@@ -1683,6 +1683,34 @@ function turnNotes(notes) {
 function skillOffer(o) {
   const line = document.createElement("div");
   line.className = "turn-note skill-offer";
+  // A note the reader keeps missing, or a message saying it was not clear
+  // (learn.offer): ways to work on it, each one a command the reader sends.
+  if (o.kind === "study") {
+    line.append(`${o.text}: `);
+    (o.commands || []).forEach((c, i) => {
+      // A place in the app (the plan Learn tracks, its form) is a link; a
+      // command goes in the box and the reader sends it.
+      let cb;
+      if (c.href) {
+        cb = document.createElement("a");
+        cb.href = c.href;
+      } else {
+        cb = document.createElement("button");
+        cb.type = "button";
+        cb.title = c.command;
+        cb.addEventListener("click", () => {
+          input.value = c.command;
+          input.focus();
+          input.dispatchEvent(new Event("input"));
+        });
+      }
+      cb.className = "linklike";
+      cb.textContent = c.label;
+      if (i) line.append(" · ");
+      line.append(cb);
+    });
+    return line;
+  }
   const b = document.createElement("button");
   b.type = "button";
   b.className = "linklike";

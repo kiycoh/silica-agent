@@ -159,10 +159,16 @@ def test_stale_reports_the_two_epistemic_lanes(tmp_path, monkeypatch, capsys):
     from silica.kernel.write.ops import InverseOp, InverseOpKind
     from silica.kernel.write.undo_journal import get_undo_journal
 
+    import silica.driver
+
     _init_repo(tmp_path)
     vault = tmp_path / "docs"
     vault.mkdir()
     monkeypatch.setattr(CONFIG, "vault_path", str(vault))
+    # /stale reads the notes through DRIVER: one an earlier test bound to its
+    # own vault found no hand.md here, so a -k subset failed while the full
+    # suite's order passed (2026-10-23).
+    monkeypatch.setattr(silica.driver, "_driver", None)
     attested = stamp_verified(NOTE, "human:me", "2026-09-04").replace("body text", "changed")
     (vault / "attested.md").write_text(attested, encoding="utf-8")
     written = "---\nAI: true\n---\n\ngate\n"
@@ -184,10 +190,16 @@ def test_stale_never_says_all_clear_above_a_stale_lane(tmp_path, monkeypatch, ca
     from silica.cli import _handle_direct_shortcut
     from silica.config import CONFIG
 
+    import silica.driver
+
     _init_repo(tmp_path)
     vault = tmp_path / "docs"
     vault.mkdir()
     monkeypatch.setattr(CONFIG, "vault_path", str(vault))
+    # /stale reads the notes through DRIVER: one an earlier test bound to its
+    # own vault found no hand.md here, so a -k subset failed while the full
+    # suite's order passed (2026-10-23).
+    monkeypatch.setattr(silica.driver, "_driver", None)
     attested = stamp_verified(NOTE, "human:me", "2026-09-04").replace("body text", "changed")
     (vault / "attested.md").write_text(attested, encoding="utf-8")
 

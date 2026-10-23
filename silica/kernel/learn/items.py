@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -153,11 +154,19 @@ def span_of(text: str, leaf_text: str) -> tuple[int, str]:
             if needle in _norm(window):
                 return i + 1, " ".join(window.split())
     best, at, span = 0.0, 0, ""
+    # The matched fraction never exceeds the characters the two share, so a
+    # window whose share is under the floor, or not above the best so far,
+    # cannot change the answer and skips difflib: the alignment was 10.8 s
+    # of a 20.6 s Learn home over eight textbook notes (2026-10-23, profiled).
+    chars = Counter(needle)
     for i in range(len(lines)):
-        window = " ".join(lines[i:i + 2])
-        frac = _local_match_fraction(needle, _norm(window))
+        window = _norm(" ".join(lines[i:i + 2]))
+        share = sum((chars & Counter(window)).values()) / len(needle)
+        if share < GROUNDING_FLOOR or share <= best:
+            continue
+        frac = _local_match_fraction(needle, window)
         if frac > best:
-            best, at, span = frac, i + 1, " ".join(window.split())
+            best, at, span = frac, i + 1, " ".join(" ".join(lines[i:i + 2]).split())
     return (at, span) if best >= GROUNDING_FLOOR else (0, "")
 
 

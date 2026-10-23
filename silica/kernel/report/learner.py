@@ -22,6 +22,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from silica.kernel.learn.schedule import DUE_R, WEAK_R, note_state, view  # noqa: F401  re-exported v1 names
 
@@ -39,12 +40,15 @@ def key_of(path: str) -> str:
 
 def _created_and_ai(text: str, mtime: float) -> tuple[float, bool]:
     """A note's creation timestamp and authorship from its own frontmatter."""
-    ts, ai, _kind = _note_meta(text, mtime)
+    ts, ai, _kind, _extra = _note_meta(text, mtime)
     return ts, ai
 
 
-def _note_meta(text: str, mtime: float) -> tuple[float, bool, str]:
-    """(created ts, AI-authored, frontmatter `type`) from one parse.
+def _note_meta(text: str, mtime: float) -> tuple[float, bool, str, dict]:
+    """(created ts, AI-authored, frontmatter `type`, extras) from one parse.
+    The extras hold what Learn's title lookups read, only when present: the
+    winner a merge loser points at, the note's aliases, whether it is a
+    lesson spine.
 
     Same date precedence as the timeline: explicit `date:` outranks the claim
     clock, and a note that states neither falls back to mtime — the ceiling
@@ -65,14 +69,34 @@ def _note_meta(text: str, mtime: float) -> tuple[float, bool, str]:
         except ValueError:
             pass  # unparseable statement: keep the mtime proxy
     # An event note states no `type`; its `event_start` is what makes it one
-    # (calendar/model.py), so that key names its kind here.
-    kind = "event" if (data or {}).get("event_start") is not None else (data or {}).get("type")
-    return ts, bool((data or {}).get("AI")), str(kind or "").strip().lower()
+    # (calendar/model.py), so that key names its kind here. A merge loser is
+    # its winner's material twice: a course plan listed "Reti neurali
+    # ricorrenti" (superseded_by Rete ricorrente) beside its winner (2026-10-23).
+    data = data or {}
+    kind = ("event" if data.get("event_start") is not None
+            else "merged" if data.get("superseded_by") else data.get("type"))
+    extra: dict = {}
+    winner = _WINNER_RE.search(str(data.get("superseded_by") or ""))
+    if winner:
+        extra["winner"] = winner.group(1).strip()
+    aliases = data.get("aliases")
+    aliases = [aliases] if isinstance(aliases, str) else aliases
+    if isinstance(aliases, list) and aliases:
+        extra["aliases"] = [str(a).strip() for a in aliases if str(a).strip()]
+    # outline.SPINE_SECTION, spelled here: outline reaches silica.agent, and the
+    # graph report imports this module (import contract P2/DKB).
+    if str(data.get("section") or "") == "(outline)":
+        extra["spine"] = True
+    return ts, bool(data.get("AI")), str(kind or "").strip().lower(), extra
 
 
-# Notes about learning, never asked about; and the calendar's own notes, which
-# Learn's "never practised" listed as study material until 2026-10-15.
-NOT_MATERIAL = ("plan", "syllabus", "event")
+_WINNER_RE = re.compile(r"\[\[([^\]|#]+)")
+
+
+# Notes about learning, never asked about; the calendar's own notes, which
+# Learn's "never practised" listed as study material until 2026-10-15; and
+# merge losers, whose winner is the note to study.
+NOT_MATERIAL = ("plan", "syllabus", "event", "merged")
 
 
 def is_material(meta: dict) -> bool:
@@ -80,6 +104,34 @@ def is_material(meta: dict) -> bool:
 
 
 _meta_memo: dict[str, tuple[str, dict[str, dict]]] = {}  # vault -> (epoch, meta)
+_parsed_memo: dict[str, tuple[float, Any, str]] = {}  # file -> (mtime, frontmatter, body)
+
+
+def parsed_note(vault: Path, path: str) -> tuple[Any, str] | None:
+    """(frontmatter, body) of a note, parsed once per mtime; None when it
+    cannot be read. A Learn session read every note's YAML three times
+    (contrast pairs, conflicts, the plan list), about 4 s each on a 2,166-note
+    vault (2026-10-23, profiled). The frontmatter is shared: read it, never
+    change it."""
+    from silica.kernel.write import frontmatter
+
+    f = vault / path
+    try:
+        mtime = f.stat().st_mtime
+    except OSError:
+        return None
+    hit = _parsed_memo.get(str(f))
+    if hit is not None and hit[0] == mtime:
+        return hit[1], hit[2]
+    try:
+        text = f.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    data, _raw, body = frontmatter.split(text)
+    _parsed_memo[str(f)] = (mtime, data, body)
+    return data, body
+
+
 
 
 def _notes_meta(vault: Path) -> dict[str, dict]:
@@ -113,10 +165,10 @@ def _notes_meta(vault: Path) -> dict[str, dict]:
             mtime = f.stat().st_mtime
         except (OSError, UnicodeDecodeError):
             continue  # one unreadable note must not blind the view
-        created, ai, kind = _note_meta(text, mtime)
+        created, ai, kind, extra = _note_meta(text, mtime)
         # mtime rides along for the picker's freshness rule (learn-suite D13):
         # a note edited after its last rating is asked as new material.
-        out["/".join(parts)] = {"created": created, "ai": ai, "mtime": mtime, "kind": kind}
+        out["/".join(parts)] = {"created": created, "ai": ai, "mtime": mtime, "kind": kind, **extra}
 
     if epoch:
         _meta_memo.clear()
@@ -208,11 +260,20 @@ def prerequisites_map() -> dict[str, list[str]]:
         from silica.kernel.report.graph_report.cooccur_delta import _compute_cooccur_variables
 
         nodes, edges = build_graph_data()
-        G_dir = edge_graph(nodes, edges, directed=True)
         store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-        _prereqs, prereq_map, _burst = _compute_cooccur_variables(
-            _empty_report(), G_dir.to_undirected(), G_dir, cooccur_store=store, created=None,
-        )
+        # The map reads two things, the wikilinks and the co-occurrence index,
+        # while the epoch moves on any edit: after a nucleation a plan page
+        # spent 16 s of its first 34 recomputing an unchanged map (2,166
+        # notes, 2026-10-23). Keyed on its inputs, on disk, it survives an
+        # unrelated edit and a restart.
+        sig = _prereq_signature(edges, store)
+        prereq_map = _prereq_disk(sig)
+        if prereq_map is None:
+            G_dir = edge_graph(nodes, edges, directed=True)
+            _prereqs, prereq_map, _burst = _compute_cooccur_variables(
+                _empty_report(), G_dir.to_undirected(), G_dir, cooccur_store=store, created=None,
+            )
+            _prereq_disk(sig, prereq_map)
         if epoch:
             _prereq_memo.clear()
             _prereq_memo[vault] = (epoch, prereq_map)
@@ -220,6 +281,43 @@ def prerequisites_map() -> dict[str, list[str]]:
     except Exception as exc:
         logger.debug("learner: prerequisites unavailable (%s)", exc)
         return {}
+
+
+def _prereq_signature(edges, store) -> str:
+    """The inputs of prerequisites_map as one hash: every wikilink edge and
+    the co-occurrence index file's size and mtime."""
+    import hashlib
+
+    h = hashlib.sha1()
+    for u, v, kind in sorted((str(e.get("from")), str(e.get("to")), str(e.get("type"))) for e in edges):
+        h.update(f"{u}\0{v}\0{kind}\n".encode())
+    path = getattr(store, "_path", None)
+    try:
+        st = Path(path).stat() if path else None
+    except OSError:
+        st = None
+    h.update(f"{st.st_size}:{st.st_mtime_ns}".encode() if st else b"-")
+    return h.hexdigest()
+
+
+def _prereq_disk(sig: str, value: dict[str, list[str]] | None = None) -> dict[str, list[str]] | None:
+    """Read (no value) or write the map stored under `sig` in the vault's index
+    directory; None when absent, stale or unreadable."""
+    import orjson
+
+    from silica.kernel.recall.paths import atomic_write_bytes, index_dir
+
+    path = index_dir() / "prerequisites.json"
+    try:
+        if value is not None:
+            atomic_write_bytes(path, orjson.dumps({"sig": sig, "map": value}))
+            return value
+        data = orjson.loads(path.read_bytes())
+        return data["map"] if data.get("sig") == sig else None
+    except (OSError, ValueError, KeyError, TypeError):
+        # A derived cache: unreadable means recompute, unwritable means the
+        # next call recomputes too, never a wrong order.
+        return None
 
 
 def _topological(rows: list[dict], prereqs: dict[str, list[str]], order_key) -> list[dict]:

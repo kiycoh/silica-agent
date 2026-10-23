@@ -31,11 +31,21 @@ NB = json.dumps({
 })
 
 
-def test_matches_and_dispatch():
+def test_matches_and_dispatch(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     assert NOTEBOOK.matches("nb/analysis.ipynb")
     assert not NOTEBOOK.matches("m.py") and not NOTEBOOK.matches("a.md")
     assert adapter_for("x.ipynb", enabled=["prose", "code", "notebook"]) is NOTEBOOK
     assert NOTEBOOK in ALL_ADAPTERS
+
+
+def test_a_notebook_outside_a_repo_is_left_to_the_converter(tmp_path, monkeypatch):
+    """read() needs the code-lane repo, so claiming the file there only turned
+    a course's lab into a refusal; convert() reads it instead."""
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
+    assert not NOTEBOOK.matches("Esercizi/lab.ipynb")
+    assert adapter_for("Esercizi/lab.ipynb", enabled=["prose", "code", "notebook"]) is None
 
 
 def test_stub_has_narrative_and_skeleton_no_outputs(tmp_path, monkeypatch):

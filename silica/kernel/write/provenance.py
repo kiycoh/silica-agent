@@ -920,10 +920,38 @@ def unfounded_numbers(text: str, evidence_tokens: set[str]) -> list[str]:
     flag means "not read", never "wrong".
     """
     out: list[str] = []
+    decimals: list[str] | None = None
     for tok in checked_numbers(text):
-        if tok not in out and not (_number_spellings(tok) & evidence_tokens):
+        spellings = _number_spellings(tok)
+        if tok in out or spellings & evidence_tokens:
+            continue
+        if decimals is None:
+            decimals = [e for e in evidence_tokens if _POINT_DECIMAL_RE.fullmatch(e)]
+        if not _rounded_from(spellings, decimals):
             out.append(tok)
     return out
+
+
+_POINT_DECIMAL_RE = re.compile(r"-?\d+\.\d+")
+# A number rounded to this many decimals or more from one that was read is
+# that number: "0,976071" under an answer that had read 0.9760712298274903 was
+# flagged as unread, on the one answer only Silica could give (2026-10-23).
+# Fewer decimals stay flagged: 0.9 rounds from too much to say it was read,
+# and a percentage or a difference is arithmetic, which the rule never exempts.
+MIN_ROUNDED_DECIMALS = 3
+
+
+def _rounded_from(spellings: set[str], decimals: list[str]) -> bool:
+    for s in spellings:
+        if not _POINT_DECIMAL_RE.fullmatch(s):
+            continue
+        places = len(s.split(".", 1)[1])
+        # rounded or cut: the same answer wrote 0,967167 for 0.9671675...
+        if places >= MIN_ROUNDED_DECIMALS and any(
+                len(e.split(".", 1)[1]) > places and (e.startswith(s) or round(float(e), places) == float(s))
+                for e in decimals):
+            return True
+    return False
 
 
 # Extractive invariant: markers the model may prepend to a copied span (list

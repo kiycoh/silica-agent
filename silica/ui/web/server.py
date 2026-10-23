@@ -110,6 +110,22 @@ def _prewarm_seed() -> None:
     threading.Thread(target=work, daemon=True).start()
 
 
+def _prewarm_learn() -> None:
+    """Learn's vault-wide reads before the first click: the notes, their
+    parsed frontmatter and the prerequisite map were 8 s of a plan page's
+    first open after a restart (2,166 notes, 2026-10-23). A failure costs only
+    that wait, which the click then pays."""
+    try:
+        from silica.kernel.learn import plans
+        from silica.kernel.report import learner
+
+        learner._notes_meta(plans._vault())
+        plans.list_plans()
+        learner.prerequisites_map()
+    except Exception:
+        logger.exception("learn prewarm failed")
+
+
 def _seeded() -> tuple[list[dict], int]:
     """A copy of the fresh-session seed, with user memory as it is NOW.
 
@@ -927,6 +943,27 @@ def _unembed_foreign_imgs(fragment: str) -> str:
     return _RAW_IMG_TAG.sub(sub, fragment)
 
 
+# A pipe inside a table cell ends the cell and splits the row: an aliased
+# wikilink ("[[Attenzione|attenzione]]" in an aid's table) and an absolute
+# value in a formula ("$|y_i f(x)| > \gamma$" in a summary's table), both
+# 2026-10-23. Obsidian asks for `\|` in a link, which reaches the cell's text
+# as `|` so the alias still resolves; in a formula `\|` would read as a norm,
+# so its bars become `\vert` and `\Vert`, which draw the same.
+_TABLE_ALIAS = re.compile(r"\[\[([^\]\[|\\]+)\|([^\]\[]+)\]\]")
+_TABLE_MATH = re.compile(r"(?<!\$)\$(?!\$)([^$\n]+?)\$")
+
+
+def _escape_table_aliases(text: str) -> str:
+    if "|" not in text:
+        return text
+
+    def math(m: re.Match) -> str:
+        return "$" + m.group(1).replace("\\|", "\\Vert ").replace("|", "\\vert ") + "$"
+
+    return "\n".join(_TABLE_MATH.sub(math, _TABLE_ALIAS.sub(r"[[\1\\|\2]]", line))
+                     if line.lstrip().startswith("|") else line for line in text.split("\n"))
+
+
 def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> str:
     """Render markdown (+ OFM sugar) to HTML, linkifying resolvable note refs
     when `resolve` is given. Works on the markdown-it token stream, so
@@ -944,7 +981,7 @@ def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> s
     from mdit_py_plugins.dollarmath import dollarmath_plugin
     from mdit_py_plugins.footnote import footnote_plugin
 
-    text = _strip_ofm_meta(text or "")
+    text = _escape_table_aliases(_strip_ofm_meta(text or ""))
     md = (
         MarkdownIt(options_update={"highlight": _highlight})
         .enable("table")
@@ -1034,8 +1071,13 @@ def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dic
     from silica.kernel import proposed_skills as ps
     from silica.kernel import user_memory
 
+    from silica.kernel.learn.offer import says_lost
+
     vault = CONFIG.vault_path or ""
-    if not vault or user_memory.incognito():
+    # "non ho capito la Lezione 14" said in three chats is a reader stuck, not
+    # a request to make reusable: it became the skill /non-ho-capito
+    # (2026-10-23). The study offer answers that message.
+    if not vault or user_memory.incognito() or says_lost(text):
         return None, None
     try:
         evidence = ps.detect(text, messages, vault, _narr.NARRATOR.sid)
@@ -1052,6 +1094,119 @@ def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dic
         # that is down costs the person the proposal, never the answer.
         logger.warning("skill proposal skipped", exc_info=True)
         return None, None
+
+
+def _study_offer(text: str, messages: list[dict]) -> dict | None:
+    """The study offer for the turn that just ended, from the notes it read
+    (learn.offer). An incognito chat gets none, as it gets no proposal."""
+    from silica.kernel import user_memory
+    from silica.kernel.learn.offer import study_offer
+
+    if user_memory.incognito():
+        return None
+    try:
+        from silica.kernel.learn.offer import asks_plan, plan_offer
+
+        if asks_plan(text):
+            # A plan asked of the chat: the one Learn tracks, or its form.
+            from silica.kernel.learn.plans import list_plans
+
+            return plan_offer(text, list_plans())
+        # The turn names its reads as the calls did, a title or a path; the
+        # ledger keys notes by path, so the titles are resolved first.
+        from silica.kernel.learn.offer import says_lost
+        from silica.kernel.recall.mindmap import _driver_graph, answer_resolver
+
+        graph = _driver_graph()
+        _resolve, read = answer_resolver(read_refs(messages), graph=graph)
+        if says_lost(text):
+            # The note the reader named is the one the offer is about: a turn
+            # that read nothing (the local 9B answered "punti di supporto" from
+            # memory), or one whose first read was a neighbour ("Limite
+            # d'errore con slack" for "variabili slack di margine", 2026-10-23).
+            low = text.casefold()
+            named = [(t, p) for p, t in graph[1].items()
+                     if len(t) >= 6 and t.casefold() in low and "/sources/" not in f"/{p}"]
+            read = [p for _t, p in sorted(named, key=lambda tp: -len(tp[0]))[:1]] + list(read)
+        from silica.kernel.learn.offer import allowed, log_offer, mode
+
+        if mode() == "off":
+            return None
+        offer = study_offer(text, [p if p.endswith(".md") else p + ".md" for p in read])
+        if offer is None:
+            return None
+        # Two offers a chat, none on a note whose offer went unused in the last
+        # week, and in shadow mode only the record (learn.offer, research rule).
+        chat = current_session_id or ""
+        show = mode() == "on" and allowed(chat, offer["note"])
+        log_offer(chat, offer, shown=show)
+        return offer if show else None
+    except Exception:
+        # An offer is an extra: a ledger that does not parse costs the offer,
+        # never the answer.
+        logger.warning("study offer skipped", exc_info=True)
+        return None
+
+
+def _escalation(text: str, messages: list[dict]) -> str:
+    """The escalation block for this turn, or "": the note the reader names,
+    stuck on it by the ledger, by an unused offer or by saying so twice. Logs
+    an offer acted on first. Nothing in an incognito chat."""
+    from silica.kernel import user_memory
+    from silica.kernel.learn import offer as learn_offer
+
+    if user_memory.incognito() or learn_offer.mode() == "off":
+        return ""
+    try:
+        chat = current_session_id or ""
+        learn_offer.log_acted(chat, text)
+        from silica.kernel.recall.mindmap import _driver_graph
+        from silica.kernel.report.quiz import entries
+
+        low = (text or "").casefold()
+        named = sorted(((t, p) for p, t in _driver_graph()[1].items()
+                        if len(t) >= 6 and t.casefold() in low and "/sources/" not in f"/{p}"),
+                       key=lambda tp: -len(tp[0]))
+        if not named:
+            return ""
+        name, path = named[0]
+        note = path if path.endswith(".md") else path + ".md"
+        history = [str(m.get("content") or "") for m in messages if m.get("role") == "user"][-3:]
+        why = learn_offer.escalation(note, chat, text, history, entries())
+        if not why:
+            return ""
+        # in shadow mode the record only: what would have fired, nothing shown
+        shown = learn_offer.mode() == "on"
+        learn_offer._append({"chat": chat, "note": note, "escalated": True, "why": why, "displayed": shown})
+        if not shown:
+            return ""
+        from silica.kernel.learn.items import read_note
+
+        return learn_offer.escalation_block(name, why, read_note(note))
+    except Exception:
+        # An escalation is an extra: a ledger that does not parse costs it,
+        # never the turn.
+        logger.warning("study escalation skipped", exc_info=True)
+        return ""
+
+
+def _plan_context(text: str) -> str:
+    """Learn's plan for this message (learn.offer.plan_context), or "". An
+    incognito chat gets none, as it gets no offer."""
+    from silica.kernel import user_memory
+
+    if user_memory.incognito() or not text or text.startswith("/"):
+        return ""
+    try:
+        from silica.kernel.learn.offer import plan_context
+        from silica.kernel.learn.plans import list_plans
+
+        return plan_context(text, list_plans())
+    except Exception:
+        # The plan's numbers are an extra: a plan note that does not parse
+        # costs the block, never the turn.
+        logger.warning("plan context skipped", exc_info=True)
+        return ""
 
 
 def _answer_html(answer: str, refs, graph=None) -> str:
@@ -1248,6 +1403,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         if worn is not None:
             text = worn[1]
         agent_msg = text
+        escalated = False   # the turn's answer is the aid itself (learn.offer.escalation)
         # /web comes first: it is neither direct nor a workflow expansion but an
         # agent turn with web-only tools. A usage error raises ValueError, which
         # the except below turns into the single error event.
@@ -1275,6 +1431,35 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                 done["memory"] = saved
             outcome = "done"
             yield done
+            return
+        elif text.lower().split(None, 1)[:1] == ["/flashcards"]:
+            # Cards are made as data and checked before they are shown
+            # (learn.artifacts.flashcards), and the answer is their Markdown:
+            # the direct path below would wrap what the command prints in a
+            # code block, and the formulas on the cards would not render.
+            import shlex
+
+            from silica.agent import narration as _narr
+            from silica.cli import _int_flag, _positional, _str_flag
+            from silica.kernel.learn.artifacts import flashcards
+
+            try:
+                args = shlex.split(text)[1:]
+            except ValueError:
+                raise ValueError("unbalanced quotes in command. Wrap paths with spaces in \"...\".") from None
+            targets = _positional(args)
+            if not targets:
+                raise ValueError("/flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]")
+            answer = await asyncio.to_thread(flashcards, targets, _int_flag(args, "--n=", 12),
+                                             _str_flag(args, "--save").strip())
+            messages.append({"role": "user", "content": text, "origin": "cli"})
+            _narrate_user_turn(messages[-1])
+            messages.append({"role": "assistant", "content": answer})
+            _narr.NARRATOR.turn(messages[-1])
+            _update_context_tokens(messages)
+            outcome = "done"
+            yield {"type": "done", "answer": answer, "html": await asyncio.to_thread(_answer_html, answer, []),
+                   **_ctx_meter()}
             return
         elif text.startswith("/"):
             from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
@@ -1360,10 +1545,24 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # loop, because it reads the driver's graph.
         if web is None:
             from silica.agent.mentions import named_notes
+            from silica.kernel.learn.offer import says_lost
             from silica.ui.web import jobs
 
             if block := await asyncio.to_thread(named_notes, text):
                 agent_msg += "\n\n" + block
+            # A reader still stuck on a note gets the aid as the answer itself
+            # (learn.offer.escalation), and an offer's command sent is recorded.
+            if block := await asyncio.to_thread(_escalation, text, messages):
+                agent_msg += "\n\n" + block
+                escalated = True
+            if block := await asyncio.to_thread(_plan_context, text):
+                agent_msg += "\n\n" + block
+            elif await asyncio.to_thread(says_lost, text):   # Jev over HTTP behind the word list: off the loop
+                # A reader saying it is unclear asked to understand, not to
+                # write: the local 9B answered "non ho capito il Boosting"
+                # with a new note of its own (2026-10-23).
+                agent_msg += ("\n\n[The reader says this was not clear. Answer here in the chat; READ-ONLY: "
+                              "do not create, edit, patch, or move any note.]")
             # This chat's conversions that ended since the agent last heard of
             # them: the history still says "still converting" (jobs.settled).
             if block := await asyncio.to_thread(jobs.settled, current_session_id):
@@ -1488,11 +1687,21 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # installed is offered as the next turn (ADR-0127 points 5 and 6).
         skill_note, offer = ((None, None) if stopped or web or not answer
                              else await asyncio.to_thread(_skill_after_turn, text, messages))
+        if offer is None and not (stopped or web or not answer or escalated):
+            # A note the reader keeps missing, or a message saying it was not
+            # clear: a way to work on it, launched by the reader (learn.offer).
+            # Not under an answer that is already the aid.
+            offer = await asyncio.to_thread(_study_offer, text, messages)
         # The lines under the answer (ADR-0094 point 8), stored on it before the
         # beat below so a reopened chat draws them too. A stopped turn has no
         # answer to carry them: they are drawn live only.
         notes = watch.notes() if isinstance(watch, RecallWatch) else []
         notes += numbers_notes(unread)
+        if not (stopped or web):
+            # A card or a slide point its cited note does not hold (learn.artifacts).
+            from silica.kernel.learn.artifacts import grounding_notes
+
+            notes += grounding_notes(text, answer)
         notes += [skill_note] if skill_note else []
         notes = turn_notes.ordered(notes) if stopped else turn_notes.attach(messages, notes)
         # The notes this turn read, before the beat stores the answer and before
@@ -1792,6 +2001,7 @@ async def _lifespan(app: FastAPI):
     # mcp.json and the keyring is file and D-Bus I/O.
     from silica.connectors.mcp_tools import start as _start_connectors
     asyncio.get_running_loop().run_in_executor(None, _start_connectors)
+    asyncio.get_running_loop().run_in_executor(None, _prewarm_learn)
     yield
     if bridge is not None:
         await bridge.stop()

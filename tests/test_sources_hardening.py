@@ -215,6 +215,13 @@ def test_xml_without_a_doctype_parses_normally():
 
 # --- guard 3: a filename stem that is a valid glob character class ----------
 
+@pytest.fixture
+def mineru3(monkeypatch):
+    """The glob below is the 3.x CLI's layout; a machine with mineru 4 on PATH
+    would send these tests down the zip branch instead."""
+    monkeypatch.setattr(conv, "_has_mineru_kit", lambda: False)
+
+
 def _fake_mineru():
     """Stand in for the mineru CLI: write the markdown it would have produced,
     under the `<stem>/auto/<stem>.md` layout the real one uses for a PDF."""
@@ -236,7 +243,7 @@ def _fake_mineru():
 
 @pytest.mark.parametrize("stem", ["Smith [2020]", "Notes *final*", "draft?"])
 def test_glob_metacharacters_in_a_stem_survive_the_round_trip(
-    stem, tmp_path, monkeypatch
+    stem, tmp_path, monkeypatch, mineru3
 ):
     """Brackets are the case that bites: `Smith [2020]` is a character class, so
     unescaped `[2020]` matches one character out of {2,0} and the pattern
@@ -252,7 +259,7 @@ def test_glob_metacharacters_in_a_stem_survive_the_round_trip(
     assert "OCR body." in md
 
 
-def test_a_genuinely_empty_mineru_run_still_reports_it(tmp_path, monkeypatch):
+def test_a_genuinely_empty_mineru_run_still_reports_it(tmp_path, monkeypatch, mineru3):
     """Escaping the stem must not turn "produced nothing" into a silent pass."""
     def run(cmd, **kw):
         class R:

@@ -25,6 +25,25 @@ DEFAULT_N = 8
 AMNESTY_FACTOR = 2   # due > 2n: one calm line, the capped session, never the backlog
 # engram's copy (MIT): a break is not a debt.
 AMNESTY_LINE = "{due} due after a break is spacing doing its job, not a debt. This session takes {n}; the rest waits."
+# The last days before a dated plan's `by`: reviews only, as RemNote's Final
+# Review Period. ponytail: 2 is a simulation's number, not a measurement;
+# reopen at 20 completed dated plans in the ledger or 2027-03-31.
+FINAL_DAYS = 2
+
+
+def _days_to(deadline: str | None, now_ts: float) -> int | None:
+    """Whole days from now to a plan's `by`, None when there is none, it does
+    not parse or it has passed."""
+    from datetime import date, datetime, timezone
+
+    if not deadline:
+        return None
+    try:
+        by = date.fromisoformat(str(deadline)[:10])
+    except ValueError:
+        return None
+    days = (by - datetime.fromtimestamp(now_ts, timezone.utc).date()).days
+    return days if days >= 0 else None
 
 
 def _folder(path: str) -> str:
@@ -41,7 +60,7 @@ def contrast_pairs(notes: dict[str, dict]) -> list[tuple[str, str]]:
     it. Kill by 2026-12-31 if the ledger shows zero `contrast` events.
     """
     from silica.config import CONFIG
-    from silica.kernel.write import frontmatter
+    from silica.kernel.report import learner
     from silica.kernel.write.templates import parse_related_traces
 
     vault = Path(CONFIG.vault_path)
@@ -56,11 +75,10 @@ def contrast_pairs(notes: dict[str, dict]) -> list[tuple[str, str]]:
             out.append((a, b))
 
     for path in notes:
-        try:
-            text = (vault / path).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        parsed = learner.parsed_note(vault, path)
+        if parsed is None:
             continue
-        data, _raw, body = frontmatter.split(text)
+        data, body = parsed
         for cand, _why in parse_related_traces(body):
             other = by_title.get(cand.split("|")[0].split("#")[0].strip().casefold())
             if other:
@@ -77,16 +95,16 @@ def conflicts(notes: dict[str, dict]) -> list[str]:
     (provenance drift). ponytail: pool D; kill by 2026-12-31 with zero
     `contradiction` events in the ledger."""
     from silica.config import CONFIG
-    from silica.kernel.write import frontmatter
+    from silica.kernel.report import learner
     from silica.kernel.write.provenance import drifted_notes, note_key
 
     vault = Path(CONFIG.vault_path)
     out: list[str] = []
     for path in notes:
-        try:
-            data, _raw, _body = frontmatter.split((vault / path).read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError):
+        parsed = learner.parsed_note(vault, path)
+        if parsed is None:
             continue
+        data = parsed[0]
         if data and (data.get("contested") or data.get("contradictions")):
             out.append(path)
     try:
@@ -118,6 +136,7 @@ def session(
     _conflicts_override: list[str] | None = None,
     _planned_override: set[str] | None = None,
     _store=None,
+    deadline: str | None = None,
 ) -> dict:
     """Pick the rows of one session. Returns {items, due, unexplored,
     amnesty, short}; each item carries path, title-less row fields, pool,
@@ -128,6 +147,13 @@ def session(
     (learner.off_plan_dropped). `frontier` names the paths that come first
     inside it; `revisit` is the reader's own queue (D26) and precedes
     everything.
+
+    `deadline` is a dated plan's `by` (ISO date). Before it, the reader's own
+    notes in scope lose their authorship prior, and the share of new notes
+    follows the pace that introduces every one of them FINAL_DAYS before the
+    date; the last FINAL_DAYS are a final pass with no new note. The fixed
+    quarter introduced half of 120 notes by an 18-day exam (simulated on the
+    picker's own mix, docs research report study-plans-and-deadline-scheduling).
     """
     from datetime import datetime, timezone
 
@@ -140,7 +166,9 @@ def session(
         from silica.config import CONFIG
 
         notes = learner._notes_meta(Path(CONFIG.vault_path))
-    rows = learner.view(now_ts=now, _notes_override=notes, _entries_override=entries)
+    days_left = _days_to(deadline, now)
+    cold = frozenset(scope) if days_left is not None and scope is not None else frozenset()
+    rows = learner.view(now_ts=now, _notes_override=notes, _entries_override=entries, cold=cold)
     rows = {k: r for k, r in rows.items() if learner.is_material(notes.get(r["path"], {}))}
     last_event: dict[str, float] = {}
     for k, evs in events_by_key(entries).items():
@@ -196,6 +224,13 @@ def session(
             take(by_path[p], by_path[p]["why"] if by_path[p]["why"] != "known" else "frontier")
 
     n_due, n_unexp = max(1, n // 2), max(1, n // 4)
+    final_pass = days_left is not None and days_left <= FINAL_DAYS
+    if final_pass:
+        n_due, n_unexp = n, 0
+    elif days_left is not None:
+        pace = -(-len(unexplored) // (days_left - FINAL_DAYS))
+        n_unexp = max(n_unexp, min(n - max(1, n // 4), pace))  # a quarter stays for reviews
+        n_due = max(1, n - n_unexp)
     for r in due[:n_due]:
         take(r, "due")
     for r in unexplored[:n_unexp]:
@@ -212,7 +247,7 @@ def session(
             take(by_path[p], "contradiction", "contradiction")
             break
 
-    for r in due + unexplored:  # backfill from A, then B
+    for r in due + ([] if final_pass else unexplored):  # backfill from A, then B
         if len(picked) >= n:
             break
         take(r, r["why"])

@@ -752,7 +752,11 @@ def _missing_hub_ops(ops: list[Op], *, target_dir: str, path_exists) -> list[Op]
     hubs_to_check = set()
     for op in ops:
         op_type = op.op
-        if op_type in (OpType.write, OpType.patch, OpType.overwrite):
+        # An overwrite rewrites a note that exists, and the bookkeeping ones
+        # (a merge's alias, its superseded_by pointer) carry only the folder's
+        # name as their hub: an empty "Teoria della probabilità" landed in the
+        # owner's Matematica folder after an alias on Variabile casuale (2026-10-23).
+        if op_type in (OpType.write, OpType.patch):
             hub = op.hub
             if hub:
                 clean_hub = hub.strip("[]")

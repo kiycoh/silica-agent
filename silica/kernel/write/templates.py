@@ -955,6 +955,10 @@ def drop_props(content: str, keys: tuple[str, ...] | list[str]) -> str:
     return head + content[end:]
 
 
+def _body_of(note: str) -> str:
+    return (frontmatter.split(note)[2] or "").strip()
+
+
 def ensure_system_floor(content: str, prior: str | None = None) -> str:
     """String-level floor under every write: `AI: true` + `last modified`
     always land, whatever the model emitted. No YAML round-trip.
@@ -967,7 +971,12 @@ def ensure_system_floor(content: str, prior: str | None = None) -> str:
     - no block anywhere: create the minimal one.
     """
     if content.startswith("---\n"):
-        return _stamp_agent(ensure_ai_flag(content))
+        # A rewrite that keeps the prior body changed only its properties (an
+        # alias, a superseded_by pointer), and the note stays its author's: a
+        # dedup alias stamped AI: true on an owner's note (Variabile casuale,
+        # 2026-10-23), which Learn then read as AI-written.
+        kept = prior is not None and _body_of(prior) == _body_of(content)
+        return _stamp_agent(ensure_ai_flag(content, value="partial" if kept else "true"))
     today = datetime.date.today().isoformat()
     pm = frontmatter.FM_RE.match(prior) if prior else None
     if pm is None:

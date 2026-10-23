@@ -2274,7 +2274,11 @@ def _draft_title(body: str, stem: str) -> str:
     span, so this stays mechanical."""
     for line in body.splitlines():
         if line.startswith("# ") and line[2:].strip():
-            return line[2:].strip().replace("/", "-")
+            # Obsidian refuses * " \ / < > : | ? in a note name; a study guide
+            # titled "Machine Learning: guida allo studio" landed as a file
+            # the app would not rename or link cleanly.
+            title = re.sub(r"\s*:\s*", " - ", line[2:].strip()).replace("/", "-")
+            return re.sub(r'[*"\\<>|?]', "", title).strip() or stem
     return stem
 
 
@@ -2380,7 +2384,13 @@ def _file_drafts(
         fm_lines = "".join(f"{k}: {json.dumps(v) if isinstance(v, str) else v}\n"
                            for k, v in data.items())
         note = f"---\n{fm_lines}---\n\n{body.strip()}\n"
-        title = _draft_title(body, Path(f).stem)
+        lab = str(data.get("source_file", "")).lower().endswith(".ipynb")
+        if lab:
+            from silica.kernel.link import labs
+            note += labs.practised_section(body, labs.folder_titles(dest_dir))
+        # A notebook's first heading names its first cell ("Dataset uploading",
+        # two optdigits labs of one course), not the lab: its file name does.
+        title = Path(f).stem if lab else _draft_title(body, Path(f).stem)
         note_rel = f"{dest_dir}/{title}.md"
         prior: str | None = None
         try:
@@ -2393,11 +2403,33 @@ def _file_drafts(
         DRIVER.upsert(note_rel, note)
         if undo_run:
             _record_inverse(undo_run, note_rel, prior)
+        _autolink_filed(note_rel, dest_dir)
         silica_cleanup(f)
         CONSOLE.print(
             f"  filed draft ({res.origin}): [bold]{note_rel}[/] — body kept intact"
         )
     return kept
+
+
+def _autolink_filed(note_rel: str, folder: str) -> None:
+    """Link a filed note to the notes of its folder it names: the filing path
+    of docs/specs/nucleation-forms.md says autolink still runs so the note
+    joins the graph, and it never did. A study guide or a lecture digest
+    names the concepts the folder holds; the folder, not the whole vault,
+    keeps "Statistica" in a psychology folder from catching it. The filed
+    note is new, so the run's /revert, which deletes it, covers this edit."""
+    from silica.driver import DRIVER
+    from silica.kernel.link.autolink import build_title_index
+
+    try:
+        added = DRIVER.autolink_note(note_rel, title_index=build_title_index(DRIVER.list_files(folder)))
+    except Exception as e:
+        # Best effort, as the FSM's own AUTOLINK phase: the note is filed whole
+        # either way, it only stays unlinked.
+        logger.debug("filed note %s not autolinked: %s", note_rel, e)
+        return
+    if added:
+        CONSOLE.print(f"  [dim]{note_rel}: linked {len(added)} note(s) it names[/]")
 
 
 # Silica's own bookkeeping folders — never a destination for a concept note.
@@ -3110,6 +3142,13 @@ def _nucleate_expand_folders(
                 pending = [p for p in pending if p not in figures]
                 CONSOLE.print(f"  [dim]{f}: left {len(figures)} file(s) "
                               f"its notes embed alone[/]")
+            # A document converted earlier sits beside its notes, and those
+            # notes ride the document's own unit (reused segments, in
+            # _nucleate_plan_units). Listed here too, every lecture of a course
+            # also joined one loose-note unit, so each was queued twice.
+            carried = _converted_notes_of(pending)
+            if carried:
+                group = [g for g in group if g not in carried]
             if group or pending:
                 detail = f"[bold]{len(group)}[/] note(s)" if group else ""
                 if pending:
@@ -3120,6 +3159,22 @@ def _nucleate_expand_folders(
         expanded.extend(group or [f])
     files = list(dict.fromkeys(expanded))
     return files, run_root
+
+
+def _converted_notes_of(sources: list[str]) -> set[str]:
+    """The inbox notes an earlier convert() made from these source files."""
+    if not sources:
+        return set()
+    from silica.sources.convert import _resolve_input
+
+    prior = _prior_conversions()
+    out: set[str] = set()
+    for s in sources:
+        try:
+            out.update(prior.get(str(_resolve_input(s)), {}).get("inbox") or [])
+        except ValueError:
+            continue  # gone since the census: convert() reports it later
+    return out
 
 
 _MD_EMBED_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)>\s]+)")
@@ -3955,6 +4010,56 @@ def _sc_organize(args: list[str], **_) -> str | None:
 # count from --focus, /learn reads the ledger and the plan notes.
 
 
+# A study artifact from the notes, beside /quiz: the deck and the cards
+# NotebookLM's Studio makes (owner's comparison, 2026-10-23), both drawn from
+# Learn's checked key points (learn.artifacts.study_points). The cards are made
+# as data and checked before they are shown (learn.artifacts.flashcards); the
+# deck is written by the agent and its points are checked after it.
+
+
+def _sc_flashcards(args: list[str], **_) -> str | None:
+    """/flashcards <note|folder> [--n=12] [--save=<path>]: question-and-answer
+    cards for review outside a session, one checked point each."""
+    from silica.kernel.learn.artifacts import flashcards
+
+    targets = _positional(args)
+    if not targets:
+        return "Error: /flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]"
+    CONSOLE.print(FlatMarkdown(flashcards(targets, _int_flag(args, "--n=", 12), _str_flag(args, "--save").strip())))
+    return ""  # fully handled inline: nothing for the agent
+
+
+def _sc_slides(args: list[str], **_) -> str | None:
+    """/slides <note|folder> [--save=<path>]: a presentation of what the notes
+    say, in the Markdown Obsidian's Slides plugin presents."""
+    from silica.kernel.learn.artifacts import study_points
+
+    save = _str_flag(args, "--save").strip()
+    targets = _positional(args)
+    if not targets:
+        return "Error: /slides needs a note or a folder. Usage: /slides <note|folder> [--save=<path>]"
+    titles, points = study_points(targets)
+    ground = ("Build the slides from these points, each already checked against its source, in this order "
+              "unless the topic's logic asks another:\n" + "\n".join(points) if points else
+              "Read the note(s) first (list a folder's notes; a lesson's outline note gives the order).")
+    out = ("Then write the deck, unchanged, as the note `" + save + "` with silica_write_note, so Obsidian's "
+           "Slides plugin presents it."
+           if save else "READ-ONLY: do not create, edit, patch, or move any note.")
+    # No example embed in the format line: given one, the local 9B put
+    # `![[file.png]]` on every slide of a lecture deck (2026-10-23).
+    return (
+        f"Make a slide deck from {', '.join(f'[[{t}]]' for t in titles) or ', '.join(targets)}.\n"
+        f"{ground}\n"
+        f"Format: Markdown slides separated by a line holding only `---`. Slide 1 is the title and one line on "
+        f"what the deck covers; then 6 to 10 slides, each a `## ` title and 3 to 5 short bullets in the notes' "
+        f"own words, formulas kept as written in $...$; a figure only where a note embeds one, its embed line "
+        f"copied exactly from the note, and no figure line otherwise; the last slide is three questions the "
+        f"reader should now be able to answer. "
+        f"Cite each slide's source note as a [[wikilink]] on its last line.\n"
+        f"Answer in chat with the deck in one ```markdown block. {out}"
+    )
+
+
 def _sc_quiz(args: list[str], **_) -> str | None:
     """/quiz [note|folder] [--n=10] [--focus="passage"]: an agent-directed
     active-recall round; --focus narrows it to one passage of the note."""
@@ -4217,6 +4322,8 @@ _SHORTCUTS: dict[str, Callable[..., str | None]] = {
     "/dedup": _sc_dedup,
     "/organize": _sc_organize,
     "/quiz": _sc_quiz,
+    "/flashcards": _sc_flashcards,
+    "/slides": _sc_slides,
     "/learn": _sc_learn,
     "/remember": _sc_remember,
 }
@@ -5021,7 +5128,10 @@ def main():
                 answer = relay_sources(answer, messages)
             # The lines under the answer, stored on it before the beat below
             # so the session keeps them (ADR-0094 point 8).
-            notes = turn_notes.attach(messages, ([] if web else watch.notes()) + numbers_notes(unread))
+            from silica.kernel.learn.artifacts import grounding_notes
+
+            notes = turn_notes.attach(messages, ([] if web else watch.notes()) + numbers_notes(unread)
+                                      + ([] if web else grounding_notes(typed, answer)))
             # Final-assistant turn beat, post-attribution (see loop.py): the
             # replay must carry what the user actually read, sources included.
             if messages and messages[-1].get("role") == "assistant":

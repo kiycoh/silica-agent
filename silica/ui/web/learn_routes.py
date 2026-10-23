@@ -490,12 +490,17 @@ def _last_session(entries: list[dict]) -> dict | None:
 
 def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
     from silica.kernel.learn import mastery, objectives as obj, plans
+    from silica.kernel.report.learner import _notes_meta
 
-    scoped = plans.scope_of(p)
+    # Read once for every title lookup below: steps_passed without it read the
+    # vault's notes per step note, 84 epoch walks and 24 s of a 30 s Learn
+    # home on a 2,166-note vault (2026-10-23, profiled).
+    notes = _notes_meta(plans._vault())
+    scoped = plans.scope_of(p, notes=notes)
     node = mastery.node_readings(scoped["paths"], rows, entries, p.get("created"), p["objectives"])
     frontier = scoped["frontier"]
     gaps = [s for s in p["steps"] if not s["notes"]]
-    passed = sum(mastery.steps_passed(p, entries)) if p["steps"] else None
+    passed = sum(mastery.steps_passed(p, entries, notes=notes)) if p["steps"] else None
     nxt = None
     # a queued note is asked first (pick.session takes revisit before the
     # frontier), so it is where the plan resumes and what its row names
@@ -517,7 +522,7 @@ def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
         "unit": "steps passed" if p["steps"] else "notes practised",
         "progress": [passed or 0, len(p["steps"])] if p["steps"] else list(node["coverage"]),
         "open_session": bool(_LIVE and _LIVE["plan"] == p["path"]),
-        "pace": plans.pace_of(p, len(scoped["paths"]) - node["all_met"]),
+        "pace": plans.pace_of(p, len(scoped["paths"]) - node["all_met"], entries=entries),
     }
 
 
@@ -636,7 +641,8 @@ def start_session(payload: dict):
 
             prefix = scope.casefold()
             scope = [p for p in learner._notes_meta(Path(CONFIG.vault_path)) if p.casefold().startswith(prefix)]
-        picked = pick.session(n=n, scope=scope, frontier=frontier, revisit=revisit)
+        picked = pick.session(n=n, scope=scope, frontier=frontier, revisit=revisit,
+                              deadline=plan.get("by") if plan else None)
         if plan is not None:
             plans.assign_objectives(plan, picked["items"])
     built = items.build_session(picked["items"], picked["backfill"], n=n)
@@ -777,13 +783,15 @@ def _momentum(before: dict | None, after: dict | None, first_success: bool) -> s
     s1 = float(after["S"])
     s0 = float(before["S"]) if before and before.get("S") is not None else None
     if first_success and s0 is None:
-        return f"First hold on this note: estimated ~{round(s1)} days."
+        return f"First hold on this note: estimated {f'~{round(s1)} days' if s1 >= 0.5 else 'under a day'}."
     if s0 is None:
         return None
     crossed = [m for m in MILESTONES if s0 < m <= s1]
     if crossed:
         return f"Estimated hold ~{round(s1)} days, was ~{round(s0)}; past {int(crossed[-1])} days."
-    if s1 >= 2 * s0:
+    # a doubling worth a line is one the reader can see: from 0.1 to 0.3 days
+    # read "Estimated hold ~0 days, was ~0." (2026-10-23)
+    if s1 >= 2 * s0 and round(s1) > round(s0):
         return f"Estimated hold ~{round(s1)} days, was ~{round(s0)}."
     return None
 
@@ -863,10 +871,88 @@ def _rate(payload: dict):
         "next_due": _iso_day(after.get("due")) if after else None,
         "momentum": _momentum(before, after, first) if rating >= 3 else None,
         "objective": entry["objective"], "unassisted": bool(correct and not entry["hints"] and not entry["told"]),
+        "escalate": None if correct else _escalate(s, it),
     }
     s["recorded"][it["i"]] = {"entry": entry, "result": result, "ts": _now()}
     s["skipped"].discard(it["i"])
     return {**result, "duplicate": False}
+
+
+def _escalate(s: dict, it: dict) -> dict | None:
+    """The escalate rung after a miss (learn.offer): once a note a session,
+    logged, and in shadow mode only logged."""
+    from pathlib import Path
+
+    from silica.kernel.learn import offer
+    from silica.kernel.report import quiz
+
+    if offer.mode() == "off" or it["path"] in s.setdefault("escalated", set()):
+        return None
+    try:
+        entries = quiz.entries()
+        why = offer.escalation(it["path"], "", "", [], entries)
+        if not why:
+            return None
+        s["escalated"].add(it["path"])
+        shown = offer.mode() == "on"
+        offer.log_aid(it["path"], s["id"], why, shown)
+        if not shown:
+            return None
+        prereq = offer.weakest_prerequisite(it["path"])
+        return {"why": why, "form": "worked", "prereq": prereq, "prereq_title": Path(prereq).stem if prereq else None}
+    except Exception:
+        # The aid is an extra: a ledger that does not parse costs it, never the rating.
+        logger.warning("learn: escalation skipped", exc_info=True)
+        return None
+
+
+@router.post("/aid", dependencies=_SAME_ORIGIN)
+def aid(payload: dict):
+    """The aid a rating escalated to, written when the reader asks for it
+    (one click: the owner's call of 2026-10-23 on ASSISTments' experiments,
+    where aids asked for helped and one that came unasked did not), once,
+    and kept for a reload. Reading it records nothing in the ledger; the
+    click is logged beside the escalation."""
+    from silica.kernel.learn import offer
+    from silica.kernel.recall.mindmap import answer_resolver
+    from silica.ui.web.server import _linkify
+
+    s = _live(str(payload.get("id") or ""))
+    it = _item(s, payload.get("i"))
+    rec = s["recorded"].get(it["i"])
+    esc = rec["result"].get("escalate") if rec else None
+    if not esc:
+        raise HTTPException(400, "this answer did not escalate")
+    done = s.setdefault("aids", {})
+    if it["i"] not in done:
+        v = s["verdicts"].get(it["i"]) or {}
+        try:
+            text = offer.learn_aid(it, esc["why"], v.get("production", ""), esc.get("prereq"))
+        except Exception as exc:
+            raise HTTPException(502, f"the model did not answer: {exc}")
+        if not text:
+            raise HTTPException(502, "the model wrote nothing")
+        offer.log_aid_opened(it["path"], s["id"])
+        # the chat's resolver: a name two notes share links to this item's note
+        resolve, _read = answer_resolver([it["path"]])
+        done[it["i"]] = {"text": text, "html": _linkify(text, resolve, remote_images=False)}
+    return done[it["i"]]
+
+
+MATH_MAX = 200        # formulas one page asks for at once; a session's page holds a few dozen
+MATH_CHARS = 2000     # one formula's LaTeX; a note's longest display block is a few hundred
+
+
+@router.post("/math", dependencies=_SAME_ORIGIN)
+def math(payload: dict):
+    """The formulas in Learn's text as MathML, converted as the chat's are
+    (server._mathml: the browser draws them, and a formula that does not
+    convert comes back as written)."""
+    from silica.ui.web.server import _mathml
+
+    tex = [str(t)[:MATH_CHARS] for t in (payload.get("tex") or [])][:MATH_MAX]
+    display = list(payload.get("display") or [])
+    return {"mathml": [_mathml(t, bool(display[i]) if i < len(display) else False) for i, t in enumerate(tex)]}
 
 
 @router.post("/teach", dependencies=_SAME_ORIGIN)

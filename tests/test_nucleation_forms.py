@@ -373,6 +373,65 @@ class TestDraftFiling:
         # the source is archived, not left to be re-filed on the next run
         assert not (Path(CONFIG.vault_path) / "Inbox" / "vo-ep180.md").exists()
 
+    def test_a_labs_notebook_folder_is_filed_whole_and_linked_to_what_it_practises(
+            self, tmp_vault, monkeypatch):
+        """A study vault is no git checkout, so the code lane never read the
+        course's notebooks: a folder /nucleate now converts them, files each
+        under its own name and links the notes it puts to work."""
+        import json
+        from pathlib import Path
+
+        from silica.config import CONFIG
+        from silica.kernel.link import labs
+
+        tmp_vault.note("ML/Support Vector Machine.md", "# SVM\n")
+        tmp_vault.note("ML/Matrice di confusione.md", "# CM\n")
+        # what the outline stage hides is no concept a lab practises
+        tmp_vault.note("ML/Lezione 10.md", "---\nsection: (outline)\n---\n# Lezione 10\n\n1. [[Margine]]\n")
+        tmp_vault.note("ML/Vettori di supporto.md", "---\nsuperseded_by: '[[Support Vector Machine]]'\n---\n# x\n")
+        nb = {"nbformat": 4, "metadata": {}, "cells": [
+            {"cell_type": "markdown", "source": "# Dataset uploading"},
+            {"cell_type": "code", "source": "clf = SVC(kernel='rbf')", "outputs": []}]}
+        tmp_vault.note("Inbox/Esercizi/esercizio_svm.ipynb", json.dumps(nb))
+        seen: list[str] = []
+
+        def ask(system, user):
+            seen.append(system)
+            return ("Support Vector Machine | addestra una SVM con kernel rbf\n"
+                    "Rete neurale inventata | non esiste\n"
+                    "Matrice di confusione | None\n"
+                    "[[support vector machine]] | doppione\n")
+        monkeypatch.setattr(labs, "_ask_worker", ask)
+
+        out, calls = self._dispatch(tmp_vault, monkeypatch, "/nucleate Inbox/Esercizi --target=ML")
+
+        assert calls == {}  # filed, never distilled
+        filed = Path(CONFIG.vault_path) / "ML" / "esercizio_svm.md"
+        text = filed.read_text(encoding="utf-8")
+        assert "clf = SVC(kernel='rbf')" in text
+        assert text.rstrip().endswith(
+            "## Concepts practised\n- [[Support Vector Machine]]: addestra una SVM con kernel rbf")
+        assert "Matrice di confusione" in seen[0]  # the folder's notes were the candidates
+        assert "Lezione 10" not in seen[0] and "Vettori di supporto" not in seen[0]
+
+    def test_a_filed_draft_links_the_notes_of_its_folder_it_names(self, tmp_vault, monkeypatch):
+        """The spec's filing path runs autolink so the note joins the graph;
+        it never did. A note outside the target folder is not a candidate."""
+        from pathlib import Path
+
+        from silica.config import CONFIG
+
+        tmp_vault.note("ML/Support Vector Machine.md", "# SVM\n")
+        tmp_vault.note("Psicologia/Memoria.md", "# Memoria\n")
+        tmp_vault.note("Inbox/sunto.md", "---\nform: draft\n---\n\n"
+                       "La Support Vector Machine massimizza il margine; la memoria del kernel conta.\n")
+
+        self._dispatch(tmp_vault, monkeypatch, "/nucleate Inbox/sunto.md --target=ML")
+
+        text = (Path(CONFIG.vault_path) / "ML" / "sunto.md").read_text(encoding="utf-8")
+        assert "[[Support Vector Machine]]" in text
+        assert "[[Memoria" not in text
+
     def test_the_title_comes_from_the_first_heading_never_a_fragment(self, tmp_vault, monkeypatch):
         from pathlib import Path
 
@@ -387,6 +446,13 @@ class TestDraftFiling:
         )
 
         assert (Path(CONFIG.vault_path) / "Videos" / "Local still loses on thumbnails.md").is_file()
+
+    def test_a_heading_title_loses_what_obsidian_refuses_in_a_name(self):
+        from silica.cli import _draft_title
+
+        assert _draft_title("# Machine Learning: guida allo studio\n", "g") == \
+            "Machine Learning - guida allo studio"
+        assert _draft_title('# Why "local"? A/B notes\n', "g") == "Why local A-B notes"
 
     def test_the_filed_note_is_revert_covered(self, tmp_vault, monkeypatch):
         from pathlib import Path
@@ -430,6 +496,29 @@ class TestDraftFiling:
         )
 
         assert calls.get("inbox_files") == ["Inbox/notes.md"]
+
+
+def test_a_lab_links_the_notes_most_replies_pick():
+    """One reply per lab was a draw at temperature 0 (2026-10-23): three
+    replies, a note linked when two of them name it, most votes first."""
+    import itertools
+    import threading
+
+    from silica.kernel.link import labs
+
+    # the same reason per note in every reply: which thread draws which reply is not fixed
+    replies = itertools.cycle(["Support Vector Machine | addestra una SVM\nMatrice di confusione | la stampa",
+                               "Support Vector Machine | addestra una SVM\nIperparametri | li sceglie",
+                               "Matrice di confusione | la stampa\nSupport Vector Machine | addestra una SVM"])
+    lock = threading.Lock()
+
+    def ask(system, user):
+        with lock:
+            return next(replies)
+
+    out = labs.practised_section("clf = SVC()", ["Support Vector Machine", "Matrice di confusione", "Iperparametri"], ask=ask)
+    assert out == ("\n## Concepts practised\n- [[Support Vector Machine]]: addestra una SVM\n"
+                   "- [[Matrice di confusione]]: la stampa\n")
 
 
 def test_sniff_is_memoized_per_content(monkeypatch):

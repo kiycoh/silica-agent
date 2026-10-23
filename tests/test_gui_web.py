@@ -3082,3 +3082,54 @@ def test_every_view_row_says_what_the_view_is_for():
     assert len(rows) == 8 and all(tip for _tab, tip in rows), rows
     assert "<span>Calendar</span>" in html and "<span>Plan</span>" not in html
     assert "nucleate it into Inbox" not in html   # a drop converts; nucleate is offered after
+
+
+def test_an_aliased_link_in_a_table_cell_keeps_the_row_whole():
+    """The model writes `[[Note|alias]]` in a table where Obsidian asks for
+    `\\|`; its pipe ended the cell and split the row (an aid's table, 2026-10-23)."""
+    from silica.ui.web import server
+
+    table = "| Aspetto | Reti |\n|---|---|\n| Movimenti | a meno di [[Attenzione|attenzione]] |\n"
+    html = server._linkify(table, resolve=lambda r: "ML/Attenzione.md" if r.startswith("Attenzione") else None)
+    row = html[html.index("<tbody"):]
+    assert row.count("<td") == 2 and '<a class="note-link" data-path="ML/Attenzione.md">attenzione</a>' in row
+    assert server._escape_table_aliases("prose [[A|b]]\n") == "prose [[A|b]]\n"
+
+
+def test_a_reader_saying_it_is_unclear_gets_a_read_only_turn(client, monkeypatch):
+    """Asked "non ho capito il Boosting", the local 9B wrote a note of its own
+    (2026-10-23): the turn says read-only."""
+    _tc, server = client
+    seen = {}
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
+        seen["content"] = messages[-1]["content"]
+        messages.append({"role": "assistant", "content": "ok"})
+        return "ok"
+
+    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+
+    async def collect():
+        return [item async for item in server.run_turn("non ho capito il Boosting")]
+
+    asyncio.run(collect())
+    assert "READ-ONLY" in seen["content"]
+
+    async def plain():
+        return [item async for item in server.run_turn("cos'è il boosting?")]
+
+    asyncio.run(plain())
+    assert "READ-ONLY" not in seen["content"]
+
+
+def test_an_absolute_value_in_a_table_cell_keeps_the_row_whole():
+    """`$|x|$` in a table row split the row at its bars (2026-10-23); they
+    become \\vert, and a norm's \\| becomes \\Vert, which draw the same."""
+    from silica.ui.web import server
+
+    table = "| Posizione | Condizione |\n|---|---|\n| Esterno | $|y_i f(x)| > \\gamma$ |\n| Norma | $\\|\\xi\\|_2$ |\n"
+    body = server._linkify(table)
+    body = body[body.index("<tbody"):]
+    assert [row.count("<td") for row in body.split("</tr>")[:2]] == [2, 2]
+    assert "&#x0007C;" in body and "&#x02016;" in body
+    assert server._escape_table_aliases("prose $|x|$\n") == "prose $|x|$\n"

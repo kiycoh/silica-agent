@@ -130,9 +130,16 @@ def _make_resolver(extra_names: set[str] | None = None):
     return resolves
 
 
-def _unlink_body(body: str, resolves) -> tuple[str, list[str], list[str]]:
+def links_in(text: str | None) -> frozenset[str]:
+    """Every note-link target a note's text holds, its `related:` entries
+    included: what a note said before a run touched it."""
+    return frozenset(m.group(2).strip() for m in _WIKILINK_RE.finditer(text or "") if not m.group(1))
+
+
+def _unlink_body(body: str, resolves, keep: frozenset[str] = frozenset()) -> tuple[str, list[str], list[str]]:
     """Unlink what does not resolve, repoint what resolves under another
-    spelling; return (new, stripped, relinked)."""
+    spelling; return (new, stripped, relinked). A target in `keep` was in the
+    note before the run and is the owner's to keep, resolved or not."""
     stripped: list[str] = []
     relinked: list[str] = []
 
@@ -140,7 +147,7 @@ def _unlink_body(body: str, resolves) -> tuple[str, list[str], list[str]]:
         embed, target, anchor, alias = m.group(1), m.group(2), m.group(3), m.group(4)
         t = target.strip()
         # Embeds and non-note targets (images, PDFs) are not note links.
-        if embed or t.lower().endswith(NON_MD_EXTENSIONS):
+        if embed or t.lower().endswith(NON_MD_EXTENSIONS) or t in keep:
             return m.group(0)
         hit = resolves(t)
         if hit == t:
@@ -159,8 +166,9 @@ def _unlink_body(body: str, resolves) -> tuple[str, list[str], list[str]]:
     return _WIKILINK_RE.sub(_sub, body), stripped, relinked
 
 
-def _prune_related(fm_text: str, resolves) -> tuple[str, list[str]]:
-    """Drop unresolved `related:` entries from the raw frontmatter text."""
+def _prune_related(fm_text: str, resolves, keep: frozenset[str] = frozenset()) -> tuple[str, list[str]]:
+    """Drop unresolved `related:` entries from the raw frontmatter text, but
+    never one the note held before the run (`keep`)."""
     out: list[str] = []
     dropped: list[str] = []
     in_related = False
@@ -175,7 +183,7 @@ def _prune_related(fm_text: str, resolves) -> tuple[str, list[str]]:
                 quote, raw = m.group(1), m.group(2)
                 entry = _unquote(raw.strip(), quote)
                 hit = resolves(entry)
-                if hit == entry:
+                if hit == entry or raw.strip() in keep or entry in keep:
                     out.append(line)
                 elif hit:
                     out.append(line.replace(raw, _quote(hit, quote), 1))
@@ -189,8 +197,9 @@ def _prune_related(fm_text: str, resolves) -> tuple[str, list[str]]:
     return "".join(out), dropped
 
 
-def sweep_note(rel_path: str, resolves) -> dict | None:
-    """Sweep one note; returns {"path", "stripped", "relinked"} when edited."""
+def sweep_note(rel_path: str, resolves, keep: frozenset[str] = frozenset()) -> dict | None:
+    """Sweep one note; returns {"path", "stripped", "relinked"} when edited.
+    `keep`: the link targets the note held before the run."""
     from silica.driver import DRIVER
     from silica.kernel.write.frontmatter import FM_RE
 
@@ -200,11 +209,11 @@ def sweep_note(rel_path: str, resolves) -> dict | None:
         return None
     content = nc.content
     if m := FM_RE.match(content):
-        fm_new, dropped = _prune_related(m.group(0), resolves)
-        body_new, stripped, relinked = _unlink_body(content[m.end():], resolves)
+        fm_new, dropped = _prune_related(m.group(0), resolves, keep)
+        body_new, stripped, relinked = _unlink_body(content[m.end():], resolves, keep)
         new = fm_new + body_new
     else:
-        new, stripped, relinked = _unlink_body(content, resolves)
+        new, stripped, relinked = _unlink_body(content, resolves, keep)
         dropped = []
     if new == content:
         return None
@@ -224,17 +233,23 @@ def sweep_note(rel_path: str, resolves) -> dict | None:
     }
 
 
-def sweep_dangling_links(note_paths: list[str]) -> dict:
+def sweep_dangling_links(note_paths: list[str], priors: dict[str, str | None] | None = None) -> dict:
     """Unlink still-dangling wikilinks in the given run-written notes.
 
-    `note_paths` are vault-relative, `.md` optional. Returns
-    {"notes_edited": N, "links_stripped": M, "links_relinked": K, "details": [...]}.
+    `note_paths` are vault-relative, `.md` optional. `priors` maps a note the
+    run patched (`.md` path) to its text before the run: a link already there
+    is the owner's, kept. Until 2026-10-23 a patched note was swept whole, and
+    a study guide's cross edges onto 15 of the owner's notes cost them their
+    own forward references (`[[Regressione lineare semplice]]` became plain
+    text, `[[Analisi della regressione]]` left `related:`).
+    Returns {"notes_edited": N, "links_stripped": M, "links_relinked": K, "details": [...]}.
     """
     resolves = _make_resolver()
     details: list[dict] = []
+    priors = priors or {}
     for p in note_paths:
         rel = p if p.endswith(".md") else p + ".md"
-        r = sweep_note(rel, resolves)
+        r = sweep_note(rel, resolves, links_in(priors.get(rel)))
         if r:
             details.append(r)
     total = sum(len(d["stripped"]) for d in details)

@@ -57,6 +57,7 @@ embeds → write the note to the inbox) is shared and provider-agnostic.
 """
 from __future__ import annotations
 
+import base64
 import io
 import json
 import logging
@@ -148,6 +149,17 @@ _MINERU_TIMEOUT_S = 3600
 # the user installed. `_mineru_error` is the place that reads the damage — an
 # unknown flag comes back as the error line, not as a silent empty convert.
 _MINERU_ARGS = ["-m", "auto", "-f", "true", "-t", "true"]
+
+# mineru >= 4 (4.0.12, 2026-10-23): `mineru` became the document-library CLI,
+# which parses the first 10 pages unless told otherwise, and the stateless
+# converter moved to `mineru-kit parse` with -b/-m/-f/-t gone in favour of a
+# quality tier. Standard, upstream's own PDF default, adds a VLM to the small
+# models: on Lezione 12 (25 formula slides) basic's formula OCR wrote
+# `\pmb{\mathscr{v}}` for a bold v and garbled the norm bars, standard read both.
+# Only PDFs and images take a tier: an .xlsx given one is refused ("'xlsx' files
+# use tier 'flash'"). Measured on the RTX 4080 laptop: ~40 s to start the VLM
+# per call (minutes on the very first, which compiles), then ~0.8 s a page.
+_MINERU4_TIER = "standard"
 
 # stderr triage (see _mineru_error): noise = loguru INFO/DEBUG, uvicorn banner
 # lines, tqdm progress bars; error-ish = a line naming an error/exception.
@@ -269,9 +281,11 @@ MEDIA_EXTS = (*AUDIO_EXTS, *VIDEO_EXTS)
 # front (config? API dump? records?), so profiling them would guess.
 TABULAR_EXTS = (".csv", ".tsv", ".parquet")
 
+# `.ipynb` reaches convert() only where the code lane does not claim it
+# (`NotebookAdapter.matches`: no git checkout around the vault).
 DOC_EXTS = (
     ".pdf", *_BASE_TEXT_EXTS, *IMG_EXTS, *OFFICE_EXTS, *MEDIA_EXTS,
-    *_PURE_PY_OFFICE_EXTS, *LEGACY_OFFICE_EXTS, *TABULAR_EXTS,
+    *_PURE_PY_OFFICE_EXTS, *LEGACY_OFFICE_EXTS, *TABULAR_EXTS, ".ipynb",
 )
 
 # The subset that is a *document* someone meant to keep, as opposed to an
@@ -427,9 +441,12 @@ _REFERENCES_HEADING_RE = re.compile(
 )
 
 # A table of contents: page-number scaffolding, and the autolinker wikilinks
-# every entry ("2.1 [[Memory for LLM Agents]] . 2").
+# every entry ("2.1 [[Memory for LLM Agents]] . 2"). A back-of-book index is the
+# same scaffolding sorted by term: the Goodfellow's 37k-character "## Index"
+# ("0-1 loss, 102, 274") was one segment queued for distillation.
 _CONTENTS_HEADING_RE = re.compile(
-    r"^#{1,6}\s*[\d.\s]*\**\s*(table of contents|contents|indice)\s*\**\s*$",
+    r"^#{1,6}\s*[\d.\s]*\**\s*(table of contents|contents|indice|index|subject index"
+    r"|indice analitico)\s*\**\s*$",
     re.IGNORECASE,
 )
 
@@ -640,6 +657,8 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
         provider = _via_fb2
     elif suffix == ".pptx":
         provider = _via_pptx
+    elif suffix == ".ipynb":
+        provider = _via_ipynb
     else:
         name = resolve_pdf_provider(CONFIG.pdf_provider)
         if name not in PDF_PROVIDERS:
@@ -707,7 +726,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
     from silica.kernel.write.preserve import Loss
 
     inbox = _note_dir(src, active_inbox_dir() or "Inbox")
-    stem = src.stem
+    stem = _note_stem(src)
     if leaf is not None:
         _write_leaf(src, body, *leaf)
         stem = Path(leaf[0]).stem
@@ -822,7 +841,7 @@ def _no_text_sentence(ocr_provider: bool = False) -> str:
     if hosted() or ocr_provider:
         return NO_TEXT
     return (f"{NO_TEXT} To read a scan on this machine, install mineru "
-            "(`pip install 'mineru[pipeline]'`) and set SILICA_PDF_PROVIDER=mineru.")
+            "(`pip install 'mineru[full]'`) and set SILICA_PDF_PROVIDER=mineru.")
 
 
 # ADR-0087 amendment: pages of one file read at once.
@@ -1240,6 +1259,76 @@ def _via_fb2(src: Path, workdir: Path) -> tuple[str, Path]:
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)
     return "\n\n".join(blocks), images
+
+
+# --- Jupyter notebooks outside a code-lane repo ------------------------------
+
+# A course's lab sits in a study vault, where the code lane (git-backed,
+# spec-code-lane §3) cannot read it. An output past this many lines is a dump
+# (a printed array of 1797 digits), not the result a reader looks at.
+_NB_OUTPUT_LINES = 25
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _nb_text(src: object) -> str:
+    return "".join(s for s in src if isinstance(s, str)) if isinstance(src, list) else (
+        src if isinstance(src, str) else "")
+
+
+def _via_ipynb(src: Path, workdir: Path) -> tuple[str, Path]:
+    """Cells in order: markdown as written, code fenced in the kernel's
+    language, then what the cell printed, cut to `_NB_OUTPUT_LINES`, and the
+    plots it drew as figures. A traceback is the run's failure, not the lab,
+    and an HTML table is dropped for the text/plain twin every frontend writes.
+    """
+    images = workdir / "images"
+    images.mkdir(parents=True, exist_ok=True)
+    try:
+        nb = json.loads(src.read_text(encoding="utf-8", errors="replace"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"malformed notebook JSON: {e}") from None
+    cells = nb.get("cells") if isinstance(nb, dict) else None
+    if not isinstance(cells, list):
+        raise ValueError("notebook has no cells list")
+    meta = nb.get("metadata") if isinstance(nb.get("metadata"), dict) else {}
+    lang = (meta.get("kernelspec") or {}).get("language") or "python"
+    parts: list[str] = []
+    for i, cell in enumerate(cells):
+        if not isinstance(cell, dict):
+            continue
+        text = _nb_text(cell.get("source")).strip("\n")
+        if cell.get("cell_type") == "markdown" and text.strip():
+            parts.append(text.strip())
+        elif cell.get("cell_type") == "code":
+            if text.strip():
+                parts.append(f"```{lang}\n{text}\n```")
+            for k, out in enumerate(cell.get("outputs") or []):
+                if not isinstance(out, dict):
+                    continue
+                data = out.get("data") if isinstance(out.get("data"), dict) else {}
+                png = data.get("image/png")
+                if isinstance(png, str):
+                    name = f"cell{i}-{k}.png"
+                    try:
+                        (images / name).write_bytes(base64.b64decode(png))
+                    except ValueError:  # a corrupt figure costs the figure only
+                        continue
+                    parts.append(f"![](images/{name})")
+                    continue
+                kind = out.get("output_type")
+                # stderr carries a library's warnings and progress bars, and
+                # Keras colours its summary with ANSI codes a note would show raw.
+                if kind == "error" or out.get("name") == "stderr":
+                    continue
+                lines = _ANSI_RE.sub("", _nb_text(out.get("text") if kind == "stream" else
+                                                 data.get("text/plain"))).rstrip().splitlines()
+                if not lines:
+                    continue
+                if len(lines) > _NB_OUTPUT_LINES:
+                    lines = lines[:_NB_OUTPUT_LINES] + [
+                        f"... ({len(lines) - _NB_OUTPUT_LINES} more lines)"]
+                parts.append("```text\n" + "\n".join(lines) + "\n```")
+    return "\n\n".join(parts) + "\n", images
 
 
 # --- PPTX: the deck's own XML (ADR-0120) ------------------------------------
@@ -2837,6 +2926,8 @@ def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
     recursive glob below finds the markdown under either.
     """
     out = workdir / "out"
+    if _has_mineru_kit():
+        return _via_mineru_kit(src, out)
     try:
         proc = subprocess.run(
             ["mineru", "-p", str(src), "-o", str(out), "-b", _MINERU_BACKEND, *_MINERU_ARGS],
@@ -2845,7 +2936,7 @@ def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
         )
     except FileNotFoundError:
         raise ValueError(
-            "mineru not installed — `pip install 'mineru[pipeline]'`, "
+            "mineru not installed — `pip install 'mineru[full]'`, "
             "or set SILICA_PDF_PROVIDER to docling/opendataloader"
         ) from None
     if proc.returncode != 0:
@@ -2859,6 +2950,41 @@ def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
         raise ValueError("mineru produced no markdown")
     md_path = Path(hits[0])
     return md_path.read_text(encoding="utf-8", errors="replace"), md_path.parent / "images"
+
+
+def _has_mineru_kit() -> bool:
+    """mineru >= 4 is on PATH: both CLIs ship together, so `mineru` alone
+    cannot tell the versions apart."""
+    return shutil.which("mineru-kit") is not None
+
+
+def _via_mineru_kit(src: Path, out: Path) -> tuple[str, Path]:
+    """mineru >= 4: one zip holding `markdown.md` and the `images/` it links.
+
+    The zip and not markdown: `--format markdown` writes the text alone, so the
+    figures a lecture links (52 in Lezione 27) would never reach the vault.
+    """
+    archive = out.with_suffix(".zip")
+    tier = ["--tier", _MINERU4_TIER] if src.suffix.lower() in (".pdf", *IMG_EXTS) else []
+    proc = subprocess.run(
+        ["mineru-kit", "parse", str(src), "-o", str(archive), "--format", "zip", *tier],
+        capture_output=True, text=True, timeout=_MINERU_TIMEOUT_S,
+        preexec_fn=_REAP_WITH_PARENT,  # killing the batch must free the GPU
+        # Its "Error: ..." line is wrapped at 80 columns off a terminal, and
+        # _mineru_error keeps one line: the half that names no cause.
+        env={**os.environ, "COLUMNS": "400"},
+    )
+    if proc.returncode != 0:
+        raise ValueError(f"mineru failed: {_mineru_error(proc.stderr)}")
+    try:
+        with zipfile.ZipFile(archive) as z:
+            z.extractall(out)
+    except (OSError, zipfile.BadZipFile) as e:
+        raise ValueError(f"mineru produced no readable archive: {e}") from None
+    md_path = out / "markdown.md"
+    if not md_path.is_file():
+        raise ValueError("mineru produced no markdown")
+    return md_path.read_text(encoding="utf-8", errors="replace"), out / "images"
 
 
 PDF_PROVIDERS = {
@@ -2930,6 +3056,20 @@ _DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s\"'<>\])}]+)")
 _ARXIV_RE = re.compile(r"arXiv:\s*(\d{4}\.\d{4,5})(v\d+)?", re.IGNORECASE)
 
 
+# Titles an authoring tool writes when nobody set one: PowerPoint's first slide
+# name in its UI languages, its own name, Word's "Document1", and a LaTeX build's
+# file name (`sigir_main.dvi`).
+_PLACEHOLDER_TITLE_RE = re.compile(
+    r"^(?:(?:slide|diapositiva|diapositive|diapositivo|folie|dia)\s*\d+"
+    r"|(?:microsoft\s+)?powerpoint(?:\s+presentation|-präsentation)?"
+    r"|presentazione(?:\s+standard)?\s+di\s+powerpoint|présentation\s+powerpoint"
+    r"|presentación\s+de\s+powerpoint|apresentação\s+do\s+powerpoint"
+    r"|untitled|senza\s+titolo|document\s*\d*|documento\s*\d*"
+    r"|\S+\.(?:dvi|tex|docx?|pptx?|pdf))$",
+    re.IGNORECASE,
+)
+
+
 def _doc_citation(src: Path, md_text: str) -> dict[str, str]:
     """Citation fields the document itself declares: doi/arxiv from the first
     page's text, authors/title from the format's own metadata. Absent fields
@@ -2956,6 +3096,11 @@ def _doc_citation(src: Path, md_text: str) -> dict[str, str]:
         elif suffix == ".epub":
             meta = _epub_metadata(src)
             title, authors = meta.get("title", ""), meta.get("creator", "")
+        if _PLACEHOLDER_TITLE_RE.match(title.strip()):
+            # The tool's default, not the author's: 26 of 32 lecture decks of
+            # one course said "Diapositiva 1" by "DMA", and every note citing
+            # them carried that. A deck nobody titled names no author either.
+            title = authors = ""
         if title.strip():
             cite["source_title"] = " ".join(title.split())
         if authors.strip():
@@ -3006,6 +3151,11 @@ def _provenance_fm(src: Path, md_text: str = "",
     # A document's form is not knowable at ingress; it gets no stamp.
     if src.suffix.lower() in MEDIA_EXTS:
         lines.append("form: transcript\n")
+    # A lab notebook is filed intact, never distilled as code: the policy
+    # forms._looks_like_notebook_export holds for nbconvert exports, stamped
+    # here by construction for a notebook this converter read itself.
+    elif src.suffix.lower() == ".ipynb":
+        lines.append("form: draft\n")
     # A tabular profile documents a LIVE file: the rows stay on disk and the
     # note is the pointer, so the note↔file edge must enter the graph, not
     # just this provenance ledger (source_file: is deliberately not indexed).
@@ -3092,8 +3242,24 @@ def _image_prefix(src: Path) -> str:
     (`{inbox}/{src.stem}.md`), so two sources that collide here already collide
     there.
     """
-    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", src.stem).strip("-_")[:40]
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", _note_stem(src)).strip("-_")[:40]
     return slug or "doc"
+
+
+# The tag a shadow library appends to every file it serves. A textbook keeps it
+# in each of its ~60 segment names, their spine notes and the hub's headings
+# ("Deep Learning (Ian Goodfellow, Yoshua Bengio, Aaron Courville) (Z-Library)").
+_DOWNLOAD_TAG_RE = re.compile(
+    r"\s*[\(\[]\s*(?:z-?library|z-?lib(?:\.\w+)?|libgen(?:\.\w+)?|library genesis"
+    r"|anna'?s[\s_-]archive|pdfdrive(?:\.com)?)\s*[\)\]]",
+    re.IGNORECASE,
+)
+
+
+def _note_stem(src: Path) -> str:
+    """The source's name as its notes carry it: the file stem without a
+    download site's tag. The same for a re-convert, as `_image_prefix` needs."""
+    return _DOWNLOAD_TAG_RE.sub("", src.stem).strip() or src.stem
 
 
 def _copy_images(

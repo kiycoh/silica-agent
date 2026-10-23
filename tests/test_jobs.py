@@ -442,16 +442,22 @@ PAPER = ["EmbedRank extracts keyphrases with sentence embeddings.",
          "Energy and mass\nE equals m times c squared, as derived", ""]
 
 
-def test_a_turn_typed_after_the_conversion_names_its_note_once(client, pdfs):
+def test_a_turn_typed_after_the_conversion_names_its_note_once(client, pdfs, monkeypatch):
     """The drop's turn said "still converting" and stays so in the history: a
     question typed once the note exists was answered from the whole vault."""
     from tests.doc_factory import pdf_bytes
 
     tc, server, ran = client
+    # The worker is a real thread: unheld, a one-page text layer converted
+    # before the turn read the job: the full suite failed here on 2026-10-23
+    # while the test alone passed 3 of 3.
+    held, real = threading.Event(), conv.convert
+    monkeypatch.setattr(conv, "convert", lambda *a, **kw: (held.wait(10), real(*a, **kw))[1])
     r = tc.post("/nucleate", data={"text": "riassumi"},
                 files=[("files", ("paper.pdf", pdf_bytes(PAPER, math={1}), "application/pdf"))])
     assert r.status_code == 200  # a text layer: the question does not wait
     assert "Still being read" in ran["text"] and "<converted-files>" not in ran["text"]
+    held.set()
     _drain()
     tc.post("/chat", json={"text": "Ora puoi farmi il riassunto?"})
     assert ran["text"].startswith("Ora puoi farmi il riassunto?\n\n<converted-files>")

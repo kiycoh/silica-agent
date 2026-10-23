@@ -119,8 +119,15 @@ def view(
     now_ts: float | None = None,
     _notes_override: dict | None = None,
     _entries_override: list | None = None,
+    cold: frozenset[str] = frozenset(),
 ) -> dict[str, dict]:
     """The whole vault's learner state, keyed by quiz.key(path).
+
+    `cold` paths start with no authorship prior: inside a plan with a date,
+    a note the reader wrote is a card like any other until its first answer,
+    or one Good gives it a stability of months and it never returns before
+    the exam (simulated on the real fold, docs research report
+    study-plans-and-deadline-scheduling, 2026-10-23).
 
     ponytail: no memo on (ledger length, epoch); the replay is one
     review_card per ledger line. Memoize when a profile shows the fold above
@@ -141,7 +148,7 @@ def view(
     out: dict[str, dict] = {}
     for path, meta in notes.items():
         k = quiz.key(path)
-        st = note_state(meta["created"], bool(meta.get("ai")), events.get(k, []), now)
+        st = note_state(meta["created"], bool(meta.get("ai")) or path in cold, events.get(k, []), now)
         st.update(path=path, ai=bool(meta.get("ai")), attempts=st["misses"] + st["correct"])
         out[k] = st
     return out

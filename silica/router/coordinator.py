@@ -172,7 +172,10 @@ class Coordinator:
         # on it; the sweep only embeds notes whose text changed.
         from silica.kernel.recall import sync
 
-        sync.sweep(force=True)
+        # Uncapped: the cap keeps a query from waiting on a rebuild, and no
+        # query waits here. Capped, a course's run left 835 patched notes on
+        # their pre-patch vectors until someone ran /embed (2026-10-23).
+        sync.sweep(force=True, uncapped=True)
         return result
 
     # --- end-of-run orphan resolution -------------------------------------
@@ -311,10 +314,16 @@ class Coordinator:
                 for n in (r.get("notes") or [])
             }
             notes.update(self._run_written_under_target())
-            ordered = sorted(notes)
+            # The ledger names the owner's notes this run patched too. Their
+            # links from before the run are kept (priors); one whose
+            # before-image this run does not hold (a patch from a stopped run)
+            # is left alone unless Silica wrote it whole.
+            priors = self._patched_priors()
+            ordered = [n for n in sorted(notes)
+                       if (n if n.endswith(".md") else n + ".md") in priors or self._ai_written(n)]
             if not ordered:
                 return
-            summary = sweep_dangling_links(ordered)
+            summary = sweep_dangling_links(ordered, priors=priors)
             for rid in stopped:
                 (_progress.run_dir_for(rid) / "interrupted").unlink(missing_ok=True)
             if summary["links_stripped"] or summary["links_relinked"]:
@@ -325,6 +334,39 @@ class Coordinator:
                 }
         except Exception as e:
             logger.warning("dangling-link sweep failed (non-fatal): %s", e)
+
+    def _patched_priors(self) -> dict[str, str]:
+        """{note path: its text before this run} for every note the run
+        patched, from the undo journal's restore inverses; the oldest one per
+        note, since a note two chunks patched is journaled twice."""
+        out: dict[str, str] = {}
+        rid = getattr(self.fsm, "_undo_run_id", None)
+        if not rid:
+            return out
+        try:
+            from silica.kernel.write.ops import InverseOpKind
+            from silica.kernel.write.undo_journal import get_undo_journal
+
+            for inv, _ in reversed(get_undo_journal().inverses_for(rid)):  # newest first: reversed
+                if inv.kind == InverseOpKind.restore_version and inv.prior_content is not None:
+                    p = inv.path if inv.path.endswith(".md") else inv.path + ".md"
+                    out.setdefault(p, inv.prior_content)
+        except Exception as e:
+            # Without the before-images every patched note counts as unknown,
+            # so the sweep skips the owner's notes instead of guessing.
+            logger.warning("link sweep: patch before-images unavailable (%s)", e)
+        return out
+
+    def _ai_written(self, note: str) -> bool:
+        """Whether Silica wrote this note whole (`AI: true`), not patched it."""
+        from pathlib import Path
+
+        vault = (getattr(self.config, "vault_path", "") or "").strip()
+        rel = note if note.endswith(".md") else note + ".md"
+        try:
+            return "\nAI: true" in (Path(vault) / rel).read_text(encoding="utf-8", errors="replace")[:2048]
+        except OSError:
+            return False
 
     def _run_written_under_target(self) -> set[str]:
         """AI-authored notes under the run's target folder modified since the

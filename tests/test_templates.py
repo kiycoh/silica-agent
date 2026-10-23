@@ -407,3 +407,16 @@ def test_stamp_citation_does_not_duplicate_keys_after_a_sources_splice():
     out = stamp_citation(stamp_sources(note, "b.md"), {"title": "Paper"})
     _, raw, _ = frontmatter.split(out)
     assert raw.count("source_title:") == 1
+
+
+
+def test_a_rewrite_that_keeps_the_body_leaves_the_note_its_authors():
+    """A dedup alias rewrote an owner's note, properties only, and stamped
+    AI: true on it (Variabile casuale, 2026-10-23)."""
+    from silica.kernel.write.templates import ensure_system_floor
+
+    prior = "---\ntags:\n  - prob\n---\n\n# Variabile casuale\n\nTesto mio.\n"
+    aliased = "---\ntags:\n  - prob\naliases:\n  - Variabili casuali\n---\n\n# Variabile casuale\n\nTesto mio.\n"
+    assert "AI: partial" in ensure_system_floor(aliased, prior=prior)
+    rewritten = "---\ntags:\n  - prob\n---\n\n# Variabile casuale\n\nTesto nuovo.\n"
+    assert "AI: true" in ensure_system_floor(rewritten, prior=prior)

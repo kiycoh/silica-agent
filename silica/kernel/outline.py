@@ -64,8 +64,14 @@ BODIES_WORKERS = 6          # concurrent bodies calls per file: the batches are 
 BODIES_REPLY_TOKENS = 4000  # what one bodies call adds to the KV beyond its prompt: four 4-idea calls
                             # overflowed a 32k unified KV at ~8.2k tokens each on a 4.6k prompt (2026-10-12)
 MAX_EDGES_PER_TARGET = 3    # a target with more is a hub in disguise, not three real dependencies
+# The same rule from the other end: an idea with more edges into the vault is a
+# list of concepts, not real dependencies. A study guide's "Otto concetti
+# fondamentali" sent "applies this" to 12 of the owner's notes, Transformer
+# among them, which the guide never names (2026-10-23).
+MAX_EDGES_PER_SOURCE = 3
 MIN_WHY_CHARS = 20          # "e' collegato" is not a reason
-MAX_OUTLINE_ROWS = 400      # ponytail: folder-scoped outline; reopen at 400 notes in one folder, then seed with cosine top-k
+MAX_OUTLINE_ROWS = 400      # stage B's vault outline; past it the rows nearest the chunk win (_nearest_rows)
+MAX_ROW_QUERIES = 40        # chunk headings embedded to rank the rows: ~400 tokens, ~4 s on a 2-core CPU embedder
 
 STAGE_A_TAG = "[silica outline: stage A]"
 STAGE_GAP_TAG = "[silica outline: coverage]"
@@ -81,7 +87,7 @@ Emit ONLY a JSON object:
  "spine": ["<idea title>", ...],
  "ideas": [
    {{
-     "title": "<noun phrase in {lang} of 2-6 words naming ONE idea, capitalised like a note title; never a sentence, a slide line ('Note that', 'Arriving at the end, case l=L') or a formula>",
+     "title": "<noun phrase in {lang} of 2-6 words naming ONE idea, capitalised the way {lang} capitalises a title (outside English: the first word and proper names only); never a sentence, a slide line ('Note that', 'Arriving at the end, case l=L') or a formula>",
      "section": "<heading of the source section(s) the idea comes from, verbatim>",
      "claim": "<one sentence in {lang}: what this idea asserts>",
      "depends_on": [{{"title": "<another idea title from THIS list>", "relation": "<one of {rels}>", "why": "<one sentence in {lang}>"}}]
@@ -104,7 +110,7 @@ STAGE_GAP = STAGE_GAP_TAG + """
 You already extracted the ideas listed below from the source document that follows. These source sections have NO idea yet:
 {gaps}
 For each of them either add an idea or record an explicit skip with the reason (empty slide, duplicate of an existing idea, noise). An idea has the shape
-{{"title": "<noun phrase in {lang} of 2-6 words naming ONE idea, capitalised like a note title>", "section": "<the source heading it comes from, verbatim from the list above>", "claim": "<one sentence in {lang}: what this idea asserts>", "depends_on": [{{"title": "<an existing or new idea title>", "relation": "<one of {rels}>", "why": "<one sentence in {lang}>"}}]}}
+{{"title": "<noun phrase in {lang} of 2-6 words naming ONE idea, capitalised the way {lang} capitalises a title (outside English: the first word and proper names only)>", "section": "<the source heading it comes from, verbatim from the list above>", "claim": "<one sentence in {lang}: what this idea asserts>", "depends_on": [{{"title": "<an existing or new idea title>", "relation": "<one of {rels}>", "why": "<one sentence in {lang}>"}}]}}
 Title, claim and every why are written in {lang}; the section is copied as it is.
 
 Emit ONLY a JSON object: {{"ideas": [...], "skips": [{{"section": "<heading>", "reason": "<why>"}}]}}. No markdown fences.
@@ -114,6 +120,10 @@ STAGE_BODIES = STAGE_BODIES_TAG + """
 You are given one complete source document (markdown, LaTeX kept) and a list of ideas already identified in it (a quoted title, then the source section it comes from). For EACH listed idea write its note body in {lang}: the facts themselves (definitions, formulas in LaTeX verbatim, theorem statements, algorithm steps), copied from the source, never outside knowledge, never a description of the source. Markdown. Keep every formula that belongs to the idea, drop repeated slides.
 
 Reply in PLAIN MARKDOWN, not JSON: for each listed idea, one line `### IDEA: <idea title exactly as quoted>` followed by its body on the following lines. One section per listed idea, in the given order, keyed by the idea title and never by the section (several ideas can share one section). Nothing before the first marker, no code fences around the reply.
+"""
+
+STAGE_BODIES_TRANSLATE = """
+The source is written in another language than {lang}: translate its sentences into {lang}, faithfully and completely. Keep formulas, code, citations and proper names as they are.
 """
 
 # Bodies are LaTeX-heavy prose: as JSON strings they came back with single
@@ -411,6 +421,7 @@ def select_edges(raw: list, *, ideas: set[str], existing: dict[str, str],
     """Stage B edges the vault will act on, in proposal order."""
     kept: list[dict] = []
     per_target: dict[str, int] = {}
+    per_source: dict[str, int] = {}
     # Casefold lookups: the model re-cases titles ("Support Vector Machines"
     # for a note filed as "Support vector machines"), and an exact match threw
     # every edge of one live run away (2026-09-02, 0 of the proposals kept).
@@ -447,7 +458,11 @@ def select_edges(raw: list, *, ideas: set[str], existing: dict[str, str],
             continue
         if per_target.get(tgt, 0) >= MAX_EDGES_PER_TARGET:
             continue
+        if not intra and per_source.get(src, 0) >= MAX_EDGES_PER_SOURCE:
+            continue
         per_target[tgt] = per_target.get(tgt, 0) + 1
+        if not intra:
+            per_source[src] = per_source.get(src, 0) + 1
         kept.append({"from": src, "to": tgt, "relation": rel, "why": why, **({"intra": True} if intra else {})})
     logger.info("outline stage B: %d edge(s) proposed, %d kept, %d dropped", len(raw or []), len(kept), dropped)
     return kept
@@ -456,6 +471,24 @@ def select_edges(raw: list, *, ideas: set[str], existing: dict[str, str],
 # ---------------------------------------------------------------------- ops --
 def _stem(basename: str) -> str:
     return os.path.splitext(os.path.basename(basename))[0]
+
+
+_EMAIL_RE = re.compile(r"\S+@\S+\.\w+")
+
+
+def _strip_byline(lead: str, title: str) -> str:
+    """The lead without a deck's cover: an email line, the name line just
+    above it, and a line that only repeats the source's title. All 32 lecture
+    spines of one course ended on "Giosuè Lo Bosco / giosue.lobosco@unipa.it /
+    Lezione 13", each line then cited back to the lecture (2026-10-23)."""
+    lines = lead.splitlines()
+    drop = {i for i, ln in enumerate(lines) if _EMAIL_RE.search(ln) or ln.strip().casefold() == title.casefold()}
+    for i in sorted(drop):
+        prev = lines[i - 1].strip() if i else ""
+        if _EMAIL_RE.search(lines[i]) and prev and len(prev.split()) <= 5 and not re.search(r"[.:;?!]$", prev):
+            drop.add(i - 1)
+    kept = [ln for i, ln in enumerate(lines) if i not in drop]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
 
 
 def outline_ops(outline: Outline, *, target: str, hub: str | None, source_basename: str,
@@ -520,6 +553,7 @@ def outline_ops(outline: Outline, *, target: str, hub: str | None, source_basena
         rows = [f"{n}. {t if t in bodiless else f'[[{t}]]'}: {next(i.claim for i in outline.ideas if i.title == t)}"
                 for n, t in enumerate(outline.spine, 1)]
         head = f"> {outline.lesson_title}\n\n" if outline.lesson_title else ""
+        lead = _strip_byline(lead, spine_title)
         tail = f"\n{lead.strip()}\n" if lead.strip() else ""
         ops.append({
             "op": "write", "path": f"{tgt}/{spine_title}.md", "heading": spine_title, "title": spine_title,
@@ -672,13 +706,19 @@ def _claim_of(body: str) -> str:
     return (re.split(r"(?<=[.!?])\s", prose, 1)[0] or "")[:200]
 
 
-def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozenset()) -> list[dict]:
+def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozenset(),
+                  query: str = "") -> list[dict]:
     """Rows {title, claim, lesson, path} for every idea note under `target_dir`.
 
     Folder-scoped by design: stage B reads titles + one-line claims, and a
     folder is the unit the user nucleates into. Spine notes and the hub are
     excluded (see SPINE_SECTION). Best-effort per note: an unreadable note is
     one missing row, never a failed run.
+
+    Past MAX_OUTLINE_ROWS the rows kept are the ones nearest `query` (the
+    chunk's source text), not the first ones by name: a course folder reached
+    746 notes, the cut fell inside "P", and stage B never saw "Reti LSTM", so
+    the textbook wrote "LSTM" beside it (2026-10-23).
     """
     from silica.driver import DRIVER
     from silica.kernel.write import frontmatter
@@ -707,9 +747,44 @@ def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozens
             srcs = [srcs]
         lesson = _stem(str(srcs[0])) if srcs else ""
         rows.append({"title": title, "claim": _claim_of(body or ""), "lesson": lesson, "path": rel})
-        if len(rows) >= MAX_OUTLINE_ROWS:
-            break
-    return rows
+    return _nearest_rows(rows, query) if len(rows) > MAX_OUTLINE_ROWS else rows
+
+
+def _nearest_rows(rows: list[dict], query: str) -> list[dict]:
+    """The MAX_OUTLINE_ROWS rows whose notes sit nearest the chunk, kept in
+    name order. The chunk speaks through its headings, one vector each, and a
+    note scores its best cosine to any of them: one vector for a 40k-char book
+    segment blurs ten sections into none. With nothing to rank by (no embedder,
+    an empty store, a query without text) it is the first rows by name, the
+    cap as it was before."""
+    heads = list(dict.fromkeys(m.group(1) for m in _HEADING_RE.finditer(query)))[:MAX_ROW_QUERIES]
+    texts = heads if len(heads) >= 2 else [t for t in (query[:1500], query[1500:3000]) if t.strip()]
+    if not texts:
+        return rows[:MAX_OUTLINE_ROWS]
+    try:
+        from silica.agent.providers import get_embedder_or_none
+        from silica.config import CONFIG
+        from silica.kernel.recall.embed import get_store
+
+        store = get_store()
+        embedder = get_embedder_or_none(CONFIG, "outline rows", level="info") if len(store) else None
+        if embedder is None:
+            return rows[:MAX_OUTLINE_ROWS]
+        keys = frozenset(r["path"].removesuffix(".md") for r in rows)
+        best: dict[str, float] = {}
+        for vec in embedder.embed(texts, query=True):
+            for h in store.cosine_top_k(vec, k=len(keys), allow=keys):
+                best[h["path"]] = max(best.get(h["path"], -1.0), float(h["score"]))
+    except Exception as exc:  # noqa: BLE001
+        # A dead embedder costs the rows their ranking, never the chunk: stage B
+        # reads the first rows by name, as it did before the ranking.
+        logger.info("vault outline: rows not ranked (%s)", exc)
+        return rows[:MAX_OUTLINE_ROWS]
+    ranked = sorted(range(len(rows)), key=lambda i: -best.get(rows[i]["path"].removesuffix(".md"), -1.0))
+    keep = set(ranked[:MAX_OUTLINE_ROWS])
+    logger.info("vault outline: %d rows past the cap, kept the %d nearest %d heading(s)",
+                len(rows), MAX_OUTLINE_ROWS, len(texts))
+    return [r for i, r in enumerate(rows) if i in keep]
 
 
 # -------------------------------------------------------------- the runner --
@@ -1054,7 +1129,7 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     # Sized only for the real worker: an injected `ask` is a test or a probe.
     workers = BODIES_WORKERS if ask else bodies_workers_for(src)
     ask = ask or _default_ask
-    verbatim = verbatim_bodies()
+    verbatim = verbatim_bodies() and not translates(src)
     if outline is None:
         outline = skeleton(src, language=language, ask=ask, cover=not verbatim)
     lead = ""
@@ -1067,6 +1142,10 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     else:
         titles = [i.title for i in outline.ideas if only_titles is None or i.title in only_titles]
     cached = _cache_layout()
+    # "in {lang}" next to "copied from the source" read as copy: DeepSeek kept
+    # the Goodfellow's English under Italian titles (2026-10-23).
+    bodies_prompt = STAGE_BODIES.format(lang=language) + (
+        STAGE_BODIES_TRANSLATE.format(lang=language) if translates(src) else "")
 
     def _bodies(batch: list[str]) -> dict[str, str]:
         section_of = {t: next(i.section for i in outline.ideas if i.title == t) for t in batch}
@@ -1079,7 +1158,7 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
             user += "\n\nPREVIOUS ATTEMPT WAS REJECTED:\n" + steer_context
         from litellm import InternalServerError
         try:
-            reply = ask(STAGE_BODIES.format(lang=language), user, max_tokens=12000, raw=True,
+            reply = ask(bodies_prompt, user, max_tokens=12000, raw=True,
                         **({"prefix": src} if cached else {}))
         except (ValueError, TimeoutError, InternalServerError) as exc:
             # One batch must not take the lecture down: Lezione 8 landed 0
@@ -1161,9 +1240,26 @@ def verbatim_bodies() -> bool:
     return os.getenv("SILICA_OUTLINE_BODIES", "").strip().lower() != "llm"
 
 
+def translates(src: str) -> bool:
+    """The vault declares a language the source is not written in. A looked-up
+    body would then keep the source's language under a title and a claim in
+    the vault's: an English textbook nucleated into an Italian course vault
+    (2026-10-23). There the bodies stage writes the body, translating."""
+    from silica.kernel.text import language as lang_mod
+    from silica.kernel.vault_manifest import get_active_manifest
+
+    declared = (get_active_manifest().conventions.language or "").strip().casefold()
+    if not declared:
+        return False
+    found = lang_mod.detect(src[:20000])
+    # "Italian", "italiano" and "it" all name the language detect calls "italian"
+    return declared[:4] not in (found[:4], lang_mod.SNOWBALL_TO_ISO.get(found, "").casefold())
+
+
 # Stage A names a section that spans two headings as "A / B" or "A; B"
 # (11 of 137 ideas on the 2026-10-14 A/B lectures).
 _SECTION_PARTS = re.compile(r"\s*[/;]\s*")
+_FRONTMATTER_RE = re.compile(r"\A\s*---[ \t]*\n.*?\n---[ \t]*(?:\n|\Z)", re.S)
 _BODY_HEADING = re.compile(r"^(#{1,6})(?=\s)", re.M)
 
 
@@ -1196,7 +1292,11 @@ def partition_bodies(outline: Outline, src: str) -> tuple[str, dict[str, str]]:
     skipped = {_sec_key(s.get("section", "")) for s in outline.skips}
     texts: dict[str, list[str]] = {}
     first = marks[0].start() if marks else len(src)
-    lead: list[str] = [src[:first].strip()] if src[:first].strip() else []
+    # Not the source's own frontmatter: a converted syllabus opens on its
+    # `date:`/`source_file:` block and then a table, and that block landed in
+    # the spine note's body as a second frontmatter (2026-10-23).
+    head = _FRONTMATTER_RE.sub("", src[:first], count=1).strip()
+    lead: list[str] = [head] if head else []
     owner: Idea | None = None
     for m, nxt in zip(marks, marks[1:] + [None]):
         k = _sec_key(m.group(1))

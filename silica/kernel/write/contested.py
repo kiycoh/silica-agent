@@ -422,19 +422,23 @@ def suppress_contest(
     return target_clock is not None and target_clock >= incoming_clock
 
 
-def mark_superseded_by(content: str, winner: str) -> str:
+def mark_superseded_by(content: str, winner: str, *, full: bool = False) -> str:
     """Point a merged-away note at the note that absorbed it.
 
     The merge loser used to be left on disk with overlapping content and no
     link to the winner: two notes saying the same thing and no record that one
     replaced the other. Idempotent; unparseable YAML is returned unchanged.
+    `full` links the winner by its vault path, for a winner that shares the
+    loser's name in another folder: by name the pointer reads as the loser
+    itself.
     """
     data, raw, body = frontmatter.split(content)
     if data is None:
         if raw is not None:
             return content
         data, body = {}, content
-    link = f"[[{winner.removesuffix('.md').rsplit('/', 1)[-1]}]]"
+    name = winner.removesuffix(".md")
+    link = f"[[{name if full else name.rsplit('/', 1)[-1]}]]"
     if data.get(SUPERSEDED_BY_KEY) == link:
         return content
     data[SUPERSEDED_BY_KEY] = link
@@ -464,8 +468,10 @@ def follow_superseded(path: str, *, max_hops: int = 5) -> str:
         link = str((data or {}).get(SUPERSEDED_BY_KEY) or "").strip()
         if not link.startswith("[["):
             return path
-        name = link.strip("[]").split("|", 1)[0].rsplit("/", 1)[-1].strip()
-        nxt = os.path.join(os.path.dirname(path), name + ("" if name.endswith(".md") else ".md"))
+        name = link.strip("[]").split("|", 1)[0].strip()
+        # a path names its note; a bare name sits next to the loser
+        nxt = (name if "/" in name else os.path.join(os.path.dirname(path), name))
+        nxt += "" if nxt.endswith(".md") else ".md"
         try:
             if nxt in seen or not DRIVER.read_note(nxt).content:
                 return path

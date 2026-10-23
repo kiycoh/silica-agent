@@ -12,6 +12,7 @@ import struct
 import subprocess
 import sys
 import types
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -251,6 +252,20 @@ def test_pdf_info_dictionary_feeds_citation(tmp_vault):
     p.write_bytes(_pdf_bytes(["body"], title="A Paper", author="P. Author"))
     cite = conv._doc_citation(p, "")
     assert cite["source_title"] == "A Paper" and cite["authors"] == "P. Author"
+
+
+@pytest.mark.parametrize("title", ["Diapositiva 1", "Slide 1", "PowerPoint Presentation",
+                                   "Presentazione standard di PowerPoint", "sigir_main.dvi"])
+def test_a_tools_placeholder_title_is_no_citation(tmp_vault, title):
+    p = Path(CONFIG.vault_path) / "deck.pdf"
+    p.write_bytes(_pdf_bytes(["body"], title=title, author="DMA"))
+    assert conv._doc_citation(p, "") == {}
+
+
+def test_a_title_that_only_starts_like_a_placeholder_stays(tmp_vault):
+    p = Path(CONFIG.vault_path) / "deck.pdf"
+    p.write_bytes(_pdf_bytes(["body"], title="Slide 1 of the SVM course", author="G. Lo Bosco"))
+    assert conv._doc_citation(p, "")["source_title"] == "Slide 1 of the SVM course"
 
 
 def _never_called(*a, **k):
@@ -543,6 +558,14 @@ def test_opendataloader_no_markdown_raises(tmp_vault, monkeypatch):
 
 # --- mineru provider --------------------------------------------------------
 
+
+@pytest.fixture(autouse=True)
+def _mineru3(monkeypatch):
+    """The 3.x CLI unless a test says otherwise: whether `mineru-kit` is on this
+    machine's PATH must not decide which fake a test meets."""
+    monkeypatch.setattr(conv, "_has_mineru_kit", lambda: False)
+
+
 def _fake_mineru_run(returncode=0, stderr="", write_md=True):
     def run(cmd, **kw):
         # Full pinned command (spec 2026-07-22): explicit non-generative backend
@@ -662,8 +685,10 @@ _REAL_MINERU = pytest.mark.skipif(
 
 
 @_REAL_MINERU
-def test_real_mineru_ocrs_an_image_with_no_text_layer(tmp_vault):
+def test_real_mineru_ocrs_an_image_with_no_text_layer(tmp_vault, monkeypatch):
     """A screenshot or a scan: pixels only, no text layer anywhere in the file."""
+    # Whichever CLI is installed, not the 3.x the fakes above are pinned to.
+    monkeypatch.setattr(conv, "_has_mineru_kit", lambda: shutil.which("mineru-kit") is not None)
     pdfium = pytest.importorskip("pypdfium2")
     pytest.importorskip("PIL")  # mineru brings Pillow in with it
     pdf = pdfium.PdfDocument(pdf_bytes(["Silica ingestion probe\nSecond line of scanned text."],
@@ -1550,6 +1575,115 @@ def test_mineru_nonzero_exit_raises(tmp_vault, monkeypatch):
         conv.convert("paper.pdf")
 
 
+def _fake_mineru_kit_run(seen: list, returncode=0, stderr=""):
+    """mineru >= 4: `mineru-kit parse SRC -o X.zip --format zip [--tier T]`,
+    a zip holding markdown.md and the images/ it links (4.0.12's layout)."""
+    def run(cmd, **kw):
+        if cmd[0] != "mineru-kit":
+            raise FileNotFoundError(cmd[0])  # the vault's git probe: not a repo here
+        seen.append(cmd)
+        if returncode == 0:
+            with zipfile.ZipFile(cmd[cmd.index("-o") + 1], "w") as z:
+                z.writestr("markdown.md", "# M\n\n![](images/page_5_chart_1.jpg)\n")
+                z.writestr("images/page_5_chart_1.jpg", b"img")
+                z.writestr("images/page_6_equation_1.jpg", b"crop")  # unreferenced
+
+        class R:
+            pass
+
+        R.returncode, R.stderr, R.stdout = returncode, stderr, ""
+        return R()
+
+    return run
+
+
+def test_mineru4_reads_the_zip_and_copies_only_linked_figures(tmp_vault, monkeypatch):
+    monkeypatch.setattr(CONFIG, "pdf_provider", "mineru")
+    monkeypatch.setattr(conv, "_has_mineru_kit", lambda: True)
+    tmp_vault.note("paper.pdf", "x")
+    seen: list = []
+    monkeypatch.setattr(conv.subprocess, "run", _fake_mineru_kit_run(seen))
+
+    body = _inbox_note(conv.convert("paper.pdf")[0]).read_text(encoding="utf-8")
+
+    (cmd,) = seen
+    assert cmd[:3] == ["mineru-kit", "parse", str(Path(CONFIG.vault_path) / "paper.pdf")]
+    assert cmd[cmd.index("--format") + 1] == "zip"
+    assert cmd[cmd.index("--tier") + 1] == "standard"
+    assert "![[paper-page_5_chart_1.jpg]]" in body
+    images = Path(CONFIG.vault_path) / "Inbox/Images"
+    assert [p.name for p in images.iterdir()] == ["paper-page_5_chart_1.jpg"]
+
+
+def test_mineru4_gives_a_sheet_no_tier(tmp_vault, monkeypatch):
+    """4.0.12 refuses a tier on an .xlsx: "'xlsx' files use tier 'flash'"."""
+    monkeypatch.setattr(conv, "_has_mineru_kit", lambda: True)
+    monkeypatch.setattr(conv.shutil, "which", lambda name: f"/usr/bin/{name}")
+    tmp_vault.note("sheet.xlsx", "x")
+    seen: list = []
+    monkeypatch.setattr(conv.subprocess, "run", _fake_mineru_kit_run(seen))
+
+    conv.convert("sheet.xlsx")
+    assert "--tier" not in seen[0]
+
+
+def test_mineru4_failure_names_the_last_error_line(tmp_vault, monkeypatch):
+    monkeypatch.setattr(CONFIG, "pdf_provider", "mineru")
+    monkeypatch.setattr(conv, "_has_mineru_kit", lambda: True)
+    tmp_vault.note("paper.pdf", "x")
+    stderr = ("2026-10-23 | INFO | loading\n"
+              "Error: Failed to parse paper.pdf: quality_tier_unavailable\n")
+    monkeypatch.setattr(conv.subprocess, "run", _fake_mineru_kit_run([], 1, stderr))
+    with pytest.raises(ValueError, match="mineru failed: Error: Failed to parse paper.pdf"):
+        conv.convert("paper.pdf")
+
+
+def test_a_download_sites_tag_stays_out_of_the_note_names(tmp_vault, monkeypatch):
+    monkeypatch.setattr(CONFIG, "pdf_provider", "mineru")
+    monkeypatch.setattr(conv, "_has_mineru_kit", lambda: True)
+    tmp_vault.note("Deep Learning (Goodfellow) (Z-Library).pdf", "x")
+    monkeypatch.setattr(conv.subprocess, "run", _fake_mineru_kit_run([]))
+
+    (rel,) = conv.convert("Deep Learning (Goodfellow) (Z-Library).pdf")
+
+    assert rel == "Inbox/Deep Learning (Goodfellow).md"
+    text = (Path(CONFIG.vault_path) / rel).read_text(encoding="utf-8")
+    assert "![[Deep-Learning-Goodfellow-page_5_chart_1.jpg]]" in text
+    assert "(Z-Library).pdf" in text.split("---")[1]  # source_file still names the real file
+
+
+def test_a_notebook_is_a_lab_note_filed_intact_with_what_it_printed(tmp_vault):
+    import base64
+
+    nb = {"nbformat": 4, "metadata": {"kernelspec": {"language": "python"}}, "cells": [
+        {"cell_type": "markdown", "source": ["# Dataset uploading\n", "Load optdigits."]},
+        {"cell_type": "code", "source": "from sklearn import svm\nclf = svm.SVC()", "outputs": [
+            {"output_type": "stream", "name": "stdout", "text": ["Accuracy: 0.97\n"]},
+            {"output_type": "stream", "name": "stderr", "text": ["UserWarning: input_shape\n"]},
+            {"output_type": "stream", "name": "stdout", "text": ["\x1b[1mModel: \"seq\"\x1b[0m\n"]},
+            {"output_type": "display_data",
+             "data": {"image/png": base64.b64encode(b"png").decode(), "text/plain": ["<Figure>"]}},
+            {"output_type": "execute_result",
+             "data": {"text/plain": "\n".join(str(i) for i in range(40))}},
+            {"output_type": "error", "ename": "ValueError", "traceback": ["boom"]},
+        ]},
+    ]}
+    tmp_vault.note("Inbox/Esercizi/lab.ipynb", json.dumps(nb))
+
+    (rel,) = conv.convert("Inbox/Esercizi/lab.ipynb")
+    text = (Path(CONFIG.vault_path) / rel).read_text(encoding="utf-8")
+
+    assert rel == "Inbox/Esercizi/lab.md"
+    assert "form: draft" in text.split("---")[1]          # filed, never distilled
+    assert "```python\nfrom sklearn import svm\nclf = svm.SVC()\n```" in text
+    assert "Accuracy: 0.97" in text
+    assert 'Model: "seq"' in text and "\x1b" not in text and "UserWarning" not in text
+    assert "![[lab-cell1-3.png]]" in text
+    assert (Path(CONFIG.vault_path) / "Inbox/Images/lab-cell1-3.png").read_bytes() == b"png"
+    assert "... (15 more lines)" in text and "\n24\n" in text and "\n25\n" not in text
+    assert "boom" not in text and "<Figure>" not in text
+
+
 def test_unknown_provider_raises(tmp_vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "pdf_provider", "bogus")
     tmp_vault.note("paper.pdf", "x")
@@ -2018,8 +2152,10 @@ def test_doc_citation_ignores_reference_section_dois(tmp_path):
 
 def test_contents_heading_is_boilerplate():
     for h in ("## Contents", "# Table of Contents", "## TABLE OF CONTENTS",
-              "## Indice", "## 1. Contents"):
+              "## Indice", "## 1. Contents", "## Index", "# Indice analitico"):
         assert conv._section_kind(h + "\n\n1 Intro 1\n2 Method 2") == "boilerplate", h
+    # a chapter about indexes is content
+    assert conv._section_kind("## Indexes and B-trees\n\nbody") == ""
 
 
 def test_venue_checklist_item_is_boilerplate_by_body():

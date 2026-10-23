@@ -117,6 +117,38 @@ def test_select_edges_filters_and_caps_per_target():
     ]
 
 
+def test_the_lead_the_spine_keeps_is_never_the_sources_frontmatter():
+    """A converted syllabus opens on its date/source_file block and a table;
+    the block became a second frontmatter in the spine note's body."""
+    src = ('---\ndate: 2024-09-08\nsource_file: "scheda.pdf"\n---\n\n'
+           "| CFU | 9 |\n| --- | --- |\n\n## Programma\n\nModelli lineari.\n")
+    outline = ol.Outline(lesson_title="", spine=["Programma"],
+                         ideas=[ol.Idea(title="Programma", section="Programma", claim="c")])
+    lead, texts = ol.partition_bodies(outline, src)
+    assert lead.startswith("| CFU | 9 |") and "source_file" not in lead
+    assert "Modelli lineari." in texts["Programma"]
+
+
+def test_the_spine_drops_a_decks_cover_but_keeps_real_lead_text():
+    lead = "Giosuè Lo Bosco\ngiosue.lobosco@unipa.it\n\nLezione 13\n\nUna premessa vera sul corso."
+    assert ol._strip_byline(lead, "Lezione 13") == "Una premessa vera sul corso."
+    assert ol._strip_byline("Scrivete a: info@x.it per dubbi.", "L") == ""   # an email line goes
+    assert ol._strip_byline("Nota: il margine conta.\nLezione 2", "Lezione 13") == "Nota: il margine conta.\nLezione 2"
+
+
+def test_select_edges_caps_what_one_idea_sends_into_the_vault():
+    """A study guide's "Otto concetti fondamentali" sent "applies this" to 12
+    of the owner's notes; an idea is a dependency of three notes at most, and
+    its edges to new ideas of the same outline do not count."""
+    why = "una frase abbastanza lunga da contare"
+    existing = {f"N{i}": f"T/N{i}.md" for i in range(6)}
+    raw = [{"from": "Otto concetti", "to": f"N{i}", "relation": "applies", "why": why} for i in range(6)]
+    raw.append({"from": "Otto concetti", "to": "Iperpiano", "relation": "defines", "why": why})
+    kept = ol.select_edges(raw, ideas={"Otto concetti", "Iperpiano"}, existing=existing)
+    assert [(e["to"], bool(e.get("intra"))) for e in kept] == [
+        ("N0", False), ("N1", False), ("N2", False), ("Iperpiano", True)]
+
+
 def test_select_edges_keeps_an_edge_between_two_new_ideas_as_intra():
     # Stage B kept proposing new -> new edges whatever the prompt said (24 of
     # 79 proposals dropped in one run, 2026-09-05): "SVD -> Riduzione della
@@ -277,6 +309,37 @@ def test_vault_outline_reads_claims_and_skips_spines(tmp_vault):
     assert by["Margine"]["lesson"] == "Lezione 10"
     assert by["Kernel"]["claim"].startswith("Un kernel e' un prodotto interno")
     assert by["Margine"]["path"] == "ML/Margine.md"
+
+
+def test_past_the_cap_stage_b_sees_the_notes_nearest_the_chunk(tmp_vault, monkeypatch):
+    """A cut by name hid every note past "P" of a 746-note course folder from
+    the textbook's stage B, so it wrote "LSTM" beside "Reti LSTM" (2026-10-23)."""
+    import silica.agent.providers as providers
+    import silica.kernel.recall.embed as embed
+
+    for t in ("Apprendimento", "Kernel", "Reti LSTM", "Rete ricorrente"):
+        tmp_vault.note(f"ML/{t}.md", f"# {t}\n\ncorpo\n")
+    near = {"ML/Reti LSTM": {"lstm": 0.9}, "ML/Rete ricorrente": {"rnn": 0.8}, "ML/Kernel": {"lstm": 0.1}}
+
+    class Store:
+        def __len__(self):
+            return 4
+
+        def cosine_top_k(self, vec, k=5, allow=None):
+            return [{"path": p, "score": s.get(vec, 0.0)} for p, s in near.items() if p in allow][:k]
+
+    class Embedder:
+        def embed(self, texts, *, query=False):
+            return ["lstm" if "LSTM" in t else "rnn" for t in texts]
+
+    monkeypatch.setattr(ol, "MAX_OUTLINE_ROWS", 2)
+    monkeypatch.setattr(embed, "get_store", lambda: Store())
+    monkeypatch.setattr(providers, "get_embedder_or_none", lambda *a, **kw: Embedder())
+    chunk = "## 10.10 The Long Short-Term Memory (LSTM)\n\ntesto\n\n## 10.2 Recurrent Neural Networks\n\ntesto\n"
+    assert [r["title"] for r in ol.vault_outline("ML", query=chunk)] == ["Rete ricorrente", "Reti LSTM"]
+    # nothing to rank by: the first rows by name, as before
+    monkeypatch.setattr(providers, "get_embedder_or_none", lambda *a, **kw: None)
+    assert [r["title"] for r in ol.vault_outline("ML", query=chunk)] == ["Apprendimento", "Kernel"]
 
 
 def test_run_outliner_call_plan_and_result_shape():
@@ -597,6 +660,44 @@ def test_verbatim_bodies_partition_the_source_with_no_bodies_or_gap_call(monkeyp
     assert "9 CFU" not in body["Lezione 11"]                       # apparatus before the first idea does not
     excerpt = {c["name"]: c["inbox_excerpt"] for c in res["concepts"]}
     assert "Si incorporano i vincoli" in excerpt["Errore del percettrone online"]
+
+
+def test_a_vault_that_translates_has_the_bodies_written_not_looked_up(tmp_vault, monkeypatch):
+    """An English textbook in an Italian vault: a looked-up body stayed English
+    under an Italian title, so translation intent brings the bodies stage back."""
+    from silica.kernel.vault_manifest import reset_manifest_cache
+
+    monkeypatch.setenv("SILICA_OUTLINE_BODIES", "verbatim")
+    tmp_vault.note("vault.yaml", "conventions:\n  language: Italian\n")
+    reset_manifest_cache()
+    english = "## Dropout\n\nDropout trains the ensemble of all the sub-networks that can be formed.\n"
+    assert ol.translates(english) is True
+    assert ol.translates("## Dropout\n\nIl dropout addestra l'insieme delle sottoreti che si possono formare.\n") is False
+    tmp_vault.note("vault.yaml", "conventions:\n  language: it\n")
+    reset_manifest_cache()
+    assert ol.translates("## Dropout\n\nIl dropout addestra l'insieme delle sottoreti.\n") is False
+    # the bodies stage runs, and is told to translate: "in Italian" beside
+    # "copied from the source" read as copy (DeepSeek kept the English)
+    tmp_vault.note("vault.yaml", "conventions:\n  language: Italian\n")
+    reset_manifest_cache()
+    seen: list[str] = []
+
+    def ask(system, user, *, max_tokens, **kw):
+        seen.append(system)
+        if system.startswith(ol.STAGE_A_TAG):
+            return {"lesson_title": "Dropout", "spine": ["Dropout come bagging"],
+                    "ideas": [{"title": "Dropout come bagging", "section": "Dropout", "claim": "Il dropout approssima il bagging."}]}
+        if system.startswith(ol.STAGE_BODIES_TAG):
+            return {"bodies": {"Dropout come bagging": "Il dropout addestra l'insieme delle sottoreti."}}
+        return {"edges": [], "ideas": [], "skips": []}
+
+    ol.run_outliner(source_text=english, source_basename="dl.md", target="T", hub="H",
+                    language="Italian", vault_outline=[], ask=ask)
+    bodies = [s for s in seen if s.startswith(ol.STAGE_BODIES_TAG)]
+    assert bodies and "translate its sentences into Italian" in bodies[0]
+    tmp_vault.note("vault.yaml", "write_dir: \"\"\n")
+    reset_manifest_cache()
+    assert ol.translates(english) is False  # no declared language: follow the source
 
 
 def test_heading_for_takes_a_paraphrase_but_not_a_generic_heading():

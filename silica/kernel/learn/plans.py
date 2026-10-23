@@ -59,18 +59,17 @@ def list_plans() -> list[dict]:
     ponytail: scans every note's frontmatter on request; index it when the
     vault passes 5k notes.
     """
-    from silica.kernel.report.learner import _notes_meta
-    from silica.kernel.write import frontmatter
+    from silica.kernel.report.learner import _notes_meta, parsed_note
 
     vault = _vault()
     out = []
     for path in _notes_meta(vault):
+        parsed = parsed_note(vault, path)
+        if parsed is None or not is_plan(parsed[0]):
+            continue
         try:
             text = (vault / path).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            continue
-        data, _raw, body = frontmatter.split(text)
-        if not is_plan(data):
             continue
         out.append(read_plan(path, text))
     return out
@@ -184,10 +183,24 @@ def _session_id(line: str) -> str:
 # ---------------------------------------------------------------- scope resolution
 
 def resolve_title(name: str, notes: dict | None = None) -> str | None:
-    """A wikilink target to a vault path, by exact path, then by stem."""
+    """A wikilink target to a vault path, by exact path, then by stem. A
+    merge loser resolves to the note it points at: a dedup pass made
+    "Retropropagazione" a loser of "Backpropagation", and a syllabus that
+    names retropropagazione called it not in the vault (2026-10-23)."""
     from silica.kernel.report.learner import _notes_meta
 
     notes = notes if notes is not None else _notes_meta(_vault())
+    hit = _by_name(name, notes)
+    for _hop in range(3):   # a chain of merges, never a loop
+        winner = hit and notes[hit].get("winner")
+        nxt = _by_name(winner, notes) if winner else None
+        if not nxt or nxt == hit:
+            break
+        hit = nxt
+    return hit
+
+
+def _by_name(name: str, notes: dict) -> str | None:
     name = name.strip()
     cand = name if name.endswith(".md") else name + ".md"
     if cand in notes:
@@ -395,17 +408,26 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
     path = None if "\n" in target else resolve_title(target, notes)
     if path:
         _d, _r, body = frontmatter.split((_vault() / path).read_text(encoding="utf-8"))
-        lines = [s["text"] for s in parse_steps(body)] or [
-            ln.strip("-* ").strip() for ln in body.splitlines()
-            if ln.strip().startswith(("-", "*", "1", "2", "3", "4", "5", "6", "7", "8", "9")) and len(ln.strip()) > 3
-        ]
+        lines = [s["text"] for s in parse_steps(body)] or reference_lines(body)
     else:
         lines = [ln.strip("-* ").strip() for ln in re.split(r"[\n;]", target) if ln.strip()]
     tree, paths, gaps = [], [], []
     for i, text in enumerate(lines):
-        how, doubt = "", False
+        how, doubt, missing, approx = "", False, [], []
         found = [p for p in (resolve_title(w, notes) for w in _WIKILINK_RE.findall(text)) if p]
-        if found:
+        topics = _topics(text)
+        if topics:
+            # every topic, linked or not: the autolinker links two of eight
+            # topics in a syllabus row, and "by link" read only those two
+            hits = topic_hits(topics, notes, allowed)
+            more = list(dict.fromkeys(p for p, _how in hits.values() if p))
+            missing = [t for t, (p, _how) in hits.items() if not p]
+            # a note met by meaning only is the one the reader should check
+            approx = [p for p, how_ in hits.values() if p and how_ == "meaning"]
+            found = list(dict.fromkeys(more + found))  # the syllabus's order first
+            how = f"{len(topics) - len(missing)} of {len(topics)} topics"
+            doubt = len(missing) * 2 > len(topics)
+        elif found:
             how = "by link"
         else:
             plain = _WIKILINK_RE.sub(r"\1", text).split(":", 1)[0].strip()
@@ -416,6 +438,10 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
                 found, how, doubt = _search_notes(plain, notes, explain=True)
         found = [p for p in found if p in allowed]
         node = {"node": _WIKILINK_RE.sub(r"\1", text).split(":", 1)[0].strip(), "children": [], "text": text}
+        if missing:
+            node["missing"] = missing
+        if approx:
+            node["approx"] = approx
         # by index from the form, by its text from the plan note (`refused:`)
         if refused and (i in refused or text in refused):
             node.update(leaves=[], gap=True, refused=len(found), how="refused")
@@ -428,6 +454,327 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
             paths += [p for p in found if p not in paths]
         tree.append(node)
     return {"paths": paths, "tree": tree, "gaps": gaps, "steps": lines}
+
+
+# A syllabus names its topics in one line per block ("Modelli lineari:
+# regressione lineare multipla, analisi discriminante ..., lasso."), and the
+# whole line used to match at most two notes by its longest words.
+_TOPIC_SPLIT_RE = re.compile(r"\s*[,;]\s*")
+_PROGRAMME_RE = re.compile(r"^\W*(programma|programme|program|syllabus|contenuti|argomenti"
+                           r"|course content|topics)\W*$", re.IGNORECASE)
+_TABLE_RULE_RE = re.compile(r"^\|[\s:|-]+\|?$")
+_CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
+
+
+def reference_lines(body: str) -> list[str]:
+    """The lines of a reference note to plan from: list items and table rows,
+    after a "Programma" marker when the note has one.
+
+    A syllabus converted from a PDF is tables: the official one this was
+    written against held its programme as `| 8 | Modelli lineari: ... |` rows
+    under a bare PROGRAMMA line, after tables of department, credits and
+    office hours, and only `-`/`*`/digit lines were read, so it gave nothing.
+    A row stands for its longest cell; a table's header row is skipped.
+    """
+    rows = body.splitlines()
+    start = next((i + 1 for i, ln in enumerate(rows) if _PROGRAMME_RE.match(ln.strip())), 0)
+    out: list[str] = []
+    for i in range(start, len(rows)):
+        ln = rows[i].strip()
+        if ln.startswith("|"):
+            if _TABLE_RULE_RE.match(ln):
+                continue
+            if i + 1 < len(rows) and _TABLE_RULE_RE.match(rows[i + 1].strip()):
+                continue  # the header above a |---| rule
+            # A link's alias in a table is `[[A\|a]]`: split on the unescaped
+            # bars only, then read the escaped ones back as the alias bar. The
+            # autolinker writes exactly that into a syllabus's cells.
+            cells = (c.strip().replace("\\|", "|") for c in _CELL_SPLIT_RE.split(ln.strip().strip("|")))
+            cell = max(cells, key=len, default="")
+            if len(cell.split()) >= 2:
+                out.append(cell)
+        elif ln.startswith(("-", "*", "1", "2", "3", "4", "5", "6", "7", "8", "9")) and len(ln) > 3:
+            out.append(ln.strip("-* ").strip())
+    return out
+
+
+def _topics(text: str) -> list[str]:
+    """The topics a step line lists, when it lists two or more: after its
+    label ("Modelli lineari: a, b, c"), split on commas and semicolons."""
+    plain = _WIKILINK_RE.sub(r"\1", text)
+    body = plain.split(":", 1)[1] if ":" in plain else plain
+    parts = [p.strip(" .") for p in _TOPIC_SPLIT_RE.split(body) if p.strip(" .")]
+    return parts if len(parts) >= 2 else []
+
+
+def _topic_notes(topics: list[str], notes: dict, allowed: set[str]) -> tuple[list[str], list[str]]:
+    """(notes covering the topics, topics no note covers), one note per topic
+    (`topic_hits` says how each was found)."""
+    hits = topic_hits(topics, notes, allowed)
+    found = list(dict.fromkeys(p for p, _how in hits.values() if p))
+    return found, [t for t, (p, _how) in hits.items() if not p]
+
+
+# Words a title opens on that say what kind of note it is, not what it is
+# about: "Definizione di kernel" is the note on kernels, and "Kernel CCA" is
+# not (2026-10-23).
+# A syllabus line says the same of a topic: "analisi discriminante lineare",
+# "casi di convoluzione efficiente", "tipi di apprendimento".
+_GENERIC_HEADS = {"definizion", "introduzion", "concett", "definition", "introduction", "concept",
+                  "analis", "cas", "tip", "propriet", "operazion"}
+
+
+def _title_words(stem: str) -> set[str]:
+    """A title's root words as topic matching reads them, less the words that
+    only name the kind of note. Acronyms stay uncounted: counted, "API" made
+    "Keras come API" miss the one-word topic "keras" (2026-10-23)."""
+    return set(_root_words(stem)) - _GENERIC_HEADS
+
+
+def topic_hits(topics: list[str], notes: dict, allowed: set[str]) -> dict[str, tuple[str | None, str]]:
+    """{topic: (note or None, how)} for the topics of one syllabus block. How:
+    "title", "words", the fallback that named it (`_named_otherwise`), or
+    "meaning" for a title vector, the one a reader should check.
+
+    By title, else the note whose name holds most of the topic's content
+    words, more than half of them, then the one adding fewest words of its
+    own: "regressione lineare multipla" is "Regressione lineare", not
+    "Regressione lineare bayesiana", which the shorter path had won from a
+    subfolder (2026-10-23). A shared "analisi" is not a match, and half of two
+    words was one: "noise injection" met "Noise-contrastive estimation"."""
+    # A merge loser's name still says what it is about; the match lands on
+    # its winner ("Set di Validazione" for "validazione", 2026-10-23).
+    losers = {p for p, m in notes.items() if m.get("winner") and resolve_title(p, notes) in allowed}
+    stems = {p: _title_words(Path(p).stem) for p in sorted(allowed | losers)}
+    block = {w for t in topics for w in _root_words(t)}
+    hits: dict[str, tuple[str | None, str]] = {}
+    for t in topics:
+        hit = resolve_title(t, notes)
+        how = "title"
+        if not hit or hit not in allowed:
+            hit, how = None, "words"
+            # each word once: "lineare e non lineare" counted "lineare" twice
+            words = list(dict.fromkeys(w for w in _root_words(t) if w not in _GENERIC_HEADS)) or _root_words(t)
+            # A one-word topic names a thing only by a title holding that word
+            # and nothing the block does not list: "ottimizzazione" met
+            # "Ottimizzazione del codice" and opened the plan on it, and
+            # "architettura" met "Architettura RBFN", while "overfitting" and
+            # "underfitting", listed together, are "Underfitting e overfitting"
+            # (2026-10-23).
+            pool = stems if len(words) > 1 else {p: s for p, s in stems.items() if s and set(words) <= s <= block}
+            # then the fewest words of its own, then a note that defines the
+            # thing ("Definizione di kernel" over "Kernel CCA"), then the shorter
+            ranked = sorted(((sum(1 for w in words if w in s), -len(s - set(words)),
+                              bool(set(_root_words(Path(p).stem)) & _GENERIC_HEADS), -len(Path(p).stem), p)
+                             for p, s in pool.items()), reverse=True)
+            got, best = (ranked[0][0], ranked[0][4]) if ranked else (0, None)
+            best = _translating(words, [r[4] for r in ranked if r[0] == got][:8], stems) if best else best
+            # the joined form of "ada-boost" is a spelling of its words, not one more
+            base = len({_root(w) for w in _content_words(t)} - _GENERIC_HEADS)
+            # A topic of one or two words is not a note that adds two of its
+            # own: "algoritmi di apprendimento" is no "Algoritmi con tassi di
+            # apprendimento adattivi" (2026-10-23).
+            narrower = best and base <= 2 and len(stems[best] - set(words)) >= 2
+            if best and got and got * 2 > (base or len(words)) and not narrower:
+                hit = resolve_title(best, notes) if best in losers else best
+            if not hit:
+                hit, how = _named_otherwise(t, notes, allowed)
+        hits[t] = (hit, how)
+    # Past the words, the meaning: a textbook translated into Italian named
+    # its notes "Iniezione di rumore negli input" and "Architettura
+    # encoder-decoder" for a syllabus that says "noise injection" and
+    # "architetture codificatore-decodificatore", and the plan called both not
+    # in the vault (2026-10-23). Topics of two words or more only: a lone
+    # "architettura" met "Diversità architetturale" at 0.80, as near as the
+    # right answers were.
+    near = _by_title_vector([t for t, (p, _h) in hits.items() if not p and len(_root_words(t)) > 1], allowed)
+    for t, p in _translated(near).items():
+        hits[t] = (p, "meaning")
+    return hits
+
+
+def _translating(words: list[str], tied: list[str], stems: dict[str, set[str]]) -> str:
+    """Among titles holding as many of the topic's words, the first that
+    holds, in its own words, a translation of the ones it misses: "Definizione
+    di reti convolutive" missed "retropropagazione", which "Backpropagation
+    nelle reti convolutive" translates (2026-10-23). The first title when none
+    does, or with no embedder to tell."""
+    best = tied[0]
+    missed = " ".join(w for w in words if w not in stems[best])
+    others = [p for p in tied[1:] if stems[p] - set(words)]
+    if not missed or not others:
+        return best
+    try:
+        import numpy as np
+
+        from silica.agent.providers import get_embedder_or_none
+        from silica.config import CONFIG
+
+        embedder = get_embedder_or_none(CONFIG, "plan topics", level="info")
+        if embedder is None:
+            return best
+        vecs = embedder.embed([missed] + [" ".join(sorted(stems[p] - set(words))) for p in others])
+        x = np.asarray(vecs[0], float)
+        for p, v in zip(others, vecs[1:]):
+            y = np.asarray(v, float)
+            if float(x @ y / (np.linalg.norm(x) * np.linalg.norm(y) or 1.0)) >= TRANSLATED_PARTS:
+                return p
+    except Exception as exc:  # noqa: BLE001
+        # No embedder: the title with fewest words of its own stands, as before.
+        logger.info("plan topics: translation check skipped (%s)", exc)
+    return best
+
+
+# A title vector near a topic because of one shared word is a sibling, not the
+# thing: "percettrone multistrato" met "Algoritmo del percettrone" and
+# "apprendimento hebbiano" met "Apprendimento artificiale" (0.81 and 0.83,
+# 2026-10-23). What tells a translation from a sibling is the words the two do
+# not share: measured, translated parts scored 0.61 to 0.94 (autocodificatori
+# and autoencoder, data and dataset) and sibling parts 0.26 to 0.38 (multistrato
+# and algoritmo, hebbiano and artificiale).
+TRANSLATED_PARTS = 0.5
+
+
+def _translated(near: dict[str, str]) -> dict[str, str]:
+    """The title-vector matches that survive the sibling check: none shared
+    word, or the parts each side does not share read as one another."""
+    todo: list[tuple[str, str, str]] = []
+    out: dict[str, str] = {}
+    for t, p in near.items():
+        tw, hw = set(_root_words(t)) - _GENERIC_HEADS, _title_words(Path(p).stem)
+        only_t, only_h = tw - hw, hw - tw
+        if not (tw & hw) or not only_t or not only_h:
+            out[t] = p           # a pure translation, or one side covering the other
+            continue
+        todo.append((t, " ".join(sorted(only_t)), " ".join(sorted(only_h))))
+    if not todo:
+        return out
+    try:
+        import numpy as np
+
+        from silica.agent.providers import get_embedder_or_none
+        from silica.config import CONFIG
+
+        embedder = get_embedder_or_none(CONFIG, "plan topics", level="info")
+        if embedder is None:
+            return out
+        vecs = embedder.embed([a for _t, a, _b in todo] + [b for _t, _a, b in todo])
+        n = len(todo)
+        for i, (t, _a, _b) in enumerate(todo):
+            x, y = np.asarray(vecs[i], float), np.asarray(vecs[n + i], float)
+            if float(x @ y / (np.linalg.norm(x) * np.linalg.norm(y) or 1.0)) >= TRANSLATED_PARTS:
+                out[t] = near[t]
+    except Exception as exc:  # noqa: BLE001
+        # No embedder for the check: the doubtful matches are dropped, never
+        # linked unchecked.
+        logger.info("plan topics: sibling check skipped (%s)", exc)
+    return out
+
+
+# A plan's link is read as "this note covers the topic", with no judge after
+# it, so the dedup title band (0.709 on jina-v5-small) is too low a bar: on 12
+# topics of a course syllabus it let in "Output strutturati" for "funzioni
+# kernel per dati strutturati" (0.729) and a general schema for "schemi
+# codificatore/decodificatore" (0.712), while the 8 right notes scored 0.760
+# to 0.883 (2026-10-23). An embedder whose band is higher keeps its own.
+PLAN_TITLE_FLOOR = 0.75
+
+
+def _by_title_vector(topics: list[str], allowed: set[str]) -> dict[str, str]:
+    """{topic: note} for each topic whose name sits within the title band
+    (CONFIG.sim_title_threshold, at least PLAN_TITLE_FLOOR) of an allowed
+    note's title vector. The topic is embedded as the index embeds a title,
+    under the folder most of the notes share, so the band compares like with
+    like. {} without an embedder or an index."""
+    if not topics or not allowed:
+        return {}
+    try:
+        from collections import Counter
+
+        from silica.agent.providers import get_embedder_or_none
+        from silica.config import CONFIG
+        from silica.kernel.recall.embed import _note_title_text, get_store
+
+        store = get_store()
+        embedder = get_embedder_or_none(CONFIG, "plan topics", level="info") if len(store) else None
+        if embedder is None:
+            return {}
+        keys = {p.removesuffix(".md"): p for p in allowed}
+        outside = {p for p in store.paths() if p not in keys}
+        folder = Counter(p.rsplit("/", 1)[0] for p in keys if "/" in p).most_common(1)
+        texts = [_note_title_text(t, folder=folder[0][0] if folder else "") for t in topics]
+        out: dict[str, str] = {}
+        for t, vec in zip(topics, embedder.embed(texts)):
+            hit = store.title_cosine_top_k(vec, k=1, exclude=outside)
+            if hit and hit[0]["path"] in keys and hit[0]["score"] >= max(CONFIG.sim_title_threshold, PLAN_TITLE_FLOOR):
+                out[t] = keys[hit[0]["path"]]
+    except Exception as exc:  # noqa: BLE001
+        # No index or no embedder: the topics stay not in the vault, which is
+        # what their words said.
+        logger.info("plan topics: no title-vector match (%s)", exc)
+        return {}
+    return out
+
+
+# A topic's letters in a title: "learning vector quantization" is the note
+# "LVQ come estensione supervisionata" (2026-10-23).
+_ACRONYM_SPAN = (2, 4)
+_SEGMENT_SLUG_RE = re.compile(r"-\d+(?:-\d+)*-([a-z][a-z0-9-]*)$")
+
+
+def _named_otherwise(topic: str, notes: dict, allowed: set[str]) -> tuple[str | None, str]:
+    """(the note a topic names in a way its title's words do not show, which
+    way), or (None, "").
+
+    In this order, each a thing the notes already carry, measured on a course
+    syllabus whose plan called these not in the vault (2026-10-23):
+    - an alias, as merges record them on the winner ("Classificazione
+      one-class" on One-class classification);
+    - a gloss in brackets: "stride" is "Convoluzione con passo (stride)";
+    - the initials of two to four of its words as a title's word, the title
+      opening on it first: "reti self organizing map" is "SOM e topologia";
+    - a textbook segment's spine whose section title is the topic: "dropout"
+      is the spine of 7.12, "Goodfellow-20-7-12-dropout", whose ideas are the
+      dropout notes.
+    """
+    key = " ".join(_root_words(topic))
+    low = topic.strip().casefold()
+    if not key:
+        return None, ""
+    for p in sorted(allowed, key=len):
+        if any(" ".join(_root_words(a)) == key for a in notes.get(p, {}).get("aliases", ())):
+            return p, "alias"
+    for p in sorted(allowed, key=len):
+        if f"({low})" in Path(p).stem.casefold():
+            return p, "gloss"
+    # by length, not a stopword list: "self" is an English stopword and the S of SOM
+    words = [w for w in re.findall(r"[^\W\d_]+", low) if len(w) > 2]
+    initials = {"".join(w[0] for w in words[i:i + n])
+                for n in range(_ACRONYM_SPAN[0], _ACRONYM_SPAN[1] + 1) for i in range(len(words) - n + 1)}
+    acr = []
+    for p in allowed:
+        toks = re.findall(r"[a-z]+", Path(p).stem.casefold())
+        if any(len(t) >= 3 and t in initials for t in toks):
+            acr.append((0 if toks[0] in initials else 1, len(p), p))
+    if acr:
+        return min(acr)[2], "initials"
+    for p in sorted(allowed, key=len):
+        m = notes.get(p, {}).get("spine") and _SEGMENT_SLUG_RE.search(Path(p).stem.casefold())
+        if m and " ".join(_root_words(m.group(1).replace("-", " "))) == key:
+            return p, "segment"
+    return None, ""
+
+
+def _root_words(text: str) -> list[str]:
+    """Content words without their last vowel, so an Italian plural meets its
+    singular: "reti neurali" and "Rete neurale" share both words."""
+    # "ada-boost" in a syllabus is the note "AdaBoost": the joined form too
+    joined = [re.sub(r"[-\s]", "", m).casefold() for m in re.findall(r"\b\w+-\w+\b", text)]
+    return [_root(w) for w in _content_words(text) + joined]
+
+
+def _root(word: str) -> str:
+    return word[:-1] if len(word) >= 4 and word[-1] in "aeiouàèéìòù" else word
 
 
 def _content_words(text: str) -> list[str]:
@@ -480,20 +827,26 @@ def _search_notes(text: str, notes: dict, k: int = 2, explain: bool = False):
         return ([], "", False) if explain else []
 
 
-def scope_of(plan: dict) -> dict:
+def scope_of(plan: dict, notes: dict | None = None) -> dict:
     """The paths a plan covers now, its frontier and its revisit queue.
     A steps plan's scope is its steps' notes plus the tree's; the frontier
-    is the first unpassed step, else the notes furthest below reach."""
+    is the first unpassed step, else the notes furthest below reach.
+
+    The vault's notes are read once and handed to every title lookup: each
+    lookup used to read them itself, a vault walk per note, and a plan of 16
+    syllabus steps over 60 notes took 56 s to open (2026-10-23, profiled)."""
+    from silica.kernel.report.learner import _notes_meta
+
+    notes = notes if notes is not None else _notes_meta(_vault())
     if plan["scope"] == "steps":
-        notes_meta = None
         paths: list[str] = []
         for s in plan["steps"]:
             for n in s["notes"]:
-                p = resolve_title(n, notes_meta)
+                p = resolve_title(n, notes)
                 if p and p not in paths:
                     paths.append(p)
         for n in plan["tree_links"]:
-            p = resolve_title(n)
+            p = resolve_title(n, notes)
             if p and p not in paths:
                 paths.append(p)
         if not paths and plan["target"]:
@@ -503,8 +856,8 @@ def scope_of(plan: dict) -> dict:
         if plan["scope"] == "notes":
             target = notes_of(target) or plan["tree_links"]
         paths = resolve_scope(plan["scope"], target, restrict=plan.get("restrict", ""))["paths"]
-    frontier = frontier_of(plan, paths)
-    revisit = [p for p in (resolve_title(n) for n in plan["revisit"]) if p]
+    frontier = frontier_of(plan, paths, notes=notes)
+    revisit = [p for p in (resolve_title(n, notes) for n in plan["revisit"]) if p]
     return {"paths": paths, "frontier": frontier, "revisit": revisit}
 
 
@@ -526,16 +879,17 @@ def planned_paths() -> set[str] | None:
     return out
 
 
-def frontier_of(plan: dict, paths: list[str], entries: list[dict] | None = None) -> list[str]:
+def frontier_of(plan: dict, paths: list[str], entries: list[dict] | None = None,
+                notes: dict | None = None) -> list[str]:
     """Where the plan resumes (D24): the first unpassed step's notes when it
     has steps, else the scoped notes with the fewest objectives met."""
     from silica.kernel.learn import mastery
 
     if plan["steps"]:
-        passed = mastery.steps_passed(plan, entries)
+        passed = mastery.steps_passed(plan, entries, notes=notes)
         for s, ok in zip(plan["steps"], passed):
             if not ok:
-                found = [p for p in (resolve_title(n) for n in s["notes"]) if p]
+                found = [p for p in (resolve_title(n, notes) for n in s["notes"]) if p]
                 if found:
                     return found
         return []
@@ -610,10 +964,23 @@ def cycles_among(paths: list[str]) -> list[list[str]]:
     return out
 
 
-def pace_of(plan: dict, below: int, n_default: int = 8) -> dict | None:
-    """Workload arithmetic for a deadline (D24): notes below reach per day
-    left, never a promise, never a division by zero."""
-    from datetime import date
+# Answers a note needs by the date: a simulation of the dated picker gave 2.4
+# to 2.8 attempts per note by an 18-day exam (research report
+# study-plans-and-deadline-scheduling, section 3). "See every note once" said a
+# third of the work. Reopen at 20 completed dated plans or 2027-03-31, with
+# FINAL_DAYS.
+ATTEMPTS_PER_NOTE = 2.5
+RECENT_PACE_DAYS = 7    # the reader's own pace: answers a day over the last week
+
+
+def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | None = None) -> dict | None:
+    """Workload arithmetic for a deadline (D24): the answers a day the notes
+    below reach need before the final pass (pick.FINAL_DAYS), set against the
+    reader's own answers a day lately. Never a promise, never a division by zero."""
+    import math
+    from datetime import date, datetime, timedelta, timezone
+
+    from silica.kernel.learn.pick import FINAL_DAYS
 
     if not plan.get("by"):
         return None
@@ -625,11 +992,172 @@ def pace_of(plan: dict, below: int, n_default: int = 8) -> dict | None:
     if days_left == 0:
         return {"days_left": 0, "per_day": below, "below": below,
                 "say": f"The date has arrived; {below} note(s) remaining below the target."}
-    per_day = -(-below // days_left)  # ceil
+    study_days = max(1, days_left - FINAL_DAYS)
+    answers = math.ceil(below * ATTEMPTS_PER_NOTE)
+    per_day = -(-answers // study_days)  # ceil
     size = max(1, min(24, per_day)) if below else n_default
+    since = (datetime.now(timezone.utc) - timedelta(days=RECENT_PACE_DAYS)).isoformat()
+    recent = sum(1 for e in (entries or []) if str(e.get("ts") or "") >= since) / RECENT_PACE_DAYS
+    final = f", then {FINAL_DAYS} days of review" if days_left > FINAL_DAYS else ""
+    lately = (f" Lately you answer about {recent:.0f} a day." if entries is not None and recent >= 0.5
+              else " You have not answered yet this week." if entries is not None else "")
     return {"days_left": days_left, "per_day": per_day, "below": below, "session": size,
-            "say": (f"About {per_day} note(s) a day for {days_left} day(s) to see every note once "
-                    f"at the target; a session of {size} covers that. Repeated attempts take more.")}
+            "answers": answers, "recent_per_day": round(recent, 1),
+            "say": (f"About {per_day} answers a day for {study_days} day(s){final}: {below} note(s) at about "
+                    f"{ATTEMPTS_PER_NOTE:g} answers each to hold them at the date; a session of {size} covers a "
+                    f"day.{lately}")}
+
+
+# The calendar a plan with a date implies, written by code. Asked for a study
+# plan, the local 9B dated it "about 17 weeks" and numbered its lessons at
+# random (2026-10-23), and the research behind Learn's plans says a calendar
+# is arithmetic a language model should not do (GPT-4 solved 0.6% of
+# TravelPlanner; docs research report study-plans-and-deadline-scheduling).
+def day_by_day(plan: dict, today=None) -> list[dict] | None:
+    """[{day, steps: [(label, notes)]}] from today to the plan's date: the
+    steps in their order over the days before the final pass, each given days
+    in proportion to its notes (a step with none counts one), then the
+    pick.FINAL_DAYS days of review and the date itself. None without a date
+    or a step."""
+    from datetime import date, timedelta
+
+    from silica.kernel.learn.pick import FINAL_DAYS
+
+    steps = plan.get("steps") or []
+    if not plan.get("by") or not steps:
+        return None
+    try:
+        by = date.fromisoformat(str(plan["by"])[:10])
+    except ValueError:
+        return None
+    today = today or date.today()
+    days = (by - today).days
+    if days <= 0:
+        return None
+    study = max(1, days - FINAL_DAYS) if days > FINAL_DAYS else days
+    weights = [max(1, len(s.get("notes") or [])) for s in steps]
+    total = sum(weights)
+    rows = [{"day": (today + timedelta(days=k)).isoformat(), "steps": []} for k in range(study)]
+    done = 0
+    for step, w in zip(steps, weights):
+        start, end = done / total * study, (done + w) / total * study
+        done += w
+        first, last = int(start), max(int(start), min(study - 1, int(end - 1e-9)))
+        span = range(first, last + 1)
+        notes = list(step.get("notes") or [])
+        share = -(-len(notes) // len(span)) if notes else 0
+        label = _step_label(step)
+        for i, k in enumerate(span):
+            rows[k]["steps"].append((label, notes[i * share:(i + 1) * share] if share else []))
+    for k in range(study, days):
+        rows.append({"day": (today + timedelta(days=k)).isoformat(), "steps": [("Review: the notes Learn shows due", [])]})
+    rows.append({"day": by.isoformat(), "steps": [("Exam", [])]})
+    return rows
+
+
+def _step_label(step: dict) -> str:
+    """A step's name: its label before the colon, or its notes when it has none."""
+    text = _WIKILINK_RE.sub(r"\1", step.get("text") or "")
+    head = text.split(":", 1)[0].strip() if ":" in text else text.strip()
+    return re.sub(r"\s*\(≈\)", "", head)[:90] or ", ".join(step.get("notes") or [])[:90]
+
+
+def day_by_day_table(rows: list[dict]) -> str:
+    """The calendar as a Markdown table, three notes named a day at most."""
+    out = ["| Day | Step | Notes |", "|---|---|---|"]
+    for r in rows:
+        for label, notes in r["steps"]:
+            named = ", ".join(f"[[{n}]]" for n in notes[:3]) + (f" and {len(notes) - 3} more" if len(notes) > 3 else "")
+            out.append(f"| {r['day']} | {label.replace('|', '/')} | {named} |")
+    return "\n".join(out)
+
+
+# The syllabus topics the lecture decks never mention: what a course asks and
+# its slides leave to the book or the guide. Read off the decks' own text,
+# because asked which topics the slides miss, the local 9B confused "in the
+# vault" with "in the slides" and listed half the programme (2026-10-23).
+# shortcut: a lesson outline is found by a lesson word at the head of its
+# title (Lezione, Lecture, Lesson, Slide); a course whose decks are named
+# otherwise gets no check. Upgrade: mark a deck as a lecture when it is
+# nucleated, and read that mark here.
+_LESSON_TITLE_RE = re.compile(r"^(?:lezione|lez\.|lecture|lesson|slides?)\b", re.I)
+
+
+GAP_SHARE = 2 / 3      # of a topic's words one deck must hold: "le operazioni di convoluzione" is held without "operazioni"
+GAP_MAX_WORDS = 6      # a longer line is an activity ("Applicazione dei modelli ... su dataset reali"), not a topic
+GAP_GLUED = 16         # a root this long is a conversion's glued line ("Introduzionealcorso", 17), unreadable; "regolarizzazione" roots to 15
+
+
+def _gap_roots(text: str) -> set[str]:
+    """Root words, an English plural folded too: "kernel tricks" is held by a
+    deck that says "kernel trick"."""
+    return {w[:-1] if len(w) > 4 and w.endswith("s") else w for w in _root_words(text)}
+
+
+_GAPS_CACHE: dict[tuple, tuple[list[str], int] | None] = {}
+
+
+def lecture_gaps(plan: dict, notes: dict | None = None) -> tuple[list[str], int] | None:
+    """(the topics of the plan's syllabus whose words no lecture deck holds,
+    the decks read), or None when the plan has no syllabus or no deck. A topic
+    is held when one deck holds GAP_SHARE of its words (all of them for one or
+    two), read as roots so a plural meets its singular; activity lines and
+    glued lines are not judged."""
+    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.write import frontmatter
+
+    # 5.6 s on the course's 32 decks, most of it the title vectors: once per
+    # plan note as written, since its syllabus and its folder are the input
+    try:
+        key = (plan.get("path"), (_vault() / plan["path"]).stat().st_mtime_ns)
+    except (KeyError, TypeError, OSError):
+        key = None
+    if key and key in _GAPS_CACHE:
+        return _GAPS_CACHE[key]
+    notes = notes if notes is not None else _notes_meta(_vault())
+    ref = resolve_title(plan.get("target") or "", notes) if plan.get("scope") == "steps" else None
+    if not ref:
+        return None
+    _d, _r, body = frontmatter.split(_read(ref))
+    lines = [s["text"] for s in parse_steps(body)] or reference_lines(body)
+    restrict = (plan.get("restrict") or "").split(RESTRICT_SEP)[0].strip().rstrip("/")
+    decks: list[set[str]] = []
+    for p, meta in notes.items():
+        if not meta.get("spine") or not _LESSON_TITLE_RE.match(Path(p).stem):
+            continue
+        if restrict and not p.startswith(restrict + "/"):
+            continue
+        for link in re.findall(r"\[\[(sources/[^\]|#]+)", _read(p)):
+            try:
+                text = _read(link if link.endswith(".md") else link + ".md")
+            except OSError:
+                continue  # a deck moved or renamed since: one deck fewer to read, not a failed answer
+            decks.append(_gap_roots(text))
+    if not decks:
+        return None
+    def held(words: set[str]) -> bool:
+        need = len(words) if len(words) <= 2 else -(-len(words) * 2 // 3)
+        return any(len(words & d) >= need for d in decks)
+
+    misses = []
+    for line in lines:
+        for topic in _topics(line) or [_WIKILINK_RE.sub(r"\1", line).split(":", 1)[-1].strip(" .")]:
+            words = _gap_roots(topic)
+            if not words or len(words) > GAP_MAX_WORDS or any(len(w) >= GAP_GLUED for w in words):
+                continue
+            if not held(words):
+                misses.append(topic)
+    # The syllabus is in Italian and the slides often keep the English term
+    # ("autocodificatori" against "autoencoder", "sequence-to-sequence"
+    # against "seq2seq"): a topic the plan matched to a note is held when a
+    # deck holds that note's title, the match having crossed the language.
+    allowed = {p for p in notes if not restrict or p.startswith(restrict + "/")}
+    hits = topic_hits(list(dict.fromkeys(misses)), notes, allowed) if misses else {}
+    gaps = [t for t in misses if not ((hit := hits.get(t, (None, ""))[0]) and held(_gap_roots(Path(hit).stem)))]
+    out = (list(dict.fromkeys(gaps)), len(decks))
+    if key:
+        _GAPS_CACHE[key] = out
+    return out
 
 
 def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None = None) -> dict:
@@ -647,17 +1175,18 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
     view = view if view is not None else learner.view(_entries_override=entries)
     from silica.kernel.learn import objectives as obj
 
-    scoped = scope_of(plan)
+    notes = learner._notes_meta(_vault())  # read once: every title lookup below uses it
+    scoped = scope_of(plan, notes)
     paths = scoped["paths"]
     since = plan.get("created")
     objectives = plan["objectives"]
-    tree_src = _tree_of(plan, paths)
+    tree_src = _tree_of(plan, paths, notes)
     tree = []
     for node in tree_src:
         leaves = node.get("leaves", [])
         tree.append({**node, "readings": mastery.node_readings(leaves, view, entries, since, objectives)})
-    passed = mastery.steps_passed(plan, entries) if plan["steps"] else []
-    steps = [{**s, "passed": ok, "gap": not s["notes"] or all(resolve_title(n) is None for n in s["notes"])}
+    passed = mastery.steps_passed(plan, entries, notes=notes) if plan["steps"] else []
+    steps = [{**s, "passed": ok, "gap": not s["notes"] or all(resolve_title(n, notes) is None for n in s["notes"])}
              for s, ok in zip(plan["steps"], passed)]
     relations = _relations_in(paths, items)
     root = mastery.node_readings(paths, view, entries, since, objectives)
@@ -684,16 +1213,16 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
         "misconceptions": mastery.misconceptions(paths, entries),
         "suggestions": mastery.suggestions(entries, paths),
         "calibration": cal, "grader": mastery.grader_agreement(entries, paths),
-        "pace": pace_of(plan, below), "cycles": cycles_among(paths),
+        "pace": pace_of(plan, below, entries=entries), "cycles": cycles_among(paths),
         "complete": completion(plan, entries, passed, steps),
         "paths": paths, "gaps": [s["text"] for s in steps if s["gap"]],
     }
 
 
-def _tree_of(plan: dict, paths: list[str]) -> list[dict]:
+def _tree_of(plan: dict, paths: list[str], notes: dict | None = None) -> list[dict]:
     if plan["scope"] == "steps":
         return [{"node": _WIKILINK_RE.sub(r"\1", s["text"]).split(":", 1)[0].strip(), "children": [],
-                 "leaves": [p for p in (resolve_title(n) for n in s["notes"]) if p], "gap": not s["notes"]}
+                 "leaves": [p for p in (resolve_title(n, notes) for n in s["notes"]) if p], "gap": not s["notes"]}
                 for s in plan["steps"]] or [{"node": plan["name"], "children": [], "leaves": paths}]
     try:
         target = plan["target"]
@@ -928,16 +1457,27 @@ def _plan_body(name: str, scope: str, target, resolved: dict, chosen: list[str],
         if node.get("gap"):
             lines.append(f"- {label}: not in the vault")
             continue
-        head = f"- [[{Path(label).stem}]]" if scope == "steps" and node.get("leaves") and len(node["leaves"]) == 1 else f"- {label}"
-        lines.append(head)
-        leaves = [f"[[{Path(p).stem}]]" for p in node.get("leaves", []) if not (scope == "steps" and len(node["leaves"]) == 1)]
+        # A step that is its one note shows as the link; any other label stays
+        # text over its notes. Linking the label made "Utilizzo delle librerie
+        # numpy, ..." a link to a note that does not exist (2026-10-23).
+        found = node.get("leaves") or []
+        one = scope == "steps" and len(found) == 1 and Path(found[0]).stem.casefold() == label.casefold()
+        lines.append(f"- [[{Path(found[0]).stem}]]" if one else f"- {label}")
+        leaves = [] if one else [f"[[{Path(p).stem}]]" for p in found]
         if leaves:
             lines.append("  - " + " · ".join(leaves))
     if scope == "steps":
         lines += ["", "## Steps"]
         for node in resolved["tree"]:
+            missing = ", ".join(node.get("missing") or [])
             if node.get("gap"):
-                lines.append(f"- [ ] {node['node']}: not in the vault")
+                lines.append(f"- [ ] {node['node']}: not in the vault" + (f" ({missing})" if missing else ""))
+            elif "missing" in node or str(node.get("how", "")).endswith("topics"):
+                # a syllabus block keeps its name; its topics are the notes,
+                # and what no note covers is said where the step is read
+                links = ", ".join(f"[[{Path(p).stem}]]" + (" (≈)" if p in node.get("approx", ()) else "")
+                                  for p in node["leaves"])
+                lines.append(f"- [ ] {node['node']}: {links}" + (f" · not in the vault: {missing}" if missing else ""))
             else:
                 text = node.get("text", node["node"])
                 links = " ".join(f"[[{Path(p).stem}]]" for p in node["leaves"]) if "[[" not in text else _WIKILINK_RE.sub(lambda m: f"[[{m.group(1)}]]", text.split(":", 1)[0])

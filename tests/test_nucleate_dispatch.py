@@ -691,6 +691,33 @@ def test_an_inbox_folder_leaves_the_images_its_notes_embed_alone(
     assert converted == ["Inbox/ml/shot.png"]
 
 
+def test_a_folder_of_pdfs_converted_beside_them_runs_each_document_once(
+        tmp_vault, monkeypatch, stub_coordinator):
+    """2026-10-23: a course folder held 32 lecture PDFs with the notes an
+    earlier /convert made beside them. Each note was listed twice, in the
+    folder's loose-note unit and in its PDF's own unit; now each lecture is
+    one unit carrying its note, and only the loose notes share one."""
+    import silica.cli as cli_mod
+
+    vault = Path(CONFIG.vault_path)
+    for n in (1, 2):
+        tmp_vault.note(f"Inbox/ml/slides/L{n}.pdf", "%PDF")
+        tmp_vault.note(f"Inbox/ml/slides/L{n}.md",
+                       f'---\nsource_file: "{vault}/Inbox/ml/slides/L{n}.pdf"\n---\n\nbody {n}\n')
+    tmp_vault.note("Inbox/ml/guide.md", "# Guide\n\nmy own guide\n")
+    monkeypatch.setattr("silica.sources.convert.convert",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("re-converted")))
+    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "T")
+
+    _expand_workflow_shortcut("/nucleate Inbox/ml")
+
+    assert [c["inbox_files"] for c in stub_coordinator] == [
+        ["Inbox/ml/guide.md"],
+        ["Inbox/ml/slides/L1.md"],
+        ["Inbox/ml/slides/L2.md"],
+    ]
+
+
 def test_a_gpu_out_of_memory_stops_the_conversions_after_the_first(
         tmp_vault, monkeypatch, stub_coordinator):
     """2026-10-12: with a 9B chat server holding the GPU, MinerU failed with

@@ -571,3 +571,31 @@ def test_graph_explain_never_calls_a_singleton_both_orphan_and_hub(monkeypatch, 
     d = atomic.silica_graph_explain("F")["diagnosis"]
     assert d["is_orphan"] is True
     assert d["is_hub"] is False
+
+
+def test_prerequisites_map_is_kept_while_its_inputs_are(graph_nodes_edges, cooccur_store, monkeypatch, tmp_path):
+    """An edit elsewhere moved the vault epoch and a plan page recomputed an
+    unchanged map, 16 s of its first 34 (2026-10-23): keyed on the links and
+    the index, it is reused, across processes too, and recomputed when a link moves."""
+    from silica.kernel.recall import cooccurrence, graph_export, paths
+    from silica.kernel.report import learner
+    from silica.kernel.report.graph_report import cooccur_delta as cd
+
+    monkeypatch.setattr(cd, "_REFD_MIN_RELATED", 1)
+    monkeypatch.setattr(graph_export, "build_graph_data", lambda: graph_nodes_edges)
+    monkeypatch.setattr(cooccurrence, "get_cooccur_store", lambda **_: cooccur_store)
+    epochs = iter(["e1", "e2", "e3", "e4"])
+    monkeypatch.setattr(paths, "vault_epoch", lambda *_: next(epochs))
+    monkeypatch.setattr(learner, "_prereq_memo", {})
+    calls = []
+    real = cd._compute_cooccur_variables
+    monkeypatch.setattr(cd, "_compute_cooccur_variables", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+
+    first = learner.prerequisites_map()
+    learner._prereq_memo.clear()                  # another process, another edit
+    assert learner.prerequisites_map() == first and len(calls) == 1
+    nodes, edges = graph_nodes_edges
+    moved = (nodes, [dict(e, to="D") if e.get("from") == "B" else e for e in edges])
+    monkeypatch.setattr(graph_export, "build_graph_data", lambda: moved)
+    learner.prerequisites_map()
+    assert len(calls) == 2

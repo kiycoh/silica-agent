@@ -116,3 +116,42 @@ def test_once_a_plan_is_active_a_never_practised_note_outside_it_is_not_offered(
     picked = pick.session(n=8, now_ts=now, _notes_override=notes, _entries_override=entries,
                           scope=["Ref/memo.md"], _planned_override={"Bio/cell.md"})
     assert [it["path"] for it in picked["items"]] == ["Ref/memo.md"]
+
+
+def _entry(path: str, ts: float, rating: int = 3, correct: bool = True) -> dict:
+    return {"ts": _iso(ts), "path": path, "rating": rating, "correct": correct}
+
+
+def test_a_dated_plan_brings_the_readers_own_note_back_before_the_exam():
+    """With the authorship prior one Good gave a reader's note a stability of
+    months and it never returned before an 18-day exam; in a dated plan's
+    scope it is a card like any other and is due again within days."""
+    now = time.time()
+    notes = _notes(now, {"ML/mine.md": (30, False)})
+    entries = [_entry("ML/mine.md", now - 4 * DAY)]
+    by = datetime.fromtimestamp(now + 18 * DAY, timezone.utc).date().isoformat()
+    plain = pick.session(n=4, now_ts=now, scope=["ML/mine.md"], _notes_override=notes,
+                         _entries_override=entries, _pairs_override=[], _conflicts_override=[])
+    dated = pick.session(n=4, now_ts=now, scope=["ML/mine.md"], _notes_override=notes,
+                         _entries_override=entries, _pairs_override=[], _conflicts_override=[], deadline=by)
+    assert plain["items"] == []                       # "known" for months
+    assert [it["pool"] for it in dated["items"]] == ["due"]
+
+
+def test_a_dated_plan_introduces_new_notes_at_the_pace_its_date_needs_and_ends_on_a_final_pass():
+    now = time.time()
+    notes = _notes(now, {**{f"ML/new{i}.md": (5, True) for i in range(40)},
+                         **{f"ML/old{i}.md": (60, True) for i in range(10)}})
+    # answered once a month ago: due again now
+    entries = [_entry(f"ML/old{i}.md", now - 30 * DAY) for i in range(10)]
+    scope = list(notes)
+    common = dict(n=8, now_ts=now, scope=scope, _notes_override=notes, _entries_override=entries,
+                  _pairs_override=[], _conflicts_override=[])
+    soon = datetime.fromtimestamp(now + 10 * DAY, timezone.utc).date().isoformat()
+    paced = pick.session(**common, deadline=soon)
+    # 40 new notes over the 8 days before the final pass: 5 a session, not the fixed quarter (2)
+    assert [it["pool"] for it in paced["items"]].count("unexplored") == 5
+    last = datetime.fromtimestamp(now + 1 * DAY, timezone.utc).date().isoformat()
+    final = pick.session(**common, deadline=last)
+    assert final["items"] and all(it["pool"] == "due" for it in final["items"])
+    assert pick._days_to("not a date", now) is None and pick._days_to("2000-01-01", now) is None

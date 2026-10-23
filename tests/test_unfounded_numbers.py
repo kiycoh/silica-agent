@@ -109,3 +109,14 @@ def test_number_tokens_carries_every_spelling():
 def test_checked_numbers_keeps_every_occurrence_the_rule_judges():
     assert checked_numbers("242 and 242, `99`, 7, [[Note 12]]\n3. it is 1.96") == [
         "242", "242", "1.96"]
+
+
+def test_a_number_rounded_from_one_read_is_that_number():
+    """The optdigits answer wrote 0,976071 for a read 0.9760712298274903 and was
+    told the number was unread (2026-10-23); a percentage or a short rounding
+    is arithmetic and stays flagged."""
+    from silica.kernel.write.provenance import number_tokens, unfounded_numbers
+
+    read = number_tokens("Accuracy 0.9760712298274903\nAccuracy: 0.9671675013912076")
+    answer = "SVM RBF: 0,976071 (0,9761), FFNN 0,967167: 97,6% contro 96,7%, circa 0,9 punti."
+    assert unfounded_numbers(answer, read) == ["97,6", "96,7", "0,9"]

@@ -337,3 +337,19 @@ def test_facade_retrieve_sweeps_first(monkeypatch):
     # Empty stores → facade returns (None, None), but the sweep ran first.
     facade_retrieve("q", k=3, use_embedder=False)
     assert called == [1]
+
+
+def test_a_run_end_sweep_embeds_past_the_cap(tmp_path, monkeypatch, enabled):
+    """The cap keeps a query from waiting on a rebuild; the end of a run has no
+    query waiting, and a course run left 835 patched notes on stale vectors
+    (2026-10-23)."""
+    import silica.kernel.recall.embed as embed
+    monkeypatch.setattr(embed, "_index_path", lambda: tmp_path / "embeddings.json")
+    _seed_embed(embed, None, {"a": "body a"})
+    monkeypatch.setattr(sync, "_RECONCILE_CAP", 2)
+    files = {"a": "body a"} | {f"n{i}": f"body {i}" for i in range(5)}
+    monkeypatch.setattr("silica.driver.DRIVER", _driver(files))
+    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _Emb())
+
+    stats = sync.sweep(force=True, uncapped=True)
+    assert stats.embedded == 5
