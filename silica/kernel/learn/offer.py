@@ -129,6 +129,9 @@ def aids(path: str, name: str, lost: bool = False, text: str | None = None) -> l
          {"label": "flashcards", "command": f'/flashcards "{name}" --n=8'}),
         (len(_HEADING_RE.findall(text)) >= 3, {"label": "slides", "command": f'/slides "{name}"'}),
     ]
+    if re.search(r"^section:\s*['\"]?\(outline\)", text, re.M):
+        # A lesson's outline is a deck already: its slides come before the rest.
+        shape.insert(0, (True, {"label": "slides", "command": f'/slides "{name}"'}))
     shown += [aid for fits, aid in shape if fits]
     # a note too short to show a shape still gets the two the reader can always use
     if len(shown) < 3:

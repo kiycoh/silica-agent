@@ -114,3 +114,6 @@ def test_the_aids_follow_the_notes_shape():
     assert labels(text=linked) == ["practise it", "map it", "slides"]
     steps = "1. uno\n2. due\n3. tre\n$$x$$ $$y$$\n"
     assert "as a diagram" in labels(text=steps) and len(labels(text=table + linked + steps, lost=True)) == offer.AIDS_SHOWN
+
+    spine = '---\nsection: "(outline)"\n---\n1. [[A]]\n2. [[B]]\n3. [[C]]\n4. [[D]]\n5. [[E]]\n'
+    assert labels(text=spine)[:2] == ["practise it", "slides"]
