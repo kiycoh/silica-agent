@@ -311,6 +311,37 @@ def test_vault_outline_reads_claims_and_skips_spines(tmp_vault):
     assert by["Margine"]["path"] == "ML/Margine.md"
 
 
+def test_past_the_cap_stage_b_sees_the_notes_nearest_the_chunk(tmp_vault, monkeypatch):
+    """A cut by name hid every note past "P" of a 746-note course folder from
+    the textbook's stage B, so it wrote "LSTM" beside "Reti LSTM" (2026-10-23)."""
+    import silica.agent.providers as providers
+    import silica.kernel.recall.embed as embed
+
+    for t in ("Apprendimento", "Kernel", "Reti LSTM", "Rete ricorrente"):
+        tmp_vault.note(f"ML/{t}.md", f"# {t}\n\ncorpo\n")
+    near = {"ML/Reti LSTM": {"lstm": 0.9}, "ML/Rete ricorrente": {"rnn": 0.8}, "ML/Kernel": {"lstm": 0.1}}
+
+    class Store:
+        def __len__(self):
+            return 4
+
+        def cosine_top_k(self, vec, k=5, allow=None):
+            return [{"path": p, "score": s.get(vec, 0.0)} for p, s in near.items() if p in allow][:k]
+
+    class Embedder:
+        def embed(self, texts, *, query=False):
+            return ["lstm" if "LSTM" in t else "rnn" for t in texts]
+
+    monkeypatch.setattr(ol, "MAX_OUTLINE_ROWS", 2)
+    monkeypatch.setattr(embed, "get_store", lambda: Store())
+    monkeypatch.setattr(providers, "get_embedder_or_none", lambda *a, **kw: Embedder())
+    chunk = "## 10.10 The Long Short-Term Memory (LSTM)\n\ntesto\n\n## 10.2 Recurrent Neural Networks\n\ntesto\n"
+    assert [r["title"] for r in ol.vault_outline("ML", query=chunk)] == ["Rete ricorrente", "Reti LSTM"]
+    # nothing to rank by: the first rows by name, as before
+    monkeypatch.setattr(providers, "get_embedder_or_none", lambda *a, **kw: None)
+    assert [r["title"] for r in ol.vault_outline("ML", query=chunk)] == ["Apprendimento", "Kernel"]
+
+
 def test_run_outliner_call_plan_and_result_shape():
     calls: list[str] = []
 

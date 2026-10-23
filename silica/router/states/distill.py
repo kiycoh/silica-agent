@@ -451,13 +451,13 @@ def _run_outline_chunk(fsm: "InjectorFSM", idx: int, chunk: dict,
         if prior is not None:
             only = {n for b in retry_payload.get("batches", [])
                     for c in b.get("concepts", []) if isinstance(c, dict) and (n := c.get("name"))}
+    source_text = chunk.get("source_text", "")
     try:
-        rows = vault_outline(fsm.target_dir, exclude_titles={fsm.hub or ""})
+        rows = vault_outline(fsm.target_dir, exclude_titles={fsm.hub or ""}, query=source_text)
     except Exception as _ve:  # a blind stage B loses cross edges, never the file
         logger.warning("DELEGATE outline: vault outline unavailable (%s) — no cross edges this chunk", _ve)
         rows = []
     from silica.router.states.finalize import file_language
-    source_text = chunk.get("source_text", "")
     # file_language returns None when the pin, the manifest and detection all
     # come up empty (an empty chunk). The value is interpolated into eight
     # prompt sentences, so a None would ask the model to write "in None".

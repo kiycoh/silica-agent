@@ -70,7 +70,8 @@ MAX_EDGES_PER_TARGET = 3    # a target with more is a hub in disguise, not three
 # among them, which the guide never names (2026-10-23).
 MAX_EDGES_PER_SOURCE = 3
 MIN_WHY_CHARS = 20          # "e' collegato" is not a reason
-MAX_OUTLINE_ROWS = 400      # ponytail: folder-scoped outline; reopen at 400 notes in one folder, then seed with cosine top-k
+MAX_OUTLINE_ROWS = 400      # stage B's vault outline; past it the rows nearest the chunk win (_nearest_rows)
+MAX_ROW_QUERIES = 40        # chunk headings embedded to rank the rows: ~400 tokens, ~4 s on a 2-core CPU embedder
 
 STAGE_A_TAG = "[silica outline: stage A]"
 STAGE_GAP_TAG = "[silica outline: coverage]"
@@ -705,13 +706,19 @@ def _claim_of(body: str) -> str:
     return (re.split(r"(?<=[.!?])\s", prose, 1)[0] or "")[:200]
 
 
-def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozenset()) -> list[dict]:
+def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozenset(),
+                  query: str = "") -> list[dict]:
     """Rows {title, claim, lesson, path} for every idea note under `target_dir`.
 
     Folder-scoped by design: stage B reads titles + one-line claims, and a
     folder is the unit the user nucleates into. Spine notes and the hub are
     excluded (see SPINE_SECTION). Best-effort per note: an unreadable note is
     one missing row, never a failed run.
+
+    Past MAX_OUTLINE_ROWS the rows kept are the ones nearest `query` (the
+    chunk's source text), not the first ones by name: a course folder reached
+    746 notes, the cut fell inside "P", and stage B never saw "Reti LSTM", so
+    the textbook wrote "LSTM" beside it (2026-10-23).
     """
     from silica.driver import DRIVER
     from silica.kernel.write import frontmatter
@@ -740,9 +747,44 @@ def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozens
             srcs = [srcs]
         lesson = _stem(str(srcs[0])) if srcs else ""
         rows.append({"title": title, "claim": _claim_of(body or ""), "lesson": lesson, "path": rel})
-        if len(rows) >= MAX_OUTLINE_ROWS:
-            break
-    return rows
+    return _nearest_rows(rows, query) if len(rows) > MAX_OUTLINE_ROWS else rows
+
+
+def _nearest_rows(rows: list[dict], query: str) -> list[dict]:
+    """The MAX_OUTLINE_ROWS rows whose notes sit nearest the chunk, kept in
+    name order. The chunk speaks through its headings, one vector each, and a
+    note scores its best cosine to any of them: one vector for a 40k-char book
+    segment blurs ten sections into none. With nothing to rank by (no embedder,
+    an empty store, a query without text) it is the first rows by name, the
+    cap as it was before."""
+    heads = list(dict.fromkeys(m.group(1) for m in _HEADING_RE.finditer(query)))[:MAX_ROW_QUERIES]
+    texts = heads if len(heads) >= 2 else [t for t in (query[:1500], query[1500:3000]) if t.strip()]
+    if not texts:
+        return rows[:MAX_OUTLINE_ROWS]
+    try:
+        from silica.agent.providers import get_embedder_or_none
+        from silica.config import CONFIG
+        from silica.kernel.recall.embed import get_store
+
+        store = get_store()
+        embedder = get_embedder_or_none(CONFIG, "outline rows", level="info") if len(store) else None
+        if embedder is None:
+            return rows[:MAX_OUTLINE_ROWS]
+        keys = frozenset(r["path"].removesuffix(".md") for r in rows)
+        best: dict[str, float] = {}
+        for vec in embedder.embed(texts, query=True):
+            for h in store.cosine_top_k(vec, k=len(keys), allow=keys):
+                best[h["path"]] = max(best.get(h["path"], -1.0), float(h["score"]))
+    except Exception as exc:  # noqa: BLE001
+        # A dead embedder costs the rows their ranking, never the chunk: stage B
+        # reads the first rows by name, as it did before the ranking.
+        logger.info("vault outline: rows not ranked (%s)", exc)
+        return rows[:MAX_OUTLINE_ROWS]
+    ranked = sorted(range(len(rows)), key=lambda i: -best.get(rows[i]["path"].removesuffix(".md"), -1.0))
+    keep = set(ranked[:MAX_OUTLINE_ROWS])
+    logger.info("vault outline: %d rows past the cap, kept the %d nearest %d heading(s)",
+                len(rows), MAX_OUTLINE_ROWS, len(texts))
+    return [r for i, r in enumerate(rows) if i in keep]
 
 
 # -------------------------------------------------------------- the runner --
