@@ -17,8 +17,8 @@ import os
 import threading
 import time
 import uuid
-from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
+from contextlib import asynccontextmanager, contextmanager, suppress
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -1528,6 +1528,42 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             _end_turn()  # normal / error / early-return: free now
 
 
+# Cloudflare cuts a request whose origin sends no byte for 125 s (ADR-0099
+# Context), and a slash command or a long tool call streams nothing while it
+# works: hosted t01's /nucleate got a 524 at 124,990 ms on 2026-10-23, while web
+# turns that kept streaming events ran to 333 s and ended done. ADR-0099 left
+# streamed bytes untried for the jobs; a turn that stays a request needs them.
+_KEEPALIVE_S = 30.0
+
+
+async def _with_keepalive(chunks: AsyncGenerator[str, None], every: float) -> AsyncIterator[str]:
+    """`chunks`, with an SSE comment line whenever `every` seconds pass without
+    one. The pending step is waited on, never timed out, so a keepalive does not
+    cancel the turn; a dropped client cancels it, as it did with no wrapper."""
+    step = asyncio.ensure_future(chunks.__anext__())
+    try:
+        while True:
+            done, _ = await asyncio.wait({step}, timeout=every)
+            if not done:
+                yield ": keepalive\n\n"
+                continue
+            try:
+                chunk = step.result()
+            except StopAsyncIteration:
+                return
+            yield chunk
+            step = asyncio.ensure_future(chunks.__anext__())
+    finally:
+        if step.done():
+            await chunks.aclose()
+        else:
+            step.cancel()
+            # What the cancelled turn raises on its way out has no reader left:
+            # its own finally already wrote the verdict and holds the gate.
+            with suppress(asyncio.CancelledError, Exception):
+                await step
+
+
 def _turn_response(text: str, attachments: "Sequence[Path]" = (), workspace: str = "",
                    **extra: Any) -> StreamingResponse:
     """One agent turn as an SSE stream. Caller must claim the slot via
@@ -1550,7 +1586,8 @@ def _turn_response(text: str, attachments: "Sequence[Path]" = (), workspace: str
             yield _sse(item)
 
     return StreamingResponse(
-        gen(), media_type="text/event-stream", background=BackgroundTask(_sweep_if_orphaned)
+        _with_keepalive(gen(), _KEEPALIVE_S), media_type="text/event-stream",
+        background=BackgroundTask(_sweep_if_orphaned)
     )
 
 

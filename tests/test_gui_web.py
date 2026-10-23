@@ -686,6 +686,69 @@ def test_run_turn_abandonment_holds_gate_until_worker_exits(client, monkeypatch)
     asyncio.run(scenario())
 
 
+def test_a_turn_silent_past_the_keepalive_still_sends_a_byte(client, monkeypatch):
+    """Cloudflare cuts a request that sends no byte for 125 s (ADR-0099), and a
+    slash command or a long tool call streams nothing while it works: hosted
+    t01's /nucleate got a 524 at 124,990 ms (2026-10-23), while web turns that
+    kept streaming ran past 300 s and ended done. A silent stretch sends a
+    comment line, which the page's parser skips (no `data:` line)."""
+    import time
+
+    tc, server = client
+    monkeypatch.setattr(server, "_KEEPALIVE_S", 0.05)
+
+    def quiet(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
+        time.sleep(0.3)
+        messages.append({"role": "assistant", "content": "late"})
+        return "late"
+
+    monkeypatch.setattr(server, "run_agent", quiet)
+
+    resp = tc.post("/chat", json={"text": "hi"})
+    assert ": keepalive\n\n" in resp.text
+    events = _read_sse(resp)
+    assert events[-1]["type"] == "done" and events[-1]["answer"] == "late"
+
+
+def test_a_stream_dropped_during_a_keepalive_still_holds_the_gate_for_the_worker(client, monkeypatch):
+    """The keepalive waits on the turn's next event without owning it: a client
+    dropped then must reach run_turn as before, so the zombie is cancelled and
+    the gate stays closed until it exits."""
+    import threading
+    import time
+
+    tc, server = client
+    monkeypatch.setattr(server, "_KEEPALIVE_S", 0.05)
+    started = threading.Event()
+
+    def slow(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
+        started.set()
+        deadline = time.monotonic() + 3.0  # bounded so a broken fix FAILS, never hangs
+        while (cancel_token is None or not cancel_token.is_set()) and time.monotonic() < deadline:
+            time.sleep(0.005)
+        messages.append({"role": "assistant", "content": "partial"})
+        return "partial"
+
+    monkeypatch.setattr(server, "run_agent", slow)
+
+    async def scenario():
+        assert server._begin_turn() is True
+        stream = server._turn_response("hi").body_iterator
+        assert await stream.__anext__() == ": keepalive\n\n"
+        await asyncio.to_thread(started.wait, 1.0)
+        await stream.aclose()
+
+        assert server._busy is True
+        assert server.current_cancel is not None and server.current_cancel.is_set()
+        for _ in range(400):
+            if not server._busy:
+                break
+            await asyncio.sleep(0.005)
+        assert server._busy is False
+
+    asyncio.run(scenario())
+
+
 def test_sweep_frees_the_gate_when_no_worker_ever_started(client):
     """Never-iterated generator (client drops between POST and first __anext__):
     run_turn never runs, so the SSE background sweep frees the eagerly-claimed
