@@ -123,7 +123,7 @@ Small samples, a flash-class judge, 2 of LoCoMo's 10 conversations: not comparab
 Over MCP the vault is the folder the client started in, and search, recall and reading need no model or API key.
 
 <details>
-<summary><b>All 62 commands</b></summary>
+<summary><b>All 63 commands</b></summary>
 
 <br/>
 
@@ -189,7 +189,8 @@ Over MCP the vault is the folder the client started in, and search, recall and r
 | `/plans` | list plans/ notes grouped by status: (todo\|in-progress\|blocked\|done) |
 | `/path <noteA> <noteB>` | shortest reading path between two notes (wikilinks + co-occurrence) |
 | `/contested` | list notes flagged contested: true with their unresolved contradictions |
-| `/verify <note> [--clear]` | vouch for a note as a person (OKF verified, bound to the body); --clear withdraws |
+| `/verify <note> [--clear] [--as "<name>"]` | vouch for a note as a person (OKF verified, bound to the body); --clear withdraws, --as signs with a name |
+| `/check <note>` | read a note you wrote against the vault: links, identifiers, dates and quotations, by grade; never edits it |
 
 **Session and settings**
 

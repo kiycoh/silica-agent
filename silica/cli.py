@@ -1055,20 +1055,43 @@ def _epistemic_filter(results: list[dict], min_trust: str, life: str) -> tuple[l
     return kept, len(results) - len(kept)
 
 
+def _quoted_flag(args: list[str], flag: str) -> tuple[str | None, list[str]]:
+    """(`--flag value` or `--flag "two words"`, the args without it). Direct
+    commands split on whitespace, so a quoted name arrives in pieces and is
+    joined back here; None when the flag is absent, "" when it has no value."""
+    for i, a in enumerate(args):
+        if a == flag or a.startswith(flag + "="):
+            head = a[len(flag) + 1:] if a.startswith(flag + "=") else (args[i + 1] if i + 1 < len(args) else "")
+            j = i + 1 if a.startswith(flag + "=") else i + 2
+            words = [head]
+            if head[:1] in "\"'" and head and not (len(head) > 1 and head.endswith(head[0])):
+                while j < len(args) and not words[-1].endswith(head[0]):
+                    words.append(args[j])
+                    j += 1
+            value = " ".join(words).strip().strip("\"'").strip()
+            if head.startswith("--"):
+                value, j = "", j - 1
+            return value, args[:i] + args[j:]
+    return None, list(args)
+
+
 def _dc_verify(args: list[str], **_) -> bool:
-    """/verify <note> [--clear] — a person vouches for a note (OKF §5.2), bound
-    to the body as it is now; --clear withdraws every human entry. The only
-    writer of a `human:` attestation: the MCP tools refuse the key (spec M4)."""
+    """/verify <note> [--clear] [--as "<name>"] — a person vouches for a note
+    (OKF §5.2), bound to the body as it is now; --clear withdraws every human
+    entry. The only writer of a `human:` attestation: the MCP tools refuse the
+    key (spec M4). It never reads or writes a /check's state (ADR-0110 point 1)."""
     import datetime
     import getpass
 
+    from silica.config import hosted
     from silica.driver import DRIVER
     from silica.kernel.write.checkpoints import get_checkpoint_store
     from silica.kernel.write.notetype import clear_verified, stamp_verified
 
-    name = " ".join(_positional(args))
-    if not name:
-        CONSOLE.print("  Usage: /verify <note> [--clear]")
+    signer, rest = _quoted_flag(args, "--as")
+    name = " ".join(_positional(rest))
+    if not name or signer == "":
+        CONSOLE.print('  Usage: /verify <note> [--clear] [--as "<name>"]')
         return True
     try:
         nc = DRIVER.read_note(name)
@@ -1076,7 +1099,10 @@ def _dc_verify(args: list[str], **_) -> bool:
         CONSOLE.print(f"  [yellow]Cannot read '{name}': {e}[/]")
         return True
     path, prior = nc.ref.path or name, nc.content or ""
-    who, today = f"human:{getpass.getuser()}", datetime.date.today().isoformat()
+    # On the server the login is the tenant's service user, which names no
+    # one: there the stamp says `owner` unless the person signs (ADR-0110).
+    login = signer.strip() if signer else ("owner" if hosted() else getpass.getuser())
+    who, today = f"human:{login}", datetime.date.today().isoformat()
     try:
         new = clear_verified(prior) if "--clear" in args else stamp_verified(prior, who, today)
     except ValueError as e:
@@ -1094,6 +1120,82 @@ def _dc_verify(args: list[str], **_) -> bool:
     else:
         CONSOLE.print(f"  {path}: verified by {who} at {today}.")
     return True
+
+
+def _dc_check(args: list[str], **_) -> bool:
+    """/check <note> — read a note the person wrote against the vault, block
+    by block, and print the findings by grade (ADR-0110 step 1: rules only,
+    no model). It never edits the note."""
+    import time
+
+    from silica import metrics
+    from silica.config import CONFIG
+    from silica.driver import DRIVER
+    from silica.kernel.check import run as check
+    from silica.kernel.vault_manifest import active_write_dir
+
+    name = " ".join(_positional(args))
+    if not name:
+        CONSOLE.print("  Usage: /check <note>")
+        return True
+    try:
+        path = DRIVER.read_note(name).ref.path or name
+    except Exception as e:
+        CONSOLE.print(f"  [yellow]Cannot read '{name}': {e}[/]")
+        return True
+    path = path if path.endswith(".md") else path + ".md"
+    started = time.monotonic()
+    search, dense, floor = _check_legs()
+    try:
+        report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(),
+                                  search=search, dense=dense, dense_floor=floor)
+    except Exception as e:
+        metrics.emit("check", outcome=metrics.outcome_of(e), ms=metrics.ms_since(started))
+        CONSOLE.print(f"  [yellow]The check failed: {e}[/]")
+        return True
+    c = report["counts"]
+    metrics.emit("check", outcome="ok", ms=metrics.ms_since(started), blocks=report["blocks"], cached=0,
+                 error=c["error"], warning=c["warning"], nit=c["nit"])
+    CONSOLE.print(check.render(report), markup=False, highlight=False)
+    return True
+
+
+def _check_legs():
+    """The passage search and the dense leg a /check reads with. The dense leg
+    is the vault's own embed index; a vault without one, an embedder that is
+    down, or an embedder with no measured floor gives None, and absence then
+    waits for the model rather than be decided on words alone (ADR-0110
+    point 6: an Italian block over English sources)."""
+    from silica.config import CONFIG
+    from silica.kernel.check import run as check
+    from silica.tools.atomic import _engine
+
+    def search(query: str, k: int) -> list[dict]:
+        r = _engine().search(query, folder="", k=k)
+        return r.get("hits") or []
+
+    floor = check.DENSE_FLOORS.get(str(getattr(CONFIG, "embedding_model", "") or ""))
+    if floor is None:
+        return search, None, None
+    try:
+        from silica.agent.providers import get_embedder
+        from silica.kernel.recall.embed import get_store
+
+        store, embedder = get_store(), get_embedder(CONFIG)
+    except Exception:
+        return search, None, None  # no embedder configured: the dense leg is simply absent
+    if not len(store):
+        return search, None, None
+
+    def dense(text: str, pool: set[str]) -> float | None:
+        try:
+            vec = embedder.embed([text], query=True)[0]
+        except Exception:
+            return None  # embedder down mid-check: this block's absence waits for the model
+        top = store.cosine_top_k(vec, k=1, allow={p.removesuffix(".md") for p in pool})
+        return float(top[0]["score"]) if top else None
+
+    return search, dense, floor
 
 
 def _epistemic_lanes(vault: str) -> tuple[list[tuple[str, str]], list[str]]:
@@ -2138,6 +2240,7 @@ _DIRECT: dict[str, Callable[..., bool]] = {
     "/path": _dc_path,
     "/contested": _dc_contested,
     "/verify": _dc_verify,
+    "/check": _dc_check,
     "/agenda": _dc_agenda,
     "/episodes": _dc_episodes,
     "/changes": _dc_changes,

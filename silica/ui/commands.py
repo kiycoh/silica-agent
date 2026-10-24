@@ -364,9 +364,16 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/verify",
         group="direct",
-        usage="<note> [--clear]",
-        summary="vouch for a note as a person (OKF verified, bound to the body); --clear withdraws",
+        usage='<note> [--clear] [--as "<name>"]',
+        summary="vouch for a note as a person (OKF verified, bound to the body); --clear withdraws, --as signs with a name",
         examples=("/verify docs/adr/0038-detection-at-session-open-writes-on-command",),
+    ),
+    Command(
+        name="/check",
+        group="direct",
+        usage="<note>",
+        summary="read a note you wrote against the vault: links, identifiers, dates and quotations, by grade; never edits it",
+        examples=('/check "Drafts/Opinion on limitation"',),
     ),
     # System
     Command(

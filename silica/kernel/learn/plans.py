@@ -1607,16 +1607,11 @@ def _goal_sentence(scope: str, target, objectives: list[str]) -> str:
 # the date and the intentions' verbs here, the material by one model call
 # whose every field is checked against the vault before it reaches a field.
 
-_MONTHS = {
-    **{m: i for i, m in enumerate(("gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto",
-                                   "settembre", "ottobre", "novembre", "dicembre"), 1)},
-    **{m: i for i, m in enumerate(("january", "february", "march", "april", "may", "june", "july", "august",
-                                   "september", "october", "november", "december"), 1)},
-    **{m: i for i, m in enumerate(("gen", "feb", "mar", "apr", "mag", "giu", "lug", "ago", "set", "ott", "nov", "dic"), 1)},
-    **{m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)},
-    "sept": 9,
-}
-_MONTH_RE = "|".join(sorted(_MONTHS, key=len, reverse=True))
+# The month names are shared with the source check's absolute reader
+# (text/dates.py); this reader keeps its own patterns, which accept a
+# year-less day.
+from silica.kernel.text.dates import MONTH_RE as _MONTH_RE  # noqa: E402
+from silica.kernel.text.dates import MONTHS as _MONTHS  # noqa: E402
 # Month first is English only, and "may" there must be capitalised: Italian
 # writes the day first, and "problem set 3" read as September 3 (review of
 # ADR-0081) while "you may 3" is a verb. The day-first form keeps them all.

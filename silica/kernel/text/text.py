@@ -212,3 +212,26 @@ def normalize_math_spacing(text: str) -> str:
         return _SCRIPT_RE.sub(r"\1", seg)
     return _MATH_SEG_RE.sub(_tight, text or "")
 
+
+# Typography a model cannot be asked to reproduce: pages render apostrophes and
+# dashes with the curly/long forms, models copy them back as ASCII, and the
+# guardian then reads a correct quote as a paraphrase. This was the whole
+# "remember paraphrase" spiral — on docs.kernel.org ("the states it’s") a run
+# burned 18 rejections and died with no findings, and the one arm that got a
+# quote past the guardian did it by cutting the quote off at the character
+# before the apostrophe. Folding these does NOT weaken the guarantee: every
+# word must still appear verbatim, only quote and dash STYLE is forgiven.
+TYPOGRAPHY = str.maketrans({
+    "‘": "'", "’": "'", "‚": "'", "‛": "'",
+    "“": '"', "”": '"', "„": '"', "‟": '"',
+    "«": '"', "»": '"', "「": '"', "」": '"', "『": '"', "』": '"',
+    "‐": "-", "‑": "-", "‒": "-", "–": "-",
+    "—": "-", "―": "-", "−": "-",
+    " ": " ", " ": " ", " ": " ", " ": " ",
+    "…": "...",
+})
+
+
+def squash(text: str) -> str:
+    """Whitespace- and quote-style-insensitive form for verbatim comparison."""
+    return " ".join(text.translate(TYPOGRAPHY).split())
