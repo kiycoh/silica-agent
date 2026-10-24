@@ -1180,22 +1180,13 @@ def _check_legs():
         return search, None, None
     try:
         from silica.agent.providers import get_embedder
-        from silica.kernel.recall.embed import get_store
+        from silica.kernel.check.dense import leg
 
-        store, embedder = get_store(), get_embedder(CONFIG)
+        dense = leg(get_embedder(CONFIG))
     except Exception:
         return search, None, None  # no embedder configured: the dense leg is simply absent
-    if not len(store):
+    if dense is None:
         return search, None, None
-
-    def dense(text: str, pool: set[str]) -> float | None:
-        try:
-            vec = embedder.embed([text], query=True)[0]
-        except Exception:
-            return None  # embedder down mid-check: this block's absence waits for the model
-        top = store.cosine_top_k(vec, k=1, allow={p.removesuffix(".md") for p in pool})
-        return float(top[0]["score"]) if top else None
-
     return search, dense, floor
 
 

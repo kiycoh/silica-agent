@@ -56,6 +56,7 @@ ALLOWED = {
     "router/states/setup.py":       "pairwise cosine (salience theme gate)",
     "kernel/residue.py":            "pairwise cosine (residue theme filter, same gate as salience), not relatedness ranking",
     "router/states/write.py":       "incremental embed index refresh after writes",
+    "kernel/check/dense.py":        "the source check's absence floor (ADR-0110 point 6): one block's best cosine against its pool, not a ranking",
     "router/states/finalize.py":    "embed index cleanup on rollback",
     "driver/fs_backend.py":         "embed vector cleanup on note delete/rename (index maintenance), not relatedness ranking",
     "tools/graph.py":               "index refresh tools + raw semantic search by design",

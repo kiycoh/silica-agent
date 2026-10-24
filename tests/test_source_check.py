@@ -223,3 +223,15 @@ def test_a_dense_floor_belongs_to_an_embedder_silica_ships_a_row_for():
 
     assert set(run.DENSE_FLOORS) <= set(EMBEDDER_DEFAULTS)
     assert 0 < run.LEXICAL_FLOOR < 1
+
+
+def test_the_command_prints_the_report_and_writes_nothing(tmp_vault, capsys):
+    from silica.cli import _handle_direct_shortcut
+    from silica.config import CONFIG
+
+    tmp_vault.note("Drafts/memo.md", "---\nmatter: x\n---\n\nThe hearing listed for 17 February 2026 was adjourned by the court.\n")
+    before = (Path(CONFIG.vault_path) / "Drafts/memo.md").read_bytes()
+    assert _handle_direct_shortcut("/check Drafts/memo", []) is True
+    out = capsys.readouterr().out
+    assert "date not found" in out and "17 February 2026" in out
+    assert (Path(CONFIG.vault_path) / "Drafts/memo.md").read_bytes() == before
