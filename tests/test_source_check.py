@@ -189,9 +189,9 @@ def test_absence_is_decided_only_with_both_floors_and_otherwise_waits(firm):
     no_vectors = run.check_note(path, str(firm), write_dir="silica", search=lambda q, k: [])
     assert not no_vectors["findings"] and no_vectors["states"][0]["state"] == "not checked"
     far = run.check_note(path, str(firm), write_dir="silica", search=lambda q, k: [],
-                         dense=lambda t, p: 0.1, dense_floor=0.5)
+                         dense=lambda t, p: [("x.md", 0.1)], dense_floor=0.5)
     assert [(f["kind"], f["grade"]) for f in far["findings"]] == [("not found", "warning")]
-    near = run.check_note(path, str(firm), write_dir="silica", dense=lambda t, p: 0.9, dense_floor=0.5,
+    near = run.check_note(path, str(firm), write_dir="silica", dense=lambda t, p: [("x.md", 0.9)], dense_floor=0.5,
                           search=lambda q, k: [])
     assert not near["findings"] and near["waiting"] == 1
 
@@ -205,7 +205,7 @@ def test_the_search_is_cut_to_the_pool(firm):
         seen.append(k)
         return hit
     path = _draft(firm, "La penale dell'uno per cento al giorno va ridotta dal giudice secondo equità.")
-    r = run.check_note(path, str(firm), write_dir="silica", search=search, dense=lambda t, p: 0.1, dense_floor=0.5)
+    r = run.check_note(path, str(firm), write_dir="silica", search=search, dense=lambda t, p: [("x.md", 0.1)], dense_floor=0.5)
     assert seen and [f["kind"] for f in r["findings"]] == ["not found"]   # the other client's 0.99 never counts
 
 
@@ -225,9 +225,11 @@ def test_a_dense_floor_belongs_to_an_embedder_silica_ships_a_row_for():
     assert 0 < run.LEXICAL_FLOOR < 1
 
 
-def test_the_command_prints_the_report_and_writes_nothing(tmp_vault, capsys):
+def test_the_command_prints_the_report_and_writes_nothing(tmp_vault, capsys, monkeypatch):
     from silica.cli import _handle_direct_shortcut
     from silica.config import CONFIG
+
+    monkeypatch.setattr("silica.cli._check_judge", lambda: None)   # rules only: no model call from a test
 
     tmp_vault.note("Drafts/memo.md", "---\nmatter: x\n---\n\nThe hearing listed for 17 February 2026 was adjourned by the court.\n")
     before = (Path(CONFIG.vault_path) / "Drafts/memo.md").read_bytes()
@@ -235,3 +237,65 @@ def test_the_command_prints_the_report_and_writes_nothing(tmp_vault, capsys):
     out = capsys.readouterr().out
     assert "date not found" in out and "17 February 2026" in out
     assert (Path(CONFIG.vault_path) / "Drafts/memo.md").read_bytes() == before
+
+
+# ---------------------------------------------------------------- the judge (step 2)
+
+from silica.kernel.check import judge as jd  # noqa: E402
+
+
+def _jev(kind, p=0.9, rests="1"):
+    calls = []
+
+    def decide(state, questions):
+        calls.append(questions)
+        if "rests_on" in questions:
+            return {"rests_on": {"type": "choice", "choice": rests, "probabilities": {rests: 0.8}}}
+        return {"verdict": {"type": "choice", "choice": kind, "probabilities": {kind: p}}}
+    return decide, calls
+
+
+def test_jev_decides_and_the_grade_comes_from_the_table(firm):
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.")
+    decide, calls = _jev("contradicted")
+    r = run.check_note(path, str(firm), write_dir="silica", search=lambda q, k: [
+        {"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "Acceptance certificate issued"},
+        {"path": "Research/Memo 2025 on limitation.md", "line": 5, "coverage": 0.5, "window": "runs from acceptance"}],
+        judge=lambda t, ps: jd.judge(t, ps, decide=decide, chat=None))
+    f = [x for x in r["findings"] if x["kind"] == "contradicted"]
+    assert f and f[0]["grade"] == "error" and f[0]["at"].startswith("Matters/Chronology.md")
+    assert any("rests_on" in q for q in calls)
+
+
+def test_below_its_threshold_a_verdict_is_not_checked_and_never_falls_back():
+    decide, _ = _jev("overstated", p=0.2)
+    asked = []
+    v = jd.judge("text", [{"path": "a.md", "line": 1, "text": "x"}], decide=decide, chat=lambda s: asked.append(s))
+    assert v["state"] == "not checked" and not asked
+
+
+def test_the_chat_model_answers_only_when_jev_does_not_and_must_quote():
+    passages = [{"path": "a.md", "line": 3, "text": "The gateway conditions are exhaustive. Impecuniosity alone is not enough."}]
+    good = jd.judge("t", passages, decide=lambda s, q: None,
+                    chat=lambda s: '{"verdict": "contradicted", "evidence": "The gateway conditions are exhaustive", "source": "a.md:3"}')
+    assert good == {"kind": "contradicted", "by": "chat", "at": "a.md:3"}
+    made_up = jd.judge("t", passages, decide=lambda s, q: None,
+                       chat=lambda s: '{"verdict": "contradicted", "evidence": "the conditions are only examples"}')
+    assert made_up["state"] == "not checked"
+
+
+def test_a_verdict_is_cached_by_block_and_passages_and_not_asked_again(firm):
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.")
+    decide, calls = _jev("supported")
+    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "x"}]
+    j = lambda t, ps: jd.judge(t, ps, decide=decide, chat=None)
+    first = run.check_note(path, str(firm), write_dir="silica", search=search, judge=j)
+    n = len(calls)
+    again = run.check_note(path, str(firm), write_dir="silica", search=search, judge=j)
+    assert first["cached"] == 0 and again["cached"] == 1 and len(calls) == n
+    assert (firm / ".silica/checks").is_dir()
+
+
+def test_not_in_these_passages_is_not_found():
+    rows, _ = run._verdict_rows({"kind": "not in these passages", "by": "jev", "p": 0.8}, 7)
+    assert rows[0]["kind"] == "not found"

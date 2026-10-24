@@ -1149,16 +1149,34 @@ def _dc_check(args: list[str], **_) -> bool:
     search, dense, floor = _check_legs()
     try:
         report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(),
-                                  search=search, dense=dense, dense_floor=floor)
+                                  search=search, dense=dense, dense_floor=floor, judge=_check_judge())
     except Exception as e:
         metrics.emit("check", outcome=metrics.outcome_of(e), ms=metrics.ms_since(started))
         CONSOLE.print(f"  [yellow]The check failed: {e}[/]")
         return True
     c = report["counts"]
-    metrics.emit("check", outcome="ok", ms=metrics.ms_since(started), blocks=report["blocks"], cached=0,
+    metrics.emit("check", outcome="ok", ms=metrics.ms_since(started), blocks=report["blocks"], cached=report["cached"],
                  error=c["error"], warning=c["warning"], nit=c["nit"])
     CONSOLE.print(check.render(report), markup=False, highlight=False)
     return True
+
+
+def _check_judge():
+    """Jev decides a block's verdict; the chat model answers only when Jev
+    answers nothing (ADR-0110 point 7, the owner's decision of 2026-10-24)."""
+    from silica.agent.decide import decide
+    from silica.agent.providers import get_provider
+    from silica.config import CONFIG
+    from silica.kernel.check import judge as jd
+
+    def chat(prompt: str) -> str:
+        # reasoning off: a thinking pass spends the budget before the JSON
+        # (llm.py, the 9B's empty answers of 2026-10-15).
+        resp = get_provider(CONFIG).call_llm(messages=[{"role": "user", "content": prompt}],
+                                             max_tokens=300, temperature=0.0, reasoning=False)
+        return resp.text or ""
+
+    return lambda text, passages: jd.judge(text, passages, decide=decide, chat=chat)
 
 
 def _check_legs():

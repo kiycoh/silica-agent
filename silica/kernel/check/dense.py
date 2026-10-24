@@ -14,7 +14,7 @@ from typing import Any
 
 
 def leg(embedder: Any):
-    """`dense(text, pool) -> best cosine or None`, or None when the vault has
+    """`dense(text, pool) -> [(path, cosine)] best first, or None`, or None when the vault has
     no embed index. A failed embed call answers None for that block, which
     then waits for the model instead of being called absent."""
     from silica.kernel.recall.embed import get_store
@@ -23,12 +23,12 @@ def leg(embedder: Any):
     if not len(store):
         return None
 
-    def dense(text: str, pool: set[str]) -> float | None:
+    def dense(text: str, pool: set[str]) -> list[tuple[str, float]] | None:
         try:
             vec = embedder.embed([text], query=True)[0]
         except Exception:
             return None  # embedder down mid-check: this block's absence waits for the model
-        top = store.cosine_top_k(vec, k=1, allow={p.removesuffix(".md") for p in pool})
-        return float(top[0]["score"]) if top else None
+        top = store.cosine_top_k(vec, k=3, allow={p.removesuffix(".md") for p in pool})
+        return [(t["path"] + ".md", float(t["score"])) for t in top]
 
     return dense

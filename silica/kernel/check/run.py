@@ -11,7 +11,10 @@ the agent and its network, and a test hands in a list.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from silica.kernel.check import GRADES, ORDER
@@ -39,7 +42,12 @@ PASSAGES = 5
 SEARCH_WIDTH = 200
 
 Search = Callable[[str, int], list[dict]]
-Dense = Callable[[str, set[str]], "float | None"]
+# The pool's nearest notes to a block, best first, as (path, cosine); [] or
+# None when the vault has no vectors.
+Dense = Callable[[str, set[str]], "list[tuple[str, float]] | None"]
+Judge = Callable[[str, list[dict]], "dict | None"]
+CACHE_DIR = ".silica/checks"
+NOTE_CHARS = 900
 
 
 def _line_of(text: str, offset: int) -> int:
@@ -62,9 +70,49 @@ def _status(path: str, note: pl.Note) -> str | None:
     return None
 
 
+def _cache_path(vault: str, path: str) -> Path:
+    return Path(vault) / CACHE_DIR / (hashlib.sha1(path.encode()).hexdigest()[:16] + ".json")
+
+
+def _excerpt(note: pl.Note) -> str:
+    return note.text[sum(len(x) + 1 for x in note.text.split("\n")[:blk.body_start(note.text)]):][:NOTE_CHARS]
+
+
+def _model_passages(passages: list[dict], cited: list[str], near: list[tuple[str, float]],
+                    notes: dict[str, pl.Note]) -> list[dict]:
+    """What the judge reads: the search's passages, then the notes the block
+    links or names, then the pool's nearest notes by meaning, which is how an
+    Italian block reaches its English source when no word matches."""
+    out = [{"path": h["path"], "line": h.get("line", 1), "text": h.get("window") or h.get("snippet") or ""}
+           for h in passages]
+    seen = {o["path"] for o in out}
+    for path in cited + [p for p, _s in near[:2]]:
+        if path not in seen and path in notes:
+            seen.add(path)
+            out.append({"path": path, "line": blk.body_start(notes[path].text) + 1, "text": _excerpt(notes[path])})
+    return out
+
+
+def _verdict_rows(v: dict, line: int) -> tuple[list[dict], list[dict]]:
+    """A judge's verdict as findings and states: the grade from the table,
+    never from the judge (point 8)."""
+    who = "Jev" if v.get("by") == "jev" else "the chat model"
+    p = f", p {v['p']:.2f}" if "p" in v else ""
+    if v.get("state") == "not checked":
+        why = v.get("why") or f"{who} was not sure enough{p}"
+        return [], [{"state": "not checked", "line": line, "say": why}]
+    kind = v["kind"]
+    if kind in ("supported", "not a statement of fact"):
+        return [], [{"state": kind, "line": line, "say": f"{who}{p}"}]
+    kind = "not found" if kind == "not in these passages" else kind
+    return [{"kind": kind, "words": "", "at": v.get("at", ""), "say": f"{v['kind']}, by {who}{p}"}], []
+
+
 def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | None = None,
-               dense: Dense | None = None, dense_floor: float | None = None) -> dict[str, Any]:
-    """The step 1 report for the note at vault-relative `path`."""
+               dense: Dense | None = None, dense_floor: float | None = None,
+               judge: Judge | None = None) -> dict[str, Any]:
+    """The report for the note at vault-relative `path`: rule findings, and
+    with a `judge` the verdict on each block the rules did not settle."""
     notes, files = pl.walk(vault)
     if path not in notes:
         raise FileNotFoundError(path)
@@ -78,7 +126,13 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
     ix = rules.index(notes, skip=path)
     findings: list[dict] = []
     states: list[dict] = []
-    waiting = 0
+    waiting = cached = 0
+    cache_file = _cache_path(vault, path)
+    try:
+        cache = json.loads(cache_file.read_text(encoding="utf-8")) if judge and cache_file.is_file() else {}
+    except (OSError, ValueError):
+        cache = {}  # a torn cache costs one re-judgment, never a wrong verdict
+    fresh: dict[str, dict] = {}
     seen_source_dates: set[tuple[str, str]] = set()
     prev_sourced = False
     prev_cited: list[str] = []
@@ -161,25 +215,50 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
 
         # Absence by rule (point 6): no link, no named note, no identifier,
         # no quotation found, and no passage over either floor.
+        near = (dense(b.clean, pool.paths) or []) if dense is not None else []
+        to_judge = True
         if not (sourced or quote_found or lexical):
-            best = dense(b.clean, pool.paths) if dense is not None and dense_floor is not None else None
+            best = near[0][1] if near and dense_floor is not None else None
             if best is None:
-                states.append({"state": "not checked", "line": b.line,
-                               "say": "absence needs the dense floor, and this vault has no vectors for it"})
+                to_judge = judge is not None
+                if not to_judge:
+                    states.append({"state": "not checked", "line": b.line,
+                                   "say": "absence needs the dense floor, and this vault has no vectors for it"})
             elif best < dense_floor:
+                to_judge = False
                 mine.append({"kind": "not found", "words": "",
                              "say": f"no note of the {len(pool.paths)} searched holds this"})
-            else:
-                waiting += 1
-        else:
+        if to_judge:
             waiting += 1
+            if judge is not None:
+                mp = _model_passages(passages, cited, near, notes)
+                key = hashlib.sha1("\0".join([b.clean] + sorted(
+                    f"{x['path']}\0{x['text']}" for x in mp)).encode()).hexdigest()
+                v = cache.get(key)
+                if v is not None:
+                    cached += 1
+                elif mp:
+                    v = judge(b.clean, mp)
+                else:
+                    states.append({"state": "not checked", "line": b.line,
+                                   "say": "no passage in the pool to judge it against"})
+                if v is not None:
+                    fresh[key] = v
+                    f, st = _verdict_rows(v, b.line)
+                    mine += f
+                    states += st
         for x in mine:
             findings.append({"grade": GRADES[x["kind"]], "line": b.line, "at": x.get("at", ""), **x})
         prev_sourced, prev_cited = sourced, cited
 
+    if fresh:
+        # Only this run's verdicts are kept: a block that changed takes its
+        # old key with it, so the cache never outgrows the note.
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps(fresh, ensure_ascii=False), encoding="utf-8")
     findings.sort(key=lambda f: (ORDER.index(f["grade"]), f["line"]))
     return {
-        "note": path, "blocks": len(blocks), "waiting": waiting,
+        "note": path, "blocks": len(blocks), "waiting": waiting, "cached": cached,
         "pool": {"size": len(pool.paths), "of": pool.of, "scope": pool.scope, "values": sorted(pool.values)},
         "findings": findings, "states": states,
         "counts": {g: sum(f["grade"] == g for f in findings) for g in ORDER},
@@ -201,6 +280,11 @@ def render(report: dict) -> str:
         tail = f"  [{f['at']}]" if f.get("at") else ""
         words = f" “{f['words']}”" if f.get("words") else ""
         out.append(f"  {f['grade']:<7} {f['kind']:<28} line {f['line']}{words}: {f['say']}{tail}")
+    quiet = ("supported", "not a statement of fact")
     for s in report["states"]:
-        out.append(f"  {'state':<7} {s['state']:<28} line {s['line']}: {s['say']}")
+        if s["state"] not in quiet:
+            out.append(f"  {'state':<7} {s['state']:<28} line {s['line']}: {s['say']}")
+    held = [s["line"] for s in report["states"] if s["state"] == "supported"]
+    if held:
+        out.append(f"  supported on line{'s' if len(held) > 1 else ''} {', '.join(map(str, held))}")
     return "\n".join(out)
