@@ -1076,10 +1076,9 @@ def _quoted_flag(args: list[str], flag: str) -> tuple[str | None, list[str]]:
 
 
 def _dc_verify(args: list[str], **_) -> bool:
-    """/verify <note> [--clear] [--as "<name>"] — a person vouches for a note
-    (OKF §5.2), bound to the body as it is now; --clear withdraws every human
-    entry. The only writer of a `human:` attestation: the MCP tools refuse the
-    key (spec M4). It never reads or writes a /check's state (ADR-0110 point 1)."""
+    """/verify <note> [--clear] — a person vouches for a note (OKF §5.2), bound
+    to the body as it is now; --clear withdraws every human entry. The only
+    writer of a `human:` attestation: the MCP tools refuse the key (spec M4)."""
     import datetime
     import getpass
 
@@ -1088,6 +1087,8 @@ def _dc_verify(args: list[str], **_) -> bool:
     from silica.kernel.write.checkpoints import get_checkpoint_store
     from silica.kernel.write.notetype import clear_verified, stamp_verified
 
+    # --as "<name>" signs with that name. A stamp never reads or writes a
+    # /check's state, nor a check the stamp (ADR-0110 point 1).
     signer, rest = _quoted_flag(args, "--as")
     name = " ".join(_positional(rest))
     if not name or signer == "":
