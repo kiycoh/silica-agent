@@ -60,9 +60,14 @@ def index(notes: dict[str, Note], skip: str) -> Index:
     for path, n in notes.items():
         if path == skip:
             continue
-        for i, line in enumerate(n.text.split("\n"), 1):
-            for iso, _s, _e in dates.find_dates(line):
-                ix.dates.setdefault(iso, []).append((path, i, line))
+        lines = n.text.split("\n")
+        # Dates over the whole text, not line by line: a memo wraps "expires
+        # **19 April" and "2028**" onto two lines, and a line index never saw
+        # that it held the date.
+        for iso, s, _e in dates.find_dates(n.text):
+            i = n.text.count("\n", 0, s)
+            ix.dates.setdefault(iso, []).append((path, i + 1, lines[i]))
+        for i, line in enumerate(lines, 1):
             for spelling, key in identifiers(line):
                 ix.idents.setdefault(key, []).append((path, i, spelling))
     return ix
@@ -132,7 +137,8 @@ def date_rules(d: str, periods: list[dict], ix: Index, pool: set[str]) -> tuple[
         for b_iso, rows in ix.dates.items():
             if dates.add_period(b_iso, p["n"], p["unit"]) != d:
                 continue
-            base = [r for r in rows if r[0] in pool and (r[0], r[1]) not in named_lines]
+            base = sorted((r for r in rows if r[0] in pool and (r[0], r[1]) not in named_lines),
+                          key=lambda r: -len(_label(r[2])))
             if base:
                 b_path, b_line, b_text = base[0]
                 findings.append({
@@ -144,7 +150,7 @@ def date_rules(d: str, periods: list[dict], ix: Index, pool: set[str]) -> tuple[
     for p in periods:
         for b_iso, rows in ix.dates.items():
             if dates.add_period(b_iso, p["n"], p["unit"]) == d:
-                base = [r for r in rows if r[0] in pool]
+                base = sorted((r for r in rows if r[0] in pool), key=lambda r: -len(_label(r[2])))
                 if base:
                     b_path, b_line, b_text = base[0]
                     states.append({"state": "derived date", "say": (
@@ -191,11 +197,15 @@ def find_quote(q: str, notes: dict[str, Note], where: list[str], near: list[str]
             window = ws[start:start + size]
             if not window or window[0] not in qw:
                 continue
-            got = sum(b.size for b in SequenceMatcher(None, qw, window, autojunk=False).get_matching_blocks())
-            share = got / len(qw)
-            if share >= MISQUOTE_SHARE and (best is None or share > best[0]):
-                a, b = flat[start][1], flat[min(start + size, len(flat)) - 1][1]
-                best = (share, path, a, " ".join(ln.strip() for ln in lines[a - 1:b]))
+            matched = [m for m in SequenceMatcher(None, qw, window, autojunk=False).get_matching_blocks() if m.size]
+            share = sum(m.size for m in matched) / len(qw)
+            # Ties go to the window that starts on the quotation's first word:
+            # it is the passage the writer meant, not one shifted to a "the".
+            rank = (share, window[0] == qw[0])
+            if share >= MISQUOTE_SHARE and (best is None or rank > best[0]):
+                a = flat[start + matched[0].b][1]
+                b = flat[start + matched[-1].b + matched[-1].size - 1][1]
+                best = (rank, path, a, " ".join(ln.strip() for ln in lines[a - 1:b]))
     if best:
-        return {"state": "near", "path": best[1], "line": best[2], "passage": best[3], "share": best[0]}
+        return {"state": "near", "path": best[1], "line": best[2], "passage": best[3], "share": best[0][0]}
     return {"state": "absent"}

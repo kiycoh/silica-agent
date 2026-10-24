@@ -25,8 +25,16 @@ from silica.kernel.write.contested import lifecycle, trust
 # lexical floor is the share of a block's rare-term weight a passage must
 # match; the dense floor is a cosine, so it belongs to one embedder (ADR-0078)
 # and an embedder without a measured row decides no absence at all.
-LEXICAL_FLOOR = 0.6
-DENSE_FLOORS: dict[str, float] = {}
+# Measured 2026-10-24 on the five gate drafts over the legal testbench (ORACLE.md,
+# "ADR-0110 step 1 gate"), each draft alone, pool-restricted, EmbeddingGemma 2:
+# the lecture-notes blocks, which have no source, scored coverage 0.0 and cosine
+# at most 0.630; the blocks with a source in the pool and no link, name or
+# identifier scored coverage 0.06 to 0.34 (Italian over English) and cosine at
+# least 0.665. The lexical floor sits on the safe side: anything that clears it
+# goes to the model. The dense margin is 0.015 a side on 29 blocks; re-measure
+# on the first 200-note vault a gate runs on, or by 2027-01-31.
+LEXICAL_FLOOR = 0.3
+DENSE_FLOORS: dict[str, float] = {"embeddinggemma-2": 0.645}
 PASSAGES = 5
 SEARCH_WIDTH = 200
 

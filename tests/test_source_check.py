@@ -214,3 +214,12 @@ def test_the_check_never_writes(firm):
     before = {p: p.read_bytes() for p in firm.rglob("*") if p.is_file()}
     run.check_note(path, str(firm), write_dir="silica")
     assert {p: p.read_bytes() for p in firm.rglob("*") if p.is_file()} == before
+
+
+def test_a_dense_floor_belongs_to_an_embedder_silica_ships_a_row_for():
+    """A cosine floor is a property of one embedder (ADR-0078); a key that names
+    no row would sit unused while every check said "no vectors"."""
+    from silica.config import EMBEDDER_DEFAULTS
+
+    assert set(run.DENSE_FLOORS) <= set(EMBEDDER_DEFAULTS)
+    assert 0 < run.LEXICAL_FLOOR < 1
