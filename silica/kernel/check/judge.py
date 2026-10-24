@@ -15,24 +15,29 @@ import json
 import re
 from collections.abc import Callable
 
+from silica.kernel.text import dates
 from silica.kernel.text.text import squash
 
-# The criteria Jev chooses among: the verdict names of point 7, each worded as
-# what the block does to its passages.
+# The criteria Jev chooses among, each worded on the claim's own point. The
+# first wording ("a passage states ... a different fact") read any other fact
+# in a passage as a contradiction: on 2026-10-24 Jev called "received by email
+# on 3 February 2026" contradicted by a passage that says exactly that and
+# "not yet reviewed" (0.97); worded on the point, 8 of 8 dev cases came right.
 CRITERIA = {
-    "supported": "the passages state what the text says, in the same or other words",
-    "contradicted": "a passage states the opposite of the text, or a different fact, date, number or outcome",
-    "overstated": ("a passage supports only a narrower claim: the text drops a condition, a qualifier or an "
-                   "exception the passage states, or turns 'some', 'usually' or 'where' into 'always' or 'any'"),
-    "off-point": "the passages are on another subject, or a related one that neither supports nor contradicts the text",
-    "not in these passages": "the passages are on the same subject but say nothing about this point",
-    "not a statement of fact": "the text states no fact: a question, a plan, an opinion or an instruction",
+    "supported": "the passages say what the claim says about its point, in the same or other words or language",
+    "contradicted": ("the passages give a different value for the claim's own point: another date, number, name, "
+                     "party or outcome, or the opposite"),
+    "overstated": ("the passages say something narrower about the claim's point: the claim drops a condition, a "
+                   "qualifier or an exception they state, or generalises it to always, every or any"),
+    "off-point": "the passages are about a different subject from the claim",
+    "not in these passages": "the passages are about the claim's subject but do not address its point",
+    "not a statement of fact": "the claim is a question, a plan, an opinion or an instruction",
 }
 QUESTION = {"verdict": {
     "type": "choice",
-    "instructions": ("A person wrote the text below and cites or relies on the passages, which come from their "
-                     "own sources. Judge the text against the passages only, never against outside knowledge. "
-                     "The text and the passages may be in different languages."),
+    "instructions": ("Judge only the CLAIM's own point against the PASSAGES. Other facts in the passages that the "
+                     "claim does not mention are not a contradiction. Use only the passages, never outside "
+                     "knowledge; the claim and the passages may be in different languages."),
     "criteria": CRITERIA,
 }}
 # Per kind, the probability Jev must give its choice for the verdict to stand;
@@ -45,9 +50,18 @@ Decide = Callable[[dict, dict], "dict | None"]
 Chat = Callable[[str], str]
 
 
+def _iso(text: str) -> str:
+    """Absolute dates as ISO days. Jev read "3 febbraio 2026" against "3 February
+    2026" as two dates (contradicted, 0.92, 2026-10-24); the rule reader already
+    knows they are one."""
+    for d, a, b in reversed(dates.find_dates(text)):
+        text = text[:a] + d + text[b:]
+    return text
+
+
 def _state(text: str, passages: list[dict]) -> dict:
-    return {"text": text, "passages": [{"source": f"{p['path']}:{p['line']}", "text": p["text"][:PASSAGE_CHARS]}
-                                       for p in passages]}
+    return {"claim": _iso(text), "passages": [
+        {"source": f"{p['path']}:{p['line']}", "text": _iso(p["text"][:PASSAGE_CHARS])} for p in passages]}
 
 
 def which_passage(text: str, passages: list[dict], decide: Decide) -> dict | None:
@@ -57,7 +71,7 @@ def which_passage(text: str, passages: list[dict], decide: Decide) -> dict | Non
         return passages[0]
     criteria = {str(i): p["text"][:300] for i, p in enumerate(passages, 1)}
     answers = decide(_state(text, passages), {"rests_on": {
-        "type": "choice", "instructions": "Which passage bears most directly on the text?", "criteria": criteria}})
+        "type": "choice", "instructions": "Which passage bears most directly on the claim's point?", "criteria": criteria}})
     if not answers:
         return None
     return passages[int(answers["rests_on"]["choice"]) - 1]
@@ -81,7 +95,7 @@ def by_jev(text: str, passages: list[dict], decide: Decide) -> dict | None:
     return out
 
 
-_PROMPT = """A person wrote TEXT and relies on PASSAGES from their own sources. Judge TEXT against the PASSAGES only, never against outside knowledge. TEXT and PASSAGES may be in different languages.
+_PROMPT = """A person wrote TEXT and relies on PASSAGES from their own sources. Judge only TEXT's own point against the PASSAGES; other facts in a passage that TEXT does not mention are not a contradiction. Never use outside knowledge. TEXT and PASSAGES may be in different languages.
 Choose one verdict:
 {criteria}
 Reply with JSON only: {{"verdict": "<one of the verdicts>", "evidence": "<words copied exactly from one passage, or empty>", "source": "<that passage's source>"}}

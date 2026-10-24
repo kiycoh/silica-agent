@@ -37,7 +37,18 @@ from silica.kernel.write.contested import lifecycle, trust
 # goes to the model. The dense margin is 0.015 a side on 29 blocks; re-measure
 # on the first 200-note vault a gate runs on, or by 2027-01-31.
 LEXICAL_FLOOR = 0.3
-DENSE_FLOORS: dict[str, float] = {"embeddinggemma-2": 0.645}
+# jina v5 small, measured the same way the same day once its drive was
+# mounted, dates counted as sources (point 4.3): no-source blocks at most
+# 0.234, sourced blocks with no link, name, identifier or date at least 0.294.
+# A thinner absolute margin than Gemma's, the same re-measure condition.
+DENSE_FLOORS: dict[str, float] = {"embeddinggemma-2": 0.645, "jina-embeddings-v5-text-small": 0.26}
+
+
+def dense_floor(model: str) -> float | None:
+    """The floor for the configured embedder id, matched the way its config
+    row is (config.embedder_defaults: the key inside the id)."""
+    m = (model or "").lower()
+    return next((v for k, v in DENSE_FLOORS.items() if k in m), None)
 PASSAGES = 5
 SEARCH_WIDTH = 200
 
@@ -148,7 +159,9 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
             elif hit and hit in pool.paths:
                 srcs.append(hit)
         named = sorted((res.mentions(text) & pool.paths) - {path} - set(srcs))
-        id_hits: list[str] = []
+        # Point 4.3: the notes that hold the block's identifiers and absolute
+        # dates word for word are sources, as a link is.
+        found_in: list[str] = []
         for spelling, key in rules.identifiers(text):
             rows = ix.idents.get(key, [])
             if not rows:
@@ -156,7 +169,7 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
                              "say": f"no note in the vault holds {spelling}"})
                 continue
             inpool = [r for r in rows if r[0] in pool.paths]
-            id_hits += [rules.at(r[0], r[1]) + (f" ({r[2]})" if r[2] != spelling else "") for r in inpool[:1]]
+            found_in += [r[0] for r in inpool[:1]]
         cited = list(dict.fromkeys(srcs + named))
         for s in cited:
             if (say := _status(s, notes[s])):
@@ -168,6 +181,7 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
             scope += _periods(s, notes[s].text)
         for d, _s, _e in dates.find_dates(text):
             holders = [r for r in ix.dates.get(d, []) if r[0] in pool.paths]
+            found_in += [r[0] for r in holders[:1]]
             local = scope + [p for h in {r[0] for r in holders} - set(cited) for p in _periods(h, notes[h].text)]
             f, st = rules.date_rules(d, local, ix, pool.paths)
             mine += f
@@ -191,7 +205,7 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
             passages = [h for h in search(b.clean, SEARCH_WIDTH) if h.get("path") in pool.paths][:PASSAGES]
         lexical = any(float(h.get("coverage") or 0) >= LEXICAL_FLOOR for h in passages)
 
-        sourced = bool(cited or id_hits)
+        sourced = bool(cited or found_in)
         attributed = b.kind == "quote" and (sourced or prev_sourced)
         quote_found = False
         for q in rules.quotations(b.text, whole=attributed):
@@ -231,7 +245,7 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
         if to_judge:
             waiting += 1
             if judge is not None:
-                mp = _model_passages(passages, cited, near, notes)
+                mp = _model_passages(passages, list(dict.fromkeys(cited + found_in)), near, notes)
                 key = hashlib.sha1("\0".join([b.clean] + sorted(
                     f"{x['path']}\0{x['text']}" for x in mp)).encode()).hexdigest()
                 v = cache.get(key)
@@ -247,6 +261,11 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
                     f, st = _verdict_rows(v, b.line)
                     mine += f
                     states += st
+                    # Point 5: a searched passage's status counts once a verdict
+                    # rests on it; a cited source already had its line above.
+                    rest = (v.get("at") or "").rsplit(":", 1)[0]
+                    if rest in notes and rest not in cited and (say := _status(rest, notes[rest])):
+                        mine.append({"kind": "source status", "words": notes[rest].stem, "say": say, "at": rest})
         for x in mine:
             findings.append({"grade": GRADES[x["kind"]], "line": b.line, "at": x.get("at", ""), **x})
         prev_sourced, prev_cited = sourced, cited
