@@ -4703,13 +4703,15 @@ async def note_check(payload: dict, request: Request):
     from silica.kernel.vault_manifest import active_write_dir
     from silica.metrics import ms_since, outcome_of
 
-    canon = note_resolver()(str(payload.get("path", "")))
+    # Off the event loop: the resolver reads the driver's graph, and every
+    # open stream (the narration SSE among them) waits while the loop does.
+    canon = await asyncio.to_thread(lambda: note_resolver()(str(payload.get("path", ""))))
     if not canon:
         raise HTTPException(404, "note not found in vault")
     path = canon if canon.endswith(".md") else canon + ".md"
     rules_only = payload.get("rules") is True
     confirmed = payload.get("confirm") is True
-    if rules_only and not check.read_cache(CONFIG.vault_path, path):
+    if rules_only and not await asyncio.to_thread(check.read_cache, CONFIG.vault_path, path):
         # Never checked (or its file torn): a rerun has no marks to bring back.
         return JSONResponse({"event": "done", "unchecked": True}, media_type="application/x-ndjson")
     loop = asyncio.get_running_loop()
