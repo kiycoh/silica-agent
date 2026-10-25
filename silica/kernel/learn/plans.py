@@ -556,6 +556,7 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
             missing = [t for t in missing if t not in said]
             found = list(dict.fromkeys(list(found) + list(said.values())))
             node["matched"] = {t: Path(p).stem for t, p in said.items()}
+            node["matched_paths"] = list(said.values())
         if missing:
             node["missing"] = missing
         if approx:
@@ -971,7 +972,9 @@ def _one_note_per_step(tree: list[dict], practice: set[str], ctx: dict | None = 
     for node in (tree[i] for i in walk):
         if node.get("gap"):
             continue
-        rest = [p for p in node["leaves"] if p in practice or p not in seen]
+        # the reader's answer for a topic stays with the topic, like practice
+        mine = set(node.get("matched_paths") or ())
+        rest = [p for p in node["leaves"] if p in practice or p in mine or p not in seen]
         if rest:
             node["leaves"] = rest
         seen.update(node["leaves"])
@@ -1436,23 +1439,29 @@ def _by_title_vector(topics: list[str], allowed: set[str]) -> dict[str, str]:
     return out
 
 
-# Texts embedded during this process, by model and text: the plan form
-# re-previews on every change, and the same ninety topics were embedded again
-# each time; the model is in the key so a changed embedder never reuses them.
-_VEC_MEMO: dict[tuple[str, str], list[float]] = {}
+# Texts embedded during this process, per vault index directory, by model and
+# text: the plan form re-previews on every change, and the same ninety topics
+# were embedded again each time; the model is in the key so a changed
+# embedder never reuses them, and the vault is, so one vault's topics never
+# land in another's index (ADR-0014: per-vault state follows the vault).
+_VEC_MEMO: dict[str, dict[tuple[str, str], list[float]]] = {}
+VEC_MAX = 4000
 
 
 def _embed(texts: list[str], embedder) -> list[list[float]]:
+    from silica.kernel.recall.paths import index_dir
+
     model = str(getattr(embedder, "model", "") or type(embedder).__name__)
-    if not _VEC_MEMO:
-        _VEC_MEMO.update(_vectors_on_disk())
-    todo = [t for t in dict.fromkeys(texts) if (model, t) not in _VEC_MEMO]
+    memo = _VEC_MEMO.get(str(index_dir()))
+    if memo is None:
+        memo = _VEC_MEMO[str(index_dir())] = _vectors_on_disk()
+    todo = [t for t in dict.fromkeys(texts) if (model, t) not in memo]
     if todo:
-        if len(_VEC_MEMO) > 4000:
-            _VEC_MEMO.clear()
-        _VEC_MEMO.update(((model, t), v) for t, v in zip(todo, embedder.embed(todo)))
-        _vectors_on_disk(_VEC_MEMO)
-    return [_VEC_MEMO[(model, t)] for t in texts]
+        for k in list(memo)[:max(0, len(memo) + len(todo) - VEC_MAX)]:
+            del memo[k]           # the oldest first, so the file stays bounded and keeps the rest
+        memo.update(((model, t), v) for t, v in zip(todo, embedder.embed(todo)))
+        _vectors_on_disk(memo)
+    return [memo[(model, t)] for t in texts]
 
 
 def _vectors_on_disk(value: dict | None = None) -> dict:

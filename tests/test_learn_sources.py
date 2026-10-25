@@ -383,6 +383,25 @@ def test_a_stem_two_notes_share_resolves_as_the_walk_did():
     assert plans.resolve_title("Nessuna", notes) is None
 
 
+def test_topic_vectors_stay_in_their_vault(tmp_path, monkeypatch):
+    import silica.config
+
+    class Emb:
+        model = "m1"
+
+        def embed(self, texts):
+            return [[1.0] for _t in texts]
+
+    plans._VEC_MEMO.clear()
+    for name, text in (("a", "topic of a"), ("b", "topic of b")):
+        (tmp_path / name).mkdir()
+        monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(tmp_path / name))
+        plans._embed([text], Emb())
+    stored = plans._vectors_on_disk()
+    assert set(stored) == {("m1", "topic of b")}               # b's index holds b's topics only
+    plans._VEC_MEMO.clear()
+
+
 def test_topic_vectors_survive_a_restart_and_never_cross_models(tmp_vault):
     calls = []
 
@@ -478,3 +497,10 @@ def test_a_note_met_by_meaning_across_the_material_by_unrelated_topics_is_generi
     assert kept["percettrone multistrato"] == {"C/Rete di percettroni.md": (0.8, False)}
     near = {0: [0], 1: [10], 2: [20]}                          # the same steps close together: not generic
     assert plans._without_generic(dense, asked, near, 100)[1] == set()
+
+
+def test_the_readers_answer_stays_in_its_step_when_an_earlier_step_holds_the_note():
+    tree = [{"node": "A", "leaves": ["n/X.md", "n/Y.md"]},
+            {"node": "B", "leaves": ["n/Z.md", "n/X.md"], "matched_paths": ["n/X.md"]}]
+    plans._one_note_per_step(tree, set())
+    assert tree[1]["leaves"] == ["n/Z.md", "n/X.md"] and tree[0]["leaves"] == ["n/X.md", "n/Y.md"]
