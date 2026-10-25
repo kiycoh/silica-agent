@@ -52,33 +52,78 @@ Then type `/report`. It is read-only: it writes one file, `GRAPH_REPORT.md`, and
 
 ## What you can do
 
-- **Turn a library into notes:** `/nucleate Inbox/` takes a folder, a glob or one file (PDF, DOCX, EPUB, PPTX, notebooks). Each file is its own transaction, checked against what you already have, and lands as the source's own sentences rather than a summary. Stop it whenever; it resumes.
-- **Ask, and be refused when the answer is not there:** `/explain`, `/compare`, `/summarize` and the chat answer from your notes and cite them. What the vault does not hold is refused, not filled in. `/web` is the explicit way out, with citations from the pages it actually opened.
+Silica is single-user: one person, one vault. There are no per-person permissions and no vault shared between people.
+
+**Bring documents in.** Slides, case files, papers and mail become notes in the source's own words, not a summary of them.
+
+- `/nucleate Inbox/` takes a folder, a glob or one file (PDF, DOCX, EPUB, PPTX, notebooks). Each file is one transaction, checked against what you already have. Stop it whenever; it resumes.
+- The vault's `+` imports files, a whole folder or a link into `Inbox/` with no chat turn; a YouTube link gives the video's transcript, and `/fetch <url>` does the same from the chat. A file dropped on the chat stays that chat's until you press "add to vault".
+- A long document is split at its headings into parts of at most 40,000 characters. A PDF page with no text, or with formulas its text layer loses, is read from its image by the model, up to 60 pages a file.
+- A note keeps its source's DOI, arXiv id, authors and title, so it can be cited without reopening the document. With Zotero linked, a paper's note opens under its byline, with links to Zotero, the PDF and the DOI.
+- `/mail import` keeps only the threads you took part in, from a mail client's export or Google Takeout, and writes nothing until `--apply`.
+- In a git repository, `/wiki` writes an `ARCHITECTURE.md` plus a note per subsystem under `docs/silica/`, and `/stale` flags the notes whose code changed shape since.
+
+**Ask, with the sources in view.** An answer comes from your notes and shows which ones.
+
+- `/explain`, `/compare`, `/summarize` and the chat answer from your notes and cite them. What the vault does not hold is refused, not filled in; `/web` is the explicit way out, cited from the pages it actually opened.
+- Each cited note gets a number. Clicking it opens the note at the line closest to the paragraph that cites it, when enough of their words match; pointing at it lights every paragraph that cites the same note.
+- A line under the answer counts the notes read, the steps and the seconds, and lists under "not cited" the notes it read and did not cite.
+- A number in the answer that is in no note the chat read and in nothing you typed is listed under it: "numbers not in what this turn read".
+- Each note `/nucleate` writes carries a `## Sources` block that leads to the source's verbatim copy in `sources/`. Search leaves those copies out, so a source never competes with the notes made from it.
+- Ask the last question again, or edit it. The chat also searches your earlier chats for what was asked and answered.
 
   <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/chat.png" alt="A chat answer listing the notes found by search, with each claim linked to its note and one link marked as having no note" width="820" />
   <br/>
   <sub>Every claim links to the note it came from; a link with no note behind it says so.</sub>
 
-- **Find how two ideas connect:** `/path "RAG" "Transformers"` walks the reading path between two notes over your wikilinks and the concept graph, `/relate` names the kind of each link, `/graph` and `/map` draw it.
+**Study (Learn).** Questions on your notes, graded against the source each note rests on.
 
-  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/explore-path.png" alt="One note in its reading order: the note to read first above it, the notes it unlocks below" width="820" />
-  <br/>
-  <sub>One note in its reading order: what to read first, and what it unlocks.</sub>
-
-- **Test yourself on what you wrote:** `/learn` asks, then corrects you by quoting the source line the note rests on; `/quiz` re-tests what is fading, scheduled with FSRS-6.
+- `/learn` and the Learn tab ask ten kinds of question, from recall and cloze to transfer and contradiction, and correct you by quoting the source line the note rests on. When the note says more than its source, the answer reads "Source mismatch" and is not scored. `/quiz` re-tests what is fading, scheduled with FSRS-6.
+- Before the reveal you say how sure you are: certain (90), pretty sure (70), half unsure (50), guessing (25), or skip. The grader never sees it, nor the session or the chat. Caps come after, in code: a hint or "Just tell me" caps the rating at Hard, and a right answer given while guessing caps at Good.
+- After 10 unassisted answers with a confidence, Calibration sets what you said against how often you met the criteria, level by level.
+- "Explain it" closes the book: you explain a note in your own words, a student who has not read it asks 4 questions, and your explanation is then checked against the note and its source.
+- No single score: estimated retention, depth (Facts, Parts, Mechanisms, New contexts), the relations you answered on and the misconceptions noted are shown apart. A note never asked counts as never practised, not as failed.
+- 3 misses in a row on a note put a worked example from it one click away; it never appears unasked. A plan over a folder, some notes or a topic paces you to its date, and that day shows in the Calendar.
 
   <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/learn.png" alt="The Learn tab: questions waiting from earlier sessions, the ones missed, and study plans" width="820" />
   <br/>
   <sub>Questions waiting from earlier sessions, the ones you missed, and your plans.</sub>
 
-- **Take anything back:** `/undo` one note, `/revert <run-id>` one run, `/revert --source paper.pdf` everything one document produced, however far it spread. A deleted note waits in the trash until you bring it back or delete it for good.
-- **Keep code docs honest:** launched in a git repository, `/wiki` writes an `ARCHITECTURE.md` plus a note per subsystem under `docs/silica/`, and `/stale` flags the notes whose code changed shape since.
+**See how notes connect.** The vault as a map: what sits together, what joins it, and what to read first.
+
+- `/path "RAG" "Transformers"` walks the reading path between two notes over your wikilinks and the concept graph, `/relate` names the kind of each link, `/graph` and `/map` draw it.
+
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/explore-path.png" alt="One note in its reading order: the note to read first above it, the notes it unlocks below" width="820" />
+  <br/>
+  <sub>One note in its reading order: what to read first, and what it unlocks.</sub>
+
+- On the graph, a click makes a note the centre of its own map. In 2D the areas can be drawn as blobs, one ribbon standing for the links between two of them, and the semantic zones, notes grouped by meaning rather than by links, as outlines over them.
+- In Explore, Folders shades each folder by how much it mixes areas. Areas shows one area and the links to its neighbours over the coupling of every pair, each link with the sentence that carries it. Read gives the whole vault a reading order from its hubs.
+- Compare one folder, area or zone with another: the panel says what characterises each and quotes the links that join them.
+- Click a concept to light the notes that treat it; a second concept narrows them to the notes that treat both, and the panel quotes the lines.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/explore-graph-3d.png" alt="The vault as a 3D graph: notes coloured by area, edge types and node shapes listed in the legend" width="820" />
   <br/>
   <sub>The same vault in 3D, coloured by the 23 areas it sorts itself into. A note's size is how much the vault routes through it.</sub>
 </p>
+
+**Trust what it writes.** Every write is checked, shown to you and reversible.
+
+- Each write is a card in the chat with its revert. When the check is unsure, the card says why, shows the changed lines and asks you to keep or revert it.
+- `/undo` one note, `/revert <run-id>` one run, `/revert --source paper.pdf` everything one document produced, however far it spread. A deleted note waits in the trash until you bring it back or delete it for good.
+- When a new source contradicts a note, the contradiction stays written on the note until you resolve it; `/contested` lists them.
+- A flashcard whose answer is not in the note it cites is dropped before you see it; a slide point that is not in its note is named under the deck.
+- `/verify` vouches for a note as you, bound to its text. `/stale` lists the notes whose source changed and the notes Silica wrote that were since edited by hand.
+
+**Organise without moving files.** Files stay where you put them; Silica groups and remembers around them.
+
+- A workspace is a note that gathers notes and folders from anywhere in the vault, by list, by folder or by a frontmatter value, plus the notes made from them. A chat opened in it searches only there and reads the workspace's text as standing instructions.
+- Vault instructions, written once in Settings, are read by every chat over the vault.
+- Silica keeps what a later chat will need and says so in the answer, unless the chat has brought in outside text such as a web page or a file. `/memory` shows what it holds, `/remember` saves your words as typed, `/incognito` keeps a chat off the record.
+- The Calendar holds events, deadlines and the day each study plan is due; click or drag an empty time to add an event, with a reminder if you want one. `/agenda` lists a day or a week.
+- A request you make in 3 separate chats, never undone, becomes a proposed skill drafted from your own words. It runs only once you install it from Settings › Skills.
+- `/curate` plans links, orphans and duplicates, and `/aliases` proposes other names for note titles; both write only with `--apply`.
 
 ## How a write is checked
 
