@@ -459,3 +459,22 @@ def test_a_topic_met_by_meaning_is_said_on_the_step_line_and_shed_by_its_label()
     step = plans.parse_steps("## Steps\n- [ ] Reti: [[A]]" + tail + "\n")[0]
     assert plans._step_label({"text": "[[A]]" + tail, "notes": ["A"]}) == "A" and step["hours"] == 6.0
     assert step["notes"] == ["A"]                 # no title in the tail becomes a note of the step
+
+
+def test_a_note_met_by_meaning_across_the_material_by_unrelated_topics_is_generic():
+    dense = {"introduzione al corso": {"C/Apprendimento artificiale.md": (0.8, False)},
+             "tipi di task": {"C/Apprendimento artificiale.md": (0.8, False)},
+             "reti convolutive profonde": {"C/Apprendimento artificiale.md": (0.8, False)},
+             "percettrone multistrato": {"C/Rete di percettroni.md": (0.8, False)},
+             "algoritmo del percettrone": {"C/Rete di percettroni.md": (0.8, False)},
+             "versione duale del percettrone": {"C/Rete di percettroni.md": (0.8, False)}}
+    asked = {0: [("introduzione al corso", 1.0), ("algoritmo del percettrone", 1.0)],
+             1: [("tipi di task", 1.0), ("versione duale del percettrone", 1.0)],
+             2: [("reti convolutive profonde", 1.0), ("percettrone multistrato", 1.0)]}
+    aligned = {0: [0, 1], 1: [40, 41], 2: [90, 91]}
+    kept, generic = plans._without_generic(dense, asked, aligned, 100)
+    assert generic == {"C/Apprendimento artificiale.md"}      # the perceptron comes back by name: not generic
+    assert "C/Apprendimento artificiale.md" not in kept["tipi di task"]
+    assert kept["percettrone multistrato"] == {"C/Rete di percettroni.md": (0.8, False)}
+    near = {0: [0], 1: [10], 2: [20]}                          # the same steps close together: not generic
+    assert plans._without_generic(dense, asked, near, 100)[1] == set()

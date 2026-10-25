@@ -674,6 +674,7 @@ def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: 
     names = dict(enumerate(labels))
     aligned = so.align(steps, main) if ctx["ordered"] else so.best_steps(steps, main, names)
     given = {n for v in aligned.values() for n in v}
+    dense, ctx["generic"] = _without_generic(dense, asked, aligned, len(main["rows"]))
     picked_by: dict[int, list[dict]] = {}
     how: dict[tuple, str] = {}
     stray: set[tuple] = set()      # rows met outside a step's own lectures
@@ -733,6 +734,44 @@ def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: 
                 pairs.append((t, Path(max(near)[1]).stem))
         ctx["by_meaning"][i] = pairs
     return ctx
+
+
+GENERIC_MIN_STEPS = 3
+GENERIC_SPAN = 0.5
+
+
+def _without_generic(dense: dict, asked: dict, aligned: dict[int, list[int]], n_rows: int) -> tuple[dict, set[str]]:
+    """The title-vector matches less the course's generic notes, and those
+    notes (ADR-0131 amendment, point 7). A note is generic when topics of
+    GENERIC_MIN_STEPS steps or more that share no word with its title meet it
+    by meaning, and those steps' rows lie further apart in the material than
+    GENERIC_SPAN of it: on the course (2026-10-25) Apprendimento artificiale
+    was met by "introduzione al corso" and "computazione numerica" among
+    others, from the first lecture to the last; Rete di percettroni was met
+    from early and late blocks too, but by topics naming the perceptron. Words
+    are never filtered, and the note stays where its lecture puts it: what
+    goes is the claim that it teaches those topics. One corpus: reopen with
+    the role thresholds."""
+    import statistics
+
+    anchor = {i: statistics.median(rows) for i, rows in aligned.items() if rows}
+    steps_of: dict[str, set[int]] = {}
+    for i, ts in asked.items():
+        for t, _w in ts:
+            words = set(_root_words(t))
+            for p in dense.get(t, {}):
+                # a topic sharing a word with the title is the concept coming
+                # back (the perceptron in three blocks), not a hub's likeness
+                if not (words & _title_words(Path(p).stem)):
+                    steps_of.setdefault(p, set()).add(i)
+    generic = set()
+    for p, steps in steps_of.items():
+        at = [anchor[i] for i in steps if i in anchor]
+        if len(steps) >= GENERIC_MIN_STEPS and len(at) >= 2 and (max(at) - min(at)) > GENERIC_SPAN * n_rows:
+            generic.add(p)
+    if not generic:
+        return dense, generic
+    return {t: {p: v for p, v in d.items() if p not in generic} for t, d in dense.items()}, generic
 
 
 def _whole_lectures(picked_by: dict[int, list[dict]], material: list[dict], stray: set[tuple] = frozenset(),
