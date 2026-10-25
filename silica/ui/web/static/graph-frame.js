@@ -939,7 +939,7 @@ function refreshPaint() {
   // With PARTICLES on the lib still owns the photon carriers, so those keep
   // the re-pass beside the merge.
   if (is2D() || PARTICLES) Graph.linkColor(Graph.linkColor());
-  if (!is2D()) repaintLinkSeg();
+  if (!is2D()) repaintLinkSeg(); else repaintGLLinks();
   wake(120);
   startFade();
 }
@@ -971,7 +971,7 @@ function fadeStep(now) {
   if (!Graph) return;
   // 2D paints from the accessors and only has to be told; 3D reads a note's
   // fade in its shader on every draw, and the merged links from their buffer.
-  if (is2D()) Graph.nodeColor(Graph.nodeColor());
+  if (is2D()) { Graph.nodeColor(Graph.nodeColor()); repaintGLLinks(); }
   else repaintLinkSeg();
   wake(200);
   if (moving) fadeRaf = requestAnimationFrame(fadeStep);
@@ -1941,6 +1941,293 @@ function linkSegStep() {
   writeLinkSegPositions();
 }
 
+// --- 2D: the solid links in WebGL, under the canvas -------------------------
+// The canvas stroke was the whole cost of a 2D frame on a big vault. force-graph
+// already strokes one path per (colour, width, dash), but Skia tessellates a
+// path 1px or wider, and a wikilink is 1.6px: on the 23,836-edge vault
+// (2026-10-26, Intel iGPU, 1600x913 backing) that was ~93ms of raster a frame
+// against 6.5ms of script, 9.7fps on a pan. Under 1px Skia takes its hairline
+// path instead, which is what the half ratio of the dynamic resolution below
+// was buying all along: it made a 1.6px line a 0.8px one.
+//
+// So every solid link is one instanced quad at its own width, on a WebGL2
+// canvas stacked under the lib's, positions read from a texture of the nodes'
+// x/y, the colours rewritten only when the paint changes (the same three
+// callers as repaintLinkSeg). The dashed links, the citations (the lib draws
+// the arrowhead after its own line) and the photon carriers stay the lib's.
+//
+// The look is the lib's, by two rules. One colour at one width is ONE path to
+// the lib, filled once, so its lines never darken where they cross: that group
+// (every wikilink) is drawn with MAX blending into an offscreen buffer and laid
+// over once. A colour in many widths was that many paths stacked (the similar
+// layer has ~45), so it is drawn straight, each line over the last; only two
+// lines of one width crossing differ from the lib's picture. The lib's
+// pre-paint layers (blobs, zones, the rim, the wedges) sat under its links, so
+// they are drawn on a 2D canvas under this one.
+let GLLinks = null;   // the layer; false where WebGL2 is unavailable or was lost
+const glOwnsLink = l => !!GLLinks && l.__glOwn;
+
+const GL_LINK_VS = `#version 300 es
+in vec2 corner;            // x: 0 at the source, 1 at the target; y: -1|1 across
+in uvec2 ends;             // the two nodes, as indices into ALL_NODES
+in vec4 color;             // straight alpha
+in float width;            // CSS px, the lib's linkWidth
+uniform highp sampler2D pos;
+uniform int posW;
+uniform vec3 m0, m1;       // graph units -> device px: the canvas's own transform
+uniform vec2 size;         // device px
+uniform float dpr;
+out vec4 vColor; out float vD; out float vHalf;
+vec2 at(uint i) { return texelFetch(pos, ivec2(int(i) % posW, int(i) / posW), 0).xy; }
+vec2 dev(vec2 p) { return vec2(dot(m0, vec3(p, 1.)), dot(m1, vec3(p, 1.))); }
+void main() {
+  vec2 a = dev(at(ends.x)), b = dev(at(ends.y)), d = b - a;
+  float L = length(d);
+  vec2 u = L > 0. ? d / L : vec2(1., 0.);
+  vHalf = width * dpr * .5;
+  vD = corner.y * (vHalf + 1.);   // one more px for the edge ramp
+  vec2 p = mix(a, b, corner.x) + vec2(-u.y, u.x) * vD;
+  vColor = color;
+  gl_Position = vec4(p.x / size.x * 2. - 1., 1. - p.y / size.y * 2., 0., 1.);
+}`;
+// Coverage is the box filter of the stroke across one pixel: a 1.6px line is
+// solid over its middle and ramps over a pixel at each edge, as Skia's AA
+// stroke does; a thinner one never reaches full cover, as its hairline does.
+const GL_LINK_FS = `#version 300 es
+precision mediump float;
+in vec4 vColor; in float vD; in float vHalf;
+out vec4 o;
+void main() {
+  float a = vColor.a * clamp(vHalf + .5 - abs(vD), 0., 1.);
+  o = vec4(vColor.rgb * a, a);
+}`;
+const GL_LAY_VS = `#version 300 es
+void main() { gl_Position = vec4(gl_VertexID == 1 ? 3. : -1., gl_VertexID == 2 ? 3. : -1., 0., 1.); }`;
+const GL_LAY_FS = `#version 300 es
+precision mediump float;
+uniform sampler2D t;
+out vec4 o;
+void main() { o = texelFetch(t, ivec2(gl_FragCoord.xy), 0); }`;
+const GL_STRIDE = 16;   // u32 source, u32 target, rgba8, f32 width
+
+function glProgram(gl, vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+  }
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+// Built with the 2D instance, before its first frame; false (and the lib draws
+// every link, as before this layer) where there is no WebGL2 to build it on.
+function buildGLLinks() {
+  const cv = document.querySelector("#graph canvas");
+  const box = cv && cv.parentElement;
+  const glc = document.createElement("canvas"), under = document.createElement("canvas");
+  const gl = box && glc.getContext("webgl2",
+    { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false });
+  if (!gl) return false;
+  let prog, lay;
+  try { prog = glProgram(gl, GL_LINK_VS, GL_LINK_FS); lay = glProgram(gl, GL_LAY_VS, GL_LAY_FS); }
+  catch (e) { console.warn("graph: WebGL links unavailable, the canvas draws them", e); return false; }
+  // After the lib's canvas in the DOM, because "#graph canvas" means the lib's
+  // everywhere in this file, and under it on screen: z-index -1 inside a box
+  // that isolates its own stacking, so they paint over its (empty) background
+  // and below its in-flow canvas.
+  box.style.isolation = "isolate";
+  for (const c of [under, glc]) {
+    c.style.cssText = "position:absolute;left:0;top:0;z-index:-1;pointer-events:none";
+    box.appendChild(c);
+  }
+  under.style.background = GP.bg;
+  RAW_EDGES.forEach(l => { l.__glOwn = !isDashed(l) && l.type !== "CITES" && !libOwnsLink(l); });
+  COVER_EDGES.forEach(l => { l.__glOwn = false; });
+  const index = new Map(ALL_NODES.map((n, i) => [n.id, i]));
+  const posW = Math.min(4096, ALL_NODES.length || 1);
+  const posH = Math.ceil((ALL_NODES.length || 1) / posW);
+  const L = {
+    gl, glc, under, uctx: under.getContext("2d"), prog, lay, index, posW, posH,
+    pos: new Float32Array(posW * posH * 2), posTex: gl.createTexture(),
+    inst: new ArrayBuffer(RAW_EDGES.length * GL_STRIDE || GL_STRIDE),
+    instBuf: gl.createBuffer(), cornerBuf: gl.createBuffer(), vao: gl.createVertexArray(),
+    fbo: gl.createFramebuffer(), fboTex: gl.createTexture(), groups: [], dirty: true,
+    rgba: new Map(),
+    u: Object.fromEntries(["pos", "posW", "m0", "m1", "size", "dpr"]
+      .map(k => [k, gl.getUniformLocation(prog, k)])),
+    uLay: gl.getUniformLocation(lay, "t"),
+  };
+  gl.bindTexture(gl.TEXTURE_2D, L.posTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, posW, posH, 0, gl.RG, gl.FLOAT, null);
+  for (const t of [L.posTex, L.fboTex]) {
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  }
+  gl.bindVertexArray(L.vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, L.cornerBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, -1, 1, -1, 1, 1, 0, -1, 1, 1, 0, 1]), gl.STATIC_DRAW);
+  const at = k => gl.getAttribLocation(prog, k);
+  gl.enableVertexAttribArray(at("corner"));
+  gl.vertexAttribPointer(at("corner"), 2, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, L.instBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, L.inst.byteLength, gl.DYNAMIC_DRAW);
+  L.attr = { ends: at("ends"), color: at("color"), width: at("width") };
+  for (const k in L.attr) {
+    gl.enableVertexAttribArray(L.attr[k]);
+    gl.vertexAttribDivisor(L.attr[k], 1);
+  }
+  gl.bindVertexArray(null);
+  // A lost context (driver reset, the tab's GPU process gone) hands every link
+  // back to the lib rather than leaving the frame without them.
+  glc.addEventListener("webglcontextlost", () => {
+    if (GLLinks !== L) return;
+    GLLinks = false;
+    under.remove(); glc.remove();
+    if (Graph) Graph.backgroundColor(GP.bg).linkVisibility(Graph.linkVisibility());
+  });
+  return L;
+}
+
+function dropGLLinks() {
+  if (!GLLinks) { GLLinks = null; return; }
+  const ext = GLLinks.gl.getExtension("WEBGL_lose_context");
+  GLLinks = null;   // first, so the loss event below finds no layer to hand back
+  if (ext) ext.loseContext();   // the browser caps live WebGL contexts at ~16
+}
+
+// The paint changed: colours, the visible set, or both. Picked up on the next
+// frame, which every one of these callers also asks for.
+function repaintGLLinks() { if (GLLinks) GLLinks.dirty = true; }
+
+function glRGBA(s) {
+  let c = GLLinks.rgba.get(s);
+  if (c) return c;
+  if (s[0] === "#") {
+    const n = parseInt(s.slice(1), 16);
+    c = [(n >> 16) & 255, (n >> 8) & 255, n & 255, 255];
+  } else {
+    const p = s.match(/rgba?\(([^)]+)\)/)[1].split(",").map(Number);
+    c = [p[0], p[1], p[2], Math.round((p.length > 3 ? p[3] : 1) * 255)];
+  }
+  GLLinks.rgba.set(s, c);
+  return c;
+}
+
+// Groups by colour in the order the lib meets them, which is the order it
+// stacks its paths in; each group's lines contiguous in the instance buffer.
+function packGLLinks() {
+  const L = GLLinks, by = new Map();
+  for (const l of RAW_EDGES) {
+    if (!l.__glOwn || l._hidden || quietNow(l)) continue;
+    const c = linkPaint(l);
+    const g = by.get(c);
+    if (g) g.push(l); else by.set(c, [l]);
+  }
+  const u32 = new Uint32Array(L.inst), u8 = new Uint8Array(L.inst), f32 = new Float32Array(L.inst);
+  let k = 0;
+  L.groups = [];
+  for (const [c, links] of by) {
+    const rgba = glRGBA(c), w0 = links[0].width || 1;
+    let union = true;
+    for (const l of links) {
+      const w = l.width || 1, q = k * GL_STRIDE;
+      if (w !== w0) union = false;
+      u32[q >> 2] = L.index.get(l.from); u32[(q >> 2) + 1] = L.index.get(l.to);
+      u8.set(rgba, q + 8);
+      f32[(q >> 2) + 3] = w;
+      k++;
+    }
+    L.groups.push({ start: k - links.length, count: links.length, union: union && links.length > 1 });
+  }
+  const gl = L.gl;
+  gl.bindBuffer(gl.ARRAY_BUFFER, L.instBuf);
+  gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Uint8Array(L.inst, 0, k * GL_STRIDE));
+  L.dirty = false;
+}
+
+// The canvas the lib's pre-paint layers draw on: the one under the links when
+// the layer is up, the lib's own when it is not. Same transform either way.
+function underCtx(ctx) {
+  const L = GLLinks;
+  if (!L) return ctx;
+  const cv = ctx.canvas, u = L.under;
+  if (u.width !== cv.width || u.height !== cv.height) {
+    u.width = cv.width; u.height = cv.height;
+    u.style.width = cv.style.width; u.style.height = cv.style.height;
+  }
+  L.uctx.setTransform(1, 0, 0, 1, 0, 0);
+  L.uctx.clearRect(0, 0, u.width, u.height);
+  L.uctx.setTransform(ctx.getTransform());
+  return L.uctx;
+}
+
+// After the lib's own frame, so the links follow the positions this frame's
+// tick just wrote, the ones the nodes were drawn at.
+function drawGLLinks(ctx, scale) {
+  const L = GLLinks;
+  if (!L) return;
+  const gl = L.gl, cv = ctx.canvas, W = cv.width, H = cv.height;
+  if (L.glc.width !== W || L.glc.height !== H) {
+    L.glc.width = W; L.glc.height = H;
+    L.glc.style.width = cv.style.width; L.glc.style.height = cv.style.height;
+    gl.bindTexture(gl.TEXTURE_2D, L.fboTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, L.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, L.fboTex, 0);
+  }
+  if (L.dirty) packGLLinks();
+  for (let i = 0; i < ALL_NODES.length; i++) {
+    L.pos[2 * i] = ALL_NODES[i].x || 0; L.pos[2 * i + 1] = ALL_NODES[i].y || 0;
+  }
+  gl.bindTexture(gl.TEXTURE_2D, L.posTex);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, L.posW, L.posH, gl.RG, gl.FLOAT, L.pos);
+  const m = ctx.getTransform();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.enable(gl.BLEND);
+  for (const g of L.groups) {
+    gl.useProgram(L.prog);
+    gl.uniform1i(L.u.pos, 0); gl.uniform1i(L.u.posW, L.posW);
+    gl.uniform3f(L.u.m0, m.a, m.c, m.e); gl.uniform3f(L.u.m1, m.b, m.d, m.f);
+    gl.uniform2f(L.u.size, W, H);
+    gl.uniform1f(L.u.dpr, m.a / scale);   // the lib's lineWidth is width / scale, under dpr * scale
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, L.posTex);
+    gl.bindVertexArray(L.vao);
+    // No base instance in WebGL2: the group's offset rides on the pointers.
+    gl.bindBuffer(gl.ARRAY_BUFFER, L.instBuf);
+    const o = g.start * GL_STRIDE;
+    gl.vertexAttribIPointer(L.attr.ends, 2, gl.UNSIGNED_INT, GL_STRIDE, o);
+    gl.vertexAttribPointer(L.attr.color, 4, gl.UNSIGNED_BYTE, true, GL_STRIDE, o + 8);
+    gl.vertexAttribPointer(L.attr.width, 1, gl.FLOAT, false, GL_STRIDE, o + 12);
+    if (g.union) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, L.fbo);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.blendEquation(gl.MAX);
+    } else {
+      gl.blendEquation(gl.FUNC_ADD);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    }
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, g.count);
+    gl.bindVertexArray(null);
+    if (!g.union) continue;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.useProgram(L.lay);
+    gl.bindTexture(gl.TEXTURE_2D, L.fboTex);
+    gl.uniform1i(L.uLay, 0);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+}
+
 // --- 3D: the same crystal the mark is cut from ------------------------------
 // PARTICLES/SHADING come from the settings panel (Display). Both off is the
 // bundle's own look: smooth lit spheres, no fog, still edges.
@@ -2433,6 +2720,9 @@ window.addEventListener("resize", () => { DPR_REAL = dprNative(); });
 
 function setRes(scale) {
   if (dprScale === scale || !Graph || !is2D()) return;
+  // The links on WebGL took the fill with them: at full ratio a pan holds 60fps
+  // at 1600x913 and at 3200x2000 (2026-10-26), so going soft buys nothing.
+  if (GLLinks && scale !== 1) return;
   dprScale = scale;
   // A same-value set still runs the lib's resize path: it rebuilds both
   // canvases at the new ratio (verified live) — and leaves them BLANK, so a
@@ -2548,10 +2838,12 @@ function buildGraph() {
     // browser caps them at ~16 — the graph would go black after enough mode
     // switches with nothing in the console to say why.
     try { Graph._destructor(); } catch (e) { console.warn("graph teardown failed", e); }
+    dropGLLinks();
     el.innerHTML = "";
     LinkSeg = null;   // died with the scene; the next 3D build remakes it
   }
   const G = is2D() ? new ForceGraph(el) : new ForceGraph3D(el);
+  if (is2D()) GLLinks = buildGLLinks();
   syncCanvasSize(G);   // the bundle's default is the size at its load, not now
   // Seeded positions and the decay that goes with them, decided before the data
   // lands: on a cache hit the whole rerelaxation fits inside the warmup, so the
@@ -2566,7 +2858,8 @@ function buildGraph() {
     .d3AlphaDecay(seeded ? FAST_DECAY : COLD_DECAY)
     .cooldownTicks(Infinity)   // alpha is the gate; see ALPHA_MIN
     .cooldownTime(Infinity)
-    .backgroundColor(GP.bg)
+    // Under the WebGL links the floor is the canvas below them (buildGLLinks).
+    .backgroundColor(GLLinks ? "transparent" : GP.bg)
     .linkSource("from").linkTarget("to")
     .nodeVal("size")
     .nodeColor(nodeColor)
@@ -2596,7 +2889,7 @@ function buildGraph() {
       : (LIGHT ? DATA.colors.gap_paper : DATA.colors.gap))
     .linkDirectionalParticleWidth(l => l.type === "SIMILAR" ? 1.5 : 2)
     .nodeVisibility(n => !n._hidden)
-    .linkVisibility(l => !l._hidden && !quietNow(l))
+    .linkVisibility(l => !glOwnsLink(l) && !l._hidden && !quietNow(l))
     .onNodeClick((n, e) => clickNote(n, e))
     // 3D only: 2D picks its hover itself (pickHover2D). One argument, since
     // the lib's second is the previous node.
@@ -2678,11 +2971,15 @@ function buildGraph() {
       // zones and the rim, which are all drawings of the free layout.
       .onRenderFramePre((ctx, scale) => {
         drsOnPaint();
-        if (ARR) { drawWedges(ctx, scale); return; }
-        drawAreaBlobs(ctx, scale); drawAreaRibbons(ctx, scale); drawZones(ctx, scale);
-        drawRim(ctx, scale);
+        const under = underCtx(ctx);
+        if (ARR) { drawWedges(under, scale); return; }
+        drawAreaBlobs(under, scale); drawAreaRibbons(under, scale); drawZones(under, scale);
+        drawRim(under, scale);
       })
-      .onRenderFramePost((ctx, scale) => ARR ? drawArrangedNames(ctx, scale) : drawAreaNames(ctx, scale));
+      .onRenderFramePost((ctx, scale) => {
+        drawGLLinks(ctx, scale);
+        ARR ? drawArrangedNames(ctx, scale) : drawAreaNames(ctx, scale);
+      });
   } else {
     // Perf on big vaults (1200+ notes): the bundle gives every link its own
     // THREE.Line — a draw call and a per-tick buffer write each. The links are
@@ -3317,7 +3614,7 @@ function applyFilters() {
   // 3D link visibility lives in the merged buffer; the accessor re-pass stays
   // for 2D and, with PARTICLES on, for the lib-owned photon carriers.
   if (is2D() || PARTICLES) Graph.linkVisibility(Graph.linkVisibility());
-  if (!is2D()) repaintLinkSeg();
+  if (!is2D()) repaintLinkSeg(); else repaintGLLinks();
   wake(120);   // and re-evaluate the idle tick: gaps may have just been toggled
 }
 

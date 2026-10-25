@@ -425,7 +425,9 @@ class TestBigVaultPerfKnobs:
         assert 'Object.defineProperty(window, "devicePixelRatio"' in html
         # first thing in the pre-paint hook, ahead of the arrangement's own
         # early return (ADR-0088), so every 2D repaint is seen
-        assert ".onRenderFramePre((ctx, scale) => {\n        drsOnPaint();\n        if (ARR)" in html
+        assert ".onRenderFramePre((ctx, scale) => {\n        drsOnPaint();\n" in html
+        hook = html[html.index(".onRenderFramePre((ctx, scale) => {"):]
+        assert hook.index("drsOnPaint();") < hook.index("if (ARR)")
         # the crisp restore must repaint AND re-derive the budget state
         assert "Graph.resumeAnimation(); Graph.pauseAnimation(); renderBudget();" in html
         # the lib's resize path re-centers using old-pixels / NEW-ratio, wrong by
@@ -439,6 +441,69 @@ class TestBigVaultPerfKnobs:
         # for 150-270ms at full res (user-reported, 2026-08-17)
         assert '(e.type === "pointermove" && e.buttons)' in html
 
+
+
+class TestWebGLLinks2D:
+    """2D draws every solid link as one instanced WebGL quad, under the canvas.
+
+    Skia tessellates a stroke 1px or wider, and a wikilink is 1.6px: on the
+    23,836-edge vault that was ~93ms of raster per full-ratio frame (9.7fps on
+    a pan, 2026-10-26); on WebGL the same pan holds 60fps at 1600x913 and at
+    3200x2000. Each test pins a piece whose loss is silent: the picture still
+    draws, only the cost or the look comes back wrong.
+    """
+
+    def _js(self, small_graph):
+        nodes, edges = small_graph
+        return render_html(nodes, edges, lib_js="// dummy")
+
+    def test_the_lib_skips_what_the_layer_draws(self, small_graph):
+        html = self._js(small_graph)
+        # a link the layer owns never reaches the lib's stroke loop: both
+        # drawing it would pay the cost twice and darken every line
+        assert ".linkVisibility(l => !glOwnsLink(l) && !l._hidden && !quietNow(l))" in html
+        # and the layer reads the same visible set the lib used to
+        assert "if (!l.__glOwn || l._hidden || quietNow(l)) continue;" in html
+
+    def test_dashes_citations_and_photons_stay_the_libs(self, small_graph):
+        html = self._js(small_graph)
+        assert 'l.__glOwn = !isDashed(l) && l.type !== "CITES" && !libOwnsLink(l);' in html
+
+    def test_one_width_one_colour_is_one_path(self, small_graph):
+        """The lib fills one path per (colour, width): its lines never darken
+        where they cross. Drawn straight here, the wikilink core of a dense
+        vault would stack toward opaque."""
+        html = self._js(small_graph)
+        assert "gl.blendEquation(gl.MAX);" in html
+        assert "union: union && links.length > 1" in html
+
+    def test_links_follow_this_frames_tick(self, small_graph):
+        """Pre runs before the lib's tick, Post after it: links drawn in Pre
+        trail the nodes by one tick through every settle."""
+        html = self._js(small_graph)
+        post = html[html.index(".onRenderFramePost((ctx, scale) => {"):]
+        assert post.index("drawGLLinks(ctx, scale);") < post.index("});")
+        assert "const under = underCtx(ctx);" in html
+
+    def test_paint_changes_reach_the_layer(self, small_graph):
+        """The three callers that keep the 3D merge true keep this one true."""
+        html = self._js(small_graph)
+        assert html.count("if (!is2D()) repaintLinkSeg(); else repaintGLLinks();") == 2
+        assert "{ Graph.nodeColor(Graph.nodeColor()); repaintGLLinks(); }" in html
+
+    def test_falls_back_to_the_canvas(self, small_graph):
+        html = self._js(small_graph)
+        # no WebGL2: the lib draws every link, as before the layer
+        assert "if (!gl) return false;" in html
+        # a lost context hands them back instead of leaving the frame bare
+        assert 'glc.addEventListener("webglcontextlost"' in html
+        assert "Graph.backgroundColor(GP.bg).linkVisibility(Graph.linkVisibility());" in html
+        # a rebuild frees the context: the browser caps live ones at ~16
+        assert html.index("dropGLLinks();") < html.index('el.innerHTML = "";')
+
+    def test_motion_stays_crisp_on_the_layer(self, small_graph):
+        html = self._js(small_graph)
+        assert "if (GLLinks && scale !== 1) return;" in html
 
 # ---------------------------------------------------------------------------
 # The host page's note drawer overlays this frame's right edge, where the HUD
