@@ -467,9 +467,10 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
     lines = [r["text"] for r in rows]
     topics_of = [_topics(t) for t in lines]
     labels = [_WIKILINK_RE.sub(r"\1", t).split(":", 1)[0].strip() for t in lines]
-    role = so.roles(colls, body, title, [[so.roots(x) for x in (tp or [lab])] for tp, lab in zip(topics_of, labels)],
-                    declared, declared_why) if colls else {}
-    ctx = _source_context(colls, role, lines, topics_of, labels, allowed)
+    steps_roots = [[so.roots(x) for x in (tp or [lab])] for tp, lab in zip(topics_of, labels)]
+    read = so.readings(colls, steps_roots) if colls else {}
+    role = so.roles(colls, body, title, steps_roots, declared, declared_why, read=read) if colls else {}
+    ctx = _source_context(colls, role, lines, topics_of, labels, allowed, read)
     tree, gaps = [], []
     for i, text in enumerate(lines):
         how, doubt, missing, approx, hits = "", False, [], [], {}
@@ -518,8 +519,10 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
         tree.append(node)
     if ctx["material"]:
         _fill_activity(tree, ctx, notes, refused or set())
-        _one_note_per_step(tree, set(ctx["practice"]))
-        _place_by_position(tree, ctx, refused or set())
+        _one_note_per_step(tree, set(ctx["practice"]), ctx)
+        if ctx["ordered"]:
+            # position means something only when the material follows the reference
+            _place_by_position(tree, ctx, refused or set())
     paths: list[str] = []
     for node in tree:
         if node["gap"]:
@@ -529,11 +532,23 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
     return {"paths": paths, "tree": tree, "gaps": gaps, "steps": lines,
             "sources": [{"key": c["key"], "label": c["label"], "kind": c["kind"], "spines": len(c["spines"]),
                          **role.get(c["key"], {})} for c in colls],
-            "assessment": assessment_of(body) if body else []}
+            "assessment": assessment_of(body) if body else [], "order_note": _order_note(ctx)}
+
+
+def _order_note(ctx: dict) -> str:
+    """What the plan says when its steps were matched without the order
+    (ADR-0131 amendment, evening): the one failure that was silent."""
+    if not ctx.get("material") or ctx.get("ordered"):
+        return ""
+    o = ctx.get("order")
+    if o is None:
+        return ("Too few of the material's sources meet the reference to follow its order: steps matched by "
+                "their words; check them.")
+    return f"The material does not follow the reference's order ({o:.2f}): steps matched by their words; check them."
 
 
 def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: list[list[str]],
-                    labels: list[str], allowed: set[str]) -> dict:
+                    labels: list[str], allowed: set[str], read: dict[str, dict] | None = None) -> dict:
     """What every step line of one reference shares: the collections by
     role, the practice notes, the activity lines, and each step's rows of
     the material, aligned to the reference's order (ADR-0131 point 3)."""
@@ -542,7 +557,8 @@ def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: 
     material = [c for c in colls if role.get(c["key"], {}).get("role") == so.MATERIAL]
     others = [c for c in colls if c not in material and role.get(c["key"], {}).get("role") != so.UNUSED]
     ctx = {"material": material, "others": others, "practice": [], "activity": set(), "lines": lines,
-           "origin": {}, "colls": colls, "rows": {}, "covered": {}, "meaning": {}}
+           "origin": {}, "colls": colls, "rows": {}, "covered": {}, "meaning": {}, "ordered": False,
+           "labels": labels}
     if not material:
         return ctx
     ctx["practice"] = so.practice_notes(allowed)
@@ -594,7 +610,15 @@ def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: 
             support[main["rows"][n]["spine"]] = support.get(main["rows"][n]["spine"], 0.0) + w
         steps.append({"i": i, "scores": {n: w for n, w in scores.items()
                                          if support[main["rows"][n]["spine"]] >= so.SPINE_SUPPORT}})
-    aligned = so.align(steps, main)
+    # The order is a structure only when the material follows the reference
+    # (ADR-0131 amendment, evening): a reference listed otherwise, its rows go
+    # each to the step that holds them best, and a step's own rows are those of
+    # the spines it took rows in rather than a stretch of the course.
+    order = (read or {}).get(main["key"], {}).get("order")
+    ctx["order"] = order
+    ctx["ordered"] = order is not None and order >= so.ORDER_FLOOR
+    names = dict(enumerate(labels))
+    aligned = so.align(steps, main) if ctx["ordered"] else so.best_steps(steps, main, names)
     given = {n for v in aligned.values() for n in v}
     picked_by: dict[int, list[dict]] = {}
     how: dict[tuple, str] = {}
@@ -603,8 +627,12 @@ def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: 
         mine = set(aligned.get(i, []))
         picked: list[dict] = []
         if mine:
-            lo, hi = min(mine), max(mine)
-            for n in range(lo, hi + 1):
+            if ctx["ordered"]:
+                local = range(min(mine), max(mine) + 1)
+            else:
+                spines = {main["rows"][n]["spine"] for n in mine}
+                local = [n for n, r in enumerate(main["rows"]) if r["spine"] in spines]
+            for n in local:
                 r = main["rows"][n]
                 kinds = [holds(t, r, ROW_NEAR) for t, _w in ts]
                 if n in mine or (n not in given and any(kinds)):
@@ -628,7 +656,10 @@ def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: 
                         how.setdefault((r["spine"], r["i"]), k)
                         stray.add((r["spine"], r["i"]))
         picked_by[i] = picked
-    _whole_lectures(picked_by, material, stray)
+    # who keeps a row two steps took: the first step in order, or by name when
+    # there is no order, so a shuffled reference gives the same steps
+    first = sorted(picked_by) if ctx["ordered"] else sorted(picked_by, key=lambda i: (names.get(i, ""), i))
+    _whole_lectures(picked_by, material, stray, first)
     ctx["owned"] = {(r["spine"], r["i"]) for v in picked_by.values() for r in v}
     for i, ts in asked.items():
         sec = so.section(picked_by[i], material)
@@ -638,7 +669,8 @@ def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: 
     return ctx
 
 
-def _whole_lectures(picked_by: dict[int, list[dict]], material: list[dict], stray: set[tuple] = frozenset()) -> None:
+def _whole_lectures(picked_by: dict[int, list[dict]], material: list[dict], stray: set[tuple] = frozenset(),
+                    first: list[int] | None = None) -> None:
     """A lecture the reference teaches is studied whole (ADR-0131 point 3):
     a row no step took, in a spine where steps took others, goes to the step
     of the nearest taken row of that spine, the earlier on a tie. Lecture
@@ -649,7 +681,7 @@ def _whole_lectures(picked_by: dict[int, list[dict]], material: list[dict], stra
     only: one title-vector row of lecture 1 had given the whole lecture to
     the exploratory-analysis block (2026-10-25)."""
     owner: dict[tuple, int] = {}
-    for i in sorted(picked_by):
+    for i in (first if first is not None else sorted(picked_by)):
         for r in picked_by[i]:
             if (r["spine"], r["i"]) not in stray:
                 owner.setdefault((r["spine"], r["i"]), i)
@@ -759,13 +791,34 @@ def _fill_activity(tree: list[dict], ctx: dict, notes: dict, refused: set) -> No
             node.update(leaves=[], gap=True, how="no practice note found")
 
 
-def _one_note_per_step(tree: list[dict], practice: set[str]) -> None:
+def _one_note_per_step(tree: list[dict], practice: set[str], ctx: dict | None = None) -> None:
     """A note met by two steps stays in the first (ADR-0131 point 5); the
     later step still counts its topic as matched. A practice note practises
     several steps and is never moved, and a step whose every note sits in
-    earlier steps keeps them rather than turning into a gap."""
+    earlier steps keeps them rather than turning into a gap. With no order
+    (a reference the material does not follow) "first" is the step whose own
+    rows hold the note, then the step's name, so the order of the list does
+    not decide."""
     seen: set[str] = set()
-    for node in tree:
+    walk = list(range(len(tree)))
+    if ctx is not None and not ctx.get("ordered", True):
+        rows_of = {i: {r["note"] for r in ctx["rows"].get(i, []) if r["note"]} for i in walk}
+        owner: dict[str, int] = {}
+        for i in sorted(walk, key=lambda i: (tree[i]["node"], i)):
+            for p in tree[i].get("leaves") or []:
+                if p in practice:
+                    continue
+                held = p in rows_of[i]
+                if p not in owner or (held and p not in rows_of[owner[p]]):
+                    owner[p] = i
+        for i, node in enumerate(tree):
+            if node.get("gap"):
+                continue
+            rest = [p for p in node["leaves"] if p in practice or owner.get(p) == i]
+            if rest:
+                node["leaves"] = rest
+        return
+    for node in (tree[i] for i in walk):
         if node.get("gap"):
             continue
         rest = [p for p in node["leaves"] if p in practice or p not in seen]
@@ -2148,7 +2201,7 @@ def _plan_body(name: str, scope: str, target, resolved: dict, chosen: list[str],
     from silica.kernel.learn import objectives as obj
 
     lines = [f"# {name}", "", _goal_sentence(scope, target, chosen or [c["intention"] for c in cards if c.get("intention")])]
-    said = _sources_sentence(resolved.get("sources") or [])
+    said = " ".join(x for x in (_sources_sentence(resolved.get("sources") or []), resolved.get("order_note") or "") if x)
     if said:
         # one paragraph with the goal, so Edit plan rewrites it (_reader_head)
         lines.append(said)

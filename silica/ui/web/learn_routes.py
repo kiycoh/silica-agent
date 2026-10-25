@@ -1430,7 +1430,7 @@ def write_plan(payload: dict):
         out = _preview(res, chosen)
         if scope == "steps":
             out.update(sources=res.get("sources") or [], assessment=res.get("assessment") or [],
-                       guides=plans.guide_candidates(restrict))
+                       guides=plans.guide_candidates(restrict), order_note=res.get("order_note") or "")
         return out
     cards = payload.get("cards")
     cards = cards if isinstance(cards, list) else None

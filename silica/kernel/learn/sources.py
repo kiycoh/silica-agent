@@ -285,12 +285,13 @@ def readings(colls: list[dict], steps: list[list[set[str]]]) -> dict[str, dict]:
 
 
 def roles(colls: list[dict], body: str, title: str, steps: list[list[set[str]]],
-          declared: dict[str, str] | None = None, declared_why: str = "you set it") -> dict[str, dict]:
+          declared: dict[str, str] | None = None, declared_why: str = "you set it",
+          read: dict[str, dict] | None = None) -> dict[str, dict]:
     """{key: {role, why}}, in ADR-0131's order: the reader's choice, the
     reference naming it, order, focus, else every matched collection is
-    material and the form asks."""
+    material and the form asks. `read` is `readings` when the caller has it."""
     declared = {k.casefold(): v for k, v in (declared or {}).items()}
-    read = readings(colls, steps)
+    read = read if read is not None else readings(colls, steps)
     out: dict[str, dict] = {}
     texts = " ".join(texts_lines(body))
     for c in colls:
@@ -543,3 +544,34 @@ def align(steps: list[dict], coll: dict) -> dict[int, list[int]]:
             out.setdefault(order[prev], []).append(r)
         k = prev
     return {i: sorted(v) for i, v in out.items()}
+
+
+def best_steps(steps: list[dict], coll: dict, names: dict[int, str]) -> dict[int, list[int]]:
+    """{step: indexes of `coll`'s rows} with no order assumed: each row goes
+    to the step that holds it with most weight, then to the step its spine
+    supports most, then by the step's name, so the steps come out the same
+    whatever order the reference lists them in.
+
+    For a reference the material does not follow. Measured on a shuffled
+    course syllabus (2026-10-25): aligned in the shuffled order, its kernel
+    block took 89 notes and its mathematics 2, and nothing said so; this way
+    the total stays within 5% of the ordered plan and 15 of the 17 gate rows
+    under kernels and SVMs stay there. Three other ways did worse (12, 12
+    and 13 of 17: whole spines, runs within a spine, the material's own
+    order). The ordered alignment is no ground truth either: where words
+    point elsewhere (Novikoff's row holds the feedforward block's
+    "percettrone"), only the order had kept a row with its lecture, which is
+    why the plan says it matched by words and asks to check."""
+    rows = coll["rows"]
+    support: dict[int, Counter] = {}
+    for st in steps:
+        sup = support.setdefault(st["i"], Counter())
+        for n, w in st["scores"].items():
+            sup[rows[n]["spine"]] += w
+    out: dict[int, list[int]] = {}
+    for n in range(len(rows)):
+        cands = [(st["scores"][n], support[st["i"]][rows[n]["spine"]], names.get(st["i"], ""), st["i"])
+                 for st in steps if st["scores"].get(n)]
+        if cands:
+            out.setdefault(max(cands)[3], []).append(n)
+    return out

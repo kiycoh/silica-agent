@@ -2156,6 +2156,12 @@ function lrSourcesSection() {
     }
     sec.appendChild(list);
     sec.appendChild(lrEl("p", "lr-help", "Steps are made of the material's outline rows; a reference's notes come in only where the material is silent, marked (ref)."));
+    if (p.order_note) {
+      // the steps were matched by their words alone: said where they are chosen
+      const w = lrEl("p", "lr-help warn");
+      w.append(lrMark("warn", ""), p.order_note);
+      sec.appendChild(w);
+    }
   }
   const parts = f.assessment !== null ? f.assessment : read;
   const as = lrEl("div", "lr-chips lr-assess");

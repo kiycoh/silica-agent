@@ -318,3 +318,23 @@ def test_the_form_previews_sources_and_the_budget_route_answers(course):
     b = client.post("/learn/plan/budget", headers={"Origin": "http://testserver"},
                     json={"by": "2099-01-20", "hours": 2, "assessment": [], "steps": [{"hours": 4, "unit": "h", "notes": 1}]}).json()
     assert "The reference's own hours: 4 h" in b["say"]
+
+
+def test_a_reference_the_material_does_not_follow_gives_the_same_steps_and_says_so(course):
+    """ADR-0131 amendment: aligned in its own order, a shuffled syllabus gave
+    one block 89 notes and another 2 with nothing said; matched by words, the
+    steps do not depend on the list's order, and the plan says how."""
+    lines = [r["text"] for r in plans.reference_rows(SYLLABUS)]
+    one = plans.resolve_scope("steps", "\n".join(lines) + "\n")
+    two = plans.resolve_scope("steps", "\n".join(reversed(lines)) + "\n")
+    steps = lambda res: {n["node"]: set(n.get("leaves") or []) for n in res["tree"]}  # noqa: E731
+    assert steps(one) == steps(two)
+    assert one["order_note"].startswith("Too few of the material's sources meet the reference")
+
+
+def test_best_steps_gives_a_row_to_the_step_holding_it_most_whatever_the_order():
+    coll = {"rows": [{"spine": "a"}, {"spine": "a"}, {"spine": "b"}]}
+    steps = [{"i": 0, "scores": {0: 1.0, 2: 0.5}}, {"i": 1, "scores": {1: 1.0, 2: 1.0}}]
+    names = {0: "Zeta", 1: "Alfa"}
+    assert sources.best_steps(steps, coll, names) == {0: [0], 1: [1, 2]}
+    assert sources.best_steps(list(reversed(steps)), coll, names) == {0: [0], 1: [1, 2]}
