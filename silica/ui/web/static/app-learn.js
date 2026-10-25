@@ -920,6 +920,7 @@ function lrRenderPlanDetail(right, p) {
   }
   // exceptions are written; a default is not (ADR-0061 §3)
   if (p.pace?.say) head.appendChild(lrEl("p", "lr-help", p.pace.say));
+  if (p.budget?.say) head.appendChild(lrEl("p", "lr-help", p.budget.say));
   if (p.cycles?.length) head.appendChild(lrEl("p", "lr-help", `Prerequisite cycle among: ${p.cycles[0].map(lrStem).join(" → ")}. Reported, not linearized.`));
   if (p.gaps?.length) head.appendChild(lrEl("p", "lr-help", `${lrPlural(p.gaps.length, "step")} not in the vault: ${p.gaps.join("; ")}.`));
   right.appendChild(head);
@@ -1413,6 +1414,9 @@ function lrFormReset(extra = {}) {
     step: "sentence", sentence: "", read: "", reading: false, said: [], took: null, model: false,
     name: "", nameTouched: false, scope: "", target: "", label: "", count: null, restrict: "", by: "", ref: null, refMode: "note", refQ: "", refOpts: [], refIdx: -1,
     objectives: [], refused: [], preview: null, previewBusy: false, cards: null, cardsBusy: false, cardsAt: 0,
+    // ADR-0131: roles the reader set by collection label, study hours a day,
+    // the assessment's parts (null: as Silica reads them), a guide note
+    roles: {}, rolesTouched: false, hours: "", assessment: null, guide: "", budget: null, budgetSeq: 0,
     cardsModel: false, cardsSaved: false, cardsFailed: false, editing: null, editPath: "", q: "", opts: [], optIdx: -1, seq: 0, cardSeq: 0,
   }, extra);
 }
@@ -1506,6 +1510,7 @@ function lrFormFromPlan(p) {
       ref: lrRefOf(p.target), refMode: String(p.target || "").includes("\n") ? "text" : "note", by: p.by || "",
       objectives: p.objectives_chosen ? [...p.objectives] : [], refused: [...(p.refused || [])],
       cards: p.cards?.length ? p.cards.map((c) => ({ ...c })) : null, cardsSaved: !!p.cards?.length,
+      ...lrSourcesFromPlan(p),
     });
     lrPreviewScope({ keepCards: !!p.cards?.length });
     return;
@@ -1519,6 +1524,20 @@ function lrFormFromPlan(p) {
     cards: p.cards?.length ? p.cards.map((c) => ({ ...c })) : null, cardsSaved: !!p.cards?.length,
   });
   lrPreviewScope({ keepCards: !!p.cards?.length });
+}
+
+// A plan's ADR-0131 keys as the form holds them: roles by label, the hours,
+// the assessment it states (or null when Silica reads it), its guide.
+function lrSourcesFromPlan(p) {
+  const roles = {};
+  for (const [key, role] of [["materials", "material"], ["references", "reference"], ["unused", "unused"]]) {
+    for (const label of String(p[key] || "").split(" | ").map((x) => x.trim()).filter(Boolean)) roles[label] = role;
+  }
+  return {
+    roles, rolesTouched: Object.keys(roles).length > 0, hours: p.hours ? String(p.hours) : "",
+    assessment: p.assessment_set ? (p.assessment || []).map((a) => ({ ...a })) : null,
+    guide: String(p.guide || "").replace(/^\[\[|\]\]$/g, ""),
+  };
 }
 
 // The dialog (ADR-0119, suggestion 5): one form for a test or a plan, over
@@ -1629,6 +1648,7 @@ function lrFieldsStep(box) {
   }
   box.appendChild(lrStudySection());
   box.appendChild(lrReferenceSection());
+  box.appendChild(lrSourcesSection());
   box.appendChild(lrGoalsSection());
   box.appendChild(lrBySection());
   box.appendChild(lrObjectivesSection());
@@ -1951,6 +1971,7 @@ async function lrPreviewScope({ keepCards = false } = {}) {
   f.previewBusy = false;
   if (!["new", "edit"].includes(lrRoute.view)) return;
   lrRender();
+  if (!out.error && f.by) lrBudget();
   if (!out.error && out.paths?.length && !(keepCards && f.cards)) lrWriteCards();
 }
 
@@ -1963,7 +1984,26 @@ function lrStudyBody() {
   // pasted text always carries a line break: one line equal to a title would
   // otherwise be read as that note (plans._steps_scope)
   if (f.ref?.target?.trim?.()) body.reference = f.ref.kind === "text" && !f.ref.target.includes("\n") ? f.ref.target + "\n" : f.ref.target;
+  if (f.ref || f.scope === "steps") Object.assign(body, lrSourcesBody());
   return body;
+}
+
+// What the form says about the sources (ADR-0131): the roles only once the
+// reader changed one, so Silica's reading stands until then; every key left
+// out keeps what the plan says.
+function lrSourcesBody() {
+  const f = lrForm;
+  const out = {};
+  if (f.rolesTouched) {
+    const roles = { ...Object.fromEntries((f.preview?.sources || []).map((s) => [s.label, s.role])), ...f.roles };
+    for (const [key, role] of [["materials", "material"], ["references", "reference"], ["unused", "unused"]]) {
+      out[key] = Object.keys(roles).filter((l) => roles[l] === role);
+    }
+  }
+  if (f.hours) out.hours = Number(f.hours);
+  if (f.assessment !== null) out.assessment = f.assessment.length ? f.assessment : "none";
+  if (f.guide) out.guide = f.guide;
+  return out;
 }
 
 // The cards, in the background (§16): one model call, never the gate
@@ -2079,6 +2119,96 @@ function lrShowPreview(sec, p) {
   }
 }
 
+// -- Sources: each collection of nucleated sources the reference meets, its
+// role in this plan and the rule that gave it (ADR-0131 points 2 and 13);
+// the assessment the reference states, as parts that can be removed; a
+// guide for the steps' depth when the bound holds one.
+const LR_ROLE = { material: "Material", reference: "Reference", unused: "Not used" };
+const LR_PART = { project: "Project", oral: "Oral exam", written: "Written exam", presentation: "Presentation", exercises: "Exercises" };
+function lrSourcesSection() {
+  const f = lrForm;
+  const p = f.preview;
+  const sources = p?.sources || [];
+  const read = p?.assessment || [];
+  if (!(f.ref || f.scope === "steps") || (!sources.length && !read.length && !p?.guides?.length)) return document.createDocumentFragment();
+  const sec = lrEl("section", "lr-fs");
+  sec.appendChild(lrEl("h3", null, "Sources"));
+  if (sources.length) {
+    const list = lrEl("div", "lr-srcs");
+    for (const src of sources) {
+      const role = f.roles[src.label] || src.role || "unused";
+      const row = lrEl("div", "lr-src");
+      const name = lrEl("span", "n", src.label);
+      name.title = `${src.label} · ${lrPlural(src.spines || 0, "source")}`;
+      const sel = lrEl("select", "lr-field");
+      sel.setAttribute("aria-label", `role of ${src.label} in this plan`);
+      for (const [v, label] of Object.entries(LR_ROLE)) {
+        const o = lrEl("option", null, label);
+        o.value = v; o.selected = v === role;
+        sel.appendChild(o);
+      }
+      sel.addEventListener("change", () => { f.roles[src.label] = sel.value; f.rolesTouched = true; lrPreviewScope(); });
+      const why = lrEl("span", "lr-help", f.roles[src.label] && f.roles[src.label] !== src.role ? "you set it" : src.why || "");
+      row.append(name, sel, why);
+      list.appendChild(row);
+    }
+    sec.appendChild(list);
+    sec.appendChild(lrEl("p", "lr-help", "Steps are made of the material's outline rows; a reference's notes come in only where the material is silent, marked (ref)."));
+  }
+  const parts = f.assessment !== null ? f.assessment : read;
+  const as = lrEl("div", "lr-chips");
+  as.setAttribute("role", "group"); as.setAttribute("aria-label", "the assessment");
+  as.appendChild(lrEl("span", "lr-help", "Assessment"));
+  parts.forEach((a, i) => {
+    const c = lrBtn("lr-chip on", `${LR_PART[a.part] || a.part}${a.days ? ` · ${a.days} days before` : ""} ×`, () => {
+      f.assessment = parts.filter((_x, j) => j !== i);
+      lrBudget();
+      lrRender();
+    });
+    c.setAttribute("aria-label", `remove ${LR_PART[a.part] || a.part} from the assessment`);
+    as.appendChild(c);
+  });
+  if (!parts.length) as.appendChild(lrEl("span", "lr-help", read.length ? "none kept" : "none read in the reference"));
+  if (f.assessment !== null && read.length) as.appendChild(lrBtn("lr-link", "read it again", () => { f.assessment = null; lrBudget(); lrRender(); }));
+  sec.appendChild(as);
+  if (p?.guides?.length) {
+    const row = lrEl("div", "lr-studyrow");
+    const sel = lrEl("select", "lr-field w");
+    sel.setAttribute("aria-label", "a study guide for each step's depth, optional");
+    const none = lrEl("option", null, "No guide");
+    none.value = "";
+    sel.appendChild(none);
+    for (const g of p.guides) {
+      const o = lrEl("option", null, lrStem(g));
+      o.value = lrStem(g); o.selected = lrStem(g) === f.guide;
+      sel.appendChild(o);
+    }
+    sel.addEventListener("change", () => { f.guide = sel.value; });
+    row.append(lrEl("span", "lr-help", "Guide"), sel, lrEl("span", "lr-help", "each step's depth from its table"));
+    sec.appendChild(row);
+  }
+  return sec;
+}
+
+// The hours under the calendar (plans.budget), asked of the server on a
+// change of date, hours a day or assessment: the reference's own hours and
+// what the days before the date hold, with the project's days kept.
+async function lrBudget() {
+  const f = lrForm;
+  const tree = f.preview?.tree || [];
+  if (!f.by || !tree.length || !(f.ref || f.scope === "steps")) { f.budget = null; return; }
+  // its own counter: the preview's (f.seq) drops a preview still running
+  const seq = f.budgetSeq = (f.budgetSeq || 0) + 1;
+  try {
+    const out = await lrPost("/learn/plan/budget", {
+      by: f.by, hours: f.hours ? Number(f.hours) : null,
+      assessment: f.assessment !== null ? f.assessment : f.preview?.assessment || [],
+      steps: tree.map((n) => ({ hours: n.hours ?? null, unit: n.unit || "", notes: (n.leaves || []).length })),
+    });
+    if (seq === f.budgetSeq) { f.budget = out?.say || null; lrRender(); }
+  } catch (e) { f.budget = null; }
+}
+
 // -- Be able to: the five intentions as chips, none required (§14)
 function lrGoalsSection() {
   const sec = lrEl("section", "lr-fs");
@@ -2127,10 +2257,20 @@ function lrBySection() {
   by.type = "date"; by.value = lrForm.by;
   by.setAttribute("aria-label", "target date, optional");
   by.min = new Date().toISOString().slice(0, 10);
-  by.addEventListener("change", () => { lrForm.by = by.value; lrRender(); });
+  by.addEventListener("change", () => { lrForm.by = by.value; lrBudget(); lrRender(); });
   row.append(by, lrEl("span", "lr-help", "optional"));
-  if (lrForm.by) row.appendChild(lrBtn("lr-link", "clear", () => { lrForm.by = ""; lrRender(); }));
+  if (lrForm.by) row.appendChild(lrBtn("lr-link", "clear", () => { lrForm.by = ""; lrForm.budget = null; lrRender(); }));
+  if (lrForm.ref || lrForm.scope === "steps") {
+    // study hours a day: the calendar's hours come from here, the reference's
+    // own numbers only weigh the steps (ADR-0131 point 8)
+    const h = lrEl("input", "lr-field lr-hours");
+    h.type = "number"; h.min = "0.5"; h.max = "24"; h.step = "0.5"; h.value = lrForm.hours; h.placeholder = "h a day";
+    h.setAttribute("aria-label", "study hours a day, optional");
+    h.addEventListener("change", () => { lrForm.hours = h.value; lrBudget(); lrRender(); });
+    row.append(h);
+  }
   sec.appendChild(row);
+  if (lrForm.budget) sec.appendChild(lrEl("p", "lr-help", lrForm.budget));
   const say = lrProjection();
   if (say) {
     const p = lrEl("p", "lr-help" + (say.amber ? " warn" : ""));

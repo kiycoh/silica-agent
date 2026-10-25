@@ -1398,6 +1398,13 @@ def write_plan(payload: dict):
     # a refused line by its index (this form) or its text (the plan note's `refused:`)
     refused = [int(i) if str(i).lstrip("-").isdigit() else str(i) for i in (payload.get("refused") or []) if str(i).strip()]
     chosen = obj.normalize(payload.get("objectives"))
+    # ADR-0131: the collections' roles the reader set, study hours a day, the
+    # assessment's parts ("none" clears them), a guide for the steps' depth;
+    # a key left out keeps what the plan says, or what Silica reads
+    declared = _declared(payload)
+    hours = payload.get("hours") if "hours" in payload else None
+    assessment = payload.get("assessment") if "assessment" in payload else None
+    guide = str(payload.get("guide") or "") if "guide" in payload else None
     reference = payload.get("reference")
     if isinstance(reference, str) and reference.strip():
         try:
@@ -1408,7 +1415,7 @@ def write_plan(payload: dict):
         raise HTTPException(400, f"scope must be one of {plans.SCOPES}")
     if payload.get("preview") or payload.get("cards_only"):
         try:
-            res = plans.resolve_scope(scope, target, restrict=restrict, refused=refused)
+            res = plans.resolve_scope(scope, target, restrict=restrict, refused=refused, declared=declared)
         except Exception as exc:
             raise HTTPException(400, str(exc))
         if payload.get("cards_only"):
@@ -1417,12 +1424,17 @@ def write_plan(payload: dict):
                 seen = obj.reads_as(c.get("title", "")) if c["source"] != "gap" else None
                 c["reads_as"] = seen if seen and seen != c["intention"] else None
             return {"cards": proposed, "model": any(c.get("wording") == "model" for c in proposed)}
-        return _preview(res, chosen)
+        out = _preview(res, chosen)
+        if scope == "steps":
+            out.update(sources=res.get("sources") or [], assessment=res.get("assessment") or [],
+                       guides=plans.guide_candidates(restrict))
+        return out
     cards = payload.get("cards")
     cards = cards if isinstance(cards, list) else None
     if cards is None and payload.get("templates"):
         try:
-            cards = obj.propose(plans.resolve_scope(scope, target, restrict=restrict, refused=refused)["tree"], chosen, model=False)
+            cards = obj.propose(plans.resolve_scope(scope, target, restrict=restrict, refused=refused,
+                                                    declared=declared)["tree"], chosen, model=False)
         except Exception as exc:
             raise HTTPException(400, str(exc))
     if payload.get("path"):
@@ -1433,7 +1445,8 @@ def write_plan(payload: dict):
             # no `refused` (Reword on the notes) keeps the plan's own refusals
             return plans.edit_plan(plan["path"], name or plan["name"], scope, target, by=payload.get("by") or None,
                                    restrict=restrict, objectives=chosen, cards=cards,
-                                   refused=refused if "refused" in payload else None)
+                                   refused=refused if "refused" in payload else None, declared=declared,
+                                   hours=hours, assessment=assessment, guide=guide)
         except Exception as exc:
             raise HTTPException(400, str(exc))
     if not name:
@@ -1441,9 +1454,28 @@ def write_plan(payload: dict):
     try:
         out = plans.write_plan(name, scope, target, by=payload.get("by") or None, restrict=restrict,
                                objectives=chosen if "objectives" in payload else None,
-                               reach=str(payload.get("reach") or "relational"), cards=cards, refused=refused)
+                               reach=str(payload.get("reach") or "relational"), cards=cards, refused=refused,
+                               declared=declared, hours=hours, assessment=assessment, guide=guide or "")
     except Exception as exc:
         raise HTTPException(400, str(exc))
+    return out
+
+
+def _declared(payload: dict) -> dict[str, str] | None:
+    """{label: role} from the form's `materials`, `references` and `unused`
+    lists, or None when the form sent none of them (Silica reads the roles,
+    or Edit plan keeps the plan's)."""
+    from silica.kernel.learn import sources as so
+
+    keys = (("materials", so.MATERIAL), ("references", so.REFERENCE), ("unused", so.UNUSED))
+    if not any(k in payload for k, _r in keys):
+        return None
+    out: dict[str, str] = {}
+    for k, role in keys:
+        items = payload.get(k) or []
+        for label in (items if isinstance(items, list) else str(items).split(" | ")):
+            if str(label).strip():
+                out[str(label).strip()] = role
     return out
 
 
@@ -1493,6 +1525,22 @@ def _preview(res: dict, chosen: list[str]) -> dict:
             "measured": rd["coverage"][0], "never": rd["not_measured"], "due": rd["due"], "marks": marks,
             "parts": sum(1 for n in res["tree"] if n.get("leaves")), "objectives": chosen, "infer": infer,
             "session": 8, "path": None, "cards": []}
+
+
+@router.post("/plan/budget", dependencies=_SAME_ORIGIN)
+def plan_budget(payload: dict):
+    """The hours under a plan's calendar for the form (ADR-0131 point 8),
+    from the preview's steps, the date, the hours a day and the assessment,
+    without resolving the reference again."""
+    from silica.kernel.learn import plans
+
+    steps = [{"hours": s.get("hours"), "unit": str(s.get("unit") or ""), "notes": [""] * int(s.get("notes") or 0)}
+             for s in (payload.get("steps") or []) if isinstance(s, dict)]
+    parts = plans.parse_assessment(payload["assessment"]) if isinstance(payload.get("assessment"), str) else [
+        {"part": str(a.get("part")), "days": a.get("days")} for a in (payload.get("assessment") or []) if isinstance(a, dict)]
+    b = plans.budget({"by": payload.get("by"), "hours": plans._hours_of(payload.get("hours")), "steps": steps,
+                      "assessment": parts})
+    return {"say": b["say"] if b else "", "budget": b}
 
 
 @router.post("/plan/read", dependencies=_SAME_ORIGIN)

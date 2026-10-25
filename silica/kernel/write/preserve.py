@@ -49,7 +49,7 @@ SYSTEM_KEYS = frozenset({"last modified", "agent", "review", "code_ref"})
 # The sections learn.plans writes and rewrites on an edit (plans._GENERATED,
 # compared by test_preserve_rule): copied, not imported, because plans pulls
 # the whole Learn stack in and this module must stay importable alone.
-PLAN_SECTIONS = frozenset({"objectives", "tree", "steps"})
+PLAN_SECTIONS = frozenset({"objectives", "tree", "steps", "assessment"})
 
 # The patch headers written until 2026-09-04 (templates.PROVENANCE_HEADER_
 # PREFIXES, compared by test_preserve_rule). resolve_contested prunes one left
@@ -80,7 +80,9 @@ class Loss(enum.Enum):
 # on a path under the inbox or sources/, which check_write tests at run time.
 _RELAX_ALL = frozenset({Loss.PERSON, Loss.RESTORE, Loss.STAGED, Loss.DERIVED, Loss.MIGRATE})
 _LOSS_KEYS = {
-    Loss.PLAN: frozenset({"scope", "target", "objectives", "by", "restrict", "refused"}),
+    # ADR-0131 adds the sources' roles, the hours a day, the assessment, the guide
+    Loss.PLAN: frozenset({"scope", "target", "objectives", "by", "restrict", "refused",
+                          "materials", "references", "unused", "hours", "assessment", "guide"}),
     Loss.RESOLVE: frozenset({"contested", "contradictions"}),
     Loss.UNLINK: frozenset({"related"}),
 }

@@ -1281,6 +1281,39 @@ button.lr-exp:hover {
   gap: 0.25rem;
 }
 
+/* ADR-0131: one row per collection of sources, its role and the rule */
+.lr-srcs {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.lr-src {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) 8.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.lr-src > .n {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--frost);
+}
+
+.lr-hours {
+  width: 6.5rem;
+}
+
+@media (max-width: 640px) {
+  .lr-src {
+    grid-template-columns: minmax(0, 1fr) 8.5rem;
+  }
+  .lr-src > .lr-help {
+    grid-column: 1 / -1;
+  }
+}
+
 .lr-cta {
   display: flex;
   align-items: center;
