@@ -1292,6 +1292,7 @@ button.lr-exp:hover {
   grid-template-columns: minmax(0, 14rem) 8.5rem minmax(0, 1fr);
   align-items: center;
   gap: 0.6rem;
+  font-size: 13px;
 }
 
 .lr-src > .n {
@@ -1301,8 +1302,16 @@ button.lr-exp:hover {
   color: var(--frost);
 }
 
+.lr-chips.lr-assess {
+  align-items: center;
+}
+
+.lr-chips.lr-assess .lr-link {
+  font-size: var(--fs-meta);
+}
+
 .lr-hours {
-  width: 6.5rem;
+  width: 5rem;
 }
 
 @media (max-width: 640px) {
@@ -2404,6 +2413,9 @@ button.lr-cell:focus-visible {
 
 .lr-steps2 .to {
   color: var(--text);
+  /* a notebook's name has no spaces ("esercizio_optdigits_svm_ffnn"), and it
+     ran over the match column */
+  overflow-wrap: anywhere;
 }
 
 .lr-steps2 .to.gap {

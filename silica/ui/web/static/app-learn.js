@@ -1416,7 +1416,7 @@ function lrFormReset(extra = {}) {
     objectives: [], refused: [], preview: null, previewBusy: false, cards: null, cardsBusy: false, cardsAt: 0,
     // ADR-0131: roles the reader set by collection label, study hours a day,
     // the assessment's parts (null: as Silica reads them), a guide note
-    roles: {}, rolesTouched: false, hours: "", assessment: null, guide: "", budget: null, budgetSeq: 0,
+    roles: {}, rolesTouched: false, rolesKept: false, hours: "", assessment: null, guide: "", budget: null, budgetSeq: 0,
     cardsModel: false, cardsSaved: false, cardsFailed: false, editing: null, editPath: "", q: "", opts: [], optIdx: -1, seq: 0, cardSeq: 0,
   }, extra);
 }
@@ -1534,7 +1534,8 @@ function lrSourcesFromPlan(p) {
     for (const label of String(p[key] || "").split(" | ").map((x) => x.trim()).filter(Boolean)) roles[label] = role;
   }
   return {
-    roles, rolesTouched: Object.keys(roles).length > 0, hours: p.hours ? String(p.hours) : "",
+    // kept, not touched: they go back as the plan's, said "as the plan says"
+    roles, rolesTouched: false, rolesKept: Object.keys(roles).length > 0, hours: p.hours ? String(p.hours) : "",
     assessment: p.assessment_set ? (p.assessment || []).map((a) => ({ ...a })) : null,
     guide: String(p.guide || "").replace(/^\[\[|\]\]$/g, ""),
   };
@@ -1994,11 +1995,12 @@ function lrStudyBody() {
 function lrSourcesBody() {
   const f = lrForm;
   const out = {};
-  if (f.rolesTouched) {
+  if (f.rolesTouched || f.rolesKept) {
     const roles = { ...Object.fromEntries((f.preview?.sources || []).map((s) => [s.label, s.role])), ...f.roles };
     for (const [key, role] of [["materials", "material"], ["references", "reference"], ["unused", "unused"]]) {
       out[key] = Object.keys(roles).filter((l) => roles[l] === role);
     }
+    if (!f.rolesTouched) out.roles_kept = true;
   }
   if (f.hours) out.hours = Number(f.hours);
   if (f.assessment !== null) out.assessment = f.assessment.length ? f.assessment : "none";
@@ -2148,7 +2150,7 @@ function lrSourcesSection() {
         sel.appendChild(o);
       }
       sel.addEventListener("change", () => { f.roles[src.label] = sel.value; f.rolesTouched = true; lrPreviewScope(); });
-      const why = lrEl("span", "lr-help", f.roles[src.label] && f.roles[src.label] !== src.role ? "you set it" : src.why || "");
+      const why = lrEl("span", "lr-help", src.why || "");
       row.append(name, sel, why);
       list.appendChild(row);
     }
@@ -2156,7 +2158,7 @@ function lrSourcesSection() {
     sec.appendChild(lrEl("p", "lr-help", "Steps are made of the material's outline rows; a reference's notes come in only where the material is silent, marked (ref)."));
   }
   const parts = f.assessment !== null ? f.assessment : read;
-  const as = lrEl("div", "lr-chips");
+  const as = lrEl("div", "lr-chips lr-assess");
   as.setAttribute("role", "group"); as.setAttribute("aria-label", "the assessment");
   as.appendChild(lrEl("span", "lr-help", "Assessment"));
   parts.forEach((a, i) => {
@@ -2267,7 +2269,7 @@ function lrBySection() {
     h.type = "number"; h.min = "0.5"; h.max = "24"; h.step = "0.5"; h.value = lrForm.hours; h.placeholder = "h a day";
     h.setAttribute("aria-label", "study hours a day, optional");
     h.addEventListener("change", () => { lrForm.hours = h.value; lrBudget(); lrRender(); });
-    row.append(h);
+    row.append(h, lrEl("span", "lr-help", "hours a day"));
   }
   sec.appendChild(row);
   if (lrForm.budget) sec.appendChild(lrEl("p", "lr-help", lrForm.budget));

@@ -285,7 +285,7 @@ def readings(colls: list[dict], steps: list[list[set[str]]]) -> dict[str, dict]:
 
 
 def roles(colls: list[dict], body: str, title: str, steps: list[list[set[str]]],
-          declared: dict[str, str] | None = None) -> dict[str, dict]:
+          declared: dict[str, str] | None = None, declared_why: str = "you set it") -> dict[str, dict]:
     """{key: {role, why}}, in ADR-0131's order: the reader's choice, the
     reference naming it, order, focus, else every matched collection is
     material and the form asks."""
@@ -296,7 +296,7 @@ def roles(colls: list[dict], body: str, title: str, steps: list[list[set[str]]],
     for c in colls:
         role = declared.get(c["label"].casefold()) or declared.get(c["key"].casefold())
         if role in ROLES:
-            out[c["key"]] = {"role": role, "why": "you set it"}
+            out[c["key"]] = {"role": role, "why": declared_why}
         elif texts and named_in(c["label"], texts):
             out[c["key"]] = {"role": REFERENCE, "why": "named among the reference's texts"}
         elif title and named_in(c["label"], title):

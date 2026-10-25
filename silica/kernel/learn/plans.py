@@ -278,7 +278,8 @@ def target_text(scope: str, target) -> str:
     return target if isinstance(target, str) else ", ".join(target)
 
 
-def resolve_scope(kind: str, target, restrict: str = "", refused=(), declared: dict[str, str] | None = None) -> dict:
+def resolve_scope(kind: str, target, restrict: str = "", refused=(), declared: dict[str, str] | None = None,
+                  declared_why: str = "you set it") -> dict:
     """{paths, tree, gaps} for a scope (D23). `target` is the scope's argument:
     paths for notes, a prefix for folder, a term for topic, a note or a
     directive for steps. `restrict` bounds the material: a folder prefix for
@@ -322,7 +323,7 @@ def resolve_scope(kind: str, target, restrict: str = "", refused=(), declared: d
     if kind == "topic":
         return _topic_scope(str(target), allowed)
     if kind == "steps":
-        return _steps_scope(str(target), notes, allowed, set(refused or ()), declared)
+        return _steps_scope(str(target), notes, allowed, set(refused or ()), declared, declared_why)
     if kind == "workspace":
         return _workspace_scope(str(target), allowed)
     raise ValueError(f"unknown scope kind {kind!r}")
@@ -435,7 +436,7 @@ def topics_like(q: str, k: int = 4) -> list[dict]:
 
 
 def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | None = None,
-                 declared: dict[str, str] | None = None) -> dict:
+                 declared: dict[str, str] | None = None, declared_why: str = "you set it") -> dict:
     """Each step line resolved to the notes that cover it: wikilinks first,
     then the title index, then one body search; a step with no note is kept
     as a gap (the plan's most useful line). Each line says how it matched
@@ -467,7 +468,7 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
     topics_of = [_topics(t) for t in lines]
     labels = [_WIKILINK_RE.sub(r"\1", t).split(":", 1)[0].strip() for t in lines]
     role = so.roles(colls, body, title, [[so.roots(x) for x in (tp or [lab])] for tp, lab in zip(topics_of, labels)],
-                    declared) if colls else {}
+                    declared, declared_why) if colls else {}
     ctx = _source_context(colls, role, lines, topics_of, labels, allowed)
     tree, gaps = [], []
     for i, text in enumerate(lines):
@@ -1576,13 +1577,17 @@ def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | No
     if days_left == 0:
         return {"days_left": 0, "per_day": below, "below": below,
                 "say": f"The date has arrived; {below} note(s) remaining below the target."}
-    study_days = max(1, days_left - FINAL_DAYS)
+    # a project window the reference states takes the last days, as in the
+    # calendar (ADR-0131 point 9): the answers fit the study days before it
+    b = budget(plan) if plan.get("steps") else None
+    study_days = b["study_days"] if b and b.get("window") else max(1, days_left - FINAL_DAYS)
     answers = math.ceil(below * ATTEMPTS_PER_NOTE)
     per_day = -(-answers // study_days)  # ceil
     size = max(1, min(24, per_day)) if below else n_default
     since = (datetime.now(timezone.utc) - timedelta(days=RECENT_PACE_DAYS)).isoformat()
     recent = sum(1 for e in (entries or []) if str(e.get("ts") or "") >= since) / RECENT_PACE_DAYS
-    final = f", then {FINAL_DAYS} days of review" if days_left > FINAL_DAYS else ""
+    final = (f", then {b['window']} days for the project" if b and b.get("window")
+             else f", then {FINAL_DAYS} days of review" if days_left > FINAL_DAYS else "")
     lately = (f" Lately you answer about {recent:.0f} a day." if entries is not None and recent >= 0.5
               else " You have not answered yet this week." if entries is not None else "")
     return {"days_left": days_left, "per_day": per_day, "below": below, "session": size,
@@ -2357,9 +2362,10 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
     old = read_plan(plan_path)
     from silica.kernel.learn import sources as so
 
-    declared = so.declared_of(old) if declared is None else declared
+    kept = declared is None
+    declared = so.declared_of(old) if kept else declared
     resolved = resolve_scope(scope, target, restrict=restrict, refused=old["refused"] if refused is None else refused,
-                             declared=declared)
+                             declared=declared, declared_why="as the plan says" if kept else "you set it")
     if assessment is None and old.get("assessment_set"):
         assessment = assessment_text(old["assessment"])
     hours = old.get("hours") if hours is None else hours

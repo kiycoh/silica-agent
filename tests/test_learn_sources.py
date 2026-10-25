@@ -254,10 +254,23 @@ def test_the_plan_note_stores_roles_hours_and_assessment_and_an_edit_keeps_them(
     text = plans._read(out["path"])
     assert "materials: Pattern Learning Methods (Ann Smith)" in text and "references: Slides" in text
     assert "assessment: project 7 | oral" in text and ("hours: '5'" in text or "hours: 5" in text)
+    assert "(you set it)" in text
     plans.edit_plan(out["path"], "Esame", "steps", "Syllabus", by="2026-11-10", objectives=[], assessment="none")
     text = plans._read(out["path"])
     assert "assessment: none" in text and "## Assessment" not in text
     assert "materials: Pattern Learning Methods (Ann Smith)" in text   # the roles the reader set stay
+    assert "(as the plan says)" in text and "(you set it)" not in text
+
+
+def test_the_pace_counts_the_study_days_before_the_projects():
+    from datetime import date as real_date, timedelta
+
+    today = real_date.today()
+    plan = {"by": (today + timedelta(days=16)).isoformat(), "assessment": [{"part": "project", "days": 7}],
+            "steps": [{"text": "A", "notes": ["a"], "hours": 4.0, "unit": "h"}]}
+    pace = plans.pace_of(plan, below=90)
+    assert pace["per_day"] == 25        # 225 answers over 9 study days, not 14
+    assert "then 7 days for the project" in pace["say"]
 
 
 def test_lecture_gaps_read_the_material_however_its_decks_are_named(course, monkeypatch):

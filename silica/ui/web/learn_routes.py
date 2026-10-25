@@ -1402,6 +1402,8 @@ def write_plan(payload: dict):
     # assessment's parts ("none" clears them), a guide for the steps' depth;
     # a key left out keeps what the plan says, or what Silica reads
     declared = _declared(payload)
+    # roles the form sends back unchanged from the plan are the plan's, not a choice made now
+    declared_why = "as the plan says" if payload.get("roles_kept") else "you set it"
     hours = payload.get("hours") if "hours" in payload else None
     assessment = payload.get("assessment") if "assessment" in payload else None
     guide = str(payload.get("guide") or "") if "guide" in payload else None
@@ -1415,7 +1417,8 @@ def write_plan(payload: dict):
         raise HTTPException(400, f"scope must be one of {plans.SCOPES}")
     if payload.get("preview") or payload.get("cards_only"):
         try:
-            res = plans.resolve_scope(scope, target, restrict=restrict, refused=refused, declared=declared)
+            res = plans.resolve_scope(scope, target, restrict=restrict, refused=refused, declared=declared,
+                                      declared_why=declared_why)
         except Exception as exc:
             raise HTTPException(400, str(exc))
         if payload.get("cards_only"):
