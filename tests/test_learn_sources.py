@@ -338,3 +338,34 @@ def test_best_steps_gives_a_row_to_the_step_holding_it_most_whatever_the_order()
     names = {0: "Zeta", 1: "Alfa"}
     assert sources.best_steps(steps, coll, names) == {0: [0], 1: [1, 2]}
     assert sources.best_steps(list(reversed(steps)), coll, names) == {0: [0], 1: [1, 2]}
+
+
+def _even_plan(created: str, by: str) -> dict:
+    return {"by": by, "created": created, "hours": 4.0,
+            "steps": [{"text": f"S{i}: [[n{i}]]", "notes": [f"n{i}"], "hours": 4.0, "unit": "h"} for i in range(4)]}
+
+
+def test_the_calendar_is_of_the_steps_left():
+    plan = _even_plan("2026-10-18", "2026-11-03")
+    rows = plans.day_by_day(plan, today=date(2026, 10, 25), passed=[True, False, False, False])
+    labels = [label for r in rows for label, _n in r["steps"]]
+    assert "S0" not in labels and labels[0] == "S1"
+    plan["steps"][1]["checked"] = True        # a checked box counts as done too
+    rows = plans.day_by_day(plan, today=date(2026, 10, 25), passed=[True, False, False, False])
+    assert [label for r in rows for label, _n in r["steps"]][0] == "S2"
+    say = plans.budget(plan, date(2026, 10, 25), [True, False, False, False])["say"]
+    assert "16 h (8 h in the steps left)" in say
+
+
+def test_today_says_how_far_behind_the_calendar_drawn_when_the_plan_was_made():
+    # 16 days, 2 of review: 14 study days, four steps of 3.5 days; the
+    # calendar made on the 18th has S2 on the 25th
+    plan = _even_plan("2026-10-18", "2026-11-03")
+    t = plans.today_line(plan, [False] * 4, today=date(2026, 10, 25))
+    assert t["behind"] == 2 and t["expected"] == "S2" and t["first"] == "S0"
+    assert "2 steps behind the calendar drawn when the plan was made: it had S2 for today" in t["say"]
+    assert t["say"].startswith("Today: S0")
+    on_time = plans.today_line(plan, [True, True, False, False], today=date(2026, 10, 25))
+    assert on_time["behind"] == 0 and "behind" not in on_time["say"]
+    fresh = plans.today_line({**plan, "created": "2026-10-25"}, [False] * 4, today=date(2026, 10, 25))
+    assert fresh["behind"] is None

@@ -1657,7 +1657,16 @@ def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | No
 # random (2026-10-23), and the research behind Learn's plans says a calendar
 # is arithmetic a language model should not do (GPT-4 solved 0.6% of
 # TravelPlanner; docs research report study-plans-and-deadline-scheduling).
-def day_by_day(plan: dict, today=None) -> list[dict] | None:
+def _left(plan: dict, passed: list[bool] | None = None) -> list[dict]:
+    """The steps still to study: neither checked on the plan note nor passed
+    in the ledger (ADR-0131 amendment, point 2). A calendar drawn over every
+    step started again from step 1 however far the reader had gone."""
+    steps = plan.get("steps") or []
+    passed = list(passed or []) + [False] * (len(steps) - len(passed or []))
+    return [s for s, ok in zip(steps, passed) if not (ok or s.get("checked"))]
+
+
+def day_by_day(plan: dict, today=None, passed: list[bool] | None = None) -> list[dict] | None:
     """[{day, steps: [(label, notes)], hours: {label: h}}] from today to the
     plan's date: the steps in their order over the study days, each given
     days in proportion to its weight and its notes split evenly over them,
@@ -1670,25 +1679,31 @@ def day_by_day(plan: dict, today=None) -> list[dict] | None:
     reference gives a lead time takes those last days and the study days end
     before them; an oral or a presentation puts a rehearsal on the day before
     the date (point 9). With the plan's `hours:` a day each row says the
-    study hours of each step that day."""
+    study hours of each step that day. `passed` (the ledger's reading per
+    step) and the note's checked boxes take steps out: the calendar is of
+    what is left."""
     from datetime import date, timedelta
 
-    steps = plan.get("steps") or []
-    if not plan.get("by") or not steps:
+    if not plan.get("by") or not plan.get("steps"):
         return None
     try:
         by = date.fromisoformat(str(plan["by"])[:10])
     except ValueError:
         return None
     today = today or date.today()
-    b = budget(plan, today)
+    b = budget(plan, today, passed)
     if b is None:
         return None
+    steps = _left(plan, passed)
     days, study, window = b["days"], b["study_days"], b["window"]
     weights = b["weights"]
-    total = sum(weights)
+    total = sum(weights) or 1.0
     per_day = plan.get("hours")
     rows = [{"day": (today + timedelta(days=k)).isoformat(), "steps": [], "hours": {}} for k in range(study)]
+    if not steps:
+        # every step passed or checked: the study days are review
+        for r in rows:
+            r["steps"].append(("Review: the notes Learn shows due", []))
     done = 0.0
     for step, w in zip(steps, weights):
         start, end = done / total * study, (done + w) / total * study
@@ -1720,18 +1735,20 @@ def day_by_day(plan: dict, today=None) -> list[dict] | None:
     return rows
 
 
-def budget(plan: dict, today=None) -> dict | None:
+def budget(plan: dict, today=None, passed: list[bool] | None = None) -> dict | None:
     """The arithmetic under the calendar, and what it says about it: the
-    days, the study days and the project window, each step's weight and
-    where it came from, the reference's own hours against the hours before
-    the date at the plan's hours a day. None without a date or a step."""
+    days, the study days and the project window, each left step's weight and
+    where it came from, the reference's own hours (and those of the steps
+    left) against the hours before the date at the plan's hours a day. None
+    without a date or a step."""
     from datetime import date
 
     from silica.kernel.learn.pick import FINAL_DAYS
 
-    steps = plan.get("steps") or []
-    if not plan.get("by") or not steps:
+    every = plan.get("steps") or []
+    if not plan.get("by") or not every:
         return None
+    steps = _left(plan, passed)
     try:
         by = date.fromisoformat(str(plan["by"])[:10])
     except ValueError:
@@ -1750,26 +1767,81 @@ def budget(plan: dict, today=None) -> dict | None:
             says.append(f"The reference gives the project {lead} days before the date, more than half the "
                         f"{days} days left: no days are kept for it.")
     study = days - window if window else (max(1, days - FINAL_DAYS) if days > FINAL_DAYS else days)
-    given = [s.get("hours") for s in steps]
-    known = sorted(h for h in given if h)
-    unit = next((s.get("unit") for s in steps if s.get("hours")), "") or ""
-    if known:
-        mid = known[len(known) // 2]
-        weights = [h or mid for h in given]
-        total = sum(weights)
+    all_known = sorted(h for h in (s.get("hours") for s in every) if h)
+    unit = next((s.get("unit") for s in every if s.get("hours")), "") or ""
+    if all_known:
+        mid = all_known[len(all_known) // 2]
+        weights = [s.get("hours") or mid for s in steps]
+        whole, left = sum(s.get("hours") or mid for s in every), sum(weights)
+        part = f" ({left:g} h in the steps left)" if len(steps) < len(every) else ""
         if unit == "h" and plan.get("hours"):
             have = study * float(plan["hours"])
-            says.append(f"The reference's own hours: {total:g} h; before the study days end, {study} days at "
+            says.append(f"The reference's own hours: {whole:g} h{part}; before the study days end, {study} days at "
                         f"{float(plan['hours']):g} h make {have:g} h."
-                        + (" Fewer than the reference's own." if have < total else ""))
+                        + ((" Fewer than the reference's own." if not part else " Fewer than the hours left.")
+                           if have < left else ""))
         else:
-            says.append(f"Steps weighted by the reference's own numbers ({total:g}{' ' + unit if unit else ''}).")
+            says.append(f"Steps weighted by the reference's own numbers ({whole:g}{' ' + unit if unit else ''}).")
     else:
         weights = [max(1, len(s.get("notes") or [])) for s in steps]
         says.append("Weighted by notes: the reference gives no hours.")
     return {"days": days, "study_days": study, "window": window, "weights": weights,
-            "unit": unit, "reference_hours": sum(known) if known else None,
+            "unit": unit, "reference_hours": sum(all_known) if all_known else None, "left": len(steps),
             "hours_per_day": plan.get("hours"), "say": " ".join(says)}
+
+
+def _short(label: str, width: int = 48) -> str:
+    """A step's name for a sentence: a syllabus block's whole topic list ran
+    past 90 characters and was cut after a comma (2026-10-25)."""
+    label = label.rstrip(" ,.;")
+    if len(label) <= width:
+        return label
+    cut = label[:width].rsplit(" ", 1)[0].rstrip(" ,.;")
+    return cut + "…"
+
+
+def today_line(plan: dict, passed: list[bool] | None = None, today=None) -> dict | None:
+    """What the plan asks of today and how far the reader is from it
+    (ADR-0131 amendment, point 2): today's row of the calendar of the steps
+    left, and against the calendar drawn when the plan was made, how many
+    steps the first one not done lies behind (or ahead of) the step that
+    calendar had for today. Drawn from today only, the row would always
+    name the first step not done and never say the reader is behind."""
+    from datetime import date
+
+    today = today or date.today()
+    live = day_by_day(plan, today, passed)
+    if not live:
+        return None
+    row = next((r for r in live if r["day"] == today.isoformat()), None)
+    doing = [(label, (row or {}).get("hours", {}).get(label)) for label, _n in (row or {}).get("steps", [])]
+    steps = plan.get("steps") or []
+    done = [bool(ok) for ok in (list(passed or []) + [False] * (len(steps) - len(passed or [])))]
+    done = [d or bool(s.get("checked")) for d, s in zip(done, steps)]
+    first = next((i for i, d in enumerate(done) if not d), None)
+    behind, expected = None, ""
+    try:
+        made = date.fromisoformat(str(plan.get("created") or "")[:10])
+    except ValueError:
+        made = None
+    if made and made < today and first is not None:
+        anchor = day_by_day(plan, made) or []
+        labels = {_step_label(s): i for i, s in enumerate(steps)}
+        due = [labels[label] for r in anchor if r["day"] == today.isoformat() for label, _n in r["steps"] if label in labels]
+        if due:
+            behind, expected = min(due) - first, _step_label(steps[min(due)])
+        elif anchor and today.isoformat() > max(r["day"] for r in anchor if any(l in labels for l, _n in r["steps"])):
+            behind, expected = len(steps) - first, ""
+    bits = ["Today: " + "; ".join(f"{_short(label)} ({h:g} h)" if h else _short(label) for label, h in doing) + "."
+            if doing else ""]
+    if behind and behind > 0:
+        bits.append(f"{behind} step{'s' if behind > 1 else ''} behind the calendar drawn when the plan was made"
+                    + (f": it had {_short(expected)} for today" if expected else ": it had every step done by now")
+                    + f", and {_short(_step_label(steps[first]))} is the first not passed.")
+    elif behind and behind < 0:
+        bits.append(f"{-behind} step{'s' if behind < -1 else ''} ahead of the calendar drawn when the plan was made.")
+    return {"steps": doing, "behind": behind, "expected": expected,
+            "first": _step_label(steps[first]) if first is not None else "", "say": " ".join(b for b in bits if b)}
 
 
 _STEP_MARKS_RE = re.compile(r"\s*\((?:≈|ref)\)|\s·\s(?:weight\s\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?\s(?:h|CFU|ECTS|wk|min)|deep|well|read)(?=\s·|$)")
@@ -1783,7 +1855,7 @@ def _step_label(step: dict) -> str:
     return _STEP_MARKS_RE.sub("", head)[:90] or ", ".join(step.get("notes") or [])[:90]
 
 
-def day_by_day_table(rows: list[dict], plan: dict | None = None) -> str:
+def day_by_day_table(rows: list[dict], plan: dict | None = None, passed: list[bool] | None = None) -> str:
     """The calendar as a Markdown table, three notes named a day at most, an
     Hours column when the plan has hours a day, and the budget's sentence
     under it when a plan is given."""
@@ -1794,7 +1866,7 @@ def day_by_day_table(rows: list[dict], plan: dict | None = None) -> str:
             named = ", ".join(f"[[{n}]]" for n in notes[:3]) + (f" and {len(notes) - 3} more" if len(notes) > 3 else "")
             h = r.get("hours", {}).get(label)
             out.append(f"| {r['day']} | {label.replace('|', '/')} | {named} |" + (f" {h:g} |" if timed and h else " |" if timed else ""))
-    b = budget(plan) if plan else None
+    b = budget(plan, passed=passed) if plan else None
     return "\n".join(out) + (f"\n\n{b['say']}" if b and b.get("say") else "")
 
 
@@ -1947,7 +2019,8 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
         "suggestions": mastery.suggestions(entries, paths),
         "calibration": cal, "grader": mastery.grader_agreement(entries, paths),
         "pace": pace_of(plan, below, entries=entries), "cycles": cycles_among(paths),
-        "budget": budget(plan), "assessment": plan.get("assessment") or [], "hours": plan.get("hours"),
+        "budget": budget(plan, passed=passed), "assessment": plan.get("assessment") or [], "hours": plan.get("hours"),
+        "today": today_line(plan, passed),
         "assessment_set": plan.get("assessment_set", False), "guide": plan.get("guide", ""),
         "materials": plan.get("materials", ""), "references": plan.get("references", ""),
         "unused": plan.get("unused", ""),

@@ -920,6 +920,14 @@ function lrRenderPlanDetail(right, p) {
   }
   // exceptions are written; a default is not (ADR-0061 §3)
   if (p.pace?.say) head.appendChild(lrEl("p", "lr-help", p.pace.say));
+  if (p.today?.say) {
+    // today's row of the calendar, and how far the first step not done lies
+    // behind the calendar drawn when the plan was made (ADR-0131 amendment)
+    const t = lrEl("p", "lr-help" + ((p.today.behind || 0) >= 2 ? " warn" : ""));
+    if ((p.today.behind || 0) >= 2) t.appendChild(lrMark("warn", ""));
+    t.append(p.today.say);
+    head.appendChild(t);
+  }
   if (p.budget?.say) head.appendChild(lrEl("p", "lr-help", p.budget.say));
   if (p.cycles?.length) head.appendChild(lrEl("p", "lr-help", `Prerequisite cycle among: ${p.cycles[0].map(lrStem).join(" → ")}. Reported, not linearized.`));
   if (p.gaps?.length) head.appendChild(lrEl("p", "lr-help", `${lrPlural(p.gaps.length, "step")} not in the vault: ${p.gaps.join("; ")}.`));

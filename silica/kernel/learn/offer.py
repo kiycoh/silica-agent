@@ -283,10 +283,14 @@ def plan_context(text: str, plans: list[dict]) -> tuple[str, str]:
     row = next((p for p in open_plans if p.get("name", "").casefold() in low), open_plans[0])
     plan = pl.read_plan(row["path"])
     if asks_plan(text):
-        rows = pl.day_by_day(plan)
+        from silica.kernel.learn import mastery
+
+        # the calendar of what is left: a step the ledger says passed is done
+        passed = mastery.steps_passed(plan) if plan.get("steps") else []
+        rows = pl.day_by_day(plan, passed=passed)
         if not rows:
             return "", ""
-        table = pl.day_by_day_table(rows, plan)
+        table = pl.day_by_day_table(rows, plan, passed)
         # the advice stands on the plan's facts, not on study tips any plan
         # would get: the heaviest steps (by the reference's hours when it
         # gives them, ADR-0131), and what the slides leave to the book
