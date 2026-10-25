@@ -653,7 +653,9 @@ def hints_for(path: str) -> list[str]:
 
     out: list[str] = []
     try:
-        prereqs = learner.prerequisites_map().get(learner.key_of(path), [])
+        # keyed by the note's own case; key_of folds it, so compare folded
+        key = learner.key_of(path)
+        prereqs = next((v for k, v in learner.prerequisites_map().items() if learner.key_of(k) == key), [])
     except Exception:
         prereqs = []
     names = [Path(p).stem for p in prereqs][:4]

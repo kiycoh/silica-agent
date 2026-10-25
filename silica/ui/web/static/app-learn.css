@@ -1281,6 +1281,48 @@ button.lr-exp:hover {
   gap: 0.25rem;
 }
 
+/* ADR-0131: one row per collection of sources, its role and the rule */
+.lr-srcs {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.lr-src {
+  display: grid;
+  grid-template-columns: minmax(0, 14rem) 8.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 13px;
+}
+
+.lr-src > .n {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--frost);
+}
+
+.lr-chips.lr-assess {
+  align-items: center;
+}
+
+.lr-chips.lr-assess .lr-link {
+  font-size: var(--fs-meta);
+}
+
+.lr-hours {
+  width: 5rem;
+}
+
+@media (max-width: 640px) {
+  .lr-src {
+    grid-template-columns: minmax(0, 1fr) 8.5rem;
+  }
+  .lr-src > .lr-help {
+    grid-column: 1 / -1;
+  }
+}
+
 .lr-cta {
   display: flex;
   align-items: center;
@@ -2371,6 +2413,9 @@ button.lr-cell:focus-visible {
 
 .lr-steps2 .to {
   color: var(--text);
+  /* a notebook's name has no spaces ("esercizio_optdigits_svm_ffnn"), and it
+     ran over the match column */
+  overflow-wrap: anywhere;
 }
 
 .lr-steps2 .to.gap {
@@ -2386,6 +2431,21 @@ button.lr-cell:focus-visible {
   height: 10px;
   margin-right: 0.4rem;
   vertical-align: -1px;
+}
+
+/* under a step, the whole row wide: choices for a topic no source met, the
+   reader's answers, the topics met by meaning only (ADR-0131 amendment) */
+.lr-steps2 .x {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: 0.15rem;
+  margin-top: -0.2rem;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-steps2 .x .lr-link {
+  font-size: inherit;
 }
 
 .lr-steps2 .how {

@@ -15,6 +15,7 @@ and is never rewritten.
 """
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from pathlib import Path
@@ -111,14 +112,49 @@ def read_plan(path: str, text: str | None = None) -> dict:
         "by": str(data.get("by") or "") or None,
         "restrict": str(data.get("restrict") or ""),
         "refused": [x.strip() for x in str(data.get("refused") or "").split(" | ") if x.strip()],
+        "matched": parse_matched(data.get("matched")),
         "created": str(data.get("created") or data.get("date") or "")[:10] or None,
         "status": str(data.get("status") or "active"),
         "completed": str(data.get("completed") or "") or None,
         "revisit": [str(x) for x in (data.get("revisit") or [])],
+        # ADR-0131: the collections' roles, study hours a day, the assessment
+        # read off the reference (or "none"), a guide for each step's depth
+        "materials": str(data.get("materials") or ""), "references": str(data.get("references") or ""),
+        "unused": str(data.get("unused") or ""), "hours": _hours_of(data.get("hours")),
+        "assessment": parse_assessment(data.get("assessment")),
+        "assessment_set": "assessment" in data, "guide": str(data.get("guide") or ""),
         "steps": parse_steps(body), "sessions": parse_sessions(body),
         "tree_links": section_links(body, "Tree"),
         "legacy": legacy,
     }
+
+
+def parse_matched(value) -> dict[str, str]:
+    """{topic: note title} from a plan's `matched:` ("topic -> Note | ..."):
+    the reader's answer to "is it one of these?" for a topic no source met
+    (ADR-0131 amendment, point 5). Plain titles, no links: a link in a plan
+    key would be one more note of the plan."""
+    if isinstance(value, dict):
+        return {str(k).strip(): str(v).strip() for k, v in value.items() if str(k).strip() and str(v).strip()}
+    out = {}
+    for bit in str(value or "").split(" | "):
+        if " -> " in bit:
+            t, n = bit.split(" -> ", 1)
+            if t.strip() and n.strip():
+                out[t.strip()] = n.strip().strip("[]")
+    return out
+
+
+def matched_text(matched: dict[str, str]) -> str:
+    return " | ".join(f"{t} -> {n}" for t, n in matched.items())
+
+
+def _hours_of(value) -> float | None:
+    try:
+        h = float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    return h if 0 < h <= 24 else None
 
 
 def _title(body: str) -> str:
@@ -156,8 +192,39 @@ def parse_steps(body: str) -> list[dict]:
             continue
         text = m.group(2).strip()
         because = text.split(":", 1)[1].strip() if ":" in text else ""
-        out.append({"checked": m.group(1).lower() == "x", "text": text,
-                    "notes": [w.strip() for w in _WIKILINK_RE.findall(text)], "because": because})
+        step = {"checked": m.group(1).lower() == "x", "text": text,
+                "notes": [w.strip() for w in _WIKILINK_RE.findall(text)], "because": because}
+        # what ADR-0131 writes after a step's notes: its weight, its depth
+        h = _HOURS_MARK_RE.search(text)
+        if h:
+            step["hours"] = float((h.group(2) or h.group(3)).replace(",", "."))
+            step["unit"] = h.group(4) or ""
+        d = _DEPTH_MARK_RE.search(text)
+        if d:
+            step["depth"] = d.group(1)
+        out.append(step)
+    return out
+
+
+_HOURS_MARK_RE = re.compile(r"\s·\s(?:(weight)\s(\d+(?:[.,]\d+)?)|(\d+(?:[.,]\d+)?)\s(h|CFU|ECTS|wk|min))(?=\s·|$)")
+_DEPTH_MARK_RE = re.compile(r"\s·\s(deep|well|read)(?=\s·|$)")
+
+
+def _marks(node: dict) -> str:
+    """The step line's tail: the topics met by meaning only (plain titles: a
+    link there would be one more note of the step), its weight in the
+    reference's unit, its depth."""
+    out = ""
+    pairs = node.get("by_meaning") or []
+    if pairs:
+        # no colon: it is what tells a step's label from its notes
+        out += " · by meaning, " + "; ".join(f"{t} ≈ {n}" for t, n in pairs[:3])
+    h = node.get("hours")
+    if h:
+        n = f"{h:g}"
+        out += f" · {n} {node['unit']}" if node.get("unit") else f" · weight {n}"
+    if node.get("depth") in ("deep", "well", "read"):
+        out += f" · {node['depth']}"
     return out
 
 
@@ -205,11 +272,26 @@ def _by_name(name: str, notes: dict) -> str | None:
     cand = name if name.endswith(".md") else name + ".md"
     if cand in notes:
         return cand
-    low = Path(name).stem.casefold()
-    for p in notes:
-        if Path(p).stem.casefold() == low:
-            return p
-    return None
+    return _stem_index(notes).get(Path(name).stem.casefold())
+
+
+# {casefolded stem: the first path holding it, in the notes' own order}, for
+# the notes dict last asked about: the stem was looked up by walking every
+# note, 4,860 walks of 2,082 notes in one course preview, 16 s of a 30 s
+# profile (2026-10-25). The dict is held, not its id, so a new dict never
+# reads an old index; a changed length rebuilds it.
+_STEMS: tuple = (None, -1, {})
+
+
+def _stem_index(notes: dict) -> dict[str, str]:
+    global _STEMS
+    held, size, index = _STEMS
+    if held is not notes or size != len(notes):
+        index = {}
+        for p in notes:
+            index.setdefault(Path(p).stem.casefold(), p)
+        _STEMS = (notes, len(notes), index)
+    return index
 
 
 def notes_of(target) -> list[str]:
@@ -239,14 +321,16 @@ def target_text(scope: str, target) -> str:
     return target if isinstance(target, str) else ", ".join(target)
 
 
-def resolve_scope(kind: str, target, restrict: str = "", refused=()) -> dict:
+def resolve_scope(kind: str, target, restrict: str = "", refused=(), declared: dict[str, str] | None = None,
+                  declared_why: str = "you set it", matched: dict[str, str] | None = None) -> dict:
     """{paths, tree, gaps} for a scope (D23). `target` is the scope's argument:
     paths for notes, a prefix for folder, a term for topic, a note or a
     directive for steps. `restrict` bounds the material: a folder prefix for
     "X relative to Y", or several prefixes joined by " | " when a reference
     is bounded by the notes studied rather than one folder (ADR-0119);
     `refused` the indexes of syllabus lines the reader marked "not this",
-    kept as gaps (ADR-0081 §13).
+    kept as gaps (ADR-0081 §13); `declared` the roles the reader gave the
+    collections of sources, {label: role} (ADR-0131).
 
     ponytail: a steps plan resolves each line by title index and search
     context; a step that names a concept with no note of its own is a gap
@@ -282,7 +366,7 @@ def resolve_scope(kind: str, target, restrict: str = "", refused=()) -> dict:
     if kind == "topic":
         return _topic_scope(str(target), allowed)
     if kind == "steps":
-        return _steps_scope(str(target), notes, allowed, set(refused or ()))
+        return _steps_scope(str(target), notes, allowed, set(refused or ()), declared, declared_why, matched)
     if kind == "workspace":
         return _workspace_scope(str(target), allowed)
     raise ValueError(f"unknown scope kind {kind!r}")
@@ -394,28 +478,48 @@ def topics_like(q: str, k: int = 4) -> list[dict]:
         return []
 
 
-def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | None = None) -> dict:
+def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | None = None,
+                 declared: dict[str, str] | None = None, declared_why: str = "you set it",
+                 matched: dict[str, str] | None = None) -> dict:
     """Each step line resolved to the notes that cover it: wikilinks first,
     then the title index, then one body search; a step with no note is kept
     as a gap (the plan's most useful line). Each line says how it matched
     (`how`) and whether that is doubtful, because "Teoria della mente"
     resolved to two probability notes on one shared word and nothing said so
-    (ADR-0081, Create plan fault 4); a refused line is a gap by the reader."""
+    (ADR-0081, Create plan fault 4); a refused line is a gap by the reader.
+
+    With nucleated sources in the bound, the sources come first (ADR-0131):
+    a step is the outline rows of the material that hold its topics, the
+    title matching behind them, a note that comes only from a reference kept
+    for a topic no material row holds, and a topic not in the vault only
+    when no source's text holds it either."""
+    from silica.kernel.learn import sources as so
     from silica.kernel.write import frontmatter
 
     # a line break says pasted text: "Iperpiano" alone names the note to read
     # the syllabus from, "Iperpiano\n" is one line to match (ADR-0119)
     path = None if "\n" in target else resolve_title(target, notes)
+    body = title = ""
     if path:
         _d, _r, body = frontmatter.split((_vault() / path).read_text(encoding="utf-8"))
-        lines = [s["text"] for s in parse_steps(body)] or reference_lines(body)
+        title = _title(body) or Path(path).stem
+        rows = [{"text": s["text"]} for s in parse_steps(body)] or reference_rows(body)
     else:
-        lines = [ln.strip("-* ").strip() for ln in re.split(r"[\n;]", target) if ln.strip()]
-    tree, paths, gaps = [], [], []
+        rows = [{"text": ln.strip("-* ").strip()} for ln in re.split(r"[\n;]", target) if ln.strip()]
+    colls = so.collections(notes, allowed)
+    rows = _unglued(rows, notes, allowed, colls)
+    lines = [r["text"] for r in rows]
+    topics_of = [_topics(t) for t in lines]
+    labels = [_WIKILINK_RE.sub(r"\1", t).split(":", 1)[0].strip() for t in lines]
+    steps_roots = [[so.roots(x) for x in (tp or [lab])] for tp, lab in zip(topics_of, labels)]
+    read = so.readings(colls, steps_roots) if colls else {}
+    role = so.roles(colls, body, title, steps_roots, declared, declared_why, read=read) if colls else {}
+    ctx = _source_context(colls, role, lines, topics_of, labels, allowed, read)
+    tree, gaps = [], []
     for i, text in enumerate(lines):
-        how, doubt, missing, approx = "", False, [], []
+        how, doubt, missing, approx, hits = "", False, [], [], {}
         found = [p for p in (resolve_title(w, notes) for w in _WIKILINK_RE.findall(text)) if p]
-        topics = _topics(text)
+        topics = topics_of[i]
         if topics:
             # every topic, linked or not: the autolinker links two of eight
             # topics in a syllabus row, and "by link" read only those two
@@ -430,30 +534,660 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
         elif found:
             how = "by link"
         else:
-            plain = _WIKILINK_RE.sub(r"\1", text).split(":", 1)[0].strip()
+            plain = labels[i]
             hit = resolve_title(plain, notes)
             if hit:
                 found, how = [hit], "by title"
             else:
                 found, how, doubt = _search_notes(plain, notes, explain=True)
         found = [p for p in found if p in allowed]
-        node = {"node": _WIKILINK_RE.sub(r"\1", text).split(":", 1)[0].strip(), "children": [], "text": text}
+        node = {"node": labels[i], "children": [], "text": text}
+        if rows[i].get("hours") is not None:
+            node.update(hours=rows[i]["hours"], unit=rows[i].get("unit") or "")
+        if rows[i].get("depth"):
+            node["depth"] = rows[i]["depth"]
+        if ctx["material"]:
+            found, missing, approx, how, doubt = _with_sources(i, text, labels[i], topics, hits, found, how, doubt,
+                                                               approx, node, ctx)
+        # the reader's answer for a topic no source met ("is it one of these?")
+        said = {t: resolve_title(matched[t], notes) for t in missing if matched and t in matched}
+        said = {t: p for t, p in said.items() if p}
+        if said:
+            missing = [t for t in missing if t not in said]
+            found = list(dict.fromkeys(list(found) + list(said.values())))
+            node["matched"] = {t: Path(p).stem for t, p in said.items()}
+            node["matched_paths"] = list(said.values())
         if missing:
             node["missing"] = missing
         if approx:
             node["approx"] = approx
+        if ctx["material"] and ctx["by_meaning"].get(i):
+            node["by_meaning"] = ctx["by_meaning"][i][:3]
         # by index from the form, by its text from the plan note (`refused:`)
         if refused and (i in refused or text in refused):
             node.update(leaves=[], gap=True, refused=len(found), how="refused")
-            gaps.append(text)
         elif not found:
-            node.update(leaves=[], gap=True, how="")
-            gaps.append(text)
+            node.update(leaves=[], gap=True, how=node.get("how", ""))
         else:
             node.update(leaves=found, gap=False, how=how, doubt=doubt)
-            paths += [p for p in found if p not in paths]
         tree.append(node)
-    return {"paths": paths, "tree": tree, "gaps": gaps, "steps": lines}
+    if ctx["material"]:
+        _fill_activity(tree, ctx, notes, refused or set())
+        _one_note_per_step(tree, set(ctx["practice"]), ctx)
+        _gap_candidates(tree, notes)
+        if ctx["ordered"]:
+            # position means something only when the material follows the reference
+            _place_by_position(tree, ctx, refused or set())
+    paths: list[str] = []
+    for node in tree:
+        if node["gap"]:
+            gaps.append(node["text"])
+        else:
+            paths += [p for p in node["leaves"] if p not in paths]
+    return {"paths": paths, "tree": tree, "gaps": gaps, "steps": lines,
+            "sources": [{"key": c["key"], "label": c["label"], "kind": c["kind"], "spines": len(c["spines"]),
+                         **role.get(c["key"], {})} for c in colls],
+            "assessment": assessment_of(body) if body else [], "order_note": _order_note(ctx)}
+
+
+def _order_note(ctx: dict) -> str:
+    """What the plan says when its steps were matched without the order
+    (ADR-0131 amendment, evening): the one failure that was silent."""
+    if not ctx.get("material") or ctx.get("ordered"):
+        return ""
+    o = ctx.get("order")
+    if o is None:
+        return ("Too few of the material's sources meet the reference to follow its order: steps matched by "
+                "their words; check them.")
+    return f"The material does not follow the reference's order ({o:.2f}): steps matched by their words; check them."
+
+
+def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: list[list[str]],
+                    labels: list[str], allowed: set[str], read: dict[str, dict] | None = None) -> dict:
+    """What every step line of one reference shares: the collections by
+    role, the practice notes, the activity lines, and each step's rows of
+    the material, aligned to the reference's order (ADR-0131 point 3)."""
+    from silica.kernel.learn import sources as so
+
+    material = [c for c in colls if role.get(c["key"], {}).get("role") == so.MATERIAL]
+    others = [c for c in colls if c not in material and role.get(c["key"], {}).get("role") != so.UNUSED]
+    ctx = {"material": material, "others": others, "practice": [], "activity": set(), "lines": lines,
+           "origin": {}, "colls": colls, "rows": {}, "covered": {}, "meaning": {}, "ordered": False,
+           "labels": labels, "by_meaning": {}}
+    if not material:
+        return ctx
+    ctx["practice"] = so.practice_notes(allowed)
+    ctx["activity"] = {i for i, t in enumerate(lines)
+                       if not topics_of[i] and len(_content_words(_WIKILINK_RE.sub(r"\1", t))) > GAP_MAX_WORDS}
+    asked: dict[int, list[tuple[str, float]]] = {}
+    for i, label in enumerate(labels):
+        if i in ctx["activity"]:
+            continue
+        q = topics_of[i] or [label]
+        asked[i] = [(t, so.W_PHRASE if len(so.roots(t)) > 1 else so.W_WORD) for t in q]
+        if topics_of[i] and label and label not in q:
+            asked[i].append((label, so.W_LABEL))
+    row_notes = {r["note"] for c in material for r in c["rows"] if r["note"]}
+    dense = _dense_rows([t for t in dict.fromkeys(t for v in asked.values() for t, _w in v)
+                         if len(_root_words(t)) > 1], row_notes)
+    topic_roots = {t: so.roots(t) for v in asked.values() for t, _w in v}
+
+    def holds(t: str, r: dict, floor: float) -> str:
+        """"words", "meaning" or "" for one topic and one row. At the plan
+        floor a meaning match must pass the sibling check; under it, inside
+        a step's own rows, a sibling is the lecture's next idea, which is
+        what the step wants: lecture 13's "Iperpiano a margine massimale"
+        and "Forma duale della lagrangiana" for "iperpiano di separazione
+        ottimale e sua formulazione lagrangiana" (2026-10-25)."""
+        if so.held(topic_roots[t], r["roots"]):
+            return "words"
+        score, checked = dense.get(t, {}).get(r["note"], (0.0, False)) if r["note"] else (0.0, False)
+        if floor >= PLAN_TITLE_FLOOR:
+            return "meaning" if checked and score >= floor else ""
+        return "meaning" if score >= floor else ""
+
+    main = max(material, key=lambda c: len(c["rows"]))
+    steps = []
+    for i, ts in asked.items():
+        scores: dict[int, float] = {}
+        for n, r in enumerate(main["rows"]):
+            w = 0.0
+            for t, wt in ts:
+                k = holds(t, r, PLAN_TITLE_FLOOR)
+                w += wt if k == "words" else so.W_MEANING if k else 0.0
+            if w:
+                scores[n] = w
+        # A lecture teaches a block when it holds a phrase of it or two of its
+        # words: lecture 15's confusion matrix held "validazione" alone, and
+        # the feedforward block opened on it, taking the metrics (2026-10-25).
+        support: dict[str, float] = {}
+        for n, w in scores.items():
+            support[main["rows"][n]["spine"]] = support.get(main["rows"][n]["spine"], 0.0) + w
+        steps.append({"i": i, "scores": {n: w for n, w in scores.items()
+                                         if support[main["rows"][n]["spine"]] >= so.SPINE_SUPPORT}})
+    # The order is a structure only when the material follows the reference
+    # (ADR-0131 amendment, evening): a reference listed otherwise, its rows go
+    # each to the step that holds them best, and a step's own rows are those of
+    # the spines it took rows in rather than a stretch of the course.
+    order = (read or {}).get(main["key"], {}).get("order")
+    ctx["order"] = order
+    ctx["ordered"] = order is not None and order >= so.ORDER_FLOOR
+    names = dict(enumerate(labels))
+    aligned = so.align(steps, main) if ctx["ordered"] else so.best_steps(steps, main, names)
+    given = {n for v in aligned.values() for n in v}
+    dense, ctx["generic"] = _without_generic(dense, asked, aligned, len(main["rows"]))
+    picked_by: dict[int, list[dict]] = {}
+    how: dict[tuple, str] = {}
+    stray: set[tuple] = set()      # rows met outside a step's own lectures
+    for i, ts in asked.items():
+        mine = set(aligned.get(i, []))
+        picked: list[dict] = []
+        if mine:
+            if ctx["ordered"]:
+                local = range(min(mine), max(mine) + 1)
+            else:
+                spines = {main["rows"][n]["spine"] for n in mine}
+                local = [n for n, r in enumerate(main["rows"]) if r["spine"] in spines]
+            for n in local:
+                r = main["rows"][n]
+                kinds = [holds(t, r, ROW_NEAR) for t, _w in ts]
+                if n in mine or (n not in given and any(kinds)):
+                    picked.append(r)
+                    how[(r["spine"], r["i"])] = "words" if "words" in kinds else "meaning"
+        for t, wt in ts:
+            if wt == so.W_LABEL or any(holds(t, r, ROW_NEAR) for r in picked):
+                continue
+            # a phrase the aligned rows miss is looked for anywhere in the
+            # material, and an unaligned step's every topic is; a lone word
+            # held out of the step's rows is a word, not its lecture
+            if mine and len(topic_roots[t]) < 2:
+                continue
+            for c in material:
+                for n, r in enumerate(c["rows"]):
+                    if c is main and n in given:
+                        continue
+                    k = holds(t, r, PLAN_TITLE_FLOOR)
+                    if k:
+                        picked.append(r)
+                        how.setdefault((r["spine"], r["i"]), k)
+                        stray.add((r["spine"], r["i"]))
+        picked_by[i] = picked
+    # who keeps a row two steps took: the first step in order, or by name when
+    # there is no order, so a shuffled reference gives the same steps
+    first = sorted(picked_by) if ctx["ordered"] else sorted(picked_by, key=lambda i: (names.get(i, ""), i))
+    _whole_lectures(picked_by, material, stray, first)
+    ctx["owned"] = {(r["spine"], r["i"]) for v in picked_by.values() for r in v}
+    for i, ts in asked.items():
+        sec = so.section(picked_by[i], material)
+        ctx["rows"][i] = sec
+        ctx["covered"][i] = {t for t, wt in ts if wt != so.W_LABEL and any(holds(t, r, ROW_NEAR) for r in sec)}
+        ctx["meaning"][i] = {r["note"] for r in sec if r["note"] and how.get((r["spine"], r["i"])) == "meaning"}
+        # a topic only a title vector met, and the note that met it best: the
+        # coverage a reader should check, said by topic (amendment, point 5)
+        pairs = []
+        for t, wt in ts:
+            if wt == so.W_LABEL or t not in ctx["covered"][i]:
+                continue
+            if any(holds(t, r, ROW_NEAR) == "words" for r in sec):
+                continue
+            near = [(dense.get(t, {}).get(r["note"], (0.0, False))[0], r["note"]) for r in sec if r["note"]]
+            if near:
+                pairs.append((t, Path(max(near)[1]).stem))
+        ctx["by_meaning"][i] = pairs
+    return ctx
+
+
+GENERIC_MIN_STEPS = 3
+GENERIC_SPAN = 0.5
+
+
+def _without_generic(dense: dict, asked: dict, aligned: dict[int, list[int]], n_rows: int) -> tuple[dict, set[str]]:
+    """The title-vector matches less the course's generic notes, and those
+    notes (ADR-0131 amendment, point 7). A note is generic when topics of
+    GENERIC_MIN_STEPS steps or more that share no word with its title meet it
+    by meaning, and those steps' rows lie further apart in the material than
+    GENERIC_SPAN of it: on the course (2026-10-25) Apprendimento artificiale
+    was met by "introduzione al corso" and "computazione numerica" among
+    others, from the first lecture to the last; Rete di percettroni was met
+    from early and late blocks too, but by topics naming the perceptron. Words
+    are never filtered, and the note stays where its lecture puts it: what
+    goes is the claim that it teaches those topics. One corpus: reopen with
+    the role thresholds."""
+    import statistics
+
+    anchor = {i: statistics.median(rows) for i, rows in aligned.items() if rows}
+    steps_of: dict[str, set[int]] = {}
+    for i, ts in asked.items():
+        for t, _w in ts:
+            words = set(_root_words(t))
+            for p in dense.get(t, {}):
+                # a topic sharing a word with the title is the concept coming
+                # back (the perceptron in three blocks), not a hub's likeness
+                if not (words & _title_words(Path(p).stem)):
+                    steps_of.setdefault(p, set()).add(i)
+    generic = set()
+    for p, steps in steps_of.items():
+        at = [anchor[i] for i in steps if i in anchor]
+        if len(steps) >= GENERIC_MIN_STEPS and len(at) >= 2 and (max(at) - min(at)) > GENERIC_SPAN * n_rows:
+            generic.add(p)
+    if not generic:
+        return dense, generic
+    return {t: {p: v for p, v in d.items() if p not in generic} for t, d in dense.items()}, generic
+
+
+def _whole_lectures(picked_by: dict[int, list[dict]], material: list[dict], stray: set[tuple] = frozenset(),
+                    first: list[int] | None = None) -> None:
+    """A lecture the reference teaches is studied whole (ADR-0131 point 3):
+    a row no step took, in a spine where steps took others, goes to the step
+    of the nearest taken row of that spine, the earlier on a tie. Lecture
+    15's SVDD rows follow its one-class row and no syllabus word names them;
+    without this they were in no step, so not in the plan (2026-10-25). A
+    spine no step touched stays out: the reference does not ask for it, and
+    a row a step met outside its own lectures (`stray`) brings that row
+    only: one title-vector row of lecture 1 had given the whole lecture to
+    the exploratory-analysis block (2026-10-25)."""
+    owner: dict[tuple, int] = {}
+    for i in (first if first is not None else sorted(picked_by)):
+        for r in picked_by[i]:
+            if (r["spine"], r["i"]) not in stray:
+                owner.setdefault((r["spine"], r["i"]), i)
+    for c in material:
+        for sp, rows in c["by_spine"].items():
+            taken = [(r["i"], owner[(sp, r["i"])]) for r in rows if (sp, r["i"]) in owner]
+            if not taken:
+                continue
+            for r in rows:
+                if (sp, r["i"]) in owner or (sp, r["i"]) in stray:
+                    continue
+                _d, i = min(taken, key=lambda t: (abs(t[0] - r["i"]), t[0]))
+                picked_by[i].append(r)
+
+
+def _origin(path: str, ctx: dict) -> set[str]:
+    from silica.kernel.learn import sources as so
+
+    if path not in ctx["origin"]:
+        ctx["origin"][path] = so.note_collections([path], ctx["colls"]).get(path, set())
+    return ctx["origin"][path]
+
+
+def _with_sources(i: int, text: str, label: str, topics: list[str], hits: dict, found: list[str], how: str,
+                  doubt: bool, approx: list[str], node: dict, ctx: dict):
+    """(notes, missing, approx, how, doubt) of one step line read against
+    the material's outline rows first (ADR-0131 points 3, 4 and 6)."""
+    from silica.kernel.learn import sources as so
+
+    material = ctx["material"]
+    mat_keys = {c["key"] for c in material}
+
+    def ref_only(p: str) -> bool:
+        # from sources, none of them the material: the reader's own notes
+        # come from no collection and always stay
+        ks = _origin(p, ctx)
+        return bool(ks) and not (ks & mat_keys)
+
+    if i in ctx["activity"]:
+        # filled after every other step (_fill_activity): practice joins the
+        # step whose theory it practises; a search hit on one shared word
+        # ("supervisionata" for LVQ, 2026-10-25) never stands beside it, a
+        # link the line itself makes does
+        node["keep"] = [p for p in found if not doubt and not ref_only(p)]
+        return node["keep"], [], [], how, doubt
+    q = topics or [label]
+    sec = ctx["rows"].get(i, [])
+    covered = ctx["covered"].get(i, set())
+    row_notes = [r["note"] for r in sec if r["note"]]
+    approx = list(dict.fromkeys([p for p in approx if p in found] + [p for p in row_notes if p in ctx["meaning"].get(i, ())]))
+    title_of_topic = {t: p for t, (p, _h) in hits.items() if p}
+    kept, refs = [], []
+    for p in found:
+        topic = next((t for t, tp in title_of_topic.items() if tp == p), None)
+        if ref_only(p):
+            # the material teaches it: the book's note gives way to the rows
+            if (topic is not None and topic in covered) or (topic is None and row_notes):
+                continue
+            refs.append(p)
+        elif doubt and how.endswith("words") and row_notes:
+            continue
+        kept.append(p)
+    missing, spines_extra = [], []
+    for t in q if topics else []:
+        if t in covered or t in title_of_topic:
+            continue
+        sp, key = so.leaf_spine(so.roots(t), material + ctx["others"])
+        if sp:
+            spines_extra.append(sp)
+            if key not in mat_keys:
+                refs.append(sp)
+        else:
+            missing.append(t)
+    notes = list(dict.fromkeys(row_notes + kept + spines_extra))
+    node["ref"] = [p for p in dict.fromkeys(refs) if p in notes]
+    node["spines"] = sorted({r["spine"] for r in sec})
+    node["rows"] = len(sec)
+    if topics:
+        how = f"{len(q) - len(missing)} of {len(q)} topics" + (f" · {len(sec)} rows" if sec else "")
+        doubt = len(missing) * 2 > len(q)
+    elif sec:
+        how, doubt = f"{len(sec)} rows", False
+    return notes, missing, approx, how, doubt
+
+
+def _fill_activity(tree: list[dict], ctx: dict, notes: dict, refused: set) -> None:
+    """An activity line's notes (ADR-0131 point 6), once the theory steps
+    hold theirs: the practice notes its distinctive words weigh most in
+    (`sources.practice_for`), and the rows of the material's spines no
+    theory step took (the exercise decks) that hold half of them."""
+    from silica.kernel.learn import sources as so
+
+    act = sorted(ctx["activity"])
+    free = [r for c in ctx["material"] for r in c["rows"] if (r["spine"], r["i"]) not in ctx.get("owned", set())]
+    for i in act:
+        node = tree[i]
+        if node.get("how") == "refused" or i in refused or node["text"] in refused:
+            continue
+        words = so.distinctive(node["text"], [tree[j]["text"] for j in act if j != i])
+        labs = so.practice_for(words, ctx["practice"])
+        sec = so.section([r for r in free if so.half_held(words, r["roots"])], ctx["material"])
+        leaves = list(dict.fromkeys(labs + [r["note"] for r in sec if r["note"]] + node.pop("keep", [])))
+        node.update(practice=labs, spines=sorted({r["spine"] for r in sec}), rows=len(sec))
+        if leaves:
+            node.update(leaves=leaves, gap=False, how=f"{len(labs)} practice · {len(sec)} rows", doubt=False)
+        else:
+            node.update(leaves=[], gap=True, how="no practice note found")
+
+
+CANDIDATES = 4
+
+
+def _gap_candidates(tree: list[dict], notes: dict) -> None:
+    """For each topic a step names and no source met, the step's notes
+    nearest it by title vector (by shared words without an embedder): the
+    choices of "is it one of these?" (ADR-0131 amendment, point 5). Lecture
+    19 says "Schemi auto-associativi" where the syllabus says "schemi
+    codificatore/decodificatore", and nothing met it."""
+    asks = [(n, t) for n in tree if not n.get("gap") for t in n.get("missing") or []]
+    if not asks:
+        return
+    try:
+        from collections import Counter
+
+        from silica.agent.providers import get_embedder_or_none
+        from silica.config import CONFIG
+        from silica.kernel.recall.embed import _note_title_text, get_store
+
+        store = get_store()
+        embedder = get_embedder_or_none(CONFIG, "plan topics", level="info") if len(store) else None
+    except Exception as exc:  # noqa: BLE001
+        # no index: the choices fall back to shared words
+        logger.info("plan gaps: no title vectors (%s)", exc)
+        store = embedder = None
+    for node, t in asks:
+        leaves = [p for p in node["leaves"] if p.endswith(".md")]
+        ranked: list[str] = []
+        if embedder is not None and leaves:
+            try:
+                keys = {p.removesuffix(".md"): p for p in leaves}
+                folder = Counter(p.rsplit("/", 1)[0] for p in keys if "/" in p).most_common(1)
+                vec = _embed([_note_title_text(t, folder=folder[0][0] if folder else "")], embedder)[0]
+                outside = {p for p in store.paths() if p not in keys}
+                ranked = [keys[h["path"]] for h in store.title_cosine_top_k(vec, k=CANDIDATES, exclude=outside)
+                          if h["path"] in keys]
+            except Exception as exc:  # noqa: BLE001
+                # a failed lookup leaves the shared-words choices below
+                logger.info("plan gaps: candidates by words for %r (%s)", t, exc)
+        if not ranked:
+            words = set(_root_words(t))
+            ranked = sorted(leaves, key=lambda p: -len(words & set(_root_words(Path(p).stem))))[:CANDIDATES]
+        node.setdefault("candidates", {})[t] = [Path(p).stem for p in ranked[:CANDIDATES]]
+
+
+def _one_note_per_step(tree: list[dict], practice: set[str], ctx: dict | None = None) -> None:
+    """A note met by two steps stays in the first (ADR-0131 point 5); the
+    later step still counts its topic as matched. A practice note practises
+    several steps and is never moved, and a step whose every note sits in
+    earlier steps keeps them rather than turning into a gap. With no order
+    (a reference the material does not follow) "first" is the step whose own
+    rows hold the note, then the step's name, so the order of the list does
+    not decide."""
+    seen: set[str] = set()
+    walk = list(range(len(tree)))
+    if ctx is not None and not ctx.get("ordered", True):
+        rows_of = {i: {r["note"] for r in ctx["rows"].get(i, []) if r["note"]} for i in walk}
+        owner: dict[str, int] = {}
+        for i in sorted(walk, key=lambda i: (tree[i]["node"], i)):
+            for p in tree[i].get("leaves") or []:
+                if p in practice:
+                    continue
+                held = p in rows_of[i]
+                if p not in owner or (held and p not in rows_of[owner[p]]):
+                    owner[p] = i
+        for i, node in enumerate(tree):
+            if node.get("gap"):
+                continue
+            rest = [p for p in node["leaves"] if p in practice or owner.get(p) == i]
+            if rest:
+                node["leaves"] = rest
+        return
+    for node in (tree[i] for i in walk):
+        if node.get("gap"):
+            continue
+        # the reader's answer for a topic stays with the topic, like practice
+        mine = set(node.get("matched_paths") or ())
+        rest = [p for p in node["leaves"] if p in practice or p in mine or p not in seen]
+        if rest:
+            node["leaves"] = rest
+        seen.update(node["leaves"])
+
+
+def _place_by_position(tree: list[dict], ctx: dict, refused: set) -> None:
+    """A step still empty in a sequenced reference takes the material's
+    spines between the step before it and the step after it that no step
+    holds (ADR-0131 point 7): the first programme line, glued past reading,
+    takes the lectures before the first matched block."""
+    if len(tree) < 4:
+        return
+    coll = max(ctx["material"], key=lambda c: len(c["rows"]))
+    pos = {sp: n for n, sp in enumerate(coll["spines"])}
+    at = [_median([pos[s] for s in n.get("spines", []) if s in pos]) for n in tree]
+    claimed = {p for n in tree if not n.get("gap") for p in n["leaves"]}
+    for i, node in enumerate(tree):
+        if not node.get("gap") or node.get("how") == "refused" or i in refused or node["text"] in refused:
+            continue
+        before = [a for a in at[:i] if a is not None]
+        after = [a for a in at[i + 1:] if a is not None]
+        lo, hi = (before[-1] if before else -1), (after[0] if after else len(coll["spines"]))
+        take = []
+        for sp in coll["spines"]:
+            if lo < pos[sp] < hi:
+                rows = [r for r in coll["by_spine"].get(sp, []) if r["note"]]
+                free = [r["note"] for r in rows if r["note"] not in claimed]
+                if rows and len(free) * 2 >= len(rows):
+                    take += free
+        if take:
+            node.update(leaves=list(dict.fromkeys(take)), gap=False, how="by position", doubt=False)
+            node.pop("missing", None)
+            claimed.update(take)
+
+
+def _median(values: list[int]) -> float | None:
+    import statistics
+
+    return statistics.median(values) if values else None
+
+
+_UNIT_RE = re.compile(r"^(ore|ora|hours?|hrs?|h|cfu|ects|crediti|credits?|settimane|weeks?|wk|minuti|minutes?|min)\b",
+                      re.I)
+_DEPTH_COL_RE = re.compile(r"profondit|depth", re.I)
+_DIFF_COL_RE = re.compile(r"^diff|difficolt|difficulty", re.I)
+_NUMBER_RE = re.compile(r"^\d+(?:[.,]\d+)?$")
+_DEPTH_WORDS = (("deep", re.compile(r"\b(a fondo|in depth|deep|thorough)", re.I)),
+                ("read", re.compile(r"\b(una lettura|lettura|skim|read once|cenni|overview)", re.I)),
+                ("well", re.compile(r"\b(bene|well|good)\b", re.I)))
+
+
+def _unit_of(header: str) -> str:
+    """The step-line unit of an hours-like column: the reference's own."""
+    m = _UNIT_RE.match(header.strip())
+    if not m:
+        return ""
+    w = m.group(1).casefold()
+    return ("h" if w[0] in "oh" else "CFU" if w in ("cfu", "crediti", "credits", "credit") else
+            "ECTS" if w == "ects" else "wk" if w[0] in "sw" else "min")
+
+
+def reference_rows(body: str) -> list[dict]:
+    """reference_lines with what a row says beside its topic: {text, hours,
+    unit, depth}. A numeric cell under an hours, credits, weeks or minutes
+    header is the row's weight (ADR-0131 point 8); a depth cell, a guide's
+    (point 11). A note with a table whose header names a depth, difficulty
+    or hours column and no programme marker is read from that table only:
+    a study guide's bullets and other tables are its prose, not its plan."""
+    rows = body.splitlines()
+    start = next((i + 1 for i, ln in enumerate(rows) if _PROGRAMME_RE.match(ln.strip())), 0)
+
+    def cells_of(ln: str) -> list[str]:
+        return [c.strip().replace("\\|", "|") for c in _CELL_SPLIT_RE.split(ln.strip().strip("|"))]
+
+    headers: dict[int, list[str]] = {}   # line of a table's first row -> its header cells
+    current = None
+    for i, ln in enumerate(rows):
+        s = ln.strip()
+        if not s.startswith("|"):
+            current = None
+            continue
+        if i + 1 < len(rows) and _TABLE_RULE_RE.match(rows[i + 1].strip()):
+            current = cells_of(s)
+        headers[i] = current
+    def attr(h): return bool(h) and any(_unit_of(c) or _DEPTH_COL_RE.search(c) or _DIFF_COL_RE.search(c) for c in h)
+    plan_table = not start and any(attr(h) for h in headers.values())
+    out: list[dict] = []
+    for i in range(start, len(rows)):
+        ln = rows[i].strip()
+        if ln.startswith("|"):
+            if _TABLE_RULE_RE.match(ln):
+                continue
+            if i + 1 < len(rows) and _TABLE_RULE_RE.match(rows[i + 1].strip()):
+                continue  # the header above a |---| rule
+            head = headers.get(i)
+            if plan_table and not attr(head):
+                continue
+            cells = cells_of(ln)
+            row: dict = {"text": "", "hours": None}
+            skip = set()
+            for k, c in enumerate(cells):
+                h = head[k] if head and k < len(head) else ""
+                if h and _unit_of(h):
+                    skip.add(k)
+                    if _NUMBER_RE.match(c):
+                        row.update(hours=float(c.replace(",", ".")), unit=_unit_of(h))
+                elif h and _DEPTH_COL_RE.search(h):
+                    skip.add(k)
+                    # the first depth the cell says: "bene; una lettura RKHS" is "well"
+                    found = [(m.start(), d) for d, rx in _DEPTH_WORDS for m in [rx.search(c)] if m]
+                    row["depth"] = min(found)[1] if found else None
+                elif h and _DIFF_COL_RE.search(h):
+                    skip.add(k)
+                elif not head and _NUMBER_RE.match(c) and len(cells) > 1:
+                    skip.add(k)
+                    row.update(hours=float(c.replace(",", ".")), unit="")
+            # A link's alias in a table is `[[A\|a]]`: split on the unescaped
+            # bars only, then read the escaped ones back as the alias bar. The
+            # autolinker writes exactly that into a syllabus's cells.
+            cell = max((c for k, c in enumerate(cells) if k not in skip), key=len, default="")
+            if len(cell.split()) >= 2:
+                row["text"] = cell
+                out.append(row)
+        elif not plan_table and ln.startswith(("-", "*", "1", "2", "3", "4", "5", "6", "7", "8", "9")) and len(ln) > 3:
+            out.append({"text": ln.strip("-* ").strip(), "hours": None})
+    return out
+
+
+def _unglued(rows: list[dict], notes: dict, allowed: set[str], colls: list[dict]) -> list[dict]:
+    """Rows whose glued tokens are split into the vault's words (ADR-0131
+    point 7). The vocabulary is read only when a token is long enough to be
+    a glued line: a root of GAP_GLUED letters no word of the vault spells."""
+    from silica.kernel.learn import sources as so
+
+    vocab = None
+    out = []
+    for r in rows:
+        text = r["text"]
+        for tok in set(re.findall(r"[^\W\d_]+", text)):
+            if len(_root(tok.casefold())) < GAP_GLUED:
+                continue
+            if vocab is None:
+                vocab = so.vocabulary(notes, allowed, colls)
+            if tok.casefold() in vocab:
+                continue
+            split = so.split_glued(tok, vocab)
+            if split:
+                text = re.sub(rf"\b{re.escape(tok)}\b", split, text)
+        out.append({**r, "text": text} if text != r["text"] else r)
+    return out
+
+
+_ASSESS_RE = re.compile(r"\b(valutazion\w*|esam[ei]|modalit\w* d.esame|verifica|assessment|exam\w*|grading|evaluation)\b",
+                        re.I)
+_PARTS = (("project", re.compile(r"\b(progett\w*|project\w*|elaborat\w*|tesina)\b", re.I)),
+          ("oral", re.compile(r"\b(oral[ei]?|colloquio|viva)\b", re.I)),
+          ("written", re.compile(r"\b(scritt[oa]|written)\b", re.I)),
+          ("presentation", re.compile(r"\b(presentazion\w*|presentation)\b", re.I)),
+          ("exercises", re.compile(r"\b(eserciz\w*|homework|assignments?|quiz\w*)\b", re.I)))
+_LEAD_RE = re.compile(r"\b(una|un|uno|one|due|two|tre|three|quattro|four|\d+)\s+(settiman[ae]|weeks?|giorni|days?)\b",
+                      re.I)
+_COUNT = {"una": 1, "un": 1, "uno": 1, "one": 1, "due": 2, "two": 2, "tre": 3, "three": 3, "quattro": 4, "four": 4}
+
+
+def assessment_of(body: str) -> list[dict]:
+    """The parts of the assessment a reference states, [{part, days}] in the
+    order it names them (ADR-0131 point 9): a row, line or section headed by
+    an assessment word, read for a project, an oral, a written exam, a
+    presentation, exercises; a project's lead time in days when the text
+    gives one ("almeno una settimana di anticipo"). No model call: the
+    vocabulary is bounded, and the reader edits what the words miss."""
+    texts: list[str] = []
+    under = False
+    for line in body.splitlines():
+        s = line.strip()
+        h = _HEADING_RE.match(s)
+        if h:
+            under = bool(_ASSESS_RE.search(h.group(2)))
+            continue
+        if under and s:
+            texts.append(s)
+        elif s.startswith("|"):
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if len(cells) >= 2 and len(cells[0].split()) <= 5 and _ASSESS_RE.search(cells[0]):
+                texts.append(" ".join(cells[1:]))
+        elif ":" in s and len(s.split(":", 1)[0].split()) <= 5 and _ASSESS_RE.search(s.split(":", 1)[0]):
+            texts.append(s.split(":", 1)[1])
+    text = " ".join(texts)
+    found = sorted(((m.start(), part) for part, rx in _PARTS for m in [rx.search(text)] if m))
+    out = []
+    for _at, part in found:
+        days = None
+        if part == "project":
+            m = _LEAD_RE.search(text)
+            if m:
+                n = int(m.group(1)) if m.group(1).isdigit() else _COUNT[m.group(1).casefold()]
+                days = n * 7 if m.group(2).casefold().startswith(("settiman", "week")) else n
+        out.append({"part": part, "days": days})
+    return out
+
+
+def assessment_text(parts: list[dict]) -> str:
+    """The `assessment:` key: "project 7 | oral"; "none" when cleared."""
+    return " | ".join(p["part"] + (f" {p['days']}" if p.get("days") else "") for p in parts) or "none"
+
+
+def parse_assessment(value) -> list[dict]:
+    out = []
+    for bit in str(value or "").split(" | "):
+        m = re.match(r"^\s*([a-z]+)(?:\s+(\d+))?\s*$", bit)
+        if m and m.group(1) in {p for p, _rx in _PARTS}:
+            out.append({"part": m.group(1), "days": int(m.group(2)) if m.group(2) else None})
+    return out
 
 
 # A syllabus names its topics in one line per block ("Modelli lineari:
@@ -475,27 +1209,9 @@ def reference_lines(body: str) -> list[str]:
     under a bare PROGRAMMA line, after tables of department, credits and
     office hours, and only `-`/`*`/digit lines were read, so it gave nothing.
     A row stands for its longest cell; a table's header row is skipped.
+    `reference_rows` keeps what else a row says (its hours, a depth).
     """
-    rows = body.splitlines()
-    start = next((i + 1 for i, ln in enumerate(rows) if _PROGRAMME_RE.match(ln.strip())), 0)
-    out: list[str] = []
-    for i in range(start, len(rows)):
-        ln = rows[i].strip()
-        if ln.startswith("|"):
-            if _TABLE_RULE_RE.match(ln):
-                continue
-            if i + 1 < len(rows) and _TABLE_RULE_RE.match(rows[i + 1].strip()):
-                continue  # the header above a |---| rule
-            # A link's alias in a table is `[[A\|a]]`: split on the unescaped
-            # bars only, then read the escaped ones back as the alias bar. The
-            # autolinker writes exactly that into a syllabus's cells.
-            cells = (c.strip().replace("\\|", "|") for c in _CELL_SPLIT_RE.split(ln.strip().strip("|")))
-            cell = max(cells, key=len, default="")
-            if len(cell.split()) >= 2:
-                out.append(cell)
-        elif ln.startswith(("-", "*", "1", "2", "3", "4", "5", "6", "7", "8", "9")) and len(ln) > 3:
-            out.append(ln.strip("-* ").strip())
-    return out
+    return [r["text"] for r in reference_rows(body)]
 
 
 def _topics(text: str) -> list[str]:
@@ -638,15 +1354,22 @@ TRANSLATED_PARTS = 0.5
 def _translated(near: dict[str, str]) -> dict[str, str]:
     """The title-vector matches that survive the sibling check: none shared
     word, or the parts each side does not share read as one another."""
-    todo: list[tuple[str, str, str]] = []
-    out: dict[str, str] = {}
-    for t, p in near.items():
+    ok = _translated_pairs(list(near.items()))
+    return {t: p for t, p in near.items() if (t, p) in ok}
+
+
+def _translated_pairs(pairs: list[tuple[str, str]]) -> set[tuple[str, str]]:
+    """The (topic, note) pairs that survive the sibling check, several notes
+    a topic allowed (a step's outline rows, ADR-0131)."""
+    todo: list[tuple[tuple[str, str], str, str]] = []
+    out: set[tuple[str, str]] = set()
+    for t, p in pairs:
         tw, hw = set(_root_words(t)) - _GENERIC_HEADS, _title_words(Path(p).stem)
         only_t, only_h = tw - hw, hw - tw
         if not (tw & hw) or not only_t or not only_h:
-            out[t] = p           # a pure translation, or one side covering the other
+            out.add((t, p))      # a pure translation, or one side covering the other
             continue
-        todo.append((t, " ".join(sorted(only_t)), " ".join(sorted(only_h))))
+        todo.append(((t, p), " ".join(sorted(only_t)), " ".join(sorted(only_h))))
     if not todo:
         return out
     try:
@@ -658,12 +1381,12 @@ def _translated(near: dict[str, str]) -> dict[str, str]:
         embedder = get_embedder_or_none(CONFIG, "plan topics", level="info")
         if embedder is None:
             return out
-        vecs = embedder.embed([a for _t, a, _b in todo] + [b for _t, _a, b in todo])
+        vecs = _embed([a for _t, a, _b in todo] + [b for _t, _a, b in todo], embedder)
         n = len(todo)
-        for i, (t, _a, _b) in enumerate(todo):
+        for i, (pair, _a, _b) in enumerate(todo):
             x, y = np.asarray(vecs[i], float), np.asarray(vecs[n + i], float)
             if float(x @ y / (np.linalg.norm(x) * np.linalg.norm(y) or 1.0)) >= TRANSLATED_PARTS:
-                out[t] = near[t]
+                out.add(pair)
     except Exception as exc:  # noqa: BLE001
         # No embedder for the check: the doubtful matches are dropped, never
         # linked unchecked.
@@ -704,7 +1427,7 @@ def _by_title_vector(topics: list[str], allowed: set[str]) -> dict[str, str]:
         folder = Counter(p.rsplit("/", 1)[0] for p in keys if "/" in p).most_common(1)
         texts = [_note_title_text(t, folder=folder[0][0] if folder else "") for t in topics]
         out: dict[str, str] = {}
-        for t, vec in zip(topics, embedder.embed(texts)):
+        for t, vec in zip(topics, _embed(texts, embedder)):
             hit = store.title_cosine_top_k(vec, k=1, exclude=outside)
             if hit and hit[0]["path"] in keys and hit[0]["score"] >= max(CONFIG.sim_title_threshold, PLAN_TITLE_FLOOR):
                 out[t] = keys[hit[0]["path"]]
@@ -713,6 +1436,107 @@ def _by_title_vector(topics: list[str], allowed: set[str]) -> dict[str, str]:
         # what their words said.
         logger.info("plan topics: no title-vector match (%s)", exc)
         return {}
+    return out
+
+
+# Texts embedded during this process, per vault index directory, by model and
+# text: the plan form re-previews on every change, and the same ninety topics
+# were embedded again each time; the model is in the key so a changed
+# embedder never reuses them, and the vault is, so one vault's topics never
+# land in another's index (ADR-0014: per-vault state follows the vault).
+_VEC_MEMO: dict[str, dict[tuple[str, str], list[float]]] = {}
+VEC_MAX = 4000
+
+
+def _embed(texts: list[str], embedder) -> list[list[float]]:
+    from silica.kernel.recall.paths import index_dir
+
+    model = str(getattr(embedder, "model", "") or type(embedder).__name__)
+    memo = _VEC_MEMO.get(str(index_dir()))
+    if memo is None:
+        memo = _VEC_MEMO[str(index_dir())] = _vectors_on_disk()
+    todo = [t for t in dict.fromkeys(texts) if (model, t) not in memo]
+    if todo:
+        for k in list(memo)[:max(0, len(memo) + len(todo) - VEC_MAX)]:
+            del memo[k]           # the oldest first, so the file stays bounded and keeps the rest
+        memo.update(((model, t), v) for t, v in zip(todo, embedder.embed(todo)))
+        _vectors_on_disk(memo)
+    return [memo[(model, t)] for t in texts]
+
+
+def _vectors_on_disk(value: dict | None = None) -> dict:
+    """Read (no value) or write the plan's topic vectors in the vault's index
+    directory, keyed "model<TAB>text": after a restart the first preview of
+    the course embedded its 120 topics again, 4.5 of its 13 s, and on hosted
+    each is a paid call (ADR-0131 amendment, point 3). {} when absent or
+    unreadable."""
+    import orjson
+
+    from silica.kernel.recall.paths import atomic_write_bytes, index_dir
+
+    path = index_dir() / "plan_vectors.json"
+    try:
+        if value is not None:
+            atomic_write_bytes(path, orjson.dumps({f"{m}\t{t}": v for (m, t), v in value.items()},
+                                                  option=orjson.OPT_SERIALIZE_NUMPY))
+            return value
+        data = orjson.loads(path.read_bytes())
+        return {tuple(k.split("\t", 1)): v for k, v in data.items() if "\t" in k}
+    except (OSError, ValueError, TypeError):
+        # A derived cache: unreadable means embed again, unwritable means the
+        # next process embeds again, never a wrong vector (the model is in the key)
+        return {}
+
+
+# A row's idea note met by a topic's title vector (ADR-0131 point 3). Read on
+# the course (2026-10-25) with the sibling check on: the plan floor (0.75)
+# keeps the right rows ("formulazione lagrangiana" 0.99, "reti ricorrenti
+# bidirezionali" to Reti bidirezionali 0.94, "versione duale dell'algoritmo
+# del percettrone" to Forma duale del percettrone 0.91), and a course's
+# generic hubs reach it too (Apprendimento artificiale, 0.68 to 0.84). So a
+# row met by meaning alone helps align a step only at the floor, and joins a
+# step under it, down to ROW_NEAR, only inside the rows its words already
+# gave that step: "autocodificatori di riduzione" meets Autoencoders at
+# 0.747, "Macchine a vettori di supporto" Punti di supporto at 0.734, while
+# the wrong "Problemi di ottimizzazione" for "iperpiano di separazione
+# ottimale" sits at 0.717.
+ROW_TOP_K = 5
+ROW_NEAR = 0.72
+
+
+def _dense_rows(topics: list[str], row_notes: set[str]) -> dict[str, dict[str, tuple[float, bool]]]:
+    """{topic: {idea note of a material row: (score, passed the sibling
+    check)}} at ROW_NEAR or more; {} without an embedder."""
+    if not topics or not row_notes:
+        return {}
+    try:
+        from collections import Counter
+
+        from silica.agent.providers import get_embedder_or_none
+        from silica.config import CONFIG
+        from silica.kernel.recall.embed import _note_title_text, get_store
+
+        store = get_store()
+        embedder = get_embedder_or_none(CONFIG, "plan topics", level="info") if len(store) else None
+        if embedder is None:
+            return {}
+        keys = {p.removesuffix(".md"): p for p in row_notes}
+        outside = {p for p in store.paths() if p not in keys}
+        folder = Counter(p.rsplit("/", 1)[0] for p in keys if "/" in p).most_common(1)
+        texts = [_note_title_text(t, folder=folder[0][0] if folder else "") for t in topics]
+        scored = []
+        for t, vec in zip(topics, _embed(texts, embedder)):
+            for hit in store.title_cosine_top_k(vec, k=ROW_TOP_K, exclude=outside):
+                if hit["path"] in keys and hit["score"] >= ROW_NEAR:
+                    scored.append((t, keys[hit["path"]], float(hit["score"])))
+        ok = _translated_pairs([(t, p) for t, p, _s in scored])
+    except Exception as exc:  # noqa: BLE001
+        # No index or no embedder: the rows meet the topics by their words only.
+        logger.info("plan rows: no title-vector match (%s)", exc)
+        return {}
+    out: dict[str, dict[str, tuple[float, bool]]] = {}
+    for t, p, sc in scored:
+        out.setdefault(t, {})[p] = (sc, (t, p) in ok)
     return out
 
 
@@ -765,23 +1589,36 @@ def _named_otherwise(topic: str, notes: dict, allowed: set[str]) -> tuple[str | 
     return None, ""
 
 
+@functools.lru_cache(maxsize=50_000)
+def _root_words_cached(text: str) -> tuple[str, ...]:
+    joined = [re.sub(r"[-\s]", "", m).casefold() for m in re.findall(r"\b\w+-\w+\b", text)]
+    return tuple(_root(w) for w in _content_words(text) + joined)
+
+
 def _root_words(text: str) -> list[str]:
     """Content words without their last vowel, so an Italian plural meets its
     singular: "reti neurali" and "Rete neurale" share both words."""
-    # "ada-boost" in a syllabus is the note "AdaBoost": the joined form too
-    joined = [re.sub(r"[-\s]", "", m).casefold() for m in re.findall(r"\b\w+-\w+\b", text)]
-    return [_root(w) for w in _content_words(text) + joined]
+    # "ada-boost" in a syllabus is the note "AdaBoost": the joined form too.
+    # Cached: a course preview asked for the roots of the same 1,100 titles
+    # 72,000 times, 2.5 s of a cold preview (2026-10-25)
+    return list(_root_words_cached(text))
 
 
 def _root(word: str) -> str:
     return word[:-1] if len(word) >= 4 and word[-1] in "aeiouàèéìòù" else word
 
 
-def _content_words(text: str) -> list[str]:
-    from silica.kernel.text.language import stopwords_for
+_STOP: frozenset[str] | None = None
 
-    stop = stopwords_for("italian") | stopwords_for("english")
-    return [w for w in re.findall(r"[^\W\d_]{4,}", text.casefold()) if w not in stop]
+
+def _content_words(text: str) -> list[str]:
+    global _STOP
+    if _STOP is None:
+        from silica.kernel.text.language import stopwords_for
+
+        # once: the union was rebuilt on each of 72,000 calls in one preview
+        _STOP = stopwords_for("italian") | stopwords_for("english")
+    return [w for w in re.findall(r"[^\W\d_]{4,}", text.casefold()) if w not in _STOP]
 
 
 def _search_notes(text: str, notes: dict, k: int = 2, explain: bool = False):
@@ -937,7 +1774,9 @@ def cycles_among(paths: list[str]) -> list[list[str]]:
     from silica.kernel.report import learner
 
     try:
-        prereqs = learner.prerequisites_map()
+        # the map is keyed by path in the note's own case and key_of folds it:
+        # read raw, no key of it matched and no cycle was ever found
+        prereqs = {learner.key_of(k): v for k, v in learner.prerequisites_map().items()}
     except Exception:
         return []
     keys = {learner.key_of(p): p for p in paths}
@@ -992,13 +1831,17 @@ def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | No
     if days_left == 0:
         return {"days_left": 0, "per_day": below, "below": below,
                 "say": f"The date has arrived; {below} note(s) remaining below the target."}
-    study_days = max(1, days_left - FINAL_DAYS)
+    # a project window the reference states takes the last days, as in the
+    # calendar (ADR-0131 point 9): the answers fit the study days before it
+    b = budget(plan) if plan.get("steps") else None
+    study_days = b["study_days"] if b and b.get("window") else max(1, days_left - FINAL_DAYS)
     answers = math.ceil(below * ATTEMPTS_PER_NOTE)
     per_day = -(-answers // study_days)  # ceil
     size = max(1, min(24, per_day)) if below else n_default
     since = (datetime.now(timezone.utc) - timedelta(days=RECENT_PACE_DAYS)).isoformat()
     recent = sum(1 for e in (entries or []) if str(e.get("ts") or "") >= since) / RECENT_PACE_DAYS
-    final = f", then {FINAL_DAYS} days of review" if days_left > FINAL_DAYS else ""
+    final = (f", then {b['window']} days for the project" if b and b.get("window")
+             else f", then {FINAL_DAYS} days of review" if days_left > FINAL_DAYS else "")
     lately = (f" Lately you answer about {recent:.0f} a day." if entries is not None and recent >= 0.5
               else " You have not answered yet this week." if entries is not None else "")
     return {"days_left": days_left, "per_day": per_day, "below": below, "session": size,
@@ -1013,33 +1856,54 @@ def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | No
 # random (2026-10-23), and the research behind Learn's plans says a calendar
 # is arithmetic a language model should not do (GPT-4 solved 0.6% of
 # TravelPlanner; docs research report study-plans-and-deadline-scheduling).
-def day_by_day(plan: dict, today=None) -> list[dict] | None:
-    """[{day, steps: [(label, notes)]}] from today to the plan's date: the
-    steps in their order over the days before the final pass, each given days
-    in proportion to its notes (a step with none counts one) and its notes
-    split evenly over them, then the
-    pick.FINAL_DAYS days of review and the date itself. None without a date
-    or a step."""
+def _left(plan: dict, passed: list[bool] | None = None) -> list[dict]:
+    """The steps still to study: neither checked on the plan note nor passed
+    in the ledger (ADR-0131 amendment, point 2). A calendar drawn over every
+    step started again from step 1 however far the reader had gone."""
+    steps = plan.get("steps") or []
+    passed = list(passed or []) + [False] * (len(steps) - len(passed or []))
+    return [s for s, ok in zip(steps, passed) if not (ok or s.get("checked"))]
+
+
+def day_by_day(plan: dict, today=None, passed: list[bool] | None = None) -> list[dict] | None:
+    """[{day, steps: [(label, notes)], hours: {label: h}}] from today to the
+    plan's date: the steps in their order over the study days, each given
+    days in proportion to its weight and its notes split evenly over them,
+    then the pick.FINAL_DAYS days of review and the date itself. None
+    without a date or a step.
+
+    The weight is the reference's own number for the step (its hours, `· 8
+    h` on the step line), a step without one the median of the others; with
+    no number anywhere, its notes (ADR-0131 point 8). A project the
+    reference gives a lead time takes those last days and the study days end
+    before them; an oral or a presentation puts a rehearsal on the day before
+    the date (point 9). With the plan's `hours:` a day each row says the
+    study hours of each step that day. `passed` (the ledger's reading per
+    step) and the note's checked boxes take steps out: the calendar is of
+    what is left."""
     from datetime import date, timedelta
 
-    from silica.kernel.learn.pick import FINAL_DAYS
-
-    steps = plan.get("steps") or []
-    if not plan.get("by") or not steps:
+    if not plan.get("by") or not plan.get("steps"):
         return None
     try:
         by = date.fromisoformat(str(plan["by"])[:10])
     except ValueError:
         return None
     today = today or date.today()
-    days = (by - today).days
-    if days <= 0:
+    b = budget(plan, today, passed)
+    if b is None:
         return None
-    study = max(1, days - FINAL_DAYS) if days > FINAL_DAYS else days
-    weights = [max(1, len(s.get("notes") or [])) for s in steps]
-    total = sum(weights)
-    rows = [{"day": (today + timedelta(days=k)).isoformat(), "steps": []} for k in range(study)]
-    done = 0
+    steps = _left(plan, passed)
+    days, study, window = b["days"], b["study_days"], b["window"]
+    weights = b["weights"]
+    total = sum(weights) or 1.0
+    per_day = plan.get("hours")
+    rows = [{"day": (today + timedelta(days=k)).isoformat(), "steps": [], "hours": {}} for k in range(study)]
+    if not steps:
+        # every step passed or checked: the study days are review
+        for r in rows:
+            r["steps"].append(("Review: the notes Learn shows due", []))
+    done = 0.0
     for step, w in zip(steps, weights):
         start, end = done / total * study, (done + w) / total * study
         done += w
@@ -1053,40 +1917,166 @@ def day_by_day(plan: dict, today=None) -> list[dict] | None:
         for i, k in enumerate(span):
             lo, hi = i * len(notes) // len(span), (i + 1) * len(notes) // len(span)
             rows[k]["steps"].append((label, notes[lo:max(hi, lo + 1)]))
+            if per_day:
+                # the share of day k this step's span covers, in hours
+                share = min(end, k + 1) - max(start, k)
+                rows[k]["hours"][label] = round(share * per_day, 1)
+    parts = {p["part"] for p in plan.get("assessment") or []}
     for k in range(study, days):
-        rows.append({"day": (today + timedelta(days=k)).isoformat(), "steps": [("Review: the notes Learn shows due", [])]})
-    rows.append({"day": by.isoformat(), "steps": [("Exam", [])]})
+        say = ("Project: the main work; review the notes Learn shows due" if window
+               else "Review: the notes Learn shows due")
+        rows.append({"day": (today + timedelta(days=k)).isoformat(), "steps": [(say, [])], "hours": {}})
+    if parts & {"oral", "presentation"} and days >= 2:
+        what = "present the project and answer a question per step aloud" if "project" in parts else \
+            "answer a question per step aloud"
+        rows[days - 1]["steps"].append((f"Rehearse the oral: {what}", []))
+    rows.append({"day": by.isoformat(), "steps": [("Exam", [])], "hours": {}})
     return rows
 
 
+def budget(plan: dict, today=None, passed: list[bool] | None = None) -> dict | None:
+    """The arithmetic under the calendar, and what it says about it: the
+    days, the study days and the project window, each left step's weight and
+    where it came from, the reference's own hours (and those of the steps
+    left) against the hours before the date at the plan's hours a day. None
+    without a date or a step."""
+    from datetime import date
+
+    from silica.kernel.learn.pick import FINAL_DAYS
+
+    every = plan.get("steps") or []
+    if not plan.get("by") or not every:
+        return None
+    steps = _left(plan, passed)
+    try:
+        by = date.fromisoformat(str(plan["by"])[:10])
+    except ValueError:
+        return None
+    today = today or date.today()
+    days = (by - today).days
+    if days <= 0:
+        return None
+    lead = next((p.get("days") for p in plan.get("assessment") or [] if p["part"] == "project" and p.get("days")), None)
+    window, says = 0, []
+    if lead:
+        if lead * 2 <= days:
+            window = lead
+            says.append(f"The reference gives the project {lead} days before the date: the last {lead} days are its.")
+        else:
+            says.append(f"The reference gives the project {lead} days before the date, more than half the "
+                        f"{days} days left: no days are kept for it.")
+    study = days - window if window else (max(1, days - FINAL_DAYS) if days > FINAL_DAYS else days)
+    all_known = sorted(h for h in (s.get("hours") for s in every) if h)
+    unit = next((s.get("unit") for s in every if s.get("hours")), "") or ""
+    if all_known:
+        mid = all_known[len(all_known) // 2]
+        weights = [s.get("hours") or mid for s in steps]
+        whole, left = sum(s.get("hours") or mid for s in every), sum(weights)
+        part = f" ({left:g} h in the steps left)" if len(steps) < len(every) else ""
+        if unit == "h" and plan.get("hours"):
+            have = study * float(plan["hours"])
+            says.append(f"The reference's own hours: {whole:g} h{part}; before the study days end, {study} days at "
+                        f"{float(plan['hours']):g} h make {have:g} h."
+                        + ((" Fewer than the reference's own." if not part else " Fewer than the hours left.")
+                           if have < left else ""))
+        else:
+            says.append(f"Steps weighted by the reference's own numbers ({whole:g}{' ' + unit if unit else ''}).")
+    else:
+        weights = [max(1, len(s.get("notes") or [])) for s in steps]
+        says.append("Weighted by notes: the reference gives no hours.")
+    return {"days": days, "study_days": study, "window": window, "weights": weights,
+            "unit": unit, "reference_hours": sum(all_known) if all_known else None, "left": len(steps),
+            "hours_per_day": plan.get("hours"), "say": " ".join(says)}
+
+
+def _short(label: str, width: int = 48) -> str:
+    """A step's name for a sentence: a syllabus block's whole topic list ran
+    past 90 characters and was cut after a comma (2026-10-25)."""
+    label = label.rstrip(" ,.;")
+    if len(label) <= width:
+        return label
+    cut = label[:width].rsplit(" ", 1)[0].rstrip(" ,.;")
+    return cut + "…"
+
+
+def today_line(plan: dict, passed: list[bool] | None = None, today=None) -> dict | None:
+    """What the plan asks of today and how far the reader is from it
+    (ADR-0131 amendment, point 2): today's row of the calendar of the steps
+    left, and against the calendar drawn when the plan was made, how many
+    steps the first one not done lies behind (or ahead of) the step that
+    calendar had for today. Drawn from today only, the row would always
+    name the first step not done and never say the reader is behind."""
+    from datetime import date
+
+    today = today or date.today()
+    live = day_by_day(plan, today, passed)
+    if not live:
+        return None
+    row = next((r for r in live if r["day"] == today.isoformat()), None)
+    doing = [(label, (row or {}).get("hours", {}).get(label)) for label, _n in (row or {}).get("steps", [])]
+    steps = plan.get("steps") or []
+    done = [bool(ok) for ok in (list(passed or []) + [False] * (len(steps) - len(passed or [])))]
+    done = [d or bool(s.get("checked")) for d, s in zip(done, steps)]
+    first = next((i for i, d in enumerate(done) if not d), None)
+    behind, expected = None, ""
+    try:
+        made = date.fromisoformat(str(plan.get("created") or "")[:10])
+    except ValueError:
+        made = None
+    if made and made < today and first is not None:
+        anchor = day_by_day(plan, made) or []
+        labels = {_step_label(s): i for i, s in enumerate(steps)}
+        due = [labels[label] for r in anchor if r["day"] == today.isoformat() for label, _n in r["steps"] if label in labels]
+        if due:
+            behind, expected = min(due) - first, _step_label(steps[min(due)])
+        elif anchor and today.isoformat() > max(r["day"] for r in anchor if any(l in labels for l, _n in r["steps"])):
+            behind, expected = len(steps) - first, ""
+    bits = ["Today: " + "; ".join(f"{_short(label)} ({h:g} h)" if h else _short(label) for label, h in doing) + "."
+            if doing else ""]
+    if behind and behind > 0:
+        bits.append(f"{behind} step{'s' if behind > 1 else ''} behind the calendar drawn when the plan was made"
+                    + (f": it had {_short(expected)} for today" if expected else ": it had every step done by now")
+                    + f", and {_short(_step_label(steps[first]))} is the first not passed.")
+    elif behind and behind < 0:
+        bits.append(f"{-behind} step{'s' if behind < -1 else ''} ahead of the calendar drawn when the plan was made.")
+    return {"steps": doing, "behind": behind, "expected": expected,
+            "first": _step_label(steps[first]) if first is not None else "", "say": " ".join(b for b in bits if b)}
+
+
+_STEP_MARKS_RE = re.compile(r"\s*\((?:≈|ref)\)|\s·\s(?:weight\s\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?\s(?:h|CFU|ECTS|wk|min)|deep|well|read"
+                            r"|by meaning, [^·]*?)(?=\s·|$)")
+
+
 def _step_label(step: dict) -> str:
-    """A step's name: its label before the colon, or its notes when it has none."""
+    """A step's name: its label before the colon, or its notes when it has
+    none, without the markers a plan note writes on it."""
     text = _WIKILINK_RE.sub(r"\1", step.get("text") or "")
     head = text.split(":", 1)[0].strip() if ":" in text else text.strip()
-    return re.sub(r"\s*\(≈\)", "", head)[:90] or ", ".join(step.get("notes") or [])[:90]
+    return _STEP_MARKS_RE.sub("", head)[:90] or ", ".join(step.get("notes") or [])[:90]
 
 
-def day_by_day_table(rows: list[dict]) -> str:
-    """The calendar as a Markdown table, three notes named a day at most."""
-    out = ["| Day | Step | Notes |", "|---|---|---|"]
+def day_by_day_table(rows: list[dict], plan: dict | None = None, passed: list[bool] | None = None) -> str:
+    """The calendar as a Markdown table, three notes named a day at most, an
+    Hours column when the plan has hours a day, and the budget's sentence
+    under it when a plan is given."""
+    timed = any(r.get("hours") for r in rows)
+    out = ["| Day | Step | Notes |" + (" Hours |" if timed else ""), "|---|---|---|" + ("---|" if timed else "")]
     for r in rows:
         for label, notes in r["steps"]:
             named = ", ".join(f"[[{n}]]" for n in notes[:3]) + (f" and {len(notes) - 3} more" if len(notes) > 3 else "")
-            out.append(f"| {r['day']} | {label.replace('|', '/')} | {named} |")
-    return "\n".join(out)
+            h = r.get("hours", {}).get(label)
+            out.append(f"| {r['day']} | {label.replace('|', '/')} | {named} |" + (f" {h:g} |" if timed and h else " |" if timed else ""))
+    b = budget(plan, passed=passed) if plan else None
+    return "\n".join(out) + (f"\n\n{b['say']}" if b and b.get("say") else "")
 
 
-# The syllabus topics the lecture decks never mention: what a course asks and
-# its slides leave to the book or the guide. Read off the decks' own text,
+# The syllabus topics the material never mentions: what a course asks and its
+# sources leave to the book or the guide. Read off the material's own text,
 # because asked which topics the slides miss, the local 9B confused "in the
-# vault" with "in the slides" and listed half the programme (2026-10-23).
-# shortcut: a lesson outline is found by a lesson word at the head of its
-# title (Lezione, Lecture, Lesson, Slide); a course whose decks are named
-# otherwise gets no check. Upgrade: mark a deck as a lecture when it is
-# nucleated, and read that mark here.
-_LESSON_TITLE_RE = re.compile(r"^(?:lezione|lez\.|lecture|lesson|slides?)\b", re.I)
-
-
+# vault" with "in the slides" and listed half the programme (2026-10-23). The
+# material is the plan's material collections (ADR-0131 point 12), however
+# its decks are named: a lesson word at the head of a title was the test
+# until then.
 GAP_SHARE = 2 / 3      # of a topic's words one deck must hold: "le operazioni di convoluzione" is held without "operazioni"
 GAP_MAX_WORDS = 6      # a longer line is an activity ("Applicazione dei modelli ... su dataset reali"), not a topic
 GAP_GLUED = 16         # a root this long is a conversion's glued line ("Introduzionealcorso", 17), unreadable; "regolarizzazione" roots to 15
@@ -1101,14 +2091,37 @@ def _gap_roots(text: str) -> set[str]:
 _GAPS_CACHE: dict[tuple, tuple[list[str], int] | None] = {}
 
 
-def lecture_gaps(plan: dict, notes: dict | None = None) -> tuple[list[str], int] | None:
-    """(the topics of the plan's syllabus whose words no lecture deck holds,
-    the decks read), or None when the plan has no syllabus or no deck. A topic
-    is held when one deck holds GAP_SHARE of its words (all of them for one or
-    two), read as roots so a plural meets its singular; activity lines and
-    glued lines are not judged."""
-    from silica.kernel.report.learner import _notes_meta
+def _material_of(plan: dict, notes: dict) -> tuple[list[dict], dict, str, list[dict]]:
+    """(the plan's material collections, every collection's role, the
+    reference's body, its rows), the roles as the plan states them or as
+    ADR-0131 reads them."""
+    from silica.kernel.learn import sources as so
+    from silica.kernel.report.learner import is_material
     from silica.kernel.write import frontmatter
+
+    ref = resolve_title(plan.get("target") or "", notes) if plan.get("scope") == "steps" else None
+    if not ref:
+        return [], {}, "", []
+    _d, _r, body = frontmatter.split(_read(ref))
+    bounds = tuple(b.strip().casefold() for b in str(plan.get("restrict") or "").split(RESTRICT_SEP) if b.strip())
+    allowed = {p for p, m in notes.items() if is_material(m) and (not bounds or p.casefold().startswith(bounds))}
+    colls = so.collections(notes, allowed)
+    rows = _unglued([{"text": s["text"]} for s in parse_steps(body)] or reference_rows(body), notes, allowed, colls)
+    lines = [r["text"] for r in rows]
+    labels = [_WIKILINK_RE.sub(r"\1", t).split(":", 1)[0].strip() for t in lines]
+    steps = [[so.roots(x) for x in (_topics(t) or [lab])] for t, lab in zip(lines, labels)]
+    role = so.roles(colls, body, _title(body) or Path(ref).stem, steps, so.declared_of(plan)) if colls else {}
+    return [c for c in colls if role[c["key"]]["role"] == so.MATERIAL], role, body, rows
+
+
+def lecture_gaps(plan: dict, notes: dict | None = None) -> tuple[list[str], int] | None:
+    """(the topics of the plan's syllabus whose words no deck of its material
+    holds, the decks read), or None when the plan has no syllabus or no
+    material. A topic is held when one deck holds GAP_SHARE of its words
+    (all of them for one or two), read as roots so a plural meets its
+    singular; activity lines and lines still glued are not judged."""
+    from silica.kernel.learn import sources as so
+    from silica.kernel.report.learner import _notes_meta
 
     # 5.6 s on the course's 32 decks, most of it the title vectors: once per
     # plan note as written, since its syllabus and its folder are the input
@@ -1119,26 +2132,13 @@ def lecture_gaps(plan: dict, notes: dict | None = None) -> tuple[list[str], int]
     if key and key in _GAPS_CACHE:
         return _GAPS_CACHE[key]
     notes = notes if notes is not None else _notes_meta(_vault())
-    ref = resolve_title(plan.get("target") or "", notes) if plan.get("scope") == "steps" else None
-    if not ref:
-        return None
-    _d, _r, body = frontmatter.split(_read(ref))
-    lines = [s["text"] for s in parse_steps(body)] or reference_lines(body)
-    restrict = (plan.get("restrict") or "").split(RESTRICT_SEP)[0].strip().rstrip("/")
-    decks: list[set[str]] = []
-    for p, meta in notes.items():
-        if not meta.get("spine") or not _LESSON_TITLE_RE.match(Path(p).stem):
-            continue
-        if restrict and not p.startswith(restrict + "/"):
-            continue
-        for link in re.findall(r"\[\[(sources/[^\]|#]+)", _read(p)):
-            try:
-                text = _read(link if link.endswith(".md") else link + ".md")
-            except OSError:
-                continue  # a deck moved or renamed since: one deck fewer to read, not a failed answer
-            decks.append(_gap_roots(text))
+    material, _role, _body, rows = _material_of(plan, notes)
+    decks = [so.leaf_roots(leaf) for c in material for leaf in c["leaves"]]
+    decks = [d for d in decks if d]
     if not decks:
         return None
+    lines = [r["text"] for r in rows]
+
     def held(words: set[str]) -> bool:
         need = len(words) if len(words) <= 2 else -(-len(words) * 2 // 3)
         return any(len(words & d) >= need for d in decks)
@@ -1155,6 +2155,7 @@ def lecture_gaps(plan: dict, notes: dict | None = None) -> tuple[list[str], int]
     # ("autocodificatori" against "autoencoder", "sequence-to-sequence"
     # against "seq2seq"): a topic the plan matched to a note is held when a
     # deck holds that note's title, the match having crossed the language.
+    restrict = (plan.get("restrict") or "").split(RESTRICT_SEP)[0].strip().rstrip("/")
     allowed = {p for p in notes if not restrict or p.startswith(restrict + "/")}
     hits = topic_hits(list(dict.fromkeys(misses)), notes, allowed) if misses else {}
     gaps = [t for t in misses if not ((hit := hits.get(t, (None, ""))[0]) and held(_gap_roots(Path(hit).stem)))]
@@ -1218,6 +2219,12 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
         "suggestions": mastery.suggestions(entries, paths),
         "calibration": cal, "grader": mastery.grader_agreement(entries, paths),
         "pace": pace_of(plan, below, entries=entries), "cycles": cycles_among(paths),
+        "budget": budget(plan, passed=passed), "assessment": plan.get("assessment") or [], "hours": plan.get("hours"),
+        "today": today_line(plan, passed),
+        "assessment_set": plan.get("assessment_set", False), "guide": plan.get("guide", ""),
+        "materials": plan.get("materials", ""), "references": plan.get("references", ""),
+        "matched": plan.get("matched", {}),
+        "unused": plan.get("unused", ""),
         "complete": completion(plan, entries, passed, steps),
         "paths": paths, "gaps": [s["text"] for s in steps if s["gap"]],
     }
@@ -1398,13 +2405,17 @@ def close_plan(plan_path: str, reopen: bool = False) -> dict:
 
 def write_plan(name: str, scope: str, target, reach: str = "relational", by: str | None = None,
                restrict: str = "", folder: str = "Plans", objectives=None, cards: list[dict] | None = None,
-               refused=()) -> dict:
+               refused=(), declared: dict[str, str] | None = None, hours=None, assessment=None,
+               guide: str = "", declared_why: str = "you set it", matched: dict[str, str] | None = None) -> dict:
     """The plan note through the write gate (silica_write_note): scope,
     objectives (the chosen intentions in frontmatter, the cards under
     `## Objectives`), tree, steps with a because clause and gaps, an empty
     Sessions section. Nothing about mastery goes in; every reading derives
     from the ledger. `reach` is accepted for the REPL's legacy call and
-    mapped to intentions when `objectives` is None."""
+    mapped to intentions when `objectives` is None. `declared` the roles of
+    the collections, `hours` study hours a day, `assessment` its parts (None
+    reads them off the reference, "none" clears them), `guide` a note whose
+    plan table gives each step's depth (ADR-0131)."""
     from datetime import date
 
     from silica.kernel.learn import objectives as obj
@@ -1414,7 +2425,12 @@ def write_plan(name: str, scope: str, target, reach: str = "relational", by: str
         raise ValueError(f"scope must be one of {SCOPES}")
     if reach not in REACH:
         reach = "relational"
-    resolved = resolve_scope(scope, target, restrict=restrict, refused=refused)
+    resolved = resolve_scope(scope, target, restrict=restrict, refused=refused, declared=declared,
+                             declared_why=declared_why, matched=matched)
+    parts, assessment_value = _parts_of(resolved, assessment) if scope == "steps" else ([], None)
+    resolved["parts"] = parts
+    if scope == "steps":
+        _depths(resolved["tree"], guide=guide, restrict=restrict)
     chosen = obj.normalize(objectives) if objectives is not None else list(obj.REACH_TO_INTENTIONS[reach])
     if cards is None:
         cards = obj.propose(resolved["tree"], chosen)
@@ -1435,6 +2451,16 @@ def write_plan(name: str, scope: str, target, reach: str = "relational", by: str
         # and Reword re-resolve without the false match (ADR-0081 review);
         # one string, because the gate stringifies a list prop
         props["refused"] = " | ".join(refused_lines)
+    props.update(_role_keys(resolved.get("sources") or []))
+    kept = _matched_kept(resolved)
+    if kept:
+        props["matched"] = matched_text(kept)
+    if _hours_of(hours):
+        props["hours"] = f"{_hours_of(hours):g}"
+    if assessment_value:
+        props["assessment"] = assessment_value
+    if guide:
+        props["guide"] = f"[[{Path(guide).stem}]]" if not guide.startswith("[[") else guide
     path = f"{folder}/{name}.md"
     out = TOOLS["silica_write_note"].fn(path=path, body="\n".join(lines), title=name, props=props)
     if isinstance(out, dict) and out.get("error"):
@@ -1452,8 +2478,12 @@ def _plan_body(name: str, scope: str, target, resolved: dict, chosen: list[str],
     the caller's, because an edit keeps the lines already there."""
     from silica.kernel.learn import objectives as obj
 
-    lines = [f"# {name}", "", _goal_sentence(scope, target, chosen or [c["intention"] for c in cards if c.get("intention")]),
-             "", "## Objectives"]
+    lines = [f"# {name}", "", _goal_sentence(scope, target, chosen or [c["intention"] for c in cards if c.get("intention")])]
+    said = " ".join(x for x in (_sources_sentence(resolved.get("sources") or []), resolved.get("order_note") or "") if x)
+    if said:
+        # one paragraph with the goal, so Edit plan rewrites it (_reader_head)
+        lines.append(said)
+    lines += ["", "## Objectives"]
     lines += [obj.format_line(c) for c in cards] or ["- to define · the whole scope · gap: no objective yet"]
     lines += ["", "## Tree"]
     for node in resolved["tree"]:
@@ -1475,23 +2505,185 @@ def _plan_body(name: str, scope: str, target, resolved: dict, chosen: list[str],
         for node in resolved["tree"]:
             missing = ", ".join(node.get("missing") or [])
             if node.get("gap"):
-                lines.append(f"- [ ] {node['node']}: not in the vault" + (f" ({missing})" if missing else ""))
-            elif "missing" in node or str(node.get("how", "")).endswith("topics"):
+                lines.append(f"- [ ] {node['node']}: " + (node["how"] if node.get("how") == "no practice note found"
+                                                         else "not in the vault") + (f" ({missing})" if missing else "")
+                             + _marks(node))
+            elif ("missing" in node or str(node.get("how", "")).endswith(("topics", "rows"))
+                  or "practice" in node or node.get("how") == "by position"):
                 # a syllabus block keeps its name; its topics are the notes,
-                # and what no note covers is said where the step is read
+                # and what no note covers is said where the step is read; a
+                # note met by meaning is marked (≈), one only a reference
+                # gives (ref), the step's weight and depth close the line
                 links = ", ".join(f"[[{Path(p).stem}]]" + (" (≈)" if p in node.get("approx", ()) else "")
-                                  for p in node["leaves"])
-                lines.append(f"- [ ] {node['node']}: {links}" + (f" · not in the vault: {missing}" if missing else ""))
+                                  + (" (ref)" if p in node.get("ref", ()) else "") for p in node["leaves"])
+                lines.append(f"- [ ] {node['node']}: {links}" + (f" · not in the vault: {missing}" if missing else "")
+                             + _marks(node))
             else:
                 text = node.get("text", node["node"])
                 links = " ".join(f"[[{Path(p).stem}]]" for p in node["leaves"]) if "[[" not in text else _WIKILINK_RE.sub(lambda m: f"[[{m.group(1)}]]", text.split(":", 1)[0])
                 because = text.split(":", 1)[1].strip() if ":" in text else ""
-                lines.append(f"- [ ] {links}: {because}" if because else f"- [ ] {links}")
+                lines.append((f"- [ ] {links}: {because}" if because else f"- [ ] {links}") + _marks(node))
+        parts = resolved.get("parts") or []
+        if parts:
+            lines += ["", "## Assessment"] + [f"- [ ] {_PART_LINE[p['part']](p.get('days'))}" for p in parts]
     return lines
 
 
+# The assessment's parts as the plan note says them (ADR-0131 point 9).
+_PART_LINE = {
+    "project": lambda d: (f"Project: the reference gives it at least {d} days before the date, and the calendar keeps "
+                          f"those days for it" if d else "Project"),
+    "oral": lambda d: "Oral exam: rehearse aloud the day before the date",
+    "written": lambda d: "Written exam",
+    "presentation": lambda d: "Presentation: rehearse it aloud the day before the date",
+    "exercises": lambda d: "Exercises",
+}
+
+
+def _sources_sentence(sources: list[dict]) -> str:
+    """"Sources: X, the material (its rule); Y, a reference (its rule).":
+    each role the plan studies by, and which rule of ADR-0131 decided it."""
+    from silica.kernel.learn import sources as so
+
+    bits = [f"{s['label']}, {'the material' if s['role'] == so.MATERIAL else 'a reference'} ({s.get('why', '')})"
+            for s in sources if s.get("role") in (so.MATERIAL, so.REFERENCE)]
+    return ("Sources: " + "; ".join(bits) + ".") if bits else ""
+
+
+def _matched_kept(resolved: dict) -> dict[str, str]:
+    """The reader's answers that still apply: a topic the sources now meet
+    by themselves needs none."""
+    return {t: n for node in resolved.get("tree") or [] for t, n in (node.get("matched") or {}).items()}
+
+
+def _role_keys(sources: list[dict]) -> dict[str, str]:
+    """The plan keys that store the roles: labels joined by " | " (the write
+    gate stringifies a list prop)."""
+    from silica.kernel.learn import sources as so
+
+    out = {}
+    # a role to confirm is used for the steps but written only once the form
+    # saves it: a plan made without the form keeps no guess as a choice
+    for key, role in (("materials", so.MATERIAL), ("references", so.REFERENCE), ("unused", so.UNUSED)):
+        labels = [s["label"] for s in sources if s.get("role") == role and not s.get("confirm")]
+        if labels:
+            out[key] = RESTRICT_SEP.join(labels)
+    return out
+
+
+def _parts_of(resolved: dict, assessment) -> tuple[list[dict], str | None]:
+    """(the assessment's parts, the `assessment:` value): None reads them off
+    the reference, "none" clears them, a list or a "project 7 | oral" string
+    is the reader's."""
+    if assessment is None:
+        parts = resolved.get("assessment") or []
+        return parts, (assessment_text(parts) if parts else None)
+    if isinstance(assessment, str):
+        parts = parse_assessment(assessment)
+        return parts, assessment_text(parts)
+    parts = [{"part": str(p.get("part")), "days": p.get("days")} for p in assessment
+             if isinstance(p, dict) and str(p.get("part")) in _PART_LINE]
+    return parts, assessment_text(parts)
+
+
+_GUIDE_HEAD_RE = re.compile(r"^\|.*\b(profondit\w*|depth|difficolt\w*|difficulty|diff\.)", re.I | re.M)
+_GUIDES_MEMO: dict[tuple, list[str]] = {}
+
+
+def guide_candidates(restrict: str = "") -> list[str]:
+    """The notes in the bound a plan could take its steps' depth from: a
+    table whose header names a depth or a difficulty (ADR-0131 point 11),
+    as a study guide writes one. Read once per notes epoch and bound."""
+    from silica.kernel.report.learner import _notes_meta, is_material, parsed_note
+
+    vault = _vault()
+    notes = _notes_meta(vault)
+    bounds = tuple(b.strip().casefold() for b in str(restrict or "").split(RESTRICT_SEP) if b.strip())
+    paths = sorted(p for p, m in notes.items() if is_material(m) and (not bounds or p.casefold().startswith(bounds)))
+    key = (str(vault), bounds, len(paths), max((notes[p].get("mtime", 0) for p in paths), default=0))
+    if key not in _GUIDES_MEMO:
+        found = []
+        for p in paths:
+            parsed = parsed_note(vault, p)
+            body = parsed[1] if parsed else ""
+            if "|" in body and _GUIDE_HEAD_RE.search(body) and any(r.get("depth") for r in reference_rows(body)):
+                found.append(p)
+        if len(_GUIDES_MEMO) > 8:
+            _GUIDES_MEMO.clear()
+        _GUIDES_MEMO[key] = found
+    return _GUIDES_MEMO[key]
+
+
+def _depths(tree: list[dict], guide: str = "", restrict: str = "") -> None:
+    """A depth per step, written on its line (ADR-0131 point 10): the guide
+    row sharing most of its notes, else the step's own verbs, else how much
+    later steps rest on it (prerequisite edges from their notes into its
+    notes), the top third deep and the bottom third read. Each step's lead,
+    the note later steps rest on most, opens its objective."""
+    from silica.kernel.report import learner
+
+    nodes = [n for n in tree if not n.get("gap") and n.get("leaves") and "practice" not in n]
+    if guide:
+        try:
+            g = resolve_scope("steps", guide, restrict=restrict)["tree"]
+        except Exception as exc:  # noqa: BLE001
+            # a guide that does not resolve leaves the depth to the other rules
+            logger.info("plan depth: guide %r unreadable (%s)", guide, exc)
+            g = []
+        for n in nodes:
+            best = max(g, key=lambda gn: len(set(gn.get("leaves") or []) & set(n["leaves"])), default=None)
+            if best and best.get("depth") and set(best.get("leaves") or []) & set(n["leaves"]):
+                n["depth"] = best["depth"]
+    for n in nodes:
+        verb = next((d for d, rx in _VERB_DEPTH if rx.search(n.get("text", ""))), None)
+        if verb and not n.get("depth"):
+            n["depth"] = verb
+    try:
+        prereqs = {learner.key_of(k): [learner.key_of(x) for x in v] for k, v in learner.prerequisites_map().items()}
+    except Exception as exc:  # noqa: BLE001
+        # no graph or no index: depth stays what the guide and the verbs said
+        logger.info("plan depth: no prerequisite map (%s)", exc)
+        prereqs = {}
+    step_of: dict[str, int] = {}
+    for idx, n in enumerate(nodes):
+        for p in n["leaves"]:
+            step_of.setdefault(learner.key_of(p), idx)
+    rests_on: dict[str, int] = {}
+    for dep, pres in prereqs.items():
+        d = step_of.get(dep)
+        if d is None:
+            continue
+        for pre in pres:
+            s_ = step_of.get(pre)
+            if s_ is not None and s_ < d:
+                rests_on[pre] = rests_on.get(pre, 0) + 1
+    score = [sum(rests_on.get(learner.key_of(p), 0) for p in n["leaves"]) for n in nodes]
+    for n in nodes:
+        lead = max(n["leaves"], key=lambda p: rests_on.get(learner.key_of(p), 0))
+        if rests_on.get(learner.key_of(lead), 0):
+            n["lead"] = lead
+    open_ = [i for i, n in enumerate(nodes) if not n.get("depth")]
+    # Too few edges say nothing: on the course two of thirteen steps had a
+    # prerequisite edge from a later step (2026-10-25), and ranking the rest
+    # by zero made them all "read". No depth beats a wrong one.
+    if len(nodes) < 3 or sum(1 for x in score if x) * 2 < len(nodes):
+        return
+    ranked = sorted(open_, key=lambda i: -score[i])
+    third = max(1, len(nodes) // 3)
+    cut_hi = sorted(score, reverse=True)[third - 1]
+    cut_lo = sorted(score)[third - 1]
+    for i in ranked:
+        nodes[i]["depth"] = "deep" if score[i] >= cut_hi and score[i] > 0 else "read" if score[i] <= cut_lo else "well"
+
+
+_VERB_DEPTH = (("deep", re.compile(r"\b(dimostr\w*|deriv\w*|prove|proofs?|derive\w*)\b", re.I)),
+               ("read", re.compile(r"\b(cenni|overview|panoramica)\b", re.I)))
+
+
 def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = None, restrict: str = "",
-              objectives=None, cards: list[dict] | None = None, refused=None) -> dict:
+              objectives=None, cards: list[dict] | None = None, refused=None, declared: dict[str, str] | None = None,
+              hours=None, assessment=None, guide: str | None = None, declared_why: str = "you set it",
+              matched: dict[str, str] | None = None) -> dict:
     """Edit plan (ADR-0081 §17): the same fields as creation, one revertible
     overwrite of the note. Only what creation generates is rewritten (the
     title, the goal line, Objectives, Tree, Steps); the reader's own text,
@@ -1499,7 +2691,9 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
     stay, so the ledger's reading of the plan does not move. The file keeps
     its path when the name changes, because a rename is a move and the
     sessions' receipts link the path. `refused` None keeps the plan's own
-    refusals (Reword sends none); a list replaces them."""
+    refusals (Reword sends none); a list replaces them. The same holds for
+    ADR-0131's `declared`, `hours`, `assessment` and `guide`: None keeps
+    what the plan says."""
     from silica.kernel.learn import objectives as obj
     from silica.kernel.write import frontmatter
 
@@ -1508,7 +2702,22 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
     if not (_vault() / plan_path).is_file():
         raise ValueError(f"no plan at {plan_path!r}")
     old = read_plan(plan_path)
-    resolved = resolve_scope(scope, target, restrict=restrict, refused=old["refused"] if refused is None else refused)
+    from silica.kernel.learn import sources as so
+
+    kept = declared is None
+    declared = so.declared_of(old) if kept else declared
+    matched = old.get("matched") if matched is None else matched
+    resolved = resolve_scope(scope, target, restrict=restrict, refused=old["refused"] if refused is None else refused,
+                             declared=declared, declared_why="as the plan says" if kept else declared_why,
+                             matched=matched)
+    if assessment is None and old.get("assessment_set"):
+        assessment = assessment_text(old["assessment"])
+    hours = old.get("hours") if hours is None else hours
+    guide = old.get("guide") if guide is None else guide
+    parts, assessment_value = _parts_of(resolved, assessment) if scope == "steps" else ([], None)
+    resolved["parts"] = parts
+    if scope == "steps":
+        _depths(resolved["tree"], guide=_WIKILINK_RE.sub(r"\1", guide or ""), restrict=restrict)
     chosen = obj.normalize(objectives)
     if cards is None:
         cards = obj.propose(resolved["tree"], chosen)
@@ -1540,7 +2749,13 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
             out[at:at] = [f"## {title}", *lines, ""]
         keys = dict(data or {})
         keys.update(scope=scope, target=target_text(scope, target), objectives=", ".join(chosen) or "proposed by Silica")
-        for k, v in (("by", by), ("restrict", restrict), ("refused", " | ".join(refused_lines))):
+        roles = _role_keys(resolved.get("sources") or [])
+        guide_link = (guide if str(guide).startswith("[[") else f"[[{Path(guide).stem}]]") if guide else ""
+        for k, v in (("by", by), ("restrict", restrict), ("refused", " | ".join(refused_lines)),
+                     ("materials", roles.get("materials")), ("references", roles.get("references")),
+                     ("unused", roles.get("unused")), ("hours", f"{_hours_of(hours):g}" if _hours_of(hours) else ""),
+                     ("assessment", assessment_value), ("guide", guide_link),
+                     ("matched", matched_text(_matched_kept(resolved)))):
             if v:
                 keys[k] = str(v)
             else:
@@ -1557,7 +2772,7 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
 
 
 # the sections creation writes, by their heading; anything else is the reader's
-_GENERATED = {"objectives": "Objectives", "tree": "Tree", "steps": "Steps"}
+_GENERATED = {"objectives": "Objectives", "tree": "Tree", "steps": "Steps", "assessment": "Assessment"}
 
 
 def _split_sections(lines: list[str]) -> list[tuple[str, list[str]]]:

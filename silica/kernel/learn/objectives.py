@@ -61,6 +61,8 @@ TEMPLATE = {
                  "the criteria named, the evidence the note supports, and a decision that follows from them"),
 }
 SOURCES = ("chosen", "proposed", "gap")
+# A plan step's depth (ADR-0131 point 10) as the intention proposed for it.
+DEPTH_INTENTION = {"deep": "explain", "well": "explain", "read": "recall"}
 MAX_MODEL_CARDS = 24
 
 
@@ -151,11 +153,17 @@ def propose(tree: list[dict], chosen: list[str], model: bool = True) -> list[dic
         if node.get("gap") or not leaves:
             cards.append(card("", label, [], "gap"))
             continue
+        # the note later steps rest on most opens the objective (ADR-0131)
+        lead = node.get("lead")
+        if lead in leaves:
+            leaves = [lead] + [p for p in leaves if p != lead]
         if chosen:
             for i in chosen:
                 cards.append(card(i, label, leaves, "chosen"))
         else:
-            cards.append(card(infer(leaves[0]), label, leaves, "proposed"))
+            # a step's depth names what to ask of it; the material otherwise
+            # (13 of 16 course steps read "Apply X to a case", 2026-10-25)
+            cards.append(card(DEPTH_INTENTION.get(node.get("depth"), "") or infer(leaves[0]), label, leaves, "proposed"))
     # model=False: Create pressed while the background call still runs
     # writes the templates the row said, not a second call (ADR-0081 §16)
     return rewrite(cards) if model else cards
