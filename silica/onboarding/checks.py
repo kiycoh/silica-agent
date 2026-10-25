@@ -128,8 +128,7 @@ def check_chat_model(config: SilicaConfig) -> CheckResult:
         return CheckResult(
             "chat model", "fail",
             "SILICA_MODEL is not set, and no provider key is exported",
-            "run `silica init` — or serve the vault read-only with `silica mcp`, "
-            "whose recall tools need no model",
+            "run `silica init`; search and the graph work without one",
         )
     key_env = PROVIDER_PRESETS.get(config.provider, {}).get("api_key_env")
     if key_env and not os.getenv(key_env):
@@ -712,7 +711,7 @@ def live_probe(config: SilicaConfig) -> CheckResult:
     run_checks only probes key-presence and /models reachability, never a paid
     call — this is the row that costs money, so it runs only when asked
     (`silica doctor --live`, `silica_doctor(live=True)`); one implementation so
-    the CLI and the MCP surface cannot drift.
+    the CLI and the tool cannot drift.
     """
     if not (getattr(config, "model", "") or "").strip():
         return CheckResult("live probe", "warn", "skipped — no model configured",
@@ -1122,7 +1121,7 @@ def verdict(results: list[CheckResult]) -> Literal["ok", "hold", "fail"]:
     row needs reading (a fallback was taken, or a check could not answer).
 
     One resolver for the three surfaces that report it (the CLI exit code,
-    the --json and MCP payload, the GUI): a consumer that re-derived the rule
+    the --json and tool payload, the GUI): a consumer that re-derived the rule
     from the rows is the consumer that folds warn back into ok, which is how
     `silica doctor && run` started on the half-answering endpoint the table
     had flagged in yellow. The wizard keeps has_failures: its exit says
@@ -1164,7 +1163,7 @@ def report_payload(results: list[CheckResult]) -> dict:
         ],
         "ok": not has_failures(results),
         # `ok` stays for the consumers that key on it; `verdict` is the same
-        # three-way answer the exit code gives, so an agent reading the MCP
+        # three-way answer the exit code gives, so an agent reading the tool
         # payload sees a hold instead of an `ok: true` over yellow rows.
         "verdict": verdict(results),
     }

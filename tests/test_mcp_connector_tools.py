@@ -98,15 +98,6 @@ def test_hosted_registers_no_connector(monkeypatch):
     assert not [n for n in TOOLS if n.startswith("mcp__")]
 
 
-def test_a_connector_is_never_reexported_by_silica_mcp():
-    from silica.connectors import mcp_tools
-    from silica.ui.mcp import exposed_tools
-
-    _mail()
-    mcp_tools.reload()
-    assert "mcp__mail" not in exposed_tools(all_tools=True)
-
-
 # --- what the sub-loop is offered --------------------------------------------
 
 def test_a_local_defs_reference_is_inlined_once():

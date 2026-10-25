@@ -66,7 +66,7 @@ def commit_note_atomic(op: Op, *, hub: str | None = None, lint: bool = True) -> 
 
     The whole window runs under ``path_lease`` so the FSM ingest path
     serializes with every other lease-holding writer (subagent commit_ops,
-    the MCP note tools) — patch is read-modify-write, and without the lease
+    the single-note tools) — patch is read-modify-write, and without the lease
     a concurrent append to the same note is silently lost.
 
     Args:

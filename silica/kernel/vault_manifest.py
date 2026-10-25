@@ -531,7 +531,7 @@ def active_write_dir() -> str:
 
     An unresolvable declaration (None) never degrades to "": the /vault seam
     refuses activation, and answering with an impossible path keeps any caller
-    that skipped that seam (GUI, MCP) from writing vault-wide.
+    that skipped that seam (the GUI) from writing vault-wide.
     """
     declared = get_active_manifest().write_dir
     return declared if declared is not None else _UNRESOLVABLE_WRITE_DIR

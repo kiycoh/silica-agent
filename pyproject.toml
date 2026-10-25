@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 version_file = "silica/_version.py"
-# The plugin marketplace copies this tree into ~/.claude/plugins/cache
-# without .git, and mcp.json builds it there, so version inference has
-# no tags to read and raised, taking the whole MCP server down with it.
+# A copy of this tree without .git has no tags to infer a version from, and
+# setuptools-scm raises instead of building. Seen where the Claude Code plugin
+# cache built it (that plugin left in ADR-0130); any archive copy is the same.
 fallback_version = "0.0.0"
 
 [project]
@@ -115,13 +115,12 @@ dev = ["pytest>=8.0", "mypy>=1.10", "import-linter>=2.0", "scipy>=1.17.1", "ruff
 connect = [
     "websockets>=16.0",
 ]
-# Opt-in MCP: the stdio server (`silica mcp`, Silica as vault memory for other
-# agents) and the client that reaches other servers (ADR-0091). 2.x and not the
-# 1.x maintenance line: 1.x is a legacy-era client and its OAuth lacks the RFC
-# 9207 check of the authorization response's `iss`, while a 2.x server still
-# serves today's `initialize` clients (`Server.run` is dual-era). The line was
-# ten weeks old at the pin (2.0.0 on 2026-07-28), so `<3`, and every minor bump
-# reruns ADR-0091's Gate 0 (tests/test_agent_identity.py, test_mcp_*).
+# Opt-in MCP client: the connectors that reach other servers (ADR-0091). The
+# stdio server that shared this extra left in ADR-0130. 2.x and not the 1.x
+# maintenance line: 1.x is a legacy-era client and its OAuth lacks the RFC 9207
+# check of the authorization response's `iss`. The line was ten weeks old at
+# the pin (2.0.0 on 2026-07-28), so `<3`, and every minor bump reruns
+# ADR-0091's Gate 0 (tests/test_mcp_*).
 mcp = ["mcp>=2.3,<3"]
 # Opt-in store for Class B secrets (ADR-0089 point 7): a credential that opens an
 # account of the owner beyond Silica (an MCP server's token, its OAuth grant)

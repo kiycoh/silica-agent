@@ -142,8 +142,8 @@ def test_declared_manifest_root_wins_over_its_write_dir(tmp_path, monkeypatch, v
 
 
 def test_adoption_never_prompts(tmp_path, monkeypatch, vault_env):
-    # `silica mcp` runs with stdin bound to the MCP client: a prompt there would
-    # eat the first JSON-RPC message and then die on EOF. cwd decides silently.
+    # The GUI adopts with no terminal behind it: a prompt there would block on
+    # stdin and then die on EOF. cwd decides silently.
     _init_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("sys.stdin", io.StringIO())

@@ -20,34 +20,9 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from silica.kernel.recall.paths import inbox_dir_for, is_system_dir
+from silica.kernel.recall.paths import inbox_dir_for
 
 logger = logging.getLogger(__name__)
-
-# Under a KiB a transcript is a session that did nothing; the drain would pay
-# an LLM call to learn that.
-MIN_TRANSCRIPT_BYTES = 1024
-
-_EVENTS = {"SessionEnd": "session_end", "PreCompact": "pre_compact"}
-
-
-def find_vault(cwd: str) -> Path | None:
-    """The vault `cwd` belongs to: nearest ancestor holding `vault.yaml`.
-
-    The walk-up is what makes a hook fired from `<repo>/silica/kernel` capture
-    to `<repo>`. Any adopted vault has the manifest — `declare_write_dir` writes
-    it on first launch, since every vault now declares a write boundary — so a
-    folder without one is a folder Silica has never been pointed at.
-    """
-    d = Path(cwd)
-    for candidate in (d, *d.parents):
-        # A manifest a stray launch left in /tmp is not a vault, and stopping
-        # here would hand every session under it someone else's.
-        if is_system_dir(candidate):
-            continue
-        if (candidate / "vault.yaml").is_file():
-            return candidate
-    return None
 
 
 def write_envelope(vault: str, name: str, envelope: dict) -> Path:
@@ -210,8 +185,9 @@ def _is_trivial(envelope: dict) -> bool:
 def _jsonl_envelopes(target: Path) -> list[tuple[str, dict]]:
     """Local Claude Code transcripts: one envelope per `.jsonl` session file.
 
-    The live hook's own name is reused (`-end`), which is what makes a session
-    already captured live skip itself on a retroactive import.
+    The name the Claude Code hook gave a live capture (`-end`) is kept after
+    the hook left (ADR-0130): a session it captured then still skips itself on
+    a retroactive import.
     """
     files = sorted(target.rglob("*.jsonl")) if target.is_dir() else [target]
     out: list[tuple[str, dict]] = []
@@ -277,14 +253,14 @@ def capture_session(messages: list[dict], *, session_id: str, driver: str,
                     notes_touched: list[str] | tuple = ()) -> Path | None:
     """Deposit one of Silica's OWN conversations in the WAL. Opt-in, no LLM.
 
-    Not a hook: the TUI and GUI call this in-process at the points where a
+    The TUI and GUI call this in-process at the points where a
     conversation ends (`/exit`, `/clear`, new chat, shutdown). What lands is
     the conversation and nothing else — tool traffic is dropped here, at the
     source, because the session knows its own history; what mattered about the
     tools travels as `notes_touched` instead.
     Returns the envelope path, or None when capture is off or the session said
-    nothing worth keeping. Fail-open like the hook producer, and for the same
-    reason: a capture bug must never break — or noise up — the session it was
+    nothing worth keeping. Fail-open: a capture bug must never break — or
+    noise up — the session it was
     capturing, so a failure is a None here rather than a raise at every call
     site.
     """
@@ -337,44 +313,3 @@ def capture_session(messages: list[dict], *, session_id: str, driver: str,
         logger.debug("session capture skipped (non-fatal): %s", exc)
         return None
 
-
-def run_capture(stdin_text: str) -> int:
-    """Claude Code hook entry: read the hook JSON, deposit one envelope.
-
-    Fail-open is the contract, hence the blanket except: every path exits 0
-    with nothing on stdout, because a capture bug must never break or noise up
-    a Claude Code session.
-    """
-    try:
-        hook = json.loads(stdin_text)
-        cwd = hook.get("cwd") or os.getcwd()
-        vault = find_vault(cwd)
-        if vault is None:
-            return 0
-        transcript = Path(hook.get("transcript_path") or "")
-        if transcript.stat().st_size < MIN_TRANSCRIPT_BYTES:
-            return 0
-        session_id = hook.get("session_id") or ""
-        event = _EVENTS[hook.get("hook_event_name", "")]
-        captured_at = datetime.now(UTC).isoformat()
-        # A session ends once (idempotent name, re-capture overwrites) but
-        # compacts many times, so each compaction keeps its own envelope.
-        name = (
-            f"claude-code-{session_id}-end.json" if event == "session_end"
-            else f"claude-code-{session_id}-precompact-"
-                 f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.json"
-        )
-        write_envelope(str(vault), name, {
-            "version": 1,
-            "source": "claude-code",
-            "event": event,
-            "format": "claude-code-jsonl",
-            "captured_at": captured_at,
-            "session_id": session_id,
-            "cwd": cwd,
-            "title": "",
-            "payload": transcript.read_text(encoding="utf-8", errors="replace"),
-        })
-    except Exception:
-        pass
-    return 0

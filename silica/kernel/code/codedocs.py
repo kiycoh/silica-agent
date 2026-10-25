@@ -291,22 +291,15 @@ def snapshot(vault: Path | str, repo_root: Path | str | None = None) -> list[Sta
         pass  # missing, corrupt, or unreadable: recompute and rewrite below
     notes = list(iter_documenting_notes(vault))
     docs = stale_docs(vault, repo_root=root, notes=notes)
-    # Every documenting note, stale or not, with its binding: the join a later
-    # `git diff` needs (drift below). A cache like the rest of the file, keyed
-    # on HEAD; frontmatter stays the only store of a binding (ADR-0038).
-    documented = {note: {"documents": _documents_of(data),
-                         "code_ref": str(data.get("code_ref") or "").strip()}
-                  for note, data, _ in notes}
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
-        # Per-pid temp name: two writers (e.g. the MCP server and a CLI run)
+        # Per-pid temp name: two writers (e.g. the GUI and a CLI run)
         # never share a temp file, so neither can publish the other's
         # partial/interleaved bytes. Each writer's os.replace is then
         # independently atomic; whichever finishes last simply wins cleanly.
         tmp = cache.parent / (cache.name + f".{os.getpid()}.tmp")
         tmp.write_text(json.dumps({"head": head,
-                                   "docs": [_doc_to_json(d) for d in docs],
-                                   "documented": documented}),
+                                   "docs": [_doc_to_json(d) for d in docs]}),
                        encoding="utf-8")
         os.replace(tmp, cache)
     except Exception:
@@ -353,48 +346,6 @@ def _note_levels(raw: dict) -> dict[str, str]:
         if out.get(d["note_path"]) != CHANGE_STRUCTURAL:
             out[d["note_path"]] = d.get("change_level", CHANGE_STRUCTURAL)
     return out
-
-
-def drift(vault: Path | str, repo_root: Path | str | None = None) -> dict | None:
-    """What moved since the snapshot was taken, for the session-open brief
-    (ADR-0038): the cache as it is plus one `git diff snap_head..HEAD`,
-    joined against the documented map. NEVER recomputes: a cold snapshot is
-    measured at 80 s on the repo vault and this runs inside someone else's
-    session hook. None when there is no repo, no HEAD or no snapshot yet.
-
-    Baseline is the snapshot's own HEAD, not a per-session marker: the map is
-    exact at that ref, so the diff from there is exactly what the snapshot
-    does not know, and the line repeats until `/stale` refreshes it.
-    """
-    try:
-        vault = Path(vault)
-        root = Path(repo_root) if repo_root else paths.repo_root_for(vault)
-        if root is None:
-            return None
-        head = gitstate.head_ref(root)
-        if not head:
-            return None
-        raw = json.loads(_snapshot_path(vault).read_text(encoding="utf-8"))
-        snap_head = str(raw.get("head") or "")
-        if not snap_head:
-            return None
-        by_path: dict[str, list[str]] = {}
-        for note, entry in (raw.get("documented") or {}).items():
-            if _hidden(note):
-                continue
-            for p in entry.get("documents", []):
-                by_path.setdefault(p, []).append(note)
-        moved = ([] if snap_head == head
-                 else gitstate.changed_paths(root, f"{snap_head}..{head}") or [])
-        changed = sorted(p for p in set(moved) if p in by_path)
-        affected: dict[str, list[str]] = {}
-        for p in changed:
-            for note in by_path[p]:
-                affected.setdefault(note, []).append(p)
-        return {"snap_head": snap_head, "head": head, "changed": changed,
-                "affected": affected, "stale": _note_levels(raw)}
-    except Exception:
-        return None  # a brief is an aid; any failure here is silence, like the hook
 
 
 def invalidate_snapshot(vault: Path | str) -> None:

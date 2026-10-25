@@ -39,8 +39,8 @@ from silica.metrics import emit
 @functools.cache
 def _litellm():
     """litellm, imported by the first call that needs it (ADR-0073): its 161 MB
-    and 2.2 s are paid by a process that talks to a model, not by doctor, the
-    MCP server or a GUI that only reads, all of which import this module."""
+    and 2.2 s are paid by a process that talks to a model, not by doctor or a
+    GUI that only reads, both of which import this module."""
     import litellm
     # silica/__init__.py sets LITELLM_MODE so litellm skips load_dotenv(); this
     # undoes what a release that renamed the switch would inject under our prefix.

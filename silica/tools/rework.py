@@ -396,7 +396,7 @@ def silica_rework(
     # and adds what nobody asked for ("paragrafi tematici e tabelle quando
     # utile" came back at 0.70 of the length, 2026-10-16), and every measured
     # block ran on the request as written. `instruction` serves a call with no
-    # message behind it (MCP).
+    # message behind it.
     ask = re.split(r"\n\s*\n", request, maxsplit=1)[0][:300] if request else (instruction or "Rework this text")
     with ThreadPoolExecutor(min(WORKERS, len(parts))) as pool:
         futures = [pool.submit(_rework, p, ask, language, cancel_token, kind, register) for p in parts]

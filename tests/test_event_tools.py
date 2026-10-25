@@ -183,13 +183,3 @@ def test_agenda_carries_the_daily_note_and_its_tasks(vault):
     assert [t["text"] for t in days[today.isoformat()]["tasks"]] == ["undated"]
     assert [t["text"] for t in days[later.isoformat()]["tasks"]] == ["exam"]
     assert "exam" in res["text"]
-
-
-# --- MCP exposure ------------------------------------------------------------
-
-def test_event_tools_are_on_the_core_mcp_surface():
-    from silica.ui.mcp import WRITE_TOOLS, exposed_tools
-    core = exposed_tools()
-    for name in ("silica_event_create", "silica_event_update", "silica_agenda"):
-        assert name in core
-    assert {"silica_event_create", "silica_event_update"} <= WRITE_TOOLS

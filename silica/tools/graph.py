@@ -296,8 +296,8 @@ def degraded_fields(leg_stats: dict) -> dict[str, Any]:
 
     Spread right after `query` (ADR-0094 point 3): the GUI card keeps the first
     1,200 characters of a result and the median recall result is 22,567 long
-    (2026-10-11), so a flag after `context` never reached the screen; an MCP
-    client's raw view and a compaction stub both keep the head too.
+    (2026-10-11), so a flag after `context` never reached the screen; a
+    compaction stub keeps the head too.
     """
     degraded = leg_stats.get("degraded")
     if not degraded:

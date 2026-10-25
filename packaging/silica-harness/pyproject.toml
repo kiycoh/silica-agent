@@ -35,9 +35,9 @@ classifiers = [
 # shipped.
 dependencies = ["silica-agent>=0.7.0"]
 
-# Every extra forwarded: MCP configs written before the rename run
-# `uvx --from 'silica-harness[mcp]' silica mcp`, and an extra the shim does not
-# declare is dropped with a warning, leaving `silica mcp` without its SDK.
+# Every extra forwarded: an install made before the rename names its extras on
+# silica-harness, and an extra the shim does not declare is dropped with a
+# warning, leaving that install without the dependency it asked for.
 [project.optional-dependencies]
 gui = ["silica-agent[gui]>=0.7.0"]
 mcp = ["silica-agent[mcp]>=0.7.0"]

@@ -30,7 +30,7 @@ _PHRASE = {"unreachable": "is unreachable", "loading": "is still loading",
            "rejected": "refused the model name", "failed": "failed"}
 # Where to fix it, per surface. The GUI names its own panels; the REPL has none,
 # so both Settings pointers become the doctor; a tool result can be read by
-# either, or by an MCP client, so it names both. Loading has no fix: it ends.
+# either, so it names both. Loading has no fix: it ends.
 _FIX = {
     "gui": {"unreachable": "start it in Settings, Endpoints",
             "diagnose": "Settings, Diagnostics names the cause"},

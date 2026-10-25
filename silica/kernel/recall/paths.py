@@ -370,8 +370,8 @@ class DiskSynced:
 
     `path_keyed_singleton` hands every caller in a process ONE store, and that
     store read its file exactly once. So a second Silica process writing the
-    same index (`silica nucleate` in a terminal while the GUI or the MCP
-    server is up) was invisible to the first until restart, and the first's
+    same index (`silica nucleate` in a terminal while the GUI is up) was
+    invisible to the first until restart, and the first's
     next save() then wrote its stale memory over the second's work. Last
     writer won, and nothing logged it.
 
@@ -627,7 +627,7 @@ def resolve_repo_root(vault: str | Path) -> tuple[Path | None, str | None]:
 
 # Resolved-once storage for the code-lane root (ADR-0019), keyed by resolved
 # vault path so it follows /vault switches and stays correct for entry points
-# that never run the CLI startup (GUI, MCP). "No repo" results are NOT cached,
+# that never run the CLI startup (the GUI). "No repo" results are NOT cached,
 # so a `git init` after first resolution is still picked up.
 _REPO_ROOT_CACHE: dict[str, tuple[Path | None, str | None]] = {}
 

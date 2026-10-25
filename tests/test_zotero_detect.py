@@ -75,18 +75,6 @@ def test_another_library_is_named(fake):
     assert z.detect(CONFIG.vault_path) == {"new": [], "changed": [], "other": "Qm41xTr8pZ0a"}
 
 
-def test_the_session_opens_with_the_zotero_line(fake, monkeypatch):
-    from silica import hook
-
-    z.detect(CONFIG.vault_path)
-    _new_paper(fake)
-    monkeypatch.setattr(hook, "find_vault", lambda cwd: CONFIG.vault_path)
-
-    text = hook.session_start("{}")
-
-    assert "Zotero: 1 paper new since the last session" in text
-
-
 # --- the Diagnostics row --------------------------------------------------------
 
 def _check():

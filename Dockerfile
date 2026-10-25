@@ -1,7 +1,7 @@
-# One image, three processes. ENTRYPOINT is the program, the argument picks the
-# lane: no argument opens the REPL, `--gui` serves the web UI, `mcp` speaks the
-# stdio protocol. Splitting this into three Dockerfiles would be three copies of
-# the same pip install, drifting apart at the first dependency bump.
+# One image, two processes. ENTRYPOINT is the program, the argument picks the
+# lane: no argument opens the REPL, `--gui` serves the web UI. Splitting this
+# into two Dockerfiles would be two copies of the same pip install, drifting
+# apart at the first dependency bump.
 
 # Build stage exists for one reason: setuptools-scm shells out to git, and the
 # runtime image has no git. Here the wheel gets a real version; there it does

@@ -118,12 +118,12 @@ def _register_embed_flush() -> None:
 def _locked(method):
     """Serialize this method against index mutation.
 
-    The MCP server dispatches every request on its own thread, so a write's
+    The GUI serves every request on a worker thread, so a write's
     `_patch_index` can interleave with a search iterating `self._notes` or
     `self._graph` — "dictionary changed size during iteration" on a normal
     concurrent session. One reentrant lock over mutators and the readers that
     iterate; reentrant because readers call `_ensure_index` which may rebuild.
-    # ponytail: one global lock, not per-structure — split it only if MCP
+    # ponytail: one global lock, not per-structure — split it only if
     # profiling ever shows read contention.
     """
     @functools.wraps(method)
@@ -978,7 +978,7 @@ class ObsidianFSBackend(GraphIndexMixin):
 
         The mixin hands out live references to `_notes`/`_unresolved_links`/
         `_graph`; consumers (graph_export, mindmap) iterate them long after
-        the lock would have been released, while an MCP write thread runs
+        the lock would have been released, while a write thread runs
         `_patch_index` — the same "dictionary changed size during iteration"
         the method-level lock exists to close. Shallow copies decouple the
         iteration from the index; NoteRefs stay shared, which readers treat
@@ -1456,7 +1456,7 @@ class ObsidianFSBackend(GraphIndexMixin):
             # unresolvable may now resolve because the new name/path matches them.
             # Collect affected sources first, then patch (avoid mutating while iterating).
             sources_to_promote: list[tuple[str, str]] = []
-            # Snapshot, not the live set: @_locked keeps another MCP thread's
+            # Snapshot, not the live set: @_locked keeps another thread's
             # _patch_index out, but this loop must survive any future in-loop
             # patch too — a set mutated while iterated raises.
             for source, target in list(self._unresolved_links):

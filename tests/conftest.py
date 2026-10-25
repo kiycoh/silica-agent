@@ -127,9 +127,9 @@ def _restore_tools_registry() -> None:
     Restoring the snapshot wholesale is wrong for the same reason. The first
     test to import a tool module registers it DURING the test, and the import
     is cached, so deleting what it added unregisters those tools for the whole
-    session — that is how `silica_code_pack` went missing from
-    `exposed_tools(all_tools=True)` two tests after `test_mcp_surface` imported
-    it. So an addition is kept when it came from a `silica.*` module (the
+    session — that is how `silica_code_pack` went missing from the MCP
+    server's served set (the server left in ADR-0130) two tests after another
+    test imported it. So an addition is kept when it came from a `silica.*` module (the
     product registry filling in lazily) and dropped otherwise (a fake defined
     in a test).
 

@@ -682,7 +682,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         The ledger knew (check_renucleate existed, tested, uncalled) and the
         user was never told that the notes of the previous version stay in
         place beside the new ones. No prompt belongs in this path, which runs
-        headless from the GUI and MCP, so the fact is said where it can be
+        headless from the GUI, so the fact is said where it can be
         acted on: the log at start, the run report (`files_summary`) and the
         completion line at the end, each naming the count and the command
         that is the operator's actual choice, `/revert --source`.

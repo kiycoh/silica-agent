@@ -127,11 +127,9 @@ def test_scoreboard_without_a_query_leads_with_the_active_vault(tmp_path, monkey
     assert "hits" not in rows[0]
 
 
-def test_tool_is_served_by_default_and_returns_the_scoreboard(tmp_path, monkeypatch):
+def test_tool_returns_the_scoreboard(tmp_path, monkeypatch):
     from silica.tools.graph import silica_vaults
-    from silica.ui import mcp
 
-    assert "silica_vaults" in mcp.exposed_tools()
     a = _adopted(tmp_path, "a")
     monkeypatch.setattr(CONFIG, "vault_path", str(a))
     _no_memory(tmp_path, monkeypatch)
@@ -452,8 +450,8 @@ def test_home_is_empty_when_every_stage_ran_and_nominated_nothing(tmp_path, monk
 
 
 # ---------------------------------------------------------------------------
-# Discovery beyond Obsidian: a vault served from the REPL or `silica mcp
-# --vault` and never opened in Obsidian used to be known only while active.
+# Discovery beyond Obsidian: a vault served from the REPL and never opened
+# in Obsidian used to be known only while active.
 # ---------------------------------------------------------------------------
 
 def test_a_vault_the_sweep_marked_is_known_without_obsidian(tmp_path, monkeypatch):

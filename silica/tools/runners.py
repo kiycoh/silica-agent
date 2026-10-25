@@ -97,7 +97,7 @@ def silica_run_injector(
 
     # Apparatus is not content — the same filter /nucleate applies (cli.py's
     # _prepare_unit). This is THE tool for "nucleate this file", and the path
-    # the web drag-drop and every MCP client take, so a filter that lived only
+    # the web drag-drop takes, so a filter that lived only
     # in the CLI was no filter at all: a references list or a venue checklist
     # arriving here was distilled into venue/journal/ethics notes. The raw chunk
     # stays in the inbox for lookup, exactly as on the CLI side.
@@ -121,7 +121,7 @@ def silica_run_injector(
         # else — and it is what makes a note's verbatim source reachable at all
         # (reliability_tier reads exactly that). It was set only on the CLI side
         # while Coordinator defaults it False, so the same file nucleated through
-        # this tool — the web drag-drop and every MCP client — silently produced
+        # this tool — the web drag-drop — silently produced
         # notes whose source could never be checked.
         keep_sources=keep_sources,
         cancel_token=cancel_token,

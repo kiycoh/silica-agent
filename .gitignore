@@ -47,10 +47,8 @@ Thumbs.db
 /docs/
 
 # Silica & Agent Specific
-# .agents/ is local agent tooling, except the Codex plugin marketplace, which
-# Codex looks for at exactly .agents/plugins/marketplace.json.
-/.agents/*
-!/.agents/plugins/
+# .agents/ is local agent tooling.
+/.agents/
 # .claude/ holds the shared harness contract (settings.json + hooks/, both
 # $CLAUDE_PROJECT_DIR-relative); only the per-machine halves stay out.
 .claude/settings.local.json

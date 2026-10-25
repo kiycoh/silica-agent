@@ -12,10 +12,7 @@ bridge.
     uv run python scripts/smoke_cli.py            # everything
     uv run python scripts/smoke_cli.py --offline  # skip the groups needing a live endpoint
 
-Exit 0 when every case passed. Nothing here touches the real config: `setup
-claude` is only ever exercised as --dry-run (the real one shells out to
-`claude mcp add` and would edit the user's own client config), and codex and
-opencode write to a temp path via --config.
+Exit 0 when every case passed. Nothing here touches the real config.
 """
 from __future__ import annotations
 
@@ -64,35 +61,8 @@ def md_digest(vault: Path) -> str:
 # Phase A — shell subcommands
 # --------------------------------------------------------------------------
 
-def phase_a(vault: Path, tmp: Path) -> None:
+def phase_a(vault: Path) -> None:
     print("\nPhase A — shell subcommands")
-
-    r = run(["setup"], vault)
-    check(r.returncode != 0 and "Usage:" in r.stdout, "setup (no client) rejects with usage")
-
-    r = run(["setup", "nonsense"], vault)
-    check(r.returncode != 0 and "Usage:" in r.stdout, "setup <unknown> rejects with usage")
-
-    r = run(["setup", "claude", "--dry-run"], vault)
-    check(r.returncode == 0 and "claude mcp add" in r.stdout,
-          "setup claude --dry-run prints the command", r.stdout[-200:])
-    check(str(vault) in r.stdout, "setup claude --dry-run carries SILICA_VAULT")
-
-    for client, name in (("codex", "config.toml"), ("opencode", "opencode.json")):
-        target = tmp / f"{client}-{name}"
-
-        r = run(["setup", client, "--config", str(target), "--dry-run"], vault)
-        check(r.returncode == 0 and not target.exists(),
-              f"setup {client} --dry-run writes nothing", r.stderr[-200:])
-
-        r = run(["setup", client, "--config", str(target)], vault)
-        check(r.returncode == 0 and target.exists(),
-              f"setup {client} writes the config", r.stderr[-200:])
-        first = target.read_bytes() if target.exists() else b""
-
-        r = run(["setup", client, "--config", str(target)], vault)
-        check(r.returncode == 0 and target.read_bytes() == first,
-              f"setup {client} is idempotent")
 
     r = run(["update", "--check"], vault)
     check(r.returncode == 0 and "Traceback" not in r.stderr,
@@ -101,12 +71,6 @@ def phase_a(vault: Path, tmp: Path) -> None:
     r = run(["doctor"], vault, timeout=300)
     check("Traceback" not in r.stderr, "doctor runs to a report", r.stderr[-300:])
     print(f"        (doctor exit {r.returncode} — non-zero is a real finding, read the table)")
-
-    # stdio transport: stdout is the protocol channel, so the bootstrap banner
-    # must not reach it. Closed stdin makes the server see EOF and return.
-    r = run(["mcp"], vault, timeout=180)
-    junk = [ln for ln in r.stdout.splitlines() if ln.strip() and not ln.lstrip().startswith("{")]
-    check(not junk, "mcp keeps stdout protocol-only", f"non-JSON on stdout: {junk[:3]}")
 
 
 # --------------------------------------------------------------------------
@@ -174,7 +138,7 @@ def main() -> int:
         vault = tmp / "vault"
         shutil.copytree(FIXTURE, vault)
         print(f"scratch vault: {vault}")
-        phase_a(vault, tmp)
+        phase_a(vault)
         phase_b(vault, offline)
 
     failed = [name for ok, name, _ in results if not ok]

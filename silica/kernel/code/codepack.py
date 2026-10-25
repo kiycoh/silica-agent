@@ -15,7 +15,7 @@ about to rewrite, signatures for everything around it (D5).
 # ponytail: kill by 2026-10-28 if unused. Exposure (re-verified 2026-08-19):
 # NOT in the chat agent's default toolset. `silica_code_pack` is in
 # constraints._CHAT_EXCLUDED, so a chat turn only sees it when the user names
-# it (constraints._summoned). Reachable otherwise behind `silica mcp --all`.
+# it (constraints._summoned). The MCP server was its other door (ADR-0130).
 # Instrumented 2026-08-19: every invocation stamps a timestamp line to
 # <index>/codepack_usage.log (codedocs_tool._stamp_code_pack_use), so at the
 # kill date `grep -c . ~/.silica/index/*/codepack_usage.log` answers the

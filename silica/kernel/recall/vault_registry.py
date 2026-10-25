@@ -7,8 +7,7 @@ Discovery reads what already exists instead of keeping a registry: the active
 vault, the personal-memory vault, every vault a Silica process has served on
 this machine (the sweep leaves `vault.json` in the vault's index namespace,
 because the namespace key is a one-way digest), and Obsidian's own vault list;
-the last two filtered to the folders Silica has adopted (a `vault.yaml`, the
-same test `capture.find_vault` applies).
+the last two filtered to the folders Silica has adopted (a `vault.yaml`).
 
 Scoring is two-stage. Each vault's own indexes NOMINATE a pool of notes
 (lexical top-pool where a lexical.json exists, embedding top-pool where
@@ -103,7 +102,7 @@ def obsidian_vaults() -> list[Path]:
 
 def is_adopted(path: Path) -> bool:
     """A folder Silica has been pointed at: `declare_write_dir` writes the
-    manifest on first launch, so this is the same test `capture.find_vault` uses."""
+    manifest on first launch."""
     return (Path(path) / "vault.yaml").is_file()
 
 

@@ -249,8 +249,7 @@ def silica_query_table(
         raise ValueError(f"cannot read {path}: {e}") from e
     # The model names this path, so it is held to the vault the way a note
     # read is (audit 2026-10-09, S5): before, SQL ran over any data file the
-    # process could open. With no vault configured the cwd is the vault, as
-    # it is for the MCP server.
+    # process could open. With no vault configured the cwd is the vault.
     root = Path(vault or os.getcwd()).resolve()
     if root not in src.parents:
         raise ValueError(f"{path} is outside the vault {root.as_posix()}")

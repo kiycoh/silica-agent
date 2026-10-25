@@ -720,7 +720,7 @@ _AGENT_KEY_RE = re.compile(r"^agent:.*$", re.MULTILINE)
 def _stamp_agent(content: str) -> str:
     """Set/refresh `agent: "<id>"` in the frontmatter head when an agent is
     writing (see `notetype.agent_id`) — provenance for a vault written by a
-    fleet of agents or through an MCP client.
+    fleet of agents.
 
     Last-writer-wins, exactly like `last modified`: the field names who last
     touched the note; git keeps the full authorship history. No agent → the

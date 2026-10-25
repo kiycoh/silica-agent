@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Alessandro Carosia
 
 """What changed in the vault — the ledger behind the GUI's Changes list, the
-REPL's ``/changes`` and the MCP ``silica_changes`` tool.
+REPL's ``/changes`` and the ``silica_changes`` tool.
 
 Two layers over the same event, a note's FIRST touch by this process:
 
@@ -16,7 +16,7 @@ Two layers over the same event, a note's FIRST touch by this process:
   note the previous session had touched came back as "deleted".
 * **On disk, per vault** (``<index namespace>/changes.db``): the same baseline
   rows stamped with the writing session, so a second process on the same vault
-  — another MCP client, a running pipeline — can read what changed since it
+  — the GUI beside the REPL, a running pipeline — can read what changed since it
   last looked (``history``). Per-vault state follows the vault (ADR-0014): no
   vault column, and no central file every process would contend on.
 
@@ -52,8 +52,8 @@ MAX_TRACKED = 200
 # the checkpoints DB, when a vault's feed needs more than ~2000 first-touches back.
 HISTORY_CAP = 2000
 
-# One id per process: the MCP server is one process per client and the REPL one
-# per terminal, so "process" is what a session is here. Not the narration sid —
+# One id per process: the REPL is one process per terminal and the GUI one per
+# launch, so "process" is what a session is here. Not the narration sid —
 # that exists only once a chat has started, and the driver writes before and
 # without one. ponytail: a host that hands over its own session id (Claude Code
 # does not, over stdio) could replace this.

@@ -359,15 +359,15 @@
       </div>
     </section>
 
-    <!-- ═══ FOUR WAYS IN ═══ -->
+    <!-- ═══ THREE WAYS IN ═══ -->
     <section class="entry" id="ways" aria-labelledby="ways-h">
       <div class="rail">
-        <span class="op">four ways in</span>
+        <span class="op">three ways in</span>
         <span class="op-note">one gate</span>
       </div>
 
       <div class="field">
-        <h2 id="ways-h">Four front doors. Switching driver changes the interface, never the rules a write has to pass.</h2>
+        <h2 id="ways-h">Three front doors. Switching driver changes the interface, never the rules a write has to pass.</h2>
 
         <dl class="rows rows--dl rows--cmd">
           <div>
@@ -385,11 +385,6 @@
             <dd><b>Obsidian plugin.</b> A live bridge into the desktop app: Silica reads and writes the vault you already
               have open, with rollback and cache behind every change, and a changes panel with a per-file diff.</dd>
           </div>
-          <div>
-            <dt><code>silica mcp</code></dt>
-            <dd><b>Agent memory.</b> Your vault served over stdio to any MCP client, so an assistant recalls your real
-              notes before it answers. No model and no API key on the read path.</dd>
-          </div>
         </dl>
 
         <figure class="shot">
@@ -398,10 +393,9 @@
           <figcaption>The web GUI, running against a real vault at <code>localhost:8765</code>.</figcaption>
         </figure>
 
-        <p class="note">Reading a vault needs no model and no API key, so one line hands your notes to an agent you
-          already run. Nothing is asked, nothing else is configured, and nothing is written.</p>
-
-        <pre class="cmdblock" id="cmd-setup"><span class="pr">$</span> silica setup claude     <span class="cm"># or: setup codex, setup opencode</span></pre>
+        <p class="note">Coding agents get the retrieval engine underneath,
+          <a href="https://github.com/kiycoh/silica-core">silica-core</a>, as an MCP server of its own, with no model
+          in the loop.</p>
       </div>
     </section>
 
@@ -416,7 +410,7 @@
         <h2 id="code-h">Point it at a repository and the map stays honest against git.</h2>
         <p class="deck deck--sm">Launch Silica in a repo instead of a note folder and it keeps a human-readable map of
           the code under <code>docs/silica/</code>. One artifact, two readers: you read it as a current map, and a coding
-          agent reads it over MCP to ground its work in the real structure instead of re-deriving it every session.</p>
+          agent reads the same markdown to ground its work in the real structure instead of re-deriving it every session.</p>
 
         <dl class="rows rows--dl rows--cmd">
           <div>
@@ -491,7 +485,7 @@
             is that the same co-occurrence structure is also a retrieval leg.</li>
           <li><b>Self-linking atomic notes</b> are A-MEM's thesis, and old news in Obsidian plugins. Silica's part is
             that those links survive a merge, a split, and a rename.</li>
-          <li><b>An MCP server and local models</b> are table stakes: four drivers, one gate, no privileged client.</li>
+          <li><b>Local models</b> are table stakes: three drivers, one gate, no privileged client.</li>
         </ul>
 
         <div class="scope scope--alt">

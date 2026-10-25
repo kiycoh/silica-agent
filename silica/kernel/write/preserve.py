@@ -408,7 +408,7 @@ def check_recreate(path: str, after: str, *, loss: Loss | None = None, free=()) 
     """A create at a path the chat deleted in this same turn is judged
     against the body the delete saved (decision 4). Out of scope by
     construction: a `user:/delete` (the lookup reads chat deletes only), a
-    create in a later turn, an MCP client's delete and create (no turn)."""
+    create in a later turn."""
     started = _TURN_STARTED.get()
     if started is None:
         return

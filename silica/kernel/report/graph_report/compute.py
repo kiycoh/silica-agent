@@ -38,8 +38,9 @@ logger = logging.getLogger(__name__)
 
 # Epoch-keyed memo for compute_report — see the comment inside it. The epoch
 # lives INSIDE the key: freshness checked against a separate global raced under
-# the MCP server's one-thread-per-request dispatch (a slow analytics pass could
-# store its stale report after a newer epoch had cleared the memo). A key that
+# one-thread-per-request dispatch, seen on the MCP server and the GUI's way of
+# serving too (a slow analytics pass could store its stale report after a
+# newer epoch had cleared the memo). A key that
 # names its own epoch cannot be served stale; entries from older epochs are
 # swept on the next miss so they cannot pile up.
 _report_memo: dict[tuple, VaultReport] = {}

@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 ENABLED = True
 # The user's requests of the running turn, oldest first, set by run_agent at
 # entry. Tools run in the loop's thread, so they see it; a tool called outside
-# run_agent (the MCP server) sees () and no decision is asked.
+# run_agent (a direct TOOLS call, a test) sees () and no decision is asked.
 REQUESTS: ContextVar[tuple[str, ...]] = ContextVar("read_scope_requests", default=())
 # A wrong "part" drops content the user asked about, a wrong "whole" costs
 # only tokens, so "part" needs a margin and an unsure verdict reads whole.

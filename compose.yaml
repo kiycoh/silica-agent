@@ -1,12 +1,5 @@
 # `docker compose run --rm cli` — the REPL, curating whatever is mounted at /vault
 # `docker compose up gui`       — the web UI on http://localhost:8765
-#
-# There is no mcp service here: an MCP server is spawned by its client over
-# stdio, not by a supervisor. Point the client at
-#   docker run -i --rm --network host \
-#     -v silica-state:/data -v /path/to/vault:/vault silica:local mcp
-# `-i` without `-t`: stdout is the protocol channel (silica/ui/mcp.py:17) and a
-# tty would echo into it.
 
 x-common: &common
   image: silica:local

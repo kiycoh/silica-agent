@@ -20,7 +20,7 @@ sits at its most recent claim, which is the reading a recency-sorted
 chronology wants.
 
 Pure and LLM-free. The walk (rglob + frontmatter parse) runs once per
-file-state epoch: `_all_rows` memoizes on `vault_epoch`, so repeated MCP
+file-state epoch: `_all_rows` memoizes on `vault_epoch`, so repeated
 queries between vault changes cost one stat walk, not a re-parse.
 """
 from __future__ import annotations
@@ -41,7 +41,7 @@ def _all_rows(vault: Path) -> list[tuple[str, str, str, str]]:
     unfiltered.
 
     Memoized on the vault's file-state epoch: the walk YAML-parses every
-    note, and the MCP tool re-runs it per query.
+    note, and the tool re-runs it per query.
     """
     from silica.kernel.recall.paths import ignore_matcher, vault_epoch
 

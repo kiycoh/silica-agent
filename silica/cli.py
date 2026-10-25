@@ -493,7 +493,7 @@ def _attach_file_log() -> None:
     entirely (audit 2026-09-06). Third-party loggers stay at WARNING in the
     file: root at DEBUG would otherwise let PIL/urllib3 flood it.
 
-    ponytail: one file shared by every silica process (REPL, GUI, MCP) in
+    ponytail: one file shared by every silica process (REPL, GUI) in
     append mode; a rotation by one process leaves the others writing to the
     renamed file until they rotate themselves. Per-pid files if that ever
     loses a line that mattered.
@@ -511,9 +511,8 @@ def _attach_file_log() -> None:
     root = logging.getLogger()
     if any(isinstance(h, RotatingFileHandler) for h in root.handlers):
         return
-    # Handlers without a level of their own showed what root allowed (the MCP
-    # wiring is a bare basicConfig): pin that before root opens up, or the
-    # terminal starts printing DEBUG.
+    # Handlers without a level of their own showed what root allowed: pin that
+    # before root opens up, or the terminal starts printing DEBUG.
     shown = root.level or logging.WARNING
     for h in root.handlers:
         if h.level == logging.NOTSET:
@@ -662,9 +661,6 @@ def _activate_repo_mode() -> None:
     in a .env file is ignored by config.load_user_env. Where cwd is not a vault
     ($HOME), the export is the fallback, then a stable ~/.silica/vault.
 
-    Do NOT pin an MCP server this way: a stdio client (Claude Code) spawns the
-    server with cwd set to the project it opened, so cwd is already the answer,
-    and a pin in the server's env silently serves one vault to every project.
     Cross-project personal memory is the separate SILICA_MEMORY_VAULT axis
     (`kernel/recall/memory_lane.py`), which self-disables inside its own vault.
     """
@@ -1058,7 +1054,7 @@ def _epistemic_filter(results: list[dict], min_trust: str, life: str) -> tuple[l
 def _dc_verify(args: list[str], **_) -> bool:
     """/verify <note> [--clear] — a person vouches for a note (OKF §5.2), bound
     to the body as it is now; --clear withdraws every human entry. The only
-    writer of a `human:` attestation: the MCP tools refuse the key (spec M4)."""
+    writer of a `human:` attestation: the write tools refuse the key (spec M4)."""
     import datetime
     import getpass
 
@@ -4527,7 +4523,7 @@ def _model_configured() -> bool:
 def _doctor_live_probe() -> bool:
     """`silica doctor --live`: one tiny real completion so a green report proves
     the model actually answers. The probe itself lives in onboarding.checks
-    (live_probe) so `silica_doctor(live=True)` over MCP is the same check —
+    (live_probe) so the `silica_doctor(live=True)` tool is the same check —
     this wrapper only renders it. Skipped-without-a-model stays True, as before:
     an unconfigured model is init's problem, not a failing endpoint."""
     from silica.onboarding.checks import live_probe
@@ -4605,12 +4601,7 @@ Usage:
   silica --gui [--port N]    serve the web GUI (default http://localhost:8765)
   silica doctor [--live]     check the environment (--json for machine output)
   silica init [--advanced]   first-run wizard
-  silica setup <client>      register the MCP server (claude, codex, opencode, dsh)
   silica connect             bridge to the Obsidian desktop app
-  silica mcp [--extended|--all] [--vault DIR]
-                             serve a vault over stdio MCP (default: the
-                             folder it starts in; --vault pins another one)
-  silica hook <event>        harness hook producer (SessionStart); stdin = payload
   silica import <path>       import external material into the vault
   silica update [--check]    self-update
   silica --version           print the version and exit
@@ -4626,7 +4617,7 @@ inside the REPL for the slash-command reference."""
 
 
 def _dispatch_subcommand(args: list[str]) -> int | None:
-    """Handle `silica doctor` / `init` / `setup` / `connect` / `mcp` / `update`.
+    """Handle `silica doctor` / `init` / `connect` / `import` / `update`.
 
     Returns an exit code, or None when no subcommand matched (→ REPL).
     Lazy imports keep REPL startup unchanged. Module attributes (not `from`
@@ -4648,26 +4639,8 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
     if args[:1] == ["update"]:
         import silica.update as update_mod
         return update_mod.update(check_only="--check" in args[1:])
-    if args[:1] == ["capture"]:
-        # Claude Code hook producer. No vault bootstrap: the vault comes from
-        # the hook's own cwd (walk-up), not from this process's config, and
-        # the whole point is to stay silent and fast inside someone else's
-        # session. Fail-open covers the import too, not just the body.
-        try:
-            import silica.capture as capture_mod
-            return capture_mod.run_capture(sys.stdin.read())
-        except Exception:
-            return 0
-    if args[:1] == ["hook"]:
-        # Same contract as capture above: the vault comes from the payload's
-        # cwd, and fail-open covers the import too.
-        try:
-            import silica.hook as hook_mod
-            return hook_mod.run_hook(args[1:], sys.stdin.read())
-        except Exception:
-            return 0
     if args[:1] == ["import"]:
-        # Dispatch runs before main()'s setup (like connect/mcp below) — the
+        # Dispatch runs before main()'s setup (like connect below) — the
         # vault has to be selected here or CONFIG.vault_path is whatever the
         # config file last held, and the envelopes land in another vault's
         # inbox (inbox_dir_for keys by vault digest) where /nucleate never
@@ -4729,9 +4702,6 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
     if args[:1] == ["init"]:
         import silica.onboarding.wizard as wizard_mod
         return wizard_mod.run_wizard(advanced="--advanced" in args[1:])
-    if args[:1] == ["setup"]:
-        import silica.onboarding.setup_client as setup_mod
-        return setup_mod.run_setup(args[1:])
     if args[:1] == ["connect"]:
         # Dispatch runs before main()'s setup (unlike --gui) — do it here.
         _activate_repo_mode()
@@ -4743,39 +4713,6 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         _ensure_servers()
         import silica.ui.connect as connect_mod
         return connect_mod.run_connect()
-    if args[:1] == ["mcp"]:
-        # Same bootstrap as connect, minus the REPL context meter (no agent
-        # loop behind MCP tools). stdio transport: stdout is the protocol
-        # channel, so plain stderr logging instead of _setup_logging's console,
-        # and the bootstrap banner is diverted too (rich resolves sys.stdout per
-        # write, so redirecting it here is enough). The redirect must NOT wrap
-        # run_mcp: that is where stdout has to be the real protocol stream.
-        import contextlib
-        import silica.ui.mcp as mcp_mod
-        opts = mcp_mod.parse_cli_args(args[1:])
-        if opts["error"]:
-            print(opts["error"], file=sys.stderr)
-            return 2
-        with contextlib.redirect_stdout(sys.stderr):
-            if opts["vault"]:
-                # Explicit per-server pin: one server entry per vault in the
-                # client config is multi-vault reach. switch_vault is the whole
-                # sequence (driver, caches, manifest — not an assignment) and
-                # already applies the manifest, so the cwd branch below is not
-                # repeated here.
-                sw = switch_vault(opts["vault"])
-                if sw.error:
-                    print(f"--vault {opts['vault']}: {sw.error}", file=sys.stderr)
-                    return 2
-                print(f"  Vault: {sw.vault}")
-            else:
-                _activate_repo_mode()
-                from silica.kernel.vault_manifest import apply_manifest_to_config
-                apply_manifest_to_config()
-            _ensure_servers()
-        logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
-        _attach_file_log()
-        return mcp_mod.run_mcp(all_tools=opts["all_tools"], extended=opts["extended"])
     return None
 
 

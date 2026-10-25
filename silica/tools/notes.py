@@ -166,9 +166,9 @@ def silica_patch_note(
             checkpoint_ok = True
         except Exception as e:
             # A patch that succeeded must not be reported as failed just because
-            # the undo bookkeeping hiccuped; undo is best-effort. But the MCP
-            # surface advertises these writes as non-destructive on the strength
-            # of /undo, so a missing restore point has to be visible, not silent.
+            # the undo bookkeeping hiccuped; undo is best-effort. But these
+            # writes are offered as non-destructive on the strength of /undo,
+            # so a missing restore point has to be visible, not silent.
             logger.warning("checkpoint push failed for '%s': %s — /undo has no "
                            "restore point for this write", path, e)
 
@@ -204,7 +204,6 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
     path = nc.ref.path or name
     prior_content = nc.content
     # `user` only when no agent identity exists at all: a person at the REPL.
-    # An MCP client always has one (the server sets it from the handshake).
     who = agent_id() or "user"
     today = datetime.date.today().isoformat()
 

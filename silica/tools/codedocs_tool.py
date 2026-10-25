@@ -48,8 +48,8 @@ def silica_document(path: Annotated[str, Field(description='Repo-relative path t
 
 def _stamp_code_pack_use() -> None:
     """Kill-gate evidence for codepack (kill by 2026-10-28 if unused): one
-    timestamp line per invocation, whatever the surface reached it (MCP or a
-    summoned chat turn), so the kill-date check reads usage data instead of
+    timestamp line per invocation (a summoned chat turn is the only surface
+    left since the MCP server went, ADR-0130), so the kill-date check reads usage data instead of
     chat silence. Grep ~/.silica/index/*/codepack_usage.log at the date.
     Best-effort: never fails the tool."""
     try:

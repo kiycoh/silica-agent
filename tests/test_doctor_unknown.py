@@ -216,7 +216,7 @@ class TestTheExitCode:
 
 class TestTheDeadRerankerHint:
     def test_names_the_autostart_variable(self, monkeypatch):
-        """`silica mcp` already runs ensure_local_servers; it only starts the
+        """`silica` already runs ensure_local_servers at start; it only starts the
         reranker when SILICA_RERANK_SERVE_CMD names a command. "start the
         reranker" sent the operator to a terminal for something the
         harness would do itself if told how (2026-09-03)."""

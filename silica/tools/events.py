@@ -4,7 +4,7 @@
 """User-event tools: create, update, and the 4-axis agenda.
 
 Events are vault notes identified by `event_start` frontmatter (ADR-0024);
-these tools are the chat/MCP surface over the pure kernel lane
+these tools are the chat surface over the pure kernel lane
 `silica/kernel/calendar/`. Writes follow the sibling single-note tools
 (notes.py): strict kernel validation first, then DRIVER under path_lease
 with the system floor stamped and a checkpoint pushed for /undo.

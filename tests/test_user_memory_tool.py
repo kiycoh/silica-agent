@@ -1,7 +1,7 @@
 """silica_remember's gates (ADR-0076 §5): enabled, a chat turn, untainted, in
 that order, structural and not in the prompt. None of them asks whether the
 user asked: the model saves on its own (amendment 2026-10-23). Plus where the
-tool is offered: in the chat core, never over `silica mcp`.
+tool is offered: in the chat core.
 """
 from __future__ import annotations
 
@@ -278,10 +278,3 @@ def test_the_tool_is_in_the_chat_core_before_the_loader():
     assert CHAT_CORE[-1] == "silica_load_tools"
     assert "silica_remember" in chat_tools()
 
-
-def test_the_tool_is_never_served_over_mcp():
-    """Another agent's host has its own memory (ADR-0076, UC5 not decided)."""
-    from silica.ui.mcp import MCP_EXCLUDED, exposed_tools
-
-    assert "silica_remember" in MCP_EXCLUDED
-    assert "silica_remember" not in exposed_tools(all_tools=True)

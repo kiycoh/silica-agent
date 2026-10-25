@@ -20,8 +20,7 @@ What stays is a property of the turn, not a line in the prompt:
   filtering on the user message unsound for tool-call memories and
   per-session no-untrusted-write sound. With unasked saves a page no longer
   needs the user to say "remember", so this gate is the whole defence.
-- a chat turn the user started: a batch, a worker loop or the MCP server
-  writes nothing.
+- a chat turn the user started: a batch or a worker loop writes nothing.
 
 `/remember <text>` and the Settings editor never come through here: those are
 the user's own keystrokes (silica/kernel/user_memory.py).
@@ -93,7 +92,7 @@ TAINT_KEY = "silica_taint"
 
 
 # Set by run_agent at entry, like read_scope.REQUESTS: tools run on the loop's
-# thread and see it; a call from anywhere else (the MCP server, a test) sees
+# thread and see it; a call from anywhere else (a batch, a test) sees
 # None and is refused, because nothing shows that a user asked.
 _TURN: ContextVar[_Turn | None] = ContextVar("user_memory_turn", default=None)
 

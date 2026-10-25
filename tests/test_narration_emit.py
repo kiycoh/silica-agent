@@ -331,56 +331,6 @@ def test_a_transient_retry_narrates_on_the_open_call_span(narrator, monkeypatch)
     assert calls[2]["payload"]["retries"] == 1
 
 
-def test_mcp_tool_call_is_a_tool_span_that_parents_its_inner_beats(narrator):
-    from silica.ui.mcp import run_tool_narrated
-
-    class T:
-        name = "silica_recall"
-
-        def run(self, **kw):
-            narr.NARRATOR.narrate("call", "done", "inner")   # what call_llm would write
-            return '{"hits": 1}'
-
-    assert run_tool_narrated(T(), {"query": "x"}) == '{"hits": 1}'
-    tools = [b for b in _beats(narrator) if b["kind"] == "tool"]
-    assert [b["status"] for b in tools] == ["running", "done"]
-    assert tools[0]["payload"] == {"name": "silica_recall", "args": {"query": "x"}}
-    assert tools[1]["payload"]["result"] == '{"hits": 1}'
-    inner = [b for b in _beats(narrator) if b["summary"] == "inner"][0]
-    assert inner["parent"] == tools[0]["id"]
-
-
-def test_mcp_tool_exception_closes_the_span_failed(narrator):
-    from silica.ui.mcp import run_tool_narrated
-
-    class T:
-        name = "silica_recall"
-
-        def run(self, **kw):
-            raise RuntimeError("registry broke")
-
-    with pytest.raises(RuntimeError):
-        run_tool_narrated(T(), {})
-    last = [b for b in _beats(narrator) if b["kind"] == "tool"][-1]
-    assert last["status"] == "failed" and "registry broke" in last["payload"]["error"]
-
-
-def test_run_mcp_opens_a_narration_session(_fresh_narrator, monkeypatch):
-    pytest.importorskip("mcp")
-    import signal
-    import anyio
-    import silica.ui.mcp as mcp
-
-    monkeypatch.setattr("silica.config.CONFIG.vault_path", "/v/demo", raising=False)
-    monkeypatch.setattr(anyio, "run", lambda fn: None)
-    monkeypatch.setattr(signal, "signal", lambda *a: None)
-    monkeypatch.setattr(mcp, "make_server", lambda a, e: object())
-    assert mcp.run_mcp() == 0
-    beats = _beats(_fresh_narrator)
-    assert beats and beats[0]["kind"] == "session"
-    assert beats[0]["payload"]["driver"] == "mcp"
-
-
 def test_dedup_judge_verdict_is_a_beat_with_the_raw_reply(narrator, monkeypatch):
     from types import SimpleNamespace
     from silica.capabilities import dedup

@@ -1,4 +1,5 @@
-"""Capture lane: the `silica capture` hook producer and its WAL."""
+"""Capture lane: the WAL, what the drain selects from it, and Silica's own
+sessions as its producer. (The Claude Code hook producer left in ADR-0130.)"""
 from __future__ import annotations
 
 import json
@@ -17,117 +18,19 @@ def wal(tmp_path, monkeypatch):
     return vault
 
 
-def _hook(vault, transcript, *, event="SessionEnd", session_id="abc", cwd=None):
-    return json.dumps({
-        "hook_event_name": event,
-        "session_id": session_id,
-        "transcript_path": str(transcript),
-        "cwd": str(cwd or vault),
-    })
-
-
-def _transcript(tmp_path, name="t.jsonl", size=2048):
-    p = tmp_path / name
-    p.write_text("x" * size, encoding="utf-8")
-    return p
-
-
-class TestCapture:
-    def test_session_end_writes_envelope(self, tmp_path, wal):
-        from silica.capture import run_capture
-        from silica.kernel.recall.paths import inbox_dir_for
-
-        t = _transcript(tmp_path)
-        assert run_capture(_hook(wal, t)) == 0
-
-        env = inbox_dir_for(str(wal)) / "claude-code-abc-end.json"
-        data = json.loads(env.read_text(encoding="utf-8"))
-        assert data["version"] == 1
-        assert data["source"] == "claude-code"
-        assert data["event"] == "session_end"
-        assert data["format"] == "claude-code-jsonl"
-        assert data["session_id"] == "abc"
-        assert data["cwd"] == str(wal)
-        assert data["payload"] == t.read_text(encoding="utf-8")
-        assert data["captured_at"]
-
-    def test_vault_found_by_walking_up_from_subdir(self, tmp_path, wal):
-        """Claude Code launched from a subdirectory still captures to the repo."""
-        from silica.capture import run_capture
-        from silica.kernel.recall.paths import inbox_dir_for
-
-        sub = wal / "silica" / "kernel"
-        sub.mkdir(parents=True)
-        t = _transcript(tmp_path)
-        assert run_capture(_hook(wal, t, cwd=sub)) == 0
-
-        assert (inbox_dir_for(str(wal)) / "claude-code-abc-end.json").is_file()
-
-    @pytest.mark.parametrize("case", ["garbage", "missing_transcript", "no_vault"])
-    def test_fail_open_leaves_the_wal_untouched(self, tmp_path, wal, case):
-        """A capture bug must never break or noise up a session."""
-        from silica.capture import run_capture
-        from silica.kernel.recall.paths import inbox_dir_for
-
-        if case == "garbage":
-            stdin = "not json at all {"
-        elif case == "missing_transcript":
-            stdin = _hook(wal, tmp_path / "gone.jsonl")
-        else:
-            outside = tmp_path / "outside"
-            outside.mkdir()
-            stdin = _hook(outside, _transcript(tmp_path), cwd=outside)
-
-        assert run_capture(stdin) == 0
-        assert not inbox_dir_for(str(wal)).exists()
-
-    def test_trivial_transcript_is_skipped(self, tmp_path, wal):
-        from silica.capture import run_capture
-        from silica.kernel.recall.paths import inbox_dir_for
-
-        t = _transcript(tmp_path, size=10)
-        assert run_capture(_hook(wal, t)) == 0
-        assert not inbox_dir_for(str(wal)).exists()
-
-    def test_envelope_is_private_and_leaves_no_temp_file(self, tmp_path, wal):
+class TestEnvelope:
+    def test_envelope_is_private_and_leaves_no_temp_file(self, wal):
         """Private conversation data: owner-only, and no half-written residue."""
-        from silica.capture import run_capture
+        from silica.capture import write_envelope
         from silica.kernel.recall.paths import inbox_dir_for
 
-        assert run_capture(_hook(wal, _transcript(tmp_path))) == 0
+        write_envelope(str(wal), "claude-code-abc-end.json", _envelope())
 
         d = inbox_dir_for(str(wal))
         env = d / "claude-code-abc-end.json"
         assert env.stat().st_mode & 0o777 == 0o600
         assert d.stat().st_mode & 0o777 == 0o700
         assert list(d.glob(".tmp-*")) == []
-
-    def test_precompact_gets_its_own_timestamped_name(self, tmp_path, wal):
-        """Several compactions per session: each keeps its own envelope."""
-        from silica.capture import run_capture
-        from silica.kernel.recall.paths import inbox_dir_for
-
-        assert run_capture(_hook(wal, _transcript(tmp_path), event="PreCompact")) == 0
-
-        found = sorted(p.name for p in inbox_dir_for(str(wal)).glob("*.json"))
-        assert len(found) == 1
-        assert found[0].startswith("claude-code-abc-precompact-")
-        data = json.loads((inbox_dir_for(str(wal)) / found[0]).read_text(encoding="utf-8"))
-        assert data["event"] == "pre_compact"
-
-    def test_same_session_end_captured_twice_stays_one_envelope(self, tmp_path, wal):
-        """Deterministic names give idempotency for free."""
-        from silica.capture import run_capture
-        from silica.kernel.recall.paths import inbox_dir_for
-
-        t = _transcript(tmp_path)
-        run_capture(_hook(wal, t))
-        t.write_text("y" * 3000, encoding="utf-8")
-        run_capture(_hook(wal, t))
-
-        envs = list(inbox_dir_for(str(wal)).glob("*.json"))
-        assert len(envs) == 1
-        assert json.loads(envs[0].read_text(encoding="utf-8"))["payload"] == "y" * 3000
 
 
 def _envelope(session_id="s1", event="session_end", payload="x",
@@ -339,27 +242,3 @@ class TestHousekeeping:
         assert old.stat().st_size == 0
         assert fresh.stat().st_size > 0
         assert (inbox_dir_for(v) / "processed" / "chatgpt-old.json").is_file()
-
-
-class TestCaptureSubcommand:
-    def test_capture_reads_the_hook_json_from_stdin(self, tmp_path, wal, monkeypatch):
-        import io
-        import sys
-
-        from silica.cli import _dispatch_subcommand
-        from silica.kernel.recall.paths import inbox_dir_for
-
-        monkeypatch.setattr(sys, "stdin", io.StringIO(_hook(wal, _transcript(tmp_path))))
-        assert _dispatch_subcommand(["capture"]) == 0
-        assert (inbox_dir_for(str(wal)) / "claude-code-abc-end.json").is_file()
-
-    def test_capture_exits_zero_even_when_the_producer_explodes(self, monkeypatch):
-        """The hook's exit code is the session's problem, so it is always 0."""
-        import silica.capture as capture_mod
-        from silica.cli import _dispatch_subcommand
-
-        def boom(_):
-            raise RuntimeError("producer bug")
-
-        monkeypatch.setattr(capture_mod, "run_capture", boom)
-        assert _dispatch_subcommand(["capture"]) == 0

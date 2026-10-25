@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Per-path advisory lease (shared across the Injector, the sub-agent pool, and
-# any *other process* pointed at the same vault — e.g. two MCP clients)
+# any *other process* pointed at the same vault — e.g. the GUI and a CLI run)
 # ---------------------------------------------------------------------------
 
 _LEASES: dict[str, threading.Lock] = {}
@@ -80,7 +80,7 @@ def path_lease(path: str) -> Iterator[None]:
     Two layers: an in-process ``threading.Lock`` (fast path, and it makes the
     OS lock contention-free between threads of one process) plus an advisory
     ``flock`` on a vault-scoped lock file so separate processes writing the
-    same vault (two MCP clients, MCP + a running pipeline) cannot interleave.
+    same vault (the GUI and the REPL, either + a running pipeline) cannot interleave.
 
     Advisory: only protects writers that opt in by acquiring the same lease.
     Lock-file bookkeeping is best-effort — if it fails we log and fall back to

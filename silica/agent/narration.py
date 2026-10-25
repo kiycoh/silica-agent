@@ -486,9 +486,10 @@ def list_sessions(vault: str) -> list[dict]:
     return out
 
 
-# Drivers whose session is a conversation. An "mcp" session narrates tool
-# calls for another agent and has no chat to resume, so /sessions and the GUI
-# list leave it out; it stays readable by sid and counted by store_stats.
+# Drivers whose session is a conversation. An "mcp" session (the stdio
+# server's, until it left in ADR-0130) narrated tool calls for another agent and
+# has no chat to resume, so /sessions and the GUI list leave the ones on disk
+# out; they stay readable by sid and counted by store_stats.
 _CHAT_DRIVERS = ("tui", "gui")
 
 

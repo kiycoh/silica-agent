@@ -197,7 +197,7 @@ def sweep(*, force: bool = False, uncapped: bool = False) -> SweepStats:
 def _mark_namespace() -> None:
     """Write `vault.json` ({"path": ...}) into the active vault's index namespace
     once. The namespace key is a one-way digest, so without this a vault served
-    only from the REPL or `silica mcp --vault` (never opened in Obsidian) could
+    only from the REPL (never opened in Obsidian) could
     not be listed by `silica_vaults`; the sweep is the one call every recall
     makes, gate or no gate, so it is where "this vault was served here" is
     cheapest to record (one stat per call). Ahead of the config gate on purpose:

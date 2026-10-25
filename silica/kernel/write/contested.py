@@ -296,9 +296,7 @@ LIFECYCLES = ("active", "review", "contested", "superseded")
 
 
 # `silica_flag_note` writes "flagged: <reason> (by <who>, <date>)" with `who` =
-# SILICA_AGENT_ID or "user"; a judge writes the source ref instead. ponytail:
-# an MCP agent running without SILICA_AGENT_ID signs as "user" too; the
-# upgrade is the MCP entry point setting its own id, not a smarter regex.
+# SILICA_AGENT_ID or "user"; a judge writes the source ref instead.
 _FLAG_BY_RE = re.compile(r"^flagged:.*\(by ([^,()]+), \d{4}-\d{2}-\d{2}\)\s*$")
 
 

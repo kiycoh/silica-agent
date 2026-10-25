@@ -109,35 +109,3 @@ def test_review_docstring_names_the_deferred_store():
 
     assert "deferred" in _dc_review.__doc__.lower()
     assert "learner" not in _dc_review.__doc__.lower()
-
-
-# --------------------------------------------------------------- the hook
-
-def test_session_start_hook_counts_due_notes_only(tmp_path, monkeypatch):
-    """D18: one line, a count and a minute estimate, never a path."""
-    import json
-    import os
-    import time
-
-    from silica import hook as hook_mod
-    from silica.kernel.report import quiz
-
-    vault = tmp_path / "v"
-    vault.mkdir()
-    (vault / "vault.yaml").write_text("name: v\n")
-    (vault / ".silica").mkdir()
-    old = time.time() - 400 * 86400
-    for i in range(3):
-        p = vault / f"n{i}.md"
-        p.write_text("---\ndate: 2024-01-01\n---\n# n\n\nx\n", encoding="utf-8")
-        os.utime(p, (old, old))
-    log = tmp_path / "quiz.jsonl"
-    monkeypatch.setattr(quiz, "log_path", lambda: log)
-    from silica.config import CONFIG
-    monkeypatch.setattr(CONFIG, "vault_path", str(vault))
-    out = hook_mod.session_start(json.dumps({"cwd": str(vault)}))
-    assert "due for review" not in out            # nothing measured yet
-    quiz.record([{"path": "n0.md", "correct": False, "rating": 1}, {"path": "n1.md", "correct": False, "rating": 1}])
-    out = hook_mod.session_start(json.dumps({"cwd": str(vault)}))
-    assert "2 notes due for review · ~1 min · /learn" in out
-    assert "n0.md" not in out

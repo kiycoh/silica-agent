@@ -42,7 +42,7 @@ silica init       # pick a model: a hosted API key, or a local LM Studio / Ollam
 silica --gui      # opens http://localhost:8765; plain `silica` opens the terminal instead
 ```
 
-Then type `/report`. It is read-only: it writes one file, `GRAPH_REPORT.md`, and shows the hubs, bridges and orphans already in your vault. Search, the graph and the MCP server work with no model at all.
+Then type `/report`. It is read-only: it writes one file, `GRAPH_REPORT.md`, and shows the hubs, bridges and orphans already in your vault. Search and the graph work with no model at all.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/metrics.png" alt="The audit in the Examine tab: lattice energy, the areas the vault sorts itself into, and the link distribution" width="820" />
@@ -116,11 +116,8 @@ Small samples, a flash-class judge, 2 of LoCoMo's 10 conversations: not comparab
 | Browser | `silica --gui` |
 | Terminal | `silica` |
 | Obsidian desktop | `silica connect`, with the [obsidian-silica](https://github.com/kiycoh/obsidian-silica) plugin |
-| Claude Code | `claude plugin marketplace add kiycoh/silica-agent` then `claude plugin install silica@silica` |
-| Codex | `codex plugin marketplace add kiycoh/silica-agent` then `codex plugin add silica@silica` |
-| Any MCP client | `silica setup claude`, `codex`, `opencode` or `dsh`; or run `uvx --from "silica-agent[mcp]" silica mcp` |
 
-Over MCP the vault is the folder the client started in, and search, recall and reading need no model or API key.
+Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://github.com/kiycoh/silica-core), the retrieval engine Silica is built on, with no model in the loop.
 
 <details>
 <summary><b>All 62 commands</b></summary>
@@ -224,7 +221,7 @@ git clone https://github.com/kiycoh/silica-agent && cd silica-agent
 SILICA_VAULT_HOST=~/notes docker compose up -d gui   # http://localhost:8765; your OPENROUTER_API_KEY passes through
 ```
 
-**Extras**, combined like `"silica-agent[gui,mcp]"`: `gui` (web GUI), `mcp` (MCP server), `connect` (Obsidian bridge), `rerank` (local cross-encoder, pulls torch), `stt` (local dictation), `all`. Scanned PDFs need OCR through [MinerU](https://github.com/opendatalab/MinerU), installed separately: `pip install 'mineru[pipeline]'`, then `SILICA_PDF_PROVIDER=mineru`.
+**Extras**, combined like `"silica-agent[gui,mcp]"`: `gui` (web GUI), `mcp` (MCP client for `/connect`), `connect` (Obsidian bridge), `rerank` (local cross-encoder, pulls torch), `stt` (local dictation), `all`. Scanned PDFs need OCR through [MinerU](https://github.com/opendatalab/MinerU), installed separately: `pip install 'mineru[pipeline]'`, then `SILICA_PDF_PROVIDER=mineru`.
 
 **Configuration** lives in `~/.silica/.env`, written by `silica init`; every variable and its default is in [`.env.example`](https://github.com/kiycoh/silica-agent/blob/main/.env.example). `silica doctor --live` checks the whole setup with one real request.
 

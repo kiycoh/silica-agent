@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""ADR-0038: detection at session open. The stale lane prunes like every
-other vault walk, the snapshot carries the documented map, and the hook
-reads drift without ever recomputing."""
+"""ADR-0038: the stale lane prunes like every other vault walk, and the
+cached snapshot never resurrects what the walk excludes. (Detection at
+session open left with the harness hook, ADR-0130.)"""
+import json
 import subprocess
 
 from silica.kernel.code import codedocs
@@ -57,109 +58,14 @@ def _fixture(tmp_path):
     return vault, ref0, ref1
 
 
-def test_snapshot_file_carries_the_documented_map(tmp_path):
-    vault, ref0, _ = _fixture(tmp_path)
-    codedocs.snapshot(vault, repo_root=tmp_path)
-    import json
-    raw = json.loads(codedocs._snapshot_path(vault).read_text(encoding="utf-8"))
-    # Every documenting note, stale or not: the fresh one is what a later
-    # diff must be joined against.
-    assert raw["documented"] == {
-        "m.md": {"documents": ["src/m.py"], "code_ref": ref0},
-        "n.md": {"documents": ["src/n.py"], "code_ref": ref0},
-    }
-
-
-def test_drift_joins_the_diff_since_the_snapshot_head_without_recomputing(tmp_path, monkeypatch):
-    vault, _, ref1 = _fixture(tmp_path)
-    codedocs.snapshot(vault, repo_root=tmp_path)
-    (tmp_path / "src" / "n.py").write_text("def g(y):\n    return y\n", encoding="utf-8")
-    (tmp_path / "src" / "other.py").write_text("x = 1\n", encoding="utf-8")
-    ref2 = _commit(tmp_path, "n moves too")
-
-    def boom(*a, **k):
-        raise AssertionError("drift must never pay the walk")
-    monkeypatch.setattr(codedocs, "stale_docs", boom)
-
-    d = codedocs.drift(vault, repo_root=tmp_path)
-    assert d["snap_head"] == ref1 and d["head"] == ref2
-    assert d["changed"] == ["src/n.py"]                 # other.py documents nothing
-    assert d["affected"] == {"n.md": ["src/n.py"]}
-    assert d["stale"] == {"m.md": codedocs.CHANGE_STRUCTURAL}   # as of the snapshot
-
-
-def test_drift_at_the_snapshot_head_has_nothing_new(tmp_path):
-    vault, _, ref1 = _fixture(tmp_path)
-    codedocs.snapshot(vault, repo_root=tmp_path)
-    d = codedocs.drift(vault, repo_root=tmp_path)
-    assert d["snap_head"] == d["head"] == ref1
-    assert d["changed"] == [] and d["affected"] == {}
-    assert d["stale"] == {"m.md": codedocs.CHANGE_STRUCTURAL}
-
-
-def test_drift_without_a_snapshot_is_none(tmp_path):
-    vault, _, _ = _fixture(tmp_path)
-    assert codedocs.drift(vault, repo_root=tmp_path) is None
-
-
-# --- the session-open brief -------------------------------------------------
-
-import json
-
-from silica import hook as hook_mod
-
-
-def _vault_marker(vault):
-    (vault / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")
-
-
-def test_session_start_reports_drift_and_stale_from_the_snapshot(tmp_path, monkeypatch):
-    vault, _, ref1 = _fixture(tmp_path)
-    _vault_marker(vault)
-    codedocs.snapshot(vault, repo_root=tmp_path)
-    (tmp_path / "src" / "n.py").write_text("def g(y):\n    return y\n", encoding="utf-8")
-    _commit(tmp_path, "n moves after the snapshot")
-
-    def boom(*a, **k):
-        raise AssertionError("the hook must never pay the walk")
-    monkeypatch.setattr(codedocs, "stale_docs", boom)
-
-    out = hook_mod.session_start(json.dumps({"cwd": str(vault)}))
-    assert str(vault) in out                      # the existing brief survives
-    assert "n.md" in out and "src/n.py" in out    # drift since the snapshot
-    assert "m.md" in out                          # structural stale at the snapshot
-    assert ref1[:8] in out and "/stale" in out
-
-
-def test_session_start_is_the_plain_brief_without_a_snapshot(tmp_path):
-    vault, _, _ = _fixture(tmp_path)
-    _vault_marker(vault)
-    out = hook_mod.session_start(json.dumps({"cwd": str(vault)}))
-    assert str(vault) in out and "/stale" not in out
-
-
-def test_session_start_is_the_plain_brief_when_nothing_moved(tmp_path):
-    vault, _, _ = _fixture(tmp_path)
-    _vault_marker(vault)
-    (vault / "m.md").unlink()                     # only the fresh note remains
-    codedocs.snapshot(vault, repo_root=tmp_path)
-    out = hook_mod.session_start(json.dumps({"cwd": str(vault)}))
-    assert str(vault) in out and "/stale" not in out
-
-
-def test_drift_ignores_cached_entries_under_hidden_dirs(tmp_path):
+def test_peek_ignores_cached_entries_under_hidden_dirs(tmp_path):
     # A snapshot written before the walk was pruned can still hold residue
-    # under .silica/; the brief must not resurrect it (seen live 2026-09-04).
+    # under .silica/; a read of the cache must not resurrect it (seen live
+    # 2026-09-04).
     vault, _, _ = _fixture(tmp_path)
     codedocs.snapshot(vault, repo_root=tmp_path)
     cache = codedocs._snapshot_path(vault)
     raw = json.loads(cache.read_text(encoding="utf-8"))
-    ghost = dict(raw["docs"][0], note_path=".silica/probe/ghost.md")
-    raw["docs"].append(ghost)
-    raw["documented"][".silica/probe/ghost.md"] = {"documents": ["src/n.py"], "code_ref": "x"}
+    raw["docs"].append(dict(raw["docs"][0], note_path=".silica/probe/ghost.md"))
     cache.write_text(json.dumps(raw), encoding="utf-8")
-    (tmp_path / "src" / "n.py").write_text("def g(y):\n    return y\n", encoding="utf-8")
-    _commit(tmp_path, "n moves")
-    d = codedocs.drift(vault, repo_root=tmp_path)
-    assert d["stale"] == {"m.md": codedocs.CHANGE_STRUCTURAL}
-    assert d["affected"] == {"n.md": ["src/n.py"]}
+    assert codedocs.peek(vault, repo_root=tmp_path) == {"m.md": codedocs.CHANGE_STRUCTURAL}

@@ -68,7 +68,7 @@ class AgentConstraints:
 # direction. Revisit if this grows past ~20 entries.
 _CHAT_EXCLUDED = frozenset({
     "silica_aliases",            # /aliases
-    "silica_code_pack",          # MCP-facing (external rewrite agents); no chat flow
+    "silica_code_pack",          # no chat flow; reached when summoned by name
     "silica_deferred_list",      # deferred-ops bookkeeping, surfaced by the FSM
     "silica_deferred_flush",
     "silica_deferred_retry",

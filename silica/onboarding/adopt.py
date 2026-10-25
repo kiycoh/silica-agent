@@ -22,8 +22,8 @@ and editable instead of re-guessed every run — and reversible from one toggle 
 the settings panel, which writes this same field.
 
 No prompt: the detection picks a default, the caller prints it, and `vault.yaml`
-makes it changeable. A question at adoption time would block the GUI and MCP
-entry points for a decision one line of YAML already expresses.
+makes it changeable. A question at adoption time would block the GUI entry
+point for a decision one line of YAML already expresses.
 """
 from __future__ import annotations
 
@@ -159,8 +159,9 @@ def resolve_cwd_vault(cwd, home=None):
     - anywhere else → cwd itself;
     - $HOME or the filesystem root → None: a vault is a folder of notes, not
       everything you own. The root is not reachable by launching a shell there
-      but a GUI client can spawn a stdio server with cwd ``/``, and indexing
-      the whole disk is never what that meant.
+      but a spawned process can start with cwd ``/`` (a GUI client's stdio
+      server did, before ADR-0130), and indexing the whole disk is never what
+      that meant.
     - a system directory itself (`recall.paths.SYSTEM_DIRS`: /tmp, /usr, the
       temp dir...) → None, same reason; a folder inside one is still a vault.
 

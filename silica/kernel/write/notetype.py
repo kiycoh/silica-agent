@@ -87,27 +87,17 @@ def stamp_type(path: str, content: str) -> str:
 # a note from a pipeline re-running over it; only the former carries authority.
 HUMAN_ACTOR_PREFIX = "human:"
 
-# Who signs an agent write. Set by the MCP server from the client's own name
-# in the initialize handshake, never by the model calling a tool: an identity
-# a caller can assert about itself is not provenance. One value per process
-# because a stdio server serves exactly one client for its whole life.
-_MCP_CLIENT = ""
-
-
-def set_mcp_client(identity: str) -> None:
-    global _MCP_CLIENT
-    _MCP_CLIENT = identity.strip()
-
-
 def agent_id() -> str:
     """The agent behind this write, or "" when a person is at the REPL.
 
-    SILICA_AGENT_ID first: a fleet operator naming its agents outranks what a
-    client calls itself. Then the handshake identity. Empty means no agent,
-    which is why callers that need a name fall back to `user` themselves
-    rather than this function guessing one.
+    SILICA_AGENT_ID, set by whoever launched the process, never by the model
+    calling a tool: an identity a caller can assert about itself is not
+    provenance. The MCP server's handshake identity was the second source
+    until the server left (ADR-0130). Empty means no agent, which is why
+    callers that need a name fall back to `user` themselves rather than this
+    function guessing one.
     """
-    return os.environ.get("SILICA_AGENT_ID", "").strip() or _MCP_CLIENT
+    return os.environ.get("SILICA_AGENT_ID", "").strip()
 
 
 def verified_entries(data: dict | None) -> list[dict]:
@@ -183,7 +173,7 @@ def _replace_verified(content: str, entries: list[dict]) -> str:
 def stamp_verified(content: str, by: str, at: str) -> str:
     """Append a person's §5.2 entry, bound to the body it vouches for
     (`body_sha256`, spec M4). Only the `/verify` command calls this, and the
-    actor prefix is enforced here as well: the MCP write tools refuse the key
+    actor prefix is enforced here as well: the write tools refuse the key
     outright, so no model-controlled path can mint a human attestation."""
     if not by.strip().lower().startswith(HUMAN_ACTOR_PREFIX):
         raise ValueError(f"an attestation must name a person ({HUMAN_ACTOR_PREFIX}…), got {by!r}")
