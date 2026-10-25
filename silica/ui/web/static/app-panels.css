@@ -68,6 +68,47 @@
   box-shadow: var(--glass-edge);
 }
 
+/* Folded (syncSideFold, under 760px of view): the column is one row, the find
+   and Key, at the end of the tab row, and the picture keeps its width under
+   it. Key open, scope and compare come back under the row as they stood, the
+   frame's key under them (silica-host-side `key`). */
+#view-graph.side-folded #graph-side {
+  flex-flow: row wrap;
+}
+
+/* Static, so the results drop from the column (positioned) and keep its 216px,
+   not the find's 150. */
+#view-graph.side-folded #node-search-wrap {
+  position: static;
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+}
+
+#view-graph.side-folded #graph-picks {
+  flex: 1 0 100%;
+}
+
+#view-graph.side-folded:not(.key-open) #graph-picks {
+  display: none;
+}
+
+#graph-key {
+  flex: none;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  color: var(--frost);
+  font-family: var(--sans);
+  font-size: var(--fs-ctl);
+}
+
+#graph-key[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+
 #graph-top,
 #surface-line {
   display: flex;

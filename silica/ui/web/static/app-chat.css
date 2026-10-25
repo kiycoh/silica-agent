@@ -2615,6 +2615,80 @@
   align-self: center;
 }
 
+/* The note open beside the chat (ADR-0097, amendment 2026-10-25): the workspace chip's
+   shape, since both say what the next message reads. It gives way before the
+   mic does, its title cut rather than the toolbar wrapped. Scoped to the row:
+   app-metrics.css styles another `.chip` later in the cascade. */
+.note-chip-row {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-self: center;
+}
+
+.note-chip-row .note-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  max-width: 22rem;
+  margin: 0;
+  padding: 0.25rem 0.3rem 0.25rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  background: var(--slate-2);
+  color: var(--accent);
+}
+
+.note-chip-row .chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--frost);
+}
+
+.note-chip-row .chip-x {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+}
+
+.note-chip-row .chip-x:hover {
+  color: var(--frost);
+  background: var(--sel-hover);
+}
+
+.note-chip-add {
+  min-width: 0;
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.25rem 0.6rem;
+  border: 1px dashed var(--line-2);
+  border-radius: 999px;
+  background: none;
+  color: var(--ash-dim);
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.note-chip-add:hover {
+  color: var(--frost);
+  border-color: var(--ash-dim);
+}
+
+/* The dock is one row, 500px beside an open note: at 12rem the chip left the
+   field 140px (seen 2026-10-25). The drawer beside it shows the whole title. */
+#dock .note-chip-row :is(.note-chip, .note-chip-add) {
+  max-width: 8.5rem;
+}
+
 #composer .mic {
   margin-left: auto;
 }
@@ -2678,7 +2752,7 @@
 /* --- the files a question carried (ADR-0121 point 4) ----------------------- */
 /* Under the words, on the question's own measure: a chip per file, its name
    opening the note, and "add to vault" until the Inbox has it (point 5). */
-.msg.user>.msg-files {
+.msg.user>:is(.msg-files, .msg-note) {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;

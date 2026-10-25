@@ -265,6 +265,11 @@
                toolbar since ADR-0117; closing it widens the next turns to the
                whole vault. -->
           <div id="ws-chip-row" hidden></div>
+          <!-- The note open beside the chat, which every message reads while
+               it is open: "this article" names nothing a link could resolve
+               (ADR-0097, amendment 2026-10-25). Drawn by renderNoteChip, here and in
+               the dock. -->
+          <div id="note-chip" class="note-chip-row" hidden></div>
           <!-- The field and a layer exactly its size behind it. The mirror draws
                background bands and the ghost completion; the textarea keeps its
                own opaque glyphs, caret and selection on top, so nothing here can
@@ -333,6 +338,11 @@
           <input id="node-search" type="text" placeholder="find a note…" aria-label="find a note" autocomplete="off" />
           <div id="node-results" hidden></div>
         </div>
+        <!-- Under 760px of view (a note open beside the graph) the column
+             folds to the find and this button, which opens scope, compare and
+             the frame's key together: open, the three covered 216 of the
+             view's 560px at 1440 (measured 2026-10-25). -->
+        <button type="button" id="graph-key" class="ghost" hidden aria-expanded="false" aria-controls="graph-picks">Key</button>
         <div id="graph-picks" hidden></div>
       </div>
 
@@ -550,7 +560,7 @@
            diff is listed only when this session changed the note: with a
            write card, it is the one way to it. -->
       <div id="note-menu" role="menu" aria-label="this note" hidden>
-        <button type="button" role="menuitem" id="note-chat">chat</button>
+        <button type="button" role="menuitem" id="note-chat">ask about it</button>
         <button type="button" role="menuitem" id="note-test">test me on this…</button>
         <button type="button" role="menuitem" id="note-teach">explain it in my words</button>
         <button type="button" role="menuitem" id="note-map">the map<span class="arw" aria-hidden="true">&#8594;</span></button>
@@ -612,6 +622,7 @@
              line above, so the mark here never has to -->
         <svg class="cp-presence" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path class="s0" d="M16 160 L96 160 L96 240 L16 240 Z"/><path class="s1" d="M16 112 L144 112 L144 240 L112 240 L112 144 L16 144 Z"/><path class="s2" d="M16 64 L192 64 L192 240 L160 240 L160 96 L16 96 Z"/><path class="s3" d="M16 16 L240 16 L240 240 L208 240 L208 48 L16 48 Z"/></svg>
         <textarea id="dock-input" rows="1" aria-label="ask the vault from here" placeholder="ask the vault from here…  (⏎ send, ⇧⏎ newline)"></textarea>
+        <div id="dock-note-chip" class="note-chip-row" hidden></div>
         <button type="button" class="mic" data-for="dock-input" title="dictate into the message" aria-label="dictate into the message">
           <svg aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
         </button>

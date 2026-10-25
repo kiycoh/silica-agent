@@ -1445,6 +1445,12 @@ function parseHash() {
            note: params.get("note") || "" };
 }
 
+// The ?note= the page was loaded with, until the tree can open it. The first
+// showTab rewrites the hash long before the tree has loaded, and until
+// 2026-10-25 that rewrite dropped the note: a reload, or a pasted link, opened
+// the view without the note it named. syncUrl keeps it while it waits.
+let pendingHashNote = parseHash().note;
+
 function syncUrl(push) {
   if (activeTab === "learn" && location.hash.startsWith("#learn")) return; // learn's own sub-states
   let h = "#" + (VIEW_SLUG[activeTab] || activeTab);
@@ -1452,7 +1458,8 @@ function syncUrl(push) {
   if (activeTab === "graph" && typeof graphMode === "string") h += "/" + graphMode;
   // #examine/<reading> (ADR-0072); Structure is the tab's own address.
   if (activeTab === "metrics" && typeof metricsTab === "string" && metricsTab !== "structure") h += "/" + metricsTab;
-  if (notePanel.classList.contains("open") && lastNotePath) h += "?note=" + encodeURIComponent(lastNotePath);
+  const note = notePanel.classList.contains("open") && lastNotePath ? lastNotePath : pendingHashNote;
+  if (note) h += "?note=" + encodeURIComponent(note);
   if (location.hash === h) return;
   if (push) history.pushState(null, "", h);
   else history.replaceState(null, "", h);
@@ -1465,8 +1472,11 @@ function applyHashSession() {
   if (slug === "chat" && arg && arg !== currentSessionId && !streaming) openSession(arg, true);
 }
 function applyHashNote() {
-  const { note } = parseHash();
-  if (note && note !== lastNotePath) openNote(note);
+  const note = parseHash().note || pendingHashNote;
+  pendingHashNote = "";
+  if (!note || note === lastNotePath) return;
+  // A note the vault no longer has leaves the address with the failed open.
+  openNote(note).then((ok) => { if (!ok) syncUrl(false); });
 }
 
 // --- tabs -------------------------------------------------------------------

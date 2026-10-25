@@ -75,15 +75,21 @@ def _vault_titles() -> dict[str, str]:
     return {p.replace("\\", "/"): ref.name for p, ref in notes.items()}
 
 
-def named_notes(text: str, titles: dict[str, str] | None = None) -> str:
+def named_notes(text: str, titles: dict[str, str] | None = None, open_note: str = "") -> str:
     """The block for the notes `text` names, or "" when it names none.
 
     `titles` maps every vault path to its title; the live vault's when None.
     Reads the driver's graph, so a caller on an event loop runs it off-loop:
     with the ws backend a driver call on the loop thread deadlocks.
+
+    `open_note` is the vault path of the note open beside the chat, which the
+    GUI's composer chip sends: "what does this article say?" names it without
+    a link, so it rides the same block on a line of its own. A path, never a
+    title to resolve: the drawer holds the canonical one. A path the vault no
+    longer has (renamed under the open drawer) is left out.
     """
     wanted = refs(text)
-    if not wanted:
+    if not wanted and not open_note:
         return ""
     if titles is None:
         try:
@@ -94,20 +100,26 @@ def named_notes(text: str, titles: dict[str, str] | None = None) -> str:
             # carried before this existed.
             logger.warning("named notes not resolved: the vault could not be read", exc_info=True)
             return ""
+    opened = open_note.replace("\\", "/") if open_note.replace("\\", "/") in titles else ""
     found: list[str] = []
     missing: list[str] = []
     ambiguous: list[str] = []
     for ref in wanted[:CAP]:
         paths = resolve(ref, titles)
         if len(paths) == 1:
-            if paths[0] not in found:
+            if paths[0] not in found and paths[0] != opened:
                 found.append(paths[0])
         elif paths:
             shown = ", ".join(paths[:_AMBIGUOUS_SHOWN]) + (", …" if len(paths) > _AMBIGUOUS_SHOWN else "")
             ambiguous.append(f"[[{ref}]] ({shown})")
         else:
             missing.append(f"[[{ref}]]")
+    if not (wanted or opened):
+        return ""
     lines = [OPEN]
+    if opened:
+        lines.append("The note open beside the chat, what \"this note\", \"this article\" or \"here\" means "
+                     "(read it before answering about its content): " + opened)
     if found:
         lines.append("Notes the user named (read one before answering about its content): "
                      + " · ".join(found))

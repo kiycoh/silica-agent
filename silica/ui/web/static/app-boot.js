@@ -38,6 +38,7 @@ async function loadVault() {
         body.dataset.words = m.content;
         addTurnImages(body, m.images || []);
         userFiles(body, m.files || []);
+        userNote(body, m.note || "");
         attached = (m.files || []).flatMap((f) => f.notes || []);
         flagTurn = m.turn || null;
         continue;

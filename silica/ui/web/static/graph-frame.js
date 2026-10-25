@@ -4011,6 +4011,8 @@ window.addEventListener("message", e => {
   if (e.data && e.data.type === "silica-host-side") {
     const h = +e.data.h || 0;
     document.body.style.setProperty("--side-h", (h ? h + 8 : 0) + "px");
+    // false only from a folded column with Key shut; an older host sends none
+    document.body.classList.toggle("key-folded", e.data.key === false);
   }
 });
 

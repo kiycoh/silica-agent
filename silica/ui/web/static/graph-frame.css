@@ -221,6 +221,9 @@ body.host-drawer-open #focus-bar{right:calc(var(--drawer-w,0px) + 10px)}
    through the note you were reading. The frame cannot see that drawer, so
    the parent tells it. */
 body.host-drawer-open #hud{display:none}
+/* The app's column folded to the find and Key under 760px of view: the key
+   shows only while Key is open, so the picture keeps the width (silica-host-side). */
+body.key-folded #hud{display:none}
 /* The foot, at the two bottom corners: on the left the chips that move the
    camera and the sim, on the right the simulation's forces and its size. The
    bottom edge is the one nothing else claims - the HUD is top-right, the focus

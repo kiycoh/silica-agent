@@ -235,9 +235,11 @@ def clamp_max_tokens(provider: str, model: str, requested: int | None, input_cha
 # `silica_workspace` is the workspace a user turn ran in (ADR-0112 point 4),
 # kept on the turn so a reopened chat knows its scope. `silica_reads` is the
 # notes a turn read, kept on its answer so a reopened chat links it the same;
-# `silica_persona` the persona a turn ran under (both ADR-0127).
+# `silica_persona` the persona a turn ran under (both ADR-0127). `silica_note`
+# is the note that was open beside the chat when the user asked, so a reopened
+# chat draws "with <note>" under the question as it did live.
 INTERNAL_KEYS = ("origin", "silica_reasoning", "silica_taint", "silica_turn_notes", "silica_workspace",
-                 "silica_files", "silica_said", "silica_reads", "silica_persona")
+                 "silica_files", "silica_said", "silica_reads", "silica_persona", "silica_note")
 
 
 def _to_wire(msg: dict) -> dict:

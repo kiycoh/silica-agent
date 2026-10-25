@@ -45,6 +45,7 @@ function setGraphMode(m) {
   // The right column (ADR-0072) holds the search on the graph and path,
   // and the bar at the left keeps out of its band wherever it shows.
   $("#graph-side").hidden = isShape || isLibrary;
+  syncSideFold(); // Key belongs to the Graph alone
   $("#graph-bar").classList.toggle("by-side", !(isShape || isLibrary));
   // Over a pane the bar is in the column's flow, so the pane starts under it
   // whatever its height: a fixed top padding let a key that wraps (a narrow
@@ -72,6 +73,31 @@ function setGraphMode(m) {
   }
 }
 
+
+// --- the right column folded (ADR-0072, amendment 2026-10-25) --------------
+// A note open beside the graph leaves the view 560px at 1440, and the column
+// (find, scope, compare) with the frame's key under it took 216 of them. Under
+// SIDE_FOLD_W the column is one row, the find and Key, beside the tabs; Key
+// opens scope, compare and the frame's key together, where they stood.
+const SIDE_FOLD_W = 760;
+let graphKeyOpen = false;
+
+function syncSideFold() {
+  const view = $("#view-graph");
+  const w = view.clientWidth;
+  if (!w) return;   // hidden: the width is 0, not narrow; the next show re-reads it
+  const folded = w < SIDE_FOLD_W;
+  if (!folded) graphKeyOpen = false;   // the next fold starts shut
+  view.classList.toggle("side-folded", folded);
+  view.classList.toggle("key-open", folded && graphKeyOpen);
+  const key = $("#graph-key");
+  key.hidden = !folded || graphMode !== "graph";
+  key.setAttribute("aria-expanded", String(folded && graphKeyOpen));
+  // app-notes.js loads after this cut, and the observer can fire between the two
+  if (typeof syncSideToViews === "function") syncSideToViews();
+}
+new ResizeObserver(syncSideFold).observe($("#view-graph"));
+$("#graph-key").addEventListener("click", () => { graphKeyOpen = !graphKeyOpen; syncSideFold(); });
 
 $("#graph-refresh").addEventListener("click", () => {
   // A finished covers pass offers the same rebuild (ADR-0066 decision 6).

@@ -1303,7 +1303,7 @@ def _turn_kind(text: str) -> str:
 
 async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str = "",
                    withhold: "Sequence[str]" = (), files: "Sequence[dict]" = (), said: str = "",
-                   prebuilt: dict | None = None) -> AsyncIterator[dict]:
+                   prebuilt: dict | None = None, note: str = "") -> AsyncIterator[dict]:
     """One agent turn as a stream of transport-neutral wire dicts.
 
     Yields `event_to_json(...)` dicts as the agent streams, then exactly one
@@ -1321,6 +1321,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
     brings attached files in is not offered the injector, point 3); `files` and
     `said` ride the user message for the bubble a reload draws (point 4);
     `prebuilt` is a stored user message asked again as it was (POST /turn/redo).
+    `note` is the vault path of the note open beside the chat (the composer's
+    chip): it joins the named notes and rides the user message as `silica_note`.
     """
     from silica.cli import _compact_context, _expand_web_turn, _update_context_tokens
 
@@ -1545,13 +1547,17 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # so a skill's expansion keeps its links and the block adds their
         # paths. Not on a /web turn: its tools cannot read a note. Off the
         # loop, because it reads the driver's graph.
+        opened = ""
         if web is None:
             from silica.agent.mentions import named_notes
             from silica.kernel.learn.offer import says_lost
             from silica.ui.web import jobs
 
-            if block := await asyncio.to_thread(named_notes, text):
+            if block := await asyncio.to_thread(named_notes, text, None, note):
                 agent_msg += "\n\n" + block
+                # Only a note the block kept: one renamed under the open drawer
+                # was left out, and the bubble must not claim it was read.
+                opened = note if note and ": " + note in block else ""
             # A reader still stuck on a note gets the aid as the answer itself
             # (learn.offer.escalation), and an offer's command sent is recorded.
             if block := await asyncio.to_thread(_escalation, text, messages):
@@ -1587,6 +1593,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             msg["silica_files"] = list(files)
         if said:
             msg["silica_said"] = said
+        if opened:
+            msg["silica_note"] = opened
         if prebuilt is not None:
             msg = prebuilt
         ws = await asyncio.to_thread(_resolve_workspace, workspace)
@@ -2179,6 +2187,9 @@ async def chat(payload: dict):
         if await asyncio.to_thread(find_workspace, workspace) is None:
             raise HTTPException(status_code=404, detail="that workspace no longer exists")
     attachments = _save_attachments(payload.get("images") or [])
+    # The note open beside the chat (the composer's chip), as a vault path;
+    # named_notes keeps it only if the vault has it.
+    note = str(payload.get("note") or "")
     if not _begin_turn():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
     text = payload.get("text", "")
@@ -2202,8 +2213,8 @@ async def chat(payload: dict):
             notes, files, earlier = joined
             composed = await asyncio.to_thread(_compose_nucleate_turn, text, notes, [], earlier=earlier)
             return _turn_response(composed, attachments, workspace,
-                                  withhold=WITHHELD_WITH_FILES, files=files, said=text)
-    return _turn_response(text, attachments, workspace)
+                                  withhold=WITHHELD_WITH_FILES, files=files, said=text, note=note)
+    return _turn_response(text, attachments, workspace, note=note)
 
 
 @app.post("/phone/turn", dependencies=_SAME_ORIGIN)
@@ -2937,15 +2948,16 @@ def _files_shown(files: Any) -> list[dict]:
     return out
 
 
-def _edited(content: str, words: str) -> str:
+def _edited(content: str, words: str, note: str = "") -> str:
     """A stored user message with its typed words replaced (POST /turn/redo):
-    the manifest and the images stay, the named notes follow the new words."""
+    the manifest and the images stay, the named notes follow the new words,
+    and the note that was open beside the chat stays the one the turn reads."""
     from silica.agent.mentions import named_notes, strip
 
     base = strip(content)
     cuts = [i for i in (base.find(MANIFEST_MARK), base.find("\n\n[image attached: ")) if i >= 0]
     rest = base[min(cuts):] if cuts else ""
-    block = named_notes(words)
+    block = named_notes(words, None, note)
     if block:
         at = rest.find("\n\n[image attached: ")
         rest = rest + "\n\n" + block if at < 0 else rest[:at] + "\n\n" + block + rest[at:]
@@ -2982,7 +2994,7 @@ async def redo_turn(payload: dict | None = None):
             words = str(words).strip()
             if not words:
                 raise HTTPException(400, "an edited question needs words")
-            content = await asyncio.to_thread(_edited, content, words)
+            content = await asyncio.to_thread(_edited, content, words, msg.get("silica_note") or "")
             if "silica_said" in msg or msg.get("silica_files"):
                 msg["silica_said"] = words
         msg["content"] = content
@@ -5742,6 +5754,7 @@ def get_messages():
                 content = "" if content == DROP_ASK else content
             files = _files_shown(m.get("silica_files"))
         data.append({"role": m["role"], "content": content, "tools": tools, "files": files,
+                     "note": m.get("silica_note") or "",
                      "thinking": thinking, "images": images,
                      "notes": turn_notes.of(m) if m["role"] == "assistant" else [],
                      "html": "" if not content else

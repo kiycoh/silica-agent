@@ -1137,7 +1137,7 @@ function setSendDisabled(v) {
 // --- the queue: one message, held until this turn settles ------------------
 // ponytail: client-side and one deep. The server already guarantees one turn
 // at a time (409), so a second slot is a client fact; move it to the server
-// when a second driver (Obsidian, MCP) needs to see what the GUI has queued.
+// when a second driver (Obsidian) needs to see what the GUI has queued.
 let queued = null;
 const queueBox = $("#queue");
 
@@ -1992,6 +1992,10 @@ function addTurnImages(body, images) {
 
 function send(text, replay = false, images = []) {
   if ((!text.trim() && !images.length) || streaming) return;
+  const find = text.trim().match(/^\/find\s*(.*)$/);
+  // The note open beside the chat rides the turn (the composer's chip); /find
+  // is answered here and reads nothing.
+  const note = find ? "" : chatNote();
   // A retry re-runs the turn but must not stack a second copy of your question
   // in the transcript: the bubble from the first attempt is still there.
   if (!replay) {
@@ -1999,14 +2003,16 @@ function send(text, replay = false, images = []) {
     body.textContent = text;
     body.dataset.words = text;
     addTurnImages(body, images.map((im) => ({ src: im.data, name: im.name })));
+    userNote(body, note);
   }
-  const find = text.trim().match(/^\/find\s*(.*)$/);
   if (find && !images.length) { runFind(find[1]); return; }
+  noteSent();
   runTurn(fetch("/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, ...(images.length ? { images } : {}),
-                           ...(chatWorkspace ? { workspace: chatWorkspace } : {}) }),
+                           ...(chatWorkspace ? { workspace: chatWorkspace } : {}),
+                           ...(note ? { note } : {}) }),
   }), "working", () => send(text, true, images));
 }
 

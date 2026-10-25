@@ -224,9 +224,10 @@ function moveNodeSel(d) {
 function pickNote(path) {
   if (graphMode === "path") {
     rootPath(path);
-  } else { // network: locate the note and fly the graph camera to it
+  } else { // network: fly the graph camera to the note and open it, as a click on its node does
     const f = $("#graph-frame");
     if (f.contentWindow) f.contentWindow.postMessage({ type: "silica-goto-path", path }, "*");
+    openNote(path);
   }
   $("#node-search").value = "";
   closeNodeResults();
@@ -803,7 +804,10 @@ new ResizeObserver(syncDockToViews).observe($("#dock"));
 // surface and with the pickers, so the frame is told, as it is of the dock.
 function syncSideToViews() {
   const side = $("#graph-side");
-  postToViews({ type: "silica-host-side", h: side.hidden ? 0 : side.offsetHeight });
+  const view = $("#view-graph");
+  // `key`: folded and shut, the frame hides its key too (syncSideFold).
+  const key = !view.classList.contains("side-folded") || view.classList.contains("key-open");
+  postToViews({ type: "silica-host-side", h: side.hidden ? 0 : side.offsetHeight, key });
 }
 new ResizeObserver(syncSideToViews).observe($("#graph-side"));
 
@@ -1113,6 +1117,7 @@ function syncDrawerMode() {
   toggle.setAttribute("aria-label", label);
   toggle.dataset.tip = label;
   document.body.classList.toggle("drawer-recall", !toggle.hidden);
+  renderNoteChip(); // the composers' chip follows the note the drawer holds
 }
 
 // A vault switch leaves nothing of the old vault to reopen.
@@ -1557,13 +1562,90 @@ function draftInComposer(draft) {
   box.setSelectionRange(draft.length, draft.length);
   box.dispatchEvent(new Event("input")); // let the autosize/palette hooks see it
 }
-// The menu's chat (ADR-0075): a question about the note, where a passage's
-// ask… puts the passage. It replaced four asks that are still typed commands.
+// The menu's ask (ADR-0075): a question about the note. The composer already
+// carries the note as its chip, so this only puts the caret there; it used to
+// write an English sentence naming the note, which an Italian vault then
+// had to delete (ADR-0097, amendment 2026-10-25).
 $("#note-chat").addEventListener("click", () => {
   if (!lastNotePath) return;
-  const title = $("#note-title-text").textContent.trim() || lastNotePath.split("/").pop().replace(/\.md$/, "");
-  draftInComposer('Tell me about "' + title + '", grounded in what the vault already says. ');
+  closeNoteMenu();
+  noteChipSkip = "";
+  renderNoteChip();
+  if (activeTab !== "chat" && $("#dock").hidden) showTab("chat");
+  (activeTab === "chat" ? $("#input") : $("#dock-input")).focus();
 });
+
+// --- the open note as the next message's context (ADR-0097, 2026-10-25) ----
+// A note open beside the chat is what "this article" means, so the composer
+// shows it as a chip and the turn sends its path (server: named_notes'
+// open_note). The chip stays from message to message while the note is open,
+// since the reader is still looking at it; its x leaves the note out of the
+// next message only, and the "+ title" left in its place puts it back.
+let noteChipSkip = "";   // the path the next message leaves out
+
+function chatNote() {
+  const open = notePanel.classList.contains("open") && drawerMode !== "node";
+  return open && lastNotePath && lastNotePath !== noteChipSkip ? lastNotePath : "";
+}
+
+// Sent: the x was for that one message.
+function noteSent() {
+  if (!noteChipSkip) return;
+  noteChipSkip = "";
+  renderNoteChip();
+}
+
+const NOTE_GLYPH = '<svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
+
+function renderNoteChip() {
+  const open = notePanel.classList.contains("open") && drawerMode !== "node" && !!lastNotePath;
+  // The x was for this note and the next message: another note, or the same
+  // one closed and reopened, starts with its chip.
+  if (!open || noteChipSkip !== lastNotePath) noteChipSkip = "";
+  const title = open ? ($("#note-title-text").textContent.trim() || noExt(lastNotePath.split("/").pop())) : "";
+  for (const row of document.querySelectorAll(".note-chip-row")) {
+    const field = row.closest("form").querySelector("textarea");
+    row.innerHTML = "";
+    row.hidden = !open;
+    if (!open) continue;
+    if (lastNotePath === noteChipSkip) {
+      const add = mkEl("button", "note-chip-add", "+ " + title);
+      add.type = "button";
+      add.title = "read " + title + " with the next message";
+      add.addEventListener("click", () => { noteChipSkip = ""; renderNoteChip(); field.focus(); });
+      row.appendChild(add);
+      continue;
+    }
+    const chip = mkEl("span", "chip note-chip");
+    chip.innerHTML = NOTE_GLYPH;
+    chip.appendChild(mkEl("span", "chip-name", title));
+    chip.title = "the note open beside the chat: each message reads it while it stays open";
+    const x = mkEl("button", "chip-x");
+    x.type = "button";
+    x.setAttribute("aria-label", "send the next message without " + title);
+    x.title = "the next message without this note";
+    x.innerHTML = '<svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18"></line><line x1="18" y1="6" x2="6" y2="18"></line></svg>';
+    x.addEventListener("click", () => { noteChipSkip = lastNotePath; renderNoteChip(); field.focus(); });
+    chip.appendChild(x);
+    row.appendChild(chip);
+  }
+}
+
+// Under the question, as its files are: the note the turn read because it was
+// open, live and on a reopened chat (`note` of /messages).
+function userNote(body, path) {
+  if (!body || !path) return;
+  const row = mkEl("div", "msg-note");
+  const chip = mkEl("span", "mf");
+  chip.appendChild(mkEl("span", "mf-in", "with"));
+  const name = mkEl("button", "mf-name", noExt(path.split("/").pop()));
+  name.type = "button";
+  name.title = "open " + path;
+  name.addEventListener("click", () => openNote(path));
+  chip.appendChild(name);
+  row.appendChild(chip);
+  body.after(row);
+}
 // Test me and Explain it (ADR-0119): Learn's home no longer lists every
 // note, so a test on this one starts here. Learn's own functions run them.
 $("#note-test").addEventListener("click", () => { closeNoteMenu(); if (lastNotePath && typeof learnTestNote === "function") learnTestNote(lastNotePath); });
@@ -2096,12 +2178,20 @@ document.addEventListener("click", (e) => {
   // the panel the click asked to walk was the panel it took away.
   if (drawerBefore && drawerBefore === drawerNow() && openBefore === openSeq &&  // untouched by this click
       e.target.isConnected &&
+      // The root is no place anyone clicks: it is what a view transition's
+      // overlay hands a click to while the landing moves onto the first turn.
+      e.target !== document.documentElement &&
       !e.target.closest("#note-panel") &&
       // A view row moved into the sidebar with ADR-0084, and a view switch
       // still puts the note away as the strip's tabs did: the corner toggle
       // brings it back on the new view.
       (!e.target.closest("#sidebar") || e.target.closest("#views .tab")) &&
-      !e.target.closest("#dock")) closeNote();
+      // The chat's composer joined the dock on 2026-10-25: its chip sends the
+      // open note with the question, and a click into the field closed it.
+      // Explore's column too (find, Key, scope, compare): it picks what the
+      // graph shows, and closing the note unfolded the column under the
+      // pointer that had just reached for it.
+      !e.target.closest("#dock, #composer, #graph-side")) closeNote();
 });
 $("#note-close").addEventListener("click", closeNote);
 // (Escape is handled once, at the bottom of this file, in priority order.)

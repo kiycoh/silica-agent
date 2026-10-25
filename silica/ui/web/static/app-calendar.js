@@ -1454,7 +1454,9 @@ buildSurfaceTabs();
 // Land on chat — it's the primary surface — unless the URL names another view
 // (#explore, #calendar, #examine): a pasted deep link must win over the default.
 // Read the hash BEFORE the default click: showTab rewrites it via replaceState.
-const bootSlug = (location.hash || "").replace(/^#/, "").split("/")[0];
+// parseHash and not a split on "/": #chat?note=… has no "/", and its whole
+// text was taken for the slug, an unknown view.
+const bootSlug = parseHash().slug;
 const bootTab = viewOfSlug(bootSlug);
 // Chat has no row since ADR-0084, so it is the one view entered by call.
 if (["graph", "learn", "calendar", "metrics"].includes(bootTab))
