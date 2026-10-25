@@ -1233,18 +1233,20 @@ def _by_title_vector(topics: list[str], allowed: set[str]) -> dict[str, str]:
     return out
 
 
-# Texts embedded during this process, by text: the plan form re-previews on
-# every change, and the same ninety topics were embedded again each time.
-_VEC_MEMO: dict[str, list[float]] = {}
+# Texts embedded during this process, by model and text: the plan form
+# re-previews on every change, and the same ninety topics were embedded again
+# each time; the model is in the key so a changed embedder never reuses them.
+_VEC_MEMO: dict[tuple[str, str], list[float]] = {}
 
 
 def _embed(texts: list[str], embedder) -> list[list[float]]:
-    todo = [t for t in dict.fromkeys(texts) if t not in _VEC_MEMO]
+    model = str(getattr(embedder, "model", "") or type(embedder).__name__)
+    todo = [t for t in dict.fromkeys(texts) if (model, t) not in _VEC_MEMO]
     if todo:
         if len(_VEC_MEMO) > 4000:
             _VEC_MEMO.clear()
-        _VEC_MEMO.update(zip(todo, embedder.embed(todo)))
-    return [_VEC_MEMO[t] for t in texts]
+        _VEC_MEMO.update(((model, t), v) for t, v in zip(todo, embedder.embed(todo)))
+    return [_VEC_MEMO[(model, t)] for t in texts]
 
 
 # A row's idea note met by a topic's title vector (ADR-0131 point 3). Read on
