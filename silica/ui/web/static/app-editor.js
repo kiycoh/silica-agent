@@ -175,15 +175,24 @@
     view.focus();
   }
 
+  // `glyphs`: a source check's marks on a table's rows (tableGlyphs), drawn
+  // at each row's left edge, the only place a row's finding can show.
   class Rendered extends WidgetType {
-    constructor(source, block) { super(); this.source = source; this.block = block; }
-    eq(o) { return o.source === this.source && o.block === this.block; }
+    constructor(source, block, glyphs = []) {
+      super(); this.source = source; this.block = block; this.glyphs = glyphs; this.gkey = JSON.stringify(glyphs);
+    }
+    eq(o) { return o.source === this.source && o.block === this.block && o.gkey === this.gkey; }
     toDOM(view) {
       const el = document.createElement(this.block ? "div" : "span");
       el.className = "cm-rendered " + (this.block ? "cm-rendered-block" : "cm-rendered-inline");
       const fill = (html) => {
         el.innerHTML = this.block ? html : html.replace(/^\s*<p>([\s\S]*)<\/p>\s*$/, "$1");
         if (HOOKS.decorate) HOOKS.decorate(el, view);
+        const rows = el.querySelectorAll("tbody tr");
+        for (const [i, grade, hollow, line, n] of this.glyphs) {
+          const cell = rows[i] && rows[i].firstElementChild;
+          if (cell) { cell.classList.add("cm-chk-cell"); cell.prepend(glyphButton(view, grade, hollow, line, n)); }
+        }
         view.requestMeasure();
       };
       if (renderCache.has(this.source)) fill(renderCache.get(this.source));
@@ -330,6 +339,238 @@
   let TOP = null; // the element heading the note, set per load()
   const linkKey = (target) => target.split("#")[0].trim();
 
+  // --- a source check's marks (ADR-0110 point 11) ----------------------------
+  // The findings stay in the lines of the text the check read (`base`), and
+  // every change since is composed onto one ChangeSet (`since`): a mark is
+  // mapped through it when drawn, and a block it touched is hollow, "changed
+  // since the check", so no mark vouches for text the check never read.
+  const checkReset = StateEffect.define();   // {base, findings, states} | null
+  const checkAdd = StateEffect.define();     // {findings, states}, as the model's arrive
+  const checkReplace = StateEffect.define(); // {findings, states}: the rerun after an edit
+  const checkOpen = StateEffect.define();    // the open box's block (its line in `base`), or 0
+  const checkShow = StateEffect.define();    // Set of the grades, and "not found", on screen
+  const checkField = StateField.define({
+    create: () => ({ base: null, since: null, findings: [], states: [], open: 0, show: null }),
+    update(v, tr) {
+      let o = v;
+      if (tr.docChanged && o.base) o = { ...o, since: o.since ? o.since.compose(tr.changes) : tr.changes };
+      for (const e of tr.effects) {
+        if (e.is(checkReset)) {
+          o = e.value ? { ...o, ...e.value, since: null } : { ...o, base: null, since: null, findings: [], states: [], open: 0 };
+        } else if (e.is(checkAdd)) {
+          o = { ...o, findings: o.findings.concat(e.value.findings), states: o.states.concat(e.value.states) };
+        } else if (e.is(checkReplace)) o = { ...o, ...e.value };
+        else if (e.is(checkOpen)) o = { ...o, open: e.value };
+        else if (e.is(checkShow)) o = { ...o, show: e.value };
+      }
+      return o;
+    },
+  });
+  const RANK = { error: 0, warning: 1, nit: 2 };
+  // The shape differs by grade and fills only while the mark is current, so
+  // neither colour nor fill is the only signal.
+  const GLYPH = { error: ["■", "□"], warning: ["▲", "△"], nit: ["●", "○"] };
+  const ROW = /^\s*\|/;
+  // A list, quote or footnote marker is not what a block says.
+  const LEAD = /^\s*(?:(?:[-*+]|\d{1,3}[.)])\s+(?:\[[ xX]\]\s+)?|(?:>\s?)+|\[\^[^\]\s]+\]:\s?)/;
+
+  // The last check's blocks as they stand in this text: {line (in base), from,
+  // to, hollow, edited, row, findings (on screen), states}. `edited`: touched
+  // since the check or its last rerun; `hollow` also counts what a rerun has
+  // already carried over hollow.
+  function checkBlocks(state, all = false) {
+    const c = state.field(checkField);
+    if (!c.base) return [];
+    const doc = state.doc, by = new Map();
+    const shown = (f) => all || !c.show || (c.show.has(f.grade) && (f.kind !== "not found" || c.show.has("not found")));
+    const at = (x) => {
+      if (!by.has(x.line)) by.set(x.line, { line: x.line, end: x.end || x.line, findings: [], states: [] });
+      return by.get(x.line);
+    };
+    for (const f of c.findings) if (shown(f)) at(f).findings.push(f);
+    for (const s of c.states) at(s).states.push(s);
+    const out = [];
+    for (const b of by.values()) {
+      if (b.end > c.base.lines) continue;
+      const a = c.base.line(b.line).from, z = c.base.line(b.end).to;
+      const from = c.since ? c.since.mapPos(a, 1) : a, to = c.since ? c.since.mapPos(z, -1) : z;
+      if (to < from) continue; // the block was deleted
+      const edited = !!c.since && c.since.touchesRange(a, z);
+      // The glyph is hollow when every mark under it is; a rerun's fresh
+      // rule finding beside a carried-over verdict keeps it filled.
+      out.push({ ...b, from, to, edited, hollow: edited || (b.findings.length > 0 && b.findings.every((f) => f.hollow)),
+                 row: ROW.test(doc.lineAt(from).text) });
+    }
+    return out.sort((x, y) => x.from - y.from);
+  }
+
+  const gradeOf = (b) => b.findings.reduce((g, f) => (RANK[f.grade] < RANK[g] ? f.grade : g), "nit");
+
+  // The words a finding is about, found in its block with any run of spaces
+  // matching any other (a date wrapped over two lines); the block's text,
+  // past its marker, when they are not there or the finding is the model's.
+  function findingRange(doc, b, f) {
+    const text = doc.sliceString(b.from, b.to), want = (f.mark || f.words || "").trim();
+    if (want && !f.model) {
+      const rx = new RegExp(want.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"), "i");
+      const m = rx.exec(text);
+      if (m) return [b.from + m.index, b.from + m.index + m[0].length];
+    }
+    const lead = LEAD.exec(text);
+    return [b.from + (lead ? lead[0].length : 0), b.to];
+  }
+
+  function toggleBox(view, line) {
+    const open = view.state.field(checkField).open;
+    view.dispatch({ effects: checkOpen.of(open === line ? 0 : line) });
+  }
+
+  class CheckGlyph extends WidgetType {
+    constructor(grade, hollow, line, n) { super(); this.grade = grade; this.hollow = hollow; this.line = line; this.n = n; }
+    eq(o) { return o.grade === this.grade && o.hollow === this.hollow && o.line === this.line && o.n === this.n; }
+    toDOM(view) { return glyphButton(view, this.grade, this.hollow, this.line, this.n); }
+    ignoreEvent() { return true; }
+  }
+
+  function glyphButton(view, grade, hollow, line, n) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = `cm-chk-glyph cm-chk-${grade}` + (hollow ? " cm-chk-hollow" : "");
+    b.textContent = GLYPH[grade][hollow ? 1 : 0];
+    b.setAttribute("aria-label", `${grade}, ${n} finding${n > 1 ? "s" : ""}` +
+      (hollow ? ", changed since the check" : "") + ": open");
+    b.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation(); // in a table, the rendered block would take it as a caret
+      toggleBox(view, line);
+    });
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); if (e.detail === 0) toggleBox(view, line); });
+    return b;
+  }
+
+  // One block's box: every finding with its grade, kind, sentence and the
+  // passage that decided it, then the states that carry arithmetic.
+  class FindingBox extends WidgetType {
+    constructor(b) {
+      super();
+      this.b = b;
+      this.key = JSON.stringify([b.line, b.edited, b.findings, b.states]);
+    }
+    eq(o) { return o.key === this.key; }
+    toDOM(view) {
+      const b = this.b, box = document.createElement("div");
+      box.className = "cm-chk-box";
+      box.setAttribute("role", "note");
+      const close = document.createElement("button");
+      close.type = "button";
+      close.className = "cm-chk-close";
+      close.setAttribute("aria-label", "close · Esc");
+      close.textContent = "×";
+      close.addEventListener("mousedown", (e) => { e.preventDefault(); view.dispatch({ effects: checkOpen.of(0) }); });
+      box.append(close);
+      const stale = (f) => b.edited || !!f.hollow;
+      if (b.findings.some(stale)) {
+        const p = document.createElement("p");
+        p.className = "cm-chk-stale";
+        p.textContent = "changed since the check: these marks read the text as it was";
+        box.append(p);
+      }
+      const findings = [...b.findings].sort((x, y) => RANK[x.grade] - RANK[y.grade]);
+      for (const f of findings) {
+        const row = document.createElement("div");
+        row.className = `cm-chk-f cm-chk-${f.grade}`;
+        const head = document.createElement("div");
+        head.className = "cm-chk-head";
+        head.textContent = `${GLYPH[f.grade][stale(f) ? 1 : 0]} ${f.grade} · ${f.kind}`;
+        const say = document.createElement("p");
+        say.textContent = f.say;
+        row.append(head, say);
+        if (f.passage) {
+          const q = document.createElement("blockquote");
+          q.textContent = f.passage;
+          row.append(q);
+        }
+        const m = /^(.+?\.md)(?::(\d+))?$/.exec(f.at || "");
+        if (m) {
+          const a = document.createElement("button");
+          a.type = "button";
+          a.className = "cm-chk-src";
+          a.textContent = f.at;
+          a.addEventListener("mousedown", (e) => { e.preventDefault(); HOOKS.openAt(m[1], m[2] ? +m[2] : 0); });
+          row.append(a);
+        }
+        box.append(row);
+      }
+      for (const s of b.states) {
+        if (s.state === "supported" || s.state === "not a statement of fact") continue;
+        const p = document.createElement("p");
+        p.className = "cm-chk-state";
+        p.textContent = `${s.state}: ${s.say}`;
+        box.append(p);
+      }
+      return box;
+    }
+    ignoreEvent() { return true; }
+  }
+
+  // The marks, beside the live preview's: an underline per finding (the
+  // highest grade wins where two meet), a glyph at the block's left edge,
+  // and the one open box under its block. A table row has its glyph alone:
+  // its line is drawn as a rendered table, where no underline would show,
+  // so the row's glyph is drawn into the table (buildDecorations).
+  function buildChecks(state) {
+    const doc = state.doc, c = state.field(checkField), out = [];
+    for (const b of checkBlocks(state)) {
+      if (b.findings.length) {
+        const grade = gradeOf(b);
+        out.push(Decoration.widget({ widget: new CheckGlyph(grade, b.hollow, b.line, b.findings.length), side: -1 })
+          .range(doc.lineAt(b.from).from));
+        if (!b.row) {
+          const taken = [];
+          for (const f of [...b.findings].sort((x, y) => RANK[x.grade] - RANK[y.grade])) {
+            let pieces = [findingRange(doc, b, f)];
+            for (const [ta, tb] of taken) {
+              pieces = pieces.flatMap(([pa, pb]) => (pb <= ta || pa >= tb ? [[pa, pb]]
+                : [[pa, ta], [tb, pb]].filter(([x, y]) => y > x)));
+            }
+            taken.push(findingRange(doc, b, f));
+            const deco = Decoration.mark({
+              class: `cm-chk-u cm-chk-${f.grade}` + (b.edited || f.hollow ? " cm-chk-hollow" : ""),
+              attributes: { "data-chk": String(b.line) },
+            });
+            for (const [pa, pb] of pieces) if (pb > pa) out.push(deco.range(pa, pb));
+          }
+        }
+      }
+      if (c.open === b.line && (b.findings.length || b.states.length)) {
+        let end = doc.lineAt(b.to);
+        if (b.row) while (end.number < doc.lines && ROW.test(doc.line(end.number + 1).text)) end = doc.line(end.number + 1);
+        out.push(Decoration.widget({ widget: new FindingBox(b), block: true, side: 1 }).range(end.to));
+      }
+    }
+    return Decoration.set(out, true);
+  }
+
+  const checkDecos = EditorView.decorations.compute(["doc", checkField], buildChecks);
+
+  // An underline opens its block's box; the press still places the caret.
+  const checkPress = EditorView.domEventHandlers({
+    mousedown(e, view) {
+      const u = e.target.closest && e.target.closest(".cm-chk-u");
+      if (u && e.button === 0) view.dispatch({ effects: checkOpen.of(+u.dataset.chk) });
+      return false;
+    },
+  });
+
+  // The glyphs of a rendered table's rows, as [tbody index, grade, hollow,
+  // block line, count]: what the table's widget draws and compares on.
+  function tableGlyphs(state, from, to) {
+    const first = state.doc.lineAt(from).number;
+    return checkBlocks(state).filter((b) => b.row && b.findings.length && b.from >= from && b.from <= to)
+      .map((b) => [state.doc.lineAt(b.from).number - first - 2, gradeOf(b), b.hollow, b.line, b.findings.length]);
+  }
+
   const FRONTMATTER = /^---[ \t]*\n(?:[\s\S]*?\n)?(?:---|\.\.\.)[ \t]*(?=\n|$)/;
   // Obsidian's frontmatter only counts at byte 0 and only when it closes.
   // `head` is the document's first 64 KB, which no properties block outgrows.
@@ -359,7 +600,8 @@
       const a = doc.lineAt(from), b = doc.lineAt(to);
       const whole = !doc.sliceString(a.from, from).trim() && !doc.sliceString(to, b.to).trim();
       if (whole && !touches(a.from, b.to)) {
-        add(Decoration.replace({ widget: new Rendered(doc.sliceString(a.from, b.to), true), block: true }), a.from, b.to);
+        const glyphs = deco === LINE.table ? tableGlyphs(state, a.from, b.to) : [];
+        add(Decoration.replace({ widget: new Rendered(doc.sliceString(a.from, b.to), true, glyphs), block: true }), a.from, b.to);
       } else {
         eachLine(from, to, deco);
       }
@@ -524,6 +766,7 @@
     create: buildDecorations,
     update(decos, tr) {
       if (tr.docChanged || tr.selection || tr.effects.some((e) => e.is(focusEffect) || e.is(brokenEffect)) ||
+          tr.state.field(checkField) !== tr.startState.field(checkField) ||
           syntaxTree(tr.state) !== syntaxTree(tr.startState)) return buildDecorations(tr.state);
       return decos;
     },
@@ -627,6 +870,9 @@
       focused,
       broken,
       marked,
+      checkField,
+      checkDecos,
+      checkPress,
       EditorView.focusChangeEffect.of((_s, on) => focusEffect.of(on)),
       livePreview,
       linkPress,
@@ -643,8 +889,8 @@
   }
 
   // hooks: render(source) -> Promise<html>, openNote(target), change(), blur(),
-  // save(), decorate(el, view), select(view), links(paths) -> ["[[…]]"]. The
-  // only caller is app-notes.js.
+  // save(), decorate(el, view), select(view), links(paths) -> ["[[…]]"],
+  // openAt(path, line). The only caller is app-notes.js.
   function create(parent, hooks) {
     HOOKS = hooks;
     const view = new EditorView({ parent, state: EditorState.create({ doc: "", extensions: extensions() }) });
@@ -682,6 +928,59 @@
         });
       },
       focus: () => view.focus(),
+      // The source check (ADR-0110 point 11). startCheck pins the text the
+      // check reads, so it goes after the save and before the request.
+      startCheck: () => view.dispatch({ effects: checkReset.of({ base: view.state.doc, findings: [], states: [], open: 0 }) }),
+      addCheck: (findings, states) => view.dispatch({ effects: checkAdd.of({ findings, states }) }),
+      endCheck: () => view.dispatch({ effects: checkReset.of(null) }),
+      showCheck: (show) => view.dispatch({ effects: checkShow.of(show) }),
+      hasCheck: () => !!view.state.field(checkField).base,
+      closeCheckBox() {
+        if (!view.state.field(checkField).open) return false;
+        view.dispatch({ effects: checkOpen.of(0) });
+        return true;
+      },
+      // Typed into since the check or its last rerun, and the caret is out of
+      // every block typed into (or out of the field): when the rules run
+      // again (Open 4), so a half-typed identifier is never flagged.
+      checkEdited() {
+        const c = view.state.field(checkField);
+        if (!c.base || !c.since || c.since.empty) return false;
+        if (!view.hasFocus) return true;
+        const doc = view.state.doc, head = view.state.selection.main.head;
+        let inside = false;
+        c.since.iterChangedRanges((_fa, _ta, fb, tb) => {
+          let a = doc.lineAt(fb).number, z = doc.lineAt(tb).number;
+          while (a > 1 && doc.line(a - 1).text.trim()) a--;
+          while (z < doc.lines && doc.line(z + 1).text.trim()) z++;
+          if (head >= doc.line(a).from && head <= doc.line(z).to) inside = true;
+        });
+        return !inside;
+      },
+      // Before a rerun: the check moves onto the text as it is now, each mark
+      // re-lined, an edited block's marks hollow. Returns the model's
+      // verdicts now hollow, which the rerun carries until the next check.
+      rebaseCheck() {
+        const state = view.state, doc = state.doc, c = state.field(checkField);
+        if (!c.base) return [];
+        const findings = [], states = [];
+        let open = 0;
+        for (const b of checkBlocks(state, true)) {
+          const line = doc.lineAt(b.from).number, end = doc.lineAt(b.to).number;
+          for (const f of b.findings) findings.push({ ...f, line, end, hollow: !!f.hollow || b.edited });
+          for (const x of b.states) states.push({ ...x, line, end });
+          if (c.open === b.line) open = line;
+        }
+        view.dispatch({ effects: checkReset.of({ base: doc, findings, states, open }) });
+        return findings.filter((f) => f.model && f.hollow);
+      },
+      // A rerun's report replaces the rules' marks; `carried` are rebaseCheck's
+      // hollow verdicts on the blocks the report could not judge from the cache.
+      replaceCheck(report, carried) {
+        const changed = new Set(report.states.filter((x) => x.state === "not checked").map((x) => x.line));
+        view.dispatch({ effects: checkReplace.of({
+          findings: report.findings.concat(carried.filter((f) => changed.has(f.line))), states: report.states }) });
+      },
       // The caret to line n, scrolled to the middle; a line past the end (the
       // note changed since the agenda read it) is left alone.
       revealLine(n) {

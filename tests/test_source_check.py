@@ -1,0 +1,422 @@
+"""ADR-0110 step 1: a note the person wrote, read against the vault by rule.
+
+The vault below is a small firm's: two clients, a chronology, a statute, a
+superseded memo, a contested one, a contract with a quotable clause. Every
+rule finding of point 5 is planted once, and the pool of point 3 is checked
+to keep the other client out.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from silica.kernel.check import GRADES, ORDER, blocks, pool, rules, run
+from silica.kernel.text import dates
+
+CHRONO = """---
+matter: "2022-009"
+client: Northwind Logistics
+---
+# Chronology
+
+| Date | Event |
+| :--- | :--- |
+| 2022-04-19 | Distribution Agreement executed |
+| 2022-06-02 | First delivery under Schedule 1 |
+| 2022-06-30 | Acceptance certificate issued under Schedule 3 |
+"""
+MEMO_OLD = """---
+matter: "2022-009"
+superseded_by: "[[Memo 2025 on limitation]]"
+---
+Time runs from delivery.
+"""
+MEMO_NEW = """---
+matter: "2022-009"
+contested: true
+---
+The six-year period runs from acceptance. Limitation now expires 19 April 2028.
+"""
+CONTRACT = """---
+client: Northwind Logistics
+---
+Clause 11.3. The indemnity at clause 11.2 is not subject to the limitation of liability in clause 12, and shall survive termination of this Agreement without limit of time.
+"""
+OTHER = """---
+cliente: Ferrovie Nord Adriatico
+---
+Penale dell'uno per cento al giorno, ridotta ex art. 1384 c.c., decreto 39/2010.
+"""
+SHARED = """# Clause bank, data processing
+
+Standard contractual clauses under Decision 2010/87/EU, repealed by Decision (EU) 2021/914.
+"""
+
+
+@pytest.fixture
+def firm(tmp_path: Path) -> Path:
+    v = tmp_path / "vault"
+    for rel, text in {
+        "Matters/Chronology.md": CHRONO,
+        "Research/Memo 2023 on limitation.md": MEMO_OLD,
+        "Research/Memo 2025 on limitation.md": MEMO_NEW,
+        "Contracts/Northwind Meridian Distribution Agreement 2022.md": CONTRACT,
+        "Clienti/Contratto Ferrovie.md": OTHER,
+        "Precedents/Clause bank, data processing.md": SHARED,
+        "GRAPH_REPORT.md": "Northwind 19 April 2028 acceptance six years\n",
+        "silica/Matters/Chronology.md": CHRONO,
+    }.items():
+        (v / rel).parent.mkdir(parents=True, exist_ok=True)
+        (v / rel).write_text(text, encoding="utf-8")
+    return v
+
+
+def _draft(v: Path, body: str, fm: str = 'matter: "2022-009"\n') -> str:
+    (v / "Drafts").mkdir(exist_ok=True)
+    (v / "Drafts/Opinion.md").write_text(f"---\n{fm}---\n\n# Opinion\n\n{body}\n", encoding="utf-8")
+    return "Drafts/Opinion.md"
+
+
+def _kinds(report) -> list[tuple[str, str]]:
+    return [(f["kind"], f["words"]) for f in report["findings"]]
+
+
+# ---------------------------------------------------------------- blocks
+
+def test_a_block_is_a_paragraph_item_row_or_footnote_and_abbreviations_do_not_split_it():
+    text = ("---\nmatter: x\n---\n# Heading that is long enough to count\n\n"
+            "Under art. 1384 c.c. and Cass. n. 123/2020 the penalty is reduced by the court.\n\n"
+            "- first item that has six words at least\n  continued here\n"
+            "| 2022-06-30 | Acceptance certificate issued under Schedule 3 |\n| --- | --- |\n\n"
+            "```\ncode that has many many words inside it\n```\n\n$$\nx = y + z and more words\n$$\n\n"
+            "Short one.\n\nA claim with a footnote reference here[^1] for the reader.\n\n"
+            "[^1]: The source is [[Memo 2025 on limitation]] at page four.\n")
+    out, defs = blocks.split(text)
+    assert [(b.kind, b.line) for b in out] == [("paragraph", 6), ("item", 8), ("row", 10),
+                                               ("paragraph", 23), ("footnote", 25)]
+    assert out[1].text.endswith("continued here")
+    assert out[3].footnotes == ["1"] and "Memo 2025" in defs["1"]
+
+
+# ---------------------------------------------------------------- dates and identifiers
+
+def test_dates_need_a_year_and_periods_name_their_event():
+    found = [d for d, _s, _e in dates.find_dates("19 April 2028, 1° marzo 2026, 2022-06-30, 12.3.2021, 3.5, 19 April")]
+    assert found == ["2028-04-19", "2026-03-01", "2022-06-30", "2021-03-12"]
+    assert [(p["n"], p["unit"], p["event"]) for p in dates.find_periods(
+        "the six-year period runs from acceptance. sei anni dall'accettazione; "
+        "six years from the date on which the cause accrued")] == [(6, "years", "acceptance"), (6, "years", "accettazione")]
+    assert dates.add_period("2024-02-29", 1, "years") == "2025-02-28"
+
+
+def test_identifiers_follow_point_4_and_match_without_their_letters():
+    got = dict(rules.identifiers("art. 2409-bis, d.lgs. 39/2010, Decision 2010/87/UE, case C-311/18, "
+                                 "on 12.3.2021, 1.250.000 euro, version 3.5, a 30-day notice, Q1"))
+    assert got == {"2409-bis": "2409", "39/2010": "39/2010", "2010/87/UE": "2010/87", "C-311/18": "311/18"}
+    assert rules.identifiers("2010/87/EU")[0][1] == got["2010/87/UE"]
+
+
+# ---------------------------------------------------------------- the pool
+
+def test_the_pool_keeps_another_client_out_and_takes_one_hop_of_party_values(firm):
+    notes, _files = pool.walk(str(firm))
+    p = pool.build("Matters/Chronology.md", notes, pool.DEFAULT_PARTY_KEYS, "silica", set())
+    assert "Contracts/Northwind Meridian Distribution Agreement 2022.md" in p.paths   # client via one hop
+    assert "Clienti/Contratto Ferrovie.md" not in p.paths                           # another party, Italian key
+    assert "Precedents/Clause bank, data processing.md" in p.paths                  # shared material
+    assert "GRAPH_REPORT.md" not in p.paths and "silica/Matters/Chronology.md" not in p.paths
+    assert p.scope == "party" and p.values == {"2022-009", "northwind logistics"}
+    named = pool.build("Matters/Chronology.md", notes, pool.DEFAULT_PARTY_KEYS, "silica", {"Clienti/Contratto Ferrovie.md"})
+    assert "Clienti/Contratto Ferrovie.md" in named.paths                           # the person named it
+
+
+def test_vault_yaml_replaces_the_party_keys_and_a_vault_without_them_is_searched_whole(firm, tmp_path):
+    (firm / "vault.yaml").write_text("check_party_keys: [project]\n", encoding="utf-8")
+    assert pool.party_keys(str(firm)) == ("project",)
+    notes, _ = pool.walk(str(firm))
+    p = pool.build("Matters/Chronology.md", notes, ("project",), "", set())
+    assert p.scope == "whole" and "Clienti/Contratto Ferrovie.md" in p.paths
+
+
+# ---------------------------------------------------------------- the rule findings
+
+def test_every_rule_finding_on_one_draft(firm):
+    path = _draft(firm, "\n\n".join([
+        "Limitation on the Northwind claim expires on 19 April 2028, six years from acceptance under Schedule 3.",
+        "As the [[Memo 2023 on limitation]] explains, time runs from the first delivery of the goods.",
+        "The clause bank still relies on Decision 2010/87/UE and on decree 99/2099 for transfers.",
+        "The directions hearing listed for 17 February 2026 was adjourned at the defendant's request.",
+        "Under the Northwind Meridian Distribution Agreement 2022 clause 11.3 reads \"The indemnity at clause 11.2 "
+        "is not subject to the limitation of liability in clause 12, and shall survive termination for six years.\"",
+        "Elsewhere we wrote \"shall survive termination of this Agreement without limit of time\" in the summary.",
+        "Our [[Nonexistent advice note]] covers the remaining points of the claim in detail.",
+    ]))
+    r = run.check_note(path, str(firm), write_dir="silica")
+    kinds = _kinds(r)
+    assert ("inconsistent", "19 April 2028") in kinds
+    inc = next(f for f in r["findings"] if f["kind"] == "inconsistent")
+    assert "2022-04-19" in inc["say"] and "2022-06-30" in inc["say"] and "30 June 2028" in inc["say"]
+    assert ("source status", "Memo 2023 on limitation") in kinds
+    assert ("not in the vault", "99/2099") in kinds and ("not in the vault", "2010/87/UE") not in kinds
+    assert ("date not found", "17 February 2026") in kinds
+    assert any(k == "misquoted" for k, _ in kinds)
+    assert any(k == "quotation without its source" for k, _ in kinds)
+    assert ("not in the vault", "Nonexistent advice note") in kinds
+    assert not any("Ferrovie" in (f.get("at") or "") + f["say"] for f in r["findings"])
+    assert {f["grade"] for f in r["findings"]} <= set(ORDER)
+    assert all(GRADES[f["kind"]] == f["grade"] for f in r["findings"])
+
+
+def test_a_derived_date_is_a_state_with_its_arithmetic(firm):
+    path = _draft(firm, "On acceptance the claim runs until 30 June 2028, six years from acceptance under Schedule 3.")
+    r = run.check_note(path, str(firm), write_dir="silica")
+    assert not r["findings"]
+    assert any(s["state"] == "derived date" and "2022-06-30" in s["say"] for s in r["states"])
+
+
+def test_a_plain_blockquote_is_the_writers_own_and_a_lead_in_attributes_one(firm):
+    q = "> The indemnity at clause 11.2 is not subject to the limitation of liability in clause 12."
+    plain = run.check_note(_draft(firm, "My own summary follows here for the reader.\n\n" + q), str(firm), write_dir="silica")
+    assert not any(f["kind"] in ("misquoted", "not found", "quotation without its source") for f in plain["findings"])
+    led = run.check_note(_draft(firm, "The Northwind Meridian Distribution Agreement 2022 provides:\n\n"
+                                + q.replace("clause 12", "clause 13")), str(firm), write_dir="silica")
+    assert any(f["kind"] == "misquoted" for f in led["findings"])
+
+
+def test_absence_is_decided_only_with_both_floors_and_otherwise_waits(firm):
+    path = _draft(firm, "Photosynthesis converts light energy into chemical energy inside the chloroplast.")
+    no_vectors = run.check_note(path, str(firm), write_dir="silica", search=lambda q, k: [])
+    assert not no_vectors["findings"] and no_vectors["states"][0]["state"] == "not checked"
+    far = run.check_note(path, str(firm), write_dir="silica", search=lambda q, k: [],
+                         dense=lambda t, p: [("x.md", 0.1)], dense_floor=0.5)
+    assert [(f["kind"], f["grade"]) for f in far["findings"]] == [("not found", "warning")]
+    near = run.check_note(path, str(firm), write_dir="silica", dense=lambda t, p: [("x.md", 0.9)], dense_floor=0.5,
+                          search=lambda q, k: [])
+    assert not near["findings"] and near["waiting"] == 1
+
+
+def test_the_search_is_cut_to_the_pool(firm):
+    seen = []
+
+    def search(q, k):
+        hit = [{"path": "Clienti/Contratto Ferrovie.md", "line": 4, "coverage": 0.99},
+               {"path": "Matters/Chronology.md", "line": 10, "coverage": 0.2}]
+        seen.append(k)
+        return hit
+    path = _draft(firm, "La penale dell'uno per cento al giorno va ridotta dal giudice secondo equità.")
+    r = run.check_note(path, str(firm), write_dir="silica", search=search, dense=lambda t, p: [("x.md", 0.1)], dense_floor=0.5)
+    assert seen and [f["kind"] for f in r["findings"]] == ["not found"]   # the other client's 0.99 never counts
+
+
+def test_the_check_never_writes(firm):
+    path = _draft(firm, "Limitation on the Northwind claim expires on 19 April 2028, six years from acceptance.")
+    before = {p: p.read_bytes() for p in firm.rglob("*") if p.is_file()}
+    run.check_note(path, str(firm), write_dir="silica")
+    assert {p: p.read_bytes() for p in firm.rglob("*") if p.is_file()} == before
+
+
+def test_a_dense_floor_belongs_to_an_embedder_silica_ships_a_row_for():
+    """A cosine floor is a property of one embedder (ADR-0078); a key that names
+    no row would sit unused while every check said "no vectors"."""
+    from silica.config import EMBEDDER_DEFAULTS
+
+    assert set(run.DENSE_FLOORS) <= set(EMBEDDER_DEFAULTS)
+    assert 0 < run.LEXICAL_FLOOR < 1
+
+
+def test_the_command_prints_the_report_and_writes_nothing(tmp_vault, capsys, monkeypatch):
+    from silica.cli import _handle_direct_shortcut
+    from silica.config import CONFIG
+
+    monkeypatch.setattr("silica.cli._check_judge", lambda: None)   # rules only: no model call from a test
+
+    tmp_vault.note("Drafts/memo.md", "---\nmatter: x\n---\n\nThe hearing listed for 17 February 2026 was adjourned by the court.\n")
+    before = (Path(CONFIG.vault_path) / "Drafts/memo.md").read_bytes()
+    assert _handle_direct_shortcut("/check Drafts/memo", []) is True
+    out = capsys.readouterr().out
+    assert "date not found" in out and "17 February 2026" in out
+    assert (Path(CONFIG.vault_path) / "Drafts/memo.md").read_bytes() == before
+
+
+# ---------------------------------------------------------------- the judge (step 2)
+
+from silica.kernel.check import judge as jd  # noqa: E402
+
+
+def _jev(kind, p=0.9, rests="1"):
+    calls = []
+
+    def decide(state, questions):
+        calls.append(questions)
+        if "rests_on" in questions:
+            return {"rests_on": {"type": "choice", "choice": rests, "probabilities": {rests: 0.8}}}
+        return {"verdict": {"type": "choice", "choice": kind, "probabilities": {kind: p}}}
+    return decide, calls
+
+
+def test_jev_decides_and_the_grade_comes_from_the_table(firm):
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.")
+    decide, calls = _jev("contradicted")
+    r = run.check_note(path, str(firm), write_dir="silica", search=lambda q, k: [
+        {"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "Acceptance certificate issued"},
+        {"path": "Research/Memo 2025 on limitation.md", "line": 5, "coverage": 0.5, "window": "runs from acceptance"}],
+        judge=lambda t, ps: jd.judge(t, ps, decide=decide, chat=None))
+    f = [x for x in r["findings"] if x["kind"] == "contradicted"]
+    assert f and f[0]["grade"] == "error" and f[0]["at"].startswith("Matters/Chronology.md")
+    assert any("rests_on" in q for q in calls)
+
+
+def test_below_its_threshold_a_verdict_is_not_checked_and_never_falls_back():
+    decide, _ = _jev("overstated", p=0.2)
+    asked = []
+    v = jd.judge("text", [{"path": "a.md", "line": 1, "text": "x"}], decide=decide, chat=lambda s: asked.append(s))
+    assert v["state"] == "not checked" and not asked
+
+
+def test_the_chat_model_answers_only_when_jev_does_not_and_must_quote():
+    passages = [{"path": "a.md", "line": 3, "text": "The gateway conditions are exhaustive. Impecuniosity alone is not enough."}]
+    good = jd.judge("t", passages, decide=lambda s, q: None,
+                    chat=lambda s: '{"verdict": "contradicted", "evidence": "The gateway conditions are exhaustive", "source": "a.md:3"}')
+    assert good == {"kind": "contradicted", "by": "chat", "at": "a.md:3"}
+    made_up = jd.judge("t", passages, decide=lambda s, q: None,
+                       chat=lambda s: '{"verdict": "contradicted", "evidence": "the conditions are only examples"}')
+    assert made_up["state"] == "not checked"
+
+
+def test_a_verdict_is_cached_by_block_and_passages_and_not_asked_again(firm):
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.")
+    decide, calls = _jev("supported")
+    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "x"}]
+    j = lambda t, ps: jd.judge(t, ps, decide=decide, chat=None)
+    first = run.check_note(path, str(firm), write_dir="silica", search=search, judge=j)
+    n = len(calls)
+    again = run.check_note(path, str(firm), write_dir="silica", search=search, judge=j)
+    assert first["cached"] == 0 and again["cached"] == 1 and len(calls) == n
+    assert (firm / ".silica/checks").is_dir()
+
+
+def test_not_in_these_passages_is_not_found():
+    rows, _ = run._verdict_rows({"kind": "not in these passages", "by": "jev", "p": 0.8}, 7)
+    assert rows[0]["kind"] == "not found"
+
+
+# ---------------------------------------------------------------- the drawer (step 3)
+
+def test_a_block_knows_its_last_line_for_the_drawers_marks():
+    out, _ = blocks.split("A paragraph that runs on for more than six words\nand wraps onto a second line.\n\n"
+                          "| a row with six words in its cells |\n")
+    assert [(b.line, b.end) for b in out] == [(1, 2), (4, 4)]
+
+
+def test_rules_arrive_first_then_one_line_per_judged_block_cached_ones_first(firm):
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.\n\n"
+                        "The hearing listed for 17 February 2026 was adjourned by the court of appeal.")
+    decide, _ = _jev("contradicted")
+    win = "Acceptance certificate issued under Schedule 3 by the engineer."
+    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": win}]
+    events = []
+    r = run.check_note(path, str(firm), write_dir="silica", search=search, progress=events.append,
+                       judge=lambda t, ps: jd.judge(t, ps, decide=decide, chat=None))
+    assert events[0]["event"] == "rules" and events[0]["calls"] == 2
+    assert ("date not found", "17 February 2026") in _kinds(events[0])
+    judged = [e for e in events[1:] if e["event"] == "block"]
+    assert [e["done"] for e in judged] == [1, 2] and all(e["of"] == 2 for e in judged)
+    c = [f for f in r["findings"] if f["kind"] == "contradicted"][0]
+    # The chronology is a short note, so the judge read it whole, not the window.
+    assert c["model"] and c["end"] == c["line"] and c["passage"].startswith("Chronology Date · Event; 2022-04-19")
+    # The report rides in the cache file, so the strip's counts are the file's.
+    assert run.read_cache(str(firm), path)["report"]["counts"] == r["counts"]
+
+
+def test_a_date_is_marked_as_the_note_spells_it(firm):
+    path = _draft(firm, "L'udienza fissata per il 17 febbraio 2026 è stata rinviata dalla corte d'appello.")
+    f = [x for x in run.check_note(path, str(firm), write_dir="silica")["findings"] if x["kind"] == "date not found"][0]
+    assert f["words"] == "17 February 2026" and f["mark"] == "17 febbraio 2026"
+
+
+def test_the_rerun_after_an_edit_asks_nothing_and_keeps_paid_verdicts(firm):
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.")
+    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "x"}]
+    never = lambda t, ps: (_ for _ in ()).throw(AssertionError("a rerun called the model"))
+    assert run.check_note(path, str(firm), write_dir="silica", search=search, cache_only=True)["states"][0]["state"] == "not checked"
+    assert not (firm / ".silica/checks").exists()   # never checked: nothing to keep
+    decide, _ = _jev("overstated")
+    run.check_note(path, str(firm), write_dir="silica", search=search, judge=lambda t, ps: jd.judge(t, ps, decide=decide, chat=None))
+    again = run.check_note(path, str(firm), write_dir="silica", search=search, judge=never, cache_only=True)
+    assert [f["kind"] for f in again["findings"]] == ["overstated"] and again["cached"] == 1
+    _draft(firm, "Limitation on the Northwind claim runs from first delivery under the Distribution Agreement.")
+    edited = run.check_note(path, str(firm), write_dir="silica", search=search, judge=never, cache_only=True)
+    assert not edited["findings"] and edited["states"][0]["state"] == "not checked"
+
+
+def test_a_cancelled_check_stops_before_its_next_call_and_keeps_what_it_paid_for(firm):
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.\n\n"
+                        "Acceptance under Schedule 3 was certified by the engineer on the agreed date.")
+    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "x"}]
+    calls = []
+    judge = lambda t, ps: (calls.append(t), {"kind": "supported", "by": "jev", "p": 0.9})[1]
+    r = run.check_note(path, str(firm), write_dir="silica", search=search, judge=judge, cancelled=lambda: len(calls) >= 1)
+    assert len(calls) == 1 and [s["say"] for s in r["states"] if s["state"] == "not checked"] == ["the check was cancelled"]
+    assert len(run.read_cache(str(firm), path)["verdicts"]) == 1
+
+
+def test_the_drawers_route_streams_rules_then_the_report_and_reruns_only_a_checked_note(tmp_vault, monkeypatch):
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    from silica.ui.web.server import app
+
+    monkeypatch.setattr("silica.cli._check_judge", lambda: None)   # rules only: no model call from a test
+    monkeypatch.setattr("silica.cli._check_legs", lambda: (None, None, None))
+    tmp_vault.note("Drafts/memo.md", "---\nmatter: x\n---\n\nThe hearing listed for 17 February 2026 was adjourned by the court.\n")
+    tc = TestClient(app, headers={"Origin": "http://testserver"})
+    lines = [_json.loads(x) for x in tc.post("/note/check", json={"path": "Drafts/memo"}).text.splitlines()]
+    assert [x["event"] for x in lines] == ["rules", "done"]
+    assert lines[-1]["counts"]["warning"] == 1 and lines[-1]["findings"][0]["line"] == 5
+    rerun = tc.post("/note/check", json={"path": "Drafts/memo", "rules": True})
+    assert _json.loads(rerun.text.splitlines()[-1]) == {"event": "done", "unchecked": True}   # no judge, no cache file
+    assert tc.post("/note/check", json={"path": "Drafts/nothing"}).status_code == 404
+
+
+def test_a_long_pass_waits_for_the_persons_go_and_asks_nothing_before_it(tmp_vault, monkeypatch):
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    from silica.ui.web.server import app
+
+    asked = []
+    hits = lambda q, k: [{"path": "Sources/rule.md", "line": 5, "coverage": 0.9, "window": "The hearing was adjourned."}]
+    monkeypatch.setattr("silica.cli._check_legs", lambda: (hits, None, None))
+    monkeypatch.setattr("silica.cli._check_judge", lambda: lambda t, ps: (asked.append(t), {"kind": "supported", "by": "jev", "p": 0.9})[1])
+    monkeypatch.setattr(run, "CONFIRM_OVER", 0)
+    tmp_vault.note("Sources/rule.md", "# Rule\n\nThe hearing listed for February was adjourned by the court.\n")
+    tmp_vault.note("Drafts/memo.md", "The hearing listed for February was adjourned by the court of appeal.\n")
+    tc = TestClient(app, headers={"Origin": "http://testserver"})
+    held = [_json.loads(x) for x in tc.post("/note/check", json={"path": "Drafts/memo"}).text.splitlines()]
+    assert [x["event"] for x in held] == ["confirm"] and held[0]["calls"] == 1 and not asked
+    went = [_json.loads(x)["event"] for x in tc.post("/note/check", json={"path": "Drafts/memo", "confirm": True}).text.splitlines()]
+    assert went == ["rules", "block", "done"] and len(asked) == 1
+
+
+def test_a_note_found_only_by_its_title_is_read_from_its_body():
+    """Step 2's four misses: the judge got "# Note on disclosure ... On models
+    A to E." and the path counted as given, so the excerpt with the rule was
+    never sent (2026-10-25)."""
+    from silica.kernel.check.pool import Note
+
+    note = Note("Research/Note on disclosure.md", "# Note on disclosure\n\nOn models A to E.\n\n## Position\n\n"
+                "Model D remains the default expectation in document-heavy claims but is not automatic.\n", {})
+    title = {"path": note.path, "line": 1, "window": "# Note on disclosure\n\nOn models A to E.\n\n"}
+    fm = {"path": "Caselaw/Ledbury.md", "line": 1, "window": "---\ntype: caselaw\nstatus: good law\n---\n\n"}
+    body = {"path": "Statutes/Act.md", "line": 9, "window": "## Firm note\n\nAccrual under section 5 is the contested point here."}
+    mp = run._model_passages([title, fm, body], [], [], {note.path: note})
+    assert [(p["path"], "not automatic" in p["text"]) for p in mp] == [("Statutes/Act.md", False), (note.path, True)]
+    # A short note is read whole even when its window is a full sentence:
+    # a window cut before "none recorded" read as support (2026-10-25).
+    full = {"path": note.path, "line": 7, "window": "## Position\n\nModel D remains the default expectation in document-heavy claims"}
+    assert [p["text"] for p in run._model_passages([full], [], [], {note.path: note})] == [run._excerpt(note)]
+    long = Note(note.path, note.text + "x " * run.NOTE_CHARS, {})
+    assert run._model_passages([full], [], [], {note.path: long})[0]["text"] == full["window"]

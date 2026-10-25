@@ -1118,6 +1118,7 @@ function syncDrawerMode() {
   toggle.dataset.tip = label;
   document.body.classList.toggle("drawer-recall", !toggle.hidden);
   renderNoteChip(); // the composers' chip follows the note the drawer holds
+  drawCheckStrip(); // the check's strip heads the text, so it goes where the text goes
 }
 
 // A vault switch leaves nothing of the old vault to reopen.
@@ -1210,6 +1211,7 @@ async function openNote(path, line, facts) {
   // button away wherever the note was opened, and the info button's dot needs
   // to know about a warning before anyone asks.
   loadContext(data.path, facts);
+  if (checkedPaths.has(data.path)) recheck(true);
   return true;
 }
 
@@ -1753,10 +1755,11 @@ function ensureEditor() {
         }).then((r) => (r.ok ? r.json() : Promise.reject(r.status))).then((d) => d.html || ""),
         openNote: openLinkedNote,
         change: () => { editConflict = false; scheduleSave(); },
-        blur: () => { saveEdit(); },
+        blur: () => { saveEdit(); recheck(); },
         save: () => { saveEdit(); },
         decorate: decorateRendered,
-        select: syncSelBar,
+        select: (view) => { syncSelBar(view); recheck(); },
+        openAt: (path, line) => openNote(path, line || undefined),
         links: (paths) => paths.map((p) => `[[${mentionLink(p)}]]`), // a tree row dropped on the note
       });
     })
@@ -1788,6 +1791,7 @@ function openLinkedNote(target) {
 // including a save that was asked for while another was in flight.
 async function releaseNote() {
   if (!editPath) return;
+  if (checkRun) checkRun.abort(); // the verdicts paid for are cached, and come back on reopening
   await saveEdit();
   while (editSaving) await editSaving;
   editPath = ""; editEtag = ""; editClean = ""; editConflict = false;
@@ -1883,6 +1887,215 @@ addEventListener("pagehide", () => {
     [JSON.stringify({ path: editPath, text: editor.getText(), etag: editEtag })],
     { type: "application/json" }));
 });
+
+// --- checking the note's sources (ADR-0110 step 3) ----------------------------
+// `check sources` reads the note on disk against the vault: the rule findings
+// land at once, the model's block by block, as marks on the text
+// (app-editor.js) and counts on the strip above it. A request of its own, so
+// the chat stays free; cancel drops it. A note checked in this page comes
+// back with its marks when it is reopened, from the server's cache and with
+// no model call, so following a box's passage and coming back loses nothing.
+const checkStrip = $("#note-check");
+const CHECK_SHOW_KEY = "check-show";
+const CHECK_GRADES = ["error", "warning", "nit"];
+let checkPath = "";       // the note the marks belong to; "" when none
+let checkRun = null;      // the AbortController of the check in flight
+let checkView = null;     // what the strip shows: {counts, pool, done, of, calls, held, notChecked}
+let recheckBusy = false;
+const checkedPaths = new Set();
+
+// Per viewer (Open 9): a lecture-notes reader hides *not found*, an auditor
+// keeps it. Nits start hidden, as the ADR has them until pressed.
+function checkShown() {
+  let list = null;
+  try { list = JSON.parse(localStorage.getItem(CHECK_SHOW_KEY) || "null"); } catch { /* unreadable: the defaults */ }
+  return new Set(Array.isArray(list) ? list : ["error", "warning", "not found"]);
+}
+
+async function readLines(resp, each) {
+  const reader = resp.body.getReader(), dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const parts = buf.split("\n");
+    buf = parts.pop();
+    for (const line of parts) if (line.trim()) each(JSON.parse(line));
+  }
+  if (buf.trim()) each(JSON.parse(buf)); // a one-line answer may end without its newline
+}
+
+// The disk is what the server checks, so the field goes there first; a
+// field the disk refused (409) is not checked against bytes it does not hold.
+async function flushForCheck() {
+  await saveEdit();
+  while (editSaving) await editSaving;
+  return !editConflict && editor.getText() === editClean;
+}
+
+function countFindings(findings) {
+  const c = { error: 0, warning: 0, nit: 0 };
+  for (const f of findings) c[f.grade]++;
+  return c;
+}
+
+async function checkSources(confirm = false) {
+  if (!editPath || !editor) return;
+  if (checkRun) checkRun.abort();
+  if (!(await flushForCheck())) { notify("this note changed on disk; reopen it before checking"); return; }
+  const path = editPath, ctl = new AbortController();
+  checkRun = ctl;
+  checkPath = path;
+  checkedPaths.add(path);
+  const seen = [];
+  checkView = { counts: countFindings(seen), pool: null, done: 0, of: 0, notChecked: 0 };
+  editor.startCheck();
+  editor.showCheck(checkShown());
+  drawCheckStrip();
+  const live = () => checkRun === ctl && editPath === path;
+  try {
+    const r = await fetch("/note/check", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, confirm }), signal: ctl.signal,
+    });
+    if (!r.ok) throw new Error(String(r.status));
+    await readLines(r, (ev) => {
+      if (!live()) return;
+      if (ev.event === "rules" || ev.event === "confirm" || ev.event === "block") {
+        editor.addCheck(ev.findings, ev.states);
+        seen.push(...ev.findings);
+        checkView.counts = countFindings(seen);
+      }
+      if (ev.event === "rules") Object.assign(checkView, { pool: ev.pool, of: ev.waiting });
+      else if (ev.event === "confirm") Object.assign(checkView, { pool: ev.pool, held: ev.calls });
+      else if (ev.event === "block") Object.assign(checkView, { done: ev.done, of: ev.of });
+      else if (ev.event === "done") {
+        // The report's counts are the cache file's (point 14, step 3).
+        Object.assign(checkView, { counts: ev.counts, pool: ev.pool, notChecked: ev.states.filter((s) => s.state === "not checked").length });
+      } else if (ev.event === "error") notify(ev.say);
+      drawCheckStrip();
+    });
+  } catch (e) {
+    if (e.name === "AbortError" && editPath === path && checkView) {
+      // The blocks it never reached; the one in flight lands in the cache.
+      Object.assign(checkView, { cancelled: true, notChecked: checkView.notChecked + Math.max(0, checkView.of - checkView.done) });
+    } else if (live()) notify("couldn't check this note");
+  } finally {
+    if (checkRun === ctl) checkRun = null;
+    if (editPath === path) drawCheckStrip();
+  }
+}
+
+// The rules again on a block typed into, once the caret has left it (Open 4),
+// and the marks of a note checked earlier in this page when it is reopened:
+// served from the cache, so no model call. The model's verdicts on an edited
+// block stay hollow until the next check.
+async function recheck(reopened = false) {
+  if (!editor || recheckBusy || checkRun || !editPath) return;
+  if (!reopened && (checkPath !== editPath || !editor.checkEdited())) return;
+  recheckBusy = true;
+  const path = editPath;
+  try {
+    if (!(await flushForCheck()) || editPath !== path) return;
+    if (reopened) { editor.startCheck(); editor.showCheck(checkShown()); }
+    const carried = editor.rebaseCheck();
+    const r = await fetch("/note/check", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, rules: true }),
+    });
+    if (!r.ok) return;
+    let report = null;
+    await readLines(r, (ev) => { if (ev.event === "done") report = ev; });
+    if (!report || editPath !== path || checkRun) return;
+    if (report.unchecked) { checkedPaths.delete(path); editor.endCheck(); return; }
+    editor.replaceCheck(report, carried);
+    checkPath = path;
+    checkView = { counts: report.counts, pool: report.pool, done: 0, of: 0,
+                  notChecked: report.states.filter((s) => s.state === "not checked").length };
+    drawCheckStrip();
+  } catch {
+    /* a rerun that failed leaves the marks hollow, which is what they are */
+  } finally {
+    recheckBusy = false;
+  }
+}
+
+function endCheck() {
+  if (checkRun) checkRun.abort();
+  checkRun = null;
+  if (checkPath) checkedPaths.delete(checkPath);
+  checkPath = "";
+  checkView = null;
+  if (editor) editor.endCheck();
+  drawCheckStrip();
+}
+
+// The strip: the counts by grade, each a toggle for its marks, and under them
+// the run's progress or what was searched. At most two lines (point 14).
+function drawCheckStrip() {
+  const on = !!checkView && checkPath === editPath && drawerMode === "note" && !detailsOn;
+  checkStrip.hidden = !on;
+  if (!on) return;
+  const v = checkView, shown = checkShown();
+  const toggle = (key, label, n) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "nc-t" + (key in v.counts ? " nc-" + key : "");
+    b.setAttribute("aria-pressed", String(shown.has(key)));
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      const next = checkShown();
+      next.has(key) ? next.delete(key) : next.add(key);
+      try { localStorage.setItem(CHECK_SHOW_KEY, JSON.stringify([...next])); } catch { /* private window: this page only */ }
+      editor.showCheck(next);
+      drawCheckStrip();
+    });
+    if (n !== undefined) b.dataset.n = String(n);
+    return b;
+  };
+  const glyph = { error: "■", warning: "▲", nit: "●" };
+  const row = document.createElement("div");
+  row.className = "nc-row";
+  for (const g of CHECK_GRADES) {
+    const n = v.counts[g];
+    row.append(toggle(g, `${glyph[g]} ${n} ${g}${n === 1 ? "" : "s"}`, n));
+  }
+  row.append(toggle("not found", "not found"));
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "nc-close";
+  close.setAttribute("aria-label", "clear the check");
+  close.textContent = "×";
+  close.addEventListener("click", endCheck);
+  row.append(close);
+  const sub = document.createElement("div");
+  sub.className = "nc-sub";
+  const act = (label, fn) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "nc-act";
+    b.textContent = label;
+    b.addEventListener("click", fn);
+    return b;
+  };
+  if (v.held && !checkRun) {
+    // Cancel keeps the rule marks: only the model's pass waited for a go.
+    sub.append(`${v.held} blocks for the model · `, act("go", () => checkSources(true)), " · ",
+      act("cancel", () => { v.held = 0; drawCheckStrip(); }));
+  } else if (checkRun) {
+    sub.append(v.of ? `judging ${v.done} of ${v.of} · ` : "reading the vault · ", act("cancel", () => checkRun && checkRun.abort()));
+  } else if (v.pool) {
+    const p = v.pool;
+    const where = p.scope === "whole" ? "searched the whole vault"
+      : p.scope === "party" ? `${p.size} of ${p.of} notes · ${p.values.join(", ")}`
+      : `${p.size} of ${p.of} notes · no party value here, so other parties' notes are out`;
+    sub.textContent = where + (v.cancelled ? " · cancelled" : "") + (v.notChecked ? ` · ${v.notChecked} not checked` : "");
+    sub.title = sub.textContent;
+  }
+  checkStrip.replaceChildren(row, sub);
+}
+
+$("#note-check-open").addEventListener("click", () => checkSources());
 
 // --- a selected passage ------------------------------------------------------
 // The whole-note asks cannot aim at a sentence; a selection can (ADR-0059).

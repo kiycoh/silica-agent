@@ -120,7 +120,7 @@ Small samples, a flash-class judge, 2 of LoCoMo's 10 conversations: not comparab
 Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://github.com/kiycoh/silica-core), the retrieval engine Silica is built on, with no model in the loop.
 
 <details>
-<summary><b>All 62 commands</b></summary>
+<summary><b>All 63 commands</b></summary>
 
 <br/>
 
@@ -186,7 +186,8 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/plans` | list plans/ notes grouped by status: (todo\|in-progress\|blocked\|done) |
 | `/path <noteA> <noteB>` | shortest reading path between two notes (wikilinks + co-occurrence) |
 | `/contested` | list notes flagged contested: true with their unresolved contradictions |
-| `/verify <note> [--clear]` | vouch for a note as a person (OKF verified, bound to the body); --clear withdraws |
+| `/verify <note> [--clear] [--as "<name>"]` | vouch for a note as a person (OKF verified, bound to the body); --clear withdraws, --as signs with a name |
+| `/check <note>` | read a note you wrote against the vault, block by block: what a source contradicts or overstates, links, identifiers, dates and quotations, by grade; never edits it. In the app, `check sources` in the note's menu underlines the text |
 
 **Session and settings**
 

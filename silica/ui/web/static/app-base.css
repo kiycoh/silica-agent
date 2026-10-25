@@ -106,6 +106,10 @@
      rule above does not bind them. */
   --warn: #E0A93B;
   /* amber, caution only */
+  --err: #FF6B57;
+  /* a source check's error (ADR-0110 point 11): change it before the text
+     leaves. Not --del, whose rose reads as a deletion in a note; a coral red,
+     5.37:1 on --sheet (the drawer) and 4.53:1 on --bubble. */
   --add: #4FD08A;
   --del: #EB778E;
   /* the two diff poles. Added and removed is the one place in this app where the
@@ -301,6 +305,8 @@
   /* paper's shells are black, so the light that crosses them is a teal brighter
      than the accent rather than the accent itself */
   --warn: #7A4F03;
+  --err: #B3261E;
+  /* 6.54:1 on --sheet, 4.57:1 on --bubble */
   /* the diff poles walked into paper's contrast range: the dark set's mint and
      rose are both under 2:1 on a white sheet */
   --add: #186B44;

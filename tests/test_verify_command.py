@@ -139,6 +139,23 @@ def test_verify_command_writes_human_entry_and_a_checkpoint(tmp_vault, monkeypat
     assert not is_human_verified(_data(content))
 
 
+def test_verify_signs_with_the_name_given_and_as_owner_on_the_server(tmp_vault, monkeypatch):
+    """ADR-0110 point 1: the server's login is the tenant's service user, which
+    names no one, so a stamp made there says `owner` unless the person signs."""
+    from silica.cli import _handle_direct_shortcut
+    from silica.config import CONFIG
+
+    monkeypatch.setattr("getpass.getuser", lambda: "silica-t05")
+    tmp_vault.note("c/a.md", NOTE)
+    tmp_vault.note("c/b.md", NOTE)
+    assert _handle_direct_shortcut('/verify c/a --as "Ada Lovelace"', []) is True
+    monkeypatch.setattr("silica.config.hosted", lambda: True)
+    assert _handle_direct_shortcut("/verify c/b", []) is True
+    read = lambda p: verified_entries(_data((Path(CONFIG.vault_path) / p).read_text(encoding="utf-8")))
+    assert [e["by"] for e in read("c/a.md")] == ["human:Ada Lovelace"]
+    assert [e["by"] for e in read("c/b.md")] == ["human:owner"]
+
+
 def test_mcp_write_still_refuses_the_verified_key(tmp_vault):
     from silica.tools.notes import silica_write_note
 
