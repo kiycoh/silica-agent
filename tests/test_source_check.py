@@ -313,7 +313,8 @@ def test_rules_arrive_first_then_one_line_per_judged_block_cached_ones_first(fir
     path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.\n\n"
                         "The hearing listed for 17 February 2026 was adjourned by the court of appeal.")
     decide, _ = _jev("contradicted")
-    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "Acceptance certificate"}]
+    win = "Acceptance certificate issued under Schedule 3 by the engineer."
+    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": win}]
     events = []
     r = run.check_note(path, str(firm), write_dir="silica", search=search, progress=events.append,
                        judge=lambda t, ps: jd.judge(t, ps, decide=decide, chat=None))
@@ -322,7 +323,7 @@ def test_rules_arrive_first_then_one_line_per_judged_block_cached_ones_first(fir
     judged = [e for e in events[1:] if e["event"] == "block"]
     assert [e["done"] for e in judged] == [1, 2] and all(e["of"] == 2 for e in judged)
     c = [f for f in r["findings"] if f["kind"] == "contradicted"][0]
-    assert c["model"] and c["end"] == c["line"] and c["passage"] == "Acceptance certificate"
+    assert c["model"] and c["end"] == c["line"] and c["passage"] == win
     # The report rides in the cache file, so the strip's counts are the file's.
     assert run.read_cache(str(firm), path)["report"]["counts"] == r["counts"]
 
@@ -397,3 +398,18 @@ def test_a_long_pass_waits_for_the_persons_go_and_asks_nothing_before_it(tmp_vau
     assert [x["event"] for x in held] == ["confirm"] and held[0]["calls"] == 1 and not asked
     went = [_json.loads(x)["event"] for x in tc.post("/note/check", json={"path": "Drafts/memo", "confirm": True}).text.splitlines()]
     assert went == ["rules", "block", "done"] and len(asked) == 1
+
+
+def test_a_note_found_only_by_its_title_is_read_from_its_body():
+    """Step 2's four misses: the judge got "# Note on disclosure ... On models
+    A to E." and the path counted as given, so the excerpt with the rule was
+    never sent (2026-10-25)."""
+    from silica.kernel.check.pool import Note
+
+    note = Note("Research/Note on disclosure.md", "# Note on disclosure\n\nOn models A to E.\n\n## Position\n\n"
+                "Model D remains the default expectation in document-heavy claims but is not automatic.\n", {})
+    title = {"path": note.path, "line": 1, "window": "# Note on disclosure\n\nOn models A to E.\n\n"}
+    fm = {"path": "Caselaw/Ledbury.md", "line": 1, "window": "---\ntype: caselaw\nstatus: good law\n---\n\n"}
+    body = {"path": "Statutes/Act.md", "line": 9, "window": "## Firm note\n\nAccrual under section 5 is the contested point here."}
+    mp = run._model_passages([title, fm, body], [], [], {note.path: note})
+    assert [(p["path"], "not automatic" in p["text"]) for p in mp] == [("Statutes/Act.md", False), (note.path, True)]

@@ -66,6 +66,9 @@ Dense = Callable[[str, set[str]], "list[tuple[str, float]] | None"]
 Judge = Callable[[str, list[dict]], "dict | None"]
 CACHE_DIR = ".silica/checks"
 NOTE_CHARS = 900
+# Fewer body words than this under a window's headings and frontmatter, and
+# the window is a title, not a passage (_thin).
+THIN_WORDS = 8
 
 
 def _line_of(text: str, offset: int) -> int:
@@ -96,15 +99,33 @@ def _excerpt(note: pl.Note) -> str:
     return note.text[sum(len(x) + 1 for x in note.text.split("\n")[:blk.body_start(note.text)]):][:NOTE_CHARS]
 
 
+def _thin(window: str) -> bool:
+    """A search window that is only a note's title and subtitle, or its
+    frontmatter: the note's words matched, its point sits further down. All
+    four misses of step 2's test set were such windows (2026-10-25): the
+    judge was handed "# Note on disclosure ... On models A to E." and never
+    the sentence it needed, so it answered "not in these passages"."""
+    lines = window.split("\n")[blk.body_start(window):]
+    return len([w for ln in lines if not ln.lstrip().startswith("#") for w in ln.split()]) < THIN_WORDS
+
+
 def _model_passages(passages: list[dict], cited: list[str], near: list[tuple[str, float]],
                     notes: dict[str, pl.Note]) -> list[dict]:
     """What the judge reads: the search's passages, then the notes the block
     links or names, then the pool's nearest notes by meaning, which is how an
-    Italian block reaches its English source when no word matches."""
-    out = [{"path": h["path"], "line": h.get("line", 1), "text": h.get("window") or h.get("snippet") or ""}
-           for h in passages]
-    seen = {o["path"] for o in out}
-    for path in cited + [p for p, _s in near[:2]]:
+    Italian block reaches its English source when no word matches. A note
+    the search found only by its title is read from its body instead."""
+    out, thin = [], []
+    for h in passages:
+        text = h.get("window") or h.get("snippet") or ""
+        if _thin(text):
+            thin.append(h["path"])
+        else:
+            out.append({"path": h["path"], "line": h.get("line", 1), "text": text})
+    # A thin hit's note gets its excerpt even beside a fuller hit of its own:
+    # Brindle's "Ratio" window came without the "Holding" above it.
+    seen = {o["path"] for o in out} - set(thin)
+    for path in list(dict.fromkeys(thin + cited + [p for p, _s in near[:2]])):
         if path not in seen and path in notes:
             seen.add(path)
             out.append({"path": path, "line": blk.body_start(notes[path].text) + 1, "text": _excerpt(notes[path])})
