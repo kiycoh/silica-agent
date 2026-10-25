@@ -369,3 +369,38 @@ def test_today_says_how_far_behind_the_calendar_drawn_when_the_plan_was_made():
     assert on_time["behind"] == 0 and "behind" not in on_time["say"]
     fresh = plans.today_line({**plan, "created": "2026-10-25"}, [False] * 4, today=date(2026, 10, 25))
     assert fresh["behind"] is None
+
+
+def test_a_stem_two_notes_share_resolves_as_the_walk_did():
+    """The name index keeps the walk's answer: the exact path first, then the
+    first note in the notes' order holding the stem."""
+    notes = {"B/Regressione lineare.md": {}, "A/Sub/Regressione lineare.md": {}, "C/Altro.md": {}}
+    assert plans.resolve_title("Regressione lineare", notes) == "B/Regressione lineare.md"
+    assert plans.resolve_title("A/Sub/Regressione lineare", notes) == "A/Sub/Regressione lineare.md"
+    assert plans.resolve_title("regressione LINEARE", notes) == "B/Regressione lineare.md"
+    notes["D/Nuova.md"] = {}
+    assert plans.resolve_title("Nuova", notes) == "D/Nuova.md"     # a grown dict rebuilds the index
+    assert plans.resolve_title("Nessuna", notes) is None
+
+
+def test_topic_vectors_survive_a_restart_and_never_cross_models(tmp_vault):
+    calls = []
+
+    class Emb:
+        model = "m1"
+
+        def embed(self, texts):
+            calls.extend(texts)
+            return [[float(len(t)), 1.0] for t in texts]
+
+    plans._VEC_MEMO.clear()
+    assert plans._embed(["kernel trick"], Emb()) == [[12.0, 1.0]]
+    plans._VEC_MEMO.clear()                       # a new process: the disk answers
+    assert plans._embed(["kernel trick"], Emb()) == [[12.0, 1.0]] and calls == ["kernel trick"]
+
+    class Other(Emb):
+        model = "m2"
+
+    plans._embed(["kernel trick"], Other())
+    assert calls == ["kernel trick", "kernel trick"]   # another model embeds again
+    plans._VEC_MEMO.clear()

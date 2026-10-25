@@ -15,6 +15,7 @@ and is never rewritten.
 """
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from pathlib import Path
@@ -244,11 +245,26 @@ def _by_name(name: str, notes: dict) -> str | None:
     cand = name if name.endswith(".md") else name + ".md"
     if cand in notes:
         return cand
-    low = Path(name).stem.casefold()
-    for p in notes:
-        if Path(p).stem.casefold() == low:
-            return p
-    return None
+    return _stem_index(notes).get(Path(name).stem.casefold())
+
+
+# {casefolded stem: the first path holding it, in the notes' own order}, for
+# the notes dict last asked about: the stem was looked up by walking every
+# note, 4,860 walks of 2,082 notes in one course preview, 16 s of a 30 s
+# profile (2026-10-25). The dict is held, not its id, so a new dict never
+# reads an old index; a changed length rebuilds it.
+_STEMS: tuple = (None, -1, {})
+
+
+def _stem_index(notes: dict) -> dict[str, str]:
+    global _STEMS
+    held, size, index = _STEMS
+    if held is not notes or size != len(notes):
+        index = {}
+        for p in notes:
+            index.setdefault(Path(p).stem.casefold(), p)
+        _STEMS = (notes, len(notes), index)
+    return index
 
 
 def notes_of(target) -> list[str]:
@@ -1294,12 +1310,39 @@ _VEC_MEMO: dict[tuple[str, str], list[float]] = {}
 
 def _embed(texts: list[str], embedder) -> list[list[float]]:
     model = str(getattr(embedder, "model", "") or type(embedder).__name__)
+    if not _VEC_MEMO:
+        _VEC_MEMO.update(_vectors_on_disk())
     todo = [t for t in dict.fromkeys(texts) if (model, t) not in _VEC_MEMO]
     if todo:
         if len(_VEC_MEMO) > 4000:
             _VEC_MEMO.clear()
         _VEC_MEMO.update(((model, t), v) for t, v in zip(todo, embedder.embed(todo)))
+        _vectors_on_disk(_VEC_MEMO)
     return [_VEC_MEMO[(model, t)] for t in texts]
+
+
+def _vectors_on_disk(value: dict | None = None) -> dict:
+    """Read (no value) or write the plan's topic vectors in the vault's index
+    directory, keyed "model<TAB>text": after a restart the first preview of
+    the course embedded its 120 topics again, 4.5 of its 13 s, and on hosted
+    each is a paid call (ADR-0131 amendment, point 3). {} when absent or
+    unreadable."""
+    import orjson
+
+    from silica.kernel.recall.paths import atomic_write_bytes, index_dir
+
+    path = index_dir() / "plan_vectors.json"
+    try:
+        if value is not None:
+            atomic_write_bytes(path, orjson.dumps({f"{m}\t{t}": v for (m, t), v in value.items()},
+                                                  option=orjson.OPT_SERIALIZE_NUMPY))
+            return value
+        data = orjson.loads(path.read_bytes())
+        return {tuple(k.split("\t", 1)): v for k, v in data.items() if "\t" in k}
+    except (OSError, ValueError, TypeError):
+        # A derived cache: unreadable means embed again, unwritable means the
+        # next process embeds again, never a wrong vector (the model is in the key)
+        return {}
 
 
 # A row's idea note met by a topic's title vector (ADR-0131 point 3). Read on
@@ -1403,23 +1446,36 @@ def _named_otherwise(topic: str, notes: dict, allowed: set[str]) -> tuple[str | 
     return None, ""
 
 
+@functools.lru_cache(maxsize=50_000)
+def _root_words_cached(text: str) -> tuple[str, ...]:
+    joined = [re.sub(r"[-\s]", "", m).casefold() for m in re.findall(r"\b\w+-\w+\b", text)]
+    return tuple(_root(w) for w in _content_words(text) + joined)
+
+
 def _root_words(text: str) -> list[str]:
     """Content words without their last vowel, so an Italian plural meets its
     singular: "reti neurali" and "Rete neurale" share both words."""
-    # "ada-boost" in a syllabus is the note "AdaBoost": the joined form too
-    joined = [re.sub(r"[-\s]", "", m).casefold() for m in re.findall(r"\b\w+-\w+\b", text)]
-    return [_root(w) for w in _content_words(text) + joined]
+    # "ada-boost" in a syllabus is the note "AdaBoost": the joined form too.
+    # Cached: a course preview asked for the roots of the same 1,100 titles
+    # 72,000 times, 2.5 s of a cold preview (2026-10-25)
+    return list(_root_words_cached(text))
 
 
 def _root(word: str) -> str:
     return word[:-1] if len(word) >= 4 and word[-1] in "aeiouàèéìòù" else word
 
 
-def _content_words(text: str) -> list[str]:
-    from silica.kernel.text.language import stopwords_for
+_STOP: frozenset[str] | None = None
 
-    stop = stopwords_for("italian") | stopwords_for("english")
-    return [w for w in re.findall(r"[^\W\d_]{4,}", text.casefold()) if w not in stop]
+
+def _content_words(text: str) -> list[str]:
+    global _STOP
+    if _STOP is None:
+        from silica.kernel.text.language import stopwords_for
+
+        # once: the union was rebuilt on each of 72,000 calls in one preview
+        _STOP = stopwords_for("italian") | stopwords_for("english")
+    return [w for w in re.findall(r"[^\W\d_]{4,}", text.casefold()) if w not in _STOP]
 
 
 def _search_notes(text: str, notes: dict, k: int = 2, explain: bool = False):
