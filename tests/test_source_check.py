@@ -323,7 +323,8 @@ def test_rules_arrive_first_then_one_line_per_judged_block_cached_ones_first(fir
     judged = [e for e in events[1:] if e["event"] == "block"]
     assert [e["done"] for e in judged] == [1, 2] and all(e["of"] == 2 for e in judged)
     c = [f for f in r["findings"] if f["kind"] == "contradicted"][0]
-    assert c["model"] and c["end"] == c["line"] and c["passage"] == win
+    # The chronology is a short note, so the judge read it whole, not the window.
+    assert c["model"] and c["end"] == c["line"] and c["passage"].startswith("Chronology Date · Event; 2022-04-19")
     # The report rides in the cache file, so the strip's counts are the file's.
     assert run.read_cache(str(firm), path)["report"]["counts"] == r["counts"]
 
@@ -413,3 +414,9 @@ def test_a_note_found_only_by_its_title_is_read_from_its_body():
     body = {"path": "Statutes/Act.md", "line": 9, "window": "## Firm note\n\nAccrual under section 5 is the contested point here."}
     mp = run._model_passages([title, fm, body], [], [], {note.path: note})
     assert [(p["path"], "not automatic" in p["text"]) for p in mp] == [("Statutes/Act.md", False), (note.path, True)]
+    # A short note is read whole even when its window is a full sentence:
+    # a window cut before "none recorded" read as support (2026-10-25).
+    full = {"path": note.path, "line": 7, "window": "## Position\n\nModel D remains the default expectation in document-heavy claims"}
+    assert [p["text"] for p in run._model_passages([full], [], [], {note.path: note})] == [run._excerpt(note)]
+    long = Note(note.path, note.text + "x " * run.NOTE_CHARS, {})
+    assert run._model_passages([full], [], [], {note.path: long})[0]["text"] == full["window"]

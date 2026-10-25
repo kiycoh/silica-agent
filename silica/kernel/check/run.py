@@ -65,7 +65,12 @@ Search = Callable[[str, int], list[dict]]
 Dense = Callable[[str, set[str]], "list[tuple[str, float]] | None"]
 Judge = Callable[[str, list[dict]], "dict | None"]
 CACHE_DIR = ".silica/checks"
-NOTE_CHARS = 900
+# A note this short is read whole, never by a search window. Two of the
+# three misses of the second test set were windows: one cut at "Agreements
+# known to have been drafted fro" before "none recorded", one the wrong
+# section of a 900-character note (2026-10-25). The testbench's shared notes
+# run 300 to 1,500 characters of body.
+NOTE_CHARS = 1800
 # Fewer body words than this under a window's headings and frontmatter, and
 # the window is a title, not a passage (_thin).
 THIN_WORDS = 8
@@ -95,8 +100,12 @@ def _cache_path(vault: str, path: str) -> Path:
     return Path(vault) / CACHE_DIR / (hashlib.sha1(path.encode()).hexdigest()[:16] + ".json")
 
 
+def _body(note: pl.Note) -> str:
+    return note.text[sum(len(x) + 1 for x in note.text.split("\n")[:blk.body_start(note.text)]):]
+
+
 def _excerpt(note: pl.Note) -> str:
-    return note.text[sum(len(x) + 1 for x in note.text.split("\n")[:blk.body_start(note.text)]):][:NOTE_CHARS]
+    return _body(note)[:NOTE_CHARS]
 
 
 def _thin(window: str) -> bool:
@@ -109,18 +118,26 @@ def _thin(window: str) -> bool:
     return len([w for ln in lines if not ln.lstrip().startswith("#") for w in ln.split()]) < THIN_WORDS
 
 
+def _short(note: pl.Note | None) -> bool:
+    return note is not None and len(_body(note)) <= NOTE_CHARS
+
+
 def _model_passages(passages: list[dict], cited: list[str], near: list[tuple[str, float]],
                     notes: dict[str, pl.Note]) -> list[dict]:
     """What the judge reads: the search's passages, then the notes the block
     links or names, then the pool's nearest notes by meaning, which is how an
-    Italian block reaches its English source when no word matches. A note
-    the search found only by its title is read from its body instead."""
+    Italian block reaches its English source when no word matches. A short
+    note, or one the search found only by its title, is read from its body
+    instead of a window."""
     out, thin = [], []
     for h in passages:
         text = h.get("window") or h.get("snippet") or ""
-        if _thin(text):
+        if _thin(text) or _short(notes.get(h["path"])):
             thin.append(h["path"])
         else:
+            # shortcut: a long note's window can still cut the sentence that
+            # decides; widen it to the hit's section once a gate misses on a
+            # note over NOTE_CHARS.
             out.append({"path": h["path"], "line": h.get("line", 1), "text": text})
     # A thin hit's note gets its excerpt even beside a fuller hit of its own:
     # Brindle's "Ratio" window came without the "Holding" above it.

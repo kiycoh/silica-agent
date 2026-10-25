@@ -44,7 +44,13 @@ QUESTION = {"verdict": {
 # below it the block is not checked. Set at step 2's gate on the step 1
 # drafts and frozen (ADR-0110 point 14).
 THRESHOLDS: dict[str, float] = {k: 0.5 for k in CRITERIA}
-PASSAGE_CHARS = 900
+# "Supported" vouches for the block, so it needs more: the second test set's
+# two false "supported" came at 0.60 and 0.67, its eight true ones at 0.77 or
+# more (2026-10-25). The first set had one true at 0.62, now not checked: a
+# block left open costs less than one wrongly vouched for.
+THRESHOLDS["supported"] = 0.75
+# run.NOTE_CHARS: a short note reaches the judge whole.
+PASSAGE_CHARS = 1800
 
 Decide = Callable[[dict, dict], "dict | None"]
 Chat = Callable[[str], str]
