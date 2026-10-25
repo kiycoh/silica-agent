@@ -112,6 +112,7 @@ def read_plan(path: str, text: str | None = None) -> dict:
         "by": str(data.get("by") or "") or None,
         "restrict": str(data.get("restrict") or ""),
         "refused": [x.strip() for x in str(data.get("refused") or "").split(" | ") if x.strip()],
+        "matched": parse_matched(data.get("matched")),
         "created": str(data.get("created") or data.get("date") or "")[:10] or None,
         "status": str(data.get("status") or "active"),
         "completed": str(data.get("completed") or "") or None,
@@ -126,6 +127,26 @@ def read_plan(path: str, text: str | None = None) -> dict:
         "tree_links": section_links(body, "Tree"),
         "legacy": legacy,
     }
+
+
+def parse_matched(value) -> dict[str, str]:
+    """{topic: note title} from a plan's `matched:` ("topic -> Note | ..."):
+    the reader's answer to "is it one of these?" for a topic no source met
+    (ADR-0131 amendment, point 5). Plain titles, no links: a link in a plan
+    key would be one more note of the plan."""
+    if isinstance(value, dict):
+        return {str(k).strip(): str(v).strip() for k, v in value.items() if str(k).strip() and str(v).strip()}
+    out = {}
+    for bit in str(value or "").split(" | "):
+        if " -> " in bit:
+            t, n = bit.split(" -> ", 1)
+            if t.strip() and n.strip():
+                out[t.strip()] = n.strip().strip("[]")
+    return out
+
+
+def matched_text(matched: dict[str, str]) -> str:
+    return " | ".join(f"{t} -> {n}" for t, n in matched.items())
 
 
 def _hours_of(value) -> float | None:
@@ -190,8 +211,14 @@ _DEPTH_MARK_RE = re.compile(r"\s·\s(deep|well|read)(?=\s·|$)")
 
 
 def _marks(node: dict) -> str:
-    """The step line's tail: its weight in the reference's unit, its depth."""
+    """The step line's tail: the topics met by meaning only (plain titles: a
+    link there would be one more note of the step), its weight in the
+    reference's unit, its depth."""
     out = ""
+    pairs = node.get("by_meaning") or []
+    if pairs:
+        # no colon: it is what tells a step's label from its notes
+        out += " · by meaning, " + "; ".join(f"{t} ≈ {n}" for t, n in pairs[:3])
     h = node.get("hours")
     if h:
         n = f"{h:g}"
@@ -295,7 +322,7 @@ def target_text(scope: str, target) -> str:
 
 
 def resolve_scope(kind: str, target, restrict: str = "", refused=(), declared: dict[str, str] | None = None,
-                  declared_why: str = "you set it") -> dict:
+                  declared_why: str = "you set it", matched: dict[str, str] | None = None) -> dict:
     """{paths, tree, gaps} for a scope (D23). `target` is the scope's argument:
     paths for notes, a prefix for folder, a term for topic, a note or a
     directive for steps. `restrict` bounds the material: a folder prefix for
@@ -339,7 +366,7 @@ def resolve_scope(kind: str, target, restrict: str = "", refused=(), declared: d
     if kind == "topic":
         return _topic_scope(str(target), allowed)
     if kind == "steps":
-        return _steps_scope(str(target), notes, allowed, set(refused or ()), declared, declared_why)
+        return _steps_scope(str(target), notes, allowed, set(refused or ()), declared, declared_why, matched)
     if kind == "workspace":
         return _workspace_scope(str(target), allowed)
     raise ValueError(f"unknown scope kind {kind!r}")
@@ -452,7 +479,8 @@ def topics_like(q: str, k: int = 4) -> list[dict]:
 
 
 def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | None = None,
-                 declared: dict[str, str] | None = None, declared_why: str = "you set it") -> dict:
+                 declared: dict[str, str] | None = None, declared_why: str = "you set it",
+                 matched: dict[str, str] | None = None) -> dict:
     """Each step line resolved to the notes that cover it: wikilinks first,
     then the title index, then one body search; a step with no note is kept
     as a gap (the plan's most useful line). Each line says how it matched
@@ -521,10 +549,19 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
         if ctx["material"]:
             found, missing, approx, how, doubt = _with_sources(i, text, labels[i], topics, hits, found, how, doubt,
                                                                approx, node, ctx)
+        # the reader's answer for a topic no source met ("is it one of these?")
+        said = {t: resolve_title(matched[t], notes) for t in missing if matched and t in matched}
+        said = {t: p for t, p in said.items() if p}
+        if said:
+            missing = [t for t in missing if t not in said]
+            found = list(dict.fromkeys(list(found) + list(said.values())))
+            node["matched"] = {t: Path(p).stem for t, p in said.items()}
         if missing:
             node["missing"] = missing
         if approx:
             node["approx"] = approx
+        if ctx["material"] and ctx["by_meaning"].get(i):
+            node["by_meaning"] = ctx["by_meaning"][i][:3]
         # by index from the form, by its text from the plan note (`refused:`)
         if refused and (i in refused or text in refused):
             node.update(leaves=[], gap=True, refused=len(found), how="refused")
@@ -536,6 +573,7 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
     if ctx["material"]:
         _fill_activity(tree, ctx, notes, refused or set())
         _one_note_per_step(tree, set(ctx["practice"]), ctx)
+        _gap_candidates(tree, notes)
         if ctx["ordered"]:
             # position means something only when the material follows the reference
             _place_by_position(tree, ctx, refused or set())
@@ -574,7 +612,7 @@ def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: 
     others = [c for c in colls if c not in material and role.get(c["key"], {}).get("role") != so.UNUSED]
     ctx = {"material": material, "others": others, "practice": [], "activity": set(), "lines": lines,
            "origin": {}, "colls": colls, "rows": {}, "covered": {}, "meaning": {}, "ordered": False,
-           "labels": labels}
+           "labels": labels, "by_meaning": {}}
     if not material:
         return ctx
     ctx["practice"] = so.practice_notes(allowed)
@@ -682,6 +720,18 @@ def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: 
         ctx["rows"][i] = sec
         ctx["covered"][i] = {t for t, wt in ts if wt != so.W_LABEL and any(holds(t, r, ROW_NEAR) for r in sec)}
         ctx["meaning"][i] = {r["note"] for r in sec if r["note"] and how.get((r["spine"], r["i"])) == "meaning"}
+        # a topic only a title vector met, and the note that met it best: the
+        # coverage a reader should check, said by topic (amendment, point 5)
+        pairs = []
+        for t, wt in ts:
+            if wt == so.W_LABEL or t not in ctx["covered"][i]:
+                continue
+            if any(holds(t, r, ROW_NEAR) == "words" for r in sec):
+                continue
+            near = [(dense.get(t, {}).get(r["note"], (0.0, False))[0], r["note"]) for r in sec if r["note"]]
+            if near:
+                pairs.append((t, Path(max(near)[1]).stem))
+        ctx["by_meaning"][i] = pairs
     return ctx
 
 
@@ -805,6 +855,51 @@ def _fill_activity(tree: list[dict], ctx: dict, notes: dict, refused: set) -> No
             node.update(leaves=leaves, gap=False, how=f"{len(labs)} practice · {len(sec)} rows", doubt=False)
         else:
             node.update(leaves=[], gap=True, how="no practice note found")
+
+
+CANDIDATES = 4
+
+
+def _gap_candidates(tree: list[dict], notes: dict) -> None:
+    """For each topic a step names and no source met, the step's notes
+    nearest it by title vector (by shared words without an embedder): the
+    choices of "is it one of these?" (ADR-0131 amendment, point 5). Lecture
+    19 says "Schemi auto-associativi" where the syllabus says "schemi
+    codificatore/decodificatore", and nothing met it."""
+    asks = [(n, t) for n in tree if not n.get("gap") for t in n.get("missing") or []]
+    if not asks:
+        return
+    try:
+        from collections import Counter
+
+        from silica.agent.providers import get_embedder_or_none
+        from silica.config import CONFIG
+        from silica.kernel.recall.embed import _note_title_text, get_store
+
+        store = get_store()
+        embedder = get_embedder_or_none(CONFIG, "plan topics", level="info") if len(store) else None
+    except Exception as exc:  # noqa: BLE001
+        # no index: the choices fall back to shared words
+        logger.info("plan gaps: no title vectors (%s)", exc)
+        store = embedder = None
+    for node, t in asks:
+        leaves = [p for p in node["leaves"] if p.endswith(".md")]
+        ranked: list[str] = []
+        if embedder is not None and leaves:
+            try:
+                keys = {p.removesuffix(".md"): p for p in leaves}
+                folder = Counter(p.rsplit("/", 1)[0] for p in keys if "/" in p).most_common(1)
+                vec = _embed([_note_title_text(t, folder=folder[0][0] if folder else "")], embedder)[0]
+                outside = {p for p in store.paths() if p not in keys}
+                ranked = [keys[h["path"]] for h in store.title_cosine_top_k(vec, k=CANDIDATES, exclude=outside)
+                          if h["path"] in keys]
+            except Exception as exc:  # noqa: BLE001
+                # a failed lookup leaves the shared-words choices below
+                logger.info("plan gaps: candidates by words for %r (%s)", t, exc)
+        if not ranked:
+            words = set(_root_words(t))
+            ranked = sorted(leaves, key=lambda p: -len(words & set(_root_words(Path(p).stem))))[:CANDIDATES]
+        node.setdefault("candidates", {})[t] = [Path(p).stem for p in ranked[:CANDIDATES]]
 
 
 def _one_note_per_step(tree: list[dict], practice: set[str], ctx: dict | None = None) -> None:
@@ -1900,7 +1995,8 @@ def today_line(plan: dict, passed: list[bool] | None = None, today=None) -> dict
             "first": _step_label(steps[first]) if first is not None else "", "say": " ".join(b for b in bits if b)}
 
 
-_STEP_MARKS_RE = re.compile(r"\s*\((?:≈|ref)\)|\s·\s(?:weight\s\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?\s(?:h|CFU|ECTS|wk|min)|deep|well|read)(?=\s·|$)")
+_STEP_MARKS_RE = re.compile(r"\s*\((?:≈|ref)\)|\s·\s(?:weight\s\d+(?:[.,]\d+)?|\d+(?:[.,]\d+)?\s(?:h|CFU|ECTS|wk|min)|deep|well|read"
+                            r"|by meaning, [^·]*?)(?=\s·|$)")
 
 
 def _step_label(step: dict) -> str:
@@ -2079,6 +2175,7 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
         "today": today_line(plan, passed),
         "assessment_set": plan.get("assessment_set", False), "guide": plan.get("guide", ""),
         "materials": plan.get("materials", ""), "references": plan.get("references", ""),
+        "matched": plan.get("matched", {}),
         "unused": plan.get("unused", ""),
         "complete": completion(plan, entries, passed, steps),
         "paths": paths, "gaps": [s["text"] for s in steps if s["gap"]],
@@ -2261,7 +2358,7 @@ def close_plan(plan_path: str, reopen: bool = False) -> dict:
 def write_plan(name: str, scope: str, target, reach: str = "relational", by: str | None = None,
                restrict: str = "", folder: str = "Plans", objectives=None, cards: list[dict] | None = None,
                refused=(), declared: dict[str, str] | None = None, hours=None, assessment=None,
-               guide: str = "", declared_why: str = "you set it") -> dict:
+               guide: str = "", declared_why: str = "you set it", matched: dict[str, str] | None = None) -> dict:
     """The plan note through the write gate (silica_write_note): scope,
     objectives (the chosen intentions in frontmatter, the cards under
     `## Objectives`), tree, steps with a because clause and gaps, an empty
@@ -2281,7 +2378,7 @@ def write_plan(name: str, scope: str, target, reach: str = "relational", by: str
     if reach not in REACH:
         reach = "relational"
     resolved = resolve_scope(scope, target, restrict=restrict, refused=refused, declared=declared,
-                             declared_why=declared_why)
+                             declared_why=declared_why, matched=matched)
     parts, assessment_value = _parts_of(resolved, assessment) if scope == "steps" else ([], None)
     resolved["parts"] = parts
     if scope == "steps":
@@ -2307,6 +2404,9 @@ def write_plan(name: str, scope: str, target, reach: str = "relational", by: str
         # one string, because the gate stringifies a list prop
         props["refused"] = " | ".join(refused_lines)
     props.update(_role_keys(resolved.get("sources") or []))
+    kept = _matched_kept(resolved)
+    if kept:
+        props["matched"] = matched_text(kept)
     if _hours_of(hours):
         props["hours"] = f"{_hours_of(hours):g}"
     if assessment_value:
@@ -2400,6 +2500,12 @@ def _sources_sentence(sources: list[dict]) -> str:
     bits = [f"{s['label']}, {'the material' if s['role'] == so.MATERIAL else 'a reference'} ({s.get('why', '')})"
             for s in sources if s.get("role") in (so.MATERIAL, so.REFERENCE)]
     return ("Sources: " + "; ".join(bits) + ".") if bits else ""
+
+
+def _matched_kept(resolved: dict) -> dict[str, str]:
+    """The reader's answers that still apply: a topic the sources now meet
+    by themselves needs none."""
+    return {t: n for node in resolved.get("tree") or [] for t, n in (node.get("matched") or {}).items()}
 
 
 def _role_keys(sources: list[dict]) -> dict[str, str]:
@@ -2528,7 +2634,8 @@ _VERB_DEPTH = (("deep", re.compile(r"\b(dimostr\w*|deriv\w*|prove|proofs?|derive
 
 def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = None, restrict: str = "",
               objectives=None, cards: list[dict] | None = None, refused=None, declared: dict[str, str] | None = None,
-              hours=None, assessment=None, guide: str | None = None, declared_why: str = "you set it") -> dict:
+              hours=None, assessment=None, guide: str | None = None, declared_why: str = "you set it",
+              matched: dict[str, str] | None = None) -> dict:
     """Edit plan (ADR-0081 §17): the same fields as creation, one revertible
     overwrite of the note. Only what creation generates is rewritten (the
     title, the goal line, Objectives, Tree, Steps); the reader's own text,
@@ -2551,8 +2658,10 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
 
     kept = declared is None
     declared = so.declared_of(old) if kept else declared
+    matched = old.get("matched") if matched is None else matched
     resolved = resolve_scope(scope, target, restrict=restrict, refused=old["refused"] if refused is None else refused,
-                             declared=declared, declared_why="as the plan says" if kept else declared_why)
+                             declared=declared, declared_why="as the plan says" if kept else declared_why,
+                             matched=matched)
     if assessment is None and old.get("assessment_set"):
         assessment = assessment_text(old["assessment"])
     hours = old.get("hours") if hours is None else hours
@@ -2597,7 +2706,8 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
         for k, v in (("by", by), ("restrict", restrict), ("refused", " | ".join(refused_lines)),
                      ("materials", roles.get("materials")), ("references", roles.get("references")),
                      ("unused", roles.get("unused")), ("hours", f"{_hours_of(hours):g}" if _hours_of(hours) else ""),
-                     ("assessment", assessment_value), ("guide", guide_link)):
+                     ("assessment", assessment_value), ("guide", guide_link),
+                     ("matched", matched_text(_matched_kept(resolved)))):
             if v:
                 keys[k] = str(v)
             else:

@@ -429,3 +429,33 @@ def test_a_close_decision_is_to_confirm_and_no_plan_key_is_written_without_the_f
                            declared_why="confirmed in the form")
     text = plans._read(out["path"])
     assert "materials: Slides" in text and "(confirmed in the form)" in text
+
+
+def test_a_topic_no_source_meets_offers_the_steps_notes_and_keeps_the_readers_answer(course, monkeypatch):
+    from silica.kernel.learn import objectives as obj
+
+    monkeypatch.setattr(obj, "rewrite", lambda cards: cards)
+    lines = [r["text"] for r in plans.reference_rows(SYLLABUS)]
+    lines[1] = "Metodi kernel: kernel trick, teorema di Mercer, spazi di funzioni speciali"
+    target = "\n".join(lines) + "\n"
+    res = plans.resolve_scope("steps", target)
+    node = next(n for n in res["tree"] if n["node"] == "Metodi kernel")
+    assert node["missing"] == ["spazi di funzioni speciali"]
+    assert set(node["candidates"]["spazi di funzioni speciali"]) <= set(LECTURES["L2"])
+    said = {"spazi di funzioni speciali": "Definizione di kernel"}
+    res = plans.resolve_scope("steps", target, matched=said)
+    node = next(n for n in res["tree"] if n["node"] == "Metodi kernel")
+    assert not node.get("missing") and node["matched"] == said
+    out = plans.write_plan("Answered", "steps", target, by="2026-11-10", objectives=[], matched=said)
+    assert "matched: spazi di funzioni speciali -> Definizione di kernel" in plans._read(out["path"])
+    plans.edit_plan(out["path"], "Answered", "steps", target, by="2026-11-10", objectives=[])
+    assert plans.read_plan(out["path"])["matched"] == said        # Edit plan keeps the answer
+
+
+def test_a_topic_met_by_meaning_is_said_on_the_step_line_and_shed_by_its_label():
+    node = {"node": "Reti", "by_meaning": [("percettrone multistrato", "Rete di percettroni")], "hours": 6.0, "unit": "h"}
+    tail = plans._marks(node)
+    assert tail == " · by meaning, percettrone multistrato ≈ Rete di percettroni · 6 h"
+    step = plans.parse_steps("## Steps\n- [ ] Reti: [[A]]" + tail + "\n")[0]
+    assert plans._step_label({"text": "[[A]]" + tail, "notes": ["A"]}) == "A" and step["hours"] == 6.0
+    assert step["notes"] == ["A"]                 # no title in the tail becomes a note of the step

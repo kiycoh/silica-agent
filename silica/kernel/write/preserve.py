@@ -82,7 +82,7 @@ _RELAX_ALL = frozenset({Loss.PERSON, Loss.RESTORE, Loss.STAGED, Loss.DERIVED, Lo
 _LOSS_KEYS = {
     # ADR-0131 adds the sources' roles, the hours a day, the assessment, the guide
     Loss.PLAN: frozenset({"scope", "target", "objectives", "by", "restrict", "refused",
-                          "materials", "references", "unused", "hours", "assessment", "guide"}),
+                          "materials", "references", "unused", "hours", "assessment", "guide", "matched"}),
     Loss.RESOLVE: frozenset({"contested", "contradictions"}),
     Loss.UNLINK: frozenset({"related"}),
 }

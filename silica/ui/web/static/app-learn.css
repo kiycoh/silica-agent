@@ -2433,6 +2433,21 @@ button.lr-cell:focus-visible {
   vertical-align: -1px;
 }
 
+/* under a step, the whole row wide: choices for a topic no source met, the
+   reader's answers, the topics met by meaning only (ADR-0131 amendment) */
+.lr-steps2 .x {
+  grid-column: 2 / -1;
+  display: grid;
+  gap: 0.15rem;
+  margin-top: -0.2rem;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-steps2 .x .lr-link {
+  font-size: inherit;
+}
+
 .lr-steps2 .how {
   font-size: var(--fs-meta);
   color: var(--ash-dim);

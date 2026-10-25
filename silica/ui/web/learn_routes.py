@@ -1408,6 +1408,7 @@ def write_plan(payload: dict):
     hours = payload.get("hours") if "hours" in payload else None
     assessment = payload.get("assessment") if "assessment" in payload else None
     guide = str(payload.get("guide") or "") if "guide" in payload else None
+    matched = plans.parse_matched(payload.get("matched")) if "matched" in payload else None
     reference = payload.get("reference")
     if isinstance(reference, str) and reference.strip():
         try:
@@ -1419,7 +1420,7 @@ def write_plan(payload: dict):
     if payload.get("preview") or payload.get("cards_only"):
         try:
             res = plans.resolve_scope(scope, target, restrict=restrict, refused=refused, declared=declared,
-                                      declared_why=declared_why)
+                                      declared_why=declared_why, matched=matched)
         except Exception as exc:
             raise HTTPException(400, str(exc))
         if payload.get("cards_only"):
@@ -1450,7 +1451,8 @@ def write_plan(payload: dict):
             return plans.edit_plan(plan["path"], name or plan["name"], scope, target, by=payload.get("by") or None,
                                    restrict=restrict, objectives=chosen, cards=cards,
                                    refused=refused if "refused" in payload else None, declared=declared,
-                                   hours=hours, assessment=assessment, guide=guide, declared_why=declared_why)
+                                   hours=hours, assessment=assessment, guide=guide, declared_why=declared_why,
+                                   matched=matched)
         except Exception as exc:
             raise HTTPException(400, str(exc))
     if not name:
@@ -1460,7 +1462,7 @@ def write_plan(payload: dict):
                                objectives=chosen if "objectives" in payload else None,
                                reach=str(payload.get("reach") or "relational"), cards=cards, refused=refused,
                                declared=declared, hours=hours, assessment=assessment, guide=guide or "",
-                               declared_why=declared_why)
+                               declared_why=declared_why, matched=matched)
     except Exception as exc:
         raise HTTPException(400, str(exc))
     return out

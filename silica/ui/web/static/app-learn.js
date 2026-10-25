@@ -1425,6 +1425,7 @@ function lrFormReset(extra = {}) {
     // ADR-0131: roles the reader set by collection label, study hours a day,
     // the assessment's parts (null: as Silica reads them), a guide note
     roles: {}, rolesTouched: false, rolesKept: false, hours: "", assessment: null, guide: "", budget: null, budgetSeq: 0,
+    matched: {}, matchedTouched: false,
     cardsModel: false, cardsSaved: false, cardsFailed: false, editing: null, editPath: "", q: "", opts: [], optIdx: -1, seq: 0, cardSeq: 0,
   }, extra);
 }
@@ -1545,6 +1546,7 @@ function lrSourcesFromPlan(p) {
     // kept, not touched: they go back as the plan's, said "as the plan says"
     roles, rolesTouched: false, rolesKept: Object.keys(roles).length > 0, hours: p.hours ? String(p.hours) : "",
     assessment: p.assessment_set ? (p.assessment || []).map((a) => ({ ...a })) : null,
+    matched: { ...(p.matched || {}) }, matchedTouched: false,
     guide: String(p.guide || "").replace(/^\[\[|\]\]$/g, ""),
   };
 }
@@ -2013,6 +2015,8 @@ function lrSourcesBody() {
   if (f.hours) out.hours = Number(f.hours);
   if (f.assessment !== null) out.assessment = f.assessment.length ? f.assessment : "none";
   if (f.guide) out.guide = f.guide;
+  // the reader's answers to "is it one of these?", sent once there are any
+  if (f.matchedTouched || Object.keys(f.matched || {}).length) out.matched = f.matched || {};
   return out;
 }
 
@@ -2084,6 +2088,33 @@ function lrShowPreview(sec, p) {
       }
       // a syllabus block's topics no note covers: the line's most useful part
       if (n.missing?.length) to.appendChild(lrEl("span", "lr-miss", ` · not in the vault: ${n.missing.join(", ")}`));
+      // the step's notes nearest a topic no source met, to answer by a click,
+      // the reader's answers, and the topics met by meaning only: on a line
+      // of their own under the step, the names column was 200 px wide
+      // (ADR-0131 amendment, point 5)
+      const extra = lrEl("span", "x");
+      for (const [topic, cands] of Object.entries(n.candidates || {})) {
+        if (!cands.length) continue;
+        const ask = lrEl("span", "lr-gapask");
+        ask.append(`Is “${topic}” one of these? `);
+        cands.forEach((c, k) => {
+          const b = lrBtn("lr-link", c, () => { f.matched = { ...f.matched, [topic]: c }; f.matchedTouched = true; lrPreviewScope(); });
+          b.setAttribute("aria-label", `“${topic}” is ${c}`);
+          ask.appendChild(b);
+          if (k < cands.length - 1) ask.append(", ");
+        });
+        extra.appendChild(ask);
+      }
+      for (const [topic, c] of Object.entries(n.matched || {})) {
+        const m = lrEl("span");
+        m.append(`${topic} → ${c}, as you said `);
+        const u = lrBtn("lr-link", "undo", () => { const x = { ...f.matched }; delete x[topic]; f.matched = x; f.matchedTouched = true; lrPreviewScope(); });
+        u.setAttribute("aria-label", `undo “${topic}” is ${c}`);
+        m.appendChild(u);
+        extra.appendChild(m);
+      }
+      // a topic only a title vector met: the coverage to check, by topic
+      if (n.by_meaning?.length) extra.appendChild(lrEl("span", null, `By meaning, ${n.by_meaning.map(([tp, c]) => `${tp} ≈ ${c}`).join("; ")}`));
       st.appendChild(to);
       const how = lrEl("span", "how" + (n.doubt ? " amb" : ""));
       if (n.doubt) how.append(lrMark("warn", ""), `${n.how} · check`);
@@ -2097,6 +2128,7 @@ function lrShowPreview(sec, p) {
       });
       if (!n.gap || refusedNow) nt.setAttribute("aria-label", `${refusedNow ? "undo refusing" : "refuse the match of"} line ${i + 1}`);
       st.appendChild(nt);
+      if (extra.childNodes.length) st.appendChild(extra);
     });
     sec.appendChild(st);
     return;
