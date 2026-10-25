@@ -601,12 +601,14 @@ def test_the_drawers_verbs_live_behind_the_title():
     the map (the diff when there is one) and put the two views' glyphs beside
     the title, outside the menu for the pin's reason: the dot is a state.
     ADR-0119 adds two items, a test on the note and its teach-back, because
-    Learn's home no longer lists every note; the old /explain ask stays out."""
+    Learn's home no longer lists every note; the old /explain ask stays out.
+    ADR-0110 adds `check sources` after chat, its one entry."""
     head = _block(INDEX, '<aside id="note-panel"', '<div id="note-diff"')
     assert ('<button type="button" id="note-title" aria-haspopup="menu" aria-expanded="false" '
             'aria-controls="note-menu">') in head
     menu = _block(head, '<div id="note-menu" role="menu"', "</header>")
-    assert re.findall(r'role="menuitem" id="([\w-]+)"', menu) == ["note-chat", "note-test", "note-teach", "note-map", "note-diff-open"]
+    assert re.findall(r'role="menuitem" id="([\w-]+)"', menu) == ["note-chat", "note-check-open", "note-test", "note-teach", "note-map",
+                                                               "note-diff-open"]
     for gone in ("note-summarize", "note-explain", "note-quiz", "note-relate", "note-learn"):
         assert gone not in INDEX, gone
     for glyph in ("note-pin", "note-info", "note-read"):
@@ -619,6 +621,8 @@ def test_the_drawers_verbs_live_behind_the_title():
     esc = js[js.index("One Escape handler for the whole app"):]
     esc = esc[:esc.index("\n});")]
     assert esc.index("closeNoteMenu(true)") < esc.index("hideSelBar()") < esc.index("closeNote();")
+    # a source check's box closes ahead of the rest (ADR-0110 point 11)
+    assert esc.index("editor.closeCheckBox()") < esc.index("closeNoteMenu(true)")
     # details go back to the text before the drawer closes (ADR-0075)
     assert esc.index("hideSelBar()") < esc.index("setDetails(false)") < esc.index("closeNote();")
 

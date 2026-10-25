@@ -299,3 +299,101 @@ def test_a_verdict_is_cached_by_block_and_passages_and_not_asked_again(firm):
 def test_not_in_these_passages_is_not_found():
     rows, _ = run._verdict_rows({"kind": "not in these passages", "by": "jev", "p": 0.8}, 7)
     assert rows[0]["kind"] == "not found"
+
+
+# ---------------------------------------------------------------- the drawer (step 3)
+
+def test_a_block_knows_its_last_line_for_the_drawers_marks():
+    out, _ = blocks.split("A paragraph that runs on for more than six words\nand wraps onto a second line.\n\n"
+                          "| a row with six words in its cells |\n")
+    assert [(b.line, b.end) for b in out] == [(1, 2), (4, 4)]
+
+
+def test_rules_arrive_first_then_one_line_per_judged_block_cached_ones_first(firm):
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.\n\n"
+                        "The hearing listed for 17 February 2026 was adjourned by the court of appeal.")
+    decide, _ = _jev("contradicted")
+    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "Acceptance certificate"}]
+    events = []
+    r = run.check_note(path, str(firm), write_dir="silica", search=search, progress=events.append,
+                       judge=lambda t, ps: jd.judge(t, ps, decide=decide, chat=None))
+    assert events[0]["event"] == "rules" and events[0]["calls"] == 2
+    assert ("date not found", "17 February 2026") in _kinds(events[0])
+    judged = [e for e in events[1:] if e["event"] == "block"]
+    assert [e["done"] for e in judged] == [1, 2] and all(e["of"] == 2 for e in judged)
+    c = [f for f in r["findings"] if f["kind"] == "contradicted"][0]
+    assert c["model"] and c["end"] == c["line"] and c["passage"] == "Acceptance certificate"
+    # The report rides in the cache file, so the strip's counts are the file's.
+    assert run.read_cache(str(firm), path)["report"]["counts"] == r["counts"]
+
+
+def test_a_date_is_marked_as_the_note_spells_it(firm):
+    path = _draft(firm, "L'udienza fissata per il 17 febbraio 2026 è stata rinviata dalla corte d'appello.")
+    f = [x for x in run.check_note(path, str(firm), write_dir="silica")["findings"] if x["kind"] == "date not found"][0]
+    assert f["words"] == "17 February 2026" and f["mark"] == "17 febbraio 2026"
+
+
+def test_the_rerun_after_an_edit_asks_nothing_and_keeps_paid_verdicts(firm):
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.")
+    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "x"}]
+    never = lambda t, ps: (_ for _ in ()).throw(AssertionError("a rerun called the model"))
+    assert run.check_note(path, str(firm), write_dir="silica", search=search, cache_only=True)["states"][0]["state"] == "not checked"
+    assert not (firm / ".silica/checks").exists()   # never checked: nothing to keep
+    decide, _ = _jev("overstated")
+    run.check_note(path, str(firm), write_dir="silica", search=search, judge=lambda t, ps: jd.judge(t, ps, decide=decide, chat=None))
+    again = run.check_note(path, str(firm), write_dir="silica", search=search, judge=never, cache_only=True)
+    assert [f["kind"] for f in again["findings"]] == ["overstated"] and again["cached"] == 1
+    _draft(firm, "Limitation on the Northwind claim runs from first delivery under the Distribution Agreement.")
+    edited = run.check_note(path, str(firm), write_dir="silica", search=search, judge=never, cache_only=True)
+    assert not edited["findings"] and edited["states"][0]["state"] == "not checked"
+
+
+def test_a_cancelled_check_stops_before_its_next_call_and_keeps_what_it_paid_for(firm):
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.\n\n"
+                        "Acceptance under Schedule 3 was certified by the engineer on the agreed date.")
+    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "x"}]
+    calls = []
+    judge = lambda t, ps: (calls.append(t), {"kind": "supported", "by": "jev", "p": 0.9})[1]
+    r = run.check_note(path, str(firm), write_dir="silica", search=search, judge=judge, cancelled=lambda: len(calls) >= 1)
+    assert len(calls) == 1 and [s["say"] for s in r["states"] if s["state"] == "not checked"] == ["the check was cancelled"]
+    assert len(run.read_cache(str(firm), path)["verdicts"]) == 1
+
+
+def test_the_drawers_route_streams_rules_then_the_report_and_reruns_only_a_checked_note(tmp_vault, monkeypatch):
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    from silica.ui.web.server import app
+
+    monkeypatch.setattr("silica.cli._check_judge", lambda: None)   # rules only: no model call from a test
+    monkeypatch.setattr("silica.cli._check_legs", lambda: (None, None, None))
+    tmp_vault.note("Drafts/memo.md", "---\nmatter: x\n---\n\nThe hearing listed for 17 February 2026 was adjourned by the court.\n")
+    tc = TestClient(app, headers={"Origin": "http://testserver"})
+    lines = [_json.loads(x) for x in tc.post("/note/check", json={"path": "Drafts/memo"}).text.splitlines()]
+    assert [x["event"] for x in lines] == ["rules", "done"]
+    assert lines[-1]["counts"]["warning"] == 1 and lines[-1]["findings"][0]["line"] == 5
+    rerun = tc.post("/note/check", json={"path": "Drafts/memo", "rules": True})
+    assert _json.loads(rerun.text.splitlines()[-1]) == {"event": "done", "unchecked": True}   # no judge, no cache file
+    assert tc.post("/note/check", json={"path": "Drafts/nothing"}).status_code == 404
+
+
+def test_a_long_pass_waits_for_the_persons_go_and_asks_nothing_before_it(tmp_vault, monkeypatch):
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    from silica.ui.web.server import app
+
+    asked = []
+    hits = lambda q, k: [{"path": "Sources/rule.md", "line": 5, "coverage": 0.9, "window": "The hearing was adjourned."}]
+    monkeypatch.setattr("silica.cli._check_legs", lambda: (hits, None, None))
+    monkeypatch.setattr("silica.cli._check_judge", lambda: lambda t, ps: (asked.append(t), {"kind": "supported", "by": "jev", "p": 0.9})[1])
+    monkeypatch.setattr(run, "CONFIRM_OVER", 0)
+    tmp_vault.note("Sources/rule.md", "# Rule\n\nThe hearing listed for February was adjourned by the court.\n")
+    tmp_vault.note("Drafts/memo.md", "The hearing listed for February was adjourned by the court of appeal.\n")
+    tc = TestClient(app, headers={"Origin": "http://testserver"})
+    held = [_json.loads(x) for x in tc.post("/note/check", json={"path": "Drafts/memo"}).text.splitlines()]
+    assert [x["event"] for x in held] == ["confirm"] and held[0]["calls"] == 1 and not asked
+    went = [_json.loads(x)["event"] for x in tc.post("/note/check", json={"path": "Drafts/memo", "confirm": True}).text.splitlines()]
+    assert went == ["rules", "block", "done"] and len(asked) == 1

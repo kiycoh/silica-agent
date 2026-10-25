@@ -33,6 +33,7 @@ class Block:
     kind: str                 # paragraph | item | row | footnote | quote
     text: str                 # as written, list and quote markers stripped
     footnotes: list[str] = field(default_factory=list)  # labels it references
+    end: int = 0              # its last line, for the drawer's marks; 0 = `line`
 
     @property
     def clean(self) -> str:
@@ -105,6 +106,7 @@ def split(content: str) -> tuple[list[Block], dict[str, str]]:
                 close()
                 cur = Block(i + 1, "quote", "")
             cur.text += " " + body
+            cur.end = i + 1
             continue
         if (m := _ITEM.match(raw)):
             close()
@@ -112,6 +114,7 @@ def split(content: str) -> tuple[list[Block], dict[str, str]]:
             continue
         if cur is not None and cur.kind in ("paragraph", "item", "footnote"):
             cur.text += " " + s
+            cur.end = i + 1
             continue
         close()
         cur = Block(i + 1, "paragraph", s)
@@ -124,6 +127,7 @@ def split(content: str) -> tuple[list[Block], dict[str, str]]:
             label = b.footnotes.pop()
             defs[label] = b.text
         b.footnotes = list(dict.fromkeys(_FOOTREF.findall(b.text)))
+        b.end = max(b.end, b.line)
         if b.words >= MIN_WORDS:
             out.append(b)
     return out, defs

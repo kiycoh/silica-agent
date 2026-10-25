@@ -4682,6 +4682,92 @@ def note_render(payload: dict):
     return {"html": html}
 
 
+class _CheckHeld(Exception):
+    """A long pass waits for the person's go (ADR-0110 point 13)."""
+
+
+@app.post("/note/check", dependencies=_SAME_ORIGIN)
+async def note_check(payload: dict, request: Request):
+    """The drawer's `check sources` (ADR-0110 step 3), as JSON lines: the rule
+    findings at once, one line per block as the model judges it, then the
+    report. It reads the note on disk, so the drawer saves first.
+
+    A request of its own and not a chat turn, so a check never locks the
+    chat; and not ADR-0099's jobs channel, whose one worker would queue it
+    behind a conversion. Cancel is the browser dropping the request: the run
+    stops before its next call and keeps the verdicts paid for. `rules: true`
+    asks the model nothing (the rerun after an edit, served from the cache);
+    `confirm: true` lets a pass of more than CONFIRM_OVER calls go."""
+    from silica.cli import _check_judge, _check_legs
+    from silica.kernel.check import run as check
+    from silica.kernel.vault_manifest import active_write_dir
+    from silica.metrics import ms_since, outcome_of
+
+    canon = note_resolver()(str(payload.get("path", "")))
+    if not canon:
+        raise HTTPException(404, "note not found in vault")
+    path = canon if canon.endswith(".md") else canon + ".md"
+    rules_only = payload.get("rules") is True
+    confirmed = payload.get("confirm") is True
+    if rules_only and not check.read_cache(CONFIG.vault_path, path):
+        # Never checked (or its file torn): a rerun has no marks to bring back.
+        return JSONResponse({"event": "done", "unchecked": True}, media_type="application/x-ndjson")
+    loop = asyncio.get_running_loop()
+    q: asyncio.Queue = asyncio.Queue()
+    stop = threading.Event()
+
+    def put(ev: dict | None) -> None:
+        with suppress(RuntimeError):  # loop closed: the browser is gone, and so is the reader
+            loop.call_soon_threadsafe(q.put_nowait, ev)
+
+    def progress(ev: dict) -> None:
+        if ev["event"] == "rules" and ev["calls"] > check.CONFIRM_OVER and not confirmed:
+            put({**ev, "event": "confirm"})
+            raise _CheckHeld
+        put(ev)
+
+    def work() -> None:
+        started = time.monotonic()
+        try:
+            search, dense, floor = _check_legs()
+            report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(), search=search,
+                                      dense=dense, dense_floor=floor, judge=None if rules_only else _check_judge(),
+                                      cache_only=rules_only, progress=progress, cancelled=stop.is_set)
+            put({**report, "event": "done"})
+            if not rules_only:  # a rerun after an edit is not a check the person asked for
+                c = report["counts"]
+                emit("check", outcome="ok", ms=ms_since(started), blocks=report["blocks"], cached=report["cached"],
+                     error=c["error"], warning=c["warning"], nit=c["nit"])
+        except _CheckHeld:
+            pass
+        except Exception as e:
+            logger.warning("/note/check failed on %s: %s", path, e)
+            put({"event": "error", "say": f"the check failed: {e}"})
+            if not rules_only:
+                emit("check", outcome=outcome_of(e), ms=ms_since(started))
+        finally:
+            put(None)
+
+    threading.Thread(target=work, name="note-check", daemon=True).start()
+
+    async def lines():
+        try:
+            while True:
+                try:
+                    ev = await asyncio.wait_for(q.get(), _SSE_POLL_S)
+                except asyncio.TimeoutError:
+                    if _stopping() or await request.is_disconnected():
+                        return
+                    continue
+                if ev is None:
+                    return
+                yield json.dumps(ev, ensure_ascii=False, default=str) + "\n"
+        finally:
+            stop.set()  # a dropped request is the cancel
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache"})
+
+
 # --- what this session changed (GET /changes, /changes/diff) ------------------
 # The ledger and the tally are the driver's (silica.kernel.write.session_changes),
 # shared with the REPL's /changes. All that is added here is a display name and

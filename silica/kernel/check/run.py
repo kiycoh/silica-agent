@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""One check of one note, step 1: rules only (ADR-0110 points 4 to 6).
+"""One check of one note (ADR-0110): the rules of points 4 to 6, then the
+judge of point 7 on each block the rules did not settle.
 
 The two search legs come in as arguments. `search(query, k)` is the chat's
 passage search (silica_search_context's engine), whose hits carry `coverage`;
@@ -13,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -51,6 +53,11 @@ def dense_floor(model: str) -> float | None:
     return next((v for k, v in DENSE_FLOORS.items() if k in m), None)
 PASSAGES = 5
 SEARCH_WIDTH = 200
+# Point 13: a pass over more model calls than this starts only on the
+# person's go, with the count shown. 60 blocks is about $0.005 at the
+# server's prices of 2026-10-13, a fifth of a Free window (ADR-0102).
+CONFIRM_OVER = 60
+PASSAGE_QUOTE = 240
 
 Search = Callable[[str, int], list[dict]]
 # The pool's nearest notes to a block, best first, as (path, cosine); [] or
@@ -116,14 +123,71 @@ def _verdict_rows(v: dict, line: int) -> tuple[list[dict], list[dict]]:
     if kind in ("supported", "not a statement of fact"):
         return [], [{"state": kind, "line": line, "say": f"{who}{p}"}]
     kind = "not found" if kind == "not in these passages" else kind
-    return [{"kind": kind, "words": "", "at": v.get("at", ""), "say": f"{v['kind']}, by {who}{p}"}], []
+    # `model`: the drawer turns these hollow on an edit until the next check,
+    # while the rules run again (point 11).
+    return [{"kind": kind, "words": "", "at": v.get("at", ""), "say": f"{_VERDICT_SAY[kind]} ({who}{p})",
+             "model": True}], []
+
+
+# The one sentence a verdict's box and line carry (point 11); the kind is
+# already beside it, so the sentence says what it asks of the writer.
+_VERDICT_SAY = {
+    "contradicted": "a source gives a different value for this block's point",
+    "overstated": "a source says something narrower than this block does",
+    "off-point": "the passage it rests on speaks to something else",
+    "not found": "the passages on its subject do not say this",
+}
+
+
+def _quote(text: str) -> str:
+    """A passage as the box quotes it: a table's rows read as text, not as
+    the pipes and separator rows a note excerpt carries."""
+    out = []
+    for ln in text.split("\n"):
+        if re.fullmatch(r"\s*\|?[\s:|-]*-{3,}[\s:|-]*\|?\s*", ln):
+            continue
+        if ln.lstrip().startswith("|"):
+            ln = " · ".join(c.strip() for c in ln.strip().strip("|").split("|")) + ";"
+        out.append(re.sub(r"^\s*#+\s*", "", ln))
+    flat = " ".join(" ".join(out).split())
+    return flat if len(flat) <= PASSAGE_QUOTE else flat[:PASSAGE_QUOTE - 1].rstrip() + "…"
+
+
+def _summary(path: str, blocks: list, pool: pl.Pool, findings: list[dict], states: list[dict],
+             waiting: int, cached: int) -> dict[str, Any]:
+    findings = sorted(findings, key=lambda f: (ORDER.index(f["grade"]), f["line"]))
+    return {
+        "note": path, "blocks": len(blocks), "waiting": waiting, "cached": cached,
+        "pool": {"size": len(pool.paths), "of": pool.of, "scope": pool.scope, "values": sorted(pool.values)},
+        "findings": findings, "states": states,
+        "counts": {g: sum(f["grade"] == g for f in findings) for g in ORDER},
+    }
+
+
+def read_cache(vault: str, path: str) -> dict:
+    """{"verdicts": {key: verdict}, "report": the last check's report}; empty
+    when the note was never checked or its file is torn."""
+    try:
+        data = json.loads(_cache_path(vault, path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}  # a torn cache costs one re-judgment, never a wrong verdict
+    return data if isinstance(data, dict) and "verdicts" in data else {}
 
 
 def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | None = None,
                dense: Dense | None = None, dense_floor: float | None = None,
-               judge: Judge | None = None) -> dict[str, Any]:
+               judge: Judge | None = None, cache_only: bool = False,
+               progress: Callable[[dict], None] | None = None,
+               cancelled: Callable[[], bool] | None = None) -> dict[str, Any]:
     """The report for the note at vault-relative `path`: rule findings, and
-    with a `judge` the verdict on each block the rules did not settle."""
+    with a `judge` the verdict on each block the rules did not settle.
+
+    Two passes, so the drawer shows the rules at once and the verdicts as
+    they come (point 11): `progress` gets {"event": "rules", report} after
+    the first and {"event": "block", ...} after each judged block. With
+    `cache_only`, only the verdicts already paid for are read and nothing is
+    asked: the drawer's rerun after an edit. `cancelled` is polled before
+    each call; the verdicts paid for until then are kept."""
     notes, files = pl.walk(vault)
     if path not in notes:
         raise FileNotFoundError(path)
@@ -138,15 +202,18 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
     findings: list[dict] = []
     states: list[dict] = []
     waiting = cached = 0
-    cache_file = _cache_path(vault, path)
-    try:
-        cache = json.loads(cache_file.read_text(encoding="utf-8")) if judge and cache_file.is_file() else {}
-    except (OSError, ValueError):
-        cache = {}  # a torn cache costs one re-judgment, never a wrong verdict
+    reading = judge is not None or cache_only
+    old = read_cache(vault, path) if reading else {}
+    cache = old.get("verdicts", {})
     fresh: dict[str, dict] = {}
+    pending: list[tuple[Any, list[dict], str, list[str]]] = []  # (block, passages, key, cited)
     seen_source_dates: set[tuple[str, str]] = set()
     prev_sourced = False
     prev_cited: list[str] = []
+
+    def keep(b, mine: list[dict]) -> None:
+        for x in mine:
+            findings.append({"grade": GRADES[x["kind"]], "line": b.line, "end": b.end, "at": x.get("at", ""), **x})
 
     for b in blocks:
         text = " ".join([b.clean] + [defs[f] for f in b.footnotes if f in defs])
@@ -175,19 +242,20 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
             if (say := _status(s, notes[s])):
                 mine.append({"kind": "source status", "words": notes[s].stem, "say": say, "at": s})
 
-        # Dates: the block's own, then those its cited sources give.
+        # Dates: the block's own, then those its cited sources give. `mark`
+        # is the date as the note spells it, which the drawer underlines.
         scope = [{**p, "origin": f"{path}:{b.line}"} for p in dates.find_periods(text)]
         for s in cited:
             scope += _periods(s, notes[s].text)
-        for d, _s, _e in dates.find_dates(text):
+        for d, d0, d1 in dates.find_dates(text):
             holders = [r for r in ix.dates.get(d, []) if r[0] in pool.paths]
             found_in += [r[0] for r in holders[:1]]
             local = scope + [p for h in {r[0] for r in holders} - set(cited) for p in _periods(h, notes[h].text)]
             f, st = rules.date_rules(d, local, ix, pool.paths)
-            mine += f
-            states += [{**x, "line": b.line} for x in st]
+            mine += [{**x, "mark": text[d0:d1]} for x in f]
+            states += [{**x, "line": b.line, "end": b.end} for x in st]
             if not f and not st and d not in ix.dates:
-                mine.append({"kind": "date not found", "words": dates.human(d),
+                mine.append({"kind": "date not found", "words": dates.human(d), "mark": text[d0:d1],
                              "say": f"no note in the vault holds {dates.human(d)}"})
         for s in cited:
             src_periods = _periods(s, notes[s].text)
@@ -215,16 +283,16 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
             if r["state"] == "verbatim":
                 quote_found = True
                 if not sourced and not attributed:
-                    mine.append({"kind": "quotation without its source", "words": short,
+                    mine.append({"kind": "quotation without its source", "words": short, "mark": q,
                                  "say": f"{r['path']} holds it word for word; the block names no source",
                                  "at": rules.at(r["path"], r["line"])})
             elif r["state"] == "near":
                 quote_found = True
-                mine.append({"kind": "misquoted", "words": short, "at": rules.at(r["path"], r["line"]),
+                mine.append({"kind": "misquoted", "words": short, "mark": q, "at": rules.at(r["path"], r["line"]),
                              "say": f"no note holds it word for word; {r['path']} holds {round(r['share'] * 100)}% "
                                     f"of its words in order: “{r['passage']}”"})
             else:
-                mine.append({"kind": "not found", "words": short,
+                mine.append({"kind": "not found", "words": short, "mark": q,
                              "say": f"no note of the {len(pool.paths)} searched holds this quotation, even nearly"})
 
         # Absence by rule (point 6): no link, no named note, no identifier,
@@ -234,54 +302,82 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
         if not (sourced or quote_found or lexical):
             best = near[0][1] if near and dense_floor is not None else None
             if best is None:
-                to_judge = judge is not None
+                to_judge = reading
                 if not to_judge:
-                    states.append({"state": "not checked", "line": b.line,
+                    states.append({"state": "not checked", "line": b.line, "end": b.end,
                                    "say": "absence needs the dense floor, and this vault has no vectors for it"})
             elif best < dense_floor:
                 to_judge = False
                 mine.append({"kind": "not found", "words": "",
                              "say": f"no note of the {len(pool.paths)} searched holds this"})
+        keep(b, mine)
         if to_judge:
             waiting += 1
-            if judge is not None:
+            if reading:
                 mp = _model_passages(passages, list(dict.fromkeys(cited + found_in)), near, notes)
                 key = hashlib.sha1("\0".join([b.clean] + sorted(
                     f"{x['path']}\0{x['text']}" for x in mp)).encode()).hexdigest()
-                v = cache.get(key)
-                if v is not None:
-                    cached += 1
-                elif mp:
-                    v = judge(b.clean, mp)
-                else:
-                    states.append({"state": "not checked", "line": b.line,
-                                   "say": "no passage in the pool to judge it against"})
-                if v is not None:
-                    fresh[key] = v
-                    f, st = _verdict_rows(v, b.line)
-                    mine += f
-                    states += st
-                    # Point 5: a searched passage's status counts once a verdict
-                    # rests on it; a cited source already had its line above.
-                    rest = (v.get("at") or "").rsplit(":", 1)[0]
-                    if rest in notes and rest not in cited and (say := _status(rest, notes[rest])):
-                        mine.append({"kind": "source status", "words": notes[rest].stem, "say": say, "at": rest})
-        for x in mine:
-            findings.append({"grade": GRADES[x["kind"]], "line": b.line, "at": x.get("at", ""), **x})
+                pending.append((b, mp, key, cited))
         prev_sourced, prev_cited = sourced, cited
 
-    if fresh:
-        # Only this run's verdicts are kept: a block that changed takes its
-        # old key with it, so the cache never outgrows the note.
+    # The model's pass. Cached verdicts first, so a rerun's marks are all on
+    # screen before the first call.
+    pending.sort(key=lambda x: x[2] not in cache)
+    calls = sum(1 for x in pending if x[2] not in cache and x[1])
+    if progress:
+        progress({"event": "rules", "calls": 0 if cache_only else calls,
+                  **_summary(path, blocks, pool, findings, states, waiting, cached)})
+    stopped = False
+    for n, (b, mp, key, cited) in enumerate(pending, 1):
+        mine, st = [], []
+        v = cache.get(key)
+        if v is not None:
+            cached += 1
+        elif not mp:
+            st.append({"state": "not checked", "line": b.line, "say": "no passage in the pool to judge it against"})
+        elif cache_only:
+            # Edited, a source changed, or a cancelled run never reached it:
+            # the drawer shows which (its marks turn hollow on an edit).
+            st.append({"state": "not checked", "line": b.line,
+                       "say": "no verdict for this text yet; check sources asks the model"})
+        elif stopped or (cancelled and cancelled()):
+            stopped = True
+            st.append({"state": "not checked", "line": b.line, "say": "the check was cancelled"})
+        else:
+            v = judge(b.clean, mp)
+        if v is not None:
+            fresh[key] = v
+            f, vst = _verdict_rows(v, b.line)
+            # The passage the verdict rests on, for the drawer's box to quote.
+            said = {f"{x['path']}:{x['line']}": x["text"] for x in mp}
+            for x in f:
+                if x.get("at") in said:
+                    x["passage"] = _quote(said[x["at"]])
+            mine += f
+            st += vst
+            # Point 5: a searched passage's status counts once a verdict
+            # rests on it; a cited source already had its line above.
+            rest = (v.get("at") or "").rsplit(":", 1)[0]
+            if rest in notes and rest not in cited and (say := _status(rest, notes[rest])):
+                mine.append({"kind": "source status", "words": notes[rest].stem, "say": say, "at": rest})
+        st = [{**x, "end": b.end} for x in st]
+        states += st
+        before = len(findings)
+        keep(b, mine)
+        if progress:
+            progress({"event": "block", "line": b.line, "end": b.end, "done": n, "of": len(pending),
+                      "findings": findings[before:], "states": st})
+
+    report = _summary(path, blocks, pool, findings, states, waiting, cached)
+    if reading and (fresh or old):
+        # Only this run's verdicts are kept, so the cache never outgrows the
+        # note; a cancelled run keeps the older ones it did not reach too.
+        # The report rides along: the drawer's counts are the file's.
+        cache_file = _cache_path(vault, path)
         cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(json.dumps(fresh, ensure_ascii=False), encoding="utf-8")
-    findings.sort(key=lambda f: (ORDER.index(f["grade"]), f["line"]))
-    return {
-        "note": path, "blocks": len(blocks), "waiting": waiting, "cached": cached,
-        "pool": {"size": len(pool.paths), "of": pool.of, "scope": pool.scope, "values": sorted(pool.values)},
-        "findings": findings, "states": states,
-        "counts": {g: sum(f["grade"] == g for f in findings) for g in ORDER},
-    }
+        cache_file.write_text(json.dumps({"verdicts": {**cache, **fresh} if stopped else fresh, "report": report},
+                                         ensure_ascii=False), encoding="utf-8")
+    return report
 
 
 def render(report: dict) -> str:

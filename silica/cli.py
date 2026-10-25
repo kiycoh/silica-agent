@@ -1125,8 +1125,9 @@ def _dc_verify(args: list[str], **_) -> bool:
 
 def _dc_check(args: list[str], **_) -> bool:
     """/check <note> — read a note the person wrote against the vault, block
-    by block, and print the findings by grade (ADR-0110 step 1: rules only,
-    no model). It never edits the note."""
+    by block, and print the findings by grade (ADR-0110): the rules first,
+    then Jev's verdict on each block they did not settle. It never edits the
+    note."""
     import time
 
     from silica import metrics

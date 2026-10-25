@@ -923,6 +923,113 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar) {
   background-image: linear-gradient(var(--sel), var(--sel));
 }
 
+/* A source check (ADR-0110 point 11). The underline's style says the grade
+   before its colour does: error a double line (not wavy, which is the
+   spellchecker's), warning dashed, nit dotted. Hollow is "changed since the
+   check": the same line at half strength, so it never vouches for new text. */
+#note-edit .cm-chk-u {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  text-decoration-skip-ink: none;
+}
+#note-edit .cm-chk-u.cm-chk-error { text-decoration-style: double; text-decoration-color: var(--err); text-decoration-thickness: 1px; }
+#note-edit .cm-chk-u.cm-chk-warning { text-decoration-style: dashed; text-decoration-color: var(--warn); }
+#note-edit .cm-chk-u.cm-chk-nit { text-decoration-style: dotted; text-decoration-color: var(--ash-dim); }
+#note-edit .cm-chk-u.cm-chk-hollow { text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); }
+
+/* The glyph sits in the text's left inset, so the line does not move. */
+#note-edit .cm-chk-glyph {
+  display: inline-block;
+  width: 14px;
+  margin-left: -17px;
+  margin-right: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 11px/1 var(--sans);
+  vertical-align: 0.15em;
+  cursor: pointer;
+}
+#note-edit .cm-chk-glyph.cm-chk-error { color: var(--err); }
+#note-edit .cm-chk-glyph.cm-chk-warning { color: var(--warn); }
+#note-edit .cm-chk-glyph.cm-chk-nit { color: var(--ash-dim); }
+#note-edit .cm-chk-cell { position: relative; }
+#note-edit .cm-chk-cell > .cm-chk-glyph {
+  position: absolute;
+  left: -16px;
+  top: 0.55em;
+  margin: 0;
+}
+#note-edit .cm-chk-glyph:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* One box at a time, under its block, the text's full width. */
+#note-edit .cm-chk-box {
+  position: relative;
+  margin: 0.3rem 0 0.6rem;
+  padding: 0.55rem 2rem 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bubble);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+#note-edit .cm-chk-close {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.35rem;
+  padding: 0 0.35rem;
+  border: 0;
+  background: none;
+  color: var(--ash);
+  font-size: 15px;
+  cursor: pointer;
+}
+#note-edit .cm-chk-f + .cm-chk-f { margin-top: 0.55rem; padding-top: 0.5rem; border-top: 1px solid var(--line); }
+#note-edit .cm-chk-head { font-weight: 600; color: var(--frost); }
+#note-edit .cm-chk-f.cm-chk-error .cm-chk-head { color: var(--err); }
+#note-edit .cm-chk-f.cm-chk-warning .cm-chk-head { color: var(--warn); }
+#note-edit .cm-chk-box p { margin: 0.15rem 0 0; }
+#note-edit .cm-chk-box blockquote {
+  margin: 0.3rem 0 0;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--line);
+  color: var(--ash);
+}
+#note-edit .cm-chk-stale, #note-edit .cm-chk-state { color: var(--ash); }
+#note-edit .cm-chk-stale { margin: 0 0 0.35rem; font-style: italic; }
+#note-edit .cm-chk-src {
+  margin-top: 0.25rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: 12px/1.4 var(--mono);
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+#note-edit .cm-chk-src:hover { text-decoration: underline; }
+
+/* The strip over a checked note: the counts, each a toggle for its marks,
+   then progress or what was searched. Two lines at most in a 320px drawer. */
+#note-check {
+  padding: 0.35rem 1.25rem 0.4rem;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ash);
+  border-bottom: 1px solid var(--line);
+}
+#note-check .nc-row { display: flex; align-items: center; gap: 0.15rem 0.6rem; flex-wrap: wrap; }
+#note-check button { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+#note-check .nc-t[aria-pressed="false"] { opacity: 0.55; text-decoration: line-through; }
+#note-check .nc-t.nc-error[data-n]:not([data-n="0"]) { color: var(--err); }
+#note-check .nc-t.nc-warning[data-n]:not([data-n="0"]) { color: var(--warn); }
+#note-check .nc-close { margin-left: auto; font-size: 14px; color: var(--ash); }
+#note-check .nc-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ash-dim); }
+#note-check .nc-act { color: var(--accent); }
+#note-check button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
 /* Headings keep their size with the caret on them, as Obsidian's do: only the
    `#` comes and goes, so the line does not jump when you step onto it. */
 #note-edit .cm-line.cm-h {

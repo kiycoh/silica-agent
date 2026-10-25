@@ -190,7 +190,7 @@ Over MCP the vault is the folder the client started in, and search, recall and r
 | `/path <noteA> <noteB>` | shortest reading path between two notes (wikilinks + co-occurrence) |
 | `/contested` | list notes flagged contested: true with their unresolved contradictions |
 | `/verify <note> [--clear] [--as "<name>"]` | vouch for a note as a person (OKF verified, bound to the body); --clear withdraws, --as signs with a name |
-| `/check <note>` | read a note you wrote against the vault: links, identifiers, dates and quotations, by grade; never edits it |
+| `/check <note>` | read a note you wrote against the vault, block by block: what a source contradicts or overstates, links, identifiers, dates and quotations, by grade; never edits it. In the app, `check sources` in the note's menu underlines the text |
 
 **Session and settings**
 

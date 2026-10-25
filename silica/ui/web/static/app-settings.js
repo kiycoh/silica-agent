@@ -732,6 +732,8 @@ document.addEventListener("keydown", (e) => {
   // The drawer's two popovers before the drawer itself (ADR-0059). An Escape
   // the editor used, to collapse a selection, is not also a close: that is
   // the first press, and the drawer goes on the second.
+  // A source check's box first (ADR-0110 point 11): it is what was just opened.
+  if (editor && editor.closeCheckBox()) return;
   if (closeNoteMenu(true)) return;
   if (hideSelBar()) { if (editor) editor.focus(); return; }
   // A note's details go back to its text before anything closes (ADR-0075).
