@@ -2261,7 +2261,7 @@ def close_plan(plan_path: str, reopen: bool = False) -> dict:
 def write_plan(name: str, scope: str, target, reach: str = "relational", by: str | None = None,
                restrict: str = "", folder: str = "Plans", objectives=None, cards: list[dict] | None = None,
                refused=(), declared: dict[str, str] | None = None, hours=None, assessment=None,
-               guide: str = "") -> dict:
+               guide: str = "", declared_why: str = "you set it") -> dict:
     """The plan note through the write gate (silica_write_note): scope,
     objectives (the chosen intentions in frontmatter, the cards under
     `## Objectives`), tree, steps with a because clause and gaps, an empty
@@ -2280,7 +2280,8 @@ def write_plan(name: str, scope: str, target, reach: str = "relational", by: str
         raise ValueError(f"scope must be one of {SCOPES}")
     if reach not in REACH:
         reach = "relational"
-    resolved = resolve_scope(scope, target, restrict=restrict, refused=refused, declared=declared)
+    resolved = resolve_scope(scope, target, restrict=restrict, refused=refused, declared=declared,
+                             declared_why=declared_why)
     parts, assessment_value = _parts_of(resolved, assessment) if scope == "steps" else ([], None)
     resolved["parts"] = parts
     if scope == "steps":
@@ -2407,8 +2408,10 @@ def _role_keys(sources: list[dict]) -> dict[str, str]:
     from silica.kernel.learn import sources as so
 
     out = {}
+    # a role to confirm is used for the steps but written only once the form
+    # saves it: a plan made without the form keeps no guess as a choice
     for key, role in (("materials", so.MATERIAL), ("references", so.REFERENCE), ("unused", so.UNUSED)):
-        labels = [s["label"] for s in sources if s.get("role") == role]
+        labels = [s["label"] for s in sources if s.get("role") == role and not s.get("confirm")]
         if labels:
             out[key] = RESTRICT_SEP.join(labels)
     return out
@@ -2525,7 +2528,7 @@ _VERB_DEPTH = (("deep", re.compile(r"\b(dimostr\w*|deriv\w*|prove|proofs?|derive
 
 def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = None, restrict: str = "",
               objectives=None, cards: list[dict] | None = None, refused=None, declared: dict[str, str] | None = None,
-              hours=None, assessment=None, guide: str | None = None) -> dict:
+              hours=None, assessment=None, guide: str | None = None, declared_why: str = "you set it") -> dict:
     """Edit plan (ADR-0081 §17): the same fields as creation, one revertible
     overwrite of the note. Only what creation generates is rewritten (the
     title, the goal line, Objectives, Tree, Steps); the reader's own text,
@@ -2549,7 +2552,7 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
     kept = declared is None
     declared = so.declared_of(old) if kept else declared
     resolved = resolve_scope(scope, target, restrict=restrict, refused=old["refused"] if refused is None else refused,
-                             declared=declared, declared_why="as the plan says" if kept else "you set it")
+                             declared=declared, declared_why="as the plan says" if kept else declared_why)
     if assessment is None and old.get("assessment_set"):
         assessment = assessment_text(old["assessment"])
     hours = old.get("hours") if hours is None else hours

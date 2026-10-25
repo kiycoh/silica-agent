@@ -297,52 +297,64 @@ def roles(colls: list[dict], body: str, title: str, steps: list[list[set[str]]],
     for c in colls:
         role = declared.get(c["label"].casefold()) or declared.get(c["key"].casefold())
         if role in ROLES:
-            out[c["key"]] = {"role": role, "why": declared_why}
+            out[c["key"]] = {"role": role, "why": declared_why, "confirm": False}
         elif texts and named_in(c["label"], texts):
-            out[c["key"]] = {"role": REFERENCE, "why": "named among the reference's texts"}
+            out[c["key"]] = {"role": REFERENCE, "why": "named among the reference's texts", "confirm": False}
         elif title and named_in(c["label"], title):
-            out[c["key"]] = {"role": MATERIAL, "why": "named in the reference's title"}
+            out[c["key"]] = {"role": MATERIAL, "why": "named in the reference's title", "confirm": False}
     open_ = [c for c in colls if c["key"] not in out and read[c["key"]]["matched"]]
     for c in colls:
         if c["key"] not in out and not read[c["key"]]["matched"]:
-            out[c["key"]] = {"role": UNUSED, "why": "no row of it meets the reference"}
+            out[c["key"]] = {"role": UNUSED, "why": "no row of it meets the reference", "confirm": False}
     if not open_:
         return out
     has_material = any(v["role"] == MATERIAL for v in out.values())
     if len(open_) == 1 and not has_material and not any(v["role"] == REFERENCE for v in out.values()):
-        out[open_[0]["key"]] = {"role": MATERIAL, "why": "the only source the reference meets"}
+        out[open_[0]["key"]] = {"role": MATERIAL, "why": "the only source the reference meets", "confirm": False}
         return out
+    confirm = False
     if not has_material:
-        winner, why = _decide(open_, read)
+        winner, why, confirm = _decide(open_, read)
         if winner:
-            out[winner] = {"role": MATERIAL, "why": why}
+            out[winner] = {"role": MATERIAL, "why": why + ("; to confirm" if confirm else ""), "confirm": confirm}
             has_material = True
     for c in open_:
         if c["key"] in out:
             continue
         if has_material:
-            out[c["key"]] = {"role": REFERENCE, "why": "another collection is the material"}
+            out[c["key"]] = {"role": REFERENCE, "why": "another collection is the material", "confirm": confirm}
         else:
-            out[c["key"]] = {"role": MATERIAL, "why": "could not tell the material from a reference: choose in the form"}
+            out[c["key"]] = {"role": MATERIAL, "why": "could not tell the material from a reference: choose in the form",
+                             "confirm": True}
     return out
 
 
-def _decide(open_: list[dict], read: dict[str, dict]) -> tuple[str | None, str]:
+# A decision closer than twice its margin is a proposal, not a role: on 20
+# random halves of the course syllabus (2026-10-25) the decks won by order 11
+# times, the smallest winning margins 0.26 and 0.28, and 9 halves settled
+# nothing; focus margins on the halves were 0.00 to 0.02. A role to confirm is
+# shown and used but not written to the plan until the form saves it.
+CONFIRM_FACTOR = 2.0
+
+
+def _decide(open_: list[dict], read: dict[str, dict]) -> tuple[str | None, str, bool]:
     """The material among undecided collections by order, then by focus, or
-    (None, "") when neither settles it."""
+    (None, "", True) when neither settles it; the flag says to confirm."""
     ordered = sorted(((read[c["key"]]["order"], c["key"]) for c in open_ if read[c["key"]]["order"] is not None),
                      reverse=True)
     if ordered and ordered[0][0] >= ORDER_FLOOR:
         second = ordered[1][0] if len(ordered) > 1 else -1.0
         if ordered[0][0] - second >= ORDER_MARGIN:
             other = f" against {second:.2f}" if len(ordered) > 1 else ""
-            return ordered[0][1], f"follows the reference's order ({ordered[0][0]:.2f}{other})"
+            close = len(ordered) > 1 and ordered[0][0] - second < ORDER_MARGIN * CONFIRM_FACTOR
+            return ordered[0][1], f"follows the reference's order ({ordered[0][0]:.2f}{other})", close
     focused = sorted(((read[c["key"]]["focus"], c["key"]) for c in open_), reverse=True)
     second = focused[1][0] if len(focused) > 1 else 0.0
     if focused[0][0] - second >= FOCUS_MARGIN:
+        close = len(focused) > 1 and focused[0][0] - second < FOCUS_MARGIN * CONFIRM_FACTOR
         return focused[0][1], (f"the reference names {focused[0][0]:.0%} of its rows"
-                               + (f", against {second:.0%}" if len(focused) > 1 else ""))
-    return None, ""
+                               + (f", against {second:.0%}" if len(focused) > 1 else "")), close
+    return None, "", True
 
 
 def declared_of(plan_keys: dict) -> dict[str, str]:

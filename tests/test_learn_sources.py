@@ -139,7 +139,7 @@ def test_a_book_named_in_the_references_title_is_the_material(course):
     colls = sources.collections(notes, set(notes))
     roles = sources.roles(colls, "", "Studying Pattern Learning Methods", [[{"dropout"}]])
     book = next(c for c in colls if c["kind"] == "book")
-    assert roles[book["key"]] == {"role": "material", "why": "named in the reference's title"}
+    assert roles[book["key"]] == {"role": "material", "why": "named in the reference's title", "confirm": False}
 
 
 def test_order_picks_the_collection_that_follows_the_reference():
@@ -404,3 +404,28 @@ def test_topic_vectors_survive_a_restart_and_never_cross_models(tmp_vault):
     plans._embed(["kernel trick"], Other())
     assert calls == ["kernel trick", "kernel trick"]   # another model embeds again
     plans._VEC_MEMO.clear()
+
+
+def test_a_close_decision_is_to_confirm_and_no_plan_key_is_written_without_the_form(course, monkeypatch):
+    from silica.kernel.learn import objectives as obj
+
+    a = {"key": "a", "label": "A", "spines": [f"a{i}" for i in range(5)], "rows": []}
+    b = {"key": "b", "label": "B", "spines": [f"b{i}" for i in range(5)], "rows": []}
+    read = {"a": {"order": 0.7, "focus": 0.5, "matched": 5}, "b": {"order": 0.45, "focus": 0.4, "matched": 5}}
+    roles = sources.roles([a, b], "", "", [[{"t"}]], read=read)
+    assert roles["a"]["role"] == "material" and roles["a"]["confirm"] and roles["a"]["why"].endswith("; to confirm")
+    read["b"]["order"] = 0.2                     # a clear margin: decided
+    assert sources.roles([a, b], "", "", [[{"t"}]], read=read)["a"]["confirm"] is False
+    # a plan made without the form writes no role it was not sure of
+    monkeypatch.setattr(obj, "rewrite", lambda cards: cards)
+    monkeypatch.setattr(sources, "FOCUS_MARGIN", 0.01)
+    monkeypatch.setattr(sources, "CONFIRM_FACTOR", 1e9)   # every focus win is close
+    lines = "\n".join(r["text"] for r in plans.reference_rows(SYLLABUS)) + "\n"
+    out = plans.write_plan("Unsure", "steps", lines, by="2026-11-10", objectives=[])
+    text = plans._read(out["path"])
+    assert "materials:" not in text and "to confirm" in text
+    out = plans.write_plan("Sure", "steps", lines, by="2026-11-10", objectives=[],
+                           declared={"Slides": "material", "Pattern Learning Methods (Ann Smith)": "reference"},
+                           declared_why="confirmed in the form")
+    text = plans._read(out["path"])
+    assert "materials: Slides" in text and "(confirmed in the form)" in text

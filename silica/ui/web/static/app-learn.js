@@ -2371,6 +2371,16 @@ async function lrWritePlan({ start = false } = {}) {
   if (!f.name.trim()) { notify("a plan needs a name", "warn"); return; }
   if (!f.preview?.paths?.length) { notify("choose what to study first", "warn"); return; }
   const body = { ...lrStudyBody(), name: f.name.trim(), by: f.by || null };
+  // saving is confirming: the roles the reader saw are written, even the ones
+  // Silica marked to confirm and the reader left as they were (ADR-0131)
+  if ((f.ref || f.scope === "steps") && f.preview?.sources?.length && !f.rolesTouched) {
+    const roles = Object.fromEntries(f.preview.sources.map((s) => [s.label, f.roles[s.label] || s.role]));
+    for (const [key, role] of [["materials", "material"], ["references", "reference"], ["unused", "unused"]]) {
+      body[key] = Object.keys(roles).filter((l) => roles[l] === role);
+    }
+    delete body.roles_kept;
+    body.roles_confirmed = true;
+  }
   // what the row says at this moment is what is written (ADR-0041, §16)
   if (f.cards && !f.cardsBusy) body.cards = f.cards;
   else body.templates = true;

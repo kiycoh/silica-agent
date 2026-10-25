@@ -1403,7 +1403,8 @@ def write_plan(payload: dict):
     # a key left out keeps what the plan says, or what Silica reads
     declared = _declared(payload)
     # roles the form sends back unchanged from the plan are the plan's, not a choice made now
-    declared_why = "as the plan says" if payload.get("roles_kept") else "you set it"
+    declared_why = ("as the plan says" if payload.get("roles_kept")
+                    else "confirmed in the form" if payload.get("roles_confirmed") else "you set it")
     hours = payload.get("hours") if "hours" in payload else None
     assessment = payload.get("assessment") if "assessment" in payload else None
     guide = str(payload.get("guide") or "") if "guide" in payload else None
@@ -1449,7 +1450,7 @@ def write_plan(payload: dict):
             return plans.edit_plan(plan["path"], name or plan["name"], scope, target, by=payload.get("by") or None,
                                    restrict=restrict, objectives=chosen, cards=cards,
                                    refused=refused if "refused" in payload else None, declared=declared,
-                                   hours=hours, assessment=assessment, guide=guide)
+                                   hours=hours, assessment=assessment, guide=guide, declared_why=declared_why)
         except Exception as exc:
             raise HTTPException(400, str(exc))
     if not name:
@@ -1458,7 +1459,8 @@ def write_plan(payload: dict):
         out = plans.write_plan(name, scope, target, by=payload.get("by") or None, restrict=restrict,
                                objectives=chosen if "objectives" in payload else None,
                                reach=str(payload.get("reach") or "relational"), cards=cards, refused=refused,
-                               declared=declared, hours=hours, assessment=assessment, guide=guide or "")
+                               declared=declared, hours=hours, assessment=assessment, guide=guide or "",
+                               declared_why=declared_why)
     except Exception as exc:
         raise HTTPException(400, str(exc))
     return out
