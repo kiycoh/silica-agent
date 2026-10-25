@@ -1,6 +1,7 @@
 """Shared pytest fixtures for the silica-agent test suite."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -304,6 +305,19 @@ def _isolate_silica_home(tmp_path_factory, monkeypatch: pytest.MonkeyPatch):
                 store.close()
             except Exception:
                 pass
+    # The change ledger keeps one connection per vault for the life of the
+    # process (session_changes.py, a measured 20.7 ms per close), and every
+    # test here has a new vault. Unclosed, 465 of them (1,395 fds) were open
+    # by test 5,273 on 2026-10-24: test_prompt_history's pipe got fd 1412,
+    # select() refuses fds past 1024, and prompt_toolkit's error prompt
+    # re-read that pipe in a loop until the process held 23 GB.
+    from silica.kernel.write import session_changes
+    session_changes.clear()
+    # The tripwire for the next leak of that kind: stop the run with a name
+    # well before 1024, instead of losing the desktop to the OOM killer.
+    if os.path.isdir("/proc/self/fd") and len(os.listdir("/proc/self/fd")) > 768:
+        pytest.exit(f"{len(os.listdir('/proc/self/fd'))} open file descriptors after this "
+                    "test: something leaks them, and past 1024 prompt_toolkit loops to OOM", 1)
 
 
 @pytest.fixture(autouse=True)
