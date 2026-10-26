@@ -3001,3 +3001,238 @@ button.lr-cell:focus-visible {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* --- a step's reading (ADR-0132) ------------------------------------------- */
+/* Wider than the home column: the sections' list beside the section, and the
+   list stacks above it below 760px. */
+.lr-one.lr-read {
+  max-width: 60rem;
+}
+
+.lr-readbtn {
+  margin-left: 0.6rem;
+}
+
+.lr-read-test {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--slate);
+  color: var(--frost);
+  font-size: 15px;
+}
+
+.lr-read-stale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  color: var(--warn);
+  font-size: var(--fs-ctl);
+}
+
+.lr-read-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.75rem;
+  align-items: flex-start;
+}
+
+.lr-read-toc {
+  flex: 1 1 15rem;
+  max-width: 18rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lr-read-toc-h {
+  padding: 0 0.6rem 0.5rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  letter-spacing: 0.02em;
+}
+
+.lr-read-toc-b {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ash);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+
+.lr-read-toc-b:hover:not(:disabled) {
+  background: var(--sel-hover);
+}
+
+.lr-read-toc-b:disabled {
+  cursor: default;
+}
+
+.lr-read-toc-i.cur .lr-read-toc-b {
+  background: var(--sel);
+  color: var(--frost);
+}
+
+.lr-read-toc-b .dot {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  border: 1px solid var(--line-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-read-toc-i.cur .dot {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* a section finished is a full mark, the way a met note is (ADR-0061) */
+.lr-read-toc-i.done .dot {
+  border-color: var(--ash);
+  background: var(--ash);
+  color: var(--slate);
+}
+
+.lr-read-toc-b .t {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.lr-read-toc-b .tt {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.lr-read-toc-i.cur .tt {
+  font-weight: 600;
+}
+
+.lr-read-toc-b .m,
+.lr-read-toc-b .mv {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  overflow-wrap: anywhere;
+}
+
+.lr-read-toc-b .mv,
+.lr-read-mv {
+  color: var(--warn);
+}
+
+.lr-read-main {
+  flex: 999 1 28rem;
+  min-width: 0;
+  max-width: 42rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.lr-read-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.4rem 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--slate);
+}
+
+.lr-read-card h3,
+.lr-read-shead h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.lr-read-q {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--frost);
+}
+
+.lr-read-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.lr-read-shead {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.lr-read-yours {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-sm);
+  font-size: 14px;
+}
+
+.lr-read-yours .k {
+  flex: 0 0 auto;
+  color: var(--ash-dim);
+}
+
+.lr-read-yours .v {
+  color: var(--frost);
+  white-space: pre-line;
+}
+
+.lr-read-label {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-read-text p {
+  margin: 0.25rem 0 0;
+  font-size: 16px;
+  line-height: 1.72;
+  color: var(--text);
+  max-width: 67ch;
+}
+
+.lr-read-text .lr-ans {
+  background: var(--sel);
+  color: var(--frost);
+  border-radius: var(--r-xs);
+  padding: 0.05rem 0.2rem;
+}
+
+.lr-read-text .lr-unheld {
+  color: var(--warn);
+  font-style: normal;
+  font-size: var(--fs-meta);
+}
+
+@media (max-width: 760px) {
+  .lr-read-toc {
+    max-width: none;
+  }
+}

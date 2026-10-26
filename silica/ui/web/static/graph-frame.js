@@ -181,7 +181,7 @@ const TRI_R = Math.sqrt(4 * Math.PI / (3 * Math.sqrt(3)));
 // The square on its corner, so the disc's area again and the square's own
 // circumsphere in 3D; DIA_R is its half-diagonal over the disc radius. The
 // value is the hover's word for it.
-const NATIVE = { plan: "Learn plan", event: "event note" };
+const NATIVE = { plan: "Learn plan", event: "event note", reading: "Learn reading" };
 const DIAMOND = 4;
 const DIA_R = Math.sqrt(Math.PI / 2);
 const shapeOf = n => SQUARE[n.type] || (n.type === "daily" ? TRIANGLE : NATIVE[n.type] ? DIAMOND : 0);
