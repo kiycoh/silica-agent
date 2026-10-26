@@ -380,6 +380,13 @@ class TestBigVaultPerfKnobs:
         html = render_html(nodes, edges, lib_js="// dummy")
         assert "G.linkWidth(0)" in html
 
+    def test_3d_renderer_has_no_msaa(self, small_graph):
+        """MSAA was the 3D frame: the merged links blended under 4x samples
+        held the 23,836-edge vault at 4.5fps, and 60 without it (2026-10-26)."""
+        nodes, edges = small_graph
+        html = render_html(nodes, edges, lib_js="// dummy")
+        assert "new ForceGraph3D(el, { rendererConfig: { antialias: false } })" in html
+
     def test_no_directional_arrow_cones(self, small_graph):
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")

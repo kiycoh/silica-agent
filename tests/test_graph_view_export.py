@@ -167,7 +167,7 @@ def test_export_graph_ships_the_2d_3d_switch(monkeypatch, tmp_path):
     assert 'id="mode-toggle"' in html            # the HUD control
     assert 'data-mode="2d"' in html and 'data-mode="3d"' in html
     assert "new ForceGraph(el)" in html          # 2D canvas branch
-    assert "new ForceGraph3D(el)" in html        # WebGL branch
+    assert "new ForceGraph3D(el" in html         # WebGL branch
     assert "nodeCanvasObject" in html            # 2D labels, the point of the mode
     assert "silica-graph-mode" in html           # last-used mode persists
     assert "centerAt" in html                    # 2D fly-to

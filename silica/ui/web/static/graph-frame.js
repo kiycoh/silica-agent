@@ -3161,7 +3161,17 @@ function buildGraph() {
     el.innerHTML = "";
     LinkSeg = null;   // died with the scene; the next 3D build remakes it
   }
-  const G = is2D() ? new ForceGraph(el) : new ForceGraph3D(el);
+  // 3D without MSAA, which the bundle turns on. The 3D frame's cost was the
+  // merged LineSegments blended under 4x MSAA, not the notes (2026-10-26, the
+  // 23,836-edge vault, Intel iGPU, dpr 2 at fit): 4.5fps as built, 5.3 with no
+  // nodes at all, 60 with no links, 60 with MSAA off; 8.3 -> 142fps uncapped at
+  // dpr 1.33. A disc's edge is the RIM_PX knockout the flat patch already
+  // smooths in pixels, so what MSAA was buying is the links' edges alone, and
+  // they now step. Lit spheres (SILICA_GRAPH_SHADING=0) step at the silhouette
+  // too. The AA way back is the links as quads with their own coverage, as 2D
+  // draws them (GL_LINK_FS), not MSAA over the whole scene.
+  const G = is2D() ? new ForceGraph(el)
+    : new ForceGraph3D(el, { rendererConfig: { antialias: false } });
   if (is2D()) GLLinks = buildGLLinks();
   syncCanvasSize(G);   // the bundle's default is the size at its load, not now
   // Seeded positions and the decay that goes with them, decided before the data
