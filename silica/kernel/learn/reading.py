@@ -30,6 +30,11 @@ from pathlib import Path
 # note is about and what it leans on, and 37 notes stay under 12k characters.
 LEDE_CHARS = 280
 ORDER_MAX_TOKENS = 2000
+# A section is one concept (ADR-0132, point 1). Asked only to group, the
+# hosted model put the owner's 37-note step into 5 sections, one of 16 notes
+# from a partial derivative to pruning, explained by one definition and one
+# example (2026-10-26); the prompt asks for one to three and code splits past this.
+MAX_SECTION_NOTES = 4
 # A section's notes handed over whole up to this much (a lesson's few screens);
 # past it each note is cut evenly, so no note of the section goes missing.
 SECTION_CHARS = 9000
@@ -51,13 +56,25 @@ KINDS = ("guess", "own")
 ORDER_PROMPT = """These are the notes of one study step, in the order the lectures present them:
 {notes}
 
-Group them into sections for one explanation a student reads from start to end. A section explains one concept and may cover several notes that belong together; a long note may stand alone. Put a section before another only when the other needs it to be understood; otherwise keep the lectures' order.
+Group them into sections for one explanation a student reads from start to end. A section explains one concept: usually one to three notes that belong together, never more than {most}; a long note stands alone. Put a section before another only when the other needs it to be understood; otherwise keep the lectures' order.
 
 Write every section as three lines, and nothing else:
 SECTION: a short title in {language}
 NOTES: the titles of the notes it covers, exactly as written above, separated by " ; "
 NEEDS: the titles of notes of this step that must be read before this section, separated by " ; ", or none
 Every note appears in exactly one section."""
+
+# The needs asked again, alone and by number: asked to group and order at once,
+# the local 9B answered "NEEDS: none" for every one of the 12 sections of the
+# owner's 37-note step (2026-10-26), so nothing could move; the vault's own
+# prerequisite graph held 1 edge inside all 16 steps of that plan.
+NEEDS_PROMPT = """These are the sections of one explanation, in the lectures' order:
+{sections}
+
+For each section, which other sections must a student have read to understand it, because it uses a definition, a formula or a result they explain? A section can need one that comes later in the list.
+
+Write one line per section, and nothing else:
+N: the numbers of the sections it needs, separated by commas, or none"""
 
 SECTION_PROMPT = """You write one section of a study explanation for a university student, from these notes only:
 {notes}
@@ -168,6 +185,15 @@ def order_sections(titles: list[str], raw: list[dict]) -> dict:
     for t in titles:
         if t.casefold() not in used:
             secs.append({"title": t, "notes": [t], "needs_raw": []})
+    # an oversized section splits in its own order; a later part is named by
+    # its first note and keeps none of the needs, which the first part carries
+    split = []
+    for s in secs:
+        for k in range(0, len(s["notes"]), MAX_SECTION_NOTES):
+            part = s["notes"][k:k + MAX_SECTION_NOTES]
+            split.append({"title": s["title"] if k == 0 else part[0], "notes": part,
+                          "needs_raw": s["needs_raw"] if k == 0 else []})
+    secs = split
     for s in secs:
         s["key"] = min(pos[n.casefold()] for n in s["notes"])
     secs.sort(key=lambda s: s["key"])
@@ -203,6 +229,42 @@ def order_sections(titles: list[str], raw: list[dict]) -> dict:
     return {"sections": out, "order": order}
 
 
+_NEED_LINE_RE = re.compile(r"^\s*(?:section\s*)?(\d+)\s*[:.)-]\s*(.*)$", re.I)
+
+
+def parse_needs(reply: str, n: int) -> dict[int, list[int]]:
+    """{section: [sections it needs]}, 0-based, from `N: a, b` lines; a self
+    reference or a number out of range is dropped."""
+    out: dict[int, list[int]] = {}
+    for line in (reply or "").splitlines():
+        m = _NEED_LINE_RE.match(line.replace("*", ""))
+        if not m:
+            continue
+        i = int(m.group(1)) - 1
+        if not 0 <= i < n or _NONE_RE.match(m.group(2)):
+            continue
+        got = [int(x) - 1 for x in re.findall(r"\d+", m.group(2))]
+        out[i] = [j for j in dict.fromkeys(got) if 0 <= j < n and j != i]
+    return out
+
+
+def add_needs(ordered: dict, titles: list[str], ask) -> dict:
+    """The order again, with the needs a second call names by number."""
+    secs = ordered["sections"]
+    if len(secs) < 2:
+        return ordered
+    listing = "\n".join(f"{i}. {s['title']}: {'; '.join(s['notes'])}" for i, s in enumerate(secs, 1))
+    try:
+        needs = parse_needs(ask(NEEDS_PROMPT.format(sections=listing), ORDER_MAX_TOKENS), len(secs))
+    except Exception:
+        # The second call only adds moves; without it the first order stands.
+        return ordered
+    raw = [{"title": s["title"], "notes": s["notes"],
+            "needs": list(dict.fromkeys(s["needs"] + [secs[j]["notes"][0] for j in needs.get(i, [])]))}
+           for i, s in enumerate(secs)]
+    return order_sections(titles, raw)
+
+
 # ------------------------------------------------------------------ a section
 
 def parse_fields(reply: str) -> dict[str, str]:
@@ -219,6 +281,17 @@ def parse_fields(reply: str) -> dict[str, str]:
     return {k: "\n".join(v).strip() for k, v in out.items()}
 
 
+_DISPLAY_RE = re.compile(r"\$\$\s*\n(.*?)\n\s*\$\$", re.S)
+
+
+def collapse_display(text: str) -> str:
+    """A `$$` block written over three lines onto one: the check reads a line
+    at a time, and a formula line without its fences was judged by its LaTeX
+    words and marked though the note holds it verbatim (the gradient update of
+    "Gradiente discendente", 2026-10-26); Learn draws `$$...$$` only on one line."""
+    return _DISPLAY_RE.sub(lambda m: "$$" + " ".join(x.strip() for x in m.group(1).splitlines()) + "$$", text or "")
+
+
 def _sentences(text: str) -> list[str]:
     out = []
     for line in text.splitlines():
@@ -228,12 +301,53 @@ def _sentences(text: str) -> list[str]:
     return out
 
 
+def _formula_held(formula: str, note_keys: list[str], held_all: str) -> bool:
+    """A formula the notes hold: verbatim once LaTeX spelling is normalized,
+    or a chain's ends (`A = B` where a note's formula reads `A = ... = B`):
+    the model wrote the partial derivative of a weighted sum as `= alpha_j`,
+    the note's last link, and the verbatim check marked it (2026-10-26)."""
+    from silica.kernel.learn import artifacts
+
+    key = artifacts._latex_key(formula)
+    if key in held_all:
+        return True
+    parts = [p for p in key.split("=") if p]
+    if len(parts) < 2:
+        return False
+    for nk in note_keys:
+        at = 0
+        for p in parts:
+            at = nk.find(p, at)
+            if at < 0:
+                break
+            at += len(p)
+        else:
+            return True
+    return False
+
+
+def _held(sentence: str, notes_text: str, note_keys: list[str], held_all: str, held_words: set[str]) -> bool:
+    """The flashcards' gate (artifacts._grounded) with a chain's ends allowed."""
+    from silica.kernel.learn import artifacts
+
+    formulas = artifacts._MATH_RE.findall(sentence)
+    if any(not _formula_held(f, note_keys, held_all) for f in formulas):
+        return False
+    words = artifacts._words(sentence)
+    if not words or (formulas and len(words) <= 2):
+        return True
+    return sum(1 for w in words if w in held_words) >= artifacts.GROUNDED_SHARE * len(words)
+
+
 def mark_unheld(text: str, notes_text: str) -> tuple[str, int]:
     """The text with each sentence the notes do not hold marked, line breaks
     kept; and how many were marked. A line of formula alone is judged by its
     formula; a sentence of fewer than three content words is not judged."""
     from silica.kernel.learn import artifacts
 
+    note_keys = [artifacts._latex_key(f) for f in artifacts._MATH_RE.findall(notes_text)]
+    held_all = artifacts._latex_key(notes_text)
+    held_words = artifacts._words(notes_text)
     marked = 0
     lines = []
     for line in text.splitlines():
@@ -243,7 +357,7 @@ def mark_unheld(text: str, notes_text: str) -> tuple[str, int]:
         parts = []
         for s in _SENTENCE_RE.split(line):
             judged = artifacts._MATH_RE.search(s) or len(artifacts._words(s)) >= 3
-            if judged and not artifacts._grounded(s, notes_text):
+            if judged and not _held(s, notes_text, note_keys, held_all, held_words):
                 parts.append(f"{s.rstrip()} {NOT_HELD}")
                 marked += 1
             else:
@@ -329,6 +443,7 @@ def write_section(sec: dict, paths_by_title: dict[str, str], language: str, ask=
     needs = f' It comes after: {", ".join(sec["needs"])}.' if sec.get("needs") else ""
     f = parse_fields(ask(SECTION_PROMPT.format(notes=block, title=sec["title"], needs=needs, language=language),
                          SECTION_MAX_TOKENS))
+    f = {k: collapse_display(v) for k, v in f.items()}
     definition, m1 = mark_unheld(f.get("DEFINITION", ""), held)
     mechanism, m2 = mark_unheld(f.get("MECHANISM", ""), held)
     contrast = "" if _NONE_RE.match(f.get("CONTRAST", "") or "none") else f.get("CONTRAST", "")
@@ -450,7 +565,8 @@ def write_reading(plan_path: str, step: int, ask=None, progress=None) -> dict:
     language = _language([p for _t, p in notes])
     listing = "\n".join(f"- {t}: {_lede(p)}" for t, p in notes)
     try:
-        raw = parse_sections(ask(ORDER_PROMPT.format(notes=listing, language=language), ORDER_MAX_TOKENS))
+        raw = parse_sections(ask(ORDER_PROMPT.format(notes=listing, language=language, most=MAX_SECTION_NOTES),
+                                 ORDER_MAX_TOKENS))
     except Exception:
         # A failed ordering call is not a failed reading: one section a note,
         # in the lectures' order, is the reading without the grouping.
@@ -458,6 +574,8 @@ def write_reading(plan_path: str, step: int, ask=None, progress=None) -> dict:
     ordered = order_sections(titles, raw)
     if not raw:
         ordered["order"] = "lecture"
+    else:
+        ordered = add_needs(ordered, titles, ask)
     total = len(ordered["sections"])
     done = [0]
     lock = threading.Lock()

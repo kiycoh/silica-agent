@@ -1093,7 +1093,11 @@ function lrPlanTree(p) {
     const leaves = node.leaves || [];
     const rd = node.readings || { coverage: [0, leaves.length], met_by_objective: {} };
     const label = p.scope === "folder" && node.node.startsWith(root) ? (node.node.slice(root.length).replace(/^\//, "") || p.target) : node.node;
-    const step = p.steps?.length ? p.steps.find((s) => s.text.startsWith(node.node) || s.text.includes(node.node)) : null;
+    // the step whose label is the node's, before any whose text merely starts
+    // with it: "Reti neurali superficiali" took "Reti neurali superficiali
+    // feedforward", the step before it in the owner's plan (2026-10-26)
+    const step = p.steps?.length ? (p.steps.find((s) => s.text === node.node || s.text.startsWith(node.node + ":"))
+      || p.steps.find((s) => s.text.startsWith(node.node) || s.text.includes(node.node))) : null;
     const tr = lrEl("tr", "node");
     const th0 = lrEl("th");
     th0.scope = "row";
@@ -3582,7 +3586,10 @@ function lrRenderRead(body) {
   const meta = d.exists
     ? `${lrPlural(d.sections.length, "section")} · ${lrPlural(d.notes.length, "note")} · about ${d.minutes} min of reading`
     : lrPlural(d.notes.length, "note");
-  one.appendChild(lrHead(`Read · step ${d.step + 1} of ${d.steps}${d.hours ? ` · ${d.hours} h in the syllabus` : ""}`, d.label, meta, []));
+  // Rewrite is one revertible overwrite; a running job hides it
+  const rewrite = d.exists && !(d.job && d.job.state === "running") ? lrBtn("ghost box", "Rewrite", () => lrReadWrite(r)) : null;
+  if (rewrite) rewrite.title = "write this reading again from the step's notes; the reader's words start over";
+  one.appendChild(lrHead(`Read · step ${d.step + 1} of ${d.steps}${d.hours ? ` · ${d.hours} h in the syllabus` : ""}`, d.label, meta, [rewrite]));
   const job = d.job;
   if (job && job.state === "running") {
     const p = lrEl("div", "lr-read-card");
@@ -3610,6 +3617,8 @@ function lrRenderRead(body) {
   }
   one.appendChild(lrEl("p", "lr-read-test", `After you read, ${lrPlural(d.questions, "question")} on these notes, with the reading closed.`));
   const next = lrReadNext(d);
+  // a note's Study tools open the reading again on that note, whatever was shown before
+  if (r.path && lrRead.forPath !== r.path) { lrRead.forPath = r.path; lrRead.view = undefined; }
   if (lrRead.view === undefined) {
     // opened from a note's Study tools: that note's section, once the reader has reached it
     const want = r.path ? d.sections.find((s) => s.notes.includes(lrStem(r.path))) : null;
@@ -3632,7 +3641,7 @@ function lrReadToc(d, next) {
     if (s.n === lrRead.view) b.setAttribute("aria-current", "step");
     const txt = lrEl("span", "t");
     txt.append(lrEl("span", "tt", s.title), lrEl("span", "m", s.notes.join(", ")));
-    if (s.needed_by?.length) txt.appendChild(lrEl("span", "mv", `moved up: needed by ${s.needed_by.join(", ")}`));
+    if (s.needed_by?.length) txt.appendChild(lrEl("span", "lr-read-moved", `moved up: needed by ${s.needed_by.join(", ")}`));
     b.append(lrEl("span", "dot", done ? "✓" : String(s.n)), txt);
     b.addEventListener("click", () => { lrRead.view = s.n; lrRender(); });
     li.appendChild(b);
@@ -3679,7 +3688,9 @@ function lrReadGuess(col, d, s, r) {
 // the notes do not hold set apart by its mark
 function lrReadText(text) {
   const box = lrEl("div", "lr-read-text");
-  for (const line of String(text || "").split("\n")) {
+  // a `$$` block over three lines becomes one line, the only form lrMd draws
+  const flat = String(text || "").replace(/\$\$\s*\n([\s\S]*?)\n\s*\$\$/g, (_m, tex) => "$$" + tex.split("\n").map((x) => x.trim()).join(" ") + "$$");
+  for (const line of flat.split("\n")) {
     if (!line.trim()) continue;
     const p = lrEl("p");
     line.split(/==(.+?)==/).forEach((t, i) => {

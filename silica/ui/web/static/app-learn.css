@@ -3009,6 +3009,12 @@ button.lr-cell:focus-visible {
   max-width: 60rem;
 }
 
+/* the head and the test line span the column like the cards under them,
+   not centred over them */
+.lr-one.lr-read > * {
+  align-self: stretch;
+}
+
 .lr-readbtn {
   margin-left: 0.6rem;
 }
@@ -3069,6 +3075,7 @@ button.lr-cell:focus-visible {
   color: var(--ash);
   font: inherit;
   text-align: left;
+  white-space: normal;
   cursor: pointer;
   transition: background var(--dur) var(--ease);
 }
@@ -3128,13 +3135,13 @@ button.lr-cell:focus-visible {
 }
 
 .lr-read-toc-b .m,
-.lr-read-toc-b .mv {
+.lr-read-toc-b .lr-read-moved {
   font-size: var(--fs-meta);
   color: var(--ash-dim);
   overflow-wrap: anywhere;
 }
 
-.lr-read-toc-b .mv,
+.lr-read-toc-b .lr-read-moved,
 .lr-read-mv {
   color: var(--warn);
 }

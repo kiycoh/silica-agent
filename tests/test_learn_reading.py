@@ -70,6 +70,8 @@ def section_reply(title: str) -> str:
 def fake_ask(prompt: str, max_tokens: int) -> str:
     if prompt.startswith("These are the notes of one study step"):
         return ORDER_REPLY
+    if prompt.startswith("These are the sections of one explanation"):
+        return "1: none\n2: none\n3: 2"
     title = prompt.split('The section is "', 1)[1].split('"', 1)[0]
     return section_reply(title)
 
@@ -122,6 +124,26 @@ def test_only_the_steps_notes_count_each_once_and_a_note_left_out_stands_alone()
     assert sum(len(s["notes"]) for s in out["sections"]) == len(ORDER)
 
 
+def test_a_section_of_too_many_notes_splits_in_its_own_order():
+    many = [f"N{i}" for i in range(10)]
+    out = reading.order_sections(many, [{"title": "Tutto", "notes": many, "needs": []}])
+    assert [s["notes"] for s in out["sections"]] == [many[:4], many[4:8], many[8:]]
+    assert [s["title"] for s in out["sections"]] == ["Tutto", "N4", "N8"]
+
+
+def test_needs_named_by_number_in_a_second_call_move_a_section():
+    """The local 9B wrote "NEEDS: none" everywhere when asked to group and
+    order at once (2026-10-26); asked by number, a need moves its section."""
+    assert reading.parse_needs("1: none\n**2:** 3, 2, 9\nSection 3: 1\nnoise", 3) == {1: [2], 2: [0]}
+    raw = [{"title": t, "notes": [t], "needs": []} for t in ORDER]
+    first = reading.order_sections(ORDER, raw)
+    assert [s["title"] for s in first["sections"]] == ORDER
+    moved = reading.add_needs(first, ORDER, lambda p, m: "3: 4")
+    assert [s["title"] for s in moved["sections"]] == [ORDER[0], ORDER[1], ORDER[3], ORDER[2]]
+    assert moved["sections"][2]["needed_by"] == [ORDER[2]]
+    assert reading.add_needs(first, ORDER, lambda p, m: 1 / 0) is first
+
+
 def test_no_reply_is_one_section_a_note_in_lecture_order():
     out = reading.order_sections(ORDER, [])
     assert [s["notes"] for s in out["sections"]] == [[t] for t in ORDER]
@@ -143,6 +165,22 @@ def test_a_sentence_the_notes_do_not_hold_is_marked_and_kept():
     assert n == 0
     text, n = reading.mark_unheld("$$z = \\prod_{i} w_i$$", held)
     assert n == 1
+
+
+def test_a_formula_over_three_lines_is_one_line_and_held_when_the_note_has_it():
+    """The gradient update copied verbatim from its note was marked: its line
+    had lost its `$$` fences and was judged by LaTeX words (2026-10-26)."""
+    text = reading.collapse_display("Prima.\n$$\nz = \\sum_{i} w_i x_i + b\n$$\nDopo.")
+    assert text == "Prima.\n$$z = \\sum_{i} w_i x_i + b$$\nDopo."
+    marked, n = reading.mark_unheld(text, NOTES["Neurone artificiale"])
+    assert n == 0 and reading.NOT_HELD not in marked
+
+
+def test_a_formula_keeping_a_chains_ends_is_held_and_one_off_the_chain_is_not():
+    note = "$$\\frac{\\partial f}{\\partial w_{j}} = \\frac{\\partial \\sum_r w_r a_r}{\\partial w_j} = a_{j}$$"
+    assert reading.mark_unheld("$\\frac{\\partial f}{\\partial w_j} = a_j$", note)[1] == 0
+    assert reading.mark_unheld("$\\frac{\\partial f}{\\partial w_j} = b_j$", note)[1] == 1
+    assert reading.mark_unheld("$a_j = \\frac{\\partial f}{\\partial w_j}$", note)[1] == 1
 
 
 def test_the_answer_is_highlighted_exactly_or_by_its_words():
