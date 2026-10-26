@@ -72,6 +72,9 @@ def _vendored_lib_js() -> str:
 # pinned 3.0.6, the line both bundles carry it from. It reaches the page as the
 # TEXT the worker is built from, in a type="text/plain" script that never runs,
 # so the frame still opens from file:// with nothing to fetch (ADR-0026).
+# Rebuilt from npm d3-force-3d@3.0.6 with an entry of
+#   export { forceSimulation, forceManyBody, forceLink, forceCenter } from "d3-force-3d";
+# through esbuild --bundle --format=iife --global-name=d3 --minify --legal-comments=none.
 _SIM_BUNDLE = "d3-force-3d.min.js"
 
 
