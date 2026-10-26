@@ -522,6 +522,7 @@ function restoreArranged(nodes, saved, keep = false) {
     n.x = s.x; n.y = s.y; n.z = s.z;
     n.fx = s.fx; n.fy = s.fy; n.fz = s.fz;
     n.vx = n.vy = n.vz = 0;
+    n.__wx = NaN;   // put back where it stood, so simFlush tells the layout worker to stop it too
   }
   if (!keep) saved.clear();
 }
@@ -866,11 +867,11 @@ function paintStat(tail) {
 // the reheat floor no longer improves). The eps fires only where a layout
 // truly converges. One click is one budget; the chip shows the step, and a
 // second click continues from where the first left off.
-// ponytail: every tick is painted, so a budget costs what the renderer costs:
-// measured 11 s in 3D and 13 s in 2D (the half-ratio backing store under
-// motion, see the dynamic resolution note, is what keeps 2D near 3D). The
-// synchronous path is warmupTicks at graphData() time, or d3-force in a
-// worker; take it when the wait is a complaint, the layout is the same.
+// The budget is ticks, and under the layout worker (see "the layout in a
+// worker") a tick no longer waits for a frame: on the 23,836-edge vault a
+// descent took 11.4 s on the lib's engine and 5.2 s in the worker, to the same
+// positions (2026-10-26). Without a worker every tick is painted again, and
+// the budget costs what the renderer costs.
 const RESIDUAL_EPS = 0.5;      // graph units per tick; saveLayout rounds to 1 anyway
 const RESIDUAL_BUDGET = 600;   // 2x the 300-tick cold schedule, at 3x its alpha
 let residualTicks = 0;         // > 0 while a descent is running
@@ -888,6 +889,7 @@ function residual() {
 function autoLayout() {
   simTicks = 0; warmupRun = 0;
   residualTicks = RESIDUAL_BUDGET;
+  if (SIM) { SIM.base = SIM.total; SIM.post({ descend: [RESIDUAL_EPS, RESIDUAL_BUDGET] }); }
   paintStat("descending");   // the click answers before the first tick does
   // Same deadlock as a drag (see onNodeDrag): the gate would stop the engine
   // on the settled alpha before the reheat could lift it. descendTick puts it
@@ -906,6 +908,11 @@ function autoLayout() {
 // onEngineStop, which caches the polished positions like any other.
 function descendTick() {
   if (!residualTicks) return;
+  if (SIM) {   // the rule runs in the worker, per tick; this only says how far it got
+    residualTicks = SIM.descending;
+    if (residualTicks) paintStat("descending, step " + SIM.residual.toFixed(2));
+    return;
+  }
   const r = residual();
   paintStat("descending, step " + r.toFixed(2));
   if (r < RESIDUAL_EPS || --residualTicks === 0) {
@@ -2668,6 +2675,9 @@ const particlesMoving = () => PARTICLES && RAW_EDGES.some(e =>
 function renderBudget() {
   if (!Graph) return;
   clearInterval(idleTick); idleTick = null;
+  // A cold build's warmup runs in the worker: paint nothing until it lands,
+  // which is what the lib's synchronous warmup showed too.
+  if (SIM && !SIM.ready) { Graph.pauseAnimation(); return; }
   if (simRunning || performance.now() < awakeUntil) { Graph.resumeAnimation(); return; }
   Graph.pauseAnimation();
   // resumeAnimation() runs one cycle synchronously and re-arms rAF;
@@ -2828,6 +2838,314 @@ function rimless(real) {
   return proxy;
 }
 
+// --- the layout in a worker ---------------------------------------------------
+// Both bundles tick the layout once per painted frame, on the main thread, so
+// a frame paid for the whole tick before it could paint. On the 23,836-edge
+// vault (2026-10-26) that was 13ms of a 13.9ms 2D frame once the links went to
+// WebGL, and in 3D 40.7ms of script a frame, 13.7fps and 19.8s to settle cold.
+//
+// The tick now runs in a worker, on the same d3-force-3d both bundles carry
+// (vendored as d3-force-3d.min.js) and its own copy of the notes. The lib's
+// engine stays the frame clock: its alpha is held, its forces are inert
+// (`inert`: they still take their settings and still resolve the link ends,
+// which is where the worker reads them from), and each of its ticks copies the
+// worker's latest positions in. So everything that listens to that engine -
+// onEngineStop, the 3D meshes, simRunning, the drag gate - runs as before. The
+// schedule the app sets on the lib (decay, the gate, a reheat) is forwarded
+// from this instance's own methods, which keeps the seven places that set it
+// as they were.
+//
+// What the main thread writes wins, and reaches the worker on the next frame:
+// a pin (a drag, the Map) by its fx, a free note put back (an arrangement let
+// go, the areas left) by its x differing from the last x the worker gave it.
+// No Worker, or ?noworker in the address, and the frame lays out as it always
+// did; a worker that fails reloads the frame with ?noworker.
+let SIM = null;
+const NO_WORKER = new URLSearchParams(location.search).has("noworker");
+
+// `fed`: called when the lib hands this force its links, which its digest does
+// after it has placed the notes (see simInit).
+function inert(real, fed) {
+  const f = () => {};
+  f.initialize = (...a) => real.initialize(...a);
+  const proxy = new Proxy(f, {
+    get(t, k) {
+      if (k === "initialize") return t[k];
+      const v = real[k];
+      if (typeof v !== "function") return v;
+      return (...a) => {
+        const r = v.apply(real, a);
+        if (k === "links" && a.length && fed) fed();
+        return r === real ? proxy : r;
+      };
+    },
+  });
+  return proxy;
+}
+
+// The worker's half. holdAreas is the same function the lib ran, by its source.
+const simWorkerSource = () => `
+const HOLD = ${HOLD}, LOOSE_HOLD = ${LOOSE_HOLD}, LOOSE_RIM = ${LOOSE_RIM}, LOOSE_PUSH = ${LOOSE_PUSH};
+${holdAreas}
+let sim = null, nodes = [], S = null, min = 0, descend = null, running = false;
+let ticks = 0, total = 0, residual = 0, gen = 0;
+const held = { discs: null, unit: 1 }, pinned = new Set();
+const hold = Object.assign(a => { if (held.discs) holdAreas(nodes, held.discs, held.unit, a); },
+  { initialize() {} });
+// A message, not setTimeout(0): nested timeouts clamp to 4ms, a third of a tick.
+const ch = new MessageChannel();
+ch.port1.onmessage = run;
+function kick() { if (!running) { running = true; ch.port2.postMessage(0); } }
+// The lib's gate, checked where the lib checks it: before the tick.
+function step() {
+  if (min > 0 && sim.alpha() < min) { running = false; return false; }
+  sim.tick(); ticks++; total++;
+  if (descend) {
+    const st = nodes.map(n => Math.hypot(n.vx || 0, n.vy || 0, n.vz || 0)).sort((a, b) => a - b);
+    residual = st[st.length >> 1] || 0;
+    if (residual < descend[0] || --descend[1] === 0) {
+      descend = null; sim.alphaDecay(${FAST_DECAY}); min = ${ALPHA_MIN};
+    }
+  }
+  return true;
+}
+function run() {
+  if (!running) return;
+  const t0 = performance.now();
+  while (performance.now() - t0 < 12 && step());
+  post();
+  if (running) ch.port2.postMessage(0);
+}
+function post() {
+  const p = new Float64Array(nodes.length * 3);
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    p[3 * i] = n.x; p[3 * i + 1] = n.y; p[3 * i + 2] = n.z || 0;
+  }
+  postMessage({ p, ticks, total, residual, gen, descending: descend ? descend[1] : 0, done: !running }, [p.buffer]);
+  ticks = 0;
+}
+function forces(f) {
+  S = f.strengths;
+  sim.force("link").distance(f.distance).strength((l, i) => S[i]);
+  sim.force("charge").strength(f.charge).distanceMax(f.chargeMax);
+  sim.force("center").strength(f.center);
+  held.discs = f.areas && f.areas.discs; held.unit = f.areas ? f.areas.unit : 1;
+}
+onmessage = ({ data: m }) => {
+  if (m.init) {
+    const { dim, x, y, z, links, group, loose, follow } = m.init;
+    nodes = Array.from({ length: x.length }, (_, i) =>
+      ({ index: i, x: x[i], y: y[i], z: z[i], vx: 0, vy: 0, vz: 0, group: group[i], _loose: !!loose[i] }));
+    follow.forEach((f, i) => { if (f) nodes[i]._follow = f.map(j => nodes[j]); });
+    const L = [];
+    for (let i = 0; i < links.length; i += 2) L.push({ source: links[i], target: links[i + 1] });
+    // The lib's force order (link, charge, center, then the areas): the same
+    // sums in the same order, so the same layout.
+    sim = d3.forceSimulation().numDimensions(dim).stop().nodes(nodes)
+      .force("link", d3.forceLink(L)).force("charge", d3.forceManyBody())
+      .force("center", d3.forceCenter()).force("areas", hold)
+      .alphaDecay(m.init.decay);
+    forces(m.init.forces);
+    min = m.init.min;
+    for (let i = 0; i < m.init.warm && !(min > 0 && sim.alpha() < min); i++) { sim.tick(); total++; }
+    kick();
+    return;
+  }
+  if (sim) for (const op of m.ops) apply(op);
+};
+function apply(m) {
+  if (m.gen) gen = m.gen;
+  if (m.forces) forces(m.forces);
+  if (m.moved) for (let k = 0; k < m.moved.length; k += 4) {
+    const n = nodes[m.moved[k]];
+    n.x = m.moved[k + 1]; n.y = m.moved[k + 2]; n.z = m.moved[k + 3];
+    n.vx = n.vy = n.vz = 0;
+  }
+  if (m.pins) {
+    for (const i of pinned) nodes[i].fx = nodes[i].fy = nodes[i].fz = null;
+    pinned.clear();
+    for (let k = 0; k < m.pins.length; k += 4) {
+      const i = m.pins[k], n = nodes[i];
+      n.fx = m.pins[k + 1]; n.fy = m.pins[k + 2]; n.fz = m.pins[k + 3];
+      pinned.add(i);
+    }
+  }
+  if (m.decay !== undefined) sim.alphaDecay(m.decay);
+  if (m.min !== undefined) min = m.min;
+  if (m.target !== undefined) { sim.alphaTarget(m.target); if (m.target) kick(); }
+  if (m.descend) descend = m.descend.slice();
+  if (m.reheat) { sim.alpha(1); kick(); }
+}`;
+
+// Built with the instance and before its data: it takes the lib's schedule
+// over, so the warmup and the decay the build set are the worker's to run.
+function buildSim(G) {
+  const lib = document.getElementById("sim-lib");
+  if (NO_WORKER || typeof Worker === "undefined" || !lib || !lib.textContent.trim()) return null;
+  let w, url;
+  try {
+    url = URL.createObjectURL(new Blob([lib.textContent, "\n", simWorkerSource()], { type: "text/javascript" }));
+    w = new Worker(url);
+  } catch (e) {
+    console.warn("graph: no layout worker, the frame lays out on its own thread", e);
+    return null;
+  }
+  const S = {
+    w, url, G, ready: false, inited: false, last: null, applied: null, pins: [],
+    total: 0, base: 0, residual: 0, descending: 0, dragging: false,
+    // Bumped by every message that starts a run: a post from before it (a
+    // done, a descent's count) is about a run that is over and changes nothing.
+    gen: 0,
+    min: G.d3AlphaMin(), decay: G.d3AlphaDecay(), warm: G.warmupTicks(),
+    // One message per turn of the main thread, its writes in order: posted
+    // one by one, the worker could tick between a reheat and the hold that
+    // follows it in autoLayout, and the descent held at whatever alpha the
+    // scheduler let through (2026-10-26).
+    box: [], queued: false,
+    post(m) {
+      if (!this.inited) return;
+      this.box.push(m);
+      if (this.queued) return;
+      this.queued = true;
+      queueMicrotask(() => { this.queued = false; const ops = this.box; this.box = []; w.postMessage({ ops }); });
+    },
+  };
+  w.onmessage = ({ data }) => {
+    if (SIM !== S) return;
+    S.last = data;
+    if (!S.ready) { S.ready = true; renderBudget(); }
+  };
+  // Loud and recovered: the same frame again, on the lib's engine. Reloaded
+  // rather than rebuilt in place: rebuilt while the failed instance was still
+  // settling in, the next layout came out at half the spread (2026-10-26),
+  // and a fresh document carries nothing over to explain.
+  w.onerror = e => {
+    e.preventDefault();   // reported once, here, instead of again as uncaught
+    console.error("graph: the layout worker failed, reloading on the main thread", e.message || e);
+    if (SIM !== S) return;
+    const u = new URL(location.href);
+    u.searchParams.set("noworker", "1");
+    location.replace(u.href);
+  };
+  const libReheat = G.d3ReheatSimulation.bind(G);
+  G.warmupTicks(0).d3AlphaDecay(0).d3AlphaMin(0);   // the lib's alpha holds: its engine only keeps time
+  G.d3AlphaDecay = v => v === undefined ? S.decay : (S.decay = v, S.post({ decay: v }), G);
+  G.d3AlphaMin = v => v === undefined ? S.min : (S.min = v, S.post({ min: v }), G);
+  G.d3ReheatSimulation = () => {
+    simFlush(S);
+    S.post({ reheat: 1, gen: ++S.gen });
+    G.cooldownTicks(Infinity);
+    libReheat();
+    return G;
+  };
+  return S;
+}
+
+// What the forces are set to, read off the lib's own (inert) force objects:
+// applyForces keeps writing them, and the strengths are d3's accessors run over
+// the same link array the lib resolved, in float64 so the sums do not drift.
+function simForces(G) {
+  const link = G.d3Force("link"), charge = G.d3Force("charge"), center = G.d3Force("center");
+  const links = link.links(), sf = link.strength();
+  const strengths = new Float64Array(links.length);
+  links.forEach((l, i) => { strengths[i] = sf(l, i, links); });
+  return {
+    strengths, distance: link.distance()(links[0] || {}, 0, links),
+    charge: charge.strength()(RAW_NODES[0] || {}, 0, RAW_NODES), chargeMax: charge.distanceMax(),
+    center: center.strength(),
+    areas: areasOn() ? { discs: AREA_DISCS, unit: discUnit() } : null,
+  };
+}
+
+// From the lib's digest of graphData, which kapsule defers past the call: the
+// digest places the notes, then hands the link force its links (inert's
+// `fed`). Nothing read off the shared notes and edges can say that: a seeded
+// layout has its positions before the digest, a rebuild after another mode
+// has its ends resolved by the instance before, and a worker started on either
+// laid the vault out with no links at all, flat in 3D (2026-10-26).
+function simInit(S) {
+  if (SIM !== S || S.inited) return;
+  const G = S.G, links = G.d3Force("link").links();
+  const index = new Map(RAW_NODES.map((n, i) => [n, i]));
+  const pairs = new Uint32Array(links.length * 2);
+  links.forEach((l, i) => { pairs[2 * i] = index.get(l.source); pairs[2 * i + 1] = index.get(l.target); });
+  const N = RAW_NODES.length, x = new Float64Array(N), y = new Float64Array(N), z = new Float64Array(N);
+  RAW_NODES.forEach((n, i) => {
+    x[i] = n.__wx = n.x || 0; y[i] = n.__wy = n.y || 0; z[i] = n.__wz = n.z || 0;
+  });
+  S.inited = true;
+  S.w.postMessage({ init: {
+    dim: is2D() ? 2 : 3, x, y, z, links: pairs, forces: simForces(G),
+    decay: S.decay, min: S.min, warm: S.warm,
+    group: RAW_NODES.map(n => n.group),
+    loose: Uint8Array.from(RAW_NODES, n => n._loose ? 1 : 0),
+    follow: RAW_NODES.map(n => n._follow ? n._follow.map(m => index.get(m)) : null),
+  } }, [x.buffer, y.buffer, z.buffer, pairs.buffer]);
+  simFlush(S);
+}
+
+// The main thread's writes since the last frame: every pin, when the set
+// changed, and every free note whose position is not the one the worker gave.
+function simFlush(S) {
+  const pins = [], moved = [], flat = is2D();
+  for (let i = 0; i < RAW_NODES.length; i++) {
+    const n = RAW_NODES[i];
+    if (n.fx != null) { pins.push(i, n.fx, n.fy, flat ? 0 : n.fz || 0); continue; }
+    if (n.x !== n.__wx || n.y !== n.__wy || (!flat && n.z !== n.__wz)) {
+      moved.push(i, n.x || 0, n.y || 0, n.z || 0);
+      n.__wx = n.x; n.__wy = n.y; n.__wz = n.z;
+    }
+  }
+  const m = {};
+  if (pins.length !== S.pins.length || pins.some((v, k) => v !== S.pins[k])) { m.pins = Float64Array.from(pins); S.pins = pins; }
+  if (moved.length) m.moved = Float64Array.from(moved);
+  if (m.pins || m.moved) S.post(m);
+}
+
+// One tick of the lib's engine: the worker's latest positions in, a pinned
+// note left where the main thread holds it, and no velocity for the lib to
+// integrate. The worker's done is the lib's stop, one tick later.
+function simSync(S) {
+  simFlush(S);
+  const d = S.last, flat = is2D();
+  if (d && d !== S.applied) {
+    S.applied = d;
+    const p = d.p;
+    for (let i = 0; i < RAW_NODES.length; i++) {
+      const n = RAW_NODES[i];
+      if (n.fx != null) continue;
+      n.x = n.__wx = p[3 * i]; n.y = n.__wy = p[3 * i + 1];
+      if (!flat) n.z = n.__wz = p[3 * i + 2];
+    }
+    S.total = d.total;
+    simTicks = Math.max(0, d.total - S.base - warmupRun);
+    if (d.gen === S.gen) {
+      S.residual = d.residual; S.descending = d.descending;
+      descendTick();
+      if (d.done) S.G.cooldownTicks(0);
+    }
+  }
+  for (const n of RAW_NODES) { n.vx = 0; n.vy = 0; if (!flat) n.vz = 0; }
+}
+
+// A drag is a run too: the lib reheats its own engine toward 0.3 on every drag
+// event, which here only keeps the clock going; the worker has to be told.
+function simDrag(on) {
+  const S = SIM;
+  if (!S || S.dragging === on) return;
+  S.dragging = on;
+  simFlush(S);
+  S.post(on ? { target: 0.3, gen: ++S.gen } : { target: 0 });
+}
+
+function dropSim() {
+  if (!SIM) return;
+  SIM.w.terminate();
+  URL.revokeObjectURL(SIM.url);
+  SIM = null;
+}
+
 function buildGraph() {
   // Direct write, not setRes: the old instance is about to die, and the new
   // one (either renderer) must initialize its canvas at the native ratio.
@@ -2839,6 +3157,7 @@ function buildGraph() {
     // switches with nothing in the console to say why.
     try { Graph._destructor(); } catch (e) { console.warn("graph teardown failed", e); }
     dropGLLinks();
+    dropSim();
     el.innerHTML = "";
     LinkSeg = null;   // died with the scene; the next 3D build remakes it
   }
@@ -2906,14 +3225,16 @@ function buildGraph() {
     // what it was going to do; dragend puts the gate back, alphaTarget returns
     // to 0, and the layout settles into onEngineStop as usual.
     .onNodeDrag(() => {
+      simDrag(true);
       if (simRunning) return;
       simRunning = true;
       G.d3AlphaMin(0);
       renderBudget();   // a still pointer stops waking the loop mid-drag
     })
-    .onNodeDragEnd(() => G.d3AlphaMin(ALPHA_MIN))
-    .onEngineTick(() => { simTicks++; descendTick(); })
+    .onNodeDragEnd(() => { simDrag(false); G.d3AlphaMin(ALPHA_MIN); })
+    .onEngineTick(() => { if (SIM) return simSync(SIM); simTicks++; descendTick(); })
     .onEngineStop(() => {
+      G.cooldownTicks(Infinity);   // the worker's stop (simSync) was a cooldown of 0
       simRunning = false;
       residualTicks = 0;
       paintStat("settled in " + gnum(warmupRun + simTicks) + " ticks");
@@ -3043,6 +3364,12 @@ function buildGraph() {
   }
   if (RIM_NODES.length)
     for (const name of ["link", "charge", "center"]) G.d3Force(name, rimless(G.d3Force(name)));
+  SIM = buildSim(G);
+  if (SIM) {
+    const S = SIM;
+    for (const name of ["link", "charge", "center"])
+      G.d3Force(name, inert(G.d3Force(name), name === "link" ? () => setTimeout(() => simInit(S)) : null));
+  }
   // Forces before the data, and the data last of all. The warmup loop runs the
   // moment graphData lands, so anything set afterwards shapes only the animated
   // tail: with the tuned forces arriving late, the bulk of the layout was being
@@ -3148,13 +3475,14 @@ function applyForces(reheat, G, decay = FAST_DECAY) {
   // prototype (ADR-0074).
   G.d3Force("charge").strength(baseCharge() * forceMul.repel)
     .distanceMax(held ? HOLD_REACH * baseDist() * forceMul.dist : 600 * FORCE_SCALE);
-  G.d3Force("areas", held ? holdForce : null);
+  G.d3Force("areas", held && !SIM ? holdForce : null);
   // heldLinkStrength(null) is d3's default rule: the areas going off on the same
   // instance have to put it back, which d3 offers no accessor for.
   G.d3Force("link").distance(baseDist() * forceMul.dist)
     .strength(heldLinkStrength(held ? AREA_DISCS : null));
   // Center capped at 1: d3 forceCenter shifts positions directly, >1 oscillates.
   G.d3Force("center").strength(Math.min(1, forceMul.center));
+  if (SIM && SIM.inited) SIM.post({ forces: simForces(G) });
   // A slider moves an already-settled layout, so the reheat is a perturbation,
   // not a cold start: the fast decay is the right budget for it, and without it
   // dragging a slider would cost the full 300-tick schedule every time. The
