@@ -91,11 +91,14 @@ def test_the_prerequisite_attached_is_the_one_held_least(monkeypatch):
 
 def test_a_note_carries_its_study_tools_and_a_session_its_aid():
     """NotebookLM's Studio row in Learn: each form of the note one button that
-    writes its command into the chat; the aid box asks for the aid once."""
+    writes its command into the chat, except the explanation of a note in a
+    plan step, which opens that step's reading in Learn (ADR-0132); the aid
+    box asks for the aid once."""
     from tests.webassets import app_js
 
     js = app_js()
-    assert "lrStudyTools(n.path, n.title)" in js and '"/learn/aid"' in js
+    assert "lrStudyTools(n.path, n.title, n.reading)" in js and '"/learn/aid"' in js
+    assert 'lrGo({ view: "read", plan: reading.plan, step: reading.step, path })' in js
     assert '"Show a worked example"' in js        # on request: written on the click
     for cmd in ("/flashcards", "/slides", "/map", "/schematize", "/diagram", "/explain"):
         assert f"`{cmd} ${{shellQuote(" in js

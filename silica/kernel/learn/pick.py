@@ -293,3 +293,28 @@ def _interleave(items: list[dict]) -> list[dict]:
         rest.remove(nxt)
         out.append(nxt)
     return out
+
+
+def alternate_notes(items: list[dict]) -> list[dict]:
+    """A step's session with its notes taking turns (ADR-0132, point 5): the
+    next item is never on the previous item's note while another note has one
+    left, and among the others the note with most items left goes first, so
+    a note with many asks is spread rather than left to bunch at the end.
+    Interleaving pays in practice on concepts that look alike (Brunmair and
+    Richter 2019, g = 0.42), and a step's notes are those concepts; a course
+    in one folder got none from _interleave. Items are renumbered."""
+    left: dict[str, int] = {}
+    for it in items:
+        left[it.get("path", "")] = left.get(it.get("path", ""), 0) + 1
+    out: list[dict] = []
+    rest = list(items)
+    while rest:
+        prev = out[-1].get("path", "") if out else None
+        others = [it for it in rest if it.get("path", "") != prev] or rest
+        nxt = max(others, key=lambda it: (left[it.get("path", "")], -rest.index(it)))
+        rest.remove(nxt)
+        left[nxt.get("path", "")] -= 1
+        out.append(nxt)
+    for i, it in enumerate(out, 1):
+        it["i"] = i
+    return out

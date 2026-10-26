@@ -95,8 +95,9 @@ _WINNER_RE = re.compile(r"\[\[([^\]|#]+)")
 
 # Notes about learning, never asked about; the calendar's own notes, which
 # Learn's "never practised" listed as study material until 2026-10-15; and
-# merge losers, whose winner is the note to study.
-NOT_MATERIAL = ("plan", "syllabus", "event", "merged")
+# merge losers, whose winner is the note to study; a step's reading (ADR-0132),
+# an explanation written from notes that are themselves the material.
+NOT_MATERIAL = ("plan", "syllabus", "event", "merged", "reading")
 
 
 def is_material(meta: dict) -> bool:

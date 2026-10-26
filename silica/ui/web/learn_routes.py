@@ -584,7 +584,20 @@ def note_detail(path: str):
         "reason": REASON["due"] if (row.get("R") is not None and row["R"] < DUE_R) else REASON["unexplored"] if not row.get("attempts") else "Practice this note",
         "grounded": bool(points) or bool(rels),
         "live": _LIVE["id"] if _LIVE and _LIVE.get("note") == path else None,
+        "reading": _reading_of(path),
     }
+
+
+def _reading_of(path: str) -> dict | None:
+    """The plan step whose reading explains this note (ADR-0132): the Study
+    tools' Explanation opens it instead of the chat."""
+    from silica.kernel.learn import plans, reading
+
+    for p in plans.list_plans():
+        i = reading.step_of_note(p, path)
+        if i is not None:
+            return {"plan": p["path"], "step": i}
+    return None
 
 
 # ---------------------------------------------------------------- the session
@@ -624,6 +637,22 @@ def start_session(payload: dict):
         scope, frontier, revisit = scoped["paths"], scoped["frontier"], scoped["revisit"]
         objectives = plan["objectives"]
         origin = {"kind": "plan", "path": plan["path"], "label": plan["name"]}
+    # the practice after a step's reading (ADR-0132, point 5): that step's
+    # notes first and only, one question a note up to the cap, notes in turn
+    step = payload.get("step")
+    stepped = plan is not None and not note and str(step).isdigit()
+    if stepped:
+        from silica.kernel.learn import reading
+
+        try:
+            in_step = reading.step_notes(plan, int(step))
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        scope = [p for _t, p in in_step]
+        frontier, revisit = list(scope), None
+        if not payload.get("n"):
+            n = reading.session_size(len(scope))
+        origin = {**origin, "label": f"{plan['name']} · {plans._step_label(plan['steps'][int(step)])}"}
     teach = bool(payload.get("teach")) and bool(note)
     if note:
         picked = _note_rows(note, payload.get("points"), objectives if plan else None)
@@ -649,6 +678,8 @@ def start_session(payload: dict):
     if teach:
         # build_session sizes a note's items on its asks, not on n
         built = built[:1]
+    if stepped:
+        built = pick.alternate_notes(built)
     sid = uuid.uuid4().hex
     _LIVE = {"id": sid, "plan": plan["path"] if plan else "", "note": note, "origin": origin, "objectives": objectives,
              "reach": plan["reach_level"] if plan else 4, "n": n, "items": built, "verdicts": {}, "recorded": {},
@@ -1616,3 +1647,60 @@ def close_plan(payload: dict):
     if plan is None:
         raise HTTPException(404, "no such plan")
     return plans.close_plan(plan["path"], reopen=bool(payload.get("reopen")))
+
+
+# ---------------------------------------------------------------- a step's reading (ADR-0132)
+
+def _step_of(payload_or_args) -> tuple[str, int]:
+    plan = str(payload_or_args.get("plan") or "")
+    step = payload_or_args.get("step")
+    if not plan or not str(step).isdigit():
+        raise HTTPException(400, "a reading needs a plan and a step")
+    return plan, int(step)
+
+
+@router.get("/reading")
+def reading_view(plan: str, step: int):
+    """A step's reading as Learn shows it: its sections, whether the notes
+    changed since it was written, what the reader wrote, the practice's size,
+    and the job writing it, if one runs."""
+    from silica.kernel.learn import reading
+
+    try:
+        return reading.state(plan, int(step))
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
+@router.post("/reading/write", dependencies=_SAME_ORIGIN)
+def reading_write(payload: dict):
+    """Write or rewrite the reading in the background; the page polls GET /reading."""
+    from silica.kernel.learn import plans, reading
+
+    plan_path, step = _step_of(payload)
+    plan = plans.find_plan(plan_path)
+    if plan is None:
+        raise HTTPException(404, "no such plan")
+    try:
+        reading.step_notes(plan, step)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return reading.start(plan["path"], step)
+
+
+@router.post("/reading/answer", dependencies=_SAME_ORIGIN)
+def reading_answer(payload: dict):
+    """A guess before a section, or the reader's own words after it: kept,
+    never graded, never in the answer ledger."""
+    from silica.kernel.learn import plans, reading
+
+    plan_path, step = _step_of(payload)
+    plan = plans.find_plan(plan_path)
+    if plan is None:
+        raise HTTPException(404, "no such plan")
+    kind = str(payload.get("kind") or "")
+    section = payload.get("section")
+    if kind not in reading.KINDS or not str(section).isdigit():
+        raise HTTPException(400, f"kind is one of {reading.KINDS} and section a number")
+    return reading.record(reading.reading_path(plan, step), int(section), kind, str(payload.get("text") or ""),
+                          unknown=bool(payload.get("unknown")))

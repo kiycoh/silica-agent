@@ -231,6 +231,8 @@ function lrHash(r) {
   if (r.view === "edit") return "#learn/edit/" + encodeURIComponent(r.plan);
   if (r.view === "session") return "#learn/session/" + r.id;
   if (r.view === "receipt") return "#learn/receipt/" + r.id;
+  // the step first: a plan's path has slashes of its own
+  if (r.view === "read") return "#learn/read/" + r.step + "/" + encodeURIComponent(r.plan);
   return "#learn";
 }
 function lrParse(hash) {
@@ -248,6 +250,7 @@ function lrParse(hash) {
   if (v === "edit" && arg) return { view: "edit", plan: arg };
   if (v === "session" && arg) return { view: "session", id: arg };
   if (v === "receipt" && arg) return { view: "receipt", id: arg };
+  if (v === "read" && /^\d+\//.test(arg)) { const k = arg.indexOf("/"); return { view: "read", step: Number(arg.slice(0, k)), plan: arg.slice(k + 1) }; }
   return { view: "home" };
 }
 const lrSegOf = (r) => { const seg = lrSegRaw(r); if (seg !== "map") lrMapCounted = false; return seg; };
@@ -357,6 +360,7 @@ function lrRender() {
   if (activeTab === "learn") $("#dock").hidden = lrRoute.view === "session";
   if (lrRoute.view === "session") lrRenderSession(body);
   else if (lrRoute.view === "receipt") lrRenderReceipt(body);
+  else if (lrRoute.view === "read") lrRenderRead(body);
   else lrRenderHome(body);
   if (keep) body.querySelector(`[data-lr-key="${CSS.escape(keep)}"]`)?.focus({ preventScroll: true });
 }
@@ -1089,13 +1093,24 @@ function lrPlanTree(p) {
     const leaves = node.leaves || [];
     const rd = node.readings || { coverage: [0, leaves.length], met_by_objective: {} };
     const label = p.scope === "folder" && node.node.startsWith(root) ? (node.node.slice(root.length).replace(/^\//, "") || p.target) : node.node;
-    const step = p.steps?.length ? p.steps.find((s) => s.text.startsWith(node.node) || s.text.includes(node.node)) : null;
+    // the step whose label is the node's, before any whose text merely starts
+    // with it: "Reti neurali superficiali" took "Reti neurali superficiali
+    // feedforward", the step before it in the owner's plan (2026-10-26)
+    const step = p.steps?.length ? (p.steps.find((s) => s.text === node.node || s.text.startsWith(node.node + ":"))
+      || p.steps.find((s) => s.text.startsWith(node.node) || s.text.includes(node.node))) : null;
     const tr = lrEl("tr", "node");
     const th0 = lrEl("th");
     th0.scope = "row";
     const exp = leaves.length ? lrBtn("lr-exp") : lrEl("span", "lr-exp");
     exp.append(lrEl("span", "chev"), label);
     th0.appendChild(exp);
+    // the step read as one explanation before its practice (ADR-0132)
+    const stepIdx = step && leaves.length ? p.steps.indexOf(step) : -1;
+    if (stepIdx >= 0) {
+      const rd0 = lrBtn("lr-link act lr-readbtn", "Read", () => lrGo({ view: "read", plan: p.path, step: stepIdx }));
+      rd0.setAttribute("aria-label", `Read ${label}`);
+      th0.appendChild(rd0);
+    }
     const ex = [];
     if (node.gap) ex.push("not in the vault");
     if (step?.passed) ex.push("passed");
@@ -1224,13 +1239,17 @@ const LR_TOOLS = [
   ["Explanation", (_p, t) => `/explain ${shellQuote(t)}`],
 ];
 const LR_STEP_NOTES = 10;
-function lrStudyTools(path, title) {
+function lrStudyTools(path, title, reading = null) {
   const sec = lrEl("section", "lr-sec lr-tools");
   sec.appendChild(lrEl("h3", null, "Study tools"));
   const row = lrEl("div", "lr-tools-row");
   for (const [name, cmd] of LR_TOOLS) {
-    const b = lrBtn("ghost box", name, () => prefillChat(cmd(path, title)));
-    b.title = "writes the command in the chat; it runs when you send it";
+    // a note of a plan step is explained by that step's reading, in Learn (ADR-0132)
+    const inStep = name === "Explanation" && reading;
+    const b = lrBtn("ghost box", name, inStep
+      ? () => lrGo({ view: "read", plan: reading.plan, step: reading.step, path })
+      : () => prefillChat(cmd(path, title)));
+    b.title = inStep ? "opens the reading of this note's step" : "writes the command in the chat; it runs when you send it";
     row.appendChild(b);
   }
   sec.appendChild(row);
@@ -1257,7 +1276,7 @@ function lrRenderNoteDetail(right, n) {
   if (n.sentence) head.appendChild(lrEl("p", "lr-reason", n.sentence));
   if (lrSession && !inLive) head.appendChild(lrEl("p", "lr-help", "A session is open; end it or resume it before starting this one."));
   right.appendChild(head);
-  if (!inLive) right.appendChild(lrStudyTools(n.path, n.title));
+  if (!inLive) right.appendChild(lrStudyTools(n.path, n.title, n.reading));
   if (n.history?.length) {
     const sec = lrEl("section", "lr-sec");
     const h = lrEl("h3", null, "History");
@@ -2453,6 +2472,7 @@ async function learnStartSession(opts = {}) {
   if (opts.note) body.note = opts.note;
   if (opts.points) body.points = opts.points;
   if (opts.scope) body.scope = opts.scope;
+  if (opts.step !== undefined) body.step = opts.step;
   if (opts.teach) body.teach = true;
   lrStarting = true;
   $("#learn-loading").hidden = false;
@@ -3476,3 +3496,266 @@ window.addEventListener("beforeunload", (e) => {
     e.returnValue = "";
   }
 });
+
+// --- a step's reading (ADR-0132) ---------------------------------------------
+// One explanation per plan step, its notes grouped by concept and each section
+// after the ones it needs. A section stays closed until the reader guesses
+// what it will say (ungraded, "I don't know" counts), opens with the answering
+// sentence marked beside the guess, and ends on the reader's own words; the
+// practice that follows asks with the reading closed. What the reader writes
+// is kept outside the vault and outside the answer ledger.
+let lrRead = null;   // {key, data, view: the section shown (null: done), drafts, polling}
+const LR_UNHELD = "(not in the notes)";
+const LR_READ_PARTS = [["definition", "Definition"], ["mechanism", "Mechanism"],
+  ["example", "Example · worked by Silica, not from the notes"], ["contrast", "Do not confuse"]];
+const lrReadKey = (r) => r.plan + "#" + r.step;
+
+async function lrFetchRead(r) {
+  const key = lrReadKey(r);
+  try {
+    const d = await (await fetch(`/learn/reading?plan=${encodeURIComponent(r.plan)}&step=${r.step}`)).json();
+    if (d.detail) throw new Error(d.detail);
+    const prev = lrRead && lrRead.key === key ? lrRead : null;
+    lrRead = { key, data: d, view: prev && prev.data?.exists ? prev.view : undefined, drafts: prev?.drafts || {}, polling: !!prev?.polling };
+  } catch (e) { lrRead = { key, error: String(e.message || e) }; }
+  if (lrRoute.view === "read" && lrReadKey(lrRoute) === key) lrRender();
+}
+
+function lrReadPoll(r) {
+  if (!lrRead || lrRead.polling) return;
+  lrRead.polling = true;
+  const tick = async () => {
+    if (lrRoute.view !== "read" || !lrRead || lrReadKey(lrRoute) !== lrRead.key) { if (lrRead) lrRead.polling = false; return; }
+    await lrFetchRead(r);
+    const j = lrRead?.data?.job;
+    if (j && j.state === "running") { setTimeout(tick, 1500); return; }
+    if (lrRead) lrRead.polling = false;
+    if (j?.state === "error") notify("couldn't write the reading: " + j.error);
+    lrRender();
+  };
+  setTimeout(tick, 1200);
+}
+
+// the first section not finished: its guess not given (when it has one), or no own words after it
+function lrReadNext(d) {
+  const a = d.answers || {};
+  for (const s of d.sections) {
+    const x = a[String(s.n)] || {};
+    if ((s.guess && !x.guess) || !x.own) return s.n;
+  }
+  return null;
+}
+
+async function lrReadWrite(r) {
+  try { lrRead.data.job = await lrPost("/learn/reading/write", { plan: r.plan, step: r.step }); }
+  catch (e) { notify("couldn't start writing the reading: " + e.message); return; }
+  lrRead.view = undefined;
+  lrRender();
+}
+
+async function lrReadAnswer(r, s, kind, text, unknown) {
+  let row;
+  try { row = await lrPost("/learn/reading/answer", { plan: r.plan, step: r.step, section: s.n, kind, text, unknown }); }
+  catch (e) { notify("couldn't keep that: " + e.message); return; }
+  const a = lrRead.data.answers || (lrRead.data.answers = {});
+  (a[String(s.n)] ||= {})[kind] = row;
+  if (kind === "own") lrRead.view = lrReadNext(lrRead.data);
+  lrRender();
+  document.querySelector(".lr-read")?.scrollIntoView({ block: "start" });
+}
+
+function lrRenderRead(body) {
+  const r = lrRoute;
+  const key = lrReadKey(r);
+  const back = { label: "Plan", run: () => lrGo({ view: "plan", plan: r.plan }) };
+  if (!lrRead || lrRead.key !== key) {
+    lrBar({ crumb: ["Reading"], back });
+    body.appendChild(lrEl("p", "lr-help", "Reading the step."));
+    lrFetchRead(r);
+    return;
+  }
+  if (lrRead.error) {
+    lrBar({ crumb: ["Reading"], back });
+    body.appendChild(lrEl("p", "lr-help", "That step is not in the plan any more."));
+    return;
+  }
+  const d = lrRead.data;
+  lrBar({ crumb: [d.plan_name, d.label], back });
+  const one = lrEl("section", "lr-one lr-read");
+  body.appendChild(one);
+  const meta = d.exists
+    ? `${lrPlural(d.sections.length, "section")} · ${lrPlural(d.notes.length, "note")} · about ${d.minutes} min of reading`
+    : lrPlural(d.notes.length, "note");
+  // Rewrite is one revertible overwrite; a running job hides it
+  const rewrite = d.exists && !(d.job && d.job.state === "running") ? lrBtn("ghost box", "Rewrite", () => lrReadWrite(r)) : null;
+  if (rewrite) rewrite.title = "write this reading again from the step's notes; the reader's words start over";
+  one.appendChild(lrHead(`Read · step ${d.step + 1} of ${d.steps}${d.hours ? ` · ${d.hours} h in the syllabus` : ""}`, d.label, meta, [rewrite]));
+  const job = d.job;
+  if (job && job.state === "running") {
+    const p = lrEl("div", "lr-read-card");
+    p.setAttribute("role", "status");
+    p.append(lrEl("p", null, job.total ? `Writing section ${Math.min(job.done + 1, job.total)} of ${job.total}.` : "Grouping the notes into sections, prerequisites first."),
+      lrEl("p", "lr-help", "One call orders the step, then one call a section. You can leave and come back."));
+    one.appendChild(p);
+    lrReadPoll(r);
+    return;
+  }
+  if (!d.exists) {
+    const p = lrEl("div", "lr-read-card");
+    p.append(lrEl("p", null, `No reading yet for this step. Silica groups its ${lrPlural(d.notes.length, "note")} by concept, puts each section after the ones it needs, and writes each section from the notes, marking any sentence they do not hold.`));
+    const row = lrEl("div", "lr-read-actions");
+    row.appendChild(lrBtn("lr-send", "Write the reading", () => lrReadWrite(r)));
+    p.appendChild(row);
+    if (job?.state === "error") p.appendChild(lrEl("p", "lr-help", "The last attempt failed: " + job.error));
+    one.appendChild(p);
+    return;
+  }
+  if (d.stale) {
+    const s = lrEl("div", "lr-read-stale");
+    s.append(lrEl("span", null, "The step's notes changed since this reading was written."), lrBtn("lr-link act", "Rewrite", () => lrReadWrite(r)));
+    one.appendChild(s);
+  }
+  one.appendChild(lrEl("p", "lr-read-test", `After you read, ${lrPlural(d.questions, "question")} on these notes, with the reading closed.`));
+  const next = lrReadNext(d);
+  // a note's Study tools open the reading again on that note, whatever was shown before
+  if (r.path && lrRead.forPath !== r.path) { lrRead.forPath = r.path; lrRead.view = undefined; }
+  if (lrRead.view === undefined) {
+    // opened from a note's Study tools: that note's section, once the reader has reached it
+    const want = r.path ? d.sections.find((s) => s.notes.includes(lrStem(r.path))) : null;
+    lrRead.view = want && (next === null || want.n <= next) ? want.n : next;
+  }
+  const grid = lrEl("div", "lr-read-grid");
+  grid.append(lrReadToc(d, next), lrReadMain(d, r));
+  one.appendChild(grid);
+}
+
+function lrReadToc(d, next) {
+  const ol = lrEl("ol", "lr-read-toc");
+  ol.setAttribute("aria-label", d.order === "prerequisites" ? "sections, each after the ones it needs" : "sections, in the lectures' order");
+  ol.appendChild(lrEl("li", "lr-read-toc-h", d.order === "prerequisites" ? "Sections · by prerequisite" : "Sections · lecture order"));
+  for (const s of d.sections) {
+    const done = next === null || s.n < next;
+    const li = lrEl("li", "lr-read-toc-i" + (s.n === lrRead.view ? " cur" : "") + (done ? " done" : ""));
+    const b = lrBtn("lr-read-toc-b");
+    b.disabled = !(done || s.n === next);
+    if (s.n === lrRead.view) b.setAttribute("aria-current", "step");
+    const txt = lrEl("span", "t");
+    txt.append(lrEl("span", "tt", s.title), lrEl("span", "m", s.notes.join(", ")));
+    if (s.needed_by?.length) txt.appendChild(lrEl("span", "lr-read-moved", `moved up: needed by ${s.needed_by.join(", ")}`));
+    b.append(lrEl("span", "dot", done ? "✓" : String(s.n)), txt);
+    b.addEventListener("click", () => { lrRead.view = s.n; lrRender(); });
+    li.appendChild(b);
+    ol.appendChild(li);
+  }
+  return ol;
+}
+
+function lrReadMain(d, r) {
+  const col = lrEl("div", "lr-read-main");
+  if (lrRead.view === null) { lrReadDone(col, d, r); return col; }
+  const s = d.sections.find((x) => x.n === lrRead.view) || d.sections[0];
+  const a = (d.answers || {})[String(s.n)] || {};
+  if (s.guess && !a.guess) lrReadGuess(col, d, s, r);
+  else lrReadSection(col, d, s, a, r);
+  return col;
+}
+
+function lrReadGuess(col, d, s, r) {
+  const card = lrEl("section", "lr-read-card");
+  card.setAttribute("aria-label", "before you read");
+  card.append(lrEl("span", "eyebrow", `Section ${s.n} of ${d.sections.length} · before you read, guess`), lrEl("h3", null, s.title));
+  card.appendChild(lrMd(lrEl("p", "lr-read-q"), s.guess));
+  const id = "lr-guess-" + s.n;
+  const lab = lrEl("label", "lr-help", "Your guess, one line is enough");
+  lab.htmlFor = id;
+  const ta = lrEl("textarea", "lr-input lr-read-ta");
+  ta.id = id;
+  ta.rows = 3;
+  ta.placeholder = "what you think, before reading";
+  ta.value = lrRead.drafts["g" + s.n] || "";
+  const open = lrBtn("lr-send", "Open the section", () => lrReadAnswer(r, s, "guess", ta.value.trim(), false));
+  open.disabled = !ta.value.trim();
+  ta.addEventListener("input", () => { lrRead.drafts["g" + s.n] = ta.value; open.disabled = !ta.value.trim(); });
+  const row = lrEl("div", "lr-read-actions");
+  row.append(open, lrBtn("ghost box", "I don't know", () => lrReadAnswer(r, s, "guess", "", true)),
+    lrEl("span", "lr-help", "Not graded. Your guess stays next to the answer."));
+  card.append(lab, ta, row);
+  col.appendChild(card);
+  setTimeout(() => ta.focus({ preventScroll: true }), 0);
+}
+
+// a part's text: a paragraph a line, the answering sentence marked, a sentence
+// the notes do not hold set apart by its mark
+function lrReadText(text) {
+  const box = lrEl("div", "lr-read-text");
+  // a `$$` block over three lines becomes one line, the only form lrMd draws
+  const flat = String(text || "").replace(/\$\$\s*\n([\s\S]*?)\n\s*\$\$/g, (_m, tex) => "$$" + tex.split("\n").map((x) => x.trim()).join(" ") + "$$");
+  for (const line of flat.split("\n")) {
+    if (!line.trim()) continue;
+    const p = lrEl("p");
+    line.split(/==(.+?)==/).forEach((t, i) => {
+      if (t) p.appendChild(lrMd(lrEl(i % 2 ? "mark" : "span", i % 2 ? "lr-ans" : null), t));
+    });
+    for (const em of p.querySelectorAll("em")) if (em.textContent.trim() === LR_UNHELD) em.className = "lr-unheld";
+    box.appendChild(p);
+  }
+  return box;
+}
+
+function lrReadSection(col, d, s, a, r) {
+  const head = lrEl("div", "lr-read-shead");
+  head.append(lrEl("span", "eyebrow", `Section ${s.n} of ${d.sections.length}`), lrEl("h3", null, s.title));
+  const from = lrEl("p", "lr-help");
+  from.append("From ");
+  s.notes.forEach((t, i) => {
+    if (i) from.append(", ");
+    const path = d.notes.find((x) => lrStem(x) === t) || t;
+    from.appendChild(lrBtn("lr-link", t, () => openNote(path)));
+  });
+  head.appendChild(from);
+  if (s.needed_by?.length) head.appendChild(lrEl("p", "lr-help lr-read-mv", `Moved up: needed by ${s.needed_by.join(", ")}.`));
+  col.appendChild(head);
+  if (a.guess) {
+    const g = lrEl("div", "lr-read-yours");
+    g.append(lrEl("span", "k", "Your guess"), lrEl("span", "v", a.guess.unknown ? "I don't know" : a.guess.text));
+    col.appendChild(g);
+  }
+  for (const [k, name] of LR_READ_PARTS) {
+    if (!s[k]) continue;
+    const part = lrEl("div", "lr-read-part");
+    part.append(lrEl("div", "lr-read-label", name), lrReadText(s[k]));
+    col.appendChild(part);
+  }
+  const own = lrEl("section", "lr-read-card lr-read-own");
+  own.setAttribute("aria-label", "in your own words");
+  own.appendChild(lrEl("span", "eyebrow", "In your own words, before the next section"));
+  if (s.own) own.appendChild(lrMd(lrEl("p", "lr-read-q"), s.own));
+  const id = "lr-own-" + s.n;
+  const lab = lrEl("label", "lr-help", "Your explanation");
+  lab.htmlFor = id;
+  const ta = lrEl("textarea", "lr-input lr-read-ta");
+  ta.id = id;
+  ta.rows = 3;
+  ta.placeholder = "as you would say it to someone who has not read it";
+  ta.value = lrRead.drafts["o" + s.n] ?? (a.own?.text || "");
+  ta.addEventListener("input", () => { lrRead.drafts["o" + s.n] = ta.value; });
+  const last = s.n === d.sections[d.sections.length - 1].n;
+  const row = lrEl("div", "lr-read-actions");
+  row.append(lrBtn("lr-send", last ? "Finish the reading" : "Next section", () => lrReadAnswer(r, s, "own", ta.value.trim(), false)),
+    lrEl("span", "lr-help", "Not graded. Kept with the section."));
+  own.append(lab, ta, row);
+  col.appendChild(own);
+}
+
+function lrReadDone(col, d, r) {
+  const card = lrEl("section", "lr-read-card");
+  card.append(lrEl("span", "eyebrow", "Reading done"), lrEl("h3", null, `Now ${lrPlural(d.questions, "question")}, with the reading closed`),
+    lrEl("p", "lr-help", "The step's notes take turns, and each answer is checked against its note. Over the next days they come back as questions, without reading again."));
+  const row = lrEl("div", "lr-read-actions");
+  const go = lrBtn("lr-send", "Start the practice", () => learnStartSession({ plan: r.plan, step: r.step, from: "reading" }));
+  go.disabled = !!lrSession;
+  row.append(go, lrBtn("ghost box", "Read again from section 1", () => { lrRead.view = d.sections[0].n; lrRender(); }));
+  if (lrSession) row.appendChild(lrEl("span", "lr-help", "A session is open; end it or resume it first."));
+  card.appendChild(row);
+  col.appendChild(card);
+}

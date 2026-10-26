@@ -204,11 +204,12 @@ def is_vault_artifact(note_id: str) -> bool:
 # graph; unlike a note it is not knowledge, and "Prova Learn" showed what
 # counting it costs: its tree of 52 links named an area on the test vault and
 # was the only in-link of 10 notes, which then never rang as orphans.
-NATIVE_TYPES = ("plan", "event")
+NATIVE_TYPES = ("plan", "event", "reading")
 
 
 def stamp_native(nodes: list[dict], vault: Path) -> None:
-    """Type a Learn plan `plan` and an event note `event`, in place.
+    """Type a Learn plan `plan`, a step's reading `reading` (ADR-0132) and an
+    event note `event`, in place.
 
     By frontmatter and never by folder, the rule both features already read
     them by (plans.is_plan, calendar.model), so a plan moved out of Plans/ is
@@ -238,8 +239,11 @@ def stamp_native(nodes: list[dict], vault: Path) -> None:
         data, _raw, _body = frontmatter.split(text)
         if not isinstance(data, dict):
             continue
-        if str(data.get("type") or "").strip().lower() in ("plan", "syllabus"):
+        kind = str(data.get("type") or "").strip().lower()
+        if kind in ("plan", "syllabus"):
             n["type"] = "plan"
+        elif kind == "reading":
+            n["type"] = "reading"
         elif data.get("event_start") is not None:
             n["type"] = "event"
 
