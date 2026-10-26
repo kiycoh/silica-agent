@@ -68,6 +68,28 @@ def _vendored_lib_js() -> str:
     return ";\n".join(_asset(name) for name in _VENDORED_BUNDLES)
 
 
+# The layout worker's d3-force-3d (graph-frame.js, "the layout in a worker"),
+# pinned 3.0.6, the line both bundles carry it from. It reaches the page as the
+# TEXT the worker is built from, in a type="text/plain" script that never runs,
+# so the frame still opens from file:// with nothing to fetch (ADR-0026).
+# Rebuilt from npm d3-force-3d@3.0.6 with an entry of
+#   export { forceSimulation, forceManyBody, forceLink, forceCenter } from "d3-force-3d";
+# through esbuild --bundle --format=iife --global-name=d3 --minify --legal-comments=none.
+_SIM_BUNDLE = "d3-force-3d.min.js"
+
+
+def _sim_js() -> str:
+    """The worker's bundle, refused if it could end its own script element.
+
+    The parser ends script data at the first `</script` whatever the type, so
+    that string inside the bundle would cut the worker short and paint the rest
+    of the bundle into the page as text."""
+    src = _asset(_SIM_BUNDLE)
+    if "</script" in src.lower():
+        raise RuntimeError(f"graph_export: {_SIM_BUNDLE} contains '</script' and cannot be inlined")
+    return src
+
+
 def _vendored_font_face() -> str:
     """@font-face rule with the Archivo woff2 inlined as a data: URI, so the
     exported HTML stays fully self-contained (it is opened from file:// too).
@@ -614,6 +636,7 @@ def _frame_context(
         # The blobs' geometry first: the drawer draws the same blobs (ADR-0075)
         # and the frame calls it, one script element so no URL is involved.
         "graph_js": _asset("blob-geometry.js") + "\n" + _asset("graph-frame.js"),
+        "sim_js": _sim_js(),
     }
 
 

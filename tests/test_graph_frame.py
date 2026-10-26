@@ -71,7 +71,7 @@ def test_the_island_cannot_be_ended_by_what_it_carries():
     island = _island(html)
     assert "<" not in island
     assert json.loads(island)["nodes"][0]["label"] == label
-    assert html.count("</script>") == 4   # theme resolver, lib, island, frame: no fifth
+    assert html.count("</script>") == 5   # theme resolver, lib, worker's lib, island, frame: no sixth
 
 
 def test_a_non_finite_score_fails_on_the_server_with_a_name():

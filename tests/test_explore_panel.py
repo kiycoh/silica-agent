@@ -443,9 +443,12 @@ def test_the_settle_count_includes_the_warmup_it_cannot_observe():
     onEngineTick call, so counting only the animated tail would under-report the
     settle by up to 240 ticks on a cold build."""
     js = FRAME_JS.read_text()
-    assert ".onEngineTick(() => { simTicks++; descendTick(); })" in js
+    # the lib's own engine counts its ticks; under the layout worker the count
+    # comes off the worker's total in simSync, which subtracts the same warmup
+    assert ".onEngineTick(() => { if (SIM) return simSync(SIM); simTicks++; descendTick(); })" in js
     assert 'paintStat("settled in " + gnum(warmupRun + simTicks) + " ticks");' in js
     assert "warmupRun = warm;" in js
+    assert "simTicks = Math.max(0, d.total - S.base - warmupRun);" in js
 
 
 def test_auto_layout_finishes_the_descent_a_reheat_only_starts():
@@ -464,7 +467,9 @@ def test_auto_layout_finishes_the_descent_a_reheat_only_starts():
     tick = _block(js, "function descendTick() {", "\n}")
     assert "r < RESIDUAL_EPS || --residualTicks === 0" in tick
     assert "Graph.d3AlphaDecay(FAST_DECAY).d3AlphaMin(ALPHA_MIN);" in tick
-    assert ".onEngineTick(() => { simTicks++; descendTick(); })" in js
+    # the lib's own engine counts its ticks; under the layout worker the count
+    # comes off the worker's total in simSync, which subtracts the same warmup
+    assert ".onEngineTick(() => { if (SIM) return simSync(SIM); simTicks++; descendTick(); })" in js
     # the residual is the median step, not the max: one hub's Barnes-Hut noise
     # would otherwise report a settled graph as moving
     assert "return st[st.length >> 1] || 0;" in _block(js, "function residual() {", "\n}")

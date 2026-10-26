@@ -41,6 +41,12 @@ def _edge(eid: str, src: str, dst: str, etype: str = "EXTRACTED") -> dict:
     }
 
 
+def _block_of(text: str, head: str) -> str:
+    """The body of the function that starts at `head`, up to its closing brace at column 0."""
+    i = text.index(head)
+    return text[i:text.index("\n}", i)]
+
+
 @pytest.fixture()
 def small_graph():
     nodes = [_node("A"), _node("B"), _node("C", node_type="ghost")]
@@ -374,6 +380,13 @@ class TestBigVaultPerfKnobs:
         html = render_html(nodes, edges, lib_js="// dummy")
         assert "G.linkWidth(0)" in html
 
+    def test_3d_renderer_has_no_msaa(self, small_graph):
+        """MSAA was the 3D frame: the merged links blended under 4x samples
+        held the 23,836-edge vault at 4.5fps, and 60 without it (2026-10-26)."""
+        nodes, edges = small_graph
+        html = render_html(nodes, edges, lib_js="// dummy")
+        assert "new ForceGraph3D(el, { rendererConfig: { antialias: false } })" in html
+
     def test_no_directional_arrow_cones(self, small_graph):
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
@@ -425,7 +438,9 @@ class TestBigVaultPerfKnobs:
         assert 'Object.defineProperty(window, "devicePixelRatio"' in html
         # first thing in the pre-paint hook, ahead of the arrangement's own
         # early return (ADR-0088), so every 2D repaint is seen
-        assert ".onRenderFramePre((ctx, scale) => {\n        drsOnPaint();\n        if (ARR)" in html
+        assert ".onRenderFramePre((ctx, scale) => {\n        drsOnPaint();\n" in html
+        hook = html[html.index(".onRenderFramePre((ctx, scale) => {"):]
+        assert hook.index("drsOnPaint();") < hook.index("if (ARR)")
         # the crisp restore must repaint AND re-derive the budget state
         assert "Graph.resumeAnimation(); Graph.pauseAnimation(); renderBudget();" in html
         # the lib's resize path re-centers using old-pixels / NEW-ratio, wrong by
@@ -439,6 +454,156 @@ class TestBigVaultPerfKnobs:
         # for 150-270ms at full res (user-reported, 2026-08-17)
         assert '(e.type === "pointermove" && e.buttons)' in html
 
+
+
+class TestWebGLLinks2D:
+    """2D draws every solid link as one instanced WebGL quad, under the canvas.
+
+    Skia tessellates a stroke 1px or wider, and a wikilink is 1.6px: on the
+    23,836-edge vault that was ~93ms of raster per full-ratio frame (9.7fps on
+    a pan, 2026-10-26); on WebGL the same pan holds 60fps at 1600x913 and at
+    3200x2000. Each test pins a piece whose loss is silent: the picture still
+    draws, only the cost or the look comes back wrong.
+    """
+
+    def _js(self, small_graph):
+        nodes, edges = small_graph
+        return render_html(nodes, edges, lib_js="// dummy")
+
+    def test_the_lib_skips_what_the_layer_draws(self, small_graph):
+        html = self._js(small_graph)
+        # a link the layer owns never reaches the lib's stroke loop: both
+        # drawing it would pay the cost twice and darken every line
+        assert ".linkVisibility(l => !glOwnsLink(l) && !l._hidden && !quietNow(l))" in html
+        # and the layer reads the same visible set the lib used to
+        assert "if (!l.__glOwn || l._hidden || quietNow(l)) continue;" in html
+
+    def test_dashes_citations_and_photons_stay_the_libs(self, small_graph):
+        html = self._js(small_graph)
+        assert 'l.__glOwn = !isDashed(l) && l.type !== "CITES" && !libOwnsLink(l);' in html
+
+    def test_one_width_one_colour_is_one_path(self, small_graph):
+        """The lib fills one path per (colour, width): its lines never darken
+        where they cross. Drawn straight here, the wikilink core of a dense
+        vault would stack toward opaque."""
+        html = self._js(small_graph)
+        assert "gl.blendEquation(gl.MAX);" in html
+        assert "union: union && links.length > 1" in html
+
+    def test_links_follow_this_frames_tick(self, small_graph):
+        """Pre runs before the lib's tick, Post after it: links drawn in Pre
+        trail the nodes by one tick through every settle."""
+        html = self._js(small_graph)
+        post = html[html.index(".onRenderFramePost((ctx, scale) => {"):]
+        assert post.index("drawGLLinks(ctx, scale);") < post.index("});")
+        assert "const under = underCtx(ctx);" in html
+
+    def test_paint_changes_reach_the_layer(self, small_graph):
+        """The three callers that keep the 3D merge true keep this one true."""
+        html = self._js(small_graph)
+        assert html.count("if (!is2D()) repaintLinkSeg(); else repaintGLLinks();") == 2
+        assert "{ Graph.nodeColor(Graph.nodeColor()); repaintGLLinks(); }" in html
+
+    def test_falls_back_to_the_canvas(self, small_graph):
+        html = self._js(small_graph)
+        # no WebGL2: the lib draws every link, as before the layer
+        assert "if (!gl) return false;" in html
+        # a lost context hands them back instead of leaving the frame bare
+        assert 'glc.addEventListener("webglcontextlost"' in html
+        assert "Graph.backgroundColor(GP.bg).linkVisibility(Graph.linkVisibility());" in html
+        # a rebuild frees the context: the browser caps live ones at ~16
+        assert html.index("dropGLLinks();") < html.index('el.innerHTML = "";')
+
+    def test_motion_stays_crisp_on_the_layer(self, small_graph):
+        html = self._js(small_graph)
+        assert "if (GLLinks && scale !== 1) return;" in html
+
+
+class TestLayoutWorker:
+    """The layout ticks in a worker; the lib's engine only keeps time.
+
+    Both bundles tick once per painted frame on the main thread: 13ms of a
+    13.9ms 2D frame and ~34ms of a 3D one on the 23,836-edge vault, 19.3s to
+    settle cold in 3D. In the worker (2026-10-26): 2D cold 4.25s -> 2.27s at
+    1.8ms of script a frame, 3D 19.0s -> 4.7s, and the final positions equal
+    the lib's to the unit, cold and seeded, 2D and 3D.
+    """
+
+    def _js(self, small_graph):
+        nodes, edges = small_graph
+        return render_html(nodes, edges, lib_js="// dummy")
+
+    def test_the_worker_is_built_from_text_the_page_never_runs(self, small_graph):
+        html = self._js(small_graph)
+        assert '<script id="sim-lib" type="text/plain">' in html
+        assert "var d3=" in html   # the vendored d3-force-3d, inlined
+        assert 'new Blob([lib.textContent, "\\n", simWorkerSource()]' in html
+
+    def test_a_bundle_that_could_end_its_element_is_refused(self, monkeypatch):
+        import silica.ui.web.graph_view as gv
+        monkeypatch.setattr(gv, "_asset", lambda name: "x</SCRIPT>y")
+        with pytest.raises(RuntimeError, match="cannot be inlined"):
+            gv._sim_js()
+
+    def test_the_libs_engine_keeps_time_and_pushes_nothing(self, small_graph):
+        html = self._js(small_graph)
+        assert "G.warmupTicks(0).d3AlphaDecay(0).d3AlphaMin(0);" in html
+        assert 'for (const name of ["link", "charge", "center"])\n      G.d3Force(name, inert(G.d3Force(name),' in html
+        # the held areas run where the other forces run, never twice
+        assert 'G.d3Force("areas", held && !SIM ? holdForce : null);' in html
+
+    def test_the_worker_starts_from_the_libs_own_digest(self, small_graph):
+        """kapsule digests graphData after the call returns, and every reading
+        of the shared notes and edges lied about it at least once: a seeded
+        build has positions before the digest (the worker ran with no links,
+        median 800 units off the lib's rerelax), and a rebuild after another
+        mode has its link ends resolved by the instance before (2D -> 3D came
+        out flat, median 1978 units off). The lib handing its link force the
+        links is the one signal that belongs to this digest."""
+        html = self._js(small_graph)
+        assert 'if (k === "links" && a.length && fed) fed();' in html
+        assert 'inert(G.d3Force(name), name === "link" ? () => setTimeout(() => simInit(S)) : null)' in html
+        assert "if (SIM !== S || S.inited) return;" in html
+
+    def test_the_same_forces_in_the_same_order(self, small_graph):
+        html = self._js(small_graph)
+        assert '.force("link", d3.forceLink(L)).force("charge", d3.forceManyBody())' in html
+        assert '.force("center", d3.forceCenter()).force("areas", hold)' in html
+        # float64, the precision d3 summed them in on the lib's side
+        assert "const strengths = new Float64Array(links.length);" in html
+
+    def test_a_post_from_a_run_that_is_over_changes_nothing(self, small_graph):
+        """A done already in flight when a reheat starts would stop the lib's
+        engine on a run the worker has only begun."""
+        html = self._js(small_graph)
+        assert "S.post({ reheat: 1, gen: ++S.gen });" in html
+        assert "if (d.gen === S.gen) {" in html
+
+    def test_what_the_main_thread_writes_reaches_the_worker(self, small_graph):
+        html = self._js(small_graph)
+        assert "if (n.fx != null) { pins.push(i, n.fx, n.fy, flat ? 0 : n.fz || 0); continue; }" in html
+        assert "if (n.x !== n.__wx || n.y !== n.__wy || (!flat && n.z !== n.__wz)) {" in html
+        # a note the Map puts back is stopped there, by the lib and the worker
+        # alike, even when it lands on the very position the worker gave it
+        assert "n.__wx = NaN;" in _block_of(html, "function restoreArranged(")
+
+    def test_a_turn_of_writes_lands_as_one(self, small_graph):
+        """autoLayout reheats and then holds: posted apart, the worker ticked
+        in between as often as the scheduler let it, and the same click gave
+        different layouts. One message per turn holds at alpha 1, which is
+        what the lib does for a click on a waking loop (same positions,
+        2026-10-26)."""
+        html = self._js(small_graph)
+        assert "queueMicrotask(() => { this.queued = false; const ops = this.box; this.box = []; w.postMessage({ ops }); });" in html
+        assert "if (sim) for (const op of m.ops) apply(op);" in html
+
+    def test_no_worker_is_the_lib_as_before(self, small_graph):
+        html = self._js(small_graph)
+        assert 'if (NO_WORKER || typeof Worker === "undefined" || !lib || !lib.textContent.trim()) return null;' in html
+        # a failed worker comes back as a fresh document on the lib's engine,
+        # never as a rebuild on top of the instance that was settling in
+        assert 'u.searchParams.set("noworker", "1");' in html
+        assert "location.replace(u.href);" in html
 
 # ---------------------------------------------------------------------------
 # The host page's note drawer overlays this frame's right edge, where the HUD
@@ -475,7 +640,10 @@ class TestDragReheat:
         html = render_html(nodes, edges, lib_js="")
         assert ".onNodeDrag(" in html
         assert "G.d3AlphaMin(0);" in html
-        assert ".onNodeDragEnd(() => G.d3AlphaMin(ALPHA_MIN))" in html
+        assert ".onNodeDragEnd(() => { simDrag(false); G.d3AlphaMin(ALPHA_MIN); })" in html
+        # under the layout worker the lib's reheat only keeps time: the worker
+        # is the one told to climb toward 0.3 and back
+        assert "S.post(on ? { target: 0.3, gen: ++S.gen } : { target: 0 });" in html
 
 
 # ---------------------------------------------------------------------------

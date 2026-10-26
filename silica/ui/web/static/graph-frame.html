@@ -226,6 +226,9 @@ ${legend_items}          </div>
   </div>
 </div>
 
+<!-- The layout worker's d3-force-3d, as the text the worker is built from: a
+     type the browser does not run, so the page never executes it (buildSim). -->
+<script id="sim-lib" type="text/plain">${sim_js}</script>
 <!-- The document's data, parsed by graph-frame.js and never evaluated. `<` is
      \u003c inside it, so no note title can end this element early
      (render_html._json_island says why that and not `</` alone). -->
