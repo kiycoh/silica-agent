@@ -4,6 +4,7 @@
 """The live Learn session survives a restart (ADR-0135 point 1): it is a
 file beside the answer ledger, written whole after every change and read
 back when memory has none. `learn_routes._reset()` is the restart."""
+# ruff: noqa: F811  the client fixture is imported, so every test that takes it reads as a redefinition
 from __future__ import annotations
 
 import json

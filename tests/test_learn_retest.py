@@ -4,6 +4,7 @@
 """A miss is asked again before the session ends, in another kind (ADR-0135
 point 4); its line is kept apart, so FSRS and the objectives never read a
 note met minutes after its miss as recalled."""
+# ruff: noqa: F811  the client fixture is imported, so every test that takes it reads as a redefinition
 from __future__ import annotations
 
 import json
@@ -86,7 +87,7 @@ def test_no_retest_for_a_met_answer_a_placement_or_past_the_cap(client, monkeypa
     from silica.ui.web import learn_routes
 
     c, _ = client
-    s = _start(c, plan="Plans/ML.md")
+    _start(c, plan="Plans/ML.md")
     live = learn_routes._LIVE
     it = dict(live["items"][0], kind="explain")
     assert learn_routes._retest(live, it, {"correct": True}) is None

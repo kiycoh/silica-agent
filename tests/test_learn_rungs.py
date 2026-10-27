@@ -3,6 +3,7 @@
 
 """A ledger line says which hints the reader saw, not only how many
 (ADR-0135 point 5); the caps of ADR-0040 do not change with it."""
+# ruff: noqa: F811  the client fixture is imported, so every test that takes it reads as a redefinition
 from __future__ import annotations
 
 import json

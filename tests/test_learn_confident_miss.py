@@ -3,6 +3,7 @@
 
 """A miss at confidence 90 is a reason to escalate, logged and never shown
 until 20 sessions show it earns its place (ADR-0135 point 9)."""
+# ruff: noqa: F811  the client fixture is imported, so every test that takes it reads as a redefinition
 from __future__ import annotations
 
 import pytest

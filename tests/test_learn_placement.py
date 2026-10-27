@@ -4,6 +4,7 @@
 """A placement before a plan starts (ADR-0135 point 3): two candidates a
 step, the walk in code, the answers as ordinary ledger lines, "placed"
 derived on read and never the same as passed."""
+# ruff: noqa: F811  the client and step_vault fixtures are imported, so every test that takes them reads as a redefinition
 from __future__ import annotations
 
 import json
