@@ -202,3 +202,21 @@ def test_explore_folds_its_column_beside_a_note_and_find_opens_it(app):
     app.click("document.querySelector('#note-close')")
     app.wait(f"!{folded}", 5, "the column to unfold")
     assert app.js("document.querySelector('#graph-key').hidden") and not app.js(frame_key_shut)
+
+
+def test_a_question_sent_while_the_transcript_loads_stays_on_screen(app):
+    """loadVault redrew the chat from a /messages reply that left before the
+    question did, and the question vanished while its turn ran on (a real
+    turn, 2026-10-25). The reply is held here until the question is drawn."""
+    _go(app, "#chat")
+    app.js(FAKE_CHAT)
+    app.js("""(() => { const f = window.fetch;
+      window.fetch = (u, o) => u === "/messages" ? new Promise((res) => { window.__release = () => res(f(u, o)); }) : f(u, o);
+      window.__loading = loadVault(); return 1; })()""")
+    app.click("document.querySelector('#input')")
+    app.type("prima domanda")
+    app.key("Enter")
+    app.wait("window.__sent.length === 1 && !streaming", 10, "the turn")
+    app.js("(window.__release(), window.__loading)")
+    assert app.js("document.querySelectorAll('#log .msg.user').length") == 1
+    assert app.js("document.querySelector('#log .msg.user .body').textContent") == "prima domanda"

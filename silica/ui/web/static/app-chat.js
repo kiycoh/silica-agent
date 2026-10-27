@@ -347,7 +347,12 @@ function makePipelineBlock(label, tracks) {
   };
 }
 
+// Bumped by every bubble: loadVault's /messages reply is stale once a bubble
+// was drawn while it was on its way (see loadVault).
+let logEpoch = 0;
+
 function bubble(role) {
+  logEpoch++;
   const el = document.createElement("div");
   el.className = "msg " + (role === "user" ? "user" : "silica");
   el.innerHTML = `<div class="role">${role === "user" ? "you" : "silica"}</div><div class="body"></div>`;

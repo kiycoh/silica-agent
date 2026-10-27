@@ -2616,8 +2616,7 @@
 }
 
 /* The note open beside the chat (ADR-0097, amendment 2026-10-25): the workspace chip's
-   shape, since both say what the next message reads. It gives way before the
-   mic does, its title cut rather than the toolbar wrapped. Scoped to the row:
+   shape, since both say what the next message reads. Scoped to the row:
    app-metrics.css styles another `.chip` later in the cascade. */
 .note-chip-row {
   display: flex;
@@ -2626,12 +2625,21 @@
   align-self: center;
 }
 
+/* The toolbar wraps, and a wrapping line places items at their content size
+   before anything shrinks: a 22rem chip sent the send button to a row of its
+   own once the context ring appeared after the first real turn (seen
+   2026-10-25). From a basis of 0 the chip takes only the room the line has
+   left, and its title is cut instead. */
+#composer .note-chip-row {
+  flex: 1 1 0;
+}
+
 .note-chip-row .note-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
   min-width: 0;
-  max-width: 22rem;
+  max-width: min(22rem, 100%);
   margin: 0;
   padding: 0.25rem 0.3rem 0.25rem 0.6rem;
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
@@ -2664,7 +2672,7 @@
 
 .note-chip-add {
   min-width: 0;
-  max-width: 22rem;
+  max-width: min(22rem, 100%);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
