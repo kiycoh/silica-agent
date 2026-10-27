@@ -114,7 +114,10 @@ def test_the_home_is_one_column_that_asks_what_you_would_like_to_learn():
     js = app_js()
     assert "What would you like to learn?" in js
     assert "Test yourself on your notes, then see what you missed." in js
-    assert '"Form"' in js and '"Test me"' in js
+    assert '"Create"' in js and '"Test me"' in js
+    # Test me leads, Create follows; plans sit above the waiting questions
+    assert "row.append(wrap, go, form)" in js
+    assert js.index("lrPlansHome(n.plans)") < js.index("col.appendChild(lrSessionList(d))")
     # the segments of ADR-0081 are gone from the bar
     assert '["next", "Next", { view: "home" }]' not in js
     # the session is its list, and Drop edits it (ADR-0119 Gate)

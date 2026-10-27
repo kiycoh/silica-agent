@@ -864,7 +864,7 @@ async function deleteFromTree(note, folder, paths) {
     });
     data = await r.json();
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify((data && data.detail) || "couldn't delete that"); return; }
+  if (!r || !r.ok) { notify((data && data.detail) || "couldn't delete that"); return false; }
   const gone = new Set(data.deleted);
   // A pin on a deleted note opens nothing; the undo puts it back with the note.
   const unpinned = pinnedPaths.filter((p) => gone.has(p));
@@ -880,6 +880,7 @@ async function deleteFromTree(note, folder, paths) {
     + (d ? ` ${d} ${d === 1 ? "link now points" : "links now point"} to no note.` : "")
     + (data.error ? ` ${data.error}.` : "");
   notify(msg, data.error ? "error" : "info", { label: "undo", run: () => undoTreeDelete(data.run, unpinned) });
+  return true;
 }
 
 async function undoTreeDelete(run, unpinned) {
@@ -889,6 +890,8 @@ async function undoTreeDelete(run, unpinned) {
   const repin = unpinned.filter((p) => back.has(p) && !pinnedPaths.includes(p));
   if (repin.length) { pinnedPaths.unshift(...repin); savePins(); }
   loadVaultInfo();
+  // a restored plan is a row Learn's cached list does not have
+  if (typeof lrData !== "undefined" && lrData) { lrData = null; if (activeTab === "learn") loadLearn(true); }
   const n = data.restored.length, s = data.skipped.length;
   notify(`Restored ${n} ${n === 1 ? "note" : "notes"}.`
     + (s ? ` ${s} not restored: changed since the delete.` : ""), s ? "error" : "info");

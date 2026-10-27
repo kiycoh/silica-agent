@@ -691,6 +691,18 @@
           }
           case "FootnoteMark":
             return false;
+          // A comment is never prose: the reader's renderer drops it, so the
+          // drawer showed `<!-- silica: valid_from=… -->` as a line of text
+          // that no other surface shows (2026-10-26). Whole lines go whole, or
+          // an empty line would stand where the stamp was.
+          case "CommentBlock": {
+            const a = doc.lineAt(n.from), b = doc.lineAt(Math.max(n.from, n.to - 1));
+            if (!touches(a.from, b.to)) add(Decoration.replace({ block: true }), a.from, b.to);
+            return false;
+          }
+          case "Comment":
+            if (live) hide(n.from, n.to);
+            return false;
           case "Embed":
           case "Image":
           case "InlineMath":

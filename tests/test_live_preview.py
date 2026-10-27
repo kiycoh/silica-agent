@@ -121,3 +121,18 @@ def test_the_editor_draws_what_the_reader_drew(tmp_path):
     assert rendered.count(["a.cm-link.cm-link-live.note-link", "Here"]) == 2
     # the caret on a definition shows its marker as typed
     assert ["FootnoteLabel", "[^a]: ", "2"] not in got[str(note.index("[^a]:") + 1)]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run the editor bundle")
+def test_a_claim_stamp_is_hidden_away_from_the_caret(tmp_path):
+    """The drawer showed `<!-- silica: valid_from=… -->` as a line of text,
+    which the reader's renderer drops (2026-10-26). The whole line goes, and
+    only that line; under the caret it shows as typed."""
+    stamp = "<!-- silica: valid_from=2024-04-10 -->"
+    note = f"# Spine\n\n{stamp}\n> The claim\n\nsee <!-- inline --> here\n"
+    got = _decorations(tmp_path, [-1, note.index(stamp) + 5], note=note)
+
+    assert ["hide", stamp] in got["-1"]
+    assert ["hide", "<!-- inline -->"] in got["-1"]
+    assert not any(r[1].startswith("> The claim") and r[0] == "hide" for r in got["-1"])
+    assert ["hide", stamp] not in got[str(note.index(stamp) + 5)]

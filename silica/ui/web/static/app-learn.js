@@ -352,6 +352,10 @@ function lrRender() {
   // a list control keeps the focus through a re-render (a detail landing
   // after a fetch re-renders too), so ↑ ↓, Tab and Enter go on working
   const keep = document.activeElement?.dataset?.lrKey;
+  // The dialog scrolls in its scrim, which every re-render (each field edit,
+  // each preview landing) rebuilds at the top: without this the form jumped
+  // back to its first field while it was being filled.
+  const dlgScroll = body.querySelector(".lr-scrim")?.scrollTop || 0;
   body.innerHTML = "";
   lrEndAsk = lrEndAsk && lrRoute.view === "session";
   const h = lrHash(lrRoute);
@@ -362,6 +366,8 @@ function lrRender() {
   else if (lrRoute.view === "receipt") lrRenderReceipt(body);
   else if (lrRoute.view === "read") lrRenderRead(body);
   else lrRenderHome(body);
+  const scrim = body.querySelector(".lr-scrim");
+  if (scrim && dlgScroll) scrim.scrollTop = dlgScroll;
   if (keep) body.querySelector(`[data-lr-key="${CSS.escape(keep)}"]`)?.focus({ preventScroll: true });
 }
 
@@ -446,11 +452,11 @@ function lrHomeColumn(d) {
     }
     col.appendChild(row);
   }
-  col.appendChild(lrSessionList(d));
   const n = d.next || {};
-  if (n.missed?.length) col.appendChild(lrMissedHome(n.missed));
   if (lrPlansError) col.appendChild(lrPlansErrorBox());
   else if (n.plans?.length) col.appendChild(lrPlansHome(n.plans));
+  col.appendChild(lrSessionList(d));
+  if (n.missed?.length) col.appendChild(lrMissedHome(n.missed));
   const links = lrEl("div", "lr-links");
   links.append(lrBtn("lr-link", "What you know", () => lrGo({ view: "map" })), lrBtn("lr-link", "All plans", () => lrGo({ view: "plans" })));
   col.appendChild(links);
@@ -501,11 +507,11 @@ function lrAskBox() {
     });
     wrap.append(inp, list);
   }
-  const form = lrBtn("ghost box", "Form", () => { lrFormReset({ step: "fields" }); lrGo({ view: "new" }); });
+  const form = lrBtn("ghost box", "Create", () => { lrFormReset({ step: "fields" }); lrGo({ view: "new" }); });
   form.title = "set a test or a plan up field by field";
   const go = lrBtn("lr-send", "Test me", lrAskGo);
   go.id = "lr-ask-go";
-  row.append(wrap, form, go);
+  row.append(wrap, go, form);
   lrAskBtn(go);
   return row;
 }
@@ -1691,7 +1697,9 @@ function lrFieldsStep(box) {
     lands.append("Saves ", lrEl("span", "path", lrLands()), " · revertible");
     const save = lrBtn("lr-send", "Save plan", () => lrWritePlan());
     save.id = "lr-create-btn";
-    cta.append(lands, lrBtn("ghost box", "Cancel", lrCloseDialog), save);
+    const del = lrBtn("lr-link", "Delete plan", lrDeletePlan);
+    del.title = "move the plan note to the trash; undo stays on the toast";
+    cta.append(del, lands, lrBtn("ghost box", "Cancel", lrCloseDialog), save);
   } else {
     lands.textContent = lrKeptLine();
     const keep = lrBtn("ghost box", "Save only", () => lrWritePlan());
@@ -1704,6 +1712,17 @@ function lrFieldsStep(box) {
   box.appendChild(cta);
   // the box is not in the page yet: its buttons are found inside it
   lrCtaState(box);
+}
+
+// The plan is a note, so it goes the way a note goes from the rail (trash,
+// undo on the toast); its sessions stay in the log, as Edit plan leaves them.
+async function lrDeletePlan() {
+  const path = lrForm.editPath;
+  if (!path || !(await deleteFromTree(path))) return;
+  lrForm.editing = null;
+  lrData = null; lrPlan = null;
+  lrGo({ view: "home" }, { replace: true });
+  loadLearn(true);
 }
 
 const lrLands = () => lrForm.editPath || `Plans/${lrForm.name.trim() || "<name>"}.md`;
