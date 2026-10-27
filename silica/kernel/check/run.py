@@ -216,7 +216,8 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
                dense: Dense | None = None, dense_floor: float | None = None,
                judge: Judge | None = None, cache_only: bool = False,
                progress: Callable[[dict], None] | None = None,
-               cancelled: Callable[[], bool] | None = None) -> dict[str, Any]:
+               cancelled: Callable[[], bool] | None = None,
+               lines: tuple[int, int] | None = None) -> dict[str, Any]:
     """The report for the note at vault-relative `path`: rule findings, and
     with a `judge` the verdict on each block the rules did not settle.
 
@@ -225,12 +226,16 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
     the first and {"event": "block", ...} after each judged block. With
     `cache_only`, only the verdicts already paid for are read and nothing is
     asked: the drawer's rerun after an edit. `cancelled` is polled before
-    each call; the verdicts paid for until then are kept."""
+    each call; the verdicts paid for until then are kept. `lines`, a
+    1-based inclusive range, checks only the blocks inside it: one card of
+    a reading the reader writes (ADR-0134 point 4)."""
     notes, files = pl.walk(vault)
     if path not in notes:
         raise FileNotFoundError(path)
     me = notes[path]
     blocks, defs = blk.split(me.text)
+    if lines is not None:
+        blocks = [b for b in blocks if lines[0] <= b.line and b.end <= lines[1]]
     res = pl.Resolver(notes, files)
     body = me.text[sum(len(x) + 1 for x in me.text.split("\n")[:blk.body_start(me.text)]):]
     named_all = {p for _t, p in res.links(body) if p} | res.mentions(body)
@@ -410,11 +415,17 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
     report = _summary(path, blocks, pool, findings, states, waiting, cached)
     if reading and (fresh or old):
         # Only this run's verdicts are kept, so the cache never outgrows the
-        # note; a cancelled run keeps the older ones it did not reach too.
-        # The report rides along: the drawer's counts are the file's.
+        # note; a cancelled run keeps the older ones it did not reach too, and
+        # so does a ranged run, whose blocks outside the range were never read.
+        # The report rides along: the drawer's counts are the file's, and a
+        # ranged run's report is one card's, so the whole note's stays.
+        # shortcut: a written reading checked card by card only ever adds
+        # verdicts, one per edited block; a whole-note check prunes them.
+        merge = stopped or lines is not None
         cache_file = _cache_path(vault, path)
         cache_file.parent.mkdir(parents=True, exist_ok=True)
-        cache_file.write_text(json.dumps({"verdicts": {**cache, **fresh} if stopped else fresh, "report": report},
+        cache_file.write_text(json.dumps({"verdicts": {**cache, **fresh} if merge else fresh,
+                                          "report": old.get("report", report) if lines is not None else report},
                                          ensure_ascii=False), encoding="utf-8")
     return report
 
