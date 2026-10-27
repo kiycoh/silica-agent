@@ -1898,9 +1898,9 @@ function citeWordsFor(msg, n) {
 async function openCite(el) {
   const msg = el.closest(".msg");
   const words = msg ? citeWordsFor(msg, el.dataset.cite) : new Set();
-  if (!(await openNote(el.dataset.path)) || !editor) return;
-  const hit = bestLine(proseLines(editor.getText()), words);
-  if (hit) editor.markLine(hit.line);
+  if (!(await openNote(el.dataset.path)) || !drawerNote.editor) return;
+  const hit = bestLine(proseLines(drawerNote.editor.getText()), words);
+  if (hit) drawerNote.editor.markLine(hit.line);
 }
 
 // cite-pure:start (run under node by tests/test_cite_cards.py)

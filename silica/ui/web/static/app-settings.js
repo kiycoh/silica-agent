@@ -734,9 +734,9 @@ document.addEventListener("keydown", (e) => {
   // the editor used, to collapse a selection, is not also a close: that is
   // the first press, and the drawer goes on the second.
   // A source check's box first (ADR-0110 point 11): it is what was just opened.
-  if (editor && editor.closeCheckBox()) return;
+  if (drawerNote.editor && drawerNote.editor.closeCheckBox()) return;
   if (closeNoteMenu(true)) return;
-  if (hideSelBar()) { if (editor) editor.focus(); return; }
+  if (hideSelBar()) { if (drawerNote.editor) drawerNote.editor.focus(); return; }
   // A note's details go back to its text before anything closes (ADR-0075).
   if (setDetails(false)) return;
   if (e.defaultPrevented && e.target.closest && e.target.closest("#note-edit")) return;

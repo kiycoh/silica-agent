@@ -1894,7 +1894,7 @@ def close_plan(payload: dict):
     return plans.close_plan(plan["path"], reopen=bool(payload.get("reopen")))
 
 
-# ---------------------------------------------------------------- a step's reading (ADR-0132)
+# ---------------------------------------------------------------- a step's reading (ADR-0132, ADR-0134)
 
 def _step_of(payload_or_args) -> tuple[str, int]:
     plan = str(payload_or_args.get("plan") or "")
@@ -1906,7 +1906,7 @@ def _step_of(payload_or_args) -> tuple[str, int]:
 
 @router.get("/reading")
 def reading_view(plan: str, step: int):
-    """A step's reading as Learn shows it: its sections, whether the notes
+    """A step's reading as Learn shows it: its cards, whether the notes
     changed since it was written, what the reader wrote, the practice's size,
     and the job writing it, if one runs."""
     from silica.kernel.learn import reading
@@ -1935,8 +1935,8 @@ def reading_write(payload: dict):
 
 @router.post("/reading/answer", dependencies=_SAME_ORIGIN)
 def reading_answer(payload: dict):
-    """A guess before a section, or the reader's own words after it: kept,
-    never graded, never in the answer ledger."""
+    """A card opened, or the answer to its closing question: kept, never
+    graded, never in the answer ledger. `section` is the card's number."""
     from silica.kernel.learn import plans, reading
 
     plan_path, step = _step_of(payload)

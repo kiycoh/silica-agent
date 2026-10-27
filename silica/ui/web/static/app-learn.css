@@ -3002,9 +3002,8 @@ button.lr-cell:focus-visible {
   }
 }
 
-/* --- a step's reading (ADR-0132) ------------------------------------------- */
-/* Wider than the home column: the sections' list beside the section, and the
-   list stacks above it below 760px. */
+/* --- a step's reading (ADR-0132, ADR-0134) ------------------------------------------- */
+/* Wider than the home column: the cards' list beside the card. */
 .lr-one.lr-read {
   max-width: 60rem;
 }
@@ -3038,7 +3037,10 @@ button.lr-cell:focus-visible {
   font-size: var(--fs-ctl);
 }
 
+/* The list folds to one line when the grid is narrow: the drawer open
+   beside Learn at 1440 px leaves it 560 px, a phone less (ADR-0134 point 3). */
 .lr-read-grid {
+  container-type: inline-size;
   display: flex;
   flex-wrap: wrap;
   gap: 1.75rem;
@@ -3048,6 +3050,45 @@ button.lr-cell:focus-visible {
 .lr-read-toc {
   flex: 1 1 15rem;
   max-width: 18rem;
+  min-width: 0;
+}
+
+.lr-read-fold {
+  display: none;
+}
+
+@container (max-width: 44rem) {
+  .lr-read-toc {
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .lr-read-side {
+    display: none;
+  }
+  .lr-read-fold {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+}
+
+.lr-read-fold-b {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--slate);
+  color: var(--frost);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lr-read-list {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -3080,12 +3121,8 @@ button.lr-cell:focus-visible {
   transition: background var(--dur) var(--ease);
 }
 
-.lr-read-toc-b:hover:not(:disabled) {
+.lr-read-toc-b:hover {
   background: var(--sel-hover);
-}
-
-.lr-read-toc-b:disabled {
-  cursor: default;
 }
 
 .lr-read-toc-i.cur .lr-read-toc-b {
@@ -3111,11 +3148,18 @@ button.lr-cell:focus-visible {
   color: var(--accent);
 }
 
-/* a section finished is a full mark, the way a met note is (ADR-0061) */
+/* a card answered is a full mark, the way a met note is (ADR-0061) */
 .lr-read-toc-i.done .dot {
   border-color: var(--ash);
   background: var(--ash);
   color: var(--slate);
+}
+
+/* read and left with its question: the yellow dash the owner asked for */
+.lr-read-toc-i.standby .dot {
+  border-color: var(--warn);
+  color: var(--warn);
+  font-weight: 700;
 }
 
 .lr-read-toc-b .t {
@@ -3128,26 +3172,35 @@ button.lr-cell:focus-visible {
 .lr-read-toc-b .tt {
   font-size: 14px;
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .lr-read-toc-i.cur .tt {
   font-weight: 600;
 }
 
-.lr-read-toc-b .m,
-.lr-read-toc-b .lr-read-moved {
+.lr-read-toc-b .lr-read-moved,
+.lr-read-mv {
   font-size: var(--fs-meta);
-  color: var(--ash-dim);
+  color: var(--warn);
   overflow-wrap: anywhere;
 }
 
-.lr-read-toc-b .lr-read-moved,
-.lr-read-mv {
+.lr-read-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  padding: 0.75rem 0.6rem 0;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-read-key .standby {
   color: var(--warn);
 }
 
 .lr-read-main {
-  flex: 999 1 28rem;
+  flex: 999 1 26rem;
   min-width: 0;
   max-width: 42rem;
   display: flex;
@@ -3165,12 +3218,38 @@ button.lr-cell:focus-visible {
   background: var(--slate);
 }
 
-.lr-read-card h3,
-.lr-read-shead h3 {
+.lr-read-card h3 {
   margin: 0;
   font-size: 18px;
   font-weight: 600;
   color: var(--frost);
+}
+
+.lr-read-eb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  align-items: baseline;
+}
+
+.lr-read-chip {
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-read-chip.standby {
+  color: var(--warn);
+}
+
+.lr-read-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  align-items: center;
+}
+
+.lr-read-choice .lr-help {
+  flex: 1 1 18rem;
 }
 
 .lr-read-q {
@@ -3180,22 +3259,33 @@ button.lr-cell:focus-visible {
   color: var(--frost);
 }
 
-.lr-read-actions {
+.lr-read-actions,
+.lr-read-nav {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
   align-items: center;
 }
 
-.lr-read-shead {
+.lr-read-ask {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.lr-read-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .lr-read-yours {
   display: flex;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
   padding: 0.7rem 0.9rem;
   border: 1px dashed var(--line-2);
   border-radius: var(--r-sm);
@@ -3208,13 +3298,27 @@ button.lr-cell:focus-visible {
 }
 
 .lr-read-yours .v {
+  flex: 1 1 16rem;
+  min-width: 0;
   color: var(--frost);
   white-space: pre-line;
+}
+
+.lr-read-says {
+  border-style: solid;
 }
 
 .lr-read-label {
   font-size: var(--fs-meta);
   color: var(--ash-dim);
+}
+
+.lr-read-example {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.7rem 0.9rem;
+  border-left: 2px solid var(--line-2);
 }
 
 .lr-read-text p {
@@ -3223,9 +3327,28 @@ button.lr-cell:focus-visible {
   line-height: 1.72;
   color: var(--text);
   max-width: 67ch;
+  overflow-wrap: anywhere;
 }
 
-.lr-read-text .lr-ans {
+.lr-read-text p.lr-read-formula {
+  overflow-x: auto;
+}
+
+.lr-read-points {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+/* a link inside the prose opens its note in the drawer */
+.lr-read-cite {
+  font-size: inherit;
+}
+
+.lr-read-text .lr-ans,
+.lr-read-yours .lr-ans {
   background: var(--sel);
   color: var(--frost);
   border-radius: var(--r-xs);
@@ -3236,10 +3359,4 @@ button.lr-cell:focus-visible {
   color: var(--warn);
   font-style: normal;
   font-size: var(--fs-meta);
-}
-
-@media (max-width: 760px) {
-  .lr-read-toc {
-    max-width: none;
-  }
 }

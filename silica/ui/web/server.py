@@ -4710,7 +4710,9 @@ async def note_check(payload: dict, request: Request):
     behind a conversion. Cancel is the browser dropping the request: the run
     stops before its next call and keeps the verdicts paid for. `rules: true`
     asks the model nothing (the rerun after an edit, served from the cache);
-    `confirm: true` lets a pass of more than CONFIRM_OVER calls go."""
+    `confirm: true` lets a pass of more than CONFIRM_OVER calls go;
+    `lines: [first, last]` checks only the blocks inside those lines (a card
+    of a reading the reader writes, ADR-0134 point 4)."""
     from silica.cli import _check_judge, _check_legs
     from silica.kernel.check import run as check
     from silica.kernel.vault_manifest import active_write_dir
@@ -4724,6 +4726,13 @@ async def note_check(payload: dict, request: Request):
     path = canon if canon.endswith(".md") else canon + ".md"
     rules_only = payload.get("rules") is True
     confirmed = payload.get("confirm") is True
+    span = payload.get("lines")
+    card_lines = None
+    if span is not None:
+        if not (isinstance(span, list) and len(span) == 2 and all(isinstance(x, int) and x >= 1 for x in span)
+                and span[0] <= span[1]):
+            raise HTTPException(400, "lines is [first, last], 1-based")
+        card_lines = (span[0], span[1])
     if rules_only and not await asyncio.to_thread(check.read_cache, CONFIG.vault_path, path):
         # Never checked (or its file torn): a rerun has no marks to bring back.
         return JSONResponse({"event": "done", "unchecked": True}, media_type="application/x-ndjson")
@@ -4747,7 +4756,8 @@ async def note_check(payload: dict, request: Request):
             search, dense, floor = _check_legs()
             report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(), search=search,
                                       dense=dense, dense_floor=floor, judge=None if rules_only else _check_judge(),
-                                      cache_only=rules_only, progress=progress, cancelled=stop.is_set)
+                                      cache_only=rules_only, progress=progress, cancelled=stop.is_set,
+                                      lines=card_lines)
             put({**report, "event": "done"})
             if not rules_only:  # a rerun after an edit is not a check the person asked for
                 c = report["counts"]

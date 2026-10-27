@@ -622,13 +622,13 @@ $("#tree").addEventListener("keydown", (e) => {
   if (row) { e.preventDefault(); renameNoteInline(row); }
 });
 
-// POST /tree/move: a folder for the set, or a name for one note. The editor's
-// pending save lands first, or a note typed into and then moved would save
-// under its old path. The page then follows: the pins, the open note, the
+// POST /tree/move: a folder for the set, or a name for one note. Every
+// editor's pending save lands first, or a note typed into and then moved
+// would save under its old path. The page then follows: the pins, the open note, the
 // folder dropped into opens, and the toast's undo brings the set back.
 async function moveFromTree(paths, folder, name) {
   closeTreeMenu();
-  if (typeof saveEdit === "function") await saveEdit();
+  if (typeof saveEdit === "function") await Promise.all(noteSessions.map((s) => saveEdit(s)));
   let r = null, data = null;
   try {
     r = await fetch("/tree/move", {

@@ -361,6 +361,30 @@ def test_a_cancelled_check_stops_before_its_next_call_and_keeps_what_it_paid_for
     assert len(run.read_cache(str(firm), path)["verdicts"]) == 1
 
 
+def test_a_line_range_judges_only_its_blocks_and_keeps_the_other_verdicts(firm):
+    """One card of a written reading (ADR-0134 point 4): blocks outside the
+    range are never judged, and a ranged run keeps the verdicts it did not read."""
+    path = _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.\n\n"
+                        "Acceptance under Schedule 3 was certified by the engineer on the agreed date.")
+    search = lambda q, k: [{"path": "Matters/Chronology.md", "line": 10, "coverage": 0.7, "window": "x"}]
+    seen = []
+    judge = lambda t, ps: (seen.append(t), {"kind": "supported", "by": "jev", "p": 0.9})[1]
+    whole = run.check_note(path, str(firm), write_dir="silica", search=search, judge=judge)
+    assert len(seen) == 2 and len(run.read_cache(str(firm), path)["verdicts"]) == 2
+    first, second = (s["line"] for s in whole["states"])
+    _draft(firm, "Limitation on the Northwind claim runs from delivery under the Distribution Agreement.\n\n"
+                 "Acceptance under Schedule 3 was certified by the engineer before the agreed date.")
+    seen.clear()
+    card = run.check_note(path, str(firm), write_dir="silica", search=search, judge=judge, lines=(second, second))
+    assert len(seen) == 1 and "before the agreed date" in seen[0] and card["blocks"] == 1
+    assert {s["line"] for s in card["states"]} == {second}
+    # the first block's verdict is still paid for, and so is the edited one's
+    assert len(run.read_cache(str(firm), path)["verdicts"]) == 3
+    seen.clear()
+    run.check_note(path, str(firm), write_dir="silica", search=search, judge=judge, lines=(first, first))
+    assert seen == []
+
+
 def test_the_drawers_route_streams_rules_then_the_report_and_reruns_only_a_checked_note(tmp_vault, monkeypatch):
     import json as _json
 
@@ -420,3 +444,34 @@ def test_a_note_found_only_by_its_title_is_read_from_its_body():
     assert [p["text"] for p in run._model_passages([full], [], [], {note.path: note})] == [run._excerpt(note)]
     long = Note(note.path, note.text + "x " * run.NOTE_CHARS, {})
     assert run._model_passages([full], [], [], {note.path: long})[0]["text"] == full["window"]
+
+
+def test_the_route_takes_a_line_range_and_refuses_a_bad_one(tmp_vault, monkeypatch):
+    import json as _json
+
+    from fastapi.testclient import TestClient
+
+    from silica.ui.web.server import app
+
+    monkeypatch.setattr("silica.cli._check_judge", lambda: None)
+    monkeypatch.setattr("silica.cli._check_legs", lambda: (None, None, None))
+    tmp_vault.note("Drafts/memo.md", "---\nmatter: x\n---\n\nThe hearing listed for 17 February 2026 was adjourned by the court.\n\n"
+                                     "A second paragraph naming 18 March 2026 for the next hearing of the court.\n")
+    tc = TestClient(app, headers={"Origin": "http://testserver"})
+    for bad in ([3], [0, 2], [5, 4], ["a", 2]):
+        assert tc.post("/note/check", json={"path": "Drafts/memo", "lines": bad}).status_code == 400
+    out = [_json.loads(x) for x in tc.post("/note/check", json={"path": "Drafts/memo", "lines": [7, 7]}).text.splitlines()]
+    done = out[-1]
+    assert done["event"] == "done" and done["blocks"] == 1
+    assert [f["words"] for f in done["findings"] if f["kind"] == "date not found"] == ["18 March 2026"]
+
+
+def test_a_steps_reading_is_never_a_source(firm):
+    """ADR-0134: the reader's rewrite is held by the notes, not by Silica's
+    summary of them (nor by another rewrite)."""
+    (firm / "Plans").mkdir(exist_ok=True)
+    (firm / "Plans/Reading.md").write_text("---\ntype: reading\n---\n\nNorthwind limitation runs from delivery.\n",
+                                           encoding="utf-8")
+    notes, _files = pool.walk(str(firm))
+    built = pool.build("Drafts/Opinion.md", notes, (), "silica", set())
+    assert "Plans/Reading.md" not in built.paths and "Matters/Chronology.md" in built.paths

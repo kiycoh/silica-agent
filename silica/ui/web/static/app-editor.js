@@ -146,14 +146,18 @@
   const language = new Language(markdownLanguage.data, markdownLanguage.parser.configure([Obsidian]), [], "markdown");
 
   // --- widgets --------------------------------------------------------------
-  // One editor per page (the drawer's), so the hooks it was built with are
-  // module state rather than a facet threaded through every widget.
-  let HOOKS = {};
-  const renderCache = new Map(); // source -> html; a block redrawn is not refetched
+  // Each editor's hooks and heading element live in its own state, not in the
+  // module: the drawer and Learn's write view are two editors of one kind
+  // (ADR-0134 point 6), and module state let the second create() take the
+  // first one's hooks. Every reader has a view or a state in hand.
+  const NO_INST = { hooks: {}, top: null };
+  const instField = StateField.define({ create: () => NO_INST, update: (v) => v });
+  const hooksOf = (view) => view.state.field(instField).hooks;
+  const renderCache = new Map(); // source -> html; a block redrawn is not refetched, by either editor
 
-  function rendered(source) {
+  function rendered(view, source) {
     if (renderCache.has(source)) return Promise.resolve(renderCache.get(source));
-    return HOOKS.render(source).then((html) => { renderCache.set(source, html); return html; });
+    return hooksOf(view).render(source).then((html) => { renderCache.set(source, html); return html; });
   }
 
   // A link inside something the server drew (a wikilink in a table cell, a
@@ -165,7 +169,7 @@
     const link = e.target.closest(".note-link, a[href]");
     if (link) {
       e.preventDefault();
-      if (link.classList.contains("note-link")) { if (link.dataset.path) HOOKS.openNote(link.dataset.path); }
+      if (link.classList.contains("note-link")) { if (link.dataset.path) hooksOf(view).openNote(link.dataset.path); }
       else window.open(link.href, "_blank", "noopener");
       return;
     }
@@ -187,7 +191,8 @@
       el.className = "cm-rendered " + (this.block ? "cm-rendered-block" : "cm-rendered-inline");
       const fill = (html) => {
         el.innerHTML = this.block ? html : html.replace(/^\s*<p>([\s\S]*)<\/p>\s*$/, "$1");
-        if (HOOKS.decorate) HOOKS.decorate(el, view);
+        const hooks = hooksOf(view);
+        if (hooks.decorate) hooks.decorate(el, view);
         const rows = el.querySelectorAll("tbody tr");
         for (const [i, grade, hollow, line, n] of this.glyphs) {
           const cell = rows[i] && rows[i].firstElementChild;
@@ -199,7 +204,7 @@
       else {
         el.textContent = this.source; // the source, dimmed, until the server answers
         el.classList.add("cm-rendering");
-        rendered(this.source).then((h) => { el.classList.remove("cm-rendering"); fill(h); },
+        rendered(view, this.source).then((h) => { el.classList.remove("cm-rendering"); fill(h); },
           () => el.classList.remove("cm-rendering")); // unrendered stays readable source
       }
       el.addEventListener("mousedown", (e) => followOrReveal(view, el, e));
@@ -336,7 +341,6 @@
     update: (v, tr) => tr.effects.reduce((a, e) => (e.is(markEffect) ? e.value : a), v.map(tr.changes)),
     provide: (f) => EditorView.decorations.from(f),
   });
-  let TOP = null; // the element heading the note, set per load()
   const linkKey = (target) => target.split("#")[0].trim();
 
   // --- a source check's marks (ADR-0110 point 11) ----------------------------
@@ -497,7 +501,7 @@
           a.type = "button";
           a.className = "cm-chk-src";
           a.textContent = f.at;
-          a.addEventListener("mousedown", (e) => { e.preventDefault(); HOOKS.openAt(m[1], m[2] ? +m[2] : 0); });
+          a.addEventListener("mousedown", (e) => { e.preventDefault(); hooksOf(view).openAt(m[1], m[2] ? +m[2] : 0); });
           row.append(a);
         }
         box.append(row);
@@ -609,7 +613,8 @@
 
     const missing = state.field(broken);
     const refs = [], defs = []; // footnotes, numbered once the whole tree is seen
-    if (TOP) add(Decoration.widget({ widget: new Top(TOP), block: true, side: -1 }), 0);
+    const top = state.field(instField).top; // the element heading the note, set per load()
+    if (top) add(Decoration.widget({ widget: new Top(top), block: true, side: -1 }), 0);
     const fmEnd = frontmatterEnd(doc.sliceString(0, HEAD));
     if (fmEnd > 0) blockOrLines(0, fmEnd, LINE.fm);
 
@@ -820,7 +825,7 @@
 
   function keys() {
     return [
-      { key: "Mod-s", run: () => { HOOKS.save(); return true; } },
+      { key: "Mod-s", run: (v) => { hooksOf(v).save(); return true; } },
       { key: "Mod-b", run: toggleWrap("**") },
       { key: "Mod-i", run: toggleWrap("*") },
       { key: "Tab", run: (v) => inList(v.state) && indentMore(v) },
@@ -831,15 +836,15 @@
 
   // A drawn link opens on press; with the caret inside it, it is text.
   const linkPress = EditorView.domEventHandlers({
-    mousedown(e) {
+    mousedown(e, view) {
       const a = e.target.closest && e.target.closest("a.cm-link-live");
       if (!a || e.button !== 0) return false;
       e.preventDefault();
-      if (a.dataset.target) HOOKS.openNote(a.dataset.target);
+      if (a.dataset.target) hooksOf(view).openNote(a.dataset.target);
       else if (a.dataset.href) {
         const href = a.dataset.href;
         if (/^[a-z][\w+.-]*:/i.test(href)) window.open(href, "_blank", "noopener");
-        else HOOKS.openNote(decodeURIComponent(href)); // `[x](Other note.md)` is a note
+        else hooksOf(view).openNote(decodeURIComponent(href)); // `[x](Other note.md)` is a note
       }
       return true;
     },
@@ -864,17 +869,21 @@
       let it = null;
       try { it = JSON.parse(e.dataTransfer.getData(ROW_DRAG) || "null"); } catch { /* not ours: nothing lands */ }
       const notes = (it && Array.isArray(it.notes)) ? it.notes : [];
-      if (!notes.length || !HOOKS.links) return true;
+      const hooks = hooksOf(view);
+      if (!notes.length || !hooks.links) return true;
       const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.selection.main.head;
-      const text = HOOKS.links(notes).join(" ") + " ";
+      const text = hooks.links(notes).join(" ") + " ";
       view.dispatch({ changes: { from: pos, insert: text }, selection: { anchor: pos + text.length } });
       view.focus();
       return true;
     },
   });
 
-  function extensions() {
+  // `inst`, {hooks, top}, is the editor's own; without it (the tests' states)
+  // there are no hooks and nothing heads the note.
+  function extensions(inst = NO_INST) {
     return [
+      instField.init(() => inst),
       history(),
       drawSelection(),
       EditorView.lineWrapping,
@@ -893,19 +902,20 @@
       keymap.of([...defaultKeymap, ...historyKeymap]),
       EditorView.contentAttributes.of({ spellcheck: "true", "aria-label": "note text" }),
       EditorView.updateListener.of((u) => {
-        if (u.docChanged && !u.transactions.some((t) => t.effects.some((e) => e.is(adoptEffect)))) HOOKS.change();
-        if (u.focusChanged && !u.view.hasFocus) HOOKS.blur();
-        if ((u.selectionSet || u.focusChanged) && HOOKS.select) HOOKS.select(u.view);
+        const hooks = hooksOf(u.view);
+        if (u.docChanged && !u.transactions.some((t) => t.effects.some((e) => e.is(adoptEffect)))) hooks.change();
+        if (u.focusChanged && !u.view.hasFocus) hooks.blur();
+        if ((u.selectionSet || u.focusChanged) && hooks.select) hooks.select(u.view);
       }),
     ];
   }
 
   // hooks: render(source) -> Promise<html>, openNote(target), change(), blur(),
   // save(), decorate(el, view), select(view), links(paths) -> ["[[…]]"],
-  // openAt(path, line). The only caller is app-notes.js.
+  // openAt(path, line). The only caller is app-notes.js, once per editor.
   function create(parent, hooks) {
-    HOOKS = hooks;
-    const view = new EditorView({ parent, state: EditorState.create({ doc: "", extensions: extensions() }) });
+    const inst = { hooks, top: null };
+    const view = new EditorView({ parent, state: EditorState.create({ doc: "", extensions: extensions(inst) }) });
     return {
       view,
       getText: () => view.state.doc.toString(),
@@ -914,10 +924,10 @@
       // it does not take focus, which only a click in the text gives it
       // (ADR-0059). `top` is what heads the note, `missing` its broken links.
       load(text, { top = null, missing = [] } = {}) {
-        TOP = top;
+        inst.top = top;
         const fm = frontmatterEnd(text.slice(0, HEAD));
         const at = fm > 0 ? Math.min(fm + 1, text.length) : 0;
-        const state = EditorState.create({ doc: text, selection: { anchor: at }, extensions: extensions() });
+        const state = EditorState.create({ doc: text, selection: { anchor: at }, extensions: extensions(inst) });
         view.setState(state.update({ effects: brokenEffect.of(missing) }).state);
         view.scrollDOM.scrollTop = 0;
       },
