@@ -16,6 +16,8 @@ Usage:
   uv run python -m evals.learn_miss_class run --model custom/qwen3.5-9b --tag local
   uv run python -m evals.learn_miss_class run --model openrouter/deepseek/deepseek-v4-flash-0731 --tag hosted
   uv run python -m evals.learn_miss_class score TAG
+  --cases FILE on both reads another set (a fresh one, to measure a prompt
+  changed after the first run: cases.json, then cases2.json).
 """
 from __future__ import annotations
 
@@ -71,13 +73,15 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("run")
     r.add_argument("--model", required=True)
     r.add_argument("--tag", required=True)
+    r.add_argument("--cases", type=Path, default=CASES)
     s = sub.add_parser("score")
     s.add_argument("tag")
+    s.add_argument("--cases", type=Path, default=CASES)
     a = p.parse_args(argv)
     if a.cmd == "run":
-        print(run(a.model, a.tag))
+        print(run(a.model, a.tag, a.cases))
     else:
-        print(json.dumps(score(a.tag), indent=1))
+        print(json.dumps(score(a.tag, a.cases), indent=1))
     return 0
 
 
