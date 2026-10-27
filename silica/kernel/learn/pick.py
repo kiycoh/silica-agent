@@ -116,6 +116,23 @@ def conflicts(notes: dict[str, dict]) -> list[str]:
     return out
 
 
+# The grader's class of a miss chooses the note's next kind (ADR-0135 point 6)
+# once the gate has passed on the local and the hosted model, 30 of 40 on each;
+# until then the class is written to the ledger and nothing reads it.
+MISS_CLASS_READ = False
+NEXT_KIND = {"cue": "recall", "execution": "apply"}   # discrimination: the contrast pool, below
+
+
+def last_miss(entries: list[dict]) -> dict[str, str]:
+    """{path: class} for each note whose last answer was a classed miss."""
+    out: dict[str, str | None] = {}
+    for e in entries:
+        if e.get("retest"):
+            continue
+        out[str(e.get("path") or "")] = None if e.get("correct") else e.get("miss")
+    return {p: m for p, m in out.items() if m}
+
+
 def _stale(row: dict) -> bool:
     """Edited after its last rating: the evidence is about other text."""
     last = row.get("last_event")
@@ -212,12 +229,14 @@ def session(
     by_path = {r["path"]: r for r in rows.values()}
     taken: set[str] = set()
     picked: list[dict] = []
+    missed = last_miss(entries) if MISS_CLASS_READ else {}
 
     def take(r: dict, pool: str, kind: str | None = None, **extra) -> None:
         if r["path"] in taken:
             return
         taken.add(r["path"])
-        k = kind or ("predict" if (r["ai"] and r["attempts"] == 0) or r["stale"] else "recall")
+        k = kind or NEXT_KIND.get(missed.get(r["path"], "")) or (
+            "predict" if (r["ai"] and r["attempts"] == 0) or r["stale"] else "recall")
         picked.append({**r, "pool": pool, "kind": k, "level": LEVEL_OF[k], **extra})
 
     for p in revisit or []:
@@ -241,6 +260,9 @@ def session(
         take(r, "unexplored")
 
     pairs = _pairs_override if _pairs_override is not None else contrast_pairs(notes)
+    if missed:
+        # a neighbouring idea that won a miss is the pair asked first
+        pairs = sorted(pairs, key=lambda ab: not any(missed.get(x) == "discrimination" for x in ab))
     for a, b in pairs:
         if a in by_path and b in by_path and a not in taken and b not in taken:
             take(by_path[a], "contrast", "contrast", pair=[a, b])

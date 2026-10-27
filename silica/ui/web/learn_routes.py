@@ -1022,6 +1022,8 @@ def _rate(payload: dict):
         entry["paraphrase"] = v["paraphrase"]
     if v.get("misconception"):
         entry["misconception"] = v["misconception"]
+    if v.get("miss") and not correct:
+        entry["miss"] = v["miss"]
     if v.get("modality") == "voice":
         entry["modality"] = "voice"
     if s["plan"]:
@@ -1152,8 +1154,9 @@ def _escalate(s: dict, it: dict) -> dict | None:
         why = offer.escalation(it["path"], "", "", [], entries)
         if not why:
             return None
-        s["escalated"].add(it["path"])
-        shown = offer.mode() == "on"
+        if not offer.shadowed(why):
+            s["escalated"].add(it["path"])   # a shadow fire never takes the session's one aid on the note
+        shown = offer.mode() == "on" and not offer.shadowed(why)
         offer.log_aid(it["path"], s["id"], why, shown)
         if not shown:
             return None
