@@ -319,7 +319,7 @@ footer .fill { margin-left: auto; max-width: 70ch; }
     <a class="nav-more" href="#measured">Measured</a>
     <a class="nav-more" href="#runs">Where it runs</a>
     <a href="https://github.com/kiycoh/silica-agent" rel="noopener">GitHub</a>
-    <a class="btn btn--small" href="https://app.silica-agent.dev" rel="noopener">Open Silica</a>
+    <a class="btn btn--small" href="#install">Install</a>
   </nav>
 </header>
 
@@ -329,8 +329,8 @@ footer .fill { margin-left: auto; max-width: 70ch; }
       <h1 id="hero-h">Ask your notes. Check every answer.</h1>
       <p class="lede">Silica answers from the notes and PDFs you give it, names the note behind every answer, and takes back any write that does not hold.</p>
       <div class="go">
-        <a class="btn" href="https://app.silica-agent.dev" rel="noopener">Open Silica <span aria-hidden="true">&rarr;</span></a>
-        <p><b>Free pilot, by invitation.</b> You sign in with a one-time code sent to your email. No password.</p>
+        <a class="btn" href="#install">Install Silica <span aria-hidden="true">&rarr;</span></a>
+        <p><b>Open source, AGPL-3.0.</b> It runs on your computer, with a provider you have a key for or a local model.</p>
       </div>
     </div>
 
@@ -489,16 +489,11 @@ footer .fill { margin-left: auto; max-width: 70ch; }
   <section class="sec wrap" id="runs" aria-labelledby="r-h">
     <div class="grid sec-head">
       <h2 id="r-h">Where it runs</h2>
-      <p>The browser is the quickest start. Silica is open source, so it also runs on your computer, inside Claude Code and inside Obsidian.</p>
+      <p>Silica is open source. It runs on your computer, inside Claude Code and inside Obsidian; a hosted pilot runs it in the browser for people invited one by one.</p>
     </div>
     <div class="grid sec-body">
       <div class="runs">
-        <article class="run">
-          <h3>In your browser <span class="mono">nothing to install</span></h3>
-          <p>Add your notes and PDFs, ask, and practise what is due. Notes, files and chats are stored on a server in the EU, in Turin.</p>
-          <div><a class="btn" href="https://app.silica-agent.dev" rel="noopener">Open Silica <span aria-hidden="true">&rarr;</span></a></div>
-        </article>
-        <article class="run">
+        <article class="run" id="install">
           <h3>On your computer <span class="mono">web app or terminal</span></h3>
           <p>Point it at any folder of Markdown files, adopted as it is. <code class="mono">silica init</code> asks where the model runs: a provider you have a key for, or a local model.</p>
           <div class="code"><pre id="c-local"><span class="pr">$ </span>uv tool install "silica-agent[gui,mcp]"
@@ -516,6 +511,11 @@ footer .fill { margin-left: auto; max-width: 70ch; }
           <h3>In Obsidian <span class="mono">Silica Bridge</span></h3>
           <p>Note panel, ranked search, autolinking and the community graph need no model and no network. The chat panel talks to Silica on your computer, and every write lands in a changes list with a diff per file.</p>
           <p class="fine">Install from the <a href="https://github.com/kiycoh/obsidian-silica/releases/latest" rel="noopener">latest release</a>, then run <code>silica connect</code> in the vault.</p>
+        </article>
+        <article class="run">
+          <h3>In your browser <span class="mono">pilot, full</span></h3>
+          <p>Nothing to install: notes, files and chats are stored on a server in the EU, in Turin. Seats are given one by one, and all of them are taken.</p>
+          <p class="fine">To ask for one, write to <span class="addr">kiycoh@proton.me</span> with what you would use it for. Already invited? <a href="https://app.silica-agent.dev" rel="noopener">Open Silica</a>.</p>
         </article>
       </div>
     </div>
@@ -540,9 +540,9 @@ footer .fill { margin-left: auto; max-width: 70ch; }
   <section class="close wrap grid" aria-labelledby="c-h">
     <div class="close-t">
       <h2 id="c-h">Bring your own notes.</h2>
-      <p>Open Silica, add your notes and PDFs, and ask the first question.</p>
-      <a class="btn" href="https://app.silica-agent.dev" rel="noopener">Open Silica <span aria-hidden="true">&rarr;</span></a>
-      <small>Not invited yet? Write to <span class="addr">kiycoh@proton.me</span>.</small>
+      <p>Install Silica, point it at a folder of notes, and ask the first question.</p>
+      <a class="btn" href="https://github.com/kiycoh/silica-agent" rel="noopener">Get it on GitHub <span aria-hidden="true">&rarr;</span></a>
+      <small>The hosted pilot is full. To ask for a seat, write to <span class="addr">kiycoh@proton.me</span>.</small>
     </div>
     <figure class="close-fig plate">
       <div class="plate-head"><span>Fig. 5</span><b>Taf. IV</b></div>
