@@ -124,6 +124,54 @@ def served_vaults() -> list[Path]:
     return [p for _t, p in sorted(out, reverse=True)]
 
 
+# Where removable drives mount. A missing folder below one of these whose drive
+# is not mounted is a drive left in a drawer, not a deleted vault.
+_MEDIA_ROOTS = tuple(Path(p) for p in ("/run/media", "/media", "/mnt", "/Volumes"))
+
+
+def _on_absent_drive(folder: Path) -> bool:
+    """True when `folder` cannot be told apart from a drive that is not
+    plugged in: no ancestor exists at all (a Windows drive letter), or the
+    nearest one sits under a media root with no mount between it and that
+    root. A mounted drive puts a mount point on that walk, so a folder deleted
+    from it is gone, not absent."""
+    near = next((p for p in folder.parents if p.exists()), None)
+    if near is None:
+        return True
+    media = next((r for r in _MEDIA_ROOTS if near == r or r in near.parents), None)
+    if media is None:
+        return False
+    return not any(os.path.ismount(p) for p in (near, *near.parents) if media in p.parents)
+
+
+def orphan_indexes() -> tuple[list[tuple[Path, Path]], list[tuple[Path, Path]]]:
+    """(gone, absent): the index dirs whose marker names a folder that no
+    longer exists, as (index dir, folder). The marker is this tree's
+    `vault.json` or silica-core's `root.json`; a dir with neither names
+    nothing and is in neither list, because a one-way digest cannot say
+    whose it was. `absent` are the folders on a drive that is not mounted:
+    reported, never removed (`_on_absent_drive`)."""
+    from silica.kernel.recall.paths import _SILICA_HOME
+
+    gone: list[tuple[Path, Path]] = []
+    absent: list[tuple[Path, Path]] = []
+    try:
+        dirs = sorted(p for p in (_SILICA_HOME / "index").iterdir() if p.is_dir())
+    except OSError:
+        return gone, absent
+    for d in dirs:
+        named = []
+        for marker in ("vault.json", "root.json"):
+            try:
+                named.append(Path(json.loads((d / marker).read_text(encoding="utf-8"))["path"]))
+            except (OSError, ValueError, KeyError, TypeError):
+                continue  # no marker, or a torn one: it names nothing
+        if not named or any(p.exists() for p in named):
+            continue
+        (absent if any(_on_absent_drive(p) for p in named) else gone).append((d, named[0]))
+    return gone, absent
+
+
 def known_vaults() -> list[Path]:
     """Resolved vault paths, deduplicated: active first, then the memory vault,
     then adopted vaults served here (newest first), then Obsidian's adopted

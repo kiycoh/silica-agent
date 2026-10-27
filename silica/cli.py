@@ -4902,6 +4902,8 @@ Usage:
   silica connect             bridge to the Obsidian desktop app
   silica import <path>       import external material into the vault
   silica update [--check]    self-update
+  silica prune [--apply]     list the indexes of folders that are gone
+                             (--apply removes them)
   silica --version           print the version and exit
 
 Options:
@@ -4914,8 +4916,45 @@ The vault is the folder you launch in; SILICA_VAULT overrides it. Type /help
 inside the REPL for the slash-command reference."""
 
 
+def _prune_indexes(found: tuple[list[tuple[Path, Path]], list[tuple[Path, Path]]], *, apply: bool) -> int:
+    """`silica prune`: list the index dirs whose folder is gone, remove them
+    with `apply`. Not only indexes: a dir also keeps that vault's quiz log,
+    study offers and change ledger (changes.db), which describe notes gone
+    with the folder. A vault that was moved rather than deleted already left
+    them behind, since the dir is keyed by path; that is why the listing is
+    the default and removal needs `apply` (orphan_indexes)."""
+    import shutil
+    from rich.markup import escape
+
+    gone, absent = found
+    for d, folder in absent:
+        CONSOLE.print(f"  kept      [dim]{d.name}[/]  {escape(str(folder))} (its drive is not mounted)")
+    if not gone:
+        CONSOLE.print("  no index belongs to a folder that is gone")
+        return 0
+    sizes = [sum(f.stat().st_size for f in d.rglob("*") if f.is_file()) for d, _f in gone]
+    for (d, folder), n in zip(gone, sizes):
+        CONSOLE.print(f"  {n / 2**20:6.1f} MB [dim]{d.name}[/]  {escape(str(folder))}")
+    if not apply:
+        CONSOLE.print(f"  {len(gone)} index dirs, {sum(sizes) / 2**20:.1f} MB: "
+                      "[bold]silica prune --apply[/] removes them")
+        return 0
+    freed = failed = 0
+    for (d, _folder), n in zip(gone, sizes):
+        try:
+            shutil.rmtree(d)
+            freed += n
+        except OSError as e:
+            # One dir held open or read-only must not keep the others: it is
+            # named here and the exit code says the prune was partial.
+            failed += 1
+            CONSOLE.print(f"  [yellow]not removed: {escape(str(d))} ({escape(str(e))})[/]")
+    CONSOLE.print(f"  removed {len(gone) - failed} index dirs, {freed / 2**20:.1f} MB")
+    return 1 if failed else 0
+
+
 def _dispatch_subcommand(args: list[str]) -> int | None:
-    """Handle `silica doctor` / `init` / `connect` / `import` / `update`.
+    """Handle `silica doctor` / `init` / `connect` / `import` / `update` / `prune`.
 
     Returns an exit code, or None when no subcommand matched (→ REPL).
     Lazy imports keep REPL startup unchanged. Module attributes (not `from`
@@ -4937,6 +4976,9 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
     if args[:1] == ["update"]:
         import silica.update as update_mod
         return update_mod.update(check_only="--check" in args[1:])
+    if args[:1] == ["prune"]:
+        from silica.kernel.recall.vault_registry import orphan_indexes
+        return _prune_indexes(orphan_indexes(), apply="--apply" in args[1:])
     if args[:1] == ["import"]:
         # Dispatch runs before main()'s setup (like connect below) — the
         # vault has to be selected here or CONFIG.vault_path is whatever the
