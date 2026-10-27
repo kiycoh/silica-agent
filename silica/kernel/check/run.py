@@ -79,9 +79,9 @@ CACHE_DIR = ".silica/checks"
 NOTE_CHARS = 4000
 # All of one judge call's passages together: four at NOTE_CHARS, about the
 # 8 x 1,800 = 14,400 the released check could already send. On ADR-0134's
-# gate (2026-10-27) its calls ran at a median of 14,800 characters and Jev's
-# 188 requests took 0.38 s median, 0.46 s p95, none unanswered (decide.py's
-# budget is 3 s). Cited notes are kept first, then the
+# gate (2026-10-27) its calls ran at a median of 13,976 characters (4,796
+# before) and Jev's 94 fresh requests took 0.37 s median, 0.67 s p95, none
+# unanswered (decide.py's budget is 3 s). Cited notes are kept first, then the
 # search and the dense leg in turn by rank: dropping the dense neighbours
 # first cost two faithful blocks their source to lower lexical hits, one a
 # "passo" (stride) block read against gradient descent's step.
@@ -128,8 +128,8 @@ def _excerpt(note: pl.Note, lines: list[int] | None = None) -> tuple[int, str]:
     those the block's search hits landed in (`lines`, best first), then the
     rest from the top while they fit, joined in the note's own order. A
     hit's own section can rank low or not at all for the block that needs
-    it: the SOM note's neighbourhood formula sits in a section the search
-    never returned for the block that misstates it (2026-10-27)."""
+    it: the SOM note's neighbourhood formula sits in a section outside the
+    top 40 hits of the block that misstates it (2026-10-27)."""
     skip = blk.body_start(note.text)
     body = _body(note)
     if len(body) <= NOTE_CHARS:
