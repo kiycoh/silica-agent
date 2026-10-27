@@ -75,6 +75,17 @@ def test_cloze_blanks_the_head_term_and_keeps_the_answer_out_of_the_cue(vault):
     assert it["source"]["line"] > 0
 
 
+def test_a_cloze_that_leaves_no_words_around_its_blank_is_not_asked(vault):
+    # a bold label alone on its line ("**Oggetti matematici**:") blanked to
+    # "____:" has nothing to cue the recall; the next claim is asked instead
+    vault.note("ML/Oggetti.md", "# Oggetti\n\n**Oggetti matematici**:[^L]\n\n"
+               "Un **tensore** generalizza vettori e matrici a più dimensioni.[^L]\n\n## Sources\n[^L]: [[sources/Lezione 11]]\n")
+    it = items.cloze("ML/Oggetti.md")
+    assert it is None or it["q"] != "Fill the blank: ____:"
+    if it is not None:
+        assert len(it["q"].replace("____", "").split()) >= 4   # "Fill the blank:" plus the cue's words
+
+
 def test_structure_reads_a_relations_bullet_in_either_direction(vault):
     got = items.structure("ML/Margine geometrico.md")
     assert got["kind"] == "structure" and got["level"] == 3

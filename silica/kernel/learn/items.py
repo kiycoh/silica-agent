@@ -524,6 +524,11 @@ def cloze(path: str, skip: set[str] | None = None, point: dict | None = None) ->
         q = re.sub(re.escape(term), BLANK, sentence, count=1, flags=re.I)
         if BLANK not in q:
             continue
+        # the words around the blank are the cue: "**Oggetti matematici**:"
+        # blanked to "____:" asked a reader to recall a heading from nothing
+        # (seen as a retest, 2026-10-27); three words is the least that cues
+        if len(re.findall(r"\w+", q.replace(BLANK, ""))) < 3:
+            continue
         source = {"leaf": c["leaf"], "line": no if c.get("self") else c["line"]}
         if c.get("self"):
             source["self"] = True
