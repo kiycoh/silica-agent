@@ -13,6 +13,8 @@ from types import FrameType
 
 import atexit
 import collections
+import contextlib
+import contextvars
 import json
 import logging
 import os
@@ -590,6 +592,43 @@ def meter_totals() -> tuple[int, int, int, int]:
     return calls, prompt, completion, cached
 
 
+# A scope a caller names, counted apart from the call-sites (ADR-0135 point
+# 8): a Learn session or a step's reading adds its own calls, tokens and
+# dollars, so two of them running at once never read each other's calls, as
+# a difference of two `meter_totals` readings would. `usd` stays None until a
+# call carries a cost: a local model's session costs nothing it can say.
+_SCOPE: contextvars.ContextVar[dict | None] = contextvars.ContextVar("silica_meter_scope", default=None)
+_SCOPE_LOCK = threading.Lock()   # a reading's sections add from four threads at once
+
+
+def new_meter() -> dict:
+    return {"calls": 0, "prompt": 0, "completion": 0, "usd": None}
+
+
+@contextlib.contextmanager
+def meter_scope(counter: dict | None):
+    """Count every call made inside the block into `counter` (None counts
+    nowhere). A thread started inside does not inherit it: enter the scope
+    in that thread's own work, as the reading's `ask` wrapper does."""
+    token = _SCOPE.set(counter)
+    try:
+        yield counter
+    finally:
+        _SCOPE.reset(token)
+
+
+def _scope_record(prompt: int, completion: int, cost) -> None:
+    counter = _SCOPE.get()
+    if counter is None:
+        return
+    with _SCOPE_LOCK:
+        counter["calls"] = counter.get("calls", 0) + 1
+        counter["prompt"] = counter.get("prompt", 0) + prompt
+        counter["completion"] = counter.get("completion", 0) + completion
+        if cost is not None:
+            counter["usd"] = (counter.get("usd") or 0.0) + float(cost)
+
+
 def _meter_site() -> str:
     f: FrameType | None = sys._getframe(2)  # skip _meter_site + _meter_record
     while f is not None:
@@ -793,6 +832,7 @@ class LLMResponse:
             emit("llm_call", site=site, model=self.request.get("model"), prompt=prompt,
                  cached=cached, completion=completion, finish=self.finish_reason,
                  usd=float(cost) if cost is not None else None)
+            _scope_record(prompt, completion, cost)
 
 
 def _split_arg_objects(cid: str, name: str, arg_str: str) -> list[tuple[str, dict, str]]:

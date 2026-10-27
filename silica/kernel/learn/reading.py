@@ -762,6 +762,9 @@ def job_status(plan_path: str, step: int) -> dict | None:
     state = rec.get("state")
     out = {"state": state, "done": prog.get("done", 0), "total": prog.get("total", 0),
            "error": rec.get("error", ""), "started": rec.get("started")}
+    from silica.agent import llm
+
+    out["meter"] = dict(rec.get("meter") or llm.new_meter()) if llm._METER_ON else None
     if state == "done":
         out.update(path=rec.get("result_path", ""), marked=rec.get("marked", 0))
     elif state != "running":
@@ -775,6 +778,7 @@ def start(plan_path: str, step: int, ask=None) -> dict:
     """Write the reading in a thread; one job a step at a time."""
     import uuid
 
+    from silica.agent import llm
     from silica.config import CONFIG
 
     with _JOBS_LOCK:
@@ -790,7 +794,7 @@ def start(plan_path: str, step: int, ask=None) -> dict:
                "source": {"path": plan_path, "name": f"{Path(plan_path).stem}, step {step + 1}"},
                "vault": str(CONFIG.vault_path or ""), "session": None, "drop": "", "state": "running",
                "created": now, "started": now, "finished": None, "error": "", "dismissed": False,
-               "progress": {"done": 0, "total": 0}}
+               "progress": {"done": 0, "total": 0}, "meter": llm.new_meter()}
         _write_job(rec)
 
     def update(**fields) -> None:
@@ -798,9 +802,18 @@ def start(plan_path: str, step: int, ask=None) -> dict:
             rec.update(fields)
             _write_job(rec)
 
+    base = ask or _ask
+
+    def metered(*args, **kwargs):
+        # every model call of the reading goes through `ask`, on the job's
+        # thread and on the sections' pool threads alike: the scope is entered
+        # here, in the thread that makes the call (ADR-0135 point 8)
+        with llm.meter_scope(rec["meter"]):
+            return base(*args, **kwargs)
+
     def run():
         try:
-            res = write_reading(plan_path, step, ask=ask, progress=lambda done, total: update(
+            res = write_reading(plan_path, step, ask=metered, progress=lambda done, total: update(
                 progress={"done": done, "total": total}))
             update(state="done", result_path=res["path"], marked=res["marked"], finished=time.time())
         except Exception as exc:

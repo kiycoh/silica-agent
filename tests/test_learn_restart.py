@@ -47,6 +47,31 @@ def test_a_session_comes_back_after_a_restart_where_it_was(client):
     assert c.get("/learn/session", params={"id": s["id"]}).status_code == 404
 
 
+def test_the_receipt_says_what_the_session_cost_only_where_calls_are_metered(client, monkeypatch):
+    from silica.agent import llm
+    from silica.ui.web import learn_routes
+
+    c, _ = client
+    monkeypatch.setattr(llm, "_METER_ON", False)
+    s = _start(c, plan="Plans/ML.md")
+    assert c.post("/learn/close", json={"id": s["id"]}).json()["meter"] is None   # a laptop: no line, never 0
+
+    import collections
+
+    monkeypatch.setattr(llm, "_METER_ON", True)
+    monkeypatch.setattr(llm, "emit", lambda *a, **k: None)
+    monkeypatch.setattr(llm, "_meter", collections.defaultdict(lambda: [0, 0, 0, 0]))
+    monkeypatch.setattr(llm, "_meter_totals", [0, 0, 0, 0])
+    s = _start(c, plan="Plans/ML.md")
+    # a grade call made inside the session's scope, as /learn/answer makes it
+    with learn_routes._metered(learn_routes._LIVE):
+        llm.LLMResponse(text="x", usage={"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.002})
+    learn_routes._save()
+    learn_routes._reset()                     # the count survives the restart with the session
+    rc = c.post("/learn/close", json={"id": s["id"]}).json()
+    assert rc["meter"]["calls"] == 1 and rc["meter"]["prompt"] == 100 and rc["meter"]["usd"] == 0.002
+
+
 def test_the_file_keeps_ints_and_sets_and_a_damaged_one_starts_empty(client):
     from silica.ui.web import learn_routes
 

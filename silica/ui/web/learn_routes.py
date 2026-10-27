@@ -94,6 +94,21 @@ def _save() -> None:
         logger.warning("learn: the live session was not saved", exc_info=True)
 
 
+def _metered(s: dict):
+    """The session's own count of its model calls (ADR-0135 point 8)."""
+    from silica.agent import llm
+
+    return llm.meter_scope(s.setdefault("meter", llm.new_meter()))
+
+
+def _meter_shown(s: dict) -> dict | None:
+    """What the session cost, or None where nothing is metered: a laptop
+    without SILICA_TOKEN_METER counts nothing, and a zero would be false."""
+    from silica.agent import llm
+
+    return dict(s.get("meter") or llm.new_meter()) if llm._METER_ON else None
+
+
 def _drop_file(s: dict) -> None:
     _live_file(s.get("vault")).unlink(missing_ok=True)
 
@@ -752,7 +767,11 @@ def start_session(payload: dict):
                               deadline=plan.get("by") if plan else None)
         if plan is not None:
             plans.assign_objectives(plan, picked["items"])
-    built = items.build_session(picked["items"], picked["backfill"], n=n)
+    from silica.agent import llm
+
+    meter = llm.new_meter()
+    with llm.meter_scope(meter):
+        built = items.build_session(picked["items"], picked["backfill"], n=n)
     if teach:
         # build_session sizes a note's items on its asks, not on n
         built = built[:1]
@@ -762,7 +781,7 @@ def start_session(payload: dict):
     _LIVE = {"id": sid, "plan": plan["path"] if plan else "", "note": note, "origin": origin, "objectives": objectives,
              "reach": plan["reach_level"] if plan else 4, "n": n, "items": built, "verdicts": {}, "recorded": {},
              "skipped": set(), "teach": {}, "started": _now(), "before": {}, "revisit": revisit or [],
-             "mode": "teach" if teach else "questions", "vault": str(CONFIG.vault_path or "")}
+             "mode": "teach" if teach else "questions", "vault": str(CONFIG.vault_path or ""), "meter": meter}
     _save()
     short = None
     if len(built) < n:
@@ -865,7 +884,8 @@ def answer(payload: dict):
         v.update(grade=None, correct=None, rating=None, feedback_line="", rubric_notes="",
                  needs_self_grade=True, skip=False)
     else:
-        v = grade.grade(it, production=production, conf=conf, hints=hints, told=told, spoken=modality == "voice")
+        with _metered(s):
+            v = grade.grade(it, production=production, conf=conf, hints=hints, told=told, spoken=modality == "voice")
     v.update(conf=conf, hints=hints, told=told, production=production, modality=modality)
     s["verdicts"][it["i"]] = v
     s["skipped"].discard(it["i"])
@@ -1040,7 +1060,8 @@ def aid(payload: dict):
     if it["i"] not in done:
         v = s["verdicts"].get(it["i"]) or {}
         try:
-            text = offer.learn_aid(it, esc["why"], v.get("production", ""), esc.get("prereq"))
+            with _metered(s):
+                text = offer.learn_aid(it, esc["why"], v.get("production", ""), esc.get("prereq"))
         except Exception as exc:
             raise HTTPException(502, f"the model did not answer: {exc}")
         if not text:
@@ -1081,7 +1102,8 @@ def teach(payload: dict):
         st["transcript"].append({"role": "reader", "text": reply})
     if st["turn"] >= grade.TEACH_TURNS:
         claims = [c["text"] for c in items.claims_of(it["path"])][:12]
-        v = grade.teach_summary(it, st["transcript"], claims)
+        with _metered(s):
+            v = grade.teach_summary(it, st["transcript"], claims)
         v.update(conf=None, hints=0, told=False, production="\n".join(t["text"] for t in st["transcript"] if t["role"] == "reader"))
         it["kind"], it["level"], it["objective"] = "teach", 3, "explain"
         s["verdicts"][it["i"]] = v
@@ -1093,7 +1115,8 @@ def teach(payload: dict):
         concepts = []
     if not concepts:
         concepts = [it.get("title", "")] + [h for h in items.headings_of(items.read_note(it["path"]))[1:4]]
-    q = grade.teach_question(it, st["transcript"], concepts)
+    with _metered(s):
+        q = grade.teach_question(it, st["transcript"], concepts)
     st["transcript"].append({"role": "student", "text": q})
     st["turn"] += 1
     _save()
@@ -1217,6 +1240,7 @@ def _receipt(s: dict) -> dict:
         },
         "followup": {"points": open_points, "questions": len(open_points), "minutes": _minutes(len(open_points))} if s.get("note") and open_points else None,
         "empty": not recorded and not s["verdicts"],
+        "meter": _meter_shown(s),
         # the same count Today prints: every note with a card below the desired retention
         "next": _next_line(rows), "due_left": sum(1 for r in learner.view().values()
                                                   if r["R"] is not None and r["R"] < DUE_R),
