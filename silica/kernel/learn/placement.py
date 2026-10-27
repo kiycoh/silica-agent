@@ -32,28 +32,47 @@ def _ordered(paths: list[str]) -> list[str]:
     return [r["path"] for r in learner._topological(rows, prereqs, lambda r: place[r["path"]])]
 
 
+def step_paths(plan: dict, notes: dict | None = None) -> list[list[str]]:
+    """Each step's note paths, in the step's order, as reading.step_notes
+    gives them, with the vault's metadata read once: resolve_title alone reads
+    it on every call, 0.08 s a title, which made a 241-note plan's page 27 s
+    slower (measured 2026-10-27)."""
+    from silica.kernel.learn import plans
+    from silica.kernel.report import learner
+
+    notes = notes if notes is not None else learner._notes_meta(plans._vault())
+    out = []
+    for step in plan.get("steps") or []:
+        seen: list[str] = []
+        for title in step.get("notes") or []:
+            path = plans.resolve_title(title, notes)
+            if path and path not in seen:
+                seen.append(path)
+        out.append(seen)
+    return out
+
+
 def kind_for(plan: dict) -> str:
     """`apply` where the plan asks for it, else `explain`: a placement asks
     for use, not recall, because recall is what a reader who skimmed has."""
     return "apply" if "apply" in (plan.get("objectives") or []) else "explain"
 
 
-def candidates(plan: dict) -> list[dict]:
+def candidates(plan: dict, view: dict | None = None, steps: list[list[str]] | None = None) -> list[dict]:
     """The rows to build, step by step, each tagged with its step and rank
     (0 the deepest note, 1 the middle one). A note already taken by an
     earlier step is not asked twice; a note the learner view does not hold
     (a lecture spine, a note outside the material) is not asked at all."""
-    from silica.kernel.learn import reading
     from silica.kernel.learn.items import LEVEL_OF
     from silica.kernel.report import learner
 
-    view = learner.view()
+    view = learner.view() if view is None else view
+    steps = step_paths(plan) if steps is None else steps
     kind = kind_for(plan)
     out: list[dict] = []
     taken: set[str] = set()
-    for step in range(min(MAX_STEPS, len(plan.get("steps") or []))):
-        paths = [p for _t, p in reading.step_notes(plan, step)
-                 if learner.key_of(p) in view and p not in taken]
+    for step in range(min(MAX_STEPS, len(steps))):
+        paths = [p for p in steps[step] if learner.key_of(p) in view and p not in taken]
         if not paths:
             continue
         order = _ordered(paths)
@@ -73,18 +92,15 @@ def met_unaided(entry: dict) -> bool:
     return bool(entry.get("correct") and not entry.get("hints") and not entry.get("told"))
 
 
-def placed_steps(plan: dict, entries: list[dict]) -> list[int]:
+def placed_steps(plan: dict, entries: list[dict], steps: list[list[str]] | None = None) -> list[int]:
     """The steps a placement placed: a deepest-note answer met without help,
     on a note that still belongs to that step. Derived from the ledger on
     every read, so a step the plan no longer has, or a note moved out of it,
     places nothing."""
-    from silica.kernel.learn import reading
-
     by_path = {(e.get("path"), e.get("step")) for e in entries
                if e.get("origin") == ORIGIN and e.get("plan") == plan.get("path")
                and e.get("rank") == 0 and met_unaided(e)}
-    out = []
-    for step in range(len(plan.get("steps") or [])):
-        if any((p, step) in by_path for _t, p in reading.step_notes(plan, step)):
-            out.append(step)
-    return out
+    if not by_path:
+        return []   # no placement answer met: no step to look up
+    steps = step_paths(plan) if steps is None else steps
+    return [i for i, paths in enumerate(steps) if any((p, i) in by_path for p in paths)]

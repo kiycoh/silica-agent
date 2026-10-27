@@ -1094,18 +1094,19 @@ def _retest(s: dict, it: dict, entry: dict) -> dict | None:
     if it["kind"] not in MECHANICAL:
         made = items.build_session([{**row, "kind": "cloze", "level": LEVEL_OF["cloze"]}], [], n=1)
         if made:
-            return _append_retest(s, made[0])
+            return _append_retest(s, made[0], it["kind"])
     kind = "explain" if it["kind"] in ("cloze", "recall", "predict") else "recall"
     threading.Thread(target=_generate_retest, args=(s, {**row, "kind": kind, "level": LEVEL_OF[kind]}, it["kind"]),
                      daemon=True, name="learn-retest").start()
     return None
 
 
-def _append_retest(s: dict, new: dict) -> dict:
+def _append_retest(s: dict, new: dict, missed_kind: str) -> dict:
     from silica.kernel.learn import items
 
     with _ITEMS_LOCK:
-        s["items"].append({**new, "retest": True, "pool": "retest", "i": len(s["items"]) + 1})
+        s["items"].append({**new, "retest": True, "missed_kind": missed_kind, "pool": "retest",
+                           "i": len(s["items"]) + 1})
         return items.cue_payload(s["items"])[-1]
 
 
@@ -1123,20 +1124,21 @@ def _generate_retest(s: dict, row: dict, missed_kind: str) -> None:
         return
     # the fallback can land on the kind just missed: that is no retest
     if made and made[0]["kind"] != missed_kind and _LIVE is s:
-        _append_retest(s, made[0])
+        _append_retest(s, made[0], missed_kind)
         _save()
 
 
 def _placed_notes(plan: dict) -> set[str]:
     """The notes of the steps a placement placed, which a plan session
     takes after every other first attempt."""
-    from silica.kernel.learn import placement, reading
+    from silica.kernel.learn import placement
     from silica.kernel.report import quiz
 
-    out: set[str] = set()
-    for step in placement.placed_steps(plan, quiz.entries()):
-        out.update(p for _t, p in reading.step_notes(plan, step))
-    return out
+    entries = quiz.entries()
+    if not any(e.get("origin") == placement.ORIGIN for e in entries):
+        return set()   # never placed: no step's notes to resolve
+    steps = placement.step_paths(plan)
+    return {p for s in placement.placed_steps(plan, entries, steps) for p in steps[s]}
 
 
 def _escalate(s: dict, it: dict) -> dict | None:
@@ -1289,6 +1291,7 @@ def _receipt(s: dict) -> dict:
                   else "first attempt" if it["kind"] == "predict" else "")
         rows.append({
             "i": it["i"], "path": it["path"], "title": it.get("title", ""), "kind": it["kind"], "level": it["level"],
+            "retest": bool(it.get("retest")),
             "level_label": mastery.DEPTH_LABEL.get(it["level"]), "q": it.get("q", ""),
             "objective": it.get("objective") or obj.of_kind(it["kind"]), "point": it.get("point"),
             "correct": rec["entry"]["correct"] if rec else None, "marker": marker, "conf": v.get("conf"),
@@ -1524,6 +1527,7 @@ def receipt(id: str):
         o = obj.of_entry(e)
         status = "met" if (e.get("correct") and not e.get("hints") and not e.get("told")) else "assisted" if e.get("correct") else "missed"
         rows.append({"path": e["path"], "title": e["path"].rsplit("/", 1)[-1].removesuffix(".md"), "kind": e.get("kind", ""),
+                     "retest": bool(e.get("retest")),
                      "level": e.get("level"), "level_label": mastery.DEPTH_LABEL.get(e.get("level") or 0), "q": e.get("q", ""),
                      "objective": o, "objective_label": obj.LABEL[o], "point": {"i": e["point"]} if e.get("point") else None,
                      "correct": e.get("correct"), "conf": e.get("conf"), "rating": r, "rating_name": RATING_NAME[r],
@@ -1576,9 +1580,6 @@ def plan_detail(path: str):
     view = learner.view(_entries_override=entries)
     rep = plans.plan_report(p, entries=entries, view=view)
     rep["open_session"] = bool(_LIVE and _LIVE["plan"] == p["path"])
-    from silica.kernel.learn import placement
-
-    rep["placed"] = placement.placed_steps(p, entries)
     rep["live_info"] = _live_info() if rep["open_session"] else None
     now = _now()
     scoped = set(rep["paths"])

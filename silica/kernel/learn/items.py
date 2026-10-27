@@ -672,7 +672,7 @@ def hint_rungs(path: str) -> list[tuple[str, str]]:
 
 
 _CUE_KEYS = ("i", "path", "title", "kind", "level", "q", "hints", "source", "stale", "pair", "endpoints",
-             "objective", "point")
+             "objective", "point", "placement", "retest", "missed_kind")
 
 
 def cue_payload(picked: list[dict]) -> list[dict]:

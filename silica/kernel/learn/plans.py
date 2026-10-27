@@ -2051,6 +2051,48 @@ _STEP_MARKS_RE = re.compile(r"\s*\((?:≈|ref)\)|\s·\s(?:weight\s\d+(?:[.,]\d+)
                             r"|by meaning, [^·]*?)(?=\s·|$)")
 
 
+def _placed_of(plan: dict, paths: list[str], objectives: list[str], entries: list[dict],
+               since: str | None, step_paths: list[list[str]]) -> dict | None:
+    """The steps a placement placed (ADR-0135 point 3), their notes in the
+    plan, and how many of those notes have not met every objective."""
+    from silica.kernel.learn import mastery, placement
+
+    steps = placement.placed_steps(plan, entries, step_paths) if plan.get("steps") else []
+    if not steps:
+        return None
+    inside = set(paths)
+    notes = sorted({p for s in steps for p in step_paths[s]} & inside)
+    held = mastery.objectives_met(notes, objectives, entries, since=since)
+    still = [p for p in notes if not all(held[p][o]["met"] for o in objectives)]
+    return {"steps": steps, "notes": len(notes), "open": len(still)}
+
+
+def _placed_said(plan: dict, placed: dict | None, paced: bool) -> dict | None:
+    if not placed:
+        return None
+    labels = "; ".join(_step_label(plan["steps"][s]) for s in placed["steps"][:3])
+    more = f" and {len(placed['steps']) - 3} more" if len(placed["steps"]) > 3 else ""
+    n = len(placed["steps"])
+    say = (f"{n} step{'s' if n != 1 else ''} placed by what you already know ({labels}{more}, "
+           f"{placed['notes']} note{'s' if placed['notes'] != 1 else ''}): asked after the other steps"
+           + (" and left out of these figures." if paced else "."))
+    return {**placed, "say": say}
+
+
+def _placement_offer(plan: dict, entries: list[dict], view: dict | None,
+                     step_paths: list[list[str]]) -> dict | None:
+    """What the plan page's offer says: how many questions a placement asks
+    now, and when this plan was last placed."""
+    from silica.kernel.learn import placement
+
+    if not plan.get("steps"):
+        return None
+    n = len(placement.candidates(plan, view=view, steps=step_paths))
+    last = max((str(e.get("ts") or "") for e in entries
+                if e.get("origin") == placement.ORIGIN and e.get("plan") == plan.get("path")), default="")
+    return {"questions": n, "last": last[:10] or None} if n else None
+
+
 def _step_label(step: dict) -> str:
     """A step's name: its label before the colon, or its notes when it has
     none, without the markers a plan note writes on it."""
@@ -2200,6 +2242,10 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
     relations = _relations_in(paths, items)
     root = mastery.node_readings(paths, view, entries, since, objectives)
     below = len(paths) - root["all_met"]
+    from silica.kernel.learn import placement
+
+    step_paths = placement.step_paths(plan, notes) if plan.get("steps") else []
+    placed = _placed_of(plan, paths, objectives, entries, since, step_paths)
     cal = mastery.calibration(entries, paths)
     frontier = scoped["frontier"]
     nxt = None
@@ -2222,7 +2268,11 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
         "misconceptions": mastery.misconceptions(paths, entries),
         "suggestions": mastery.suggestions(entries, paths),
         "calibration": cal, "grader": mastery.grader_agreement(entries, paths),
-        "pace": pace_of(plan, below, entries=entries), "cycles": cycles_among(paths),
+        # a placed step's open notes are left out of the workload (ADR-0135 point 3)
+        "pace": (pace := pace_of(plan, below - (placed["open"] if placed else 0), entries=entries)),
+        "placed": _placed_said(plan, placed, pace is not None),
+        "placement": _placement_offer(plan, entries, view, step_paths),
+        "cycles": cycles_among(paths),
         "budget": budget(plan, passed=passed), "assessment": plan.get("assessment") or [], "hours": plan.get("hours"),
         "today": today_line(plan, passed),
         "assessment_set": plan.get("assessment_set", False), "guide": plan.get("guide", ""),

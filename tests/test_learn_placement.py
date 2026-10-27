@@ -63,7 +63,10 @@ def test_the_walk_drops_the_second_question_of_a_placed_step_and_placed_is_deriv
     lines = [json.loads(ln) for ln in (tmp_path / "quiz.jsonl").read_text().splitlines()]
     assert [(e["origin"], e["step"], e["rank"]) for e in lines] == [("placement", 0, 0), ("placement", 1, 0)]
     assert not any(mastery.eligible(e) for e in lines)           # a pretest: out of calibration
-    assert c.get("/learn/plan", params={"path": "Plans/Due.md"}).json()["placed"] == [0]
+    rep = c.get("/learn/plan", params={"path": "Plans/Due.md"}).json()
+    assert rep["placed"]["steps"] == [0] and rep["placed"]["notes"] == 2
+    assert rep["placed"]["say"].startswith("1 step placed by what you already know (Neuroni, 2 notes)")
+    assert rep["placement"]["questions"] == 4 and rep["placement"]["last"]
     rc = c.post("/learn/close", json={"id": s["id"]}).json()
     assert len(rc["items"]) == 3                                 # the dropped question was never asked
 

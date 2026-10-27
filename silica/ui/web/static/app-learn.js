@@ -906,11 +906,19 @@ function lrRenderPlanDetail(right, p) {
   const open = lrBtn("ghost box", "Open plan note", () => openNote(p.path));
   const edit = lrBtn("ghost box", "Edit plan", () => lrGo({ view: "edit", plan: p.path }));
   const go = !live && !closed ? lrBtn(p.complete ? "ghost box" : "lr-send", "Continue plan", () => learnStartSession({ plan: p.path, n })) : null;
+  // the placement (ADR-0135 point 3): an offer beside Continue, never a step before it
+  const check = !live && !closed && p.placement?.questions
+    ? lrBtn("ghost box", "Check what I already know", () => learnStartSession({ plan: p.path, placement: true })) : null;
   const done = p.complete && !closed ? lrBtn(live ? "ghost box" : "lr-send", "Mark completed", async () => { await lrPost("/learn/plan/close", { path: p.path }); lrData = null; lrPlan = null; loadLearn(true); }) : null;
   const reopen = closed ? lrBtn("ghost box", "Reopen", async () => { await lrPost("/learn/plan/close", { path: p.path, reopen: true }); lrData = null; lrPlan = null; loadLearn(true); }) : null;
   const head = lrHead(closed ? `Plan · completed ${lrDate(p.completed)}` : "Plan", p.name,
     live ? "a new session waits for this one to end" : !closed ? `${lrPlural(n, "question")} · about ${Math.max(1, Math.round(n * 1.3))} min` : "",
-    [open, edit, reopen, go, done]);
+    [open, edit, reopen, go, check, done]);
+  if (check) {
+    const q = p.placement.questions;
+    head.appendChild(lrEl("p", "lr-help", `Up to 2 questions a step, ${q} in all, about ${Math.max(1, Math.round(q * 1.3))} min. `
+      + "A step you know comes after the others; nothing is passed for you." + (p.placement.last ? ` Last checked ${lrDate(p.placement.last)}.` : "")));
+  }
   const goal = lrEl("p", "goal");
   goal.append(`Across ${p.scope === "workspace" ? "the workspace " : ""}${lrTargetShown(p)}, ${lrPlural(r.coverage[1], "note")}: `);
   p.objectives.forEach((o, i) => { goal.appendChild(lrEl("b", null, LR_OBJ[o]?.toLowerCase() || o)); goal.append(i < p.objectives.length - 2 ? ", " : i === p.objectives.length - 2 ? ", and " : "."); });
@@ -932,6 +940,7 @@ function lrRenderPlanDetail(right, p) {
   }
   // exceptions are written; a default is not (ADR-0061 §3)
   if (p.pace?.say) head.appendChild(lrEl("p", "lr-help", p.pace.say));
+  if (p.placed?.say) head.appendChild(lrEl("p", "lr-help", p.placed.say));
   if (p.today?.say) {
     // today's row of the calendar, and how far the first step not done lies
     // behind the calendar drawn when the plan was made (ADR-0131 amendment)
@@ -1122,8 +1131,14 @@ function lrPlanTree(p) {
     const ex = [];
     if (node.gap) ex.push("not in the vault");
     if (step?.passed) ex.push("passed");
+    const placed = stepIdx >= 0 && p.placed?.steps?.includes(stepIdx);
+    if (placed) ex.push("placed");
     if (rd.due) ex.push(`${rd.due} to review`);
-    if (ex.length) th0.appendChild(lrEl("span", "m", ex.join(" · ")));
+    if (ex.length) {
+      const m = lrEl("span", "m", ex.join(" · "));
+      if (placed) m.title = "placed: met without help on its deepest note in a placement";
+      th0.appendChild(m);
+    }
     tr.appendChild(th0);
     const pr = lrEl("td", "pr");
     if (!node.gap) {
@@ -2495,6 +2510,7 @@ async function learnStartSession(opts = {}) {
   if (opts.scope) body.scope = opts.scope;
   if (opts.step !== undefined) body.step = opts.step;
   if (opts.teach) body.teach = true;
+  if (opts.placement) body.placement = true;
   lrStarting = true;
   $("#learn-loading").hidden = false;
   $("#learn-loading").querySelector(".fl-msg").textContent = "Picking and writing the questions.";
@@ -2523,12 +2539,22 @@ function lrItem() { return lrSession.items[lrSession.cur]; }
 
 // The eyebrow names the objective and the point; the path is the crumb and
 // the hold estimate is the receipt's (ADR-0061 §18).
+// A retest's eyebrow names the kind it was missed as (ADR-0135 point 4).
+const LR_KIND_A = { cloze: "a fill-in", recall: "a recall question", explain: "an explanation", apply: "an application",
+  structure: "a relation question", contrast: "a comparison", predict: "a prediction", transfer: "a transfer question",
+  teach: "a teach-back", contradiction: "a disagreement" };
 function lrEyebrow(it) {
+  if (it.retest) return `Asked again · you missed it as ${LR_KIND_A[it.missed_kind] || "another question"}`;
   const pt = it.point;
   const parts = [LR_OBJ[it.objective] || `${it.kind}${it.level ? " · " + (LR_LEVEL[it.level] || it.level) : ""}`];
   if (pt?.i) parts.push(lrA(pt.kind || "point") + (pt.heading ? `, under ${pt.heading}` : ""));
   else if (pt) parts.push("a relation");
   if (it.stale) parts.push("edited since last practised");
+  if (it.placement && lrSession) {
+    // its place among the placement's steps, not the plan's step number
+    const steps = [...new Set(lrSession.items.filter((x) => x.placement).map((x) => x.placement.step))].sort((a, b) => a - b);
+    parts.push(`step ${steps.indexOf(it.placement.step) + 1} of ${steps.length}`);
+  }
   return parts.join(" · ");
 }
 
@@ -3064,7 +3090,10 @@ function lrReveal(sheet, it, v) {
   confirm.setAttribute("aria-disabled", chosen ? "false" : "true");
   confirm.title = s.results[it.i] ? "" : "records the rating shown, then moves on";
   rate.appendChild(confirm);
-  if (s.results[it.i]?.momentum) rate.appendChild(lrEl("p", "lr-momentum", s.results[it.i].momentum));
+  const res = s.results[it.i];
+  if (res?.drop?.length) rate.appendChild(lrEl("p", "lr-momentum", "You know this step: its second question is dropped."));
+  if (res && it.retest) rate.appendChild(lrEl("p", "lr-momentum", "Asked minutes after the miss: this answer does not move when the note comes back, nor an objective."));
+  else if (res?.momentum) rate.appendChild(lrEl("p", "lr-momentum", res.momentum));
   sheet.appendChild(rate);
   if (s.results[it.i]?.escalate) sheet.appendChild(lrAidBox(it, s.results[it.i].escalate));
 }
@@ -3153,7 +3182,8 @@ async function lrConfirm() {
   } catch (e) { if (lrGone(e)) return; notify("not recorded: " + e.message); if (btn) btn.disabled = false; return; }
   finally { s.confirming = false; }
   // a milestone line, or the aid a third miss calls for, reads before moving on
-  if (s.results[it.i].momentum || s.results[it.i].escalate) { lrRender(); return; }
+  const said = s.results[it.i];
+  if (said.momentum || said.escalate || said.drop?.length || it.retest) { lrRender(); return; }
   lrNext();
 }
 
@@ -3250,29 +3280,35 @@ const lrStatusMark = (st) => (st === "met" ? "full" : st === "assisted" ? "half"
 function lrMissedList(wrap, r) {
   const byPoint = !!r.points?.length;
   const pts = byPoint ? r.points.filter((p) => p.status !== "met") : [];
-  const items = byPoint ? [] : r.items.filter((x) => ["missed", "assisted", "skipped"].includes(x.status));
+  // a retest is told on its missed question's row, never a row of its own (ADR-0135 point 4)
+  const again = new Map(r.items.filter((x) => x.retest).map((x) => [x.path, x.status === "met" ? "met" : "missed"]));
+  const items = byPoint ? [] : r.items.filter((x) => !x.retest && ["missed", "assisted", "skipped"].includes(x.status));
   const n = pts.length + items.length;
   // a skip is not a miss (ADR-0061): it is listed, and the head does not count it
   const missedN = [...pts, ...items].filter((x) => x.status !== "skipped").length;
   const skippedN = n - missedN;
   const sec = lrEl("section", "lr-missed");
-  sec.appendChild(lrEl("h2", null, missedN ? `You missed ${lrPlural(missedN, byPoint ? "point" : "question")}` : "Nothing missed"));
+  const metAgain = items.filter((x) => x.status !== "skipped").every((x) => again.get(x.path) === "met");
+  sec.appendChild(lrEl("h2", null, missedN ? `You missed ${lrPlural(missedN, byPoint ? "point" : "question")}`
+    + (metAgain ? (missedN === 1 ? ", and met it when it came back" : ", and met them when they came back") : "") : "Nothing missed"));
   const t3 = r.tally3;
   const sub = [t3 ? `${t3.met} of ${t3.points} met without help` : "", t3?.assisted ? `${t3.assisted} more with help, not counted` : "",
     skippedN ? `${skippedN} skipped, not counted as wrong` : ""].filter(Boolean).join(" · ");
   if (sub) sec.appendChild(lrEl("p", "lr-help", sub));
+  if (again.size) sec.appendChild(lrEl("p", "lr-help", `Asked again before the end: ${[...again.values()].filter((v) => v === "met").length} of ${again.size} met`));
   for (const p of pts) {
     const it = r.items.find((x) => x.point?.i === p.i && x.span?.line) || r.items.find((x) => x.point?.i === p.i);
     sec.appendChild(lrMissedRow(p.status, p.heading ? `${p.kind}, under ${p.heading}` : p.kind, r.note, it?.span, lrStem(r.note)));
   }
   // the note's name, not items.title_of's first heading (a section in this vault)
-  for (const x of items) sec.appendChild(lrMissedRow(x.status, x.q ? lrPlain(x.q) : lrStem(x.path), x.path, x.span, lrStem(x.path)));
+  for (const x of items) sec.appendChild(lrMissedRow(x.status, x.q ? lrPlain(x.q) : lrStem(x.path), x.path, x.span, lrStem(x.path), again.get(x.path)));
   wrap.appendChild(sec);
-  const paths = [...new Set(items.filter((x) => x.status !== "skipped").map((x) => x.path))];
+  // a note met when it came back has left Missed: it is not asked again from here
+  const paths = [...new Set(items.filter((x) => x.status !== "skipped" && again.get(x.path) !== "met").map((x) => x.path))];
   return { n, paths };
 }
 
-function lrMissedRow(status, what, path, span, title) {
+function lrMissedRow(status, what, path, span, title, again) {
   const row = lrEl("div", "lr-mrow");
   const t = lrEl("div", "t");
   t.append(lrMark(lrStatusMark(status), ""), lrEl("span", null, what));
@@ -3285,7 +3321,9 @@ function lrMissedRow(status, what, path, span, title) {
   const acts = lrEl("div", "acts");
   const read = lrBtn("lr-link", inSource ? "Read it in the source" : "Read it in the note", () => openNote(file, span?.line));
   read.setAttribute("aria-label", `Read ${inSource ? lrStem(file) : title}${span?.line ? ` at line ${span.line}` : ""}`);
-  acts.append(read, lrEl("span", "lr-help", [LR_STATUS_WORD[status], LR_COMES_BACK[status]].filter(Boolean).join(" · ")));
+  const back = again === "met" ? ["asked again, met", "comes back when it falls due"]
+    : again === "missed" ? ["asked again, missed", LR_COMES_BACK[status]] : [LR_COMES_BACK[status]];
+  acts.append(read, lrEl("span", "lr-help", [LR_STATUS_WORD[status], ...back].filter(Boolean).join(" · ")));
   row.appendChild(acts);
   return row;
 }
@@ -3308,6 +3346,15 @@ function lrNetMoves(moved, all = false) {
     else { const y = { ...x }; by.set(k, y); out.push(y); }
   }
   return all ? out : out.filter((x) => x.from !== x.to);
+}
+
+// What the session cost (ADR-0135 point 8), only where calls are metered: a
+// laptop without the meter has no line, never a zero.
+function lrMeterSay(m) {
+  if (!m || !m.calls) return "";
+  const k = ((m.prompt || 0) + (m.completion || 0)) / 1000;
+  const usd = m.usd != null ? `, $${m.usd.toFixed(4)}` : "";
+  return ` ${lrPlural(m.calls, "model call")}, ${k.toFixed(1)}k tokens${usd} for this session.`;
 }
 
 function lrRenderReceipt(body) {
@@ -3483,7 +3530,7 @@ function lrRenderReceipt(body) {
   });
   wrap.appendChild(discs);
   wrap.appendChild(lrEl("p", "lr-help", r.recorded
-    ? `${lrPlural(r.recorded, "answer")} recorded in the ledger.` + (r.plan_line ? ` The plan's session line was written under ## Sessions in ${r.plan}; it can be reverted.` : r.plan_error ? ` ${r.plan_error}` : "")
+    ? `${lrPlural(r.recorded, "answer")} recorded in the ledger.` + lrMeterSay(r.meter) + (r.plan_line ? ` The plan's session line was written under ## Sessions in ${r.plan}; it can be reverted.` : r.plan_error ? ` ${r.plan_error}` : "")
     : "Nothing was recorded."));
   body.appendChild(wrap);
 }
