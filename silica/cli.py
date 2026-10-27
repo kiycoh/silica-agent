@@ -2631,25 +2631,11 @@ def _pick_target_folder(md_files: list[str]) -> str:
     from pathlib import Path
 
     from silica.agent.llm import call_llm
-    from silica.driver import DRIVER
 
     from silica.kernel.vault_manifest import active_inbox_dir
 
     inbox = active_inbox_dir() or "Inbox"
-    # Note parents (any depth) PLUS the shallow tree of folders that hold
-    # anything at all. A research library is folders of PDFs: censusing note
-    # parents alone showed the model an EMPTY list, whereupon it echoed back the
-    # inbox subfolder the source sat in and VALIDATE rejected all 31 ops.
-    folders = {
-        str(Path(r.path or r.name).parent)
-        for r in DRIVER.list_files("")
-    } | _shallow_folders(CONFIG.vault_path)
-    listed = sorted(
-        f for f in folders - {".", inbox}
-        if not f.startswith(f"{inbox}/")
-        and not any(part.startswith(".") or part.casefold() in _CENSUS_SKIP
-                    for part in Path(f).parts)
-    )
+    listed = _listed_folders(inbox)
     # read_source_text, not DRIVER.read_note: a .txt inbox source (draft
     # filing's ep180 case) must be auto-targetable too.
     from silica.kernel.forms import read_source_text
@@ -2660,16 +2646,10 @@ def _pick_target_folder(md_files: list[str]) -> str:
         "content into a knowledge vault. Reply with ONLY the folder path on one "
         "line, no quotes. Prefer an existing folder; invent a sensible new path "
         "only if nothing fits.\n\n"
-        "Existing folders:\n" + (
-            "\n".join(f"- {f}" for f in listed[:200]) if listed
-            # Say it, never leave the list blank: on a fresh vault the model
-            # spent its whole reply on "nothing follows 'Existing folders:'"
-            # before guessing (473 completion tokens for two words, 2026-08-23).
-            else "(no folders yet: this vault holds only its inbox, so name a "
-                 "sensible new top-level folder)"
+        "Existing folders:\n" + _folders_listing(listed)
         # The file's name, not its inbox path: shown `Inbox/machine_learning/
         # Lezione 1.md`, a Qwen3.5-9B answered `machine_learning` (2026-10-12).
-        ) + f"\n\nContent excerpt ({Path(md_files[0]).name}):\n{excerpt}"
+        + f"\n\nContent excerpt ({Path(md_files[0]).name}):\n{excerpt}"
     )
     # reasoning=False: the answer is one line, and a hybrid model left to think
     # spent all 2048 tokens on its trace and answered "" (Qwen3.5-9B on
@@ -2680,6 +2660,46 @@ def _pick_target_folder(md_files: list[str]) -> str:
     pick = next((ln for ln in lines if ln), "")
     if not pick:
         raise ValueError("empty folder pick")
+    return _resolve_pick(pick, listed, inbox)
+
+
+def _listed_folders(inbox: str) -> list[str]:
+    """The folders a pick is shown as existing: never the inbox, a dot-folder
+    or a census-skipped one."""
+    from pathlib import Path
+
+    from silica.driver import DRIVER
+
+    # Note parents (any depth) PLUS the shallow tree of folders that hold
+    # anything at all. A research library is folders of PDFs: censusing note
+    # parents alone showed the model an EMPTY list, whereupon it echoed back the
+    # inbox subfolder the source sat in and VALIDATE rejected all 31 ops.
+    folders = {
+        str(Path(r.path or r.name).parent)
+        for r in DRIVER.list_files("")
+    } | _shallow_folders(CONFIG.vault_path)
+    return sorted(
+        f for f in folders - {".", inbox}
+        if not f.startswith(f"{inbox}/")
+        and not any(part.startswith(".") or part.casefold() in _CENSUS_SKIP
+                    for part in Path(f).parts)
+    )
+
+
+def _folders_listing(listed: list[str]) -> str:
+    if listed:
+        return "\n".join(f"- {f}" for f in listed[:200])
+    # Say it, never leave the list blank: on a fresh vault the model spent its
+    # whole reply on "nothing follows 'Existing folders:'" before guessing (473
+    # completion tokens for two words, 2026-08-23).
+    return ("(no folders yet: this vault holds only its inbox, so name a "
+            "sensible new top-level folder)")
+
+
+def _resolve_pick(pick: str, listed: list[str], inbox: str) -> str:
+    """A model's folder answer as a vault folder, or ValueError."""
+    from pathlib import Path
+
     # Same rule VALIDATE applies to every op, asked once here instead of once
     # per rejected op an hour of LLM calls later.
     from silica.kernel.recall.paths import contain_in_vault, is_inbox_path
@@ -2713,6 +2733,116 @@ def _pick_target_folder(md_files: list[str]) -> str:
     if not norm or (in_inbox and norm not in listed) or is_inbox_path(f"{norm}/x.md"):
         raise ValueError(f"folder pick {pick!r} lands in the inbox")
     return norm
+
+
+def _pick_batch_folders(briefs: list[tuple[str, str]]) -> dict[int, str]:
+    """A folder for each unit of a /nucleate batch, from ONE call that sees
+    every unit (ADR-0133). `briefs` are (name, text) per unit; the result maps
+    a unit's index to its folder.
+
+    Picked one at a time, the first unit's folder was an existing folder by the
+    second pick: six papers on four subjects all went to `machine-learning`, the
+    folder the first one invented (2026-10-26). A unit whose line is missing,
+    unreadable or lands in the inbox is left out, and the caller picks for it
+    alone.
+    """
+    from silica.agent.llm import call_llm
+    from silica.kernel.vault_manifest import active_inbox_dir
+
+    inbox = active_inbox_dir() or "Inbox"
+    listed = _listed_folders(inbox)
+    # shortcut: 24,000 characters of briefs in all, 300 to 1500 per unit: 74
+    # books come to ~6k tokens beside the folder list, far under the 64k
+    # context. Past 80 units the floor grows the prompt past that sum; split
+    # the batch into calls if a batch over 200 units ever appears.
+    per = max(300, min(1500, 24000 // max(1, len(briefs))))
+    sources = "\n\n".join(f"[{i}] {name}\n{text[:per]}".rstrip()
+                          for i, (name, text) in enumerate(briefs, 1))
+    prompt = (
+        "Pick a destination folder in a knowledge vault for each source below; "
+        "the sources are nucleated together. Group them by subject, broad "
+        "enough that sources which build on one another or share a field's "
+        "subarea land together: most folders should hold two or more of these "
+        "sources, and a source that shares nothing with the others gets a "
+        "folder of its own. One folder for all of them is right only when they "
+        "all share one subject. A folder names a subject, never one source: no "
+        "folder named after a source's title. The folders form one tree: one "
+        "name and one place for each field. Reuse an existing folder when its "
+        "subject is the source's subject; otherwise name a new one, at the top "
+        "level or inside an existing folder (Parent/Subject). The last part of "
+        "a path titles the folder's hub note, so it names the subject on its "
+        "own: `Organic Chemistry/Reaction Mechanisms`, not `Organic "
+        "Chemistry/Mechanisms`.\n"
+        "Reply with a first line `Subjects: <folder>; <folder>; ...`, then one "
+        "line per source, `<number>: <folder path>`, and nothing else.\n\n"
+        "Existing folders:\n" + _folders_listing(listed) + "\n\nSources:\n\n" + sources
+    )
+    # reasoning=False as in _pick_target_folder; ~12 tokens per answer line.
+    # temperature=0: at the default, two calls on the same six papers grouped
+    # them as four folders and as six (2026-10-27).
+    resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}],
+                    max_tokens=2048 + 16 * len(briefs), temperature=0, reasoning=False)
+    picks: dict[int, str] = {}
+    known = list(listed)
+    for line in (resp.text or "").splitlines():
+        m = re.match(r"\s*(?:[-*]\s*)?[\[(]?(\d+)[\])]?\s*[:.\-]?\s*(.+)", line)
+        if not m:
+            continue
+        i = int(m.group(1)) - 1
+        if not 0 <= i < len(briefs) or i in picks:
+            continue
+        pick = m.group(2).strip().strip('"`*').rstrip("/")
+        try:
+            picks[i] = _resolve_pick(pick, known, inbox)
+        except ValueError:
+            continue
+        # A new folder joins the list, so the same subject spelt two ways in
+        # one reply ("NLP", "nlp") lands in one folder.
+        if picks[i] not in known:
+            known.append(picks[i])
+    return picks
+
+
+def _unit_brief(label: str, mfs: list[str]) -> tuple[str, str]:
+    """A converted unit as the batch pick reads it: its name and its first
+    content segment. A references chunk would brief a paper by its
+    bibliography."""
+    from pathlib import Path
+
+    from silica.kernel.forms import read_source_text
+    from silica.kernel.write import frontmatter
+    from silica.sources.convert import is_skippable_chunk
+
+    first = next((f for f in mfs if not is_skippable_chunk(f)), mfs[0])
+    try:
+        body = frontmatter.split(read_source_text(first))[2]
+    except Exception:
+        # The Coordinator reports an unreadable file; here the name alone still
+        # places the unit.
+        body = ""
+    return label or Path(first).name, body.strip()
+
+
+def _pending_brief(src: str) -> tuple[str, str]:
+    """A unit not yet converted: its file name, and the PDF's own Title and
+    Author when it carries them (117 of 260 PDFs of the paper library do,
+    2026-10-27). Its text is minutes of OCR away, and waiting for it would stop
+    the next book converting while this one distills."""
+    from pathlib import Path
+
+    name = Path(src).name
+    if Path(src).suffix.lower() != ".pdf":
+        return name, ""
+    try:
+        from silica.sources import pdf_extract
+        from silica.sources.convert import _resolve_input
+
+        meta = pdf_extract.metadata(_resolve_input(src))
+    except Exception:
+        # A PDF that will not open is convert's to report, a few lines later;
+        # here it only goes without its title.
+        return name, ""
+    return name, " / ".join(v for k in ("Title", "Author") if (v := meta.get(k)))
 
 
 _WEB_USAGE = (
@@ -3435,9 +3565,32 @@ def _nucleate_plan_units(
 
     # Loose .md arguments distill together, exactly as before the pipeline —
     # first in line: they are ready, so the first conversion overlaps them.
+    # Converted segments among them are a unit per source, as a PDF argument
+    # is: six papers sent as their inbox folder were one unit, so one folder
+    # pick read off the first file filed all six (2026-10-26).
     if md_files:
-        ready_units.insert(0, ("", list(dict.fromkeys(md_files))))
+        ready_units[:0] = _units_by_source(list(dict.fromkeys(md_files)))
     return _NucleatePlan(ready_units, to_convert, staged, needs_agent, leaf_for)
+
+
+def _units_by_source(md_files: list[str]) -> list[tuple[str, list[str]]]:
+    """Loose files as units: the ones with no `source_file` together under
+    no label, then one unit per converted source, labelled with its name, in
+    the order each source first appears."""
+    from silica.driver import DRIVER
+    from silica.kernel.write import frontmatter
+
+    groups: dict[str, list[str]] = {}
+    for f in md_files:
+        try:
+            data, _, _ = frontmatter.split(DRIVER.read_note(f).content or "")
+            src = str((data or {}).get("source_file") or "") if isinstance(data, dict) else ""
+        except Exception:
+            src = ""  # unreadable here: the Coordinator reports it, in the loose unit
+        groups.setdefault(src, []).append(f)
+    loose = groups.pop("", [])
+    units = [("", loose)] if loose else []
+    return units + [(Path(src).stem, fs) for src, fs in groups.items()]
 
 
 def _nucleate_prepare(
@@ -3675,24 +3828,45 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
     # an auto-picked target is resolved at first dispatch, after conversion.
     convert_dest = target_dir
 
-    def _dispatch_unit(label: str, mfs: list[str]) -> str | None:
+    # Index → folder for a batch with no --target, from one call that sees
+    # every unit (ADR-0133), made before the first conversion starts.
+    picks: dict[int, str] = {}
+    if batch and not target_dir:
+        names = [Path(label or segs[0]).name for label, segs in ready_units] + [
+            Path(src).name for src in to_convert]
+        try:
+            picks = _pick_batch_folders(
+                [_unit_brief(label, segs) for label, segs in ready_units]
+                + [_pending_brief(src) for src in to_convert])
+        except Exception as exc:
+            # Each unit is then picked on its own, as before ADR-0133: a worse
+            # grouping, never a lost run.
+            logger.debug("/nucleate: batch folder pick failed (non-fatal): %s", exc)
+        if picks:
+            CONSOLE.print(f"  auto-target: {len(picks)} of {total_units} source(s) → "
+                          f"{len(set(picks.values()))} folder(s)")
+            for k, folder in sorted(picks.items()):
+                CONSOLE.print(f"    {names[k]} → [bold]{_announced_target(folder)}[/]")
+
+    def _dispatch_unit(label: str, mfs: list[str], pick: str | None = None) -> str | None:
         """Prepare and run one unit; a returned string is the agent
         fallback (unresolvable target) and ends the whole batch."""
-        nonlocal target_dir, dispatched
+        nonlocal dispatched
         mfs = _nucleate_prepare(mfs, target_dir, profile, undo_run)
         if not mfs:
             return None
 
-        if not target_dir:
-            # auto-target: one small folder-pick call, not a full agent
-            # turn; resolved once, every later unit inherits it.
+        unit_target = target_dir or pick
+        if not unit_target:
+            # auto-target: one small folder-pick call for a unit the batch
+            # call left out (or a single unit), not a full agent turn.
             try:
-                target_dir = _pick_target_folder(mfs)
-                CONSOLE.print(f"  auto-target: [bold]{_announced_target(target_dir)}[/]")
+                unit_target = _pick_target_folder(mfs)
+                CONSOLE.print(f"  auto-target: [bold]{_announced_target(unit_target)}[/]")
             except Exception as exc:
                 logger.debug("/nucleate: auto-target pick failed (non-fatal): %s", exc)
 
-        if not target_dir:
+        if not unit_target:
             # Fallback: hand the folder choice to the agent (legacy behavior).
             files_json = json.dumps(mfs)
             msg = (
@@ -3722,7 +3896,7 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
 
         head = f"{label}: " if (batch and label) else ""
         CONSOLE.print(
-            f"  {_at()}{head}nucleate: {len(mfs)} file(s) → [bold]{_announced_target(target_dir)}[/]"
+            f"  {_at()}{head}nucleate: {len(mfs)} file(s) → [bold]{_announced_target(unit_target)}[/]"
         )
         # The unit as the injector call the agent makes: the web chat drew no
         # block for it and dropped its phases, and the narration held no running
@@ -3731,7 +3905,7 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
         # frontend's. Published first: the web turn narrates the user's line on
         # the start, so the tool's beats follow the turn they belong to.
         name, call_id = "silica_run_injector", f"nucleate-{uuid.uuid4().hex[:8]}"
-        args = {"inbox_files": mfs, "target_dir": target_dir}
+        args = {"inbox_files": mfs, "target_dir": unit_target}
 
         def _tell(ev) -> None:
             BUS.publish("work/tool", ev)
@@ -3741,7 +3915,7 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
         started = _time.monotonic()
         try:
             coordinator = Coordinator(
-                inbox_files=mfs, target_dir=target_dir, hub=hub or None,
+                inbox_files=mfs, target_dir=unit_target, hub=hub or None,
                 keep_sources=keep_sources, seen_override=seen or None,
                 distill_profile=profile or None,
             )
@@ -3796,8 +3970,8 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
 
     pending = _submit(0)
     try:
-        for label, segs in ready_units:
-            msg = _dispatch_unit(label, segs)
+        for k, (label, segs) in enumerate(ready_units):
+            msg = _dispatch_unit(label, segs, picks.get(k))
             if msg:
                 return msg
         for i, src in enumerate(to_convert):
@@ -3823,7 +3997,7 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
             pending = _submit(i + 1)
             if segs:
                 before = dispatched
-                msg = _dispatch_unit(src, segs)
+                msg = _dispatch_unit(src, segs, picks.get(len(ready_units) + i))
                 if msg:
                     return msg
                 if src in leaf_for and dispatched > before:

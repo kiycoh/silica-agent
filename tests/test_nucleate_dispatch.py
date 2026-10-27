@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from silica.cli import _expand_workflow_shortcut
+# Bound at import, before conftest stubs the module attribute for every test.
+from silica.cli import _pick_batch_folders as _REAL_BATCH
 from silica.config import CONFIG
 
 
@@ -81,6 +83,189 @@ def test_nucleate_md_missing_target_uses_folder_pick(stub_coordinator, monkeypat
     assert msg == ""
     assert stub_coordinator[0]["target_dir"] == "Concepts/AI"
     assert stub_coordinator[0]["inbox_files"] == ["Inbox/a.md"]
+
+
+def _seg(src: str, body: str, extra: str = "") -> str:
+    return f'---\nsource_file: "/papers/{src}.pdf"\n{extra}---\n\n{body}\n'
+
+
+def _three_units(tmp_vault):
+    tmp_vault.note("Inbox/Adam/Adam-1-adam.md", _seg("Adam", "# Adam"))
+    tmp_vault.note("Inbox/Adam/Adam-3-appendix.md", _seg("Adam", "# Appendix"))
+    tmp_vault.note("Inbox/YOLO/YOLO-1-yolo.md", _seg("YOLO", "# YOLO"))
+    tmp_vault.note("Inbox/memo.md", "# a note of mine\n")
+
+
+_UNITS = {
+    "memo": ("Inbox/memo.md",),
+    "Adam": ("Inbox/Adam/Adam-1-adam.md", "Inbox/Adam/Adam-3-appendix.md"),
+    "YOLO": ("Inbox/YOLO/YOLO-1-yolo.md",),
+}
+
+
+def test_a_batch_picks_every_units_folder_in_one_call(stub_coordinator, monkeypatch, tmp_vault, capsys):
+    """Picked one at a time, the first paper's folder was an existing folder
+    for the next five, and all six went to `machine-learning` (2026-10-26).
+    One call sees every unit (ADR-0133). Segments of one source stay one unit;
+    loose notes with no source go together."""
+    import silica.cli as cli_mod
+
+    _three_units(tmp_vault)
+    calls: list = []
+
+    def _batch(briefs):
+        calls.append(briefs)
+        return {0: "Notes", 1: "ML/Optimization", 2: "ML/Vision"}
+
+    def _never(files):
+        raise AssertionError("a unit the batch placed is not picked again")
+
+    monkeypatch.setattr(cli_mod, "_pick_batch_folders", _batch)
+    monkeypatch.setattr(cli_mod, "_pick_target_folder", _never)
+
+    assert _expand_workflow_shortcut("/nucleate Inbox/") == ""
+    assert calls == [[("memo.md", "# a note of mine"), ("Adam", "# Adam"), ("YOLO", "# YOLO")]]
+    got = {tuple(c["inbox_files"]): c["target_dir"] for c in stub_coordinator}
+    assert got == {_UNITS["memo"]: "Notes", _UNITS["Adam"]: "ML/Optimization",
+                   _UNITS["YOLO"]: "ML/Vision"}
+    out = capsys.readouterr().out
+    assert "auto-target: 3 of 3 source(s) → 3 folder(s)" in out
+    assert "Adam → ML/Optimization" in out and "memo.md → Notes" in out
+
+
+def test_a_unit_the_batch_call_left_out_is_picked_alone(stub_coordinator, monkeypatch, tmp_vault):
+    import silica.cli as cli_mod
+
+    _three_units(tmp_vault)
+    alone: list = []
+
+    def _single(files):
+        alone.append(files[0])
+        return "Picked/Alone"
+
+    monkeypatch.setattr(cli_mod, "_pick_batch_folders", lambda briefs: {0: "Notes", 2: "ML/Vision"})
+    monkeypatch.setattr(cli_mod, "_pick_target_folder", _single)
+
+    assert _expand_workflow_shortcut("/nucleate Inbox/") == ""
+    assert alone == ["Inbox/Adam/Adam-1-adam.md"]
+    got = {tuple(c["inbox_files"]): c["target_dir"] for c in stub_coordinator}
+    assert got[_UNITS["Adam"]] == "Picked/Alone"
+    assert got[_UNITS["YOLO"]] == "ML/Vision"
+
+
+def test_a_failed_batch_call_picks_each_paper_alone(stub_coordinator, monkeypatch, tmp_vault):
+    """The conftest stub makes the batch call raise: the run goes on with the
+    pick per unit it had before ADR-0133, never a lost run."""
+    import silica.cli as cli_mod
+
+    _three_units(tmp_vault)
+    picks = {"Inbox/Adam/Adam-1-adam.md": "ML/Optimization", "Inbox/YOLO/YOLO-1-yolo.md": "ML/Vision",
+             "Inbox/memo.md": "Notes"}
+    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: picks[files[0]])
+
+    assert _expand_workflow_shortcut("/nucleate Inbox/") == ""
+    got = {tuple(c["inbox_files"]): c["target_dir"] for c in stub_coordinator}
+    assert got == {_UNITS["memo"]: "Notes", _UNITS["Adam"]: "ML/Optimization",
+                   _UNITS["YOLO"]: "ML/Vision"}
+
+
+def test_one_unit_or_a_given_target_makes_no_batch_call(stub_coordinator, monkeypatch, tmp_vault):
+    import silica.cli as cli_mod
+
+    def _never(briefs):
+        raise AssertionError("no batch call")
+
+    monkeypatch.setattr(cli_mod, "_pick_batch_folders", _never)
+    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "Concepts/AI")
+    _three_units(tmp_vault)
+    assert _expand_workflow_shortcut("/nucleate Inbox/memo.md") == ""
+    assert _expand_workflow_shortcut("/nucleate Inbox/ --target=Papers") == ""
+    assert [c["target_dir"] for c in stub_coordinator] == ["Concepts/AI"] + ["Papers"] * 3
+
+
+def test_a_pdf_not_yet_converted_takes_its_batch_pick(tmp_vault, monkeypatch, stub_coordinator):
+    import silica.cli as cli_mod
+
+    _library(tmp_vault, monkeypatch)
+    seen: list = []
+
+    def _batch(briefs):
+        seen.extend(briefs)
+        return {0: "silica/Freemasonry/Mackey", 1: "silica/Freemasonry/Memphis"}
+
+    monkeypatch.setattr(cli_mod, "_pick_batch_folders", _batch)
+
+    assert _expand_workflow_shortcut("/nucleate 04-massoneria") == ""
+    # The fixture files are not real PDFs: no metadata, the name alone.
+    assert seen == [("mackey.pdf", ""), ("memphis.pdf", "")]
+    assert [c["target_dir"] for c in stub_coordinator] == [
+        "silica/Freemasonry/Mackey", "silica/Freemasonry/Memphis"]
+
+
+def test_batch_pick_reads_one_line_per_unit(tmp_vault, monkeypatch):
+    """The reply is untrusted text: every line goes through the single pick's
+    containment and spelling rules, a bad line costs its unit only, and one
+    subject spelt two ways in a reply lands in one folder."""
+    import silica.agent.llm as llm
+
+    tmp_vault.note("Machine learning/old.md", "# old\n")
+    tmp_vault.note("Inbox/x.md", "# x\n")
+    seen: dict = {}
+
+    class _R:
+        text = ("Subjects: Machine learning; Language/NLP; Vision\n"
+                "\n1: machine_learning\n"
+                '2. "Language/NLP"\n'
+                "- 3: **language/nlp**\n"
+                "4: Inbox/Adam\n"
+                "5: ../../etc\n"
+                "9: Out/Of/Range\n"
+                "6 Vision/\n"
+                "6: Vision/Duplicate\n")
+
+    def _spy(model, messages, **kw):
+        seen["prompt"] = messages[0]["content"]
+        seen["max_tokens"] = kw.get("max_tokens")
+        return _R()
+
+    monkeypatch.setattr(llm, "call_llm", _spy)
+    briefs = [(f"paper{i}", f"text of paper {i}") for i in range(1, 7)]
+    assert _REAL_BATCH(briefs) == {0: "Machine learning", 1: "Language/NLP",
+                                   2: "Language/NLP", 5: "Vision"}
+    assert "- Machine learning" in seen["prompt"]
+    assert "[6] paper6\ntext of paper 6" in seen["prompt"]
+    assert seen["max_tokens"] == 2048 + 16 * 6
+
+
+def test_unit_brief_skips_a_references_chunk(tmp_vault):
+    from silica.cli import _unit_brief
+
+    tmp_vault.note("Inbox/P/P-1-refs.md", _seg("P", "[1] A. Author, 1999.", "boilerplate: true\n"))
+    tmp_vault.note("Inbox/P/P-2-intro.md", _seg("P", "# Intro\n\nWhat the paper is about."))
+    assert _unit_brief("P", ["Inbox/P/P-1-refs.md", "Inbox/P/P-2-intro.md"]) == (
+        "P", "# Intro\n\nWhat the paper is about.")
+
+
+def test_pending_brief_reads_a_pdfs_own_title(tmp_vault, monkeypatch):
+    """An arXiv download is named by its number; its metadata may name it."""
+    from silica.cli import _pending_brief
+    from silica.sources import pdf_extract
+
+    tmp_vault.note("Inbox/1706.03762.pdf", "%PDF-1.4\n")
+    tmp_vault.note("Inbox/notes.docx", "PK")
+    monkeypatch.setattr(pdf_extract, "metadata",
+                        lambda p: {"Title": "Attention Is All You Need", "Author": "Vaswani et al.",
+                                   "CreationDate": ""})
+    assert _pending_brief("Inbox/1706.03762.pdf") == (
+        "1706.03762.pdf", "Attention Is All You Need / Vaswani et al.")
+    assert _pending_brief("Inbox/notes.docx") == ("notes.docx", "")
+
+
+def test_a_given_target_still_takes_every_paper(stub_coordinator, tmp_vault):
+    tmp_vault.note("Inbox/Adam/Adam-1-adam.md", '---\nsource_file: "/p/Adam.pdf"\n---\n\n# Adam\n')
+    tmp_vault.note("Inbox/YOLO/YOLO-1-yolo.md", '---\nsource_file: "/p/YOLO.pdf"\n---\n\n# YOLO\n')
+    assert _expand_workflow_shortcut("/nucleate Inbox/ --target=Papers") == ""
+    assert {c["target_dir"] for c in stub_coordinator} == {"Papers"}
 
 
 def test_nucleate_folder_pick_failure_falls_back_to_agent(monkeypatch):
