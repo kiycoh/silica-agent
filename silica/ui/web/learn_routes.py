@@ -1032,6 +1032,8 @@ def _rate(payload: dict):
         entry.update(origin="placement", step=it["placement"]["step"], rank=it["placement"]["rank"])
     if it.get("retest"):
         entry["retest"] = True
+    if entry["hints"] and it.get("rungs"):
+        entry["rungs"] = it["rungs"][:entry["hints"]]   # which help, not only how much (ADR-0135 point 5)
     written = quiz.record([entry])
     after = learner.view().get(key)
     first = bool(before and before.get("attempts") == 0 and correct)

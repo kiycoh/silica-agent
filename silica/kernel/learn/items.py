@@ -644,14 +644,17 @@ def _match_heading(anchor: str, headings: list[str]) -> str | None:
 
 def hints_for(path: str) -> list[str]:
     """H2 (the prerequisites the vault knows) and H3 (the heading tree), no
-    model. Only nonempty rungs, so the budget of two counts real help.
+    model. Only nonempty rungs, so the budget of two counts real help. H1,
+    the orient rung, is the model's own and rides the item from the batch."""
+    return [text for _rung, text in hint_rungs(path)]
 
-    ponytail: hints H2 and H3 are the prerequisite names and the outline; a
-    model-written orient rung lands when the generation contract carries it.
-    """
+
+def hint_rungs(path: str) -> list[tuple[str, str]]:
+    """hints_for with each hint's rung, so a ledger line can say which ones
+    the reader saw (ADR-0135 point 5)."""
     from silica.kernel.report import learner
 
-    out: list[str] = []
+    out: list[tuple[str, str]] = []
     try:
         # keyed by the note's own case; key_of folds it, so compare folded
         key = learner.key_of(path)
@@ -660,11 +663,11 @@ def hints_for(path: str) -> list[str]:
         prereqs = []
     names = [Path(p).stem for p in prereqs][:4]
     if names:
-        out.append("Prerequisites the vault names: " + ", ".join(names) + ". What did they say?")
+        out.append(("H2", "Prerequisites the vault names: " + ", ".join(names) + ". What did they say?"))
     text = read_note(path)
     heads = [h for h in headings_of(text)[1:] if h][:8]
     if heads:
-        out.append("Outline: " + " · ".join(heads))
+        out.append(("H3", "Outline: " + " · ".join(heads)))
     return out
 
 
@@ -1061,7 +1064,10 @@ def build_session(picked: list[dict], backfill: list[dict] | None = None, n: int
             return
         it = dict(it)
         it.update({k: r[k] for k in ("pool", "stale", "pair", "R", "S", "due", "why", "folder") if k in r})
-        it["hints"] = list(it.get("hints") or []) + hints_for(r["path"])
+        own, rungs = list(it.get("hints") or []), hint_rungs(r["path"])
+        it["hints"] = own + [text for _rung, text in rungs]
+        # the page shows hints in this order, so the first `hints` rungs are the ones seen
+        it["rungs"] = ["H1"] * len(own) + [rung for rung, _text in rungs]
         it["objective"] = it.get("objective") or r.get("objective") or obj.of_kind(it["kind"])
         if not isinstance(it.get("point"), dict):
             it.pop("point", None)   # the model's POINT number is only a join key
