@@ -130,6 +130,7 @@ def session(
     scope: list[str] | None = None,
     frontier: list[str] | None = None,
     revisit: list[str] | None = None,
+    later: set[str] | None = None,
     _notes_override: dict | None = None,
     _entries_override: list | None = None,
     _pairs_override: list[tuple[str, str]] | None = None,
@@ -202,8 +203,11 @@ def session(
     gain = learner.gain_fn(entries, _store)
     due = sorted((r for r in rows.values() if r["why"] == "due"),
                  key=lambda r: (round(r["R"], 1), -gain(r), r["path"]))
+    # `later`: the notes of steps a placement placed (ADR-0135 point 3) wait
+    # behind every other first attempt, and still come when nothing else does
+    later = later or set()
     unexplored = sorted((r for r in rows.values() if r["why"] == "unexplored"),
-                        key=lambda r: (not r["ai"], -gain(r), r["path"]))
+                        key=lambda r: (r["path"] in later, not r["ai"], -gain(r), r["path"]))
 
     by_path = {r["path"]: r for r in rows.values()}
     taken: set[str] = set()

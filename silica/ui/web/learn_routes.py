@@ -51,7 +51,7 @@ LIVE_FILE = "learn-live.json"
 # JSON has no int keys and no sets: these fields are converted on the way out
 # and back, every other value is already plain JSON.
 _INT_KEYED = ("verdicts", "recorded", "teach", "aids")
-_SETS = ("skipped", "escalated")
+_SETS = ("skipped", "escalated", "dropped")
 _SAVE_LOCK = threading.Lock()
 
 
@@ -694,13 +694,21 @@ def _reading_of(path: str) -> dict | None:
 
 # ---------------------------------------------------------------- the session
 
+def _asked(s: dict) -> list[dict]:
+    """The session's items without those a placement's walk dropped: a
+    step placed on its deepest note never asks its second question."""
+    dropped = s.get("dropped") or set()
+    return [it for it in s["items"] if it["i"] not in dropped]
+
+
 def _live_info() -> dict | None:
     if not _LIVE:
         return None
     s = _LIVE
     done = set(s["recorded"]) | set(s["skipped"])
-    cur = next((it["i"] for it in s["items"] if it["i"] not in done), len(s["items"]))
-    return {"id": s["id"], "plan": s["plan"], "note": s.get("note", ""), "origin": s["origin"], "n": len(s["items"]),
+    asked = _asked(s)
+    cur = next((it["i"] for it in asked if it["i"] not in done), asked[-1]["i"] if asked else 0)
+    return {"id": s["id"], "plan": s["plan"], "note": s.get("note", ""), "origin": s["origin"], "n": len(asked),
             "cur": cur, "recorded": len(s["recorded"]), "skipped": len(s["skipped"]), "started": s["started"],
             "title": (s["items"][cur - 1]["title"] if 0 < cur <= len(s["items"]) else "")}
 
@@ -747,7 +755,18 @@ def start_session(payload: dict):
             n = reading.session_size(len(scope))
         origin = {**origin, "label": f"{plan['name']} · {plans._step_label(plan['steps'][int(str(step))])}"}
     teach = bool(payload.get("teach")) and bool(note)
-    if note:
+    # a placement (ADR-0135 point 3): asked of a plan before it starts, on offer
+    placing = plan is not None and not note and not stepped and bool(payload.get("placement"))
+    if placing and plan is not None:
+        from silica.kernel.learn import placement
+
+        rows = placement.candidates(plan)
+        if not rows:
+            raise HTTPException(400, "this plan has no step with a note to ask about")
+        picked = {"items": rows, "backfill": [], "amnesty": None, "short": None}
+        n = len(rows)
+        origin = {**origin, "label": f"{plan['name']} · placement"}
+    elif note:
         picked = _note_rows(note, payload.get("points"), objectives if plan else None)
         objectives = picked["objectives"]
         if plan is None:
@@ -763,7 +782,11 @@ def start_session(payload: dict):
 
             prefix = scope.casefold()
             scope = [p for p in learner._notes_meta(Path(CONFIG.vault_path)) if p.casefold().startswith(prefix)]
-        picked = pick.session(n=n, scope=scope, frontier=frontier, revisit=revisit,
+        later: set[str] = set()
+        if plan is not None:
+            later = _placed_notes(plan)
+            frontier = [p for p in frontier or [] if p not in later] + [p for p in frontier or [] if p in later]
+        picked = pick.session(n=n, scope=scope, frontier=frontier, revisit=revisit, later=later,
                               deadline=plan.get("by") if plan else None)
         if plan is not None:
             plans.assign_objectives(plan, picked["items"])
@@ -777,6 +800,11 @@ def start_session(payload: dict):
         built = built[:1]
     if stepped:
         built = pick.alternate_notes(built)
+    if placing:
+        tags = {r["path"]: {"step": r["step"], "rank": r["rank"]} for r in picked["items"]}
+        for it in built:
+            if it["path"] in tags:
+                it["placement"] = tags[it["path"]]
     sid = uuid.uuid4().hex
     _LIVE = {"id": sid, "plan": plan["path"] if plan else "", "note": note, "origin": origin, "objectives": objectives,
              "reach": plan["reach_level"] if plan else 4, "n": n, "items": built, "verdicts": {}, "recorded": {},
@@ -819,9 +847,11 @@ def _session_payload(s: dict, amnesty=None, short=None) -> dict:
 
     return {"id": s["id"], "plan": s["plan"], "note": s.get("note", ""), "origin": s["origin"], "n": s["n"],
             "objectives": s["objectives"], "objective_labels": [obj.LABEL[o] for o in s["objectives"]],
-            "items": items.cue_payload(s["items"]), "amnesty": amnesty, "short": short, "started": s["started"],
-            "reasons": [REASON.get("stale" if it.get("stale") else it["pool"], it["pool"]) for it in s["items"]],
-            "minutes": _minutes(len(s["items"])), "mode": s.get("mode", "questions")}
+            # numbered on the whole list, then filtered: `i` is the item's place in
+            # s["items"], which every route resolves it by
+            "items": [c for c in items.cue_payload(s["items"]) if c["i"] not in (s.get("dropped") or set())],
+            "reasons": [REASON.get("stale" if it.get("stale") else it["pool"], it["pool"]) for it in _asked(s)],
+            "minutes": _minutes(len(_asked(s))), "mode": s.get("mode", "questions")}
 
 
 @router.get("/session")
@@ -994,6 +1024,8 @@ def _rate(payload: dict):
         entry["plan"] = s["plan"]
     if it.get("endpoints"):
         entry["endpoints"] = it["endpoints"]
+    if it.get("placement"):
+        entry.update(origin="placement", step=it["placement"]["step"], rank=it["placement"]["rank"])
     written = quiz.record([entry])
     after = learner.view().get(key)
     first = bool(before and before.get("attempts") == 0 and correct)
@@ -1005,10 +1037,39 @@ def _rate(payload: dict):
         "objective": entry["objective"], "unassisted": bool(correct and not entry["hints"] and not entry["told"]),
         "escalate": None if correct else _escalate(s, it),
     }
+    drop = _walk(s, it, entry)
+    if drop:
+        result["drop"] = drop
     s["recorded"][it["i"]] = {"entry": entry, "result": result, "ts": _now()}
     s["skipped"].discard(it["i"])
     _save()
     return {**result, "duplicate": False}
+
+
+def _walk(s: dict, it: dict, entry: dict) -> list[int]:
+    """A placement's walk (ADR-0135 point 3): the deepest note met without
+    help places its step, and the step's second question is dropped."""
+    from silica.kernel.learn import placement
+
+    pl = it.get("placement")
+    if not pl or pl["rank"] != 0 or not placement.met_unaided(entry):
+        return []
+    drop = [x["i"] for x in s["items"] if (x.get("placement") or {}).get("step") == pl["step"]
+            and x["i"] != it["i"] and x["i"] not in s["recorded"]]
+    s.setdefault("dropped", set()).update(drop)
+    return drop
+
+
+def _placed_notes(plan: dict) -> set[str]:
+    """The notes of the steps a placement placed, which a plan session
+    takes after every other first attempt."""
+    from silica.kernel.learn import placement, reading
+    from silica.kernel.report import quiz
+
+    out: set[str] = set()
+    for step in placement.placed_steps(plan, quiz.entries()):
+        out.update(p for _t, p in reading.step_notes(plan, step))
+    return out
 
 
 def _escalate(s: dict, it: dict) -> dict | None:
@@ -1153,7 +1214,7 @@ def _receipt(s: dict) -> dict:
     for r in recorded:
         tally[RATING_NAME[r["entry"]["rating"]]] += 1
     rows = []
-    for it in s["items"]:
+    for it in _asked(s):
         v = s["verdicts"].get(it["i"]) or {}
         rec = s["recorded"].get(it["i"])
         marker = ("told" if v.get("told") else "assisted" if v.get("hints") else "self-assessed" if v.get("grader") == "self"
@@ -1172,7 +1233,7 @@ def _receipt(s: dict) -> dict:
         })
     for r in rows:
         r["objective_label"] = obj.LABEL.get(r["objective"], r["objective"])
-    paths = list(dict.fromkeys(it["path"] for it in s["items"]))
+    paths = list(dict.fromkeys(it["path"] for it in _asked(s)))
     prior = [e for e in entries if e.get("session") != s["id"]]
     depth_after = mastery.depth_by_path(paths, entries)
     depth_before = mastery.depth_by_path(paths, prior)
@@ -1445,6 +1506,9 @@ def plan_detail(path: str):
     view = learner.view(_entries_override=entries)
     rep = plans.plan_report(p, entries=entries, view=view)
     rep["open_session"] = bool(_LIVE and _LIVE["plan"] == p["path"])
+    from silica.kernel.learn import placement
+
+    rep["placed"] = placement.placed_steps(p, entries)
     rep["live_info"] = _live_info() if rep["open_session"] else None
     now = _now()
     scoped = set(rep["paths"])

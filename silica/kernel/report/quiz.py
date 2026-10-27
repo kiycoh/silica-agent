@@ -115,6 +115,24 @@ def _v2_fields(r: dict, rec: dict) -> None:
     ends = r.get("endpoints")
     if isinstance(ends, list) and len(ends) == 2 and all(str(x).strip() for x in ends):
         rec["endpoints"] = [str(x).strip() for x in ends]
+    # ADR-0135: a placement's line and its place in the walk (point 3), a
+    # retest (point 4), the hints shown in order (point 5), the grader's class
+    # of a miss (point 6). Each optional, so an older reader sees the line it knew.
+    origin = str(r.get("origin") or "").strip()
+    if origin:
+        rec["origin"] = origin
+    for k in ("step", "rank"):
+        v = r.get(k)
+        if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
+            rec[k] = v
+    if r.get("retest") is True:
+        rec["retest"] = True
+    rungs = r.get("rungs")
+    if isinstance(rungs, list) and rungs and all(isinstance(x, str) and x.strip() for x in rungs):
+        rec["rungs"] = [x.strip() for x in rungs]
+    miss = str(r.get("miss") or "").strip().lower()
+    if miss:
+        rec["miss"] = miss
 
 
 def entries(path: Path | None = None) -> list[dict]:

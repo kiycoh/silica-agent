@@ -3144,6 +3144,9 @@ async function lrConfirm() {
   try {
     const r = await lrPost("/learn/rate", { id: s.id, i: it.i, rating });
     s.results[it.i] = r;
+    // a placement's walk (ADR-0135 point 3): a step placed on its deepest note
+    // drops its second question, always one after the current, so `cur` holds
+    if (r.drop?.length) s.items = s.items.filter((x) => !r.drop.includes(x.i));
     if (v.needs_self_grade) v.selfRated = true;
   } catch (e) { if (lrGone(e)) return; notify("not recorded: " + e.message); if (btn) btn.disabled = false; return; }
   finally { s.confirming = false; }

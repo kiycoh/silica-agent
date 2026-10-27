@@ -216,9 +216,10 @@ def misconceptions(paths: list[str], entries: list[dict]) -> list[dict]:
 
 
 def eligible(e: dict) -> bool:
-    """D26: valid, model-graded, unassisted, non-null confidence, not a pretest."""
+    """D26: valid, model-graded, unassisted, non-null confidence, not a pretest.
+    A placement answer is a pretest too (ADR-0135 point 3): asked before study."""
     return (e.get("grader") == "model" and not int(e.get("hints") or 0) and not e.get("told")
-            and e.get("conf") in BANDS and e.get("kind") != "predict")
+            and e.get("conf") in BANDS and e.get("kind") != "predict" and e.get("origin") != "placement")
 
 
 def suggestions(entries: list[dict], paths: list[str] | None = None) -> dict:
