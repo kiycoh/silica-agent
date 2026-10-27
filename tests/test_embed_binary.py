@@ -23,9 +23,10 @@ def test_binary_roundtrip_preserves_vectors(tmp_path):
 
     s2 = EmbedStore(path=idx)
     assert s2.paths() == ["a", "b"]
-    assert s2.get_vec("a") == pytest.approx([0.1, 0.2, 0.3], abs=1e-6)
-    assert s2.get_title_vec("a") == pytest.approx([0.4, 0.5, 0.6], abs=1e-6)
-    assert s2.get_vec("b") == pytest.approx([0.7, 0.8, 0.9], abs=1e-6)
+    # float16 on disk: 11 bits of mantissa, so a relative error under 2**-11
+    assert s2.get_vec("a") == pytest.approx([0.1, 0.2, 0.3], rel=2**-11)
+    assert s2.get_title_vec("a") == pytest.approx([0.4, 0.5, 0.6], rel=2**-11)
+    assert s2.get_vec("b") == pytest.approx([0.7, 0.8, 0.9], rel=2**-11)
     assert s2.get_title_vec("b") is None  # not all notes carry a title vec
     assert s2._notes["a"]["name"] == "A"
 
@@ -37,6 +38,24 @@ def test_save_writes_binary_not_json(tmp_path):
     s.save()
     head = idx.read_bytes()[:2]
     assert head == b"PK"  # npz (zip) magic — not the legacy JSON '{'
+
+
+def test_vectors_are_float16_on_disk_and_float32_in_memory(tmp_path):
+    """Half the file; search and every reader still see float32. A value past
+    float16's range keeps its array float32 instead of turning into inf."""
+    import io
+
+    import numpy as np
+
+    idx = tmp_path / "embeddings.json"
+    s = EmbedStore(path=idx)
+    s.upsert("a", "A", [0.1] * 64, title_vec=[1e6] + [0.0] * 63)
+    s.save()
+    with np.load(io.BytesIO(idx.read_bytes()), allow_pickle=False) as z:
+        assert z["flat"].dtype == np.float16 and z["tflat"].dtype == np.float32
+    s2 = EmbedStore(path=idx)
+    assert s2._notes["a"]["vec"].dtype == np.float32
+    assert s2.get_title_vec("a")[0] == 1e6
 
 
 def test_old_json_format_auto_migrates(tmp_path):

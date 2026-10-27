@@ -134,7 +134,8 @@ def document_theme_vector(
 #
 # The index is machine-only derived state and the float vectors dominate its
 # size. Storing them as float32 binary instead of pretty-printed text floats is
-# ~4x smaller (102 MB -> ~25 MB) with a no-parse load. One self-contained npz
+# ~4x smaller (102 MB -> ~25 MB) with a no-parse load, and float16 on disk
+# (_half, 2026-10-27) halves that again. One self-contained npz
 # per save (crash-safe, per-note): all `vec`s concatenated into one flat array,
 # all `title_vec`s into another, with a small JSON `meta` blob giving each note's
 # name/ts and its slice lengths. Flat-concat (not a 2D matrix) so ragged/odd-dim
@@ -164,12 +165,24 @@ def _serialize_notes(notes: dict[str, dict[str, Any]]) -> bytes:
             m["chash"] = ch
         meta["notes"][path] = m
 
-    flat = np.concatenate(vecs) if vecs else np.zeros(0, dtype=np.float32)
-    tflat = np.concatenate(tvecs) if tvecs else np.zeros(0, dtype=np.float32)
+    flat = _half(np.concatenate(vecs) if vecs else np.zeros(0, dtype=np.float32))
+    tflat = _half(np.concatenate(tvecs) if tvecs else np.zeros(0, dtype=np.float32))
     meta_arr = np.frombuffer(orjson.dumps(meta), dtype=np.uint8)
     buf = io.BytesIO()
     np.savez(buf, flat=flat, tflat=tflat, meta=meta_arr)
     return buf.getvalue()
+
+
+def _half(a: np.ndarray) -> np.ndarray:
+    """float16 on disk, float32 again at load (_deserialize_notes): half the
+    file and half of every flush's write, with search still in float32. Not
+    the fp16 refuted in _build_matrix, which COMPUTED in half precision.
+    Measured 2026-10-27 on a 2082-note, 1024-dim store: the top-10 is the same
+    for 200/200 stored rows as queries, scores move by ~1e-4. A row beyond
+    float16's range (65504) keeps the whole array float32 rather than become
+    inf; npz records the dtype, so either reads back."""
+    h = a.astype(np.float16)
+    return h if np.isfinite(h).all() else a
 
 
 def _deserialize_notes(raw: bytes) -> dict[str, dict[str, Any]]:
@@ -177,8 +190,10 @@ def _deserialize_notes(raw: bytes) -> dict[str, dict[str, Any]]:
 
     try:
         with np.load(io.BytesIO(raw), allow_pickle=False) as z:
-            flat = z["flat"]
-            tflat = z["tflat"]
+            # float32 whatever was stored (_half): every reader and the search
+            # matrix expect it, and an index written before 2026-10-27 is float32 already.
+            flat = z["flat"].astype(np.float32, copy=False)
+            tflat = z["tflat"].astype(np.float32, copy=False)
             meta = orjson.loads(z["meta"].tobytes())
     except Exception:
         return {}
@@ -467,7 +482,7 @@ class EmbedStore(DiskSynced):
         # it and is REFUTED on speed: numpy has no half-precision BLAS, so the matvec
         # drops out of OpenBLAS into a software loop. Measured on this store:
         # matvec 0.03 ms -> 12.4 ms, mat@mat.T 10 ms -> 15.3 s. Do not retry without
-        # a BLAS that speaks fp16.
+        # a BLAS that speaks fp16. The FILE is float16 (_half): only RAM stays float32.
         # `is not None and len(v)`, never bare truthiness: rows are ndarrays
         # now, and an ndarray raises on bool(). Filtered into its own dict so
         # the reads below cannot see the None this drops.

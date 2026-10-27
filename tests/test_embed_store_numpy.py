@@ -59,7 +59,7 @@ def test_npz_roundtrip_stays_ndarray(store, tmp_path):
     entry = loaded._notes["n3.md"]
     assert isinstance(entry["vec"], np.ndarray)
     assert isinstance(entry["title_vec"], np.ndarray)
-    assert loaded.get_vec("n3.md") == pytest.approx(_vec(3), rel=1e-6)
+    assert loaded.get_vec("n3.md") == pytest.approx(_vec(3), rel=2**-11)  # float16 on disk
     assert loaded.get_content_hash("n3.md") == "h3"
 
 
