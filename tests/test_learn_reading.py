@@ -267,7 +267,6 @@ def client(step_vault, monkeypatch):
     monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", "stop"))
     monkeypatch.setattr(grade, "_llm", lambda *a, **k: ("", "stop"))
     monkeypatch.setattr(reading, "_ask", fake_ask)
-    reading._JOBS.clear()
     server._reset_session()
     learn_routes._reset()
     return TestClient(server.app, headers={"Origin": "http://testserver"})
@@ -309,3 +308,39 @@ def test_a_reading_for_a_step_that_is_not_there_is_refused(client):
     assert client.get("/learn/reading", params={"plan": "Plans/Esame.md", "step": 5}).status_code == 404
     assert client.post("/learn/reading/write", json={"plan": "Plans/Esame.md", "step": 5}).status_code == 400
     assert client.post("/learn/reading/write", json={"plan": "Plans/Nope.md", "step": 0}).status_code == 404
+
+
+# ------------------------------------------------------------------ the job survives a restart (ADR-0135 point 1)
+
+def _until_written(c):
+    for _ in range(100):
+        st = c.get("/learn/reading", params={"plan": "Plans/Esame.md", "step": 0}).json()
+        if st["job"] and st["job"]["state"] != "running":
+            return st
+        time.sleep(0.05)
+    return st
+
+
+def test_a_reading_job_is_a_record_the_chat_tray_never_lists_and_a_restart_interrupts(client):
+    from silica.ui.web import jobs
+
+    c = client
+    assert c.post("/learn/reading/write", json={"plan": "Plans/Esame.md", "step": 0}).json()["state"] in ("running", "done")
+    st = _until_written(c)
+    assert st["job"]["state"] == "done" and st["job"]["path"]
+    recs = [r for r in jobs._all() if r.get("kind") == "reading"]
+    assert len(recs) == 1 and recs[0]["plan"] == "Plans/Esame.md" and recs[0]["step"] == 0
+    assert c.get("/jobs").json()["jobs"] == []            # the chat's tray: what waits on the next message
+    assert c.post(f"/jobs/{recs[0]['id']}/retry").status_code == 409
+
+    # A process killed mid-write: the record says running and nothing runs it.
+    reading._write_job(dict(recs[0], state="running", finished=None))
+    assert c.get("/jobs/running").json()["jobs"][0]["kind"] == "reading"   # the release drain sees it
+    assert jobs.recover() == 1
+    st = c.get("/learn/reading", params={"plan": "Plans/Esame.md", "step": 0}).json()
+    assert st["job"]["state"] == "error" and st["job"]["error"] == reading.INTERRUPTED
+
+    # Writing it again replaces the stopped record: one record a step.
+    c.post("/learn/reading/write", json={"plan": "Plans/Esame.md", "step": 0})
+    assert _until_written(c)["job"]["state"] == "done"
+    assert len([r for r in jobs._all() if r.get("kind") == "reading"]) == 1

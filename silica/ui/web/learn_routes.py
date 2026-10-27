@@ -15,11 +15,13 @@ reloaded tab re-attach to the live session instead of meeting a 409.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import threading
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -39,15 +41,86 @@ SUGGESTIONS_N = 8
 # everything else as explain, so a free session still says what it looks for.
 FREE_OBJECTIVES = ["recall", "explain"]
 
-# ponytail: one live session in memory, keyed by id; a second tab replaces
-# it after `close`. Persist under .silica/ if two readers ever share a vault.
+# One live session, keyed by id; a second tab replaces it after `close`. It is
+# held in memory and in a file beside the answer ledger, written whole after
+# every change (ADR-0135 point 1): on the hosted pilot a deploy restarts the
+# tenant, and a session held only in memory died with it.
 _LIVE: dict | None = None
 _LAST: dict | None = None
+LIVE_FILE = "learn-live.json"
+# JSON has no int keys and no sets: these fields are converted on the way out
+# and back, every other value is already plain JSON.
+_INT_KEYED = ("verdicts", "recorded", "teach", "aids")
+_SETS = ("skipped", "escalated")
+_SAVE_LOCK = threading.Lock()
 
 
 def _reset() -> None:
+    """What a restart does to memory; the file stays, as it does on disk."""
     global _LIVE, _LAST
     _LIVE = _LAST = None
+
+
+def _live_file(vault: str | None = None) -> Path:
+    from silica.config import CONFIG
+    from silica.kernel.recall import paths
+
+    return paths.index_dir_for(vault or CONFIG.vault_path) / LIVE_FILE
+
+
+def _save() -> None:
+    """Write the live session whole, in the vault it was started in."""
+    s = _LIVE
+    if s is None:
+        return
+    from silica.kernel.recall.paths import atomic_write_bytes
+
+    doc = dict(s)
+    for k in _INT_KEYED:
+        if k in doc:
+            doc[k] = {str(i): v for i, v in doc[k].items()}
+    for k in _SETS:
+        if k in doc:
+            doc[k] = sorted(doc[k])
+    path = _live_file(s.get("vault"))
+    try:
+        with _SAVE_LOCK:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_bytes(path, json.dumps(doc, ensure_ascii=False).encode("utf-8"), mode=0o600)
+    except OSError:
+        # Tolerated: the session goes on in memory, and the answer in hand is
+        # already in the ledger or still on the page. A failed write costs only
+        # the next restart's copy of the session.
+        logger.warning("learn: the live session was not saved", exc_info=True)
+
+
+def _drop_file(s: dict) -> None:
+    _live_file(s.get("vault")).unlink(missing_ok=True)
+
+
+def _load_live() -> None:
+    """After a restart, read the live session back from its file. A router
+    dependency, so every Learn route sees the session memory lost."""
+    global _LIVE
+    if _LIVE is not None:
+        return
+    try:
+        doc = json.loads(_live_file().read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError):
+        # Written whole by rename, so a file that does not parse was damaged on
+        # disk or edited by hand: Learn starts without the session rather than
+        # failing every route on it, and the next start overwrites the file.
+        logger.warning("learn: the live session's file does not read", exc_info=True)
+        return
+    for k in _INT_KEYED:
+        if k in doc:
+            doc[k] = {int(i): v for i, v in doc[k].items()}
+    for k in _SETS:
+        if k in doc:
+            doc[k] = set(doc[k])
+    _LIVE = doc
 
 
 def _require_same_origin(request: Request) -> None:
@@ -56,7 +129,7 @@ def _require_same_origin(request: Request) -> None:
     check(request)
 
 
-router = APIRouter(prefix="/learn")
+router = APIRouter(prefix="/learn", dependencies=[Depends(_load_live)])
 _SAME_ORIGIN = [Depends(_require_same_origin)]
 
 
@@ -620,6 +693,7 @@ def _live_info() -> dict | None:
 @router.post("/session", dependencies=_SAME_ORIGIN)
 def start_session(payload: dict):
     global _LIVE
+    from silica.config import CONFIG
     from silica.kernel.learn import items, pick, plans
 
     if _LIVE is not None:
@@ -688,7 +762,8 @@ def start_session(payload: dict):
     _LIVE = {"id": sid, "plan": plan["path"] if plan else "", "note": note, "origin": origin, "objectives": objectives,
              "reach": plan["reach_level"] if plan else 4, "n": n, "items": built, "verdicts": {}, "recorded": {},
              "skipped": set(), "teach": {}, "started": _now(), "before": {}, "revisit": revisit or [],
-             "mode": "teach" if teach else "questions"}
+             "mode": "teach" if teach else "questions", "vault": str(CONFIG.vault_path or "")}
+    _save()
     short = None
     if len(built) < n:
         short = picked["short"] or (f"{len(built)} of {n}: the other picked notes carry no line to ask about "
@@ -794,6 +869,7 @@ def answer(payload: dict):
     v.update(conf=conf, hints=hints, told=told, production=production, modality=modality)
     s["verdicts"][it["i"]] = v
     s["skipped"].discard(it["i"])
+    _save()
     return _verdict_payload(v, it)
 
 
@@ -807,6 +883,7 @@ def skip(payload: dict):
         raise HTTPException(400, "already recorded")
     s["skipped"].add(it["i"])
     s["verdicts"].pop(it["i"], None)
+    _save()
     return {"skipped": sorted(s["skipped"])}
 
 
@@ -910,6 +987,7 @@ def _rate(payload: dict):
     }
     s["recorded"][it["i"]] = {"entry": entry, "result": result, "ts": _now()}
     s["skipped"].discard(it["i"])
+    _save()
     return {**result, "duplicate": False}
 
 
@@ -971,6 +1049,7 @@ def aid(payload: dict):
         # the chat's resolver: a name two notes share links to this item's note
         resolve, _read = answer_resolver([it["path"]])
         done[it["i"]] = {"text": text, "html": _linkify(text, resolve, remote_images=False)}
+        _save()
     return done[it["i"]]
 
 
@@ -1006,6 +1085,7 @@ def teach(payload: dict):
         v.update(conf=None, hints=0, told=False, production="\n".join(t["text"] for t in st["transcript"] if t["role"] == "reader"))
         it["kind"], it["level"], it["objective"] = "teach", 3, "explain"
         s["verdicts"][it["i"]] = v
+        _save()
         return {"turn": st["turn"], "done": True, **_verdict_payload(v, it), "summary": v.get("summary", "")}
     try:
         concepts = [c.get("concept", "") for c in (items.__dict__.get("_concepts_of") or (lambda p: []))(it["path"])]
@@ -1016,6 +1096,7 @@ def teach(payload: dict):
     q = grade.teach_question(it, st["transcript"], concepts)
     st["transcript"].append({"role": "student", "text": q})
     st["turn"] += 1
+    _save()
     return {"turn": st["turn"], "question": q, "done": False, "of": grade.TEACH_TURNS}
 
 
@@ -1265,6 +1346,7 @@ def close(payload: dict):
             logger.warning("learn: plan summary not saved (%s)", exc)
             rc["plan_line"] = None
             rc["plan_error"] = "Answers recorded; plan summary not saved"
+    _drop_file(s)
     _LAST, _LIVE = rc, None
     return rc
 

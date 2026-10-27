@@ -115,10 +115,19 @@ def _write(rec: dict) -> None:
     _publish(rec)
 
 
+def _conversion(rec: dict) -> bool:
+    """A record the chat's tray shows. Learn's readings share this directory
+    (ADR-0135 point 1) so a restart interrupts them and the release drain
+    counts them, but the tray lists what waits on the next message (ADR-0117
+    point 5), and a reading is not that: it stays in Learn's own view."""
+    return rec.get("kind", "convert") == "convert"
+
+
 def _publish(rec: dict) -> None:
     from silica.agent.bus import BUS
 
-    BUS.publish(TOPIC, public(rec))
+    if _conversion(rec):
+        BUS.publish(TOPIC, public(rec))
 
 
 def _update(job_id: str, expect: tuple[str, ...] | None = None, **fields: Any) -> dict | None:
@@ -419,7 +428,7 @@ def retry(job_id: str) -> dict:
     writes the same note names (`convert` derives them from the file), so a
     retry after a half-written run replaces, never duplicates."""
     rec = read(job_id)
-    if rec is None:
+    if rec is None or not _conversion(rec):
         raise Refused("there is no such conversion")
     if rec.get("state") not in ("failed", "interrupted"):
         raise Refused(f"{rec['source']['name']} is not stopped, so there is nothing to retry")
@@ -457,7 +466,7 @@ def dismiss(job_id: str) -> None:
     30-day prune; a job that has not ended cannot be dismissed."""
     with _LOCK:
         rec = read(job_id)
-        if rec is None:
+        if rec is None or not _conversion(rec):
             return
         if rec.get("state") in ("queued", "running"):
             raise Refused(f"{rec['source']['name']} is still converting")
@@ -521,7 +530,8 @@ def join_next(session: str) -> tuple[list[str], list[dict], str] | None:
 def listing() -> list[dict]:
     """The jobs the student has not dismissed, in this vault, oldest first."""
     vault = CONFIG.vault_path or ""
-    return [public(rec) for rec in _all() if not rec.get("dismissed") and rec.get("vault") == vault]
+    return [public(rec) for rec in _all()
+            if _conversion(rec) and not rec.get("dismissed") and rec.get("vault") == vault]
 
 
 def settled(session: str | None) -> str:

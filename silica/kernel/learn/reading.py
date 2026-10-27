@@ -707,40 +707,106 @@ def step_of_note(plan: dict, note_path: str) -> int | None:
 
 
 # ------------------------------------------------------------------ writing in the background
+#
+# A reading is a record in the conversions' jobs directory (ADR-0099, here
+# ADR-0135 point 1), written whole on every change: the server's startup
+# recovery turns a job a restart cut into `interrupted`, where an in-memory
+# job vanished and the page polled one that no longer existed. Kernel code
+# writes the record in the registry's format itself instead of importing the
+# web layer; the registry keeps these out of the chat's tray and its retry.
 
-_JOBS: dict[tuple[str, int], dict] = {}
+JOB_KIND = "reading"
+INTERRUPTED = "the server restarted while this reading was being written"
 _JOBS_LOCK = threading.Lock()
 
 
+def _jobs_dir() -> Path:
+    from silica.kernel.recall import paths
+
+    return paths._SILICA_HOME / "jobs"
+
+
+def _job_records(plan_path: str, step: int) -> list[dict]:
+    """This vault's reading jobs for one step, oldest first."""
+    from silica.config import CONFIG
+
+    vault, out = str(CONFIG.vault_path or ""), []
+    root = _jobs_dir()
+    for f in root.glob("*.json") if root.is_dir() else []:
+        try:
+            rec = json.loads(f.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue  # the registry's own reader skips such a file the same way
+        if (rec.get("kind") == JOB_KIND and rec.get("vault") == vault
+                and rec.get("plan") == plan_path and rec.get("step") == step):
+            out.append(rec)
+    return sorted(out, key=lambda r: r.get("created") or 0)
+
+
+def _write_job(rec: dict) -> None:
+    from silica.kernel.recall.paths import atomic_write_bytes
+
+    root = _jobs_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    rec["updated"] = time.time()
+    atomic_write_bytes(root / f"{rec['id']}.json", json.dumps(rec, sort_keys=True).encode("utf-8"), mode=0o600)
+
+
 def job_status(plan_path: str, step: int) -> dict | None:
-    with _JOBS_LOCK:
-        j = _JOBS.get((plan_path, step))
-        return dict(j) if j else None
+    """The step's last job as the read view knows it: running, done or error."""
+    recs = _job_records(plan_path, step)
+    if not recs:
+        return None
+    rec = recs[-1]
+    prog = rec.get("progress") or {}
+    state = rec.get("state")
+    out = {"state": state, "done": prog.get("done", 0), "total": prog.get("total", 0),
+           "error": rec.get("error", ""), "started": rec.get("started")}
+    if state == "done":
+        out.update(path=rec.get("result_path", ""), marked=rec.get("marked", 0))
+    elif state != "running":
+        # failed or interrupted: the view has one word for both, and the
+        # sentence says which
+        out.update(state="error", error=INTERRUPTED if state == "interrupted" else out["error"])
+    return out
 
 
 def start(plan_path: str, step: int, ask=None) -> dict:
     """Write the reading in a thread; one job a step at a time."""
-    key = (plan_path, step)
-    with _JOBS_LOCK:
-        j = _JOBS.get(key)
-        if j and j["state"] == "running":
-            return dict(j)
-        _JOBS[key] = {"state": "running", "done": 0, "total": 0, "error": "", "started": time.time()}
+    import uuid
 
-    def progress(done, total):
+    from silica.config import CONFIG
+
+    with _JOBS_LOCK:
+        recs = _job_records(plan_path, step)
+        if recs and recs[-1].get("state") == "running":
+            return job_status(plan_path, step) or {}
+        # one record a step: an earlier attempt, finished or stopped, goes,
+        # so a failed step never piles records up in the directory
+        for old in recs:
+            (_jobs_dir() / f"{old['id']}.json").unlink(missing_ok=True)
+        now = time.time()
+        rec = {"id": uuid.uuid4().hex[:12], "kind": JOB_KIND, "origin": "learn", "plan": plan_path, "step": step,
+               "source": {"path": plan_path, "name": f"{Path(plan_path).stem}, step {step + 1}"},
+               "vault": str(CONFIG.vault_path or ""), "session": None, "drop": "", "state": "running",
+               "created": now, "started": now, "finished": None, "error": "", "dismissed": False,
+               "progress": {"done": 0, "total": 0}}
+        _write_job(rec)
+
+    def update(**fields) -> None:
         with _JOBS_LOCK:
-            _JOBS[key].update(done=done, total=total)
+            rec.update(fields)
+            _write_job(rec)
 
     def run():
         try:
-            res = write_reading(plan_path, step, ask=ask, progress=progress)
-            with _JOBS_LOCK:
-                _JOBS[key].update(state="done", path=res["path"], marked=res["marked"])
+            res = write_reading(plan_path, step, ask=ask, progress=lambda done, total: update(
+                progress={"done": done, "total": total}))
+            update(state="done", result_path=res["path"], marked=res["marked"], finished=time.time())
         except Exception as exc:
             # The job reports the failure to the page that polls it; the
             # thread has no caller to raise to.
-            with _JOBS_LOCK:
-                _JOBS[key].update(state="error", error=str(exc)[:300])
+            update(state="failed", error=str(exc)[:300], finished=time.time())
 
     threading.Thread(target=run, daemon=True, name=f"reading-{step}").start()
     return job_status(plan_path, step) or {}
