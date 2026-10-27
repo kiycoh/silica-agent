@@ -39,6 +39,8 @@ from typing import Any
 
 import httpx
 
+from silica.config import hosted
+
 logger = logging.getLogger(__name__)
 
 # A module constant and not a setting: the request carries the tenant's key,
@@ -245,9 +247,12 @@ def spent_layer() -> UsageLimited | None:
 
 def status(model: str) -> list[dict[str, Any]]:
     """GET /limits (point 7): the window, then the week and the month, each
-    `{layer, used, resets_at}`. Empty for a model not on OpenRouter, a key with
-    no limit, or a failed read: the drawer then shows nothing."""
-    if not model.startswith("openrouter/"):
+    `{layer, used, resets_at}`. Empty off hosted, for a model not on
+    OpenRouter, a key with no limit, or a failed read: the drawer then shows
+    nothing. Off hosted because a laptop's key limit is its owner's own cap,
+    set on openrouter.ai, not an allowance Silica hands out (ADR-0122
+    amendment 2026-10-27); it also spares that laptop a read per page load."""
+    if not hosted() or not model.startswith("openrouter/"):
         return []
     try:
         data = read_key()

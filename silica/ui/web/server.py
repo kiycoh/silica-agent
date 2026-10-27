@@ -5692,7 +5692,8 @@ def limits():
     """How much of each usage limit is used and when it resets (ADR-0102
     point 7): `{"limits": [{layer, used, resets_at}]}`, the window first, then
     the week and the month, `used` a share from 0 to 1 and never a currency. An
-    empty list where the key has no limit or the model is not on OpenRouter.
+    empty list off hosted, where the key has no limit or the model is not on
+    OpenRouter.
     Sync, so FastAPI runs the read of the key on its thread pool."""
     from silica.agent.usage_limits import status
 

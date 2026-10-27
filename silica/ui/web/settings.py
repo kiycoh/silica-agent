@@ -135,7 +135,7 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 models_of="chat"),
             Row("SILICA_PROVIDER", "provider", "provider", "enum",
                 "where that model is served", options=providers),
-            Row("context", "", "context", "readonly", "tokens this model can hold"),
+            Row("context", "", "context", "readonly", "tokens a turn is cut to"),
             Row("SILICA_SHOW_THINKING", "show_thinking", "thinking", "toggle",
                 "show the model's reasoning as it works"),
         ),
@@ -246,8 +246,6 @@ def _hosted_row(row: Row) -> Row:
         # Read-only by kind, not only by host.env's lock: a host.env that lost
         # the line would otherwise let a POST pick any model on the tenant's key.
         return replace(row, kind="readonly", models_of="")
-    if row.key == "context":
-        return replace(row, help="tokens a turn is cut to")
     if row.key == "SILICA_STT_BROWSER":
         # "cloud" sends the audio to the browser's vendor, a recipient the
         # privacy notice does not name.
@@ -330,16 +328,12 @@ def _shown(row: Row) -> str:
 def _readonly_value(key: str) -> str:
     if key == "SILICA_MODEL":
         return CONFIG.model or ""
-    if key == "context" and hosted():
-        # model_limits misses the dated id the host pins ((0, 0) for
-        # qwen3.7-flash-20260727, measured 2026-10-14), and the window a turn
-        # is actually cut to is this one.
-        return f"{CONFIG.max_context_tokens:,} tokens"
     if key == "context":
-        from silica.agent.providers import model_limits
-
-        window = model_limits(CONFIG.provider, CONFIG.model)[0] if CONFIG.model else 0
-        return f"{window:,} tokens" if window else "—"
+        # The window a turn is actually cut to, not the model's: since
+        # 2026-10-27 a laptop's SILICA_MAX_CONTEXT holds on OpenRouter too, and
+        # model_limits misses the dated id the host pins ((0, 0) for
+        # qwen3.7-flash-20260727, measured 2026-10-14).
+        return f"{CONFIG.max_context_tokens:,} tokens"
     if key == "write_dir":
         from silica.kernel.vault_manifest import get_active_manifest
 

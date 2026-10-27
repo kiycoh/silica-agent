@@ -227,7 +227,8 @@ def test_decide_is_refused_like_a_call(fake, monkeypatch):
 
 # --- what the drawer reads (point 7) -------------------------------------------
 
-def test_limits_shape_with_a_window_open(fake):
+def test_limits_shape_with_a_window_open(fake, monkeypatch):
+    monkeypatch.setenv("SILICA_HOSTED", "1")
     usage_limits.check()
     fake.body = key_record(usage=10.06, week_spend=0.4, month_spend=1.2)
     got = usage_limits.status("openrouter/qwen/qwen3.7-flash")
@@ -239,6 +240,7 @@ def test_limits_shape_with_a_window_open(fake):
 
 
 def test_limits_before_the_first_message_and_off_openrouter(fake, monkeypatch):
+    monkeypatch.setenv("SILICA_HOSTED", "1")
     fake.body = key_record(month_spend=0.3)
     assert usage_limits.status("openrouter/x/y") == [
         {"layer": "window", "used": 0.0, "resets_at": None},
@@ -251,6 +253,14 @@ def test_limits_before_the_first_message_and_off_openrouter(fake, monkeypatch):
     assert usage_limits.status("ollama/qwen3.5:9b") == [] and fake.reads == reads
 
 
+def test_a_laptop_shows_no_limits_even_with_a_capped_key(fake, monkeypatch):
+    # Regression 2026-10-27: a local key's own $20 month drew the Usage tab and
+    # the 80% line above the composer, as if it were a pilot allowance.
+    fake.body = key_record(month_spend=1.4)
+    assert usage_limits.status("openrouter/deepseek/deepseek-v4-flash-0731") == []
+    assert fake.reads == 0
+
+
 def test_the_limits_route(fake, tmp_vault, monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
@@ -258,6 +268,7 @@ def test_the_limits_route(fake, tmp_vault, monkeypatch):
     from silica.config import CONFIG
     from silica.ui.web import server
 
+    monkeypatch.setenv("SILICA_HOSTED", "1")
     monkeypatch.setattr(CONFIG, "model", "openrouter/qwen/qwen3.7-flash")
     fake.body = key_record(week_spend=0.25, month_spend=0.75)
     body = TestClient(server.app).get("/limits").json()

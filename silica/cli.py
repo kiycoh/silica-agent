@@ -4864,28 +4864,25 @@ def _autolaunch_wizard_if_unconfigured() -> None:
 def _resolve_context_budget() -> None:
     """Size the REPL context meter to the live model's window.
 
-    SILICA_MAX_CONTEXT pins the window for LOCAL providers (LM Studio, Ollama),
-    whose served window silica can't reliably introspect. Hosted providers
-    (OpenRouter) report their own context_length, so the pin is ignored there
-    and the provider's value always wins. Falls back to the static default when
-    the provider is unreachable.
-
-    Hosted, the pin wins on OpenRouter too: there it is the operator's price
-    decision, set in host.env, not a guess at the window. The pilot's endpoint
-    bills a call of 32k prompt tokens or more at 3.3x, and a 32k cap cost 62%
-    less a chat than the 1M window at equal answers
-    (docs/evaluation/context-cap-2026-10-13.md). hosted() is the unit's
-    variable, so a laptop's .env cannot shrink an OpenRouter model's window.
+    SILICA_MAX_CONTEXT, when set, is the window on every provider. Locally it
+    stands in for a served window silica can't reliably introspect (LM Studio,
+    Ollama). On OpenRouter it is a price decision, a laptop's as much as the
+    host's: a 32k cap cost 62% less a chat than the 1M window at equal answers
+    (docs/evaluation/context-cap-2026-10-13.md). Until 2026-10-27 a laptop's
+    pin was ignored on OpenRouter, so a 65536 in ~/.silica/.env ran DeepSeek
+    at 1M. Falls back to the static default when the provider is unreachable.
     """
     if not _model_configured():
         return
-    from silica.config import hosted
-    if os.getenv("SILICA_MAX_CONTEXT") and (CONFIG.provider != "openrouter" or hosted()):
+    pinned = bool(os.getenv("SILICA_MAX_CONTEXT"))
+    if pinned and CONFIG.provider != "openrouter":
         return
     from silica.agent.providers import model_limits
     window, _ = model_limits(CONFIG.provider, CONFIG.model)
     if window:
-        CONFIG.max_context_tokens = window
+        # OpenRouter's window is the one it serves, so a pin left from a larger
+        # model is cut to it instead of sending prompts the provider refuses.
+        CONFIG.max_context_tokens = min(window, CONFIG.max_context_tokens) if pinned else window
 
 
 def _ensure_servers() -> None:

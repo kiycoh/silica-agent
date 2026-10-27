@@ -6,7 +6,7 @@
 // did, where a price would move with the model. The server sends instants in
 // UTC and this file writes them in the reader's own clock, including in the
 // refusal sentence a turn's error frame carries (limitSentence below). Where
-// the key has no limit, /limits is empty and nothing here draws.
+// the key has no limit, or off hosted, /limits is empty and nothing here draws.
 
 const LIM_NAMES = { window: "5-hour window", week: "This week", month: "This month" };
 const LIM_PHRASE = { window: "this 5-hour window", week: "this week's allowance", month: "this month's allowance" };
@@ -16,7 +16,7 @@ const LIM_WARN = 0.8;
 const LIM_REFRESH_CAP_MS = 6 * 3600 * 1000;
 let limTimer = 0;
 // The last /limits read, which Settings asks before drawing its Usage tab: no
-// entries, no tab, so a local key without limits never shows one.
+// entries, no tab, so a laptop never shows one (ADR-0122 amendment 2026-10-27).
 let limitsNow = [];
 
 // The reset in words, in the reader's zone: "at 14:20" for the window, which

@@ -22,8 +22,9 @@ const ST_EXTRA = ["Zotero", "Connectors", "Skills", "Endpoints", "Diagnostics", 
 // 2026-10-22): /connectors itself still refuses on hosted.
 const ST_EXTRA_HOSTED = ["Connectors", "Skills", "About"];
 // Usage heads the extras wherever /limits has entries (ADR-0122 point 6), as
-// Claude's settings keep theirs: a hosted key always has a month, a local key
-// usually has nothing, and then there is no tab rather than an empty one.
+// Claude's settings keep theirs: a hosted key always has a month, a laptop
+// has nothing (ADR-0122 amendment 2026-10-27), and then there is no tab
+// rather than an empty one.
 const stState = { data: null, section: "Session", controls: [], uid: 0 };
 
 // One glyph per section, drawn as the rail draws its own: a 24 grid, a 1.7

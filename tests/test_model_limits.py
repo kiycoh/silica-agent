@@ -198,18 +198,30 @@ class TestCliContextBudget:
         assert CONFIG.max_context_tokens == 42000
 
     @patch("silica.agent.providers.model_limits", return_value=(1048576, 0))
-    def test_env_pin_ignored_for_openrouter(self, _limits, monkeypatch):
-        # Hosted providers report their own window — the pin (meant for local
-        # models) must not mask it. Regression: mimo-v2.5 (1M) showed 250k.
+    def test_env_pin_wins_on_openrouter_off_hosted(self, _limits, monkeypatch):
+        # Regression 2026-10-27: a laptop's 65536 ran DeepSeek V4 Flash at 1M.
+        from silica.cli import _resolve_context_budget
+        from silica.config import CONFIG
+
+        monkeypatch.delenv("SILICA_HOSTED", raising=False)
+        monkeypatch.setenv("SILICA_MAX_CONTEXT", "65536")
+        monkeypatch.setattr(CONFIG, "model", "openrouter/deepseek/deepseek-v4-flash-0731")
+        monkeypatch.setattr(CONFIG, "_provider", "openrouter")
+        monkeypatch.setattr(CONFIG, "max_context_tokens", 65536)
+        _resolve_context_budget()
+        assert CONFIG.max_context_tokens == 65536
+
+    @patch("silica.agent.providers.model_limits", return_value=(131072, 0))
+    def test_env_pin_above_the_openrouter_window_is_cut_to_it(self, _limits, monkeypatch):
         from silica.cli import _resolve_context_budget
         from silica.config import CONFIG
 
         monkeypatch.setenv("SILICA_MAX_CONTEXT", "250000")
-        monkeypatch.setattr(CONFIG, "model", "openrouter/xiaomi/mimo-v2.5")
+        monkeypatch.setattr(CONFIG, "model", "openrouter/x/y")
         monkeypatch.setattr(CONFIG, "_provider", "openrouter")
         monkeypatch.setattr(CONFIG, "max_context_tokens", 250000)
         _resolve_context_budget()
-        assert CONFIG.max_context_tokens == 1048576
+        assert CONFIG.max_context_tokens == 131072
 
     @patch("silica.agent.providers.model_limits", return_value=(1000000, 0))
     def test_env_pin_wins_on_openrouter_when_hosted(self, _limits, monkeypatch):
