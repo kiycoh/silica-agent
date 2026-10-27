@@ -432,6 +432,20 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
         j += 1
 
 
+def _segment_title(inbox_file: str) -> str | None:
+    """The `segment_title` convert writes on each segment of a split source,
+    or None: the spine is then named after the file, as before."""
+    from silica.driver import DRIVER
+    from silica.kernel.write import frontmatter
+
+    try:
+        data, _, _ = frontmatter.split(DRIVER.read_note(inbox_file).content or "")
+    except Exception:
+        return None  # an unreadable inbox file costs the title, never the chunk
+    title = str((data or {}).get("segment_title") or "").strip() if isinstance(data, dict) else ""
+    return title or None
+
+
 def _run_outline_chunk(fsm: "InjectorFSM", idx: int, chunk: dict,
                        retry_payload: dict | None, steer_context: str | None) -> dict:
     """DELEGATE for the outline lane: whole source in, distiller-shaped ops out.
@@ -468,6 +482,7 @@ def _run_outline_chunk(fsm: "InjectorFSM", idx: int, chunk: dict,
         target=fsm.target_dir, hub=fsm.hub,
         language=language,
         vault_outline=rows, outline=prior, only_titles=only, steer_context=steer_context,
+        spine_title=_segment_title(inbox_file),
     )
     if only is None:
         try:

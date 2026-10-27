@@ -545,9 +545,13 @@ def test_a_topic_meets_its_note_by_alias_gloss_initials_or_segment(vault):
     vault.note("ML/Goodfellow-20-7-12-dropout.md", '---\nsection: "(outline)"\n---\n# x\n')
     vault.note("ML/Dropout boosting.md", "# x\n")
     vault.note("ML/Sonno.md", "# x\n")
+    vault.note("ML/Goodfellow, Batch normalization.md", '---\nsection: "(outline)"\n---\n# x\n')
     meta, allowed = _meta_and_material()
     topics = ["classificazione one-class", "stride", "reti learning vector quantization",
               "reti self organizing map: proprietà e loro algoritmi", "dropout", "sonno profondo e memoria"]
+    # a spine convert named "<source>, <section>" (2026-10-26)
+    assert plans._named_otherwise("batch normalization", meta, allowed) == (
+        "ML/Goodfellow, Batch normalization.md", "segment")
     found = [plans._named_otherwise(t, meta, allowed)[0] for t in topics]
     assert [plans._named_otherwise(t, meta, allowed)[1] for t in topics] == [
         "alias", "gloss", "initials", "initials", "segment", ""]

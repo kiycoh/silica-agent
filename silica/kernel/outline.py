@@ -493,7 +493,8 @@ def _strip_byline(lead: str, title: str) -> str:
 
 def outline_ops(outline: Outline, *, target: str, hub: str | None, source_basename: str,
                 edges: list[dict], existing: dict[str, str],
-                only_titles: set[str] | None = None, lead: str = "") -> list[dict]:
+                only_titles: set[str] | None = None, lead: str = "",
+                spine_title: str | None = None) -> list[dict]:
     """Outline + edges -> raw ops in the distiller's own shape.
 
     One write per idea (section, parent = the spine note, typed relations in
@@ -502,9 +503,12 @@ def outline_ops(outline: Outline, *, target: str, hub: str | None, source_basena
     flagged with the near-title verdict format, so WRITE's settle path hands
     the pair to the dedup judge with a real loser to mark (the prototype
     merged blind and collapsed a variant into its parent).
+
+    `spine_title` is a split source's own name for this segment (convert's
+    `segment_title`); the file name is the provenance ledger's key, not a title.
     """
     tgt = target.rstrip("/")
-    spine_title = _stem(source_basename)
+    spine_title = spine_title or _stem(source_basename)
     ops: list[dict] = []
     # An idea the bodies stage left empty is not written: the claim alone was
     # enough body for VALIDATE's hard gate (==0) and the 275-char floor is
@@ -1118,7 +1122,7 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
                  language: str, vault_outline: list[dict],
                  ask: Callable[..., dict] | None = None,
                  outline: Outline | None = None, only_titles: set[str] | None = None,
-                 steer_context: str | None = None) -> dict:
+                 steer_context: str | None = None, spine_title: str | None = None) -> dict:
     """The lane's DELEGATE: source text -> {"updates", "ephemerals", "concepts", "outline", "gaps"}.
 
     `outline` + `only_titles` is the steer retry: VALIDATE rejected some
@@ -1217,7 +1221,8 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
         edges = select_edges(reply.get("edges") or [], ideas=set(outline.titles()), existing=existing,
                              spine_titles={r["title"] for r in vault_outline if r.get("spine")})
     ops = outline_ops(outline, target=target, hub=hub, source_basename=source_basename,
-                      edges=edges, existing=existing, only_titles=only_titles, lead=lead)
+                      edges=edges, existing=existing, only_titles=only_titles, lead=lead,
+                      spine_title=spine_title)
     return {
         "updates": ops, "ephemerals": [], "concepts": concept_entries(ops, src, looked_up),
         "missing_bodies": missing,

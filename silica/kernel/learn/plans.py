@@ -1544,6 +1544,8 @@ def _dense_rows(topics: list[str], row_notes: set[str]) -> dict[str, dict[str, t
 # "LVQ come estensione supervisionata" (2026-10-23).
 _ACRONYM_SPAN = (2, 4)
 _SEGMENT_SLUG_RE = re.compile(r"-\d+(?:-\d+)*-([a-z][a-z0-9-]*)$")
+# The same spine as convert names it since 2026-10-26: "<source>, <section>".
+_SEGMENT_TITLE_RE = re.compile(r", ([^,]+)$")
 
 
 def _named_otherwise(topic: str, notes: dict, allowed: set[str]) -> tuple[str | None, str]:
@@ -1558,8 +1560,8 @@ def _named_otherwise(topic: str, notes: dict, allowed: set[str]) -> tuple[str | 
     - the initials of two to four of its words as a title's word, the title
       opening on it first: "reti self organizing map" is "SOM e topologia";
     - a textbook segment's spine whose section title is the topic: "dropout"
-      is the spine of 7.12, "Goodfellow-20-7-12-dropout", whose ideas are the
-      dropout notes.
+      is the spine of 7.12, "Goodfellow-20-7-12-dropout" (or, named since
+      2026-10-26, "Goodfellow, Dropout"), whose ideas are the dropout notes.
     """
     key = " ".join(_root_words(topic))
     low = topic.strip().casefold()
@@ -1583,7 +1585,8 @@ def _named_otherwise(topic: str, notes: dict, allowed: set[str]) -> tuple[str | 
     if acr:
         return min(acr)[2], "initials"
     for p in sorted(allowed, key=len):
-        m = notes.get(p, {}).get("spine") and _SEGMENT_SLUG_RE.search(Path(p).stem.casefold())
+        stem = Path(p).stem.casefold()
+        m = notes.get(p, {}).get("spine") and (_SEGMENT_SLUG_RE.search(stem) or _SEGMENT_TITLE_RE.search(stem))
         if m and " ".join(_root_words(m.group(1).replace("-", " "))) == key:
             return p, "segment"
     return None, ""

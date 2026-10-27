@@ -1352,3 +1352,17 @@ def test_bodies_are_looked_up_by_default(monkeypatch):
     assert ol.verbatim_bodies()
     monkeypatch.setenv("SILICA_OUTLINE_BODIES", "llm")
     assert not ol.verbatim_bodies()
+
+
+def test_a_segments_spine_takes_the_title_convert_gave_it():
+    """A split source's file name is its provenance key; the spine and every
+    idea's parent take the reader's title instead (2026-10-26)."""
+    outline = ol.parse_outline(_OUTLINE_JSON)
+    for i in outline.ideas:
+        i.body = "corpo"
+    ops = ol.outline_ops(outline, target="ML", hub="H", source_basename="Adam-3-10-appendix.md",
+                         edges=[], existing={}, spine_title="Adam, Appendix")
+    spine = next(o for o in ops if o.get("section") == ol.SPINE_SECTION)
+    assert spine["path"] == "ML/Adam, Appendix.md" and spine["title"] == "Adam, Appendix"
+    assert {o["parent"] for o in ops if o is not spine} == {"Adam, Appendix"}
+    assert {o["source_basename"] for o in ops} == {"Adam-3-10-appendix.md"}   # the ledger's key

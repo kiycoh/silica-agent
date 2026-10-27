@@ -2274,3 +2274,36 @@ def test_a_single_segment_of_real_content_stays_unflagged(tmp_vault, monkeypatch
     head = _inbox_note(paths[0]).read_text(encoding="utf-8").split("\n---\n")[0]
     assert "references: true" not in head and "boilerplate: true" not in head
     assert not conv.is_skippable_chunk(paths[0])
+
+
+def test_each_segment_of_a_split_source_carries_its_readers_title(tmp_vault, monkeypatch):
+    """The spine of a segment was named after its file, the provenance key:
+    "Adam-1-adam-a-method-for-stochastic-optimization" (2026-10-26). The file
+    keeps that name; the title the outline lane gives the spine rides along."""
+    chapter = " ".join(f"w{i}" for i in range(6000))
+    big = f"# Paper: A Method\n\n{chapter}\n\n## 10 Appendix\n\n{chapter}\n"
+    monkeypatch.setattr(conv, "_via_docx", lambda src, wd: (big, wd))
+    tmp_vault.note("paper.docx", "x")
+
+    paths = conv.convert("paper.docx")
+    heads = [_inbox_note(p).read_text(encoding="utf-8").split("\n---\n")[0] for p in paths]
+    assert "-1-paper-a-method" in paths[0] and "-2-10-appendix" in paths[1]
+    assert 'segment_title: "paper"' in heads[0]
+    assert 'segment_title: "paper, Appendix"' in heads[1]
+
+
+@pytest.mark.parametrize("heading, title", [
+    ("## 5.3 Feature-based Approach with BERT", "P, Feature-based Approach with BERT"),
+    ("# A. Object Detection Baselines", "P, Object Detection Baselines"),
+    ("# A Object Detection Baselines", "P, Object Detection Baselines"),
+    ("# A Survey of Things", "P, A Survey of Things"),
+    ("# A.1 Details", "P, Details"),
+    ("# II. Related Work", "P, Related Work"),
+    ("# 10 APPENDIX", "P, Appendix"),
+    ("# BERT", "P, BERT"),
+    ('# Appendix for “BERT: Pre-training of Deep Bidirectional Transformers for Language”',
+     "P, Appendix for BERT Pre-training of Deep Bidirectional"),
+])
+def test_a_segments_title_drops_its_section_label(heading, title):
+    """Headings mineru gave six arXiv papers (2026-10-26)."""
+    assert conv._segment_title("P", f"{heading}\n\nbody\n", 2) == title

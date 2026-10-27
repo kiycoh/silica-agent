@@ -597,6 +597,39 @@ def _segment_slug(segment: str, fallback: str) -> str:
     return fallback
 
 
+# A section label ahead of a heading's words: "5.3", "10", "A.1", "II", and a
+# bare appendix letter. An "A" before a consonant is the article ("A Survey of
+# ..."), so it stays.
+_SECTION_LABEL_RE = re.compile(r"^(?:\d+(?:\.\d+)*\.?|[A-Z](?:\.\d+)+\.?|[A-Z]\.|[IVX]+\.|[B-HJ-UWYZ]|A(?=\s+[AEIOUaeiou])|[IVX]{2,})\s+")
+# What a file name cannot hold, and quotes, which a cut at 60 characters can
+# leave open ("Appendix for “BERT Pre-training of", seen 2026-10-26).
+_TITLE_UNSAFE_RE = re.compile(r'[\\/:*?"<>|#^\[\]“”„«»]')
+
+
+def _segment_title(stem: str, segment: str, index: int) -> str:
+    """The reader's name for one segment of a split source: the source's own
+    name for the first, which opens it, and "<source>, <heading>" after.
+
+    The segment's file name serves the provenance ledger and stays as it is;
+    named after it, six papers' spine notes read
+    "Adam, A Method for Stochastic Optimization-1-adam-a-method-for-stochastic-
+    optimization" in the vault and the graph (2026-10-26).
+    """
+    if index == 1:
+        return stem
+    for line in segment.splitlines():
+        if _HEADING_RE.match(line):
+            words = _SECTION_LABEL_RE.sub("", line.lstrip("#").strip())
+            words = re.sub(r"\s+", " ", _TITLE_UNSAFE_RE.sub(" ", words)).strip(" .,")
+            if words.isupper() and any(len(w) > 4 for w in words.split()):
+                words = words.capitalize()  # "APPENDIX", not an acronym like "BERT"
+            if len(words) > 60:
+                words = words[:60].rsplit(" ", 1)[0]
+            if words:
+                return f"{stem}, {words}"
+    return f"{stem}, part {index}"
+
+
 # mineru drops the space after , ; : between letters ("symmetric,and positive")
 # and the glitch flows into RECON concepts and note titles. Letters-only guard
 # keeps digits ("10,000") and LaTeX macros ("\alpha,\beta") untouched.
@@ -781,7 +814,11 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
         # an Introduction each produced `1-introduction.md`, and the second
         # one's sha256 marked the first one's notes as drifted.
         note_rel = f"{inbox}/{stem}/{stem}-{i:0{width}d}-{slug}.md"
-        DRIVER.upsert(note_rel, _flag(kind) + seg.lstrip("\n"),  # a re-convert refreshes it
+        title = _segment_title(stem, seg, i).replace("\\", "\\\\").replace('"', '\\"')
+        head = _flag(kind)
+        end = head.rindex("---\n")  # last key, so `source_file:` still opens the block
+        head = f'{head[:end]}segment_title: "{title}"\n{head[end:]}'
+        DRIVER.upsert(note_rel, head + seg.lstrip("\n"),  # a re-convert refreshes it
                       loss=Loss.STAGED)
         paths.append(note_rel)
     logger.info("PDF %s split into %d inbox segment(s)", src.name, len(segments))
