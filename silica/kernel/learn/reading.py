@@ -468,6 +468,59 @@ def spine_card(card: dict) -> dict:
             "marked": 0}
 
 
+# ------------------------------------------------------------------ a card the reader writes
+
+# More than this share of a written card's sentences found word for word in
+# its note is a copy, not a rewrite (ADR-0134 point 4).
+COPY_SHARE = 0.5
+# A sentence this short ("Sia x reale.") is not counted either way.
+COPY_MIN_WORDS = 4
+
+
+def _plain(text: str) -> str:
+    text = _ANY_WIKI_RE.sub(lambda m: (m.group(2) or m.group(1)), text or "")
+    text = re.sub(r"\*\*|\*|==|`|^\s*>\s?|^\s*[-*+]\s+|^\s*\d+[.)]\s+", "", text, flags=re.M)
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def copy_share(text: str, note_text: str) -> tuple[int, int]:
+    """(sentences of the card found word for word in the note, sentences
+    counted): links read as their text, emphasis and spacing aside."""
+    held = _plain(note_text)
+    said = [x for line in (text or "").splitlines() for x in _SENTENCE_RE.split(line)]
+    said = [_plain(x).rstrip(".;:!? ") for x in said]
+    said = [x for x in said if len(x.split()) >= COPY_MIN_WORDS]
+    return sum(1 for x in said if x in held), len(said)
+
+
+def is_copy(text: str, note_text: str) -> bool:
+    found, of = copy_share(text, note_text)
+    return of > 0 and found > COPY_SHARE * of
+
+
+def note_lede(path_or_text: str, *, is_text: bool = False) -> str:
+    """A note's central claim: its first blockquote line, the one-line lede
+    a nucleated note opens on; else its first sentence."""
+    from silica.kernel.write import frontmatter
+
+    body = frontmatter.split(path_or_text)[2] if is_text else _body(path_or_text, 20000)
+    body = re.sub(r"<!--.*?-->", " ", body, flags=re.S)
+    for ln in body.splitlines():
+        if ln.startswith(">") and ln.lstrip("> ").strip() and not ln.lstrip("> ").startswith("[!"):
+            return ln.lstrip("> ").strip()
+    prose = " ".join(ln for ln in body.splitlines() if ln.strip() and not ln.lstrip().startswith(("#", "$$", "|")))
+    return (_SENTENCE_RE.split(prose.strip()) or [""])[0]
+
+
+def holds_lede(text: str, lede: str) -> bool:
+    """The card says the note's central claim, by the flashcards' gate
+    (`artifacts._grounded`): the lede's content words and formulas are in
+    the card. A lede the gate cannot read (no content words) is held."""
+    from silica.kernel.learn import artifacts
+
+    return not artifacts._words(lede) or artifacts._grounded(lede, text or "")
+
+
 # ------------------------------------------------------------------ the note
 
 def _quote(text: str) -> str:

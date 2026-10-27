@@ -215,6 +215,33 @@ def test_a_spine_card_is_its_lede_and_points_with_no_call(step_vault):
     assert sp["points"] == ["Neurone artificiale", "Gradiente discendente"] and not sp["question"]
 
 
+# ------------------------------------------------------------------ a card the reader writes
+
+NOTE = ("---\ntype: Note\n---\n\n# Norme\n\n<!-- silica: valid_from=2026-03-03 -->\n\n"
+        "> Una norma vettoriale è una funzione che misura la lunghezza di un vettore, con proprietà di positività.\n\n"
+        "> Le norme misurano la grandezza di un vettore.\n\n"
+        "A volte serve misurare la dimensione di un vettore. Nel [[Machine learning|machine learning]] usiamo una norma. "
+        "La norma L1 è spesso preferita per favorire la sparsità. La norma L2 è detta norma euclidea.\n")
+
+
+def test_a_card_mostly_copied_from_its_note_is_a_copy_and_a_rewrite_is_not():
+    copied = ("Nel machine learning usiamo una **norma**. La norma L1 è spesso preferita per favorire la sparsità.\n"
+              "La norma L2 è detta norma euclidea. Io la uso per i vettori lunghi.")
+    assert reading.copy_share(copied, NOTE) == (3, 4) and reading.is_copy(copied, NOTE)
+    own = ("Una norma dice quanto è lungo un vettore. La L1 somma i valori assoluti e spinge verso vettori sparsi. "
+           "La norma L2 è detta norma euclidea.")
+    assert reading.copy_share(own, NOTE) == (1, 3) and not reading.is_copy(own, NOTE)
+    assert not reading.is_copy("", NOTE)
+
+
+def test_the_central_claim_is_the_first_lede_line_and_a_card_must_say_it():
+    lede = reading.note_lede(NOTE, is_text=True)
+    assert lede.startswith("Una norma vettoriale è una funzione") and lede.endswith("positività.")
+    assert reading.holds_lede("La norma vettoriale è una funzione: misura la lunghezza di un vettore, ed è positiva.", lede)
+    assert not reading.holds_lede("La norma L1 favorisce la sparsità dei pesi.", lede)
+    assert reading.note_lede("# T\n\nPrima frase del testo. Seconda frase.", is_text=True) == "Prima frase del testo."
+
+
 # ------------------------------------------------------------------ the note
 
 def test_a_reading_is_written_beside_the_plan_read_back_and_never_material(step_vault):
