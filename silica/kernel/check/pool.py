@@ -155,12 +155,16 @@ def build(checked: str, notes: dict[str, Note], keys: tuple[str, ...], write_dir
     """The notes that may be `checked`'s sources.
 
     Never: the note itself, anything under the write boundary (its copies read
-    `distilled`), Silica's own root files. Never another party's material,
-    unless the person links or names it (`named`)."""
+    `distilled`), Silica's own root files, a step's reading (ADR-0134: an
+    explanation written from the notes, Silica's or the reader's, so a
+    rewrite checked against it would be held by a summary instead of the
+    notes). Never another party's material, unless the person links or
+    names it (`named`)."""
     from silica.kernel.recall.graph_export import is_vault_artifact
 
     wd = (write_dir or "").strip("/")
     candidates = {p for p in notes if p != checked and not is_vault_artifact(p)
+                  and str(notes[p].fm.get("type") or "").strip().lower() != "reading"
                   and not (wd and (p == wd or p.startswith(wd + "/")))}
     parties = {p: values_of(notes[p], keys) for p in candidates}
     if not any(parties.values()):

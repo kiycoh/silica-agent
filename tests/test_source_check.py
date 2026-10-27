@@ -464,3 +464,14 @@ def test_the_route_takes_a_line_range_and_refuses_a_bad_one(tmp_vault, monkeypat
     done = out[-1]
     assert done["event"] == "done" and done["blocks"] == 1
     assert [f["words"] for f in done["findings"] if f["kind"] == "date not found"] == ["18 March 2026"]
+
+
+def test_a_steps_reading_is_never_a_source(firm):
+    """ADR-0134: the reader's rewrite is held by the notes, not by Silica's
+    summary of them (nor by another rewrite)."""
+    (firm / "Plans").mkdir(exist_ok=True)
+    (firm / "Plans/Reading.md").write_text("---\ntype: reading\n---\n\nNorthwind limitation runs from delivery.\n",
+                                           encoding="utf-8")
+    notes, _files = pool.walk(str(firm))
+    built = pool.build("Drafts/Opinion.md", notes, (), "silica", set())
+    assert "Plans/Reading.md" not in built.paths and "Matters/Chronology.md" in built.paths
