@@ -1175,8 +1175,9 @@ def _escalation(text: str, messages: list[dict]) -> str:
         why = learn_offer.escalation(note, chat, text, history, entries())
         if not why:
             return ""
-        # in shadow mode the record only: what would have fired, nothing shown
-        shown = learn_offer.mode() == "on"
+        # in shadow mode the record only: what would have fired, nothing shown;
+        # a shadowed reason the same in any mode (ADR-0135 point 9)
+        shown = learn_offer.mode() == "on" and not learn_offer.shadowed(why)
         learn_offer._append({"chat": chat, "note": note, "escalated": True, "why": why, "displayed": shown})
         if not shown:
             return ""

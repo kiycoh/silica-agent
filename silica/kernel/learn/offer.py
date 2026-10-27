@@ -330,6 +330,16 @@ def plan_context(text: str, plans: list[dict]) -> tuple[str, str]:
 MAX_OFFERS_PER_CHAT = 2
 DECLINE_DAYS = 7
 ESCALATE_MISSES = 3
+# A miss at confidence 90 (ADR-0135 point 9): sure and wrong is the strongest
+# signal one answer gives (LearnHarness's confidence doctrine). It ships logged
+# and never shown; it acts once 20 sessions show at least half of its fires
+# followed by another miss on the same note (`confident_readout`).
+CONFIDENT_CONF = 90
+CONFIDENT_REASON = "a miss at confidence 90"
+CONFIDENT_SHADOW = True
+# The grader's structural class (ADR-0135 point 6), read behind the same gate
+# as the picker's (pick.MISS_CLASS_READ).
+STRUCTURAL_REASON = "a wrong idea held"
 
 
 def mode() -> str:
@@ -441,7 +451,50 @@ def escalation(note: str, chat: str, text: str, history: list[str], entries: lis
                 return "two more misses after an offer went unused"
     if says_lost(text) and any(says_lost(h) for h in history):
         return "still unclear after an answer"
+    last = evs[-1] if evs else {}
+    if not last.get("correct") and last.get("miss") == "structural":
+        from silica.kernel.learn import pick
+
+        if pick.MISS_CLASS_READ:
+            return STRUCTURAL_REASON
+    if evs and not last.get("correct") and last.get("conf") == CONFIDENT_CONF:
+        return CONFIDENT_REASON
     return ""
+
+
+def shadowed(why: str) -> bool:
+    """A reason that is logged and never shown, whatever the mode."""
+    return why == CONFIDENT_REASON and CONFIDENT_SHADOW
+
+
+def confident_readout(entries: list[dict], records: list[dict] | None = None) -> dict:
+    """The shadow reason's record against the ledger (ADR-0135 point 9): its
+    fires, how many the next answer on the same note missed again, and the
+    Learn sessions it was seen in. It acts at 20 sessions and half followed."""
+    from silica.kernel.report.quiz import key
+
+    from datetime import datetime
+
+    def at(ts) -> float:
+        try:
+            return datetime.fromisoformat(str(ts)).timestamp()
+        except ValueError:
+            return float("inf")
+
+    records = _records() if records is None else records
+    fires = [r for r in records if r.get("why") == CONFIDENT_REASON]
+    ordered = sorted(entries, key=lambda e: at(e.get("ts")))
+    followed = 0
+    for r in fires:
+        # a record's time is to the second and the miss that fired it is a
+        # fraction of that second earlier: the next answer starts past it
+        since = at(r.get("ts")) + 1
+        nxt = next((e for e in ordered if key(str(e.get("path") or "")) == key(str(r.get("note") or ""))
+                    and at(e.get("ts")) >= since), None)
+        followed += bool(nxt and not nxt.get("correct"))
+    sessions = {r.get("session") for r in fires if r.get("session")}
+    return {"fires": len(fires), "followed_by_miss": followed, "sessions": len(sessions),
+            "three_miss_fires": sum(1 for r in records if r.get("why") == f"{ESCALATE_MISSES} misses in a row")}
 
 
 # The aid an escalated chat answer becomes, by the note's first shape: the
