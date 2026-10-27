@@ -116,10 +116,12 @@ def conflicts(notes: dict[str, dict]) -> list[str]:
     return out
 
 
-# The grader's class of a miss chooses the note's next kind (ADR-0135 point 6)
-# once the gate has passed on the local and the hosted model, 30 of 40 on each;
-# until then the class is written to the ledger and nothing reads it.
-MISS_CLASS_READ = False
+# The grader's class of a miss chooses the note's next kind (ADR-0135 point 6).
+# On, on both models, by the owner's call of 2026-10-27 on a gate of 29 of 40
+# local (qwen3.5-9b) and 30 of 40 hosted, against 30 asked of each: room to
+# improve, the local small model most (execution read as careless, 5 of 8).
+# Reopen with a fresh labelled set when the grader's model changes.
+MISS_CLASS_READ = True
 NEXT_KIND = {"cue": "recall", "execution": "apply"}   # discrimination: the contrast pool, below
 
 

@@ -26,13 +26,13 @@ def test_the_reason_fires_on_the_last_answer_only_and_the_old_reasons_win(monkey
     three = [_e(1, False), _e(2, False), _e(3, False, 90)]
     assert offer.escalation("ML/x.md", "", "", [], three, records=[]) == "3 misses in a row"
     assert offer.shadowed(offer.CONFIDENT_REASON) and not offer.shadowed("3 misses in a row")
-    # the structural class waits behind the picker's gate
+    # the structural class escalates behind the picker's switch
     structural = [_e(1, True), _e(2, False, 50, "structural")]
-    assert offer.escalation("ML/x.md", "", "", [], structural, records=[]) == ""
+    assert offer.escalation("ML/x.md", "", "", [], structural, records=[]) == offer.STRUCTURAL_REASON
     from silica.kernel.learn import pick
 
-    monkeypatch.setattr(pick, "MISS_CLASS_READ", True)
-    assert offer.escalation("ML/x.md", "", "", [], structural, records=[]) == offer.STRUCTURAL_REASON
+    monkeypatch.setattr(pick, "MISS_CLASS_READ", False)
+    assert offer.escalation("ML/x.md", "", "", [], structural, records=[]) == ""
 
 
 def test_a_confident_miss_in_a_session_is_logged_not_shown_and_keeps_the_notes_aid(client):

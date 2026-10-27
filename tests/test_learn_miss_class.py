@@ -32,13 +32,13 @@ def _iso(ts):
     return datetime.fromtimestamp(ts, timezone.utc).isoformat()
 
 
-def test_the_picker_reads_the_class_only_behind_the_gate(monkeypatch):
+def test_the_picker_reads_the_class_behind_its_switch(monkeypatch):
     now = time.time()
     notes = {"A/x.md": {"created": now - 400 * 86400, "ai": False, "mtime": now - 400 * 86400}}
     entries = [{"ts": _iso(now - 300 * 86400), "path": "A/x.md", "correct": False, "rating": 1, "miss": "execution"}]
     kw = dict(n=1, now_ts=now, _notes_override=notes, _entries_override=entries, _pairs_override=[],
               _conflicts_override=[], _planned_override={"A/x.md"})
-    assert pick.MISS_CLASS_READ is False
-    assert pick.session(**kw)["items"][0]["kind"] == "recall"
-    monkeypatch.setattr(pick, "MISS_CLASS_READ", True)
+    assert pick.MISS_CLASS_READ is True           # on since 2026-10-27, the owner's call
     assert pick.session(**kw)["items"][0]["kind"] == "apply"
+    monkeypatch.setattr(pick, "MISS_CLASS_READ", False)
+    assert pick.session(**kw)["items"][0]["kind"] == "recall"
