@@ -1178,11 +1178,15 @@ async function openNote(path, line, facts) {
   // The note already open, on its text or its details: clicking its node again
   // or a row naming it has nothing new to load, and a reload would drop the
   // caret and the scroll for nothing.
-  if (path === editPath && drawerMode === "note" && notePanel.classList.contains("open")) {
-    if (line && editor) editor.revealLine(line);
+  if (path === drawerNote.path && drawerMode === "note" && notePanel.classList.contains("open")) {
+    if (line && drawerNote.editor) drawerNote.editor.revealLine(line);
     if (ctxPath !== path) loadContext(path, facts);
     return true;
   }
+  // A note another editor holds (Learn's write view, ADR-0134 point 6) goes
+  // there instead of loading twice.
+  const held = heldElsewhere(path, drawerNote);
+  if (held) { if (held.reveal) held.reveal(line); return false; }
   closeNoteMenu();
   await releaseNote(); // what was typed into the last note reaches the disk first
   let data, ed;
@@ -1195,11 +1199,15 @@ async function openNote(path, line, facts) {
   } catch { if (seq === openSeq) notify("couldn't open that note"); return; }
   if (seq !== openSeq) return;
   if (!ed) { notify("couldn't load the editor"); return; }
+  // Named by a bare title, the note turned out to be the other editor's: the
+  // drawer has already let its own go, so it shuts rather than show bytes it
+  // no longer saves.
+  const holder = heldElsewhere(data.path, drawerNote);
+  if (holder) { closeNote(); if (holder.reveal) holder.reveal(line); return false; }
   lastNotePath = data.path;
   lastViewedPath = data.path;
   drawerMode = "note";
-  editPath = data.path; editEtag = data.etag; editClean = data.text;
-  editConflict = false;
+  holdNote(drawerNote, data);
   ed.load(data.text, { top: data.paper ? paperStripEl(data.paper) : null, missing: data.broken || [] });
   focusGraphNode(data.path);
   showDrawer(data.title || data.path);
@@ -1250,7 +1258,7 @@ function setDetails(on) {
   detailsOn = on;
   syncDrawerMode();
   if (on && ctxPath !== lastNotePath) loadContext(lastNotePath);
-  if (!on && editor) editor.view.requestMeasure(); // it was measured while hidden
+  if (!on && drawerNote.editor) drawerNote.editor.view.requestMeasure(); // it was measured while hidden
   // The control that was pressed is hidden now: focus goes to the one that
   // took its place, rather than to the page.
   const f = document.activeElement;
@@ -1723,15 +1731,40 @@ const closeNoteMenu = menuButton(noteMenu, noteTitleBtn, () => syncDrawerMode())
 // says so once, and stops flushing on its own - only MORE typing writes again,
 // and then it wins, which is Obsidian's rule stated instead of silent.
 const noteEdit = $("#note-edit");
-let editor = null;      // the one LiveEditor, built with the first note
-let editorLoad = null;  // its two scripts, fetched once
-let editPath = "";      // the note the field holds; "" when it holds none
-let editEtag = "";      // the disk's bytes as last seen, for the save to check
-let editClean = "";     // the text the disk holds as far as the field knows
-let editConflict = false;
-let editTimer = 0;
-let editSaving = null;  // the in-flight save; a second one waits for it
-let editAgain = false;  // a save asked for while one was in flight
+let editorLoad = null;  // the drawerNote.editor's two scripts, fetched once for every drawerNote.editor
+
+// One note in one editor (ADR-0134 point 6). The drawer holds one session and
+// Learn's write view another; saving, releasing and flushing take the one
+// they act on, and everything else acts on the drawer's. A note is held by
+// one session at a time, so two editors never race on one file's etag.
+function noteSession() {
+  return {
+    editor: null,
+    path: "",       // the note the field holds; "" when it holds none
+    etag: "",       // the disk's bytes as last seen, for the save to check
+    clean: "",      // the text the disk holds as far as the field knows
+    conflict: false,
+    timer: 0,
+    saving: null,   // the in-flight save; a second one waits for it
+    again: false,   // a save asked for while one was in flight
+    onRelease: null, // what the place does when its note is let go
+  };
+}
+const noteSessions = [];
+const drawerNote = noteSession();
+noteSessions.push(drawerNote);
+
+// The session other than `s` that holds this note, if any.
+const heldElsewhere = (path, s) => noteSessions.find((x) => x !== s && x.path && x.path === path) || null;
+
+// The field takes a note it read from /note/raw: false when another editor
+// holds that note, which then keeps it.
+function holdNote(s, data) {
+  if (heldElsewhere(data.path, s)) return false;
+  s.path = data.path; s.etag = data.etag; s.clean = data.text;
+  s.conflict = false;
+  return true;
+}
 
 const loadScript = (src) => new Promise((resolve, reject) => {
   const s = document.createElement("script");
@@ -1744,28 +1777,47 @@ const loadScript = (src) => new Promise((resolve, reject) => {
 // With the first note and not with the page: 320 KB of editor is dead weight
 // for a session that never opens one. A failed load is forgotten, so the next
 // open tries again rather than inheriting the failure.
-function ensureEditor() {
+function loadEditor() {
   editorLoad ||= loadScript("/static/codemirror.min.js")
     .then(() => loadScript("/static/app-editor.js"))
-    .then(() => {
-      editor = window.LiveEditor.create(noteEdit, {
-        render: (text) => fetch("/note/render", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
-        }).then((r) => (r.ok ? r.json() : Promise.reject(r.status))).then((d) => d.html || ""),
-        openNote: openLinkedNote,
-        change: () => { editConflict = false; scheduleSave(); },
-        blur: () => { saveEdit(); recheck(); },
-        save: () => { saveEdit(); },
-        decorate: decorateRendered,
-        select: (view) => { syncSelBar(view); recheck(); },
-        openAt: (path, line) => openNote(path, line || undefined),
-        links: (paths) => paths.map((p) => `[[${mentionLink(p)}]]`), // a tree row dropped on the note
-      });
-    })
-    .catch(() => { editorLoad = null; });
-  return editorLoad.then(() => editor);
+    .catch((e) => { editorLoad = null; throw e; });
+  return editorLoad;
 }
+
+// The hooks every note editor takes, bound to its session; `extra` is what
+// one place does differently.
+function sessionHooks(s, extra = {}) {
+  return {
+    render: (text) => fetch("/note/render", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    }).then((r) => (r.ok ? r.json() : Promise.reject(r.status))).then((d) => d.html || ""),
+    openNote: openLinkedNote,
+    change: () => { s.conflict = false; scheduleSave(s); },
+    blur: () => { saveEdit(s); },
+    save: () => { saveEdit(s); },
+    decorate: decorateRendered,
+    openAt: (path, line) => openNote(path, line || undefined),
+    links: (paths) => paths.map((p) => `[[${mentionLink(p)}]]`), // a tree row dropped on the note
+    ...extra,
+  };
+}
+
+// A session's editor in `parent`, built once; null when the scripts failed.
+function sessionEditor(s, parent, extra) {
+  return loadEditor().then(() => (s.editor ||= window.LiveEditor.create(parent, sessionHooks(s, extra))), () => null);
+}
+
+function ensureEditor() {
+  return sessionEditor(drawerNote, noteEdit, {
+    blur: () => { saveEdit(drawerNote); recheck(); },
+    select: (view) => { syncSelBar(view); recheck(); },
+  });
+}
+drawerNote.onRelease = () => {
+  if (checkRun) checkRun.abort(); // the verdicts paid for are cached, and come back on reopening
+  hideSelBar();
+};
 
 // What the server drew inside the editor gets what the reader's copy got:
 // diagrams run, and the properties box opens as it was last left.
@@ -1776,7 +1828,7 @@ function decorateRendered(el, view) {
     fm.open = localStorage.getItem("note-props") === "open";
     fm.addEventListener("toggle", () => {
       localStorage.setItem("note-props", fm.open ? "open" : "closed");
-      view.requestMeasure(); // the box changed height under the editor
+      view.requestMeasure(); // the box changed height under the drawerNote.editor
     });
   }
 }
@@ -1789,103 +1841,114 @@ function openLinkedNote(target) {
 
 // The field lets go of its note: whatever was typed is on disk first,
 // including a save that was asked for while another was in flight.
-async function releaseNote() {
-  if (!editPath) return;
-  if (checkRun) checkRun.abort(); // the verdicts paid for are cached, and come back on reopening
-  await saveEdit();
-  while (editSaving) await editSaving;
-  editPath = ""; editEtag = ""; editClean = ""; editConflict = false;
-  clearTimeout(editTimer);
-  hideSelBar();
+async function releaseNote(s = drawerNote) {
+  if (!s.path) return;
+  if (s.onRelease) s.onRelease();
+  await saveEdit(s);
+  while (s.saving) await s.saving;
+  s.path = ""; s.etag = ""; s.clean = ""; s.conflict = false;
+  clearTimeout(s.timer);
 }
 
-// An agent's write or an /undo can land on the note the field holds. While
+// An agent's write or an /undo can land on a note an editor holds. While
 // nothing typed is waiting to be saved, the field takes the disk's bytes as one
 // mapped change, so the caret stays where it was; with typing in it, the
 // next save's 409 says so instead, as it did before the editor was always
 // open. Called from loadChanges, which runs after every turn and every undo.
-async function refreshOpenNote() {
-  const path = editPath;
-  if (!path || !editor || editSaving || editor.getText() !== editClean) return;
-  const r = await fetch("/note/raw?path=" + encodeURIComponent(path)).catch(() => null);
-  const d = r && r.ok ? await r.json().catch(() => null) : null;
-  if (!d || editPath !== path || editSaving || editor.getText() !== editClean || d.etag === editEtag) return;
-  editEtag = d.etag;
-  editClean = d.text;
-  editor.adopt(d.text);
-  editor.setMissing(d.broken || []);
+function refreshOpenNote() {
+  return Promise.all(noteSessions.map(refreshSession));
 }
 
-function scheduleSave() {
-  clearTimeout(editTimer);
-  editTimer = setTimeout(saveEdit, 800);
+async function refreshSession(s) {
+  const path = s.path, ed = s.editor;
+  if (!path || !ed || s.saving || ed.getText() !== s.clean) return;
+  const r = await fetch("/note/raw?path=" + encodeURIComponent(path)).catch(() => null);
+  const d = r && r.ok ? await r.json().catch(() => null) : null;
+  if (!d || s.path !== path || s.saving || ed.getText() !== s.clean || d.etag === s.etag) return;
+  s.etag = d.etag;
+  s.clean = d.text;
+  ed.adopt(d.text);
+  ed.setMissing(d.broken || []);
+}
+
+function scheduleSave(s = drawerNote) {
+  clearTimeout(s.timer);
+  s.timer = setTimeout(() => saveEdit(s), 800);
 }
 
 // A move from the tree (ADR-0126 point 3): the panel's note follows its path,
 // reopened so the title and the URL say the new one; a note whose links the
 // move rewrote takes the disk's bytes, or the next save would write the old
-// link back and meet a 409. `to` maps old paths to new.
+// link back and meet a 409. `to` maps old paths to new. Another editor's
+// note keeps its place and takes the new path.
 function followNote(to, rewritten) {
-  if (!editPath) return;
-  if (to.has(editPath)) {
-    const path = to.get(editPath);
-    if (lastViewedPath === editPath) lastViewedPath = path;
-    editPath = ""; // or openNote would take it for the note already open
+  for (const s of noteSessions) {
+    if (s === drawerNote || !s.path) continue;
+    if (to.has(s.path)) s.path = to.get(s.path);
+    else if (rewritten.includes(s.path)) refreshSession(s);
+  }
+  if (!drawerNote.path) return;
+  if (to.has(drawerNote.path)) {
+    const path = to.get(drawerNote.path);
+    if (lastViewedPath === drawerNote.path) lastViewedPath = path;
+    drawerNote.path = ""; // or openNote would take it for the note already open
     openNote(path);
-  } else if (rewritten.includes(editPath)) {
-    refreshOpenNote();
+  } else if (rewritten.includes(drawerNote.path)) {
+    refreshSession(drawerNote);
   }
 }
 
-async function saveEdit() {
-  clearTimeout(editTimer);
-  if (!editPath || editConflict || !editor) return;
-  if (editSaving) { editAgain = true; return editSaving; }
-  const path = editPath, text = editor.getText();
-  if (text === editClean) return;
-  editSaving = (async () => {
+async function saveEdit(s = drawerNote) {
+  clearTimeout(s.timer);
+  if (!s.path || s.conflict || !s.editor) return;
+  if (s.saving) { s.again = true; return s.saving; }
+  const path = s.path, ed = s.editor, text = ed.getText();
+  if (text === s.clean) return;
+  s.saving = (async () => {
     try {
       const r = await fetch("/note/save", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, text, etag: editEtag }),
+        body: JSON.stringify({ path, text, etag: s.etag }),
       });
       const data = await r.json().catch(() => ({}));
-      if (editPath !== path) return; // the field moved on; this save is history
+      if (s.path !== path) return; // the field moved on; this save is history
       if (r.status === 409) {
-        editEtag = data.etag || editEtag;
-        editConflict = true;
+        s.etag = data.etag || s.etag;
+        s.conflict = true;
         notify("this note changed on disk while you were editing; keep typing to overwrite it");
         return;
       }
       if (!r.ok) { notify("couldn't save the note"); return; }
-      editEtag = data.etag;
+      s.etag = data.etag;
       // What landed may differ from what was sent (overwrite stamps a `type:`
       // into frontmatter that lacks it). If nothing was typed meanwhile the
       // field takes the disk's bytes as one mapped change, so the two agree;
       // otherwise the next save carries the newer text anyway. Either way the
       // clean text is the disk's, the one the new etag names.
-      if (data.text !== text && editor.getText() === text) editor.adopt(data.text);
-      editClean = data.text;
-      if (data.broken) editor.setMissing(data.broken);
+      if (data.text !== text && ed.getText() === text) ed.adopt(data.text);
+      s.clean = data.text;
+      if (data.broken) ed.setMissing(data.broken);
       loadChanges(); // the menu's diff and the write cards see the edit
       // a workspace note's row reads its name, lines and instructions (ADR-0112)
       if (typeof workspaces !== "undefined" && workspaces.some((w) => w.path === path)) loadWorkspaces();
     } catch {
       notify("couldn't save the note");
     } finally {
-      editSaving = null;
-      if (editAgain) { editAgain = false; saveEdit(); }
+      s.saving = null;
+      if (s.again) { s.again = false; saveEdit(s); }
     }
   })();
-  return editSaving;
+  return s.saving;
 }
 
 // A reload or a closed tab with an unsaved edit: the beacon outlives the page.
 addEventListener("pagehide", () => {
-  if (!editPath || editConflict || !editor || editor.getText() === editClean) return;
-  navigator.sendBeacon("/note/save", new Blob(
-    [JSON.stringify({ path: editPath, text: editor.getText(), etag: editEtag })],
-    { type: "application/json" }));
+  for (const s of noteSessions) {
+    if (!s.path || s.conflict || !s.editor || s.editor.getText() === s.clean) continue;
+    navigator.sendBeacon("/note/save", new Blob(
+      [JSON.stringify({ path: s.path, text: s.editor.getText(), etag: s.etag })],
+      { type: "application/json" }));
+  }
 });
 
 // --- checking the note's sources (ADR-0110 step 3) ----------------------------
@@ -1928,10 +1991,10 @@ async function readLines(resp, each) {
 
 // The disk is what the server checks, so the field goes there first; a
 // field the disk refused (409) is not checked against bytes it does not hold.
-async function flushForCheck() {
-  await saveEdit();
-  while (editSaving) await editSaving;
-  return !editConflict && editor.getText() === editClean;
+async function flushForCheck(s = drawerNote) {
+  await saveEdit(s);
+  while (s.saving) await s.saving;
+  return !s.conflict && s.editor.getText() === s.clean;
 }
 
 function countFindings(findings) {
@@ -1941,19 +2004,19 @@ function countFindings(findings) {
 }
 
 async function checkSources(confirm = false) {
-  if (!editPath || !editor) return;
+  if (!drawerNote.path || !drawerNote.editor) return;
   if (checkRun) checkRun.abort();
   if (!(await flushForCheck())) { notify("this note changed on disk; reopen it before checking"); return; }
-  const path = editPath, ctl = new AbortController();
+  const path = drawerNote.path, ctl = new AbortController();
   checkRun = ctl;
   checkPath = path;
   checkedPaths.add(path);
   const seen = [];
   checkView = { counts: countFindings(seen), pool: null, done: 0, of: 0, notChecked: 0 };
-  editor.startCheck();
-  editor.showCheck(checkShown());
+  drawerNote.editor.startCheck();
+  drawerNote.editor.showCheck(checkShown());
   drawCheckStrip();
-  const live = () => checkRun === ctl && editPath === path;
+  const live = () => checkRun === ctl && drawerNote.path === path;
   try {
     const r = await fetch("/note/check", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -1963,7 +2026,7 @@ async function checkSources(confirm = false) {
     await readLines(r, (ev) => {
       if (!live()) return;
       if (ev.event === "rules" || ev.event === "confirm" || ev.event === "block") {
-        editor.addCheck(ev.findings, ev.states);
+        drawerNote.editor.addCheck(ev.findings, ev.states);
         seen.push(...ev.findings);
         checkView.counts = countFindings(seen);
       }
@@ -1977,13 +2040,13 @@ async function checkSources(confirm = false) {
       drawCheckStrip();
     });
   } catch (e) {
-    if (e.name === "AbortError" && editPath === path && checkView) {
+    if (e.name === "AbortError" && drawerNote.path === path && checkView) {
       // The blocks it never reached; the one in flight lands in the cache.
       Object.assign(checkView, { cancelled: true, notChecked: checkView.notChecked + Math.max(0, checkView.of - checkView.done) });
     } else if (live()) notify("couldn't check this note");
   } finally {
     if (checkRun === ctl) checkRun = null;
-    if (editPath === path) drawCheckStrip();
+    if (drawerNote.path === path) drawCheckStrip();
   }
 }
 
@@ -1992,23 +2055,23 @@ async function checkSources(confirm = false) {
 // served from the cache, so no model call. The model's verdicts on an edited
 // block stay hollow until the next check.
 async function recheck(reopened = false) {
-  if (!editor || recheckBusy || checkRun || !editPath) return;
-  if (!reopened && (checkPath !== editPath || !editor.checkEdited())) return;
+  if (!drawerNote.editor || recheckBusy || checkRun || !drawerNote.path) return;
+  if (!reopened && (checkPath !== drawerNote.path || !drawerNote.editor.checkEdited())) return;
   recheckBusy = true;
-  const path = editPath;
+  const path = drawerNote.path;
   try {
-    if (!(await flushForCheck()) || editPath !== path) return;
-    if (reopened) { editor.startCheck(); editor.showCheck(checkShown()); }
-    const carried = editor.rebaseCheck();
+    if (!(await flushForCheck()) || drawerNote.path !== path) return;
+    if (reopened) { drawerNote.editor.startCheck(); drawerNote.editor.showCheck(checkShown()); }
+    const carried = drawerNote.editor.rebaseCheck();
     const r = await fetch("/note/check", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, rules: true }),
     });
     if (!r.ok) return;
     let report = null;
     await readLines(r, (ev) => { if (ev.event === "done") report = ev; });
-    if (!report || editPath !== path || checkRun) return;
-    if (report.unchecked) { checkedPaths.delete(path); editor.endCheck(); return; }
-    editor.replaceCheck(report, carried);
+    if (!report || drawerNote.path !== path || checkRun) return;
+    if (report.unchecked) { checkedPaths.delete(path); drawerNote.editor.endCheck(); return; }
+    drawerNote.editor.replaceCheck(report, carried);
     checkPath = path;
     checkView = { counts: report.counts, pool: report.pool, done: 0, of: 0,
                   notChecked: report.states.filter((s) => s.state === "not checked").length };
@@ -2026,14 +2089,14 @@ function endCheck() {
   if (checkPath) checkedPaths.delete(checkPath);
   checkPath = "";
   checkView = null;
-  if (editor) editor.endCheck();
+  if (drawerNote.editor) drawerNote.editor.endCheck();
   drawCheckStrip();
 }
 
 // The strip: the counts by grade, each a toggle for its marks, and under them
 // the run's progress or what was searched. At most two lines (point 14).
 function drawCheckStrip() {
-  const on = !!checkView && checkPath === editPath && drawerMode === "note" && !detailsOn;
+  const on = !!checkView && checkPath === drawerNote.path && drawerMode === "note" && !detailsOn;
   checkStrip.hidden = !on;
   if (!on) return;
   const v = checkView, shown = checkShown();
@@ -2047,7 +2110,7 @@ function drawCheckStrip() {
       const next = checkShown();
       next.has(key) ? next.delete(key) : next.add(key);
       try { localStorage.setItem(CHECK_SHOW_KEY, JSON.stringify([...next])); } catch { /* private window: this page only */ }
-      editor.showCheck(next);
+      drawerNote.editor.showCheck(next);
       drawCheckStrip();
     });
     if (n !== undefined) b.dataset.n = String(n);
@@ -2115,7 +2178,7 @@ function hideSelBar() {
 
 function syncSelBar(view) {
   const sel = view.state.selection.main;
-  if (sel.empty || drawerMode !== "note" || !editPath) { hideSelBar(); return; }
+  if (sel.empty || drawerMode !== "note" || !drawerNote.path) { hideSelBar(); return; }
   if (selDragging || !view.hasFocus) return; // shown on release, kept on blur
   placeSelBar(view);
 }
@@ -2140,17 +2203,17 @@ noteEdit.addEventListener("pointerdown", () => { selDragging = true; hideSelBar(
 document.addEventListener("pointerup", () => {
   if (!selDragging) return;
   selDragging = false;
-  if (editor) syncSelBar(editor.view);
+  if (drawerNote.editor) syncSelBar(drawerNote.editor.view);
 });
 document.addEventListener("pointerdown", (e) => {
   if (!e.target.closest("#note-selbar, #note-edit")) hideSelBar();
 });
 noteEdit.addEventListener("scroll", () => {
-  if (!selBar.hidden && editor) placeSelBar(editor.view);
+  if (!selBar.hidden && drawerNote.editor) placeSelBar(drawerNote.editor.view);
 }, true);
 
 const passage = () => {
-  const v = editor && editor.view, sel = v && v.state.selection.main;
+  const v = drawerNote.editor && drawerNote.editor.view, sel = v && v.state.selection.main;
   return sel && !sel.empty ? v.state.sliceDoc(sel.from, sel.to).trim() : "";
 };
 const quoted = (text) => text.split("\n").map((l) => "> " + l).join("\n");

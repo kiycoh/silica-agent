@@ -40,7 +40,7 @@ async function loadWorkspaces({ adopt = false } = {}) {
   // A workspace note open in the reader was rewritten under it (a ◇ edit, a
   // note the chat wrote): the field takes the new bytes unless it holds
   // unsaved typing, and the next keystroke no longer meets a 409.
-  if (typeof refreshOpenNote === "function" && workspaces.some((w) => w.path === editPath)) refreshOpenNote();
+  if (typeof refreshOpenNote === "function" && workspaces.some((w) => w.path === drawerNote.path)) refreshOpenNote();
 }
 
 const wsByPath = (p) => workspaces.find((w) => w.path === p);
