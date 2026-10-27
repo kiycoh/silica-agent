@@ -105,6 +105,10 @@ def events_by_key(entries: list[dict]) -> dict[str, list]:
 
     out: dict[str, list] = {}
     for e in entries:
+        if e.get("retest"):
+            # asked again minutes after its miss (ADR-0135 point 4): still
+            # semi-active, so the day's last review stays the miss
+            continue
         try:
             ts = datetime.fromisoformat(str(e.get("ts"))).timestamp()
         except (ValueError, TypeError):

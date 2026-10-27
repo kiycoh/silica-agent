@@ -56,6 +56,8 @@ def by_path(entries: list[dict], paths: list[str] | None = None) -> dict[str, li
     want = {_key(p): p for p in paths} if paths is not None else None
     out: dict[str, list[dict]] = {p: [] for p in (paths or [])}
     for e in entries:
+        if e.get("retest"):
+            continue  # evidence for the reader, not for an objective (ADR-0135 point 4)
         k = _key(str(e.get("path") or ""))
         if want is not None:
             if k not in want:
@@ -181,7 +183,7 @@ def integration(paths: list[str], entries: list[dict], relations: list[tuple[str
     held: set[tuple[str, str]] = set()
     items = []
     for e in entries:
-        if e.get("kind") not in _STRUCTURE_KINDS or _key(str(e.get("path") or "")) not in scope:
+        if e.get("retest") or e.get("kind") not in _STRUCTURE_KINDS or _key(str(e.get("path") or "")) not in scope:
             continue
         ends = e.get("endpoints") or []
         keys = [k for x in ends if (k := stems.get(_key(str(x)).rsplit("/", 1)[-1]))]

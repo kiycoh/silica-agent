@@ -3147,6 +3147,8 @@ async function lrConfirm() {
     // a placement's walk (ADR-0135 point 3): a step placed on its deepest note
     // drops its second question, always one after the current, so `cur` holds
     if (r.drop?.length) s.items = s.items.filter((x) => !r.drop.includes(x.i));
+    // a miss asked again before the end (ADR-0135 point 4), when it was ready at once
+    if (r.added?.length) s.items.push(...r.added);
     if (v.needs_self_grade) v.selfRated = true;
   } catch (e) { if (lrGone(e)) return; notify("not recorded: " + e.message); if (btn) btn.disabled = false; return; }
   finally { s.confirming = false; }
@@ -3159,10 +3161,29 @@ function lrNext() {
   const s = lrSession;
   s.chosen = {}; s.changing = false; s.conf = null; s.confSkipped = false; s.told = false;
   lrPrevOpen = false;
-  if (s.cur + 1 >= s.items.length) return lrClose();
+  if (s.cur + 1 >= s.items.length) return lrMoreOrClose();
   s.cur += 1;
   s.state = "input";
   lrRender();
+}
+
+// At the end, a retest generated in the background may have landed since the
+// last rating (ADR-0135 point 4): the server's list is read once more, and
+// only an item this tab does not have yet keeps the session open.
+async function lrMoreOrClose() {
+  const s = lrSession;
+  try {
+    const d = await (await fetch("/learn/session?id=" + encodeURIComponent(s.id))).json();
+    const have = new Set(s.items.map((x) => x.i));
+    const more = (d.items || []).filter((x) => !have.has(x.i));
+    if (more.length && lrSession === s) {
+      s.items.push(...more);
+      s.cur += 1;
+      s.state = "input";
+      return lrRender();
+    }
+  } catch { /* the list could not be read: the session closes as it always did */ }
+  return lrClose();
 }
 
 // Leaving keeps the session (refinement §9): the plan shows Resume, the

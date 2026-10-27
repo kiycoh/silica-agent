@@ -51,8 +51,12 @@ LIVE_FILE = "learn-live.json"
 # JSON has no int keys and no sets: these fields are converted on the way out
 # and back, every other value is already plain JSON.
 _INT_KEYED = ("verdicts", "recorded", "teach", "aids")
-_SETS = ("skipped", "escalated", "dropped")
+_SETS = ("skipped", "escalated", "dropped", "retested")
 _SAVE_LOCK = threading.Lock()
+_ITEMS_LOCK = threading.Lock()   # a retest is appended from a route and from its generator's thread
+# Asked again before the end (ADR-0135 point 4): one a note, a quarter of the
+# session cap of 24 (start_session).
+RETEST_MAX = 6
 
 
 def _reset() -> None:
@@ -1026,6 +1030,8 @@ def _rate(payload: dict):
         entry["endpoints"] = it["endpoints"]
     if it.get("placement"):
         entry.update(origin="placement", step=it["placement"]["step"], rank=it["placement"]["rank"])
+    if it.get("retest"):
+        entry["retest"] = True
     written = quiz.record([entry])
     after = learner.view().get(key)
     first = bool(before and before.get("attempts") == 0 and correct)
@@ -1040,6 +1046,9 @@ def _rate(payload: dict):
     drop = _walk(s, it, entry)
     if drop:
         result["drop"] = drop
+    added = _retest(s, it, entry)
+    if added:
+        result["added"] = [added]
     s["recorded"][it["i"]] = {"entry": entry, "result": result, "ts": _now()}
     s["skipped"].discard(it["i"])
     _save()
@@ -1058,6 +1067,60 @@ def _walk(s: dict, it: dict, entry: dict) -> list[int]:
             and x["i"] != it["i"] and x["i"] not in s["recorded"]]
     s.setdefault("dropped", set()).update(drop)
     return drop
+
+
+def _retest(s: dict, it: dict, entry: dict) -> dict | None:
+    """A miss or a "Just tell me", asked again before the session ends in
+    another kind (ADR-0135 point 4). A model kind's miss gets a mechanical
+    item, ready now with no call; a mechanical kind's miss, or a note with no
+    mechanical item, gets one generated in the background, appended when it
+    lands. Returns the cue of an item appended now."""
+    from silica.kernel.learn import items
+    from silica.kernel.learn.items import LEVEL_OF, MECHANICAL
+    from silica.kernel.report import learner
+
+    if entry["correct"] or it.get("retest") or it.get("placement") or s.get("mode") == "teach":
+        return None
+    done = s.setdefault("retested", set())
+    if it["path"] in done or len(done) >= RETEST_MAX:
+        return None
+    done.add(it["path"])
+    row = {**(learner.view().get(learner.key_of(it["path"])) or {}), "path": it["path"], "pool": "retest",
+           "objective": it.get("objective")}
+    if it["kind"] not in MECHANICAL:
+        made = items.build_session([{**row, "kind": "cloze", "level": LEVEL_OF["cloze"]}], [], n=1)
+        if made:
+            return _append_retest(s, made[0])
+    kind = "explain" if it["kind"] in ("cloze", "recall", "predict") else "recall"
+    threading.Thread(target=_generate_retest, args=(s, {**row, "kind": kind, "level": LEVEL_OF[kind]}, it["kind"]),
+                     daemon=True, name="learn-retest").start()
+    return None
+
+
+def _append_retest(s: dict, new: dict) -> dict:
+    from silica.kernel.learn import items
+
+    with _ITEMS_LOCK:
+        s["items"].append({**new, "retest": True, "pool": "retest", "i": len(s["items"]) + 1})
+        return items.cue_payload(s["items"])[-1]
+
+
+def _generate_retest(s: dict, row: dict, missed_kind: str) -> None:
+    from silica.agent import llm
+    from silica.kernel.learn import items
+
+    try:
+        with llm.meter_scope(s.get("meter")):
+            made = items.build_session([row], [], n=1)
+    except Exception:
+        # Tolerated: a retest is an extra, and this thread has no caller to
+        # raise to; the session goes on without it.
+        logger.warning("learn: a retest was not generated", exc_info=True)
+        return
+    # the fallback can land on the kind just missed: that is no retest
+    if made and made[0]["kind"] != missed_kind and _LIVE is s:
+        _append_retest(s, made[0])
+        _save()
 
 
 def _placed_notes(plan: dict) -> set[str]:
@@ -1302,6 +1365,8 @@ def _receipt(s: dict) -> dict:
         "followup": {"points": open_points, "questions": len(open_points), "minutes": _minutes(len(open_points))} if s.get("note") and open_points else None,
         "empty": not recorded and not s["verdicts"],
         "meter": _meter_shown(s),
+        "retests": {"asked": sum(1 for r in recorded if r["entry"].get("retest")),
+                    "met": sum(1 for r in recorded if r["entry"].get("retest") and r["entry"]["correct"])},
         # the same count Today prints: every note with a card below the desired retention
         "next": _next_line(rows), "due_left": sum(1 for r in learner.view().values()
                                                   if r["R"] is not None and r["R"] < DUE_R),
