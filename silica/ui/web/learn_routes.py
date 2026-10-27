@@ -767,7 +767,7 @@ def start_session(payload: dict):
         rows = placement.candidates(plan)
         if not rows:
             raise HTTPException(400, "this plan has no step with a note to ask about")
-        picked = {"items": rows, "backfill": [], "amnesty": None, "short": None}
+        picked: dict[str, Any] = {"items": rows, "backfill": [], "amnesty": None, "short": None}
         n = len(rows)
         origin = {**origin, "label": f"{plan['name']} · placement"}
     elif note:
