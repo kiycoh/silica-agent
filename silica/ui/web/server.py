@@ -4811,7 +4811,14 @@ def _review_of(path: str) -> str:
 
 
 def _change_rows() -> list[dict]:
-    return [{**r, "name": _clean_name(r["path"]), "review": _review_of(r["path"])}
+    from silica.kernel.write.checkpoints import get_checkpoint_store
+
+    # `undo_deletes` is what a write card's button says: the ledger's
+    # "created" is a first touch by this process, the click is /undo <path>,
+    # which reads the checkpoint store (CheckpointStore.undo_removes).
+    store = get_checkpoint_store()
+    return [{**r, "name": _clean_name(r["path"]), "review": _review_of(r["path"]),
+             "undo_deletes": store.undo_removes(r["path"])}
             for r in session_changes.rows()]
 
 

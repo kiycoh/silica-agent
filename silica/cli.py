@@ -1636,6 +1636,19 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
     note_path: str | None
     if len(rest) > 1:
         note_path = rest[1].strip()
+        if store.depth(note_path) == 0:
+            # The write card sends the tool's own argument, often a bare name,
+            # while the store keys a patch on the path it resolved to: unresolved,
+            # the card's revert said "nothing to undo" over a patch that had
+            # landed (2026-10-26).
+            try:
+                resolved = DRIVER.read_note(note_path).ref.path
+            except Exception:
+                # No note answers to the name: a deleted note is looked up by
+                # the name as given, just below.
+                resolved = ""
+            if resolved and store.depth(resolved):
+                note_path = resolved
         if not _on_disk(note_path):
             deleted = journal.last_delete(vault, note_path)
         # A patch the note took after it landed is undone before the move.

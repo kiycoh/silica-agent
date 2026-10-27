@@ -290,6 +290,29 @@ def test_keep_clears_review_through_the_gate_and_the_count_drops(client, tmp_vau
     assert "review:" not in text and "\nnew\n" in text, "keep took more than the mark"
 
 
+def test_a_card_says_delete_only_when_its_undo_deletes(client, tmp_vault, tmp_path, monkeypatch):
+    """The ledger's "created" is a first touch by this process: a note
+    nucleated earlier in the GUI process and patched later showed "created ...
+    delete" over a click that only took back the patch (2026-10-26)."""
+    import silica.kernel.write.checkpoints as cp
+    from silica.kernel.write import session_changes
+
+    monkeypatch.setattr(cp, "_store", cp.CheckpointStore(tmp_path / "cp.db"))
+    tc, _server = client
+    store = cp.get_checkpoint_store()
+    session_changes.touched("Nucleated.md", None)          # written by a run, no restore point
+    tmp_vault.note("Nucleated.md", "# Nucleated\n\nbody\n")
+    store.push("Nucleated.md", "# Nucleated\n\nbody\n", "# Nucleated\n\nbody\npatch\n")
+    tmp_vault.note("Nucleated.md", "# Nucleated\n\nbody\npatch\n")
+    session_changes.touched("Chat.md", None)               # the chat created it
+    store.push("Chat.md", None, "# Chat\n")
+    tmp_vault.note("Chat.md", "# Chat\n")
+
+    rows = {r["path"]: r for r in tc.get("/changes").json()}
+    assert rows["Nucleated.md"]["kind"] == "created" and not rows["Nucleated.md"]["undo_deletes"]
+    assert rows["Chat.md"]["undo_deletes"]
+
+
 def test_revert_copy_names_what_it_takes_back_and_what_stays():
     js = app_js()
     body = _fn(js, "function stampReviewCards()")

@@ -114,6 +114,18 @@ class CheckpointStore:
         ).fetchall()
         return len(rows) == 1 and bool(rows[0]["absent"])
 
+    def undo_removes(self, path: str) -> bool:
+        """True when the next ``undo`` of ``path`` leaves only an absent floor,
+        i.e. /undo <path> deletes the note. A write card labels its button
+        from this, the state the click will read: the session ledger's
+        "created" is the first touch by this process, and a note nucleated
+        earlier in the process and patched later read "created ... delete"
+        over a click that only took back the patch (2026-10-26)."""
+        rows = self._conn.execute(
+            "SELECT absent FROM checkpoints WHERE path = ? ORDER BY id LIMIT 3", (path,)
+        ).fetchall()
+        return len(rows) == 2 and bool(rows[0]["absent"])
+
     def latest_at(self, path: str) -> float | None:
         """When the newest restore point for ``path`` was taken: /undo <path>
         compares it with a chat move that landed the note there."""

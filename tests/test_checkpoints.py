@@ -92,3 +92,15 @@ def test_clear_drops_all_for_path(store):
     store.clear("A.md")
     assert store.depth("A.md") == 0
     assert store.depth("B.md") == 2
+
+
+def test_undo_removes_only_when_the_next_undo_deletes_the_note(store):
+    # The write card labels its button from this: "delete" only when its
+    # /undo would remove the note (2026-10-26).
+    store.push("New.md", None, "created")
+    assert store.undo_removes("New.md")
+    store.push("New.md", "created", "patched")
+    assert not store.undo_removes("New.md")          # the next undo takes back the patch
+    store.push("Old.md", "ORIG", "patched")
+    assert not store.undo_removes("Old.md")          # the floor is a real note
+    assert not store.undo_removes("Unknown.md")

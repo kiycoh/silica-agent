@@ -1040,7 +1040,7 @@ function stampWriteTallies(rows) {
     const open = card && card.querySelector(".wc-open");
     if (open) open.dataset.path = r.path;
     const act = card && card.classList.contains("written") && card.querySelector(".wc-act");
-    if (act && r.kind === "created") {
+    if (act && r.undo_deletes) {
       card.querySelector(".wc-op").textContent = WRITE_COPY.created.label;
       act.textContent = WRITE_COPY.created.act;
       act.dataset.tip = WRITE_COPY.created.hint;

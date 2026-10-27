@@ -47,6 +47,19 @@ def test_undo_with_the_path_recreates_a_deleted_note(vault):
     assert (vault / "Corso" / "Autoencoders.md").read_text(encoding="utf-8") == before
 
 
+def test_undo_by_the_note_name_takes_back_a_patch_keyed_by_its_path(vault):
+    # The GUI write card sends the tool's own argument, a bare name, while the
+    # checkpoint store keys the patch on the path it resolved to (2026-10-26).
+    from silica.tools.notes import silica_patch_note
+
+    before = (vault / "Corso" / "Other.md").read_text(encoding="utf-8")
+    silica_patch_note("Other", "Key takeaways", "- one\n- two", "chat")
+    assert "Key takeaways" in (vault / "Corso" / "Other.md").read_text(encoding="utf-8")
+
+    assert _handle_direct_shortcut("/undo Other", []) is True
+    assert (vault / "Corso" / "Other.md").read_text(encoding="utf-8") == before
+
+
 def test_bare_undo_takes_back_the_newest_action_even_when_it_is_a_delete(vault):
     from silica.tools.notes import silica_patch_note
 

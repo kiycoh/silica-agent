@@ -567,7 +567,7 @@ function stampReviewCards() {
       } catch { notify("couldn't clear the review mark"); keep.disabled = false; return; }
       loadChanges(); // the count drops and this card sheds its border
     });
-    const created = changeRows.some((r) => r.path === path && r.kind === "created");
+    const created = changeRows.some((r) => r.path === path && r.undo_deletes);
     const revert = document.createElement("button");
     revert.type = "button";
     revert.className = "wc-act";
