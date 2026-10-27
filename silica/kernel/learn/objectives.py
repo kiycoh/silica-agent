@@ -163,7 +163,7 @@ def propose(tree: list[dict], chosen: list[str], model: bool = True) -> list[dic
         else:
             # a step's depth names what to ask of it; the material otherwise
             # (13 of 16 course steps read "Apply X to a case", 2026-10-25)
-            cards.append(card(DEPTH_INTENTION.get(node.get("depth"), "") or infer(leaves[0]), label, leaves, "proposed"))
+            cards.append(card(DEPTH_INTENTION.get(node.get("depth") or "", "") or infer(leaves[0]), label, leaves, "proposed"))
     # model=False: Create pressed while the background call still runs
     # writes the templates the row said, not a second call (ADR-0081 §16)
     return rewrite(cards) if model else cards

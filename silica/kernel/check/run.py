@@ -344,7 +344,7 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
                 if not to_judge:
                     states.append({"state": "not checked", "line": b.line, "end": b.end,
                                    "say": "absence needs the dense floor, and this vault has no vectors for it"})
-            elif best < dense_floor:
+            elif dense_floor is not None and best < dense_floor:
                 to_judge = False
                 mine.append({"kind": "not found", "words": "",
                              "say": f"no note of the {len(pool.paths)} searched holds this"})
@@ -382,6 +382,7 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
             stopped = True
             st.append({"state": "not checked", "line": b.line, "say": "the check was cancelled"})
         else:
+            assert judge is not None  # pending fills only while reading, and cache_only took the branch above
             v = judge(b.clean, mp)
         if v is not None:
             fresh[key] = v

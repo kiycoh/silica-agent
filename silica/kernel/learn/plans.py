@@ -550,8 +550,8 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
             found, missing, approx, how, doubt = _with_sources(i, text, labels[i], topics, hits, found, how, doubt,
                                                                approx, node, ctx)
         # the reader's answer for a topic no source met ("is it one of these?")
-        said = {t: resolve_title(matched[t], notes) for t in missing if matched and t in matched}
-        said = {t: p for t, p in said.items() if p}
+        resolved = {t: resolve_title(matched[t], notes) for t in missing if matched and t in matched}
+        said = {t: p for t, p in resolved.items() if p}
         if said:
             missing = [t for t in missing if t not in said]
             found = list(dict.fromkeys(list(found) + list(said.values())))
@@ -611,7 +611,7 @@ def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: 
 
     material = [c for c in colls if role.get(c["key"], {}).get("role") == so.MATERIAL]
     others = [c for c in colls if c not in material and role.get(c["key"], {}).get("role") != so.UNUSED]
-    ctx = {"material": material, "others": others, "practice": [], "activity": set(), "lines": lines,
+    ctx: dict[str, Any] = {"material": material, "others": others, "practice": [], "activity": set(), "lines": lines,
            "origin": {}, "colls": colls, "rows": {}, "covered": {}, "meaning": {}, "ordered": False,
            "labels": labels, "by_meaning": {}}
     if not material:
@@ -684,7 +684,7 @@ def _source_context(colls: list[dict], role: dict, lines: list[str], topics_of: 
         picked: list[dict] = []
         if mine:
             if ctx["ordered"]:
-                local = range(min(mine), max(mine) + 1)
+                local: range | list[int] = range(min(mine), max(mine) + 1)
             else:
                 spines = {main["rows"][n]["spine"] for n in mine}
                 local = [n for n, r in enumerate(main["rows"]) if r["spine"] in spines]
@@ -775,7 +775,7 @@ def _without_generic(dense: dict, asked: dict, aligned: dict[int, list[int]], n_
     return {t: {p: v for p, v in d.items() if p not in generic} for t, d in dense.items()}, generic
 
 
-def _whole_lectures(picked_by: dict[int, list[dict]], material: list[dict], stray: set[tuple] = frozenset(),
+def _whole_lectures(picked_by: dict[int, list[dict]], material: list[dict], stray: set[tuple] | frozenset[tuple] = frozenset(),
                     first: list[int] | None = None) -> None:
     """A lecture the reference teaches is studied whole (ADR-0131 point 3):
     a row no step took, in a spine where steps took others, goes to the step
@@ -909,6 +909,7 @@ def _gap_candidates(tree: list[dict], notes: dict) -> None:
     asks = [(n, t) for n in tree if not n.get("gap") for t in n.get("missing") or []]
     if not asks:
         return
+    store: Any
     try:
         from collections import Counter
 
@@ -1049,7 +1050,7 @@ def reference_rows(body: str) -> list[dict]:
     def cells_of(ln: str) -> list[str]:
         return [c.strip().replace("\\|", "|") for c in _CELL_SPLIT_RE.split(ln.strip().strip("|"))]
 
-    headers: dict[int, list[str]] = {}   # line of a table's first row -> its header cells
+    headers: dict[int, list[str] | None] = {}   # line of a table's first row -> its header cells
     current = None
     for i, ln in enumerate(rows):
         s = ln.strip()
@@ -2036,7 +2037,7 @@ def today_line(plan: dict, passed: list[bool] | None = None, today=None) -> dict
             behind, expected = len(steps) - first, ""
     bits = ["Today: " + "; ".join(f"{_short(label)} ({h:g} h)" if h else _short(label) for label, h in doing) + "."
             if doing else ""]
-    if behind and behind > 0:
+    if behind and behind > 0 and first is not None:
         bits.append(f"{behind} step{'s' if behind > 1 else ''} behind the calendar drawn when the plan was made"
                     + (f": it had {_short(expected)} for today" if expected else ": it had every step done by now")
                     + f", and {_short(_step_label(steps[first]))} is the first not passed.")

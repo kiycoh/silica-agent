@@ -120,7 +120,8 @@ def date_rules(d: str, periods: list[dict], ix: Index, pool: set[str]) -> tuple[
     differently. That is the Northwind defect (19 April 2028 is execution plus
     six years; the rule counts from acceptance) and nothing else: a memo's own
     date or a hearing date is never "not acceptance plus six years"."""
-    findings, states = [], []
+    findings: list[dict] = []
+    states: list[dict] = []
     for p in periods:
         span = dates.period_words(p["n"], p["unit"])
         named = event_dates(p["event"], ix, pool)
@@ -190,8 +191,8 @@ def find_quote(q: str, notes: dict[str, Note], where: list[str], near: list[str]
     best = None
     for path in near:
         lines = notes[path].text.split("\n")
-        flat: list[tuple[str, int]] = [(w, i) for i, ln in enumerate(lines, 1) for w in _words(ln)]
-        ws = [w for w, _ in flat]
+        spots: list[tuple[str, int]] = [(w, i) for i, ln in enumerate(lines, 1) for w in _words(ln)]
+        ws = [w for w, _ in spots]
         size = len(qw) + max(2, len(qw) // 4)
         for start in range(0, max(1, len(ws) - len(qw) + 1)):
             window = ws[start:start + size]
@@ -203,8 +204,8 @@ def find_quote(q: str, notes: dict[str, Note], where: list[str], near: list[str]
             # it is the passage the writer meant, not one shifted to a "the".
             rank = (share, window[0] == qw[0])
             if share >= MISQUOTE_SHARE and (best is None or rank > best[0]):
-                a = flat[start + matched[0].b][1]
-                b = flat[start + matched[-1].b + matched[-1].size - 1][1]
+                a = spots[start + matched[0].b][1]
+                b = spots[start + matched[-1].b + matched[-1].size - 1][1]
                 best = (rank, path, a, " ".join(ln.strip() for ln in lines[a - 1:b]))
     if best:
         return {"state": "near", "path": best[1], "line": best[2], "passage": best[3], "share": best[0][0]}

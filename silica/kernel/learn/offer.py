@@ -61,7 +61,7 @@ def _jev_lost(text: str) -> bool:
     from silica.agent.decide import decide
 
     answers = decide({"message": text}, LOST_QUESTION)
-    return bool(answers) and answers["lost"]["probabilities"].get("yes", 0.0) >= LOST_ACCEPT
+    return bool(answers and answers["lost"]["probabilities"].get("yes", 0.0) >= LOST_ACCEPT)
 
 
 def says_lost(text: str) -> bool:
@@ -311,9 +311,9 @@ def plan_context(text: str, plans: list[dict]) -> tuple[str, str]:
     found = pl.lecture_gaps(plan) if plan.get("scope") == "steps" else None
     if not found:
         return "", ""
-    gaps, decks = found
+    missing, decks = found
     return (f"[Learn's plan {plan['name']} reads its syllabus, {plan['target']}, against the text of the {decks} "
-            f"lecture decks. Topics of the syllabus that no deck mentions: {', '.join(gaps) or 'none'}. Use this "
+            f"lecture decks. Topics of the syllabus that no deck mentions: {', '.join(missing) or 'none'}. Use this "
             f"list for what the slides do not cover; a topic named another way in the slides can still be there.]",
             "")
 

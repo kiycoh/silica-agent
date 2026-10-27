@@ -1342,7 +1342,8 @@ def _via_ipynb(src: Path, workdir: Path) -> tuple[str, Path]:
             for k, out in enumerate(cell.get("outputs") or []):
                 if not isinstance(out, dict):
                     continue
-                data = out.get("data") if isinstance(out.get("data"), dict) else {}
+                raw = out.get("data")
+                data = raw if isinstance(raw, dict) else {}
                 png = data.get("image/png")
                 if isinstance(png, str):
                     name = f"cell{i}-{k}.png"

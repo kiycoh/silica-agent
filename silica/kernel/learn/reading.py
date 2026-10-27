@@ -502,8 +502,8 @@ def parse(text: str) -> list[dict]:
 
     _d, _r, body = frontmatter.split(text or "")
     secs: list[dict] = []
-    cur = None
-    part = None
+    cur: dict | None = None
+    part: str | None = None
     for line in body.splitlines():
         m = _SEC_RE.match(line)
         if m:

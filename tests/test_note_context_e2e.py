@@ -108,7 +108,8 @@ def _drawer_on(page: Page, path: str) -> None:
 
 def _row(path: str) -> str:
     # json.dumps: OTHER's "dell'inadempimento" would end a single-quoted string
-    return f"document.querySelector({json.dumps(f'#tree a.tree-note[data-id=\"{path}\"]')})"
+    sel = '#tree a.tree-note[data-id="' + path + '"]'  # no nested quotes: 3.11 rejects them in f-strings
+    return f"document.querySelector({json.dumps(sel)})"
 
 
 def test_a_reload_keeps_the_note_the_address_names(app):

@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from collections.abc import Mapping
 
 from silica.kernel.link.ast import NON_MD_EXTENSIONS
 
@@ -233,7 +234,7 @@ def sweep_note(rel_path: str, resolves, keep: frozenset[str] = frozenset()) -> d
     }
 
 
-def sweep_dangling_links(note_paths: list[str], priors: dict[str, str | None] | None = None) -> dict:
+def sweep_dangling_links(note_paths: list[str], priors: Mapping[str, str | None] | None = None) -> dict:
     """Unlink still-dangling wikilinks in the given run-written notes.
 
     `note_paths` are vault-relative, `.md` optional. `priors` maps a note the

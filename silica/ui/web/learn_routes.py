@@ -645,18 +645,18 @@ def start_session(payload: dict):
     # notes first and only, one question a note up to the cap, notes in turn
     step = payload.get("step")
     stepped = plan is not None and not note and str(step).isdigit()
-    if stepped:
+    if stepped and plan is not None:
         from silica.kernel.learn import reading
 
         try:
-            in_step = reading.step_notes(plan, int(step))
+            in_step = reading.step_notes(plan, int(str(step)))
         except ValueError as exc:
             raise HTTPException(400, str(exc))
         scope = [p for _t, p in in_step]
         frontier, revisit = list(scope), None
         if not payload.get("n"):
             n = reading.session_size(len(scope))
-        origin = {**origin, "label": f"{plan['name']} · {plans._step_label(plan['steps'][int(step)])}"}
+        origin = {**origin, "label": f"{plan['name']} · {plans._step_label(plan['steps'][int(str(step))])}"}
     teach = bool(payload.get("teach")) and bool(note)
     if note:
         picked = _note_rows(note, payload.get("points"), objectives if plan else None)
@@ -1706,5 +1706,5 @@ def reading_answer(payload: dict):
     section = payload.get("section")
     if kind not in reading.KINDS or not str(section).isdigit():
         raise HTTPException(400, f"kind is one of {reading.KINDS} and section a number")
-    return reading.record(reading.reading_path(plan, step), int(section), kind, str(payload.get("text") or ""),
+    return reading.record(reading.reading_path(plan, step), int(str(section)), kind, str(payload.get("text") or ""),
                           unknown=bool(payload.get("unknown")))

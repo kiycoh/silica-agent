@@ -137,7 +137,7 @@ def find_periods(text: str) -> list[dict]:
             if cut == event:
                 break
             event = cut
-        words = []
+        words: list[str] = []
         for w in re.findall(r"[\w’']+", event):
             if w.lower() in _EVENT_STOP or len(words) == 4:
                 break

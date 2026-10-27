@@ -501,7 +501,8 @@ def split_glued(token: str, vocab: set[str]) -> str | None:
             piece = low[j:i]
             if prev is None or piece not in vocab or (len(piece) == 1 and piece not in _SHORT):
                 continue
-            if best[i] is None or len(prev) + 1 < len(best[i]):
+            cur = best[i]
+            if cur is None or len(prev) + 1 < len(cur):
                 best[i] = prev + [piece]
     parts = best[n]
     return " ".join(parts) if parts and len(parts) > 1 else None
