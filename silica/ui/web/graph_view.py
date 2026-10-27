@@ -177,7 +177,6 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
     def emit(tree: dict, depth: int, prefix: str = "") -> str:
         out = []
         for name in sorted((k for k in tree if k != "__notes__"), key=str.lower):
-            attr = " open" if depth == 0 else ""
             folder = f"{prefix}{name}/"
             # the rail's one folder action, Learn's "Plan this folder"
             # (ADR-0081 §17); the frame has no Learn tab to send it to
@@ -188,7 +187,7 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
             # a note's <a> drags by itself; a summary only when told, and the
             # rail drops a folder on a workspace row as its menu adds one
             drag = ' draggable="true"' if actions else ""
-            out.append(f"<details{attr}><summary{drag}>{html.escape(name)}"
+            out.append(f"<details><summary{drag}>{html.escape(name)}"
                        f'<span class="tree-n">{count(tree[name])}</span>{more}{plan}</summary>')
             out.append(emit(tree[name], depth + 1, folder))
             out.append("</details>")

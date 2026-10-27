@@ -2606,11 +2606,12 @@ def test_the_landing_is_the_mark_and_a_greeting_and_no_webgl_is_left():
     for gone in ("vh-brief", "vh-facts", "vh-lockup", "vh-presence"):
         assert gone not in INDEX_HTML + js + app_css(), gone
     # one drawing everywhere the GUI shows the mark: the ledger's, the dock's
-    # run line, the landing and the dock's disc
+    # run line and the landing. The dock's disc is a chat icon since 2026-10-26.
     run_mark = re.search(r"const RUN_MARK = '(.*?)';", js).group(1)
-    copies = re.findall(r'<svg class="(?:rl-mark|vh-mark|cp-presence)".*?</svg>', INDEX_HTML)
-    assert len(copies) == 3
+    copies = re.findall(r'<svg class="(?:rl-mark|vh-mark)".*?</svg>', INDEX_HTML)
+    assert len(copies) == 2
     assert {_mark_drawing(c) for c in copies} == {_mark_drawing(run_mark)}
+    assert _mark_drawing(re.search(r'<svg class="cp-presence".*?</svg>', INDEX_HTML).group(0)) != _mark_drawing(run_mark)
     # while it writes, the mark wears the run line's own class and beat
     greet = js[js.index("function greet(again = false)"):]
     greet = greet[:greet.index("\n}\n")]

@@ -97,6 +97,8 @@ def app(tmp_vault):
 def _go(page: Page, hash_: str) -> None:
     page.send("Page.navigate", {"url": page.base + "/" + hash_})
     page.wait("document.querySelectorAll('#tree a.tree-note').length >= 3", 30, "the tree to load")
+    # folders start closed and a closed row has no box to click
+    page.js("document.querySelectorAll('#tree details').forEach(d => { d.open = true; })")
 
 
 def _drawer_on(page: Page, path: str) -> None:

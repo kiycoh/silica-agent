@@ -492,7 +492,7 @@ $("#side-search").addEventListener("input", () => trimTreeSel()); // after apply
 // --- open folders survive a redraw (ADR-0126 point 9) -------------------------
 // What the person opened or closed, by folder path, from the toggle events;
 // the filter's forced opening is not theirs, so a toggle under a non-empty
-// filter is not written. Applied over the server's default (top level open)
+// filter is not written. Applied over the server's default (every folder closed)
 // after each innerHTML. toggle does not bubble: captured.
 const treeOpen = new Map();
 const folderOf = (d) => d.querySelector(":scope > summary .tree-more")?.dataset.folder;

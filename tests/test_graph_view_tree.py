@@ -14,8 +14,9 @@ def test_nested_folders_become_details():
     # the summary carries the note count under the folder (audit P19)
     assert '<summary>a<span class="tree-n">2</span></summary>' in html
     assert '<summary>b<span class="tree-n">1</span></summary>' in html
-    # top-level folder is open, nested folder is not
-    assert "<details open><summary>a<" in html
+    # every folder starts closed, the top level included
+    assert "<details><summary>a<" in html
+    assert "<details open" not in html
     assert "<details><summary>b<" in html
 
 

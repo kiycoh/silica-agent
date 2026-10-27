@@ -1472,10 +1472,8 @@ body.note-open #dock {
 }
 
 #dock {
-  /* unitless, because the mark's scale is their ratio; --open is its size at
-     the head of the open row */
+  /* unitless, so the icon's width can be this times (1 - --unfold) */
   --rest: 42;
-  --open: 36;
   /* the disc at rest: the mark's box plus the shell's padding and border */
   --pod: calc(var(--rest) * 1px + 0.6rem + 2px);
 }
@@ -1509,6 +1507,20 @@ body.note-open #dock {
   #dock-composer:has(.cp-presence:not([hidden])):not(:hover, :focus-within, :has(#dock-input:not(:placeholder-shown))) {
   --unfold: 0;
   transition-delay: 300ms;
+  /* An animation and not a transition on opacity: at a page load the dock is
+     born resting, and a transition does not run from the first computed style,
+     so the disc would have started faint instead of fading after 3 s. The
+     animation ends with the rest (hover, focus, a draft), which puts opacity
+     back to 1 at once: the pointer never meets a half-faded control. The bob is
+     named again because this declaration replaces the base one's list; a
+     running animation of the same name is kept, not restarted. */
+  animation: dock-bob 3.2s ease-in-out infinite alternate, dock-rest-fade 2s ease-out 3s both;
+}
+
+@keyframes dock-rest-fade {
+  to {
+    opacity: 0.35;
+  }
 }
 
 /* The unfolded width (ADR-0072). Over the Graph and the Map the frame's two
@@ -1547,24 +1559,22 @@ body.note-open #dock {
   transition: border-color var(--dur) var(--ease);
 }
 
-/* The mark keeps its 42 px box in both shapes and is SCALED to 36 px when the
-   composer opens, not resized: one transform a frame and no relayout of the
-   row under the morph (it was a WebGL canvas until 2026-10-22, where a resize
-   also cleared the backing store). The margins seat the scaled box on the
-   row's 2 px inset.
-   At rest the mark IS the row, so the disc is round; open, its box overhangs
-   the field's row equally above and below, so the shell is back at the
-   composer's own height. */
+/* The icon is the disc at rest and gives its place to the field when the
+   composer opens (2026-10-26; it used to travel to the head of the row and stay
+   there). Its width runs to 0 with --unfold, so the field slides into the row
+   it vacates, and it is gone by the time the controls arrive (the first 45% of
+   the unfold: the controls' fade below starts there). The SVG scales down with
+   its box, so it shrinks as it leaves. At rest the icon IS the row, so the disc
+   is round; open, its box overhangs the field's row equally above and below, so
+   the shell is back at the composer's own height. */
 #dock .cp-presence {
   flex-shrink: 0;
   pointer-events: none;
   fill: var(--frost);
-  width: calc(var(--rest) * 1px);
+  width: calc(var(--rest) * 1px * (1 - var(--unfold)));
   height: calc(var(--rest) * 1px);
   margin-block: calc((var(--field-row) - var(--rest) * 1px) / 2 * var(--unfold));
-  margin-left: calc((2px - (var(--rest) - var(--open)) * 0.5px) * var(--unfold));
-  margin-right: calc((var(--open) - var(--rest)) * 0.5px * var(--unfold));
-  scale: calc(1 - (1 - var(--open) / var(--rest)) * var(--unfold));
+  opacity: clamp(0, 1 - var(--unfold) * 2.2, 1);
 }
 
 #dock .cp-presence .s0 {

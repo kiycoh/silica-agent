@@ -622,11 +622,12 @@
     </div>
     <form id="dock-composer">
       <div class="composer-shell">
-        <!-- the dock rests as this mark and opens around it (ADR-0048,
-             amendment 2026-10-06), drawn in 2D and still since the amendment
-             of 2026-10-22: a turn from the graph shows its work on the run
-             line above, so the mark here never has to -->
-        <svg class="cp-presence" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path class="s0" d="M16 160 L96 160 L96 240 L16 240 Z"/><path class="s1" d="M16 112 L144 112 L144 240 L112 240 L112 144 L16 144 Z"/><path class="s2" d="M16 64 L192 64 L192 240 L160 240 L160 96 L16 96 Z"/><path class="s3" d="M16 16 L240 16 L240 240 L208 240 L208 48 L16 48 Z"/></svg>
+        <!-- the dock rests as a chat bubble and opens around it. It was the
+             product mark until 2026-10-26: a disc that bobs in a corner read
+             as a logo to look at, not as the place a question is typed. Still,
+             drawn in 2D: a turn from the graph shows its work on the run line
+             above, so the icon here never has to -->
+        <svg class="cp-presence" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path d="M64 32 H192 A40 40 0 0 1 232 72 V152 A40 40 0 0 1 192 192 H112 L64 232 V192 A40 40 0 0 1 24 152 V72 A40 40 0 0 1 64 32 Z"/><circle class="s0" cx="92" cy="112" r="14"/><circle class="s0" cx="128" cy="112" r="14"/><circle class="s0" cx="164" cy="112" r="14"/></svg>
         <textarea id="dock-input" rows="1" aria-label="ask the vault from here" placeholder="ask the vault from here…  (⏎ send, ⇧⏎ newline)"></textarea>
         <div id="dock-note-chip" class="note-chip-row" hidden></div>
         <button type="button" class="mic" data-for="dock-input" title="dictate into the message" aria-label="dictate into the message">
