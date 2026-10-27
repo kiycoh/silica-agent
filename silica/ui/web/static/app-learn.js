@@ -604,7 +604,9 @@ function lrSessionList(d) {
   const rows = all.filter((r) => !lrDropped.has(r.path));
   const head = lrEl("div", "lr-nhead");
   const t = lrEl("div", "t");
-  t.appendChild(lrEl("b", null, `${lrPlural(rows.length, "question")} waiting from earlier sessions`));
+  // Before any answer there is no earlier session: a fresh vault of six
+  // papers read "8 questions waiting from earlier sessions" (2026-10-26).
+  t.appendChild(lrEl("b", null, `${lrPlural(rows.length, "question")} ${d.measured ? "waiting from earlier sessions" : "for your first session"}`));
   t.appendChild(lrEl("span", "lr-help", lrDropped.size ? `about ${_lrMinutes(rows.length)} min · ${lrPlural(lrDropped.size, "note")} dropped`
     : [d.session ? `about ${d.session.minutes} min` : "", d.mix || ""].filter(Boolean).join(" · ")));
   head.appendChild(t);

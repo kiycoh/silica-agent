@@ -217,3 +217,22 @@ def test_a_one_line_pasted_reference_reads_back_as_text(vault):
     vault.note("ML/Programma.md", "# Programma\n\n- Softmax\n- Chain rule\n")
     q = plans.read_plan(plans.write_plan("By note", "steps", "Programma", restrict="ML/")["path"])
     assert q["target"] == "Programma" and plans.scope_of(q)["paths"] == ["ML/Softmax.md", "ML/Chain rule.md"]
+
+
+def test_the_session_list_names_no_earlier_session_before_any_answer():
+    """A fresh vault of six papers opened Learn on "8 questions waiting from
+    earlier sessions", none ever run (2026-10-26)."""
+    js = app_js()
+    body = js[js.index("function lrSessionList(d)"):]
+    body = body[:body.index("\n}\n")]
+    assert 'd.measured ? "waiting from earlier sessions" : "for your first session"' in body
+
+
+def test_a_pair_never_answered_is_not_counted_as_fading():
+    from silica.ui.web.learn_routes import _mix
+
+    groups = {"missed": [], "due": [{"path": "a.md"}], "never": []}   # the pair sits in the "due" list
+    items = [{"path": "a.md", "pool": "contrast", "attempts": 0},
+             {"path": "b.md", "pool": "unexplored", "attempts": 0},
+             {"path": "c.md", "pool": "due", "attempts": 0}]       # a card from writing it (D10)
+    assert _mix(items, groups) == "1 fading, 2 not tested yet"

@@ -194,18 +194,21 @@ def _search(query: str, k: int) -> list[str]:
 
 def _nearest(query: str, resolve) -> list[str]:
     """The K_NEAREST nearest notes, as graph ids. A paper leaf is a paper, not
-    one of "my notes", so leaves are dropped; a vault with leaves among the
-    first hits asks once more for four times as many, and keeps the first
-    K_NEAREST notes left. The first call is the measured k=5 one, so a vault
-    without leaves runs exactly the measured search."""
-    from silica.kernel.recall.paths import is_source_leaf
+    one of "my notes", so leaves are dropped, and so is the pipeline's staging:
+    an archived segment of a nucleated paper covered 33 of a collection's 37
+    papers, under its segment file name, beside the 16 its note covered
+    (2026-10-26). A vault with either among the first hits asks once more for
+    four times as many, and keeps the first K_NEAREST notes left. The first
+    call is the measured k=5 one, so a vault without them runs exactly the
+    measured search."""
+    from silica.kernel.recall.paths import is_source_leaf, is_staging_path
 
     for k in (K_NEAREST, 4 * K_NEAREST):
         found = _search(query, k)
         notes: list[str] = []
         for path in found:
             gid = resolve(path) or path
-            if gid and not is_source_leaf(gid) and gid not in notes:
+            if gid and not is_source_leaf(gid) and not is_staging_path(gid) and gid not in notes:
                 notes.append(gid)
         if len(notes) >= K_NEAREST or len(notes) == len(found):
             break

@@ -96,8 +96,9 @@ _WINNER_RE = re.compile(r"\[\[([^\]|#]+)")
 # Notes about learning, never asked about; the calendar's own notes, which
 # Learn's "never practised" listed as study material until 2026-10-15; and
 # merge losers, whose winner is the note to study; a step's reading (ADR-0132),
-# an explanation written from notes that are themselves the material.
-NOT_MATERIAL = ("plan", "syllabus", "event", "merged", "reading")
+# an explanation written from notes that are themselves the material; and
+# the pipeline's staging, converted text that is the source, not a note.
+NOT_MATERIAL = ("plan", "syllabus", "event", "merged", "reading", "staged")
 
 
 def is_material(meta: dict) -> bool:
@@ -139,11 +140,14 @@ def _notes_meta(vault: Path) -> dict[str, dict]:
     """{relative path: {"created": ts, "ai": bool}} for every readable note.
 
     Timeline's walk verbatim: dot-dirs, .silicaignore matches and the verbatim
-    sources dir are not the reader's notes. Memoized on the vault's file-state
-    epoch like timeline._all_rows: repeated digest reads between vault changes
-    cost one stat walk instead of a full re-parse.
+    sources dir are not the reader's notes. The pipeline's own staging (the
+    inbox, the archive, the run log) is walked, since a workspace may list an
+    inbox handout, but its kind is "staged", which is not study material.
+    Memoized on the vault's file-state epoch like timeline._all_rows: repeated
+    digest reads between vault changes cost one stat walk instead of a full
+    re-parse.
     """
-    from silica.kernel.recall.paths import SOURCES_DIR, ignore_matcher, vault_epoch
+    from silica.kernel.recall.paths import SOURCES_DIR, ignore_matcher, is_staging_path, vault_epoch
 
     epoch = vault_epoch(str(vault))
     if epoch:
@@ -161,15 +165,23 @@ def _notes_meta(vault: Path) -> dict[str, dict]:
             continue
         if parts[0] == SOURCES_DIR:
             continue
+        rel = "/".join(parts)
         try:
             text = f.read_text(encoding="utf-8")
             mtime = f.stat().st_mtime
         except (OSError, UnicodeDecodeError):
             continue  # one unreadable note must not blind the view
         created, ai, kind, extra = _note_meta(text, mtime)
+        # Converted text waiting in the inbox or filed in the archive carries
+        # the paper's own `date:` and no `AI: true`, so it read as notes the
+        # reader wrote years ago: a fresh vault of six papers opened Learn on
+        # "8 questions waiting from earlier sessions", a references segment
+        # among them (2026-10-26).
+        if is_staging_path(rel):
+            kind = "staged"
         # mtime rides along for the picker's freshness rule (learn-suite D13):
         # a note edited after its last rating is asked as new material.
-        out["/".join(parts)] = {"created": created, "ai": ai, "mtime": mtime, "kind": kind, **extra}
+        out[rel] = {"created": created, "ai": ai, "mtime": mtime, "kind": kind, **extra}
 
     if epoch:
         _meta_memo.clear()
@@ -275,6 +287,7 @@ def prerequisites_map() -> dict[str, list[str]]:
                 _empty_report(), G_dir.to_undirected(), G_dir, cooccur_store=store, created=None,
             )
             _prereq_disk(sig, prereq_map)
+        prereq_map = drop_structural(prereq_map, _notes_meta(Path(vault)))
         if epoch:
             _prereq_memo.clear()
             _prereq_memo[vault] = (epoch, prereq_map)
@@ -282,6 +295,39 @@ def prerequisites_map() -> dict[str, list[str]]:
     except Exception as exc:
         logger.debug("learner: prerequisites unavailable (%s)", exc)
         return {}
+
+
+def drop_structural(prereq_map: dict[str, list[str]], notes: dict[str, dict]) -> dict[str, list[str]]:
+    """The map without the notes that arrange the vault rather than state a
+    concept: a lesson spine, a folder's hub (`Papers/Papers.md`, the name the
+    pipeline gives the hub of its target, orchestrator.py and validate.py),
+    and the source's own text, a leaf under `sources/` or a segment staged in
+    the inbox or the archive.
+
+    RefD damps a note that cites everything but not one that everything
+    cites, and every note a run writes links its hub, its spine and its
+    source: on six nucleated papers the Path view put the `Papers` hub, and
+    the YOLO paper's spine two rungs up, before every note; without them, each
+    paper's archived segment stood after each of its notes (2026-10-26).
+    """
+    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.recall.paths import is_source_leaf
+
+    structural = {cooccur_key(p) for p, m in notes.items()
+                  if m.get("spine") or m.get("kind") == "staged"
+                  or Path(p).stem.casefold() == Path(p).parent.name.casefold()}
+
+    def arranges(key: str) -> bool:
+        return key in structural or is_source_leaf(key)
+
+    out: dict[str, list[str]] = {}
+    for dependent, prereqs in prereq_map.items():
+        if arranges(dependent):
+            continue
+        kept = [q for q in prereqs if not arranges(q)]
+        if kept:
+            out[dependent] = kept
+    return out
 
 
 def _prereq_signature(edges, store) -> str:

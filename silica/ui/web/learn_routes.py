@@ -419,10 +419,14 @@ def _next_groups(entries: list[dict], rows: dict, preview: dict, plan_rows: list
 
 
 def _mix(preview_items: list[dict], groups: dict) -> str:
-    where = {r["path"]: g for g in ("missed", "due", "never") for r in groups[g]}
+    missed = {r["path"] for r in groups["missed"]}
     n = {"due": 0, "missed": 0, "never": 0}
     for it in preview_items:
-        g = where.get(it["path"]) or ("never" if it["pool"] == "unexplored" and not it.get("attempts") else "due")
+        # Never answered is "not tested yet" from any pool but the schedule's
+        # own, as _reason says. Read off the "due" list, which also holds the
+        # pairs, a contrast pair on a fresh vault read "1 fading" (2026-10-26).
+        g = ("missed" if it["path"] in missed
+             else "never" if not it.get("attempts") and it["pool"] != "due" else "due")
         n[g] += 1
     words = {"due": "fading", "missed": "missed", "never": "not tested yet"}
     return ", ".join(f"{v} {words[k]}" for k, v in n.items() if v)

@@ -249,3 +249,46 @@ def test_an_event_note_is_not_study_material(tmp_vault):
     meta = learner._notes_meta(Path(CONFIG.vault_path))
     assert not learner.is_material(meta["Cal/Lab session.md"])
     assert learner.is_material(meta["Bio/cell.md"])
+
+
+def test_the_pipelines_staging_and_its_log_are_not_the_readers_notes(tmp_vault):
+    """A fresh vault of six converted papers showed "8 questions waiting from
+    earlier sessions" and a `-2-references` row before any session: the inbox
+    and the archive hold converted text with the paper's own `date:` and no
+    `AI: true`, so each one was granted a card from "writing" it (2026-10-26)."""
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    paper = "---\ndate: 2014-12-22\nsource_file: /papers/Adam.pdf\n---\n\n# Adam\n"
+    tmp_vault.note("Inbox/Adam/Adam-2-references.md", paper)
+    tmp_vault.note("Done/Adam/Adam-1-adam.md", paper)
+    tmp_vault.note("log.md", "- 2026-10-26 · nucleate `Adam-1-adam.md` → 10 new\n")
+    tmp_vault.note("Papers/Adam Update Rule.md", "---\nAI: true\n---\n\n# Adam Update Rule\n")
+
+    meta = learner._notes_meta(Path(CONFIG.vault_path))
+    assert {p for p, m in meta.items() if learner.is_material(m)} == {"Papers/Adam Update Rule.md"}
+    # still walked: a workspace may list an inbox handout
+    assert "Inbox/Adam/Adam-2-references.md" in meta
+
+
+def test_a_spine_or_a_folder_hub_is_never_a_prerequisite():
+    """Every note a run writes links its folder hub, its source's spine and
+    its leaf, so RefD made them a prerequisite of everything (Path view,
+    2026-10-26)."""
+    notes = {
+        "Papers/Papers.md": {},
+        "Papers/You Only Look Once.md": {"spine": True},
+        "Papers/Adam Update Rule.md": {},
+        "Papers/Bias Correction.md": {},
+        "Done/Adam/Adam-1-adam.md": {"kind": "staged"},
+    }
+    prereq = {
+        "Papers/Adam Update Rule": ["Papers/Papers", "Papers/You Only Look Once", "Papers/Bias Correction",
+                                    "sources/Adam/Adam-1-adam"],
+        "sources/Adam/Adam-1-adam": ["Papers/Bias Correction"],
+        "Done/Adam/Adam-1-adam": ["Papers/Bias Correction"],
+        "Papers/Bias Correction": ["Papers/Papers"],
+        "Papers/You Only Look Once": ["Papers/Adam Update Rule"],
+    }
+    assert learner.drop_structural(prereq, notes) == {"Papers/Adam Update Rule": ["Papers/Bias Correction"]}

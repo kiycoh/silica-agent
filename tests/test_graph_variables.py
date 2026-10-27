@@ -584,7 +584,8 @@ def test_prerequisites_map_is_kept_while_its_inputs_are(graph_nodes_edges, coocc
     monkeypatch.setattr(cd, "_REFD_MIN_RELATED", 1)
     monkeypatch.setattr(graph_export, "build_graph_data", lambda: graph_nodes_edges)
     monkeypatch.setattr(cooccurrence, "get_cooccur_store", lambda **_: cooccur_store)
-    epochs = iter(["e1", "e2", "e3", "e4"])
+    # every read moves the epoch; the map also reads the notes' own (spines, hubs)
+    epochs = (f"e{i}" for i in __import__("itertools").count(1))
     monkeypatch.setattr(paths, "vault_epoch", lambda *_: next(epochs))
     monkeypatch.setattr(learner, "_prereq_memo", {})
     calls = []

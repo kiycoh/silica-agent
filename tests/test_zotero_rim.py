@@ -108,6 +108,18 @@ def test_the_query_is_the_title_and_abstract_cut_as_one_string():
     assert zc.query_of("T", "") == "T. "
 
 
+def test_nearest_drops_the_pipelines_staging_too(monkeypatch, tmp_vault):
+    """An archived segment of a nucleated paper covered 33 of a collection's
+    37 papers under its segment file name (2026-10-26): Done/ and the inbox
+    are the pipeline's, not notes."""
+    def search(query, k):
+        return ["Done/Paper/Paper-1-intro.md", "Inbox/Other/Other-1-a.md", "N1.md", "N2.md", "N3.md",
+                "N4.md", "N5.md"][:k]
+
+    monkeypatch.setattr(zc, "_search", search)
+    assert zc._nearest("q", lambda p: p) == ["N1.md", "N2.md", "N3.md", "N4.md", "N5.md"]
+
+
 def test_nearest_drops_paper_leaves_and_asks_again(monkeypatch):
     asked = []
 
