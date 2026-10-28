@@ -69,6 +69,7 @@ ALLOWED = {
     "kernel/report/structure.py":   "keyspace normalization (cooccur_key) plus paths/note_nodes/node_label for the burst window (V6), same reads as learner.py; constructs no ranking",
     "kernel/recall/compare.py":     "keyspace normalization (cooccur_key) plus stem_postings to count each part's terms for /compare (ADR-0047, rate ratio); constructs no ranking",
     "ui/web/server.py":             "hands get_cooccur_store() to compare_sets for /compare (ADR-0047); constructs no ranking",
+    "sources/discover/rank.py":     "a story's near notes (ADR-0137): raw cosine_top_k against the vault store under an absolute floor (NEAR_AT), which the facade's fused scores cannot carry; constructs no ranking",
 }
 
 
