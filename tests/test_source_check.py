@@ -441,9 +441,47 @@ def test_a_note_found_only_by_its_title_is_read_from_its_body():
     # A short note is read whole even when its window is a full sentence:
     # a window cut before "none recorded" read as support (2026-10-25).
     full = {"path": note.path, "line": 7, "window": "## Position\n\nModel D remains the default expectation in document-heavy claims"}
-    assert [p["text"] for p in run._model_passages([full], [], [], {note.path: note})] == [run._excerpt(note)]
+    assert [p["text"] for p in run._model_passages([full], [], [], {note.path: note})] == [run._excerpt(note)[1]]
+    # A long note is read by its hit's section, not the window: a section
+    # over the cap alone is cut to the cap around its hit.
     long = Note(note.path, note.text + "x " * run.NOTE_CHARS, {})
-    assert run._model_passages([full], [], [], {note.path: long})[0]["text"] == full["window"]
+    [p] = run._model_passages([full], [], [], {note.path: long})
+    assert p["line"] == 5 and "not automatic" in p["text"] and len(p["text"]) == run.NOTE_CHARS
+
+
+def test_a_long_notes_deciding_section_reaches_the_judge_under_both_caps():
+    """ADR-0134's gate, 2026-10-27: three of Jev's seven misses were a long
+    note shown as a window or its first 1,800 characters, the deciding
+    sentence further down. The search hit the note's lede (n24) or not the
+    note at all (n08, read because the block links it)."""
+    from silica.kernel.check import judge
+    from silica.kernel.check.pool import Note
+
+    filler = "Filler sentence about something else entirely. " * 60  # ~2,900 characters a section
+    text = (f"---\ntype: Note\n---\n\n# SOM\n\n> The lede.\n\n## A\n\n{filler}\n\n## B\n\n{filler}\n\n"
+            f"## C\n\nThe neighbour factor is 0.5 within radius r and 0 beyond it.\n\n## D\n\n{filler}\n")
+    som = Note("ML/SOM.md", text, {})
+    c_line = text.split("\n").index("## C") + 1
+    assert len(run._body(som)) > 2 * run.NOTE_CHARS
+    deciding = "0.5 within radius r"
+    # The block's top hit is the lede; the deciding section ranked lower in
+    # the same search, past the cap of a read from the top: it is read
+    # after the lede, then A, while B no longer fits.
+    lede = {"path": som.path, "line": 5, "window": "# SOM\n\n> The lede.\n\nThe neighbour factor is shared by every unit."}
+    [p] = run._model_passages([lede], [], [], {som.path: som}, [lede, {"path": som.path, "line": c_line}])
+    assert deciding in p["text"] and "## B" not in p["text"] and p["line"] == 5
+    assert text.index("## C") - text.index("# SOM") > run.NOTE_CHARS
+    # Linked, never hit: the note from its top, while sections fit the cap.
+    [p] = run._model_passages([], [som.path], [], {som.path: som})
+    assert p["text"].startswith("# SOM") and len(p["text"]) <= run.NOTE_CHARS
+    # Per call: cited notes first, the dense neighbours dropped once the
+    # call is full, and no passage the judge slices again.
+    others = [Note(f"ML/N{i}.md", text, {}) for i in range(6)]
+    notes = {n.path: n for n in [som, *others]}
+    cited = [som.path] + [n.path for n in others[:4]]
+    mp = run._model_passages([], cited, [(n.path, 0.9) for n in others[4:]], notes)
+    assert [x["path"] for x in mp] == cited and sum(len(x["text"]) for x in mp) <= run.JUDGE_CHARS
+    assert judge.PASSAGE_CHARS >= run.NOTE_CHARS
 
 
 def test_the_route_takes_a_line_range_and_refuses_a_bad_one(tmp_vault, monkeypatch):

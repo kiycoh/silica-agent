@@ -70,7 +70,25 @@ CACHE_DIR = ".silica/checks"
 # known to have been drafted fro" before "none recorded", one the wrong
 # section of a 900-character note (2026-10-25). The testbench's shared notes
 # run 300 to 1,500 characters of body.
-NOTE_CHARS = 1800
+# It is also the most a longer note's passage carries (_excerpt). At 1,800,
+# three of Jev's seven misses on ADR-0134's gate (2026-10-27) were a note
+# shown as its first 1,800 characters or a 600-character window, the
+# deciding sentence 2,121 to 2,581 characters into its body. 4,000 holds a
+# whole section for 95% of the course vault's 13,008 sections and a whole
+# note for 66% of its 2,166 notes (measured 2026-10-27).
+NOTE_CHARS = 4000
+# All of one judge call's passages together: four at NOTE_CHARS, about the
+# 8 x 1,800 = 14,400 the released check could already send. On ADR-0134's
+# gate (2026-10-27) its calls ran at a median of 13,976 characters (4,796
+# before) and Jev's 94 fresh requests took 0.37 s median, 0.67 s p95, none
+# unanswered (decide.py's budget is 3 s). Cited notes are kept first, then the
+# search and the dense leg in turn by rank: dropping the dense neighbours
+# first cost two faithful blocks their source to lower lexical hits, one a
+# "passo" (stride) block read against gradient descent's step.
+JUDGE_CHARS = 16000
+# silica_core's own section split (core._HEADING), so a hit's line falls in
+# exactly one of the sections _excerpt reads.
+_SECTION = re.compile(r"(?m)^(?=#{1,4} )")
 # Fewer body words than this under a window's headings and frontmatter, and
 # the window is a title, not a passage (_thin).
 THIN_WORDS = 8
@@ -104,8 +122,42 @@ def _body(note: pl.Note) -> str:
     return note.text[sum(len(x) + 1 for x in note.text.split("\n")[:blk.body_start(note.text)]):]
 
 
-def _excerpt(note: pl.Note) -> str:
-    return _body(note)[:NOTE_CHARS]
+def _excerpt(note: pl.Note, lines: list[int] | None = None) -> tuple[int, str]:
+    """(first line, text): what the judge reads of a note. A note up to
+    NOTE_CHARS is read whole. A longer one is read by its sections: first
+    those the block's search hits landed in (`lines`, best first), then the
+    rest from the top while they fit, joined in the note's own order. A
+    hit's own section can rank low or not at all for the block that needs
+    it: the SOM note's neighbourhood formula sits in a section outside the
+    top 40 hits of the block that misstates it (2026-10-27)."""
+    skip = blk.body_start(note.text)
+    body = _body(note)
+    if len(body) <= NOTE_CHARS:
+        return skip + 1, body
+    secs, off = [], 0  # (first line, text)
+    for part in _SECTION.split(body):
+        if part.strip():
+            secs.append((skip + 1 + body.count("\n", 0, off), part))
+        off += len(part)
+    hit: dict[int, int] = {}  # section -> its best hit line
+    for ln in lines or []:
+        hit.setdefault(max((i for i, s in enumerate(secs) if s[0] <= ln), default=0), ln)
+    take, left = [], NOTE_CHARS
+    for i in list(hit) + [i for i in range(len(secs)) if i not in hit]:
+        first, part = secs[i]
+        if len(part) <= left:
+            take.append(i)
+            left -= len(part)
+        elif not take:
+            # shortcut: a section over NOTE_CHARS alone (5% of the course
+            # vault's, the longest 1% over 9,652 characters) is cut to the
+            # cap from a quarter before its hit, so a sentence further on is
+            # lost again; reopen when a gate misses on one.
+            at = len("\n".join(part.split("\n")[:hit.get(i, first) - first]))
+            start = part.rfind("\n", 0, max(0, min(at - NOTE_CHARS // 4, len(part) - NOTE_CHARS))) + 1
+            return first + part.count("\n", 0, start), part[start:start + NOTE_CHARS]
+    take.sort()
+    return secs[take[0]][0], "".join(secs[i][1] for i in take)
 
 
 def _thin(window: str) -> bool:
@@ -123,30 +175,48 @@ def _short(note: pl.Note | None) -> bool:
 
 
 def _model_passages(passages: list[dict], cited: list[str], near: list[tuple[str, float]],
-                    notes: dict[str, pl.Note]) -> list[dict]:
+                    notes: dict[str, pl.Note], found: list[dict] | None = None) -> list[dict]:
     """What the judge reads: the search's passages, then the notes the block
     links or names, then the pool's nearest notes by meaning, which is how an
-    Italian block reaches its English source when no word matches. A short
-    note, or one the search found only by its title, is read from its body
-    instead of a window."""
+    Italian block reaches its English source when no word matches. A note is
+    read by _excerpt, one passage per note, from the sections every hit of
+    the block's search (`found`, the whole ranking) landed in; a window is
+    kept only for a hit outside the walked notes."""
+    lines: dict[str, list[int]] = {}
+    for h in found or passages:
+        lines.setdefault(h["path"], []).append(h.get("line", 1))
     out, thin = [], []
     for h in passages:
         text = h.get("window") or h.get("snippet") or ""
-        if _thin(text) or _short(notes.get(h["path"])):
+        note = notes.get(h["path"])
+        if _thin(text) or _short(note):
             thin.append(h["path"])
-        else:
-            # shortcut: a long note's window can still cut the sentence that
-            # decides; widen it to the hit's section once a gate misses on a
-            # note over NOTE_CHARS.
+        elif note is None:
             out.append({"path": h["path"], "line": h.get("line", 1), "text": text})
-    # A thin hit's note gets its excerpt even beside a fuller hit of its own:
-    # Brindle's "Ratio" window came without the "Holding" above it.
-    seen = {o["path"] for o in out} - set(thin)
+        elif h["path"] not in {o["path"] for o in out}:
+            line, text = _excerpt(note, lines.get(h["path"]))
+            out.append({"path": h["path"], "line": line, "text": text})
+    # A thin hit's section is already in its note's read above, ahead of the
+    # rest: Brindle's "Ratio" window once came without the "Holding" above it.
+    seen = {o["path"] for o in out}
     for path in list(dict.fromkeys(thin + cited + [p for p, _s in near[:2]])):
         if path not in seen and path in notes:
             seen.add(path)
-            out.append({"path": path, "line": blk.body_start(notes[path].text) + 1, "text": _excerpt(notes[path])})
-    return out
+            line, text = _excerpt(notes[path], lines.get(path))
+            out.append({"path": path, "line": line, "text": text})
+    # The budget's order: cited notes, then the two legs taken in turn by rank.
+    prio: dict[str, int] = {}
+    for r, h in enumerate(passages):
+        prio.setdefault(h["path"], 2 * r + 1)
+    for j, (p, _s) in enumerate(near[:2]):
+        prio[p] = min(prio.get(p, 2 * j + 2), 2 * j + 2)
+    prio.update(dict.fromkeys(cited, 0))
+    kept, left = set(), JUDGE_CHARS
+    for i in sorted(range(len(out)), key=lambda i: prio.get(out[i]["path"], len(out) * 2)):
+        if len(out[i]["text"]) <= left:
+            kept.add(i)
+            left -= len(out[i]["text"])
+    return [o for i, o in enumerate(out) if i in kept]
 
 
 def _verdict_rows(v: dict, line: int) -> tuple[list[dict], list[dict]]:
@@ -311,9 +381,10 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
 
         # Passages, before the quotations: their notes are where a near
         # quotation is looked for.
-        passages: list[dict] = []
+        found: list[dict] = []
         if search is not None:
-            passages = [h for h in search(b.clean, SEARCH_WIDTH) if h.get("path") in pool.paths][:PASSAGES]
+            found = [h for h in search(b.clean, SEARCH_WIDTH) if h.get("path") in pool.paths]
+        passages = found[:PASSAGES]
         lexical = any(float(h.get("coverage") or 0) >= LEXICAL_FLOOR for h in passages)
 
         sourced = bool(cited or found_in)
@@ -357,7 +428,7 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
         if to_judge:
             waiting += 1
             if reading:
-                mp = _model_passages(passages, list(dict.fromkeys(cited + found_in)), near, notes)
+                mp = _model_passages(passages, list(dict.fromkeys(cited + found_in)), near, notes, found)
                 key = hashlib.sha1("\0".join([b.clean] + sorted(
                     f"{x['path']}\0{x['text']}" for x in mp)).encode()).hexdigest()
                 pending.append((b, mp, key, cited))

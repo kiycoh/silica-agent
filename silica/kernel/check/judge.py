@@ -49,8 +49,10 @@ THRESHOLDS: dict[str, float] = {k: 0.5 for k in CRITERIA}
 # more (2026-10-25). The first set had one true at 0.62, now not checked: a
 # block left open costs less than one wrongly vouched for.
 THRESHOLDS["supported"] = 0.75
-# run.NOTE_CHARS: a short note reaches the judge whole.
-PASSAGE_CHARS = 1800
+# run.NOTE_CHARS, which already caps what run hands over. Left at 1,800, a
+# 3,879-character section run widened would reach Jev cut before its
+# deciding list (ADR-0134's gate, n04, 2026-10-27).
+PASSAGE_CHARS = 4000
 
 Decide = Callable[[dict, dict], "dict | None"]
 Chat = Callable[[str], str]
