@@ -624,7 +624,7 @@ body.drawer-recall #node-search-wrap {
   width: calc(100% - 40px);
 }
 
-body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar) {
+body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-head) {
   padding-right: 52px;
 }
 

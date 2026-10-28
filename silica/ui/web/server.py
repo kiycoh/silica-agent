@@ -1304,7 +1304,8 @@ def _turn_kind(text: str) -> str:
 
 async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str = "",
                    withhold: "Sequence[str]" = (), files: "Sequence[dict]" = (), said: str = "",
-                   prebuilt: dict | None = None, note: str = "") -> AsyncIterator[dict]:
+                   prebuilt: dict | None = None, note: str = "", story: str = "",
+                   scope: str = "story") -> AsyncIterator[dict]:
     """One agent turn as a stream of transport-neutral wire dicts.
 
     Yields `event_to_json(...)` dicts as the agent streams, then exactly one
@@ -1324,6 +1325,9 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
     `prebuilt` is a stored user message asked again as it was (POST /turn/redo).
     `note` is the vault path of the note open beside the chat (the composer's
     chip): it joins the named notes and rides the user message as `silica_note`.
+    `story` is a Discover story the composer's story chip names (ADR-0137 point
+    8): its articles ride the turn as a fenced block, `scope` says what the
+    answer may draw on, and the chip rides the message as `silica_story`.
     """
     from silica.cli import _compact_context, _expand_web_turn, _update_context_tokens
 
@@ -1578,6 +1582,13 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             if block := await asyncio.to_thread(jobs.settled, current_session_id):
                 agent_msg += "\n\n" + block
 
+        story_chip = None
+        if story:
+            from silica.sources.discover.story import chat_block
+
+            block, story_chip = await asyncio.to_thread(chat_block, None, story, scope)
+            if block:
+                agent_msg += "\n\n" + block
         # An attached image rides this turn only (ADR-0077 point 3): the
         # transcript, the narration and every later turn carry its saved path,
         # which silica_look opens again, because the base64 would otherwise be
@@ -1596,6 +1607,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             msg["silica_said"] = said
         if opened:
             msg["silica_note"] = opened
+        if story_chip:
+            msg["silica_story"] = story_chip
         if prebuilt is not None:
             msg = prebuilt
         ws = await asyncio.to_thread(_resolve_workspace, workspace)
@@ -2191,9 +2204,15 @@ async def chat(payload: dict):
     # The note open beside the chat (the composer's chip), as a vault path;
     # named_notes keeps it only if the vault has it.
     note = str(payload.get("note") or "")
+    # A story from Discover (ADR-0137 point 8): its id and where the answer
+    # comes from. Web makes it a /web turn, the one whose tools read pages.
+    story = str(payload.get("story") or "")
+    scope = str(payload.get("scope") or "story")
     if not _begin_turn():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
     text = payload.get("text", "")
+    if story and scope == "web" and text.strip() and not text.startswith("/"):
+        text = "/web " + text
     # /convert and /nucleate <file> typed here convert as jobs and answer at
     # once (ADR-0099 point 1), with the 202 a drop of files alone gets.
     from silica.ui.web import jobs
@@ -2214,8 +2233,10 @@ async def chat(payload: dict):
             notes, files, earlier = joined
             composed = await asyncio.to_thread(_compose_nucleate_turn, text, notes, [], earlier=earlier)
             return _turn_response(composed, attachments, workspace,
-                                  withhold=WITHHELD_WITH_FILES, files=files, said=text, note=note)
-    return _turn_response(text, attachments, workspace, note=note)
+                                  withhold=WITHHELD_WITH_FILES, files=files, said=text, note=note,
+                                  story=story, scope=scope)
+    return _turn_response(text, attachments, workspace, note=note, story=story, scope=scope,
+                          **({"said": text.removeprefix("/web ")} if story and scope == "web" else {}))
 
 
 @app.post("/phone/turn", dependencies=_SAME_ORIGIN)
@@ -5818,7 +5839,7 @@ def get_messages():
             continue
         images: list[dict] = []
         if m["role"] == "user" and isinstance(content, str) and (
-                "<named-notes>" in content or "<converted-files>" in content):
+                "<named-notes>" in content or "<converted-files>" in content or "<discover-story>" in content):
             from silica.agent.mentions import strip
 
             content = strip(content)
@@ -5836,6 +5857,7 @@ def get_messages():
             files = _files_shown(m.get("silica_files"))
         data.append({"role": m["role"], "content": content, "tools": tools, "files": files,
                      "note": m.get("silica_note") or "",
+                     "story": m.get("silica_story") or None,
                      "thinking": thinking, "images": images,
                      "notes": turn_notes.of(m) if m["role"] == "assistant" else [],
                      "html": "" if not content else
@@ -6825,6 +6847,10 @@ app.include_router(_skills_router)
 from silica.ui.web.jobs import router as _jobs_router  # noqa: E402
 
 app.include_router(_jobs_router)
+
+from silica.ui.web.discover_routes import router as _discover_router  # noqa: E402
+
+app.include_router(_discover_router)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

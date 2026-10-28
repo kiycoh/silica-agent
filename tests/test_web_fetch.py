@@ -211,6 +211,8 @@ class _Resp:
         self.headers.update(extra_headers or {})
         self.is_redirect = location is not None
         self.next_request = SimpleNamespace(url=location) if location else None
+        if location:
+            self.headers["location"] = location
         self._payload = payload
 
     def __enter__(self):
@@ -235,6 +237,14 @@ class _Resp:
             )
 
 
+def _patch_stream(monkeypatch, fake):
+    """`_fetch` opens each hop through `_stream(url, ip, headers)` since the
+    DNS pin (ADR-0137 point 11); the fakes here keep httpx.stream's shape."""
+    monkeypatch.setattr(
+        wf, "_stream",
+        lambda url, ip, headers: fake("GET", url, follow_redirects=False, headers=headers))
+
+
 def _serve(monkeypatch, *responses, allow_all_dns=True):
     """Queue responses for successive httpx.stream calls; record requested URLs."""
     seen: list[str] = []
@@ -246,7 +256,7 @@ def _serve(monkeypatch, *responses, allow_all_dns=True):
         assert kw.get("follow_redirects") is False, "redirects must be manual"
         return queue.pop(0)
 
-    monkeypatch.setattr(wf.httpx, "stream", fake_stream)
+    _patch_stream(monkeypatch, fake_stream)
     if allow_all_dns:
         monkeypatch.setattr(
             wf.socket, "getaddrinfo",
@@ -307,7 +317,7 @@ def test_web_fetch_revalidates_every_redirect_hop(monkeypatch):
         ip = "169.254.169.254" if host == "169.254.169.254" else "93.184.216.34"
         return [(2, 1, 6, "", (ip, port))]
 
-    monkeypatch.setattr(wf.httpx, "stream", fake_stream)
+    _patch_stream(monkeypatch, fake_stream)
     monkeypatch.setattr(wf.socket, "getaddrinfo", fake_dns)
 
     with pytest.raises(ValueError, match="non-global"):
@@ -382,7 +392,7 @@ def test_web_fetch_rejects_a_private_target_before_any_request(monkeypatch):
         called["n"] += 1
         return _Resp()
 
-    monkeypatch.setattr(wf.httpx, "stream", fake_stream)
+    _patch_stream(monkeypatch, fake_stream)
     monkeypatch.setattr(
         wf.socket, "getaddrinfo",
         lambda host, port, *a, **kw: [(2, 1, 6, "", ("127.0.0.1", port))],
@@ -430,7 +440,7 @@ def test_youtube_never_takes_the_http_path(monkeypatch):
     def boom(*a, **kw):
         raise AssertionError("no HTTP request must run for a YouTube URL")
 
-    monkeypatch.setattr(wf.httpx, "stream", boom)
+    _patch_stream(monkeypatch, boom)
     with pytest.raises(ValueError, match="yt-dlp"):
         wf.web_fetch("https://youtu.be/abc")
 
@@ -629,7 +639,7 @@ def test_wikipedia_sends_a_descriptive_user_agent_not_a_browser_string(monkeypat
         sent.append(kw.get("headers") or {})
         return _Resp(payload=_wp_page(extract="Prose."))
 
-    monkeypatch.setattr(wf.httpx, "stream", fake_stream)
+    _patch_stream(monkeypatch, fake_stream)
     monkeypatch.setattr(
         wf.socket, "getaddrinfo",
         lambda host, port, *a, **kw: [(2, 1, 6, "", ("93.184.216.34", port))],
