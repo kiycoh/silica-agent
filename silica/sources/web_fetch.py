@@ -27,11 +27,13 @@ import socket
 import subprocess
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import NamedTuple
-from urllib.parse import unquote, urlencode, urlsplit
+from urllib.parse import unquote, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 
@@ -110,6 +112,17 @@ _HEADERS = {
     "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
 }
 _TEXT_TYPES = ("text/", "application/xhtml", "application/xml", "application/json")
+# What Discover reads with (ADR-0137 point 11): a reader that runs because a
+# view opened announces itself, as the Wikipedia branch does, instead of
+# passing for a person at a browser. Measured 2026-10-28: a descriptive agent
+# got 200 from all ten tested feeds and the three article pages behind them.
+_READER_HEADERS = {
+    "User-Agent": _WP_HEADERS["User-Agent"],
+    "Accept": ("application/rss+xml, application/atom+xml, application/feed+json, "
+               "application/xml;q=0.9, text/html;q=0.8, */*;q=0.5"),
+}
+FEED_TYPES = (*_TEXT_TYPES, "application/rss+xml", "application/atom+xml",
+              "application/feed+json", "application/rdf+xml")
 
 _SCHEMES = ("http", "https")
 
@@ -139,8 +152,9 @@ def host_matches(url: str, *domains: str) -> bool:
     )
 
 
-def _validated(url: str) -> None:
-    """Fail closed on anything we should not open a socket to.
+def _validated(url: str) -> str:
+    """Fail closed on anything we should not open a socket to, and return the
+    address that passed, which is the one `_stream` connects to.
 
     Rejects non-HTTP schemes, embedded credentials, and any hostname that
     resolves to a non-global address. `ipaddress.is_global` is the single
@@ -149,11 +163,11 @@ def _validated(url: str) -> None:
     Every resolved address must pass: one global answer cannot launder a
     private sibling.
 
-    ponytail: residual TOCTOU. httpx resolves the hostname again after this
-    check, so a hostile DNS server could rebind between the two. Closing it
-    means pinning the resolved IP into the transport and setting the Host
-    header by hand; build that only if Silica ever fetches attacker-supplied
-    URLs unattended. Today they come from Tavily results or from the user.
+    The address is returned because checking a name and then letting httpx
+    resolve it again left a DNS-rebinding window between the two. That was
+    deferred until Silica fetched attacker-supplied URLs unattended, and
+    Discover does (ADR-0137 point 11): a feed names its own item links and
+    image URLs, and they are read because a view opened.
     """
     try:
         parts = urlsplit(url)
@@ -181,6 +195,34 @@ def _validated(url: str) -> None:
         ip = ipaddress.ip_address(info[4][0])
         if not ip.is_global:
             raise ValueError(f"refusing non-global address {ip} for host {host!r}")
+    return str(infos[0][4][0])
+
+
+@contextmanager
+def _stream(url: str, ip: str, headers: dict[str, str]) -> Iterator[httpx.Response]:
+    """GET `url` over a connection to `ip`, the address `_validated` approved.
+
+    The name stays the request's in every way a server or a certificate can
+    see: the Host header is the URL's own authority and TLS is verified
+    against the hostname through httpcore's `sni_hostname` extension, so a
+    pinned fetch reads exactly the page an unpinned one would. Only the socket
+    is told where to go, and it no longer asks DNS a second time.
+    """
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    where = f"[{ip}]" if ":" in ip else ip
+    if parts.port:
+        where += f":{parts.port}"
+    pinned = urlunsplit(parts._replace(netloc=where))
+    ext = {"sni_hostname": host} if parts.scheme.lower() == "https" else {}
+    with httpx.Client(timeout=_HTTP_TIMEOUT, follow_redirects=False) as client:
+        req = client.build_request("GET", pinned, headers={**headers, "Host": parts.netloc},
+                                   extensions=ext)
+        resp = client.send(req, stream=True)
+        try:
+            yield resp
+        finally:
+            resp.close()
 
 
 _SKIP_TAGS = frozenset({
@@ -355,6 +397,11 @@ class _TitleExtractor(HTMLParser):
         self.og_title = ""
         self.twitter_title = ""
         self.site_name = ""
+        # The image a page declares for sharing: Discover's cover when its
+        # feed item carried none (ADR-0137 point 7). `twitter:image` is the
+        # second choice, as twitter:title is.
+        self.og_image = ""
+        self.twitter_image = ""
         self._in_title = False
         self._seen_title = False
 
@@ -378,6 +425,10 @@ class _TitleExtractor(HTMLParser):
                 self.twitter_title = content
             elif key == "og:site_name" and not self.site_name:
                 self.site_name = content
+            elif key in ("og:image", "og:image:url", "og:image:secure_url") and not self.og_image:
+                self.og_image = content
+            elif key in ("twitter:image", "twitter:image:src") and not self.twitter_image:
+                self.twitter_image = content
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "title":
@@ -427,6 +478,27 @@ def page_title(html: str) -> str:
     return ""
 
 
+def page_image(html: str, base: str) -> str:
+    """The page's own cover, `og:image` else `twitter:image`, as an absolute
+    http(s) URL; "" when it declares none.
+
+    html.parser, not a pattern: one of the three pages measured for ADR-0137
+    writes `content` before `property` and leaves the value unquoted
+    (`property=og:image`), which a regex keyed on `property="og:image"` misses.
+    """
+    parser = _TitleExtractor()
+    parser.feed(html)
+    parser.close()
+    for candidate in (parser.og_image, parser.twitter_image):
+        # An empty value joins to the page itself, which is no cover.
+        if not candidate.strip():
+            continue
+        url = urljoin(base, candidate.strip())
+        if urlsplit(url).scheme in _SCHEMES:
+            return url
+    return ""
+
+
 def _render(url: str, text: str) -> str:
     """Header line plus body.
 
@@ -457,13 +529,19 @@ def content_type(resp: httpx.Response) -> str:
     return resp.headers.get("content-type", "").split(";")[0].strip().lower()
 
 
-def _refuse_binary(resp: httpx.Response, url: str) -> None:
+def _refuse_binary(resp: httpx.Response, url: str, types: tuple[str, ...] = _TEXT_TYPES) -> None:
     """Decided on the headers, before a byte of the body is spent: a PDF or a
     video is refused either way, and refusing it after buffering it is the
-    expensive way to reach the same answer."""
+    expensive way to reach the same answer. `types` is what the caller reads:
+    text for a page, feeds for Discover, `image/` for a cover."""
     ctype = content_type(resp)
-    if ctype and not ctype.startswith(_TEXT_TYPES):
+    if ctype and not ctype.startswith(types):
         raise ValueError(f"refusing to read {ctype} content at {url}")
+    if not ctype and "text/" not in types:
+        # A caller that reads no text (a cover) takes a body only on its
+        # word: an untyped one can be anything, and a page has no business
+        # being saved as an image.
+        raise ValueError(f"refusing untyped content at {url}")
 
 
 def _decoded_headers(headers: httpx.Headers) -> httpx.Headers:
@@ -482,7 +560,7 @@ def _decoded_headers(headers: httpx.Headers) -> httpx.Headers:
     return out
 
 
-def _read_capped(resp: httpx.Response, url: str) -> bytes:
+def _read_capped(resp: httpx.Response, url: str, cap: int = _MAX_BODY_BYTES) -> bytes:
     """Accumulate the body against a size ceiling and a wall clock, aborting on
     either. Content-Length is not consulted: it is the server's claim, and a
     chunked response makes none."""
@@ -491,9 +569,9 @@ def _read_capped(resp: httpx.Response, url: str) -> bytes:
     deadline = time.monotonic() + _BODY_DEADLINE
     for chunk in resp.iter_bytes():
         total += len(chunk)
-        if total > _MAX_BODY_BYTES:
+        if total > cap:
             raise ValueError(
-                f"body at {url} passed {_MAX_BODY_BYTES} bytes; refusing to read on"
+                f"body at {url} passed {cap} bytes; refusing to read on"
             )
         if time.monotonic() > deadline:
             raise ValueError(
@@ -503,29 +581,39 @@ def _read_capped(resp: httpx.Response, url: str) -> bytes:
     return b"".join(chunks)
 
 
-def _fetch(url: str, headers: dict[str, str] = _HEADERS) -> tuple[httpx.Response, str]:
+def _fetch(url: str, headers: dict[str, str] = _HEADERS, *, types: tuple[str, ...] = _TEXT_TYPES,
+           cap: int = _MAX_BODY_BYTES) -> tuple[httpx.Response, str]:
     """GET with redirects followed by hand, revalidating every hop, and a body
     read under a ceiling instead of buffered whole.
 
     Open WebUI validates the first URL and then hands it to a client that
     follows redirects itself, so a perfectly global URL can 302 into link-local
-    space. Following them here closes that.
+    space. Following them here closes that, and each hop connects to the
+    address its own check approved (`_stream`).
 
     Streamed, so the two cheap refusals (wrong content type, oversized body)
     happen while the body is still on the wire. The response handed back carries
     the bytes we accepted, so callers keep reading `.text` / `.json()`.
+
+    A 304 comes back as it is, with no body: only a caller that sent
+    `If-None-Match` or `If-Modified-Since` can get one, and that caller holds
+    the copy it means.
     """
     for _ in range(_MAX_REDIRECTS + 1):
-        _validated(url)
-        with httpx.stream(
-            "GET", url, follow_redirects=False, timeout=_HTTP_TIMEOUT, headers=headers
-        ) as resp:
-            if resp.is_redirect and resp.next_request is not None:
-                url = str(resp.next_request.url)
+        ip = _validated(url)
+        with _stream(url, ip, headers) as resp:
+            if resp.status_code == 304:
+                return httpx.Response(304, headers=_decoded_headers(resp.headers),
+                                      request=resp.request), url
+            location = resp.headers.get("location")
+            if resp.is_redirect and location:
+                # Against the URL as named, never the pinned one: a relative
+                # Location resolved on the IP would send the next hop there.
+                url = urljoin(url, location)
                 continue
             _raise_for_status(resp, url)
-            _refuse_binary(resp, url)
-            body = _read_capped(resp, url)
+            _refuse_binary(resp, url, types)
+            body = _read_capped(resp, url, cap)
             return (
                 httpx.Response(
                     resp.status_code,
@@ -625,11 +713,12 @@ class Page(NamedTuple):
     title: str
 
 
-def fetch_page(url: str) -> Page:
+def fetch_page(url: str, headers: dict[str, str] = _HEADERS) -> Page:
     """`web_fetch` plus the title, for callers that name a note after the page.
 
     The tool wrapper below drops the title; nothing else about the text differs,
-    so both paths stay one code path.
+    so both paths stay one code path. `headers` is for Discover, which reads an
+    article as itself (`_READER_HEADERS`) and not as a browser.
     """
     if host_matches(url, *_YT_DOMAINS):
         return _youtube_transcript(url)
@@ -640,7 +729,7 @@ def fetch_page(url: str) -> Page:
         if article:
             extract, title = article
             return Page(_render(url, _truncate(extract)), title)
-    resp, final_url = _fetch(url)
+    resp, final_url = _fetch(url, headers)
     # the type gate already ran in _fetch, on the headers, before the body
     ctype = content_type(resp)
     # no charset sniffing, httpx already decoded from the header.

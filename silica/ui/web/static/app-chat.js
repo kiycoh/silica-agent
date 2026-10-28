@@ -2001,6 +2001,9 @@ function send(text, replay = false, images = []) {
   // The note open beside the chat rides the turn (the composer's chip); /find
   // is answered here and reads nothing.
   const note = find ? "" : chatNote();
+  // A Discover story in the composer (ADR-0137 point 8), and what the answer
+  // may draw on; app-discover.js holds it.
+  const story = find || typeof chatStory !== "function" ? null : chatStory();
   // A retry re-runs the turn but must not stack a second copy of your question
   // in the transcript: the bubble from the first attempt is still there.
   if (!replay) {
@@ -2009,6 +2012,7 @@ function send(text, replay = false, images = []) {
     body.dataset.words = text;
     addTurnImages(body, images.map((im) => ({ src: im.data, name: im.name })));
     userNote(body, note);
+    if (story) userStory(body, story);
   }
   if (find && !images.length) { runFind(find[1]); return; }
   noteSent();
@@ -2017,7 +2021,8 @@ function send(text, replay = false, images = []) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, ...(images.length ? { images } : {}),
                            ...(chatWorkspace ? { workspace: chatWorkspace } : {}),
-                           ...(note ? { note } : {}) }),
+                           ...(note ? { note } : {}),
+                           ...(story ? { story: story.id, scope: story.scope } : {}) }),
   }), "working", () => send(text, true, images));
 }
 
@@ -2028,6 +2033,7 @@ function send(text, replay = false, images = []) {
 let editing = false;
 
 function markLastTurn() {
+  if (typeof dvMarkAnswers === "function") dvMarkAnswers(); // Save to Inbox under a story's answers
   for (const b of log.querySelectorAll(".redo-btn, .edit-btn")) b.remove();
   const users = log.querySelectorAll(".msg.user");
   const user = users[users.length - 1];

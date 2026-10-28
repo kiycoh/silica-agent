@@ -1207,7 +1207,8 @@ not given, do not write a Sources section, and do not repeat what the outline \
 assigns to other sections."""
 
 
-def _compose_findings(concept: str, bank: dict[str, _Quote]) -> str | None:
+def _compose_findings(concept: str, bank: dict[str, _Quote], *, reasoning: bool | None = None,
+                      workers: int = 1) -> str | None:
     """Outline + per-section writer (spec §3.3-3.4). None means: fall back.
 
     One tool-less call plans sections from the bank *index* (no quote texts),
@@ -1217,6 +1218,13 @@ def _compose_findings(concept: str, bank: dict[str, _Quote]) -> str | None:
     stubs. Costs N+1 LLM calls per run, N = sections. Any failure — unparsable
     outline, a section call raising or coming back empty — returns None and the
     caller keeps the loop's one-shot body (§3.6): no regression possible.
+
+    `reasoning` and `workers` are Discover's (ADR-0137 gate G3, a story in
+    20 s): measured 2026-10-28 on deepseek-v4-flash, a 4-article story took
+    239 s with thinking on and the sections in turn, and 9.8 to 13.1 s over
+    three stories with thinking off and the sections at once, which are
+    independent once the outline exists. /web-search passes neither and runs
+    as it always has.
     """
     index = "\n".join(f"{qid} | {q.url} | {q.why}" for qid, q in bank.items())
     try:
@@ -1230,6 +1238,7 @@ def _compose_findings(concept: str, bank: dict[str, _Quote]) -> str | None:
                         "content": f"Question: {concept}\n\nEvidence bank:\n{index}",
                     },
                 ],
+                reasoning=reasoning,
             ).text
             or ""
         )
@@ -1240,8 +1249,9 @@ def _compose_findings(concept: str, bank: dict[str, _Quote]) -> str | None:
         ]
         if not sections:
             return None
-        parts = []
-        for title, ids in sections:
+
+        def _write(section: tuple[str, list[str]]) -> str | None:
+            title, ids = section
             quotes = "\n\n".join(
                 f"[{qid}] {bank[qid].url}\n> {bank[qid].quote}\nwhy: {bank[qid].why}"
                 for qid in ids
@@ -1259,6 +1269,7 @@ def _compose_findings(concept: str, bank: dict[str, _Quote]) -> str | None:
                             ),
                         },
                     ],
+                    reasoning=reasoning,
                 ).text
                 or ""
             ).strip()
@@ -1268,9 +1279,17 @@ def _compose_findings(concept: str, bank: dict[str, _Quote]) -> str | None:
             first, _, rest = prose.partition("\n")
             if re.fullmatch(rf"#+\s+{re.escape(title)}\s*", first):
                 prose = rest.strip()
-            if not prose:
-                return None
-            parts.append(f"## {title}\n\n{prose}")
+            return f"## {title}\n\n{prose}" if prose else None
+
+        if workers > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                parts = list(pool.map(_write, sections))
+        else:
+            parts = [_write(sec) for sec in sections]
+        if any(p is None for p in parts):
+            return None
         return "\n\n".join(parts)
     except Exception:
         import logging

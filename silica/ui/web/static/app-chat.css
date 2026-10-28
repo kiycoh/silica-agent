@@ -2617,8 +2617,10 @@
 
 /* The note open beside the chat (ADR-0097, amendment 2026-10-25): the workspace chip's
    shape, since both say what the next message reads. Scoped to the row:
-   app-metrics.css styles another `.chip` later in the cascade. */
-.note-chip-row {
+   app-metrics.css styles another `.chip` later in the cascade. Discover's
+   story chip (ADR-0137 point 8) wears it too, in a row of its own class:
+   renderNoteChip empties every .note-chip-row. */
+:is(.note-chip-row, .dv-chip-row) {
   display: flex;
   flex: 0 1 auto;
   min-width: 0;
@@ -2630,11 +2632,11 @@
    own once the context ring appeared after the first real turn (seen
    2026-10-25). From a basis of 0 the chip takes only the room the line has
    left, and its title is cut instead. */
-#composer .note-chip-row {
+#composer :is(.note-chip-row, .dv-chip-row) {
   flex: 1 1 0;
 }
 
-.note-chip-row .note-chip {
+:is(.note-chip-row, .dv-chip-row) .note-chip {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -2648,7 +2650,7 @@
   color: var(--accent);
 }
 
-.note-chip-row .chip-name {
+:is(.note-chip-row, .dv-chip-row) .chip-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2656,7 +2658,7 @@
   color: var(--frost);
 }
 
-.note-chip-row .chip-x {
+:is(.note-chip-row, .dv-chip-row) .chip-x {
   display: grid;
   flex: none;
   place-items: center;
@@ -2665,7 +2667,7 @@
   border-radius: 999px;
 }
 
-.note-chip-row .chip-x:hover {
+:is(.note-chip-row, .dv-chip-row) .chip-x:hover {
   color: var(--frost);
   background: var(--sel-hover);
 }

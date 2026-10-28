@@ -1456,6 +1456,7 @@ let pendingHashNote = parseHash().note;
 
 function syncUrl(push) {
   if (activeTab === "learn" && location.hash.startsWith("#learn")) return; // learn's own sub-states
+  if (activeTab === "discover" && location.hash.startsWith("#discover")) return; // a story, the Feeds screen
   let h = "#" + (VIEW_SLUG[activeTab] || activeTab);
   if (activeTab === "chat" && currentSessionId) h += "/" + encodeURIComponent(currentSessionId);
   if (activeTab === "graph" && typeof graphMode === "string") h += "/" + graphMode;
@@ -1558,11 +1559,13 @@ function showTab(tab) {
     else b.removeAttribute("aria-current");
   }
   $("#view-chat").classList.toggle("active", tab === "chat");
+  $("#view-discover").classList.toggle("active", tab === "discover");
   $("#view-graph").classList.toggle("active", tab === "graph");
   $("#view-learn").classList.toggle("active", tab === "learn");
   $("#view-calendar").classList.toggle("active", tab === "calendar");
   $("#view-metrics").classList.toggle("active", tab === "metrics");
   if (tab === "graph") setGraphMode(graphMode); // load the active mode's content
+  if (tab === "discover") loadDiscover();
   if (tab === "learn") loadLearn();
   if (tab === "calendar") loadCalendar();
   if (tab === "metrics") loadMetrics();
@@ -1589,7 +1592,7 @@ let pendingGraphMode = "";
 function tabFromHash() {
   const { slug, arg, note } = parseHash();
   const tab = viewOfSlug(slug);
-  if (["chat", "graph", "learn", "calendar", "metrics"].includes(tab) && tab !== activeTab) showTab(tab);
+  if (["chat", "discover", "graph", "learn", "calendar", "metrics"].includes(tab) && tab !== activeTab) showTab(tab);
   // Back and Forward walk the chats and the surfaces, not only the tabs.
   if (tab === "chat" && arg && arg !== currentSessionId && !streaming) openSession(arg, true);
   if (tab === "graph" && arg && arg !== graphMode) {
@@ -1598,7 +1601,7 @@ function tabFromHash() {
   }
   if (tab === "metrics" && typeof setMetricsTab === "function") setMetricsTab(arg || "structure", false);
   if (note && note !== lastNotePath) openNote(note);
-  else if (!note && notePanel.classList.contains("open") && tab !== "learn") closeNote();
+  else if (!note && notePanel.classList.contains("open") && tab !== "learn" && tab !== "discover") closeNote();
 }
 window.addEventListener("hashchange", tabFromHash);
 
