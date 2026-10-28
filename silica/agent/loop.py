@@ -58,7 +58,7 @@ from silica.tools import user_memory as memory_gate
 from silica.config import CONFIG
 from silica.agent.concurrency import worker_slot
 from silica.agent.constraints import AgentConstraints
-from silica.tools import TOOLS, Tool
+from silica.tools import MODEL_CALL, TOOLS, Tool
 from contextlib import nullcontext
 
 logger = logging.getLogger(__name__)
@@ -710,11 +710,15 @@ def run_agent(
                     # its own has its own `_emit` publishing there already — so
                     # forwarding that one would put every inner event on
                     # `agent/tool_*` twice.
-                    result = allowed[tc.name].run(
-                        _cancel_token=cancel_token,
-                        _progress=progress_cb,
-                        **tc.args,
-                    )
+                    model_call = MODEL_CALL.set(tc.name)
+                    try:
+                        result = allowed[tc.name].run(
+                            _cancel_token=cancel_token,
+                            _progress=progress_cb,
+                            **tc.args,
+                        )
+                    finally:
+                        MODEL_CALL.reset(model_call)
                     duration = time.perf_counter() - start_time
                     _emit(
                         ToolCompleteEvent(

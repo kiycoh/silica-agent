@@ -56,11 +56,53 @@ def _bind_documents(entries: list[str]) -> tuple[list[str], str | None, str | No
     return docs, ref, None
 
 
+# Both write tools' text fields carry it, and every refusal repeats it. The two
+# shapes are the ones the 2026-10-28 mind map broke on: `(` and `[` inside node
+# text open a node shape, and a [[link]] there is not drawn as a link anyway.
+_MERMAID_RULE = ('In a ```mermaid block, quote node text that has brackets or punctuation '
+                 '(A["f(x)"]) and put no [[links]] in it.')
+# Corrections a note's diagrams get (owner, 2026-10-28). The parser stops at
+# the first error, so a diagram with two takes two rounds (that mind map failed
+# on line 4, then on line 33), and past four the model's text is written as it
+# is rather than lost for a diagram.
+_MERMAID_TRIES = 4
+# ponytail: counted per note, not per chat, so a chat that gives up mid-way
+# leaves its count to the next chat on that path, which gets fewer corrections.
+# Count per session if a pilot report shows it before 2027-01-31.
+_mermaid_refused: dict[str, int] = {}
+
+
+def _mermaid_gate(tool: str, path: str, text: str) -> tuple[dict | None, str | None]:
+    """(refusal, warning) for the ```mermaid fences of `text`. Only the model's
+    own call is ever refused (MODEL_CALL): the same function run by code or
+    inside another tool, a reading card or a rework, has no one to fix the
+    diagram, and a refusal there would lose the text it carries."""
+    from silica.config import CONFIG
+    from silica.kernel.link.mermaid import parse_errors
+    from silica.tools import MODEL_CALL
+
+    if MODEL_CALL.get() != tool:
+        return None, None
+    key = f"{CONFIG.vault_path}::{path}"
+    tries = _mermaid_refused.pop(key, 0)
+    errors = parse_errors(text)
+    if not errors:
+        return None, None
+    if tries >= _MERMAID_TRIES:
+        # Under the 80 characters the eager projection keeps of a write result
+        # (compaction.generic_projection), or the model never reads it.
+        return None, f"Mermaid still fails to parse after {tries} corrections: tell the user"
+    _mermaid_refused[key] = tries + 1
+    return {"error": (f"Not written: the user would see an error instead of the diagram. Fix it and "
+                      f"call {tool} again (correction {tries + 1} of {_MERMAID_TRIES}). {_MERMAID_RULE}\n"
+                      + "\n".join(errors))}, None
+
+
 @tool(cls="composed", collapse="eager")
 def silica_patch_note(
     name: Annotated[str, Field(description='Name or vault-relative path of the note to patch')],
     heading: Annotated[str, Field(description='Concept/section heading the snippet is filed under')],
-    snippet: Annotated[str, Field(description='Distilled body text to append to the note')],
+    snippet: Annotated[str, Field(description='Distilled body text to append to the note. ' + _MERMAID_RULE)],
     source_basename: Annotated[str, Field(description='Provenance: source filename this snippet derives from')],
     hub: Annotated[str | None, Field(description='Optional [[Hub]] to link in frontmatter if missing')] = None,
     documents: Annotated[list[str] | None, Field(description=_DOCUMENTS_DESC)] = None,
@@ -101,6 +143,10 @@ def silica_patch_note(
         path = contain_in_vault(path, Path(CONFIG.vault_path))
     except ValueError as e:
         return {"error": f"Refused note '{name}': {e}"}
+
+    refused, mermaid_warning = _mermaid_gate("silica_patch_note", path, snippet)
+    if refused:
+        return refused
 
     # Two meanings of `heading` meet here. Nucleation's is the CONCEPT: the
     # landing (templates.patch_snippet) drops a leading `## <heading>` as the
@@ -173,7 +219,8 @@ def silica_patch_note(
                            "restore point for this write", path, e)
 
     return {**result, "note": name, "path": path,
-            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
+            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok,
+            **({"warning": mermaid_warning} if mermaid_warning else {})}
 
 
 @tool(cls="composed", collapse="eager")
@@ -256,7 +303,7 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
 @tool(cls="composed", collapse="eager")
 def silica_write_note(
     path: Annotated[str, Field(description="Vault-relative path for the new note (e.g. 'Computer Science/Computer Vision.md')")],
-    body: Annotated[str, Field(description='Markdown body only — NO YAML frontmatter; it is applied mechanically from the vault template')],
+    body: Annotated[str, Field(description='Markdown body only — NO YAML frontmatter; it is applied mechanically from the vault template. ' + _MERMAID_RULE)],
     title: Annotated[str | None, Field(description='H1 title; defaults to the filename stem')] = None,
     tags: Annotated[list[str] | None, Field(description='Frontmatter tags; normalized automatically')] = None,
     related: Annotated[list[str] | None, Field(description='Related note names, rendered as frontmatter wikilinks')] = None,
@@ -331,6 +378,10 @@ def silica_write_note(
     if docs:
         content = tpl.stamp_documents(content, docs, code_ref)
 
+    refused, mermaid_warning = _mermaid_gate("silica_write_note", path, body)
+    if refused:
+        return refused
+
     # The existence check and the create must be atomic: the fs backend's
     # create() now raises on an existing note, but the pre-check under lease
     # stays: it returns a friendly "use silica_patch_note" error instead of a
@@ -366,4 +417,5 @@ def silica_write_note(
                            "restore point for this write", path, e)
 
     return {"op": "write", "success": True, "path": ref.path or path,
-            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
+            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok,
+            **({"warning": mermaid_warning} if mermaid_warning else {})}

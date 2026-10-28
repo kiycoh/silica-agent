@@ -26,6 +26,14 @@ FROM python:3.11-slim
 # sends expanduser to the pwd module and it raises.
 ENV HOME=/data \
     PYTHONUNBUFFERED=1
+# Node runs the web UI's own mermaid bundle over the diagrams a model writes
+# into a note, so a broken one goes back to the model instead of reaching the
+# reader (silica/kernel/link/mermaid.py). Found through shutil.which like the
+# tools listed below: without it diagrams are written unchecked. Above the
+# wheel so a code change does not reinstall it.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/*
 COPY --from=build /wheels /wheels
 # By wheel path, never by name: between two tags setuptools-scm versions the
 # wheel as a `.devN` pre-release, which pip skips when a name resolves, so
