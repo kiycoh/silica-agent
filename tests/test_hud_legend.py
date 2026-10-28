@@ -132,26 +132,25 @@ def test_a_ghost_follows_unresolved():
     assert 'getElementById("st-ghost-row").classList.toggle("off", !showAmbiguous)' in js
 
 
-def test_the_two_partitions_are_two_rows_of_one_section():
-    """Structural areas and semantic zones are both answers to "what does this
-    colour mean", so they read together. The zone rows only exist where the
-    vault has vectors, which is why they are a separate f-string."""
+def test_one_atlas_row_replaces_the_blobs_and_the_zones_and_names_its_partition():
+    """ADR-0136: the area blobs and the semantic zones were two rows of the
+    Colour section; the atlas is one, on by default. It draws the areas, or
+    the zones on a vault with no area of 3 notes, and says so (ADR-0023: a
+    surface names the partition it shows). With neither it has no row."""
+    from silica.kernel.recall.graph_export import Community
     from silica.ui.web.graph_view import Zone, render_html
-    nodes = [{"id": "a.md", "label": "A", "type": "note", "group": 0, "sgroup": 0,
-              "size": 3, "betweenness": 0.4, "path": "a.md"}]
-    zones = [Zone(id=0, label="z", color="#888", color_paper="#444", size=1)]
+    nodes = [{"id": f"{i}.md", "label": str(i), "type": "note", "group": 0, "sgroup": 0,
+              "size": 3, "path": f"{i}.md"} for i in range(3)]
+    areas = [Community(id=0, label="a", color="#888", color_paper="#444", size=3)]
+    colour = _hud(render_html(nodes, [], communities=areas, lib_js="// x"))
+    colour = colour[colour.index(">Colour<"):]
+    assert 'id="cb-atlas" checked' in colour and "semantic zones" not in colour
+    for gone in ("cb-areas", "cb-zones", "cb-zone-nodes"):
+        assert gone not in colour
+    zones = [Zone(id=0, label="z", color="#888", color_paper="#444", size=3)]
     hud = _hud(render_html(nodes, [], communities=[], lib_js="// x", zones=zones))
-    colour = hud[hud.index(">Colour<"):]
-    assert "structural areas" in colour and "semantic zones" in colour
-    assert 'id="cb-zones"' in colour and 'id="cb-zone-nodes"' in colour
-    # "notes" means "the zones alone": hidden until there are zones on, or it
-    # blanks the frame
-    assert '<label class="filter-row" id="zone-nodes-row" style="display:none' in colour
-    upd = FRAME_JS.read_text().split("function updateZoneFilter() {")[1].split("\n}")[0]
-    assert "if (cbNodes && !showZones) cbNodes.checked = true;" in upd
-    # no vectors, no rows: an empty checkbox promises a layer with nothing behind it
-    plain = _hud(_render())
-    assert 'id="cb-zones"' not in plain
+    assert 'id="cb-atlas" checked' in hud and "atlas · semantic zones" in hud
+    assert 'id="atlas-row"' not in _hud(_render())
 
 
 def test_the_edges_are_ordered_by_the_rule_they_are_drawn_by():

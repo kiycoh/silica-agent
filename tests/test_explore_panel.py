@@ -565,14 +565,15 @@ def test_the_ladder_footer_roots_path_before_it_enters_the_tab():
 # matrix that says HOW MANY into the same surface, under the drawing's index.
 
 def test_areas_is_one_shape_view_fed_by_the_shape_load():
-    """One /shape load feeds it like the other pane surfaces, both readings: a
-    second endpoint would be a second build of the same graph that can
-    disagree with the matrix beside it. The matrix's own surface is gone."""
+    """One /shape load feeds it like the other pane surfaces: a second endpoint
+    would be a second build of the same graph that can disagree with the
+    matrix beside it. The matrix's own surface is gone, and so is the zones'
+    reading beside the areas' (ADR-0136)."""
     app = app_js()
     views = _block(app, "const SHAPE_VIEWS = {", "};")
     assert "areas: renderAreas" in views and "bridges" not in views
     body = _block(app, "function renderAreas(s) {", "\n}")
-    assert "s.bridges" in body and "s.zone_bridges" in body
+    assert "s.bridges" in body and "s.zone" not in body and "bridgePartition" not in body
     assert "couplingMatrix(" in body and "s.matrix" in body
     assert "function renderBridges(" not in app
 
@@ -600,8 +601,8 @@ def test_a_coupling_cell_opens_its_pair():
     grid = _block(app, "function couplingMatrix(areas, matrix,", "\n}")
     assert "onPair(a.id, b.id)" in grid
     body = _block(app, "function renderAreas(s) {", "\n}")
-    assert "onPair: openPair" in body and "openBridges(x, y, bridgePartition)" in body
-    opener = _block(app, "function openBridges(x, y,", "\n}")
+    assert "onPair: openPair" in body and "openBridges(x, y)" in body
+    opener = _block(app, "function openBridges(x, y)", "\n}")
     assert "bridgeSpoke = y" in opener and "setGraphScope(" in opener and 'setGraphMode("areas")' in opener
     assert "bridgePair" not in app, "the flat list's pair filter is gone with the list"
 
@@ -609,12 +610,9 @@ def test_a_coupling_cell_opens_its_pair():
 def test_the_matrix_holds_only_the_parts_that_link():
     """ADR-0064: a part with no link to another is a row and a column of empty
     cells (8 of 22 areas on the test vault); the drawing already says so by
-    drawing its disc alone, so the grid leaves it out. Zones have no matrix on
-    the payload: theirs is summed from the rows, whose links_between is the
-    same tally the area matrix reads."""
+    drawing its disc alone, so the grid leaves it out."""
     body = _block(app_js(), "function renderAreas(s) {", "\n}")
     assert ".some((v, j) => j !== i && v)" in body
-    assert "r.links_between" in body
 
 
 def test_the_folded_matrix_names_its_parts_by_colour_and_one_renderer_draws_it():

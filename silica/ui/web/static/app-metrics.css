@@ -1696,14 +1696,6 @@
   border-radius: var(--r-sm);
 }
 
-.ego-seg {
-  display: flex;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  overflow: hidden;
-}
-
-.ego-seg button,
 .ego-btn {
   font: inherit;
   font-size: var(--fs-meta);
@@ -1714,12 +1706,6 @@
   cursor: pointer;
 }
 
-.ego-seg button[aria-pressed="true"] {
-  background: var(--accent);
-  color: var(--on-vivid);
-}
-
-.ego-seg button:disabled,
 .ego-btn:disabled {
   color: var(--ash-dim);
   cursor: default;
@@ -1730,13 +1716,11 @@
   border-radius: var(--r-sm);
 }
 
-.ego-btn:hover:not(:disabled),
-.ego-seg button:hover:not(:disabled):not([aria-pressed="true"]) {
+.ego-btn:hover:not(:disabled) {
   color: var(--frost);
   background: var(--sel-hover);
 }
 
-.ego-seg button:focus-visible,
 .ego-btn:focus-visible,
 .ego-pick select:focus-visible {
   outline: 2px solid var(--accent);
@@ -1778,7 +1762,7 @@
   overflow: visible;
 }
 
-/* A disc wears its part's colour (--c, set per element from the area or zone),
+/* A disc wears its part's colour (--c, set per element from the area),
    so a bridge reads as a line between two colours and the line itself stays
    neutral. One size for every disc, one width for every line: the count is a
    label, never a width or a radius (ADR-0058 Decision 11). */

@@ -183,16 +183,9 @@ body.embedded #focus-bar{top:58px;left:12px;right:auto}
 #focus-bar b{color:var(--frost);font-weight:600}
 #focus-bar .esc{color:var(--ash-dim)}
 body.host-drawer-open #focus-bar{right:calc(var(--drawer-w,0px) + 10px)}
-/* Zone names: over the canvas, under the HUD, never in the way of a click.
-   The halo is what keeps a mid-lightness hue readable over both a dark
-   background and the translucent hull it sits on. */
-#zone-labels{position:absolute;inset:0;z-index:4;pointer-events:none;overflow:hidden}
-.zone-label{position:absolute;top:0;left:0;display:none;white-space:nowrap;
-             font-size:13px;font-weight:600;
-             text-shadow:0 0 10px var(--void),0 0 4px var(--void),0 0 2px var(--void)}
-/* Note names in 3D. Below the zone names, which name a whole region and must
-   win where the two overlap. The halo is the same trick: the canvas behind a
-   label is whatever colour the cluster happens to be. */
+/* Note names in 3D, over the canvas and under the HUD, never in the way of a
+   click. The halo is what keeps them readable: the canvas behind a label is
+   whatever colour the cluster happens to be. */
 #node-labels{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}
 .node-label{position:absolute;top:0;left:0;display:none;white-space:nowrap;
              font-size:12px;color:var(--frost);
@@ -352,6 +345,3 @@ body.embedded.foot-lift{--foot:calc(var(--dock-h,72px) + 12px)}
 .g3d-tip b{font-weight:600;color:var(--frost)}
 .g3d-tip i{font-style:normal;font-size:12px;color:var(--ash-dim);
             }
-/* The second partition gets its own line and the word ZONE, and nothing
-   else: dimming it to rank it below the community was measured at 3.23:1
-   on --slate-2, under the 4.5:1 a 10px label owes. The prefix ranks it. */

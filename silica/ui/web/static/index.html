@@ -506,7 +506,7 @@
            separates them lives here, not in a longer button -->
       <div class="sp-title">explore</div>
       <div class="hp-row"><span class="hp-what">3D</span><span>spatial layout of the whole vault; a node names itself when you hover it</span></div>
-      <div class="hp-row"><span class="hp-what">2D</span><span>names appear as you zoom in, biggest notes first, and semantic zones in the graph's panel draws the zones as hulls</span></div>
+      <div class="hp-row"><span class="hp-what">2D</span><span>a map of the areas: each note owns the ground nearest it, and zooming in names the sub-areas, then the notes; a note's links show when you point at it</span></div>
       <div class="hp-row"><span class="hp-what">the tabs</span><span>top of explore: Graph and Path draw the links (a click on a note in the Graph lays it out as its map), Folders, Areas and Read read the shape. The line under them is the key, and on the graph the panel at the right says how to read it</span></div>
   </div>
   <!-- The note drawer's one control while it is shut (ADR-0084): the corner
@@ -738,7 +738,6 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
   <script src="/static/app-zotero.js"></script>
   <script src="/static/app-mail.js"></script>
   <script src="/static/app-calendar.js"></script>
-  <script src="/static/blob-geometry.js"></script>
   <script src="/static/work.js"></script>
 </body>
 </html>

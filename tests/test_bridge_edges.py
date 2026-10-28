@@ -57,13 +57,13 @@ def test_compare_fades_the_links_inside_each_part():
     assert "const on = !!AB && !!l._ab;" in paint
 
 
-def test_a_scoped_area_or_zone_keeps_the_far_end_of_its_links():
+def test_a_scoped_area_keeps_the_far_end_of_its_links():
     """What a part reaches is the note across the link; a far end shows only
     the links that reach it from the part, never its own."""
     js = FRAME_JS.read_text()
     filt = js[js.index("function computeFilters("):js.index("function applyFilters(")]
     # A collection keeps them too since ADR-0066 decision 5.
-    assert '(SCOPE.kind === "area" || SCOPE.kind === "zone" || SCOPE.kind === "collection")' in filt
+    assert '(SCOPE.kind === "area" || SCOPE.kind === "collection")' in filt
     assert "inScope(a) !== inScope(b)" in filt
     # A link between two far ends stays hidden, unless it is a context
     # wikilink under the rim (ADR-0066 amendment).
@@ -96,5 +96,5 @@ def test_the_frame_names_an_area_by_its_hub_like_the_shape_surfaces_do():
     assert json.loads(ctx["graph_data"])["comm_hubs"] == {"0": "A", "1": "B"}
     js = FRAME_JS.read_text()
     assert "const COMM_HUBS = DATA.comm_hubs" in js
-    area = js[js.index("function areaOf("):js.index("// --- The semantic zone layer")]
+    area = js[js.index("function areaOf("):js.index("function inFrontOfCamera(")]
     assert "COMM_HUBS[" in area and "COMM_LABELS" not in area

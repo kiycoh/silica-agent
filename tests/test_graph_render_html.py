@@ -549,8 +549,8 @@ class TestLayoutWorker:
         html = self._js(small_graph)
         assert "G.warmupTicks(0).d3AlphaDecay(0).d3AlphaMin(0);" in html
         assert 'for (const name of ["link", "charge", "center"])\n      G.d3Force(name, inert(G.d3Force(name),' in html
-        # the held areas run where the other forces run, never twice
-        assert 'G.d3Force("areas", held && !SIM ? holdForce : null);' in html
+        # a Silica note's follow runs where the other forces run, never twice
+        assert 'G.d3Force("follow", SIM ? null : followForce);' in html
 
     def test_the_worker_starts_from_the_libs_own_digest(self, small_graph):
         """kapsule digests graphData after the call returns, and every reading
@@ -568,7 +568,7 @@ class TestLayoutWorker:
     def test_the_same_forces_in_the_same_order(self, small_graph):
         html = self._js(small_graph)
         assert '.force("link", d3.forceLink(L)).force("charge", d3.forceManyBody())' in html
-        assert '.force("center", d3.forceCenter()).force("areas", hold)' in html
+        assert '.force("center", d3.forceCenter()).force("follow", follow)' in html
         # float64, the precision d3 summed them in on the lib's side
         assert "const strengths = new Float64Array(links.length);" in html
 

@@ -173,8 +173,8 @@ def _pure(tmp_path, body: str, *functions: str):
     """The pure block, plus any named top-level function of the frame (cut at
     its closing brace), then `body`."""
     src = (STATIC / "graph-frame.js").read_text(encoding="utf-8")
-    # blob-geometry.js is the frame's too: graph_view inlines it ahead of it.
-    pure = (STATIC / "blob-geometry.js").read_text(encoding="utf-8") + "\n" \
+    # d3-delaunay is the frame's too: graph_view inlines it ahead of it.
+    pure = (STATIC / "d3-delaunay.min.js").read_text(encoding="utf-8") + "\n" \
         + src[src.index("// frame-pure:start"):src.index("// frame-pure:end")]
     for fn in functions:
         start = src.index(f"function {fn}(")

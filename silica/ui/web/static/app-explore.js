@@ -113,7 +113,7 @@ $("#graph-refresh").addEventListener("click", () => {
 // choose what you look at.
 const SURFACE_KEYS = {
   folders: "tile area = notes in the folder · fill = how much the folder mixes areas · click a folder to descend",
-  areas: "disc = an area, or a zone · dot = a note with a link out · line = one wikilink · cell = the links between two parts · neighbours clockwise from the top, fewest links first",
+  areas: "disc = an area · dot = a note with a link out · line = one wikilink · cell = the links between two parts · neighbours clockwise from the top, fewest links first",
   read: "stops in area order, biggest first · each hub then what it opens onto",
   path: "− comes before this note · + is what it unlocks · ● is where you are · re-root from any chip",
   library: "your Zotero library · the count on the tab is what arrived since the last session",
@@ -145,8 +145,9 @@ function buildSurfaceLine() {
 }
 
 // --- scope: one part of the vault on the graph --------------------------------
-// A native <select>: folders, areas and zones are three ways of naming a set of
-// notes, and one list with three groups says so. The frame hides the rest and
+// A native <select>: folders and areas are two ways of naming a set of notes,
+// and one list with two groups says so (the semantic zones were a third until
+// ADR-0136). The frame hides the rest and
 // keeps the layout, so the part is seen where it sits (the compare surface will
 // take two of these).
 let graphScope = null;   // {kind, prefix|id, label} or null = the whole vault
@@ -223,7 +224,6 @@ function fillPicker(sel, s) {
   const groups = [
     ["Folders", folderPrefixes(s.notes || []).map(([pre, c]) => ["folder:" + pre, pre + " · " + c])],
     ["Areas", (s.areas || []).map((a) => ["area:" + a.id, a.label + " · " + a.size])],
-    ["Zones", (s.zones || []).map((z) => ["zone:" + z.id, z.label + " · " + z.size])],
   ];
   for (const [name, opts] of groups) {
     if (!opts.length) continue;
@@ -239,7 +239,7 @@ function buildComparePicker() {
   row.appendChild(mkEl("span", null, "compare"));
   const sel = mkEl("select");
   sel.id = "graph-compare";
-  sel.title = "a second folder, area or zone against the scope: both stay, the links inside each fade, the panel reads them";
+  sel.title = "a second folder or area against the scope: both stay, the links inside each fade, the panel reads them";
   const none = mkEl("option", null, "nothing");
   none.value = "";
   sel.appendChild(none);
@@ -253,7 +253,7 @@ function buildScopePicker() {
   row.appendChild(mkEl("span", null, "scope"));
   const sel = mkEl("select");
   sel.id = "graph-scope";
-  sel.title = "show one folder, area, zone or collection where it sits; the rest is hidden, the layout stays, and a part keeps the notes its links reach. A collection's papers outside this vault sit on a rim around the notes";
+  sel.title = "show one folder, area or collection where it sits; the rest is hidden, the layout stays, and a part keeps the notes its links reach. A collection's papers outside this vault sit on a rim around the notes";
   const all = mkEl("option", null, "whole vault");
   all.value = "";
   sel.appendChild(all);
@@ -530,7 +530,6 @@ function renderReading(s) {
 // reverse. The ring keeps ADR-0045's order clockwise from twelve: fewest links
 // between the two parts first, then the pair holding more notes, so rarity
 // reads as position.
-let bridgePartition = "areas";  // "areas" | "zones": the switch beside the picker
 let bridgeSpoke = null;         // the neighbour whose group is open, or null
 let bridgeLink = null;          // the selected link's key (egoKey), or null
 let bridgeCentre = null;        // {kind, id} last drawn at the centre, scope or default
@@ -545,11 +544,9 @@ const egoKey = (r) => r.a.path + "→" + r.b.path;
 const egoCount = (n, one, many) => `${nfmt(n)} ${n === 1 ? one : many}`;
 
 function renderAreas(s) {
-  const zones = bridgePartition === "zones";
-  const kind = zones ? "zone" : "area";
-  const unit = zones ? "zones" : "areas";
-  const parts = (zones ? s.zones : s.areas) || [];
-  const rows = (zones ? s.zone_bridges : s.bridges) || [];
+  const kind = "area", unit = "areas";
+  const parts = s.areas || [];
+  const rows = s.bridges || [];
   const byId = new Map(parts.map((p) => [p.id, p]));
   const light = document.documentElement.dataset.theme === "light";
   const col = (id) => { const p = byId.get(id); return (p && (light ? p.color_paper : p.color)) || "var(--ash)"; };
@@ -563,17 +560,14 @@ function renderAreas(s) {
   bridgeCentre = ego == null ? null : { kind, id: ego };
 
   const pane = mkEl("div", "shape-body ego-body");
-  // What morphEgo matches the next drawing against: a disc is the same disc
-  // only inside one partition, because area 3 and zone 3 are different parts.
-  pane.dataset.partition = bridgePartition;
+  // What morphEgo matches the next drawing against.
   pane.dataset.ego = String(ego);
   const head = mkEl("div", "shape-head ego-head");
   head.appendChild(mkEl("strong", null, "Areas"));
   const pairs = new Set(rows.map((r) => Math.min(r.a.part_id, r.b.part_id) + ":" + Math.max(r.a.part_id, r.b.part_id)));
   head.appendChild(mkEl("span", "shape-sub",
     `${nfmt(rows.length)} links join ${nfmt(pairs.size)} pairs of ${unit} · `
-    + (zones ? `${nfmt(rows.filter((r) => r.other === "same").length)} inside one area`
-             : `${nfmt(rows.filter((r) => r.scaffold).length)} from frontmatter`)));
+    + `${nfmt(rows.filter((r) => r.scaffold).length)} from frontmatter`));
   const tools = mkEl("div", "ego-tools");
   const lab = mkEl("label", "ego-pick");
   lab.appendChild(mkEl("span", null, "around"));
@@ -587,27 +581,6 @@ function renderAreas(s) {
   sel.addEventListener("change", () => pickEgo(Number(sel.value)));
   lab.appendChild(sel);
   tools.appendChild(lab);
-  const seg = mkEl("div", "ego-seg");
-  seg.setAttribute("role", "group");
-  seg.setAttribute("aria-label", "partition");
-  for (const m of ["areas", "zones"]) {
-    const b = mkEl("button", null, m);
-    b.type = "button";
-    b.setAttribute("aria-pressed", String(m === bridgePartition));
-    // Without an embed index there is no semantic partition to draw over: the
-    // switch says why instead of opening onto an empty picture.
-    if (m === "zones" && !(s.zones || []).length) {
-      b.disabled = true;
-      b.title = "no semantic zones: the embed index does not cover the vault";
-    }
-    b.addEventListener("click", () => {
-      if (m === bridgePartition) return;
-      bridgePartition = m; bridgeSpoke = null; bridgeLink = null;
-      drawShape();
-    });
-    seg.appendChild(b);
-  }
-  tools.appendChild(seg);
   const toGraph = mkEl("button", "ego-btn", "show in graph");
   toGraph.type = "button";
   toGraph.title = "the Graph with this part as its scope; the notes its links reach stay lit";
@@ -645,7 +618,8 @@ function renderAreas(s) {
   const want = eList.map((d) => d.a);
   for (let k = 1; k < eList.length; k++) if (eList[k].a - eList[k - 1].a < gap) eList[k].a = eList[k - 1].a + gap;
   // The push above only runs clockwise, so a run of 15 notes all reaching one
-  // neighbour trailed half the rim past it (the busiest zone, 2026-10-06).
+  // neighbour trailed half the rim past it (the busiest semantic zone,
+  // 2026-10-06, when this view drew the zones too).
   // Each run moves back until it is centred on where its notes point.
   for (let i = 0, j; i < eList.length; i = j + 1) {
     for (j = i; j + 1 < eList.length && eList[j + 1].a - eList[j].a <= gap + 1e-9; j++);
@@ -757,7 +731,7 @@ function renderAreas(s) {
   // The right column (ADR-0064): the index on top, the matrix at its foot. The
   // index is a layer over the column, so a group opens in place and grows down
   // over the matrix instead of pushing it. The reserve holds the closed index
-  // of the busiest centre in this partition (8 areas, 9 zones on the test
+  // of the busiest centre (8 areas on the test
   // vault), so a recentre does not move the matrix either.
   const side = mkEl("div", "ego-side");
   const nbrs = new Map();
@@ -829,24 +803,15 @@ function renderAreas(s) {
   // The coupling of every pair, in couplingMatrix's swatch form. A part with no
   // link to another is a row and a column of empty cells (8 of 22 areas on the
   // test vault, 2026-10-06), and the drawing already says so by drawing its
-  // disc alone, so the grid leaves it out. Zones ship no matrix: theirs is
-  // summed from the rows, whose links_between is the tally the area matrix
-  // reads (area_bridges), so the two partitions count the same thing.
+  // disc alone, so the grid leaves it out.
   const posOf = new Map(parts.map((p, i) => [p.id, i]));
-  let grid = s.matrix;
-  if (zones) {
-    grid = parts.map(() => parts.map(() => 0));
-    for (const r of rows) {
-      const i = posOf.get(r.a.part_id), j = posOf.get(r.b.part_id);
-      if (i != null && j != null) grid[i][j] = grid[j][i] = r.links_between;
-    }
-  }
+  const grid = s.matrix;
   const keep = parts.map((p, i) => i).filter((i) => grid[i].some((v, j) => j !== i && v));
   const links = (x, y) => grid[posOf.get(x)][posOf.get(y)];
   // A cell on the centre opens the other end's group in place; off it, the
   // row's part comes to the centre with the column's open (openBridges).
   const openPair = (x, y) => {
-    if (x !== ego && y !== ego) { openBridges(x, y, bridgePartition); return; }
+    if (x !== ego && y !== ego) { openBridges(x, y); return; }
     const other = x === ego ? y : x;
     bridgeSpoke = bridgeSpoke === other ? null : other;
     bridgeLink = null;
@@ -958,7 +923,7 @@ function renderAreas(s) {
     bridgeLink = egoKey(m.r);
     bridgeSpoke = m.f.part_id;
     paint();
-    document.dispatchEvent(new CustomEvent("silica:bridge", { detail: { ...m.r, partition: bridgePartition } }));
+    document.dispatchEvent(new CustomEvent("silica:bridge", { detail: m.r }));
     if (window.openNodeDrawer) window.openNodeDrawer();
   }
   function paint() {
@@ -1012,7 +977,7 @@ function morphEgo(prev, next) {
   const fig = next.querySelector(".ego-fig");
   const svg = fig && fig.querySelector(".ego-svg");
   if (!svg) return;
-  const same = !!prev && prev.dataset.partition === next.dataset.partition;
+  const same = !!prev;
   // A repaint (theme, a selection, the same centre picked again) is not a move.
   if (same && prev.dataset.ego === next.dataset.ego) return;
   const was = new Map();
@@ -1079,17 +1044,14 @@ function morphEgo(prev, next) {
 const SHAPE_VIEWS = { folders: renderFolders, areas: renderAreas, read: renderReading };
 // A pair of parts, from a matrix cell or the work panel's bridge: Areas on the
 // first with the second's spoke open.
-function openBridges(x, y, partition = "areas") {
+function openBridges(x, y) {
   // Already centred on one end of the pair: stay there and open the other's
   // spoke, rather than flipping the picture to the link's source part.
-  const kind = partition === "zones" ? "zone" : "area";
-  if (bridgeCentre && bridgeCentre.kind === kind && bridgeCentre.id === y) [x, y] = [y, x];
-  bridgePartition = partition;
+  if (bridgeCentre && bridgeCentre.kind === "area" && bridgeCentre.id === y) [x, y] = [y, x];
   bridgeSpoke = y;
   bridgeLink = null;
-  const parts = (shapeData && (partition === "zones" ? shapeData.zones : shapeData.areas)) || [];
-  const p = parts.find((q) => q.id === x);
-  setGraphScope({ kind, id: x,
+  const p = ((shapeData && shapeData.areas) || []).find((q) => q.id === x);
+  setGraphScope({ kind: "area", id: x,
                   label: p ? `${p.label} · ${nfmt(p.size)}` : "#" + x });
   setGraphMode("areas");
 }

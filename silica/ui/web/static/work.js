@@ -1055,18 +1055,13 @@ function neighbourRows(d) {
     };
   }
 
-  const polyPath = (p) => {
-    let d = "M" + p[0].toFixed(1) + " " + p[1].toFixed(1);
-    for (let i = 2; i < p.length; i += 2) d += "L" + p[i].toFixed(1) + " " + p[i + 1].toFixed(1);
-    return d + "Z";
-  };
-
-  // The cut as the 2D graph draws it: the notes where their links put them
-  // (laid out by the server, structure.cut_layout), each area a level-set blob
-  // (ADR-0074), the vault's side dimmed as the graph dims context, and the cut
-  // a dashed line through the note, named at its foot. It draws the cut and not
-  // the reading order, which ADR-0075 notes against the "rungs only, never the
-  // edges" rule above: Path still owns the DAG.
+  // The cut: the notes where their links put them (laid out by the server,
+  // structure.cut_layout), each in its area's colour, the vault's side dimmed
+  // as the graph dims context, and the cut a dashed line through the note,
+  // named at its foot. It draws the cut and not the reading order, which
+  // ADR-0075 notes against the "rungs only, never the edges" rule above: Path
+  // still owns the DAG. Its areas were level-set blobs, the graph's own, until
+  // ADR-0136 pruned them with the graph's (the owner, 2026-10-28).
   function cutSvg(b, title, W) {
     const c = b.cut, nodes = c.nodes, me = nodes.findIndex((n) => n.side === "note");
     const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
@@ -1088,27 +1083,6 @@ function neighbourRows(d) {
       return e;
     };
 
-    // Blobs: one field per area AND side, the note itself left out so it sits
-    // on the line and not inside a ground. Per side, because an area the cut
-    // runs through is two grounds: on Backward chaining, one field per area
-    // drew Backtracking and Forward chaining in one blob across the line.
-    // R is the frame's 0.85 rest lengths with a hop as the rest length, 14-34px.
-    const keyOf = (n) => n.area + "|" + n.side;
-    const keys = [...new Set(nodes.filter((n, i) => i !== me && n.area >= 0).map(keyOf))];
-    const R = Math.max(14, Math.min(34, 0.85 * s));
-    const pts = [];
-    nodes.forEach((n, i) => { if (i !== me && n.area >= 0) pts.push({ x: P[i][0], y: P[i][1], k: keys.indexOf(keyOf(n)) }); });
-    if (typeof blobGeometry === "function") {
-      blobGeometry(pts, R, 0.35, R / 8).forEach((g, k) => {
-        if (!g.n) return;
-        const sample = nodes.find((n) => keyOf(n) === keys[k]);
-        const cls = "pl-a" + (sample.side === "rest" ? " ctx" : "");
-        gF.appendChild(hue(sample, svgEl("path", { class: cls + " pl-blob",
-          d: g.fill.map(polyPath).join("") })));
-        gF.appendChild(hue(sample, svgEl("path", { class: cls + " pl-rim",
-          d: g.line.map((l) => `M${l[0].toFixed(1)} ${l[1].toFixed(1)}L${l[2].toFixed(1)} ${l[3].toFixed(1)}`).join("") })));
-      });
-    }
     gF.appendChild(svgEl("line", { x1: bx, y1: 22, x2: bx, y2: H - 26, class: "pl-cutln" }));
 
     for (const [i, j] of c.edges)
@@ -1320,12 +1294,9 @@ function neighbourRows(d) {
 
   // A bridge picked on the Areas surface: the pair, why it counts, the
   // sentence that joins it. The two notes are one click from the node view,
-  // the pair's spoke one click back on Areas (ADR-0060). A row is over the
-  // areas or over the zones; `other` is the other partition's verdict.
+  // the pair's spoke one click back on Areas (ADR-0060).
   function renderBridge() {
     const r = bridge;
-    const zones = r.partition === "zones";
-    const unit = zones ? "zones" : "areas";
     // The chip, not the head: a bridge is the reading that is NOT a node,
     // which is the one case the chip exists for.
     scope.textContent = "bridge";
@@ -1339,11 +1310,8 @@ function neighbourRows(d) {
     rh.appendChild(areas);
     const why = el("div", "wk-run-m");
     why.appendChild(el("span", "wk-num strong", r.links_between === 1
-      ? "the only link between these two " + unit
-      : "one of " + r.links_between + " links between these two " + unit));
-    if (r.other) why.appendChild(el("span", "wk-num", zones
-      ? (r.other === "same" ? "same area" : "different areas")
-      : (r.other === "same" ? "same semantic zone" : "different semantic zones")));
+      ? "the only link between these two areas"
+      : "one of " + r.links_between + " links between these two areas"));
     if (r.scaffold) why.appendChild(el("span", "wk-num", "frontmatter"));
     rh.appendChild(why);
     body.appendChild(rh);
@@ -1359,7 +1327,7 @@ function neighbourRows(d) {
     }
     if (window.openBridges) {
       const l = el("button", "wk-mini", "this pair on Areas");
-      l.addEventListener("click", () => window.openBridges(r.a.part_id, r.b.part_id, r.partition));
+      l.addEventListener("click", () => window.openBridges(r.a.part_id, r.b.part_id));
       acts.appendChild(l);
     }
     body.appendChild(acts);

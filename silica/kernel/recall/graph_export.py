@@ -27,6 +27,7 @@ from typing import Any, NamedTuple
 
 import colorsys
 import logging
+import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -894,12 +895,12 @@ class AreaTally(NamedTuple):
     pairs: dict[tuple[str, str], tuple[str, str, bool]]   # (lo, hi) -> (from, to, scaffold)
 
 
-def area_tally(nodes: list[dict], edges: list[dict], key: str = "group") -> AreaTally:
+def area_tally(nodes: list[dict], edges: list[dict]) -> AreaTally:
     """The one count of wikilinks inside and between areas.
 
-    `key` names the partition: "group" (the areas, every caller but one) or
-    "sgroup" (the semantic zones), so the zone reading of Bridges is this count
-    over the other partition and not a second producer of it (ADR-0060).
+    It took a partition key until 2026-10-28, for Bridges' reading over the
+    semantic zones; ADR-0136 pruned that reading, and the areas are the one
+    partition left to count.
 
     structural_gaps, area_bridges, compute_report's inter_cluster and the
     /shape matrix all read it. Until 2026-09-22 the report and /shape each
@@ -913,9 +914,9 @@ def area_tally(nodes: list[dict], edges: list[dict], key: str = "group") -> Area
     a 2-note area whose notes link both ways.
     """
     group_of = {
-        n["id"]: n[key]
+        n["id"]: n["group"]
         for n in nodes
-        if n.get("type") != "ghost" and n.get(key, -1) >= 0
+        if n.get("type") != "ghost" and n.get("group", -1) >= 0
     }
     sizes = Counter(group_of.values())
     deg: Counter = Counter()
@@ -948,15 +949,74 @@ def area_tally(nodes: list[dict], edges: list[dict], key: str = "group") -> Area
     return AreaTally(group_of, sizes, deg, inter, intra, pairs)
 
 
+def _is_file_slug(note_id: str) -> bool:
+    """A title that is a file name and not a name: no space, three or more
+    parts joined by - or _, one of them a number (`Goodfellow-38-15-2-...`,
+    a daily `2026-10-28`). "GPT-4" and "Cross-validation" are names."""
+    stem = note_id.rsplit("/", 1)[-1].removesuffix(".md")
+    parts = re.split(r"[-_]", stem)
+    return not re.search(r"\s", stem) and len(parts) >= 3 and any(p.isdigit() for p in parts)
+
+
+def hub_of(members, deg) -> str:
+    """The note a group of notes is named by: the highest degree, a tie to the
+    larger id, and a file-slug title only when the group has nothing else.
+
+    One rule for an area and for a sub-area (ADR-0136). Without the slug rule
+    7 of the machine learning course's 61 sub-areas were named by a chapter
+    file (`Goodfellow-01-part`); with it none is, and none of its 10 areas
+    changes name (2026-10-28)."""
+    named = [m for m in members if not _is_file_slug(m)] or list(members)
+    return max(named, key=lambda m: (deg[m], m))
+
+
 def area_hubs(t: AreaTally) -> dict[int, str]:
-    """Area -> its highest-degree note; a tie goes to the larger id, the rule
-    ClusterStat.hub always used, so a report row, a gap overlay and a matrix
-    row point at the same note."""
-    hub: dict[int, str] = {}
+    """Area -> the note it is named by (hub_of), the rule ClusterStat.hub, the
+    gap overlay and the matrix all read, so they point at the same note."""
+    members: dict[int, list[str]] = {}
     for nid, g in t.group_of.items():
-        if g not in hub or (t.deg[nid], nid) > (t.deg[hub[g]], hub[g]):
-            hub[g] = nid
-    return hub
+        members.setdefault(g, []).append(nid)
+    return {g: hub_of(ms, t.deg) for g, ms in members.items()}
+
+
+class SubArea(NamedTuple):
+    id: int
+    area: int
+    hub: str    # the note it is named by, hub_of's rule
+    size: int
+
+
+def detect_sub_areas(nodes: list[dict], edges: list[dict]) -> list[SubArea]:
+    """Louvain inside each area, on that area's own wikilinks: the atlas's
+    provinces (ADR-0136). Stamps node["sub"], -1 where a note has no area.
+
+    A grouping inside the structural partition and never across the two
+    (ADR-0023): it reads node["group"] and the wikilinks, nothing semantic.
+    Ids run area by area in area order, the parts largest first, so they are
+    a function of the partition as the area ids are (detect_communities).
+    On the machine learning course (1,092 notes, 10 areas of 2 or more) it
+    finds 61 sub-areas, the largest of 52 notes (2026-10-28).
+    """
+    t = area_tally(nodes, edges)
+    G = edge_graph(nodes, edges)
+    members: dict[int, list[str]] = {}
+    for nid, g in t.group_of.items():
+        members.setdefault(g, []).append(nid)
+    subs: list[SubArea] = []
+    sub_of: dict[str, int] = {}
+    for g in sorted(members):
+        ms = members[g]
+        H = G.subgraph(ms)
+        # louvain_sorted is [] when it cannot run; an area it cannot split is
+        # one province, which draws no border inside it.
+        parts = louvain_sorted(H) if H.number_of_edges() else []
+        for part in parts or [set(ms)]:
+            for nid in part:
+                sub_of[nid] = len(subs)
+            subs.append(SubArea(len(subs), g, hub_of(part, t.deg), len(part)))
+    for node in nodes:
+        node["sub"] = sub_of.get(node["id"], -1)
+    return subs
 
 
 def structural_gaps(
@@ -1001,7 +1061,7 @@ def structural_gaps(
     return gaps[:top_k]
 
 
-def area_bridges(nodes: list[dict], edges: list[dict], key: str = "group") -> list[dict]:
+def area_bridges(nodes: list[dict], edges: list[dict]) -> list[dict]:
     """Every wikilink that joins two areas, rarest pair of areas first.
 
     Two keys, two questions, no scalar: `links_between` (how many linked pairs
@@ -1021,27 +1081,17 @@ def area_bridges(nodes: list[dict], edges: list[dict], key: str = "group") -> li
     someone wrote across two areas is the row a reader wants first, and a
     `related:` entry has no sentence to show.
 
-    `zone` reads node["sgroup"] when detect_semantic_partition has run: "same"
-    or "different", None while either note has no vector. A link between two
-    areas that sit in one semantic zone is organised apart and written close;
-    between two zones it is distant on both partitions. Both are worth a row,
-    and the row says which.
-
-    `key="sgroup"` ranks the links between semantic zones the same way, and
-    the fields keep their names with the partitions swapped: `area_a`/`area_b`
-    are then zones and `zone` says whether the two notes share an AREA. On the
-    test vault (2026-10-06) 114 of the 155 zone-crossing pairs sat in one area,
-    so that verdict is the zone reading's own question: same area, other topic.
+    A row also said whether its two notes shared a semantic zone, and the
+    same ranking ran over the zones for Bridges' areas | zones switch; both
+    were pruned with the graph's zones (ADR-0136, the owner's answer to its
+    Open 2, 2026-10-28).
     """
-    t = area_tally(nodes, edges, key)
-    other = "sgroup" if key == "group" else "group"
-    zone = {n["id"]: n.get(other, -1) for n in nodes}
+    t = area_tally(nodes, edges)
     rows: list[dict] = []
     for a, b, scaffold in t.pairs.values():
         ga, gb = t.group_of[a], t.group_of[b]
         if ga == gb:
             continue
-        za, zb = zone.get(a, -1), zone.get(b, -1)
         rows.append({
             "a": a, "b": b,
             "area_a": ga, "area_b": gb,
@@ -1049,7 +1099,6 @@ def area_bridges(nodes: list[dict], edges: list[dict], key: str = "group") -> li
             "links_between": t.inter[(min(ga, gb), max(ga, gb))],
             "joined": t.sizes[ga] * t.sizes[gb],
             "scaffold": scaffold,
-            "zone": None if za < 0 or zb < 0 else ("same" if za == zb else "different"),
         })
     rows.sort(key=lambda r: (r["links_between"], -r["joined"], r["scaffold"], r["a"], r["b"]))
     return rows
@@ -1264,3 +1313,51 @@ def canvas_metrics(nodes: list[dict], edges: list[dict], k: int = 400) -> tuple[
         except Exception:
             bet = {}
     return bet, giant
+
+
+def backbone_links(nodes: list[dict], edges: list[dict]) -> int:
+    """Stamps `backbone` on one wikilink of each pair the layout pulls on, its
+    value the pair's neighbourhood Jaccard; returns the pairs kept (ADR-0136).
+
+    L-Spar (Satuluri, Parthasarathy and Ruan, SIGMOD 2011): each note keeps the
+    ceil(sqrt(degree)) links whose two ends share the most neighbours, joined
+    with a maximum spanning tree on the same Jaccard, so no linked note is left
+    out. A force layout of a small-world graph is a hairball by construction,
+    chasing one length for every link (Nocaj, Ortmann and Brandes, JGAA 2015);
+    laid out on its most embedded ties it is not. A hub keeps few links because
+    its neighbourhood dwarfs any leaf's, which is what demotes a book note with
+    847 pairs without a special case. On the machine learning course it keeps
+    2,965 of 8,026 pairs (2026-10-28).
+
+    Over edge_graph, the edge set Louvain reads, so the ties the layout pulls on
+    are the ones the areas were cut from. Every other wikilink is still drawn;
+    the browser only reads the stamp (the frame's linkStrength).
+    """
+    import math
+
+    import networkx as nx
+
+    G = edge_graph(nodes, edges)
+    G.remove_edges_from(list(nx.selfloop_edges(G)))
+    near = {u: set(G[u]) for u in G}
+    for u, v in G.edges():
+        G[u][v]["jaccard"] = len(near[u] & near[v]) / len(near[u] | near[v])
+    keep: set[tuple[str, str]] = set()
+    for u in G:
+        # Ties on the neighbour's id: G's insertion order is sorted already
+        # (edge_graph), and the key says so rather than leaning on it.
+        ranked = sorted(G[u], key=lambda v: (-G[u][v]["jaccard"], v))
+        keep.update((min(u, v), max(u, v)) for v in ranked[:math.ceil(len(ranked) ** 0.5)])
+    keep.update((min(u, v), max(u, v))
+                for u, v in nx.maximum_spanning_edges(G, weight="jaccard", data=False))
+    stamped: set[tuple[str, str]] = set()
+    for e in edges:
+        if e.get("type") != "EXTRACTED":
+            continue
+        pair = (min(e["from"], e["to"]), max(e["from"], e["to"]))
+        # One edge per pair: a mutual link is two edges, and both stamped would
+        # pull the pair twice as hard as a one-way link.
+        if pair in keep and pair not in stamped:
+            stamped.add(pair)
+            e["backbone"] = round(G.edges[pair]["jaccard"], 4)
+    return len(keep)
