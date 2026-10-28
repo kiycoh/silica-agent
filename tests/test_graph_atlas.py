@@ -119,8 +119,13 @@ def test_a_name_takes_the_first_free_spot_and_waits_when_there_is_none(tmp_path)
 
 @needs_node
 def test_the_zoom_names_areas_then_sub_areas_then_notes(tmp_path):
-    out = _pure(tmp_path, "console.log(JSON.stringify([0.5, 1, 1.79, 1.8, 3.59, 3.6, 9].map(atlasTier)));")
-    assert out == [0, 0, 0, 1, 1, 2, 2]
+    out = _pure(tmp_path, """
+      const z = [0.5, 1, 1.79, 1.8, 3.59, 3.6, 9];
+      console.log(JSON.stringify([z.map(k => atlasTier(k)), z.map(k => atlasTier(k, false))]));
+    """)
+    assert out[0] == [0, 0, 0, 1, 1, 2, 2]
+    # no province to name: the areas hold the middle of the zoom
+    assert out[1] == [0, 0, 0, 0, 0, 2, 2]
 
 
 @needs_node
@@ -163,3 +168,11 @@ def test_with_the_atlas_on_a_line_shows_for_the_note_in_hand_only():
     # the atlas names its notes; drawNode's own labels stand down
     node = FRAME_JS[FRAME_JS.index("function drawNode("):FRAME_JS.index("// --- an arrangement, drawn")]
     assert "if (atlas || (scale < 1.5" in node
+
+
+def test_a_drag_holds_forceatlas2_running_from_a_settled_layout():
+    """A settled run has spent its budget: the hold has to open it again, or
+    the notes around a dragged one never answer the drag (2026-10-28)."""
+    assert "if (fa) { fa.hold = m.target > 0; faRestart(); }" in FRAME_JS
+    step = FRAME_JS[FRAME_JS.index("function faStep() {"):FRAME_JS.index("function faRestart()")]
+    assert step.index("if (!fa.left)") < step.index("if (fa.hold) return true;")

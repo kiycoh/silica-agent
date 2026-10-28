@@ -423,9 +423,12 @@ function cellInDisc(poly, sx, sy, R, sides) {
 // What the zoom names, relative to the zoom that fits the atlas: the areas
 // under 1.8x, their sub-areas to 3.6x, the notes past it (the draft the owner
 // approved, ADR-0136). Relative because the absolute zoom of a fit runs from
-// 0.05 on a big vault to over 1 on a small one.
+// 0.05 on a big vault to over 1 on a small one. Where no area splits into
+// provinces (a small vault, or an atlas of zones, which have none) the areas
+// keep their names to 3.6x rather than the middle tier naming nothing.
 const ATLAS_TIERS = [1.8, 3.6];
-const atlasTier = kRel => kRel < ATLAS_TIERS[0] ? 0 : kRel < ATLAS_TIERS[1] ? 1 : 2;
+const atlasTier = (kRel, provinces = true) =>
+  kRel < (provinces ? ATLAS_TIERS[0] : ATLAS_TIERS[1]) ? 0 : kRel < ATLAS_TIERS[1] ? 1 : 2;
 
 // The notes a part's name may sit on: first the member nearest the part's
 // centroid, so a part shaped like a crescent is not named over the hole in
@@ -3244,7 +3247,9 @@ function apply(m) {
   if (m.min !== undefined) min = m.min;
   if (m.target !== undefined) {
     sim.alphaTarget(m.target);
-    if (fa) { fa.hold = m.target > 0; if (!fa.hold) faRestart(); }
+    // A drag holds FA2 running and its end lets it settle: either way the
+    // budget opens again, since a settled run has spent it.
+    if (fa) { fa.hold = m.target > 0; faRestart(); }
     if (m.target || fa) kick();
   }
   if (m.descend) { descend = m.descend.slice(); if (fa) { faRestart(); kick(); } }
@@ -4021,7 +4026,7 @@ function drawAtlasNames(ctx, scale) {
     RAW_NODES.filter(n => !n._dim && !n._hidden && !roots.has(n.id) && seen(n))
       .sort((p, q) => deg(q) - deg(p)).forEach(n => note(n, 11, 500, GP.label));
   } else {
-    const tier = atlasTier(scale / atlasFitZoom(g));
+    const tier = atlasTier(scale / atlasFitZoom(g), g.subs.length > 0);
     const top = g.countries.length ? g.countries[0].size : 1;
     if (tier === 0) g.countries.forEach(c => part(c, Math.round(12 + 5 * Math.sqrt(c.size / top)), 10, 40));
     else if (tier === 1) g.subs.forEach(p => { if (seen(g.on[p.at[0]])) part(p, 12, 9.5, 28); });
