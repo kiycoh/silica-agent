@@ -3840,10 +3840,10 @@ try { if (localStorage.getItem(ATLAS_KEY) === "off") showAtlas = false; } catch 
 const atlasOn = () => showAtlas && is2D() && !!ATLAS_BY;
 // The draft's disc, 13px at fit on the course, was 0.74 of the median
 // backbone link there, and a link's rest length is the unit (ForceAtlas2's
-// posts are scaled to it, faUnit). The coast is a rim of the floor's line
-// colour around the land, as the draft drew it, thinner: the draft's 1.15 R
-// was a 15px band at 5x fit.
-const ATLAS_R = 0.74, ATLAS_COAST = 1.08;
+// posts are scaled to it, faUnit). The coast is a line of constant width
+// (ATLAS_LINES), where the draft filled a 1.15 R ring under the cells: that
+// ring was a 15px band at 5x fit.
+const ATLAS_R = 0.74;
 // The colour's share of a cell's ground, over the floor: the draft's 0.28 on
 // graphite and 0.2 on paper, where a tint reads stronger.
 const ATLAS_GROUND = LIGHT ? 0.2 : 0.28;
