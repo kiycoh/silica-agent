@@ -630,7 +630,7 @@ button.nb-n:focus-visible {
 }
 
 /* The figures (ADR-0075, Place) wear the diagram theme of ADR-0069: an area's
-   hue on its notes and blobs, the signal on the note, names masked by a halo
+   hue on its notes, the signal on the note, names masked by a halo
    in the sheet they sit on. --ad/--ap are the area's graphite and paper hues,
    set per element, so a theme switch needs no redraw. */
 .pl-cutfig,
@@ -650,32 +650,6 @@ button.nb-n:focus-visible {
 
 :root[data-theme="light"] .pl-cutfig .pl-a {
   --a: var(--ap);
-}
-
-/* The frame's BLOB_ALPHA, 0.17 on graphite and 0.13 on paper. */
-.pl-cutfig .pl-blob {
-  fill: var(--a);
-  fill-opacity: 0.17;
-}
-
-:root[data-theme="light"] .pl-cutfig .pl-blob {
-  fill-opacity: 0.13;
-}
-
-.pl-cutfig .pl-rim {
-  fill: none;
-  stroke: var(--a);
-  stroke-opacity: 0.7;
-  stroke-linecap: round;
-}
-
-/* The vault's side is context, at about the weight the graph gives it. */
-.pl-cutfig .pl-blob.ctx {
-  fill-opacity: 0.07;
-}
-
-.pl-cutfig .pl-rim.ctx {
-  stroke-opacity: 0.3;
 }
 
 .pl-cutfig .pl-dot {

@@ -50,6 +50,7 @@ from silica.kernel.recall.graph_export import (
     _EDGE_COLOR_SIMILAR_PAPER,
     NATIVE_TYPES,
     Community,
+    SubArea,
     Zone,
 )
 
@@ -75,19 +76,27 @@ def _vendored_lib_js() -> str:
 # Rebuilt from npm d3-force-3d@3.0.6 with an entry of
 #   export { forceSimulation, forceManyBody, forceLink, forceCenter } from "d3-force-3d";
 # through esbuild --bundle --format=iife --global-name=d3 --minify --legal-comments=none.
-_SIM_BUNDLE = "d3-force-3d.min.js"
+# ForceAtlas2 lays out 2D since ADR-0136, in the same worker: npm
+# graphology-layout-forceatlas2@0.10.1, an entry of
+#   export { default as iterate } from "graphology-layout-forceatlas2/iterate.js";
+# through the same esbuild flags with --global-name=fa2. Only `iterate`: it
+# works on flat arrays, so graphology itself never ships.
+_SIM_BUNDLES = ("d3-force-3d.min.js", "forceatlas2.min.js")
 
 
 def _sim_js() -> str:
-    """The worker's bundle, refused if it could end its own script element.
+    """The worker's bundles, refused if one could end its own script element.
 
     The parser ends script data at the first `</script` whatever the type, so
-    that string inside the bundle would cut the worker short and paint the rest
-    of the bundle into the page as text."""
-    src = _asset(_SIM_BUNDLE)
-    if "</script" in src.lower():
-        raise RuntimeError(f"graph_export: {_SIM_BUNDLE} contains '</script' and cannot be inlined")
-    return src
+    that string inside a bundle would cut the worker short and paint the rest
+    of it into the page as text."""
+    out = []
+    for name in _SIM_BUNDLES:
+        src = _asset(name)
+        if "</script" in src.lower():
+            raise RuntimeError(f"graph_export: {name} contains '</script' and cannot be inlined")
+        out.append(src)
+    return ";\n".join(out)
 
 
 def _vendored_font_face() -> str:
@@ -225,8 +234,10 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
 # `<script src>` as index.html does it: the emitted document is opened from
 # file:// with no server behind it, so a URL is a reference to nothing there
 # (ADR-0026). The cost is one read per render, which /graph already pays
-# fifteen-fold for the bundles.
-_FRAME_ASSETS = ("graph-frame.html", "graph-frame.css", "blob-geometry.js", "graph-frame.js")
+# fifteen-fold for the bundles. d3-delaunay is the atlas's Voronoi (ADR-0136):
+# npm d3-delaunay@6.0.4, an entry of `export { Delaunay } from "d3-delaunay";`
+# through the worker bundles' esbuild flags with --global-name=d3Delaunay.
+_FRAME_ASSETS = ("graph-frame.html", "graph-frame.css", "d3-delaunay.min.js", "graph-frame.js")
 
 
 def _asset(name: str) -> str:
@@ -261,35 +272,11 @@ def _json_island(payload: dict) -> str:
     return json.dumps(payload, ensure_ascii=False, allow_nan=False).replace("<", "\\u003c")
 
 
-def _zone_gate_row(nodes: list[dict], edges: list[dict]) -> str:
-    """The HUD row shown INSTEAD of the zone rows when the coverage gate fires.
-
-    An empty `zone_section` is right when the vault has no embed index at all --
-    nothing to explain -- but wrong when the index exists and is merely too thin:
-    that is the state the user is actually in, and dropping the row silently is
-    the same defect as drawing 737 one-note hulls, one layer up. The row is dead
-    (no checkbox) because there is nothing to toggle; it carries the two numbers
-    and the command that fixes them.
-    """
-    from silica.kernel.recall.graph_export import (
-        _ZONE_MIN_COVERAGE,
-        semantic_coverage,
-    )
-
-    covered, total = semantic_coverage(nodes, edges)
-    if not total or not covered:
-        return ""   # no index at all: the absent layer needs no explaining
-    return (
-        f'<div class="filter-row" style="margin-top:4px;opacity:.55" '
-        f'title="Louvain over the embedding k-NN is a global function of the note set, so a '
-        f'partial index does not draw a partial map, it draws a different one. Measured on an '
-        f'887-note vault, a {int(100 * _ZONE_MIN_COVERAGE)}% index still agrees with the full '
-        f'partition; a 15% one agrees on barely a third. Run /embed to fill the index and the '
-        f'layer comes back.">'
-        f'<span class="dot" style="--c:#565a77;--cp:#6b6f8c;opacity:.5"></span>semantic zones'
-        f'<span class="ct">{covered}/{total} embedded</span>'
-        f'</div>'
-    )
+# The atlas draws the areas once one of them holds this many notes; under it
+# the vault is link-free for the atlas's purpose (converted PDFs, a folder per
+# client) and the atlas draws the semantic zones instead, saying so (ADR-0136,
+# Open 4, the owner's "ok" 2026-10-28). Two notes are a link, not a country.
+ATLAS_MIN_AREA = 3
 
 
 def _frame_context(
@@ -301,6 +288,7 @@ def _frame_context(
     discourse: str,
     zones: "list[Zone]",
     covers: dict | None = None,
+    subs: "list[SubArea]" = (),  # type: ignore[assignment]
 ) -> dict:
     """Every value graph-frame.html asks for, under the name it asks for it by.
 
@@ -313,7 +301,7 @@ def _frame_context(
     title = html.escape(title)
 
     # A missing paper rides the payload (ADR-0055) and is an id, not a file:
-    # every count and the zone gate below read the notes without it. An
+    # every count below reads the notes without it. An
     # outside paper (ADR-0066) is the same kind of node, a paper with no file
     # in this vault, and stays out of them for the same reason.
     missing = {n["id"] for n in nodes if n.get("type") == "missing"}
@@ -515,45 +503,29 @@ def _frame_context(
         f'of one.">single-note areas<span class="ct">{n_single}</span></div>\n'
         if n_single else "")
 
-    # The areas as blobs (ADR-0074): asked for, like the zones, and 2D only, so
-    # the frame hides the row in 3D. Only where the list names an area.
-    areas_row = (
-        '<label class="filter-row" id="areas-row" style="margin-top:4px" title="Draw each area '
-        'as a blob around its notes and gather its notes there, starting from where they are. '
-        'Inside an area only its wikilinks are drawn; two areas joined by 3 lines or more get '
-        'one ribbon, and a focused note shows all of its lines. 2D only.">'
-        '<input type="checkbox" id="cb-areas" onchange="updateAreaFilter()">'
-        '<span class="dot all"></span>area blobs'
-        '</label>'
-    ) if areas else ""
-
-    # The zone layer only exists where the vault has vectors, so the rows do too:
-    # an empty "semantic zones" checkbox would promise a layer with nothing
-    # behind it. They are two rows of the Colour section and not a section of
-    # their own, because what the HUD answers there is "what does a colour mean
-    # here", and the answer is a choice between two partitions. The tooltip
-    # states the rule the layer obeys, since a second grouping over the same
-    # notes is unreadable without one.
-    zone_section = (
-        f'<label class="filter-row" style="margin-top:4px" title="Louvain over the embedding k-NN, '
-        f'not over your wikilinks: notes grouped by what they are about, drawn as a hull and a '
-        f'name. Note colour does not change - it always means the structural area - so the two '
-        f'partitions can be read against each other in one frame. In 3D the zones are names only; '
-        f'the hulls are drawn on the 2D canvas.">'
-        f'<input type="checkbox" id="cb-zones" onchange="updateZoneFilter()">'
-        f'<span class="dot" style="--c:{zones[0].color if zones else "#565a77"};'
-        f'--cp:{(zones[0].color_paper or zones[0].color) if zones else "#6b6f8c"};opacity:.5"></span>semantic zones'
-        f'<span class="ct">{len(zones)}</span>'
-        f'</label>'
-        # Only while the zones are on (ADR-0058): with them off this row hid
-        # every note and left an empty frame.
-        f'<label class="filter-row" id="zone-nodes-row" style="display:none;padding-left:16px" '
-        f'title="Untick to leave the zones alone in the frame: the macro read of the vault, with '
-        f'the individual notes and their edges out of the way.">'
-        f'<input type="checkbox" id="cb-zone-nodes" checked onchange="updateZoneFilter()">'
-        f'notes'
-        f'</label>'
-    ) if zones else _zone_gate_row(nodes, edges)
+    # The atlas (ADR-0136) is the one row that replaced two, the area blobs and
+    # the semantic zones: every note owns the ground nearest it, an area's
+    # ground is a country, a sub-area's a province. It draws the areas, or the
+    # zones where no area reaches ATLAS_MIN_AREA notes, and the row says which
+    # (ADR-0023: a surface names the partition it shows). On in 2D unless the
+    # reader turned it off; the frame hides the row in 3D, which has no atlas.
+    atlas_by = "zones" if zones else ("areas" if areas else "")
+    atlas_tip = (
+        "No area holds 3 notes or more, so the countries are the semantic zones: Louvain over "
+        "the embedding k-NN, notes grouped by what they are about. Every note owns the ground "
+        "nearest to it. Links show for the note under the pointer or in focus. 2D only."
+        if zones else
+        "Every note owns the ground nearest to it: an area's ground is a country, a sub-area's "
+        "a province. Zoom in for the sub-areas, then the notes. Links show for the note under "
+        "the pointer or in focus. 2D only."
+    )
+    atlas_row = (
+        f'<label class="filter-row" id="atlas-row" style="margin-top:4px" title="{atlas_tip}">'
+        f'<input type="checkbox" id="cb-atlas" checked onchange="updateAtlas()">'
+        f'<span class="dot all"></span>atlas'
+        + (f' · semantic zones<span class="ct">{len(zones)}</span>' if zones else "")
+        + '</label>'
+    ) if atlas_by else ""
 
     tree_html = render_tree(nodes)
 
@@ -570,11 +542,22 @@ def _frame_context(
         # bridge tip named an area by its c-TF-IDF label ("python · stringa")
         # where the detail said "Python"; the legend list keeps the label as a
         # description of the colour, the tip names the area (ADR-0045). Its
-        # keys are the listed areas, multi-note only: the ones the 2D frame
-        # draws as blobs (ADR-0074).
+        # keys are the listed areas, multi-note only: the countries the 2D atlas
+        # names (ADR-0136).
         "comm_hubs": hub_name,
-        # The semantic partition rides as its own list (ADR-0023): the JS keys
-        # it by node.sgroup, never by node.group.
+        # What the atlas draws: "areas" (node.group, provinces node.sub), or
+        # "zones" (node.sgroup) on a vault with no area of ATLAS_MIN_AREA notes,
+        # or "" with neither. One partition per document, never both (ADR-0023).
+        "atlas": atlas_by,
+        # The provinces, named by hub_of's rule over each one's notes. A
+        # one-note sub-area is its note, and a province is drawn from two.
+        "subs": [
+            {"id": s.id, "area": s.area, "name": label_by_id.get(s.hub, s.hub), "size": s.size}
+            for s in subs if s.size > 1
+        ],
+        # The semantic partition rides as its own list (ADR-0023), and only on
+        # the vault whose atlas draws it: the JS keys it by node.sgroup, never
+        # by node.group.
         "zones": [
             {"id": z.id, "label": z.label, "color": z.color,
              "color_paper": z.color_paper or z.color, "size": z.size}
@@ -629,12 +612,11 @@ def _frame_context(
         "native_row": native_row,
         "discourse_badge": discourse_badge,
         "legend_items": legend_items,
-        "areas_row": areas_row,
-        "zone_section": zone_section,
+        "atlas_row": atlas_row,
         "graph_data": _json_island(data),
-        # The blobs' geometry first: the drawer draws the same blobs (ADR-0075)
-        # and the frame calls it, one script element so no URL is involved.
-        "graph_js": _asset("blob-geometry.js") + "\n" + _asset("graph-frame.js"),
+        # The atlas's Delaunay first, which the frame calls: one script
+        # element, so no URL is involved (ADR-0026).
+        "graph_js": _asset("d3-delaunay.min.js") + "\n" + _asset("graph-frame.js"),
         "sim_js": _sim_js(),
     }
 
@@ -648,14 +630,16 @@ def render_html(
     discourse: str = "",
     zones: "list[Zone]" = (),  # type: ignore[assignment]
     covers: dict | None = None,
+    subs: "list[SubArea]" = (),  # type: ignore[assignment]
 ) -> str:
     """Produce a fully self-contained force-graph HTML string.
 
     lib_js is the vendored renderer bundle, embedded inline (offline-capable;
     export_graph always supplies it via _vendored_lib_js).
     communities is a list of Community objects; legend is built from it.
-    zones is the semantic partition (node["sgroup"]); it draws the zone layer,
-    which is off until asked for and is a different grouping from communities.
+    zones is the semantic partition (node["sgroup"]), passed only where the
+    atlas draws it in place of the areas (ATLAS_MIN_AREA); subs are the areas'
+    provinces (detect_sub_areas, node["sub"]).
 
     string.Template and not an f-string: the skeleton is a file the browser
     and a linter read as HTML, and its `$name` slots need no brace doubling,
@@ -663,7 +647,7 @@ def render_html(
     substitute() is the strict form, so a slot with no value is a KeyError at
     render and never an empty sidebar.
     """
-    ctx = _frame_context(nodes, edges, communities, title, lib_js, discourse, zones, covers)
+    ctx = _frame_context(nodes, edges, communities, title, lib_js, discourse, zones, covers, subs)
     return string.Template(_asset("graph-frame.html")).substitute(ctx)
 
 
@@ -1008,13 +992,14 @@ def export_graph(
     from silica.kernel.recall.graph_export import (
         build_graph_data,
         canvas_metrics,
+        backbone_links,
         detect_communities,
         detect_semantic_partition,
+        detect_sub_areas,
         discourse_shape,
+        edge_graph,
         knn_edges,
     )
-
-    from silica.kernel.recall.graph_export import edge_graph
 
     lib_js = _vendored_lib_js()  # fail fast before the graph build
     nodes, edges = build_graph_data(folder=folder)   # wikilink edges (the structure)
@@ -1037,9 +1022,15 @@ def export_graph(
     from silica.kernel.recall.daily_layer import neutral_lone_dailies
 
     neutral_lone_dailies(nodes)   # a day alone in its community is not a hue
-    # ...and the second partition, on the same nodes: Louvain on the k-NN. It
-    # writes node["sgroup"] only, so the structural colours above stand.
-    zones = detect_semantic_partition(nodes, sim)
+    # The provinces of the atlas, and the ties the layout pulls on (ADR-0136).
+    subs = detect_sub_areas(nodes, edges)
+    n_backbone = backbone_links(nodes, edges)
+    # The second partition only where the atlas draws it, a vault with no area
+    # of ATLAS_MIN_AREA notes: since ADR-0136 the graph reads it nowhere else.
+    # Louvain on the k-NN, writing node["sgroup"] only, so the structural
+    # colours above stand.
+    linked = any(c.size >= ATLAS_MIN_AREA for c in communities)
+    zones = [] if linked else detect_semantic_partition(nodes, sim)
 
     # Betweenness → node size (bottleneck nodes swell) + discourse-shape badge,
     # from one shared nx build over the wikilinks. Base size 16 for ordinary nodes.
@@ -1077,7 +1068,7 @@ def export_graph(
     html_out = render_html(
         nodes + missing + outside, edges + sim + gaps + proposed + coupled + cites + covers,
         communities, title=title, lib_js=lib_js, discourse=discourse, zones=zones,
-        covers=covers_meta,
+        covers=covers_meta, subs=subs,
     )
 
     out = Path(output_path)
@@ -1091,9 +1082,10 @@ def export_graph(
     n_communities = len(communities)
 
     logger.info(
-        "graph_export: wrote %s — %d notes, %d links, %d similar, %d clusters, "
-        "%d zones, %d unresolved",
-        out, n_notes, n_links, n_similar, n_communities, len(zones), n_ghost,
+        "graph_export: wrote %s — %d notes, %d links (%d pairs on the backbone), %d similar, "
+        "%d clusters, %d unresolved, atlas over the %s",
+        out, n_notes, n_links, n_backbone, n_similar, n_communities, n_ghost,
+        "areas" if linked else "zones",
     )
     return {
         "success":     True,
@@ -1102,9 +1094,13 @@ def export_graph(
         "edges":       n_links,
         "similar":     n_similar,
         # Two counts, two names: `communities` is the structural partition,
-        # `zones` the semantic one. Never summed, never swapped (ADR-0023).
+        # `zones` the semantic one, counted only where the atlas draws it
+        # (ATLAS_MIN_AREA) and None elsewhere. Never summed, never swapped
+        # (ADR-0023).
         "communities": n_communities,
-        "zones":       len(zones),
+        "zones":       None if linked else len(zones),
+        "sub_areas":   sum(1 for s in subs if s.size > 1),
+        "backbone":    n_backbone,
         "unresolved":  n_ghost,
         "gaps":        len(gaps),
     }

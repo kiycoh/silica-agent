@@ -16,7 +16,7 @@ needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="needs node
 
 
 def _pure(tmp_path, body: str):
-    pure = (STATIC / "blob-geometry.js").read_text(encoding="utf-8") + "\n" \
+    pure = (STATIC / "d3-delaunay.min.js").read_text(encoding="utf-8") + "\n" \
         + FRAME_JS[FRAME_JS.index("// frame-pure:start"):FRAME_JS.index("// frame-pure:end")]
     script = tmp_path / "pure.js"
     script.write_text(pure + "\n" + body + "\n", encoding="utf-8")

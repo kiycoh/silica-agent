@@ -3606,18 +3606,6 @@ def shape():
     except Exception as exc:
         logger.warning("shape: graph build failed (%s)", exc)
         return _failure(exc)
-    # The semantic partition too, so a bridge row can say whether its two notes
-    # sit in one zone or two. Best-effort, like the frame's own zone layer:
-    # without an embed index every sgroup is -1 and the row says nothing. k=6
-    # is export_graph's own default, so the zones here are the zones drawn.
-    zones = []
-    try:
-        from silica.kernel.recall.graph_export import detect_semantic_partition, knn_edges
-
-        zones = detect_semantic_partition(nodes, knn_edges(nodes, k=6))
-    except Exception:
-        logger.debug("shape: semantic partition unavailable", exc_info=True)
-
     real = [n for n in nodes if n.get("type") != "ghost"]
     group_of = {n["id"]: n.get("group", -1) for n in real}
     label_of = {n["id"]: n.get("label") or n["id"].rsplit("/", 1)[-1] for n in real}
@@ -3658,21 +3646,15 @@ def shape():
         "areas": areas,
         "matrix": matrix,
         # Every link that joins two areas, rarest pair first: the matrix's
-        # off-diagonal cells unrolled into the wikilinks behind them. Then the
-        # same over the semantic zones, the reading the Areas surface's areas | zones
-        # switch draws (ADR-0060); empty without an embed index.
+        # off-diagonal cells unrolled into the wikilinks behind them. The same
+        # over the semantic zones, and each note's zone, went with the graph's
+        # zones (ADR-0136): /shape no longer runs the semantic partition.
         "bridges": _bridge_rows(real, edges, {a["id"]: a["label"] for a in areas}),
-        "zone_bridges": _bridge_rows(real, edges, {z.id: z.label for z in zones}, key="sgroup"),
         # Every real note, for the containment view. Three fields, not the whole
         # node: the treemap needs a path, an area and a weight, and shipping the
         # colour/font/title the canvas uses would triple the payload for nothing.
-        "notes": [{"path": n["id"], "size": n.get("size") or 1, "area": group_of.get(n["id"], -1),
-                   "zone": n.get("sgroup", -1)}
+        "notes": [{"path": n["id"], "size": n.get("size") or 1, "area": group_of.get(n["id"], -1)}
                   for n in real],
-        # The semantic partition as a list, so the scope picker can name a zone
-        # the way it names an area; the frame draws them, this only lists them.
-        "zones": [{"id": z.id, "label": z.label, "size": z.size,
-                   "color": z.color, "color_paper": z.color_paper} for z in zones],
         "reading": _shape_reading(adj, deg, areas, label_of),
         "totals": {"notes": len(real), "areas": len(ids),
                    "singletons": sum(1 for s in sizes.values() if s <= 1)},
@@ -5030,15 +5012,14 @@ def _row(path: str) -> dict:
     return {"name": _clean_name(path), "path": path}
 
 
-def _bridge_rows(nodes: list[dict], edges: list[dict], name_of: dict[int, str],
-                 key: str = "group") -> list[dict]:
+def _bridge_rows(nodes: list[dict], edges: list[dict], name_of: dict[int, str]) -> list[dict]:
     """area_bridges' rows dressed for the explore surface: names, part labels
     and the sentence that carries the link.
 
-    `key` is the partition, `name_of` its parts' names: the areas by their hub
-    note's title, the zones by their topics (ADR-0058 Decision 5). The row says
-    `part`, not `area`, because one producer ships both readings; `other` is
-    the other partition's verdict on the two notes, "same" or "different".
+    `name_of` names the areas by their hub note's title (ADR-0058 Decision 5).
+    The row says `part`, not `area`: one producer shipped the areas and the
+    semantic zones until ADR-0136 pruned the second reading, and the surface
+    still reads `part`.
 
     No shared concepts, measured: `shared_concepts` on the 74 bridges of the
     728-note test vault (2026-09-22) labelled every row, with "definizione",
@@ -5049,7 +5030,7 @@ def _bridge_rows(nodes: list[dict], edges: list[dict], name_of: dict[int, str],
     """
     from silica.kernel.recall.graph_export import area_bridges
 
-    rows = area_bridges(nodes, edges, key)
+    rows = area_bridges(nodes, edges)
 
     def end(path: str, part: int) -> dict:
         return {"name": _clean_name(path), "path": path, "part_id": part,
@@ -5058,7 +5039,7 @@ def _bridge_rows(nodes: list[dict], edges: list[dict], name_of: dict[int, str],
     return [{
         "a": end(r["a"], r["area_a"]), "b": end(r["b"], r["area_b"]),
         "links_between": r["links_between"], "joined": r["joined"],
-        "scaffold": r["scaffold"], "other": r["zone"],
+        "scaffold": r["scaffold"],
         # A scaffold link has no sentence by definition (frontmatter, heading
         # line), so the row says so instead of quoting a `## [[Title]]`.
         "passage": "" if r["scaffold"] else _bridge_passage(r["a"], r["b"]),
@@ -5494,9 +5475,9 @@ def concepts(terms: str = ""):
             "notes": notes}
 
 
-def _select(nodes: list[dict], sel: str, zones: list, edges: list | None = None
+def _select(nodes: list[dict], sel: str, edges: list | None = None
             ) -> tuple[set[str], str] | None:
-    """`folder:<prefix>` | `area:<id>` | `zone:<id>` | `collection:<name>` |
+    """`folder:<prefix>` | `area:<id>` | `collection:<name>` |
     `collections:<json list of names>` -> (note ids, label), or None.
     `collections:` with no list is every collection (ADR-0066 decision 5)."""
     kind, _, rest = sel.partition(":")
@@ -5523,17 +5504,13 @@ def _select(nodes: list[dict], sel: str, zones: list, edges: list | None = None
     if kind == "folder" and rest:
         pre = rest if rest.endswith("/") else rest + "/"
         return {n["id"] for n in real if n["id"].startswith(pre)}, pre
-    if kind in ("area", "zone") and rest.lstrip("-").isdigit():
-        gid, key = int(rest), ("group" if kind == "area" else "sgroup")
-        ids = {n["id"] for n in real if n.get(key, -1) == gid}
-        if kind == "area":
-            from silica.kernel.recall.graph_export import area_hubs, area_tally
+    if kind == "area" and rest.lstrip("-").isdigit():
+        from silica.kernel.recall.graph_export import area_hubs, area_tally
 
-            hub = area_hubs(area_tally(real, [])).get(gid, "")
-            label = _clean_name(hub) if hub else f"area {gid}"
-        else:
-            label = next((z.label for z in zones if z.id == gid), f"zone {gid}")
-        return ids, label
+        gid = int(rest)
+        ids = {n["id"] for n in real if n.get("group", -1) == gid}
+        hub = area_hubs(area_tally(real, [])).get(gid, "")
+        return ids, _clean_name(hub) if hub else f"area {gid}"
     return None
 
 
@@ -5542,12 +5519,11 @@ def compare(a: str = "", b: str = ""):
     """Two parts of the vault side by side (compare_sets): what characterises
     each, and the wikilinks and k-NN pairs that put them in touch, each link
     with the sentence that carries it. Selectors are the scope picker's:
-    folder:<prefix>, area:<id>, zone:<id>."""
+    folder:<prefix>, area:<id>, collection:<name>."""
     from silica.config import CONFIG
     from silica.kernel.recall.compare import compare_sets
     from silica.kernel.recall.cooccurrence import get_cooccur_store
-    from silica.kernel.recall.graph_export import (
-        build_graph_data, detect_communities, detect_semantic_partition, knn_edges)
+    from silica.kernel.recall.graph_export import build_graph_data, detect_communities, knn_edges
 
     try:
         nodes, edges = build_graph_data(folder="")
@@ -5555,10 +5531,8 @@ def compare(a: str = "", b: str = ""):
     except Exception as exc:
         return _failure(exc)
     sim: list[dict] = []
-    zones: list = []
     try:
         sim = knn_edges(nodes, k=6)
-        zones = detect_semantic_partition(nodes, sim)
     except Exception:
         logger.debug("compare: semantic layer unavailable", exc_info=True)
     if a.startswith("collection") or b.startswith("collection"):
@@ -5567,10 +5541,10 @@ def compare(a: str = "", b: str = ""):
 
         paper_layer(nodes)
         _stamp_collections(nodes)
-    A, B = _select(nodes, a, zones, edges), _select(nodes, b, zones, edges)
+    A, B = _select(nodes, a, edges), _select(nodes, b, edges)
     if not A or not B:
-        return {"error": "selectors are folder:<prefix>, area:<id>, zone:<id> or "
-                         "collection:<name>", "a": a, "b": b}
+        return {"error": "selectors are folder:<prefix>, area:<id> or collection:<name>",
+                "a": a, "b": b}
     store = None
     try:
         store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)

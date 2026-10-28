@@ -51,14 +51,10 @@ ${graph_css}</style>
 
 <div id="graph-wrap">
   <div id="graph"></div>
-  <!-- Zone names ride the DOM, not the canvas and not a three sprite: one
-       positioning path serves both renderers, and the vendored 3d bundle
-       exposes no THREE to build a sprite with anyway. -->
-  <div id="zone-labels"></div>
-  <!-- Note names in 3D ride the same DOM path as the zone names above, for the
-       same reason: one positioning routine serves both renderers, and there is
-       no THREE to build a sprite with. 2D keeps painting its labels on canvas —
-       there the zoom IS the level of detail, and the canvas draw is cheaper. -->
+  <!-- Note names in 3D ride the DOM, not a three sprite: the vendored 3d bundle
+       exposes no THREE to build one with. 2D keeps painting its labels on
+       canvas - there the zoom IS the level of detail, and the canvas draw is
+       cheaper. -->
   <div id="node-labels"></div>
   <div id="focus-bar"></div>
   <!-- The foot is the mechanics (ADR-0058): how the picture is made, where the
@@ -185,7 +181,7 @@ ${graph_css}</style>
 
     <div>
       <div class="section-title" style="margin-bottom:8px"
-           title="Two independent groupings over the same notes. The node colour is always the structural one; the semantic zones are drawn as hulls over it, so the two can be read against each other in one frame.">Colour</div>
+           title="The node colour is the structural area, Louvain over your wikilinks. In 2D the atlas draws the areas as countries under the notes.">Colour</div>
       <!-- The area list is the ANSWER to this row, not a section beside it:
            closed, the row states how many areas there are, which is the legend;
            open, an area is a scope (ADR-0058): clicking one shows that area
@@ -205,8 +201,7 @@ ${graph_css}</style>
 ${legend_items}          </div>
         </div>
       </details>
-      ${areas_row}
-      ${zone_section}
+      ${atlas_row}
     </div>
   </div>
 </div>

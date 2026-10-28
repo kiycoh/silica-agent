@@ -50,13 +50,13 @@ def test_the_frame_reads_its_data_from_the_island_and_nowhere_else():
                           [], lib_js="// x")
     js = gv._asset("graph-frame.js")
     assert 'JSON.parse(document.getElementById("graph-data").textContent)' in js
-    for sym in ("RAW_NODES", "RAW_EDGES", "COMM_LABELS", "COMM_HUBS", "ZONES", "PARTICLES",
-                "SHADING"):
+    for sym in ("RAW_NODES", "RAW_EDGES", "COMM_LABELS", "COMM_HUBS", "ATLAS_BY", "SUBS", "ZONES",
+                "PARTICLES", "SHADING"):
         assert f"const {sym} = DATA." in js, f"{sym} is not read off the island"
     data = json.loads(_island(html))
     assert data["nodes"][0]["id"] == "a.md"
-    assert set(data) == {"nodes", "edges", "comm_labels", "comm_hubs", "zones", "covers",
-                         "particles", "shading", "colors"}
+    assert set(data) == {"nodes", "edges", "comm_labels", "comm_hubs", "atlas", "subs", "zones",
+                         "covers", "particles", "shading", "colors"}
 
 
 def test_the_island_cannot_be_ended_by_what_it_carries():

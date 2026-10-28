@@ -70,35 +70,13 @@ def test_a_mutual_pair_is_one_bridge():
     assert len(rows) == 1
 
 
-def test_a_row_says_whether_the_two_notes_share_a_semantic_zone():
+def test_a_row_carries_no_semantic_reading():
+    """ADR-0136 pruned the zone verdict and the zones' own ranking with the
+    graph's zones: a row is the areas' reading alone."""
     na, ea = _clique("a", 2, 0, sgroup=7)
-    nb, eb = _clique("b", 2, 1, sgroup=7)
-    nc, ec = _clique("c", 2, 2, sgroup=9)
-    nd, ed = _clique("d", 2, 3)              # no vector: sgroup absent
-    rows = area_bridges(
-        na + nb + nc + nd,
-        ea + eb + ec + ed + [_link("a0", "b0"), _link("a1", "c0"), _link("a0", "d0")],
-    )
-    zone = {r["b"]: r["zone"] for r in rows}
-    assert zone == {"b0": "same", "c0": "different", "d0": None}
-
-
-def test_the_zones_are_ranked_by_the_same_producer_and_the_row_reads_the_areas():
-    """ADR-0060 Decision 5: the zone reading is the area reading with the
-    partitions swapped, not a second producer. a0-b0 crosses two zones inside
-    one area (the case 114 of 155 zone pairs were on the test vault), a1-c0
-    crosses both partitions, and a link inside one zone is no row."""
-    na, ea = _clique("a", 2, 0, sgroup=5)
-    nb, eb = [{"id": "b0", "label": "b0", "type": "note", "group": 0, "sgroup": 6}], []
-    nc, ec = _clique("c", 2, 1, sgroup=7)
-    nd, ed = _clique("d", 2, 2, sgroup=5)
-    rows = area_bridges(
-        na + nb + nc + nd,
-        ea + eb + ec + ed + [_link("a0", "b0"), _link("a1", "c0"), _link("a0", "d0")],
-        key="sgroup",
-    )
-    assert [(r["a"], r["b"], r["area_a"], r["area_b"], r["zone"]) for r in rows] == [
-        ("a1", "c0", 5, 7, "different"), ("a0", "b0", 5, 6, "same")]   # one link each: 4x2 joined before 4x1
+    nb, eb = _clique("b", 2, 1, sgroup=9)
+    rows = area_bridges(na + nb, ea + eb + [_link("a0", "b0")])
+    assert len(rows) == 1 and "zone" not in rows[0]
 
 
 def test_a_row_carries_the_areas_it_joins():
@@ -151,7 +129,7 @@ def test_shape_ships_the_bridges_with_the_sentence_that_carries_the_link(client,
     assert [(r["a"]["name"], r["b"]["name"]) for r in rows] == [("C", "D")]
     row = rows[0]
     assert row["links_between"] == 1 and row["joined"] == 9 and "score" not in row
-    assert row["scaffold"] is False and row["other"] is None
+    assert row["scaffold"] is False and "other" not in row
     assert row["a"]["part"] and row["b"]["part"] and row["a"]["part"] != row["b"]["part"]
     assert row["a"]["path"] == "C.md" and row["b"]["path"] == "D.md"
     assert row["passage"] == "The proof in C leans on D for its lemma."
@@ -176,15 +154,15 @@ def test_a_frontmatter_bridge_has_no_sentence_to_show(client, tmp_vault):
     assert row["scaffold"] is True and row["passage"] == ""
 
 
-def test_shape_ships_both_readings_and_the_colours_bridges_paints_with(client, tmp_vault):
-    """ADR-0060: the zone rows ride on the same load (empty without an embed
-    index, never missing), and an area carries the colour its notes wear on the
-    graph, so a disc and the dots it stands for agree."""
+def test_shape_ships_the_areas_reading_and_the_colours_bridges_paints_with(client, tmp_vault):
+    """ADR-0060: an area carries the colour its notes wear on the graph, so a
+    disc and the dots it stands for agree. The zone rows it shipped beside them
+    went with the graph's zones (ADR-0136)."""
     from silica.kernel.recall.graph_export import _community_color
 
     _two_triangles(tmp_vault, "[[A]] [[B]] [[D]]")
     s = client.get("/shape").json()
-    assert s["zone_bridges"] == [] and s["zones"] == []
+    assert "zone_bridges" not in s and "zones" not in s
     assert [(a["color"], a["color_paper"]) for a in s["areas"]] == [
         (_community_color(a["id"]), _community_color(a["id"], on_paper=True)) for a in s["areas"]]
     assert {r["a"]["part"] for r in s["bridges"]} <= {a["label"] for a in s["areas"]}

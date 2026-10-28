@@ -742,7 +742,7 @@ function couplingMatrix(areas, matrix, { dense = true, onPair = null, swatch = n
         // cohesive area read as the least cohesive one on the grid.
         const coh = a.cohesion >= 1 ? "1" : a.cohesion ? a.cohesion.toFixed(2).slice(1) : "";
         // Folded, a cell is ~18px and ".55" does not fit in it: the cohesion
-        // rides the caller's readout instead. A zone has none to print.
+        // rides the caller's readout instead.
         const c = mkEl("div", "smx-cell diag", swatch ? "" : coh);
         c.dataset.i = a.id;
         c.dataset.j = a.id;

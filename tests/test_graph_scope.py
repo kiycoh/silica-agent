@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Scoping the graph to one part of the vault: a folder, a structural area or a
-semantic zone. A third visibility predicate in the frame beside the area filter
-and the focus dim, never a second build: positions stay global so the part is
-seen where it sits."""
+"""Scoping the graph to one part of the vault: a folder or a structural area (a
+semantic zone too until ADR-0136). A visibility predicate in the frame beside
+the focus dim, never a second build: positions stay global so the part is seen
+where it sits."""
 import re
 from pathlib import Path
 
@@ -24,13 +24,15 @@ def client(tmp_vault):
     return TestClient(server.app), tmp_vault
 
 
-def test_shape_ships_the_zones_and_each_notes_zone(client):
+def test_shape_no_longer_runs_the_semantic_partition(client):
+    """ADR-0136 pruned every reader of the zones but the atlas's fallback and
+    Zotero, so /shape ships the areas alone."""
     api, vault = client
     vault.note("Math/A.md", "[[B]]")
     vault.note("Math/B.md", "[[A]]")
     s = api.get("/shape").json()
-    assert isinstance(s["zones"], list)               # [] without an embed index
-    assert all("zone" in n for n in s["notes"])       # -1 without one
+    assert "zones" not in s and "zone_bridges" not in s
+    assert all(set(n) == {"path", "size", "area"} for n in s["notes"])
     assert {n["path"] for n in s["notes"]} == {"Math/A.md", "Math/B.md"}
 
 
@@ -38,8 +40,8 @@ def test_the_frame_hides_what_the_scope_does_not_name():
     js = FRAME_JS.read_text()
     assert re.search(r"let SCOPE = null;", js)
     body = js[js.index("function inScope("):js.index("function computeFilters(")]
-    assert '"folder"' in body and '"area"' in body and '"zone"' in body
-    assert "startsWith(SCOPE.prefix)" in body and "n.sgroup === SCOPE.id" in body and "n.group === SCOPE.id" in body
+    assert '"folder"' in body and '"area"' in body and '"zone"' not in body
+    assert "startsWith(SCOPE.prefix)" in body and "n.group === SCOPE.id" in body
     filt = js[js.index("function computeFilters("):js.index("function applyFilters(")]
     assert "!inScope(n)" in filt
     assert '"silica-scope"' in js
@@ -52,8 +54,9 @@ def test_the_legend_offers_the_scope_and_replays_it_on_reload():
     load = js[js.index('$("#graph-frame").addEventListener("load"'):]
     load = load[:load.index("});")]
     assert "replayGraphScope()" in load
-    for group in ("Folders", "Areas", "Zones"):
+    for group in ("Folders", "Areas"):
         assert f'"{group}"' in js, f"the scope picker lists {group}"
+    assert '"Zones"' not in js
 
 
 def test_an_edge_goes_when_either_of_its_notes_is_hidden():

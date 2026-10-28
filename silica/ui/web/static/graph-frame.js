@@ -27,18 +27,15 @@ const pinHome = n => { n.x = n.fx = 0; n.y = n.fy = 0; n.z = n.fz = 0; };
 RIM_NODES.forEach(pinHome);
 const COMM_LABELS = DATA.comm_labels;
 const COMM_HUBS = DATA.comm_hubs || {};   // area -> hub note: the name the /shape surfaces use
-// The semantic partition: node.sgroup -> zone. Disjoint from node.group in every
-// way that matters — different edges, different ids, different colours.
-const ZONES = DATA.zones;
-// Only the label is indexed. There was a ZONE_COLOR map beside it, read by
-// nodeColor alone; now that the notes keep their community colour it has no
-// reader left — the hulls and the zone names take z.color straight off ZONES.
-const ZONE_LABEL = {};
-ZONES.forEach(z => { ZONE_LABEL[z.id] = z.label; });
-// The zone's hue for the live floor. Both rides on the zone (see Zone in
-// graph_export) because the phase shift that keeps zone i off community i is
-// declared there, and recomputing it here would be a second place to break it.
-const zoneColor = z => (LIGHT && z.color_paper) || z.color;
+// What the 2D atlas draws (ADR-0136): "areas" (node.group, its provinces
+// node.sub), "zones" (node.sgroup) on a vault with no area of 3 notes or more,
+// or "" with neither. One partition per document, never both (ADR-0023).
+const ATLAS_BY = DATA.atlas || "";
+const SUBS = DATA.subs || [];
+// The semantic partition rides only on a document whose atlas draws it.
+// Disjoint from node.group in every way that matters: different edges,
+// different ids, different colours.
+const ZONES = DATA.zones || [];
 
 const outDeg = {}, inDeg = {};
 RAW_EDGES.forEach(e => {
@@ -49,8 +46,8 @@ RAW_EDGES.forEach(e => {
 const NODE_BY_ID = {};
 ALL_NODES.forEach(n => { NODE_BY_ID[n.id] = n; });
 
-// Every link a note has, whatever is on show: the held layout's follow force
-// (_follow) reads this, since a hidden link still places a note in its area.
+// Every link a note has, whatever is on show: a note Silica runs on is placed
+// by these (followNative), since its links pull nothing.
 const neighbors = {};
 ALL_EDGES.forEach(e => {
   (neighbors[e.from] = neighbors[e.from] || new Set()).add(e.to);
@@ -124,10 +121,6 @@ function paintHover() {
 function updateFocusBar() {
   const bar = document.getElementById("focus-bar");
   const parts = [];
-  // Notes off is the loudest filter of the three: with the zones off too it
-  // empties the frame outright, and an empty frame that says nothing reads as a
-  // broken view rather than a chosen one.
-  if (!showNotes) parts.push(showZones ? "<b>zones only</b>" : "<b>notes hidden</b>");
   if (SCOPE && SCOPE.kind === "area" && window.parent === window) {
     const n = RAW_NODES.filter(x => x.group === SCOPE.id).length;
     parts.push("area <b>" + escHtml(COMM_HUBS[SCOPE.id] || "#" + SCOPE.id) + "</b> · " + n + " notes");
@@ -302,144 +295,153 @@ function countLinkIns(edges, byId) {
   return deg;
 }
 
-// --- Areas held on their discs (ADR-0074) -----------------------------------
-// The areas are a view asked for, like the zones, and they start from the
-// layout on screen: each area's disc is placed where its notes already are
-// (placeDiscs), so switching the areas on gathers each area in place instead of
-// laying the vault out again. A note is pulled toward its area's centre: the
-// charge already spreads an area to about the disc's size, which is what the
-// radius was sized on. A plan or an event follows the mean of the notes it
-// links (_follow), since its links move nothing (heldLinkStrength). A note in
-// no area follows its own neighbours the same way, and is sent to the rim of
-// any disc it lands in, so it waits beside the notes it links and outside every
-// blob. A ghost is none of these: its links place it.
-// Measured on the test vault 2026-10-07 against the first build, which placed
-// the discs on a golden spiral and sent the notes in no area to a ring past
-// them: 81,419 line crossings against 164,212, and a note moves 7.7 rest
-// lengths when the areas come on against 18.5. The ring's 513 lines ran from
-// the edge of the frame into the middle.
-const HOLD = 0.1, LOOSE_HOLD = 0.06, LOOSE_RIM = 0.35, LOOSE_PUSH = 0.3;
-function holdAreas(nodes, discs, unit, alpha) {
-  const all = Object.values(discs);
+// --- What a line pulls with (ADR-0136) ---------------------------------------
+// Only the backbone's wikilinks lay the vault out: graph_export.backbone_links
+// stamps each pair it keeps with the Jaccard of its two ends' neighbourhoods,
+// and the pull is min(1, BACKBONE_K x J), floored for a spanning-tree tie whose
+// ends share no neighbour. Every other wikilink is drawn and pulls nothing.
+// Measured on the machine learning course (1,092 notes, 2026-10-28) by a
+// replica of this frame's layout, purity being the share of each note's 10
+// nearest that sit in its own area: 3D 0.639 with every line pulling, 0.758 on
+// the backbone; the d3 layout in 2D 0.462 against 0.515, which is why 2D lays
+// out with ForceAtlas2 (see "the layout in a worker"). J itself was too weak
+// against the charge (2D 0.361), x6 unclamped collapsed to 0.507 in 3D, and
+// clamped at 1 every factor from 4 to 10 held 0.745-0.758.
+// An unresolved link places its ghost, at d3's default `dflt` (1 / the line
+// count of its less busy end). A k-NN or citation line pulls only where one
+// end has no resolved wikilink (`linked`), so a link-orphan still lands beside
+// its semantic neighbours. The absent lines (GAP, PROPOSED, COUPLED) pull
+// nothing, and nor does a Silica note's line (ADR-0070): followNative places it.
+const BACKBONE_K = 4, BACKBONE_FLOOR = 0.05;
+function pullOf(l, linked, dflt) {
+  const a = l.source, b = l.target;
+  if (NATIVE[a.type] || NATIVE[b.type]) return 0;
+  if (l.type === "EXTRACTED")
+    return l.backbone == null ? 0 : Math.min(1, BACKBONE_K * Math.max(l.backbone, BACKBONE_FLOOR));
+  if (l.type === "AMBIGUOUS") return dflt;
+  if (l.type === "SIMILAR" || l.type === "CITES") return linked.has(a.id) && linked.has(b.id) ? 0 : dflt;
+  return 0;
+}
+
+// A note Silica runs on is placed, not laid out: each tick it moves FOLLOW of
+// the way to the mean of the notes it links (_follow), and never moves them.
+// With its lines pulling, d3 moved a plan's notes and not the plan (it has the
+// most lines): under ADR-0074's held areas one plan carried an area 12.6 disc
+// radii off its disc (test vault, 2026-10-07). The layout worker runs this by
+// its source.
+const FOLLOW = 0.1;
+function followNative(nodes, alpha) {
   for (const n of nodes) {
-    const d = discs[n.group];
-    if (d) {
-      n.vx += (d[0] * unit - n.x) * HOLD * alpha;
-      n.vy += (d[1] * unit - n.y) * HOLD * alpha;
-      continue;
-    }
-    if (!n._follow || !n._follow.length) continue;
-    let x = 0, y = 0;
-    for (const m of n._follow) { x += m.x; y += m.y; }
-    const k = (n._loose ? LOOSE_HOLD : HOLD) * alpha;
-    n.vx += (x / n._follow.length - n.x) * k;
-    n.vy += (y / n._follow.length - n.y) * k;
-    if (n._loose) for (const q of all) {
-      const dx = n.x - q[0] * unit, dy = n.y - q[1] * unit, r = Math.hypot(dx, dy) || 1e-6;
-      const rim = (q[2] + LOOSE_RIM) * unit;
-      if (r < rim) {
-        n.vx += dx / r * (rim - r) * LOOSE_PUSH * alpha;
-        n.vy += dy / r * (rim - r) * LOOSE_PUSH * alpha;
-      }
-    }
+    const f = n._follow;
+    if (!f || !f.length) continue;
+    let x = 0, y = 0, z = 0;
+    for (const m of f) { x += m.x; y += m.y; z += m.z || 0; }
+    n.vx += (x / f.length - n.x) * FOLLOW * alpha;
+    n.vy += (y / f.length - n.y) * FOLLOW * alpha;
+    if (n.vz !== undefined) n.vz += (z / f.length - (n.z || 0)) * FOLLOW * alpha;
   }
 }
 
-// Where each area is held, in link rest lengths: graph_export.area_discs's
-// relaxation, started from `start` (each area's centroid on screen) instead of
-// a golden spiral. Areas a wikilink joins drift to touching, a gravity packs
-// the mass toward the origin, and no two discs overlap, `gap` apart. Without
-// the gravity the discs kept the free layout's spread and the mass read sparse,
-// which is the separation the owner turned down (2.5 rest lengths, 2026-10-07).
-// start: {area: [x, y]}, radius: {area: r}, inter: [[a, b, pairs]].
-// O(iters x areas^2) on the positions alone: 23 areas run in about a millisecond.
-const AREA_GAP = 0.3;
-function placeDiscs(start, radius, inter, gap = AREA_GAP, iters = 240) {
-  const ids = Object.keys(start), P = {};
-  ids.forEach(g => { P[g] = [start[g][0], start[g][1], radius[g]]; });
-  const links = inter.filter(([a, b]) => P[a] && P[b]);
-  const wmax = Math.max(1, ...links.map(l => l[2]));
-  // f > 0 draws the two together by f of their distance, f < 0 parts them;
-  // the smaller disc takes the larger share of the move.
-  const nudge = (a, b, f) => {
-    const dx = b[0] - a[0], dy = b[1] - a[1], wa = b[2] ** 2 / (a[2] ** 2 + b[2] ** 2);
-    a[0] += dx * f * wa; a[1] += dy * f * wa;
-    b[0] -= dx * f * (1 - wa); b[1] -= dy * f * (1 - wa);
-  };
-  const separate = () => {
-    let moved = false;
-    for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
-      const a = P[ids[i]], b = P[ids[j]];
-      if (a[0] === b[0] && a[1] === b[1]) b[0] += 1e-3;
-      const d = Math.hypot(b[0] - a[0], b[1] - a[1]), need = a[2] + b[2] + gap;
-      if (d < need) { nudge(a, b, -(need - d) / d); moved = true; }
+// --- The atlas's geometry (ADR-0136) ----------------------------------------
+// Every note owns its Voronoi cell, clipped to a disc of radius R around it.
+// A border between two notes is the part of their Voronoi edge inside both
+// discs (the lens of the two): any other point of that edge lies outside every
+// disc, so this is exactly the border that shows, with no clipping pass.
+// P: the points, flat [x0, y0, x1, y1, ...]; country[i], prov[i]: point i's
+// parts; del: a d3-delaunay Delaunay over P; cc: its Voronoi's circumcenters.
+// Returns {country: [x0, y0, x1, y1, ...], province: {country: [...]}}.
+// The hull's own edges count too: there the Voronoi edge is a ray, outward
+// from the triangle's circumcenter, and its lens part shows like any other.
+function atlasBorders(P, country, prov, R, del, cc) {
+  const T = del.triangles, H = del.halfedges, out = { country: [], province: {} };
+  const next = e => e % 3 === 2 ? e - 2 : e + 1;
+  for (let e = 0; e < H.length; e++) {
+    const j = H[e];
+    if (j >= 0 && j < e) continue;   // each inner edge once, from its lower half
+    const p = T[e], q = T[next(e)];
+    if (country[p] === country[q] && prov[p] === prov[q]) continue;
+    const mx = (P[2 * p] + P[2 * q]) / 2, my = (P[2 * p + 1] + P[2 * q + 1]) / 2;
+    const dx = P[2 * q] - P[2 * p], dy = P[2 * q + 1] - P[2 * p + 1], d = Math.hypot(dx, dy);
+    if (d === 0 || d >= 2 * R) continue;   // the two discs do not meet
+    const ux = -dy / d, uy = dx / d, h = Math.sqrt(R * R - d * d / 4);
+    const along = (x, y) => (x - mx) * ux + (y - my) * uy;
+    const t = Math.floor(e / 3), t1 = along(cc[2 * t], cc[2 * t + 1]);
+    let lo, hi;
+    if (j >= 0) {
+      const u = Math.floor(j / 3), t2 = along(cc[2 * u], cc[2 * u + 1]);
+      lo = Math.min(t1, t2); hi = Math.max(t1, t2);
+    } else {
+      // Outward is away from the triangle's third note.
+      const w = T[next(next(e))];
+      [lo, hi] = along(P[2 * w], P[2 * w + 1]) > 0 ? [-Infinity, t1] : [t1, Infinity];
     }
-    return moved;
-  };
-  for (let it = 0; it < iters; it++) {
-    const cool = 1 - it / iters;
-    for (const [ga, gb, w] of links) {
-      const a = P[ga], b = P[gb];
-      const d = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1e-9, need = a[2] + b[2] + gap;
-      if (d > need) nudge(a, b, 0.08 * (0.3 + w / wmax) * (d - need) / d * cool);
-    }
-    for (const g of ids) { P[g][0] *= 1 - 0.02 * cool; P[g][1] *= 1 - 0.02 * cool; }
-    separate();
+    lo = Math.max(lo, -h); hi = Math.min(hi, h);
+    if (hi <= lo) continue;
+    const seg = country[p] !== country[q] ? out.country
+      : out.province[country[p]] || (out.province[country[p]] = []);
+    seg.push(mx + ux * lo, my + uy * lo, mx + ux * hi, my + uy * hi);
   }
-  // One pass can push a disc into a third one; more passes settle it. Areas
-  // starting on one line settle slowest, a chain each pass shifts by a little:
-  // 8 of them needed more than 100 passes (2026-10-07). A pass ends the loop
-  // as soon as nothing overlaps, so the bound costs nothing on a real layout.
-  for (let pass = 0; pass < 1000 && separate(); pass++);
-  return P;
+  return out;
 }
 
-// Held, a k-NN line pulls only between two notes of one area. Measured on the
-// test vault 2026-10-07 with every line pulling: 5 of 23 areas settled 11-20
-// disc radii off their disc. A plan's or an event's line pulls nothing either,
-// the forces' half of ADR-0070's "drawn and not counted": a plan has the most
-// lines, so d3 moved its notes and not the plan, and carried one area 12.6
-// radii off its disc. Every other line keeps d3's default, 1 / the line count
-// of its less busy end, which a custom strength otherwise replaces; with no
-// discs (the areas off) every line keeps it, so the same force serves both.
-const pullsInside = (discs, a, b) => !!discs[a] && a === b;
-function heldLinkStrength(discs) {
-  let seen = null, count = null;
-  return (l, i, links) => {
-    if (links !== seen) {
-      seen = links;
-      count = new Map();
-      for (const k of links) for (const n of [k.source, k.target]) count.set(n, (count.get(n) || 0) + 1);
-    }
-    if (discs && l.type === "SIMILAR" && !pullsInside(discs, l.source.group, l.target.group)) return 0;
-    if (discs && (NATIVE[l.source.type] || NATIVE[l.target.type])) return 0;
-    return 1 / Math.min(count.get(l.source), count.get(l.target));
-  };
-}
-
-// With the areas on, the blob says which notes belong together, so a line
-// inside an area is kept only if it is a wikilink, and every other line is
-// quiet: drawn for a focused note only. Between two areas one ribbon stands for
-// all their lines. 4,377 lines crossed 164,212 times on the test vault
-// (2026-10-07); the wikilinks inside the areas and 50 ribbons cross 2,870
-// times. A pair under RIBBON_MIN lines gets no ribbon: its lines show on the
-// note, and 87 ribbons at full count read as a second mat.
-const RIBBON_MIN = 3;
-const keptInside = (discs, type, a, b) => type !== "SIMILAR" && pullsInside(discs, a, b);
-// pairs: [[area, area]] of the lines on show. Returns [[a, b, lines]], a < b.
-function ribbonPairs(pairs, min = RIBBON_MIN) {
-  const m = new Map();
-  for (const [a, b] of pairs) {
-    if (a === b) continue;
-    const key = a < b ? a + "|" + b : b + "|" + a;
-    m.set(key, (m.get(key) || 0) + 1);
+// A note's ground: its Voronoi cell `poly` ([[x, y], ...], convex, closed or
+// not, any winding) inside the disc of radius R around its note (sx, sy), the
+// disc a regular `sides`-gon (at 24 the gon is within 0.9% of the circle).
+// Returns {pts: [x0, y0, x1, y1, ...], arc: [edge i lies on the disc's rim]},
+// convex: the gon clipped by each of the cell's half-planes (Sutherland and
+// Hodgman), each edge remembering whether it came from the gon, which is the
+// coast where no neighbour's ground meets it.
+function cellInDisc(poly, sx, sy, R, sides) {
+  let V = [], F = [];
+  for (let k = 0; k < sides; k++) {
+    const a = 2 * Math.PI * k / sides;
+    V.push([sx + R * Math.cos(a), sy + R * Math.sin(a)]);
+    F.push(true);
   }
-  return [...m].filter(([, n]) => n >= min).map(([key, n]) => [...key.split("|"), n]);
+  const n = poly.length - (poly.length > 1 && poly[0][0] === poly[poly.length - 1][0]
+    && poly[0][1] === poly[poly.length - 1][1] ? 1 : 0);
+  for (let e = 0; e < n && V.length; e++) {
+    const A = poly[e], B = poly[(e + 1) % n];
+    const ex = B[0] - A[0], ey = B[1] - A[1];
+    // Inside is the note's side of the edge, whatever the winding.
+    const side = Math.sign(ex * (sy - A[1]) - ey * (sx - A[0])) || 1;
+    const d = P => side * (ex * (P[1] - A[1]) - ey * (P[0] - A[0]));
+    const W = [], G = [];
+    for (let i = 0; i < V.length; i++) {
+      const S = V[i], E = V[(i + 1) % V.length], f = F[i], ds = d(S), de = d(E);
+      const cut = () => { const t = ds / (ds - de); return [S[0] + (E[0] - S[0]) * t, S[1] + (E[1] - S[1]) * t]; };
+      if (de >= 0) {
+        if (ds < 0) { W.push(cut()); G.push(f); }
+        W.push(E); G.push(F[(i + 1) % V.length]);
+      } else if (ds >= 0) { W.push(cut()); G.push(false); }
+    }
+    V = W; F = G;
+  }
+  return { pts: V.flat(), arc: F };
 }
 
-// An area's blob (ADR-0074) is blobGeometry, in blob-geometry.js: the drawer's
-// cut figure draws the same blobs (ADR-0075), and graph_view inlines the file
-// ahead of this one.
+// What the zoom names, relative to the zoom that fits the atlas: the areas
+// under 1.8x, their sub-areas to 3.6x, the notes past it (the draft the owner
+// approved, ADR-0136). Relative because the absolute zoom of a fit runs from
+// 0.05 on a big vault to over 1 on a small one.
+const ATLAS_TIERS = [1.8, 3.6];
+const atlasTier = kRel => kRel < ATLAS_TIERS[0] ? 0 : kRel < ATLAS_TIERS[1] ? 1 : 2;
+
+// The notes a part's name may sit on: first the member nearest the part's
+// centroid, so a part shaped like a crescent is not named over the hole in
+// its middle, then up to k - 1 more spread from the centre outward, where the
+// name goes when its spot is taken or out of sight (under the key, at fit).
+// ids: point indices; P as atlasBorders reads it.
+function atlasSpots(ids, P, k) {
+  let x = 0, y = 0;
+  for (const i of ids) { x += P[2 * i]; y += P[2 * i + 1]; }
+  x /= ids.length; y /= ids.length;
+  const d = i => (P[2 * i] - x) ** 2 + (P[2 * i + 1] - y) ** 2;
+  const near = ids.slice().sort((a, b) => d(a) - d(b));
+  if (near.length <= k || k < 2) return near.slice(0, k);
+  const step = (near.length - 1) / (k - 1);
+  return Array.from({ length: k }, (_, j) => near[Math.round(j * step)]);
+}
 
 // --- what a focus lights, and the Map it is arranged as (ADR-0088) ----------
 // incident: id -> the edges that touch it. An edge lights its far end only
@@ -532,13 +534,18 @@ function restoreArranged(nodes, saved, keep = false) {
 // given, is what the reader can see: a name reaching past it would be cut, so
 // it waits too.
 function keepLabels(boxes, area) {
+  return placeLabels(boxes.map(b => [b]), area).map(k => k === 0);
+}
+// The same, for a name with places to go: alts[i] is name i's boxes in the
+// order it would rather sit, and the answer is the one it took, or -1.
+function placeLabels(alts, area) {
   const kept = [];
-  return boxes.map(b => {
+  return alts.map(boxes => boxes.findIndex(b => {
     const inside = !area || (b.x0 >= area.x0 && b.x1 <= area.x1 && b.y0 >= area.y0 && b.y1 <= area.y1);
     const clear = inside && kept.every(k => b.x0 >= k.x1 || b.x1 <= k.x0 || b.y0 >= k.y1 || b.y1 <= k.y0);
     if (clear) kept.push(b);
     return clear;
-  });
+  }));
 }
 
 // The server's Map, made to sit in the graph it opens in (ADR-0088 amendment).
@@ -1017,7 +1024,7 @@ const GP = {
   linkDim: tok('--g-link-dim'),
   bg: tok('--void'),
   ringHub: tok('--accent'), ringOrphan: tok('--ash-dim'), ringCut: tok('--warn'),
-  accent: tok('--accent'), line: tok('--line'),
+  accent: tok('--accent'), line: tok('--line'), line2: tok('--line-2'),
 };
 // three.js wants the floor as an int, and only here: one parse of the value
 // above rather than a second literal that can disagree with it.
@@ -1035,8 +1042,7 @@ let showProposed = false;
 let showCites = true;
 let showMissing = false;
 // The part of the vault on show: {kind: "folder", prefix} | {kind: "area", id} |
-// {kind: "zone", id} | {kind: "collection", ids: [names]} | {kind: "papers"} |
-// null. A visibility predicate beside the focus dim, never a second build:
+// {kind: "collection", ids: [names]} | {kind: "papers"} | null. A visibility predicate beside the focus dim, never a second build:
 // positions stay global, so a folder is seen where it sits among the rest. The
 // HUD's area list sets it too (ADR-0058): it used to set a filter of its own
 // with the same predicate, and two different areas set there and here
@@ -1053,8 +1059,6 @@ let COVERING = null;
 // thickening: 2.6 against 1.6 px did not read on a graph that zooms (ADR-0058).
 let AB = null;
 let showCoupled = false;
-let showZones = false;   // the semantic layer is asked for, never assumed
-let showNotes = true;    // the macro read: zones alone in the frame
 
 // --- Node color = its community color, flat -------------------------------
 // One hue per community: every node in a community shares the exact color,
@@ -1083,8 +1087,8 @@ function litColor(n) {
   // the zone layer was up, which read as a bug and was one: ADR-0023 says the
   // two partitions "coexist and never substitute for each other" and "share
   // neither colour key nor id space", and a channel that swaps between them
-  // is a substitution by definition. The semantic layer owns the hulls and the
-  // names; it does not get to repaint the notes.
+  // is a substitution by definition. An atlas over the zones owns the ground
+  // and the names; it does not get to repaint the notes.
   return baseColor(n);
 }
 
@@ -1239,7 +1243,9 @@ function WARMUP_TICKS(seeded) {
 // would accumulate a dead entry for every force-slider position ever dragged.
 // The fingerprint covers the node set AND the force multipliers: a layout
 // settled under different forces is not this layout.
-const LAYOUT_KEY = "silica-graph-layout";
+// -2 since ADR-0136: a layout settled under every line pulling is not one the
+// backbone would reach, and a fingerprint hit would seed it as if it were.
+const LAYOUT_KEY = "silica-graph-layout-2";
 const FAST_DECAY = 0.1;   // alpha 1 -> ALPHA_MIN in ~66 ticks
 const COLD_DECAY = 0.0228;   // d3's own: alpha 1 -> ALPHA_MIN in ~300 ticks
 const NODE_FP = (() => {
@@ -1248,12 +1254,18 @@ const NODE_FP = (() => {
     for (let i = 0; i < n.id.length; i++) h = (h * 31 + n.id.charCodeAt(i)) | 0;
   return h;
 })();
+// The engine too: a 2D layout settled by ForceAtlas2 is not the one d3 settles
+// in a frame with no worker, and either would seed the other as its own.
 const layoutFp = () => NODE_FP + ":" + forceMul.repel.toFixed(3) + ":" +
-  forceMul.dist.toFixed(3) + ":" + forceMul.center.toFixed(2);
+  forceMul.dist.toFixed(3) + ":" + forceMul.center.toFixed(2) + ":" + (is2D() ? ENGINE_2D : "d3");
+// ForceAtlas2's own unit over the frame's, as the cached layout was settled at
+// (the worker's faUnit), so a seeded run starts where it stopped; 1 for d3.
+let layoutUnit = 1;
 
 // True when the positions were seeded, i.e. the sim only has to rerelax.
 function loadLayout() {
   let saved = null;
+  layoutUnit = 1;
   try { saved = JSON.parse(localStorage.getItem(LAYOUT_KEY + "-" + mode)); } catch (e) {}
   if (!saved || saved.fp !== layoutFp() || !saved.pos) return false;
   // Positions are keyed by id, not by index: a vault that gained a note between
@@ -1266,14 +1278,13 @@ function loadLayout() {
     n.x = p[0]; n.y = p[1]; n.z = p[2];
     hit++;
   });
-  return hit === RAW_NODES.length;
+  if (hit !== RAW_NODES.length) return false;
+  layoutUnit = saved.unit || 1;
+  return true;
 }
 
 function saveLayout() {
-  // The cache holds the layout the frame opens on, and it opens with the areas
-  // off: a held layout saved here would open as the free one (ADR-0074).
-  if (areasOn()) return;
-  // Nor an arrangement (ADR-0088): it is a state of one focus, put back by
+  // Never an arrangement (ADR-0088): it is a state of one focus, put back by
   // Esc, and an engine stop lands inside it whenever a tick moves its pins.
   if (ARR) return;
   const pos = {};
@@ -1283,8 +1294,8 @@ function saveLayout() {
     pos[n.id] = [Math.round(n.x || 0), Math.round(n.y || 0), Math.round(n.z || 0)];
   });
   try {
-    localStorage.setItem(LAYOUT_KEY + "-" + mode,
-                         JSON.stringify({ fp: layoutFp(), pos: pos }));
+    localStorage.setItem(LAYOUT_KEY + "-" + mode, JSON.stringify(
+      { fp: layoutFp(), pos: pos, unit: SIM && SIM.last ? SIM.last.unit : 1 }));
   } catch (e) { /* quota or blocked storage -> next load just re-settles */ }
 }
 
@@ -1326,6 +1337,7 @@ function drawNode(n, ctx, scale) {
   }
   if (covering && !n._dim) { drawNodeLabel(n, ctx, scale, r); return; }
   if (n._dim || n._ctx || scale < 0.6) return;             // dimmed or context: dot only
+  const atlas = atlasOn();
   // The ring is detail, so it lives behind the same zoom gate as the labels.
   // Drawing it at every scale flooded the zoomed-out view: rings outnumbered
   // the pixels between them and the whole graph read as one alarm.
@@ -1354,7 +1366,9 @@ function drawNode(n, ctx, scale) {
     ctx.strokeStyle = GP.ringCut;
     ctx.stroke();
   }
-  if (scale < 1.5 && (n.size || 16) <= BASE_SIZE) return;  // mid zoom: standouts
+  // The atlas names its notes by its own zoom tiers, all at once and never
+  // overlapping (drawAtlasNames).
+  if (atlas || (scale < 1.5 && (n.size || 16) <= BASE_SIZE)) return;  // mid zoom: standouts
   drawNodeLabel(n, ctx, scale, r);
 }
 
@@ -1516,9 +1530,9 @@ function drawRimPaper(n, ctx, scale) {
   ctx.fillText(n.label, n.x, n.y + h + 2 / scale);
 }
 
-// The arcs and their names, under the papers (2D only, like the hulls).
+// The arcs and their names, under the papers (2D only, like the atlas).
 function drawRim(ctx, scale) {
-  if (!RIM || AB || !showNotes) return;
+  if (!RIM || AB) return;
   const { cx, cy, R, arcs } = RIM;
   const pending = !DATA.covers || DATA.covers.state === "none";
   ctx.lineWidth = 1 / scale;
@@ -1677,8 +1691,8 @@ const isDashed = l => ABSENT.has(l.type) || l.type === "COVERS";
 // of it each - so a long link drew three long strokes with two furrows cut in
 // them rather than a broken line. This is the upgrade the note that stood here
 // named, a period in world units with a per-edge count, and it obeys the rule
-// the zone geometry already does (ZONE_BULB): a constant would be wrong the
-// moment the distance slider moved, so the period rides baseDist().
+// the atlas's discs do (ATLAS_R): a constant would be wrong the moment the
+// distance slider moved, so the period rides baseDist().
 //
 // A dash still lands on each end. A broken line that stopped short of its
 // target would read as a link that does not arrive, which is a different claim
@@ -1969,7 +1983,7 @@ function linkSegStep() {
 // over once. A colour in many widths was that many paths stacked (the similar
 // layer has ~45), so it is drawn straight, each line over the last; only two
 // lines of one width crossing differ from the lib's picture. The lib's
-// pre-paint layers (blobs, zones, the rim, the wedges) sat under its links, so
+// pre-paint layers (the atlas, the rim, the wedges) sat under its links, so
 // they are drawn on a 2D canvas under this one.
 let GLLinks = null;   // the layer; false where WebGL2 is unavailable or was lost
 const glOwnsLink = l => !!GLLinks && l.__glOwn;
@@ -2016,6 +2030,49 @@ uniform sampler2D t;
 out vec4 o;
 void main() { o = texelFetch(t, ivec2(gl_FragCoord.xy), 0); }`;
 const GL_STRIDE = 16;   // u32 source, u32 target, rgba8, f32 width
+
+// The atlas (ADR-0136) on the same layer, under the links: its ground as
+// triangles, its coast and borders as quads with the links' coverage
+// (GL_LINK_FS), their ends given in graph units rather than as notes.
+const GL_FILL_VS = `#version 300 es
+in vec2 p;
+in vec4 color;
+uniform vec3 m0, m1;
+uniform vec2 size;
+out vec4 vColor;
+void main() {
+  vec2 d = vec2(dot(m0, vec3(p, 1.)), dot(m1, vec3(p, 1.)));
+  vColor = color;
+  gl_Position = vec4(d.x / size.x * 2. - 1., 1. - d.y / size.y * 2., 0., 1.);
+}`;
+const GL_FILL_FS = `#version 300 es
+precision mediump float;
+in vec4 vColor;
+out vec4 o;
+void main() { o = vec4(vColor.rgb * vColor.a, vColor.a); }`;
+const GL_SEG_VS = `#version 300 es
+in vec2 corner;
+in vec4 ends;              // x0, y0, x1, y1 in graph units
+in vec4 color;
+in float width;            // CSS px
+uniform vec3 m0, m1;
+uniform vec2 size;
+uniform float dpr;
+out vec4 vColor; out float vD; out float vHalf;
+vec2 dev(vec2 p) { return vec2(dot(m0, vec3(p, 1.)), dot(m1, vec3(p, 1.))); }
+void main() {
+  vec2 a = dev(ends.xy), b = dev(ends.zw), d = b - a;
+  float L = length(d);
+  vec2 u = L > 0. ? d / L : vec2(1., 0.);
+  vHalf = width * dpr * .5;
+  vD = corner.y * (vHalf + 1.);
+  // Square ends, half a width past each end, so a coast of short segments
+  // meets itself without a notch at every joint.
+  vec2 p = mix(a - u * vHalf, b + u * vHalf, corner.x) + vec2(-u.y, u.x) * vD;
+  vColor = color;
+  gl_Position = vec4(p.x / size.x * 2. - 1., 1. - p.y / size.y * 2., 0., 1.);
+}`;
+const GL_SEG_STRIDE = 24;   // f32 x0, y0, x1, y1, rgba8, f32 width
 
 function glProgram(gl, vs, fs) {
   const p = gl.createProgram();
@@ -2089,6 +2146,7 @@ function buildGLLinks() {
     gl.vertexAttribDivisor(L.attr[k], 1);
   }
   gl.bindVertexArray(null);
+  L.atlas = buildGLAtlas(gl, L.cornerBuf);
   // A lost context (driver reset, the tab's GPU process gone) hands every link
   // back to the lib rather than leaving the frame without them.
   glc.addEventListener("webglcontextlost", () => {
@@ -2098,6 +2156,95 @@ function buildGLLinks() {
     if (Graph) Graph.backgroundColor(GP.bg).linkVisibility(Graph.linkVisibility());
   });
   return L;
+}
+
+// The atlas's two programs and their buffers; null, and the canvas draws the
+// atlas (drawAtlas), where they do not build.
+function buildGLAtlas(gl, cornerBuf) {
+  let fill, seg;
+  try { fill = glProgram(gl, GL_FILL_VS, GL_FILL_FS); seg = glProgram(gl, GL_SEG_VS, GL_LINK_FS); }
+  catch (e) { console.warn("graph: the atlas draws on the canvas", e); return null; }
+  const A = { fill, seg, fvao: gl.createVertexArray(), fbuf: gl.createBuffer(),
+              svao: gl.createVertexArray(), sbuf: gl.createBuffer(), fn: 0, sn: 0, of: null };
+  const loc = (prog, names) => Object.fromEntries(names.map(k => [k, gl.getUniformLocation(prog, k)]));
+  A.uf = loc(fill, ["m0", "m1", "size"]);
+  A.us = loc(seg, ["m0", "m1", "size", "dpr"]);
+  gl.bindVertexArray(A.fvao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, A.fbuf);
+  const fp = gl.getAttribLocation(fill, "p"), fc = gl.getAttribLocation(fill, "color");
+  gl.enableVertexAttribArray(fp); gl.vertexAttribPointer(fp, 2, gl.FLOAT, false, 12, 0);
+  gl.enableVertexAttribArray(fc); gl.vertexAttribPointer(fc, 4, gl.UNSIGNED_BYTE, true, 12, 8);
+  gl.bindVertexArray(A.svao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, cornerBuf);
+  const at = k => gl.getAttribLocation(seg, k);
+  gl.enableVertexAttribArray(at("corner"));
+  gl.vertexAttribPointer(at("corner"), 2, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, A.sbuf);
+  for (const [k, n, type, norm, off] of [["ends", 4, gl.FLOAT, false, 0], ["color", 4, gl.UNSIGNED_BYTE, true, 16],
+                                         ["width", 1, gl.FLOAT, false, 20]]) {
+    gl.enableVertexAttribArray(at(k));
+    gl.vertexAttribPointer(at(k), n, type, norm, GL_SEG_STRIDE, off);
+    gl.vertexAttribDivisor(at(k), 1);
+  }
+  gl.bindVertexArray(null);
+  return A;
+}
+
+// The geometry atlasGeometry built, into the two buffers: each cell a fan of
+// triangles (it is convex), each segment one instance, in ATLAS_LINES' order.
+function packGLAtlas(L, g) {
+  const A = L.atlas, gl = L.gl;
+  let tris = 0;
+  for (const { pts } of g.polys) tris += pts.length / 2 - 2;
+  const fb = new ArrayBuffer(tris * 3 * 12), ff = new Float32Array(fb), fu = new Uint8Array(fb);
+  let v = 0;
+  const vert = (x, y, rgba) => { ff[v * 3] = x; ff[v * 3 + 1] = y; fu.set(rgba, v * 12 + 8); v++; };
+  for (const { c, pts } of g.polys) {
+    const rgba = glRGBA(g.ground.get(c));
+    for (let k = 2; k + 3 < pts.length; k += 2) {
+      vert(pts[0], pts[1], rgba); vert(pts[k], pts[k + 1], rgba); vert(pts[k + 2], pts[k + 3], rgba);
+    }
+  }
+  let segs = g.coast.length / 4 + g.borders.length / 4;
+  for (const f of g.provinces.values()) segs += f.length / 4;
+  const sb = new ArrayBuffer(segs * GL_SEG_STRIDE), sf = new Float32Array(sb), su = new Uint8Array(sb);
+  let i = 0;
+  const put = (flat, rgba, w) => {
+    for (let k = 0; k < flat.length; k += 4, i++) {
+      sf.set(flat.slice(k, k + 4), i * 6);
+      su.set(rgba, i * GL_SEG_STRIDE + 16);
+      sf[i * 6 + 5] = w;
+    }
+  };
+  const alpha = (hex, a) => { const c = glRGBA(hex); return [c[0], c[1], c[2], Math.round(255 * a)]; };
+  for (const [part, w, a] of ATLAS_LINES) {
+    if (part === "provinces") for (const [c, f] of g.provinces) put(f, alpha(g.hue.get(c), a), w);
+    else put(g[part], alpha(part === "coast" ? GP.line2 : GP.label, a), w);
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, A.fbuf);
+  gl.bufferData(gl.ARRAY_BUFFER, fb, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, A.sbuf);
+  gl.bufferData(gl.ARRAY_BUFFER, sb, gl.DYNAMIC_DRAW);
+  A.fn = v; A.sn = i; A.of = g;
+}
+
+// After the clear and before the links: the ground, then the lines.
+function drawGLAtlas(L, g, m, W, H, dpr) {
+  const A = L.atlas, gl = L.gl;
+  if (A.of !== g) packGLAtlas(L, g);
+  gl.blendEquation(gl.FUNC_ADD);
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(A.fill);
+  gl.uniform3f(A.uf.m0, m.a, m.c, m.e); gl.uniform3f(A.uf.m1, m.b, m.d, m.f);
+  gl.uniform2f(A.uf.size, W, H);
+  gl.bindVertexArray(A.fvao);
+  gl.drawArrays(gl.TRIANGLES, 0, A.fn);
+  gl.useProgram(A.seg);
+  gl.uniform3f(A.us.m0, m.a, m.c, m.e); gl.uniform3f(A.us.m1, m.b, m.d, m.f);
+  gl.uniform2f(A.us.size, W, H); gl.uniform1f(A.us.dpr, dpr);
+  gl.bindVertexArray(A.svao);
+  gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, A.sn);
+  gl.bindVertexArray(null);
 }
 
 function dropGLLinks() {
@@ -2199,6 +2346,7 @@ function drawGLLinks(ctx, scale) {
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.enable(gl.BLEND);
+  if (L.atlas && atlasNow && atlasNow.n) drawGLAtlas(L, atlasNow, m, W, H, m.a / scale);
   for (const g of L.groups) {
     gl.useProgram(L.prog);
     gl.uniform1i(L.u.pos, 0); gl.uniform1i(L.u.posW, L.posW);
@@ -2639,9 +2787,13 @@ function fogStep() {
 // rebuilds from the RAW_NODES/RAW_EDGES already in the page. The two libs are
 // kapsule siblings — one builder, four branches (fly-to, sphere detail, link
 // width, labels), everything else shared.
-const MODE_KEY = "silica-graph-mode";
-let mode = "3d";
-try { if (localStorage.getItem(MODE_KEY) === "2d") mode = "2d"; } catch (e) {}
+// 2D unless this browser chose 3D (ADR-0136, the owner's "default view 2d",
+// 2026-10-28): the atlas exists only in 2D, and 3D was the hardest picture of
+// the course to read. -2 because the first build wrote the old default, 3D,
+// into every profile, so the old key cannot tell a choice from that default.
+const MODE_KEY = "silica-graph-mode-2";
+let mode = "2d";
+try { if (localStorage.getItem(MODE_KEY) === "3d") mode = "3d"; } catch (e) {}
 const is2D = () => mode === "2d";
 
 let Graph = null;
@@ -2883,21 +3035,45 @@ function inert(real, fed) {
   return proxy;
 }
 
-// The worker's half. holdAreas is the same function the lib ran, by its source.
+// --- ForceAtlas2, the 2D layout (ADR-0136) ------------------------------------
+// Laid out on the backbone (pullOf), d3 in 2D reached 0.515 purity on the
+// machine learning course and ForceAtlas2 0.68-0.715 by its seed, in a replica
+// of this frame (2026-10-28); today's 2D was 0.462. ForceAtlas2 is Jacomy,
+// Venturini, Heymann and Bastian (PLoS ONE 2014), graphology's iterate()
+// (vendored as forceatlas2.min.js), run in the layout worker; d3 keeps 3D and
+// a 2D frame with no worker. Settings, measured on the course: Gephi's mass
+// (1 + the pulling degree) and outbound attraction distribution, scalingRatio
+// 2, gravity 1, slowDown 1 (8, graphology's default for this size, stood at
+// 0.561 after 600 iterations against 0.678), Barnes-Hut at theta 1 (0.5 bought
+// nothing and cost twice the time). The weights are pullOf's strengths, one
+// rule for both engines: 0.702 after 1,000 iterations, against 0.685 at the
+// Jaccard itself.
+// FA2 has no alpha. A run stops when the median note moves less than FA2_EPS
+// graph units an iteration, after FA2_MIN of them, or after FA2_BUDGET; a
+// drag holds it running; a reheat (a slider, autoLayout) starts the count again.
+const FA2_SCALING = 2, FA2_THETA = 1, FA2_MIN = 100, FA2_BUDGET = 1500;
+const FA2_EPS = RESIDUAL_EPS;
+// No worker, no FA2: the lib's own engine is d3.
+const ENGINE_2D = NO_WORKER || typeof Worker === "undefined" ? "d3" : "fa2";
+
+// The worker's half: one protocol, two engines. followNative is the same
+// function the lib runs without a worker, by its source.
 const simWorkerSource = () => `
-const HOLD = ${HOLD}, LOOSE_HOLD = ${LOOSE_HOLD}, LOOSE_RIM = ${LOOSE_RIM}, LOOSE_PUSH = ${LOOSE_PUSH};
-${holdAreas}
+const FOLLOW = ${FOLLOW};
+${followNative}
+const PPN = 10, FA2_SCALING = ${FA2_SCALING}, FA2_THETA = ${FA2_THETA};
+const FA2_MIN = ${FA2_MIN}, FA2_BUDGET = ${FA2_BUDGET}, FA2_EPS = ${FA2_EPS};
 let sim = null, nodes = [], S = null, min = 0, descend = null, running = false;
-let ticks = 0, total = 0, residual = 0, gen = 0;
-const held = { discs: null, unit: 1 }, pinned = new Set();
-const hold = Object.assign(a => { if (held.discs) holdAreas(nodes, held.discs, held.unit, a); },
-  { initialize() {} });
+let ticks = 0, total = 0, residual = 0, gen = 0, fa = null;
+const pinned = new Set();
+const follow = Object.assign(a => followNative(nodes, a), { initialize() {} });
 // A message, not setTimeout(0): nested timeouts clamp to 4ms, a third of a tick.
 const ch = new MessageChannel();
 ch.port1.onmessage = run;
 function kick() { if (!running) { running = true; ch.port2.postMessage(0); } }
 // The lib's gate, checked where the lib checks it: before the tick.
 function step() {
+  if (fa) return faStep();
   if (min > 0 && sim.alpha() < min) { running = false; return false; }
   sim.tick(); ticks++; total++;
   if (descend) {
@@ -2918,37 +3094,125 @@ function run() {
 }
 function post() {
   const p = new Float64Array(nodes.length * 3);
+  if (fa) faUnit();
   for (let i = 0; i < nodes.length; i++) {
+    if (fa) { p[3 * i] = fa.N[i * PPN] * fa.U; p[3 * i + 1] = fa.N[i * PPN + 1] * fa.U; continue; }
     const n = nodes[i];
     p[3 * i] = n.x; p[3 * i + 1] = n.y; p[3 * i + 2] = n.z || 0;
   }
-  postMessage({ p, ticks, total, residual, gen, descending: descend ? descend[1] : 0, done: !running }, [p.buffer]);
+  postMessage({ p, ticks, total, residual, gen, unit: fa ? fa.U : 1,
+    descending: descend ? descend[1] : 0, done: !running }, [p.buffer]);
   ticks = 0;
 }
+
+// ForceAtlas2: the notes in a node matrix, the pulling lines in an edge matrix,
+// flat as fa2.iterate takes them. It works in its own unit, since its speed is
+// not scale-free (scaled up 2x by its scalingRatio, the course stood at 0.643
+// after 1,000 iterations against 0.702); a post multiplies it by U, which puts
+// the median pulling line at one rest length, the frame's unit, and a pin or a
+// note put back comes in divided by U. A layout seeded from the cache starts
+// at the U it was saved with, so it starts where it settled.
+function faInit(unit) {
+  const n = nodes.length, N = new Float32Array(n * PPN);
+  fa = { N, E: new Float32Array(0), U: unit || 1, rest: 1, opt: null, prev: new Float32Array(2 * n),
+         st: new Float32Array(n), left: FA2_BUDGET, iters: 0, hold: false };
+  for (let i = 0; i < n; i++) {
+    N[i * PPN] = nodes[i].x / fa.U; N[i * PPN + 1] = nodes[i].y / fa.U;
+    N[i * PPN + 7] = 1; N[i * PPN + 8] = 1;   // convergence, size
+    // A note Silica runs on is placed beside its notes (faFollow), never by
+    // the forces: fixed, so iterate leaves it where faFollow puts it.
+    if (nodes[i]._follow) N[i * PPN + 9] = 1;
+  }
+}
+function faForces(f, links) {
+  const N = fa.N, keep = [];
+  for (let i = 0; i < f.strengths.length; i++) if (f.strengths[i] > 0) keep.push(i);
+  const E = new Float32Array(keep.length * 3);
+  for (let i = 0; i < nodes.length; i++) N[i * PPN + 6] = 1;
+  keep.forEach((li, k) => {
+    const s = links[2 * li], t = links[2 * li + 1];
+    E[3 * k] = s * PPN; E[3 * k + 1] = t * PPN; E[3 * k + 2] = f.strengths[li];
+    N[s * PPN + 6]++; N[t * PPN + 6]++;
+  });
+  fa.E = E; fa.rest = f.distance;
+  fa.opt = { linLogMode: false, outboundAttractionDistribution: true, adjustSizes: false,
+    edgeWeightInfluence: 1, scalingRatio: FA2_SCALING * f.repel, strongGravityMode: false,
+    gravity: f.center, slowDown: 1, barnesHutOptimize: true, barnesHutTheta: FA2_THETA };
+}
+function faFollow() {
+  const N = fa.N;
+  for (let i = 0; i < nodes.length; i++) {
+    const f = nodes[i]._follow;
+    if (!f || !f.length || pinned.has(i)) continue;
+    let x = 0, y = 0;
+    for (const m of f) { x += N[m.index * PPN]; y += N[m.index * PPN + 1]; }
+    N[i * PPN] = x / f.length; N[i * PPN + 1] = y / f.length;
+  }
+}
+function faUnit() {
+  const N = fa.N, E = fa.E, k = E.length / 3;
+  if (!k) return;
+  const L = new Float32Array(k);
+  for (let j = 0; j < k; j++) {
+    const s = E[3 * j], t = E[3 * j + 1];
+    L[j] = Math.hypot(N[s] - N[t], N[s + 1] - N[t + 1]);
+  }
+  L.sort();
+  if (L[k >> 1] > 0) fa.U = fa.rest / L[k >> 1];
+}
+function faStep() {
+  if (!fa.left) { running = false; return false; }
+  const N = fa.N, P = fa.prev, st = fa.st, n = nodes.length;
+  for (let i = 0; i < n; i++) { P[2 * i] = N[i * PPN]; P[2 * i + 1] = N[i * PPN + 1]; }
+  fa2.iterate(fa.opt, N, fa.E);
+  faFollow();
+  for (let i = 0; i < n; i++) st[i] = Math.hypot(N[i * PPN] - P[2 * i], N[i * PPN + 1] - P[2 * i + 1]);
+  st.sort();
+  residual = (st[n >> 1] || 0) * fa.U;
+  ticks++; total++; fa.iters++;
+  if (fa.hold) return true;
+  if (descend) {
+    if (residual < descend[0] || --descend[1] === 0) { descend = null; fa.left = 0; }
+  } else if (--fa.left > 0 && fa.iters >= FA2_MIN && residual < FA2_EPS) fa.left = 0;
+  if (!fa.left) running = false;
+  return running;
+}
+function faRestart() { fa.left = FA2_BUDGET; fa.iters = 0; }
+
 function forces(f) {
   S = f.strengths;
   sim.force("link").distance(f.distance).strength((l, i) => S[i]);
   sim.force("charge").strength(f.charge).distanceMax(f.chargeMax);
   sim.force("center").strength(f.center);
-  held.discs = f.areas && f.areas.discs; held.unit = f.areas ? f.areas.unit : 1;
 }
+let LINKS = null;
 onmessage = ({ data: m }) => {
   if (m.init) {
-    const { dim, x, y, z, links, group, loose, follow } = m.init;
+    const { dim, x, y, z, links, follow: near } = m.init;
     nodes = Array.from({ length: x.length }, (_, i) =>
-      ({ index: i, x: x[i], y: y[i], z: z[i], vx: 0, vy: 0, vz: 0, group: group[i], _loose: !!loose[i] }));
-    follow.forEach((f, i) => { if (f) nodes[i]._follow = f.map(j => nodes[j]); });
+      ({ index: i, x: x[i], y: y[i], z: z[i], vx: 0, vy: 0, vz: 0 }));
+    near.forEach((f, i) => { if (f) nodes[i]._follow = f.map(j => nodes[j]); });
+    LINKS = links;
     const L = [];
     for (let i = 0; i < links.length; i += 2) L.push({ source: links[i], target: links[i + 1] });
-    // The lib's force order (link, charge, center, then the areas): the same
-    // sums in the same order, so the same layout.
+    // The lib's force order (link, charge, center, then the native notes'
+    // follow): the same sums in the same order, so the same layout.
     sim = d3.forceSimulation().numDimensions(dim).stop().nodes(nodes)
       .force("link", d3.forceLink(L)).force("charge", d3.forceManyBody())
-      .force("center", d3.forceCenter()).force("areas", hold)
+      .force("center", d3.forceCenter()).force("follow", follow)
       .alphaDecay(m.init.decay);
     forces(m.init.forces);
+    if (m.init.engine === "fa2") { faInit(m.init.unit); faForces(m.init.forces, links); }
     min = m.init.min;
-    for (let i = 0; i < m.init.warm && !(min > 0 && sim.alpha() < min); i++) { sim.tick(); total++; }
+    // The warmup, unposted as the lib's synchronous loop was unpainted.
+    if (fa) {
+      running = true;
+      for (let i = 0; i < m.init.warm && faStep(); i++);
+      running = false;
+      if (!fa.left) { post(); return; }   // settled inside the warmup
+    } else {
+      for (let i = 0; i < m.init.warm && !(min > 0 && sim.alpha() < min); i++) { sim.tick(); total++; }
+    }
     kick();
     return;
   }
@@ -2956,26 +3220,35 @@ onmessage = ({ data: m }) => {
 };
 function apply(m) {
   if (m.gen) gen = m.gen;
-  if (m.forces) forces(m.forces);
+  if (m.forces) { forces(m.forces); if (fa) faForces(m.forces, LINKS); }
   if (m.moved) for (let k = 0; k < m.moved.length; k += 4) {
-    const n = nodes[m.moved[k]];
+    const i = m.moved[k], n = nodes[i];
     n.x = m.moved[k + 1]; n.y = m.moved[k + 2]; n.z = m.moved[k + 3];
     n.vx = n.vy = n.vz = 0;
+    if (fa) { fa.N[i * PPN] = n.x / fa.U; fa.N[i * PPN + 1] = n.y / fa.U; fa.N[i * PPN + 2] = fa.N[i * PPN + 3] = 0; }
   }
   if (m.pins) {
-    for (const i of pinned) nodes[i].fx = nodes[i].fy = nodes[i].fz = null;
+    for (const i of pinned) {
+      nodes[i].fx = nodes[i].fy = nodes[i].fz = null;
+      if (fa) fa.N[i * PPN + 9] = nodes[i]._follow ? 1 : 0;
+    }
     pinned.clear();
     for (let k = 0; k < m.pins.length; k += 4) {
       const i = m.pins[k], n = nodes[i];
       n.fx = m.pins[k + 1]; n.fy = m.pins[k + 2]; n.fz = m.pins[k + 3];
+      if (fa) { fa.N[i * PPN] = n.fx / fa.U; fa.N[i * PPN + 1] = n.fy / fa.U; fa.N[i * PPN + 9] = 1; }
       pinned.add(i);
     }
   }
   if (m.decay !== undefined) sim.alphaDecay(m.decay);
   if (m.min !== undefined) min = m.min;
-  if (m.target !== undefined) { sim.alphaTarget(m.target); if (m.target) kick(); }
-  if (m.descend) descend = m.descend.slice();
-  if (m.reheat) { sim.alpha(1); kick(); }
+  if (m.target !== undefined) {
+    sim.alphaTarget(m.target);
+    if (fa) { fa.hold = m.target > 0; if (!fa.hold) faRestart(); }
+    if (m.target || fa) kick();
+  }
+  if (m.descend) { descend = m.descend.slice(); if (fa) { faRestart(); kick(); } }
+  if (m.reheat) { sim.alpha(1); if (fa) faRestart(); kick(); }
 }`;
 
 // Built with the instance and before its data: it takes the lib's schedule
@@ -3054,7 +3327,8 @@ function simForces(G) {
     strengths, distance: link.distance()(links[0] || {}, 0, links),
     charge: charge.strength()(RAW_NODES[0] || {}, 0, RAW_NODES), chargeMax: charge.distanceMax(),
     center: center.strength(),
-    areas: areasOn() ? { discs: AREA_DISCS, unit: discUnit() } : null,
+    // ForceAtlas2's repulsion has no d3 charge to read it off (FA2_SCALING).
+    repel: forceMul.repel,
   };
 }
 
@@ -3078,8 +3352,7 @@ function simInit(S) {
   S.w.postMessage({ init: {
     dim: is2D() ? 2 : 3, x, y, z, links: pairs, forces: simForces(G),
     decay: S.decay, min: S.min, warm: S.warm,
-    group: RAW_NODES.map(n => n.group),
-    loose: Uint8Array.from(RAW_NODES, n => n._loose ? 1 : 0),
+    engine: is2D() ? ENGINE_2D : "d3", unit: layoutUnit,
     follow: RAW_NODES.map(n => n._follow ? n._follow.map(m => index.get(m)) : null),
   } }, [x.buffer, y.buffer, z.buffer, pairs.buffer]);
   simFlush(S);
@@ -3248,8 +3521,7 @@ function buildGraph() {
       simRunning = false;
       residualTicks = 0;
       paintStat("settled in " + gnum(warmupRun + simTicks) + " ticks");
-      for (const k in mstMemo) delete mstMemo[k];  // positions just moved
-      blobMemo = null;
+      atlasMemo = null;   // positions just moved
       saveLayout();
       measureGraphRadius();   // the label thresholds are a fraction of it
       if (RIM) placeRim();
@@ -3294,22 +3566,22 @@ function buildGraph() {
       // buys nothing: paint no link areas at all. Node picking keeps its own
       // painter above. Measured: worst 2D frame 78ms -> 9ms.
       .linkPointerAreaPaint(() => {})
-      // Pre, not Post: a zone is the ground the notes stand on. 2D only — the
-      // 3D bundle hands out no THREE, so there the zones are colour and name.
-      // Every real 2D repaint passes here, which is what makes it the seam
-      // where the resolution governor watches for streams.
-      // An arrangement is its own picture: its wedges replace the areas, the
-      // zones and the rim, which are all drawings of the free layout.
+      // Pre, not Post: the atlas is the ground the notes stand on. 2D only:
+      // the 3D bundle hands out no THREE, so there an area is a colour and a
+      // name. Every real 2D repaint passes here, which is what makes it the
+      // seam where the resolution governor watches for streams.
+      // An arrangement is its own picture: its wedges replace the atlas and
+      // the rim, which are drawings of the free layout.
       .onRenderFramePre((ctx, scale) => {
         drsOnPaint();
         const under = underCtx(ctx);
+        drawAtlas(under, scale);   // first, so an arrangement clears it too
         if (ARR) { drawWedges(under, scale); return; }
-        drawAreaBlobs(under, scale); drawAreaRibbons(under, scale); drawZones(under, scale);
         drawRim(under, scale);
       })
       .onRenderFramePost((ctx, scale) => {
         drawGLLinks(ctx, scale);
-        ARR ? drawArrangedNames(ctx, scale) : drawAreaNames(ctx, scale);
+        ARR ? drawArrangedNames(ctx, scale) : drawAtlasNames(ctx, scale);
       });
   } else {
     // Perf on big vaults (1200+ notes): the bundle gives every link its own
@@ -3345,30 +3617,20 @@ function buildGraph() {
       // the note labels do not reach: which cluster is this, and is it special.
       //
       // The community comes first because that is what the node's colour means,
-      // always. The zone is APPENDED when its layer is up, never substituted:
-      // in 3D there are no hulls to carry it (onRenderFramePre is 2D-only), so
-      // without this the semantic layer would be floating names and nothing an
-      // individual note could be checked against.
-      // The zone gets its OWN line rather than joining the first: community
-      // labels already contain " · " inside themselves, so appending to them
-      // produced "etica · sistemi · zone: etica · morale", one run with no seam
-      // where the second partition starts.
+      // always.
       .nodeLabel(n => {
         const bits = [];
         if (areaOf(n)) bits.push(areaOf(n));
         const st = nodeState(n);
         if (st !== "note") bits.push(st);
-        const zone = (showZones && n.sgroup >= 0) ? ZONE_LABEL[n.sgroup] : null;
-        // Appended on the same terms as the zone. The mark carries the ring now
-        // (RING_S_PX), so this line is no longer the only place the reading
-        // lands - but the ring says load-bearing and cannot say how MANY
-        // strands, and it is gone below RING_MIN_PX of disc, which is most of a
-        // zoomed-out frame.
+        // A line of its own. The mark carries the ring now (RING_S_PX), so
+        // this line is no longer the only place the reading lands - but the
+        // ring says load-bearing and cannot say how MANY strands, and it is
+        // gone below RING_MIN_PX of disc, which is most of a zoomed-out frame.
         const cut = n.cut
           ? "load-bearing · strands " + (n.strands || 0) : null;
         return '<div class="g3d-tip"><b>' + escHtml(n.label) + '</b>' + paperTip(n) +
           (bits.length ? '<i>' + escHtml(bits.join(" · ")) + '</i>' : '') +
-          (zone ? '<i>zone ' + escHtml(zone) + '</i>' : '') +
           (cut ? '<i>' + escHtml(cut) + '</i>' : '') + '</div>';
       });
   }
@@ -3402,16 +3664,17 @@ function setMode(m) {
   // and arrange the same focus again in the new mode.
   const rearrange = !!ARR;
   disarrange(false);
-  leaveAreas();
   mode = m;
-  try { localStorage.setItem(MODE_KEY, m); } catch (e) {}
+  // Only a switch is a choice: the first build writing its default here is
+  // what made the old key unable to tell the two apart (MODE_KEY).
+  if (rebuild) try { localStorage.setItem(MODE_KEY, m); } catch (e) {}
   document.querySelectorAll("#mode-toggle button")
     .forEach(b => b.classList.toggle("active", b.dataset.mode === m));
   // The rings are a canvas draw. Leaving their legend up in 3D would promise a
   // channel that mode does not paint.
   document.getElementById("state-legend").style.display = is2D() ? "" : "none";
-  const areasRow = document.getElementById("areas-row");
-  if (areasRow) areasRow.style.display = is2D() ? "" : "none";
+  const atlasRow = document.getElementById("atlas-row");
+  if (atlasRow) atlasRow.style.display = is2D() ? "" : "none";
   placeRim();   // the rim is 2D only: built on the way in, sent home on the way out
   fitPending = fitPending || rebuild;
   // Flags BEFORE the build, repaint never: the new instance reads _hidden/_dim
@@ -3424,13 +3687,12 @@ function setMode(m) {
   Graph = buildGraph();    // owns the forces now: they must precede graphData
   window.__G = Graph;      // console/harness handle: frame-cost probes in hidden tabs
   styleScene();            // first frame already lit; a no-op if 2D
-  syncZoneLoop();          // the note-name layer is 3D-only, so the mode owns it
+  syncLabelLoop();         // the note-name layer is 3D-only, so the mode owns it
   renderBudget();
   if (rearrange) arrangeFocus();
 }
 
-// The scope picker is the app's, and its Folders, Areas and Zones come from
-// /shape. Zotero collections cannot: membership is read live at THIS build
+// The scope picker is the app's, and its Folders and Areas come from /shape. Zotero collections cannot: membership is read live at THIS build
 // and never stored (graph_view._stamp_collections), so the frame says which
 // collections it can scope to, and how many papers it holds for "Papers
 // only". A frame built while Zotero was closed announces no collection.
@@ -3476,29 +3738,21 @@ try {
 
 // G is passed explicitly during a build, where the instance is not yet the
 // global one: the forces have to be in place before graphData runs the warmup.
-function applyForces(reheat, G, decay = FAST_DECAY) {
+function applyForces(reheat, G) {
   G = G || Graph;
-  const held = areasOn();
   // distanceMax bounds both over-dispersion and per-tick cost on big graphs.
-  // Held, it only spaces neighbours: the discs place the areas, and a charge
-  // reaching across them inflated every area into a string of beads on the
-  // prototype (ADR-0074).
-  G.d3Force("charge").strength(baseCharge() * forceMul.repel)
-    .distanceMax(held ? HOLD_REACH * baseDist() * forceMul.dist : 600 * FORCE_SCALE);
-  G.d3Force("areas", held && !SIM ? holdForce : null);
-  // heldLinkStrength(null) is d3's default rule: the areas going off on the same
-  // instance have to put it back, which d3 offers no accessor for.
-  G.d3Force("link").distance(baseDist() * forceMul.dist)
-    .strength(heldLinkStrength(held ? AREA_DISCS : null));
+  G.d3Force("charge").strength(baseCharge() * forceMul.repel).distanceMax(600 * FORCE_SCALE);
+  // The worker runs its own follow; the lib's engine needs one only alone.
+  G.d3Force("follow", SIM ? null : followForce);
+  G.d3Force("link").distance(baseDist() * forceMul.dist).strength(linkStrength());
   // Center capped at 1: d3 forceCenter shifts positions directly, >1 oscillates.
   G.d3Force("center").strength(Math.min(1, forceMul.center));
   if (SIM && SIM.inited) SIM.post({ forces: simForces(G) });
   // A slider moves an already-settled layout, so the reheat is a perturbation,
   // not a cold start: the fast decay is the right budget for it, and without it
-  // dragging a slider would cost the full 300-tick schedule every time. The
-  // areas coming on move every area to its disc, which is a cold start.
+  // dragging a slider would cost the full 300-tick schedule every time.
   if (reheat) {
-    G.d3AlphaDecay(decay).d3ReheatSimulation();
+    G.d3AlphaDecay(FAST_DECAY).d3ReheatSimulation();
     simRunning = true;
     renderBudget();
   }
@@ -3536,244 +3790,291 @@ function resetForces() {
 
 syncForceUI();
 
-// --- Areas held and drawn as blobs (ADR-0074), 2D only ----------------------
-// 3D keeps its layout as it was: a blob is a 2D drawing, like a zone's hull,
-// and holding the areas without one only flattens the cloud. Off when the frame
-// opens, like the zones, and off again on every mode switch: the areas are a
-// view of the layout on screen, and the frame always opens on the free one.
-let showAreas = false;
-// The areas the legend lists, which are the ones with a hub to be named by:
-// graph_view keeps comm_hubs to the multi-note areas.
-const HELD_AREAS = Object.keys(COMM_HUBS);
-const AREA_INDEX = {};
-HELD_AREAS.forEach((g, k) => { AREA_INDEX[g] = k; });
-const areasOn = () => showAreas && is2D() && HELD_AREAS.length > 0;
-// area -> [x, y, r] in link rest lengths, placed when the areas come on.
-let AREA_DISCS = {};
-// One unit, a link rest length, in graph units, scaled so a blob's edge lands
-// on its disc's rim. Measured in the app on the test vault 2026-10-07 at 1.15:
-// the edge (the 90th percentile note's distance from the centroid, plus the
-// blob's reach) sat at 0.62-0.93 of the disc for every area of 9 notes or
-// more, median 0.77, which left a moat around each blob on top of AREA_GAP.
-// 0.9 is 1.15 x 0.78; the smallest areas overflow their discs and meet their
-// neighbours at a shared border, the dense mass the owner asked for.
-const discUnit = () => 0.9 * baseDist() * forceMul.dist;
-const HOLD_REACH = 3;   // the held charge, in rest lengths
-const holdForce = Object.assign(
-  alpha => holdAreas(RAW_NODES, AREA_DISCS, discUnit(), alpha),
-  { initialize() {} });   // reads RAW_NODES, so the rim never reaches it (ADR-0066)
-
-// What placeDiscs needs from the vault, fixed for the life of the frame: a disc
-// whose area is its note count (0.62 sqrt(notes), the radius area_discs used),
-// and the linked pairs between two areas, counted as area_tally counts them.
-const AREA_RADIUS = {}, AREA_INTER = [];
-(() => {
-  const size = {}, pairs = new Map(), seen = new Set();
-  RAW_NODES.forEach(n => {
-    if (AREA_INDEX[n.group] !== undefined && n.type !== "ghost") size[n.group] = (size[n.group] || 0) + 1;
-  });
-  HELD_AREAS.forEach(g => { AREA_RADIUS[g] = 0.62 * Math.sqrt(size[g] || 1); });
-  RAW_EDGES.forEach(e => {
-    const a = NODE_BY_ID[e.from], b = NODE_BY_ID[e.to];
-    if (e.type !== "EXTRACTED" || !a || !b || a.group === b.group) return;
-    if (AREA_INDEX[a.group] === undefined || AREA_INDEX[b.group] === undefined) return;
-    const pair = e.from < e.to ? e.from + "\n" + e.to : e.to + "\n" + e.from;
-    if (seen.has(pair)) return;   // a mutual link is one pair, as area_tally has it
-    seen.add(pair);
-    const key = a.group < b.group ? a.group + "|" + b.group : b.group + "|" + a.group;
-    pairs.set(key, (pairs.get(key) || 0) + 1);
-  });
-  pairs.forEach((w, key) => AREA_INTER.push([...key.split("|"), w]));
-})();
-RAW_NODES.forEach(n => {
-  n._loose = AREA_INDEX[n.group] === undefined && n.type !== "ghost" && n.type !== "missing" && !NATIVE[n.type];
-  if (NATIVE[n.type] || n._loose)
-    n._follow = [...(neighbors[n.id] || [])].map(id => NODE_BY_ID[id])
-      .filter(m => m && !isRim(m) && (NATIVE[n.type] || (m.type !== "ghost" && m.type !== "missing")));
+// --- What pulls (ADR-0136) ---------------------------------------------------
+// The notes a resolved wikilink reaches, over the edges Louvain and the
+// backbone read (no ghost, no Silica note): a k-NN or citation line pulls a
+// note outside this set only (pullOf).
+const LINKED = new Set();
+RAW_EDGES.forEach(e => {
+  const a = NODE_BY_ID[e.from], b = NODE_BY_ID[e.to];
+  if (e.type !== "EXTRACTED" || !a || !b || e.from === e.to || NATIVE[a.type] || NATIVE[b.type]) return;
+  LINKED.add(e.from); LINKED.add(e.to);
 });
-
-// Each area's centroid on screen, in disc units, is where its disc starts.
-function discsFromLayout() {
-  const acc = {}, u = discUnit(), start = {};
-  for (const n of RAW_NODES) {
-    if (AREA_INDEX[n.group] === undefined || n.type === "ghost" || typeof n.x !== "number") continue;
-    const c = acc[n.group] || (acc[n.group] = [0, 0, 0]);
-    c[0] += n.x; c[1] += n.y; c[2]++;
-  }
-  for (const g in acc) start[g] = [acc[g][0] / acc[g][2] / u, acc[g][1] / acc[g][2] / u];
-  return placeDiscs(start, AREA_RADIUS, AREA_INTER);
-}
-
-// The free layout the areas were switched on from, put back when they go off:
-// the areas gather each area in place, so the way back is where it started.
-// Put back as it was and not rerelaxed, when it had settled: a fast reheat
-// from it still carried one note 6 rest lengths (test vault, 2026-10-07).
-let freePos = null, freeSettled = false;
-function setAreas(on) {
-  const cb = document.getElementById("cb-areas");
-  if (cb) cb.checked = on;
-  if (on === showAreas) return;
-  showAreas = on;
-  if (!Graph || !is2D()) return;
-  blobMemo = null;
-  if (on) {
-    freePos = RAW_NODES.map(n => [n.x, n.y]);
-    freeSettled = !simRunning;
-    AREA_DISCS = discsFromLayout();
-    fitPending = true;
-    applyForces(true, Graph, COLD_DECAY);
-  } else {
-    const back = !!freePos;
-    leaveAreas();
-    if (back && freeSettled) { applyForces(false); fitGraph(); }
-    else { fitPending = true; applyForces(true); }
-  }
-  applyFilters();
-}
-function updateAreaFilter() {
-  disarrange();   // the areas hold the free layout, not an arrangement of it
-  const cb = document.getElementById("cb-areas");
-  setAreas(!!(cb && cb.checked));
-}
-// A mode switch leaves the areas: the positions go back to the free layout
-// before the new instance reads them, with no reheat on the old one.
-function leaveAreas() {
-  if (freePos) RAW_NODES.forEach((n, i) => { n.x = freePos[i][0]; n.y = freePos[i][1]; n.vx = n.vy = 0; });
-  freePos = null;
-  showAreas = false;
-  const cb = document.getElementById("cb-areas");
-  if (cb) cb.checked = false;
-}
-// A quiet line (computeFilters) shows only as a line of the focused note, and
-// under a focus the areas show that note's lines alone: a dimmed line is
-// painted in the floor's colour, a dark scratch across every blob it crosses.
-const quietNow = l => (l._quiet || (l._dim && areasOn())) && !(focusIds.length && !l._dim);
-
-// The blob's reach, in rest lengths, and the field level its edge sits on. The
-// owner's values from the prototype, 2026-10-07; at TAU a lone note's blob is
-// 0.64 R across and two notes up to 1.5 R apart fuse.
-const BLOB_PAD = 0.85, BLOB_TAU = 0.35;
-const BLOB_ALPHA = LIGHT ? 0.13 : 0.17;   // a ground under the notes, as ZONE_ALPHA is
-const RIBBON_ALPHA = LIGHT ? 0.4 : 0.34;
-
-// Recomputed every frame while the layout moves, served from here once it
-// settles; onEngineStop and computeFilters clear it. Each area also gets a rim,
-// 1.25 x the RMS distance of its notes from their centroid plus a quarter rest
-// length, where its ribbons leave it.
-// ponytail: blobGeometry allocates its grids per call. 25 runs on the test
-// vault 2026-10-07: median 3.2 ms, max 24.7 ms, the max a collection. Keep
-// the buffers between frames when a settle's max passes 33 ms (a frame at 30 fps).
-let blobMemo = null, blobsNow = null;
-function areaBlobs() {
-  if (blobMemo && !simRunning) return blobMemo;
-  const pts = [], color = [];
-  for (const n of RAW_NODES) {
-    const k = AREA_INDEX[n.group];
-    if (k === undefined || n._hidden || n._ctx || typeof n.x !== "number") continue;
-    pts.push({ x: n.x, y: n.y, k });
-    if (!color[k]) color[k] = baseColor(n);
-  }
-  const R = BLOB_PAD * baseDist() * forceMul.dist;
-  const geo = blobGeometry(pts, R, BLOB_TAU), rim = geo.map(() => 0);
-  for (const p of pts) rim[p.k] += (p.x - geo[p.k].x) ** 2 + (p.y - geo[p.k].y) ** 2;
-  geo.forEach((g, k) => { rim[k] = g.n ? 1.25 * Math.sqrt(rim[k] / g.n) + 0.25 * baseDist() * forceMul.dist : 0; });
-  const ribbons = ribbonPairs(RAW_EDGES.filter(e => e._ribbon && !e._hidden)
-    .map(e => [NODE_BY_ID[e.from].group, NODE_BY_ID[e.to].group]));
-  return (blobMemo = { geo, color, rim, ribbons });
-}
-
-// Under the notes, and not with the zones up: the zone layer owns the ground
-// then, and two partitions' regions on one floor read as neither (ADR-0023).
-function drawAreaBlobs(ctx, scale) {
-  blobsNow = null;
-  if (!areasOn() || showZones) return;
-  blobsNow = areaBlobs();
-  blobsNow.geo.forEach((g, k) => {
-    if (!g.n) return;
-    ctx.save();
-    ctx.fillStyle = ctx.strokeStyle = blobsNow.color[k];
-    ctx.beginPath();
-    for (const p of g.fill) {
-      ctx.moveTo(p[0], p[1]);
-      for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]);
-      ctx.closePath();
+// d3's link strength under pullOf's rule. d3 offers no accessor for its own
+// default, so it is counted here, once per link array the force is handed.
+function linkStrength() {
+  let seen = null, count = null;
+  return (l, i, links) => {
+    if (links !== seen) {
+      seen = links;
+      count = new Map();
+      for (const k of links) for (const n of [k.source, k.target]) count.set(n, (count.get(n) || 0) + 1);
     }
-    ctx.globalAlpha = BLOB_ALPHA;
-    ctx.fill();
-    ctx.beginPath();
-    for (const l of g.line) { ctx.moveTo(l[0], l[1]); ctx.lineTo(l[2], l[3]); }
-    ctx.globalAlpha = 0.85;
-    ctx.lineWidth = 1.3 / scale;
-    ctx.stroke();
-    ctx.restore();
-  });
+    return pullOf(l, LINKED, 1 / Math.min(count.get(l.source), count.get(l.target)));
+  };
+}
+// A note Silica runs on follows the notes it links (followNative). The lib's
+// engine runs it only without a worker (applyForces); RAW_NODES, so the rim
+// never reaches it (ADR-0066).
+RAW_NODES.forEach(n => {
+  if (NATIVE[n.type])
+    n._follow = [...(neighbors[n.id] || [])].map(id => NODE_BY_ID[id]).filter(m => m && !isRim(m));
+});
+const followForce = Object.assign(alpha => followNative(RAW_NODES, alpha), { initialize() {} });
+
+// --- The atlas (ADR-0136), 2D only ------------------------------------------
+// The areas drawn as a map under the notes: every note owns its Voronoi cell,
+// clipped to a disc of ATLAS_R rest lengths around it, an area's cells are a
+// country and a sub-area's a province (graph_export.detect_sub_areas). The
+// ground is the area's colour most of the way to the floor; a country's border
+// is a line in the frame's ink, a province's a thinner one in its area's
+// colour. Names climb with the zoom (atlasTier). It replaced the area blobs of
+// ADR-0074 and the semantic zones' hulls, and on a vault with no area of 3
+// notes its countries are the zones, as the key row says (ATLAS_BY).
+// On unless the reader turned it off, remembered per browser: the owner's
+// atlas is the 2D view, the row is the way out of it.
+const ATLAS_KEY = "silica-graph-atlas";
+let showAtlas = true;
+try { if (localStorage.getItem(ATLAS_KEY) === "off") showAtlas = false; } catch (e) {}
+{ const cb = document.getElementById("cb-atlas"); if (cb) cb.checked = showAtlas; }
+const atlasOn = () => showAtlas && is2D() && !!ATLAS_BY;
+// The draft's disc, 13px at fit on the course, was 0.74 of the median
+// backbone link there, and a link's rest length is the unit (ForceAtlas2's
+// posts are scaled to it, faUnit). The coast is a rim of the floor's line
+// colour around the land, as the draft drew it, thinner: the draft's 1.15 R
+// was a 15px band at 5x fit.
+const ATLAS_R = 0.74, ATLAS_COAST = 1.08;
+// The colour's share of a cell's ground, over the floor: the draft's 0.28 on
+// graphite and 0.2 on paper, where a tint reads stronger.
+const ATLAS_GROUND = LIGHT ? 0.2 : 0.28;
+const ZONE_BY_ID = {};
+ZONES.forEach(z => { ZONE_BY_ID[z.id] = z; });
+const SUB_BY_ID = {};
+SUBS.forEach(s => { SUB_BY_ID[s.id] = s; });
+const countryOf = n => ATLAS_BY === "zones" ? n.sgroup : n.group;
+const provinceOf = n => ATLAS_BY === "zones" ? -1 : n.sub;
+const countryName = c => ATLAS_BY === "zones" ? (ZONE_BY_ID[c] || {}).label || "" : COMM_HUBS[c] || "";
+// A zone's hue rides on the zone (graph_export.Zone), off any area's key; an
+// area's is the colour its notes are painted with, so a country and its dots
+// cannot disagree.
+function countryHue(c, n) {
+  if (ATLAS_BY !== "zones") return baseColor(n);
+  const z = ZONE_BY_ID[c];
+  return z ? (LIGHT && z.color_paper) || z.color : GP.fallback;
 }
 
-// One ribbon per pair of areas that RIBBON_MIN lines or more join, from rim
-// to rim, each end facing the other area, bowed a tenth of its length so two
-// ribbons between neighbours do not lie on one line. Its width grows with the
-// square root of its lines, in screen pixels. Faded under a focus, where the
-// focused note's own lines are the reading.
-function drawAreaRibbons(ctx, scale) {
-  if (!blobsNow) return;
-  const { geo, color, rim, ribbons } = blobsNow;
-  const port = (k, o) => {
-    const dx = geo[o].x - geo[k].x, dy = geo[o].y - geo[k].y, d = Math.hypot(dx, dy) || 1;
-    return [geo[k].x + dx / d * rim[k], geo[k].y + dy / d * rim[k]];
-  };
+// The geometry of the notes on show, rebuilt when a note moved, a filter
+// changed what is on show, or the unit changed; a pan or a zoom over a still
+// layout serves it from here. While the layout settles it is rebuilt at most
+// every ATLAS_SETTLE_MS, a few frames behind the notes, which on 2,165 notes
+// is a Delaunay, a cell each and one pass over the edges.
+// Every part is plain polygons and segments, drawn by WebGL under the links
+// (drawGLAtlas) or by the canvas where there is no WebGL2 (drawAtlas): as
+// Canvas2D paths with a clip to the discs the atlas held 8-11 fps at fit on
+// alex_second_brain (Intel iGPU, 2026-10-28), against 106 without it.
+const ATLAS_SIDES = 24, ATLAS_SETTLE_MS = 66;
+let atlasMemo = null, atlasNow = null;
+function atlasGeometry() {
+  const R = ATLAS_R * baseDist() * forceMul.dist;
+  if (atlasMemo && simRunning && atlasMemo.R === R && performance.now() - atlasMemo.at < ATLAS_SETTLE_MS) return atlasMemo;
+  const on = [];
+  let sum = 0;
+  for (const n of RAW_NODES) {
+    if (n._hidden || n._ctx || typeof n.x !== "number" || !(countryOf(n) >= 0)) continue;
+    on.push(n);
+    sum += n.x * 1.000003 + n.y;
+  }
+  if (atlasMemo && atlasMemo.sum === sum && atlasMemo.n === on.length && atlasMemo.R === R) return atlasMemo;
+  // polys: [{c, pts}]; coast and borders: [x0, y0, x1, y1, ...]; provinces: country -> the same.
+  const g = { sum, n: on.length, R, at: performance.now(), on, polys: [], coast: [], borders: [],
+              provinces: new Map(), ground: new Map(), hue: new Map(), countries: [], subs: [], box: null, paths: null };
+  atlasMemo = g;
+  if (!on.length) return g;
+  const P = new Float64Array(2 * on.length);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  on.forEach((n, i) => {
+    P[2 * i] = n.x; P[2 * i + 1] = n.y;
+    x0 = Math.min(x0, n.x); x1 = Math.max(x1, n.x); y0 = Math.min(y0, n.y); y1 = Math.max(y1, n.y);
+  });
+  g.box = { x0, y0, x1, y1 };
+  const del = new d3Delaunay.Delaunay(P);
+  const vor = del.voronoi([x0 - 2 * R, y0 - 2 * R, x1 + 2 * R, y1 + 2 * R]);
+  const country = Int32Array.from(on, countryOf), prov = Int32Array.from(on, provinceOf);
+  const byCountry = new Map(), byProv = new Map();
+  on.forEach((n, i) => {
+    const c = country[i];
+    if (!g.hue.has(c)) {
+      const hue = countryHue(c, n);
+      g.hue.set(c, hue);
+      g.ground.set(c, towardFloor(hue, ATLAS_GROUND));
+    }
+    (byCountry.get(c) || byCountry.set(c, []).get(c)).push(i);
+    if (prov[i] >= 0) (byProv.get(prov[i]) || byProv.set(prov[i], []).get(prov[i])).push(i);
+    // A note on another's very spot has no cell of its own (d3-delaunay
+    // leaves a coincident point out): the first one's ground is theirs.
+    const cell = vor.cellPolygon(i);
+    if (!cell) return;
+    const k = cellInDisc(cell, n.x, n.y, R, ATLAS_SIDES), q = k.pts;
+    if (q.length < 6) return;
+    g.polys.push({ c, pts: q });
+    for (let e = 0; e < k.arc.length; e++) if (k.arc[e]) {
+      const f = (e + 1) % k.arc.length;
+      g.coast.push(q[2 * e], q[2 * e + 1], q[2 * f], q[2 * f + 1]);
+    }
+  });
+  const b = atlasBorders(P, country, prov, R, del, vor.circumcenters);
+  g.borders = b.country;
+  for (const c in b.province) g.provinces.set(+c, b.province[c]);
+  // What the names stand on: a country of two notes or more with a name, a
+  // province of three or more in a country it splits.
+  for (const [c, ids] of byCountry) {
+    const name = countryName(c);
+    if (ids.length > 1 && name) g.countries.push({ name, size: ids.length, at: atlasSpots(ids, P, 9) });
+  }
+  g.countries.sort((p, q) => q.size - p.size);
+  for (const [s, ids] of byProv) {
+    const sub = SUB_BY_ID[s];
+    if (sub && ids.length > 2 && g.provinces.has(sub.area))
+      g.subs.push({ name: sub.name, size: ids.length, at: atlasSpots(ids, P, 1) });
+  }
+  g.subs.sort((p, q) => q.size - p.size);
+  return g;
+}
+
+// The atlas's three lines, in the order they are laid: the coast in the
+// floor's line colour, a province's border in its area's colour, a country's
+// in the frame's ink. Widths in CSS px, constant on screen at any zoom.
+const ATLAS_LINES = [["coast", 1.5, 1], ["provinces", 0.8, 0.5], ["borders", 1.4, 0.7]];
+
+// Under the notes. With WebGL the layer under the links draws it
+// (drawGLAtlas) and this only hands it the geometry; without, the canvas
+// draws the same polygons and segments, one path per colour.
+function drawAtlas(ctx, scale) {
+  atlasNow = null;   // what the WebGL layer draws this frame, if anything
+  if (!atlasOn() || ARR) return;
+  const g = atlasNow = atlasGeometry();
+  if (!g.n || (GLLinks && GLLinks.atlas)) return;
+  if (!g.paths) {
+    const seg = flat => { const p = new Path2D(); for (let k = 0; k < flat.length; k += 4) { p.moveTo(flat[k], flat[k + 1]); p.lineTo(flat[k + 2], flat[k + 3]); } return p; };
+    const cells = new Map();
+    for (const { c, pts } of g.polys) {
+      const p = cells.get(c) || cells.set(c, new Path2D()).get(c);
+      p.moveTo(pts[0], pts[1]);
+      for (let k = 2; k < pts.length; k += 2) p.lineTo(pts[k], pts[k + 1]);
+      p.closePath();
+    }
+    g.paths = { cells, coast: seg(g.coast), borders: seg(g.borders),
+                provinces: new Map([...g.provinces].map(([c, f]) => [c, seg(f)])) };
+  }
   ctx.save();
+  for (const [c, p] of g.paths.cells) { ctx.fillStyle = g.ground.get(c); ctx.fill(p); }
   ctx.lineCap = "round";
-  ctx.globalAlpha = RIBBON_ALPHA * (focusIds.length ? 0.35 : 1);
-  for (const [a, b, n] of ribbons) {
-    const i = AREA_INDEX[a], j = AREA_INDEX[b];
-    if (!geo[i].n || !geo[j].n) continue;
-    const p = port(i, j), q = port(j, i), dx = q[0] - p[0], dy = q[1] - p[1];
-    const grad = ctx.createLinearGradient(p[0], p[1], q[0], q[1]);
-    grad.addColorStop(0, color[i]);
-    grad.addColorStop(1, color[j]);
-    ctx.strokeStyle = grad;
-    ctx.lineWidth = (0.6 + 0.55 * Math.sqrt(n)) / scale;
-    ctx.beginPath();
-    ctx.moveTo(p[0], p[1]);
-    ctx.quadraticCurveTo((p[0] + q[0]) / 2 - dy * 0.1, (p[1] + q[1]) / 2 + dx * 0.1, q[0], q[1]);
-    ctx.stroke();
+  for (const [part, w, alpha] of ATLAS_LINES) {
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = w / scale;
+    if (part === "provinces") for (const [c, p] of g.paths.provinces) { ctx.strokeStyle = g.hue.get(c); ctx.stroke(p); }
+    else { ctx.strokeStyle = part === "coast" ? GP.line2 : GP.label; ctx.stroke(g.paths[part]); }
   }
   ctx.restore();
 }
 
-// The area's name over its blob, only below the zoom where the canvas starts
-// naming notes (drawNode, 0.6): above it the hub's own label says it again.
-// Held areas nearly touch, so two names can land on each other; the bigger
-// area keeps its name. Keys are area ids, which run in size order
-// (detect_communities), and an object walks integer keys ascending.
-function drawAreaNames(ctx, scale) {
-  if (!blobsNow || scale >= 0.6) return;
-  const taken = [];
+// The zoom the whole atlas fits at, as zoomToFit(_, 40) frames it: the tiers
+// are read against it (atlasTier).
+function atlasFitZoom(g) {
+  const { x0, y0, x1, y1 } = g.box, pad = 2 * 40;
+  return Math.min((Graph.width() - pad) / Math.max(x1 - x0, 1), (Graph.height() - pad) / Math.max(y1 - y0, 1));
+}
+
+// The names, after the notes, all together: whether one is drawn depends on
+// every one before it (placeLabels), largest part or busiest note first. With
+// a note under the pointer or in focus, its name and its neighbours' are the
+// only ones, as its lines are the only ones drawn.
+const ATLAS_FONT = "Archivo, system-ui, sans-serif";
+// Where a country's name tries to sit, in screen px off its anchor (x in its
+// own widths): four spots around it, as the draft did, then the other notes
+// atlasSpots offers. The draft named 10 of the course's 10 areas at fit.
+const ATLAS_SPOTS = [[0, 0], [0, -30], [0, 30], [0.6, 0], [-0.6, 0]];
+const clip = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
+function drawAtlasNames(ctx, scale) {
+  const g = atlasNow;
+  if (!g || !g.n) return;
+  const tl = Graph.screen2GraphCoords(0, 0), br = Graph.screen2GraphCoords(freeWidth(), Graph.height());
+  const view = { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y };
+  const seen = p => p.x >= view.x0 && p.x <= view.x1 && p.y >= view.y0 && p.y <= view.y1;
+  const deg = n => (outDeg[n.id] || 0) + (inDeg[n.id] || 0);
+  // A name: its lines, [text, px, weight, ink], over a point, and where else
+  // it may sit.
+  // spots: [x, y, dx in its own widths, dy in screen px], in the order tried.
+  const items = [];
+  const note = (n, px, weight, ink) =>
+    items.push({ lines: [[clip(n.label, 30), px, weight, ink]], spots: [[n.x, n.y - (px + 4) / scale, 0, 0]] });
+  const part = (p, px, small, cap) => {
+    const [a, ...rest] = p.at.map(i => g.on[i]);
+    items.push({ lines: [[clip(p.name, cap), px, 600, GP.label], [gnum(p.size) + " notes", small, 400, GP.ghostLabel]],
+                 spots: (p.at.length > 1 ? ATLAS_SPOTS : [[0, 0]]).map(([dx, dy]) => [a.x, a.y, dx, dy])
+                   .concat(rest.map(n => [n.x, n.y, 0, 0])) });
+  };
+  const lit = hoverId ? [hoverId] : focusIds;
+  if (lit.length) {
+    const roots = new Set(lit);
+    for (const id of lit) { const n = NODE_BY_ID[id]; if (n && !n._hidden) note(n, 13, 600, GP.accent); }
+    RAW_NODES.filter(n => !n._dim && !n._hidden && !roots.has(n.id) && seen(n))
+      .sort((p, q) => deg(q) - deg(p)).forEach(n => note(n, 11, 500, GP.label));
+  } else {
+    const tier = atlasTier(scale / atlasFitZoom(g));
+    const top = g.countries.length ? g.countries[0].size : 1;
+    if (tier === 0) g.countries.forEach(c => part(c, Math.round(12 + 5 * Math.sqrt(c.size / top)), 10, 40));
+    else if (tier === 1) g.subs.forEach(p => { if (seen(g.on[p.at[0]])) part(p, 12, 9.5, 28); });
+    else g.on.filter(seen).sort((p, q) => deg(q) - deg(p)).forEach(n => note(n, 11, 500, GP.label));
+  }
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.lineJoin = "round";
-  blobsNow.geo.forEach((g, k) => {
-    if (!(g.n >= 9 || (g.n >= 4 && scale > 0.35))) return;
-    const hub = COMM_HUBS[HELD_AREAS[k]] || "";
-    const name = hub.length > 30 ? hub.slice(0, 29) + "\u2026" : hub;
-    const sub = g.n + " notes";
-    ctx.font = "600 " + (13 / scale) + "px Archivo, system-ui, sans-serif";
-    const hw = ctx.measureText(name).width / 2, hh = 17 / scale;
-    if (taken.some(t => Math.abs(t[0] - g.x) < t[2] + hw && Math.abs(t[1] - g.y) < 2 * hh)) return;
-    taken.push([g.x, g.y, hw]);
-    ctx.lineWidth = 4 / scale;
-    ctx.strokeStyle = GP.bg;
-    ctx.strokeText(name, g.x, g.y - 7 / scale);
-    ctx.fillStyle = GP.label;
-    ctx.fillText(name, g.x, g.y - 7 / scale);
-    ctx.font = (12 / scale) + "px Archivo, system-ui, sans-serif";
-    ctx.strokeText(sub, g.x, g.y + 9 / scale);
-    ctx.fillStyle = GP.ghostLabel;
-    ctx.fillText(sub, g.x, g.y + 9 / scale);
+  // Each name's boxes, in graph units: its lines stacked, its widest line wide.
+  const alts = items.map(it => {
+    let w = 0, h = 0;
+    for (const [t, px, weight] of it.lines) {
+      ctx.font = weight + " " + px / scale + "px " + ATLAS_FONT;
+      w = Math.max(w, ctx.measureText(t).width);
+      h += px * 1.25 / scale;
+    }
+    it.h = h;
+    return it.spots.map(([x0, y0, dx, dy]) => {
+      const x = x0 + dx * w, y = y0 + dy / scale;
+      return { x, y, x0: x - w / 2 - 3 / scale, y0: y - h / 2, x1: x + w / 2 + 3 / scale, y1: y + h / 2 };
+    });
+  });
+  placeLabels(alts, view).forEach((k, i) => {
+    if (k < 0) return;
+    const at = alts[i][k];
+    let y = at.y - items[i].h / 2;
+    for (const [t, px, weight, ink] of items[i].lines) {
+      y += px * 0.625 / scale;
+      ctx.font = weight + " " + px / scale + "px " + ATLAS_FONT;
+      ctx.lineWidth = 3.5 / scale;
+      ctx.strokeStyle = GP.bg;
+      ctx.strokeText(t, at.x, y);
+      ctx.fillStyle = ink;
+      ctx.fillText(t, at.x, y);
+      y += px * 0.625 / scale;
+    }
   });
   ctx.restore();
 }
+
+function updateAtlas() {
+  const cb = document.getElementById("cb-atlas");
+  showAtlas = !cb || cb.checked;
+  try { localStorage.setItem(ATLAS_KEY, showAtlas ? "on" : "off"); } catch (e) {}
+  if (Graph) applyFilters();
+}
+
+// With the atlas on, a line shows only as a line of the note under the pointer
+// or in focus, the ones markDim leaves lit. Not under a comparison, whose
+// reading is the lines between its two parts, nor a collection's covers, the
+// lines the rim is drawn for.
+const quietNow = l => atlasOn() && !AB && l.type !== "COVERS" && !((hoverId || focusIds.length) && !l._dim);
 
 // Same split as computeFocus/applyFocus: flags on the shared objects here,
 // repaint only when there is no rebuild coming to read them for free.
@@ -3781,7 +4082,6 @@ function inScope(n) {
   if (!SCOPE) return true;
   if (SCOPE.kind === "folder") return (n.id || "").startsWith(SCOPE.prefix);
   if (SCOPE.kind === "area") return n.group === SCOPE.id;
-  if (SCOPE.kind === "zone") return n.sgroup === SCOPE.id;
   // The two Zotero kinds (ADR-0055) read the paper itself: its collections
   // are stamped on it live at build (graph_view._stamp_collections), so a
   // frame built while Zotero was closed has none to match.
@@ -3799,7 +4099,7 @@ function computeFilters() {
   // A ghost is the far end of an unresolved link, so it is drawn with those
   // links and only with them: 466 of 1,194 nodes floated with no line to
   // explain them while the row was off, which is its default (ADR-0058).
-  const toggledOff = n => !showNotes || (n.type === "missing" && !showMissing)
+  const toggledOff = n => (n.type === "missing" && !showMissing)
     || (n.type === "ghost" && !showAmbiguous);
   RAW_NODES.forEach(n => {
     n._hidden = toggledOff(n) || (AB ? !(AB.a.has(n.id) || AB.b.has(n.id)) : !inScope(n));
@@ -3809,14 +4109,13 @@ function computeFilters() {
   // takes their wikilinks along, but the k-NN joins two papers directly and
   // often, so the rule has to be on the edge as well as on the node.
   const citesOnly = !AB && SCOPE && SCOPE.kind === "papers";
-  // An area or a zone on show keeps the far end of every wikilink that leaves
-  // it: what a part reaches is the note across the link, and with the Highlight
-  // group gone (ADR-0058) this is where the Graph still says it. A far end
-  // shows only the links that reach it from the part, never its own.
+  // An area on show keeps the far end of every wikilink that leaves it: what a
+  // part reaches is the note across the link, and with the Highlight group
+  // gone (ADR-0058) this is where the Graph still says it. A far end shows
+  // only the links that reach it from the part, never its own.
   // A collection keeps the far ends of its leaves' wikilinks the same way
   // (ADR-0066 decision 5), and the far end of every COVERS edge below.
-  const reach = !AB && showNotes && SCOPE &&
-    (SCOPE.kind === "area" || SCOPE.kind === "zone" || SCOPE.kind === "collection");
+  const reach = !AB && SCOPE && (SCOPE.kind === "area" || SCOPE.kind === "collection");
   if (reach) {
     RAW_EDGES.forEach(e => {
       if (!((e.type === "EXTRACTED" && showExtracted) || (e.type === "AMBIGUOUS" && showAmbiguous))) return;
@@ -3827,7 +4126,7 @@ function computeFilters() {
   // The rim: under a collection scope only, in 2D only. The note at the far end
   // of a COVERS edge stays in both modes, so 3D still shows which notes cover
   // the scoped papers and leaves the papers themselves to the 2D drawing.
-  const rimOn = !AB && showNotes && !!SCOPE && SCOPE.kind === "collection";
+  const rimOn = !AB && !!SCOPE && SCOPE.kind === "collection";
   RIM_NODES.forEach(n => { n._hidden = !(rimOn && is2D() && inScope(n)); });
   COVERING = rimOn ? new Map() : null;
   if (rimOn) {
@@ -3846,14 +4145,12 @@ function computeFilters() {
     });
   }
   RAW_EDGES.forEach(e => {
-    // Notes off takes the edges with it: an edge between two invisible nodes is
-    // a line to nowhere, and the macro read is exactly the one that cannot
-    // afford 2718 of them. Same for ONE invisible end: both renderers filter
-    // links on linkVisibility alone and never look at the nodes', so a folder
-    // scope hid its outsiders and kept every line to them (1385 wikilinks
-    // around 171 notes). Read after the node pass and the far-end rule above.
+    // A hidden end takes the edge with it: both renderers filter links on
+    // linkVisibility alone and never look at the nodes', so a folder scope hid
+    // its outsiders and kept every line to them (1385 wikilinks around 171
+    // notes). Read after the node pass and the far-end rule above.
     const a = NODE_BY_ID[e.from], b = NODE_BY_ID[e.to];
-    const off = !showNotes || (a && a._hidden) || (b && b._hidden) ||
+    const off = (a && a._hidden) || (b && b._hidden) ||
                 (e.type === "EXTRACTED" && !showExtracted) ||
                 (e.type === "AMBIGUOUS" && !showAmbiguous) ||
                 (e.type === "GAP" && !showGaps) ||
@@ -3869,21 +4166,11 @@ function computeFilters() {
     e._ctx = rimOn && beyond && !off && (e.type === "EXTRACTED" || e.type === "AMBIGUOUS");
     e._hidden = off || (beyond && !e._ctx);
   });
-  // With the areas on (ADR-0074) only a wikilink inside one area is drawn
-  // as it is; every other line is quiet (quietNow), and a line between two
-  // areas counts into their ribbon.
-  const held = areasOn();
-  RAW_EDGES.forEach(e => {
-    const a = NODE_BY_ID[e.from], b = NODE_BY_ID[e.to];
-    e._quiet = held && !(a && b && keptInside(AREA_DISCS, e.type, a.group, b.group));
-    e._ribbon = held && !!a && !!b && a.group !== b.group &&
-      AREA_INDEX[a.group] !== undefined && AREA_INDEX[b.group] !== undefined;
-  });
   COVER_EDGES.forEach(e => {
     const a = NODE_BY_ID[e.from], b = NODE_BY_ID[e.to];
     e._hidden = !rimOn || !a || !b || a._hidden || b._hidden;
   });
-  blobMemo = null;   // a blob is drawn around the notes on show
+  atlasMemo = null;   // the atlas is drawn around the notes on show
   syncRimKey();
 }
 
@@ -3991,151 +4278,9 @@ function areaOf(n) {
   return (Number.isInteger(n.group) && n.group >= 0 && COMM_HUBS[n.group]) || "";
 }
 
-// --- The semantic zone layer ------------------------------------------------
-// Hull + name around the members of each k-NN Louvain cluster. Not a second
-// view and not a second graph: the same frame, one more layer, so the two
-// partitions are read against each other instead of one after the other.
-//
-// The k-NN FORCES are not toggled here and never were — d3's link force reads
-// every link in graphData, and linkVisibility is a render-time accessor, so the
-// SIMILAR edges pull whether or not they are drawn. That decoupling is what
-// makes a hull honest: on a pure-wikilink layout the members of a semantic
-// cluster sit all over the frame and its hull would be a lie about space.
-// The region is a CORRIDOR OF CONSTANT WIDTH along the zone's minimum spanning
-// tree, not a hull around it.
-// A zone has to LOOK like one region — Louvain hands back a partition, and a
-// grouping drawn as scattered islands reads as several. But a CONVEX hull buys
-// that continuity by claiming the members are contiguous in SPACE, and they are
-// not: the layout is driven by the wikilinks too, so a semantic zone is
-// routinely scattered and its hull swallows whatever lies between the pieces.
-//
-// Measured on the 682-note vault, one settled layout, counting foreign notes
-// that fall inside a zone's drawn region:
-//
-//   convex hull            675   1.88 regions over the average note   max 6
-//   plain discs r=0.7·d    110   1.16                                 max 3   NOT continuous
-//   MST corridor r=0.35·d  119   1.17                                 max 3   continuous
-//
-// So continuity is nearly free as long as the corridors are the SHORTEST set
-// that joins the members — which is what a minimum spanning tree is. Striping
-// every intra-zone k-NN edge instead was measured too: 2406 edges, many of them
-// long sweeps across the frame, 300 foreign notes at a third of this width.
-//
-// What overlap survives is the real thing (spec §3): wikilink pull dragging a
-// note into another zone's neighbourhood. The gaps stay gaps, which is the
-// information the tessellation was rejected to keep.
-//
-// Width follows the layout, never a constant: baseDist() IS the link force's
-// rest length, and it landed within 15% of this vault's measured median
-// nearest-neighbour distance (84 vs 73). So the zones breathe with the vault's
-// density and with the Link-distance slider instead of going blobby or grainy.
-// Two widths, because one does not read: at a single width wide enough to fuse
-// neighbouring branches the corridors claim the whole neighbourhood, and at one
-// narrow enough to be honest the zone reads as a tangle of tubes rather than a
-// territory. So the members get a BULB and the tree gets an ISTHMUS, and the
-// isthmus only shows where the bulbs do not already touch.
-const ZONE_BULB = () => 0.70 * baseDist() * forceMul.dist;   // fuses at typical spacing
-const ZONE_LINK = () => 0.22 * baseDist() * forceMul.dist;   // half-width of a bridge
-const ZONE_ALPHA = 0.13;   // a backdrop; the notes stay the figure
-
-// Prim, O(m²) — the textbook array form, not the naive rescan: with the tree
-// scanned per candidate it is O(m³) and cost 7.9ms a frame on the largest zone
-// here, against 1.0ms for all 18 zones this way.
-//
-// While the engine is stopped the positions are frozen, so drawZones serves
-// each zone's tree from mstMemo (cleared on every onEngineStop, bypassed
-// while simRunning): a pan or zoom over a settled layout stops paying Prim
-// per frame. Member count guards a same-id zone whose membership changed.
-const mstMemo = {};
-function zoneMST(ms) {
-  if (ms.length < 2) return [];
-  const n = ms.length, used = new Array(n).fill(false),
-        best = new Array(n).fill(Infinity), from = new Array(n).fill(0), out = [];
-  used[0] = true;
-  for (let j = 1; j < n; j++) best[j] = (ms[0].x - ms[j].x) ** 2 + (ms[0].y - ms[j].y) ** 2;
-  for (let k = 1; k < n; k++) {
-    let b = -1;
-    for (let j = 0; j < n; j++) if (!used[j] && (b < 0 || best[j] < best[b])) b = j;
-    used[b] = true;
-    out.push([ms[from[b]], ms[b]]);
-    for (let j = 0; j < n; j++) if (!used[j]) {
-      const d = (ms[b].x - ms[j].x) ** 2 + (ms[b].y - ms[j].y) ** 2;
-      if (d < best[j]) { best[j] = d; from[j] = b; }
-    }
-  }
-  return out;
-}
-
-// Members per zone, positions only — recomputed per frame because the layout
-// is still moving for most of the time a zone is on screen.
-function zoneMembers() {
-  const by = {};
-  RAW_NODES.forEach(n => {
-    if (!(n.sgroup >= 0) || typeof n.x !== "number") return;
-    (by[n.sgroup] = by[n.sgroup] || []).push(n);
-  });
-  return by;
-}
-
-// 2D only: onRenderFramePre draws under the nodes.
-//
-// ONE fill per zone, never a fill plus a stroke: the two widths would have to be
-// two passes, and two passes double-composite where they meet — a darker lozenge
-// ringing every member, an accidental density map. So the isthmus goes into the
-// SAME path as the bulbs, as a quad rather than a stroked segment, and nonzero
-// winding unions the lot. Everything inside one fill() composites exactly once,
-// however much of it overlaps, which is what lets dense areas fuse flat.
-//
-// The quad is wound consistently (left normal, so its handedness does not follow
-// the edge's direction) and the arcs are drawn anticlockwise to match: mixed
-// winding would subtract the overlaps and punch holes where a bridge meets a bulb.
-function drawZones(ctx) {
-  if (!showZones || !ZONES.length) return;
-  const by = zoneMembers();
-  const R = ZONE_BULB(), w = ZONE_LINK();
-  ZONES.forEach(z => {
-    const members = by[z.id];
-    if (!members) return;
-    ctx.save();
-    ctx.globalAlpha = ZONE_ALPHA;
-    ctx.fillStyle = zoneColor(z);
-    ctx.beginPath();
-    members.forEach(n => {
-      ctx.moveTo(n.x + R, n.y);
-      ctx.arc(n.x, n.y, R, 0, 2 * Math.PI, true);
-    });
-    let mst = !simRunning && mstMemo[z.id];
-    if (!mst || mst.n !== members.length) {
-      mst = { n: members.length, seg: zoneMST(members) };
-      if (!simRunning) mstMemo[z.id] = mst;
-    }
-    mst.seg.forEach(([a, b]) => {
-      const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
-      const nx = -dy / len * w, ny = dx / len * w;
-      ctx.moveTo(a.x + nx, a.y + ny);
-      ctx.lineTo(b.x + nx, b.y + ny);
-      ctx.lineTo(b.x - nx, b.y - ny);
-      ctx.lineTo(a.x - nx, a.y - ny);
-      ctx.closePath();
-    });
-    ctx.fill();
-    ctx.restore();
-  });
-}
-
-const zoneEls = {};
-function buildZoneLabels() {
-  const layer = document.getElementById("zone-labels");
-  if (!layer || !ZONES.length) return;
-  layer.innerHTML = ZONES.map(z =>
-    '<div class="zone-label" data-id="' + z.id + '" style="color:' + zoneColor(z) + '">' +
-    escHtml(z.label) + '</div>').join("");
-  layer.querySelectorAll(".zone-label").forEach(el => { zoneEls[el.dataset.id] = el; });
-}
-
-// In 3D a centroid behind the camera still projects to a point on screen — a
-// mirrored one. A zone name planted over the wrong cluster is worse than no
-// name, so ask which side of the camera it is on first. Plain arithmetic on
+// In 3D a point behind the camera still projects to a point on screen, a
+// mirrored one, and a name planted over the wrong cluster is worse than no
+// name: ask which side of the camera it is on first. Plain arithmetic on
 // camera.position and the controls' target: the bundle exposes no THREE.
 function inFrontOfCamera(c) {
   if (is2D()) return true;
@@ -4146,42 +4291,14 @@ function inFrontOfCamera(c) {
   return (c.x - p.x) * (t.x - p.x) + (c.y - p.y) * (t.y - p.y) + (c.z - p.z) * (t.z - p.z) > 0;
 }
 
-function positionZoneLabels() {
-  const by = zoneMembers();
-  ZONES.forEach(z => {
-    const el = zoneEls[z.id];
-    if (!el) return;
-    const members = by[z.id];
-    if (!showZones || !members) { el.style.display = "none"; return; }
-    let x = 0, y = 0, zc = 0;
-    members.forEach(n => { x += n.x; y += n.y; zc += n.z || 0; });
-    x /= members.length; y /= members.length; zc /= members.length;
-    // Snap to the member nearest the centroid. A scattered zone's centroid sits
-    // in the hole between its pieces — now that the region no longer fills that
-    // hole, a name parked there labels empty space, or worse, someone else's.
-    // O(n) per zone per frame, n <= 92 here.
-    let c = null, best = Infinity;
-    members.forEach(n => {
-      const d = (n.x - x) ** 2 + (n.y - y) ** 2 + ((n.z || 0) - zc) ** 2;
-      if (d < best) { best = d; c = { x: n.x, y: n.y, z: n.z || 0 }; }
-    });
-    if (!c || !inFrontOfCamera(c)) { el.style.display = "none"; return; }
-    const s = Graph.graph2ScreenCoords(c.x, c.y, c.z);
-    el.style.display = "block";
-    el.style.transform =
-      "translate(" + s.x + "px," + s.y + "px) translate(-50%,-50%)";
-  });
-}
-
 // --- Note names in 3D -------------------------------------------------------
 // 2D paints its labels on the canvas and gates them on the ZOOM: dots below
 // 0.6, the standouts up to 1.5, everything above it. 3D has no zoom scalar, so
 // the same idea rides the only distance it does have — camera to node. Move in,
 // names appear; the reading is identical, the quantity is not a guess.
 //
-// DOM, like the zone names above, and for the same two reasons: the bundle
-// hands out no THREE to build a sprite with, and one positioning routine is
-// enough. The cost is bounded by a fixed pool of divs rather than by the vault:
+// DOM, because the bundle hands out no THREE to build a sprite with. The cost
+// is bounded by a fixed pool of divs rather than by the vault:
 // 553 absolutely-positioned elements written every frame is a real bill, and
 // past the first few dozen the names overlap into a smear anyway.
 const LABEL_POOL = 60;
@@ -4219,8 +4336,8 @@ function positionNodeLabels() {
   if (!labelEls.length) return;
   const cam = !is2D() && Graph.camera && Graph.camera();
   // 2D draws its own labels on the canvas; showing these there would double
-  // every name. Same for notes-off, where there is nothing to name.
-  if (!cam || !cam.position || !showNotes || !GRAPH_R) {
+  // every name.
+  if (!cam || !cam.position || !GRAPH_R) {
     labelEls.forEach(el => { el.style.display = "none"; });
     return;
   }
@@ -4282,58 +4399,34 @@ function positionNodeLabels() {
 
 // Its own rAF, not the render budget's: a camera orbit moves the labels without
 // the simulation running, and this loop only writes transforms on a bounded set
-// of divs — nothing is rendered. It exists only while a layer that needs it is
-// on. One loop drives both layers, so a 3D graph with zones up pays for one.
-let zoneRaf = null;
-const labelsWanted = () => showZones || !is2D();
-function syncZoneLoop() {
-  if (labelsWanted() && zoneRaf === null) {
+// of divs - nothing is rendered. It runs only in 3D, the one mode that names
+// its notes in the DOM.
+let labelRaf = null;
+function syncLabelLoop() {
+  if (!is2D() && labelRaf === null) {
     const step = () => {
-      positionZoneLabels();
       positionNodeLabels();
       // All 3D-only and all cheap. styleScene is here rather than wired to
       // each rebuild site because the rebuilds are the bundle's, not ours, and
       // land whenever it decides: a frame is the one moment we know they have.
-      // linkSegStep rides the same fact — the link carriers it builds from
+      // linkSegStep rides the same fact - the link carriers it builds from
       // appear whenever the digest does.
       linkSegStep();
       styleScene();
       fogStep();
-      zoneRaf = requestAnimationFrame(step);
+      labelRaf = requestAnimationFrame(step);
     };
-    zoneRaf = requestAnimationFrame(step);
-  } else if (!labelsWanted() && zoneRaf !== null) {
-    cancelAnimationFrame(zoneRaf);
-    zoneRaf = null;
-    positionZoneLabels();   // one last pass to hide them
-    positionNodeLabels();
+    labelRaf = requestAnimationFrame(step);
+  } else if (is2D() && labelRaf !== null) {
+    cancelAnimationFrame(labelRaf);
+    labelRaf = null;
+    positionNodeLabels();   // one last pass to hide them
   }
 }
 
-function updateZoneFilter() {
-  const cbZones = document.getElementById("cb-zones");
-  const cbNodes = document.getElementById("cb-zone-nodes");
-  if (cbZones) showZones = cbZones.checked;
-  // "notes" means "the zones alone", so it exists only while there are zones
-  // to leave alone: with them off it blanked the frame (ADR-0058). Leaving the
-  // zones takes the notes back with it.
-  if (cbNodes && !showZones) cbNodes.checked = true;
-  const row = document.getElementById("zone-nodes-row");
-  if (row) row.style.display = showZones ? "" : "none";
-  if (cbNodes) showNotes = cbNodes.checked;
-  // No refreshPaint: toggling zones no longer touches a single node's colour,
-  // and in 3D that call rebuilds the material of every node and every link (see
-  // its comment). applyFilters already re-passes the visibility accessors and
-  // wakes the renderer, which is all the hull layer needs to appear.
-  applyFilters();
-  syncZoneLoop();
-  updateFocusBar();
-}
-
-buildZoneLabels();
 buildNodeLabels();
 
-// First build: the mode comes from localStorage (3D on a fresh profile), and
+// First build: the mode comes from localStorage (2D on a fresh profile), and
 // setMode owns the whole bring-up — instance, forces, filters, focus. A 2D
 // first paint has no default camera worth keeping, so it refits; 3D keeps the
 // lib's own initial framing.
@@ -4688,12 +4781,6 @@ document.addEventListener("keydown", e => {
   if (e.target && e.target.id === "search") return;
   if (focusIds.length) { closeDrawer(); clearFocus(); }
   else if (SCOPE) pickScope(null);
-  // Last rung, because it is the one the banner promises Esc will undo: the
-  // zone layer stays on, only the notes come back.
-  else if (!showNotes) {
-    const cb = document.getElementById("cb-zone-nodes");
-    if (cb) { cb.checked = true; updateZoneFilter(); }
-  }
 });
 
 // The loop sleeps between interactions, so anything the renderer itself

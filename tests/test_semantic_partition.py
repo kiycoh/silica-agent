@@ -253,15 +253,3 @@ def test_thin_embed_index_withholds_the_zones(monkeypatch):
     zones = ge.detect_semantic_partition(nodes, edges)
     assert zones and all(z.size > 1 for z in zones)
     assert all(n["sgroup"] >= 0 for n in nodes)
-
-
-def test_gated_layer_says_why_in_the_hud():
-    """The row replaces the layer; dropping it silently is the defect it fixes."""
-    from silica.ui.web.graph_view import _zone_gate_row
-
-    nodes = [{"id": f"n{i}.md"} for i in range(10)]
-    row = _zone_gate_row(nodes, _ring(["n0.md", "n1.md", "n2.md"]))
-    assert "3/10 embedded" in row
-    assert "/embed" in row
-    # No index at all needs no explaining — that layer was never promised.
-    assert _zone_gate_row(nodes, []) == ""
