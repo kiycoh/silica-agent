@@ -44,8 +44,10 @@ class _Panel(HTMLParser):
     row whose last direct child is the text and the children before it the term."""
 
     def __init__(self, hosted: bool):
+        from silica.config import VIEWS, hosted_views
+
         super().__init__()
-        self.hosted = hosted
+        self.served = {"chat", *(hosted_views() if hosted else VIEWS)}
         self.sections: list[tuple[str, list[tuple[str, str]]]] = []
         self.depth = 0            # depth inside #help-panel, 0 when outside
         self.title: list[str] | None = None
@@ -66,7 +68,9 @@ class _Panel(HTMLParser):
             self.title = []
         elif "hp-row" in cls:
             self.row, self.row_depth = [], self.depth
-            self.skip = self.hosted and a.get("data-surface") == "local"
+            # A view the account does not get is not in its panel (ADR-0140),
+            # so the chat does not offer it either.
+            self.skip = a.get("data-view", "chat") not in self.served
         elif self.row is not None and self.depth == self.row_depth + 1:
             self.row.append([])
 

@@ -56,7 +56,8 @@ const TOUR_STEPS = {
   map: {
     n: 3, dim: "none",
     body: "Every note is a dot on this map, and notes that say similar things sit close together. It grows with every file you add.",
-    primary: ["Next", () => tourGo("quiz")],
+    // Step 4 is Learn's: an account without it ends here (ADR-0140).
+    primary: viewServed("learn") ? ["Next", () => tourGo("quiz")] : ["Done", () => tourEnd()],
   },
   quiz: {
     n: 4, target: TOUR_COMPOSER, wait: "turn",
@@ -142,7 +143,7 @@ function tourRender() {
   const head = document.createElement("div");
   head.className = "tour-head";
   const count = document.createElement("span");
-  count.textContent = s.n ? `Step ${s.n} of 4` : "Welcome";
+  count.textContent = s.n ? `Step ${s.n} of ${viewServed("learn") ? 4 : 3}` : "Welcome";
   const close = tourButton("tour-x", ["✕", () => tourEnd()]);
   close.setAttribute("aria-label", "close the tour");
   head.append(count, close);

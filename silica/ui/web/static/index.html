@@ -258,8 +258,8 @@
             <button type="button" role="menuitem" data-action="/explain" title="a concept explained from what the vault says">explain</button>
             <button type="button" role="menuitem" data-action="/relate" title="how a note relates to its neighbours in the vault">relate</button>
             <div role="separator"></div>
-            <button type="button" role="menuitem" data-action="/quiz" title="a round of questions here on what you name; name nothing for the review queue">quiz me</button>
-            <button type="button" role="menuitem" id="am-plan" data-how="Learn &#8594;" title="a plan toward an exam or a date, made in Learn">study plan</button>
+            <button type="button" role="menuitem" data-action="/quiz" data-view="learn" title="a round of questions here on what you name; name nothing for the review queue">quiz me</button>
+            <button type="button" role="menuitem" id="am-plan" data-view="learn" data-how="Learn &#8594;" title="a plan toward an exam or a date, made in Learn">study plan</button>
             <button type="button" role="menuitem" id="am-skill" data-how="Settings &#8594;" title="a command of your own, or a persona a chat wears; what you typed becomes its instructions">new skill…</button>
             <div role="separator"></div>
             <button type="button" role="menuitem" data-action="/report" title="structural audit of the vault">report</button>
@@ -498,10 +498,10 @@
            the view is picked. -->
       <div class="sp-title">the views</div>
       <div class="hp-row"><span class="hp-what">a chat</span><span>asks your notes; under each answer, the notes it read</span></div>
-      <div class="hp-row"><span class="hp-what">Explore</span><span>a map of your notes: similar notes sit close, links draw lines</span></div>
-      <div class="hp-row"><span class="hp-what">Learn</span><span>questions on your notes; what you miss comes back. Study plans are made and kept here</span></div>
-      <div class="hp-row"><span class="hp-what">Calendar</span><span>events, deadlines, and the day each study plan is due; click or drag an empty time to add an event</span></div>
-      <div class="hp-row" data-surface="local"><span class="hp-what">Examine</span><span>the vault's health: its shape, what to fix, what changed</span></div>
+      <div class="hp-row" data-view="graph"><span class="hp-what">Explore</span><span>a map of your notes: similar notes sit close, links draw lines</span></div>
+      <div class="hp-row" data-view="learn"><span class="hp-what">Learn</span><span>questions on your notes; what you miss comes back. Study plans are made and kept here</span></div>
+      <div class="hp-row" data-view="calendar"><span class="hp-what">Calendar</span><span>events, deadlines, and the day each study plan is due; click or drag an empty time to add an event</span></div>
+      <div class="hp-row" data-view="metrics"><span class="hp-what">Examine</span><span>the vault's health: its shape, what to fix, what changed</span></div>
       <div class="hp-row"><span class="hp-what">a new note</span><span>the chat reads it and Explore draws it at once. It never changes a plan, and Learn suggests it only when a plan covers it, or when you have no plan yet</span></div>
       <div class="sp-title">keyboard</div>
       <div class="hp-row"><kbd>&#8629;</kbd><span>send the message</span></div>
@@ -518,10 +518,10 @@
       <div class="hp-row"><span class="hp-what">the mic</span><span>dictates into the message; on your own machine it needs a transcription endpoint, set in settings</span></div>
       <!-- the two renderer buttons are labelled 3D and 2D and nothing else; what
            separates them lives here, not in a longer button -->
-      <div class="sp-title">explore</div>
-      <div class="hp-row"><span class="hp-what">3D</span><span>spatial layout of the whole vault; a node names itself when you hover it</span></div>
-      <div class="hp-row"><span class="hp-what">2D</span><span>a map of the areas: each note owns the ground nearest it, and zooming in names the sub-areas, then the notes; a note's links show when you point at it</span></div>
-      <div class="hp-row"><span class="hp-what">the tabs</span><span>top of explore: Graph and Path draw the links (a click on a note in the Graph lays it out as its map), Folders, Areas and Read read the shape. The line under them is the key, and on the graph the panel at the right says how to read it</span></div>
+      <div class="sp-title" data-view="graph">explore</div>
+      <div class="hp-row" data-view="graph"><span class="hp-what">3D</span><span>spatial layout of the whole vault; a node names itself when you hover it</span></div>
+      <div class="hp-row" data-view="graph"><span class="hp-what">2D</span><span>a map of the areas: each note owns the ground nearest it, and zooming in names the sub-areas, then the notes; a note's links show when you point at it</span></div>
+      <div class="hp-row" data-view="graph"><span class="hp-what">the tabs</span><span>top of explore: Graph and Path draw the links (a click on a note in the Graph lays it out as its map), Folders, Areas and Read read the shape. The line under them is the key, and on the graph the panel at the right says how to read it</span></div>
   </div>
   <!-- The note drawer's one control while it is shut (ADR-0084): the corner
        of the view, where the drawer's own close sits while it is open, so the
@@ -601,7 +601,7 @@
     <!-- A selected passage's own asks, over the selection (ADR-0059). -->
     <div id="note-selbar" role="toolbar" aria-label="this passage" hidden>
       <button type="button" class="na" id="sel-explain">explain this</button>
-      <button type="button" class="na" id="sel-quiz">quiz me on this</button>
+      <button type="button" class="na" id="sel-quiz" data-view="learn">quiz me on this</button>
       <button type="button" class="na" id="sel-ask">ask&#8230;</button>
     </div>
     <!-- A note's details (Content, Links, Place) behind the info button, and

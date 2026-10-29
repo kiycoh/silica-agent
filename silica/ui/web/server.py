@@ -1472,7 +1472,15 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             return
         elif text.startswith("/"):
             from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
+            from silica.config import withheld
             from silica.ui.console import CONSOLE
+
+            # A view's command goes with the view (ADR-0140 point 4); the
+            # picker does not offer it, but a typed one does not come from it.
+            if text.split()[0] in withheld("commands"):
+                outcome = "error"
+                yield {"type": "error", "error": f"'{text.split()[0]}' is not part of this account"}
+                return
 
             def _run_slash():
                 # Both dispatchers print their result to CONSOLE and both can do
@@ -2120,6 +2128,19 @@ async def _hosted_image_policy(request: Request, call_next):
 
 
 @app.middleware("http")
+async def _withheld_views(request: Request, call_next):
+    """A view this account does not get answers as a route that does not exist
+    (ADR-0140 point 4). The page hides its tab, but a request does not come
+    from the page."""
+    from silica.config import withheld
+
+    path = request.url.path
+    if any(path == r or path.startswith(r + "/") for r in withheld("routes")):
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def _require_loopback_host(request: Request, call_next):
     if _authority(request.headers.get("host", ""))[0] not in _ALLOWED_HOSTS:
         return JSONResponse({"detail": "unknown host refused"}, status_code=403)
@@ -2302,12 +2323,14 @@ def list_commands():
     """Commands the web GUI's fuzzy picker offers — everything the chat turn can
     actually dispatch. `repl_only` ones are terminal-session business and would
     only answer 'not available in this session' if offered here."""
+    from silica.config import withheld
     from silica.ui.commands import commands
 
+    gone = withheld("commands")
     return [
         {"name": c.name, "summary": c.summary, "usage": c.usage}
         for c in commands()
-        if not c.repl_only
+        if not c.repl_only and c.name not in gone
     ]
 
 
@@ -6791,7 +6814,7 @@ def index(request: Request):
     # The big vendored bundles keep their long-lived cache — only these churn.
     import hashlib
 
-    from silica.config import CONFIG, hosted
+    from silica.config import CONFIG, hosted, served_views
 
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     # work.js belongs here as much as the others: it owns the whole node
@@ -6821,6 +6844,11 @@ def index(request: Request):
     # does not get (ADR-0111 point 3) must be gone before the first paint.
     if hosted():
         html = html.replace('<html lang="en"', '<html lang="en" data-hosted', 1)
+        # The views this account gets (ADR-0140 point 4): every element of one
+        # is marked, and the CSS hides each unmarked one, so a view added later
+        # stays hidden until the tenant's list serves it.
+        for view in served_views():
+            html = re.sub(rf'data-(?:tab|view)="{view}"', r"\g<0> data-served", html)
         # The account the window is signed in as, for the menu under SILICA
         # (ADR-0122, amendment 2026-10-22). Cloudflare Access sets the header,
         # and the host's Caddy passes only Access's hostname to a tenant

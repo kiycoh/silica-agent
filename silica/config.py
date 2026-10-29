@@ -161,6 +161,44 @@ def hosted() -> bool:
     return os.environ.get("SILICA_HOSTED", "").strip() == "1"
 
 
+# What each view beyond the chat is made of, by the tab id the page gives it
+# (ADR-0140 point 4): a view a process does not serve loses its routes, its
+# chat tools and its commands with its tab. A route is its path or anything
+# under it. Explore has no tools of its own: the chat reads the notes it draws.
+VIEWS: dict[str, dict[str, tuple[str, ...]]] = {
+    "discover": {"routes": ("/discover",)},
+    "graph": {"routes": ("/graph", "/map/layout", "/compare", "/shape")},
+    "learn": {"routes": ("/learn",),
+              "tools": ("silica_learn_items", "silica_review_queue", "silica_record_quiz"),
+              "commands": ("/quiz", "/learn")},
+    "calendar": {"routes": ("/calendar", "/reminders"),
+                 "tools": ("silica_agenda", "silica_event_create", "silica_event_update"),
+                 "commands": ("/agenda",)},
+    "metrics": {"routes": ("/metrics",)},
+}
+
+
+def hosted_views() -> frozenset[str]:
+    """The views a hosted process serves beyond the chat (ADR-0140 point 3):
+    SILICA_VIEWS from the tenant's unit, tab ids or "all". Unset or empty is
+    the chat alone, so a unit that lost its line loses views instead of giving
+    the paid ones away. Examine is never one (ADR-0111 point 3). The tenant
+    cannot write the key: on hosted, POST /settings takes ADR-0104's rows only."""
+    names = {v.strip() for v in os.environ.get("SILICA_VIEWS", "").split(",")}
+    return frozenset((set(VIEWS) if "all" in names else names & set(VIEWS)) - {"metrics"})
+
+
+def served_views() -> frozenset[str]:
+    """Every view off hosted: the variable is the host's, never read on a laptop."""
+    return hosted_views() if hosted() else frozenset(VIEWS)
+
+
+def withheld(part: str) -> frozenset[str]:
+    """The routes, tools or commands of every view this process does not serve."""
+    served = served_views()
+    return frozenset(x for v, p in VIEWS.items() if v not in served for x in p.get(part, ()))
+
+
 # Provider prefixes that map a `prefix/model` string to an endpoint and get
 # auto-prefixed onto a bare model. Single source for the three checks below
 # (provider, distill_escalation_provider, ensure_prefix). "custom" routes to

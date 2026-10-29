@@ -353,6 +353,7 @@ def test_first_run_then_feeds_catalog_and_opml(client, monkeypatch):
 
 def test_a_feedless_site_is_refused_on_the_hosted_pilot(client, monkeypatch):
     monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")  # a seat: Free has no Discover (ADR-0140)
 
     def no_feed(url, state=None, **kw):
         return httpx.Response(200, headers={"content-type": "text/html"}, content=b"<p>no feed</p>"), url

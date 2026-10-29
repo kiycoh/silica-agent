@@ -3054,9 +3054,8 @@ def test_index_stamps_hosted_so_examine_is_gone_before_first_paint(client, monke
     assert "data-hosted" not in app.get("/").text.split(">", 2)[1]
     monkeypatch.setenv("SILICA_HOSTED", "1")
     assert '<html lang="en" data-hosted' in app.get("/").text
-    css = (STATIC_SRC / "app-shell.css").read_text(encoding="utf-8")
-    assert 'html[data-hosted] #views .tab[data-tab="metrics"]' in css
-    assert 'html[data-hosted] #railmini .tab[data-tab="metrics"]' in css
+    # Examine is never marked served there, so ADR-0140's rule hides it.
+    assert 'data-tab="metrics" data-served' not in app.get("/").text
 
 
 def test_index_names_the_hosted_account_and_nobody_else(client, monkeypatch):

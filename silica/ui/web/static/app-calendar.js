@@ -1444,7 +1444,8 @@ async function pollReminders() {
     showReminders(due);
   } catch { /* a reminder is a courtesy; the next tick retries */ }
 }
-setInterval(pollReminders, 30000);
+// Reminders are the calendar's: an account without it would poll a 404 (ADR-0140).
+if (viewServed("calendar")) setInterval(pollReminders, 30000);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && heldReminders.length) showReminders(heldReminders.splice(0));
 });

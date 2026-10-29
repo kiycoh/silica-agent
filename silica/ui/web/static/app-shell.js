@@ -35,6 +35,9 @@ let railSection = null; // which list the summoned rail is showing
 // Stamped on <html> by the server (index()), so the views a hosted account
 // does not get are gone before the first paint rather than after a probe.
 const HOSTED = document.documentElement.hasAttribute("data-hosted");
+// The server marks a hosted account's views on their tabs (ADR-0140); read
+// from there so the page and the CSS cannot disagree about one.
+const viewServed = (tab) => tab === "chat" || !HOSTED || !!document.querySelector(`#views .tab[data-tab="${tab}"][data-served]`);
 
 function toggleRail(sec) {
   const open = railSection !== sec;
@@ -417,12 +420,13 @@ function greet(again = false) {
 // way the + menu does. Dated notes are left out: a daily note is a hub because
 // every day links to it, and "quiz me on 2026-10-21" asks about nothing.
 // /quiz is a shortcut, split with shlex, so a title with spaces is quoted; the
-// two skills read their line as written.
+// two skills read their line as written. /quiz is Learn's, so an account
+// without Learn is not offered it (ADR-0140).
 const LANDING_IDEAS = [
   ["Explain ", "/explain", (link) => `/explain [[${link}]]`],
   ["Quiz me on ", "/quiz", (link) => `/quiz ${/\s/.test(link) ? `"${link}"` : link}`],
   ["Summarize ", "/summarize", (link) => `/summarize [[${link}]]`],
-];
+].filter(([, cmd]) => cmd !== "/quiz" || viewServed("learn"));
 
 function renderLandingIdeas(data) {
   const box = $("#vh-ideas");
@@ -1429,11 +1433,12 @@ async function openSession(id, fromUrl = false) {
 // made in Learn, and two pilot users looked for them under Plan the same day.
 const VIEW_SLUG = { graph: "explore", metrics: "examine" };
 const OLD_SLUG = { plan: "calendar" };
-// Examine is off the hosted surface (ADR-0111 point 3): the address no longer
-// opens it there, so a bookmark lands on the chat like any unknown one.
+// A view the account does not get (Examine on hosted, ADR-0111 point 3; a paid
+// one on Free, ADR-0140) has no address, so a bookmark lands on the chat like
+// any unknown one.
 const viewOfSlug = (s) => {
   const v = Object.keys(VIEW_SLUG).find((k) => VIEW_SLUG[k] === s) || OLD_SLUG[s] || s;
-  return v === "metrics" && HOSTED ? "" : v;
+  return viewServed(v) ? v : "";
 };
 
 function parseHash() {
@@ -1540,6 +1545,9 @@ for (const id of ["#surface-tabs", "#cal-mode", "#metrics-tabs", "#side-tabs"]) 
 // caller that needs the drawer to survive the switch (the context drawer's
 // concept cloud, its suggested rows) calls this instead.
 function showTab(tab) {
+  // One guard for every way into a view (a button, a link in a note, the
+  // calendar's Learn row): one the account does not get opens the chat.
+  if (!viewServed(tab)) tab = "chat";
   // The view arrives from the side of the strip it was picked toward
   // (app-motion.css .view.active), read off the strip so a reordered tab
   // cannot disagree with its own motion.
