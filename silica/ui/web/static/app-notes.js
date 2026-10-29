@@ -1820,9 +1820,12 @@ drawerNote.onRelease = () => {
 };
 
 // What the server drew inside the editor gets what the reader's copy got:
-// diagrams run, and the properties box opens as it was last left.
+// diagrams run, and the properties box opens as it was last left. Diagrams go
+// through the chat's drawDiagrams, not renderMermaid alone: on 2026-10-28 a
+// mind map the chat wrote into a note drew here as an empty bar, and quoting
+// its labels, which a reply already gets, is all it took to draw it.
 function decorateRendered(el, view) {
-  renderMermaid(el);
+  drawDiagrams(el, { keepStyles: true });
   const fm = el.querySelector("details.fm");
   if (fm) {
     fm.open = localStorage.getItem("note-props") === "open";
