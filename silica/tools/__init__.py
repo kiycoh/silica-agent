@@ -18,11 +18,18 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+from contextvars import ContextVar
 from typing import Any, Callable, get_type_hints
 
 from pydantic import BaseModel, create_model
 
 logger = logging.getLogger(__name__)
+
+# The tool the agent loop is running for a model, set around that one call. A
+# tool reads it to tell the model's own call, whose error the model reads and
+# can act on, from the same function run by code or inside another tool, where
+# an error only loses the work (silica_write_note's mermaid check).
+MODEL_CALL: ContextVar[str | None] = ContextVar("silica_model_call", default=None)
 
 
 # Schema keys whose VALUE is a name -> subschema map, not a schema node. Their
