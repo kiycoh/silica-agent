@@ -312,12 +312,17 @@ function countLinkIns(edges, byId) {
 // end has no resolved wikilink (`linked`), so a link-orphan still lands beside
 // its semantic neighbours. The absent lines (GAP, PROPOSED, COUPLED) pull
 // nothing, and nor does a Silica note's line (ADR-0070): followNative places it.
+// `same` multiplies a backbone line whose two notes share an area, after the
+// clamp: the areas are cut from every link and the layout reads only the
+// backbone, so without it an area's notes land wherever their strongest ties
+// pull them and the atlas draws each area as islands (AREA_PULL).
 const BACKBONE_K = 4, BACKBONE_FLOOR = 0.05;
-function pullOf(l, linked, dflt) {
+function pullOf(l, linked, dflt, same = 1) {
   const a = l.source, b = l.target;
   if (NATIVE[a.type] || NATIVE[b.type]) return 0;
   if (l.type === "EXTRACTED")
-    return l.backbone == null ? 0 : Math.min(1, BACKBONE_K * Math.max(l.backbone, BACKBONE_FLOOR));
+    return l.backbone == null ? 0 : Math.min(1, BACKBONE_K * Math.max(l.backbone, BACKBONE_FLOOR))
+      * (a.group >= 0 && a.group === b.group ? same : 1);
   if (l.type === "AMBIGUOUS") return dflt;
   if (l.type === "SIMILAR" || l.type === "CITES") return linked.has(a.id) && linked.has(b.id) ? 0 : dflt;
   return 0;
@@ -352,7 +357,9 @@ function followNative(nodes, alpha) {
 // Returns {country: [x0, y0, x1, y1, ...], province: {country: [...]}}.
 // The hull's own edges count too: there the Voronoi edge is a ray, outward
 // from the triangle's circumcenter, and its lens part shows like any other.
-function atlasBorders(P, country, prov, R, del, cc) {
+// keep(p, q), when given, is false for a pair whose border is left out: below
+// the notes' zoom a small island draws none (atlasIslands, ATLAS_MIN_ISLAND).
+function atlasBorders(P, country, prov, R, del, cc, keep) {
   const T = del.triangles, H = del.halfedges, out = { country: [], province: {} };
   const next = e => e % 3 === 2 ? e - 2 : e + 1;
   for (let e = 0; e < H.length; e++) {
@@ -360,6 +367,7 @@ function atlasBorders(P, country, prov, R, del, cc) {
     if (j >= 0 && j < e) continue;   // each inner edge once, from its lower half
     const p = T[e], q = T[next(e)];
     if (country[p] === country[q] && prov[p] === prov[q]) continue;
+    if (keep && !keep(p, q)) continue;
     const mx = (P[2 * p] + P[2 * q]) / 2, my = (P[2 * p + 1] + P[2 * q + 1]) / 2;
     const dx = P[2 * q] - P[2 * p], dy = P[2 * q + 1] - P[2 * p + 1], d = Math.hypot(dx, dy);
     if (d === 0 || d >= 2 * R) continue;   // the two discs do not meet
@@ -420,15 +428,51 @@ function cellInDisc(poly, sx, sy, R, sides) {
   return { pts: V.flat(), arc: F };
 }
 
-// What the zoom names, relative to the zoom that fits the atlas: the areas
-// under 1.8x, their sub-areas to 3.6x, the notes past it (the draft the owner
-// approved, ADR-0136). Relative because the absolute zoom of a fit runs from
-// 0.05 on a big vault to over 1 on a small one. Where no area splits into
-// provinces (a small vault, or an atlas of zones, which have none) the areas
-// keep their names to 3.6x rather than the middle tier naming nothing.
-const ATLAS_TIERS = [1.8, 3.6];
-const atlasTier = (kRel, provinces = true) =>
-  kRel < (provinces ? ATLAS_TIERS[0] : ATLAS_TIERS[1]) ? 0 : kRel < ATLAS_TIERS[1] ? 1 : 2;
+// An area's islands: its notes whose grounds touch (the two discs meet),
+// joined through each other, as the eye joins them. A separate pass from
+// atlasBorders, which skips a pair of one province before it measures it.
+// Returns {of: the island each point is in (a point index), size: per point,
+// the size of its island, shore: per point, 1 where its island's ground meets
+// another area's}. P, country, R, del as atlasBorders reads them.
+function atlasIslands(P, country, R, del) {
+  const n = P.length / 2, up = new Int32Array(n), meet = [];
+  for (let i = 0; i < n; i++) up[i] = i;
+  const root = i => { while (up[i] !== i) i = up[i] = up[up[i]]; return i; };
+  const T = del.triangles, H = del.halfedges, next = e => e % 3 === 2 ? e - 2 : e + 1;
+  for (let e = 0; e < H.length; e++) {
+    if (H[e] >= 0 && H[e] < e) continue;
+    const p = T[e], q = T[next(e)];
+    if (Math.hypot(P[2 * q] - P[2 * p], P[2 * q + 1] - P[2 * p + 1]) >= 2 * R) continue;
+    if (country[p] !== country[q]) meet.push(p, q);
+    else up[root(p)] = root(q);
+  }
+  const of = new Int32Array(n), count = new Int32Array(n), size = new Int32Array(n);
+  const wet = new Uint8Array(n), shore = new Uint8Array(n);
+  for (let i = 0; i < n; i++) { of[i] = root(i); count[of[i]]++; }
+  for (const p of meet) wet[of[p]] = 1;
+  for (let i = 0; i < n; i++) { size[i] = count[of[i]]; shore[i] = wet[of[i]]; }
+  return { of, size, shore };
+}
+
+// What the atlas names and draws at a zoom, by what fits on the screen and not
+// by the zoom's ratio to the fit (ADR-0136, amendment 2026-10-29): the ratios
+// 1.8x and 3.6x were set on the 1,092-note course, and on alex_second_brain
+// (2,166 notes) the step at 3.6x put 1,167 notes up for a name at once, 24
+// names on screen to 150. cellPx: one note's ground across on screen, 2R times
+// the zoom. An area with sub-areas opens into them once its own footprint,
+// cellPx x sqrt(its notes), is ATLAS_OPEN_PX across, about half the frame at
+// 1440, so the big areas open first and a small one stays one name. Every area
+// is open and the notes are named once one ground is ATLAS_NOTE_PX across,
+// room for a dozen characters at 11px. The two values are the draft's
+// (2026-10-29), where they kept 8 to 30 names on screen at every zoom.
+// parts: [{c, size, split}], split: the area has sub-areas. Returns
+// {notes, open: the set of c open}.
+const ATLAS_OPEN_PX = 520, ATLAS_NOTE_PX = 90;
+function atlasZoom(cellPx, parts) {
+  const notes = cellPx >= ATLAS_NOTE_PX, open = new Set();
+  for (const p of parts) if (p.split && (notes || cellPx * Math.sqrt(p.size) >= ATLAS_OPEN_PX)) open.add(p.c);
+  return { notes, open };
+}
 
 // The notes a part's name may sit on: first the member nearest the part's
 // centroid, so a part shaped like a crescent is not named over the hole in
@@ -541,14 +585,22 @@ function keepLabels(boxes, area) {
 }
 // The same, for a name with places to go: alts[i] is name i's boxes in the
 // order it would rather sit, and the answer is the one it took, or -1.
-function placeLabels(alts, area) {
-  const kept = [];
-  return alts.map(boxes => boxes.findIndex(b => {
-    const inside = !area || (b.x0 >= area.x0 && b.x1 <= area.x1 && b.y0 >= area.y0 && b.y1 <= area.y1);
-    const clear = inside && kept.every(k => b.x0 >= k.x1 || b.x1 <= k.x0 || b.y0 >= k.y1 || b.y1 <= k.y0);
-    if (clear) kept.push(b);
-    return clear;
-  }));
+// cls[i] and caps, when given: a budget per kind of name, spent on the names
+// placed, so a name that waits for room leaves its turn to the next one.
+function placeLabels(alts, area, cls, caps) {
+  const kept = [], used = {};
+  return alts.map((boxes, i) => {
+    const kind = cls && cls[i];
+    if (caps && kind in caps && (used[kind] || 0) >= caps[kind]) return -1;
+    const k = boxes.findIndex(b => {
+      const inside = !area || (b.x0 >= area.x0 && b.x1 <= area.x1 && b.y0 >= area.y0 && b.y1 <= area.y1);
+      const clear = inside && kept.every(k => b.x0 >= k.x1 || b.x1 <= k.x0 || b.y0 >= k.y1 || b.y1 <= k.y0);
+      if (clear) kept.push(b);
+      return clear;
+    });
+    if (k >= 0 && kind) used[kind] = (used[kind] || 0) + 1;
+    return k;
+  });
 }
 
 // The server's Map, made to sit in the graph it opens in (ADR-0088 amendment).
@@ -1248,7 +1300,9 @@ function WARMUP_TICKS(seeded) {
 // settled under different forces is not this layout.
 // -2 since ADR-0136: a layout settled under every line pulling is not one the
 // backbone would reach, and a fingerprint hit would seed it as if it were.
-const LAYOUT_KEY = "silica-graph-layout-2";
+// -3 since the area pull (AREA_PULL): a 2D layout settled without it is not
+// one ForceAtlas2 reaches with it.
+const LAYOUT_KEY = "silica-graph-layout-3";
 const FAST_DECAY = 0.1;   // alpha 1 -> ALPHA_MIN in ~66 ticks
 const COLD_DECAY = 0.0228;   // d3's own: alpha 1 -> ALPHA_MIN in ~300 ticks
 const NODE_FP = (() => {
@@ -1369,7 +1423,7 @@ function drawNode(n, ctx, scale) {
     ctx.strokeStyle = GP.ringCut;
     ctx.stroke();
   }
-  // The atlas names its notes by its own zoom tiers, all at once and never
+  // The atlas names its notes by what fits on screen (atlasZoom), all at once and never
   // overlapping (drawAtlasNames).
   if (atlas || (scale < 1.5 && (n.size || 16) <= BASE_SIZE)) return;  // mid zoom: standouts
   drawNodeLabel(n, ctx, scale, r);
@@ -2195,21 +2249,23 @@ function buildGLAtlas(gl, cornerBuf) {
 
 // The geometry atlasGeometry built, into the two buffers: each cell a fan of
 // triangles (it is convex), each segment one instance, in ATLAS_LINES' order.
+// What the zoom draws of it is atlasLayer's, so a zoom that opens an area or
+// reaches the notes repacks (drawGLAtlas, the key).
 function packGLAtlas(L, g) {
-  const A = L.atlas, gl = L.gl;
+  const A = L.atlas, gl = L.gl, layer = atlasLayer(g);
   let tris = 0;
   for (const { pts } of g.polys) tris += pts.length / 2 - 2;
   const fb = new ArrayBuffer(tris * 3 * 12), ff = new Float32Array(fb), fu = new Uint8Array(fb);
   let v = 0;
   const vert = (x, y, rgba) => { ff[v * 3] = x; ff[v * 3 + 1] = y; fu.set(rgba, v * 12 + 8); v++; };
-  for (const { c, pts } of g.polys) {
-    const rgba = glRGBA(g.ground.get(c));
+  for (const { c, i: at, pts } of g.polys) {
+    const rgba = glRGBA(layer.ground(c, at));
     for (let k = 2; k + 3 < pts.length; k += 2) {
       vert(pts[0], pts[1], rgba); vert(pts[k], pts[k + 1], rgba); vert(pts[k + 2], pts[k + 3], rgba);
     }
   }
-  let segs = g.coast.length / 4 + g.borders.length / 4;
-  for (const f of g.provinces.values()) segs += f.length / 4;
+  let segs = g.coast.length / 4 + layer.borders.length / 4;
+  for (const f of layer.provinces.values()) segs += f.length / 4;
   const sb = new ArrayBuffer(segs * GL_SEG_STRIDE), sf = new Float32Array(sb), su = new Uint8Array(sb);
   let i = 0;
   const put = (flat, rgba, w) => {
@@ -2221,20 +2277,20 @@ function packGLAtlas(L, g) {
   };
   const alpha = (hex, a) => { const c = glRGBA(hex); return [c[0], c[1], c[2], Math.round(255 * a)]; };
   for (const [part, w, a] of ATLAS_LINES) {
-    if (part === "provinces") for (const [c, f] of g.provinces) put(f, alpha(g.hue.get(c), a), w);
-    else put(g[part], alpha(part === "coast" ? GP.line2 : GP.label, a), w);
+    if (part === "provinces") for (const [c, f] of layer.provinces) put(f, alpha(g.hue.get(c), a), w);
+    else put(part === "coast" ? g.coast : layer.borders, alpha(part === "coast" ? GP.line2 : GP.label, a), w);
   }
   gl.bindBuffer(gl.ARRAY_BUFFER, A.fbuf);
   gl.bufferData(gl.ARRAY_BUFFER, fb, gl.DYNAMIC_DRAW);
   gl.bindBuffer(gl.ARRAY_BUFFER, A.sbuf);
   gl.bufferData(gl.ARRAY_BUFFER, sb, gl.DYNAMIC_DRAW);
-  A.fn = v; A.sn = i; A.of = g;
+  A.fn = v; A.sn = i; A.of = g; A.key = g.zoom ? g.zoom.key : "";
 }
 
 // After the clear and before the links: the ground, then the lines.
 function drawGLAtlas(L, g, m, W, H, dpr) {
   const A = L.atlas, gl = L.gl;
-  if (A.of !== g) packGLAtlas(L, g);
+  if (A.of !== g || A.key !== (g.zoom ? g.zoom.key : "")) packGLAtlas(L, g);
   gl.blendEquation(gl.FUNC_ADD);
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   gl.useProgram(A.fill);
@@ -3805,6 +3861,16 @@ RAW_EDGES.forEach(e => {
   if (e.type !== "EXTRACTED" || !a || !b || e.from === e.to || NATIVE[a.type] || NATIVE[b.type]) return;
   LINKED.add(e.from); LINKED.add(e.to);
 });
+// What a backbone line inside one area pulls with in ForceAtlas2 (pullOf's
+// `same`), the atlas being 2D. Measured in this frame on alex_second_brain
+// (2,164 notes, 2026-10-29), purity 0.740 -> 0.817, the notes off their area's
+// largest island 28.9% -> 13.9%, borders drawn 2,290 -> 1,722, settled in 915
+// ticks against 862, and the unrelated areas stood further from the core
+// (OSINT 6.13 -> 6.86 vault radii). x4 reached 0.895 but no longer settled
+// inside FA2_BUDGET; x8 pulled OSINT in to 4.54 (ADR-0136, amendment
+// 2026-10-29). d3 keeps 1: a link strength over 1 overshoots its integrator,
+// and 3D draws no atlas.
+const AREA_PULL = 2;
 // d3's link strength under pullOf's rule. d3 offers no accessor for its own
 // default, so it is counted here, once per link array the force is handed.
 function linkStrength() {
@@ -3815,7 +3881,8 @@ function linkStrength() {
       count = new Map();
       for (const k of links) for (const n of [k.source, k.target]) count.set(n, (count.get(n) || 0) + 1);
     }
-    return pullOf(l, LINKED, 1 / Math.min(count.get(l.source), count.get(l.target)));
+    return pullOf(l, LINKED, 1 / Math.min(count.get(l.source), count.get(l.target)),
+      is2D() && ENGINE_2D === "fa2" ? AREA_PULL : 1);
   };
 }
 // A note Silica runs on follows the notes it links (followNative). The lib's
@@ -3833,7 +3900,8 @@ const followForce = Object.assign(alpha => followNative(RAW_NODES, alpha), { ini
 // country and a sub-area's a province (graph_export.detect_sub_areas). The
 // ground is the area's colour most of the way to the floor; a country's border
 // is a line in the frame's ink, a province's a thinner one in its area's
-// colour. Names climb with the zoom (atlasTier). It replaced the area blobs of
+// colour. What it names and how much of it it draws follow what fits on the
+// screen (atlasZoom). It replaced the area blobs of
 // ADR-0074 and the semantic zones' hulls, and on a vault with no area of 3
 // notes its countries are the zones, as the key row says (ATLAS_BY).
 // On unless the reader turned it off, remembered per browser: the owner's
@@ -3852,6 +3920,17 @@ const ATLAS_R = 0.74;
 // The colour's share of a cell's ground, over the floor: the draft's 0.28 on
 // graphite and 0.2 on paper, where a tint reads stronger.
 const ATLAS_GROUND = LIGHT ? 0.2 : 0.28;
+// An island of fewer than ATLAS_MIN_ISLAND notes whose ground meets another
+// area's, a note or two of one area standing among another's, draws under the
+// notes' zoom as unclaimed ground with no border: otherwise each is a hole
+// ringed in ink, and on alex_second_brain 168 of 284 islands were a single
+// note (2026-10-29). One standing alone keeps its ground, having no border to
+// take away: taking its colour too made 500 of 2,164 cells unclaimed at fit.
+// Its dot keeps its area's colour, and ground and border come back with the
+// notes' names. The ground is the coast's line most of the way to the floor,
+// so it reads as land, not as an area.
+const ATLAS_MIN_ISLAND = 3;
+const ATLAS_UNCLAIMED = towardFloor(GP.line2, 0.4);
 const ZONE_BY_ID = {};
 ZONES.forEach(z => { ZONE_BY_ID[z.id] = z; });
 const SUB_BY_ID = {};
@@ -3921,7 +4000,7 @@ function atlasGeometry() {
     if (!cell) return;
     const k = cellInDisc(cell, n.x, n.y, R, ATLAS_SIDES), q = k.pts;
     if (q.length < 6) return;
-    g.polys.push({ c, pts: q });
+    g.polys.push({ c, i, pts: q });
     for (let e = 0; e < k.arc.length; e++) if (k.arc[e]) {
       const f = (e + 1) % k.arc.length;
       g.coast.push(q[2 * e], q[2 * e + 1], q[2 * f], q[2 * f + 1]);
@@ -3930,17 +4009,31 @@ function atlasGeometry() {
   const b = atlasBorders(P, country, prov, R, del, vor.circumcenters);
   g.borders = b.country;
   for (const c in b.province) g.provinces.set(+c, b.province[c]);
-  // What the names stand on: a country of two notes or more with a name, a
-  // province of three or more in a country it splits.
+  // The same lines less a small island's, for the zooms under the notes'.
+  const isl = atlasIslands(P, country, R, del);
+  g.bare = Uint8Array.from(isl.size, (s, i) => s < ATLAS_MIN_ISLAND && isl.shore[i]);
+  const gb = atlasBorders(P, country, prov, R, del, vor.circumcenters, (p, q) => !g.bare[p] && !g.bare[q]);
+  g.gBorders = gb.country;
+  g.gProvinces = new Map(Object.entries(gb.province).map(([c, f]) => [+c, f]));
+  // What the names stand on: an area of three notes or more with a name (two
+  // notes are a link, graph_view.ATLAS_MIN_AREA), on its largest island, so
+  // its name never sits on another area's ground; a province of three or more
+  // in a country it splits. `split` is what atlasZoom may open.
   for (const [c, ids] of byCountry) {
     const name = countryName(c);
-    if (ids.length > 1 && name) g.countries.push({ name, size: ids.length, at: atlasSpots(ids, P, 9) });
+    if (ids.length < 3 || !name) continue;
+    const count = new Map();
+    for (const i of ids) count.set(isl.of[i], (count.get(isl.of[i]) || 0) + 1);
+    let main = -1, most = 0;
+    for (const [o, k] of count) if (k > most) { main = o; most = k; }
+    g.countries.push({ c, name, size: ids.length, split: g.provinces.has(c),
+                       at: atlasSpots(ids.filter(i => isl.of[i] === main), P, 1) });
   }
   g.countries.sort((p, q) => q.size - p.size);
   for (const [s, ids] of byProv) {
     const sub = SUB_BY_ID[s];
     if (sub && ids.length > 2 && g.provinces.has(sub.area))
-      g.subs.push({ name: sub.name, size: ids.length, at: atlasSpots(ids, P, 1) });
+      g.subs.push({ name: sub.name, area: sub.area, size: ids.length, at: atlasSpots(ids, P, 1) });
   }
   g.subs.sort((p, q) => q.size - p.size);
   return g;
@@ -3951,28 +4044,44 @@ function atlasGeometry() {
 // in the frame's ink. Widths in CSS px, constant on screen at any zoom.
 const ATLAS_LINES = [["coast", 1.5, 1], ["provinces", 0.8, 0.5], ["borders", 1.4, 0.7]];
 
+// The atlas at the zoom atlasZoom read: under the notes' zoom a small island
+// is unclaimed ground with no border, and only an open area draws its
+// provinces; at the notes' zoom, every line. ground(c, i): point i's colour.
+function atlasLayer(g) {
+  const z = g.zoom, all = !z || z.notes;
+  return {
+    ground: (c, i) => !all && g.bare[i] ? ATLAS_UNCLAIMED : g.ground.get(c),
+    borders: all ? g.borders : g.gBorders,
+    provinces: all ? g.provinces : new Map([...g.gProvinces].filter(([c]) => z.open.has(c))),
+  };
+}
+
 // Under the notes. With WebGL the layer under the links draws it
-// (drawGLAtlas) and this only hands it the geometry; without, the canvas
+// (drawGLAtlas) and this only hands it the geometry and the zoom's reading
+// (atlasZoom, keyed so a layer repacks when it changes); without, the canvas
 // draws the same polygons and segments, one path per colour.
 function drawAtlas(ctx, scale) {
   atlasNow = null;   // what the WebGL layer draws this frame, if anything
   if (!atlasOn() || ARR) return;
   const g = atlasNow = atlasGeometry();
-  if (!g.n || (GLLinks && GLLinks.atlas)) return;
-  if (!g.paths) {
+  if (!g.n) return;
+  const z = g.zoom = atlasZoom(2 * g.R * scale, g.countries);
+  z.key = z.notes ? "notes" : [...z.open].join(",");
+  if (GLLinks && GLLinks.atlas) return;
+  if (!g.paths || g.paths.key !== z.key) {
     const seg = flat => { const p = new Path2D(); for (let k = 0; k < flat.length; k += 4) { p.moveTo(flat[k], flat[k + 1]); p.lineTo(flat[k + 2], flat[k + 3]); } return p; };
-    const cells = new Map();
-    for (const { c, pts } of g.polys) {
-      const p = cells.get(c) || cells.set(c, new Path2D()).get(c);
+    const layer = atlasLayer(g), cells = new Map();
+    for (const { c, i, pts } of g.polys) {
+      const col = layer.ground(c, i), p = cells.get(col) || cells.set(col, new Path2D()).get(col);
       p.moveTo(pts[0], pts[1]);
       for (let k = 2; k < pts.length; k += 2) p.lineTo(pts[k], pts[k + 1]);
       p.closePath();
     }
-    g.paths = { cells, coast: seg(g.coast), borders: seg(g.borders),
-                provinces: new Map([...g.provinces].map(([c, f]) => [c, seg(f)])) };
+    g.paths = { key: z.key, cells, coast: seg(g.coast), borders: seg(layer.borders),
+                provinces: new Map([...layer.provinces].map(([c, f]) => [c, seg(f)])) };
   }
   ctx.save();
-  for (const [c, p] of g.paths.cells) { ctx.fillStyle = g.ground.get(c); ctx.fill(p); }
+  for (const [col, p] of g.paths.cells) { ctx.fillStyle = col; ctx.fill(p); }
   ctx.lineCap = "round";
   for (const [part, w, alpha] of ATLAS_LINES) {
     ctx.globalAlpha = alpha;
@@ -3983,22 +4092,21 @@ function drawAtlas(ctx, scale) {
   ctx.restore();
 }
 
-// The zoom the whole atlas fits at, as zoomToFit(_, 40) frames it: the tiers
-// are read against it (atlasTier).
-function atlasFitZoom(g) {
-  const { x0, y0, x1, y1 } = g.box, pad = 2 * 40;
-  return Math.min((Graph.width() - pad) / Math.max(x1 - x0, 1), (Graph.height() - pad) / Math.max(y1 - y0, 1));
-}
-
 // The names, after the notes, all together: whether one is drawn depends on
 // every one before it (placeLabels), largest part or busiest note first. With
 // a note under the pointer or in focus, its name and its neighbours' are the
 // only ones, as its lines are the only ones drawn.
 const ATLAS_FONT = "Archivo, system-ui, sans-serif";
-// Where a country's name tries to sit, in screen px off its anchor (x in its
-// own widths): four spots around it, as the draft did, then the other notes
-// atlasSpots offers. The draft named 10 of the course's 10 areas at fit.
+// Where a part's name tries to sit, in screen px off its anchor (x in its
+// own widths): on it, then four spots around it, as the draft did.
 const ATLAS_SPOTS = [[0, 0], [0, -30], [0, 30], [0.6, 0], [-0.6, 0]];
+// Names per screen, by kind, spent on the names placed (placeLabels): with
+// the zoom rule (atlasZoom) the draft kept 8 to 30 names on screen at every
+// zoom where the frame drew 19 to 150 (2026-10-29). ctx: the quiet names of
+// what the reader is inside of, an open area once ATLAS_CONTEXT_MIN of its
+// notes are on screen, the sub-areas once the notes are named.
+const ATLAS_CAPS = { area: 12, sub: 20, note: 30, ctx: 4 };
+const ATLAS_CONTEXT_MIN = 20, ATLAS_CONTEXT_ALPHA = 0.45;
 const clip = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
 function drawAtlasNames(ctx, scale) {
   const g = atlasNow;
@@ -4008,17 +4116,17 @@ function drawAtlasNames(ctx, scale) {
   const seen = p => p.x >= view.x0 && p.x <= view.x1 && p.y >= view.y0 && p.y <= view.y1;
   const deg = n => (outDeg[n.id] || 0) + (inDeg[n.id] || 0);
   // A name: its lines, [text, px, weight, ink], over a point, and where else
-  // it may sit.
+  // it may sit; its kind is the budget it spends (ATLAS_CAPS).
   // spots: [x, y, dx in its own widths, dy in screen px], in the order tried.
   const items = [];
-  const note = (n, px, weight, ink) =>
-    items.push({ lines: [[clip(n.label, 30), px, weight, ink]], spots: [[n.x, n.y - (px + 4) / scale, 0, 0]] });
-  const part = (p, px, small, cap) => {
-    const [a, ...rest] = p.at.map(i => g.on[i]);
-    items.push({ lines: [[clip(p.name, cap), px, 600, GP.label], [gnum(p.size) + " notes", small, 400, GP.ghostLabel]],
-                 spots: (p.at.length > 1 ? ATLAS_SPOTS : [[0, 0]]).map(([dx, dy]) => [a.x, a.y, dx, dy])
-                   .concat(rest.map(n => [n.x, n.y, 0, 0])) });
-  };
+  const note = (n, px, weight, ink, kind) =>
+    items.push({ kind, lines: [[clip(n.label, 30), px, weight, ink]], spots: [[n.x, n.y - (px + 4) / scale, 0, 0]] });
+  const around = p => { const a = g.on[p.at[0]]; return ATLAS_SPOTS.map(([dx, dy]) => [a.x, a.y, dx, dy]); };
+  const part = (p, px, small, cap, kind) =>
+    items.push({ kind, lines: [[clip(p.name, cap), px, 600, GP.label], [gnum(p.size) + " notes", small, 400, GP.ghostLabel]],
+                 spots: around(p) });
+  const context = p =>
+    items.push({ kind: "ctx", quiet: true, lines: [[clip(p.name, 32).toUpperCase(), 11, 600, GP.label]], spots: around(p) });
   const lit = hoverId ? [hoverId] : focusIds;
   if (lit.length) {
     const roots = new Set(lit);
@@ -4026,11 +4134,17 @@ function drawAtlasNames(ctx, scale) {
     RAW_NODES.filter(n => !n._dim && !n._hidden && !roots.has(n.id) && seen(n))
       .sort((p, q) => deg(q) - deg(p)).forEach(n => note(n, 11, 500, GP.label));
   } else {
-    const tier = atlasTier(scale / atlasFitZoom(g), g.subs.length > 0);
+    const z = g.zoom || atlasZoom(2 * g.R * scale, g.countries);
+    const here = new Map();
+    for (const n of g.on) if (seen(n)) here.set(countryOf(n), (here.get(countryOf(n)) || 0) + 1);
     const top = g.countries.length ? g.countries[0].size : 1;
-    if (tier === 0) g.countries.forEach(c => part(c, Math.round(12 + 5 * Math.sqrt(c.size / top)), 10, 40));
-    else if (tier === 1) g.subs.forEach(p => { if (seen(g.on[p.at[0]])) part(p, 12, 9.5, 28); });
-    else g.on.filter(seen).sort((p, q) => deg(q) - deg(p)).forEach(n => note(n, 11, 500, GP.label));
+    for (const c of g.countries)
+      if (!z.open.has(c.c) && here.get(c.c)) part(c, Math.round(12 + 6 * Math.sqrt(c.size / top)), 10, 40, "area");
+    const subs = g.subs.filter(p => z.open.has(p.area) && seen(g.on[p.at[0]]));
+    if (!z.notes) subs.forEach(p => part(p, 12.5, 9.5, 28, "sub"));
+    else g.on.filter(seen).sort((p, q) => deg(q) - deg(p)).forEach(n => note(n, 11.5, 500, GP.label, "note"));
+    (z.notes ? subs : g.countries.filter(c => z.open.has(c.c) && here.get(c.c) >= ATLAS_CONTEXT_MIN)
+      .sort((p, q) => here.get(q.c) - here.get(p.c))).forEach(context);
   }
   ctx.save();
   ctx.textAlign = "center";
@@ -4039,6 +4153,7 @@ function drawAtlasNames(ctx, scale) {
   // Each name's boxes, in graph units: its lines stacked, its widest line wide.
   const alts = items.map(it => {
     let w = 0, h = 0;
+    ctx.letterSpacing = it.quiet ? "0.12em" : "0px";
     for (const [t, px, weight] of it.lines) {
       ctx.font = weight + " " + px / scale + "px " + ATLAS_FONT;
       w = Math.max(w, ctx.measureText(t).width);
@@ -4050,9 +4165,13 @@ function drawAtlasNames(ctx, scale) {
       return { x, y, x0: x - w / 2 - 3 / scale, y0: y - h / 2, x1: x + w / 2 + 3 / scale, y1: y + h / 2 };
     });
   });
-  placeLabels(alts, view).forEach((k, i) => {
-    if (k < 0) return;
+  const took = placeLabels(alts, view, items.map(it => it.kind), lit.length ? null : ATLAS_CAPS);
+  // The quiet names first, so the names they frame are drawn over them.
+  for (const quiet of [true, false]) took.forEach((k, i) => {
+    if (k < 0 || !!items[i].quiet !== quiet) return;
     const at = alts[i][k];
+    ctx.globalAlpha = quiet ? ATLAS_CONTEXT_ALPHA : 1;
+    ctx.letterSpacing = quiet ? "0.12em" : "0px";
     let y = at.y - items[i].h / 2;
     for (const [t, px, weight, ink] of items[i].lines) {
       y += px * 0.625 / scale;
