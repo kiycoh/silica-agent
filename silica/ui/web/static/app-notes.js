@@ -2303,6 +2303,9 @@ function peekRollback() {
 function peekDone(ev) {
   if (!peek) return;
   if (ev.html || ev.answer) peek.body.innerHTML = ev.html || escapeHtml(ev.answer);
+  // a reply like the chat's, so its diagrams draw as the chat's do: until
+  // 2026-10-29 the card styled pre.mermaid and never ran it, showing the source
+  drawDiagrams(peek.body);
   freezePeek();
 }
 function peekError(msg) {
