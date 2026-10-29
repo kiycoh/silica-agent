@@ -176,3 +176,14 @@ def test_quote_labels_escapes_what_the_9b_wrote_bare(tmp_path):
     assert '-->|"f(x)=0"| C[Fine]' in flow
     assert mind.splitlines()[1:3] == ["  root((Java))", "    Object"]
     assert '      n3["toString()"]' in mind and "::icon(fa fa-book)" in mind
+
+
+def test_a_note_and_the_dock_card_draw_diagrams_as_a_reply_does():
+    """2026-10-28: a mind map the chat wrote into a note drew in the drawer as
+    an empty bar, because only a reply went through drawDiagrams' quoting; the
+    dock card ran no diagram at all. A note keeps its author's style lines."""
+    js = app_js()
+    note = re.search(r"^function decorateRendered\(el, view\) \{.*?^\}", js, re.S | re.M)
+    assert note and "drawDiagrams(el, { keepStyles: true })" in note.group(0)
+    peek = re.search(r"^function peekDone\(ev\) \{.*?^\}", js, re.S | re.M)
+    assert peek and "drawDiagrams(peek.body)" in peek.group(0)

@@ -770,12 +770,18 @@
   max-width: 100%;
 }
 
-/* A fence mermaid could not parse (ADR-0082): one quiet line in the answer,
-   the source behind it for whoever wants to see what the model wrote. */
-.msg details.diagram-failed > summary {
+/* A fence mermaid could not parse (ADR-0082): one quiet line in the answer or
+   the note, the source behind it for whoever wants to see what was written. */
+:is(.msg, #peek-body, #note-edit) details.diagram-failed > summary {
   color: var(--ash-dim);
   font-size: 12px;
   cursor: pointer;
+}
+
+/* the source's longest line scrolls in its box, as a drawn diagram does below:
+   in a 1000px window it widened the editor line 21px past the drawer's edge */
+:is(.msg, #peek-body, #note-edit) details.diagram-failed {
+  contain: inline-size;
 }
 
 /* Drawn, a diagram sits on the reading surface itself (ADR-0069): the code

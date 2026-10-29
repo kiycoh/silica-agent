@@ -762,7 +762,7 @@ $("#flag-sheet").addEventListener("click", (e) => { if (e.target === e.currentTa
 // owner still has the text to see what the model wrote. Parsed before run(),
 // not judged after it: run() marks a block processed before it draws, so a
 // second call landing mid-draw would have taken a pending block for a failed one.
-async function drawDiagrams(root) {
+async function drawDiagrams(root, { keepStyles = false } = {}) {
   const pending = [...root.querySelectorAll("pre.mermaid:not([data-processed])")];
   if (!pending.length) return;
   await loadMermaid();
@@ -770,7 +770,7 @@ async function drawDiagrams(root) {
     // A model's own `style A fill:#f9f` paints over the theme (ADR-0069) and,
     // on graphite, puts the light label ink on a pastel fill: 2 of 10 audited
     // /diagram answers did it. A note keeps its author's styles; a reply does not.
-    b.textContent = b.textContent.replace(/^\s*(?:style|linkStyle)\s.*$\n?/gm, "");
+    if (!keepStyles) b.textContent = b.textContent.replace(/^\s*(?:style|linkStyle)\s.*$\n?/gm, "");
     if (await mermaid.parse(b.textContent, { suppressErrors: true })) continue;
     const quoted = quoteLabels(b.textContent);
     if (quoted !== b.textContent && await mermaid.parse(quoted, { suppressErrors: true })) {
