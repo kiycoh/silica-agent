@@ -51,6 +51,27 @@ def test_only_the_backbone_lays_out_and_a_link_orphan_is_still_placed(tmp_path):
 
 
 @needs_node
+def test_a_backbone_line_inside_one_area_pulls_harder_and_only_there(tmp_path):
+    out = _pure(tmp_path, """
+      const n = (id, group) => ({id, type: "note", group});
+      const a = n("a", 3), b = n("b", 3), c = n("c", 4), u = n("u", -1), v = n("v", -1);
+      const l = (source, target, backbone) => ({source, target, type: "EXTRACTED", backbone});
+      const linked = new Set();
+      console.log(JSON.stringify([
+        pullOf(l(a, b, 0.2), linked, 0.1, 2),   // one area: twice 4 x J
+        pullOf(l(a, b, 0.6), linked, 0.1, 2),   // after the clamp, so 2
+        pullOf(l(a, c, 0.2), linked, 0.1, 2),   // two areas: as before
+        pullOf(l(u, v, 0.2), linked, 0.1, 2),   // no area is not one area
+        pullOf(l(a, b, 0.2), linked, 0.1),      // d3's call: no pull of its own
+      ]));
+    """)
+    assert out == pytest.approx([1.6, 2, 0.8, 0.8, 0.8])
+    # ForceAtlas2 in 2D only; d3 (3D, or 2D with no worker) keeps the rule
+    assert 'is2D() && ENGINE_2D === "fa2" ? AREA_PULL : 1' in FRAME_JS
+    assert "const AREA_PULL = 2;" in FRAME_JS
+
+
+@needs_node
 def test_a_silica_note_follows_its_notes_and_moves_none_of_them(tmp_path):
     out = _pure(tmp_path, """
       const a = {x: 0, y: 0, vx: 0, vy: 0}, b = {x: 10, y: 0, vx: 0, vy: 0};
@@ -118,14 +139,63 @@ def test_a_name_takes_the_first_free_spot_and_waits_when_there_is_none(tmp_path)
 
 
 @needs_node
-def test_the_zoom_names_areas_then_sub_areas_then_notes(tmp_path):
+def test_an_area_opens_by_its_own_footprint_and_the_notes_by_theirs(tmp_path):
     out = _pure(tmp_path, """
-      const z = [0.5, 1, 1.79, 1.8, 3.59, 3.6, 9];
-      console.log(JSON.stringify([z.map(k => atlasTier(k)), z.map(k => atlasTier(k, false))]));
+      const parts = [{c: 0, size: 400, split: true}, {c: 1, size: 100, split: true}, {c: 2, size: 400, split: false}];
+      const at = px => { const z = atlasZoom(px, parts); return [z.notes, [...z.open]]; };
+      console.log(JSON.stringify([at(10), at(26), at(52), at(89), at(90), [ATLAS_OPEN_PX, ATLAS_NOTE_PX]]));
     """)
-    assert out[0] == [0, 0, 0, 1, 1, 2, 2]
-    # no province to name: the areas hold the middle of the zoom
-    assert out[1] == [0, 0, 0, 0, 0, 2, 2]
+    *zooms, (open_px, note_px) = out
+    assert (open_px, note_px) == (520, 90)
+    assert zooms[0] == [False, []], "at a far zoom every area is one name"
+    # 26 px x sqrt(400) = 520: the big area opens, the small one waits
+    assert zooms[1] == [False, [0]]
+    assert zooms[2] == [False, [0, 1]]
+    assert zooms[3] == [False, [0, 1]], "an area with no sub-areas never opens"
+    assert zooms[4] == [True, [0, 1]], "a ground of 90 px names the notes"
+
+
+@needs_node
+def test_a_budget_counts_the_names_placed_not_the_names_tried(tmp_path):
+    out = _pure(tmp_path, """
+      const b = (x0, y0, x1, y1) => [{x0, y0, x1, y1}];
+      const area = {x0: 0, y0: 0, x1: 100, y1: 100};
+      // the second area name collides and waits: its turn goes to the third
+      const alts = [b(0, 0, 20, 10), b(5, 0, 25, 10), b(40, 0, 60, 10), b(70, 0, 90, 10), b(0, 50, 20, 60)];
+      console.log(JSON.stringify(placeLabels(alts, area, ["area", "area", "area", "area", "ctx"], {area: 2, ctx: 0})));
+    """)
+    assert out == [0, -1, 0, -1, -1]
+
+
+@needs_node
+def test_an_island_is_an_area_s_notes_whose_grounds_touch(tmp_path):
+    out = _pure(tmp_path, """
+      // a row a unit apart, R = 1 (grounds meet under 2), then one far off
+      const P = new Float64Array([0, 0, 1, 0.1, 2, 0, 3, 0.1, 9, 0]);
+      const del = new d3Delaunay.Delaunay(P);
+      const run = country => { const r = atlasIslands(P, Int32Array.from(country), 1, del); return [[...r.size], [...r.of], [...r.shore]]; };
+      console.log(JSON.stringify([run([0, 0, 0, 0, 0]), run([0, 0, 1, 0, 0])]));
+    """)
+    (one_size, _, one_shore), (cut_size, cut_of, cut_shore) = out
+    assert one_size == [4, 4, 4, 4, 1], "the far note is an island of its own"
+    assert one_shore == [0, 0, 0, 0, 0], "one area alone meets no other"
+    # a note of another area in the row cuts the area in two
+    assert cut_size == [2, 2, 1, 1, 1] and cut_of[0] == cut_of[1] and cut_of[3] != cut_of[0]
+    # the far note touches nobody: an island, but no area's enclave
+    assert cut_shore == [1, 1, 1, 1, 0]
+
+
+@needs_node
+def test_a_border_left_out_is_left_out_whole(tmp_path):
+    out = _pure(tmp_path, """
+      const P = new Float64Array([0, 0, 1, 0, 0.5, Math.sqrt(3) / 2]);
+      const del = new d3Delaunay.Delaunay(P), vor = del.voronoi([-5, -5, 5, 5]);
+      const C = Int32Array.from([0, 1, 2]);
+      const all = atlasBorders(P, C, C, 1, del, vor.circumcenters);
+      const less = atlasBorders(P, C, C, 1, del, vor.circumcenters, (p, q) => p !== 2 && q !== 2);
+      console.log(JSON.stringify([all.country.length / 4, less.country.length / 4]));
+    """)
+    assert out == [3, 1], "only the pair without note 2 keeps its border"
 
 
 @needs_node
@@ -158,7 +228,8 @@ def test_the_renderer_and_the_layout_cache_start_over_once():
     assert re.search(r'const MODE_KEY = "silica-graph-mode-2";\nlet mode = "2d";', FRAME_JS)
     assert 'if (localStorage.getItem(MODE_KEY) === "3d") mode = "3d";' in FRAME_JS
     assert "if (rebuild) try { localStorage.setItem(MODE_KEY, m); }" in FRAME_JS
-    assert 'const LAYOUT_KEY = "silica-graph-layout-2";' in FRAME_JS
+    # -3: a 2D layout settled without the area pull (AREA_PULL) is not its own
+    assert 'const LAYOUT_KEY = "silica-graph-layout-3";' in FRAME_JS
 
 
 def test_with_the_atlas_on_a_line_shows_for_the_note_in_hand_only():
