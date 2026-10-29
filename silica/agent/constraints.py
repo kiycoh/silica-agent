@@ -214,7 +214,12 @@ def _eligible() -> dict:
     # One `mcp__<key>` per configured server (ADR-0091), from the file alone
     # and once per process, so the loadable catalog it joins stays static.
     ensure_registered()
-    return {n: t for n, t in TOOLS.items() if not t.sensitive and not t.internal}
+    # A view this account does not get takes its tools with it (ADR-0140): left
+    # here, the loader would list them and the loop would run a direct call.
+    from silica.config import withheld
+
+    gone = withheld("tools")
+    return {n: t for n, t in TOOLS.items() if not t.sensitive and not t.internal and n not in gone}
 
 
 def loadable() -> tuple[str, ...]:
