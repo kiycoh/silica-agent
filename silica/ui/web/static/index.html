@@ -485,6 +485,15 @@
            read once: this one opens the view that lists what it counts. -->
       <button type="button" class="vp-row" id="top-broken" hidden></button>
     </div>
+    <!-- The vault's two downloads (ADR-0142), the server's only: on a laptop
+         the vault is the person's own folder. Each says what it would give,
+         asked when the menu opens, so "nothing new" is read before a click. -->
+    <div id="vault-export" hidden>
+      <div class="vp-rule" role="separator"></div>
+      <a class="vp-item vp-two" id="vx-all" href="/vault/export" download><span>Download the vault</span><small id="vx-all-note"></small></a>
+      <button type="button" class="vp-item vp-two" id="vx-added"><span>Download what Silica added</span><small id="vx-added-note"></small></button>
+      <p id="vx-said" role="status" aria-live="polite" hidden></p>
+    </div>
     <div class="vp-rule" role="separator"></div>
     <button type="button" id="settings-btn" class="vp-item" aria-haspopup="dialog" aria-expanded="false"><svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6 1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span>Settings</span><kbd>ctrl ,</kbd></button>
     <button type="button" id="help-btn" class="vp-item" aria-haspopup="dialog" aria-expanded="false"><svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.3-2.5 3.8"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg><span>Shortcuts and help</span><kbd>?</kbd></button>
@@ -512,6 +521,7 @@
       <div class="hp-row"><kbd>?</kbd><span>this panel, from anywhere you are not typing</span></div>
       <div class="sp-title">the vault</div>
       <div class="hp-row"><span class="hp-what">drop a file</span><span>anywhere on the window: it joins the chat, and its "add to vault" copies it into Inbox/; the vault's + takes a folder, or a link to a web page, too</span></div>
+      <div class="hp-row hp-hosted"><span class="hp-what">download</span><span>the SILICA menu downloads the whole vault as a zip, or only the notes Silica added since the last download, in one folder to put at the top of your Obsidian vault</span></div>
       <div class="hp-row"><span class="hp-what">New chat</span><span>at the top of the sidebar starts one; the old one stays in Chats</span></div>
       <div class="hp-row"><span class="hp-what">every write</span><span>gets a card in the transcript with its own revert</span></div>
       <div class="hp-row"><span class="hp-what">Notes, Chats</span><span>the sidebar shows one of its two lists; the switch above them picks it, and the filter reads both</span></div>

@@ -48,6 +48,7 @@ class _Panel(HTMLParser):
 
         super().__init__()
         self.served = {"chat", *(hosted_views() if hosted else VIEWS)}
+        self.hosted = hosted
         self.sections: list[tuple[str, list[tuple[str, str]]]] = []
         self.depth = 0            # depth inside #help-panel, 0 when outside
         self.title: list[str] | None = None
@@ -69,8 +70,10 @@ class _Panel(HTMLParser):
         elif "hp-row" in cls:
             self.row, self.row_depth = [], self.depth
             # A view the account does not get is not in its panel (ADR-0140),
-            # so the chat does not offer it either.
-            self.skip = a.get("data-view", "chat") not in self.served
+            # so the chat does not offer it either; nor, on a laptop, the
+            # server's downloads (ADR-0142).
+            self.skip = (a.get("data-view", "chat") not in self.served
+                         or ("hp-hosted" in cls and not self.hosted))
         elif self.row is not None and self.depth == self.row_depth + 1:
             self.row.append([])
 
