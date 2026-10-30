@@ -367,14 +367,12 @@ def _parse_zotero(block) -> ZoteroLink | None:
     )
 
 
-_ZOTERO_LINE = re.compile(r"zotero\s*:")
-
-
-def _zotero_span(lines: list[str]) -> tuple[int, int] | None:
-    """[start, end) of the top-level `zotero:` block: its key line and the
+def _block_span(lines: list[str], name: str = "zotero") -> tuple[int, int] | None:
+    """[start, end) of the top-level `<name>:` block: its key line and the
     indented or blank lines after it, minus trailing blanks, which belong to
-    whatever follows."""
-    start = next((i for i, line in enumerate(lines) if _ZOTERO_LINE.match(line)), None)
+    whatever follows. One reader for `zotero:` and `public:` (ADR-0143)."""
+    head = re.compile(rf"{re.escape(name)}\s*:")
+    start = next((i for i, line in enumerate(lines) if head.match(line)), None)
     if start is None:
         return None
     end = start + 1
@@ -401,12 +399,17 @@ def _write_lines(vault: str | Path, mutate) -> Path:
 
 
 def set_zotero(vault: str | Path, key: str, value: str | bool) -> Path:
-    """Set one key of the `zotero:` block, creating the block when absent.
+    """Set one key of the `zotero:` block, creating the block when absent."""
+    return set_block_key(vault, "zotero", key, value)
+
+
+def set_block_key(vault: str | Path, block: str, key: str, value) -> Path:
+    """Set one key of a top-level block, creating the block when absent.
 
     Line-level like `set_write_dir`, for the same reason: vault.yaml is
-    hand-written and a yaml round-trip would drop its comments. Strings are
-    written JSON-quoted, which YAML reads back verbatim, so a collection
-    named `2024` stays a string.
+    hand-written and a yaml round-trip would drop its comments. Strings and
+    lists are written as JSON, which YAML reads back verbatim, so a
+    collection named `2024` stays a string and a folder list stays one line.
     """
     import json
 
@@ -415,9 +418,9 @@ def set_zotero(vault: str | Path, key: str, value: str | bool) -> Path:
     key_re = re.compile(rf"\s+{re.escape(key)}\s*:")
 
     def mutate(lines: list[str]) -> list[str]:
-        span = _zotero_span(lines)
+        span = _block_span(lines, block)
         if span is None:
-            return [*lines, "zotero:\n", line]
+            return [*lines, f"{block}:\n", line]
         start, end = span
         for i in range(start + 1, end):
             if key_re.match(lines[i]):
@@ -431,7 +434,7 @@ def set_zotero(vault: str | Path, key: str, value: str | bool) -> Path:
 def unlink_zotero(vault: str | Path) -> Path:
     """Remove the `zotero:` block; every other line stays where it was."""
     def mutate(lines: list[str]) -> list[str]:
-        span = _zotero_span(lines)
+        span = _block_span(lines, "zotero")
         return lines if span is None else [*lines[:span[0]], *lines[span[1]:]]
 
     return _write_lines(vault, mutate)

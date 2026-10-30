@@ -193,11 +193,17 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
                     f'title="plan this folder in Learn" aria-label="plan the folder {html.escape(name, quote=True)}">'
                     f"plan</button>") if actions else ""
             more = _more_button(folder.rstrip("/"), name, folder=True) if actions else ""
+            # the folder's globe (ADR-0143 point 2), drawn hidden: app-public.js
+            # shows it where the account gets Public page and the folder is not Silica's
+            pub = (f'<button type="button" class="tree-pub" hidden aria-pressed="false" '
+                   f'data-pub-folder="{html.escape(folder.rstrip("/"), quote=True)}" '
+                   f'aria-label="put the folder {html.escape(name, quote=True)} on your public page"></button>'
+                   ) if actions else ""
             # a note's <a> drags by itself; a summary only when told, and the
             # rail drops a folder on a workspace row as its menu adds one
             drag = ' draggable="true"' if actions else ""
             out.append(f"<details><summary{drag}>{html.escape(name)}"
-                       f'<span class="tree-n">{count(tree[name])}</span>{more}{plan}</summary>')
+                       f'<span class="tree-n">{count(tree[name])}</span>{more}{pub}{plan}</summary>')
             out.append(emit(tree[name], depth + 1, folder))
             out.append("</details>")
         for leaf, nid in sorted(tree.get("__notes__", []), key=lambda x: x[0].lower()):
@@ -223,6 +229,9 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
                 f'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
                 f'<line x1="12" y1="17" x2="12" y2="22"></line>'
                 f'<path d="M5 17h14l-2-4V4H7v9z"></path></svg></button>'
+                f'<button type="button" class="tree-pub" hidden aria-pressed="false" '
+                f'data-pub="{html.escape(nid, quote=True)}" '
+                f'aria-label="put {html.escape(shown, quote=True)} on your public page"></button>'
                 f'{_more_button(nid, shown, folder=False)}</div>'
             )
         return "".join(out)

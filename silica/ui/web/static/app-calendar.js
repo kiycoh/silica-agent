@@ -1461,7 +1461,7 @@ buildSurfaceTabs();
 const bootSlug = parseHash().slug;
 const bootTab = viewOfSlug(bootSlug);
 // Chat has no row since ADR-0084, so it is the one view entered by call.
-if (["discover", "graph", "learn", "calendar", "metrics"].includes(bootTab))
+if (["discover", "graph", "learn", "calendar", "metrics", "public"].includes(bootTab))
   document.querySelector(`#views .tab[data-tab="${bootTab}"]`).click();
 else showTab("chat");
 

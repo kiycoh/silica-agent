@@ -48,6 +48,7 @@ FREE_PINS = {
     ("silica/kernel/learn/plans.py", "clear_revisit", "('revisit',)"): 1,
     ("silica/kernel/learn/plans.py", "close_plan", "('status', 'completed')"): 2,
     ("silica/driver/fs_backend.py", "set_prop", "(name,)"): 1,
+    ("silica/driver/fs_backend.py", "unset_prop", "(name,)"): 1,   # ADR-0143: a globe clears publish:
     ("silica/driver/ws_backend.py", "set_prop", "(name,)"): 1,
 }
 
@@ -100,7 +101,7 @@ def test_the_counts_the_record_states():
     off = sum(n for (_f, _fn, v), n in LOSS_PINS.items()
               if Loss[v.rsplit(".", 1)[-1].split()[0]] in _RELAX_ALL)
     assert off == 18
-    assert sum(FREE_PINS.values()) == 7
+    assert sum(FREE_PINS.values()) == 8  # ADR-0143: unset_prop beside set_prop
 
 
 def test_a_reason_never_rides_on_an_op():

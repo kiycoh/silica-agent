@@ -184,9 +184,9 @@ def test_index_carries_the_learn_view_after_explore_and_the_section():
     # ADR-0137 (decision 1, the first slot).
     views = INDEX[INDEX.index('<nav id="views"'):]
     views = views[:views.index("</nav>")]
-    assert re.findall(r'data-tab="(\w+)"', views) == ["discover", "graph", "learn", "calendar", "metrics"]
+    assert re.findall(r'data-tab="(\w+)"', views) == ["discover", "graph", "learn", "calendar", "public", "metrics"]
     rail = INDEX[INDEX.index('<aside id="railmini"'):INDEX.index('<aside id="sidebar">')]
-    assert re.findall(r'data-tab="(\w+)"', rail) == ["discover", "graph", "learn", "calendar", "metrics"]
+    assert re.findall(r'data-tab="(\w+)"', rail) == ["discover", "graph", "learn", "calendar", "public", "metrics"]
     assert 'id="view-learn"' in INDEX and 'id="learn-bar"' in INDEX
     assert 'id="learn-crumb"' in INDEX and 'id="learn-back"' in INDEX and 'id="learn-end"' in INDEX
     # practice left the note's menu (ADR-0075) and came back as two items,
@@ -203,7 +203,7 @@ def test_shell_switches_loads_and_deep_links_the_learn_view():
     js = app_js()
     assert '$("#view-learn").classList.toggle("active", tab === "learn")' in js
     assert 'if (tab === "learn") loadLearn()' in js
-    assert '["chat", "discover", "graph", "learn", "calendar", "metrics"].includes(tab)' in js
+    assert '["chat", "discover", "graph", "learn", "calendar", "metrics", "public"].includes(tab)' in js
     assert '["graph", "learn"].includes(tab)' in js
     assert "async function loadLearn(" in js
     assert '#note-learn' not in js and "learnStartSession({ note: n.path" in js
@@ -212,7 +212,7 @@ def test_shell_switches_loads_and_deep_links_the_learn_view():
     assert '.split("/")[0]' in js[js.index("function tabFromHash"):]
     # the one writer of the hash (syncUrl, audit P7) keeps learn's own
     assert 'activeTab === "learn" && location.hash.startsWith("#learn")' in js
-    assert '["discover", "graph", "learn", "calendar", "metrics"].includes(bootTab)' in js
+    assert '["discover", "graph", "learn", "calendar", "metrics", "public"].includes(bootTab)' in js
     for h in ('"#learn/plan/"', '"#learn/note/"', '"#learn/plans"', '"#learn/map"', '"#learn/new"', '"#learn/edit/"',
               '"#learn/session/"', '"#learn/receipt/"'):
         assert h in js
