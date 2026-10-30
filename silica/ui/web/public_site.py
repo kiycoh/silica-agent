@@ -392,9 +392,21 @@ def build(vault: Path | None = None) -> dict:
     state = {"published_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
              "notes": shown}
     (root / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
+    _readable(build_dir, root)
     publish.swap_in(build_dir, h)
     return {"notes": len(shown), "links": len(pairs), "images": sum(1 for v in copied.values() if v),
             "url": site.base, "published_at": state["published_at"]}
+
+
+def _readable(build_dir: Path, root: Path) -> None:
+    """Every published file readable by others, whatever the umask: on the
+    server the account's unit writes with UMask=0077 and the web server reads
+    as another user (silica-hosted, ADR-0143 point 6). What is published is
+    public by definition; state.json beside it stays the account's."""
+    root.chmod(0o755)
+    build_dir.chmod(0o755)
+    for p in build_dir.rglob("*"):
+        p.chmod(0o755 if p.is_dir() else 0o644)
 
 
 def last_published(h: str) -> dict:

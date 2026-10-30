@@ -141,3 +141,20 @@ def test_a_new_publication_replaces_the_old_and_the_paused_one(marta):
     assert not (live / "forgetting-curve.html").exists()
     assert not (marta / "public" / "marta" / "paused").exists()
     assert not list((marta / "public" / "marta").glob(".build-*"))
+
+
+def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta):
+    import os
+    import stat
+
+    from silica.ui.web.public_site import build
+
+    old = os.umask(0o077)  # the hosted unit's
+    try:
+        build()
+    finally:
+        os.umask(old)
+    root = marta / "public" / "marta"
+    for p in [root, *(root / "live").rglob("*"), root / "live"]:
+        mode = stat.S_IMODE(p.stat().st_mode)
+        assert mode & 0o004, (p, oct(mode))
