@@ -6,12 +6,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-PAGE = "https://silica-agent.dev/@marta/spacing-effect"
+PAGE = "https://pages.silica-agent.dev/@marta/spacing-effect"
 MD = ("---\ntitle: Spacing effect\ntags:\n- memory\n---\n"
       "Reviews spread over days. It follows from the "
-      "[Forgetting curve](https://silica-agent.dev/@marta/forgetting-curve) and the "
-      "[Testing effect](https://silica-agent.dev/@marta/testing-effect).\n\n"
-      "How I use it: see Exam plan June.\n\n![hypnogram](https://silica-agent.dev/@marta/assets/1-h.png)\n")
+      "[Forgetting curve](https://pages.silica-agent.dev/@marta/forgetting-curve) and the "
+      "[Testing effect](https://pages.silica-agent.dev/@marta/testing-effect).\n\n"
+      "How I use it: see Exam plan June.\n\n![hypnogram](https://pages.silica-agent.dev/@marta/assets/1-h.png)\n")
 
 
 @pytest.fixture
@@ -114,13 +114,13 @@ def test_the_preview_reads_and_writes_nothing(client, fetched):
 def test_save_writes_a_snapshot_crediting_the_author_and_links_what_it_can(client, fetched, tmp_vault):
     tc, tmp = client
     tmp_vault.note("Saved/@marta/Forgetting curve.md",
-                   "---\nauthor: '@marta'\nsource: https://silica-agent.dev/@marta/forgetting-curve\n---\nEbb.\n")
+                   "---\nauthor: '@marta'\nsource: https://pages.silica-agent.dev/@marta/forgetting-curve\n---\nEbb.\n")
     path = tc.post("/vault/save", json={"url": PAGE}).json()["path"]
     assert path == "Saved/@marta/Spacing effect.md"
     text = (tmp / "vault" / path).read_text(encoding="utf-8")
     assert "author: '@marta'" in text and f"source: {PAGE}" in text and "form: clip" in text
     assert "[[Saved/@marta/Forgetting curve|Forgetting curve]]" in text
-    assert "[Testing effect](https://silica-agent.dev/@marta/testing-effect)" in text
+    assert "[Testing effect](https://pages.silica-agent.dev/@marta/testing-effect)" in text
     assert "see Exam plan June." in text
     # a second save is a second copy, never a rewrite of the first
     again = tc.post("/vault/save", json={"url": PAGE}).json()["path"]
@@ -131,11 +131,11 @@ def test_save_writes_a_snapshot_crediting_the_author_and_links_what_it_can(clien
 
 
 @pytest.mark.parametrize("url", [
-    "http://silica-agent.dev/@marta/spacing-effect",          # not https
+    "http://pages.silica-agent.dev/@marta/spacing-effect",          # not https
     "https://evil.test/@marta/spacing-effect",                 # not a listed host
-    "https://silica-agent.dev/@marta/spacing-effect?x=1",      # a query
-    "https://silica-agent.dev/notes/spacing-effect",           # not a page address
-    "https://silica-agent.dev@evil.test/@marta/x",             # a userinfo trick
+    "https://pages.silica-agent.dev/@marta/spacing-effect?x=1",      # a query
+    "https://pages.silica-agent.dev/notes/spacing-effect",           # not a page address
+    "https://pages.silica-agent.dev@evil.test/@marta/x",             # a userinfo trick
 ])
 def test_save_refuses_anything_but_a_public_page_address(client, fetched, url):
     tc, _ = client
@@ -175,13 +175,13 @@ def test_a_copy_credits_its_original_only_when_the_original_is_that_authors_page
 
     from silica.sources import web_fetch
 
-    copy = ("---\ntitle: Borrowed\nauthor: '@luca'\nsource: https://silica-agent.dev/@luca/borrowed\n---\nLuca's.\n")
+    copy = ("---\ntitle: Borrowed\nauthor: '@luca'\nsource: https://pages.silica-agent.dev/@luca/borrowed\n---\nLuca's.\n")
     monkeypatch.setattr(web_fetch, "_fetch", lambda url, headers=None, *, types=(), cap=0:
                         (httpx.Response(200, text=copy), url))
     tc, tmp = client
-    path = tc.post("/vault/save", json={"url": "https://silica-agent.dev/@marta/borrowed"}).json()["path"]
+    path = tc.post("/vault/save", json={"url": "https://pages.silica-agent.dev/@marta/borrowed"}).json()["path"]
     assert path == "Saved/@luca/Borrowed.md"
-    assert "source: https://silica-agent.dev/@luca/borrowed" in (tmp / "vault" / path).read_text(encoding="utf-8")
+    assert "source: https://pages.silica-agent.dev/@luca/borrowed" in (tmp / "vault" / path).read_text(encoding="utf-8")
 
 
 def test_hosted_without_an_address_offers_no_page(client, monkeypatch):
