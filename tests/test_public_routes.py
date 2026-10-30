@@ -153,3 +153,43 @@ def test_a_page_that_moved_to_another_host_is_not_saved(client, monkeypatch):
     tc, tmp = client
     assert tc.post("/vault/save", json={"url": PAGE}).status_code == 400
     assert not (tmp / "vault" / "Saved").exists()
+
+
+def test_a_hostile_page_cannot_pick_the_folder_or_the_credit(client, monkeypatch):
+    import httpx
+
+    from silica.sources import web_fetch
+
+    hostile = ("---\ntitle: Spacing effect\nauthor: \"../../x\"\nsource: https://evil.test/@marta/y\n---\nBody.\n")
+    monkeypatch.setattr(web_fetch, "_fetch", lambda url, headers=None, *, types=(), cap=0:
+                        (httpx.Response(200, text=hostile), url))
+    tc, tmp = client
+    path = tc.post("/vault/save", json={"url": PAGE}).json()["path"]
+    assert path == "Saved/@marta/Spacing effect.md"
+    text = (tmp / "vault" / path).read_text(encoding="utf-8")
+    assert "author: '@marta'" in text and f"source: {PAGE}" in text and "evil.test" not in text
+
+
+def test_a_copy_credits_its_original_only_when_the_original_is_that_authors_page(client, monkeypatch):
+    import httpx
+
+    from silica.sources import web_fetch
+
+    copy = ("---\ntitle: Borrowed\nauthor: '@luca'\nsource: https://silica-agent.dev/@luca/borrowed\n---\nLuca's.\n")
+    monkeypatch.setattr(web_fetch, "_fetch", lambda url, headers=None, *, types=(), cap=0:
+                        (httpx.Response(200, text=copy), url))
+    tc, tmp = client
+    path = tc.post("/vault/save", json={"url": "https://silica-agent.dev/@marta/borrowed"}).json()["path"]
+    assert path == "Saved/@luca/Borrowed.md"
+    assert "source: https://silica-agent.dev/@luca/borrowed" in (tmp / "vault" / path).read_text(encoding="utf-8")
+
+
+def test_hosted_without_an_address_offers_no_page(client, monkeypatch):
+    tc, _ = client
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    monkeypatch.delenv("SILICA_PUBLIC_BASE", raising=False)
+    assert tc.get("/public").json()["available"] is False
+    assert tc.post("/public/publish").status_code == 400
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test")
+    assert tc.get("/public").json()["available"] is True

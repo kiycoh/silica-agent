@@ -158,3 +158,14 @@ def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta):
     for p in [root, *(root / "live").rglob("*"), root / "live"]:
         mode = stat.S_IMODE(p.stat().st_mode)
         assert mode & 0o004, (p, oct(mode))
+
+
+def test_join_and_the_footer_point_at_the_app_not_the_public_hosts_root(marta, monkeypatch):
+    from silica.ui.web.public_site import build
+
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test")
+    monkeypatch.setenv("SILICA_PUBLIC_SAVE_URL", "https://app.test")
+    build()
+    page = (marta / "public" / "marta" / "live" / "index.html").read_text(encoding="utf-8")
+    assert 'href="https://app.test/">Join Silica' in page and 'href="https://app.test/">Published with Silica' in page
+    assert 'href="https://pages.test/"' not in page

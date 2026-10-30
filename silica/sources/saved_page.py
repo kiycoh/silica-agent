@@ -72,12 +72,18 @@ def saved_copies(handle: str, vault: Path | None = None) -> dict[str, str]:
 def _credit(props: dict, handle: str, url: str) -> tuple[str, str]:
     """(author, source) the copy carries. A page that is itself a saved copy
     names its original, and the new copy credits that one: provenance does
-    not chain through readers (ADR-0143 point 10)."""
-    author = props.get("author")
-    source = props.get("source")
-    if isinstance(author, str) and author.strip() and isinstance(source, str) \
-            and source.startswith("https://"):
-        return "@" + author.strip().lstrip("@"), source.strip()
+    not chain through readers (ADR-0143 point 10). Both come from a file
+    someone else wrote, so the credit is taken only when `source` is itself
+    a public page address and its handle is the declared author: anything
+    else (a path in `author`, a source elsewhere) credits the page fetched."""
+    author, source = props.get("author"), props.get("source")
+    if isinstance(author, str) and isinstance(source, str):
+        try:
+            orig, who, _slug = page_of(source)
+        except ValueError:
+            return f"@{handle}", url
+        if who == author.strip().lstrip("@"):
+            return f"@{who}", orig
     return f"@{handle}", url
 
 

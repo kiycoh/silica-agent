@@ -77,6 +77,15 @@ def page_url(vault: Path | None = None) -> str:
     return f"{base}/@{h}" if base and h else ""
 
 
+def available(vault: Path | None = None) -> bool:
+    """Whether this account can have a page. On the server it needs the
+    address too: without SILICA_PUBLIC_BASE the files link to each other as
+    plain files, which the host does not serve under /@handle."""
+    from silica.config import hosted
+
+    return bool(handle(vault)) and (bool(page_url(vault)) or not hosted())
+
+
 def settings(vault: Path | None = None) -> dict:
     """{"page": bool, "folders": [...]}: off and empty until the person says
     otherwise, so a vault never goes public by default."""

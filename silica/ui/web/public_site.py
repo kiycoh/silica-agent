@@ -108,9 +108,15 @@ def _report_link(url: str) -> str:
     return f' · <a href="{_esc(href)}">Report this page</a>'
 
 
+def _app() -> str:
+    """The app a reader is sent to: to save a page, or to join. The public
+    host answers nothing at its root (silica-hosted's caddy), so "Join" and
+    "Published with Silica" go here too."""
+    return os.environ.get("SILICA_PUBLIC_SAVE_URL", "").strip().rstrip("/") or "https://app.silica-agent.dev"
+
+
 def _save_link(url: str) -> str:
-    app = os.environ.get("SILICA_PUBLIC_SAVE_URL", "").strip().rstrip("/") or "https://app.silica-agent.dev"
-    return f"{app}/?save={quote(url, safe='')}"
+    return f"{_app()}/?save={quote(url, safe='')}"
 
 
 def _head(title: str, desc: str, site: _Site, *, canonical: str = "", md: str = "",
@@ -134,15 +140,13 @@ def _head(title: str, desc: str, site: _Site, *, canonical: str = "", md: str = 
 
 
 def _top(site: _Site, crumb: str = "") -> str:
-    join = (f'<a class="btn ghost small" href="{_esc(site.absolute().split("/@", 1)[0] + "/")}">Join Silica</a>'
-            if site.base else "")
+    join = f'<a class="btn ghost small" href="{_esc(_app() + "/")}">Join Silica</a>' if site.base else ""
     return (f'<header class="top"><a class="brand" href="{_esc(site.index())}">@{_esc(site.h)}</a>'
             f'{crumb}<span class="spacer"></span>{join}</header>\n')
 
 
 def _foot(site: _Site, url: str) -> str:
-    made = (f'<a href="{_esc(site.absolute().split("/@", 1)[0] + "/")}">Published with Silica</a>'
-            if site.base else "Published with Silica")
+    made = f'<a href="{_esc(_app() + "/")}">Published with Silica</a>' if site.base else "Published with Silica"
     return f'<footer class="foot">{made}{_report_link(url)}</footer>\n</body>\n</html>\n'
 
 
@@ -231,7 +235,7 @@ def build(vault: Path | None = None) -> dict:
 
     vault = vault or publish._vault()
     h = publish.handle(vault)
-    if not h:
+    if not publish.available(vault):
         raise ValueError("this account has no public address yet")
     sel = publish.selection(vault)
     fms = sel["frontmatter"]

@@ -81,7 +81,7 @@ def _view() -> dict:
     private += [{"title": title[p], "why": "saved from elsewhere: its own globe only"}
                 for p, s in notes.items() if s == "off" and in_public(p) and (fms.get(p) or {}).get("form") == "clip"]
     return {
-        "available": bool(h),
+        "available": publish.available(vault),
         "handle": h,
         "url": publish.page_url(vault),
         # where the files are, on a laptop: the person serves them; a hosted
@@ -159,7 +159,7 @@ async def public_publish():
     from silica.kernel import publish
     from silica.ui.web.public_site import build
 
-    if not publish.handle():
+    if not publish.available():
         raise HTTPException(400, "this account has no public address yet")
     publish.set_page(True)
     try:
