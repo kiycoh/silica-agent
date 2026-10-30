@@ -1304,6 +1304,26 @@ class ObsidianFSBackend(GraphIndexMixin):
         atomic_write_bytes(path, raw)
         self._body_cache.pop(str(path), None)
 
+    def unset_prop(self, ref: NoteRef | str, name: str) -> None:
+        """Remove a frontmatter property, and the block with it when it was the
+        last: a property set and then unset leaves the note as it was, which
+        set_prop(name, None) would not (it writes `name: null`). No type stamp,
+        for the same reason set_prop has none: the person changed one key."""
+        path = self._resolve_path(ref)
+        if not path.exists():
+            raise RuntimeError(f"File not found: {path}")
+        rel_path_str = contain_in_vault(str(path), self.vault_path)
+        content, crlf = _read_lf(path)
+        data, delim, body = fm.split(content)
+        if not data or name not in data:
+            return
+        data.pop(name)
+        new_content = fm.dump(data, body) if data else body.lstrip("\n")
+        raw = self._guard_write(rel_path_str, content, new_content, crlf, free=(name,))
+        session_changes.touched(rel_path_str, content)
+        atomic_write_bytes(path, raw)
+        self._body_cache.pop(str(path), None)
+
     @_locked
     def move(self, ref: NoteRef | str, to: str) -> None:
         """Move/rename a note, rewriting incoming wikilinks in all referrers.
