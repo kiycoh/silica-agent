@@ -320,6 +320,7 @@ function syncPinButton() {
   // put, since aria-pressed already says whether it is on.
   btn.dataset.tip = on ? "pinned: unpin this note" : "keep this note in the rail";
   if (typeof syncNoteWs === "function") syncNoteWs(); // its neighbour states the same note
+  if (typeof syncNotePub === "function") syncNotePub(); // and so does the globe (ADR-0143)
 }
 
 // The same pin, stated on the row it came from. Pinned is a state of the NOTE,
@@ -698,6 +699,9 @@ $("#tree").addEventListener("click", (e) => {
   // what a pin is for (naming it without going there).
   const pin = e.target.closest(".tree-pin");
   if (pin) { togglePin(pin.dataset.pin); return; }
+  // the globe (ADR-0143), also inside a folder's summary, as the plan is
+  const pub = e.target.closest(".tree-pub");
+  if (pub) { e.preventDefault(); togglePublicRow(pub); return; }
   // the row's menu (ADR-0123), also inside a folder's summary, where the
   // details must not toggle under it
   const more = e.target.closest(".tree-more");
@@ -1572,11 +1576,13 @@ function showTab(tab) {
   $("#view-learn").classList.toggle("active", tab === "learn");
   $("#view-calendar").classList.toggle("active", tab === "calendar");
   $("#view-metrics").classList.toggle("active", tab === "metrics");
+  $("#view-public").classList.toggle("active", tab === "public");
   if (tab === "graph") setGraphMode(graphMode); // load the active mode's content
   if (tab === "discover") loadDiscover();
   if (tab === "learn") loadLearn();
   if (tab === "calendar") loadCalendar();
   if (tab === "metrics") loadMetrics();
+  if (tab === "public") loadPublicView();
   // Deep-linkable views: the hash names the tab, the chat, the surface and the
   // open note (audit P7). Learn keeps its own sub-states in the hash
   // (#learn/plan/…, #learn/session/…) so Back and Forward restore them
@@ -1600,7 +1606,7 @@ let pendingGraphMode = "";
 function tabFromHash() {
   const { slug, arg, note } = parseHash();
   const tab = viewOfSlug(slug);
-  if (["chat", "discover", "graph", "learn", "calendar", "metrics"].includes(tab) && tab !== activeTab) showTab(tab);
+  if (["chat", "discover", "graph", "learn", "calendar", "metrics", "public"].includes(tab) && tab !== activeTab) showTab(tab);
   // Back and Forward walk the chats and the surfaces, not only the tabs.
   if (tab === "chat" && arg && arg !== currentSessionId && !streaming) openSession(arg, true);
   if (tab === "graph" && arg && arg !== graphMode) {

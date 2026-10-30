@@ -353,7 +353,8 @@ def build(vault: Path | None = None) -> dict:
                 + (f'<aside class="side">{side}</aside>' if side else "") + "</div>\n"
                 + _foot(site, url or slug))
         (build_dir / f"{slug}.html").write_text(page, encoding="utf-8")
-        kept = {k: props[k] for k in _SHOWN_PROPS if k in props}
+        # the title always, so a saver names the copy as the page does
+        kept = {"title": titles[p], **{k: props[k] for k in _SHOWN_PROPS if k in props and k != "title"}}
         if credit:
             kept.update({"author": f"@{credit}", **({"source": source} if source else {})})
         md = _md_for_reader(r["body"], resolve, href_of)
@@ -361,7 +362,7 @@ def build(vault: Path | None = None) -> dict:
 
     own = [p for p in shown if not _author(rendered[p]["props"], h)]
     others = [p for p in shown if _author(rendered[p]["props"], h)]
-    pairs = {tuple(sorted(e)) for e in edges if e[0] in rendered and e[1] in rendered and e[0] != e[1]}
+    pairs = {(min(a, b), max(a, b)) for a, b in edges if a in rendered and b in rendered and a != b}
 
     def row(p: str) -> str:
         deg = sum(1 for e in pairs if p in e)
@@ -374,7 +375,7 @@ def build(vault: Path | None = None) -> dict:
     lists = f'<ol class="plist">{"".join(row(p) for p in by_title(own))}</ol>'
     if others:
         lists += f'<h2 class="lab sub">Saved from others</h2><ol class="plist">{"".join(row(p) for p in by_title(others))}</ol>'
-    svg = _graph_svg(shown, {e for e in pairs}, titles, slugs, site)
+    svg = _graph_svg(shown, pairs, titles, slugs, site)
     meta = f'{len(shown)} {"note" if len(shown) == 1 else "notes"} · {len(pairs)} links · updated {stamp}'
     index = (_head(f"@{h} · Silica", f"{len(shown)} notes by @{h}", site, canonical=site.base, lang=lang)
              + "<body>\n" + _top(site)

@@ -77,7 +77,7 @@ def test_a_link_to_a_private_note_is_its_words_and_a_public_one_a_link(marta):
     md = (marta / "public" / "marta" / "live" / "spacing-effect.md").read_text(encoding="utf-8")
     assert "[Forgetting curve](forgetting-curve.html)" in md
     assert "see Exam plan June." in md and "[[" not in md
-    assert md.startswith("---\ntags:")
+    assert md.startswith("---\ntitle: Spacing effect\ntags:")
 
 
 def test_only_images_a_public_note_cites_are_copied(marta):

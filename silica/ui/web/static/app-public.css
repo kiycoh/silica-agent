@@ -1,0 +1,415 @@
+/* --- Public page (ADR-0143) ---------------------------------------------------
+   The view in Learn's frame (a bar on --slate, a body that scrolls), its boxes
+   in the hairline grammar of the settings rows, and the globe: the pin's
+   twin on every row, lit in the signal when a note is on the page, in the dim
+   ink when the whole page is off, struck when left out of a public folder. */
+
+#public-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.9rem;
+  background: var(--slate);
+  flex-shrink: 0;
+}
+
+#public-url {
+  color: var(--accent);
+  font-size: var(--fs-ctl);
+  text-decoration: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#public-url:hover {
+  text-decoration: underline;
+}
+
+#public-switch {
+  display: flex;
+  gap: 2px;
+  background: var(--slate-2);
+  border-radius: var(--r-sm);
+  padding: 2px;
+}
+
+#public-switch button {
+  border: 0;
+  background: transparent;
+  color: var(--ash);
+  padding: 4px 14px;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-ctl);
+}
+
+#public-switch button.active {
+  background: var(--sel);
+  color: var(--frost);
+  font-weight: 500;
+}
+
+#public-switch button[data-page="on"].active {
+  color: var(--accent);
+}
+
+#public-switch button:focus-visible,
+.pp-go:focus-visible,
+.tree-pub:focus-visible,
+#note-pub:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+#public-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.1rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  container-type: inline-size;
+}
+
+.pp-status {
+  margin: 0;
+  color: var(--ash);
+  font-size: var(--fs-ctl);
+  max-width: var(--measure);
+}
+
+.pp-dim {
+  margin: 0;
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+}
+
+.pp-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  max-width: var(--measure);
+}
+
+@container (max-width: 620px) {
+  .pp-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.pp-box {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+.pp-box.wide {
+  grid-column: 1 / -1;
+}
+
+.pp-box h3 {
+  margin: 0 0 6px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--ash-dim);
+}
+
+.pp-box h3 b {
+  color: var(--frost);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pp-box ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+  font-size: var(--fs-ctl);
+}
+
+.pp-box li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 10px;
+  color: var(--text);
+}
+
+.pp-box.wide ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pp-box.wide li {
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 1px 10px;
+}
+
+.pp-box.wide li.pp-none {
+  border: 0;
+  padding: 1px 0;
+}
+
+.pp-aside {
+  margin-left: auto;
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+  text-align: right;
+}
+
+.pp-none {
+  color: var(--ash-dim);
+}
+
+.pp-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  max-width: var(--measure);
+}
+
+.pp-go {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--on-vivid);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pp-go:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pp-actions .pp-dim {
+  flex: 1;
+  min-width: 14rem;
+}
+
+/* the globe on a row: the pin's size, shown as the pin is (hover, focus, on) */
+.tree-pub {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ash-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.tree-pub[hidden] {
+  display: none;
+}
+
+#tree summary .tree-pub {
+  float: right;
+  display: inline-grid;
+  height: 18px;
+}
+
+.tree-row:hover .tree-pub,
+#tree summary:hover .tree-pub,
+.tree-pub.on,
+.tree-pub.struck {
+  opacity: 1;
+}
+
+.tree-pub:hover {
+  color: var(--frost);
+}
+
+.tree-pub.on,
+#note-pub.on {
+  color: var(--accent);
+}
+
+.tree-pub.paused,
+#note-pub.paused {
+  color: var(--ash-dim);
+}
+
+@media (hover: none) {
+  .tree-pub {
+    opacity: 1;
+  }
+}
+
+/* the note's globe, the pin's twin beside it (app-panels.css #note-pin) */
+#note-pub {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ash-dim);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+
+#note-pub[hidden] {
+  display: none;
+}
+
+#note-pub:hover {
+  color: var(--frost);
+}
+
+#note-pub-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+#note-pub-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: -8rem;
+  z-index: 40;
+  width: 19rem;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--lift), var(--glass-edge);
+  padding: 0.8rem;
+}
+
+#note-pub-pop[hidden] {
+  display: none;
+}
+
+.np-text {
+  margin: 0 0 0.7rem;
+  color: var(--text);
+  font-size: var(--fs-ctl);
+  line-height: 1.5;
+}
+
+.np-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* over a saved note's text, as .note-paper is over a paper's */
+.note-saved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0 0 0.8rem;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--slate);
+  color: var(--ash);
+  font-size: var(--fs-ctl);
+}
+
+.note-saved a {
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* a note from someone else's page, cited in the chat */
+#log .note-link[data-from]::after,
+#log .wc-open[data-from]::after {
+  content: " · from " attr(data-from);
+  color: var(--ash-dim);
+  font-size: 0.85em;
+}
+
+#save-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: var(--scrim);
+}
+
+#save-sheet[hidden] {
+  display: none;
+}
+
+.sv-card {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  margin-bottom: 0.6rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--slate);
+  color: var(--ash);
+  font-size: var(--fs-ctl);
+}
+
+.sv-card b {
+  color: var(--frost);
+  font-size: 15px;
+}
+
+.sv-card code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ash-dim);
+  overflow-wrap: anywhere;
+}
+
+.sv-links {
+  list-style: none;
+  margin: 0.3rem 0 0.6rem;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: var(--fs-ctl);
+}
+
+.sv-links li {
+  display: flex;
+  gap: 10px;
+  color: var(--frost);
+}
+
+.sv-snap {
+  margin: 0.6rem 0 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text);
+  font-size: var(--fs-ctl);
+}
+
+#save-card .st-sheet-text + .st-sheet-text {
+  margin-top: 0.4rem;
+}

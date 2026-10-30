@@ -1208,7 +1208,10 @@ async function openNote(path, line, facts) {
   lastViewedPath = data.path;
   drawerMode = "note";
   holdNote(drawerNote, data);
-  ed.load(data.text, { top: data.paper ? paperStripEl(data.paper) : null, missing: data.broken || [] });
+  // a saved note names its author over the text as a paper does (ADR-0143 point 11)
+  const top = data.paper ? paperStripEl(data.paper)
+    : data.saved && typeof savedStripEl === "function" ? savedStripEl(data.saved) : null;
+  ed.load(data.text, { top, missing: data.broken || [] });
   focusGraphNode(data.path);
   showDrawer(data.title || data.path);
   ed.view.requestMeasure(); // it was measured while hidden

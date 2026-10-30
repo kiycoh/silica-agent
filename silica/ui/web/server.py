@@ -4366,11 +4366,25 @@ def _note_identity(canon: str, props: dict | None) -> dict:
     its citekey stem. One helper because the reader and the editor's raw read
     both head the drawer, and two copies of the rule would title it twice."""
     if not props or not props.get("zotero_key"):
-        return {"title": _clean_name(canon)}
+        return {"title": _clean_name(canon), **_saved_identity(props)}
     from silica.ui.web.zotero_web import _PAPER_FM
 
     return {"title": str(props.get("title") or "") or _clean_name(canon),
             "paper": {k: props[k] for k in _PAPER_FM if props.get(k)}}
+
+
+def _saved_identity(props: dict | None) -> dict:
+    """A note saved from another page names its author over the text, as a
+    paper names its own (ADR-0143 point 11); {} for the person's own notes."""
+    props = props or {}
+    author = props.get("author")
+    if not isinstance(author, str) or not author.strip():
+        return {}
+    raw = props.get("source")
+    source = raw if isinstance(raw, str) else ""
+    return {"saved": {"author": "@" + author.strip().lstrip("@"),
+                      "source": source if source.startswith("https://") else "",
+                      "saved": str(props.get("saved") or "")}}
 
 
 def _broken_links(text: str, resolve) -> list[str]:
@@ -6879,6 +6893,10 @@ app.include_router(_jobs_router)
 from silica.ui.web.discover_routes import router as _discover_router  # noqa: E402
 
 app.include_router(_discover_router)
+
+from silica.ui.web.public_routes import router as _public_router  # noqa: E402
+
+app.include_router(_public_router)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
