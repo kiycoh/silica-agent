@@ -76,7 +76,7 @@ def _view() -> dict:
     for f in folders:
         under = [p for p, s in notes.items() if s != "never" and (p == f or p.startswith(f + "/"))]
         by_folder.append({"folder": f, "on": sum(1 for p in under if notes[p] == "on"), "of": len(under)})
-    private = [{"title": title[p], "why": "left out of " + next(f for f in folders if in_public(p) and p.startswith(f))}
+    private = [{"title": title[p], "why": "left out of " + next(f for f in folders if p.startswith(f + "/"))}
                for p, s in notes.items() if s == "struck"]
     private += [{"title": title[p], "why": "saved from elsewhere: its own globe only"}
                 for p, s in notes.items() if s == "off" and in_public(p) and (fms.get(p) or {}).get("form") == "clip"]
