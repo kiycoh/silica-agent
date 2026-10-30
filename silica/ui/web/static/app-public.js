@@ -361,6 +361,7 @@ $("#save-go").addEventListener("click", async () => {
   }
   closeSaveSheet();
   notify(`Saved to ${d.path}`, "info");
+  await loadVaultInfo(); // the tree shows the copy now, not at the next poll
   openNote(d.path);
 });
 

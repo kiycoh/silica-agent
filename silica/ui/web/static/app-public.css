@@ -413,3 +413,9 @@
 #save-card .st-sheet-text + .st-sheet-text {
   margin-top: 0.4rem;
 }
+
+/* the note sidebar's corner toggle sits over a view's bar when the drawer is
+   shut; the other views' bars make room for it (app-panels.css drawer-recall) */
+body.drawer-recall #public-bar {
+  padding-right: 52px;
+}

@@ -208,7 +208,11 @@ def _graph_svg(public: list[str], edges: set[tuple[str, str]], titles: dict, slu
     for n in sorted(public):
         x, y = at(n)
         r = 4.5 + 1.6 * min(g.degree(n), 9) ** 0.5
-        label = (f'<text x="{x + r + 5:.1f}" y="{y + 4:.1f}">{_esc(titles[n])}</text>'
+        # a node on the right third names itself leftward, or its name runs
+        # off the drawing
+        left = x > w * 0.62
+        label = (f'<text x="{x - r - 5 if left else x + r + 5:.1f}" y="{y + 4:.1f}"'
+                 f'{" text-anchor=\"end\"" if left else ""}>{_esc(titles[n])}</text>'
                  if n in named else "")
         out.append(f'<a href="{_esc(site.href(slugs[n]))}"><title>{_esc(titles[n])}</title>'
                    f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}"/>{label}</a>')
