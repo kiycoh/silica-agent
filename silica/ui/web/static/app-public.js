@@ -140,6 +140,14 @@ $("#note-pub").addEventListener("click", (e) => {
   else pubPost("/public/note", { path, on });
 });
 
+// a dialog in the one focus trap (app-settings.js DIALOGS), so Escape is its way out
+$("#note-pub-pop").addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  e.stopPropagation();
+  $("#note-pub-pop").hidden = true;
+  $("#note-pub").focus();
+});
+
 $("#note-pub-pop").addEventListener("click", (e) => {
   e.stopPropagation();
   const pick = e.target.closest("[data-np]");

@@ -101,7 +101,7 @@ def test_the_strip_is_gone_and_the_views_are_rows_of_the_drawer():
     rail = _block(html, '<aside id="sidebar">', "</aside>")
     views = _block(rail, '<nav id="views"', "</nav>")
     # Discover first, right under New chat (ADR-0137 decision 1).
-    assert re.findall(r'data-tab="(\w+)"', views) == ["discover", "graph", "learn", "calendar", "metrics"]
+    assert re.findall(r'data-tab="(\w+)"', views) == ["discover", "graph", "learn", "calendar", "public", "metrics"]
     assert rail.index('id="vault-chip"') < rail.index('id="new-chat"') < rail.index('<nav id="views"') \
         < rail.index('id="side-tabs"') < rail.index('id="side-search"') < rail.index('id="side-vault"')
     assert 'data-tab="chat"' not in html
