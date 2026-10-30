@@ -195,6 +195,11 @@ def test_links_point_at_the_persons_own_files_and_the_rest_travel(tmp_vault):
     # the person's own lecture and its leaf do not.
     assert names == {"Biology/Cell.md", "Biology/Other.md", "sources/web/Page.md", "Inbox/Images/fig.png"}
     assert plan.notes == 3
+    # Only the notes whose links are rewritten are held in memory; an image
+    # streams from disk (point 6), as a vault full of figures needs.
+    sources = {name.removeprefix(f"{TOP}/"): src for name, src, _ in plan.files}
+    assert isinstance(sources["Inbox/Images/fig.png"], Path)
+    assert isinstance(sources["sources/web/Page.md"], Path)
 
 
 # --- point 5: the + remembers a folder that was an Obsidian vault --------------

@@ -151,6 +151,19 @@ def _read(p: Path) -> bytes | None:
         return None  # deleted by a turn since the walk: not part of the vault any more
 
 
+def _sha(p: Path) -> str | None:
+    """A file's sha256 read in chunks: an image or a leaf is sent from disk,
+    never held whole, as point 6 holds for the archive itself."""
+    h = hashlib.sha256()
+    try:
+        with open(p, "rb") as fh:
+            while chunk := fh.read(_CHUNK):
+                h.update(chunk)
+    except FileNotFoundError:
+        return None  # deleted by a turn since the walk
+    return h.hexdigest()
+
+
 def _links(text: str):
     """The wikilinks of `text` outside code and math, its frontmatter's
     included: Silica writes links into properties too (rename.py, A19)."""
@@ -213,20 +226,25 @@ def plan_additions(vault: Path, state: dict, top: str) -> Plan:
                 return str(PurePosixPath(below).with_name(PurePosixPath(raw).name))
         return below
 
-    carried: dict[str, tuple[bytes, str]] = {}
+    carried: dict[str, str] = {}  # vault path -> sha256 of what goes
+    raw: dict[str, bytes] = {}     # the notes whose links are rewritten; the rest stays on disk
 
-    def carry(rel: str, data: bytes | None) -> None:
+    def carry(rel: str, data: bytes | None = None) -> None:
         # Sent before at this path, or moved since with the same bytes: the
         # sha256 alone would drop a distinct note that happens to match one.
-        if data is None or rel in sent or rel in carried:
+        if rel in sent or rel in carried:
             return
-        sha = hashlib.sha256(data).hexdigest()
-        if sha not in gone:
-            carried[rel] = (data, sha)
+        sha = hashlib.sha256(data).hexdigest() if data is not None else _sha(files[rel])
+        if sha and sha not in gone:
+            carried[rel] = sha
+            if data is not None:
+                raw[rel] = data
 
     for rel, p in files.items():
         if rel.lower().endswith(".md") and not theirs(rel):
-            carry(rel, _read(p))
+            data = _read(p)
+            if data is not None:
+                carry(rel, data)
     notes = list(carried)
 
     def resolve(target: str, bang: str) -> str | None:
@@ -238,15 +256,15 @@ def plan_additions(vault: Path, state: dict, top: str) -> Plan:
 
     texts: dict[str, str] = {}
     for rel in notes:
-        texts[rel] = text = carried[rel][0].decode("utf-8", "replace")
+        texts[rel] = text = raw[rel].decode("utf-8", "replace")
         for m in _links(text):
             got = resolve(m.group(2), m.group(1))
             if not got or got in carried or below_root(got):
                 continue
             if m.group(1) and not got.lower().endswith(".md"):
-                carry(got, _read(files[got]))        # an image the note shows
+                carry(got)        # an image the note shows
             elif got.startswith(leaves + "/"):
-                carry(got, _read(files[got]))        # the leaf of a source the person has no copy of
+                carry(got)        # the leaf of a source the person has no copy of
 
     def where(rel: str) -> str | None:
         if rel in carried:
@@ -276,7 +294,7 @@ def plan_additions(vault: Path, state: dict, top: str) -> Plan:
         # shortcut: wikilinks only; a markdown link to a vault path is left as
         # written and not counted, since Silica writes wikilinks. Reopen if
         # G1's vault holds one.
-        out[rel] = ("".join(parts) + text[at:]).encode("utf-8") if parts else carried[rel][0]
+        out[rel] = ("".join(parts) + text[at:]).encode("utf-8") if parts else raw[rel]
 
     entries: list[tuple[str, Path | bytes, float | None]] = []
     for rel in sorted(carried):
@@ -284,8 +302,8 @@ def plan_additions(vault: Path, state: dict, top: str) -> Plan:
             mtime = files[rel].stat().st_mtime
         except OSError:
             mtime = None
-        entries.append((f"{top}/{rel}", out.get(rel, carried[rel][0]), mtime))
-    return Plan(top, entries, {rel: {"sha256": sha, "folder": top} for rel, (_, sha) in carried.items()},
+        entries.append((f"{top}/{rel}", out[rel] if rel in out else files[rel], mtime))
+    return Plan(top, entries, {rel: {"sha256": sha, "folder": top} for rel, sha in carried.items()},
                 sum(rel.lower().endswith(".md") for rel in carried), left)
 
 
