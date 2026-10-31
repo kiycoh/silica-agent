@@ -30,9 +30,10 @@ _NEAR_PER_READ = 60
 # only within one call and sat between -0.2 and 0.22 for every query on this
 # machine's reranker.
 # A floor belongs to one embedder (ADR-0078). Measured 2026-10-31 on
-# tests/fixtures/synthetic_vault with the 1,716 stories of one Discover store,
-# 139 of them labeled blind to the score (20 unrelated, 87 tangent, 32 match);
-# the median top-1 cosine of each class:
+# tests/fixtures/synthetic_vault with the 1,716 stories of one Discover store.
+# 139 were labeled blind to the score (20 unrelated, 87 tangent, 32 match):
+# every story above the floors and a few per score band below, so these are
+# the median top-1 cosines of the labeled stories of each class:
 #   jina-embeddings-v5-text-small  0.154 / 0.357 / 0.445  floor 0.40
 #   pplx-embed-v1-4b               0.100 / 0.248 / 0.316  floor 0.28
 # Each floor is the midpoint of the tangent and match medians (jina's agrees

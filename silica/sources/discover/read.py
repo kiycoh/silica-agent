@@ -48,11 +48,13 @@ _YT_LIST = 12
 #   - the highest different-event pair is 0.75 on pplx-embed-v1-4b and 0.79 on
 #     jina-embeddings-v5-text-small, one Wired pair (a Kindle buying guide and
 #     a Kindle review); the next are 0.73 and 0.72.
-#   - group() at 0.74 makes 416 stories on pplx and 412 on jina, one of them
-#     mixing two events on each (that same pair), B-cubed precision 0.998 on
-#     both and recall 0.89 and 0.90. At 0.72 pplx mixes events in 6 stories and
-#     jina in 2; at 0.76 pplx mixes none.
-# The embedders land within 0.02, under the 0.05 that separated the first
+#   - group() at 0.74 makes 416 stories on pplx and 412 on jina, one on each
+#     mixing two events (that same pair). It is precision first: of the 38
+#     events with several articles 14 (pplx) and 15 (jina) end whole in one
+#     story, and an article with partners finds 61% and 65% of them. At 0.70
+#     that is 19 and 21 events whole and 7 and 4 stories mixing events.
+# The embedders land within 0.04 of each other whichever line is drawn (fewest
+# mixed stories, pair precision), under the 0.05 that separated the first
 # reading's two lines, so one value serves both (the hosted one is pplx).
 # shortcut: one judge (the agent, blind to the cosines), English feeds, three
 # days. Re-label 300 pairs by 2027-01-31, or when the first feed in another
