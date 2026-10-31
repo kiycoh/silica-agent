@@ -36,14 +36,27 @@ COVER_CAP = 2 * 1024 * 1024
 # so a first read of 300 stories does not open 300 pages before it ends.
 _PAGE_LOOKUPS = 30
 _YT_LIST = 12
-# Measured 2026-10-28 on 343 articles from eleven of the News starters, title
-# plus lead through the vault's embedder (jina-embeddings-v5-text-small):
-# same-event pairs ran down to 0.74 (Bolsonaro 0.746, the methane rules
-# 0.741, the Anthropic IPO 0.740) and the first wrong merge sat at 0.688. A
-# new article joins the nearest story centroid at or above this.
-# shortcut: one day of one embedder; re-measure on three days of the News
-# bucket, as ADR-0137 "Left to the build" asks, by 2026-11-04, and per
-# embedder when the hosted one differs.
+# A new article joins the nearest story centroid at or above this. The first
+# reading (2026-10-28, jina, 343 articles of one day) put same-event pairs down
+# to 0.74 and the first wrong merge at 0.688. Re-measured 2026-10-31 on the 477
+# News articles of 10-28 to 10-30, title plus lead through _embed, with every
+# pair at or above 0.60 on either embedder labeled by hand (350 pairs; a later
+# step of the same saga counts as another event) and group() itself run
+# against the labeled events:
+#   - same-event pairs do not stop at 0.74: on both embedders they run down
+#     to 0.60, the lowest cosine labeled.
+#   - the highest different-event pair is 0.75 on pplx-embed-v1-4b and 0.79 on
+#     jina-embeddings-v5-text-small, one Wired pair (a Kindle buying guide and
+#     a Kindle review); the next are 0.73 and 0.72.
+#   - group() at 0.74 makes 416 stories on pplx and 412 on jina, one of them
+#     mixing two events on each (that same pair), B-cubed precision 0.998 on
+#     both and recall 0.89 and 0.90. At 0.72 pplx mixes events in 6 stories and
+#     jina in 2; at 0.76 pplx mixes none.
+# The embedders land within 0.02, under the 0.05 that separated the first
+# reading's two lines, so one value serves both (the hosted one is pplx).
+# shortcut: one judge (the agent, blind to the cosines), English feeds, three
+# days. Re-label 300 pairs by 2027-01-31, or when the first feed in another
+# language is read by default.
 GROUP_AT = 0.74
 # Research and Video are lists of their own items: two papers on one topic
 # are two papers, not one event. Every other bucket (News, a catalog topic)
