@@ -218,3 +218,17 @@ class TestRepl:
             monkeypatch,
         )
         assert printed == [[_note("243")], [], [_note("242")], []]
+
+
+def test_a_seed_cached_for_another_vault_is_not_reused(tmp_vault, monkeypatch):
+    """The suite's 2026-10-31 failure: a seed another test built, its "55" read
+    as evidence, left only "60" unread. A prewarm ending after a vault switch
+    does the same to a real chat."""
+    from silica.ui.web import server
+
+    stale = [{"role": "system", "content": "another vault's map: 55 notes"}]
+    monkeypatch.setattr(server, "_seed", (stale, 1))
+    monkeypatch.setattr(server, "_seed_vault", "/elsewhere")
+    msgs, _ = server._seeded()
+    assert all("55 notes" not in str(m.get("content")) for m in msgs)
+

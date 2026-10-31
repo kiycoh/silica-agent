@@ -80,14 +80,21 @@ current_workspace: str | None = None  # vault path of the workspace this chat is
 # vault). Built at startup, refreshed in the background after each turn (the
 # turn may have written notes). (messages, their token count).
 _seed: tuple[list[dict], int] | None = None
+# The vault the cached seed was built from. A prewarm started before a vault
+# switch can end after it and leave the old vault's map for the next chat; in
+# the suite one test inherited another test's seed, whose numbers then read as
+# evidence the turn had seen (test_unread_numbers_chat, 2026-10-31).
+_seed_vault: str | None = None
 
 
 def _build_seed() -> tuple[list[dict], int]:
     """Compute the fresh-session seed. Never touches the live session state:
     uses the pure token counter so a background rebuild can't clobber the
     context meter of the conversation in progress."""
-    global _seed
+    global _seed, _seed_vault
     from silica.cli import _chat_tool_schemas, _count_context_tokens, seed_messages
+
+    vault = CONFIG.vault_path  # before the build: a switch during it must not label the old map as the new vault's
 
     # The same builder the TUI seeds from, math=True for the MathML renderer,
     # app=True for the help panel the chat answers from (ADR-0115).
@@ -96,6 +103,8 @@ def _build_seed() -> tuple[list[dict], int]:
     # counted without the block, a fresh window read 2.1k and jumped to 9.3k on
     # the first turn, so the meter's opening number disagreed with its next one.
     _seed = (msgs, _count_context_tokens(msgs, _chat_tool_schemas(msgs)))
+    # After _seed: a reader between the two sees a vault that does not match and builds again.
+    _seed_vault = vault
     return _seed
 
 
@@ -136,7 +145,8 @@ def _seeded() -> tuple[list[dict], int]:
     """
     from silica.kernel import user_memory
 
-    seed_msgs, seed_tokens = _seed if _seed is not None else _build_seed()
+    cached, built_for = _seed, _seed_vault  # read once: /instructions can set _seed to None meanwhile
+    seed_msgs, seed_tokens = cached if cached is not None and built_for == CONFIG.vault_path else _build_seed()
     msgs = [dict(m) for m in seed_msgs]  # per-message copy; the seed's own dicts stay untouched
     if user_memory.refresh_snapshot(msgs):
         from silica.cli import _chat_tool_schemas, _count_context_tokens
