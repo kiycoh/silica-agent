@@ -170,11 +170,11 @@ COMMANDS: tuple[Command, ...] = (
         examples=('/slides "Lezione 13"', '/slides "Lezione 13" --save="Corso/ML/Lezione 13 - slides.md"'),
     ),
     Command(
-        name="/learn",
+        name="/memorize",
         group="workflow",
         usage="<area|folder|note|topic>",
         summary="guided re-learning: builds (or resumes) a syllabus note calibrated on what you still retain, then teaches step by step with quiz gates",
-        examples=("/learn Concepts/ML", '/learn "differential forms"'),
+        examples=("/memorize Concepts/ML", '/memorize "differential forms"'),
     ),
     # Direct — immediate, no LLM round-trip
     Command(

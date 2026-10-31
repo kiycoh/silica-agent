@@ -190,7 +190,7 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 "what the microphone expects"),
             Row("SILICA_STT_BROWSER", "stt_browser", "browser speech", "enum",
                 "the browser's own recognizer, when no transcriber answers, and its voices "
-                "for reading Learn aloud · on-device keeps audio on this machine, "
+                "for reading Memorize's questions aloud · on-device keeps audio on this machine, "
                 "cloud may send it to the browser's vendor",
                 options=("off", "on-device", "cloud")),
             Row("SILICA_PDF_PROVIDER", "pdf_provider", "pdf reader", "enum",
@@ -251,7 +251,7 @@ def _hosted_row(row: Row) -> Row:
         # privacy notice does not name.
         return replace(row, options=("off", "on-device"), help=(
             "the browser's own recognizer, when no transcriber answers, and its "
-            "voices for reading Learn aloud · on-device keeps audio on this device"))
+            "voices for reading Memorize's questions aloud · on-device keeps audio on this device"))
     return row
 
 

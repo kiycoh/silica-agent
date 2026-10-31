@@ -190,7 +190,7 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
             # the rail's one folder action, Learn's "Plan this folder"
             # (ADR-0081 §17); the frame has no Learn tab to send it to
             plan = (f'<button type="button" class="tree-plan" data-folder="{html.escape(folder, quote=True)}" '
-                    f'title="plan this folder in Learn" aria-label="plan the folder {html.escape(name, quote=True)}">'
+                    f'title="plan this folder in Memorize" aria-label="plan the folder {html.escape(name, quote=True)}">'
                     f"plan</button>") if actions else ""
             more = _more_button(folder.rstrip("/"), name, folder=True) if actions else ""
             # the folder's globe (ADR-0143 point 2), drawn hidden: app-public.js
@@ -455,7 +455,7 @@ def _frame_context(
     n_native = sum(1 for n in nodes if n.get("type") in NATIVE_TYPES)
     native_row = (
         f'<div class="filter-row" style="margin-top:4px" title="A note a Silica feature runs '
-        f'on: a Learn plan (type: plan) or an event note (event_start). Drawn with its links, '
+        f'on: a Memorize plan (type: plan) or an event note (event_start). Drawn with its links, '
         f'and none of them is counted: no area, size, hub or orphan moves because of one.">'
         f'<span class="dia"></span>Silica notes'
         f'<span class="ct">{n_native}</span>'

@@ -595,7 +595,7 @@ def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
     scoped = plans.scope_of(p, notes=notes)
     node = mastery.node_readings(scoped["paths"], rows, entries, p.get("created"), p["objectives"])
     frontier = scoped["frontier"]
-    gaps = [s for s in p["steps"] if not s["notes"]]
+    gaps = [s for s in p["steps"] if plans.is_gap(s, notes)]
     passed = sum(mastery.steps_passed(p, entries, notes=notes)) if p["steps"] else None
     nxt = None
     # a queued note is asked first (pick.session takes revisit before the
@@ -615,8 +615,7 @@ def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
         "coverage": node["coverage"], "due": node["due"], "R_mean": node["R_mean"], "frontier": [plans.Path(x).stem for x in frontier],
         "next": nxt, "revisit": len(scoped["revisit"]), "gaps": len(gaps), "steps": len(p["steps"]),
         "steps_passed": passed, "all_met": node["all_met"], "met_by_objective": node["met_by_objective"],
-        "unit": "steps passed" if p["steps"] else "notes practised",
-        "progress": [passed or 0, len(p["steps"])] if p["steps"] else list(node["coverage"]),
+        "percent": plans.percent_done(node["all_met"], node["coverage"][1], len(gaps)),
         "open_session": bool(_LIVE and _LIVE["plan"] == p["path"]),
         "pace": plans.pace_of(p, len(scoped["paths"]) - node["all_met"], entries=entries),
     }

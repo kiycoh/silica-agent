@@ -177,7 +177,7 @@ The question ends with a question mark and asks for one point; the answer is sho
 """
 CARD_RETRY = ("Your reply had no line of the form `question? :: answer [[note title]]`. "
               "Write the cards again, in that form only.")
-PRACTICE_LINE = "Graded practice that counts toward your plan: /quiz or a Learn session."
+PRACTICE_LINE = "Graded practice that counts toward your plan: /quiz or a Memorize session."
 CARD_TITLES_SHOWN = 3    # notes named in the deck's title; a folder's thirty would fill the screen
 
 

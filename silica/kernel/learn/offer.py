@@ -251,11 +251,11 @@ def plan_offer(text: str, plans: list[dict]) -> dict | None:
     if active:
         p = active[0]
         by = f", by {p['by']}" if p.get("by") else ""
-        return {"kind": "study", "text": f"Learn tracks a plan for this: {p['name']}{by}", "note": p["path"],
-                "commands": [{"label": "open it", "href": "#learn/plan/" + quote(p["path"], safe="")},
-                             {"label": "continue it", "command": "/learn"}]}
-    return {"kind": "study", "text": "Learn can track this as a plan, paced to its date", "note": "",
-            "commands": [{"label": "write it as a plan", "href": "#learn/new"}]}
+        return {"kind": "study", "text": f"Memorize tracks a plan for this: {p['name']}{by}", "note": p["path"],
+                "commands": [{"label": "open it", "href": "#memorize/plan/" + quote(p["path"], safe="")},
+                             {"label": "continue it", "command": "/memorize"}]}
+    return {"kind": "study", "text": "Memorize can track this as a plan, paced to its date", "note": "",
+            "commands": [{"label": "write it as a plan", "href": "#memorize/new"}]}
 
 
 # What Learn's plan computes and the chat model would otherwise make up, put
@@ -302,17 +302,17 @@ def plan_context(text: str, plans: list[dict]) -> tuple[str, str]:
         gaps = pl.lecture_gaps(plan) if plan.get("scope") == "steps" else None
         if gaps and gaps[0]:
             facts += f" Topics of the syllabus no lecture deck mentions, to study from the book or the guide: {', '.join(gaps[0])}."
-        return (f"[Learn tracks the plan {plan['name']}, by {plan['by']}. Silica appends its day-by-day calendar, "
+        return (f"[Memorize tracks the plan {plan['name']}, by {plan['by']}. Silica appends its day-by-day calendar, "
                 f"computed from the plan's steps in the syllabus's order and its date, under your answer; do not "
                 f"write a calendar or a table of days yourself. {facts} Write a short introduction and advice for "
                 f"this plan built on these facts and the steps below, naming the steps and topics; no study tip "
                 f"that would fit any plan:\n{table}]",
-                f"Calendar computed by Learn from the plan {plan['name']} (by {plan['by']}):\n\n{table}")
+                f"Calendar computed by Memorize from the plan {plan['name']} (by {plan['by']}):\n\n{table}")
     found = pl.lecture_gaps(plan) if plan.get("scope") == "steps" else None
     if not found:
         return "", ""
     missing, decks = found
-    return (f"[Learn's plan {plan['name']} reads its syllabus, {plan['target']}, against the text of the {decks} "
+    return (f"[Memorize's plan {plan['name']} reads its syllabus, {plan['target']}, against the text of the {decks} "
             f"lecture decks. Topics of the syllabus that no deck mentions: {', '.join(missing) or 'none'}. Use this "
             f"list for what the slides do not cover; a topic named another way in the slides can still be there.]",
             "")

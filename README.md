@@ -78,14 +78,14 @@ Silica is single-user: one person, one vault. There are no per-person permission
 
 **Study (Learn).** Questions on your notes, graded against the source each note rests on.
 
-- `/learn` and the Learn tab ask ten kinds of question, from recall and cloze to transfer and contradiction, and correct you by quoting the source line the note rests on. When the note says more than its source, the answer reads "Source mismatch" and is not scored. `/quiz` re-tests what is fading, scheduled with FSRS-6.
+- `/memorize` and the Memorize tab ask ten kinds of question, from recall and cloze to transfer and contradiction, and correct you by quoting the source line the note rests on. When the note says more than its source, the answer reads "Source mismatch" and is not scored. `/quiz` re-tests what is fading, scheduled with FSRS-6.
 - Before the reveal you say how sure you are: certain (90), pretty sure (70), half unsure (50), guessing (25), or skip. The grader never sees it, nor the session or the chat. Caps come after, in code: a hint or "Just tell me" caps the rating at Hard, and a right answer given while guessing caps at Good.
 - After 10 unassisted answers with a confidence, Calibration sets what you said against how often you met the criteria, level by level.
 - "Explain it" closes the book: you explain a note in your own words, a student who has not read it asks 4 questions, and your explanation is then checked against the note and its source.
 - No single score: estimated retention, depth (Facts, Parts, Mechanisms, New contexts), the relations you answered on and the misconceptions noted are shown apart. A note never asked counts as never practised, not as failed.
 - 3 misses in a row on a note put a worked example from it one click away; it never appears unasked. A plan over a folder, some notes or a topic paces you to its date, and that day shows in the Calendar.
 
-  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/learn.png" alt="The Learn tab: questions waiting from earlier sessions, the ones missed, and study plans" width="820" />
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/learn.png" alt="The Memorize tab: questions waiting from earlier sessions, the ones missed, and study plans" width="820" />
   <br/>
   <sub>Questions waiting from earlier sessions, the ones you missed, and your plans.</sub>
 
@@ -184,7 +184,7 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/quiz [note|folder] [--n=10]` | active-recall quiz; graded answers resurface the notes you miss. No target = review queue |
 | `/flashcards <note|folder> [--n=12] [--save=<path>]` | question-and-answer cards from the notes' checked points; `--save` writes them for the Spaced Repetition plugin |
 | `/slides <note|folder> [--save=<path>]` | a slide deck of what the notes say; `--save` writes it for Obsidian's Slides |
-| `/learn [plan] [--n=8] [--plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]] [--teach <note>] [--status [plan]]` | a study session graded against the source line, a plan note to continue or write, a teach-back, or the readings in one line; the Learn tab is the same engine with a screen |
+| `/memorize [plan] [--n=8] [--plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]] [--teach <note>] [--status [plan]]` | a study session graded against the source line, a plan note to continue or write, a teach-back, or the readings in one line; the Memorize tab is the same engine with a screen; `/learn`, its name before, still runs it |
 | `/relate <note> [--n=8]` | typed relationship map: how/why one note relates to its vault neighbors |
 | `/schematize <note|folder|topic> [--save=<path>]` | Markdown table schematizing a note, folder, or topic |
 | `/diagram <note|folder|topic> [--save=<path>]` | Mermaid diagram of a note, folder, or topic |

@@ -64,7 +64,9 @@ def test_get_learn_reports_the_readings_and_a_preview(client):
     row = next(r for r in d["preview"]["items"] if r["path"] == "ML/Margine geometrico.md")
     assert row["points"] >= 1 and row["questions"] >= 1 and row["minutes"] >= 1 and row["also_in"][0]["name"] == "ML plan"
     assert d["preview"]["counts"]["review"] + d["preview"]["counts"]["first"] >= 1
-    assert d["plans"][0]["unit"] == "notes practised" and d["plans"][0]["objectives"] == ["explain"]   # legacy reach: relational
+    assert d["plans"][0]["objectives"] == ["explain"]   # legacy reach: relational
+    # the row and the page it opens read one percent (ADR-0141)
+    assert d["plans"][0]["percent"] == c.get("/learn/plan", params={"path": d["plans"][0]["path"]}).json()["percent"]
     assert d["live"] is None and d["live_info"] is None
 
 
@@ -211,10 +213,12 @@ def test_shell_switches_loads_and_deep_links_the_learn_view():
     # the first segment and never flattens a learn hash; the boot tab knows learn
     assert '.split("/")[0]' in js[js.index("function tabFromHash"):]
     # the one writer of the hash (syncUrl, audit P7) keeps learn's own
-    assert 'activeTab === "learn" && location.hash.startsWith("#learn")' in js
+    assert 'activeTab === "learn" && /^#(memorize|learn)/.test(location.hash)' in js
+    # the view is Memorize since ADR-0141: its address too, and #learn still lands
+    assert 'learn: "memorize"' in js and 'parts[0] !== "memorize" && parts[0] !== "learn"' in js
     assert '["discover", "graph", "learn", "calendar", "metrics", "public"].includes(bootTab)' in js
-    for h in ('"#learn/plan/"', '"#learn/note/"', '"#learn/plans"', '"#learn/map"', '"#learn/new"', '"#learn/edit/"',
-              '"#learn/session/"', '"#learn/receipt/"'):
+    for h in ('"#memorize/plan/"', '"#memorize/note/"', '"#memorize/plans"', '"#memorize/map"', '"#memorize/new"', '"#memorize/edit/"',
+              '"#memorize/session/"', '"#memorize/receipt/"'):
         assert h in js
     assert 'v === "suggest"' in js                       # a bookmark from before ADR-0081 still lands on the note
     assert "history[replace ? \"replaceState\" : \"pushState\"]" in js
@@ -294,7 +298,7 @@ def test_plan_preview_proposes_objectives_and_write_keeps_the_edited_cards(clien
     rep = c.get("/learn/plan", params={"path": w["path"]}).json()
     assert rep["objectives"] == ["explain", "apply"] and rep["cards"][0]["title"] == "Explain why the margin bounds the error."
     row = next(p for p in c.get("/learn/plans").json() if p["path"] == w["path"])
-    assert row["objective_labels"] == ["Explain how and why", "Apply to a case"] and row["progress"][1] == 2
+    assert row["objective_labels"] == ["Explain how and why", "Apply to a case"] and row["coverage"][1] == 2
 
 
 def test_a_spoken_answer_is_graded_as_speech_and_recorded_as_voice(client, tmp_path, monkeypatch):

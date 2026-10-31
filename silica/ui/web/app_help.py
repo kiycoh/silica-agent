@@ -16,7 +16,7 @@ from pathlib import Path
 INDEX = Path(__file__).parent / "static" / "index.html"
 
 # A view's address, which the hash router opens (app-shell.js tabFromHash).
-ADDRESS = {"Explore": "#explore", "Learn": "#learn", "Calendar": "#calendar", "Examine": "#examine"}
+ADDRESS = {"Explore": "#explore", "Memorize": "#memorize", "Calendar": "#calendar", "Examine": "#examine"}
 
 # Not "point to the help panel" for what it does not name: it holds these same
 # rows, so the pointer led nowhere, and the first wording's answers went on to
@@ -35,7 +35,7 @@ LIMIT = (
     "do not send the person to look for it in the help or the settings. What you can "
     "do yourself with your own tools stays yours to offer. You cannot press anything "
     "in the app: say where to click, never that you clicked. Name a view as the rows "
-    "do, as a link like [Learn](#learn), which opens it; a bare #learn shows as a tag."
+    "do, as a link like [Memorize](#memorize), which opens it; a bare #memorize shows as a tag."
 )
 
 

@@ -4510,7 +4510,7 @@ def _learn_plan_prompt(name: str, kind: str, target: str, restrict: str = "") ->
         f"goal; `## Tree` (children as bullets, leaves as [[wikilinks]], a note under several "
         f"children listed once per child); {steps_rule} End with an empty `## Sessions`. "
         f"Nothing about mastery goes in the note: every reading derives from the ledger.\n"
-        f"3. Then STOP and ask whether to begin; `/learn {name}` continues the plan at its "
+        f"3. Then STOP and ask whether to begin; `/memorize {name}` continues the plan at its "
         f"frontier.\n"
         f"A `type: syllabus` note from before is read as a steps plan; never rewrite one, "
         f"continue it."
@@ -4550,18 +4550,18 @@ def _sc_learn(args: list[str], **_) -> str | None:
     teach = _kv_flag(args, "--teach")
     if teach is not None:
         if not teach:
-            return "Error: /learn --teach requires a note. Usage: /learn --teach <note>"
+            return "Error: /memorize --teach requires a note. Usage: /memorize --teach <note>"
         return _learn_teach_prompt(teach)
     plan = _kv_flag(args, "--plan")
     scope = _str_flag(args, "--scope")
     steps = _str_flag(args, "--steps")
     if plan is not None:
         if not plan:
-            return "Error: /learn --plan requires a name. Usage: /learn --plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]"
+            return "Error: /memorize --plan requires a name. Usage: /memorize --plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]"
         if steps:
             return _learn_plan_prompt(plan, "steps", steps, restrict=scope)
         if not scope:
-            return "Error: /learn --plan needs --scope=<folder|note,note|topic:term> or --steps=<note>"
+            return "Error: /memorize --plan needs --scope=<folder|note,note|topic:term> or --steps=<note>"
         if scope.startswith("topic:"):
             return _learn_plan_prompt(plan, "topic", scope[len("topic:"):])
         if "," in scope or (not scope.endswith("/") and scope.endswith(".md")):
@@ -4620,6 +4620,8 @@ _SHORTCUTS: dict[str, Callable[..., str | None]] = {
     "/quiz": _sc_quiz,
     "/flashcards": _sc_flashcards,
     "/slides": _sc_slides,
+    "/memorize": _sc_learn,
+    # the command's name until ADR-0141 named the view Memorize; typed from habit, it still runs
     "/learn": _sc_learn,
     "/remember": _sc_remember,
 }

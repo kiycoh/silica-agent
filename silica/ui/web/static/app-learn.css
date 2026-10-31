@@ -326,7 +326,8 @@
   min-width: 0;
 }
 
-.lr-fig .n {
+.lr-fig .n,
+.lr-done .n {
   font-family: var(--sans);
   font-size: 34px;
   font-weight: 600;
@@ -336,12 +337,14 @@
   white-space: nowrap;
 }
 
-.lr-fig .l {
+.lr-fig .l,
+.lr-done .l {
   font-size: var(--fs-meta);
   color: var(--ash-dim);
 }
 
-.lr-fig .s {
+.lr-fig .s,
+.lr-done .s {
   font-size: var(--fs-meta);
   color: var(--ash);
 }
@@ -789,6 +792,79 @@
   display: block;
   height: 100%;
   background: var(--c-accent);
+}
+
+.lr-pl .n.pct {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.lr-hline .done {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-hline .done .lr-meter {
+  width: 180px;
+  max-width: 40%;
+}
+
+/* how much of the plan is done (ADR-0141): the figure is .lr-fig's, the bar
+   a row of steps on the meter's hairline track, 2px of sheet between them */
+.lr-done {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0.9rem 0 0.75rem;
+}
+
+.lr-done .fig {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.55rem;
+}
+
+.lr-done .s {
+  margin-left: auto;
+  text-align: right;
+}
+
+.lr-segs {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+}
+
+.lr-segs .seg {
+  flex: 1 1 0;
+  min-width: 4px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.lr-segs .seg i {
+  display: block;
+  height: 100%;
+  background: var(--c-accent);
+}
+
+/* a step not in the vault: an outline no answer can fill */
+.lr-segs .seg.gap {
+  flex: 0 0 14px;
+  box-sizing: border-box;
+  border: 1.4px dashed var(--ash-dim);
+  background: none;
+}
+
+.lr-phead .go {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
 }
 
 /* --- the detail: a head that answers "what now?" ---------------------------- */

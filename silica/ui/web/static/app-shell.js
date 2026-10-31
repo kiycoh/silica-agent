@@ -1435,7 +1435,7 @@ async function openSession(id, fromUrl = false) {
 // bookmark made before a rename lands where it did. Calendar was Plan from
 // 2026-10-13 to 2026-10-15 and is Calendar again (ADR-0111 point 2): plans are
 // made in Learn, and two pilot users looked for them under Plan the same day.
-const VIEW_SLUG = { graph: "explore", metrics: "examine" };
+const VIEW_SLUG = { graph: "explore", metrics: "examine", learn: "memorize" };
 const OLD_SLUG = { plan: "calendar" };
 // A view the account does not get (Examine on hosted, ADR-0111 point 3; a paid
 // one on Free, ADR-0140) has no address, so a bookmark lands on the chat like
@@ -1464,7 +1464,7 @@ function parseHash() {
 let pendingHashNote = parseHash().note;
 
 function syncUrl(push) {
-  if (activeTab === "learn" && location.hash.startsWith("#learn")) return; // learn's own sub-states
+  if (activeTab === "learn" && /^#(memorize|learn)/.test(location.hash)) return; // its own sub-states, and #learn from before ADR-0141
   if (activeTab === "discover" && location.hash.startsWith("#discover")) return; // a story, the Feeds screen
   let h = "#" + (VIEW_SLUG[activeTab] || activeTab);
   if (activeTab === "chat" && currentSessionId) h += "/" + encodeURIComponent(currentSessionId);

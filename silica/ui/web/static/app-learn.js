@@ -223,21 +223,22 @@ function lrMarked(el, text, term) {
 // and the composer; Map, what you know as marks. A plan opens under the
 // segment it was picked from, so the left pane does not jump under the reader.
 function lrHash(r) {
-  if (r.view === "plan") return "#learn/plan/" + encodeURIComponent(r.plan);
-  if (r.view === "note") return "#learn/note/" + encodeURIComponent(r.path);
-  if (r.view === "plans") return "#learn/plans";
-  if (r.view === "map") return "#learn/map" + (r.path ? "/" + encodeURIComponent(r.path) : "");
-  if (r.view === "new") return "#learn/new";
-  if (r.view === "edit") return "#learn/edit/" + encodeURIComponent(r.plan);
-  if (r.view === "session") return "#learn/session/" + r.id;
-  if (r.view === "receipt") return "#learn/receipt/" + r.id;
+  if (r.view === "plan") return "#memorize/plan/" + encodeURIComponent(r.plan);
+  if (r.view === "note") return "#memorize/note/" + encodeURIComponent(r.path);
+  if (r.view === "plans") return "#memorize/plans";
+  if (r.view === "map") return "#memorize/map" + (r.path ? "/" + encodeURIComponent(r.path) : "");
+  if (r.view === "new") return "#memorize/new";
+  if (r.view === "edit") return "#memorize/edit/" + encodeURIComponent(r.plan);
+  if (r.view === "session") return "#memorize/session/" + r.id;
+  if (r.view === "receipt") return "#memorize/receipt/" + r.id;
   // the step first: a plan's path has slashes of its own
-  if (r.view === "read") return "#learn/read/" + r.step + "/" + encodeURIComponent(r.plan);
-  return "#learn";
+  if (r.view === "read") return "#memorize/read/" + r.step + "/" + encodeURIComponent(r.plan);
+  return "#memorize";
 }
 function lrParse(hash) {
   const parts = String(hash || "").replace(/^#/, "").split("/");
-  if (parts[0] !== "learn") return null;
+  // #learn was the address until ADR-0141 named the view Memorize: an old link still lands
+  if (parts[0] !== "memorize" && parts[0] !== "learn") return null;
   const v = parts[1] || "";
   let arg = parts.slice(2).join("/");
   try { arg = decodeURIComponent(arg); } catch { /* a hand-typed hash: keep it as is */ }
@@ -392,7 +393,7 @@ function lrRenderHome(body) {
     if (v === "new" || v === "edit") { col.inert = true; body.appendChild(lrDialog()); }
     return;
   }
-  const back = { label: "Learn", run: () => lrGo({ view: "home" }) };
+  const back = { label: "Memorize", run: () => lrGo({ view: "home" }) };
   if (v === "map") {
     lrBar({ crumb: ["What you know"], stamp: lrMapStamp(), back });
     const mv = lrEl("section", "mv lr-mv lr-mapv");
@@ -689,6 +690,18 @@ function lrPlansHome(plans) {
     if (p.by) name.appendChild(lrEl("span", "lr-help", ` · by ${lrDate(p.by)}`));
     const live = lrSession && lrSession.plan === p.path;
     tx.append(name, lrEl("span", "lr-help", live ? "in the open session" : p.why));
+    // the plan page's percent, once a note is met (ADR-0141); a fresh plan's
+    // row stays as it was, since 0% there read as failure too (ADR-0081 §5)
+    const full = (lrData.plans || []).find((x) => x.path === p.path);
+    if (full?.all_met) {
+      const done = lrEl("div", "done");
+      const meter = lrEl("span", "lr-meter");
+      const fill = lrEl("i");
+      fill.style.width = full.percent + "%";
+      meter.appendChild(fill);
+      done.append(meter, lrEl("span", "num", `${full.percent}% complete`));
+      tx.appendChild(done);
+    }
     const go = live ? lrBtn("ghost box", "Resume", () => lrGo({ view: "session", id: lrSession.id }))
       : lrBtn("ghost box", "Continue", () => learnStartSession({ plan: p.path, from: "plan" }));
     if (!live) go.disabled = !!lrSession;
@@ -736,8 +749,8 @@ function lrRenderPlansLeft(left, sel) {
   }).classList.add("side");
 }
 
-// A plan row keeps the plan's name, its next step and its progress with the
-// unit (refinement §17); the rest is in its detail.
+// A plan row keeps the plan's name, its next step and its progress in notes
+// met (refinement §17, ADR-0141); the rest is in its detail.
 function lrPlanRow(p, on, completed = false) {
   const b = lrBtn("lr-pl" + (on ? " on" : ""), undefined, () => lrGo({ view: "plan", plan: p.path }));
   b.dataset.lrRow = b.dataset.lrKey = "plan:" + p.path;
@@ -757,12 +770,16 @@ function lrPlanRow(p, on, completed = false) {
     const why = (lrData.next?.plans || []).find((x) => x.path === p.path)?.why;
     b.appendChild(lrEl("div", "n", why || (p.gaps ? `not started · ${lrPlural(p.gaps, "step has no note in the vault", "steps have no note in the vault")}` : "nothing pending")));
   }
+  // the plan page's measure (ADR-0141): notes met, and the percent once one is met
   const meter = lrEl("div", "lr-meter");
   const fill = lrEl("i");
-  fill.style.width = (p.progress[1] ? Math.round((p.progress[0] / p.progress[1]) * 100) : 0) + "%";
+  fill.style.width = p.percent + "%";
   meter.appendChild(fill);
   b.appendChild(meter);
-  b.appendChild(lrEl("div", "n num", `${p.progress[0]} of ${p.progress[1]} ${p.unit}`));
+  const k = lrEl("div", "n num pct");
+  k.appendChild(lrEl("span", null, `${p.all_met} of ${lrPlural(p.coverage[1], "note")} met`));
+  if (p.all_met) k.appendChild(lrEl("span", null, `${p.percent}%`));
+  b.appendChild(k);
   return b;
 }
 
@@ -913,7 +930,16 @@ function lrRenderPlanDetail(right, p) {
   const reopen = closed ? lrBtn("ghost box", "Reopen", async () => { await lrPost("/learn/plan/close", { path: p.path, reopen: true }); lrData = null; lrPlan = null; loadLearn(true); }) : null;
   const head = lrHead(closed ? `Plan · completed ${lrDate(p.completed)}` : "Plan", p.name,
     live ? "a new session waits for this one to end" : !closed ? `${lrPlural(n, "question")} · about ${Math.max(1, Math.round(n * 1.3))} min` : "",
-    [open, edit, reopen, go, check, done]);
+    [open, edit, reopen]);
+  head.appendChild(lrCompletion(p));
+  // under the bar that says why: Mark completed leads once it is the plan's
+  // next act, Continue until then (the classes above swap at p.complete)
+  const acts = [done, go, check].filter(Boolean);
+  if (acts.length) {
+    const row = lrEl("div", "go");
+    row.append(...acts);
+    head.appendChild(row);
+  }
   if (check) {
     const q = p.placement.questions;
     head.appendChild(lrEl("p", "lr-help", `Up to 2 questions a step, ${q} in all, about ${Math.max(1, Math.round(q * 1.3))} min. `
@@ -969,14 +995,11 @@ function lrRenderPlanDetail(right, p) {
     sec.appendChild(row);
     right.appendChild(sec);
   }
-  // the facts a decision needs, as figures, once one is not zero; before that
-  // one sentence, because 0 / 0 read as failure early in a plan (ADR-0081 §5)
-  if (!r.due && !r.all_met) {
-    const met = p.objectives.map((o) => LR_OBJ_SHORT[o] || o);
-    right.appendChild(lrEl("p", "lr-lead", `${r.coverage[0]} of ${lrPlural(r.coverage[1], "note")} practised; none has met ${lrAnd(met)} without help yet.`));
-  } else {
+  // the facts a decision needs, as figures, once one is not zero (ADR-0081
+  // §5); the notes met are the bar's, in the head (ADR-0141)
+  if (r.due || r.all_met) {
     const figs = lrEl("div", "lr-figs");
-    figs.append(lrFig(r.not_measured, "notes never practised"), lrFig(r.due, "to review in this plan"), lrFig(r.all_met, `of ${r.coverage[1]} met every objective`));
+    figs.append(lrFig(r.not_measured, "notes never practised"), lrFig(r.due, "to review in this plan"));
     right.appendChild(figs);
   }
   right.appendChild(lrPlanTree(p));
@@ -1058,13 +1081,57 @@ function lrRenderPlanDetail(right, p) {
     box.appendChild(lrMarkKey());
     const say = (k, t) => { const para = lrEl("p"); para.append(lrEl("b", null, k), " " + t); box.appendChild(para); };
     say("To review", "counts notes whose estimated retention is below the retention target.");
-    say("Met every objective", "counts notes where every objective was met without help, since the plan was written. An objective is met on a note when its criteria were satisfied without help on a dated question; meeting one objective says nothing about another, and an assisted answer never counts as \"without help\".");
+    say("Complete", "is the share of the plan's notes that met every objective without help since the plan was written. A step with no note in the vault counts as one more that no answer can meet, and the share is rounded down, so 100% shows only once the plan can be marked completed. The bar has a segment per step, as wide as its notes; a full segment is a passed step. An objective is met on a note when its criteria were satisfied without help on a dated question; meeting one objective says nothing about another, and an assisted answer never counts as \"without help\".");
     say(p.steps?.length ? "Steps" : "Material", "has one row per child, expandable to its notes; a node counts distinct notes, so children need not sum to the parent.");
     if (p.cards?.length) say("Objectives", "say what the plan asks you to show, per step; the notes' own key points say what to cover.");
     say("Sessions", `are each a line under ## Sessions in ${p.path}.`);
     say("Answer structure", "reads the shape of the answers observed (SOLO: unistructural, multistructural, relational, extended abstract); it orients the feedback and is not an objective you chose.");
   });
   right.appendChild(discs);
+}
+
+// How much of the plan is done (ADR-0141): the percent the server floors, then
+// one segment per step as wide as its notes, filled by the notes met without
+// help, so a full segment is a passed step and a dashed one a step not in the
+// vault. Until a note is met the lead sentence stands where the figure would:
+// 0% read as failure early in a plan (ADR-0081 §5).
+function lrCompletion(p) {
+  const r = p.readings;
+  const box = lrEl("div", "lr-done");
+  const objs = p.objectives.map((o) => LR_OBJ_SHORT[o] || o);
+  const steps = p.steps || [];
+  let say = "no note met without help yet";
+  if (r.all_met) {
+    say = (r.all_met === r.coverage[1] ? `every note met ${lrAnd(objs)} without help` : `${r.all_met} of ${lrPlural(r.coverage[1], "note")} met without help`)
+      + (steps.length ? ` · ${steps.filter((s) => s.passed).length} of ${lrPlural(steps.length, "step")} passed` : "");
+    const fig = lrEl("div", "fig");
+    fig.append(lrEl("span", "n num", `${p.percent}%`), lrEl("span", "l", "complete"), lrEl("span", "s", say));
+    box.appendChild(fig);
+  } else box.appendChild(lrEl("p", "lr-lead", `${r.coverage[0]} of ${lrPlural(r.coverage[1], "note")} practised; none has met ${lrAnd(objs)} without help yet.`));
+  // a plan without steps has no part that passes, and its folders overlap:
+  // one segment, the whole scope. The tree has a node per step only on a
+  // steps plan (plans._tree_of); a `## Steps` typed into a folder plan's
+  // note still parses, and would pair its folders with unrelated steps.
+  const parts = p.scope === "steps" && steps.length ? p.tree.map((node, i) => [node, steps[i]]) : [[{ node: p.name, readings: r }, null]];
+  const bar = lrEl("div", "lr-segs");
+  bar.setAttribute("role", "img");
+  bar.setAttribute("aria-label", r.all_met ? `${p.percent}% complete: ${say}` : say);
+  for (const [node, step] of parts) {
+    const k = node.readings?.coverage[1] || 0;
+    const seg = lrEl("span", "seg" + (step?.gap || !k ? " gap" : ""));
+    if (step?.gap || !k) seg.title = `${node.node}: not in the vault`;
+    else {
+      const met = node.readings.all_met;
+      const fill = lrEl("i");
+      fill.style.width = (met / k) * 100 + "%";
+      seg.appendChild(fill);
+      seg.style.flexGrow = k;
+      seg.title = `${node.node}: ${met} of ${lrPlural(k, "note")} met` + (step?.passed ? ", passed" : "");
+    }
+    bar.appendChild(seg);
+  }
+  box.appendChild(bar);
+  return box;
 }
 
 // A note inside the plan's detail: its title selects it in Next, its reason
@@ -3363,7 +3430,7 @@ function lrRenderReceipt(body) {
   const o = r.origin || {};
   // Back lands on the plan it came from, else on Learn, whose Missed row now
   // carries what this receipt established (ADR-0119)
-  const backLabel = o.kind === "plan" ? `Back to ${o.label}` : "Back to Learn";
+  const backLabel = o.kind === "plan" ? `Back to ${o.label}` : "Back to Memorize";
   const goBack = async () => { lrReceipt = null; if (!lrData) await loadLearn(true); lrGo(o.kind === "plan" ? lrOriginRoute(o) : { view: "home" }); };
   const when = r.ts ? lrDate(r.ts) : r.started ? `${lrDate(r.started)}, ${lrTime(r.started)}` : "";
   const dur = r.duration ? ` · ${Math.floor(r.duration / 60)} min ${Math.round(r.duration % 60)} s` : "";

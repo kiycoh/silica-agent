@@ -1906,7 +1906,7 @@ def day_by_day(plan: dict, today=None, passed: list[bool] | None = None) -> list
     if not steps:
         # every step passed or checked: the study days are review
         for r in rows:
-            r["steps"].append(("Review: the notes Learn shows due", []))
+            r["steps"].append(("Review: the notes Memorize shows due", []))
     done = 0.0
     for step, w in zip(steps, weights):
         start, end = done / total * study, (done + w) / total * study
@@ -1927,8 +1927,8 @@ def day_by_day(plan: dict, today=None, passed: list[bool] | None = None) -> list
                 rows[k]["hours"][label] = round(share * per_day, 1)
     parts = {p["part"] for p in plan.get("assessment") or []}
     for k in range(study, days):
-        say = ("Project: the main work; review the notes Learn shows due" if window
-               else "Review: the notes Learn shows due")
+        say = ("Project: the main work; review the notes Memorize shows due" if window
+               else "Review: the notes Memorize shows due")
         rows.append({"day": (today + timedelta(days=k)).isoformat(), "steps": [(say, [])], "hours": {}})
     if parts & {"oral", "presentation"} and days >= 2:
         what = "present the project and answer a question per step aloud" if "project" in parts else \
@@ -2237,8 +2237,7 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
         leaves = node.get("leaves", [])
         tree.append({**node, "readings": mastery.node_readings(leaves, view, entries, since, objectives)})
     passed = mastery.steps_passed(plan, entries, notes=notes) if plan["steps"] else []
-    steps = [{**s, "passed": ok, "gap": not s["notes"] or all(resolve_title(n, notes) is None for n in s["notes"])}
-             for s, ok in zip(plan["steps"], passed)]
+    steps = [{**s, "passed": ok, "gap": is_gap(s, notes)} for s, ok in zip(plan["steps"], passed)]
     relations = _relations_in(paths, items)
     root = mastery.node_readings(paths, view, entries, since, objectives)
     below = len(paths) - root["all_met"]
@@ -2280,6 +2279,7 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
         "matched": plan.get("matched", {}),
         "unused": plan.get("unused", ""),
         "complete": completion(plan, entries, passed, steps),
+        "percent": percent_done(root["all_met"], root["coverage"][1], sum(s["gap"] for s in steps)),
         "paths": paths, "gaps": [s["text"] for s in steps if s["gap"]],
     }
 
@@ -2348,6 +2348,26 @@ def completion(plan: dict, entries: list[dict], passed: list[bool] | None = None
         return False
     met = mastery.objectives_met(paths, plan["objectives"], entries, since=plan.get("created"))
     return all(met[p][o]["met"] for p in paths for o in plan["objectives"])
+
+
+def is_gap(step: dict, notes: dict | None = None) -> bool:
+    """A step with no note, or none of whose notes is in the vault any more:
+    no answer can pass it. Named once because the plan page and the plan's
+    row each count these, and a row that skipped the renamed-away notes read
+    a different percent from the page it opens (ADR-0141)."""
+    return not step["notes"] or all(resolve_title(n, notes) is None for n in step["notes"])
+
+
+def percent_done(met: int, notes: int, gaps: int) -> int:
+    """The completion bar's figure (ADR-0141): the notes that met every
+    objective without help, over the plan's notes plus one unit for each
+    gap step, which no answer can meet. Floored, so 224 of 225 reads 99:
+    100 shows only when every unit is met, which on a plan Silica wrote is
+    when `completion` holds, since its Tree lists the steps' own notes and
+    the scope is their union. A Tree link added by hand outside every step
+    counts here and not in `completion`, which reads the steps."""
+    units = notes + gaps
+    return met * 100 // units if units else 0
 
 
 # ---------------------------------------------------------------- the plan note, written

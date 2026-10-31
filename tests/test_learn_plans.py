@@ -87,6 +87,30 @@ def test_ledger_over_checkbox(vault):
     assert report["frontier"] == ["ML/Gradient descent.md"]
 
 
+def test_the_bar_reads_100_exactly_when_the_plan_is_complete(vault):
+    """ADR-0141: notes met over notes, a step not in the vault one unit no
+    answer meets, floored; 100 and Mark completed come together or not at all."""
+    from silica.kernel.report import quiz
+
+    def met(*names):
+        quiz.record([{"path": f"ML/{n}.md", "correct": True, "rating": 3, "level": 3, "kind": "explain", "hints": 0}
+                     for n in names])
+
+    def read(text):
+        vault.note("Plans/ML.md", text)
+        r = plans.plan_report(plans.read_plan("Plans/ML.md"))
+        assert (r["percent"] == 100) is r["complete"]
+        return r["percent"]
+
+    no_gap = PLAN.replace("- [ ] Momentum di Nesterov: not in the vault\n", "")
+    assert read(PLAN) == 0                        # 3 notes + 1 gap, none met
+    met("Chain rule", "Backpropagation")
+    assert read(PLAN) == 50 and read(no_gap) == 66   # 2 of 4; 2 of 3 floored, not rounded to 67
+    met("Gradient descent")
+    assert read(PLAN) == 75                       # every note met, the gap still open
+    assert read(no_gap) == 100
+
+
 def test_a_prerequisite_cycle_is_reported_not_linearized(vault, monkeypatch):
     from silica.kernel.report import learner
 
@@ -625,7 +649,7 @@ def test_a_dated_plan_lays_its_steps_over_the_days_before_the_review():
     assert [r["day"] for r in rows] == ["2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26",
                                         "2026-10-27", "2026-10-28", "2026-10-29"]
     labels = [[label for label, _n in r["steps"]] for r in rows]
-    assert labels[0][0] == "Basi" and labels[-1] == ["Exam"] and labels[-2] == labels[-3] == ["Review: the notes Learn shows due"]
+    assert labels[0][0] == "Basi" and labels[-1] == ["Exam"] and labels[-2] == labels[-3] == ["Review: the notes Memorize shows due"]
     seen = [label for day in labels[:4] for label in day]
     assert seen.index("Basi") < seen.index("Lacuna") < seen.index("Reti") and seen.count("Reti") >= 2
     reti = [n for r in rows for label, notes in r["steps"] if label == "Reti" for n in notes]

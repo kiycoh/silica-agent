@@ -255,7 +255,7 @@ function calPlanBar(p, open) {
   el.type = "button";
   el.append(mkEl("span", "cal-dia"), mkEl("b", "", p.name), mkEl("span", "left", calDaysLeft(p.by)));
   if (open) el.appendChild(mkEl("span", "to", calShort(calDay(p.by)) + " →"));
-  el.title = `study plan due ${p.by}: open it in Learn`;
+  el.title = `study plan due ${p.by}: open it in Memorize`;
   el.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   el.addEventListener("click", () => calOpenPlan(p.path));
   return el;
@@ -637,7 +637,7 @@ function calStrip(date, today) {
       const r = mkEl("button", "cd-plan");
       r.type = "button";
       r.append(mkEl("span", "cal-dia"), mkEl("span", "nm", p.name), mkEl("b", "", calDaysLeft(p.by)));
-      r.title = `${p.name}, due ${calShort(calDay(p.by))}: open the plan in Learn`;
+      r.title = `${p.name}, due ${calShort(calDay(p.by))}: open the plan in Memorize`;
       r.addEventListener("click", () => calOpenPlan(p.path));
       plans.appendChild(r);
     }

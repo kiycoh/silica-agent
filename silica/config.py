@@ -170,7 +170,8 @@ VIEWS: dict[str, dict[str, tuple[str, ...]]] = {
     "graph": {"routes": ("/graph", "/map/layout", "/compare", "/shape")},
     "learn": {"routes": ("/learn",),
               "tools": ("silica_learn_items", "silica_review_queue", "silica_record_quiz"),
-              "commands": ("/quiz", "/learn")},
+              # /learn is the name before ADR-0141 and cli.py still runs it
+              "commands": ("/quiz", "/memorize", "/learn")},
     "calendar": {"routes": ("/calendar", "/reminders"),
                  "tools": ("silica_agenda", "silica_event_create", "silica_event_update"),
                  "commands": ("/agenda",)},
