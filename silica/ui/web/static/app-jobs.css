@@ -120,7 +120,7 @@
 
 .job-go {
   font-family: var(--sans);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   font-weight: 600;
   color: var(--on-vivid);
   background: var(--accent);
@@ -148,7 +148,7 @@
   background: none;
   border: none;
   color: var(--ash-dim);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   cursor: pointer;
 }
 

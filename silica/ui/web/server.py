@@ -1253,7 +1253,7 @@ def _render_frontmatter(props: dict) -> str:
         rows.append(
             f'<div class="fm-row"><span class="fm-key">{_html.escape(str(key))}</span>{chips}</div>'
         )
-    return '<details class="fm"><summary>properties</summary>' + "".join(rows) + "</details>"
+    return '<details class="fm"><summary>Properties</summary>' + "".join(rows) + "</details>"
 
 
 def _sse(data: dict) -> str:

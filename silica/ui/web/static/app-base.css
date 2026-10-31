@@ -4,8 +4,8 @@
    1px-compartment grid, 90 degree corners only. Type: Archivo for UI and prose,
    Martian Mono only where the cell grid matters, meaning code.
    Two rules carry the design. First, hierarchy comes from size and surface, not
-   from decoration: uppercase and letterspacing stay on chrome micro-labels and
-   never touch prose. Second, the surface steps are far enough apart to actually
+   from decoration: no label is set in tracked uppercase, chrome included, since
+   2026-10-31 (the last twelve rules went then). Second, the surface steps are far enough apart to actually
    read as separate planes, which is what the earlier palette got wrong. */
 @font-face {
   font-family: "Martian Mono";
@@ -131,10 +131,13 @@
      footers) at --fs-meta, controls (tabs, segments, buttons) at --fs-ctl.
      The previous chrome ran 230 declarations at 9-11px in tracked uppercase,
      and that, more than any radius, is what read as an instrument panel
-     rather than a reading room. Long-form prose stays at 16px. Views outside
-     the shell (metrics, calendar internals) are not on this scale yet; Learn
-     moved onto it on 2026-10-06 (ADR-0061), from 29 uppercase rules and 11px
-     explanations measured 2026-09-22 to none under --fs-meta. */
+     rather than a reading room. Long-form prose stays at 16px. Learn moved
+     onto it on 2026-10-06 (ADR-0061), from 29 uppercase rules and 11px
+     explanations measured 2026-09-22 to none under --fs-meta; every other view
+     followed on 2026-10-31 (123 declarations at 9 to 11.5px, calendar and
+     settings the most). What stays under it on purpose: glyphs drawn in a
+     ::before or ::after, kbd keycaps, the dense matrix in Examine and the
+     one-letter domain initials in Discover. */
   --fs-meta: 12px;
   --fs-ctl: 13px;
 
@@ -212,9 +215,10 @@
   --on-vivid: #0D0E0F;
 
   /* The page wash's two poles, see html,body. Was a blue pole and a magenta
-     pole, which smuggled a second brand hue into the ambient field. Now one
-     hue plus tone: --accent lifts one corner, a neutral lifts the other. */
-  --wash-a: rgba(34, 180, 204, .16);
+     pole, which smuggled a second brand hue into the ambient field; then
+     --accent at 16% on the left, which made the click colour atmosphere.
+     Since 2026-10-31 both are the same neutral, tone and no hue. */
+  --wash-a: rgba(63, 69, 77, .30);
   --wash-b: rgba(63, 69, 77, .30);
 
   /* Shadow, scrim and glow do not follow the surfaces: they all reverse
@@ -333,7 +337,7 @@
   /* Same two poles, an eighth of the strength. Enough that the header's
      translucency has something to travel across — which is the whole reason
      the wash exists — and not enough to tint the paper. */
-  --wash-a: rgba(10, 96, 112, .07);
+  --wash-a: rgba(58, 44, 20, .05);
   --wash-b: rgba(58, 44, 20, .05);
 
   --shadow-rgb: 58 44 20;
@@ -356,6 +360,43 @@
   display: none !important;
 }
 
+/* One disclosure mark for every fold: the line chevron the rail's icons are
+   drawn in, turned a quarter when open. Each site kept its own text triangle,
+   ▸ and ▾ at four sizes, a solid glyph beside 1.8px line icons (2026-10-31).
+   A mask, so the mark takes each site's colour. */
+#tree details > summary::before,
+#trash-group > summary::before,
+#vp-notices > summary::before,
+.thinking summary::before,
+details.fm summary::before,
+.ego-gh::after,
+.lg-caret {
+  --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -1px;
+  background: currentColor;
+  -webkit-mask: var(--chev) center / 12px no-repeat;
+  mask: var(--chev) center / 12px no-repeat;
+  transition: transform var(--dur) var(--ease);
+}
+
+.ego-gh::after {
+  margin: 0 0 0 4px;
+}
+
+#tree details[open] > summary::before,
+#trash-group[open] > summary::before,
+#vp-notices[open] > summary::before,
+.thinking[open] summary::before,
+details.fm[open] summary::before,
+.ego-gh.open::after {
+  transform: rotate(90deg);
+}
+
 /* keep hidden working under `header > * { display:flex }` */
 
 /* scrollbars: see the block under "the one piece of chrome the app was letting
@@ -372,14 +413,12 @@ body {
   height: 100%;
   /* The wash moved up here from #view-chat, and it moved because the chrome now
      shows it: a translucent header over a flat fill is a tint, over a travelling
-     one it is glass. Two poles instead of one violet, taken from the mascot's
-     own body — blue on its lit half, magenta on its far one. Cyan is left out
-     on purpose: in the mark it is only the eye, and in the app it is only what
-     you can click, so it never becomes atmosphere. Fixed attachment, so the
-     poles stay put and no scroll repaints them.
+     one it is glass. Two poles of one neutral, no hue: the signal hue is only
+     what you can click, so it never becomes atmosphere (the left pole broke
+     that rule as the accent at 16% until 2026-10-31). Fixed attachment, so
+     the poles stay put and no scroll repaints them.
      The two poles are tokens because light keeps the same geometry at a
-     fraction of the strength: on paper the same alphas are a stain, and a
-     warm-white desk with a cool cast at the top edge is daylight on it. */
+     fraction of the strength: on paper the same alphas are a stain. */
   background:
     radial-gradient(58rem 30rem at 3% -3rem, var(--wash-a), transparent 70%),
     radial-gradient(54rem 27rem at 99% -2rem, var(--wash-b), transparent 70%),

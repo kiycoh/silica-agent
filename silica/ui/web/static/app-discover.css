@@ -121,7 +121,7 @@
 .dv-chip:hover { border-color: var(--line-2); }
 .dv-chip[aria-pressed="true"] { border-color: transparent; background: var(--sel); color: var(--frost); }
 .dv-chip.dv-dashed { border-style: dashed; border-color: var(--line-2); color: var(--ash); }
-.dv-chip.dv-mono { font-family: var(--mono); font-size: 11.5px; height: 26px; }
+.dv-chip.dv-mono { font-family: var(--mono); font-size: var(--fs-meta); height: 26px; }
 
 .dv-switch {
   flex: none;
@@ -376,7 +376,7 @@
   display: grid;
   place-items: center;
   color: var(--ash-dim);
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
 }
 
 .dv-intro { margin: 0 0 12px; font-size: 12.5px; color: var(--ash-dim); }
@@ -386,7 +386,7 @@
 .dv-paper .dv-row-text { flex: 999 1 360px; gap: 4px; }
 .dv-paper .dv-row-title { font-size: 15px; }
 .dv-paper .dv-authors { font-size: 12.5px; color: var(--ash); }
-.dv-paper .dv-id { font-family: var(--mono); font-size: 11.5px; color: var(--ash-dim); }
+.dv-paper .dv-id { font-family: var(--mono); font-size: var(--fs-meta); color: var(--ash-dim); }
 
 a.dv-btn { text-decoration: none; }
 
@@ -422,7 +422,7 @@ a.dv-btn { text-decoration: none; }
   background: var(--void);
   color: var(--text);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
 }
 
 .dv-video .dv-row-title { font-size: 14.5px; }
@@ -489,7 +489,7 @@ a.dv-btn { text-decoration: none; }
   border-radius: 10px;
   background: var(--bubble);
   color: var(--ash);
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   vertical-align: 1px;
   text-decoration: none;
   transition: color var(--dur) var(--ease);
@@ -515,7 +515,7 @@ a.dv-btn { text-decoration: none; }
 }
 
 .dv-source:hover { border-color: var(--line-2); }
-.dv-source .dv-sd { font-size: 11.5px; color: var(--ash-dim); }
+.dv-source .dv-sd { font-size: var(--fs-meta); color: var(--ash-dim); }
 .dv-source .dv-st { font-size: 12.5px; line-height: 1.35; color: var(--text); }
 .dv-source.dv-more { border-style: dashed; border-color: var(--line-2); color: var(--ash); font-size: 12.5px; justify-content: center; }
 
@@ -684,7 +684,7 @@ a.dv-btn { text-decoration: none; }
 .dv-feed:first-child { border-top-color: transparent; }
 .dv-feed-name { flex: 999 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .dv-feed-name span:first-child { font-size: 13.5px; color: var(--frost); }
-.dv-feed-url { font-family: var(--mono); font-size: 11px; color: var(--ash-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dv-feed-url { font-family: var(--mono); font-size: var(--fs-meta); color: var(--ash-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dv-feed-kind { font-size: var(--fs-meta); color: var(--ash); min-width: 96px; }
 .dv-feed-tags { display: flex; gap: 4px; min-width: 110px; }
 
@@ -696,7 +696,7 @@ a.dv-btn { text-decoration: none; }
   border-radius: 10px;
   background: var(--bubble);
   color: var(--ash);
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
 }
 
 .dv-feed-state { font-size: var(--fs-meta); min-width: 150px; color: var(--ash); }
@@ -731,7 +731,9 @@ a.dv-btn { text-decoration: none; }
   transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 
-.dv-starter[aria-pressed="true"] { border-color: var(--accent); background: var(--sel); }
+/* picked reads from the fill and the checkbox; an accent border on every picked
+   card put the click colour on three cards at once (2026-10-31) */
+.dv-starter[aria-pressed="true"] { background: var(--sel); }
 
 .dv-box-mark {
   flex: none;
@@ -776,7 +778,7 @@ a.dv-btn { text-decoration: none; }
 .dv-toast svg { color: var(--add); flex: none; }
 .dv-toast > div { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .dv-toast .dv-th { font-size: 13.5px; color: var(--frost); }
-.dv-toast .dv-tp { font-family: var(--mono); font-size: 11.5px; color: var(--ash); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dv-toast .dv-tp { font-family: var(--mono); font-size: var(--fs-meta); color: var(--ash); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* --- the story chip in Chat's composer (ADR-0137 point 8) ---------------------------- */
 .dv-chip-row .story-chip { background: var(--sel); border-color: transparent; color: var(--frost); }

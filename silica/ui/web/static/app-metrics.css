@@ -331,8 +331,6 @@
 .ev-tl,
 .ev-tc {
   font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--ash-dim);
 }
 
@@ -1115,7 +1113,7 @@
 }
 
 .shape-sub {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash);
 }
 
@@ -1221,7 +1219,7 @@
   border: 0;
   background: none;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1.35;
   text-align: left;
   padding: 0.32rem 0 0.32rem 0.7rem;
@@ -1290,9 +1288,7 @@
 .rpath-area {
   margin: 1.3rem 0 0.35rem;
   padding-left: 2.46rem;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: var(--fs-meta);
   color: var(--ash);
 }
 
@@ -1321,7 +1317,7 @@
 .rpath-n {
   grid-row: 1 / 3;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
   font-variant-numeric: tabular-nums;
   align-self: center;
@@ -1333,7 +1329,7 @@
 
 .rpath-why {
   grid-column: 2;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash);
 }
 
@@ -2035,18 +2031,12 @@
 
 .ego-gh-c {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
 }
 
 .ego-gh::after {
-  content: "▸";
-  font-size: 10px;
   color: var(--ash-dim);
-}
-
-.ego-gh.open::after {
-  content: "▾";
 }
 
 .ego-rows {

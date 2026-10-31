@@ -322,8 +322,8 @@ async function skPreview(host, row, file) {
   if (s.replaces) box.appendChild(stEl("div", "st-warn", `You already have a vault skill named ${s.name}. Installing this one replaces it.`));
   else if (s.shadows) box.appendChild(stEl("div", "sk-also", `While it is here, it answers /${s.name} in place of the ${SK_SOURCE[s.shadows]} skill of that name.`));
   box.appendChild(stEl("div", "sk-pv-label", s.persona
-    ? `a persona: what every answer of a chat follows from /${s.name} until /persona off`
-    : `what the model receives when you type /${s.name}`));
+    ? `A persona: what every answer of a chat follows from /${s.name} until /persona off`
+    : `What the model receives when you type /${s.name}`));
   box.appendChild(stEl("pre", "sk-pv-body", s.body));
   if (s.stripped) box.appendChild(stEl("div", "st-help", "Maintainer comments (<!-- -->) are left out above, as the loader leaves them out of the turn."));
   const ok = skBtn(s.replaces ? `replace your vault skill ${s.name}` : "install to this vault", "primary");

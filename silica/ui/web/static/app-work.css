@@ -1,8 +1,11 @@
 /* --- calendar ---------------------------------------------------------------
    ADR-0118: Google Calendar's frame in one hue. Every surface is a theme
    token, so paper needs no rules of its own. A kind is a shape (block,
-   diamond, triangle, checkbox, ring), never a colour: the accent marks today,
-   now, the selection and the one primary action; amber marks overdue. */
+   diamond, triangle, checkbox, ring, dot), never a colour: the accent marks
+   today in the grid, now and the plan diamond; New event, the mini-calendar's
+   today and the layer boxes are ink and grey, since 2026-10-31 (ADR-0118
+   amendment: the accent was on seven things and none led); amber marks
+   overdue. */
 /* position: the #cal-loading overlay is .frame-loading (inset:0), so without
    a positioned ancestor it resolves against the viewport and blanks header and
    sidebar for the whole first /calendar fetch. #view-graph and #view-metrics
@@ -23,7 +26,7 @@
 
 /* the side column */
 #cal-side { flex: 0 0 216px; display: flex; flex-direction: column; gap: 18px; min-height: 0; overflow-x: hidden; overflow-y: auto; }
-.cal-new { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; height: 44px; padding: 0 18px 0 14px; border: 0; border-radius: var(--r); background: var(--accent); color: var(--void); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.cal-new { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; height: 44px; padding: 0 18px 0 14px; border: 0; border-radius: var(--r); background: var(--frost); color: var(--on-vivid); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .cal-new::before { content: "+"; font-size: 22px; font-weight: 400; line-height: 1; }
 .cal-new.sm { height: 32px; padding: 0 12px 0 10px; border-radius: var(--r-sm); font-size: var(--fs-ctl); margin-left: 6px; }
 .cal-new.sm::before { font-size: 18px; }
@@ -36,7 +39,7 @@
 .cal-mini-h button { width: 26px; height: 26px; border: 0; border-radius: var(--r-sm); background: none; color: var(--ash); font-size: 16px; cursor: pointer; }
 .cal-mini-h button:hover { background: var(--sel-hover); color: var(--frost); }
 .cal-mini-g { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); row-gap: 2px; text-align: center; }
-.cal-mini-g .dw { font-size: 11px; color: var(--ash-dim); line-height: 22px; }
+.cal-mini-g .dw { font-size: var(--fs-meta); color: var(--ash-dim); line-height: 22px; }
 .cal-mini-g button { position: relative; height: 28px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-meta); color: var(--text); cursor: pointer; font-variant-numeric: tabular-nums; }
 .cal-mini-g button span { display: inline-block; width: 26px; height: 26px; line-height: 26px; border-radius: 999px; }
 .cal-mini-g button:hover span { background: var(--sel-hover); }
@@ -46,14 +49,14 @@
 .cal-mini-g .wk.l { border-radius: var(--r-sm) 0 0 var(--r-sm); }
 .cal-mini-g .wk.r { border-radius: 0 var(--r-sm) var(--r-sm) 0; }
 .cal-mini-g .on span { background: var(--sel); color: var(--frost); font-weight: 600; }
-.cal-mini-g .td span { background: var(--accent); color: var(--void); font-weight: 700; }
+.cal-mini-g .td span { background: var(--frost); color: var(--on-vivid); font-weight: 600; }
 .cal-mini-g .pd::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 5px; height: 5px; margin-left: -2.5px; background: var(--accent); transform: rotate(45deg); }
 .cal-side-h { font-size: var(--fs-meta); color: var(--ash-dim); margin: 0 0 4px 6px; }
 .cal-layer { display: flex; align-items: center; gap: 10px; width: 100%; height: 30px; padding: 0 6px; border: 0; border-radius: var(--r-sm); background: none; font: inherit; font-size: var(--fs-ctl); color: var(--ash-dim); text-align: left; cursor: pointer; }
 .cal-layer:hover { background: var(--sel-hover); }
 .cal-layer.on { color: var(--text); }
 .cal-layer .cb { width: 14px; height: 14px; box-sizing: border-box; border: 1.5px solid var(--line-2); border-radius: var(--r-xs); display: grid; place-items: center; flex: 0 0 auto; }
-.cal-layer.on .cb { background: var(--accent); border-color: var(--accent); }
+.cal-layer.on .cb { background: var(--ash); border-color: var(--ash); }
 .cal-layer.on .cb::after { content: ""; width: 7px; height: 4px; border-left: 2px solid var(--void); border-bottom: 2px solid var(--void); transform: translateY(-1px) rotate(-45deg); }
 .cal-layer .n { margin-left: auto; font-size: var(--fs-meta); color: var(--ash-dim); font-variant-numeric: tabular-nums; }
 .cal-keys { margin-top: auto; padding-left: 6px; font-size: var(--fs-meta); line-height: 2; color: var(--ash-dim); }
@@ -69,7 +72,7 @@
 .cal-g-tasks::before { width: 10px; height: 10px; box-sizing: border-box; border: 1.5px solid var(--ash); border-radius: 2px; }
 .cal-g-review::before { width: 10px; height: 10px; box-sizing: border-box; border: 1.5px solid var(--ash); border-radius: 50%; }
 .cal-g-daily::before { width: 10px; height: 9px; background: var(--ash); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
-.cal-g-runs::before { width: 10px; height: 10px; background: var(--ash); clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); }
+.cal-g-runs::before { width: 8px; height: 8px; background: var(--ash); border-radius: 50%; }
 .cal-g-notes::before { width: 10px; height: 2px; background: var(--ash); }
 .cal-dia { display: inline-block; width: 7px; height: 7px; background: var(--accent); transform: rotate(45deg); flex: 0 0 auto; }
 
@@ -84,11 +87,11 @@
 .ct-dh .num { min-width: 30px; height: 30px; padding: 0 2px; border: 0; border-radius: 999px; background: none; font: inherit; font-size: 20px; font-weight: 500; color: var(--text); text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; }
 .ct-dh .num:hover { color: var(--frost); background: var(--sel-hover); }
 .ct-dh.past .num { color: var(--ash); }
-.ct-dh.today .num { width: 30px; text-align: center; background: var(--accent); color: var(--void); font-size: 16px; font-weight: 700; }
+.ct-dh.today .num { width: 30px; text-align: center; background: var(--accent); color: var(--void); font-size: 16px; font-weight: 600; }
 .ct-ct { min-height: 16px; font-size: var(--fs-meta); line-height: 16px; color: var(--ash-dim); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .ct-ct .due { color: var(--warn); }
 .ct-band { flex: 0 0 auto; row-gap: 3px; padding: 6px 0; max-height: 120px; overflow-y: auto; border-bottom: 1px solid var(--line); }
-.ct-band > .ct-gut { grid-column: 1; grid-row: 1 / -1; padding: 5px 8px 0 0; font-size: 11px; color: var(--ash-dim); text-align: right; }
+.ct-band > .ct-gut { grid-column: 1; grid-row: 1 / -1; padding: 5px 8px 0 0; font-size: var(--fs-meta); color: var(--ash-dim); text-align: right; }
 .ct-bar, .ct-plan, .ct-band .cal-chip { display: flex; align-items: center; gap: 8px; min-width: 0; height: 24px; margin: 0 3px; padding: 0 8px; border-radius: var(--r-xs); font: inherit; font-size: var(--fs-meta); text-align: left; white-space: nowrap; overflow: hidden; cursor: pointer; }
 .ct-bar { border: 0; background: var(--slate-2); color: var(--frost); font-weight: 500; }
 .ct-bar:hover { background: var(--line); }
@@ -105,13 +108,13 @@
 .ct-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .ct-body { position: relative; height: calc(24 * 48px); background-image: linear-gradient(color-mix(in srgb, var(--line) 65%, transparent) 1px, transparent 1px); background-size: 100% 48px; }
 .ct-body > .ct-gut { position: relative; background: var(--page); }
-.ct-hl { position: absolute; right: 8px; font-size: 11px; color: var(--ash-dim); font-variant-numeric: tabular-nums; transform: translateY(-7px); }
+.ct-hl { position: absolute; right: 8px; font-size: var(--fs-meta); color: var(--ash-dim); font-variant-numeric: tabular-nums; transform: translateY(-7px); }
 .ct-col { position: relative; border-left: 1px solid var(--line); touch-action: pan-y; cursor: cell; }
 .ct-ev { position: absolute; display: flex; flex-direction: column; gap: 1px; box-sizing: border-box; padding: 4px 7px; border: 0; border-radius: var(--r-xs); background: var(--slate-2); color: var(--frost); font: inherit; text-align: left; overflow: hidden; cursor: pointer; z-index: 1; }
 .ct-ev:hover { background: var(--line); }
 .ct-ev .et { font-size: var(--fs-meta); font-weight: 600; line-height: 15px; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .ct-ev .et .cal-dia { margin: 0 6px 1px 1px; vertical-align: middle; }
-.ct-ev .tm { font-size: 11px; color: var(--ash); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ct-ev .tm { font-size: var(--fs-meta); color: var(--ash); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ct-ev.short { flex-direction: row; align-items: center; gap: 6px; padding: 0 7px; }
 .ct-ev.short .et, .ct-ev.s1 .et { -webkit-line-clamp: 1; }
 .ct-ev.short .et { flex: 0 1 auto; }
@@ -128,7 +131,7 @@
 .ct-ev.sess:hover { background: var(--sel-hover); }
 .ct-now { position: absolute; left: -1px; right: 0; height: 2px; background: var(--accent); z-index: 3; pointer-events: none; }
 .ct-now::before { content: ""; position: absolute; left: -6px; top: -5px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
-.ct-ghost { position: absolute; left: 2px; right: 4px; box-sizing: border-box; padding: 3px 7px; border-radius: var(--r-xs); background: var(--sel); box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--frost); font-size: 11px; font-variant-numeric: tabular-nums; z-index: 2; pointer-events: none; }
+.ct-ghost { position: absolute; left: 2px; right: 4px; box-sizing: border-box; padding: 3px 7px; border-radius: var(--r-xs); background: var(--sel); box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--frost); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; z-index: 2; pointer-events: none; }
 .ct.one .ct-ev { padding: 7px 12px; }
 .ct.one .ct-ev .et { font-size: 14px; line-height: 18px; }
 .ct.one .ct-ev .tm { font-size: var(--fs-meta); }
@@ -192,7 +195,7 @@
 /* --- month ----------------------------------------------------------------- */
 .cm { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--page); }
 .cal-dow { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
-.cal-dow div { padding: 5px 8px; font-size: 10px; color: var(--ash-dim); text-transform: uppercase; letter-spacing: 0.07em; text-align: right; }
+.cal-dow div { padding: 5px 8px; font-size: var(--fs-meta); color: var(--ash-dim);text-align: right; }
 .cal-week { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid var(--line); flex: 1; min-height: 0; }
 .cal-week:last-child { border-bottom: 0; }
 .cal-day { grid-row: 1 / -1; display: flex; flex-direction: column; border-right: 1px solid var(--line); padding: 0 3px 3px; min-height: 84px; min-width: 0; cursor: cell; overflow: hidden; }
@@ -210,9 +213,9 @@
 /* A pill, and 9px was aiming at one and missing: the badge is 20px tall, so
    any radius under half its height leaves four flat spots on what reads as a
    round day marker. 999px states the intent instead of approximating it. */
-.cal-n { min-width: 20px; height: 20px; padding: 0 5px; border: 0; border-radius: 999px; background: none; font: inherit; font-size: 11px; color: var(--ash); cursor: pointer; font-variant-numeric: tabular-nums; }
+.cal-n { min-width: 20px; height: 20px; padding: 0 5px; border: 0; border-radius: 999px; background: none; font: inherit; font-size: var(--fs-meta); color: var(--ash); cursor: pointer; font-variant-numeric: tabular-nums; }
 .cal-n:hover { background: var(--sel); color: var(--frost); }
-.cal-day.today .cal-n { background: var(--accent); color: var(--void); font-weight: 700; }
+.cal-day.today .cal-n { background: var(--accent); color: var(--void); font-weight: 600; }
 /* The day's daily note (ADR-0062): the graph's triangle, apex up, in the
    neutral fill the graph gives a lone day. A button, so it carries the focus
    ring and the keyboard; 16px of hit area around a 9px mark. */
@@ -220,7 +223,7 @@
 .cal-daily::before { content: ""; width: 9px; height: 8px; background: var(--ash); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .cal-daily:hover::before { background: var(--frost); }
 .cal-chips { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: hidden; }
-.cal-chip { display: block; width: 100%; border: 0; font: inherit; text-align: left; font-size: 11px; color: var(--text); background: var(--slate-2); border-radius: var(--r-xs); padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.cal-chip { display: block; width: 100%; border: 0; font: inherit; text-align: left; font-size: var(--fs-meta); color: var(--text); background: var(--slate-2); border-radius: var(--r-xs); padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .cal-chip:hover { background: var(--line); color: var(--frost); }
 .cal-chip .et { overflow: hidden; text-overflow: ellipsis; }
 .cal-chip .t { color: var(--ash); margin-right: 4px; font-variant-numeric: tabular-nums; }
@@ -234,7 +237,7 @@
 .cal-chip.plan.done::before { content: "\2713"; }
 /* An all-day event is a filled neutral bar like any other event: the accent
    fill it wore made the calendar's loudest object a dentist's appointment. */
-.cal-bar { z-index: 1; display: block; margin: 1px 3px; border: 0; border-radius: var(--r-xs); background: var(--slate-2); color: var(--frost); font: inherit; font-size: 11px; line-height: 18px; font-weight: 600; padding: 0 6px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; min-width: 0; }
+.cal-bar { z-index: 1; display: block; margin: 1px 3px; border: 0; border-radius: var(--r-xs); background: var(--slate-2); color: var(--frost); font: inherit; font-size: var(--fs-meta); line-height: 18px; font-weight: 600; padding: 0 6px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; min-width: 0; }
 .cal-bar:hover { background: var(--line); }
 /* The derived axes: what already happened here, or is waiting. Not chips — a
    filled chip is an appointment, and printing sixty agent writes in the same
@@ -245,7 +248,7 @@
    narrow cell cut "nucleate ×50" to "nucleat" with no mark that it had. */
 .cal-sig {
   display: block;
-  font-size: 10px;
+  font-size: var(--fs-meta);
   line-height: 16px;
   padding: 0 5px;
   color: var(--ash-dim);
@@ -275,12 +278,12 @@
 .cal-day:hover .cal-sig.due { color: var(--warn); }
 .cal-chip.done, .cal-bar.done { background: color-mix(in srgb, var(--slate-2) 50%, var(--page)); color: var(--ash); }
 .cal-chip.cancelled, .cal-bar.cancelled { background: color-mix(in srgb, var(--slate-2) 50%, var(--page)); color: var(--ash); text-decoration: line-through; }
-.cal-more { align-self: flex-start; margin-top: auto; padding: 1px 0 0; border: 0; background: none; font: inherit; font-size: 10px; color: var(--ash-dim); cursor: pointer; }
+.cal-more { align-self: flex-start; margin-top: auto; padding: 1px 0 0; border: 0; background: none; font: inherit; font-size: var(--fs-meta); color: var(--ash-dim); cursor: pointer; }
 button.cal-more:hover { color: var(--frost); text-decoration: underline; }
 
 /* --- agenda ------------------------------------------------------------------- */
 .cal-ag { flex: 1; min-height: 0; max-width: 46rem; overflow-y: auto; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r); background: var(--page); }
-.cal-ag-head { font-size: 10px; color: var(--ash-dim); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
+.cal-ag-head { font-size: var(--fs-meta); color: var(--ash-dim);margin-bottom: 8px; }
 .cal-ag-day { margin-bottom: 12px; }
 .cal-ag-date { font-size: 12px; font-weight: 600; color: var(--frost); margin-bottom: 3px; }
 .cal-ag-date .wd { color: var(--ash-dim); font-weight: 400; margin-left: 6px; }
@@ -293,9 +296,9 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
 .cal-ag-item.ev { cursor: pointer; }
 .cal-ag-item.ev:hover > span:last-child { color: var(--frost); text-decoration: underline; }
 .cal-ag-item.cancelled > span:last-child { text-decoration: line-through; color: var(--ash-dim); }
-.cal-ag-item .when { flex: 0 0 52px; color: var(--ash); font-variant-numeric: tabular-nums; font-size: 11px; padding-top: 1px; }
-.cal-ag-kind { text-transform: uppercase; letter-spacing: 0.05em; font-size: 9px !important; color: var(--ash-dim) !important; padding-top: 3px !important; }
-.cal-ag-empty { color: var(--ash-dim); font-size: 11px; }
+.cal-ag-item .when { flex: 0 0 52px; color: var(--ash); font-variant-numeric: tabular-nums; font-size: var(--fs-meta); padding-top: 1px; }
+.cal-ag-kind {font-size: var(--fs-meta) !important; color: var(--ash-dim) !important; padding-top: 3px !important; }
+.cal-ag-empty { color: var(--ash-dim); font-size: var(--fs-meta); }
 /* An agenda row is three fields, not one sentence: the verb leads, the note is
    the part you scan for, and the counts trail. */
 .cal-ag-txt { min-width: 0; overflow-wrap: anywhere; }
@@ -312,7 +315,7 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
   border: 0;
   background: none;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--accent);
   cursor: pointer;
 }
@@ -336,7 +339,7 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
 .cq-ad input { accent-color: var(--accent); }
 .cal-card input[type="date"], .cal-card input[type="time"], .cal-card select { height: 30px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--page); font: inherit; font-size: var(--fs-ctl); color: var(--frost); color-scheme: inherit; }
 .cq-plan select { flex: 1; min-width: 0; }
-.cq-path { padding: 6px 8px; border-radius: var(--r-xs); background: var(--page); font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--ash); overflow-wrap: anywhere; }
+.cq-path { padding: 6px 8px; border-radius: var(--r-xs); background: var(--page); font-family: var(--mono); font-size: var(--fs-meta); line-height: 1.5; color: var(--ash); overflow-wrap: anywhere; }
 .cq-err { font-size: var(--fs-meta); color: var(--del); }
 .cq-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 2px; }
 .cq-more { margin: 0 auto 0 -6px; padding: 4px 6px; border: 0; border-radius: var(--r-xs); background: none; font: inherit; font-size: var(--fs-ctl); color: var(--ash); cursor: pointer; }
@@ -459,7 +462,7 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
 }
 
 .wk-empty-d {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.55;
   color: var(--ash-dim);
 }
@@ -485,7 +488,7 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
 
 .wk-num {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-meta);
   font-variant-numeric: tabular-nums;
   color: var(--ash-dim);
 }
@@ -509,7 +512,7 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
 .wk-sec-n {
   margin-left: auto;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-meta);
   font-variant-numeric: tabular-nums;
   color: var(--ash-dim);
 }
@@ -527,7 +530,7 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
   background: transparent;
   color: var(--ash);
   font-family: var(--sans);
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   cursor: pointer;
   transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
@@ -567,7 +570,7 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
 }
 
 .wk-src-n {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
@@ -579,7 +582,7 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
   align-items: center;
   gap: 0.4rem;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
 }
 
