@@ -35,6 +35,10 @@ let railSection = null; // which list the summoned rail is showing
 // Stamped on <html> by the server (index()), so the views a hosted account
 // does not get are gone before the first paint rather than after a probe.
 const HOSTED = document.documentElement.hasAttribute("data-hosted");
+// A demo's process (ADR-0139 point 6), stamped the same way: what it refuses
+// has no control. Nothing of the visit's count reads it: that is the door's
+// headers' (renderDemo in app-chat.js).
+const DEMO = document.documentElement.hasAttribute("data-demo");
 // The server marks a hosted account's views on their tabs (ADR-0140); read
 // from there so the page and the CSS cannot disagree about one.
 const viewServed = (tab) => tab === "chat" || !HOSTED || !!document.querySelector(`#views .tab[data-tab="${tab}"][data-served]`);
@@ -422,12 +426,12 @@ function greet(again = false) {
 // every day links to it, and "quiz me on 2026-10-21" asks about nothing.
 // /quiz is a shortcut, split with shlex, so a title with spaces is quoted; the
 // two skills read their line as written. /quiz is Learn's, so an account
-// without Learn is not offered it (ADR-0140).
+// without Learn is not offered it (ADR-0140), and a demo refuses /explain.
 const LANDING_IDEAS = [
   ["Explain ", "/explain", (link) => `/explain [[${link}]]`],
   ["Quiz me on ", "/quiz", (link) => `/quiz ${/\s/.test(link) ? `"${link}"` : link}`],
   ["Summarize ", "/summarize", (link) => `/summarize [[${link}]]`],
-].filter(([, cmd]) => cmd !== "/quiz" || viewServed("learn"));
+].filter(([, cmd]) => (cmd !== "/quiz" || viewServed("learn")) && (cmd !== "/explain" || !DEMO));
 
 function renderLandingIdeas(data) {
   const box = $("#vh-ideas");

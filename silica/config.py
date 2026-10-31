@@ -161,6 +161,13 @@ def hosted() -> bool:
     return os.environ.get("SILICA_HOSTED", "").strip() == "1"
 
 
+def demo() -> bool:
+    """The demo sandbox (ADR-0139 point 6): one anonymous visit's process, set
+    only by silica-demo@.service beside SILICA_HOSTED=1. Read per call and
+    spelled "1" alone, as hosted() is."""
+    return os.environ.get("SILICA_DEMO", "").strip() == "1"
+
+
 # What each view beyond the chat is made of, by the tab id the page gives it
 # (ADR-0140 point 4): a view a process does not serve loses its routes, its
 # chat tools and its commands with its tab. A route is its path or anything
@@ -188,18 +195,59 @@ def hosted_views() -> frozenset[str]:
     the paid ones away. Examine is never one (ADR-0111 point 3). The tenant
     cannot write the key: on hosted, POST /settings takes ADR-0104's rows only."""
     names = {v.strip() for v in os.environ.get("SILICA_VIEWS", "").split(",")}
-    return frozenset((set(VIEWS) if "all" in names else names & set(VIEWS)) - {"metrics"})
+    views = (set(VIEWS) if "all" in names else names & set(VIEWS)) - {"metrics"}
+    # A demo is Explore alone whatever its unit lists (ADR-0139, amendment
+    # 2026-10-31): it has no handle to publish under, Learn is off by the
+    # owner's answer, and Discover reaches the internet.
+    return frozenset(views & {"graph"} if demo() else views)
 
 
 def served_views() -> frozenset[str]:
-    """Every view off hosted: the variable is the host's, never read on a laptop."""
-    return hosted_views() if hosted() else frozenset(VIEWS)
+    """Every view off hosted: the variable is the host's, never read on a laptop.
+    A demo keeps its clamp even on a unit that lost SILICA_HOSTED."""
+    return hosted_views() if hosted() or demo() else frozenset(VIEWS)
+
+
+# What a demo refuses beyond its views (ADR-0139 point 6), at the doors a view
+# already has: a route answers 404 as one that does not exist, a command is
+# neither offered nor run. The chat's tools are constraints.DEMO_WITHHELD.
+DEMO_OFF: dict[str, tuple[str, ...]] = {
+    "routes": (
+        # an upload is personal data, and an import reaches the internet
+        "/chat/files/add", "/vault/import", "/vault/fetch", "/vault/save", "/mail/upload",
+        # Settings and what only Settings reaches. The Caddy block that refuses
+        # /settings/*, /endpoints, /zotero and /bug_report on a tenant's route
+        # never sees the demo's hostname (ADR-0139 point 4).
+        "/settings", "/connectors", "/skills", "/instructions", "/endpoints", "/zotero", "/bug_report",
+        # dictation sends the voice outside the count; a flag would die unread
+        "/stt", "/flag",
+        # model calls the door never counts: a turn outside POST /chat, the
+        # injector, check sources' judge, the worker's sentence on the vault
+        "/turn/redo", "/phone", "/nucleate", "/note/check", "/vault_brief",
+        # ADR-0142's two downloads: the owner has not decided (2026-10-31)
+        "/vault/export",
+    ),
+    "commands": (
+        # the web door reaches the internet, and the connectors are Settings'
+        "/web", "/web-search", "/fetch", "/keep", "/connect", "/zotero",
+        # files in, through the injector or a converter
+        "/nucleate", "/convert", "/mail", "/promote",
+        # the model or the embedder spent outside the chat's 8 calls
+        "/enrich", "/dedup", "/curate", "/anneal", "/aliases", "/flashcards", "/wiki", "/embed", "/check",
+        # off by the owner's answer (Open 6); /organize's two tools are not the demo's
+        "/explain", "/organize",
+        # one vault, and no settings
+        "/vault", "/settings",
+    ),
+}
 
 
 def withheld(part: str) -> frozenset[str]:
-    """The routes, tools or commands of every view this process does not serve."""
+    """The routes, tools or commands of every view this process does not serve,
+    and in a demo what DEMO_OFF names."""
     served = served_views()
-    return frozenset(x for v, p in VIEWS.items() if v not in served for x in p.get(part, ()))
+    gone = {x for v, p in VIEWS.items() if v not in served for x in p.get(part, ())}
+    return frozenset(gone | set(DEMO_OFF.get(part, ()) if demo() else ()))
 
 
 # Provider prefixes that map a `prefix/model` string to an endpoint and get
