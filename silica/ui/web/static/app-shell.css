@@ -230,6 +230,37 @@
   color: var(--ash-dim);
 }
 
+/* A download says under its name what it would give (ADR-0142 point 1). */
+.vp-item.vp-two {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  text-decoration: none;
+  /* one line height for the link and the button, which the UA sets apart */
+  line-height: 1.35;
+}
+
+.vp-two small {
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+.vp-item:disabled {
+  color: var(--ash-dim);
+  cursor: default;
+}
+
+.vp-item:disabled:hover {
+  background: transparent;
+}
+
+#vx-said {
+  margin: 0;
+  padding: 0.15rem 0.55rem 0.45rem;
+  font-size: 12px;
+  color: var(--ash);
+}
+
 #boot-notices:empty::after {
   content: "nothing needs configuring";
   display: block;
@@ -416,6 +447,11 @@
    these carries its own display, #views .tab with an id's weight. */
 html[data-hosted] :is([data-tab], [data-view]):not([data-served]) {
   display: none !important;
+}
+
+/* A help row about the server's downloads (ADR-0142): a laptop has none. */
+html:not([data-hosted]) .hp-hosted {
+  display: none;
 }
 
 .side-new:hover,

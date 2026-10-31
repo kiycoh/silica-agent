@@ -821,9 +821,72 @@ function toggleVaultPanel(e) {
   vaultOpener().setAttribute("aria-expanded", "true");
   const first = vaultPanel.querySelector("button, summary, [href]");
   if (first) first.focus();
+  if (HOSTED) { vxSay(""); loadVaultExport(); }
 }
 vaultChip.addEventListener("click", toggleVaultPanel);
 $("#rail-vault").addEventListener("click", toggleVaultPanel);
+
+// The vault's two downloads (ADR-0142), the server's only. What each would
+// give is asked as the menu opens, so "nothing new" is read before a click.
+if (HOSTED) $("#vault-export").hidden = false;
+const vxDate = (s) => new Date(s * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+const vxSize = (b) => b < 1048576 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1048576).toFixed(b < 10485760 ? 1 : 0)} MB`;
+function vxSay(text) {
+  $("#vx-said").textContent = text;
+  $("#vx-said").hidden = !text;
+}
+async function loadVaultExport() {
+  let s;
+  try {
+    const r = await fetch("/vault/export/summary");
+    if (!r.ok) return;
+    s = await r.json();
+  } catch {
+    return; // the menu still works; its two lines stay as they were
+  }
+  const n = s.vault.files, a = s.added;
+  $("#vx-all-note").textContent = `${n} ${n === 1 ? "file" : "files"}, ${vxSize(s.vault.bytes)}`;
+  $("#vx-added-note").textContent = a.files
+    ? `${a.notes} new ${a.notes === 1 ? "note" : "notes"}${a.last ? ` since ${vxDate(a.last)}` : ""}`
+    : a.last ? `nothing new since ${vxDate(a.last)}` : "nothing yet";
+  $("#vx-added").disabled = !a.files;
+}
+// A fetch and not a link, as the vault's is: the page reads where the folder
+// goes off the answer's headers. The archive is held in memory for it, which
+// what Silica added since the last download can afford and the vault cannot.
+$("#vx-added").addEventListener("click", async () => {
+  const btn = $("#vx-added");
+  btn.disabled = true;
+  vxSay("preparing the archive…");
+  let r, blob;
+  try {
+    r = await fetch("/vault/export/added", { method: "POST" });
+    if (r.ok && r.status !== 204) blob = await r.blob();
+  } catch {
+    vxSay("the server could not be reached");
+    btn.disabled = false;
+    return;
+  }
+  if (!r.ok) {
+    vxSay((await r.json().catch(() => ({}))).detail || `the server answered ${r.status}`);
+    btn.disabled = false;
+    return;
+  }
+  if (blob) {
+    const folder = r.headers.get("X-Silica-Folder") || "Silica";
+    const left = Number(r.headers.get("X-Silica-Left")) || 0;
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${folder}.zip`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+    vxSay(`Unzip it and put the folder "${folder}" at the top of your Obsidian vault.`
+      + (left ? ` ${left} ${left === 1 ? "link points" : "links point"} at a note the archive does not hold.` : ""));
+  } else {
+    vxSay("nothing new since the last download");
+  }
+  loadVaultExport();
+});
 
 // The two entries the strip's gear and help mark were, kept one gesture away
 // now that each is a row of the vault's panel (ADR-0084). `?` only where it

@@ -599,6 +599,11 @@ async function importToVault(files, fromFolder) {
   const extOf = (name) => (name.match(/\.[^./]+$/) || [""])[0].toLowerCase();
   const intoWorkspace = vaultImportWorkspace;
   vaultImportWorkspace = "";
+  // A picked folder holding .obsidian/ is an Obsidian vault: the server
+  // remembers it, so what Silica adds can link to the person's own files
+  // (ADR-0142 point 5). Read before the filter below drops hidden paths.
+  const obsidian = fromFolder && files.some((f) => relOf(f).split("/")[1] === ".obsidian")
+    ? relOf(files[0]).split("/")[0] : "";
   const skipped = [];
   const wanted = files.filter((f) => {
     const path = relOf(f) || f.name;
@@ -628,6 +633,7 @@ async function importToVault(files, fromFolder) {
     }
     if (i + VAULT_IMPORT_BATCH >= wanted.length) fd.append("last", "1");
     if (intoWorkspace) fd.append("workspace", intoWorkspace);
+    if (obsidian) fd.append("obsidian", obsidian);
     let r;
     try {
       r = await fetch("/vault/import", { method: "POST", body: fd });
@@ -641,7 +647,7 @@ async function importToVault(files, fromFolder) {
     }
     rows.push(...(await r.json()).files);
   }
-  vaultImportLast = { rows, skipped, failed, folder, big };
+  vaultImportLast = { rows, skipped, failed, folder, big, obsidian };
   renderVaultImport(vaultImportLast);
   if (intoWorkspace) loadWorkspaces();
   // A PDF converts in milliseconds: its job's last event can arrive before this
@@ -667,7 +673,7 @@ function vaultImportJob(j) {
 // One line of counts with its two actions, then the files that need a word:
 // refused with their reason, hidden text left out (ADR-0098 H6), and pages
 // with no text that no model read (ADR-0087 point 3).
-function renderVaultImport({ progress = "", rows = [], skipped = [], failed = "", folder = "", big = 0 }) {
+function renderVaultImport({ progress = "", rows = [], skipped = [], failed = "", folder = "", big = 0, obsidian = "" }) {
   vaultImportBox.hidden = false;
   vaultImportBox.replaceChildren();
   const head = document.createElement("div");
@@ -719,6 +725,8 @@ function renderVaultImport({ progress = "", rows = [], skipped = [], failed = ""
     ...rows.filter((r) => r.hidden).flatMap((r) => r.hidden.map((h) =>
       `${r.name}, page ${h.page}: ${h.characters} characters of hidden text left out`)),
     ...rows.filter((r) => r.pages_not_read).map((r) => `${r.name}: ${r.pages_not_read}`),
+    // The way back is in another menu: said where the vault came in (ADR-0142).
+    ...(obsidian && HOSTED ? ["To take the notes Silica writes back to Obsidian: SILICA menu, Download what Silica added."] : []),
   ];
   if (notes.length) {
     const list = document.createElement("ul");

@@ -3055,7 +3055,7 @@ async def redo_turn(payload: dict | None = None):
 
 @app.post("/vault/import", dependencies=_SAME_ORIGIN)
 async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = Form([]),
-                       last: str = Form(""), workspace: str = Form("")):
+                       last: str = Form(""), workspace: str = Form(""), obsidian: str = Form("")):
     """The vault's `+` (ADR-0098 point 5): files, or a folder's files with
     their relative paths, into the Inbox, each through its lane, with no agent
     turn. One result per file; one file's failure never stops the others (H4).
@@ -3065,7 +3065,8 @@ async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = F
     which the imported folders are embedded in the background. `workspace`
     (ADR-0112 point 6) is the workspace whose `+` was used: each imported
     note joins its `notes:`, a file still converting by its name, which
-    resolves when the job writes the note.
+    resolves when the job writes the note. `obsidian` names the picked folder
+    when it held `.obsidian/` (ADR-0142 point 5).
 
     The turn slot is held while the batch writes: `_begin_turn` is the one
     serialisation of vault writes the server has, and an import racing a
@@ -3083,11 +3084,100 @@ async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = F
         results, folders = await _import_files(files, paths or [""] * len(files))
     finally:
         _end_turn()
+    if obsidian:
+        _mark_obsidian_root(obsidian, paths)
     if last and folders:
         _embed_imported(folders)
     if workspace:
         await asyncio.to_thread(_list_imports_in, workspace, results)
     return {"files": results}
+
+
+def _mark_obsidian_root(name: str, paths: list[str]) -> None:
+    """ADR-0142 point 5: below this folder, a path is where the person keeps
+    that file in Obsidian. The page's word is taken, because a wrong mark only
+    misdirects links in that person's own archive; it must still name a folder
+    of this batch. The server's only, as the downloads that read it."""
+    from silica.config import hosted
+    from silica.ui.web import vault_export as ve
+    from silica.ui.web import vault_import as vi
+
+    if not hosted():
+        return
+    firsts = set()
+    for p in paths:
+        try:
+            firsts.add(vi.clean_rel(p).parts[0])
+        except vi.Refused:
+            continue  # the import refused that file too
+    try:
+        root = vi.clean_rel(name).parts[0]
+    except vi.Refused:
+        return
+    if root in firsts:
+        ve.mark_root(Path(CONFIG.vault_path), root)
+
+
+# --- the vault's two downloads (ADR-0142) ------------------------------------
+# The server's only: on a laptop the vault is the person's own folder, which
+# Obsidian already opens.
+
+def _export_vault() -> Path:
+    from silica.config import hosted
+
+    if not hosted():
+        raise HTTPException(404, "the vault is a folder on this machine: there is nothing to download")
+    if not CONFIG.vault_path:
+        raise HTTPException(409, "no vault is open")
+    return Path(CONFIG.vault_path)
+
+
+@app.get("/vault/export/summary")
+def vault_export_summary():
+    """What each of the vault menu's two downloads would give, asked when the
+    menu opens, so that "nothing new" is said before a click (ADR-0142 point 1)."""
+    from silica.ui.web import vault_export as ve
+
+    return ve.summary(_export_vault())
+
+
+@app.get("/vault/export", dependencies=_SAME_ORIGIN)
+def vault_export():
+    """The vault whole, every file in its tree (ADR-0142 point 2). A link the
+    browser follows, so the archive streams to the person's disk."""
+    from silica.ui.web import vault_export as ve
+
+    vault = _export_vault()
+    top = time.strftime("Silica vault %Y-%m-%d")
+    return StreamingResponse(ve.whole(vault, top), media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{top}.zip"'})
+
+
+@app.post("/vault/export/added", dependencies=_SAME_ORIGIN)
+def vault_export_added():
+    """What Silica added since the last download, written for the root of the
+    person's Obsidian vault (ADR-0142 points 3 and 4); 204 when nothing is new.
+    A POST, because it moves the sent list. The page reads the folder's name
+    and the links left as written off the headers, to say where it goes."""
+    from silica.ui.web import vault_export as ve
+
+    vault = _export_vault()
+    if not ve.BUSY.acquire(blocking=False):
+        raise HTTPException(409, "a download of what Silica added is already running")
+    try:
+        plan = ve.plan_additions(vault, ve.load_state(vault), time.strftime("Silica %Y-%m-%d %H%M%S"))
+    except BaseException:
+        ve.BUSY.release()
+        raise
+    if not plan.files:
+        ve.BUSY.release()
+        return Response(status_code=204)
+    stream = ve.added(vault, plan)
+    next(stream)  # started, its finally releases BUSY even if no byte is ever asked for
+    return StreamingResponse(stream, media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{plan.top}.zip"',
+        "X-Silica-Folder": plan.top, "X-Silica-Files": str(len(plan.files)),
+        "X-Silica-Left": str(plan.left)})
 
 
 # Measured from the pilot host 2026-10-17: yt-dlp gets "Sign in to confirm
