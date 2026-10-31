@@ -1208,7 +1208,9 @@ function restoreDraft(sid) {
   try { d = localStorage.getItem(draftKey()) || ""; } catch { /* same */ }
   if (!d) return;
   const typed = input.value;
-  input.value = typed.trim() ? typed.replace(/\s+$/, "") + "\n" + d : d;
+  // The same text already in the box is the tour's prefill resumed after a
+  // reload (ADR-0105): appended, the question or /quiz showed twice.
+  input.value = typed.trim() && typed.trim() !== d.trim() ? typed.replace(/\s+$/, "") + "\n" + d : d;
   autoGrow(input);
   renderHighlight();
 }

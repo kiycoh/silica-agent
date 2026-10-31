@@ -793,6 +793,16 @@ body.sidebar-collapsed #sidebar {
   line-height: 1.5;
 }
 
+/* Create's walkthrough lights fields inside Learn's dialog, whose scrim sits at
+   200 (app-learn.css): there the dim and the bubble go over it. */
+#tour-spot.tour-high {
+  z-index: 205;
+}
+
+#tour-tip.tour-high {
+  z-index: 210;
+}
+
 #tour-spot[hidden],
 #tour-tip[hidden],
 .tour-status[hidden] {

@@ -370,6 +370,7 @@ function lrRender() {
   const scrim = body.querySelector(".lr-scrim");
   if (scrim && dlgScroll) scrim.scrollTop = dlgScroll;
   if (keep) body.querySelector(`[data-lr-key="${CSS.escape(keep)}"]`)?.focus({ preventScroll: true });
+  document.dispatchEvent(new CustomEvent("silica:learn-view", { detail: lrRoute.view })); // Read and Create walk through themselves (ADR-0105)
 }
 
 // --- home: one column (ADR-0119) ----------------------------------------------

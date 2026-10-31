@@ -16,7 +16,7 @@ from pathlib import Path
 INDEX = Path(__file__).parent / "static" / "index.html"
 
 # A view's address, which the hash router opens (app-shell.js tabFromHash).
-ADDRESS = {"Explore": "#explore", "Memorize": "#memorize", "Calendar": "#calendar", "Examine": "#examine"}
+ADDRESS = {"Discover": "#discover", "Explore": "#explore", "Memorize": "#memorize", "Calendar": "#calendar", "Examine": "#examine"}
 
 # Not "point to the help panel" for what it does not name: it holds these same
 # rows, so the pointer led nowhere, and the first wording's answers went on to
