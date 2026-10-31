@@ -374,6 +374,50 @@ def test_the_reading_is_checked_against_the_vault_and_rescued_only_where_code_ca
     assert r["scope"] == "" and "not a folder" in r["said"][-1]
 
 
+def test_a_syllabus_named_in_the_sentence_is_the_reference_never_the_material(vault, monkeypatch):
+    from silica.kernel.learn import items
+
+    def reply(text):
+        monkeypatch.setattr(items, "_llm", lambda *a, **k: (text, "stop"))
+
+    # a transparency sheet: a programme marker over a table, a name that says nothing
+    vault.note("ML/Scheda ML.md", "# Scheda ML\n\n| CFU | 9 |\n| --- | --- |\n\nPROGRAMMA\n\n| ORE | Lezioni |\n| --- | --- |\n"
+               "| 4 | Softmax e funzioni di attivazione |\n| 6 | Chain rule e retropropagazione |\n")
+    # a programme by its name, in bullets
+    vault.note("ML/Programma del corso.md", "# Programma del corso\n\n- Softmax\n- Chain rule\n")
+    reply("KIND: notes\nTARGET: Scheda ML\nONLY_IN: ML/\nNAME: Esame ML")
+    r = plans.read_sentence("Esame di ML il 30 novembre 2099, gli argomenti sono nella Scheda ML")
+    assert (r["scope"], r["target"], r["restrict"]) == ("steps", "Scheda ML", "ML/")
+    assert any("syllabus" in s for s in r["said"])
+    assert [n["text"] for n in plans.resolve_scope("steps", r["target"])["tree"]] == [
+        "Softmax e funzioni di attivazione", "Chain rule e retropropagazione"]
+    # named with the extension of the file it was converted from, read back as a topic
+    reply("KIND: topic\nTARGET: Programma del corso.pdf\nONLY_IN: none\nNAME: Esame")
+    assert plans.read_sentence("dal Programma del corso.pdf")["target"] == "Programma del corso"
+    # a name no title equals, whose words one title alone holds
+    reply("KIND: topic\nTARGET: scheda di ML\nONLY_IN: none\nNAME: Esame")
+    assert plans.read_sentence("prendi gli argomenti dalla scheda di ML")["target"] == "Scheda ML"
+    # a title with a dot in it is not cut at the dot
+    vault.note("ML/scheda.trasparenza - Reti.md", "# Reti\n\n- Softmax\n- Chain rule\n")
+    reply("KIND: notes\nTARGET: scheda.trasparenza - Reti\nONLY_IN: none\nNAME: Esame")
+    assert plans.read_sentence("dalla scheda.trasparenza - Reti")["target"] == "scheda.trasparenza - Reti"
+    # a downloaded sheet's name, its words joined by underscores
+    vault.note("ML/scheda_trasparenza_173558.md", "# x\n\n- Softmax\n- Chain rule\n")
+    reply("KIND: notes\nTARGET: scheda_trasparenza_173558\nONLY_IN: none\nNAME: Esame")
+    assert plans.read_sentence("interrogami su scheda_trasparenza_173558")["scope"] == "steps"
+    # a title that says nothing is a syllabus when the sentence calls it one
+    vault.note("ML/Corso 2025.md", "# Corso 2025\n\n- Softmax\n- Chain rule\n")
+    reply("KIND: notes\nTARGET: Corso 2025\nONLY_IN: none\nNAME: Esame")
+    assert plans.read_sentence("gli argomenti sono nel programma, Corso 2025")["scope"] == "steps"
+    assert plans.read_sentence("interrogami su Corso 2025")["scope"] == "notes"
+    # an ordinary note is still the material, a bulleted one whose title holds "indice" too
+    vault.note("ML/Indice di Gini.md", "# Indice di Gini\n\n- disuguaglianza\n- curva di Lorenz\n")
+    reply("KIND: notes\nTARGET: Indice di Gini\nONLY_IN: none\nNAME: Gini")
+    assert plans.read_sentence("interrogami sull'Indice di Gini")["scope"] == "notes"
+    reply("KIND: notes\nTARGET: Softmax\nONLY_IN: none\nNAME: Softmax")
+    assert plans.read_sentence("interrogami su Softmax")["scope"] == "notes"
+
+
 def test_a_syllabus_line_says_how_it_matched_and_a_refused_line_is_a_gap(vault):
     vault.note("Other/Teoria della probabilita.md", "# Teoria della probabilita\n\nEventi.\n")
     res = plans.resolve_scope("steps", "[[Softmax]]\nChain rule\nTeoria della mente\nGradient")

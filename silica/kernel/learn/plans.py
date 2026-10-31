@@ -267,12 +267,17 @@ def resolve_title(name: str, notes: dict | None = None) -> str | None:
     return hit
 
 
+# A file's own extension, the only suffix a name loses: Path.stem cut
+# "scheda.trasparenza - Reti di Calcolatori e Internet" to "scheda" (2026-10-29).
+_FILE_EXT_RE = re.compile(r"\.(md|pdf|docx?|pptx?|xlsx?|odt|epub|html?|txt)$", re.I)
+
+
 def _by_name(name: str, notes: dict) -> str | None:
     name = name.strip()
     cand = name if name.endswith(".md") else name + ".md"
     if cand in notes:
         return cand
-    return _stem_index(notes).get(Path(name).stem.casefold())
+    return _stem_index(notes).get(_FILE_EXT_RE.sub("", name.rsplit("/", 1)[-1]).casefold())
 
 
 # {casefolded stem: the first path holding it, in the notes' own order}, for
@@ -2992,7 +2997,7 @@ A reader describes a study plan in one sentence. Read only WHAT they will study;
 KIND is one of:
 - steps: the sentence lists two or more subjects. TARGET copies each subject in the sentence's own words, in order, separated by " | ".
 - folder: the sentence names one folder, or "all of" one. TARGET is that path copied from FOLDERS.
-- notes: the sentence names notes by their titles. TARGET is the titles, separated by " | ".
+- notes: the sentence names notes by their titles. TARGET is the titles, separated by " | ". A syllabus, programme or transparency sheet the subjects are taken from is a note too: TARGET is its name as written.
 - topic: one concept, wherever it appears. TARGET is the concept.
 ONLY_IN: the path from FOLDERS that holds the sentence's subject area (a course named after a folder), or none.
 NAME: a short name for the plan in the sentence's language, at most six words.
@@ -3075,7 +3080,44 @@ def _folder_by_segment(name: str, folders: dict[str, int]) -> str | None:
     return hits[0] if len(hits) == 1 else _folder_named(name, folders)
 
 
-def _checked_study(kind: str, raw: str, restrict: str, notes: dict, folders: dict[str, int], said: list[str]) -> dict:
+# What calls a note a syllabus, in its title or in the sentence naming it.
+# Narrow and word-bounded, because it turns a test on a note into a plan read
+# from it: on alex_second_brain (2026-10-29, 2,085 notes) the typeahead's
+# wider stems, or a programme heading in the body, took 88, 64 of them
+# "Sunto lezione" and the rest mostly "Programmazione ..."; these take 7, one
+# of them wrongly ("Prospettiva del programma multi-step").
+SYLLABUS_WORD_RE = re.compile(r"\b(programma|programme|syllabus|scheda|trasparenza)\b", re.I)
+
+
+def _syllabus_note(name: str, notes: dict, sentence: str = "") -> str | None:
+    """The note a name points at when it is a syllabus to study from: its
+    title or the sentence says so, and it has two rows to match. A name no
+    title equals is taken when one title alone holds its words, so "la scheda
+    di trasparenza" finds the only one there is."""
+    from silica.kernel.text.language import stopwords_for
+
+    path = resolve_title(name, notes)
+    if not path:
+        stop = stopwords_for("italian") | stopwords_for("english")
+        words = lambda s: set(re.findall(r"[^\W\d_]{2,}", s.casefold())) - stop  # noqa: E731
+        mine = words(_FILE_EXT_RE.sub("", name.strip()))
+        hits = [p for p in notes if mine and mine <= words(Path(p).stem)]
+        path = hits[0] if len(hits) == 1 else None
+    # "_" is a word character to \b, and a downloaded sheet is "scheda_trasparenza_173558"
+    if not path or not (SYLLABUS_WORD_RE.search(Path(path).stem.replace("_", " ")) or SYLLABUS_WORD_RE.search(sentence)):
+        return None
+    from silica.kernel.write import frontmatter
+
+    try:
+        _d, _r, body = frontmatter.split((_vault() / path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        # gone or unreadable since the walk: not a syllabus, the reading goes on as before
+        return None
+    return path if len(reference_rows(body)) >= 2 else None
+
+
+def _checked_study(kind: str, raw: str, restrict: str, notes: dict, folders: dict[str, int], said: list[str],
+                   sentence: str = "") -> dict:
     """The model's KIND and TARGET checked against the vault, with the
     rescues code can verify. Measured on Qwen3.5-9B (2026-10-08): four
     subjects listed came back as notes, three of which do not exist, and
@@ -3083,6 +3125,14 @@ def _checked_study(kind: str, raw: str, restrict: str, notes: dict, folders: dic
     that do not resolve is read as a syllabus, whose resolver keeps gaps; a
     single name that is a folder's is that folder. Each rescue is said."""
     names = [n.strip() for n in raw.split("|") if n.strip()]
+    # One name that is a syllabus is the Reference, never the material: on
+    # deepseek-v4-flash (2026-10-29) "gli argomenti sono nella Scheda di
+    # trasparenza - Machine Learning" came back as that note to be tested on,
+    # and "dalla scheda di trasparenza" as a topic no note carries.
+    syllabus = _syllabus_note(names[0], notes, sentence) if len(names) == 1 else None
+    if syllabus:
+        said.append(f"“{Path(syllabus).stem}” reads as a syllabus: its lines are the Reference, matched below.")
+        return {"scope": "steps", "target": Path(syllabus).stem}
     if kind == "notes":
         found = [resolve_title(n, notes) for n in names]
         if all(found):
@@ -3180,7 +3230,7 @@ def read_sentence(sentence: str, today=None) -> dict:
     if kind not in SCOPES or not raw:
         out["said"].append("The reading named no material; pick it in Study.")
     else:
-        out.update(_checked_study(kind, raw, out["restrict"], notes, folders, out["said"]))
+        out.update(_checked_study(kind, raw, out["restrict"], notes, folders, out["said"], sentence))
     if out["scope"] in ("folder", "notes"):
         out["restrict"] = ""   # a folder or named notes are the material already
     elif unnamed:
