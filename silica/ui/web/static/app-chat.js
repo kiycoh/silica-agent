@@ -52,8 +52,11 @@ log.addEventListener("scroll", () => {
   const was = following;
   // Up from where the machine left it is the reader's act; anything else is
   // the content growing under a position the machine set, which must not
-  // flip the state, or a fast stream reads as "the reader scrolled up".
-  if (log.scrollTop < lastSetTop - FOLLOW_TOL) following = false;
+  // flip the state, or a fast stream reads as "the reader scrolled up". Up
+  // and still at the bottom is the content shrinking under it, the browser
+  // clamping the position: a layout settling under a taller composer read as
+  // the reader leaving, and a demo's card hid the last answer (2026-10-31).
+  if (log.scrollTop < lastSetTop - FOLLOW_TOL && !atBottom()) following = false;
   else if (atBottom()) following = true;
   if (following) newBelow = 0;
   if (was !== following) syncJump();
