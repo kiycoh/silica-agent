@@ -355,6 +355,21 @@ def test_grouping_joins_an_article_to_the_nearest_story(tmp_vault, monkeypatch):
     assert groups == [["a", "b"], ["c"]]
 
 
+def test_a_changed_embedder_leaves_old_stories_as_they_are_and_groups_on(tmp_vault, monkeypatch):
+    import numpy as np
+
+    doc = store.load()
+    doc["articles"]["a"] = {"id": "a", "title": "x", "lead": "", "bucket": "news", "tags": []}
+    doc["stories"]["old"] = {"id": "old", "articles": ["z"], "bucket": "news", "tags": [], "created": 0, "updated": 0,
+                             "n": 1, "cover": None, "written": None, "near": None}
+    vectors = {"old": np.ones(4, dtype=np.float32) / 2}   # the embedder before: 4 wide
+    monkeypatch.setattr(read, "_embed", lambda texts: np.tile(np.array([1.0, 0.0, 0.0], dtype=np.float32), (len(texts), 1)))
+    read.group(doc, vectors, ["a"])   # 3 wide now: used to raise in `mat @ v` on every read
+    assert set(doc["stories"]) == {"old", "sa"} and doc["stories"]["old"]["articles"] == ["z"]
+    assert set(vectors) == {"sa"}
+    store.save_vectors(vectors)   # one width, so the file can be written
+
+
 # --- the routes ---------------------------------------------------------------------
 
 

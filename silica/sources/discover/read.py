@@ -293,6 +293,14 @@ def group(doc: dict, vectors: dict, new: list[str]) -> None:
     news = [a for a in new if grouped(arts[a]["bucket"])]
     vecs = _embed([f"{arts[a]['title']}. {arts[a]['lead'][:240]}" for a in news]) if news else None
     vec_of = {a: vecs[i] for i, a in enumerate(news)} if vecs is not None else {}
+    if vecs is not None:
+        # Centroids of another embedder (SILICA_EMBEDDING_MODEL changed; the
+        # file carries vectors and no model tag) cannot be compared with these
+        # articles, and `mat @ v` would raise on every read from then on. Their
+        # stories keep their articles and stop taking new ones: a feed that
+        # reads flat, not one that breaks.
+        for stale in [s for s, c in vectors.items() if len(c) != vecs.shape[1]]:
+            del vectors[stale]
     ids = [s for s in vectors if grouped(doc["stories"].get(s, {}).get("bucket", "research"))]
     mat = np.array([vectors[s] for s in ids], dtype=np.float32) if ids else None
     for aid in new:
