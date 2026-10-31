@@ -44,7 +44,7 @@ def test_the_engine_registers_nothing_here(vault):
     owner = {"silica_search": "silica.tools.atomic",
              "silica_files": "silica.tools.atomic",
              "silica_write_note": "silica.tools.notes",
-             "silica_code_pack": "silica.tools.codedocs_tool"}
+             "silica_document": "silica.tools.codedocs_tool"}
     assert {n: TOOLS[n].fn.__module__ for n in owner} == owner
 
 
