@@ -55,7 +55,7 @@ class AgentConstraints:
 # turns that instruction into a dead end. That constraint is what keeps
 # silica_curate, silica_dedup and silica_graph_export reachable (loadable
 # since ADR-0050) despite each having a slash command, and why this list is
-# 14 entries rather than 30.
+# 13 entries rather than 30.
 #
 # silica_anneal was here until 2026-08-23 and is deliberately NOT: it is the
 # only tool that resolves a deferred bundle, and the nucleate summary tells the
@@ -68,7 +68,6 @@ class AgentConstraints:
 # direction. Revisit if this grows past ~20 entries.
 _CHAT_EXCLUDED = frozenset({
     "silica_aliases",            # /aliases
-    "silica_code_pack",          # no chat flow; reached when summoned by name
     "silica_deferred_list",      # deferred-ops bookkeeping, surfaced by the FSM
     "silica_deferred_flush",
     "silica_deferred_retry",
