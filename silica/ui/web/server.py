@@ -29,6 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from silica.agent.constraints import (
+    DEMO_MAX_ITERATIONS,
     PHONE_TOOLS,
     AgentConstraints,
     chat_deferred,
@@ -47,7 +48,7 @@ from silica.agent.recall_watch import (
     read_refs,
     unfounded_in_turn,
 )
-from silica.config import CONFIG
+from silica.config import CONFIG, demo
 from silica.kernel.recall.mindmap import answer_resolver, note_resolver
 from silica.metrics import emit
 from silica.kernel.write import session_changes
@@ -1076,8 +1077,10 @@ def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dic
     vault = CONFIG.vault_path or ""
     # "non ho capito la Lezione 14" said in three chats is a reader stuck, not
     # a request to make reusable: it became the skill /non-ho-capito
-    # (2026-10-23). The study offer answers that message.
-    if not vault or user_memory.incognito() or says_lost(text):
+    # (2026-10-23). The study offer answers that message. A demo neither
+    # drafts one (a worker call no question counts) nor offers one it may
+    # refuse, /explain among them (ADR-0139 point 6).
+    if not vault or demo() or user_memory.incognito() or says_lost(text):
         return None, None
     try:
         evidence = ps.detect(text, messages, vault, _narr.NARRATOR.sid)
@@ -1098,11 +1101,12 @@ def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dic
 
 def _study_offer(text: str, messages: list[dict]) -> dict | None:
     """The study offer for the turn that just ended, from the notes it read
-    (learn.offer). An incognito chat gets none, as it gets no proposal."""
+    (learn.offer). An incognito chat gets none, as it gets no proposal, and
+    a demo none: its commands are Learn's and the demo's refused ones."""
     from silica.kernel import user_memory
     from silica.kernel.learn.offer import study_offer
 
-    if user_memory.incognito():
+    if demo() or user_memory.incognito():
         return None
     try:
         from silica.kernel.learn.offer import asks_plan, plan_offer
@@ -1477,7 +1481,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
 
             # A view's command goes with the view (ADR-0140 point 4); the
             # picker does not offer it, but a typed one does not come from it.
-            if text.split()[0] in withheld("commands"):
+            # Lowered as both dispatchers lower it, or /Quiz ran past the view.
+            if text.split()[0].lower() in withheld("commands"):
                 outcome = "error"
                 yield {"type": "error", "error": f"'{text.split()[0]}' is not part of this account"}
                 return
@@ -1666,7 +1671,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                 constraints=(
                     web_turn_constraints() if web
                     else AgentConstraints(tools=tuple(n for n in chat_tools(messages) if n not in withhold),
-                                          deferred=chat_deferred(messages), interactive=True)
+                                          deferred=chat_deferred(messages), interactive=True,
+                                          max_iterations=DEMO_MAX_ITERATIONS if demo() else None)
                 ),
             )
         )
@@ -1858,9 +1864,11 @@ def _turn_response(text: str, attachments: "Sequence[Path]" = (), workspace: str
         from silica.config import hosted
 
         # The done frame names the turn a flag would point at (ADR-0100 point
-        # 6), hosted only: the one place a flag exists. Read where the session
-        # stood first, since the _busy gate lets only this turn narrate in it.
-        flaggable = hosted()
+        # 6), hosted only: the one place a flag exists. Not a demo's, whose
+        # flags would die unread with its HOME (ADR-0139 point 6). Read where
+        # the session stood first, since the _busy gate lets only this turn
+        # narrate in it.
+        flaggable = hosted() and not demo()
         sid0 = current_session_id
         seq0 = await asyncio.to_thread(_session_head, sid0) if flaggable else 0
         async for item in run_turn(text, attachments, workspace, **extra):
@@ -2135,8 +2143,8 @@ async def _hosted_image_policy(request: Request, call_next):
 @app.middleware("http")
 async def _withheld_views(request: Request, call_next):
     """A view this account does not get answers as a route that does not exist
-    (ADR-0140 point 4). The page hides its tab, but a request does not come
-    from the page."""
+    (ADR-0140 point 4), and so does what a demo refuses (ADR-0139 point 6).
+    The page hides the control, but a request does not come from the page."""
     from silica.config import withheld
 
     path = request.url.path
@@ -2216,8 +2224,28 @@ def attachment(name: str):
         raise HTTPException(status_code=404)
     return FileResponse(path, headers=_ASSET_HEADERS)
 
+
+def _demo_refuses(payload: dict) -> str:
+    """Why a demo refuses this message, or "" (ADR-0139 points 5 and 6). Asked
+    before the turn starts: a 404 is a refusal the door counts no question for,
+    where the stream's own error frame for a withheld command arrives in a 200."""
+    from silica.config import withheld
+
+    if not demo():
+        return ""
+    if payload.get("images"):
+        return "images are not part of the demo"
+    if payload.get("story"):
+        return "Discover is not part of the demo"
+    text = str(payload.get("text") or "")
+    word = text.split()[0].lower() if text.startswith("/") else ""
+    return f"'{word}' is not part of the demo" if word in withheld("commands") else ""
+
+
 @app.post("/chat", dependencies=_SAME_ORIGIN)
 async def chat(payload: dict):
+    if refused := _demo_refuses(payload):
+        raise HTTPException(status_code=404, detail=refused)
     workspace = str(payload.get("workspace") or "")
     if workspace:
         from silica.kernel.workspaces import find_workspace
@@ -5947,7 +5975,7 @@ def get_messages():
     from silica.config import hosted
 
     turn_of: dict[int, dict] = {}
-    sid = _plain_sid(current_session_id) if hosted() else ""
+    sid = _plain_sid(current_session_id) if hosted() and not demo() else ""
     if sid:
         seqs = _user_turn_seqs(_session_beats(sid))
         users = [m for m in messages if m.get("role") == "user"]
@@ -6949,6 +6977,12 @@ def index(request: Request):
     if CONFIG.user_name:
         html = html.replace('<html lang="en"', '<html lang="en" data-name="'
                             f'{_html.escape(CONFIG.user_name, quote=True)}"', 1)
+    # A demo's controls for what it refuses (ADR-0139 point 6) go before the
+    # first paint too, by the same kind of stamp, and the field names whose
+    # notes these are. Ahead of the hosted stamp, which the account's line reads.
+    if demo():
+        html = html.replace('<html lang="en"', '<html lang="en" data-demo', 1)
+        html = html.replace('placeholder="Ask about your notes"', 'placeholder="Ask about the sample vault"', 1)
     # Stamped, not probed, for the same reason: the views a hosted account
     # does not get (ADR-0111 point 3) must be gone before the first paint.
     if hosted():

@@ -454,6 +454,14 @@ html:not([data-hosted]) .hp-hosted {
   display: none;
 }
 
+/* What a demo refuses has no control (ADR-0139 point 6): the composer's +, the
+   mics, the vault's +, the vault switch and Settings; and again and edit,
+   which ask a question through a route the door does not count. The Download
+   rows follow the server on their own (loadVaultExport). */
+html[data-demo] :is(#attach, .mic, #vault-add, #vault-switch, #settings-btn, .redo-btn, .edit-btn) {
+  display: none !important;
+}
+
 .side-new:hover,
 #views .tab:hover {
   background: var(--sel-hover);

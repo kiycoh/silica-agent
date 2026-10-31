@@ -162,10 +162,13 @@ class RecallWatch:
     def notes(self) -> list[dict]:
         """This turn's `retrieval` notes for the end-of-turn channel (turn_notes):
         the degraded legs first, the cause before the miss it may explain."""
+        from silica.config import demo
+
         lines = degraded_lines(self.degraded, self.surface)
         # Not after the turn already went to the web: "/web to search the web"
-        # under a web answer sends the user where they just were.
-        if self.thin and not self.web_answer:
+        # under a web answer sends the user where they just were. Not in a
+        # demo, which refuses /web (ADR-0139 point 6).
+        if self.thin and not self.web_answer and not demo():
             lines.append(THIN_COVERAGE_HINT)
         return [{"kind": "retrieval", "text": line} for line in lines]
 

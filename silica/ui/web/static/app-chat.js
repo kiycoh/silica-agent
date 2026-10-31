@@ -52,8 +52,11 @@ log.addEventListener("scroll", () => {
   const was = following;
   // Up from where the machine left it is the reader's act; anything else is
   // the content growing under a position the machine set, which must not
-  // flip the state, or a fast stream reads as "the reader scrolled up".
-  if (log.scrollTop < lastSetTop - FOLLOW_TOL) following = false;
+  // flip the state, or a fast stream reads as "the reader scrolled up". Up
+  // and still at the bottom is the content shrinking under it, the browser
+  // clamping the position: a layout settling under a taller composer read as
+  // the reader leaving, and a demo's card hid the last answer (2026-10-31).
+  if (log.scrollTop < lastSetTop - FOLLOW_TOL && !atBottom()) following = false;
   else if (atBottom()) following = true;
   if (following) newBelow = 0;
   if (was !== following) syncJump();
@@ -690,6 +693,134 @@ function addCopyBtn(bodyEl, getText) {
   (led || bodyEl).appendChild(b);
 }
 
+// --- the demo's visit (ADR-0139 point 9) --------------------------------------
+// The door in front of a demo sandbox tells an open tab how the visit stands,
+// in headers (ADR-0139, amendment 2026-10-31): X-Silica-Demo-Left, the
+// questions left, on every response it proxies; X-Silica-Demo-State on what it
+// answers itself, "spent" or "closed" for a question it refused (429) and
+// "ended" once the sandbox is gone (410). A server with no door in front sends
+// neither, so a local user and a tenant never see any of this.
+let demoLeft = null; // the last count the door sent; null until one arrives
+let demoState = "";  // kept once sent: none of the three undoes itself in a visit
+let demoClock = 0;   // the closed card's countdown, redrawn each minute
+let demoShown = "null"; // the view last drawn, as JSON
+
+// demo-pure:start
+// The install as the landing shows it (site/index.html), so the card never
+// teaches a command the landing does not.
+const DEMO_INSTALL = [
+  'uv tool install "silica-agent[gui,mcp]"',
+  "cd ~/path/to/your/notes",
+  "silica init",
+  "silica --gui",
+];
+
+// The time to the next midnight UTC, the daily key's reset, as "5 h 12 min".
+function demoUntilMidnight(now) {
+  const d = new Date(now);
+  const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+  const mins = Math.max(1, Math.ceil((next - now) / 60000));
+  const h = Math.floor(mins / 60);
+  return h ? `${h} h ${mins % 60} min` : `${mins} min`;
+}
+
+// What the composer's place says for a count and a state: null before the
+// door has said anything, a count line while questions are left, else the
+// card that takes the box. Copy as the owner picked it on the draft (2026-10-31).
+function demoView(left, state, now) {
+  if (state === "ended") {
+    return { card: "ended", line: "This sample vault has been cleared", more: "", install: false,
+             under: "A sample vault lasts 30 minutes, or 15 without a question." };
+  }
+  if (state === "closed") {
+    return { card: "closed", line: "Today's demo budget is spent.", install: true, under: "",
+             more: `It opens again at midnight UTC, in ${demoUntilMidnight(now)}.` };
+  }
+  if (state === "spent" || left === 0) {
+    return { card: "end", line: "That was your third question.", more: "Run Silica on your own notes:",
+             install: true, under: "This chat stays here until the sample vault is cleared, within 30 min." };
+  }
+  if (typeof left !== "number") return null;
+  return { count: left === 1 ? "Last question" : `${left} questions left`, tail: "cleared within 30 min" };
+}
+// demo-pure:end
+
+// Reads the two headers off any response; true when the door answered with a
+// state, which the caller shows as the card and not as its own failure.
+function readDemoHeaders(resp) {
+  const left = (resp.headers.get("X-Silica-Demo-Left") || "").trim();
+  const state = (resp.headers.get("X-Silica-Demo-State") || "").trim();
+  if (!left && !state) return false;
+  if (/^\d+$/.test(left)) demoLeft = Number(left);
+  if (state) demoState = state;
+  renderDemo(demoLeft, demoState);
+  return !!state;
+}
+
+function demoSep() {
+  return mkEl("span", "sep", "·");
+}
+
+function renderDemo(left, state) {
+  const view = demoView(left, state, Date.now());
+  // The last question's card waits for its answer: the box holds that turn's
+  // Stop until it ends, and runTurn draws the card then.
+  if (view && view.card === "end" && streaming) return;
+  // The version poll reads the headers every 15 s: redrawing a view that
+  // stands would take the focus off its button and announce the card again.
+  const key = JSON.stringify(view);
+  if (key === demoShown) return;
+  demoShown = key;
+  const composer = $("#composer");
+  composer.querySelectorAll(".demo-count, .demo-age, .demo-end, .demo-under").forEach((e) => e.remove());
+  clearInterval(demoClock);
+  composer.classList.toggle("demo-wrap", !!view);
+  composer.classList.toggle("demo-over", !!(view && view.card));
+  document.body.classList.toggle("demo-card", !!(view && view.card));
+  if (!view) return;
+  if (view.count) {
+    const count = mkEl("div", "demo-count");
+    count.setAttribute("role", "status");
+    count.append(mkEl("b", "", view.count), demoSep(), view.tail);
+    const age = mkEl("div", "demo-age");
+    const terms = Object.assign(mkEl("a", "", "Terms"), { href: "/terms", target: "_blank", rel: "noopener" });
+    const privacy = Object.assign(mkEl("a", "", "Privacy"), { href: "/privacy", target: "_blank", rel: "noopener" });
+    age.append("18 or older only", demoSep(), terms, demoSep(), privacy);
+    composer.prepend(count);
+    composer.append(age);
+    followBottom(); // a taller composer must not hide the transcript's last lines
+    return;
+  }
+  const card = mkEl("div", "composer-shell demo-end");
+  card.setAttribute("role", "status");
+  const line = mkEl("p", "demo-end-line", view.line);
+  if (view.more) line.append(" ", mkEl("span", "", view.more));
+  card.append(line);
+  if (view.install) {
+    const code = mkEl("div", "demo-code");
+    const pre = mkEl("pre");
+    DEMO_INSTALL.forEach((l, i) => pre.append(mkEl("span", "pr", "$ "), l + (i < DEMO_INSTALL.length - 1 ? "\n" : "")));
+    const copy = mkEl("button", "st-btn", "Copy");
+    copy.type = "button";
+    copy.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(DEMO_INSTALL.join("\n")); copy.textContent = "Copied"; }
+      catch { copy.textContent = "Select to copy"; } // a refused clipboard leaves the lines as selectable text
+      setTimeout(() => (copy.textContent = "Copy"), 1800);
+    });
+    code.append(pre, copy);
+    const seat = mkEl("p", "demo-seat", "Or ask for a seat in the hosted pilot: ");
+    seat.append(Object.assign(mkEl("a", "addr", "kiycoh@proton.me"), { href: "mailto:kiycoh@proton.me" }));
+    card.append(code, seat);
+  } else {
+    const again = Object.assign(mkEl("a", "st-btn primary", "Start a new sample vault"), { href: "/" });
+    card.append(again);
+  }
+  composer.append(card);
+  if (view.under) composer.append(mkEl("div", "demo-under", view.under));
+  followBottom();
+  if (view.card === "closed") demoClock = setInterval(() => renderDemo(demoLeft, demoState), 60000);
+}
+
 // --- flagging an answer (ADR-0100 point 6) -----------------------------------
 // The server names a turn ({ session, seq }) in its done frame and on a reopened
 // chat's user rows only when it runs hosted, so the turn id is the whole switch:
@@ -1103,8 +1234,10 @@ function closeCtxPanel(refocus = false) {
 // one. The placeholder says the same thing where the eye already is.
 // The idle placeholder names what the field is for and stops teaching keys
 // (ADR-0117 point 5); the busy one keeps its clause, because a queue is not
-// something anyone guesses an Enter does.
-const PH_IDLE = "Ask about your notes";
+// something anyone guesses an Enter does. The idle one is read off the page
+// as the server wrote it, where a demo's names the sample vault (index()):
+// a copy here put "your notes" back after the visitor's first answer.
+const PH_IDLE = input.placeholder;
 // The parenthetical is the clause the fitter drops when the field is narrow.
 const PH_BUSY = "type the next message  (⏎ queues it for after this turn)";
 // The chat's send button has three acts and shows one (ADR-0117 point 4): send,
@@ -1377,6 +1510,9 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
 
   try {
     const resp = await fetchPromise;
+    // A question the demo's door refused itself is the card in the composer's
+    // place (renderDemo), not a failure under a question nobody answered.
+    if (readDemoHeaders(resp) && !resp.ok) { lastUserBody?.closest(".msg")?.remove(); return; }
     if (resp.status === 409) { flowMsg("(a turn is already in progress)"); return; }
     // Any other refusal used to be read as an event stream, yield no event and
     // vanish without a word: Cloudflare's 524 after its 125 s read timeout, the
@@ -1437,6 +1573,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     streaming = false;
     setRunVisible(false);
     setSendDisabled(false);
+    if (demoLeft !== null || demoState) renderDemo(demoLeft, demoState); // the last answer's end card
     pending.remove(); // no-op if the first event already dropped it
     caret.remove(); // no-op if a rerender already detached it
     freezePeek(); // done or aborted — stop mirroring, keep the preview up

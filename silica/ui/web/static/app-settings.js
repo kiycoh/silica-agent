@@ -686,6 +686,7 @@ function stTrapFocus(e) {
 }
 
 async function openSettings() {
+  if (DEMO) return; // refused there (ADR-0139 point 6); its entry is hidden, ctrl , still lands here
   stBackdrop.hidden = false;
   stModal.hidden = false;
   settingsBtn.setAttribute("aria-expanded", "true");
@@ -828,7 +829,8 @@ $("#rail-vault").addEventListener("click", toggleVaultPanel);
 
 // The vault's two downloads (ADR-0142), the server's only. What each would
 // give is asked as the menu opens, so "nothing new" is read before a click.
-if (HOSTED) $("#vault-export").hidden = false;
+// A demo's rows wait for the summary, so the server's refusal decides them.
+if (HOSTED && !DEMO) $("#vault-export").hidden = false;
 const vxDate = (s) => new Date(s * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 const vxSize = (b) => b < 1048576 ? `${Math.max(1, Math.round(b / 1024))} KB` : `${(b / 1048576).toFixed(b < 10485760 ? 1 : 0)} MB`;
 function vxSay(text) {
@@ -841,6 +843,7 @@ async function loadVaultExport() {
     const r = await fetch("/vault/export/summary");
     if (!r.ok) return;
     s = await r.json();
+    $("#vault-export").hidden = false;
   } catch {
     return; // the menu still works; its two lines stay as they were
   }

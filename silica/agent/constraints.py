@@ -204,6 +204,23 @@ PHONE_TOOLS = (
     "silica_backlinks",
 )
 
+# What a demo's chat is not offered (ADR-0139 point 6): it gets the core minus
+# these and nothing deferred. The web door, the injector and the rework each
+# run model calls of their own past the question's cap, and the loader would
+# open every tool the core leaves out, the sub-agents among them. The writes
+# stay: they land in the visitor's copy and go with it.
+DEMO_WITHHELD = frozenset({
+    "silica_web_answer",
+    "silica_run_injector",
+    "silica_rework",
+    "silica_load_tools",
+})
+
+# ADR-0139 point 5: a demo question spends at most the 8 calls the web door is
+# held to (web_answer_constraints), so three questions spend 24 where the
+# chat's default of 20 would allow 60.
+DEMO_MAX_ITERATIONS = 8
+
 
 def _eligible() -> dict:
     from silica.tools import TOOLS
@@ -215,9 +232,9 @@ def _eligible() -> dict:
     ensure_registered()
     # A view this account does not get takes its tools with it (ADR-0140): left
     # here, the loader would list them and the loop would run a direct call.
-    from silica.config import withheld
+    from silica.config import demo, withheld
 
-    gone = withheld("tools")
+    gone = withheld("tools") | (DEMO_WITHHELD if demo() else frozenset())
     return {n: t for n, t in TOOLS.items() if not t.sensitive and not t.internal and n not in gone}
 
 
@@ -298,8 +315,12 @@ def chat_tools(messages: "list[dict] | None" = None) -> tuple[str, ...]:
     so a plain "yes, go ahead" turn still needs the ledger tools. Anything that
     picked tools from the current message alone would strand that second turn.
     """
+    from silica.config import demo
+
     eligible = _eligible()
     offered = [n for n in CHAT_CORE if n in eligible]
+    if demo():
+        return tuple(offered)  # a demo's set is fixed: nothing a turn or a command brings in
     for n in _in_play(messages) + sorted(_summoned(messages)):
         if n in eligible and n not in offered:
             offered.append(n)
@@ -308,6 +329,11 @@ def chat_tools(messages: "list[dict] | None" = None) -> tuple[str, ...]:
 
 def chat_deferred(messages: "list[dict] | None" = None) -> tuple[str, ...]:
     """The loadable tools this conversation has not brought in yet: what the
-    loop may add to `chat_tools(messages)` mid-turn."""
+    loop may add to `chat_tools(messages)` mid-turn. None in a demo, whose
+    loop may call only what it is offered."""
+    from silica.config import demo
+
+    if demo():
+        return ()
     offered = set(chat_tools(messages))
     return tuple(n for n in loadable() if n not in offered)

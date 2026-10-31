@@ -1412,7 +1412,13 @@ function syncRefreshCue() {
 async function pollVaultVersion() {
   if (document.visibilityState !== "visible") return; // no view to keep fresh
   try {
-    const { version } = await (await fetch("/vault_version")).json();
+    // Never from the cache: the demo door's 410 is cacheable by default, and
+    // a tab served it again took a live sandbox for an ended one (2026-10-31).
+    const r = await fetch("/vault_version", { cache: "no-store" });
+    // Also the page's read of the demo door's headers at load and every 15 s,
+    // which is how an idle tab learns its sandbox ended (ADR-0139 point 9).
+    readDemoHeaders(r);
+    const { version } = await r.json();
     if (!version) return;            // unreadable vault answers "": nothing to say
     if (vaultVersion === null) vaultVersion = version; // first read is the baseline
     else if (version !== vaultVersion) { vaultVersion = version; markVaultChanged(); }
