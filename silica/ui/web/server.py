@@ -1613,6 +1613,11 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             msg["silica_files"] = list(files)
         if said:
             msg["silica_said"] = said
+        elif text.startswith("/") and agent_msg != text:
+            # A command's expansion is the model's instructions, not the
+            # person's words: a reloaded chat drew /quiz's directive as what
+            # they had typed (tour run, 2026-10-29).
+            msg["silica_said"] = text
         if opened:
             msg["silica_note"] = opened
         if story_chip:

@@ -361,6 +361,9 @@ def test_declined_direct_command_leaves_no_duplicate_user_turn(client, monkeypat
     users = [m["content"] for m in server.messages if m["role"] == "user"]
     assert len(users) == 1, f"duplicated user turn: {users}"
     assert users[0] != "/summarize Concepts/RAG.md", "the agent got the raw command, not the expansion"
+    # a reload draws what was typed, never the directive the model read
+    row = next(m for m in tc.get("/messages").json() if m["role"] == "user")
+    assert row["content"] == "/summarize Concepts/RAG.md"
 
 
 def test_chat_streams_events_and_appends_the_user_message(client, monkeypatch):
