@@ -6961,7 +6961,7 @@ def index(request: Request):
     # The big vendored bundles keep their long-lived cache — only these churn.
     import hashlib
 
-    from silica.config import CONFIG, hosted, served_views
+    from silica.config import CONFIG, hosted, served_views, withheld
 
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     # work.js belongs here as much as the others: it owns the whole node
@@ -7002,6 +7002,10 @@ def index(request: Request):
         # stays hidden until the tenant's list serves it.
         for view in served_views():
             html = re.sub(rf'data-(?:tab|view)="{view}"', r"\g<0> data-served", html)
+        # A help row keyed by a route is marked too, unless this process refuses
+        # the route, as a demo refuses Settings and uploads (ADR-0139 point 6).
+        gone = withheld("routes")
+        html = re.sub(r'data-route="([^"]*)"', lambda m: m[0] if m[1] in gone else f"{m[0]} data-served", html)
         # The account the window is signed in as, for the menu under SILICA
         # (ADR-0122, amendment 2026-10-22). Cloudflare Access sets the header,
         # and the host's Caddy passes only Access's hostname to a tenant

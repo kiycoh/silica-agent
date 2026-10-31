@@ -105,7 +105,7 @@ def test_the_page_marks_only_the_served_views_and_the_css_hides_the_rest(free, m
     monkeypatch.delenv("SILICA_HOSTED", raising=False)
     assert "data-served" not in tc.get("/").text
     css = (STATIC_SRC / "app-shell.css").read_text(encoding="utf-8")
-    assert "html[data-hosted] :is([data-tab], [data-view]):not([data-served])" in css
+    assert "html[data-hosted] :is([data-tab], [data-view], [data-route]):not([data-served])" in css
 
 
 def test_the_chat_hears_of_no_view_the_account_does_not_get(monkeypatch):

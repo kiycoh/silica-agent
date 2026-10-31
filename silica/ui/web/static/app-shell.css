@@ -443,9 +443,11 @@
 /* On the server a view is drawn only when the account gets it (ADR-0140): the
    server marks every element of a served view data-served, so an unmarked tab,
    row or menu item, a view added later included, is gone before the first
-   paint. Examine is never marked (ADR-0111 point 3). Important because each of
-   these carries its own display, #views .tab with an id's weight. */
-html[data-hosted] :is([data-tab], [data-view]):not([data-served]) {
+   paint. Examine is never marked (ADR-0111 point 3). A help row keyed by a
+   route is marked the same way unless the process refuses that route, as a
+   demo refuses Settings (ADR-0139 point 6). Important because each of these
+   carries its own display, #views .tab with an id's weight. */
+html[data-hosted] :is([data-tab], [data-view], [data-route]):not([data-served]) {
   display: none !important;
 }
 

@@ -307,6 +307,54 @@ def test_the_page_without_the_demo_is_unchanged(sandbox, monkeypatch):
     assert '<html lang="en" data-hosted' in html
 
 
+# --- the help, and the chat's picture of the app it reads (ADR-0115) ------------
+
+# The help rows about a control the demo refuses, by the route each is keyed on
+REFUSED_ROWS = {"ctrl ,": "/settings", "drop a file": "/chat/files/add", "download": "/vault/export",
+                "the mic": "/stt"}
+
+
+def _terms(sections) -> list[str]:
+    return [term for _, rows in sections for term, _ in rows]
+
+
+def test_a_help_row_goes_with_the_route_it_names(sandbox, monkeypatch):
+    tc, _, _ = sandbox
+    html = tc.get("/").text
+    # each key is a route the demo refuses as written, or the row hides nowhere
+    assert set(re.findall(r'data-route="([^"]+)"', html)) == set(REFUSED_ROWS.values()) <= set(DEMO_OFF["routes"])
+    for route in REFUSED_ROWS.values():
+        assert f'data-route="{route}" data-served' not in html, route
+    monkeypatch.delenv("SILICA_DEMO")
+    html = tc.get("/").text
+    for route in REFUSED_ROWS.values():
+        assert f'data-route="{route}" data-served' in html, route
+
+
+def test_the_chat_hears_of_no_control_the_demo_refuses(monkeypatch):
+    """The panel's rows are the chat's picture of the app, so a row the demo
+    drops is one the chat never describes, and the settings block goes with
+    the row that opens it."""
+    from silica.ui.web.app_help import app_message, panel
+
+    monkeypatch.delenv("SILICA_HOSTED", raising=False)
+    monkeypatch.delenv("SILICA_DEMO", raising=False)
+    laptop, laptop_told = _terms(panel(hosted=False)), app_message()
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "graph")
+    tenant, told = _terms(panel(hosted=True)), app_message()
+    monkeypatch.setenv("SILICA_DEMO", "1")
+    shown, demo_told = _terms(panel(hosted=True)), app_message()
+    # a laptop has no downloads (ADR-0142); a tenant keeps all four
+    assert set(REFUSED_ROWS) - {"download"} <= set(laptop) and set(REFUSED_ROWS) <= set(tenant)
+    assert "### settings (ctrl ,)" in laptop_told and "### settings (ctrl ,)" in told
+    assert shown == [t for t in tenant if t not in REFUSED_ROWS]
+    for term in REFUSED_ROWS:
+        assert f"\n- {term}: " in told and f"\n- {term}: " not in demo_told, term
+    rows = demo_told[:demo_told.index("These rows")]
+    assert "settings" not in rows.lower() and "download" not in rows.lower()
+
+
 # --- the visit's count and cards (renderDemo), from the door's headers ----------
 
 node = pytest.mark.skipif(shutil.which("node") is None, reason="needs node")

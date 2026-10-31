@@ -44,10 +44,11 @@ class _Panel(HTMLParser):
     row whose last direct child is the text and the children before it the term."""
 
     def __init__(self, hosted: bool):
-        from silica.config import VIEWS, hosted_views
+        from silica.config import VIEWS, hosted_views, withheld
 
         super().__init__()
         self.served = {"chat", *(hosted_views() if hosted else VIEWS)}
+        self.gone = withheld("routes") if hosted else frozenset()
         self.hosted = hosted
         self.sections: list[tuple[str, list[tuple[str, str]]]] = []
         self.depth = 0            # depth inside #help-panel, 0 when outside
@@ -70,9 +71,11 @@ class _Panel(HTMLParser):
         elif "hp-row" in cls:
             self.row, self.row_depth = [], self.depth
             # A view the account does not get is not in its panel (ADR-0140),
-            # so the chat does not offer it either; nor, on a laptop, the
-            # server's downloads (ADR-0142).
+            # so the chat does not offer it either; nor a control whose route
+            # the process refuses (a demo's, ADR-0139 point 6); nor, on a
+            # laptop, the server's downloads (ADR-0142).
             self.skip = (a.get("data-view", "chat") not in self.served
+                         or a.get("data-route") in self.gone
                          or ("hp-hosted" in cls and not self.hosted))
         elif self.row is not None and self.depth == self.row_depth + 1:
             self.row.append([])
@@ -104,7 +107,7 @@ def panel(hosted: bool) -> list[tuple[str, list[tuple[str, str]]]]:
 
 
 def app_message() -> str:
-    from silica.config import hosted as _hosted
+    from silica.config import hosted as _hosted, withheld
     from silica.ui.web.settings import sections
 
     hosted = _hosted()
@@ -118,8 +121,11 @@ def app_message() -> str:
         for term, text in rows:
             addr = ADDRESS.get(term)
             lines.append(f"- [{term}]({addr}): {text}" if addr else f"- {term}: {text}")
-    lines += ["", "### settings (ctrl ,)"]
-    # Labels only: a row's value can be a key.
-    lines += [f"- {name}: " + ", ".join(r.label for r in rows)
-              for name, rows in sections().items() if rows]
+    # Not where Settings is refused: the block describes a panel the person
+    # cannot open, as the ctrl , row it stands beside would (ADR-0139 point 6).
+    if "/settings" not in withheld("routes"):
+        lines += ["", "### settings (ctrl ,)"]
+        # Labels only: a row's value can be a key.
+        lines += [f"- {name}: " + ", ".join(r.label for r in rows)
+                  for name, rows in sections().items() if rows]
     return "\n".join(lines + ["", LIMIT])
