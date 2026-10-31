@@ -1,14 +1,13 @@
 # tests/test_code_lane_guards.py
 """Containment and degrade guards on the code lane's untrusted inputs:
-`target` (model-authored, silica_code_pack), a source file's AST depth, and
-`code_ref` read back out of note frontmatter."""
+a source file's AST depth, and `code_ref` read back out of note frontmatter."""
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from silica.kernel.code import codeast, codepack, gitstate
+from silica.kernel.code import codeast, gitstate
 
 
 def _init_repo(path: Path) -> None:
@@ -26,49 +25,6 @@ def _commit(path: Path, rel: str, text: str, msg: str) -> str:
     return subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=path, capture_output=True, text=True
     ).stdout.strip()
-
-
-# ---------------------------------------------------------------------------
-# codepack: the target never leaves the repo
-# ---------------------------------------------------------------------------
-
-def _repo_with_secret(tmp_path: Path) -> tuple[Path, Path]:
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _init_repo(repo)
-    _commit(repo, "m.py", "def f():\n    return 1\n", "c1")
-    secret = tmp_path / "secret.txt"
-    secret.write_text("PRIVATE KEY\n", encoding="utf-8")
-    return repo, secret
-
-
-def test_code_pack_rejects_relative_escape(tmp_path):
-    repo, secret = _repo_with_secret(tmp_path)
-    with pytest.raises(ValueError) as e:
-        codepack.code_pack(repo, "../secret.txt")
-    assert "escapes the repository" in str(e.value)
-
-
-def test_code_pack_rejects_absolute_outside_target(tmp_path):
-    repo, secret = _repo_with_secret(tmp_path)
-    with pytest.raises(ValueError) as e:
-        codepack.code_pack(repo, str(secret))
-    assert "escapes the repository" in str(e.value)
-
-
-def test_code_pack_rejects_symlink_leaving_the_repo(tmp_path):
-    repo, secret = _repo_with_secret(tmp_path)
-    (repo / "link.py").symlink_to(secret)
-    with pytest.raises(ValueError):
-        codepack.code_pack(repo, "link.py")
-
-
-def test_code_pack_still_serves_an_in_repo_target(tmp_path):
-    repo, _ = _repo_with_secret(tmp_path)
-    pack = codepack.code_pack(repo, "m.py")
-    assert "def f()" in pack["text"]
-    # an absolute path UNDER the repo is relativized, not rejected
-    assert codepack.code_pack(repo, str(repo / "m.py"))["sections"]["target"] == ["m.py"]
 
 
 # ---------------------------------------------------------------------------

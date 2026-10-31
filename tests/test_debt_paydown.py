@@ -181,18 +181,6 @@ def test_energy_series_appends_only_on_change(tmp_path):
     assert len(s.read_bytes().splitlines()) == 2
 
 
-# --- codepack usage tripwire ------------------------------------------------
-
-def test_code_pack_usage_stamp(tmp_path, monkeypatch):
-    import silica.kernel.recall.paths as paths
-    from silica.tools import codedocs_tool
-
-    monkeypatch.setattr(paths, "index_dir_for", lambda v: tmp_path)
-    codedocs_tool._stamp_code_pack_use()
-    codedocs_tool._stamp_code_pack_use()
-    assert len((tmp_path / "codepack_usage.log").read_text().splitlines()) == 2
-
-
 # --- wizard live /models ----------------------------------------------------
 
 def test_live_models_drops_stale_ids(monkeypatch):
