@@ -289,6 +289,41 @@ def test_less_like_this_leaves_for_you():
     assert [s["id"] for s in rank.for_you(doc, stories)] == ["a"]
 
 
+def test_a_near_floor_belongs_to_the_embedder_it_was_measured_on():
+    from silica.config import EMBEDDER_DEFAULTS
+
+    # pplx scores the same stories about 0.7 times what jina does, so jina's 0.40
+    # would show a hosted tenant almost nothing; an id nobody measured keeps 0.40.
+    assert rank.near_at("perplexity/pplx-embed-v1-4b") == 0.28
+    assert rank.near_at("jina-embeddings-v5-text-small-retrieval") == rank.NEAR_AT == 0.40
+    assert rank.near_at("perplexity/pplx-embed-v1-0.6b") == rank.NEAR_AT   # never measured, not the 4b
+    assert rank.near_at("") == rank.NEAR_AT
+    assert set(rank.NEAR_AT_BY_MODEL) <= set(EMBEDDER_DEFAULTS)
+
+
+def test_near_notes_keep_what_clears_the_configured_embedders_floor(tmp_vault, monkeypatch):
+    import numpy as np
+
+    from silica.config import CONFIG
+    from silica.kernel.recall import embed
+
+    class Store:
+        def __len__(self):
+            return 2
+
+        def cosine_top_k(self, vec, k=5):
+            return [{"path": "A/near", "name": "near", "score": 0.33}, {"path": "B/far", "name": "far", "score": 0.20}]
+
+    monkeypatch.setattr(embed, "get_store", lambda: Store())
+    for model, expect in (("perplexity/pplx-embed-v1-4b", [{"path": "A/near.md", "name": "near", "score": 0.33}]),
+                          ("jina-embeddings-v5-text-small-retrieval", [])):
+        _doc_with_story()
+        store.save_vectors({"s1": np.array([1.0, 0.0], dtype=np.float32)})
+        monkeypatch.setattr(CONFIG, "embedding_model", model)
+        rank.near_notes(None, ["s1"])
+        assert store.load()["stories"]["s1"]["near"] == expect, model
+
+
 def test_tags_in_their_three_yaml_spellings():
     assert rank.note_tags("tags: [a, b]") == ["a", "b"]
     assert rank.note_tags("tags: a, #b") == ["a", "b"]
