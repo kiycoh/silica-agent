@@ -139,14 +139,32 @@ def bank_quotes(title: str, arts: list[dict], texts: list[str]) -> tuple[dict, l
 
 
 # A sentence ends at . ! ? or … followed by space and a capital, a digit or an
-# opening quote, except after an initial (U.S., J. R.) or a title (Mr., Dr.).
-# shortcut: a punctuation splitter, not a sentence model; a quotation that
-# ends a sentence mid-paragraph can still split early. Count G2's dropped
-# sentences on its 20 stories and replace it if one is a split, not a claim.
+# opening quote, except after an initial (U.S., J. R.), a title (Mr., Dr.) or a
+# month as the AP abbreviates it (Nov. 4), and never inside a “quotation”: its
+# sentences are the one the writer cited at its end, and cut apart the opening
+# ones were dropped as unmarked, leaving the cited tail to start mid-quote.
+# Counted on G2's 20 stories (2026-10-31, deepseek-v4-flash-0731): of 126
+# dropped sentences 5 were splits, one quotation cut in three and "Nov. 4" in
+# two, the two cases handled here; 3 were headings typed as plain text; the
+# other 118 carried no citation.
+# shortcut: a punctuation splitter, not a sentence model. A quotation in
+# straight quotes and an abbreviation outside the list (Gov., Inc.) still
+# split. Count the next 20 stories' dropped sentences by 2026-12-15, or at the
+# first split that mutilates a kept sentence, and replace the splitter then.
 _SENT = re.compile(r"(?<!\b[A-Z]\.)(?<![A-Z]\.[A-Z]\.)(?<!Mr\.)(?<!Ms\.)(?<!Dr\.)(?<!St\.)"
+                   r"(?<!Jan\.)(?<!Feb\.)(?<!Aug\.)(?<!Sept\.)(?<!Oct\.)(?<!Nov\.)(?<!Dec\.)"
                    r"(?<=[.!?…])\s+(?=[A-Z0-9\"“‘(\[])")
+_QUOTED = re.compile(r"“[^”]*”")
+_STOP = re.compile(r"([.!?…])\s")
 _MARK = re.compile(r"\[\d+(?:, \d+)*\]")
 _LEADING_MARKS = re.compile(r"^((?:\[\d+(?:, \d+)*\]\s*)+)(.*)$", re.S)
+
+
+def _split(line: str) -> list[str]:
+    """`_SENT` on a line whose “quotations” cannot be cut: the space after a
+    full stop inside one is hidden from it, then given back."""
+    hidden = _QUOTED.sub(lambda m: _STOP.sub("\\1\x00", m.group(0)), line)
+    return [part.replace("\x00", " ") for part in _SENT.split(hidden)]
 
 
 def drop_unmarked(body: str) -> tuple[str, int]:
@@ -167,7 +185,7 @@ def drop_unmarked(body: str) -> tuple[str, int]:
             bullet = re.match(r"^\s*([-*]|\d+\.)\s+", line)
             lead = bullet.group(0) if bullet else ""
             sentences: list[str] = []
-            for s in _SENT.split(line[len(lead):].strip()):
+            for s in _split(line[len(lead):].strip()):
                 m = _LEADING_MARKS.match(s)
                 if m and sentences:
                     sentences[-1] = sentences[-1].rstrip() + " " + m.group(1).strip()

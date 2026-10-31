@@ -218,6 +218,16 @@ def test_a_sentence_with_no_marker_is_dropped_and_a_late_marker_kept():
     assert secs[1]["paras"][0]["cites"] == [2, 3] and secs[1]["articles"] == 2
 
 
+def test_a_quotation_is_one_sentence_and_an_ap_month_ends_none():
+    # G2, 2026-10-31: a quotation was cut in three with only its cited tail kept,
+    # and "Nov. 4" was cut in two.
+    quote = "“We needed to get there. It was not heavier. It was not thicker. It came with the screen,” he said [1]."
+    body = quote + " The summit opens Nov. 4 at 9 a.m. [2] Nobody explained."
+    out, dropped = S.drop_unmarked(body)
+    assert out == quote + " The summit opens Nov. 4 at 9 a.m. [2]"
+    assert dropped == 1   # "Nobody explained."
+
+
 def test_only_quotes_the_article_contains_are_banked(monkeypatch):
     reply = json.dumps({"quotes": [
         {"article": 1, "quote": "The vote was  close.", "why": "result"},
