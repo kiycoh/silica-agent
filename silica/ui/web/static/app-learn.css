@@ -3235,7 +3235,7 @@ button.lr-cell:focus-visible {
 .lr-read-toc-i.standby .dot {
   border-color: var(--warn);
   color: var(--warn);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .lr-read-toc-b .t {

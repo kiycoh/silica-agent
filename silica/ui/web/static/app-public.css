@@ -380,7 +380,7 @@
 
 .sv-card code {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
   overflow-wrap: anywhere;
 }

@@ -29,7 +29,7 @@ a.st-btn {
   border-radius: var(--r-xs);
   color: var(--frost);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   padding: 0.35rem 0.5rem;
 }
 
@@ -47,7 +47,7 @@ a.st-btn {
 
 .st-mcp-tools {
   grid-column: 1 / -1;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
 }
 
@@ -96,7 +96,7 @@ a.st-btn {
   max-height: 18rem;
   overflow: auto;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1.55;
   color: var(--text);
   white-space: pre-wrap;
@@ -111,6 +111,6 @@ a.st-btn {
 }
 
 .approval-state {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
 }

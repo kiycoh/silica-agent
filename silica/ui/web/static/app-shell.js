@@ -1180,7 +1180,7 @@ function dayBucket(ts) {
   const d = new Date(ts * 1000), now = new Date();
   const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((day(now) - day(d)) / 86400000);
-  return diff <= 0 ? "today" : diff === 1 ? "yesterday" : "earlier";
+  return diff <= 0 ? "Today" : diff === 1 ? "Yesterday" : "Earlier";
 }
 // Relative while it is short, a date once it is not; the absolute time rides
 // the title for the hover.

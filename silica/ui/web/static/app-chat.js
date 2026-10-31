@@ -1782,7 +1782,7 @@ function makeLedger(msg, live) {
   btn.type = "button";
   btn.className = "ledger-toggle";
   btn.setAttribute("aria-expanded", "false");
-  btn.innerHTML = '<span class="lg-caret" aria-hidden="true">▸</span><span class="lg-sum"></span>';
+  btn.innerHTML = '<span class="lg-caret" aria-hidden="true"></span><span class="lg-sum"></span>';
   if (live) {
     btn.querySelector(".lg-sum").innerHTML = '<span class="run-line" data-state="live">'
       + RUN_MARK + '<span class="rl-verb">working</span>'

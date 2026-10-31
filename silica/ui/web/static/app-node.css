@@ -18,7 +18,7 @@
   border-radius: var(--r-xs);
   background: var(--sheet);
   color: var(--text);
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   cursor: pointer;
   transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
@@ -61,7 +61,7 @@
 
 .wk-lad-d {
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
   text-align: center;
 }
@@ -85,7 +85,7 @@
 .wk-lad-x {
   padding: 0.1rem 0.85rem 0.3rem 1.4rem;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
 }
 
@@ -97,7 +97,7 @@
   background: transparent;
   color: var(--ash-dim);
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-meta);
   text-align: left;
   cursor: pointer;
   transition: color var(--dur) var(--ease);
@@ -161,7 +161,7 @@
 }
 
 .wk-snip-t {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.45;
   color: var(--text);
   display: -webkit-box;
@@ -176,7 +176,7 @@
 .wk-more summary {
   padding: 0.35rem 0.85rem;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
   cursor: pointer;
   list-style: none;
@@ -199,7 +199,7 @@
    because it is never the answer, only the reason the answer is short. */
 .wk-hint {
   padding: 0.55rem 0.85rem;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1.45;
   color: var(--ash-dim);
 }
@@ -827,7 +827,7 @@ button.nb-n:focus-visible {
 
 .pl-empty,
 .pl-foot {
-  font-size: 11.5px;
+  font-size: var(--fs-meta);
   line-height: 1.5;
   color: var(--ash-dim);
   max-width: 62ch;
@@ -871,7 +871,7 @@ button.nb-n:focus-visible {
 .pl-pick-d {
   flex: none;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
 }
 
@@ -956,7 +956,7 @@ button.nb-n:focus-visible {
   border: 0;
   background: transparent;
   color: var(--ash-dim);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1;
   padding: 0 0.1rem;
   cursor: pointer;

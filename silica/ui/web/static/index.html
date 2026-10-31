@@ -139,7 +139,7 @@
            a file pane keeps its own, and leave with the notes. -->
       <div id="side-filter">
         <div class="sf-row">
-          <input id="side-search" type="text" placeholder="filter by name&hellip;" autocomplete="off" aria-label="filter notes and chats by name" />
+          <input id="side-search" type="text" placeholder="Filter" autocomplete="off" aria-label="filter notes and chats by name" />
           <button type="button" id="tree-collapse" class="sf-tool" aria-label="collapse all folders" data-tip="collapse all folders"><svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 20 12 15 17 20"></polyline><polyline points="7 4 12 9 17 4"></polyline></svg></button>
           <button type="button" id="vault-add" class="sf-tool" aria-label="add to the vault" aria-haspopup="menu" aria-expanded="false" aria-controls="vault-add-menu" title="add files, a folder or a link"><svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
         </div>
@@ -163,14 +163,14 @@
           <div id="tree-sel" aria-live="polite" hidden><span class="t"></span><button type="button" class="linklike">clear</button></div>
           <div id="tree-newfolder">New folder…</div>
           <div id="pinned-group" hidden>
-            <div class="side-bucket">pinned</div>
+            <div class="side-bucket">Pinned</div>
             <div id="pinned"></div>
           </div>
           <!-- Workspaces (ADR-0112 point 6): a group of THIS list, as pinned is.
                Each gathers notes from any folder without moving them; a chat or
                a plan opened in one reads only what it gathers. -->
           <div id="ws-group">
-            <div class="side-bucket ws-bucket"><span>workspaces</span><button type="button" id="ws-new" class="ws-new" aria-label="new workspace" data-tip="New workspace: it groups notes from any folder without moving them. A note joins one from its … in the tree, the ◇ beside its pin, or by being dragged here"><svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button></div>
+            <div class="side-bucket ws-bucket"><span>Workspaces</span><button type="button" id="ws-new" class="ws-new" aria-label="new workspace" data-tip="New workspace: it groups notes from any folder without moving them. A note joins one from its … in the tree, the ◇ beside its pin, or by being dragged here"><svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button></div>
             <form id="ws-new-form" hidden><input id="ws-new-name" type="text" placeholder="Name the workspace" aria-label="name of the new workspace" autocomplete="off" /></form>
             <div id="workspaces"></div>
           </div>
@@ -179,7 +179,7 @@
                nothing has brought back. Last and shut, since a note is put
                there and rarely looked for; hidden while it holds nothing. -->
           <details id="trash-group" hidden>
-            <summary class="side-bucket">trash <span id="trash-n"></span></summary>
+            <summary class="side-bucket">Trash <span id="trash-n"></span></summary>
             <div id="trash"></div>
           </details>
         </div>
@@ -352,7 +352,7 @@
         <!-- graph and path: fuzzy note search. Pick → fly the graph camera
              and arrange the note as the Map (graph), or root the ladder (path). -->
         <div id="node-search-wrap" class="gbar-controls">
-          <input id="node-search" type="text" placeholder="find a note…" aria-label="find a note" autocomplete="off" />
+          <input id="node-search" type="text" placeholder="Find a note" aria-label="find a note" autocomplete="off" />
           <div id="node-results" hidden></div>
         </div>
         <!-- Under 760px of view (a note open beside the graph) the column
@@ -469,7 +469,7 @@
           <button type="button" class="stab" data-mtab="activity" aria-pressed="false" title="what wrote it, and what could be added">Activity</button>
         </nav>
         <div class="mbar-stamp" id="metrics-stamp"></div>
-        <button type="button" id="metrics-refresh" class="ghost" title="recompute the report">recompute</button>
+        <button type="button" id="metrics-refresh" class="ghost" title="recompute the report">Recompute</button>
       </div>
       <div id="metrics-loading" class="frame-loading" hidden>
         <div class="spinner"></div>
@@ -663,7 +663,7 @@
              drawn in 2D: a turn from the graph shows its work on the run line
              above, so the icon here never has to -->
         <svg class="cp-presence" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path d="M64 32 H192 A40 40 0 0 1 232 72 V152 A40 40 0 0 1 192 192 H112 L64 232 V192 A40 40 0 0 1 24 152 V72 A40 40 0 0 1 64 32 Z"/><circle class="s0" cx="92" cy="112" r="14"/><circle class="s0" cx="128" cy="112" r="14"/><circle class="s0" cx="164" cy="112" r="14"/></svg>
-        <textarea id="dock-input" rows="1" aria-label="ask the vault from here" placeholder="ask the vault from here…  (⏎ send, ⇧⏎ newline)"></textarea>
+        <textarea id="dock-input" rows="1" aria-label="Ask the vault from here" placeholder="Ask the vault from here"></textarea>
         <div id="dock-note-chip" class="note-chip-row" hidden></div>
         <button type="button" class="mic" data-for="dock-input" title="dictate into the message" aria-label="dictate into the message">
           <svg aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
@@ -698,14 +698,14 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
   <div id="st-backdrop" hidden></div>
   <div id="st-modal" hidden role="dialog" aria-modal="true" aria-label="settings">
     <header>
-      <span class="st-head">settings</span>
+      <span class="st-head">Settings</span>
       <span class="st-env" id="st-env"></span>
       <button type="button" id="st-close" class="ghost" title="close" aria-label="close settings">&#10005;</button>
     </header>
     <div id="st-busy" class="st-banner" hidden>a response is running &middot; settings apply once it finishes</div>
     <div class="st-body">
       <nav id="st-nav" aria-label="settings sections">
-        <input id="st-search" type="text" placeholder="search settings&hellip;" autocomplete="off" aria-label="search settings" />
+        <input id="st-search" type="text" placeholder="Search settings" autocomplete="off" aria-label="search settings" />
         <div id="st-tabs"></div>
       </nav>
       <div id="st-panel" tabindex="-1"></div>

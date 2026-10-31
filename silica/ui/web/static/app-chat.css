@@ -419,13 +419,13 @@
   display: flex;
   gap: 0.35rem;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-meta);
 }
 
 .wc-act {
   flex-shrink: 0;
   font-family: var(--sans);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash);
   background: transparent;
   border: 1px solid var(--line-2);
@@ -474,7 +474,7 @@
 
 .wc-note {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
 }
 
@@ -833,8 +833,8 @@
   list-style: none;
   color: var(--ash-dim);
   font-size: var(--fs-meta);
-  /* 10px of uppercase text is a ~12px-tall pointer target; the padding is the
-     hit area, not decoration. fit-content keeps it on the label so a stray
+  /* 12px of text is a ~16px-tall pointer target; the padding is the hit area,
+     not decoration. fit-content keeps it on the label so a stray
      click beside the trace does not collapse it. */
   padding: 0.25rem 0;
   width: fit-content;
@@ -843,14 +843,6 @@
 
 .thinking summary::-webkit-details-marker {
   display: none;
-}
-
-.thinking:not([open]) summary::before {
-  content: "▸ ";
-}
-
-.thinking[open] summary::before {
-  content: "▾ ";
 }
 
 .thinking summary:hover {
@@ -1048,7 +1040,7 @@
   min-width: 0;
   margin: 0;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1.55;
   color: var(--text);
   white-space: pre-wrap;
@@ -1073,7 +1065,7 @@
   margin-top: 0.35rem;
   color: var(--ash-dim);
   font-family: var(--sans);
-  font-size: 10px;
+  font-size: var(--fs-meta);
 }
 
 /* --- injector pipeline block ------------------------------------------------
@@ -1549,7 +1541,7 @@
   padding-top: 0.5rem;
   border-top: 1px solid var(--line);
   color: var(--warn);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1.5;
 }
 
@@ -1756,7 +1748,7 @@
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--fs-meta);
   line-height: 1.6;
   color: var(--ash);
   white-space: pre-wrap;
@@ -1861,7 +1853,7 @@
    exactly where they were rather than on a blank pane. */
 .fl-cancel {
   font-family: var(--sans);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   letter-spacing: 0.08em;
   color: var(--ash);
   background: transparent;
@@ -1976,7 +1968,7 @@
   position: relative;
   margin-left: auto;
   padding: 0.05rem 0.5rem;
-  font-size: 11px;
+  font-size: var(--fs-meta);
 }
 
 .msg:focus-within .copy-btn,
@@ -2016,13 +2008,13 @@
 #queue .q-note {
   flex-shrink: 0;
   color: var(--ash-dim);
-  font-size: 11px;
+  font-size: var(--fs-meta);
 }
 
 #q-now {
   flex-shrink: 0;
   font-family: var(--sans);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--text);
   background: transparent;
   border: 1px solid var(--line-2);
@@ -2048,7 +2040,7 @@
   flex-shrink: 0;
   padding: 0.25rem 0.45rem;
   min-height: 24px;
-  font-size: 11px;
+  font-size: var(--fs-meta);
 }
 
 /* --- a failure on the message that failed (P3) ----------------------------- */
@@ -2074,7 +2066,7 @@
 
 .te-detail {
   flex-basis: 100%;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
 }
 
@@ -2089,7 +2081,7 @@
   background: var(--void);
   border-radius: var(--r-xs);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2215,7 +2207,7 @@
 .rl-elapsed {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   white-space: nowrap;
 }
 
@@ -2302,7 +2294,7 @@
   flex-direction: column;
   gap: 1px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
 }
 
 .wc-excerpt:empty {
@@ -2364,7 +2356,7 @@
 }
 
 .wc-review-note {
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
 }
 
@@ -2425,7 +2417,7 @@
   gap: 0.2rem 0.9rem;
   margin: 0 0 0.75rem;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1.6;
   color: var(--ash);
 }
@@ -2537,7 +2529,7 @@
   min-height: 0;
   margin: 0;
   padding: 0;
-  font-size: 11px;
+  font-size: var(--fs-meta);
 }
 
 .ledger .rl-mark {
@@ -2566,7 +2558,7 @@
 #log .cite-mark {
   margin-left: 0.15em;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-meta);
   font-weight: 600;
   line-height: 0;
   vertical-align: super;
@@ -2752,7 +2744,7 @@
   margin-top: 0.6rem;
   padding-top: 0.55rem;
   border-top: 1px solid var(--line);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
 }
 
@@ -2826,7 +2818,7 @@
   position: relative;
   display: block;
   margin-top: 0.4rem;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   padding: 0.05rem 0.5rem;
 }
 

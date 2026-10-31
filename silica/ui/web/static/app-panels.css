@@ -817,7 +817,7 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 
 .nm-head {
   padding: 0.35rem 0.6rem 0.2rem;
-  font-size: 11px;
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
 }
 
@@ -1224,14 +1224,6 @@ details.fm summary::-webkit-details-marker {
   display: none;
 }
 
-details.fm:not([open]) summary::before {
-  content: "▸ ";
-}
-
-details.fm[open] summary::before {
-  content: "▾ ";
-}
-
 details.fm summary:hover {
   color: var(--frost);
 }
@@ -1302,7 +1294,7 @@ details.fm summary:hover {
   align-items: baseline;
   gap: 0.6rem;
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--fs-meta);
   flex-shrink: 0;
 }
 
@@ -1337,7 +1329,7 @@ details.fm summary:hover {
 
 .dl-line {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   line-height: 1.65;
   white-space: pre;
   padding: 0 0.8rem;
@@ -1611,7 +1603,7 @@ body.note-open #dock {
   min-width: 0;
   /* same clip idiom as #note-title */
   color: var(--frost);
-  font-size: 11px;
+  font-size: var(--fs-meta);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1621,7 +1613,7 @@ body.note-open #dock {
 /* header actions read as real buttons — same outlined chips as the drawer's */
 #peek>header .ghost {
   padding: 0.35rem 0.5rem;
-  font-size: 10px;
+  font-size: var(--fs-meta);
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   background: var(--slate);

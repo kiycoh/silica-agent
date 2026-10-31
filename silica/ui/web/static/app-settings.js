@@ -60,6 +60,10 @@ function stEl(tag, cls, text) {
   return el;
 }
 
+// Row labels stay lowercase in settings.py, where error messages and the app's
+// help quote them mid-sentence; the panel shows them as labels.
+const stCap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
 function stSectionEl(name) {
   const s = stEl("section", "st-section");
   s.dataset.section = name;
@@ -140,7 +144,7 @@ function stRowEl(row) {
   el.dataset.key = row.key;
   el.dataset.search = `${row.label} ${row.help} ${row.key}`.toLowerCase();
   const label = stEl("div", "st-label");
-  const name = stEl("label", "st-name", row.label);
+  const name = stEl("label", "st-name", stCap(row.label));
   label.appendChild(name);
   if (row.help) label.appendChild(stEl("div", "st-help", row.help));
   if (row.warn) label.appendChild(stEl("div", "st-warn", "⚠ " + row.warn));
@@ -343,7 +347,7 @@ async function renderMemory(host) {
     const row = stEl("div", "st-row st-mem");
     row.dataset.search = `memory ${name} ${s.text}`.toLowerCase();
     const label = stEl("div", "st-label");
-    const lab = stEl("label", "st-name", name);
+    const lab = stEl("label", "st-name", stCap(name));
     label.appendChild(lab);
     label.appendChild(stEl("div", "st-help", s.available ? `${help} · ${s.path}` : "no vault is open"));
     row.appendChild(label);
@@ -410,7 +414,7 @@ async function renderMemory(host) {
   const reset = stEl("div", "st-row st-mem");
   reset.dataset.search = "memory reset erase forget everything";
   const rl = stEl("div", "st-label");
-  rl.appendChild(stEl("div", "st-name", "reset"));
+  rl.appendChild(stEl("div", "st-name", "Reset"));
   rl.appendChild(stEl("div", "st-help", "erase both files above · other vaults' memory is kept"));
   reset.appendChild(rl);
   const rc = stEl("div", "st-ctl");
@@ -457,7 +461,7 @@ async function renderEndpoints(host) {
     const row = stEl("div", "st-row");
     row.dataset.search = `${e.label} ${e.url} endpoint`.toLowerCase();
     const label = stEl("div", "st-label");
-    label.appendChild(stEl("span", "st-name", e.label));
+    label.appendChild(stEl("span", "st-name", stCap(e.label)));
     label.appendChild(stEl("div", "st-help", e.url || "not configured"));
     row.appendChild(label);
     const state = stEl("div", "st-ctl-text " + (e.up ? "up" : "down"));
@@ -535,12 +539,12 @@ async function openBugReport(fallbackUrl) {
   let data = { payload: "", issues_url: fallbackUrl };
   try { data = await (await fetch("/bug_report")).json(); } catch { /* file it bare */ }
   const body = stEl("div", "st-bug");
-  body.appendChild(stEl("label", "st-bug-label", "what happened?"));
+  body.appendChild(stEl("label", "st-bug-label", "What happened?"));
   const what = stEl("textarea", "st-bug-what");
   what.rows = 4;
   what.placeholder = "what you did, what you expected, what happened instead";
   body.appendChild(what);
-  body.appendChild(stEl("label", "st-bug-label", "this will be attached · edit it if you like"));
+  body.appendChild(stEl("label", "st-bug-label", "This will be attached · edit it if you like"));
   const payload = stEl("textarea", "st-bug-payload");
   payload.rows = 8;
   payload.value = data.payload;

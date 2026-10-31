@@ -768,7 +768,7 @@ function calDayStack(row, date, today) {
 function calRenderMonth(main) {
   const m = mkEl("div", "cm");
   const dow = mkEl("div", "cal-dow");
-  for (const n of ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]) dow.appendChild(mkEl("div", "", n));
+  for (const n of ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]) dow.appendChild(mkEl("div", "", n));
   m.appendChild(dow);
   const w = calWindow();
   const dates = [];
@@ -917,7 +917,7 @@ function calAgendaDay(row) {
     any = true;
     const rows = items.map((x) => {
       const it = mkEl("div", "cal-ag-item");
-      const k = mkEl("span", "when cal-ag-kind", kind);
+      const k = mkEl("span", "when cal-ag-kind", kind[0].toUpperCase() + kind.slice(1));
       it.appendChild(k);
       build(it, x);
       return it;
@@ -1018,7 +1018,7 @@ function calAgendaDay(row) {
 function calBurstStrip() {
   if (!calBursting.length) return null;
   const box = mkEl("div", "cal-burst");
-  box.appendChild(mkEl("div", "cal-ag-head", "this fortnight of writing"));
+  box.appendChild(mkEl("div", "cal-ag-head", "This fortnight of writing"));
   const pills = mkEl("div", "cal-burst-p");
   for (const b of calBursting) {
     const pill = mkEl("button", "wk-pill", b.concept);
@@ -1042,7 +1042,7 @@ function renderCalAgenda() {
   const head = document.createElement("div");
   head.className = "cal-ag-head";
   const w = calWindow();
-  head.textContent = calFmt(w.start) === calFmt(new Date()) ? "next 7 days" : "7 days from " + calShort(w.start);
+  head.textContent = calFmt(w.start) === calFmt(new Date()) ? "Next 7 days" : "7 days from " + calShort(w.start);
   panel.appendChild(head);
   for (const row of Object.values(calDays).sort((a, b) => (a.date < b.date ? -1 : 1))) {
     panel.appendChild(calAgendaDay(row));
