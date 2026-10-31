@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import base64
 import json
+import re
+import shutil
+import subprocess
 
 import pytest
 
@@ -282,6 +285,8 @@ def test_the_page_of_a_demo_has_no_control_for_what_it_refuses(sandbox, monkeypa
     html = tc.get("/").text
     assert '<html lang="en" data-hosted data-demo' in html
     assert 'placeholder="Ask about the sample vault"' in html and "Ask about your notes" not in html
+    # the field goes back to it after each turn: read off the page, not a copy
+    assert "Ask about your notes" not in (WEB / "app-chat.js").read_text(encoding="utf-8")
     assert 'data-tab="graph" data-served' in html
     css = (WEB / "app-shell.css").read_text(encoding="utf-8")
     rule = css[css.index("html[data-demo] :is("):]
@@ -300,3 +305,69 @@ def test_the_page_without_the_demo_is_unchanged(sandbox, monkeypatch):
     html = tc.get("/").text
     assert "data-demo" not in html and 'placeholder="Ask about your notes"' in html
     assert '<html lang="en" data-hosted' in html
+
+
+# --- the visit's count and cards (renderDemo), from the door's headers ----------
+
+node = pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
+
+
+def _view(tmp_path, expr: str):
+    src = (WEB / "app-chat.js").read_text(encoding="utf-8")
+    pure = src[src.index("// demo-pure:start"):src.index("// demo-pure:end")]
+    script = tmp_path / "demo.js"
+    script.write_text(pure + f"\nconsole.log(JSON.stringify({expr}));\n", encoding="utf-8")
+    out = subprocess.run(["node", str(script)], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)
+
+
+@node
+def test_without_the_door_s_header_nothing_is_drawn(tmp_path):
+    assert _view(tmp_path, "[demoView(null, '', 0), demoView(undefined, '', 0)]") == [None, None]
+
+
+@node
+def test_the_count_line_counts_down_to_the_last_question(tmp_path):
+    views = _view(tmp_path, "[3, 2, 1].map((n) => demoView(n, '', 0))")
+    assert [v["count"] for v in views] == ["3 questions left", "2 questions left", "Last question"]
+    assert {v["tail"] for v in views} == {"cleared within 30 min"}
+    assert not any("card" in v for v in views)
+
+
+@node
+def test_each_state_the_door_sends_is_its_card(tmp_path):
+    v = _view(tmp_path, "({zero: demoView(0, '', 0), spent: demoView(0, 'spent', 0), "
+                        "closed: demoView(2, 'closed', Date.UTC(2026, 9, 31, 18, 48)), "
+                        "ended: demoView(1, 'ended', 0), late: demoUntilMidnight(Date.UTC(2026, 9, 31, 23, 59, 30))})")
+    assert v["zero"] == v["spent"] == {
+        "card": "end", "line": "That was your third question.", "more": "Run Silica on your own notes:",
+        "install": True, "under": "This chat stays here until the sample vault is cleared, within 30 min."}
+    assert v["closed"] == {
+        "card": "closed", "line": "Today's demo budget is spent.", "install": True, "under": "",
+        "more": "It opens again at midnight UTC, in 5 h 12 min."}
+    assert v["ended"] == {
+        "card": "ended", "line": "This sample vault has been cleared", "more": "", "install": False,
+        "under": "A sample vault lasts 30 minutes, or 15 without a question."}
+    assert v["late"] == "1 min"
+
+
+@node
+def test_the_card_teaches_the_install_the_landing_shows(tmp_path):
+    site = (WEB.parents[3] / "site" / "index.html").read_text(encoding="utf-8")
+    block = site[site.index('<pre id="c-local">'):]
+    shown = [re.sub(r"<[^>]+>", "", line).removeprefix("$ ") for line in block[:block.index("</pre>")].splitlines()]
+    assert _view(tmp_path, "DEMO_INSTALL") == shown
+
+
+def test_the_page_reads_the_door_where_it_already_asks():
+    """The headers ride the chat's own responses, and the vault's version poll
+    reads them at load and every 15 s, which is how an idle tab learns its
+    sandbox ended; the age line's links are the door's legal pages."""
+    chat = (WEB / "app-chat.js").read_text(encoding="utf-8")
+    turn = chat[chat.index("async function runTurn("):]
+    assert turn.index("readDemoHeaders(resp)") < turn.index("if (!resp.ok)")
+    poll = (WEB / "app-calendar.js").read_text(encoding="utf-8")
+    poll = poll[poll.index("async function pollVaultVersion()"):]
+    assert "readDemoHeaders(r)" in poll[:poll.index("\n}\n")]
+    assert '"/terms"' in chat and '"/privacy"' in chat

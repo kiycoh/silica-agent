@@ -2826,3 +2826,138 @@
   color: var(--ash);
   border-top-color: var(--accent);
 }
+
+/* --- the demo's visit (ADR-0139 point 9) -----------------------------------
+   Drawn only from the door's headers (renderDemo), on the app's own tokens:
+   12 px meta in --ash-dim, the box's own border for the card, the accent only
+   where a control is live. The owner's picks of 2026-10-31: the count on a
+   line of its own over the box (A), the end card in the box (A). */
+
+/* With the + and the mic gone the toolbar keeps send on the right edge: the
+   ring when it shows, else send, takes the mic's auto margin. */
+html[data-demo] #composer #ctx-ring:not([hidden]),
+html[data-demo] #composer #ctx-ring[hidden] ~ #send {
+  margin-left: auto;
+}
+
+#composer.demo-wrap {
+  flex-wrap: wrap;
+}
+
+/* the box gives way to the card; the transcript above stays readable, and
+   the ways to start a question go with the box they fill. Important because
+   the empty chat shows its ideas by a :has() rule of three ids' weight. */
+#composer.demo-over > .composer-shell:not(.demo-end),
+body.demo-card :is(#dock-composer, #vh-ideas) {
+  display: none !important;
+}
+
+/* the count over the box and the age line under it, on the field's text inset */
+.demo-count,
+.demo-age,
+.demo-under {
+  flex: 1 0 100%;
+  box-sizing: border-box;
+  max-width: var(--measure);
+  margin: 0 auto 0.45rem;
+  padding: 0 0.85rem;
+  font-size: var(--fs-meta);
+  line-height: 1.45;
+  color: var(--ash-dim);
+}
+
+.demo-age,
+.demo-under {
+  margin: 0.5rem auto 0;
+}
+
+.demo-count b {
+  font-weight: 500;
+  color: var(--frost);
+}
+
+:is(.demo-count, .demo-age) .sep {
+  margin: 0 0.4em;
+}
+
+.demo-age a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 2px;
+}
+
+#composer .composer-shell.demo-end {
+  display: block;
+  min-width: 0;
+  padding: 0.85rem 0.9rem 0.9rem;
+}
+
+.demo-end-line {
+  margin: 0 0 0.7rem;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--frost);
+}
+
+.demo-end-line span {
+  color: var(--ash);
+}
+
+/* Copy sits beside the lines, and under them where the column is too narrow
+   for both: in a phone's column the button took the width the quoted package
+   name needed, which then broke inside its quotes */
+.demo-code {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0.55rem 0.55rem 0.55rem 0.85rem;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+/* wraps rather than scrolling sideways in a phone's 240 px column; Copy
+   copies the lines whole */
+.demo-code pre {
+  flex: 1 1 16rem;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--frost);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.demo-code .st-btn {
+  margin-left: auto;
+}
+
+/* A phone's column held 23 characters of the 12.5 px mono, one short of the
+   quoted package name, which then broke at its hyphen (390 px, 2026-10-31). */
+@media (max-width: 480px) {
+  .demo-code pre {
+    font-size: 11px;
+  }
+}
+
+.demo-code .pr {
+  color: var(--ash-dim);
+  user-select: none;
+}
+
+.demo-seat {
+  margin: 0.7rem 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ash);
+}
+
+.demo-seat .addr {
+  color: var(--frost);
+  white-space: nowrap;
+}
