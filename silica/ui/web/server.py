@@ -6185,7 +6185,7 @@ def load_session(payload: dict):
     _collapsed = set()
     # The scope its last turn ran in (ADR-0112 point 4): the seed holds no
     # workspace line, so it is written again here, as the seed is.
-    last = next((m for m in reversed(replayed) if m.get("role") == "user"), {})
+    last: dict = next((m for m in reversed(replayed) if m.get("role") == "user"), {})
     ws = _resolve_workspace(str(last.get("silica_workspace") or ""))
     if ws is not None:
         _apply_workspace(ws)

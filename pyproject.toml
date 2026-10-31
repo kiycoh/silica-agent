@@ -111,11 +111,7 @@ dependencies = [
 gui = ["fastapi", "uvicorn", "python-multipart", "mdit-py-plugins>=0.6.1", "latex2mathml>=3.81.0"]
 # scipy is dev-only: no product code imports it (PageRank runs on numpy), but the
 # eval harness under evals/ uses scipy.stats (binomtest, spearmanr) for its gates.
-# mypy stays under 2.4: it reports `last = next((m for m in ...), {})` as
-# var-annotated at silica/cli.py:4753 and silica/ui/web/server.py:6160 (the red
-# CI of Dependabot's group PR, 2026-10-27), and the one-line fix is
-# `last: dict = ...` in both. Lift the cap in the same commit as those two lines.
-dev = ["pytest>=8.0", "mypy>=1.10,<2.4", "import-linter>=2.0", "scipy>=1.17.1", "ruff>=0.16"]
+dev = ["pytest>=8.0", "mypy>=1.10", "import-linter>=2.0", "scipy>=1.17.1", "ruff>=0.16"]
 connect = [
     "websockets>=16.0",
 ]

@@ -4750,7 +4750,7 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
         # /session/load puts it back.
         from silica.kernel import personas
 
-        last = next((m for m in reversed(replayed) if m.get("role") == "user"), {})
+        last: dict = next((m for m in reversed(replayed) if m.get("role") == "user"), {})
         if (worn := personas.available(CONFIG.vault_path or None).get(str(last.get(personas.TURN_KEY) or ""))):
             personas.apply(messages, worn)
         _update_context_tokens(messages)
