@@ -2584,7 +2584,7 @@ DROP_ASK = ("I attached the file(s) below without saying what I want. Do not nuc
             "outline below; read the file only when the outline is not enough. Then ask what I "
             "want to do with it, offering three or four concrete options that fit this material "
             "(for example: nucleate it into notes under a folder you name, summarize it, quiz me "
-            "on it, a guided /learn path).")
+            "on it, a guided /memorize path).")
 _DROP_OUTLINE_HEADINGS = 8
 
 # The two turns a read file offers besides its question (ADR-0121 point 6),

@@ -87,6 +87,30 @@ def test_ledger_over_checkbox(vault):
     assert report["frontier"] == ["ML/Gradient descent.md"]
 
 
+def test_the_bar_reads_100_exactly_when_the_plan_is_complete(vault):
+    """ADR-0141: notes met over notes, a step not in the vault one unit no
+    answer meets, floored; 100 and Mark completed come together or not at all."""
+    from silica.kernel.report import quiz
+
+    def met(*names):
+        quiz.record([{"path": f"ML/{n}.md", "correct": True, "rating": 3, "level": 3, "kind": "explain", "hints": 0}
+                     for n in names])
+
+    def read(text):
+        vault.note("Plans/ML.md", text)
+        r = plans.plan_report(plans.read_plan("Plans/ML.md"))
+        assert (r["percent"] == 100) is r["complete"]
+        return r["percent"]
+
+    no_gap = PLAN.replace("- [ ] Momentum di Nesterov: not in the vault\n", "")
+    assert read(PLAN) == 0                        # 3 notes + 1 gap, none met
+    met("Chain rule", "Backpropagation")
+    assert read(PLAN) == 50 and read(no_gap) == 66   # 2 of 4; 2 of 3 floored, not rounded to 67
+    met("Gradient descent")
+    assert read(PLAN) == 75                       # every note met, the gap still open
+    assert read(no_gap) == 100
+
+
 def test_a_prerequisite_cycle_is_reported_not_linearized(vault, monkeypatch):
     from silica.kernel.report import learner
 
@@ -348,6 +372,50 @@ def test_the_reading_is_checked_against_the_vault_and_rescued_only_where_code_ca
     reply("KIND: folder\nTARGET: Biology/\nONLY_IN: none\nNAME: Bio")
     r = plans.read_sentence("all of biology")
     assert r["scope"] == "" and "not a folder" in r["said"][-1]
+
+
+def test_a_syllabus_named_in_the_sentence_is_the_reference_never_the_material(vault, monkeypatch):
+    from silica.kernel.learn import items
+
+    def reply(text):
+        monkeypatch.setattr(items, "_llm", lambda *a, **k: (text, "stop"))
+
+    # a transparency sheet: a programme marker over a table, a name that says nothing
+    vault.note("ML/Scheda ML.md", "# Scheda ML\n\n| CFU | 9 |\n| --- | --- |\n\nPROGRAMMA\n\n| ORE | Lezioni |\n| --- | --- |\n"
+               "| 4 | Softmax e funzioni di attivazione |\n| 6 | Chain rule e retropropagazione |\n")
+    # a programme by its name, in bullets
+    vault.note("ML/Programma del corso.md", "# Programma del corso\n\n- Softmax\n- Chain rule\n")
+    reply("KIND: notes\nTARGET: Scheda ML\nONLY_IN: ML/\nNAME: Esame ML")
+    r = plans.read_sentence("Esame di ML il 30 novembre 2099, gli argomenti sono nella Scheda ML")
+    assert (r["scope"], r["target"], r["restrict"]) == ("steps", "Scheda ML", "ML/")
+    assert any("syllabus" in s for s in r["said"])
+    assert [n["text"] for n in plans.resolve_scope("steps", r["target"])["tree"]] == [
+        "Softmax e funzioni di attivazione", "Chain rule e retropropagazione"]
+    # named with the extension of the file it was converted from, read back as a topic
+    reply("KIND: topic\nTARGET: Programma del corso.pdf\nONLY_IN: none\nNAME: Esame")
+    assert plans.read_sentence("dal Programma del corso.pdf")["target"] == "Programma del corso"
+    # a name no title equals, whose words one title alone holds
+    reply("KIND: topic\nTARGET: scheda di ML\nONLY_IN: none\nNAME: Esame")
+    assert plans.read_sentence("prendi gli argomenti dalla scheda di ML")["target"] == "Scheda ML"
+    # a title with a dot in it is not cut at the dot
+    vault.note("ML/scheda.trasparenza - Reti.md", "# Reti\n\n- Softmax\n- Chain rule\n")
+    reply("KIND: notes\nTARGET: scheda.trasparenza - Reti\nONLY_IN: none\nNAME: Esame")
+    assert plans.read_sentence("dalla scheda.trasparenza - Reti")["target"] == "scheda.trasparenza - Reti"
+    # a downloaded sheet's name, its words joined by underscores
+    vault.note("ML/scheda_trasparenza_173558.md", "# x\n\n- Softmax\n- Chain rule\n")
+    reply("KIND: notes\nTARGET: scheda_trasparenza_173558\nONLY_IN: none\nNAME: Esame")
+    assert plans.read_sentence("interrogami su scheda_trasparenza_173558")["scope"] == "steps"
+    # a title that says nothing is a syllabus when the sentence calls it one
+    vault.note("ML/Corso 2025.md", "# Corso 2025\n\n- Softmax\n- Chain rule\n")
+    reply("KIND: notes\nTARGET: Corso 2025\nONLY_IN: none\nNAME: Esame")
+    assert plans.read_sentence("gli argomenti sono nel programma, Corso 2025")["scope"] == "steps"
+    assert plans.read_sentence("interrogami su Corso 2025")["scope"] == "notes"
+    # an ordinary note is still the material, a bulleted one whose title holds "indice" too
+    vault.note("ML/Indice di Gini.md", "# Indice di Gini\n\n- disuguaglianza\n- curva di Lorenz\n")
+    reply("KIND: notes\nTARGET: Indice di Gini\nONLY_IN: none\nNAME: Gini")
+    assert plans.read_sentence("interrogami sull'Indice di Gini")["scope"] == "notes"
+    reply("KIND: notes\nTARGET: Softmax\nONLY_IN: none\nNAME: Softmax")
+    assert plans.read_sentence("interrogami su Softmax")["scope"] == "notes"
 
 
 def test_a_syllabus_line_says_how_it_matched_and_a_refused_line_is_a_gap(vault):
@@ -625,7 +693,7 @@ def test_a_dated_plan_lays_its_steps_over_the_days_before_the_review():
     assert [r["day"] for r in rows] == ["2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26",
                                         "2026-10-27", "2026-10-28", "2026-10-29"]
     labels = [[label for label, _n in r["steps"]] for r in rows]
-    assert labels[0][0] == "Basi" and labels[-1] == ["Exam"] and labels[-2] == labels[-3] == ["Review: the notes Learn shows due"]
+    assert labels[0][0] == "Basi" and labels[-1] == ["Exam"] and labels[-2] == labels[-3] == ["Review: the notes Memorize shows due"]
     seen = [label for day in labels[:4] for label in day]
     assert seen.index("Basi") < seen.index("Lacuna") < seen.index("Reti") and seen.count("Reti") >= 2
     reti = [n for r in rows for label, notes in r["steps"] if label == "Reti" for n in notes]
@@ -656,3 +724,28 @@ def test_the_syllabus_topics_no_lecture_deck_mentions(vault):
     gaps, decks = plans.lecture_gaps(plan)
     assert decks == 1 and gaps == ["dropout"]
     assert plans.lecture_gaps({"scope": "folder", "target": "Corso"}) is None
+
+
+def test_a_step_line_s_weight_and_depth_stay_out_of_its_last_topic(vault):
+    """A syllabus written as checkbox lines closes a row on its weight or
+    depth (`· weight 4`, `· 2 h · deep`, what _marks writes): read as text,
+    "lasso · weight 4" was the topic the plan named as missing, and the
+    weight never reached the plan (2026-10-29)."""
+    vault.note("Corso/Programma.md", "# Programma\n\n## Steps\n\n"
+               "- [ ] Ottimizzazione: gradient descent, chain rule, lasso · weight 4\n"
+               "- [ ] Reti: backpropagation, softmax · 2 h · deep\n")
+
+    res = plans.resolve_scope("steps", "Programma", restrict="ML/")
+
+    opt, nets = res["tree"]
+    assert opt["how"] == "2 of 3 topics" and opt["leaves"] == ["ML/Gradient descent.md", "ML/Chain rule.md"]
+    assert opt["missing"] == ["lasso"] and opt["hours"] == 4.0 and opt["unit"] == ""
+    assert nets["how"] == "2 of 2 topics" and (nets["hours"], nets["unit"], nets["depth"]) == (2.0, "h", "deep")
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    out = plans.write_plan("Programma ML", "steps", "Programma", restrict="ML/", reach="relational", cards=[])
+    text = (Path(CONFIG.vault_path) / out["path"]).read_text(encoding="utf-8")
+    assert ("- [ ] Ottimizzazione: [[Gradient descent]], [[Chain rule]] · not in the vault: lasso · weight 4"
+            in text)

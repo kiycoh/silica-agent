@@ -32,6 +32,7 @@ def _dispatched_from_source() -> set[str]:
     # Remove aliases that are intentionally not in COMMANDS
     found.discard("/quit")
     found.discard("/q")
+    found.discard("/learn")   # /memorize's name before ADR-0141, kept so a typed /learn still runs
     return found
 
 

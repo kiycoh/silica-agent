@@ -73,9 +73,9 @@ QUESTIONS = [
      "hosted": {"kind": "absent"}},
     {"id": "new_note", "lang": "zh", "q": "如果我每天往 Vault 里添加新的笔记，会更新我的学习计划吗？",
      "kind": "answer", "key": "A new note never changes a plan. The chat reads it and Explore draws it at "
-     "once; Learn suggests it only when a plan covers it, or when there is no plan yet."},
+     "once; Memorize suggests it only when a plan covers it, or when there is no plan yet."},
     {"id": "where_plans", "lang": "it", "q": "Ho fatto un piano di studio ma non lo trovo più. Dove sono i piani?",
-     "kind": "answer", "key": "Study plans are made and kept in Learn; the Calendar shows the day each plan is due."},
+     "kind": "answer", "key": "Study plans are made and kept in Memorize; the Calendar shows the day each plan is due."},
     {"id": "add_folder", "lang": "zh", "q": "怎么把一个文件夹添加到 Vault？",
      "kind": "answer", "key": "The vault's + takes a folder; a file dropped anywhere on the window becomes a note in Inbox/."},
     {"id": "newline", "lang": "it", "q": "Come vado a capo nel messaggio senza inviarlo?",
@@ -106,7 +106,7 @@ QUESTIONS = [
     {"id": "pdf_export", "lang": "it", "q": "Come esporto tutto il vault in PDF?", "kind": "absent"},
     {"id": "share", "lang": "zh", "q": "怎么把一条笔记分享给我的同学？", "kind": "absent"},
     {"id": "pomodoro", "lang": "it", "q": "Come imposto un timer pomodoro per studiare?", "kind": "absent"},
-    {"id": "anki", "lang": "zh", "q": "怎么把 Learn 里的题目导出到 Anki？", "kind": "absent"},
+    {"id": "anki", "lang": "zh", "q": "怎么把 Memorize 里的题目导出到 Anki？", "kind": "absent"},
     {"id": "password", "lang": "it", "q": "Come cambio la password del mio account?", "kind": "absent"},
 ]
 

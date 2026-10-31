@@ -86,10 +86,10 @@ def test_a_study_plan_asked_of_the_chat_points_at_learn():
     plans = [{"name": "Esame Machine Learning", "path": "Plans/Esame Machine Learning.md", "by": "2026-11-10",
               "status": "active"}]
     o = offer.plan_offer("Prepara un piano di studio fino all'esame del 10 novembre", plans)
-    assert o["text"] == "Learn tracks a plan for this: Esame Machine Learning, by 2026-11-10"
-    assert o["commands"] == [{"label": "open it", "href": "#learn/plan/Plans%2FEsame%20Machine%20Learning.md"},
-                             {"label": "continue it", "command": "/learn"}]
-    assert offer.plan_offer("help me make a study plan", [])["commands"] == [{"label": "write it as a plan", "href": "#learn/new"}]
+    assert o["text"] == "Memorize tracks a plan for this: Esame Machine Learning, by 2026-11-10"
+    assert o["commands"] == [{"label": "open it", "href": "#memorize/plan/Plans%2FEsame%20Machine%20Learning.md"},
+                             {"label": "continue it", "command": "/memorize"}]
+    assert offer.plan_offer("help me make a study plan", [])["commands"] == [{"label": "write it as a plan", "href": "#memorize/new"}]
     assert offer.plan_offer("cos'è il dropout?", plans) is None
 
 
@@ -371,7 +371,7 @@ def test_learn_s_plan_reaches_the_turn_that_needs_it(monkeypatch):
     block, appendix = offer.plan_context("Prepara un piano di studio giorno per giorno fino all'esame", rows)
     assert "day-by-day calendar" in block and "do not write a calendar" in block
     assert "The heaviest steps: Basi (1 notes)" in block and "study from the book or the guide: dropout, multi-task" in block
-    assert appendix.startswith("Calendar computed by Learn from the plan Esame") and "| Day | Step | Notes |" in appendix
+    assert appendix.startswith("Calendar computed by Memorize from the plan Esame") and "| Day | Step | Notes |" in appendix
     block, appendix = offer.plan_context("quali argomenti del programma non compaiono nelle slide delle lezioni?", rows)
     assert "dropout, multi-task" in block and "32 lecture decks" in block and appendix == ""
     assert offer.plan_context("cos'è il dropout?", rows) == ("", "")

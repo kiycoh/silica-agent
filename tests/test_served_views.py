@@ -115,7 +115,7 @@ def test_the_chat_hears_of_no_view_the_account_does_not_get(monkeypatch):
     free = [t for t, _ in dict(panel(hosted=True))["the views"]]
     assert free == ["a chat", "Explore", "a new note"]
     local = [t for t, _ in dict(panel(hosted=False))["the views"]]
-    assert {"Learn", "Calendar", "Examine"} <= set(local)
+    assert {"Memorize", "Calendar", "Examine"} <= set(local)
 
 
 # Point 5: a route, tool or command added later is placed on purpose, so a new
@@ -197,7 +197,11 @@ def test_every_route_tool_command_and_tab_is_a_views_or_named_shared():
     assert _owned("tools") <= tools
     assert not tools - _owned("tools") - SHARED_TOOLS, sorted(tools - _owned("tools") - SHARED_TOOLS)
     commands = {c.name for c in COMMANDS}
-    assert _owned("commands") <= commands
+    # an old name the dispatcher still runs is owned too, or a typed one gets past the view
+    assert _owned("commands") <= commands | set(silica.cli._SHORTCUTS)
+    runs = {silica.cli._SHORTCUTS[c] for c in _owned("commands") if c in silica.cli._SHORTCUTS}
+    aliases = {k for k, f in silica.cli._SHORTCUTS.items() if f in runs}
+    assert aliases <= _owned("commands"), sorted(aliases - _owned("commands"))
     assert not commands - _owned("commands") - SHARED_COMMANDS, sorted(commands - _owned("commands") - SHARED_COMMANDS)
     tabs = set(re.findall(r'data-tab="([a-z]+)"', (STATIC_SRC / "index.html").read_text(encoding="utf-8")))
     assert tabs == set(VIEWS)

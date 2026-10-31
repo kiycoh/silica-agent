@@ -83,7 +83,7 @@ function renderWorkspaces() {
     head.appendChild(tg);
     const acts = mkEl("div", "ws-acts");
     for (const [act, icon, tip] of [["chat", WS_ICON.chat, `new chat in ${w.name}`],
-                                   ["plan", WS_ICON.plan, `plan from ${w.name} in Learn`],
+                                   ["plan", WS_ICON.plan, `plan from ${w.name} in Memorize`],
                                    ["add", WS_ICON.plus, `add files to ${w.name}`]]) {
       const b = mkEl("button", "ws-act");
       b.type = "button";

@@ -208,6 +208,18 @@ def parse_steps(body: str) -> list[dict]:
 
 _HOURS_MARK_RE = re.compile(r"\s·\s(?:(weight)\s(\d+(?:[.,]\d+)?)|(\d+(?:[.,]\d+)?)\s(h|CFU|ECTS|wk|min))(?=\s·|$)")
 _DEPTH_MARK_RE = re.compile(r"\s·\s(deep|well|read)(?=\s·|$)")
+# The whole tail _marks writes. A reference's checkbox line kept it in its
+# text, so "lasso · weight 4" was the topic named missing and the weight
+# never reached the plan (2026-10-29); reference_rows already parts the two.
+_MARKS_TAIL_RE = re.compile(r"(?:\s·\s(?:by meaning, [^·]*|weight\s\d+(?:[.,]\d+)?"
+                            r"|\d+(?:[.,]\d+)?\s(?:h|CFU|ECTS|wk|min)|deep|well|read))+$")
+
+
+def _step_rows(body: str) -> list[dict]:
+    """A reference's checkbox steps in reference_rows' shape: {text, hours,
+    unit, depth}, the text without its marks."""
+    return [{"text": _MARKS_TAIL_RE.sub("", s["text"]), **{k: s[k] for k in ("hours", "unit", "depth") if k in s}}
+            for s in parse_steps(body)]
 
 
 def _marks(node: dict) -> str:
@@ -267,12 +279,17 @@ def resolve_title(name: str, notes: dict | None = None) -> str | None:
     return hit
 
 
+# A file's own extension, the only suffix a name loses: Path.stem cut
+# "scheda.trasparenza - Reti di Calcolatori e Internet" to "scheda" (2026-10-29).
+_FILE_EXT_RE = re.compile(r"\.(md|pdf|docx?|pptx?|xlsx?|odt|epub|html?|txt)$", re.I)
+
+
 def _by_name(name: str, notes: dict) -> str | None:
     name = name.strip()
     cand = name if name.endswith(".md") else name + ".md"
     if cand in notes:
         return cand
-    return _stem_index(notes).get(Path(name).stem.casefold())
+    return _stem_index(notes).get(_FILE_EXT_RE.sub("", name.rsplit("/", 1)[-1]).casefold())
 
 
 # {casefolded stem: the first path holding it, in the notes' own order}, for
@@ -503,7 +520,7 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
     if path:
         _d, _r, body = frontmatter.split((_vault() / path).read_text(encoding="utf-8"))
         title = _title(body) or Path(path).stem
-        rows = [{"text": s["text"]} for s in parse_steps(body)] or reference_rows(body)
+        rows = _step_rows(body) or reference_rows(body)
     else:
         rows = [{"text": ln.strip("-* ").strip()} for ln in re.split(r"[\n;]", target) if ln.strip()]
     colls = so.collections(notes, allowed)
@@ -1906,7 +1923,7 @@ def day_by_day(plan: dict, today=None, passed: list[bool] | None = None) -> list
     if not steps:
         # every step passed or checked: the study days are review
         for r in rows:
-            r["steps"].append(("Review: the notes Learn shows due", []))
+            r["steps"].append(("Review: the notes Memorize shows due", []))
     done = 0.0
     for step, w in zip(steps, weights):
         start, end = done / total * study, (done + w) / total * study
@@ -1927,8 +1944,8 @@ def day_by_day(plan: dict, today=None, passed: list[bool] | None = None) -> list
                 rows[k]["hours"][label] = round(share * per_day, 1)
     parts = {p["part"] for p in plan.get("assessment") or []}
     for k in range(study, days):
-        say = ("Project: the main work; review the notes Learn shows due" if window
-               else "Review: the notes Learn shows due")
+        say = ("Project: the main work; review the notes Memorize shows due" if window
+               else "Review: the notes Memorize shows due")
         rows.append({"day": (today + timedelta(days=k)).isoformat(), "steps": [(say, [])], "hours": {}})
     if parts & {"oral", "presentation"} and days >= 2:
         what = "present the project and answer a question per step aloud" if "project" in parts else \
@@ -2152,7 +2169,7 @@ def _material_of(plan: dict, notes: dict) -> tuple[list[dict], dict, str, list[d
     bounds = tuple(b.strip().casefold() for b in str(plan.get("restrict") or "").split(RESTRICT_SEP) if b.strip())
     allowed = {p for p, m in notes.items() if is_material(m) and (not bounds or p.casefold().startswith(bounds))}
     colls = so.collections(notes, allowed)
-    rows = _unglued([{"text": s["text"]} for s in parse_steps(body)] or reference_rows(body), notes, allowed, colls)
+    rows = _unglued(_step_rows(body) or reference_rows(body), notes, allowed, colls)
     lines = [r["text"] for r in rows]
     labels = [_WIKILINK_RE.sub(r"\1", t).split(":", 1)[0].strip() for t in lines]
     steps = [[so.roots(x) for x in (_topics(t) or [lab])] for t, lab in zip(lines, labels)]
@@ -2237,8 +2254,7 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
         leaves = node.get("leaves", [])
         tree.append({**node, "readings": mastery.node_readings(leaves, view, entries, since, objectives)})
     passed = mastery.steps_passed(plan, entries, notes=notes) if plan["steps"] else []
-    steps = [{**s, "passed": ok, "gap": not s["notes"] or all(resolve_title(n, notes) is None for n in s["notes"])}
-             for s, ok in zip(plan["steps"], passed)]
+    steps = [{**s, "passed": ok, "gap": is_gap(s, notes)} for s, ok in zip(plan["steps"], passed)]
     relations = _relations_in(paths, items)
     root = mastery.node_readings(paths, view, entries, since, objectives)
     below = len(paths) - root["all_met"]
@@ -2280,6 +2296,7 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
         "matched": plan.get("matched", {}),
         "unused": plan.get("unused", ""),
         "complete": completion(plan, entries, passed, steps),
+        "percent": percent_done(root["all_met"], root["coverage"][1], sum(s["gap"] for s in steps)),
         "paths": paths, "gaps": [s["text"] for s in steps if s["gap"]],
     }
 
@@ -2348,6 +2365,26 @@ def completion(plan: dict, entries: list[dict], passed: list[bool] | None = None
         return False
     met = mastery.objectives_met(paths, plan["objectives"], entries, since=plan.get("created"))
     return all(met[p][o]["met"] for p in paths for o in plan["objectives"])
+
+
+def is_gap(step: dict, notes: dict | None = None) -> bool:
+    """A step with no note, or none of whose notes is in the vault any more:
+    no answer can pass it. Named once because the plan page and the plan's
+    row each count these, and a row that skipped the renamed-away notes read
+    a different percent from the page it opens (ADR-0141)."""
+    return not step["notes"] or all(resolve_title(n, notes) is None for n in step["notes"])
+
+
+def percent_done(met: int, notes: int, gaps: int) -> int:
+    """The completion bar's figure (ADR-0141): the notes that met every
+    objective without help, over the plan's notes plus one unit for each
+    gap step, which no answer can meet. Floored, so 224 of 225 reads 99:
+    100 shows only when every unit is met, which on a plan Silica wrote is
+    when `completion` holds, since its Tree lists the steps' own notes and
+    the scope is their union. A Tree link added by hand outside every step
+    counts here and not in `completion`, which reads the steps."""
+    units = notes + gaps
+    return met * 100 // units if units else 0
 
 
 # ---------------------------------------------------------------- the plan note, written
@@ -2972,7 +3009,7 @@ A reader describes a study plan in one sentence. Read only WHAT they will study;
 KIND is one of:
 - steps: the sentence lists two or more subjects. TARGET copies each subject in the sentence's own words, in order, separated by " | ".
 - folder: the sentence names one folder, or "all of" one. TARGET is that path copied from FOLDERS.
-- notes: the sentence names notes by their titles. TARGET is the titles, separated by " | ".
+- notes: the sentence names notes by their titles. TARGET is the titles, separated by " | ". A syllabus, programme or transparency sheet the subjects are taken from is a note too: TARGET is its name as written.
 - topic: one concept, wherever it appears. TARGET is the concept.
 ONLY_IN: the path from FOLDERS that holds the sentence's subject area (a course named after a folder), or none.
 NAME: a short name for the plan in the sentence's language, at most six words.
@@ -3055,7 +3092,44 @@ def _folder_by_segment(name: str, folders: dict[str, int]) -> str | None:
     return hits[0] if len(hits) == 1 else _folder_named(name, folders)
 
 
-def _checked_study(kind: str, raw: str, restrict: str, notes: dict, folders: dict[str, int], said: list[str]) -> dict:
+# What calls a note a syllabus, in its title or in the sentence naming it.
+# Narrow and word-bounded, because it turns a test on a note into a plan read
+# from it: on alex_second_brain (2026-10-29, 2,085 notes) the typeahead's
+# wider stems, or a programme heading in the body, took 88, 64 of them
+# "Sunto lezione" and the rest mostly "Programmazione ..."; these take 7, one
+# of them wrongly ("Prospettiva del programma multi-step").
+SYLLABUS_WORD_RE = re.compile(r"\b(programma|programme|syllabus|scheda|trasparenza)\b", re.I)
+
+
+def _syllabus_note(name: str, notes: dict, sentence: str = "") -> str | None:
+    """The note a name points at when it is a syllabus to study from: its
+    title or the sentence says so, and it has two rows to match. A name no
+    title equals is taken when one title alone holds its words, so "la scheda
+    di trasparenza" finds the only one there is."""
+    from silica.kernel.text.language import stopwords_for
+
+    path = resolve_title(name, notes)
+    if not path:
+        stop = stopwords_for("italian") | stopwords_for("english")
+        words = lambda s: set(re.findall(r"[^\W\d_]{2,}", s.casefold())) - stop  # noqa: E731
+        mine = words(_FILE_EXT_RE.sub("", name.strip()))
+        hits = [p for p in notes if mine and mine <= words(Path(p).stem)]
+        path = hits[0] if len(hits) == 1 else None
+    # "_" is a word character to \b, and a downloaded sheet is "scheda_trasparenza_173558"
+    if not path or not (SYLLABUS_WORD_RE.search(Path(path).stem.replace("_", " ")) or SYLLABUS_WORD_RE.search(sentence)):
+        return None
+    from silica.kernel.write import frontmatter
+
+    try:
+        _d, _r, body = frontmatter.split((_vault() / path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        # gone or unreadable since the walk: not a syllabus, the reading goes on as before
+        return None
+    return path if len(reference_rows(body)) >= 2 else None
+
+
+def _checked_study(kind: str, raw: str, restrict: str, notes: dict, folders: dict[str, int], said: list[str],
+                   sentence: str = "") -> dict:
     """The model's KIND and TARGET checked against the vault, with the
     rescues code can verify. Measured on Qwen3.5-9B (2026-10-08): four
     subjects listed came back as notes, three of which do not exist, and
@@ -3063,6 +3137,14 @@ def _checked_study(kind: str, raw: str, restrict: str, notes: dict, folders: dic
     that do not resolve is read as a syllabus, whose resolver keeps gaps; a
     single name that is a folder's is that folder. Each rescue is said."""
     names = [n.strip() for n in raw.split("|") if n.strip()]
+    # One name that is a syllabus is the Reference, never the material: on
+    # deepseek-v4-flash (2026-10-29) "gli argomenti sono nella Scheda di
+    # trasparenza - Machine Learning" came back as that note to be tested on,
+    # and "dalla scheda di trasparenza" as a topic no note carries.
+    syllabus = _syllabus_note(names[0], notes, sentence) if len(names) == 1 else None
+    if syllabus:
+        said.append(f"“{Path(syllabus).stem}” reads as a syllabus: its lines are the Reference, matched below.")
+        return {"scope": "steps", "target": Path(syllabus).stem}
     if kind == "notes":
         found = [resolve_title(n, notes) for n in names]
         if all(found):
@@ -3160,7 +3242,7 @@ def read_sentence(sentence: str, today=None) -> dict:
     if kind not in SCOPES or not raw:
         out["said"].append("The reading named no material; pick it in Study.")
     else:
-        out.update(_checked_study(kind, raw, out["restrict"], notes, folders, out["said"]))
+        out.update(_checked_study(kind, raw, out["restrict"], notes, folders, out["said"], sentence))
     if out["scope"] in ("folder", "notes"):
         out["restrict"] = ""   # a folder or named notes are the material already
     elif unnamed:

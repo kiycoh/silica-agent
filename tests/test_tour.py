@@ -41,6 +41,29 @@ def test_every_step_moves_on_by_its_button_or_by_an_event_the_tour_listens_to():
             assert f'tourWaiting("{wait.group(1)}")' in TOUR, f"nothing ends {name}'s wait"
 
 
+def test_every_wait_in_the_file_is_ended_by_a_listener():
+    # The runs after the basics (amendment of 2026-10-29) wait too: Create's
+    # first step waits for the fields.
+    for wait in set(re.findall(r'wait: "(\w+)"', TOUR)):
+        assert f'tourWaiting("{wait}")' in TOUR, wait
+
+
+def test_the_classes_the_runs_light_are_ones_discover_and_learn_draw():
+    # Built in JS, so the index.html check never sees them: a rename there
+    # would leave a step lighting nothing.
+    drawn = (WEB / "app-discover.js").read_text(encoding="utf-8") + (WEB / "app-learn.js").read_text(encoding="utf-8")
+    for cls in set(re.findall(r"\.((?:dv|lr)-[\w-]+)", TOUR)):
+        assert cls in drawn, cls
+
+
+def test_a_step_that_waits_on_a_turn_has_a_link_out():
+    # A turn can fail, be stopped or never be sent; step 2 had no way on
+    # but the close until 2026-10-29 (ADR-0105, amendment of that date).
+    for name, body in _steps().items():
+        if 'wait: "turn"' in body:
+            assert "link:" in body, name
+
+
 def test_the_numbers_run_one_to_four_in_order_after_the_welcome():
     ns = [int(re.search(r"\bn: (\d)", body).group(1)) for body in _steps().values()]
     assert ns == sorted(ns) and set(ns) == {0, 1, 2, 3, 4}
@@ -63,6 +86,6 @@ def test_its_listeners_exist_before_the_first_lists_are_asked_for():
 
 def test_the_page_announces_what_the_tour_waits_on():
     page = app_js() + (WEB / "work.js").read_text(encoding="utf-8")
-    for event in ("silica:vault-info", "silica:sessions", "silica:turn-end", "silica:view", "silica:job"):
+    for event in ("silica:vault-info", "silica:sessions", "silica:turn-end", "silica:view", "silica:job", "silica:learn-view"):
         assert f'new CustomEvent("{event}"' in page, event
         assert f'"{event}"' in TOUR, event
