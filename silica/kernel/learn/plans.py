@@ -208,6 +208,18 @@ def parse_steps(body: str) -> list[dict]:
 
 _HOURS_MARK_RE = re.compile(r"\s·\s(?:(weight)\s(\d+(?:[.,]\d+)?)|(\d+(?:[.,]\d+)?)\s(h|CFU|ECTS|wk|min))(?=\s·|$)")
 _DEPTH_MARK_RE = re.compile(r"\s·\s(deep|well|read)(?=\s·|$)")
+# The whole tail _marks writes. A reference's checkbox line kept it in its
+# text, so "lasso · weight 4" was the topic named missing and the weight
+# never reached the plan (2026-10-29); reference_rows already parts the two.
+_MARKS_TAIL_RE = re.compile(r"(?:\s·\s(?:by meaning, [^·]*|weight\s\d+(?:[.,]\d+)?"
+                            r"|\d+(?:[.,]\d+)?\s(?:h|CFU|ECTS|wk|min)|deep|well|read))+$")
+
+
+def _step_rows(body: str) -> list[dict]:
+    """A reference's checkbox steps in reference_rows' shape: {text, hours,
+    unit, depth}, the text without its marks."""
+    return [{"text": _MARKS_TAIL_RE.sub("", s["text"]), **{k: s[k] for k in ("hours", "unit", "depth") if k in s}}
+            for s in parse_steps(body)]
 
 
 def _marks(node: dict) -> str:
@@ -508,7 +520,7 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
     if path:
         _d, _r, body = frontmatter.split((_vault() / path).read_text(encoding="utf-8"))
         title = _title(body) or Path(path).stem
-        rows = [{"text": s["text"]} for s in parse_steps(body)] or reference_rows(body)
+        rows = _step_rows(body) or reference_rows(body)
     else:
         rows = [{"text": ln.strip("-* ").strip()} for ln in re.split(r"[\n;]", target) if ln.strip()]
     colls = so.collections(notes, allowed)
@@ -2157,7 +2169,7 @@ def _material_of(plan: dict, notes: dict) -> tuple[list[dict], dict, str, list[d
     bounds = tuple(b.strip().casefold() for b in str(plan.get("restrict") or "").split(RESTRICT_SEP) if b.strip())
     allowed = {p for p, m in notes.items() if is_material(m) and (not bounds or p.casefold().startswith(bounds))}
     colls = so.collections(notes, allowed)
-    rows = _unglued([{"text": s["text"]} for s in parse_steps(body)] or reference_rows(body), notes, allowed, colls)
+    rows = _unglued(_step_rows(body) or reference_rows(body), notes, allowed, colls)
     lines = [r["text"] for r in rows]
     labels = [_WIKILINK_RE.sub(r"\1", t).split(":", 1)[0].strip() for t in lines]
     steps = [[so.roots(x) for x in (_topics(t) or [lab])] for t, lab in zip(lines, labels)]

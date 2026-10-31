@@ -724,3 +724,28 @@ def test_the_syllabus_topics_no_lecture_deck_mentions(vault):
     gaps, decks = plans.lecture_gaps(plan)
     assert decks == 1 and gaps == ["dropout"]
     assert plans.lecture_gaps({"scope": "folder", "target": "Corso"}) is None
+
+
+def test_a_step_line_s_weight_and_depth_stay_out_of_its_last_topic(vault):
+    """A syllabus written as checkbox lines closes a row on its weight or
+    depth (`· weight 4`, `· 2 h · deep`, what _marks writes): read as text,
+    "lasso · weight 4" was the topic the plan named as missing, and the
+    weight never reached the plan (2026-10-29)."""
+    vault.note("Corso/Programma.md", "# Programma\n\n## Steps\n\n"
+               "- [ ] Ottimizzazione: gradient descent, chain rule, lasso · weight 4\n"
+               "- [ ] Reti: backpropagation, softmax · 2 h · deep\n")
+
+    res = plans.resolve_scope("steps", "Programma", restrict="ML/")
+
+    opt, nets = res["tree"]
+    assert opt["how"] == "2 of 3 topics" and opt["leaves"] == ["ML/Gradient descent.md", "ML/Chain rule.md"]
+    assert opt["missing"] == ["lasso"] and opt["hours"] == 4.0 and opt["unit"] == ""
+    assert nets["how"] == "2 of 2 topics" and (nets["hours"], nets["unit"], nets["depth"]) == (2.0, "h", "deep")
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    out = plans.write_plan("Programma ML", "steps", "Programma", restrict="ML/", reach="relational", cards=[])
+    text = (Path(CONFIG.vault_path) / out["path"]).read_text(encoding="utf-8")
+    assert ("- [ ] Ottimizzazione: [[Gradient descent]], [[Chain rule]] · not in the vault: lasso · weight 4"
+            in text)
