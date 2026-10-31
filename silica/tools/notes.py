@@ -110,8 +110,8 @@ def silica_patch_note(
     """Append a snippet under a heading in a single EXISTING note — the fast path
     for interactive edits.
 
-    To create a new note use silica_write_note; for nucleating whole documents
-    into many notes use silica_run_injector. Every successful patch is
+    To create a new note use silica_write_note<<; for nucleating whole documents
+    into many notes use silica_run_injector>>. Every successful patch is
     checkpointed and can be reverted with /undo.
     """
     from pathlib import Path
@@ -318,8 +318,8 @@ def silica_write_note(
     `props`), never raw YAML in `body` (a leading YAML block is stripped).
     Skeleton from the vault template (explicit `template` > vault default >
     built-in); `template="none"` writes the body as-is. Fails if the note
-    exists: append with silica_patch_note; multi-note nucleation with gates
-    and rollback: silica_run_injector. Checkpointed, revertible with /undo.
+    exists: append with silica_patch_note<<; multi-note nucleation with gates
+    and rollback: silica_run_injector>>. Checkpointed, revertible with /undo.
     """
     from pathlib import Path, PurePosixPath
 

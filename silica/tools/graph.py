@@ -419,7 +419,7 @@ def silica_semantic_search(query: Annotated[str, Field(description='Free-form qu
 
 
 @tool(cls="composed")
-def silica_recall(query: Annotated[str, Field(description='The question or topic to recall memory for')], k: Annotated[int, Field(description='Maximum number of notes contributing to the context')] = 15, memory: Annotated[bool, Field(description='Include the personal-memory lane and its facts (ADR-0019). Pass false for questions scoped to THIS vault — repo and code questions — so an unrelated personal vault cannot occupy context slots.')] = True, vault: Annotated[str, Field(description="Peek: path of another Silica vault to answer from (silica_vaults, loadable, lists them). Read-only; the session's vault does not change.")] = "",
+def silica_recall(query: Annotated[str, Field(description='The question or topic to recall memory for')], k: Annotated[int, Field(description='Maximum number of notes contributing to the context')] = 15, memory: Annotated[bool, Field(description='Include the personal-memory lane and its facts (ADR-0019). Pass false for questions scoped to THIS vault — repo and code questions — so an unrelated personal vault cannot occupy context slots.')] = True, vault: Annotated[str, Field(description="Peek: path of another Silica vault to answer from<< (silica_vaults, loadable, lists them)>>. Read-only; the session's vault does not change.")] = "",
                   folder: Annotated[str, Field(description="Only notes under this vault folder (e.g. 'docs/adr', 'silica'). Empty = whole vault. Use it when a subtree of unrelated notes (research on other products, fixtures) keeps taking the slots.")] = "",
                   min_trust: Annotated[str, Field(description="Trust floor: 'human' (a person wrote or vouched for it), 'grounded' (agent note with its verbatim source leaf), 'distilled' (agent note without one), 'kept' (a /keep of a web answer). Empty = no floor. A floor drops notes after retrieval, so `filtered` says how many you did not see.")] = "",
                   lifecycle: Annotated[str, Field(description="Only notes in this state: 'active', 'review' (gate soft flag), 'contested' (unresolved contradiction), 'superseded'. Empty = every state; the header names the non-active ones anyway.")] = "",
@@ -1126,9 +1126,9 @@ def silica_vault_report(
     dangling links, clusters; writes GRAPH_REPORT.md and seeds a remediation
     run for silica_ledger_next. Nothing runs until the
     user approves the run; then tiers: auto (no per-task confirmation),
-    propose (ask first), escalate (IssueCards, human judgment). Loadable
+    propose (ask first), escalate (IssueCards, human judgment).<< Loadable
     follow-ups: silica_graph_export for a visual graph, silica_curate straight
-    to executable maintenance.
+    to executable maintenance.>>
     """
     import orjson
     from pathlib import Path

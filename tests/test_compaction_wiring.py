@@ -26,7 +26,7 @@ class _FakeTool:
         self.collapse = collapse
         self._result = result
 
-    def json_schema(self):
+    def json_schema(self, reach=None):
         return {
             "type": "function",
             "function": {"name": self.name, "description": "", "parameters": {"type": "object", "properties": {}}},
@@ -120,7 +120,7 @@ def test_compact_context_collapses_old_read_and_recounts(monkeypatch):
     # block the turn ships (_chat_tool_schemas), so it reads the same fields the
     # agent loop reads when it builds the schemas for the call.
     fake = SimpleNamespace(collapse="lazy", sensitive=False, internal=False,
-                           json_schema=lambda: {"type": "function", "function": {
+                           json_schema=lambda reach=None: {"type": "function", "function": {
                                "name": "fake_read", "description": "d", "parameters": {}}})
     with patch.dict("silica.tools.TOOLS", {"fake_read": fake}, clear=True):
         collapsed = cli._compact_context(messages, set())
