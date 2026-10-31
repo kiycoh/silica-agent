@@ -397,7 +397,7 @@ def covers(doc: dict, vault: str | None = None, stories: list[str] | None = None
 # --- the read ------------------------------------------------------------------------
 
 def due(doc: dict) -> bool:
-    return doc.get("setup") and time.time() - doc.get("read_at", 0) >= READ_EVERY_S
+    return bool(doc.get("setup")) and time.time() - doc.get("read_at", 0) >= READ_EVERY_S
 
 
 def readable(doc: dict) -> list[dict]:

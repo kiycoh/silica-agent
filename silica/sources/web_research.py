@@ -1288,9 +1288,10 @@ def _compose_findings(concept: str, bank: dict[str, _Quote], *, reasoning: bool 
                 parts = list(pool.map(_write, sections))
         else:
             parts = [_write(sec) for sec in sections]
-        if any(p is None for p in parts):
+        texts = [p for p in parts if p is not None]
+        if len(texts) < len(parts):
             return None
-        return "\n\n".join(parts)
+        return "\n\n".join(texts)
     except Exception:
         import logging
 

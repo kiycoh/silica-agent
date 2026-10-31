@@ -85,7 +85,7 @@ def article_text(a: dict) -> str:
     return text[:ARTICLE_CHARS]
 
 
-def _json_object(text: str) -> dict:
+def _json_object(text: str | None) -> dict:
     m = re.search(r"\{.*\}", text or "", re.S)
     if not m:
         return {}
@@ -118,7 +118,7 @@ def bank_quotes(title: str, arts: list[dict], texts: list[str]) -> tuple[dict, l
         if not isinstance(q, dict):
             continue
         try:
-            i = int(q.get("article")) - 1
+            i = int(q.get("article") or 0) - 1   # none: -1, refused by the range check below
         except (TypeError, ValueError):
             continue
         quote = str(q.get("quote") or "").strip()

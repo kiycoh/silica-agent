@@ -15,6 +15,7 @@ import math
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from silica.sources.discover import store
 
@@ -139,7 +140,7 @@ def vault_topics(vault: str | None = None) -> list[dict]:
                     if t.lower() not in ("inbox", "web-research", "web-fetch", "discover"):
                         tags[t] = tags.get(t, 0) + 1
                         tagged.setdefault(t, []).append(path)
-    out = [{"key": "f:" + k, "label": k, "why": f"folder, {n} notes", "notes": n}
+    out: list[dict[str, Any]] = [{"key": "f:" + k, "label": k, "why": f"folder, {n} notes", "notes": n}
            for k, n in folders.items() if n >= 3]
     out += [{"key": "t:" + k, "label": "#" + k, "why": f"tag, {n} notes", "notes": n, "paths": tagged[k][:500]}
             for k, n in tags.items() if n >= 3]
