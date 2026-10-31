@@ -218,6 +218,16 @@ def test_a_sentence_with_no_marker_is_dropped_and_a_late_marker_kept():
     assert secs[1]["paras"][0]["cites"] == [2, 3] and secs[1]["articles"] == 2
 
 
+def test_a_quotation_is_one_sentence_and_an_ap_month_ends_none():
+    # G2, 2026-10-31: a quotation was cut in three with only its cited tail kept,
+    # and "Nov. 4" was cut in two.
+    quote = "“We needed to get there. It was not heavier. It was not thicker. It came with the screen,” he said [1]."
+    body = quote + " The summit opens Nov. 4 at 9 a.m. [2] Nobody explained."
+    out, dropped = S.drop_unmarked(body)
+    assert out == quote + " The summit opens Nov. 4 at 9 a.m. [2]"
+    assert dropped == 1   # "Nobody explained."
+
+
 def test_only_quotes_the_article_contains_are_banked(monkeypatch):
     reply = json.dumps({"quotes": [
         {"article": 1, "quote": "The vote was  close.", "why": "result"},
@@ -289,6 +299,41 @@ def test_less_like_this_leaves_for_you():
     assert [s["id"] for s in rank.for_you(doc, stories)] == ["a"]
 
 
+def test_a_near_floor_belongs_to_the_embedder_it_was_measured_on():
+    from silica.config import EMBEDDER_DEFAULTS
+
+    # pplx scores the same stories about 0.7 times what jina does, so jina's 0.40
+    # would show a hosted tenant almost nothing; an id nobody measured keeps 0.40.
+    assert rank.near_at("perplexity/pplx-embed-v1-4b") == 0.28
+    assert rank.near_at("jina-embeddings-v5-text-small-retrieval") == rank.NEAR_AT == 0.40
+    assert rank.near_at("perplexity/pplx-embed-v1-0.6b") == rank.NEAR_AT   # never measured, not the 4b
+    assert rank.near_at("") == rank.NEAR_AT
+    assert set(rank.NEAR_AT_BY_MODEL) <= set(EMBEDDER_DEFAULTS)
+
+
+def test_near_notes_keep_what_clears_the_configured_embedders_floor(tmp_vault, monkeypatch):
+    import numpy as np
+
+    from silica.config import CONFIG
+    from silica.kernel.recall import embed
+
+    class Store:
+        def __len__(self):
+            return 2
+
+        def cosine_top_k(self, vec, k=5):
+            return [{"path": "A/near", "name": "near", "score": 0.33}, {"path": "B/far", "name": "far", "score": 0.20}]
+
+    monkeypatch.setattr(embed, "get_store", lambda: Store())
+    for model, expect in (("perplexity/pplx-embed-v1-4b", [{"path": "A/near.md", "name": "near", "score": 0.33}]),
+                          ("jina-embeddings-v5-text-small-retrieval", [])):
+        _doc_with_story()
+        store.save_vectors({"s1": np.array([1.0, 0.0], dtype=np.float32)})
+        monkeypatch.setattr(CONFIG, "embedding_model", model)
+        rank.near_notes(None, ["s1"])
+        assert store.load()["stories"]["s1"]["near"] == expect, model
+
+
 def test_tags_in_their_three_yaml_spellings():
     assert rank.note_tags("tags: [a, b]") == ["a", "b"]
     assert rank.note_tags("tags: a, #b") == ["a", "b"]
@@ -318,6 +363,21 @@ def test_grouping_joins_an_article_to_the_nearest_story(tmp_vault, monkeypatch):
     read.group(doc, vectors, ["a", "b", "c"])
     groups = sorted(sorted(s["articles"]) for s in doc["stories"].values())
     assert groups == [["a", "b"], ["c"]]
+
+
+def test_a_changed_embedder_leaves_old_stories_as_they_are_and_groups_on(tmp_vault, monkeypatch):
+    import numpy as np
+
+    doc = store.load()
+    doc["articles"]["a"] = {"id": "a", "title": "x", "lead": "", "bucket": "news", "tags": []}
+    doc["stories"]["old"] = {"id": "old", "articles": ["z"], "bucket": "news", "tags": [], "created": 0, "updated": 0,
+                             "n": 1, "cover": None, "written": None, "near": None}
+    vectors = {"old": np.ones(4, dtype=np.float32) / 2}   # the embedder before: 4 wide
+    monkeypatch.setattr(read, "_embed", lambda texts: np.tile(np.array([1.0, 0.0, 0.0], dtype=np.float32), (len(texts), 1)))
+    read.group(doc, vectors, ["a"])   # 3 wide now: used to raise in `mat @ v` on every read
+    assert set(doc["stories"]) == {"old", "sa"} and doc["stories"]["old"]["articles"] == ["z"]
+    assert set(vectors) == {"sa"}
+    store.save_vectors(vectors)   # one width, so the file can be written
 
 
 # --- the routes ---------------------------------------------------------------------

@@ -28,20 +28,45 @@ _NEAR_PER_READ = 60
 # the story's vector against the vault's own note vectors, one cosine scale
 # per embedder. Not the chat's reranked search, whose score is comparable
 # only within one call and sat between -0.2 and 0.22 for every query on this
-# machine's reranker. Measured 2026-10-28 on tests/fixtures/synthetic_vault
-# with jina-embeddings-v5-text-small: unrelated news 0.10 to 0.15, a story
-# only tangent to the notes 0.33, real matches 0.44 to 0.58.
-# shortcut: one 13-note vault and one embedder; re-measure on the owner's
-# vault and on the hosted embedder before 2026-11-15.
+# machine's reranker.
+# A floor belongs to one embedder (ADR-0078). Measured 2026-10-31 on
+# tests/fixtures/synthetic_vault with the 1,716 stories of one Discover store.
+# 139 were labeled blind to the score (20 unrelated, 87 tangent, 32 match):
+# every story above the floors and a few per score band below, so these are
+# the median top-1 cosines of the labeled stories of each class:
+#   jina-embeddings-v5-text-small  0.154 / 0.357 / 0.445  floor 0.40
+#   pplx-embed-v1-4b               0.100 / 0.248 / 0.316  floor 0.28
+# Each floor is the midpoint of the tangent and match medians (jina's agrees
+# with the 0.40 of the first reading, 2026-10-28), and 0.28 passes 3.7% of the
+# stories where 0.40 passes 3.4% on jina. Hosted tenants run pplx, and 0.40
+# there would pass 4 of the 1,716.
 NEAR_AT = 0.40
+NEAR_AT_BY_MODEL: dict[str, float] = {"pplx-embed-v1-4b": 0.28}
+# shortcut: a flat floor does not know how many notes the vault has. The
+# owner's 2,083-note vault on jina (92 labeled stories, 2026-10-31): 47% of
+# stories pass 0.40, 95% of those in the right subfield and only 18% real
+# matches; the tangent and match medians there are 0.45 and 0.57, a floor near
+# 0.51. The 13-note fixture passes 3%. pplx has no such reading: a person's
+# notes do not go to the embedding API for a measurement. Reopen at the first
+# hosted vault over 500 notes, or by 2026-12-15, with the vault's own p95 of
+# story-to-note top-1 as the floor.
 _NEAR_K = 3
 _TOPICS_SHOWN = 8
 _TAG_SCAN = 3000           # notes read for their tags on the first run
 _SKIP_DIRS = {"sources", "attachments", "assets", "templates", "_inbox", "inbox"}
 
 
+def near_at(model: str) -> float:
+    """The floor for the configured embedder id, matched the way its config
+    row is (config.embedder_defaults: the key inside the id); NEAR_AT for a
+    model nobody measured."""
+    m = (model or "").lower()
+    return next((v for k, v in NEAR_AT_BY_MODEL.items() if k in m), NEAR_AT)
+
+
 def near_notes(vault: str | None, stories: list[str]) -> None:
     """Fill `near` for the given stories, newest and largest first."""
+    from silica.config import CONFIG
     from silica.kernel.recall.embed import get_store
     from silica.sources.discover import read
 
@@ -71,13 +96,14 @@ def near_notes(vault: str | None, stories: list[str]) -> None:
             todo = [sid for sid in todo if sid in vectors]
         else:
             vectors.update({sid: got[i] for i, sid in enumerate(missing)})
+    floor = near_at(CONFIG.embedding_model)
     found: dict[str, list[dict]] = {}
     for sid in todo:
         if sid not in vectors:
             continue
         hits = es.cosine_top_k([float(x) for x in vectors[sid]], k=_NEAR_K)
         found[sid] = [{"path": h["path"] + ".md", "name": h.get("name") or h["path"].rsplit("/", 1)[-1],
-                       "score": round(float(h["score"]), 3)} for h in hits if h["score"] >= NEAR_AT]
+                       "score": round(float(h["score"]), 3)} for h in hits if h["score"] >= floor]
     if not found:
         return
     with store.LOCK:
