@@ -35,6 +35,13 @@ NARRATIVE_WEIGHT = 3
 GAP = 4               # effective look-back of GAP - 1 = 3 tokens
 MIN_TOKEN_LEN = 3
 EVIDENCE = "cooccur"
+# A note's body contributes its first MAX_BODY_CHARS characters (after cleaning),
+# as embed._MAX_CHARS does for vectors. Uncapped, 97 converted books (median 221 KB,
+# max 6.7 MB, hosted t20 2026-10-30) made the startup vault map's
+# _aggregate need >1.6 GB before the socket bound, against a tenant's 1 GB; cut
+# at 20k the same notes start at 329 MB peak and /cooccur --force drops from
+# 999 to 284 MB. Every note under 20k is unchanged.
+MAX_BODY_CHARS = 20_000
 
 
 def _index_path() -> Path:
@@ -142,7 +149,7 @@ def build_contribution(
     # strip_fences: prose vaults treat code blocks as noise; code vaults keep
     # their identifiers as graph signal (C1 fork ⚑). Keyed on the manifest
     # `sources` by the caller. Math and images never become nodes.
-    text = f"{name}\n\n{clean_body(body, fences=strip_fences)}"
+    text = f"{name}\n\n{clean_body(body, fences=strip_fences)[:MAX_BODY_CHARS]}"
     if concepts:
         concept_sentences = ". ".join(c.strip() for c in concepts if c and c.strip())
         if concept_sentences:
@@ -820,7 +827,10 @@ def build_index(
     if requested == "auto" and not refreeze and store.paths() and store.lang != "auto":
         use_lang = store.lang
     else:
-        use_lang = language.resolve(requested, "\n".join(b for _p, _n, b in notes[:50]))
+        # The sample takes the same cut as the bodies: 50 whole books joined
+        # were 413 MB and 6.9 s of detection, the first 20k of each 0.3 s.
+        use_lang = language.resolve(
+            requested, "\n".join(b[:MAX_BODY_CHARS] for _p, _n, b in notes[:50]))
     store.lang = use_lang  # freeze resolved language (no 'auto' persisted)
     cmap = concepts_by_path or {}
     strip_fences = _strip_fences_for_active_vault()

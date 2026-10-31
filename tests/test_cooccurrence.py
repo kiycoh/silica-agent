@@ -169,6 +169,16 @@ def test_build_contribution_excludes_excalidraw_drawings():
     assert ok["nodes"]
 
 
+def test_build_contribution_reads_only_the_first_max_body_chars():
+    from silica.kernel.recall.cooccurrence import MAX_BODY_CHARS
+
+    book = "alpha beta gamma delta. " * (MAX_BODY_CHARS // 24 + 1)
+    st = __import__("snowballstemmer").stemmer("english").stemWord
+    c = build_contribution("N", book + "zephyrine quokkaland.", lang="english")
+    assert st("alpha") in c["nodes"] and st("zephyrine") not in c["nodes"]
+    assert c == build_contribution("N", book + "other tail entirely.", lang="english")
+
+
 def test_strip_fences_keyed_on_manifest_sources(monkeypatch):
     from silica.kernel.recall import cooccurrence
     from silica.kernel import vault_manifest
