@@ -410,7 +410,10 @@ def silica_write_note(
         checkpoint_depth = None
         checkpoint_ok = False
         try:
-            checkpoint_depth = get_checkpoint_store().push(path, None, content)  # None: created, /undo removes it
+            # What landed, not what was asked: the driver composes the frontmatter, and
+            # a stored body that is not the disk reads as a hand edit at the next write.
+            landed = DRIVER.read_note(ref.path).content
+            checkpoint_depth = get_checkpoint_store().push(path, None, landed)  # None: created, /undo removes it
             checkpoint_ok = True
         except Exception as e:
             logger.warning("checkpoint push failed for '%s': %s — /undo has no "

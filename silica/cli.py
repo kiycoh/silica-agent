@@ -1694,10 +1694,19 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
         CONSOLE.print("  Nothing to undo — no patches recorded in this session.")
         return True
 
-    content = store.undo(note_path)
+    try:
+        on_disk = DRIVER.read_note(note_path).content
+    except Exception:
+        on_disk = None  # nothing on disk to keep: the undo writes the note back
+    by_hand = store.edited_by_hand(note_path, on_disk)
+    # Read before the undo: written over blind, an edit made in Obsidian after
+    # Silica's write was lost for good (ADR-0144, reproduced 2026-11-01).
+    content = store.undo(note_path, current=on_disk)
     if content is None:
         CONSOLE.print(f"  [yellow]Nothing to undo for[/] {note_path} (already at original).")
         return True
+    kept = ("; your edits made after it are taken back too and kept in the note's history"
+            if by_hand else "")
 
     if store.absent_floor(note_path):
         # The chat created this note: before it there was nothing, so undo
@@ -1725,7 +1734,7 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
         DRIVER.overwrite(note_path, content, loss=Loss.RESTORE)
         depth = store.depth(note_path)
         remaining = max(0, depth - 1)
-        CONSOLE.print(f"  Undone: [bold]{note_path}[/]  [dim]({remaining} undo step(s) remaining)[/]")
+        CONSOLE.print(f"  Undone: [bold]{note_path}[/]{kept}  [dim]({remaining} undo step(s) remaining)[/]")
     except Exception as exc:
         CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
     return True

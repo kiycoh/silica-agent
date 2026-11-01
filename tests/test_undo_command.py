@@ -21,9 +21,12 @@ class _Store:
     def most_recent(self):
         return ("fallback.md", 0.0)
 
-    def undo(self, path):
+    def undo(self, path, current=None):
         self.asked = path
         return "restored body"
+
+    def edited_by_hand(self, path, current):
+        return False
 
     def depth(self, path):
         return 1

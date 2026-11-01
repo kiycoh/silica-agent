@@ -22,6 +22,7 @@ LOSS_PINS = {
     ("silica/cli.py", "_dc_verify", "Loss.PERSON"): 1,
     ("silica/tools/wrapped.py", "silica_restore", "Loss.RESTORE"): 2,
     ("silica/cli.py", "_dc_undo", "Loss.RESTORE"): 1,
+    ("silica/ui/web/server.py", "note_history_restore", "Loss.RESTORE"): 1,   # ADR-0144 point 7
     ("silica/agent/commit.py", "commit_derived", "Loss.RESTORE"): 1,
     ("silica/driver/ws_backend.py", "restore", "preserve.Loss.RESTORE"): 1,
     ("silica/sources/convert.py", "_doc_to_md", "Loss.STAGED"): 2,
@@ -97,10 +98,10 @@ def test_every_free_key_set_is_pinned():
 def test_the_counts_the_record_states():
     from silica.kernel.write.preserve import _RELAX_ALL, Loss
 
-    assert sum(LOSS_PINS.values()) == 24  # ADR-0126: explicit_links under RENAME
+    assert sum(LOSS_PINS.values()) == 25  # ADR-0144: a version restored from the history
     off = sum(n for (_f, _fn, v), n in LOSS_PINS.items()
               if Loss[v.rsplit(".", 1)[-1].split()[0]] in _RELAX_ALL)
-    assert off == 18
+    assert off == 19  # RESTORE relaxes all: ADR-0144 point 7 adds one
     assert sum(FREE_PINS.values()) == 8  # ADR-0143: unset_prop beside set_prop
 
 
