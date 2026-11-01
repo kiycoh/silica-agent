@@ -162,8 +162,10 @@ def test_the_chevrons_are_stroked_in_screen_pixels_and_draw_no_head():
     body = js[js.index("function drawRequires"):js.index("function paintNodeArea")]
     assert "ctx.stroke()" in body and "ctx.fill(" not in body   # open chevrons, never a head
     assert "1 / (k || 1)" in body                                # 16 and 4 screen px at any zoom
-    # the GL layer draws plain lines only: a requires stays on the canvas painter
-    assert "!l.requires && !libOwnsLink(l)" in js
+    # the GL layer draws its line (ADR-0146) and the lib keeps it visible for
+    # the chevrons, as it keeps a citation for its head
+    assert 'l.type === "CITES" || l.requires || libOwnsLink(l)' in js
+    assert "l.requires ? drawRequires(l, ctx, k) : drawCiteArrow(l, ctx)" in js
 
 
 def test_slash_path_names_the_requires_leg(tmp_vault, monkeypatch):

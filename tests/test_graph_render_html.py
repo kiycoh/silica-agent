@@ -457,13 +457,14 @@ class TestBigVaultPerfKnobs:
 
 
 class TestWebGLLinks2D:
-    """2D draws every solid link as one instanced WebGL quad, under the canvas.
+    """2D draws every link as one instanced WebGL quad, under the canvas.
 
-    Skia tessellates a stroke 1px or wider, and a wikilink is 1.6px: on the
+    Skia tessellates a stroke 1px or wider, and a wikilink was 1.6px: on the
     23,836-edge vault that was ~93ms of raster per full-ratio frame (9.7fps on
     a pan, 2026-10-26); on WebGL the same pan holds 60fps at 1600x913 and at
     3200x2000. Each test pins a piece whose loss is silent: the picture still
-    draws, only the cost or the look comes back wrong.
+    draws, only the cost or the look comes back wrong. The look itself (spot
+    inks, screens, widths) is run in node by test_graph_frame.
     """
 
     def _js(self, small_graph):
@@ -472,23 +473,26 @@ class TestWebGLLinks2D:
 
     def test_the_lib_skips_what_the_layer_draws(self, small_graph):
         html = self._js(small_graph)
-        # a link the layer owns never reaches the lib's stroke loop: both
-        # drawing it would pay the cost twice and darken every line
-        assert ".linkVisibility(l => !glOwnsLink(l) && !l._hidden && !quietNow(l))" in html
-        # and the layer reads the same visible set the lib used to
-        assert "if (!l.__glOwn || l._hidden || quietNow(l)) continue;" in html
+        # with the layer up the lib strokes no line: both drawing it would pay
+        # the cost twice, and a lib line over a band would cut it; it keeps the
+        # citations (their arrowhead), a written requires (its chevrons) and the
+        # photon carriers visible
+        assert '.linkVisibility(l => !l._hidden && !quietNow(l) && (!GLLinks || l.type === "CITES" || l.requires || libOwnsLink(l)))' in html
+        assert '.linkCanvasObjectMode(l => GLLinks ? "replace" : l.type === "CITES" || l.requires ? "after" : null)' in html
+        # and the layer reads every visible link, covers included: what the
+        # atlas quiets is its mat (test_graph_frame), not a hidden link
+        assert "for (const l of ALL_EDGES) {\n    if (l._hidden) continue;" in html
+        assert "(quietNow(l) && !live ? mat : read).push(l);" in html
 
-    def test_dashes_citations_and_photons_stay_the_libs(self, small_graph):
+    def test_no_link_crossing_darkens(self, small_graph):
+        """The MAX-blended union buffer kept the wikilinks from darkening where
+        they crossed. Every link is a spot ink now (ADR-0146): opaque with the
+        atlas off, and with it on written into a buffer with blending off, so
+        the last link wins and a crossing cannot darken in any order."""
         html = self._js(small_graph)
-        assert 'l.__glOwn = !isDashed(l) && l.type !== "CITES" && !l.requires && !libOwnsLink(l);' in html
-
-    def test_one_width_one_colour_is_one_path(self, small_graph):
-        """The lib fills one path per (colour, width): its lines never darken
-        where they cross. Drawn straight here, the wikilink core of a dense
-        vault would stack toward opaque."""
-        html = self._js(small_graph)
-        assert "gl.blendEquation(gl.MAX);" in html
-        assert "union: union && links.length > 1" in html
+        assert "gl.blendEquation(gl.MAX);" not in html
+        assert "prog = glProgram(gl, GL_LINK_VS, GL_INK_FS);" in html
+        assert "float c = over > .5 ? vColor.a : 1.;" in html
 
     def test_links_follow_this_frames_tick(self, small_graph):
         """Pre runs before the lib's tick, Post after it: links drawn in Pre

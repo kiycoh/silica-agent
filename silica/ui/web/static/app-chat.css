@@ -1874,18 +1874,18 @@
   outline-offset: 2px;
 }
 
-.spinner {
-  width: 22px;
-  height: 22px;
-  border: 2px solid var(--line-2);
-  border-top-color: var(--accent);
-  animation: spin 0.9s steps(8) infinite;
+/* the wait: ASCII wake's hand over a row of cells, drawn by app-wake.js (ADR-0146) */
+.wake {
+  width: 144px;
+  height: 16px;
+  color: var(--frost);
+  font-family: var(--mono);
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+.wake canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 

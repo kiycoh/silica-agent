@@ -315,7 +315,7 @@
          markup here is the frame and its loading line, nothing else. -->
     <section id="view-discover" class="view">
       <div id="dv-loading" class="frame-loading" hidden>
-        <div class="spinner"></div>
+        <div class="wake" aria-hidden="true"></div>
         <div>Reading your feeds.</div>
       </div>
       <div id="dv-body"></div>
@@ -364,12 +364,12 @@
       </div>
 
       <div id="graph-loading" class="frame-loading" hidden>
-        <div class="spinner"></div>
+        <div class="wake" aria-hidden="true"></div>
         <div>Building the graph. Large vaults take a moment.</div>
       </div>
 
       <div id="shape-loading" class="frame-loading" hidden>
-        <div class="spinner"></div>
+        <div class="wake" aria-hidden="true"></div>
         <div>Reading the vault's shape.</div>
       </div>
 
@@ -395,7 +395,7 @@
         <button type="button" id="learn-end" class="ghost lr-end" hidden>End session</button>
       </div>
       <div id="learn-loading" class="frame-loading" hidden>
-        <div class="spinner"></div>
+        <div class="wake" aria-hidden="true"></div>
         <div class="fl-msg">Reading the ledger.</div>
       </div>
       <div id="learn-body"></div>
@@ -422,7 +422,7 @@
       <!-- the other four views all name what they are doing while they do it;
            this one used to open on an empty grid and fill in silently -->
       <div id="cal-loading" class="frame-loading" hidden>
-        <div class="spinner"></div>
+        <div class="wake" aria-hidden="true"></div>
         <div>Reading the vault's dates.</div>
       </div>
       <div id="cal-main">
@@ -472,7 +472,7 @@
         <button type="button" id="metrics-refresh" class="ghost" title="recompute the report">Recompute</button>
       </div>
       <div id="metrics-loading" class="frame-loading" hidden>
-        <div class="spinner"></div>
+        <div class="wake" aria-hidden="true"></div>
         <div class="fl-msg">Measuring the vault. A full report takes a moment.</div>
         <button type="button" id="metrics-cancel" class="fl-cancel">cancel</button>
       </div>
@@ -787,6 +787,7 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
   <script src="/static/app-workspaces.js"></script>
   <script src="/static/app-jobs.js"></script>
   <script src="/static/app-boot.js"></script>
+  <script src="/static/app-wake.js"></script>
   <!-- Before app-settings.js, which starts the first /vault_info and /sessions:
        the tour's listeners must exist before either answers (ADR-0105). -->
   <script src="/static/app-tour.js"></script>

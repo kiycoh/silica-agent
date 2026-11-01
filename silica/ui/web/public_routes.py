@@ -113,6 +113,68 @@ def public_view():
     return _view()
 
 
+# One picture per set of notes and links, kept for the process: a layout of a few hundred notes
+# takes about a second, and the view asks every time it opens.
+_COVER: dict[int, dict] = {}
+# shortcut: past this many notes the cover keeps the best linked ones, so the layout stays near a
+# second; reopen if a page this large asks for every mark (count them in the published meta line)
+_COVER_MAX = 1500
+
+
+@router.get("/public/cover")
+def public_cover():
+    """The view's cover (ADR-0146 point 4): the notes that would go out and the links between
+    them, laid out as the published page lays out its own graph (spring layout, seed 7). The
+    links are the vault graph's between two outgoing notes, so a private note is never a mark."""
+    import networkx as nx
+
+    from silica.driver import get_driver
+    from silica.kernel import publish
+
+    vault = publish._vault()
+    sel = publish.selection(vault)
+    on = sorted(p for p, s in sel["notes"].items() if s == "on")
+    if not on:
+        return {"n": [], "e": []}
+    out = set(on)
+    pairs: set[tuple[str, str]] = set()
+    try:
+        _notes, _unresolved, g = get_driver().graph_data()
+        for p in on:
+            for t in g.successors(p) if p in g else ():
+                if t in out and t != p:
+                    pairs.add((min(p, t), max(p, t)))
+    except Exception as exc:
+        # A cover without lines still shows the page's notes; the boxes below it, which say
+        # what goes out, do not read the graph.
+        logger.warning("public cover: links not drawn (%s)", exc)
+    key = hash((tuple(on), tuple(sorted(pairs))))
+    if key in _COVER:
+        return _COVER[key]
+    g2 = nx.Graph()
+    g2.add_nodes_from(on)
+    g2.add_edges_from(pairs)
+    if len(on) > _COVER_MAX:
+        g2 = g2.subgraph(sorted(on, key=lambda p: (-g2.degree(p), p))[:_COVER_MAX]).copy()
+    nodes = sorted(g2.nodes)
+    pos = nx.spring_layout(g2, seed=7, k=1.6 / max(len(nodes), 1) ** 0.5) if len(nodes) > 1 \
+        else {nodes[0]: (0.0, 0.0)}
+    xs = [pos[n][0] for n in nodes]
+    ys = [pos[n][1] for n in nodes]
+    sx, sy = (max(xs) - min(xs)) or 1.0, (max(ys) - min(ys)) or 1.0
+    fms = sel["frontmatter"]
+    at = {n: i for i, n in enumerate(nodes)}
+    cover = {
+        "n": [[round((pos[n][0] - min(xs)) / sx, 4), round((pos[n][1] - min(ys)) / sy, 4),
+               g2.degree(n), _title(n, fms.get(n) or {})] for n in nodes],
+        "e": [[at[a], at[b]] for a, b in g2.edges],
+    }
+    # one entry: a view shows one page, and an old picture is never asked for again
+    _COVER.clear()
+    _COVER[key] = cover
+    return cover
+
+
 def _canon(path: str) -> str:
     from silica.kernel.recall.mindmap import note_resolver
 

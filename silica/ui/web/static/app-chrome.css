@@ -216,7 +216,6 @@ body.note-open #toasts {
 
   .caret,
   .tool:not(.done):not(.error),
-  .spinner,
   .toast,
   .msg {
     animation: none !important;

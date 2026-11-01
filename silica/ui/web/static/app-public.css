@@ -419,3 +419,56 @@
 body.drawer-recall #public-bar {
   padding-right: 52px;
 }
+
+/* --- the view stands centred, its cover above the boxes (ADR-0146 point 4) -------
+   Every block keeps the page measure and the column sits in the middle of the view, instead of
+   hanging from its left edge. The cover is printed in two inks on the well, at the 46:21 of the
+   draft until the family of cover ratios is decided. */
+#public-body > * {
+  width: 100%;
+  max-width: var(--measure);
+  margin-inline: auto;
+}
+
+.pp-cover {
+  margin: 0;
+}
+
+.pp-cover-box {
+  position: relative;
+  aspect-ratio: 46 / 21;
+  background: var(--void);
+  border-radius: var(--r);
+  overflow: hidden;
+  line-height: 0;
+}
+
+.pp-cover-box canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+}
+
+.pp-ctip {
+  position: absolute;
+  transform: translate(10px, -50%);
+  font: 600 12px/1.2 var(--sans);
+  color: var(--on-vivid);
+  background: var(--accent);
+  padding: 3px 7px;
+  border-radius: var(--r-xs);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.pp-ctip.left {
+  transform: translate(calc(-100% - 10px), -50%);
+}
+
+.pp-cover figcaption {
+  margin-top: 0.5rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  font-variant-numeric: tabular-nums;
+}

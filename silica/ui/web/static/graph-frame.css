@@ -147,6 +147,22 @@ label.filter-row:has(>input:focus-visible){outline:1px solid var(--accent);outli
   var(--c,var(--ash-dim)) 0 6px,transparent 6px 8px)}
 :where(:root[data-theme="light"]) .dot-edge.dashed{background:repeating-linear-gradient(90deg,
   var(--cp,var(--c,var(--ash-dim))) 0 6px,transparent 6px 8px)}
+/* In 2D the canvas prints these rows as bands through a screen (ADR-0146:
+   SCREEN_2D and SCREEN_INK in graph-frame.js), so there the swatch is the
+   band: the hue through the same Bayer cells at the same share, as tall as
+   the band. 3D keeps the dash above. The masks are the inked cells of the
+   4x4 at .42 and .55 and of the 8x8 at .14 and .16, graphite then paper. */
+.mode-2d #cb-proposed+.dot-edge,.mode-2d #covers-row>.dot-edge{background:var(--c,var(--ash-dim));height:3px;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM2 0h1v1h-1zM1 1h1v1h-1zM3 1h1v1h-1zM0 2h1v1h-1zM2 2h1v1h-1zM3 3h1v1h-1z'/%3E%3C/svg%3E") 0 0/4px 4px}
+.mode-2d #cb-coupled+.dot-edge,.mode-2d #cb-gaps+.dot-edge{background:var(--c,var(--ash-dim));height:5px;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Cpath d='M0 0h1v1h-1zM2 0h1v1h-1zM4 0h1v1h-1zM2 2h1v1h-1zM6 2h1v1h-1zM0 4h1v1h-1zM4 4h1v1h-1zM2 6h1v1h-1zM6 6h1v1h-1z'/%3E%3C/svg%3E") 0 0/8px 8px}
+.mode-2d #cb-gaps+.dot-edge{height:6px}
+:where(:root[data-theme="light"]) .mode-2d #cb-proposed+.dot-edge,
+:where(:root[data-theme="light"]) .mode-2d #covers-row>.dot-edge{background:var(--cp,var(--c,var(--ash-dim)));
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Cpath d='M0 0h1v1h-1zM1 0h1v1h-1zM2 0h1v1h-1zM1 1h1v1h-1zM3 1h1v1h-1zM0 2h1v1h-1zM2 2h1v1h-1zM1 3h1v1h-1zM3 3h1v1h-1z'/%3E%3C/svg%3E") 0 0/4px 4px}
+:where(:root[data-theme="light"]) .mode-2d #cb-coupled+.dot-edge,
+:where(:root[data-theme="light"]) .mode-2d #cb-gaps+.dot-edge{background:var(--cp,var(--c,var(--ash-dim)));
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Cpath d='M0 0h1v1h-1zM2 0h1v1h-1zM4 0h1v1h-1zM6 0h1v1h-1zM2 2h1v1h-1zM6 2h1v1h-1zM0 4h1v1h-1zM4 4h1v1h-1zM6 4h1v1h-1zM2 6h1v1h-1zM6 6h1v1h-1z'/%3E%3C/svg%3E") 0 0/8px 8px}
 /* The citation row, drawn as the canvas draws it (ADR-0055): solid, a step
    thinner than "resolved" because Silica did not write it, and the frame's
    only arrowhead, because the direction is what a citation says. */
