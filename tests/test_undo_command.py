@@ -25,8 +25,11 @@ class _Store:
         self.asked = path
         return "restored body"
 
-    def edited_by_hand(self, path, current):
-        return False
+    def changed_since(self, path, current):
+        return None
+
+    def settle(self, path, landed):
+        pass
 
     def depth(self, path):
         return 1

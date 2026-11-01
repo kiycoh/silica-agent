@@ -166,7 +166,7 @@ def silica_event_update(note: Annotated[str, Field(description='Event note stem 
     from silica.kernel.calendar.model import scan_events, validate_event
     from silica.kernel.workqueue import path_lease
     from silica.kernel.write import frontmatter
-    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.checkpoints import push_landed
     from silica.kernel.write.templates import upsert_props
 
     changes = {k: v.strip() for k, v in
@@ -205,7 +205,7 @@ def silica_event_update(note: Annotated[str, Field(description='Event note stem 
 
         checkpoint_ok = False
         try:
-            get_checkpoint_store().push(target.path, prior, new_content)
+            push_landed(target.path, prior, new_content)
             checkpoint_ok = True
         except Exception as e:
             logger.warning("checkpoint push failed for '%s': %s", target.path, e)

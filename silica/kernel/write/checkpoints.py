@@ -54,6 +54,22 @@ def _same_text(a: str | None, b: str | None) -> bool:
     return norm(a) == norm(b)
 
 
+def _outside_kind(path: str, text: str) -> str:
+    """`run` when `text` is what a journaled run (/nucleate, Zotero, a
+    migration) last wrote at `path`, else `hand`: both land between two of the
+    chat's writes, and only one of them is the person editing outside Silica."""
+    import hashlib
+
+    try:
+        from silica.config import CONFIG
+        from silica.kernel.write.undo_journal import get_undo_journal
+
+        post = get_undo_journal().newest_post_hash(path, (CONFIG.vault_path or "").strip() or None)
+    except Exception:
+        return "hand"  # no journal to ask: the body is still kept, only its label is the general one
+    return "run" if post == hashlib.sha256(text.encode("utf-8")).hexdigest() else "hand"
+
+
 class CheckpointStore:
     """A persistent stack of full-note restore points, keyed by vault path."""
 
@@ -85,7 +101,8 @@ class CheckpointStore:
         for name, ddl in (("absent", "INTEGER NOT NULL DEFAULT 0"),
                           ("undone", "INTEGER NOT NULL DEFAULT 0"),
                           ("vault", "TEXT"),
-                          ("kind", "TEXT NOT NULL DEFAULT 'silica'")):
+                          ("kind", "TEXT NOT NULL DEFAULT 'silica'"),
+                          ("of", "TEXT")):
             if name not in cols:
                 self._conn.execute(f"ALTER TABLE checkpoints ADD COLUMN {name} {ddl}")
         self._conn.commit()
@@ -93,11 +110,11 @@ class CheckpointStore:
     # -- internals ---------------------------------------------------------
 
     def _insert(self, path: str, content: str, absent: bool = False, *,
-                kind: str = "silica", undone: bool = False) -> None:
+                kind: str = "silica", undone: bool = False, of: str | None = None) -> None:
         self._conn.execute(
-            "INSERT INTO checkpoints (path, content, created_at, absent, undone, vault, kind) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (path, content, time.time(), int(absent), int(undone), _current_vault(), kind),
+            "INSERT INTO checkpoints (path, content, created_at, absent, undone, vault, kind, of) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (path, content, time.time(), int(absent), int(undone), _current_vault(), kind, of),
         )
         self._conn.commit()
 
@@ -111,7 +128,7 @@ class CheckpointStore:
     # -- write -------------------------------------------------------------
 
     def push(self, path: str, prior_content: str | None, new_content: str,
-             kind: str = "silica") -> int:
+             kind: str = "silica", of: str | None = None) -> int:
         """Record a restore point after a patch.
 
         On the first push for ``path`` the original ``prior_content`` is seeded
@@ -129,8 +146,8 @@ class CheckpointStore:
         if not top:
             self._insert(path, prior_content or "", absent=prior_content is None, kind="original")
         elif prior_content is not None and not _same_text(prior_content, top[0]["content"]):
-            self._insert(path, prior_content, kind="hand")
-        self._insert(path, new_content, kind=kind)
+            self._insert(path, prior_content, kind=_outside_kind(path, prior_content))
+        self._insert(path, new_content, kind=kind, of=of)
         return self.depth(path)
 
     # -- read --------------------------------------------------------------
@@ -195,24 +212,43 @@ class CheckpointStore:
         recent = self.most_recent()
         return recent[0] if recent else None
 
-    def edited_by_hand(self, path: str, current: str | None) -> bool:
-        """True when the note on disk is not its newest live version: someone
-        changed it outside Silica after Silica's last write."""
+    def changed_since(self, path: str, current: str | None) -> str | None:
+        """How the note on disk came to differ from its newest live version:
+        `hand` (edited outside Silica), `run` (a journaled run wrote it), or
+        None when it does not differ."""
         top = self._live(path, 1)
-        return bool(top) and current is not None and not _same_text(current, top[0]["content"])
+        if not top or current is None or _same_text(current, top[0]["content"]):
+            return None
+        return _outside_kind(path, current)
 
-    def history(self, path: str) -> list[dict]:
+    def settle(self, path: str, landed: str) -> None:
+        """Make the newest live version the text the driver actually left: a
+        restore through overwrite gains the derived `type:` stamp, and a top
+        that is not the disk reads as an outside edit at the next write."""
+        top = self._live(path, 1)
+        if top and top[0]["content"] != landed:
+            self._conn.execute("UPDATE checkpoints SET content = ? WHERE id = ?", (landed, top[0]["id"]))
+            self._conn.commit()
+
+    def history(self, path: str, current: str | None = None) -> list[dict]:
         """Every version of ``path`` in this vault, newest first, undone ones
-        included: ``{id, at, kind, undone, absent, chars}``. The oldest row is
-        always the floor, whatever kind a store older than ADR-0144 wrote."""
+        included: ``{id, at, kind, undone, absent, chars, now}``, and ``of``
+        (the version it brought back) on a restore. The oldest row is always
+        the floor, whatever kind a store older than ADR-0144 wrote. ``now``
+        marks the newest live version when it is ``current``, the note on disk."""
         rows = self._conn.execute(
-            f"SELECT id, content, created_at, absent, undone, kind FROM checkpoints "
+            f"SELECT id, content, created_at, absent, undone, kind, of FROM checkpoints "
             f"WHERE {_SCOPE} ORDER BY id", (path, _current_vault()),
         ).fetchall()
+        live = [r for r in rows if not r["undone"]]
+        now_id = live[-1]["id"] if live and current is not None and _same_text(
+            live[-1]["content"], current) else None
         out = [{"id": r["id"], "at": r["created_at"],
                 "kind": "original" if i == 0 else r["kind"],
                 "undone": bool(r["undone"]), "absent": bool(r["absent"]),
-                "chars": len(r["content"] or "")} for i, r in enumerate(rows)]
+                "chars": len(r["content"] or ""), "now": r["id"] == now_id,
+                **({"of": r["of"]} if r["of"] is not None else {})}
+               for i, r in enumerate(rows)]
         return out[::-1]
 
     def version(self, path: str, version_id: int) -> str | None:
@@ -243,7 +279,7 @@ class CheckpointStore:
         if len(live) <= 1:
             return None
         if current is not None and not _same_text(current, live[0]["content"]):
-            self._insert(path, current, kind="hand", undone=True)
+            self._insert(path, current, kind=_outside_kind(path, current), undone=True)
         self._conn.execute("UPDATE checkpoints SET undone = 1 WHERE id = ?", (live[0]["id"],))
         self._conn.commit()
         return live[1]["content"]
@@ -253,6 +289,21 @@ class CheckpointStore:
         note the chat created, whose body the trash keeps (ADR-0128)."""
         self._conn.execute(f"DELETE FROM checkpoints WHERE {_SCOPE}", (path, _current_vault()))
         self._conn.commit()
+
+
+def push_landed(path: str, prior: str | None, asked: str, kind: str = "silica",
+                of: str | None = None) -> int:
+    """Push what the driver left on disk after a write, not what the caller
+    asked for: the driver stamps a derived `type:` on overwrite, and a version
+    that is not the disk read as a hand edit at the next /undo (reproduced
+    2026-11-01: /verify then /undo warned of edits nobody made)."""
+    from silica.driver import DRIVER
+
+    try:
+        landed = DRIVER.read_note(path).content
+    except Exception:
+        landed = asked  # unreadable right after its own write: keep what was asked
+    return get_checkpoint_store().push(path, prior, landed, kind=kind, of=of)
 
 
 _store: CheckpointStore | None = None

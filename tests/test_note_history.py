@@ -51,7 +51,7 @@ def test_undo_marks_the_version_and_the_history_keeps_it(store):
 
 def test_undo_over_a_hand_edit_keeps_the_edit_as_an_undone_version(store):
     store.push("A.md", "ORIG", "P1")
-    assert store.edited_by_hand("A.md", "P1 + HAND")
+    assert store.changed_since("A.md", "P1 + HAND") == "hand"
     assert store.undo("A.md", current="P1 + HAND") == "ORIG"
     hand = store.history("A.md")[0]
     assert hand["kind"] == "hand" and hand["undone"]
@@ -186,3 +186,59 @@ def test_a_run_before_image_is_a_version(client):
     assert before and before[0]["source"] == "lezione.pdf"
     diff = tc.get("/note/history/diff", params={"path": "Corso/A.md", "id": before[0]["id"]}).json()
     assert {"op": "+", "text": "before nucleate"} in diff["lines"]
+
+
+def test_a_write_the_driver_stamps_is_not_a_hand_edit(vault, out):
+    """/verify on a note without frontmatter lands with `type:` stamped by the
+    driver; the restore point must be what landed, or the next /undo warns of a
+    hand edit nobody made and stores it as a version."""
+    from silica.kernel.write.checkpoints import get_checkpoint_store
+
+    note = vault / "A.md"
+    _handle_direct_shortcut("/verify A.md", [])
+    assert "type:" in note.read_text()
+    _handle_direct_shortcut("/undo A.md", [])
+    assert note.read_text() == "# A\n\nfirst\n"
+    assert "taken back too" not in out()
+    assert [v["kind"] for v in get_checkpoint_store().history("A.md")] == ["silica", "original"]
+
+
+def test_a_run_write_between_two_chat_writes_is_labelled_run_not_hand(vault, out):
+    """A /nucleate or Zotero write lands between two chat writes too; only an
+    edit made outside Silica is the person's (draft review, 2026-11-01)."""
+    import hashlib
+
+    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.ops import InverseOp, InverseOpKind
+    from silica.kernel.write.undo_journal import get_undo_journal
+
+    store = get_checkpoint_store()
+    note = vault / "A.md"
+    store.push("A.md", note.read_text(), "# A\n\nchat\n")
+    note.write_text("# A\n\nchat\n\nby a run\n", encoding="utf-8")
+    journal = get_undo_journal()
+    run = journal.start_run(source="lezione.pdf", vault=CONFIG.vault_path)
+    journal.record(run, InverseOp(kind=InverseOpKind.restore_version, path="A.md",
+                                  prior_content="# A\n\nchat\n"),
+                   hashlib.sha256(note.read_text().encode()).hexdigest())
+
+    _handle_direct_shortcut("/undo A.md", [])
+    assert "a later run's changes to it are taken back too" in out()
+    assert store.history("A.md")[0]["kind"] == "run"
+
+
+def test_the_history_marks_the_version_on_disk_and_what_a_restore_brought_back(client):
+    from silica.kernel.write.checkpoints import get_checkpoint_store
+
+    tc, vault = client
+    note = vault / "Corso/A.md"
+    get_checkpoint_store().push("Corso/A.md", note.read_text(), "# A\n\nsecond\n")
+    note.write_text("# A\n\nsecond\n", encoding="utf-8")
+    versions = tc.get("/note/history", params={"path": "Corso/A.md"}).json()["versions"]
+    assert [v["now"] for v in versions] == [True, False]
+    first = versions[1]["id"]
+    d = tc.get("/note/history/diff", params={"path": "Corso/A.md", "id": first}).json()
+    assert (d["added"], d["removed"]) == (1, 1)
+    tc.post("/note/history/restore", json={"path": "Corso/A.md", "id": first})
+    top = tc.get("/note/history", params={"path": "Corso/A.md"}).json()["versions"][0]
+    assert top["kind"] == "restore" and top["of"] == str(first) and top["now"]

@@ -235,7 +235,7 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
     """
     import datetime
 
-    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.checkpoints import push_landed
     from silica.kernel.write.contested import (
         contested_refs,
         mark_contested,
@@ -290,7 +290,7 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
     checkpoint_depth = None
     checkpoint_ok = False
     try:
-        checkpoint_depth = get_checkpoint_store().push(path, prior_content, new_content)
+        checkpoint_depth = push_landed(path, prior_content, new_content)
         checkpoint_ok = True
     except Exception as e:
         logger.warning("checkpoint push failed for '%s': %s — /undo has no "

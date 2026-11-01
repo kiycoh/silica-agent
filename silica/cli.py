@@ -1080,7 +1080,7 @@ def _dc_verify(args: list[str], **_) -> bool:
 
     from silica.config import hosted
     from silica.driver import DRIVER
-    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.checkpoints import push_landed
     from silica.kernel.write.notetype import clear_verified, stamp_verified
 
     # --as "<name>" signs with that name. A stamp never reads or writes a
@@ -1111,7 +1111,7 @@ def _dc_verify(args: list[str], **_) -> bool:
     from silica.kernel.write.preserve import Loss
 
     DRIVER.overwrite(path, new, loss=Loss.PERSON)  # the person's own attestation
-    get_checkpoint_store().push(path, prior, new)  # /undo reaches it; the edited lane knows it
+    push_landed(path, prior, new)  # /undo reaches it; the edited lane knows it
     if "--clear" in args:
         CONSOLE.print(f"  {path}: human attestations cleared.")
     else:
@@ -1704,15 +1704,16 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
         on_disk = DRIVER.read_note(note_path).content
     except Exception:
         on_disk = None  # nothing on disk to keep: the undo writes the note back
-    by_hand = store.edited_by_hand(note_path, on_disk)
+    since = store.changed_since(note_path, on_disk)
     # Read before the undo: written over blind, an edit made in Obsidian after
     # Silica's write was lost for good (ADR-0144, reproduced 2026-11-01).
     content = store.undo(note_path, current=on_disk)
     if content is None:
         CONSOLE.print(f"  [yellow]Nothing to undo for[/] {note_path} (already at original).")
         return True
-    kept = ("; your edits made after it are taken back too and kept in the note's history"
-            if by_hand else "")
+    kept = {"hand": "; your edits made after it are taken back too and kept in the note's history",
+            "run": "; a later run's changes to it are taken back too and kept in the note's history",
+            }.get(since or "", "")
 
     if store.absent_floor(note_path):
         # The chat created this note: before it there was nothing, so undo
@@ -1738,6 +1739,10 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
 
     try:
         DRIVER.overwrite(note_path, content, loss=Loss.RESTORE)
+        try:
+            store.settle(note_path, DRIVER.read_note(note_path).content)  # what landed, stamp included
+        except Exception:
+            pass  # the undo landed; an unsettled top only labels the next write as an outside edit
         depth = store.depth(note_path)
         remaining = max(0, depth - 1)
         CONSOLE.print(f"  Undone: [bold]{note_path}[/]{kept}  [dim]({remaining} undo step(s) remaining)[/]")

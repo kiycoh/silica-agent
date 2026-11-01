@@ -5119,8 +5119,10 @@ def note_history(path: str = ""):
     from silica.kernel.write.checkpoints import get_checkpoint_store
     from silica.kernel.write.undo_journal import get_undo_journal
 
+    from silica.driver import DRIVER
+
     note = _history_note(path)
-    versions = get_checkpoint_store().history(note) + get_undo_journal().before_images(
+    versions = get_checkpoint_store().history(note, current=DRIVER.read_note(note).content) + get_undo_journal().before_images(
         note, (CONFIG.vault_path or "").strip() or None)
     versions.sort(key=lambda v: v["at"], reverse=True)
     return {"path": note, "name": _clean_name(note), "versions": versions}
@@ -5134,9 +5136,11 @@ def note_history_diff(path: str = "", id: str = ""):
 
     note = _history_note(path)
     body = _history_body(note, id)
-    rows = _diff_rows(DRIVER.read_note(note).content, body)
-    return {"path": note, "id": id, "lines": rows[:_MAX_DIFF_LINES],
-            "clipped": max(0, len(rows) - _MAX_DIFF_LINES)}
+    current = DRIVER.read_note(note).content
+    rows = _diff_rows(current, body)
+    added, removed = session_changes.tally(current, body)
+    return {"path": note, "id": id, "added": added, "removed": removed,
+            "lines": rows[:_MAX_DIFF_LINES], "clipped": max(0, len(rows) - _MAX_DIFF_LINES)}
 
 
 @app.post("/note/history/restore", dependencies=_SAME_ORIGIN)
@@ -5144,17 +5148,18 @@ def note_history_restore(payload: dict):
     """Write one past version back as the note's body. A restore is a write
     like any other: it is pushed as a version, so /undo takes it back."""
     from silica.driver import DRIVER
-    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.checkpoints import push_landed
     from silica.kernel.write.preserve import Loss
 
     note = _history_note(str(payload.get("path", "")))
-    body = _history_body(note, str(payload.get("id", "")))
+    version = str(payload.get("id", ""))
+    body = _history_body(note, version)
     if not _begin_turn():
         raise HTTPException(409, "a turn is running: restore when it ends")
     try:
         prior = DRIVER.read_note(note).content
         DRIVER.overwrite(note, body, loss=Loss.RESTORE)
-        get_checkpoint_store().push(note, prior, body, kind="restore")
+        push_landed(note, prior, body, kind="restore", of=version)
     finally:
         _end_turn()
     return {"restored": note, "id": payload.get("id")}
