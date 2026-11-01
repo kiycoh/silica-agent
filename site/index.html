@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&family=Host+Grotesk:wght@300..800&family=Martian+Mono:wght@300..800&display=swap">
 <title>Silica · Ask your notes. Check every answer.</title>
 <meta name="description" content="Silica answers from the notes and PDFs you give it, names the note behind every answer, and takes back any write that does not hold. Open source.">
 <link rel="canonical" href="https://silica-agent.dev/">
@@ -11,291 +14,300 @@
 <meta property="og:url" content="https://silica-agent.dev/">
 <meta property="og:title" content="Silica · Ask your notes. Check every answer.">
 <meta property="og:description" content="Silica answers from the notes and PDFs you give it, names the note behind every answer, and takes back any write that does not hold.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400;500;700&display=swap">
-<!--
-THESIS: The page is a natural-history plate. Evidence is observed, drawn and lettered,
-and Silica's answers work the same way: every claim pinned to the note it came from.
-It refuses the category's dark hero with a glowing app screenshot.
-OWN-WORLD: Paper and ink only, one bit. Silica in three states, each a public-domain
-engraving: a rock-crystal druse, a flint core, a diatom. No clusters of round openings,
-not even in a crop: faces, edges, lines and bands only. Tone is dithered live in the browser. Density is meaning: solid ink = written, a mechanical
-screen = proposed, a ghost = asked first. Teal (189deg) only for the action and for
-the letter you are pointing at. Host Grotesk for words, JetBrains Mono for figure
-labels, data and commands.
-STORY: Ask your notes and check every answer; see how sure Silica is by how much ink it
-puts down; watch a run link what it read, in the same three densities; watch a write that
-does not hold get taken back; read the numbers; open it.
-FIRST VIEWPORT: Left five columns: H1, lede, Open Silica. Right seven: Plate I, the
-druse pulled top to bottom, five lettered notes pinned on its faces, and
-the answer as the plate's legend.
-FORM: Specimen plate, user-pinned direction (dither as semantics, engraved silica cropped
-to a detail, glitch only on failure). Fig. 3 is the one plate printed in negative: the only
-figure about many notes at once, so it takes the full width, and paper on ink keeps the
-three densities while the page's rhythm marks the change of subject. No seed roll: the brief pinned the world.
--->
 <style>
-/* Layout: one sheet of paper. A 12-column grid; every figure sits in a ruled plate
-   with its number and caption, the way a monograph prints evidence. */
+/* The landing on the app's own kit, one world with it (ADR-0146, DESIGN.md "The Night Plate"):
+   the app's paper theme by default and its graphite behind a switch, figures printed in one bit. */
 :root {
+  /* the paper theme, the landing's default (owner, 2026-11-01): app-base.css's light block */
   color-scheme: light;
-  --paper: #FFFDF9;
-  --ink: #1A1815;
-  --ink-2: #4A453C;      /* captions, secondary lines: 9.4:1 on paper */
-  --hair: #CFC8BA;       /* the plate's inner rule */
-  --signal: #0A6070;     /* the action, and the letter being pointed at */
-  --on-signal: #FFFFFF;
-  --sans: "Host Grotesk", ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
-  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --void: #EFEAE0; --slate: #F5F1E9; --sheet: #FFFDF9; --slate-2: #E9E2D4; --bubble: #E1D7C1;
+  --line: #D9D1C0; --line-2: #C6BCA8;
+  --frost: #1A1815; --text: #3A362F; --ash: #5B554B; --ash-dim: #655D4F;
+  --accent: #0A6070; --on-vivid: #FFFFFF; --warn: #7A4F03;
+  --sel: rgb(40 90 100 / .10); --sel-hover: rgb(26 24 21 / .05);
+  --wash: rgba(58, 44, 20, .05);
+  /* a figure is printed in two inks: paper and ink here, the well and frost on graphite */
+  /* an engraving prints on the sheet itself (--fig is the sheet), so it has no edge, and so does the
+     hero's page graph; Fig. 3 and 4 are objects, the app and a note, and keep their plate */
+  --fig: #FFFDF9; --fig-ink: #1A1815; --fig-edge: #D9D1C0; --well: #F5F1E9; --plate: #FFFDF9;
+  --r: 14px; --r-sm: 8px; --r-xs: 4px; --gutter: 12px;
+  --sans: "Archivo", ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
+  --mono: "Martian Mono", ui-monospace, Menlo, monospace;
   --t-1: clamp(2.9rem, 1.6rem + 4.4vw, 5.6rem);
   --t-2: clamp(2rem, 1.3rem + 2.4vw, 3.4rem);
   --t-3: clamp(1.15rem, 1.05rem + .4vw, 1.4rem);
-  --t-4: 1.0625rem;
+  --t-4: 1rem;
   --t-5: .8125rem;
-  --ease: cubic-bezier(.16, 1, .3, 1);
+  --t-6: .75rem;
+  --ease: cubic-bezier(.2, .8, .2, 1); --dur: .18s;
 }
-* { box-sizing: border-box; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --void: #0D0E0F; --slate: #141518; --sheet: #23272B; --slate-2: #24272B; --bubble: #2F3339;
+  --line: #2F343A; --line-2: #3F454D;
+  --frost: #F4F5F7; --text: #C5CAD2; --ash: #AEB4BE; --ash-dim: #969CA6;
+  --accent: #22B4CC; --on-vivid: #0D0E0F; --warn: #E0A93B;
+  --sel: rgb(150 205 215 / .14); --sel-hover: rgb(244 245 247 / .06);
+  --wash: rgba(63, 69, 77, .30);
+  --fig: #23272B; --fig-ink: #F4F5F7; --fig-edge: transparent; --well: #0D0E0F; --plate: #0D0E0F;
+}
+* { box-sizing: border-box; border-radius: 0; }
 [hidden] { display: none !important; }
-html { background: var(--paper); }
+html { background: var(--void); }
 body {
-  margin: 0; background: var(--paper); color: var(--ink);
-  font: 400 var(--t-4)/1.55 var(--sans);
+  margin: 0; padding: var(--gutter); color: var(--text);
+  background:
+    radial-gradient(58rem 30rem at 3% -3rem, var(--wash), transparent 70%),
+    radial-gradient(54rem 27rem at 99% -2rem, var(--wash), transparent 70%),
+    var(--void);
+  background-attachment: fixed;
+  font: 400 var(--t-4)/1.65 var(--sans);
   -webkit-font-smoothing: antialiased;
 }
+::selection { background: rgb(34 180 204 / .32); color: var(--frost); }
 h1, h2, h3, p, figure, dl, dd, ol, ul { margin: 0; }
-h1, h2, h3 { text-wrap: balance; }
+h1, h2, h3 { text-wrap: balance; color: var(--frost); }
 p { text-wrap: pretty; }
-a { color: inherit; }
-:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+a { color: inherit; text-underline-offset: 4px; }
+b, strong { color: var(--frost); }
+:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; border-radius: var(--r-xs); }
 .wrap {
-  max-width: 88rem; margin: 0 auto;
-  padding-left: max(16px, env(safe-area-inset-left, 0px), 3vw);
-  padding-right: max(16px, env(safe-area-inset-right, 0px), 3vw);
+  max-width: 96rem; margin: 0 auto;
+  padding-left: max(14px, env(safe-area-inset-left, 0px), 1.6vw);
+  padding-right: max(14px, env(safe-area-inset-right, 0px), 1.6vw);
 }
-.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: clamp(1rem, 2.2vw, 2.25rem); }
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: clamp(1.25rem, 3.6vw, 4.5rem); }
 .mono { font-family: var(--mono); }
+html { scrollbar-color: var(--line-2) transparent; }
+
+/* ---- the three surfaces on the canvas: chrome bar, sheets, the floor between ---- */
+.top-bar { background: var(--slate); border-radius: var(--r); }
+.sheet { background: var(--sheet); border-radius: var(--r); margin-top: var(--gutter); overflow: clip; }
+.sheet + .floor, .floor + .sheet { margin-top: 0; }
 
 /* ---- header ------------------------------------------------------------- */
-.top { display: flex; align-items: center; gap: 2rem; padding-block: 20px; }
-.brand { display: inline-flex; align-items: center; gap: .6rem; text-decoration: none; }
-.brand svg { width: 26px; height: 26px; }
-.brand svg .i { fill: var(--ink); } .brand svg .s { fill: var(--signal); }
-.brand b { font-weight: 640; font-size: var(--t-3); letter-spacing: -.02em; }
-.top nav { margin-left: auto; display: flex; align-items: center; gap: 1.6rem; font-size: var(--t-4); }
-.top nav a:not(.btn) { color: var(--ink-2); text-decoration: none; white-space: nowrap; }
-.top nav a:not(.btn):hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
+.top { display: flex; align-items: center; gap: 2rem; padding-block: 12px; }
+.brand { display: inline-flex; align-items: center; gap: .6rem; text-decoration: none; color: var(--frost); }
+.brand svg { width: 22px; height: 22px; }
+.brand svg .i { fill: var(--frost); } .brand svg .s { fill: var(--accent); }
+.brand b { font: 600 15px/1 "Host Grotesk", var(--sans); letter-spacing: .09em; text-transform: uppercase; }
+.top nav { margin-left: auto; display: flex; align-items: center; gap: 1.4rem; font-size: 13.5px; }
+.top nav a:not(.btn) { color: var(--ash); text-decoration: none; white-space: nowrap; transition: color var(--dur) var(--ease); }
+.top nav a:not(.btn):hover { color: var(--frost); }
 
 .btn {
-  display: inline-flex; align-items: center; gap: .55rem; min-height: 48px; padding: 0 1.35rem;
-  background: var(--ink); color: var(--paper); text-decoration: none; border: 0; cursor: pointer;
-  font: 600 var(--t-4)/1 var(--sans); transition: background .2s var(--ease);
+  display: inline-flex; align-items: center; gap: .55rem; min-height: 46px; padding: 0 1.25rem;
+  background: var(--accent); color: var(--on-vivid); text-decoration: none; border: 1px solid var(--accent); cursor: pointer;
+  border-radius: var(--r-sm); font: 600 15px/1 var(--sans);
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
-.btn:hover { background: var(--signal); }
+.btn:hover { background: var(--frost); border-color: var(--frost); }
 .btn:active { transform: translateY(1px); }
-.btn--small { min-height: 40px; padding: 0 1rem; font-size: var(--t-5); }
+.btn--small { min-height: 34px; padding: 0 .9rem; font-size: 13px; }
+.theme { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: transparent; color: var(--ash); cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.theme:hover { color: var(--accent); border-color: var(--accent); }
+.theme svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.theme .sun, :root[data-theme="dark"] .theme .moon { display: none; }
+:root[data-theme="dark"] .theme .sun { display: block; }
 
 /* ---- hero: words left, Plate I right ------------------------------------- */
-.hero { padding-block: clamp(1.5rem, 4vw, 3.5rem) clamp(4rem, 8vw, 7rem); align-items: start; }
-.hero-copy { grid-column: 1 / span 5; padding-top: clamp(1rem, 5vw, 4.5rem); }
-.hero h1 { font-size: var(--t-1); line-height: .96; letter-spacing: -.04em; font-weight: 720; }
-.hero .lede { margin-top: 1.75rem; font-size: var(--t-3); line-height: 1.4; max-width: 28rem; }
+.hero { padding-block: clamp(2.5rem, 5vw, 4.5rem); align-items: center; }
+.hero-copy { grid-column: 1 / span 5; }
+.hero h1 { font-size: var(--t-1); line-height: .96; letter-spacing: -.032em; font-weight: 700; }
+.hero .lede { margin-top: 1.75rem; font-size: var(--t-3); line-height: 1.45; max-width: 28rem; color: var(--text); }
 .hero .go { margin-top: 2rem; display: grid; gap: .9rem; justify-items: start; }
-.hero .go p { font-size: var(--t-4); color: var(--ink-2); max-width: 24rem; }
-.hero .go p b { color: var(--ink); font-weight: 600; }
+.hero .go p { font-size: 14px; color: var(--ash); max-width: 24rem; }
+.hero .go p b { font-weight: 600; }
 
-.plate { border: 1.5px solid var(--ink); padding: clamp(.75rem, 1.6vw, 1.25rem); background: var(--paper); }
-.plate-head { display: flex; justify-content: space-between; align-items: baseline; font: 500 var(--t-5)/1 var(--mono); color: var(--ink-2); padding-bottom: .75rem; }
-.plate-head b { color: var(--ink); font-weight: 700; }
-.hero-plate { grid-column: 6 / span 7; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 0; }
-.hero-plate .plate-head { grid-column: 1 / -1; }
-.specimen { position: relative; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); line-height: 0; }
-.specimen img, .specimen canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+/* a figure: its head on the sheet, its print in a well */
+.plate { min-width: 0; }
+.plate-head { display: flex; justify-content: space-between; align-items: baseline; font: 500 var(--t-6)/1 var(--mono); color: var(--ash-dim); padding-bottom: .7rem; }
+.plate-head b { color: var(--frost); font-weight: 600; }
+.hero-plate { grid-column: 6 / span 7; }
+.specimen { position: relative; line-height: 0; }
+.specimen canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
 .specimen canvas { position: absolute; inset: 0; }
-.pin {
-  position: absolute; transform: translate(-50%, -50%);
-  width: 26px; height: 26px; border-radius: 50%;
-  display: grid; place-items: center;
-  background: var(--paper); color: var(--ink); border: 1.5px solid var(--ink);
-  font: 700 var(--t-5)/1 var(--mono);
-  transition: background .2s var(--ease), color .2s var(--ease), border-color .2s var(--ease), transform .3s var(--ease);
-}
-.pin.on { background: var(--signal); color: var(--on-signal); border-color: var(--signal); transform: translate(-50%, -50%) scale(1.18); }
-.pin.wait { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
-
-/* the legend: the answer, printed as the plate's explanation */
-.legend { padding: 0 0 0 clamp(.9rem, 1.8vw, 1.5rem); display: grid; align-content: start; gap: .9rem; font-size: var(--t-4); line-height: 1.5; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); padding-block: 1rem; }
-.legend .q { font: 500 var(--t-5)/1.45 var(--mono); color: var(--ink-2); }
-.legend .q b { color: var(--ink); font-weight: 700; }
-.legend .ans { color: var(--ink); }
-.legend .math { font-style: italic; text-align: center; padding: .1rem 0; }
-.legend .math sub { font-size: .7em; }
-.legend ol { list-style: none; padding: 0; display: grid; gap: .1rem; }
-.legend li button {
-  appearance: none; border: 0; background: none; cursor: pointer; padding: .3rem 0; width: 100%;
-  display: grid; grid-template-columns: 1.6rem 1fr; align-items: baseline; text-align: left;
-  font: 400 var(--t-4)/1.35 var(--sans); color: var(--ink);
-}
-.legend li button .k { font: 700 var(--t-5)/1 var(--mono); }
-.legend li button:hover, .legend li button.on { color: var(--signal); }
-.legend li button:hover .t, .legend li button.on .t { text-decoration: underline; text-underline-offset: 3px; }
-.plate-cap { grid-column: 1 / -1; padding-top: .75rem; font-size: var(--t-5); line-height: 1.5; color: var(--ink-2); max-width: 62ch; }
-.plate-cap b { color: var(--ink); font-weight: 600; }
+.specimen canvas.ht { width: 100%; height: 100%; image-rendering: auto; touch-action: pan-y; }
+.plate-cap { grid-column: 1 / -1; padding-top: .75rem; font-size: var(--t-5); line-height: 1.55; color: var(--ash); max-width: 62ch; }
+.plate-cap b { font-weight: 600; }
 
 /* ---- sections ------------------------------------------------------------ */
-.sec { padding-block: clamp(4.5rem, 9vw, 8rem) 0; }
+.sec { padding-block: clamp(4rem, 8vw, 7rem) 0; }
+.sheet > .sec:last-child, .sheet > .sec-last { padding-bottom: clamp(4rem, 8vw, 7rem); }
 .sec-head { align-items: end; }
 .sec-head h2 { grid-column: 1 / span 6; font-size: var(--t-2); line-height: 1; letter-spacing: -.035em; font-weight: 700; }
-.sec-head p { grid-column: 8 / span 5; font-size: var(--t-3); line-height: 1.4; }
+.sec-head p { grid-column: 8 / span 5; font-size: var(--t-3); line-height: 1.45; }
 .sec-body { margin-top: clamp(2.5rem, 5vw, 4rem); }
 
-/* Fig. 2: one specimen at three densities */
+/* Fig. 2: three flints at three densities */
 .densities { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(1rem, 2.2vw, 2.25rem); }
-.dens .specimen { border: 1px solid var(--hair); aspect-ratio: 1 / 1; overflow: hidden; }
+.dens .specimen { aspect-ratio: 1 / 1; }
 .dens .specimen canvas { position: static; width: 100%; height: 100%; }
-.dens .key { margin-top: 1rem; font: 500 var(--t-4)/1 var(--mono); letter-spacing: 0; white-space: nowrap; overflow: hidden; }
-.dens h3 { margin-top: .9rem; display: flex; align-items: baseline; gap: .75rem; font-size: var(--t-3); font-weight: 680; letter-spacing: -.01em; }
-.dens h3 .mono { font-size: var(--t-5); font-weight: 500; color: var(--ink-2); }
+.dens .key { margin-top: 1rem; font: 500 15px/1 var(--mono); letter-spacing: 0; white-space: nowrap; overflow: hidden; color: var(--frost); }
+.dens h3 { margin-top: .9rem; display: flex; align-items: baseline; gap: .75rem; font-size: var(--t-3); font-weight: 650; letter-spacing: -.01em; }
+.dens h3 .mono { font-size: var(--t-6); font-weight: 500; color: var(--ash-dim); }
 .dens p { margin-top: .5rem; max-width: 34ch; }
-.dens .eg { margin-top: .75rem; font-size: var(--t-5); color: var(--ink-2); max-width: 36ch; }
-.figcap { margin-top: 1.75rem; font-size: var(--t-5); color: var(--ink-2); max-width: 70ch; }
+.dens .eg { margin-top: .75rem; font-size: var(--t-5); color: var(--ash); max-width: 36ch; }
+.figcap { margin-top: 1.75rem; font-size: var(--t-5); color: var(--ash); max-width: 70ch; }
 
-/* Fig. 3: the one plate printed in negative. It is the only figure about many notes at
-   once, so it takes the full width; paper on ink keeps Fig. 2's three densities (a solid
-   mark, a screen, a few specks) and flips only the ground */
-.nuc {
-  --n-2: #BDB6AA;        /* secondary text on ink: 8.9:1 */
-  --n-hair: #4A453C;
-  --n-signal: #22B4CC;   /* the signal hue as it sits on a dark ground */
-  margin-top: clamp(4.5rem, 9vw, 8rem); background: var(--ink); color: var(--paper);
-  padding-block: clamp(1.25rem, 2.5vw, 2rem) clamp(3.5rem, 7vw, 6rem);
+/* Fig. 1: the public page @kiycoh, printed on the sheet, one density */
+.kp-field { position: relative; aspect-ratio: 16 / 11; }
+.kp-field canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+.kp-hit { position: absolute; inset: 0; display: block; cursor: default; }
+.kp-hit.on { cursor: pointer; }
+.kp-labels span { position: absolute; transform: translate(-50%, -50%); font: 600 12px/1.1 var(--sans); color: var(--fig-ink); background: var(--fig); padding: 1px 5px; border-radius: var(--r-xs); white-space: nowrap; pointer-events: none; }
+.kp-tip { position: absolute; font: 600 13px/1.2 var(--sans); color: var(--on-vivid); background: var(--accent); padding: 4px 8px; border-radius: var(--r-xs); white-space: nowrap; pointer-events: none; transform: translate(12px, -50%); z-index: 2; }
+.kp-tip.left { transform: translate(calc(-100% - 12px), -50%); }
+/* the address and the counts share one line under the print: no list, no second button in the hero */
+.kp-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: .35rem 1.5rem; margin-top: .9rem; padding-top: .8rem; border-top: 1px solid var(--line); }
+.kp-addr { font: 500 13px/1.3 var(--mono); color: var(--ash); text-decoration: none; }
+.kp-addr b { font-weight: 600; color: var(--frost); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.kp-addr svg { display: inline-block; width: 11px; height: 11px; margin-left: .3rem; vertical-align: -1px; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.kp-addr:hover b { color: var(--accent); }
+.kp-meta { font: 500 12px/1.3 var(--mono); color: var(--ash-dim); font-variant-numeric: tabular-nums; }
+
+/* Fig. 3: the app's chat in the app's own grammar, a view and the note beside it on the canvas */
+.demo { grid-column: 1 / -1; }
+.demo-win { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--gutter); padding: var(--gutter); background: var(--well); border-radius: var(--r); height: clamp(28rem, 33vw, 30rem); }
+.demo-chat, .demo-note { background: var(--fig); border-radius: var(--r); min-height: 0; }
+.demo-chat { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; justify-items: center; padding: clamp(1rem, 2.2vw, 1.75rem) clamp(1rem, 3vw, 2.5rem) clamp(.8rem, 1.6vw, 1.25rem); }
+/* the transcript sits on the composer, as the app's follows its bottom; a hidden step keeps its
+   place, so the replay fills the block in without moving it */
+.demo-log { width: 100%; max-width: 40rem; overflow: auto; display: grid; align-content: safe end; gap: .75rem; padding-top: 2.5rem; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.dq { font: 650 1.0625rem/1.4 var(--sans); color: var(--frost); padding-top: .9rem; border-top: 1px solid var(--line); }
+.dmeta { font: 500 12px/1.4 var(--mono); color: var(--ash); }
+.dsrc { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: .35rem; }
+.dsrc button { appearance: none; display: inline-flex; align-items: baseline; gap: .45rem; padding: .3rem .6rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: none; font: 500 13px/1.3 var(--sans); color: var(--frost); cursor: pointer; transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity .25s var(--ease); }
+.dsrc .n { font: 600 11px/1 var(--mono); color: var(--accent); }
+.dsrc button:hover { background: var(--sel-hover); border-color: var(--line-2); }
+.dsrc button[aria-pressed="true"] { background: var(--sel); border-color: var(--accent); }
+.dans { font-size: 15px; line-height: 1.65; color: var(--text); }
+.cite { appearance: none; border: 0; background: none; padding: 0; font: inherit; color: var(--frost); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: pointer; }
+.cite sup { font: 600 10px/0 var(--mono); color: var(--accent); margin-left: 2px; }
+.cite:hover { color: var(--accent); }
+.dmath { font-style: italic; text-align: center; color: var(--frost); font-size: 15px; line-height: 1.6; }
+.dmath sub { font-size: .7em; }
+.demo-comp { width: 100%; max-width: 40rem; margin-top: .75rem; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .75rem; padding: .6rem .6rem .6rem 1rem; border: 1px solid var(--line-2); border-radius: var(--r); font-size: 15px; line-height: 1.45; color: var(--frost); }
+.dtext { min-height: 2.9em; padding-bottom: .15rem; }
+.dph { color: var(--ash-dim); }
+.demo-comp.typing .dph { display: none; }
+/* a steady caret: it marks where the replay is typing, it does not blink for attention */
+.demo-comp.typing .dtype::after { content: ""; display: inline-block; width: 1.5px; height: 1.1em; margin-left: 1px; vertical-align: -.2em; background: var(--frost); }
+.dsend { width: 2.25rem; height: 2.25rem; border-radius: var(--r-sm); background: var(--accent); display: grid; place-items: center; transition: background-color .15s var(--ease); }
+.dsend svg { width: 16px; height: 16px; fill: none; stroke: var(--on-vivid); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.demo-comp.sent .dsend { background: var(--frost); }
+.demo-again { position: absolute; top: .7rem; right: .7rem; appearance: none; display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .65rem; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: none; font: 500 12px/1.2 var(--mono); color: var(--ash); cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.demo-again svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.demo-again:hover { color: var(--frost); border-color: var(--frost); }
+.demo [data-step], .dsrc li { transition: opacity .25s var(--ease), transform .25s var(--ease); }
+.demo .off { opacity: 0; visibility: hidden; }
+.dq.off { transform: translateY(6px); }
+.demo .w { transition: none; }
+.demo-note { display: grid; padding: clamp(1rem, 2.2vw, 1.75rem); overflow: auto; }
+.dn-empty { align-self: center; justify-self: center; max-width: 28ch; text-align: center; font-size: 14px; line-height: 1.55; color: var(--ash); }
+.dn-path { font: 500 12px/1.4 var(--mono); color: var(--ash-dim); overflow-wrap: anywhere; }
+.dn h3 { margin-top: .35rem; font-size: 1.375rem; line-height: 1.2; font-weight: 650; letter-spacing: -.015em; }
+.dn-why { margin-top: .45rem; font: 500 12px/1.4 var(--mono); color: var(--ash); }
+.dn p:not(.dn-path):not(.dn-why) { margin-top: 1rem; font-size: 15px; line-height: 1.65; color: var(--text); }
+.dn p.dmath { color: var(--frost); }
+.dn b { font-weight: 600; color: var(--frost); }
+/* the passage the answer quotes is marked as the page loads it, left to right */
+.dn mark { color: inherit; padding: .05em .1em; background: linear-gradient(var(--sel), var(--sel)) no-repeat 0 0 / 0% 100%; -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background-size .8s cubic-bezier(.16, 1, .3, 1) .15s; }
+.dn.lit mark { background-size: 100% 100%; }
+.sec-next { margin-top: clamp(4rem, 8vw, 6.5rem); }
+@media (max-width: 860px) {
+  .demo-win { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .demo-chat { min-height: 30rem; }
+  .demo-note { min-height: 15rem; }
 }
-.nuc :focus-visible { outline-color: var(--n-signal); }
-.nuc .plate-head { color: var(--n-2); }
-.nuc .plate-head b { color: var(--paper); }
-.nuc-field { position: relative; aspect-ratio: 2 / 1; border-top: 1px solid var(--n-hair); border-bottom: 1px solid var(--n-hair); overflow: hidden; }
-.nuc-field img, .nuc-field canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; image-rendering: pixelated; }
-
-.nuc .steps { color: var(--n-2); }
-.nuc .play { color: var(--paper); }
-.nuc .play:hover, .nuc .play:focus-visible { color: var(--n-signal); }
-.nuc .steps li.on { color: var(--paper); }
-.nuc-body { margin-top: clamp(2rem, 4vw, 3.25rem); row-gap: 2rem; align-items: start; }
-.nuc-body h2 { grid-column: 1 / span 3; font-size: var(--t-2); line-height: 1; letter-spacing: -.035em; font-weight: 700; }
-.nuc-text { grid-column: 4 / span 6; max-width: 62ch; }
-.nuc-text > p:first-child { font-size: var(--t-3); line-height: 1.5; }
-.nuc-text code { font: 500 .8em/1 var(--mono); white-space: nowrap; }
-.nuc-src { margin-top: 1.25rem; font-size: var(--t-5); color: var(--n-2); }
-.nuc-side { grid-column: 10 / span 3; display: grid; gap: 1.5rem; align-content: start; }
-.nuc-key { display: grid; gap: 1rem; }
-.nuc-key div { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr); column-gap: .9rem; align-items: baseline; }
-.nuc-key dt { font: 500 var(--t-4)/1 var(--mono); white-space: nowrap; overflow: hidden; }
-.nuc-key dd b { display: block; font-weight: 680; }
-.nuc-key dd span { font: 500 var(--t-5)/1.4 var(--mono); color: var(--n-2); }
-.nuc-key dd small { display: block; margin-top: .2rem; font-size: var(--t-5); line-height: 1.45; color: var(--n-2); }
-.nuc-nodes { font-size: var(--t-5); color: var(--n-2); display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; }
-.nuc-nodes b { font: 700 var(--t-4)/1 var(--mono); color: var(--paper); margin-right: .35rem; }
-.nuc-cap { font-size: var(--t-5); line-height: 1.5; color: var(--n-2); }
-.nuc-cap b { color: var(--paper); font-weight: 600; }
+@media (max-width: 760px) { .kp-field { aspect-ratio: 4 / 3; } }
 
 /* Fig. 4: a write that does not hold */
 .fail { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: clamp(1rem, 2.2vw, 2.25rem); align-items: start; }
-.fail .plate { min-width: 0; }
-.fail canvas { display: block; width: 100%; height: auto; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
-/* under an animated view: its steps on the left, play at the bottom-right corner */
+.fail canvas { display: block; width: 100%; height: auto; border-radius: var(--r); background: var(--plate); outline: 1px solid var(--fig-edge); outline-offset: -1px; }
 .fig-under { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
 .fig-under .play { margin-top: .25rem; }
-.play { flex: none; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--ink); cursor: pointer; }
-.play svg { width: 15px; height: 15px; fill: currentColor; }
-.play:hover, .play:focus-visible { color: var(--signal); }
-.play:focus-visible { outline-offset: -2px; }
-.steps { list-style: none; padding: .9rem 0 0; display: flex; flex-wrap: wrap; gap: .4rem 1.1rem; font: 500 var(--t-5)/1.4 var(--mono); color: var(--ink-2); }
-.steps li { transition: color .15s linear; }
-.steps li.on { color: var(--ink); font-weight: 700; }
+.play { flex: none; width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: none; color: var(--ash); cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.play svg { width: 13px; height: 13px; fill: currentColor; }
+.play:hover, .play:focus-visible { color: var(--accent); border-color: var(--accent); }
+.steps { list-style: none; padding: .9rem 0 0; display: flex; flex-wrap: wrap; gap: .4rem 1.1rem; font: 500 var(--t-6)/1.5 var(--mono); color: var(--ash-dim); }
+.steps li { transition: color var(--dur) var(--ease); }
+.steps li.on { color: var(--frost); font-weight: 700; }
 .steps li.bad.on { text-decoration: line-through; text-decoration-thickness: 2px; }
-.steps li.ok.on { color: var(--signal); }
+.steps li.ok.on { color: var(--accent); }
 .fail-t { display: grid; gap: 1rem; align-content: start; }
 .fail-t p { max-width: 42ch; }
 .cmds { display: grid; gap: .45rem; margin-top: .5rem; }
-.cmds div { display: grid; grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); gap: 1rem; align-items: baseline; font-size: var(--t-4); }
-.cmds code { font: 500 var(--t-5)/1.3 var(--mono); }
+.cmds div { display: grid; grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); gap: 1rem; align-items: baseline; font-size: 15px; }
+.cmds code { font: 500 var(--t-6)/1.3 var(--mono); color: var(--frost); }
 
-/* Tab. 1: measured */
+/* Tab. 1: measured, the app's rigid hairline grid */
 .tab { grid-column: 1 / -1; overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; min-width: 640px; font-variant-numeric: tabular-nums; }
-caption { caption-side: bottom; text-align: left; padding-top: 1rem; font-size: var(--t-5); color: var(--ink-2); }
-th, td { text-align: left; vertical-align: baseline; padding: .85rem 1rem .85rem 0; border-bottom: 1px solid var(--hair); }
-thead th { font: 500 var(--t-5)/1.3 var(--mono); color: var(--ink-2); border-bottom: 1.5px solid var(--ink); }
-td.v { font: 700 var(--t-4)/1.2 var(--mono); white-space: nowrap; }
-td.n { font: 400 var(--t-5)/1.35 var(--mono); color: var(--ink-2); }
-tr.flat td { color: var(--ink-2); }
+caption { caption-side: bottom; text-align: left; padding-top: 1rem; font-size: var(--t-5); color: var(--ash); }
+th, td { text-align: left; vertical-align: baseline; padding: .8rem 1rem .8rem 0; border-bottom: 1px solid var(--line); }
+thead th { font: 500 var(--t-6)/1.3 var(--mono); color: var(--ash-dim); border-bottom: 1px solid var(--line-2); }
+td.v { font: 600 15px/1.2 var(--mono); white-space: nowrap; color: var(--frost); }
+td.n { font: 400 var(--t-6)/1.35 var(--mono); color: var(--ash-dim); }
+tr.flat td { color: var(--ash); }
+tr.flat td.v { color: var(--ash); }
 
-/* where it runs: the plate's explanation, four entries */
+/* where it runs */
 .runs { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 clamp(1rem, 2.2vw, 2.25rem); }
-.run { border-top: 1.5px solid var(--ink); padding: 1.25rem 0 2.5rem; display: grid; gap: .8rem; align-content: start; min-width: 0; }
-.run h3 { font-size: var(--t-3); font-weight: 680; display: flex; gap: .8rem; align-items: baseline; }
-.run h3 .mono { font-size: var(--t-5); font-weight: 500; color: var(--ink-2); }
+.run { border-top: 1px solid var(--line-2); padding: 1.25rem 0 2.5rem; display: grid; gap: .8rem; align-content: start; min-width: 0; }
+.run h3 { font-size: var(--t-3); font-weight: 650; display: flex; gap: .8rem; align-items: baseline; }
+.run h3 .mono { font-size: var(--t-6); font-weight: 500; color: var(--ash-dim); }
 .run p { max-width: 54ch; }
-.code { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: start; border: 1px solid var(--hair); padding: .25rem .25rem .25rem 1rem; min-width: 0; }
-.code pre { margin: 0; padding: .7rem 0; overflow-x: auto; font: 500 var(--t-5)/1.75 var(--mono); }
-.code pre .pr { color: var(--ink-2); user-select: none; }
-.copy { appearance: none; border: 0; background: var(--ink); color: var(--paper); min-height: 36px; padding: 0 .85rem; margin-top: .2rem; cursor: pointer; font: 600 var(--t-5)/1 var(--sans); }
-.copy:hover { background: var(--signal); }
-.fine { font-size: var(--t-5); color: var(--ink-2); }
-.fine code { font: 500 .85em/1 var(--mono); color: var(--ink); }
+.code { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: start; background: var(--well); border-radius: var(--r-sm); padding: .3rem .3rem .3rem 1rem; min-width: 0; }
+.code pre { margin: 0; padding: .7rem 0; overflow-x: auto; font: 500 var(--t-6)/1.85 var(--mono); color: var(--frost); }
+.code pre .pr { color: var(--ash-dim); user-select: none; }
+.copy { appearance: none; border: 1px solid var(--line-2); background: transparent; color: var(--ash); min-height: 32px; padding: 0 .75rem; margin-top: .25rem; cursor: pointer; border-radius: var(--r-sm); font: 400 12px/1 var(--sans); transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.copy:hover { color: var(--accent); border-color: var(--accent); }
+.fine { font-size: var(--t-5); color: var(--ash); }
+.run p code, .dens p code, .figcap code { font: 500 .82em/1 var(--mono); color: var(--frost); }
+.fine code { font: 500 .85em/1 var(--mono); color: var(--frost); }
+.fine a, .run a, .facts a, .legal a { color: var(--frost); text-decoration-color: var(--accent); }
 
 /* your notes */
 .facts { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2rem clamp(1rem, 2.2vw, 2.25rem); }
-.facts dt { font-weight: 680; font-size: var(--t-3); }
+.facts dt { font-weight: 650; font-size: var(--t-3); color: var(--frost); }
 .facts dd { margin-top: .6rem; max-width: 30ch; }
-.legal { grid-column: 1 / -1; margin-top: 2.5rem; display: flex; gap: 1.5rem; font-size: var(--t-5); color: var(--ink-2); }
+.legal { grid-column: 1 / -1; margin-top: 2.5rem; display: flex; gap: 1.5rem; font-size: var(--t-5); color: var(--ash); }
 
 /* close */
-.close { padding-block: clamp(5rem, 10vw, 9rem) clamp(2rem, 4vw, 3rem); align-items: end; }
+.close { padding-block: clamp(4rem, 8vw, 7rem); align-items: end; }
 .close-t { grid-column: 1 / span 6; display: grid; gap: 1.5rem; justify-items: start; }
-.close-t h2 { font-size: var(--t-1); line-height: .96; letter-spacing: -.04em; font-weight: 720; }
+.close-t h2 { font-size: var(--t-1); line-height: .96; letter-spacing: -.032em; font-weight: 700; }
 .close-t p { font-size: var(--t-3); max-width: 28rem; }
-.close-t small { font-size: var(--t-5); color: var(--ink-2); }
-.addr { user-select: all; color: var(--ink); }
+.close-t small { font-size: var(--t-5); color: var(--ash); }
+.addr { user-select: all; color: var(--frost); }
 .close-fig { grid-column: 8 / span 5; }
-.close-fig .specimen { border: 0; }
-/* line art at 2x: a smooth downscale keeps the ribs that a nearest-pixel one would drop */
-.close-fig .specimen img { image-rendering: auto; }
-footer { border-top: 1.5px solid var(--ink); padding-block: 1.25rem 2rem; display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; font-size: var(--t-5); color: var(--ink-2); }
-footer .fill { margin-left: auto; max-width: 70ch; }
+.close-fig .specimen { aspect-ratio: 1 / 1; }
+.close-fig .specimen canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+.close-fig .specimen canvas.ht { image-rendering: auto; }
+footer { padding-block: 1.5rem 1.25rem; display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; font-size: var(--t-5); color: var(--ash-dim); }
+footer a { color: var(--ash); text-decoration: none; } footer a:hover { color: var(--frost); }
+footer .fill { margin-left: auto; max-width: 120ch; font-size: .6875rem; line-height: 1.45; }
 
-/* six links fit one line down to here; below, the three "How" sections and GitHub stay */
-@media (max-width: 1020px) {
-  .top nav .nav-more { display: none; }
-}
+@media (max-width: 1020px) { .top nav .nav-more { display: none; } }
 @media (max-width: 1100px) {
-  .hero-copy { grid-column: 1 / -1; padding-top: 1rem; }
+  .hero-copy { grid-column: 1 / -1; }
   .hero-plate { grid-column: 1 / -1; margin-top: 2.5rem; }
   .sec-head h2, .sec-head p { grid-column: 1 / -1; }
   .sec-head p { margin-top: 1.25rem; }
   .fail { grid-template-columns: minmax(0, 1fr); }
   .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .nuc-body h2 { grid-column: 1 / -1; }
-  .nuc-text { grid-column: 1 / span 7; }
-  .nuc-side { grid-column: 8 / span 5; }
 }
 @media (max-width: 760px) {
+  body { padding: 8px; }
   .top nav a:not(.btn) { display: none; }
-  .hero-plate { grid-template-columns: minmax(0, 1fr); }
-  .legend { padding-left: 0; border-top: 0; order: 1; }
-  .hero-plate .specimen { order: 2; margin-top: .5rem; }
-  .hero-plate .plate-cap { order: 3; }
   .densities { grid-template-columns: minmax(0, 1fr); gap: 3rem; }
   .runs { grid-template-columns: minmax(0, 1fr); }
   .close-t, .close-fig { grid-column: 1 / -1; }
   .close-fig { margin-top: 3rem; max-width: 26rem; }
   .cmds div { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
-  /* on a phone the plate crops to the run itself, square, so a cross is still a cross */
-  .nuc-field { aspect-ratio: 1 / 1; }
-  .nuc-text, .nuc-side { grid-column: 1 / -1; }
 }
 @media (max-width: 520px) {
-  /* the table fits the phone instead of scrolling its caption out of view */
   table { min-width: 0; }
   td.v { white-space: normal; }
   .facts { grid-template-columns: minmax(0, 1fr); }
@@ -305,25 +317,31 @@ footer .fill { margin-left: auto; max-width: 70ch; }
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
 </style>
+<script>
+// the reader's last choice, before the first paint: the page opens white unless they chose dark
+document.documentElement.classList.add("js");
+try { if (localStorage.getItem("silica-landing-theme") === "dark") document.documentElement.dataset.theme = "dark"; } catch (e) {}
+</script>
 </head>
 <body>
-<header class="top wrap">
+<div class="top-bar"><header class="top wrap">
   <a class="brand" href="#top" aria-label="Silica, top of the page">
     <svg viewBox="0 0 256 256" aria-hidden="true"><path class="i" d="M16 112 L144 112 L144 240 L112 240 L112 144 L16 144 Z M16 64 L192 64 L192 240 L160 240 L160 96 L16 96 Z M16 16 L240 16 L240 240 L208 240 L208 48 L16 48 Z"/><path class="s" d="M16 160 L96 160 L96 240 L16 240 Z"/></svg>
     <b>Silica</b>
   </a>
   <nav aria-label="Primary">
-    <a href="#how-sure">How sure</a>
-    <a href="#how-it-links">How it links</a>
+    <a href="#how-sure">How reliable</a>
     <a href="#how-it-writes">How it writes</a>
     <a class="nav-more" href="#measured">Measured</a>
     <a class="nav-more" href="#runs">Where it runs</a>
     <a href="https://github.com/kiycoh/silica-agent" rel="noopener">GitHub</a>
+    <button class="theme" type="button" id="theme" aria-pressed="false" aria-label="Dark mode"><svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/></svg><svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
     <a class="btn btn--small" href="#install">Install</a>
   </nav>
-</header>
+</header></div>
 
 <main id="top">
+<div class="sheet">
   <section class="hero wrap grid" aria-labelledby="hero-h">
     <div class="hero-copy">
       <h1 id="hero-h">Ask your notes. Check every answer.</h1>
@@ -336,35 +354,24 @@ footer .fill { margin-left: auto; max-width: 70ch; }
 
     <figure class="plate hero-plate" aria-labelledby="fig1-cap">
       <div class="plate-head"><span>Fig. 1</span><b>Taf. I</b></div>
-      <div class="specimen" id="spec-1">
-        <img src="img/quartz-1bit.png" width="420" height="450" alt="A group of rock crystals, six-sided prisms ending in pointed faces, drawn in one-bit ink">
-        <canvas id="cv-1" aria-hidden="true" hidden></canvas>
-        <span class="pin" data-k="a" style="left:55%;top:57%">a</span>
-        <span class="pin" data-k="b" style="left:37%;top:13%">b</span>
-        <span class="pin" data-k="c" style="left:76%;top:15%">c</span>
-        <span class="pin" data-k="d" style="left:10%;top:60%">d</span>
-        <span class="pin" data-k="e" style="left:62%;top:84%">e</span>
+      <div class="kp-field" id="kp-field">
+        <canvas id="cv-kp" role="img" aria-label="The notes of the public page @kiycoh as points joined by their links, in areas such as Statistica, Java, Python and Psicologia"></canvas>
+        <div class="kp-labels" id="kp-labels" aria-hidden="true"></div>
+        <a class="kp-hit" id="kp-hit" href="https://pages.silica-agent.dev/@kiycoh/" target="_blank" rel="noopener" aria-label="Open the page @kiycoh"></a>
+        <div class="kp-tip" id="kp-tip" hidden></div>
       </div>
-      <div class="legend">
-        <p class="q"><b>Asked:</b> What do my notes say about Bayes' theorem? Name the notes you used.</p>
-        <p class="ans"><a href="#" class="cite" data-k="a">Teorema di Bayes</a> presents the theorem as a way to calculate the probability that an event is the cause of an event that has already occurred. It is described as a "posterior search for causes."</p>
-        <p class="math" aria-label="P of H i given E equals P of E given H i times P of H i, over P of E">P(H<sub>i</sub> | E) = P(E | H<sub>i</sub>) · P(H<sub>i</sub>) / P(E)</p>
-        <ol aria-label="The notes this answer read">
-          <li><button type="button" data-k="a"><span class="k">a</span><span class="t">Teorema di Bayes</span></button></li>
-          <li><button type="button" data-k="b"><span class="k">b</span><span class="t">Distribuzioni condizionate</span></button></li>
-          <li><button type="button" data-k="c"><span class="k">c</span><span class="t">Analisi del discriminante (DA)</span></button></li>
-          <li><button type="button" data-k="d"><span class="k">d</span><span class="t">Naive Bayes</span></button></li>
-          <li><button type="button" data-k="e"><span class="k">e</span><span class="t">Lezione 10</span></button></li>
-        </ol>
+      <div class="kp-foot">
+        <a class="kp-addr" href="https://pages.silica-agent.dev/@kiycoh/" target="_blank" rel="noopener">pages.silica-agent.dev/<b>@kiycoh</b><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3.5 8.5l5-5M4.5 3.5h4v4"/></svg></a>
+        <p class="kp-meta" id="kp-meta"></p>
       </div>
-      <figcaption class="plate-cap" id="fig1-cap"><b>One answer and the five notes it read,</b> from a recorded session on Silica's test vault. The crystals are rock crystal, <i lang="fr">silice pure cristallisée</i> in Louis Figuier's <i>Les merveilles de l'industrie</i> (1873), dithered to one bit as this page loads.</figcaption>
+      <figcaption class="plate-cap" id="fig1-cap"><b>A real page, published with Silica by its author.</b> Each point is one of its notes: point at one to read its title, click it to open the note.</figcaption>
     </figure>
   </section>
 
-  <section class="sec wrap" id="how-sure" aria-labelledby="sure-h">
+  <section class="sec wrap sec-last" id="how-sure" aria-labelledby="sure-h">
     <div class="grid sec-head">
-      <h2 id="sure-h">How sure it is</h2>
-      <p>Before Silica changes a note it sorts the change by how much the vault already agrees with it. The less agreement, the less ink it puts down on its own.</p>
+      <h2 id="sure-h">How reliable is it?</h2>
+      <p>Before Silica changes a note it sorts the change by how much the vault already agrees with it: the less agreement, the less ink it puts down on its own. Every answer names the notes it read.</p>
     </div>
     <div class="grid sec-body">
       <div class="densities">
@@ -376,14 +383,14 @@ footer .fill { margin-left: auto; max-width: 70ch; }
           <p class="eg">An orphan note whose title another note already uses gets its link.</p>
         </figure>
         <figure class="dens">
-          <div class="specimen"><canvas data-mode="screen" aria-label="The same flint core in a mechanical screen, half the ink"></canvas></div>
+          <div class="specimen"><canvas data-mode="screen" aria-label="A smaller rough flint from the Yorkshire Wolds, in a mechanical screen, half the ink"></canvas></div>
           <p class="key mono" aria-hidden="true">▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒</p>
           <h3>Proposed <span class="mono">propose · inferred</span></h3>
           <p>Reversible, but only one signal says yes. You see it first and confirm before it lands.</p>
           <p class="eg">Two notes that share a concept and are not linked yet.</p>
         </figure>
         <figure class="dens">
-          <div class="specimen"><canvas data-mode="ghost" aria-label="The same flint core as a faint ghost of dots"></canvas></div>
+          <div class="specimen"><canvas data-mode="ghost" aria-label="The smallest, another rough flint from the Yorkshire Wolds, as a faint ghost of dots"></canvas></div>
           <p class="key mono" aria-hidden="true">░░░░░░░░░░░░░░░░</p>
           <h3>Asked <span class="mono">escalate · ambiguous</span></h3>
           <p>Irreversible, or a call only you can make. Nothing is written: you get the choices.</p>
@@ -391,49 +398,73 @@ footer .fill { margin-left: auto; max-width: 70ch; }
         </figure>
       </div>
     </div>
-    <div class="grid"><p class="figcap" style="grid-column:1/-1">Fig. 2. One specimen at three densities: a flint core with its flakes fitted back on, from John Evans's <i>Ancient Stone Implements</i>. The three tiers and their rules are the analyst plan in Silica's source (<code class="mono">silica/kernel/analyst_plan.py</code>); a move, a delete or a bulk write is never in the first tier.</p></div>
-  </section>
-
-  <section class="nuc" id="how-it-links" aria-labelledby="nuc-h">
-    <div class="wrap">
-      <figure aria-labelledby="nuc-cap">
+    <div class="grid"><p class="figcap" style="grid-column:1/-1">Fig. 2. Three flints at three densities, smaller as the tier drops: a core with its flakes fitted back on and two rough flints from the Yorkshire Wolds, all from John Evans's <i>Ancient Stone Implements</i>. The three tiers and their rules are the analyst plan in Silica's source (<code class="mono">silica/kernel/analyst_plan.py</code>); a move, a delete or a bulk write is never in the first tier.</p></div>
+    <div class="grid sec-body sec-next">
+      <figure class="plate demo" id="demo" aria-labelledby="fig3-cap">
         <div class="plate-head"><span>Fig. 3</span><b>Taf. II</b></div>
-        <div class="nuc-field" id="nuc-field">
-          <picture>
-            <source media="(max-width: 760px)" srcset="img/nuc-phone.png">
-            <img src="img/nuc-desk.png" alt="A run of eighteen new notes, drawn as crosses among the test vault's notes, linked to the notes they name by solid lines; four screened lines propose links, and three faint lines ask about an association and a missing note">
-          </picture>
-          <canvas id="cv-nuc" aria-hidden="true" hidden></canvas>
+        <div class="demo-win">
+          <div class="demo-chat">
+            <button class="demo-again" id="demo-again" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v3h3"/></svg>Replay</button>
+            <div class="demo-log">
+              <p class="dq" data-step="q">What do my notes say about Bayes' theorem?</p>
+              <p class="dmeta" data-step="meta" id="demo-read">read 5 notes</p>
+              <ol class="dsrc" data-step="src" aria-label="The notes this answer read">
+                <li><button type="button" data-k="0" aria-pressed="false"><span class="n">1</span><span class="t">Teorema di Bayes</span></button></li>
+                <li><button type="button" data-k="1" aria-pressed="false"><span class="n">2</span><span class="t">Distribuzioni condizionate</span></button></li>
+                <li><button type="button" data-k="2" aria-pressed="false"><span class="n">3</span><span class="t">Analisi del discriminante (DA)</span></button></li>
+                <li><button type="button" data-k="3" aria-pressed="false"><span class="n">4</span><span class="t">Naive Bayes</span></button></li>
+                <li><button type="button" data-k="4" aria-pressed="false"><span class="n">5</span><span class="t">Lezione 10</span></button></li>
+              </ol>
+              <p class="dans" data-step="ans"><button type="button" class="cite" data-k="0">Teorema di Bayes<sup>1</sup></button> presents the theorem as a way to calculate the probability that an event is the cause of an event that has already occurred. It is described as a "posterior search for causes."</p>
+              <p class="dmath" data-step="math" aria-label="P of H i given E equals P of E given H i times P of H i, over P of E">P(H<sub>i</sub> | E) = P(E | H<sub>i</sub>) · P(H<sub>i</sub>) / P(E)</p>
+            </div>
+            <div class="demo-comp" aria-hidden="true"><span class="dtext"><span class="dtype" id="demo-typed"></span><span class="dph">Ask about your notes</span></span><span class="dsend"><svg viewBox="0 0 16 16"><path d="M3 8h9.5M8.5 4l4 4-4 4"/></svg></span></div>
+          </div>
+          <aside class="demo-note" aria-live="polite" aria-label="The note open beside the chat">
+            <p class="dn-empty" id="demo-empty">A note the answer read opens here, beside it, so you can check one against the other.</p>
+            <article class="dn" data-k="0" hidden>
+              <p class="dn-path">Matematica/Teoria della probabilità/</p>
+              <h3>Teorema di Bayes</h3>
+              <p class="dn-why">Quoted in the answer</p>
+              <p><mark>Il teorema di Bayes serve a calcolare la probabilità che un evento sia la <b>causa</b> di un evento che <b>si è già verificato</b>. <i>È quindi una <b>ricerca a posteriori delle cause</b>.</i></mark></p>
+              <p class="dmath">P(H<sub>i</sub> | E) = P(E | H<sub>i</sub>) · P(H<sub>i</sub>) / P(E)</p>
+            </article>
+            <article class="dn" data-k="1" hidden>
+              <p class="dn-path">Matematica/Statistica/</p>
+              <h3>Distribuzioni condizionate</h3>
+              <p class="dn-why">Read, not quoted</p>
+              <p>La <b>distribuzione condizionata</b> di una variabile è la distribuzione di frequenza (assoluta o relativa) di tale variabile, calcolata <b>per una specifica modalità di un'altra variabile</b>.</p>
+            </article>
+            <article class="dn" data-k="2" hidden>
+              <p class="dn-path">Matematica/Statistica/</p>
+              <h3>Analisi del discriminante (DA)</h3>
+              <p class="dn-why">Read, not quoted</p>
+              <p>L'<b>Analisi Discriminante (DA)</b> è una <b>tecnica statistica per la classificazione</b> che ha l'obiettivo di assegnare nuove osservazioni a classi predefinite. La sua metodologia si basa sul <b>Teorema di Bayes</b> e cerca di trovare <b>funzioni discriminanti</b> che siano in grado di separare al meglio queste classi.</p>
+            </article>
+            <article class="dn" data-k="3" hidden>
+              <p class="dn-path">Matematica/Statistica/</p>
+              <h3>Naive Bayes</h3>
+              <p class="dn-why">Read, not quoted</p>
+              <p>Il <i>Naive Bayes</i> è un classificatore probabilistico basato sul Teorema di Bayes. È definito "ingenuo" (naive) per via della sua <b>assunzione fondamentale di indipendenza condizionale tra le caratteristiche</b> (o predittori) dato un certo valore della classe.</p>
+            </article>
+            <article class="dn" data-k="4" hidden>
+              <p class="dn-path">Informatica/Intelligenza artificiale/Machine learning/</p>
+              <h3>Lezione 10</h3>
+              <p class="dn-why">Read, not quoted</p>
+              <p><i>Classificazione, modelli probabilistici e kernel.</i> La classificazione può essere effettuata tramite una funzione discriminante che assegna ogni punto a una delle K classi.</p>
+            </article>
+          </aside>
         </div>
-        <div class="fig-under">
-          <ol class="steps" id="nuc-steps" aria-hidden="true">
-            <li data-s="0">18 notes written</li><li data-s="1">62 links written</li><li data-s="2">4 proposed</li><li data-s="3">3 asked</li>
-          </ol>
-          <button class="play" type="button" id="nuc-replay" aria-label="Play it again"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1.5 L14 8 L3 14.5 Z"/></svg></button>
-        </div>
+        <figcaption class="plate-cap" id="fig3-cap"><b>One answer and the five notes it read,</b> replayed from a recorded session on Silica's test vault. Pick a note to read it beside the answer.</figcaption>
       </figure>
-      <div class="grid nuc-body">
-        <h2 id="nuc-h">How it links what it reads</h2>
-        <div class="nuc-text">
-          <p>Point <code>/nucleate</code> at a PDF, a deck, an EPUB or a whole folder and it writes notes in the source's own sentences, one transaction per file, checked against what you already have. Then it links them without asking, but only where the words are already there: a name in a new note that is the title of a note you already have, or a note you already have that names a new one. A link to a note the run never wrote goes back to plain text when the run ends. Pairs that are only related wait for the vault audit, <code>/report --cooccurrence</code>: two notes that share a concept, it proposes and waits for your yes; two joined only by association, or a missing note that keeps being linked, it asks you about. With every wikilink stripped from a real 796-note vault, the same autolink put back 72.3% of the 1,384 links its owner had made.</p>
-          <p class="nuc-src">Source: <code>evals/golden/probe_links.py</code>, 1,384 links across 442 notes, frozen in <a href="https://github.com/kiycoh/silica-agent/blob/main/evals/golden/baseline.json" rel="noopener"><code>evals/golden/baseline.json</code></a> on 2026-08-11; also in Tab. 1.</p>
-        </div>
-        <div class="nuc-side">
-          <dl class="nuc-key">
-            <div><dt aria-hidden="true">████</dt><dd><b>Written by itself</b><span>auto · extracted</span><small>A name that is already a note's title.</small></dd></div>
-            <div><dt aria-hidden="true">▒▒▒▒</dt><dd><b>Proposed</b><span>propose · inferred</span><small>Two notes that share a concept.</small></dd></div>
-            <div><dt aria-hidden="true">░░░░</dt><dd><b>Asked</b><span>escalate · ambiguous</span><small>An association only, or a missing note linked twice.</small></dd></div>
-          </dl>
-          <p class="nuc-nodes"><span><b aria-hidden="true">+</b>a note this run wrote</span><span><b aria-hidden="true">▪</b>a note already there</span></p>
-          <p class="nuc-cap" id="nuc-cap"><b>Illustration.</b> The notes and links are those of Silica's test vault, 748 notes and 1,421 links, cropped around one area. Which links autolink wrote is not recorded there, so this run of 18 notes, its order, and the screened and faint links are drawn for the figure.</p>
-        </div>
-      </div>
     </div>
   </section>
 
+</div>
+<div class="sheet">
   <section class="sec wrap" id="how-it-writes" aria-labelledby="hold-h">
     <div class="grid sec-head">
-      <h2 id="hold-h">How confidently it writes</h2>
+      <h2 id="hold-h">How it writes?</h2>
       <p>Every note a run writes passes parse, structure and link checks, and is read back after it lands. One that fails is sent back. The note stays as it was.</p>
     </div>
     <div class="grid sec-body">
@@ -464,7 +495,7 @@ footer .fill { margin-left: auto; max-width: 70ch; }
 
   <section class="sec wrap" id="measured" aria-labelledby="m-h">
     <div class="grid sec-head">
-      <h2 id="m-h">Measured, and shipped unedited</h2>
+      <h2 id="m-h">Measured</h2>
       <p>Every number comes from the harness in the repository, run on the product path. The samples are small and they are re-runnable on your machine.</p>
     </div>
     <div class="grid sec-body">
@@ -488,7 +519,7 @@ footer .fill { margin-left: auto; max-width: 70ch; }
 
   <section class="sec wrap" id="runs" aria-labelledby="r-h">
     <div class="grid sec-head">
-      <h2 id="r-h">Where it runs</h2>
+      <h2 id="r-h">Where it runs?</h2>
       <p>Silica is open source. It runs on your computer, inside Claude Code and inside Obsidian; a hosted pilot runs it in the browser for people invited one by one.</p>
     </div>
     <div class="grid sec-body">
@@ -521,15 +552,15 @@ footer .fill { margin-left: auto; max-width: 70ch; }
     </div>
   </section>
 
-  <section class="sec wrap" id="notes" aria-labelledby="n-h">
+  <section class="sec wrap sec-last" id="notes" aria-labelledby="n-h">
     <div class="grid sec-head">
-      <h2 id="n-h">What happens to your notes</h2>
-      <p>The pilot runs on one server, for people invited one by one. Four facts from its privacy notice and terms.</p>
+      <h2 id="n-h">Hosted Pilot in EU</h2>
+      <p>The pilot runs on one server, for people invited one by one. Three facts from its privacy notice and terms, and one for after it.</p>
     </div>
     <div class="grid sec-body">
       <dl class="facts">
         <div><dt>Kept in Turin</dt><dd>Notes, files and chats are stored on a server in the EU, in Turin.</dd></div>
-        <div><dt>No password</dt><dd>A one-time code is sent to the email address that was invited.</dd></div>
+        <div><dt>ZDR compliant</dt><dd>For users after the pilot, every model call goes to endpoints that keep no data. In the pilot two still do: image reading and result ordering.</dd></div>
         <div><dt>Free, by invitation</dt><dd>There are no payments. You must be 18 or older.</dd></div>
         <div><dt>Open source</dt><dd>AGPL-3.0-or-later. Read the code or run it yourself, from <a href="https://github.com/kiycoh/silica-agent" rel="noopener">GitHub</a>.</dd></div>
       </dl>
@@ -537,6 +568,8 @@ footer .fill { margin-left: auto; max-width: 70ch; }
     </div>
   </section>
 
+</div>
+<div class="sheet">
   <section class="close wrap grid" aria-labelledby="c-h">
     <div class="close-t">
       <h2 id="c-h">Bring your own notes.</h2>
@@ -546,290 +579,473 @@ footer .fill { margin-left: auto; max-width: 70ch; }
     </div>
     <figure class="close-fig plate">
       <div class="plate-head"><span>Fig. 5</span><b>Taf. IV</b></div>
-      <div class="specimen"><img src="img/diatom-1bit.png" width="480" height="500" alt="The rounded ends of two diatoms, their silica walls ribbed with fine parallel lines" style="width:100%"></div>
-      <figcaption class="plate-cap"><i>Pinnularia nobilis</i> and <i>P. major</i> var. <i>pulchella</i>, two diatoms, from Charles S. Boyer's plate 28.</figcaption>
+      <div class="specimen" id="spec-5"><canvas id="cv-5" role="img" aria-label="Silica's mark, a square and three nested angles, printed one-bit"></canvas></div>
+      <figcaption class="plate-cap"><b>Illustration.</b> Silica's mark, its square and three angles drawn as a grey relief and printed one-bit as it comes into view.</figcaption>
     </figure>
   </section>
+</div>
 </main>
 
 <footer class="wrap">
   <a href="https://app.silica-agent.dev/privacy" rel="noopener">Privacy</a>
   <a href="https://app.silica-agent.dev/terms" rel="noopener">Terms</a>
   <a href="https://github.com/kiycoh/silica-agent" rel="noopener">GitHub</a>
-  <span class="fill">Plates via Wikimedia Commons, cropped and dithered for this page. Rock crystal: Louis Figuier, <i>Les merveilles de l'industrie</i>, vol. I, 1873, scan by the Biblioteca de la Facultad de Derecho y Ciencias del Trabajo, Universidad de Sevilla, CC BY 2.0. Flint core: John Evans, <i>The Ancient Stone Implements, Weapons and Ornaments of Great Britain</i>, 1897, fig. 2, public domain. Diatoms: Charles S. Boyer, <i>The Diatomaceae of Philadelphia and Vicinity</i>, 1916, plate 28, public domain.</span>
+  <span class="fill">Plates via Wikimedia Commons, cropped and dithered for this page. Flints: John Evans, <i>The Ancient Stone Implements, Weapons and Ornaments of Great Britain</i>, 1897, figs. 2, 225 and 229, public domain.</span>
 </footer>
 
-<script src="graph.js"></script>
+<script src="kgraph.js"></script>
 <script>
 (() => {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const $ = (s, r = document) => r.querySelector(s);
 
-  // ---- dithering: the page draws its own one-bit ink from a grey source ------
-  const INK = [0x1A, 0x18, 0x15], PAPER = [0xFF, 0xFD, 0xF9];
-  const B8 = [0,32,8,40,2,34,10,42,48,16,56,24,50,18,58,26,12,44,4,36,14,46,6,38,60,28,52,20,62,30,54,22,3,35,11,43,1,33,9,41,51,19,59,27,49,17,57,25,15,47,7,39,13,45,5,37,63,31,55,23,61,29,53,21];
-  // Plate I and Fig. 2 are different specimens, each with its own grey source
-  const src = new Image(), flint = new Image();
-  src.src = "img/quartz-grey.jpg"; flint.src = "img/flint-grey.jpg";
+  // ---- the figures: the page draws its own ink from a grey source --------------
+  // the two inks and the tier amounts come from the theme: ink on paper keeps .55/.16, the
+  // amounts they were tuned at; light dots on graphite spread to the eye, so they thin (chosen by eye, 2026-11-01)
+  const tok = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const rgbOf = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  let INK, INK_CSS, AMT_SCREEN, AMT_GHOST;
+  function inks() {
+    const dark = document.documentElement.dataset.theme === "dark";
+    // read once per theme, not per frame: getComputedStyle in a paint loop forces a style pass
+    INK_CSS = tok("--fig-ink"); INK = rgbOf(INK_CSS);
+    AMT_SCREEN = dark ? .42 : .55; AMT_GHOST = dark ? .14 : .16;
+  }
+  inks();
+  // Fig. 2 holds a flint per tier (owner, 2026-11-01), each trimmed to its outline so the three
+  // can share one line
+  const stone = { full: new Image(), screen: new Image(), ghost: new Image() };
+  stone.full.src = "img/flint-2-grey.jpg"; stone.screen.src = "img/flint-225-grey.jpg"; stone.ghost.src = "img/flint-229-grey.jpg";
+  const stonesReady = () => Object.values(stone).every((i) => i.complete && i.naturalWidth);
 
-  // grey values at w x h, cropped to the box's aspect from the source centre
-  function greyAt(src, w, h) {
-    const c = document.createElement("canvas"); c.width = w; c.height = h;
-    const x = c.getContext("2d", { willReadFrequently: true });
-    const sa = src.width / src.height, da = w / h;
-    let sw = src.width, sh = src.height, sx = 0, sy = 0;
-    if (da > sa) { sh = sw / da; sy = (src.height - sh) / 2; } else { sw = sh * da; sx = (src.width - sw) / 2; }
-    x.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
-    const d = x.getImageData(0, 0, w, h).data, g = new Float32Array(w * h);
+  // ---- the engravings as a one-bit print the hand can stir: bencho.dev's ASCII wake (MIT) ----
+  // Two grids. The print is one-bit pixels of one size on every figure (owner, 2026-11-01):
+  // ASCII wake's own dot grows with the ink, which made a pale engraving print smaller dots than
+  // a dark one, and a 10 px character grid is too coarse for a line engraving to read at all
+  // (tried at 10 down to 4, 2026-11-01). The hand works on a grid of 10 px characters over it,
+  // each cell holding the print's ink under it. The hand drops heat along its path, every frame the grid cools by one
+  // fraction, and a warm cell shows a character off a ramp, densest under the hand; the
+  // characters lean toward it, a press sends a ring out. The owner chose this for the landing's
+  // images on 2026-11-01, knowing it lets the pointer thicken the ink: it is the one place the
+  // hand changes how much ink there is, and only while it is over an image.
+  // ASCII wake's Blocks ramp and half its default reach, a narrower wake (owner, 2026-11-01)
+  const RAMP = [" ", "\u00b7", "\u2591", "\u2592", "\u2593", "\u2588"], COLD = .04, RING_S = 2.2;
+  const REACH = 30, TRAIL = 1.2, PULL = 40;
+  // one print pixel for every figure, in CSS px, snapped to whole device pixels so no figure
+  // resamples it: at 2 the crystal's faces read in a 400 px plate, at 3 they break into scatter
+  const HT_PX = 2;
+  // the hand's grid: characters of 10 px, the size the owner set on 2026-11-01; under 9 px the
+  // ramp stops reading as characters
+  const HT_SIZE = 10, HT_FONT = `500 ${HT_SIZE}px "Martian Mono", ui-monospace, monospace`;
+  // the 8x8 Bayer matrix; its even cells are the 4x4 one. Proposed prints through the 4x4, asked
+  // through the 8x8, at the amounts of the tier key, as everywhere else in Silica
+  const B8 = [0,32,8,40,2,34,10,42,48,16,56,24,50,18,58,26,12,44,4,36,14,46,6,38,60,28,52,20,62,30,54,22,3,35,11,43,1,33,9,41,51,19,59,27,49,17,57,25,15,47,7,39,13,45,5,37,63,31,55,23,61,29,53,21];
+  const cellHash = (k, n) => { let h = (k * 374761393 + n * 668265263) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+  const inView = (el, ratio, fn) => {
+    if (!("IntersectionObserver" in window)) return fn();
+    const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { io.disconnect(); fn(); } }, { threshold: ratio });
+    io.observe(el);
+  };
+  function halftone(cv, box, opt) {
+    const S = { W: 0, H: 0, r: 1, cols: 0, rows: 0, cw: 0, ch: 0, ox: 0, oy: 0, ink: null, lit: null, heat: null, born: null,
+      Pd: 1, pc: 0, pr: 0, pox: 0, poy: 0, order: null, pborn: null, small: null, img: null, px: null, inkPx: 0, shown: -2, pn: 0,
+      hk: null, hx2: null, hy2: null, hi: null,
+      hx: -999, hy: -999, lx: NaN, ly: NaN, near: 0, inside: false, rings: [], deal: 0, tick: 0, raf: 0, k: 1, run: 0, warm: 0, ready: false, off: false };
+    cv.classList.add("ht");
+    function build() {
+      const b = box.getBoundingClientRect();
+      S.W = Math.max(40, Math.floor(b.width)); S.H = Math.max(40, Math.floor(b.height));
+      S.r = Math.min(2, window.devicePixelRatio || 1);
+      cv.width = Math.round(S.W * S.r); cv.height = Math.round(S.H * S.r);
+      const g = opt.grey(S.W, S.H), amt = opt.amount ? opt.amount() : 1;
+      // a summed-area table, so any box's ink is four reads: sampled at a centre, an engraved line
+      // thinner than the box drops in and out of the grid
+      const W1 = S.W + 1, sat = new Float64Array(W1 * (S.H + 1));
+      for (let y = 0; y < S.H; y++) { let row = 0; for (let x = 0; x < S.W; x++) { row += g[y * S.W + x]; sat[(y + 1) * W1 + x + 1] = sat[y * W1 + x + 1] + row; } }
+      const inkIn = (x0, y0, x1, y1) => {
+        x0 = Math.min(S.W - 1, Math.max(0, Math.floor(x0))); y0 = Math.min(S.H - 1, Math.max(0, Math.floor(y0)));
+        x1 = Math.min(S.W, Math.max(x0 + 1, Math.ceil(x1))); y1 = Math.min(S.H, Math.max(y0 + 1, Math.ceil(y1)));
+        const mean = (sat[y1 * W1 + x1] - sat[y0 * W1 + x1] - sat[y1 * W1 + x0] + sat[y0 * W1 + x0]) / ((x1 - x0) * (y1 - y0));
+        // under 8% ink a box is paper, or every blank corner of the sheet would print
+        return Math.max(0, ((255 - mean) / 255 - .08) / .92) * amt;
+      };
+      // the print
+      const Pd = S.Pd = Math.max(1, Math.round(HT_PX * S.r)), P = Pd / S.r;
+      const pc = S.pc = Math.floor(cv.width / Pd), pr = S.pr = Math.floor(cv.height / Pd), N = pc * pr;
+      S.pox = (cv.width - pc * Pd) >> 1; S.poy = (cv.height - pr * Pd) >> 1;
+      const ox = S.pox / S.r, oy = S.poy / S.r, v = new Float32Array(N), on = new Uint8Array(N);
+      for (let j = 0; j < pr; j++) for (let i = 0; i < pc; i++) v[j * pc + i] = inkIn(ox + i * P, oy + j * P, ox + (i + 1) * P, oy + (j + 1) * P);
+      if (opt.screen) {
+        // an ordered screen: regular, mechanical, visibly not the final print
+        for (let j = 0; j < pr; j++) for (let i = 0; i < pc; i++) {
+          const t = opt.screen === 4 ? B8[((j & 3) * 2) * 8 + (i & 3) * 2] / 16 : B8[(j & 7) * 8 + (i & 7)] / 64;
+          on[j * pc + i] = v[j * pc + i] > t + .0001 ? 1 : 0;
+        }
+      } else {
+        // Atkinson: it drops a quarter of the error, which keeps the dark masses solid
+        const e = Float32Array.from(v);
+        for (let j = 0; j < pr; j++) for (let i = 0; i < pc; i++) {
+          const q = j * pc + i, x = e[q], o = x >= .5 ? 1 : 0, err = (x - o) / 8;
+          on[q] = o && v[q] > 0 ? 1 : 0;
+          if (i + 1 < pc) e[q + 1] += err;
+          if (i + 2 < pc) e[q + 2] += err;
+          if (j + 1 < pr) { if (i > 0) e[q + pc - 1] += err; e[q + pc] += err; if (i + 1 < pc) e[q + pc + 1] += err; }
+          if (j + 2 < pr) e[q + 2 * pc] += err;
+        }
+      }
+      // each printed pixel's moment in the entrance, sorted once so a frame only touches what it adds
+      let n = 0; for (let q = 0; q < N; q++) n += on[q];
+      const order = new Int32Array(n), pborn = new Float32Array(N); n = 0;
+      for (let q = 0; q < N; q++) if (on[q]) { pborn[q] = opt.order(ox + (q % pc + .5) * P, oy + (((q / pc) | 0) + .5) * P, S.W, S.H, q); order[n++] = q; }
+      order.sort((x, y) => pborn[x] - pborn[y]);
+      S.order = order; S.pborn = pborn;
+      S.small = document.createElement("canvas"); S.small.width = pc; S.small.height = pr;
+      S.img = S.small.getContext("2d").createImageData(pc, pr); S.px = new Uint32Array(S.img.data.buffer);
+      S.inkPx = (INK[0] | INK[1] << 8 | INK[2] << 16 | 0xff000000) >>> 0;
+      S.shown = -2; S.pn = 0;
+      // the hand's grid: rows a little tighter than the face's own leading, odd rows half a cell over
+      S.ch = HT_SIZE * .82; S.cw = HT_SIZE * .62;
+      S.cols = Math.floor(S.W / S.cw - .5); S.rows = Math.floor(S.H / S.ch);
+      S.ox = (S.W - S.cols * S.cw) / 2; S.oy = (S.H - S.rows * S.ch) / 2;
+      const M = S.cols * S.rows;
+      S.ink = new Float32Array(M); S.heat = new Float32Array(M); S.born = new Float32Array(M);
+      S.hk = new Int32Array(M); S.hx2 = new Float32Array(M); S.hy2 = new Float32Array(M); S.hi = new Uint8Array(M);
+      // the printed pixels under any box, four reads: a cell takes the wake only where the print
+      // has ink, or the grey a source carries in its blank parts (the mark's soft shadow in the gaps
+      // between its angles) would raise characters over paper
+      const P1 = pc + 1, cnt = new Int32Array(P1 * (pr + 1));
+      for (let j = 0; j < pr; j++) { let row = 0; for (let i = 0; i < pc; i++) { row += on[j * pc + i]; cnt[(j + 1) * P1 + i + 1] = cnt[j * P1 + i + 1] + row; } }
+      const printedIn = (x0, y0, x1, y1) => {
+        const a = Math.max(0, Math.min(pc, Math.floor((x0 - ox) / P))), b = Math.max(0, Math.min(pc, Math.ceil((x1 - ox) / P)));
+        const c = Math.max(0, Math.min(pr, Math.floor((y0 - oy) / P))), d = Math.max(0, Math.min(pr, Math.ceil((y1 - oy) / P)));
+        return cnt[d * P1 + b] - cnt[c * P1 + b] - cnt[d * P1 + a] + cnt[c * P1 + a];
+      };
+      let L = 0;
+      for (let j = 0; j < S.rows; j++) for (let i = 0; i < S.cols; i++) {
+        const x = S.ox + (i + .5 + (j & 1) * .5) * S.cw, y = S.oy + (j + .5) * S.ch, k = j * S.cols + i;
+        const x0 = x - S.cw / 2, y0 = y - S.ch / 2, x1 = x + S.cw / 2, y1 = y + S.ch / 2;
+        S.ink[k] = printedIn(x0, y0, x1, y1) ? inkIn(x0, y0, x1, y1) : 0;
+        S.born[k] = opt.order(x, y, S.W, S.H, k);
+        if (S.ink[k] > 0) L++;
+      }
+      // the hand's pass visits only cells with ink: a blank cell never takes the wake
+      S.lit = new Int32Array(L); L = 0;
+      for (let k = 0; k < M; k++) if (S.ink[k] > 0) S.lit[L++] = k;
+      S.ready = true;
+    }
+    // the print as it stands at S.k; pixels are only added while k grows, so a frame costs what it adds
+    function reveal() {
+      if (S.k === S.shown) return;
+      if (S.k < S.shown) { S.px.fill(0); S.pn = 0; }
+      const o = S.order, b = S.pborn, px = S.px, ink = S.inkPx;
+      while (S.pn < o.length && b[o[S.pn]] <= S.k) px[o[S.pn++]] = ink;
+      S.small.getContext("2d").putImageData(S.img, 0, 0);
+      S.shown = S.k;
+    }
+    const radius = () => 12 + (REACH / 100) * 58;
+    function stamp(x, y, rad, amt) {
+      x -= S.ox; y -= S.oy;
+      const c0 = Math.max(0, Math.floor((x - rad) / S.cw)), c1 = Math.min(S.cols - 1, Math.ceil((x + rad) / S.cw));
+      const r0 = Math.max(0, Math.floor((y - rad) / S.ch)), r1 = Math.min(S.rows - 1, Math.ceil((y + rad) / S.ch)), R2 = rad * rad;
+      for (let j = r0; j <= r1; j++) { const dy = (j + .5) * S.ch - y; for (let i = c0; i <= c1; i++) {
+        const dx = (i + .5) * S.cw - x, q = (dx * dx + dy * dy) / R2; if (q >= 1) continue;
+        const t = 1 - q, k = j * S.cols + i; S.heat[k] = Math.min(1, S.heat[k] + amt * t * t);
+      } }
+    }
+    function paint() {
+      if (!S.ready || S.off) return;
+      reveal();
+      const g = cv.getContext("2d");
+      g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, cv.width, cv.height);
+      g.imageSmoothingEnabled = false;
+      g.drawImage(S.small, S.pox, S.poy, S.pc * S.Pd, S.pr * S.Pd);
+      // at rest a frame is that one copy; the hand's pass runs only while something is warm
+      if (S.near <= .002 && !S.rings.length && !S.warm) return;
+      g.setTransform(S.r, 0, 0, S.r, 0, 0);
+      const top = RAMP.length - 1, lean = (PULL / 100) * S.near;
+      const rad = radius(), far2 = (rad * 2) ** 2, R2 = rad * rad;
+      const rings = S.rings.map((r) => { const p = r.t / RING_S, e = 1 - Math.pow(1 - p, 3); return { x: r.x, y: r.y, R: 8 + e * 260, amp: .6 * (1 - p) * (1 - p) * Math.min(1, p * 6) }; });
+      let n = 0;
+      for (let q = 0; q < S.lit.length; q++) {
+        const k = S.lit[q], m = S.ink[k];
+        if (S.born[k] > S.k) continue;
+        const j = (k / S.cols) | 0, i = k - j * S.cols, y = S.oy + (j + .5) * S.ch;
+        const cx = S.ox + (i + .5 + (j & 1) * .5) * S.cw;
+        let h = S.heat[k];
+        if (S.near > .002) { const d = ((cx - S.hx) ** 2 + (y - S.hy) ** 2) / R2; if (d < 1) h = Math.max(h, .95 * S.near * (1 - d) * (1 - d)); }
+        for (const r of rings) { const d = (Math.hypot(cx - r.x, y - r.y) - r.R) / 24; if (d > -2.5 && d < 2.5) h += r.amp * Math.exp(-d * d); }
+        h *= .55 + .45 * Math.min(1, m);
+        if (h <= COLD) continue;
+        const u = Math.min(1, h) * top + .5 + (cellHash(k, S.deal) - .5) * 1.6 * Math.min(1, h * 2);
+        const idx = Math.min(top, Math.max(1, Math.floor(u)));
+        // the lightest step is the print itself, so the wake cools back into the plate without a seam
+        if (idx === 1) continue;
+        let x = cx, yy = y;
+        if (lean > .002) {
+          const dx = S.hx - x, dy = S.hy - yy, d2 = dx * dx + dy * dy;
+          if (d2 < far2) { const f = 1 - d2 / far2, d = Math.sqrt(d2) || 1, mv = Math.min(d * .6, 14 * lean * f * f); x += (dx / d) * mv; yy += (dy / d) * mv; }
+        }
+        S.hk[n] = k; S.hx2[n] = x; S.hy2[n] = yy; S.hi[n] = idx; n++;
+      }
+      // a warm cell's character replaces the print under it: every box is cleared before any is
+      // written, or a cleared neighbour would cut a leaning character in half
+      for (let q = 0; q < n; q++) {
+        const k = S.hk[q], j = (k / S.cols) | 0, i = k - j * S.cols;
+        g.clearRect(S.ox + (i + (j & 1) * .5) * S.cw, S.oy + j * S.ch, S.cw, S.ch);
+      }
+      g.fillStyle = INK_CSS; g.font = HT_FONT; g.textAlign = "center"; g.textBaseline = "middle";
+      for (let q = 0; q < n; q++) g.fillText(RAMP[S.hi[q]], S.hx2[q], S.hy2[q]);
+    }
+    // the loop runs only while the wake is warm or the hand is moving
+    function loop() {
+      if (S.raf || S.off) return;
+      let prev = performance.now();
+      const step = (t) => {
+        const dt = Math.min(.05, (t - prev) / 1000); prev = t;
+        const keep = Math.exp((-dt * 3) / TRAIL); let warm = 0;
+        for (let k = 0; k < S.heat.length; k++) { const v = S.heat[k] * keep; S.heat[k] = v < .003 ? 0 : v; if (v > warm) warm = v; }
+        S.warm = warm < .003 ? 0 : warm;
+        S.rings = S.rings.filter((r) => (r.t += dt) < RING_S);
+        S.near += ((S.inside ? 1 : 0) - S.near) * (1 - Math.pow(.004, dt));
+        S.tick += dt; if (S.tick > .07) { S.tick = 0; S.deal++; }
+        paint();
+        const still = warm === 0 && !S.rings.length && Math.abs((S.inside ? 1 : 0) - S.near) < .004;
+        S.raf = still ? 0 : requestAnimationFrame(step);
+      };
+      S.raf = requestAnimationFrame(step);
+    }
+    const where = (e) => { const b = box.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+    function move(e) {
+      if (!S.ready || S.off) return;
+      const [x, y] = where(e), rad = radius();
+      if (Number.isNaN(S.lx)) { S.lx = x; S.ly = y; }
+      const n = Math.max(1, Math.ceil(Math.hypot(x - S.lx, y - S.ly) / (rad / 3)));
+      for (let k = 1; k <= n; k++) stamp(S.lx + (x - S.lx) * (k / n), S.ly + (y - S.ly) * (k / n), rad, .5);
+      S.lx = x; S.ly = y; S.hx = x; S.hy = y; S.inside = true; loop();
+    }
+    if (!reduce) {
+      box.addEventListener("pointerenter", (e) => { S.lx = NaN; move(e); });
+      box.addEventListener("pointermove", move);
+      box.addEventListener("pointerleave", () => { S.inside = false; S.lx = NaN; loop(); });
+      box.addEventListener("pointerdown", (e) => { if (S.off) return; const [x, y] = where(e); S.rings.push({ x, y, t: 0 }); loop(); });
+    }
+    // the entrance: every cell lands at its own moment, in the order the figure asks for
+    function enter(dur, done) {
+      const run = ++S.run; S.k = 0; const t0 = performance.now();
+      (function step(now) {
+        if (run !== S.run) return;
+        const u = Math.min(1, (now - t0) / dur); S.k = 1 - (1 - u) * (1 - u);
+        if (!S.raf) paint();
+        if (u < 1) requestAnimationFrame(step); else if (done) done();
+      })(t0);
+    }
+    function show() { ++S.run; S.k = 1; paint(); }
+    function hold() { ++S.run; S.k = -1; paint(); }
+    return { build, paint, enter, show, hold, S };
+  }
+
+  // the stones stand on one line near the foot of their boxes, smaller as the tier drops: Written
+  // full, Proposed medium, Asked the smallest (owner, 2026-11-01)
+  const STONE_SCALE = { full: 1, screen: .74, ghost: .52 };
+  function stoneBox(mode, W, H) {
+    const im = stone[mode], D = .92 * Math.min(W, H) * STONE_SCALE[mode], k = Math.min(D / im.naturalWidth, D / im.naturalHeight);
+    const w = im.naturalWidth * k, h = im.naturalHeight * k;
+    return { x: (W - w) / 2, y: H * .9 - h, w, h };
+  }
+  function stoneAt(mode, W, H) {
+    const c = document.createElement("canvas"); c.width = W; c.height = H;
+    const x = c.getContext("2d", { willReadFrequently: true }), b = stoneBox(mode, W, H);
+    x.fillStyle = "#fff"; x.fillRect(0, 0, W, H);
+    x.drawImage(stone[mode], b.x, b.y, b.w, b.h);
+    const d = x.getImageData(0, 0, W, H).data, g = new Float32Array(W * H);
     for (let i = 0; i < g.length; i++) g[i] = d[i * 4];
+    // Written's plate is cut at its sides, so only those fade to paper; the others are whole stones
+    if (mode === "full") {
+      const m = b.w * .14, x0 = Math.floor(b.x), x1 = Math.ceil(b.x + b.w);
+      for (let px = Math.max(0, x0); px < Math.min(W, x1); px++) {
+        const e = Math.min(px - b.x, b.x + b.w - px) / m; if (e >= 1) continue;
+        const f = e <= 0 ? 0 : e * e * (3 - 2 * e);
+        for (let py = 0; py < H; py++) { const i = py * W + px; g[i] = 255 - (255 - g[i]) * f; }
+      }
+    }
     return g;
   }
-  // amount 1 = the source's own ink; below 1 the ink thins toward paper
-  function paint(cv, g, w, h, mode, amount) {
-    const ctx = cv.getContext("2d");
-    const out = ctx.createImageData(w, h), o = out.data;
-    let bits;
-    if (mode === "full" && amount >= 1) {
-      // Atkinson: it drops a quarter of the error, which keeps the bars solid
-      const e = Float32Array.from(g); bits = new Uint8Array(w * h);
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        const i = y * w + x, v = e[i], on = v < 128 ? 1 : 0, err = (v - (on ? 0 : 255)) / 8;
-        bits[i] = on;
-        if (x + 1 < w) e[i + 1] += err;
-        if (x + 2 < w) e[i + 2] += err;
-        if (y + 1 < h) { if (x > 0) e[i + w - 1] += err; e[i + w] += err; if (x + 1 < w) e[i + w + 1] += err; }
-        if (y + 2 < h) e[i + 2 * w] += err;
-      }
-    } else {
-      // an ordered screen: regular, mechanical, visibly not the final print
-      bits = new Uint8Array(w * h);
-      const n = mode === "screen" ? 4 : 8;
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        // below 8% ink the source is paper; without the floor the screen dots every blank cell
-        const i = y * w + x, dark = Math.max(0, ((255 - g[i]) / 255 - .08) / .92) * amount;
-        // the even cells of the 8x8 Bayer matrix are the 4x4 one, values 0..15
-        const t = n === 4 ? B8[((y % 4) * 2) * 8 + (x % 4) * 2] / 16 : B8[(y % 8) * 8 + (x % 8)] / 64;
-        bits[i] = dark > t + 0.0001 ? 1 : 0;
-      }
-    }
-    for (let i = 0; i < bits.length; i++) {
-      const c = bits[i] ? INK : PAPER, k = i * 4;
-      o[k] = c[0]; o[k + 1] = c[1]; o[k + 2] = c[2]; o[k + 3] = 255;
-    }
-    ctx.putImageData(out, 0, 0);
-  }
-  // one dot is one CSS pixel (dot > 1 makes the screen visible at a glance)
-  function sizeTo(cv, box, dot) {
-    const r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
-    const w = Math.max(40, Math.floor(r.width / dot)), h = Math.max(40, Math.floor(r.height / dot));
-    cv.width = w; cv.height = h;
-    return [w, h, dpr];
-  }
-
-  const pins = [...document.querySelectorAll(".pin")];
-  const hero = $("#cv-1"), heroBox = $("#spec-1");
-  let heroRun = 0;
-  function drawHero(animate) {
-    const run = ++heroRun;      // a newer draw (a resize) retires a reveal still running
-    const [w, h] = sizeTo(hero, heroBox, 1);
-    const g = greyAt(src, w, h);
-    hero.hidden = false;
-    if (!animate) { paint(hero, g, w, h, "full", 1); pins.forEach((p) => p.classList.remove("wait")); return; }
-    // the print is pulled once, top to bottom, always at full density: on this page
-    // a thinner screen means "proposed", so it never stands in for "loading"
-    const off = document.createElement("canvas"); off.width = w; off.height = h;
-    paint(off, g, w, h, "full", 1);
-    const ctx = hero.getContext("2d");
-    ctx.fillStyle = "#FFFDF9"; ctx.fillRect(0, 0, w, h);
-    const t0 = performance.now(), dur = 900; let done = 0;
-    pins.forEach((p) => p.classList.add("wait"));
-    (function step(now) {
-      if (run !== heroRun) return;
-      const k = Math.min(1, (now - t0) / dur), y = Math.round((1 - Math.pow(1 - k, 3)) * h);
-      if (y > done) { ctx.drawImage(off, 0, done, w, y - done, 0, done, w, y - done); done = y; }
-      if (k < 1) requestAnimationFrame(step);
-      else pins.forEach((p, i) => setTimeout(() => p.classList.remove("wait"), 90 * i));
-    })(t0);
-  }
+  // the flints keep theirs: each from its own centre outward, one after another, written first
   const dens = [...document.querySelectorAll(".dens canvas")];
-  function drawDens() {
-    dens.forEach((cv) => {
-      const mode = cv.dataset.mode;
-      const [w, h] = sizeTo(cv, cv.parentElement, mode === "full" ? 1 : 2);
-      paint(cv, greyAt(flint, w, h), w, h, mode, mode === "full" ? 1 : mode === "screen" ? .55 : .16);
+  const densHT = dens.map((cv) => halftone(cv, cv.parentElement, { size: HT_SIZE,
+    grey: (W, H) => stoneAt(cv.dataset.mode, W, H),
+    amount: () => (cv.dataset.mode === "full" ? 1 : cv.dataset.mode === "screen" ? AMT_SCREEN : AMT_GHOST),
+    screen: cv.dataset.mode === "screen" ? 4 : cv.dataset.mode === "ghost" ? 8 : 0,
+    order: (x, y, W, H, k) => { const b = stoneBox(cv.dataset.mode, W, H);
+      return .55 * Math.min(1, Math.hypot(x - b.x - b.w / 2, y - b.y - b.h / 2) / Math.hypot(b.w / 2, b.h / 2)) + .45 * cellHash(k, 11); } }));
+  function drawDens(animate) {
+    if (!stonesReady()) return;
+    densHT.forEach((ht, k) => {
+      ht.build();
+      if (!animate) return ht.show();
+      ht.hold(); setTimeout(() => ht.enter(1300), k * 350);
     });
   }
-  src.onload = () => drawHero(!reduce);
-  flint.onload = drawDens;
+  let stonesLeft = 3;
+  Object.values(stone).forEach((im) => { im.onload = () => {
+    if (--stonesLeft) return;
+    if (reduce) return drawDens(false);
+    densHT.forEach((ht) => { ht.build(); ht.hold(); });
+    inView($(".densities"), .35, () => drawDens(true));
+  }; });
   let rt;
-  addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (src.complete) drawHero(false); if (flint.complete) drawDens(); }, 150); });
+  // a resize keeps where each entrance had got to: the grid is rebuilt and repainted as it stood
+  addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { [...densHT, fig5HT].forEach((ht) => { if (ht.S.ready) { ht.build(); ht.paint(); } }); }, 150); });
 
-  // ---- the legend points at the plate ---------------------------------------
-  function light(k) {
-    pins.forEach((p) => p.classList.toggle("on", p.dataset.k === k));
-    document.querySelectorAll(".legend li button").forEach((b) => b.classList.toggle("on", b.dataset.k === k));
+  {
+    // ---- Fig. 1, the @kiycoh page: one-bit ink on the sheet itself, one density -----
+    const D = window.KIYCOH;
+    const cv = $("#cv-kp"), box = $("#kp-field"), hit = $("#kp-hit"), tip = $("#kp-tip"), labs = $("#kp-labels");
+    const PAGE = "https://pages.silica-agent.dev/@kiycoh/";
+    $("#kp-meta").textContent = `${D.notes.toLocaleString("en")} notes \u00b7 ${D.pairs.toLocaleString("en")} links \u00b7 ${D.areas.length} areas`;
+    const adj = D.n.map(() => []);
+    for (const [a, b] of D.e) { adj[a].push(b); adj[b].push(a); }
+    const ctx = cv.getContext("2d");
+    const u32 = (c) => ((255 << 24) | (c[2] << 16) | (c[1] << 8) | c[0]) >>> 0;   // little-endian RGBA
+    let PAPER32, INK32, SIG32;
+    let w = 0, h = 0, bits, hl, img, pad = 16, hover = -1;
+    const X = (n) => Math.round(pad + n[0] * (w - 2 * pad)), Y = (n) => Math.round(pad + n[1] * (h - 2 * pad));
+    const R = (n) => (n[3] >= 12 ? 2 : 1);
+    // the page instantiates as the Public page's cover does: notes land from the middle of the
+    // layout outward, then each link is drawn out from its first note, all at full ink
+    const cxN = D.n.reduce((t, n) => t + n[0], 0) / D.n.length, cyN = D.n.reduce((t, n) => t + n[1], 0) / D.n.length;
+    const distN = D.n.map((n) => Math.hypot(n[0] - cxN, n[1] - cyN)), rankN = new Float32Array(D.n.length);
+    [...distN.keys()].sort((a, b) => distN[a] - distN[b]).forEach((i, k) => { rankN[i] = k / D.n.length; });
+    const at = (i) => rankN[i] * .55;
+    let K = reduce ? 1 : 0;
+    function put(m, x, y, v) { if (x >= 0 && y >= 0 && x < w && y < h) m[y * w + x] = v; }
+    function seg(m, x0, y0, x1, y1) {
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+      for (let s = 0; s <= n; s++) put(m, Math.round(x0 + (x1 - x0) * s / n), Math.round(y0 + (y1 - y0) * s / n), 1);
+    }
+    function block(m, x, y, r, v) { for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) put(m, x + a, y + b, v); }
+    function draw() {
+      if (!w) return;
+      bits.fill(0); hl.fill(0);
+      for (const [a0, b0] of D.e) {
+        const [a, b] = rankN[a0] <= rankN[b0] ? [a0, b0] : [b0, a0], f = Math.min(1, Math.max(0, (K - at(b) - .05) / .35));
+        if (f > 0) seg(bits, X(D.n[a]), Y(D.n[a]), Math.round(X(D.n[a]) + (X(D.n[b]) - X(D.n[a])) * f), Math.round(Y(D.n[a]) + (Y(D.n[b]) - Y(D.n[a])) * f));
+      }
+      // a clear ring of paper first, so a note reads as a mark and not as a crossing
+      D.n.forEach((n, i) => { if (K < at(i)) return; block(bits, X(n), Y(n), R(n) + 1, 0); block(bits, X(n), Y(n), R(n), 1); });
+      labs.style.visibility = K < .8 ? "hidden" : "";
+      if (hover >= 0) {
+        const n = D.n[hover];
+        for (const j of adj[hover]) seg(hl, X(n), Y(n), X(D.n[j]), Y(D.n[j]));
+        block(bits, X(n), Y(n), R(n) + 3, 0); block(hl, X(n), Y(n), R(n) + 2, 1);
+      }
+      const u = new Uint32Array(img.data.buffer);
+      for (let i = 0; i < u.length; i++) u[i] = hl[i] ? SIG32 : bits[i] ? INK32 : PAPER32;
+      ctx.putImageData(img, 0, 0);
+    }
+    function label() {
+      labs.textContent = "";
+      const placed = [];
+      for (const a of D.areas.filter((a) => a.size >= 15)) {
+        const x = pad + a.x * (w - 2 * pad), y = pad + a.y * (h - 2 * pad), hw = a.name.length * 3.6 + 8, hh = 10;
+        if (placed.some((p) => Math.abs(p[0] - x) < p[2] + hw && Math.abs(p[1] - y) < 2 * hh)) continue;
+        placed.push([x, y, hw]);
+        const el = document.createElement("span");
+        el.textContent = a.name; el.style.left = `${Math.min(Math.max(x, hw), w - hw)}px`; el.style.top = `${y}px`;
+        labs.append(el);
+      }
+    }
+    function setup() {
+      PAPER32 = u32(rgbOf(tok("--fig"))); INK32 = u32(INK); SIG32 = u32(rgbOf(tok("--accent")));
+      const r = box.getBoundingClientRect();
+      if (r.width < 40 || r.height < 40) { w = 0; return; }
+      w = Math.floor(r.width); h = Math.floor(r.height); cv.width = w; cv.height = h;
+      bits = new Uint8Array(w * h); hl = new Uint8Array(w * h); img = ctx.createImageData(w, h);
+      draw(); label();
+    }
+    function point(ev) {
+      const r = box.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
+      let best = -1, bd = 12 * 12;
+      D.n.forEach((n, i) => { const d = (X(n) - mx) ** 2 + (Y(n) - my) ** 2; if (d < bd) { bd = d; best = i; } });
+      if (best === hover) return;
+      hover = best; draw();
+      if (best < 0) { tip.hidden = true; hit.classList.remove("on"); hit.href = PAGE; hit.setAttribute("aria-label", "Open the page @kiycoh"); return; }
+      const n = D.n[best];
+      tip.textContent = n[4]; tip.hidden = false;
+      tip.style.left = `${X(n)}px`; tip.style.top = `${Y(n)}px`; tip.classList.toggle("left", X(n) > w * 0.62);
+      hit.classList.add("on"); hit.href = `${PAGE}${n[5]}.html`; hit.setAttribute("aria-label", `Open ${n[4]}`);
+    }
+    hit.addEventListener("pointermove", point);
+    hit.addEventListener("pointerleave", () => { hover = -1; tip.hidden = true; hit.classList.remove("on"); hit.href = PAGE; draw(); });
+    new ResizeObserver(setup).observe(box);
+    if (!reduce) inView(box, .3, () => {
+      const t0 = performance.now();
+      (function step(now) { K = Math.min(1, (now - t0) / 1700); draw(); if (K < 1) requestAnimationFrame(step); })(t0);
+    });
+    document.addEventListener("silica-theme", setup);
   }
-  document.querySelectorAll(".legend [data-k]").forEach((el) => {
-    el.addEventListener("mouseenter", () => light(el.dataset.k));
-    el.addEventListener("focus", () => light(el.dataset.k));
-    el.addEventListener("mouseleave", () => light(null));
-    el.addEventListener("blur", () => light(null));
-    el.addEventListener("click", (e) => { e.preventDefault(); light(el.dataset.k); });
-  });
 
-  // ---- Fig. 3: one run links what it wrote, on the test vault's own graph -----
-  // The notes and links are graph.js. Nothing records which links autolink wrote, so
-  // the run (the 18 notes of Teorema di Bayes's area nearest to it), its order and the
-  // proposed and asked pairs are chosen here, and the caption says Illustration.
-  // graph.js is public, so it keeps only the titles read below (the seed, the hub it
-  // skips, a daily note's date); every other title of the owner's vault is blanked.
-  const GR = window.SILICA_GRAPH, cvN = $("#cv-nuc"), boxN = $("#nuc-field");
-  if (GR && cvN) {
-    const P = GR.n.map((n) => [n[0], n[1]]), N = P.length;
-    const key = (a, b) => (a < b ? a * N + b : b * N + a);
-    const adj = new Set(GR.l.map(([a, b]) => key(a, b)));
-    const d2 = (a, b) => (P[a][0] - P[b][0]) ** 2 + (P[a][1] - P[b][1]) ** 2;
-    const title = (i) => GR.n[i][7], area = (i) => GR.n[i][8];
-    const daily = (i) => /^\d{4}-\d{2}-\d{2}/.test(title(i));
-    const areaSize = {};
-    GR.n.forEach((n) => { areaSize[n[8]] = (areaSize[n[8]] || 0) + 1; });
-    const seed = GR.n.findIndex((n) => n[7] === "Teorema di Bayes"), A0 = area(seed);
-    const RUN = GR.n.map((_, i) => i).filter((i) => area(i) === A0 && !daily(i) && title(i) !== "Statistica")
-      .sort((a, b) => d2(a, seed) - d2(b, seed)).slice(0, 18);
-    const rank = new Map(RUN.map((i, k) => [i, k]));
-    // one pair per note, the length nearest `len`: a screen on a very short line reads as a blob
-    function pick(test, len, k) {
-      const c = [];
-      for (const u of RUN) for (let v = 0; v < N; v++) {
-        if (v !== u && !adj.has(key(u, v)) && test(v)) c.push([u, v, Math.abs(Math.sqrt(d2(u, v)) - len)]);
+  // ---- Fig. 3: the recorded answer, replayed in the app's own chat ---------------------
+  // It types, sends, reads the five notes, streams the answer and opens the note it quotes, once,
+  // when it comes into view; Replay runs it again. Every word is the recorded session's and every
+  // excerpt is the note's own, so nothing here answers a question the session did not ask.
+  {
+    const root = $("#demo"), typed = $("#demo-typed"), comp = root.querySelector(".demo-comp"), empty = $("#demo-empty"), readN = $("#demo-read");
+    const step = (k) => root.querySelector(`[data-step="${k}"]`);
+    const chips = [...root.querySelectorAll(".dsrc li")], notes = [...root.querySelectorAll(".dn")];
+    const Q = step("q").textContent;
+    // the answer streams a word at a time; the citation is one word
+    const words = [];
+    for (const node of [...step("ans").childNodes]) {
+      if (node.nodeType !== 3) { node.classList.add("w"); words.push(node); continue; }
+      const frag = document.createDocumentFragment();
+      for (const t of node.textContent.split(/(\s+)/)) {
+        if (!t) continue;
+        if (/^\s+$/.test(t)) { frag.append(t); continue; }
+        const w = document.createElement("span"); w.className = "w"; w.textContent = t; frag.append(w); words.push(w);
       }
-      c.sort((p, q) => p[2] - q[2]);
-      const used = new Set(), out = [];
-      for (const [u, v] of c) {
-        if (used.has(u) || used.has(v)) continue;
-        used.add(u); used.add(v); out.push([u, v]);
-        if (out.length === k) break;
-      }
-      return out;
+      node.replaceWith(frag);
     }
-    const PROP = pick((v) => area(v) === A0 && !daily(v), .07, 4);
-    const ASK = pick((v) => area(v) !== A0 && areaSize[area(v)] >= 9 && !daily(v), .2, 2);
-    // the missing note: the emptiest spot near the run, linked from its two nearest notes
-    const xs = RUN.map((i) => P[i][0]), ys = RUN.map((i) => P[i][1]);
-    const bx0 = Math.min(...xs), bx1 = Math.max(...xs), by0 = Math.min(...ys), by1 = Math.max(...ys);
-    let M = [bx0, by0], best = -1;
-    for (let x = bx0; x <= bx1; x += .006) for (let y = by0; y <= by1; y += .006) {
-      let m = Infinity;
-      for (const p of P) m = Math.min(m, (p[0] - x) ** 2 + (p[1] - y) ** 2);
-      if (m > best) { best = m; M = [x, y]; }
+    let run = 0, picked = false;
+    const sleep = (ms, r) => new Promise((ok) => setTimeout(() => ok(r === run), ms));
+    function open(k) {
+      empty.hidden = true;
+      notes.forEach((n) => { n.hidden = +n.dataset.k !== k; n.classList.remove("lit"); });
+      root.querySelectorAll(".dsrc button").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.k === k)));
+      // two frames, so the mark starts from nothing after the note is shown
+      requestAnimationFrame(() => requestAnimationFrame(() => notes.find((n) => +n.dataset.k === k).classList.add("lit")));
     }
-    const toM = [...RUN].sort((a, b) => ((P[a][0] - M[0]) ** 2 + (P[a][1] - M[1]) ** 2) - ((P[b][0] - M[0]) ** 2 + (P[b][1] - M[1]) ** 2)).slice(0, 2);
-
-    // timeline, ms: notes appear from the seed outward, then their links, then the two lower tiers
-    const APPEAR = 60, T_LINK = 1250, T_PROP = 3050, T_ASK = 4150, T_END = 5300;
-    const AUTO = GR.l.filter(([a, b]) => rank.has(a) || rank.has(b))
-      .map(([a, b]) => (rank.has(a) && (!rank.has(b) || rank.get(a) <= rank.get(b)) ? [a, b] : [b, a]))
-      .sort((p, q) => rank.get(p[0]) - rank.get(q[0]))
-      .map(([a, b], j, all) => [a, b, T_LINK + j * (1500 / all.length)]);
-    const BASE = GR.l.filter(([a, b]) => !rank.has(a) && !rank.has(b));
-    const LOW = [
-      ...PROP.map(([a, b], k) => [a, b, T_PROP + k * 160, 2]),
-      ...ASK.map(([a, b], k) => [a, b, T_ASK + k * 160, 3]),
-      ...toM.map((a, k) => [a, -1, T_ASK + 320 + k * 160, 3]),
-    ];
-    const stepAt = (t) => (t >= T_END ? -1 : t >= T_ASK ? 3 : t >= T_PROP ? 2 : t >= T_LINK ? 1 : 0);
-    const stepsN = [...document.querySelectorAll("#nuc-steps li")];
-
-    const ctxN = cvN.getContext("2d");
-    const PAPER32 = 0xFFF9FDFF, INK32 = 0xFF15181A;   // little-endian RGBA of --paper and --ink
-    let w = 0, h = 0, bits, base, imgN, cx = 0, cy = 0, k = 1;
-    const X = (i) => Math.round((P[i][0] - cx) * k + w / 2), Y = (i) => Math.round((P[i][1] - cy) * k + h / 2);
-    // the tiers of Fig. 2, by pixel: 1 solid, 2 the 4x4 screen at .55, 3 the 8x8 ghost at .16
-    function put(x, y, c) {
-      if (x < 0 || y < 0 || x >= w || y >= h) return;
-      if (c === 1 || (c === 2 && .55 > B8[((y & 3) * 2) * 8 + (x & 3) * 2] / 16) || (c === 3 && .16 > B8[(y & 7) * 8 + (x & 7)] / 64)) bits[y * w + x] = 1;
+    root.querySelectorAll("button[data-k]").forEach((b) => b.addEventListener("click", () => { picked = true; open(+b.dataset.k); }));
+    function set(done) {
+      for (const k of ["q", "meta", "src", "ans", "math"]) step(k).classList.toggle("off", !done);
+      chips.forEach((c) => c.classList.toggle("off", !done));
+      words.forEach((w) => w.classList.toggle("off", !done));
+      readN.textContent = "read 5 notes"; typed.textContent = ""; comp.classList.remove("typing", "sent");
+      notes.forEach((n) => { n.hidden = true; n.classList.remove("lit"); }); empty.hidden = false;
+      root.querySelectorAll(".dsrc button").forEach((b) => b.setAttribute("aria-pressed", "false"));
+      if (done) open(0);
     }
-    function seg(x0, y0, x1, y1, f, c, th) {
-      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1), m = Math.round(n * Math.min(1, f)), o = th >> 1;
-      for (let s = 0; s <= m; s++) {
-        const x = Math.round(x0 + (x1 - x0) * s / n), y = Math.round(y0 + (y1 - y0) * s / n);
-        for (let a = 0; a < th; a++) for (let b = 0; b < th; b++) put(x + a - o, y + b - o, c);
-      }
+    async function play() {
+      const r = ++run; picked = false; set(false);
+      comp.classList.add("typing");
+      for (let i = 1; i <= Q.length; i++) { typed.textContent = Q.slice(0, i); if (!await sleep(Q[i - 1] === " " ? 55 : 24, r)) return; }
+      if (!await sleep(380, r)) return;
+      comp.classList.remove("typing"); comp.classList.add("sent"); typed.textContent = "";
+      step("q").classList.remove("off");
+      if (!await sleep(420, r)) return;
+      comp.classList.remove("sent");
+      step("meta").classList.remove("off"); step("src").classList.remove("off");
+      for (const c of chips) { readN.textContent = `reading ${c.querySelector(".t").textContent}`; c.classList.remove("off"); if (!await sleep(280, r)) return; }
+      readN.textContent = "read 5 notes";
+      step("ans").classList.remove("off");
+      for (const w of words) { w.classList.remove("off"); if (!await sleep(36, r)) return; }
+      if (!await sleep(220, r)) return;
+      step("math").classList.remove("off");
+      if (!await sleep(650, r)) return;
+      if (!picked) open(0);
     }
-    function block(x, y, r, c) { for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) put(x + a, y + b, c); }
-    // a clear square of ground first, so a new note reads as a cross and not as a crossing
-    function clear(x, y, r) {
-      for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) {
-        const xx = x + a, yy = y + b;
-        if (xx >= 0 && yy >= 0 && xx < w && yy < h) bits[yy * w + xx] = 0;
-      }
-    }
-    function cross(x, y) { clear(x, y, 8); for (let d = -6; d <= 6; d++) { put(x + d, y, 1); put(x, y + d, 1); } block(x, y, 1, 1); }
-
-    function frameView() {
-      const pts = [...RUN, ...PROP.flat(), ...ASK.flat()];
-      const px = pts.map((i) => P[i][0]), py = pts.map((i) => P[i][1]);
-      const x0 = Math.min(...px), x1 = Math.max(...px), y0 = Math.min(...py), y1 = Math.max(...py);
-      // wide: the run inside its area and the areas around it; square: the run alone
-      const grow = w / h > 1.4 ? 1.6 : 1.3;
-      k = Math.min(w / ((x1 - x0) * grow), h / ((y1 - y0) * grow));
-      cx = (x0 + x1) / 2; cy = (y0 + y1) / 2;
-    }
-    function setupN() {
-      [w, h] = sizeTo(cvN, boxN, 1);
-      bits = new Uint8Array(w * h); imgN = ctxN.createImageData(w, h);
-      frameView();
-      // the vault as it stands before the run: drawn once, copied under every frame
-      for (const [a, b] of BASE) seg(X(a), Y(a), X(b), Y(b), 1, 1, 1);
-      for (let i = 0; i < N; i++) if (!rank.has(i)) block(X(i), Y(i), 1, 1);
-      base = bits.slice();
-    }
-    function drawN(t) {
-      bits.set(base);
-      // the lower tiers get a wider band than a written link so their screen can be read;
-      // ink per length still falls from solid to screen to ghost
-      for (const [a, b, s] of AUTO) if (t > s) seg(X(a), Y(a), X(b), Y(b), (t - s) / 380, 1, 2);
-      for (const [a, b, s, c] of LOW) {
-        if (t <= s) continue;
-        const mx = Math.round((M[0] - cx) * k + w / 2), my = Math.round((M[1] - cy) * k + h / 2);
-        if (b < 0) { clear(mx, my, 9); block(mx, my, 8, 3); seg(X(a), Y(a), mx, my, (t - s) / 520, c, 4); }
-        else seg(X(a), Y(a), X(b), Y(b), (t - s) / 520, c, 4);
-      }
-      RUN.forEach((i, r) => { if (t >= r * APPEAR) cross(X(i), Y(i)); });
-      const u32 = new Uint32Array(imgN.data.buffer);
-      for (let i = 0; i < u32.length; i++) u32[i] = bits[i] ? PAPER32 : INK32;
-      ctxN.putImageData(imgN, 0, 0);
-      const st = stepAt(t);
-      stepsN.forEach((li) => li.classList.toggle("on", st < 0 || +li.dataset.s === st));
-    }
-
-    // runs once when it is in view, holds still out of view, and resumes where it stopped
-    let tN = 0, last = 0, rafN = 0, runningN = false, inView = false;
-    function tick(now) {
-      if (!runningN) return;
-      tN += last ? now - last : 0; last = now;
-      drawN(Math.min(tN, T_END));
-      if (tN >= T_END) { runningN = false; return; }
-      rafN = requestAnimationFrame(tick);
-    }
-    function resumeN() {
-      if (runningN || reduce || tN >= T_END || !inView) return;
-      runningN = true; last = 0; rafN = requestAnimationFrame(tick);
-    }
-    function pauseN() { runningN = false; cancelAnimationFrame(rafN); }
-    setupN(); cvN.hidden = false;
-    if (reduce) tN = T_END;
-    drawN(tN);
-    $("#nuc-replay").addEventListener("click", () => { pauseN(); tN = reduce ? T_END : 0; drawN(tN); inView = true; resumeN(); });
-    if ("IntersectionObserver" in window) {
-      new IntersectionObserver((es) => {
-        const e = es[es.length - 1];
-        inView = e.isIntersecting && e.intersectionRatio >= .35;
-        if (inView) resumeN(); else pauseN();
-      }, { threshold: [0, .35] }).observe(boxN);
-    } else { tN = T_END; drawN(tN); }
-    let rN;
-    addEventListener("resize", () => { clearTimeout(rN); rN = setTimeout(() => { setupN(); drawN(Math.min(tN, T_END)); }, 150); });
+    $("#demo-again").addEventListener("click", play);
+    if (reduce) set(true); else { set(false); inView(root, .45, play); }
   }
 
   // ---- Fig. 4: the failed write, drawn once as noise and then taken back -----
@@ -856,8 +1072,8 @@ footer .fill { margin-left: auto; max-width: 70ch; }
     let y = pad + 26 * U;
     for (const [k, t] of lines) {
       const [wt, size, lead] = F[k];
-      x.font = `${wt} ${size * U}px ${k === "f" ? "'JetBrains Mono', monospace" : "'Host Grotesk', sans-serif"}`;
-      if (draw) x.fillStyle = k === "f" ? "#4A453C" : "#1A1815";
+      x.font = `${wt} ${size * U}px ${k === "f" ? "'Martian Mono', monospace" : "'Archivo', sans-serif"}`;
+      if (draw) x.fillStyle = k === "f" ? tok("--ash") : tok("--fig-ink");
       let line = "";
       const flush = () => { if (draw) x.fillText(line, pad, y); y += lead * U; line = ""; };
       for (const wd of t.split(" ")) { const tt = line ? line + " " + wd : wd; if (line && x.measureText(tt).width > max) { flush(); line = wd; } else line = tt; }
@@ -871,7 +1087,7 @@ footer .fill { margin-left: auto; max-width: 70ch; }
   function sheet(lines) {
     const c = document.createElement("canvas"); c.width = W3; c.height = H3;
     const x = c.getContext("2d");
-    x.fillStyle = "#FFFDF9"; x.fillRect(0, 0, W3, H3);
+    x.fillStyle = tok("--plate"); x.fillRect(0, 0, W3, H3);
     typeset(x, lines, true);
     return c;
   }
@@ -900,9 +1116,9 @@ footer .fill { margin-left: auto; max-width: 70ch; }
     }
     // one-bit noise: ink dots where the structure gave way
     const dot = Math.max(2, Math.round(2 * sc));
-    c3.fillStyle = "#1A1815";
+    c3.fillStyle = tok("--fig-ink");
     for (let n = 0; n < 900 * amt * Math.max(.4, sc); n++) c3.fillRect((rnd() * W3) | 0, (rnd() * H3) | 0, dot, dot);
-    c3.fillStyle = "#FFFDF9";
+    c3.fillStyle = tok("--plate");
     for (let n = 0; n < 6 * amt; n++) c3.fillRect(0, (rnd() * H3) | 0, W3, ((2 + rnd() * 5) * sc) | 0 || 2);
   }
   function play() {
@@ -931,7 +1147,53 @@ footer .fill { margin-left: auto; max-width: 70ch; }
       io.observe(cv3);
     }
     let r3; addEventListener("resize", () => { clearTimeout(r3); r3 = setTimeout(() => { cancelAnimationFrame(raf); playing = false; size3(); c3.drawImage(A, 0, 0); stepTo(4); }, 150); });
+    document.addEventListener("silica-theme", () => { cancelAnimationFrame(raf); playing = false; size3(); c3.drawImage(A, 0, 0); stepTo(4); });
   });
+
+  // ---- the theme: white by default, dark on the switch, remembered where the browser lets it ----
+  const themeBtn = $("#theme");
+  const showTheme = () => themeBtn.setAttribute("aria-pressed", String(document.documentElement.dataset.theme === "dark"));
+  showTheme();
+  themeBtn.addEventListener("click", () => {
+    const root = document.documentElement, dark = root.dataset.theme !== "dark";
+    if (dark) root.dataset.theme = "dark"; else delete root.dataset.theme;
+    try { localStorage.setItem("silica-landing-theme", dark ? "dark" : "light"); } catch (e) {}
+    showTheme(); inks();
+    if (stonesReady()) drawDens(false);
+    fig5(false);
+    document.dispatchEvent(new Event("silica-theme"));
+  });
+
+  // ---- Fig. 5: Silica's mark as a grey relief, printed in one bit ----
+  const fig5Box = $("#spec-5"), cv5 = $("#cv-5");
+  const MARK = ["M16 160 L96 160 L96 240 L16 240 Z", "M16 112 L144 112 L144 240 L112 240 L112 144 L16 144 Z",
+    "M16 64 L192 64 L192 240 L160 240 L160 96 L16 96 Z", "M16 16 L240 16 L240 240 L208 240 L208 48 L16 48 Z"];
+  function markGrey(w, h) {
+    // the relief: light from the top left, each piece shaded across, a soft shadow under it
+    const g = document.createElement("canvas"); g.width = w; g.height = h;
+    const gx = g.getContext("2d", { willReadFrequently: true }), s5 = Math.min(w, h) / 256 * .82;
+    gx.fillStyle = "#fff"; gx.fillRect(0, 0, w, h);
+    gx.setTransform(s5, 0, 0, s5, (w - 256 * s5) / 2, (h - 256 * s5) / 2);
+    MARK.forEach((dpath, i) => {
+      const grad = gx.createLinearGradient(16, 16, 240, 240);
+      grad.addColorStop(0, `rgb(${200 - i * 18},${200 - i * 18},${200 - i * 18})`); grad.addColorStop(1, `rgb(${70 - i * 10},${70 - i * 10},${70 - i * 10})`);
+      gx.save(); gx.shadowColor = "rgba(0,0,0,.45)"; gx.shadowBlur = 14 * s5; gx.shadowOffsetX = 6 * s5; gx.shadowOffsetY = 8 * s5;
+      gx.fillStyle = grad; gx.fill(new Path2D(dpath)); gx.restore();
+    });
+    const d = gx.getImageData(0, 0, w, h).data, gr = new Float32Array(w * h);
+    for (let i = 0; i < gr.length; i++) gr[i] = d[i * 4];
+    return gr;
+  }
+  // from the square the three angles stand on
+  const fig5HT = halftone(cv5, fig5Box, { size: HT_SIZE, grey: markGrey,
+    order: (x, y, W, H, k) => { const s5 = Math.min(W, H) / 256 * .82, sx = (W - 256 * s5) / 2 + 56 * s5, sy = (H - 256 * s5) / 2 + 200 * s5;
+      return .55 * Math.hypot(x - sx, y - sy) / Math.hypot(W, H) + .45 * cellHash(k, 13); } });
+  function fig5(animate) {
+    fig5HT.build();
+    animate ? fig5HT.enter(1600) : fig5HT.show();
+  }
+  if (reduce) fig5(false);
+  else { fig5HT.build(); fig5HT.hold(); inView(fig5Box, .35, () => fig5(true)); }
 
   // ---- copy ------------------------------------------------------------------
   document.querySelectorAll(".copy").forEach((b) => b.addEventListener("click", async () => {
