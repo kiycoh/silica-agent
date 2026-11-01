@@ -41,7 +41,7 @@ def _perceive_with(monkeypatch, bodies: list[str], query: str, k: int, **kw):
                for i in range(len(bodies))]
     monkeypatch.setattr(perception, "facade_retrieve", lambda *a, **k_: (results, None))
     monkeypatch.setattr(perception, "_read_dated_body",
-                        lambda path, origin="vault": ("", None, bodies[int(path[1:])], [], "", "active", False))
+                        lambda path, origin="vault": ("", None, bodies[int(path[1:])], [], "", "active", False, []))
     monkeypatch.setattr(perception, "_recall_facts", lambda *a, **k_: ([], [], ""))
     return perception.perceive(query, now="2026-09-03", k=k, with_facts=False, **kw)
 
@@ -82,7 +82,7 @@ def test_identical_bodies_from_different_origins_both_survive(monkeypatch):
     b.origin = "memory"
     monkeypatch.setattr(perception, "facade_retrieve", lambda *a_, **k_: ([a, b], None))
     monkeypatch.setattr(perception, "_read_dated_body",
-                        lambda path, origin="vault": ("", None, "yoga on Tuesday", [], "", "active", False))
+                        lambda path, origin="vault": ("", None, "yoga on Tuesday", [], "", "active", False, []))
     monkeypatch.setattr(perception, "_recall_facts", lambda *a_, **k_: ([], [], ""))
     p = perception.perceive("yoga", now="2026-09-22", k=2, with_facts=False)
     assert [(blk.path, blk.origin) for blk in p.blocks] == [("n0", "vault"), ("deep/n0", "memory")]

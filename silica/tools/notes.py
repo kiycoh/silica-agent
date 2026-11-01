@@ -301,6 +301,67 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
 
 
 @tool(cls="composed", collapse="eager")
+def silica_require(
+    name: Annotated[str, Field(description='Name or vault-relative path of the note that requires another')],
+    prerequisite: Annotated[str, Field(description='Name or path of the note to read before it')],
+    clear: Annotated[bool, Field(description='Remove this prerequisite instead of adding it')] = False,
+) -> dict[str, Any]:
+    """Record that a note requires another: `requires:` in its frontmatter
+    (ADR-0145). Memorize orders study by it and /path follows it. Call it only
+    for a pair the user accepted; otherwise propose the pair. Revertible with /undo.
+    """
+    from silica.kernel.write import frontmatter
+    from silica.kernel.write.checkpoints import get_checkpoint_store
+
+    try:
+        nc = DRIVER.read_note(name)
+        target = DRIVER.read_note(prerequisite).ref.path
+    except Exception as e:
+        return {"error": f"Failed to read '{name}' or '{prerequisite}': {e}"}
+    path = nc.ref.path or name
+    if target == path:
+        return {"error": "A note cannot require itself."}
+    # The shortest link that names one note: the file name, unless several
+    # notes share it (ADR-0114), then the path.
+    stem = target.rsplit("/", 1)[-1].removesuffix(".md")
+    try:
+        shared = len(DRIVER.notes_named(stem)) > 1
+    except Exception:
+        shared = True  # a backend without the name index: the path is never ambiguous
+    link = target.removesuffix(".md") if shared else stem
+
+    data, _raw, _body = frontmatter.split(nc.content)
+    names = frontmatter.requires_in(data)
+    same = {link.casefold(), stem.casefold(), target.removesuffix(".md").casefold()}
+    if clear:
+        wanted = [n for n in names if n.casefold() not in same]
+    else:
+        wanted = names if any(n.casefold() in same for n in names) else names + [link]
+    if wanted == names:
+        return {"note": name, "path": path, "requires": names, "changed": False}
+    try:
+        unset = getattr(DRIVER, "unset_prop", None)  # the Obsidian bridge has none
+        if wanted or unset is None:
+            DRIVER.set_prop(path, "requires", [f"[[{n}]]" for n in wanted])
+        else:
+            unset(path, "requires")
+        new_content = DRIVER.read_note(path).content
+    except Exception as e:
+        return {"error": f"Failed to write '{name}': {e}"}
+
+    checkpoint_depth = None
+    checkpoint_ok = False
+    try:
+        checkpoint_depth = get_checkpoint_store().push(path, nc.content, new_content)
+        checkpoint_ok = True
+    except Exception as e:
+        logger.warning("checkpoint push failed for '%s': %s — /undo has no "
+                       "restore point for this write", path, e)
+    return {"note": name, "path": path, "requires": wanted,
+            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
+
+
+@tool(cls="composed", collapse="eager")
 def silica_write_note(
     path: Annotated[str, Field(description="Vault-relative path for the new note (e.g. 'Computer Science/Computer Vision.md')")],
     body: Annotated[str, Field(description='Markdown body only — NO YAML frontmatter; it is applied mechanically from the vault template. ' + _MERMAID_RULE)],

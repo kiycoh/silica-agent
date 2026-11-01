@@ -87,6 +87,8 @@ def _note_meta(text: str, mtime: float) -> tuple[float, bool, str, dict]:
     # graph report imports this module (import contract P2/DKB).
     if str(data.get("section") or "") == "(outline)":
         extra["spine"] = True
+    if requires := frontmatter.requires_in(data):
+        extra["requires"] = requires  # written prerequisites (ADR-0145)
     return ts, bool(data.get("AI")), str(kind or "").strip().lower(), extra
 
 
@@ -287,14 +289,71 @@ def prerequisites_map() -> dict[str, list[str]]:
                 _empty_report(), G_dir.to_undirected(), G_dir, cooccur_store=store, created=None,
             )
             _prereq_disk(sig, prereq_map)
-        prereq_map = drop_structural(prereq_map, _notes_meta(Path(vault)))
+        notes = _notes_meta(Path(vault))
+        # After the disk cache, which keys on the links and the index alone:
+        # an edit to `requires:` moves the epoch and lands here, not there.
+        prereq_map = with_written(drop_structural(prereq_map, notes), _written_keys(notes))
         if epoch:
             _prereq_memo.clear()
             _prereq_memo[vault] = (epoch, prereq_map)
         return prereq_map
     except Exception as exc:
         logger.debug("learner: prerequisites unavailable (%s)", exc)
+        # What the person wrote needs no graph and no index (ADR-0145 point 3).
+        try:
+            from silica.config import CONFIG
+
+            return _written_keys(_notes_meta(Path(CONFIG.vault_path))) if CONFIG.vault_path else {}
+        except Exception:
+            return {}  # no readable vault either: the queue orders by gain alone, as before
+
+
+def _written_keys(notes: dict[str, dict]) -> dict[str, list[str]]:
+    """written_requires in the store keyspace prerequisites_map speaks."""
+    from silica.kernel.recall.cooccurrence import cooccur_key
+
+    return {cooccur_key(d): [cooccur_key(q) for q in qs]
+            for d, qs in written_requires(notes).items()}
+
+
+def written_requires(notes: dict[str, dict]) -> dict[str, list[str]]:
+    """{note path: [prerequisite paths]} from the `requires:` the person wrote
+    or accepted (ADR-0145), over `_notes_meta`'s paths. A name is a path, a
+    file name or an alias; one that names several notes, or none, is
+    skipped rather than guessed (ADR-0114)."""
+    if not any(m.get("requires") for m in notes.values()):
         return {}
+    by_name: dict[str, set[str]] = {}
+    for p, m in notes.items():
+        for name in (p.removesuffix(".md"), Path(p).stem, *m.get("aliases", ())):
+            by_name.setdefault(name.casefold(), set()).add(p)
+
+    def resolve(name: str) -> str | None:
+        hits = by_name.get(name.removesuffix(".md").casefold(), set())
+        return next(iter(hits)) if len(hits) == 1 else None
+
+    out: dict[str, list[str]] = {}
+    for p, m in notes.items():
+        got = [q for q in map(resolve, m.get("requires", ())) if q and q != p]
+        if got:
+            out[p] = list(dict.fromkeys(got))
+    return out
+
+
+def with_written(prereq_map: dict[str, list[str]], written: dict[str, list[str]]) -> dict[str, list[str]]:
+    """RefD's map with the written prerequisites over it (ADR-0145 point 3):
+    a note's written list replaces its inferred one, and an inferred edge
+    running the other way between the same two notes goes. Both maps are in
+    the store keyspace."""
+    if not written:
+        return prereq_map
+    out = {d: list(ps) for d, ps in prereq_map.items()}
+    for dependent, prereqs in written.items():
+        out[dependent] = list(prereqs)
+        for q in prereqs:
+            if dependent in out.get(q, []):
+                out[q] = [x for x in out[q] if x != dependent]
+    return {d: ps for d, ps in out.items() if ps}
 
 
 def drop_structural(prereq_map: dict[str, list[str]], notes: dict[str, dict]) -> dict[str, list[str]]:

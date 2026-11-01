@@ -93,6 +93,27 @@ def documents_in(content):
     return [str(x).strip() for x in raw if str(x).strip()]
 
 
+_LINK_TARGET = re.compile(r"\[\[([^\]|#]+)")
+
+
+def requires_in(data) -> list[str]:
+    """The note names a parsed frontmatter's `requires:` names (ADR-0145):
+    `"[[Gradient descent]]"`, `[[A|alias]]` and `[[A#h]]` give their target,
+    a bare string is taken as a name, in written order, once each."""
+    raw = data.get("requires") if isinstance(data, dict) else None
+    items = [raw] if isinstance(raw, str) else raw if isinstance(raw, (list, tuple)) else []
+    out: list[str] = []
+    for item in items:
+        while isinstance(item, list):  # an unquoted [[A]] parses as nested YAML lists
+            item = item[0] if item else ""
+        text = str(item or "").strip()
+        m = _LINK_TARGET.search(text)
+        name = (m.group(1) if m else text).strip()
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
 def add_alias(content, alias):
     """Add `alias` to a note's `aliases:`, idempotently. Returns the new content.
 

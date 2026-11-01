@@ -648,6 +648,7 @@ def reading_path(
     graph: GraphLike | None = None,
     cooccur_store: "CooccurStore | None" = None,
     weighted: bool = False,
+    requires: dict[str, list[str]] | None = None,
 ) -> list[tuple[str, str]] | None:
     """Shortest reading path src → dst: BFS over wikilinks + latent cooccur edges.
 
@@ -661,9 +662,18 @@ def reading_path(
     edge cost = 1/strength (wikilink strength 1.0, cooccur strength = its
     Jaccard score, so a weak 0.25 bridge costs 4 wikilink hops) and Dijkstra
     picks the strongest chain instead of the fewest hops.
+
+    `requires` ({note: [its written prerequisites]}, graph keys, ADR-0145)
+    names a leg "requires" or "required by" at strength 2: a prerequisite the
+    person wrote is the strongest reading order there is, so the walk prefers it.
     """
     if graph is None:
         _notes, _titles, graph = _driver_graph()
+    req = {u: set(vs) for u, vs in (requires or {}).items()}
+    required_by: dict[str, set[str]] = {}
+    for u, vs in req.items():
+        for v in vs:
+            required_by.setdefault(v, set()).add(u)
     if cooccur_store is None:  # embed leg unused here — load only the cooccur half
         cooccur_store = _cooccur_store()
 
@@ -677,6 +687,10 @@ def reading_path(
         if u in graph:
             for nb in graph.neighbors(u):
                 out[nb] = ("wikilink", 1.0)  # wikilink wins when both legs share an edge
+        for nb in required_by.get(u, ()):
+            out[nb] = ("required by", 2.0)
+        for nb in req.get(u, ()):
+            out[nb] = ("requires", 2.0)
         return sorted(out.items())
 
     prev: dict[str, tuple[str | None, str]] = {src: (None, "start")}
