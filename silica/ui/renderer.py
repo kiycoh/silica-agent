@@ -126,6 +126,7 @@ _TOOL_DESC: dict[str, tuple[str, str | None]] = {
     "silica_write_note": ("write note", "path"),
     "silica_patch_note": ("patch note", "name"),
     "silica_flag_note": ("flag note", "name"),
+    "silica_require": ("require", "name"),
     "silica_record_quiz": ("record quiz", None),
     "silica_review_queue": ("review queue", None),
     "silica_props": ("props", "name"),

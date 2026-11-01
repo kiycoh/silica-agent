@@ -363,6 +363,39 @@ class UndoJournalStore:
         return [{"run": r["run_id"], "path": r["path"], "deleted_at": r["started_at"],
                  "source": r["source"]} for r in self._conn().execute(query, params)]
 
+    def before_images(self, path: str, vault: str | None) -> list[dict]:
+        """Every body a run found at `path` in `vault` before it wrote over the
+        note or deleted it, as `{id, at, kind: "before", source, reverted,
+        chars}` with `id` = "j<inverse id>": the part of a note's history that
+        /nucleate and the other runs keep, not the checkpoint store (ADR-0144
+        point 6). A note a run created has no before-image."""
+        from silica.kernel.write.provenance import note_key
+
+        query = ("SELECT i.id, i.path, LENGTH(i.prior_content) AS chars, r.started_at, "
+                 "r.source, r.reverted_at FROM inverses i JOIN runs r ON r.run_id = i.run_id "
+                 "WHERE i.prior_content IS NOT NULL")
+        params: list = []
+        if vault is not None:
+            query += " AND r.vault = ?"
+            params.append(vault)
+        want = note_key(path)
+        return [{"id": f"j{r['id']}", "at": r["started_at"], "kind": "before",
+                 "source": r["source"], "reverted": r["reverted_at"] is not None,
+                 "chars": r["chars"]}
+                for r in self._conn().execute(query + " ORDER BY i.id DESC", params)
+                if note_key(r["path"]) == want]
+
+    def before_image(self, inverse_id: int, path: str, vault: str | None) -> str | None:
+        """The body of one before-image of `path` in `vault`; None when the id is not one."""
+        from silica.kernel.write.provenance import note_key
+
+        row = self._conn().execute(
+            "SELECT i.path, i.prior_content, r.vault FROM inverses i "
+            "JOIN runs r ON r.run_id = i.run_id WHERE i.id = ?", (inverse_id,)).fetchone()
+        if row is None or note_key(row["path"]) != note_key(path):
+            return None
+        return row["prior_content"] if vault is None or row["vault"] == vault else None
+
     def leave_trash(self, run_id: str, path: str) -> None:
         """`path` leaves run `run_id`'s trash, restored or erased: its inverse
         goes, and a run with none left is closed, so the tree's undo of the

@@ -144,7 +144,10 @@ def create_event(title: str, start: str, *, end: str = "", rrule: str = "",
         checkpoint_depth = None
         checkpoint_ok = False
         try:
-            checkpoint_depth = get_checkpoint_store().push(path, None, content)  # None: created, /undo removes it
+            # What landed, not what was asked: the driver composes the frontmatter, and
+            # a stored body that is not the disk reads as a hand edit at the next write.
+            landed = DRIVER.read_note(ref.path).content
+            checkpoint_depth = get_checkpoint_store().push(path, None, landed)  # None: created, /undo removes it
             checkpoint_ok = True
         except Exception as e:
             logger.warning("checkpoint push failed for '%s': %s — /undo has no "
@@ -163,7 +166,7 @@ def silica_event_update(note: Annotated[str, Field(description='Event note stem 
     from silica.kernel.calendar.model import scan_events, validate_event
     from silica.kernel.workqueue import path_lease
     from silica.kernel.write import frontmatter
-    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.checkpoints import push_landed
     from silica.kernel.write.templates import upsert_props
 
     changes = {k: v.strip() for k, v in
@@ -202,7 +205,7 @@ def silica_event_update(note: Annotated[str, Field(description='Event note stem 
 
         checkpoint_ok = False
         try:
-            get_checkpoint_store().push(target.path, prior, new_content)
+            push_landed(target.path, prior, new_content)
             checkpoint_ok = True
         except Exception as e:
             logger.warning("checkpoint push failed for '%s': %s", target.path, e)

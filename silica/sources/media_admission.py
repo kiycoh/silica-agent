@@ -91,8 +91,10 @@ _MONTHS = ("January", "February", "March", "April", "May", "June", "July",
 
 
 def _renewal() -> str:
-    """The first day of next month, as the refusal names it."""
-    return f"1 {_MONTHS[time.localtime().tm_mon % 12]}"
+    """The first day of the month after the one being counted, as the refusal
+    names it. From `_month()` and not a second clock read, which named the
+    wrong month whenever the two straddled a month's end."""
+    return f"1 {_MONTHS[int(_month()[5:7]) % 12]}"
 
 
 def _ledger() -> dict[str, float]:

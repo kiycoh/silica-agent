@@ -1066,8 +1066,49 @@ def _vault_rel(path: str) -> str:
     return path.replace("\\", "/").strip("/")
 
 
+def _prop_selector(prop: str) -> tuple[str, str] | None:
+    """`"key: value"` as a casefolded (key, value) pair; None when either is missing."""
+    key, sep, value = prop.partition(":")
+    key, value = key.strip().casefold(), value.strip().strip("\"'").strip().casefold()
+    return (key, value) if sep and key and value else None
+
+
+def _with_prop(files: list[str], key: str, value: str, folder: str) -> list[str]:
+    """The notes of `files` whose frontmatter `key` equals `value` (ADR-0109 point 1).
+
+    Resolved over each note's frontmatter, never over a search, because a set
+    named by a ranking has no size: on the 2026-08-15 testbench the contract
+    filed outside Contracts/ entered no tool result in 4 of 4 runs. Values are
+    compared as written apart from case (owner, 2026-11-01: `in force` and
+    `in vigore` stay two values), a list matching on any element. A safe-mode
+    copy is not a member, its original is: counting both made 18 contracts of
+    17. Unless the listing asks for the staging folder itself.
+    """
+    from silica.kernel.vault_manifest import active_write_dir, within
+    from silica.onboarding.adopt import SAFE_WRITE_DIR
+
+    skip_copies = (active_write_dir() == SAFE_WRITE_DIR
+                   and not within(_vault_rel(folder), SAFE_WRITE_DIR))
+    out: list[str] = []
+    for f in files:
+        if skip_copies and within(f, SAFE_WRITE_DIR):
+            continue
+        props = DRIVER.props_of(f) or {}
+        got = next((v for k, v in props.items() if str(k).casefold() == key), None)
+        if any(v is not None and str(v).strip().casefold() == value
+               for v in (got if isinstance(got, list) else [got])):
+            out.append(f)
+    # shortcut: one frontmatter read per note on every call; cache per index
+    # generation if it measures above 100 ms at p90 on a 2,000-note vault (ADR-0109).
+    return out
+
+
 @tool(cls="atomic")
-def silica_files(folder: Annotated[str, Field(description='Optional folder path to filter results')] = "") -> dict:
+def silica_files(
+    folder: Annotated[str, Field(description='Optional folder path to filter results')] = "",
+    prop: Annotated[str, Field(description='Optional "key: value": only notes whose frontmatter '
+                                           'key has that value, e.g. "type: contract" or "tags: statistics"')] = "",
+) -> dict:
     """Lists vault notes and source files under a folder.
 
     Returns {"total", "files"} for markdown (wikilink name = filename minus
@@ -1077,12 +1118,19 @@ def silica_files(folder: Annotated[str, Field(description='Optional folder path 
     ({folder: count}) for non-markdown material that IS in the vault — never
     report it as missing. Listings cap at 200: on "truncated", narrow with
     folder= instead of re-calling. For a bare count use "total" or the
-    '## Vault map' already in context.
+    '## Vault map' already in context. For a question over every note of a
+    kind (all my contracts, a course's notes), prop= names the set by its
+    frontmatter and "total" is its size.
     """
     # bare paths, not {name, path} dicts — NoteRef.name is the
     # filename without its extension, so the dict shipped every note's name
     # twice (48% of this payload, ~2.5k tokens at the 200-entry cap).
     files = notes_under(folder)
+    selector = _prop_selector(prop) if prop else None
+    if prop and selector is None:
+        return {"error": 'prop takes "key: value", e.g. prop="type: contract"'}
+    if selector:
+        files = _with_prop(files, *selector, folder)
     from silica.kernel.workspaces import active_scope, in_scope
 
     scope = active_scope()
@@ -1098,6 +1146,16 @@ def silica_files(folder: Annotated[str, Field(description='Optional folder path 
     if len(files) > _FILES_CAP:
         result["truncated"] = True
         result["hint"] = "Listing capped at 200 entries; pass folder= to narrow."
+    if selector:
+        # A property set holds notes only: the code, inbox and source-folder
+        # lines below describe a folder, not the set.
+        if not files:
+            # A bare 0 reads as "the vault has none"; it says only that no note
+            # spells this value this way (ADR-0109 point 9).
+            result["hint"] = (f"No note has '{prop.strip()}' in its frontmatter. Values match as "
+                              "written: a note may spell the value differently or in another "
+                              "language; list a folder to see the values its notes carry.")
+        return result
     # An inbox folder of PDFs is not an empty folder: say so, or the caller
     # concludes the path does not exist. See _unconverted_under.
     pending = _unconverted_under(folder) if folder else []

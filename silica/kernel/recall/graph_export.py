@@ -135,6 +135,10 @@ def _zone_color(i: int, on_paper: bool = False) -> str:
 # as an alarm — but off the neon and into the same lightness band as its
 # neighbours.
 _EDGE_COLOR_EXTRACTED = "#868f9c"   # unlit graphite — resolved links
+# A written `requires:` (ADR-0145 point 7): the theme's frost, the "on" ink of
+# what the person wrote and accepted, a neutral so k-NN stays the one vivid layer.
+_EDGE_COLOR_REQUIRES = "#F4F5F7"
+_EDGE_COLOR_REQUIRES_PAPER = "#1A1815"
 _EDGE_COLOR_AMBIGUOUS = "#e2544f"   # alarm red, deliberately outside the arc
 _EDGE_COLOR_SIMILAR   = "#22b4cc"   # the signal — embedding k-NN (semantic map)
 
@@ -314,6 +318,15 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
     edges: list[dict] = []
     edge_set: set[tuple[str, str]] = set()
     edge_idx = 0
+    # A written requires is the wikilink its frontmatter already makes, with a
+    # direction the person gave it: the same edge, flagged, so every structural
+    # reading still counts it once and only its mark changes (ADR-0145).
+    try:
+        from silica.kernel.recall.requires import written_requires
+
+        written = written_requires(CONFIG.vault_path or ".")
+    except Exception:
+        written = {}  # an unreadable walk draws every link as the plain wikilink it is
 
     for src_raw, tgt_raw, attrs in internal_graph.edges(data=True):
         src = src_raw.replace("\\", "/")
@@ -326,8 +339,10 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
         edge_set.add(key)
         # Only the scaffold class is stamped: a prose link is the payload every
         # consumer already reads, and the viewer ignores keys it does not know.
+        requires = tgt in written.get(src, ())
         edges.append({
             **({"scaffold": True} if attrs.get("scaffold") else {}),
+            **({"requires": True} if requires else {}),
             "id":     f"e{edge_idx}",
             "from":   src,
             "to":     tgt,
@@ -335,8 +350,10 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
             # opacity and width are the RANK, and the viewer honours both. A
             # wikilink is the strongest thing in the graph because it is the only
             # edge a person actually wrote; everything else is inferred.
-            "color":  {"color": _EDGE_COLOR_EXTRACTED,
-                       "paper": _EDGE_COLOR_EXTRACTED_PAPER, "opacity": 0.72},
+            "color":  ({"color": _EDGE_COLOR_REQUIRES, "paper": _EDGE_COLOR_REQUIRES_PAPER,
+                        "opacity": 1.0} if requires else
+                       {"color": _EDGE_COLOR_EXTRACTED,
+                        "paper": _EDGE_COLOR_EXTRACTED_PAPER, "opacity": 0.72}),
             "arrows": {"to": {"enabled": True, "scaleFactor": 0.6}},
             "width":  1.6,
         })

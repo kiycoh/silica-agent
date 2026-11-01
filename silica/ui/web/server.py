@@ -5034,8 +5034,6 @@ def changes_keep(payload: dict):
 @app.get("/changes/diff")
 def changes_diff(path: str = ""):
     """One note's diff as flat rows: `-` removed, `+` added, ` ` context, `@` gap."""
-    import difflib
-
     base = session_changes.snapshot().get(path)
     if base is None:
         # No baseline: this session never touched the note, so there is no diff
@@ -5047,18 +5045,7 @@ def changes_diff(path: str = ""):
                 "baseline": False, "lines": []}
     before, after = base.before or "", session_changes.current_text(path)
     added, removed = session_changes.tally(before, after or "")
-    rows: list[dict] = []
-    diff = difflib.unified_diff(before.splitlines(), (after or "").splitlines(),
-                                lineterm="", n=_DIFF_CONTEXT)
-    for i, ln in enumerate(diff):
-        if i < 2:
-            continue  # the ---/+++ file headers difflib always emits first
-        if ln.startswith("@@"):
-            if not rows and _HUNK_AT_TOP.match(ln):
-                continue  # nothing was skipped above the first line
-            rows.append({"op": "@", "text": ""})
-            continue
-        rows.append({"op": ln[:1] or " ", "text": ln[1:]})
+    rows = _diff_rows(before, after or "")
     return {
         "path": path,
         "name": _clean_name(path),
@@ -5070,6 +5057,112 @@ def changes_diff(path: str = ""):
         "lines": rows[:_MAX_DIFF_LINES],
         "clipped": max(0, len(rows) - _MAX_DIFF_LINES),
     }
+
+
+def _diff_rows(before: str, after: str) -> list[dict]:
+    """Flat diff rows: `-` removed, `+` added, ` ` context, `@` gap."""
+    import difflib
+
+    rows: list[dict] = []
+    diff = difflib.unified_diff(before.splitlines(), after.splitlines(),
+                                lineterm="", n=_DIFF_CONTEXT)
+    for i, ln in enumerate(diff):
+        if i < 2:
+            continue  # the ---/+++ file headers difflib always emits first
+        if ln.startswith("@@"):
+            if not rows and _HUNK_AT_TOP.match(ln):
+                continue  # nothing was skipped above the first line
+            rows.append({"op": "@", "text": ""})
+            continue
+        rows.append({"op": ln[:1] or " ", "text": ln[1:]})
+    return rows
+
+
+# --- a note's history (ADR-0144) ---------------------------------------------
+# Versions come from two stores: the checkpoint rows of interactive writes (an
+# int id) and the undo journal's before-images of runs ("j<id>"). The drawer's
+# History section behind Info reads these; it is drawn after the owner's pick.
+
+def _history_note(path: str) -> str:
+    """The vault path a history request names, resolved the way /undo resolves
+    a card's argument; 404 when no note answers to it."""
+    from silica.driver import DRIVER
+
+    try:
+        return DRIVER.read_note(path).ref.path
+    except Exception:
+        raise HTTPException(status_code=404, detail="no such note")
+
+
+def _history_body(path: str, version: str) -> str:
+    from silica.config import CONFIG
+    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.undo_journal import get_undo_journal
+
+    body = None
+    v = str(version)
+    if v.startswith("j") and v[1:].isdigit():
+        body = get_undo_journal().before_image(int(v[1:]), path,
+                                               (CONFIG.vault_path or "").strip() or None)
+    elif v.isdigit():
+        body = get_checkpoint_store().version(path, int(v))
+    if body is None:
+        raise HTTPException(status_code=404, detail="no such version of this note")
+    return body
+
+
+@app.get("/note/history")
+def note_history(path: str = ""):
+    """Every version of one note, newest first: what Silica wrote, what it
+    found edited by hand, what a run found before writing over it."""
+    from silica.config import CONFIG
+    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.undo_journal import get_undo_journal
+
+    from silica.driver import DRIVER
+
+    note = _history_note(path)
+    versions = get_checkpoint_store().history(note, current=DRIVER.read_note(note).content) + get_undo_journal().before_images(
+        note, (CONFIG.vault_path or "").strip() or None)
+    versions.sort(key=lambda v: v["at"], reverse=True)
+    return {"path": note, "name": _clean_name(note), "versions": versions}
+
+
+@app.get("/note/history/diff")
+def note_history_diff(path: str = "", id: str = ""):
+    """One past version against the note as it is now: `-` is what restoring
+    it would take out of the note, `+` what it would bring back."""
+    from silica.driver import DRIVER
+
+    note = _history_note(path)
+    body = _history_body(note, id)
+    current = DRIVER.read_note(note).content
+    rows = _diff_rows(current, body)
+    added, removed = session_changes.tally(current, body)
+    return {"path": note, "id": id, "added": added, "removed": removed,
+            "lines": rows[:_MAX_DIFF_LINES], "clipped": max(0, len(rows) - _MAX_DIFF_LINES)}
+
+
+@app.post("/note/history/restore", dependencies=_SAME_ORIGIN)
+def note_history_restore(payload: dict):
+    """Write one past version back as the note's body. A restore is a write
+    like any other: it is pushed as a version, so /undo takes it back."""
+    from silica.driver import DRIVER
+    from silica.kernel.write.checkpoints import push_landed
+    from silica.kernel.write.preserve import Loss
+
+    note = _history_note(str(payload.get("path", "")))
+    version = str(payload.get("id", ""))
+    body = _history_body(note, version)
+    if not _begin_turn():
+        raise HTTPException(409, "a turn is running: restore when it ends")
+    try:
+        prior = DRIVER.read_note(note).content
+        DRIVER.overwrite(note, body, loss=Loss.RESTORE)
+        push_landed(note, prior, body, kind="restore", of=version)
+    finally:
+        _end_turn()
+    return {"restored": note, "id": payload.get("id")}
 
 
 # --- context explorer (GET /context) -----------------------------------------

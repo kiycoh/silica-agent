@@ -287,14 +287,48 @@ def prerequisites_map() -> dict[str, list[str]]:
                 _empty_report(), G_dir.to_undirected(), G_dir, cooccur_store=store, created=None,
             )
             _prereq_disk(sig, prereq_map)
-        prereq_map = drop_structural(prereq_map, _notes_meta(Path(vault)))
+        # After the disk cache, which keys on the links and the index alone:
+        # an edit to `requires:` moves the epoch and lands here, not there.
+        prereq_map = with_written(drop_structural(prereq_map, _notes_meta(Path(vault))),
+                                  _written_keys(vault))
         if epoch:
             _prereq_memo.clear()
             _prereq_memo[vault] = (epoch, prereq_map)
         return prereq_map
     except Exception as exc:
         logger.debug("learner: prerequisites unavailable (%s)", exc)
-        return {}
+        # What the person wrote needs no graph and no index (ADR-0145 point 3).
+        try:
+            from silica.config import CONFIG
+
+            return _written_keys(CONFIG.vault_path) if CONFIG.vault_path else {}
+        except Exception:
+            return {}  # no readable vault either: the queue orders by gain alone, as before
+
+
+def _written_keys(vault: str) -> dict[str, list[str]]:
+    """The written prerequisites (ADR-0145) in the store keyspace prerequisites_map speaks."""
+    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.recall.requires import written_requires
+
+    return {cooccur_key(d): [cooccur_key(q) for q in qs]
+            for d, qs in written_requires(vault).items()}
+
+
+def with_written(prereq_map: dict[str, list[str]], written: dict[str, list[str]]) -> dict[str, list[str]]:
+    """RefD's map with the written prerequisites over it (ADR-0145 point 3):
+    a note's written list replaces its inferred one, and an inferred edge
+    running the other way between the same two notes goes. Both maps are in
+    the store keyspace."""
+    if not written:
+        return prereq_map
+    out = {d: list(ps) for d, ps in prereq_map.items()}
+    for dependent, prereqs in written.items():
+        out[dependent] = list(prereqs)
+        for q in prereqs:
+            if dependent in out.get(q, []):
+                out[q] = [x for x in out[q] if x != dependent]
+    return {d: ps for d, ps in out.items() if ps}
 
 
 def drop_structural(prereq_map: dict[str, list[str]], notes: dict[str, dict]) -> dict[str, list[str]]:

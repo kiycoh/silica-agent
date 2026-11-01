@@ -31,6 +31,7 @@ const TOOL_VERBS = {
   "silica_write_note": ["write note", "path"],
   "silica_patch_note": ["patch note", "name"],
   "silica_flag_note": ["flag note", "name"],
+  "silica_require": ["require", "name"],
   "silica_record_quiz": ["record quiz", null],
   "silica_review_queue": ["review queue", null],
   "silica_props": ["props", "name"],
@@ -69,6 +70,7 @@ const WRITE_OPS = {
   "silica_write_note": "write",
   "silica_patch_note": "patch",
   "silica_flag_note": "flag",
+  "silica_require": "require",
   "silica_bulk_write": "bulk write",
   "silica_restore": "restore",
   "silica_delete": "delete",
@@ -812,9 +814,10 @@ function neighbourRows(d) {
   // The tab chosen last holds for the session; until the reader picks one, a
   // note with a warning opens on Place and every other note on Content.
   let detailsTab = null;
-  const TABS = [["content", "Content"], ["links", "Links"], ["place", "Place"]];
+  const TABS = [["content", "Content"], ["links", "Links"], ["place", "Place"], ["history", "History"]];
 
   function pickTab(key) {
+    if (key === "history") hist = null;   // read afresh each time it is picked
     detailsTab = key;
     renderNode();
     body.scrollTop = 0;
@@ -845,6 +848,9 @@ function neighbourRows(d) {
       }
       b.appendChild(document.createTextNode(label));
       if (key === "links" && d.neighbours.length) b.appendChild(el("span", "dt-n", String(d.neighbours.length)));
+      // History is read when picked, not when the drawer opens: its count shows once it has been.
+      if (key === "history" && hist && hist.path === d.path && hist.versions && hist.versions.length)
+        b.appendChild(el("span", "dt-n", String(hist.versions.length)));
       b.addEventListener("click", () => pickTab(key));
       bar.appendChild(b);
     }
@@ -864,7 +870,181 @@ function neighbourRows(d) {
     body.appendChild(panel);
     if (tab === "content") detailsContent(d, panel);
     else if (tab === "links") detailsLinks(d, panel);
+    else if (tab === "history") detailsHistory(d, panel);
     else detailsPlace(d, panel);
+  }
+
+  // --- History (ADR-0144): every version, a timeline by day (A2), the diff
+  // under the row picked (A3), Restore at the head of the diff -------------
+  let hist = null;   // { path, versions, error, open, diff } for the note in details
+  const KIND = { original: "Original", silica: "Silica", hand: "By hand", run: "A run",
+                 restore: "Restored", before: "Before a run" };
+  const enc = encodeURIComponent;
+  const two = (n) => String(n).padStart(2, "0");
+  const clock = (at) => { const t = new Date(at * 1000); return two(t.getHours()) + ":" + two(t.getMinutes()); };
+
+  function dayOf(at) {
+    const t = new Date(at * 1000), now = new Date();
+    const midnight = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const ago = Math.round((midnight(now) - midnight(t)) / 86400000);
+    if (ago === 0) return "Today";
+    if (ago === 1) return "Yesterday";
+    return t.toLocaleDateString("en-GB", t.getFullYear() === now.getFullYear()
+      ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
+  }
+
+  // Re-drawn in place: the pane is rebuilt on every change, so the scroll and
+  // the focused row are carried over by hand.
+  function redraw() {
+    const top = body.scrollTop, f = document.activeElement, id = f && f.dataset ? f.dataset.version : null;
+    renderNode();
+    body.scrollTop = top;
+    if (id) { const b = body.querySelector('[data-version="' + id + '"]'); if (b) b.focus(); }
+  }
+
+  async function loadHistory(path) {
+    hist = { path, versions: null, open: null, diff: null };
+    let versions = [], error = "";
+    try {
+      const r = await fetch("/note/history?path=" + enc(path), { cache: "no-store" });
+      if (r.ok) versions = (await r.json()).versions || [];
+      else error = "couldn't read this note's history";
+    } catch { error = "couldn't read this note's history"; }
+    if (!hist || hist.path !== path) return;
+    hist.versions = versions; hist.error = error;
+    if (detailsTab === "history") redraw();
+  }
+
+  function versionTail(v, byId) {
+    const bits = [];
+    if (v.now) bits.push("now");
+    if (v.kind === "hand") bits.push("found when Silica wrote");
+    if (v.kind === "run") bits.push("written by a run");
+    if (v.kind === "before" && v.source) bits.push(String(v.source).split("/").pop());
+    if (v.kind === "restore" && v.of && byId.has(String(v.of))) bits.push("brings back " + clock(byId.get(String(v.of)).at));
+    if (v.undone) bits.push("undone");
+    if (v.reverted) bits.push("run reverted");
+    return bits.join(" · ");
+  }
+
+  function detailsHistory(d, into) {
+    if (!hist || hist.path !== d.path) { loadHistory(d.path); emptyLine(into, "reading the history…"); return; }
+    if (!hist.versions) { emptyLine(into, "reading the history…"); return; }
+    if (hist.error) { emptyLine(into, hist.error); return; }
+    if (!hist.versions.length) {
+      emptyLine(into, "no versions yet: Silica keeps one each time it writes this note");
+      return;
+    }
+    const byId = new Map(hist.versions.map((v) => [String(v.id), v]));
+    const tl = el("div", "tl");
+    let day = "";
+    for (const v of hist.versions) {
+      const label = dayOf(v.at);
+      if (label !== day) { day = label; tl.appendChild(el("div", "tl-day", label)); }
+      const id = String(v.id), open = hist.open === id;
+      const row = el("button", "tl-row" + (v.undone || v.reverted ? " undone" : "") + (v.now ? " now" : "") + (open ? " sel" : ""));
+      row.type = "button";
+      row.dataset.version = id;
+      row.setAttribute("aria-expanded", String(open));
+      row.appendChild(el("span", "tl-time", clock(v.at)));
+      const mark = el("span", "tl-mark");
+      mark.setAttribute("aria-hidden", "true");
+      mark.appendChild(el("i"));
+      row.appendChild(mark);
+      const what = el("span", "tl-what", KIND[v.kind] || v.kind);
+      const tail = versionTail(v, byId);
+      if (tail) what.appendChild(el("span", "", tail));
+      row.appendChild(what);
+      row.appendChild(el("span", "tl-sz", Number(v.chars || 0).toLocaleString("en-US")));
+      row.addEventListener("click", () => openVersion(v, d));
+      tl.appendChild(row);
+      if (open) tl.appendChild(versionDiff(v, d));
+    }
+    into.appendChild(tl);
+    into.appendChild(el("div", "nb-leg", "Sizes in characters. A hollow mark is undone."));
+  }
+
+  async function openVersion(v, d) {
+    const id = String(v.id);
+    if (hist.open === id) { hist.open = null; hist.diff = null; redraw(); return; }
+    hist.open = id; hist.diff = { id };
+    redraw();
+    let diff;
+    try {
+      const r = await fetch("/note/history/diff?path=" + enc(d.path) + "&id=" + enc(id), { cache: "no-store" });
+      diff = r.ok ? { id, ...(await r.json()) } : { id, error: "couldn't read that version" };
+    } catch { diff = { id, error: "couldn't read that version" }; }
+    if (!hist || hist.open !== id) return;
+    hist.diff = diff;
+    redraw();
+  }
+
+  const DIFF_CLS = { "+": "dl-add", "-": "dl-del", "@": "dl-gap", " ": "dl-ctx" };
+
+  function versionDiff(v, d) {
+    const box = el("div", "tl-diff");
+    const dl = el("div", "dl");
+    box.appendChild(dl);
+    const st = hist.diff;
+    if (!st || st.id !== String(v.id) || (!st.lines && !st.error)) {
+      dl.appendChild(el("div", "dl-empty", "reading that version…"));
+      return box;
+    }
+    if (st.error) { dl.appendChild(el("div", "dl-empty", st.error)); return box; }
+    const head = el("div", "dl-head");
+    head.appendChild(el("span", "dl-kind", st.lines.length ? "if restored" : "the same as now"));
+    if (st.added) head.appendChild(el("span", "chg-add", "+" + st.added));
+    if (st.removed) head.appendChild(el("span", "chg-del", "−" + st.removed));
+    // Never on the version the note is now, nor on a floor that stands for a
+    // note that did not exist yet: the route has nothing to write back.
+    if (!v.now && !v.absent && st.lines.length) {
+      const b = el("button", "wc-act", "Restore");
+      b.type = "button";
+      b.addEventListener("click", () => restoreVersion(v, d, b));
+      head.appendChild(b);
+    }
+    dl.appendChild(head);
+    if (st.lines.length) {
+      const track = el("div", "dl-track");
+      for (const r of st.lines)
+        track.appendChild(el("div", "dl-line " + (DIFF_CLS[r.op] || "dl-ctx"), r.op === "@" ? "⋯" : r.op + r.text));
+      if (st.clipped) track.appendChild(el("div", "dl-line dl-gap", st.clipped + " more lines"));
+      dl.appendChild(track);
+    }
+    dl.appendChild(el("div", "dl-note", st.note || "Restoring writes this version as a new one. /undo takes it back."));
+    return box;
+  }
+
+  // A turn can write the note: the list it leaves behind is re-read.
+  document.addEventListener("silica:turn-end", () => {
+    if (!hist) return;
+    hist = null;
+    if (detailsTab === "history") redraw();
+  });
+
+  async function restoreVersion(v, d, btn) {
+    btn.disabled = true;
+    // What was typed into the open note reaches the disk first, so the restore
+    // keeps it as a version instead of the editor losing it to the new text.
+    if (typeof drawerNote !== "undefined" && drawerNote.path === d.path && typeof saveEdit === "function")
+      await saveEdit(drawerNote);
+    let r;
+    try {
+      r = await fetch("/note/history/restore", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: d.path, id: String(v.id) }),
+      });
+    } catch { r = null; }
+    if (!r || !r.ok) {
+      hist.diff.note = r && r.status === 409 ? "A turn is running: restore when it ends."
+        : "couldn't restore that version";
+      redraw();
+      return;
+    }
+    // loadChanges refreshes an editor holding the note, as after an /undo,
+    // and the Changes record and the write cards with it.
+    if (typeof loadChanges === "function") loadChanges();
+    await loadHistory(d.path);
   }
 
   // Content: what the note says and what it is about, as the node pane drew it.

@@ -21,9 +21,15 @@ class _Store:
     def most_recent(self):
         return ("fallback.md", 0.0)
 
-    def undo(self, path):
+    def undo(self, path, current=None):
         self.asked = path
         return "restored body"
+
+    def changed_since(self, path, current):
+        return None
+
+    def settle(self, path, landed):
+        pass
 
     def depth(self, path):
         return 1

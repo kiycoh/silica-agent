@@ -235,7 +235,7 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
     """
     import datetime
 
-    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.checkpoints import push_landed
     from silica.kernel.write.contested import (
         contested_refs,
         mark_contested,
@@ -290,13 +290,74 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
     checkpoint_depth = None
     checkpoint_ok = False
     try:
-        checkpoint_depth = get_checkpoint_store().push(path, prior_content, new_content)
+        checkpoint_depth = push_landed(path, prior_content, new_content)
         checkpoint_ok = True
     except Exception as e:
         logger.warning("checkpoint push failed for '%s': %s — /undo has no "
                        "restore point for this write", path, e)
 
     return {"note": name, "path": path, "contested": still_contested,
+            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
+
+
+@tool(cls="composed", collapse="eager")
+def silica_require(
+    name: Annotated[str, Field(description='Name or vault-relative path of the note that requires another')],
+    prerequisite: Annotated[str, Field(description='Name or path of the note to read before it')],
+    clear: Annotated[bool, Field(description='Remove this prerequisite instead of adding it')] = False,
+) -> dict[str, Any]:
+    """Record that a note requires another: `requires:` in its frontmatter
+    (ADR-0145). Memorize orders study by it and /path follows it. Call it only
+    for a pair the user accepted; otherwise propose the pair. Revertible with /undo.
+    """
+    from silica.kernel.write import frontmatter
+    from silica.kernel.write.checkpoints import get_checkpoint_store
+
+    try:
+        nc = DRIVER.read_note(name)
+        target = DRIVER.read_note(prerequisite).ref.path
+    except Exception as e:
+        return {"error": f"Failed to read '{name}' or '{prerequisite}': {e}"}
+    path = nc.ref.path or name
+    if target == path:
+        return {"error": "A note cannot require itself."}
+    # The shortest link that names one note: the file name, unless several
+    # notes share it (ADR-0114), then the path.
+    stem = target.rsplit("/", 1)[-1].removesuffix(".md")
+    try:
+        shared = len(DRIVER.notes_named(stem)) > 1
+    except Exception:
+        shared = True  # a backend without the name index: the path is never ambiguous
+    link = target.removesuffix(".md") if shared else stem
+
+    data, _raw, _body = frontmatter.split(nc.content)
+    names = frontmatter.requires_in(data)
+    same = {link.casefold(), stem.casefold(), target.removesuffix(".md").casefold()}
+    if clear:
+        wanted = [n for n in names if n.casefold() not in same]
+    else:
+        wanted = names if any(n.casefold() in same for n in names) else names + [link]
+    if wanted == names:
+        return {"note": name, "path": path, "requires": names, "changed": False}
+    try:
+        unset = getattr(DRIVER, "unset_prop", None)  # the Obsidian bridge has none
+        if wanted or unset is None:
+            DRIVER.set_prop(path, "requires", [f"[[{n}]]" for n in wanted])
+        else:
+            unset(path, "requires")
+        new_content = DRIVER.read_note(path).content
+    except Exception as e:
+        return {"error": f"Failed to write '{name}': {e}"}
+
+    checkpoint_depth = None
+    checkpoint_ok = False
+    try:
+        checkpoint_depth = get_checkpoint_store().push(path, nc.content, new_content)
+        checkpoint_ok = True
+    except Exception as e:
+        logger.warning("checkpoint push failed for '%s': %s — /undo has no "
+                       "restore point for this write", path, e)
+    return {"note": name, "path": path, "requires": wanted,
             "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
 
 
@@ -410,7 +471,10 @@ def silica_write_note(
         checkpoint_depth = None
         checkpoint_ok = False
         try:
-            checkpoint_depth = get_checkpoint_store().push(path, None, content)  # None: created, /undo removes it
+            # What landed, not what was asked: the driver composes the frontmatter, and
+            # a stored body that is not the disk reads as a hand edit at the next write.
+            landed = DRIVER.read_note(ref.path).content
+            checkpoint_depth = get_checkpoint_store().push(path, None, landed)  # None: created, /undo removes it
             checkpoint_ok = True
         except Exception as e:
             logger.warning("checkpoint push failed for '%s': %s — /undo has no "

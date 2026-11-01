@@ -318,7 +318,10 @@ def _frame_context(
     nodes_all, nodes = nodes, [n for n in nodes if n["id"] not in missing | outside]
     n_notes      = sum(1 for n in nodes if n.get("type") != "ghost")
     n_ghost      = sum(1 for n in nodes if n.get("type") == "ghost")
-    n_extracted  = sum(1 for e in edges if e.get("type") == "EXTRACTED")
+    # A written requires is drawn and switched as its own row (ADR-0145), so
+    # "resolved" counts the plain wikilinks it no longer draws as.
+    n_requires   = sum(1 for e in edges if e.get("type") == "EXTRACTED" and e.get("requires"))
+    n_extracted  = sum(1 for e in edges if e.get("type") == "EXTRACTED") - n_requires
     n_ambiguous  = sum(1 for e in edges if e.get("type") == "AMBIGUOUS")
     n_gaps       = sum(1 for e in edges if e.get("type") == "GAP")
     n_similar    = sum(1 for e in edges if e.get("type") == "SIMILAR")
@@ -368,6 +371,19 @@ def _frame_context(
     # off until asked for and take their citations with them. The count is the
     # lines between library papers; the arrows into missing papers belong to
     # the second row.
+    # On by default, like cites: the person wrote it, so it holds. Chevrons
+    # point at the prerequisite (2D); the swatch draws them the same way.
+    requires_row = (
+        '<label class="filter-row" style="margin-top:4px" title="A note\'s requires: in its '
+        'frontmatter, accepted by you. The chevrons point at the note to read first.">'
+        '<input type="checkbox" id="cb-requires" checked onchange="updateEdgeFilter()">'
+        '<svg class="dot-edge req" width="24" height="9" viewBox="0 0 24 9" aria-hidden="true" '
+        'shape-rendering="crispEdges"><rect x="0" y="4" width="24" height="1" fill="currentColor"/>'
+        '<path d="M6 1 L9 4 L6 7 M15 1 L18 4 L15 7" stroke="currentColor" stroke-width="1" fill="none"/></svg>'
+        'requires'
+        f'<span class="ct">{n_requires}</span>'
+        '</label>'
+    ) if n_requires else ""
     n_papers = sum(1 for n in nodes if n.get("type") == "paper")
     n_cites = sum(1 for e in edges if e.get("type") == "CITES" and e.get("to") not in missing)
     cites_row = (
@@ -613,6 +629,7 @@ def _frame_context(
         "proposed_row": proposed_row,
         "coupled_row": coupled_row,
         "cites_row": cites_row,
+        "requires_row": requires_row,
         "missing_row": missing_row,
         "covers_row": covers_row,
         "rim_rows": rim_rows,

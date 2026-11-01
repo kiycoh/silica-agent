@@ -74,7 +74,7 @@ class NoteBlock:
     excerpt: str    # query-densest window of the body
     contested: str | None = None  # correction reason when flagged, else None
     section: str = ""  # heading chain above the first window ("A > B"), '' at top
-    builds_on: str = ""  # rendered prereqs ("A, B"), set only by study order (G6)
+    builds_on: str = ""  # the note's written `requires:` ("A, B"), ADR-0145 point 5
     origin: str = "vault"  # "memory" = personal-memory lane (ADR-0019): the path
     #                        resolves in ANOTHER vault, so read_note denies it
     documents: list[str] = field(default_factory=list)  # `documents:` frontmatter, repo-relative
@@ -325,10 +325,10 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
 
 
 def _read_dated_body(path: str, origin: str = "vault") -> tuple[
-        str, str | None, str | None, list[str], str, str, bool]:
+        str, str | None, str | None, list[str], str, str, bool, list[str]]:
     """(frontmatter date, contested reason, body, documents, trust, lifecycle,
-    weak) for one note; ('', None, None, [], '', 'active', False) when
-    unreadable. `weak` marks a contest raised only by agents' flags
+    weak, requires) for one note; ('', None, None, [], '', 'active', False, [])
+    when unreadable. `weak` marks a contest raised only by agents' flags
     (contested.contested_by_agents_only): labelled, never decisive (M3).
     `contested` is the note's flag reason (first `contradictions` entry) or
     None; `documents` the repo files the note documents (`documents:`
@@ -342,12 +342,12 @@ def _read_dated_body(path: str, origin: str = "vault") -> tuple[
 
         root = foreign_root(origin)
         if root is None:
-            return "", None, None, [], "", "active", False
+            return "", None, None, [], "", "active", False, []
         p = root / (path if path.endswith(".md") else path + ".md")
         try:
             content = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
-            return "", None, None, [], "", "active", False
+            return "", None, None, [], "", "active", False, []
     else:
         from silica.driver import DRIVER
 
@@ -355,7 +355,7 @@ def _read_dated_body(path: str, origin: str = "vault") -> tuple[
             content = DRIVER.read_note(
                 path if path.endswith(".md") else path + ".md").content or ""
         except Exception:
-            return "", None, None, [], "", "active", False
+            return "", None, None, [], "", "active", False, []
     from silica.kernel.write import frontmatter
 
     data, _raw, body = frontmatter.split(content)
@@ -381,7 +381,7 @@ def _read_dated_body(path: str, origin: str = "vault") -> tuple[
         [str(r) for r in (data.get("contradictions") or [])])
     return (date, contested, body, frontmatter.documents_in(content),
             note_trust(content, has_source_leaf=SOURCES_MARKER in (body or "")),
-            life, weak)
+            life, weak, frontmatter.requires_in(data))
 
 
 def _recall_facts(perception: Perception, query: str, query_vec, *, now: str,
@@ -621,7 +621,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     unresolved = 0
     seen_bodies: dict[int, int] = {}  # hash(body + epistemic state) -> index in blocks
     for rank, (path, evidence, origin) in enumerate(hits, 1):
-        date, contested, body, documents, trust, life, weak = _read_dated_body(path, origin)
+        date, contested, body, documents, trust, life, weak, requires = _read_dated_body(path, origin)
         if body is None:
             continue
         # A byte-identical body is the same file twice (a mineru intermediate
@@ -666,6 +666,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
                                 body=body, excerpt=excerpt, contested=contested,
                                 section=_section_chain(body, spans[0][0]), title=title, whole=whole,
                                 origin=origin, documents=documents,
+                                builds_on=", ".join(requires),
                                 grounding=(grounding.get(note_key(path), "")
                                            if origin == "vault" else ""),
                                 trust=trust, lifecycle=life, non_active=non_active))

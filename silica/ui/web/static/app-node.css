@@ -553,6 +553,135 @@ button.nb-n:focus-visible {
   color: var(--ash-dim);
 }
 
+/* History (ADR-0144): a timeline by day, one line a version (A2), the diff
+   opening under the row picked (A3). The mark says the state without a
+   strikethrough or a fade: an undone version can still be restored, so it is
+   hollow, not gone; the version on disk is the larger frost dot. */
+.tl {
+  padding: 0.2rem 1.25rem 0;
+}
+
+.tl-day {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  padding: 0.7rem 0 0.25rem;
+}
+
+.tl-row {
+  display: grid;
+  grid-template-columns: 3.4rem 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  width: calc(100% + 1rem);
+  height: 2rem;
+  margin: 0 -0.5rem;
+  padding: 0 0.5rem;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tl-row:hover {
+  background: var(--sel-hover);
+}
+
+.tl-row.sel {
+  background: var(--sel);
+}
+
+.tl-row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.tl-time,
+.tl-sz {
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--ash-dim);
+}
+
+.tl-mark {
+  position: relative;
+  height: 2rem;
+}
+
+.tl-mark::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-2);
+}
+
+.tl-mark i {
+  position: absolute;
+  left: 3px;
+  top: calc(50% - 3.5px);
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ash);
+}
+
+.tl-row.undone .tl-mark i {
+  background: var(--sheet);
+  border: 1px solid var(--ash-dim);
+}
+
+.tl-row.now .tl-mark i {
+  left: 2px;
+  top: calc(50% - 4.5px);
+  width: 9px;
+  height: 9px;
+  background: var(--frost);
+}
+
+.tl-what {
+  font-size: var(--fs-ctl);
+  color: var(--frost);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tl-what span {
+  margin-left: 0.4rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.tl-row.undone .tl-what {
+  color: var(--ash-dim);
+}
+
+.tl-diff {
+  padding: 0 0 0.2rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.tl-diff .dl {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.55rem 0 0.7rem;
+}
+
+.tl-diff .wc-act {
+  margin-left: auto;
+}
+
+.tl-diff .dl-note {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
 /* Place: the cut drawn, its caption and names, then the two measures. */
 .pl-fig {
   margin: 0.75rem 1.25rem 0;

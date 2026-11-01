@@ -40,6 +40,7 @@ MUTATING_TOOLS = frozenset({
     "silica_write_note",
     "silica_patch_note",
     "silica_flag_note",
+    "silica_require",
     "silica_move",
     "silica_delete",
 })

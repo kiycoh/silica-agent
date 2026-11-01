@@ -38,6 +38,7 @@ _TOOL_EFFECT: dict[str, str] = {
     "silica_write_note": "written",
     "silica_patch_note": "written",
     "silica_flag_note": "written",
+    "silica_require": "written",
     "silica_bulk_write": "written",
     "silica_restore": "written",
     "silica_delete": "deleted",

@@ -154,6 +154,9 @@ label.filter-row:has(>input:focus-visible){outline:1px solid var(--accent);outli
 .dot-edge.cites::after{content:"";position:absolute;right:-1px;top:-3px;
   border:4px solid transparent;border-right:0;border-left:6px solid var(--c,var(--ash-dim))}
 :where(:root[data-theme="light"]) .dot-edge.cites::after{border-left-color:var(--cp,var(--c,var(--ash-dim)))}
+/* A written requires (ADR-0145): frost, the ink of what the person wrote,
+   with the canvas's chevrons in place of a head, which stays cites' alone. */
+.dot-edge.req{height:9px;background:none;color:var(--frost)}
 /* A missing paper is a hollow broken square in --g-fallback, the colour of a
    node with no community, which is what nodeColor gives it on the canvas. */
 .sq{width:9px;height:9px;flex-shrink:0}
