@@ -403,7 +403,7 @@ def _frame_context(
         '<div class="filter-row" id="covers-row" style="display:none;margin-top:4px" '
         'title="A note among the paper\'s 5 nearest notes, which the papers of its collection '
         'meet more often than the rest of the library does, beyond chance. Inferred by Silica, '
-        'so dashed; no direction, so no arrowhead.">'
+        'so screened in 2D and dashed in 3D (ADR-0146); no direction, so no arrowhead.">'
         '<div class="dot-edge dashed" style="--c:var(--accent);--cp:var(--accent)"></div>'
         '<span id="covers-name">covers</span><span class="ct" id="ct-covers"></span>'
         '</div>'

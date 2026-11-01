@@ -1637,6 +1637,7 @@ const ARROW_2D = 4, ARROW_3D = 8;   // length in graph units: 2/3 of a size-16 d
 const ARROW_W = 0.45;               // half-width over length
 
 function drawCiteArrow(l, ctx) {
+  if (l.type !== "CITES") return;   // the photon carriers pass here too, with the layer up
   const a = l.source, b = l.target;
   if (!a || !b || a.x == null || b.x == null) return;
   const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
@@ -1717,7 +1718,8 @@ const LINK_ALPHA_2D = 0.55;   // see the comment on its use below
 const EDGE_FALLBACK = LIGHT ? DATA.colors.extracted_paper : DATA.colors.extracted;
 
 // --- Edge family: a broken line is a link that is not there ------------------
-// Weight ranks the layers; it does not SEPARATE them, and seven kinds on the
+// Since ADR-0146 the 2D view carries this division as a screen (SCREEN_2D
+// below); the dash is 3D's and the WebGL2-less canvas's. Weight ranks the layers; it does not SEPARATE them, and seven kinds on the
 // hue channel alone is more than a 1px antialiased line can carry. So a second
 // channel, carrying the one division that survives being drawn: GAP is a bridge
 // between two areas that does not exist, PROPOSED is a link the shape of the
@@ -1766,10 +1768,34 @@ const DASH_PERIOD = () => 0.10 * baseDist() * forceMul.dist;
 // only for the outliers. Raise it (6 floats per dashed edge per step) if a
 // vault ever draws an absent edge that reads solid.
 const DASH_MIN = 2, DASH_CAP = 24;
-// 2D keeps its own pair: the canvas painter runs inside the zoom transform, so
-// the pattern is already in the same graph units the period above works in, and
-// nothing there scales with the link.
+// The canvas painter's pair, in the graph units the period above works in. 2D
+// prints a screen instead (SCREEN_2D); this dash is left to the frame with no
+// WebGL2, whose canvas has no screen to print.
 const DASH_2D = [6, 2];
+
+// --- 2D: every link in a spot ink (ADR-0146 point 5) ------------------------
+// Translucent lines darkened where they crossed, and a dash beside an
+// antialiased line clashed with the dithered tiers the landing prints. So in
+// 2D each kind is one opaque ink and an inferred link is a band printed
+// through the landing's screens: [Bayer side, band width in CSS px]. A
+// proposal (a shared concept; COVERS, which Silica drew) takes the 4x4 screen
+// in 3 px, a question (an association only) the 8x8 ghost in 5 to 6 px, as
+// wide as its screen needs to read. The key order is the draw order, gap
+// under coupled under proposed, as the approved draft stacked them.
+const SCREEN_2D = { GAP: [8, 6], COUPLED: [8, 5], PROPOSED: [4, 3], COVERS: [4, 3] };
+// The share of a screen's cells inked. Paper keeps the landing's .55 and .16;
+// light dots on graphite spread to the eye, so the draft thinned them to .42
+// and .14, by eye and not yet measured (DESIGN.md, Tier key).
+const SCREEN_INK = LIGHT ? { 4: 0.55, 8: 0.16 } : { 4: 0.42, 8: 0.14 };
+// Every written link is 1 px, so width says one thing: a band is inferred.
+// Hover, focus and Compare dim; none of them reach this.
+const width2D = l => SCREEN_2D[l.type] ? SCREEN_2D[l.type][1] : 1;
+// With the atlas on, every link the atlas used to hide prints as a mat over
+// the cells at this share, and what is being read prints over it whole (the
+// owner, 2026-11-01: "in atlas si potessero vedere i link, ma meno opachi").
+// Chosen by eye on alex_second_brain beside .25, which kept a little more of
+// the cells' hue and showed the links less, and seeing them was the ask.
+const ATLAS_MAT = 0.35;
 
 // Memoised because 2D calls this for every visible link on every frame, and
 // building the string costs ~1ms per frame across 4.6k edges — measured, not
@@ -1790,7 +1816,9 @@ function linkPaint(l) {
   const key = (q ? "d" + q : "") + (l._ctx ? "x" : "") + (is2D() ? "2" : "3") +
     (AB ? (l._ab ? "C" : "c") : "");
   if (l.__paintKey === key) return l.__paint;
-  let out;
+  // The share of the ground the 2D ink covers: what it was mixed onto the
+  // floor at, so over an atlas cell it can be laid at that share (GL_INK_FS).
+  let out, cover = 1;
   // A context wikilink under the rim (ADR-0066 amendment) is drawn as the
   // focus dims one: the structure is there, and it is not what is being read.
   if (q >= FADE_STEPS || l._ctx || (AB && !on)) out = GP.linkDim;
@@ -1805,12 +1833,18 @@ function linkPaint(l) {
     // One scale factor rather than a second table: the RANK is what is worth
     // preserving between the two views, not the absolute values.
     const a = (on ? 0.95 : (c.opacity == null ? 0.6 : c.opacity)) * (is2D() ? LINK_ALPHA_2D : 1);
+    // 2D prints the spot ink (ADR-0146): the colour mixed onto the floor once
+    // at that alpha, so it reads as it did and a crossing cannot darken. A
+    // band takes its hue whole; its screen is the density.
+    const g = parseInt(GP.bg.slice(1), 16), k = SCREEN_2D[l.type] ? 1 : a;
+    const ink = sh => is2D() ? ((g >> sh) & 255) + (((n >> sh) & 255) - ((g >> sh) & 255)) * k : (n >> sh) & 255;
     // Partway dimmed: toward the dim's colour and toward its full opacity.
     const t = q / FADE_STEPS, d = parseInt(GP.linkDim.slice(1), 16);
-    const ch = sh => Math.round(((n >> sh) & 255) + (((d >> sh) & 255) - ((n >> sh) & 255)) * t);
-    out = "rgba(" + ch(16) + "," + ch(8) + "," + ch(0) + "," + (a + (1 - a) * t).toFixed(3) + ")";
+    const ch = sh => Math.round(ink(sh) + (((d >> sh) & 255) - ink(sh)) * t);
+    cover = k + (1 - k) * t;
+    out = "rgba(" + ch(16) + "," + ch(8) + "," + ch(0) + "," + (is2D() ? 1 : a + (1 - a) * t).toFixed(3) + ")";
   }
-  l.__paintKey = key; l.__paint = out;
+  l.__paintKey = key; l.__paint = out; l.__cover = cover;
   return out;
 }
 
@@ -2028,34 +2062,39 @@ function linkSegStep() {
 // path instead, which is what the half ratio of the dynamic resolution below
 // was buying all along: it made a 1.6px line a 0.8px one.
 //
-// So every solid link is one instanced quad at its own width, on a WebGL2
-// canvas stacked under the lib's, positions read from a texture of the nodes'
-// x/y, the colours rewritten only when the paint changes (the same three
-// callers as repaintLinkSeg). The dashed links, the citations (the lib draws
-// the arrowhead after its own line) and the photon carriers stay the lib's.
+// So every link is one instanced quad, on a WebGL2 canvas stacked under the
+// lib's, positions read from a texture of the nodes' x/y, the colours
+// rewritten only when the paint changes (the same three callers as
+// repaintLinkSeg). All of the line is the layer's, so a band can be drawn
+// after every written link and nothing the lib strokes crosses it; the lib
+// keeps what it adds to a line, the citation's arrowhead and the photons.
 //
-// The look is the lib's, by two rules. One colour at one width is ONE path to
-// the lib, filled once, so its lines never darken where they cross: that group
-// (every wikilink) is drawn with MAX blending into an offscreen buffer and laid
-// over once. A colour in many widths was that many paths stacked (the similar
-// layer has ~45), so it is drawn straight, each line over the last; only two
-// lines of one width crossing differ from the lib's picture. The lib's
-// pre-paint layers (the atlas, the rim, the wedges) sat under its links, so
-// they are drawn on a 2D canvas under this one.
+// Every fragment is the link's spot ink or nothing (ADR-0146 point 5): no
+// coverage ramp and no translucent paint, so two links crossing cannot darken
+// whatever order they land in. That is what the MAX-blended buffer for the
+// wikilinks used to buy. Over the bare floor that is the whole story. An
+// atlas cell is not the floor, and an ink pre-mixed onto the floor all but
+// vanished over one (a focused wikilink at luma 65 on a cell of 49, against
+// 86 before). So with the atlas on the links are written into a buffer with
+// blending off, each at the share of the ground it covers, the last one
+// winning where they cross, and the buffer is laid over the cells: the mat at
+// ATLAS_MAT, then what is being read at full strength. The lib's pre-paint
+// layers (the atlas, the rim, the wedges) sat under its links, so they are
+// drawn on a 2D canvas under this one.
 let GLLinks = null;   // the layer; false where WebGL2 is unavailable or was lost
-const glOwnsLink = l => !!GLLinks && l.__glOwn;
 
 const GL_LINK_VS = `#version 300 es
 in vec2 corner;            // x: 0 at the source, 1 at the target; y: -1|1 across
 in uvec2 ends;             // the two nodes, as indices into ALL_NODES
-in vec4 color;             // straight alpha
-in float width;            // CSS px, the lib's linkWidth
+in vec4 color;             // opaque: the spot ink
+in float width;            // CSS px, width2D
+in vec2 screen;            // Bayer side (0: solid) and the share of its cells inked
 uniform highp sampler2D pos;
 uniform int posW;
 uniform vec3 m0, m1;       // graph units -> device px: the canvas's own transform
 uniform vec2 size;         // device px
 uniform float dpr;
-out vec4 vColor; out float vD; out float vHalf;
+out vec4 vColor; out float vD; out float vHalf; flat out vec2 vScreen;
 vec2 at(uint i) { return texelFetch(pos, ivec2(int(i) % posW, int(i) / posW), 0).xy; }
 vec2 dev(vec2 p) { return vec2(dot(m0, vec3(p, 1.)), dot(m1, vec3(p, 1.))); }
 void main() {
@@ -2063,14 +2102,16 @@ void main() {
   float L = length(d);
   vec2 u = L > 0. ? d / L : vec2(1., 0.);
   vHalf = width * dpr * .5;
-  vD = corner.y * (vHalf + 1.);   // one more px for the edge ramp
+  vD = corner.y * (vHalf + 1.);   // a px of slack, so a sub-pixel width still finds its centre
   vec2 p = mix(a, b, corner.x) + vec2(-u.y, u.x) * vD;
   vColor = color;
+  vScreen = screen;
   gl_Position = vec4(p.x / size.x * 2. - 1., 1. - p.y / size.y * 2., 0., 1.);
 }`;
 // Coverage is the box filter of the stroke across one pixel: a 1.6px line is
 // solid over its middle and ramps over a pixel at each edge, as Skia's AA
 // stroke does; a thinner one never reaches full cover, as its hairline does.
+// The atlas's coast and borders keep it; the links print (GL_INK_FS).
 const GL_LINK_FS = `#version 300 es
 precision mediump float;
 in vec4 vColor; in float vD; in float vHalf;
@@ -2079,14 +2120,48 @@ void main() {
   float a = vColor.a * clamp(vHalf + .5 - abs(vD), 0., 1.);
   o = vec4(vColor.rgb * a, a);
 }`;
+// A link is ink inside its width, never thinner than a device pixel, and a
+// band inks only the cells its screen admits, so the floor casing under it
+// shows through the rest. The screen is the landing's 8x8 Bayer (its even
+// cells are the 4x4), thresholded on gl_FragCoord in whole device pixels per
+// CSS pixel: it never scales with zoom and a dot stays a dot at any ratio.
+// highp because a device pixel column past 2048 is not an integer in fp16.
+const GL_INK_FS = `#version 300 es
+precision highp float;
+precision highp int;
+in vec4 vColor; in float vD; in float vHalf; flat in vec2 vScreen;
+uniform float dpr;
+uniform float over;        // 0: print the spot ink (atlas off); 1: lay it at its cover (atlas on)
+uniform vec3 ground;       // the floor the spot ink was mixed onto
+out vec4 o;
+const int B8[64] = int[64](0,32,8,40,2,34,10,42,48,16,56,24,50,18,58,26,12,44,4,36,14,46,6,38,
+  60,28,52,20,62,30,54,22,3,35,11,43,1,33,9,41,51,19,59,27,49,17,57,25,15,47,7,39,13,45,5,37,63,31,55,23,61,29,53,21);
+void main() {
+  if (abs(vD) > max(vHalf, .5)) discard;
+  if (vScreen.x > 0.) {
+    ivec2 c = ivec2(gl_FragCoord.xy / max(1., floor(dpr + .5)));
+    float t = vScreen.x > 4. ? float(B8[(c.y & 7) * 8 + (c.x & 7)]) / 64.
+                             : float(B8[(c.y & 3) * 16 + (c.x & 3) * 2]) / 16.;
+    if (vScreen.y <= t) discard;
+  }
+  // The spot ink less the floor it was mixed onto is the ink at its cover,
+  // premultiplied: over the floor it composites back to the spot ink, over a
+  // cell to the line the cell had before the reshade.
+  float c = over > .5 ? vColor.a : 1.;
+  o = vec4(vColor.rgb - ground * (1. - c), c);
+}`;
+// u32 source, u32 target, rgba8 (the spot ink, its cover in alpha), f32 width,
+// f32 screen side, f32 screen ink
+const GL_STRIDE = 24;
+// The buffer laid over the canvas, at a share: the mat's, or whole.
 const GL_LAY_VS = `#version 300 es
 void main() { gl_Position = vec4(gl_VertexID == 1 ? 3. : -1., gl_VertexID == 2 ? 3. : -1., 0., 1.); }`;
 const GL_LAY_FS = `#version 300 es
 precision mediump float;
 uniform sampler2D t;
+uniform float share;
 out vec4 o;
-void main() { o = texelFetch(t, ivec2(gl_FragCoord.xy), 0); }`;
-const GL_STRIDE = 16;   // u32 source, u32 target, rgba8, f32 width
+void main() { o = texelFetch(t, ivec2(gl_FragCoord.xy), 0) * share; }`;
 
 // The atlas (ADR-0136) on the same layer, under the links: its ground as
 // triangles, its coast and borders as quads with the links' coverage
@@ -2154,7 +2229,7 @@ function buildGLLinks() {
     { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false });
   if (!gl) return false;
   let prog, lay;
-  try { prog = glProgram(gl, GL_LINK_VS, GL_LINK_FS); lay = glProgram(gl, GL_LAY_VS, GL_LAY_FS); }
+  try { prog = glProgram(gl, GL_LINK_VS, GL_INK_FS); lay = glProgram(gl, GL_LAY_VS, GL_LAY_FS); }
   catch (e) { console.warn("graph: WebGL links unavailable, the canvas draws them", e); return false; }
   // After the lib's canvas in the DOM, because "#graph canvas" means the lib's
   // everywhere in this file, and under it on screen: z-index -1 inside a box
@@ -2166,21 +2241,20 @@ function buildGLLinks() {
     box.appendChild(c);
   }
   under.style.background = GP.bg;
-  RAW_EDGES.forEach(l => { l.__glOwn = !isDashed(l) && l.type !== "CITES" && !libOwnsLink(l); });
-  COVER_EDGES.forEach(l => { l.__glOwn = false; });
   const index = new Map(ALL_NODES.map((n, i) => [n.id, i]));
   const posW = Math.min(4096, ALL_NODES.length || 1);
   const posH = Math.ceil((ALL_NODES.length || 1) / posW);
   const L = {
-    gl, glc, under, uctx: under.getContext("2d"), prog, lay, index, posW, posH,
+    gl, glc, under, uctx: under.getContext("2d"), prog, index, posW, posH,
     pos: new Float32Array(posW * posH * 2), posTex: gl.createTexture(),
-    inst: new ArrayBuffer(RAW_EDGES.length * GL_STRIDE || GL_STRIDE),
+    // a band is two instances, its casing and itself
+    inst: new ArrayBuffer((ALL_EDGES.length + ALL_EDGES.filter(l => SCREEN_2D[l.type]).length) * GL_STRIDE || GL_STRIDE),
     instBuf: gl.createBuffer(), cornerBuf: gl.createBuffer(), vao: gl.createVertexArray(),
-    fbo: gl.createFramebuffer(), fboTex: gl.createTexture(), groups: [], dirty: true,
-    rgba: new Map(),
-    u: Object.fromEntries(["pos", "posW", "m0", "m1", "size", "dpr"]
+    count: 0, mat: 0, over: false, dirty: true, rgba: new Map(),
+    lay, fbo: gl.createFramebuffer(), fboTex: gl.createTexture(),
+    u: Object.fromEntries(["pos", "posW", "m0", "m1", "size", "dpr", "over", "ground"]
       .map(k => [k, gl.getUniformLocation(prog, k)])),
-    uLay: gl.getUniformLocation(lay, "t"),
+    uLay: { t: gl.getUniformLocation(lay, "t"), share: gl.getUniformLocation(lay, "share") },
   };
   gl.bindTexture(gl.TEXTURE_2D, L.posTex);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, posW, posH, 0, gl.RG, gl.FLOAT, null);
@@ -2197,7 +2271,7 @@ function buildGLLinks() {
   gl.vertexAttribPointer(at("corner"), 2, gl.FLOAT, false, 0, 0);
   gl.bindBuffer(gl.ARRAY_BUFFER, L.instBuf);
   gl.bufferData(gl.ARRAY_BUFFER, L.inst.byteLength, gl.DYNAMIC_DRAW);
-  L.attr = { ends: at("ends"), color: at("color"), width: at("width") };
+  L.attr = { ends: at("ends"), color: at("color"), width: at("width"), screen: at("screen") };
   for (const k in L.attr) {
     gl.enableVertexAttribArray(L.attr[k]);
     gl.vertexAttribDivisor(L.attr[k], 1);
@@ -2331,32 +2405,67 @@ function glRGBA(s) {
   return c;
 }
 
-// Groups by colour in the order the lib meets them, which is the order it
-// stacks its paths in; each group's lines contiguous in the instance buffer.
+// The mat holds a link as it stands at rest, whatever is in focus: the focus
+// is told apart over the atlas by strength, its links whole over the mat's
+// share. In the dim ink the mat darkened every cell and the focused links over
+// it fell to luma 80 against 86; faded out instead, it would flash the whole
+// structure each time the pointer crossed a note. Cached per link, since the
+// mat is most of the vault and is repacked on every fade step.
+function restPaint(l) {
+  if (l.__restOf !== !!l._ctx) {
+    const p = { type: l.type, color: l.color, _ctx: l._ctx };
+    l.__rest = linkPaint(p); l.__restCover = p.__cover; l.__restOf = !!l._ctx;
+  }
+  return l.__rest;
+}
+
+// Two ranges, the mat and then what is being read. The mat is what the atlas
+// used to hide (quietNow), and is empty with the atlas off; a band whose layer
+// is on is read wherever it is. In each range the written links are grouped by
+// colour in the order the lib met them, which is the order its paths stacked
+// in, then every band after them (ADR-0146: drawn last), each as its casing, a
+// pixel of floor either side, and then itself. A band out of focus or outside
+// a comparison is not read, so it goes first and uncased: drawn last, its
+// casing cut every lit link that crossed it. A band in the mat goes the same
+// way: a casing laid at the mat's share is a dark stripe through a cell.
 function packGLLinks() {
-  const L = GLLinks, by = new Map();
-  for (const l of RAW_EDGES) {
-    if (!l.__glOwn || l._hidden || quietNow(l)) continue;
-    const c = linkPaint(l);
-    const g = by.get(c);
-    if (g) g.push(l); else by.set(c, [l]);
+  const L = GLLinks, kinds = Object.keys(SCREEN_2D), mat = [], read = [];
+  for (const l of ALL_EDGES) {
+    if (l._hidden) continue;
+    const live = SCREEN_2D[l.type] && linkPaint(l) !== GP.linkDim;
+    (quietNow(l) && !live ? mat : read).push(l);
   }
   const u32 = new Uint32Array(L.inst), u8 = new Uint8Array(L.inst), f32 = new Float32Array(L.inst);
+  const floor = glRGBA(GP.bg);
   let k = 0;
-  L.groups = [];
-  for (const [c, links] of by) {
-    const rgba = glRGBA(c), w0 = links[0].width || 1;
-    let union = true;
-    for (const l of links) {
-      const w = l.width || 1, q = k * GL_STRIDE;
-      if (w !== w0) union = false;
-      u32[q >> 2] = L.index.get(l.from); u32[(q >> 2) + 1] = L.index.get(l.to);
-      u8.set(rgba, q + 8);
-      f32[(q >> 2) + 3] = w;
-      k++;
+  const put = (l, rgba, w, side, cover) => {
+    const q = k++ * GL_STRIDE;
+    u32[q >> 2] = L.index.get(l.from); u32[(q >> 2) + 1] = L.index.get(l.to);
+    u8.set(rgba, q + 8); u8[q + 11] = Math.round(cover * 255);
+    f32[(q >> 2) + 3] = w; f32[(q >> 2) + 4] = side; f32[(q >> 2) + 5] = side ? SCREEN_INK[side] : 0;
+  };
+  const pack = (list, rest) => {
+    const by = new Map(), bands = kinds.map(() => []), under = [];
+    for (const l of list) {
+      const s = kinds.indexOf(l.type), c = rest ? restPaint(l) : linkPaint(l);
+      if (s >= 0) { (rest || c === GP.linkDim ? under : bands[s]).push(l); continue; }
+      const g = by.get(c);
+      if (g) g.push(l); else by.set(c, [l]);
     }
-    L.groups.push({ start: k - links.length, count: links.length, union: union && links.length > 1 });
-  }
+    for (const l of under) put(l, glRGBA(rest ? restPaint(l) : linkPaint(l)), width2D(l), SCREEN_2D[l.type][0], 1);
+    for (const [c, links] of by) {
+      const rgba = glRGBA(c);
+      for (const l of links) put(l, rgba, width2D(l), 0, rest ? l.__restCover : l.__cover);
+    }
+    for (const list of bands) for (const l of list) {
+      put(l, floor, width2D(l) + 2, 0, 1);
+      put(l, glRGBA(linkPaint(l)), width2D(l), SCREEN_2D[l.type][0], 1);
+    }
+  };
+  pack(mat, true);
+  L.mat = k;
+  pack(read, false);
+  L.count = k; L.over = atlasOn();
   const gl = L.gl;
   gl.bindBuffer(gl.ARRAY_BUFFER, L.instBuf);
   gl.bufferSubData(gl.ARRAY_BUFFER, 0, new Uint8Array(L.inst, 0, k * GL_STRIDE));
@@ -2388,10 +2497,14 @@ function drawGLLinks(ctx, scale) {
   if (L.glc.width !== W || L.glc.height !== H) {
     L.glc.width = W; L.glc.height = H;
     L.glc.style.width = cv.style.width; L.glc.style.height = cv.style.height;
+  }
+  if (L.fboW !== W || L.fboH !== H) {
+    L.fboW = W; L.fboH = H;
     gl.bindTexture(gl.TEXTURE_2D, L.fboTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, L.fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, L.fboTex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
   if (L.dirty) packGLLinks();
   for (let i = 0; i < ALL_NODES.length; i++) {
@@ -2400,44 +2513,50 @@ function drawGLLinks(ctx, scale) {
   gl.bindTexture(gl.TEXTURE_2D, L.posTex);
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, L.posW, L.posH, gl.RG, gl.FLOAT, L.pos);
   const m = ctx.getTransform();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   gl.viewport(0, 0, W, H);
   gl.clearColor(0, 0, 0, 0);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.enable(gl.BLEND);
   if (L.atlas && atlasNow && atlasNow.n) drawGLAtlas(L, atlasNow, m, W, H, m.a / scale);
-  for (const g of L.groups) {
+  if (!L.count) return;
+  const links = () => {
     gl.useProgram(L.prog);
     gl.uniform1i(L.u.pos, 0); gl.uniform1i(L.u.posW, L.posW);
     gl.uniform3f(L.u.m0, m.a, m.c, m.e); gl.uniform3f(L.u.m1, m.b, m.d, m.f);
     gl.uniform2f(L.u.size, W, H);
     gl.uniform1f(L.u.dpr, m.a / scale);   // the lib's lineWidth is width / scale, under dpr * scale
+    gl.uniform1f(L.u.over, L.over ? 1 : 0);
+    gl.uniform3fv(L.u.ground, glRGBA(GP.bg).slice(0, 3).map(v => v / 255));
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, L.posTex);
     gl.bindVertexArray(L.vao);
-    // No base instance in WebGL2: the group's offset rides on the pointers.
     gl.bindBuffer(gl.ARRAY_BUFFER, L.instBuf);
-    const o = g.start * GL_STRIDE;
+  };
+  // No base instance in WebGL2: a range's offset rides on the pointers.
+  const draw = (from, n) => {
+    const o = from * GL_STRIDE;
     gl.vertexAttribIPointer(L.attr.ends, 2, gl.UNSIGNED_INT, GL_STRIDE, o);
     gl.vertexAttribPointer(L.attr.color, 4, gl.UNSIGNED_BYTE, true, GL_STRIDE, o + 8);
     gl.vertexAttribPointer(L.attr.width, 1, gl.FLOAT, false, GL_STRIDE, o + 12);
-    if (g.union) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, L.fbo);
-      gl.clear(gl.COLOR_BUFFER_BIT);
-      gl.blendEquation(gl.MAX);
-    } else {
-      gl.blendEquation(gl.FUNC_ADD);
-      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    }
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, g.count);
+    gl.vertexAttribPointer(L.attr.screen, 2, gl.FLOAT, false, GL_STRIDE, o + 16);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
     gl.bindVertexArray(null);
-    if (!g.union) continue;
+  };
+  // Atlas off: the spot inks straight onto the canvas, opaque, over the floor.
+  if (!L.over) { links(); draw(0, L.count); return; }
+  for (const [from, n, share] of [[0, L.mat, ATLAS_MAT], [L.mat, L.count - L.mat, 1]]) {
+    if (!n) continue;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, L.fbo);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.disable(gl.BLEND);   // the last link wins where two cross: nothing stacks
+    links();
+    draw(from, n);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.useProgram(L.lay);
     gl.bindTexture(gl.TEXTURE_2D, L.fboTex);
-    gl.uniform1i(L.uLay, 0);
-    gl.blendEquation(gl.FUNC_ADD);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.uniform1i(L.uLay.t, 0); gl.uniform1f(L.uLay.share, share);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 }
@@ -3552,7 +3671,7 @@ function buildGraph() {
       : (LIGHT ? DATA.colors.gap_paper : DATA.colors.gap))
     .linkDirectionalParticleWidth(l => l.type === "SIMILAR" ? 1.5 : 2)
     .nodeVisibility(n => !n._hidden)
-    .linkVisibility(l => !glOwnsLink(l) && !l._hidden && !quietNow(l))
+    .linkVisibility(l => !l._hidden && !quietNow(l) && (!GLLinks || l.type === "CITES" || libOwnsLink(l)))
     .onNodeClick((n, e) => clickNote(n, e))
     // 3D only: 2D picks its hover itself (pickHover2D). One argument, since
     // the lib's second is the previous node.
@@ -3591,26 +3710,17 @@ function buildGraph() {
     });
 
   if (is2D()) {
-    // Width 0 is invisible on canvas (GL draws a 1px line for it, 2D draws
-    // nothing), and the labels ARE the point here, so pay for them. Width is
-    // per-edge because on canvas it is free, and it is the second half of the
-    // rank the alpha starts: a wikilink is both stronger and thicker than the
-    // similarity that a model proposed beside it.
-    G.linkWidth(l => l.width || 1)
-      // The dash the 3D side has to build by hand (see LinkSeg), free here:
-      // the canvas painter ends on setLineDash(accessor || []). Paint-time and
-      // untriggered, so a family that costs one buffer rewrite over there costs
-      // nothing at all on this side.
-      //
-      // The pattern is in graph units, and the painter runs inside
-      // the zoom transform, so dashes lengthen as you zoom in. It reads as the
-      // whole picture growing rather than as a pattern changing, which is why
-      // it stays. Screen-space would mean owning the link painter outright
-      // (linkCanvasObject) to divide by scale the way drawNode does its font.
+    // The layer draws every line at width2D (ADR-0146). These two reach the
+    // lib's own stroke only in the frame with no WebGL2, which cannot print a
+    // screen: there every link is 1 px, as a written link is, and the absent
+    // ones keep the dash they had, in graph units under the zoom transform.
+    G.linkWidth(1)
       .linkLineDash(l => isDashed(l) ? DASH_2D : null)
-      // After the lib's own stroke, on the citations only: any other mode
-      // value leaves a link to the default painter alone.
-      .linkCanvasObjectMode(l => l.type === "CITES" ? "after" : null)
+      // With the layer up the lib strokes no line ("replace" with a painter
+      // that draws only a citation's arrowhead), and keeps the links it must
+      // count as visible for the arrowheads and the photons. Without it the
+      // arrowhead goes after the lib's own stroke, on the citations only.
+      .linkCanvasObjectMode(l => GLLinks ? "replace" : l.type === "CITES" ? "after" : null)
       .linkCanvasObject(drawCiteArrow)
       .nodeRelSize(NODE_REL_SIZE)
       // 2D names every note on the canvas and hovers nothing, except a paper
@@ -3734,6 +3844,8 @@ function setMode(m) {
   // The rings are a canvas draw. Leaving their legend up in 3D would promise a
   // channel that mode does not paint.
   document.getElementById("state-legend").style.display = is2D() ? "" : "none";
+  // The absent rows' swatch is the band in 2D and the dash in 3D (graph-frame.css).
+  document.body.classList.toggle("mode-2d", is2D());
   const atlasRow = document.getElementById("atlas-row");
   if (atlasRow) atlasRow.style.display = is2D() ? "" : "none";
   placeRim();   // the rim is 2D only: built on the way in, sent home on the way out

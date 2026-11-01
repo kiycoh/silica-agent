@@ -40,7 +40,10 @@ def test_the_graph_offers_no_highlight():
 
 def test_no_edge_is_told_apart_by_width():
     js = FRAME_JS.read_text()
-    assert "G.linkWidth(l => l.width || 1)" in js     # 2D: the layer's own rank, nothing more
+    # 2D: a written link is 1 px and a band as wide as its screen (ADR-0146);
+    # the dim never reaches the width
+    assert "const width2D = l => SCREEN_2D[l.type] ? SCREEN_2D[l.type][1] : 1;" in js
+    assert "G.linkWidth(1)" in js
     assert "G.linkWidth(0)" in js                     # 3D: the merged 1px lines
     assert "G.linkWidth(l => ((" not in js and "linkWidth(Graph.linkWidth())" not in js
     # nothing is lib-owned to be hovered: only the particle carriers are
