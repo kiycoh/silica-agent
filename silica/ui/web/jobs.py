@@ -320,7 +320,12 @@ def _run(job_id: str) -> None:
         hidden = _hidden(src)
         pages, unread = _pages(src)
     except Exception as exc:
-        logger.warning("job %s failed: %s", job_id, type(exc).__name__)
+        # exc_info and not the type as an argument: a hosted journal keeps a
+        # template, never its arguments, but keeps an exception's type and
+        # frames (ui/logging.py HostedJsonFormatter), so the class name alone
+        # was dropped and t06's failed imports of 2026-10-26 and 2026-10-29
+        # left only "job %s failed: %s". The exception's text still stays out there.
+        logger.warning("job %s failed", job_id, exc_info=exc)
         rec = _update(job_id, state="failed", error=_sentence(exc), finished=time.time(),
                       outcome=getattr(exc, "outcome", "error"), pages=_pages(src)[0])
     else:

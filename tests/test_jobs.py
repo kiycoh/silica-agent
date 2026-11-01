@@ -249,6 +249,40 @@ def test_convert_itself_holds_no_lock_on_a_hosted_tenant(tmp_vault, lane, monkey
             t.join(10)
 
 
+def test_a_failed_job_leaves_its_cause_in_a_hosted_journal_and_not_its_text(client, monkeypatch):
+    """t06's failed imports of 2026-10-26 and 2026-10-29 left only the
+    template: the cause was an argument, which the hosted formatter drops."""
+    import logging
+
+    from silica.ui.logging import HostedJsonFormatter
+
+    tc, _, _ = client
+    secret = "student-wrote-this-7f3a"
+
+    def refused(audio):
+        raise ValueError(f"transcription server returned 402: {secret}")
+
+    monkeypatch.setitem(conv.ASR_PROVIDERS, "endpoint", refused)
+    lines: list[str] = []
+    handler = logging.Handler(logging.DEBUG)
+    handler.setFormatter(HostedJsonFormatter())
+    handler.emit = lambda record: lines.append(handler.format(record))
+    log = logging.getLogger("silica.ui.web.jobs")
+    log.addHandler(handler)
+    try:
+        r = tc.post("/nucleate", files=[("files", ("one.mp3", b"x" * 8, "audio/mpeg"))])
+        job_id = r.json()["jobs"][0]["id"]
+        _drain()
+    finally:
+        log.removeHandler(handler)
+    assert _record(job_id)["state"] == "failed"
+    failed = [json.loads(s) for s in lines if '"job %s failed"' in s]
+    assert len(failed) == 1
+    assert failed[0]["exc"]["type"] == "ValueError"
+    assert any(":refused:" in f for f in failed[0]["exc"]["frames"])
+    assert not any(secret in s for s in lines)
+
+
 # --- point 4: a restart is visible, nothing resumes ---------------------------------------
 
 def _write(rec: dict) -> None:
