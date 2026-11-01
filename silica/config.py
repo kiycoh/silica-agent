@@ -224,6 +224,10 @@ DEMO_OFF: dict[str, tuple[str, ...]] = {
         # model calls the door never counts: a turn outside POST /chat, the
         # injector, check sources' judge, the worker's sentence on the vault
         "/turn/redo", "/phone", "/nucleate", "/note/check", "/vault_brief",
+        # a job's turn (POST /jobs/{id}/turn) is a whole agent loop the door
+        # never counts, whatever queued the job; with no upload there is none
+        # to list, and the tray leaves itself as it was on a 404 (jobsFetch)
+        "/jobs",
         # ADR-0142's two downloads: the owner has not decided (2026-10-31)
         "/vault/export",
     ),

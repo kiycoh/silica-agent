@@ -135,6 +135,7 @@ def test_every_name_the_demo_refuses_exists():
     # what each prefix covers
     "/settings/confirm", "/vault/save/preview", "/vault/export/added", "/vault/export/summary",
     "/phone/turn", "/phone/new", "/connectors/mcp/add", "/skills/proposed/x/install", "/zotero/status",
+    "/jobs/x/turn", "/jobs/x/retry",
 ])
 def test_each_refused_route_answers_as_one_that_does_not_exist(sandbox, path):
     tc, server, ran = sandbox
@@ -181,6 +182,8 @@ def test_a_route_the_demo_keeps_still_answers(sandbox):
 @pytest.mark.parametrize("text", [
     "/web what is entropy?", "/WEB what is entropy?", "/fetch https://example.com",
     "/nucleate Inbox", "/explain Entropy", "/flashcards Entropy", "/vault ~/elsewhere", "/quiz Entropy",
+    # whitespace first: jobs.from_command strips it and queued the conversion
+    " /convert notes/paper.pdf", "\n/nucleate x.pdf", " /flashcards Entropy",
 ])
 def test_a_refused_command_is_a_404_before_the_turn_so_the_door_counts_nothing(sandbox, text):
     tc, server, ran = sandbox
@@ -188,6 +191,26 @@ def test_a_refused_command_is_a_404_before_the_turn_so_the_door_counts_nothing(s
     assert r.status_code == 404
     assert r.json()["detail"] == f"'{text.split()[0].lower()}' is not part of the demo"
     assert not ran and not server._busy
+
+
+@pytest.mark.parametrize("command", ["/web latest news", "/flashcards Entropy", "/quiz Entropy"])
+def test_a_refused_command_behind_a_persona_runs_nothing(sandbox, monkeypatch, command):
+    """The persona's words are the turn, and /web and /flashcards run before the
+    dispatchers: the refusal has to read the text the persona hands on."""
+    from pathlib import Path
+
+    import silica.cli
+    from silica.config import CONFIG
+
+    d = Path(CONFIG.vault_path) / ".silica" / "skills" / "tutor"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("---\nname: tutor\ndescription: a tutor\nmetadata:\n  persona: true\n---\n"
+                                "Ask before you answer.\n", encoding="utf-8")
+    monkeypatch.setattr(silica.cli, "_expand_web_turn", lambda *a: pytest.fail("the dispatch reached _expand_web_turn"))
+    tc, server, ran = sandbox
+    last = _frames(tc.post("/chat", json={"text": f"/tutor {command}"}))[-1]
+    assert last == {"type": "error", "error": f"'{command.split()[0]}' is not part of this account"}
+    assert not ran
 
 
 def test_an_image_or_a_story_is_refused_before_anything_is_saved(sandbox):
@@ -223,7 +246,8 @@ def test_a_question_runs_on_the_demo_set_at_8_calls(sandbox, monkeypatch):
 
 
 def test_the_cap_is_the_one_the_web_door_already_uses():
-    """ADR-0139 point 5: 8 calls a question, three questions 24 at most."""
+    """ADR-0139 point 5: 8 iterations a question, the web door's (a capped one
+    spends at least 9 calls with its landing: constraints.DEMO_MAX_ITERATIONS)."""
     assert DEMO_MAX_ITERATIONS == web_answer_constraints().max_iterations == 8
 
 
@@ -342,12 +366,21 @@ def test_the_page_of_a_demo_has_no_control_for_what_it_refuses(sandbox, monkeypa
     css = (WEB / "app-shell.css").read_text(encoding="utf-8")
     rule = css[css.index("html[data-demo] :is("):]
     hidden = rule[:rule.index(")")]
-    for control in ("#attach", ".mic", "#vault-add", "#vault-switch", "#settings-btn", ".redo-btn", ".edit-btn"):
+    for control in ("#attach", ".mic", "#vault-add", "#vault-switch", "#settings-btn", ".redo-btn", ".edit-btn",
+                    "#note-check-open"):
         assert control in hidden, control
     # each id the rule names is in the page, or the rule hides nothing
-    for name in ("attach", "vault-add", "vault-switch", "settings-btn"):
+    for name in ("attach", "vault-add", "vault-switch", "settings-btn", "note-check-open"):
         assert f'id="{name}"' in html, name
     assert 'class="mic"' in html
+
+
+def test_a_demo_that_lost_its_hosted_line_still_offers_explore_alone(sandbox, monkeypatch):
+    tc, _, _ = sandbox
+    monkeypatch.delenv("SILICA_HOSTED")
+    html = tc.get("/").text
+    assert '<html lang="en" data-hosted data-demo' in html
+    assert 'data-tab="graph" data-served' in html and 'data-tab="learn" data-served' not in html
 
 
 def test_the_page_without_the_demo_is_unchanged(sandbox, monkeypatch):
@@ -449,6 +482,16 @@ def test_each_state_the_door_sends_is_its_card(tmp_path):
         "card": "ended", "line": "This sample vault has been cleared", "more": "", "install": False,
         "under": "A sample vault lasts 30 minutes, or 15 without a question."}
     assert v["late"] == "1 min"
+
+
+@node
+def test_the_closed_card_comes_down_at_its_midnight_and_the_others_stay(tmp_path):
+    v = _view(tmp_path, "(() => { const r = demoMidnight(Date.UTC(2026, 9, 31, 23, 50)); return ["
+                        "demoStateAt('closed', r, Date.UTC(2026, 9, 31, 23, 59)), "
+                        "demoStateAt('closed', r, Date.UTC(2026, 10, 1, 0, 0, 30)), "
+                        "demoStateAt('spent', r, Date.UTC(2026, 10, 1, 0, 0, 30)), "
+                        "demoStateAt('ended', r, Date.UTC(2026, 10, 1, 0, 0, 30))]; })()")
+    assert v == ["closed", "", "spent", "ended"]
 
 
 @node

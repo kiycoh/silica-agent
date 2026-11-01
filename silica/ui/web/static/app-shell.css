@@ -457,10 +457,11 @@ html:not([data-hosted]) .hp-hosted {
 }
 
 /* What a demo refuses has no control (ADR-0139 point 6): the composer's +, the
-   mics, the vault's +, the vault switch and Settings; and again and edit,
-   which ask a question through a route the door does not count. The Download
-   rows follow the server on their own (loadVaultExport). */
-html[data-demo] :is(#attach, .mic, #vault-add, #vault-switch, #settings-btn, .redo-btn, .edit-btn) {
+   mics, the vault's +, the vault switch and Settings; again and edit, which
+   ask a question through a route the door does not count; and a note's check
+   sources, whose judge is one too. The Download rows follow the server on
+   their own (loadVaultExport). */
+html[data-demo] :is(#attach, .mic, #vault-add, #vault-switch, #settings-btn, .redo-btn, .edit-btn, #note-check-open) {
   display: none !important;
 }
 

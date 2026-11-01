@@ -1424,6 +1424,20 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             return
         if worn is not None:
             text = worn[1]
+        from silica.config import withheld
+
+        # A view's command goes with the view (ADR-0140 point 4), and a demo's
+        # refused ones with it (ADR-0139 point 6); the picker does not offer
+        # them, but a typed one does not come from it. Asked after the persona,
+        # whose words are this turn, and before /web and /flashcards, which run
+        # ahead of the dispatchers: "/<persona> /web" passed the 404 in
+        # _demo_refuses and reached the internet (review 2026-10-31). The first
+        # word as split() finds it, lowered as both dispatchers lower it.
+        head = (text.split(None, 1) or [""])[0]
+        if head.startswith("/") and head.lower() in withheld("commands"):
+            outcome = "error"
+            yield {"type": "error", "error": f"'{head}' is not part of this account"}
+            return
         agent_msg = text
         escalated = False   # the turn's answer is the aid itself (learn.offer.escalation)
         plan_appendix = ""  # Learn's calendar, appended under the answer (learn.offer.plan_context)
@@ -1486,16 +1500,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             return
         elif text.startswith("/"):
             from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
-            from silica.config import withheld
             from silica.ui.console import CONSOLE
-
-            # A view's command goes with the view (ADR-0140 point 4); the
-            # picker does not offer it, but a typed one does not come from it.
-            # Lowered as both dispatchers lower it, or /Quiz ran past the view.
-            if text.split()[0].lower() in withheld("commands"):
-                outcome = "error"
-                yield {"type": "error", "error": f"'{text.split()[0]}' is not part of this account"}
-                return
 
             def _run_slash():
                 # Both dispatchers print their result to CONSOLE and both can do
@@ -2247,8 +2252,11 @@ def _demo_refuses(payload: dict) -> str:
         return "images are not part of the demo"
     if payload.get("story"):
         return "Discover is not part of the demo"
+    # The first word as split() finds it, as jobs.from_command and run_turn's
+    # /flashcards branch find it: " /convert x" got past a startswith("/")
+    # here and queued a conversion (review 2026-10-31).
     text = str(payload.get("text") or "")
-    word = text.split()[0].lower() if text.startswith("/") else ""
+    word = (text.split(None, 1) or [""])[0].lower()
     return f"'{word}' is not part of the demo" if word in withheld("commands") else ""
 
 
@@ -7087,8 +7095,10 @@ def index(request: Request):
         html = html.replace('<html lang="en"', '<html lang="en" data-demo', 1)
         html = html.replace('placeholder="Ask about your notes"', 'placeholder="Ask about the sample vault"', 1)
     # Stamped, not probed, for the same reason: the views a hosted account
-    # does not get (ADR-0111 point 3) must be gone before the first paint.
-    if hosted():
+    # does not get (ADR-0111 point 3) must be gone before the first paint. A
+    # demo is stamped as served_views() clamps it, even on a unit that lost
+    # SILICA_HOSTED, or the page offers tabs the server answers 404 for.
+    if hosted() or demo():
         html = html.replace('<html lang="en"', '<html lang="en" data-hosted', 1)
         # The views this account gets (ADR-0140 point 4): every element of one
         # is marked, and the CSS hides each unmarked one, so a view added later

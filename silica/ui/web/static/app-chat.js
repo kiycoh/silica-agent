@@ -701,7 +701,8 @@ function addCopyBtn(bodyEl, getText) {
 // "ended" once the sandbox is gone (410). A server with no door in front sends
 // neither, so a local user and a tenant never see any of this.
 let demoLeft = null; // the last count the door sent; null until one arrives
-let demoState = "";  // kept once sent: none of the three undoes itself in a visit
+let demoState = "";  // kept once sent; only "closed" undoes itself, at demoReopens
+let demoReopens = 0; // the midnight UTC after the last "closed" the door sent
 let demoClock = 0;   // the closed card's countdown, redrawn each minute
 let demoShown = "null"; // the view last drawn, as JSON
 
@@ -715,11 +716,15 @@ const DEMO_INSTALL = [
   "silica --gui",
 ];
 
-// The time to the next midnight UTC, the daily key's reset, as "5 h 12 min".
-function demoUntilMidnight(now) {
+// The next midnight UTC, the daily key's reset.
+function demoMidnight(now) {
   const d = new Date(now);
-  const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
-  const mins = Math.max(1, Math.ceil((next - now) / 60000));
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+}
+
+// The time to it, as "5 h 12 min".
+function demoUntilMidnight(now) {
+  const mins = Math.max(1, Math.ceil((demoMidnight(now) - now) / 60000));
   const h = Math.floor(mins / 60);
   return h ? `${h} h ${mins % 60} min` : `${mins} min`;
 }
@@ -743,6 +748,14 @@ function demoView(left, state, now) {
   if (typeof left !== "number") return null;
   return { count: left === 1 ? "Last question" : `${left} questions left`, tail: "cleared within 30 min" };
 }
+
+// The state as it stands at `now`. "spent" and "ended" are the visit's and
+// stay; "closed" is the day's budget, which its midnight reopens, and the door
+// sends no state to say so: the poll's later responses carry the count alone,
+// as they did while it was closed. Kept, an open tab counted to the next day.
+function demoStateAt(state, reopens, now) {
+  return state === "closed" && now >= reopens ? "" : state;
+}
 // demo-pure:end
 
 // Reads the two headers off any response; true when the door answered with a
@@ -753,6 +766,7 @@ function readDemoHeaders(resp) {
   if (!left && !state) return false;
   if (/^\d+$/.test(left)) demoLeft = Number(left);
   if (state) demoState = state;
+  if (state === "closed") demoReopens = demoMidnight(Date.now());
   renderDemo(demoLeft, demoState);
   return !!state;
 }
@@ -762,6 +776,9 @@ function demoSep() {
 }
 
 function renderDemo(left, state) {
+  // Every caller passes demoState; the closed card's clock is what notices
+  // its midnight, within the minute.
+  demoState = state = demoStateAt(state, demoReopens, Date.now());
   const view = demoView(left, state, Date.now());
   // The last question's card waits for its answer: the box holds that turn's
   // Stop until it ends, and runTurn draws the card then.

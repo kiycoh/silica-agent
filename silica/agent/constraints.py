@@ -216,9 +216,12 @@ DEMO_WITHHELD = frozenset({
     "silica_load_tools",
 })
 
-# ADR-0139 point 5: a demo question spends at most the 8 calls the web door is
-# held to (web_answer_constraints), so three questions spend 24 where the
-# chat's default of 20 would allow 60.
+# ADR-0139 point 5: a demo question runs at most the 8 iterations the web door
+# is held to (web_answer_constraints). They are iterations, not calls: one still
+# calling tools at the 8th gets a landing call with the tools removed, and any
+# reply that answers in its reasoning alone is asked once more (loop.py), so a
+# capped question spends at least 9 calls and at most 18. Three spend 27 or
+# more where the ADR's arithmetic says 24 (review 2026-10-31).
 DEMO_MAX_ITERATIONS = 8
 
 

@@ -145,7 +145,7 @@ SHARED_ROUTES = {
 SHARED_TOOLS = {
     "find_in_page", "plan", "remember", "silica_aliases", "silica_anneal", "silica_autolink",
     "silica_backlink", "silica_backlinks", "silica_bulk_write", "silica_changes", "silica_cleanup",
-    "silica_code_pack", "silica_concepts", "silica_cooccurrence_refresh", "silica_curate", "silica_dedup",
+    "silica_concepts", "silica_cooccurrence_refresh", "silica_curate", "silica_dedup",
     "silica_dedup_pairs", "silica_deferred_flush", "silica_deferred_list", "silica_deferred_retry",
     "silica_delegate", "silica_delete", "silica_doctor", "silica_document", "silica_embed_refresh",
     "silica_enrich_batch", "silica_exists", "silica_file_links", "silica_files", "silica_flag_note", "silica_require",
