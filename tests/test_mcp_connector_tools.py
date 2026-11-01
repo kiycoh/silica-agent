@@ -396,13 +396,19 @@ def test_a_session_start_imports_the_sdk_and_reads_the_keyring_off_the_callers_t
 
     monkeypatch.setattr(mcp_client.Clients, "available", held(""))
     monkeypatch.setattr(credentials, "get", held(None))
-    runner = threading.Thread(target=mcp_tools.start)
+    opens: list[threading.Thread] = []
+    runner = threading.Thread(target=lambda: opens.append(mcp_tools.start()))
     runner.start()
     runner.join(5)  # generous: start() has nothing left to do on this thread
     returned = not runner.is_alive()
     reached.wait(20)  # the background open got to the keyring
     gate.set()
     runner.join(20)
+    # The open start() handed off, joined too: let go, it went on to open the
+    # server after this test's close_all and left a session the next test read
+    # (the full suite of 2026-11-01, under load; alone it always won the race).
+    for t in opens:
+        t.join(20)
     assert returned, "start() waited on the SDK import or the keyring"
     assert callers and runner not in callers
 
