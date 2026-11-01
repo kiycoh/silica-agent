@@ -58,6 +58,21 @@ def test_publish_turns_the_page_on_and_writes_it(client):
     assert not off["page"] and not live.exists()
 
 
+def test_the_cover_is_the_graph_of_what_goes_out_and_nothing_private(client):
+    """The view's cover (ADR-0146 point 4): the notes that go out, the links between them, laid
+    out once; a private note it links to is neither a mark nor a line."""
+    tc, _ = client
+    assert tc.get("/public/cover").json() == {"n": [], "e": []}
+    tc.post("/public/folder", json={"folder": "Memory", "on": True})
+    c = tc.get("/public/cover").json()
+    assert sorted(n[3] for n in c["n"]) == ["Forgetting curve", "Spacing effect"]
+    assert all(0 <= n[0] <= 1 and 0 <= n[1] <= 1 for n in c["n"])
+    assert len(c["e"]) == 1 and sorted(c["n"][i][3] for i in c["e"][0]) == ["Forgetting curve", "Spacing effect"]
+    assert "Exam plan June" not in str(c)
+    # the same notes and links draw the same picture
+    assert tc.get("/public/cover").json() == c
+
+
 def test_a_post_from_another_origin_is_refused(client):
     tc, _ = client
     r = tc.post("/public/folder", json={"folder": "Memory", "on": True},

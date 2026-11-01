@@ -163,7 +163,137 @@ async function loadPublicView() {
   if (!pubState) $("#public-body").replaceChildren(mkEl("p", "pp-dim", "Reading the vault…"));
   await loadPublicState();
   renderPublic();
+  // the page builds itself each time the view opens; a later render only redraws it
+  loadPubCover(true);
 }
+
+// --- the cover (ADR-0146 point 4) ----------------------------------------------
+// The page's own graph printed in one bit above the boxes: every note that goes out is a mark,
+// every link between two of them a line, ink on the well and nothing in between. When the view
+// opens it builds as the landing's Fig. 1 does: notes from the middle of the layout outward,
+// then each link drawn out from its first note, all at full ink, in 1.7 s.
+let pubCover = null, pubCoverK = 1, pubCoverRun = 0, pubCoverHover = -1, pubCoverRank = null, pubCoverAdj = null;
+let pubCoverEl = null;
+
+function pubCoverFigure() {
+  if (pubCoverEl) return pubCoverEl;
+  pubCoverEl = mkEl("figure", "pp-cover");
+  const box = mkEl("div", "pp-cover-box");
+  const cv = document.createElement("canvas");
+  cv.setAttribute("role", "img");
+  const tip = mkEl("div", "pp-ctip");
+  tip.hidden = true;
+  box.append(cv, tip);
+  pubCoverEl.append(box, mkEl("figcaption", "", ""));
+  box.addEventListener("pointermove", pubCoverPoint);
+  box.addEventListener("pointerleave", () => { pubCoverHover = -1; tip.hidden = true; drawPubCover(); });
+  new ResizeObserver(() => drawPubCover()).observe(box);
+  return pubCoverEl;
+}
+
+async function loadPubCover(build) {
+  let c = null;
+  try {
+    const r = await fetch("/public/cover");
+    c = r.ok ? await r.json() : null;
+  } catch {
+    // A page without its picture still says what goes out: the boxes do not need it.
+    c = null;
+  }
+  pubCover = c && c.n.length ? c : null;
+  pubCoverRank = null;
+  pubCoverAdj = null;
+  if (pubCoverEl) pubCoverEl.hidden = !(pubCover || (pubState && pubState.out.length));
+  if (!pubCover) return;
+  const cap = pubCoverEl.querySelector("figcaption");
+  cap.textContent = `${pubCount(pubCover.n.length)} · ${pubCover.e.length} ${pubCover.e.length === 1 ? "link" : "links"}`;
+  pubCoverEl.querySelector("canvas").setAttribute("aria-label", `The page as a graph: ${cap.textContent}`);
+  const run = ++pubCoverRun;
+  if (!build || matchMedia("(prefers-reduced-motion: reduce)").matches) { pubCoverK = 1; drawPubCover(); return; }
+  pubCoverK = 0;
+  const t0 = performance.now();
+  (function step(now) {
+    if (run !== pubCoverRun) return;
+    pubCoverK = Math.min(1, (now - t0) / 1700);
+    drawPubCover();
+    if (pubCoverK < 1) requestAnimationFrame(step);
+  })(t0);
+}
+
+const pubCss = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const pubRgb = (hex) => { const h = hex.replace("#", ""); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); };
+const pubU32 = (c) => ((255 << 24) | (c[2] << 16) | (c[1] << 8) | c[0]) >>> 0;
+
+function drawPubCover() {
+  if (!pubCover || !pubCoverEl || activeTab !== "public") return;
+  const box = pubCoverEl.querySelector(".pp-cover-box"), cv = box.querySelector("canvas");
+  const r = box.getBoundingClientRect(), w = Math.floor(r.width), h = Math.floor(r.height);
+  if (w < 40 || h < 40) return;
+  const N = pubCover.n, E = pubCover.e, pad = 14;
+  if (!pubCoverRank) {
+    // the order the page builds in: from the middle of the layout outward
+    const cx = N.reduce((t, n) => t + n[0], 0) / N.length, cy = N.reduce((t, n) => t + n[1], 0) / N.length;
+    const d = N.map((n) => Math.hypot(n[0] - cx, n[1] - cy));
+    pubCoverRank = new Float32Array(N.length);
+    [...d.keys()].sort((a, b) => d[a] - d[b]).forEach((i, k) => { pubCoverRank[i] = k / N.length; });
+    pubCoverAdj = N.map(() => []);
+    for (const [a, b] of E) { pubCoverAdj[a].push(b); pubCoverAdj[b].push(a); }
+  }
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  const X = (i) => Math.round(pad + N[i][0] * (w - 2 * pad)), Y = (i) => Math.round(pad + N[i][1] * (h - 2 * pad));
+  const x = cv.getContext("2d"), img = x.createImageData(w, h), px = new Uint32Array(img.data.buffer);
+  const ground = pubU32(pubRgb(pubCss("--void"))), ink = pubU32(pubRgb(pubCss("--frost"))), sig = pubU32(pubRgb(pubCss("--accent")));
+  px.fill(ground);
+  const put = (a, b, c) => { if (a >= 0 && b >= 0 && a < w && b < h) px[b * w + a] = c; };
+  const seg = (x0, y0, x1, y1, c) => {
+    const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+    for (let k = 0; k <= n; k++) put(Math.round(x0 + (x1 - x0) * k / n), Math.round(y0 + (y1 - y0) * k / n), c);
+  };
+  const disc = (cx, cy, rr, c) => { for (let a = -rr; a <= rr; a++) for (let b = -rr; b <= rr; b++) if (a * a + b * b <= rr * rr + rr) put(cx + a, cy + b, c); };
+  // a note lands at at(i) and its links grow from the note that landed first
+  const K = pubCoverK, rk = pubCoverRank, at = (i) => rk[i] * 0.55;
+  for (const [a0, b0] of E) {
+    const [a, b] = rk[a0] <= rk[b0] ? [a0, b0] : [b0, a0];
+    const f = Math.min(1, Math.max(0, (K - at(b) - 0.05) / 0.35));
+    if (f > 0) seg(X(a), Y(a), Math.round(X(a) + (X(b) - X(a)) * f), Math.round(Y(a) + (Y(b) - Y(a)) * f), ink);
+  }
+  // a clear ring of the well first, so a note reads as a mark and not as a crossing
+  for (let i = 0; i < N.length; i++) {
+    if (K < at(i)) continue;
+    const rr = N[i][2] >= 12 ? 2 : 1;
+    disc(X(i), Y(i), rr + 1, ground); disc(X(i), Y(i), rr, ink);
+  }
+  if (pubCoverHover >= 0 && K >= 1) {
+    const i = pubCoverHover;
+    for (const j of pubCoverAdj[i]) seg(X(i), Y(i), X(j), Y(j), sig);
+    disc(X(i), Y(i), 4, ground); disc(X(i), Y(i), 3, sig);
+  }
+  x.putImageData(img, 0, 0);
+}
+
+function pubCoverPoint(ev) {
+  if (!pubCover || pubCoverK < 1) return;
+  const box = ev.currentTarget, r = box.getBoundingClientRect(), w = Math.floor(r.width), h = Math.floor(r.height), pad = 14;
+  const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+  let best = -1, bd = 10 * 10;
+  pubCover.n.forEach((n, i) => {
+    const d = (pad + n[0] * (w - 2 * pad) - mx) ** 2 + (pad + n[1] * (h - 2 * pad) - my) ** 2;
+    if (d < bd) { bd = d; best = i; }
+  });
+  if (best === pubCoverHover) return;
+  pubCoverHover = best;
+  drawPubCover();
+  const tip = box.querySelector(".pp-ctip");
+  if (best < 0) { tip.hidden = true; return; }
+  const n = pubCover.n[best], tx = pad + n[0] * (w - 2 * pad);
+  tip.textContent = n[3];
+  tip.hidden = false;
+  tip.style.left = `${tx}px`;
+  tip.style.top = `${pad + n[1] * (h - 2 * pad)}px`;
+  tip.classList.toggle("left", tx > w * 0.62);
+}
+
+new MutationObserver(() => drawPubCover()).observe(document.documentElement, { attributeFilter: ["data-theme"] });
 
 function ppBox(title, count, items, { wide = false, none = "" } = {}) {
   const box = mkEl("section", "pp-box" + (wide ? " wide" : ""));
@@ -219,6 +349,12 @@ function renderPublic() {
       : "Off: the address says there is no page. Your folders and notes keep their globes for when you turn it on.";
   const n = st.out.length;
   const frag = document.createDocumentFragment();
+  // the same figure across renders, so a toggle redraws the page without building it again
+  const cover = pubCoverFigure();
+  // the well holds its place from the first render, so the boxes do not jump when the picture
+  // arrives
+  cover.hidden = !(pubCover || n);
+  frag.append(cover);
   frag.append(mkEl("p", "pp-status", status));
 
   const grid = mkEl("div", "pp-grid");
@@ -263,6 +399,8 @@ function renderPublic() {
     frag.append(mkEl("p", "pp-dim", `Last publish: ${pubCount(r.notes)}, ${r.links} ${r.links === 1 ? "link" : "links"}, ${r.images} ${r.images === 1 ? "image" : "images"}.`));
   }
   body.replaceChildren(frag);
+  if (pubCover && pubCover.n.length !== n) loadPubCover(false);
+  else drawPubCover();
 }
 
 $("#public-switch").addEventListener("click", (e) => {
