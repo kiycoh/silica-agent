@@ -288,8 +288,9 @@ def test_citations_carry_an_arrowhead_in_both_renderers():
     """Drawn by the frame, not by the bundles: 3d-force-graph's arrow is a cone
     mesh and a draw call each, which TestBigVaultPerfKnobs keeps out."""
     js = _js()
-    assert '.linkCanvasObjectMode(l => l.type === "CITES" ? "after" : null)' in js
-    assert ".linkCanvasObject(drawCiteArrow)" in js
+    assert '.linkCanvasObjectMode(l => l.type === "CITES" || l.requires ? "after" : null)' in js
+    # a written requires shares the hook, with chevrons and no head (ADR-0145, B2)
+    assert 'l.type === "CITES" ? drawCiteArrow(l, ctx) : drawRequires(l, ctx, k)' in js
     write = js[js.index("function writeLinkSegPositions"):js.index("function linkSegStep")]
     assert "LinkSeg.heads" in write and "Graph.camera()" in write, (
         "the 3D head rides the merged buffer and turns with the camera")

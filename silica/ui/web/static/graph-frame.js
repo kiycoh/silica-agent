@@ -1095,6 +1095,7 @@ let showProposed = false;
 // Citations are read off the paper's own references, so they are on; missing
 // papers are ids no file carries, so they wait to be asked for (ADR-0055).
 let showCites = true;
+let showRequires = true;   // a written requires: on, like cites (ADR-0145)
 let showMissing = false;
 // The part of the vault on show: {kind: "folder", prefix} | {kind: "area", id} |
 // {kind: "collection", ids: [names]} | {kind: "papers"} | null. A visibility predicate beside the focus dim, never a second build:
@@ -1655,6 +1656,30 @@ function drawCiteArrow(l, ctx) {
   ctx.fill();
 }
 
+// A written requires (ADR-0145, B2): open chevrons every 16 screen px along
+// the line, pointing at the prerequisite (the edge's target). In screen pixels
+// so they read alike at any zoom, and no head, so cites keeps the frame's only
+// arrowhead. 2D only: 3D draws the plain frost line.
+function drawRequires(l, ctx, k) {
+  const a = l.source, b = l.target;
+  if (!a || !b || a.x == null || b.x == null) return;
+  const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+  if (!len) return;
+  const ux = dx / len, uy = dy / len, px = 1 / (k || 1), arm = 4 * px;
+  const end = len - markEdge(b, nodeRadius(b), ux, uy) - 8 * px;
+  ctx.beginPath();
+  for (let d = markEdge(a, nodeRadius(a), ux, uy) + 10 * px; d <= end; d += 16 * px) {
+    const x = a.x + ux * d, y = a.y + uy * d;
+    ctx.moveTo(x - ux * arm - uy * arm, y - uy * arm + ux * arm);
+    ctx.lineTo(x, y);
+    ctx.lineTo(x - ux * arm + uy * arm, y - uy * arm - ux * arm);
+  }
+  ctx.setLineDash([]);
+  ctx.lineWidth = px;
+  ctx.strokeStyle = linkPaint(l);
+  ctx.stroke();
+}
+
 // Hit area follows the circle, not the label: clicking the text of a dense
 // cluster would otherwise pick whichever node's label happened to be on top.
 function paintNodeArea(n, color, ctx, scale) {
@@ -1804,7 +1829,10 @@ function linkPaint(l) {
     // out, so the same alphas that read as structure in 3D read as a mat there.
     // One scale factor rather than a second table: the RANK is what is worth
     // preserving between the two views, not the absolute values.
-    const a = (on ? 0.95 : (c.opacity == null ? 0.6 : c.opacity)) * (is2D() ? LINK_ALPHA_2D : 1);
+    // A written requires prints at full ink in both views: the 2D scale-down
+    // is for the mat of plain links, and this one is meant to stand out of it.
+    const a = l.requires ? 0.95
+      : (on ? 0.95 : (c.opacity == null ? 0.6 : c.opacity)) * (is2D() ? LINK_ALPHA_2D : 1);
     // Partway dimmed: toward the dim's colour and toward its full opacity.
     const t = q / FADE_STEPS, d = parseInt(GP.linkDim.slice(1), 16);
     const ch = sh => Math.round(((n >> sh) & 255) + (((d >> sh) & 255) - ((n >> sh) & 255)) * t);
@@ -2166,7 +2194,9 @@ function buildGLLinks() {
     box.appendChild(c);
   }
   under.style.background = GP.bg;
-  RAW_EDGES.forEach(l => { l.__glOwn = !isDashed(l) && l.type !== "CITES" && !libOwnsLink(l); });
+  // A written requires stays on the canvas with cites: both carry a mark the
+  // GL lines cannot draw (the head, the chevrons, ADR-0145).
+  RAW_EDGES.forEach(l => { l.__glOwn = !isDashed(l) && l.type !== "CITES" && !l.requires && !libOwnsLink(l); });
   COVER_EDGES.forEach(l => { l.__glOwn = false; });
   const index = new Map(ALL_NODES.map((n, i) => [n.id, i]));
   const posW = Math.min(4096, ALL_NODES.length || 1);
@@ -3610,8 +3640,8 @@ function buildGraph() {
       .linkLineDash(l => isDashed(l) ? DASH_2D : null)
       // After the lib's own stroke, on the citations only: any other mode
       // value leaves a link to the default painter alone.
-      .linkCanvasObjectMode(l => l.type === "CITES" ? "after" : null)
-      .linkCanvasObject(drawCiteArrow)
+      .linkCanvasObjectMode(l => l.type === "CITES" || l.requires ? "after" : null)
+      .linkCanvasObject((l, ctx, k) => l.type === "CITES" ? drawCiteArrow(l, ctx) : drawRequires(l, ctx, k))
       .nodeRelSize(NODE_REL_SIZE)
       // 2D names every note on the canvas and hovers nothing, except a paper
       // or a missing paper: its canvas name is the short form ("Xu 2025"),
@@ -4275,7 +4305,7 @@ function computeFilters() {
     // notes). Read after the node pass and the far-end rule above.
     const a = NODE_BY_ID[e.from], b = NODE_BY_ID[e.to];
     const off = (a && a._hidden) || (b && b._hidden) ||
-                (e.type === "EXTRACTED" && !showExtracted) ||
+                (e.type === "EXTRACTED" && (e.requires ? !showRequires : !showExtracted)) ||
                 (e.type === "AMBIGUOUS" && !showAmbiguous) ||
                 (e.type === "GAP" && !showGaps) ||
                 (e.type === "SIMILAR" && !showSimilar) ||
@@ -4376,6 +4406,9 @@ function updateEdgeFilter() {
   // Rendered only where a paper or a missing paper exists (graph_view).
   const cbCites = document.getElementById("cb-cites");
   if (cbCites) showCites = cbCites.checked;
+  // Rendered only where a note has a written requires (graph_view).
+  const cbReq = document.getElementById("cb-requires");
+  if (cbReq) showRequires = cbReq.checked;
   const cbMissing = document.getElementById("cb-missing");
   if (cbMissing) showMissing = cbMissing.checked;
   // Each of the four is rendered only where its layer has something in it, so

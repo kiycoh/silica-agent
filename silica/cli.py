@@ -1442,10 +1442,10 @@ def _dc_path(args: list[str], *, raw_input: str = "", **_) -> bool:
         return True
     # Weighted: a reading path wants the most coherent chain, not the fewest
     # hops — A/B on a live vault: weakest-link 0.87→0.97 for +0.14 hops.
-    from silica.kernel.report.learner import _notes_meta, written_requires
+    from silica.kernel.recall.requires import written_requires
 
     try:
-        requires = written_requires(_notes_meta(Path(CONFIG.vault_path)))
+        requires = written_requires(CONFIG.vault_path)
     except Exception:
         requires = {}  # an unreadable walk: the path runs on links and co-occurrence, as before
     path = reading_path(src, dst, weighted=True, requires=requires)

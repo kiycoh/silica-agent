@@ -480,7 +480,7 @@ class TestWebGLLinks2D:
 
     def test_dashes_citations_and_photons_stay_the_libs(self, small_graph):
         html = self._js(small_graph)
-        assert 'l.__glOwn = !isDashed(l) && l.type !== "CITES" && !libOwnsLink(l);' in html
+        assert 'l.__glOwn = !isDashed(l) && l.type !== "CITES" && !l.requires && !libOwnsLink(l);' in html
 
     def test_one_width_one_colour_is_one_path(self, small_graph):
         """The lib fills one path per (colour, width): its lines never darken

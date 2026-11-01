@@ -9,7 +9,8 @@ from __future__ import annotations
 import networkx as nx
 import pytest
 
-from silica.kernel.report.learner import with_written, written_requires
+from silica.kernel.recall.requires import resolve
+from silica.kernel.report.learner import with_written
 from silica.kernel.write.frontmatter import requires_in
 
 
@@ -23,15 +24,12 @@ def test_requires_in_reads_every_spelling_of_a_link_once():
     assert requires_in({"requires": 3}) == [] and requires_in(None) == []
 
 
-def test_written_requires_resolves_by_path_name_and_alias_and_skips_a_shared_name():
-    notes = {
-        "ML/Backprop.md": {"requires": ["Chain rule", "GD", "Intro", "Nowhere", "Backprop"]},
-        "Math/Chain rule.md": {},
-        "ML/Gradient descent.md": {"aliases": ["GD"]},
-        "A/Intro.md": {}, "B/Intro.md": {},
-        "ML/Adam.md": {"requires": ["ML/Gradient descent"]},
-    }
-    assert written_requires(notes) == {
+def test_a_name_resolves_by_path_name_or_alias_and_a_shared_name_is_skipped():
+    paths = ["ML/Backprop.md", "Math/Chain rule.md", "ML/Gradient descent.md", "A/Intro.md",
+             "B/Intro.md", "ML/Adam.md"]
+    requires = {"ML/Backprop.md": ["Chain rule", "GD", "Intro", "Nowhere", "Backprop"],
+                "ML/Adam.md": ["ML/Gradient descent"]}
+    assert resolve(requires, {"ML/Gradient descent.md": ["GD"]}, paths) == {
         "ML/Backprop.md": ["Math/Chain rule.md", "ML/Gradient descent.md"],
         "ML/Adam.md": ["ML/Gradient descent.md"],
     }
@@ -51,7 +49,6 @@ def test_prerequisites_map_carries_what_the_person_wrote(tmp_vault, monkeypatch)
     tmp_vault.note("ML/Backprop.md", '---\nrequires: ["[[Chain rule]]"]\n---\n\n# Backprop\n')
     tmp_vault.note("Math/Chain rule.md", "# Chain rule\n")
     learner._prereq_memo.clear()
-    learner._meta_memo.clear()
     got = learner.prerequisites_map()
     assert got[cooccur_key("ML/Backprop.md")] == [cooccur_key("Math/Chain rule.md")]
 
@@ -138,3 +135,45 @@ def test_an_entry_already_there_is_no_write_wherever_it_sits(vault):
     silica_require("ML/Backprop", "A/Intro")
     assert silica_require("ML/Backprop", "Chain rule")["changed"] is False
     assert _requires("ML/Backprop.md") == ["Chain rule", "A/Intro"]
+
+
+# -- Explore (B2) --------------------------------------------------------------
+
+def test_the_graph_flags_a_written_requires_on_its_wikilink_and_keys_it_apart(tmp_vault):
+    from silica.kernel.recall.graph_export import build_graph_data
+    from silica.ui.web.graph_view import render_html
+
+    tmp_vault.note("ML/Backprop.md", '---\nrequires: ["[[Chain rule]]"]\n---\n\n# Backprop\n\nsee [[Adam]]\n')
+    tmp_vault.note("Math/Chain rule.md", "# Chain rule\n")
+    tmp_vault.note("ML/Adam.md", "# Adam\n")
+    nodes, edges = build_graph_data()
+    req = [e for e in edges if e.get("requires")]
+    assert [(e["from"], e["to"], e["type"]) for e in req] == [
+        ("ML/Backprop.md", "Math/Chain rule.md", "EXTRACTED")]   # one edge, toward the prerequisite
+    assert all(not e.get("requires") for e in edges if e["to"] == "ML/Adam.md")
+    html = render_html(nodes, edges, communities=[], lib_js="// x")
+    assert 'id="cb-requires" checked' in html and "requires" in html
+
+
+def test_the_chevrons_are_stroked_in_screen_pixels_and_draw_no_head():
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "silica/ui/web/static/graph-frame.js").read_text()
+    body = js[js.index("function drawRequires"):js.index("function paintNodeArea")]
+    assert "ctx.stroke()" in body and "ctx.fill(" not in body   # open chevrons, never a head
+    assert "1 / (k || 1)" in body                                # 16 and 4 screen px at any zoom
+    # the GL layer draws plain lines only: a requires stays on the canvas painter
+    assert "!l.requires && !libOwnsLink(l)" in js
+
+
+def test_slash_path_names_the_requires_leg(tmp_vault, monkeypatch):
+    from rich.console import Console
+
+    from silica.cli import _handle_direct_shortcut
+
+    console = Console(record=True, width=200)
+    monkeypatch.setattr("silica.cli.CONSOLE", console)
+    tmp_vault.note("ML/Backprop.md", '---\nrequires: ["[[Chain rule]]"]\n---\n\n# Backprop\n')
+    tmp_vault.note("Math/Chain rule.md", "# Chain rule\n")
+    _handle_direct_shortcut('/path "Chain rule" "Backprop"', [])
+    assert "required by" in console.export_text()
