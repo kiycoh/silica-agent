@@ -13,11 +13,12 @@ list to keep in sync.
 from __future__ import annotations
 
 import re
+from collections.abc import Container
 from typing import Annotated, Any
 
 from pydantic import Field
 
-from silica.tools import TOOLS, Tool, _model_from_signature
+from silica.tools import TOOLS, Tool, _model_from_signature, pointed
 
 # The catalog line is the first sentence of the tool's own description, cut
 # here: 33 deferred tools at 90 chars is ~750 tokens, and the gist is enough to
@@ -61,11 +62,11 @@ def silica_load_tools(
 class _LoaderTool(Tool):
     __slots__ = ()
 
-    def json_schema(self) -> dict:
+    def json_schema(self, reach: Container[str] | None = None) -> dict:
         from silica.agent.constraints import loadable
 
-        schema = super().json_schema()
-        lines = [f"- {n}: {_gist(TOOLS[n].description)}" for n in loadable() if n in TOOLS]
+        schema = super().json_schema(reach)
+        lines = [f"- {n}: {_gist(pointed(TOOLS[n].description, reach))}" for n in loadable() if n in TOOLS]
         schema["function"]["description"] = "\n".join([self.description, *lines])
         return schema
 

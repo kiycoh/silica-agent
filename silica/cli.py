@@ -133,10 +133,13 @@ def _chat_tool_schemas(messages: list[dict]) -> list[dict]:
     (nucleate, injector) ships a different set, but the meter is a chat surface
     and never shows one.
     """
-    from silica.agent.constraints import chat_tools
+    from silica.agent.constraints import chat_deferred, chat_tools
     from silica.tools import TOOLS
 
-    return [TOOLS[n].json_schema() for n in chat_tools(messages) if n in TOOLS]
+    names = chat_tools(messages)
+    # the reach the loop cuts a schema's pointers by, or the meter counts text never sent
+    reach = {*names, *chat_deferred(messages)}
+    return [TOOLS[n].json_schema(reach) for n in names if n in TOOLS]
 
 
 def _update_context_tokens(messages: list[dict]) -> None:

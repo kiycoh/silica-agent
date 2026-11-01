@@ -81,7 +81,7 @@ def test_run_agent_hands_the_turns_requests_to_the_tools(monkeypatch):
     class Probe:
         name, collapse, sensitive, internal, summarize = "probe", "lazy", False, False, None
 
-        def json_schema(self):
+        def json_schema(self, reach=None):
             return {"type": "function", "function": {"name": "probe", "description": "",
                                                      "parameters": {"type": "object", "properties": {}}}}
 

@@ -278,6 +278,57 @@ def test_the_chat_gets_the_core_minus_a_named_set_and_nothing_deferred(monkeypat
     assert DEMO_WITHHELD <= set(chat_tools()) and chat_deferred()
 
 
+def _texts(node):
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, (list, tuple)):
+        for v in node:
+            yield from _texts(v)
+    elif isinstance(node, dict):
+        yield from _texts(list(node.values()))
+
+
+def test_no_description_the_demo_sends_points_at_a_tool_it_withholds(monkeypatch):
+    """Four core descriptions point at a tool the demo does not offer: its turn
+    reads them without that clause, which a question's 8 calls cannot afford
+    to chase, while a turn that reaches every tool reads every description as
+    it always did (tools.pointed)."""
+    import silica.cli  # noqa: F401  registers every tool
+    from silica.tools import TOOLS
+
+    monkeypatch.delenv("SILICA_HOSTED", raising=False)
+    monkeypatch.delenv("SILICA_DEMO", raising=False)
+    _eligible()  # registers the loader and the connectors' tools
+    whole = {n: t.json_schema() for n, t in TOOLS.items()}
+    assert all(t.json_schema(set(TOOLS)) == whole[n] for n, t in TOOLS.items())
+    assert "<<" not in json.dumps(whole) and ">>" not in json.dumps(whole)
+    # a marked clause that names no tool would be kept everywhere, a silent no-op
+    for t in TOOLS.values():
+        for text in _texts([t.description, t.params_model.model_json_schema()]):
+            for clause in re.findall(r"<<(.*?)>>", text, re.S):
+                assert {w for w in re.findall(r"\w+", clause) if "_" in w} & set(TOOLS), (t.name, clause)
+    # a laptop's chat reaches each tool the core points at, so it sends them whole
+    reach = {*chat_tools(), *chat_deferred()}
+    assert all(TOOLS[n].json_schema(reach) == whole[n] for n in chat_tools())
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "graph")
+    monkeypatch.setenv("SILICA_DEMO", "1")
+    reach = {*chat_tools(), *chat_deferred()}
+    assert reach == set(DEMO_TOOLS)
+    sent = {n: TOOLS[n].json_schema(reach) for n in DEMO_TOOLS}
+    assert {n for n in DEMO_TOOLS if sent[n] != whole[n]} == {
+        "silica_recall", "silica_write_note", "silica_patch_note", "silica_vault_report"}
+    text = json.dumps(list(sent.values()), ensure_ascii=False)
+    assert not {n for n in TOOLS if "_" in n and re.search(rf"\b{n}\b", text)} - set(DEMO_TOOLS)
+    # what is left of each reads as a sentence
+    desc = {n: s["function"]["description"] for n, s in sent.items()}
+    assert "append with silica_patch_note. Checkpointed" in desc["silica_write_note"]
+    assert "use silica_write_note. Every successful patch" in desc["silica_patch_note"]
+    assert desc["silica_vault_report"].endswith("escalate (IssueCards, human judgment).")
+    vault = sent["silica_recall"]["function"]["parameters"]["properties"]["vault"]["description"]
+    assert vault.startswith("Peek: path of another Silica vault to answer from. Read-only;")
+
+
 # --- the page -------------------------------------------------------------------
 
 def test_the_page_of_a_demo_has_no_control_for_what_it_refuses(sandbox, monkeypatch):
@@ -305,6 +356,54 @@ def test_the_page_without_the_demo_is_unchanged(sandbox, monkeypatch):
     html = tc.get("/").text
     assert "data-demo" not in html and 'placeholder="Ask about your notes"' in html
     assert '<html lang="en" data-hosted' in html
+
+
+# --- the help, and the chat's picture of the app it reads (ADR-0115) ------------
+
+# The help rows about a control the demo refuses, by the route each is keyed on
+REFUSED_ROWS = {"ctrl ,": "/settings", "drop a file": "/chat/files/add", "download": "/vault/export",
+                "the mic": "/stt"}
+
+
+def _terms(sections) -> list[str]:
+    return [term for _, rows in sections for term, _ in rows]
+
+
+def test_a_help_row_goes_with_the_route_it_names(sandbox, monkeypatch):
+    tc, _, _ = sandbox
+    html = tc.get("/").text
+    # each key is a route the demo refuses as written, or the row hides nowhere
+    assert set(re.findall(r'data-route="([^"]+)"', html)) == set(REFUSED_ROWS.values()) <= set(DEMO_OFF["routes"])
+    for route in REFUSED_ROWS.values():
+        assert f'data-route="{route}" data-served' not in html, route
+    monkeypatch.delenv("SILICA_DEMO")
+    html = tc.get("/").text
+    for route in REFUSED_ROWS.values():
+        assert f'data-route="{route}" data-served' in html, route
+
+
+def test_the_chat_hears_of_no_control_the_demo_refuses(monkeypatch):
+    """The panel's rows are the chat's picture of the app, so a row the demo
+    drops is one the chat never describes, and the settings block goes with
+    the row that opens it."""
+    from silica.ui.web.app_help import app_message, panel
+
+    monkeypatch.delenv("SILICA_HOSTED", raising=False)
+    monkeypatch.delenv("SILICA_DEMO", raising=False)
+    laptop, laptop_told = _terms(panel(hosted=False)), app_message()
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "graph")
+    tenant, told = _terms(panel(hosted=True)), app_message()
+    monkeypatch.setenv("SILICA_DEMO", "1")
+    shown, demo_told = _terms(panel(hosted=True)), app_message()
+    # a laptop has no downloads (ADR-0142); a tenant keeps all four
+    assert set(REFUSED_ROWS) - {"download"} <= set(laptop) and set(REFUSED_ROWS) <= set(tenant)
+    assert "### settings (ctrl ,)" in laptop_told and "### settings (ctrl ,)" in told
+    assert shown == [t for t in tenant if t not in REFUSED_ROWS]
+    for term in REFUSED_ROWS:
+        assert f"\n- {term}: " in told and f"\n- {term}: " not in demo_told, term
+    rows = demo_told[:demo_told.index("These rows")]
+    assert "settings" not in rows.lower() and "download" not in rows.lower()
 
 
 # --- the visit's count and cards (renderDemo), from the door's headers ----------

@@ -24,6 +24,7 @@ import json
 import logging
 import re
 import threading
+from collections.abc import Container
 from dataclasses import replace
 from typing import Annotated, Any
 
@@ -165,7 +166,8 @@ class _ServerTool(Tool):
         super().__init__(lambda **kw: "", safe_name(remote), description, None, "atomic")  # type: ignore[arg-type]
         self.key, self.remote, self.schema, self.budget, self.record = key, remote, schema, budget, record
 
-    def json_schema(self) -> dict:
+    def json_schema(self, reach: Container[str] | None = None) -> dict:
+        # The server's own text is never marked (tools.pointed), so it is sent whole.
         return {"type": "function",
                 "function": {"name": self.name, "description": self.description, "parameters": self.schema}}
 

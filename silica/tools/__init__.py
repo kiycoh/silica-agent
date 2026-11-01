@@ -18,6 +18,8 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import re
+from collections.abc import Container
 from contextvars import ContextVar
 from typing import Any, Callable, get_type_hints
 
@@ -75,6 +77,37 @@ def _strip_titles(node: Any, *, in_map: bool = False) -> Any:
     return node
 
 
+# A clause that sends the model to another tool is marked <<like this>> where
+# it is written, in a docstring or a parameter's description. A turn that can
+# reach every tool the clause names reads it without the marks, the text it
+# always read; a turn that cannot reads the description without the clause. A
+# model calls what a description names, and a call to a tool the turn lacks
+# spends one of its steps on an error: a demo question has 8 (ADR-0139).
+_POINTER = re.compile(r"<<(.*?)>>", re.S)
+
+
+def pointed(text: str, reach: Container[str] | None = None) -> str:
+    """`text` as a turn that can reach the tools in `reach` reads it; None
+    reaches every tool. A clause naming two tools goes when either is out."""
+
+    def clause(m: re.Match[str]) -> str:
+        # Namespaced names only: plan and remember are tools and English words.
+        named = [w for w in re.findall(r"\w+", m[1]) if "_" in w and w in TOOLS]
+        return m[1] if reach is None or all(n in reach for n in named) else ""
+
+    return _POINTER.sub(clause, text)
+
+
+def _pointed(node: Any, reach: Container[str] | None) -> Any:
+    if isinstance(node, str):
+        return pointed(node, reach)
+    if isinstance(node, dict):
+        return {k: _pointed(v, reach) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_pointed(v, reach) for v in node]
+    return node
+
+
 class Tool:
     """Metadata and executor for a single registered tool."""
 
@@ -107,16 +140,17 @@ class Tool:
         # reachable when named in AgentConstraints.tools.
         self.internal = internal
 
-    def json_schema(self) -> dict:
-        """Return the OpenAI-compatible function schema for this tool."""
-        return {
+    def json_schema(self, reach: Container[str] | None = None) -> dict:
+        """Return the OpenAI-compatible function schema for this tool, as a
+        turn that can reach the tools in `reach` reads it (pointed())."""
+        return _pointed({
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
                 "parameters": _strip_titles(self.params_model.model_json_schema()),
             },
-        }
+        }, reach)
 
     def run(self, _cancel_token: Any = None, _progress: Any = None, **kwargs: Any) -> str:
         """Validate args via pydantic, then execute the tool function.

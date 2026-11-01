@@ -531,20 +531,24 @@
       <div class="hp-row" data-view="public"><span class="hp-what">Public page</span><span>a page anyone can read, of the folders and notes whose globe you turn on; Publish puts it online, Off takes it down</span></div>
       <div class="hp-row" data-view="metrics"><span class="hp-what">Examine</span><span>the vault's health: its shape, what to fix, what changed</span></div>
       <div class="hp-row"><span class="hp-what">a new note</span><span>the chat reads it and Explore draws it at once. It never changes a plan, and Memorize suggests it only when a plan covers it, or when you have no plan yet</span></div>
+      <!-- A row about a control that has a route of its own carries it in
+           data-route, and is gone wherever that route is refused, as a view's
+           row is with its view (ADR-0140); a demo refuses Settings, uploads,
+           dictation and the downloads (ADR-0139 point 6). -->
       <div class="sp-title">keyboard</div>
       <div class="hp-row"><kbd>&#8629;</kbd><span>send the message</span></div>
       <div class="hp-row"><kbd>&#8679; &#8629;</kbd><span>new line instead of sending</span></div>
       <div class="hp-row"><kbd>/</kbd><span>open the command palette, then <kbd>&#8593;</kbd><kbd>&#8595;</kbd> to pick</span></div>
       <div class="hp-row"><kbd>esc</kbd><span>close the note drawer or an open panel</span></div>
-      <div class="hp-row"><kbd>ctrl ,</kbd><span>settings</span></div>
+      <div class="hp-row" data-route="/settings"><kbd>ctrl ,</kbd><span>settings</span></div>
       <div class="hp-row"><kbd>?</kbd><span>this panel, from anywhere you are not typing</span></div>
       <div class="sp-title">the vault</div>
-      <div class="hp-row"><span class="hp-what">drop a file</span><span>anywhere on the window: it joins the chat, and its "add to vault" copies it into Inbox/; the vault's + takes a folder, or a link to a web page, too</span></div>
-      <div class="hp-row hp-hosted"><span class="hp-what">download</span><span>the SILICA menu downloads the whole vault as a zip, or only the notes Silica added since the last download, in one folder to put at the top of your Obsidian vault</span></div>
+      <div class="hp-row" data-route="/chat/files/add"><span class="hp-what">drop a file</span><span>anywhere on the window: it joins the chat, and its "add to vault" copies it into Inbox/; the vault's + takes a folder, or a link to a web page, too</span></div>
+      <div class="hp-row hp-hosted" data-route="/vault/export"><span class="hp-what">download</span><span>the SILICA menu downloads the whole vault as a zip, or only the notes Silica added since the last download, in one folder to put at the top of your Obsidian vault</span></div>
       <div class="hp-row"><span class="hp-what">New chat</span><span>at the top of the sidebar starts one; the old one stays in Chats</span></div>
       <div class="hp-row"><span class="hp-what">every write</span><span>gets a card in the transcript with its own revert</span></div>
       <div class="hp-row"><span class="hp-what">Notes, Chats</span><span>the sidebar shows one of its two lists; the switch above them picks it, and the filter reads both</span></div>
-      <div class="hp-row"><span class="hp-what">the mic</span><span>dictates into the message; on your own machine it needs a transcription endpoint, set in settings</span></div>
+      <div class="hp-row" data-route="/stt"><span class="hp-what">the mic</span><span>dictates into the message; on your own machine it needs a transcription endpoint, set in settings</span></div>
       <!-- the two renderer buttons are labelled 3D and 2D and nothing else; what
            separates them lives here, not in a longer button -->
       <div class="sp-title" data-view="graph">explore</div>

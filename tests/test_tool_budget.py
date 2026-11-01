@@ -13,6 +13,8 @@ import importlib
 import json
 import pkgutil
 
+import pytest
+
 import silica.tools as T
 from silica.agent.constraints import (
     _CHAT_EXCLUDED, _REVIEW_APPLY, CHAT_CORE, chat_deferred, chat_tools, loadable,
@@ -42,19 +44,30 @@ def test_chat_tools_excludes_only_the_named_batch_tools():
     assert set(CHAT_CORE) <= set(tools)
 
 
-def test_chat_tools_keeps_every_recovery_path_it_advertises():
+@pytest.mark.parametrize("env", [
+    {},
+    {"SILICA_HOSTED": "1", "SILICA_VIEWS": "graph"},
+    {"SILICA_HOSTED": "1", "SILICA_VIEWS": "graph", "SILICA_DEMO": "1"},
+], ids=["laptop", "free", "demo"])
+def test_chat_tools_keeps_every_recovery_path_it_advertises(monkeypatch, env):
     """A description that says "run X" must leave X reachable, and a tool the
     turn is not offered must be named as loadable: llama.cpp constrains a tool
     call to the offered names, so on the local route a bare pointer to an
-    unoffered tool is a call the model cannot make.
+    unoffered tool is a call the model cannot make. Held per tier, on the
+    schemas as the turn renders them: a clause pointing past what a Free
+    tenant or a demo can reach is cut there (tools.pointed).
     """
     import re
 
+    for key in ("SILICA_HOSTED", "SILICA_VIEWS", "SILICA_DEMO"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
     tools = _all_tools()
     chat = set(chat_tools())
-    reach = chat | set(loadable())
+    reach = chat | set(chat_deferred())
     for name in chat - {"silica_load_tools"}:  # the catalog IS the list of loadables
-        text = json.dumps(tools[name].json_schema()["function"], ensure_ascii=False)
+        text = json.dumps(tools[name].json_schema(reach)["function"], ensure_ascii=False)
         for other in tools:
             # Bare-word tool names (plan, remember) collide with prose: the
             # ledger's "when the plan is exhausted" is not a recovery hint.

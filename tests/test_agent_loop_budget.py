@@ -171,7 +171,7 @@ def test_turn_prompt_budget_lands_the_turn_instead_of_spiralling(monkeypatch):
 
     class _Tool:
         sensitive = False; internal = False; summarize = None; collapse = "lazy"; name = "fake_read"
-        def json_schema(self):
+        def json_schema(self, reach=None):
             return {"type": "function", "function": {"name": "fake_read", "description": "", "parameters": {"type": "object", "properties": {}}}}
         def run(self, _cancel_token=None, **kw):
             return "x" * 50

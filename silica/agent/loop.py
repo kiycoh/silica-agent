@@ -312,9 +312,6 @@ def run_agent(
         # them in AgentConstraints.tools.
         allowed = {n: t for n, t in TOOLS.items() if not t.sensitive and not t.internal}
 
-    # Collect tool schemas for the LLM
-    schemas = [t.json_schema() for t in allowed.values()] if allowed else None
-
     # Permitted, not offered (ADR-0050): a tool joins `allowed` and `schemas`
     # when silica_load_tools names it or the model calls it directly. Only
     # ever appended, so the part of the tool block the last request sent is
@@ -322,13 +319,20 @@ def run_agent(
     deferred: dict[str, "Tool"] = (
         {n: TOOLS[n] for n in constraints.deferred if n in TOOLS and n not in allowed}
         if constraints is not None and allowed else {})
+    # What the turn can reach, offered or one load away: a schema's clause
+    # that points at a tool outside it is cut (tools.pointed). Taken once, so
+    # a load never changes a schema the last request already sent.
+    reach = frozenset(allowed) | frozenset(deferred)
+
+    # Collect tool schemas for the LLM
+    schemas = [t.json_schema(reach) for t in allowed.values()] if allowed else None
 
     def _load(name: str) -> None:
         tool = deferred.pop(name, None)
         if tool is not None:
             assert schemas is not None  # deferred is empty unless `allowed` built schemas
             allowed[name] = tool
-            schemas.append(tool.json_schema())
+            schemas.append(tool.json_schema(reach))
 
     effective_model = (
         constraints.model if (constraints is not None and constraints.model) else model
