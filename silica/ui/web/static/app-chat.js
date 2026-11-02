@@ -464,7 +464,20 @@ function turnFooter(touched, failed) {
       const label = `revert all ${mutations.length} changes`;
       u.textContent = label;
       u.title = "run /undo for every note this turn touched";
-      armThenRun(u, label, `click again to revert ${mutations.length}`, () => send("/undo"));
+      // One /undo per note, each once the last has ended: a bare /undo takes
+      // back only the newest action, so the button reverted one change of N,
+      // and send() refuses while a turn runs.
+      armThenRun(u, label, `click again to revert ${mutations.length}`, async () => {
+        for (const [ref] of mutations) {
+          const card = [...w.querySelectorAll(".wcard")].find((c) => c.dataset.ref === ref);
+          if (card) {
+            card.classList.add("reverting");
+            const act = card.querySelector(".wc-act");
+            if (act) act.disabled = true;
+          }
+          await send("/undo " + ref);
+        }
+      });
       w.appendChild(u);
     }
     frag.appendChild(w);
@@ -2207,7 +2220,8 @@ function send(text, replay = false, images = []) {
   if (find && !images.length) { runFind(find[1]); return; }
   if (/^\/nucleate\b/.test(text.trim())) askNotify(); // a nucleate outlasts a glance at another tab
   noteSent();
-  runTurn(fetch("/chat", {
+  // The turn's promise, so a caller can wait for it to end (the bulk revert).
+  return runTurn(fetch("/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, ...(images.length ? { images } : {}),
