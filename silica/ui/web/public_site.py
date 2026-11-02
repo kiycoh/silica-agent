@@ -599,11 +599,15 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
     head = _head(f"{m['title']} · @{h}", m["line"] or f"{_plural(count['notes'], 'note')} by @{h}", site, 1,
                  canonical=m["url"], lang=lang)
     vaults_json = f"{site.root}/vaults.json" if site.base else "../vaults.json"
+    # absolute on the host: caddy also serves the vault at /@h/<vault> with no slash, where a
+    # relative "vault.json" would name the Page's folder instead
+    here = f"{site.root}/{vslug}/" if site.base else ""
     return (head + "<body>\n" + top(site.catalog(), _app(), page=site.page(1), h=h)
             + f'<main class="sheet"><section class="wrap vp grid" aria-labelledby="vp-h"'
-            f' data-vaults="{_esc(vaults_json)}" data-self="{_esc(vslug)}" data-root="{_esc(site.page(1))}">'
+            f' data-vaults="{_esc(vaults_json)}" data-self="{_esc(vslug)}" data-root="{_esc(site.page(1))}"'
+            f' data-here="{_esc(here)}">'
             + crumb
-            + f'<figure class="vp-cover"><div class="well" data-cover="vault.json">{_svg(c)}'
+            + f'<figure class="vp-cover"><div class="well" data-cover="{_esc(here)}vault.json">{_svg(c)}'
             f'<canvas role="img" aria-label="{_esc(m["title"])} as a graph of its notes"></canvas>'
             f'<div class="ctip" hidden></div></div><figcaption>{caption}</figcaption></figure>'
             + f'<div class="vp-side"><h1 id="vp-h">{_esc(m["title"])}</h1>'

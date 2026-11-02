@@ -224,7 +224,7 @@ def _chosen(manifest: dict, areas) -> list[str]:
     -1 is the notes with no link, which the vault's page lists as an area."""
     rows = [(r[2], r[5]) for r in manifest.get("n", []) if isinstance(r, list) and len(r) >= 6]
     rows += [(-1, r[1]) for r in manifest.get("unlinked", []) if isinstance(r, list) and len(r) >= 2]
-    if not areas:
+    if areas is None:
         return [slug for _a, slug in rows]
     want = {int(a) for a in areas if str(a).lstrip("-").isdigit()}
     return [slug for a, slug in rows if a in want]

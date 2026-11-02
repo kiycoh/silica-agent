@@ -106,7 +106,7 @@
       draw();
     });
     well.addEventListener("pointerleave", () => { hover = null; tip.hidden = true; draw(); });
-    well.addEventListener("click", () => { if (G && hover != null) location.href = G.n[hover][5] + ext; });
+    well.addEventListener("click", () => { if (G && hover != null) location.href = (vp.dataset.here || "") + G.n[hover][5] + ext; });
 
     // the areas: what Save takes, and what they light on the cover
     const boxes = $$(".areas input", vp);

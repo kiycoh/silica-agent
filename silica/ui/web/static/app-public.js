@@ -407,6 +407,10 @@ function upsellText(why) {
 
 function renderPublic(fresh) {
   const body = $("#public-body");
+  // a render that a save of another field set off keeps the field being typed in as it was
+  const ae = document.activeElement;
+  const keep = ae && body.contains(ae) && ae.dataset.keep
+    ? { k: ae.dataset.keep, v: ae.value, s: ae.selectionStart, e: ae.selectionEnd, slug: pubCur } : null;
   const link = $("#public-url");
   const count = $("#public-count");
   const st = pubState;
@@ -499,6 +503,7 @@ function renderPublic(fresh) {
   const tl = mkEl("div", "pg-tl");
   const title = Object.assign(document.createElement("input"), { className: "pg-ed pg-ed-t", value: v.title, maxLength: 80 });
   title.setAttribute("aria-label", "Title of this vault");
+  title.dataset.keep = "title";
   title.title = "Edit the title";
   const save = (key, el) => {
     const val = el.value.trim();
@@ -524,6 +529,7 @@ function renderPublic(fresh) {
   tl.append(title, ctl);
   const line = Object.assign(document.createElement("input"), { className: "pg-ed pg-ed-l", value: v.line, maxLength: 160, placeholder: "One line about this vault" });
   line.setAttribute("aria-label", "One line about this vault");
+  line.dataset.keep = "line";
   line.title = "Edit the line";
   line.addEventListener("change", () => save("line", line));
   line.addEventListener("keydown", (e) => { if (e.key === "Enter") line.blur(); });
@@ -592,6 +598,10 @@ function renderPublic(fresh) {
     frag.append(mkEl("p", "pp-dim", `Last publish: ${pubCount(r.notes)}, ${r.links} ${r.links === 1 ? "link" : "links"}, ${r.images} ${r.images === 1 ? "image" : "images"}.`));
   }
   body.replaceChildren(frag);
+  if (keep && keep.slug === v.slug) {
+    const el = body.querySelector(`[data-keep="${keep.k}"]`);
+    if (el) { el.value = keep.v; el.focus({ preventScroll: true }); el.setSelectionRange(keep.s, keep.e); }
+  }
   if (fresh || pubCoverOf !== v.slug || (pubCover && pubCover.n.length + (pubCover.unlinked || 0) !== v.out)) loadPubCover(v.slug, !!fresh);
   else drawPubCover();
 }
@@ -601,11 +611,13 @@ function readersBox(v) {
   const row = mkEl("div", "pg-row");
   const input = Object.assign(document.createElement("input"), { className: "pg-sel pg-grow", placeholder: "Add a reader by their handle" });
   input.setAttribute("aria-label", "A reader's handle");
+  input.dataset.keep = "reader";
   const go = mkEl("button", "pp-go small", "Invite");
   go.type = "button";
   const invite = () => {
     const h = input.value.trim().replace(/^@/, "").toLowerCase();
     if (!h) return;
+    input.value = ""; // the render the invite sets off keeps what the field holds, which is none
     pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { readers: [...v.readers, h] });
   };
   go.addEventListener("click", invite);

@@ -192,7 +192,9 @@ def enforce_tier(vault: Path | None = None) -> list[str]:
     point 10); returns the slugs it turned. Readers keep what they saved,
     and the relay has already stopped delivering on the tier."""
     vault = vault or _vault()
-    if private_allowed() == "ok":
+    # only a hosted account loses Private; a laptop never had a relay, and a vault.yaml brought
+    # down from the server keeps its choice there rather than reading as a downgrade
+    if private_allowed() != "paid":
         return []
     items = vaults(vault)
     turned = [v["slug"] for v in items if v["visibility"] == "private"]
