@@ -181,9 +181,11 @@
       if (!/^https?:\/\//i.test(to)) to = "https://" + to;
       try { new URL(to); } catch { input.focus(); return; }
       try { localStorage.setItem(WHERE, to + "/"); } catch { /* not remembered */ }
-      form.action = to + "/";
+      // a navigation, not a submit: the host's policy sends forms only to the two Silicas it
+      // names, and an address the reader typed is neither
       prune();
-      form.submit();
+      const q = new URLSearchParams(new FormData(form));
+      location.href = `${to}/?${q}`;
     });
   }
 
