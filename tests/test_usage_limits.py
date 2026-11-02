@@ -433,7 +433,7 @@ def test_what_needs_no_model_stays_at_the_limit(fake, tmp_vault, monkeypatch):
     assert resp.status_code == 200
     from silica.config import CONFIG
 
-    assert (Path(CONFIG.vault_path) / "Inbox" / "Lecture.md").exists()
+    assert (Path(CONFIG.vault_path) / "Lecture.md").exists()  # the + lands at the top of the vault
     assert tc.get("/limits").status_code == 200
 
 

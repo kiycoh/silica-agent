@@ -476,7 +476,8 @@ nucleateInput.addEventListener("change", () => {
 });
 
 // --- the vault's + (ADR-0098) ---------------------------------------------------
-// Files, a folder or a link into the Inbox, each through its lane, and no
+// Files or a folder at the top of the vault, a link into the Inbox (web text
+// waits there for the person's word), each through its lane, and no
 // agent turn: a folder the student only wants searchable should not spend a
 // turn. Two picker entries because one browser picker takes files or a folder,
 // never both; the link is typed (ADR-0120).
@@ -693,7 +694,11 @@ function renderVaultImport({ progress = "", rows = [], skipped = [], failed = ""
   const refused = rows.filter((r) => r.status === "refused");
   const converting = rows.filter((r) => r.status === "queued");
   const notTaken = skipped.length + rows.filter((r) => r.status === "skipped").length;
-  const where = folder ? `${(done[0]?.path || converting[0]?.path || "").split("/")[0] || "Inbox"}/${folder}` : "the Inbox";
+  // The + lands at the top of the vault (or of a confined write folder), so a
+  // folder's place is its rows' path up to its own name.
+  const first = done[0]?.path || converting[0]?.path || "";
+  const at = folder ? first.indexOf(`${folder}/`) : -1;
+  const where = folder ? (at >= 0 ? first.slice(0, at + folder.length) : folder) : "the top of the vault";
   const parts = [done.length ? `${done.length} imported into ${where}` : converting.length ? `into ${where}` : "nothing imported"];
   if (converting.length) parts.push(`${converting.length} converting`);
   if (notTaken) parts.push(`${notTaken} not a type Silica reads`);
