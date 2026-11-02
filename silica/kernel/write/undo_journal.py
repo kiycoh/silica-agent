@@ -146,6 +146,24 @@ class UndoJournalStore:
         conn.commit()
         return run_id
 
+    def match_runs(self, ref: str, vault: str | None = None) -> list[tuple[str, str | None]]:
+        """(run_id, ledger_run_id) of the un-reverted runs `ref` names, newest
+        first: a journal run id, or the ledger's, whole or by a prefix of at
+        least 4 characters. The ledger's is the one a person sees (`/status`
+        prints `RUN 3fa9c1d2`), while the journal's never reached a screen
+        whole, so `/revert <run-id>` had nothing it could be given."""
+        ref = (ref or "").strip().lower()
+        if len(ref) < 4 or not all(c in "0123456789abcdef-" for c in ref):
+            return []  # ids are hex: anything else names no run, and LIKE never sees a wildcard
+        query = ("SELECT run_id, ledger_run_id FROM runs WHERE reverted_at IS NULL "
+                 "AND (run_id LIKE ? OR ledger_run_id LIKE ?)")
+        params: list[str] = [ref + "%", ref + "%"]
+        if vault is not None:
+            query += " AND vault = ?"
+            params.append(vault)
+        query += " ORDER BY started_at DESC, rowid DESC"
+        return [(r["run_id"], r["ledger_run_id"]) for r in self._conn().execute(query, params).fetchall()]
+
     def runs_for_ledger(self, ledger_run_ids: list[str],
                         vault: str | None = None) -> list[str]:
         """Un-reverted journal runs opened under these ledger run ids, newest

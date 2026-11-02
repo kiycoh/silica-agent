@@ -323,3 +323,45 @@ def test_partial_revert_unlinks_dangling_refs_in_survivors(tmp_vault, tmp_path):
     # ...but not keep a link to a note the revert just deleted.
     assert "[[Fresh]]" not in tmp_vault.read(hub)
     assert "my own words" in tmp_vault.read(hub)
+
+
+def test_match_runs_takes_a_journal_or_ledger_id_whole_or_by_prefix(tmp_path):
+    store = UndoJournalStore(tmp_path / "j.db")
+    a = store.start_run("nucleate", vault="/v", ledger_run_id="3fa9c1d2" + "0" * 24)
+    b = store.start_run("nucleate", vault="/v", ledger_run_id="3fa9c1d2" + "0" * 24)
+    other = store.start_run("organize", vault="/v", ledger_run_id="77" + "1" * 30)
+
+    assert [r for r, _ in store.match_runs("3fa9c1d2", vault="/v")] == [b, a]  # newest first
+    assert [r for r, _ in store.match_runs(other[:6], vault="/v")] == [other]
+    assert store.match_runs("3fa9c1d2", vault="/elsewhere") == []
+    assert store.match_runs("3fa") == [] and store.match_runs("not-an-id%") == []
+    store.mark_reverted(b)
+    assert [r for r, _ in store.match_runs("3fa9c1d2", vault="/v")] == [a]
+
+
+def test_revert_by_the_id_status_prints_takes_back_every_journal_run_under_it(tmp_path, monkeypatch):
+    from silica import cli
+    from silica.config import CONFIG
+    from silica.kernel.write import undo_journal
+
+    store = UndoJournalStore(tmp_path / "j.db")
+    ledger = "3fa9c1d2" + "0" * 24
+    a = store.start_run("nucleate", vault="/v", ledger_run_id=ledger)
+    b = store.start_run("nucleate", vault="/v", ledger_run_id=ledger)
+    c = store.start_run("organize", vault="/v", ledger_run_id="3fa9" + "9" * 28)
+    reverted = []
+    monkeypatch.setattr(CONFIG, "vault_path", "/v")
+    monkeypatch.setattr(undo_journal, "get_undo_journal", lambda: store)
+    monkeypatch.setattr(undo_journal, "revert_run",
+                        lambda run_id: reverted.append(run_id) or {"reverted": [], "skipped": [], "errors": []})
+    monkeypatch.setattr(cli, "_revert_zotero", lambda run_id: None)
+
+    assert cli._handle_direct_shortcut("/revert 3fa9c1d2", []) is True
+    assert reverted == [b, a]
+
+    reverted.clear()  # a prefix that names runs of two ledger runs reverts nothing
+    assert cli._handle_direct_shortcut("/revert 3fa9", []) is True
+    assert reverted == []
+
+    assert cli._handle_direct_shortcut(f"/revert {c[:10]}", []) is True
+    assert reverted == [c]

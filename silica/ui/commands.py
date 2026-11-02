@@ -273,7 +273,7 @@ COMMANDS: tuple[Command, ...] = (
         name="/revert",
         group="direct",
         usage="[run-id | --source <file>]",
-        summary="revert a whole injection (per-run, LIFO), or every run derived from one source",
+        summary="revert a whole run (bare: the newest; or the RUN id /status prints, whole or its first characters), or every run derived from one source",
     ),
     Command(
         name="/zotero",
