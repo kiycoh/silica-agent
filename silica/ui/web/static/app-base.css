@@ -370,7 +370,12 @@
 .thinking summary::before,
 details.fm summary::before,
 .ego-gh::after,
-.lg-caret {
+.lg-caret,
+.lr-dr > summary::before,
+.lr-prev > summary .chev,
+.lr-ob summary .chev,
+.lr-exp .chev,
+.lr-objrow > summary .chev {
   --chev: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m9 18 6-6-6-6'/%3E%3C/svg%3E");
   content: "";
   display: inline-block;
@@ -393,7 +398,12 @@ details.fm summary::before,
 #vp-notices[open] > summary::before,
 .thinking[open] summary::before,
 details.fm[open] summary::before,
-.ego-gh.open::after {
+.ego-gh.open::after,
+.lr-dr[open] > summary::before,
+.lr-prev[open] > summary .chev,
+.lr-ob details[open] summary .chev,
+.lr-exp[aria-expanded="true"] .chev,
+.lr-objrow[open] > summary .chev {
   transform: rotate(90deg);
 }
 

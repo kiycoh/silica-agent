@@ -1371,6 +1371,19 @@ def test_latex_inline_and_block_become_mathml():
     assert 'display="block"' in html
 
 
+def test_display_math_inside_a_paragraph_leaves_no_dollar_on_screen():
+    """A `$$...$$` line inside a paragraph or a quote is display math, as Obsidian and Pandoc
+    read it. The block rule cannot interrupt a paragraph, and the inline rule alone ate one `$`
+    of each pair: an answer showed "tali che $" and "$5 · (1,0) + ... = b$" (2026-11-01)."""
+    from silica.ui.web.server import _linkify
+
+    for text in ("Eppure\n$$5 \\cdot (1,0) = b$$\nquindi b sta nello span",
+                 "> **tali che**\n> $$x_1 + x_2 = b$$\n"):
+        html = _linkify(text, _fake_resolve)
+        assert "$" not in html and 'display="block"' in html, html
+    assert "<math" not in _linkify("costs $$5 and $$10 today", _fake_resolve)
+
+
 def test_latex_text_argument_cannot_smuggle_markup_into_mtext():
     """A math block is injected after the raw-HTML allowlist has run, and
     latex2mathml copies a `\\text{…}` argument into <mtext> character for

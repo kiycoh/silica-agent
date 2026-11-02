@@ -3473,37 +3473,6 @@ function lrRenderReceipt(body) {
     fu.append(t, lrBtn("lr-send", "Ask these again", () => learnStartSession({ scope: missed.paths, n: Math.min(24, missed.n), from: "missed" })));
     wrap.appendChild(fu);
   }
-  // the figures and the points' marks, on request (ADR-0061 §25, §27)
-  if (t3 || r.points?.length) lrDisc(wrap, "The figures", "", (box) => {
-    if (t3) {
-      const unit = r.points?.length ? "points" : "questions";
-      const figs = lrEl("div", "lr-figs");
-      const left = Math.max(0, t3.points - t3.met);
-      const sub2 = [t3.missed ? `${t3.missed} missed` : "", t3.skipped ? `${t3.skipped} skipped, not counted as wrong` : ""].filter(Boolean).join(" · ");
-      figs.append(lrFig(`${t3.met} of ${t3.points}`, `${unit} met without help`, t3.assisted ? `${t3.assisted} more with help, not counted` : ""),
-        lrFig(left, `${unit} still open`, sub2));
-      const hold = r.note ? lrNetMoves(r.moved, true).find((x) => x.what === "hold") : null;
-      if (hold) figs.appendChild(lrFig(hold.to, "hold, estimated", hold.from !== hold.to ? `was ${hold.from}` : ""));
-      else figs.appendChild(lrFig(`${t3.with_evidence} of ${t3.objectives}`, "objectives with new evidence"));
-      box.appendChild(figs);
-    }
-    if (r.points?.length) {
-      // points are marks grouped by heading (ADR-0061 §27)
-      let heading = null;
-      let grid = null;
-      for (const p of r.points) {
-        if (p.heading !== heading || !grid) {
-          heading = p.heading;
-          if (heading) box.appendChild(lrEl("span", "lr-grp", heading));
-          grid = lrEl("div", "lr-pts");
-          box.appendChild(grid);
-        }
-        const name = lrEl("span", "p");
-        name.append(lrMark(lrStatusMark(p.status), p.status === "met" ? "met without help" : ""), p.kind);
-        grid.append(name, lrEl("span", "k", LR_OBJ_SHORT[p.objective] || p.objective));
-      }
-    }
-  });
   if (r.revisit?.length) {
     const sec = lrEl("section", "lr-sec");
     sec.appendChild(lrEl("h3", null, "What to revisit"));
@@ -3564,6 +3533,38 @@ function lrRenderReceipt(body) {
     wrap.appendChild(sec);
   }
   const discs = lrEl("div", "lr-discs");
+  // the figures and the points' marks, on request (ADR-0061 §25, §27), the first of the receipt's
+  // three folds: on its own above them it stood 22 px apart, the receipt's gap (2026-11-01)
+  if (t3 || r.points?.length) lrDisc(discs, "The figures", "", (box) => {
+    if (t3) {
+      const unit = r.points?.length ? "points" : "questions";
+      const figs = lrEl("div", "lr-figs");
+      const left = Math.max(0, t3.points - t3.met);
+      const sub2 = [t3.missed ? `${t3.missed} missed` : "", t3.skipped ? `${t3.skipped} skipped, not counted as wrong` : ""].filter(Boolean).join(" · ");
+      figs.append(lrFig(`${t3.met} of ${t3.points}`, `${unit} met without help`, t3.assisted ? `${t3.assisted} more with help, not counted` : ""),
+        lrFig(left, `${unit} still open`, sub2));
+      const hold = r.note ? lrNetMoves(r.moved, true).find((x) => x.what === "hold") : null;
+      if (hold) figs.appendChild(lrFig(hold.to, "hold, estimated", hold.from !== hold.to ? `was ${hold.from}` : ""));
+      else figs.appendChild(lrFig(`${t3.with_evidence} of ${t3.objectives}`, "objectives with new evidence"));
+      box.appendChild(figs);
+    }
+    if (r.points?.length) {
+      // points are marks grouped by heading (ADR-0061 §27)
+      let heading = null;
+      let grid = null;
+      for (const p of r.points) {
+        if (p.heading !== heading || !grid) {
+          heading = p.heading;
+          if (heading) box.appendChild(lrEl("span", "lr-grp", heading));
+          grid = lrEl("div", "lr-pts");
+          box.appendChild(grid);
+        }
+        const name = lrEl("span", "p");
+        name.append(lrMark(lrStatusMark(p.status), p.status === "met" ? "met without help" : ""), p.kind);
+        grid.append(name, lrEl("span", "k", LR_OBJ_SHORT[p.objective] || p.objective));
+      }
+    }
+  });
   lrDisc(discs, "Questions", r.items.length, (inner) => {
     const t = lrEl("table", "chart tight lr-tbl lr-items");
     const th = lrEl("thead"); const hr = lrEl("tr");

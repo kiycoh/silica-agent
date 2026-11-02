@@ -675,7 +675,7 @@ def test_pace_counts_answers_a_day_before_the_final_pass():
     week = [{"ts": (datetime.now(timezone.utc) - timedelta(days=d % 7)).isoformat()} for d in range(14)]
     pace = plans.pace_of({"by": by}, 69, entries=week)
     assert pace["answers"] == 173 and pace["per_day"] == 11          # 173 answers over 16 days
-    assert pace["say"].startswith("About 11 answers a day for 16 day(s), then 2 days of review: 69 note(s)")
+    assert pace["say"].startswith("About 11 answers a day for 16 days, then 2 days of review: 69 notes")
     assert "Lately you answer about 2 a day." in pace["say"]
     assert "not answered yet" in plans.pace_of({"by": by}, 69, entries=[])["say"]
 

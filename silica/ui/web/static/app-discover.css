@@ -146,7 +146,9 @@
   transition: transform var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 
-.dv-switch[aria-pressed="true"] { background: var(--accent); }
+/* On is ink, as the app's other selections (segments, rail tabs) are neutral: eight teal
+   switches in one column were the loudest thing on Discover (unslop, 2026-11-01) */
+.dv-switch[aria-pressed="true"] { background: var(--frost); }
 .dv-switch[aria-pressed="true"]::after { transform: translateX(14px); background: var(--on-vivid); }
 .dv-switch:disabled { opacity: .45; cursor: default; }
 
