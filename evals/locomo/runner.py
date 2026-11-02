@@ -507,6 +507,24 @@ _AGENT_MAX_ITERATIONS = 10   # below the product default 20: declared cost contr
 _ABSTAIN = "I do not have that information."
 
 
+def _hide_recall_window() -> None:
+    """ADR-0148 gate, arm A: the same silica_recall with `since` and `until`
+    taken out of its schema, so the only difference between the arms is
+    whether the model is offered the window."""
+    import copy
+
+    from pydantic import create_model
+
+    import silica.cli  # noqa: F401  registers the full toolset
+    from silica.tools import TOOLS
+
+    tool = copy.copy(TOOLS["silica_recall"])
+    fields = {n: (f.annotation, f) for n, f in tool.params_model.model_fields.items()
+              if n not in ("since", "until")}
+    tool.params_model = create_model("silica_recall_no_window", **fields)  # type: ignore[call-overload]
+    TOOLS["silica_recall"] = tool
+
+
 def answer_question_agent(model: str, question: str, now: str,
                           speakers: tuple[str, str],
                           timeline_seed: str | None = None) -> dict:
@@ -1094,6 +1112,12 @@ def main(argv=None) -> int:
     ap.add_argument("--answer", choices=("oneshot", "agent"), default="oneshot",
                     help="read path: 'oneshot' = stuffed-context single call, "
                          "'agent' = product run_agent loop with read-only tools")
+    ap.add_argument("--named-period", action="store_true",
+                    help="ADR-0148 gate: only the questions that name a month or a "
+                         "year, where a date window can act")
+    ap.add_argument("--no-recall-window", action="store_true",
+                    help="ADR-0148 gate, arm A: silica_recall without its since/until "
+                         "parameters, as it was before the date window")
     ap.add_argument("--timeline", action="store_true",
                     help="inject a chronological index of the vault's dated "
                          "notes as an extra agent system seed (--answer agent "
@@ -1178,6 +1202,8 @@ def main(argv=None) -> int:
     if args.answer == "agent" and (args.stuff or args.retrieval_only):
         print("--answer agent retrieves via tools; drop --stuff/--retrieval-only")
         return 2
+    if args.no_recall_window:
+        _hide_recall_window()
     if args.timeline and args.answer != "agent":
         print("--timeline seeds the agent; pass --answer agent")
         return 2
@@ -1204,6 +1230,11 @@ def main(argv=None) -> int:
     categories = ({int(c) for c in args.categories.split(",") if c.strip()}
                   if args.categories else None)
     data = json.loads(Path(args.data).read_text(encoding="utf-8"))
+    if args.named_period:
+        names = re.compile(r"\b(January|February|March|April|May|June|July|August|September|"
+                           r"October|November|December|(?:19|20)\d\d)\b", re.I)
+        for inst in data:
+            inst["qa"] = [qa for qa in inst.get("qa") or [] if names.search(qa.get("question", ""))]
     if args.conversations:
         wanted = {c.strip() for c in args.conversations.split(",") if c.strip()}
         data = [inst for inst in data if inst.get("sample_id") in wanted]

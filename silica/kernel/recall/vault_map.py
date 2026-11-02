@@ -120,7 +120,8 @@ def build_vault_map(
             if dated_count:
                 lines.append(
                     f"- Timeline: {dated_count} dated notes — "
-                    "silica_timeline for chronology/ordering questions"
+                    "silica_timeline for chronology/ordering questions, "
+                    "silica_recall since/until for a period"
                 )
         except Exception as e:  # best-effort
             skipped.append("contested")
