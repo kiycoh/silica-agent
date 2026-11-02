@@ -1,4 +1,4 @@
-"""The public page's routes and Save to Silica (ADR-0143)."""
+"""The Page's routes, Save to Silica and invitations (ADR-0143, ADR-0151)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,12 +6,13 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-PAGE = "https://pages.silica-agent.dev/@marta/spacing-effect"
-MD = ("---\ntitle: Spacing effect\ntags:\n- memory\n---\n"
+BASE = "https://pages.silica-agent.dev/@marta/memory/"
+PAGE = BASE + "spacing-effect"
+MD = ("---\ntitle: Spacing effect\ntags:\n- memory\nvault: Memoria\n---\n"
       "Reviews spread over days. It follows from the "
-      "[Forgetting curve](https://pages.silica-agent.dev/@marta/forgetting-curve) and the "
-      "[Testing effect](https://pages.silica-agent.dev/@marta/testing-effect).\n\n"
-      "How I use it: see Exam plan June.\n\n![hypnogram](https://pages.silica-agent.dev/@marta/assets/1-h.png)\n")
+      f"[Forgetting curve]({BASE}forgetting-curve) and the "
+      f"[Testing effect]({BASE}testing-effect).\n\n"
+      f"How I use it: see Exam plan June.\n\n![hypnogram]({BASE}assets/1-h.png)\n")
 
 
 @pytest.fixture
@@ -33,61 +34,82 @@ def client(tmp_vault, tmp_path, monkeypatch):
     reset_manifest_cache()
 
 
-def test_the_view_reports_the_choice_and_what_publish_would_send(client):
+def test_the_view_reports_each_vault_and_what_publish_would_send(client):
     tc, _ = client
     v = tc.get("/public").json()
-    assert v["available"] and v["handle"] == "marta" and not v["page"] and v["out"] == []
-    v = tc.post("/public/folder", json={"folder": "Memory", "on": True}).json()
-    assert v["folders"] == ["Memory"] and v["out"] == ["Forgetting curve", "Spacing effect"]
-    assert {"words": "Exam plan June", "in": "Spacing effect"} in v["plain"]
+    assert v["available"] and v["handle"] == "marta" and v["vaults"] == [] and v["max"] == 10
+    assert "Memory" in v["folders"] and v["private"] == "hosted"
+    v = tc.post("/public/vault", json={"folder": "Memory"}).json()
+    assert v["added"] == "memory" and "Memory" not in v["folders"]
+    m = v["vaults"][0]
+    assert (m["slug"], m["visibility"], m["out"]) == ("memory", "off", 2)
+    assert m["top"][0] == "Spacing effect" or m["top"][0] == "Forgetting curve"
     v = tc.post("/public/note", json={"path": "Memory/Forgetting curve.md", "on": False}).json()
-    assert v["notes"]["Memory/Forgetting curve.md"] == "struck"
-    assert any(p["why"] == "left out of Memory" for p in v["private"])
-    assert tc.post("/public/folder", json={"folder": "sources", "on": True}).status_code == 400
+    assert v["notes"]["Memory/Forgetting curve.md"] == "struck" and v["vaults"][0]["struck"] == 1
+    assert tc.post("/public/vault", json={"folder": "sources"}).status_code == 400
+    v = tc.post("/public/vault/memory", json={"title": "Memoria", "line": "How it works", "license": "CC BY 4.0"}).json()
+    assert (v["vaults"][0]["title"], v["vaults"][0]["license"]) == ("Memoria", "CC BY 4.0")
+    assert tc.post("/public/vault/memory", json={"license": "mine"}).status_code == 400
+    assert tc.post("/public/vault/memory", json={"visibility": "private"}).status_code == 400
 
 
-def test_publish_turns_the_page_on_and_writes_it(client):
+def test_publish_turns_the_vault_public_and_writes_it_and_off_takes_it_down(client):
     tc, tmp = client
-    tc.post("/public/folder", json={"folder": "Memory", "on": True})
-    r = tc.post("/public/publish").json()
-    assert r["page"] and r["result"]["notes"] == 2 and r["published"] == 2
+    tc.post("/public/vault", json={"folder": "Memory"})
+    r = tc.post("/public/publish", json={"vault": "memory"}).json()
+    assert r["vaults"][0]["visibility"] == "public" and r["result"]["notes"] == 2
+    assert r["vaults"][0]["published"]
     live = tmp / "public" / "marta" / "live"
-    assert (live / "spacing-effect.html").is_file()
-    assert "Private plan" not in (live / "spacing-effect.html").read_text(encoding="utf-8")
-    off = tc.post("/public/page", json={"on": False}).json()
-    assert not off["page"] and not live.exists()
+    assert (live / "memory" / "spacing-effect.html").is_file() and (live / "index.html").is_file()
+    assert "Private plan" not in (live / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
+    off = tc.post("/public/vault/memory", json={"visibility": "off"}).json()
+    assert off["vaults"][0]["visibility"] == "off"
+    assert not (live / "memory").exists() and not (live / "index.html").exists()
+    # an Off vault leaves the Page; one still on it refuses
+    assert tc.post("/public/vault/memory/remove").json()["vaults"] == []
+
+
+def test_listed_reaches_the_published_manifest_at_once(client):
+    import json
+
+    tc, tmp = client
+    tc.post("/public/vault", json={"folder": "Memory"})
+    tc.post("/public/publish", json={"vault": "memory"})
+    tc.post("/public/vault/memory", json={"listed": True})
+    m = json.loads((tmp / "public" / "marta" / "live" / "memory" / "vault.json").read_text(encoding="utf-8"))
+    assert m["listed"] is True
 
 
 def test_the_cover_is_the_graph_of_what_goes_out_and_nothing_private(client):
     """The view's cover (ADR-0146 point 4): the notes that go out, the links between them, laid
     out once; a private note it links to is neither a mark nor a line."""
     tc, _ = client
-    assert tc.get("/public/cover").json() == {"n": [], "e": []}
-    tc.post("/public/folder", json={"folder": "Memory", "on": True})
-    c = tc.get("/public/cover").json()
-    assert sorted(n[3] for n in c["n"]) == ["Forgetting curve", "Spacing effect"]
+    assert tc.get("/public/cover", params={"vault": "memory"}).json() == {"n": [], "e": []}
+    tc.post("/public/vault", json={"folder": "Memory"})
+    c = tc.get("/public/cover", params={"vault": "memory"}).json()
+    assert sorted(n[4] for n in c["n"]) == ["Forgetting curve", "Spacing effect"]
     assert all(0 <= n[0] <= 1 and 0 <= n[1] <= 1 for n in c["n"])
-    assert len(c["e"]) == 1 and sorted(c["n"][i][3] for i in c["e"][0]) == ["Forgetting curve", "Spacing effect"]
+    assert c["e"] == [[0, 1]] and len(c["areas"]) == 1
     assert "Exam plan June" not in str(c)
     # the same notes and links draw the same picture
-    assert tc.get("/public/cover").json() == c
+    assert tc.get("/public/cover", params={"vault": "memory"}).json() == c
 
 
 def test_a_post_from_another_origin_is_refused(client):
     tc, _ = client
-    r = tc.post("/public/folder", json={"folder": "Memory", "on": True},
-                headers={"Origin": "https://evil.test"})
+    r = tc.post("/public/vault", json={"folder": "Memory"}, headers={"Origin": "https://evil.test"})
     assert r.status_code == 403
 
 
-def test_hosted_without_the_view_has_no_public_routes_but_can_save(client, monkeypatch):
+def test_hosted_without_the_view_has_no_page_routes_but_can_save(client, monkeypatch):
     tc, _ = client
     monkeypatch.setenv("SILICA_HOSTED", "1")
     monkeypatch.setenv("SILICA_VIEWS", "graph")
     assert tc.get("/public").status_code == 404
-    assert tc.post("/public/publish").status_code == 404
+    assert tc.post("/public/publish", json={"vault": "memory"}).status_code == 404
     # saving stays: the preview answers (here, a refusal of the address), not 404
-    assert tc.get("/vault/save/preview", params={"url": "https://elsewhere.test/@x/y"}).status_code == 400
+    assert tc.get("/vault/save/preview", params={"url": "https://elsewhere.test/@x/y/z"}).status_code == 400
+    assert tc.get("/vault/invitations").status_code == 200
 
 
 def test_hosted_without_a_handle_offers_no_page(client, monkeypatch):
@@ -96,7 +118,21 @@ def test_hosted_without_a_handle_offers_no_page(client, monkeypatch):
     monkeypatch.setenv("SILICA_VIEWS", "all")
     monkeypatch.delenv("SILICA_PUBLIC_HANDLE")
     assert tc.get("/public").json()["available"] is False
-    assert tc.post("/public/publish").status_code == 400
+    assert tc.post("/public/publish", json={"vault": "memory"}).status_code == 400
+
+
+def test_a_free_account_loses_private_and_its_private_vault_turns_off(client, monkeypatch):
+    tc, _ = client
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    tc.post("/public/vault", json={"folder": "Memory"})
+    v = tc.post("/public/vault/memory", json={"visibility": "private", "readers": ["sara"]}).json()
+    assert v["vaults"][0]["visibility"] == "private" and v["vaults"][0]["readers"] == ["sara"]
+    monkeypatch.setenv("SILICA_VIEWS", "graph,public")
+    v = tc.get("/public").json()
+    assert v["private"] == "paid" and v["turned_off"] == ["memory"]
+    assert v["vaults"][0]["visibility"] == "off" and v["vaults"][0]["downgraded"]
 
 
 @pytest.fixture
@@ -120,7 +156,7 @@ def test_the_preview_reads_and_writes_nothing(client, fetched):
     tc, tmp = client
     p = tc.get("/vault/save/preview", params={"url": PAGE}).json()
     assert fetched == [PAGE + ".md"]
-    assert p["title"] == "Spacing effect" and p["author"] == "@marta" and p["folder"] == "Saved/@marta"
+    assert p["title"] == "Spacing effect" and p["author"] == "@marta" and p["folder"] == "Saved/@marta/Memoria"
     assert [l["to"] for l in p["links"]] == ["web", "web"] and p["images"] == 1
     assert "content" not in p
     assert not (tmp / "vault" / "Saved").exists()
@@ -128,29 +164,31 @@ def test_the_preview_reads_and_writes_nothing(client, fetched):
 
 def test_save_writes_a_snapshot_crediting_the_author_and_links_what_it_can(client, fetched, tmp_vault):
     tc, tmp = client
-    tmp_vault.note("Saved/@marta/Forgetting curve.md",
-                   "---\nauthor: '@marta'\nsource: https://pages.silica-agent.dev/@marta/forgetting-curve\n---\nEbb.\n")
+    tmp_vault.note("Saved/@marta/Memoria/Forgetting curve.md",
+                   f"---\nauthor: '@marta'\nsource: {BASE}forgetting-curve\n---\nEbb.\n")
     path = tc.post("/vault/save", json={"url": PAGE}).json()["path"]
-    assert path == "Saved/@marta/Spacing effect.md"
+    assert path == "Saved/@marta/Memoria/Spacing effect.md"
     text = (tmp / "vault" / path).read_text(encoding="utf-8")
     assert "author: '@marta'" in text and f"source: {PAGE}" in text and "form: clip" in text
-    assert "[[Saved/@marta/Forgetting curve|Forgetting curve]]" in text
-    assert "[Testing effect](https://pages.silica-agent.dev/@marta/testing-effect)" in text
+    assert "[[Saved/@marta/Memoria/Forgetting curve|Forgetting curve]]" in text
+    assert f"[Testing effect]({BASE}testing-effect)" in text
     assert "see Exam plan June." in text
     # a second save is a second copy, never a rewrite of the first
     again = tc.post("/vault/save", json={"url": PAGE}).json()["path"]
-    assert again == "Saved/@marta/Spacing effect 2.md"
+    assert again == "Saved/@marta/Memoria/Spacing effect 2.md"
     # and the drawer names the author over the copy
     raw = tc.get("/note/raw", params={"path": path}).json()
     assert raw["saved"]["author"] == "@marta" and raw["saved"]["source"] == PAGE
 
 
 @pytest.mark.parametrize("url", [
-    "http://pages.silica-agent.dev/@marta/spacing-effect",          # not https
-    "https://evil.test/@marta/spacing-effect",                 # not a listed host
-    "https://pages.silica-agent.dev/@marta/spacing-effect?x=1",      # a query
-    "https://pages.silica-agent.dev/notes/spacing-effect",           # not a page address
-    "https://pages.silica-agent.dev@evil.test/@marta/x",             # a userinfo trick
+    "http://pages.silica-agent.dev/@marta/memory/spacing-effect",     # not https
+    "https://evil.test/@marta/memory/spacing-effect",                 # not a listed host
+    "https://pages.silica-agent.dev/@marta/memory/spacing-effect?x=1",  # a query
+    "https://pages.silica-agent.dev/notes/spacing-effect",            # not a page address
+    "https://pages.silica-agent.dev/@marta/spacing-effect",           # ADR-0143's shape, gone
+    "https://pages.silica-agent.dev@evil.test/@marta/memory/x",       # a userinfo trick
+    "https://pages.silica-agent.dev:8443/@marta/memory/",             # another port
 ])
 def test_save_refuses_anything_but_a_public_page_address(client, fetched, url):
     tc, _ = client
@@ -190,13 +228,14 @@ def test_a_copy_credits_its_original_only_when_the_original_is_that_authors_page
 
     from silica.sources import web_fetch
 
-    copy = ("---\ntitle: Borrowed\nauthor: '@luca'\nsource: https://pages.silica-agent.dev/@luca/borrowed\n---\nLuca's.\n")
+    orig = "https://pages.silica-agent.dev/@luca/notes/borrowed"
+    copy = f"---\ntitle: Borrowed\nauthor: '@luca'\nsource: {orig}\nvault: Memoria\n---\nLuca's.\n"
     monkeypatch.setattr(web_fetch, "_fetch", lambda url, headers=None, *, types=(), cap=0:
                         (httpx.Response(200, text=copy), url))
     tc, tmp = client
-    path = tc.post("/vault/save", json={"url": "https://pages.silica-agent.dev/@marta/borrowed"}).json()["path"]
+    path = tc.post("/vault/save", json={"url": BASE + "borrowed"}).json()["path"]
     assert path == "Saved/@luca/Borrowed.md"
-    assert "source: https://pages.silica-agent.dev/@luca/borrowed" in (tmp / "vault" / path).read_text(encoding="utf-8")
+    assert f"source: {orig}" in (tmp / "vault" / path).read_text(encoding="utf-8")
 
 
 def test_hosted_without_an_address_offers_no_page(client, monkeypatch):
@@ -205,6 +244,121 @@ def test_hosted_without_an_address_offers_no_page(client, monkeypatch):
     monkeypatch.setenv("SILICA_VIEWS", "all")
     monkeypatch.delenv("SILICA_PUBLIC_BASE", raising=False)
     assert tc.get("/public").json()["available"] is False
-    assert tc.post("/public/publish").status_code == 400
+    assert tc.post("/public/publish", json={"vault": "memory"}).status_code == 400
     monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test")
     assert tc.get("/public").json()["available"] is True
+
+
+def _vault_files():
+    import json
+
+    manifest = {"v": 1, "handle": "marta", "slug": "memory", "title": "Memoria", "url": BASE,
+                "license": "CC BY 4.0", "count": {"notes": 3, "links": 1, "drawn": 2, "areas": 1},
+                "areas": [["Spacing effect", 2]],
+                "n": [[0, 0, 0, 1, "Spacing effect", "spacing-effect"], [1, 1, 0, 1, "Forgetting curve", "forgetting-curve"]],
+                "e": [[0, 1]], "unlinked": [["Diary", "diary"]]}
+    notes = {"spacing-effect": MD,
+             "forgetting-curve": "---\ntitle: Forgetting curve\nvault: Memoria\n---\nEbbinghaus.\n",
+             "diary": "---\ntitle: Diary\nvault: Memoria\n---\nAlone.\n"}
+    return json.dumps(manifest), json.dumps(notes)
+
+
+@pytest.fixture
+def vault_fetched(monkeypatch):
+    import httpx
+
+    from silica.sources import web_fetch
+
+    seen = []
+    m, n = _vault_files()
+
+    def fake(url, headers=None, *, types=(), cap=0):
+        seen.append(url)
+        body = m if url.endswith("vault.json") else n
+        return httpx.Response(200, text=body, headers={"content-type": "application/json"}), url
+
+    monkeypatch.setattr(web_fetch, "_fetch", fake)
+    return seen
+
+
+def test_a_vault_saves_the_areas_picked_as_one_revertible_run(client, vault_fetched):
+    from silica.kernel.write.undo_journal import get_undo_journal
+
+    tc, tmp = client
+    p = tc.get("/vault/save/preview", params={"url": BASE, "areas": "0"}).json()
+    assert p["kind"] == "vault" and p["notes"] == 2 and p["of"] == 3 and p["folder"] == "Saved/@marta/Memoria"
+    assert vault_fetched == [BASE + "vault.json", BASE + "notes.json"]
+    assert not (tmp / "vault" / "Saved").exists()
+    r = tc.post("/vault/save", json={"url": BASE, "areas": [0]}).json()
+    assert r["notes"] == 2 and r["folder"] == "Saved/@marta/Memoria"
+    folder = tmp / "vault" / "Saved/@marta/Memoria"
+    assert sorted(p.name for p in folder.iterdir()) == ["Forgetting curve.md", "Spacing effect.md"]
+    text = (folder / "Spacing effect.md").read_text(encoding="utf-8")
+    # a link to a note saved in the same write opens the copy; one to a note left out stays a web link
+    assert "[[Saved/@marta/Memoria/Forgetting curve|Forgetting curve]]" in text
+    assert f"[Testing effect]({BASE}testing-effect)" in text
+    assert f"source: {PAGE}" in text and "author: '@marta'" in text and "form: clip" in text
+    runs = get_undo_journal()._conn().execute("SELECT COUNT(*) FROM inverses WHERE run_id = ?", (r["run"],)).fetchone()[0]
+    assert runs == 2
+    # a second save of the vault goes beside the first, dated
+    again = tc.post("/vault/save", json={"url": BASE}).json()
+    assert again["notes"] == 3 and again["folder"].startswith("Saved/@marta/Memoria (")
+
+
+def test_a_vault_save_past_the_room_left_is_refused_naming_the_shortfall(client, vault_fetched, monkeypatch):
+    tc, tmp = client
+    monkeypatch.setenv("SILICA_VAULT_MAX_NOTES", "4")
+    p = tc.get("/vault/save/preview", params={"url": BASE}).json()
+    assert "notes over the 4" in p["room"]["short"]
+    r = tc.post("/vault/save", json={"url": BASE})
+    assert r.status_code == 400 and "no room" in r.json()["detail"]
+    assert not (tmp / "vault" / "Saved").exists()
+
+
+def _invite(tmp: Path, author="sara", slug="tesi", stamp="h1"):
+    m, n = _vault_files()
+    d = tmp / "invitations" / author / slug
+    (d / "assets").mkdir(parents=True)
+    (d / "vault.json").write_text(m.replace('"handle": "marta"', '"handle": "luca"'), encoding="utf-8")
+    (d / "notes.json").write_text(n, encoding="utf-8")
+    (d / "assets" / "1-h.png").write_bytes(b"png")
+    (d / ".hash").write_text(stamp, encoding="utf-8")
+    return d
+
+
+def test_an_invitation_is_listed_saved_as_a_private_copy_and_then_gone(client, monkeypatch):
+    tc, tmp = client
+    monkeypatch.setenv("SILICA_INVITATIONS_DIR", str(tmp / "invitations"))
+    monkeypatch.setenv("HOME", str(tmp / "home"))
+    _invite(tmp)
+    inv = tc.get("/vault/invitations").json()["invitations"]
+    assert [(i["author"], i["vault"], i["title"], i["notes"]) for i in inv] == [("sara", "tesi", "Memoria", 3)]
+    p = tc.get("/vault/invitations/preview", params={"author": "sara", "vault": "tesi"}).json()
+    # the author is the folder the host wrote, not the manifest's claim
+    assert p["author"] == "@sara" and p["folder"] == "Saved/@sara/Memoria" and p["notes"] == 3
+    r = tc.post("/vault/invitations/save", json={"author": "sara", "vault": "tesi"}).json()
+    folder = tmp / "vault" / r["folder"]
+    text = (folder / "Spacing effect.md").read_text(encoding="utf-8")
+    assert "shared: private" in text and "author: '@sara'" in text
+    # a Private vault's addresses are never served: a link to a note not saved is its words
+    assert "Testing effect" in text and "testing-effect" not in text
+    assert (folder / "assets" / "1-h.png").read_bytes() == b"png"
+    assert tc.get("/vault/invitations").json()["invitations"] == []
+    # republished by the author: offered again
+    (tmp / "invitations" / "sara" / "tesi" / ".hash").write_text("h2", encoding="utf-8")
+    assert len(tc.get("/vault/invitations").json()["invitations"]) == 1
+    assert tc.post("/vault/invitations/decline", json={"author": "sara", "vault": "tesi"}).json() == {"invitations": []}
+    assert tc.post("/vault/invitations/save", json={"author": "../x", "vault": "tesi"}).status_code == 400
+
+
+def test_a_saved_private_copy_has_no_globe(client, monkeypatch):
+    tc, tmp = client
+    monkeypatch.setenv("SILICA_INVITATIONS_DIR", str(tmp / "invitations"))
+    monkeypatch.setenv("HOME", str(tmp / "home"))
+    _invite(tmp)
+    r = tc.post("/vault/invitations/save", json={"author": "sara", "vault": "tesi"}).json()
+    (tmp / "vault" / "Saved").mkdir(exist_ok=True)
+    tc.post("/public/vault", json={"folder": "Saved"})
+    v = tc.get("/public").json()
+    assert not any(p.startswith(r["folder"]) for p in v["notes"])
+    assert tc.post("/public/note", json={"path": r["first"], "on": True}).status_code == 400

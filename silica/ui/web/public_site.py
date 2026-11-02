@@ -1,15 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""The public page's files (ADR-0143): a profile, one page and one markdown
-file per public note, their images, a sheet and two fonts, in a folder any
-static host serves.
+"""A Page's files (ADR-0143, ADR-0151): the Page that lists the account's
+Public vaults, and for each vault its own page, one page and one markdown
+file per note, its images, and two files the script and a reader's Silica
+read (`vault.json`, `notes.json`).
 
 Rendered by the note drawer's own renderer (`server._linkify`), so a page
 reads as the note reads in the app, with one difference that is the point:
-the resolver only knows the public notes, so a link to anything else comes
-out as its words (ADR-0143 point 4). Built in a temporary folder and swapped
-in whole (`publish.swap_in`).
+the resolver only knows the vault's published notes, so a link to anything
+else comes out as its words (ADR-0143 point 4). A vault is built in a
+temporary folder and swapped in whole (`publish.swap_in`).
 """
 from __future__ import annotations
 
@@ -33,9 +34,25 @@ logger = logging.getLogger(__name__)
 _SHOWN_PROPS = ("title", "tags", "date")
 _ANCHOR = re.compile(r'<a class="note-link" data-path="([^"]*)">')
 _ASSET_SRC = re.compile(r'/asset\?path=([^"\'\s>]+)')
-_FONTS = ("host-grotesk-latin.woff2", "martian-mono-latin.woff2", "host-grotesk-OFL.txt")
+# The sheet, the script and their fonts: the host serves them from /_s/ (ADR-0151 point 7); a page
+# built on a laptop carries its own copy in _s/ so its folder opens from disk.
+_STATIC = ("pages/pages.css", "pages/pages.js", "archivo-latin.woff2", "martian-mono-latin.woff2",
+           "host-grotesk-latin.woff2", "host-grotesk-OFL.txt")
 _LANGS = {"italian": "it", "english": "en", "spanish": "es", "french": "fr",
           "german": "de", "portuguese": "pt"}
+# shortcut: past this many linked notes the cover keeps the best linked ones, so the layout stays
+# near a second; reopen if a vault this large asks for every mark (count them in the caption)
+_COVER_MAX = 1500
+# The local Silica a reader may save into (ADR-0151 point 8), `silica --gui`'s default port.
+LOCAL_APP = "http://localhost:8765"
+_BRAND = ('<svg viewBox="0 0 256 256" aria-hidden="true"><path class="i" d="M16 112 L144 112 L144 240 '
+          'L112 240 L112 144 L16 144 Z M16 64 L192 64 L192 240 L160 240 L160 96 L16 96 Z M16 16 L240 16 '
+          'L240 240 L208 240 L208 48 L16 48 Z"/><path class="s" d="M16 160 L96 160 L96 240 L16 240 Z"/></svg>')
+_THEME = ('<button class="theme" type="button" data-theme-btn aria-label="Switch between paper and graphite">'
+          '<svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 '
+          '3.5a8.5 8.5 0 1 0 11 11z"/></svg><svg class="sun" viewBox="0 0 24 24" aria-hidden="true">'
+          '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 '
+          '12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>')
 
 
 def _esc(text) -> str:
@@ -55,12 +72,13 @@ def _tags(fm: dict) -> list[str]:
 
 def _slugs(paths: list[str], titles: dict[str, str]) -> dict[str, str]:
     """One address per note, from its title; two notes of one title in two
-    folders get -2, -3 in path order, so a republish gives each the same one."""
-    out, used = {}, set()
+    folders get -2, -3 in path order, so a republish gives each the same one.
+    The vault's own files keep their names."""
+    out, used = {}, {"index", "vault", "notes", "assets", "readers"}
     for p in sorted(paths):
         base = publish.slugify(titles[p]) or "note"
         slug, n = base, 2
-        while slug in used or slug == "index":
+        while slug in used:
             slug, n = f"{base}-{n}", n + 1
         used.add(slug)
         out[p] = slug
@@ -74,56 +92,123 @@ def _author(fm: dict, h: str) -> str:
     return "" if not a or a == h else a
 
 
+def _fmt(n: int) -> str:
+    return f"{n:,}"
+
+
+def _plural(n: int, one: str, many: str = "") -> str:
+    return f"{_fmt(n)} {one if n == 1 else (many or one + 's')}"
+
+
+def _day(iso: str) -> str:
+    """"2026-11-02" -> "2 Nov 2026"; anything else as it came."""
+    try:
+        d = datetime.date.fromisoformat(iso[:10])
+    except ValueError:
+        return iso
+    return f"{d.day} {d.strftime('%b %Y')}"
+
+
 class _Site:
-    """Where things are and how a page names another, for one build."""
+    """Where things are and how a page names another, for one build.
+
+    Served under /@handle when the host says where, with the sheet at /_s/;
+    plain files beside each other otherwise, so the folder also opens from
+    disk. `lvl` is how deep the page being written sits: 0 the Page, 1 a
+    vault's folder."""
 
     def __init__(self, h: str, base: str):
         self.h, self.base = h, base
-        # Served under /@handle when the host says where; plain files beside
-        # each other otherwise, so the folder also opens from disk.
         self.root = f"/@{h}" if base else ""
 
-    def href(self, slug: str) -> str:
-        return f"{self.root}/{slug}" if self.base else f"{slug}.html"
+    def _up(self, lvl: int) -> str:
+        return "../" * lvl
 
-    def index(self) -> str:
-        return self.root if self.base else "index.html"
+    def origin(self) -> str:
+        return self.base.split("/@", 1)[0]
 
-    def asset(self, name: str) -> str:
-        return f"{self.root}/assets/{name}" if self.base else f"assets/{name}"
+    def static(self, name: str, lvl: int) -> str:
+        return f"/_s/{name}" if self.base else f"{self._up(lvl)}_s/{name}"
 
-    def absolute(self, slug: str = "") -> str:
-        origin = self.base.split("/@", 1)[0]
-        return f"{origin}{self.href(slug)}" if slug else self.base
+    def page(self, lvl: int) -> str:
+        return f"{self.root}/" if self.base else f"{self._up(lvl)}index.html"
+
+    def vault(self, slug: str, lvl: int) -> str:
+        if self.base:
+            return f"{self.root}/{slug}/"
+        return "index.html" if lvl == 1 else f"{slug}/index.html"
+
+    def note(self, vslug: str, slug: str, lvl: int) -> str:
+        if self.base:
+            return f"{self.root}/{vslug}/{slug}"
+        return f"{slug}.html" if lvl == 1 else f"{vslug}/{slug}.html"
+
+    def asset(self, vslug: str, name: str, lvl: int) -> str:
+        return f"{self.root}/{vslug}/assets/{name}" if self.base else f"assets/{name}"
+
+    def absolute(self, path: str) -> str:
+        """An absolute address of a path this site wrote, "" without a base."""
+        return f"{self.origin()}{path}" if self.base else ""
+
+    def catalog(self) -> str:
+        return f"{self.origin()}/" if self.base else ""
 
 
-def _report_link(url: str) -> str:
-    """The channel for reports on a public page (ADR-0143 Open 5), from the
-    host; a page without one shows none rather than a dead link."""
+def _report(url: str, site: _Site) -> str:
+    """The Report button (ADR-0151 point 11): a short form the public host's
+    pages service answers. A page built without an address has no host to
+    answer it, so it shows the channel, if any (ADR-0143 Open 5)."""
+    if site.base:
+        reasons = (("rights", "It publishes a work its author has no right to publish"),
+                   ("personal", "It shows someone's personal data"),
+                   ("other", "Something else"))
+        radios = "".join(f'<label><input type="radio" name="why" value="{v}"{" checked" if i == 0 else ""}> '
+                         f'{_esc(t)}</label>' for i, (v, t) in enumerate(reasons))
+        return (f'<details class="report"><summary class="btn-o">Report</summary>'
+                f'<form class="panel" method="post" action="/_report">'
+                f'<p class="pt">What is wrong with this page?</p>{radios}'
+                f'<input type="hidden" name="page" value="{_esc(url)}">'
+                f'<textarea class="sel" name="text" rows="3" maxlength="2000" '
+                f'placeholder="What should be looked at? (optional)" aria-label="Details"></textarea>'
+                f'<div class="row"><button type="submit" class="btn btn--small">Send report</button></div>'
+                f'</form></details>')
     to = os.environ.get("SILICA_PUBLIC_REPORT", "").strip()
     if not to:
         return ""
-    href = (f"mailto:{to}?subject={quote('Report: ' + url)}"
-            if "@" in to and "://" not in to else to)
-    return f' · <a href="{_esc(href)}">Report this page</a>'
+    href = (f"mailto:{to}?subject={quote('Report: ' + url)}" if "@" in to and "://" not in to else to)
+    return f'<a class="btn-o" href="{_esc(href)}">Report</a>'
 
 
 def _app() -> str:
-    """The app a reader is sent to: to save a page, or to join. The public
-    host answers nothing at its root (silica-hosted's caddy), so "Join" and
-    "Published with Silica" go here too."""
+    """The hosted app a reader is sent to: to save a page, or to join."""
     return os.environ.get("SILICA_PUBLIC_SAVE_URL", "").strip().rstrip("/") or "https://app.silica-agent.dev"
 
 
-def _save_link(url: str) -> str:
-    return f"{_app()}/?save={quote(url, safe='')}"
+def _save_form(url: str, label: str, form_id: str = "save") -> str:
+    """Save into a Silica the reader names (ADR-0151 point 8). Without the
+    script, two submit buttons, one per Silica the page knows; the script
+    adds another address and remembers the choice. A GET, as ADR-0143 point
+    8 asks: the reader's Silica asks before it writes."""
+    return (f'<form class="vp-save" id="{form_id}" method="get" action="{_esc(_app())}/" data-save>'
+            f'<input type="hidden" name="save" value="{_esc(url)}">'
+            f'<details class="where"><summary class="btn">{_esc(label)}</summary>'
+            f'<div class="panel"><p class="pt">Save into which Silica?</p>'
+            f'<div class="row"><button type="submit" class="btn btn--small" formaction="{_esc(_app())}/">'
+            f'Silica hosted</button><button type="submit" class="btn-o" formaction="{LOCAL_APP}/">'
+            f'Silica on this computer</button></div>'
+            f'<div class="row other" hidden><input class="sel" data-other placeholder="https://" '
+            f'aria-label="Address of your Silica"><button type="button" class="btn-o" data-go>Another address'
+            f'</button></div>'
+            f'<p class="dim">Your Silica asks before it writes anything, and every note keeps its author\'s '
+            f'name.</p></div></details></form>')
 
 
-def _head(title: str, desc: str, site: _Site, *, canonical: str = "", md: str = "",
+def _head(title: str, desc: str, site: _Site, lvl: int, *, canonical: str = "", md: str = "",
           lang: str = "", kind: str = "website") -> str:
     meta = [f"<title>{_esc(title)}</title>",
             f'<meta name="description" content="{_esc(desc)}">',
-            f'<link rel="stylesheet" href="{_esc(site.asset("site.css"))}">']
+            f'<link rel="stylesheet" href="{_esc(site.static("pages.css", lvl))}">',
+            f'<script src="{_esc(site.static("pages.js", lvl))}" defer></script>']
     if canonical:
         meta += [f'<link rel="canonical" href="{_esc(canonical)}">',
                  f'<meta property="og:url" content="{_esc(canonical)}">']
@@ -133,21 +218,26 @@ def _head(title: str, desc: str, site: _Site, *, canonical: str = "", md: str = 
              '<meta property="og:site_name" content="Silica">']
     if md:
         meta.append(f'<link rel="alternate" type="text/markdown" href="{_esc(md)}">')
-    lang_attr = f' lang="{lang}"' if lang else ""
-    return ("<!DOCTYPE html>\n<html" + lang_attr + '>\n<head>\n<meta charset="utf-8">\n'
+    return ('<!DOCTYPE html>\n<html lang="' + (lang or "en") + '">\n<head>\n<meta charset="utf-8">\n'
             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
             + "\n".join(meta) + "\n</head>\n")
 
 
-def _top(site: _Site, crumb: str = "") -> str:
-    join = f'<a class="btn ghost small" href="{_esc(_app() + "/")}">Join Silica</a>' if site.base else ""
-    return (f'<header class="top"><a class="brand" href="{_esc(site.index())}">@{_esc(site.h)}</a>'
-            f'{crumb}<span class="spacer"></span>{join}</header>\n')
+def top(catalog: str, app: str, current: str = "", page: str = "", h: str = "") -> str:
+    """The bar every public page shares, the catalog's included."""
+    cur = ' aria-current="page"'
+    pages = f'<a href="{_esc(catalog)}"{cur if current == "pages" else ""}>Pages</a>' if catalog else ""
+    own = (f'<a class="opt" href="{_esc(page)}"{cur if current == "page" else ""}>@{_esc(h)}</a>'
+           if page and h else "")
+    brand = f'<a class="brand" href="{_esc(app)}/" aria-label="Silica">{_BRAND}<b>Silica</b></a>'
+    return (f'<div class="top-bar"><header class="top wrap">{brand}<nav aria-label="Primary">{pages}{own}'
+            f'{_THEME}<a class="btn btn--small" href="{_esc(app)}/">Open Silica</a></nav></header></div>\n')
 
 
-def _foot(site: _Site, url: str) -> str:
-    made = f'<a href="{_esc(_app() + "/")}">Published with Silica</a>' if site.base else "Published with Silica"
-    return f'<footer class="foot">{made}{_report_link(url)}</footer>\n</body>\n</html>\n'
+def foot(left: str, app: str) -> str:
+    return (f'<footer class="foot wrap"><span>{left}</span><span><a href="{_esc(app)}/privacy">Privacy</a>'
+            f' · <a href="{_esc(app)}/terms">Terms</a> · <a href="{_esc(app)}/">Published with Silica</a>'
+            f'</span></footer>\n</body>\n</html>\n')
 
 
 def _desc(body: str) -> str:
@@ -158,9 +248,9 @@ def _desc(body: str) -> str:
 
 
 def _md_for_reader(body: str, resolve, href_of) -> str:
-    """The note as a reader saves it (ADR-0143 point 8): a link to a public
-    note becomes a web link to its page, any other becomes its words, an
-    embedded image points at the page's copy.
+    """The note as a reader saves it (ADR-0143 point 8): a link to a note of
+    the vault becomes a web link to its page, any other becomes its words, an
+    embedded image points at the vault's copy.
     shortcut: wikilinks inside a code fence are rewritten too; split on fences
     if a published note ever shows one mangled."""
     from silica.ui.web.server import _ASSET_EXTS, _WIKILINK
@@ -179,57 +269,61 @@ def _md_for_reader(body: str, resolve, href_of) -> str:
     return _WIKILINK.sub(sub, body)
 
 
-def _graph_svg(public: list[str], edges: set[tuple[str, str]], titles: dict, slugs: dict,
-               site: _Site) -> str:
-    """The links between public notes, drawn once at publish. Not the Explore
-    frame: it carries layers that would leak (ADR-0143 point 4) and two
-    renderers per page. A fixed seed, so a republish of the same notes draws
-    the same picture."""
+def cover(nodes: list[str], pairs: set[tuple[str, str]], titles: dict[str, str]) -> dict:
+    """The vault's graph as the cover prints it and Explore groups it
+    (ADR-0151 point 5): the linked notes laid out by a spring layout (seed 7,
+    so a republish of the same links draws the same picture), the areas
+    Louvain's on the same links, each named by its hub note. A note with no
+    link is not drawn and belongs to no area."""
     import networkx as nx
 
-    if not public:
-        return ""
+    from silica.kernel.recall.graph_export import hub_of, louvain_sorted
+
     g = nx.Graph()
-    g.add_nodes_from(public)
-    g.add_edges_from((a, b) for a, b in edges if a != b)
-    pos = nx.spring_layout(g, seed=7, k=1.6 / max(len(public), 1) ** 0.5) if len(public) > 1 \
-        else {public[0]: (0.0, 0.0)}
-    w, hgt, pad = 620, 400, 44
-    xs = [p[0] for p in pos.values()]
-    ys = [p[1] for p in pos.values()]
-    span_x = (max(xs) - min(xs)) or 1.0
-    span_y = (max(ys) - min(ys)) or 1.0
-
-    def at(n):
-        x, y = pos[n]
-        return (pad + (x - min(xs)) / span_x * (w - 2 * pad), pad + (y - min(ys)) / span_y * (hgt - 2 * pad))
-
-    named = set(sorted(public, key=lambda n: (-g.degree(n), titles[n].lower()))[:14])
-    out = [f'<svg viewBox="0 0 {w} {hgt}" role="img" aria-label="how these notes link">']
-    for a, b in g.edges():
-        (x1, y1), (x2, y2) = at(a), at(b)
-        out.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}"/>')
-    for n in sorted(public):
-        x, y = at(n)
-        r = 4.5 + 1.6 * min(g.degree(n), 9) ** 0.5
-        # a node on the right third names itself leftward, or its name runs
-        # off the drawing
-        left = x > w * 0.62
-        anchor = ' text-anchor="end"' if left else ""
-        label = (f'<text x="{x - r - 5 if left else x + r + 5:.1f}" y="{y + 4:.1f}"{anchor}>'
-                 f'{_esc(titles[n])}</text>' if n in named else "")
-        out.append(f'<a href="{_esc(site.href(slugs[n]))}"><title>{_esc(titles[n])}</title>'
-                   f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}"/>{label}</a>')
-    out.append("</svg>")
-    return "".join(out)
+    g.add_edges_from((a, b) for a, b in pairs if a != b)
+    if g.number_of_nodes() > _COVER_MAX:
+        g = g.subgraph(sorted(g.nodes, key=lambda p: (-g.degree(p), p))[:_COVER_MAX]).copy()
+    drawn = sorted(g.nodes)
+    areas = louvain_sorted(g) if drawn else []
+    deg = dict(g.degree())
+    group = {n: i for i, members in enumerate(areas) for n in members}
+    names = [titles[hub_of(members, deg)] for members in areas]
+    pos = nx.spring_layout(g, seed=7, k=1.6 / max(len(drawn), 1) ** 0.5) if len(drawn) > 1 \
+        else {n: (0.0, 0.0) for n in drawn}
+    xs = [pos[n][0] for n in drawn] or [0.0]
+    ys = [pos[n][1] for n in drawn] or [0.0]
+    sx, sy = (max(xs) - min(xs)) or 1.0, (max(ys) - min(ys)) or 1.0
+    at = {n: i for i, n in enumerate(drawn)}
+    return {
+        "nodes": drawn,
+        "n": [[round((pos[n][0] - min(xs)) / sx, 4), round((pos[n][1] - min(ys)) / sy, 4),
+               group.get(n, -1), deg[n]] for n in drawn],
+        "e": sorted([at[a], at[b]] for a, b in g.edges),
+        "areas": [[names[i], len(m)] for i, m in enumerate(areas)],
+        "unlinked": [n for n in nodes if n not in at],
+    }
 
 
-def build(vault: Path | None = None) -> dict:
-    """Write the page from the current choice and make it live. Returns what
-    went out, for the view's line after Publish."""
+def _svg(c: dict) -> str:
+    """The cover a reader without the script sees: the same points and
+    lines, in one ink, drawn once at publish."""
+    w, h, pad = 460, 210, 10
+    X = lambda i: pad + c["n"][i][0] * (w - 2 * pad)  # noqa: E731
+    Y = lambda i: pad + c["n"][i][1] * (h - 2 * pad)  # noqa: E731
+    out = [f'<svg viewBox="0 0 {w} {h}" aria-hidden="true">']
+    out += [f'<line x1="{X(a):.1f}" y1="{Y(a):.1f}" x2="{X(b):.1f}" y2="{Y(b):.1f}"/>' for a, b in c["e"]]
+    out += [f'<circle cx="{X(i):.1f}" cy="{Y(i):.1f}" r="{1.6 if n[3] >= 12 else 1.1}"/>'
+            for i, n in enumerate(c["n"])]
+    return "".join(out) + "</svg>"
+
+
+def build(slug: str, vault: Path | None = None) -> dict:
+    """Write one vault from the current choice and put it where its
+    visibility says: served when Public, beside the served folder for the
+    relay when Private (ADR-0151 points 3, 9). Returns what went out, for
+    the view's line after Publish."""
     from silica.driver import DRIVER
     from silica.kernel.recall.mindmap import note_resolver
-    from silica.kernel.vault_manifest import get_active_manifest
     from silica.kernel.write import frontmatter as fm
     from silica.ui.web.server import _find_asset, _linkify
 
@@ -237,14 +331,20 @@ def build(vault: Path | None = None) -> dict:
     h = publish.handle(vault)
     if not publish.available(vault):
         raise ValueError("this account has no public address yet")
+    publish.enforce_tier(vault)
+    conf = publish.find(slug, vault)
+    if conf["visibility"] == "off":
+        raise ValueError("turn the vault Public or Private before publishing it")
+    private = conf["visibility"] == "private"
     sel = publish.selection(vault)
     fms = sel["frontmatter"]
-    public = sorted(p for p, s in sel["notes"].items() if s == "on")
+    public = sorted(p for p, s in sel["notes"].items() if s == "on" and sel["vault_of"].get(p) == slug)
     on = set(public)
     titles = {p: _title(p, fms.get(p) or {}) for p in public}
     slugs = _slugs(public, titles)
     site = _Site(h, publish.page_url(vault))
-    lang = _LANGS.get((get_active_manifest().conventions.language or "").strip().lower(), "")
+    vurl = site.absolute(site.vault(slug, 0))
+    lang = _LANGS.get(_language().strip().lower(), "")
 
     base_resolve = note_resolver()
 
@@ -256,16 +356,15 @@ def build(vault: Path | None = None) -> dict:
 
     root = publish.site_root(h)
     root.mkdir(parents=True, exist_ok=True)
-    build_dir = root / f".build-{os.getpid()}"
+    build_dir = root / f".build-{slug}-{os.getpid()}"
     if build_dir.exists():
         shutil.rmtree(build_dir)
     (build_dir / "assets").mkdir(parents=True)
-    _copy_static(build_dir / "assets")
 
     copied: dict[str, str] = {}
 
     def copy_asset(target: str) -> str:
-        """The page's name for an image a public note cites, copied once."""
+        """The vault's name for an image a published note cites, copied once."""
         if target in copied:
             return copied[target]
         found = _find_asset(target)
@@ -277,12 +376,19 @@ def build(vault: Path | None = None) -> dict:
         copied[target] = name
         return name
 
+    def note_url(p: str) -> str:
+        # A Private vault is never served, but its notes keep the address they would have, so a
+        # reader's Silica tells its links apart as it does a Public vault's (saved_page.save_vault).
+        return site.absolute(site.note(slug, slugs[p], 1)) or f"{slugs[p]}.md"
+
     def href_of(item) -> str:
         kind, target = item
         if kind == "asset":
             name = copy_asset(target)
-            return site.asset(name) if name else ""
-        return site.absolute(slugs[target]) if site.base else site.href(slugs[target])
+            if not name:
+                return ""
+            return f"assets/{name}" if private or not site.base else site.absolute(site.asset(slug, name, 1))
+        return note_url(target) if site.base or private else site.note(slug, slugs[target], 1)
 
     rendered: dict[str, dict] = {}
     edges: set[tuple[str, str]] = set()
@@ -290,7 +396,7 @@ def build(vault: Path | None = None) -> dict:
         try:
             text = DRIVER.read_note(p).content
         except Exception as exc:
-            # One unreadable note must not take the whole page down with it;
+            # One unreadable note must not take the whole vault down with it;
             # it stays out and the log names it.
             logger.warning("public page: %s skipped (%s)", p, exc)
             continue
@@ -300,125 +406,319 @@ def build(vault: Path | None = None) -> dict:
         page_html = _linkify(body, resolve)
         targets = set(_ANCHOR.findall(page_html))
         edges.update((p, html.unescape(t)) for t in targets if html.unescape(t) in on)
-        page_html = _ANCHOR.sub(lambda m: f'<a class="note-link" href="{_esc(site.href(slugs[html.unescape(m.group(1))]))}">'
-                                if html.unescape(m.group(1)) in slugs else "<a>", page_html)
+        page_html = _ANCHOR.sub(
+            lambda m: f'<a class="note-link" href="{_esc(site.note(slug, slugs[html.unescape(m.group(1))], 1))}">'
+            if html.unescape(m.group(1)) in slugs else "<a>", page_html)
         page_html = _ASSET_SRC.sub(
-            lambda m: site.asset(copy_asset(_unquote(m.group(1)))) if copy_asset(_unquote(m.group(1))) else "",
+            lambda m: site.asset(slug, copy_asset(_unquote(m.group(1))), 1) if copy_asset(_unquote(m.group(1))) else "",
             page_html)
         rendered[p] = {"html": page_html, "props": props, "body": body}
 
     shown = [p for p in public if p in rendered]
-    backlinks: dict[str, list[str]] = {p: [] for p in shown}
-    for a, b in edges:
-        if b in backlinks and a in rendered:
-            backlinks[b].append(a)
-    stamp = datetime.date.today().isoformat()
-
+    pairs = {(min(a, b), max(a, b)) for a, b in edges if a in rendered and b in rendered and a != b}
+    c = cover(shown, pairs, titles)
+    today = datetime.date.today().isoformat()
+    stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    manifest = {
+        "v": 1, "handle": h, "slug": slug, "title": conf["title"], "line": conf["line"],
+        "license": conf["license"], "published": today, "listed": conf["listed"] and not private,
+        "url": vurl,
+        "count": {"notes": len(shown), "links": len(pairs), "drawn": len(c["n"]), "areas": len(c["areas"])},
+        "areas": c["areas"],
+        # a drawn note: x, y, area, links, title, slug; the cover and the areas read nothing else
+        "n": [[*row, titles[p], slugs[p]] for row, p in zip(c["n"], c["nodes"])],
+        "e": c["e"],
+        "unlinked": [[titles[p], slugs[p]] for p in c["unlinked"]],
+    }
+    notes_md: dict[str, str] = {}
     for p in shown:
-        r = rendered[p]
-        props, slug = r["props"], slugs[p]
-        url = site.absolute(slug) if site.base else ""
+        props = rendered[p]["props"]
         credit = _author(props, h)
         source = props.get("source") if isinstance(props.get("source"), str) else ""
         source = source if source.startswith(("http://", "https://")) else ""
-        # A republished copy points engines and savers at its original
-        # (ADR-0143 point 10), so the copy cannot outrank the author.
-        canonical = source if credit and source else url
-        head = _head(f"{titles[p]} · @{h}", _desc(r["body"]), site, canonical=canonical,
-                     md=f"{slug}.md", lang=lang, kind="article")
-        crumb = f'<span class="crumb">/ {_esc(slug)}</span>'
-        banner = ""
-        if credit:
-            saved = props.get("saved") or ""
-            orig = f' <a href="{_esc(source)}">Read the original</a>' if source else ""
-            banner = (f'<p class="banner">Saved from <b>@{_esc(credit)}</b>'
-                      f'{" on " + _esc(saved) if saved else ""}. This is a copy, and @{_esc(credit)} '
-                      f'may have changed the original since.{orig}</p>')
-        date = props.get("date") or stamp
-        byline = f"@{_esc(credit)} · shared by @{_esc(h)}" if credit else f"@{_esc(h)} · {_esc(date)}"
-        tags = _tags(props)
-        save = ""
-        if site.base:
-            target = source if credit and source else url
-            note = f"saves @{_esc(credit)}'s original" if credit and source else "a copy goes into your own vault"
-            save = (f'<p class="actions"><a class="btn" href="{_esc(_save_link(target))}">Save to Silica</a>'
-                    f'<span class="cap">{note}</span></p>')
-        linked = "".join(f'<li><a href="{_esc(site.href(slugs[b]))}">{_esc(titles[b])}</a></li>'
-                         for b in sorted(backlinks[p], key=lambda x: titles[x].lower()))
-        more = [q for q in shown if q != p][:3]
-        more_html = "".join(f'<li><a href="{_esc(site.href(slugs[q]))}">{_esc(titles[q])}</a></li>' for q in more)
-        side = ""
-        if linked:
-            side += f'<div><h2 class="lab">Linked from</h2><ul>{linked}</ul></div>'
-        if more_html:
-            side += (f'<div><h2 class="lab">More from @{_esc(h)}</h2><ul>{more_html}'
-                     f'<li><a href="{_esc(site.index())}">All {len(shown)} notes</a></li></ul></div>')
-        page = (head + "<body>\n" + _top(site, crumb)
-                + '<div class="art-grid"><main class="art">' + banner
-                + f'<p class="lab meta">{byline}</p><h1>{_esc(titles[p])}</h1>'
-                + (f'<p class="tags">{" · ".join(_esc(t) for t in tags)}</p>' if tags else "")
-                + f'<article class="body">{r["html"]}</article>{save}</main>'
-                + (f'<aside class="side">{side}</aside>' if side else "") + "</div>\n"
-                + _foot(site, url or slug))
-        (build_dir / f"{slug}.html").write_text(page, encoding="utf-8")
-        # the title always, so a saver names the copy as the page does
-        kept = {"title": titles[p], **{k: props[k] for k in _SHOWN_PROPS if k in props and k != "title"}}
+        kept = {"title": titles[p], **{k: props[k] for k in _SHOWN_PROPS if k in props and k != "title"},
+                "vault": conf["title"]}
         if credit:
             kept.update({"author": f"@{credit}", **({"source": source} if source else {})})
-        md = _md_for_reader(r["body"], resolve, href_of)
-        (build_dir / f"{slug}.md").write_text(fm.dump(kept, md) if kept else md, encoding="utf-8")
+        md = fm.dump(kept, _md_for_reader(rendered[p]["body"], resolve, href_of))
+        notes_md[slugs[p]] = md
+        if not private:
+            (build_dir / f"{slugs[p]}.md").write_text(md, encoding="utf-8")
+    (build_dir / "vault.json").write_text(json.dumps(manifest, ensure_ascii=False, separators=(",", ":")),
+                                          encoding="utf-8")
+    (build_dir / "notes.json").write_text(json.dumps(notes_md, ensure_ascii=False), encoding="utf-8")
 
-    own = [p for p in shown if not _author(rendered[p]["props"], h)]
-    others = [p for p in shown if _author(rendered[p]["props"], h)]
-    pairs = {(min(a, b), max(a, b)) for a, b in edges if a in rendered and b in rendered and a != b}
-
-    def row(p: str) -> str:
-        deg = sum(1 for e in pairs if p in e)
-        credit = _author(rendered[p]["props"], h)
-        tail = f"from @{_esc(credit)}" if credit else " · ".join(_esc(t) for t in _tags(rendered[p]["props"]))
-        return (f'<li><a href="{_esc(site.href(slugs[p]))}">{_esc(titles[p])}</a>'
-                f'<span class="m">{tail}</span><span class="m">{deg} {"link" if deg == 1 else "links"}</span></li>')
-
-    by_title = lambda ps: sorted(ps, key=lambda x: titles[x].lower())  # noqa: E731
-    lists = f'<ol class="plist">{"".join(row(p) for p in by_title(own))}</ol>'
-    if others:
-        lists += f'<h2 class="lab sub">Saved from others</h2><ol class="plist">{"".join(row(p) for p in by_title(others))}</ol>'
-    svg = _graph_svg(shown, pairs, titles, slugs, site)
-    meta = f'{len(shown)} {"note" if len(shown) == 1 else "notes"} · {len(pairs)} links · updated {stamp}'
-    index = (_head(f"@{h} · Silica", f"{len(shown)} notes by @{h}", site, canonical=site.base, lang=lang)
-             + "<body>\n" + _top(site)
-             + f'<section class="profile"><h1>@{_esc(h)}</h1><p class="lab">{_esc(meta)}</p></section>'
-             + f'<div class="pub-grid"><div>{lists}</div>'
-             + (f'<figure class="pgraph"><figcaption class="lab">How these notes link</figcaption>{svg}</figure>'
-                if svg else "")
-             + "</div>\n" + _foot(site, site.base or "index.html"))
-    (build_dir / "index.html").write_text(index, encoding="utf-8")
-    state = {"published_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-             "notes": shown}
+    if private:
+        (build_dir / "readers.json").write_text(json.dumps(conf["readers"]), encoding="utf-8")
+        dest = root / "private" / slug
+    else:
+        backlinks: dict[str, list[str]] = {p: [] for p in shown}
+        for a, b in edges:
+            if b in backlinks and a in rendered:
+                backlinks[b].append(a)
+        for p in shown:
+            _write_note(build_dir, p, rendered[p], titles, slugs, backlinks[p], shown, conf, site, slug, h,
+                        lang, today)
+        (build_dir / "index.html").write_text(_vault_page(manifest, c, site, h, lang), encoding="utf-8")
+        dest = root / "live" / slug
+    _readable(build_dir, root, private)
+    publish.swap_in(build_dir, dest)
+    if not private:
+        shutil.rmtree(root / "paused" / slug, ignore_errors=True)
+    _mark_published(slug, today, vault)
+    state = last_published(h) or {"vaults": {}}
+    state["vaults"][slug] = {"published_at": stamp, "notes": shown}
     (root / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
-    _readable(build_dir, root)
-    publish.swap_in(build_dir, h)
-    return {"notes": len(shown), "links": len(pairs), "images": sum(1 for v in copied.values() if v),
-            "url": site.base, "published_at": state["published_at"]}
+    write_page(vault)
+    return {"vault": slug, "notes": len(shown), "links": len(pairs),
+            "images": sum(1 for v in copied.values() if v), "url": vurl, "published_at": stamp,
+            "private": private}
 
 
-def _readable(build_dir: Path, root: Path) -> None:
+def _mark_published(slug: str, day: str, vault: Path) -> None:
+    items = publish.vaults(vault)
+    for v in items:
+        if v["slug"] == slug:
+            v["published"] = day
+    publish._save_vaults(items, vault)
+
+
+def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, backlinks: list[str],
+                shown: list[str], conf: dict, site: _Site, vslug: str, h: str, lang: str, today: str) -> None:
+    props, slug = r["props"], slugs[p]
+    url = site.absolute(site.note(vslug, slug, 1))
+    credit = _author(props, h)
+    source = props.get("source") if isinstance(props.get("source"), str) else ""
+    source = source if source.startswith(("http://", "https://")) else ""
+    # A republished copy points engines and savers at its original
+    # (ADR-0143 point 10), so the copy cannot outrank the author.
+    canonical = source if credit and source else url
+    head = _head(f"{titles[p]} · {conf['title']} · @{h}", _desc(r["body"]), site, 1, canonical=canonical,
+                 md=f"{slug}.md", lang=lang, kind="article")
+    crumb = ('<nav class="crumb" aria-label="Breadcrumb">'
+             + (f'<a href="{_esc(site.catalog())}">Pages</a> / ' if site.base else "")
+             + f'<a href="{_esc(site.page(1))}">@{_esc(h)}</a> / '
+             f'<a href="{_esc(site.vault(vslug, 1))}">{_esc(conf["title"])}</a></nav>')
+    banner = ""
+    if credit:
+        saved = props.get("saved") or ""
+        orig = f' <a href="{_esc(source)}">Read the original</a>' if source else ""
+        banner = (f'<p class="banner">Saved from <b>@{_esc(credit)}</b>'
+                  f'{" on " + _esc(saved) if saved else ""}. This is a copy, and @{_esc(credit)} '
+                  f'may have changed the original since.{orig}</p>')
+    date = props.get("date") or today
+    byline = f"@{_esc(credit)} · shared by @{_esc(h)}" if credit else f"@{_esc(h)} · {_esc(date)}"
+    tags = _tags(props)
+    rep = _report(url or slug, site)
+    if site.base:
+        target = source if credit and source else url
+        actions = (_save_form(target, f"Save @{credit}'s original to Silica" if credit and source
+                              else "Save to Silica", "save-note") + f'<div class="row">{rep}</div>')
+    else:
+        actions = f'<div class="row">{rep}</div>' if rep else ""
+    linked = "".join(f'<li><a href="{_esc(site.note(vslug, slugs[b], 1))}">{_esc(titles[b])}</a></li>'
+                     for b in sorted(backlinks, key=lambda x: titles[x].lower()))
+    more = [q for q in shown if q != p][:3]
+    more_html = "".join(f'<li><a href="{_esc(site.note(vslug, slugs[q], 1))}">{_esc(titles[q])}</a></li>'
+                        for q in more)
+    side = ""
+    if linked:
+        side += f'<div><h2>Linked from</h2><ul>{linked}</ul></div>'
+    if more_html:
+        side += (f'<div><h2>More from {_esc(conf["title"])}</h2><ul>{more_html}'
+                 f'<li><a href="{_esc(site.vault(vslug, 1))}">All {_fmt(len(shown))} notes</a></li></ul></div>')
+    page = (head + "<body>\n" + top(site.catalog(), _app(), page=site.page(1), h=h)
+            + '<main class="sheet"><div class="art-grid"><article class="art">' + crumb + banner
+            + f'<p class="meta">{byline}</p><h1>{_esc(titles[p])}</h1>'
+            + (f'<p class="tags">{" · ".join(_esc(t) for t in tags)}</p>' if tags else "")
+            + f'<div class="body">{r["html"]}</div>{actions}</article>'
+            + (f'<aside class="side">{side}</aside>' if side else "") + "</div></main>\n"
+            + foot(f"A note @{_esc(h)} chose to publish.", _app()))
+    (build_dir / f"{slug}.html").write_text(page, encoding="utf-8")
+
+
+def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
+    """A vault's own page (ADR-0151 point 4): the cover, the facts, Save by
+    areas, Report, every note by area, and the author's other vaults."""
+    count = m["count"]
+    vslug = m["slug"]
+    url = m["url"] or "index.html"
+    unl = len(m["unlinked"])
+    caption = (f'<span class="num">{_fmt(count["drawn"])}</span> of <span class="num">{_fmt(count["notes"])}</span> '
+               f'notes drawn · <span class="num">{_fmt(count["links"])}</span> links'
+               + (f' · the <span class="num">{_fmt(unl)}</span> notes with no link are in the vault but not in '
+                  f'the picture' if unl else ""))
+    facts = [("Notes", f'<span class="num">{_fmt(count["notes"])}</span>'),
+             ("Links", f'<span class="num">{_fmt(count["links"])}</span>'),
+             ("Areas", f'<span class="num">{_fmt(count["areas"])}</span>'),
+             ("Published", _esc(_day(m["published"]))),
+             ("License", "Not stated by the author" if m["license"] == "not stated" else _esc(m["license"]))]
+    dl = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts)
+    rows = [(i, name, size) for i, (name, size) in enumerate(m["areas"])]
+    if unl:
+        rows.append((-1, "In no area: notes with no link", unl))
+    owner = ' form="save"' if site.base else " disabled"
+    areas = "".join(
+        f'<li data-area="{i}"><label><input type="checkbox" name="areas" value="{i}"{owner} checked>'
+        f'<span class="nm">{_esc(name)}</span><span class="ct num">{_fmt(size)}</span></label></li>'
+        for i, name, size in rows)
+    by_area: dict[int, list[tuple[str, str]]] = {}
+    for row in m["n"]:
+        by_area.setdefault(row[2], []).append((row[4], row[5]))
+    for title, slug in m["unlinked"]:
+        by_area.setdefault(-1, []).append((title, slug))
+    notes = "".join(
+        f'<details><summary>{_esc(name)}<span class="num">{_fmt(size)}</span></summary><ul>'
+        + "".join(f'<li><a href="{_esc(site.note(vslug, s, 1))}">{_esc(t)}</a></li>'
+                  for t, s in sorted(by_area.get(i, []), key=lambda x: x[0].lower()))
+        + "</ul></details>" for i, name, size in rows)
+    save = (_save_form(url, f"Save {_plural(count['notes'], 'note')} to Silica") if site.base else
+            '<p class="dim">Saving needs the vault on a Silica host.</p>')
+    crumb = ('<nav class="crumb" aria-label="Breadcrumb">'
+             + (f'<a href="{_esc(site.catalog())}">Pages</a> / ' if site.base else "")
+             + f'<a href="{_esc(site.page(1))}">@{_esc(h)}</a> / {_esc(m["title"])}</nav>')
+    head = _head(f"{m['title']} · @{h}", m["line"] or f"{_plural(count['notes'], 'note')} by @{h}", site, 1,
+                 canonical=m["url"], lang=lang)
+    vaults_json = f"{site.root}/vaults.json" if site.base else "../vaults.json"
+    return (head + "<body>\n" + top(site.catalog(), _app(), page=site.page(1), h=h)
+            + f'<main class="sheet"><section class="wrap vp grid" aria-labelledby="vp-h"'
+            f' data-vaults="{_esc(vaults_json)}" data-self="{_esc(vslug)}" data-root="{_esc(site.page(1))}">'
+            + crumb
+            + f'<figure class="vp-cover"><div class="well" data-cover="vault.json">{_svg(c)}'
+            f'<canvas role="img" aria-label="{_esc(m["title"])} as a graph of its notes"></canvas>'
+            f'<div class="ctip" hidden></div></div><figcaption>{caption}</figcaption></figure>'
+            + f'<div class="vp-side"><h1 id="vp-h">{_esc(m["title"])}</h1>'
+            f'<p class="vp-by">by <a href="{_esc(site.page(1))}">@{_esc(h)}</a><span data-of></span></p>'
+            + (f'<p class="vp-line">{_esc(m["line"])}</p>' if m["line"] else "")
+            + f'<dl class="facts">{dl}</dl>{save}'
+            f'<div class="row"><a class="btn-o" href="#notes">Read the notes</a>{_report(url, site)}</div></div>'
+            + f'<div class="vp-areas"><div class="vp-areas-head"><h2>Areas</h2>'
+            f'<p>Choose what to save.<span data-all hidden> <button type="button" class="linkish" data-pick="all">'
+            f'All</button> · <button type="button" class="linkish" data-pick="none">None</button></span></p>'
+            f'<span class="sum"><span class="num" data-sum>{_fmt(count["notes"])}</span> of '
+            f'<span class="num">{_fmt(count["notes"])}</span> notes chosen</span></div>'
+            f'<ul class="areas">{areas}</ul></div>'
+            + f'<div class="vp-notes" id="notes"><h2>The notes</h2>{notes}</div>'
+            + f'<div class="vp-more" data-more hidden><h2>Also by @{_esc(h)}</h2><div class="cat-grid"></div></div>'
+            + "</section></main>\n" + foot(f"A vault @{_esc(h)} chose to publish.", _app()))
+
+
+def card(e: dict, href: str, graph: str, who: bool = True) -> str:
+    """One vault as a card, on a Page and in Pages: the cover the script
+    prints from `graph`, the title, the line, the handle and the counts."""
+    meta = ((f'<span class="who">@{_esc(e["handle"])}</span>' if who else "")
+            + f'<span><span class="num">{_fmt(e["count"]["notes"])}</span> notes</span>'
+            f'<span data-in><span class="num">{_fmt(e["count"]["areas"])}</span> areas</span>')
+    return (f'<a class="vcard" href="{_esc(href)}" data-graph="{_esc(graph)}" data-title="{_esc(e["title"])}"'
+            f' data-line="{_esc(e["line"])}" data-who="{_esc(e["handle"])}" data-notes="{int(e["count"]["notes"])}"'
+            f' data-date="{_esc(e["published"])}" data-areas="{_esc(json.dumps(e["areas"], ensure_ascii=False))}">'
+            f'<div class="well"><canvas role="img" aria-label="{_esc(e["title"])} as a graph of its notes"></canvas>'
+            f'</div><div><h2>{_esc(e["title"])}</h2>'
+            + (f'<p class="vline">{_esc(e["line"])}</p>' if e["line"] else "")
+            + f'<p class="vmeta">{meta}</p></div></a>')
+
+
+def write_page(vault: Path | None = None) -> None:
+    """The Page, `/@handle/` (ADR-0151 point 3): the account's Public vaults
+    from their published manifests, and `vaults.json`, which a vault's page
+    reads for "Also by". With no Public vault the Page goes, so its address
+    answers that there is no page; a laptop's copy of the sheet goes with it."""
+    vault = vault or publish._vault()
+    h = publish.handle(vault)
+    if not h:
+        return
+    root = publish.site_root(h)
+    live = root / "live"
+    public = {v["slug"] for v in publish.vaults(vault) if v["visibility"] == "public"}
+    entries = []
+    for slug in sorted(public):
+        try:
+            entries.append(json.loads((live / slug / "vault.json").read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            continue
+    if live.is_dir():
+        for stale in [p for p in live.iterdir() if p.is_dir() and p.name not in public and p.name != "_s"]:
+            # a vault Off or Private whose folder stayed, after a crash between two renames
+            shutil.rmtree(stale)
+    if not entries:
+        for name in ("index.html", "vaults.json"):
+            (live / name).unlink(missing_ok=True)
+        shutil.rmtree(live / "_s", ignore_errors=True)
+        return
+    site = _Site(h, publish.page_url(vault))
+    entries.sort(key=lambda m: m["published"], reverse=True)
+    lang = _LANGS.get(_language().strip().lower(), "")
+    notes = sum(m["count"]["notes"] for m in entries)
+    cards = "".join(card(m, site.vault(m["slug"], 0), f"{site.root}/{m['slug']}/vault.json" if site.base
+                         else f"{m['slug']}/vault.json", who=False) for m in entries)
+    head = _head(f"@{h} · Silica", f"{_plural(len(entries), 'vault')} by @{h}", site, 0,
+                 canonical=site.absolute(site.page(0)), lang=lang)
+    page = (head + "<body>\n" + top(site.catalog(), _app(), current="page", page=site.page(0), h=h)
+            + '<main class="sheet"><section class="wrap cat" aria-labelledby="pg-h">'
+            + f'<div class="cat-head grid"><h1 id="pg-h">@{_esc(h)}</h1>'
+            f'<p>{_plural(len(entries), "vault")} · {_plural(notes, "note")}. Read one here, or save a copy into '
+            f'your own vault: every note in the copy keeps its author\'s name.</p></div>'
+            + f'<div class="cat-grid">{cards}</div></section></main>\n'
+            + foot(f"Vaults @{_esc(h)} chose to publish.", _app()))
+    live.mkdir(parents=True, exist_ok=True)
+    _atomic(live / "index.html", page)
+    listing = [{"slug": m["slug"], "title": m["title"], "line": m["line"], "count": m["count"],
+                "published": m["published"], "areas": m["areas"], "handle": h} for m in entries]
+    _atomic(live / "vaults.json", json.dumps(listing, ensure_ascii=False))
+    if not site.base:
+        _copy_static(live / "_s")
+    _readable(live, root, False)
+
+
+def set_listed(slug: str, listed: bool, vault: Path | None = None) -> None:
+    """"Listed in Pages" reaches the published manifest at once, since the
+    catalog reads only that; the rest of the vault waits for Publish."""
+    vault = vault or publish._vault()
+    h = publish.handle(vault)
+    path = publish.site_root(h) / "live" / slug / "vault.json" if h else None
+    if path is None or not path.is_file():
+        return
+    m = json.loads(path.read_text(encoding="utf-8"))
+    m["listed"] = bool(listed)
+    _atomic(path, json.dumps(m, ensure_ascii=False, separators=(",", ":")))
+
+
+def _language() -> str:
+    from silica.kernel.vault_manifest import get_active_manifest
+
+    return get_active_manifest().conventions.language or ""
+
+
+def _atomic(path: Path, text: str) -> None:
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.chmod(0o644)
+    os.replace(tmp, path)
+
+
+def _readable(build_dir: Path, root: Path, private: bool) -> None:
     """Every published file readable by others, whatever the umask: on the
     server the account's unit writes with UMask=0077 and the web server reads
-    as another user (silica-hosted, ADR-0143 point 6). What is published is
-    public by definition; state.json beside it stays the account's."""
+    as another user (silica-hosted, ADR-0143 point 6). A Private build is
+    read by the relay, as root, and by no one else."""
     root.chmod(0o755)
+    if private:
+        return
     build_dir.chmod(0o755)
     for p in build_dir.rglob("*"):
         p.chmod(0o755 if p.is_dir() else 0o644)
+    live = root / "live"
+    if live.is_dir():
+        live.chmod(0o755)
 
 
 def last_published(h: str) -> dict:
-    """{"published_at", "notes"} of the last build, {} before the first."""
+    """{"vaults": {slug: {"published_at", "notes"}}} of the last builds, {} before the first."""
     try:
-        return json.loads((publish.site_root(h) / "state.json").read_text(encoding="utf-8"))
+        state = json.loads((publish.site_root(h) / "state.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+    return state if isinstance(state, dict) and isinstance(state.get("vaults"), dict) else {}
 
 
 def _drop_title_heading(body: str, title: str) -> str:
@@ -434,67 +734,19 @@ def _unquote(s: str) -> str:
     return unquote(html.unescape(s))
 
 
-def _copy_static(dest: Path) -> None:
-    """The sheet and the fonts every page links, from the app's own files."""
+def static_files() -> dict[str, bytes]:
+    """{name: bytes} of the sheet, the script and the fonts, as /_s/ serves
+    them; the host copies them from the release (ADR-0151 point 7)."""
     static = importlib.resources.files("silica.ui.web") / "static"
-    for name in _FONTS:
-        res = static / name
+    out = {}
+    for name in _STATIC:
+        res = static.joinpath(*name.split("/"))
         if res.is_file():
-            (dest / name).write_bytes(res.read_bytes())
-    (dest / "site.css").write_text(_CSS, encoding="utf-8")
+            out[name.rsplit("/", 1)[-1]] = res.read_bytes()
+    return out
 
 
-# The landing's plate (site/DESIGN.md): paper, one ink, one signal, square
-# corners. Martian Mono for the labels because it ships with the app; the
-# landing's JetBrains Mono does not.
-_CSS = """@font-face{font-family:"Host Grotesk";src:url("host-grotesk-latin.woff2") format("woff2");font-weight:300 800;font-display:swap}
-@font-face{font-family:"Martian Mono";src:url("martian-mono-latin.woff2") format("woff2");font-weight:300 800;font-display:swap}
-:root{--paper:#FFFDF9;--ink:#1A1815;--ink-2:#4A453C;--hair:#CFC8BA;--signal:#0A6070;
---sans:"Host Grotesk",ui-sans-serif,system-ui,"Helvetica Neue",Arial,sans-serif;
---mono:"Martian Mono",ui-monospace,Menlo,Consolas,monospace;color-scheme:light}
-*{box-sizing:border-box}html,body{margin:0}
-body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.55}
-a{color:var(--ink);text-decoration-color:var(--signal);text-underline-offset:3px}a:hover{color:var(--signal)}
-:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
-.lab{font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2);margin:0}
-.top{display:flex;align-items:center;gap:14px;min-height:58px;padding:0 max(16px,3vw);border-bottom:1px solid var(--hair)}
-.brand{font-weight:700;letter-spacing:.02em;text-decoration:none}.crumb{font-family:var(--mono);font-size:12.5px;color:var(--ink-2)}
-.spacer{flex:1}
-.btn{display:inline-flex;align-items:center;height:44px;padding:0 1.1rem;background:var(--ink);color:var(--paper);border:1px solid var(--ink);font:600 16px/1 var(--sans);text-decoration:none}
-.btn:hover{background:var(--signal);border-color:var(--signal);color:var(--paper)}
-.btn.ghost{background:transparent;color:var(--ink)}.btn.ghost:hover{color:var(--signal);background:transparent}
-.btn.small{height:36px;font-size:14.5px;padding:0 .9rem}
-.profile{padding:30px max(16px,3vw) 18px;border-bottom:1px solid var(--ink);display:grid;gap:6px}
-.profile h1{margin:0;font-size:clamp(1.8rem,1.3rem + 2vw,2.6rem);letter-spacing:-.03em;line-height:1.05}
-.pub-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,560px)}
-.plist{list-style:none;margin:0;padding:6px max(16px,3vw) 22px}
-.plist li{display:grid;grid-template-columns:1fr auto 70px;gap:14px;align-items:baseline;padding:12px 0;border-bottom:1px solid var(--hair)}
-.plist a{font-size:18px;font-weight:600;text-decoration:none;letter-spacing:-.01em}.plist a:hover{text-decoration:underline}
-.m{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);text-align:right}
-.sub{padding:18px max(16px,3vw) 0}
-.pgraph{margin:0;border-left:1px solid var(--ink);padding:18px 22px;display:grid;gap:8px;align-content:start}
-.pgraph svg{width:100%;height:auto}.pgraph line{stroke:var(--ink);stroke-width:1.1}
-.pgraph circle{fill:var(--paper);stroke:var(--ink);stroke-width:1.5}.pgraph a:hover circle{fill:var(--signal)}
-.pgraph text{font-family:var(--sans);font-size:12.5px;font-weight:600;fill:var(--ink)}
-.art-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px}
-.art{padding:34px max(16px,3vw) 30px;max-width:780px}
-.art .meta{margin-bottom:10px}
-.art h1{margin:0 0 6px;font-size:clamp(2rem,1.4rem + 2.4vw,2.8rem);line-height:1.02;letter-spacing:-.035em}
-.tags{margin:0 0 22px;font-family:var(--mono);font-size:12.5px;color:var(--ink-2)}
-.body{font-size:18px;line-height:1.6}.body p,.body ul,.body ol,.body pre,.body blockquote,.body table{max-width:66ch}
-.body img{max-width:100%;height:auto}.body pre{overflow-x:auto;padding:12px;border:1px solid var(--hair);font-size:14px}
-.body code{font-family:var(--mono);font-size:.85em}.body table{border-collapse:collapse;display:block;overflow-x:auto}
-.body th,.body td{border:1px solid var(--hair);padding:4px 8px}
-.body blockquote{margin:0;padding:2px 14px;border-left:2px solid var(--ink)}
-.body .note-link{text-decoration:underline;text-decoration-color:var(--signal);text-decoration-thickness:1.5px}
-.body .tag{font-family:var(--mono);font-size:.8em;color:var(--ink-2)}
-.banner{border:1px solid var(--ink);padding:12px 14px;margin:0 0 22px;font-size:15.5px;max-width:66ch}
-.banner a{color:var(--signal)}
-.actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:28px}.cap{font-size:14px;color:var(--ink-2)}
-.side{border-left:1px solid var(--hair);padding:34px 24px;display:grid;gap:22px;align-content:start}
-.side ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}.side a{text-decoration:none}.side a:hover{text-decoration:underline}
-.foot{display:flex;gap:6px;flex-wrap:wrap;padding:14px max(16px,3vw);border-top:1px solid var(--ink);font-size:13.5px;color:var(--ink-2)}
-.foot a{color:var(--ink-2)}
-@media (max-width:860px){.pub-grid,.art-grid{grid-template-columns:1fr}.pgraph,.side{border-left:0;border-top:1px solid var(--hair)}
-.plist li{grid-template-columns:1fr auto}.plist li .m:last-child{display:none}}
-"""
+def _copy_static(dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    for name, data in static_files().items():
+        (dest / name).write_bytes(data)
