@@ -169,3 +169,37 @@ def test_join_and_the_footer_point_at_the_app_not_the_public_hosts_root(marta, m
     page = (marta / "public" / "marta" / "live" / "index.html").read_text(encoding="utf-8")
     assert 'href="https://app.test/">Join Silica' in page and 'href="https://app.test/">Published with Silica' in page
     assert 'href="https://pages.test/"' not in page
+
+
+def test_the_page_carries_no_script_and_its_cover_links_each_mark_to_its_note(marta):
+    """The public host serves /@handle under default-src 'none' (silica-hosted Caddyfile): a
+    script would be dropped there, so the page ships none, and the cover (ADR-0146 amendment
+    2026-11-01) is SVG whose marks are links, out of the tab order, in the app's kit."""
+    from silica.ui.web import public_site
+
+    public_site.build()
+    live = marta / "public" / "marta" / "live"
+    pages = list(live.glob("*.html"))
+    assert pages and not any("<script" in p.read_text(encoding="utf-8") for p in pages)
+    index = (live / "index.html").read_text(encoding="utf-8")
+    assert '<svg class="graph"' in index and 'style="' not in index
+    for slug in ("spacing-effect", "forgetting-curve"):
+        assert f'<a href="{slug}.html" tabindex="-1">' in index
+    assert "working-memory" not in index
+    css = (live / "assets" / "site.css").read_text(encoding="utf-8")
+    assert "Archivo" in css and "Host Grotesk" not in css and "uppercase" not in css
+    assert "prefers-color-scheme:dark" in css
+    assert (live / "assets" / "archivo-latin.woff2").is_file()
+    assert not list((live / "assets").glob("host-grotesk*"))
+
+
+def test_a_sparse_page_prints_bigger_marks():
+    from silica.ui.web.public_site import mark_px
+
+    assert [mark_px(3, 0), mark_px(120, 0), mark_px(654, 0), mark_px(654, 12)] == [7, 5, 3, 5]
+
+
+def test_a_page_of_one_note_prints_it_in_the_middle():
+    from silica.ui.web.public_site import cover_layout
+
+    assert cover_layout(["Memory/One.md"], set()) == ([("Memory/One.md", 0.5, 0.5, 0)], [])

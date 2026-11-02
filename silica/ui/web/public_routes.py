@@ -16,6 +16,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from silica.ui.web.settings import _tilde
+
 logger = logging.getLogger(__name__)
 _EMBED = re.compile(r"!\[\[([^\]|#]+\.(?:png|jpe?g|gif|webp|svg|bmp))", re.IGNORECASE)
 
@@ -85,8 +87,9 @@ def _view() -> dict:
         "handle": h,
         "url": publish.page_url(vault),
         # where the files are, on a laptop: the person serves them; a hosted
-        # path names the server's disk and says nothing to the account
-        "dir": str(publish.site_root(h) / "live") if h and not hosted() else "",
+        # path names the server's disk and says nothing to the account. The home
+        # folder reads as ~, as the bug report prints it: the line is read, not typed.
+        "dir": _tilde(str(publish.site_root(h) / "live")) if h and not hosted() else "",
         "page": sel["page"],
         "folders": folders,
         "never": sel["never"],
@@ -116,20 +119,17 @@ def public_view():
 # One picture per set of notes and links, kept for the process: a layout of a few hundred notes
 # takes about a second, and the view asks every time it opens.
 _COVER: dict[int, dict] = {}
-# shortcut: past this many notes the cover keeps the best linked ones, so the layout stays near a
-# second; reopen if a page this large asks for every mark (count them in the published meta line)
-_COVER_MAX = 1500
 
 
 @router.get("/public/cover")
 def public_cover():
     """The view's cover (ADR-0146 point 4): the notes that would go out and the links between
-    them, laid out as the published page lays out its own graph (spring layout, seed 7). The
-    links are the vault graph's between two outgoing notes, so a private note is never a mark."""
-    import networkx as nx
-
+    them, laid out by the published page's own `cover_layout`, so both print one picture. The
+    links are the vault graph's between two outgoing notes, so a private note is never a mark.
+    Each mark carries its width in pixels (`mark_px`), the published SVG's rule."""
     from silica.driver import get_driver
     from silica.kernel import publish
+    from silica.ui.web.public_site import cover_layout, mark_px
 
     vault = publish._vault()
     sel = publish.selection(vault)
@@ -151,23 +151,11 @@ def public_cover():
     key = hash((tuple(on), tuple(sorted(pairs))))
     if key in _COVER:
         return _COVER[key]
-    g2 = nx.Graph()
-    g2.add_nodes_from(on)
-    g2.add_edges_from(pairs)
-    if len(on) > _COVER_MAX:
-        g2 = g2.subgraph(sorted(on, key=lambda p: (-g2.degree(p), p))[:_COVER_MAX]).copy()
-    nodes = sorted(g2.nodes)
-    pos = nx.spring_layout(g2, seed=7, k=1.6 / max(len(nodes), 1) ** 0.5) if len(nodes) > 1 \
-        else {nodes[0]: (0.0, 0.0)}
-    xs = [pos[n][0] for n in nodes]
-    ys = [pos[n][1] for n in nodes]
-    sx, sy = (max(xs) - min(xs)) or 1.0, (max(ys) - min(ys)) or 1.0
+    marks, links = cover_layout(on, pairs)
     fms = sel["frontmatter"]
-    at = {n: i for i, n in enumerate(nodes)}
     cover = {
-        "n": [[round((pos[n][0] - min(xs)) / sx, 4), round((pos[n][1] - min(ys)) / sy, 4),
-               g2.degree(n), _title(n, fms.get(n) or {})] for n in nodes],
-        "e": [[at[a], at[b]] for a, b in g2.edges],
+        "n": [[x, y, deg, _title(n, fms.get(n) or {}), mark_px(len(marks), deg)] for n, x, y, deg in marks],
+        "e": [list(e) for e in links],
     }
     # one entry: a view shows one page, and an old picture is never asked for again
     _COVER.clear()
