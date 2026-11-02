@@ -1005,8 +1005,12 @@ def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> s
     # "a URL is clickable", not "prose opens a mail client".
     if md.linkify is not None:  # only present with the [linkify] extra
         md.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
-    # allow_space=False keeps prose prices ("$5 and $10") out of math
-    md.use(dollarmath_plugin, allow_space=False, allow_digits=False)
+    # allow_space=False keeps prose prices ("$5 and $10") out of math.
+    # double_inline: a `$$...$$` line inside a paragraph is display math, as in
+    # Obsidian and Pandoc. The block rule cannot interrupt a paragraph, so
+    # without it the inline rule ate one `$` of each pair and left two on screen
+    # around the formula (chat 4b3dfdab7b64, 2026-11-01).
+    md.use(dollarmath_plugin, allow_space=False, allow_digits=False, double_inline=True)
     # Without it a `## Sources` definition `[^L]: [[sources/X]]` parsed as a
     # link reference whose target was the literal `[[sources/X]]`, and clicking
     # the marker navigated away from the app (ADR-0055 prerequisite). Its
@@ -1057,9 +1061,9 @@ def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> s
                     continue
                 new.append(child)
                 continue
-            if child.type == "math_inline":
+            if child.type in ("math_inline", "math_inline_double"):
                 raw = Token("html_inline", "", 0)
-                raw.content = _mathml(child.content, display=False)
+                raw.content = _mathml(child.content, display=child.type == "math_inline_double")
                 new.append(raw)
                 continue
             if child.type != "text":
