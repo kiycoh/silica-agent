@@ -172,8 +172,8 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/memorize",
         group="workflow",
-        usage="<area|folder|note|topic>",
-        summary="guided re-learning: builds (or resumes) a syllabus note calibrated on what you still retain, then teaches step by step with quiz gates",
+        usage="[plan] [--n=8] [--plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]] [--teach <note>] [--status [plan]]",
+        summary="a study session graded against the source line, a plan to continue or write, a teach-back, or the readings in one line; the Memorize view is the same engine with a screen",
         examples=("/memorize Concepts/ML", '/memorize "differential forms"'),
     ),
     # Direct — immediate, no LLM round-trip
