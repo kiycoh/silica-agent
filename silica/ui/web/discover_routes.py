@@ -32,6 +32,9 @@ def _require_same_origin(request: Request) -> None:
 router = APIRouter(prefix="/discover")
 _SAME_ORIGIN = [Depends(_require_same_origin)]
 _COVER_NAME = re.compile(r"^[0-9a-f]{24}\.(?:jpg|png|webp|gif|avif)$")
+# A host name and nothing else: it becomes both a fetched address and a file name.
+_DOMAIN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
+_IMAGE_HEADERS = {"Cache-Control": "private, max-age=86400", "Content-Security-Policy": "default-src 'none'; sandbox"}
 _TABS = ("foryou", "news", "research", "video")
 _FEEDBACK = (-1, 0, 1)
 _CATALOG_SHOWN = 40
@@ -236,8 +239,28 @@ def cover(name: str):
     path = store.covers_dir() / name
     if not path.is_file():
         raise HTTPException(404)
-    return FileResponse(path, headers={"Cache-Control": "private, max-age=86400",
-                                       "Content-Security-Policy": "default-src 'none'; sandbox"})
+    return FileResponse(path, headers=_IMAGE_HEADERS)
+
+
+@router.get("/icon/{domain}")
+def icon(domain: str):
+    """A site's icon the server fetched, for a site an article in the store
+    came from only, so the route is no proxy to an address a page names."""
+    if not _DOMAIN.match(domain):
+        raise HTTPException(404)
+    # A kept icon was fetched for a store domain only, so it is served without
+    # the store's read (38 ms on a 2.2 MB store, measured 2026-11-02, eight per story).
+    got = read.kept_icon(domain)
+    if got is None:
+        with store.LOCK:
+            doc = store.load()
+        if not any(a.get("domain") == domain for a in doc["articles"].values()):
+            raise HTTPException(404)
+        got = read.site_icon(domain)
+    if got is None:
+        raise HTTPException(404)
+    # The type from the bytes: the file is named after the site, and ".com" guesses wrong.
+    return FileResponse(got[0], media_type=got[1], headers=_IMAGE_HEADERS)
 
 
 @router.get("/story/{sid}")

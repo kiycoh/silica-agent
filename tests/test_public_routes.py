@@ -121,6 +121,69 @@ def test_hosted_without_a_handle_offers_no_page(client, monkeypatch):
     assert tc.post("/public/publish", json={"vault": "memory"}).status_code == 400
 
 
+def _hosted_claims(monkeypatch, tmp):
+    """A hosted account with no handle, on a host that takes claims."""
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test")
+    monkeypatch.delenv("SILICA_PUBLIC_HANDLE")
+    monkeypatch.setenv("SILICA_HOST_DIR", str(tmp / "host"))
+    monkeypatch.setenv("HOME", str(tmp / "home"))
+    (tmp / "host").mkdir()
+    return tmp / "host" / "handle.json", tmp / "home" / ".silica" / "handle-request.json"
+
+
+def test_a_hosted_account_asks_for_a_handle_and_the_host_answers(client, monkeypatch):
+    import json
+
+    tc, tmp = client
+    answer, request = _hosted_claims(monkeypatch, tmp)
+    v = tc.get("/public").json()
+    assert v["available"] is False and v["ask_handle"]["ask"] is True and "admin" in v["ask_handle"]["reserved"]
+    for bad in ("admin", "a--b", "-x", "Ab_c", "x" * 31):
+        assert tc.post("/public/handle", json={"handle": bad}).status_code == 400, bad
+    assert not request.exists()
+    v = tc.post("/public/handle", json={"handle": "@Sara"}).json()
+    assert json.loads(request.read_text()) == {"handle": "sara"} and v["ask_handle"]["pending"] == "sara"
+    # the host's pass: taken, the request answered and removed
+    request.unlink()
+    answer.write_text(json.dumps({"asked": "sara", "refused": "taken"}))
+    assert tc.get("/public").json()["ask_handle"]["refused"] == {"handle": "sara", "why": "taken"}
+    # granted, with no restart: the file is read before the unit's env
+    answer.write_text(json.dumps({"handle": "sara-k"}))
+    v = tc.get("/public").json()
+    assert v["available"] is True and v["handle"] == "sara-k" and v["ask_handle"] == {"ask": False}
+    assert v["url"] == "https://pages.test/@sara-k"
+    assert tc.post("/public/handle", json={"handle": "other"}).status_code == 400
+
+
+def test_a_host_that_takes_no_claims_keeps_giving_handles_itself(client, monkeypatch):
+    tc, tmp = client
+    _hosted_claims(monkeypatch, tmp)
+    monkeypatch.delenv("SILICA_HOST_DIR")
+    assert tc.get("/public").json()["ask_handle"] == {"ask": False}
+    assert tc.post("/public/handle", json={"handle": "sara"}).status_code == 400
+    assert not (tmp / "home" / ".silica" / "handle-request.json").exists()
+
+
+def test_a_laptop_takes_its_handle_into_the_vault_unless_it_already_published(client, monkeypatch):
+    from silica.kernel import publish
+
+    tc, tmp = client
+    monkeypatch.delenv("SILICA_PUBLIC_HANDLE")
+    ask = tc.get("/public").json()["ask_handle"]
+    assert ask["ask"] is True and ask["suggest"] == publish.slugify((tmp / "vault").resolve().name)
+    v = tc.post("/public/handle", json={"handle": "marta-v"}).json()
+    assert v["handle"] == "marta-v" and v["ask_handle"] == {"ask": False}
+    assert publish._block((tmp / "vault"))["handle"] == "marta-v"
+    # a laptop that already has a page under its folder's name is not asked
+    from silica.kernel.vault_manifest import unset_block_key
+
+    unset_block_key((tmp / "vault"), publish.PUBLIC_KEY, "handle")
+    (tmp / "public" / publish.handle((tmp / "vault"))).mkdir(parents=True)
+    assert tc.get("/public").json()["ask_handle"] == {"ask": False}
+
+
 def test_a_free_account_loses_private_and_its_private_vault_turns_off(client, monkeypatch):
     tc, _ = client
     monkeypatch.setenv("SILICA_HOSTED", "1")

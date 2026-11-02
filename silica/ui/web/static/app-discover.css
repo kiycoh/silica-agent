@@ -522,7 +522,64 @@ a.dv-btn { text-decoration: none; }
 .dv-source.dv-more { border-style: dashed; border-color: var(--line-2); color: var(--ash); font-size: 12.5px; justify-content: center; }
 
 .dv-sec-foot { display: flex; align-items: center; gap: 10px; font-size: var(--fs-meta); color: var(--ash-dim); }
-.dv-sec-foot .dv-count { padding: 3px 8px; border: 1px solid var(--line); border-radius: 10px; }
+
+/* "Checked against N articles": a meta line that opens the story's sources */
+.dv-checked {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.dv-checked svg { flex: none; }
+.dv-checked:hover, .dv-checked[aria-expanded="true"] { color: var(--frost); border-color: var(--line-2); }
+.dv-sec-foot .dv-checked { border-color: var(--line); color: var(--ash-dim); }
+.dv-sec-foot .dv-checked:hover, .dv-sec-foot .dv-checked[aria-expanded="true"] { color: var(--frost); border-color: var(--line-2); }
+
+.dv-pop {
+  position: fixed;
+  z-index: 60;
+  width: min(360px, calc(100vw - 16px));
+  max-height: min(70vh, 560px);
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bubble);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  box-shadow: var(--lift);
+  font-family: var(--sans);
+}
+.dv-pop-h { font-size: var(--fs-meta); color: var(--ash); }
+.dv-pop ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.dv-pop a {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: start;
+  padding: 8px;
+  border-radius: 6px;
+  color: inherit;
+  text-decoration: none;
+  transition: background var(--dur) var(--ease);
+}
+.dv-pop a:hover, .dv-pop a:focus-visible { background: var(--sel); }
+.dv-ico { grid-row: span 2; width: 20px; height: 20px; border-radius: var(--r-xs); object-fit: contain; }
+.dv-ico-mono { display: grid; place-items: center; background: var(--line-2); color: var(--frost); font-size: 10.5px; font-weight: 700; }
+.dv-pop-t { font-size: 13px; line-height: 1.35; color: var(--frost); overflow-wrap: anywhere; }
+.dv-pop-t svg { margin-left: 4px; vertical-align: -1px; color: var(--ash-dim); }
+.dv-pop-d { font-size: var(--fs-meta); color: var(--ash-dim); }
+.dv-pop .dv-uncited .dv-pop-t { color: var(--ash); }
+.dv-pop .dv-uncited .dv-ico { opacity: .6; }
+.dv-pop-f { padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ash-dim); }
 
 .dv-skeleton { display: flex; flex-direction: column; gap: 10px; }
 
