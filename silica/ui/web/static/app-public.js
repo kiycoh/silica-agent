@@ -172,7 +172,7 @@ async function loadPublicView() {
 // every link between two of them a line, ink on the well and nothing in between. When the view
 // opens it builds as the landing's Fig. 1 does: notes from the middle of the layout outward,
 // then each link drawn out from its first note, all at full ink, in 1.7 s.
-let pubCover = null, pubCoverK = 1, pubCoverRun = 0, pubCoverHover = -1, pubCoverRank = null, pubCoverAdj = null;
+let pubCover = null, pubCoverK = 1, pubCoverRun = 0, pubCoverHover = -1, pubCoverRank = null;
 let pubCoverEl = null;
 
 function pubCoverFigure() {
@@ -202,11 +202,10 @@ async function loadPubCover(build) {
   }
   pubCover = c && c.n.length ? c : null;
   pubCoverRank = null;
-  pubCoverAdj = null;
   if (pubCoverEl) pubCoverEl.hidden = !(pubCover || (pubState && pubState.out.length));
   if (!pubCover) return;
   const cap = pubCoverEl.querySelector("figcaption");
-  cap.textContent = `${pubCount(pubCover.n.length)} · ${pubCover.e.length} ${pubCover.e.length === 1 ? "link" : "links"}`;
+  cap.textContent = `${pubCount(pubCover.n.length)} · ${pubCover.e.length.toLocaleString("en")} ${pubCover.e.length === 1 ? "link" : "links"}`;
   pubCoverEl.querySelector("canvas").setAttribute("aria-label", `The page as a graph: ${cap.textContent}`);
   const run = ++pubCoverRun;
   if (!build || matchMedia("(prefers-reduced-motion: reduce)").matches) { pubCoverK = 1; drawPubCover(); return; }
@@ -236,13 +235,11 @@ function drawPubCover() {
     const d = N.map((n) => Math.hypot(n[0] - cx, n[1] - cy));
     pubCoverRank = new Float32Array(N.length);
     [...d.keys()].sort((a, b) => d[a] - d[b]).forEach((i, k) => { pubCoverRank[i] = k / N.length; });
-    pubCoverAdj = N.map(() => []);
-    for (const [a, b] of E) { pubCoverAdj[a].push(b); pubCoverAdj[b].push(a); }
   }
   if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
   const X = (i) => Math.round(pad + N[i][0] * (w - 2 * pad)), Y = (i) => Math.round(pad + N[i][1] * (h - 2 * pad));
   const x = cv.getContext("2d"), img = x.createImageData(w, h), px = new Uint32Array(img.data.buffer);
-  const ground = pubU32(pubRgb(pubCss("--void"))), ink = pubU32(pubRgb(pubCss("--frost"))), sig = pubU32(pubRgb(pubCss("--accent")));
+  const ground = pubU32(pubRgb(pubCss("--void"))), ink = pubU32(pubRgb(pubCss("--frost")));
   px.fill(ground);
   const put = (a, b, c) => { if (a >= 0 && b >= 0 && a < w && b < h) px[b * w + a] = c; };
   const seg = (x0, y0, x1, y1, c) => {
@@ -258,15 +255,19 @@ function drawPubCover() {
     if (f > 0) seg(X(a), Y(a), Math.round(X(a) + (X(b) - X(a)) * f), Math.round(Y(a) + (Y(b) - Y(a)) * f), ink);
   }
   // a clear ring of the well first, so a note reads as a mark and not as a crossing
+  // a mark's width comes with the cover (public_site.mark_px), so a sparse page prints
+  // bigger marks here and on the published page alike
+  const rad = (i) => ((N[i][4] || 3) - 1) / 2;
   for (let i = 0; i < N.length; i++) {
     if (K < at(i)) continue;
-    const rr = N[i][2] >= 12 ? 2 : 1;
-    disc(X(i), Y(i), rr + 1, ground); disc(X(i), Y(i), rr, ink);
+    disc(X(i), Y(i), rad(i) + 1, ground); disc(X(i), Y(i), rad(i), ink);
   }
   if (pubCoverHover >= 0 && K >= 1) {
-    const i = pubCoverHover;
-    for (const j of pubCoverAdj[i]) seg(X(i), Y(i), X(j), Y(j), sig);
-    disc(X(i), Y(i), 4, ground); disc(X(i), Y(i), 3, sig);
+    // the pointed note rings in ink: the print keeps its two inks (DESIGN.md, the Two Inks
+    // Rule), where it once lit the note and its links in teal
+    const i = pubCoverHover, r0 = rad(i);
+    disc(X(i), Y(i), r0 + 4, ground); disc(X(i), Y(i), r0 + 3, ink);
+    disc(X(i), Y(i), r0 + 1, ground); disc(X(i), Y(i), r0, ink);
   }
   x.putImageData(img, 0, 0);
 }
@@ -313,7 +314,7 @@ function ppBox(title, count, items, { wide = false, none = "" } = {}) {
   return box;
 }
 
-const pubCount = (n) => `${n} ${n === 1 ? "note" : "notes"}`;
+const pubCount = (n) => `${n.toLocaleString("en")} ${n === 1 ? "note" : "notes"}`;
 
 function renderPublic() {
   const body = $("#public-body");
@@ -340,7 +341,10 @@ function renderPublic() {
     link.textContent = st.url.replace(/^https?:\/\//, "") + " ↗";
   }
 
-  const when = st.published_at ? new Date(st.published_at).toLocaleString() : "";
+  // the stamp Examine prints (2026-10-31 01:08), in the reader's own time: toLocaleString gave a
+  // US date with seconds and AM/PM, unlike every other date in the app
+  const d = st.published_at ? new Date(st.published_at) : null, p2 = (x) => String(x).padStart(2, "0");
+  const when = d ? `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}` : "";
   const where = st.dir ? `, in ${st.dir}` : "";
   const status = !st.published_at
     ? "Not published yet. A note goes out when its globe, or its folder's, is on; Publish puts the page online."
@@ -376,7 +380,6 @@ function renderPublic() {
     ["Similar-note lines, proposed links, your Zotero library", ""],
   ]));
   if (st.new.length) grid.append(ppBox("New since the last publish", pubCount(st.new.length), st.new.map((t) => [t, ""])));
-  frag.append(grid);
 
   const row = mkEl("div", "pp-actions");
   const go = mkEl("button", "pp-go", st.page ? `Publish ${pubCount(n)}` : `Turn on and publish ${pubCount(n)}`);
@@ -398,6 +401,9 @@ function renderPublic() {
     const r = pubResult;
     frag.append(mkEl("p", "pp-dim", `Last publish: ${pubCount(r.notes)}, ${r.links} ${r.links === 1 ? "link" : "links"}, ${r.images} ${r.images === 1 ? "image" : "images"}.`));
   }
+  // the boxes after the action: at the 900 px floor the cover and five boxes had pushed Publish
+  // under the fold (measured 2026-11-01), and the status line above it is what it answers
+  frag.append(grid);
   body.replaceChildren(frag);
   if (pubCover && pubCover.n.length !== n) loadPubCover(false);
   else drawPubCover();
