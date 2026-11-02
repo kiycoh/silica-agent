@@ -167,6 +167,9 @@ html { scrollbar-color: var(--line-2) transparent; }
 .kp-addr svg { display: inline-block; width: 11px; height: 11px; margin-left: .25rem; vertical-align: -1px; fill: none; stroke: var(--accent); stroke-width: 1.64; stroke-linecap: round; stroke-linejoin: round; }
 .kp-addr:hover b { color: var(--accent); }
 .kp-meta { font: 500 12px/1.3 var(--mono); color: var(--ash-dim); font-variant-numeric: tabular-nums; }
+/* the second door to Pages (ADR-0151 point 15), beside the page the figure is */
+.kp-cat { font-size: 13px; color: var(--frost); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.kp-cat:hover { color: var(--accent); }
 
 /* Fig. 3: the app's chat in the app's own grammar, a view and the note beside it on the canvas */
 .demo { grid-column: 1 / -1; }
@@ -335,6 +338,7 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
     <a href="#how-it-writes">How it writes</a>
     <a class="nav-more" href="#measured">Measured</a>
     <a class="nav-more" href="#runs">Where it runs</a>
+    <a href="https://pages.silica-agent.dev/">Pages</a>
     <a href="https://github.com/kiycoh/silica-agent" rel="noopener">GitHub</a>
     <button class="theme" type="button" id="theme" aria-pressed="false" aria-label="Dark mode"><svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/></svg><svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
     <a class="btn btn--small" href="#install">Install</a>
@@ -364,6 +368,7 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
       <div class="kp-foot">
         <a class="kp-addr" href="https://pages.silica-agent.dev/@kiycoh/" target="_blank" rel="noopener">pages.silica-agent.dev/<b>@kiycoh</b><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3.5 8.5l5-5M4.5 3.5h4v4"/></svg></a>
         <p class="kp-meta" id="kp-meta"></p>
+        <a class="kp-cat" href="https://pages.silica-agent.dev/">Browse every public page</a>
       </div>
       <figcaption class="plate-cap" id="fig1-cap"><b>A real page, published with Silica by its author.</b> Each point is one of its notes: point at one to read its title, click it to open the note.</figcaption>
     </figure>
@@ -547,7 +552,7 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
           <p>Note panel, ranked search, autolinking and the community graph need no model and no network. The chat panel talks to Silica on your computer, and every write lands in a changes list with a diff per file.</p>
           <p class="fine">Install from the <a href="https://github.com/kiycoh/obsidian-silica/releases/latest" rel="noopener">latest release</a>, then run <code>silica connect</code> in the vault.</p>
         </article>
-        <article class="run">
+        <article class="run" id="hosted">
           <h3>In your browser <span class="mono">pilot, full</span></h3>
           <p>Nothing to install: you work in the browser, on the pilot's server. All seats are taken.</p>
           <p class="fine">To ask for one, write to <span class="addr">kiycoh@proton.me</span> with what you would use it for. Already invited? <a href="https://app.silica-agent.dev" rel="noopener">Open Silica</a>.</p>
@@ -907,6 +912,8 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
     const D = window.KIYCOH;
     const cv = $("#cv-kp"), box = $("#kp-field"), hit = $("#kp-hit"), tip = $("#kp-tip"), labs = $("#kp-labels");
     const PAGE = "https://pages.silica-agent.dev/@kiycoh/";
+    // the figure is the vault Cultura of that Page, and its notes live under it (ADR-0151 point 4)
+    const VAULT = PAGE + "cultura/";
     $("#kp-meta").textContent = `${D.notes.toLocaleString("en")} notes \u00b7 ${D.pairs.toLocaleString("en")} links \u00b7 ${D.areas.length} areas`;
     const adj = D.n.map(() => []);
     for (const [a, b] of D.e) { adj[a].push(b); adj[b].push(a); }
@@ -978,7 +985,7 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
       const n = D.n[best];
       tip.textContent = n[4]; tip.hidden = false;
       tip.style.left = `${X(n)}px`; tip.style.top = `${Y(n)}px`; tip.classList.toggle("left", X(n) > w * 0.62);
-      hit.classList.add("on"); hit.href = `${PAGE}${n[5]}.html`; hit.setAttribute("aria-label", `Open ${n[4]}`);
+      hit.classList.add("on"); hit.href = `${VAULT}${n[5]}`; hit.setAttribute("aria-label", `Open ${n[4]}`);
     }
     hit.addEventListener("pointermove", point);
     hit.addEventListener("pointerleave", () => { hover = -1; tip.hidden = true; hit.classList.remove("on"); hit.href = PAGE; draw(); });

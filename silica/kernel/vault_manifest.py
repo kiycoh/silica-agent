@@ -431,6 +431,34 @@ def set_block_key(vault: str | Path, block: str, key: str, value) -> Path:
     return _write_lines(vault, mutate)
 
 
+def unset_block_key(vault: str | Path, block: str, key: str) -> Path | None:
+    """Remove one key of a top-level block and the lines indented under it,
+    so a list written by hand over several lines goes with its key. None
+    when there was nothing to remove, and the file is not rewritten."""
+    path = Path(vault) / MANIFEST_REL
+    if not path.is_file():
+        return None
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    span = _block_span(lines, block)
+    key_re = re.compile(rf"(\s+){re.escape(key)}\s*:")
+    if span is None or not any(key_re.match(lines[i]) for i in range(span[0] + 1, span[1])):
+        return None
+
+    def mutate(lines: list[str]) -> list[str]:
+        start, end = _block_span(lines, block)
+        for i in range(start + 1, end):
+            m = key_re.match(lines[i])
+            if m:
+                j, depth = i + 1, len(m.group(1).expandtabs())
+                while j < end and (not lines[j].strip()
+                                   or len(lines[j]) - len(lines[j].lstrip()) > depth):
+                    j += 1
+                return [*lines[:i], *lines[j:]]
+        return lines
+
+    return _write_lines(vault, mutate)
+
+
 def unlink_zotero(vault: str | Path) -> Path:
     """Remove the `zotero:` block; every other line stays where it was."""
     def mutate(lines: list[str]) -> list[str]:

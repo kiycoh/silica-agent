@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from silica.config import VIEWS, served_views, withheld
 from tests.webassets import WEB as STATIC_SRC
 
-# Public page (ADR-0143) is a view added after ADR-0140, so paid by default
+# Page (ADR-0143, ADR-0151) is a view added after ADR-0140, so paid by default
 PAID = {"discover", "learn", "calendar", "public"}
 
 
@@ -135,7 +135,9 @@ SHARED_ROUTES = {
     "/skills/proposed/{name}/dismiss", "/skills/proposed/{name}/install", "/skills/{name}", "/static",
     "/stop", "/stt", "/supported_types", "/trash", "/trash/erase", "/trash/restore", "/tree/delete",
     "/tree/move", "/tree/undo", "/turn/redo", "/vault/export", "/vault/export/added",
-    "/vault/export/summary", "/vault/fetch", "/vault/import", "/vault/save", "/vault/save/preview",
+    "/vault/export/summary", "/vault/fetch", "/vault/import", "/vault/invitations",
+    "/vault/invitations/decline", "/vault/invitations/preview", "/vault/invitations/save",
+    "/vault/save", "/vault/save/preview",
     "/vault_brief",
     "/vault_info", "/vault_version", "/workspaces", "/workspaces/line", "/workspaces/membership",
     "/zotero/collection", "/zotero/covers", "/zotero/file", "/zotero/grant", "/zotero/groups",

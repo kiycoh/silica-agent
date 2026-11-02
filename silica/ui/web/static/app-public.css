@@ -1,8 +1,9 @@
-/* --- Public page (ADR-0143) ---------------------------------------------------
-   The view in Learn's frame (a bar on --slate, a body that scrolls), its boxes
-   in the hairline grammar of the settings rows, and the globe: the pin's
-   twin on every row, lit in the signal when a note is on the page, in the dim
-   ink when the whole page is off, struck when left out of a public folder. */
+/* --- Page (ADR-0143, ADR-0151) ---------------------------------------------------
+   The view in Learn's frame (a bar on --slate, a body that scrolls): the vaults as tabs, the open
+   vault's head edited in place, its boxes in the hairline grammar of the settings rows, and the
+   globe: the pin's twin on every row, lit in the signal when a note goes out with a Public vault,
+   in the ink with a Private one, dim when its vault is Off, struck when left out of it. A
+   folder that is a vault carries the vault's mark: the globe, or a lock when Private. */
 
 #public-bar {
   display: flex;
@@ -25,43 +26,6 @@
 
 #public-url:hover {
   text-decoration: underline;
-}
-
-#public-switch {
-  display: flex;
-  gap: 2px;
-  background: var(--slate-2);
-  border-radius: var(--r-sm);
-  padding: 2px;
-}
-
-#public-switch button {
-  border: 0;
-  background: transparent;
-  color: var(--ash);
-  padding: 4px 14px;
-  border-radius: var(--r-xs);
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--fs-ctl);
-}
-
-#public-switch button.active {
-  background: var(--sel);
-  color: var(--frost);
-  font-weight: 500;
-}
-
-#public-switch button[data-page="on"].active {
-  color: var(--accent);
-}
-
-#public-switch button:focus-visible,
-.pp-go:focus-visible,
-.tree-pub:focus-visible,
-#note-pub:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: -1px;
 }
 
 #public-body {
@@ -234,8 +198,15 @@
 .tree-row:hover .tree-pub,
 #tree summary:hover .tree-pub,
 .tree-pub.on,
+.tree-pub.priv,
+.tree-pub.vault,
 .tree-pub.struck {
   opacity: 1;
+}
+
+.tree-pub.priv,
+#note-pub.priv {
+  color: var(--frost);
 }
 
 .tree-pub:hover {
@@ -422,10 +393,9 @@ body.drawer-recall #public-bar {
 
 /* --- the view stands centred, its cover above the boxes (ADR-0146 point 4) -------
    Every block keeps the page measure and the column sits in the middle of the view, instead of
-   hanging from its left edge. The cover is printed in two inks on the well. Its height is capped
-   rather than held at the draft's 46:21: at the 58 rem measure that ratio is 397 px whatever the
-   page holds, and at the 900 px floor it put Publish under the fold (ADR-0146 amendment
-   2026-11-01). The family of cover ratios is still open. */
+   hanging from its left edge. The cover is printed in two inks on the well, at 46:21, the ratio
+   ADR-0151's Page draft fixed for every vault cover (answer 20a, 2026-11-01); it supersedes the
+   height cap of the ADR-0146 amendment of the same day, made for the single page's Publish row. */
 #public-body > * {
   width: 100%;
   max-width: var(--measure);
@@ -438,7 +408,7 @@ body.drawer-recall #public-bar {
 
 .pp-cover-box {
   position: relative;
-  height: clamp(176px, 26vh, 248px);
+  aspect-ratio: 46 / 21;
   background: var(--void);
   border-radius: var(--r);
   overflow: hidden;
@@ -477,3 +447,213 @@ body.drawer-recall #public-bar {
   color: var(--ash-dim);
   font-variant-numeric: tabular-nums;
 }
+
+/* --- the vaults of the Page, and the open one's head (ADR-0151 point 13) ----------- */
+.pg-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.pg-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  cursor: pointer;
+}
+
+.pg-tab:hover { background: var(--sel-hover); color: var(--frost); }
+.pg-tab[aria-selected="true"] { background: var(--sel); color: var(--frost); font-weight: 500; }
+.pg-tab.add { color: var(--ash); }
+.pg-tab.add:disabled { color: var(--ash-dim); cursor: not-allowed; background: transparent; }
+.pg-tab-name { max-width: 16rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-tab:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+.pg-mark { display: inline-grid; place-items: center; }
+.pg-mark svg { display: block; }
+.pg-public { color: var(--accent); }
+.pg-off { color: var(--ash-dim); }
+.pg-private { color: var(--frost); }
+
+.pg-panel {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-ctl);
+}
+
+.pg-pt { margin: 0; color: var(--frost); font-weight: 500; }
+.pg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pg-grow { flex: 1 1 14rem; min-width: 0; }
+
+.pg-sel {
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-2);
+  background: var(--slate-2);
+  color: var(--frost);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  min-width: 0;
+  outline: none;
+}
+
+.pg-sel:focus { border-color: var(--accent); }
+
+.pg-head { display: grid; gap: 2px; padding-top: 0.35rem; }
+.pg-tl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.pg-tl .pg-ed-t { flex: 1 1 16rem; width: auto; min-width: 0; }
+.pg-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* a title and a line that read as text until pointed at, then as the field they are */
+.pg-ed {
+  width: calc(100% + 14px);
+  margin-left: -7px;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  outline: none;
+  text-overflow: ellipsis;
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.pg-ed:hover { border-color: var(--line-2); cursor: text; }
+.pg-ed:focus { border-color: var(--accent); background: var(--slate-2); }
+.pg-ed::placeholder { color: var(--ash-dim); }
+.pg-ed-t { font: 700 26px/1.25 var(--sans); letter-spacing: -0.02em; color: var(--frost); }
+.pg-ed-l { font: 400 15px/1.5 var(--sans); color: var(--text); }
+
+.pg-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1rem;
+  margin: 0.3rem 0 0;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.pg-meta .pg-areas:empty { display: none; }
+.pg-path { font-family: var(--mono); font-size: var(--fs-meta); color: var(--frost); letter-spacing: -0.02em; }
+.pg-lic { display: inline-flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+
+/* the license is a quiet word in the line, not a field of its own */
+.pg-lic select {
+  field-sizing: content;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--ash);
+  font: inherit;
+  padding: 1px 2px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--line-2);
+  text-underline-offset: 3px;
+}
+
+.pg-lic select:hover,
+.pg-lic select:focus { color: var(--accent); text-decoration-color: var(--accent); outline: none; }
+.pg-lic select:focus-visible { outline: 1px solid var(--accent); }
+
+.pg-lst { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-ctl); color: var(--ash); margin-right: 6px; }
+
+/* Off, Public, Private and Listed: the calendar's segment */
+.pg-seg {
+  display: inline-flex;
+  gap: 2px;
+  background: var(--slate-2);
+  border-radius: var(--r-sm);
+  padding: 2px;
+}
+
+.pg-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--ash);
+  padding: 4px 12px;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--fs-ctl);
+}
+
+.pg-seg button:hover { color: var(--frost); }
+.pg-seg button[aria-pressed="true"] { background: var(--sel); color: var(--frost); font-weight: 500; }
+.pg-seg button[data-v="public"][aria-pressed="true"],
+.pg-seg button[data-v="on"][aria-pressed="true"] { color: var(--accent); }
+.pg-lock { display: inline-grid; }
+
+.pg-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--fs-ctl);
+}
+
+.pg-chips li { border: 1px solid var(--line-2); border-radius: 999px; padding: 1px 10px; color: var(--text); }
+.pg-chips li.more { border: 0; padding: 1px 0; color: var(--ash-dim); }
+.pp-box .pp-dim { margin-top: 8px; }
+
+.pg-rows { list-style: none; margin: 8px 0 0; padding: 0; display: grid; }
+.pg-rows li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-ctl);
+  color: var(--text);
+}
+
+.pg-rows li:first-child { border-top: 0; }
+.pg-who { color: var(--frost); }
+.pp-status a { color: var(--frost); text-decoration-color: var(--accent); }
+.pp-go.small { height: 32px; padding: 0 12px; }
+
+/* the save sheet's areas, for a whole vault */
+.sv-areas {
+  list-style: none;
+  margin: 0.3rem 0 0.6rem;
+  padding: 0;
+  display: grid;
+  max-height: 16rem;
+  overflow-y: auto;
+  font-size: var(--fs-ctl);
+}
+
+.sv-areas label { display: flex; align-items: center; gap: 0.6rem; padding: 4px 2px; cursor: pointer; color: var(--text); }
+.sv-areas input { accent-color: var(--accent); margin: 0; }
+.sv-over { color: var(--warn); }
+
+/* the rows and chips inside a wide box keep their own grammar, not the box's pills */
+.pp-box.wide ul.pg-rows { display: grid; gap: 0; }
+.pp-box.wide .pg-rows li { border: 0; border-top: 1px solid var(--line); border-radius: 0; padding: 7px 0; justify-content: flex-start; }
+.pp-box.wide .pg-rows li:first-child { border-top: 0; }
+.pp-box .pg-rows .st-btn { margin-left: auto; }
+.pp-box .pg-rows .st-btn + .st-btn { margin-left: 0; }
+.pp-box.wide ul.pg-chips { gap: 6px; }

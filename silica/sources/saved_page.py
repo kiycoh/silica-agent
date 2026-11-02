@@ -1,24 +1,31 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Save to Silica (ADR-0143 point 8): a public page's markdown, copied into
-the reader's vault under `Saved/@handle/`, never read from another vault.
+"""Save to Silica (ADR-0143 point 8, ADR-0151 points 8 and 9): a published
+note, or the areas a reader picks of a published vault, copied into the
+reader's vault under `Saved/@handle/<Vault>/`, never read from another vault.
 
-The page publishes a `.md` beside its `.html` whose links already point at
-the author's pages and whose private links are already plain words, so the
-copy can only rewrite the links the reader can serve from their own vault:
-a note of the same author they saved before.
+A vault publishes a `.md` beside each note's `.html` and all of them in
+`notes.json`, whose links already point at the author's pages and whose
+private links are already plain words, so the copy can only rewrite the
+links the reader can serve from their own vault: a note of the same author
+they saved before, or one saved in the same write. A Private vault reaches
+the reader as the same files, put outside their vault by the host's relay.
 """
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
 SAVED_DIR = "Saved"
-_PAGE_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)$")
+# a note, /@handle/<vault>/<note>, and a vault, /@handle/<vault>/ (ADR-0151 point 4)
+_PAGE_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)/([a-z0-9-]+)$")
+_VAULT_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)/$")
+_FOLDER_UNSAFE = re.compile(r'[\\/:*?"<>|#^\[\]]+')
 _MD_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
 _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")
 
@@ -29,17 +36,40 @@ def allowed_hosts() -> set[str]:
     return {h.strip().lower() for h in raw.split(",") if h.strip()}
 
 
-def page_of(url: str) -> tuple[str, str, str]:
-    """(url, handle, slug) of a public page address, or ValueError. Only an
-    https page on a host the server lists: the confirm card must never be a
-    way to make the app fetch an arbitrary address."""
+def _on_host(url: str):
     parts = urlsplit((url or "").strip())
+    if parts.scheme != "https" or (parts.hostname or "").lower() not in allowed_hosts() \
+            or parts.query or parts.fragment or parts.port is not None:
+        return None, parts
+    return f"https://{(parts.hostname or '').lower()}{parts.path}", parts
+
+
+def page_of(url: str) -> tuple[str, str, str]:
+    """(url, handle, slug) of a published note's address, or ValueError. Only
+    an https page on a host the server lists: the confirm card must never be
+    a way to make the app fetch an arbitrary address."""
+    clean, parts = _on_host(url)
     m = _PAGE_PATH.match(parts.path or "")
-    if parts.scheme != "https" or (parts.hostname or "").lower() not in allowed_hosts() or not m \
-            or parts.query or parts.fragment:
-        raise ValueError("that is not the address of a note on a Silica public page")
-    clean = f"https://{(parts.hostname or '').lower()}{parts.path}"
+    if not clean or not m:
+        raise ValueError("that is not the address of a note on a Silica page")
+    return clean, m.group(1), m.group(3)
+
+
+def vault_of(url: str) -> tuple[str, str, str]:
+    """(url, handle, vault slug) of a published vault's address, or ValueError."""
+    clean, parts = _on_host(url)
+    m = _VAULT_PATH.match(parts.path or "")
+    if not clean or not m:
+        raise ValueError("that is not the address of a vault on a Silica page")
     return clean, m.group(1), m.group(2)
+
+
+def is_vault(url: str) -> bool:
+    return bool(_VAULT_PATH.match(urlsplit((url or "").strip()).path or ""))
+
+
+def _folder_name(title: str) -> str:
+    return _FOLDER_UNSAFE.sub(" ", title or "").strip().strip(".")[:80].strip() or "Saved vault"
 
 
 def _fetch_markdown(url: str) -> str:
@@ -66,7 +96,7 @@ def saved_copies(handle: str, vault: Path | None = None) -> dict[str, str]:
     for path, fm in frontmatters(vault).items():
         src = fm.get("source")
         if path.startswith(folder) and isinstance(src, str):
-            out[src.strip()] = path
+            out.setdefault(src.strip(), path)
     return out
 
 
@@ -115,7 +145,9 @@ def prepare(url: str, vault: Path | None = None) -> dict:
     tags = props.get("tags") if isinstance(props.get("tags"), list) else []
     note = {"title": title, **({"tags": tags} if tags else {}), "author": author,
             "source": source, "saved": datetime.date.today().isoformat(), "form": "clip"}
-    folder = in_write_dir(f"{SAVED_DIR}/@{who}")
+    # a note of a vault lands beside the other notes of that vault the reader saves (ADR-0151 point 8)
+    shelf = props.get("vault") if isinstance(props.get("vault"), str) and who == handle else ""
+    folder = in_write_dir(f"{SAVED_DIR}/@{who}" + (f"/{_folder_name(shelf)}" if shelf else ""))
     return {
         "url": url, "title": title, "author": author, "source": source, "folder": folder,
         "links": links, "images": len(_MD_IMAGE.findall(body)),
@@ -143,3 +175,264 @@ def _exists(rel: str) -> bool:
     from silica.config import CONFIG
 
     return (Path(CONFIG.vault_path or ".") / rel).exists()
+
+
+# --- a whole vault, or the areas a reader picks of it (ADR-0151 point 8) -------
+
+def _limits() -> tuple[int, int]:
+    """(notes, MB) a vault may hold, 0 for no limit: the Free limits are
+    still open (ADR-0151 Opens 1), so the host sets them or nothing does."""
+    def num(key: str) -> int:
+        raw = os.environ.get(key, "").strip()
+        return int(raw) if raw.isdigit() else 0
+    return num("SILICA_VAULT_MAX_NOTES"), num("SILICA_VAULT_MAX_MB")
+
+
+def room(adding_notes: int, adding_bytes: int, vault: Path | None = None) -> dict:
+    """What the vault holds, what the save adds, and what the limits allow.
+    `short` names the shortfall, "" when it fits."""
+    from silica.config import CONFIG
+
+    root = Path(vault or CONFIG.vault_path or ".")
+    notes = size = 0
+    for p in root.rglob("*"):
+        if p.is_file() and not any(part.startswith(".") for part in p.relative_to(root).parts):
+            size += p.stat().st_size
+            notes += p.suffix == ".md"
+    max_notes, max_mb = _limits()
+    short = []
+    if max_notes and notes + adding_notes > max_notes:
+        short.append(f"{notes + adding_notes - max_notes} notes over the {max_notes} this vault may hold")
+    if max_mb and size + adding_bytes > max_mb * 1024 * 1024:
+        over = (size + adding_bytes - max_mb * 1024 * 1024) / 1024 / 1024
+        short.append(f"{over:.1f} MB over the {max_mb} MB this vault may hold")
+    return {"notes": notes, "bytes": size, "max_notes": max_notes, "max_mb": max_mb,
+            "short": "; ".join(short)}
+
+
+def _fetch_json(url: str):
+    from silica.sources.web_fetch import _fetch
+
+    resp, final = _fetch(url, types=("application/json", "text/"), cap=64 * 1024 * 1024)
+    if (urlsplit(final).hostname or "").lower() not in allowed_hosts():
+        raise ValueError("that vault moved to a host Silica does not save from")
+    return resp.json()
+
+
+def _chosen(manifest: dict, areas) -> list[str]:
+    """The note slugs of the areas picked; every note when none are named.
+    -1 is the notes with no link, which the vault's page lists as an area."""
+    rows = [(r[2], r[5]) for r in manifest.get("n", []) if isinstance(r, list) and len(r) >= 6]
+    rows += [(-1, r[1]) for r in manifest.get("unlinked", []) if isinstance(r, list) and len(r) >= 2]
+    if areas is None:
+        return [slug for _a, slug in rows]
+    want = {int(a) for a in areas if str(a).lstrip("-").isdigit()}
+    return [slug for a, slug in rows if a in want]
+
+
+def _vault_files(url: str) -> tuple[dict, dict]:
+    clean, _h, _slug = vault_of(url)
+    return _fetch_json(clean + "vault.json"), _fetch_json(clean + "notes.json")
+
+
+def prepare_vault(url: str, areas=None, vault: Path | None = None, *, files=None, private: bool = False) -> dict:
+    """What the save sheet shows for a vault, and every note it would write.
+    `files` is (manifest, notes) already read, as an invitation's are."""
+    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.write import frontmatter as fm
+
+    if files is None:
+        url, handle, vslug = vault_of(url)
+        manifest, notes = _vault_files(url)
+    else:
+        manifest, notes = files
+        handle, vslug = manifest.get("handle", ""), manifest.get("slug", "")
+    if not isinstance(manifest, dict) or not isinstance(notes, dict):
+        raise ValueError("that vault could not be read")
+    title = manifest.get("title") if isinstance(manifest.get("title"), str) else vslug
+    chosen = [s for s in _chosen(manifest, areas) if isinstance(notes.get(s), str)]
+    folder = in_write_dir(f"{SAVED_DIR}/@{handle}/{_folder_name(title)}")
+    if _exists(folder):
+        folder = f"{folder} ({datetime.date.today().isoformat()})"
+    base = url if url.endswith("/") else ""
+    today = datetime.date.today().isoformat()
+    names: dict[str, str] = {}
+    titles: dict[str, str] = {}
+    taken: set[str] = set()
+    for slug in chosen:
+        props, _raw, _body = fm.split(notes[slug])
+        t = (props or {}).get("title")
+        titles[slug] = t.strip() if isinstance(t, str) and t.strip() else slug.replace("-", " ")
+        name = _FOLDER_UNSAFE.sub(" ", titles[slug]).strip() or slug
+        n, cand = 2, name
+        while cand.lower() in taken:
+            cand, n = f"{name} {n}", n + 1
+        taken.add(cand.lower())
+        names[slug] = f"{folder}/{cand}"
+    mine = saved_copies(handle, vault)
+    out = {}
+    for slug in chosen:
+        props, _raw, body = fm.split(notes[slug])
+        props = props or {}
+
+        def relink(m: re.Match) -> str:
+            words, target = m.group(1), m.group(2)
+            tail = target.rsplit("/", 1)[-1].removesuffix(".md")
+            if (not base or target.startswith(base)) and tail in names:
+                return f"[[{names[tail]}|{words}]]"
+            own = mine.get(target)
+            if own:
+                return f"[[{own.removesuffix('.md')}|{words}]]"
+            # a Private vault's address is never served: a link to a note not saved is its words
+            return words if private else m.group(0)
+
+        new_body = _MD_LINK.sub(relink, body)
+        tags = props.get("tags") if isinstance(props.get("tags"), list) else []
+        # a note the author saved from someone else credits that someone (ADR-0143 point 10)
+        author, src = _credit(props, handle, base + slug if base else "")
+        note = {"title": titles[slug], **({"tags": tags} if tags else {}), "author": author}
+        if src and not (private and author == f"@{handle}"):
+            note["source"] = src
+        note.update({"saved": today, "form": "clip", **({"shared": "private"} if private else {})})
+        out[names[slug] + ".md"] = fm.dump(note, new_body)
+    adding = sum(len(t.encode("utf-8")) for t in out.values())
+    return {"url": url, "title": title, "author": f"@{handle}", "folder": folder,
+            "notes": len(out), "of": len(_chosen(manifest, None)),
+            "areas": manifest.get("areas", []), "room": room(len(out), adding, vault),
+            "license": manifest.get("license", ""), "files": out}
+
+
+def save_vault(url: str, areas=None, vault: Path | None = None, *, files=None, private: bool = False,
+               assets: Path | None = None) -> dict:
+    """Write the chosen notes as one run of the undo journal, so `/revert`
+    takes the whole save back (ADR-0151 point 8). Refused past the room
+    left, naming the shortfall, before anything is written."""
+    import hashlib
+    import shutil
+
+    from silica.config import CONFIG
+    from silica.driver import DRIVER
+    from silica.kernel.write.ops import InverseOp, InverseOpKind
+    from silica.kernel.write.undo_journal import get_undo_journal
+
+    p = prepare_vault(url, areas, vault, files=files, private=private)
+    if not p["files"]:
+        raise ValueError("no note of that vault was chosen")
+    if p["room"]["short"]:
+        raise ValueError(f"this vault has no room for that save: {p['room']['short']}")
+    journal = get_undo_journal()
+    run_id = journal.start_run(source="vault:save", vault=str(vault or CONFIG.vault_path or ""))
+    for path, text in p["files"].items():
+        DRIVER.create(path, text)
+        post = DRIVER.read_note(path).content or ""
+        journal.record(run_id, InverseOp(kind=InverseOpKind.delete_created, path=path),
+                       hashlib.sha256(post.encode("utf-8")).hexdigest())
+    if assets is not None and assets.is_dir():
+        # a Private vault's images travel with it, beside the notes that cite them as assets/<name>
+        dest = Path(vault or CONFIG.vault_path or ".") / p["folder"] / "assets"
+        dest.mkdir(parents=True, exist_ok=True)
+        for f in assets.iterdir():
+            if f.is_file() and not f.is_symlink():
+                shutil.copyfile(f, dest / f.name)
+    return {"folder": p["folder"], "notes": len(p["files"]), "run": run_id,
+            "first": next(iter(p["files"]))}
+
+
+# --- Private vaults shared with this account (ADR-0151 point 9) ----------------
+# The host's relay puts each one in <dir>/<author>/<vault>/ (vault.json, notes.json, assets/),
+# owned by root and readable by this account alone, outside the vault and its quota. A saved or
+# declined one is marked in the account's own `done` folder with the hash the relay wrote, so the
+# relay stops offering it until the author publishes it again.
+_NAME = re.compile(r"^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$")
+
+
+def invitations_dir() -> Path:
+    raw = os.environ.get("SILICA_INVITATIONS_DIR", "").strip()
+    return Path(raw) if raw else Path.home() / ".silica" / "invitations"
+
+
+def _done_dir() -> Path:
+    return Path.home() / ".silica" / "invitations-done"
+
+
+def _stamp(d: Path) -> str:
+    try:
+        return (d / ".hash").read_text(encoding="utf-8").strip()[:128]
+    except OSError:
+        return ""
+
+
+def _is_done(author: str, slug: str, stamp: str) -> bool:
+    try:
+        return (_done_dir() / f"{author}.{slug}").read_text(encoding="utf-8").strip() == stamp
+    except OSError:
+        return False
+
+
+def invitations() -> list[dict]:
+    """The Private vaults offered to this account and not yet saved or declined."""
+    root = invitations_dir()
+    out = []
+    if not root.is_dir():
+        return out
+    for a in sorted(root.iterdir()):
+        if not (a.is_dir() and _NAME.match(a.name)):
+            continue
+        for d in sorted(a.iterdir()):
+            if not (d.is_dir() and _NAME.match(d.name)) or _is_done(a.name, d.name, _stamp(d)):
+                continue
+            try:
+                m = json.loads((d / "vault.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            count = m.get("count") if isinstance(m.get("count"), dict) else {}
+            out.append({"author": a.name, "vault": d.name,
+                        "title": str(m.get("title") or d.name)[:80], "line": str(m.get("line") or "")[:160],
+                        "notes": int(count.get("notes") or 0), "areas": m.get("areas") or [],
+                        "unlinked": len(m.get("unlinked") or []),
+                        "published": str(m.get("published") or "")[:10], "license": str(m.get("license") or "")})
+    return out
+
+
+def _invitation(author: str, slug: str) -> Path:
+    if not (_NAME.match(author or "") and _NAME.match(slug or "")):
+        raise ValueError("no such invitation")
+    d = invitations_dir() / author / slug
+    if not (d / "vault.json").is_file():
+        raise ValueError("that invitation is gone: its author may have withdrawn it")
+    return d
+
+
+def _files(d: Path) -> tuple[dict, dict]:
+    m = json.loads((d / "vault.json").read_text(encoding="utf-8"))
+    n = json.loads((d / "notes.json").read_text(encoding="utf-8"))
+    # the author is the folder the host wrote, never the manifest's claim
+    m["handle"], m["slug"] = d.parent.name, d.name
+    return m, n
+
+
+def prepare_invitation(author: str, slug: str, areas=None, vault: Path | None = None) -> dict:
+    d = _invitation(author, slug)
+    m, n = _files(d)
+    p = prepare_vault(str(m.get("url") or ""), areas, vault, files=(m, n), private=True)
+    p.pop("files")
+    return p
+
+
+def save_invitation(author: str, slug: str, areas=None, vault: Path | None = None) -> dict:
+    d = _invitation(author, slug)
+    m, n = _files(d)
+    out = save_vault(str(m.get("url") or ""), areas, vault, files=(m, n), private=True, assets=d / "assets")
+    _mark_done(author, slug, _stamp(d))
+    return out
+
+
+def decline_invitation(author: str, slug: str) -> None:
+    d = _invitation(author, slug)
+    _mark_done(author, slug, _stamp(d))
+
+
+def _mark_done(author: str, slug: str, stamp: str) -> None:
+    done = _done_dir()
+    done.mkdir(parents=True, exist_ok=True)
+    (done / f"{author}.{slug}").write_text(stamp or "-", encoding="utf-8")

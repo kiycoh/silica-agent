@@ -1,4 +1,4 @@
-"""The public page's files (ADR-0143): what goes out, and above all what does not."""
+"""A Page's files (ADR-0143, ADR-0151): what goes out, and above all what does not."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,9 +35,11 @@ def marta(tmp_vault, tmp_path, monkeypatch):
     v.note("Inbox/lecture.md", "converted lecture\n")
     (Path(tmp_path) / "vault" / "hypnogram.png").write_bytes(PNG)
     (Path(tmp_path) / "vault" / "private-scan.png").write_bytes(PNG + b"x")
-    from silica.kernel.publish import set_folder
+    from silica.kernel.publish import add_vault, set_visibility, update_vault
 
-    set_folder("Memory", True)
+    add_vault("Memory")
+    update_vault("memory", {"title": "Memoria", "line": "How remembering works."})
+    set_visibility("memory", "public")
     yield Path(tmp_path)
     reset_manifest_cache()
 
@@ -47,16 +49,22 @@ def _all_text(live: Path) -> str:
                      if p.is_file() and p.suffix in (".html", ".md", ".css", ".json"))
 
 
-def test_the_page_carries_the_public_notes_and_nothing_private(marta):
+def _live(marta: Path) -> Path:
+    return marta / "public" / "marta" / "live"
+
+
+def test_the_vault_carries_its_notes_and_nothing_private(marta):
     from silica.ui.web.public_site import build
 
-    out = build()
-    live = marta / "public" / "marta" / "live"
-    names = sorted(p.name for p in live.iterdir())
-    assert {"index.html", "spacing-effect.html", "spacing-effect.md", "forgetting-curve.html",
-            "borrowed.html", "assets"} <= set(names)
+    out = build("memory")
+    live = _live(marta)
+    vault = live / "memory"
+    names = {p.name for p in vault.iterdir()}
+    assert {"index.html", "vault.json", "notes.json", "spacing-effect.html", "spacing-effect.md",
+            "forgetting-curve.html", "borrowed.html", "assets"} <= names
     assert "working-memory.html" not in names and "diary.html" not in names
-    assert out["notes"] == 3
+    assert (live / "index.html").is_file() and (live / "vaults.json").is_file()
+    assert out["notes"] == 3 and not out["private"]
     text = _all_text(live)
     for leaked in ("therapy on Tuesdays", "Thesis Rombo", "verbatim book", "converted lecture",
                    "Baddeley draft", "Courses", "Memory/", "Secret textbook", "ABCD1234",
@@ -64,30 +72,51 @@ def test_the_page_carries_the_public_notes_and_nothing_private(marta):
         assert leaked not in text, leaked
 
 
-def test_a_link_to_a_private_note_is_its_words_and_a_public_one_a_link(marta):
+def test_the_manifest_carries_the_cover_and_the_areas_of_the_published_notes(marta):
+    import json
+
     from silica.ui.web.public_site import build
 
-    build()
-    page = (marta / "public" / "marta" / "live" / "spacing-effect.html").read_text(encoding="utf-8")
+    build("memory")
+    m = json.loads((_live(marta) / "memory" / "vault.json").read_text(encoding="utf-8"))
+    assert (m["handle"], m["slug"], m["title"], m["line"], m["license"]) == (
+        "marta", "memory", "Memoria", "How remembering works.", "not stated")
+    assert m["count"] == {"notes": 3, "links": 1, "drawn": 2, "areas": 1}
+    assert sorted(n[4] for n in m["n"]) == ["Forgetting curve", "Spacing effect"]
+    assert all(0 <= n[0] <= 1 and 0 <= n[1] <= 1 for n in m["n"])
+    assert m["areas"][0][1] == 2 and m["areas"][0][0] in ("Forgetting curve", "Spacing effect")
+    assert m["unlinked"] == [["Borrowed", "borrowed"]]
+    assert m["listed"] is False
+    notes = json.loads((_live(marta) / "memory" / "notes.json").read_text(encoding="utf-8"))
+    assert set(notes) == {"spacing-effect", "forgetting-curve", "borrowed"}
+    assert "vault: Memoria" in notes["spacing-effect"]
+
+
+def test_a_link_to_a_private_note_is_its_words_and_a_vault_note_a_link(marta):
+    from silica.ui.web.public_site import build
+
+    build("memory")
+    page = (_live(marta) / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
     assert 'href="forgetting-curve.html">Forgetting curve</a>' in page
     assert "see Exam plan June." in page and "exam-plan-june" not in page
     assert "A draft: Working memory." in page
     # the title is the page's heading once, not twice
-    assert page.count(">Spacing effect</h1>") == 1 and "<h1>Spacing effect</h1>" in page
-    md = (marta / "public" / "marta" / "live" / "spacing-effect.md").read_text(encoding="utf-8")
+    assert page.count(">Spacing effect</h1>") == 1
+    assert 'href="../_s/pages.css"' in page and 'src="../_s/pages.js"' in page
+    md = (_live(marta) / "memory" / "spacing-effect.md").read_text(encoding="utf-8")
     assert "[Forgetting curve](forgetting-curve.html)" in md
     assert "see Exam plan June." in md and "[[" not in md
     assert md.startswith("---\ntitle: Spacing effect\ntags:")
 
 
-def test_only_images_a_public_note_cites_are_copied(marta):
+def test_only_images_a_published_note_cites_are_copied(marta):
     from silica.ui.web.public_site import build
 
-    out = build()
-    assets = sorted(p.name for p in (marta / "public" / "marta" / "live" / "assets").iterdir())
+    out = build("memory")
+    assets = sorted(p.name for p in (_live(marta) / "memory" / "assets").iterdir())
     assert [a for a in assets if a.endswith(".png")] == ["1-hypnogram.png"]
     assert out["images"] == 1
-    page = (marta / "public" / "marta" / "live" / "spacing-effect.html").read_text(encoding="utf-8")
+    page = (_live(marta) / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
     assert 'src="assets/1-hypnogram.png"' in page
 
 
@@ -95,52 +124,103 @@ def test_a_republished_copy_credits_its_author_and_points_at_the_original(marta,
     from silica.ui.web.public_site import build
 
     monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://silica-agent.dev")
-    build()
-    live = marta / "public" / "marta" / "live"
-    page = (live / "borrowed.html").read_text(encoding="utf-8")
+    build("memory")
+    page = (_live(marta) / "memory" / "borrowed.html").read_text(encoding="utf-8")
     assert "Saved from <b>@luca</b>" in page
     assert '<link rel="canonical" href="https://silica-agent.dev/@luca/borrowed">' in page
-    assert "save=https%3A%2F%2Fsilica-agent.dev%2F%40luca%2Fborrowed" in page
+    assert 'name="save" value="https://silica-agent.dev/@luca/borrowed"' in page
+
+
+def test_with_an_address_links_are_absolute_and_every_page_can_be_saved_and_reported(marta, monkeypatch):
+    from silica.ui.web.public_site import build
+
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
+    build("memory")
+    vault = _live(marta) / "memory"
+    page = (vault / "spacing-effect.html").read_text(encoding="utf-8")
+    assert '<link rel="canonical" href="https://pages.test/@marta/memory/spacing-effect">' in page
+    assert 'href="/@marta/memory/forgetting-curve"' in page
+    assert 'href="/_s/pages.css"' in page and 'src="/_s/pages.js"' in page
+    assert 'action="https://app.silica-agent.dev/"' in page and 'formaction="http://localhost:8765/"' in page
+    assert 'name="save" value="https://pages.test/@marta/memory/spacing-effect"' in page
+    assert 'action="/_report"' in page
+    index = (vault / "index.html").read_text(encoding="utf-8")
+    assert 'name="save" value="https://pages.test/@marta/memory/"' in index
+    assert "Save 3 notes to Silica" in index and 'form="save"' in index and 'action="/_report"' in index
+    assert '<a href="https://pages.test/">Pages</a> / <a href="/@marta/">@marta</a> / Memoria' in index
+    md = (vault / "spacing-effect.md").read_text(encoding="utf-8")
+    assert "[Forgetting curve](https://pages.test/@marta/memory/forgetting-curve)" in md
+    assert not (_live(marta) / "_s").exists()  # the host serves the sheet
+
+
+def test_without_an_address_there_is_no_save_and_the_folder_opens_from_disk(marta):
+    from silica.ui.web.public_site import build
+
+    build("memory")
+    live = _live(marta)
+    page = (live / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
+    assert "Save to Silica" not in page and "canonical" not in page and "_report" not in page
+    assert (live / "_s" / "pages.css").is_file() and (live / "_s" / "pages.js").is_file()
     index = (live / "index.html").read_text(encoding="utf-8")
-    assert "Saved from others" in index and "from @luca" in index
+    assert 'href="memory/index.html"' in index and 'data-graph="memory/vault.json"' in index
 
 
-def test_with_an_address_links_are_absolute_and_each_page_can_be_saved(marta, monkeypatch):
-    from silica.ui.web.public_site import build
+def test_off_takes_the_vault_and_the_page_down_and_a_republish_replaces_the_paused_copy(marta):
+    from silica.kernel.publish import set_note, set_visibility
+    from silica.ui.web.public_site import build, write_page
 
-    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://silica-agent.dev/")
-    monkeypatch.setenv("SILICA_PUBLIC_REPORT", "reports@silica-agent.dev")
-    build()
-    page = (marta / "public" / "marta" / "live" / "spacing-effect.html").read_text(encoding="utf-8")
-    assert '<link rel="canonical" href="https://silica-agent.dev/@marta/spacing-effect">' in page
-    assert 'href="/@marta/forgetting-curve"' in page
-    assert "https://app.silica-agent.dev/?save=https%3A%2F%2Fsilica-agent.dev%2F%40marta%2Fspacing-effect" in page
-    assert "mailto:reports@silica-agent.dev" in page
-    md = (marta / "public" / "marta" / "live" / "spacing-effect.md").read_text(encoding="utf-8")
-    assert "[Forgetting curve](https://silica-agent.dev/@marta/forgetting-curve)" in md
-
-
-def test_without_an_address_there_is_no_save_button(marta):
-    from silica.ui.web.public_site import build
-
-    build()
-    page = (marta / "public" / "marta" / "live" / "spacing-effect.html").read_text(encoding="utf-8")
-    assert "Save to Silica" not in page and "canonical" not in page
-
-
-def test_a_new_publication_replaces_the_old_and_the_paused_one(marta):
-    from silica.kernel.publish import set_note, set_page
-    from silica.ui.web.public_site import build
-
-    build()
-    live = marta / "public" / "marta" / "live"
-    set_page(False)
+    build("memory")
+    live = _live(marta)
+    set_visibility("memory", "off")
+    write_page()
+    assert not (live / "memory").exists() and not (live / "index.html").exists()
     set_note("Memory/Forgetting curve.md", False)
-    set_page(True)
-    build()
-    assert not (live / "forgetting-curve.html").exists()
-    assert not (marta / "public" / "marta" / "paused").exists()
+    set_visibility("memory", "public")
+    build("memory")
+    assert not (live / "memory" / "forgetting-curve.html").exists()
+    assert not (marta / "public" / "marta" / "paused" / "memory").exists()
     assert not list((marta / "public" / "marta").glob(".build-*"))
+
+
+def test_a_private_vault_is_built_beside_the_served_folder_with_its_readers(marta, monkeypatch):
+    import json
+
+    from silica.kernel.publish import set_visibility, update_vault
+    from silica.ui.web.public_site import build
+
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test")
+    build("memory")
+    set_visibility("memory", "private")
+    update_vault("memory", {"readers": ["sara"]})
+    out = build("memory")
+    root = marta / "public" / "marta"
+    assert out["private"] and not (root / "live" / "memory").exists()
+    priv = root / "private" / "memory"
+    assert json.loads((priv / "readers.json").read_text(encoding="utf-8")) == ["sara"]
+    assert {p.name for p in priv.iterdir()} == {"vault.json", "notes.json", "readers.json", "assets"}
+    assert json.loads((priv / "vault.json").read_text(encoding="utf-8"))["listed"] is False
+    notes = json.loads((priv / "notes.json").read_text(encoding="utf-8"))
+    assert "![hypnogram.png](assets/1-hypnogram.png)" in notes["spacing-effect"]
+
+
+def test_two_vaults_share_the_page_and_each_lists_the_other(marta, tmp_path):
+    import json
+
+    from silica.kernel.publish import add_vault, set_visibility
+    from silica.ui.web.public_site import build
+
+    (Path(tmp_path) / "vault" / "Courses").mkdir(exist_ok=True)
+    add_vault("Courses")
+    set_visibility("courses", "public")
+    build("memory")
+    build("courses")
+    live = _live(marta)
+    listing = json.loads((live / "vaults.json").read_text(encoding="utf-8"))
+    assert sorted(v["slug"] for v in listing) == ["courses", "memory"]
+    index = (live / "index.html").read_text(encoding="utf-8")
+    assert "2 vaults" in index and "Memoria" in index and "Courses" in index
 
 
 def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta):
@@ -151,7 +231,7 @@ def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta):
 
     old = os.umask(0o077)  # the hosted unit's
     try:
-        build()
+        build("memory")
     finally:
         os.umask(old)
     root = marta / "public" / "marta"
@@ -160,46 +240,35 @@ def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta):
         assert mode & 0o004, (p, oct(mode))
 
 
-def test_join_and_the_footer_point_at_the_app_not_the_public_hosts_root(marta, monkeypatch):
+def test_the_catalog_lists_only_listed_vaults_under_the_handle_the_host_gave(marta, monkeypatch, tmp_path):
+    import json
+
+    from silica.ui.web import pages_catalog
     from silica.ui.web.public_site import build
 
     monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test")
-    monkeypatch.setenv("SILICA_PUBLIC_SAVE_URL", "https://app.test")
-    build()
-    page = (marta / "public" / "marta" / "live" / "index.html").read_text(encoding="utf-8")
-    assert 'href="https://app.test/">Join Silica' in page and 'href="https://app.test/">Published with Silica' in page
-    assert 'href="https://pages.test/"' not in page
-
-
-def test_the_page_carries_no_script_and_its_cover_links_each_mark_to_its_note(marta):
-    """The public host serves /@handle under default-src 'none' (silica-hosted Caddyfile): a
-    script would be dropped there, so the page ships none, and the cover (ADR-0146 amendment
-    2026-11-01) is SVG whose marks are links, out of the tab order, in the app's kit."""
-    from silica.ui.web import public_site
-
-    public_site.build()
-    live = marta / "public" / "marta" / "live"
-    pages = list(live.glob("*.html"))
-    assert pages and not any("<script" in p.read_text(encoding="utf-8") for p in pages)
-    index = (live / "index.html").read_text(encoding="utf-8")
-    assert '<svg class="graph"' in index and 'style="' not in index
-    for slug in ("spacing-effect", "forgetting-curve"):
-        assert f'<a href="{slug}.html" tabindex="-1">' in index
-    assert "working-memory" not in index
-    css = (live / "assets" / "site.css").read_text(encoding="utf-8")
-    assert "Archivo" in css and "Host Grotesk" not in css and "uppercase" not in css
-    assert "prefers-color-scheme:dark" in css
-    assert (live / "assets" / "archivo-latin.woff2").is_file()
-    assert not list((live / "assets").glob("host-grotesk*"))
-
-
-def test_a_sparse_page_prints_bigger_marks():
-    from silica.ui.web.public_site import mark_px
-
-    assert [mark_px(3, 0), mark_px(120, 0), mark_px(654, 0), mark_px(654, 12)] == [7, 5, 3, 5]
-
-
-def test_a_page_of_one_note_prints_it_in_the_middle():
-    from silica.ui.web.public_site import cover_layout
-
-    assert cover_layout(["Memory/One.md"], set()) == ([("Memory/One.md", 0.5, 0.5, 0)], [])
+    build("memory")
+    public = marta / "public"
+    # the host's layout: <public>/<account>/<handle>/live
+    host = tmp_path / "srv"
+    (host / "t01").mkdir(parents=True)
+    (public / "marta").rename(host / "t01" / "marta")
+    tsv = tmp_path / "handles.tsv"
+    tsv.write_text("marta\tt01\n", encoding="utf-8")
+    out = tmp_path / "pages"
+    assert pages_catalog.write(host, tsv, out, "https://app.test") == 0
+    m = host / "t01" / "marta" / "live" / "memory" / "vault.json"
+    m.write_text(m.read_text(encoding="utf-8").replace('"listed":false', '"listed":true'), encoding="utf-8")
+    # an account that wrote a manifest under a handle it does not hold is not listed
+    (host / "t02" / "kiycoh" / "live" / "x").mkdir(parents=True)
+    (host / "t02" / "kiycoh" / "live" / "x" / "vault.json").write_text(
+        json.dumps({"listed": True, "title": "Fake", "handle": "kiycoh"}), encoding="utf-8")
+    tsv.write_text("marta\tt01\nkiycoh\tt03\n", encoding="utf-8")
+    assert pages_catalog.write(host, tsv, out, "https://app.test") == 1
+    index = (out / "index.html").read_text(encoding="utf-8")
+    assert 'href="/@marta/memory/"' in index and "Memoria" in index and "Fake" not in index
+    assert (out / "_s" / "pages.js").is_file() and (out / "_s" / "archivo-latin.woff2").is_file()
+    # a hostile title is text, never markup
+    m.write_text(m.read_text(encoding="utf-8").replace('"Memoria"', '"<script>x</script>"'), encoding="utf-8")
+    pages_catalog.write(host, tsv, out, "https://app.test")
+    assert "<script>x" not in (out / "index.html").read_text(encoding="utf-8")
