@@ -1803,11 +1803,13 @@ const DASH_2D = [6, 2];
 // antialiased line clashed with the dithered tiers the landing prints. So in
 // 2D each kind is one opaque ink and an inferred link is a band printed
 // through the landing's screens: [Bayer side, band width in CSS px]. A
-// proposal (a shared concept; COVERS, which Silica drew) takes the 4x4 screen
-// in 3 px, a question (an association only) the 8x8 ghost in 5 to 6 px, as
-// wide as its screen needs to read. The key order is the draw order, gap
-// under coupled under proposed, as the approved draft stacked them.
-const SCREEN_2D = { GAP: [8, 6], COUPLED: [8, 5], PROPOSED: [4, 3], COVERS: [4, 3] };
+// proposal (a shared concept; COVERS, which Silica drew) takes the 4x4 screen,
+// a question (an association only) the 8x8 ghost. Every band is 3 px since
+// 2026-11-01, when the owner asked for them narrower and all one size (they were
+// 3 and 5 to 6 px): 3 is the floor because at .14 to .16 ink an 8x8 strip under
+// 3 rows is a dotted hairline, not a screen. The key order is the draw order,
+// gap under coupled under proposed, as the approved draft stacked them.
+const SCREEN_2D = { GAP: [8, 3], COUPLED: [8, 3], PROPOSED: [4, 3], COVERS: [4, 3] };
 // The share of a screen's cells inked. Paper keeps the landing's .55 and .16;
 // light dots on graphite spread to the eye, so the draft thinned them to .42
 // and .14, by eye and not yet measured (DESIGN.md, Tier key).

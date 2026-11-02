@@ -375,9 +375,8 @@ def test_proposed_prints_through_the_4x4_and_a_question_through_the_8x8():
     widths = dict(zip(_KINDS, zip(out["w"][::2], out["w"][1::2])))
     for kind in _WRITTEN:
         assert widths[kind] == (1, 1), kind
-    # 3 px for a proposal, 5 to 6 for a question: as wide as its screen needs
-    assert widths["PROPOSED"] == (3, 3) and widths["COVERS"] == (3, 3)
-    assert widths["COUPLED"] == (5, 5) and widths["GAP"] == (6, 6)
+    # every band 3 px, one size (the owner, 2026-11-01)
+    assert all(widths[k] == (3, 3) for k in ("PROPOSED", "COVERS", "COUPLED", "GAP"))
     # the approved draft's graphite shares; paper keeps the landing's
     assert out["ink"] == {"4": 0.42, "8": 0.14}
     assert _run_frame("console.log(JSON.stringify(SCREEN_INK))", light=True) == {"4": 0.55, "8": 0.16}
@@ -400,14 +399,14 @@ def test_the_layer_draws_every_band_last_cased_by_a_pixel_of_floor(light):
     rgb = lambda paint: [int(v) for v in _rgba(paint)[:3]]
     by = dict(zip(kinds, got["paint"]))
     dim = list(_mix(_tokens(light)["--g-link-dim"], "#000000", 1))
-    full = {"rgb": dim, "cover": 255, "w": 5, "side": 8, "ink": round(ink["8"], 2)}
+    full = {"rgb": dim, "cover": 255, "w": 3, "side": 8, "ink": round(ink["8"], 2)}
     assert out[0] == full, "the dimmed band, first"
     written = out[1:5]
     assert all(i["side"] == 0 and i["w"] == 1 for i in written)
     assert sorted(i["rgb"] for i in written) == sorted(rgb(by[k]) for k in _WRITTEN)
     floor = list(_mix(_tokens(light)["--void"], _tokens(light)["--void"], 1))
     bands = out[5:]
-    want = [("GAP", 8, 6), ("COUPLED", 8, 5), ("PROPOSED", 4, 3), ("COVERS", 4, 3)]
+    want = [("GAP", 8, 3), ("COUPLED", 8, 3), ("PROPOSED", 4, 3), ("COVERS", 4, 3)]
     assert len(bands) == 2 * len(want), "a band is drawn after every written link"
     for (kind, side, w), case, band in zip(want, bands[::2], bands[1::2]):
         assert case == {"rgb": floor, "cover": 255, "w": w + 2, "side": 0, "ink": 0}, kind
@@ -452,7 +451,7 @@ def test_with_the_atlas_on_the_mat_prints_under_the_read_links(light):
     assert got["over"] is True
     assert 0.2 <= got["matAlpha"] <= 0.6, "the mat is translucent and still reads"
     assert mat == 3, out
-    assert out[0]["side"] == 8 and out[0]["w"] == 5 and out[0]["cover"] == 255, "the dimmed band, uncased"
+    assert out[0]["side"] == 8 and out[0]["w"] == 3 and out[0]["cover"] == 255, "the dimmed band, uncased"
     assert all(i["cover"] < 255 for i in out[1:3]), "a written link in the mat keeps its coverage"
     lit = [int(v) for v in _rgba(got["paint"][2])[:3]]
     assert lit in [i["rgb"] for i in out[1:3]], "the dimmed wikilink prints its own ink in the mat"
