@@ -491,6 +491,92 @@ def test_pages_without_text_are_rendered_before_formula_pages(pdfium_vault, monk
     assert FORMULA in body and "[page 2, read by" in body
 
 
+@pytest.mark.parametrize("hosted", [False, True])
+def test_every_page_reads_the_text_pages_too_drawn_a_batch_at_a_time(pdfium_vault, monkeypatch, hosted):
+    """The server's setting (amendment of 2026-11-01): a page with text is
+    read as a formula page is, and the pages the first read did not draw are
+    drawn `vision_pages()` at a time, in the child when hosted."""
+    from silica.kernel.recall import image_readings
+    from silica.sources import pdf_extract
+    from silica.sources.convert import convert
+
+    if hosted:
+        monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_PDF_EVERY_PAGE", "1")
+    monkeypatch.setenv("SILICA_PDF_VISION_PAGES", "2")
+    calls = _reader(monkeypatch)
+    drawn: list = []
+    page_pngs = pdf_extract.page_pngs
+    monkeypatch.setattr(pdf_extract, "page_pngs", lambda path, pages: drawn.append(pages) or page_pngs(path, pages))
+    texts = [TEXT, "", TEXT.replace("entropy", "work"), TEXT.replace("entropy", "heat"),
+             TEXT.replace("entropy", "gas")]
+    src = _write(pdfium_vault, "book.pdf", pdf_bytes(texts, images={1: gray_lines()}))
+
+    body = _note(convert("Inbox/book.pdf")[0])
+
+    assert drawn == [[0, 2], [3, 4]]  # page 2 came with the first read
+    prompts = [p["text"] for m in calls for p in m[0]["content"] if p["type"] == "text"]
+    assert prompts.count(image_readings.FORMULA_PAGE_PROMPT) == 4 and len(prompts) == 5
+    assert all(f"[page {n}, read by glm-5.3-flash]" in body for n in range(1, 6))
+    assert "about entropy" not in body and "about gas" not in body  # the readings stand for the text
+    seen = pdf_extract.cached(src)
+    assert seen["math"] == [] and seen["math_read"] == [0, 2, 3, 4]
+    assert pdf_extract.report(src) == ({"pages": 5, "pages_without_text": 1, "pages_read": 1}, "")
+
+
+def test_a_batch_that_cannot_be_drawn_keeps_its_pages_text(pdfium_vault, monkeypatch, caplog):
+    from silica.sources import pdf_extract
+    from silica.sources.convert import convert
+
+    monkeypatch.setenv("SILICA_PDF_EVERY_PAGE", "1")
+    monkeypatch.setenv("SILICA_PDF_VISION_PAGES", "1")
+    calls = _reader(monkeypatch)
+    page_pngs = pdf_extract.page_pngs
+
+    def draw(path, pages):
+        if pages == [1]:
+            raise pdf_extract.PdfUnreadable("too large", "too_large")
+        return page_pngs(path, pages)
+
+    monkeypatch.setattr(pdf_extract, "page_pngs", draw)
+    _write(pdfium_vault, "two.pdf", pdf_bytes([TEXT, TEXT.replace("entropy", "work")]))
+
+    with caplog.at_level(logging.WARNING):
+        body = _note(convert("Inbox/two.pdf")[0])
+
+    assert len(calls) == 1 and "[page 1, read by" in body and "about entropy" not in body
+    assert "about work" in body and "page 2" not in body and "pdf pages 2 to 2 not drawn" in caplog.text
+
+
+def test_a_usage_limit_mid_file_stops_drawing_the_batches_left(pdfium_vault, monkeypatch):
+    from silica.agent import vision
+    from silica.agent.usage_limits import UsageLimited
+    from silica.sources import pdf_extract
+    from silica.sources.convert import convert
+
+    monkeypatch.setenv("SILICA_PDF_EVERY_PAGE", "1")
+    monkeypatch.setenv("SILICA_PDF_VISION_PAGES", "1")
+    calls: list = []
+
+    def ask(messages, max_tokens=700, **_):
+        calls.append(messages)
+        if len(calls) > 1:
+            raise UsageLimited("window", None)
+        return READING
+
+    monkeypatch.setattr(vision, "ask_chat_model", ask)
+    drawn: list = []
+    page_pngs = pdf_extract.page_pngs
+    monkeypatch.setattr(pdf_extract, "page_pngs", lambda path, pages: drawn.append(pages) or page_pngs(path, pages))
+    texts = [TEXT, TEXT.replace("entropy", "work"), TEXT.replace("entropy", "gas")]
+    _write(pdfium_vault, "three.pdf", pdf_bytes(texts))
+
+    body = _note(convert("Inbox/three.pdf")[0])
+
+    assert drawn == [[0], [1]] and len(calls) == 2
+    assert "[page 1, read by" in body and "about work" in body and "about gas" in body
+
+
 def test_the_server_child_finds_the_math_font_page(tmp_path):
     from silica.sources import pdf_extract
 

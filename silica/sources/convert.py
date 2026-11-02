@@ -840,8 +840,9 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
     when it does not; a file none of whose pages has text or a reading is
     refused with ADR-0087 point 3's sentence. A page drawing a math font is
     read the same way, and its reading stands in for its text below the
-    headings (the amendment of 2026-10-14); unread, it keeps its text.
-    Figures are not extracted (the images dir comes back empty): PDFium exposes image objects, but
+    headings (the amendment of 2026-10-14); unread, it keeps its text. With
+    `pdf_extract.every_page()`, the server's setting, every page with text is
+    read so (the amendment of 2026-11-01). Figures are not extracted (the images dir comes back empty): PDFium exposes image objects, but
     turning them into files needs Pillow, which the base install does not carry;
     mineru (installed separately) is the path for a document whose figures are
     the point. The file itself is opened only in `pdf_extract`, in a child with
@@ -857,7 +858,7 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
     from silica.sources import pdf_extract
 
     data = pdf_extract.read(src)
-    _read_pages(data, workdir)
+    _read_pages(data, workdir, draw=lambda pages: pdf_extract.page_pngs(src, pages))
     if len(data["no_text"]) == data["n_pages"] and not data["read"]:
         raise pdf_extract.PdfUnreadable(_no_text_sentence(), "no_text")
     after = dict(data["readings"])
@@ -889,13 +890,13 @@ def _no_text_sentence(ocr_provider: bool = False) -> str:
 # rate limit: OpenRouter's free models allow 20 requests a minute per account
 # (ADR-0071), which 4 calls of 2 s pass at 120, and call_llm's 429 pacing
 # absorbs a burst until its retries run out and the page is named. The
-# pilot's glm-5.3-flash is not a free model. The upgrade is one limiter in
+# pilot's reader is not a free model. The upgrade is one limiter in
 # call_llm for every caller, due at the first "pdf page %d not read" line
 # whose exception type is a RateLimitError in a tenant's journal.
 _PAGE_READERS = 4
 
 
-def _read_pages(data: dict, workdir: Path) -> None:
+def _read_pages(data: dict, workdir: Path, draw=None) -> None:
     """Send each rendered page to the chat model, a page without text
     (ADR-0087 amendment) for its words and a formula page (the amendment of
     2026-10-14) for a transcription with its formulas in LaTeX, and keep what
@@ -909,69 +910,120 @@ def _read_pages(data: dict, workdir: Path) -> None:
       to read. `math_read`, the formula pages read: one left unread keeps
       PDFium's text and is not named, since its words are there.
 
+    With `draw`, page indices to their PNGs (`pdf_extract.page_pngs` on the
+    same file), and `pdf_extract.every_page()`, every page with text is read
+    as a formula page is (the amendment of 2026-11-01), and the pages the
+    read did not draw are drawn `vision_pages()` at a time, each batch in a
+    child under the first read's limits (ADR-0098 H1): a book's pictures in
+    one child would pass `_IMAGE_BYTES`, and in the tenant's memory at once
+    its 1 GB.
+
     The images leave `data` here, read or not: up to 16 MiB of PNG a file has
     no reason to stay in the cache once its readings exist.
     """
     if "readings" in data:
         return
+    from silica.sources import pdf_extract
+
     images = data.pop("images", None) or {}
-    pending = sorted(i for i, png in images.items() if png)
     math = set(data.get("math", ()))
+    later: list[int] = []
+    size = pdf_extract.vision_pages()
+    if draw is not None and size and pdf_extract.every_page():
+        # A local set and not data["math"]: that one stays the pages that draw
+        # a math font, which the chat's attachment line names (server.py).
+        math |= set(range(data["n_pages"])) - set(data["no_text"])
+        later = [i for i in range(data["n_pages"]) if i not in images]
+    pending = sorted(i for i, png in images.items() if png)
     readings: dict[int, str] = {}
-    if pending:
+    if pending or later:
+        from concurrent.futures import ThreadPoolExecutor
+
+        from silica.agent.usage_limits import UsageLimited
         from silica.agent.vision import ask_chat_model
         from silica.kernel.recall import image_readings
 
         sample = " ".join(t for page in data["pages"] for t, _ in page)[:4000]
         language = image_readings._language(sample)
+        total = len(pending) + len(later)
+        limited = False
 
         def ask(messages: list[dict]) -> str:
             return ask_chat_model(messages, max_tokens=_PAGE_MAX_TOKENS, cut=_PAGE_CUT)
 
-        def one(i: int) -> dict | None:
+        def one(i: int, picture: bytes) -> dict | None:
             # A slide's picture keeps its own suffix: `image_part` names the
             # MIME type after it, and a JPEG sent as image/png is the provider's
             # to refuse (`_via_pptx`).
             png = workdir / f"page-{i + 1}{data.get('suffixes', {}).get(i, '.png')}"
-            png.write_bytes(images[i])
+            png.write_bytes(picture)
             try:
                 return _transcribe_page(png, ask, image_readings.FORMULA_PAGE_PROMPT if i in math
                                         else image_readings.PAGE_PROMPT.format(language=language))
             finally:
                 png.unlink(missing_ok=True)
 
-        def guarded(i: int) -> dict | None:
+        def guarded(item: tuple[int, bytes]) -> dict | None:
+            nonlocal limited
             try:
-                return one(i)
+                return one(*item)
             except Exception as exc:
+                limited = limited or isinstance(exc, UsageLimited)
                 # One page the model will not take (a content filter, a time
                 # out, the usage window closing mid-file) is that page named,
                 # not the file lost: the pages already read are paid for. The
                 # type goes with it, which the hosted journal keeps.
-                logger.warning("pdf page %d not read", i + 1, exc_info=exc)
+                logger.warning("pdf page %d not read", item[0] + 1, exc_info=exc)
                 return None
+
+        def batches():
+            # A generator, so a batch is drawn when the reading reaches it and
+            # the one before it is let go.
+            nonlocal total
+            yield [(i, images[i]) for i in pending]
+            for k in range(0, len(later), size):
+                chunk = later[k:k + size]
+                try:
+                    drawn = draw(chunk)
+                except Exception as exc:
+                    # A batch whose child failed keeps those pages' PDFium
+                    # text, as a formula page past the cap always did, and the
+                    # next batch is other pages: a book is not lost to one.
+                    logger.warning("pdf pages %d to %d not drawn", chunk[0] + 1, chunk[-1] + 1,
+                                   exc_info=exc)
+                    drawn = {}
+                batch = [(i, drawn[i]) for i in chunk if drawn.get(i)]
+                total -= len(chunk) - len(batch)
+                yield batch
 
         results: list[tuple[int, dict | None]] = []
         report = PAGE_PROGRESS.get() or (lambda done, total: None)
-        report(0, len(pending))
-        try:
-            results.append((pending[0], one(pending[0])))
-            report(1, len(pending))
-        except Exception as exc:
-            # The first call alone decides whether the others go out: a model
-            # without image input, or no model at all, fails every page the
-            # same way, and 60 refusals would cost 60 round trips to learn it.
-            logger.info("pdf pages not read, the chat model refused the first: %s", type(exc).__name__)
-        else:
-            if len(pending) > 1:
-                from concurrent.futures import ThreadPoolExecutor
-
-                with ThreadPoolExecutor(max_workers=_PAGE_READERS, thread_name_prefix="pdf-page") as pool:
-                    # In order, so a slow page holds the count back a little;
-                    # the calling thread is the one the job's PAGE_PROGRESS is set in.
-                    for i, reading in zip(pending[1:], pool.map(guarded, pending[1:])):
-                        results.append((i, reading))
-                        report(len(results), len(pending))
+        report(0, total)
+        with ThreadPoolExecutor(max_workers=_PAGE_READERS, thread_name_prefix="pdf-page") as pool:
+            for batch in batches():
+                if not results and batch:
+                    try:
+                        results.append((batch[0][0], one(*batch[0])))
+                    except Exception as exc:
+                        # The first call alone decides whether the others go
+                        # out: a model without image input, or no model at
+                        # all, fails every page the same way, and 60 refusals
+                        # would cost 60 round trips to learn it.
+                        logger.info("pdf pages not read, the chat model refused the first: %s",
+                                    type(exc).__name__)
+                        break
+                    report(1, total)
+                    batch = batch[1:]
+                # In order, so a slow page holds the count back a little;
+                # the calling thread is the one the job's PAGE_PROGRESS is set in.
+                for (i, _), reading in zip(batch, pool.map(guarded, batch)):
+                    results.append((i, reading))
+                    report(len(results), total)
+                if limited:
+                    # The tenant's window or month closed mid-file: every page
+                    # after would be refused the same way, so the batches left
+                    # are not drawn on the host's shared cores for nothing.
+                    break
         for i, reading in results:
             if reading:
                 readings[i] = _page_reading_md(i + 1, reading, data.get("unit", "page"))

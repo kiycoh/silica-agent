@@ -73,7 +73,8 @@ _FUNCTION_WORDS = frozenset("""
 # The amendment's render: grayscale, long side at most 1600 px, about 1,500
 # image tokens a page in on glm-5.3-flash by its estimate. A page without text
 # past `vision_pages()` is named instead; a formula page past it keeps PDFium's
-# text.
+# text. Under `every_page()` it is a batch's size instead and no page is past
+# it (`convert._read_pages`).
 VISION_PAGES = 60
 LONG_SIDE = 1600
 # A page drawing a glyph in one of these fonts has formulas PDFium's text layer
@@ -167,6 +168,16 @@ def vision_pages() -> int:
         return max(0, int(raw)) if raw else VISION_PAGES
     except ValueError:
         return VISION_PAGES
+
+
+def every_page() -> bool:
+    """Whether every page with text is read too, its transcription in place of
+    PDFium's text as a formula page's is: `SILICA_PDF_EVERY_PAGE=1`, set on the
+    server (owner, 2026-11-01, ADR-0087 amendment of that date), where no
+    layout model fits a tenant to pick the pages. Then `vision_pages()`
+    is the size of one batch of pages drawn, not a cap on the file. Spelled "1"
+    alone and read per call, as `hosted()` is."""
+    return os.environ.get("SILICA_PDF_EVERY_PAGE", "").strip() == "1"
 
 
 # --- the read, on either side of the process boundary -------------------------
