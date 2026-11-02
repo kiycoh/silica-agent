@@ -25,6 +25,7 @@ queries between vault changes cost one stat walk, not a re-parse.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -33,7 +34,18 @@ from silica.kernel.write.contested import note_clock
 from silica.kernel.recall.paths import SOURCES_DIR
 
 
-_rows_memo: dict[str, tuple[str, list[tuple[str, str, str, str]]]] = {}  # vault -> (epoch, rows)
+# vault -> (epoch, dated rows, paths of the notes the walk found no date for)
+_rows_memo: dict[str, tuple[str, list[tuple[str, str, str, str]], list[str]]] = {}
+
+# What a date bound may be: a year, a month or a day (ADR-0148 point 1).
+DATE_PREFIX = re.compile(r"\d{4}(-\d{2}(-\d{2})?)?")
+
+
+def in_window(date: str, start: str = "", end: str = "") -> bool:
+    """`date` inside the inclusive bounds, each an ISO prefix: compared on the
+    end's own length, an `end` of "2026-03" keeps all of March, where a plain
+    string compare put "2026-03-05" after it."""
+    return (not start or date >= start) and (not end or date[:len(end)] <= end)
 
 
 def _all_rows(vault: Path) -> list[tuple[str, str, str, str]]:
@@ -43,19 +55,26 @@ def _all_rows(vault: Path) -> list[tuple[str, str, str, str]]:
     Memoized on the vault's file-state epoch: the walk YAML-parses every
     note, and the tool re-runs it per query.
     """
+    return _scan(vault)[0]
+
+
+def _scan(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
+    """(the dated rows of `_all_rows`, the vault-relative paths of the notes
+    the same walk found no date for), memoized together."""
     from silica.kernel.recall.paths import ignore_matcher, vault_epoch
 
     epoch = vault_epoch(str(vault))
     if epoch:
         hit = _rows_memo.get(str(vault))
         if hit is not None and hit[0] == epoch:
-            return hit[1]
+            return hit[1], hit[2]
 
     from silica.kernel.calendar.daily import daily_date, daily_rule
 
     ignored = ignore_matcher(vault)
     days = daily_rule(vault)
     rows: list[tuple[str, str, str, str]] = []
+    undated: list[str] = []
     for f in sorted(vault.rglob("*.md")):
         parts = f.relative_to(vault).parts
         if any(p.startswith(".") for p in parts):
@@ -78,14 +97,27 @@ def _all_rows(vault: Path) -> list[tuple[str, str, str, str]]:
         date = ((data or {}).get("date") or daily_date("/".join(parts), days)
                 or note_clock(text))
         if not date:
+            undated.append("/".join(parts))
             continue
         label = str((data or {}).get("session_id") or f.stem)
         rows.append((str(date)[:10], label, f.stem, "/".join(parts)))
 
     if epoch:
         _rows_memo.clear()
-        _rows_memo[str(vault)] = (epoch, rows)
-    return rows
+        _rows_memo[str(vault)] = (epoch, rows, undated)
+    return rows, undated
+
+
+def dated_window(vault: Path, since: str = "", until: str = "",
+                 keep: Callable[[str], bool] | None = None) -> tuple[frozenset[str], int]:
+    """(the store keys of the notes dated inside [since, until], how many notes
+    have no date and so fall outside every window), both counted over the
+    notes `keep` accepts. The keys are what recall's legs take as `allow`
+    (ADR-0148 point 2): a path without its `.md`."""
+    rows, undated = _scan(vault)
+    keys = frozenset(r[3].removesuffix(".md") for r in rows
+                     if in_window(r[0], since, until) and (keep is None or keep(r[3])))
+    return keys, sum(1 for p in undated if keep is None or keep(p))
 
 
 def timeline(vault: Path, start: str = "", end: str = "", limit: int = 50,
@@ -103,8 +135,7 @@ def timeline(vault: Path, start: str = "", end: str = "", limit: int = 50,
     rows = [
         r[:3] for r in _all_rows(vault)
         # day precision: keeps datetime values inside inclusive bounds
-        if not (start and r[0] < start) and not (end and r[0] > end)
-        and (keep is None or keep(r[3]))
+        if in_window(r[0], start, end) and (keep is None or keep(r[3]))
     ]
     rows.sort(key=lambda r: (r[0], r[2]))  # date asc; stem tie-break for determinism
     total = len(rows)

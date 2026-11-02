@@ -132,6 +132,40 @@ function notify(msg, level = "error", action = null) {
   rollUpToasts();
 }
 
+// --- system notifications (ADR-0147) -----------------------------------------
+// os-notify:start
+// A reminder, a finished conversion and a finished answer reach a person who
+// left the tab. Posted only when they are away and the browser allows it; the
+// false return keeps the caller's in-app path. A body never carries an answer's
+// text: a lock screen shows it, and an answer quotes the vault.
+const awayFromTab = () => document.visibilityState !== "visible" || !document.hasFocus();
+function osNotify(title, body, tag) {
+  if (!("Notification" in window) || Notification.permission !== "granted" || !awayFromTab()) return false;
+  try {
+    const n = new Notification(title, { body, tag, icon: "/static/favicon.svg" });
+    n.onclick = () => { window.focus(); n.close(); };
+    return true;
+  } catch {
+    return false; // Chrome on Android posts only from a service worker: the toast stands
+  }
+}
+// Asked inside the gesture that starts something that ends later (a file
+// staged or imported, /nucleate, a reminder saved), once per page load and
+// only while undecided: Firefox refuses the ask outside a gesture, and a
+// prompt before any reason to accept it teaches people to deny it.
+let notifyAsked = false;
+function askNotify() {
+  if (notifyAsked || DEMO || !("Notification" in window) || Notification.permission !== "default") return;
+  notifyAsked = true;
+  try { Notification.requestPermission(); } catch { /* an old callback-only API: no prompt, the toasts stand */ }
+}
+document.addEventListener("silica:turn-end", (e) => {
+  const o = e.detail && e.detail.outcome;
+  if (o === "success") osNotify("Silica answered", "Your answer is ready.", "silica-turn");
+  else if (o === "error") osNotify("Silica could not answer", "The answer failed; the chat says why.", "silica-turn");
+});
+// os-notify:end
+
 // Name what a tool acted on. The verb alone ("write note") never told the user
 // which file the agent touched in their own vault. One formatter, so a replayed
 // transcript reads exactly like the stream that produced it.
@@ -2171,6 +2205,7 @@ function send(text, replay = false, images = []) {
     if (story) userStory(body, story);
   }
   if (find && !images.length) { runFind(find[1]); return; }
+  if (/^\/nucleate\b/.test(text.trim())) askNotify(); // a nucleate outlasts a glance at another tab
   noteSent();
   runTurn(fetch("/chat", {
     method: "POST",

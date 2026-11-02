@@ -391,11 +391,102 @@ def _scoped_search(engine, query: str, k: int, folder: str) -> dict:
     return {**(first or {}), "hits": hits[:k], "candidates": len({h["path"] for h in hits})}
 
 
+# The exact scan of ADR-0149: what bounds a scan no ranking bounds. A short
+# string matches most of a vault, so hits are capped like the source leg's;
+# the clock and the size cap keep one call from reading a huge vault or file.
+_LITERAL_MAX_K = 50
+_LITERAL_LINES_PER_NOTE = 3
+_LITERAL_MAX_BYTES = 2_000_000
+_LITERAL_BUDGET_S = 2.0
+_LITERAL_SNIPPET = 240
+
+
+def _literal_search(query: str, folder: str, k: int) -> dict:
+    """Notes whose text holds `query` exactly, case aside (ADR-0149): the
+    BM25 leg splits `2022-009` or an email into tokens, ranking a passage that
+    holds the parts apart as high as one holding the string, and finds no
+    token at all in `x_{t-1}`.
+
+    The walk is the timeline's (no dot-folder, nothing ignored, Silica's own
+    config folder never), cut to `folder` and to a workspace's members, and it
+    never reads through a link out of the vault: a hosted vault is the
+    account's directory (ADR-0086). A plain substring and never a pattern,
+    because Python's `re` cannot be stopped mid-match.
+    """
+    import hashlib
+    import time
+
+    from silica.config import CONFIG, in_config_dir
+    from silica.kernel.recall.paths import ignore_matcher, in_folder
+    from silica.kernel.workspaces import in_scope
+
+    needle = query.strip()
+    if not 2 <= len(needle) <= 200:
+        return {"error": {"code": "bad_query",
+                          "hint": "a literal search takes one exact string of 2 to 200 characters"}}
+    vault = Path(CONFIG.vault_path or ".").expanduser().resolve()
+    ignored = ignore_matcher(vault)
+    folded = needle.casefold()
+    t0 = time.monotonic()
+    found: list[tuple[int, str, list[dict]]] = []
+    scanned = cut = 0
+    for f in sorted(vault.rglob("*.md")):
+        parts = f.relative_to(vault).parts
+        if any(p.startswith(".") for p in parts) or any(ignored(p) for p in parts[:-1]):
+            continue
+        rel = "/".join(parts)
+        if not in_folder(rel, folder) or not in_scope(rel):
+            continue
+        if time.monotonic() - t0 > _LITERAL_BUDGET_S:
+            cut += 1
+            continue  # counted, not read: the reply says how much was left
+        try:
+            real = f.resolve()
+            if (not real.is_relative_to(vault) or in_config_dir(real)
+                    or real.stat().st_size > _LITERAL_MAX_BYTES):
+                continue
+            # silica-core's own read (core.py `_read`), so the version below
+            # and the line numbers are the ones silica_read serves.
+            text = real.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue  # vanished or unreadable mid-walk: one note, not the scan
+        scanned += 1
+        count = text.casefold().count(folded)
+        if not count:
+            continue
+        version = hashlib.sha1(text.encode("utf-8", "surrogateescape")).hexdigest()[:12]
+        hits: list[dict] = []
+        for n, line in enumerate(text.splitlines(), 1):
+            at = line.casefold().find(folded)
+            if at < 0:
+                continue
+            lo = max(0, min(at - _LITERAL_SNIPPET // 3, len(line) - _LITERAL_SNIPPET))
+            hits.append({"name": f.stem, "path": rel, "line": n,
+                         "snippet": line[lo:lo + _LITERAL_SNIPPET].strip(),
+                         "version": version, "matched_terms": [needle], "coverage": 1.0})
+            if len(hits) >= _LITERAL_LINES_PER_NOTE:
+                break
+        found.append((count, rel, hits))
+    found.sort(key=lambda t: (-t[0], t[1]))
+    cap = max(1, min(k, _LITERAL_MAX_K))
+    hits = [h for _, _, hs in found for h in hs][:cap]
+    out: dict = {"hits": hits, "notes_matched": len(found),
+                 "terms_absent": [] if found else [needle], "literal": True}
+    if len(hits) < sum(len(hs) for _, _, hs in found):
+        out["truncated"] = (f"{len(found)} notes hold the string; showing {len(hits)} lines. "
+                            "Raise k or narrow with folder.")
+    if cut:
+        out["scan_cut"] = (f"stopped after {_LITERAL_BUDGET_S:g} s: {scanned} notes scanned, "
+                           f"{cut} not; narrow with folder")
+    return out
+
+
 @tool(cls="atomic")
 def silica_search_context(
     query: Annotated[str, Field(description='Words to look for inside note bodies; the vault vocabulary, not a question')],
     folder: Annotated[str, Field(description='Only notes under this vault-relative folder')] = "",
     k: Annotated[int, Field(description='Max passages')] = 8,
+    literal: Annotated[bool, Field(description="query is ONE exact string (ID, code, email, formula) matched verbatim, case aside")] = False,
 ) -> dict:
     """Search note BODIES; returns ranked passages with line numbers.
 
@@ -413,6 +504,17 @@ def silica_search_context(
     Returns {hits, notes_matched, terms_absent, index}; `scanned` says which
     corpora answered.
     """
+    if literal:
+        lit = _literal_search(query, folder, k)
+        if "error" not in lit:
+            from silica.tools.user_memory import returned_notes
+
+            returned_notes(h["path"] for h in lit["hits"])  # the taint gate (ADR-0090 point 8)
+            src = _source_hits(query)
+            if src is not None:
+                lit["hits"].extend(src)
+                lit["scanned"] = ["notes", "source"]
+        return lit
     r = _scoped_search(_engine(), query, k, folder)
     if "error" in r:
         return r

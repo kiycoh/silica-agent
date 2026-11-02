@@ -423,7 +423,9 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
                   folder: Annotated[str, Field(description="Only notes under this vault folder (e.g. 'docs/adr', 'silica'). Empty = whole vault. Use it when a subtree of unrelated notes (research on other products, fixtures) keeps taking the slots.")] = "",
                   min_trust: Annotated[str, Field(description="Trust floor: 'human' (a person wrote or vouched for it), 'grounded' (agent note with its verbatim source leaf), 'distilled' (agent note without one), 'kept' (a /keep of a web answer). Empty = no floor. A floor drops notes after retrieval, so `filtered` says how many you did not see.")] = "",
                   lifecycle: Annotated[str, Field(description="Only notes in this state: 'active', 'review' (gate soft flag), 'contested' (unresolved contradiction), 'superseded'. Empty = every state; the header names the non-active ones anyway.")] = "",
-                  notes: Annotated[list[str] | None, Field(description="Notes the question names (names or paths): the context is those notes, in this order, and `missing` lists the ones that do not exist. Empty = search the vault.")] = None) -> dict[str, Any]:
+                  notes: Annotated[list[str] | None, Field(description="Notes the question names (names or paths): the context is those notes, in this order, and `missing` lists the ones that do not exist. Empty = search the vault.")] = None,
+                  since: Annotated[str, Field(description="Only notes dated on/after YYYY[-MM[-DD]]. Undated notes drop out: on an empty result, retry without.")] = "",
+                  until: Annotated[str, Field(description="Only notes dated on/before YYYY[-MM[-DD]]; '2026-03' keeps all of March.")] = "") -> dict[str, Any]:
     """Assemble an answer-ready memory context for a question: fused retrieval,
     each note's query-densest window under a rank/evidence/date header,
     recalled personal facts first. Use when ANSWERING from vault memory
@@ -452,9 +454,22 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
     if lifecycle and lifecycle not in LIFECYCLES:
         return {"query": query, "error": f"unknown lifecycle '{lifecycle}'; one of "
                 + ", ".join(LIFECYCLES), "context": "", "notes": [], "partial": [], "facts": 0}
+    from silica.kernel.write.timeline import DATE_PREFIX
+
+    since, until = since.strip(), until.strip()
+    bad = next((b for b in (since, until) if b and not DATE_PREFIX.fullmatch(b)), None)
+    if bad is not None:
+        return {"query": query, "error": f"'{bad}' is not a date bound; since and until take "
+                "YYYY, YYYY-MM or YYYY-MM-DD", "context": "", "notes": [], "partial": [], "facts": 0}
     peek = _peek_target(vault)
     if isinstance(peek, dict):  # a refusal, already shaped as the reply
         return {"query": query, **peek}
+    if (since or until) and (notes or peek):
+        # A peek's legs take no allow set (perception.py:308): the window would
+        # be dropped there without a word (ADR-0148 point 5).
+        return {"query": query, "error": "since/until narrow a search of this vault: named notes "
+                "are read whatever their date, and a peek takes no window",
+                "context": "", "notes": [], "partial": [], "facts": 0}
     if notes and peek:
         # perceive() assembles given paths from the active vault only.
         return {"query": query, "error": "notes= names notes of the active vault; for another "
@@ -466,6 +481,22 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
     # A workspace's turn searches its members only (ADR-0112 point 4); named
     # notes are the user's act and a peek is another vault, so neither is cut.
     allow = allow_keys() if named is None and not peek else None
+    window: dict[str, Any] | None = None
+    if since or until:
+        from silica.config import CONFIG
+        from silica.kernel.workspaces import in_scope
+        from silica.kernel.write.timeline import dated_window
+
+        # The window is an allow set, applied inside each leg like a
+        # workspace's and intersected with it (ADR-0148 point 2).
+        keys, undated = dated_window(Path(getattr(CONFIG, "vault_path", "") or ".").expanduser(),
+                                     since, until, keep=in_scope if allow is not None else None)
+        allow = keys if allow is None else allow & keys
+        window = {"since": since, "until": until, "dated": len(allow), "undated": undated}
+        if not allow:
+            return {"query": query, "window": window, "context": "", "notes": [], "partial": [],
+                    "facts": 0, "hint": "no dated note falls in this window; retry without "
+                    "since/until"}
     if allow is not None:
         memory = False
     rr: dict[str, Any] = {"reranked": False}
@@ -505,6 +536,8 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
            "facts": len(p.fact_hits)}
     if missing:
         out["missing"] = missing
+    if window is not None:
+        out["window"] = window
     if p.filtered:
         out["filtered"] = p.filtered  # the model must know it saw less than retrieval found
     if p.all_non_active:

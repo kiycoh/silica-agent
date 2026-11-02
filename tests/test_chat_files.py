@@ -252,6 +252,10 @@ def test_stop_runs_no_further_tool_of_the_batch(monkeypatch):
     from silica.agent import loop
     from silica.tools import TOOLS
 
+    # The serial path, which every block holding a write takes. A block of
+    # reads only starts its calls together (ADR-0150): see the test below.
+    monkeypatch.setattr(loop, "PARALLEL_READS", frozenset())
+
     token = threading.Event()
     ran: list[str] = []
     calls = [SimpleNamespace(id=f"c{i}", name="silica_exists", args={"path": f"n{i}.md"}) for i in range(3)]
@@ -273,6 +277,45 @@ def test_stop_runs_no_further_tool_of_the_batch(monkeypatch):
     monkeypatch.setattr(TOOLS["silica_exists"], "fn", fn)
     out = loop.run_agent([{"role": "user", "content": "hi"}], "m", cancel_token=token)
     assert out == "(silica: cancelled)" and ran == ["n0.md"]
+
+
+def test_stop_in_a_block_of_reads_hands_back_only_what_came_before_it(monkeypatch):
+    # ADR-0150 point 5: the reads of the block started together, so one already
+    # running may finish; Stop ends the block at once, no result of it enters
+    # the history (the next turn heals the ids, as on the serial path), and a
+    # read that had not begun never runs.
+    from types import SimpleNamespace
+
+    import silica.cli  # noqa: F401  (fills the TOOLS registry)
+    from silica.agent import loop
+    from silica.tools import TOOLS
+
+    token = threading.Event()
+    first_done = threading.Event()
+    calls = [SimpleNamespace(id=f"c{i}", name="silica_exists", args={"path": f"n{i}.md"}) for i in range(3)]
+
+    def one_batch(model, messages, **kw):
+        return SimpleNamespace(tool_calls=calls, text="", reasoning="", usage={},
+                               assistant_message={"role": "assistant", "content": "", "tool_calls": [
+                                   {"id": c.id, "type": "function",
+                                    "function": {"name": c.name, "arguments": json.dumps(c.args)}} for c in calls]})
+
+    real = TOOLS["silica_exists"].fn
+
+    def fn(**kw):
+        if kw.get("path") == "n0.md":
+            token.set()  # Stop pressed while the first read ran
+            first_done.set()
+        else:
+            first_done.wait(5)
+        return real(**kw)
+
+    messages = [{"role": "user", "content": "hi"}]
+    monkeypatch.setattr(loop, "call_llm", one_batch)
+    monkeypatch.setattr(TOOLS["silica_exists"], "fn", fn)
+    out = loop.run_agent(messages, "m", cancel_token=token)
+    assert out == "(silica: cancelled)"
+    assert [m for m in messages if m.get("role") == "tool"] == []
 
 
 # --- point 7: sources from search, and the page progress ----------------------------------

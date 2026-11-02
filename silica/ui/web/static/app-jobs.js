@@ -243,8 +243,10 @@ function jobsUpdate(j) {
   if (ended && !jobsToldDone.has(j.id)) {
     jobsToldDone.add(j.id);
     const msg = j.state === "done" ? `${j.source.name} is ready` : `${j.source.name} could not be converted`;
-    // Said aloud always; shown as a toast only when its row is not in view.
-    if (jobHere(j)) announce(msg); else notify(msg + ", in the chat it was added to", j.state === "done" ? "info" : "error");
+    // Away: the system says it (ADR-0147). Here: said aloud always, and shown
+    // as a toast only when its row is not in view.
+    if (osNotify(j.state === "done" ? "Conversion ready" : "Conversion failed", msg, `silica-job-${j.id}`)) announce(msg);
+    else if (jobHere(j)) announce(msg); else notify(msg + ", in the chat it was added to", j.state === "done" ? "info" : "error");
   }
   // Its notes landed: the tree and the vault's figures redraw, as they do when
   // a turn ends (a chat's file lands in its chat's folder, and nothing moves).

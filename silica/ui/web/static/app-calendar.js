@@ -1215,6 +1215,7 @@ function calQuickCard(at, anchor) {
       err.hidden = false;
       return;
     }
+    if (v.reminder) askNotify(); // still inside the click: the reminder is why to allow it
     save.disabled = more.disabled = true;
     err.hidden = true;
     try {
@@ -1444,7 +1445,10 @@ function showReminders(due) {
 async function pollReminders() {
   try {
     const d = await (await fetch("/reminders", { method: "POST" })).json();
-    const due = d.due || [];
+    // Posted to the system when the person is away (ADR-0147); a reminder
+    // that could not be posted is held or toasted as before.
+    const due = (d.due || []).filter((r) => !osNotify(r.late ? "Late reminder" : "Reminder",
+      r.title + " · " + r.start.slice(0, 16), `silica-reminder-${r.stem}@${r.start}`));
     if (document.visibilityState !== "visible") { heldReminders.push(...due); return; }
     showReminders(heldReminders.splice(0));
     showReminders(due);
