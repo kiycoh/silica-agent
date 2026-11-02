@@ -54,3 +54,30 @@ jobs:
       # cleanup of 158 unused imports. Narrow by config (F, E9 in pyproject):
       # it blocks dead code, it does not arbitrate style.
       - run: uv run ruff check silica tests scripts evals
+
+  # The install a person runs (`silica-agent[gui]`, and the hosted host's
+  # `uv export --no-dev --extra gui`) carries none of the extras `test` adds,
+  # so `test` cannot see a dependency only an extra was supplying. That is how
+  # 0.26.0 shipped: litellm 1.106.6 needs `mcp` for any call with tools, `test`
+  # had it through --extra mcp, the host did not, and every hosted chat turn
+  # failed for 84 minutes on 2026-11-02. One mocked call with tools, no network.
+  gui-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - run: uv sync --locked --no-dev --extra gui
+
+      - run: |
+          uv run --no-sync python - <<'EOF'
+          import litellm
+          tool = {"type": "function", "function": {"name": "f", "parameters": {"type": "object", "properties": {}}}}
+          r = litellm.completion(model="openai/gpt-4o-mini", messages=[{"role": "user", "content": "x"}],
+                                 tools=[tool], mock_response="ok")
+          assert r.choices[0].message.content == "ok"
+          EOF

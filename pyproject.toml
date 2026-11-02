@@ -33,7 +33,14 @@ dependencies = [
   # every `silica_core` symbol imported here (checked 2026-10-09); to work on
   # both at once, `uv pip install -e ../silica-core` over it.
   "silica-core>=0.10.1",
-  "litellm",
+  # [mcp]: litellm 1.106.6 (0.26.0's lock; 1.86.0 did not) imports its MCP
+  # gateway from completion(), and through it `mcp.types`, whenever `tools`
+  # is passed, which every chat turn does; litellm declares that package only
+  # under this extra. Without it 0.26.0 failed every chat turn at the first
+  # model call on an install without silica's own [mcp] (the hosted host,
+  # 2026-11-02 17:53-19:17 UTC).
+  # The CI job gui-install runs that install shape.
+  "litellm[mcp]",
   # The context meter's counter, imported without litellm (ADR-0073): 42 MB
   # against litellm's 161 MB at GUI startup. Already in every install through
   # litellm; named here because silica imports it itself.
@@ -120,7 +127,10 @@ connect = [
 # maintenance line: 1.x is a legacy-era client and its OAuth lacks the RFC 9207
 # check of the authorization response's `iss`. The line was ten weeks old at
 # the pin (2.0.0 on 2026-07-28), so `<3`, and every minor bump reruns
-# ADR-0091's Gate 0 (tests/test_mcp_*).
+# ADR-0091's Gate 0 (tests/test_mcp_*). Since 0.26.1 the SDK is in every
+# install through litellm[mcp] (which asks only >=2.2), so this extra holds the
+# floor and the `<3`; the opt-in is a configured connector, and hosted stays
+# closed through mcp_config.hosted(), never through the import.
 mcp = ["mcp>=2.3,<3"]
 # Opt-in store for Class B secrets (ADR-0089 point 7): a credential that opens an
 # account of the owner beyond Silica (an MCP server's token, its OAuth grant)
