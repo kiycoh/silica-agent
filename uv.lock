@@ -1764,6 +1764,13 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4a/41/8c5076437a5a56cf8e788eafe9ca36b649375bb14811d2401e6520acba86/litellm-1.106.6-cp310-abi3-win_amd64.whl", hash = "sha256:42ce43ffb0161c9a844e8b0cd02a8796d0423b11d84fe304bff925378ca55085", size = 37383305, upload-time = "2026-10-28T22:49:13.624Z" },
 ]
 
+[package.optional-dependencies]
+mcp = [
+    { name = "httpx2" },
+    { name = "mcp" },
+    { name = "pydantic" },
+]
+
 [[package]]
 name = "mammoth"
 version = "1.13.0"
@@ -3606,7 +3613,7 @@ dependencies = [
     { name = "duckdb" },
     { name = "fsrs" },
     { name = "httpx" },
-    { name = "litellm" },
+    { name = "litellm", extra = ["mcp"] },
     { name = "mammoth" },
     { name = "markdown-it-py", extra = ["linkify"] },
     { name = "networkx" },
@@ -3685,7 +3692,7 @@ requires-dist = [
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "keyring", marker = "extra == 'connectors'", specifier = ">=25" },
     { name = "latex2mathml", marker = "extra == 'gui'", specifier = ">=3.81.0" },
-    { name = "litellm" },
+    { name = "litellm", extras = ["mcp"] },
     { name = "mammoth", specifier = ">=1.9" },
     { name = "markdown-it-py", extras = ["linkify"] },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.3,<3" },
