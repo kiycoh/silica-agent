@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -109,6 +110,8 @@ def _view() -> dict:
     return {
         "available": publish.available(vault),
         "handle": h,
+        "ask_handle": publish.handle_state(vault),
+        "base": os.environ.get("SILICA_PUBLIC_BASE", "").strip().rstrip("/"),
         "url": page_url,
         "hosted": hosted(),
         # where the files are, on a laptop: the person serves them; a hosted
@@ -134,6 +137,18 @@ def _view() -> dict:
 
 @router.get("/public")
 def public_view():
+    return _view()
+
+
+@router.post("/public/handle", dependencies=_SAME_ORIGIN)
+def public_handle(payload: dict):
+    """The handle My Page asks for on its first visit (ADR-0143 point 7, amended 2026-11-02)."""
+    from silica.kernel import publish
+
+    try:
+        publish.claim(str(payload.get("handle") or ""))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     return _view()
 
 

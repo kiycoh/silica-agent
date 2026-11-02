@@ -58,17 +58,129 @@ def slugify(text: str) -> str:
 
 
 def handle(vault: Path | None = None) -> str:
-    """The page's @name. On the server the host assigns it and the account
-    cannot pick another's (ADR-0143 point 7), so an account without one has
-    no page rather than one named after its vault folder."""
+    """The page's @name. On the server the host writes it and the account
+    cannot take another's (ADR-0143 point 7, amended 2026-11-02: the account
+    asks for one from My Page, the host decides), so an account without one
+    has no page rather than one named after its vault folder."""
     from silica.config import hosted
 
     env = os.environ.get("SILICA_PUBLIC_HANDLE", "").strip()
     if env or hosted():
-        return slugify(env)
+        # The host's answer before the unit's env: a claim granted after the
+        # process started is in the file, and the env catches up at the next start.
+        named = _host_answer().get("handle")
+        return slugify(named if isinstance(named, str) and _HANDLE.match(named) else env)
     vault = vault or _vault()
     named = _block(vault).get("handle")
     return slugify(named if isinstance(named, str) and named.strip() else vault.resolve().name)
+
+
+# The names no account may take: silica-hosted bin/tenant's RESERVED (ADR-0151
+# point 12). The host's list decides; this copy only spares a person the
+# minute's wait for a refusal it already knows.
+RESERVED_HANDLES = frozenset(
+    "silica admin administrator root pages page www app api help support security abuse report "
+    "privacy terms legal about official staff team mod moderator system null undefined demo static assets".split())
+
+
+def handle_problem(h: str) -> str:
+    """"" when `h` can be a handle, else why not, as My Page says it."""
+    if not _HANDLE.match(h) or "--" in h:
+        return "a handle is 1 to 30 of a-z, 0-9 and single dashes, not at either end"
+    if h in RESERVED_HANDLES:
+        return f"@{h} is reserved"
+    return ""
+
+
+def _host_dir() -> Path | None:
+    """The folder the host writes for this account alone (root's, readable by
+    the account's group), None on a host that does not take claims."""
+    raw = os.environ.get("SILICA_HOST_DIR", "").strip()
+    return Path(raw) if raw else None
+
+
+def _host_answer() -> dict:
+    """The host's handle.json: {"handle": h} once the account has one,
+    {"asked": h, "refused": "taken" | "invalid"} after a claim it refused."""
+    import json
+
+    d = _host_dir()
+    if d is None:
+        return {}
+    try:
+        raw = json.loads((d / "handle.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # No answer yet, or one being replaced: the account reads as having no
+        # handle, which is what it has until the host's rename lands.
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def claim_path() -> Path:
+    """Where the account asks for a handle; silica-hosted bin/pages claims reads
+    it as root, never through a link, and removes it once answered."""
+    return Path.home() / ".silica" / "handle-request.json"
+
+
+def _asked() -> str:
+    import json
+
+    try:
+        h = json.loads(claim_path().read_text(encoding="utf-8")).get("handle")
+    except (OSError, ValueError, AttributeError):
+        # No request, or one written by hand that the host will refuse too.
+        return ""
+    return h if isinstance(h, str) else ""
+
+
+def handle_state(vault: Path | None = None) -> dict:
+    """What My Page's overlay needs: whether to ask for a handle, the claim
+    waiting for the host, and the last one it refused."""
+    from silica.config import hosted
+
+    if os.environ.get("SILICA_PUBLIC_HANDLE", "").strip():
+        return {"ask": False}
+    if hosted():
+        # A host without the claims pass, or without a public address, would
+        # leave the request unanswered: the view says the operator gives handles.
+        if _host_dir() is None or not os.environ.get("SILICA_PUBLIC_BASE", "").strip() or handle():
+            return {"ask": False}
+        out: dict = {"ask": True, "pending": _asked(), "reserved": sorted(RESERVED_HANDLES)}
+        ans = _host_answer()
+        if not out["pending"] and isinstance(ans.get("refused"), str):
+            out["refused"] = {"handle": str(ans.get("asked") or ""), "why": ans["refused"]}
+        return out
+    vault = vault or _vault()
+    named = _block(vault).get("handle")
+    # A laptop that already published under its folder's name keeps it: a new
+    # handle would leave those files in a folder nothing points at.
+    if (isinstance(named, str) and named.strip()) or site_root(handle(vault)).exists():
+        return {"ask": False}
+    return {"ask": True, "suggest": handle(vault), "reserved": sorted(RESERVED_HANDLES)}
+
+
+def claim(h: str, vault: Path | None = None) -> None:
+    """Take `h` as the Page's handle. On a laptop it is the vault's own key; on
+    the server the host decides, so the request waits where its claims pass
+    reads it, once a minute."""
+    import json
+
+    from silica.config import hosted
+    from silica.kernel.vault_manifest import set_block_key
+
+    h = h.strip().lstrip("@").lower()
+    if why := handle_problem(h):
+        raise ValueError(why)
+    if not handle_state(vault).get("ask"):
+        raise ValueError("this Page already has its handle")
+    if hosted():
+        p = claim_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(p.name + ".tmp")
+        tmp.write_text(json.dumps({"handle": h}), encoding="utf-8")
+        os.replace(tmp, p)
+        return
+    set_block_key(vault or _vault(), PUBLIC_KEY, "handle", h)
 
 
 def page_url(vault: Path | None = None) -> str:

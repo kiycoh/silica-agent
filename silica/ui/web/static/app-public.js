@@ -404,6 +404,115 @@ function upsellText(why) {
   return [document.createTextNode("A Private vault is read only by the accounts you name. It comes with a paid account: "), a, document.createTextNode(".")];
 }
 
+// --- the handle, asked on the first visit (ADR-0143 point 7, amended 2026-11-02) ---------
+// An overlay on this view alone: the drawer stays live, so the person can leave and come back,
+// and the view behind it is inert. The format and the reserved names are checked as typed with
+// the server's own list; whether a name is taken only the host knows, within a minute.
+const PUB_HANDLE = /^[a-z0-9]([a-z0-9-]{0,28}[a-z0-9])?$/;
+// How long a claim may wait before the field opens again: the host's pass runs every minute.
+const PUB_ASK_STALE_MS = 3 * 60 * 1000;
+let pubAskTimer = 0, pubAskSince = 0;
+
+function pubHandleWhy(h, reserved) {
+  if (!h) return "";
+  if (!PUB_HANDLE.test(h) || h.includes("--")) return "Use 1 to 30 of a-z, 0-9 and single dashes, not at either end.";
+  if (reserved.includes(h)) return `@${h} is reserved.`;
+  return "";
+}
+
+function pubAsk(st) {
+  const view = $("#view-public");
+  let over = $("#pg-ask");
+  const ask = st && st.ask_handle && st.ask_handle.ask ? st.ask_handle : null;
+  for (const el of [$("#public-bar"), $("#public-body")]) el.inert = !!ask;
+  if (!ask) {
+    if (over) over.remove();
+    clearTimeout(pubAskTimer);
+    pubAskSince = 0;
+    return;
+  }
+  if (!over) {
+    over = mkEl("div", "pg-ask");
+    over.id = "pg-ask";
+    const card = mkEl("form", "pg-ask-card");
+    card.noValidate = true;
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-labelledby", "pg-ask-h");
+    const h = mkEl("h2", "pg-ask-h", "Choose your handle");
+    h.id = "pg-ask-h";
+    const field = mkEl("label", "pg-ask-field");
+    const input = Object.assign(document.createElement("input"), {
+      id: "pg-ask-in", autocomplete: "off", spellcheck: false, maxLength: 31, placeholder: "your-name",
+    });
+    input.setAttribute("aria-describedby", "pg-ask-addr pg-ask-msg");
+    field.append(mkEl("span", "", "@"), input);
+    const addr = mkEl("div", "pg-ask-addr");
+    addr.id = "pg-ask-addr";
+    const msg = mkEl("div", "pg-ask-msg");
+    msg.id = "pg-ask-msg";
+    msg.setAttribute("role", "status");
+    const go = mkEl("button", "pp-go", "Take this handle");
+    go.type = "submit";
+    const row = mkEl("div", "pg-ask-row");
+    row.append(go);
+    card.append(h, mkEl("p", "pg-ask-p", ""), field, addr, msg, row);
+    over.append(card);
+    view.append(over);
+    input.addEventListener("input", () => pubAskPaint(pubState));
+    card.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const v = input.value.trim().replace(/^@/, "").toLowerCase();
+      if (pubHandleWhy(v, pubState.ask_handle.reserved || []) || !v) return;
+      go.disabled = true;
+      // the reply is the view again: pubPost repaints it, and a laptop's overlay is gone with it
+      if (!(await pubPost("/public/handle", { handle: v }))) go.disabled = false;
+    });
+    input.value = ask.suggest || (ask.refused && ask.refused.handle) || "";
+    if (!ask.pending) setTimeout(() => input.focus(), 0);
+  }
+  pubAskPaint(st);
+}
+
+function pubAskPaint(st) {
+  const ask = st.ask_handle;
+  const input = $("#pg-ask-in"), msg = $("#pg-ask-msg"), go = $("#pg-ask button[type=submit]");
+  if (ask.pending && !input.value) input.value = ask.pending;
+  const v = input.value.trim().replace(/^@/, "").toLowerCase();
+  $(".pg-ask-p").textContent = st.hosted
+    ? "It is your Page's address and the name readers see on every vault you publish. You choose it once."
+    : "It names your Page and is shown on every vault you publish.";
+  const base = (st.base || "").replace(/^https?:\/\//, "");
+  $("#pg-ask-addr").textContent = base ? `${base}/@${v || "your-name"}/` : "";
+  const pending = ask.pending || "";
+  const stale = pending && pubAskSince && Date.now() - pubAskSince > PUB_ASK_STALE_MS;
+  msg.className = "pg-ask-msg";
+  let ok = false;
+  if (pending && !stale) {
+    msg.className += " ok";
+    msg.textContent = `Taking @${pending}. Your Page opens in about a minute.`;
+  } else if (stale) {
+    msg.textContent = "The server has not answered yet. You can try again.";
+    ok = !pubHandleWhy(v, ask.reserved || []) && !!v;
+  } else if (ask.refused && ask.refused.handle && ask.refused.handle === v) {
+    msg.className += " err";
+    msg.textContent = ask.refused.why === "taken" ? `@${v} is taken. Try another.` : `@${v} cannot be a handle.`;
+  } else {
+    const why = pubHandleWhy(v, ask.reserved || []);
+    if (why) msg.className += " err";
+    msg.textContent = why || "1 to 30 of a-z, 0-9 and single dashes.";
+    ok = !why && !!v;
+  }
+  input.disabled = !!pending && !stale;
+  go.disabled = !ok;
+  go.textContent = ok ? `Take @${v}` : "Take this handle";
+  clearTimeout(pubAskTimer);
+  if (pending && !stale) {
+    if (!pubAskSince) pubAskSince = Date.now();
+    // the host answers into a file this account reads; the view asks again until it has
+    pubAskTimer = setTimeout(() => { if (activeTab === "public") loadPublicState(); }, 5000);
+  }
+}
+
 function renderPublic(fresh) {
   const body = $("#public-body");
   // a render that a save of another field set off keeps the field being typed in as it was
@@ -413,6 +522,13 @@ function renderPublic(fresh) {
   const link = $("#public-url");
   const count = $("#public-count");
   const st = pubState;
+  pubAsk(st);
+  if (st && st.ask_handle && st.ask_handle.ask && !st.available) {
+    link.hidden = true;
+    count.textContent = "";
+    body.replaceChildren();
+    return;
+  }
   if (!st || !st.available) {
     link.hidden = true;
     count.textContent = "";

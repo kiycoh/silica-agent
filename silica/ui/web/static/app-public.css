@@ -657,3 +657,101 @@ body.drawer-recall #public-bar {
 .pp-box .pg-rows .st-btn { margin-left: auto; }
 .pp-box .pg-rows .st-btn + .st-btn { margin-left: 0; }
 .pp-box.wide ul.pg-chips { gap: 6px; }
+
+/* --- the handle, asked on the first visit (ADR-0143 point 7, amended 2026-11-02) ------------
+   Over this view alone, not the app: the drawer stays live, so a person who is not ready can
+   go elsewhere and find the question here again. */
+#view-public {
+  position: relative;
+}
+
+.pg-ask {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: var(--scrim);
+}
+
+.pg-ask-card {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  background: var(--sheet);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--lift);
+}
+
+.pg-ask-h {
+  margin: 0;
+  color: var(--frost);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.pg-ask-p {
+  margin: 0;
+  color: var(--ash);
+  font-size: var(--fs-ctl);
+}
+
+.pg-ask-field {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background: var(--page);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+
+.pg-ask-field:focus-within {
+  border-color: var(--accent);
+}
+
+.pg-ask-field span {
+  color: var(--ash-dim);
+  font: var(--fs-ctl) var(--mono);
+}
+
+.pg-ask-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 4px;
+  color: var(--frost);
+  background: none;
+  border: 0;
+  outline: none;
+  font: var(--fs-ctl) var(--mono);
+}
+
+.pg-ask-field input:disabled {
+  color: var(--ash);
+}
+
+.pg-ask-addr {
+  color: var(--ash);
+  font: 11.5px var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.pg-ask-addr:empty {
+  display: none;
+}
+
+.pg-ask-msg {
+  min-height: 18px;
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+}
+
+.pg-ask-msg.err { color: var(--err); }
+.pg-ask-msg.ok { color: var(--add); }
+
+.pg-ask-row {
+  display: flex;
+  justify-content: flex-end;
+}
