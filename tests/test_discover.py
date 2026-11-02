@@ -143,6 +143,19 @@ def test_the_cover_order_is_the_items_own_and_empty_means_none():
     assert arts[3]["lead"] == "Lead text."
 
 
+def test_a_description_that_is_only_a_link_is_no_summary():
+    """Hacker News sends <a href="...item?id=...">Comments</a> as every item's description;
+    a summary that says only "Comments" is no summary, and a description with words keeps them."""
+    hn = b"""<?xml version="1.0"?><rss version="2.0"><channel><title>Hacker News</title>
+<item><title>Limits merging</title><link>https://o.test/a</link>
+  <description><![CDATA[<a href="https://news.ycombinator.com/item?id=45">Comments</a>]]></description></item>
+<item><title>Words and a link</title><link>https://o.test/b</link>
+  <description><![CDATA[Real summary. <a href="https://x.test/c">Comments</a>]]></description></item>
+</channel></rss>"""
+    _, arts = F.parse(hn, "https://news.ycombinator.com/rss")
+    assert [a["lead"] for a in arts] == ["", "Real summary. Comments"]
+
+
 def test_atom_and_json_feed():
     atom = b"""<feed xmlns="http://www.w3.org/2005/Atom"><title>A</title>
       <entry><title>E</title><link rel="alternate" href="/e1"/><updated>2026-10-27T10:00:00Z</updated>
@@ -348,6 +361,18 @@ def test_an_old_item_is_not_news(tmp_vault):
                                   {"url": "https://n.test/new", "title": "n", "lead": "", "image": "",
                                    "published": None}]}, {"f": feed})
     assert [doc["articles"][a]["url"] for a in new] == ["https://n.test/new"]
+
+
+def test_a_read_mends_the_summary_its_own_feed_serves_again(tmp_vault):
+    doc = store.load()
+    feed = {"id": "f", "bucket": "news", "name": "F", "tags": []}
+    item = {"url": "https://n.test/a", "title": "a", "lead": "Comments", "image": "", "published": None}
+    read._merge(doc, {"f": [item]}, {"f": feed})
+    assert read._merge(doc, {"f": [{**item, "lead": ""}]}, {"f": feed}) == []
+    assert doc["articles"][F.article_id(item["url"])]["lead"] == ""
+    # another feed carrying the same address leaves the first feed's summary alone
+    read._merge(doc, {"g": [{**item, "lead": "Other words"}]}, {"g": {**feed, "id": "g"}})
+    assert doc["articles"][F.article_id(item["url"])]["lead"] == ""
 
 
 def test_grouping_joins_an_article_to_the_nearest_story(tmp_vault, monkeypatch):

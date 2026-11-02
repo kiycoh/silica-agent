@@ -498,6 +498,11 @@ def _merge(doc: dict, results: dict, feeds: dict) -> list[str]:
         for a in arts:
             aid = F.article_id(a["url"])
             if aid in doc["articles"]:
+                # the same feed's current summary replaces the stored one: a lead the parser
+                # once got wrong ("Comments", 2026-11-01) is mended at the next read, not in
+                # the 14 days the story is kept
+                if doc["articles"][aid].get("feed") == fid:
+                    doc["articles"][aid]["lead"] = a.get("lead", "")
                 continue
             published = a.get("published")
             if published and published < now - store.KEEP_DAYS * 86400:
