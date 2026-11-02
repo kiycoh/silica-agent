@@ -73,8 +73,8 @@ b, strong { color: var(--frost); }
 :focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; border-radius: var(--r-xs); }
 .wrap {
   max-width: 96rem; margin: 0 auto;
-  padding-left: max(14px, env(safe-area-inset-left, 0px), 1.6vw);
-  padding-right: max(14px, env(safe-area-inset-right, 0px), 1.6vw);
+  padding-left: max(16px, env(safe-area-inset-left, 0px), 1.6vw);
+  padding-right: max(16px, env(safe-area-inset-right, 0px), 1.6vw);
 }
 .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: clamp(1.25rem, 3.6vw, 4.5rem); }
 .mono { font-family: var(--mono); }
@@ -87,41 +87,42 @@ html { scrollbar-color: var(--line-2) transparent; }
 
 /* ---- header ------------------------------------------------------------- */
 .top { display: flex; align-items: center; gap: 2rem; padding-block: 12px; }
-.brand { display: inline-flex; align-items: center; gap: .6rem; text-decoration: none; color: var(--frost); }
+.brand { display: inline-flex; align-items: center; gap: .5rem; text-decoration: none; color: var(--frost); }
 .brand svg { width: 22px; height: 22px; }
 .brand svg .i { fill: var(--frost); } .brand svg .s { fill: var(--accent); }
 .brand b { font: 600 15px/1 "Host Grotesk", var(--sans); letter-spacing: .09em; text-transform: uppercase; }
-.top nav { margin-left: auto; display: flex; align-items: center; gap: 1.4rem; font-size: 13.5px; }
+.top nav { margin-left: auto; display: flex; align-items: center; gap: 1.5rem; font-size: 13.5px; }
 .top nav a:not(.btn) { color: var(--ash); text-decoration: none; white-space: nowrap; transition: color var(--dur) var(--ease); }
 .top nav a:not(.btn):hover { color: var(--frost); }
 
 .btn {
-  display: inline-flex; align-items: center; gap: .55rem; min-height: 46px; padding: 0 1.25rem;
+  display: inline-flex; align-items: center; gap: .5rem; min-height: 48px; padding: 0 1.25rem;
   background: var(--accent); color: var(--on-vivid); text-decoration: none; border: 1px solid var(--accent); cursor: pointer;
   border-radius: var(--r-sm); font: 600 15px/1 var(--sans);
   transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 .btn:hover { background: var(--frost); border-color: var(--frost); }
 .btn:active { transform: translateY(1px); }
-.btn--small { min-height: 34px; padding: 0 .9rem; font-size: 13px; }
-.theme { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: transparent; color: var(--ash); cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.btn--small { min-height: 36px; padding: 0 1rem; font-size: 13px; }
+.theme { display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: transparent; color: var(--ash); cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
 .theme:hover { color: var(--accent); border-color: var(--accent); }
-.theme svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* stroke widths are in each icon's viewBox units, set so every icon draws a 1.5px line */
+.theme svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.25; stroke-linecap: round; stroke-linejoin: round; }
 .theme .sun, :root[data-theme="dark"] .theme .moon { display: none; }
 :root[data-theme="dark"] .theme .sun { display: block; }
 
 /* ---- hero: words left, Plate I right ------------------------------------- */
 .hero { padding-block: clamp(2.5rem, 5vw, 4.5rem); align-items: center; }
 .hero-copy { grid-column: 1 / span 5; }
-.hero h1 { font-size: var(--t-1); line-height: .96; letter-spacing: -.032em; font-weight: 700; }
+.hero h1 { font-size: var(--t-1); line-height: .96; letter-spacing: -.04em; font-weight: 700; }
 .hero .lede { margin-top: 1.75rem; font-size: var(--t-3); line-height: 1.45; max-width: 28rem; color: var(--text); }
-.hero .go { margin-top: 2rem; display: grid; gap: .9rem; justify-items: start; }
-.hero .go p { font-size: 14px; color: var(--ash); max-width: 24rem; }
+.hero .go { margin-top: 2rem; display: grid; gap: 1rem; justify-items: start; }
+.hero .go p { font-size: var(--t-5); color: var(--ash); max-width: 24rem; }
 .hero .go p b { font-weight: 600; }
 
 /* a figure: its head on the sheet, its print in a well */
 .plate { min-width: 0; }
-.plate-head { display: flex; justify-content: space-between; align-items: baseline; font: 500 var(--t-6)/1 var(--mono); color: var(--ash-dim); padding-bottom: .7rem; }
+.plate-head { display: flex; justify-content: space-between; align-items: baseline; font: 500 var(--t-6)/1 var(--mono); color: var(--ash-dim); padding-bottom: .75rem; }
 .plate-head b { color: var(--frost); font-weight: 600; }
 .hero-plate { grid-column: 6 / span 7; }
 .specimen { position: relative; line-height: 0; }
@@ -129,7 +130,7 @@ html { scrollbar-color: var(--line-2) transparent; }
 .specimen canvas { position: absolute; inset: 0; }
 .specimen canvas.ht { width: 100%; height: 100%; image-rendering: auto; touch-action: pan-y; }
 .plate-cap { grid-column: 1 / -1; padding-top: .75rem; font-size: var(--t-5); line-height: 1.55; color: var(--ash); max-width: 62ch; }
-.plate-cap b { font-weight: 600; }
+.plate-cap b, .figcap b { font-weight: 600; }
 
 /* ---- sections ------------------------------------------------------------ */
 .sec { padding-block: clamp(4rem, 8vw, 7rem) 0; }
@@ -140,11 +141,12 @@ html { scrollbar-color: var(--line-2) transparent; }
 .sec-body { margin-top: clamp(2.5rem, 5vw, 4rem); }
 
 /* Fig. 2: three flints at three densities */
-.densities { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(1rem, 2.2vw, 2.25rem); }
-.dens .specimen { aspect-ratio: 1 / 1; }
+.flints { grid-column: 1 / -1; }
+.densities { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(1rem, 2.2vw, 2.25rem); }
+.dens .specimen { aspect-ratio: 5 / 4; }
 .dens .specimen canvas { position: static; width: 100%; height: 100%; }
 .dens .key { margin-top: 1rem; font: 500 15px/1 var(--mono); letter-spacing: 0; white-space: nowrap; overflow: hidden; color: var(--frost); }
-.dens h3 { margin-top: .9rem; display: flex; align-items: baseline; gap: .75rem; font-size: var(--t-3); font-weight: 650; letter-spacing: -.01em; }
+.dens h3 { margin-top: 1rem; display: flex; align-items: baseline; gap: .75rem; font-size: var(--t-3); font-weight: 600; letter-spacing: -.01em; }
 .dens h3 .mono { font-size: var(--t-6); font-weight: 500; color: var(--ash-dim); }
 .dens p { margin-top: .5rem; max-width: 34ch; }
 .dens .eg { margin-top: .75rem; font-size: var(--t-5); color: var(--ash); max-width: 36ch; }
@@ -155,14 +157,14 @@ html { scrollbar-color: var(--line-2) transparent; }
 .kp-field canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
 .kp-hit { position: absolute; inset: 0; display: block; cursor: default; }
 .kp-hit.on { cursor: pointer; }
-.kp-labels span { position: absolute; transform: translate(-50%, -50%); font: 600 12px/1.1 var(--sans); color: var(--fig-ink); background: var(--fig); padding: 1px 5px; border-radius: var(--r-xs); white-space: nowrap; pointer-events: none; }
+.kp-labels span { position: absolute; transform: translate(-50%, -50%); font: 600 12px/1.1 var(--sans); color: var(--fig-ink); background: var(--fig); padding: 1px 4px; border-radius: var(--r-xs); white-space: nowrap; pointer-events: none; }
 .kp-tip { position: absolute; font: 600 13px/1.2 var(--sans); color: var(--on-vivid); background: var(--accent); padding: 4px 8px; border-radius: var(--r-xs); white-space: nowrap; pointer-events: none; transform: translate(12px, -50%); z-index: 2; }
 .kp-tip.left { transform: translate(calc(-100% - 12px), -50%); }
 /* the address and the counts share one line under the print: no list, no second button in the hero */
-.kp-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: .35rem 1.5rem; margin-top: .9rem; padding-top: .8rem; border-top: 1px solid var(--line); }
+.kp-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: .25rem 1.5rem; margin-top: 1rem; padding-top: .75rem; border-top: 1px solid var(--line); }
 .kp-addr { font: 500 13px/1.3 var(--mono); color: var(--ash); text-decoration: none; }
 .kp-addr b { font-weight: 600; color: var(--frost); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
-.kp-addr svg { display: inline-block; width: 11px; height: 11px; margin-left: .3rem; vertical-align: -1px; fill: none; stroke: var(--accent); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.kp-addr svg { display: inline-block; width: 11px; height: 11px; margin-left: .25rem; vertical-align: -1px; fill: none; stroke: var(--accent); stroke-width: 1.64; stroke-linecap: round; stroke-linejoin: round; }
 .kp-addr:hover b { color: var(--accent); }
 .kp-meta { font: 500 12px/1.3 var(--mono); color: var(--ash-dim); font-variant-numeric: tabular-nums; }
 
@@ -170,49 +172,49 @@ html { scrollbar-color: var(--line-2) transparent; }
 .demo { grid-column: 1 / -1; }
 .demo-win { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: var(--gutter); padding: var(--gutter); background: var(--well); border-radius: var(--r); height: clamp(28rem, 33vw, 30rem); }
 .demo-chat, .demo-note { background: var(--fig); border-radius: var(--r); min-height: 0; }
-.demo-chat { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; justify-items: center; padding: clamp(1rem, 2.2vw, 1.75rem) clamp(1rem, 3vw, 2.5rem) clamp(.8rem, 1.6vw, 1.25rem); }
+.demo-chat { position: relative; display: grid; grid-template-rows: minmax(0, 1fr) auto; justify-items: center; padding: clamp(1rem, 2.2vw, 1.75rem) clamp(1rem, 3vw, 2.5rem) clamp(.75rem, 1.6vw, 1.25rem); }
 /* the transcript sits on the composer, as the app's follows its bottom; a hidden step keeps its
    place, so the replay fills the block in without moving it */
 .demo-log { width: 100%; max-width: 40rem; overflow: auto; display: grid; align-content: safe end; gap: .75rem; padding-top: 2.5rem; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
-.dq { font: 650 1.0625rem/1.4 var(--sans); color: var(--frost); padding-top: .9rem; border-top: 1px solid var(--line); }
+.dq { font: 600 19px/1.4 var(--sans); color: var(--frost); padding-top: 1rem; border-top: 1px solid var(--line); }
 .dmeta { font: 500 12px/1.4 var(--mono); color: var(--ash); }
-.dsrc { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: .35rem; }
-.dsrc button { appearance: none; display: inline-flex; align-items: baseline; gap: .45rem; padding: .3rem .6rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: none; font: 500 13px/1.3 var(--sans); color: var(--frost); cursor: pointer; transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity .25s var(--ease); }
-.dsrc .n { font: 600 11px/1 var(--mono); color: var(--accent); }
+.dsrc { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: .5rem; }
+.dsrc button { appearance: none; display: inline-flex; align-items: baseline; gap: .5rem; padding: .25rem .5rem; border: 1px solid var(--line); border-radius: var(--r-sm); background: none; font: 500 13px/1.3 var(--sans); color: var(--frost); cursor: pointer; transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), opacity .25s var(--ease); }
+.dsrc .n { font: 600 12px/1 var(--mono); color: var(--accent); }
 .dsrc button:hover { background: var(--sel-hover); border-color: var(--line-2); }
 .dsrc button[aria-pressed="true"] { background: var(--sel); border-color: var(--accent); }
 .dans { font-size: 15px; line-height: 1.65; color: var(--text); }
 .cite { appearance: none; border: 0; background: none; padding: 0; font: inherit; color: var(--frost); text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; cursor: pointer; }
-.cite sup { font: 600 10px/0 var(--mono); color: var(--accent); margin-left: 2px; }
+.cite sup { font: 600 12px/0 var(--mono); color: var(--accent); margin-left: 2px; }
 .cite:hover { color: var(--accent); }
 .dmath { font-style: italic; text-align: center; color: var(--frost); font-size: 15px; line-height: 1.6; }
-.dmath sub { font-size: .7em; }
-.demo-comp { width: 100%; max-width: 40rem; margin-top: .75rem; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .75rem; padding: .6rem .6rem .6rem 1rem; border: 1px solid var(--line-2); border-radius: var(--r); font-size: 15px; line-height: 1.45; color: var(--frost); }
-.dtext { min-height: 2.9em; padding-bottom: .15rem; }
+.dmath sub { font-size: .8em; }
+.demo-comp { width: 100%; max-width: 40rem; margin-top: .75rem; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .75rem; padding: .5rem .5rem .5rem 1rem; border: 1px solid var(--line-2); border-radius: var(--r); font-size: 15px; line-height: 1.45; color: var(--frost); }
+.dtext { min-height: 2.9em; padding-bottom: 2px; }
 .dph { color: var(--ash-dim); }
 .demo-comp.typing .dph { display: none; }
 /* a steady caret: it marks where the replay is typing, it does not blink for attention */
 .demo-comp.typing .dtype::after { content: ""; display: inline-block; width: 1.5px; height: 1.1em; margin-left: 1px; vertical-align: -.2em; background: var(--frost); }
 .dsend { width: 2.25rem; height: 2.25rem; border-radius: var(--r-sm); background: var(--accent); display: grid; place-items: center; transition: background-color .15s var(--ease); }
-.dsend svg { width: 16px; height: 16px; fill: none; stroke: var(--on-vivid); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.dsend svg { width: 16px; height: 16px; fill: none; stroke: var(--on-vivid); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .demo-comp.sent .dsend { background: var(--frost); }
-.demo-again { position: absolute; top: .7rem; right: .7rem; appearance: none; display: inline-flex; align-items: center; gap: .4rem; padding: .3rem .65rem; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: none; font: 500 12px/1.2 var(--mono); color: var(--ash); cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
-.demo-again svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.demo-again { position: absolute; top: .75rem; right: .75rem; appearance: none; display: inline-flex; align-items: center; gap: .5rem; padding: .25rem .75rem; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: none; font: 500 12px/1.2 var(--mono); color: var(--ash); cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.demo-again svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.85; stroke-linecap: round; stroke-linejoin: round; }
 .demo-again:hover { color: var(--frost); border-color: var(--frost); }
 .demo [data-step], .dsrc li { transition: opacity .25s var(--ease), transform .25s var(--ease); }
 .demo .off { opacity: 0; visibility: hidden; }
 .dq.off { transform: translateY(6px); }
 .demo .w { transition: none; }
 .demo-note { display: grid; padding: clamp(1rem, 2.2vw, 1.75rem); overflow: auto; }
-.dn-empty { align-self: center; justify-self: center; max-width: 28ch; text-align: center; font-size: 14px; line-height: 1.55; color: var(--ash); }
+.dn-empty { align-self: center; justify-self: center; max-width: 28ch; text-align: center; font-size: 15px; line-height: 1.55; color: var(--ash); }
 .dn-path { font: 500 12px/1.4 var(--mono); color: var(--ash-dim); overflow-wrap: anywhere; }
-.dn h3 { margin-top: .35rem; font-size: 1.375rem; line-height: 1.2; font-weight: 650; letter-spacing: -.015em; }
-.dn-why { margin-top: .45rem; font: 500 12px/1.4 var(--mono); color: var(--ash); }
+.dn h3 { margin-top: .25rem; font-size: 22px; line-height: 1.2; font-weight: 600; letter-spacing: -.015em; }
+.dn-why { margin-top: .5rem; font: 500 12px/1.4 var(--mono); color: var(--ash); }
 .dn p:not(.dn-path):not(.dn-why) { margin-top: 1rem; font-size: 15px; line-height: 1.65; color: var(--text); }
 .dn p.dmath { color: var(--frost); }
 .dn b { font-weight: 600; color: var(--frost); }
 /* the passage the answer quotes is marked as the page loads it, left to right */
-.dn mark { color: inherit; padding: .05em .1em; background: linear-gradient(var(--sel), var(--sel)) no-repeat 0 0 / 0% 100%; -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background-size .8s cubic-bezier(.16, 1, .3, 1) .15s; }
+.dn mark { color: inherit; padding: .05em .1em; background: linear-gradient(var(--sel), var(--sel)) no-repeat 0 0 / 0% 100%; -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background-size .8s var(--ease) .15s; }
 .dn.lit mark { background-size: 100% 100%; }
 .sec-next { margin-top: clamp(4rem, 8vw, 6.5rem); }
 @media (max-width: 860px) {
@@ -230,14 +232,14 @@ html { scrollbar-color: var(--line-2) transparent; }
 .play { flex: none; width: 40px; height: 40px; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: none; color: var(--ash); cursor: pointer; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
 .play svg { width: 13px; height: 13px; fill: currentColor; }
 .play:hover, .play:focus-visible { color: var(--accent); border-color: var(--accent); }
-.steps { list-style: none; padding: .9rem 0 0; display: flex; flex-wrap: wrap; gap: .4rem 1.1rem; font: 500 var(--t-6)/1.5 var(--mono); color: var(--ash-dim); }
+.steps { list-style: none; padding: 1rem 0 0; display: flex; flex-wrap: wrap; gap: .5rem 1rem; font: 500 var(--t-6)/1.5 var(--mono); color: var(--ash-dim); }
 .steps li { transition: color var(--dur) var(--ease); }
-.steps li.on { color: var(--frost); font-weight: 700; }
+.steps li.on { color: var(--frost); font-weight: 600; }
 .steps li.bad.on { text-decoration: line-through; text-decoration-thickness: 2px; }
 .steps li.ok.on { color: var(--accent); }
 .fail-t { display: grid; gap: 1rem; align-content: start; }
 .fail-t p { max-width: 42ch; }
-.cmds { display: grid; gap: .45rem; margin-top: .5rem; }
+.cmds { display: grid; gap: .5rem; margin-top: .5rem; }
 .cmds div { display: grid; grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); gap: 1rem; align-items: baseline; font-size: 15px; }
 .cmds code { font: 500 var(--t-6)/1.3 var(--mono); color: var(--frost); }
 
@@ -245,7 +247,7 @@ html { scrollbar-color: var(--line-2) transparent; }
 .tab { grid-column: 1 / -1; overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; min-width: 640px; font-variant-numeric: tabular-nums; }
 caption { caption-side: bottom; text-align: left; padding-top: 1rem; font-size: var(--t-5); color: var(--ash); }
-th, td { text-align: left; vertical-align: baseline; padding: .8rem 1rem .8rem 0; border-bottom: 1px solid var(--line); }
+th, td { text-align: left; vertical-align: baseline; padding: .75rem 1rem .75rem 0; border-bottom: 1px solid var(--line); }
 thead th { font: 500 var(--t-6)/1.3 var(--mono); color: var(--ash-dim); border-bottom: 1px solid var(--line-2); }
 td.v { font: 600 15px/1.2 var(--mono); white-space: nowrap; color: var(--frost); }
 td.n { font: 400 var(--t-6)/1.35 var(--mono); color: var(--ash-dim); }
@@ -254,32 +256,31 @@ tr.flat td.v { color: var(--ash); }
 
 /* where it runs */
 .runs { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 clamp(1rem, 2.2vw, 2.25rem); }
-.run { border-top: 1px solid var(--line-2); padding: 1.25rem 0 2.5rem; display: grid; gap: .8rem; align-content: start; min-width: 0; }
-.run h3 { font-size: var(--t-3); font-weight: 650; display: flex; gap: .8rem; align-items: baseline; }
+.run { border-top: 1px solid var(--line-2); padding: 1.25rem 0 2.5rem; display: grid; gap: .75rem; align-content: start; min-width: 0; }
+.run h3 { font-size: var(--t-3); font-weight: 600; display: flex; gap: .75rem; align-items: baseline; }
 .run h3 .mono { font-size: var(--t-6); font-weight: 500; color: var(--ash-dim); }
 .run p { max-width: 54ch; }
-.code { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: start; background: var(--well); border-radius: var(--r-sm); padding: .3rem .3rem .3rem 1rem; min-width: 0; }
-.code pre { margin: 0; padding: .7rem 0; overflow-x: auto; font: 500 var(--t-6)/1.85 var(--mono); color: var(--frost); }
+.code { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: start; background: var(--well); border-radius: var(--r-sm); padding: .25rem .25rem .25rem 1rem; min-width: 0; }
+.code pre { margin: 0; padding: .75rem 0; overflow-x: auto; font: 500 var(--t-6)/1.85 var(--mono); color: var(--frost); }
 .code pre .pr { color: var(--ash-dim); user-select: none; }
 .copy { appearance: none; border: 1px solid var(--line-2); background: transparent; color: var(--ash); min-height: 32px; padding: 0 .75rem; margin-top: .25rem; cursor: pointer; border-radius: var(--r-sm); font: 400 12px/1 var(--sans); transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease); }
 .copy:hover { color: var(--accent); border-color: var(--accent); }
 .fine { font-size: var(--t-5); color: var(--ash); }
-.run p code, .dens p code, .figcap code { font: 500 .82em/1 var(--mono); color: var(--frost); }
-.fine code { font: 500 .85em/1 var(--mono); color: var(--frost); }
+.run p code, .dens p code, .figcap code { font: 500 max(.82em, 12px)/1 var(--mono); color: var(--frost); }
+.fine code { font: 500 max(.85em, 12px)/1 var(--mono); color: var(--frost); }
 .fine a, .run a, .facts a, .legal a { color: var(--frost); text-decoration-color: var(--accent); }
 
 /* your notes */
 .facts { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2rem clamp(1rem, 2.2vw, 2.25rem); }
-.facts dt { font-weight: 650; font-size: var(--t-3); color: var(--frost); }
-.facts dd { margin-top: .6rem; max-width: 30ch; }
+.facts dt { font-weight: 600; font-size: var(--t-3); color: var(--frost); }
+.facts dd { margin-top: .5rem; max-width: 30ch; }
 .legal { grid-column: 1 / -1; margin-top: 2.5rem; display: flex; gap: 1.5rem; font-size: var(--t-5); color: var(--ash); }
 
 /* close */
 .close { padding-block: clamp(4rem, 8vw, 7rem); align-items: end; }
 .close-t { grid-column: 1 / span 6; display: grid; gap: 1.5rem; justify-items: start; }
-.close-t h2 { font-size: var(--t-1); line-height: .96; letter-spacing: -.032em; font-weight: 700; }
+.close-t h2 { font-size: var(--t-1); line-height: .96; letter-spacing: -.04em; font-weight: 700; }
 .close-t p { font-size: var(--t-3); max-width: 28rem; }
-.close-t small { font-size: var(--t-5); color: var(--ash); }
 .addr { user-select: all; color: var(--frost); }
 .close-fig { grid-column: 8 / span 5; }
 .close-fig .specimen { aspect-ratio: 1 / 1; }
@@ -287,7 +288,7 @@ tr.flat td.v { color: var(--ash); }
 .close-fig .specimen canvas.ht { image-rendering: auto; }
 footer { padding-block: 1.5rem 1.25rem; display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; font-size: var(--t-5); color: var(--ash-dim); }
 footer a { color: var(--ash); text-decoration: none; } footer a:hover { color: var(--frost); }
-footer .fill { margin-left: auto; max-width: 120ch; font-size: .6875rem; line-height: 1.45; }
+footer .fill { margin-left: auto; max-width: 120ch; font-size: var(--t-6); line-height: 1.45; }
 
 @media (max-width: 1020px) { .top nav .nav-more { display: none; } }
 @media (max-width: 1100px) {
@@ -305,7 +306,7 @@ footer .fill { margin-left: auto; max-width: 120ch; font-size: .6875rem; line-he
   .runs { grid-template-columns: minmax(0, 1fr); }
   .close-t, .close-fig { grid-column: 1 / -1; }
   .close-fig { margin-top: 3rem; max-width: 26rem; }
-  .cmds div { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
+  .cmds div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 }
 @media (max-width: 520px) {
   table { min-width: 0; }
@@ -374,6 +375,8 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
       <p>Before Silica changes a note it sorts the change by how much the vault already agrees with it: the less agreement, the less ink it puts down on its own. Every answer names the notes it read.</p>
     </div>
     <div class="grid sec-body">
+      <figure class="plate flints" aria-labelledby="fig2-cap">
+      <div class="plate-head"><span>Fig. 2</span><b>Taf. II</b></div>
       <div class="densities">
         <figure class="dens">
           <div class="specimen"><canvas data-mode="full" aria-label="A flint core in solid ink"></canvas></div>
@@ -397,11 +400,12 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
           <p class="eg">A link to a note that does not exist, seen twice: create the note, rename one, or leave it.</p>
         </figure>
       </div>
+      <figcaption class="figcap" id="fig2-cap"><b>Three flints at three densities,</b> smaller as the tier drops: a core with its flakes fitted back on and two rough flints from the Yorkshire Wolds, all from John Evans's <i>Ancient Stone Implements</i>. The three tiers and their rules are the analyst plan in Silica's source (<code class="mono">silica/kernel/analyst_plan.py</code>); a move, a delete or a bulk write is never in the first tier.</figcaption>
+      </figure>
     </div>
-    <div class="grid"><p class="figcap" style="grid-column:1/-1">Fig. 2. Three flints at three densities, smaller as the tier drops: a core with its flakes fitted back on and two rough flints from the Yorkshire Wolds, all from John Evans's <i>Ancient Stone Implements</i>. The three tiers and their rules are the analyst plan in Silica's source (<code class="mono">silica/kernel/analyst_plan.py</code>); a move, a delete or a bulk write is never in the first tier.</p></div>
     <div class="grid sec-body sec-next">
       <figure class="plate demo" id="demo" aria-labelledby="fig3-cap">
-        <div class="plate-head"><span>Fig. 3</span><b>Taf. II</b></div>
+        <div class="plate-head"><span>Fig. 3</span><b>Taf. III</b></div>
         <div class="demo-win">
           <div class="demo-chat">
             <button class="demo-again" id="demo-again" type="button"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v3h3"/></svg>Replay</button>
@@ -464,13 +468,13 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
 <div class="sheet">
   <section class="sec wrap" id="how-it-writes" aria-labelledby="hold-h">
     <div class="grid sec-head">
-      <h2 id="hold-h">How it writes?</h2>
+      <h2 id="hold-h">How does it write?</h2>
       <p>Every note a run writes passes parse, structure and link checks, and is read back after it lands. One that fails is sent back. The note stays as it was.</p>
     </div>
     <div class="grid sec-body">
       <div class="fail">
         <figure class="plate" aria-labelledby="fig4-cap">
-          <div class="plate-head"><span>Fig. 4</span><b>Taf. III</b></div>
+          <div class="plate-head"><span>Fig. 4</span><b>Taf. IV</b></div>
           <canvas id="cv-4" width="900" height="420" role="img" aria-label="The note Teorema di Bayes is overwritten by a summary that drops its frontmatter and heading, breaks apart, and is restored as it was"></canvas>
           <div class="fig-under">
             <ol class="steps" id="steps" aria-hidden="true">
@@ -519,8 +523,8 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
 
   <section class="sec wrap" id="runs" aria-labelledby="r-h">
     <div class="grid sec-head">
-      <h2 id="r-h">Where it runs?</h2>
-      <p>Silica is open source. It runs on your computer, inside Claude Code and inside Obsidian; a hosted pilot runs it in the browser for people invited one by one.</p>
+      <h2 id="r-h">Where does it run?</h2>
+      <p>Silica runs on your computer, inside Claude Code and inside Obsidian; a hosted pilot runs it in the browser for people invited one by one.</p>
     </div>
     <div class="grid sec-body">
       <div class="runs">
@@ -545,7 +549,7 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
         </article>
         <article class="run">
           <h3>In your browser <span class="mono">pilot, full</span></h3>
-          <p>Nothing to install: notes, files and chats are stored on a server in the EU, in Turin. Seats are given one by one, and all of them are taken.</p>
+          <p>Nothing to install: you work in the browser, on the pilot's server. All seats are taken.</p>
           <p class="fine">To ask for one, write to <span class="addr">kiycoh@proton.me</span> with what you would use it for. Already invited? <a href="https://app.silica-agent.dev" rel="noopener">Open Silica</a>.</p>
         </article>
       </div>
@@ -554,15 +558,15 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
 
   <section class="sec wrap sec-last" id="notes" aria-labelledby="n-h">
     <div class="grid sec-head">
-      <h2 id="n-h">Hosted Pilot in EU</h2>
-      <p>The pilot runs on one server, for people invited one by one. Three facts from its privacy notice and terms, and one for after it.</p>
+      <h2 id="n-h">Hosted pilot in the EU</h2>
+      <p>The pilot runs on one server. Where your notes are kept, what it costs, its license, and what changes after the pilot.</p>
     </div>
     <div class="grid sec-body">
       <dl class="facts">
         <div><dt>Kept in Turin</dt><dd>Notes, files and chats are stored on a server in the EU, in Turin.</dd></div>
-        <div><dt>ZDR compliant</dt><dd>For users after the pilot, every model call goes to endpoints that keep no data. In the pilot two still do: image reading and result ordering.</dd></div>
         <div><dt>Free, by invitation</dt><dd>There are no payments. You must be 18 or older.</dd></div>
         <div><dt>Open source</dt><dd>AGPL-3.0-or-later. Read the code or run it yourself, from <a href="https://github.com/kiycoh/silica-agent" rel="noopener">GitHub</a>.</dd></div>
+        <div><dt>After the pilot</dt><dd>Every model call goes to endpoints that keep no data. In the pilot two still do: image reading and result ordering.</dd></div>
       </dl>
       <p class="legal"><a href="https://app.silica-agent.dev/privacy" rel="noopener">Privacy notice</a><a href="https://app.silica-agent.dev/terms" rel="noopener">Terms</a></p>
     </div>
@@ -572,13 +576,12 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
 <div class="sheet">
   <section class="close wrap grid" aria-labelledby="c-h">
     <div class="close-t">
-      <h2 id="c-h">Bring your own notes.</h2>
+      <h2 id="c-h">Bring your own notes</h2>
       <p>Install Silica, point it at a folder of notes, and ask the first question.</p>
       <a class="btn" href="https://github.com/kiycoh/silica-agent" rel="noopener">Get it on GitHub <span aria-hidden="true">&rarr;</span></a>
-      <small>The hosted pilot is full. To ask for a seat, write to <span class="addr">kiycoh@proton.me</span>.</small>
     </div>
     <figure class="close-fig plate">
-      <div class="plate-head"><span>Fig. 5</span><b>Taf. IV</b></div>
+      <div class="plate-head"><span>Fig. 5</span><b>Taf. V</b></div>
       <div class="specimen" id="spec-5"><canvas id="cv-5" role="img" aria-label="Silica's mark, a square and three nested angles, printed one-bit"></canvas></div>
       <figcaption class="plate-cap"><b>Illustration.</b> Silica's mark, its square and three angles drawn as a grey relief and printed one-bit as it comes into view.</figcaption>
     </figure>
@@ -845,12 +848,14 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
   }
 
   // the stones stand on one line near the foot of their boxes, smaller as the tier drops: Written
-  // full, Proposed medium, Asked the smallest (owner, 2026-11-01)
+  // full, Proposed medium, Asked the smallest (owner, 2026-11-01). The boxes went from square to
+  // 5:4 on 2026-11-01, the square left up to 220px of paper over the smaller stones; a stone is
+  // sized by the box's width so it keeps the size it had in the square, and Written still clears the top
   const STONE_SCALE = { full: 1, screen: .74, ghost: .52 };
   function stoneBox(mode, W, H) {
-    const im = stone[mode], D = .92 * Math.min(W, H) * STONE_SCALE[mode], k = Math.min(D / im.naturalWidth, D / im.naturalHeight);
+    const im = stone[mode], D = .92 * W * STONE_SCALE[mode], k = Math.min(D / im.naturalWidth, D / im.naturalHeight);
     const w = im.naturalWidth * k, h = im.naturalHeight * k;
-    return { x: (W - w) / 2, y: H * .9 - h, w, h };
+    return { x: (W - w) / 2, y: H * .95 - h, w, h };
   }
   function stoneAt(mode, W, H) {
     const c = document.createElement("canvas"); c.width = W; c.height = H;
