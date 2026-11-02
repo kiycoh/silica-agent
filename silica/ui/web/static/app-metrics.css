@@ -46,6 +46,37 @@
   --c-track: #CFE3E9;
 }
 
+/* Examine's and Explore's chart tables print in graphite (ADR-0146 amendment 2026-11-01, which
+   extends ADR-0069 rule 12 to every chart here): teal is what you press (DESIGN.md, the Clickable
+   Teal Rule), and the one mark a card is about takes frost, as the E(vault) total already did.
+   Scoped to the two views because the teal ramp above still themes the diagrams inside notes
+   (app-notes.js reads it from the root). Measured against the card (--page) and the view
+   (--sheet), WCAG contrast and OKLCH L, 2026-11-01:
+     graphite  ord-4 #DADEE5 11.1:1  .90 | ord-3 #BDC1C8 8.3:1  .81 | ord-2 #A0A5AC 6.1:1  .72 |
+               ord-1 #858990  4.3:1  .63 | track #44484E 1.6:1 .40 | ink --ash-dim 5.4:1 .69
+     paper     ord-4 #262118 15.7:1  .25 | ord-3 #453F35 10.3:1 .37 | ord-2 #665F55 6.2:1  .49 |
+               ord-1 #898277  3.7:1  .61 | track #DED6CB 1.4:1 .88 | ink --ash-dim 6.4:1 .48
+   every step at 3:1 or more on both planes, where the teal ramp's recessive step was 2.6:1, and
+   frost over a tile at its full 45% tint still 6.2:1 (graphite) and 8.7:1 (paper). */
+#view-metrics,
+#view-graph {
+  --c-accent: var(--ash-dim);
+  --c-ord-4: #DADEE5;
+  --c-ord-3: #BDC1C8;
+  --c-ord-2: #A0A5AC;
+  --c-ord-1: #858990;
+  --c-track: #44484E;
+}
+
+:root[data-theme="light"] #view-metrics,
+:root[data-theme="light"] #view-graph {
+  --c-ord-4: #262118;
+  --c-ord-3: #453F35;
+  --c-ord-2: #665F55;
+  --c-ord-1: #898277;
+  --c-track: #DED6CB;
+}
+
 /* .frame-loading is inset:0, so the view has to be its containing block —
    without this the overlay resolves against the viewport and blanks the whole
    app (header and sidebar included) while the report computes. #view-graph
@@ -257,7 +288,6 @@
 }
 
 .ev-n {
-  font-family: var(--mono);
   font-size: 12px;
   color: var(--ash-dim);
   font-variant-numeric: tabular-nums;
@@ -283,7 +313,7 @@
   height: 22px;
   padding: 0 0.6rem;
   background: none;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-2);
   border-radius: var(--r-xs);
   font-family: var(--sans);
   font-size: 12px;
@@ -293,8 +323,8 @@
 }
 
 .mini:hover {
-  border-color: var(--line-2);
-  color: var(--frost);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* The one that changes the vault carries the one interactive colour. It drafts
@@ -340,7 +370,6 @@
 
 .ev-tc {
   margin-top: 0.45rem;
-  font-family: var(--mono);
   letter-spacing: 0;
   text-transform: none;
   font-variant-numeric: tabular-nums;
@@ -361,8 +390,10 @@
   background: var(--line-2);
 }
 
+/* the bin the caption is about: frost, the chart's one lead; teal is what you press
+   (ADR-0146 amendment 2026-11-01) */
 .hist i.hot {
-  background: var(--accent);
+  background: var(--frost);
 }
 
 /* --- one figure, when the column is constant --------------------------------
@@ -664,6 +695,11 @@
   background: var(--ash-dim);
 }
 
+/* the one row the card is about: frost, the E(vault) total's ink (ADR-0146 amendment 2026-11-01) */
+.bar.accent {
+  background: var(--frost);
+}
+
 /* The waterfall's other sign: an outline in the same ink, so lowering and
    raising differ by fill weight and survive greyscale. Inset rather than a
    border, so a 2px step still paints its whole width. */
@@ -852,7 +888,7 @@
 }
 
 .sc-dot.focal {
-  fill: var(--c-accent);
+  fill: var(--frost);
   fill-opacity: 1;
   stroke: var(--frost);
 }
@@ -883,7 +919,7 @@
 /* Drawn over the field rather than by restyling the hovered circle, which
    would take the whole field's DOM with it on every pointer move. */
 .sc-ring {
-  fill: var(--c-accent);
+  fill: var(--frost);
   fill-opacity: 0.9;
   stroke: var(--text);
   stroke-width: 1.2;
@@ -914,7 +950,7 @@
 .sc-al {
   fill: var(--ash-dim);
   font-size: 12px;
-  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 
 .sc-q {
