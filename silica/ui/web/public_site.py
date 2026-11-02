@@ -280,7 +280,9 @@ def cover(nodes: list[str], pairs: set[tuple[str, str]], titles: dict[str, str])
     from silica.kernel.recall.graph_export import hub_of, louvain_sorted
 
     g = nx.Graph()
-    g.add_edges_from((a, b) for a, b in pairs if a != b)
+    # sorted: Louvain and the layout both follow insertion order, and the view's preview and the
+    # published vault reach the same links in different orders (4 areas against 5, 2026-11-02)
+    g.add_edges_from(sorted((a, b) for a, b in pairs if a != b))
     if g.number_of_nodes() > _COVER_MAX:
         g = g.subgraph(sorted(g.nodes, key=lambda p: (-g.degree(p), p))[:_COVER_MAX]).copy()
     drawn = sorted(g.nodes)
@@ -290,6 +292,7 @@ def cover(nodes: list[str], pairs: set[tuple[str, str]], titles: dict[str, str])
     names = [titles[hub_of(members, deg)] for members in areas]
     pos = nx.spring_layout(g, seed=7, k=1.6 / max(len(drawn), 1) ** 0.5) if len(drawn) > 1 \
         else {n: (0.0, 0.0) for n in drawn}
+    pos = _lie_flat(pos)
     xs = [pos[n][0] for n in drawn] or [0.0]
     ys = [pos[n][1] for n in drawn] or [0.0]
     sx, sy = (max(xs) - min(xs)) or 1.0, (max(ys) - min(ys)) or 1.0
@@ -302,6 +305,22 @@ def cover(nodes: list[str], pairs: set[tuple[str, str]], titles: dict[str, str])
         "areas": [[names[i], len(m)] for i, m in enumerate(areas)],
         "unlinked": [n for n in nodes if n not in at],
     }
+
+
+def _lie_flat(pos: dict) -> dict:
+    """The layout turned so its longest spread runs across: the cover is 46:21, each axis is
+    stretched to fill it, and a layout whose spread runs down came out as two flat smears (the
+    Silica Wiki's two groups and their one bridge, 2026-11-02)."""
+    import numpy as np
+
+    if len(pos) < 3:
+        return pos
+    keys = list(pos)
+    xy = np.array([pos[k] for k in keys], dtype=float)
+    xy -= xy.mean(axis=0)
+    _vals, vecs = np.linalg.eigh(np.cov(xy.T))
+    turned = xy @ vecs[:, ::-1]  # the largest spread first, as x
+    return {k: (float(turned[i, 0]), float(turned[i, 1])) for i, k in enumerate(keys)}
 
 
 def _svg(c: dict) -> str:

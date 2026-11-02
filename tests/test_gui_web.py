@@ -3082,7 +3082,7 @@ def test_every_view_row_says_what_the_view_is_for():
 
     html = (STATIC_SRC / "index.html").read_text(encoding="utf-8")
     rows = re.findall(r'<button type="button" class="(?:rm )?tab" data-tab="(\w+)"[^>]*?(?: data-tip="([^"]*)")?>', html)
-    # Six views (Discover joined first, ADR-0137; Public page, ADR-0143), each
+    # Six views (Discover joined first, ADR-0137; Page, ADR-0143 and ADR-0151), each
     # in the rail and the drawer.
     assert len(rows) == 12 and all(tip for _tab, tip in rows), rows
     assert "<span>Calendar</span>" in html and "<span>Plan</span>" not in html

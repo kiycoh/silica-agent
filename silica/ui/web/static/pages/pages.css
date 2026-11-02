@@ -164,7 +164,7 @@ a.vcard:hover h2 { text-decoration: underline; text-decoration-color: var(--acce
 .facts dt { color: var(--ash-dim); }
 .facts dd { color: var(--frost); }
 .vp-save { display: grid; gap: .75rem; justify-items: start; }
-.vp-save .row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.vp-save .row, .vp-side > .row, .art > .row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: flex-start; }
 .vp-areas, .vp-notes, .vp-more { grid-column: 1 / -1; }
 .vp-more { display: grid; gap: 1rem; }
 .vp-more h2, .vp-areas-head h2, .vp-notes h2 { font-size: 20px; letter-spacing: -.02em; font-weight: 700; }
@@ -178,7 +178,8 @@ details > summary::-webkit-details-marker { display: none; }
 .panel .sel { width: 100%; height: 32px; padding: 0 10px; border-radius: var(--r-sm); background: var(--slate-2); border: 1px solid var(--line-2); color: var(--frost); }
 .panel textarea.sel { height: auto; padding: 8px 10px; resize: vertical; }
 .panel .dim, .dim { font-size: 12px; color: var(--ash-dim); }
-.panel .row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; }
+.panel .row { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; width: 100%; }
+.panel .other .sel { flex: 1 1 12rem; width: auto; }
 .vp-areas-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1.25rem; padding-bottom: .9rem; border-bottom: 1px solid var(--line); }
 .vp-areas-head p { font-size: 13px; color: var(--ash); }
 .vp-areas-head .sum { margin-left: auto; color: var(--frost); }

@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from silica.config import VIEWS, served_views, withheld
 from tests.webassets import WEB as STATIC_SRC
 
-# Public page (ADR-0143) is a view added after ADR-0140, so paid by default
+# Page (ADR-0143, ADR-0151) is a view added after ADR-0140, so paid by default
 PAID = {"discover", "learn", "calendar", "public"}
 
 

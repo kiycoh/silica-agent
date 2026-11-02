@@ -1,17 +1,26 @@
-// The public page (ADR-0143): the view that says what goes out before it
-// goes, the globes on the tree and on the note, the strip over a saved note,
-// and the confirm a public page's "Save to Silica" lands on.
+// The Page (ADR-0143, ADR-0151): the view that holds the account's vaults, up to ten, each a
+// folder of its vault, Off, Public or Private; the globes on the tree and on the note; the strip
+// over a saved note; the invitations to Private vaults; and the confirm a page's "Save to Silica"
+// lands on, for one note or for the areas of a whole vault.
 
 const PUB_PATHS = '<circle cx="12" cy="12" r="9"></circle><ellipse cx="12" cy="12" rx="4" ry="9"></ellipse><line x1="3" y1="12" x2="21" y2="12"></line>';
-const pubSvg = (size, struck) => `<svg aria-hidden="true" focusable="false" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${PUB_PATHS}${struck ? '<line x1="4" y1="4" x2="20" y2="20"></line>' : ""}</svg>`;
+const LOCK_PATHS = '<rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path>';
+const pubSvg = (size, struck, lock) => `<svg aria-hidden="true" focusable="false" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${lock ? LOCK_PATHS : PUB_PATHS}${struck ? '<line x1="4" y1="4" x2="20" y2="20"></line>' : ""}</svg>`;
 
 let pubState = null;  // GET /public, the one source every globe draws from
+let pubCur = "";      // the slug of the vault the view has open
+let pubInvites = [];  // GET /vault/invitations
+let pubAdding = false;
 let pubResult = null; // the last Publish, for the line under the button
 
 const pubName = (path) => path.split("/").pop().replace(/\.md$/, "");
 const pubLive = () => !!(pubState && pubState.available);
 const pubOf = (path) => (pubState && pubState.notes[path]) || "off";
-const pubFolderOn = (f) => !!(pubState && pubState.folders.includes(f));
+const pubVaultBy = (slug) => (pubState ? pubState.vaults.find((v) => v.slug === slug) : null);
+const pubVaultAt = (folder) => (pubState ? pubState.vaults.find((v) => v.folder === folder) : null);
+const pubVaultOfNote = (path) => pubVaultBy(pubState && pubState.of[path]);
+const pubCount = (n) => `${n.toLocaleString("en-GB")} ${n === 1 ? "note" : "notes"}`;
+const pubCurVault = () => pubVaultBy(pubCur) || (pubState && pubState.vaults[0]) || null;
 
 // Silica's own folders and every dot-folder have no globe (ADR-0143 point 3);
 // the server refuses them too, this only keeps the button from being offered.
@@ -44,30 +53,72 @@ async function loadPublicState() {
   return pubState;
 }
 
-function paintGlobe(b, st, size) {
-  b.setAttribute("aria-pressed", String(st === "on"));
-  b.classList.toggle("on", st === "on");
-  b.classList.toggle("struck", st === "struck");
-  // on, but the whole page is off: lit in the dim ink, so the choice shows
-  // and nothing pretends to be online
-  b.classList.toggle("paused", st === "on" && !pubState.page);
-  b.innerHTML = pubSvg(size, st === "struck");
+async function loadInvitations() {
+  try {
+    const r = await fetch("/vault/invitations");
+    pubInvites = r.ok ? (await r.json()).invitations : [];
+  } catch {
+    // No list is no invitation shown; nothing is lost, the relay keeps offering it.
+    pubInvites = [];
+  }
 }
 
-function pubTitle(st, name) {
-  if (st === "on") return `on your public page: take ${name} off`;
-  if (st === "struck") return `left out of a public folder: put ${name} back`;
-  return `put ${name} on your public page`;
+// A vault's mark: the globe in the signal when Public, a lock when Private, the globe dim when Off.
+function vaultMark(vis, size) {
+  const s = mkEl("span", `pg-mark pg-${vis}`);
+  s.innerHTML = pubSvg(size, false, vis === "private");
+  return s;
+}
+
+function paintGlobe(b, st, size, vault) {
+  b.setAttribute("aria-pressed", String(st === "on"));
+  b.classList.toggle("on", st === "on" && vault && vault.visibility === "public");
+  b.classList.toggle("priv", st === "on" && vault && vault.visibility === "private");
+  b.classList.toggle("struck", st === "struck");
+  // on, but its vault is Off: lit in the dim ink, so the choice shows and nothing pretends to
+  // be online
+  b.classList.toggle("paused", st === "on" && (!vault || vault.visibility === "off"));
+  b.innerHTML = pubSvg(size, st === "struck", false);
+}
+
+function pubTitle(st, name, vault) {
+  const where = vault ? vault.title : "its vault";
+  if (st === "on") return `goes out with ${where}: leave ${name} out`;
+  if (st === "struck") return `left out of ${where}: put ${name} back`;
+  return `put ${name} in ${where}`;
 }
 
 function syncTreePublic() {
+  const full = pubState && pubState.vaults.length >= pubState.max;
   for (const b of document.querySelectorAll("#tree .tree-pub")) {
     const folder = b.dataset.pubFolder;
-    b.hidden = !pubLive() || pubNever(folder ? folder + "/_" : b.dataset.pub);
-    if (b.hidden) continue;
-    const st = folder ? (pubFolderOn(folder) ? "on" : "off") : pubOf(b.dataset.pub);
-    paintGlobe(b, st, 11);
-    b.title = pubTitle(st, folder ? `the folder ${folder}` : pubName(b.dataset.pub));
+    b.classList.remove("vault", "on", "priv", "struck", "paused");
+    if (!pubLive() || pubNever(folder ? folder + "/_" : b.dataset.pub)) { b.hidden = true; continue; }
+    if (folder) {
+      const v = pubVaultAt(folder);
+      if (v) {
+        b.hidden = false;
+        b.classList.add("vault", v.visibility === "public" ? "on" : v.visibility === "private" ? "priv" : "paused");
+        b.innerHTML = pubSvg(11, false, v.visibility === "private");
+        b.title = `the vault ${v.title} on your Page, ${v.visibility === "off" ? "Off" : v.visibility === "public" ? "Public" : "Private"}: open it`;
+        b.setAttribute("aria-pressed", String(v.visibility !== "off"));
+        continue;
+      }
+      // a folder inside a vault, or around one, cannot be a vault itself (ADR-0151 point 1)
+      const near = pubState.vaults.some((x) => folder.startsWith(x.folder + "/") || x.folder.startsWith(folder + "/"));
+      b.hidden = near || full;
+      if (b.hidden) continue;
+      b.innerHTML = pubSvg(11, false, false);
+      b.setAttribute("aria-pressed", "false");
+      b.title = `make the folder ${folder} a vault on your Page`;
+      continue;
+    }
+    const v = pubVaultOfNote(b.dataset.pub);
+    b.hidden = !v;
+    if (!v) continue;
+    const st = pubOf(b.dataset.pub);
+    paintGlobe(b, st, 11, v);
+    b.title = pubTitle(st, pubName(b.dataset.pub), v);
   }
 }
 
@@ -76,25 +127,40 @@ async function pubPost(url, body) {
   try {
     r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   } catch {
-    notify("the public page could not be reached");
+    notify("your Page could not be reached");
     return null;
   }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
-    notify(data.detail || "the public page did not change");
+    notify(data.detail || "your Page did not change");
     return null;
   }
-  pubState = data;
-  syncTreePublic();
-  syncNotePub();
-  if (activeTab === "public") renderPublic();
+  if (data.vaults) {
+    pubState = data;
+    syncTreePublic();
+    syncNotePub();
+    if (activeTab === "public") renderPublic();
+  }
   return data;
+}
+
+function openVault(slug) {
+  pubCur = slug;
+  pubAdding = false;
+  if (activeTab !== "public") showTab("public");
+  else renderPublic(true);
 }
 
 async function togglePublicRow(b) {
   if (!pubLive()) return;
   const folder = b.dataset.pubFolder;
-  if (folder) return pubPost("/public/folder", { folder, on: !pubFolderOn(folder) });
+  if (folder) {
+    const v = pubVaultAt(folder);
+    if (v) return openVault(v.slug);
+    const r = await pubPost("/public/vault", { folder });
+    if (r && r.added) openVault(r.added);
+    return;
+  }
   const path = b.dataset.pub;
   const on = pubOf(path) !== "on";
   // Someone else's note asks first, naming them (ADR-0143 point 10), and the
@@ -114,18 +180,19 @@ function syncNotePub() {
   if (!b) return;
   const path = lastViewedPath;
   $("#note-pub-pop").hidden = true;
-  b.hidden = !pubLive() || !path || pubNever(path);
+  const v = path && pubLive() ? pubVaultOfNote(path) : null;
+  b.hidden = !v || pubNever(path);
   if (b.hidden) return;
   const st = pubOf(path);
-  paintGlobe(b, st, 14);
-  b.dataset.tip = pubTitle(st, "this note");
+  paintGlobe(b, st, 14, v);
+  b.dataset.tip = pubTitle(st, "this note", v);
 }
 
 function askCredit(path) {
   const pop = $("#note-pub-pop");
   const who = pubCredit(path);
   pop.querySelector(".np-text").textContent =
-    `This note is ${who}'s. Your page will list it under Saved from others, name ${who} as its author and link the original.`;
+    `This note is ${who}'s. Your vault will name ${who} as its author and link the original.`;
   pop.dataset.path = path;
   pop.hidden = false;
   pop.querySelector('[data-np="yes"]').focus();
@@ -161,19 +228,17 @@ $("#note-pub-pop").addEventListener("click", (e) => {
 
 async function loadPublicView() {
   if (!pubState) $("#public-body").replaceChildren(mkEl("p", "pp-dim", "Reading the vault…"));
-  await loadPublicState();
-  renderPublic();
-  // the page builds itself each time the view opens; a later render only redraws it
-  loadPubCover(true);
+  await Promise.all([loadPublicState(), loadInvitations()]);
+  renderPublic(true);
 }
 
 // --- the cover (ADR-0146 point 4) ----------------------------------------------
-// The page's own graph printed in one bit above the boxes: every note that goes out is a mark,
-// every link between two of them a line, ink on the well and nothing in between. When the view
-// opens it builds as the landing's Fig. 1 does: notes from the middle of the layout outward,
-// then each link drawn out from its first note, all at full ink, in 1.7 s.
+// The open vault's own graph printed in one bit under its head: every note that goes out is a
+// mark, every link between two of them a line, ink on the well and nothing in between. When a
+// vault opens it builds as the landing's Fig. 1 does: notes from the middle of the layout
+// outward, then each link drawn out from its first note, all at full ink, in 1.7 s.
 let pubCover = null, pubCoverK = 1, pubCoverRun = 0, pubCoverHover = -1, pubCoverRank = null, pubCoverAdj = null;
-let pubCoverEl = null;
+let pubCoverEl = null, pubCoverOf = "";
 
 function pubCoverFigure() {
   if (pubCoverEl) return pubCoverEl;
@@ -191,23 +256,31 @@ function pubCoverFigure() {
   return pubCoverEl;
 }
 
-async function loadPubCover(build) {
+async function loadPubCover(slug, build) {
   let c = null;
   try {
-    const r = await fetch("/public/cover");
+    const r = await fetch("/public/cover?vault=" + encodeURIComponent(slug));
     c = r.ok ? await r.json() : null;
   } catch {
-    // A page without its picture still says what goes out: the boxes do not need it.
+    // A vault without its picture still says what goes out: the boxes do not need it.
     c = null;
   }
+  // the person moved to another vault while this one's picture was on its way
+  if (pubCurVault() && pubCurVault().slug !== slug) return;
+  pubCoverOf = slug;
   pubCover = c && c.n.length ? c : null;
   pubCoverRank = null;
   pubCoverAdj = null;
-  if (pubCoverEl) pubCoverEl.hidden = !(pubCover || (pubState && pubState.out.length));
+  if (!pubCoverEl) return;
+  pubCoverEl.hidden = !pubCover;
+  const areas = $("#public-body .pg-areas");
+  if (areas) areas.textContent = c && c.areas ? `${c.areas.length} ${c.areas.length === 1 ? "area" : "areas"}` : "";
   if (!pubCover) return;
   const cap = pubCoverEl.querySelector("figcaption");
-  cap.textContent = `${pubCount(pubCover.n.length)} · ${pubCover.e.length} ${pubCover.e.length === 1 ? "link" : "links"}`;
-  pubCoverEl.querySelector("canvas").setAttribute("aria-label", `The page as a graph: ${cap.textContent}`);
+  const unl = pubCover.unlinked || 0;
+  cap.textContent = `${pubCover.n.length.toLocaleString("en-GB")} notes drawn · ${pubCover.e.length.toLocaleString("en-GB")} ${pubCover.e.length === 1 ? "link" : "links"}`
+    + (unl ? ` · ${unl.toLocaleString("en-GB")} with no link, in the vault but not in the picture` : "");
+  pubCoverEl.querySelector("canvas").setAttribute("aria-label", `This vault as a graph: ${cap.textContent}`);
   const run = ++pubCoverRun;
   if (!build || matchMedia("(prefers-reduced-motion: reduce)").matches) { pubCoverK = 1; drawPubCover(); return; }
   pubCoverK = 0;
@@ -231,7 +304,7 @@ function drawPubCover() {
   if (w < 40 || h < 40) return;
   const N = pubCover.n, E = pubCover.e, pad = 14;
   if (!pubCoverRank) {
-    // the order the page builds in: from the middle of the layout outward
+    // the order the vault builds in: from the middle of the layout outward
     const cx = N.reduce((t, n) => t + n[0], 0) / N.length, cy = N.reduce((t, n) => t + n[1], 0) / N.length;
     const d = N.map((n) => Math.hypot(n[0] - cx, n[1] - cy));
     pubCoverRank = new Float32Array(N.length);
@@ -260,7 +333,7 @@ function drawPubCover() {
   // a clear ring of the well first, so a note reads as a mark and not as a crossing
   for (let i = 0; i < N.length; i++) {
     if (K < at(i)) continue;
-    const rr = N[i][2] >= 12 ? 2 : 1;
+    const rr = N[i][3] >= 12 ? 2 : 1;
     disc(X(i), Y(i), rr + 1, ground); disc(X(i), Y(i), rr, ink);
   }
   if (pubCoverHover >= 0 && K >= 1) {
@@ -286,7 +359,7 @@ function pubCoverPoint(ev) {
   const tip = box.querySelector(".pp-ctip");
   if (best < 0) { tip.hidden = true; return; }
   const n = pubCover.n[best], tx = pad + n[0] * (w - 2 * pad);
-  tip.textContent = n[3];
+  tip.textContent = n[4];
   tip.hidden = false;
   tip.style.left = `${tx}px`;
   tip.style.top = `${pad + n[1] * (h - 2 * pad)}px`;
@@ -295,118 +368,290 @@ function pubCoverPoint(ev) {
 
 new MutationObserver(() => drawPubCover()).observe(document.documentElement, { attributeFilter: ["data-theme"] });
 
-function ppBox(title, count, items, { wide = false, none = "" } = {}) {
+function ppBox(title, count, { wide = false } = {}) {
   const box = mkEl("section", "pp-box" + (wide ? " wide" : ""));
   const h = mkEl("h3", "", "");
   h.append(mkEl("span", "", title));
   if (count !== null) h.append(mkEl("b", "", count));
   box.append(h);
-  const ul = mkEl("ul", "");
-  for (const [a, b] of items) {
-    const li = mkEl("li", "");
-    li.append(mkEl("span", "", a));
-    if (b) li.append(mkEl("span", "pp-aside", b));
-    ul.append(li);
-  }
-  if (!items.length && none) ul.append(mkEl("li", "pp-none", none));
-  box.append(ul);
   return box;
 }
 
-const pubCount = (n) => `${n} ${n === 1 ? "note" : "notes"}`;
+function pgSeg(label, items, current, onPick) {
+  const seg = mkEl("div", "pg-seg");
+  seg.setAttribute("role", "group");
+  seg.setAttribute("aria-label", label);
+  for (const [value, text, extra] of items) {
+    const b = mkEl("button", "", text);
+    b.type = "button";
+    b.dataset.v = value;
+    b.setAttribute("aria-pressed", String(value === current));
+    if (extra) b.append(extra);
+    b.addEventListener("click", () => onPick(value));
+    seg.append(b);
+  }
+  return seg;
+}
 
-function renderPublic() {
+const pubDay = (iso) => {
+  if (!iso) return "not yet";
+  const d = new Date(iso.length <= 10 ? iso + "T12:00:00" : iso);
+  return isNaN(d) ? iso : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+};
+
+function upsellText(why) {
+  if (why === "hosted") return [document.createTextNode("A Private vault is read only by the accounts you name, which needs Silica hosted: on this computer there is no one to deliver it to.")];
+  const a = Object.assign(document.createElement("a"), { href: "https://silica-agent.dev/#hosted", target: "_blank", rel: "noopener", textContent: "What a paid account includes" });
+  return [document.createTextNode("A Private vault is read only by the accounts you name. It comes with a paid account: "), a, document.createTextNode(".")];
+}
+
+function renderPublic(fresh) {
   const body = $("#public-body");
-  const sw = $("#public-switch");
   const link = $("#public-url");
+  const count = $("#public-count");
   const st = pubState;
   if (!st || !st.available) {
-    sw.hidden = true;
     link.hidden = true;
+    count.textContent = "";
     body.replaceChildren(mkEl("p", "pp-dim", !st
-      ? "The public page could not be read."
-      : "This account has no public address yet: the person who runs Silica gives each account its own."));
+      ? "Your Page could not be read."
+      : "This account has no Page address yet: the person who runs Silica gives each account its own handle."));
     return;
-  }
-  sw.hidden = false;
-  for (const b of sw.querySelectorAll("button")) {
-    const on = (b.dataset.page === "on") === st.page;
-    b.setAttribute("aria-pressed", String(on));
-    b.classList.toggle("active", on);
   }
   link.hidden = !st.url;
   if (st.url) {
-    link.href = st.url;
+    link.href = st.url + "/";
     link.textContent = st.url.replace(/^https?:\/\//, "") + " ↗";
   }
-
-  const when = st.published_at ? new Date(st.published_at).toLocaleString() : "";
-  const where = st.dir ? `, in ${st.dir}` : "";
-  const status = !st.published_at
-    ? "Not published yet. A note goes out when its globe, or its folder's, is on; Publish puts the page online."
-    : st.page
-      ? `Online since ${when}${where}. Changes below go out when you publish.`
-      : "Off: the address says there is no page. Your folders and notes keep their globes for when you turn it on.";
-  const n = st.out.length;
+  count.textContent = `${st.vaults.length} of ${st.max} vaults`;
+  const v = pubCurVault();
+  if (v) pubCur = v.slug;
   const frag = document.createDocumentFragment();
-  // the same figure across renders, so a toggle redraws the page without building it again
+
+  // the vaults of this Page, one tab each, and the way to add one
+  const tabs = mkEl("div", "pg-tabs");
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Your vaults");
+  for (const x of st.vaults) {
+    const b = mkEl("button", "pg-tab");
+    b.type = "button";
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(!!v && x.slug === v.slug));
+    b.append(mkEl("span", "pg-tab-name", x.title || "Untitled"), vaultMark(x.visibility, 12));
+    b.addEventListener("click", () => openVault(x.slug));
+    tabs.append(b);
+  }
+  const add = mkEl("button", "pg-tab add", "+ New vault");
+  add.type = "button";
+  add.disabled = st.vaults.length >= st.max;
+  if (add.disabled) add.title = `a Page holds ${st.max} vaults at most`;
+  add.addEventListener("click", () => { pubAdding = !pubAdding; renderPublic(); });
+  tabs.append(add);
+  frag.append(tabs);
+
+  if (pubAdding || !v) {
+    const panel = mkEl("div", "pg-panel");
+    panel.append(mkEl("p", "pg-pt", "Publish a folder of your vault as a vault on your Page"));
+    const row = mkEl("div", "pg-row");
+    const sel = document.createElement("select");
+    sel.className = "pg-sel";
+    sel.setAttribute("aria-label", "Folder");
+    for (const f of st.folders) sel.append(Object.assign(document.createElement("option"), { value: f, textContent: f + "/" }));
+    const go = mkEl("button", "pp-go small", "Add vault");
+    go.type = "button";
+    go.disabled = !st.folders.length || add.disabled;
+    go.addEventListener("click", async () => {
+      const r = await pubPost("/public/vault", { folder: sel.value });
+      if (r && r.added) openVault(r.added);
+    });
+    row.append(sel, go);
+    if (v) {
+      const no = mkEl("button", "st-btn", "Cancel");
+      no.type = "button";
+      no.addEventListener("click", () => { pubAdding = false; renderPublic(); });
+      row.append(no);
+    }
+    panel.append(row, mkEl("p", "pp-dim", st.folders.length
+      ? "It starts Off. Inbox, sources/, Plans, Workspaces and templates cannot be vaults, nor a folder inside another vault."
+      : "No folder is left that could be a vault."));
+    frag.append(panel);
+  }
+  if (!v) {
+    frag.append(mkEl("p", "pp-status", `Your Page holds up to ${st.max} vaults, each a folder of your vault. Readers find them at your address, and in Pages if you list them.`));
+    frag.append(invitesBox(true));
+    body.replaceChildren(frag);
+    return;
+  }
+
+  // a status line only when there is something to say: Off, or the lock
+  const status = mkEl("p", "pp-status");
+  status.hidden = v.visibility !== "off";
+  if (v.visibility === "off") {
+    status.textContent = v.downgraded
+      ? "Off since this account became Free: a Private vault goes Off. Its readers keep the copies they saved."
+      : st.hosted || st.url
+        ? "Off: this vault's address says there is nothing there, and your Page does not show it. Its notes keep their globes for when you turn it on."
+        : `Off. Publish writes it${st.dir ? ` into ${st.dir}` : ""}, as files any static host can serve; a vault on this computer is not listed in Pages.`;
+  }
+
+  // the head of the vault in hand: its title and line, edited in place
+  const head = mkEl("div", "pg-head");
+  const tl = mkEl("div", "pg-tl");
+  const title = Object.assign(document.createElement("input"), { className: "pg-ed pg-ed-t", value: v.title, maxLength: 80 });
+  title.setAttribute("aria-label", "Title of this vault");
+  title.title = "Edit the title";
+  const save = (key, el) => {
+    const val = el.value.trim();
+    if (val === (v[key] || "")) return;
+    pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { [key]: val });
+  };
+  title.addEventListener("change", () => save("title", title));
+  title.addEventListener("keydown", (e) => { if (e.key === "Enter") title.blur(); });
+  const ctl = mkEl("div", "pg-ctl");
+  if (v.visibility === "public" && st.url) {
+    const lst = mkEl("span", "pg-lst");
+    lst.append(mkEl("span", "", "Listed in Pages"), pgSeg("Listed in Pages", [["off", "Off"], ["on", "On"]], v.listed ? "on" : "off",
+      (x) => pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { listed: x === "on" })));
+    ctl.append(lst);
+  }
+  const lock = st.private === "ok" ? null : mkEl("span", "pg-lock");
+  if (lock) lock.innerHTML = pubSvg(12, false, true);
+  ctl.append(pgSeg("Who can read this vault", [["off", "Off"], ["public", "Public"], ["private", "Private", lock]], v.visibility, (x) => {
+    if (x === v.visibility) return;
+    if (x === "private" && st.private !== "ok") { status.hidden = false; status.replaceChildren(...upsellText(st.private)); return; }
+    pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { visibility: x });
+  }));
+  tl.append(title, ctl);
+  const line = Object.assign(document.createElement("input"), { className: "pg-ed pg-ed-l", value: v.line, maxLength: 160, placeholder: "One line about this vault" });
+  line.setAttribute("aria-label", "One line about this vault");
+  line.title = "Edit the line";
+  line.addEventListener("change", () => save("line", line));
+  line.addEventListener("keydown", (e) => { if (e.key === "Enter") line.blur(); });
+  const meta = mkEl("p", "pg-meta");
+  meta.append(mkEl("span", "", "@" + st.handle), mkEl("span", "pg-path", v.folder + "/"), mkEl("span", "", pubCount(v.out)));
+  const areaN = pubCover && pubCoverOf === v.slug && pubCover.areas ? pubCover.areas.length : null;
+  meta.append(mkEl("span", "pg-areas", areaN === null ? "" : `${areaN} ${areaN === 1 ? "area" : "areas"}`));
+  const lic = mkEl("label", "pg-lic", "License: ");
+  const ls = document.createElement("select");
+  for (const l of st.licenses) ls.append(Object.assign(document.createElement("option"), { value: l, textContent: l, selected: l === v.license }));
+  ls.addEventListener("change", () => pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { license: ls.value }));
+  lic.append(ls);
+  meta.append(lic, mkEl("span", "", "Published: " + pubDay(v.published)));
+  head.append(tl, line, meta);
+  frag.append(head);
+
+  // the cover: the same figure across renders, so a toggle redraws it without building it again
   const cover = pubCoverFigure();
-  // the well holds its place from the first render, so the boxes do not jump when the picture
-  // arrives
-  cover.hidden = !(pubCover || n);
-  frag.append(cover);
-  frag.append(mkEl("p", "pp-status", status));
+  cover.hidden = !(pubCover && pubCoverOf === v.slug);
+  frag.append(cover, status);
 
   const grid = mkEl("div", "pp-grid");
-  const goes = ppBox(st.page || !st.published_at ? "Goes out" : "Would go out", pubCount(n),
-    st.out.slice(0, 60).map((t) => [t, ""]), { wide: true, none: "Nothing yet: turn on the globe of a folder or a note in the tree." });
-  const how = [...st.by_folder.map((f) => `${f.folder}: ${f.on} of ${f.of}`), ...(st.single.length ? [`${st.single.length} single`] : [])];
-  if (how.length) goes.querySelector("h3 span").textContent += " · " + how.join(" · ");
-  if (n > 60) goes.querySelector("ul").append(mkEl("li", "pp-none", `and ${n - 60} more`));
+  const goes = ppBox(v.visibility === "off" ? "Would go out" : "Goes out", `${pubCount(v.out)} · ${v.folder}/`, { wide: true });
+  const chips = mkEl("ul", "pg-chips");
+  for (const t of v.top) chips.append(mkEl("li", "", t));
+  if (!v.out) chips.append(mkEl("li", "more", "Nothing yet: this folder has no note that can go out."));
+  else if (v.out > v.top.length) chips.append(mkEl("li", "more", `and ${(v.out - v.top.length).toLocaleString("en-GB")} more`));
+  goes.append(chips);
+  const notes = [];
+  if (v.struck) notes.push(`${pubCount(v.struck)} left out by their own globe`);
+  if (v.new) notes.push(`${pubCount(v.new)} new since the last publish`);
+  if (st.outside) notes.push(`${pubCount(st.outside)} with publish: true outside every vault stay in your vault`);
+  if (notes.length) goes.append(mkEl("p", "pp-dim", notes.join(" · ")));
   grid.append(goes);
-  grid.append(ppBox("Stays private", pubCount(st.private_count),
-    st.private.map((p) => [p.title, p.why]), { none: "Every note outside the public folders" }));
-  grid.append(ppBox("Shown as plain text: the note it names is private", st.plain_count || null,
-    st.plain.map((p) => [p.words, "in " + p.in]), { none: "None" }));
-  grid.append(ppBox("Copied with the notes", st.images.length || null,
-    st.images.map((i) => [i.name, "cited by " + i.in]), { none: "No images" }));
-  grid.append(ppBox("Never on the page", null, [
-    ["Inbox, sources/, Plans/, Workspaces and Silica's own files", ""],
-    ["Folder names; properties other than title, tags and date", ""],
-    ["Similar-note lines, proposed links, your Zotero library", ""],
-  ]));
-  if (st.new.length) grid.append(ppBox("New since the last publish", pubCount(st.new.length), st.new.map((t) => [t, ""])));
+  if (v.visibility === "private") grid.append(readersBox(v));
+  grid.append(invitesBox(false));
   frag.append(grid);
 
   const row = mkEl("div", "pp-actions");
-  const go = mkEl("button", "pp-go", st.page ? `Publish ${pubCount(n)}` : `Turn on and publish ${pubCount(n)}`);
+  const go = mkEl("button", "pp-go", v.visibility === "off" ? `Turn on and publish ${pubCount(v.out)}` : `Publish ${pubCount(v.out)}`);
   go.type = "button";
-  go.disabled = !n;
+  go.disabled = !v.out;
   go.addEventListener("click", async () => {
     go.disabled = true;
     go.textContent = "publishing…";
-    const r = await pubPost("/public/publish");
+    const r = await pubPost("/public/publish", { vault: v.slug });
     if (r && r.result) {
       pubResult = r.result;
-      notify(`Published ${pubCount(r.result.notes)}`, "info");
+      notify(`Published ${pubCount(r.result.notes)}${r.result.private ? ` for ${v.readers.length} ${v.readers.length === 1 ? "reader" : "readers"}` : ""}`, "info");
     }
     renderPublic();
   });
-  row.append(go, mkEl("span", "pp-dim", "Readers see the page as it is when you publish; a note written later in a public folder goes out the next time."));
+  row.append(go, mkEl("span", "pp-dim", v.visibility === "private"
+    ? "Your readers get the vault as it is when you publish, as an invitation to save it."
+    : "Readers see the vault as it is when you publish; a note written later in its folder goes out the next time."));
+  if (v.visibility === "off") {
+    const rm = mkEl("button", "st-btn", "Remove from your Page");
+    rm.type = "button";
+    rm.title = "the folder and its notes stay as they are";
+    rm.addEventListener("click", async () => { const r = await pubPost(`/public/vault/${encodeURIComponent(v.slug)}/remove`); if (r) { pubCur = ""; renderPublic(true); } });
+    row.append(rm);
+  }
   frag.append(row);
-  if (pubResult) {
+  if (pubResult && pubResult.vault === v.slug) {
     const r = pubResult;
     frag.append(mkEl("p", "pp-dim", `Last publish: ${pubCount(r.notes)}, ${r.links} ${r.links === 1 ? "link" : "links"}, ${r.images} ${r.images === 1 ? "image" : "images"}.`));
   }
   body.replaceChildren(frag);
-  if (pubCover && pubCover.n.length !== n) loadPubCover(false);
+  if (fresh || pubCoverOf !== v.slug || (pubCover && pubCover.n.length + (pubCover.unlinked || 0) !== v.out)) loadPubCover(v.slug, !!fresh);
   else drawPubCover();
 }
 
-$("#public-switch").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-page]");
-  if (b && pubState && (b.dataset.page === "on") !== pubState.page) pubPost("/public/page", { on: b.dataset.page === "on" });
-});
+function readersBox(v) {
+  const box = ppBox("Readers", `${v.readers.length} ${v.readers.length === 1 ? "reader" : "readers"}`, { wide: true });
+  const row = mkEl("div", "pg-row");
+  const input = Object.assign(document.createElement("input"), { className: "pg-sel pg-grow", placeholder: "Add a reader by their handle" });
+  input.setAttribute("aria-label", "A reader's handle");
+  const go = mkEl("button", "pp-go small", "Invite");
+  go.type = "button";
+  const invite = () => {
+    const h = input.value.trim().replace(/^@/, "").toLowerCase();
+    if (!h) return;
+    pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { readers: [...v.readers, h] });
+  };
+  go.addEventListener("click", invite);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") invite(); });
+  row.append(input, go);
+  const ul = mkEl("ul", "pg-rows");
+  for (const r of v.readers) {
+    const li = mkEl("li", "");
+    li.append(mkEl("span", "pg-who", "@" + r), mkEl("span", "pp-dim", v.published ? "gets it at each publish" : "gets it at the first publish"));
+    const rm = mkEl("button", "st-btn", "Remove");
+    rm.type = "button";
+    rm.addEventListener("click", () => pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { readers: v.readers.filter((x) => x !== r) }));
+    li.append(rm);
+    ul.append(li);
+  }
+  if (!v.readers.length) ul.append(mkEl("li", "pp-dim", "No readers yet: invite one by their handle."));
+  box.append(row, ul, mkEl("p", "pp-dim", "Each reader gets an invitation in their own Silica and saves the vault there; nothing is written in their vault until they do. Removing a reader cancels an invitation not yet saved. A copy already saved stays theirs, with your name on every note, and cannot go on their own Page."));
+  return box;
+}
+
+function invitesBox(alone) {
+  const n = pubInvites.length;
+  const box = ppBox("Shared with you", `${n} ${n === 1 ? "invitation" : "invitations"}`, { wide: true });
+  const ul = mkEl("ul", "pg-rows");
+  for (const inv of pubInvites) {
+    const li = mkEl("li", "");
+    const what = mkEl("span", "pg-grow");
+    what.append(mkEl("span", "pg-who", "@" + inv.author), document.createTextNode(` shared ${inv.title}`));
+    li.append(what, mkEl("span", "pp-dim", `${pubCount(inv.notes)}${inv.published ? " · " + pubDay(inv.published) : ""}`));
+    const no = mkEl("button", "st-btn", "Decline");
+    no.type = "button";
+    no.addEventListener("click", async () => {
+      const r = await fetch("/vault/invitations/decline", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ author: inv.author, vault: inv.vault }) }).catch(() => null);
+      if (r && r.ok) { pubInvites = (await r.json()).invitations; renderPublic(); }
+    });
+    const yes = mkEl("button", "st-btn primary", "Save to Silica");
+    yes.type = "button";
+    yes.addEventListener("click", () => openSaveSheet({ invite: inv, areas: null }));
+    li.append(no, yes);
+    ul.append(li);
+  }
+  if (!n) ul.append(mkEl("li", "pp-dim", "No invitations. When an account names you as a reader of a Private vault, it appears here."));
+  box.append(ul, mkEl("p", "pp-dim", "Free and paid accounts both receive. A saved copy lands in Saved/@handle/ and is a write like any other: it can be taken back."));
+  box.hidden = alone ? false : !n;
+  return box;
+}
 
 document.addEventListener("silica:vault-info", () => loadPublicState()); // a fresh tree has bare globes
 
@@ -438,52 +683,103 @@ function stampSaved(root) {
 new MutationObserver(() => stampSaved($("#log"))).observe($("#log"), { childList: true, subtree: true });
 
 // --- Save to Silica ------------------------------------------------------------
+// One note, the areas of a public vault, or an invitation to a Private one (ADR-0151 points 8, 9).
 
-let saveUrl = "";
+let saveWhat = null;   // {url} or {invite}
+let saveAreas = null;  // the area indexes ticked, null for all of them
 
-async function openSaveSheet(url) {
+function saveAreasQuery() {
+  if (saveAreas === null) return "";
+  return saveAreas.length ? saveAreas.map((a) => "&areas=" + a).join("") : "&areas=none";
+}
+
+async function openSaveSheet(what) {
   const sheet = $("#save-sheet");
   const card = $("#save-card");
   const go = $("#save-go");
-  saveUrl = url;
+  if (what !== saveWhat) saveAreas = what.areas === undefined ? null : what.areas;
+  saveWhat = what;
   go.disabled = true;
-  card.replaceChildren(mkEl("p", "st-sheet-text", "Reading the page…"));
+  go.textContent = "save";
+  if (!card.childElementCount) card.replaceChildren(mkEl("p", "st-sheet-text", what.invite ? "Reading the invitation…" : "Reading the page…"));
   sheet.hidden = false;
   let r, p;
   try {
-    r = await fetch("/vault/save/preview?url=" + encodeURIComponent(url));
+    r = await fetch(what.invite
+      ? `/vault/invitations/preview?author=${encodeURIComponent(what.invite.author)}&vault=${encodeURIComponent(what.invite.vault)}${saveAreasQuery()}`
+      : "/vault/save/preview?url=" + encodeURIComponent(what.url) + saveAreasQuery());
     p = await r.json();
   } catch {
     card.replaceChildren(mkEl("p", "st-sheet-text", "That page could not be read right now."));
     return;
   }
+  if (saveWhat !== what) return;
   if (!r.ok) {
     card.replaceChildren(mkEl("p", "st-sheet-text", p.detail || "That page could not be read."));
     return;
   }
   const head = mkEl("div", "sv-card");
-  head.append(mkEl("b", "", p.title), mkEl("span", "", `by ${p.author}`), mkEl("code", "", p.source));
-  const parts = [head, mkEl("p", "st-sheet-text", `Into ${p.folder}.`)];
-  if (p.links.length) {
-    const ul = mkEl("ul", "sv-links");
-    for (const l of p.links) {
-      const li = mkEl("li", "");
-      li.append(mkEl("span", "", l.text), mkEl("span", "pp-aside", l.to === "copy" ? "opens the copy you saved" : `opens ${p.author}'s page`));
-      ul.append(li);
+  head.append(mkEl("b", "", p.title), mkEl("span", "", `by ${p.author}`), mkEl("code", "", what.invite ? "a Private vault shared with you" : (p.source || p.url || "").replace(/^https:\/\//, "")));
+  const parts = [head];
+  if (p.kind === "note") {
+    parts.push(mkEl("p", "st-sheet-text", `Into ${p.folder}.`));
+    if (p.links.length) {
+      const ul = mkEl("ul", "sv-links");
+      for (const l of p.links) {
+        const li = mkEl("li", "");
+        li.append(mkEl("span", "", l.text), mkEl("span", "pp-aside", l.to === "copy" ? "opens the copy you saved" : `opens ${p.author}'s page`));
+        ul.append(li);
+      }
+      parts.push(mkEl("p", "st-sheet-text", "Links in your copy:"), ul);
     }
-    parts.push(mkEl("p", "st-sheet-text", "Links in your copy:"), ul);
+    if (p.images) parts.push(mkEl("p", "st-sheet-text", `${p.images} ${p.images === 1 ? "image stays" : "images stay"} on ${p.author}'s page.`));
+    if (p.existing) parts.push(mkEl("p", "st-sheet-text", `You saved this page before (${p.existing}); this makes a second copy beside it.`));
+    parts.push(mkEl("p", "sv-snap", `This saves the note as it is today. If ${p.author} edits or removes it later, your copy stays as saved.`));
+    card.replaceChildren(...parts);
+    go.disabled = false;
+    go.focus();
+    return;
   }
-  if (p.images) parts.push(mkEl("p", "st-sheet-text", `${p.images} ${p.images === 1 ? "image stays" : "images stay"} on ${p.author}'s page.`));
-  if (p.existing) parts.push(mkEl("p", "st-sheet-text", `You saved this page before (${p.existing}); this makes a second copy beside it.`));
-  parts.push(mkEl("p", "sv-snap", `This saves the note as it is today. If ${p.author} edits or removes it later, your copy stays as saved.`));
+  // a whole vault: the areas to take, and the room they need
+  const areas = mkEl("ul", "sv-areas");
+  const named = p.areas.reduce((t, a) => t + a[1], 0);
+  const rows = p.areas.map((a, i) => [i, a[0], a[1]]);
+  if (p.of > named) rows.push([-1, "In no area: notes with no link", p.of - named]);
+  for (const [i, name, size] of rows) {
+    const li = mkEl("li", "");
+    const lab = mkEl("label", "");
+    const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: saveAreas === null || saveAreas.includes(i) });
+    box.addEventListener("change", () => {
+      const all = rows.map((x) => x[0]);
+      const now = saveAreas === null ? all : saveAreas;
+      saveAreas = box.checked ? [...new Set([...now, i])] : now.filter((x) => x !== i);
+      if (saveAreas.length === all.length) saveAreas = null;
+      openSaveSheet(saveWhat);
+    });
+    lab.append(box, mkEl("span", "pg-grow", name), mkEl("span", "pp-dim", size.toLocaleString("en-GB")));
+    li.append(lab);
+    areas.append(li);
+  }
+  parts.push(mkEl("p", "st-sheet-text", `${pubCount(p.notes)} of ${p.of.toLocaleString("en-GB")}, into ${p.folder}/. Links between them stay links${what.invite ? "; a link to a note you leave out keeps its words" : `; a link to a note you leave out opens ${p.author}'s page`}.`), areas);
+  const room = p.room;
+  if (room.max_notes || room.max_mb) {
+    parts.push(mkEl("p", "st-sheet-text" + (room.short ? " sv-over" : ""), room.short
+      ? `This save does not fit: ${room.short}. Choose fewer areas.`
+      : `Your vault holds ${room.notes.toLocaleString("en-GB")} notes${room.max_notes ? ` of ${room.max_notes.toLocaleString("en-GB")}` : ""}; after saving, ${(room.notes + p.notes).toLocaleString("en-GB")}.`));
+  }
+  if (p.license) parts.push(mkEl("p", "st-sheet-text", `License: ${p.license === "not stated" ? "not stated by the author" : p.license}.`));
+  parts.push(mkEl("p", "sv-snap", `This saves the vault as it is today, as one write you can take back. If ${p.author} edits or removes a note later, your copy stays as saved.`));
   card.replaceChildren(...parts);
-  go.disabled = false;
-  go.focus();
+  go.textContent = `save ${pubCount(p.notes)}`;
+  go.disabled = !p.notes || !!room.short;
+  if (!go.disabled) go.focus();
 }
 
 function closeSaveSheet() {
   $("#save-sheet").hidden = true;
-  saveUrl = "";
+  $("#save-card").replaceChildren();
+  saveWhat = null;
+  saveAreas = null;
 }
 
 $("#save-cancel").addEventListener("click", closeSaveSheet);
@@ -491,9 +787,13 @@ $("#save-sheet").addEventListener("keydown", (e) => { if (e.key === "Escape") cl
 $("#save-go").addEventListener("click", async () => {
   const go = $("#save-go");
   go.disabled = true;
+  const what = saveWhat;
   let r, d;
   try {
-    r = await fetch("/vault/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: saveUrl }) });
+    r = await fetch(what.invite ? "/vault/invitations/save" : "/vault/save", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(what.invite ? { author: what.invite.author, vault: what.invite.vault, areas: saveAreas } : { url: what.url, areas: saveAreas }),
+    });
     d = await r.json().catch(() => ({}));
   } catch {
     notify("the page could not be saved");
@@ -506,16 +806,19 @@ $("#save-go").addEventListener("click", async () => {
     return;
   }
   closeSaveSheet();
-  notify(`Saved to ${d.path}`, "info");
+  notify(d.notes ? `Saved ${pubCount(d.notes)} to ${d.folder}` : `Saved to ${d.path}`, "info");
+  if (what.invite) { await loadInvitations(); if (activeTab === "public") renderPublic(); }
   await loadVaultInfo(); // the tree shows the copy now, not at the next poll
   openNote(d.path);
 });
 
-// A public page's button opens the app on ?save=<page>; the address leaves the
-// bar at once, so a reload does not ask again.
+// A page's button opens the app on ?save=<page>[&areas=..]; the address leaves the bar at once,
+// so a reload does not ask again.
 (() => {
-  const q = new URLSearchParams(location.search).get("save");
+  const qs = new URLSearchParams(location.search);
+  const q = qs.get("save");
   if (!q) return;
+  const areas = qs.getAll("areas").flatMap((a) => a.split(",")).filter((a) => /^-?\d+$/.test(a)).map(Number);
   history.replaceState(null, "", location.pathname + location.hash);
-  openSaveSheet(q);
+  openSaveSheet({ url: q, areas: areas.length ? areas : null });
 })();
