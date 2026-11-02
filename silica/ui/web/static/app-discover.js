@@ -27,6 +27,7 @@ const DV_ICON = {
   warn: '<svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg>',
   check: '<svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg>',
   tick: '<svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg>',
+  chev: '<svg aria-hidden="true" focusable="false" width="10" height="10" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l4 4 4-4"></path></svg>',
   compass: '<svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M15.5 8.5l-2 5-5 2 2-5z"></path></svg>',
 };
 
@@ -118,6 +119,7 @@ window.addEventListener("hashchange", () => {
 });
 
 function loadDiscover() {
+  dvPopClose();
   dv.loaded = location.hash;
   const r = dvRoute();
   clearTimeout(dv.storyPoll);
@@ -669,11 +671,20 @@ function dvCiteText(p, text, sources) {
 function dvRenderStory() {
   const s = dv.story;
   if (!s) return;
+  dvPopClose();
   const root = dvEl("div");
   root.style.cssText = "display:contents";
   const head = dvEl("header", "dv-head dv-bar");
-  head.append(dvBtn("Discover", "dv-flat", () => dvGo(""), DV_ICON.back), dvEl("div", "dv-spacer"),
-    dvEl("span", "dv-meta", `${s.articles} article${s.articles === 1 ? "" : "s"}`),
+  // Written, the count is what its sentences cite: only READ_MAX articles are
+  // read, so the story's own count can name articles nothing was checked against.
+  const w0 = s.written;
+  const cited = w0 ? new Set(w0.sections.flatMap((x) => x.paras.flatMap((p) => p.cites))) : null;
+  const count = w0
+    ? dvChecked("Every sentence cites a quote found in one of these articles.",
+      [...w0.sources.filter((x) => cited.has(x.n)).map((x) => ({ src: x, cited: true })),
+        ...w0.sources.filter((x) => !cited.has(x.n)).map((x) => ({ src: x, cited: false }))])
+    : dvEl("span", "dv-meta", `${s.articles} article${s.articles === 1 ? "" : "s"}`);
+  head.append(dvBtn("Discover", "dv-flat", () => dvGo(""), DV_ICON.back), dvEl("div", "dv-spacer"), count,
     dvBtn("Ask in Chat", "", () => dvToChat(s, "", dv.scope), DV_ICON.ask));
   const save = dvBtn(s.saved ? "Saved to Inbox" : "Save to Inbox", s.saved ? "dv-saved" : "dv-primary", () => dvSave(s, save), DV_ICON.save);
   if (s.saved) save.title = "open " + s.saved;
@@ -719,10 +730,11 @@ function dvStoryText(art, s, w) {
       dvCiteText(p, para.text, w.sources);
       art.append(p);
     }
-    if (i === 0) art.append(dvSourceGrid(s, w));
     if (sec.title) {
       const foot = dvEl("div", "dv-sec-foot");
-      foot.append(dvEl("span", "dv-count", `${sec.articles} article${sec.articles === 1 ? "" : "s"}`));
+      const ids = new Set(sec.paras.flatMap((p) => p.cites));
+      foot.append(dvChecked("This section's sentences cite these articles.",
+        w.sources.filter((x) => ids.has(x.n)).map((x) => ({ src: x, cited: true }))));
       const copy = dvEl("button", "dv-link", "Copy section");
       copy.type = "button";
       copy.style.cssText = "font-size:12px;color:var(--ash)";
@@ -769,6 +781,104 @@ function dvSourceGrid(s, w) {
     grid.append(more);
   }
   return grid;
+}
+
+// --- the sources a story checked against -------------------------------------------
+// One popover at a time, on the body: #view-discover is a size container, which
+// makes it the containing block of a fixed descendant, so a popover inside the
+// view would be placed against it and cut by its scroll.
+let dvPop = null;
+
+function dvPopClose(refocus) {
+  if (!dvPop) return;
+  const { el, btn } = dvPop;
+  dvPop = null;
+  el.remove();
+  btn.setAttribute("aria-expanded", "false");
+  if (refocus) btn.focus();
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (dvPop && !dvPop.el.contains(e.target) && !dvPop.btn.contains(e.target)) dvPopClose();
+}, true);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && dvPop) { e.stopPropagation(); dvPopClose(true); } }, true);
+// Placed once against the button: a scroll or a resize would leave it pointing at nothing.
+document.addEventListener("scroll", (e) => { if (dvPop && !dvPop.el.contains(e.target)) dvPopClose(); }, true);
+window.addEventListener("resize", () => dvPopClose());
+
+function dvIcon(domain) {
+  const img = dvEl("img", "dv-ico");
+  img.src = "/discover/icon/" + encodeURIComponent(domain);
+  img.alt = ""; // the domain is written beside it
+  img.width = img.height = 20;
+  img.loading = "lazy";
+  img.decoding = "async";
+  const mono = () => img.replaceWith(dvEl("span", "dv-ico dv-ico-mono", dvSite(domain).charAt(0).toUpperCase()));
+  img.addEventListener("error", mono);
+  // techcrunch.com's /favicon.ico is 16x16 with every pixel transparent (2026-11-02):
+  // a blank tile names no site, the initial does. Same origin, so the canvas reads it.
+  img.addEventListener("load", () => {
+    const g = Object.assign(document.createElement("canvas"), { width: 16, height: 16 }).getContext("2d");
+    g.drawImage(img, 0, 0, 16, 16);
+    if (!g.getImageData(0, 0, 16, 16).data.some((v, i) => i % 4 === 3 && v)) mono();
+  });
+  return img;
+}
+
+// rows: [{src: {n, url, title, domain}, cited}], the cited first; the label
+// counts the cited rows, so it never names more than the list shows.
+function dvChecked(head, rows) {
+  const n = rows.filter((r) => r.cited).length;
+  const b = dvEl("button", "dv-checked");
+  b.type = "button";
+  b.setAttribute("aria-expanded", "false");
+  b.setAttribute("aria-haspopup", "dialog");
+  b.innerHTML = DV_ICON.tick;
+  b.append(document.createTextNode(`Checked against ${n} article${n === 1 ? "" : "s"}`));
+  b.insertAdjacentHTML("beforeend", DV_ICON.chev);
+  b.addEventListener("click", () => {
+    const mine = dvPop && dvPop.btn === b;
+    dvPopClose();
+    if (!mine) dvPopOpen(b, head, rows);
+  });
+  return b;
+}
+
+function dvPopOpen(btn, head, rows) {
+  const el = dvEl("div", "dv-pop");
+  el.id = "dv-pop";
+  el.setAttribute("role", "dialog");
+  el.setAttribute("aria-label", btn.textContent);
+  const ul = dvEl("ul");
+  for (const { src, cited } of rows) {
+    const a = dvEl("a");
+    a.href = dvHref(src.url);
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    const t = dvEl("span", "dv-pop-t", src.title || src.domain);
+    t.insertAdjacentHTML("beforeend", DV_ICON.ext);
+    a.append(dvIcon(src.domain), t, dvEl("span", "dv-pop-d", cited ? src.domain : src.domain + " · read, cited nowhere"));
+    const li = dvEl("li", cited ? "" : "dv-uncited");
+    li.append(a);
+    ul.append(li);
+  }
+  el.append(dvEl("div", "dv-pop-h", head), ul, dvEl("div", "dv-pop-f", "Each title opens the publisher's page in a new tab."));
+  // Focus moving out of the popover closes it, except onto its own button, whose click toggles it.
+  el.addEventListener("focusout", (e) => { if (e.relatedTarget && !el.contains(e.relatedTarget) && e.relatedTarget !== btn) dvPopClose(); });
+  document.body.append(el);
+  btn.setAttribute("aria-controls", el.id);
+  btn.setAttribute("aria-expanded", "true");
+  dvPop = { el, btn };
+  const r = btn.getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  const below = innerHeight - r.bottom >= r.top || innerHeight - r.bottom - 14 >= h;
+  const top = below ? r.bottom + 6 : r.top - 6 - h;
+  let left = r.left;
+  if (left + w > innerWidth - 8) left = r.right - w;
+  el.style.top = Math.max(8, Math.min(top, innerHeight - h - 8)) + "px";
+  el.style.left = Math.max(8, Math.min(left, innerWidth - w - 8)) + "px";
+  const first = el.querySelector("a");
+  if (first) first.focus({ preventScroll: true });
 }
 
 function dvStoryState(art, s) {

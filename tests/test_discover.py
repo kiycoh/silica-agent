@@ -451,3 +451,43 @@ def test_a_feedless_site_is_refused_on_the_hosted_pilot(client, monkeypatch):
 def test_a_cover_name_is_checked_before_a_file_is_opened(client):
     assert client.get("/discover/cover/..%2F..%2Fdiscover.json").status_code == 404
     assert client.get("/discover/cover/" + "a" * 24 + ".jpg").status_code == 404
+
+
+def test_a_site_icon_is_fetched_once_and_only_for_a_site_in_the_store(client, monkeypatch):
+    _doc_with_story()
+    _dns(monkeypatch)
+    calls, png = [], b"\x89PNG\r\n\x1a\n" + b"\0" * 20
+
+    def stream(url, ip, headers):
+        calls.append(url)
+        return _Resp(body=png, ctype="image/x-icon")  # nytimes.com's shape: a PNG typed as an icon
+
+    monkeypatch.setattr(wf, "_stream", stream)
+    r = client.get("/discover/icon/n.test")
+    assert r.status_code == 200 and r.content == png and r.headers["content-type"] == "image/png"
+    assert "sandbox" in r.headers["content-security-policy"]
+    assert client.get("/discover/icon/n.test").status_code == 200
+    assert client.get("/discover/icon/other.test").status_code == 404
+    assert client.get("/discover/icon/..%2Fdiscover.json").status_code == 404
+    assert calls == ["https://n.test/favicon.ico"]
+
+
+def test_an_icon_that_is_no_raster_or_too_big_is_refused_and_asked_again_only_after_days(client, monkeypatch):
+    import os
+
+    _doc_with_story()
+    _dns(monkeypatch)
+    calls, bodies = [], iter([b"<svg onload='alert(1)'/>", b"\x89PNG\r\n\x1a\n" + b"\0" * read.ICON_CAP])
+
+    def stream(url, ip, headers):
+        calls.append(url)
+        return _Resp(body=next(bodies), ctype="image/svg+xml")
+
+    monkeypatch.setattr(wf, "_stream", stream)
+    assert client.get("/discover/icon/n.test").status_code == 404
+    assert client.get("/discover/icon/n.test").status_code == 404 and len(calls) == 1
+    marker = store.home() / "icons" / "n.test.none"
+    old = time.time() - (read.ICON_RETRY_DAYS + 1) * 86400
+    os.utime(marker, (old, old))
+    assert client.get("/discover/icon/n.test").status_code == 404 and len(calls) == 2
+    assert marker.stat().st_mtime > old and not (store.home() / "icons" / "n.test").exists()

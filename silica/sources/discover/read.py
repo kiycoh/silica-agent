@@ -365,6 +365,65 @@ def fetch_cover(url: str, vault: str | None = None) -> dict | None:
     return {"file": name, "type": ctype, "from": F.domain(final)}
 
 
+# --- site icons ----------------------------------------------------------------------
+# Measured 2026-11-02 on ten news and research sites: eight serve /favicon.ico,
+# the largest 15,086 bytes, so the cap leaves four times that.
+ICON_CAP = 64 * 1024
+# A site that gave no icon is asked again after a week, not on every story view.
+ICON_RETRY_DAYS = 7
+# Decided on the bytes, never the header: nytimes.com serves a PNG as image/x-icon,
+# and an SVG is a document that can carry script, so it is never taken.
+_ICON_MAGIC = ((b"\x00\x00\x01\x00", "image/x-icon"), (b"\x89PNG\r\n\x1a\n", "image/png"),
+               (b"GIF87a", "image/gif"), (b"GIF89a", "image/gif"), (b"\xff\xd8\xff", "image/jpeg"))
+
+
+def icon_type(body: bytes) -> str:
+    """The raster type the bytes are, "" for anything else."""
+    for magic, ctype in _ICON_MAGIC:
+        if body.startswith(magic):
+            return ctype
+    return "image/webp" if body[:4] == b"RIFF" and body[8:12] == b"WEBP" else ""
+
+
+def kept_icon(domain: str, vault: str | None = None) -> tuple[str, str] | None:
+    """The icon already fetched for `domain`, with no store read and no network."""
+    path = store.home(vault) / "icons" / domain
+    return (str(path), icon_type(path.read_bytes()[:12])) if path.is_file() else None
+
+
+def site_icon(domain: str, vault: str | None = None) -> tuple[str, str] | None:
+    """A site's /favicon.ico, fetched by the server through the guard the covers
+    use and kept beside them, so the page never calls a publisher (ADR-0137).
+    Returns (path, type), None when the site has none.
+
+    shortcut: icons are kept for every site ever read, ~64 KB at most each, so
+    6 MB per hundred sites; prune them with the covers past 1,000 sites."""
+    if got := kept_icon(domain, vault):
+        return got
+    idir = store.home(vault) / "icons"
+    path, miss = idir / domain, idir / (domain + ".none")
+    if miss.is_file() and time.time() - miss.stat().st_mtime < ICON_RETRY_DAYS * 86400:
+        return None
+    idir.mkdir(parents=True, exist_ok=True)
+    try:
+        resp, _ = _get(f"https://{domain}/favicon.ico", None, types=("image/",), cap=ICON_CAP)
+        body = resp.content if resp.status_code == 200 else b""
+    except Exception as exc:
+        # Unreachable, refused by the guard, over the cap or not an image: all
+        # one missing icon, which the page draws as the site's initial.
+        logger.debug("discover: icon for %s refused: %s", domain, exc)
+        body = b""
+    ctype = icon_type(body)
+    if not ctype:
+        miss.touch()
+        return None
+    from silica.kernel.recall.paths import atomic_write_bytes
+
+    atomic_write_bytes(path, body, mode=0o600)
+    miss.unlink(missing_ok=True)
+    return str(path), ctype
+
+
 def _page_image(url: str) -> str:
     try:
         resp, final = _get(url, None, types=wf._TEXT_TYPES, cap=wf._MAX_BODY_BYTES)
