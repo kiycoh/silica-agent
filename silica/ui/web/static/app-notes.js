@@ -263,6 +263,8 @@ function renderAttachments() {
 }
 function addFiles(fileList) {
   if (DEMO) return; // an upload is personal data (ADR-0139 point 6): a drop or a paste stages nothing
+  // A pasted screenshot rides the turn; any other file may convert for minutes.
+  if ([...fileList].some((f) => !(f.type || "").startsWith("image/"))) askNotify();
   // A mail export is not a chip: the import has a dry run and keeps only the
   // threads the user took part in (ADR-0090 point 5), and the composer has
   // neither. Dropped here it wrote a note /revert could not find (2026-10-12).
@@ -596,6 +598,7 @@ vaultFolderInput.addEventListener("change", () => {
 
 async function importToVault(files, fromFolder) {
   if (DEMO) return; // a workspace row's drop is the one way here a demo leaves open
+  askNotify(); // an import converts in the background (ADR-0147)
   // A File from a folder carries its path under the picked folder; Safari can
   // hand over single files in folder mode, and those go in as files.
   const relOf = (f) => (fromFolder && f.webkitRelativePath) || "";
