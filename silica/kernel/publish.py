@@ -108,7 +108,7 @@ def _clean_vault(raw) -> dict | None:
     text = lambda k, n: raw[k].strip()[:n] if isinstance(raw.get(k), str) else ""  # noqa: E731
     vis = raw.get("visibility")
     lic = raw.get("license")
-    readers = raw.get("readers") if isinstance(raw.get("readers"), list) else []
+    readers = r if isinstance(r := raw.get("readers"), list) else []
     return {
         "folder": folder,
         "slug": slugify(text("slug", 60)) or slugify(folder.rsplit("/", 1)[-1]) or "vault",
@@ -132,10 +132,12 @@ def vaults(vault: Path | None = None) -> list[dict]:
     block = _block(vault or _vault())
     raw = block.get("vaults")
     if not isinstance(raw, list):
-        old = block.get("folders") if isinstance(block.get("folders"), list) else []
+        old = f if isinstance(f := block.get("folders"), list) else []
         on = "public" if block.get("page") is True else "off"
         raw = [{"folder": f, "visibility": on} for f in old if isinstance(f, str)]
-    out, slugs, folders = [], set(), set()
+    out: list[dict] = []
+    slugs: set[str] = set()
+    folders: set[str] = set()
     for item in raw:
         v = _clean_vault(item)
         if v is None or v["folder"] in folders or len(out) >= MAX_VAULTS:
@@ -226,7 +228,9 @@ def add_vault(folder: str, vault: Path | None = None) -> dict:
     slug, n, taken = base, 2, {v["slug"] for v in items} | _RESERVED_SLUGS
     while slug in taken:
         slug, n = f"{base}-{n}", n + 1
-    items.append(_clean_vault({"folder": folder, "slug": slug}))
+    new = _clean_vault({"folder": folder, "slug": slug})
+    assert new is not None  # the folder was refused above when empty, the one way it cleans to None
+    items.append(new)
     _save_vaults(items, vault)
     return next(v for v in vaults(vault) if v["folder"] == folder)
 

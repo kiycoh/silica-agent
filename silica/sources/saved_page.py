@@ -92,7 +92,7 @@ def saved_copies(handle: str, vault: Path | None = None) -> dict[str, str]:
     from silica.kernel.vault_manifest import in_write_dir
 
     folder = in_write_dir(f"{SAVED_DIR}/@{handle}") + "/"
-    out = {}
+    out: dict[str, str] = {}
     for path, fm in frontmatters(vault).items():
         src = fm.get("source")
         if path.startswith(folder) and isinstance(src, str):
@@ -249,7 +249,7 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, files=None
         handle, vslug = manifest.get("handle", ""), manifest.get("slug", "")
     if not isinstance(manifest, dict) or not isinstance(notes, dict):
         raise ValueError("that vault could not be read")
-    title = manifest.get("title") if isinstance(manifest.get("title"), str) else vslug
+    title = t if isinstance(t := manifest.get("title"), str) else vslug
     chosen = [s for s in _chosen(manifest, areas) if isinstance(notes.get(s), str)]
     folder = in_write_dir(f"{SAVED_DIR}/@{handle}/{_folder_name(title)}")
     if _exists(folder):
@@ -372,7 +372,7 @@ def _is_done(author: str, slug: str, stamp: str) -> bool:
 def invitations() -> list[dict]:
     """The Private vaults offered to this account and not yet saved or declined."""
     root = invitations_dir()
-    out = []
+    out: list[dict] = []
     if not root.is_dir():
         return out
     for a in sorted(root.iterdir()):

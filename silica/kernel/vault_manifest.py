@@ -445,7 +445,10 @@ def unset_block_key(vault: str | Path, block: str, key: str) -> Path | None:
         return None
 
     def mutate(lines: list[str]) -> list[str]:
-        start, end = _block_span(lines, block)
+        now = _block_span(lines, block)
+        if now is None:  # the block went between the read above and the write: nothing to remove
+            return lines
+        start, end = now
         for i in range(start + 1, end):
             m = key_re.match(lines[i])
             if m:

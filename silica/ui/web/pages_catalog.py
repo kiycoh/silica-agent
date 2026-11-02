@@ -43,10 +43,10 @@ def entry(raw: dict, handle: str, slug: str) -> dict | None:
     """The card's fields from one manifest, None unless it asks to be listed."""
     if not isinstance(raw, dict) or raw.get("listed") is not True:
         return None
-    count = raw.get("count") if isinstance(raw.get("count"), dict) else {}
+    count = c if isinstance(c := raw.get("count"), dict) else {}
     areas = [[_text(a[0], 80), _int(a[1])] for a in raw.get("areas", [])[:200]
              if isinstance(a, list) and len(a) == 2 and _text(a[0], 80)] if isinstance(raw.get("areas"), list) else []
-    published = raw.get("published") if isinstance(raw.get("published"), str) else ""
+    published = p if isinstance(p := raw.get("published"), str) else ""
     return {
         "handle": handle, "slug": slug,
         "title": _text(raw.get("title"), 80) or slug,
