@@ -10,6 +10,8 @@
   const fmt = (n) => Number(n).toLocaleString("en-GB");
   const root = document.documentElement;
   root.classList.add("js");
+  // Read while the script runs: a deferred script's currentScript is gone in any later callback.
+  const here = document.currentScript ? document.currentScript.src : "";
 
   // ---- paper or graphite: the reader's system decides until they choose -------------------
   const THEME = "silica-pages-theme";
@@ -242,5 +244,76 @@
       b.addEventListener("click", () => { S.sort = b.dataset.v; $$("[data-sort] button", cat).forEach((x) => x.setAttribute("aria-pressed", String(x === b))); render(); });
     }
     render();
+  }
+
+  // ---- a note's diagrams: mermaid from this same folder, only on a page that holds one ------
+  // The note renderer writes a ```mermaid fence as <pre class="mermaid"> with its source escaped,
+  // so a reader without the script still reads the source. The host's policy refuses inline
+  // styles (style-src 'self'), and mermaid's SVG carries its colours in a <style> and in style
+  // attributes: drawn as it comes, every box is black. So the SVG is rendered off the page and
+  // its styles are handed over through the CSSOM, which the policy leaves to this script, the one
+  // the host serves from /_s/. The source is kept: a theme switch draws it again in the other inks.
+  const diagrams = $$("pre.mermaid");
+  // The keys a note's own %%{init}%% may not set: its CSS would reach the page through the CSSOM.
+  const LOCKED = ["secure", "securityLevel", "startOnLoad", "maxTextSize", "maxEdges", "suppressErrorRendering",
+    "theme", "themeVariables", "themeCSS", "fontFamily", "altFontFamily", "darkMode", "htmlLabels"];
+  function diagramConfig() {
+    const dark = getComputedStyle(root).colorScheme === "dark";
+    return {
+      startOnLoad: false, suppressErrorRendering: true, securityLevel: "strict", secure: LOCKED,
+      theme: "base", htmlLabels: false, fontFamily: css("--sans"), fontSize: 14,
+      flowchart: { curve: "basis", padding: 14, htmlLabels: false },
+      themeVariables: {
+        darkMode: dark, fontSize: "14px", background: css("--slate"),
+        primaryColor: css("--sheet"), primaryTextColor: css("--frost"), primaryBorderColor: css("--ash-dim"),
+        secondaryColor: css("--slate-2"), tertiaryColor: css("--slate"), lineColor: css("--ash"),
+        textColor: css("--frost"), mainBkg: css("--sheet"), nodeBorder: css("--ash-dim"),
+        clusterBkg: css("--slate-2"), clusterBorder: css("--line-2"), edgeLabelBackground: css("--slate"),
+        titleColor: css("--frost"),
+      },
+    };
+  }
+  const sheets = new Map(); // a diagram's index -> the sheet its <style> became
+  async function drawOne(d, i) {
+    const { svg } = await window.mermaid.render(`pub-diagram-${i}`, d.dataset.src);
+    const el = new DOMParser().parseFromString(svg, "image/svg+xml").documentElement;
+    if (el.nodeName !== "svg") throw new Error("not an svg");
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync([...el.querySelectorAll("style")].map((st) => { st.remove(); return st.textContent; }).join("\n"));
+    const inline = [];
+    for (const n of [el, ...el.querySelectorAll("[style]")]) {
+      if (!n.hasAttribute("style")) continue;
+      n.setAttribute("data-st", String(inline.push(n.getAttribute("style")) - 1));
+      n.removeAttribute("style");
+    }
+    const live = document.importNode(el, true);
+    d.replaceChildren(live);
+    for (const n of [live, ...live.querySelectorAll("[data-st]")]) {
+      const at = n.getAttribute("data-st");
+      if (at === null) continue;
+      n.style.cssText = inline[Number(at)];
+      n.removeAttribute("data-st");
+    }
+    sheets.set(i, sheet);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  }
+  async function drawDiagrams() {
+    if (!window.mermaid) return;
+    window.mermaid.initialize(diagramConfig());
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => ![...sheets.values()].includes(x));
+    sheets.clear();
+    for (const [i, d] of diagrams.entries()) {
+      // a diagram mermaid cannot parse keeps its source, which still reads
+      try { await drawOne(d, i); } catch { d.textContent = d.dataset.src; }
+    }
+  }
+  if (diagrams.length && here) {
+    for (const d of diagrams) d.dataset.src = d.textContent;
+    const s = document.createElement("script");
+    s.src = new URL("mermaid.min.js", here).href;
+    s.onload = drawDiagrams;
+    document.head.append(s);
+    for (const b of $$("[data-theme-btn]")) b.addEventListener("click", drawDiagrams);
+    matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", drawDiagrams);
   }
 })();

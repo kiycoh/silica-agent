@@ -272,3 +272,18 @@ def test_the_catalog_lists_only_listed_vaults_under_the_handle_the_host_gave(mar
     m.write_text(m.read_text(encoding="utf-8").replace('"Memoria"', '"<script>x</script>"'), encoding="utf-8")
     pages_catalog.write(host, tsv, out, "https://app.test")
     assert "<script>x" not in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(marta, tmp_vault):
+    from silica.ui.web.public_site import build
+
+    tmp_vault.note("Memory/Forgetting curve.md",
+               "Ebbinghaus measured it. Back to [[Spacing effect]].\n\n"
+               "```mermaid\nflowchart LR\n  A[\"<b>learn</b>\"] --> B[forget]\n```\n")
+    build("memory")
+    live = _live(marta)
+    page = (live / "memory" / "forgetting-curve.html").read_text(encoding="utf-8")
+    # the source, escaped, in the block pages.js hands to mermaid; no script of the note's own
+    assert '<pre class="mermaid">' in page and "&lt;b&gt;learn&lt;/b&gt;" in page
+    assert "<script>" not in page and page.count("<script") == 1  # pages.js alone
+    assert (live / "_s" / "mermaid.min.js").is_file()

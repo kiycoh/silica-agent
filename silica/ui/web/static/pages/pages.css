@@ -214,6 +214,8 @@ details > summary::-webkit-details-marker { display: none; }
 .body h1, .body h2, .body h3 { margin-top: 1.4em; letter-spacing: -.02em; }
 .body img { max-width: 100%; height: auto; border-radius: var(--r-sm); }
 .body pre { overflow-x: auto; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--slate); font-size: 14px; }
+.body pre.mermaid { text-align: center; }
+.body pre.mermaid svg { max-width: 100%; height: auto; }
 .body code { font-family: var(--mono); font-size: .82em; }
 .body table { border-collapse: collapse; display: block; overflow-x: auto; }
 .body th, .body td { border: 1px solid var(--line); padding: 4px 8px; }
