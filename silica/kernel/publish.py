@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""The public page (ADR-0143): which notes a person put on it, and where
-Silica keeps the static files it writes for them.
+"""The Page (ADR-0143, ADR-0151): the vaults a person put on it, which of
+their notes go out, and where Silica keeps the static files it writes.
 
-The choice lives in two places, as in Obsidian Publish: a folder's globe in
-`vault.yaml` (`public: folders:`), a note's own `publish:` in its frontmatter,
-which beats its folder. The whole page has a switch (`public: page:`). The
-files themselves are written by `silica.ui.web.public_site`, which renders
-with the drawer's renderer; this module only decides and moves folders.
+A vault on the Page is a folder of the account's one vault, at most ten,
+each Off, Public or Private, kept in `vault.yaml` under `public: vaults:`.
+A note's own `publish:` in its frontmatter beats its vault, as in Obsidian
+Publish. The files themselves are written by `silica.ui.web.public_site`,
+which renders with the drawer's renderer; this module only decides and
+moves folders.
 """
 from __future__ import annotations
 
@@ -86,14 +87,190 @@ def available(vault: Path | None = None) -> bool:
     return bool(handle(vault)) and (bool(page_url(vault)) or not hosted())
 
 
-def settings(vault: Path | None = None) -> dict:
-    """{"page": bool, "folders": [...]}: off and empty until the person says
-    otherwise, so a vault never goes public by default."""
+# ADR-0151 point 1: a vault on the Page is a folder of the account's one vault, at most ten.
+MAX_VAULTS = 10
+VISIBILITY = ("off", "public", "private")
+# The license select's choices; "not stated" is the default (ADR-0151 answer 15a).
+LICENSES = ("not stated", "CC BY 4.0", "CC BY-SA 4.0", "CC BY-NC 4.0", "CC0 1.0", "all rights reserved")
+# A vault's slug is a folder of the page beside these, so none may take their names.
+_RESERVED_SLUGS = {"index", "assets", "_s", "private", "paused", "vault"}
+_HANDLE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,28}[a-z0-9])?$")
+
+
+def _clean_vault(raw) -> dict | None:
+    """One `vaults:` entry as the code reads it, None when it names no folder."""
+    if not isinstance(raw, dict):
+        return None
+    folder = raw.get("folder")
+    folder = folder.strip().strip("/") if isinstance(folder, str) else ""
+    if not folder:
+        return None
+    text = lambda k, n: raw[k].strip()[:n] if isinstance(raw.get(k), str) else ""  # noqa: E731
+    vis = raw.get("visibility")
+    lic = raw.get("license")
+    readers = raw.get("readers") if isinstance(raw.get("readers"), list) else []
+    return {
+        "folder": folder,
+        "slug": slugify(text("slug", 60)) or slugify(folder.rsplit("/", 1)[-1]) or "vault",
+        "title": text("title", 80) or folder.rsplit("/", 1)[-1],
+        "line": text("line", 160),
+        "license": lic if lic in LICENSES else LICENSES[0],
+        "visibility": vis if vis in VISIBILITY else "off",
+        "listed": raw.get("listed") is True,
+        "readers": sorted({r.strip().lstrip("@").lower() for r in readers
+                           if isinstance(r, str) and _HANDLE.match(r.strip().lstrip("@").lower())}),
+        "published": text("published", 40),
+        "downgraded": raw.get("downgraded") is True,
+    }
+
+
+def vaults(vault: Path | None = None) -> list[dict]:
+    """The vaults on the Page, in the order they were made. ADR-0143's
+    `folders:` list and `page:` switch are read as vaults until the first
+    write replaces them (ADR-0151 point 2): each folder becomes a vault,
+    Public when the page was on."""
     block = _block(vault or _vault())
-    raw = block.get("folders")
-    folders = sorted({f.strip().strip("/") for f in raw if isinstance(f, str) and f.strip().strip("/")}) \
-        if isinstance(raw, list) else []
-    return {"page": block.get("page") is True, "folders": folders}
+    raw = block.get("vaults")
+    if not isinstance(raw, list):
+        old = block.get("folders") if isinstance(block.get("folders"), list) else []
+        on = "public" if block.get("page") is True else "off"
+        raw = [{"folder": f, "visibility": on} for f in old if isinstance(f, str)]
+    out, slugs, folders = [], set(), set()
+    for item in raw:
+        v = _clean_vault(item)
+        if v is None or v["folder"] in folders or len(out) >= MAX_VAULTS:
+            continue
+        base, n = v["slug"], 2
+        while v["slug"] in slugs or v["slug"] in _RESERVED_SLUGS:
+            v["slug"], n = f"{base}-{n}", n + 1
+        slugs.add(v["slug"])
+        folders.add(v["folder"])
+        out.append(v)
+    return out
+
+
+def _save_vaults(items: list[dict], vault: Path) -> None:
+    """Write `vaults:` and drop ADR-0143's keys, which it replaces."""
+    from silica.kernel.vault_manifest import set_block_key, unset_block_key
+
+    keep = ("folder", "slug", "title", "line", "license", "visibility", "listed", "readers", "published")
+    rows = [{k: v[k] for k in keep if v.get(k) not in ("", [], None, False)}
+            | ({"downgraded": True} if v.get("downgraded") else {}) for v in items]
+    set_block_key(vault, PUBLIC_KEY, "vaults", rows)
+    for old in ("folders", "page"):
+        unset_block_key(vault, PUBLIC_KEY, old)
+
+
+def vault_of(path: str, items: list[dict]) -> dict | None:
+    """The vault a note is in, None outside every vault."""
+    return next((v for v in items if _within(path, v["folder"])), None)
+
+
+def find(slug: str, vault: Path | None = None) -> dict:
+    v = next((v for v in vaults(vault) if v["slug"] == slug), None)
+    if v is None:
+        raise ValueError(f"no vault {slug!r} on this page")
+    return v
+
+
+def private_allowed() -> str:
+    """"ok", "paid" (the account's tier does not list Private) or "hosted"
+    (a laptop has no relay to carry an invitation). The tier says it in its
+    views line, as for every paid view (ADR-0140, ADR-0151 point 9): a word
+    beside the tab ids, `private`, with no tab of its own; a seat's `all`
+    takes it."""
+    from silica.config import hosted
+
+    if not hosted():
+        return "hosted"
+    names = {v.strip() for v in os.environ.get("SILICA_VIEWS", "").split(",")}
+    return "ok" if names & {"all", "private"} else "paid"
+
+
+def enforce_tier(vault: Path | None = None) -> list[str]:
+    """A Private vault of an account that lost Private turns Off (ADR-0151
+    point 10); returns the slugs it turned. Readers keep what they saved,
+    and the relay has already stopped delivering on the tier."""
+    vault = vault or _vault()
+    if private_allowed() == "ok":
+        return []
+    items = vaults(vault)
+    turned = [v["slug"] for v in items if v["visibility"] == "private"]
+    if not turned:
+        return []
+    for v in items:
+        if v["visibility"] == "private":
+            v.update(visibility="off", downgraded=True)
+            _drop_private(v["slug"], vault)
+    _save_vaults(items, vault)
+    return turned
+
+
+def add_vault(folder: str, vault: Path | None = None) -> dict:
+    """Make a folder a vault on the Page; it starts Off (ADR-0151 point 1)."""
+    vault = vault or _vault()
+    folder = folder.strip().strip("/")
+    items = vaults(vault)
+    if not folder or never(folder + "/x", never_dirs()):
+        raise ValueError(f"{folder or 'that folder'} cannot be published")
+    if not (vault / folder).is_dir():
+        raise ValueError(f"{folder} is not a folder of this vault")
+    if len(items) >= MAX_VAULTS:
+        raise ValueError(f"a page holds {MAX_VAULTS} vaults at most")
+    for v in items:
+        if _within(folder, v["folder"]) or _within(v["folder"], folder):
+            raise ValueError(f"{folder} overlaps the vault {v['title']} ({v['folder']})")
+    base = slugify(folder.rsplit("/", 1)[-1]) or "vault"
+    slug, n, taken = base, 2, {v["slug"] for v in items} | _RESERVED_SLUGS
+    while slug in taken:
+        slug, n = f"{base}-{n}", n + 1
+    items.append(_clean_vault({"folder": folder, "slug": slug}))
+    _save_vaults(items, vault)
+    return next(v for v in vaults(vault) if v["folder"] == folder)
+
+
+def update_vault(slug: str, changes: dict, vault: Path | None = None) -> dict:
+    """Title, line, license, listing or readers of one vault. Visibility has
+    its own call, which moves files."""
+    vault = vault or _vault()
+    items = vaults(vault)
+    v = next((x for x in items if x["slug"] == slug), None)
+    if v is None:
+        raise ValueError(f"no vault {slug!r} on this page")
+    if "title" in changes:
+        v["title"] = str(changes["title"] or "").strip()[:80] or v["folder"].rsplit("/", 1)[-1]
+    if "line" in changes:
+        v["line"] = " ".join(str(changes["line"] or "").split())[:160]
+    if "license" in changes:
+        if changes["license"] not in LICENSES:
+            raise ValueError("that is not a license this page offers")
+        v["license"] = changes["license"]
+    if "listed" in changes:
+        v["listed"] = bool(changes["listed"])
+    if "readers" in changes:
+        me = handle(vault)
+        names = [str(r).strip().lstrip("@").lower() for r in changes["readers"] or []]
+        bad = [n for n in names if not _HANDLE.match(n)]
+        if bad:
+            raise ValueError(f"@{bad[0]} is not a handle")
+        v["readers"] = sorted({n for n in names if n != me})
+    _save_vaults(items, vault)
+    return next(x for x in vaults(vault) if x["slug"] == slug)
+
+
+def remove_vault(slug: str, vault: Path | None = None) -> None:
+    """Take an Off vault off the Page, its last publication with it; the
+    folder and its notes stay as they are."""
+    vault = vault or _vault()
+    items = vaults(vault)
+    v = next((x for x in items if x["slug"] == slug), None)
+    if v is None:
+        raise ValueError(f"no vault {slug!r} on this page")
+    if v["visibility"] != "off":
+        raise ValueError("turn the vault Off before removing it")
+    root = site_root(handle(vault))
+    shutil.rmtree(root / "paused" / slug, ignore_errors=True)
+    _save_vaults([x for x in items if x["slug"] != slug], vault)
 
 
 def never_dirs() -> tuple[str, ...]:
@@ -137,19 +314,22 @@ def _flag(value) -> bool | None:
     return None
 
 
-def state(path: str, fm: dict, folders: list[str], dirs: tuple[str, ...]) -> str:
-    """"on", "off", "struck" (left out of a public folder by its own globe)
-    or "never". A clip is someone else's text, so a folder's globe does not
-    take it: only its own does (ADR-0143 point 3)."""
-    if never(path, dirs):
+def state(path: str, fm: dict, items: list[dict], dirs: tuple[str, ...]) -> str:
+    """"on" (goes out with its vault), "off", "struck" (left out of its vault
+    by its own globe) or "never". A note outside every vault is off whatever
+    its `publish:` says (ADR-0151 point 2). A clip is someone else's text, so
+    its vault does not take it: only its own globe does (ADR-0143 point 3).
+    A copy of someone's Private vault never goes out (ADR-0151 point 9)."""
+    if never(path, dirs) or fm.get("shared") == "private":
         return "never"
+    if vault_of(path, items) is None:
+        return "off"
     own = _flag(fm.get("publish"))
     if own is True:
         return "on"
-    folder_on = any(_within(path, f) for f in folders)
     if own is False:
-        return "struck" if folder_on else "off"
-    return "on" if folder_on and fm.get("form") != "clip" else "off"
+        return "struck"
+    return "off" if fm.get("form") == "clip" else "on"
 
 
 def frontmatters(vault: Path | None = None) -> dict[str, dict]:
@@ -160,36 +340,21 @@ def frontmatters(vault: Path | None = None) -> dict[str, dict]:
 
 
 def selection(vault: Path | None = None) -> dict:
-    """Every note's state and the settings it was computed from."""
+    """Every note's state, its vault, and the vaults it was computed from."""
     vault = vault or _vault()
-    conf = settings(vault)
+    items = vaults(vault)
     dirs = never_dirs()
     fms = frontmatters(vault)
-    notes = {p: state(p, fm, conf["folders"], dirs) for p, fm in fms.items()}
-    return {**conf, "never": list(dirs), "notes": notes, "frontmatter": fms}
-
-
-def set_folder(folder: str, on: bool, vault: Path | None = None) -> list[str]:
-    """Put a folder's globe on or off; returns the folders now public."""
-    from silica.kernel.vault_manifest import set_block_key
-
-    vault = vault or _vault()
-    folder = folder.strip().strip("/")
-    if not folder or never(folder + "/x", never_dirs()):
-        raise ValueError(f"{folder or 'that folder'} cannot be published")
-    folders = set(settings(vault)["folders"])
-    if on:
-        folders.add(folder)
-    else:
-        folders.discard(folder)
-    set_block_key(vault, PUBLIC_KEY, "folders", sorted(folders))
-    return sorted(folders)
+    notes = {p: state(p, fm, items, dirs) for p, fm in fms.items()}
+    of = {p: v["slug"] for p in notes if (v := vault_of(p, items)) is not None}
+    return {"vaults": items, "never": list(dirs), "notes": notes, "vault_of": of, "frontmatter": fms}
 
 
 def set_note(path: str, on: bool, vault: Path | None = None) -> str:
-    """Put a note's globe on or off, writing the least that says it: no
-    `publish:` when its folder already decides, `true` or `false` when the
-    note must differ from its folder. Returns the note's new state."""
+    """Put a note's globe on or off inside its vault, writing the least that
+    says it: no `publish:` when its vault already takes it, `false` to leave
+    it out, `true` for a clip, which only its own globe takes. Returns the
+    note's new state."""
     vault = vault or _vault()
     dirs = never_dirs()
     if never(path, dirs):
@@ -197,12 +362,16 @@ def set_note(path: str, on: bool, vault: Path | None = None) -> str:
     fm = frontmatters(vault).get(path)
     if fm is None:
         raise ValueError(f"{path} is not a note of this vault")
-    folders = settings(vault)["folders"]
-    by_folder = any(_within(path, f) for f in folders) and fm.get("form") != "clip"
-    value = (None if by_folder else True) if on else (False if by_folder else None)
+    if fm.get("shared") == "private":
+        raise ValueError(f"{path} is a copy of a Private vault and stays yours alone")
+    items = vaults(vault)
+    if vault_of(path, items) is None:
+        raise ValueError(f"{path} is in no vault of your Page: make its folder a vault first")
+    clip = fm.get("form") == "clip"
+    value = (True if clip else None) if on else (None if clip else False)
     _write_publish(path, value)
     return state(path, {**fm, "publish": value} if value is not None
-                 else {k: v for k, v in fm.items() if k != "publish"}, folders, dirs)
+                 else {k: v for k, v in fm.items() if k != "publish"}, items, dirs)
 
 
 def _write_publish(path: str, value: bool | None) -> None:
@@ -230,50 +399,69 @@ def _write_publish(path: str, value: bool | None) -> None:
 
 def site_root(h: str | None = None) -> Path:
     """`~/.silica/public/<handle>`: one folder per page, so a laptop serving
-    two vaults keeps two pages. `live/` is what the host serves, `paused/`
-    the last publication while the page is off."""
+    two vaults keeps two pages. `live/` is what the host serves, the Page and
+    one folder per Public vault; `paused/<vault>` a vault's last publication
+    while it is off; `private/<vault>` a Private vault, for the relay only."""
     base = os.environ.get("SILICA_PUBLIC_DIR", "").strip()
     root = Path(base).expanduser() if base else Path.home() / ".silica" / "public"
     return root / (h if h is not None else handle())
 
 
-def set_page(on: bool, vault: Path | None = None) -> bool:
-    """Turn the whole page on or off (ADR-0143 point 5). Off moves `live/`
-    aside, so its address answers that there is no page; on moves the last
-    publication back. Nothing about the choice of notes changes."""
-    from silica.kernel.vault_manifest import set_block_key
-
+def set_visibility(slug: str, vis: str, vault: Path | None = None) -> dict:
+    """Off, Public or Private for one vault (ADR-0151 point 3). Off moves its
+    last publication aside, so its address answers that there is nothing
+    there; Public puts it back; Private takes it off the public host, and
+    Publish builds it where only the relay reads (point 9)."""
     vault = vault or _vault()
-    set_block_key(vault, PUBLIC_KEY, "page", bool(on))
+    if vis not in VISIBILITY:
+        raise ValueError("a vault is off, public or private")
+    if vis == "private" and private_allowed() != "ok":
+        raise ValueError("Private needs a paid account on Silica hosted"
+                         if private_allowed() == "paid" else "Private works between accounts on Silica hosted")
+    items = vaults(vault)
+    v = next((x for x in items if x["slug"] == slug), None)
+    if v is None:
+        raise ValueError(f"no vault {slug!r} on this page")
+    v["visibility"], v["downgraded"] = vis, False
+    _save_vaults(items, vault)
     h = handle(vault)
-    if not h:
-        return bool(on)
-    root = site_root(h)
-    live, paused = root / "live", root / "paused"
-    if on and not live.exists() and paused.exists():
-        paused.rename(live)
-    elif not on and live.exists():
-        if paused.exists():
-            shutil.rmtree(paused)
-        live.rename(paused)
-    return bool(on)
+    if h:
+        root = site_root(h)
+        live, paused = root / "live" / slug, root / "paused" / slug
+        if vis == "public" and not live.exists() and paused.exists():
+            live.parent.mkdir(parents=True, exist_ok=True)
+            paused.rename(live)
+        elif vis != "public" and live.exists():
+            if paused.exists():
+                shutil.rmtree(paused)
+            paused.parent.mkdir(parents=True, exist_ok=True)
+            live.rename(paused)
+        if vis != "private":
+            _drop_private(slug, vault)
+    return find(slug, vault)
 
 
-def swap_in(build: Path, h: str) -> Path:
-    """Make a finished build the live page. Two renames, so a visitor can miss
-    the page for the instant between them, never read half of one.
+def _drop_private(slug: str, vault: Path) -> None:
+    """A Private build no longer Private leaves the folder the relay reads,
+    so its readers' invitations go at the relay's next pass."""
+    h = handle(vault)
+    if h:
+        shutil.rmtree(site_root(h) / "private" / slug, ignore_errors=True)
+
+
+def swap_in(build: Path, dest: Path) -> Path:
+    """Make a finished build the folder a vault is served or relayed from.
+    Two renames, so a visitor can miss the vault for the instant between
+    them, never read half of one.
     shortcut: two renames leave a sub-millisecond 404; a symlink swapped with
     os.replace closes it, if a host ever reports a reader hitting that gap."""
-    root = site_root(h)
-    live, old = root / "live", root / ".old"
+    old = dest.with_name(f".old-{dest.name}")
     if old.exists():
         shutil.rmtree(old)
-    if live.exists():
-        live.rename(old)
-    build.rename(live)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        dest.rename(old)
+    build.rename(dest)
     if old.exists():
         shutil.rmtree(old)
-    paused = root / "paused"
-    if paused.exists():
-        shutil.rmtree(paused)  # a new publication replaces the one put aside
-    return live
+    return dest
