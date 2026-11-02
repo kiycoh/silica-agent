@@ -2489,7 +2489,9 @@
   padding-top: 0.2rem;
 }
 
+/* the run line's words in Archivo; its counts stay in the mono around them */
 .lg-label {
+  font-family: var(--sans);
   color: var(--ash-dim);
 }
 

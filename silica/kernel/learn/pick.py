@@ -302,9 +302,10 @@ def session(
     amnesty = AMNESTY_LINE.format(due=n_due_total, n=n) if n_due_total > AMNESTY_FACTOR * n else None
     short = None
     if len(items) < n:
-        short = (f"{len(items)} item(s) in scope: {n_due_total} due, {len(unexplored)} unexplored"
+        noun = "item" if len(items) == 1 else "items"
+        short = (f"{len(items)} {noun} in scope: {n_due_total} due, {len(unexplored)} unexplored"
                  if scope is not None else
-                 f"{len(items)} eligible item(s): {n_due_total} due, {len(unexplored)} unexplored")
+                 f"{len(items)} eligible {noun}: {n_due_total} due, {len(unexplored)} unexplored")
     return {"items": items, "backfill": backfill, "due": n_due_total, "unexplored": len(unexplored),
             "amnesty": amnesty, "short": short}
 

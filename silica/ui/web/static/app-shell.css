@@ -854,8 +854,8 @@ body.sidebar-collapsed #sidebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-family: var(--mono);
   font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
   color: var(--ash-dim);
 }
 

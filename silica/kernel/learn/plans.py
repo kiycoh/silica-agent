@@ -1833,6 +1833,11 @@ ATTEMPTS_PER_NOTE = 2.5
 RECENT_PACE_DAYS = 7    # the reader's own pace: answers a day over the last week
 
 
+def _count(n: int, word: str) -> str:
+    """'1 day', '7 days': the plan's own sentence picks the plural, where "day(s)" made the reader do it."""
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
 def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | None = None) -> dict | None:
     """Workload arithmetic for a deadline (D24): the answers a day the notes
     below reach need before the final pass (pick.FINAL_DAYS), set against the
@@ -1851,7 +1856,7 @@ def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | No
     days_left = max(0, (by - date.today()).days)
     if days_left == 0:
         return {"days_left": 0, "per_day": below, "below": below,
-                "say": f"The date has arrived; {below} note(s) remaining below the target."}
+                "say": f"The date has arrived; {_count(below, 'note')} remaining below the target."}
     # a project window the reference states takes the last days, as in the
     # calendar (ADR-0131 point 9): the answers fit the study days before it
     b = budget(plan) if plan.get("steps") else None
@@ -1867,7 +1872,7 @@ def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | No
               else " You have not answered yet this week." if entries is not None else "")
     return {"days_left": days_left, "per_day": per_day, "below": below, "session": size,
             "answers": answers, "recent_per_day": round(recent, 1),
-            "say": (f"About {per_day} answers a day for {study_days} day(s){final}: {below} note(s) at about "
+            "say": (f"About {per_day} answers a day for {_count(study_days, 'day')}{final}: {_count(below, 'note')} at about "
                     f"{ATTEMPTS_PER_NOTE:g} answers each to hold them at the date; a session of {size} covers a "
                     f"day.{lately}")}
 

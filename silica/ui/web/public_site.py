@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 _SHOWN_PROPS = ("title", "tags", "date")
 _ANCHOR = re.compile(r'<a class="note-link" data-path="([^"]*)">')
 _ASSET_SRC = re.compile(r'/asset\?path=([^"\'\s>]+)')
-_FONTS = ("host-grotesk-latin.woff2", "martian-mono-latin.woff2", "host-grotesk-OFL.txt")
+_FONTS = ("archivo-latin.woff2", "martian-mono-latin.woff2")
 _LANGS = {"italian": "it", "english": "en", "spanish": "es", "french": "fr",
           "german": "de", "portuguese": "pt"}
 
@@ -140,14 +140,20 @@ def _head(title: str, desc: str, site: _Site, *, canonical: str = "", md: str = 
 
 
 def _top(site: _Site, crumb: str = "") -> str:
-    join = f'<a class="btn ghost small" href="{_esc(_app() + "/")}">Join Silica</a>' if site.base else ""
-    return (f'<header class="top"><a class="brand" href="{_esc(site.index())}">@{_esc(site.h)}</a>'
+    join = f'<a class="btn small" href="{_esc(_app() + "/")}">Join Silica</a>' if site.base else ""
+    return (f'<div class="page">\n<header class="bar"><a class="handle" href="{_esc(site.index())}">@{_esc(site.h)}</a>'
             f'{crumb}<span class="spacer"></span>{join}</header>\n')
+
+
+# Silica's mark (site/index.html's brand): the page says whose tool made it once, at its foot.
+_MARK = ('<svg class="mk" viewBox="0 0 256 256" aria-hidden="true"><path class="i" d="M16 112 L144 112 '
+         'L144 240 L112 240 L112 144 L16 144 Z M16 64 L192 64 L192 240 L160 240 L160 96 L16 96 Z M16 16 '
+         'L240 16 L240 240 L208 240 L208 48 L16 48 Z"/><path class="s" d="M16 160 L96 160 L96 240 L16 240 Z"/></svg>')
 
 
 def _foot(site: _Site, url: str) -> str:
     made = f'<a href="{_esc(_app() + "/")}">Published with Silica</a>' if site.base else "Published with Silica"
-    return f'<footer class="foot">{made}{_report_link(url)}</footer>\n</body>\n</html>\n'
+    return f'<footer class="foot">{_MARK}{made}{_report_link(url)}</footer>\n</div>\n</body>\n</html>\n'
 
 
 def _desc(body: str) -> str:
@@ -179,47 +185,79 @@ def _md_for_reader(body: str, resolve, href_of) -> str:
     return _WIKILINK.sub(sub, body)
 
 
-def _graph_svg(public: list[str], edges: set[tuple[str, str]], titles: dict, slugs: dict,
-               site: _Site) -> str:
-    """The links between public notes, drawn once at publish. Not the Explore
-    frame: it carries layers that would leak (ADR-0143 point 4) and two
-    renderers per page. A fixed seed, so a republish of the same notes draws
-    the same picture."""
+# shortcut: past this many notes the cover keeps the best linked ones, so the layout stays near a
+# second; reopen if a page this large asks for every mark (count them in the published meta line)
+COVER_MAX = 1500
+
+
+def cover_layout(nodes: list[str], pairs: set[tuple[str, str]]) -> tuple[list[tuple[str, float, float, int]],
+                                                                       list[tuple[int, int]]]:
+    """The page's graph as its cover lays it out: each note at (x, y) in 0..1 with its degree, and
+    the links as index pairs. One layout rule for the app's cover (`GET /public/cover`, links from
+    the vault graph) and the published one (links from the rendered pages), so the two agree
+    wherever their links do (ADR-0146 point 4 and its amendment of 2026-11-01). Not the Explore
+    frame: it carries layers that would leak (ADR-0143 point 4). A fixed seed, so a republish of
+    the same notes draws the same picture."""
     import networkx as nx
 
-    if not public:
-        return ""
+    if not nodes:
+        return [], []
     g = nx.Graph()
-    g.add_nodes_from(public)
-    g.add_edges_from((a, b) for a, b in edges if a != b)
-    pos = nx.spring_layout(g, seed=7, k=1.6 / max(len(public), 1) ** 0.5) if len(public) > 1 \
-        else {public[0]: (0.0, 0.0)}
-    w, hgt, pad = 620, 400, 44
-    xs = [p[0] for p in pos.values()]
-    ys = [p[1] for p in pos.values()]
-    span_x = (max(xs) - min(xs)) or 1.0
-    span_y = (max(ys) - min(ys)) or 1.0
+    g.add_nodes_from(nodes)
+    g.add_edges_from((a, b) for a, b in pairs if a != b)
+    if len(nodes) > COVER_MAX:
+        g = g.subgraph(sorted(nodes, key=lambda p: (-g.degree(p), p))[:COVER_MAX]).copy()
+    order = sorted(g.nodes)
+    if len(order) == 1:
+        return [(order[0], 0.5, 0.5, 0)], []  # one note sits in the middle, not in a corner
+    pos = nx.spring_layout(g, seed=7, k=1.6 / len(order) ** 0.5)
+    xs = [pos[n][0] for n in order]
+    ys = [pos[n][1] for n in order]
+    sx, sy = (max(xs) - min(xs)) or 1.0, (max(ys) - min(ys)) or 1.0
+    at = {n: i for i, n in enumerate(order)}
+    marks = [(n, round((pos[n][0] - min(xs)) / sx, 4), round((pos[n][1] - min(ys)) / sy, 4), g.degree(n))
+             for n in order]
+    return marks, [(at[a], at[b]) for a, b in g.edges]
 
-    def at(n):
-        x, y = pos[n]
-        return (pad + (x - min(xs)) / span_x * (w - 2 * pad), pad + (y - min(ys)) / span_y * (hgt - 2 * pad))
 
-    named = set(sorted(public, key=lambda n: (-g.degree(n), titles[n].lower()))[:14])
-    out = [f'<svg viewBox="0 0 {w} {hgt}" role="img" aria-label="how these notes link">']
-    for a, b in g.edges():
-        (x1, y1), (x2, y2) = at(a), at(b)
-        out.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}"/>')
-    for n in sorted(public):
-        x, y = at(n)
-        r = 4.5 + 1.6 * min(g.degree(n), 9) ** 0.5
-        # a node on the right third names itself leftward, or its name runs
-        # off the drawing
-        left = x > w * 0.62
-        anchor = ' text-anchor="end"' if left else ""
-        label = (f'<text x="{x - r - 5 if left else x + r + 5:.1f}" y="{y + 4:.1f}"{anchor}>'
-                 f'{_esc(titles[n])}</text>' if n in named else "")
-        out.append(f'<a href="{_esc(site.href(slugs[n]))}"><title>{_esc(titles[n])}</title>'
-                   f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}"/>{label}</a>')
+def mark_px(count: int, degree: int) -> int:
+    """A cover mark's width in screen pixels: a sparse page prints bigger marks, so three notes read
+    as three and not as specks, and a hub (twelve links) never prints under 5 px. The app's
+    canvas cover and the published SVG both take it from here."""
+    base = 7 if count < 40 else 5 if count < 200 else 3
+    return max(base, 5 if degree >= 12 else 3)
+
+
+_COVER_W, _COVER_H, _COVER_PAD = 1000, 420, 14
+
+
+def _cover_svg(marks: list[tuple[str, float, float, int]], links: list[tuple[int, int]],
+               titles: dict, hrefs: dict) -> str:
+    """The cover printed at publish: notes as marks, links as lines, in the sheet's two inks.
+    SVG and not the app's canvas because the public host allows no script (silica-hosted's
+    Caddyfile serves /@handle under default-src 'none'); crisp edges keep every pixel one of the
+    two inks, and the strokes are screen pixels, so a mark keeps its size on a phone. Each mark is
+    a link to its note, out of the tab order: the list below is the way through by keyboard."""
+    if not marks:
+        return ""
+    w, h, pad = _COVER_W, _COVER_H, _COVER_PAD
+    xy = [(pad + x * (w - 2 * pad), pad + y * (h - 2 * pad)) for _, x, y, _ in marks]
+    dots: dict[int, list[str]] = {}
+    for (_, _, _, deg), (x, y) in zip(marks, xy):
+        dots.setdefault(mark_px(len(marks), deg), []).append(f"M{x:.1f} {y:.1f}h0")
+    out = [f'<svg class="graph" viewBox="0 0 {w} {h}" aria-hidden="true" focusable="false">']
+    if links:
+        out.append('<path class="ln" d="' + "".join(
+            f"M{xy[a][0]:.1f} {xy[a][1]:.1f}L{xy[b][0]:.1f} {xy[b][1]:.1f}" for a, b in links) + '"/>')
+    # a clear ring of the sheet under each mark first, so a note reads as a mark and not a crossing;
+    # sizes are classes, not style attributes, which the host's style-src 'self' would drop
+    for px, d in sorted(dots.items()):
+        out.append(f'<path class="halo s{px}" d="{"".join(d)}"/>')
+    for px, d in sorted(dots.items()):
+        out.append(f'<path class="ink s{px}" d="{"".join(d)}"/>')
+    for (p, _, _, _), (x, y) in zip(marks, xy):
+        out.append(f'<a href="{_esc(hrefs[p])}" tabindex="-1"><title>{_esc(titles[p])}</title>'
+                   f'<path class="hit" d="M{x:.1f} {y:.1f}h0"/></a>')
     out.append("</svg>")
     return "".join(out)
 
@@ -340,7 +378,7 @@ def build(vault: Path | None = None) -> dict:
         save = ""
         if site.base:
             target = source if credit and source else url
-            note = f"saves @{_esc(credit)}'s original" if credit and source else "a copy goes into your own vault"
+            note = f"Saves @{_esc(credit)}'s original" if credit and source else "A copy goes into your own vault"
             save = (f'<p class="actions"><a class="btn" href="{_esc(_save_link(target))}">Save to Silica</a>'
                     f'<span class="cap">{note}</span></p>')
         linked = "".join(f'<li><a href="{_esc(site.href(slugs[b]))}">{_esc(titles[b])}</a></li>'
@@ -352,13 +390,13 @@ def build(vault: Path | None = None) -> dict:
             side += f'<div><h2 class="lab">Linked from</h2><ul>{linked}</ul></div>'
         if more_html:
             side += (f'<div><h2 class="lab">More from @{_esc(h)}</h2><ul>{more_html}'
-                     f'<li><a href="{_esc(site.index())}">All {len(shown)} notes</a></li></ul></div>')
+                     f'<li><a href="{_esc(site.index())}">All {len(shown):,} notes</a></li></ul></div>')
         page = (head + "<body>\n" + _top(site, crumb)
-                + '<div class="art-grid"><main class="art">' + banner
-                + f'<p class="lab meta">{byline}</p><h1>{_esc(titles[p])}</h1>'
+                + f'<div class="art-grid{"" if side else " solo"}"><main class="sheet art">' + banner
+                + f'<p class="byline">{byline}</p><h1>{_esc(titles[p])}</h1>'
                 + (f'<p class="tags">{" · ".join(_esc(t) for t in tags)}</p>' if tags else "")
                 + f'<article class="body">{r["html"]}</article>{save}</main>'
-                + (f'<aside class="side">{side}</aside>' if side else "") + "</div>\n"
+                + (f'<aside class="sheet side">{side}</aside>' if side else "") + "</div>\n"
                 + _foot(site, url or slug))
         (build_dir / f"{slug}.html").write_text(page, encoding="utf-8")
         # the title always, so a saver names the copy as the page does
@@ -377,21 +415,26 @@ def build(vault: Path | None = None) -> dict:
         credit = _author(rendered[p]["props"], h)
         tail = f"from @{_esc(credit)}" if credit else " · ".join(_esc(t) for t in _tags(rendered[p]["props"]))
         return (f'<li><a href="{_esc(site.href(slugs[p]))}">{_esc(titles[p])}</a>'
-                f'<span class="m">{tail}</span><span class="m">{deg} {"link" if deg == 1 else "links"}</span></li>')
+                f'<span class="t">{tail}</span><span class="m">{deg} {"link" if deg == 1 else "links"}</span></li>')
 
     by_title = lambda ps: sorted(ps, key=lambda x: titles[x].lower())  # noqa: E731
-    lists = f'<ol class="plist">{"".join(row(p) for p in by_title(own))}</ol>'
+    lists = (f'<h2 class="lab">Notes<span>{len(own):,}</span></h2>'
+             f'<ol class="plist">{"".join(row(p) for p in by_title(own))}</ol>')
     if others:
-        lists += f'<h2 class="lab sub">Saved from others</h2><ol class="plist">{"".join(row(p) for p in by_title(others))}</ol>'
-    svg = _graph_svg(shown, pairs, titles, slugs, site)
-    meta = f'{len(shown)} {"note" if len(shown) == 1 else "notes"} · {len(pairs)} links · updated {stamp}'
+        lists += (f'<h2 class="lab sub">Saved from others<span>{len(others):,}</span></h2>'
+                  f'<ol class="plist">{"".join(row(p) for p in by_title(others))}</ol>')
+    marks, links = cover_layout(shown, pairs)
+    cover = _cover_svg(marks, links, titles, {p: site.href(slugs[p]) for p in shown})
+    meta = (f'{len(shown):,} {"note" if len(shown) == 1 else "notes"} · {len(pairs):,} '
+            f'{"link" if len(pairs) == 1 else "links"} · updated {stamp}')
     index = (_head(f"@{h} · Silica", f"{len(shown)} notes by @{h}", site, canonical=site.base, lang=lang)
              + "<body>\n" + _top(site)
-             + f'<section class="profile"><h1>@{_esc(h)}</h1><p class="lab">{_esc(meta)}</p></section>'
-             + f'<div class="pub-grid"><div>{lists}</div>'
-             + (f'<figure class="pgraph"><figcaption class="lab">How these notes link</figcaption>{svg}</figure>'
-                if svg else "")
-             + "</div>\n" + _foot(site, site.base or "index.html"))
+             + '<section class="sheet profile">'
+             # a page of a few notes prints big marks (mark_px) on a lower sheet, as the app's cover
+             + (f'<figure class="cover{" sparse" if len(marks) < 40 else ""}">{cover}</figure>' if cover else "")
+             + f'<div class="addr"><h1>@{_esc(h)}</h1><p class="meta">{_esc(meta)}</p></div></section>\n'
+             + f'<section class="sheet notes">{lists}</section>\n'
+             + _foot(site, site.base or "index.html"))
     (build_dir / "index.html").write_text(index, encoding="utf-8")
     state = {"published_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
              "notes": shown}
@@ -444,57 +487,83 @@ def _copy_static(dest: Path) -> None:
     (dest / "site.css").write_text(_CSS, encoding="utf-8")
 
 
-# The landing's plate (site/DESIGN.md): paper, one ink, one signal, square
-# corners. Martian Mono for the labels because it ships with the app; the
-# landing's JetBrains Mono does not.
-_CSS = """@font-face{font-family:"Host Grotesk";src:url("host-grotesk-latin.woff2") format("woff2");font-weight:300 800;font-display:swap}
+# The app's kit (root DESIGN.md "Public pages", ADR-0146 amendment 2026-11-01): the canvas, its
+# sheets at 14 px, Archivo for words and Martian Mono for counts, the app's two ramps. Paper unless
+# the reader's system is dark: a remembered switch, as the landing has, needs a script, and the
+# public host allows none (silica-hosted Caddyfile, default-src 'none').
+_CSS = """@font-face{font-family:"Archivo";src:url("archivo-latin.woff2") format("woff2");font-weight:100 900;font-stretch:62% 125%;font-display:swap}
 @font-face{font-family:"Martian Mono";src:url("martian-mono-latin.woff2") format("woff2");font-weight:300 800;font-display:swap}
-:root{--paper:#FFFDF9;--ink:#1A1815;--ink-2:#4A453C;--hair:#CFC8BA;--signal:#0A6070;
---sans:"Host Grotesk",ui-sans-serif,system-ui,"Helvetica Neue",Arial,sans-serif;
---mono:"Martian Mono",ui-monospace,Menlo,Consolas,monospace;color-scheme:light}
-*{box-sizing:border-box}html,body{margin:0}
-body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:17px;line-height:1.55}
-a{color:var(--ink);text-decoration-color:var(--signal);text-underline-offset:3px}a:hover{color:var(--signal)}
-:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
-.lab{font-family:var(--mono);font-size:12px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-2);margin:0}
-.top{display:flex;align-items:center;gap:14px;min-height:58px;padding:0 max(16px,3vw);border-bottom:1px solid var(--hair)}
-.brand{font-weight:700;letter-spacing:.02em;text-decoration:none}.crumb{font-family:var(--mono);font-size:12.5px;color:var(--ink-2)}
-.spacer{flex:1}
-.btn{display:inline-flex;align-items:center;height:44px;padding:0 1.1rem;background:var(--ink);color:var(--paper);border:1px solid var(--ink);font:600 16px/1 var(--sans);text-decoration:none}
-.btn:hover{background:var(--signal);border-color:var(--signal);color:var(--paper)}
-.btn.ghost{background:transparent;color:var(--ink)}.btn.ghost:hover{color:var(--signal);background:transparent}
-.btn.small{height:36px;font-size:14.5px;padding:0 .9rem}
-.profile{padding:30px max(16px,3vw) 18px;border-bottom:1px solid var(--ink);display:grid;gap:6px}
-.profile h1{margin:0;font-size:clamp(1.8rem,1.3rem + 2vw,2.6rem);letter-spacing:-.03em;line-height:1.05}
-.pub-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,560px)}
-.plist{list-style:none;margin:0;padding:6px max(16px,3vw) 22px}
-.plist li{display:grid;grid-template-columns:1fr auto 70px;gap:14px;align-items:baseline;padding:12px 0;border-bottom:1px solid var(--hair)}
-.plist a{font-size:18px;font-weight:600;text-decoration:none;letter-spacing:-.01em}.plist a:hover{text-decoration:underline}
-.m{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);text-align:right}
-.sub{padding:18px max(16px,3vw) 0}
-.pgraph{margin:0;border-left:1px solid var(--ink);padding:18px 22px;display:grid;gap:8px;align-content:start}
-.pgraph svg{width:100%;height:auto}.pgraph line{stroke:var(--ink);stroke-width:1.1}
-.pgraph circle{fill:var(--paper);stroke:var(--ink);stroke-width:1.5}.pgraph a:hover circle{fill:var(--signal)}
-.pgraph text{font-family:var(--sans);font-size:12.5px;font-weight:600;fill:var(--ink)}
-.art-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px}
-.art{padding:34px max(16px,3vw) 30px;max-width:780px}
-.art .meta{margin-bottom:10px}
-.art h1{margin:0 0 6px;font-size:clamp(2rem,1.4rem + 2.4vw,2.8rem);line-height:1.02;letter-spacing:-.035em}
-.tags{margin:0 0 22px;font-family:var(--mono);font-size:12.5px;color:var(--ink-2)}
-.body{font-size:18px;line-height:1.6}.body p,.body ul,.body ol,.body pre,.body blockquote,.body table{max-width:66ch}
-.body img{max-width:100%;height:auto}.body pre{overflow-x:auto;padding:12px;border:1px solid var(--hair);font-size:14px}
-.body code{font-family:var(--mono);font-size:.85em}.body table{border-collapse:collapse;display:block;overflow-x:auto}
-.body th,.body td{border:1px solid var(--hair);padding:4px 8px}
-.body blockquote{margin:0;padding:2px 14px;border-left:2px solid var(--ink)}
-.body .note-link{text-decoration:underline;text-decoration-color:var(--signal);text-decoration-thickness:1.5px}
-.body .tag{font-family:var(--mono);font-size:.8em;color:var(--ink-2)}
-.banner{border:1px solid var(--ink);padding:12px 14px;margin:0 0 22px;font-size:15.5px;max-width:66ch}
-.banner a{color:var(--signal)}
-.actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:28px}.cap{font-size:14px;color:var(--ink-2)}
-.side{border-left:1px solid var(--hair);padding:34px 24px;display:grid;gap:22px;align-content:start}
-.side ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}.side a{text-decoration:none}.side a:hover{text-decoration:underline}
-.foot{display:flex;gap:6px;flex-wrap:wrap;padding:14px max(16px,3vw);border-top:1px solid var(--ink);font-size:13.5px;color:var(--ink-2)}
-.foot a{color:var(--ink-2)}
-@media (max-width:860px){.pub-grid,.art-grid{grid-template-columns:1fr}.pgraph,.side{border-left:0;border-top:1px solid var(--hair)}
-.plist li{grid-template-columns:1fr auto}.plist li .m:last-child{display:none}}
+:root{--void:#EFEAE0;--slate:#F5F1E9;--sheet:#FFFDF9;--slate-2:#E9E2D4;--line:#D9D1C0;--line-2:#C6BCA8;
+--frost:#1A1815;--text:#3A362F;--ash:#5B554B;--ash-dim:#655D4F;--accent:#0A6070;--on-vivid:#FFFFFF;
+--r:14px;--r-sm:8px;--r-xs:4px;--gutter:12px;--text-w:43rem;
+--sans:"Archivo",ui-sans-serif,system-ui,"Helvetica Neue",Arial,sans-serif;
+--mono:"Martian Mono",ui-monospace,Menlo,Consolas,monospace;--ease:cubic-bezier(.2,.8,.2,1);--dur:.18s;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--void:#0D0E0F;--slate:#141518;--sheet:#23272B;--slate-2:#24272B;
+--line:#2F343A;--line-2:#3F454D;--frost:#F4F5F7;--text:#C5CAD2;--ash:#AEB4BE;--ash-dim:#969CA6;--accent:#22B4CC;--on-vivid:#0D0E0F}}
+*{box-sizing:border-box}html{background:var(--void)}
+body{margin:0;padding:var(--gutter);background:var(--void);color:var(--text);font:400 15px/1.65 var(--sans);-webkit-font-smoothing:antialiased}
+h1,h2,h3,p,figure,ol,ul{margin:0}h1,h2,h3{color:var(--frost);text-wrap:balance}
+a{color:inherit;text-underline-offset:3px}b,strong{color:var(--frost)}
+:focus-visible{outline:1px solid var(--accent);outline-offset:3px;border-radius:var(--r-xs)}
+.page{max-width:76rem;margin:0 auto;display:grid;gap:var(--gutter)}
+.sheet{background:var(--sheet);border-radius:var(--r);overflow:clip}
+.bar{display:flex;align-items:center;gap:12px;min-height:56px;padding:0 10px 0 20px;background:var(--slate);border-radius:var(--r)}
+.handle{font:600 15px/1 var(--sans);color:var(--frost);text-decoration:none}.crumb{font-size:13.5px;color:var(--ash)}.spacer{flex:1}
+.btn{display:inline-flex;align-items:center;min-height:44px;padding:0 1.25rem;background:var(--accent);color:var(--on-vivid);border:1px solid var(--accent);border-radius:var(--r-sm);font:600 15px/1 var(--sans);text-decoration:none;transition:background-color var(--dur) var(--ease),border-color var(--dur) var(--ease)}
+.btn:hover{background:var(--frost);border-color:var(--frost)}.btn:active{transform:translateY(1px)}
+.btn.small{min-height:36px;padding:0 1rem;font-size:13px}
+.profile{padding:clamp(16px,2.4vw,32px) clamp(16px,2.4vw,32px) 0}
+.cover{height:clamp(240px,36vw,460px)}.cover.sparse{height:clamp(160px,18vw,220px)}
+.graph{display:block;width:100%;height:100%;shape-rendering:crispEdges}
+.graph path{fill:none;vector-effect:non-scaling-stroke;stroke-linecap:round}
+.graph .ln{stroke:var(--frost);stroke-width:1px}.graph .halo{stroke:var(--sheet)}.graph .ink{stroke:var(--frost)}
+.graph .halo.s3{stroke-width:5px}.graph .halo.s5{stroke-width:7px}.graph .halo.s7{stroke-width:9px}
+.graph .ink.s3{stroke-width:3px}.graph .ink.s5{stroke-width:5px}.graph .ink.s7{stroke-width:7px}
+.graph .hit{stroke:transparent;stroke-width:14px}.graph a:hover .hit{stroke:var(--frost);stroke-width:9px}
+.addr{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:16px 0 24px}
+.cover + .addr{border-top:1px solid var(--line);margin-top:16px}
+.addr h1{font-size:clamp(2rem,1.3rem + 2.4vw,3.4rem);font-weight:700;line-height:1;letter-spacing:-.035em}
+.meta{font-size:13px;color:var(--ash);font-variant-numeric:tabular-nums}
+.notes{padding:20px clamp(16px,2.4vw,32px) 24px}
+.lab{display:flex;align-items:baseline;gap:8px;font:500 13px/1.3 var(--sans);color:var(--ash)}
+.lab span{font:400 12px/1 var(--mono);color:var(--ash-dim);font-variant-numeric:tabular-nums}
+.lab.sub{margin-top:32px}
+.plist{list-style:none;padding:0;margin-top:12px;columns:2 24rem;column-gap:clamp(1.25rem,3.6vw,4rem)}
+.plist li{display:flex;align-items:baseline;gap:12px;min-height:40px;padding:9px 0;border-bottom:1px solid var(--line);break-inside:avoid}
+.plist a{flex:1;min-width:0;font-size:15px;font-weight:500;color:var(--frost);text-decoration:none}
+.plist a:hover{text-decoration:underline;text-decoration-color:var(--accent)}
+.t{font-size:12px;color:var(--ash);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40%}
+.m{font:400 12px/1 var(--mono);color:var(--ash-dim);font-variant-numeric:tabular-nums;white-space:nowrap}
+.art-grid{display:grid;grid-template-columns:minmax(0,1fr) 18rem;gap:var(--gutter);align-items:start}
+.art-grid.solo{grid-template-columns:minmax(0,1fr)}
+.art{padding:clamp(24px,4vw,56px)}.art > *{max-width:var(--text-w)}
+.byline{font-size:12px;color:var(--ash);margin-bottom:12px}
+.art > h1{font-size:clamp(2rem,1.3rem + 2.4vw,3.4rem);font-weight:700;line-height:1;letter-spacing:-.035em}
+.tags{margin-top:12px;font-size:13px;color:var(--ash)}
+.body{margin-top:32px;font-size:16px;line-height:1.72}.body > * + *{margin-top:1em}
+.body h1,.body h2{font-size:1.35rem;line-height:1.25;font-weight:600;margin-top:2em}
+.body h3,.body h4{font-size:1.05rem;font-weight:600;margin-top:1.6em}
+.body a,.body .note-link{color:var(--frost);text-decoration:underline;text-decoration-color:var(--accent);text-decoration-thickness:1px}
+.body ul,.body ol{padding-left:1.25em}.body li + li{margin-top:.35em}
+.body blockquote{margin-left:0;padding:2px 16px;border-left:2px solid var(--line-2)}
+.body code{font-family:var(--mono);font-size:.82em}
+.body pre{background:var(--slate);border-radius:var(--r-sm);padding:12px 16px;overflow-x:auto;font-size:13px}
+.body table{border-collapse:collapse;display:block;overflow-x:auto;font-size:14px}
+.body th,.body td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+.body img{max-width:100%;height:auto;border-radius:var(--r-sm)}
+.body .math{overflow-x:auto;padding:4px 0}.body math{font-size:1.1em;color:var(--frost)}
+.body hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+.body .tag{font-family:var(--mono);font-size:.8em;color:var(--ash)}
+.banner{border:1px solid var(--line-2);border-radius:var(--r-sm);padding:12px 16px;margin-bottom:24px;font-size:14px}
+.banner a{color:var(--frost);text-decoration-color:var(--accent)}
+.actions{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:48px;padding-top:24px;border-top:1px solid var(--line)}
+.cap{font-size:13px;color:var(--ash)}
+.side{padding:24px;display:grid;gap:24px}.side ul{list-style:none;padding:0;margin-top:8px;display:grid;gap:2px}
+.side a{display:block;padding:6px 0;font-size:14px;color:var(--frost);text-decoration:none}
+.side a:hover{text-decoration:underline;text-decoration-color:var(--accent)}
+.foot{display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap;padding:16px 0 4px;font-size:12px;color:var(--ash-dim)}
+.foot a{color:inherit;text-decoration:none}.foot a:hover{color:var(--frost)}
+.mk{width:14px;height:14px}.mk .i{fill:currentColor}.mk .s{fill:var(--accent)}
+@media (max-width:860px){body{padding:8px}.art-grid{grid-template-columns:1fr}.bar .crumb{display:none}.t{display:none}}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
 """

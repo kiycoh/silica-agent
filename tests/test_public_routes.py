@@ -69,6 +69,8 @@ def test_the_cover_is_the_graph_of_what_goes_out_and_nothing_private(client):
     assert all(0 <= n[0] <= 1 and 0 <= n[1] <= 1 for n in c["n"])
     assert len(c["e"]) == 1 and sorted(c["n"][i][3] for i in c["e"][0]) == ["Forgetting curve", "Spacing effect"]
     assert "Exam plan June" not in str(c)
+    # a two-note page prints its marks at 7 px, the published SVG's rule (mark_px)
+    assert [n[4] for n in c["n"]] == [7, 7]
     # the same notes and links draw the same picture
     assert tc.get("/public/cover").json() == c
 

@@ -962,7 +962,8 @@ function evDangling(d, T) {
   box.appendChild(mTable(
     [{ key: "target", label: "Target" }, { key: "refs", label: "Refs", num: true },
      { key: "src", label: "Referenced from" },
-     { label: "", el: (r) => evAct("write it", writePrompt(r._row), true) }],
+     // a row's action is the outline button; the card's one teal is "write the top N" below it
+     { label: "", el: (r) => evAct("write it", writePrompt(r._row), false) }],
     d.dangling.map((r) => ({ target: r.target, refs: r.refs, _row: r, src: srcLabel(r) })),
   ));
   const more = mMore(d.dangling.length, targets, "targets");

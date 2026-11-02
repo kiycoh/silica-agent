@@ -422,8 +422,10 @@ body.drawer-recall #public-bar {
 
 /* --- the view stands centred, its cover above the boxes (ADR-0146 point 4) -------
    Every block keeps the page measure and the column sits in the middle of the view, instead of
-   hanging from its left edge. The cover is printed in two inks on the well, at the 46:21 of the
-   draft until the family of cover ratios is decided. */
+   hanging from its left edge. The cover is printed in two inks on the well. Its height is capped
+   rather than held at the draft's 46:21: at the 58 rem measure that ratio is 397 px whatever the
+   page holds, and at the 900 px floor it put Publish under the fold (ADR-0146 amendment
+   2026-11-01). The family of cover ratios is still open. */
 #public-body > * {
   width: 100%;
   max-width: var(--measure);
@@ -436,7 +438,7 @@ body.drawer-recall #public-bar {
 
 .pp-cover-box {
   position: relative;
-  aspect-ratio: 46 / 21;
+  height: clamp(176px, 26vh, 248px);
   background: var(--void);
   border-radius: var(--r);
   overflow: hidden;
@@ -450,12 +452,15 @@ body.drawer-recall #public-bar {
   image-rendering: pixelated;
 }
 
+/* the name of the pointed note is chrome over the print, not ink in it: a teal tag sat inside a
+   figure the Two Inks Rule keeps to the plane and frost */
 .pp-ctip {
   position: absolute;
   transform: translate(10px, -50%);
-  font: 600 12px/1.2 var(--sans);
-  color: var(--on-vivid);
-  background: var(--accent);
+  font: 500 12px/1.2 var(--sans);
+  color: var(--frost);
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
   padding: 3px 7px;
   border-radius: var(--r-xs);
   white-space: nowrap;

@@ -83,6 +83,11 @@ def html_text(markup: str) -> tuple[str, str]:
     return " ".join("".join(p.parts).split()), p.img
 
 
+# A description that is one link and nothing else: Hacker News sends `<a href="…item?id=…">Comments</a>`
+# for every item, which made "Comments" the summary of 120 of 1,949 stories in one vault (2026-11-01).
+_ONLY_LINK = re.compile(r"\s*<a\b[^>]*>[^<]*</a>\s*", re.IGNORECASE)
+
+
 def _lead(text: str) -> str:
     text = " ".join((text or "").split())
     if len(text) <= LEAD_CHARS:
@@ -187,6 +192,7 @@ def _parse_rss(root: ET.Element, feed_url: str) -> tuple[str, list[dict]]:
         if not link:
             continue
         desc = _txt(f("description"))
+        desc = "" if _ONLY_LINK.fullmatch(desc) else desc
         body = it.findtext(CONTENT) or desc
         text, _ = html_text(desc or body)
         authors = [a.strip() for a in (_txt(it.find(DC + "creator")) or _txt(f("author"))).split(",") if a.strip()]

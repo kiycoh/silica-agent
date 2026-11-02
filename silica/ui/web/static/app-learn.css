@@ -383,29 +383,21 @@
   display: none;
 }
 
-/* the disclosure mark is drawn, so it carries the state without a glyph that
-   changes width between the two */
+/* the disclosure mark is the app's one line chevron (app-base.css); these five
+   drew a solid triangle until 2026-11-01. Here it sits in a flex row, whose gap
+   spaces it, so the shared rule's margin goes. */
 .lr-dr > summary::before,
 .lr-prev > summary .chev,
 .lr-ob summary .chev,
-.lr-exp .chev {
-  content: "";
-  display: inline-block;
-  flex: 0 0 auto;
-  width: 0;
-  height: 0;
-  border: 4px solid transparent;
-  border-left-color: var(--ash-dim);
-  border-right-width: 0;
-  transform-origin: 2px 50%;
-  transition: transform var(--dur) var(--ease);
+.lr-exp .chev,
+.lr-objrow > summary .chev {
+  flex: none;
+  margin-right: 0;
+  color: var(--ash-dim);
 }
 
-.lr-dr[open] > summary::before,
-.lr-prev[open] > summary .chev,
-.lr-ob details[open] summary .chev,
-.lr-exp[aria-expanded="true"] .chev {
-  transform: rotate(90deg);
+.lr-objrow > summary .chev {
+  align-self: center;
 }
 
 .chev.none {
@@ -2539,8 +2531,10 @@ button.lr-cell:focus-visible {
   white-space: nowrap;
 }
 
+/* a caution reads in the body's ink; its amber triangle (.lr-mk.warn) is the mark, so four lines
+   of amber no longer outshout the plan they qualify */
 .lr-help.warn {
-  color: var(--warn);
+  color: var(--text);
 }
 
 /* the objectives wait in one closed row (§16) */
@@ -2564,20 +2558,6 @@ button.lr-cell:focus-visible {
   display: none;
 }
 
-.lr-objrow > summary .chev {
-  display: inline-block;
-  width: 0;
-  height: 0;
-  border-left: 4px solid currentColor;
-  border-top: 3.5px solid transparent;
-  border-bottom: 3.5px solid transparent;
-  color: var(--ash-dim);
-  transition: transform var(--dur) var(--ease);
-}
-
-.lr-objrow[open] > summary .chev {
-  transform: rotate(90deg);
-}
 
 .lr-objrow > summary .m {
   margin-left: auto;
