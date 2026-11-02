@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Any
 import concurrent.futures as _cf
+import contextvars
 import re
 import threading
 import time
@@ -275,6 +276,61 @@ def _content_chars(content) -> int:
 
 class _Stopped(Exception):
     """The turn's cancel token was set while the model was still writing."""
+
+
+# ADR-0150: the reads one tool block may run at once. Each reads files or
+# stores that take their own locks (EmbedStore, silica-core's _STORE_RW), the
+# Obsidian bridge correlates concurrent RPCs by id, and none of them takes a
+# progress callback. Anything else, or a block holding a write, runs one call
+# at a time as before.
+PARALLEL_READS = frozenset({
+    "silica_search_context", "silica_read", "silica_read_note", "silica_outline",
+    "silica_files", "silica_exists", "silica_search", "silica_semantic_search",
+    "silica_related", "silica_timeline", "silica_recall", "silica_concepts",
+    "silica_links", "silica_backlinks", "silica_props", "silica_file_links",
+    "silica_unresolved", "silica_orphans", "silica_graph_path", "silica_vaults",
+})
+_READ_WORKERS = 4
+
+
+def _run_read(tool: Tool, tc: Any, cancel_token: Any) -> tuple[Any, BaseException | None, float, list[str]]:
+    """One read of a parallel block, in its own copy of the turn's context:
+    (result, the exception it raised, seconds, the paths it returned)."""
+    if cancel_token is not None and cancel_token.is_set():
+        # Stop came before this read began: it never runs, and the loop has
+        # already left the block (ADR-0121 point 7, ADR-0150 point 5).
+        return '{"error": "stopped before it ran"}', None, 0.0, []
+    returned = memory_gate.own_returns()
+    MODEL_CALL.set(tc.name)
+    t0 = time.perf_counter()
+    try:
+        return tool.run(_cancel_token=cancel_token, **tc.args), None, time.perf_counter() - t0, returned
+    except Exception as e:  # handed to the loop, which reports it as the serial path does
+        return None, e, time.perf_counter() - t0, returned
+
+
+def _prefetch_reads(tool_calls: list, allowed: dict[str, Tool], cancel_token: Any) -> dict[int, _cf.Future]:
+    """Start every call of a block of two or more parallel reads at once:
+    {id(call): future}, or {} and the block runs serially. The loop still
+    takes the calls in order, so events, narration and history read exactly as
+    before, only sooner.
+
+    At most one silica_recall per block: its mark_used re-reads and saves the
+    episodic file, and two in flight would lose one's TTL refresh.
+    """
+    names = [tc.name for tc in tool_calls]
+    if (len(names) < 2 or names.count("silica_recall") > 1
+            or any(n not in PARALLEL_READS or n not in allowed for n in names)):
+        return {}
+    pool = _cf.ThreadPoolExecutor(max_workers=min(len(names), _READ_WORKERS),
+                                  thread_name_prefix="silica-read")
+    # One context copy per call: the workspace scope, read_scope's requests and
+    # the user-memory turn are context variables a pool thread would not see.
+    futures = {id(tc): pool.submit(contextvars.copy_context().run, _run_read,
+                                   allowed[tc.name], tc, cancel_token)
+               for tc in tool_calls}
+    pool.shutdown(wait=False)  # the threads end with their call; nothing waits on the pool
+    return futures
 
 
 def run_agent(
@@ -650,6 +706,9 @@ def run_agent(
         # Dispatch each tool call
         final_answer: dict | None = None  # a `final` web answer's tool message
         pending_notices: list[dict] = []  # A34: convergence warnings, flushed AFTER
+        for tc in resp.tool_calls:
+            _load(tc.name)
+        prefetched = _prefetch_reads(resp.tool_calls, allowed, cancel_token)
         for tc in resp.tool_calls:        # the tool block, never between sibling results
             if cancel_token is not None and cancel_token.is_set():
                 # No further tool of the batch once Stop is pressed (ADR-0121
@@ -714,16 +773,26 @@ def run_agent(
                     # its own has its own `_emit` publishing there already — so
                     # forwarding that one would put every inner event on
                     # `agent/tool_*` twice.
-                    model_call = MODEL_CALL.set(tc.name)
-                    try:
-                        result = allowed[tc.name].run(
-                            _cancel_token=cancel_token,
-                            _progress=progress_cb,
-                            **tc.args,
-                        )
-                    finally:
-                        MODEL_CALL.reset(model_call)
-                    duration = time.perf_counter() - start_time
+                    ahead = prefetched.get(id(tc))
+                    if ahead is not None:
+                        # Started with its siblings (ADR-0150): its own run
+                        # time, and its paths credited to it, not the block.
+                        result, raised, duration, paths = ahead.result()
+                        if memory_turn is not None:
+                            memory_turn.returned.extend(paths)
+                        if raised is not None:
+                            raise raised
+                    else:
+                        model_call = MODEL_CALL.set(tc.name)
+                        try:
+                            result = allowed[tc.name].run(
+                                _cancel_token=cancel_token,
+                                _progress=progress_cb,
+                                **tc.args,
+                            )
+                        finally:
+                            MODEL_CALL.reset(model_call)
+                        duration = time.perf_counter() - start_time
                     _emit(
                         ToolCompleteEvent(
                             name=tc.name,

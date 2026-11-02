@@ -31,7 +31,7 @@ import json
 import re
 from contextvars import ContextVar
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Annotated, Any, Literal
 
 from pydantic import Field
@@ -127,6 +127,20 @@ def returned_notes(paths: Iterable[str]) -> None:
     turn = _TURN.get()
     if turn is not None:
         turn.returned.extend(str(p) for p in paths if p)
+
+
+def own_returns() -> list[str]:
+    """Give the calling context a turn of its own whose `returned` starts
+    empty, and hand back that list. A read running beside others of its block
+    (ADR-0150) collects its paths there, and the loop credits them to its own
+    call before `after_tool`: on the shared list, the first call's taint mark
+    would carry what its siblings returned."""
+    turn = _TURN.get()
+    if turn is None:
+        return []
+    mine = replace(turn, returned=[])
+    _TURN.set(mine)
+    return mine.returned
 
 
 def after_tool(turn: _Turn, name: str) -> str:
