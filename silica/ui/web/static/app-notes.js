@@ -488,6 +488,30 @@ const vaultImportBox = $("#vault-import");
 // The server's cap per request (_UPLOAD_MAX_FILES), and ADR-0098 H2's cap per
 // import, the free tier's note count: past it a folder is a job, not a pick.
 const VAULT_IMPORT_BATCH = 32;
+// And a cap in bytes. The edge cuts a request whose origin sends no byte for
+// 125 s, and the origin cannot answer before the whole body is in: on
+// 2026-11-02 t18's one batch of 53.4 MB died at 125.0 s twice, while the
+// tenant socket reads 53 MB in 0.3 s, so the time went on the person's uplink
+// (under 0.43 MB/s). 8 MB is 19 s at that rate; a larger file goes alone.
+const VAULT_IMPORT_BATCH_BYTES = 8 * 1024 * 1024;
+// import-batches:start
+// The files in order, cut where either cap would be passed.
+function importBatches(files, maxFiles, maxBytes) {
+  const batches = [];
+  let bytes = 0;
+  for (const f of files) {
+    const cur = batches[batches.length - 1];
+    if (!cur || cur.length >= maxFiles || bytes + f.size > maxBytes) {
+      batches.push([f]);
+      bytes = f.size;
+    } else {
+      cur.push(f);
+      bytes += f.size;
+    }
+  }
+  return batches;
+}
+// import-batches:end
 // The workspace whose + opened the picker (ADR-0112 point 6): each imported
 // note joins it. Cleared by the import that uses it and by a click on the
 // vault's own +, which imports into no workspace.
@@ -630,14 +654,16 @@ async function importToVault(files, fromFolder) {
   }
   const rows = [];
   let failed = "";
-  for (let i = 0; i < wanted.length; i += VAULT_IMPORT_BATCH) {
-    renderVaultImport({ progress: `importing ${i} of ${wanted.length}…` });
+  const batches = importBatches(wanted, VAULT_IMPORT_BATCH, VAULT_IMPORT_BATCH_BYTES);
+  let sent = 0;
+  for (const [n, batch] of batches.entries()) {
+    renderVaultImport({ progress: `importing ${sent} of ${wanted.length}…` });
     const fd = new FormData();
-    for (const f of wanted.slice(i, i + VAULT_IMPORT_BATCH)) {
+    for (const f of batch) {
       fd.append("files", f, f.name);
       if (fromFolder) fd.append("paths", relOf(f));
     }
-    if (i + VAULT_IMPORT_BATCH >= wanted.length) fd.append("last", "1");
+    if (n === batches.length - 1) fd.append("last", "1");
     if (intoWorkspace) fd.append("workspace", intoWorkspace);
     if (obsidian) fd.append("obsidian", obsidian);
     let r;
@@ -648,10 +674,14 @@ async function importToVault(files, fromFolder) {
       break;
     }
     if (!r.ok) {
-      failed = (await r.json().catch(() => ({}))).detail || `the server answered ${r.status}`;
+      // 502 and 524 are the edge's cut at 125 s, with a page of its own and no detail.
+      failed = (await r.json().catch(() => ({}))).detail || (r.status === 502 || r.status === 524
+        ? `${batch.map((f) => f.name).join(", ")} did not finish uploading in the 125 s the server waits: try it again on a faster connection`
+        : `the server answered ${r.status}`);
       break;
     }
     rows.push(...(await r.json()).files);
+    sent += batch.length;
   }
   vaultImportLast = { rows, skipped, failed, folder, big, obsidian };
   renderVaultImport(vaultImportLast);
