@@ -548,6 +548,48 @@ def _literal_search(query: str, folder: str, k: int) -> dict:
     return out
 
 
+def _note_states(hits: list[dict]) -> None:
+    """Put on each passage hit when its file last changed, and who wrote the
+    note and what state it is in, in place: `modified` always, `trust` when
+    the note is not a person's, `lifecycle` when it is not active, and the
+    note that replaced a superseded one. The same signals silica_recall's
+    headers carry, omitted at the same defaults (perception.render), and the
+    ones it filters on: a passage hit had none of them, so a superseded
+    decision outranking its successor read as the position (survey card C2,
+    docs plans/llm-km-survey-cards.md). One read per note, at most k of them.
+
+    A `sources/` copy and a PDF get `modified` only: a verbatim document is
+    the document, and the tiers are about the notes made from it."""
+    from datetime import date
+
+    from silica.kernel.recall.paths import is_source_leaf
+    from silica.kernel.write import frontmatter
+    from silica.kernel.write.contested import SUPERSEDED_BY_KEY, lifecycle, trust
+
+    root = _engine()._root()
+    seen: dict[str, dict] = {}
+    for hit in hits:
+        path = hit.get("path") or ""
+        if path not in seen:
+            state: dict = {}
+            full = root / path
+            try:
+                state["modified"] = date.fromtimestamp(full.stat().st_mtime).isoformat()
+                if path.endswith(".md") and not is_source_leaf(path):
+                    content = full.read_text(encoding="utf-8", errors="replace")
+                    data = frontmatter.split(content)[0] or {}
+                    if (who := trust(content)) != "human":
+                        state["trust"] = who
+                    if (life := lifecycle(data)) != "active":
+                        state["lifecycle"] = life
+                    if life == "superseded":
+                        state["superseded_by"] = str(data.get(SUPERSEDED_BY_KEY))
+            except OSError:
+                pass  # gone or unreadable since the index read it: the hit stands without the fields
+            seen[path] = state
+        hit.update(seen[path])
+
+
 @tool(cls="atomic")
 def silica_search_context(
     query: Annotated[str, Field(description='Words to look for inside note bodies; the vault vocabulary, not a question')],
@@ -571,6 +613,9 @@ def silica_search_context(
     layer, an office file never converted, a failed read) and names up to
     10: a miss there has not shown the vault is silent, so name the files
     you could not read instead of saying the documents do not say it.
+    `modified` is the file's last change; `trust` (an agent's note) and
+    `lifecycle` (not active) appear only when they apply: cite a superseded
+    hit's `superseded_by` as the current position, not the hit.
 
     Use silica_recall when the wording is unknown, silica_search to
     match note titles.
@@ -581,6 +626,7 @@ def silica_search_context(
     if literal:
         lit = _literal_search(query, folder, k)
         if "error" not in lit:
+            _note_states(lit["hits"])
             from silica.tools.user_memory import returned_notes
 
             returned_notes(h["path"] for h in lit["hits"])  # the taint gate (ADR-0090 point 8)
@@ -614,11 +660,12 @@ def silica_search_context(
         # path-native (it also serves PDFs, which have no wikilink name).
         hit = {"name": Path(h["path"]).stem, "path": h["path"], "line": h["line"],
                "section": h["section"], "snippet": h["window"],
-               "version": h["version"], "score": h["score"],
+               "version": h["version"],
                "matched_terms": h["matched_terms"], "coverage": h["coverage"]}
         if stale_map and codedocs and (lvl := codedocs.peek_level(stale_map, h["path"])):
             hit["stale"] = lvl
         hits.append(hit)
+    _note_states(hits)
 
     from silica.tools.user_memory import returned_notes
 

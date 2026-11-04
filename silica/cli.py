@@ -1015,8 +1015,6 @@ def _dc_find(args: list[str], *, raw_input: str = "", **_) -> bool:
     """/find <query> [--k=N] [--min-trust=T] [--lifecycle=L] — semantic search,
     printed in the terminal. The two epistemic flags (spec M2) filter AFTER the
     search, so the printed count says what they cost."""
-    from silica.tools import TOOLS
-
     k = _int_flag(args, "--k=", 5)
     min_trust = _str_flag(args, "--min-trust").strip().lower()
     life = _str_flag(args, "--lifecycle").strip().lower()
@@ -1026,9 +1024,14 @@ def _dc_find(args: list[str], *, raw_input: str = "", **_) -> bool:
         CONSOLE.print("  Usage: /find <query> [--k=N] [--min-trust=human|grounded|distilled|kept] "
                       "[--lifecycle=active|review|contested|superseded]")
         return True
-    result = TOOLS["silica_semantic_search"].run(query=query, k=k)
+    from silica.tools.graph import _facade_search
+
+    # The core and not the tool: the tool's payload drops `score` for the
+    # model (graph._without_score), and this list shows it to the person.
+    result = ""
     try:
-        parsed = json.loads(result)
+        parsed = _facade_search(query, k=k)
+        result = json.dumps(parsed)
         results = parsed.get("results", [])
         if results and (min_trust or life):
             results, dropped = _epistemic_filter(results, min_trust, life)
