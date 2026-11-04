@@ -258,6 +258,65 @@ def _source_hits(query: str) -> list[dict] | None:
     return hits
 
 
+
+# silica-core's silica_files classifies every file but reads each note's head
+# to report conversions: 1.33 s on a 3,202-file vault (alex_second_brain,
+# 2026-11-04), against 0.032 s for this walk, which stats only the document
+# types the index cannot read without a sidecar; both found the same 12 files.
+# One walk per search call: reopen with a cache keyed on the index's built_at if
+# a vault passes 20k files (about 0.2 s at the measured rate).
+_UNREADABLE_SHOWN = 10
+
+
+def _unreadable(folder: str) -> dict | None:
+    """Documents under `folder` the passage index holds no text for: a PDF it
+    read and found no text layer in, an office file with no `.md` converted
+    beside it, a file whose read failed. None when there are none, and None
+    when the pinned silica-core (ADR-0043) no longer has the names read here:
+    no field is honest then, a zero would not be.
+
+    A search that misses under a folder holding such files has not shown the
+    folder is silent: the answer can sit in what was never read (survey card
+    C1, docs plans/llm-km-survey-cards.md).
+    """
+    try:
+        core = _engine()
+        from silica_core.sources.convert import DOC_EXTS, IMG_EXTS
+
+        load_meta, walk, failures, root = core._load_meta, core._walk, core._failures, core._root()
+    except (ImportError, AttributeError, RuntimeError):
+        return None
+    from silica.kernel.workspaces import in_scope
+
+    rel_folder = folder.strip().strip("/")
+    base = root / rel_folder if rel_folder else None
+    if base is not None and not base.is_dir():
+        return None
+    skipped = load_meta().get("no_text", {})
+    failed = failures()
+    paths: list[str] = []
+    # shortcut: a workspace turn keeps only the files in_scope admits, which are
+    # notes, so it reports none; widen to the members' folders if a workspace
+    # holding unconverted files is seen asserting an absence.
+    for rel, full in walk(base):
+        if full is None or not in_scope(rel):
+            continue
+        suffix = full.suffix.lower()
+        if rel in failed:
+            paths.append(rel)
+        elif suffix in DOC_EXTS and suffix not in IMG_EXTS and not full.with_suffix(".md").is_file():
+            if suffix != ".pdf":
+                paths.append(rel)
+                continue
+            try:
+                if skipped.get(rel, {}).get("mtime") == full.stat().st_mtime:
+                    paths.append(rel)
+            except OSError:
+                continue  # gone between the walk and the stat: not a file to report
+    if not paths:
+        return None
+    return {"count": len(paths), "paths": paths[:_UNREADABLE_SHOWN]}
+
 # Its walk does not apply is_source_leaf: sources/ leaves are searchable here
 # and hidden from the fusion indexes, one vault with two rules (S3 of
 # docs/audits/2026-09-17-paper-backed-simplifications.md).
@@ -499,6 +558,11 @@ def silica_search_context(
     Carry a hit's `version` into silica_read to be refused if the note changed.
     A hit under `sources/` is a document's verbatim copy, the one the notes
     made from it link to under `## Sources`: quote figures and wording from it.
+    `unreadable`, present only when some exist, counts the documents under
+    the searched folder the index holds no text for (a scan with no text
+    layer, an office file never converted, a failed read) and names up to
+    10: a miss there has not shown the vault is silent, so name the files
+    you could not read instead of saying the documents do not say it.
 
     Use silica_recall when the wording is unknown, silica_search to
     match note titles.
@@ -516,6 +580,8 @@ def silica_search_context(
             if src is not None:
                 lit["hits"].extend(src)
                 lit["scanned"] = ["notes", "source"]
+            if (unread := _unreadable(folder)) is not None:
+                lit["unreadable"] = unread
         return lit
     r = _scoped_search(_engine(), query, k, folder)
     if "error" in r:
@@ -569,6 +635,8 @@ def silica_search_context(
     if src is not None:
         out["hits"].extend(src)
         out["scanned"] = ["notes", "source"]
+    if (unread := _unreadable(folder)) is not None:
+        out["unreadable"] = unread
     return out
 
 
