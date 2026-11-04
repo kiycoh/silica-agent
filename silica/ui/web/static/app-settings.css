@@ -543,6 +543,56 @@
   border-color: var(--accent);
 }
 
+/* The date beside each entry (survey card D3, draft B): the field's text copied
+   invisibly over it in the same box, with each date in the copy's right margin.
+   Every metric that moves a line break is set on both, or the dates drift. */
+.st-mem-field {
+  grid-column: 1 / -1;
+  position: relative;
+}
+
+.st-mem-field .st-mem-text {
+  display: block;
+  padding-right: var(--st-mem-margin, 0.6rem);
+}
+
+.st-mem-dates {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border: 1px solid transparent;
+}
+
+.st-mem-copy {
+  position: relative;
+  padding: 0.5rem var(--st-mem-margin, 0.6rem) 0.5rem 0.6rem;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: transparent;
+}
+
+.st-mem-at {
+  display: inline-block;
+  width: 0;
+  height: 1lh;
+  vertical-align: top;
+}
+
+.st-mem-when {
+  position: absolute;
+  right: 0.6rem;
+  font-family: var(--sans);
+  font-size: var(--fs-meta);
+  line-height: inherit;
+  white-space: nowrap;
+  color: var(--ash-dim);
+}
+
 .st-mem-count {
   font-family: var(--mono);
   font-size: var(--fs-meta);

@@ -332,6 +332,117 @@ const ST_MEMORY = {
   vault: ["this vault", "the state of your work here"],
 };
 
+// The date beside each entry (survey card D3, draft B chosen by the owner on
+// 2026-11-04 over a list under the field, which repeated every entry cut short).
+// A textarea cannot mark one of its lines, so an invisible copy of its text is
+// laid over it in the same box and font, and each dated entry's date sits in the
+// copy's right margin at the top of the entry's first line. The editor stays the
+// plain field it was. Entries split as user_memory._spans does and match by the
+// text entry_id hashes, so an entry being changed is undated until it is saved,
+// when the server stamps it as the person's.
+// mem-pure:start (run under node by tests/test_memory_dates_ui.py)
+function stMemSpans(text) {
+  const spans = [];
+  let pos = 0;
+  for (const line of text.split(/(?<=\n)/)) {
+    const end = pos + line.length;
+    if (line.trim()) {
+      if ((line[0] === " " || line[0] === "\t") && spans.length) spans[spans.length - 1][1] = end;
+      else spans.push([pos, end]);
+    }
+    pos = end;
+  }
+  return spans;
+}
+
+const stMemKey = (entry) => entry.replace(/^- /, "").trim().split(/\s+/).join(" ").toLowerCase();
+
+// Months by hand, not toLocaleDateString: en-GB writes "14 Sept" beside "30 Aug"
+// in the same column, and a date string read as a Date is UTC midnight, the day
+// before west of Greenwich.
+const ST_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// `short` for a narrow field, where the long words took half a phone's width.
+function stMemWhen(d, short = false) {
+  const [y, m, day] = String(d.at).split("-").map(Number);
+  const when = `${day} ${ST_MONTHS[m - 1]}` + (y === new Date().getFullYear() ? "" : ` ${y}`);
+  const who = d.by === "chat" ? (short ? "chat" : "saved in a chat") : (short ? "you" : "your words");
+  return `${who} · ${when}`;
+}
+
+// mem-pure:end
+
+function stMemDates(field, area, dates) {
+  const layer = stEl("div", "st-mem-dates");
+  layer.setAttribute("aria-hidden", "true");
+  const copy = stEl("div", "st-mem-copy");
+  layer.appendChild(copy);
+  // What the margin shows, said once for a screen reader, which skips the layer.
+  const said = stEl("p", "sr-only");
+  said.id = `${area.id}-dates`;
+  area.setAttribute("aria-describedby", said.id);
+  field.append(layer, said);
+  let byKey = new Map();
+
+  function paint() {
+    const text = area.value;
+    const marks = [];
+    let pos = 0;
+    copy.replaceChildren();
+    for (const [s, e] of stMemSpans(text)) {
+      const d = byKey.get(stMemKey(text.slice(s, e)));
+      if (!d) continue;
+      const at = stEl("span", "st-mem-at");
+      copy.append(text.slice(pos, s), at);
+      marks.push([at, d, text.slice(s, e)]);
+      pos = s;
+    }
+    copy.append(text.slice(pos));
+    // Sized by the widest of all the file's dates, not only those still matched,
+    // so the margin holds still while an entry is retyped; the short words when
+    // the long ones would take more than a third of the field (390 px: 155 of 323).
+    const widest = (short) => Math.max(0, ...[...byKey.values()].map((d) => {
+      const el = copy.appendChild(stEl("span", "st-mem-when", stMemWhen(d, short)));
+      const w = el.offsetWidth;
+      el.remove();
+      return w + 28;
+    }));
+    let short = false, margin = widest(false);
+    if (margin > area.offsetWidth / 3) [short, margin] = [true, widest(true)];
+    field.style.setProperty("--st-mem-margin", byKey.size ? `${Math.ceil(margin)}px` : "");
+    // Sized to the box the text wraps in, read after the margin is set: a
+    // scrollbar takes its width off the text, and the edge is the border.
+    const edge = area.offsetHeight - area.clientHeight;
+    layer.style.width = `${area.clientWidth + edge}px`;
+    layer.style.height = `${area.clientHeight + edge}px`;
+    for (const [at, d] of marks) {
+      copy.appendChild(stEl("span", "st-mem-when", stMemWhen(d, short))).style.top = `${at.offsetTop}px`;
+    }
+    scroll();
+    const head = (entry) => {
+      const t = entry.replace(/^- /, "").replace(/\s+/g, " ").trim();
+      return t.length > 60 ? t.slice(0, 59) + "…" : t;
+    };
+    said.textContent = marks.length
+      ? "Dates: " + marks.map(([, d, entry]) => `${head(entry)}, ${stMemWhen(d)}`).join("; ") : "";
+  }
+  const scroll = () => { copy.style.transform = `translateY(${-area.scrollTop}px)`; };
+
+  area.addEventListener("scroll", scroll);
+  // Drawn again when the box changes: the panel opening from hidden, the
+  // field's own resize handle, a narrower window re-wrapping the entries. The
+  // border box, so the margin the paint itself sets does not call it again.
+  new ResizeObserver(() => paint()).observe(area, { box: "border-box" });
+  // A font that lands after the first paint re-wraps the text and not the box.
+  document.fonts?.ready.then(() => paint());
+  const set = (list) => {
+    byKey = new Map(list.map((d) => [stMemKey(d.text), d]));
+    paint();
+  };
+  set(dates);
+  return { paint, set };
+}
+
 async function renderMemory(host) {
   host.querySelectorAll(".st-mem, .st-mem-line").forEach((e) => e.remove());
   let data;
@@ -368,7 +479,10 @@ async function renderMemory(host) {
     area.placeholder = "- one fact per line";
     area.value = s.text;
     area.dataset.saved = s.text;
-    row.appendChild(area);
+    const field = stEl("div", "st-mem-field");
+    field.appendChild(area);
+    row.appendChild(field);
+    const margin = stMemDates(field, area, s.dates || []);
     row.appendChild(stEl("div", "st-note"));
     const paint = () => {
       const n = area.value.length;
@@ -377,7 +491,7 @@ async function renderMemory(host) {
       count.title = `${s.budget} characters at most · what every chat is shown`;
       save.disabled = area.value === area.dataset.saved;
     };
-    area.addEventListener("input", () => { paint(); stNote(row, "", ""); });
+    area.addEventListener("input", () => { paint(); margin.paint(); stNote(row, "", ""); });
     save.addEventListener("click", async () => {
       save.disabled = true;
       stNote(row, "pending", "saving…");
@@ -398,9 +512,10 @@ async function renderMemory(host) {
       }
       stNote(row, "good", out.unchanged ? "✓ nothing changed" : "✓ saved · shown from the next chat");
       try {
-        const now = (await (await fetch("/memory")).json()).scopes[scope].text;
-        area.value = now;
-        area.dataset.saved = now;
+        const now = (await (await fetch("/memory")).json()).scopes[scope];
+        area.value = now.text;
+        area.dataset.saved = now.text;
+        margin.set(now.dates || []);
       } catch {
         // The save landed and only the re-read failed: what was typed is on
         // disk, less the trailing spaces the server trims.
