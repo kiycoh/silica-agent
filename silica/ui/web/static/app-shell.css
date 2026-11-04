@@ -758,7 +758,9 @@ body.sidebar-collapsed #sidebar {
    state, drawn a third way. */
 .tree-note.open,
 .session.active,
+.tree-file.open,
 .tree-note.open:hover,
+.tree-file.open:hover,
 .session.active:hover,
 .session.active:focus-within {
   color: var(--frost);
@@ -1363,13 +1365,15 @@ body.sidebar-collapsed #sidebar {
 }
 
 #tree details details,
-#tree .tree-note {
+#tree .tree-note,
+#tree .tree-file {
   margin-left: 12px;
 }
 
 /* the row is a <button>, so it has to be told to fill its column rather than
    shrink-wrap its filename */
-#tree .tree-note {
+#tree .tree-note,
+#tree .tree-file {
   width: calc(100% - 12px);
   padding-block: 0;
   line-height: 28px;
@@ -1389,7 +1393,8 @@ body.sidebar-collapsed #sidebar {
   gap: 0.2rem;
 }
 
-.tree-row .tree-note {
+.tree-row .tree-note,
+.tree-row .tree-file {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -1559,7 +1564,8 @@ body.sidebar-collapsed #sidebar {
   color: var(--accent);
 }
 
-.tree-note {
+.tree-note,
+.tree-file {
   display: block;
   text-align: left;
   font: inherit;
@@ -1577,7 +1583,8 @@ body.sidebar-collapsed #sidebar {
   transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
-.tree-note:hover {
+.tree-note:hover,
+.tree-file:hover {
   background: var(--sel-hover);
   color: var(--frost);
 }
@@ -1586,8 +1593,32 @@ body.sidebar-collapsed #sidebar {
    fill, so it stays apart from hover (the fill alone), the open note (the
    frosted box, "you are here") and keyboard focus (the outline). Rows take
    no text selection, as summaries do, or a shift click highlights the tree. */
-.tree-note {
+.tree-note,
+.tree-file {
   user-select: none;
+}
+
+/* A raw's row (ADR-0129, amended 2026-11-04): a note row's shape, led by the
+   page the drawer's glyph wears, with the extension the notes do not show. */
+.tree-file {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.tree-file svg {
+  flex: none;
+  color: var(--ash-dim);
+}
+
+.tree-file > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-ext {
+  color: var(--ash-dim);
 }
 
 .tree-note.sel {

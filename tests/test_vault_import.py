@@ -163,10 +163,11 @@ def test_hidden_text_is_named_in_the_reply(client):
     assert row["hidden"][0]["page"] == 1 and row["hidden"][0]["characters"] > 40
 
 
-def test_on_the_server_the_pdf_goes_once_its_note_exists(client, monkeypatch):
-    """Point 7, and ADR-0087 point 5's list with its audio (amendment of
-    2026-10-14) and ADR-0120's documents, images and CSV: a video is not
-    offered or taken, and a .docx that is not one is refused by its bytes."""
+def test_on_the_server_the_pdf_stays_as_the_raw_of_its_note(client, monkeypatch):
+    """ADR-0129 point 1, reversing point 7: the PDF stays beside the note it
+    became. ADR-0087 point 5's list with its audio (amendment of 2026-10-14)
+    and ADR-0120's documents, images and CSV: a video is not offered or
+    taken, and a .docx that is not one is refused by its bytes, and goes."""
     from silica.ui.web.vault_import import HOSTED_EXTENSIONS
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
@@ -180,7 +181,7 @@ def test_on_the_server_the_pdf_goes_once_its_note_exists(client, monkeypatch):
     assert {".docx", ".pptx", ".epub", ".png", ".csv", ".3gp"} <= set(HOSTED_EXTENSIONS)
     rows = _settled(resp)
     assert rows["paper.pdf"]["notes"] == ["Inbox/paper.md"]
-    assert not (_inbox() / "paper.pdf").exists() and (_inbox() / "paper.md").exists()
+    assert (_inbox() / "paper.pdf").exists() and (_inbox() / "paper.md").exists()
     assert rows["doc.docx"]["status"] == "refused" and "not a DOCX file" in rows["doc.docx"]["reason"]
     assert not (_inbox() / "doc.docx").exists()
     assert rows["talk.mp4"]["status"] == "skipped"
@@ -197,9 +198,9 @@ def test_locally_the_vault_plus_offers_images():
 
 
 def test_on_the_server_a_document_a_deck_an_image_and_a_table_become_notes(client, monkeypatch):
-    """ADR-0120 end to end, hosted: the documents go once read, as a PDF does
-    (point 7); the image stays, since its note embeds it; the CSV stays, since
-    its rows are queried where they lie."""
+    """ADR-0120 end to end, hosted: every file stays beside the note it
+    became, the documents as their raws (ADR-0129 point 1), the image since
+    its note embeds it, the CSV since its rows are queried where they lie."""
     import json
     import shutil
 
@@ -227,7 +228,7 @@ def test_on_the_server_a_document_a_deck_an_image_and_a_table_become_notes(clien
     assert "## Entropy" in (vault / rows["deck.pptx"]["notes"][0]).read_text(encoding="utf-8")
     assert "Carnot cycle" in (vault / rows["board.png"]["notes"][0]).read_text(encoding="utf-8")
     assert "student" in (vault / rows["marks.csv"]["notes"][0]).read_text(encoding="utf-8")
-    assert not (_inbox() / "essay.docx").exists() and not (_inbox() / "deck.pptx").exists()
+    assert (_inbox() / "essay.docx").exists() and (_inbox() / "deck.pptx").exists()
     assert (_inbox() / "board.png").exists() and (_inbox() / "marks.csv").exists()
 
 

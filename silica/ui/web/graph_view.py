@@ -135,7 +135,16 @@ def _more_button(target: str, shown: str, *, folder: bool) -> str:
             f'aria-label="more for {what}{html.escape(shown, quote=True)}">…</button>')
 
 
-def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
+# The raw's glyph in the rail (ADR-0129, amended 2026-11-04): a page with its
+# corner folded, the shape a file manager gives a document.
+_RAW_GLYPH = ('<svg aria-hidden="true" width="13" height="13" viewBox="0 0 16 16" fill="none" '
+              'stroke="currentColor" stroke-width="1.3" stroke-linejoin="round">'
+              '<path d="M4 1.75h5.25L12.5 5v9.25h-8.5z"></path><path d="M9 1.75V5.25h3.5"></path>'
+              '<path d="M6.25 8.5h4M6.25 11h4"></path></svg>')
+
+
+def render_tree(nodes: list[dict], *, actions: bool = False,
+                raws: dict[str, list[str]] | None = None) -> str:
     """Build a collapsible <details> file tree from real note paths.
 
     Pure: nodes -> HTML. Folders become nested <details>/<summary> (native
@@ -165,6 +174,11 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
     Ghost nodes (type == "ghost" or empty path) are unresolved links, not files,
     so they are skipped. Folders sort before notes at each level; both groups
     sort case-insensitively.
+
+    `raws`, the rail's only, is {a raw's vault path: the notes naming it}
+    (ADR-0129, amended 2026-11-04): each raw is a row in its own folder, with
+    its extension, a link to the note that opens it. Not a `.tree-note`, which
+    every search, count, selection and drag of the rail reads as a note.
     """
     root: dict = {}
     for n in nodes:
@@ -178,9 +192,17 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
         for f in folders:
             cur = cur.setdefault(f, {})
         cur.setdefault("__notes__", []).append((leaf, n.get("id", path)))
+    for raw, notes in (raws or {}).items() if actions else ():
+        *folders, leaf = raw.split("/")
+        cur = root
+        for f in folders:
+            cur = cur.setdefault(f, {})
+        cur.setdefault("__notes__", []).append((leaf, raw, notes[0]))
 
     def count(tree: dict) -> int:
-        return len(tree.get("__notes__", [])) + sum(
+        # notes only, raws not: the folder menu's delete names this count, and
+        # tree_delete removes the notes the tree counts, never their raws
+        return sum(1 for row in tree.get("__notes__", []) if len(row) == 2) + sum(
             count(v) for k, v in tree.items() if k != "__notes__")
 
     def emit(tree: dict, depth: int, prefix: str = "") -> str:
@@ -206,7 +228,16 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
                        f'<span class="tree-n">{count(tree[name])}</span>{more}{pub}{plan}</summary>')
             out.append(emit(tree[name], depth + 1, folder))
             out.append("</details>")
-        for leaf, nid in sorted(tree.get("__notes__", []), key=lambda x: x[0].lower()):
+        for leaf, nid, *raw_note in sorted(tree.get("__notes__", []), key=lambda x: x[0].lower()):
+            if raw_note:
+                stem, dot, ext = leaf.rpartition(".")
+                out.append(
+                    f'<div class="tree-row tree-raw"><a class="tree-file" '
+                    f'href="/raw?path={quote(raw_note[0], safe="")}" '
+                    f'data-raw="{html.escape(nid, quote=True)}" data-note="{html.escape(raw_note[0], quote=True)}">'
+                    f'{_RAW_GLYPH}'
+                    f'<span>{html.escape(stem or leaf)}<span class="tree-ext">{dot}{html.escape(ext if stem else "")}</span></span></a></div>')
+                continue
             shown = leaf[:-3] if leaf.endswith(".md") else leaf
             note = (
                 f'<a class="tree-note" href="#chat?note={quote(nid, safe="")}" '

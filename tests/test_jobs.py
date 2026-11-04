@@ -585,7 +585,7 @@ def test_a_scan_makes_the_question_wait_and_is_looked_at_a_page_at_a_time(client
 
 # --- the vault import (ADR-0098) and commands typed in the chat ------------------------------
 
-def test_an_imported_pdf_converts_as_a_job_and_the_server_drops_it_after(client, monkeypatch):
+def test_an_imported_pdf_converts_as_a_job_and_the_server_keeps_it_as_the_raw(client, monkeypatch):
     from silica.config import CONFIG
     from tests.doc_factory import pdf_bytes
 
@@ -599,7 +599,7 @@ def test_an_imported_pdf_converts_as_a_job_and_the_server_drops_it_after(client,
     _drain()
     rec = _record(row["job"])
     assert rec["state"] == "done" and rec["notes"] == ["Inbox/paper.md"]
-    assert not (_inbox() / "paper.pdf").exists() and (_inbox() / "paper.md").exists()
+    assert (_inbox() / "paper.pdf").exists() and (_inbox() / "paper.md").exists()
 
 
 def test_convert_typed_in_the_chat_is_a_job(client):

@@ -2613,6 +2613,11 @@ def _prior_conversions() -> dict[str, dict]:
             src = str((data or {}).get("source_file") or "")
             if not src:
                 continue
+            if "/" in src and not Path(src).is_absolute():
+                # The server's vault path (ADR-0129 point 1), keyed as
+                # `_resolve_input` spells the same file; a bare name is an
+                # older server note whose file is gone, and matches nothing.
+                src = str(vault / src)
             entry = out.setdefault(src, {"inbox": [], "done": 0})
             if bucket == "inbox":
                 entry["inbox"].append(rel)
@@ -3647,7 +3652,7 @@ def _nucleate_prepare(
         mfs = [mf for mf in mfs if mf not in ref_chunks]
         CONSOLE.print(
             f"  [dim]skipped {len(ref_chunks)} non-content file(s) "
-            f"(references, contents, venue checklists, Excalidraw drawings) — "
+            f"(references, contents, venue checklists, a document's list of parts, Excalidraw drawings) — "
             f"kept in the inbox, not distilled into notes[/]"
         )
         if not mfs:

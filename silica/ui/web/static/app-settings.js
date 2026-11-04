@@ -742,8 +742,9 @@ document.addEventListener("keydown", (e) => {
   if (drawerNote.editor && drawerNote.editor.closeCheckBox()) return;
   if (closeNoteMenu(true)) return;
   if (hideSelBar()) { if (drawerNote.editor) drawerNote.editor.focus(); return; }
-  // A note's details go back to its text before anything closes (ADR-0075).
-  if (setDetails(false)) return;
+  // A note's details, and its PDF, go back to its text before anything
+  // closes (ADR-0075, ADR-0129).
+  if (setDetails(false) || setRaw(false)) return;
   if (e.defaultPrevented && e.target.closest && e.target.closest("#note-edit")) return;
   closeNote();
 });

@@ -358,9 +358,9 @@ def _converted(job_id: str, src: Path, dest_dir: str) -> list[str]:
 
 def _pages(src: Path) -> tuple[dict, str]:
     """ADR-0087's page counts and the sentence naming the pages no model read,
-    from the read convert() just did, before the server may delete the PDF;
-    nothing for any other file. Read here because the drop's turn and the
-    import's row no longer wait for the conversion that knows them."""
+    from the read convert() just did; nothing for any other file. Read here
+    because the drop's turn and the import's row no longer wait for the
+    conversion that knows them."""
     if src.suffix.lower() != ".pdf":
         return {}, ""
     from silica.sources import pdf_extract
@@ -382,17 +382,11 @@ def _hidden(src: Path) -> list[dict]:
 
 
 def _settle_source(rec: dict) -> None:
-    """ADR-0098 point 7 on the server: an imported PDF, or since ADR-0120 a
-    document (`READ_THEN_REMOVED`), goes once its note is written, and an
-    imported file that failed goes too, since nothing refused
-    stays in a capped directory. A drop keeps its file in the Inbox, as it
-    always has, and so does a laptop."""
-    if not hosted() or rec.get("origin") != "import":
-        return
-    from silica.ui.web.vault_import import READ_THEN_REMOVED
-
-    if rec["state"] == "failed" or (rec["state"] == "done"
-                                    and rec["source"]["name"].lower().endswith(READ_THEN_REMOVED)):
+    """On the server an imported file that failed goes, since nothing refused
+    stays in a capped directory. One that converted stays where it landed, as
+    the raw its notes name (ADR-0129 point 1, reversing ADR-0098 point 7). A
+    drop keeps its file, as it always has, and so does a laptop."""
+    if hosted() and rec.get("origin") == "import" and rec["state"] == "failed":
         _remove_source(rec)
 
 
@@ -482,7 +476,7 @@ def dismiss(job_id: str) -> None:
         _path(job_id).unlink(missing_ok=True)
         _publish(rec)  # the record is gone; every other open tab drops its row too
     if hosted() and rec.get("origin") == "import" and rec.get("vault") == (CONFIG.vault_path or ""):
-        _remove_source(rec)  # point 7: an interrupted import's file goes with it
+        _remove_source(rec)  # an import that did not convert is no raw (ADR-0129 point 1): it goes with its row
 
 
 def _drop_of(rec: dict) -> list[dict]:
