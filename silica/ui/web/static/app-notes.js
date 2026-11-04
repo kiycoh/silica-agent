@@ -770,7 +770,8 @@ function renderVaultImport({ progress = "", rows = [], skipped = [], failed = ""
   head.append(x);
   const notes = [
     ...refused.map((r) => `${r.name}: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`),
-    ...attached.map((r) => `${r.name}: the file of ${r.notes.length} ${r.notes.length === 1 ? "note" : "notes"}, back beside ${r.notes.length === 1 ? "it" : "them"} and not converted again`),
+    // The + puts it at the top of the vault, not beside its notes: it is linked, not moved.
+    ...attached.map((r) => `${r.name}: the file ${r.notes.length} ${r.notes.length === 1 ? "note" : "notes"} came from, linked to ${r.notes.length === 1 ? "it" : "them"} again and not converted`),
     ...rows.filter((r) => r.hidden).flatMap((r) => r.hidden.map((h) =>
       `${r.name}, page ${h.page}: ${h.characters} characters of hidden text left out`)),
     ...rows.filter((r) => r.pages_not_read).map((r) => `${r.name}: ${r.pages_not_read}`),
