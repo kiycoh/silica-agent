@@ -444,7 +444,10 @@ def _prefix_tokens() -> int:
 # Re-pinned 2026-10-16 with the token meter (6,947 + 10%), which ADR-0116's
 # silica_rework moved by +256; four servers measured 7,054 then, so the
 # ceiling now leaves room for about 20 more catalog lines, not one.
-GATE2_CEILING = 7_641
+# Re-pinned 2026-11-04 with the token meter (7,645 + 10%), which
+# silica_search_context's sources/ and `unreadable` lines moved by +125; four
+# servers measured 7,752.
+GATE2_CEILING = 8_409
 
 
 def test_gate2_four_configured_servers_keep_the_chat_prefix_under_the_ceiling():

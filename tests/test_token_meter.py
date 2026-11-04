@@ -82,7 +82,12 @@ def test_meter_off_is_noop(monkeypatch):
 # tolerance), and +256 is silica_rework joining the core (ADR-0116). Its
 # description was not trimmed: it is the text the routing probe measured
 # (docs/evaluation/rework-chunked-2026-10-16.md), and a trim reruns that probe.
-CHAT_PREFIX_TOKENS = 6_947
+# Re-measured 2026-11-04 at 7_645: main stood at 7_520 on 6a4974e (inside the
+# tolerance), +37 is silica_search_context naming sources/ hits (512eb89) and
+# +88 its `unreadable` field (c53d06e), which crossed the ceiling. Not trimmed:
+# that text is what took Qwen3.5-9B's false absences from 10 of 20 to 2 of 20
+# (survey card C1), and a trim reruns that probe.
+CHAT_PREFIX_TOKENS = 7_645
 CHAT_PREFIX_TOLERANCE = 0.10
 
 
