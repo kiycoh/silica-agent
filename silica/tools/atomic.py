@@ -568,6 +568,9 @@ def _note_states(hits: list[dict]) -> None:
 
     root = _engine()._root()
     seen: dict[str, dict] = {}
+    # shortcut: the whole note is read for its frontmatter and its Sources
+    # marker; 8 hits on 5.1 MB converted sidecars took 97 ms (2026-11-04).
+    # Read the head and stat for the marker if a search is seen past 300 ms.
     for hit in hits:
         path = hit.get("path") or ""
         if path not in seen:
