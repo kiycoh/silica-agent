@@ -208,6 +208,17 @@ _STAMP_TAIL = re.compile(r"\s*\((?:saved|the user's words,) \d{4}-\d{2}-\d{2}[^(
 def _note_version(rel: str) -> str | None:
     """silica-core's version of a vault file (core._version: sha1 of the
     text, 12 hex), the one silica_read serves; None when it is not there."""
+    from silica.tools.atomic import _engine
+
+    try:
+        core = _engine()
+    except RuntimeError:
+        core = None
+    if core is not None and callable(getattr(core, "version_of", None)):
+        # the engine's own answer since feat/survey-asks (2026-11-04): the
+        # hash below is its rule copied by hand, and would read every source
+        # as changed the day the rule moved
+        return core.version_of(rel)
     # shortcut: a whole read and hash per source; at most 3 per entry, so 60
     # at chat start on a full memory, 362 ms if all were 5.1 MB sidecars
     # (2026-11-04). Compare mtime and size first if a chat is seen opening slowly.
