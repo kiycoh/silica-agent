@@ -1113,10 +1113,13 @@ def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dic
         return None, None
 
 
-def _study_offer(text: str, messages: list[dict]) -> dict | None:
+def _study_offer(text: str, messages: list[dict], plan_draft: dict | None = None) -> dict | None:
     """The study offer for the turn that just ended, from the notes it read
     (learn.offer). An incognito chat gets none, as it gets no proposal, and
-    a demo none: its commands are Learn's and the demo's refused ones."""
+    a demo none: its commands are Learn's and the demo's refused ones.
+    `plan_draft` is the plan this turn computed (_plan_context), offered for
+    saving."""
+    from silica.config import withheld
     from silica.kernel import user_memory
     from silica.kernel.learn.offer import study_offer
 
@@ -1125,11 +1128,11 @@ def _study_offer(text: str, messages: list[dict]) -> dict | None:
     try:
         from silica.kernel.learn.offer import asks_plan, plan_offer
 
-        if asks_plan(text):
-            # A plan asked of the chat: the one Learn tracks, or its form.
+        if (plan_draft or asks_plan(text)) and "/learn" not in withheld("routes"):
+            # A plan asked of the chat: the one it computed, or the one Learn tracks.
             from silica.kernel.learn.plans import list_plans
 
-            return plan_offer(text, list_plans())
+            return plan_offer(text, list_plans(), plan_draft)
         # The turn names its reads as the calls did, a title or a path; the
         # ledger keys notes by path, so the titles are resolved first.
         from silica.kernel.learn.offer import says_lost
@@ -1209,24 +1212,39 @@ def _escalation(text: str, messages: list[dict]) -> str:
         return ""
 
 
-def _plan_context(text: str) -> tuple[str, str]:
-    """Learn's plan for this message (learn.offer.plan_context), or ("", ""):
-    the block for the model and the calendar appended under its answer. An
-    incognito chat gets none, as it gets no offer."""
+def _plan_context(text: str, messages: list[dict]) -> tuple[str, str, dict | None]:
+    """Learn's plan for this message (learn.offer.plan_context), or ("", "",
+    None): the block for the model, the plan or calendar appended under its
+    answer, and the plan to save when this turn computed one. `messages` is
+    the chat before this turn, whose last exchange may be the question for
+    the material that this message answers. An incognito chat gets none, as
+    it gets no offer, and an account Memorize is not served to none: the
+    plan it would offer to save lands on a route that answers 404."""
+    from silica.config import withheld
     from silica.kernel import user_memory
 
-    if user_memory.incognito() or not text or text.startswith("/"):
-        return "", ""
+    if "/learn" in withheld("routes") or user_memory.incognito() or not text or text.startswith("/"):
+        return "", "", None
     try:
         from silica.kernel.learn.offer import plan_context
         from silica.kernel.learn.plans import list_plans
 
-        return plan_context(text, list_plans())
+        prev_user, prev_answer = "", ""
+        for m in reversed(messages):
+            if m.get("role") == "assistant" and not prev_answer and not prev_user:
+                prev_answer = str(m.get("content") or "")
+            elif m.get("role") == "user":
+                # the person's words: the blocks this server appended to the
+                # turn start at a blank line and a bracket, and the question
+                # for the material said "study plan" itself
+                prev_user = str(m.get("silica_said") or m.get("content") or "").split("\n\n[", 1)[0]
+                break
+        return plan_context(text, list_plans(), prev_user, prev_answer)
     except Exception:
-        # The plan's numbers are an extra: a plan note that does not parse
-        # costs the block, never the turn.
+        # The plan's numbers are an extra: a plan note that does not parse,
+        # or a reading model that is down, costs the block, never the turn.
         logger.warning("plan context skipped", exc_info=True)
-        return "", ""
+        return "", "", None
 
 
 def _answer_html(answer: str, refs, graph=None) -> str:
@@ -1445,6 +1463,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         agent_msg = text
         escalated = False   # the turn's answer is the aid itself (learn.offer.escalation)
         plan_appendix = ""  # Learn's calendar, appended under the answer (learn.offer.plan_context)
+        plan_draft = None   # the plan this turn computed, offered for saving under the answer
         # /web comes first: it is neither direct nor a workflow expansion but an
         # agent turn with web-only tools. A usage error raises ValueError, which
         # the except below turns into the single error event.
@@ -1600,7 +1619,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             if block := await asyncio.to_thread(_escalation, text, messages):
                 agent_msg += "\n\n" + block
                 escalated = True
-            block, plan_appendix = await asyncio.to_thread(_plan_context, text)
+            block, plan_appendix, plan_draft = await asyncio.to_thread(_plan_context, text, messages)
             if block:
                 agent_msg += "\n\n" + block
             elif await asyncio.to_thread(says_lost, text):   # Jev over HTTP behind the word list: off the loop
@@ -1760,7 +1779,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             # A note the reader keeps missing, or a message saying it was not
             # clear: a way to work on it, launched by the reader (learn.offer).
             # Not under an answer that is already the aid.
-            offer = await asyncio.to_thread(_study_offer, text, messages)
+            offer = await asyncio.to_thread(_study_offer, text, messages, plan_draft)
         # The lines under the answer (ADR-0094 point 8), stored on it before the
         # beat below so a reopened chat draws them too. A stopped turn has no
         # answer to carry them: they are drawn live only.

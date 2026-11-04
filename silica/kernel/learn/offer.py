@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import functools
 import re
+from pathlib import Path
 from urllib.parse import quote
 
 # The reader saying it did not follow, in the two languages this was written
@@ -242,9 +243,16 @@ def asks_plan(text: str) -> bool:
     return bool(_PLAN_RE.search(text or ""))
 
 
-def plan_offer(text: str, plans: list[dict]) -> dict | None:
-    """The line under an answer to a study-plan request: the plan Learn
-    already tracks, or the form that writes one. None for any other message."""
+def plan_offer(text: str, plans: list[dict], draft: dict | None = None) -> dict | None:
+    """The line under an answer to a study-plan request: the plan this turn
+    computed, saved by the reader's click with what the Memorize form posts
+    (`draft`, plan_context's third value), or the plan Memorize already
+    tracks. None for any other message, and for the turn that asked the
+    reader for the material: a second way in under that question is noise."""
+    if draft:
+        by = f", paced to {draft['by']}" if draft.get("by") else ""
+        return {"kind": "study", "text": f"Memorize can keep this plan{by}", "note": "",
+                "commands": [{"label": "save it in Memorize", "save": draft}]}
     if not asks_plan(text):
         return None
     active = [p for p in plans if p.get("status") != "completed"]
@@ -254,8 +262,7 @@ def plan_offer(text: str, plans: list[dict]) -> dict | None:
         return {"kind": "study", "text": f"Memorize tracks a plan for this: {p['name']}{by}", "note": p["path"],
                 "commands": [{"label": "open it", "href": "#memorize/plan/" + quote(p["path"], safe="")},
                              {"label": "continue it", "command": "/memorize"}]}
-    return {"kind": "study", "text": "Memorize can track this as a plan, paced to its date", "note": "",
-            "commands": [{"label": "write it as a plan", "href": "#memorize/new"}]}
+    return None
 
 
 # What Learn's plan computes and the chat model would otherwise make up, put
@@ -266,22 +273,61 @@ def plan_offer(text: str, plans: list[dict]) -> dict | None:
 # half the programme as missing from the slides (2026-10-23).
 _SYLLABUS_RE = re.compile(r"\b(programma|scheda|syllabus|curriculum)\b", re.I)
 _LECTURES_RE = re.compile(r"\b(slides?|lezion[ei]|lectures?|lessons?)\b", re.I)
+# Every plan or calendar the code appends to an answer carries this phrase,
+# and the question for the material never does: the next turn reads it to
+# tell a plan already shown from that question.
+COMPUTED = "computed by Memorize"
+FOLDERS_NAMED = 4   # the folders the question for the material names as examples
+TREE_SHOWN = 12     # the parts of a plan with no steps listed under the answer
 
 
-def plan_context(text: str, plans: list[dict]) -> tuple[str, str]:
-    """(the block for the model, the text appended under its answer) for this
-    message, ("", "") when the plan has nothing for it: the plan the message
-    names, else the first open one. The calendar is appended by code, not
-    copied by the model: told to reproduce it, the 9B merged three days and
-    dropped 1 November (2026-10-23)."""
+def plan_request(text: str, prev_user: str = "", prev_answer: str = "") -> str:
+    """The words a new plan is read from, or "": this message when it asks
+    for a study plan, else the request of the turn before and this message
+    together, when that turn asked for a plan and got none (its answer was
+    the question for the material). One turn of follow-up only: a question
+    on the material after a plan was shown is not read as a plan again."""
+    if not text or text.startswith("/"):
+        return ""
+    if asks_plan(text):
+        return text
+    if asks_plan(prev_user) and COMPUTED not in (prev_answer or ""):
+        return f"{prev_user}\n{text}"
+    return ""
+
+
+def plan_context(text: str, plans: list[dict], prev_user: str = "",
+                 prev_answer: str = "") -> tuple[str, str, dict | None]:
+    """(the block for the model, the text appended under its answer, the
+    plan to save) for this message, ("", "", None) when no plan has anything
+    for it. A request that names material no open plan covers gets a plan
+    computed now and offered for saving (plan_draft); one that names none,
+    with no plan open, gets the model asking for it; otherwise the plan the
+    message names, else the first open one. The calendar is appended by
+    code, not copied by the model: told to reproduce it, the 9B merged three
+    days and dropped 1 November (2026-10-23)."""
     from silica.kernel.learn import plans as pl
 
     open_plans = [p for p in plans if p.get("status") != "completed"]
-    if not open_plans or not (asks_plan(text) or (_SYLLABUS_RE.search(text) and _LECTURES_RE.search(text))):
-        return "", ""
     low = text.casefold()
-    row = next((p for p in open_plans if p.get("name", "").casefold() in low), open_plans[0])
-    plan = pl.read_plan(row["path"])
+    # a plan named like a request ("Piano di studio") would catch every later
+    # request by its name and no new plan could be drawn from the chat
+    row = next((p for p in open_plans if p.get("name") and not asks_plan(p["name"]) and p["name"].casefold() in low),
+               None)
+    sentence = "" if row else plan_request(text, prev_user, prev_answer)
+    if sentence:
+        read = pl.read_sentence(sentence)
+        if read.get("scope") and read.get("target"):
+            kept = pl.target_text(read["scope"], read["target"])
+            row = next((p for p in open_plans if p.get("scope") == read["scope"] and p.get("target") == kept), None)
+            if row is None:
+                draft = plan_draft(read)
+                return (*draft_context(draft), draft["body"])
+        elif not open_plans:
+            return ask_block(), "", None
+    if not open_plans or not (asks_plan(text) or (_SYLLABUS_RE.search(text) and _LECTURES_RE.search(text))):
+        return "", "", None
+    plan = pl.read_plan((row or open_plans[0])["path"])
     if asks_plan(text):
         from silica.kernel.learn import mastery
 
@@ -289,16 +335,9 @@ def plan_context(text: str, plans: list[dict]) -> tuple[str, str]:
         passed = mastery.steps_passed(plan) if plan.get("steps") else []
         rows = pl.day_by_day(plan, passed=passed)
         if not rows:
-            return "", ""
+            return "", "", None
         table = pl.day_by_day_table(rows, plan, passed)
-        # the advice stands on the plan's facts, not on study tips any plan
-        # would get: the heaviest steps (by the reference's hours when it
-        # gives them, ADR-0131), and what the slides leave to the book
-        heavy = sorted((s for s in plan.get("steps") or [] if s.get("notes")),
-                       key=lambda s: (-(s.get("hours") or 0), -len(s["notes"])))[:3]
-        facts = "The heaviest steps: " + "; ".join(
-            f"{pl._step_label(s)} ({s['hours']:g} {s.get('unit') or 'weight'})" if s.get("hours")
-            else f"{pl._step_label(s)} ({len(s['notes'])} notes)" for s in heavy) + "."
+        facts = _heavy_steps(plan)
         gaps = pl.lecture_gaps(plan) if plan.get("scope") == "steps" else None
         if gaps and gaps[0]:
             facts += f" Topics of the syllabus no lecture deck mentions, to study from the book or the guide: {', '.join(gaps[0])}."
@@ -307,15 +346,130 @@ def plan_context(text: str, plans: list[dict]) -> tuple[str, str]:
                 f"write a calendar or a table of days yourself. {facts} Write a short introduction and advice for "
                 f"this plan built on these facts and the steps below, naming the steps and topics; no study tip "
                 f"that would fit any plan:\n{table}]",
-                f"Calendar computed by Memorize from the plan {plan['name']} (by {plan['by']}):\n\n{table}")
+                f"Calendar {COMPUTED} from the plan {plan['name']} (by {plan['by']}):\n\n{table}", None)
     found = pl.lecture_gaps(plan) if plan.get("scope") == "steps" else None
     if not found:
-        return "", ""
+        return "", "", None
     missing, decks = found
     return (f"[Memorize's plan {plan['name']} reads its syllabus, {plan['target']}, against the text of the {decks} "
             f"lecture decks. Topics of the syllabus that no deck mentions: {', '.join(missing) or 'none'}. Use this "
             f"list for what the slides do not cover; a topic named another way in the slides can still be there.]",
-            "")
+            "", None)
+
+
+def _heavy_steps(plan: dict) -> str:
+    """The advice stands on the plan's facts, not on study tips any plan
+    would get: its heaviest steps, by the reference's hours when it gives
+    them (ADR-0131), else by their notes."""
+    from silica.kernel.learn import plans as pl
+
+    heavy = sorted((s for s in plan.get("steps") or [] if s.get("notes")),
+                   key=lambda s: (-(s.get("hours") or 0), -len(s["notes"])))[:3]
+    if not heavy:
+        return ""
+    return "The heaviest steps: " + "; ".join(
+        f"{pl._step_label(s)} ({s['hours']:g} {s.get('unit') or 'weight'})" if s.get("hours")
+        else f"{pl._step_label(s)} ({len(s['notes'])} notes)" for s in heavy) + "."
+
+
+def plan_draft(read: dict) -> dict:
+    """The plan a request reads as (plans.read_sentence), composed and read
+    back, not written: {body, plan, resolved}. `body` is what the line under
+    the answer posts to /learn/plan, the Memorize form's own save, so the
+    click writes the plan this turn showed. The name moves to "<name> 2" when
+    Plans/<name>.md exists, because the write gate refuses a path that does."""
+    from silica.kernel.learn import plans as pl
+    from silica.kernel.publish import PLANS_DIR
+    from silica.kernel.write import frontmatter
+
+    base = read.get("name") or ""
+    if not base or asks_plan(base):
+        # read_sentence named it after the request ("Piano di studio", live
+        # run 2026-11-03), a name the reader cannot edit here and plan_context
+        # passes over: the material names it instead, as in read_sentence
+        base = pl.name_of(read["scope"], read["target"]) or "Plan"
+    name, n = base, 2
+    while (pl._vault() / PLANS_DIR / f"{name}.md").exists():
+        name, n = f"{base} {n}", n + 1
+    body = {"name": name, "scope": read["scope"], "target": read["target"],
+            "restrict": read.get("restrict") or "", "by": read.get("by") or None, "templates": True}
+    if read.get("objectives"):
+        body["objectives"] = read["objectives"]
+    d = pl.compose_plan(name, body["scope"], body["target"], by=body["by"], restrict=body["restrict"],
+                        objectives=body.get("objectives"), folder=PLANS_DIR, templates=True)
+    plan = pl.read_plan(d["path"], frontmatter.dump(d["props"], d["body"]))
+    return {"body": body, "plan": plan, "resolved": d["resolved"]}
+
+
+def draft_context(draft: dict) -> tuple[str, str]:
+    """(the block for the model, the plan appended under its answer) for a
+    plan computed and not saved: its steps in the reference's order, or its
+    parts when it has none, and the day-by-day calendar when it has a date."""
+    from silica.kernel.learn import plans as pl
+
+    plan, res = draft["plan"], draft["resolved"]
+    material = plan["target"] + (f" under {plan['restrict']}" if plan.get("restrict") else "")
+    when = f"by {plan['by']}" if plan.get("by") else "with no date"
+    steps = plan.get("steps") or []
+    if steps:
+        listing = "\n".join(f"{i}. {s['text']}" for i, s in enumerate(steps, 1))
+    else:
+        # three notes named a part at most, as the calendar names a day's
+        parts = [f"- {n['node']}: " + ", ".join(f"[[{Path(p).stem}]]" for p in n["leaves"][:3])
+                 + (f" and {len(n['leaves']) - 3} more" if len(n["leaves"]) > 3 else "")
+                 for n in res["tree"] if not n.get("gap") and n.get("leaves")]
+        listing = "\n".join(parts[:TREE_SHOWN] + ([f"- and {len(parts) - TREE_SHOWN} more"] if len(parts) > TREE_SHOWN else []))
+    rows = pl.day_by_day(plan) if steps else None
+    table = pl.day_by_day_table(rows, plan) if rows else ""
+    facts = f"{len(res['paths'])} notes" + (f" in {len(steps)} steps." if steps else ".")
+    b = pl.budget(plan) if rows else None
+    if b:
+        # the count the model otherwise makes up: "6 passi in 6 giornate" for 37 days (2026-11-03)
+        facts += f" {b['days']} days to the date, {b['study_days']} of them for the steps, then review."
+    facts += (" " + _heavy_steps(plan)) if steps else ""
+    if res.get("gaps"):
+        facts += f" Not in the vault: {', '.join(res['gaps'])}."
+    # a step met on some of its words is a guess the form asks the reader to
+    # confirm; here the summary says so: the model called "Gradient boosting"
+    # missing while the plan gave it Discesa del gradiente (2026-11-03)
+    unsure = "; ".join(f"{n['node']} as {', '.join(Path(p).stem for p in n['leaves'][:3])}"
+                       for n in res["tree"] if not n.get("gap") and n.get("doubt"))
+    check = f"Matched on some of their words, not by name: {unsure}." if unsure else ""
+    dated = "" if plan.get("by") else " It has no date: say in one line that a date paces it day by day, and ask for it."
+    block = (f"[Memorize computed a study plan for this request, not saved yet: {plan['name']}, from {material}, "
+             f"{when}. {facts}{f' {check} The reader should check them.' if check else ''}{dated} Silica appends the plan{' and its day-by-day calendar' if table else ''} under "
+             f"your answer and shows the reader a line that saves it in Memorize; do not write the steps, a calendar "
+             f"or a table of days yourself, and do not create, edit or save any note. Write a summary of this plan "
+             f"in at most four sentences, built on these facts and the steps below: name its heaviest steps, what "
+             f"the vault does not hold and the steps to check, and do not list the steps one by one (they are under your answer); no study "
+             f"tip that would fit any plan. End by asking whether to keep it in Memorize. Write in the reader's "
+             f"language.\n{listing}]")
+    # no "not saved" here: the answer is stored, and the click saves the plan after it
+    appendix = (f"Plan {COMPUTED} from {material}, {when}:\n\n{listing}"
+                + (f"\n\n{check} Check them in Memorize with Edit plan." if check else "")
+                + (f"\n\n{table}" if table else ""))
+    return block, appendix
+
+
+def ask_block() -> str:
+    """The turn that asks for a study plan and names no material the vault
+    holds: the model asks for it, naming the vault's largest folders so the
+    question can be answered by picking one, and writes no plan of its own."""
+    from silica.kernel.learn import plans as pl
+    from silica.kernel.publish import never
+
+    try:
+        # a folder of Silica's own (Plans, sources, the inbox) is never material
+        folders = sorted(((c, f) for f, c in pl.folders_of().items() if f.count("/") <= 2 and not never(f + "_")),
+                         reverse=True)[:FOLDERS_NAMED]
+    except Exception:
+        # the examples are an extra: a vault that does not scan still gets the question
+        folders = []
+    named = f" The vault's largest folders: {', '.join(f for _c, f in folders)}." if folders else ""
+    return ("[The reader asks for a study plan and names no material Silica found in the vault. Do not write a plan, "
+            "a schedule or a list of weeks, and do not create or edit any note. Ask in one short question which "
+            f"folder, note or course syllabus of the vault the plan is for, and the exam date.{named} Ask in the "
+            "reader's language.]")
 
 
 # --- the offer's own record: caps, declines, escalation, and its validation --
