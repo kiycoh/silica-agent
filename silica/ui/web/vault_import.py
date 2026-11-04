@@ -32,10 +32,6 @@ DOCUMENT_EXTENSIONS = (".docx", ".pptx", ".epub", ".fb2", ".odt", ".odp", ".ods"
 IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
 HOSTED_EXTENSIONS = (".md", ".pdf", ".txt", *DOCUMENT_EXTENSIONS, *IMAGE_EXTENSIONS, ".csv",
                      *AUDIO_EXTS)
-# On the server a file goes once its note is written (ADR-0098 point 7): the
-# note is what the product reads. Not an image, which the note embeds, nor a
-# CSV, whose rows stay for silica_query_table, nor audio, as before.
-READ_THEN_REMOVED = (".pdf", *DOCUMENT_EXTENSIONS)
 # What the first bytes of an upload must be for its extension: a renamed
 # file reached a reader as whatever it really was (ADR-0098 H4).
 _SIGNATURES = {
@@ -154,3 +150,77 @@ def check_text(data: bytes) -> str:
         return data.decode("utf-8")
     except UnicodeDecodeError:
         raise Refused("it is not UTF-8 text") from None
+
+
+# --- a raw brought in again (ADR-0129, amended 2026-11-04) -----------------------
+
+def orphans(vault: Path) -> dict[str, list[tuple[str, dict]]]:
+    """{sha256: [(note, its raw keys)]} for the notes whose raw is gone and
+    whose hash is known: what a file brought in again can be matched to. On
+    the server until 2026-11-04 an import's PDF was deleted once converted
+    (ADR-0098 point 7), so a tenant's older notes are exactly these."""
+    from silica.kernel import raws
+
+    root = vault.resolve()
+    out: dict[str, list[tuple[str, dict]]] = {}
+    for note, f in raws.named(root):
+        sha = f.get("source_sha256")
+        if isinstance(sha, str) and sha and not raws.kept(raws.resolve(f["source_file"], note, root), f):
+            out.setdefault(sha, []).append((note, f))
+    return out
+
+
+def attach(dest: Path, vault: Path, waiting: dict[str, list[tuple[str, dict]]]) -> list[str]:
+    """When `dest`, a file just brought in, is byte for byte the raw some
+    notes name and no longer find, those notes name it again and nothing is
+    converted: the notes, and every link to them a plan or a person wrote,
+    stay as they are. Returns them, [] for any other file. A part written
+    before parts carried pages is given its pages from the file now, so the
+    drawer opens the PDF where the part starts."""
+    import hashlib
+
+    from silica.driver import DRIVER
+
+    if not waiting:
+        return []
+    with open(dest, "rb") as fh:
+        notes = waiting.pop(hashlib.file_digest(fh, "sha256").hexdigest(), [])
+    if not notes:
+        return []
+    root = vault.resolve()
+    rel = dest.resolve().relative_to(root).as_posix()
+    spans = _spans(dest, notes, root) if dest.suffix.lower() == ".pdf" else {}
+    for note, _f in notes:
+        DRIVER.set_prop(note, "source_file", rel)
+        if note in spans:
+            DRIVER.set_prop(note, "source_page", spans[note][0])
+            DRIVER.set_prop(note, "source_page_end", spans[note][1])
+    return sorted(n for n, _ in notes)
+
+
+def _spans(pdf: Path, notes: list[tuple[str, dict]], root: Path) -> dict[str, tuple[int, int]]:
+    """The pages of each part without them, per folder of parts in its order."""
+    import logging
+
+    from silica.sources import pdf_extract
+    from silica.sources.convert import page_texts, part_pages
+
+    folders: dict[str, list[str]] = {}
+    for note, f in notes:
+        if not f.get("document") and not f.get("source_page"):
+            folders.setdefault(str(PurePosixPath(note).parent), []).append(note)
+    folders = {k: sorted(v) for k, v in folders.items() if len(v) > 1}
+    if not folders:
+        return {}
+    try:
+        texts = page_texts(pdf, pdf_extract.read(pdf))
+    except Exception as exc:
+        # The file was attached already; without its pages the drawer opens
+        # it at page 1, which is what a part with no pages does anyway.
+        logging.getLogger(__name__).warning("raw attach: pages of %s unread: %s", pdf.name, type(exc).__name__)
+        return {}
+    out: dict[str, tuple[int, int]] = {}
+    for parts in folders.values():
+        spans = part_pages([(root / p).read_text(encoding="utf-8") for p in parts], pdf, texts)
+        out.update(zip(parts, spans or []))
+    return out

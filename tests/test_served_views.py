@@ -130,7 +130,7 @@ SHARED_ROUTES = {
     "/memory", "/memory/reset", "/memory/undo", "/memory/{scope}", "/messages", "/narration",
     "/narration/sse", "/note", "/note/check", "/note/history", "/note/history/diff",
     "/note/history/restore", "/note/raw", "/note/render", "/note/save", "/nucleate",
-    "/openapi.json", "/path", "/phone/new", "/phone/turn", "/redoc", "/reset", "/session/delete",
+    "/openapi.json", "/path", "/phone/new", "/phone/turn", "/raw", "/redoc", "/reset", "/session/delete",
     "/session/load", "/session/rename", "/sessions", "/settings", "/settings/confirm", "/skills",
     "/skills/proposed/{name}/dismiss", "/skills/proposed/{name}/install", "/skills/{name}", "/static",
     "/stop", "/stt", "/supported_types", "/trash", "/trash/erase", "/trash/restore", "/tree/delete",

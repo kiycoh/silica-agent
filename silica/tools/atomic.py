@@ -1130,6 +1130,19 @@ def _unconverted_under(folder: str) -> list[str]:
     )
 
 
+def _raws_of(files: list[str]) -> dict[str, str]:
+    """{file: the note naming it as its raw} for those of `files` a note names."""
+    if not files:
+        return {}
+    from silica.config import CONFIG
+    from silica.kernel import raws
+
+    if not CONFIG.vault_path:
+        return {}
+    named = raws.index(Path(CONFIG.vault_path))
+    return {f: named[f][0] for f in files if f in named}
+
+
 def _vault_files_under(scope: str) -> list[str]:
     """Vault-relative files under `scope`, dotfiles and dot-dirs skipped."""
     import os
@@ -1261,6 +1274,13 @@ def silica_files(
     # An inbox folder of PDFs is not an empty folder: say so, or the caller
     # concludes the path does not exist. See _unconverted_under.
     pending = _unconverted_under(folder) if folder else []
+    # A file some note names as its raw is converted (ADR-0129 point 1): on
+    # the server it stays beside its notes since 2026-11-04, and listed as
+    # unconverted it would be offered to /nucleate again.
+    raw_of = _raws_of(pending)
+    if raw_of:
+        pending = [p for p in pending if p not in raw_of]
+        result["raws"] = [{"path": r, "source": raw_of[r]} for r in sorted(raw_of, key=_natural_key)][:_FILES_CAP]
     if pending:
         result["unconverted"] = pending[:_FILES_CAP]
         result["unconverted_total"] = len(pending)

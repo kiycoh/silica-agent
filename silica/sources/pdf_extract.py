@@ -637,8 +637,8 @@ def report(path: str | os.PathLike) -> tuple[dict, str]:
     try:
         seen = cached(path)
     except OSError:
-        # The file is gone (the server deletes a PDF once its note exists or
-        # it failed): there is nothing left to count, and nulls say so.
+        # The file is gone (the server deletes an import that failed): there
+        # is nothing left to count, and nulls say so.
         seen = None
     if not seen:
         return {"pages": None, "pages_without_text": None, "pages_read": None}, ""

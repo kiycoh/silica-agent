@@ -3398,6 +3398,7 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
     enabled = get_active_manifest().sources
     results: list[dict] = []
     folders: set[str] = set()
+    waiting: dict | None = None  # vi.orphans, once a request: notes whose raw is gone, by hash
     for f, given in zip(files, paths):
         row: dict = {"name": given or Path(f.filename or "").name}
         dest: Path | None = None
@@ -3437,6 +3438,10 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
 
                 await asyncio.to_thread(DRIVER.create, dest_rel, content)
             else:
+                if waiting is None:
+                    # Before this file is written: a note naming its bare name
+                    # would find it beside itself and no longer read as lost.
+                    waiting = await asyncio.to_thread(vi.orphans, vault)
                 cap = pdf_extract.MAX_BYTES if on_server else _UPLOAD_MAX_BYTES
 
                 async def chunks(upload=f):
@@ -3451,6 +3456,11 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
             row["path"] = dest_rel
             top = rel.parts[0] if len(rel.parts) > 1 else ""
             folders.add(f"{inbox_rel}/{top}" if top else inbox_rel)
+            if suffix not in (".md", ".txt"):
+                attached = await asyncio.to_thread(vi.attach, dest, vault, waiting or {})
+                if attached:  # the file its notes lost, back beside them: nothing to convert
+                    row.update(status="note", notes=attached, attached=True)
+                    continue
             adapter = adapter_for(dest_rel, enabled=enabled)
             if adapter is None:  # no source claims it: the converter, as a job (ADR-0099)
                 # Its notes, and the hidden text it left out, arrive on the job.
@@ -3484,13 +3494,12 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
             # A queued file is its job's now, which settles it when it ends.
             if dest is not None and dest.is_file() and not dest.is_symlink() and row.get("status") != "queued":
                 refused = row.get("status") == "refused"
-                # On the server a PDF goes once its note is written, or once it
-                # failed (point 7): the note is what the product reads, and a
-                # copy of the student's file is what it should not hold; and
-                # nothing refused stays in a capped directory. Locally only a
-                # file that is not what its extension says goes: a real
-                # document a lane could not read stays for mineru and /report.
-                if (on_server and (refused or dest.suffix.lower() in vi.READ_THEN_REMOVED)) or (refused and not checked):
+                # On the server nothing refused stays in a capped directory; a
+                # file that became a note stays as its raw (ADR-0129 point 1).
+                # Locally only a file that is not what its extension says goes:
+                # a real document a lane could not read stays for mineru and
+                # /report.
+                if (on_server and refused) or (refused and not checked):
                     dest.unlink()
     return results, folders
 
@@ -4511,7 +4520,8 @@ def _note_identity(canon: str, props: dict | None) -> dict:
     its citekey stem. One helper because the reader and the editor's raw read
     both head the drawer, and two copies of the rule would title it twice."""
     if not props or not props.get("zotero_key"):
-        return {"title": _clean_name(canon), **_saved_identity(props)}
+        raw = _raw_of(canon, props)
+        return {"title": _clean_name(canon), **_saved_identity(props), **({"raw": raw} if raw else {})}
     from silica.ui.web.zotero_web import _PAPER_FM
 
     return {"title": str(props.get("title") or "") or _clean_name(canon),
@@ -4530,6 +4540,71 @@ def _saved_identity(props: dict | None) -> dict:
     return {"saved": {"author": "@" + author.strip().lstrip("@"),
                       "source": source if source.startswith("https://") else "",
                       "saved": str(props.get("saved") or "")}}
+
+
+# The raws the drawer shows in the browser's own viewer (ADR-0129 point 1);
+# every other one is a download.
+# shortcut: PDF only, the one type checked in an iframe under _ASSET_HEADERS'
+# sandbox (Chrome 156, Firefox 158, 2026-11-03); images and audio, which the
+# ADR also lets open, join when that is checked for them.
+_RAW_OPENS = (".pdf",)
+
+
+def _raw_found(canon: str, props: dict | None) -> tuple[str, Path | None]:
+    """The note's `source_file` and the file it names in the vault, which is
+    None when the file is gone or not one Silica brings in as a raw."""
+    from silica.kernel import raws
+    from silica.sources.convert import DOC_EXTS
+
+    value = (props or {}).get("source_file")
+    if not isinstance(value, str) or not CONFIG.vault_path:
+        return "", None
+    found = raws.resolve(value, canon, Path(CONFIG.vault_path))
+    if found is not None and (found.suffix.lower() not in DOC_EXTS or not raws.kept(found, props or {})):
+        found = None
+    return value, found
+
+
+def _raw_of(canon: str, props: dict | None) -> dict | None:
+    """What a source's strip says of its raw (ADR-0129 point 1): the file, the
+    pages the note spans, whether the drawer can open it, and when it is gone,
+    whether a second import of it can be recognised. None for a note that
+    names no raw, or one outside the vault, which the drawer offers nothing
+    for (ADR-0129: "A note whose source_file does not resolve inside the
+    vault offers neither")."""
+    from silica.config import hosted
+    from silica.sources.convert import DOC_EXTS
+
+    props = props or {}
+    value, found = _raw_found(canon, props)
+    name = value.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not name or Path(name).suffix.lower() not in DOC_EXTS:
+        return None
+    vault = Path(CONFIG.vault_path).resolve()
+    named = value.strip().replace("\\", "/")
+    if found is None and "/" in named and not (vault / named).resolve().is_relative_to(vault):
+        return None  # a path out of the vault: an absolute one joins as itself
+    ints = {k: props[k] for k in ("source_pages", "source_page", "source_page_end")
+            if isinstance(props.get(k), int) and props[k] > 0}
+    out = {"name": name, "kept": found is not None,
+           "open": found is not None and found.suffix.lower() in _RAW_OPENS,
+           "pages": ints.get("source_pages"), "from": ints.get("source_page"),
+           "to": ints.get("source_page_end")}
+    if found is None:
+        # A bare name on the server is a note written while the server
+        # deleted an import's file once converted (ADR-0098 point 7, until
+        # 2026-11-04): it is gone for that reason, not mislaid. The sha256 is
+        # what lets the vault's + recognise the same file brought in again.
+        out["gone"] = "removed" if hosted() and "/" not in value.replace("\\", "/") else "missing"
+        out["again"] = bool(props.get("source_sha256"))
+    else:
+        # its place in the vault, which the rail marks while the drawer shows it
+        out["path"] = found.relative_to(vault).as_posix()
+        if props.get("document"):
+            from silica.kernel import raws
+
+            out["parts"] = max(0, len(raws.index(vault).get(out["path"], [])) - 1)
+    return out
 
 
 def _broken_links(text: str, resolve) -> list[str]:
@@ -4586,6 +4661,33 @@ def note_raw(path: str = ""):
     props, _body = _split_frontmatter(text)
     return {"path": canon, **_note_identity(canon, props), "text": text, "etag": _etag(text),
             "broken": _broken_links(text, resolve)}
+
+
+@app.get("/raw")
+def raw_file(path: str = "", download: bool = False):
+    """The raw a note names (ADR-0129 point 1): the PDF the drawer frames, or
+    any raw as a download under its own name. Keyed by the note and never by
+    a file: only a path some note's `source_file` names, inside the vault, is
+    served, and the tenant never sees a server path (ADR-0085). /asset's
+    headers, whose `sandbox` keeps a navigated file off the GUI's origin;
+    checked 2026-11-03, Chrome 156 and Firefox 158 still draw a PDF under
+    them, in an iframe and at #page=N."""
+    from silica.driver import get_driver
+    from silica.driver.base import NoteRef
+
+    canon = note_resolver()(path)
+    if not canon:
+        raise HTTPException(404)
+    try:
+        text = get_driver().read_note(NoteRef(name=_clean_name(canon), path=canon)).content
+    except Exception:
+        raise HTTPException(404)
+    _value, found = _raw_found(canon, _split_frontmatter(text)[0])
+    if found is None:
+        raise HTTPException(404)
+    attach = download or found.suffix.lower() not in _RAW_OPENS
+    return FileResponse(found, headers=_ASSET_HEADERS, filename=found.name,
+                        content_disposition_type="attachment" if attach else "inline")
 
 
 @app.post("/note/save", dependencies=_SAME_ORIGIN)
@@ -5902,6 +6004,19 @@ def _find_asset(path: str) -> Path | None:
     return found
 
 
+def _tree_raws() -> dict[str, list[str]]:
+    """The raws the rail lists where they sit (ADR-0129, amended 2026-11-04),
+    each with the notes naming it, from the notes' `source_file` and never
+    from the disk: an embedded image or a figure Silica extracted is no raw."""
+    from silica.kernel import raws
+    from silica.sources.convert import DOC_EXTS
+
+    if not CONFIG.vault_path:
+        return {}
+    return {r: n for r, n in raws.index(Path(CONFIG.vault_path)).items()
+            if Path(r).suffix.lower() in DOC_EXTS}
+
+
 @app.get("/vault_info")
 def vault_info():
     """Sidebar data: vault stats + file tree, from the same builders as the
@@ -5922,7 +6037,7 @@ def vault_info():
         # actions=True: the rail's tree carries a pin per note. The graph
         # frame renders the same tree without one, because a pin there would
         # point at a rail that document does not have.
-        "tree": render_tree(nodes, actions=True),
+        "tree": render_tree(nodes, actions=True, raws=_tree_raws()),
         # The chat landing's ways to start (ADR-0048, amendment 2026-10-22):
         # the notes the vault links most. The counts, the area count and the
         # topic labels the landing stated before the greeting went with it,

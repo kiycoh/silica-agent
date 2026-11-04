@@ -317,7 +317,7 @@ def test_undated_pdf_gets_no_date_line(tmp_vault, monkeypatch):
     (Path(CONFIG.vault_path) / "plain.pdf").write_bytes(_pdf_bytes(["Undated body of a short paper"]))
 
     note = _inbox_note(conv.convert("plain.pdf")[0]).read_text(encoding="utf-8")
-    assert note.startswith('---\nsource_file: "')
+    assert note.startswith('---\nsource_pages: 1\nsource_file: "')
     assert "\ndate:" not in note.split("\n---\n")[0]
 
 

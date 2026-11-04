@@ -686,6 +686,7 @@ async function importToVault(files, fromFolder) {
   vaultImportLast = { rows, skipped, failed, folder, big, obsidian };
   renderVaultImport(vaultImportLast);
   if (intoWorkspace) loadWorkspaces();
+  for (const r of rows) if (r.attached && (r.notes || []).includes(drawerNote.path)) refreshRaw(drawerNote.path);
   // A PDF converts in milliseconds: its job's last event can arrive before this
   // answer did, so each row takes the state the page already holds for it.
   for (const r of rows) if (r.job && jobsById.has(r.job)) vaultImportJob(jobsById.get(r.job));
@@ -719,12 +720,18 @@ function renderVaultImport({ progress = "", rows = [], skipped = [], failed = ""
     head.textContent = progress;
     return;
   }
-  const done = rows.filter((r) => r.status === "note");
+  // A file its notes lost and got back (ADR-0129, amended 2026-11-04) was
+  // not imported as new: it is counted apart, and offers no /nucleate.
+  const attached = rows.filter((r) => r.status === "note" && r.attached);
+  const done = rows.filter((r) => r.status === "note" && !r.attached);
   const refused = rows.filter((r) => r.status === "refused");
   const converting = rows.filter((r) => r.status === "queued");
   const notTaken = skipped.length + rows.filter((r) => r.status === "skipped").length;
   const where = folder ? `${(done[0]?.path || converting[0]?.path || "").split("/")[0] || "Inbox"}/${folder}` : "the Inbox";
-  const parts = [done.length ? `${done.length} imported into ${where}` : converting.length ? `into ${where}` : "nothing imported"];
+  const lead = done.length ? `${done.length} imported into ${where}` : converting.length ? `into ${where}`
+    : attached.length ? "" : "nothing imported";
+  const parts = lead ? [lead] : [];
+  if (attached.length) parts.push(`${attached.length} attached to the notes ${attached.length === 1 ? "it" : "they"} became`);
   if (converting.length) parts.push(`${converting.length} converting`);
   if (notTaken) parts.push(`${notTaken} not a type Silica reads`);
   if (big) parts.push(`${big} over ${uploadMaxMb} MB`);
@@ -758,6 +765,7 @@ function renderVaultImport({ progress = "", rows = [], skipped = [], failed = ""
   head.append(x);
   const notes = [
     ...refused.map((r) => `${r.name}: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`),
+    ...attached.map((r) => `${r.name}: the file of ${r.notes.length} ${r.notes.length === 1 ? "note" : "notes"}, back beside ${r.notes.length === 1 ? "it" : "them"} and not converted again`),
     ...rows.filter((r) => r.hidden).flatMap((r) => r.hidden.map((h) =>
       `${r.name}, page ${h.page}: ${h.characters} characters of hidden text left out`)),
     ...rows.filter((r) => r.pages_not_read).map((r) => `${r.name}: ${r.pages_not_read}`),
@@ -1129,27 +1137,45 @@ function restoreYieldedSidebar() {
 // `changes` chip is the way back from it to the text.
 let drawerMode = "note";
 let detailsOn = false; // the note's second view, held for the session (ADR-0075)
+// The PDF a source came from is its third view (ADR-0129, amended 2026-11-04),
+// held the same way: once it is asked for, every source opened after it opens
+// on its PDF, at the page the note starts, until the text is asked for again.
+// The text stays the first view, because a citation leads to a line of it.
+// A PDF opened from the rail is shown for that open alone (`rawFor`).
+let rawOn = false;
+let rawFor = null;
+let drawerRaw = null; // the open note's raw, as /note/raw describes it
+let rawTop = null;    // the strip heading its text, refilled when the raw comes back
+const rawShowing = () => drawerMode === "note" && !!drawerRaw && drawerRaw.open
+  && (rawOn || rawFor === drawerNote.path);
 
 function syncDrawerMode() {
   const open = notePanel.classList.contains("open");
-  const details = drawerMode === "note" && detailsOn;
+  const raw = rawShowing();
+  const details = drawerMode === "note" && detailsOn && !raw;
   // The title belongs to a note in every view of it, in the same place; the
   // two chips to what has no title. Beside the title, the info button and
-  // the pin on the text, the read glyph in details, which leads back.
+  // the pin on the text, the read glyph in details, which leads back; the
+  // raw's glyph on the text and on the PDF, lit on the PDF.
   $("#note-title").hidden = drawerMode === "node";
-  $("#note-info").hidden = drawerMode !== "note" || details;
+  $("#note-info").hidden = drawerMode !== "note" || details || raw;
   $("#note-read").hidden = !details;
+  $("#note-raw").hidden = drawerMode !== "note" || details || !drawerRaw || !drawerRaw.open;
+  $("#note-raw").setAttribute("aria-pressed", String(raw));
+  $("#note-raw").setAttribute("aria-label", raw ? "back to the text" : "the PDF this note came from");
+  $("#note-raw").dataset.tip = raw ? "back to the text" : "the PDF this note came from";
   $("#note-pin").hidden = drawerMode === "node" || details;
   $("#note-changes").hidden = drawerMode !== "diff";
   $("#node-scope").hidden = drawerMode !== "node";
   $("#node-state").hidden = drawerMode !== "node";
-  $("#note-edit").hidden = drawerMode !== "note" || details;
+  $("#note-edit").hidden = drawerMode !== "note" || details || raw;
   $("#note-diff").hidden = drawerMode !== "diff";
   $("#node-pane").hidden = drawerMode !== "node" && !details;
+  syncRawView(raw);
   // A diff of a note this session never touched has nothing in it, so the
   // menu lists it only when there is one, and not while it is showing.
   $("#nm-read").hidden = drawerMode !== "note" || !changedPaths.has(lastNotePath);
-  if (drawerMode !== "note" || details) hideSelBar();
+  if (drawerMode !== "note" || details || raw) hideSelBar();
   // The corner toggle (ADR-0084) exists only while the drawer is shut AND has
   // something to reopen: what reopenDrawer restores, a note read or a node
   // pointed at. Open, the drawer's own close holds the same corner. It names
@@ -1252,9 +1278,13 @@ async function openNote(path, line, facts) {
   lastViewedPath = data.path;
   drawerMode = "note";
   holdNote(drawerNote, data);
-  // a saved note names its author over the text as a paper does (ADR-0143 point 11)
+  drawerRaw = data.raw || null;
+  if (rawFor !== data.path) rawFor = null;
+  // a saved note names its author over the text as a paper does (ADR-0143
+  // point 11), and a source the file it came from (ADR-0129)
+  rawTop = data.raw && !data.paper && !data.saved ? fillRawStrip(mkEl("div", ""), data.raw, data.path, false) : null;
   const top = data.paper ? paperStripEl(data.paper)
-    : data.saved && typeof savedStripEl === "function" ? savedStripEl(data.saved) : null;
+    : data.saved && typeof savedStripEl === "function" ? savedStripEl(data.saved) : rawTop;
   ed.load(data.text, { top, missing: data.broken || [] });
   focusGraphNode(data.path);
   showDrawer(data.title || data.path);
@@ -1303,6 +1333,7 @@ function setDetails(on) {
   if (drawerMode !== "note" || detailsOn === on || !notePanel.classList.contains("open")) return false;
   const inPanel = notePanel.contains(document.activeElement);
   detailsOn = on;
+  if (on) { rawOn = false; rawFor = null; } // details are asked for over the PDF too: Alt+Enter
   syncDrawerMode();
   if (on && ctxPath !== lastNotePath) loadContext(lastNotePath);
   if (!on && drawerNote.editor) drawerNote.editor.view.requestMeasure(); // it was measured while hidden
@@ -1314,6 +1345,101 @@ function setDetails(on) {
 }
 $("#note-info").addEventListener("click", () => setDetails(true));
 $("#note-read").addEventListener("click", () => setDetails(false));
+$("#note-raw").addEventListener("click", () => setRaw(!rawShowing()));
+
+// The text and the PDF of one source. False when nothing changed, so the
+// Escape list can stop at a press that took the reader back to the text.
+function setRaw(on) {
+  if (drawerMode !== "note" || !drawerRaw || !drawerRaw.open || rawShowing() === on) return false;
+  rawOn = on;
+  rawFor = null;
+  syncDrawerMode();
+  markOpenNote();
+  if (!on && drawerNote.editor) drawerNote.editor.view.requestMeasure(); // it was measured while hidden
+  return true;
+}
+
+// The rail's PDF row: the note that names it, on its PDF, for this open.
+async function openRaw(path) {
+  rawFor = path;
+  const ok = await openNote(path);
+  if (ok === true) { rawFor = drawerNote.path; syncDrawerMode(); markOpenNote(); }
+}
+window.openRaw = openRaw;
+
+const rawUrl = (path, extra = "") => "/raw?path=" + encodeURIComponent(path) + extra;
+
+// What a source says of its raw, over its text and over its PDF: the file,
+// the pages the note spans, the other view, the download. A raw the server
+// deleted before 2026-11-04 is named as gone, with the way to bring it back
+// when its hash lets the vault's + recognise it. Built from text nodes only:
+// every word here is a file name from the person's vault.
+function fillRawStrip(el, raw, path, inRaw) {
+  el.className = raw.kept ? "note-paper raw-strip" : "note-saved raw-gone";
+  el.replaceChildren();
+  const line = mkEl("span", "");
+  const name = mkEl("b", "", raw.name);
+  let where = "";
+  if (raw.from && raw.to) where = raw.from === raw.to ? `page ${raw.from}` : `pages ${raw.from} to ${raw.to}`;
+  if (where && raw.pages) where += ` of ${raw.pages}`;
+  if (!where && raw.pages) where = `${raw.pages} pages`;
+  if (raw.parts) where += `${where ? ", " : ""}in ${raw.parts} parts`;
+  line.append("From ", name, where ? `, ${where}` : "");
+  if (!raw.kept) {
+    line.append(raw.gone === "removed" ? ". The server removed the file after converting it."
+      : ". The file is not in the vault any more.");
+    el.append(line);
+    if (raw.again && !DEMO) {
+      const again = mkEl("button", "raw-again", "Import it again");
+      again.type = "button";
+      again.title = "the same file is attached to this note, not converted again";
+      again.addEventListener("click", () => vaultFilesInput.click());
+      el.append(again);
+    }
+    return el;
+  }
+  el.append(line);
+  if (raw.open) {
+    const b = mkEl("button", "wk-paper-a", inRaw ? "Text" : "PDF");
+    b.type = "button";
+    b.addEventListener("click", () => setRaw(!inRaw));
+    el.append(b);
+  }
+  el.append(Object.assign(document.createElement("a"),
+    { className: "wk-paper-a", textContent: "Download", href: rawUrl(path, "&download=1") }));
+  return el;
+}
+
+// The PDF in the browser's own viewer, at the page the note starts. A new
+// note is a new address, so the frame loads it; the same address is left
+// alone, or the reader's place in it would be lost.
+function syncRawView(on) {
+  const view = $("#raw-view");
+  view.hidden = !on;
+  if (!on) return;
+  fillRawStrip($("#raw-head"), drawerRaw, drawerNote.path, true);
+  const url = rawUrl(drawerNote.path) + (drawerRaw.from ? `#page=${drawerRaw.from}` : "");
+  const frame = $("#raw-frame");
+  if (frame.dataset.url !== url) {
+    frame.dataset.url = url;
+    frame.title = `${drawerRaw.name}, the PDF of this note`;
+    frame.src = url;
+  }
+}
+
+// The raw came back (an import recognised it): the strip says so without a
+// reload of the note, which would cost the caret and the scroll.
+async function refreshRaw(path) {
+  if (!rawTop || drawerNote.path !== path) return;
+  try {
+    const data = await (await fetch("/note/raw?path=" + encodeURIComponent(path))).json();
+    if (drawerNote.path !== path || !data.raw) return;
+    drawerRaw = data.raw;
+    fillRawStrip(rawTop, data.raw, path, false);
+    if (drawerNote.editor) drawerNote.editor.view.requestMeasure();
+    syncDrawerMode();
+  } catch { /* the strip keeps saying the file is gone; the next open reads it again */ }
+}
 // Alt+Enter toggles them, the Properties key in Windows. Mod-i is the
 // editor's italic (app-editor.js) and Ctrl+Shift+I Chrome's DevTools. Not
 // from a text field: in the composer Enter sends, and a send is not undone.
@@ -2146,7 +2272,7 @@ function endCheck() {
 // The strip: the counts by grade, each a toggle for its marks, and under them
 // the run's progress or what was searched. At most two lines (point 14).
 function drawCheckStrip() {
-  const on = !!checkView && checkPath === drawerNote.path && drawerMode === "note" && !detailsOn;
+  const on = !!checkView && checkPath === drawerNote.path && drawerMode === "note" && !detailsOn && !rawShowing();
   checkStrip.hidden = !on;
   if (!on) return;
   const v = checkView, shown = checkShown();

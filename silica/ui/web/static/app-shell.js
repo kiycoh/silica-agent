@@ -713,6 +713,15 @@ $("#tree").addEventListener("click", (e) => {
   // inside the folder's summary: the details must not toggle under it
   const plan = e.target.closest(".tree-plan");
   if (plan) { e.preventDefault(); learnPlanFolder(plan.dataset.folder); return; }
+  // a raw's row (ADR-0129): its PDF in the drawer; a modified click is the
+  // browser's, which opens /raw in a tab of its own
+  const file = e.target.closest(".tree-file");
+  if (file) {
+    if (e.button !== 0 || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return;
+    e.preventDefault();
+    openRaw(file.dataset.note);
+    return;
+  }
   const leaf = e.target.closest(".tree-note");
   if (!leaf) {
     if (e.target.id === "tree" || e.target.id === "file-tree") clearTreeSel(); // the tree's empty space
@@ -972,8 +981,12 @@ function plainClick(e) {
 // active tab and the current chat carry: cyan says "you are here".
 function markOpenNote() {
   const open = notePanel.classList.contains("open") ? (lastNotePath || "") : "";
+  // On its PDF, the drawer is on the raw's row and not the note's (ADR-0129).
+  const raw = open && rawShowing() ? drawerRaw.path : "";
   for (const el of $("#tree").querySelectorAll(".tree-note"))
-    el.classList.toggle("open", !!open && el.dataset.id === open);
+    el.classList.toggle("open", !!open && !raw && el.dataset.id === open);
+  for (const el of $("#tree").querySelectorAll(".tree-file"))
+    el.classList.toggle("open", !!raw && el.dataset.raw === raw);
 }
 
 // --- changes (what this session did to the vault) ----------------------------
@@ -1071,10 +1084,10 @@ function stampWriteTallies(rows) {
 // (ADR-0122), which is a different question.
 function applySidebarFilter() {
   const q = $("#side-search").value.trim().toLowerCase();
-  // notes: substring on name or full path
-  $("#tree").querySelectorAll(".tree-note").forEach((el) => {
+  // notes and raws (ADR-0129): substring on name or full path
+  $("#tree").querySelectorAll(".tree-note, .tree-file").forEach((el) => {
     const off = !!q && !el.textContent.toLowerCase().includes(q) &&
-                !(el.dataset.id || "").toLowerCase().includes(q);
+                !(el.dataset.id || el.dataset.raw || "").toLowerCase().includes(q);
     el.hidden = off;
     // The pin rides in a wrapper, so hiding the label alone would leave a bare
     // pin on an empty line. Both, because every count below still asks the
@@ -1084,7 +1097,7 @@ function applySidebarFilter() {
   });
   // folders: hide if nothing visible remains inside; reveal matches while searching
   $("#tree").querySelectorAll("details").forEach((d) => {
-    const any = Array.from(d.querySelectorAll(".tree-note")).some((n) => !n.hidden);
+    const any = Array.from(d.querySelectorAll(".tree-note, .tree-file")).some((n) => !n.hidden);
     d.hidden = !!q && !any;
     if (q && any) d.open = true;
   });

@@ -484,8 +484,9 @@ def is_skippable_chunk(note_rel: str) -> bool:
     """True when an inbox file is non-content: a flagged converted chunk, or
     an Excalidraw drawing.
 
-    `boilerplate: true` is the current key; `references: true` is the original
-    one and stays recognized forever — inbox segments from earlier runs carry
+    `boilerplate: true` is the current key; `document: true` marks a split
+    document's parent note, a list of its parts (ADR-0129 point 5);
+    `references: true` is the original one and stays recognized forever — inbox segments from earlier runs carry
     it, and re-converting is not something a vault owner should have to do.
 
     `excalidraw-plugin:` is what the Obsidian Excalidraw plugin writes into
@@ -506,7 +507,7 @@ def is_skippable_chunk(note_rel: str) -> bool:
         return False
     if not isinstance(data, dict):
         return False
-    return bool(data.get("boilerplate") or data.get("references")
+    return bool(data.get("boilerplate") or data.get("references") or data.get("document")
                 or "excalidraw-plugin" in data)
 
 
@@ -806,6 +807,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
         return [note_rel]
 
     width = len(str(len(segments)))
+    spans = part_pages(segments, src)
     paths: list[str] = []
     for i, (seg, kind) in enumerate(flagged, 1):
         slug = _segment_slug(seg, "part")
@@ -817,12 +819,87 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
         title = _segment_title(stem, seg, i).replace("\\", "\\\\").replace('"', '\\"')
         head = _flag(kind)
         end = head.rindex("---\n")  # last key, so `source_file:` still opens the block
-        head = f'{head[:end]}segment_title: "{title}"\n{head[end:]}'
+        pages = f"source_page: {spans[i - 1][0]}\nsource_page_end: {spans[i - 1][1]}\n" if spans else ""
+        head = f'{head[:end]}segment_title: "{title}"\n{pages}{head[end:]}'
         DRIVER.upsert(note_rel, head + seg.lstrip("\n"),  # a re-convert refreshes it
                       loss=Loss.STAGED)
         paths.append(note_rel)
+    # The document as one note (ADR-0129 point 5), at the path a one-part file
+    # gets, so `[[<stem>]]` names it either way. Flagged so /nucleate skips it,
+    # as it skips a reference list: its body is the list of parts, not content.
+    # Not returned: every caller of convert() reads its list as the text. Not
+    # for a Zotero paper, whose source leaf already is the document under that
+    # name, and a second `<stem>.md` would split the links to it.
+    if leaf is None:
+        rows = [f"- [[{Path(p).stem}]]" + (f" (pages {a} to {b})" if spans else "")
+                for p, (a, b) in zip(paths, spans or [(0, 0)] * len(paths))]
+        DRIVER.upsert(f"{inbox}/{stem}.md", _flag("document")
+                      + f"The {len(paths)} parts of {src.name}, in order.\n\n" + "\n".join(rows) + "\n",
+                      loss=Loss.STAGED)
     logger.info("PDF %s split into %d inbox segment(s)", src.name, len(segments))
     return paths
+
+
+def page_texts(src: Path, data: dict | None = None) -> list[str] | None:
+    """Each page's words, lowercased, from a read of the PDF: its text layer
+    and what a model read off the page's image (ADR-0087), since a part cut
+    from a reading starts with the reading's words. None when no read of
+    `src` is at hand (a provider other than PDFium, or not a PDF)."""
+    from silica.sources.pdf_extract import cached
+
+    seen = data if data is not None else cached(src)
+    if not seen or not seen.get("pages"):
+        return None
+    readings = seen.get("readings") or {}
+    return [" ".join(_WORD_RE.findall((" ".join(t for t, _ in lines) + " "
+                                       + str(readings.get(i, ""))).lower()))
+            for i, lines in enumerate(seen["pages"])]
+
+
+_WORD_RE = re.compile(r"\w+")
+
+
+def part_pages(parts: list[str], src: Path, texts: list[str] | None = None) -> list[tuple[int, int]] | None:
+    """(first page, last page), 1-based, of each part cut from the PDF `src`:
+    what the drawer opens the PDF at (ADR-0129). The pages were joined before
+    the cut (`_pdf_markdown`, then `_split_markdown_flagged`), so a part is
+    found again by its first words of prose in the pages' words, searching
+    forward from the part before it. A heading is no probe: one the outline
+    named is written whether or not its page carries the title. A part not
+    found keeps the page of the one before; a part ends on the page the next
+    one starts on, since a cut falls inside a page as often as between two.
+    None when there is no read of the pages to search."""
+    texts = texts if texts is not None else page_texts(src)
+    if not texts:
+        return None
+    starts: list[int] = []
+    at = 0
+    for k, part in enumerate(parts):
+        if k:
+            words = _first_prose_words(part)
+            for n in (8, 4):  # a probe across a page break misses at 8 words
+                probe = " ".join(words[:n])
+                hit = next((i for i in range(at, len(texts)) if probe and probe in texts[i]), None)
+                if hit is not None:
+                    at = hit
+                    break
+        starts.append(at + 1)
+    ends = [*starts[1:], len(texts)]
+    return [(a, max(a, b)) for a, b in zip(starts, ends)]
+
+
+def _first_prose_words(part: str) -> list[str]:
+    """The first words of `part` below its frontmatter that are not a heading,
+    an embed or a line Silica wrote ("> [page 3: ...]"), lowercased."""
+    words: list[str] = []
+    for line in re.sub(r"\A---\n.*?\n---\n", "", part, flags=re.S).splitlines():
+        t = line.strip()
+        if not t or t.startswith(("#", "![", "> [page", "```")):
+            continue
+        words += _WORD_RE.findall(t.lower())
+        if len(words) >= 8:
+            break
+    return words
 
 
 # --- providers (each: src pdf, workdir → markdown text, images dir) ---------
@@ -3207,6 +3284,14 @@ def _doc_citation(src: Path, md_text: str) -> dict[str, str]:
     return cite
 
 
+def _vault_path_of(src: Path) -> str:
+    """`src` relative to the vault, or its bare name when it lies outside."""
+    try:
+        return src.resolve().relative_to(Path(CONFIG.vault_path or ".").resolve()).as_posix()
+    except (ValueError, OSError):
+        return src.name
+
+
 def _provenance_fm(src: Path, md_text: str = "",
                    tabular_members: list[Path] | None = None,
                    cite: dict[str, str] | None = None) -> str:
@@ -3218,10 +3303,10 @@ def _provenance_fm(src: Path, md_text: str = "",
     from silica.config import hosted
 
     # On the server the absolute path is /srv/silica/<tenant>/..., which says
-    # nothing to the student, and the PDF itself is deleted once converted
-    # (ADR-0098 point 7): the name, the size, the pages and the hash are what
-    # identify the original, and let a second upload of it be recognised.
-    quoted = (src.name if hosted() else str(src)).replace("\\", "\\\\").replace('"', '\\"')
+    # nothing to the student (ADR-0085): the raw's path in the vault is what
+    # the GUI opens it by (ADR-0129 point 1), and the size and the hash tell
+    # whether the file there is still it, or a second upload of it.
+    quoted = (_vault_path_of(src) if hosted() else str(src)).replace("\\", "\\\\").replace('"', '\\"')
     date = _source_date(src)
     lines = [f"date: {date}\n"] if date else []
     if hosted():
@@ -3230,12 +3315,13 @@ def _provenance_fm(src: Path, md_text: str = "",
         with open(src, "rb") as fh:
             lines.append(f"source_sha256: {hashlib.file_digest(fh, 'sha256').hexdigest()}\n")
         lines.append(f"source_bytes: {src.stat().st_size}\n")
-        if src.suffix.lower() == ".pdf":
-            from silica.sources.pdf_extract import cached
+    if src.suffix.lower() == ".pdf":
+        from silica.sources.pdf_extract import cached
 
-            seen = cached(src)
-            if seen:
-                lines.append(f"source_pages: {seen['n_pages']}\n")
+        # In both homes since the drawer names the pages a part spans "of N".
+        seen = cached(src)
+        if seen:
+            lines.append(f"source_pages: {seen['n_pages']}\n")
     # Form stamp (docs/specs/nucleation-forms.md): a converted media file is a
     # transcript by construction, so the profile ladder never has to sniff it.
     # A document's form is not knowable at ingress; it gets no stamp.

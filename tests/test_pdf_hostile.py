@@ -254,8 +254,9 @@ def test_the_child_has_no_network_where_the_host_allows_it():
 
 
 def test_on_the_server_the_note_names_the_file_and_its_hash(pdfium_vault, monkeypatch):
-    """Point 7: the absolute /srv/silica path says nothing to the student, and
-    the PDF is deleted after conversion; name, size, pages and hash stay."""
+    """The absolute /srv/silica path says nothing to the student (ADR-0085):
+    the note names the PDF by its place in the vault, which the GUI opens it
+    by, and its size, pages and hash (ADR-0129 point 1)."""
     import hashlib
 
     import yaml
@@ -268,7 +269,7 @@ def test_on_the_server_the_note_names_the_file_and_its_hash(pdfium_vault, monkey
 
     fm = yaml.safe_load(_body(convert("Inbox/notes.pdf")[0]).split("---\n")[1])
 
-    assert fm["source_file"] == "notes.pdf"
+    assert fm["source_file"] == "Inbox/notes.pdf"
     assert fm["source_sha256"] == hashlib.sha256(data).hexdigest()
     assert fm["source_bytes"] == len(data) and fm["source_pages"] == 2
 
