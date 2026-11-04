@@ -263,6 +263,8 @@ def _source_hits(query: str) -> list[dict] | None:
 # to report conversions: 1.33 s on a 3,202-file vault (alex_second_brain,
 # 2026-11-04), against 0.032 s for this walk, which stats only the document
 # types the index cannot read without a sidecar; both found the same 12 files.
+# One walk per search call: reopen with a cache keyed on the index's built_at if
+# a vault passes 20k files (about 0.2 s at the measured rate).
 _UNREADABLE_SHOWN = 10
 
 
