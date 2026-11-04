@@ -113,6 +113,9 @@ def test_the_rail_lists_a_raw_in_its_folder_and_the_frame_does_not(client, monke
     assert 'class="tree-file" href="/raw?path=Inbox%2Fsurvey.md"' in tree
     assert 'data-raw="Inbox/survey.pdf"' in tree and '<span class="tree-ext">.pdf</span>' in tree
     assert "tree-file" not in render_tree([{"path": "Inbox/survey.md", "id": "Inbox/survey.md"}], raws=raws)
+    # the folder counts notes, which its menu's delete removes, and not the raw beside them
+    rail = render_tree([{"path": "Inbox/survey.md", "id": "Inbox/survey.md"}], actions=True, raws=raws)
+    assert '<summary draggable="true">Inbox<span class="tree-n">1</span>' in rail
 
 
 def test_silica_files_lists_a_converted_raw_as_the_raw_of_its_source(client, monkeypatch):

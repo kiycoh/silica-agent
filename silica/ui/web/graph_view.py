@@ -200,7 +200,9 @@ def render_tree(nodes: list[dict], *, actions: bool = False,
         cur.setdefault("__notes__", []).append((leaf, raw, notes[0]))
 
     def count(tree: dict) -> int:
-        return len(tree.get("__notes__", [])) + sum(
+        # notes only, raws not: the folder menu's delete names this count, and
+        # tree_delete removes the notes the tree counts, never their raws
+        return sum(1 for row in tree.get("__notes__", []) if len(row) == 2) + sum(
             count(v) for k, v in tree.items() if k != "__notes__")
 
     def emit(tree: dict, depth: int, prefix: str = "") -> str:
