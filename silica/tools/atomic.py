@@ -497,6 +497,8 @@ def silica_search_context(
     a discriminating term absent, means the vault does not answer in these
     words. There is no boolean "no answer" — read the two signals and decide.
     Carry a hit's `version` into silica_read to be refused if the note changed.
+    A hit under `sources/` is a document's verbatim copy, the one the notes
+    made from it link to under `## Sources`: quote figures and wording from it.
 
     Use silica_recall when the wording is unknown, silica_search to
     match note titles.

@@ -3794,10 +3794,11 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
     # Explicit lens override: tops the whole form ladder
     # (docs/specs/nucleation-forms.md), filing included.
     profile = _str_flag(args, "--profile")
-    # On by default: the leaf lives in `sources/`, which is
-    # retrieval-invisible by construction (is_source_leaf excludes it from
-    # search, search_context and embeddings), so it costs disk and nothing
-    # else — and it is what makes a note's verbatim source reachable at all
+    # On by default: the leaf lives in `sources/`, which every index built on
+    # the vault listing leaves out (is_source_leaf: embeddings, the graph, the
+    # driver's search), while the passage search behind silica_search_context
+    # walks it and returns it (kernel/recall/paths.py:235, probed 2026-11-04).
+    # It is what makes a note's verbatim source reachable at all
     # (reliability_tier reads exactly that). --no-keep-sources opts out.
     keep_sources = "--no-keep-sources" not in args
 

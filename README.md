@@ -69,7 +69,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 - Each cited note gets a number. Clicking it opens the note at the line closest to the paragraph that cites it, when enough of their words match; pointing at it lights every paragraph that cites the same note.
 - A line under the answer counts the notes read, the steps and the seconds, and lists under "not cited" the notes it read and did not cite.
 - A number in the answer that is in no note the chat read and in nothing you typed is listed under it: "numbers not in what this turn read".
-- Each note `/nucleate` writes carries a `## Sources` block that leads to the source's verbatim copy in `sources/`. Search leaves those copies out, so a source never competes with the notes made from it.
+- Each note `/nucleate` writes carries a `## Sources` block that leads to the source's verbatim copy in `sources/`. Passage search returns those copies, so a figure or a sentence can be checked in the source's own words; search by meaning and the graph leave them out, so there a source never competes with the notes made from it.
 - Ask the last question again, or edit it. The chat also searches your earlier chats for what was asked and answered.
 
   <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/chat.png" alt="A chat answer listing the notes found by search, with each claim linked to its note and one link marked as having no note" width="820" />
