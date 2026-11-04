@@ -358,6 +358,17 @@ def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = Non
 # (pages read, pages to read) while the chat model reads a PDF's pages, the one
 # slow part of a conversion that knows how far it is.
 PAGE_PROGRESS: ContextVar[Callable[[int, int], None] | None] = ContextVar("page_progress", default=None)
+# Set by the job worker around the convert() of a file the vault's + brought in:
+# that file sits where the person put it, at the top of the vault and not in
+# the inbox (owner, 2026-11-02), so its note goes beside it. /convert keeps its
+# contract, a note in the inbox.
+BESIDE_SOURCE: ContextVar[bool] = ContextVar("beside_source", default=False)
+
+
+def _in(folder: str, name: str) -> str:
+    """`name` under `folder`, where "" is the top of the vault: a note imported
+    there converts beside itself, and "/name.md" would be no vault path."""
+    return f"{folder}/{name}" if folder else name
 
 
 def _note_dir(src: Path, inbox: str) -> str:
@@ -368,12 +379,19 @@ def _note_dir(src: Path, inbox: str) -> str:
     `CorsoA/Lezione 1.pdf` and `CorsoB/Lezione 1.pdf` the same note, the second
     overwriting the first (reproduced 2026-10-13, ADR-0098 point 6), and a
     folder import is made of exactly such folders.
-    ponytail: a source outside the inbox (a library folder given to /convert)
-    still lands at the inbox root, so two such sources with one name still
-    collide; the upgrade is the same rule against the vault root, due when a
-    /convert of a library reports it.
+    A file the vault's + imported (`BESIDE_SOURCE`) converts beside itself
+    wherever it sits in the vault: the same rule against the vault root.
+    ponytail: a source outside the inbox given to /convert still lands at the
+    inbox root, so two such sources with one name still collide; the upgrade is
+    `BESIDE_SOURCE` for /convert too, due when a /convert of a library reports it.
     """
     vault = Path(CONFIG.vault_path or ".").resolve()
+    if BESIDE_SOURCE.get():
+        try:
+            rel = src.resolve().parent.relative_to(vault)
+            return "" if rel == Path(".") else rel.as_posix()
+        except (ValueError, OSError):
+            pass  # outside the vault, as the rule below already handles
     try:
         # A file attached to a chat (ADR-0121 point 5) converts beside itself,
         # inside its chat's folder, never into the inbox it was kept out of.
@@ -801,7 +819,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
     # it meant a standalone bibliography export or a lone checklist page — one
     # segment because it fits under _MAX_SEGMENT_CHARS — was distilled in full.
     if len(segments) == 1:
-        note_rel = f"{inbox}/{stem}.md"
+        note_rel = _in(inbox, f"{stem}.md")
         DRIVER.upsert(note_rel, _flag(flagged[0][1]) + body.lstrip("\n"),  # a re-convert refreshes it
                       loss=Loss.STAGED)
         return [note_rel]
@@ -815,7 +833,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
         # source by basename alone (ADR-0055): two papers that both open with
         # an Introduction each produced `1-introduction.md`, and the second
         # one's sha256 marked the first one's notes as drifted.
-        note_rel = f"{inbox}/{stem}/{stem}-{i:0{width}d}-{slug}.md"
+        note_rel = _in(inbox, f"{stem}/{stem}-{i:0{width}d}-{slug}.md")
         title = _segment_title(stem, seg, i).replace("\\", "\\\\").replace('"', '\\"')
         head = _flag(kind)
         end = head.rindex("---\n")  # last key, so `source_file:` still opens the block
@@ -833,7 +851,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
     if leaf is None:
         rows = [f"- [[{Path(p).stem}]]" + (f" (pages {a} to {b})" if spans else "")
                 for p, (a, b) in zip(paths, spans or [(0, 0)] * len(paths))]
-        DRIVER.upsert(f"{inbox}/{stem}.md", _flag("document")
+        DRIVER.upsert(_in(inbox, f"{stem}.md"), _flag("document")
                       + f"The {len(paths)} parts of {src.name}, in order.\n\n" + "\n".join(rows) + "\n",
                       loss=Loss.STAGED)
     logger.info("PDF %s split into %d inbox segment(s)", src.name, len(segments))
@@ -2548,7 +2566,7 @@ def _convert_tabular(src: Path) -> list[str]:
     inbox = _note_dir(src, active_inbox_dir() or "Inbox")
     stem = _family_stem(members) if len(members) > 1 else src.stem
     fm = _provenance_fm(src, md, tabular_members=members)
-    note_rel = f"{inbox}/{stem}.md"
+    note_rel = _in(inbox, f"{stem}.md")
     from silica.kernel.write.preserve import Loss
 
     DRIVER.upsert(note_rel, fm + md.lstrip("\n"), loss=Loss.STAGED)  # any member's re-convert refreshes it

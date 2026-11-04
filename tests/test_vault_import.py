@@ -31,10 +31,10 @@ def _post(tc, entries, last=True):
     return tc.post("/vault/import", files=files, data=data)
 
 
-def _inbox() -> Path:
+def _vault() -> Path:
     from silica.config import CONFIG
 
-    return Path(CONFIG.vault_path) / "Inbox"
+    return Path(CONFIG.vault_path)
 
 
 def _settled(resp) -> dict[str, dict]:
@@ -99,13 +99,13 @@ def test_a_folder_keeps_its_tree_and_only_what_silica_reads(client):
     assert resp.status_code == 200
     assert {r["name"]: r for r in resp.json()["files"]}["Corso/Settimana 1/Lezione 1.pdf"]["status"] == "queued"
     rows = _settled(resp)
-    assert rows["Corso/Settimana 1/Lezione 1.pdf"]["notes"] == ["Inbox/Corso/Settimana 1/Lezione 1.md"]
-    assert (_inbox() / "Corso/Settimana 1/Lezione 1.pdf").exists()  # locally the PDF stays
+    assert rows["Corso/Settimana 1/Lezione 1.pdf"]["notes"] == ["Corso/Settimana 1/Lezione 1.md"]
+    assert (_vault() / "Corso/Settimana 1/Lezione 1.pdf").exists()  # locally the PDF stays
     assert rows["Corso/appunti.md"]["status"] == "note"
-    assert rows["Corso/elenco.txt"]["path"] == "Inbox/Corso/elenco.md"  # text comes in as a note
+    assert rows["Corso/elenco.txt"]["path"] == "Corso/elenco.md"  # text comes in as a note
     assert rows["Corso/foto.jpg"]["status"] != "skipped"  # a source since ADR-0120
     assert rows["Corso/.obsidian/workspace.md"]["status"] == "skipped"
-    assert not (_inbox() / "Corso/.obsidian").exists()
+    assert not (_vault() / "Corso/.obsidian").exists()
 
 
 def test_one_bad_file_never_stops_the_batch(client):
@@ -122,7 +122,7 @@ def test_one_bad_file_never_stops_the_batch(client):
     assert rows["fake.pdf"]["status"] == "refused" and "not a PDF" in rows["fake.pdf"]["reason"]
     assert rows["good.pdf"]["status"] == "note"
     assert rows["binary.md"]["status"] == "refused" and "not text" in rows["binary.md"]["reason"]
-    assert not (_inbox() / "fake.pdf").exists() and not (_inbox() / "binary.md").exists()
+    assert not (_vault() / "fake.pdf").exists() and not (_vault() / "binary.md").exists()
 
 
 def test_a_second_upload_of_a_name_is_numbered_not_overwritten(client):
@@ -130,15 +130,28 @@ def test_a_second_upload_of_a_name_is_numbered_not_overwritten(client):
     _post(tc, [("", "notes.md", b"# first")])
     resp = _post(tc, [("", "notes.md", b"# second")])
 
-    assert resp.json()["files"][0]["path"] == "Inbox/notes (2).md"
-    assert (_inbox() / "notes.md").read_text() == "# first"
+    assert resp.json()["files"][0]["path"] == "notes (2).md"
+    assert (_vault() / "notes.md").read_text() == "# first"
 
 
-def test_a_path_that_climbs_lands_inside_the_inbox(client):
+def test_an_import_lands_in_the_write_folder_when_writes_are_confined(client, monkeypatch):
+    from silica.kernel import vault_manifest
+
+    tc, _ = client
+    monkeypatch.setattr(vault_manifest, "active_write_dir", lambda: "docs/silica")
+    resp = _post(tc, [("Corso/appunti.md", "appunti.md", b"# Appunti")])
+    assert resp.json()["files"][0]["path"] == "docs/silica/Corso/appunti.md"
+
+    # A write_dir that cannot be found is a hidden folder no index reads: refused.
+    monkeypatch.setattr(vault_manifest, "active_write_dir", lambda: vault_manifest._UNRESOLVABLE_WRITE_DIR)
+    assert _post(tc, [("", "x.md", b"# x")]).status_code == 409
+
+
+def test_a_path_that_climbs_lands_inside_the_vault(client):
     tc, _ = client
     resp = _post(tc, [("../../outside.md", "outside.md", b"# x")])
 
-    assert resp.json()["files"][0]["path"] == "Inbox/outside.md"
+    assert resp.json()["files"][0]["path"] == "outside.md"
     from silica.config import CONFIG
 
     assert not (Path(CONFIG.vault_path).parent / "outside.md").exists()
@@ -180,10 +193,10 @@ def test_on_the_server_the_pdf_stays_as_the_raw_of_its_note(client, monkeypatch)
     assert types["import"] == types["extensions"] == list(HOSTED_EXTENSIONS)
     assert {".docx", ".pptx", ".epub", ".png", ".csv", ".3gp"} <= set(HOSTED_EXTENSIONS)
     rows = _settled(resp)
-    assert rows["paper.pdf"]["notes"] == ["Inbox/paper.md"]
-    assert (_inbox() / "paper.pdf").exists() and (_inbox() / "paper.md").exists()
+    assert rows["paper.pdf"]["notes"] == ["paper.md"]
+    assert (_vault() / "paper.pdf").exists() and (_vault() / "paper.md").exists()
     assert rows["doc.docx"]["status"] == "refused" and "not a DOCX file" in rows["doc.docx"]["reason"]
-    assert not (_inbox() / "doc.docx").exists()
+    assert not (_vault() / "doc.docx").exists()
     assert rows["talk.mp4"]["status"] == "skipped"
 
 
@@ -223,13 +236,13 @@ def test_on_the_server_a_document_a_deck_an_image_and_a_table_become_notes(clien
     ]))
 
     assert {n: r["status"] for n, r in rows.items()} == dict.fromkeys(rows, "note")
-    vault = _inbox().parent
+    vault = _vault()
     assert "Heat flows" in (vault / rows["essay.docx"]["notes"][0]).read_text(encoding="utf-8")
     assert "## Entropy" in (vault / rows["deck.pptx"]["notes"][0]).read_text(encoding="utf-8")
     assert "Carnot cycle" in (vault / rows["board.png"]["notes"][0]).read_text(encoding="utf-8")
     assert "student" in (vault / rows["marks.csv"]["notes"][0]).read_text(encoding="utf-8")
-    assert (_inbox() / "essay.docx").exists() and (_inbox() / "deck.pptx").exists()
-    assert (_inbox() / "board.png").exists() and (_inbox() / "marks.csv").exists()
+    assert (_vault() / "essay.docx").exists() and (_vault() / "deck.pptx").exists()
+    assert (_vault() / "board.png").exists() and (_vault() / "marks.csv").exists()
 
 
 def test_an_image_whose_bytes_are_not_one_is_refused(client):
@@ -238,7 +251,7 @@ def test_an_image_whose_bytes_are_not_one_is_refused(client):
     row = _settled(_post(tc, [("", "photo.png", b"<html>not a picture</html>")]))["photo.png"]
 
     assert row["status"] == "refused" and "not a PNG file" in row["reason"]
-    assert not (_inbox() / "photo.png").exists()
+    assert not (_vault() / "photo.png").exists()
 
 
 # --- a link (ADR-0120) ----------------------------------------------------------
@@ -259,7 +272,10 @@ def test_a_link_becomes_a_note_in_the_inbox(client, monkeypatch):
 
     assert seen == ["https://x.test/post"]
     assert row["status"] == "note"
-    assert "The second law, stated plainly." in (_inbox().parent / row["notes"][0]).read_text(encoding="utf-8")
+    assert "The second law, stated plainly." in (_vault() / row["notes"][0]).read_text(encoding="utf-8")
+    # A page is web text, staged for the person's confirmation before it joins
+    # the notes, so a link still lands in the Inbox where a file does not.
+    assert row["notes"][0].startswith("Inbox/")
 
 
 def test_on_the_server_a_youtube_link_is_refused_before_any_request(client, monkeypatch):

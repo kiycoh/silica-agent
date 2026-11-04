@@ -706,6 +706,29 @@ def _announce_code_lane() -> None:
         CONSOLE.print(f"  [yellow]⚠ {warn}[/]")
 
 
+def _direct_args(raw: str) -> list[str]:
+    """A direct command's words, a double-quoted run being one word, so
+    `/check "Drafts/Opinion on limitation"` names the note and not a note
+    called `"Drafts/Opinion`. Not shlex's default: an apostrophe is a letter in
+    prose (`/find l'entropia`), `#` starts a tag and not a comment, and a
+    backslash is a Windows path's. An unbalanced quote leaves the words as
+    typed, as every direct command read them before quotes were honoured."""
+    lex = shlex.shlex(raw, posix=True)
+    lex.whitespace_split, lex.quotes, lex.escape, lex.commenters = True, '"', "", ""
+    try:
+        return list(lex)
+    except ValueError:
+        return raw.split()
+
+
+def _unquoted(text: str) -> str:
+    """The path a command takes whole (`/undo`, `/delete`, `/trash restore`)
+    without one pair of quotes around it: those read the raw line, since a
+    note's name has spaces, and a quoted name was looked up with its quotes."""
+    text = text.strip()
+    return text[1:-1].strip() if len(text) > 1 and text[0] == text[-1] and text[0] in "\"'" else text
+
+
 def _positional(args: list[str]) -> list[str]:
     """The tokens that are not flags — anything not starting with `-`.
 
@@ -1055,9 +1078,10 @@ def _epistemic_filter(results: list[dict], min_trust: str, life: str) -> tuple[l
 
 
 def _quoted_flag(args: list[str], flag: str) -> tuple[str | None, list[str]]:
-    """(`--flag value` or `--flag "two words"`, the args without it). Direct
-    commands split on whitespace, so a quoted name arrives in pieces and is
-    joined back here; None when the flag is absent, "" when it has no value."""
+    """(`--flag value` or `--flag "two words"`, the args without it). A
+    double-quoted name arrives whole (`_direct_args`); a single-quoted one
+    still arrives in pieces and is joined back here; None when the flag is
+    absent, "" when it has no value."""
     for i, a in enumerate(args):
         if a == flag or a.startswith(flag + "="):
             head = a[len(flag) + 1:] if a.startswith(flag + "=") else (args[i + 1] if i + 1 < len(args) else "")
@@ -1644,7 +1668,7 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
     deleted = moved = None
     note_path: str | None
     if len(rest) > 1:
-        note_path = rest[1].strip()
+        note_path = _unquoted(rest[1])
         if store.depth(note_path) == 0:
             # The write card sends the tool's own argument, often a bare name,
             # while the store keys a patch on the path it resolved to: unresolved,
@@ -1770,7 +1794,7 @@ def _dc_delete(args: list[str], *, raw_input: str = "", **_) -> bool:
     # Everything after the command is the path, as for /undo: note names
     # with spaces are the common case.
     rest = raw_input.strip().split(maxsplit=1)
-    ref = rest[1].strip() if len(rest) > 1 else ""
+    ref = _unquoted(rest[1]) if len(rest) > 1 else ""
     if not ref:
         CONSOLE.print("  Usage: /delete <path>  [dim](the note to delete; /undo brings it back)[/]")
         return True
@@ -1841,10 +1865,10 @@ def _dc_trash(args: list[str], *, raw_input: str = "", **_) -> bool:
         return True
     # Everything after the verb is the path, as for /undo. A path deleted
     # twice is two items; the newest delete is the one meant.
-    want = note_key(rest[2].strip())
+    want = note_key(_unquoted(rest[2]))
     item = next((t for t in items if note_key(t["path"]) == want), None)
     if item is None:
-        CONSOLE.print(f"  [yellow]Not in the trash:[/] {escape(rest[2].strip())}", soft_wrap=True)
+        CONSOLE.print(f"  [yellow]Not in the trash:[/] {escape(_unquoted(rest[2]))}", soft_wrap=True)
         return True
     if verb == "erase":
         journal.leave_trash(item["run"], item["path"])
@@ -1903,7 +1927,9 @@ def _revert_by_source(source: str, vault: str | None) -> bool:
 def _dc_revert(args: list[str], *, raw_input: str = "", **_) -> bool:
     """/revert [run-id | --source <file>] — undo a journalled run, or every run
     that derived notes from one source."""
-    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
+    from rich.markup import escape
+
+    from silica.kernel.write.undo_journal import get_undo_journal
     vault = CONFIG.vault_path.strip() or None
     tokens = list(args) or raw_input.strip().split()[1:]
     # The source is the rest of the line: lecture files carry spaces
@@ -1917,10 +1943,42 @@ def _dc_revert(args: list[str], *, raw_input: str = "", **_) -> bool:
     if source:
         return _revert_by_source(source, vault)
     parts_split = raw_input.strip().split(maxsplit=1)
-    run_id = parts_split[1].strip() if len(parts_split) > 1 else _latest_revertable(vault)
-    if not run_id:
-        CONSOLE.print("  Nothing to revert — no runs recorded for this vault.")
+    given = _unquoted(parts_split[1]) if len(parts_split) > 1 else ""
+    if not given:
+        run_id = _latest_revertable(vault)
+        if not run_id:
+            CONSOLE.print("  Nothing to revert — no runs recorded for this vault.")
+            return True
+        return _revert_one(run_id)
+    found = get_undo_journal().match_runs(given, vault)
+    ledgers = {ledger for _run, ledger in found}
+    if any(run == given for run, _l in found):
+        runs = [given]
+    elif found and len(ledgers) == 1 and (next(iter(ledgers)) or "").startswith(given.lower()):
+        # The id /status prints is the ledger's, and one ledger run can hold
+        # several journal runs: newest first, the only sound replay order.
+        runs = [run for run, _l in found]
+    elif len(found) == 1:
+        runs = [found[0][0]]
+    elif found:
+        CONSOLE.print(f"  '{escape(given)}' names {len(found)} runs; give more of the id:")
+        for run, ledger in found[:10]:
+            CONSOLE.print(f"    {run}  [dim](run {(ledger or '')[:8]})[/]")
         return True
+    else:
+        # Not a journal run: a Zotero write's run, which has no inverse in the
+        # journal and is taken back by _revert_zotero alone, keeps working as
+        # it did when every id passed straight through.
+        runs = [given]
+    for run_id in runs:
+        _revert_one(run_id)
+    return True
+
+
+def _revert_one(run_id: str) -> bool:
+    """One run taken back, journal and Zotero, and the line that says what it was."""
+    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
+
     # Name WHAT is being reverted: the journal's run ids live in a different
     # id-space than the progress ledger's (log.md), so a bare id told the
     # user nothing about which run they were about to undo.
@@ -2330,7 +2388,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         /trash [restore <path> | erase <path> | empty]
     """
 
-    parts = raw_input.strip().split()
+    parts = _direct_args(raw_input.strip())
     if not parts:
         return False
     cmd = parts[0].lower()

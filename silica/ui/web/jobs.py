@@ -316,7 +316,7 @@ def _run(job_id: str) -> None:
     try:
         if rec.get("vault") != (CONFIG.vault_path or ""):
             raise Refused("the vault changed since this file was added: add it again in this one")
-        notes = _converted(job_id, src, rec.get("dest_dir") or "")
+        notes = _converted(job_id, src, rec.get("dest_dir") or "", beside=rec.get("origin") == "import")
         hidden = _hidden(src)
         pages, unread = _pages(src)
     except Exception as exc:
@@ -339,20 +339,21 @@ def _run(job_id: str) -> None:
         hook(rec)
 
 
-def _converted(job_id: str, src: Path, dest_dir: str) -> list[str]:
+def _converted(job_id: str, src: Path, dest_dir: str, beside: bool = False) -> list[str]:
     """convert(), with how many of a PDF's pages the chat model has read kept
     on the record as `progress` (ADR-0121 point 1): the slow part of a PDF,
     105 s for a 13-page paper with formulas, which the row could only count in
     minutes. One write a page; a page takes about 2 s."""
-    from silica.sources.convert import PAGE_PROGRESS, convert
+    from silica.sources.convert import BESIDE_SOURCE, PAGE_PROGRESS, convert
 
     def report(done: int, total: int) -> None:
         _update(job_id, expect=("running",), progress={"done": done, "total": total})
 
-    token = PAGE_PROGRESS.set(report)
+    token, near = PAGE_PROGRESS.set(report), BESIDE_SOURCE.set(beside)
     try:
         return convert(str(src), dest_dir=dest_dir)
     finally:
+        BESIDE_SOURCE.reset(near)
         PAGE_PROGRESS.reset(token)
 
 
@@ -421,7 +422,7 @@ def recover() -> int:
 
 
 def retry(job_id: str) -> dict:
-    """Run a failed or interrupted job again from the Inbox copy. Refused with
+    """Run a failed or interrupted job again from the copy it was added as. Refused with
     a sentence when that file is gone or its bytes changed: a conversion of
     other bytes under the old job would be a result nobody asked for. A rerun
     writes the same note names (`convert` derives them from the file), so a
@@ -436,7 +437,7 @@ def retry(job_id: str) -> dict:
     src = _absolute(rec)
     name = rec["source"]["name"]
     if not src.is_file():
-        raise Refused(f"{name} is no longer in the Inbox, so it cannot be converted again: add it again")
+        raise Refused(f"{name} is no longer where it was added, so it cannot be converted again: add it again")
     if _sha256(src) != rec["source"].get("sha256"):
         raise Refused(f"{name} changed since it was added, so this conversion would not be of the "
                       "same file: add it again")

@@ -24,7 +24,7 @@ const TOUR_STEPS = {
   },
   file: {
     n: 1, target: "#vault-add", prepare: () => tourOpenDrawer(), wait: "note",
-    body: "Add your notes here: a PDF, a .md or a .txt. Each file becomes a note in your Inbox.",
+    body: "Add your notes here: a PDF, a .md or a .txt. Each file becomes a note at the top of your vault.",
     link: ["only have a link?", () => tourGo("fetch")],
   },
   fetch: {

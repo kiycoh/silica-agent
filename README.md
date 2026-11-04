@@ -39,7 +39,7 @@ Needs Python 3.11+ and [uv](https://docs.astral.sh/uv/). With pipx: `pipx instal
 ```bash
 cd ~/notes        # any folder of .md files, adopted as it is
 silica init       # pick a model: a hosted API key, or a local LM Studio / Ollama model
-silica --gui      # opens http://localhost:8765; plain `silica` opens the terminal instead
+silica --gui      # serves http://localhost:8765, open it in your browser; plain `silica` opens the terminal instead
 ```
 
 Then type `/report`. It is read-only: it writes one file, `GRAPH_REPORT.md`, and shows the hubs, bridges and orphans already in your vault. Search and the graph work with no model at all.
@@ -57,7 +57,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 **Bring documents in.** Slides, case files, papers and mail become notes in the source's own words, not a summary of them.
 
 - `/nucleate Inbox/` takes a folder, a glob or one file (PDF, DOCX, EPUB, PPTX, notebooks). Each file is one transaction, checked against what you already have. Stop it whenever; it resumes.
-- The vault's `+` imports files, a whole folder or a link into `Inbox/` with no chat turn; a YouTube link gives the video's transcript, and `/fetch <url>` does the same from the chat. A file dropped on the chat stays that chat's until you press "add to vault".
+- The vault's `+` imports files or a whole folder at the top of the vault, as they are, and a link into `Inbox/`, with no chat turn; move a folder into `Inbox/` and `/nucleate` it when you want it rewritten as notes. A YouTube link gives the video's transcript, and `/fetch <url>` does the same from the chat. A file dropped on the chat stays that chat's until you press "add to vault".
 - A long document is split at its headings into parts of at most 40,000 characters. A PDF page with no text, or with formulas its text layer loses, is read from its image by the model, up to 60 pages a file.
 - A note keeps its source's DOI, arXiv id, authors and title, so it can be cited without reopening the document. With Zotero linked, a paper's note opens under its byline, with links to Zotero, the PDF and the DOI.
 - `/mail import` keeps only the threads you took part in, from a mail client's export or Google Takeout, and writes nothing until `--apply`.
@@ -97,9 +97,9 @@ Silica is single-user: one person, one vault. There are no per-person permission
   <br/>
   <sub>One note in its reading order: what to read first, and what it unlocks.</sub>
 
-- On the graph, a click makes a note the centre of its own map. In 2D the areas can be drawn as blobs, one ribbon standing for the links between two of them, and the semantic zones, notes grouped by meaning rather than by links, as outlines over them.
+- On the graph, a click makes a note the centre of its own map. In 2D the areas are an atlas: each note owns the ground nearest it, and zooming in names the sub-areas, then the notes.
 - In Explore, Folders shades each folder by how much it mixes areas. Areas shows one area and the links to its neighbours over the coupling of every pair, each link with the sentence that carries it. Read gives the whole vault a reading order from its hubs.
-- Compare one folder, area or zone with another: the panel says what characterises each and quotes the links that join them.
+- Compare one folder or area with another: the panel says what characterises each and quotes the links that join them.
 - Click a concept to light the notes that treat it; a second concept narrows them to the notes that treat both, and the panel quotes the lines.
 
 <p align="center">
@@ -217,7 +217,7 @@ Coding agents (Claude Code, Codex, any MCP client) use [silica-core](https://git
 | `/trash [restore <path> | erase <path> | empty]` | the notes deleted from this vault: bring one back, or delete for good |
 | `/review [--flush=HASH]` | inspect the async review queue (deferred ops) |
 | `/anneal [--steer] [--limit=N]` | retry every deferred bundle against the current vault; --steer escalates what still fails |
-| `/revert [run-id | --source <file>]` | revert a whole injection (per-run, LIFO), or every run derived from one source |
+| `/revert [run-id | --source <file>]` | revert a whole run (bare: the newest; or the RUN id /status prints, whole or its first characters), or every run derived from one source |
 | `/zotero [file|group|unlink|grant] [--apply|--yes]` | the linked Zotero library: status, file the inbox, write groups, unlink |
 | `/mail [import <file.mbox|file.eml> [--label=X] [--me=ADDR] [--all] [--limit=N] [--apply]]` | mail threads you took part in, from a file you exported (a client's export or Google Takeout), kept as notes under `sources/mail/`; a dry run until `--apply`; bare, your addresses and imports so far |
 | `/connect [list|add <json>|secure <key>|login <key>|logout <key>|remove <key>|reload]` | MCP servers Silica connects to, from `~/.silica/mcp.json` in Claude Code's shape: list them, add a pasted entry, move an inline secret to the keyring, log in to an HTTP server; each server is one loadable tool and every call it makes asks first |
@@ -267,7 +267,7 @@ git clone https://github.com/kiycoh/silica-agent && cd silica-agent
 SILICA_VAULT_HOST=~/notes docker compose up -d gui   # http://localhost:8765; your OPENROUTER_API_KEY passes through
 ```
 
-**Extras**, combined like `"silica-agent[gui,mcp]"`: `gui` (web GUI), `mcp` (MCP client for `/connect`), `connect` (Obsidian bridge), `rerank` (local cross-encoder, pulls torch), `stt` (local dictation), `all`. Scanned PDFs need OCR through [MinerU](https://github.com/opendatalab/MinerU), installed separately: `pip install 'mineru[pipeline]'`, then `SILICA_PDF_PROVIDER=mineru`.
+**Extras**, combined like `"silica-agent[gui,mcp]"`: `gui` (web GUI), `mcp` (MCP client for `/connect`), `connect` (Obsidian bridge), `rerank` (local cross-encoder, pulls torch), `stt` (local dictation), `all`. Scanned PDFs need OCR through [MinerU](https://github.com/opendatalab/MinerU), installed separately: `pip install 'mineru[full]'`, then `SILICA_PDF_PROVIDER=mineru`.
 
 **Configuration** lives in `~/.silica/.env`, written by `silica init`; every variable and its default is in [`.env.example`](https://github.com/kiycoh/silica-agent/blob/main/.env.example). `silica doctor --live` checks the whole setup with one real request.
 

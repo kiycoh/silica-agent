@@ -3131,8 +3131,8 @@ async def redo_turn(payload: dict | None = None):
 async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = Form([]),
                        last: str = Form(""), workspace: str = Form(""), obsidian: str = Form("")):
     """The vault's `+` (ADR-0098 point 5): files, or a folder's files with
-    their relative paths, into the Inbox, each through its lane, with no agent
-    turn. One result per file; one file's failure never stops the others (H4).
+    their relative paths, at the top of the vault, each through its lane, with
+    no agent turn. One result per file; one file's failure never stops the others (H4).
 
     `paths[i]` is the folder-relative path of `files[i]` (`webkitRelativePath`),
     "" for a file picked on its own. `last` marks the page's final batch, after
@@ -3400,7 +3400,7 @@ def workspaces_membership(path: str, folder: bool = False):
 async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list[dict], set[str]]:
     from silica.config import hosted
     from silica.kernel.recall.paths import ignore_matcher
-    from silica.kernel.vault_manifest import active_write_dir, get_active_manifest, resolve_inbox_dir
+    from silica.kernel.vault_manifest import _UNRESOLVABLE_WRITE_DIR, active_write_dir, get_active_manifest
     from silica.sources import pdf_extract
     from silica.sources.media_admission import MediaRefused
     from silica.sources.registry import adapter_for, stage
@@ -3409,9 +3409,17 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
 
     on_server = hosted()
     vault = Path(CONFIG.vault_path or ".")
-    inbox_rel = resolve_inbox_dir(str(vault), active_write_dir(), CONFIG.inbox_dir or "Inbox")
-    inbox = vault / inbox_rel
-    inbox.mkdir(parents=True, exist_ok=True)
+    # At the top of the vault, or of the folder writes are confined to: what the
+    # + brings is the person's own material, used as it is, and moving a folder
+    # into the Inbox is how they ask for it to be nucleated (owner, 2026-11-02,
+    # amending ADR-0098 point 4, which put every import in the Inbox).
+    root_rel = active_write_dir().strip("/")
+    if root_rel == _UNRESOLVABLE_WRITE_DIR:
+        # The sentinel is a hidden folder the index never reads: an import
+        # there would be files no question can reach, so it is refused.
+        raise HTTPException(409, "the vault's write folder cannot be found: fix write_dir in vault.yaml first")
+    root = vault / root_rel if root_rel else vault
+    root.mkdir(parents=True, exist_ok=True)
     allowed = set(vi.importable_extensions(on_server))
     ignore = ignore_matcher(vault)
     enabled = get_active_manifest().sources
@@ -3424,7 +3432,7 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
         checked = False  # written, and its bytes are what its extension says
         try:
             # A file picked on its own keeps its name only, as a drop does; a
-            # folder's file keeps the folder's tree under the Inbox (point 4).
+            # folder's file keeps the folder's tree (point 4).
             rel = vi.clean_rel(given or Path(f.filename or "").name)
             suffix = rel.suffix.lower()
             if vi.skipped(rel, ignore):
@@ -3437,10 +3445,10 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
                 # The index reads .md only: plain text comes in as the note it
                 # already is, not as a file no question can reach.
                 rel = rel.with_suffix(".md")
-            dest = vi.numbered(inbox / rel)
+            dest = vi.numbered(root / rel)
             dest.parent.mkdir(parents=True, exist_ok=True)
-            if not dest.parent.resolve().is_relative_to(inbox.resolve()):
-                raise vi.Refused("its folder leads outside the inbox")
+            if not dest.parent.resolve().is_relative_to(root.resolve()):
+                raise vi.Refused("its folder leads outside the vault")
             dest_rel = dest.relative_to(vault).as_posix()
             if suffix in (".md", ".txt"):
                 # A note goes in through the driver, so the index knows it at
@@ -3474,10 +3482,14 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
             checked = True
             row["path"] = dest_rel
             top = rel.parts[0] if len(rel.parts) > 1 else ""
-            folders.add(f"{inbox_rel}/{top}" if top else inbox_rel)
+            # A file picked alone at the top of a whole-vault boundary names no
+            # folder: "" would embed the entire vault, the notes still waiting
+            # on their vectors included, so the search's own sweep catches it up.
+            if folder := "/".join(x for x in (root_rel, top) if x):
+                folders.add(folder)
             if suffix not in (".md", ".txt"):
                 attached = await asyncio.to_thread(vi.attach, dest, vault, waiting or {})
-                if attached:  # the file its notes lost, back beside them: nothing to convert
+                if attached:  # the file its notes lost, brought back: nothing to convert
                     row.update(status="note", notes=attached, attached=True)
                     continue
             adapter = adapter_for(dest_rel, enabled=enabled)
@@ -3492,7 +3504,7 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
                 row.update(status="note", notes=[staged["note_path"]])
             else:
                 raise vi.Refused(staged.get("message") or "no lane could read it")
-        except HTTPException as exc:  # the size cap, or a link in the Inbox: authored above
+        except HTTPException as exc:  # the size cap, or a symlink in the way: authored above
             row.update(status="refused", reason=exc.detail)
         except (vi.Refused, pdf_extract.PdfUnreadable, MediaRefused) as exc:
             # Sentences written for the student (vault_import, pdf_extract,
@@ -7291,7 +7303,8 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 def serve(port: int = 8765) -> None:
-    """Apply config, open the browser on startup, then block on uvicorn."""
+    """Apply config, print the address, then block on uvicorn. No browser is
+    opened: the person opens the address the banner prints."""
     import uvicorn
 
     from silica.ui.banner import print_banner

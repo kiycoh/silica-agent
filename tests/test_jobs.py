@@ -370,7 +370,7 @@ def test_retry_refuses_a_file_that_is_gone_or_changed(client):
     _inbox().mkdir(parents=True, exist_ok=True)
     _write(_rec("a" * 12, "failed"))
     r = tc.post(f"/jobs/{'a' * 12}/retry")
-    assert r.status_code == 409 and "no longer in the Inbox" in r.json()["detail"]
+    assert r.status_code == 409 and "no longer where it was added" in r.json()["detail"]
     assert tc.get("/jobs").json()["jobs"][0]["retry"] is False
 
     (_inbox() / "a.mp3").write_bytes(b"other bytes")
@@ -595,11 +595,14 @@ def test_an_imported_pdf_converts_as_a_job_and_the_server_keeps_it_as_the_raw(cl
     r = tc.post("/vault/import", files=[("files", ("paper.pdf", pdf_bytes(["The full text of the paper, long enough to be a page."]), "application/pdf"))],
                 data={"paths": [""], "last": "1"})
     (row,) = r.json()["files"]
-    assert row["status"] == "queued" and row["path"] == "Inbox/paper.pdf"
+    # The + brings files to the top of the vault, and a converted one's note
+    # sits beside it there, not in the inbox.
+    assert row["status"] == "queued" and row["path"] == "paper.pdf"
     _drain()
     rec = _record(row["job"])
-    assert rec["state"] == "done" and rec["notes"] == ["Inbox/paper.md"]
-    assert (_inbox() / "paper.pdf").exists() and (_inbox() / "paper.md").exists()
+    assert rec["state"] == "done" and rec["notes"] == ["paper.md"]
+    vault = _inbox().parent
+    assert (vault / "paper.pdf").exists() and (vault / "paper.md").exists()
 
 
 def test_convert_typed_in_the_chat_is_a_job(client):

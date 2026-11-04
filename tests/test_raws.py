@@ -159,7 +159,9 @@ def test_the_same_file_brought_in_again_is_attached_to_its_notes_and_not_convert
     assert gone["kept"] is False and gone["gone"] == "removed" and gone["again"] is True
     assert row["status"] == "note" and row["attached"] is True and "job" not in row
     assert row["notes"] == sorted(parts)
-    assert [_fm(vault / p)["source_file"] for p in sorted(parts)] == ["Inbox/survey.pdf"] * 3
+    # the + puts it at the top of the vault (owner, 2026-11-02), where its notes now find it
+    assert [_fm(vault / p)["source_file"] for p in sorted(parts)] == ["survey.pdf"] * 3
+    assert (vault / "survey.pdf").is_file()
     assert back["kept"] is True and (back["from"], back["to"]) == (2, 3)
     assert not (vault / "Inbox/survey.md").exists()  # attached, not converted: no parent written
 
