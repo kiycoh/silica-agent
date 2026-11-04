@@ -4635,11 +4635,12 @@ def _raw_of(canon: str, props: dict | None) -> dict | None:
         out["again"] = bool(props.get("source_sha256"))
     else:
         # its place in the vault, which the rail marks while the drawer shows it
-        out["path"] = found.relative_to(vault).as_posix()
+        path = found.relative_to(vault).as_posix()
+        out["path"] = path
         if props.get("document"):
             from silica.kernel import raws
 
-            out["parts"] = max(0, len(raws.index(vault).get(out["path"], [])) - 1)
+            out["parts"] = max(0, len(raws.index(vault).get(path, [])) - 1)
     return out
 
 
