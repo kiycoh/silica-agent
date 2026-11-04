@@ -408,14 +408,24 @@ def silica_semantic_search(query: Annotated[str, Field(description='Free-form qu
     index, embedder offline) degrades to the survivor. For literal text use
     silica_search_context; when the text IS an existing note, prefer
     silica_related. Returns at most k results, best first; verify with
-    silica_read_note before acting.
-
-    `score` is comparable only WITHIN one call: `reranked: true` means
-    cross-encoder relevance, `false` means a raw fusion cosine (a different,
-    much smaller scale). A low score never means "absent" — to decide whether
-    a note exists, use silica_exists or silica_search, not a threshold here.
+    silica_read_note before acting. The last result is not a cut-off: to
+    decide whether a note exists, use silica_exists or silica_search.
     """
-    return {"query": query, **_facade_search(query, k=k, memory=memory, folder=folder)}
+    return _without_score({"query": query, **_facade_search(query, k=k, memory=memory, folder=folder)})
+
+
+def _without_score(out: dict[str, Any]) -> dict[str, Any]:
+    """The payload the model gets: no fused `score`, and no `reranked`, which
+    only said which of two scales that score was on. Seven of nine models in
+    the 2026-11-04 survey refuse a number with no basis beside it, and the
+    owner took it out (docs plans/llm-km-survey-cards.md, C2); the order is
+    the ranking, and `evidence`, `embed` and `cooccur` keep the numbers that
+    name their leg. /find, in the CLI and the web panel, reads
+    _facade_search and keeps the score for the person."""
+    out = {key: v for key, v in out.items() if key != "reranked"}
+    if isinstance(out.get("results"), list):
+        out["results"] = [{key: v for key, v in r.items() if key != "score"} for r in out["results"]]
+    return out
 
 
 @tool(cls="composed")
@@ -679,15 +689,18 @@ def silica_related(note: Annotated[str, Field(description='Note name (wikilink-s
     Use for "what's related to note X" INSTEAD of reading X and
     keyword-searching; for free-form text use silica_semantic_search. Each
     result carries `evidence` (which metric proposed it, with native scores),
-    `cluster`, and `distance` (wikilink hops; null = unreachable). High score +
-    null/large distance = a missing link worth creating; distance 1 = already
-    linked. Verify with silica_read_note before acting.
-
-    `score` follows the silica_semantic_search contract: comparable only
-    WITHIN one call — `reranked: true` means cross-encoder relevance, `false`
-    means first-stage fusion mass (a much smaller scale). `legs` names which
-    retrieval legs actually ranked; an absent leg is not agreement.
+    `cluster`, and `distance` (wikilink hops; null = unreachable). A top
+    result at null/large distance = a missing link worth creating; distance
+    1 = already linked. Verify with silica_read_note before acting. `legs`
+    names which retrieval legs actually ranked; an absent leg is not
+    agreement.
     """
+    return _without_score(_related(note, k, memory))
+
+
+def _related(note: str, k: int = 5, memory: bool = True) -> dict[str, Any]:
+    """silica_related's payload with the fused `score` and `reranked`, for the
+    callers that are not the model: the reranker's contract is tested here."""
     from silica.config import CONFIG
     from silica.driver import DRIVER
     from silica.kernel.recall.cooccurrence import (

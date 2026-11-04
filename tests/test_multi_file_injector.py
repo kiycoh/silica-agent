@@ -499,18 +499,17 @@ class TestT6DirectShortcuts:
         return _ctx()
 
     def test_find_preserves_case(self):
-        """'/find Neural Networks' reaches the tool with original casing."""
+        """'/find Neural Networks' reaches the search with original casing."""
         received_query = []
         from silica.cli import _handle_direct_shortcut
 
-        # mirrors the tool signature, memory included since ADR-0032: a stub
-        # that drops a real parameter dies as a TypeError inside Tool.run,
-        # which swallows it and leaves this asserting on an empty list.
-        def capture_search(query: str, k: int = 5, memory: bool = True, folder: str = ""):
-            received_query.append(query)
-            return {"query": query, "results": []}
+        # /find reads the scored core, not the tool, whose payload drops
+        # `score` for the model (survey card C2); the stub mirrors its signature.
+        def capture_search(text: str, k: int, memory: bool = True, folder: str = ""):
+            received_query.append(text)
+            return {"results": []}
 
-        with self._swap_tool_fn("silica_semantic_search", capture_search):
+        with patch("silica.tools.graph._facade_search", capture_search):
             with patch("silica.cli.CONSOLE"):
                 result = _handle_direct_shortcut("/find Neural Networks", [])
 

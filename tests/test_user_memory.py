@@ -215,3 +215,78 @@ def test_hide_and_show_keep_the_message_in_place(vault):
     um.set_incognito(False)
     assert um.sync_live_snapshot(msgs) is True
     assert "Giulia" in msgs[1]["content"]
+
+
+# --- stamps (survey cards D3 and C7, owner 2026-11-04) ---------------------
+
+def test_an_entry_carries_the_date_it_was_saved_and_who_wrote_it(vault):
+    import datetime
+
+    today = datetime.date.today().isoformat()
+    um.save("vault", "Fee in the Northlight contract is 41,250 NOK", by="chat", session="s1")
+    um.save("vault", "Exam on Friday")
+    snap = um.snapshot()
+    assert f"Fee in the Northlight contract is 41,250 NOK (saved {today})" in snap
+    assert f"Exam on Friday (the user's words, {today})" in snap
+    assert "silica_changes(scope='disk'" in snap  # the frame says how to check one
+    eid = um.entry_id("- Fee in the Northlight contract is 41,250 NOK")
+    assert um.stamps("vault")[eid] == {"at": today, "by": "chat", "session": "s1"}
+    # The stamp is beside the file, not in it: the budget counts the text alone.
+    assert um.read("vault") == "- Fee in the Northlight contract is 41,250 NOK\n- Exam on Friday\n"
+
+
+def test_an_entry_saved_before_stamps_existed_shows_no_date(vault):
+    um.path_for("user").parent.mkdir(parents=True, exist_ok=True)
+    um.path_for("user").write_text("- Name is Giulia\n", encoding="utf-8")
+    assert "- [" in um.snapshot() and "Name is Giulia\n" in um.snapshot() + "\n"
+    assert "(saved" not in um.snapshot()
+
+
+def test_a_quote_copied_with_its_date_still_names_the_entry(vault):
+    import datetime
+
+    today = datetime.date.today().isoformat()
+    um.save("vault", "Exam on Friday", by="chat")
+    assert um.replace("vault", f"Exam on Friday (saved {today})", f"Exam on Monday (saved {today})")["ok"]
+    assert um.read("vault") == "- Exam on Monday\n"  # the date was not saved into the text
+
+
+def test_settings_stamps_what_the_person_typed_and_keeps_the_rest(vault):
+    um.save("vault", "Exam on Friday", by="chat")
+    kept = um.entry_id("- Exam on Friday")
+    um.write_file("vault", "- Exam on Friday\n- Thesis due in March\n")
+    st = um.stamps("vault")
+    assert st[kept]["by"] == "chat"
+    assert st[um.entry_id("- Thesis due in March")]["by"] == "you"
+
+
+def test_undo_brings_an_entry_back_with_its_date_and_reset_erases_the_stamps(vault):
+    um.save("vault", "Exam on Friday", by="chat")
+    eid = um.entry_id("- Exam on Friday")
+    out = um.forget("vault", "Exam on Friday")
+    assert eid in um.stamps("vault")  # the undo level still holds it
+    um.undo("vault", out["token"])
+    assert um.stamps("vault")[eid]["by"] == "chat"
+    um.reset()
+    assert um.stamps("vault") == {}
+
+
+def test_an_entry_read_from_a_note_says_when_that_note_changed(vault):
+    """Survey card C7: the layer compares, so a model that answers from memory
+    without a look still sees that the note behind the figure moved."""
+    note = vault / "Clients" / "Northlight contract.md"
+    note.parent.mkdir()
+    note.write_text("# Northlight\n\nFee: 41,250 NOK.\n", encoding="utf-8")
+    um.save("vault", "Northlight fee is 41,250 NOK", by="chat", sources=["Clients/Northlight contract"])
+    um.save("user", "Name is Giulia", by="chat", sources=["Clients/Northlight contract.md"])
+    assert "changed since, re-read" not in um.snapshot()
+    assert "from" not in um.stamps("user")[um.entry_id("- Name is Giulia")]  # true in every vault
+    note.write_text("# Northlight\n\nFee: 46,800 NOK.\n", encoding="utf-8")
+    snap = um.snapshot()
+    assert "Northlight fee is 41,250 NOK (saved " in snap
+    assert "; Clients/Northlight contract.md changed since, re-read before using this)" in snap
+    note.unlink()
+    assert "Clients/Northlight contract.md changed since" in um.snapshot()  # gone reads as changed
+    # A quote copied with the longer tail still names the entry.
+    tail = snap.split("Northlight fee is 41,250 NOK", 1)[1].split("\n", 1)[0]
+    assert um.forget("vault", "Northlight fee is 41,250 NOK" + tail)["ok"]

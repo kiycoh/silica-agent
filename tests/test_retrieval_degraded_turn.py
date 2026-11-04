@@ -388,7 +388,9 @@ def _reload_holds(gui, turns) -> None:
 def test_both_endpoints_running_marks_nothing(gui):
     turns = run_turns(gui, _plans())
     assert _unmarked(turns) == NONE
-    assert sum(t.result.get("reranked", True) is True for t in turns) == TURNS
+    # The model gets no `reranked` flag and no score (survey card C2): the
+    # rerank status is tested on the core in test_related_evidence.py.
+    assert not any("reranked" in t.result for t in turns)
 
 
 def test_embedder_stopped(gui, rig):
@@ -429,9 +431,7 @@ def test_reranker_answering_half_the_indices(gui, rig):
     rig.rerank.half = True
     turns = run_turns(gui, _plans())
     assert _tally(turns, "rerank", "failed") == ALL
-    # The fused order stands: nothing was reranked on padded zeros.
-    assert sum(t.result.get("reranked", False) is False for t in turns
-               if "results" in t.result) == TURNS // 2
+    assert not any("score" in r for t in turns for r in t.result.get("results", []))
     _reload_holds(gui, turns)
 
 

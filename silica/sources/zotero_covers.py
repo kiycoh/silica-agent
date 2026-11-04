@@ -176,14 +176,16 @@ def _search(query: str, k: int) -> list[str]:
     pool of long notes as well as on a reranker that is down."""
     from silica.agent.providers import get_embedder
     from silica.config import CONFIG
-    from silica.tools import TOOLS
+    from silica.tools.graph import _facade_search
 
     try:
         get_embedder(CONFIG).embed([query], query=True)
     except Exception as exc:
         raise RuntimeError(f"the embedder stopped answering ({exc}); a pass on co-occurrence "
                            "alone is not the measured search") from exc
-    res = json.loads(TOOLS["silica_semantic_search"].run(query=query, k=k, memory=False))
+    # The core, not the tool: the tool drops `reranked` for the model
+    # (graph._without_score), and the unreranked count below reads it.
+    res = _facade_search(query, k=k, memory=False)
     if "error" in res:
         raise RuntimeError(res["error"])
     if not res.get("reranked"):

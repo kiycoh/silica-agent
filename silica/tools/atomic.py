@@ -548,6 +548,51 @@ def _literal_search(query: str, folder: str, k: int) -> dict:
     return out
 
 
+def _note_states(hits: list[dict]) -> None:
+    """Put on each passage hit when its file last changed, and who wrote the
+    note and what state it is in, in place: `modified` always, `trust` when
+    the note is not a person's, `lifecycle` when it is not active, and the
+    note that replaced a superseded one. The same signals silica_recall's
+    headers carry, omitted at the same defaults (perception.render), and the
+    ones it filters on: a passage hit had none of them, so a superseded
+    decision outranking its successor read as the position (survey card C2,
+    docs plans/llm-km-survey-cards.md). One read per note, at most k of them.
+
+    A `sources/` copy and a PDF get `modified` only: a verbatim document is
+    the document, and the tiers are about the notes made from it."""
+    from datetime import date
+
+    from silica.kernel.recall.paths import is_source_leaf
+    from silica.kernel.write import frontmatter
+    from silica.kernel.write.contested import SUPERSEDED_BY_KEY, lifecycle, trust
+
+    root = _engine()._root()
+    seen: dict[str, dict] = {}
+    # shortcut: the whole note is read for its frontmatter and its Sources
+    # marker; 8 hits on 5.1 MB converted sidecars took 97 ms (2026-11-04).
+    # Read the head and stat for the marker if a search is seen past 300 ms.
+    for hit in hits:
+        path = hit.get("path") or ""
+        if path not in seen:
+            state: dict = {}
+            full = root / path
+            try:
+                state["modified"] = date.fromtimestamp(full.stat().st_mtime).isoformat()
+                if path.endswith(".md") and not is_source_leaf(path):
+                    content = full.read_text(encoding="utf-8", errors="replace")
+                    data = frontmatter.split(content)[0] or {}
+                    if (who := trust(content)) != "human":
+                        state["trust"] = who
+                    if (life := lifecycle(data)) != "active":
+                        state["lifecycle"] = life
+                    if life == "superseded":
+                        state["superseded_by"] = str(data.get(SUPERSEDED_BY_KEY))
+            except OSError:
+                pass  # gone or unreadable since the index read it: the hit stands without the fields
+            seen[path] = state
+        hit.update(seen[path])
+
+
 @tool(cls="atomic")
 def silica_search_context(
     query: Annotated[str, Field(description='Words to look for inside note bodies; the vault vocabulary, not a question')],
@@ -571,6 +616,9 @@ def silica_search_context(
     layer, an office file never converted, a failed read) and names up to
     10: a miss there has not shown the vault is silent, so name the files
     you could not read instead of saying the documents do not say it.
+    `modified` is the file's last change; `trust` (an agent's note) and
+    `lifecycle` (not active) appear only when they apply: cite a superseded
+    hit's `superseded_by` as the current position, not the hit.
 
     Use silica_recall when the wording is unknown, silica_search to
     match note titles.
@@ -581,6 +629,7 @@ def silica_search_context(
     if literal:
         lit = _literal_search(query, folder, k)
         if "error" not in lit:
+            _note_states(lit["hits"])
             from silica.tools.user_memory import returned_notes
 
             returned_notes(h["path"] for h in lit["hits"])  # the taint gate (ADR-0090 point 8)
@@ -614,11 +663,12 @@ def silica_search_context(
         # path-native (it also serves PDFs, which have no wikilink name).
         hit = {"name": Path(h["path"]).stem, "path": h["path"], "line": h["line"],
                "section": h["section"], "snippet": h["window"],
-               "version": h["version"], "score": h["score"],
+               "version": h["version"],
                "matched_terms": h["matched_terms"], "coverage": h["coverage"]}
         if stale_map and codedocs and (lvl := codedocs.peek_level(stale_map, h["path"])):
             hit["stale"] = lvl
         hits.append(hit)
+    _note_states(hits)
 
     from silica.tools.user_memory import returned_notes
 
@@ -1865,18 +1915,63 @@ def silica_doctor(live: Annotated[bool, Field(description='Also run one tiny PAI
     return checks.report_payload(results)
 
 
+# ponytail: a full stat walk per call, 3,202 files in about 0.03 s on
+# alex_second_brain (the _unreadable measure, 2026-11-04); key a cache on the
+# walk's newest directory mtime if a vault past 20k files calls it per turn.
+def _disk_changes(cut: float) -> list[dict]:
+    """Files under the vault modified after `cut` (epoch seconds), newest
+    first, through silica-core's walk so the ignore rules and the hidden
+    folders are the index's own. From the disk and not the index stamps: a
+    search rebuilds the index, so the stamps of the last build would already
+    hold the edit a remembered claim missed (survey card C4)."""
+    import datetime
+
+    from silica.kernel.workspaces import in_scope
+
+    rows: list[tuple[float, str]] = []
+    for rel, full in _engine()._walk():
+        if full is None or not in_scope(rel):
+            continue
+        try:
+            mtime = full.stat().st_mtime
+        except OSError:
+            continue  # gone between the walk and the stat: a deletion, which this lists none of
+        if mtime > cut:
+            rows.append((mtime, rel))
+    rows.sort(reverse=True)
+    return [{"path": rel, "modified": datetime.datetime.fromtimestamp(t).isoformat(timespec="seconds")}
+            for t, rel in rows]
+
+
 @tool(cls="atomic")
-def silica_changes(scope: Annotated[str, Field(description="'session' = this process (default); 'vault' = every session on this vault, rows with session/ts/mine")] = "session", since: Annotated[str, Field(description='vault scope: ISO-8601; only rows first touched after it (pass the last `ts` you saw)')] = "", limit: Annotated[int, Field(description='vault scope: newest rows kept')] = 200) -> dict:
+def silica_changes(scope: Annotated[str, Field(description="'session' = this process (default); 'vault' = every session on this vault, rows with session/ts/mine; 'disk' = every file changed on disk after `since`, outside edits included")] = "session", since: Annotated[str, Field(description='vault and disk scopes: ISO-8601; only rows first touched after it (pass the last `ts` you saw)')] = "", limit: Annotated[int, Field(description='vault and disk scopes: newest rows kept')] = 200) -> dict:
     """What changed in the vault: path, created/modified/moved/deleted, lines
     added/removed, measured against the file as it is now (an /undo empties
     its row). scope='session' is this process; scope='vault' is every
     session's ledger on this vault, so another client or a pipeline shows up
-    with `session`, `ts`, `mine`; poll with `since`.
+    with `session`, `ts`, `mine`; poll with `since`. scope='disk' lists the
+    files whose content changed after `since`, `by` silica or outside it
+    (an editor, a sync, a copy): re-read one before repeating what memory or
+    an earlier answer says it holds. Deleted files are not listed.
     """
     import datetime
 
     from silica.kernel.write import session_changes
 
+    if scope == "disk":
+        try:
+            after = datetime.datetime.fromisoformat(since.strip()).timestamp()
+        except ValueError:
+            return {"error": f"disk scope needs since as ISO-8601, got {since!r}",
+                    "scope": scope, "total": 0, "changes": []}
+        rows = _disk_changes(after)
+        ours = {r["path"] for r in session_changes.history(since=after, limit=10_000)}
+        for r in rows:
+            r["by"] = "silica" if r["path"] in ours else "outside"
+        out: dict = {"scope": "disk", "since": since.strip(), "total": len(rows), "changes": rows[:max(1, limit)]}
+        if len(rows) > limit:
+            out["truncated"] = f"{len(rows)} files changed; showing the {limit} newest"
+        return out
     if scope == "vault":
         cut = None
         if since.strip():
@@ -1893,7 +1988,7 @@ def silica_changes(scope: Annotated[str, Field(description="'session' = this pro
         return {"scope": "vault", "session": session_changes.SESSION,
                 "total": len(rows), "changes": rows}
     if scope != "session":
-        return {"error": f"scope must be 'session' or 'vault', got {scope!r}",
+        return {"error": f"scope must be 'session', 'vault' or 'disk', got {scope!r}",
                 "scope": scope, "total": 0, "changes": []}
     rows = session_changes.rows()
     return {"scope": "session", "total": len(rows), "changes": rows}

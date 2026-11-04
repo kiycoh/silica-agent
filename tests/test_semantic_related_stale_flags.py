@@ -48,8 +48,10 @@ def test_semantic_search_flags_stale_results(monkeypatch):
 def test_semantic_search_fresh_vault_payload_unchanged(monkeypatch):
     _patch_retrieve(monkeypatch, [_r("wiki/m")])
     monkeypatch.setattr(codedocs, "peek", lambda v: {})
-    assert set(graph.silica_semantic_search("q")["results"][0]) == {
-        "path", "name", "score"}
+    out = graph.silica_semantic_search("q")
+    # No `score` and no `reranked`: the model reads the order (survey card C2).
+    assert set(out["results"][0]) == {"path", "name"} and "reranked" not in out
+    assert "score" in graph._facade_search("q", k=5)["results"][0]  # /find still shows it
 
 
 def test_peek_failure_never_fails_the_search(monkeypatch):

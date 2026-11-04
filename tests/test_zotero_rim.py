@@ -147,7 +147,7 @@ def test_the_search_is_this_vaults_alone(monkeypatch):
 
     monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: Up())
 
-    def facade(query, k, memory, folder):
+    def facade(query, k, memory=True, folder=""):
         seen.update(k=k, memory=memory)
         return {"results": [{"path": "N1.md"}]}
 
