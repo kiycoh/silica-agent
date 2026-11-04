@@ -152,3 +152,27 @@ def test_tool_vault_scope_reads_the_persisted_ledger(tmp_path, monkeypatch):
     out = silica_changes(scope="vault")
     assert out["scope"] == "vault" and out["total"] == 1
     assert out["changes"][0]["path"] == "n.md" and out["changes"][0]["mine"] is True
+
+
+def test_disk_scope_lists_outside_edits_and_marks_silica_writes(tmp_path, monkeypatch):
+    """A remembered claim about a file edited outside Silica since has no
+    ledger row; the disk scope lists it from the file's own date (survey card C4)."""
+    import datetime
+    import os
+
+    from silica.tools.atomic import silica_changes
+
+    a = _vault(tmp_path, "a")
+    monkeypatch.setattr(CONFIG, "vault_path", str(a))
+    for rel in ("old.md", "edited.md", "written.md", ".hidden/x.md"):
+        _note(a, rel, rel)
+        os.utime(a / rel, (1_700_000_000, 1_700_000_000))  # 2023-11-14
+    since = datetime.datetime.fromtimestamp(1_750_000_000).isoformat()  # 2025-06-15
+    _note(a, "edited.md", "changed in an editor")
+    _note(a, "written.md", "changed by silica")
+    session_changes.touched("written.md", "written.md")
+
+    out = silica_changes(scope="disk", since=since)
+    assert out["scope"] == "disk"
+    assert {r["path"]: r["by"] for r in out["changes"]} == {"edited.md": "outside", "written.md": "silica"}
+    assert "error" in silica_changes(scope="disk")  # a disk read needs its since
