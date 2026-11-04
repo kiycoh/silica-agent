@@ -41,3 +41,18 @@ def test_the_literal_scan_names_it_too(vault):
 def test_a_folder_holding_none_carries_no_field(vault):
     out = atomic.silica_search_context("rate card", folder="Notes")
     assert "unreadable" not in out
+
+
+def test_a_raw_its_notes_hold_the_text_of_is_not_named(vault):
+    """An office file brought in again and attached to its notes (ADR-0129,
+    amended 2026-11-04) has no sidecar beside it: its parts name it."""
+    from pathlib import Path
+
+    root = Path(CONFIG.vault_path)
+    data = (root / "Contracts/rate-card.docx").read_bytes()
+    (root / "Contracts/rate-card").mkdir()
+    (root / "Contracts/rate-card/rate-card-1-fees.md").write_text(
+        f'---\nsource_file: "Contracts/rate-card.docx"\nsource_bytes: {len(data)}\n---\n\n'
+        "## Fees\n\nThe rate card was revised.\n", encoding="utf-8")
+
+    assert "unreadable" not in atomic.silica_search_context("rate card")

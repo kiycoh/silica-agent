@@ -313,6 +313,14 @@ def _unreadable(folder: str) -> dict | None:
                     paths.append(rel)
             except OSError:
                 continue  # gone between the walk and the stat: not a file to report
+    if paths:
+        # A raw its notes hold the text of is read, through them: one brought
+        # in again and attached by sha256 has no sidecar beside it, its parts
+        # sit in the folder named after it (ADR-0129, amended 2026-11-04).
+        from silica.kernel import raws
+
+        held = raws.index(root)
+        paths = [p for p in paths if p not in held]
     if not paths:
         return None
     return {"count": len(paths), "paths": paths[:_UNREADABLE_SHOWN]}
