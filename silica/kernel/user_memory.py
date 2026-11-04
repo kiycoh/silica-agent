@@ -419,9 +419,15 @@ def view(vault: str | None = None) -> dict:
     for scope in SCOPES:
         path = path_for(scope, vault)
         text = _read(path)
+        held = stamps(scope, vault)
+        # By the entry's text and not its line: the editor matches them again
+        # as the person types, and an entry they change is undated until saved.
+        dates = [{"text": e, "at": st["at"], "by": st["by"]} for e in entries(text)
+                 if (st := held.get(entry_id(e))) and st.get("at") and st.get("by") in _BY]
         scopes[scope] = {"path": str(path) if path else "", "text": text,
                          "chars": len(text), "budget": budget(scope),
-                         "entries": len(entries(text)), "available": path is not None}
+                         "entries": len(entries(text)), "available": path is not None,
+                         "dates": dates}
     return {"paused": not CONFIG.user_memory, "incognito": _INCOGNITO, "scopes": scopes}
 
 
