@@ -117,11 +117,17 @@ def named(vault: Path) -> Iterator[tuple[str, dict]]:
 
 def index(vault: Path) -> dict[str, list[str]]:
     """{a raw's vault path: the notes naming it} for every raw in the vault,
-    the document's parent note first, then the parts in their order."""
+    the document's parent note first, then the parts in their order, and
+    the archive's copies last: the rail opens the first, and a part filed in
+    done/ by /nucleate is the older copy of one still in the inbox."""
+    from silica.kernel.vault_manifest import active_done_dir
+
     root = vault.resolve()
-    out: dict[str, list[tuple[bool, str]]] = {}
+    done = (active_done_dir() or "").strip("/") + "/"
+    out: dict[str, list[tuple[bool, bool, str]]] = {}
     for note, f in named(root):
         found = resolve(f["source_file"], note, root)
         if kept(found, f):
-            out.setdefault(found.relative_to(root).as_posix(), []).append((not f.get("document"), note))
-    return {raw: [n for _, n in sorted(rows)] for raw, rows in out.items()}
+            out.setdefault(found.relative_to(root).as_posix(), []).append(
+                (not f.get("document"), done != "/" and note.startswith(done), note))
+    return {raw: [n for *_, n in sorted(rows)] for raw, rows in out.items()}

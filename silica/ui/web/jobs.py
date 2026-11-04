@@ -476,7 +476,7 @@ def dismiss(job_id: str) -> None:
         _path(job_id).unlink(missing_ok=True)
         _publish(rec)  # the record is gone; every other open tab drops its row too
     if hosted() and rec.get("origin") == "import" and rec.get("vault") == (CONFIG.vault_path or ""):
-        _remove_source(rec)  # point 7: an interrupted import's file goes with it
+        _remove_source(rec)  # an import that did not convert is no raw (ADR-0129 point 1): it goes with its row
 
 
 def _drop_of(rec: dict) -> list[dict]:

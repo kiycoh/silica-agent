@@ -91,14 +91,17 @@ def test_a_part_opens_its_pdf_and_the_route_serves_it_under_the_asset_headers(cl
     assert client.get("/note/raw", params={"path": "Inbox/survey.md"}).json()["raw"]["parts"] == 3
 
 
-def test_a_raw_outside_the_vault_is_offered_nowhere_and_the_route_refuses_it(client, tmp_path):
+def test_a_raw_outside_the_vault_or_in_a_chat_is_offered_nowhere_and_the_route_refuses_it(client, tmp_path):
     outside = tmp_path / "elsewhere.pdf"
     outside.write_bytes(pdf_bytes(["x"]))
     vault = Path(CONFIG.vault_path)
-    for name, value in (("far.md", str(outside)), ("up.md", "../elsewhere.pdf"), ("own.md", "far.md")):
+    (vault / ".silica-chat/s1").mkdir(parents=True)
+    (vault / ".silica-chat/s1/drop.pdf").write_bytes(pdf_bytes(["x"]))
+    for name, value in (("far.md", str(outside)), ("up.md", "../elsewhere.pdf"), ("own.md", "far.md"),
+                        ("drop.md", ".silica-chat/s1/drop.pdf")):
         (vault / name).write_text(f'---\nsource_file: "{value}"\n---\n\ntext\n', encoding="utf-8")
 
-    for name in ("far.md", "up.md", "own.md"):
+    for name in ("far.md", "up.md", "own.md", "drop.md"):
         assert "raw" not in client.get("/note/raw", params={"path": name}).json()
         assert client.get("/raw", params={"path": name}).status_code == 404
 

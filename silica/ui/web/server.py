@@ -4584,6 +4584,11 @@ def _raw_of(canon: str, props: dict | None) -> dict | None:
     named = value.strip().replace("\\", "/")
     if found is None and "/" in named and not (vault / named).resolve().is_relative_to(vault):
         return None  # a path out of the vault: an absolute one joins as itself
+    # A chat drop's file sits in its chat's dot-folder (ADR-0121 point 5), which
+    # /raw never serves: the strip would call a file that is there lost.
+    if found is None and any(part.startswith(".") for part in (
+            *Path(canon).parts, *(vault / named).resolve().relative_to(vault).parts[:-1])):
+        return None
     ints = {k: props[k] for k in ("source_pages", "source_page", "source_page_end")
             if isinstance(props.get(k), int) and props[k] > 0}
     out = {"name": name, "kept": found is not None,
