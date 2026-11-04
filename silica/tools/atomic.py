@@ -279,16 +279,28 @@ def _unreadable(folder: str) -> dict | None:
     folder is silent: the answer can sit in what was never read (survey card
     C1, docs plans/llm-km-survey-cards.md).
     """
-    try:
-        core = _engine()
-        from silica_core.sources.convert import DOC_EXTS, IMG_EXTS
-
-        load_meta, walk, failures, root = core._load_meta, core._walk, core._failures, core._root()
-    except (ImportError, AttributeError, RuntimeError):
-        return None
     from silica.kernel.workspaces import in_scope
 
     rel_folder = folder.strip().strip("/")
+    try:
+        core = _engine()
+    except RuntimeError:
+        return None
+    if callable(getattr(core, "unreadable", None)):
+        # silica-core names these itself since feat/survey-asks (2026-11-04),
+        # with the same classification its search scope reports.
+        got = core.unreadable(rel_folder)
+        if "error" in got:
+            return None
+        return _unread_outside_raws(Path(got["root"]), [f["path"] for f in got["files"] if in_scope(f["path"])])
+    # shortcut: the private names below serve silica-core 0.11 and older;
+    # delete this branch once pyproject's floor names a release with unreadable().
+    try:
+        from silica_core.sources.convert import DOC_EXTS, IMG_EXTS
+
+        load_meta, walk, failures, root = core._load_meta, core._walk, core._failures, core._root()
+    except (ImportError, AttributeError):
+        return None
     base = root / rel_folder if rel_folder else None
     if base is not None and not base.is_dir():
         return None
@@ -313,6 +325,10 @@ def _unreadable(folder: str) -> dict | None:
                     paths.append(rel)
             except OSError:
                 continue  # gone between the walk and the stat: not a file to report
+    return _unread_outside_raws(root, paths)
+
+
+def _unread_outside_raws(root: Path, paths: list[str]) -> dict | None:
     if paths:
         # A raw its notes hold the text of is read, through them: one brought
         # in again and attached by sha256 has no sidecar beside it, its parts
@@ -1929,7 +1945,9 @@ def _disk_changes(cut: float) -> list[dict]:
     from silica.kernel.workspaces import in_scope
 
     rows: list[tuple[float, str]] = []
-    for rel, full in _engine()._walk():
+    core = _engine()
+    # silica-core's public walk since feat/survey-asks; the private one before it
+    for rel, full in (core.walk() if callable(getattr(core, "walk", None)) else core._walk()):
         if full is None or not in_scope(rel):
             continue
         try:
