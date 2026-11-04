@@ -587,7 +587,8 @@ def test_one_filter_heads_the_list_and_reads_both_lists():
     assert "if (pane === sidePane)" in body
     # one string narrows notes, pinned AND chats: no branch zeroes it
     assert 'sideScope === "notes" ? raw : ""' not in body
-    assert 'querySelectorAll(".session")' in body and 'querySelectorAll(".tree-note")' in body
+    # the notes and, since ADR-0129's amendment of 2026-11-04, the raws beside them
+    assert 'querySelectorAll(".session")' in body and 'querySelectorAll(".tree-note, .tree-file")' in body
 
 
 # --- P20. One composer ---------------------------------------------------------

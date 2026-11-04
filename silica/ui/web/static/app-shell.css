@@ -757,8 +757,8 @@ body.sidebar-collapsed #sidebar {
    fill so the two states stay two. Keyboard focus keeps its outline: a third
    state, drawn a third way. */
 .tree-note.open,
-.tree-file.open,
 .session.active,
+.tree-file.open,
 .tree-note.open:hover,
 .tree-file.open:hover,
 .session.active:hover,
