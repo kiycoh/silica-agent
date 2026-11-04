@@ -306,14 +306,19 @@ def silica_remember(
                          "else kept, they will say so."}
     if action != "forget" and (why := _date_mismatch(text, dt.date.today())):
         return {"error": why}
+    from silica.agent import narration
+
+    # The chat it came from (survey card D3): the date reaches the model, the
+    # session is kept for the person.
+    session = narration.NARRATOR.sid or ""
     if action == "save":
-        out = um.save(scope, text)
+        out = um.save(scope, text, by="chat", session=session)
     else:
         # qwen3.5-9b put the entry to forget in `text` on 3 of 3 forget runs
         # (probe_user_memory, 2026-10-07), and refused, saved the opposite
         # preference instead.
         needle = old or (text if action == "forget" else "")
-        out = _addressed(um, action, scope, needle, text)
+        out = _addressed(um, action, scope, needle, text, session)
     if not out.get("ok"):
         out["error"] = out.get("error", "not saved")
         del out["ok"]   # the loop reads a failure off "error"; ok=False beside it says it twice
@@ -321,13 +326,14 @@ def silica_remember(
     return out
 
 
-def _addressed(um, action: str, scope: str, needle: str, text: str) -> dict:
+def _addressed(um, action: str, scope: str, needle: str, text: str, session: str = "") -> dict:
     """replace/forget in the named file, then in the other one: the model
     names the default scope for an entry the snapshot shows under the other
     (the same 3 of 3 forget runs). A miss in both shows both files' entries,
     so the next call can quote one."""
     def edit(s: str) -> dict:
-        return um.replace(s, needle, text) if action == "replace" else um.forget(s, needle)
+        return (um.replace(s, needle, text, by="chat", session=session) if action == "replace"
+                else um.forget(s, needle))
 
     first = edit(scope)
     if not first.get("miss"):

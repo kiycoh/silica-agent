@@ -1480,7 +1480,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             from silica.cli import remember_text
             from silica.kernel import user_memory
 
-            out = user_memory.save("vault", remember_text(text))
+            out = user_memory.save("vault", remember_text(text), session=_narr.NARRATOR.sid or "")
             answer = user_memory.describe(out)
             messages.append({"role": "user", "content": text, "origin": "cli"})
             _narrate_user_turn(messages[-1])

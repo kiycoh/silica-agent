@@ -2261,7 +2261,9 @@ def _dc_remember(args: list[str], *, raw_input: str = "", **_) -> bool:
     text = remember_text(raw_input)
     if not text:
         return False
-    out = user_memory.save("vault", text)
+    from silica.agent import narration
+
+    out = user_memory.save("vault", text, session=narration.NARRATOR.sid or "")
     if not out["ok"]:
         CONSOLE.print(f"  [yellow]{escape(out['error'])}[/]")
         for entry in out.get("entries") or ():

@@ -58,6 +58,8 @@ def test_an_asked_untainted_save_lands(vault):
     out = _call(action="save", text="Exam on Friday", scope="vault")
     assert out["ok"] and out["token"]
     assert um.read("vault") == "- Exam on Friday\n"
+    # The model's save is stamped as the chat's (survey card D3).
+    assert um.stamps("vault")[um.entry_id("- Exam on Friday")]["by"] == "chat"
 
 
 def test_an_unasked_save_lands(vault):
