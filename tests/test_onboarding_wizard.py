@@ -10,8 +10,16 @@ import pytest
 def _fresh_setup_env(monkeypatch):
     # Importing silica.config preloads ~/.silica/.env (SILICA_MODEL included)
     # into os.environ. These tests simulate fresh setups, where no chat model is
-    # configured yet; the keep-current shortcut has its own test.
+    # configured yet; the keep-current shortcut has its own test. A provider key
+    # left there answers model_from_env() too (OPENROUTER_API_KEY derives a
+    # model), and the wizard then offers to keep it: 19 of these tests failed
+    # on any machine whose ~/.silica/.env holds a key (found 2026-11-04).
+    from silica.config import HOSTED_PROVIDERS
+
     monkeypatch.delenv("SILICA_MODEL", raising=False)
+    monkeypatch.delenv("SILICA_PROVIDER", raising=False)
+    for key_env, _models in HOSTED_PROVIDERS.values():
+        monkeypatch.delenv(key_env, raising=False)
 
 
 class TestMergeEnv:
