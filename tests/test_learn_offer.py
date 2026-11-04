@@ -89,8 +89,14 @@ def test_a_study_plan_asked_of_the_chat_points_at_learn():
     assert o["text"] == "Memorize tracks a plan for this: Esame Machine Learning, by 2026-11-10"
     assert o["commands"] == [{"label": "open it", "href": "#memorize/plan/Plans%2FEsame%20Machine%20Learning.md"},
                              {"label": "continue it", "command": "/memorize"}]
-    assert offer.plan_offer("help me make a study plan", [])["commands"] == [{"label": "write it as a plan", "href": "#memorize/new"}]
+    # no plan open and none computed: the model asks for the material, with no second way in under it
+    assert offer.plan_offer("help me make a study plan", []) is None
     assert offer.plan_offer("cos'è il dropout?", plans) is None
+    # a plan the turn computed is saved by the click, with the body the Memorize form posts
+    draft = {"name": "Esame ML", "scope": "folder", "target": "ML/", "restrict": "", "by": "2026-12-10", "templates": True}
+    o = offer.plan_offer("ML/, esame il 10 dicembre", plans, draft)
+    assert o["text"] == "Memorize can keep this plan, paced to 2026-12-10"
+    assert o["commands"] == [{"label": "save it in Memorize", "save": draft}]
 
 
 
@@ -368,11 +374,87 @@ def test_learn_s_plan_reaches_the_turn_that_needs_it(monkeypatch):
     monkeypatch.setattr(pl, "read_plan", lambda path: plan)
     monkeypatch.setattr(pl, "lecture_gaps", lambda p: (["dropout", "multi-task"], 32))
     rows = [{"path": "Plans/Esame.md", "name": "Esame", "status": "active"}]
-    block, appendix = offer.plan_context("Prepara un piano di studio giorno per giorno fino all'esame", rows)
+    block, appendix, draft = offer.plan_context("Prepara un piano di studio giorno per giorno fino all'esame", rows)
+    assert draft is None   # the message names the open plan: no new one is read
     assert "day-by-day calendar" in block and "do not write a calendar" in block
     assert "The heaviest steps: Basi (1 notes)" in block and "study from the book or the guide: dropout, multi-task" in block
     assert appendix.startswith("Calendar computed by Memorize from the plan Esame") and "| Day | Step | Notes |" in appendix
-    block, appendix = offer.plan_context("quali argomenti del programma non compaiono nelle slide delle lezioni?", rows)
+    block, appendix, _ = offer.plan_context("quali argomenti del programma non compaiono nelle slide delle lezioni?", rows)
     assert "dropout, multi-task" in block and "32 lecture decks" in block and appendix == ""
-    assert offer.plan_context("cos'è il dropout?", rows) == ("", "")
-    assert offer.plan_context("piano di studio per domani", [{**rows[0], "status": "completed"}]) == ("", "")
+    assert offer.plan_context("cos'è il dropout?", rows) == ("", "", None)
+    # no plan open and no material named: the model asks for it and writes no plan
+    monkeypatch.setattr(pl, "read_sentence", lambda s: {"name": "", "scope": "", "target": ""})
+    monkeypatch.setattr(pl, "folders_of", lambda: {"ML/": 30, "ML/Deep/": 6, "Plans/": 2})
+    block, appendix, draft = offer.plan_context("piano di studio per domani", [{**rows[0], "status": "completed"}])
+    assert "Ask in one short question" in block and "Do not write a plan" in block
+    assert "largest folders: ML/, ML/Deep/." in block and appendix == "" and draft is None
+
+
+def test_the_reply_to_the_question_for_the_material_is_read_with_the_request():
+    """The second turn ("ML/, esame il 10 dicembre") says no "piano di studio":
+    it is read with the request it answers, for one turn only."""
+    ask = "Su quale cartella o syllabus lo costruisco, e per quando?"
+    assert offer.plan_request("fammi un piano di studio", "", "") == "fammi un piano di studio"
+    assert offer.plan_request("ML/, il 10 dicembre", "fammi un piano di studio", ask) == "fammi un piano di studio\nML/, il 10 dicembre"
+    # the turn before showed a plan: a question on its material is not a plan again
+    shown = "Riassunto.\n\nPlan computed by Memorize from ML/, by 2026-12-10, not saved yet:"
+    assert offer.plan_request("cos'è il dropout?", "fammi un piano di studio", shown) == ""
+    assert offer.plan_request("cos'è il dropout?", "cos'è una SVM?", "Una SVM...") == ""
+    assert offer.plan_request("/memorize", "fammi un piano di studio", ask) == ""
+
+
+def test_a_plan_computed_in_the_chat_is_the_plan_the_click_saves(tmp_vault, tmp_path, monkeypatch):
+    """The plan shown under the answer is composed as write_plan composes it,
+    and the body the line posts is accepted by the Memorize form's own route
+    and lands as the same steps."""
+    from datetime import date, timedelta
+
+    import silica.tools.notes  # noqa: F401 (the write gate registers on import)
+    from silica.kernel.learn import plans as pl
+    from silica.kernel.write import undo_journal
+    from silica.ui.web import learn_routes
+
+    monkeypatch.setattr(undo_journal, "_DEFAULT_JOURNAL_PATH", tmp_path / "undo.db", raising=False)
+    for name in ("Softmax", "Chain rule"):
+        tmp_vault.note(f"ML/{name}.md", f"---\ndate: 2026-01-01\n---\n# {name}\n\nBody of {name}.\n")
+    tmp_vault.note("Plans/Esame.md", "# Esame\n")   # a note on the path: the draft takes the next name
+    by = (date.today() + timedelta(days=20)).isoformat()
+    asked = []
+    monkeypatch.setattr(pl, "read_sentence", lambda s: asked.append(s) or {
+        "name": "Esame", "scope": "steps", "target": "[[Softmax]]\nMomentum di Nesterov", "restrict": "",
+        "by": by, "objectives": []})
+    block, appendix, draft = offer.plan_context("ML/, esame tra venti giorni", [], "fammi un piano di studio",
+                                                "Su quale cartella lo costruisco?")
+    assert asked == ["fammi un piano di studio\nML/, esame tra venti giorni"]
+    assert draft == {"name": "Esame 2", "scope": "steps", "target": "[[Softmax]]\nMomentum di Nesterov",
+                     "restrict": "", "by": by, "templates": True}
+    assert "not saved yet" in block and "do not write the steps, a calendar" in block and "not saved" not in appendix
+    assert "Not in the vault: Momentum di Nesterov" in block and "End by asking whether to keep it in Memorize" in block
+    assert "20 days to the date" in block
+    assert appendix.startswith(f"Plan computed by Memorize from [[Softmax]]") and f"by {by}" in appendix
+    assert "1. [[Softmax]]" in appendix and "| Day | Step | Notes |" in appendix
+    # a request's own words never name the plan: "Piano di studio" would catch every later request
+    assert offer.plan_draft({"name": "Piano di studio", "scope": "folder", "target": "ML/"})["body"]["name"] == "ML"
+    named = [{"name": "Piano di studio", "path": "Plans/Piano di studio.md", "status": "active", "scope": "folder",
+              "target": "ML/"}]
+    asked.clear()
+    offer.plan_context("fammi un piano di studio per Other", named)
+    assert asked == ["fammi un piano di studio per Other"]   # read as a new request, not as that plan
+    # a step met on some of its words is named for the reader to check
+    with monkeypatch.context() as m:
+        m.setattr(pl, "resolve_scope", lambda *a, **k: {
+            "tree": [{"node": "Gradient boosting", "leaves": ["ML/Softmax.md"], "gap": False, "doubt": True,
+                      "text": "Gradient boosting"}],
+            "paths": ["ML/Softmax.md"], "gaps": [], "steps": ["Gradient boosting"]})
+        block, appendix = offer.draft_context(offer.plan_draft({"name": "G", "scope": "steps", "target": "Gradient boosting"}))
+    assert "Matched on some of their words, not by name: Gradient boosting as Softmax. The reader should check them." in block
+    assert "Check them in Memorize with Edit plan." in appendix
+    # a plan with no steps lists its parts with their notes named
+    folder = offer.plan_draft({"name": "Area", "scope": "folder", "target": "ML/"})
+    assert "- ML: [[Chain rule]], [[Softmax]]" in offer.draft_context(folder)[1]
+    shown = offer.plan_draft({"name": "Esame", "scope": "steps", "target": draft["target"], "by": by})["plan"]
+    out = learn_routes.write_plan(dict(draft))
+    assert out["path"] == "Plans/Esame 2.md" and out["gaps"] == ["Momentum di Nesterov"]
+    saved = pl.read_plan(out["path"])
+    assert saved["by"] == by and [s["text"] for s in saved["steps"]] == [s["text"] for s in shown["steps"]]
+    assert pl.day_by_day(saved) == pl.day_by_day(shown)   # the calendar shown is the one Memorize keeps

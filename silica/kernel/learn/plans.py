@@ -2503,8 +2503,33 @@ def write_plan(name: str, scope: str, target, reach: str = "relational", by: str
                restrict: str = "", folder: str = "Plans", objectives=None, cards: list[dict] | None = None,
                refused=(), declared: dict[str, str] | None = None, hours=None, assessment=None,
                guide: str = "", declared_why: str = "you set it", matched: dict[str, str] | None = None) -> dict:
-    """The plan note through the write gate (silica_write_note): scope,
-    objectives (the chosen intentions in frontmatter, the cards under
+    """The note compose_plan composes, through the write gate
+    (silica_write_note), which refuses a path that exists."""
+    from silica.tools import TOOLS
+
+    d = compose_plan(name, scope, target, reach=reach, by=by, restrict=restrict, folder=folder,
+                     objectives=objectives, cards=cards, refused=refused, declared=declared, hours=hours,
+                     assessment=assessment, guide=guide, declared_why=declared_why, matched=matched)
+    out = TOOLS["silica_write_note"].fn(path=d["path"], body=d["body"], title=name, props=d["props"])
+    if isinstance(out, dict) and out.get("error"):
+        raise RuntimeError(out["error"])
+    resolved = d["resolved"]
+    return {"path": (out.get("path") if isinstance(out, dict) else None) or d["path"],
+            "gaps": resolved["gaps"], "tree": resolved["tree"], "paths": resolved["paths"], "cards": d["cards"]}
+
+
+def compose_plan(name: str, scope: str, target, reach: str = "relational", by: str | None = None,
+                 restrict: str = "", folder: str = "Plans", objectives=None, cards: list[dict] | None = None,
+                 refused=(), declared: dict[str, str] | None = None, hours=None, assessment=None,
+                 guide: str = "", declared_why: str = "you set it", matched: dict[str, str] | None = None,
+                 templates: bool = False) -> dict:
+    """{path, body, props, resolved, cards}: the plan note, not written. The
+    chat's unsaved plan is this note read back (learn.offer.plan_draft), so
+    its steps and calendar are the ones Memorize shows once it is saved.
+    `templates` words the objective cards without the model, as the form's
+    Save does.
+
+    Scope, objectives (the chosen intentions in frontmatter, the cards under
     `## Objectives`), tree, steps with a because clause and gaps, an empty
     Sessions section. Nothing about mastery goes in; every reading derives
     from the ledger. `reach` is accepted for the REPL's legacy call and
@@ -2515,7 +2540,6 @@ def write_plan(name: str, scope: str, target, reach: str = "relational", by: str
     from datetime import date
 
     from silica.kernel.learn import objectives as obj
-    from silica.tools import TOOLS
 
     if scope not in SCOPES:
         raise ValueError(f"scope must be one of {SCOPES}")
@@ -2529,7 +2553,7 @@ def write_plan(name: str, scope: str, target, reach: str = "relational", by: str
         _depths(resolved["tree"], guide=guide, restrict=restrict)
     chosen = obj.normalize(objectives) if objectives is not None else list(obj.REACH_TO_INTENTIONS[reach])
     if cards is None:
-        cards = obj.propose(resolved["tree"], chosen)
+        cards = obj.propose(resolved["tree"], chosen, model=not templates)
     cards = [c for c in cards if isinstance(c, dict) and c.get("source") in obj.SOURCES]
     lines = _plan_body(name, scope, target, resolved, chosen, cards) + ["", "## Sessions", ""]
     # the gate stringifies a list prop (`['explain']`), so the intentions go
@@ -2557,12 +2581,8 @@ def write_plan(name: str, scope: str, target, reach: str = "relational", by: str
         props["assessment"] = assessment_value
     if guide:
         props["guide"] = f"[[{Path(guide).stem}]]" if not guide.startswith("[[") else guide
-    path = f"{folder}/{name}.md"
-    out = TOOLS["silica_write_note"].fn(path=path, body="\n".join(lines), title=name, props=props)
-    if isinstance(out, dict) and out.get("error"):
-        raise RuntimeError(out["error"])
-    return {"path": (out.get("path") if isinstance(out, dict) else None) or path,
-            "gaps": resolved["gaps"], "tree": resolved["tree"], "paths": resolved["paths"], "cards": cards}
+    return {"path": f"{folder}/{name}.md", "body": "\n".join(lines), "props": props, "resolved": resolved,
+            "cards": cards}
 
 
 def _refused_lines(resolved: dict) -> list[str]:
@@ -3254,8 +3274,14 @@ def read_sentence(sentence: str, today=None) -> dict:
         out["said"].append(unnamed)
     out["name"] = _safe_name(got.get("NAME", ""))
     if not out["name"] and out["scope"]:
-        t = out["target"]
-        out["name"] = _safe_name(t.rstrip("/").split("/")[-1] if out["scope"] == "folder" else
-                                 t.splitlines()[0] if out["scope"] == "steps" else
-                                 ", ".join(t) if isinstance(t, list) else t)
+        out["name"] = name_of(out["scope"], out["target"])
     return out
+
+
+def name_of(scope: str, target) -> str:
+    """A plan's name from its material: the folder's last segment, the
+    syllabus's first line, the notes joined, the topic."""
+    t = target
+    return _safe_name(t.rstrip("/").split("/")[-1] if scope == "folder" else
+                      t.splitlines()[0] if scope == "steps" else
+                      ", ".join(t) if isinstance(t, list) else t)

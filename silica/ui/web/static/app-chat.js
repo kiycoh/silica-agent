@@ -1871,6 +1871,29 @@ function turnNotes(notes) {
   return block;
 }
 
+// The plan the turn computed (learn.offer.plan_draft), saved on the click with
+// the body the Memorize form posts: the reader finds it in Memorize with no
+// further step, where a command put in the box asked for a second one. The
+// line then says what Memorize tracks, as the answer to a later request would.
+async function savePlanOffer(body, line, btn) {
+  btn.disabled = true;
+  try {
+    const r = await fetch("/learn/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(out.detail || r.statusText);
+    // Memorize reads its plans again when it next opens (lrWritePlan does the same)
+    lrData = null; lrPlan = null; lrMap = null;
+    const open = document.createElement("a");
+    open.className = "linklike";
+    open.href = "#memorize/plan/" + encodeURIComponent(out.path);
+    open.textContent = "open it";
+    line.replaceChildren(`Memorize tracks a plan for this: ${body.name}${body.by ? `, by ${body.by}` : ""}: `, open);
+  } catch (e) {
+    btn.disabled = false;
+    notify("plan not saved: " + e.message);
+  }
+}
+
 // An installed skill that answers this kind of request (ADR-0127 point 6),
 // offered for the next turn: the click puts `/name` in the box and the person
 // sends it, the model never runs it. Live only: an offer is about the next
@@ -1889,6 +1912,10 @@ function skillOffer(o) {
       if (c.href) {
         cb = document.createElement("a");
         cb.href = c.href;
+      } else if (c.save) {
+        cb = document.createElement("button");
+        cb.type = "button";
+        cb.addEventListener("click", () => savePlanOffer(c.save, line, cb));
       } else {
         cb = document.createElement("button");
         cb.type = "button";

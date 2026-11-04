@@ -3164,7 +3164,7 @@ def test_a_plan_request_ends_on_the_calendar_learn_computed(client, monkeypatch)
         return "Ecco come studiare."
 
     monkeypatch.setattr(server, "run_agent", fake_run_agent)
-    monkeypatch.setattr(server, "_plan_context", lambda text: ("[block]", "| Day | Step | Notes |\n|---|---|---|\n| 2026-10-23 | Basi |  |"))
+    monkeypatch.setattr(server, "_plan_context", lambda text, messages: ("[block]", "| Day | Step | Notes |\n|---|---|---|\n| 2026-10-23 | Basi |  |", None))
 
     async def collect():
         return [item async for item in server.run_turn("piano di studio fino all'esame")]
@@ -3172,3 +3172,26 @@ def test_a_plan_request_ends_on_the_calendar_learn_computed(client, monkeypatch)
     done = asyncio.run(collect())[-1]
     assert done["answer"].startswith("Ecco come studiare.") and done["answer"].endswith("| 2026-10-23 | Basi |  |")
     assert server.messages[-1]["content"] == done["answer"]
+
+
+def test_a_plan_computed_in_the_chat_is_offered_for_saving_with_one_click(client, monkeypatch):
+    """The line under the answer carries what the Memorize form posts, and
+    the page saves it on the click itself: the reader finds the plan in
+    Memorize with no command to send (owner, 2026-11-03)."""
+    _tc, server = client
+    draft = {"name": "Esame ML", "scope": "folder", "target": "ML/", "restrict": "", "by": "2026-12-10", "templates": True}
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
+        messages.append({"role": "assistant", "content": "Il piano copre ML/."})
+        return "Il piano copre ML/."
+
+    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(server, "_plan_context", lambda text, messages: ("[block]", "Plan computed by Memorize", draft))
+
+    async def collect():
+        return [item async for item in server.run_turn("ML/, esame il 10 dicembre")]
+
+    done = asyncio.run(collect())[-1]
+    assert done["offer"]["commands"] == [{"label": "save it in Memorize", "save": draft}]
+    js = (Path(server.__file__).parent / "static" / "app-chat.js").read_text(encoding="utf-8")
+    assert "} else if (c.save) {" in js and 'fetch("/learn/plan", { method: "POST"' in js
