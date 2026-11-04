@@ -82,6 +82,9 @@ class _Turn:
     # Vault paths the running tool's result holds, handed over by the tool
     # itself (returned_notes) and checked by after_tool (ADR-0090 point 8).
     returned: list[str] = field(default_factory=list)
+    # Every path the turn's tools returned, in order: a save names the last
+    # few as where its entry came from (survey card C7).
+    read: list[str] = field(default_factory=list)
 
 
 # The key a tool message carries once its call tainted the conversation by a
@@ -150,6 +153,7 @@ def after_tool(turn: _Turn, name: str) -> str:
     if _ingress(name) and not turn.tainted_by:
         turn.tainted_by = name
     returned, turn.returned = turn.returned, []
+    turn.read.extend(p for p in returned if p not in turn.read)
     if returned and not turn.tainted_by:
         from silica.sources.mail import mail_note_among
 
@@ -311,14 +315,19 @@ def silica_remember(
     # The chat it came from (survey card D3): the date reaches the model, the
     # session is kept for the person.
     session = narration.NARRATOR.sid or ""
+    # The notes this turn read last, at most 3: if one changes, the next
+    # chat's snapshot says so beside the entry (survey card C7: on Qwen3.5-9B
+    # a remembered figure was repeated without a look in 9 of 10 turns, and a
+    # frame sentence alone moved it to 7; docs plans/llm-km-survey-cards.md).
+    sources = turn.read[-3:] if turn else []
     if action == "save":
-        out = um.save(scope, text, by="chat", session=session)
+        out = um.save(scope, text, by="chat", session=session, sources=sources)
     else:
         # qwen3.5-9b put the entry to forget in `text` on 3 of 3 forget runs
         # (probe_user_memory, 2026-10-07), and refused, saved the opposite
         # preference instead.
         needle = old or (text if action == "forget" else "")
-        out = _addressed(um, action, scope, needle, text, session)
+        out = _addressed(um, action, scope, needle, text, session, sources)
     if not out.get("ok"):
         out["error"] = out.get("error", "not saved")
         del out["ok"]   # the loop reads a failure off "error"; ok=False beside it says it twice
@@ -326,13 +335,14 @@ def silica_remember(
     return out
 
 
-def _addressed(um, action: str, scope: str, needle: str, text: str, session: str = "") -> dict:
+def _addressed(um, action: str, scope: str, needle: str, text: str, session: str = "",
+               sources: list[str] | None = None) -> dict:
     """replace/forget in the named file, then in the other one: the model
     names the default scope for an entry the snapshot shows under the other
     (the same 3 of 3 forget runs). A miss in both shows both files' entries,
     so the next call can quote one."""
     def edit(s: str) -> dict:
-        return (um.replace(s, needle, text, by="chat", session=session) if action == "replace"
+        return (um.replace(s, needle, text, by="chat", session=session, sources=sources) if action == "replace"
                 else um.forget(s, needle))
 
     first = edit(scope)

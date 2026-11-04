@@ -269,3 +269,24 @@ def test_undo_brings_an_entry_back_with_its_date_and_reset_erases_the_stamps(vau
     assert um.stamps("vault")[eid]["by"] == "chat"
     um.reset()
     assert um.stamps("vault") == {}
+
+
+def test_an_entry_read_from_a_note_says_when_that_note_changed(vault):
+    """Survey card C7: the layer compares, so a model that answers from memory
+    without a look still sees that the note behind the figure moved."""
+    note = vault / "Clients" / "Northlight contract.md"
+    note.parent.mkdir()
+    note.write_text("# Northlight\n\nFee: 41,250 NOK.\n", encoding="utf-8")
+    um.save("vault", "Northlight fee is 41,250 NOK", by="chat", sources=["Clients/Northlight contract"])
+    um.save("user", "Name is Giulia", by="chat", sources=["Clients/Northlight contract.md"])
+    assert "changed since, re-read" not in um.snapshot()
+    assert "from" not in um.stamps("user")[um.entry_id("- Name is Giulia")]  # true in every vault
+    note.write_text("# Northlight\n\nFee: 46,800 NOK.\n", encoding="utf-8")
+    snap = um.snapshot()
+    assert "Northlight fee is 41,250 NOK (saved " in snap
+    assert "; Clients/Northlight contract.md changed since, re-read before using this)" in snap
+    note.unlink()
+    assert "Clients/Northlight contract.md changed since" in um.snapshot()  # gone reads as changed
+    # A quote copied with the longer tail still names the entry.
+    tail = snap.split("Northlight fee is 41,250 NOK", 1)[1].split("\n", 1)[0]
+    assert um.forget("vault", "Northlight fee is 41,250 NOK" + tail)["ok"]

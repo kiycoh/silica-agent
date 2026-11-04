@@ -280,3 +280,19 @@ def test_the_tool_is_in_the_chat_core_before_the_loader():
     assert CHAT_CORE[-1] == "silica_load_tools"
     assert "silica_remember" in chat_tools()
 
+
+
+def test_a_save_names_the_notes_the_turn_read(vault):
+    """The turn's reads, handed over by returned_notes and kept by after_tool,
+    become the entry's sources (survey card C7)."""
+    from pathlib import Path
+
+    note = Path(CONFIG.vault_path) / "Clients" / "Fees.md"
+    note.parent.mkdir(parents=True, exist_ok=True)
+    note.write_text("Fee 41,250 NOK\n", encoding="utf-8")
+    turn = tool_mod.begin_turn([_user("what is the fee? remember it")], chat=True)
+    tool_mod.returned_notes(["Clients/Fees.md"])
+    tool_mod.after_tool(turn, "silica_read_note")
+    assert _call(action="save", text="The fee is 41,250 NOK", scope="vault")["ok"]
+    stamp = um.stamps("vault")[um.entry_id("- The fee is 41,250 NOK")]
+    assert [f["path"] for f in stamp["from"]] == ["Clients/Fees.md"]

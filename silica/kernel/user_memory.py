@@ -188,7 +188,8 @@ def _stamps_path(path: Path) -> Path:
 
 
 def stamps(scope: str, vault: str | None = None) -> dict[str, dict]:
-    """entry_id -> {at: YYYY-MM-DD, by: chat | you, session}; {} when none."""
+    """entry_id -> {at: YYYY-MM-DD, by: chat | you, session, from: [{path,
+    version}]}; {} when none."""
     path = path_for(scope, vault)
     if path is None:
         return {}
@@ -201,16 +202,35 @@ def stamps(scope: str, vault: str | None = None) -> dict[str, dict]:
 
 _BY = {"chat": "saved {at}", "you": "the user's words, {at}"}
 # What _when appends, read back off a quote the model copies from the snapshot.
-_STAMP_TAIL = re.compile(r"\s*\((?:saved|the user's words,) \d{4}-\d{2}-\d{2}\)\s*$")
+_STAMP_TAIL = re.compile(r"\s*\((?:saved|the user's words,) \d{4}-\d{2}-\d{2}[^()]*\)\s*$")
+
+
+def _note_version(rel: str) -> str | None:
+    """silica-core's version of a vault file (core._version: sha1 of the
+    text, 12 hex), the one silica_read serves; None when it is not there."""
+    root = Path(CONFIG.vault_path or ".").expanduser()
+    try:
+        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None  # moved or deleted since: the snapshot says changed
+    return hashlib.sha1(text.encode("utf-8", "surrogateescape")).hexdigest()[:12]
 
 
 def _when(stamp: dict | None) -> str:
     if not stamp or stamp.get("by") not in _BY or not stamp.get("at"):
         return ""
-    return f" ({_BY[stamp['by']].format(at=stamp['at'])})"
+    when = _BY[stamp["by"]].format(at=stamp["at"])
+    # The layer checks, not the model: a note the entry was read from that no
+    # longer has the version it had is named beside the entry.
+    moved = [f["path"] for f in stamp.get("from") or ()
+             if isinstance(f, dict) and f.get("path") and _note_version(f["path"]) != f.get("version")]
+    if moved:
+        when += f"; {', '.join(moved)} changed since, re-read before using this"
+    return f" ({when})"
 
 
-def _commit(path: Path, before: str, after: str, *, by: str = "you", session: str = "") -> str:
+def _commit(path: Path, before: str, after: str, *, by: str = "you", session: str = "",
+            sources: list[str] | None = None) -> str:
     """Write `after`, keeping `before` as the one level of undo, and stamp
     the entries `after` adds. Returns the undo token: the digest of what was
     written, so an undo can tell whether the file is still the one that write
@@ -233,8 +253,12 @@ def _commit(path: Path, before: str, after: str, *, by: str = "you", session: st
     # The undo level's entries keep theirs: an undo brings them back dated.
     kept = {i: v for i, v in held.items() if i in old_ids | new_ids}
     today = datetime.date.today().isoformat()
+    # recall hands over note paths without their suffix, the readers with it
+    named = [r if _note_version(r) or r.endswith(".md") else r + ".md" for r in sources or ()]
+    held_from = [{"path": rel, "version": v} for rel in dict.fromkeys(named) if (v := _note_version(rel))]
     for i in new_ids - old_ids:
-        kept[i] = {"at": today, "by": by, **({"session": session} if session else {})}
+        kept[i] = {"at": today, "by": by, **({"session": session} if session else {}),
+                   **({"from": held_from} if held_from else {})}
     if kept != held:
         atomic_write_bytes(_stamps_path(path), json.dumps(kept, sort_keys=True).encode("utf-8"))
     return _digest(after)
@@ -250,7 +274,7 @@ def _refuse(error: str, current: str | None = None, scope: str | None = None,
 
 
 def _edit(action: str, scope: str, text: str, old: str, vault: str | None,
-          by: str = "you", session: str = "") -> dict:
+          by: str = "you", session: str = "", sources: list[str] | None = None) -> dict:
     # A quote copied from the snapshot can carry the date _when put after it.
     text, old = _STAMP_TAIL.sub("", text), _STAMP_TAIL.sub("", old)
     if scope not in SCOPES:
@@ -306,7 +330,9 @@ def _edit(action: str, scope: str, text: str, old: str, vault: str | None,
             "Merge or shorten the entries first (replace or forget one, or edit them in "
             "Settings > Memory), then save again.",
             current, scope)
-    token = _commit(path, current, new, by=by, session=session)
+    # A user-scope entry is true in every vault; a vault path means nothing there.
+    token = _commit(path, current, new, by=by, session=session,
+                    sources=sources if scope == "vault" else None)
     out = {"ok": True, "action": action, "scope": scope,
            "text": block.rstrip("\n") if action != "forget" else span_text,
            "token": token, "chars": len(new), "budget": limit}
@@ -317,13 +343,14 @@ def _edit(action: str, scope: str, text: str, old: str, vault: str | None,
 
 # `by`: "chat" when the model saved it in a turn, "you" when the person wrote
 # it (/remember, Settings); `session` is the chat it was written in.
-def save(scope: str, text: str, vault: str | None = None, *, by: str = "you", session: str = "") -> dict:
-    return _edit("save", scope, text, "", vault, by, session)
+def save(scope: str, text: str, vault: str | None = None, *, by: str = "you", session: str = "",
+         sources: list[str] | None = None) -> dict:
+    return _edit("save", scope, text, "", vault, by, session, sources)
 
 
 def replace(scope: str, old: str, text: str, vault: str | None = None, *,
-            by: str = "you", session: str = "") -> dict:
-    return _edit("replace", scope, text, old, vault, by, session)
+            by: str = "you", session: str = "", sources: list[str] | None = None) -> dict:
+    return _edit("replace", scope, text, old, vault, by, session, sources)
 
 
 def forget(scope: str, old: str, vault: str | None = None) -> dict:
