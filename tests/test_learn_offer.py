@@ -431,7 +431,7 @@ def test_a_plan_computed_in_the_chat_is_the_plan_the_click_saves(tmp_vault, tmp_
     assert "not saved yet" in block and "do not write the steps, a calendar" in block and "not saved" not in appendix
     assert "Not in the vault: Momentum di Nesterov" in block and "End by asking whether to keep it in Memorize" in block
     assert "20 days to the date" in block
-    assert appendix.startswith(f"Plan computed by Memorize from [[Softmax]]") and f"by {by}" in appendix
+    assert appendix.startswith("Plan computed by Memorize from [[Softmax]]") and f"by {by}" in appendix
     assert "1. [[Softmax]]" in appendix and "| Day | Step | Notes |" in appendix
     # a request's own words never name the plan: "Piano di studio" would catch every later request
     assert offer.plan_draft({"name": "Piano di studio", "scope": "folder", "target": "ML/"})["body"]["name"] == "ML"

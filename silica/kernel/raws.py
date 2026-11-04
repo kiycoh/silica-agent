@@ -127,7 +127,7 @@ def index(vault: Path) -> dict[str, list[str]]:
     out: dict[str, list[tuple[bool, bool, str]]] = {}
     for note, f in named(root):
         found = resolve(f["source_file"], note, root)
-        if kept(found, f):
+        if found is not None and kept(found, f):  # kept() says the same; mypy needs it said here
             out.setdefault(found.relative_to(root).as_posix(), []).append(
                 (not f.get("document"), done != "/" and note.startswith(done), note))
     return {raw: [n for *_, n in sorted(rows)] for raw, rows in out.items()}
