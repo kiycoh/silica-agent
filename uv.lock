@@ -3716,7 +3716,7 @@ requires-dist = [
     { name = "scipy", marker = "extra == 'dev'", specifier = ">=1.17.1" },
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=3.0" },
     { name = "silica-agent", extras = ["connect", "connectors", "gui", "mcp", "rerank", "stt"], marker = "extra == 'all'" },
-    { name = "silica-core", specifier = ">=0.10.1" },
+    { name = "silica-core", specifier = ">=0.12.0" },
     { name = "snowballstemmer" },
     { name = "stop-words", specifier = ">=2025.11.4" },
     { name = "striprtf", specifier = ">=0.0.29" },
@@ -3731,7 +3731,7 @@ provides-extras = ["gui", "dev", "connect", "mcp", "connectors", "rerank", "stt"
 
 [[package]]
 name = "silica-core"
-version = "0.11.0"
+version = "0.12.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -3750,9 +3750,9 @@ dependencies = [
     { name = "tree-sitter-language-pack" },
     { name = "xlrd" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/be/7e/3bc44d22a4df543fafada92cf5c180fe5cf0ff39f39aa2c3049fdd271e05/silica_core-0.11.0.tar.gz", hash = "sha256:f46237a53df1a43c726fc1a1219d8ae4ec1ea67f7fdaa0b802f7a8ffd7193c3a", size = 3884206, upload-time = "2026-10-14T16:47:14.463Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/7e/bd4d0801aea70f95f10d43c7e031cde04fe899093bd2ba1f91fbac74c9a3/silica_core-0.12.0.tar.gz", hash = "sha256:246a3bb1017d986779d1b525fdd240a0e0939bacd332610cfd84bc00dfb77949", size = 3899011, upload-time = "2026-11-05T16:54:58.94Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6d/23/9365c1cc3a62ffa630581ed1d6f413e40eff9f32e46ddba29c5171f61bf3/silica_core-0.11.0-py3-none-any.whl", hash = "sha256:e5f4eb106d87e39f5d5370e8a5f9d542c1b2d725693653f6335290f57a7eb265", size = 252996, upload-time = "2026-10-14T16:47:12.521Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/db/6a9b18717d35eaf8a53c3b2f45f0196a1e390c4e9a752d46a3d147a8433d/silica_core-0.12.0-py3-none-any.whl", hash = "sha256:4804826d284dae7123839d1bd6375450e023a9bb9b16a8815d2b6c5fa83fca49", size = 261029, upload-time = "2026-11-05T16:54:57.032Z" },
 ]
 
 [[package]]
