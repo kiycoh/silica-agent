@@ -271,9 +271,9 @@ _UNREADABLE_SHOWN = 10
 def _unreadable(folder: str) -> dict | None:
     """Documents under `folder` the passage index holds no text for: a PDF it
     read and found no text layer in, an office file with no `.md` converted
-    beside it, a file whose read failed. None when there are none, and None
-    when the pinned silica-core (ADR-0043) no longer has the names read here:
-    no field is honest then, a zero would not be.
+    beside it, a file whose read failed: silica-core's own `unreadable()`
+    (0.12), the classification its search scope counts. None when there are
+    none.
 
     A search that misses under a folder holding such files has not shown the
     folder is silent: the answer can sit in what was never read (survey card
@@ -281,51 +281,17 @@ def _unreadable(folder: str) -> dict | None:
     """
     from silica.kernel.workspaces import in_scope
 
-    rel_folder = folder.strip().strip("/")
     try:
         core = _engine()
     except RuntimeError:
         return None
-    if callable(getattr(core, "unreadable", None)):
-        # silica-core names these itself since feat/survey-asks (2026-11-04),
-        # with the same classification its search scope reports.
-        got = core.unreadable(rel_folder)
-        if "error" in got:
-            return None
-        return _unread_outside_raws(Path(got["root"]), [f["path"] for f in got["files"] if in_scope(f["path"])])
-    # shortcut: the private names below serve silica-core 0.11 and older;
-    # delete this branch once pyproject's floor names a release with unreadable().
-    try:
-        from silica_core.sources.convert import DOC_EXTS, IMG_EXTS
-
-        load_meta, walk, failures, root = core._load_meta, core._walk, core._failures, core._root()
-    except (ImportError, AttributeError):
+    got = core.unreadable(folder.strip().strip("/"))
+    if "error" in got:
         return None
-    base = root / rel_folder if rel_folder else None
-    if base is not None and not base.is_dir():
-        return None
-    skipped = load_meta().get("no_text", {})
-    failed = failures()
-    paths: list[str] = []
     # shortcut: a workspace turn keeps only the files in_scope admits, which are
     # notes, so it reports none; widen to the members' folders if a workspace
     # holding unconverted files is seen asserting an absence.
-    for rel, full in walk(base):
-        if full is None or not in_scope(rel):
-            continue
-        suffix = full.suffix.lower()
-        if rel in failed:
-            paths.append(rel)
-        elif suffix in DOC_EXTS and suffix not in IMG_EXTS and not full.with_suffix(".md").is_file():
-            if suffix != ".pdf":
-                paths.append(rel)
-                continue
-            try:
-                if skipped.get(rel, {}).get("mtime") == full.stat().st_mtime:
-                    paths.append(rel)
-            except OSError:
-                continue  # gone between the walk and the stat: not a file to report
-    return _unread_outside_raws(root, paths)
+    return _unread_outside_raws(Path(got["root"]), [f["path"] for f in got["files"] if in_scope(f["path"])])
 
 
 def _unread_outside_raws(root: Path, paths: list[str]) -> dict | None:
@@ -1945,9 +1911,7 @@ def _disk_changes(cut: float) -> list[dict]:
     from silica.kernel.workspaces import in_scope
 
     rows: list[tuple[float, str]] = []
-    core = _engine()
-    # silica-core's public walk since feat/survey-asks; the private one before it
-    for rel, full in (core.walk() if callable(getattr(core, "walk", None)) else core._walk()):
+    for rel, full in _engine().walk():
         if full is None or not in_scope(rel):
             continue
         try:

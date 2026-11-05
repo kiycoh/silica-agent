@@ -59,8 +59,8 @@ def test_a_raw_its_notes_hold_the_text_of_is_not_named(vault):
 
 
 def test_the_engines_public_inventory_is_read_when_it_has_one(vault, monkeypatch):
-    """A silica-core with `unreadable()` answers for itself; the private names
-    are read only for a release without it."""
+    """silica-core's `unreadable()` answers for itself (0.12): the engine's
+    private walk is never reached."""
     from silica_core import core
 
     def public(folder=""):
