@@ -485,7 +485,10 @@ def silica_generate_taxonomy(
         pass
 
     if not isinstance(taxonomy_dict, dict):
-        parsed, _ = parse_json(raw, strict=False)
+        try:
+            parsed, _ = parse_json(raw, strict=False)
+        except ValueError:
+            parsed = None  # neither YAML nor JSON: the error below says so
         if isinstance(parsed, dict):
             taxonomy_dict = parsed
         else:

@@ -163,6 +163,16 @@ class TestGenerateTaxonomyTool:
             assert res["success"] is True
             assert save_file.exists()
 
+    def test_a_reply_that_is_no_taxonomy_is_reported_not_raised(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+        from silica.tools.composed import silica_generate_taxonomy
+
+        with patch("silica.model.llm.call_llm") as mock_call_llm, patch("silica.driver.DRIVER") as mock_driver:
+            mock_driver.list_files.return_value = []
+            mock_call_llm.return_value = MagicMock(text="I would group them by theme.")
+            res = silica_generate_taxonomy(user_intent="x", save_path=str(tmp_path / "t.yaml"))
+        assert "unparseable output" in res["error"]
+
     def test_silica_generate_taxonomy_merge_includes_existing(self, tmp_path):
         from unittest.mock import MagicMock, patch
         from silica.tools.composed import silica_generate_taxonomy
