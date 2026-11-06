@@ -4051,7 +4051,7 @@ function lrReadQuestion(d, c, r, last) {
       const k = lrEl("span", "k");
       k.append(last ? "The note says · " : "The next note says · ", lrReadLink(c.answer_from, c.answer_from, d));
       const v = lrEl("span", "v");
-      v.appendChild(lrMd(lrEl("mark", "lr-ans"), c.answer));
+      v.appendChild(lrReadInline(lrEl("mark", "lr-ans"), c.answer, d));
       says.append(k, v);
       box.appendChild(says);
       box.appendChild(lrEl("span", "lr-help", "Not graded. Compare, then go on."));

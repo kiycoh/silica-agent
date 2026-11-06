@@ -161,8 +161,14 @@ def test_fields_read_through_bold_labels_and_keep_their_lines():
 def test_a_link_stays_only_when_it_names_a_note_of_the_step():
     titles = ["Neurone artificiale", "Funzione gradino"]
     text = "Uno [[neurone artificiale|il neurone]], due [[Wikipedia]], tre [[Altro|testo]], quattro [[Funzione gradino#Uscita]]."
-    assert reading.keep_step_links(text, titles) == ("Uno [[Neurone artificiale]], due Wikipedia, tre testo, "
+    assert reading.keep_step_links(text, titles) == ("Uno [[Neurone artificiale|il neurone]], due Wikipedia, tre testo, "
                                                      "quattro [[Funzione gradino]].")
+
+
+def test_an_answer_copied_with_its_link_shown_as_other_words_is_still_held():
+    """The hosted model copied a sentence whose link shows other words than its title."""
+    sentence = "A [[Study plans|plan]] decides the goals, and the goals decide the rest."
+    assert reading.answer_held(reading.keep_step_links(sentence, ["Study plans"]), sentence)
 
 
 def test_a_sentence_the_notes_do_not_hold_is_marked_and_kept():

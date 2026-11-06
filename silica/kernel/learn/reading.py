@@ -369,7 +369,12 @@ def keep_step_links(text: str, titles: list[str]) -> str:
     def one(m: re.Match) -> str:
         target, shown = m.group(1).strip(), (m.group(2) or "").strip()
         hit = canon.get(target.casefold())
-        return f"[[{hit}]]" if hit else (shown or target)
+        if not hit:
+            return shown or target
+        # The words shown stay: "A [[Study plans|plan]] decides" lost them, read as "A
+        # Study plans decides", and an answer copied exactly no longer matched its note
+        # and was not shown (1 of 6 cards on the hosted model, 2026-11-06).
+        return f"[[{hit}|{shown}]]" if shown and shown != hit else f"[[{hit}]]"
 
     return _ANY_WIKI_RE.sub(one, text or "")
 
