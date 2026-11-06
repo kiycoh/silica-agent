@@ -185,3 +185,36 @@ def test_a_users_own_log_note_is_still_a_violation(tmp_path):
     _write(tmp_path, "Journal/log.md", "---\ntype: Note\n---\n\nB\n")
 
     assert [v.clause for v in okf_conformance(tmp_path).violations] == ["11.3"]
+
+
+# --- OKF's `Plan` is not Learn's plan ----------------------------------------
+
+def test_a_note_stamped_plan_stays_study_material():
+    """derive_type stamps `Plan` on any note with a task status, and folded to
+    `plan` a to-do became a study plan, left the study material and was drawn
+    as a plan in the graph. The stamped notes are on disk: the readers decide."""
+    from silica.kernel.base import frontmatter
+    from silica.kernel.base.noteshape import is_material, is_plan, note_kind
+
+    stamped = stamp_type("Projects/x.md", "---\nstatus: todo\n---\n\nShip it.\n")
+    data, _raw, _body = frontmatter.split(stamped)
+    assert data["type"] == "Plan"
+    assert not is_plan(data)
+    assert is_material({"kind": note_kind(data)})
+
+
+def test_learn_keeps_its_own_plan_words():
+    from silica.kernel.base.noteshape import is_plan
+
+    assert is_plan({"type": "plan"}) and is_plan({"type": " plan "}) and is_plan({"type": "syllabus"})
+    assert is_plan({"type": "Syllabus"})   # no writer of `Plan` ever wrote this one
+
+
+def test_the_graph_draws_a_stamped_note_as_a_note(tmp_path):
+    from silica.kernel.graph.graph_export import stamp_native
+
+    (tmp_path / "x.md").write_text("---\nstatus: todo\ntype: Plan\n---\nShip it.\n", encoding="utf-8")
+    (tmp_path / "p.md").write_text("---\ntype: plan\n---\nA plan.\n", encoding="utf-8")
+    nodes = [{"id": "x.md", "type": "note"}, {"id": "p.md", "type": "note"}]
+    stamp_native(nodes, tmp_path)
+    assert [n["type"] for n in nodes] == ["note", "plan"]

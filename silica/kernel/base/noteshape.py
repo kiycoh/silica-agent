@@ -97,8 +97,17 @@ SPINE_SECTION = "(outline)"
 
 
 def type_word(data: dict | None) -> str:
-    """The `type:` of a parsed frontmatter as readers compare it, lowercased."""
-    return str((data or {}).get("type") or "").strip().lower()
+    """The `type:` of a parsed frontmatter as readers compare it, lowercased.
+
+    OKF's `Plan` is the exception and reads as a note: `stamp_type` writes it
+    on any note with a task `status:`, on create and on overwrite, and folded
+    to `plan` it made a to-do a study plan, off the study material and drawn as
+    a plan in the graph. Case tells them apart because only `derive_type` ever
+    wrote the capital, and Learn only ever wrote `plan`; the stamped notes stay
+    on disk, so the reader is where this is decided.
+    """
+    word = str((data or {}).get("type") or "").strip()
+    return "note" if word == OKF_PLAN else word.lower()
 
 
 def is_plan(data: dict | None) -> bool:
