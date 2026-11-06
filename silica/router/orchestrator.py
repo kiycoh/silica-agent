@@ -11,7 +11,7 @@ Contracts applied (see silica_architecture_addendum.md):
   C1 — ops_path carries list[Op]-compatible dicts after VALIDATE.
   C2 — freshness via per-op postconditions in CLI backend.
   C3 — build_txn() builds InverseOp entries; ROLLBACK applies them.
-  C4 — VALIDATE writes what it kept to ops_path; SNAPSHOT/WRITE read that file.
+  C4: VALIDATE writes what it kept to ops_path; SNAPSHOT/WRITE read that file.
   C5 — ledger records ops; CLEANUP only reachable from DONE state.
 
 S2.3 change: DELEGATE calls the real Distiller LLM via prep_delegation.
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 
 from silica.driver import DRIVER
 from silica.config import CONFIG
-from silica.kernel.text.payload import payload_chunks  # noqa: F401  — see the `import time` note above
+from silica.kernel.text.payload import payload_chunks  # noqa: F401  (see the `import time` note above)
 from silica.kernel.text.vault_recon import recon_file  # noqa: F401
 from silica.kernel.text.sanitize import sanitize_output  # noqa: F401
 from silica.kernel.write.gate import build_txn, in_run, open_run  # noqa: F401

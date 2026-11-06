@@ -73,7 +73,7 @@ class TestIsConceptKeepsConcepts:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# silica_recon — degraded (embedder-down) extraction defers uncorroborated concepts
+# recon_file: degraded (embedder-down) extraction defers uncorroborated concepts
 # ---------------------------------------------------------------------------
 
 class _FakeDriver:

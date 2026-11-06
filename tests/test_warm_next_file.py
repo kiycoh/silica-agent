@@ -57,8 +57,8 @@ def _warm_stub(n_files=2, cur_fi=0):
 
 def test_warm_next_file_attaches_chunks_and_marks():
     fsm = _warm_stub()
-    with patch.object(st.orch, "silica_recon", return_value=_recon_res()) as rec, \
-         patch.object(st.orch, "silica_payload", return_value=_payload_res()), \
+    with patch.object(st.orch, "recon_file", return_value=_recon_res()) as rec, \
+         patch.object(st.orch, "payload_chunks", return_value=_payload_res()), \
          patch("silica.model.providers.get_embedder_or_none", return_value=None):
         assert st.warm_next_file(fsm) is True
     rec.assert_called_once_with("Inbox/f1.md")
@@ -74,7 +74,7 @@ def test_warm_next_file_attaches_chunks_and_marks():
 
 def test_warm_next_file_bails_on_recon_error():
     fsm = _warm_stub()
-    with patch.object(st.orch, "silica_recon", return_value={"error": "boom"}):
+    with patch.object(st.orch, "recon_file", return_value={"error": "boom"}):
         assert st.warm_next_file(fsm) is False
     assert len(fsm._chunks) == 1
     assert 1 not in fsm._file_chunks
@@ -84,7 +84,7 @@ def test_warm_next_file_bails_on_recon_error():
 
 def test_warm_next_file_bails_when_no_next_file():
     fsm = _warm_stub(n_files=1)
-    with patch.object(st.orch, "silica_recon") as rec:
+    with patch.object(st.orch, "recon_file") as rec:
         assert st.warm_next_file(fsm) is False
     rec.assert_not_called()
 
@@ -92,7 +92,7 @@ def test_warm_next_file_bails_when_no_next_file():
 def test_handle_recon_consumes_warm_result():
     fsm = _warm_stub(cur_fi=1)
     fsm.context["warm_recon_1"] = _recon_res()
-    with patch.object(st.orch, "silica_recon") as rec:
+    with patch.object(st.orch, "recon_file") as rec:
         st.handle_recon(fsm)
     rec.assert_not_called()
     assert fsm.context["recon"] == [_recon_res()]
@@ -107,7 +107,7 @@ def test_handle_payload_skips_reassembly_for_warmed_file():
     fsm._chunk_flat_to_fi_ci[1] = (1, 0)
     fsm._file_chunks[1] = {"source_file": "Inbox/f1.md", "chunks": [w0]}
     fsm.context["warm_payload_1"] = {"warm": True}
-    with patch.object(st.orch, "silica_payload") as pay:
+    with patch.object(st.orch, "payload_chunks") as pay:
         st.handle_payload(fsm)
     pay.assert_not_called()
     assert len(fsm._chunks) == 2  # no double append

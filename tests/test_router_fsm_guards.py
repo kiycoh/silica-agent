@@ -53,7 +53,7 @@ def _validated_fsm(chunk_hash: str = "deadbeef") -> InjectorFSM:
 def test_validate_checkpoint_is_filed_under_the_id_the_readers_use():
     fsm = _validated_fsm()
 
-    with patch.object(d.orch, "silica_validate_ops", return_value=_VALIDATE_OK):
+    with patch.object(d.orch, "validate_ops", return_value=_VALIDATE_OK):
         d.handle_validate(fsm)
 
     task_id = fsm._chunk_task_id("validate")
@@ -71,7 +71,7 @@ def test_resume_skips_the_distiller_for_an_unchanged_chunk():
     """The checkpoint VALIDATE writes is what DELEGATE reads to skip a chunk."""
     fsm = _validated_fsm()
 
-    with patch.object(d.orch, "silica_validate_ops", return_value=_VALIDATE_OK):
+    with patch.object(d.orch, "validate_ops", return_value=_VALIDATE_OK):
         d.handle_validate(fsm)
 
     # A resume re-enters DELEGATE for the same chunk with the same input hash.
@@ -116,7 +116,7 @@ def test_payload_reassembles_a_file_whose_chunks_never_attached():
 
     res = {"chunks": [{"schema_version": 1, "batches": [
         {"inbox_file": "Inbox/b.md", "concepts": [{"name": "Beta", "excerpt": "y"}]}]}]}
-    with patch.object(s.orch, "silica_payload", return_value=res):
+    with patch.object(s.orch, "payload_chunks", return_value=res):
         s.handle_payload(fsm)
 
     assert fsm._file_chunks[1]["chunks"], "PAYLOAD fast-pathed on an empty chunk list"
@@ -129,6 +129,6 @@ def test_warm_next_file_reprepares_a_file_whose_chunks_never_attached():
     fsm._file_chunks[1] = {"source_file": "Inbox/b.md", "chunks": []}
     fsm._current_file_idx = 0
 
-    with patch.object(s.orch, "silica_recon", return_value={"error": "boom"}) as recon:
+    with patch.object(s.orch, "recon_file", return_value={"error": "boom"}) as recon:
         assert s.warm_next_file(fsm) is False
     assert recon.called, "warm stood down on a file it had only claimed, not attached"

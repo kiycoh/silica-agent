@@ -78,7 +78,7 @@ def test_frontmatter_ignored(it_overlay):
 
 
 def test_empty_content_abstains(it_overlay):
-    """No content => empty list (silica_recon handles it as an empty report)."""
+    """No content => empty list (recon_file handles it as an empty report)."""
     from silica.kernel.text.keyphrase import extract_keyphrases
 
     assert extract_keyphrases("", overlay=it_overlay, lang="italian") == []

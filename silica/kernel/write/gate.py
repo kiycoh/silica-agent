@@ -360,7 +360,7 @@ def apply_inverses(txn_id: str, inverses: list[InverseOp] | list[dict]) -> dict[
 def _revert(txn_id: str, inverses: list) -> tuple[bool, str | None]:
     """Apply the micro-snapshot inverses; report whether disk was truly restored.
 
-    apply_inverses never raises — it returns {"success", "errors"} — and a
+    apply_inverses never raises: it returns {"success", "errors"}, and a
     restore_version whose prior_content is None (build_txn could read neither
     the note nor its mirror seed) is SKIPPED with only a warning, never landing
     in errors. Claiming reverted=True there tells the caller the note was left
@@ -681,7 +681,7 @@ def _commit_note_atomic_unlocked(op: Op, *, hub: str | None = None, lint: bool =
         )
 
     # 3. optional lint on this note; revert on failure. Only NEW violations
-    # (not in the pre-write baseline) count — see lint_baseline.
+    # (not in the pre-write baseline) count: see lint_baseline.
     if lint and path:
         new_errors = new_lint_errors(path, op_name, lint_hub, baseline_errors)
         if new_errors:

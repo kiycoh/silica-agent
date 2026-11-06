@@ -183,7 +183,7 @@ def _reset_run_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _keyphrase_lane_under_test(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The FSM suites mock silica_recon/silica_payload and count their calls:
+    """The FSM suites mock recon_file/payload_chunks and count their calls:
     they test the keyphrase pipeline. The outline lane (the default since
     2026-09-02) bypasses both, so it is opted into per test
     (tests/test_outline_lane.py) instead of silently emptying these mocks."""
@@ -192,7 +192,7 @@ def _keyphrase_lane_under_test(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_recon_embedder(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Disable silica_recon's network embedder by default: recon falls back to the
+    """Disable recon_file's network embedder by default: recon falls back to the
     deterministic mined rank. Keeps the suite fast and offline; the rerank path is
     covered by test_keyphrase (FakeEmbedder) and the SILICA_EVAL golden eval."""
     import silica.kernel.text.vault_recon as recon_mod
