@@ -831,6 +831,25 @@ function flowColumns(levels, unit) {
   return { layout, heads };
 }
 
+const clip = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
+
+// A head says what the arrangement says, so one too long for its side is cut and
+// not dropped: 30 characters want 215px and the room is 165, which took the name
+// off Deep Learning (149 notes) on alex_second_brain. `width` measures a text.
+function fitHead(name, tail, room, width) {
+  let n = 30;
+  while (n > 6 && width(clip(name, n) + tail) > room) n--;
+  return clip(name, n) + tail;
+}
+
+// What is left of an arrangement's side room on a frame too narrow for it: never
+// more than half the free width, or the picture has none. At 390px 2 * 165 is
+// more than the frame's 302, and the fit came out negative.
+function layoutRoom(free, left, right) {
+  const s = Math.min(1, free / (2 * (left + right)));
+  return [left * s, right * s];
+}
+
 // frame-pure:end
 
 function applyFocus(ids) { computeFocus(ids); refreshPaint(); arrangeFocus(); }
@@ -1062,8 +1081,18 @@ function fitGraph() {
   fitFree(400);
 }
 
+// The lib clamps every zoom at 0.01, a number of graph units and not a share of
+// the picture: alex_second_brain fits at 0.008 on a 1440 frame, and at 390 the fit
+// asked 0.0085 and got 0.01. Half the fit leaves a wheel room to go on out.
+function lowerZoomFloor(k) {
+  Graph.minZoom(Math.min(0.01, k / 2));
+}
+
 // The lib's zoomToFit frames the canvas, and the key stands over its right edge
 // (freeWidth): with a note counted in pixels (KREF) the outer ones went under it.
+// The foot stands over the bottom edge the same way, 44px up against a pad of 40,
+// and took Petrarch and Divine Comedy on silica_wiki at 1440.
+const FOOT_GAP = 12;
 function fitFree(ms, pad = 40, only = n => !n._hidden) {
   wake(ms + 200);
   if (!is2D()) { Graph.zoomToFit(ms, pad, only); return; }
@@ -1075,9 +1104,11 @@ function fitFree(ms, pad = 40, only = n => !n._hidden) {
   }
   if (x0 > x1) return;
   const W = Graph.width(), H = Graph.height(), free = freeWidth();
-  const k = Math.min((free - 2 * pad) / Math.max(1, x1 - x0), (H - 2 * pad) / Math.max(1, y1 - y0));
+  const foot = Math.max(pad, H - document.getElementById("gstat").getBoundingClientRect().top + FOOT_GAP);
+  const k = Math.min((free - 2 * pad) / Math.max(1, x1 - x0), (H - pad - foot) / Math.max(1, y1 - y0));
   if (!(k > 0)) return;
-  Graph.centerAt((x0 + x1) / 2 + (W - free) / 2 / k, (y0 + y1) / 2, ms);
+  lowerZoomFloor(k);
+  Graph.centerAt((x0 + x1) / 2 + (W - free) / 2 / k, (y0 + y1) / 2 + (foot - pad) / 2 / k, ms);
   Graph.zoom(k, ms);
 }
 
@@ -1236,8 +1267,10 @@ function placeLayout(arr, from) {
 }
 
 // Clusters and Flow leave room round their picture for their heads: a head
-// stands outside its disc, a note's name to the right of its column.
-const LAYOUT_ROOM = { clusters: [165, 70], flow: [40, 60] }, FLOW_NAME = 190;
+// stands outside its disc, a note's name to the right of its column. The top
+// clears the line under the tabs, which ends 71px down and took "No area · 298",
+// the first disc and so the one at the top, at 70.
+const LAYOUT_ROOM = { clusters: [165, 96], flow: [40, 96] }, FLOW_NAME = 190;
 function frameLayout() {
   if (!ARR || ARR.kind === "map") return;   // asked for on a frame: the tab may have changed
   const { centre: c, layout, heads, kind } = ARR;
@@ -1248,11 +1281,12 @@ function frameLayout() {
   };
   for (const id in layout) take(c.x + layout[id][0], c.y + layout[id][1]);
   for (const h of heads) kind === "clusters" ? take(c.x + h.cx, c.y + h.cy, h.R) : take(c.x + h.x, c.y + h.y);
-  const W = Graph.width(), H = Graph.height(), free = freeWidth(), [px, py] = LAYOUT_ROOM[kind];
-  const right = kind === "flow" ? FLOW_NAME : px;
-  const k = Math.max(0.01, Math.min((free - px - right) / Math.max(1, x1 - x0),
-    (H - 2 * py) / Math.max(1, y1 - y0), kind === "flow" ? 4 * KREF : Infinity));
+  const W = Graph.width(), H = Graph.height(), free = freeWidth(), [side, py] = LAYOUT_ROOM[kind];
+  const [px, right] = layoutRoom(free, side, kind === "flow" ? FLOW_NAME : side);
+  const k = Math.min((free - px - right) / Math.max(1, x1 - x0),
+    Math.max(1, H - 2 * py) / Math.max(1, y1 - y0), kind === "flow" ? 4 * KREF : Infinity);
   ARR.k = k;
+  lowerZoomFloor(k);
   // the picture's middle at the middle of what is free of the key and the names
   const dx = ((W - free) / 2 + (right - px) / 2) / k;
   Graph.centerAt((x0 + x1) / 2 + dx, (y0 + y1) / 2, 800);
@@ -1385,10 +1419,14 @@ const flowRung = d => d === 0 ? "This note" : d === -1 ? "Read first" : d === 1 
 function drawLayoutNames(ctx, scale) {
   const { kind, heads, centre: c, layout } = ARR, items = [], gap = 8 / scale;
   if (kind === "clusters") {
+    const tl = Graph.screen2GraphCoords(0, 0), br = Graph.screen2GraphCoords(freeWidth(), Graph.height());
+    ctx.font = (12.5 / scale) + "px " + ATLAS_FONT;
+    const width = t => ctx.measureText(t).width;
     for (const h of heads.slice().sort((a, b) => b.n - a.n)) {
-      const cos = Math.cos(h.th), sin = Math.sin(h.th);
-      items.push({ text: clip(h.name, 30) + " · " + gnum(h.n), px: 12.5, x: h.cx + (h.R + gap) * cos, y: h.cy + (h.R + gap) * sin,
-        align: cos > 0.25 ? "left" : cos < -0.25 ? "right" : "center", ink: GP.label });
+      const cos = Math.cos(h.th), sin = Math.sin(h.th), x = h.cx + (h.R + gap) * cos;
+      const align = cos > 0.25 ? "left" : cos < -0.25 ? "right" : "center";
+      const room = align === "left" ? br.x - x : align === "right" ? x - tl.x : 2 * Math.min(br.x - x, x - tl.x);
+      items.push({ text: fitHead(h.name, " · " + gnum(h.n), room, width), px: 12.5, x, y: h.cy + (h.R + gap) * sin, align, ink: GP.label });
     }
   } else {
     for (const h of heads) items.push({ text: flowRung(h.depth) + (h.depth ? " · " + gnum(h.n) : ""), px: 12.5,
@@ -4730,7 +4768,6 @@ const ATLAS_SPOTS = [[0, 0], [0, -30], [0, 30], [0.6, 0], [-0.6, 0]];
 // notes are on screen, the sub-areas once the notes are named.
 const ATLAS_CAPS = { area: 12, sub: 20, note: 30, ctx: 4 };
 const ATLAS_CONTEXT_MIN = 20, ATLAS_CONTEXT_ALPHA = 0.45;
-const clip = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
 function drawAtlasNames(ctx, scale) {
   if (namesMode === "off") return;
   const g = atlasNow, auto = namesMode === "auto";

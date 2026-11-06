@@ -89,6 +89,28 @@ def test_clusters_sit_on_one_ring_biggest_first_and_never_touch():
 
 
 @needs_node
+def test_an_arrangement_keeps_room_for_its_picture_on_a_narrow_frame():
+    wide, phone, flow = _pure("""
+      return [layoutRoom(912, 165, 165), layoutRoom(302, 165, 165), layoutRoom(302, 40, 190)];
+    """)
+    assert wide == [165, 165]   # room to spare: the heads keep all of it
+    assert sum(phone) == pytest.approx(151) and phone[0] == phone[1]
+    assert sum(flow) == pytest.approx(151) and flow[0] < flow[1]   # the names keep their share
+
+
+@needs_node
+def test_a_head_too_long_for_its_side_is_cut_and_not_dropped():
+    short, cut, floor = _pure("""
+      const w = t => t.length * 7;   // a text 7px a character
+      const long = "Deep Learning (Goodfellow, Bengio, Courville)";
+      return [fitHead("Statistica", " · 89", 165, w), fitHead(long, " · 149", 165, w), fitHead(long, " · 149", 10, w)];
+    """)
+    assert short == "Statistica · 89"
+    assert cut.endswith("… · 149") and len(cut) * 7 <= 165
+    assert floor == "Deep …" + " · 149"   # past the floor it stands as it is, and paintNames decides
+
+
+@needs_node
 def test_a_flow_reads_left_to_right_and_a_tall_level_takes_more_columns():
     out = _pure("""
       const ids = n => Array.from({length: n}, (_, i) => "u" + i);

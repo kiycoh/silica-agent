@@ -93,6 +93,17 @@
   display: none;
 }
 
+/* Stacked (syncSideFold, a phone): the row spans the view at the top and the
+   tabs and their line stand under it, on the row's 34px and the bar's 8px gap. */
+#view-graph.side-stacked #graph-side {
+  left: 12px;
+  width: auto;
+}
+
+#view-graph.side-stacked #graph-bar.by-side {
+  padding: 54px 12px 0;
+}
+
 #graph-key {
   flex: none;
   padding: 0.4rem 0.75rem;

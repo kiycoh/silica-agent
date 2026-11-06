@@ -945,6 +945,8 @@ def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> s
     from mdit_py_plugins.dollarmath import dollarmath_plugin
     from mdit_py_plugins.footnote import footnote_plugin
 
+    from silica.kernel.link.ast import join_code_aliases
+
     text = _escape_table_aliases(_strip_ofm_meta(text or ""))
     md = (
         MarkdownIt(options_update={"highlight": _highlight})
@@ -989,7 +991,7 @@ def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> s
         # `chemistry.md`, nested inside the <a href> the browser then unnests.
         # Whoever writes `[...](url)` has already said where the link points.
         depth = 0
-        for child in tok.children:
+        for child in join_code_aliases(tok.children):
             if child.type == "link_open":
                 depth += 1
             elif child.type == "link_close":

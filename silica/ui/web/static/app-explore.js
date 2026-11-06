@@ -91,6 +91,10 @@ const inFrame = (m) => m === "graph" || m === "flow" || m === "clusters";
 // SIDE_FOLD_W the column is one row, the find and Key, beside the tabs; Key
 // opens scope, compare and the frame's key together, where they stood.
 const SIDE_FOLD_W = 760;
+// Under this the folded row (216px) and the tabs (12rem at least) no longer fit
+// side by side: at 390 the find covered Flow and Clusters and Key covered Folders,
+// so only Graph could be pressed. The row takes the top and the tabs stand under it.
+const SIDE_STACK_W = 460;
 let graphKeyOpen = false;
 
 function syncSideFold() {
@@ -100,6 +104,7 @@ function syncSideFold() {
   const folded = w < SIDE_FOLD_W;
   if (!folded) graphKeyOpen = false;   // the next fold starts shut
   view.classList.toggle("side-folded", folded);
+  view.classList.toggle("side-stacked", w < SIDE_STACK_W);
   view.classList.toggle("key-open", folded && graphKeyOpen);
   const key = $("#graph-key");
   key.hidden = !folded || !inFrame(graphMode);
