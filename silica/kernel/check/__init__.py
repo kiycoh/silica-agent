@@ -25,6 +25,9 @@ GRADES: dict[str, str] = {
     "source status": "warning",
     "date not found": "warning",
     "inconsistent": "warning",
+    # Never error: the lanes vet no page, and an unvetted page may not carry
+    # the grade that says the writer is wrong (ADR-0110 amendment, point 9).
+    "web disagrees": "warning",
     "quotation without its source": "nit",
     "no pinpoint": "nit",
 }

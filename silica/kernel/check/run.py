@@ -229,7 +229,10 @@ def _verdict_rows(v: dict, line: int) -> tuple[list[dict], list[dict]]:
         return [], [{"state": "not checked", "line": line, "say": why}]
     kind = v["kind"]
     if kind in ("supported", "not a statement of fact"):
-        return [], [{"state": kind, "line": line, "say": f"{who}{p}"}]
+        # `at` so a selection's box can name what backs it; a verdict cached
+        # before 2026-11-06 has none, and the box then says only "supported".
+        at = {"at": v["at"]} if v.get("at") else {}
+        return [], [{"state": kind, "line": line, "say": f"{who}{p}", **at}]
     kind = "not found" if kind == "not in these passages" else kind
     # `model`: the drawer turns these hollow on an edit until the next check,
     # while the rules run again (point 11).
@@ -272,6 +275,15 @@ def _summary(path: str, blocks: list, pool: pl.Pool, findings: list[dict], state
     }
 
 
+def overlapping(blocks: list, lines: tuple[int, int]) -> list:
+    """The blocks a 1-based inclusive range touches. Overlap, not containment:
+    a selection inside a paragraph of several lines lies inside no block's
+    span, and containment found none (ADR-0110, amendment of 2026-11-06, point
+    4). ADR-0134's cards hold whole blocks, so they read the same. `end` is 0
+    on a Block split() has not finished."""
+    return [b for b in blocks if b.line <= lines[1] and (b.end or b.line) >= lines[0]]
+
+
 def read_cache(vault: str, path: str) -> dict:
     """{"verdicts": {key: verdict}, "report": the last check's report}; empty
     when the note was never checked or its file is torn."""
@@ -297,15 +309,16 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
     `cache_only`, only the verdicts already paid for are read and nothing is
     asked: the drawer's rerun after an edit. `cancelled` is polled before
     each call; the verdicts paid for until then are kept. `lines`, a
-    1-based inclusive range, checks only the blocks inside it: one card of
-    a reading the reader writes (ADR-0134 point 4)."""
+    1-based inclusive range, checks only the blocks it touches: one card of
+    a reading the reader writes (ADR-0134 point 4), or a selection, which
+    widens to its blocks (ADR-0110, amendment of 2026-11-06, point 4)."""
     notes, files = pl.walk(vault)
     if path not in notes:
         raise FileNotFoundError(path)
     me = notes[path]
     blocks, defs = blk.split(me.text)
     if lines is not None:
-        blocks = [b for b in blocks if lines[0] <= b.line and b.end <= lines[1]]
+        blocks = overlapping(blocks, lines)
     res = pl.Resolver(notes, files)
     body = me.text[sum(len(x) + 1 for x in me.text.split("\n")[:blk.body_start(me.text)]):]
     named_all = {p for _t, p in res.links(body) if p} | res.mentions(body)

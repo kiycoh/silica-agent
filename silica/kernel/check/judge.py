@@ -96,7 +96,10 @@ def by_jev(text: str, passages: list[dict], decide: Decide) -> dict | None:
     if p < THRESHOLDS.get(kind, 1.0):
         return {"state": "not checked", "kind": kind, "p": p, "by": "jev"}
     out = {"kind": kind, "p": p, "by": "jev"}
-    if kind in ("contradicted", "overstated", "off-point") and passages:
+    # "supported" too since 2026-11-06: a checked selection prints what backs
+    # it (ADR-0110 amendment), and a web verdict must name its page. One more
+    # decision per supported block when more than one passage was read.
+    if kind in ("supported", "contradicted", "overstated", "off-point") and passages:
         rest = which_passage(text, passages, decide)
         if rest:
             out["at"] = f"{rest['path']}:{rest['line']}"
