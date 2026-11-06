@@ -57,6 +57,7 @@ _MIN_ACROSS = 3
 _MIN_DOWN = 2
 _THIN = 2.5
 _MAX_OBJECTS = 4000
+_CELL_EDGE = re.compile(r"(?<!\\)\|")
 _CAPTION = re.compile(r"(?:table|tabella|tab\.|tabla|tableau|tabelle)\s*[0-9ivxlc]+\b", re.I)
 
 # No "plain text" here: in the bench's crop prompt those words made Qwen answer
@@ -440,6 +441,15 @@ def _accepted(text: str | None, finish_reason: str | None, grid: str) -> str | N
     # A box the layout model took for a table (a column of prose, a list) is
     # refused in words, or answered with something that has no rows.
     if "NOT TABLE" in md[:40] or (len(rows) < 2 and "<table" not in md):
+        return None
+    # A header short of a cell slides every value one column right and drops the last
+    # one on the page, with every digit still printed: the Attention paper's Table 3
+    # came back with 12 headers over 13 columns and lost `params`. PDFium's text is
+    # flat but says nothing false. Refused and not repaired: which cell is missing is
+    # a guess, and the prompt's wording is benched, so it does not carry this rule.
+    if "<table" not in md and len({
+            len(_CELL_EDGE.split(r.strip().removeprefix("|").removesuffix("|")))
+            for r in md.splitlines() if "|" in r}) > 1:
         return None
     # Silica keeps the source's words, and a number is where a slip costs most.
     # Tags out first: the rowspan="2" the prompt asks for prints nowhere. Whole
