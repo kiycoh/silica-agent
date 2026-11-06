@@ -32,6 +32,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Protocol, TYPE_CHECKING
 
+from silica.kernel.base import notekey
+
 if TYPE_CHECKING:
     from silica.kernel.recall.cooccurrence import CooccurStore
 
@@ -128,7 +130,7 @@ def _with_md(path: str) -> str:
 
 
 def _stem_title(node_id: str) -> str:
-    return node_id.rsplit("/", 1)[-1].removesuffix(".md")
+    return notekey.stem(node_id)
 
 
 def _bfs(root: str, graph: GraphLike, hops: int) -> dict[str, tuple[int, str | None]]:
@@ -577,9 +579,9 @@ def _matches_in(note: str, note_paths: list[str], titles: dict[str, str]) -> lis
     for c in (cand, cand + ".md", cand.removesuffix(".md")):
         if c in key_set:
             return [c]
-    target = cand.removesuffix(".md").rsplit("/", 1)[-1].lower()
+    target = notekey.stem(cand).lower()
     return [path for path in keys
-            if path.removesuffix(".md").rsplit("/", 1)[-1].lower() == target
+            if notekey.stem(path).lower() == target
             or (titles.get(path, "") or "").lower() == target]
 
 

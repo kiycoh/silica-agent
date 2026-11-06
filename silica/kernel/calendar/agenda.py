@@ -26,6 +26,7 @@ import datetime as dt
 import re
 from collections.abc import Sequence
 
+from silica.kernel.base import notekey
 from silica.kernel.calendar.occurrences import Occurrence, days
 from silica.kernel.calendar.tasks import Task
 
@@ -84,7 +85,7 @@ def agenda(win_start: dt.date, win_end: dt.date, *,
 
     daily_stems: set[str] = set()
     for path, day in sorted((dailies or {}).items()):
-        stem = path.rsplit("/", 1)[-1].removesuffix(".md")
+        stem = notekey.stem(path)
         daily_stems.add(stem)
         row = by_day.get(day.isoformat())
         if row is not None:

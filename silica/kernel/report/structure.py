@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from silica.kernel.base import notekey
+
 logger = logging.getLogger(__name__)
 
 # (epoch,) -> StructureMap. One entry: unlike the graph memo there is no folder
@@ -570,7 +572,7 @@ def _build_burst(k: int) -> list[dict]:
         gid = key + ".md" if key + ".md" in m.degree else key
         try:
             content = DRIVER.read_note(
-                NoteRef(name=gid.rsplit("/", 1)[-1].removesuffix(".md"), path=gid)
+                NoteRef(name=notekey.stem(gid), path=gid)
             ).content
             mt = mtime_of(gid) if mtime_of else None
         except Exception:

@@ -17,6 +17,8 @@ import re
 import statistics
 from typing import Any, Callable
 
+from silica.kernel.base import notekey
+
 _WINDOW_CHARS = 800  # cross-encoder document budget (chars): excerpt window + gate unit
 # Frozen by the phase-0 run (2026-07-17, bench/phase0_gates.json): the spec's
 # clean-gap expectation was REFUTED — real-vault notes are long (ratio p50 3.6,
@@ -170,7 +172,7 @@ def _read_body(path: str, *, origin: str = "vault") -> tuple[str, str]:
     from silica.kernel.base import frontmatter
 
     _data, _raw, body = frontmatter.split(content)
-    name = path.rsplit("/", 1)[-1].removesuffix(".md")
+    name = notekey.stem(path)
     return name, (body or content)
 
 

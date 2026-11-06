@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from silica.kernel.base import notekey
 from silica.kernel.calendar.daily import DailyRule, compile_format, daily_date, daily_rule
 
 # The same shapes Tasks accepts: a list item of any marker, under any depth of
@@ -122,7 +123,7 @@ def _filename_date(rel: str, settings: dict) -> dt.date | None:
     folders = [str(f).strip("/") for f in settings.get("filenameAsDateFolders") or []]
     if folders and not any(rel.startswith(f + "/") for f in folders if f):
         return None
-    stem = rel.rsplit("/", 1)[-1].removesuffix(".md")
+    stem = notekey.stem(rel)
     fmt = str(settings.get("filenameAsScheduledDateFormat") or "").strip()
     if fmt:
         compiled = compile_format(fmt)

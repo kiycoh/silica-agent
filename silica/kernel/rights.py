@@ -19,6 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
+from silica.kernel.base import notekey
 from silica.kernel import publish
 from silica.kernel.base.noteshape import SOURCES_TAIL_RE
 
@@ -274,7 +275,7 @@ def _keep(url: str, data: bytes, ctype: str, vault: Path) -> Path:
 
 def _title(path: str, fm: dict) -> str:
     t = fm.get("title")
-    return t.strip() if isinstance(t, str) and t.strip() else path.rsplit("/", 1)[-1].removesuffix(".md")
+    return t.strip() if isinstance(t, str) and t.strip() else notekey.stem(path)
 
 
 def _body(text: str) -> str:

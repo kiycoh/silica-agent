@@ -16,6 +16,8 @@ import logging
 from collections import Counter
 from typing import TYPE_CHECKING
 
+from silica.kernel.base import notekey
+
 if TYPE_CHECKING:
     from silica.kernel.recall.cooccurrence import CooccurStore
 
@@ -109,7 +111,7 @@ def build_vault_map(
                     dated_count += 1
                 if props and props.get("contested"):
                     contested_names.append(
-                        ref.path.rsplit("/", 1)[-1].removesuffix(".md")
+                        notekey.stem(ref.path)
                     )
             if contested_names:
                 shown = ", ".join(f"[[{n}]]" for n in contested_names[:max_contested])
@@ -171,7 +173,7 @@ def build_vault_map(
                 key=lambda p: len(store.note_nodes(p)),
                 reverse=True,
             )[:max_hubs]
-            hub_names = [p.rsplit("/", 1)[-1].removesuffix(".md") for p in ranked]
+            hub_names = [notekey.stem(p) for p in ranked]
             if hub_names:
                 lines.append(
                     "- Hub notes: " + ", ".join(f"[[{h}]]" for h in hub_names)

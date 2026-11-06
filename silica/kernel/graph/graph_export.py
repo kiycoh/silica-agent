@@ -31,6 +31,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from silica.kernel.base import notekey
 from silica.kernel.base.layout import is_vault_artifact
 from silica.kernel.base.noteshape import NATIVE_TYPES
 
@@ -339,7 +340,7 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
         src = src_raw.replace("\\", "/")
         if src not in node_ids:
             continue
-        tgt_name = tgt_raw.removesuffix(".md").rsplit("/", 1)[-1]
+        tgt_name = notekey.stem(tgt_raw)
         ghost_id  = f"__unresolved__{tgt_name}"
 
         if ghost_id not in ghost_nodes:
@@ -946,7 +947,7 @@ def _is_file_slug(note_id: str) -> bool:
     """A title that is a file name and not a name: no space, three or more
     parts joined by - or _, one of them a number (`Goodfellow-38-15-2-...`,
     a daily `2026-10-28`). "GPT-4" and "Cross-validation" are names."""
-    stem = note_id.rsplit("/", 1)[-1].removesuffix(".md")
+    stem = notekey.stem(note_id)
     parts = re.split(r"[-_]", stem)
     return not re.search(r"\s", stem) and len(parts) >= 3 and any(p.isdigit() for p in parts)
 
@@ -1279,7 +1280,7 @@ def cluster_hub_of(ctx: dict, path: str) -> str | None:
     hub = (gctx or {}).get("hub")
     if not hub:
         return None
-    return hub.rsplit("/", 1)[-1].removesuffix(".md")
+    return notekey.stem(hub)
 
 
 def canvas_metrics(nodes: list[dict], edges: list[dict], k: int = 400) -> tuple[dict[str, float], int]:

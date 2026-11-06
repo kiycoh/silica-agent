@@ -13,6 +13,7 @@ from pathlib import Path
 
 import orjson
 
+from silica.kernel.base import notekey
 from silica.kernel.report.graph_report.models import VaultReport
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ def append_energy_point(series_path: Path, record: dict,
 
 
 def _short(p: str | None) -> str:
-    return p.rsplit("/", 1)[-1].removesuffix(".md") if p else "—"
+    return notekey.stem(p) if p else "—"
 
 
 _TOTAL_LABELS = {
