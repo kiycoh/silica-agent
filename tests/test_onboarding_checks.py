@@ -480,7 +480,8 @@ class TestCheckLanguage:
         frozen italian, but a frontmatter-heavy sample makes `detect` say
         english. The declaration is authority — no false 'mismatch' warning."""
         import silica.kernel.recall.cooccurrence as cooc_mod
-        from silica.onboarding.checks import check_language, detect_vault_language
+        from silica.onboarding.checks import check_language
+        from silica.kernel.vault_language import detect_vault_language
 
         (tmp_path / "n.md").write_text(
             "---\nlast: 2026-07-09\nrelated:\n  - null\n---\nappunto italiano",
@@ -595,7 +596,7 @@ class TestSampleVaultTextSpread:
         return " ".join(rng.choice(words) for _ in range(n))
 
     def test_alphabetical_head_minority_does_not_dominate_detection(self, tmp_path):
-        from silica.onboarding.checks import detect_vault_language
+        from silica.kernel.vault_language import detect_vault_language
 
         en_words = [
             "the", "company", "report", "market", "update", "system", "project",
@@ -948,7 +949,7 @@ class TestDetectionIgnoresTheAgentsOwnOutput:
         vault to `english`, and doctor then proposed rebuilding the
         co-occurrence store in English — freezing the error. The agent's own
         output never votes on the vault's language."""
-        from silica.onboarding.checks import detect_vault_language
+        from silica.kernel.vault_language import detect_vault_language
 
         for i in range(3):
             (tmp_path / f"nota{i}.md").write_text(f"# nota\n\n{self.IT}", encoding="utf-8")
@@ -960,7 +961,7 @@ class TestDetectionIgnoresTheAgentsOwnOutput:
 
     def test_vault_root_artifacts_do_not_vote(self, tmp_path):
         """GRAPH_REPORT.md sorts before every note and is English scaffolding."""
-        from silica.onboarding.checks import detect_vault_language
+        from silica.kernel.vault_language import detect_vault_language
 
         (tmp_path / "GRAPH_REPORT.md").write_text(
             "# Silica Vault Report\n\n" + self.EN * 10, encoding="utf-8")
@@ -972,7 +973,7 @@ class TestDetectionIgnoresTheAgentsOwnOutput:
     def test_the_conversion_archive_does_not_vote(self, tmp_path):
         """`silica/done/` holds verbatim converted sources — the input's
         language, not the vault's."""
-        from silica.onboarding.checks import detect_vault_language
+        from silica.kernel.vault_language import detect_vault_language
 
         (tmp_path / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")
         done = tmp_path / "silica" / "done"
@@ -988,7 +989,7 @@ class TestReplyLanguage:
     IT = TestDetectionIgnoresTheAgentsOwnOutput.IT
 
     def test_explicit_conventions_win(self, tmp_path):
-        from silica.onboarding.checks import reply_language_for
+        from silica.kernel.vault_language import reply_language_for
 
         (tmp_path / "vault.yaml").write_text(
             "conventions:\n  reply_language: english\n", encoding="utf-8")
@@ -1000,14 +1001,14 @@ class TestReplyLanguage:
         turns carry no language of their own, and only the explicit
         conventions ever reached the prompt. The vault's authority (declared,
         else detected) is the missing fallback."""
-        from silica.onboarding.checks import reply_language_for
+        from silica.kernel.vault_language import reply_language_for
 
         for i in range(3):
             (tmp_path / f"nota{i}.md").write_text(self.IT, encoding="utf-8")
         assert reply_language_for(str(tmp_path)) == "italian"
 
     def test_no_vault_returns_none(self):
-        from silica.onboarding.checks import reply_language_for
+        from silica.kernel.vault_language import reply_language_for
 
         assert reply_language_for("") is None
 

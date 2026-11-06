@@ -207,7 +207,7 @@ def speech_lang(config: Any) -> str:
     if fixed and fixed != "auto":
         return fixed
     from silica.kernel.text.language import ISO
-    from silica.onboarding.checks import reply_language_for
+    from silica.kernel.vault_language import reply_language_for
 
     name = (reply_language_for((getattr(config, "vault_path", "") or "").strip()) or "").strip().lower()
     if name in ISO:

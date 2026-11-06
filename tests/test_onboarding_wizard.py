@@ -1207,7 +1207,7 @@ class TestAskSecret:
 
 class TestUnindexableDocs:
     def test_finds_docs_the_markdown_index_cannot_read(self, tmp_path):
-        from silica.onboarding.wizard import unindexable_docs
+        from silica.sources.ingest import unindexable_docs
 
         (tmp_path / "notes.md").write_text("indexed", encoding="utf-8")
         (tmp_path / "cover.png").write_bytes(b"not a document")
@@ -1225,7 +1225,7 @@ class TestUnindexableDocs:
         screenshots with "N documents to convert" — and `<inbox>/Images` is where
         Silica puts the figures it extracted itself, so it would offer to
         re-ingest its own output."""
-        from silica.onboarding.wizard import unindexable_docs
+        from silica.sources.ingest import unindexable_docs
 
         images = tmp_path / "Inbox" / "Images"
         images.mkdir(parents=True)
@@ -1247,7 +1247,7 @@ class TestUnindexableDocs:
         assert set(CONVERTIBLE_DOC_EXTS) <= set(DOC_EXTS)
 
     def test_walk_is_bounded(self, tmp_path):
-        from silica.onboarding.wizard import unindexable_docs
+        from silica.sources.ingest import unindexable_docs
 
         for i in range(30):
             (tmp_path / f"f{i:02d}.pdf").write_bytes(b"%PDF-1.4")

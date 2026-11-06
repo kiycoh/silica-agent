@@ -621,7 +621,7 @@ def switch_vault(arg: str) -> VaultSwitch:
         reset_manifest_cache,
     )
     from silica.onboarding.adopt import declare_write_dir, seed_silicaignore
-    from silica.onboarding.checks import language_status
+    from silica.kernel.vault_language import language_status
 
     target = resolve_vault_switch(arg)
     if target.error:
@@ -835,7 +835,7 @@ def _dc_vault(args: list[str], **_) -> bool:
 
         count = len(list(Path(CONFIG.vault_path).rglob("*.md")))
         CONSOLE.print(f"  Notes:   {count}")
-        from silica.onboarding.checks import language_status
+        from silica.kernel.vault_language import language_status
 
         lang, store_lang, drift = language_status(CONFIG.vault_path)
         if lang and drift:

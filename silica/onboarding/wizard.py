@@ -554,35 +554,11 @@ def _offer_zotero(input_fn: Callable[[str], str], vault: Path) -> None:
         CONSOLE.print(f"  {GLYPHS['ok']} zotero: library {library}")
 
 
-def unindexable_docs(vault: Path, cap: int = _DOC_SCAN_CAP) -> list[Path]:
-    """Documents present in the vault that the index cannot read.
-
-    The index is markdown-only (`fs_backend._build_index` skips every non-`.md`
-    file), so a vault of PDFs answers every question with nothing until
-    `/convert` turns them into notes. Onboarding is the one place that sees the
-    vault before the user asks their first question, so it is where the gap gets
-    named.
-
-    `CONVERTIBLE_DOC_EXTS`, not the full `DOC_EXTS`: the converter also takes
-    images and media, and those sitting in a vault are attachments, not documents
-    someone is waiting to ingest. Counting them would greet a user who pastes
-    screenshots with "500 documents to convert", and would count the figures
-    Silica itself extracted into `<inbox>/Images`.
-    """
-    from silica.kernel.base.formats import CONVERTIBLE_DOC_EXTS
-
-    out: list[Path] = []
-    for i, p in enumerate(vault.rglob("*")):
-        if i >= cap:
-            break
-        if p.suffix.lower() in CONVERTIBLE_DOC_EXTS and p.is_file():
-            out.append(p)
-    return out
-
-
 def _warn_unindexable(vault: Path) -> None:
     """One line naming the documents `/convert` still has to bring in."""
-    docs = unindexable_docs(vault)
+    from silica.sources.ingest import unindexable_docs
+
+    docs = unindexable_docs(vault, _DOC_SCAN_CAP)
     if not docs:
         return
     names = ", ".join(p.name for p in docs[:3])

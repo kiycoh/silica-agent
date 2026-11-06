@@ -1243,7 +1243,7 @@ def silica_vault_report(
     try:
         if vault_path:
             from silica.kernel.base.manifest import active_done_dir
-            from silica.onboarding.wizard import unindexable_docs
+            from silica.sources.ingest import unindexable_docs
 
             root = Path(vault_path)
             # rglob, not glob: the archive mirrors the inbox tree since

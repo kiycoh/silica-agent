@@ -41,6 +41,32 @@ def _announced_target(target_dir: str) -> str:
         return target_dir
 
 
+def unindexable_docs(vault: Path, cap: int = 20_000) -> list[Path]:
+    """Documents present in the vault that the index cannot read.
+
+    The index is markdown-only (`fs_backend._build_index` skips every non-`.md`
+    file), so a vault of PDFs answers every question with nothing until
+    `/convert` turns them into notes. Onboarding is the one place that sees the
+    vault before the user asks their first question, so it is where the gap gets
+    named.
+
+    `CONVERTIBLE_DOC_EXTS`, not the full `DOC_EXTS`: the converter also takes
+    images and media, and those sitting in a vault are attachments, not documents
+    someone is waiting to ingest. Counting them would greet a user who pastes
+    screenshots with "500 documents to convert", and would count the figures
+    Silica itself extracted into `<inbox>/Images`.
+    """
+    from silica.kernel.base.formats import CONVERTIBLE_DOC_EXTS
+
+    out: list[Path] = []
+    for i, p in enumerate(vault.rglob("*")):
+        if i >= cap:
+            break
+        if p.suffix.lower() in CONVERTIBLE_DOC_EXTS and p.is_file():
+            out.append(p)
+    return out
+
+
 def _draft_title(body: str, stem: str) -> str:
     """First `# ` heading, else the file stem. Never a prose fragment: the
     audit's `minutes of compute` came from letting a model pick a mid-sentence

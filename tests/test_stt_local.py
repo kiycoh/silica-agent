@@ -96,18 +96,18 @@ def test_speech_lang_prefers_the_fixed_dictation_language(monkeypatch):
 
 
 def test_speech_lang_maps_the_vault_language_to_a_bcp47_tag(monkeypatch):
-    from silica.onboarding import checks
+    from silica.kernel import vault_language
 
     class Cfg:
         stt_lang = "auto"
         vault_path = "/some/vault"
 
-    monkeypatch.setattr(checks, "reply_language_for", lambda v: "Italian")
+    monkeypatch.setattr(vault_language, "reply_language_for", lambda v: "Italian")
     assert stt.speech_lang(Cfg()) == "it"
-    monkeypatch.setattr(checks, "reply_language_for", lambda v: "de")
+    monkeypatch.setattr(vault_language, "reply_language_for", lambda v: "de")
     assert stt.speech_lang(Cfg()) == "de"
-    monkeypatch.setattr(checks, "reply_language_for", lambda v: "chinese")
+    monkeypatch.setattr(vault_language, "reply_language_for", lambda v: "chinese")
     assert stt.speech_lang(Cfg()) == "zh"
     # an unknown name is no tag at all: the browser's own default beats a guess
-    monkeypatch.setattr(checks, "reply_language_for", lambda v: "klingon")
+    monkeypatch.setattr(vault_language, "reply_language_for", lambda v: "klingon")
     assert stt.speech_lang(Cfg()) == ""

@@ -1702,12 +1702,16 @@ def test_respace_prose_fixes_tight_punctuation_outside_math_and_code():
     assert "a,b = 1,2" in fixed                  # fenced code untouched
 
 
-# --- book segmentation (split_markdown) -------------------------------------
+# --- book segmentation (_split_markdown_flagged) -----------------------------
+
+
+def _split(md: str, max_chars: int = conv._MAX_SEGMENT_CHARS) -> list[str]:
+    return [seg for seg, _ in conv._split_markdown_flagged(md, max_chars)]
 
 def test_split_on_headings_splits_chapters():
     # max_chars small enough that no two sections pack together → cuts land
     # exactly on the heading boundaries.
-    segs = conv.split_markdown("# Book\n\nintro\n\n## One\n\naaa\n\n## Two\n\nbbb", max_chars=20)
+    segs = _split("# Book\n\nintro\n\n## One\n\naaa\n\n## Two\n\nbbb", max_chars=20)
     assert len(segs) == 3
     assert segs[0].startswith("# Book")      # preamble attached to first heading
     assert "## One" in segs[1] and "## Two" in segs[2]
@@ -1715,7 +1719,7 @@ def test_split_on_headings_splits_chapters():
 
 def test_split_ignores_headings_inside_code_fences():
     md = "intro\n\n```\n# not a heading\n```\n\n## Real\n\nbody"
-    segs = conv.split_markdown(md, max_chars=40)
+    segs = _split(md, max_chars=40)
     assert len(segs) == 2                     # the fenced '# ...' is not a boundary
     assert "# not a heading" in segs[0]
 
@@ -1725,7 +1729,7 @@ def test_split_packs_small_sections_together():
     lines (80-page docling probe: 53 raw segments, some 14 chars) — adjacent
     small sections must coalesce instead of becoming micro-notes."""
     md = "".join(f"## S{i}\n\n{'x' * 50}\n\n" for i in range(10))
-    segs = conv.split_markdown(md, max_chars=200)
+    segs = _split(md, max_chars=200)
     assert 1 < len(segs) < 10                  # packed, not one-note-per-heading
     assert all(len(s) <= 200 for s in segs)
     assert segs[0].count("## S") >= 2          # a pack spans multiple headings
@@ -1733,24 +1737,24 @@ def test_split_packs_small_sections_together():
 
 def test_split_small_multiheading_doc_packs_to_one():
     md = "# Paper\n\nintro\n\n## Method\n\naaa\n\n## Results\n\nbbb"
-    assert conv.split_markdown(md) == [md]     # a paper stays one flat note
+    assert _split(md) == [md]     # a paper stays one flat note
 
 
 def test_split_dimensional_fallback_when_no_headings():
     body = "".join(f"Paragraph {i} of heading-less scanned prose.\n\n" for i in range(200))
-    segs = conv.split_markdown(body, max_chars=500)
+    segs = _split(body, max_chars=500)
     assert len(segs) > 1                       # blind body still gets cut into parts
     assert all(len(s) <= 600 for s in segs)    # ≤ max + one paragraph of slack
 
 
 def test_split_size_caps_an_oversized_heading_section():
     big = "## Huge\n\n" + "".join(f"line {i}\n\n" for i in range(300))
-    segs = conv.split_markdown(big, max_chars=400)
+    segs = _split(big, max_chars=400)
     assert len(segs) > 1                        # a giant chapter is split further
 
 
 def test_split_single_small_section_is_one_segment():
-    assert conv.split_markdown("# Paper\n\nshort body") == ["# Paper\n\nshort body"]
+    assert _split("# Paper\n\nshort body") == ["# Paper\n\nshort body"]
 
 
 def test_pdf_book_splits_into_multiple_inbox_notes(tmp_vault, monkeypatch):
@@ -2121,7 +2125,7 @@ def test_references_heading_variants_match():
 
 def test_split_markdown_unchanged_without_references():
     md = "# Paper\n\nintro\n\n## Method\n\naaa\n\n## Results\n\nbbb"
-    assert conv.split_markdown(md) == [md]
+    assert _split(md) == [md]
 
 
 def test_doc_citation_finds_doi_and_arxiv_in_head(tmp_path):

@@ -256,7 +256,7 @@ def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = Non
 
     Returns the list of created note paths. A small document is a single note; a
     book-sized one is split into chapter/size-bounded segments (see
-    ``split_markdown``) so RECON — which caps concepts PER FILE — sees book
+    ``_split_markdown_flagged``) so RECON — which caps concepts PER FILE — sees book
     units, not the whole book collapsed into one note. Dispatch by extension
     over ``formats.DOC_EXTS``; anything else → ``ValueError``. Side artifacts (extracted
     figures) go to ``<dest_dir>/Images`` when given, else ``<inbox>/Images``.
@@ -485,7 +485,17 @@ def _section_kind(section: str) -> str:
 
 
 def _split_markdown_flagged(md: str, max_chars: int) -> list[tuple[str, str]]:
-    """split_markdown's engine, each segment carrying its `_section_kind`.
+    """Book-sized markdown → RECON-sized segments, each carrying its `_section_kind`.
+
+    Headings (``#``/``##``) are the cut points; any section still over
+    ``max_chars`` is further split on paragraph boundaries — the same
+    dimensional fallback that carries a heading-less scan. Adjacent pieces are
+    then greedily packed up to ``max_chars``: real converters flatten every
+    section to ``##`` and emit lone ``## Chapter N`` lines (verified on an
+    80-page docling probe: 53 raw segments, some 14 chars), so raw sections
+    over-fragment — packing restores chapter-sized units and absorbs the
+    micro-segments. A document smaller than ``max_chars`` packs to a single
+    segment. Always returns ≥1 segment.
 
     The kind is per SECTION (heading-level), inherited by its size-split
     continuation pieces, and packing never merges across a kind change — so a
@@ -512,22 +522,6 @@ def _split_markdown_flagged(md: str, max_chars: int) -> list[tuple[str, str]]:
     if cur.strip():
         out.append((cur, cur_kind))
     return out or [(md, "")]
-
-
-def split_markdown(md: str, max_chars: int = _MAX_SEGMENT_CHARS) -> list[str]:
-    """Book-sized markdown → RECON-sized segments: heading-split, packed to size.
-
-    Headings (``#``/``##``) are the cut points; any section still over
-    ``max_chars`` is further split on paragraph boundaries — the same
-    dimensional fallback that carries a heading-less scan. Adjacent pieces are
-    then greedily packed up to ``max_chars``: real converters flatten every
-    section to ``##`` and emit lone ``## Chapter N`` lines (verified on an
-    80-page docling probe: 53 raw segments, some 14 chars), so raw sections
-    over-fragment — packing restores chapter-sized units and absorbs the
-    micro-segments. A document smaller than ``max_chars`` packs to a single
-    segment. Always returns ≥1 segment.
-    """
-    return [seg for seg, _ in _split_markdown_flagged(md, max_chars)]
 
 
 def _segment_slug(segment: str, fallback: str) -> str:

@@ -300,7 +300,9 @@ def test_review_protocol_lives_in_the_tool_results_not_the_prompt():
     """BASE keeps only the consent rule; the step-by-step ledger protocol is
     handed over by silica_vault_report and silica_ledger_next at the moment it
     applies (docs/evaluation/prompt-rules-2026-09-28.md)."""
-    from silica.prompts import SYSTEM_PROMPT
+    from silica.prompts import system_prompt
+
+    SYSTEM_PROMPT = system_prompt()
 
     assert "silica_vault_report" in SYSTEM_PROMPT and "yes" in SYSTEM_PROMPT
     assert "silica_ledger_next" not in SYSTEM_PROMPT
