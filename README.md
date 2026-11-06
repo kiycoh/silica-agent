@@ -98,14 +98,14 @@ Silica is single-user: one person, one vault. There are no per-person permission
   <sub>One note in its reading order: what to read first, and what it unlocks.</sub>
 
 - On the graph, a click makes a note the centre of its own map. In 2D the areas are an atlas: each note owns the ground nearest it, and zooming in names the sub-areas, then the notes.
-- In Explore, Folders shades each folder by how much it mixes areas. Areas shows one area and the links to its neighbours over the coupling of every pair, each link with the sentence that carries it. Read gives the whole vault a reading order from its hubs.
+- In Explore, Clusters gathers each area in one place on a ring, Flow puts one note in its reading order inside the graph, and Folders shades each folder by how much it mixes areas. Click a link to read the line it is written on. Read gives the whole vault a reading order from its hubs.
 - Compare one folder or area with another: the panel says what characterises each and quotes the links that join them.
 - Click a concept to light the notes that treat it; a second concept narrows them to the notes that treat both, and the panel quotes the lines.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/explore-graph-3d.png" alt="The vault as a 3D graph: notes coloured by area, edge types and node shapes listed in the legend" width="820" />
   <br/>
-  <sub>The same vault in 3D, coloured by the 23 areas it sorts itself into. A note's size is how much the vault routes through it.</sub>
+  <sub>The same vault in 3D, coloured by the 23 areas it sorts itself into. A note's size is how many notes it links with.</sub>
 </p>
 
 **Trust what it writes.** Every write is checked, shown to you and reversible.

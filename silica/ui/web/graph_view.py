@@ -524,7 +524,7 @@ def _frame_context(
     # bridging action. The amber GAP overlay and its checkbox stay: that IS a key.
     #
     # The one list of areas (ADR-0058). Named by the hub note, the name the
-    # Areas surface and the scope picker use; the two c-TF-IDF topics ride the
+    # Clusters tab and the scope picker use; the two c-TF-IDF topics ride the
     # tooltip, and stay the zones' names, so an area and a zone can no longer
     # share one ("variabile · statistica" was both, over 113 and 106 notes).
     # It counts what the matrix counts: a one-note area is a row of zeroes

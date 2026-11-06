@@ -712,10 +712,14 @@ function clearRing(points, centre, R) {
 // Worked out once, so a last pass can move overlapping discs apart by their
 // drawn size, which ForceAtlas2 cannot (adjustSizes is off: it doubled the
 // iterations and cost the purity ADR-0136 measured). In place. Pairs through a
-// grid of the largest disc, so a round is linear in the notes.
-const SPREAD_ROUNDS = 120, GOLDEN = 2.399963;
+// grid sized for nine discs in ten, and the larger of two is the one that looks
+// for the other: on alex_second_brain one note holds 852 links, and a grid of
+// the largest disc took 900 ms for 120 rounds. 600 rounds is what that vault
+// needs to reach no overlap at all (2026-11-06).
+const SPREAD_ROUNDS = 600, GOLDEN = 2.399963;
 function spreadDiscs(x, y, r, gap) {
-  const n = x.length, cell = 2 * Math.max(0, ...r) + gap;
+  const n = x.length, sorted = Float64Array.from(r).sort();
+  const cell = 2 * (sorted[Math.floor(n * 0.9)] || 1) + gap;
   const key = (i, j) => i * 73856093 ^ j * 19349663;
   for (let round = 0; round < SPREAD_ROUNDS; round++) {
     const grid = new Map();
@@ -726,9 +730,10 @@ function spreadDiscs(x, y, r, gap) {
     let moved = 0;
     for (let i = 0; i < n; i++) {
       const cx = Math.floor(x[i] / cell), cy = Math.floor(y[i] / cell);
-      for (let gx = cx - 1; gx <= cx + 1; gx++) for (let gy = cy - 1; gy <= cy + 1; gy++) {
+      const span = Math.ceil((2 * r[i] + gap) / cell);
+      for (let gx = cx - span; gx <= cx + span; gx++) for (let gy = cy - span; gy <= cy + span; gy++) {
         for (const j of grid.get(key(gx, gy)) || []) {
-          if (j <= i) continue;
+          if (r[j] > r[i] || (r[j] === r[i] && j <= i)) continue;
           let dx = x[j] - x[i], dy = y[j] - y[i], d = Math.hypot(dx, dy);
           const min = r[i] + r[j] + gap;
           if (d >= min) continue;
@@ -1090,7 +1095,8 @@ function arrivalStart() {
   const A = ARRIVAL, W = Graph.width(), free = freeWidth();
   const at = arrivalRing(RAW_NODES.filter(n => !n._hidden).map(n =>
     ({ id: n.id, area: n.group == null ? -1 : n.group, links: n.links || 0, r: nodeRadius(n) })),
-    0.42 * Math.min(free, Graph.height()) / KREF);
+    // A frame loaded behind another surface has no size yet.
+    0.42 * (Math.min(free, Graph.height()) || 800) / KREF);
   for (const n of RAW_NODES) {
     const p = at.get(n.id);
     n.__rank = p ? p.rank : 1;
@@ -1159,7 +1165,7 @@ function arrivalDone() {
   paintStat("settled in " + gnum(warmupRun + simTicks) + " ticks");
   applyFilters();   // the atlas comes on, and the links go back under it
   if (then) then();
-  else if (focusIds.length) arrangeFocus();
+  if (focusIds.length) arrangeFocus();
 }
 
 // The layout as it settled gives the fit a disc is counted from (KREF), at the
@@ -1233,6 +1239,7 @@ function placeLayout(arr, from) {
 // stands outside its disc, a note's name to the right of its column.
 const LAYOUT_ROOM = { clusters: [165, 70], flow: [40, 60] }, FLOW_NAME = 190;
 function frameLayout() {
+  if (!ARR || ARR.kind === "map") return;   // asked for on a frame: the tab may have changed
   const { centre: c, layout, heads, kind } = ARR;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   const take = (x, y, r = 0) => {
@@ -1299,6 +1306,7 @@ let flowSeq = 0;
 async function setFlow(root) {
   const seq = ++flowSeq, flowing = ARR && ARR.kind === "flow";
   if (flowing && root === ARR.root) return;
+  sayLayout("Reading the order");   // the first answer on a big vault takes seconds
   const asked = root ? await readPath(root) : null;
   if (seq !== flowSeq) return;
   let d = asked;
@@ -3269,7 +3277,7 @@ const RING_S_PX = 1.6, RING_C_PX = 1.3, RING_GAP_PX = 1.2, RING_MIN_PX = 13;
 // filling ~120px: at 20 the chords and the width wobble both read, at 32
 // neither does. 2048 triangles a node against 72, ~2.4M a frame on the
 // reference vault - and the render budget only pays for them while something
-// moves. Revisit at 5k notes, or if a weak iGPU ever drops frames on a drag.
+// moves. Revisit at 5k notes, or if a weak iGPU ever drops frames on an orbit.
 const NODE_RES = 32;
 // The bundle caches one sphere geometry per node VALUE, and size is
 // round(16 + 40*betweenness, 2) - a near-continuous float, so it was caching
@@ -4516,7 +4524,7 @@ const ATLAS_KEY = "silica-graph-atlas";
 let showAtlas = true;
 try { if (localStorage.getItem(ATLAS_KEY) === "off") showAtlas = false; } catch (e) {}
 { const cb = document.getElementById("cb-atlas"); if (cb) cb.checked = showAtlas; }
-const atlasOn = () => showAtlas && is2D() && !!ATLAS_BY && !ARRIVAL;
+const atlasOn = () => showAtlas && is2D() && !!ATLAS_BY;
 // The draft's disc, 13px at fit on the course, was 0.74 of the median
 // backbone link there, and a link's rest length is the unit (ForceAtlas2's
 // posts are scaled to it, faUnit). The coast is a line of constant width
@@ -4671,7 +4679,9 @@ function atlasLayer(g) {
 // draws the same polygons and segments, one path per colour.
 function drawAtlas(ctx, scale) {
   atlasNow = null;   // what the WebGL layer draws this frame, if anything
-  if (!atlasOn() || ARR) return;
+  // On the circle the links print as the mat they will rest as, over no ground:
+  // at full ink 14,563 chords filled alex_second_brain's circle solid.
+  if (!atlasOn() || ARR || ARRIVAL) return;
   const g = atlasNow = atlasGeometry();
   if (!g.n) return;
   const z = g.zoom = atlasZoom(2 * g.R * scale, g.countries);
@@ -4739,7 +4749,7 @@ function drawAtlasNames(ctx, scale) {
                  spots: around(p) });
   const context = p =>
     items.push({ kind: "ctx", quiet: true, lines: [[clip(p.name, 32).toUpperCase(), 11, 600, GP.label]], spots: around(p) });
-  const lit = hoverId ? [hoverId] : focusIds;
+  const lit = LINK_SEL ? [LINK_SEL.from, LINK_SEL.to] : hoverId ? [hoverId] : focusIds;
   if (lit.length) {
     const roots = new Set(lit);
     for (const id of lit) { const n = NODE_BY_ID[id]; if (n && !n._hidden) note(n, 13, 600, GP.accent); }
@@ -5012,7 +5022,7 @@ function updateEdgeFilter() {
 
 // --- areas: named by their hub note ----------------------------------------
 // The hub note's name, not the community's c-TF-IDF label: it is what the
-// Areas surface and the scope picker call the area, and a title the reader
+// Clusters tab and the scope picker call the area, and a title the reader
 // wrote (ADR-0058). graph_view sends a name only for the areas of more than
 // one note; for the rest this is "", which says nothing rather than repeating
 // the note's own name as its area.
@@ -5256,8 +5266,11 @@ window.addEventListener("resize", () => {
   if (scopeFitPending) requestAnimationFrame(fitScope);
   // The click that arranges also opens the note drawer, which narrows this
   // frame a moment later: the arrangement is framed again for the new size.
-  if (ARR) requestAnimationFrame(ARR.kind === "map" ? frameArrangement : frameLayout);
+  reframe();
 });
+function reframe() {
+  if (ARR) requestAnimationFrame(ARR.kind === "map" ? frameArrangement : frameLayout);
+}
 
 // --- Communities legend: sort by size, toggling ascending <-> descending ----
 let communitySortAsc = true;
@@ -5476,6 +5489,9 @@ window.addEventListener("message", e => {
   if (e.data && e.data.type === "silica-host-drawer") {
     document.body.classList.toggle("host-drawer-open", !!e.data.open);
     document.body.style.setProperty("--drawer-w", (e.data.width || 0) + "px");
+    // The key comes back with the drawer gone, after the resize that framed for
+    // a width with no key in it.
+    reframe();
   }
   // The app's dock floats over this frame's foot and grows during a turn; the
   // corner bars park above it (graph-frame.css --foot).
@@ -5490,6 +5506,7 @@ window.addEventListener("message", e => {
     document.body.style.setProperty("--side-h", (h ? h + 8 : 0) + "px");
     // false only from a folded column with Key shut; an older host sends none
     document.body.classList.toggle("key-folded", e.data.key === false);
+    reframe();   // the same, from the folded column
   }
 });
 
@@ -5549,11 +5566,11 @@ document.addEventListener("keydown", e => {
   document.getElementById("graph-wrap").addEventListener(t, e => {
     wake();
     if (e.type !== "pointermove") fitPending = false;
-    else if (!e.buttons) pickHover2D(e);   // a held button is a pan or a drag
+    else if (!e.buttons) pickHover2D(e);   // a held button is a pan
     // Camera manipulation drops the resolution BEFORE the first heavy paint:
     // capture phase runs ahead of d3-zoom's own handlers, so the very frame
     // this gesture dirties already paints at the motion ratio. A move with a
-    // button held is a drag (camera or node), a wheel notch is a zoom; hover
+    // button held is a pan, a wheel notch is a zoom; hover
     // and plain clicks never blur. Restore rides the usual no-paints timer.
     if (e.type === "wheel" || (e.type === "pointermove" && e.buttons))
       setRes(DRS_SCALE);

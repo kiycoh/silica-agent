@@ -4447,7 +4447,7 @@ def prereq_path(note: str = ""):
             # than as a bare graph: RefD needs the co-occurrence
             # index, and a vault that never built one has no reading order to
             # show, not a reading order of length zero.
-            "hint": "no reading order yet: the prerequisite direction is derived from the "
+            "hint": "No reading order yet: the prerequisite direction is derived from the "
                     "co-occurrence index. Run /report to build it.",
         }
 
@@ -5703,7 +5703,7 @@ def _note_ladder(canon: str, *, near: int = 2, per_rung: int = 3) -> dict:
     The two flat lists this replaced could not say the one thing the DAG knows:
     that a prerequisite has a prerequisite. `ladder` walks three hops each way,
     and the drawer draws the near rungs at `near`; everything past that is a
-    count and a hand-off to the Path surface, which is the one place in the app
+    count and a hand-off to Flow, which is the one place in the app
     that draws a whole ladder. Same reason `per_rung` exists: a 310px column
     that prints all 21 dependents of a hub buries every section under it.
 
@@ -5727,7 +5727,7 @@ def _note_ladder(canon: str, *, near: int = 2, per_rung: int = 3) -> dict:
     for d in sorted(by_depth):
         paths = sorted(by_depth[d], key=_clean_name)
         # Past the near rungs the drawer says how many rather than which: the
-        # names are the Path surface's job and it has the width for them.
+        # names are Flow's job and it has the width for them.
         if abs(d) > near:
             further += len(paths)
             continue

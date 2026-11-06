@@ -362,4 +362,4 @@ def test_the_vault_stays_around_the_rim_faint_and_unnamed():
     paint = js[js.index("function linkPaint("):js.index("// --- 3D: every link in ONE LineSegments")]
     assert '(l._ctx ? "x" : "")' in paint, "a cached paint would outlive the scope"
     draw = js[js.index("function drawNode("):js.index("function drawNodeLabel(")]
-    assert "n._dim || n._ctx || scale < 0.6" in draw
+    assert "n._dim || n._ctx || scale < RING_ZOOM * KREF" in draw

@@ -340,7 +340,7 @@ def drop_structural(prereq_map: dict[str, list[str]], notes: dict[str, dict]) ->
 
     RefD damps a note that cites everything but not one that everything
     cites, and every note a run writes links its hub, its spine and its
-    source: on six nucleated papers the Path view put the `Papers` hub, and
+    source: on six nucleated papers the reading order put the `Papers` hub, and
     the YOLO paper's spine two rungs up, before every note; without them, each
     paper's archived segment stood after each of its notes (2026-10-26).
     """

@@ -122,6 +122,7 @@ def test_the_chat_hears_of_no_view_the_account_does_not_get(monkeypatch):
 # view's cannot ship open to Free by omission. These are the chat's, shared by
 # every account; a new one goes here or into its view's row in config.VIEWS.
 SHARED_ROUTES = {
+    "/link",
     "/", "/asset", "/attachment/{name}", "/bug_report", "/changes", "/changes/diff", "/changes/keep",
     "/chat", "/chat/files/add", "/commands", "/concept", "/concepts", "/config", "/connectors",
     "/connectors/{name}/{action}", "/context", "/docs", "/docs/oauth2-redirect", "/endpoints",
