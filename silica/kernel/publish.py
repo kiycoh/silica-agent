@@ -199,8 +199,12 @@ def available(vault: Path | None = None) -> bool:
     return bool(handle(vault)) and (bool(page_url(vault)) or not hosted())
 
 
-# ADR-0151 point 1: a vault on the Page is a folder of the account's one vault, at most ten.
-MAX_VAULTS = 10
+# ADR-0151 point 1: a vault on the Page is a folder of the account's one vault. MAX_VAULTS is
+# what any account can hold (amendment 2026-11-06) and what vaults() reads up to, never a
+# tier's number: _save_vaults writes back what vaults() read, so a read cut at Free's three
+# would erase the rest of a downgraded account's rows at its next write.
+MAX_VAULTS = 20
+FREE_VAULTS = 3
 VISIBILITY = ("off", "public", "private")
 # The license select's choices; "not stated" is the default (ADR-0151 answer 15a).
 LICENSES = ("not stated", "CC BY 4.0", "CC BY-SA 4.0", "CC BY-NC 4.0", "CC0 1.0", "all rights reserved")
@@ -301,6 +305,15 @@ def private_allowed() -> str:
     return "ok" if names & {"all", "private"} else "paid"
 
 
+def max_vaults() -> int:
+    """How many vaults this account may make (ADR-0151, amendment 2026-11-06).
+    The word that allows Private already says who pays (point 9), so a second
+    word could only disagree with it; a laptop has no tier and takes the most.
+    Only a new vault asks: an account that fell to Free keeps its Public
+    vaults, whose addresses readers hold, and makes no more until it is under."""
+    return FREE_VAULTS if private_allowed() == "paid" else MAX_VAULTS
+
+
 def enforce_tier(vault: Path | None = None) -> list[str]:
     """A Private vault of an account that lost Private turns Off (ADR-0151
     point 10); returns the slugs it turned. Readers keep what they saved,
@@ -331,8 +344,9 @@ def add_vault(folder: str, vault: Path | None = None) -> dict:
         raise ValueError(f"{folder or 'that folder'} cannot be published")
     if not (vault / folder).is_dir():
         raise ValueError(f"{folder} is not a folder of this vault")
-    if len(items) >= MAX_VAULTS:
-        raise ValueError(f"a page holds {MAX_VAULTS} vaults at most")
+    limit = max_vaults()
+    if len(items) >= limit:
+        raise ValueError(f"a page holds {limit} vaults at most")
     for v in items:
         if _within(folder, v["folder"]) or _within(v["folder"], folder):
             raise ValueError(f"{folder} overlaps the vault {v['title']} ({v['folder']})")

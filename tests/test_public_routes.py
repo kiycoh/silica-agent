@@ -37,7 +37,7 @@ def client(tmp_vault, tmp_path, monkeypatch):
 def test_the_view_reports_each_vault_and_what_publish_would_send(client):
     tc, _ = client
     v = tc.get("/public").json()
-    assert v["available"] and v["handle"] == "marta" and v["vaults"] == [] and v["max"] == 10
+    assert v["available"] and v["handle"] == "marta" and v["vaults"] == [] and v["max"] == 20
     assert "Memory" in v["folders"] and v["private"] == "hosted"
     v = tc.post("/public/vault", json={"folder": "Memory"}).json()
     assert v["added"] == "memory" and "Memory" not in v["folders"]
@@ -182,6 +182,15 @@ def test_a_laptop_takes_its_handle_into_the_vault_unless_it_already_published(cl
     unset_block_key((tmp / "vault"), publish.PUBLIC_KEY, "handle")
     (tmp / "public" / publish.handle((tmp / "vault"))).mkdir(parents=True)
     assert tc.get("/public").json()["ask_handle"] == {"ask": False}
+
+
+def test_the_view_counts_against_the_account_s_tier(client, monkeypatch):
+    tc, _ = client
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "graph,public")
+    assert tc.get("/public").json()["max"] == 3
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    assert tc.get("/public").json()["max"] == 20
 
 
 def test_a_free_account_loses_private_and_its_private_vault_turns_off(client, monkeypatch):

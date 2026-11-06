@@ -1,4 +1,4 @@
-// The Page (ADR-0143, ADR-0151): the view that holds the account's vaults, up to ten, each a
+// The Page (ADR-0143, ADR-0151): the view that holds the account's vaults, each a
 // folder of its vault, Off, Public or Private; the globes on the tree and on the note; the strip
 // over a saved note; the invitations to Private vaults; and the confirm a page's "Save to Silica"
 // lands on, for one note or for the areas of a whole vault.

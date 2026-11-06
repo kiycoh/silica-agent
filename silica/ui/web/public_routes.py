@@ -119,7 +119,7 @@ def _view() -> dict:
         # folder reads as ~, as the bug report prints it: the line is read, not typed.
         "dir": _tilde(str(publish.site_root(h) / "live")) if h and not hosted() else "",
         "private": publish.private_allowed(),
-        "max": publish.MAX_VAULTS,
+        "max": publish.max_vaults(),
         "licenses": list(publish.LICENSES),
         "vaults": vaults,
         "turned_off": turned,
