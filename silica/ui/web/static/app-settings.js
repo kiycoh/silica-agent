@@ -53,21 +53,14 @@ function stTabIcon(name) {
     + (ST_ICONS[name] || "") + "</svg>";
 }
 
-function stEl(tag, cls, text) {
-  const el = document.createElement(tag);
-  if (cls) el.className = cls;
-  if (text !== undefined) el.textContent = text;
-  return el;
-}
-
 // Row labels stay lowercase in settings.py, where error messages and the app's
 // help quote them mid-sentence; the panel shows them as labels.
 const stCap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 function stSectionEl(name) {
-  const s = stEl("section", "st-section");
+  const s = mkEl("section", "st-section");
   s.dataset.section = name;
-  s.appendChild(stEl("div", "st-section-title", name));
+  s.appendChild(mkEl("div", "st-section-title", name));
   return s;
 }
 
@@ -95,7 +88,7 @@ function stBuildControl(row, rowEl, labelEl) {
   if (row.kind === "readonly") {
     // Registered like any control so a write that derives it (safe mode sets
     // write_dir) refreshes the readout instead of leaving it stale until reopen.
-    const ro = stEl("span", "st-ro", row.value || "—");
+    const ro = mkEl("span", "st-ro", row.value || "—");
     stState.controls.push({ row, input: ro });
     return ro;
   }
@@ -103,17 +96,17 @@ function stBuildControl(row, rowEl, labelEl) {
   labelEl.setAttribute("for", id);
   let input;
   if (row.kind === "toggle") {
-    input = stEl("input");
+    input = mkEl("input");
     input.type = "checkbox";
     input.checked = row.value === "true";
   } else if (row.kind === "enum") {
-    input = stEl("select");
+    input = mkEl("select");
     const opts = row.options.includes(row.value) || !row.value
       ? row.options : [row.value, ...row.options];
     for (const o of opts) input.appendChild(new Option(o, o));
     input.value = row.value;
   } else {
-    input = stEl("input");
+    input = mkEl("input");
     input.type = "text";
     input.spellcheck = false;
     input.autocomplete = "off";
@@ -121,7 +114,7 @@ function stBuildControl(row, rowEl, labelEl) {
     // A secret arrives masked by the server (settings._shown), never the key.
     input.value = row.value;
     if (row.options.length) {
-      const dl = stEl("datalist");
+      const dl = mkEl("datalist");
       dl.id = id + "-list";
       for (const o of row.options) dl.appendChild(new Option(o, o));
       input.setAttribute("list", dl.id);
@@ -140,23 +133,23 @@ function stBuildControl(row, rowEl, labelEl) {
 }
 
 function stRowEl(row) {
-  const el = stEl("div", "st-row");
+  const el = mkEl("div", "st-row");
   el.dataset.key = row.key;
   el.dataset.search = `${row.label} ${row.help} ${row.key}`.toLowerCase();
-  const label = stEl("div", "st-label");
-  const name = stEl("label", "st-name", stCap(row.label));
+  const label = mkEl("div", "st-label");
+  const name = mkEl("label", "st-name", stCap(row.label));
   label.appendChild(name);
-  if (row.help) label.appendChild(stEl("div", "st-help", row.help));
-  if (row.warn) label.appendChild(stEl("div", "st-warn", "⚠ " + row.warn));
+  if (row.help) label.appendChild(mkEl("div", "st-help", row.help));
+  if (row.warn) label.appendChild(mkEl("div", "st-warn", "⚠ " + row.warn));
   el.appendChild(label);
 
-  const ctl = stEl("div", "st-ctl");
+  const ctl = mkEl("div", "st-ctl");
   const input = stBuildControl(row, el, name);
   ctl.appendChild(input);
   // A key already set is shown masked and read-only: the eye is how you say
   // "I mean to replace this", so a mask can never be saved as a value.
   if (row.kind === "secret" && row.value && !row.locked) {
-    const eye = stEl("button", "st-eye", "✎");
+    const eye = mkEl("button", "st-eye", "✎");
     eye.type = "button";
     eye.title = "replace";
     eye.setAttribute("aria-label", `replace ${row.label}`);
@@ -174,7 +167,7 @@ function stRowEl(row) {
   }
   el.appendChild(ctl);
 
-  const note = stEl("div", "st-note");
+  const note = mkEl("div", "st-note");
   if (row.locked) note.textContent = `🔒 defined in the environment (${row.key})`;
   else if (row.kind === "secret" && row.value) note.textContent = "set · ✎ to replace";
   el.appendChild(note);
@@ -206,11 +199,7 @@ async function stCommit(row, input, rowEl) {
   stNote(rowEl, "pending", "saving…");
   let resp = null, data = null;
   try {
-    resp = await fetch(row.confirm ? "/settings/confirm" : "/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: row.key, value }),
-    });
+    resp = await postJson(row.confirm ? "/settings/confirm" : "/settings", { key: row.key, value });
     data = await resp.json();
   } catch { /* falls through to the failure branch */ }
   if (!resp || !resp.ok || (data && data.ok === false)) {
@@ -261,7 +250,7 @@ function openSheet(title, body, actions) {
   actEl.innerHTML = "";
   bodyEl.appendChild(body);
   for (const [label, fn, kind] of actions) {
-    const b = stEl("button", "st-btn " + (kind || ""), label);
+    const b = mkEl("button", "st-btn " + (kind || ""), label);
     b.type = "button";
     b.addEventListener("click", () => fn());
     actEl.appendChild(b);
@@ -312,7 +301,7 @@ function stConfirmRow(row, value) {
 }
 
 function stAsk(title, body, ok) {
-  const el = stEl("p", "st-sheet-text", body);
+  const el = mkEl("p", "st-sheet-text", body);
   return new Promise((resolve) => {
     stSheetResolve = resolve;
     openSheet(title, el, [
@@ -373,12 +362,12 @@ function stMemWhen(d, short = false) {
 // mem-pure:end
 
 function stMemDates(field, area, dates) {
-  const layer = stEl("div", "st-mem-dates");
+  const layer = mkEl("div", "st-mem-dates");
   layer.setAttribute("aria-hidden", "true");
-  const copy = stEl("div", "st-mem-copy");
+  const copy = mkEl("div", "st-mem-copy");
   layer.appendChild(copy);
   // What the margin shows, said once for a screen reader, which skips the layer.
-  const said = stEl("p", "sr-only");
+  const said = mkEl("p", "sr-only");
   said.id = `${area.id}-dates`;
   area.setAttribute("aria-describedby", said.id);
   field.append(layer, said);
@@ -392,7 +381,7 @@ function stMemDates(field, area, dates) {
     for (const [s, e] of stMemSpans(text)) {
       const d = byKey.get(stMemKey(text.slice(s, e)));
       if (!d) continue;
-      const at = stEl("span", "st-mem-at");
+      const at = mkEl("span", "st-mem-at");
       copy.append(text.slice(pos, s), at);
       marks.push([at, d, text.slice(s, e)]);
       pos = s;
@@ -402,7 +391,7 @@ function stMemDates(field, area, dates) {
     // so the margin holds still while an entry is retyped; the short words when
     // the long ones would take more than a third of the field (390 px: 155 of 323).
     const widest = (short) => Math.max(0, ...[...byKey.values()].map((d) => {
-      const el = copy.appendChild(stEl("span", "st-mem-when", stMemWhen(d, short)));
+      const el = copy.appendChild(mkEl("span", "st-mem-when", stMemWhen(d, short)));
       const w = el.offsetWidth;
       el.remove();
       return w + 28;
@@ -416,7 +405,7 @@ function stMemDates(field, area, dates) {
     layer.style.width = `${area.clientWidth + edge}px`;
     layer.style.height = `${area.clientHeight + edge}px`;
     for (const [at, d] of marks) {
-      copy.appendChild(stEl("span", "st-mem-when", stMemWhen(d, short))).style.top = `${at.offsetTop}px`;
+      copy.appendChild(mkEl("span", "st-mem-when", stMemWhen(d, short))).style.top = `${at.offsetTop}px`;
     }
     scroll();
     const head = (entry) => {
@@ -447,31 +436,31 @@ async function renderMemory(host) {
   host.querySelectorAll(".st-mem, .st-mem-line").forEach((e) => e.remove());
   let data;
   try { data = await (await fetch("/memory")).json(); }
-  catch { host.appendChild(stEl("div", "st-note-line st-mem-line", "could not read the memory files")); return; }
+  catch { host.appendChild(mkEl("div", "st-note-line st-mem-line", "could not read the memory files")); return; }
   if (data.incognito) {
-    host.appendChild(stEl("div", "st-note-line st-mem-line",
+    host.appendChild(mkEl("div", "st-note-line st-mem-line",
       "this chat is incognito: memory is kept but not shown or saved until a new chat"));
   }
   for (const scope of ["user", "vault"]) {
     const s = data.scopes[scope];
     const [name, help] = ST_MEMORY[scope];
-    const row = stEl("div", "st-row st-mem");
+    const row = mkEl("div", "st-row st-mem");
     row.dataset.search = `memory ${name} ${s.text}`.toLowerCase();
-    const label = stEl("div", "st-label");
-    const lab = stEl("label", "st-name", stCap(name));
+    const label = mkEl("div", "st-label");
+    const lab = mkEl("label", "st-name", stCap(name));
     label.appendChild(lab);
-    label.appendChild(stEl("div", "st-help", s.available ? `${help} · ${s.path}` : "no vault is open"));
+    label.appendChild(mkEl("div", "st-help", s.available ? `${help} · ${s.path}` : "no vault is open"));
     row.appendChild(label);
     host.appendChild(row);
     if (!s.available) continue;
 
-    const ctl = stEl("div", "st-ctl");
-    const count = stEl("span", "st-mem-count");
-    const save = stEl("button", "st-btn", "save");
+    const ctl = mkEl("div", "st-ctl");
+    const count = mkEl("span", "st-mem-count");
+    const save = mkEl("button", "st-btn", "save");
     save.type = "button";
     ctl.append(count, save);
     row.appendChild(ctl);
-    const area = stEl("textarea", "st-mem-text");
+    const area = mkEl("textarea", "st-mem-text");
     area.id = `st-mem-${scope}`;
     lab.setAttribute("for", area.id);
     area.rows = 5;
@@ -479,11 +468,11 @@ async function renderMemory(host) {
     area.placeholder = "- one fact per line";
     area.value = s.text;
     area.dataset.saved = s.text;
-    const field = stEl("div", "st-mem-field");
+    const field = mkEl("div", "st-mem-field");
     field.appendChild(area);
     row.appendChild(field);
     const margin = stMemDates(field, area, s.dates || []);
-    row.appendChild(stEl("div", "st-note"));
+    row.appendChild(mkEl("div", "st-note"));
     const paint = () => {
       const n = area.value.length;
       count.textContent = `${n} / ${s.budget}`;
@@ -526,14 +515,14 @@ async function renderMemory(host) {
     paint();
   }
 
-  const reset = stEl("div", "st-row st-mem");
+  const reset = mkEl("div", "st-row st-mem");
   reset.dataset.search = "memory reset erase forget everything";
-  const rl = stEl("div", "st-label");
-  rl.appendChild(stEl("div", "st-name", "Reset"));
-  rl.appendChild(stEl("div", "st-help", "erase both files above · other vaults' memory is kept"));
+  const rl = mkEl("div", "st-label");
+  rl.appendChild(mkEl("div", "st-name", "Reset"));
+  rl.appendChild(mkEl("div", "st-help", "erase both files above · other vaults' memory is kept"));
   reset.appendChild(rl);
-  const rc = stEl("div", "st-ctl");
-  const erase = stEl("button", "st-btn", "erase…");
+  const rc = mkEl("div", "st-ctl");
+  const erase = mkEl("button", "st-btn", "erase…");
   erase.type = "button";
   erase.addEventListener("click", async () => {
     const yes = await stAsk("erase memory?",
@@ -549,7 +538,7 @@ async function renderMemory(host) {
   });
   rc.appendChild(erase);
   reset.appendChild(rc);
-  reset.appendChild(stEl("div", "st-note"));
+  reset.appendChild(mkEl("div", "st-note"));
   host.appendChild(reset);
 }
 
@@ -557,38 +546,38 @@ async function renderMemory(host) {
 const ST_DOT = { ok: "●", warn: "◐", fail: "○", unknown: "○" };
 
 function stInfoRow(host, label, value, cls) {
-  const el = stEl("div", "st-row" + (cls ? " " + cls : ""));
+  const el = mkEl("div", "st-row" + (cls ? " " + cls : ""));
   el.dataset.search = `${label} ${value}`.toLowerCase();
-  el.appendChild(stEl("div", "st-label", label));
-  el.appendChild(stEl("div", "st-ctl-text", value));
+  el.appendChild(mkEl("div", "st-label", label));
+  el.appendChild(mkEl("div", "st-ctl-text", value));
   host.appendChild(el);
   return el;
 }
 
 async function renderEndpoints(host) {
   host.querySelectorAll(".st-row, .st-note-line").forEach((e) => e.remove());
-  host.appendChild(stEl("div", "st-note-line",
+  host.appendChild(mkEl("div", "st-note-line",
     "reachability is checked with a real request, not an open port"));
   let rows = [];
   try { rows = await (await fetch("/endpoints")).json(); }
-  catch { host.appendChild(stEl("div", "st-note-line", "could not probe the endpoints")); return; }
+  catch { host.appendChild(mkEl("div", "st-note-line", "could not probe the endpoints")); return; }
   for (const e of rows) {
-    const row = stEl("div", "st-row");
+    const row = mkEl("div", "st-row");
     row.dataset.search = `${e.label} ${e.url} endpoint`.toLowerCase();
-    const label = stEl("div", "st-label");
-    label.appendChild(stEl("span", "st-name", stCap(e.label)));
-    label.appendChild(stEl("div", "st-help", e.url || "not configured"));
+    const label = mkEl("div", "st-label");
+    label.appendChild(mkEl("span", "st-name", stCap(e.label)));
+    label.appendChild(mkEl("div", "st-help", e.url || "not configured"));
     row.appendChild(label);
-    const state = stEl("div", "st-ctl-text " + (e.up ? "up" : "down"));
+    const state = mkEl("div", "st-ctl-text " + (e.up ? "up" : "down"));
     state.textContent = e.up
       ? `● up${e.models ? ` · ${e.models} model${e.models === 1 ? "" : "s"}` : ""}`
       : `○ down${e.command || !e.local ? "" : " · no start command set"}`;
     row.appendChild(state);
-    const note = stEl("div", "st-note");
+    const note = mkEl("div", "st-note");
     if (e.command) note.textContent = `start command read-only · edit ${e.command_key} in the .env`;
     row.appendChild(note);
     if (!e.up && e.local && e.command) {
-      const start = stEl("button", "st-btn", "start");
+      const start = mkEl("button", "st-btn", "start");
       start.type = "button";
       start.addEventListener("click", async () => {
         start.disabled = true;
@@ -596,10 +585,7 @@ async function renderEndpoints(host) {
         note.textContent = `starting ${e.label}… loading a model takes a while`;
         let out = null;
         try {
-          out = await (await fetch("/endpoints/start", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ label: e.label }),
-          })).json();
+          out = await (await postJson("/endpoints/start", { label: e.label })).json();
         } catch { /* reported below */ }
         if (out && out.ok) renderEndpoints(host);
         else {
@@ -619,11 +605,11 @@ async function renderDiagnostics(host) {
   host.querySelectorAll(".st-row, .st-note-line").forEach((e) => e.remove());
   let rows = [];
   try { rows = await (await fetch("/health?all=1")).json(); }
-  catch { host.appendChild(stEl("div", "st-note-line", "could not run the checks")); return; }
-  if (!rows.length) { host.appendChild(stEl("div", "st-note-line", "everything checks out")); return; }
+  catch { host.appendChild(mkEl("div", "st-note-line", "could not run the checks")); return; }
+  if (!rows.length) { host.appendChild(mkEl("div", "st-note-line", "everything checks out")); return; }
   for (const r of rows) {
     const el = stInfoRow(host, r.name, `${ST_DOT[r.status] || "○"} ${r.detail}`, "st-check-" + r.status);
-    if (r.hint) el.appendChild(stEl("div", "st-note", r.hint));
+    if (r.hint) el.appendChild(mkEl("div", "st-note", r.hint));
   }
 }
 
@@ -639,13 +625,13 @@ function renderAbout(host, data) {
   stInfoRow(host, "updates", data.behind
     ? `${data.behind} commit${data.behind === 1 ? "" : "s"} behind · update with \`silica update\``
     : "up to date");
-  const row = stEl("div", "st-row");
+  const row = mkEl("div", "st-row");
   row.dataset.search = "report a bug issue github";
-  row.appendChild(stEl("div", "st-label", "report a bug"));
-  const btn = stEl("button", "st-btn st-safe", "report a bug");
+  row.appendChild(mkEl("div", "st-label", "report a bug"));
+  const btn = mkEl("button", "st-btn st-safe", "report a bug");
   btn.type = "button";
   btn.addEventListener("click", () => openBugReport(data.issues_url));
-  const ctl = stEl("div", "st-ctl");
+  const ctl = mkEl("div", "st-ctl");
   ctl.appendChild(btn);
   row.appendChild(ctl);
   host.appendChild(row);
@@ -654,16 +640,16 @@ function renderAbout(host, data) {
 // A session lasts a week idle (ADR-0154 point 6), so a shared PC left signed in needs a
 // way out from somewhere else. A form for the reason the menu's Sign out is one.
 function renderSignOutEverywhere(host) {
-  const row = stEl("div", "st-row");
+  const row = mkEl("div", "st-row");
   row.dataset.search = "sign out everywhere session device account";
-  const label = stEl("div", "st-label");
-  label.appendChild(stEl("span", "st-name", "sign out everywhere"));
-  label.appendChild(stEl("div", "st-help", "ends every session of this account, this window's too"));
+  const label = mkEl("div", "st-label");
+  label.appendChild(mkEl("span", "st-name", "sign out everywhere"));
+  label.appendChild(mkEl("div", "st-help", "ends every session of this account, this window's too"));
   row.appendChild(label);
-  const form = stEl("form", "st-ctl");
+  const form = mkEl("form", "st-ctl");
   form.method = "post";
   form.action = "/sign-out/everywhere";
-  const btn = stEl("button", "st-btn st-safe", "sign out everywhere");
+  const btn = mkEl("button", "st-btn st-safe", "sign out everywhere");
   btn.type = "submit";
   form.appendChild(btn);
   row.appendChild(form);
@@ -675,18 +661,18 @@ function renderSignOutEverywhere(host) {
 async function openBugReport(fallbackUrl) {
   let data = { payload: "", issues_url: fallbackUrl };
   try { data = await (await fetch("/bug_report")).json(); } catch { /* file it bare */ }
-  const body = stEl("div", "st-bug");
-  body.appendChild(stEl("label", "st-bug-label", "What happened?"));
-  const what = stEl("textarea", "st-bug-what");
+  const body = mkEl("div", "st-bug");
+  body.appendChild(mkEl("label", "st-bug-label", "What happened?"));
+  const what = mkEl("textarea", "st-bug-what");
   what.rows = 4;
   what.placeholder = "what you did, what you expected, what happened instead";
   body.appendChild(what);
-  body.appendChild(stEl("label", "st-bug-label", "This will be attached · edit it if you like"));
-  const payload = stEl("textarea", "st-bug-payload");
+  body.appendChild(mkEl("label", "st-bug-label", "This will be attached · edit it if you like"));
+  const payload = mkEl("textarea", "st-bug-payload");
   payload.rows = 8;
   payload.value = data.payload;
   body.appendChild(payload);
-  body.appendChild(stEl("div", "st-note-line",
+  body.appendChild(mkEl("div", "st-note-line",
     "your vault path is shortened to ~ · api keys are never included"));
   openSheet("report a bug", body, [
     ["cancel", () => closeSheet(false)],
@@ -716,11 +702,11 @@ function stRender(data) {
   }
   const extra = [...(limitsNow.length ? ["Usage"] : []), ...(data.hosted ? ST_EXTRA_HOSTED : ST_EXTRA)];
   for (const name of extra) stPanel.appendChild(stSectionEl(name));
-  stPanel.appendChild(stEl("div", "st-empty"));
+  stPanel.appendChild(mkEl("div", "st-empty"));
   for (const name of [...data.sections.map((s) => s.name), ...extra]) {
-    const b = stEl("button", "st-tab");
+    const b = mkEl("button", "st-tab");
     b.innerHTML = stTabIcon(name);
-    b.appendChild(stEl("span", "", name));
+    b.appendChild(mkEl("span", "", name));
     b.type = "button";
     b.dataset.section = name;
     b.addEventListener("click", () => stShow(name));
@@ -745,7 +731,7 @@ function stRenderMachine() {
   const diagnostics = stPanel.querySelector('[data-section="Diagnostics"]');
   // The checks are a snapshot of a machine that keeps changing — starting the
   // server this panel just told you was down is the whole point.
-  const recheck = stEl("button", "st-btn st-safe", "recheck");
+  const recheck = mkEl("button", "st-btn st-safe", "recheck");
   recheck.type = "button";
   recheck.addEventListener("click", () => renderDiagnostics(diagnostics));
   diagnostics.querySelector(".st-section-title").appendChild(recheck);
@@ -828,13 +814,13 @@ async function openSettings() {
   stModal.hidden = false;
   settingsBtn.setAttribute("aria-expanded", "true");
   stPanel.innerHTML = "";
-  stPanel.appendChild(stEl("div", "st-note-line", "reading your configuration…"));
+  stPanel.appendChild(mkEl("div", "st-note-line", "reading your configuration…"));
   stSearch.focus();
   try {
     stRender(await (await fetch("/settings")).json());
   } catch {
     stPanel.innerHTML = "";
-    stPanel.appendChild(stEl("div", "st-note-line", "could not read the settings"));
+    stPanel.appendChild(mkEl("div", "st-note-line", "could not read the settings"));
   }
 }
 

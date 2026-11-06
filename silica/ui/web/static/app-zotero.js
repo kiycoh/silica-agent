@@ -90,7 +90,7 @@ function paperStrip(fm) {
 }
 // A read chip's name: "Surname Year" for a paper leaf, the stem otherwise.
 function chipLabelFor(path, labels) {
-  return (labels && labels[path]) || String(path).split("/").pop().replace(/\.md$/, "");
+  return (labels && labels[path]) || noteStem(path);
 }
 
 // What a click on a link inside a rendered note or answer does. A footnote
@@ -177,22 +177,6 @@ function coversCue(pass) {
 }
 // zotero-pure:end
 
-async function zPost(url, body) {
-  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body || {}) });
-  let d = {};
-  try { d = await r.json(); } catch { /* an empty answer is still an answer */ }
-  if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
-  return d;
-}
-
-function zEl(tag, cls, text) {
-  const el = document.createElement(tag);
-  if (cls) el.className = cls;
-  if (text !== undefined) el.textContent = text;
-  return el;
-}
-
 // Two clicks for anything that writes into the user's own Zotero tree, the
 // same confirm "Revert all N" asks for (ADR-0055 decision 7): the first click
 // says what will happen, the second does it.
@@ -214,15 +198,15 @@ function zTwoClick(btn, label, armedLabel, run) {
 
 // --- Settings › Zotero ---------------------------------------------------------
 function zSettingRow(host, label, help) {
-  const row = zEl("div", "st-row");
+  const row = mkEl("div", "st-row");
   row.dataset.search = `zotero ${label} ${help || ""}`.toLowerCase();
-  const lab = zEl("div", "st-label");
-  lab.appendChild(zEl("span", "st-name", label));
-  if (help) lab.appendChild(zEl("div", "st-help", help));
+  const lab = mkEl("div", "st-label");
+  lab.appendChild(mkEl("span", "st-name", label));
+  if (help) lab.appendChild(mkEl("div", "st-help", help));
   row.appendChild(lab);
-  const ctl = zEl("div", "st-ctl");
+  const ctl = mkEl("div", "st-ctl");
   row.appendChild(ctl);
-  const note = zEl("div", "st-note");
+  const note = mkEl("div", "st-note");
   row.appendChild(note);
   host.appendChild(row);
   return { row, ctl, note };
@@ -234,27 +218,27 @@ async function renderZotero(host) {
   host.querySelectorAll(".st-row, .st-note-line").forEach((e) => e.remove());
   let s;
   try { s = await (await fetch("/zotero/status")).json(); }
-  catch { host.appendChild(zEl("div", "st-note-line", "could not ask the server about Zotero")); return; }
+  catch { host.appendChild(mkEl("div", "st-note-line", "could not ask the server about Zotero")); return; }
   const up = s.state === "running" || s.state === "read_only";
   const line = zoteroStatus(s);
 
   const st = zSettingRow(host, "status", "probed live on 127.0.0.1:23119");
-  st.ctl.appendChild(zEl("span", "st-ctl-text " + (up ? "up" : "down"), `${line.dot} ${line.text}`));
-  const again = zEl("button", "st-btn st-safe", "recheck");
+  st.ctl.appendChild(mkEl("span", "st-ctl-text " + (up ? "up" : "down"), `${line.dot} ${line.text}`));
+  const again = mkEl("button", "st-btn st-safe", "recheck");
   again.type = "button";
   again.addEventListener("click", () => renderZotero(host));
   st.ctl.appendChild(again);
   if (line.fix) st.note.textContent = line.fix;
 
   const use = zSettingRow(host, "use in this vault", "writes the zotero: block in vault.yaml");
-  const box = zEl("input");
+  const box = mkEl("input");
   box.type = "checkbox";
   box.checked = !!s.linked;
   box.disabled = !s.linked && (!up || !!s.elsewhere);
   box.setAttribute("aria-label", "use Zotero in this vault");
   box.addEventListener("change", async () => {
     try {
-      await zPost("/zotero/link", { on: box.checked });
+      await apiPost("/zotero/link", { on: box.checked });
       renderZotero(host);
       zoteroBoot();
     } catch (err) {
@@ -269,17 +253,17 @@ async function renderZotero(host) {
 
   const wa = zSettingRow(host, "write access", "Zotero asks you in its own dialog");
   if (s.write) {
-    wa.ctl.appendChild(zEl("span", "st-ctl-text up", "● granted"));
+    wa.ctl.appendChild(mkEl("span", "st-ctl-text up", "● granted"));
     wa.note.textContent = "key kept in your user .env, outside the vault";
   } else {
-    const grant = zEl("button", "st-btn", "grant");
+    const grant = mkEl("button", "st-btn", "grant");
     grant.type = "button";
     grant.disabled = s.state !== "running";
     grant.addEventListener("click", async () => {
       grant.disabled = true;
       zSay(wa.note, "pending", "waiting for Zotero: answer its dialog (Always Allow keeps the key)");
       try {
-        const out = await zPost("/zotero/grant");
+        const out = await apiPost("/zotero/grant");
         if (out.kept) renderZotero(host);
         else zSay(wa.note, "bad", "allowed once: the key is not kept; Silica asks again before the next write");
       } catch (err) {
@@ -292,37 +276,37 @@ async function renderZotero(host) {
 
   const bl = zSettingRow(host, "back-links in Zotero",
     "importing a paper adds a child note under it, tagged silica, linking back to its notes");
-  const blBox = zEl("input");
+  const blBox = mkEl("input");
   blBox.type = "checkbox";
   blBox.checked = !!s.backlinks;
   blBox.setAttribute("aria-label", "write back-link notes in Zotero");
   blBox.addEventListener("change", async () => {
-    try { await zPost("/zotero/setting", { key: "backlinks", value: blBox.checked }); zSay(bl.note, "ok", "saved"); }
+    try { await apiPost("/zotero/setting", { key: "backlinks", value: blBox.checked }); zSay(bl.note, "ok", "saved"); }
     catch (err) { blBox.checked = !blBox.checked; zSay(bl.note, "bad", err.message); }
   });
   bl.ctl.appendChild(blBox);
 
   const ib = zSettingRow(host, "inbox collection", "filing proposes moves out of this collection");
-  const pick = zEl("select");
+  const pick = mkEl("select");
   pick.setAttribute("aria-label", "inbox collection");
   pick.appendChild(new Option("none", ""));
   for (const c of s.collections || []) pick.appendChild(new Option(c, c));
   pick.value = s.inbox || "";
   pick.addEventListener("change", async () => {
-    try { await zPost("/zotero/setting", { key: "inbox", value: pick.value }); zSay(ib.note, "ok", "saved"); }
+    try { await apiPost("/zotero/setting", { key: "inbox", value: pick.value }); zSay(ib.note, "ok", "saved"); }
     catch (err) { zSay(ib.note, "bad", err.message); }
   });
   ib.ctl.appendChild(pick);
 
   const gr = zSettingRow(host, "groups collection", "created by the first groups write");
-  gr.ctl.appendChild(zEl("span", "st-ctl-text", s.groups ? `Silica groups · ${s.groups}` : "not created yet"));
+  gr.ctl.appendChild(mkEl("span", "st-ctl-text", s.groups ? `Silica groups · ${s.groups}` : "not created yet"));
 
   const un = zSettingRow(host, "unlink", "removes Silica's notes and groups from Zotero; items are never touched");
-  const unBtn = zEl("button", "st-btn st-safe");
+  const unBtn = mkEl("button", "st-btn st-safe");
   unBtn.type = "button";
   zTwoClick(unBtn, "remove from Zotero", () => "remove them? click again", async () => {
     try {
-      const out = await zPost("/zotero/unlink");
+      const out = await apiPost("/zotero/unlink");
       zSay(un.note, "ok", `removed ${out.notes} note(s) and ${out.collections} collection(s)`);
     } catch (err) { zSay(un.note, "bad", err.message); }
   });
@@ -363,16 +347,16 @@ async function zoteroBoot() {
 }
 
 function zBadge() {
-  const b = document.querySelector('#surface-tabs .stab[data-gmode="library"]');
+  const b = $(surfaceTab("library"));
   if (!b) return;
   b.querySelector(".lay-count")?.remove();
-  if (zLib.lib && zLib.lib.new) b.appendChild(zEl("span", "lay-count", String(zLib.lib.new)));
+  if (zLib.lib && zLib.lib.new) b.appendChild(mkEl("span", "lay-count", String(zLib.lib.new)));
 }
 
 async function drawLibrary() {
   const pane = $("#shape-pane");
   pane.innerHTML = "";
-  const body = zEl("div", "shape-body zl surface-in");
+  const body = mkEl("div", "shape-body zl surface-in");
   pane.appendChild(body);
   try {
     const r = await fetch("/zotero/library");
@@ -380,25 +364,25 @@ async function drawLibrary() {
   } catch { zLib.lib = null; }
   zBadge();
   if (!zLib.lib) {
-    body.appendChild(zEl("p", "zl-empty", "Zotero is not answering. Start it, then open Library again."));
+    body.appendChild(mkEl("p", "zl-empty", "Zotero is not answering. Start it, then open Library again."));
     return;
   }
-  const head = zEl("div", "shape-head");
-  head.appendChild(zEl("h2", "zl-title", "Library"));
-  head.appendChild(zEl("span", "shape-sub", libraryHeader(zLib.lib)));
+  const head = mkEl("div", "shape-head");
+  head.appendChild(mkEl("h2", "zl-title", "Library"));
+  head.appendChild(mkEl("span", "shape-sub", libraryHeader(zLib.lib)));
   if (!zLib.lib.read_only) {
-    const groupsBtn = zEl("button", "zl-btn", "Write groups to Zotero");
+    const groupsBtn = mkEl("button", "zl-btn", "Write groups to Zotero");
     groupsBtn.type = "button";
     groupsBtn.addEventListener("click", () => zShowGroups());
     head.appendChild(groupsBtn);
   }
   body.appendChild(head);
 
-  const grid = zEl("div", "zl-grid");
-  const tree = zEl("nav", "zl-tree");
+  const grid = mkEl("div", "zl-grid");
+  const tree = mkEl("nav", "zl-tree");
   tree.setAttribute("aria-label", "Zotero collections");
-  const main = zEl("section", "zl-main");
-  const side = zEl("aside", "zl-side");
+  const main = mkEl("section", "zl-main");
+  const side = mkEl("aside", "zl-side");
   grid.append(tree, main, side);
   body.appendChild(grid);
   zLib.side = side;
@@ -408,15 +392,15 @@ async function drawLibrary() {
   // A tick per collection and one button: the graph's scope is a set of
   // collections, and this list is where a set is picked (ADR-0066 decision 5);
   // the picker above the graph holds one value.
-  const showBtn = zEl("button", "zl-btn", "Show on graph");
+  const showBtn = mkEl("button", "zl-btn", "Show on graph");
   showBtn.type = "button";
   const syncShow = () => {
     showBtn.disabled = !zLib.show.size;
     showBtn.textContent = zLib.show.size > 1 ? `Show ${zLib.show.size} on graph` : "Show on graph";
   };
   const add = (c, depth) => {
-    const row = zEl("div", "zl-col-row");
-    const tick = zEl("input");
+    const row = mkEl("div", "zl-col-row");
+    const tick = mkEl("input");
     tick.type = "checkbox";
     tick.checked = zLib.show.has(c.name);
     tick.disabled = !c.total;
@@ -426,12 +410,12 @@ async function drawLibrary() {
       if (tick.checked) zLib.show.add(c.name); else zLib.show.delete(c.name);
       syncShow();
     });
-    const b = zEl("button", "zl-col");
+    const b = mkEl("button", "zl-col");
     b.type = "button";
     b.dataset.key = c.key;
     b.title = c.name;   // the tick narrows the row: a cut name reads whole on hover
-    b.appendChild(zEl("span", "zl-col-name", c.name));
-    b.appendChild(zEl("span", "zl-col-count" + (c.in_vault && c.in_vault === c.total ? " full" : ""),
+    b.appendChild(mkEl("span", "zl-col-name", c.name));
+    b.appendChild(mkEl("span", "zl-col-count" + (c.in_vault && c.in_vault === c.total ? " full" : ""),
       zLib.lib.read_only ? String(c.total) : `${c.in_vault} / ${c.total}`));
     b.addEventListener("click", () => { zLib.col = c.key; zLib.sel.clear(); zLib.alt = {}; zLoadCollection(); });
     row.append(tick, b);
@@ -448,7 +432,7 @@ async function drawLibrary() {
   });
   syncShow();
   tree.appendChild(showBtn);
-  tree.appendChild(zEl("p", "zl-hint", "Read live from Zotero. Collections are edited in Zotero."));
+  tree.appendChild(mkEl("p", "zl-hint", "Read live from Zotero. Collections are edited in Zotero."));
   if (!zLib.col || !cols.some((c) => c.key === zLib.col)) {
     zLib.col = zLib.lib.inbox || (cols.find((c) => c.total) || cols[0] || {}).key || "";
   }
@@ -467,7 +451,7 @@ async function zLoadCollection() {
   const main = document.querySelector(".zl-main");
   if (!main) return;
   main.innerHTML = "";
-  main.appendChild(zEl("p", "zl-hint", "reading Zotero…"));
+  main.appendChild(mkEl("p", "zl-hint", "reading Zotero…"));
   try {
     const r = await fetch("/zotero/collection?key=" + encodeURIComponent(zLib.col));
     const d = await r.json();
@@ -475,7 +459,7 @@ async function zLoadCollection() {
     zLib.data = d;
   } catch (err) {
     main.innerHTML = "";
-    main.appendChild(zEl("p", "zl-empty", "could not read this collection: " + err.message));
+    main.appendChild(mkEl("p", "zl-empty", "could not read this collection: " + err.message));
     return;
   }
   if (zLib.data.inbox) {
@@ -497,16 +481,16 @@ function zRenderTable() {
   const col = zNames()[zLib.col] || "";
   const inbox = zLib.data.inbox;
   const rows = zLib.data.rows;
-  const bar = zEl("div", "zl-bar");
-  bar.appendChild(zEl("h3", "zl-col-title", col));
+  const bar = mkEl("div", "zl-bar");
+  bar.appendChild(mkEl("h3", "zl-col-title", col));
   const chosen = rows.filter((r) => zLib.sel.has(r.key));
   const readOnly = zLib.lib && zLib.lib.read_only;
   if (readOnly) {
-    bar.appendChild(zEl("span", "zl-hint", zLib.lib.holder
+    bar.appendChild(mkEl("span", "zl-hint", zLib.lib.holder
       ? `papers come in through ${zLib.lib.holder}, the vault linked to this library`
       : "papers come in through the vault linked to this library: link one in Settings › Zotero"));
   } else if (inbox) {
-    const file = zEl("button", "zl-btn primary");
+    const file = mkEl("button", "zl-btn primary");
     file.type = "button";
     file.disabled = !chosen.length;
     zTwoClick(file, `File ${chosen.length}`, () => `Move ${chosen.length} item(s)? Click again`, async () => {
@@ -514,22 +498,22 @@ function zRenderTable() {
       const moves = chosen.filter((r) => r.first)
         .map((r) => [r.key, suggestion(r, names, !!zLib.alt[r.key]).target]);
       try {
-        const out = await zPost("/zotero/file", { moves });
+        const out = await apiPost("/zotero/file", { moves });
         notify(`Filed ${out.moved} item(s) out of ${col}. /revert undoes it.`, "info");
         zLib.sel.clear();
         drawLibrary();
       } catch (err) { notify("Zotero: " + err.message); }
     });
     bar.appendChild(file);
-    bar.appendChild(zEl("span", "zl-hint",
+    bar.appendChild(mkEl("span", "zl-hint",
       "each suggestion is the vote of the 3 nearest filed papers; click it for the second choice"));
   } else {
     const out = rows.filter((r) => r.state !== "in");
-    const bring = zEl("button", "zl-btn primary", `Bring in ${chosen.length}`);
+    const bring = mkEl("button", "zl-btn primary", `Bring in ${chosen.length}`);
     bring.type = "button";
     bring.disabled = !chosen.length;
     bring.addEventListener("click", () => zBring(chosen));
-    const all = zEl("button", "zl-btn", `Bring in the ${out.length} not in the vault`);
+    const all = mkEl("button", "zl-btn", `Bring in the ${out.length} not in the vault`);
     all.type = "button";
     all.disabled = !out.length;
     all.addEventListener("click", () => zBring(out));
@@ -537,23 +521,23 @@ function zRenderTable() {
   }
   main.appendChild(bar);
 
-  const table = zEl("div", "zl-table");
+  const table = mkEl("div", "zl-table");
   table.setAttribute("role", "table");
-  const head = zEl("div", "zl-row zl-th" + (inbox ? " inbox" : ""));
+  const head = mkEl("div", "zl-row zl-th" + (inbox ? " inbox" : ""));
   head.setAttribute("role", "row");
   for (const t of ["", "", "First author", "Year", "Title", inbox ? "Suggested" : "Cited by"]) {
-    const c = zEl("span", "", t);
+    const c = mkEl("span", "", t);
     c.setAttribute("role", "columnheader");
     head.appendChild(c);
   }
   table.appendChild(head);
   const names = zNames();
   for (const r of rows) {
-    const tr = zEl("div", "zl-row" + (inbox ? " inbox" : ""));
+    const tr = mkEl("div", "zl-row" + (inbox ? " inbox" : ""));
     tr.setAttribute("role", "row");
-    const pickCell = zEl("span");
+    const pickCell = mkEl("span");
     if (!readOnly) {
-      const box = zEl("input");
+      const box = mkEl("input");
       box.type = "checkbox";
       box.checked = zLib.sel.has(r.key);
       box.disabled = !inbox && r.state === "in";
@@ -565,35 +549,35 @@ function zRenderTable() {
       pickCell.appendChild(box);
     }
     const m = rowMark(r.state);
-    const mark = zEl("span", "zl-mark " + m.cls, m.mark);
+    const mark = mkEl("span", "zl-mark " + m.cls, m.mark);
     mark.title = m.why;
-    const title = zEl("button", "zl-open", r.title);
+    const title = mkEl("button", "zl-open", r.title);
     title.type = "button";
     title.addEventListener("click", () => zOpen(r));
     let last;
     if (inbox && r.first) {
       const sg = suggestion(r, names, !!zLib.alt[r.key]);
-      last = zEl("button", "zl-sug");
+      last = mkEl("button", "zl-sug");
       last.type = "button";
       last.title = zLib.alt[r.key] ? `second choice; first was ${names[r.first] || r.first}`
         : `${r.votes} of its 3 nearest filed papers are in ${sg.text}; click for the second choice`;
-      last.appendChild(zEl("span", "zl-sug-to", "→ " + sg.text));
-      last.appendChild(zEl("span", "zl-sug-vote" + (r.votes === 3 && !zLib.alt[r.key] ? " sure" : ""), sg.vote));
+      last.appendChild(mkEl("span", "zl-sug-to", "→ " + sg.text));
+      last.appendChild(mkEl("span", "zl-sug-vote" + (r.votes === 3 && !zLib.alt[r.key] ? " sure" : ""), sg.vote));
       last.addEventListener("click", () => {
         zLib.alt[r.key] = !zLib.alt[r.key];
         zRenderTable();
       });
     } else {
-      last = zEl("span", "zl-num", inbox ? "no suggestion" : String(r.cited_by));
+      last = mkEl("span", "zl-num", inbox ? "no suggestion" : String(r.cited_by));
     }
-    for (const c of [pickCell, mark, zEl("span", "zl-sur", r.sur), zEl("span", "zl-num", r.year), title, last]) {
+    for (const c of [pickCell, mark, mkEl("span", "zl-sur", r.sur), mkEl("span", "zl-num", r.year), title, last]) {
       c.setAttribute("role", "cell");
       tr.appendChild(c);
     }
     table.appendChild(tr);
   }
   main.appendChild(table);
-  main.appendChild(zEl("p", "zl-hint", readOnly
+  main.appendChild(mkEl("p", "zl-hint", readOnly
     ? "● in the linked vault · ○ not imported anywhere. Click a title: a paper in the linked vault "
       + "is read from there by peek, one not imported shows its abstract."
     : "● in the vault · ○ not yet · ◐ PDF changed in Zotero since import. Click a title: a paper "
@@ -612,34 +596,34 @@ async function zOpen(r) {
   const side = zLib.side;
   if (!side) return;
   side.innerHTML = "";
-  side.appendChild(zEl("p", "zl-hint", "reading Zotero…"));
+  side.appendChild(mkEl("p", "zl-hint", "reading Zotero…"));
   let p;
   try {
     const res = await fetch("/zotero/item?key=" + encodeURIComponent(r.key));
     p = await res.json();
     if (!res.ok) throw new Error(p.detail || "HTTP " + res.status);
-  } catch (err) { side.innerHTML = ""; side.appendChild(zEl("p", "zl-empty", err.message)); return; }
+  } catch (err) { side.innerHTML = ""; side.appendChild(mkEl("p", "zl-empty", err.message)); return; }
   side.innerHTML = "";
   const readOnly = zLib.lib && zLib.lib.read_only;
-  side.appendChild(zEl("div", "zl-kicker", readOnly ? "Not imported in any vault"
+  side.appendChild(mkEl("div", "zl-kicker", readOnly ? "Not imported in any vault"
     : r.state === "new" ? "New in Zotero · not in the vault" : "Not in the vault"));
-  side.appendChild(zEl("h3", "zl-ptitle", p.title));
+  side.appendChild(mkEl("h3", "zl-ptitle", p.title));
   const who = (p.authors || []).map((a) => a.split(",")[0]);
-  side.appendChild(zEl("div", "zl-by", [who.length > 3 ? who.slice(0, 3).join(", ") + " et al." : who.join(", "),
+  side.appendChild(mkEl("div", "zl-by", [who.length > 3 ? who.slice(0, 3).join(", ") + " et al." : who.join(", "),
     p.year, p.venue].filter(Boolean).join(" · ")));
-  if (p.abstract) side.appendChild(zEl("p", "zl-abs", p.abstract));
-  const acts = zEl("div", "zl-acts");
+  if (p.abstract) side.appendChild(mkEl("p", "zl-abs", p.abstract));
+  const acts = mkEl("div", "zl-acts");
   if (!readOnly) {
-    const bring = zEl("button", "zl-btn primary", "Bring in");
+    const bring = mkEl("button", "zl-btn primary", "Bring in");
     bring.type = "button";
     bring.addEventListener("click", () => zBring([r]));
     acts.appendChild(bring);
   }
-  const open = zEl("a", "zl-btn", "Open in Zotero");
+  const open = mkEl("a", "zl-btn", "Open in Zotero");
   open.href = p.zotero;
   acts.appendChild(open);
   side.appendChild(acts);
-  if (!p.pdf && !readOnly) side.appendChild(zEl("p", "zl-hint", "No PDF in Zotero: Silica brings in its title, authors and abstract."));
+  if (!p.pdf && !readOnly) side.appendChild(mkEl("p", "zl-hint", "No PDF in Zotero: Silica brings in its title, authors and abstract."));
 }
 
 // A paper whose leaf lives in the linked vault, read from there and never
@@ -648,26 +632,26 @@ async function zPeek(r) {
   const side = zLib.side;
   if (!side) return;
   side.innerHTML = "";
-  side.appendChild(zEl("p", "zl-hint", "reading the linked vault…"));
+  side.appendChild(mkEl("p", "zl-hint", "reading the linked vault…"));
   let d;
   try {
     const res = await fetch("/zotero/peek?key=" + encodeURIComponent(r.key));
     d = await res.json();
     if (!res.ok) throw new Error(d.detail || "HTTP " + res.status);
-  } catch (err) { side.innerHTML = ""; side.appendChild(zEl("p", "zl-empty", err.message)); return; }
+  } catch (err) { side.innerHTML = ""; side.appendChild(mkEl("p", "zl-empty", err.message)); return; }
   side.innerHTML = "";
-  side.appendChild(zEl("div", "zl-kicker", "In " + d.vault.split("/").pop() + " · read by peek"));
-  side.appendChild(zEl("h3", "zl-ptitle", r.title));
-  side.appendChild(zEl("div", "zl-by", d.vault + "/…/" + d.leaf));
-  side.appendChild(zEl("pre", "zl-peek", d.text));
+  side.appendChild(mkEl("div", "zl-kicker", "In " + d.vault.split("/").pop() + " · read by peek"));
+  side.appendChild(mkEl("h3", "zl-ptitle", r.title));
+  side.appendChild(mkEl("div", "zl-by", d.vault + "/…/" + d.leaf));
+  side.appendChild(mkEl("pre", "zl-peek", d.text));
 }
 
 async function zShowGroups() {
   const side = zLib.side;
   if (!side) return;
   side.innerHTML = "";
-  side.appendChild(zEl("div", "zl-kicker", "Write groups to Zotero"));
-  side.appendChild(zEl("p", "zl-hint", "computing the zones of the papers in this vault…"));
+  side.appendChild(mkEl("div", "zl-kicker", "Write groups to Zotero"));
+  side.appendChild(mkEl("p", "zl-hint", "computing the zones of the papers in this vault…"));
   let d;
   try {
     const r = await fetch("/zotero/groups");
@@ -675,22 +659,22 @@ async function zShowGroups() {
     if (!r.ok) throw new Error(d.detail || "HTTP " + r.status);
   } catch (err) { side.lastChild.textContent = err.message; return; }
   side.lastChild.remove();
-  side.appendChild(zEl("p", "", "The semantic zones of the papers in this vault, as subcollections of Silica groups. "
+  side.appendChild(mkEl("p", "", "The semantic zones of the papers in this vault, as subcollections of Silica groups. "
     + "Your own collections are not touched; running it again replaces only what Silica put there."));
-  if (!d.groups.length) side.appendChild(zEl("p", "zl-hint", "No paper has notes in a zone yet."));
+  if (!d.groups.length) side.appendChild(mkEl("p", "zl-hint", "No paper has notes in a zone yet."));
   for (const g of d.groups) {
-    const row = zEl("div", "zl-group");
-    row.appendChild(zEl("span", "", g.label));
-    row.appendChild(zEl("span", "zl-num", g.now ? `${g.papers} (now ${g.now})` : `+${g.papers}`));
+    const row = mkEl("div", "zl-group");
+    row.appendChild(mkEl("span", "", g.label));
+    row.appendChild(mkEl("span", "zl-num", g.now ? `${g.papers} (now ${g.now})` : `+${g.papers}`));
     side.appendChild(row);
   }
-  const write = zEl("button", "zl-btn primary");
+  const write = mkEl("button", "zl-btn primary");
   write.type = "button";
   write.disabled = !d.groups.length;
   const n = d.groups.reduce((s, g) => s + g.papers, 0);
   zTwoClick(write, "Write groups", () => `Write ${n} membership(s)? Click again`, async () => {
     try {
-      const out = await zPost("/zotero/groups");
+      const out = await apiPost("/zotero/groups");
       notify(`Wrote ${out.groups} group(s) under Silica groups. /revert undoes it.`, "info");
       zSideHint();
     } catch (err) { notify("Zotero: " + err.message); }
@@ -706,7 +690,7 @@ let zPass = null;
 async function coversNeeded() {
   const st = zScopes && zScopes.covers ? zScopes.covers.state : "none";
   if (st === "fresh" || (zPass && (zPass.running || zPass.ready))) return;
-  try { zPass = await zPost("/zotero/covers"); } catch (err) { notify("covers: " + err.message); return; }
+  try { zPass = await apiPost("/zotero/covers"); } catch (err) { notify("covers: " + err.message); return; }
   zCoversPoll();
 }
 async function zCoversPoll() {
@@ -752,10 +736,10 @@ function fillZoteroScopes(groups) {
     sel.querySelector("optgroup[data-zotero]")?.remove();
     const opts = zoteroScopeOptions(zScopes, withPapers);
     if (!opts.length) continue;
-    const g = zEl("optgroup");
+    const g = mkEl("optgroup");
     g.label = "Collections";
     g.dataset.zotero = "1";
-    for (const [v, t] of opts) { const o = zEl("option", null, t); o.value = v; g.appendChild(o); }
+    for (const [v, t] of opts) { const o = mkEl("option", null, t); o.value = v; g.appendChild(o); }
     sel.appendChild(g);
   }
   if (window.syncScopePicker) syncScopePicker();

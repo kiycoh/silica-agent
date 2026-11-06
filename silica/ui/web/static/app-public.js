@@ -13,13 +13,12 @@ let pubInvites = [];  // GET /vault/invitations
 let pubAdding = false;
 let pubResult = null; // the last Publish, for the line under the button
 
-const pubName = (path) => path.split("/").pop().replace(/\.md$/, "");
 const pubLive = () => !!(pubState && pubState.available);
 const pubOf = (path) => (pubState && pubState.notes[path]) || "off";
 const pubVaultBy = (slug) => (pubState ? pubState.vaults.find((v) => v.slug === slug) : null);
 const pubVaultAt = (folder) => (pubState ? pubState.vaults.find((v) => v.folder === folder) : null);
 const pubVaultOfNote = (path) => pubVaultBy(pubState && pubState.of[path]);
-const pubCount = (n) => `${n.toLocaleString("en-GB")} ${n === 1 ? "note" : "notes"}`;
+const pubCount = (n) => `${fmtNum(n)} ${n === 1 ? "note" : "notes"}`;
 const pubCurVault = () => pubVaultBy(pubCur) || (pubState && pubState.vaults[0]) || null;
 
 // Silica's own folders and every dot-folder have no globe (ADR-0143 point 3);
@@ -118,21 +117,16 @@ function syncTreePublic() {
     if (!v) continue;
     const st = pubOf(b.dataset.pub);
     paintGlobe(b, st, 11, v);
-    b.title = pubTitle(st, pubName(b.dataset.pub), v);
+    b.title = pubTitle(st, noteStem(b.dataset.pub), v);
   }
 }
 
 async function pubPost(url, body) {
-  let r;
+  let data;
   try {
-    r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
-  } catch {
-    notify("My Wikis could not be reached");
-    return null;
-  }
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    notify(data.detail || "My Wikis did not change");
+    data = await apiPost(url, body);
+  } catch (e) {
+    notify(!e.status ? "My Wikis could not be reached" : e.data?.detail || "My Wikis did not change");
     return null;
   }
   if (data.vaults) {
@@ -278,8 +272,8 @@ async function loadPubCover(slug, build) {
   if (!pubCover) return;
   const cap = pubCoverEl.querySelector("figcaption");
   const unl = pubCover.unlinked || 0;
-  cap.textContent = `${pubCover.n.length.toLocaleString("en-GB")} notes drawn · ${pubCover.e.length.toLocaleString("en-GB")} ${pubCover.e.length === 1 ? "link" : "links"}`
-    + (unl ? ` · ${unl.toLocaleString("en-GB")} with no link, in the wiki but not in the picture` : "");
+  cap.textContent = `${fmtNum(pubCover.n.length)} notes drawn · ${fmtNum(pubCover.e.length)} ${pubCover.e.length === 1 ? "link" : "links"}`
+    + (unl ? ` · ${fmtNum(unl)} with no link, in the wiki but not in the picture` : "");
   pubCoverEl.querySelector("canvas").setAttribute("aria-label", `This wiki as a graph: ${cap.textContent}`);
   const run = ++pubCoverRun;
   if (!build || matchMedia("(prefers-reduced-motion: reduce)").matches) { pubCoverK = 1; drawPubCover(); return; }
@@ -311,16 +305,20 @@ function drawPubCover() {
     [...d.keys()].sort((a, b) => d[a] - d[b]).forEach((i, k) => { pubCoverRank[i] = k / N.length; });
   }
   if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  // cover-ink:start The press this cover shares with pages.js, which ships alone to the public
+  // host and cannot load a file of the app's: tests/test_design_copies.py holds the two to one text.
   const X = (i) => Math.round(pad + N[i][0] * (w - 2 * pad)), Y = (i) => Math.round(pad + N[i][1] * (h - 2 * pad));
+  const rad = (i) => (N[i][3] >= 12 ? 2 : 1);
   const x = cv.getContext("2d"), img = x.createImageData(w, h), px = new Uint32Array(img.data.buffer);
-  const ground = pubU32(pubRgb(pubCss("--void"))), ink = pubU32(pubRgb(pubCss("--frost")));
-  px.fill(ground);
   const put = (a, b, c) => { if (a >= 0 && b >= 0 && a < w && b < h) px[b * w + a] = c; };
   const seg = (x0, y0, x1, y1, c) => {
     const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
     for (let k = 0; k <= n; k++) put(Math.round(x0 + (x1 - x0) * k / n), Math.round(y0 + (y1 - y0) * k / n), c);
   };
   const disc = (cx, cy, rr, c) => { for (let a = -rr; a <= rr; a++) for (let b = -rr; b <= rr; b++) if (a * a + b * b <= rr * rr + rr) put(cx + a, cy + b, c); };
+  // cover-ink:end
+  const ground = pubU32(pubRgb(pubCss("--void"))), ink = pubU32(pubRgb(pubCss("--frost")));
+  px.fill(ground);
   // a note lands at at(i) and its links grow from the note that landed first
   const K = pubCoverK, rk = pubCoverRank, at = (i) => rk[i] * 0.55;
   for (const [a0, b0] of E) {
@@ -331,13 +329,12 @@ function drawPubCover() {
   // a clear ring of the well first, so a note reads as a mark and not as a crossing
   for (let i = 0; i < N.length; i++) {
     if (K < at(i)) continue;
-    const rr = N[i][3] >= 12 ? 2 : 1;
-    disc(X(i), Y(i), rr + 1, ground); disc(X(i), Y(i), rr, ink);
+    disc(X(i), Y(i), rad(i) + 1, ground); disc(X(i), Y(i), rad(i), ink);
   }
   if (pubCoverHover >= 0 && K >= 1) {
     // the pointed note rings in ink: the print keeps its two inks (DESIGN.md, the Two Inks
     // Rule), where it once lit the note and its links in teal
-    const i = pubCoverHover, r0 = N[i][3] >= 12 ? 2 : 1;
+    const i = pubCoverHover, r0 = rad(i);
     disc(X(i), Y(i), r0 + 4, ground); disc(X(i), Y(i), r0 + 3, ink);
     disc(X(i), Y(i), r0 + 1, ground); disc(X(i), Y(i), r0, ink);
   }
@@ -708,7 +705,7 @@ function renderPublic(fresh) {
   const chips = mkEl("ul", "pg-chips");
   for (const t of v.top) chips.append(mkEl("li", "", t));
   if (!v.out) chips.append(mkEl("li", "more", "Nothing yet: this folder has no note that can go out."));
-  else if (v.out > v.top.length) chips.append(mkEl("li", "more", `and ${(v.out - v.top.length).toLocaleString("en-GB")} more`));
+  else if (v.out > v.top.length) chips.append(mkEl("li", "more", `and ${fmtNum(v.out - v.top.length)} more`));
   goes.append(chips);
   const notes = [];
   if (v.struck) notes.push(`${pubCount(v.struck)} left out by ${v.struck === 1 ? "its" : "their"} own globe`);
@@ -793,7 +790,7 @@ function listingBox(v) {
 // its foot is the count Publish will honour.
 const PRE_ANSWERS = [["mine", "Mine, or I have permission"], ["open", "Open or public domain"], ["else", "Someone else's"]];
 const PRE_SHEET = 10;
-const prePlural = (n, w) => `${n.toLocaleString("en-GB")} ${w}${n === 1 ? "" : "s"}`;
+const prePlural = (n, w) => `${fmtNum(n)} ${w}${n === 1 ? "" : "s"}`;
 const preOpen = (o) => !o.answer || (o.answer === "open" && !o.free && o.license !== "CC BY-ND");
 
 async function publishNow(v) {
@@ -1022,7 +1019,7 @@ function preCheckRow(n, text, what, stop, extra) {
   const li = mkEl("li");
   const words = mkEl("span", "", text);
   if (extra) words.append(" ", extra);
-  li.append(mkEl("span", "n", n.toLocaleString("en-GB")), words, mkEl("span", "what" + (stop ? " stop" : ""), what));
+  li.append(mkEl("span", "n", fmtNum(n)), words, mkEl("span", "what" + (stop ? " stop" : ""), what));
   return li;
 }
 
@@ -1053,7 +1050,7 @@ function checkSheet(v) {
   }
 
   if (c.plain) {
-    const box = ppBox("Notes with no known source", c.plain.toLocaleString("en-GB"), { wide: true });
+    const box = ppBox("Notes with no known source", fmtNum(c.plain), { wide: true });
     box.append(mkEl("p", "pre-p", "Silica cannot tell where these come from: you may have written them, pasted them, or made them in the chat. They go out, and publishing them says they are yours to publish."));
     frag.append(box);
   }
@@ -1159,7 +1156,7 @@ function invitesBox(alone) {
     const no = mkEl("button", "st-btn", "Decline");
     no.type = "button";
     no.addEventListener("click", async () => {
-      const r = await fetch("/vault/invitations/decline", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ author: inv.author, vault: inv.vault }) }).catch(() => null);
+      const r = await postJson("/vault/invitations/decline", { author: inv.author, vault: inv.vault }).catch(() => null);
       if (r && r.ok) { pubInvites = (await r.json()).invitations; renderPublic(); }
     });
     const yes = mkEl("button", "st-btn primary", "Save to Silica");
@@ -1279,19 +1276,19 @@ async function openSaveSheet(what) {
       if (saveAreas.length === all.length) saveAreas = null;
       openSaveSheet(saveWhat);
     });
-    lab.append(box, mkEl("span", "pg-grow", name), mkEl("span", "pp-dim", size.toLocaleString("en-GB")));
+    lab.append(box, mkEl("span", "pg-grow", name), mkEl("span", "pp-dim", fmtNum(size)));
     li.append(lab);
     areas.append(li);
   }
-  parts.push(mkEl("p", "st-sheet-text", `${pubCount(p.notes + p.already)} of ${p.of.toLocaleString("en-GB")}, into ${p.folder}/. Links between them stay links${what.invite ? "; a link to a note you leave out keeps its words" : `; a link to a note you leave out opens ${p.author}'s page`}.`));
-  if (p.already) parts.push(mkEl("p", "st-sheet-text", `${p.already.toLocaleString("en-GB")} of these ${p.already === 1 ? "is already in your vault and stays as it is" : "are already in your vault and stay as they are"}.`));
+  parts.push(mkEl("p", "st-sheet-text", `${pubCount(p.notes + p.already)} of ${fmtNum(p.of)}, into ${p.folder}/. Links between them stay links${what.invite ? "; a link to a note you leave out keeps its words" : `; a link to a note you leave out opens ${p.author}'s page`}.`));
+  if (p.already) parts.push(mkEl("p", "st-sheet-text", `${fmtNum(p.already)} of these ${p.already === 1 ? "is already in your vault and stays as it is" : "are already in your vault and stay as they are"}.`));
   // a selection was made on the page, note by note: the sheet confirms it, areas could not say it
   if (!saveNotes) parts.push(areas);
   const room = p.room;
   if (room.max_notes || room.max_mb) {
     parts.push(mkEl("p", "st-sheet-text" + (room.short ? " sv-over" : ""), room.short
       ? `This save does not fit: ${room.short}. Choose fewer ${saveNotes ? "notes" : "areas"}.`
-      : `Your vault holds ${room.notes.toLocaleString("en-GB")} notes${room.max_notes ? ` of ${room.max_notes.toLocaleString("en-GB")}` : ""}; after saving, ${(room.notes + p.notes).toLocaleString("en-GB")}.`));
+      : `Your vault holds ${fmtNum(room.notes)} notes${room.max_notes ? ` of ${fmtNum(room.max_notes)}` : ""}; after saving, ${fmtNum(room.notes + p.notes)}.`));
   }
   if (p.license) parts.push(mkEl("p", "st-sheet-text", `License: ${p.license === "not stated" ? "not stated by the author" : p.license}.`));
   parts.push(mkEl("p", "sv-snap", `This saves the wiki as it is today, as one write you can take back. If ${p.author} edits or removes a note later, your copy stays as saved.`));
@@ -1321,10 +1318,7 @@ $("#save-go").addEventListener("click", async () => {
   const what = saveWhat;
   let r, d;
   try {
-    r = await fetch(what.invite ? "/vault/invitations/save" : "/vault/save", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(what.invite ? { author: what.invite.author, vault: what.invite.vault, areas: saveAreas } : { url: what.url, areas: saveAreas, notes: saveNotes }),
-    });
+    r = await postJson(what.invite ? "/vault/invitations/save" : "/vault/save", what.invite ? { author: what.invite.author, vault: what.invite.vault, areas: saveAreas } : { url: what.url, areas: saveAreas, notes: saveNotes });
     d = await r.json().catch(() => ({}));
   } catch {
     notify("the page could not be saved");

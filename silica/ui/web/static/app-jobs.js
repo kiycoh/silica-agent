@@ -65,19 +65,10 @@ function jobButton(label, cls, title, onClick) {
 
 async function jobPost(j, action, body) {
   try {
-    const r = await fetch(`/jobs/${j.id}/${action}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body || {}),
-    });
-    if (!r.ok) {
-      const d = await r.json().catch(() => ({}));
-      notify(typeof d.detail === "string" ? d.detail : `the server answered ${r.status}`);
-      return null;
-    }
-    return r;
-  } catch {
-    notify("the server could not be reached");
+    return await apiPost(`/jobs/${j.id}/${action}`, body);
+  } catch (e) {
+    notify(!e.status ? "the server could not be reached"
+      : typeof e.data?.detail === "string" ? e.data.detail : `the server answered ${e.status}`);
     return null;
   }
 }
@@ -105,11 +96,7 @@ function jobOffer(j, kind) {
   }
   jobsById.delete(j.id);
   renderJobs();
-  const go = () => runTurn(fetch(`/jobs/${j.id}/turn`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ as: kind }),
-  }), "working", go);
+  const go = () => runTurn(postJson(`/jobs/${j.id}/turn`, { as: kind }), "working", go);
   go();
 }
 
@@ -136,10 +123,7 @@ function askDrop(j) {
 
 async function jobAddToVault(j) {
   try {
-    const r = await fetch("/chat/files/add", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source: j.source.path }),
-    });
+    const r = await postJson("/chat/files/add", { source: j.source.path });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { notify(typeof d.detail === "string" ? d.detail : `the server answered ${r.status}`); return; }
     announce(`${j.source.name} added to the Inbox`);
@@ -168,7 +152,7 @@ function jobRow(j, ahead) {
   acts.className = "job-acts";
   if (j.state === "done") {
     for (const n of j.notes || []) {
-      const a = jobButton(n.split("/").pop().replace(/\.md$/, ""), "job-note linklike", "open " + n, () => openNote(n));
+      const a = jobButton(noteStem(n), "job-note linklike", "open " + n, () => openNote(n));
       what.append(" ", a);
     }
     // ADR-0087 point 3: the note names the pages no model read, and so does
@@ -255,7 +239,7 @@ function jobsUpdate(j) {
     markVaultChanged();
   }
   if (ended && j.state === "done" && !j.dismissed) askDrop(j);
-  if (typeof vaultImportJob === "function") vaultImportJob(j);
+  vaultImportJob(j);
   renderJobs();
 }
 

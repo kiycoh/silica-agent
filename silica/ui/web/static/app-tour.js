@@ -34,7 +34,7 @@ const TOUR_STEPS = {
   ask: {
     n: 2, target: TOUR_COMPOSER, wait: "turn",
     prepare: () => prefillChat(/\.md$/i.test(tour.note)
-      ? `What are the key points of [[${tour.note.replace(/\.md$/i, "")}]]? `
+      ? `What are the key points of [[${noExt(tour.note)}]]? `
       : `What are the key points of the notes in "${tour.note}"? `),
     body: "Ask about it. The question is written for you: send it, or write your own.",
     // The turn steps had no button, so a turn that failed, was stopped or was
@@ -149,11 +149,11 @@ const TOUR_RUNS = {
       body: "Find a note and the map flies to it, with its neighbours arranged around it. Click any dot to open its note beside the map." },
     { ch: "Explore", prepare: () => tourSurface("graph"), target: "#surface-tabs",
       body: "The same notes, read five ways. Graph draws the links, Flow and Clusters arrange them, Folders and Read read the shape. Library is here when the vault is linked to Zotero." },
-    { ch: "Explore", prepare: () => tourSurface("flow"), target: '#surface-tabs [data-gmode="flow"]',
+    { ch: "Explore", prepare: () => tourSurface("flow"), target: surfaceTab("flow"),
       body: "Flow puts one note in its reading order, in the graph: what comes before it, and what it unlocks. Click a note to place it." },
-    { ch: "Explore", prepare: () => tourSurface("clusters"), target: '#surface-tabs [data-gmode="clusters"]',
+    { ch: "Explore", prepare: () => tourSurface("clusters"), target: surfaceTab("clusters"),
       body: "Clusters gathers each area in one place, on a ring, and the links between them stay drawn. Folders, beside it, shades each folder by how much it mixes areas." },
-    { ch: "Explore", prepare: () => tourSurface("read"), target: '#surface-tabs [data-gmode="read"]',
+    { ch: "Explore", prepare: () => tourSurface("read"), target: surfaceTab("read"),
       body: "Read is a way through the whole vault: each area's hub first, then the notes it opens onto." },
     { ch: "Explore", prepare: () => tourSurface("graph"), target: "#dock .composer-shell",
       body: "Ask from here. The answer opens in a card over the map, and goes on in the chat when you want the whole of it." },

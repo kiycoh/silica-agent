@@ -264,6 +264,9 @@ const LAYOUT_MODES = [
   ["read", "Read", "a reading order derived from hubs and their links", 1],
 ];
 
+// A mode's tab, for the scripts that point at it (the tour, Library's badge).
+const surfaceTab = (mode) => `#surface-tabs [data-gmode="${mode}"]`;
+
 function buildSurfaceTabs() {
   const box = $("#surface-tabs");
   box.innerHTML = "";
@@ -354,7 +357,7 @@ function renderPins() {
     row.title = path;
     row.draggable = true; // onto a workspace, a folder or the composer (ADR-0126 point 10)
     row.appendChild(mkEl("span", "sw"));
-    row.appendChild(mkEl("span", "t", path.replace(/\.md$/, "").split("/").pop()));
+    row.appendChild(mkEl("span", "t", noteStem(path)));
     const x = mkEl("button", "pin-x", "✕");
     x.type = "button";
     x.setAttribute("aria-label", "unpin " + path);
@@ -645,10 +648,7 @@ async function moveFromTree(paths, folder, name) {
   if (typeof saveEdit === "function") await Promise.all(noteSessions.map((s) => saveEdit(s)));
   let r = null, data = null;
   try {
-    r = await fetch("/tree/move", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(name !== undefined ? { path: paths[0], name } : { paths, folder }),
-    });
+    r = await postJson("/tree/move", name !== undefined ? { path: paths[0], name } : { paths, folder });
     data = await r.json();
   } catch { /* reported below */ }
   if (!r || !r.ok) { notify((data && data.detail) || "couldn't move that"); return; }
@@ -691,9 +691,7 @@ async function undoTreeMove(run, moved) {
 async function undoTreeRun(run) {
   let r = null, data = null;
   try {
-    r = await fetch("/tree/undo", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run }),
-    });
+    r = await postJson("/tree/undo", { run });
     data = await r.json();
   } catch { /* reported below */ }
   if (!r || !r.ok) { notify((data && data.detail) || "couldn't undo that"); return null; }
@@ -888,10 +886,7 @@ async function deleteFromTree(note, folder, paths) {
   closeTreeMenu();
   let r = null, data = null;
   try {
-    r = await fetch("/tree/delete", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(paths ? { paths } : note ? { path: note } : { folder }),
-    });
+    r = await postJson("/tree/delete", paths ? { paths } : note ? { path: note } : { folder });
     data = await r.json();
   } catch { /* reported below */ }
   if (!r || !r.ok) { notify((data && data.detail) || "couldn't delete that"); return false; }
@@ -905,7 +900,7 @@ async function deleteFromTree(note, folder, paths) {
   if (lastViewedPath && gone.has(lastViewedPath)) lastViewedPath = null; // the corner toggle would reopen it
   loadVaultInfo();
   clearTreeSel();
-  const what = note ? note.replace(/\.md$/, "").split("/").pop()
+  const what = note ? noteStem(note)
     : `${gone.size} ${gone.size === 1 ? "note" : "notes"}` + (folder ? ` in ${folder.split("/").pop()}` : "");
   const d = data.dangling.length;
   const msg = `Moved ${what} to the trash.`
@@ -943,7 +938,7 @@ async function loadTrash() {
   list.innerHTML = "";
   for (const t of items) {
     const row = mkEl("div", "trash-row");
-    const name = mkEl("span", "trash-name", t.path.replace(/\.md$/, "").split("/").pop());
+    const name = mkEl("span", "trash-name", noteStem(t.path));
     const who = t.source === "user:/delete" ? "you" : "the chat";
     name.title = `${t.path}\ndeleted ${new Date(t.deleted_at * 1000).toLocaleString()} by ${who}`;
     const back = mkEl("button", "linklike", "restore");
@@ -971,10 +966,7 @@ async function loadTrash() {
 async function trashAct(url, item, done) {
   let r = null, data = null;
   try {
-    r = await fetch(url, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(item.all ? { all: true } : { run: item.run, path: item.path }),
-    });
+    r = await postJson(url, item.all ? { all: true } : { run: item.run, path: item.path });
     data = await r.json();
   } catch { /* reported below */ }
   if (!r || !r.ok) { notify((data && data.detail) || "couldn't do that", "error"); loadTrash(); return; }
@@ -1064,7 +1056,7 @@ function stampWriteTallies(rows) {
   // to open was never the thing that opened.
   const by = new Map(), byBase = new Map();
   for (const r of rows) {
-    const stem = r.path.replace(/\.md$/, "");
+    const stem = noExt(r.path);
     by.set(r.path, r);
     by.set(stem, r);
     const base = stem.split("/").pop();
@@ -1206,9 +1198,7 @@ $("#sessions-more").addEventListener("click", () => {
 // today / yesterday / earlier, by the calendar day of the machine the vault is
 // on, which is also the machine the person is on.
 function dayBucket(ts) {
-  const d = new Date(ts * 1000), now = new Date();
-  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diff = Math.round((day(now) - day(d)) / 86400000);
+  const diff = daysAgo(ts);
   return diff <= 0 ? "Today" : diff === 1 ? "Yesterday" : "Earlier";
 }
 // Relative while it is short, a date once it is not; the absolute time rides
@@ -1218,7 +1208,7 @@ function relTime(ts) {
   if (s < 60) return "now";
   if (s < 3600) return Math.floor(s / 60) + "m";
   if (s < 86400) return Math.floor(s / 3600) + "h";
-  return new Date(ts * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return fmtDay(new Date(ts * 1000));
 }
 
 // The document title follows the open chat, so a tab strip of three silica
@@ -1317,7 +1307,7 @@ function openSessionMenu(row) {
   const del = item("delete", () => {}, "danger");
   armThenRun(del, "delete", "click again · this chat and its record are gone", async () => {
     try {
-      const r = await fetch("/session/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      const r = await postJson("/session/delete", { id });
       if (!r.ok) { notify(r.status === 409 ? "that chat is running; stop it first" : "couldn't delete that chat"); return; }
     } catch { notify("couldn't delete that chat"); return; }
     closeSessionMenus();
@@ -1348,7 +1338,7 @@ function renameSessionInline(row) {
     field.replaceWith(t);
     if (!save || !title || title === t.textContent) return;
     try {
-      const r = await fetch("/session/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.dataset.id, title }) });
+      const r = await postJson("/session/rename", { id: row.dataset.id, title });
       if (!r.ok) { notify("couldn't rename that chat"); return; }
     } catch { notify("couldn't rename that chat"); return; }
     loadSessions();
@@ -1428,11 +1418,7 @@ async function openSession(id, fromUrl = false) {
   autoGrow(input);
   renderHighlight();
   try {
-    const r = await fetch("/session/load", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
+    const r = await postJson("/session/load", { id });
     if (!r.ok) {
       // A stale id is a notice over a working page, never a blank one.
       notify(r.status === 404 ? "That chat wasn't found. It may have been deleted." : "couldn't load that chat");

@@ -54,7 +54,6 @@ function calMonday(d) {
 function calDay(s) { return new Date(s + "T00:00"); }
 function calMin(s) { return Number(s.slice(11, 13)) * 60 + Number(s.slice(14, 16)); }
 function calHM(m) { return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; }
-function calShort(d) { return d.toLocaleString("en-US", { month: "short", day: "numeric" }); }
 function calWindow() {
   if (calMode === "month") {
     return { start: calMonday(new Date(calAnchor.getFullYear(), calAnchor.getMonth(), 1)), days: 42 };
@@ -205,7 +204,7 @@ function calSpan(e) {
   const a = e.start.slice(11, 16);
   if (!e.end) return a;
   return e.end.slice(0, 10) === e.start.slice(0, 10) ? `${a} to ${e.end.slice(11, 16)}`
-    : `${a} to ${calShort(calDay(e.end.slice(0, 10)))} ${e.end.slice(11, 16)}`;
+    : `${a} to ${fmtDay(calDay(e.end.slice(0, 10)))} ${e.end.slice(11, 16)}`;
 }
 
 // An event is a button: its click opens the event card on it (ADR-0118 point
@@ -254,7 +253,7 @@ function calPlanBar(p, open) {
   const el = mkEl("button", "ct-plan" + (open ? " open" : ""));
   el.type = "button";
   el.append(mkEl("span", "cal-dia"), mkEl("b", "", p.name), mkEl("span", "left", calDaysLeft(p.by)));
-  if (open) el.appendChild(mkEl("span", "to", calShort(calDay(p.by)) + " →"));
+  if (open) el.appendChild(mkEl("span", "to", fmtDay(calDay(p.by)) + " →"));
   el.title = `study plan due ${p.by}: open it in Memorize`;
   el.addEventListener("pointerdown", (ev) => ev.stopPropagation());
   el.addEventListener("click", () => calOpenPlan(p.path));
@@ -309,7 +308,7 @@ function calRenderTitle() {
   b.setDate(b.getDate() + w.days - 1);
   t.textContent = calMode === "agenda" ? "Agenda"
     : w.start.toLocaleString("en-US", { month: "long", year: "numeric" });
-  sub.textContent = `${calShort(w.start)} to ${calShort(b)}`;
+  sub.textContent = `${fmtDay(w.start)} to ${fmtDay(b)}`;
 }
 
 // The month the side column jumps with. Its arrows page the small month alone;
@@ -637,7 +636,7 @@ function calStrip(date, today) {
       const r = mkEl("button", "cd-plan");
       r.type = "button";
       r.append(mkEl("span", "cal-dia"), mkEl("span", "nm", p.name), mkEl("b", "", calDaysLeft(p.by)));
-      r.title = `${p.name}, due ${calShort(calDay(p.by))}: open the plan in Memorize`;
+      r.title = `${p.name}, due ${fmtDay(calDay(p.by))}: open the plan in Memorize`;
       r.addEventListener("click", () => calOpenPlan(p.path));
       plans.appendChild(r);
     }
@@ -684,7 +683,7 @@ function calDayStack(row, date, today) {
       // the note leads; of its folder only the last step, which is the one
       // that tells two notes apart (the whole path rides the tooltip)
       const folder = cut > 0 ? path.slice(0, cut).split("/").pop() : "";
-      const it = rowBtn("review", path.slice(cut + 1).replace(/\.md$/, ""), folder, "i", () => openNote(path));
+      const it = rowBtn("review", noteStem(path), folder, "i", () => openNote(path));
       it.title = path;
       p.appendChild(it);
     }
@@ -704,7 +703,7 @@ function calDayStack(row, date, today) {
     const p = panel("Tasks", "tick them in their note");
     for (const t of tk) {
       const done = t.status === "done";
-      const due = t.due ? (t.due === today ? "today" : calShort(calDay(t.due))) : "";
+      const due = t.due ? (t.due === today ? "today" : fmtDay(calDay(t.due))) : "";
       const it = rowBtn("tasks", t.text, t.overdue ? "late since " + due : done ? "done" : due ? "due " + due : "",
                         t.overdue ? "em" : "i", () => openNote(t.path, t.line));
       if (done) it.classList.add("done");
@@ -901,7 +900,7 @@ function calAgendaDay(row) {
   const d = calDay(row.date);
   const h = document.createElement("div");
   h.className = "cal-ag-date";
-  h.textContent = calShort(d);
+  h.textContent = fmtDay(d);
   const wd = document.createElement("span");
   wd.className = "wd";
   wd.textContent = d.toLocaleString("en-US", { weekday: "long" });
@@ -992,7 +991,7 @@ function calAgendaDay(row) {
     const path = r.path || "";
     const cut = path.lastIndexOf("/");
     const t = mkEl("span", "cal-ag-txt");
-    t.appendChild(document.createTextNode(path.slice(cut + 1).replace(/\.md$/, "")));
+    t.appendChild(document.createTextNode(noteStem(path)));
     if (cut > 0) t.appendChild(mkEl("i", "", " " + path.slice(0, cut)));
     it.title = path;
     it.classList.add("clickable");
@@ -1042,7 +1041,7 @@ function renderCalAgenda() {
   const head = document.createElement("div");
   head.className = "cal-ag-head";
   const w = calWindow();
-  head.textContent = calFmt(w.start) === calFmt(new Date()) ? "Next 7 days" : "7 days from " + calShort(w.start);
+  head.textContent = calFmt(w.start) === calFmt(new Date()) ? "Next 7 days" : "7 days from " + fmtDay(w.start);
   panel.appendChild(head);
   for (const row of Object.values(calDays).sort((a, b) => (a.date < b.date ? -1 : 1))) {
     panel.appendChild(calAgendaDay(row));
@@ -1219,9 +1218,7 @@ function calQuickCard(at, anchor) {
     save.disabled = more.disabled = true;
     err.hidden = true;
     try {
-      const r = await fetch("/calendar/event", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(v),
-      }).then((x) => x.json());
+      const r = await postJson("/calendar/event", v).then((x) => x.json());
       if (r.error) { err.textContent = r.error; err.hidden = false; return; }
       calCloseCard();
       notify("saved " + r.path, "info");
@@ -1232,9 +1229,9 @@ function calQuickCard(at, anchor) {
       const row = calDays[date.value];
       if (row) {
         row.events = [...(row.events || []), {
-          stem: r.path.split("/").pop().replace(/\.md$/, ""), title: v.title, path: r.path,
+          stem: noteStem(r.path), title: v.title, path: r.path,
           start: v.start, end: v.end, all_day: allDay.checked, status: "",
-          rrule: v.rrule, reminder: v.reminder, plan: v.plan.replace(/\.md$/, ""),
+          rrule: v.rrule, reminder: v.reminder, plan: noExt(v.plan),
         }];
         renderCalendar();
       }
@@ -1282,7 +1279,7 @@ function calEventCard(e, anchor) {
     el.appendChild(mkEl("div", "ce-row", "Reminds " + lead));
   }
   if (e.plan) {
-    const p = calPlans.find((q) => q.path.replace(/\.md$/, "") === e.plan);
+    const p = calPlans.find((q) => noExt(q.path) === e.plan);
     const b = mkEl("button", "ce-link", "Session for " + (p ? p.name : e.plan.split("/").pop()));
     b.type = "button";
     b.addEventListener("click", () => { calCloseCard(); calOpenPlan(p ? p.path : e.plan + ".md"); });
@@ -1318,10 +1315,7 @@ function calEventCard(e, anchor) {
 async function calSetStatus(e, status) {
   let r;
   try {
-    r = await fetch("/calendar/event/status", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: e.path, status }),
-    }).then((x) => x.json());
+    r = await postJson("/calendar/event/status", { path: e.path, status }).then((x) => x.json());
   } catch { r = { error: "couldn't reach the server" }; }
   if (r.error) { notify(r.error); return; }
   calCloseCard();

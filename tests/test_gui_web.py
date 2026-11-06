@@ -2854,7 +2854,7 @@ def test_a_write_card_meets_the_changes_payload_on_the_resolved_path():
     js = app_js()
     block = js[js.index("function stampWriteTallies"):]
     block = block[:block.index("\n}\n")]
-    assert 'replace(/\\.md$/, "")' in block, "no stem key: a bare name never matches"
+    assert "noExt(" in block, "no stem key: a bare name never matches"
     assert 'querySelector(".wc-open")' in block, "the card is never re-pointed at the resolved path"
 
 
@@ -3220,4 +3220,4 @@ def test_a_plan_computed_in_the_chat_is_offered_for_saving_with_one_click(client
     done = asyncio.run(collect())[-1]
     assert done["offer"]["commands"] == [{"label": "save it in Memorize", "save": draft}]
     js = (Path(server.__file__).parent / "static" / "app-chat.js").read_text(encoding="utf-8")
-    assert "} else if (c.save) {" in js and 'fetch("/learn/plan", { method: "POST"' in js
+    assert "} else if (c.save) {" in js and 'postJson("/learn/plan", body)' in js

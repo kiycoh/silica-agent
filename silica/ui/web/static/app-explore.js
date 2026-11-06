@@ -500,7 +500,7 @@ function renderReading(s) {
     // forks of each other under `silica/`, so they share every segment except
     // the first, and one parent segment disambiguated nothing.
     const name = seenLabel.get(stop.label) > 1
-      ? stop.path.replace(/\.md$/, "") : stop.label;
+      ? noExt(stop.path) : stop.label;
     const n = mkEl("span", "rpath-name", name);
     n.title = stop.path;
     li.appendChild(n);

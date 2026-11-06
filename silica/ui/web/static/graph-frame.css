@@ -1,9 +1,9 @@
 /* Palette mirrors the app shell: graphite substrate, one signal hue at 189deg,
    amber for caution. Community hues stay data-driven. Type: Archivo, inlined
    as a data: URI because this file must stay self-contained for file:// use.
-   Keep these tokens in sync with static/app-base.css: this block had already
-   drifted a generation behind it once (--ash-dim was still #757F99, which
-   fails 4.5:1 on --slate-2), so drift here is not hypothetical.
+   tests/test_design_copies.py holds these tokens to static/app-base.css: this
+   block had already drifted a generation behind it once (--ash-dim was still
+   #757F99, which fails 4.5:1 on --slate-2), so drift here is not hypothetical.
    --violet is deleted, see docs/specs/visual-identity.md. */
 :root{
   color-scheme:dark;
@@ -12,8 +12,8 @@
   --frost:#F4F5F7;--text:#C5CAD2;--ash:#AEB4BE;--ash-dim:#969CA6;
   --accent:#22B4CC;--warn:#E0A93B;
   --sel:rgb(150 205 215 / .14);--sel-hover:rgb(244 245 247 / .06);
-  --sans:"Archivo",ui-sans-serif,system-ui,sans-serif;
-  --lift:0 10px 28px -12px rgba(0,0,0,.7);
+  --sans:"Archivo",ui-sans-serif,system-ui,"Helvetica Neue",Arial,sans-serif;
+  --lift:0 10px 28px -12px rgb(0 0 0 / .7);
   /* HUD and focus bar float over the canvas, so their fill is the floor at
      near-opacity, not a surface step: whatever the graph paints has to stop
      at their edge. --g-* are the canvas's own neutrals, and the renderer now

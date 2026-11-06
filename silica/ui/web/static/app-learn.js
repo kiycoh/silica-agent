@@ -45,7 +45,6 @@ const LR_CONF = [["certain", 90], ["pretty sure", 70], ["half unsure", 50], ["gu
 const LR_RATING = { 1: "again", 2: "hard", 3: "good", 4: "easy" };
 const LR_LEVEL = { 1: "Facts", 2: "Parts", 3: "Mechanisms", 4: "New contexts" };
 const LR_OBJ = { recall: "Recall information", explain: "Explain how and why", apply: "Apply to a case", compare: "Compare and distinguish", evaluate: "Evaluate and justify" };
-const LR_OBJ_SHORT = { recall: "recall", explain: "explain", apply: "apply", compare: "compare", evaluate: "evaluate" };
 const LR_OBJ_DESC = {
   recall: "Restate definitions, facts or steps without looking them up.",
   explain: "Make relations, mechanisms and conditions of validity explicit.",
@@ -62,8 +61,6 @@ const LR_READ_KEY = "silica.learn.readAloud";
 let lrReadAloud = (() => { try { return localStorage.getItem(LR_READ_KEY) === "1"; } catch { return false; } })();
 let lrSpoken = new Set();     // what was already read aloud, so a re-render never repeats it
 
-const lrEl = (tag, cls, text) => mkEl(tag, cls, text);
-const lrStem = (p) => String(p || "").replace(/\.md$/, "").split("/").pop();
 const lrDays = (s) => (typeof s === "number" ? `~${Math.round(s)} d` : "new");
 const lrDate = (iso) => {
   if (!iso) return "";
@@ -72,7 +69,7 @@ const lrDate = (iso) => {
   // and a plan row "by 30 nov" beside them looked like two products. A bare
   // date is that date (parsed as UTC midnight); a moment is the local day
   const bare = typeof iso === "string" && /^\d{4}-\d{2}-\d{2}$/.test(iso);
-  return isNaN(d) ? String(iso).slice(0, 10) : d.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(bare ? { timeZone: "UTC" } : {}) });
+  return isNaN(d) ? String(iso).slice(0, 10) : fmtDay(d, bare ? { timeZone: "UTC" } : {});
 };
 const lrTime = (ts) => { const d = new Date(ts * 1000); return isNaN(d) ? "" : d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }); };
 const lrPlural = (n, one, many) => `${n} ${n === 1 ? one : many || one + "s"}`;
@@ -83,13 +80,6 @@ const lrObjList = (objs) => { const l = (objs || []).map((o) => LR_OBJ[o] ? LR_O
 // a session returns to its plan, else to the home column, where a note is a
 // row of the list (ADR-0119); before, a note's session returned to its pane
 const lrOriginRoute = (o) => (o?.kind === "plan" ? { view: "plan", plan: o.path } : { view: "home" });
-
-async function lrPost(url, body) {
-  const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(data.detail || r.statusText), { status: r.status, data });
-  return data;
-}
 
 // The server restarted under an open page: the session lived in its memory
 // and is gone, and every call on it would fail the same way (2026-10-06:
@@ -109,7 +99,7 @@ function lrGone(e) {
 // beside it already say it.
 const LR_MARK_SAY = { open: "still to verify", half: "met with help, not counted", full: "met without help", warn: "caution", never: "not tested yet" };
 function lrMark(kind, say) {
-  const m = lrEl("span", "lr-mk " + kind);
+  const m = mkEl("span", "lr-mk " + kind);
   const label = say === undefined ? LR_MARK_SAY[kind] : say;
   if (label) { m.setAttribute("role", "img"); m.setAttribute("aria-label", label); m.title = label; }
   else m.setAttribute("aria-hidden", "true");
@@ -118,9 +108,9 @@ function lrMark(kind, say) {
 
 // A figure is a number that decides, with its label under it.
 function lrFig(n, label, sub) {
-  const f = lrEl("div", "lr-fig");
-  f.append(lrEl("span", "n num", String(n)), lrEl("span", "l", label));
-  if (sub) f.appendChild(lrEl("span", "s", sub));
+  const f = mkEl("div", "lr-fig");
+  f.append(mkEl("span", "n num", String(n)), mkEl("span", "l", label));
+  if (sub) f.appendChild(mkEl("span", "s", sub));
   return f;
 }
 
@@ -128,14 +118,14 @@ function lrFig(n, label, sub) {
 // request, closed, and stays open across a re-render once opened.
 function lrDisc(box, title, count, build) {
   const key = `${lrRoute.view}:${title}`;
-  const det = lrEl("details", "lr-dr");
+  const det = mkEl("details", "lr-dr");
   det.open = lrDiscOpen.has(key);
   det.addEventListener("toggle", () => (det.open ? lrDiscOpen.add(key) : lrDiscOpen.delete(key)));
-  const sum = lrEl("summary");
-  sum.appendChild(lrEl("span", "t", title));
-  if (count !== "" && count != null) sum.appendChild(lrEl("span", typeof count === "number" ? "c num" : "c", String(count)));
+  const sum = mkEl("summary");
+  sum.appendChild(mkEl("span", "t", title));
+  if (count !== "" && count != null) sum.appendChild(mkEl("span", typeof count === "number" ? "c num" : "c", String(count)));
   det.appendChild(sum);
-  const inner = lrEl("div", "in");
+  const inner = mkEl("div", "in");
   build(inner);
   det.appendChild(inner);
   box.appendChild(det);
@@ -144,7 +134,7 @@ function lrDisc(box, title, count, build) {
 
 // A key is shown on the button it presses, not in a legend across the bar.
 function lrKey(btn, key, shortcut) {
-  const k = lrEl("kbd", "lr-k", key);
+  const k = mkEl("kbd", "lr-k", key);
   k.setAttribute("aria-hidden", "true");
   btn.appendChild(k);
   if (shortcut) btn.setAttribute("aria-keyshortcuts", shortcut);
@@ -152,7 +142,7 @@ function lrKey(btn, key, shortcut) {
 }
 
 function lrBtn(cls, text, run) {
-  const b = lrEl("button", cls, text);
+  const b = mkEl("button", cls, text);
   b.type = "button";
   if (run) b.addEventListener("click", run);
   return b;
@@ -162,16 +152,15 @@ function lrBtn(cls, text, run) {
 // cloze's blank drawn as a gap. Code and formulas are parked before the rest
 // is escaped, so the only tags in the result are the ones written here and
 // the server's MathML.
-const lrEsc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function lrMd(el, text) {
   const code = [], math = [];
-  el.innerHTML = lrEsc(String(text || "")
+  el.innerHTML = escapeAttr(String(text || "")
     .replace(/`([^`]+)`/g, (_m, c) => `\u0000${code.push(c) - 1}\u0000`)
     .replace(LR_MATH_RE, (_m, d, i) => `\u0001${math.push([d !== undefined, d ?? i]) - 1}\u0001`))
     .replace(/_{3,}/g, '<span class="lr-gap" role="img" aria-label="blank"></span>')
     .replace(/\*\*([^*]+?)\*\*/g, "<b>$1</b>")
     .replace(/\*([^*\n]+?)\*/g, "<em>$1</em>")
-    .replace(/\u0000(\d+)\u0000/g, (_m, i) => `<code>${lrEsc(code[i])}</code>`)
+    .replace(/\u0000(\d+)\u0000/g, (_m, i) => `<code>${escapeAttr(code[i])}</code>`)
     .replace(/\u0001(\d+)\u0001/g, (_m, i) => lrMathSpan(...math[i]));
   if (math.length) lrTypeset(el);
   return el;
@@ -189,13 +178,13 @@ function lrMathSpan(display, tex) {
   const done = LR_MATH.get(k);
   if (done) return `<span class="lr-math">${done}</span>`;
   const fence = display ? "$$" : "$";
-  return `<span class="lr-math" data-k="${lrEsc(k)}">${lrEsc(fence + tex + fence)}</span>`;
+  return `<span class="lr-math" data-k="${escapeAttr(k)}">${escapeAttr(fence + tex + fence)}</span>`;
 }
 async function lrTypeset(root) {
   const want = [...new Set([...root.querySelectorAll(".lr-math[data-k]")].map((e) => e.dataset.k))].filter((k) => !LR_MATH.has(k));
   if (want.length) {
     try {
-      const r = await lrPost("/learn/math", { tex: want.map((k) => k.slice(1)), display: want.map((k) => k[0] === "D") });
+      const r = await apiPost("/learn/math", { tex: want.map((k) => k.slice(1)), display: want.map((k) => k[0] === "D") });
       want.forEach((k, i) => LR_MATH.set(k, r.mathml[i]));
     } catch { return; }   // the formula stays as written, which is what it was before
   }
@@ -214,7 +203,7 @@ function lrMarked(el, text, term) {
   const k = String(term || "").trim();
   const at = k && k.length <= 80 ? t.toLowerCase().indexOf(k.toLowerCase()) : -1;
   if (at < 0) { el.textContent = t; return el; }
-  el.append(t.slice(0, at), lrEl("b", "key", t.slice(at, at + k.length)), t.slice(at + k.length));
+  el.append(t.slice(0, at), mkEl("b", "key", t.slice(at, at + k.length)), t.slice(at + k.length));
   return el;
 }
 
@@ -328,9 +317,9 @@ async function lrAttach(id) {
 function lrBar({ crumb = [], stamp = "", stampTitle = "", back = null, end = false, say = "" } = {}) {
   const c = $("#learn-crumb");
   c.innerHTML = "";
-  if (say) c.appendChild(lrEl("span", "lr-purpose", say));
-  crumb.forEach((part, i) => { if (i) c.appendChild(lrEl("span", "sep", "›")); c.appendChild(lrEl("b", null, part)); });
-  if (stamp) { const s = lrEl("span", "vault num", stamp); if (stampTitle) s.title = stampTitle; c.appendChild(s); }
+  if (say) c.appendChild(mkEl("span", "lr-purpose", say));
+  crumb.forEach((part, i) => { if (i) c.appendChild(mkEl("span", "sep", "›")); c.appendChild(mkEl("b", null, part)); });
+  if (stamp) { const s = mkEl("span", "vault num", stamp); if (stampTitle) s.title = stampTitle; c.appendChild(s); }
   const b = $("#learn-back");
   b.hidden = !back;
   b.onclick = back ? back.run : null;
@@ -397,22 +386,22 @@ function lrRenderHome(body) {
   const back = { label: "Memorize", run: () => lrGo({ view: "home" }) };
   if (v === "map") {
     lrBar({ crumb: ["What you know"], stamp: lrMapStamp(), back });
-    const mv = lrEl("section", "mv lr-mv lr-mapv");
-    const left = lrEl("div", "mv-l");
-    const right = lrEl("div", "mv-r");
+    const mv = mkEl("section", "mv lr-mv lr-mapv");
+    const left = mkEl("div", "mv-l");
+    const right = mkEl("div", "mv-r");
     lrRenderMapLeft(left);
     mv.append(left, right);
     body.appendChild(mv);
     if (lrRoute.path) { lrNoteInto(right, lrRoute.path); return; }
-    const inv = lrEl("div", "lr-invite");
-    inv.append(lrEl("h2", null, "Pick a note to see its history"), lrEl("p", null, "Each mark is a note: dashed not tested yet, open still to verify, half met with help, full met without help."));
+    const inv = mkEl("div", "lr-invite");
+    inv.append(mkEl("h2", null, "Pick a note to see its history"), mkEl("p", null, "Each mark is a note: dashed not tested yet, open still to verify, half met with help, full met without help."));
     right.appendChild(inv);
-    const discs = lrEl("div", "lr-discs end");
+    const discs = mkEl("div", "lr-discs end");
     lrReadings(discs, d);
     right.appendChild(discs);
     return;
   }
-  const one = lrEl("section", "lr-one");
+  const one = mkEl("section", "lr-one");
   body.appendChild(one);
   if (v === "plans") {
     lrBar({ crumb: ["All plans"], back });
@@ -422,30 +411,30 @@ function lrRenderHome(body) {
   if (v === "plan") {
     const sel = (d.plans || []).find((p) => p.path === lrRoute.plan);
     lrBar({ crumb: [sel ? sel.name : "Plan"], back });
-    if (!sel) { one.appendChild(lrEl("p", "lr-help", "That plan is not in the vault any more.")); return; }
+    if (!sel) { one.appendChild(mkEl("p", "lr-help", "That plan is not in the vault any more.")); return; }
     if (lrPlan && lrPlan.path === sel.path) lrRenderPlanDetail(one, lrPlan);
-    else { one.appendChild(lrEl("p", "lr-help", "Reading the plan.")); lrFetchPlan(sel.path); }
+    else { one.appendChild(mkEl("p", "lr-help", "Reading the plan.")); lrFetchPlan(sel.path); }
     return;
   }
-  lrBar({ crumb: [lrStem(lrRoute.path)], back });
+  lrBar({ crumb: [noteStem(lrRoute.path)], back });
   lrNoteInto(one, lrRoute.path);
 }
 
 function lrNoteInto(box, path) {
-  if (lrNote && lrNote.path === path && lrNote.gone) box.appendChild(lrEl("p", "lr-help", "That note is not in the vault any more."));
+  if (lrNote && lrNote.path === path && lrNote.gone) box.appendChild(mkEl("p", "lr-help", "That note is not in the vault any more."));
   else if (lrNote && lrNote.path === path) lrRenderNoteDetail(box, lrNote);
-  else { box.appendChild(lrEl("p", "lr-help", "Reading the note.")); lrFetchNote(path); }
+  else { box.appendChild(mkEl("p", "lr-help", "Reading the note.")); lrFetchNote(path); }
 }
 
 function lrHomeColumn(d) {
-  const col = lrEl("div", "lr-home");
+  const col = mkEl("div", "lr-home");
   if (lrSession) col.appendChild(lrResumeBox());
-  col.appendChild(lrEl("h2", "lr-ask-h", "What would you like to learn?"));
+  col.appendChild(mkEl("h2", "lr-ask-h", "What would you like to learn?"));
   col.appendChild(lrAskBox());
   if (d.recent?.length) {
     // what a student who studies to their own plan wants tested (t4, messages 3, 7)
-    const row = lrEl("div", "lr-recent");
-    row.appendChild(lrEl("span", "lr-help", "Changed this week"));
+    const row = mkEl("div", "lr-recent");
+    row.appendChild(mkEl("span", "lr-help", "Changed this week"));
     for (const r of d.recent) {
       const c = lrBtn("lr-chip", r.title, () => learnStartSession({ note: r.path, from: "recent" }));
       c.title = `Test me on ${r.title}`;
@@ -459,7 +448,7 @@ function lrHomeColumn(d) {
   else if (n.plans?.length) col.appendChild(lrPlansHome(n.plans));
   col.appendChild(lrSessionList(d));
   if (n.missed?.length) col.appendChild(lrMissedHome(n.missed));
-  const links = lrEl("div", "lr-links");
+  const links = mkEl("div", "lr-links");
   links.append(lrBtn("lr-link", "What you know", () => lrGo({ view: "map" })), lrBtn("lr-link", "All plans", () => lrGo({ view: "plans" })));
   col.appendChild(links);
   return col;
@@ -470,25 +459,25 @@ function lrHomeColumn(d) {
 // gather, one after another, into one test; a syllabus note opens the dialog
 // with it as the Reference; a sentence is read into the dialog.
 function lrAskBox() {
-  const row = lrEl("div", "lr-ask");
-  const wrap = lrEl("div", "lr-ta lr-askin");
+  const row = mkEl("div", "lr-ask");
+  const wrap = mkEl("div", "lr-ta lr-askin");
   lrAsk.picks.forEach((o, i) => {
-    const tok = lrEl("span", "lr-tok");
-    tok.append(lrEl("i", null, lrKindWord(o)), o.label);
+    const tok = mkEl("span", "lr-tok");
+    tok.append(mkEl("i", null, lrKindWord(o)), o.label);
     const x = lrBtn("lr-x", "×", () => { lrAsk.picks.splice(i, 1); lrRender(); setTimeout(() => $("#lr-ask")?.focus(), 0); });
     x.setAttribute("aria-label", lrAsk.picks.length > 1 ? `remove ${o.label}` : "clear what to learn");
     tok.appendChild(x);
     wrap.appendChild(tok);
   });
   if (lrAsk.picks.every(lrJoins)) {
-    const inp = lrEl("input", "lr-field");
+    const inp = mkEl("input", "lr-field");
     inp.type = "text"; inp.id = "lr-ask"; inp.value = lrAsk.q; inp.autocomplete = "off";
     inp.placeholder = lrAsk.picks.length ? "Add a note or a folder" : "A note, a folder, a topic, or what you are preparing for";
     inp.setAttribute("aria-label", "What would you like to learn?");
     inp.setAttribute("role", "combobox"); inp.setAttribute("aria-autocomplete", "list");
     inp.setAttribute("aria-controls", "lr-ask-opts"); inp.setAttribute("aria-expanded", "false");
     inp.dataset.lrKey = "ask";
-    const list = lrEl("ul", "lr-opts");
+    const list = mkEl("ul", "lr-opts");
     list.id = "lr-ask-opts"; list.setAttribute("role", "listbox"); list.hidden = true;
     let t = null;
     inp.addEventListener("input", () => { lrAsk.q = inp.value; lrAskBtn(); clearTimeout(t); t = setTimeout(() => lrAskSearch(inp, list), 120); });
@@ -540,11 +529,11 @@ async function lrAskSearch(inp, list) {
 function lrAskPaint(inp, list) {
   list.innerHTML = "";
   lrAsk.opts.forEach((o, i) => {
-    const li = lrEl("li", i === lrAsk.idx ? "on" : null);
+    const li = mkEl("li", i === lrAsk.idx ? "on" : null);
     li.id = "lr-ask-opt-" + i;
     li.setAttribute("role", "option");
     li.setAttribute("aria-selected", i === lrAsk.idx ? "true" : "false");
-    li.append(lrEl("i", null, lrKindWord(o)), lrEl("span", "l", o.label), lrEl("span", "c num", o.kind === "steps" ? `${o.count} lines` : lrPlural(o.count, "note")));
+    li.append(mkEl("i", null, lrKindWord(o)), mkEl("span", "l", o.label), mkEl("span", "c num", o.kind === "steps" ? `${o.count} lines` : lrPlural(o.count, "note")));
     li.addEventListener("mousedown", (e) => { e.preventDefault(); lrAskPick(o); });
     list.appendChild(li);
   });
@@ -585,7 +574,7 @@ async function lrAskGo() {
     // resolve to, as a plan's preview reads them
     const s = lrStudyOf(picks);
     let paths = [];
-    try { paths = (await lrPost("/learn/plan", { scope: s.scope, target: s.target, preview: true })).paths || []; } catch (e) { notify("couldn't read that: " + e.message); return; }
+    try { paths = (await apiPost("/learn/plan", { scope: s.scope, target: s.target, preview: true })).paths || []; } catch (e) { notify("couldn't read that: " + e.message); return; }
     if (!paths.length) { notify(`no notes to test on ${s.label}`, "warn"); return; }
     lrAskClear();
     learnStartSession({ scope: paths, from: "ask" });
@@ -602,20 +591,20 @@ async function lrAskGo() {
 // with its reason. Drop takes one out; Start then sends the rows left as the
 // session's scope, and untouched it is the picker's own session.
 function lrSessionList(d) {
-  const sec = lrEl("section", "lr-hsec lr-next");
+  const sec = mkEl("section", "lr-hsec lr-next");
   const all = d.session_rows || [];
   if (!all.length) {
-    sec.appendChild(lrEl("p", "lr-help", d.total ? "Nothing waiting from earlier sessions: a note needs a footnoted claim or a Relations bullet to be asked about."
+    sec.appendChild(mkEl("p", "lr-help", d.total ? "Nothing waiting from earlier sessions: a note needs a footnoted claim or a Relations bullet to be asked about."
       : "Nothing tested yet. Name a note above and test yourself on it; this list grows from there."));
     return sec;
   }
   const rows = all.filter((r) => !lrDropped.has(r.path));
-  const head = lrEl("div", "lr-nhead");
-  const t = lrEl("div", "t");
+  const head = mkEl("div", "lr-nhead");
+  const t = mkEl("div", "t");
   // Before any answer there is no earlier session: a fresh vault of six
   // papers read "8 questions waiting from earlier sessions" (2026-10-26).
-  t.appendChild(lrEl("b", null, `${lrPlural(rows.length, "question")} ${d.measured ? "waiting from earlier sessions" : "for your first session"}`));
-  t.appendChild(lrEl("span", "lr-help", lrDropped.size ? `about ${_lrMinutes(rows.length)} min · ${lrPlural(lrDropped.size, "note")} dropped`
+  t.appendChild(mkEl("b", null, `${lrPlural(rows.length, "question")} ${d.measured ? "waiting from earlier sessions" : "for your first session"}`));
+  t.appendChild(mkEl("span", "lr-help", lrDropped.size ? `about ${_lrMinutes(rows.length)} min · ${lrPlural(lrDropped.size, "note")} dropped`
     : [d.session ? `about ${d.session.minutes} min` : "", d.mix || ""].filter(Boolean).join(" · ")));
   head.appendChild(t);
   if (lrDropped.size) head.appendChild(lrBtn("lr-link", "Put them back", () => { lrDropped.clear(); lrRender(); }));
@@ -637,14 +626,14 @@ function lrStartList(rows) {
 }
 
 function lrSessionRow(r, { drop = true } = {}) {
-  const row = lrEl("div", "lr-sg lr-srow");
+  const row = mkEl("div", "lr-sg lr-srow");
   const pick = lrBtn("pick", undefined, () => lrGo({ view: "note", path: r.path }));
   pick.dataset.lrRow = pick.dataset.lrKey = "note:" + r.path;
   pick.setAttribute("aria-pressed", "false");
-  const t = lrEl("span", "t");
+  const t = mkEl("span", "t");
   t.append(lrMark(r.mark || "open", ""), r.title);
-  pick.append(t, lrEl("span", "r", r.why));
-  const act = lrEl("span", "act");
+  pick.append(t, mkEl("span", "r", r.why));
+  const act = mkEl("span", "act");
   const ex = lrBtn("lr-link", "Explain it", () => learnExplain(r.path));
   ex.setAttribute("aria-label", `Explain ${r.title} in your own words`);
   ex.disabled = !!lrSession || !!r.pair;
@@ -659,12 +648,12 @@ function lrSessionRow(r, { drop = true } = {}) {
 // Missed: a row per note with its reason, as the session's list, and one
 // action for all of them in the head (three reasons on one line did not read)
 function lrMissedHome(missed) {
-  const sec = lrEl("section", "lr-hsec");
-  const head = lrEl("div", "lr-nhead");
-  const t = lrEl("div", "t");
-  const h = lrEl("b", null, "Missed");
-  h.appendChild(lrEl("span", "cnt num", ` ${missed.length}`));
-  t.append(h, lrEl("span", "lr-help", "lately, and not met since"));
+  const sec = mkEl("section", "lr-hsec");
+  const head = mkEl("div", "lr-nhead");
+  const t = mkEl("div", "t");
+  const h = mkEl("b", null, "Missed");
+  h.appendChild(mkEl("span", "cnt num", ` ${missed.length}`));
+  t.append(h, mkEl("span", "lr-help", "lately, and not met since"));
   const q = missed.reduce((a, m) => a + (m.questions || 1), 0);
   const go = lrBtn("ghost box", "Ask these again", () => learnStartSession({ scope: missed.map((m) => m.path), n: Math.min(24, q), from: "missed" }));
   go.disabled = !!lrSession;
@@ -677,30 +666,30 @@ function lrMissedHome(missed) {
 }
 
 function lrPlansHome(plans) {
-  const sec = lrEl("section", "lr-hsec");
-  const h = lrEl("h3", "lr-hh", "Your plans");
-  h.appendChild(lrEl("span", "cnt num", String(plans.length)));
+  const sec = mkEl("section", "lr-hsec");
+  const h = mkEl("h3", "lr-hh", "Your plans");
+  h.appendChild(mkEl("span", "cnt num", String(plans.length)));
   sec.appendChild(h);
   for (const p of plans) {
-    const row = lrEl("div", "lr-hline");
-    const tx = lrEl("div", "tx");
-    const name = lrEl("div", "t");
+    const row = mkEl("div", "lr-hline");
+    const tx = mkEl("div", "tx");
+    const name = mkEl("div", "t");
     const open = lrBtn("lr-link", p.name, () => lrGo({ view: "plan", plan: p.path }));
     open.dataset.lrRow = open.dataset.lrKey = "plan:" + p.path;
     name.appendChild(open);
-    if (p.by) name.appendChild(lrEl("span", "lr-help", ` · by ${lrDate(p.by)}`));
+    if (p.by) name.appendChild(mkEl("span", "lr-help", ` · by ${lrDate(p.by)}`));
     const live = lrSession && lrSession.plan === p.path;
-    tx.append(name, lrEl("span", "lr-help", live ? "in the open session" : p.why));
+    tx.append(name, mkEl("span", "lr-help", live ? "in the open session" : p.why));
     // the plan page's percent, once a note is met (ADR-0141); a fresh plan's
     // row stays as it was, since 0% there read as failure too (ADR-0081 §5)
     const full = (lrData.plans || []).find((x) => x.path === p.path);
     if (full?.all_met) {
-      const done = lrEl("div", "done");
-      const meter = lrEl("span", "lr-meter");
-      const fill = lrEl("i");
+      const done = mkEl("div", "done");
+      const meter = mkEl("span", "lr-meter");
+      const fill = mkEl("i");
       fill.style.width = full.percent + "%";
       meter.appendChild(fill);
-      done.append(meter, lrEl("span", "num", `${full.percent}% complete`));
+      done.append(meter, mkEl("span", "num", `${full.percent}% complete`));
       tx.appendChild(done);
     }
     const go = live ? lrBtn("ghost box", "Resume", () => lrGo({ view: "session", id: lrSession.id }))
@@ -715,11 +704,11 @@ function lrPlansHome(plans) {
 
 function lrPlansErrorBox() {
   // an error is not an empty vault (refinement §4): where the plans would be
-  const eb = lrEl("div", "lr-errbox");
+  const eb = mkEl("div", "lr-errbox");
   eb.setAttribute("role", "alert");
-  const t = lrEl("b");
+  const t = mkEl("b");
   t.append(lrMark("warn", ""), "Couldn't read your plans");
-  eb.append(t, lrEl("span", null, "The vault answered with an error. Your plans are untouched."), lrBtn("ghost box", "Retry", () => loadLearn(true)));
+  eb.append(t, mkEl("span", null, "The vault answered with an error. Your plans are untouched."), lrBtn("ghost box", "Retry", () => loadLearn(true)));
   return eb;
 }
 
@@ -728,15 +717,15 @@ function lrRenderPlansLeft(left, sel) {
   const plans = lrData.plans || [];
   const active = plans.filter((p) => p.status !== "completed");
   const done = plans.filter((p) => p.status === "completed");
-  const lh = lrEl("div", "lr-lh", "Your plans");
-  lh.appendChild(lrEl("span", "cnt num", lrPlansError ? "–" : String(active.length)));
+  const lh = mkEl("div", "lr-lh", "Your plans");
+  lh.appendChild(mkEl("span", "cnt num", lrPlansError ? "–" : String(active.length)));
   left.appendChild(lh);
   if (lrPlansError) {
-    const eb = lrEl("div", "lr-errbox");
+    const eb = mkEl("div", "lr-errbox");
     eb.setAttribute("role", "alert");
-    const t = lrEl("b");
+    const t = mkEl("b");
     t.append(lrMark("warn", ""), "Couldn't read your plans");
-    eb.append(t, lrEl("span", null, "The vault answered with an error. Your plans are untouched."), lrBtn("ghost box", "Retry", () => loadLearn(true)));
+    eb.append(t, mkEl("span", null, "The vault answered with an error. Your plans are untouched."), lrBtn("ghost box", "Retry", () => loadLearn(true)));
     left.appendChild(eb);
     return;
   }
@@ -756,30 +745,30 @@ function lrPlanRow(p, on, completed = false) {
   const b = lrBtn("lr-pl" + (on ? " on" : ""), undefined, () => lrGo({ view: "plan", plan: p.path }));
   b.dataset.lrRow = b.dataset.lrKey = "plan:" + p.path;
   b.setAttribute("aria-pressed", on ? "true" : "false");
-  const t = lrEl("div", "t", p.name);
-  if (p.open_session) t.appendChild(lrEl("span", "due", "session open"));
-  else if (p.by && !completed) t.appendChild(lrEl("span", "due", `by ${lrDate(p.by)}`));
+  const t = mkEl("div", "t", p.name);
+  if (p.open_session) t.appendChild(mkEl("span", "due", "session open"));
+  else if (p.by && !completed) t.appendChild(mkEl("span", "due", `by ${lrDate(p.by)}`));
   b.appendChild(t);
   if (completed) {
-    const met = Object.entries(p.met_by_objective || {}).map(([o, n]) => `${LR_OBJ_SHORT[o] || o} met on ${n} of ${p.coverage[1]} notes`);
-    b.appendChild(lrEl("div", "n", (p.steps ? `${p.steps_passed || 0} of ${p.steps} steps` : met.join(" · ") || `${p.coverage[1]} notes`) + ` · closed ${lrDate(p.completed)} · ${lrPlural(p.sessions, "session")}`));
+    const met = Object.entries(p.met_by_objective || {}).map(([o, n]) => `${o} met on ${n} of ${p.coverage[1]} notes`);
+    b.appendChild(mkEl("div", "n", (p.steps ? `${p.steps_passed || 0} of ${p.steps} steps` : met.join(" · ") || `${p.coverage[1]} notes`) + ` · closed ${lrDate(p.completed)} · ${lrPlural(p.sessions, "session")}`));
     return b;
   }
   if (p.open_session && lrSession && lrSession.plan === p.path) {
-    b.appendChild(lrEl("div", "n", `in progress · ${lrSession.items[lrSession.cur]?.title || ""}, question ${lrSession.cur + 1} of ${lrSession.items.length}`));
+    b.appendChild(mkEl("div", "n", `in progress · ${lrSession.items[lrSession.cur]?.title || ""}, question ${lrSession.cur + 1} of ${lrSession.items.length}`));
   } else {
     const why = (lrData.next?.plans || []).find((x) => x.path === p.path)?.why;
-    b.appendChild(lrEl("div", "n", why || (p.gaps ? `not started · ${lrPlural(p.gaps, "step has no note in the vault", "steps have no note in the vault")}` : "nothing pending")));
+    b.appendChild(mkEl("div", "n", why || (p.gaps ? `not started · ${lrPlural(p.gaps, "step has no note in the vault", "steps have no note in the vault")}` : "nothing pending")));
   }
   // the plan page's measure (ADR-0141): notes met, and the percent once one is met
-  const meter = lrEl("div", "lr-meter");
-  const fill = lrEl("i");
+  const meter = mkEl("div", "lr-meter");
+  const fill = mkEl("i");
   fill.style.width = p.percent + "%";
   meter.appendChild(fill);
   b.appendChild(meter);
-  const k = lrEl("div", "n num pct");
-  k.appendChild(lrEl("span", null, `${p.all_met} of ${lrPlural(p.coverage[1], "note")} met`));
-  if (p.all_met) k.appendChild(lrEl("span", null, `${p.percent}%`));
+  const k = mkEl("div", "n num pct");
+  k.appendChild(mkEl("span", null, `${p.all_met} of ${lrPlural(p.coverage[1], "note")} met`));
+  if (p.all_met) k.appendChild(mkEl("span", null, `${p.percent}%`));
   b.appendChild(k);
   return b;
 }
@@ -792,15 +781,15 @@ const LR_MAP_SHOWN = 12;
 const LR_CELL_SAY = { never: "not tested yet", open: "asked, still open", half: "met with help", full: "met without help" };
 function lrRenderMapLeft(left) {
   if (!lrMapCounted) { lrMapCounted = true; lrGateCount("map"); }
-  if (!lrMap) { left.appendChild(lrEl("p", "lr-lh-sub", "Reading the map.")); lrFetchMap(); return; }
+  if (!lrMap) { left.appendChild(mkEl("p", "lr-lh-sub", "Reading the map.")); lrFetchMap(); return; }
   const plan = lrMap.plans.find((p) => p.path === lrMapPlan) ? lrMapPlan : "";
   const folders = lrMap.folders.filter((f) => !plan || f.plans.includes(plan))
     .map((f) => (plan ? { ...f, notes: f.notes.filter((n) => n.plans.includes(plan)) } : f));
-  const lh = lrEl("div", "lr-lh", "Folders");
-  lh.appendChild(lrEl("span", "cnt", plan ? `${folders.length} in the plan` : `${folders.filter((f) => f.practised || f.plans.length).length} with evidence or in a plan`));
+  const lh = mkEl("div", "lr-lh", "Folders");
+  lh.appendChild(mkEl("span", "cnt", plan ? `${folders.length} in the plan` : `${folders.filter((f) => f.practised || f.plans.length).length} with evidence or in a plan`));
   left.appendChild(lh);
   if (lrMap.plans.length) {
-    const chips = lrEl("div", "lr-chips lr-mapf");
+    const chips = mkEl("div", "lr-chips lr-mapf");
     chips.setAttribute("role", "group"); chips.setAttribute("aria-label", "filter the map");
     for (const [k, label] of [["", "All folders"], ...lrMap.plans.map((p) => [p.path, p.name])]) {
       const c = lrBtn("lr-chip" + (k === plan ? " on" : ""), label, () => { lrMapPlan = k; lrRender(); });
@@ -809,27 +798,27 @@ function lrRenderMapLeft(left) {
     }
     left.appendChild(chips);
   }
-  const grid = lrEl("div", "lr-map");
+  const grid = mkEl("div", "lr-map");
   const open = lrMore.has("map") || folders.slice(LR_MAP_SHOWN).some((f) => f.notes.some((n) => n.path === lrRoute.path));
   for (const f of open ? folders : folders.slice(0, LR_MAP_SHOWN)) grid.appendChild(lrMapRow(f, plan));
   left.appendChild(grid);
   if (folders.length > LR_MAP_SHOWN) left.appendChild(lrBtn("lr-more", open ? "Show fewer folders" : `Show ${folders.length - LR_MAP_SHOWN} more folders`, () => { lrMore.has("map") ? lrMore.delete("map") : lrMore.add("map"); lrRender(); }));
-  const key = lrEl("div", "lr-mkey lr-mapkey");
-  for (const m of ["never", "open", "half", "full"]) { const s = lrEl("span"); s.append(lrEl("i", "lr-cell " + m), LR_CELL_SAY[m]); key.appendChild(s); }
+  const key = mkEl("div", "lr-mkey lr-mapkey");
+  for (const m of ["never", "open", "half", "full"]) { const s = mkEl("span"); s.append(mkEl("i", "lr-cell " + m), LR_CELL_SAY[m]); key.appendChild(s); }
   left.appendChild(key);
 }
 
 function lrMapRow(f, plan) {
-  const row = lrEl("div", "lr-maprow");
-  const head = lrEl("div", "f");
+  const row = mkEl("div", "lr-maprow");
+  const head = mkEl("div", "f");
   const practised = f.notes.filter((n) => n.mark !== "never").length;
-  head.append(lrEl("span", "fn", f.folder), lrEl("span", "cnt", `${practised} of ${f.notes.length}`));
+  head.append(mkEl("span", "fn", f.folder), mkEl("span", "cnt", `${practised} of ${f.notes.length}`));
   // Plan this folder (ADR-0081 §17): on hover and focus, the folder filled in
   const pl = lrBtn("lr-link act", "Plan this folder", () => lrPlanFolder(f.folder + "/"));
   pl.setAttribute("aria-label", `Plan the folder ${f.folder}`);
   if (!plan && f.folder !== "(root)") head.appendChild(pl);
   row.appendChild(head);
-  const cells = lrEl("div", "cells");
+  const cells = mkEl("div", "cells");
   f.notes.forEach((n, i) => {
     const on = lrRoute.path === n.path;
     const c = lrBtn("lr-cell " + n.mark + (on ? " on" : ""), undefined, () => lrGo({ view: "map", path: n.path }, { replace: lrRoute.view === "map" && !!lrRoute.path }));
@@ -867,14 +856,14 @@ async function lrFetchMap() {
 // Resume as the view's only primary (ADR-0061 §12).
 function lrResumeBox() {
   const s = lrSession;
-  const box = lrEl("div", "lr-resume");
+  const box = mkEl("div", "lr-resume");
   box.setAttribute("role", "status");
-  const t = lrEl("div", "t");
-  t.appendChild(lrEl("b", null, `Session in progress · ${s.items[s.cur]?.title || ""}, question ${s.cur + 1} of ${s.items.length}`));
+  const t = mkEl("div", "t");
+  t.appendChild(mkEl("b", null, `Session in progress · ${s.items[s.cur]?.title || ""}, question ${s.cur + 1} of ${s.items.length}`));
   const rec = Object.keys(s.results).length;
   const draft = s.answers[s.items[s.cur]?.i];
-  t.appendChild(lrEl("span", null, `${lrPlural(rec, "answer")} recorded` + (draft ? ` · your draft for question ${s.cur + 1} is kept` : "") + (s.started ? ` · started ${lrTime(s.started)}` : "")));
-  box.append(lrEl("span", "dot"), t,
+  t.appendChild(mkEl("span", null, `${lrPlural(rec, "answer")} recorded` + (draft ? ` · your draft for question ${s.cur + 1} is kept` : "") + (s.started ? ` · started ${lrTime(s.started)}` : "")));
+  box.append(mkEl("span", "dot"), t,
     lrBtn("lr-q", "End session", () => { lrGo({ view: "session", id: s.id }); lrEnd(); }),
     lrBtn("lr-send", "Resume", () => lrGo({ view: "session", id: s.id })));
   return box;
@@ -904,11 +893,11 @@ async function lrFetchNote(path) {
 // The head answers "what now?": an eyebrow, the title, the size of the next
 // session, Open, the primary action (ADR-0061 §1).
 function lrHead(eyebrow, title, meta, buttons) {
-  const head = lrEl("div", "lr-phead");
-  head.appendChild(lrEl("span", "eyebrow", eyebrow));
-  const row = lrEl("div", "phead-row");
-  row.appendChild(lrEl("h2", null, title));
-  if (meta) row.appendChild(lrEl("span", "meta", meta));
+  const head = mkEl("div", "lr-phead");
+  head.appendChild(mkEl("span", "eyebrow", eyebrow));
+  const row = mkEl("div", "phead-row");
+  row.appendChild(mkEl("h2", null, title));
+  if (meta) row.appendChild(mkEl("span", "meta", meta));
   row.append(...buttons.filter(Boolean));
   head.appendChild(row);
   return head;
@@ -927,8 +916,8 @@ function lrRenderPlanDetail(right, p) {
   // the placement (ADR-0135 point 3): an offer beside Continue, never a step before it
   const check = !live && !closed && p.placement?.questions
     ? lrBtn("ghost box", "Check what I already know", () => learnStartSession({ plan: p.path, placement: true })) : null;
-  const done = p.complete && !closed ? lrBtn(live ? "ghost box" : "lr-send", "Mark completed", async () => { await lrPost("/learn/plan/close", { path: p.path }); lrData = null; lrPlan = null; loadLearn(true); }) : null;
-  const reopen = closed ? lrBtn("ghost box", "Reopen", async () => { await lrPost("/learn/plan/close", { path: p.path, reopen: true }); lrData = null; lrPlan = null; loadLearn(true); }) : null;
+  const done = p.complete && !closed ? lrBtn(live ? "ghost box" : "lr-send", "Mark completed", async () => { await apiPost("/learn/plan/close", { path: p.path }); lrData = null; lrPlan = null; loadLearn(true); }) : null;
+  const reopen = closed ? lrBtn("ghost box", "Reopen", async () => { await apiPost("/learn/plan/close", { path: p.path, reopen: true }); lrData = null; lrPlan = null; loadLearn(true); }) : null;
   const head = lrHead(closed ? `Plan · completed ${lrDate(p.completed)}` : "Plan", p.name,
     live ? "a new session waits for this one to end" : !closed ? `${lrPlural(n, "question")} · about ${Math.max(1, Math.round(n * 1.3))} min` : "",
     [open, edit, reopen]);
@@ -937,61 +926,61 @@ function lrRenderPlanDetail(right, p) {
   // next act, Continue until then (the classes above swap at p.complete)
   const acts = [done, go, check].filter(Boolean);
   if (acts.length) {
-    const row = lrEl("div", "go");
+    const row = mkEl("div", "go");
     row.append(...acts);
     head.appendChild(row);
   }
   if (check) {
     const q = p.placement.questions;
-    head.appendChild(lrEl("p", "lr-help", `Up to 2 questions a step, ${q} in all, about ${Math.max(1, Math.round(q * 1.3))} min. `
+    head.appendChild(mkEl("p", "lr-help", `Up to 2 questions a step, ${q} in all, about ${Math.max(1, Math.round(q * 1.3))} min. `
       + "A step you know comes after the others; nothing is passed for you." + (p.placement.last ? ` Last checked ${lrDate(p.placement.last)}.` : "")));
   }
-  const goal = lrEl("p", "goal");
+  const goal = mkEl("p", "goal");
   goal.append(`Across ${p.scope === "workspace" ? "the workspace " : ""}${lrTargetShown(p)}, ${lrPlural(r.coverage[1], "note")}: `);
-  p.objectives.forEach((o, i) => { goal.appendChild(lrEl("b", null, LR_OBJ[o]?.toLowerCase() || o)); goal.append(i < p.objectives.length - 2 ? ", " : i === p.objectives.length - 2 ? ", and " : "."); });
+  p.objectives.forEach((o, i) => { goal.appendChild(mkEl("b", null, LR_OBJ[o]?.toLowerCase() || o)); goal.append(i < p.objectives.length - 2 ? ", " : i === p.objectives.length - 2 ? ", and " : "."); });
   head.appendChild(goal);
-  const next = lrEl("p", "next");
-  next.appendChild(lrEl("span", "k", "Next"));
+  const next = mkEl("p", "next");
+  next.appendChild(mkEl("span", "k", "Next"));
   if (p.next) {
-    next.appendChild(lrEl("span", "v", `${p.next.step ? `step ${p.next.step}, ` : ""}${p.next.title}`));
+    next.appendChild(mkEl("span", "v", `${p.next.step ? `step ${p.next.step}, ` : ""}${p.next.title}`));
     const bits = [];
-    if (p.objectives.length > 1) bits.push(LR_OBJ_SHORT[p.next.objective] || p.next.objective);
+    if (p.objectives.length > 1) bits.push(p.next.objective);
     if (live) bits.push("in the open session");
-    if (bits.length) next.appendChild(lrEl("span", "m", " · " + bits.join(" · ")));
-  } else next.appendChild(lrEl("span", "v", p.complete ? "every note met every objective" : p.gaps?.length ? "not started" : "nothing pending"));
+    if (bits.length) next.appendChild(mkEl("span", "m", " · " + bits.join(" · ")));
+  } else next.appendChild(mkEl("span", "v", p.complete ? "every note met every objective" : p.gaps?.length ? "not started" : "nothing pending"));
   head.appendChild(next);
   if (p.revisit?.length) {
-    const q = lrEl("p", "next");
-    q.append(lrEl("span", "k", "Queued"), lrEl("span", "v", p.revisit.map(lrStem).join(", ")), lrEl("span", "m", " · queued by you, they come first"));
+    const q = mkEl("p", "next");
+    q.append(mkEl("span", "k", "Queued"), mkEl("span", "v", p.revisit.map(noteStem).join(", ")), mkEl("span", "m", " · queued by you, they come first"));
     head.appendChild(q);
   }
   // exceptions are written; a default is not (ADR-0061 §3)
-  if (p.pace?.say) head.appendChild(lrEl("p", "lr-help", p.pace.say));
-  if (p.placed?.say) head.appendChild(lrEl("p", "lr-help", p.placed.say));
+  if (p.pace?.say) head.appendChild(mkEl("p", "lr-help", p.pace.say));
+  if (p.placed?.say) head.appendChild(mkEl("p", "lr-help", p.placed.say));
   if (p.today?.say) {
     // today's row of the calendar, and how far the first step not done lies
     // behind the calendar drawn when the plan was made (ADR-0131 amendment)
-    const t = lrEl("p", "lr-help" + ((p.today.behind || 0) >= 2 ? " warn" : ""));
+    const t = mkEl("p", "lr-help" + ((p.today.behind || 0) >= 2 ? " warn" : ""));
     if ((p.today.behind || 0) >= 2) t.appendChild(lrMark("warn", ""));
     t.append(p.today.say);
     head.appendChild(t);
   }
-  if (p.budget?.say) head.appendChild(lrEl("p", "lr-help", p.budget.say));
-  if (p.cycles?.length) head.appendChild(lrEl("p", "lr-help", `Prerequisite cycle among: ${p.cycles[0].map(lrStem).join(" → ")}. Reported, not linearized.`));
-  if (p.gaps?.length) head.appendChild(lrEl("p", "lr-help", `${lrPlural(p.gaps.length, "step")} not in the vault: ${p.gaps.join("; ")}.`));
+  if (p.budget?.say) head.appendChild(mkEl("p", "lr-help", p.budget.say));
+  if (p.cycles?.length) head.appendChild(mkEl("p", "lr-help", `Prerequisite cycle among: ${p.cycles[0].map(noteStem).join(" → ")}. Reported, not linearized.`));
+  if (p.gaps?.length) head.appendChild(mkEl("p", "lr-help", `${lrPlural(p.gaps.length, "step")} not in the vault: ${p.gaps.join("; ")}.`));
   right.appendChild(head);
   // Lately: the plan's misses as rows, a misconception joined to its row
   // (ADR-0081 §5); Observations folded in here
   if (p.lately?.length) {
-    const sec = lrEl("section", "lr-sec");
-    const h = lrEl("h3", null, "Lately");
-    h.appendChild(lrEl("span", "c", String(p.lately.length)));
+    const sec = mkEl("section", "lr-sec");
+    const h = mkEl("h3", null, "Lately");
+    h.appendChild(mkEl("span", "c", String(p.lately.length)));
     sec.appendChild(h);
     for (const x of p.lately) sec.appendChild(lrPlanNoteRow(x, p, x.misconception ? `${x.why} · noted: ${x.misconception}` : x.why, "Ask again"));
     const q = p.lately.reduce((a, x) => a + (x.questions || 1), 0);
     const again = lrBtn("ghost box", `Ask these again · ${lrPlural(q, "question")}`, () => learnStartSession({ scope: p.lately.map((x) => x.path), n: q }));
     again.disabled = !!lrSession;
-    const row = lrEl("div", "lr-again");
+    const row = mkEl("div", "lr-again");
     row.appendChild(again);
     sec.appendChild(row);
     right.appendChild(sec);
@@ -999,20 +988,20 @@ function lrRenderPlanDetail(right, p) {
   // the facts a decision needs, as figures, once one is not zero (ADR-0081
   // §5); the notes met are the bar's, in the head (ADR-0141)
   if (r.due || r.all_met) {
-    const figs = lrEl("div", "lr-figs");
+    const figs = mkEl("div", "lr-figs");
     figs.append(lrFig(r.not_measured, "notes never practised"), lrFig(r.due, "to review in this plan"));
     right.appendChild(figs);
   }
   right.appendChild(lrPlanTree(p));
   // After this: three in-scope rows with reasons, the plan's own "what next"
   if (p.after?.length) {
-    const sec = lrEl("section", "lr-sec");
-    sec.appendChild(lrEl("h3", null, "After this"));
+    const sec = mkEl("section", "lr-sec");
+    sec.appendChild(mkEl("h3", null, "After this"));
     for (const x of p.after) sec.appendChild(lrPlanNoteRow(x, p, x.why, "Practice"));
     right.appendChild(sec);
   }
   // the readings and every explanation, closed (refinement §20, ADR-0061 §6)
-  const discs = lrEl("div", "lr-discs");
+  const discs = mkEl("div", "lr-discs");
   const cards = (p.cards || []).filter((c) => c.source !== "gap");
   // rewording the cards on the notes is the plan's action too (ADR-0081 §17)
   if (p.cards?.length) lrDisc(discs, "Objectives", cards.length, (box) => {
@@ -1022,25 +1011,25 @@ function lrRenderPlanDetail(right, p) {
       try {
         // no `refused`: the plan keeps the matches the reader refused
         const target = p.scope === "notes" ? p.notes : p.target;
-        await lrPost("/learn/plan", { path: p.path, name: p.name, scope: p.scope, target, restrict: p.restrict || "", by: p.by || null, objectives: p.objectives_chosen ? p.objectives : [] });
+        await apiPost("/learn/plan", { path: p.path, name: p.name, scope: p.scope, target, restrict: p.restrict || "", by: p.by || null, objectives: p.objectives_chosen ? p.objectives : [] });
         lrPlan = null; lrFetchPlan(p.path);
       } catch (e) { notify("not reworded: " + e.message); rw.disabled = false; rw.textContent = "Reword on the notes"; }
     });
     box.appendChild(rw);
   });
   lrDisc(discs, "Sessions", p.sessions.length, (box) => {
-    if (!p.sessions.length) { box.appendChild(lrEl("p", "lr-help", "No session yet.")); return; }
-    const tbl = lrEl("table", "chart tight lr-tbl");
-    const thd = lrEl("thead"); const h2 = lrEl("tr");
-    for (const [l, c] of [["date", null], ["questions", "num"], ["objectives met", null], ["", null]]) h2.appendChild(lrEl("th", c, l));
+    if (!p.sessions.length) { box.appendChild(mkEl("p", "lr-help", "No session yet.")); return; }
+    const tbl = mkEl("table", "chart tight lr-tbl");
+    const thd = mkEl("thead"); const h2 = mkEl("tr");
+    for (const [l, c] of [["date", null], ["questions", "num"], ["objectives met", null], ["", null]]) h2.appendChild(mkEl("th", c, l));
     thd.appendChild(h2); tbl.appendChild(thd);
-    const tb2 = lrEl("tbody");
+    const tb2 = mkEl("tbody");
     for (const s of [...p.sessions].reverse()) {
-      const tr = lrEl("tr");
-      tr.appendChild(lrEl("th", null, lrDate(s.date)));
-      tr.appendChild(lrEl("td", "num", String(s.items)));
-      tr.appendChild(lrEl("td", null, s.met ? s.met.replace(/,/g, " ·") : s.line.replace(/ · session: [0-9a-f]+$/, "").split(" · ").slice(2).join(" · ")));
-      const td = lrEl("td");
+      const tr = mkEl("tr");
+      tr.appendChild(mkEl("th", null, lrDate(s.date)));
+      tr.appendChild(mkEl("td", "num", String(s.items)));
+      tr.appendChild(mkEl("td", null, s.met ? s.met.replace(/,/g, " ·") : s.line.replace(/ · session: [0-9a-f]+$/, "").split(" · ").slice(2).join(" · ")));
+      const td = mkEl("td");
       if (s.session) td.appendChild(lrBtn("lr-link", "receipt", () => lrOpenReceipt(s.session)));
       tr.appendChild(td);
       tb2.appendChild(tr);
@@ -1051,25 +1040,25 @@ function lrRenderPlanDetail(right, p) {
   const shaped = Object.values(r.depth_profile || {}).reduce((a, b) => a + b, 0);
   lrDisc(discs, "Answer structure", shaped ? lrPlural(shaped, "note") : "no answers yet", (box) => {
     const total = r.coverage[1] || 1;
-    const stack = lrEl("div", "lr-stack");
+    const stack = mkEl("div", "lr-stack");
     for (const lv of [1, 2, 3, 4]) {
       const k = r.depth_profile[String(lv)] || 0;
       if (!k) continue;
-      const i = lrEl("i", "r" + lv);
+      const i = mkEl("i", "r" + lv);
       i.style.width = Math.round((k / total) * 100) + "%";
       i.title = `${LR_LEVEL[lv]}: ${k}`;
       stack.appendChild(i);
     }
     box.appendChild(stack);
-    const legend = lrEl("div", "lr-legend");
-    for (const [lv, name] of Object.entries(LR_LEVEL)) { const s = lrEl("span"); s.appendChild(lrEl("i", "r" + lv)); s.append(`${name} · ${r.depth_profile[String(lv)] || 0}`); legend.appendChild(s); }
+    const legend = mkEl("div", "lr-legend");
+    for (const [lv, name] of Object.entries(LR_LEVEL)) { const s = mkEl("span"); s.appendChild(mkEl("i", "r" + lv)); s.append(`${name} · ${r.depth_profile[String(lv)] || 0}`); legend.appendChild(s); }
     box.appendChild(legend);
-    box.appendChild(lrEl("p", "lr-help", `The shape of the answers observed, per note. Relations answered: ${p.integration.label}.`));
+    box.appendChild(mkEl("p", "lr-help", `The shape of the answers observed, per note. Relations answered: ${p.integration.label}.`));
   });
   lrReadings(discs, lrData || {}, { plan: p });
   lrDisc(discs, "About this plan", "", (box) => {
-    const dl = lrEl("dl", "lr-kv");
-    const kv = (k, v) => { if (v) dl.append(lrEl("dt", null, k), lrEl("dd", null, v)); };
+    const dl = mkEl("dl", "lr-kv");
+    const kv = (k, v) => { if (v) dl.append(mkEl("dt", null, k), mkEl("dd", null, v)); };
     kv("studies", `${LR_SCOPE[p.scope] || p.scope}, ${lrTargetShown(p)}, ${lrPlural(r.coverage[1], "note")}`);
     kv(p.objectives.length > 1 ? "objectives" : "objective", `${lrObjList(p.objectives)}, ${p.objectives_chosen ? "chosen by you" : "proposed by Silica"}`);
     kv("created", lrDate(p.created));
@@ -1080,7 +1069,7 @@ function lrRenderPlanDetail(right, p) {
   });
   lrDisc(discs, "How this is measured", "", (box) => {
     box.appendChild(lrMarkKey());
-    const say = (k, t) => { const para = lrEl("p"); para.append(lrEl("b", null, k), " " + t); box.appendChild(para); };
+    const say = (k, t) => { const para = mkEl("p"); para.append(mkEl("b", null, k), " " + t); box.appendChild(para); };
     say("To review", "counts notes whose estimated retention is below the retention target.");
     say("Complete", "is the share of the plan's notes that met every objective without help since the plan was written. A step with no note in the vault counts as one more that no answer can meet, and the share is rounded down, so 100% shows only once the plan can be marked completed. The bar has a segment per step, as wide as its notes; a full segment is a passed step. An objective is met on a note when its criteria were satisfied without help on a dated question; meeting one objective says nothing about another, and an assisted answer never counts as \"without help\".");
     say(p.steps?.length ? "Steps" : "Material", "has one row per child, expandable to its notes; a node counts distinct notes, so children need not sum to the parent.");
@@ -1098,32 +1087,32 @@ function lrRenderPlanDetail(right, p) {
 // 0% read as failure early in a plan (ADR-0081 §5).
 function lrCompletion(p) {
   const r = p.readings;
-  const box = lrEl("div", "lr-done");
-  const objs = p.objectives.map((o) => LR_OBJ_SHORT[o] || o);
+  const box = mkEl("div", "lr-done");
+  const objs = p.objectives;
   const steps = p.steps || [];
   let say = "no note met without help yet";
   if (r.all_met) {
     say = (r.all_met === r.coverage[1] ? `every note met ${lrAnd(objs)} without help` : `${r.all_met} of ${lrPlural(r.coverage[1], "note")} met without help`)
       + (steps.length ? ` · ${steps.filter((s) => s.passed).length} of ${lrPlural(steps.length, "step")} passed` : "");
-    const fig = lrEl("div", "fig");
-    fig.append(lrEl("span", "n num", `${p.percent}%`), lrEl("span", "l", "complete"), lrEl("span", "s", say));
+    const fig = mkEl("div", "fig");
+    fig.append(mkEl("span", "n num", `${p.percent}%`), mkEl("span", "l", "complete"), mkEl("span", "s", say));
     box.appendChild(fig);
-  } else box.appendChild(lrEl("p", "lr-lead", `${r.coverage[0]} of ${lrPlural(r.coverage[1], "note")} practised; none has met ${lrAnd(objs)} without help yet.`));
+  } else box.appendChild(mkEl("p", "lr-lead", `${r.coverage[0]} of ${lrPlural(r.coverage[1], "note")} practised; none has met ${lrAnd(objs)} without help yet.`));
   // a plan without steps has no part that passes, and its folders overlap:
   // one segment, the whole scope. The tree has a node per step only on a
   // steps plan (plans._tree_of); a `## Steps` typed into a folder plan's
   // note still parses, and would pair its folders with unrelated steps.
   const parts = p.scope === "steps" && steps.length ? p.tree.map((node, i) => [node, steps[i]]) : [[{ node: p.name, readings: r }, null]];
-  const bar = lrEl("div", "lr-segs");
+  const bar = mkEl("div", "lr-segs");
   bar.setAttribute("role", "img");
   bar.setAttribute("aria-label", r.all_met ? `${p.percent}% complete: ${say}` : say);
   for (const [node, step] of parts) {
     const k = node.readings?.coverage[1] || 0;
-    const seg = lrEl("span", "seg" + (step?.gap || !k ? " gap" : ""));
+    const seg = mkEl("span", "seg" + (step?.gap || !k ? " gap" : ""));
     if (step?.gap || !k) seg.title = `${node.node}: not in the vault`;
     else {
       const met = node.readings.all_met;
-      const fill = lrEl("i");
+      const fill = mkEl("i");
       fill.style.width = (met / k) * 100 + "%";
       seg.appendChild(fill);
       seg.style.flexGrow = k;
@@ -1138,9 +1127,9 @@ function lrCompletion(p) {
 // A note inside the plan's detail: its title selects it in Next, its reason
 // is the ledger's, its action shows on hover and focus.
 function lrPlanNoteRow(x, p, why, verb) {
-  const row = lrEl("div", "lr-sg lr-inrow");
+  const row = mkEl("div", "lr-sg lr-inrow");
   const pick = lrBtn("pick", undefined, () => lrGo({ view: "note", path: x.path }));
-  pick.append(lrEl("span", "t", x.title), lrEl("span", "r", why));
+  pick.append(mkEl("span", "t", x.title), mkEl("span", "r", why));
   const act = lrBtn("act", verb, () => learnStartSession({ note: x.path, plan: p.path }));
   act.setAttribute("aria-label", `${verb} ${x.title}`);
   row.append(pick, act);
@@ -1149,9 +1138,9 @@ function lrPlanNoteRow(x, p, why, verb) {
 
 // The key of the marks, with the measurements it explains.
 function lrMarkKey() {
-  const k = lrEl("div", "lr-mkey");
+  const k = mkEl("div", "lr-mkey");
   for (const [m, say] of [["open", "still to verify, or missed"], ["half", "met with help, not counted"], ["full", "met without help"]]) {
-    const s = lrEl("span");
+    const s = mkEl("span");
     s.append(lrMark(m, ""), say);
     k.appendChild(s);
   }
@@ -1163,16 +1152,16 @@ function lrMarkKey() {
 // hover and focus.
 function lrPlanTree(p) {
   const r = p.readings;
-  const sec = lrEl("section", "lr-sec");
-  sec.appendChild(lrEl("h3", null, p.steps?.length ? "Steps" : "Material"));
-  const t = lrEl("table", "lr-tree");
-  const th = lrEl("thead");
-  const hr = lrEl("tr");
-  hr.append(lrEl("th", null, "topic"), lrEl("th", "pr", "practised"));
-  for (const o of p.objectives) hr.appendChild(lrEl("th", "ob", `${LR_OBJ_SHORT[o] || o} met`));
+  const sec = mkEl("section", "lr-sec");
+  sec.appendChild(mkEl("h3", null, p.steps?.length ? "Steps" : "Material"));
+  const t = mkEl("table", "lr-tree");
+  const th = mkEl("thead");
+  const hr = mkEl("tr");
+  hr.append(mkEl("th", null, "topic"), mkEl("th", "pr", "practised"));
+  for (const o of p.objectives) hr.appendChild(mkEl("th", "ob", `${o} met`));
   th.appendChild(hr);
   t.appendChild(th);
-  const tb = lrEl("tbody");
+  const tb = mkEl("tbody");
   const root = p.target.replace(/\/$/, "");
   for (const node of p.tree) {
     const leaves = node.leaves || [];
@@ -1183,11 +1172,11 @@ function lrPlanTree(p) {
     // feedforward", the step before it in the owner's plan (2026-10-26)
     const step = p.steps?.length ? (p.steps.find((s) => s.text === node.node || s.text.startsWith(node.node + ":"))
       || p.steps.find((s) => s.text.startsWith(node.node) || s.text.includes(node.node))) : null;
-    const tr = lrEl("tr", "node");
-    const th0 = lrEl("th");
+    const tr = mkEl("tr", "node");
+    const th0 = mkEl("th");
     th0.scope = "row";
-    const exp = leaves.length ? lrBtn("lr-exp") : lrEl("span", "lr-exp");
-    exp.append(lrEl("span", "chev"), label);
+    const exp = leaves.length ? lrBtn("lr-exp") : mkEl("span", "lr-exp");
+    exp.append(mkEl("span", "chev"), label);
     th0.appendChild(exp);
     // the step read as one explanation before its practice (ADR-0132)
     const stepIdx = step && leaves.length ? p.steps.indexOf(step) : -1;
@@ -1203,26 +1192,26 @@ function lrPlanTree(p) {
     if (placed) ex.push("placed");
     if (rd.due) ex.push(`${rd.due} to review`);
     if (ex.length) {
-      const m = lrEl("span", "m", ex.join(" · "));
+      const m = mkEl("span", "m", ex.join(" · "));
       if (placed) m.title = "placed: met without help on its deepest note in a placement";
       th0.appendChild(m);
     }
     tr.appendChild(th0);
-    const pr = lrEl("td", "pr");
+    const pr = mkEl("td", "pr");
     if (!node.gap) {
-      const meter = lrEl("span", "lr-meter");
-      const fill = lrEl("i");
+      const meter = mkEl("span", "lr-meter");
+      const fill = mkEl("i");
       fill.style.width = (rd.coverage[1] ? Math.round((rd.coverage[0] / rd.coverage[1]) * 100) : 0) + "%";
       meter.appendChild(fill);
-      pr.append(meter, lrEl("span", "num" + (rd.coverage[0] ? "" : " zero"), `${rd.coverage[0]}/${rd.coverage[1]}`));
+      pr.append(meter, mkEl("span", "num" + (rd.coverage[0] ? "" : " zero"), `${rd.coverage[0]}/${rd.coverage[1]}`));
     }
     tr.appendChild(pr);
     for (const o of p.objectives) {
-      const td = lrEl("td", "ob");
+      const td = mkEl("td", "ob");
       if (!node.gap) {
         const k = rd.met_by_objective?.[o] || 0;
         const all = k && k === rd.coverage[1];
-        td.append(lrMark(all ? "full" : "open", all ? "every note met" : `${k} of ${rd.coverage[1]} notes met`), lrEl("span", "num" + (k ? "" : " zero"), String(k)));
+        td.append(lrMark(all ? "full" : "open", all ? "every note met" : `${k} of ${rd.coverage[1]} notes met`), mkEl("span", "num" + (k ? "" : " zero"), String(k)));
       }
       tr.appendChild(td);
     }
@@ -1230,23 +1219,23 @@ function lrPlanTree(p) {
     const leafRows = [];
     for (const leaf of leaves) {
       const lv = r.leaves[leaf] || {};
-      const ltr = lrEl("tr", "leaf");
+      const ltr = mkEl("tr", "leaf");
       ltr.hidden = true;
-      const lth = lrEl("th");
+      const lth = mkEl("th");
       lth.scope = "row";
-      lth.append(lrBtn("lr-link", lrStem(leaf), () => openNote(leaf)),
+      lth.append(lrBtn("lr-link", noteStem(leaf), () => openNote(leaf)),
         lrBtn("lr-link act", "Practice", () => learnStartSession({ note: leaf, plan: p.path })));
-      lth.lastChild.setAttribute("aria-label", `Practice ${lrStem(leaf)}`);
+      lth.lastChild.setAttribute("aria-label", `Practice ${noteStem(leaf)}`);
       ltr.appendChild(lth);
       // "to review" is the node's count, on the plan's own reading (measured and
       // under the target); a leaf's raw `due` is true for a note never practised
-      ltr.appendChild(lrEl("td", "pr m", lv.attempts ? "practised" : ""));
+      ltr.appendChild(mkEl("td", "pr m", lv.attempts ? "practised" : ""));
       for (const o of p.objectives) {
         const x = lv.objectives?.[o] || {};
-        const td = lrEl("td", "ob");
+        const td = mkEl("td", "ob");
         if (x.met) td.appendChild(lrMark("full", `met without help ${lrDate(x.met)}`));
-        else if (x.assisted) td.append(lrMark("half", ""), lrEl("span", "m", `with help ${lrDate(x.assisted)}`));
-        else if (x.missed) td.append(lrMark("open", ""), lrEl("span", "m", `missed ${lrDate(x.missed)}`));
+        else if (x.assisted) td.append(lrMark("half", ""), mkEl("span", "m", `with help ${lrDate(x.assisted)}`));
+        else if (x.missed) td.append(lrMark("open", ""), mkEl("span", "m", `missed ${lrDate(x.missed)}`));
         else td.appendChild(lrMark("open"));
         ltr.appendChild(td);
       }
@@ -1258,12 +1247,12 @@ function lrPlanTree(p) {
       // shortcut: the first LR_STEP_NOTES notes; /slides hands over 40 checked
       // points (learn.artifacts.STUDY_POINTS_MAX), about that many notes' worth, so a longer
       // step's tail would add nothing. Raise the two together.
-      const str = lrEl("tr", "leaf lr-step-tools");
+      const str = mkEl("tr", "leaf lr-step-tools");
       str.hidden = true;
-      const td = lrEl("td");
+      const td = mkEl("td");
       td.colSpan = 2 + p.objectives.length;
       const q = leaves.slice(0, LR_STEP_NOTES).map(shellQuote).join(" ");
-      td.append(lrEl("span", "m", "This step as"),
+      td.append(mkEl("span", "m", "This step as"),
         lrBtn("lr-link act", "slides", () => prefillChat(`/slides ${q}`)),
         lrBtn("lr-link act", "flashcards", () => prefillChat(`/flashcards ${q} --n=10`)));
       str.appendChild(td);
@@ -1285,27 +1274,27 @@ function lrPlanTree(p) {
 // An objective is a row, its node and its sentence; how it is checked is
 // closed under it; edit and remove show on hover and focus (ADR-0061 §16).
 function lrObjRow(c, { edit = null, remove = null } = {}) {
-  const row = lrEl("div", "lr-ob" + (c.source === "gap" ? " gap" : ""));
+  const row = mkEl("div", "lr-ob" + (c.source === "gap" ? " gap" : ""));
   if (c.source === "gap") {
-    row.append(lrEl("span", "chev none"), lrEl("span", "n", c.node), lrEl("span", "i"), lrEl("span", "t", "no material in the vault, no objective proposed"));
+    row.append(mkEl("span", "chev none"), mkEl("span", "n", c.node), mkEl("span", "i"), mkEl("span", "t", "no material in the vault, no objective proposed"));
     return row;
   }
-  const det = lrEl("details");
-  const sum = lrEl("summary");
-  const t = lrEl("span", "t", c.title);
+  const det = mkEl("details");
+  const sum = mkEl("summary");
+  const t = mkEl("span", "t", c.title);
   // the 9B opens 6 in 21 titles with another intention's verb (ADR-0081 §16)
-  if (c.reads_as) { const a = lrEl("em", "amb"); a.append(lrMark("warn", ""), `reads as ${c.reads_as}`); t.appendChild(a); }
-  sum.append(lrEl("span", "chev"), lrEl("span", "n", c.node), lrEl("span", "i", LR_OBJ_SHORT[c.intention] || ""), t);
+  if (c.reads_as) { const a = mkEl("em", "amb"); a.append(lrMark("warn", ""), `reads as ${c.reads_as}`); t.appendChild(a); }
+  sum.append(mkEl("span", "chev"), mkEl("span", "n", c.node), mkEl("span", "i", LR_OBJ[c.intention] ? c.intention : ""), t);
   det.appendChild(sum);
-  const dl = lrEl("dl", "lr-kv");
-  const kv = (k, v) => { if (v) dl.append(lrEl("dt", null, k), lrEl("dd", null, v)); };
+  const dl = mkEl("dl", "lr-kv");
+  const kv = (k, v) => { if (v) dl.append(mkEl("dt", null, k), mkEl("dd", null, v)); };
   kv("intention", `${LR_OBJ[c.intention]?.toLowerCase() || c.intention}, ${c.source === "chosen" ? "chosen by you" : "proposed by Silica"}`);
   kv("conditions", c.conditions);
   kv("criterion", c.criterion);
   det.appendChild(dl);
   row.appendChild(det);
   if (edit || remove) {
-    const ed = lrEl("span", "ed");
+    const ed = mkEl("span", "ed");
     if (edit) ed.appendChild(lrBtn("lr-link", c.reads_as ? "reword" : "edit", edit));
     if (remove) ed.appendChild(lrBtn("lr-link", "remove", remove));
     row.appendChild(ed);
@@ -1331,9 +1320,9 @@ const LR_TOOLS = [
 ];
 const LR_STEP_NOTES = 10;
 function lrStudyTools(path, title, reading = null) {
-  const sec = lrEl("section", "lr-sec lr-tools");
-  sec.appendChild(lrEl("h3", null, "Study tools"));
-  const row = lrEl("div", "lr-tools-row");
+  const sec = mkEl("section", "lr-sec lr-tools");
+  sec.appendChild(mkEl("h3", null, "Study tools"));
+  const row = mkEl("div", "lr-tools-row");
   for (const [name, cmd] of LR_TOOLS) {
     // a note of a plan step is explained by that step's reading, in Learn (ADR-0132)
     const inStep = name === "Explanation" && reading;
@@ -1364,39 +1353,39 @@ function lrRenderNoteDetail(right, n) {
     inLive ? "" : n.questions ? `${lrPlural(n.questions, "question")} · about ${n.minutes} min` : "no grounded line to ask about",
     [lrBtn("ghost box", "Open note", () => openNote(n.path)), explain, go]);
   // why it is up, in words: the ledger's own fields, never a model's (ADR-0081 §3)
-  if (n.sentence) head.appendChild(lrEl("p", "lr-reason", n.sentence));
-  if (lrSession && !inLive) head.appendChild(lrEl("p", "lr-help", "A session is open; end it or resume it before starting this one."));
+  if (n.sentence) head.appendChild(mkEl("p", "lr-reason", n.sentence));
+  if (lrSession && !inLive) head.appendChild(mkEl("p", "lr-help", "A session is open; end it or resume it before starting this one."));
   right.appendChild(head);
   if (!inLive) right.appendChild(lrStudyTools(n.path, n.title, n.reading));
   if (n.history?.length) {
-    const sec = lrEl("section", "lr-sec");
-    const h = lrEl("h3", null, "History");
+    const sec = mkEl("section", "lr-sec");
+    const h = mkEl("h3", null, "History");
     const days = [...new Set(n.history.map((x) => x.day))];
-    h.appendChild(lrEl("span", "c", `${lrPlural(n.history.length, "answer")}` + (days.length === 1 ? ` · ${days[0]}` : "")));
+    h.appendChild(mkEl("span", "c", `${lrPlural(n.history.length, "answer")}` + (days.length === 1 ? ` · ${days[0]}` : "")));
     sec.appendChild(h);
-    const t = lrEl("table", "lr-hist");
-    const tb = lrEl("tbody");
+    const t = mkEl("table", "lr-hist");
+    const tb = mkEl("tbody");
     for (const x of n.history) {
-      const tr = lrEl("tr");
-      tr.appendChild(lrEl("td", "d", x.day));
-      const q = lrEl("td", "q");
+      const tr = mkEl("tr");
+      tr.appendChild(mkEl("td", "d", x.day));
+      const q = mkEl("td", "q");
       q.append(lrMark(LR_HIST_MARK[x.outcome] || "open", ""));
-      lrMd(q.appendChild(lrEl("span")), x.q || "(question not kept)");
+      lrMd(q.appendChild(mkEl("span")), x.q || "(question not kept)");
       tr.appendChild(q);
       const bits = [x.word, x.conf != null ? `said ${x.conf}` : "", x.rating, x.line ? `line ${x.line}` : ""].filter(Boolean);
-      tr.appendChild(lrEl("td", "rt", bits.join(" · ")));
+      tr.appendChild(mkEl("td", "rt", bits.join(" · ")));
       tb.appendChild(tr);
     }
     t.appendChild(tb);
     sec.appendChild(t);
     right.appendChild(sec);
   }
-  const sec = lrEl("section", "lr-sec");
+  const sec = mkEl("section", "lr-sec");
   const asked = n.points.filter((pt) => pt.objective);
-  const sh = lrEl("h3", null, "What a session covers");
-  if (n.points.length) sh.appendChild(lrEl("span", "c", `${lrPlural(n.questions, "question")} on ${lrPlural(n.points.filter((p) => p.i).length, "key point")}`));
+  const sh = mkEl("h3", null, "What a session covers");
+  if (n.points.length) sh.appendChild(mkEl("span", "c", `${lrPlural(n.questions, "question")} on ${lrPlural(n.points.filter((p) => p.i).length, "key point")}`));
   sec.appendChild(sh);
-  sec.appendChild(lrEl("p", "lr-help", n.points.length
+  sec.appendChild(mkEl("p", "lr-help", n.points.length
     ? `Found in the note's own text${n.leaves?.length ? `; it cites ${n.leaves.join(", ")}` : n.self_grounded ? "; no source cited, the questions rest on the note's lines" : ""}. Questions and answers stay hidden until you answer.`
     : "No key point found: the note has no footnoted claim, no Relations bullet and no prose line long enough to check."));
   // key points grouped by heading, named once (ADR-0061 §9)
@@ -1405,12 +1394,12 @@ function lrRenderNoteDetail(right, n) {
   for (const pt of asked) {
     if (pt.heading !== heading || !grid) {
       heading = pt.heading;
-      if (heading) sec.appendChild(lrEl("span", "lr-grp", heading));
-      grid = lrEl("div", "lr-points");
+      if (heading) sec.appendChild(mkEl("span", "lr-grp", heading));
+      grid = mkEl("div", "lr-points");
       sec.appendChild(grid);
     }
-    grid.append(lrEl("span", "i num", pt.i ? String(pt.i) : "+"), lrEl("span", "p", lrCap(pt.kind)), lrEl("span", "h", pt.line ? `line ${pt.line}` : ""),
-      lrEl("span", "k", (LR_OBJ_SHORT[pt.objective] || pt.objective) + (pt.questions > 1 ? ` · ${pt.questions} questions` : "")));
+    grid.append(mkEl("span", "i num", pt.i ? String(pt.i) : "+"), mkEl("span", "p", lrCap(pt.kind)), mkEl("span", "h", pt.line ? `line ${pt.line}` : ""),
+      mkEl("span", "k", pt.objective + (pt.questions > 1 ? ` · ${pt.questions} questions` : "")));
   }
   const rest = n.points.filter((pt) => !pt.objective);
   if (rest.length) {
@@ -1419,19 +1408,19 @@ function lrRenderNoteDetail(right, n) {
     lrDisc(sec, `${what.replace(/^\d+/, (k) => `${k} more`)}, not asked this time`, "", (box) => {
       for (const k of kinds) {
         const lines = rest.filter((pt) => pt.kind === k && pt.line).map((pt) => pt.line);
-        box.appendChild(lrEl("p", "lr-help", `${lrCap(k)}${lines.length ? `, ${lines.length > 1 ? "lines" : "line"} ${lrAnd(lines.map(String))}` : ""}.`));
+        box.appendChild(mkEl("p", "lr-help", `${lrCap(k)}${lines.length ? `, ${lines.length > 1 ? "lines" : "line"} ${lrAnd(lines.map(String))}` : ""}.`));
       }
     });
   }
   right.appendChild(sec);
-  const discs = lrEl("div", "lr-discs");
+  const discs = mkEl("div", "lr-discs");
   lrDisc(discs, "How this is measured", "", (box) => {
     box.appendChild(lrMarkKey());
     const objs = lrObjList(n.objectives);
-    if (typeof n.R === "number") box.appendChild(lrEl("p", null, `Estimated retention ${n.R.toFixed(2)}${typeof n.S === "number" ? `, holding about ${lrDays(n.S)}` : ""}; the schedule asks for a note below 0.90.`));
-    box.appendChild(lrEl("p", null, n.atomic ? "This note is atomic: one point, one question." : "A key point is a claim, mechanism, condition, step or relation the note's source supports; repeated wording was grouped."));
-    if (objs) box.appendChild(lrEl("p", null, `${n.also_in?.length ? `The objectives of ${n.also_in[0].name}, ${objs},` : `The objectives ${objs}`} say what counts as evidence on each.`));
-    box.appendChild(lrEl("p", null, "The reason above is read from the recorded answers only: the last date, the misses, whether you were sure, whether the note changed since."));
+    if (typeof n.R === "number") box.appendChild(mkEl("p", null, `Estimated retention ${n.R.toFixed(2)}${typeof n.S === "number" ? `, holding about ${lrDays(n.S)}` : ""}; the schedule asks for a note below 0.90.`));
+    box.appendChild(mkEl("p", null, n.atomic ? "This note is atomic: one point, one question." : "A key point is a claim, mechanism, condition, step or relation the note's source supports; repeated wording was grouped."));
+    if (objs) box.appendChild(mkEl("p", null, `${n.also_in?.length ? `The objectives of ${n.also_in[0].name}, ${objs},` : `The objectives ${objs}`} say what counts as evidence on each.`));
+    box.appendChild(mkEl("p", null, "The reason above is read from the recorded answers only: the last date, the misses, whether you were sure, whether the note changed since."));
   });
   right.appendChild(discs);
 }
@@ -1442,7 +1431,7 @@ function lrReadings(box, d, { plan = null } = {}) {
   {
     const areas = (d.areas || []).filter((a) => a.measured);
     lrDisc(box, "Areas", areas.length ? lrPlural(areas.length, "area") : "none practised yet", (inner) => {
-      inner.appendChild(lrEl("p", "lr-help", "Mean estimated retention over practised notes."));
+      inner.appendChild(mkEl("p", "lr-help", "Mean estimated retention over practised notes."));
       if (!areas.length) return;
       inner.appendChild(lrTable(
         [{ key: "folder", label: "folder" }, { key: "r", label: "retention est.", num: true, bar: true }, { key: "due", label: "to review", num: true }, { key: "never", label: "not practised", num: true }],
@@ -1451,63 +1440,63 @@ function lrReadings(box, d, { plan = null } = {}) {
     const rows = d.horizon || [];
     const falling = rows.reduce((a, h) => a + (h.notes || 0), 0);
     lrDisc(box, "Forgetting horizon", fresh ? "from the first practice on" : `${falling} in the next seven days`, (inner) => {
-      inner.appendChild(lrEl("p", "lr-help", "Notes estimated to fall due, day by day."));
+      inner.appendChild(mkEl("p", "lr-help", "Notes estimated to fall due, day by day."));
       if (!rows.length) return;
       const max = Math.max(1, ...rows.map((h) => h.notes));
       inner.appendChild(lrTable(
         [{ key: "day", label: "day" }, { key: "notes", label: "notes", num: true, bar: true }],
         rows.map((h, i) => ({ day: i === 0 ? "today" : lrDate(h.day), notes: h.notes, _bar: h.notes / max, _o2: i > 0 }))));
-      if (d.median_S) inner.appendChild(lrEl("p", "lr-help", `Estimates from the schedule. Median estimated hold over practised notes: ${Math.round(d.median_S)} days.`));
+      if (d.median_S) inner.appendChild(mkEl("p", "lr-help", `Estimates from the schedule. Median estimated hold over practised notes: ${Math.round(d.median_S)} days.`));
     });
   }
   if (fresh) return;
   const cal = plan ? plan.calibration : d.calibration;
   lrDisc(box, "Calibration", cal && cal.enough ? `n = ${cal.n}` : `${cal ? cal.n : 0} of ${cal ? cal.min : 10} answers needed`, (inner) => {
-    inner.appendChild(lrEl("p", "lr-help", "Confidence before the reveal, against criteria met."));
-    if (!cal || !cal.enough) { inner.appendChild(lrEl("p", "lr-help", "Not enough evidence. Unassisted, model-graded answers with a confidence count; a null confidence does not.")); return; }
+    inner.appendChild(mkEl("p", "lr-help", "Confidence before the reveal, against criteria met."));
+    if (!cal || !cal.enough) { inner.appendChild(mkEl("p", "lr-help", "Not enough evidence. Unassisted, model-graded answers with a confidence count; a null confidence does not.")); return; }
     const rows = LR_CONF.map(([lbl, b]) => {
       const band = cal.bands[String(b)] || {};
       return { said: `${lbl} · ${b}`, met: band.n ? Math.round(band.hit * 100) + "%" : "Not enough evidence", n: band.n || 0, _bar: band.n ? band.hit : 0, _amber: band.n && band.hit < b / 100 };
     });
     inner.appendChild(lrTable([{ key: "said", label: "you said" }, { key: "met", label: "criteria met", num: true, bar: true }, { key: "n", label: "n", num: true }], rows));
-    inner.appendChild(lrEl("p", "lr-help", `${cal.bias_say}: ${cal.bias > 0 ? "+" : ""}${cal.bias.toFixed(2)} (Brier ${cal.brier.toFixed(2)}). Descriptive, not a trait.`));
+    inner.appendChild(mkEl("p", "lr-help", `${cal.bias_say}: ${cal.bias > 0 ? "+" : ""}${cal.bias.toFixed(2)} (Brier ${cal.brier.toFixed(2)}). Descriptive, not a trait.`));
   });
   const g = plan ? plan.grader : d.grader;
   lrDisc(box, "Grader", g && g.n ? `${g.n} graded` : "none graded yet", (inner) => {
-    inner.appendChild(lrEl("p", "lr-help", "The model proposes a rating, you decide."));
-    if (!g || !g.n) { inner.appendChild(lrEl("p", "lr-help", "Agreement is measured once the model has graded an item.")); return; }
+    inner.appendChild(mkEl("p", "lr-help", "The model proposes a rating, you decide."));
+    if (!g || !g.n) { inner.appendChild(mkEl("p", "lr-help", "Agreement is measured once the model has graded an item.")); return; }
     inner.appendChild(lrTable([{ key: "k", label: "you kept" }, { key: "s", label: "share", num: true, bar: true }],
       [{ k: "the proposed rating", s: Math.round(g.share * 100) + "%", _bar: g.share }, { k: "another rating", s: Math.round((1 - g.share) * 100) + "%", _bar: 1 - g.share, _o2: true }]));
-    inner.appendChild(lrEl("p", "lr-help", "Agreement about a scheduling rating, not accuracy. Below 75% the grader prompt is wrong, not you."));
+    inner.appendChild(mkEl("p", "lr-help", "Agreement about a scheduling rating, not accuracy. Below 75% the grader prompt is wrong, not you."));
     if (g.voice && g.voice.n) {
       const pct = (x) => (x.n ? Math.round(x.share * 100) + "%" : "none yet");
-      inner.appendChild(lrEl("p", "lr-help", `Spoken answers: kept ${g.voice.kept} of ${g.voice.n} (${pct(g.voice)}); typed: ${g.typed.kept} of ${g.typed.n} (${pct(g.typed)}). A lower share on spoken answers means the transcription, not the grader, is being corrected.`));
+      inner.appendChild(mkEl("p", "lr-help", `Spoken answers: kept ${g.voice.kept} of ${g.voice.n} (${pct(g.voice)}); typed: ${g.typed.kept} of ${g.typed.n} (${pct(g.typed)}). A lower share on spoken answers means the transcription, not the grader, is being corrected.`));
     }
   });
 }
 
 // A chart table where one cell carries the bar (the app's chart grammar).
 function lrTable(cols, rows) {
-  const t = lrEl("table", "chart lr-chart");
-  const thead = lrEl("thead");
-  const hr = lrEl("tr");
+  const t = mkEl("table", "chart lr-chart");
+  const thead = mkEl("thead");
+  const hr = mkEl("tr");
   for (const c of cols) {
-    hr.appendChild(lrEl("th", c.num ? "num" : null, c.label));
-    if (c.bar) hr.appendChild(lrEl("th", "bar"));
+    hr.appendChild(mkEl("th", c.num ? "num" : null, c.label));
+    if (c.bar) hr.appendChild(mkEl("th", "bar"));
   }
   thead.appendChild(hr);
-  const tb = lrEl("tbody");
+  const tb = mkEl("tbody");
   for (const r of rows) {
-    const tr = lrEl("tr");
+    const tr = mkEl("tr");
     cols.forEach((c, i) => {
       const v = r[c.key];
-      const cell = lrEl(i === 0 ? "th" : "td", c.num ? "num" : null, typeof v === "number" && !Number.isInteger(v) ? v.toFixed(2) : v == null ? "—" : String(v));
+      const cell = mkEl(i === 0 ? "th" : "td", c.num ? "num" : null, typeof v === "number" && !Number.isInteger(v) ? v.toFixed(2) : v == null ? "—" : String(v));
       if (i === 0) cell.scope = "row";
       tr.appendChild(cell);
       if (c.bar) {
-        const td = lrEl("td", "bar");
-        const cellDiv = lrEl("div", "cell");
-        const fill = lrEl("i", r._amber ? "amber" : r._o2 ? "o2" : null);
+        const td = mkEl("td", "bar");
+        const cellDiv = mkEl("div", "cell");
+        const fill = mkEl("i", r._amber ? "amber" : r._o2 ? "o2" : null);
         fill.style.width = Math.max(0, Math.min(100, Math.round((r._bar || 0) * 100))) + "%";
         cellDiv.appendChild(fill);
         td.appendChild(cellDiv);
@@ -1554,7 +1543,7 @@ function lrStudyItems(f) {
   if (f.scope === "notes") return (Array.isArray(f.target) ? f.target : [f.target]).map((t) => ({ kind: "notes", target: t, label: t }));
   if (f.scope === "folder") {
     return String(f.target).split(LR_SEP).map((b) => b.trim()).filter(Boolean)
-      .map((b) => (/\.md$/i.test(b) ? { kind: "notes", target: lrStem(b), label: lrStem(b), path: b } : { kind: "folder", target: b, label: b }));
+      .map((b) => (/\.md$/i.test(b) ? { kind: "notes", target: noteStem(b), label: noteStem(b), path: b } : { kind: "folder", target: b, label: b }));
   }
   return [{ kind: f.scope, target: f.target, label: f.label || f.target }];
 }
@@ -1582,7 +1571,7 @@ window.learnPlanFolder = lrPlanFolder;
 // as its Study; Start tests it at once, unless a date or a reference makes
 // it a plan.
 function learnTestNote(path) {
-  const stem = lrStem(path);
+  const stem = noteStem(path);
   lrFormReset({ step: "fields", scope: "notes", target: [stem], label: stem });
   if (activeTab !== "learn") showTab("learn");
   lrGo({ view: "new" });
@@ -1620,7 +1609,7 @@ function lrStudyFromBounds(restrict) {
 }
 function lrRefOf(target) {
   const t = String(target || "");
-  return t.includes("\n") ? { kind: "text", target: t, label: "" } : { kind: "note", target: t, label: lrStem(t) };
+  return t.includes("\n") ? { kind: "text", target: t, label: "" } : { kind: "note", target: t, label: noteStem(t) };
 }
 function lrFormFromPlan(p) {
   if (p.scope === "steps") {
@@ -1665,9 +1654,9 @@ function lrSourcesFromPlan(p) {
 // the home column, opened by Form, by a sentence, by the note menu and by
 // the chat's + menu. Escape, × and a click outside close it.
 function lrDialog() {
-  const scrim = lrEl("div", "lr-scrim");
+  const scrim = mkEl("div", "lr-scrim");
   scrim.addEventListener("mousedown", (e) => { if (e.target === scrim) lrCloseDialog(); });
-  const dlg = lrEl("div", "lr-dialog");
+  const dlg = mkEl("div", "lr-dialog");
   dlg.setAttribute("role", "dialog");
   dlg.setAttribute("aria-modal", "true");
   dlg.setAttribute("aria-label", lrRoute.view === "edit" ? "Edit plan" : "New test or plan");
@@ -1688,22 +1677,22 @@ function lrCloseDialog() {
 function lrRenderComposer(right) {
   if (lrRoute.view === "edit" && lrForm.editPath !== lrRoute.plan) {
     if (lrPlan && lrPlan.path === lrRoute.plan) lrFormFromPlan(lrPlan);
-    else { right.appendChild(lrEl("p", "lr-help", "Reading the plan.")); lrFetchPlan(lrRoute.plan); return; }
+    else { right.appendChild(mkEl("p", "lr-help", "Reading the plan.")); lrFetchPlan(lrRoute.plan); return; }
   }
   if (lrRoute.view === "new" && lrForm.editPath) lrFormReset();
-  const box = lrEl("div", "lr-composer");
+  const box = mkEl("div", "lr-composer");
   if (lrForm.reading) {
-    box.append(lrEl("span", "eyebrow", "New test"), lrEl("p", "lr-readback s", `“${lrForm.sentence}”`), lrEl("p", "lr-help", "Reading your sentence…"));
+    box.append(mkEl("span", "eyebrow", "New test"), mkEl("p", "lr-readback s", `“${lrForm.sentence}”`), mkEl("p", "lr-help", "Reading your sentence…"));
   } else if (lrForm.step === "sentence") lrSentenceStep(box);
   else lrFieldsStep(box);
   right.appendChild(box);
 }
 
 function lrSentenceStep(box) {
-  const head = lrEl("div", "lr-phead");
-  head.append(lrEl("span", "eyebrow", "New test · nothing is written until you keep it"), lrEl("h2", null, "What would you like to learn?"));
+  const head = mkEl("div", "lr-phead");
+  head.append(mkEl("span", "eyebrow", "New test · nothing is written until you keep it"), mkEl("h2", null, "What would you like to learn?"));
   box.appendChild(head);
-  const ta = lrEl("textarea", "lr-field textarea lr-sentence");
+  const ta = mkEl("textarea", "lr-field textarea lr-sentence");
   ta.rows = 3;
   ta.value = lrForm.sentence;
   ta.placeholder = "Psychology exam on November 30: perception, short-term memory, reinforcement learning, theory of mind. I need to explain and apply them.";
@@ -1714,8 +1703,8 @@ function lrSentenceStep(box) {
   ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); lrReadSentence(); } });
   ta.addEventListener("blur", (e) => { if (!e.relatedTarget?.closest?.(".lr-cta")) lrReadSentence(); });
   box.appendChild(ta);
-  const cta = lrEl("div", "lr-cta");
-  cta.append(lrEl("span", "lr-help", lrForm.reading ? "Reading the sentence…" : "Say what, by when, and what you want to be able to do. Every field it fills can be changed."),
+  const cta = mkEl("div", "lr-cta");
+  cta.append(mkEl("span", "lr-help", lrForm.reading ? "Reading the sentence…" : "Say what, by when, and what you want to be able to do. Every field it fills can be changed."),
     lrBtn("lr-q", "Fill the fields yourself", () => { lrForm.step = "fields"; lrRender(); }),
     lrBtn("lr-send" + (lrForm.reading ? " off" : ""), "Read it", lrReadSentence));
   box.appendChild(cta);
@@ -1728,7 +1717,7 @@ async function lrReadSentence() {
   lrForm.reading = true;
   lrRender();
   let r;
-  try { r = await lrPost("/learn/plan/read", { sentence: text }); } catch (e) { r = { said: ["The reading failed (" + e.message + "); fill the fields, the sentence is kept."] }; }
+  try { r = await apiPost("/learn/plan/read", { sentence: text }); } catch (e) { r = { said: ["The reading failed (" + e.message + "); fill the fields, the sentence is kept."] }; }
   lrForm.reading = false;
   lrForm.read = text;
   Object.assign(lrForm, {
@@ -1747,9 +1736,9 @@ async function lrReadSentence() {
 
 function lrFieldsStep(box) {
   const edit = !!lrForm.editPath;
-  const head = lrEl("div", "lr-phead");
-  head.appendChild(lrEl("span", "eyebrow", edit ? "Edit plan · one revertible write, sessions untouched" : lrForm.read ? "Filled from your sentence. Change anything." : "New test"));
-  const name = lrEl("input", "lr-title");
+  const head = mkEl("div", "lr-phead");
+  head.appendChild(mkEl("span", "eyebrow", edit ? "Edit plan · one revertible write, sessions untouched" : lrForm.read ? "Filled from your sentence. Change anything." : "New test"));
+  const name = mkEl("input", "lr-title");
   name.type = "text"; name.value = lrForm.name; name.placeholder = edit ? "Name the plan" : "Name it, to keep it as a plan";
   name.setAttribute("aria-label", "Plan name");
   name.dataset.lrKey = "form:name";
@@ -1758,13 +1747,13 @@ function lrFieldsStep(box) {
   box.appendChild(head);
   // the sentence, kept above the fields, and what the reading did with it
   if (lrForm.read && !edit) {
-    const said = lrEl("div", "lr-readback");
-    said.appendChild(lrEl("p", "s", `“${lrForm.read}”`));
-    const line = lrEl("p", "lr-help");
+    const said = mkEl("div", "lr-readback");
+    said.appendChild(mkEl("p", "s", `“${lrForm.read}”`));
+    const line = mkEl("p", "lr-help");
     line.append(lrForm.model ? `Read in ${lrForm.took} s · every field can be changed` : "Not read · the fields are yours to fill", " · ");
     line.appendChild(lrBtn("lr-link", "rewrite the sentence", () => { lrForm.step = "sentence"; lrForm.read = ""; lrRender(); }));
     said.appendChild(line);
-    for (const s of lrForm.said) said.appendChild(lrEl("p", "lr-help", s));
+    for (const s of lrForm.said) said.appendChild(mkEl("p", "lr-help", s));
     box.appendChild(said);
   }
   box.appendChild(lrStudySection());
@@ -1773,11 +1762,11 @@ function lrFieldsStep(box) {
   box.appendChild(lrGoalsSection());
   box.appendChild(lrBySection());
   box.appendChild(lrObjectivesSection());
-  const cta = lrEl("div", "lr-cta");
-  const lands = lrEl("span", "lr-help");
+  const cta = mkEl("div", "lr-cta");
+  const lands = mkEl("span", "lr-help");
   lands.id = "lr-lands";
   if (edit) {
-    lands.append("Saves ", lrEl("span", "path", lrLands()), " · revertible");
+    lands.append("Saves ", mkEl("span", "path", lrLands()), " · revertible");
     const save = lrBtn("lr-send", "Save plan", () => lrWritePlan());
     save.id = "lr-create-btn";
     const del = lrBtn("lr-link", "Delete plan", lrDeletePlan);
@@ -1849,17 +1838,17 @@ async function lrStartTest() {
 
 // -- Study: a token, or a typeahead over folders, notes, topics and syllabus notes
 function lrStudySection() {
-  const sec = lrEl("section", "lr-fs");
-  sec.appendChild(lrEl("h3", null, "Study"));
+  const sec = mkEl("section", "lr-fs");
+  sec.appendChild(mkEl("h3", null, "Study"));
   const f = lrForm;
-  const row = lrEl("div", "lr-studyrow");
+  const row = mkEl("div", "lr-studyrow");
   const items = lrStudyItems(f);
   // with a Reference the preview counts its matches, not the Study's notes;
   // with several items the preview's line counts them all
   const n = f.ref || items.length !== 1 ? null : f.preview?.paths?.length;
   items.forEach((it, i) => {
-    const tok = lrEl("span", "lr-tok");
-    tok.append(lrEl("i", null, lrKindWord(it)), it.label + (n != null ? ` · ${lrPlural(n, "note")}` : ""));
+    const tok = mkEl("span", "lr-tok");
+    tok.append(mkEl("i", null, lrKindWord(it)), it.label + (n != null ? ` · ${lrPlural(n, "note")}` : ""));
     const x = lrBtn("lr-x", "×", () => lrDropStudy(i));
     x.setAttribute("aria-label", items.length > 1 ? `remove ${it.label}` : "clear what to study");
     tok.appendChild(x);
@@ -1869,9 +1858,9 @@ function lrStudySection() {
   sec.appendChild(row);
   // a restriction read from the sentence is shown on the field and can be cleared (§13)
   if (f.restrict && ["steps", "topic"].includes(f.scope)) {
-    const r = lrEl("div", "lr-asides");
-    const tok = lrEl("span", "lr-tok sm");
-    tok.append(lrEl("i", null, "only in"), f.restrict);
+    const r = mkEl("div", "lr-asides");
+    const tok = mkEl("span", "lr-tok sm");
+    tok.append(mkEl("i", null, "only in"), f.restrict);
     const x = lrBtn("lr-x", "×", () => { f.restrict = ""; f.refused = []; lrPreviewScope(); });
     x.setAttribute("aria-label", "clear the restriction");
     tok.appendChild(x);
@@ -1879,9 +1868,9 @@ function lrStudySection() {
     sec.appendChild(r);
   }
   // with a Reference the preview is its lines, shown under it; here, what bounds them
-  if (f.ref) sec.appendChild(lrEl("p", "lr-help", f.scope ? "The reference's lines are looked for here." : "Empty: the reference's lines are looked for in the whole vault."));
-  else if (f.previewBusy && !f.preview) sec.appendChild(lrEl("p", "lr-help", "Resolving the material…"));
-  else if (f.preview?.error) { const e = lrEl("p", "lr-help warn"); e.append(lrMark("warn", ""), "Could not resolve: " + f.preview.error); sec.appendChild(e); }
+  if (f.ref) sec.appendChild(mkEl("p", "lr-help", f.scope ? "The reference's lines are looked for here." : "Empty: the reference's lines are looked for in the whole vault."));
+  else if (f.previewBusy && !f.preview) sec.appendChild(mkEl("p", "lr-help", "Resolving the material…"));
+  else if (f.preview?.error) { const e = mkEl("p", "lr-help warn"); e.append(lrMark("warn", ""), "Could not resolve: " + f.preview.error); sec.appendChild(e); }
   else if (f.preview) lrShowPreview(sec, f.preview);
   return sec;
 }
@@ -1890,11 +1879,11 @@ function lrStudySection() {
 // Stored as today's syllabus scope, bounded by the Study; optional.
 function lrReferenceSection() {
   const f = lrForm;
-  const sec = lrEl("section", "lr-fs");
-  const h = lrEl("h3", null, "Reference");
-  h.appendChild(lrEl("span", "lr-help", " optional"));
+  const sec = mkEl("section", "lr-fs");
+  const h = mkEl("h3", null, "Reference");
+  h.appendChild(mkEl("span", "lr-help", " optional"));
   sec.appendChild(h);
-  const seg = lrEl("div", "lr-seg lr-refseg");
+  const seg = mkEl("div", "lr-seg lr-refseg");
   seg.setAttribute("role", "radiogroup"); seg.setAttribute("aria-label", "the reference is");
   for (const [k, label] of [["note", "A note"], ["text", "Paste text"]]) {
     const on = f.refMode === k;
@@ -1909,7 +1898,7 @@ function lrReferenceSection() {
   }
   sec.appendChild(seg);
   if (f.refMode === "text") {
-    const ta = lrEl("textarea", "lr-field textarea");
+    const ta = mkEl("textarea", "lr-field textarea");
     const text = f.ref?.kind === "text" ? f.ref.target : "";
     ta.rows = Math.min(8, Math.max(3, text.split("\n").length));
     ta.value = text;
@@ -1920,38 +1909,38 @@ function lrReferenceSection() {
     ta.addEventListener("change", () => { f.refused = []; lrPreviewScope(); });
     sec.appendChild(ta);
   } else if (f.ref?.kind === "note") {
-    const tok = lrEl("span", "lr-tok");
-    tok.append(lrEl("i", null, "note"), f.ref.label || lrStem(f.ref.target));
+    const tok = mkEl("span", "lr-tok");
+    tok.append(mkEl("i", null, "note"), f.ref.label || noteStem(f.ref.target));
     const x = lrBtn("lr-x", "×", () => { Object.assign(f, { ref: null, refused: [], preview: null, cards: null }); lrRender(); lrPreviewScope(); });
     x.setAttribute("aria-label", "clear the reference");
     tok.appendChild(x);
     sec.appendChild(tok);
   } else sec.appendChild(lrRefInput());
   if (f.ref) {
-    if (f.previewBusy && !f.preview) sec.appendChild(lrEl("p", "lr-help", "Matching the lines against your notes…"));
-    else if (f.preview?.error) { const e = lrEl("p", "lr-help warn"); e.append(lrMark("warn", ""), "Could not resolve: " + f.preview.error); sec.appendChild(e); }
+    if (f.previewBusy && !f.preview) sec.appendChild(mkEl("p", "lr-help", "Matching the lines against your notes…"));
+    else if (f.preview?.error) { const e = mkEl("p", "lr-help warn"); e.append(lrMark("warn", ""), "Could not resolve: " + f.preview.error); sec.appendChild(e); }
     else if (f.preview) lrShowPreview(sec, f.preview);
-  } else sec.appendChild(lrEl("p", "lr-help", "A syllabus or a list of what the exam covers: each line is matched to your notes, and a line with no note is shown."));
+  } else sec.appendChild(mkEl("p", "lr-help", "A syllabus or a list of what the exam covers: each line is matched to your notes, and a line with no note is shown."));
   return sec;
 }
 
 function lrRefInput() {
   const f = lrForm;
-  const wrap = lrEl("div", "lr-ta");
-  const inp = lrEl("input", "lr-field");
+  const wrap = mkEl("div", "lr-ta");
+  const inp = mkEl("input", "lr-field");
   inp.type = "text"; inp.id = "lr-ref"; inp.placeholder = "A note that lists what to study"; inp.value = f.refQ; inp.autocomplete = "off";
   inp.setAttribute("role", "combobox"); inp.setAttribute("aria-autocomplete", "list");
   inp.setAttribute("aria-controls", "lr-ref-opts"); inp.setAttribute("aria-expanded", "false");
   inp.setAttribute("aria-label", "the reference note");
   inp.dataset.lrKey = "form:refnote";
-  const list = lrEl("ul", "lr-opts");
+  const list = mkEl("ul", "lr-opts");
   list.id = "lr-ref-opts"; list.setAttribute("role", "listbox"); list.hidden = true;
   const paint = () => {
     list.innerHTML = "";
     f.refOpts.forEach((o, i) => {
-      const li = lrEl("li", i === f.refIdx ? "on" : null);
+      const li = mkEl("li", i === f.refIdx ? "on" : null);
       li.setAttribute("role", "option"); li.setAttribute("aria-selected", i === f.refIdx ? "true" : "false");
-      li.append(lrEl("i", null, o.kind === "steps" ? "syllabus" : "note"), lrEl("span", "l", o.label));
+      li.append(mkEl("i", null, o.kind === "steps" ? "syllabus" : "note"), mkEl("span", "l", o.label));
       li.addEventListener("mousedown", (e) => { e.preventDefault(); pick(o); });
       list.appendChild(li);
     });
@@ -1999,15 +1988,15 @@ function lrDropStudy(i) {
 }
 
 function lrStudyInput(chosen = 0) {
-  const wrap = lrEl("div", "lr-ta");
-  const inp = lrEl("input", "lr-field");
+  const wrap = mkEl("div", "lr-ta");
+  const inp = mkEl("input", "lr-field");
   inp.type = "text"; inp.id = "lr-study"; inp.placeholder = chosen ? "Add a folder or a note" : "A folder, a note or a topic";
   inp.value = lrForm.q;
   inp.setAttribute("role", "combobox"); inp.setAttribute("aria-autocomplete", "list");
   inp.setAttribute("aria-controls", "lr-opts"); inp.setAttribute("aria-expanded", "false");
   inp.setAttribute("aria-label", "what to study");
   inp.dataset.lrKey = "form:study";
-  const list = lrEl("ul", "lr-opts");
+  const list = mkEl("ul", "lr-opts");
   list.id = "lr-opts"; list.setAttribute("role", "listbox"); list.hidden = true;
   let t = null;
   inp.addEventListener("input", () => { lrForm.q = inp.value; clearTimeout(t); t = setTimeout(() => lrScopeSearch(inp, list), 120); });
@@ -2049,11 +2038,11 @@ async function lrScopeSearch(inp, list) {
 function lrPaintOpts(inp, list) {
   list.innerHTML = "";
   lrForm.opts.forEach((o, i) => {
-    const li = lrEl("li", i === lrForm.optIdx ? "on" : null);
+    const li = mkEl("li", i === lrForm.optIdx ? "on" : null);
     li.id = "lr-opt-" + i;
     li.setAttribute("role", "option");
     li.setAttribute("aria-selected", i === lrForm.optIdx ? "true" : "false");
-    li.append(lrEl("i", null, lrKindWord(o)), lrEl("span", "l", o.label), lrEl("span", "c num", o.kind === "steps" ? `${o.count} lines` : lrPlural(o.count, "note")));
+    li.append(mkEl("i", null, lrKindWord(o)), mkEl("span", "l", o.label), mkEl("span", "c num", o.kind === "steps" ? `${o.count} lines` : lrPlural(o.count, "note")));
     li.addEventListener("mousedown", (e) => { e.preventDefault(); lrPickScope(o); });
     list.appendChild(li);
   });
@@ -2076,7 +2065,7 @@ function lrPickScope(o) {
 function lrDefaultName() {
   const f = lrForm;
   if (f.nameTouched) return;
-  if (f.ref?.kind === "note") { f.name = f.ref.label || lrStem(f.ref.target); return; }
+  if (f.ref?.kind === "note") { f.name = f.ref.label || noteStem(f.ref.target); return; }
   if (f.ref && !f.scope) { f.name = `Syllabus, ${lrDate(new Date().toISOString())}`; return; }
   if (!f.scope) return;
   if (f.scope === "folder") f.name = lrStudyItems(f).map((i) => (i.kind === "folder" ? i.target.replace(/\/$/, "").split("/").pop() : i.label)).join(", ");
@@ -2098,7 +2087,7 @@ async function lrPreviewScope({ keepCards = false } = {}) {
   lrRender();
   let out;
   try {
-    out = await lrPost("/learn/plan", { ...lrStudyBody(), preview: true });
+    out = await apiPost("/learn/plan", { ...lrStudyBody(), preview: true });
   } catch (e) { out = { error: e.message }; }
   if (seq !== f.seq) return;   // a later change owns the preview
   f.preview = out;
@@ -2151,7 +2140,7 @@ async function lrWriteCards() {
   f.cardsAt = Date.now();
   lrPaintCardsStatus();
   let out;
-  try { out = await lrPost("/learn/plan", { ...lrStudyBody(), cards_only: true }); } catch (e) {
+  try { out = await apiPost("/learn/plan", { ...lrStudyBody(), cards_only: true }); } catch (e) {
     // the cards are never the gate (§16): a failed call leaves Create writing
     // the templates, and the row says so instead of a stale "written on the notes"
     out = null;
@@ -2184,41 +2173,41 @@ function lrCardsLine() {
 function lrShowPreview(sec, p) {
   const f = lrForm;
   const steps = !!f.ref || f.scope === "steps";
-  const line = lrEl("p", "lr-pline");
+  const line = mkEl("p", "lr-pline");
   if (steps) {
     const covered = p.tree.filter((n) => !n.gap);
     const doubt = covered.filter((n) => n.doubt).length;
-    line.appendChild(lrEl("b", null, `${lrPlural(p.tree.length, "line")} · ${lrPlural(p.paths.length, "note")}`));
+    line.appendChild(mkEl("b", null, `${lrPlural(p.tree.length, "line")} · ${lrPlural(p.paths.length, "note")}`));
     line.append(` · ${covered.length - doubt} matched` + (doubt ? ` · ${doubt} to check` : "") + (p.gaps.length ? ` · ${lrPlural(p.gaps.length, "gap")}` : ""));
   } else {
-    line.appendChild(lrEl("b", null, `${lrPlural(p.paths.length, "note")}` + (p.parts > 1 ? ` in ${p.parts} parts` : "")));
+    line.appendChild(mkEl("b", null, `${lrPlural(p.paths.length, "note")}` + (p.parts > 1 ? ` in ${p.parts} parts` : "")));
     line.append(` · ${p.measured} practised · ${p.never} not tested yet` + (p.due ? ` · ${p.due} to review` : ""));
   }
   sec.appendChild(line);
   if (steps) {
-    const st = lrEl("div", "lr-steps2");
+    const st = mkEl("div", "lr-steps2");
     p.tree.forEach((n, i) => {
-      st.appendChild(lrEl("span", "n num", String(i + 1)));
-      st.appendChild(lrEl("span", "s", n.node));
-      const to = lrEl("span", "to" + (n.gap ? " gap" : ""));
-      if (n.gap) to.append(lrEl("i", "lr-cell never"), "not in the vault · kept as a gap");
+      st.appendChild(mkEl("span", "n num", String(i + 1)));
+      st.appendChild(mkEl("span", "s", n.node));
+      const to = mkEl("span", "to" + (n.gap ? " gap" : ""));
+      if (n.gap) to.append(mkEl("i", "lr-cell never"), "not in the vault · kept as a gap");
       else {
         // A syllabus block meets eight notes; listed whole, sixteen blocks made
         // the dialog 4,000 px tall. Four names, the rest counted, all on hover.
-        const names = n.leaves.map(lrStem);
+        const names = n.leaves.map(noteStem);
         to.textContent = names.slice(0, 4).join(", ") + (names.length > 4 ? ` and ${names.length - 4} more` : "");
         to.title = names.join(", ");
       }
       // a syllabus block's topics no note covers: the line's most useful part
-      if (n.missing?.length) to.appendChild(lrEl("span", "lr-miss", ` · not in the vault: ${n.missing.join(", ")}`));
+      if (n.missing?.length) to.appendChild(mkEl("span", "lr-miss", ` · not in the vault: ${n.missing.join(", ")}`));
       // the step's notes nearest a topic no source met, to answer by a click,
       // the reader's answers, and the topics met by meaning only: on a line
       // of their own under the step, the names column was 200 px wide
       // (ADR-0131 amendment, point 5)
-      const extra = lrEl("span", "x");
+      const extra = mkEl("span", "x");
       for (const [topic, cands] of Object.entries(n.candidates || {})) {
         if (!cands.length) continue;
-        const ask = lrEl("span", "lr-gapask");
+        const ask = mkEl("span", "lr-gapask");
         ask.append(`Is “${topic}” one of these? `);
         cands.forEach((c, k) => {
           const b = lrBtn("lr-link", c, () => { f.matched = { ...f.matched, [topic]: c }; f.matchedTouched = true; lrPreviewScope(); });
@@ -2229,7 +2218,7 @@ function lrShowPreview(sec, p) {
         extra.appendChild(ask);
       }
       for (const [topic, c] of Object.entries(n.matched || {})) {
-        const m = lrEl("span");
+        const m = mkEl("span");
         m.append(`${topic} → ${c}, as you said `);
         const u = lrBtn("lr-link", "undo", () => { const x = { ...f.matched }; delete x[topic]; f.matched = x; f.matchedTouched = true; lrPreviewScope(); });
         u.setAttribute("aria-label", `undo “${topic}” is ${c}`);
@@ -2237,15 +2226,15 @@ function lrShowPreview(sec, p) {
         extra.appendChild(m);
       }
       // a topic only a title vector met: the coverage to check, by topic
-      if (n.by_meaning?.length) extra.appendChild(lrEl("span", null, `By meaning, ${n.by_meaning.map(([tp, c]) => `${tp} ≈ ${c}`).join("; ")}`));
+      if (n.by_meaning?.length) extra.appendChild(mkEl("span", null, `By meaning, ${n.by_meaning.map(([tp, c]) => `${tp} ≈ ${c}`).join("; ")}`));
       st.appendChild(to);
-      const how = lrEl("span", "how" + (n.doubt ? " amb" : ""));
+      const how = mkEl("span", "how" + (n.doubt ? " amb" : ""));
       if (n.doubt) how.append(lrMark("warn", ""), `${n.how} · check`);
       else how.textContent = n.how === "refused" ? `you refused ${lrPlural(n.refused || 0, "note")}` : n.how || "";
       st.appendChild(how);
       // refused here by index, or on the plan note by its text (Edit plan)
       const refusedNow = f.refused.includes(i) || f.refused.includes(n.text);
-      const nt = n.gap && !refusedNow ? lrEl("span") : lrBtn("lr-link", refusedNow ? "undo" : "not this", () => {
+      const nt = n.gap && !refusedNow ? mkEl("span") : lrBtn("lr-link", refusedNow ? "undo" : "not this", () => {
         f.refused = refusedNow ? f.refused.filter((x) => x !== i && x !== n.text) : [...f.refused, i];
         lrPreviewScope();
       });
@@ -2256,20 +2245,20 @@ function lrShowPreview(sec, p) {
     sec.appendChild(st);
     return;
   }
-  const grid = lrEl("div", "lr-map lr-pmap");
+  const grid = mkEl("div", "lr-map lr-pmap");
   const root = f.scope === "folder" ? f.target.replace(/\/$/, "") : "";
   const nodes = f.scope === "notes" ? [{ node: "Notes", leaves: p.paths }] : p.tree.filter((n) => n.leaves?.length);
   for (const n of nodes) {
-    const row = lrEl("div", "lr-maprow");
-    const head = lrEl("div", "f");
-    const label = root && n.node.startsWith(root) ? (n.node.slice(root.length).replace(/^\//, "") || lrStem(root)) : n.node;
-    head.append(lrEl("span", "fn", label), lrEl("span", "cnt", String(n.leaves.length)));
+    const row = mkEl("div", "lr-maprow");
+    const head = mkEl("div", "f");
+    const label = root && n.node.startsWith(root) ? (n.node.slice(root.length).replace(/^\//, "") || noteStem(root)) : n.node;
+    head.append(mkEl("span", "fn", label), mkEl("span", "cnt", String(n.leaves.length)));
     row.appendChild(head);
-    const cells = lrEl("div", "cells");
+    const cells = mkEl("div", "cells");
     for (const path of n.leaves) {
       const m = p.marks?.[path] || "never";
-      const c = lrEl("i", "lr-cell " + m);
-      c.title = `${lrStem(path)} · ${LR_CELL_SAY[m]}`;
+      const c = mkEl("i", "lr-cell " + m);
+      c.title = `${noteStem(path)} · ${LR_CELL_SAY[m]}`;
       cells.appendChild(c);
     }
     row.appendChild(cells);
@@ -2277,8 +2266,8 @@ function lrShowPreview(sec, p) {
   }
   sec.appendChild(grid);
   if (p.neighbours?.length) {
-    const nb = lrEl("div", "lr-asides");
-    nb.appendChild(lrEl("span", "lr-help", "Nearby concepts"));
+    const nb = mkEl("div", "lr-asides");
+    nb.appendChild(mkEl("span", "lr-help", "Nearby concepts"));
     for (const c of p.neighbours.slice(0, 6)) nb.appendChild(lrBtn("lr-chip", c, () => { Object.assign(f, { target: c, label: c, refused: [] }); if (!f.nameTouched) f.name = c; lrPreviewScope(); }));
     sec.appendChild(nb);
   }
@@ -2296,40 +2285,40 @@ function lrSourcesSection() {
   const sources = p?.sources || [];
   const read = p?.assessment || [];
   if (!(f.ref || f.scope === "steps") || (!sources.length && !read.length && !p?.guides?.length)) return document.createDocumentFragment();
-  const sec = lrEl("section", "lr-fs");
-  sec.appendChild(lrEl("h3", null, "Sources"));
+  const sec = mkEl("section", "lr-fs");
+  sec.appendChild(mkEl("h3", null, "Sources"));
   if (sources.length) {
-    const list = lrEl("div", "lr-srcs");
+    const list = mkEl("div", "lr-srcs");
     for (const src of sources) {
       const role = f.roles[src.label] || src.role || "unused";
-      const row = lrEl("div", "lr-src");
-      const name = lrEl("span", "n", src.label);
+      const row = mkEl("div", "lr-src");
+      const name = mkEl("span", "n", src.label);
       name.title = `${src.label} · ${lrPlural(src.spines || 0, "source")}`;
-      const sel = lrEl("select", "lr-field");
+      const sel = mkEl("select", "lr-field");
       sel.setAttribute("aria-label", `role of ${src.label} in this plan`);
       for (const [v, label] of Object.entries(LR_ROLE)) {
-        const o = lrEl("option", null, label);
+        const o = mkEl("option", null, label);
         o.value = v; o.selected = v === role;
         sel.appendChild(o);
       }
       sel.addEventListener("change", () => { f.roles[src.label] = sel.value; f.rolesTouched = true; lrPreviewScope(); });
-      const why = lrEl("span", "lr-help", src.why || "");
+      const why = mkEl("span", "lr-help", src.why || "");
       row.append(name, sel, why);
       list.appendChild(row);
     }
     sec.appendChild(list);
-    sec.appendChild(lrEl("p", "lr-help", "Steps are made of the material's outline rows; a reference's notes come in only where the material is silent, marked (ref)."));
+    sec.appendChild(mkEl("p", "lr-help", "Steps are made of the material's outline rows; a reference's notes come in only where the material is silent, marked (ref)."));
     if (p.order_note) {
       // the steps were matched by their words alone: said where they are chosen
-      const w = lrEl("p", "lr-help warn");
+      const w = mkEl("p", "lr-help warn");
       w.append(lrMark("warn", ""), p.order_note);
       sec.appendChild(w);
     }
   }
   const parts = f.assessment !== null ? f.assessment : read;
-  const as = lrEl("div", "lr-chips lr-assess");
+  const as = mkEl("div", "lr-chips lr-assess");
   as.setAttribute("role", "group"); as.setAttribute("aria-label", "the assessment");
-  as.appendChild(lrEl("span", "lr-help", "Assessment"));
+  as.appendChild(mkEl("span", "lr-help", "Assessment"));
   parts.forEach((a, i) => {
     const c = lrBtn("lr-chip on", `${LR_PART[a.part] || a.part}${a.days ? ` · ${a.days} days before` : ""} ×`, () => {
       f.assessment = parts.filter((_x, j) => j !== i);
@@ -2339,23 +2328,23 @@ function lrSourcesSection() {
     c.setAttribute("aria-label", `remove ${LR_PART[a.part] || a.part} from the assessment`);
     as.appendChild(c);
   });
-  if (!parts.length) as.appendChild(lrEl("span", "lr-help", read.length ? "none kept" : "none read in the reference"));
+  if (!parts.length) as.appendChild(mkEl("span", "lr-help", read.length ? "none kept" : "none read in the reference"));
   if (f.assessment !== null && read.length) as.appendChild(lrBtn("lr-link", "read it again", () => { f.assessment = null; lrBudget(); lrRender(); }));
   sec.appendChild(as);
   if (p?.guides?.length) {
-    const row = lrEl("div", "lr-studyrow");
-    const sel = lrEl("select", "lr-field w");
+    const row = mkEl("div", "lr-studyrow");
+    const sel = mkEl("select", "lr-field w");
     sel.setAttribute("aria-label", "a study guide for each step's depth, optional");
-    const none = lrEl("option", null, "No guide");
+    const none = mkEl("option", null, "No guide");
     none.value = "";
     sel.appendChild(none);
     for (const g of p.guides) {
-      const o = lrEl("option", null, lrStem(g));
-      o.value = lrStem(g); o.selected = lrStem(g) === f.guide;
+      const o = mkEl("option", null, noteStem(g));
+      o.value = noteStem(g); o.selected = noteStem(g) === f.guide;
       sel.appendChild(o);
     }
     sel.addEventListener("change", () => { f.guide = sel.value; });
-    row.append(lrEl("span", "lr-help", "Guide"), sel, lrEl("span", "lr-help", "each step's depth from its table"));
+    row.append(mkEl("span", "lr-help", "Guide"), sel, mkEl("span", "lr-help", "each step's depth from its table"));
     sec.appendChild(row);
   }
   return sec;
@@ -2371,7 +2360,7 @@ async function lrBudget() {
   // its own counter: the preview's (f.seq) drops a preview still running
   const seq = f.budgetSeq = (f.budgetSeq || 0) + 1;
   try {
-    const out = await lrPost("/learn/plan/budget", {
+    const out = await apiPost("/learn/plan/budget", {
       by: f.by, hours: f.hours ? Number(f.hours) : null,
       assessment: f.assessment !== null ? f.assessment : f.preview?.assessment || [],
       steps: tree.map((n) => ({ hours: n.hours ?? null, unit: n.unit || "", notes: (n.leaves || []).length })),
@@ -2382,13 +2371,13 @@ async function lrBudget() {
 
 // -- Be able to: the five intentions as chips, none required (§14)
 function lrGoalsSection() {
-  const sec = lrEl("section", "lr-fs");
-  sec.appendChild(lrEl("h3", null, "Be able to"));
-  const chips = lrEl("div", "lr-chips");
+  const sec = mkEl("section", "lr-fs");
+  sec.appendChild(mkEl("h3", null, "Be able to"));
+  const chips = mkEl("div", "lr-chips");
   chips.setAttribute("role", "group"); chips.setAttribute("aria-label", "what you want to be able to do");
   for (const o of Object.keys(LR_OBJ)) {
     const on = lrForm.objectives.includes(o);
-    const c = lrBtn("lr-chip" + (on ? " on" : ""), lrCap(LR_OBJ_SHORT[o]), () => {
+    const c = lrBtn("lr-chip" + (on ? " on" : ""), lrCap(o), () => {
       lrForm.objectives = on ? lrForm.objectives.filter((x) => x !== o) : Object.keys(LR_OBJ).filter((x) => x === o || lrForm.objectives.includes(x));
       lrPreviewScope();
     });
@@ -2400,51 +2389,51 @@ function lrGoalsSection() {
   sec.appendChild(chips);
   const p = lrForm.preview;
   if (!p || !p.paths?.length) {
-    sec.appendChild(lrEl("p", "lr-help", "They combine, they are not rungs. Nothing chosen: Silica picks one per part from the material."));
+    sec.appendChild(mkEl("p", "lr-help", "They combine, they are not rungs. Nothing chosen: Silica picks one per part from the material."));
   } else if (!lrForm.objectives.length) {
     const by = new Map();
     for (const x of p.infer || []) { if (!by.has(x.intention)) by.set(x.intention, []); by.get(x.intention).push(x.part); }
-    const short = (part) => (lrForm.scope === "folder" ? lrStem(part) : part);
+    const short = (part) => (lrForm.scope === "folder" ? noteStem(part) : part);
     const bits = [...by].map(([o, parts]) => [o, parts.length <= 2 ? lrAnd(parts.map(short)) : `${parts.length} parts`]);
-    const line = lrEl("p", "lr-help");
+    const line = mkEl("p", "lr-help");
     line.append("Nothing chosen: Silica asks ");
-    bits.forEach(([o, where], i) => { line.append(lrEl("b", null, LR_OBJ_SHORT[o] || o), ` on ${where}`); line.append(i < bits.length - 2 ? ", " : i === bits.length - 2 ? " and " : "."); });
+    bits.forEach(([o, where], i) => { line.append(mkEl("b", null, o), ` on ${where}`); line.append(i < bits.length - 2 ? ", " : i === bits.length - 2 ? " and " : "."); });
     line.append(" Pick any to ask the same on every part.");
     sec.appendChild(line);
   } else {
     const parts = p.parts || 0;
-    const names = lrForm.objectives.map((o) => LR_OBJ_SHORT[o]);
-    sec.appendChild(lrEl("p", "lr-help", `${lrCap(lrAnd(names))}, on each of the ${lrPlural(parts, "part")}${p.gaps?.length ? `. ${p.gaps.length > 1 ? "The gaps get" : "The gap gets"} an objective to define, never met` : ""}.`));
+    const names = lrForm.objectives;
+    sec.appendChild(mkEl("p", "lr-help", `${lrCap(lrAnd(names))}, on each of the ${lrPlural(parts, "part")}${p.gaps?.length ? `. ${p.gaps.length > 1 ? "The gaps get" : "The gap gets"} an objective to define, never met` : ""}.`));
   }
   return sec;
 }
 
 // -- By: optional; the workload shows before the commit (§15)
 function lrBySection() {
-  const sec = lrEl("section", "lr-fs");
-  sec.appendChild(lrEl("h3", null, "By"));
-  const row = lrEl("div", "lr-studyrow");
-  const by = lrEl("input", "lr-field w");
+  const sec = mkEl("section", "lr-fs");
+  sec.appendChild(mkEl("h3", null, "By"));
+  const row = mkEl("div", "lr-studyrow");
+  const by = mkEl("input", "lr-field w");
   by.type = "date"; by.value = lrForm.by;
   by.setAttribute("aria-label", "target date, optional");
   by.min = new Date().toISOString().slice(0, 10);
   by.addEventListener("change", () => { lrForm.by = by.value; lrBudget(); lrRender(); });
-  row.append(by, lrEl("span", "lr-help", "optional"));
+  row.append(by, mkEl("span", "lr-help", "optional"));
   if (lrForm.by) row.appendChild(lrBtn("lr-link", "clear", () => { lrForm.by = ""; lrForm.budget = null; lrRender(); }));
   if (lrForm.ref || lrForm.scope === "steps") {
     // study hours a day: the calendar's hours come from here, the reference's
     // own numbers only weigh the steps (ADR-0131 point 8)
-    const h = lrEl("input", "lr-field lr-hours");
+    const h = mkEl("input", "lr-field lr-hours");
     h.type = "number"; h.min = "0.5"; h.max = "24"; h.step = "0.5"; h.value = lrForm.hours; h.placeholder = "h a day";
     h.setAttribute("aria-label", "study hours a day, optional");
     h.addEventListener("change", () => { lrForm.hours = h.value; lrBudget(); lrRender(); });
-    row.append(h, lrEl("span", "lr-help", "hours a day"));
+    row.append(h, mkEl("span", "lr-help", "hours a day"));
   }
   sec.appendChild(row);
-  if (lrForm.budget) sec.appendChild(lrEl("p", "lr-help", lrForm.budget));
+  if (lrForm.budget) sec.appendChild(mkEl("p", "lr-help", lrForm.budget));
   const say = lrProjection();
   if (say) {
-    const p = lrEl("p", "lr-help" + (say.amber ? " warn" : ""));
+    const p = mkEl("p", "lr-help" + (say.amber ? " warn" : ""));
     if (say.amber) p.appendChild(lrMark("warn", ""));
     p.append(say.text);
     sec.appendChild(p);
@@ -2484,28 +2473,28 @@ const _lrMinutes = (q) => Math.max(1, Math.round(q * 1.3));
 // -- Objectives: a closed row, written in the background, never the gate (§16)
 function lrObjectivesSection() {
   const f = lrForm;
-  const sec = lrEl("section", "lr-fs");
-  sec.appendChild(lrEl("h3", null, "Objectives"));
-  const det = lrEl("details", "lr-objrow");
+  const sec = mkEl("section", "lr-fs");
+  sec.appendChild(mkEl("h3", null, "Objectives"));
+  const det = mkEl("details", "lr-objrow");
   det.open = lrDiscOpen.has("form:objectives");
   det.addEventListener("toggle", () => (det.open ? lrDiscOpen.add("form:objectives") : lrDiscOpen.delete("form:objectives")));
-  const sum = lrEl("summary");
-  const st = lrEl("span", "t", lrCardsLine());
+  const sum = mkEl("summary");
+  const st = mkEl("span", "t", lrCardsLine());
   st.id = "lr-cards-status";
-  sum.append(lrEl("span", "chev"), st);
+  sum.append(mkEl("span", "chev"), st);
   const check = (f.cards || []).filter((c) => c.reads_as).length;
-  if (check) { const m = lrEl("span", "m"); m.append(lrMark("warn", ""), `${check} to check`); sum.appendChild(m); }
-  else sum.appendChild(lrEl("span", "m mute", "Saving writes what is shown"));
+  if (check) { const m = mkEl("span", "m"); m.append(lrMark("warn", ""), `${check} to check`); sum.appendChild(m); }
+  else sum.appendChild(mkEl("span", "m mute", "Saving writes what is shown"));
   det.appendChild(sum);
-  const inner = lrEl("div", "in");
-  if (!f.cards) inner.appendChild(lrEl("p", "lr-help", f.cardsBusy ? "The cards show here once written; Create meanwhile writes them in template wording." : "Written once the material is chosen."));
+  const inner = mkEl("div", "in");
+  if (!f.cards) inner.appendChild(mkEl("p", "lr-help", f.cardsBusy ? "The cards show here once written; Create meanwhile writes them in template wording." : "Written once the material is chosen."));
   else {
     f.cards.forEach((c, i) => {
       if (f.editing === i) { inner.appendChild(lrObjEditor(c, i)); return; }
       inner.appendChild(lrObjRow(c, c.source === "gap" ? {} : { edit: () => { f.editing = i; lrRender(); }, remove: () => { f.cards.splice(i, 1); lrRender(); } }));
     });
-    if (!f.cards.some((c) => c.source !== "gap")) inner.appendChild(lrEl("p", "lr-help", "No objective proposed: the plan can still be created with objectives to define, never counted as met."));
-    inner.appendChild(lrEl("p", "lr-help", "Objectives say what counts as evidence; each note's key points say what to cover."));
+    if (!f.cards.some((c) => c.source !== "gap")) inner.appendChild(mkEl("p", "lr-help", "No objective proposed: the plan can still be created with objectives to define, never counted as met."));
+    inner.appendChild(mkEl("p", "lr-help", "Objectives say what counts as evidence; each note's key points say what to cover."));
   }
   det.appendChild(inner);
   sec.appendChild(det);
@@ -2513,8 +2502,8 @@ function lrObjectivesSection() {
 }
 
 function lrObjEditor(c, i) {
-  const box = lrEl("div", "lr-ob editing");
-  const f = (label, key) => { const fr = lrEl("label", "lr-flab"); fr.appendChild(lrEl("span", "lr-help", label)); const ta = lrEl("textarea", "lr-field textarea"); ta.value = c[key] || ""; ta.rows = 2; ta.addEventListener("input", () => { c[key] = ta.value; if (key === "title") c.reads_as = null; }); fr.appendChild(ta); return fr; };
+  const box = mkEl("div", "lr-ob editing");
+  const f = (label, key) => { const fr = mkEl("label", "lr-flab"); fr.appendChild(mkEl("span", "lr-help", label)); const ta = mkEl("textarea", "lr-field textarea"); ta.value = c[key] || ""; ta.rows = 2; ta.addEventListener("input", () => { c[key] = ta.value; if (key === "title") c.reads_as = null; }); fr.appendChild(ta); return fr; };
   box.append(f("Objective", "title"), f("Conditions", "conditions"), f("Criterion", "criterion"));
   box.appendChild(lrBtn("ghost box", "Done", () => { lrForm.editing = null; lrRender(); }));
   void i;
@@ -2543,7 +2532,7 @@ async function lrWritePlan({ start = false } = {}) {
   const btn = $("#lr-create-btn");
   if (btn) btn.disabled = true;
   try {
-    const out = await lrPost("/learn/plan", body);
+    const out = await apiPost("/learn/plan", body);
     notify(`${f.editPath ? "plan saved" : "plan created"} at ${out.path}` + (out.gaps?.length ? ` · ${lrPlural(out.gaps.length, "gap")}` : ""), "info");
     lrFormReset();
     lrData = null; lrPlan = null; lrMap = null;
@@ -2583,7 +2572,7 @@ async function learnStartSession(opts = {}) {
   $("#learn-loading").hidden = false;
   $("#learn-loading").querySelector(".fl-msg").textContent = "Picking and writing the questions.";
   let s;
-  try { s = await lrPost("/learn/session", body); } catch (e) {
+  try { s = await apiPost("/learn/session", body); } catch (e) {
     lrStarting = false;
     $("#learn-loading").hidden = true;
     if (e.status === 409) { notify("a session is already open; end it or resume it first", "warn"); lrData = null; loadLearn(true); return; }
@@ -2594,7 +2583,7 @@ async function learnStartSession(opts = {}) {
   $("#learn-loading").hidden = true;
   if (!s.items.length) {
     notify(s.short ? `no grounded material: ${s.short}` : "no grounded material in scope", "warn");
-    await lrPost("/learn/close", { id: s.id }).catch(() => {});
+    await apiPost("/learn/close", { id: s.id }).catch(() => {});
     return;
   }
   lrGateCount(opts.from || "other");
@@ -2650,25 +2639,25 @@ function lrRenderSession(body) {
   const o = s.origin || {};
   const crumb = [];
   if (o.kind === "plan") crumb.push(o.label);
-  crumb.push(it.pair ? it.pair.map(lrStem).join(" · ") : it.title);
+  crumb.push(it.pair ? it.pair.map(noteStem).join(" · ") : it.title);
   // the bar carries the place, the strip the progress (ADR-0061 §17)
   lrBar({ crumb, end: true, back: { label: "Leave", title: "the session stays open; Resume brings you back", run: lrLeave } });
-  const wrap = lrEl("div", "lr-session");
-  const strip = lrEl("div", "lr-strip");
-  const segs = lrEl("div", "segs");
+  const wrap = mkEl("div", "lr-session");
+  const strip = mkEl("div", "lr-strip");
+  const segs = mkEl("div", "segs");
   segs.setAttribute("aria-hidden", "true");
-  s.items.forEach((x, i) => segs.appendChild(lrEl("i", s.skipped[x.i] ? "skip" : i < s.cur || s.results[x.i] ? "done" : i === s.cur ? "cur" : "")));
-  strip.append(segs, lrEl("span", "num", `${s.cur + 1} of ${s.items.length}`));
+  s.items.forEach((x, i) => segs.appendChild(mkEl("i", s.skipped[x.i] ? "skip" : i < s.cur || s.results[x.i] ? "done" : i === s.cur ? "cur" : "")));
+  strip.append(segs, mkEl("span", "num", `${s.cur + 1} of ${s.items.length}`));
   strip.lastChild.setAttribute("aria-label", `question ${s.cur + 1} of ${s.items.length}`);
   wrap.appendChild(strip);
-  if (s.amnesty && s.cur === 0 && s.state === "input") wrap.appendChild(lrEl("p", "lr-help", s.amnesty));
+  if (s.amnesty && s.cur === 0 && s.state === "input") wrap.appendChild(mkEl("p", "lr-help", s.amnesty));
   if (lrEndAsk) {
     wrap.appendChild(lrEndConfirm());
-    const dim = lrEl("div", "lr-sheet dim");
+    const dim = mkEl("div", "lr-sheet dim");
     dim.setAttribute("aria-hidden", "true");
     dim.inert = true;
-    dim.append(lrEl("span", "eyebrow", lrEyebrow(it)), lrMd(lrEl("p", "q"), it.q));
-    if (s.answers[it.i]) dim.appendChild(lrEl("p", "lr-draft", s.answers[it.i]));
+    dim.append(mkEl("span", "eyebrow", lrEyebrow(it)), lrMd(mkEl("p", "q"), it.q));
+    if (s.answers[it.i]) dim.appendChild(mkEl("p", "lr-draft", s.answers[it.i]));
     wrap.appendChild(dim);
     body.appendChild(wrap);
     setTimeout(() => $("#lr-endkeep")?.focus(), 0);
@@ -2677,7 +2666,7 @@ function lrRenderSession(body) {
   // the previous question stays readable (refinement §22), never re-graded
   const prev = s.cur > 0 ? s.items[s.cur - 1] : null;
   if (prev) wrap.appendChild(lrPrevRow(s, prev, s.cur));
-  const sheet = lrEl("div", "lr-sheet");
+  const sheet = mkEl("div", "lr-sheet");
   if (s.mode === "teach" && s.state !== "reveal") {
     lrTeachParts(sheet, s, it);
     wrap.appendChild(sheet);
@@ -2685,13 +2674,13 @@ function lrRenderSession(body) {
     setTimeout(() => $("#lr-answer")?.focus(), 0);
     return;
   }
-  const eb = lrEl("div", "lr-eyebrow");
+  const eb = mkEl("div", "lr-eyebrow");
   // a teach-back's item keeps the kind it was built with; the eyebrow says what was asked
-  eb.appendChild(lrEl("span", "eyebrow", s.mode === "teach" ? `Explain it · ${lrStem(it.path)}` : lrEyebrow(it)));
+  eb.appendChild(mkEl("span", "eyebrow", s.mode === "teach" ? `Explain it · ${noteStem(it.path)}` : lrEyebrow(it)));
   if (window.speechSynthesis) eb.appendChild(lrReadToggle());
   sheet.appendChild(eb);
   // the question keeps its size after the answer (ADR-0061 §18)
-  sheet.appendChild(lrMd(lrEl("p", "q"), s.mode === "teach" ? lrTeachAsk(it) : it.q));
+  sheet.appendChild(lrMd(mkEl("p", "q"), s.mode === "teach" ? lrTeachAsk(it) : it.q));
   if (s.state === "input") lrInputParts(sheet, s, it);
   else if (s.state === "grading") lrGradingParts(sheet, s, it);
   else if (s.state === "reveal") lrReveal(sheet, it, s.verdicts[it.i]);
@@ -2703,23 +2692,23 @@ function lrRenderSession(body) {
 }
 
 function lrPrevRow(s, prev, n) {
-  const det = lrEl("details", "lr-prev");
+  const det = mkEl("details", "lr-prev");
   det.open = lrPrevOpen;
   det.addEventListener("toggle", () => (lrPrevOpen = det.open));
-  const sum = lrEl("summary");
+  const sum = mkEl("summary");
   const v = s.verdicts[prev.i];
   const res = s.results[prev.i];
   // a reload brings back the results and not the verdicts of recorded answers
   let mark = res?.correct ? "full" : "open";
   let say = s.skipped[prev.i] ? "skipped" : res ? (res.correct ? "met" : "missed") : "not recorded";
   if (!s.skipped[prev.i] && v) { const w = lrVerdictSay(prev, v, s); mark = w.mark; say = w.word.toLowerCase(); }
-  sum.append(lrEl("span", "chev"), lrEl("span", "k", `${n} · ${prev.point?.kind || prev.kind}`), lrMark(mark, ""),
-    lrEl("span", "v", res ? `${say} · ${res.rating_name}, recorded` : say));
+  sum.append(mkEl("span", "chev"), mkEl("span", "k", `${n} · ${prev.point?.kind || prev.kind}`), lrMark(mark, ""),
+    mkEl("span", "v", res ? `${say} · ${res.rating_name}, recorded` : say));
   det.appendChild(sum);
-  const d = lrEl("div", "in");
-  d.appendChild(lrMd(lrEl("p", "q"), prev.q));
-  if (s.answers[prev.i]) d.appendChild(lrEl("p", "you", s.answers[prev.i]));
-  if (v?.feedback_line) d.appendChild(lrEl("p", "fb", v.feedback_line));
+  const d = mkEl("div", "in");
+  d.appendChild(lrMd(mkEl("p", "q"), prev.q));
+  if (s.answers[prev.i]) d.appendChild(mkEl("p", "you", s.answers[prev.i]));
+  if (v?.feedback_line) d.appendChild(mkEl("p", "fb", v.feedback_line));
   if (res?.escalate) d.appendChild(lrAidBox(prev, res.escalate));
   det.appendChild(d);
   return det;
@@ -2727,30 +2716,30 @@ function lrPrevRow(s, prev, n) {
 
 function lrInputParts(sheet, s, it) {
   const shown = s.shown[it.i] || [];
-  shown.forEach((h, i) => { const d = lrEl("div", "lr-hint"); d.appendChild(lrEl("b", null, `hint ${i + 1} of 2`)); d.append(h); sheet.appendChild(d); });
-  const lab = lrEl("label", "lr-answer");
-  lab.appendChild(lrEl("span", "lr-help", "Your answer"));
-  const ta = lrEl("textarea", "lr-input" + (it.kind === "cloze" ? " short" : ""));
+  shown.forEach((h, i) => { const d = mkEl("div", "lr-hint"); d.appendChild(mkEl("b", null, `hint ${i + 1} of 2`)); d.append(h); sheet.appendChild(d); });
+  const lab = mkEl("label", "lr-answer");
+  lab.appendChild(mkEl("span", "lr-help", "Your answer"));
+  const ta = mkEl("textarea", "lr-input" + (it.kind === "cloze" ? " short" : ""));
   ta.id = "lr-answer";
   ta.placeholder = it.kind === "cloze" ? "the missing term" : "your answer, in your own words";
   ta.value = s.answers[it.i] || "";
   ta.addEventListener("input", () => (s.answers[it.i] = ta.value));
-  const inwrap = lrEl("div", "lr-inwrap");
+  const inwrap = mkEl("div", "lr-inwrap");
   inwrap.appendChild(ta);
   if (typeof attachMic === "function") inwrap.appendChild(lrMic(s, it, ta));
   lab.appendChild(inwrap);
   sheet.appendChild(lab);
   // confidence is one segment, guessing to certain, the number only on the chosen one (ADR-0061 §19)
-  const conf = lrEl("div", "lr-conf");
-  conf.appendChild(lrEl("span", "lr-help", "How likely is this answer to meet the criteria?"));
-  const seg = lrEl("div", "lr-seg");
+  const conf = mkEl("div", "lr-conf");
+  conf.appendChild(mkEl("span", "lr-help", "How likely is this answer to meet the criteria?"));
+  const seg = mkEl("div", "lr-seg");
   seg.setAttribute("role", "radiogroup"); seg.setAttribute("aria-label", "confidence");
   for (const [lbl, v] of [...LR_CONF].reverse()) {
     const on = s.conf === v;
     const b = lrBtn(on ? "on" : null, lbl, () => { s.conf = v; s.confSkipped = false; lrRender(); $("#lr-answer")?.focus(); });
     b.setAttribute("role", "radio"); b.setAttribute("aria-checked", on ? "true" : "false");
     b.title = String(v);
-    if (on) b.appendChild(lrEl("span", "num", " " + v));
+    if (on) b.appendChild(mkEl("span", "num", " " + v));
     seg.appendChild(b);
   }
   conf.appendChild(seg);
@@ -2759,7 +2748,7 @@ function lrInputParts(sheet, s, it) {
   skipc.setAttribute("aria-pressed", s.confSkipped ? "true" : "false");
   conf.appendChild(skipc);
   sheet.appendChild(conf);
-  const actions = lrEl("div", "lr-actions");
+  const actions = mkEl("div", "lr-actions");
   const left = 2 - shown.length;
   const hint = lrKey(lrBtn("lr-q", "Hint", lrHint), "H", "h");
   hint.title = `${left} left`;
@@ -2767,8 +2756,8 @@ function lrInputParts(sheet, s, it) {
   const skip = lrBtn("lr-q", "Skip question", lrSkip);
   skip.title = "not a wrong answer: the point stays open and nothing is recorded";
   const ready = s.conf !== null || s.confSkipped;
-  actions.append(hint, lrBtn("lr-q", "Just tell me", () => lrSubmit(true)), skip, lrEl("span", "sp"));
-  if (!ready) actions.appendChild(lrEl("span", "lr-help", "pick a confidence, or skip it, to submit"));
+  actions.append(hint, lrBtn("lr-q", "Just tell me", () => lrSubmit(true)), skip, mkEl("span", "sp"));
+  if (!ready) actions.appendChild(mkEl("span", "lr-help", "pick a confidence, or skip it, to submit"));
   const submit = lrKey(lrBtn("lr-send" + (ready ? "" : " off"), "Submit", () => lrSubmit(false)), "⏎", "Enter");
   submit.id = "lr-submit";
   submit.setAttribute("aria-disabled", ready ? "false" : "true");
@@ -2784,35 +2773,35 @@ function lrInputParts(sheet, s, it) {
 const LR_TEACH_TURNS = 4;
 // the note's name, not items.title_of: that reads the first heading, which in
 // this vault is often a section ("Modellamento cognitivo" for L'apprendimento)
-const lrTeachAsk = (it) => `Explain ${lrStem(it.path)} in your own words.`;
+const lrTeachAsk = (it) => `Explain ${noteStem(it.path)} in your own words.`;
 function lrTeachParts(sheet, s, it) {
   const T = s.teachT[it.i] || (s.teachT[it.i] = { turn: 0, transcript: [] });
-  const eb = lrEl("div", "lr-eyebrow");
-  eb.appendChild(lrEl("span", "eyebrow", T.turn ? `A student who has not read your note asks · ${T.turn} of ${LR_TEACH_TURNS}` : "Explain it · with the book closed"));
+  const eb = mkEl("div", "lr-eyebrow");
+  eb.appendChild(mkEl("span", "eyebrow", T.turn ? `A student who has not read your note asks · ${T.turn} of ${LR_TEACH_TURNS}` : "Explain it · with the book closed"));
   sheet.appendChild(eb);
-  sheet.appendChild(lrEl("p", "q", lrTeachAsk(it)));
+  sheet.appendChild(mkEl("p", "q", lrTeachAsk(it)));
   if (T.transcript.length) {
-    const log = lrEl("div", "lr-teachlog");
-    for (const x of T.transcript) log.appendChild(lrEl("p", x.role === "reader" ? "you" : "ask", x.text));
+    const log = mkEl("div", "lr-teachlog");
+    for (const x of T.transcript) log.appendChild(mkEl("p", x.role === "reader" ? "you" : "ask", x.text));
     sheet.appendChild(log);
   }
-  const lab = lrEl("label", "lr-answer");
-  lab.appendChild(lrEl("span", "lr-help", T.turn ? "Your answer to the student" : "What it is, how it works, why it matters"));
-  const ta = lrEl("textarea", "lr-input");
+  const lab = mkEl("label", "lr-answer");
+  lab.appendChild(mkEl("span", "lr-help", T.turn ? "Your answer to the student" : "What it is, how it works, why it matters"));
+  const ta = mkEl("textarea", "lr-input");
   ta.id = "lr-answer";
   ta.rows = T.turn ? 3 : 6;
   ta.placeholder = T.turn ? "answer in your own words" : "your explanation, as you would give it to someone who has not read the note";
   ta.value = s.answers[it.i] || "";
   ta.disabled = !!s.teachBusy;
   ta.addEventListener("input", () => (s.answers[it.i] = ta.value));
-  const inwrap = lrEl("div", "lr-inwrap");
+  const inwrap = mkEl("div", "lr-inwrap");
   inwrap.appendChild(ta);
   if (typeof attachMic === "function") inwrap.appendChild(lrMic(s, it, ta));
   lab.appendChild(inwrap);
   sheet.appendChild(lab);
-  const actions = lrEl("div", "lr-actions");
-  actions.appendChild(lrEl("span", "sp"));
-  if (s.teachBusy) actions.appendChild(lrEl("span", "lr-help", T.turn >= LR_TEACH_TURNS ? "Checking your explanation against the note…" : "The student is reading what you said…"));
+  const actions = mkEl("div", "lr-actions");
+  actions.appendChild(mkEl("span", "sp"));
+  if (s.teachBusy) actions.appendChild(mkEl("span", "lr-help", T.turn >= LR_TEACH_TURNS ? "Checking your explanation against the note…" : "The student is reading what you said…"));
   const send = lrKey(lrBtn("lr-send" + (s.teachBusy ? " off" : ""), T.turn >= LR_TEACH_TURNS ? "Finish" : "Send", lrTeachSend), "⏎", "Enter");
   send.id = "lr-submit";
   actions.appendChild(send);
@@ -2829,7 +2818,7 @@ async function lrTeachSend() {
   s.teachBusy = true;
   lrRender();
   let r;
-  try { r = await lrPost("/learn/teach", { id: s.id, i: it.i, reply }); } catch (e) {
+  try { r = await apiPost("/learn/teach", { id: s.id, i: it.i, reply }); } catch (e) {
     s.teachBusy = false;
     if (!lrGone(e)) { notify("couldn't send: " + e.message); lrRender(); }
     return;
@@ -2860,24 +2849,24 @@ function lrSaidWith(s, it) {
 
 // Checking says what it waits for (ADR-0061 §20).
 function lrGradingParts(sheet, s, it) {
-  const kv = lrEl("dl", "lr-kv");
-  kv.append(lrEl("dt", null, "you wrote"), lrEl("dd", "lr-said", s.told ? "(answer requested)" : s.answers[it.i] || "(no answer)"));
-  kv.append(lrEl("dt", null, "confidence"), lrEl("dd", null, s.conf !== null ? `${LR_CONF.find((c) => c[1] === s.conf)?.[0]} · ${s.conf}` : "skipped"));
+  const kv = mkEl("dl", "lr-kv");
+  kv.append(mkEl("dt", null, "you wrote"), mkEl("dd", "lr-said", s.told ? "(answer requested)" : s.answers[it.i] || "(no answer)"));
+  kv.append(mkEl("dt", null, "confidence"), mkEl("dd", null, s.conf !== null ? `${LR_CONF.find((c) => c[1] === s.conf)?.[0]} · ${s.conf}` : "skipped"));
   const used = (s.shown[it.i] || []).length;
-  if (used) kv.append(lrEl("dt", null, "hints"), lrEl("dd", null, `${used} used`));
+  if (used) kv.append(mkEl("dt", null, "hints"), mkEl("dd", null, `${used} used`));
   sheet.appendChild(kv);
-  const g = lrEl("div", "lr-check");
+  const g = mkEl("div", "lr-check");
   g.setAttribute("aria-live", "polite"); g.setAttribute("aria-busy", "true");
   const src = it.source || {};
-  const where = src.leaf && src.leaf !== it.path ? lrStem(src.leaf) : "the note";
-  g.appendChild(lrEl("span", "t", `Checking against ${where}${src.line ? `, line ${src.line}` : ""}`));
+  const where = src.leaf && src.leaf !== it.path ? noteStem(src.leaf) : "the note";
+  g.appendChild(mkEl("span", "t", `Checking against ${where}${src.line ? `, line ${src.line}` : ""}`));
   // the bar runs to the self-rating fallback; a re-render resumes it where it was
-  const bar = lrEl("div", "lr-wait");
-  const fill = lrEl("i");
+  const bar = mkEl("div", "lr-wait");
+  const fill = mkEl("i");
   fill.style.animationDuration = LR_GRADE_WAIT_MS + "ms";
   fill.style.animationDelay = -Math.min(LR_GRADE_WAIT_MS, Date.now() - (s.gradeStart || Date.now())) + "ms";
   bar.appendChild(fill);
-  g.append(bar, lrEl("p", "lr-help", "After 20 seconds without a verdict, the claim, the source and the criterion appear and you rate it yourself."));
+  g.append(bar, mkEl("p", "lr-help", "After 20 seconds without a verdict, the claim, the source and the criterion appear and you rate it yourself."));
   sheet.appendChild(g);
 }
 
@@ -2887,7 +2876,7 @@ function lrGradingParts(sheet, s, it) {
 // were said for. A dictated answer is marked voice, however much is typed
 // around it: the grader reads it as a transcript (ADR-0049).
 function lrMic(s, it, ta) {
-  const b = lrEl("button", "mic lr-mic");
+  const b = mkEl("button", "mic lr-mic");
   b.type = "button";
   b.title = "say your answer · click again to stop";
   b.setAttribute("aria-label", "say your answer");
@@ -2907,7 +2896,7 @@ function lrMic(s, it, ta) {
 
 // Read aloud is an icon, its label in aria-label and title (ADR-0061 §18).
 function lrReadToggle() {
-  const b = lrEl("button", "lr-q lr-read" + (lrReadAloud ? " on" : ""));
+  const b = mkEl("button", "lr-q lr-read" + (lrReadAloud ? " on" : ""));
   b.type = "button";
   b.setAttribute("aria-pressed", String(lrReadAloud));
   b.setAttribute("aria-label", "read aloud");
@@ -2938,26 +2927,26 @@ function lrSpeakCurrent(s, it) {
 // lost; Keep going holds the focus and answers Esc (ADR-0061 §24).
 function lrEndConfirm() {
   const s = lrSession, it = lrItem();
-  const box = lrEl("div", "lr-confirm");
+  const box = mkEl("div", "lr-confirm");
   box.id = "lr-endq";
   box.setAttribute("role", "alertdialog"); box.setAttribute("aria-labelledby", "lr-endq-t");
-  const t = lrEl("b", null, "End this session?");
+  const t = mkEl("b", null, "End this session?");
   t.id = "lr-endq-t";
   box.appendChild(t);
   const rec = Object.keys(s.results).length;
-  const facts = lrEl("ul", "facts");
-  const fact = (mark, text) => { const li = lrEl("li"); li.append(lrMark(mark, ""), text); facts.appendChild(li); };
+  const facts = mkEl("ul", "facts");
+  const fact = (mark, text) => { const li = mkEl("li"); li.append(lrMark(mark, ""), text); facts.appendChild(li); };
   if (rec) fact("full", `${lrPlural(rec, "answer")} ${rec === 1 ? "is" : "are"} recorded and stay${rec === 1 ? "s" : ""} in the ledger.`);
   else fact("open", "Nothing is recorded yet.");
   fact("open", s.state === "input" ? `The answer you are typing for question ${s.cur + 1} is lost.` : `The feedback on question ${s.cur + 1} is not recorded yet and would be lost.`);
   box.appendChild(facts);
-  box.appendChild(lrEl("p", "lr-help", `To keep it and come back later, leave instead: the session stays open${s.origin?.kind !== "vault" ? ` on ${s.origin.label}` : ""}.`));
-  const row = lrEl("div", "row");
+  box.appendChild(mkEl("p", "lr-help", `To keep it and come back later, leave instead: the session stays open${s.origin?.kind !== "vault" ? ` on ${s.origin.label}` : ""}.`));
+  const row = mkEl("div", "row");
   const keep = lrKey(lrBtn("ghost box", "Keep going", () => { lrEndAsk = false; lrRender(); }), "Esc", "Escape");
   keep.id = "lr-endkeep";
   row.append(keep,
     lrBtn("ghost box", "Leave, keep the session", () => { lrEndAsk = false; lrLeave(); }),
-    lrEl("span", "sp"),
+    mkEl("span", "sp"),
     lrBtn("lr-send", "End session", () => { lrEndAsk = false; lrClose(); }));
   box.appendChild(row);
   return box;
@@ -2976,7 +2965,7 @@ function lrHint() {
 async function lrSkip() {
   const s = lrSession, it = lrItem();
   if (!s || s.state !== "input") return;
-  try { await lrPost("/learn/skip", { id: s.id, i: it.i }); } catch (e) { if (!lrGone(e)) notify("couldn't skip: " + e.message); return; }
+  try { await apiPost("/learn/skip", { id: s.id, i: it.i }); } catch (e) { if (!lrGone(e)) notify("couldn't skip: " + e.message); return; }
   s.skipped[it.i] = true;
   lrNext();
 }
@@ -2999,7 +2988,7 @@ async function lrSubmit(told) {
   lrGradeTimer = setTimeout(() => { fallback = true; lrSelfGradeFallback(it); }, LR_GRADE_WAIT_MS);
   let v;
   try {
-    v = await lrPost("/learn/answer", { id: s.id, i: it.i, production, conf: s.conf, hints: s.hintsUsed[it.i] || 0, told, modality });
+    v = await apiPost("/learn/answer", { id: s.id, i: it.i, production, conf: s.conf, hints: s.hintsUsed[it.i] || 0, told, modality });
   } catch (e) {
     clearTimeout(lrGradeTimer);
     if (fallback) return;
@@ -3023,7 +3012,7 @@ async function lrSelfGradeFallback(it) {
   // falls through to `needs_self_grade` once its own call returns; here we
   // ask it again with force_model off so the claim, span and criterion show now
   try {
-    const v = await lrPost("/learn/answer", { id: s.id, i: it.i, production: s.answers[it.i] || "", conf: s.conf, hints: s.hintsUsed[it.i] || 0, told: false, self: true, modality: s.voiced?.[it.i] ? "voice" : "typed" });
+    const v = await apiPost("/learn/answer", { id: s.id, i: it.i, production: s.answers[it.i] || "", conf: s.conf, hints: s.hintsUsed[it.i] || 0, told: false, self: true, modality: s.voiced?.[it.i] ? "voice" : "typed" });
     v.needs_self_grade = true;
     s.verdicts[it.i] = v;
     s.state = "reveal";
@@ -3033,26 +3022,26 @@ async function lrSelfGradeFallback(it) {
 
 // Your words beside the note's line, the reference answer marked in it.
 function lrCompare(it, v, s, { criterion = false } = {}) {
-  const box = lrEl("div", "lr-cmp");
-  const you = lrEl("div", "you");
-  you.append(lrEl("span", "lab", ["you wrote", ...lrSaidWith(s, it)].join(" · ")),
-    lrEl("p", "txt", s.told ? "(answer requested)" : s.answers[it.i] || v.production || "(no answer)"));
-  const note = lrEl("div", "note");
-  const lab = lrEl("span", "lab");
+  const box = mkEl("div", "lr-cmp");
+  const you = mkEl("div", "you");
+  you.append(mkEl("span", "lab", ["you wrote", ...lrSaidWith(s, it)].join(" · ")),
+    mkEl("p", "txt", s.told ? "(answer requested)" : s.answers[it.i] || v.production || "(no answer)"));
+  const note = mkEl("div", "note");
+  const lab = mkEl("span", "lab");
   const line = it.point?.line || (v.span?.self ? v.span.line : 0);
-  lab.append(lrEl("span", null, `the note${line ? `, line ${line}` : ""}${v.span?.self ? " · no source cited" : ""}`),
+  lab.append(mkEl("span", null, `the note${line ? `, line ${line}` : ""}${v.span?.self ? " · no source cited" : ""}`),
     lrBtn("lr-link", "open note", () => openNote(it.path)));
   const text = v.span?.self ? v.span.text || v.claim : v.claim || v.answer;
-  note.append(lab, lrMarked(lrEl("p", "txt"), text || "(this item rests on a relation, not a line)", v.answer));
+  note.append(lab, lrMarked(mkEl("p", "txt"), text || "(this item rests on a relation, not a line)", v.answer));
   if (v.answer && v.answer !== text && !String(text || "").toLowerCase().includes(String(v.answer).toLowerCase())) {
-    const ref = lrEl("p", "ref");
-    ref.append(lrEl("span", "lab", "reference answer"), " ", lrMd(lrEl("span"), v.answer));
+    const ref = mkEl("p", "ref");
+    ref.append(mkEl("span", "lab", "reference answer"), " ", lrMd(mkEl("span"), v.answer));
     note.appendChild(ref);
   }
   box.append(you, note);
   if (criterion && v.criteria) {
-    const c = lrEl("div", "crit");
-    c.append(lrEl("span", "lab", "criterion"), lrEl("span", null, v.criteria));
+    const c = mkEl("div", "crit");
+    c.append(mkEl("span", "lab", "criterion"), mkEl("span", null, v.criteria));
     box.appendChild(c);
   }
   return box;
@@ -3065,40 +3054,40 @@ function lrReveal(sheet, it, v) {
   const last = s.cur + 1 >= s.items.length;
   const say = lrVerdictSay(it, v, s);
   // the verdict, stated once: a mark, a word, the grader's sentence (ADR-0061 §21)
-  const vd = lrEl("div", "lr-verdict" + (mismatch ? " warn" : ""));
+  const vd = mkEl("div", "lr-verdict" + (mismatch ? " warn" : ""));
   vd.id = "lr-verdict"; vd.tabIndex = -1; vd.setAttribute("aria-live", "polite");
-  const vh = lrEl("div", "h");
-  vh.append(lrMark(say.mark, ""), lrEl("b", null, say.word));
-  if (say.sub) vh.appendChild(lrEl("span", "m", "· " + say.sub));
+  const vh = mkEl("div", "h");
+  vh.append(lrMark(say.mark, ""), mkEl("b", null, say.word));
+  if (say.sub) vh.appendChild(mkEl("span", "m", "· " + say.sub));
   vd.appendChild(vh);
   const fb = mismatch ? `The note's claim is not supported by the line it cites, so this answer is not scored.${v.note_defect ? " " + v.note_defect : ""}`
     : v.feedback_line || (self ? "No model verdict. Compare your answer with the claim and the source, then rate it." : "");
-  if (fb) vd.appendChild(lrEl("p", "fb", fb));
-  if (s.mode === "teach" && v.summary && v.summary !== fb) vd.appendChild(lrEl("p", "fb", v.summary));
+  if (fb) vd.appendChild(mkEl("p", "fb", fb));
+  if (s.mode === "teach" && v.summary && v.summary !== fb) vd.appendChild(mkEl("p", "fb", v.summary));
   sheet.appendChild(vd);
   if (mismatch) {
     // the one amber verdict: the note's claim beside the source's line (ADR-0061 §23)
-    const box = lrEl("div", "lr-cmp col");
-    const note = lrEl("div");
-    const l1 = lrEl("span", "lab");
-    l1.append(lrEl("span", null, "the note says"), lrBtn("lr-link", "open note", () => openNote(it.path)));
-    note.append(l1, lrEl("p", "txt", v.claim || ""));
-    const src = lrEl("div");
-    const l2 = lrEl("span", "lab");
-    l2.append(lrEl("span", null, v.span?.leaf ? `the source says · ${v.span.leaf}, line ${v.span.line}` : "the source says"));
+    const box = mkEl("div", "lr-cmp col");
+    const note = mkEl("div");
+    const l1 = mkEl("span", "lab");
+    l1.append(mkEl("span", null, "the note says"), lrBtn("lr-link", "open note", () => openNote(it.path)));
+    note.append(l1, mkEl("p", "txt", v.claim || ""));
+    const src = mkEl("div");
+    const l2 = mkEl("span", "lab");
+    l2.append(mkEl("span", null, v.span?.leaf ? `the source says · ${v.span.leaf}, line ${v.span.line}` : "the source says"));
     if (v.span?.leaf) l2.appendChild(lrBtn("lr-link", "open source", () => openNote(v.span.leaf)));
-    src.append(l2, lrEl("p", "txt", v.span?.text || ""));
-    const you = lrEl("div", "you");
-    you.append(lrEl("span", "lab", "you wrote"), lrEl("p", "txt", s.answers[it.i] || "(no answer)"));
+    src.append(l2, mkEl("p", "txt", v.span?.text || ""));
+    const you = mkEl("div", "you");
+    you.append(mkEl("span", "lab", "you wrote"), mkEl("p", "txt", s.answers[it.i] || "(no answer)"));
     box.append(note, src, you);
     sheet.appendChild(box);
-    sheet.appendChild(lrEl("p", "lr-help", "No rating is written: the schedule, the depth and the calibration of this note do not change."));
-    const row = lrEl("div", "lr-actions");
+    sheet.appendChild(mkEl("p", "lr-help", "No rating is written: the schedule, the depth and the calibration of this note do not change."));
+    const row = mkEl("div", "lr-actions");
     const flag = lrBtn("ghost box", "Flag in chat", () => prefillChat(`/flag ${shellQuote(it.path)} claim vs ${v.span?.leaf || "source"}:${v.span?.line || ""} · ${v.note_defect || "not supported by the span"}`));
     flag.title = "prefills a chat turn; nothing is sent until you send it";
     const next = lrKey(lrBtn("lr-send", last ? "Finish session" : "Next question", () => lrNext()), "⏎", "Enter");
     next.id = "lr-next";
-    row.append(flag, lrEl("span", "sp"), next);
+    row.append(flag, mkEl("span", "sp"), next);
     sheet.appendChild(row);
     return;
   }
@@ -3106,25 +3095,25 @@ function lrReveal(sheet, it, v) {
   // the criterion and the grader's notes, on request (ADR-0061 §21)
   if (!self && (v.criteria || v.rubric_notes || v.misconception || (v.span?.leaf && !v.span.self))) {
     lrDisc(sheet, "Why this verdict", "", (box) => {
-      const dl = lrEl("dl", "lr-kv");
-      const kv = (k, val) => { if (val) dl.append(lrEl("dt", null, k), lrEl("dd", null, val)); };
+      const dl = mkEl("dl", "lr-kv");
+      const kv = (k, val) => { if (val) dl.append(mkEl("dt", null, k), mkEl("dd", null, val)); };
       kv("criterion", v.criteria);
       kv("notes", v.rubric_notes);
       kv("observation", v.misconception);
       if (v.paraphrase !== null && v.paraphrase !== undefined) kv("wording", v.paraphrase ? "restated in your own words" : "reused the note's wording");
       if (v.span?.leaf && !v.span.self) {
-        const dd = lrEl("dd");
+        const dd = mkEl("dd");
         dd.append(v.span.text || "", " ", lrBtn("lr-link", "open source", () => openNote(v.span.leaf)));
-        dl.append(lrEl("dt", null, `source, line ${v.span.line}`), dd);
+        dl.append(mkEl("dt", null, `source, line ${v.span.line}`), dd);
       }
       box.appendChild(dl);
     });
   }
-  const rate = lrEl("div", "lr-actions lr-rate");
+  const rate = mkEl("div", "lr-actions lr-rate");
   const proposed = v.rating;
   const chosen = s.results[it.i]?.rating ?? s.chosen?.[it.i] ?? (self ? null : proposed) ?? null;
   const seg = () => {
-    const g = lrEl("div", "lr-seg");
+    const g = mkEl("div", "lr-seg");
     g.id = "lr-rate-opts"; g.setAttribute("role", "radiogroup"); g.setAttribute("aria-label", "rating");
     for (const [n, name] of Object.entries(LR_RATING)) {
       const on = Number(n) === chosen;
@@ -3136,11 +3125,11 @@ function lrReveal(sheet, it, v) {
   };
   if (proposed && !self) {
     // a proposal with change (review §10), the four only on request
-    rate.appendChild(lrEl("span", "lr-help", "rating"));
+    rate.appendChild(mkEl("span", "lr-help", "rating"));
     if (s.changing && !s.results[it.i]) {
-      rate.append(seg(), lrEl("span", "lr-help", "changes the schedule only; the rubric result stays recorded"));
+      rate.append(seg(), mkEl("span", "lr-help", "changes the schedule only; the rubric result stays recorded"));
     } else {
-      rate.append(lrEl("b", null, lrCap(LR_RATING[chosen])), lrEl("span", "lr-help", chosen === proposed ? "proposed from the verdict" : "chosen by you"));
+      rate.append(mkEl("b", null, lrCap(LR_RATING[chosen])), mkEl("span", "lr-help", chosen === proposed ? "proposed from the verdict" : "chosen by you"));
     }
     if (!s.results[it.i]) {
       const ch = lrBtn("lr-q", "change", () => { s.changing = !s.changing; lrRender(); });
@@ -3149,19 +3138,19 @@ function lrReveal(sheet, it, v) {
     }
   } else {
     // rate it yourself: the four, with their keys (ADR-0061 §22)
-    rate.append(lrEl("span", "lr-help", v.told ? "Told: Hard at best." : "your rating"), seg());
+    rate.append(mkEl("span", "lr-help", v.told ? "Told: Hard at best." : "your rating"), seg());
   }
-  rate.appendChild(lrEl("span", "sp"));
-  if (!chosen) rate.appendChild(lrEl("span", "lr-help", "pick a rating"));
+  rate.appendChild(mkEl("span", "sp"));
+  if (!chosen) rate.appendChild(mkEl("span", "lr-help", "pick a rating"));
   const confirm = lrKey(lrBtn("lr-send" + (chosen ? "" : " off"), last ? "Finish session" : "Next question", () => lrConfirm()), "⏎", "Enter");
   confirm.id = "lr-confirm";
   confirm.setAttribute("aria-disabled", chosen ? "false" : "true");
   confirm.title = s.results[it.i] ? "" : "records the rating shown, then moves on";
   rate.appendChild(confirm);
   const res = s.results[it.i];
-  if (res?.drop?.length) rate.appendChild(lrEl("p", "lr-momentum", "You know this step: its second question is dropped."));
-  if (res && it.retest) rate.appendChild(lrEl("p", "lr-momentum", "Asked minutes after the miss: this answer does not move when the note comes back, nor an objective."));
-  else if (res?.momentum) rate.appendChild(lrEl("p", "lr-momentum", res.momentum));
+  if (res?.drop?.length) rate.appendChild(mkEl("p", "lr-momentum", "You know this step: its second question is dropped."));
+  if (res && it.retest) rate.appendChild(mkEl("p", "lr-momentum", "Asked minutes after the miss: this answer does not move when the note comes back, nor an objective."));
+  else if (res?.momentum) rate.appendChild(mkEl("p", "lr-momentum", res.momentum));
   sheet.appendChild(rate);
   if (s.results[it.i]?.escalate) sheet.appendChild(lrAidBox(it, s.results[it.i].escalate));
 }
@@ -3175,43 +3164,43 @@ function lrReveal(sheet, it, v) {
 const LR_AID_WHAT = { worked: "A worked example" };
 function lrAidBox(it, esc) {
   const s = lrSession;
-  const box = lrEl("section", "lr-aid");
+  const box = mkEl("section", "lr-aid");
   box.id = `lr-aid-${it.i}`;
   box.setAttribute("aria-live", "polite");
-  const h = lrEl("div", "h");
-  h.append(lrEl("b", null, LR_AID_WHAT[esc.form] || LR_AID_WHAT.worked), lrEl("span", "m", "· " + esc.why));
+  const h = mkEl("div", "h");
+  h.append(mkEl("b", null, LR_AID_WHAT[esc.form] || LR_AID_WHAT.worked), mkEl("span", "m", "· " + esc.why));
   box.appendChild(h);
   const got = s.aids?.[it.i];
   if (got?.html) {
     // the chat's prose styles (tables, MathML, code) are scoped to .msg
-    const body = lrEl("div", "msg lr-aid-body");
+    const body = mkEl("div", "msg lr-aid-body");
     body.innerHTML = got.html;
     box.appendChild(body);
     renderMermaid(body);
   } else if (got?.error) {
-    const p = lrEl("p", "lr-help", `Not written: ${got.error} `);
+    const p = mkEl("p", "lr-help", `Not written: ${got.error} `);
     p.appendChild(lrBtn("lr-q", "try again", () => { delete s.aids[it.i]; box.replaceWith(lrAidBox(it, esc)); }));
     box.appendChild(p);
   } else if (got) {
-    box.appendChild(lrEl("p", "lr-help", `Writing it from ${lrStem(it.path)}…`));
+    box.appendChild(mkEl("p", "lr-help", `Writing it from ${noteStem(it.path)}…`));
   } else {
     const go = lrBtn("ghost box", "Show a worked example", () => { lrFetchAid(it); box.replaceWith(lrAidBox(it, esc)); });
     go.title = "written from this note's checked points when you ask";
     box.appendChild(go);
   }
   if (esc.prereq) {
-    const p = lrEl("p", "lr-help", "The prerequisite you hold least: ");
-    p.appendChild(lrBtn("lr-link", esc.prereq_title || lrStem(esc.prereq), () => openNote(esc.prereq)));
+    const p = mkEl("p", "lr-help", "The prerequisite you hold least: ");
+    p.appendChild(lrBtn("lr-link", esc.prereq_title || noteStem(esc.prereq), () => openNote(esc.prereq)));
     box.appendChild(p);
   }
-  box.appendChild(lrEl("p", "lr-help", "Reading it changes nothing in the schedule: the next answer on this note is what counts."));
+  box.appendChild(mkEl("p", "lr-help", "Reading it changes nothing in the schedule: the next answer on this note is what counts."));
   return box;
 }
 
 async function lrFetchAid(it) {
   const s = lrSession;
   (s.aids || (s.aids = {}))[it.i] = { pending: true };
-  try { s.aids[it.i] = await lrPost("/learn/aid", { id: s.id, i: it.i }); }
+  try { s.aids[it.i] = await apiPost("/learn/aid", { id: s.id, i: it.i }); }
   catch (e) { if (lrGone(e)) return; s.aids[it.i] = { error: e.message }; }
   // in place, not a render: the reader may be typing the next answer by now
   const box = lrSession === s && document.getElementById(`lr-aid-${it.i}`);
@@ -3239,7 +3228,7 @@ async function lrConfirm() {
   if (btn) btn.disabled = true;
   s.confirming = true;
   try {
-    const r = await lrPost("/learn/rate", { id: s.id, i: it.i, rating });
+    const r = await apiPost("/learn/rate", { id: s.id, i: it.i, rating });
     s.results[it.i] = r;
     // a placement's walk (ADR-0135 point 3): a step placed on its deepest note
     // drops its second question, always one after the current, so `cur` holds
@@ -3309,7 +3298,7 @@ async function lrClose() {
   if (!s) return;
   clearTimeout(lrGradeTimer);
   let rc;
-  try { rc = await lrPost("/learn/close", { id: s.id }); } catch (e) { if (!lrGone(e)) notify("couldn't end the session: " + e.message); return; }
+  try { rc = await apiPost("/learn/close", { id: s.id }); } catch (e) { if (!lrGone(e)) notify("couldn't end the session: " + e.message); return; }
   lrSession = null;
   lrEndAsk = false;
   lrData = null; lrPlan = null; lrNote = null; lrMap = null;
@@ -3357,24 +3346,24 @@ function lrMissedList(wrap, r) {
   // are listed, and the head counts neither
   const missedN = [...pts, ...items].filter((x) => !["skipped", "open"].includes(x.status)).length;
   const skippedN = [...pts, ...items].filter((x) => x.status === "skipped").length;
-  const sec = lrEl("section", "lr-missed");
+  const sec = mkEl("section", "lr-missed");
   // by point there are no rows here, and every() on none said a session with no
   // retest "met them when they came back"
   const back = items.filter((x) => x.status !== "skipped");
   const metAgain = back.length > 0 && back.every((x) => again.get(x.path) === "met");
-  sec.appendChild(lrEl("h2", null, missedN ? `You missed ${lrPlural(missedN, byPoint ? "point" : "question")}`
+  sec.appendChild(mkEl("h2", null, missedN ? `You missed ${lrPlural(missedN, byPoint ? "point" : "question")}`
     + (metAgain ? (missedN === 1 ? ", and met it when it came back" : ", and met them when they came back") : "") : "Nothing missed"));
   const t3 = r.tally3;
   const sub = [t3 ? `${t3.met} of ${t3.points} met without help` : "", t3?.assisted ? `${t3.assisted} more with help, not counted` : "",
     skippedN ? `${skippedN} skipped, not counted as wrong` : ""].filter(Boolean).join(" · ");
-  if (sub) sec.appendChild(lrEl("p", "lr-help", sub));
-  if (again.size) sec.appendChild(lrEl("p", "lr-help", `Asked again before the end: ${[...again.values()].filter((v) => v === "met").length} of ${again.size} met`));
+  if (sub) sec.appendChild(mkEl("p", "lr-help", sub));
+  if (again.size) sec.appendChild(mkEl("p", "lr-help", `Asked again before the end: ${[...again.values()].filter((v) => v === "met").length} of ${again.size} met`));
   for (const p of pts) {
     const it = r.items.find((x) => x.point?.i === p.i && x.span?.line) || r.items.find((x) => x.point?.i === p.i);
-    sec.appendChild(lrMissedRow(p.status, p.heading ? `${p.kind}, under ${p.heading}` : p.kind, r.note, it?.span, lrStem(r.note)));
+    sec.appendChild(lrMissedRow(p.status, p.heading ? `${p.kind}, under ${p.heading}` : p.kind, r.note, it?.span, noteStem(r.note)));
   }
   // the note's name, not items.title_of's first heading (a section in this vault)
-  for (const x of items) sec.appendChild(lrMissedRow(x.status, x.q ? lrPlain(x.q) : lrStem(x.path), x.path, x.span, lrStem(x.path), again.get(x.path)));
+  for (const x of items) sec.appendChild(lrMissedRow(x.status, x.q ? lrPlain(x.q) : noteStem(x.path), x.path, x.span, noteStem(x.path), again.get(x.path)));
   wrap.appendChild(sec);
   // a note met when it came back has left Missed: it is not asked again from here
   const paths = [...new Set(items.filter((x) => x.status !== "skipped" && again.get(x.path) !== "met").map((x) => x.path))];
@@ -3382,21 +3371,21 @@ function lrMissedList(wrap, r) {
 }
 
 function lrMissedRow(status, what, path, span, title, again) {
-  const row = lrEl("div", "lr-mrow");
-  const t = lrEl("div", "t");
-  t.append(lrMark(lrStatusMark(status), ""), lrEl("span", null, what));
+  const row = mkEl("div", "lr-mrow");
+  const t = mkEl("div", "t");
+  t.append(lrMark(lrStatusMark(status), ""), mkEl("span", null, what));
   row.appendChild(t);
   // a claim's line is in its source when the note cites one (item.source.leaf)
   const inSource = !!(span?.leaf && span.leaf !== path);
   const file = inSource ? span.leaf : path;
-  const where = [inSource ? lrStem(file) : title, span?.line ? `line ${span.line}` : ""].filter(Boolean).join(", ");
-  row.appendChild(lrEl("p", "src", span?.text ? `${where}: «${span.text}»` : where));
-  const acts = lrEl("div", "acts");
+  const where = [inSource ? noteStem(file) : title, span?.line ? `line ${span.line}` : ""].filter(Boolean).join(", ");
+  row.appendChild(mkEl("p", "src", span?.text ? `${where}: «${span.text}»` : where));
+  const acts = mkEl("div", "acts");
   const read = lrBtn("lr-link", inSource ? "Read it in the source" : "Read it in the note", () => openNote(file, span?.line));
-  read.setAttribute("aria-label", `Read ${inSource ? lrStem(file) : title}${span?.line ? ` at line ${span.line}` : ""}`);
+  read.setAttribute("aria-label", `Read ${inSource ? noteStem(file) : title}${span?.line ? ` at line ${span.line}` : ""}`);
   const back = again === "met" ? ["asked again, met", "comes back when it falls due"]
     : again === "missed" ? ["asked again, missed", LR_COMES_BACK[status]] : [LR_COMES_BACK[status]];
-  acts.append(read, lrEl("span", "lr-help", [LR_STATUS_WORD[status], ...back].filter(Boolean).join(" · ")));
+  acts.append(read, mkEl("span", "lr-help", [LR_STATUS_WORD[status], ...back].filter(Boolean).join(" · ")));
   row.appendChild(acts);
   return row;
 }
@@ -3442,28 +3431,28 @@ function lrRenderReceipt(body) {
   const dur = r.duration ? ` · ${Math.floor(r.duration / 60)} min ${Math.round(r.duration % 60)} s` : "";
   const crumb = [];
   if (o.kind === "plan") crumb.push(o.label);
-  if (r.note) crumb.push(r.items[0]?.title || lrStem(r.note));
+  if (r.note) crumb.push(r.items[0]?.title || noteStem(r.note));
   lrBar({ crumb, stamp: `session of ${when}${dur}`, back: { label: backLabel, run: goBack } });
-  const wrap = lrEl("div", "lr-receipt");
+  const wrap = mkEl("div", "lr-receipt");
   const t3 = r.tally3;
   const npts = r.points?.length ? r.points.filter((p) => p.i).length : 0;
   const eyebrow = ["Receipt", `${lrPlural(r.items.length, "question")}${npts ? ` on ${lrPlural(npts, "key point")}` : ""}`];
-  if (r.objectives?.length) eyebrow.push(r.objectives.map((x) => LR_OBJ_SHORT[x] || x).join(", "));
+  if (r.objectives?.length) eyebrow.push(r.objectives.join(", "));
   if (r.from_ledger) eyebrow.push("rebuilt from the ledger: recorded events only");
   const again = r.from_ledger ? null : lrBtn("ghost box", `Another session on ${o.kind === "vault" ? "the vault" : o.kind === "note" ? "this note" : o.label}`,
     () => learnStartSession(o.kind === "plan" ? { plan: o.path } : o.kind === "note" ? { note: o.path } : {}));
-  wrap.appendChild(lrHead(eyebrow.join(" · "), r.note ? r.items[0]?.title || lrStem(r.note) : o.kind === "plan" ? o.label : "Suggested practice", "", [again]));
+  wrap.appendChild(lrHead(eyebrow.join(" · "), r.note ? r.items[0]?.title || noteStem(r.note) : o.kind === "plan" ? o.label : "Suggested practice", "", [again]));
   // what was missed first (ADR-0119, suggestion 3), then the way to ask it again
   const missed = lrMissedList(wrap, r);
   if (lrReadAloud && r.established && typeof speak === "function" && !lrSpoken.has(`rc:${r.id}`)) { lrSpoken.add(`rc:${r.id}`); speak(r.established); }
-  if (r.next && !r.note) wrap.appendChild(lrEl("p", "lr-help", `${r.next} ${typeof r.due_left === "number" ? r.due_left + " notes stay due; they can wait." : ""}`));
+  if (r.next && !r.note) wrap.appendChild(mkEl("p", "lr-help", `${r.next} ${typeof r.due_left === "number" ? r.due_left + " notes stay due; they can wait." : ""}`));
   // the next step is the primary: the targeted questions, naming them (ADR-0061 §26)
   if (r.followup && r.followup.questions) {
-    const fu = lrEl("div", "lr-followup");
-    const t = lrEl("div", "t");
-    t.appendChild(lrEl("b", null, `${lrPlural(r.followup.questions, "targeted question")} on the points left open`));
+    const fu = mkEl("div", "lr-followup");
+    const t = mkEl("div", "t");
+    t.appendChild(mkEl("b", null, `${lrPlural(r.followup.questions, "targeted question")} on the points left open`));
     const named = lrNamePoints((r.points || []).filter((p) => (r.followup.points || []).includes(p.i)));
-    t.appendChild(lrEl("span", "lr-help", [named, "they come back in the next session either way"].filter(Boolean).join(" · ")));
+    t.appendChild(mkEl("span", "lr-help", [named, "they come back in the next session either way"].filter(Boolean).join(" · ")));
     fu.append(t, lrBtn("lr-q", "Not now", () => fu.remove()),
       lrBtn("lr-send", `Ask them now · about ${r.followup.minutes} min`, () => learnStartSession({ note: r.note, points: r.followup.points, plan: r.plan || undefined })));
     wrap.appendChild(fu);
@@ -3471,29 +3460,29 @@ function lrRenderReceipt(body) {
     // a session over several notes: the notes missed, asked again now; a
     // miss schedules nothing by itself (_reason_sentence), so "tomorrow" as
     // drawn would have been a promise the schedule does not keep
-    const fu = lrEl("div", "lr-followup");
-    const t = lrEl("div", "t");
-    t.appendChild(lrEl("b", null, `${lrPlural(missed.paths.length, "note")} to ask again`));
-    t.appendChild(lrEl("span", "lr-help", "or they come back in Missed"));
+    const fu = mkEl("div", "lr-followup");
+    const t = mkEl("div", "t");
+    t.appendChild(mkEl("b", null, `${lrPlural(missed.paths.length, "note")} to ask again`));
+    t.appendChild(mkEl("span", "lr-help", "or they come back in Missed"));
     fu.append(t, lrBtn("lr-send", "Ask these again", () => learnStartSession({ scope: missed.paths, n: Math.min(24, missed.n), from: "missed" })));
     wrap.appendChild(fu);
   }
   if (r.revisit?.length) {
-    const sec = lrEl("section", "lr-sec");
-    sec.appendChild(lrEl("h3", null, "What to revisit"));
+    const sec = mkEl("section", "lr-sec");
+    sec.appendChild(mkEl("h3", null, "What to revisit"));
     for (const x of r.revisit) {
-      const d = lrEl("div", "lr-defect");
-      const t = lrEl("div", "t");
-      t.appendChild(lrEl("b", null, lrStem(x.path)));
+      const d = mkEl("div", "lr-defect");
+      const t = mkEl("div", "t");
+      t.appendChild(mkEl("b", null, noteStem(x.path)));
       t.append(` · ${x.say}.` + (x.related?.length ? " Related, not the proven cause: " : ""));
-      x.related?.forEach((rel, i) => { const a = lrBtn("lr-link", lrStem(rel.path), () => openNote(rel.path)); a.title = rel.why; t.appendChild(a); if (i < x.related.length - 1) t.append(", "); });
-      t.appendChild(lrEl("span", "fn", `${x.kind} · said ${x.conf}`));
+      x.related?.forEach((rel, i) => { const a = lrBtn("lr-link", noteStem(rel.path), () => openNote(rel.path)); a.title = rel.why; t.appendChild(a); if (i < x.related.length - 1) t.append(", "); });
+      t.appendChild(mkEl("span", "fn", `${x.kind} · said ${x.conf}`));
       d.appendChild(t);
       if (r.plan) {
         const q = lrBtn("ghost box", "queue for next session");
         q.addEventListener("click", async () => {
           const paths = [x.path, ...(x.related || []).map((rel) => rel.path)];
-          try { await lrPost("/learn/revisit", { plan: r.plan, paths }); q.textContent = "queued"; q.disabled = true; } catch (e) { notify("not queued: " + e.message); }
+          try { await apiPost("/learn/revisit", { plan: r.plan, paths }); q.textContent = "queued"; q.disabled = true; } catch (e) { notify("not queued: " + e.message); }
         });
         d.appendChild(q);
       }
@@ -3502,16 +3491,16 @@ function lrRenderReceipt(body) {
     wrap.appendChild(sec);
   }
   if (r.defects?.length) {
-    const sec = lrEl("section", "lr-sec");
-    const h = lrEl("h3");
-    h.append(lrMark("warn", ""), "Source mismatch ", lrEl("span", "num", String(r.defects.length)));
+    const sec = mkEl("section", "lr-sec");
+    const h = mkEl("h3");
+    h.append(lrMark("warn", ""), "Source mismatch ", mkEl("span", "num", String(r.defects.length)));
     sec.appendChild(h);
     for (const x of r.defects) {
-      const d = lrEl("div", "lr-defect");
-      const t = lrEl("div", "t");
-      t.appendChild(lrEl("b", null, x.title || lrStem(x.path)));
+      const d = mkEl("div", "lr-defect");
+      const t = mkEl("div", "t");
+      t.appendChild(mkEl("b", null, x.title || noteStem(x.path)));
       t.append(` · ${x.note_defect} Not scored.`);
-      t.appendChild(lrEl("span", "fn", x.span?.leaf ? `${x.span.leaf} · line ${x.span.line}` : ""));
+      t.appendChild(mkEl("span", "fn", x.span?.leaf ? `${x.span.leaf} · line ${x.span.line}` : ""));
       d.appendChild(t);
       const f = lrBtn("ghost box", "Flag in chat", () => prefillChat(`/flag ${shellQuote(x.path)} claim vs ${x.span?.leaf || "source"}:${x.span?.line || ""} · ${x.note_defect}`));
       f.title = "prefills a chat turn; nothing is written until you send it";
@@ -3522,28 +3511,28 @@ function lrRenderReceipt(body) {
   }
   const moved = lrNetMoves(r.moved);
   if (moved.length) {
-    const sec = lrEl("section", "lr-sec");
-    sec.appendChild(lrEl("h3", null, "What moved"));
-    const m = lrEl("div", "lr-moved");
+    const sec = mkEl("section", "lr-sec");
+    sec.appendChild(mkEl("h3", null, "What moved"));
+    const m = mkEl("div", "lr-moved");
     let lastPath = null;
     for (const x of moved) {
-      m.appendChild(lrEl("span", "lbl", x.path === lastPath ? "" : lrStem(x.path)));
+      m.appendChild(mkEl("span", "lbl", x.path === lastPath ? "" : noteStem(x.path)));
       lastPath = x.path;
-      m.appendChild(lrEl("span", "lr-help", x.what === "hold" ? "hold, est." : x.what_label ? (LR_OBJ_SHORT[x.what] || x.what) + (x.plan ? ` (${x.plan})` : "") : x.what));
-      const ft = lrEl("span", "n num", `${x.from} → `);
-      ft.appendChild(lrEl("b", null, x.to));
+      m.appendChild(mkEl("span", "lr-help", x.what === "hold" ? "hold, est." : x.what_label ? x.what + (x.plan ? ` (${x.plan})` : "") : x.what));
+      const ft = mkEl("span", "n num", `${x.from} → `);
+      ft.appendChild(mkEl("b", null, x.to));
       m.appendChild(ft);
     }
     sec.appendChild(m);
     wrap.appendChild(sec);
   }
-  const discs = lrEl("div", "lr-discs");
+  const discs = mkEl("div", "lr-discs");
   // the figures and the points' marks, on request (ADR-0061 §25, §27), the first of the receipt's
   // three folds: on its own above them it stood 22 px apart, the receipt's gap (2026-11-01)
   if (t3 || r.points?.length) lrDisc(discs, "The figures", "", (box) => {
     if (t3) {
       const unit = r.points?.length ? "points" : "questions";
-      const figs = lrEl("div", "lr-figs");
+      const figs = mkEl("div", "lr-figs");
       const left = Math.max(0, t3.points - t3.met);
       const sub2 = [t3.missed ? `${t3.missed} missed` : "", t3.skipped ? `${t3.skipped} skipped, not counted as wrong` : ""].filter(Boolean).join(" · ");
       figs.append(lrFig(`${t3.met} of ${t3.points}`, `${unit} met without help`, t3.assisted ? `${t3.assisted} more with help, not counted` : ""),
@@ -3560,50 +3549,50 @@ function lrRenderReceipt(body) {
       for (const p of r.points) {
         if (p.heading !== heading || !grid) {
           heading = p.heading;
-          if (heading) box.appendChild(lrEl("span", "lr-grp", heading));
-          grid = lrEl("div", "lr-pts");
+          if (heading) box.appendChild(mkEl("span", "lr-grp", heading));
+          grid = mkEl("div", "lr-pts");
           box.appendChild(grid);
         }
-        const name = lrEl("span", "p");
+        const name = mkEl("span", "p");
         name.append(lrMark(lrStatusMark(p.status), p.status === "met" ? "met without help" : ""), p.kind);
-        grid.append(name, lrEl("span", "k", LR_OBJ_SHORT[p.objective] || p.objective));
+        grid.append(name, mkEl("span", "k", p.objective));
       }
     }
   });
   lrDisc(discs, "Questions", r.items.length, (inner) => {
-    const t = lrEl("table", "chart tight lr-tbl lr-items");
-    const th = lrEl("thead"); const hr = lrEl("tr");
-    for (const [l, c] of [[r.note ? "point" : "note", null], ["objective", null], ["result", null], ["said", "num"], ["rating", null], ["hold, est.", "num"], ["next due", null]]) hr.appendChild(lrEl("th", c, l));
+    const t = mkEl("table", "chart tight lr-tbl lr-items");
+    const th = mkEl("thead"); const hr = mkEl("tr");
+    for (const [l, c] of [[r.note ? "point" : "note", null], ["objective", null], ["result", null], ["said", "num"], ["rating", null], ["hold, est.", "num"], ["next due", null]]) hr.appendChild(mkEl("th", c, l));
     th.appendChild(hr); t.appendChild(th);
-    const tb = lrEl("tbody");
+    const tb = mkEl("tbody");
     for (const x of r.items) {
-      const tr = lrEl("tr");
-      tr.appendChild(lrEl("th", null, r.note ? (x.point?.i ? `${x.point.i} · ${x.point.kind || ""}` : "relation") : x.title || lrStem(x.path)));
-      tr.appendChild(lrEl("td", null, `${LR_OBJ_SHORT[x.objective] || x.objective_label || ""} · ${x.kind}`));
+      const tr = mkEl("tr");
+      tr.appendChild(mkEl("th", null, r.note ? (x.point?.i ? `${x.point.i} · ${x.point.kind || ""}` : "relation") : x.title || noteStem(x.path)));
+      tr.appendChild(mkEl("td", null, `${LR_OBJ[x.objective] ? x.objective : x.objective_label || ""} · ${x.kind}`));
       const st = x.status || (x.skip ? "not_scored" : x.correct ? "met" : x.correct === false ? "missed" : "open");
       const word = st === "not_scored" ? "not scored" : st === "met" || st === "assisted" ? "met" : st === "missed" ? "not met" : st === "skipped" ? "skipped" : x.answered ? "not rated" : "not answered";
       const marker = x.skip ? "source mismatch" : st === "skipped" ? "not recorded" : x.marker || "";
-      tr.appendChild(lrEl("td", null, marker ? `${word} · ${marker}` : word));
-      tr.appendChild(lrEl("td", "num", x.conf == null ? "—" : String(x.conf)));
-      tr.appendChild(lrEl("td", null, x.rating_name || ""));
-      tr.appendChild(lrEl("td", "num", x.S_after ? `${x.S_before ? Math.round(x.S_before) : "new"} → ${Math.round(x.S_after)} d` : x.S_before ? `${Math.round(x.S_before)} d` : ""));
-      tr.appendChild(lrEl("td", null, x.next_due ? lrDate(x.next_due) : ""));
+      tr.appendChild(mkEl("td", null, marker ? `${word} · ${marker}` : word));
+      tr.appendChild(mkEl("td", "num", x.conf == null ? "—" : String(x.conf)));
+      tr.appendChild(mkEl("td", null, x.rating_name || ""));
+      tr.appendChild(mkEl("td", "num", x.S_after ? `${x.S_before ? Math.round(x.S_before) : "new"} → ${Math.round(x.S_after)} d` : x.S_before ? `${Math.round(x.S_before)} d` : ""));
+      tr.appendChild(mkEl("td", null, x.next_due ? lrDate(x.next_due) : ""));
       tb.appendChild(tr);
     }
     t.appendChild(tb);
-    const sc = lrEl("div", "tscroll");
+    const sc = mkEl("div", "tscroll");
     sc.appendChild(t);
     inner.appendChild(sc);
   });
   lrDisc(discs, "How this is measured", "", (box) => {
     box.appendChild(lrMarkKey());
-    if (r.points?.length) box.appendChild(lrEl("p", null, "A point counts for an objective when its criteria were met without help; an assisted answer stays recorded but does not count. It does not complete the note, and an answer right after feedback does not prove recall at a distance."));
-    if (moved.length) box.appendChild(lrEl("p", null, "What moved comes from the recorded answers only; no model call, no claim about you beyond them."));
-    box.appendChild(lrEl("p", null, "Result: whether the rubric was met, before help or confidence enter. Rating: what the schedule received; a hint or \"just tell me\" caps it at Hard, an answer at 25 caps it at Good. A skipped question writes nothing."));
-    if (r.revisit?.length) box.appendChild(lrEl("p", null, r.plan ? "Queueing writes a revisit line on the plan through the gate; the plan's next session takes those first. Nothing is queued on its own." : "A free session belongs to no plan, so nothing can be queued; a plan's session can."));
+    if (r.points?.length) box.appendChild(mkEl("p", null, "A point counts for an objective when its criteria were met without help; an assisted answer stays recorded but does not count. It does not complete the note, and an answer right after feedback does not prove recall at a distance."));
+    if (moved.length) box.appendChild(mkEl("p", null, "What moved comes from the recorded answers only; no model call, no claim about you beyond them."));
+    box.appendChild(mkEl("p", null, "Result: whether the rubric was met, before help or confidence enter. Rating: what the schedule received; a hint or \"just tell me\" caps it at Hard, an answer at 25 caps it at Good. A skipped question writes nothing."));
+    if (r.revisit?.length) box.appendChild(mkEl("p", null, r.plan ? "Queueing writes a revisit line on the plan through the gate; the plan's next session takes those first. Nothing is queued on its own." : "A free session belongs to no plan, so nothing can be queued; a plan's session can."));
   });
   wrap.appendChild(discs);
-  wrap.appendChild(lrEl("p", "lr-help", r.recorded
+  wrap.appendChild(mkEl("p", "lr-help", r.recorded
     ? `${lrPlural(r.recorded, "answer")} recorded in the ledger.` + lrMeterSay(r.meter) + (r.plan_line ? ` The plan's session line was written under ## Sessions in ${r.plan}; it can be reverted.` : r.plan_error ? ` ${r.plan_error}` : "")
     : "Nothing was recorded."));
   body.appendChild(wrap);
@@ -3737,7 +3726,7 @@ const lrReadOpen = () => lrRead?.data?.cards?.find((c) => c.n === lrRead.view);
 // a visit, and the answer is the reading as it stands.
 async function lrReadReach(r, n) {
   let d;
-  try { d = await lrPost("/learn/reading/card", { plan: r.plan, step: r.step, n }); }
+  try { d = await apiPost("/learn/reading/card", { plan: r.plan, step: r.step, n }); }
   catch (e) { notify("couldn't write this card: " + e.message); return; }
   if (!lrRead || lrReadKey(r) !== lrRead.key || lrRead.view !== n) return;
   const was = lrReadOpen();
@@ -3758,7 +3747,7 @@ function lrCardState(d, c) {
 }
 
 async function lrReadWrite(r) {
-  try { lrRead.data.job = await lrPost("/learn/reading/write", { plan: r.plan, step: r.step }); }
+  try { lrRead.data.job = await apiPost("/learn/reading/write", { plan: r.plan, step: r.step }); }
   catch (e) { notify("couldn't start writing the reading: " + e.message); return; }
   lrRead.view = lrRead.reached = undefined; // a new reading: its first card is reached anew
   lrRender();
@@ -3766,7 +3755,7 @@ async function lrReadWrite(r) {
 
 async function lrReadKeep(r, c, kind, text, unknown) {
   let row;
-  try { row = await lrPost("/learn/reading/answer", { plan: r.plan, step: r.step, section: c.n, kind, text, unknown }); }
+  try { row = await apiPost("/learn/reading/answer", { plan: r.plan, step: r.step, section: c.n, kind, text, unknown }); }
   catch (e) { if (kind === "answer") notify("couldn't keep that: " + e.message); return; }
   const a = lrRead.data.answers || (lrRead.data.answers = {});
   (a[String(c.n)] ||= {})[kind] = row;
@@ -3810,18 +3799,18 @@ function lrRenderRead(body) {
   const back = { label: "Plan", run: () => lrGo({ view: "plan", plan: r.plan }) };
   if (!lrRead || lrRead.key !== key) {
     lrBar({ crumb: ["Reading"], back });
-    body.appendChild(lrEl("p", "lr-help", "Reading the step."));
+    body.appendChild(mkEl("p", "lr-help", "Reading the step."));
     lrFetchRead(r);
     return;
   }
   if (lrRead.error) {
     lrBar({ crumb: ["Reading"], back });
-    body.appendChild(lrEl("p", "lr-help", lrRead.error));
+    body.appendChild(mkEl("p", "lr-help", lrRead.error));
     return;
   }
   const d = lrRead.data;
   lrBar({ crumb: [d.plan_name, d.label], back });
-  const one = lrEl("section", "lr-one lr-read");
+  const one = mkEl("section", "lr-one lr-read");
   body.appendChild(one);
   const done = d.exists ? d.cards.filter((c) => lrCardState(d, c) === "done").length : 0;
   const waiting = d.exists ? d.cards.filter((c) => c.pending).length : 0;
@@ -3836,42 +3825,42 @@ function lrRenderRead(body) {
   one.appendChild(lrHead(`Read · step ${d.step + 1} of ${d.steps}${d.hours ? ` · ${d.hours} h in the syllabus` : ""}`, d.label, meta, [rewrite]));
   const job = d.job;
   if (job && job.state === "running") {
-    const p = lrEl("div", "lr-read-card");
+    const p = mkEl("div", "lr-read-card");
     p.setAttribute("role", "status");
-    p.append(lrEl("p", null, job.total ? `Writing card ${Math.min(job.done + 1, job.total)} of ${job.total}.` : "Putting each note after the notes it needs."),
-      lrEl("p", "lr-help", "One call orders the step and one writes the first card; the others come as you reach them. You can leave and come back."));
+    p.append(mkEl("p", null, job.total ? `Writing card ${Math.min(job.done + 1, job.total)} of ${job.total}.` : "Putting each note after the notes it needs."),
+      mkEl("p", "lr-help", "One call orders the step and one writes the first card; the others come as you reach them. You can leave and come back."));
     one.appendChild(p);
     lrReadPoll(r);
     return;
   }
   if (!d.exists) {
-    const p = lrEl("div", "lr-read-card");
+    const p = mkEl("div", "lr-read-card");
     const n = d.notes.length;
-    p.append(lrEl("p", null, `No reading yet for this step. Its ${lrPlural(n, "note")} become ${lrPlural(n, "card")}, each after the notes it needs. Each card ends on a question toward the next one; answer it, or go on and come back.`));
-    const row = lrEl("div", "lr-read-choice");
+    p.append(mkEl("p", null, `No reading yet for this step. Its ${lrPlural(n, "note")} become ${lrPlural(n, "card")}, each after the notes it needs. Each card ends on a question toward the next one; answer it, or go on and come back.`));
+    const row = mkEl("div", "lr-read-choice");
     row.append(lrBtn("lr-send", "Generate the reading", () => lrReadWrite(r)),
-      lrEl("span", "lr-help", "Silica writes each card when you reach it: a summary of its note, with links to the notes it cites. A link opens the note on the right."));
+      mkEl("span", "lr-help", "Silica writes each card when you reach it: a summary of its note, with links to the notes it cites. A link opens the note on the right."));
     p.appendChild(row);
-    if (job?.state === "error") p.appendChild(lrEl("p", "lr-help", "The last attempt failed: " + job.error));
+    if (job?.state === "error") p.appendChild(mkEl("p", "lr-help", "The last attempt failed: " + job.error));
     one.appendChild(p);
-    one.appendChild(lrEl("p", "lr-read-test", `After you read, ${lrPlural(d.questions, "question")} on these notes, with the reading closed.`));
+    one.appendChild(mkEl("p", "lr-read-test", `After you read, ${lrPlural(d.questions, "question")} on these notes, with the reading closed.`));
     return;
   }
   if (d.stale) {
-    const s = lrEl("div", "lr-read-stale");
-    s.append(lrEl("span", null, "The step's notes changed since this reading was written."), lrBtn("lr-link act", "Rewrite", () => lrReadWrite(r)));
+    const s = mkEl("div", "lr-read-stale");
+    s.append(mkEl("span", null, "The step's notes changed since this reading was written."), lrBtn("lr-link act", "Rewrite", () => lrReadWrite(r)));
     one.appendChild(s);
   }
-  one.appendChild(lrEl("p", "lr-read-test", `After you read, ${lrPlural(d.questions, "question")} on these notes, with the reading closed.`));
+  one.appendChild(mkEl("p", "lr-read-test", `After you read, ${lrPlural(d.questions, "question")} on these notes, with the reading closed.`));
   // a note's Study tools open the reading again on that note, whatever was shown before
   if (r.path && lrRead.forPath !== r.path) { lrRead.forPath = r.path; lrRead.view = undefined; }
   if (lrRead.view === undefined || !d.cards.some((c) => c.n === lrRead.view)) {
-    const want = r.path ? d.cards.find((c) => c.note === lrStem(r.path) || (c.notes || []).includes(lrStem(r.path))) : null;
+    const want = r.path ? d.cards.find((c) => c.note === noteStem(r.path) || (c.notes || []).includes(noteStem(r.path))) : null;
     const open = d.cards.find((c) => lrCardState(d, c) !== "done");
     lrRead.view = (want || open || d.cards[0]).n;
   }
   if (lrRead.reached !== lrRead.view) { lrRead.reached = lrRead.view; lrReadReach(r, lrRead.view); }
-  const grid = lrEl("div", "lr-read-grid");
+  const grid = mkEl("div", "lr-read-grid");
   grid.append(lrReadToc(d), lrReadMain(d, r));
   one.appendChild(grid);
 }
@@ -3879,23 +3868,23 @@ function lrRenderRead(body) {
 const LR_CARD_MARK = { done: "✓", standby: "–" };
 
 function lrReadList(d) {
-  const ol = lrEl("ol", "lr-read-list");
+  const ol = mkEl("ol", "lr-read-list");
   ol.setAttribute("aria-label", d.order === "prerequisites" ? "cards, each after the notes it needs" : "cards, in the lectures' order");
   for (const c of d.cards) {
     const st = lrCardState(d, c);
-    const li = lrEl("li", "lr-read-toc-i" + (c.n === lrRead.view ? " cur" : "") + (st ? " " + st : ""));
+    const li = mkEl("li", "lr-read-toc-i" + (c.n === lrRead.view ? " cur" : "") + (st ? " " + st : ""));
     const b = lrBtn("lr-read-toc-b");
     if (c.n === lrRead.view) b.setAttribute("aria-current", "step");
     b.setAttribute("aria-label", `card ${c.n}, ${c.title}` + (st === "done" ? ", done" : st === "standby" ? ", read, question left" : ""));
-    const txt = lrEl("span", "t");
-    txt.appendChild(lrEl("span", "tt", c.title));
-    if (c.needed_by?.length) txt.appendChild(lrEl("span", "lr-read-moved", `moved up: needed by ${c.needed_by.join(", ")}`));
+    const txt = mkEl("span", "t");
+    txt.appendChild(mkEl("span", "tt", c.title));
+    if (c.needed_by?.length) txt.appendChild(mkEl("span", "lr-read-moved", `moved up: needed by ${c.needed_by.join(", ")}`));
     if (c.pending) {
       li.classList.add("pending");
-      txt.appendChild(c.failure ? lrEl("span", "lr-read-moved", "not written yet")
-        : lrEl("span", "lr-read-wait", c.writing ? "writing" : "written when you reach it"));
+      txt.appendChild(c.failure ? mkEl("span", "lr-read-moved", "not written yet")
+        : mkEl("span", "lr-read-wait", c.writing ? "writing" : "written when you reach it"));
     }
-    b.append(lrEl("span", "dot", LR_CARD_MARK[st] || String(c.n)), txt);
+    b.append(mkEl("span", "dot", LR_CARD_MARK[st] || String(c.n)), txt);
     b.addEventListener("click", () => lrReadShow(c.n));
     li.appendChild(b);
     ol.appendChild(li);
@@ -3906,17 +3895,17 @@ function lrReadList(d) {
 // The list beside the card; folded to one line when the column is narrow
 // (the drawer open, or a phone), which CSS decides on the grid's width.
 function lrReadToc(d) {
-  const box = lrEl("div", "lr-read-toc");
-  const side = lrEl("div", "lr-read-side");
-  side.append(lrEl("div", "lr-read-toc-h", d.order === "prerequisites" ? "Cards · by prerequisite" : "Cards · lecture order"), lrReadList(d));
-  const key = lrEl("div", "lr-read-key");
-  key.append(lrEl("span", "done", "✓ done"), lrEl("span", "standby", "– read, question left"));
+  const box = mkEl("div", "lr-read-toc");
+  const side = mkEl("div", "lr-read-side");
+  side.append(mkEl("div", "lr-read-toc-h", d.order === "prerequisites" ? "Cards · by prerequisite" : "Cards · lecture order"), lrReadList(d));
+  const key = mkEl("div", "lr-read-key");
+  key.append(mkEl("span", "done", "✓ done"), mkEl("span", "standby", "– read, question left"));
   side.appendChild(key);
-  const fold = lrEl("div", "lr-read-fold");
+  const fold = mkEl("div", "lr-read-fold");
   const i = d.cards.findIndex((c) => c.n === lrRead.view);
   const tg = lrBtn("lr-read-fold-b", null, () => { lrRead.listOpen = !lrRead.listOpen; lrRender(); });
   tg.setAttribute("aria-expanded", String(!!lrRead.listOpen));
-  tg.append(lrEl("span", null, `Card ${i + 1} of ${d.cards.length}`), lrEl("span", "lr-help", lrRead.listOpen ? "hide the list" : "show the list"));
+  tg.append(mkEl("span", null, `Card ${i + 1} of ${d.cards.length}`), mkEl("span", "lr-help", lrRead.listOpen ? "hide the list" : "show the list"));
   fold.appendChild(tg);
   if (lrRead.listOpen) fold.appendChild(lrReadList(d));
   box.append(side, fold);
@@ -3926,12 +3915,12 @@ function lrReadToc(d) {
 // A card's text: a paragraph a line, its [[links]] as buttons that open the
 // note in the drawer, a sentence the notes do not hold set apart by its mark.
 function lrReadText(text, d) {
-  const box = lrEl("div", "lr-read-text");
+  const box = mkEl("div", "lr-read-text");
   // a `$$` block over three lines becomes one line, the only form lrMd draws
   const flat = String(text || "").replace(/\$\$\s*\n([\s\S]*?)\n\s*\$\$/g, (_m, tex) => "$$" + tex.split("\n").map((x) => x.trim()).join(" ") + "$$");
   for (const line of flat.split("\n")) {
     if (!line.trim()) continue;
-    const p = lrEl("p", /^\s*\$\$.*\$\$\s*$/.test(line) ? "lr-read-formula" : null);
+    const p = mkEl("p", /^\s*\$\$.*\$\$\s*$/.test(line) ? "lr-read-formula" : null);
     lrReadInline(p, line, d);
     box.appendChild(p);
   }
@@ -3953,12 +3942,12 @@ function lrReadInline(el, line, d) {
 // `==x==` is the answering sentence an ADR-0132 reading marked
 function lrReadSpan(el, text) {
   text.split(/==(.+?)==/).forEach((t, i) => {
-    if (t) el.appendChild(lrMd(lrEl(i % 2 ? "mark" : "span", i % 2 ? "lr-ans" : null), t));
+    if (t) el.appendChild(lrMd(mkEl(i % 2 ? "mark" : "span", i % 2 ? "lr-ans" : null), t));
   });
 }
 
 function lrReadLink(title, shown, d) {
-  const path = d.notes.find((x) => lrStem(x).toLowerCase() === title.toLowerCase()) || title;
+  const path = d.notes.find((x) => noteStem(x).toLowerCase() === title.toLowerCase()) || title;
   const b = lrBtn("lr-link lr-read-cite", shown, () => openNote(path));
   b.title = "open " + title + " on the right";
   return b;
@@ -3966,40 +3955,40 @@ function lrReadLink(title, shown, d) {
 
 // A card still to come: the page waits on it, or says why it could not be written.
 function lrReadWaiting(d, c, i) {
-  const card = lrEl("article", "lr-read-card lr-card-one");
-  const eb = lrEl("div", "lr-read-eb");
-  eb.appendChild(lrEl("span", "eyebrow", `Card ${i + 1} of ${d.cards.length}`));
+  const card = mkEl("article", "lr-read-card lr-card-one");
+  const eb = mkEl("div", "lr-read-eb");
+  eb.appendChild(mkEl("span", "eyebrow", `Card ${i + 1} of ${d.cards.length}`));
   card.appendChild(eb);
   if (c.failure) {
     const kept = d.cards.filter((x) => !x.pending && !x.spine).length;
-    card.appendChild(lrEl("p", null, limitSentence(c.failure)));
+    card.appendChild(mkEl("p", null, limitSentence(c.failure)));
     if (c.failure.detail && c.failure.detail !== c.failure.error) {
-      const more = lrEl("details", "te-detail");
-      more.append(lrEl("summary", null, "detail"), lrEl("pre", null, c.failure.detail));
+      const more = mkEl("details", "te-detail");
+      more.append(mkEl("summary", null, "detail"), mkEl("pre", null, c.failure.detail));
       card.appendChild(more);
     }
-    card.appendChild(lrEl("p", "lr-help", kept
+    card.appendChild(mkEl("p", "lr-help", kept
       ? `${kept === 1 ? "The card already written stays" : `The ${kept} cards already written stay`} here, and this one is written when you come back to it.`
       : "It is written when you come back to it."));
     return card;
   }
   card.setAttribute("role", "status");
-  card.append(lrEl("p", null, "Writing this card."), lrEl("p", "lr-help", "It takes a few seconds. The cards before it stay open."));
+  card.append(mkEl("p", null, "Writing this card."), mkEl("p", "lr-help", "It takes a few seconds. The cards before it stay open."));
   return card;
 }
 
 function lrReadNav(i, last) {
-  const nav = lrEl("div", "lr-read-nav");
+  const nav = mkEl("div", "lr-read-nav");
   const prev = lrBtn("ghost box", "← Previous", () => lrReadGo(-1));
   prev.disabled = i === 0;
   const next = lrBtn("ghost box", "Next →", () => lrReadGo(1));
   next.disabled = i === last;
-  nav.append(prev, next, lrEl("span", "lr-help", "← → on the keyboard. The drawer shows only the notes you click."));
+  nav.append(prev, next, mkEl("span", "lr-help", "← → on the keyboard. The drawer shows only the notes you click."));
   return nav;
 }
 
 function lrReadMain(d, r) {
-  const col = lrEl("div", "lr-read-main");
+  const col = mkEl("div", "lr-read-main");
   const i = d.cards.findIndex((c) => c.n === lrRead.view);
   const c = d.cards[i];
   if (c.pending) {
@@ -4007,28 +3996,28 @@ function lrReadMain(d, r) {
     return col;
   }
   if (!c.question) lrReadSeen(r, d, c);
-  const card = lrEl("article", "lr-read-card lr-card-one");
+  const card = mkEl("article", "lr-read-card lr-card-one");
   const st = lrCardState(d, c);
-  const eb = lrEl("div", "lr-read-eb");
-  eb.appendChild(lrEl("span", "eyebrow", `Card ${i + 1} of ${d.cards.length}` + (c.spine ? " · a lecture's outline" : "")));
-  if (st && !c.spine) eb.appendChild(lrEl("span", "lr-read-chip " + st, st === "done" ? "✓ answered" : "– question left"));
-  card.append(eb, lrEl("h3", null, c.title));
-  const from = lrEl("p", "lr-help");
+  const eb = mkEl("div", "lr-read-eb");
+  eb.appendChild(mkEl("span", "eyebrow", `Card ${i + 1} of ${d.cards.length}` + (c.spine ? " · a lecture's outline" : "")));
+  if (st && !c.spine) eb.appendChild(mkEl("span", "lr-read-chip " + st, st === "done" ? "✓ answered" : "– question left"));
+  card.append(eb, mkEl("h3", null, c.title));
+  const from = mkEl("p", "lr-help");
   const notes = c.notes?.length ? c.notes : [c.note];
   from.append(notes.length > 1 ? "The notes: " : "The note: ");
   notes.forEach((t, k) => { if (k) from.append(", "); from.appendChild(lrReadLink(t, t, d)); });
   card.appendChild(from);
-  if (c.needed_by?.length) card.appendChild(lrEl("p", "lr-help lr-read-mv", `Moved up: needed by ${c.needed_by.join(", ")}.`));
+  if (c.needed_by?.length) card.appendChild(mkEl("p", "lr-help lr-read-mv", `Moved up: needed by ${c.needed_by.join(", ")}.`));
   if (c.text) card.appendChild(lrReadText(c.text, d));
   if (c.spine && c.points?.length) {
-    card.appendChild(lrEl("p", "lr-help", `Its ${lrPlural(c.points.length, "point")}, each opening its note:`));
-    const ol = lrEl("ol", "lr-read-points");
-    for (const t of c.points) { const li = lrEl("li"); li.appendChild(lrReadLink(t, t, d)); ol.appendChild(li); }
+    card.appendChild(mkEl("p", "lr-help", `Its ${lrPlural(c.points.length, "point")}, each opening its note:`));
+    const ol = mkEl("ol", "lr-read-points");
+    for (const t of c.points) { const li = mkEl("li"); li.appendChild(lrReadLink(t, t, d)); ol.appendChild(li); }
     card.appendChild(ol);
   }
   if (c.example) {
-    const ex = lrEl("div", "lr-read-example");
-    ex.append(lrEl("div", "lr-read-label", "Example · worked by Silica, not from the notes"), lrReadText(c.example, d));
+    const ex = mkEl("div", "lr-read-example");
+    ex.append(mkEl("div", "lr-read-label", "Example · worked by Silica, not from the notes"), lrReadText(c.example, d));
     card.appendChild(ex);
   }
   if (c.question) card.appendChild(lrReadQuestion(d, c, r, i === d.cards.length - 1));
@@ -4039,34 +4028,34 @@ function lrReadMain(d, r) {
 
 function lrReadQuestion(d, c, r, last) {
   const a = (d.answers || {})[String(c.n)] || {};
-  const q = lrEl("section", "lr-read-ask");
+  const q = mkEl("section", "lr-read-ask");
   q.setAttribute("aria-label", last ? "question on this card" : "question on the next card");
-  q.appendChild(lrEl("span", "eyebrow", last ? "To finish the card · a question on this note" : "To finish the card · a question toward the next one"));
-  q.appendChild(lrReadInline(lrEl("p", "lr-read-q"), c.question, d));
+  q.appendChild(mkEl("span", "eyebrow", last ? "To finish the card · a question on this note" : "To finish the card · a question toward the next one"));
+  q.appendChild(lrReadInline(mkEl("p", "lr-read-q"), c.question, d));
   if (a.answer) {
-    const box = lrEl("div", "lr-read-reveal");
-    const yours = lrEl("div", "lr-read-yours");
-    yours.append(lrEl("span", "k", "Your answer"), lrEl("span", "v", a.answer.unknown ? "I don't know" : a.answer.text));
+    const box = mkEl("div", "lr-read-reveal");
+    const yours = mkEl("div", "lr-read-yours");
+    yours.append(mkEl("span", "k", "Your answer"), mkEl("span", "v", a.answer.unknown ? "I don't know" : a.answer.text));
     box.appendChild(yours);
     if (c.answer) {
-      const says = lrEl("div", "lr-read-yours lr-read-says");
-      const k = lrEl("span", "k");
+      const says = mkEl("div", "lr-read-yours lr-read-says");
+      const k = mkEl("span", "k");
       k.append(last ? "The note says · " : "The next note says · ", lrReadLink(c.answer_from, c.answer_from, d));
-      const v = lrEl("span", "v");
-      v.appendChild(lrReadInline(lrEl("mark", "lr-ans"), c.answer, d));
+      const v = mkEl("span", "v");
+      v.appendChild(lrReadInline(mkEl("mark", "lr-ans"), c.answer, d));
       says.append(k, v);
       box.appendChild(says);
-      box.appendChild(lrEl("span", "lr-help", "Not graded. Compare, then go on."));
+      box.appendChild(mkEl("span", "lr-help", "Not graded. Compare, then go on."));
     } else {
-      box.appendChild(lrEl("span", "lr-help", "Not graded. The next note had no sentence to set beside it; open it to compare."));
+      box.appendChild(mkEl("span", "lr-help", "Not graded. The next note had no sentence to set beside it; open it to compare."));
     }
     q.appendChild(box);
     return q;
   }
   const id = "lr-ans-" + c.n;
-  const lab = lrEl("label", "lr-help", "Your answer, from what this card said");
+  const lab = mkEl("label", "lr-help", "Your answer, from what this card said");
   lab.htmlFor = id;
-  const ta = lrEl("textarea", "lr-input lr-read-ta");
+  const ta = mkEl("textarea", "lr-input lr-read-ta");
   ta.id = id;
   ta.rows = 3;
   ta.placeholder = "a line or two";
@@ -4074,23 +4063,23 @@ function lrReadQuestion(d, c, r, last) {
   const check = lrBtn("lr-send", "Check my answer", () => lrReadKeep(r, c, "answer", ta.value.trim(), false));
   check.disabled = !ta.value.trim();
   ta.addEventListener("input", () => { lrRead.drafts[c.n] = ta.value; check.disabled = !ta.value.trim(); });
-  const row = lrEl("div", "lr-read-actions");
+  const row = mkEl("div", "lr-read-actions");
   row.append(check, lrBtn("ghost box", "I don't know", () => lrReadKeep(r, c, "answer", "", true)),
-    lrEl("span", "lr-help", "Or go on: the card stays marked as read, question left."));
+    mkEl("span", "lr-help", "Or go on: the card stays marked as read, question left."));
   q.append(lab, ta, row);
   return q;
 }
 
 function lrReadDone(col, d, r) {
-  const card = lrEl("section", "lr-read-card");
+  const card = mkEl("section", "lr-read-card");
   card.setAttribute("aria-label", "after the reading");
-  card.append(lrEl("span", "eyebrow", "After the reading"), lrEl("h3", null, `Now ${lrPlural(d.questions, "question")} on these notes, with the reading closed`),
-    lrEl("p", "lr-help", "The step's notes take turns, and each answer is checked against its note. Over the next days they come back as questions, without reading again."));
-  const row = lrEl("div", "lr-read-actions");
+  card.append(mkEl("span", "eyebrow", "After the reading"), mkEl("h3", null, `Now ${lrPlural(d.questions, "question")} on these notes, with the reading closed`),
+    mkEl("p", "lr-help", "The step's notes take turns, and each answer is checked against its note. Over the next days they come back as questions, without reading again."));
+  const row = mkEl("div", "lr-read-actions");
   const go = lrBtn("lr-send", "Start the practice", () => learnStartSession({ plan: r.plan, step: r.step, from: "reading" }));
   go.disabled = !!lrSession;
   row.append(go, lrBtn("ghost box", "Back to card 1", () => lrReadShow(d.cards[0].n)));
-  if (lrSession) row.appendChild(lrEl("span", "lr-help", "A session is open; end it or resume it first."));
+  if (lrSession) row.appendChild(mkEl("span", "lr-help", "A session is open; end it or resume it first."));
   card.appendChild(row);
   col.appendChild(card);
 }

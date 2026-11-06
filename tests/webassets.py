@@ -39,6 +39,12 @@ def app_js() -> str:
     return _join(APP_JS_PARTS, "app-*.js")
 
 
+def core_js() -> str:
+    """app-core.js, for a block lifted out of a script and run under node: such a
+    block reads core's names as globals, and core touches no DOM while it loads."""
+    return (WEB / "app-core.js").read_text(encoding="utf-8")
+
+
 def app_css() -> str:
     """The cuts of app.css, joined in the order index.html links them."""
     return _join(APP_CSS_PARTS, "app-*.css")

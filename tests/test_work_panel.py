@@ -21,7 +21,7 @@ WEB = Path(__file__).resolve().parents[1] / "silica" / "ui" / "web"
 WORK_JS = WEB / "static" / "work.js"
 INDEX = WEB / "static" / "index.html"
 
-from tests.webassets import app_css, app_js
+from tests.webassets import app_css, app_js, core_js
 
 # The shape is the real one: silica/obs/narration.py writes these records and
 # `read_beats` hands them back verbatim. A thought span WRAPS the llm call that
@@ -71,7 +71,7 @@ def _pure_block() -> str:
     block = m.group(0)
     for banned in ("document.", "window.", "fetch(", "EventSource"):
         assert banned not in block, f"the projection block reaches for {banned}"
-    return block
+    return core_js() + block
 
 
 def _project(tmp_path, beats: list[dict]) -> dict:
@@ -85,6 +85,16 @@ def _project(tmp_path, beats: list[dict]) -> dict:
                          capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout)
+
+
+def test_a_new_core_beat_kind_is_decided_in_the_panel_too():
+    """narration.fold builds a span tree and projectRun builds run rows, so they
+    stay two functions, but both read one vocabulary and only this ties them: a
+    new kind in CORE_KINDS fails here until projectRun takes it or skips it."""
+    from silica.obs.narration import CORE_KINDS
+
+    handled = set(re.findall(r'if \(kind === "(\w+)"\)', _pure_block()))
+    assert handled | {"subagent", "run", "work", "compaction"} == set(CORE_KINDS)
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run work.js")

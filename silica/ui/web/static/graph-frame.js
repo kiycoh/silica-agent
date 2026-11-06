@@ -5357,10 +5357,9 @@ function renderResults(q) {
     .map(p => p[1]);
   selIdx = results.length ? 0 : -1;
 
-  const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
   const sub = n => {
     const cl = areaOf(n);
-    return cl ? '<em>' + esc(cl) + '</em>' : esc(n.path || n.type);
+    return cl ? '<em>' + escHtml(cl) + '</em>' : escHtml(n.path || n.type);
   };
   box.innerHTML =
     '<div id="search-count">' + (results.length || 'no') +
@@ -5368,7 +5367,7 @@ function renderResults(q) {
     results.map((n, i) =>
       '<div class="result-item' + (i === selIdx ? ' sel' : '') +
         '" onclick="chooseResult(' + i + ')">' +
-        '<span class="result-name">' + esc(n.label) + '</span>' +
+        '<span class="result-name">' + escHtml(n.label) + '</span>' +
         '<span class="result-sub">' + sub(n) + '</span>' +
       '</div>').join("");
   box.className = "open";

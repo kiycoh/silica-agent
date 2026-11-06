@@ -9,7 +9,7 @@
 // mail-pure:start
 function mailCount(n, word) {
   const v = Number(n || 0);
-  return `${v.toLocaleString("en-US")} ${word}${v === 1 ? "" : "s"}`;
+  return `${fmtNum(v)} ${word}${v === 1 ? "" : "s"}`;
 }
 
 // "214 threads you took part in, 3,180 in the file; the first 200 would be
@@ -18,11 +18,11 @@ function mailCount(n, word) {
 function mailPlanLine(p) {
   const who = p.takeout ? "you sent in (Gmail's Sent label)" : "you took part in";
   const n = (p.threads || []).length;
-  const writes = p.over_limit ? `the first ${n.toLocaleString("en-US")} would be written`
-    : `${n.toLocaleString("en-US")} would be written`;
+  const writes = p.over_limit ? `the first ${fmtNum(n)} would be written`
+    : `${fmtNum(n)} would be written`;
   return `${mailCount(p.took_part, "thread")} ${who}, `
-    + `${Number(p.in_file || 0).toLocaleString("en-US")} in the file; ${writes}, `
-    + `${Number(p.present || 0).toLocaleString("en-US")} already in the vault`;
+    + `${fmtNum(p.in_file || 0)} in the file; ${writes}, `
+    + `${fmtNum(p.present || 0)} already in the vault`;
 }
 
 // The --all switch, named by what it adds; "" when it would add nothing.
@@ -51,8 +51,7 @@ function mailUndoLine(out) {
 // mail-pure:end
 
 async function mailAct(action, payload) {
-  const r = await fetch(`/connectors/mail/${action}`, { method: "POST",
-    headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload || {}) });
+  const r = await postJson(`/connectors/mail/${action}`, payload);
   let d = {};
   try { d = await r.json(); } catch { /* an empty answer is still an answer */ }
   if (!r.ok || d.ok === false) throw new Error(d.error || d.detail || `HTTP ${r.status}`);
@@ -60,15 +59,15 @@ async function mailAct(action, payload) {
 }
 
 function mailRow(host, label, help) {
-  const row = stEl("div", "st-row");
+  const row = mkEl("div", "st-row");
   row.dataset.search = `mail ${label} ${help || ""}`.toLowerCase();
-  const lab = stEl("div", "st-label");
-  lab.appendChild(stEl("span", "st-name", label));
-  if (help) lab.appendChild(stEl("div", "st-help", help));
+  const lab = mkEl("div", "st-label");
+  lab.appendChild(mkEl("span", "st-name", label));
+  if (help) lab.appendChild(mkEl("div", "st-help", help));
   row.appendChild(lab);
-  const ctl = stEl("div", "st-ctl");
+  const ctl = mkEl("div", "st-ctl");
   row.appendChild(ctl);
-  const note = stEl("div", "st-note");
+  const note = mkEl("div", "st-note");
   row.appendChild(note);
   host.appendChild(row);
   return { row, ctl, note };
@@ -88,7 +87,7 @@ let mailForm = null;
 // write since the import is that write.
 function mailUndoRow(blockEl, last, rerender) {
   const row = mailRow(blockEl, "last import", `${last.file}, ${last.at}`);
-  const undo = stEl("button", "st-btn", `undo ${mailCount(last.written, "note")}`);
+  const undo = mkEl("button", "st-btn", `undo ${mailCount(last.written, "note")}`);
   undo.type = "button";
   undo.addEventListener("click", async () => {
     const ok = await stAsk(`undo the import of ${last.file}?`,
@@ -110,10 +109,10 @@ function mailUndoRow(blockEl, last, rerender) {
 
 window.ST_CONNECTOR_RENDERERS = window.ST_CONNECTOR_RENDERERS || {};
 window.ST_CONNECTOR_RENDERERS.mail = function renderMail(blockEl, status, rerender) {
-  blockEl.appendChild(stEl("div", "st-note-line", status.detail || "Keep chosen mail threads as notes"));
+  blockEl.appendChild(mkEl("div", "st-note-line", status.detail || "Keep chosen mail threads as notes"));
   const file = mailRow(blockEl, "Import a file",
     "an .mbox or .eml you exported: your mail client's export, or Google Takeout");
-  const input = stEl("input");
+  const input = mkEl("input");
   input.type = "file";
   input.accept = ".mbox,.eml";
   // The server's list, which the composer's picker leaves out (a chat drop
@@ -122,7 +121,7 @@ window.ST_CONNECTOR_RENDERERS.mail = function renderMail(blockEl, status, rerend
     .then((d) => { if (d.mail && d.mail.length) input.accept = d.mail.join(","); })
     .catch(() => { /* the literal stays: the same two types */ });
   input.hidden = true;
-  const pick = stEl("button", "st-btn", "Import a file");
+  const pick = mkEl("button", "st-btn", "Import a file");
   pick.type = "button";
   pick.addEventListener("click", () => input.click());
   file.ctl.append(input, pick);
@@ -130,13 +129,13 @@ window.ST_CONNECTOR_RENDERERS.mail = function renderMail(blockEl, status, rerend
   if (status.imported) file.note.textContent += `${status.account ? " · " : ""}${mailCount(status.imported, "thread")} imported`;
   if (status.last) mailUndoRow(blockEl, status.last, rerender);
 
-  const dry = stEl("div", "st-mail-dry");
+  const dry = mkEl("div", "st-mail-dry");
   blockEl.appendChild(dry);
   // The fields are built once per file and only the result under them is
   // redrawn: a dry run that rebuilt the whole block on the address field's
   // blur took away the checkbox the same click was landing on (2026-10-12).
-  const fields = stEl("div");
-  const result = stEl("div");
+  const fields = mkEl("div");
+  const result = mkEl("div");
   dry.append(fields, result);
   let form = mailForm || {};
   let controls = null;
@@ -149,13 +148,13 @@ window.ST_CONNECTOR_RENDERERS.mail = function renderMail(blockEl, status, rerend
       const row = mailRow(fields, "your address", "the threads kept are the ones a message of yours is in");
       // type=text, not email: app-settings.css styles text fields, and a
       // comma-separated list is not one address for the browser to check.
-      const box = stEl("input");
+      const box = mkEl("input");
       box.type = "text";
       box.value = (p.me || []).join(", ");
       box.setAttribute("aria-label", "your mail addresses, comma-separated");
       // Confirm sends the field as it stands: a guess the user agrees with is
       // never edited, so the field's change event alone could not say yes.
-      const confirm = stEl("button", "st-btn", "confirm");
+      const confirm = mkEl("button", "st-btn", "confirm");
       confirm.type = "button";
       const take = () => { form.me = box.value.trim(); plan(); };
       box.addEventListener("change", take);
@@ -165,7 +164,7 @@ window.ST_CONNECTOR_RENDERERS.mail = function renderMail(blockEl, status, rerend
       me = { row, box, confirm };
     } else {
       const lab = mailRow(fields, "label", "Takeout: keep the threads under one Gmail label");
-      const box = stEl("input");
+      const box = mkEl("input");
       box.type = "text";
       box.placeholder = "any label";
       box.value = form.label || "";
@@ -175,7 +174,7 @@ window.ST_CONNECTOR_RENDERERS.mail = function renderMail(blockEl, status, rerend
     }
     const all = mailRow(fields, "include", "every thread in the file");
     const allHelp = all.row.querySelector(".st-help");
-    const tick = stEl("input");
+    const tick = mkEl("input");
     tick.type = "checkbox";
     tick.checked = Boolean(form.all);
     tick.addEventListener("change", () => { form.all = tick.checked; plan(); });
@@ -198,22 +197,22 @@ window.ST_CONNECTOR_RENDERERS.mail = function renderMail(blockEl, status, rerend
 
   function drawResult(p) {
     result.replaceChildren();
-    result.appendChild(stEl("div", "st-note-line", mailPlanLine(p)));
+    result.appendChild(mkEl("div", "st-note-line", mailPlanLine(p)));
     // st-note-line for the type and colour the panel's own lines use; layout
     // only inline: a 200-thread list scrolls inside the row instead of pushing
     // Import a screen away, and a subject wraps anywhere, so one with no space
     // in it (a stranger's) cannot scroll the list sideways (2026-10-12).
-    const list = stEl("ul", "st-note-line st-mail-threads");
+    const list = mkEl("ul", "st-note-line st-mail-threads");
     list.style.cssText = "max-height:14rem;overflow:hidden auto;margin:0;padding:0 0 .6rem 1.2rem";
     for (const t of p.threads) {
-      const li = stEl("li", "", `${t.date || "undated"}  ${t.subject || "no subject"} · ${mailCount(t.messages, "message")}`);
+      const li = mkEl("li", "", `${t.date || "undated"}  ${t.subject || "no subject"} · ${mailCount(t.messages, "message")}`);
       li.style.overflowWrap = "anywhere";
       li.title = t.path;
       list.appendChild(li);
     }
     result.appendChild(list);
     const go = mailRow(result, "Import", "writes them under sources/mail in one run, which undo takes back");
-    const btn = stEl("button", "st-btn", `Import ${mailCount(p.threads.length, "thread")}`);
+    const btn = mkEl("button", "st-btn", `Import ${mailCount(p.threads.length, "thread")}`);
     btn.type = "button";
     const blocked = mailImportBlock(p);
     btn.disabled = Boolean(blocked);
