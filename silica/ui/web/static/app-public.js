@@ -305,16 +305,20 @@ function drawPubCover() {
     [...d.keys()].sort((a, b) => d[a] - d[b]).forEach((i, k) => { pubCoverRank[i] = k / N.length; });
   }
   if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  // cover-ink:start The press this cover shares with pages.js, which ships alone to the public
+  // host and cannot load a file of the app's: tests/test_design_copies.py holds the two to one text.
   const X = (i) => Math.round(pad + N[i][0] * (w - 2 * pad)), Y = (i) => Math.round(pad + N[i][1] * (h - 2 * pad));
+  const rad = (i) => (N[i][3] >= 12 ? 2 : 1);
   const x = cv.getContext("2d"), img = x.createImageData(w, h), px = new Uint32Array(img.data.buffer);
-  const ground = pubU32(pubRgb(pubCss("--void"))), ink = pubU32(pubRgb(pubCss("--frost")));
-  px.fill(ground);
   const put = (a, b, c) => { if (a >= 0 && b >= 0 && a < w && b < h) px[b * w + a] = c; };
   const seg = (x0, y0, x1, y1, c) => {
     const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
     for (let k = 0; k <= n; k++) put(Math.round(x0 + (x1 - x0) * k / n), Math.round(y0 + (y1 - y0) * k / n), c);
   };
   const disc = (cx, cy, rr, c) => { for (let a = -rr; a <= rr; a++) for (let b = -rr; b <= rr; b++) if (a * a + b * b <= rr * rr + rr) put(cx + a, cy + b, c); };
+  // cover-ink:end
+  const ground = pubU32(pubRgb(pubCss("--void"))), ink = pubU32(pubRgb(pubCss("--frost")));
+  px.fill(ground);
   // a note lands at at(i) and its links grow from the note that landed first
   const K = pubCoverK, rk = pubCoverRank, at = (i) => rk[i] * 0.55;
   for (const [a0, b0] of E) {
@@ -325,13 +329,12 @@ function drawPubCover() {
   // a clear ring of the well first, so a note reads as a mark and not as a crossing
   for (let i = 0; i < N.length; i++) {
     if (K < at(i)) continue;
-    const rr = N[i][3] >= 12 ? 2 : 1;
-    disc(X(i), Y(i), rr + 1, ground); disc(X(i), Y(i), rr, ink);
+    disc(X(i), Y(i), rad(i) + 1, ground); disc(X(i), Y(i), rad(i), ink);
   }
   if (pubCoverHover >= 0 && K >= 1) {
     // the pointed note rings in ink: the print keeps its two inks (DESIGN.md, the Two Inks
     // Rule), where it once lit the note and its links in teal
-    const i = pubCoverHover, r0 = N[i][3] >= 12 ? 2 : 1;
+    const i = pubCoverHover, r0 = rad(i);
     disc(X(i), Y(i), r0 + 4, ground); disc(X(i), Y(i), r0 + 3, ink);
     disc(X(i), Y(i), r0 + 1, ground); disc(X(i), Y(i), r0, ink);
   }

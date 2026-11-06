@@ -54,6 +54,8 @@
   // pages-pure:end
 
   // ---- paper or graphite: the reader's system decides until they choose -------------------
+  // A key of its own and not the landing's: wikis.silica-agent.dev and silica-agent.dev are two
+  // origins, so one key would share nothing, and the app's choice is SILICA_THEME on the server.
   const THEME = "silica-pages-theme";
   try { const t = localStorage.getItem(THEME); if (t === "light" || t === "dark") root.dataset.theme = t; } catch { /* storage off: the system decides */ }
   for (const b of $$("[data-theme-btn]")) {
@@ -74,15 +76,21 @@
     if (w < 40 || h < 40 || !G) return;
     if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
     const N = G.n, E = G.e, pad = 14;
+    // cover-ink:start One text with app-public.js's, held by tests/test_design_copies.py
     const X = (i) => Math.round(pad + N[i][0] * (w - 2 * pad)), Y = (i) => Math.round(pad + N[i][1] * (h - 2 * pad));
+    const rad = (i) => (N[i][3] >= 12 ? 2 : 1);
     const x = cv.getContext("2d"), img = x.createImageData(w, h), px = new Uint32Array(img.data.buffer);
+    const put = (a, b, c) => { if (a >= 0 && b >= 0 && a < w && b < h) px[b * w + a] = c; };
+    const seg = (x0, y0, x1, y1, c) => {
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+      for (let k = 0; k <= n; k++) put(Math.round(x0 + (x1 - x0) * k / n), Math.round(y0 + (y1 - y0) * k / n), c);
+    };
+    const disc = (cx, cy, rr, c) => { for (let a = -rr; a <= rr; a++) for (let b = -rr; b <= rr; b++) if (a * a + b * b <= rr * rr + rr) put(cx + a, cy + b, c); };
+    // cover-ink:end
     const ground = u32(rgb(css("--void"))), ink = u32(rgb(css("--frost")));
     px.fill(ground);
-    const put = (a, b, c) => { if (a >= 0 && b >= 0 && a < w && b < h) px[b * w + a] = c; };
-    const seg = (x0, y0, x1, y1, c) => { const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1); for (let k = 0; k <= n; k++) put(Math.round(x0 + (x1 - x0) * k / n), Math.round(y0 + (y1 - y0) * k / n), c); };
-    const disc = (cx, cy, rr, c) => { for (let a = -rr; a <= rr; a++) for (let b = -rr; b <= rr; b++) if (a * a + b * b <= rr * rr + rr) put(cx + a, cy + b, c); };
     for (const [a, b] of E) seg(X(a), Y(a), X(b), Y(b), ink);
-    for (let i = 0; i < N.length; i++) { const rr = N[i][3] >= 12 ? 2 : 1; disc(X(i), Y(i), rr + 1, ground); disc(X(i), Y(i), rr, ink); }
+    for (let i = 0; i < N.length; i++) { disc(X(i), Y(i), rad(i) + 1, ground); disc(X(i), Y(i), rad(i), ink); }
     x.putImageData(img, 0, 0);
   }
 
