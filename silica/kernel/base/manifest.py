@@ -170,7 +170,7 @@ def within(rel_path: str, root: str) -> bool:
     """
     if not root:
         return True
-    prefix = root.strip("/").lower()
+    prefix = root.replace("\\", "/").strip("/").lower()
     p = (rel_path or "").replace("\\", "/").strip("/").lower()
     return p == prefix or p.startswith(prefix + "/")
 

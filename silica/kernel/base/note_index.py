@@ -57,10 +57,8 @@ def note_meta(text: str, mtime: float) -> tuple[float, bool, str, dict]:
     winner = WIKILINK_TARGET_RE.search(str(data.get("superseded_by") or ""))
     if winner:
         extra["winner"] = winner.group(1).strip()
-    aliases = data.get("aliases")
-    aliases = [aliases] if isinstance(aliases, str) else aliases
-    if isinstance(aliases, list) and aliases:
-        extra["aliases"] = [str(a).strip() for a in aliases if str(a).strip()]
+    if aliases := frontmatter.aliases_in(data):
+        extra["aliases"] = aliases
     if is_spine(data):
         extra["spine"] = True
     return ts, bool(data.get("AI")), note_kind(data), extra

@@ -2703,9 +2703,9 @@ def _prior_conversions() -> dict[str, dict]:
     done = active_done_dir()
     if done:
         _scan([r.path for r in DRIVER.list_files(done)], "done")
-    from silica.tools.atomic import _natural_key
+    from silica.kernel.recall.listing import natural_key
     for entry in out.values():
-        entry["inbox"].sort(key=_natural_key)  # segment order is ingest order
+        entry["inbox"].sort(key=natural_key)  # segment order is ingest order
     return out
 
 
@@ -3437,7 +3437,7 @@ def _nucleate_expand_folders(
     from pathlib import Path
 
     from silica.sources.registry import adapter_for, expand_folder, folder_rel
-    from silica.tools.atomic import notes_under
+    from silica.kernel.recall.listing import notes_under
 
     # A folder argument is the common way to say "this subsystem": expand it
     # to the source files under it, then dispatch each exactly like a file.

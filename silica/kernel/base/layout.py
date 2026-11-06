@@ -20,6 +20,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 
 from silica.config import CONFIG
+from silica.kernel.base.manifest import within
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +32,13 @@ def in_folder(path: str, folder: str | None) -> bool:
 
     Single source of truth for folder-scoping: index reconciliation
     (embed/cooccur build_index), the /embed, /cooccur, /dedup tools, the
-    graph-report signals, and the cooccur/relatedness scope filters. The `.md`
-    strip is a no-op on keyspaces that are already suffix-free (store_key).
+    graph-report signals, and the cooccur/relatedness scope filters.
+
+    `manifest.within` with one difference: `path` may be a note, so its `.md`
+    comes off and `a.md` sits in folder `a`, as its store key already says. A
+    write boundary asks `within`, where `a.md` is not `a/`.
     """
-    if not folder:
-        return True
-    f = folder.replace("\\", "/").strip("/").lower()
-    p = path.replace("\\", "/").strip("/").lower().removesuffix(".md")
-    return p == f or p.startswith(f + "/")
+    return within(path[:-3] if path.lower().endswith(".md") else path, folder or "")
 
 
 def vault_epoch(vault: str | None = None) -> str:
@@ -410,8 +410,6 @@ def is_staging_path(path: str) -> bool:
     calling them orphaned reports Silica's bookkeeping as vault damage. One
     predicate for the report's orphans and the orphan pass's candidates and
     targets (owner ruling 2026-09-27: the pass leaves inbox and done/ alone).
-    `kernel/graph_diff._is_staging` is an older, looser copy (any `done/`
-    segment) kept for the regression gate.
     """
     from silica.kernel.base.manifest import active_done_dir, in_write_dir
 
@@ -424,6 +422,22 @@ def is_staging_path(path: str) -> bool:
         return True  # the run journal, same reason
     done = active_done_dir().casefold()
     return bool(done) and p.casefold().startswith(done + "/")
+
+
+def is_gate_staging(path: str) -> bool:
+    """`is_staging_path` as the graph regression gate reads it: any `done/`
+    segment at any depth, and no run journal. Looser on purpose and kept apart:
+    the gate compares two snapshots, a copy archived under a subfolder must drop
+    out of both, and tightening it changes which runs roll back. Recon already
+    refuses these as collision targets; the gate owes them the same blindness.
+    """
+    p = path.replace("\\", "/").lower()
+    if p.startswith("done/") or "/done/" in p:
+        return True
+    try:
+        return is_inbox_path(path)
+    except Exception:  # config not resolvable: the bare folder name is the honest guess
+        return p.startswith("inbox/") or "/inbox/" in p
 
 
 def resolve_target_dir(target_dir: str) -> str:

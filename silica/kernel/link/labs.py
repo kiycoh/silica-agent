@@ -141,7 +141,7 @@ def folder_titles(folder: str, exclude: str = "") -> list[str]:
     (2026-10-23)."""
     from silica.kernel.outline import _hidden_note
     from silica.kernel.base.layout import is_source_leaf
-    from silica.tools.atomic import notes_under
+    from silica.kernel.recall.listing import notes_under
 
     return [Path(p).stem for p in notes_under(folder)
             if p != exclude and not is_source_leaf(p) and not _hidden_note(p)]

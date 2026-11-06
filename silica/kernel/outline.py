@@ -723,7 +723,7 @@ def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozens
     the textbook wrote "LSTM" beside it (2026-10-23).
     """
     from silica.driver import DRIVER
-    from silica.tools.atomic import notes_under
+    from silica.kernel.recall.listing import notes_under
 
     rows: list[dict] = []
     for rel in notes_under(target_dir):

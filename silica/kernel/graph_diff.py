@@ -3,6 +3,7 @@
 
 import logging
 from silica.driver.base import GraphSnapshot, NoteRef
+from silica.kernel.base.layout import is_gate_staging
 from silica.kernel.base.notekey import gate_key
 
 logger = logging.getLogger(__name__)
@@ -12,22 +13,6 @@ def normalize_ref(ref: NoteRef) -> str:
 
 def normalize_link(source_ref: NoteRef, target: str) -> tuple[str, str]:
     return (normalize_ref(source_ref), gate_key(target))
-
-def _is_staging(path: str) -> bool:
-    """True for pipeline bookkeeping notes: inbox sources and done/ archives.
-
-    Recon already refuses them as collision targets ("Inbox notes are
-    staging"); the regression gate owes them the same blindness.
-    """
-    p = path.replace("\\", "/").lower()
-    if p.startswith("done/") or "/done/" in p:
-        return True
-    try:
-        from silica.kernel.base.layout import is_inbox_path  # lazy: CONFIG-backed
-        return is_inbox_path(path)
-    except Exception:
-        return p.startswith("inbox/") or "/inbox/" in p
-
 
 def check_graph_regression(
     pre: GraphSnapshot,
@@ -166,10 +151,10 @@ def check_graph_regression(
     # Filtering only pre would instead let inbox counts on the post side mask
     # a real loss on a same-stem vault note.
     pre_lower = fold({k: v for k, v in pre.backlink_counts.items()
-                      if not _is_staging(k)})
+                      if not is_gate_staging(k)})
     post_lower = {stem: total for stem, (_, total) in
                   fold({k: v for k, v in post.backlink_counts.items()
-                        if not _is_staging(k)}).items()}
+                        if not is_gate_staging(k)}).items()}
     shared_keys = set(pre_lower.keys()) & set(post_lower.keys())
     
     for norm_name in sorted(shared_keys):

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 
+from silica.kernel.base.notekey import store_key
 from silica.kernel.base.noteshape import LEGACY_MOC_PREFIX, MOC_PREFIX
 
 
@@ -80,7 +81,7 @@ def moc_line(path: str, desc: str = "") -> str:
     """
     from silica.driver import DRIVER
 
-    stem = (path or "").replace("\\", "/").removesuffix(".md")
+    stem = store_key(path)
     name = stem.rsplit("/", 1)[-1]
     try:
         shared = len(DRIVER.notes_named(name)) > 1

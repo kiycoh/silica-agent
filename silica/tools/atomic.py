@@ -23,6 +23,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
+from silica.kernel.recall.listing import natural_key, notes_under, vault_rel
 from silica.tools import tool
 
 
@@ -1152,54 +1153,6 @@ def silica_unresolved() -> list:
 # List files
 # ---------------------------------------------------------------------------
 
-def _natural_key(path: str) -> list:
-    """Sort key that reads embedded runs of digits as numbers.
-
-    Plain lexicographic order interleaves "Lezione 10" between 1 and 2, and the
-    injector ingests a folder in listing order: lesson 10's concepts would land
-    before lesson 2 defines them. re.split alternates non-digit/digit, so the
-    element at a given index always has the same type across paths.
-    """
-    import re
-
-    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", path)]
-
-
-def notes_under(folder: str) -> list[str]:
-    """Vault-relative `.md` paths under `folder`, natural-sorted. "" ⇒ the vault.
-
-    The one answer to "which notes does this folder hold?", because neither
-    half of the codebase could give it for an inbox folder: the note index used
-    to skip the inbox entirely, and `sources.registry.expand_folder` answers
-    only for the code lane off a git-backed census — a plain Obsidian vault is
-    no repo, so it returns [] for every folder in it. Between the two a folder
-    argument had no listing at all, and the only caller left to produce one was
-    an LLM guessing filenames.
-
-    The index now walks the inbox, so `list_files` alone answers. The
-    `list_inbox_files` fallback below stays as belt-and-braces: its failure mode
-    was a model inventing filenames, which is not a failure worth re-earning to
-    save four lines.
-    """
-    from silica.kernel.base.layout import in_folder
-    from silica.kernel.base.manifest import active_inbox_dir
-
-    scope = _vault_rel(folder)
-    # list_files(folder) pre-filters loosely (startswith); in_folder tightens it
-    # so a Foo/ argument never leaks into a sibling FooBar/.
-    paths = [r.path for r in DRIVER.list_files(scope) if in_folder(r.path, scope)]
-    if not paths and scope:
-        inbox = active_inbox_dir()
-        if inbox and in_folder(scope, inbox):
-            # .md only: the unconverted files (PDFs) are silica_inbox_ls's job,
-            # and a converted folder's Images/ leaves outnumber its notes 70:1.
-            paths = [
-                r.path for r in DRIVER.list_inbox_files()
-                if r.path.endswith(".md") and in_folder(r.path, scope)
-            ]
-    return sorted(paths, key=_natural_key)
-
-
 def _unconverted_under(folder: str) -> list[str]:
     """Non-markdown files under `folder`, natural-sorted; `Images/` excluded.
 
@@ -1216,7 +1169,7 @@ def _unconverted_under(folder: str) -> list[str]:
     from silica.kernel.base.layout import in_folder
     from silica.kernel.base.manifest import active_inbox_dir
 
-    scope = _vault_rel(folder)
+    scope = vault_rel(folder)
     if not scope:
         return []
     inbox = active_inbox_dir()
@@ -1231,7 +1184,7 @@ def _unconverted_under(folder: str) -> list[str]:
             and in_folder(p, scope)
             and "/Images/" not in p
         ),
-        key=_natural_key,
+        key=natural_key,
     )
 
 
@@ -1267,24 +1220,6 @@ def _vault_files_under(scope: str) -> list[str]:
     return out
 
 
-def _vault_rel(path: str) -> str:
-    """`path` as a vault-relative posix path; already-relative input passes through.
-
-    Users do paste absolute vault paths at /nucleate, and every listing below is
-    keyed vault-relative. A path outside the vault is returned as given: it
-    matches nothing, which is the honest answer for it.
-    """
-    from silica.config import CONFIG
-
-    p = Path(path.strip())
-    if p.is_absolute():
-        try:
-            return p.resolve().relative_to(Path(CONFIG.vault_path).resolve()).as_posix()
-        except (ValueError, OSError):
-            pass
-    return path.replace("\\", "/").strip("/")
-
-
 def _prop_selector(prop: str) -> tuple[str, str] | None:
     """`"key: value"` as a casefolded (key, value) pair; None when either is missing."""
     key, sep, value = prop.partition(":")
@@ -1307,7 +1242,7 @@ def _with_prop(files: list[str], key: str, value: str, folder: str) -> list[str]
     from silica.kernel.base.manifest import SAFE_WRITE_DIR
 
     skip_copies = (active_write_dir() == SAFE_WRITE_DIR
-                   and not within(_vault_rel(folder), SAFE_WRITE_DIR))
+                   and not within(vault_rel(folder), SAFE_WRITE_DIR))
     out: list[str] = []
     for f in files:
         if skip_copies and within(f, SAFE_WRITE_DIR):
@@ -1384,7 +1319,7 @@ def silica_files(
     raw_of = _raws_of(pending)
     if raw_of:
         pending = [p for p in pending if p not in raw_of]
-        result["raws"] = [{"path": r, "source": raw_of[r]} for r in sorted(raw_of, key=_natural_key)][:_FILES_CAP]
+        result["raws"] = [{"path": r, "source": raw_of[r]} for r in sorted(raw_of, key=natural_key)][:_FILES_CAP]
     if pending:
         result["unconverted"] = pending[:_FILES_CAP]
         result["unconverted_total"] = len(pending)

@@ -41,7 +41,7 @@ def test_source_leaf_matches_the_write_dir_copy(monkeypatch):
     lectures outranked the notes distilled from them."""
     monkeypatch.setattr(layout, "is_source_leaf", layout.is_source_leaf)  # unwrapped
     from silica.kernel.base import manifest as vm
-    monkeypatch.setattr(vm, "in_write_dir", lambda rel: f"silica/{rel}")
+    monkeypatch.setattr(vm, "in_write_dir", lambda rel, write_dir=None: f"silica/{rel}")
     assert layout.is_source_leaf("sources/Lezione 1.md")        # legacy root
     assert layout.is_source_leaf("silica/sources/Lezione 1.md")  # composed
     assert not layout.is_source_leaf("silica/Informatica/Kernel trick.md")
@@ -50,7 +50,7 @@ def test_source_leaf_matches_the_write_dir_copy(monkeypatch):
 def test_source_leaf_survives_an_unresolvable_manifest(monkeypatch):
     from silica.kernel.base import manifest as vm
 
-    def boom(rel):
+    def boom(rel, write_dir=None):
         raise RuntimeError("no config")
 
     monkeypatch.setattr(vm, "in_write_dir", boom)

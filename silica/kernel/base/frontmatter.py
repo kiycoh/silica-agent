@@ -116,6 +116,11 @@ def aliases_of(content):
         data = yaml.safe_load(m.group(1)) or {}
     except Exception:
         return []
+    return aliases_in(data)
+
+
+def aliases_in(data):
+    """`aliases_of` for a frontmatter already parsed."""
     if not isinstance(data, dict):
         return []
     raw = data.get('aliases') or data.get('alias')
