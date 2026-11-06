@@ -59,6 +59,7 @@ from silica.agent.constraints import AgentConstraints
 from silica.obs.events import LLMStreamEvent, ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
 from silica.model.llm import call_llm
 from silica.agent.loop import run_agent
+from silica.agent.sentinels import is_sentinel
 from silica.config import CONFIG
 from silica.kernel.write.templates import slugify
 from silica.tools import tool
@@ -717,7 +718,7 @@ def web_research(
         ),
     )
 
-    if not body or body.startswith("(silica:"):
+    if not body or is_sentinel(body):
         raise ValueError(
             f"web-research produced no findings for {concept!r} "
             "(loop hit its limit, was cancelled, or all searches failed)."
@@ -809,7 +810,7 @@ class WebTurn:
         """
         global _LAST_WEB_TURN
 
-        if not answer or answer.startswith("(silica:"):
+        if not answer or is_sentinel(answer):
             return answer  # cancelled or capped: nothing to cite, nothing to keep
         raw = list(self._trace.values())
         answer, sources, audit = _bind_citations(answer, _collect_sources(raw), _BANK)

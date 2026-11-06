@@ -55,6 +55,8 @@ from silica.agent.compaction import (
 from silica.model.limits import ROUGH_CHARS_PER_TOKEN, TEXT_CHARS_PER_TOKEN
 from silica.agent import read_scope
 from silica.agent.relevance import compact_by_relevance
+from silica.agent.sentinels import CANCELLED, MAX_ITERATIONS, is_sentinel
+from silica.agent.sentinels import EMPTY_COMPLETION as _EMPTY_COMPLETION
 from silica.tools import user_memory as memory_gate
 from silica.config import CONFIG
 from silica.model.concurrency import worker_slot
@@ -107,6 +109,10 @@ ToolProgressCallback = Callable[[RenderEvent], None] | None
 # a budget line on every iteration is noise the model learns to skip, and the
 # number only changes the right move once finishing IS the right move.
 BUDGET_NOTICE_AT = 2
+# Iterations of a turn no constraint capped: the hard safety net, lowered from 50.
+# The lanes that hold a turn tighter name their own beside their reasons
+# (constraints, connectors.mcp_tools, profiles, ANNEAL_STEER_ITERATIONS).
+DEFAULT_MAX_ITERATIONS = 20
 # Prompt tokens one turn may spend across its LLM calls before it lands with
 # the tool-less final turn. The iteration cap alone let a factual question
 # spend 300k tokens re-reading one lecture (12 of 26 live runs, 2026-09-22);
@@ -149,12 +155,6 @@ def _fit_shrink(name: str, arguments: str, body: str) -> str | None:
         # the stub the caller falls back to is what the fit wrote before.
         logger.warning("fit narrowing failed for %s (%s): stubbed", args["name"], exc)
         return None
-
-# What a turn that produced neither text nor a tool call returns. A sentinel and
-# not "": every caller gates its output on the returned string being truthy, so
-# an empty return renders as silence and the user cannot tell a broken provider
-# call from a turn that never ran.
-_EMPTY_COMPLETION = "(silica: the model returned an empty response)"
 
 _FINAL_TURN_INSTRUCTION = (
     "The tool phase of this turn is over and no tools are available now. "
@@ -421,8 +421,8 @@ def run_agent(
     max_iterations = (
         constraints.max_iterations
         if (constraints is not None and constraints.max_iterations is not None)
-        else 20
-    )  # Hard safety cap lowered from 50
+        else DEFAULT_MAX_ITERATIONS
+    )
 
     # Track consecutive failures for the same (tool_name, args) pair
     # Key: (tool_name, args_json_string)
@@ -503,10 +503,23 @@ def run_agent(
             catch=BaseException, abandon=_abandon,
             stop=cancel_token if cancel_token is not None else threading.Event(), on_stop=_Stopped)
 
+    def _reask_without_reasoning(reply, kwargs: dict):
+        """`reply`, or when the answer went into the reasoning and the reply came
+        back empty, the same call once more with reasoning off, the knob V4
+        honours (llm.py). Seen on hosted t06's landing (2026-10-22), 2.8k chars
+        of answer there under "maximum iterations", and in a chapter rework
+        probe's last step at 64k the same night. A tool call counts only where
+        tools were on offer: the landing turn has none to run."""
+        if ((reply.tool_calls and kwargs.get("tools")) or (reply.text or "").strip()
+                or not (reply.reasoning or "").strip()):
+            return reply
+        _abandon.clear()
+        return _interruptible_llm({**kwargs, "reasoning": False})
+
     while iteration < max_iterations:
         if cancel_token is not None and cancel_token.is_set():
             logger.info("Agent loop cancelled at iteration %d", iteration)
-            return "(silica: cancelled)"
+            return CANCELLED
         iteration += 1
         logger.debug("Agent loop iteration %d", iteration)
 
@@ -564,7 +577,7 @@ def run_agent(
         except _Stopped:
             logger.info("Agent loop stopped during the model call at iteration %d", iteration)
             _narr_mod.NARRATOR.thought_close("")   # the thought this call opened ends here
-            return "(silica: cancelled)"
+            return CANCELLED
         except BaseException:
             # A call that raises never reaches thought_close below, and a thought
             # left open reads as a run still going to every projection of the
@@ -575,20 +588,14 @@ def run_agent(
         finally:
             _emit(ThinkingEndEvent(iteration=iteration))
         thought = resp.reasoning or ""
-        if not resp.tool_calls and not (resp.text or "").strip() and thought.strip():
-            # The answer went into the reasoning and the reply came back empty,
-            # as on hosted t06's landing (2026-10-22, below) and in a chapter
-            # rework probe's last step at 64k the same night. Asked once more
-            # with reasoning off, the knob V4 honours (llm.py); a failure keeps
-            # the empty reply, which the caller names.
-            try:
-                _abandon.clear()
-                resp = _interruptible_llm({**_llm_kwargs, "reasoning": False})
-            except _Stopped:
-                _narr_mod.NARRATOR.thought_close(thought)
-                return "(silica: cancelled)"
-            except Exception as e:
-                logger.warning("re-asking an answer left in the reasoning failed: %s", e)
+        try:
+            resp = _reask_without_reasoning(resp, _llm_kwargs)
+        except _Stopped:
+            _narr_mod.NARRATOR.thought_close(thought)
+            return CANCELLED
+        except Exception as e:
+            # The empty reply stands, and the caller names it.
+            logger.warning("re-asking an answer left in the reasoning failed: %s", e)
         # Closed here and not in the adapter: the reasoning text only exists
         # once resp does, and the durable thought carries it whole (spec §4).
         _narr_mod.NARRATOR.thought_close(thought or resp.reasoning or "")
@@ -827,7 +834,7 @@ def run_agent(
             messages.append(tool_msg)
             _narr_mod.NARRATOR.turn(tool_msg)
             if (not failed and tc.name == "silica_web_answer" and (tc.args or {}).get("final")
-                    and not str(result).startswith("(silica:")):
+                    and not is_sentinel(str(result))):
                 final_answer = tool_msg
 
             # Update convergence guard
@@ -915,7 +922,7 @@ def run_agent(
     # `_abandon` cleared so the TUI still streams this closing answer.
     if cancel_token is not None and cancel_token.is_set():
         logger.info("Agent loop cancelled before the final turn")
-        return "(silica: cancelled)"
+        return CANCELLED
     messages.append({"role": "system", "content": _FINAL_TURN_INSTRUCTION})
     _narr_mod.NARRATOR.turn(messages[-1])
     _emit(ThinkingStartEvent(iteration=iteration))
@@ -928,13 +935,7 @@ def run_agent(
             final_kwargs["cancel"] = _abandon
             final = _interruptible_llm(final_kwargs)
             thought = final.reasoning or ""
-            if not (final.text or "").strip() and thought.strip():
-                # The answer went into the reasoning and the reply came back
-                # empty: hosted t06's landing (2026-10-22) wrote 2.8k chars of
-                # answer there and showed "maximum iterations". Asked once more
-                # with reasoning off, the knob V4 honours (llm.py).
-                _abandon.clear()
-                final = _interruptible_llm({**final_kwargs, "reasoning": False})
+            final = _reask_without_reasoning(final, final_kwargs)
     except Exception as e:
         from silica.model.usage_limits import UsageLimited
 
@@ -942,11 +943,11 @@ def run_agent(
         if isinstance(e, UsageLimited):
             raise  # the student is owed the reset time, not "maximum iterations" (ADR-0102)
         logger.warning("Forced final turn failed (%s)", e)
-        return "(silica: maximum iterations reached)"
+        return MAX_ITERATIONS
     finally:
         _emit(ThinkingEndEvent(iteration=iteration))
     _narr_mod.NARRATOR.thought_close(thought or final.reasoning or "")
-    text = (final.text or "").strip() or "(silica: maximum iterations reached)"
+    text = (final.text or "").strip() or MAX_ITERATIONS
     text = _declare_links(text) if _interactive else text
     # Into the history and not narrated here, as the normal path does: the
     # caller's final beat records it after attribution, figures and the turn
