@@ -37,7 +37,7 @@ def client(tmp_vault, tmp_path, monkeypatch):
 def test_the_view_reports_each_vault_and_what_publish_would_send(client):
     tc, _ = client
     v = tc.get("/public").json()
-    assert v["available"] and v["handle"] == "marta" and v["vaults"] == [] and v["max"] == 10
+    assert v["available"] and v["handle"] == "marta" and v["vaults"] == [] and v["max"] == 20
     assert "Memory" in v["folders"] and v["private"] == "hosted"
     v = tc.post("/public/vault", json={"folder": "Memory"}).json()
     assert v["added"] == "memory" and "Memory" not in v["folders"]
@@ -182,6 +182,15 @@ def test_a_laptop_takes_its_handle_into_the_vault_unless_it_already_published(cl
     unset_block_key((tmp / "vault"), publish.PUBLIC_KEY, "handle")
     (tmp / "public" / publish.handle((tmp / "vault"))).mkdir(parents=True)
     assert tc.get("/public").json()["ask_handle"] == {"ask": False}
+
+
+def test_the_view_counts_against_the_account_s_tier(client, monkeypatch):
+    tc, _ = client
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "graph,public")
+    assert tc.get("/public").json()["max"] == 3
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    assert tc.get("/public").json()["max"] == 20
 
 
 def test_a_free_account_loses_private_and_its_private_vault_turns_off(client, monkeypatch):
@@ -473,3 +482,15 @@ def test_a_saved_private_copy_has_no_globe(client, monkeypatch):
     v = tc.get("/public").json()
     assert not any(p.startswith(r["folder"]) for p in v["notes"])
     assert tc.post("/public/note", json={"path": r["first"], "on": True}).status_code == 400
+
+
+def test_the_upgrade_window_has_its_three_doors_and_a_page_reads_the_plan():
+    """ADR-0140, amendment of 2026-11-06: the fourth wiki, Private and a month spent
+    open one window, and its button goes to the landing's Plans section."""
+    from tests.webassets import app_js
+
+    js = app_js()
+    assert js.count("upgradeOpen(") == 4 and "upgradeAtLimit(ev, said)" in js      # its definition, three doors
+    assert 'ev.limit !== "month"' in js
+    html = (Path(__file__).parents[1] / "silica/ui/web/static/index.html").read_text(encoding="utf-8")
+    assert 'href="https://silica-agent.dev/#plans"' in html and ">Check it out<" in html

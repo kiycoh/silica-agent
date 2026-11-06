@@ -60,7 +60,7 @@ def vault_of(url: str) -> tuple[str, str, str]:
     clean, parts = _on_host(url)
     m = _VAULT_PATH.match(parts.path or "")
     if not clean or not m:
-        raise ValueError("that is not the address of a vault on a Silica page")
+        raise ValueError("that is not the address of a wiki on a Silica page")
     return clean, m.group(1), m.group(2)
 
 
@@ -215,7 +215,7 @@ def _fetch_json(url: str):
 
     resp, final = _fetch(url, types=("application/json", "text/"), cap=64 * 1024 * 1024)
     if (urlsplit(final).hostname or "").lower() not in allowed_hosts():
-        raise ValueError("that vault moved to a host Silica does not save from")
+        raise ValueError("that wiki moved to a host Silica does not save from")
     return resp.json()
 
 
@@ -256,7 +256,7 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
         manifest, notes = files
         handle, vslug = manifest.get("handle", ""), manifest.get("slug", "")
     if not isinstance(manifest, dict) or not isinstance(notes, dict):
-        raise ValueError("that vault could not be read")
+        raise ValueError("that wiki could not be read")
     title = t if isinstance(t := manifest.get("title"), str) else vslug
     chosen = [s for s in _chosen(manifest, areas, named) if isinstance(notes.get(s), str)]
     today = datetime.date.today().isoformat()
@@ -337,7 +337,7 @@ def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, f
 
     p = prepare_vault(url, areas, vault, named=named, files=files, private=private)
     if not p["files"]:
-        raise ValueError("those notes are saved already" if p["already"] else "no note of that vault was chosen")
+        raise ValueError("those notes are saved already" if p["already"] else "no note of that wiki was chosen")
     if p["room"]["short"]:
         raise ValueError(f"this vault has no room for that save: {p['room']['short']}")
     journal = get_undo_journal()

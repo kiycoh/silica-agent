@@ -49,8 +49,9 @@ MAX_DEPTH = 16
 # Near ADR-0087's cap of 8 million characters out of one PDF: a larger note
 # is not one a reader or the index can use.
 TEXT_MAX_BYTES = 8 * 1024 * 1024
-# The vault's + caps a folder at the free tier's note cap (ADR-0086 point 4):
-# the page stops there, so a folder of bombs costs one tenant one CPU (H2).
+# The vault's + stops a folder at ADR-0086 point 4's first Free cap. Free holds
+# 1,000 notes since 2026-11-06 (ADR-0140, amendment of that day), so this is now
+# a CPU bound and not the cap: a folder of bombs costs one tenant one CPU (H2).
 MAX_FILES_PER_IMPORT = 500
 
 # C0 and C1 controls, DEL, and the bidirectional embeddings, overrides and

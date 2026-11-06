@@ -157,10 +157,10 @@
     try { const r = localStorage.getItem(REMEMBER) || ""; if (/^https?:\/\//i.test(r)) remember = r; } catch { /* the page asks */ }
 
     const room = el("div", "room");
-    room.innerHTML = `<aside class="rail" aria-label="This vault">
-      <div class="rs"><input type="search" name="q" placeholder="Search this vault" aria-label="Search this vault" autocomplete="off"><kbd>/</kbd><div class="res" hidden></div></div>
+    room.innerHTML = `<aside class="rail" aria-label="This wiki">
+      <div class="rs"><input type="search" name="q" placeholder="Search this wiki" aria-label="Search this wiki" autocomplete="off"><kbd>/</kbd><div class="res" hidden></div></div>
       <div class="rc"></div><div class="rf"></div></aside>
-      <section class="view" aria-label="Map of the vault"><canvas class="map" role="img"></canvas><canvas class="names" aria-hidden="true"></canvas>
+      <section class="view" aria-label="Map of the wiki"><canvas class="map" role="img"></canvas><canvas class="names" aria-hidden="true"></canvas>
       <div class="mb"><div class="seg" data-arr role="group" aria-label="Arrangement"><button type="button" data-v="map" aria-pressed="true">Map</button><button type="button" data-v="clusters" aria-pressed="false">Clusters</button></div>
       <span class="lab nm-seg">Names</span><div class="seg nm-seg" data-nms role="group" aria-label="Names"><button type="button" data-v="auto" aria-pressed="true">Auto</button><button type="button" data-v="off" aria-pressed="false">Off</button><button type="button" data-v="key" aria-pressed="false">Key</button><button type="button" data-v="all" aria-pressed="false">All</button></div>
       <button type="button" class="btn-o pickb" aria-pressed="false">Choose</button></div>
@@ -882,10 +882,10 @@
         if (S.area && hit) inArea.append(S.area);
       }
       const notes = list.reduce((t, m) => t + m.notes, 0);
-      count.textContent = `${list.length} ${list.length === 1 ? "vault" : "vaults"} · ${fmt(notes)} notes`;
+      count.textContent = `${list.length} ${list.length === 1 ? "wiki" : "wikis"} · ${fmt(notes)} notes`;
       empty.hidden = list.length > 0;
-      empty.textContent = qq ? `No vault matches "${S.q.trim()}"${S.area ? ` in ${S.area}` : ""}. Search reads titles, lines, areas and handles.`
-        : `No vault has an area called ${S.area}.`;
+      empty.textContent = qq ? `No wiki matches "${S.q.trim()}"${S.area ? ` in ${S.area}` : ""}. Search reads titles, lines, areas and handles.`
+        : `No wiki has an area called ${S.area}.`;
       areas();
     }
     $(".cat-tools", cat).hidden = false;

@@ -117,3 +117,18 @@ def test_sdk_retries_reach_the_client():
     with patch("litellm.completion", return_value=litellm_mock_response("ok")) as completion:
         call_llm(model="custom/qwen-local", messages=[{"role": "user", "content": "hi"}])
     assert "max_retries" not in completion.call_args.kwargs
+
+
+def test_a_model_on_anthropic_gets_room_for_the_thinking_the_knob_cannot_stop():
+    """The knob reaches OpenRouter only, and Sonnet 5.5 thinks by default inside
+    max_tokens: at 2,200 it ended 10 of 18 reading cards mid-sentence."""
+    from silica.agent import llm as llm_mod
+
+    msgs = [{"role": "user", "content": "hi"}]
+    with patch("litellm.completion", return_value=litellm_mock_response("ok")) as completion:
+        call_llm(model="anthropic/claude-sonnet-5-5", messages=msgs, max_tokens=2200, reasoning=False)
+        assert completion.call_args.kwargs["max_tokens"] == 2200 + llm_mod.ANTHROPIC_THINKING_ROOM
+        call_llm(model="anthropic/claude-sonnet-5-5", messages=msgs, max_tokens=2200)
+        assert completion.call_args.kwargs["max_tokens"] == 2200, "a caller that allows thinking set its own budget"
+        call_llm(model="openrouter/test/room", messages=msgs, max_tokens=2200, reasoning=False)
+        assert completion.call_args.kwargs["max_tokens"] == 2200, "there the knob does the work"

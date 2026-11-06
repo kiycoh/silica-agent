@@ -60,7 +60,7 @@ def slugify(text: str) -> str:
 def handle(vault: Path | None = None) -> str:
     """The page's @name. On the server the host writes it and the account
     cannot take another's (ADR-0143 point 7, amended 2026-11-02: the account
-    asks for one from My Page, the host decides), so an account without one
+    asks for one from My Wikis, the host decides), so an account without one
     has no page rather than one named after its vault folder."""
     from silica.config import hosted
 
@@ -84,7 +84,7 @@ RESERVED_HANDLES = frozenset(
 
 
 def handle_problem(h: str) -> str:
-    """"" when `h` can be a handle, else why not, as My Page says it."""
+    """"" when `h` can be a handle, else why not, as My Wikis says it."""
     if not _HANDLE.match(h) or "--" in h:
         return "a handle is 1 to 30 of a-z, 0-9 and single dashes, not at either end"
     if h in RESERVED_HANDLES:
@@ -134,7 +134,7 @@ def _asked() -> str:
 
 
 def handle_state(vault: Path | None = None) -> dict:
-    """What My Page's overlay needs: whether to ask for a handle, the claim
+    """What My Wikis' overlay needs: whether to ask for a handle, the claim
     waiting for the host, and the last one it refused."""
     from silica.config import hosted
 
@@ -172,7 +172,7 @@ def claim(h: str, vault: Path | None = None) -> None:
     if why := handle_problem(h):
         raise ValueError(why)
     if not handle_state(vault).get("ask"):
-        raise ValueError("this Page already has its handle")
+        raise ValueError("this account already has its handle")
     if hosted():
         p = claim_path()
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -199,8 +199,12 @@ def available(vault: Path | None = None) -> bool:
     return bool(handle(vault)) and (bool(page_url(vault)) or not hosted())
 
 
-# ADR-0151 point 1: a vault on the Page is a folder of the account's one vault, at most ten.
-MAX_VAULTS = 10
+# ADR-0151 point 1: a vault on the Page is a folder of the account's one vault. MAX_VAULTS is
+# what any account can hold (amendment 2026-11-06) and what vaults() reads up to, never a
+# tier's number: _save_vaults writes back what vaults() read, so a read cut at Free's three
+# would erase the rest of a downgraded account's rows at its next write.
+MAX_VAULTS = 20
+FREE_VAULTS = 3
 VISIBILITY = ("off", "public", "private")
 # The license select's choices; "not stated" is the default (ADR-0151 answer 15a).
 LICENSES = ("not stated", "CC BY 4.0", "CC BY-SA 4.0", "CC BY-NC 4.0", "CC0 1.0", "all rights reserved")
@@ -283,7 +287,7 @@ def vault_of(path: str, items: list[dict]) -> dict | None:
 def find(slug: str, vault: Path | None = None) -> dict:
     v = next((v for v in vaults(vault) if v["slug"] == slug), None)
     if v is None:
-        raise ValueError(f"no vault {slug!r} on this page")
+        raise ValueError(f"no wiki {slug!r} on this page")
     return v
 
 
@@ -299,6 +303,24 @@ def private_allowed() -> str:
         return "hosted"
     names = {v.strip() for v in os.environ.get("SILICA_VIEWS", "").split(",")}
     return "ok" if names & {"all", "private"} else "paid"
+
+
+def max_vaults() -> int:
+    """How many vaults this account may make (ADR-0151, amendment 2026-11-06).
+    The word that allows Private already says who pays (point 9), so a second
+    word could only disagree with it; a laptop has no tier and takes the most.
+    Only a new vault asks: an account that fell to Free keeps its Public
+    vaults, whose addresses readers hold, and makes no more until it is under."""
+    return FREE_VAULTS if private_allowed() == "paid" else MAX_VAULTS
+
+
+def paid_plan() -> list[str]:
+    """What the upgrade window lists, in the host's words and beside its numbers:
+    silica-agent names no plan (ADR-0140 point 3). Empty for an account with
+    nothing left to buy and on a host that sets none, and then no window opens."""
+    if private_allowed() != "paid":
+        return []
+    return [line.strip() for line in os.environ.get("SILICA_PAID_PLAN", "").split("|") if line.strip()]
 
 
 def enforce_tier(vault: Path | None = None) -> list[str]:
@@ -331,11 +353,12 @@ def add_vault(folder: str, vault: Path | None = None) -> dict:
         raise ValueError(f"{folder or 'that folder'} cannot be published")
     if not (vault / folder).is_dir():
         raise ValueError(f"{folder} is not a folder of this vault")
-    if len(items) >= MAX_VAULTS:
-        raise ValueError(f"a page holds {MAX_VAULTS} vaults at most")
+    limit = max_vaults()
+    if len(items) >= limit:
+        raise ValueError(f"you can publish {limit} wikis at most")
     for v in items:
         if _within(folder, v["folder"]) or _within(v["folder"], folder):
-            raise ValueError(f"{folder} overlaps the vault {v['title']} ({v['folder']})")
+            raise ValueError(f"{folder} overlaps the wiki {v['title']} ({v['folder']})")
     base = slugify(folder.rsplit("/", 1)[-1]) or "vault"
     slug, n, taken = base, 2, {v["slug"] for v in items} | _RESERVED_SLUGS
     while slug in taken:
@@ -354,7 +377,7 @@ def update_vault(slug: str, changes: dict, vault: Path | None = None) -> dict:
     items = vaults(vault)
     v = next((x for x in items if x["slug"] == slug), None)
     if v is None:
-        raise ValueError(f"no vault {slug!r} on this page")
+        raise ValueError(f"no wiki {slug!r} on this page")
     if "title" in changes:
         v["title"] = str(changes["title"] or "").strip()[:80] or v["folder"].rsplit("/", 1)[-1]
     if "line" in changes:
@@ -383,9 +406,9 @@ def remove_vault(slug: str, vault: Path | None = None) -> None:
     items = vaults(vault)
     v = next((x for x in items if x["slug"] == slug), None)
     if v is None:
-        raise ValueError(f"no vault {slug!r} on this page")
+        raise ValueError(f"no wiki {slug!r} on this page")
     if v["visibility"] != "off":
-        raise ValueError("turn the vault Off before removing it")
+        raise ValueError("turn the wiki Off before removing it")
     root = site_root(handle(vault))
     shutil.rmtree(root / "paused" / slug, ignore_errors=True)
     _save_vaults([x for x in items if x["slug"] != slug], vault)
@@ -481,10 +504,10 @@ def set_note(path: str, on: bool, vault: Path | None = None) -> str:
     if fm is None:
         raise ValueError(f"{path} is not a note of this vault")
     if fm.get("shared") == "private":
-        raise ValueError(f"{path} is a copy of a Private vault and stays yours alone")
+        raise ValueError(f"{path} is a copy of a Private wiki and stays yours alone")
     items = vaults(vault)
     if vault_of(path, items) is None:
-        raise ValueError(f"{path} is in no vault of your Page: make its folder a vault first")
+        raise ValueError(f"{path} is in no wiki: make its folder a wiki first")
     clip = fm.get("form") == "clip"
     value = (True if clip else None) if on else (None if clip else False)
     _write_publish(path, value)
@@ -532,14 +555,14 @@ def set_visibility(slug: str, vis: str, vault: Path | None = None) -> dict:
     Publish builds it where only the relay reads (point 9)."""
     vault = vault or _vault()
     if vis not in VISIBILITY:
-        raise ValueError("a vault is off, public or private")
+        raise ValueError("a wiki is off, public or private")
     if vis == "private" and private_allowed() != "ok":
         raise ValueError("Private needs a paid account on Silica hosted"
                          if private_allowed() == "paid" else "Private works between accounts on Silica hosted")
     items = vaults(vault)
     v = next((x for x in items if x["slug"] == slug), None)
     if v is None:
-        raise ValueError(f"no vault {slug!r} on this page")
+        raise ValueError(f"no wiki {slug!r} on this page")
     v["visibility"], v["downgraded"] = vis, False
     _save_vaults(items, vault)
     h = handle(vault)

@@ -57,7 +57,7 @@ def test_a_note_outside_every_vault_never_goes_out_even_with_its_own_true(vault,
         "---\npublish: true\n---\nPrivate plan.\n", encoding="utf-8")
     add_vault("Memory")
     assert _states()["Courses/Exam plan June.md"] == "off"
-    with pytest.raises(ValueError, match="no vault"):
+    with pytest.raises(ValueError, match="no wiki"):
         set_note("Courses/Exam plan June.md", True)
 
 
@@ -76,7 +76,7 @@ def test_silica_folders_are_never_published_and_cannot_be_vaults(vault):
         set_note("sources/Spacing effect.md", True)
 
 
-def test_ten_vaults_at_most_and_none_inside_another(vault, tmp_path):
+def test_a_laptop_holds_twenty_vaults_and_none_inside_another(vault, tmp_path):
     from silica.kernel.publish import MAX_VAULTS, add_vault
 
     add_vault("Memory")
@@ -88,9 +88,32 @@ def test_ten_vaults_at_most_and_none_inside_another(vault, tmp_path):
     for i in range(MAX_VAULTS - 1):
         (Path(tmp_path) / "vault" / f"F{i}").mkdir()
         add_vault(f"F{i}")
-    (Path(tmp_path) / "vault" / "Eleventh").mkdir()
-    with pytest.raises(ValueError, match="10 vaults"):
-        add_vault("Eleventh")
+    (Path(tmp_path) / "vault" / "OneTooMany").mkdir()
+    with pytest.raises(ValueError, match="20 wikis"):
+        add_vault("OneTooMany")
+
+
+def test_free_makes_three_and_a_downgrade_loses_none_it_had(vault, tmp_path, monkeypatch):
+    from silica.kernel.publish import add_vault, update_vault, vaults
+
+    for i in range(5):
+        (Path(tmp_path) / "vault" / f"F{i}").mkdir()
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_VIEWS", "graph,public")
+    for i in range(3):
+        add_vault(f"F{i}")
+    with pytest.raises(ValueError, match="3 wikis"):
+        add_vault("F3")
+
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    add_vault("F3")
+    add_vault("F4")
+    monkeypatch.setenv("SILICA_VIEWS", "graph,public")
+    with pytest.raises(ValueError, match="3 wikis"):
+        add_vault("Memory")
+    # a write rewrites every row it read: the fifth must come through it
+    update_vault(vaults()[0]["slug"], {"title": "Renamed"})
+    assert [v["folder"] for v in vaults()] == ["F0", "F1", "F2", "F3", "F4"]
 
 
 def test_a_note_globe_strikes_it_from_its_vault_and_writes_the_least(vault, tmp_path):
@@ -209,3 +232,19 @@ def test_a_slug_folds_accents(vault):
     from silica.kernel.publish import slugify
 
     assert slugify("Perché la memoria è fragile?") == "perche-la-memoria-e-fragile"
+
+
+def test_the_plan_is_the_hosts_words_and_only_an_account_that_can_still_buy_it_gets_them(monkeypatch):
+    """silica-agent names no plan (ADR-0140 point 3): the list is host.env's, and a
+    paying account, or one on a host that sets none, has no window to open."""
+    from silica.kernel import publish
+
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_PAID_PLAN", "Private wikis | 20 wikis instead of 3 |")
+    monkeypatch.setenv("SILICA_VIEWS", "graph,public")
+    assert publish.paid_plan() == ["Private wikis", "20 wikis instead of 3"]
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    assert publish.paid_plan() == []
+    monkeypatch.setenv("SILICA_VIEWS", "graph,public")
+    monkeypatch.delenv("SILICA_PAID_PLAN")
+    assert publish.paid_plan() == []

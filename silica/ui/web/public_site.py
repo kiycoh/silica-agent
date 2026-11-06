@@ -363,7 +363,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     publish.enforce_tier(vault)
     conf = publish.find(slug, vault)
     if conf["visibility"] == "off":
-        raise ValueError("turn the vault Public or Private before publishing it")
+        raise ValueError("turn the wiki Public or Private before publishing it")
     private = conf["visibility"] == "private"
     sel = publish.selection(vault)
     fms = sel["frontmatter"]
@@ -581,7 +581,7 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
     unl = len(m["unlinked"])
     caption = (f'<span class="num">{_fmt(count["drawn"])}</span> of <span class="num">{_fmt(count["notes"])}</span> '
                f'notes drawn · <span class="num">{_fmt(count["links"])}</span> links'
-               + (f' · the <span class="num">{_fmt(unl)}</span> notes with no link are in the vault but not in '
+               + (f' · the <span class="num">{_fmt(unl)}</span> notes with no link are in the wiki but not in '
                   f'the picture' if unl else ""))
     facts = [("Notes", f'<span class="num">{_fmt(count["notes"])}</span>'),
              ("Links", f'<span class="num">{_fmt(count["links"])}</span>'),
@@ -608,7 +608,7 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
                   for t, s in sorted(by_area.get(i, []), key=lambda x: x[0].lower()))
         + "</ul></details>" for i, name, size in rows)
     save = (_save_form(url, f"Save {_plural(count['notes'], 'note')} to Silica") if site.base else
-            '<p class="dim">Saving needs the vault on a Silica host.</p>')
+            '<p class="dim">Saving needs the wiki on a Silica host.</p>')
     crumb = ('<nav class="crumb" aria-label="Breadcrumb">'
              + (f'<a href="{_esc(site.catalog())}">Pages</a> / ' if site.base else "")
              + f'<a href="{_esc(site.page(1))}">@{_esc(h)}</a> / {_esc(m["title"])}</nav>')
@@ -628,7 +628,7 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
             f'<p>Choose what to save.</p></div>'
             f'<ul class="areas">{areas}</ul></div>'
             + f'<div class="vp-notes" id="notes"><h2>The notes</h2>{notes}</div>'
-            + "</section></main>\n" + foot(f"A vault @{_esc(h)} chose to publish.", _app()))
+            + "</section></main>\n" + foot(f"A wiki @{_esc(h)} chose to publish.", _app()))
 
 
 def card(e: dict, href: str, graph: str, who: bool = True) -> str:
@@ -681,7 +681,7 @@ def write_page(vault: Path | None = None) -> None:
     notes = sum(m["count"]["notes"] for m in entries)
     cards = "".join(card(m, site.vault(m["slug"], 0), f"{site.root}/{m['slug']}/vault.json" if site.base
                          else f"{m['slug']}/vault.json", who=False) for m in entries)
-    head = _head(f"@{h} · Silica", f"{_plural(len(entries), 'vault')} by @{h}", site, 0,
+    head = _head(f"@{h} · Silica", f"{_plural(len(entries), 'wiki')} by @{h}", site, 0,
                  canonical=site.absolute(site.page(0)), lang=lang)
     page = (head + "<body>\n" + top(site.catalog(), _app(), current="page", page=site.page(0), h=h)
             + '<main class="sheet"><section class="wrap cat" aria-labelledby="pg-h"'
@@ -690,7 +690,7 @@ def write_page(vault: Path | None = None) -> None:
             f'<p>{_plural(len(entries), "vault")} · {_plural(notes, "note")}. Read one here, or save a copy into '
             f'your own vault: every note in the copy keeps its author\'s name.</p></div>'
             + f'<div class="cat-grid">{cards}</div></section></main>\n'
-            + foot(f"Vaults @{_esc(h)} chose to publish.", _app()))
+            + foot(f"Wikis @{_esc(h)} chose to publish.", _app()))
     live.mkdir(parents=True, exist_ok=True)
     _atomic(live / "index.html", page)
     listing = [{"slug": m["slug"], "title": m["title"], "line": m["line"], "count": m["count"],

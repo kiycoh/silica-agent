@@ -119,7 +119,8 @@ def _view() -> dict:
         # folder reads as ~, as the bug report prints it: the line is read, not typed.
         "dir": _tilde(str(publish.site_root(h) / "live")) if h and not hosted() else "",
         "private": publish.private_allowed(),
-        "max": publish.MAX_VAULTS,
+        "max": publish.max_vaults(),
+        "plan": publish.paid_plan(),
         "licenses": list(publish.LICENSES),
         "vaults": vaults,
         "turned_off": turned,
@@ -142,7 +143,7 @@ def public_view():
 
 @router.post("/public/handle", dependencies=_SAME_ORIGIN)
 def public_handle(payload: dict):
-    """The handle My Page asks for on its first visit (ADR-0143 point 7, amended 2026-11-02)."""
+    """The handle My Wikis asks for on its first visit (ADR-0143 point 7, amended 2026-11-02)."""
     from silica.kernel import publish
 
     try:

@@ -3687,7 +3687,7 @@ async function lrFetchRead(r) {
     if (d.detail) throw new Error(d.detail);
     const prev = lrRead && lrRead.key === key ? lrRead : null;
     lrRead = { key, data: d, view: prev && prev.data?.exists ? prev.view : undefined, drafts: prev?.drafts || {},
-               polling: !!prev?.polling, listOpen: !!prev?.listOpen };
+               polling: !!prev?.polling, listOpen: !!prev?.listOpen, reached: prev?.reached };
   } catch (e) { lrRead = { key, error: String(e.message || e) }; }
   if (lrRoute.view === "read" && lrReadKey(lrRoute) === key) lrRender();
 }
@@ -3699,12 +3699,34 @@ function lrReadPoll(r) {
     if (lrRoute.view !== "read" || !lrRead || lrReadKey(lrRoute) !== lrRead.key) { if (lrRead) lrRead.polling = false; return; }
     await lrFetchRead(r);
     const j = lrRead?.data?.job;
-    if (j && j.state === "running") { setTimeout(tick, 1500); return; }
+    // Only while the page has nothing else to show: a card written ahead of the
+    // reader waits for them, and a render now would take the answer they are typing.
+    const open = lrReadOpen();
+    if ((j && j.state === "running") || (open?.pending && !open.failure)) { setTimeout(tick, 1500); return; }
     if (lrRead) lrRead.polling = false;
     if (j?.state === "error") notify("couldn't write the reading: " + j.error);
     lrRender();
+    if (open?.failure && typeof upgradeAtLimit === "function") upgradeAtLimit(open.failure, limitSentence(open.failure));
   };
   setTimeout(tick, 1200);
+}
+
+const lrReadOpen = () => lrRead?.data?.cards?.find((c) => c.n === lrRead.view);
+
+// The reader is at this card: it and the next get written if they wait. Asked once
+// a visit, and the answer is the reading as it stands.
+async function lrReadReach(r, n) {
+  let d;
+  try { d = await lrPost("/learn/reading/card", { plan: r.plan, step: r.step, n }); }
+  catch (e) { notify("couldn't write this card: " + e.message); return; }
+  if (!lrRead || lrReadKey(r) !== lrRead.key || lrRead.view !== n) return;
+  const was = lrReadOpen();
+  lrRead.data = { ...d, answers: lrRead.data.answers };
+  const now = lrReadOpen();
+  if (now?.pending && !now.failure) lrReadPoll(r);
+  else if (now?.failure && typeof upgradeAtLimit === "function") upgradeAtLimit(now.failure, limitSentence(now.failure));
+  // a written card already on screen stays as it is, with what the reader is typing
+  if (was?.pending) lrRender();
 }
 
 // "done" once answered (a spine: once opened), "standby" once opened and
@@ -3718,7 +3740,7 @@ function lrCardState(d, c) {
 async function lrReadWrite(r) {
   try { lrRead.data.job = await lrPost("/learn/reading/write", { plan: r.plan, step: r.step }); }
   catch (e) { notify("couldn't start writing the reading: " + e.message); return; }
-  lrRead.view = undefined;
+  lrRead.view = lrRead.reached = undefined; // a new reading: its first card is reached anew
   lrRender();
 }
 
@@ -3746,7 +3768,7 @@ function lrReadShow(n) {
   const d = lrRead?.data;
   if (!d?.exists || n === lrRead.view) return;
   const was = d.cards.find((c) => c.n === lrRead.view);
-  if (was) lrReadSeen(lrRoute, d, was);
+  if (was && !was.pending) lrReadSeen(lrRoute, d, was);
   lrRead.view = n;
   lrRead.listOpen = false;
   lrRender();
@@ -3782,9 +3804,12 @@ function lrRenderRead(body) {
   const one = lrEl("section", "lr-one lr-read");
   body.appendChild(one);
   const done = d.exists ? d.cards.filter((c) => lrCardState(d, c) === "done").length : 0;
-  const meta = d.exists
-    ? `${done} of ${lrPlural(d.cards.length, "card")} done · about ${d.minutes} min of reading`
-    : lrPlural(d.notes.length, "note");
+  const waiting = d.exists ? d.cards.filter((c) => c.pending).length : 0;
+  const meta = waiting
+    ? `${d.cards.length - waiting} of ${lrPlural(d.cards.length, "card")} written`
+    : d.exists
+      ? `${done} of ${lrPlural(d.cards.length, "card")} done · about ${d.minutes} min of reading`
+      : lrPlural(d.notes.length, "note");
   // Rewrite is one revertible overwrite; a running job hides it
   const rewrite = d.exists && !(d.job && d.job.state === "running") ? lrBtn("ghost box", "Rewrite", () => lrReadWrite(r)) : null;
   if (rewrite) rewrite.title = "write this reading again from the step's notes; your answers start over";
@@ -3794,7 +3819,7 @@ function lrRenderRead(body) {
     const p = lrEl("div", "lr-read-card");
     p.setAttribute("role", "status");
     p.append(lrEl("p", null, job.total ? `Writing card ${Math.min(job.done + 1, job.total)} of ${job.total}.` : "Putting each note after the notes it needs."),
-      lrEl("p", "lr-help", "One call orders the step, then one call a card. You can leave and come back."));
+      lrEl("p", "lr-help", "One call orders the step and one writes the first card; the others come as you reach them. You can leave and come back."));
     one.appendChild(p);
     lrReadPoll(r);
     return;
@@ -3805,7 +3830,7 @@ function lrRenderRead(body) {
     p.append(lrEl("p", null, `No reading yet for this step. Its ${lrPlural(n, "note")} become ${lrPlural(n, "card")}, each after the notes it needs. Each card ends on a question toward the next one; answer it, or go on and come back.`));
     const row = lrEl("div", "lr-read-choice");
     row.append(lrBtn("lr-send", "Generate the reading", () => lrReadWrite(r)),
-      lrEl("span", "lr-help", "Silica writes a summary of each note, with links to the notes it cites. A link opens the note on the right."));
+      lrEl("span", "lr-help", "Silica writes each card when you reach it: a summary of its note, with links to the notes it cites. A link opens the note on the right."));
     p.appendChild(row);
     if (job?.state === "error") p.appendChild(lrEl("p", "lr-help", "The last attempt failed: " + job.error));
     one.appendChild(p);
@@ -3825,6 +3850,7 @@ function lrRenderRead(body) {
     const open = d.cards.find((c) => lrCardState(d, c) !== "done");
     lrRead.view = (want || open || d.cards[0]).n;
   }
+  if (lrRead.reached !== lrRead.view) { lrRead.reached = lrRead.view; lrReadReach(r, lrRead.view); }
   const grid = lrEl("div", "lr-read-grid");
   grid.append(lrReadToc(d), lrReadMain(d, r));
   one.appendChild(grid);
@@ -3844,6 +3870,11 @@ function lrReadList(d) {
     const txt = lrEl("span", "t");
     txt.appendChild(lrEl("span", "tt", c.title));
     if (c.needed_by?.length) txt.appendChild(lrEl("span", "lr-read-moved", `moved up: needed by ${c.needed_by.join(", ")}`));
+    if (c.pending) {
+      li.classList.add("pending");
+      txt.appendChild(c.failure ? lrEl("span", "lr-read-moved", "not written yet")
+        : lrEl("span", "lr-read-wait", c.writing ? "writing" : "written when you reach it"));
+    }
     b.append(lrEl("span", "dot", LR_CARD_MARK[st] || String(c.n)), txt);
     b.addEventListener("click", () => lrReadShow(c.n));
     li.appendChild(b);
@@ -3913,10 +3944,42 @@ function lrReadLink(title, shown, d) {
   return b;
 }
 
+// A card still to come: the page waits on it, or says why it could not be written.
+function lrReadWaiting(d, c, i) {
+  const card = lrEl("article", "lr-read-card lr-card-one");
+  const eb = lrEl("div", "lr-read-eb");
+  eb.appendChild(lrEl("span", "eyebrow", `Card ${i + 1} of ${d.cards.length}`));
+  card.appendChild(eb);
+  if (c.failure) {
+    const kept = d.cards.filter((x) => !x.pending && !x.spine).length;
+    card.append(lrEl("p", null, limitSentence(c.failure)), lrEl("p", "lr-help", kept
+      ? `${kept === 1 ? "The card" : `The ${kept} cards`} already written stay here, and this one is written when you come back to it.`
+      : "It is written when you come back to it."));
+    return card;
+  }
+  card.setAttribute("role", "status");
+  card.append(lrEl("p", null, "Writing this card."), lrEl("p", "lr-help", "It takes a few seconds. The cards before it stay open."));
+  return card;
+}
+
+function lrReadNav(i, last) {
+  const nav = lrEl("div", "lr-read-nav");
+  const prev = lrBtn("ghost box", "← Previous", () => lrReadGo(-1));
+  prev.disabled = i === 0;
+  const next = lrBtn("ghost box", "Next →", () => lrReadGo(1));
+  next.disabled = i === last;
+  nav.append(prev, next, lrEl("span", "lr-help", "← → on the keyboard. The drawer shows only the notes you click."));
+  return nav;
+}
+
 function lrReadMain(d, r) {
   const col = lrEl("div", "lr-read-main");
   const i = d.cards.findIndex((c) => c.n === lrRead.view);
   const c = d.cards[i];
+  if (c.pending) {
+    col.append(lrReadWaiting(d, c, i), lrReadNav(i, d.cards.length - 1));
+    return col;
+  }
   if (!c.question) lrReadSeen(r, d, c);
   const card = lrEl("article", "lr-read-card lr-card-one");
   const st = lrCardState(d, c);
@@ -3943,14 +4006,7 @@ function lrReadMain(d, r) {
     card.appendChild(ex);
   }
   if (c.question) card.appendChild(lrReadQuestion(d, c, r, i === d.cards.length - 1));
-  col.appendChild(card);
-  const nav = lrEl("div", "lr-read-nav");
-  const prev = lrBtn("ghost box", "← Previous", () => lrReadGo(-1));
-  prev.disabled = i === 0;
-  const next = lrBtn("ghost box", "Next →", () => lrReadGo(1));
-  next.disabled = i === d.cards.length - 1;
-  nav.append(prev, next, lrEl("span", "lr-help", "← → on the keyboard. The drawer shows only the notes you click."));
-  col.appendChild(nav);
+  col.append(card, lrReadNav(i, d.cards.length - 1));
   if (i === d.cards.length - 1) lrReadDone(col, d, r);
   return col;
 }

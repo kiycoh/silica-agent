@@ -1,4 +1,4 @@
-// The Page (ADR-0143, ADR-0151): the view that holds the account's vaults, up to ten, each a
+// My Wikis (ADR-0143, ADR-0151): the view that holds the account's vaults, each a
 // folder of its vault, Off, Public or Private; the globes on the tree and on the note; the strip
 // over a saved note; the invitations to Private vaults; and the confirm a page's "Save to Silica"
 // lands on, for one note or for the areas of a whole vault.
@@ -82,7 +82,7 @@ function paintGlobe(b, st, size, vault) {
 }
 
 function pubTitle(st, name, vault) {
-  const where = vault ? vault.title : "its vault";
+  const where = vault ? vault.title : "its wiki";
   if (st === "on") return `goes out with ${where}: leave ${name} out`;
   if (st === "struck") return `left out of ${where}: put ${name} back`;
   return `put ${name} in ${where}`;
@@ -100,7 +100,7 @@ function syncTreePublic() {
         b.hidden = false;
         b.classList.add("vault", v.visibility === "public" ? "on" : v.visibility === "private" ? "priv" : "paused");
         b.innerHTML = pubSvg(11, false, v.visibility === "private");
-        b.title = `the vault ${v.title} on your Page, ${v.visibility === "off" ? "Off" : v.visibility === "public" ? "Public" : "Private"}: open it`;
+        b.title = `the wiki ${v.title} in My Wikis, ${v.visibility === "off" ? "Off" : v.visibility === "public" ? "Public" : "Private"}: open it`;
         b.setAttribute("aria-pressed", String(v.visibility !== "off"));
         continue;
       }
@@ -110,7 +110,7 @@ function syncTreePublic() {
       if (b.hidden) continue;
       b.innerHTML = pubSvg(11, false, false);
       b.setAttribute("aria-pressed", "false");
-      b.title = `make the folder ${folder} a vault on your Page`;
+      b.title = `make the folder ${folder} a wiki in My Wikis`;
       continue;
     }
     const v = pubVaultOfNote(b.dataset.pub);
@@ -127,12 +127,12 @@ async function pubPost(url, body) {
   try {
     r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   } catch {
-    notify("your Page could not be reached");
+    notify("My Wikis could not be reached");
     return null;
   }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
-    notify(data.detail || "your Page did not change");
+    notify(data.detail || "My Wikis did not change");
     return null;
   }
   if (data.vaults) {
@@ -278,8 +278,8 @@ async function loadPubCover(slug, build) {
   const cap = pubCoverEl.querySelector("figcaption");
   const unl = pubCover.unlinked || 0;
   cap.textContent = `${pubCover.n.length.toLocaleString("en-GB")} notes drawn · ${pubCover.e.length.toLocaleString("en-GB")} ${pubCover.e.length === 1 ? "link" : "links"}`
-    + (unl ? ` · ${unl.toLocaleString("en-GB")} with no link, in the vault but not in the picture` : "");
-  pubCoverEl.querySelector("canvas").setAttribute("aria-label", `This vault as a graph: ${cap.textContent}`);
+    + (unl ? ` · ${unl.toLocaleString("en-GB")} with no link, in the wiki but not in the picture` : "");
+  pubCoverEl.querySelector("canvas").setAttribute("aria-label", `This wiki as a graph: ${cap.textContent}`);
   const run = ++pubCoverRun;
   if (!build || matchMedia("(prefers-reduced-motion: reduce)").matches) { pubCoverK = 1; drawPubCover(); return; }
   pubCoverK = 0;
@@ -398,10 +398,39 @@ const pubDay = (iso) => {
   return isNaN(d) ? iso : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 };
 
+// The one window a Free account meets at what a paid account adds (ADR-0140,
+// amendment of 2026-11-06). The list is the host's: on a host that sets none,
+// and for an account with nothing left to buy, nothing here opens.
+let upgradeFrom = null;
+const upgradeOn = () => !!pubState?.plan?.length;
+
+function upgradeOpen(head, why) {
+  upgradeFrom = document.activeElement;
+  $("#upgrade-h").textContent = head;
+  $("#upgrade-why").textContent = why;
+  $("#upgrade-list").replaceChildren(...pubState.plan.map((line) => mkEl("li", "", line)));
+  $("#upgrade-sheet").hidden = false;
+  $("#upgrade-go").focus();
+}
+
+function upgradeClose() {
+  $("#upgrade-sheet").hidden = true;
+  upgradeFrom?.focus?.();
+  upgradeFrom = null;
+}
+
+// The month only: a window reopens within hours and its sentence says when, and
+// a sale at every stop would be noise to the account that meets them most.
+function upgradeAtLimit(ev, said) {
+  if (ev.limit !== "month" || !upgradeOn()) return;
+  const [head, ...rest] = said.split(/(?<=\.)\s+/);
+  upgradeOpen(head.replace(/\.$/, ""), [...rest, "Reading, search and the graph keep working."].join(" "));
+}
+
 function upsellText(why) {
-  if (why === "hosted") return [document.createTextNode("A Private vault is read only by the accounts you name, which needs Silica hosted: on this computer there is no one to deliver it to.")];
-  const a = Object.assign(document.createElement("a"), { href: "https://silica-agent.dev/#hosted", target: "_blank", rel: "noopener", textContent: "What a paid account includes" });
-  return [document.createTextNode("A Private vault is read only by the accounts you name. It comes with a paid account: "), a, document.createTextNode(".")];
+  if (why === "hosted") return [document.createTextNode("A Private wiki is read only by the accounts you name, which needs Silica hosted: on this computer there is no one to deliver it to.")];
+  const a = Object.assign(document.createElement("a"), { href: "https://silica-agent.dev/#plans", target: "_blank", rel: "noopener", textContent: "What a paid account includes" });
+  return [document.createTextNode("A Private wiki is read only by the accounts you name. It comes with a paid account: "), a, document.createTextNode(".")];
 }
 
 // --- the handle, asked on the first visit (ADR-0143 point 7, amended 2026-11-02) ---------
@@ -479,8 +508,8 @@ function pubAskPaint(st) {
   if (ask.pending && !input.value) input.value = ask.pending;
   const v = input.value.trim().replace(/^@/, "").toLowerCase();
   $(".pg-ask-p").textContent = st.hosted
-    ? "It is your Page's address and the name readers see on every vault you publish. You choose it once."
-    : "It names your Page and is shown on every vault you publish.";
+    ? "It is your public page's address and the name readers see on every wiki you publish. You choose it once."
+    : "It names your public page and is shown on every wiki you publish.";
   const base = (st.base || "").replace(/^https?:\/\//, "");
   $("#pg-ask-addr").textContent = base ? `${base}/@${v || "your-name"}/` : "";
   const pending = ask.pending || "";
@@ -489,7 +518,7 @@ function pubAskPaint(st) {
   let ok = false;
   if (pending && !stale) {
     msg.className += " ok";
-    msg.textContent = `Taking @${pending}. Your Page opens in about a minute.`;
+    msg.textContent = `Taking @${pending}. My Wikis opens in about a minute.`;
   } else if (stale) {
     msg.textContent = "The server has not answered yet. You can try again.";
     ok = !pubHandleWhy(v, ask.reserved || []) && !!v;
@@ -533,8 +562,8 @@ function renderPublic(fresh) {
     link.hidden = true;
     count.textContent = "";
     body.replaceChildren(mkEl("p", "pp-dim", !st
-      ? "Your Page could not be read."
-      : "This account has no Page address yet: the person who runs Silica gives each account its own handle."));
+      ? "My Wikis could not be read."
+      : "This account has no public address yet: the person who runs Silica gives each account its own handle."));
     return;
   }
   link.hidden = !st.url;
@@ -542,7 +571,7 @@ function renderPublic(fresh) {
     link.href = st.url + "/";
     link.textContent = st.url.replace(/^https?:\/\//, "") + " ↗";
   }
-  count.textContent = `${st.vaults.length} of ${st.max} vaults`;
+  count.textContent = `${st.vaults.length} of ${st.max} wikis`;
   const v = pubCurVault();
   if (v) pubCur = v.slug;
   const frag = document.createDocumentFragment();
@@ -550,7 +579,7 @@ function renderPublic(fresh) {
   // the vaults of this Page, one tab each, and the way to add one
   const tabs = mkEl("div", "pg-tabs");
   tabs.setAttribute("role", "tablist");
-  tabs.setAttribute("aria-label", "Your vaults");
+  tabs.setAttribute("aria-label", "Your wikis");
   for (const x of st.vaults) {
     const b = mkEl("button", "pg-tab");
     b.type = "button";
@@ -560,23 +589,28 @@ function renderPublic(fresh) {
     b.addEventListener("click", () => openVault(x.slug));
     tabs.append(b);
   }
-  const add = mkEl("button", "pg-tab add", "+ New vault");
+  const add = mkEl("button", "pg-tab add", "+ New wiki");
   add.type = "button";
-  add.disabled = st.vaults.length >= st.max;
-  if (add.disabled) add.title = `a Page holds ${st.max} vaults at most`;
-  add.addEventListener("click", () => { pubAdding = !pubAdding; renderPublic(); });
+  const full = st.vaults.length >= st.max;
+  add.disabled = full && !upgradeOn();
+  if (add.disabled) add.title = `you can publish ${st.max} wikis at most`;
+  add.addEventListener("click", () => {
+    if (full) { upgradeOpen(`A free account publishes ${st.max} wikis`, "Remove one to add another, or move to a paid account."); return; }
+    pubAdding = !pubAdding;
+    renderPublic();
+  });
   tabs.append(add);
   frag.append(tabs);
 
   if (pubAdding || !v) {
     const panel = mkEl("div", "pg-panel");
-    panel.append(mkEl("p", "pg-pt", "Publish a folder of your vault as a vault on your Page"));
+    panel.append(mkEl("p", "pg-pt", "Publish a folder of your vault as a wiki"));
     const row = mkEl("div", "pg-row");
     const sel = document.createElement("select");
     sel.className = "pg-sel";
     sel.setAttribute("aria-label", "Folder");
     for (const f of st.folders) sel.append(Object.assign(document.createElement("option"), { value: f, textContent: f + "/" }));
-    const go = mkEl("button", "pp-go small", "Add vault");
+    const go = mkEl("button", "pp-go small", "Add wiki");
     go.type = "button";
     go.disabled = !st.folders.length || add.disabled;
     go.addEventListener("click", async () => {
@@ -591,12 +625,12 @@ function renderPublic(fresh) {
       row.append(no);
     }
     panel.append(row, mkEl("p", "pp-dim", st.folders.length
-      ? "It starts Off. Inbox, sources/, Plans, Workspaces and templates cannot be vaults, nor a folder inside another vault."
-      : "No folder is left that could be a vault."));
+      ? "It starts Off. Inbox, sources/, Plans, Workspaces and templates cannot be wikis, nor a folder inside another wiki."
+      : "No folder is left that could be a wiki."));
     frag.append(panel);
   }
   if (!v) {
-    frag.append(mkEl("p", "pp-status", `Your Page holds up to ${st.max} vaults, each a folder of your vault. Readers find them at your address, and in Pages if you list them.`));
+    frag.append(mkEl("p", "pp-status", `You can publish up to ${st.max} wikis, each a folder of your vault. Readers find them at your address, and in Pages if you list them.`));
     frag.append(invitesBox(true));
     body.replaceChildren(frag);
     return;
@@ -607,17 +641,17 @@ function renderPublic(fresh) {
   status.hidden = v.visibility !== "off";
   if (v.visibility === "off") {
     status.textContent = v.downgraded
-      ? "Off since this account became Free: a Private vault goes Off. Its readers keep the copies they saved."
+      ? "Off since this account became Free: a Private wiki goes Off. Its readers keep the copies they saved."
       : st.hosted || st.url
-        ? "Off: this vault's address says there is nothing there, and your Page does not show it. Its notes keep their globes for when you turn it on."
-        : `Off. Publish writes it${st.dir ? ` into ${st.dir}` : ""}, as files any static host can serve; a vault on this computer is not listed in Pages.`;
+        ? "Off: this wiki's address says there is nothing there, and your public page does not show it. Its notes keep their globes for when you turn it on."
+        : `Off. Publish writes it${st.dir ? ` into ${st.dir}` : ""}, as files any static host can serve; a wiki on this computer is not listed in Pages.`;
   }
 
   // the head of the vault in hand: its title and line, edited in place
   const head = mkEl("div", "pg-head");
   const tl = mkEl("div", "pg-tl");
   const title = Object.assign(document.createElement("input"), { className: "pg-ed pg-ed-t", value: v.title, maxLength: 80 });
-  title.setAttribute("aria-label", "Title of this vault");
+  title.setAttribute("aria-label", "Title of this wiki");
   title.dataset.keep = "title";
   title.title = "Edit the title";
   const save = (key, el) => {
@@ -636,14 +670,15 @@ function renderPublic(fresh) {
   }
   const lock = st.private === "ok" ? null : mkEl("span", "pg-lock");
   if (lock) lock.innerHTML = pubSvg(12, false, true);
-  ctl.append(pgSeg("Who can read this vault", [["off", "Off"], ["public", "Public"], ["private", "Private", lock]], v.visibility, (x) => {
+  ctl.append(pgSeg("Who can read this wiki", [["off", "Off"], ["public", "Public"], ["private", "Private", lock]], v.visibility, (x) => {
     if (x === v.visibility) return;
+    if (x === "private" && upgradeOn()) { upgradeOpen("Private wikis come with a paid account", "A Private wiki is read only by the accounts you name."); return; }
     if (x === "private" && st.private !== "ok") { status.hidden = false; status.replaceChildren(...upsellText(st.private)); return; }
     pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { visibility: x });
   }));
   tl.append(title, ctl);
-  const line = Object.assign(document.createElement("input"), { className: "pg-ed pg-ed-l", value: v.line, maxLength: 160, placeholder: "One line about this vault" });
-  line.setAttribute("aria-label", "One line about this vault");
+  const line = Object.assign(document.createElement("input"), { className: "pg-ed pg-ed-l", value: v.line, maxLength: 160, placeholder: "One line about this wiki" });
+  line.setAttribute("aria-label", "One line about this wiki");
   line.dataset.keep = "line";
   line.title = "Edit the line";
   line.addEventListener("change", () => save("line", line));
@@ -676,7 +711,7 @@ function renderPublic(fresh) {
   const notes = [];
   if (v.struck) notes.push(`${pubCount(v.struck)} left out by their own globe`);
   if (v.new) notes.push(`${pubCount(v.new)} new since the last publish`);
-  if (st.outside) notes.push(`${pubCount(st.outside)} with publish: true outside every vault stay in your vault`);
+  if (st.outside) notes.push(`${pubCount(st.outside)} with publish: true outside every wiki stay in your vault`);
   if (notes.length) goes.append(mkEl("p", "pp-dim", notes.join(" · ")));
   grid.append(goes);
   if (v.visibility === "private") grid.append(readersBox(v));
@@ -698,10 +733,10 @@ function renderPublic(fresh) {
     renderPublic();
   });
   row.append(go, mkEl("span", "pp-dim", v.visibility === "private"
-    ? "Your readers get the vault as it is when you publish, as an invitation to save it."
-    : "Readers see the vault as it is when you publish; a note written later in its folder goes out the next time."));
+    ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
+    : "Readers see the wiki as it is when you publish; a note written later in its folder goes out the next time."));
   if (v.visibility === "off") {
-    const rm = mkEl("button", "st-btn", "Remove from your Page");
+    const rm = mkEl("button", "st-btn", "Remove from My Wikis");
     rm.type = "button";
     rm.title = "the folder and its notes stay as they are";
     rm.addEventListener("click", async () => { const r = await pubPost(`/public/vault/${encodeURIComponent(v.slug)}/remove`); if (r) { pubCur = ""; renderPublic(true); } });
@@ -749,7 +784,7 @@ function readersBox(v) {
     ul.append(li);
   }
   if (!v.readers.length) ul.append(mkEl("li", "pp-dim", "No readers yet: invite one by their handle."));
-  box.append(row, ul, mkEl("p", "pp-dim", "Each reader gets an invitation in their own Silica and saves the vault there; nothing is written in their vault until they do. Removing a reader cancels an invitation not yet saved. A copy already saved stays theirs, with your name on every note, and cannot go on their own Page."));
+  box.append(row, ul, mkEl("p", "pp-dim", "Each reader gets an invitation in their own Silica and saves the wiki there; nothing is written in their vault until they do. Removing a reader cancels an invitation not yet saved. A copy already saved stays theirs, with your name on every note, and cannot go on their own Page."));
   return box;
 }
 
@@ -774,7 +809,7 @@ function invitesBox(alone) {
     li.append(no, yes);
     ul.append(li);
   }
-  if (!n) ul.append(mkEl("li", "pp-dim", "No invitations. When an account names you as a reader of a Private vault, it appears here."));
+  if (!n) ul.append(mkEl("li", "pp-dim", "No invitations. When an account names you as a reader of a Private wiki, it appears here."));
   box.append(ul, mkEl("p", "pp-dim", "Free and paid accounts both receive. A saved copy lands in Saved/@handle/ and is a write like any other: it can be taken back."));
   box.hidden = alone ? false : !n;
   return box;
@@ -848,7 +883,7 @@ async function openSaveSheet(what) {
     return;
   }
   const head = mkEl("div", "sv-card");
-  head.append(mkEl("b", "", p.title), mkEl("span", "", `by ${p.author}`), mkEl("code", "", what.invite ? "a Private vault shared with you" : (p.source || p.url || "").replace(/^https:\/\//, "")));
+  head.append(mkEl("b", "", p.title), mkEl("span", "", `by ${p.author}`), mkEl("code", "", what.invite ? "a Private wiki shared with you" : (p.source || p.url || "").replace(/^https:\/\//, "")));
   const parts = [head];
   if (p.kind === "note") {
     parts.push(mkEl("p", "st-sheet-text", `Into ${p.folder}.`));
@@ -900,7 +935,7 @@ async function openSaveSheet(what) {
       : `Your vault holds ${room.notes.toLocaleString("en-GB")} notes${room.max_notes ? ` of ${room.max_notes.toLocaleString("en-GB")}` : ""}; after saving, ${(room.notes + p.notes).toLocaleString("en-GB")}.`));
   }
   if (p.license) parts.push(mkEl("p", "st-sheet-text", `License: ${p.license === "not stated" ? "not stated by the author" : p.license}.`));
-  parts.push(mkEl("p", "sv-snap", `This saves the vault as it is today, as one write you can take back. If ${p.author} edits or removes a note later, your copy stays as saved.`));
+  parts.push(mkEl("p", "sv-snap", `This saves the wiki as it is today, as one write you can take back. If ${p.author} edits or removes a note later, your copy stays as saved.`));
   card.replaceChildren(...parts);
   go.textContent = p.notes ? `save ${pubCount(p.notes)}` : "nothing new to save";
   go.disabled = !p.notes || !!room.short;
@@ -915,6 +950,10 @@ function closeSaveSheet() {
   saveNotes = null;
 }
 
+$("#upgrade-not").addEventListener("click", upgradeClose);
+// stopped here, or the one Escape handler closes whatever lies under the window too
+$("#upgrade-sheet").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); upgradeClose(); } });
+$("#upgrade-sheet").addEventListener("click", (e) => { if (e.target === e.currentTarget) upgradeClose(); });
 $("#save-cancel").addEventListener("click", closeSaveSheet);
 $("#save-sheet").addEventListener("keydown", (e) => { if (e.key === "Escape") closeSaveSheet(); });
 $("#save-go").addEventListener("click", async () => {
