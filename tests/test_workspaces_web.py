@@ -34,12 +34,13 @@ Answer in Italian and cite the page.
 @pytest.fixture
 def client(tmp_vault):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     tmp_vault.note("Courses/Econometrics/Panel data.md", "# Panel data\n\nFixed effects.\n")
     tmp_vault.note("Courses/Statistics/Bayes.md", "# Bayes\n\nPriors.\n")
     tmp_vault.note("Inbox/Dataset README.md", "# Dataset\n\nColumns.\n")
     tmp_vault.note("Workspaces/Thesis.md", WS)
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 
@@ -69,6 +70,7 @@ def test_create_add_remove_and_membership(client):
 
 
 def test_a_chat_opened_in_a_workspace_is_scoped_instructed_and_lists_what_it_writes(client, monkeypatch, tmp_vault):
+    from silica.ui.web.session import SESSION
     tc, server = client
     from silica.kernel import workspaces
 
@@ -90,7 +92,7 @@ def test_a_chat_opened_in_a_workspace_is_scoped_instructed_and_lists_what_it_wri
     assert seen["allow"] == frozenset({"Courses/Econometrics/Panel data", "Inbox/Dataset README"})
     (line,) = seen["system"]
     assert '"Thesis" (2 notes)' in line and "Answer in Italian and cite the page." in line
-    user = next(m for m in server.messages if m["role"] == "user")
+    user = next(m for m in SESSION.chat.messages if m["role"] == "user")
     assert user["silica_workspace"] == "Workspaces/Thesis.md"
     assert "Summary" in workspaces.find_workspace("Thesis")["notes"]     # the written note joined
     assert workspaces.allow_keys() is None                                # the scope ends with the turn
@@ -98,6 +100,7 @@ def test_a_chat_opened_in_a_workspace_is_scoped_instructed_and_lists_what_it_wri
 
 
 def test_closing_the_scope_widens_the_next_turn_and_edits_the_line_in_place(client, monkeypatch):
+    from silica.ui.web.session import SESSION
     tc, server = client
     from silica.kernel import workspaces
 
@@ -110,16 +113,17 @@ def test_closing_the_scope_widens_the_next_turn_and_edits_the_line_in_place(clie
 
     monkeypatch.setattr(server, "run_agent", fake_run_agent)
     tc.post("/chat", json={"text": "one", "workspace": "Thesis"})
-    n = len([m for m in server.messages if m.get("origin") == "workspace"])
+    n = len([m for m in SESSION.chat.messages if m.get("origin") == "workspace"])
     tc.post("/chat", json={"text": "two"})
-    lines = [m["content"] for m in server.messages if m.get("origin") == "workspace"]
+    lines = [m["content"] for m in SESSION.chat.messages if m.get("origin") == "workspace"]
     assert n == 1 and len(lines) == 1 and "no longer limited" in lines[0]
     assert allows[0] is not None and allows[1] is None
-    users = [m for m in server.messages if m["role"] == "user"]
+    users = [m for m in SESSION.chat.messages if m["role"] == "user"]
     assert "silica_workspace" in users[0] and "silica_workspace" not in users[1]
 
 
 def test_a_reopened_chat_keeps_the_scope_of_its_last_turn(client, monkeypatch):
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -128,12 +132,12 @@ def test_a_reopened_chat_keeps_the_scope_of_its_last_turn(client, monkeypatch):
 
     monkeypatch.setattr(server, "run_agent", fake_run_agent)
     tc.post("/chat", json={"text": "one", "workspace": "Thesis"})
-    sid = server.current_session_id
+    sid = SESSION.chat.sid
     tc.post("/reset")
     assert tc.get("/workspaces").json()["current"] is None
     assert tc.post("/session/load", json={"id": sid}).status_code == 200
     assert tc.get("/workspaces").json()["current"] == "Workspaces/Thesis.md"
-    assert any(m.get("origin") == "workspace" for m in server.messages)
+    assert any(m.get("origin") == "workspace" for m in SESSION.chat.messages)
 
 
 def test_the_internal_key_never_reaches_the_provider():

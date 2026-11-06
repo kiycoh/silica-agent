@@ -146,12 +146,13 @@ def client(tmp_vault):
     from fastapi.testclient import TestClient
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     tmp_vault.note("Corso/A.md", "# A\n")
     tmp_vault.note("Corso/B.md", "# B\n")
-    server._reset_session()
+    SESSION.reset()
     yield TestClient(server.app), Path(CONFIG.vault_path)
-    server._end_turn()
+    SESSION.release()
 
 
 def test_the_gui_lists_restores_one_note_and_erases(client):

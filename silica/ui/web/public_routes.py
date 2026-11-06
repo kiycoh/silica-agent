@@ -403,9 +403,10 @@ async def save_preview(request: Request, url: str = ""):
 
 
 async def _write_turn(fn, *args, **kwargs):
-    from silica.ui.web.server import _begin_turn, _embed_imported, _end_turn
+    from silica.ui.web.server import _embed_imported
+    from silica.ui.web.session import SESSION
 
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(409, "a turn is running: save when it ends")
     try:
         out = await asyncio.to_thread(fn, *args, **kwargs)
@@ -415,7 +416,7 @@ async def _write_turn(fn, *args, **kwargs):
         logger.warning("save failed: %s: %s", type(exc).__name__, exc)
         raise HTTPException(502, "that page could not be read right now")
     finally:
-        _end_turn()
+        SESSION.release()
     folder = out["folder"] if isinstance(out, dict) else str(Path(out).parent)
     _embed_imported({folder})
     return out

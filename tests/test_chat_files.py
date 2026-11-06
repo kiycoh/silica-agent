@@ -31,13 +31,14 @@ def chat(tmp_vault, monkeypatch):
     """The GUI with the transcriber stood in for and the agent recorded: each
     turn keeps its user message and the tools it was offered."""
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     for key in (adm.MAX_MINUTES_ENV, adm.MONTHLY_MINUTES_ENV, "SILICA_HOSTED"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(conv, "_media_to_audio", lambda src, wd, mp3=False: _wav(Path(wd) / f"{src.stem}.wav", 5))
     monkeypatch.setitem(conv.ASR_PROVIDERS, "endpoint", lambda audio: "The lecture said the sky is blue.")
     monkeypatch.setattr(adm, "probe_seconds", lambda src: 5.0)
-    server._reset_session()
+    SESSION.reset()
     turns: list[dict] = []
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, constraints=None, **kw):
@@ -57,9 +58,10 @@ def _drain():
 
 
 def _folder(server) -> str:
+    from silica.ui.web.session import SESSION
     from silica.kernel.base.layout import chat_folder
 
-    return chat_folder(server.current_session_id)
+    return chat_folder(SESSION.chat.sid)
 
 
 def _vault() -> Path:
@@ -116,9 +118,10 @@ def test_a_file_too_long_to_include_is_named_with_its_outline_and_read_first(tmp
 # --- point 6: the turns a read file offers ------------------------------------------------
 
 def test_summarize_and_quiz_compose_their_request_and_withhold_the_injector(chat):
+    from silica.ui.web.session import SESSION
     tc, server, turns = chat
     for kind, lead in (("summarize", server.SUMMARIZE_ASK), ("quiz", server.QUIZ_ASK)):
-        server._reset_session()
+        SESSION.reset()
         r = tc.post("/nucleate", files=[("files", (f"{kind}.mp3", kind.encode() * 9, "audio/mpeg"))])
         _drain()
         assert tc.post(f"/jobs/{r.json()['jobs'][0]['id']}/turn", json={"as": kind}).status_code == 200
@@ -169,9 +172,10 @@ def test_add_to_vault_refuses_to_overwrite_another_file_of_the_same_name(chat):
 
 
 def test_deleting_a_chat_deletes_its_files(chat):
+    from silica.ui.web.session import SESSION
     tc, server, _ = chat
     tc.post("/nucleate", data={"text": "leggi"}, files=[("files", ("note.md", b"# A\n\nbody", "text/markdown"))])
-    sid, folder = server.current_session_id, _vault() / _folder(server)
+    sid, folder = SESSION.chat.sid, _vault() / _folder(server)
     assert (folder / "note.md").exists()
     assert tc.post("/session/delete", json={"id": sid}).json() == {"ok": True}
     assert not folder.exists()
@@ -190,18 +194,20 @@ def test_messages_serve_the_typed_words_and_the_files(chat):
 
 
 def test_a_drop_names_its_chat_at_once(chat):
+    from silica.ui.web.session import SESSION
     from silica.obs import narration
 
     tc, server, _ = chat
     tc.post("/nucleate", data={"text": "riassumi i findings\nper favore"},
             files=[("files", ("talk.mp3", b"\0" * 64, "audio/mpeg"))])
     rows = narration.list_sessions(str(_vault()))
-    assert [r["title"] for r in rows if r["id"] == server.current_session_id] == ["riassumi i findings"]
+    assert [r["title"] for r in rows if r["id"] == SESSION.chat.sid] == ["riassumi i findings"]
 
 
 # --- point 7: the last turn asked again -----------------------------------------------------
 
 def test_redo_regenerates_and_edit_replaces_the_words_keeping_the_files(chat):
+    from silica.ui.web.session import SESSION
     from silica.obs import narration
 
     tc, server, turns = chat
@@ -213,18 +219,19 @@ def test_redo_regenerates_and_edit_replaces_the_words_keeping_the_files(chat):
     assert tc.post("/turn/redo", json={"text": "e il mare?"}).status_code == 200
     content = turns[-1]["msg"]["content"]
     assert content.startswith("e il mare?") and "il cielo" in content and "cosa dice?" not in content
-    users = [m for m in server.messages if m["role"] == "user"]
+    users = [m for m in SESSION.chat.messages if m["role"] == "user"]
     assert [u.get("silica_said", u["content"]) for u in users] == ["prima domanda", "e il mare?"]
     # The narration folds the rewinds the same way, so a reload agrees.
-    beats = narration.read_beats(narration.narration_dir() / f"{server.current_session_id}.jsonl")
+    beats = narration.read_beats(narration.narration_dir() / f"{SESSION.chat.sid}.jsonl")
     replayed = [m for m in narration.messages_from_beats(beats) if m["role"] == "user"]
     assert [u.get("silica_said", u["content"]) for u in replayed] == ["prima domanda", "e il mare?"]
     assert tc.post("/turn/redo", json={"text": "  "}).status_code == 400
 
 
 def test_redo_refuses_a_direct_command(chat):
+    from silica.ui.web.session import SESSION
     tc, server, _ = chat
-    server.messages.append({"role": "user", "content": "/vault", "origin": "cli"})
+    SESSION.chat.messages.append({"role": "user", "content": "/vault", "origin": "cli"})
     assert tc.post("/turn/redo", json={}).status_code == 409
 
 

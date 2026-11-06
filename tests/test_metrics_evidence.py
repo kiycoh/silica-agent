@@ -28,8 +28,9 @@ from tests.webassets import app_css, app_js
 def client(tmp_vault, tmp_path, monkeypatch):
     """Fresh module-level session per test, backed by a tmp fs vault."""
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 

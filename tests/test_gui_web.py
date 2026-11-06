@@ -41,10 +41,11 @@ def _read_sse(response) -> list[dict]:
 def client(tmp_vault, tmp_path, monkeypatch):
     """Fresh module-level session per test, backed by a tmp fs vault."""
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     # SESSIONS_DIR is gone with the snapshot store: sessions live in the
     # narration under _SILICA_HOME, already tmp-isolated by conftest.
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 
@@ -334,6 +335,7 @@ def test_health_reports_only_what_needs_fixing(client, monkeypatch):
 
 def test_direct_command_runs_without_an_llm_round_trip(client, monkeypatch):
     """/plans is REPL-direct: the GUI must run it inline, not hand it to the agent."""
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def boom(*a, **kw):
@@ -343,12 +345,13 @@ def test_direct_command_runs_without_an_llm_round_trip(client, monkeypatch):
 
     events = _read_sse(tc.post("/chat", json={"text": "/plans"}))
     assert events[-1]["type"] == "done"
-    assert [m["content"] for m in server.messages if m["role"] == "user"] == ["/plans"]
+    assert [m["content"] for m in SESSION.chat.messages if m["role"] == "user"] == ["/plans"]
 
 
 def test_declined_direct_command_leaves_no_duplicate_user_turn(client, monkeypatch):
     """Every slash command is offered to the direct handler first; one it declines
     must fall through with exactly ONE user turn in history — the expanded one."""
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -358,7 +361,7 @@ def test_declined_direct_command_leaves_no_duplicate_user_turn(client, monkeypat
     monkeypatch.setattr(server, "run_agent", fake_run_agent)
 
     tc.post("/chat", json={"text": "/summarize Concepts/RAG.md"})
-    users = [m["content"] for m in server.messages if m["role"] == "user"]
+    users = [m["content"] for m in SESSION.chat.messages if m["role"] == "user"]
     assert len(users) == 1, f"duplicated user turn: {users}"
     assert users[0] != "/summarize Concepts/RAG.md", "the agent got the raw command, not the expansion"
     # a reload draws what was typed, never the directive the model read
@@ -367,6 +370,7 @@ def test_declined_direct_command_leaves_no_duplicate_user_turn(client, monkeypat
 
 
 def test_chat_streams_events_and_appends_the_user_message(client, monkeypatch):
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -386,7 +390,7 @@ def test_chat_streams_events_and_appends_the_user_message(client, monkeypatch):
     assert "delta" in types
     assert types[-1] == "done"
     assert events[-1]["answer"] == "Hello"
-    assert any(m["role"] == "user" and m["content"] == "hi there" for m in server.messages)
+    assert any(m["role"] == "user" and m["content"] == "hi there" for m in SESSION.chat.messages)
 
 
 def test_inline_slash_command_reports_its_own_result_not_an_error(client, monkeypatch):
@@ -448,6 +452,7 @@ def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypa
     answer arrives as markdown (not a fenced text block) and carries the Sources
     block built from the trace. A direct handler here would append the captured
     answer a second time."""
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None,
@@ -471,7 +476,7 @@ def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypa
     assert "## Sources (web)" in done["answer"]
     assert "https://a.test/rw" in done["answer"]
     # history carries what the user saw
-    assert server.messages[-1]["content"] == done["answer"]
+    assert SESSION.chat.messages[-1]["content"] == done["answer"]
 
 
 def test_bare_web_without_a_question_yields_one_usage_error(client):
@@ -529,6 +534,7 @@ def test_an_unknown_slash_command_is_still_reported_as_unavailable(client):
 def test_run_turn_yields_raw_dicts_not_sse_frames(client, monkeypatch):
     """The transport-neutral core: raw wire dicts, no `data: ` framing, ending
     in one `done` dict. This is what both `--gui` (SSE) and `connect` (WS) wrap."""
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -546,8 +552,8 @@ def test_run_turn_yields_raw_dicts_not_sse_frames(client, monkeypatch):
     assert any(i["type"] == "delta" and i["text"] == "Hi" for i in items[:-1])
     assert items[-1]["type"] == "done"
     assert items[-1]["answer"] == "Hi"
-    assert any(m["role"] == "user" and m["content"] == "hello" for m in server.messages)
-    assert server._busy is False  # gate freed on normal completion
+    assert any(m["role"] == "user" and m["content"] == "hello" for m in SESSION.chat.messages)
+    assert SESSION.busy is False  # gate freed on normal completion
 
 
 
@@ -555,6 +561,7 @@ def test_a_chat_image_rides_its_turn_and_history_keeps_only_its_path(client, mon
     """ADR-0077 point 3: the pixels go to the model once, as an image_url part;
     the transcript, the narration and every later turn carry the saved path,
     which silica_look opens again, never the base64."""
+    from silica.ui.web.session import SESSION
     import base64
     tc, server = client
     seen = {}
@@ -571,7 +578,7 @@ def test_a_chat_image_rides_its_turn_and_history_keeps_only_its_path(client, mon
     assert events[-1]["type"] == "done"
     text, image = seen["content"]
     assert image == {"type": "image_url", "image_url": {"url": png}}
-    user = next(m for m in server.messages if m["role"] == "user" and "Cosa mostra?" in str(m["content"]))
+    user = next(m for m in SESSION.chat.messages if m["role"] == "user" and "Cosa mostra?" in str(m["content"]))
     assert isinstance(user["content"], str) and "base64" not in user["content"]
     saved = Path(user["content"].split("[image attached: ")[1].split("]")[0])
     assert saved.read_bytes() == b"\x89PNG fake" and text["text"] == user["content"]
@@ -580,6 +587,7 @@ def test_a_chat_image_rides_its_turn_and_history_keeps_only_its_path(client, mon
 def test_a_text_only_chat_model_gets_the_attached_image_as_words(client, monkeypatch):
     """ADR-0077 amendment 2026-10-21: with a vision model of its own, the chat
     model never receives pixels; the reading rides the turn, the path stays."""
+    from silica.ui.web.session import SESSION
     import base64
     from silica import config as cfg_mod
     from silica.agent import vision
@@ -601,7 +609,7 @@ def test_a_text_only_chat_model_gets_the_attached_image_as_words(client, monkeyp
     assert events[-1]["type"] == "done"
     assert isinstance(seen["content"], str) and "base64" not in seen["content"]
     assert "Una lavagna con due formule." in seen["content"]
-    user = next(m for m in server.messages if m["role"] == "user" and "Cosa mostra?" in str(m["content"]))
+    user = next(m for m in SESSION.chat.messages if m["role"] == "user" and "Cosa mostra?" in str(m["content"]))
     assert "[image attached: " in user["content"] and "Una lavagna con due formule." not in user["content"]
 
 
@@ -628,6 +636,7 @@ def test_chat_refuses_an_attachment_that_is_not_an_image(client):
 def test_run_turn_error_path_yields_one_error_and_frees_the_gate(client, monkeypatch):
     """A worker crash ends the stream with exactly one `error` dict, and the
     busy-gate is freed (never leave the UI stuck, never wedge the next turn)."""
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def boom(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -644,7 +653,7 @@ def test_run_turn_error_path_yields_one_error_and_frees_the_gate(client, monkeyp
     # The raw text rides `detail`; `error` is the authored sentence (P3).
     assert "kaboom" in items[-1]["detail"]
     assert "kaboom" not in items[-1]["error"]
-    assert server._busy is False
+    assert SESSION.busy is False
 
 
 def test_run_turn_abandonment_holds_gate_until_worker_exits(client, monkeypatch):
@@ -669,6 +678,7 @@ def test_run_turn_abandonment_holds_gate_until_worker_exits(client, monkeypatch)
     monkeypatch.setattr(server, "run_agent", slow)
 
     async def scenario():
+        from silica.ui.web.session import SESSION
         gen = server.run_turn("hi")
         first = await gen.__anext__()  # one delta, then abandon
         assert first["type"] == "delta"
@@ -676,15 +686,15 @@ def test_run_turn_abandonment_holds_gate_until_worker_exits(client, monkeypatch)
         await gen.aclose()  # GeneratorExit into run_turn
 
         # zombie still alive → gate closed, cancel signalled
-        assert server._busy is True
-        assert server.current_cancel is not None and server.current_cancel.is_set()
+        assert SESSION.busy is True
+        assert SESSION.cancel is not None and SESSION.cancel.is_set()
 
         # once the worker sees the cancel and exits, its done-callback frees the gate
         for _ in range(400):
-            if not server._busy:
+            if not SESSION.busy:
                 break
             await asyncio.sleep(0.005)
-        assert server._busy is False
+        assert SESSION.busy is False
 
     asyncio.run(scenario())
 
@@ -800,19 +810,20 @@ def test_a_stream_dropped_during_a_keepalive_still_holds_the_gate_for_the_worker
     monkeypatch.setattr(server, "run_agent", slow)
 
     async def scenario():
-        assert server._begin_turn() is True
+        from silica.ui.web.session import SESSION
+        assert SESSION.claim() is True
         stream = server._turn_response("hi").body_iterator
         assert await stream.__anext__() == ": keepalive\n\n"
         await asyncio.to_thread(started.wait, 1.0)
         await stream.aclose()
 
-        assert server._busy is True
-        assert server.current_cancel is not None and server.current_cancel.is_set()
+        assert SESSION.busy is True
+        assert SESSION.cancel is not None and SESSION.cancel.is_set()
         for _ in range(400):
-            if not server._busy:
+            if not SESSION.busy:
                 break
             await asyncio.sleep(0.005)
-        assert server._busy is False
+        assert SESSION.busy is False
 
     asyncio.run(scenario())
 
@@ -821,15 +832,17 @@ def test_sweep_frees_the_gate_when_no_worker_ever_started(client):
     """Never-iterated generator (client drops between POST and first __anext__):
     run_turn never runs, so the SSE background sweep frees the eagerly-claimed
     gate. Guards against a permanently 409-locked server."""
+    from silica.ui.web.session import SESSION
     tc, server = client
-    assert server._begin_turn() is True
-    assert server._busy is True
-    server.current_task = None  # no worker was created
-    server._sweep_if_orphaned()
-    assert server._busy is False
+    assert SESSION.claim() is True
+    assert SESSION.busy is True
+    SESSION.task = None  # no worker was created
+    SESSION.sweep_if_orphaned()
+    assert SESSION.busy is False
 
 
 def test_nucleate_stages_uploads_and_hands_files_to_the_agent(client, monkeypatch):
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     ran: dict = {}
@@ -851,7 +864,7 @@ def test_nucleate_stages_uploads_and_hands_files_to_the_agent(client, monkeypatc
     from silica.config import CONFIG
     from silica.kernel.base.layout import chat_folder
 
-    folder = chat_folder(server.current_session_id)
+    folder = chat_folder(SESSION.chat.sid)
     saved = Path(CONFIG.vault_path) / folder / "note.md"
     assert saved.exists()  # landed in the chat's own folder (ADR-0121 point 5)
     assert not (Path(CONFIG.vault_path) / "Inbox" / "note.md").exists()
@@ -867,6 +880,7 @@ def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkey
     """No words with the drop: the turn describes and asks (t03 2026-10-14 ran
     a 22-file nucleate off a bare drop), from the file's text when it fits
     (ADR-0121 point 2) and from an outline when it does not."""
+    from silica.ui.web.session import SESSION
     tc, server = client
     ran: dict = {}
 
@@ -884,15 +898,16 @@ def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkey
     from silica.kernel.base.layout import chat_folder
 
     assert user.startswith(server.DROP_ASK)
-    assert f'<file path="{chat_folder(server.current_session_id)}/bio.md">' in user and "## Inibizione" in user
+    assert f'<file path="{chat_folder(SESSION.chat.sid)}/bio.md">' in user and "## Inibizione" in user
     monkeypatch.setattr(server, "_INLINE_CHARS", 10)
     assert "sections: Enzimi; Cinetica; Inibizione" in server._compose_nucleate_turn(
-        "", [f"{chat_folder(server.current_session_id)}/bio.md"], [])
+        "", [f"{chat_folder(SESSION.chat.sid)}/bio.md"], [])
 
 
 def test_a_dropped_file_lands_in_its_chat_inside_the_write_boundary(client, monkeypatch):
     """A vault that writes only under docs/silica keeps a chat's files there,
     not in a folder at the root of what may be a repository (ADR-0121 point 5)."""
+    from silica.ui.web.session import SESSION
     from silica.config import CONFIG
     from silica.kernel.base.manifest import reset_manifest_cache
 
@@ -905,7 +920,7 @@ def test_a_dropped_file_lands_in_its_chat_inside_the_write_boundary(client, monk
     resp = tc.post("/nucleate", files=[("files", ("note.md", b"# Hi\n\nbody", "text/markdown"))])
 
     assert resp.status_code == 200
-    assert (root / f"docs/silica/.silica-chat/{server.current_session_id}/note.md").exists()
+    assert (root / f"docs/silica/.silica-chat/{SESSION.chat.sid}/note.md").exists()
     assert not (root / "Inbox/note.md").exists() and not (root / ".silica-chat").exists()
 
 
@@ -924,6 +939,7 @@ def test_compose_nucleate_turn_defaults_empty_text_and_lists_files():
 
 
 def test_reset_restores_a_fresh_session(client, monkeypatch):
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -933,21 +949,22 @@ def test_reset_restores_a_fresh_session(client, monkeypatch):
     monkeypatch.setattr(server, "run_agent", fake_run_agent)
 
     tc.post("/chat", json={"text": "hi"})
-    assert any(m["role"] == "user" for m in server.messages)
+    assert any(m["role"] == "user" for m in SESSION.chat.messages)
 
     r = tc.post("/reset")
     assert r.status_code == 200
-    assert not any(m["role"] in ("user", "assistant") for m in server.messages)
+    assert not any(m["role"] in ("user", "assistant") for m in SESSION.chat.messages)
 
 
 def test_stop_signals_the_in_flight_cancel_token(client):
+    from silica.ui.web.session import SESSION
     tc, server = client
     import threading
 
-    server.current_cancel = threading.Event()
+    SESSION.cancel = threading.Event()
     r = tc.post("/stop")
     assert r.status_code == 200
-    assert server.current_cancel.is_set()
+    assert SESSION.cancel.is_set()
 
 
 def test_messages_endpoint_returns_user_and_assistant_turns(client, monkeypatch):
@@ -968,12 +985,13 @@ def test_messages_endpoint_returns_user_and_assistant_turns(client, monkeypatch)
 
 def test_messages_endpoint_replays_the_tool_calls_of_a_turn(client):
     """Reopening a chat has to show the steps, and a failed one as failed."""
+    from silica.ui.web.session import SESSION
     tc, server = client
     call = lambda cid, name, args: {  # noqa: E731
         "id": cid, "type": "function",
         "function": {"name": name, "arguments": json.dumps(args)},
     }
-    server.messages += [
+    SESSION.chat.messages += [
         {"role": "user", "content": "q"},
         {"role": "assistant", "content": "Let me look.", "silica_reasoning": "the vault may hold it",
          "tool_calls": [call("c1", "silica_read_note", {"name": "a.md"}),
@@ -993,6 +1011,7 @@ def test_messages_endpoint_replays_the_tool_calls_of_a_turn(client):
 
 
 def test_sessions_persist_across_reset_and_reload(client, monkeypatch):
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -1011,12 +1030,12 @@ def test_sessions_persist_across_reset_and_reload(client, monkeypatch):
 
     # new chat clears the live session; the saved one survives on disk
     tc.post("/reset")
-    assert not any(m["role"] in ("user", "assistant") for m in server.messages)
+    assert not any(m["role"] in ("user", "assistant") for m in SESSION.chat.messages)
 
     r = tc.post("/session/load", json={"id": sid})
     assert r.status_code == 200
-    assert any(m.get("content") == "Reply one" for m in server.messages)
-    assert server.current_session_id == sid
+    assert any(m.get("content") == "Reply one" for m in SESSION.chat.messages)
+    assert SESSION.chat.sid == sid
 
     # unknown / path-traversal ids are rejected
     assert tc.post("/session/load", json={"id": "../../etc/passwd"}).status_code == 404
@@ -1912,12 +1931,13 @@ class TestOwnSessionCapture:
 
     @pytest.fixture(autouse=True)
     def _opt_in(self, client, tmp_path, monkeypatch):
+        from silica.ui.web.session import SESSION
         from silica.config import CONFIG
 
         monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / "silica-home")
         monkeypatch.setattr(CONFIG, "capture_sessions", True)
         _, server = client
-        server.messages.extend([
+        SESSION.chat.messages.extend([
             {"role": "user", "content": "does the GUI capture its own chats?"},
             {"role": "assistant", "content": "Only when you opt in. " * 20},
         ])
@@ -1936,8 +1956,9 @@ class TestOwnSessionCapture:
         assert len(self._envelopes()) == 1
 
     def test_shutting_the_server_down_flushes_the_live_chat(self, client, monkeypatch):
+        from silica.ui.web.session import SESSION
         _, server = client
-        monkeypatch.setattr(server, "_reset_session", lambda: None)  # keep the history
+        monkeypatch.setattr(SESSION, "reset", lambda: None)  # keep the history
         import uvicorn
         # Server.run, not uvicorn.run: serve() builds the Server itself so the
         # beat stream can read should_exit. Patching the call serve() no longer
@@ -2511,10 +2532,11 @@ def test_gui_seed_is_the_tui_seed(tmp_vault, monkeypatch):
     import datetime as dt
 
     from silica.cli import seed_messages
-    from silica.ui.web import server
+    from silica.ui.web.session import SESSION
+    from silica.ui.web import session
 
-    server._build_seed()
-    gui = [m["content"] for m in server._seed[0]]
+    session.build_seed()
+    gui = [m["content"] for m in SESSION.seed[0]]
     tui = [m["content"] for m in seed_messages()]
 
     # Same messages, two differences: the GUI prompt carries the math block, and
@@ -2953,11 +2975,12 @@ def test_the_beat_stream_ends_when_the_server_is_leaving(client, monkeypatch):
     while the wait is still polite — and no cancelled connection task prints
     the 40-line ASGI traceback that reads as a crash under a Ctrl+C.
     """
+    from silica.ui.web.session import SESSION
     import threading
     from types import SimpleNamespace
 
     c, server = client
-    monkeypatch.setattr(server, "_SERVER", SimpleNamespace(should_exit=True))
+    monkeypatch.setattr(SESSION, "server", SimpleNamespace(should_exit=True))
     monkeypatch.setattr(server, "_SSE_POLL_S", 0.01)
     # Read in a thread with a join deadline: a regression here is a HANG, and a
     # hung suite says less than a red test does.
@@ -2978,19 +3001,21 @@ def test_serve_keeps_a_handle_on_the_server_it_runs(monkeypatch):
     import uvicorn
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
+    from silica.ui.web import session
 
-    monkeypatch.setattr(server, "_SERVER", None)
+    monkeypatch.setattr(SESSION, "server", None)
     ran: list[bool] = []
     monkeypatch.setattr(uvicorn.Server, "run",
                         lambda self, sockets=None: ran.append(True))
-    monkeypatch.setattr(server, "_reset_session", lambda: None)
-    monkeypatch.setattr(server, "_capture_own_session", lambda: None)
+    monkeypatch.setattr(SESSION, "reset", lambda: None)
+    monkeypatch.setattr(session, "capture_own_session", lambda: None)
     monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
 
     server.serve(port=8799)
     assert ran == [True], "the fake never ran: this test would bind a real port"
-    assert server._SERVER is not None, "nothing can ask this server to stop"
-    assert server._SERVER.config.timeout_graceful_shutdown == 1
+    assert SESSION.server is not None, "nothing can ask this server to stop"
+    assert SESSION.server.config.timeout_graceful_shutdown == 1
 
 
 def test_a_hosted_tenant_listens_on_its_socket_and_answers_to_its_public_name(monkeypatch, tmp_path):
@@ -2999,18 +3024,20 @@ def test_a_hosted_tenant_listens_on_its_socket_and_answers_to_its_public_name(mo
     import uvicorn
 
     from silica.ui.web import security, server
+    from silica.ui.web.session import SESSION
+    from silica.ui.web import session
 
     sock = str(tmp_path / "gui.sock")
     monkeypatch.setenv("SILICA_GUI_SOCKET", sock)
     monkeypatch.setenv("SILICA_GUI_HOSTS", " Silica.Example.dev , ")
-    monkeypatch.setattr(server, "_SERVER", None)
+    monkeypatch.setattr(SESSION, "server", None)
     monkeypatch.setattr(uvicorn.Server, "run", lambda self, sockets=None: None)
-    monkeypatch.setattr(server, "_reset_session", lambda: None)
-    monkeypatch.setattr(server, "_capture_own_session", lambda: None)
+    monkeypatch.setattr(SESSION, "reset", lambda: None)
+    monkeypatch.setattr(session, "capture_own_session", lambda: None)
     monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
 
     server.serve(port=8799)
-    assert server._SERVER.config.uds == sock
+    assert SESSION.server.config.uds == sock
     assert security._public_hosts() == {"silica.example.dev"}
 
 
@@ -3025,15 +3052,17 @@ def test_serve_exits_quietly_on_the_signal_uvicorn_re_raises(monkeypatch, tmp_pa
     import uvicorn
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
+    from silica.ui.web import session
 
     def interrupted(self, sockets=None):
         raise KeyboardInterrupt
 
     flushed: list[bool] = []
-    monkeypatch.setattr(server, "_SERVER", None)
+    monkeypatch.setattr(SESSION, "server", None)
     monkeypatch.setattr(uvicorn.Server, "run", interrupted)
-    monkeypatch.setattr(server, "_reset_session", lambda: None)
-    monkeypatch.setattr(server, "_capture_own_session", lambda: flushed.append(True))
+    monkeypatch.setattr(SESSION, "reset", lambda: None)
+    monkeypatch.setattr(session, "capture_own_session", lambda: flushed.append(True))
     monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
 
     server.serve(port=8799)   # must not raise
@@ -3182,6 +3211,7 @@ def test_an_absolute_value_in_a_table_cell_keeps_the_row_whole():
 def test_a_plan_request_ends_on_the_calendar_learn_computed(client, monkeypatch):
     """The calendar is appended by code under the answer and stored with it:
     told to copy it, the 9B merged days (2026-10-23)."""
+    from silica.ui.web.session import SESSION
     _tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -3197,7 +3227,7 @@ def test_a_plan_request_ends_on_the_calendar_learn_computed(client, monkeypatch)
 
     done = asyncio.run(collect())[-1]
     assert done["answer"].startswith("Ecco come studiare.") and done["answer"].endswith("| 2026-10-23 | Basi |  |")
-    assert server.messages[-1]["content"] == done["answer"]
+    assert SESSION.chat.messages[-1]["content"] == done["answer"]
 
 
 def test_a_plan_computed_in_the_chat_is_offered_for_saving_with_one_click(client, monkeypatch):

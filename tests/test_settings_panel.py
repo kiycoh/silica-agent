@@ -28,8 +28,9 @@ def env_file(tmp_path, monkeypatch):
 @pytest.fixture
 def client(tmp_vault, tmp_path, monkeypatch):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    monkeypatch.setattr(server, "_busy", False)
+    monkeypatch.setattr(SESSION, "busy", False)
     return TestClient(server.app), server
 
 
@@ -72,8 +73,9 @@ def test_env_path_is_the_user_file_even_inside_a_repo(tmp_path, monkeypatch):
 
 
 def test_a_write_is_refused_while_a_turn_runs(client, env_file, monkeypatch):
+    from silica.ui.web.session import SESSION
     c, server = client
-    monkeypatch.setattr(server, "_busy", True)
+    monkeypatch.setattr(SESSION, "busy", True)
     r = c.post("/settings", json={"key": "SILICA_INBOX_DIR", "value": "Nope"})
     assert r.status_code == 409
     assert not env_file.exists()  # refused means nothing was written

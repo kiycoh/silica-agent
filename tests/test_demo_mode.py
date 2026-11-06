@@ -47,11 +47,12 @@ def sandbox(tmp_vault, _fresh_narrator, monkeypatch):
     line SILICA_VIEWS=graph; the chat answers without a model and keeps the
     constraints of every turn it ran."""
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
     monkeypatch.setenv("SILICA_DEMO", "1")
     monkeypatch.setenv("SILICA_VIEWS", "graph")
-    server._reset_session()
+    SESSION.reset()
     ran: list = []
 
     def answers(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -138,14 +139,16 @@ def test_every_name_the_demo_refuses_exists():
     "/jobs/x/turn", "/jobs/x/retry",
 ])
 def test_each_refused_route_answers_as_one_that_does_not_exist(sandbox, path):
+    from silica.ui.web.session import SESSION
     tc, server, ran = sandbox
     for method in ("get", "post"):
         r = getattr(tc, method)(path)
         assert (r.status_code, r.json()) == (404, {"detail": "Not Found"}), (method, path)
-    assert not ran and not server._busy
+    assert not ran and not SESSION.busy
 
 
 def test_a_refused_route_runs_nothing_behind_it(sandbox, monkeypatch):
+    from silica.ui.web.session import SESSION
     from pathlib import Path
 
     from silica.config import CONFIG
@@ -167,7 +170,7 @@ def test_a_refused_route_runs_nothing_behind_it(sandbox, monkeypatch):
     # a question the door would not count: again, edit, the phone's turn
     assert tc.post("/turn/redo", json={"text": "and again"}).status_code == 404
     assert tc.post("/phone/turn", json={"text": "hi"}).status_code == 404
-    assert not ran and not server._busy
+    assert not ran and not SESSION.busy
 
 
 def test_a_route_the_demo_keeps_still_answers(sandbox):
@@ -186,11 +189,12 @@ def test_a_route_the_demo_keeps_still_answers(sandbox):
     " /convert notes/paper.pdf", "\n/nucleate x.pdf", " /flashcards Entropy",
 ])
 def test_a_refused_command_is_a_404_before_the_turn_so_the_door_counts_nothing(sandbox, text):
+    from silica.ui.web.session import SESSION
     tc, server, ran = sandbox
     r = tc.post("/chat", json={"text": text})
     assert r.status_code == 404
     assert r.json()["detail"] == f"'{text.split()[0].lower()}' is not part of the demo"
-    assert not ran and not server._busy
+    assert not ran and not SESSION.busy
 
 
 @pytest.mark.parametrize("command", ["/web latest news", "/flashcards Entropy", "/quiz Entropy"])
@@ -214,6 +218,7 @@ def test_a_refused_command_behind_a_persona_runs_nothing(sandbox, monkeypatch, c
 
 
 def test_an_image_or_a_story_is_refused_before_anything_is_saved(sandbox):
+    from silica.ui.web.session import SESSION
     from silica.kernel.base.home import attachments_dir
 
     tc, server, ran = sandbox
@@ -224,7 +229,7 @@ def test_an_image_or_a_story_is_refused_before_anything_is_saved(sandbox):
     # a Discover story with the web as its scope would be a /web turn
     r = tc.post("/chat", json={"text": "and this?", "story": "s1", "scope": "web"})
     assert (r.status_code, r.json()["detail"]) == (404, "Discover is not part of the demo")
-    assert not ran and not server._busy
+    assert not ran and not SESSION.busy
 
 
 def test_the_picker_offers_no_command_the_demo_refuses(sandbox):

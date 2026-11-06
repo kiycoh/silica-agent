@@ -19,10 +19,11 @@ PAID = {"discover", "learn", "calendar", "public"}
 def free(tmp_vault, monkeypatch):
     """A Free tenant: hosted, with the line bin/tenant writes for the tier."""
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
     monkeypatch.setenv("SILICA_VIEWS", "graph")
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 

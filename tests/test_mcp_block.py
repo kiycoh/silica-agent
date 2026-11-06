@@ -160,8 +160,9 @@ def client():
     from fastapi.testclient import TestClient
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app)
 
 
@@ -204,11 +205,11 @@ def test_stopping_the_turn_answers_every_open_card_no(client):
     import threading
 
     from silica.connectors import approval
-    from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     seen, verdicts = [], []
     cancel = threading.Event()
-    server.current_cancel = cancel
+    SESSION.cancel = cancel
     t = threading.Thread(target=lambda: verdicts.append(approval.ask(
         server="mail", tool="send_message", args={}, progress=seen.append,
         cancel=cancel, budget=approval.Budget(5))))

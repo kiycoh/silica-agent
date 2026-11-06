@@ -22,9 +22,10 @@ def tc(tmp_vault, tmp_path, monkeypatch):
     from silica_core.kernel.recall import paths
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path / "home")
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app)
 
 

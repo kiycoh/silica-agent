@@ -27,8 +27,9 @@ WORK = (WEB / "work.js").read_text(encoding="utf-8")
 @pytest.fixture
 def client(tmp_vault, tmp_path, monkeypatch):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 
@@ -249,10 +250,11 @@ def test_ninety_seconds_without_a_frame_names_the_stall():
 
 
 def test_stop_signals_the_cancel_token_and_the_done_frame_says_so(client):
+    from silica.ui.web.session import SESSION
     tc, server = client
-    server.current_cancel = threading.Event()
+    SESSION.cancel = threading.Event()
     assert tc.post("/stop").status_code == 200
-    assert server.current_cancel.is_set()
+    assert SESSION.cancel.is_set()
 
 
 # --- P4. Review-requested write card; cards that survive reload ---------------
@@ -323,15 +325,16 @@ def test_revert_copy_names_what_it_takes_back_and_what_stays():
 
 
 def test_a_reopened_session_shows_the_same_writes_and_reads_as_the_live_one(client, monkeypatch):
+    from silica.ui.web.session import SESSION
     tc, server = client
-    server.messages.append({"role": "user", "content": "patch it"})
-    server.messages.append({"role": "assistant", "content": "", "tool_calls": [
+    SESSION.chat.messages.append({"role": "user", "content": "patch it"})
+    SESSION.chat.messages.append({"role": "assistant", "content": "", "tool_calls": [
         {"id": "c1", "type": "function", "function": {"name": "silica_patch_note", "arguments": json.dumps({"name": "Etica", "heading": "H", "snippet": "s"})}},
         {"id": "c2", "type": "function", "function": {"name": "silica_read_note", "arguments": json.dumps({"name": "Morale"})}},
     ]})
-    server.messages.append({"role": "tool", "tool_call_id": "c1", "content": "ok"})
-    server.messages.append({"role": "tool", "tool_call_id": "c2", "content": "body"})
-    server.messages.append({"role": "assistant", "content": "done"})
+    SESSION.chat.messages.append({"role": "tool", "tool_call_id": "c1", "content": "ok"})
+    SESSION.chat.messages.append({"role": "tool", "tool_call_id": "c2", "content": "body"})
+    SESSION.chat.messages.append({"role": "assistant", "content": "done"})
     data = tc.get("/messages").json()
     tools = [t for m in data for t in m["tools"]]
     assert {"name": "patch note", "effect": "written", "notes": ["Etica"]}.items() <= tools[0].items()
@@ -537,12 +540,13 @@ def test_delete_asks_first_and_names_the_consequence(client, tmp_path):
 
 
 def test_rename_and_delete_reach_the_narration_store(client, monkeypatch):
+    from silica.ui.web.session import SESSION
     tc, server = client
     from silica.obs import narration as _narr
 
     sid = _narr.NARRATOR.ensure_session(driver="gui")
     _narr.NARRATOR.turn({"role": "user", "content": "first question"})
-    server.current_session_id = sid
+    SESSION.chat.sid = sid
     assert tc.get("/sessions").json()[0]["title"] == "first question"
     assert tc.post("/session/rename", json={"id": sid, "title": "renamed"}).status_code == 200
     assert tc.get("/sessions").json()[0]["title"] == "renamed"
@@ -691,13 +695,14 @@ def test_a_late_response_from_the_previous_vault_never_paints():
 
 
 def test_a_failed_tool_row_keeps_its_reason_on_replay(client):
+    from silica.ui.web.session import SESSION
     tc, server = client
-    server.messages.append({"role": "user", "content": "read it"})
-    server.messages.append({"role": "assistant", "content": "", "tool_calls": [
+    SESSION.chat.messages.append({"role": "user", "content": "read it"})
+    SESSION.chat.messages.append({"role": "assistant", "content": "", "tool_calls": [
         {"id": "c1", "type": "function", "function": {"name": "silica_read_note", "arguments": json.dumps({"name": "Ghost"})}},
     ]})
-    server.messages.append({"role": "tool", "tool_call_id": "c1", "content": json.dumps({"error": "'Ghost' not found in vault"})})
-    server.messages.append({"role": "assistant", "content": "sorry"})
+    SESSION.chat.messages.append({"role": "tool", "tool_call_id": "c1", "content": json.dumps({"error": "'Ghost' not found in vault"})})
+    SESSION.chat.messages.append({"role": "assistant", "content": "sorry"})
     tools = [t for m in tc.get("/messages").json() for t in m["tools"]]
     assert tools[0]["error"] is True
     assert tools[0]["reason"] == "That note isn't in the vault under that name."

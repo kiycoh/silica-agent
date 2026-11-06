@@ -31,8 +31,9 @@ def web(tmp_vault, tmp_path):
     from fastapi.testclient import TestClient
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 
@@ -173,6 +174,7 @@ def test_a_dropped_mbox_says_why_instead_of_no_files_could_be_staged(web, tmp_pa
 # --- 4. Security: an upload through a planted symlink ------------------------------------
 
 def test_an_upload_never_writes_through_a_planted_symlink(web, tmp_path, monkeypatch):
+    from silica.ui.web import session
     tc, server = web
     monkeypatch.setattr(server, "run_agent", lambda messages, *a, **kw: "ok")
     outside = tmp_path / "outside"
@@ -184,7 +186,7 @@ def test_an_upload_never_writes_through_a_planted_symlink(web, tmp_path, monkeyp
     # A drop writes to its chat's folder (ADR-0121 point 5): the link planted there.
     from silica.kernel.base.layout import chat_folder
 
-    folder = tmp_path / "vault" / chat_folder(server._open_session())
+    folder = tmp_path / "vault" / chat_folder(session.open_session())
     folder.mkdir(parents=True)
     (folder / "victim.md").symlink_to(victim)
 

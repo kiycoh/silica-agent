@@ -33,8 +33,9 @@ from silica.driver.base import NoteRef  # noqa: E402
 def bridge_env(tmp_vault, tmp_path, monkeypatch):
     """Fresh web-session state + driver singleton around each bridge test."""
     from silica.ui.web import server as web
+    from silica.ui.web.session import SESSION
 
-    web._reset_session()
+    SESSION.reset()
     yield web
 
 

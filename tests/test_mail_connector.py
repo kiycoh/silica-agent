@@ -73,8 +73,9 @@ def web(tmp_vault, tmp_path):
     from fastapi.testclient import TestClient
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), tmp_path / "vault"
 
 

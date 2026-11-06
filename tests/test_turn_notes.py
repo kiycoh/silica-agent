@@ -38,10 +38,11 @@ def _read_sse(response) -> list[dict]:
 @pytest.fixture
 def client(tmp_vault):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     yield TestClient(server.app), server
-    server._reset_session()
+    SESSION.reset()
 
 
 def _thin_turn(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -107,6 +108,7 @@ class TestNeverSentToTheModel:
     def test_the_next_request_carries_no_key(self, client, monkeypatch):
         """Turn one stores a note; turn two goes through the real loop and the
         real call_llm, and litellm receives the history without it."""
+        from silica.ui.web.session import SESSION
         from silica.agent.constraints import AgentConstraints
         from silica.agent.loop import run_agent
         from tests.llm_mocks import litellm_mock_response
@@ -114,7 +116,7 @@ class TestNeverSentToTheModel:
         tc, server = client
         monkeypatch.setattr(server, "run_agent", _thin_turn)
         tc.post("/chat", json={"text": "what is graph rewiring?"})
-        assert server.messages[-1][turn_notes.KEY] == [THIN]
+        assert SESSION.chat.messages[-1][turn_notes.KEY] == [THIN]
 
         def real_turn(messages, model, cb, cancel_token=None, **kw):
             return run_agent(messages, "test_model", cb, cancel_token=cancel_token,
@@ -131,14 +133,16 @@ class TestNeverSentToTheModel:
 
 class TestLive:
     def test_the_done_frame_carries_the_notes_in_place_of_hint(self, client, monkeypatch):
+        from silica.ui.web.session import SESSION
         tc, server = client
         monkeypatch.setattr(server, "run_agent", _thin_turn)
         done = _read_sse(tc.post("/chat", json={"text": "what is graph rewiring?"}))[-1]
         assert done["notes"] == [THIN]
         assert "hint" not in done
-        assert server.messages[-1][turn_notes.KEY] == [THIN]
+        assert SESSION.chat.messages[-1][turn_notes.KEY] == [THIN]
 
     def test_a_turn_with_nothing_to_say_has_no_notes(self, client, monkeypatch):
+        from silica.ui.web.session import SESSION
         tc, server = client
 
         def found(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -152,10 +156,11 @@ class TestLive:
         monkeypatch.setattr(server, "run_agent", found)
         done = _read_sse(tc.post("/chat", json={"text": "what about RAG?"}))[-1]
         assert "notes" not in done
-        assert turn_notes.KEY not in server.messages[-1]
+        assert turn_notes.KEY not in SESSION.chat.messages[-1]
 
     def test_a_stopped_turn_draws_its_notes_live_only(self, client, monkeypatch):
         """No final answer to carry them: the frame has them, the history not."""
+        from silica.ui.web.session import SESSION
         tc, server = client
 
         def stopped(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -167,7 +172,7 @@ class TestLive:
         done = _read_sse(tc.post("/chat", json={"text": "q"}))[-1]
         assert done["stopped"] is True
         assert done["notes"] == [THIN]
-        assert not any(turn_notes.KEY in m for m in server.messages)
+        assert not any(turn_notes.KEY in m for m in SESSION.chat.messages)
 
 
 class TestReplay:
@@ -182,6 +187,7 @@ class TestReplay:
     def test_both_compactions_leave_the_key(self, client, monkeypatch):
         """Relevance and budget compaction rewrite tool results, never the
         assistant answer: forced over a history whose tool results all qualify."""
+        from silica.ui.web.session import SESSION
         from silica.agent import relevance
         from silica.agent.compaction import compact_read_history
         from silica.tools import TOOLS
@@ -210,17 +216,18 @@ class TestReplay:
         monkeypatch.setattr(server.CONFIG, "decision_model", "stub/model")
         monkeypatch.setattr(relevance, "decide",
                             lambda state, q: {"needed": {"noul": 0.0}})
-        dropped = relevance.compact_by_relevance(server.messages, TOOLS)
-        collapsed = compact_read_history(server.messages, set(), prompt_tokens=10**6,
+        dropped = relevance.compact_by_relevance(SESSION.chat.messages, TOOLS)
+        collapsed = compact_read_history(SESSION.chat.messages, set(), prompt_tokens=10**6,
                                          budget=1, floor_turns=1, tools=TOOLS)
         assert dropped and collapsed  # both passes did rewrite something
         assert _assistant_notes(tc) == before
 
     def test_session_load_gives_them_back(self, client, monkeypatch):
+        from silica.ui.web.session import SESSION
         tc, server = client
         monkeypatch.setattr(server, "run_agent", _thin_turn)
         tc.post("/chat", json={"text": "what is graph rewiring?"})
-        sid = server.current_session_id
+        sid = SESSION.chat.sid
         tc.post("/reset")
         assert tc.post("/session/load", json={"id": sid}).status_code == 200
         assert _assistant_notes(tc)[-1] == [THIN]
@@ -273,6 +280,7 @@ class TestLandingTurn:
 
     def test_a_landing_turn_keeps_its_notes_live_and_on_both_replays(
             self, client, monkeypatch, empty_recall):
+        from silica.ui.web.session import SESSION
         from silica.obs import narration as narr
         from silica.agent.loop import run_agent
 
@@ -289,7 +297,7 @@ class TestLandingTurn:
         assert done["notes"] == [THIN]
         assert _assistant_notes(tc)[-1] == [THIN]
 
-        sid = server.current_session_id
+        sid = SESSION.chat.sid
         beats = narr.read_beats(narr.narration_dir() / f"{sid}.jsonl")
         answers = [b for b in narr.messages_from_beats(list(beats))
                    if b.get("content") == done["answer"]]

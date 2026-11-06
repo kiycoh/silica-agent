@@ -14,11 +14,12 @@ def client(tmp_vault, monkeypatch):
     from silica.config import CONFIG
     from silica.sources import pdf_extract
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
     monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
     pdf_extract._CACHE.clear()
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 
@@ -158,12 +159,13 @@ def test_a_path_that_climbs_lands_inside_the_vault(client):
 
 
 def test_an_import_waits_for_a_running_turn(client):
+    from silica.ui.web.session import SESSION
     tc, server = client
-    assert server._begin_turn()
+    assert SESSION.claim()
     try:
         assert _post(tc, [("", "a.md", b"# a")]).status_code == 409
     finally:
-        server._end_turn()
+        SESSION.release()
 
 
 def test_hidden_text_is_named_in_the_reply(client):

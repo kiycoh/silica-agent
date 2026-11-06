@@ -15,9 +15,10 @@ TOP = "Silica 2026-10-30 164207"
 @pytest.fixture
 def hosted(tmp_vault, monkeypatch):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app)
 
 
@@ -222,11 +223,12 @@ def test_the_plus_marks_a_folder_that_held_obsidian(hosted, monkeypatch):
 
 def test_a_laptop_marks_nothing(tmp_vault, monkeypatch):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
     from silica.ui.web import vault_export as ve
 
     monkeypatch.delenv("SILICA_HOSTED", raising=False)
     monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
-    server._reset_session()
+    SESSION.reset()
     assert _import(TestClient(server.app), "MyVault", "MyVault").status_code == 200
     assert ve.load_state(_vault())["roots"] == []
 

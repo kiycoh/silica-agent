@@ -345,6 +345,7 @@ DRAFT = "---\nmatter: x\n---\n\nThe short-term right to reject lasts 14 days fro
 def desk(tmp_vault, monkeypatch):
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     tmp_vault.note("Drafts/memo.md", DRAFT)
     calls: dict = {"judged": [], "searched": []}
@@ -363,9 +364,9 @@ def desk(tmp_vault, monkeypatch):
     monkeypatch.setattr("silica.cli._check_judge", lambda **_: vault_judge)
     monkeypatch.setattr("silica.cli._check_legs", lambda: (None, None, None))
     monkeypatch.setattr("silica.cli._check_web_legs", legs)
-    server._reset_session()
+    SESSION.reset()
     yield TestClient(server.app, headers={"Origin": "http://testserver"}), server, Path(CONFIG.vault_path), calls, monkeypatch
-    server._end_turn()
+    SESSION.release()
 
 
 def press(tc, **over):
@@ -443,9 +444,10 @@ def test_no_network_keeps_the_vaults_verdict_and_says_so(desk):
 
 
 def test_a_press_stays_out_of_the_chats_lock(desk):
+    from silica.ui.web.session import SESSION
     tc, server, _, _, mp = desk
     judged_web(mp)
-    assert server._begin_turn()
+    assert SESSION.claim()
     assert press(tc)[-1]["event"] == "done"
 
 
@@ -584,10 +586,11 @@ def test_keep_refuses_what_is_not_a_page_its_words_and_a_claim(desk, over):
 
 
 def test_keep_needs_a_note_a_free_turn_and_a_same_origin(desk):
+    from silica.ui.web.session import SESSION
     tc, server, vault, *_ = desk
     assert keep(tc, path="Nowhere/Nothing").status_code == 404
-    assert server._begin_turn()
+    assert SESSION.claim()
     assert keep(tc).status_code == 409
-    server._end_turn()
+    SESSION.release()
     assert tc.post("/note/check/keep", json={}, headers={"Origin": "http://evil.example"}).status_code == 403
     assert not (vault / "Inbox").exists()

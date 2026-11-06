@@ -683,12 +683,12 @@ def running_jobs():
     the turn slot and the jobs not yet ended. It reads this process's state
     only and probes nothing remote, unlike GET /settings, which asks four
     endpoints for their models. No file names: the operator sees counts."""
-    from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     vault = CONFIG.vault_path or ""
     rows = [{"id": r["id"], "state": r["state"], "kind": r.get("kind", "convert")}
             for r in _all() if r.get("state") in ("queued", "running") and r.get("vault") == vault]
-    return {"turn": bool(server._busy), "jobs": rows}
+    return {"turn": bool(SESSION.busy), "jobs": rows}
 
 
 @router.post("/{job_id}/retry")
@@ -720,6 +720,7 @@ def offered_turn(job_id: str, payload: dict | None = None):
     spelling of "ask". A drop is answered once: a second ask, from another tab,
     is refused, which is what keeps two tabs from answering it twice."""
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     body = payload or {}
     kind = str(body.get("as") or ("ask" if body.get("ask") else "nucleate"))
@@ -727,7 +728,7 @@ def offered_turn(job_id: str, payload: dict | None = None):
         raise HTTPException(400, "a read file offers ask, summarize, quiz or nucleate")
     # The slot first, then the record: a typed message that took this file in
     # (join_next) holds the slot while it marks the file answered.
-    if not server._begin_turn():
+    if not SESSION.claim():
         raise HTTPException(409, "a turn is already in progress")
     try:
         rec = read(job_id) if _ID.fullmatch(job_id or "") else None
@@ -759,5 +760,5 @@ def offered_turn(job_id: str, payload: dict | None = None):
         return server._turn_response(server._compose_nucleate_turn(words, notes, []),
                                      withhold=server.WITHHELD_WITH_FILES, files=files, said=said)
     except BaseException:
-        server._end_turn()
+        SESSION.release()
         raise

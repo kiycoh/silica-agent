@@ -60,69 +60,12 @@ from silica.ui.web import security
 from silica.ui.web.failures import explain as _failure
 from silica.kernel.text import note_parts
 from silica.ui.web import render
+from silica.ui.web.session import SESSION
+from silica.ui.web import session
 
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
-
-# --- module-level session state (spec: single session) -----------------------
-messages: list[dict] = []
-current_cancel: threading.Event | None = None  # cancel token of the in-flight turn
-current_task: asyncio.Task | None = None  # in-flight worker; owns the busy-gate release
-_collapsed: set[int] = set()  # message indices elided by compaction, across turns
-# Number tokens of every result this session read, raw (ADR-0095): compaction
-# and a relevance verdict stub the tool messages, and must not decide what grounds.
-_seen_numbers: set[str] = set()
-_busy = False  # one turn at a time; a second /chat is refused with 409
-current_session_id: str | None = None  # narration sid of the live conversation
-current_workspace: str | None = None  # vault path of the workspace this chat is opened in (ADR-0112)
-# The store moved to ~/.silica/narration (docs/specs/narration/spec.md §5);
-# legacy web_sessions/*.json are read forever through silica.obs.narration.
-
-
-# Fresh-session seed, precomputed so /reset ("new chat") is instant instead of
-# rebuilding the vault map + token count on the click path (~seconds on a real
-# vault). Built at startup, refreshed in the background after each turn (the
-# turn may have written notes). (messages, their token count).
-_seed: tuple[list[dict], int] | None = None
-# The vault the cached seed was built from. A prewarm started before a vault
-# switch can end after it and leave the old vault's map for the next chat; in
-# the suite one test inherited another test's seed, whose numbers then read as
-# evidence the turn had seen (test_unread_numbers_chat, 2026-10-31).
-_seed_vault: str | None = None
-
-
-def _build_seed() -> tuple[list[dict], int]:
-    """Compute the fresh-session seed. Never touches the live session state:
-    uses the pure token counter so a background rebuild can't clobber the
-    context meter of the conversation in progress."""
-    global _seed, _seed_vault
-    from silica.cli import _chat_tool_schemas, _count_context_tokens, seed_messages
-
-    vault = CONFIG.vault_path  # before the build: a switch during it must not label the old map as the new vault's
-
-    # The same builder the TUI seeds from, math=True for the MathML renderer,
-    # app=True for the help panel the chat answers from (ADR-0115).
-    msgs = seed_messages(math=True, app=True)
-    # Tools included for the same reason `_update_context_tokens` includes them:
-    # counted without the block, a fresh window read 2.1k and jumped to 9.3k on
-    # the first turn, so the meter's opening number disagreed with its next one.
-    _seed = (msgs, _count_context_tokens(msgs, _chat_tool_schemas(msgs)))
-    # After _seed: a reader between the two sees a vault that does not match and builds again.
-    _seed_vault = vault
-    return _seed
-
-
-def _prewarm_seed() -> None:
-    """Refresh the seed off the request path; failures only cost freshness."""
-
-    def work():
-        try:
-            _build_seed()
-        except Exception:
-            logger.exception("seed prewarm failed")
-
-    threading.Thread(target=work, daemon=True).start()
 
 
 def _prewarm_learn() -> None:
@@ -139,94 +82,6 @@ def _prewarm_learn() -> None:
         learner.prerequisites_map()
     except Exception:
         logger.exception("learn prewarm failed")
-
-
-def _seeded() -> tuple[list[dict], int]:
-    """A copy of the fresh-session seed, with user memory as it is NOW.
-
-    The seed is rebuilt only when a turn ends, and memory also changes outside
-    a turn (Settings, Undo, /incognito), so the two small files are re-read
-    here; the count is redone only when that changed the list.
-    """
-    from silica.kernel import user_memory
-
-    cached, built_for = _seed, _seed_vault  # read once: /instructions can set _seed to None meanwhile
-    seed_msgs, seed_tokens = cached if cached is not None and built_for == CONFIG.vault_path else _build_seed()
-    msgs = [dict(m) for m in seed_msgs]  # per-message copy; the seed's own dicts stay untouched
-    if user_memory.refresh_snapshot(msgs):
-        from silica.cli import _chat_tool_schemas, _count_context_tokens
-
-        seed_tokens = _count_context_tokens(msgs, _chat_tool_schemas(msgs))
-    return msgs, seed_tokens
-
-
-def _reset_session() -> None:
-    global current_cancel, current_task, _busy, current_session_id, current_workspace
-    from silica.obs import narration as _narr
-    from silica.kernel import user_memory
-
-    # A phone turn (ADR-0089 amendment) holds the gate and the narrator while
-    # the browser cannot see it, so its New chat must not free either: the
-    # browser's chat starts over here, and the phone turn hands the narrator
-    # to whatever chat is current when it ends (_narrating_phone).
-    phone = _phone_running
-    if not phone:
-        _narr.NARRATOR.close()   # release the flock; next turn opens a fresh sid
-    # Incognito is per chat in the GUI (ADR-0076 §8): a new chat is back on
-    # the record, so the seed below gets its memory message again.
-    user_memory.set_incognito(False)
-    messages[:], CONFIG.context_tokens = _seeded()
-    _collapsed.clear()
-    _seen_numbers.clear()
-    if not phone:
-        current_cancel = None
-        current_task = None
-        _busy = False
-    current_session_id = None  # next turn opens a new file
-    current_workspace = None   # a new chat is the whole vault until a turn names one
-
-
-WS_ORIGIN = "workspace"
-
-
-def _apply_workspace(ws: dict | None) -> None:
-    """The system line of a chat opened in a workspace (ADR-0112 point 4,
-    Open 3): what the scope does, then the workspace note's body as the
-    user's standing instructions. Written once and edited in place, never
-    removed: compaction counts messages by index (`_collapsed`), so a removal
-    or a late insert would shift every one it recorded."""
-    from silica.kernel import workspaces
-
-    i = next((n for n, m in enumerate(messages) if m.get("origin") == WS_ORIGIN), None)
-    if ws is None:
-        if i is not None:
-            messages[i]["content"] = ("This conversation is no longer limited to a workspace: searches "
-                                      "cover the whole vault and no workspace instructions apply.")
-        return
-    text = workspaces.instructions_message(ws, len(workspaces.members(ws)))
-    if i is not None:
-        messages[i]["content"] = text
-        return
-    if _collapsed:
-        # ponytail: a chat compacted before it was first opened in a workspace
-        # gets the scope without the line; the UI opens a workspace chat only
-        # as a new chat, so this needs an API caller. Rebase `_collapsed` if
-        # that ever shows up in the pilot's logs.
-        logger.info("workspace line skipped: the chat is already compacted")
-        return
-    # Before the seed's last system message, the language rule, which must stay last.
-    head = next((n for n, m in enumerate(messages) if m.get("role") != "system"), len(messages))
-    messages.insert(max(head - 1, 0), {"role": "system", "content": text, "origin": WS_ORIGIN})
-
-
-def _resolve_workspace(ref: str) -> dict | None:
-    """The workspace a turn names, or None; sets this chat's current one."""
-    global current_workspace
-    from silica.kernel import workspaces
-
-    ws = workspaces.find_workspace(ref) if ref else None
-    current_workspace = ws["path"] if ws else None
-    return ws
 
 
 def _scoped_run(ws: dict | None, fn, *args, **kwargs):
@@ -267,88 +122,6 @@ def _join_workspace(ws_path: str, ev) -> None:
         # The note is written either way; a workspace note deleted or broken
         # mid-turn only loses the listing, which the drawer then shows absent.
         logger.warning("could not add %s to the workspace %s", path, ws_path, exc_info=True)
-
-
-def _ctx_meter() -> dict:
-    """What the composer's context ring reads, in one shape.
-
-    The parts are counted, not apportioned: `_context_breakdown` charges the
-    chat envelope once so they sum to the total beside them, and a meter that
-    invites you to add up its own segments has to survive that. Three sites emit
-    this (the two `done` yields and the transcript headers) and they must not
-    drift, since the ring is the one place the user is told how much room is
-    left before the history starts being collapsed.
-    """
-    from silica.agent.compaction import COMPACT_FRACTION
-    from silica.cli import _context_breakdown
-
-    return {"context_tokens": CONFIG.context_tokens,
-            "max_context_tokens": CONFIG.max_context_tokens,
-            "context_parts": _context_breakdown(messages),
-            # The one fill level that means anything: past it the loop starts
-            # collapsing old read results. Sent rather than mirrored in the
-            # client, so the ring cannot go on reassuring at 0.6 after someone
-            # moves the threshold in compaction.py.
-            "compact_at": COMPACT_FRACTION}
-
-
-def _capture_own_session() -> None:
-    """Flush the live conversation to the capture WAL, if capture is on.
-
-    The server owns the session, so the two moments it can see a conversation
-    end are a new chat and its own shutdown. A closed tab is neither; the next
-    one of these catches its content (accepted ceiling, spec §10).
-    `capture_session` is opt-in and fail-open in itself — a capture bug can
-    never break the GUI from here. An incognito chat is never flushed.
-    """
-    from silica.capture import capture_session
-    from silica.kernel import user_memory
-
-    if user_memory.incognito():
-        return
-    capture_session(messages, session_id=current_session_id or uuid.uuid4().hex[:12],
-                    driver="gui")
-
-
-def _open_session() -> str | None:
-    """The live chat's session, opened now when its first turn has not come
-    yet; idempotent, as the turn's own `ensure_session` is."""
-    global current_session_id
-    from silica.obs import narration as _narr
-    try:
-        current_session_id = _narr.NARRATOR.ensure_session(driver="gui", sid=current_session_id)
-    except _narr.SessionBusy as e:   # another process owns it: the turn will say so
-        logger.warning("narration unavailable for this drop: %s", e)
-    return current_session_id
-
-
-def _narrate_user_turn(msg: dict) -> None:
-    """Session born at the first user turn (spec §5), then the turn beat.
-    Runs on the worker thread; ensure_session is idempotent per turn."""
-    global current_session_id
-    from silica.obs import narration as _narr
-    try:
-        current_session_id = _narr.NARRATOR.ensure_session(
-            driver="gui", sid=current_session_id)
-        _narr.NARRATOR.turn(msg)
-    except _narr.SessionBusy as e:   # another process owns it: keep chatting unsaved
-        logger.warning("narration unavailable for this turn: %s", e)
-
-
-def _session_title(msgs: list[dict]) -> str:
-    for m in msgs:
-        if m.get("role") == "user" and m.get("content"):
-            line = str(m["content"]).strip().splitlines()[0]
-            return line[:57] + "…" if len(line) > 58 else line
-    return "untitled"
-
-
-def _list_sessions() -> list[dict]:
-    """Saved conversations for the current vault, newest first, both stores.
-    _save_session is gone with the snapshot model: appending turn beats IS
-    the save (spec §5), so a refresh/close can no longer lose history."""
-    from silica.obs import narration as _narr
-    return _narr.list_sessions(CONFIG.vault_path or "")
 
 
 def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dict | None]:
@@ -432,7 +205,7 @@ def _study_offer(text: str, messages: list[dict], plan_draft: dict | None = None
             return None
         # Two offers a chat, none on a note whose offer went unused in the last
         # week, and in shadow mode only the record (learn.offer, research rule).
-        chat = current_session_id or ""
+        chat = SESSION.chat.sid or ""
         show = mode() == "on" and allowed(chat, offer["note"])
         log_offer(chat, offer, shown=show)
         return offer if show else None
@@ -453,7 +226,7 @@ def _escalation(text: str, messages: list[dict]) -> str:
     if user_memory.incognito() or learn_offer.mode() == "off":
         return ""
     try:
-        chat = current_session_id or ""
+        chat = SESSION.chat.sid or ""
         learn_offer.log_acted(chat, text)
         from silica.kernel.graph.mindmap import _driver_graph
         from silica.kernel.learn.quiz import entries
@@ -525,33 +298,6 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
-def _begin_turn() -> bool:
-    """Claim the single-turn slot. Sync with no `await` between the test and the
-    set, so two racing POSTs can't both pass. Returns False if one's in flight."""
-    global _busy
-    if _busy:
-        return False
-    _busy = True
-    return True
-
-
-def _end_turn() -> None:
-    """Release the turn slot. Idempotent (a completed turn and its worker's
-    done-callback may both call it)."""
-    global _busy, current_cancel, current_task
-    _busy = False
-    current_cancel = None
-    current_task = None
-
-
-def _sweep_if_orphaned() -> None:
-    """Free a gate claimed for a turn whose `run_turn` never ran — the client
-    dropped between POST and the SSE body's first `__anext__`, so nothing else
-    releases it. Runs after the response closes; a no-op once a worker exists."""
-    if _busy and (current_task is None or current_task.done()):
-        _end_turn()
-
-
 def _turn_kind(text: str) -> str:
     """The turn line's kind: "chat", a built-in command's name, or "slash".
 
@@ -596,12 +342,12 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
     """
     from silica.cli import _compact_context, _expand_web_turn, _update_context_tokens
 
-    global _busy, current_cancel, current_task, _collapsed
-    if not _busy:  # direct callers (tests, future WS) that didn't pre-claim
-        _busy = True
+    messages = SESSION.chat.messages
+    if not SESSION.busy:  # direct callers (tests, future WS) that didn't pre-claim
+        SESSION.busy = True
     q: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
-    current_cancel = threading.Event()  # module-level so /stop can see it
+    SESSION.cancel = threading.Event()  # module-level so /stop can see it
     task: asyncio.Task | None = None
     # The turn's usage line (ADR-0100 point 3), written in the finally.
     # Abandonment ends the stream without a verdict, so "cancelled" until a
@@ -660,18 +406,18 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         from silica.kernel import personas
 
         worn = (await asyncio.to_thread(personas.command, text, messages, CONFIG.vault_path or None,
-                                        not _collapsed) if text.startswith("/") else None)
+                                        not SESSION.chat.collapsed) if text.startswith("/") else None)
         if worn is not None and not worn[1]:
             from silica.obs import narration as _narr
 
             messages.append({"role": "user", "content": text, "origin": "cli"})
-            _narrate_user_turn(messages[-1])
+            session.narrate_user_turn(messages[-1])
             messages.append({"role": "assistant", "content": worn[0]})
             _narr.NARRATOR.turn(messages[-1])
             _update_context_tokens(messages)
             outcome = "done"
             yield {"type": "done", "answer": worn[0], "html": render.linkify(worn[0], remote_images=False),
-                   **_ctx_meter()}
+                   **session.ctx_meter()}
             return
         if worn is not None:
             text = worn[1]
@@ -712,10 +458,10 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             out = user_memory.save("vault", remember_text(text), session=_narr.NARRATOR.sid or "")
             answer = user_memory.describe(out)
             messages.append({"role": "user", "content": text, "origin": "cli"})
-            _narrate_user_turn(messages[-1])
+            session.narrate_user_turn(messages[-1])
             messages.append({"role": "assistant", "content": answer})
             _narr.NARRATOR.turn(messages[-1])
-            done = {"type": "done", "answer": answer, "html": render.linkify(answer, remote_images=False), **_ctx_meter()}
+            done = {"type": "done", "answer": answer, "html": render.linkify(answer, remote_images=False), **session.ctx_meter()}
             if (saved := user_memory.undo_payload(out)) is not None:
                 done["memory"] = saved
             outcome = "done"
@@ -742,13 +488,13 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             answer = await asyncio.to_thread(flashcards, targets, _int_flag(args, "--n=", 12),
                                              _str_flag(args, "--save").strip())
             messages.append({"role": "user", "content": text, "origin": "cli"})
-            _narrate_user_turn(messages[-1])
+            session.narrate_user_turn(messages[-1])
             messages.append({"role": "assistant", "content": answer})
             _narr.NARRATOR.turn(messages[-1])
             _update_context_tokens(messages)
             outcome = "done"
             yield {"type": "done", "answer": answer, "html": await asyncio.to_thread(render.answer_html, answer, []),
-                   **_ctx_meter()}
+                   **session.ctx_meter()}
             return
         elif text.startswith("/"):
             from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
@@ -784,11 +530,11 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                 # narrated here is never narrated again as an expansion.
                 if not told:
                     told.append(True)
-                    _narrate_user_turn(typed)
+                    session.narrate_user_turn(typed)
 
             BUS.subscribe("work/tool", _turn_before_its_work)
             try:
-                current_task = task = asyncio.ensure_future(asyncio.to_thread(_run_slash))
+                SESSION.task = task = asyncio.ensure_future(asyncio.to_thread(_run_slash))
                 task.add_done_callback(lambda t: q.put_nowait(done_slash))
                 while (item := await q.get()) is not done_slash:
                     yield item
@@ -801,7 +547,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                 # the agent below, which appends the expanded turn itself.
                 messages.append(typed)
                 if not told:
-                    _narrate_user_turn(typed)
+                    session.narrate_user_turn(typed)
                 # A GUI started from a terminal renders CONSOLE in colour and the
                 # capture keeps the escape codes, which the chat showed verbatim
                 # around /fetch's note path. The browser gets the text alone.
@@ -818,7 +564,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                     "type": "done",
                     "answer": answer,
                     "html": render.linkify(answer, note_resolver(), remote_images=False),
-                    **_ctx_meter(),
+                    **session.ctx_meter(),
                 }
                 return
 
@@ -859,7 +605,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                               "do not create, edit, patch, or move any note.]")
             # This chat's conversions that ended since the agent last heard of
             # them: the history still says "still converting" (jobs.settled).
-            if block := await asyncio.to_thread(jobs.settled, current_session_id):
+            if block := await asyncio.to_thread(jobs.settled, SESSION.chat.sid):
                 agent_msg += "\n\n" + block
 
         story_chip = None
@@ -896,12 +642,12 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             msg["silica_story"] = story_chip
         if prebuilt is not None:
             msg = prebuilt
-        ws = await asyncio.to_thread(_resolve_workspace, workspace)
-        await asyncio.to_thread(_apply_workspace, ws)
+        ws = await asyncio.to_thread(session.resolve_workspace, workspace)
+        await asyncio.to_thread(session.apply_workspace, ws)
         if ws is not None:
             msg["silica_workspace"] = ws["path"]   # the scope this turn ran in
         messages.append(msg)
-        _narrate_user_turn(msg)
+        session.narrate_user_turn(msg)
         if msg.get("silica_files"):
             # The bubble's file chips, with what "add to vault" needs (ADR-0121
             # point 4): the page only knew the names it uploaded.
@@ -929,7 +675,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         task = asyncio.create_task(
             asyncio.to_thread(
                 _scoped_run, ws, run_agent, messages, CONFIG.model, watch,
-                cancel_token=current_cancel,
+                cancel_token=SESSION.cancel,
                 # Same chat_tools cut as the CLI REPL (the tool block is the
                 # biggest per-iteration cost); interactive keeps the GUI's live
                 # stream and keeps the turn off the worker-slot cap. Slash
@@ -943,7 +689,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                 ),
             )
         )
-        current_task = task
+        SESSION.task = task
         task.add_done_callback(lambda t: q.put_nowait(sentinel))
         if images:
             # After the sentinel's callback and before the stream reader resumes,
@@ -958,7 +704,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
 
         # Before the await, which re-raises: a turn that failed still read what
         # its results showed, and the narration a reload rebuilds from has them.
-        _seen_numbers.update(read.numbers)
+        SESSION.chat.seen_numbers.update(read.numbers)
         answer = await task  # re-raises if run_agent failed
         # Read before attribution and figures append to it.
         empty = answer == _EMPTY_COMPLETION
@@ -968,12 +714,12 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # draws that as a row under what arrived, never as the reply. `answer`
         # keeps the sentinel: the WS bridge (silica connect) reads it as the
         # turn's text and has no row to draw.
-        stopped = current_cancel.is_set()
+        stopped = SESSION.cancel.is_set()
         # ADR-0095: the answer as the model wrote it, before attribution and
         # figures add text it did not; not a stopped turn's, not a /web turn's,
         # whose answer is bound to banked verbatim quotes.
         unread = ([] if stopped or web else
-                  unfounded_in_turn(answer, read.numbers, messages, _seen_numbers))
+                  unfounded_in_turn(answer, read.numbers, messages, SESSION.chat.seen_numbers))
         # isinstance, not `if web:` — the two are the same condition (watch is
         # built from it one screen up) but only this one says which half of the
         # union carries `attribute`.
@@ -1031,7 +777,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             from silica.obs import narration as _narr
             _narr.NARRATOR.turn(messages[-1])
         _update_context_tokens(messages)
-        _collapsed = _compact_context(messages, _collapsed)
+        SESSION.chat.collapsed = _compact_context(messages, SESSION.chat.collapsed)
         # answer_resolver reads the DRIVER graph — with the ws backend installed
         # (silica connect) a driver call on the loop thread deadlocks (`_rpc`
         # blocks the very loop that must send the frame), so render off-loop.
@@ -1040,7 +786,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             "type": "done",
             "answer": answer,
             "html": html,
-            **_ctx_meter(),
+            **session.ctx_meter(),
         }
         if stopped:
             done["stopped"] = True
@@ -1078,12 +824,12 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
              completion=tokens_after[2] - tokens_before[2],
              tools=dict(tools), tool_errors=dict(tool_errors), limit=limit,
              scope="workspace" if ws is not None else "vault")
-        _prewarm_seed()  # the turn may have written notes — refresh the new-chat seed
+        session.prewarm_seed()  # the turn may have written notes — refresh the new-chat seed
         if task is not None and not task.done():
-            current_cancel.set()  # abandonment: stop the zombie...
-            task.add_done_callback(lambda t: _end_turn())  # ...free the gate when it exits
+            SESSION.cancel.set()  # abandonment: stop the zombie...
+            task.add_done_callback(lambda t: SESSION.release())  # ...free the gate when it exits
         else:
-            _end_turn()  # normal / error / early-return: free now
+            SESSION.release()  # normal / error / early-return: free now
 
 
 # Cloudflare cuts a request whose origin sends no byte for 125 s (ADR-0099
@@ -1136,7 +882,7 @@ def _turn_response(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # the session stood first, since the _busy gate lets only this turn
         # narrate in it.
         flaggable = hosted() and not demo()
-        sid0 = current_session_id
+        sid0 = SESSION.chat.sid
         seq0 = await asyncio.to_thread(_session_head, sid0) if flaggable else 0
         async for item in run_turn(text, attachments, workspace, **extra):
             if flaggable and item.get("type") == "done":
@@ -1147,20 +893,9 @@ def _turn_response(text: str, attachments: "Sequence[Path]" = (), workspace: str
 
     return StreamingResponse(
         _with_keepalive(gen(), _KEEPALIVE_S), media_type="text/event-stream",
-        background=BackgroundTask(_sweep_if_orphaned)
+        background=BackgroundTask(SESSION.sweep_if_orphaned)
     )
 
-
-# --- the phone's conversation (ADR-0089 point 5, amendment 2026-10-14) -------
-# Turns from the operator's Telegram bot (silica-hosted) run in a conversation
-# of their own: their own list, narration session and tool block, so a phone
-# turn never re-prefills the browser's chat with a different block. The gate
-# stays shared, one model and one turn at a time, which also makes the release
-# drain (GET /jobs/running) wait for a phone turn as for any other.
-_phone_messages: list[dict] = []
-_phone_collapsed: set[int] = set()
-_phone_sid: str | None = None
-_phone_running = False  # a phone turn holds the gate; read by _reset_session
 
 # The system prompt teaches the write workflows and a phone turn has none of
 # their tools, so without this line "save this" reads to the model as a request
@@ -1174,13 +909,6 @@ _PHONE_LINE = (
 )
 
 
-def _reset_phone() -> None:
-    global _phone_sid
-    _phone_messages.clear()
-    _phone_collapsed.clear()
-    _phone_sid = None
-
-
 @contextmanager
 def _narrating_phone():
     """Point the narrator at the phone's session for one turn, then at the
@@ -1188,16 +916,15 @@ def _narrating_phone():
     it meanwhile (_reset_session), and reopening the one held at the start
     would append the next chat's turns to the file the student left. No
     browser turn narrates in between, because the gate is the phone's."""
-    global _phone_sid
     from silica.obs import narration as _narr
 
     _narr.NARRATOR.close()
     try:
-        fresh = _phone_sid is None
+        fresh = SESSION.phone.sid is None
         # Named before the session beat is written, so narration_sse already
         # knows the phone's beats by their sid and keeps them off the tab.
-        _phone_sid = _phone_sid or uuid.uuid4().hex[:12]
-        _narr.NARRATOR.ensure_session(driver="gui", sid=_phone_sid)
+        SESSION.phone.sid = SESSION.phone.sid or uuid.uuid4().hex[:12]
+        _narr.NARRATOR.ensure_session(driver="gui", sid=SESSION.phone.sid)
         if fresh:
             # A title beat before the first turn names the chat in the list,
             # as a rename does (narration._narration_row).
@@ -1205,9 +932,9 @@ def _narrating_phone():
         yield
     finally:
         _narr.NARRATOR.close()
-        if current_session_id:
+        if SESSION.chat.sid:
             try:
-                _narr.NARRATOR.ensure_session(driver="gui", sid=current_session_id)
+                _narr.NARRATOR.ensure_session(driver="gui", sid=SESSION.chat.sid)
             except _narr.SessionBusy:
                 # Another process took the browser's file while the phone held
                 # the narrator. Nothing is lost by going on: the browser's next
@@ -1219,7 +946,6 @@ def _narrating_phone():
 def _phone_turn(text: str, cancel: threading.Event) -> dict:
     """One phone turn, whole: `{"answer": ...}`, or `{"error": ...}` with the
     sentence the browser would show, a usage limit's reset included."""
-    global _phone_collapsed
     from silica.obs import narration as _narr
     from silica.cli import _compact_context, _update_context_tokens, seed_messages
 
@@ -1227,10 +953,10 @@ def _phone_turn(text: str, cancel: threading.Event) -> dict:
     # writes it, so the phone goes on in a new one rather than beside it. A
     # chat deleted from the list starts over too: its history must not reach
     # the model again, nor its file come back without a title.
-    if _phone_sid is not None and (
-            _phone_sid == current_session_id
-            or not (_narr.narration_dir() / f"{_phone_sid}.jsonl").exists()):
-        _reset_phone()
+    if SESSION.phone.sid is not None and (
+            SESSION.phone.sid == SESSION.chat.sid
+            or not (_narr.narration_dir() / f"{SESSION.phone.sid}.jsonl").exists()):
+        SESSION.reset_phone()
     started, tokens_before = time.monotonic(), meter_totals()
     first_token: list[float] = []
     tools: dict[str, int] = {}
@@ -1249,20 +975,20 @@ def _phone_turn(text: str, cancel: threading.Event) -> dict:
             first_token.append(time.monotonic())
 
     try:
-        if not _phone_messages:
+        if not SESSION.phone.messages:
             seed = seed_messages()
             seed.insert(len(seed) - 1, {"role": "system", "content": _PHONE_LINE})
-            _phone_messages[:] = seed
+            SESSION.phone.messages[:] = seed
         with _narrating_phone():
             msg = {"role": "user", "content": text, "origin": "telegram"}
-            _phone_messages.append(msg)
+            SESSION.phone.messages.append(msg)
             _narr.NARRATOR.turn(msg)
-            answer = run_agent(_phone_messages, CONFIG.model, cb, cancel_token=cancel,
+            answer = run_agent(SESSION.phone.messages, CONFIG.model, cb, cancel_token=cancel,
                                constraints=AgentConstraints(tools=PHONE_TOOLS, interactive=True))
-            if _phone_messages[-1].get("role") == "assistant":
-                _narr.NARRATOR.turn(_phone_messages[-1])
-            _update_context_tokens(_phone_messages)
-            _phone_collapsed = _compact_context(_phone_messages, _phone_collapsed)
+            if SESSION.phone.messages[-1].get("role") == "assistant":
+                _narr.NARRATOR.turn(SESSION.phone.messages[-1])
+            _update_context_tokens(SESSION.phone.messages)
+            SESSION.phone.collapsed = _compact_context(SESSION.phone.messages, SESSION.phone.collapsed)
         if cancel.is_set():
             return {"answer": "Stopped."}
         outcome = "empty" if answer == _EMPTY_COMPLETION else "done"
@@ -1446,7 +1172,7 @@ async def chat(payload: dict):
     # comes from. Web makes it a /web turn, the one whose tools read pages.
     story = str(payload.get("story") or "")
     scope = str(payload.get("scope") or "story")
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
     text = payload.get("text", "")
     if story and scope == "web" and text.strip() and not text.startswith("/"):
@@ -1456,17 +1182,17 @@ async def chat(payload: dict):
     from silica.ui.web import jobs
 
     try:
-        queued = await asyncio.to_thread(jobs.from_command, text, current_session_id)
+        queued = await asyncio.to_thread(jobs.from_command, text, SESSION.chat.sid)
     except BaseException:
-        _end_turn()
+        SESSION.release()
         raise
     if queued is not None:
-        _end_turn()
+        SESSION.release()
         return JSONResponse(queued, status_code=202)
-    if current_session_id and text.strip() and not text.startswith("/"):
+    if SESSION.chat.sid and text.strip() and not text.startswith("/"):
         # A file read after its drop got no turn joins this message (ADR-0121
         # point 4): otherwise "this paper" names nothing the chat was given.
-        joined = await asyncio.to_thread(jobs.join_next, current_session_id)
+        joined = await asyncio.to_thread(jobs.join_next, SESSION.chat.sid)
         if joined:
             notes, files, earlier = joined
             composed = await asyncio.to_thread(_compose_nucleate_turn, text, notes, [], earlier=earlier)
@@ -1482,31 +1208,30 @@ async def phone_turn(payload: dict):
     """One turn from the phone, answered once and whole: a Telegram message is
     sent complete, so the caller has no use for a stream (ADR-0089 amendment,
     H5). 409 while any turn runs, the browser's included."""
-    global current_cancel, current_task, _phone_running
     text = str(payload.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=422, detail="text is empty")
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
-    _phone_running = True
+    SESSION.phone_running = True
     # The browser's Stop sets this token, so it ends a phone turn too.
-    current_cancel = cancel = threading.Event()
+    SESSION.cancel = cancel = threading.Event()
     # Named as the gate's task, so a /chat stream closing in the same instant
     # (_sweep_if_orphaned) does not take this turn for an orphan and free it.
-    current_task = task = asyncio.ensure_future(asyncio.to_thread(_phone_turn, text, cancel))
+    SESSION.task = task = asyncio.ensure_future(asyncio.to_thread(_phone_turn, text, cancel))
     try:
         return await task
     finally:
-        _phone_running = False
-        _end_turn()
+        SESSION.phone_running = False
+        SESSION.release()
 
 
 @app.post("/phone/new")
 async def phone_new():
     """`/new` from the phone: its next turn opens a fresh conversation."""
-    if _busy:
+    if SESSION.busy:
         raise HTTPException(status_code=409, detail="a turn is already in progress")
-    _reset_phone()
+    SESSION.reset_phone()
     return {"ok": True}
 
 
@@ -2007,14 +1732,14 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     this chat asks the question once the drop's last job is done. A drop of
     only such files and no words answers 202 too; each one, read, offers its
     turns. Otherwise the turn starts with the files that were ready."""
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
     from silica.kernel.base.layout import chat_folder
     from silica.ui.web import jobs
 
     try:
-        fresh = not any(m.get("role") == "user" for m in messages)
-        sid = await asyncio.to_thread(_open_session) or uuid.uuid4().hex[:12]
+        fresh = not any(m.get("role") == "user" for m in SESSION.chat.messages)
+        sid = await asyncio.to_thread(session.open_session) or uuid.uuid4().hex[:12]
         names = [Path(f.filename or "").name for f in files]
         if fresh:
             title = (text.strip().splitlines() or [", ".join(names)])[0]
@@ -2025,7 +1750,7 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
         ready, stubs, skipped, queued = await _stage_uploads(
             files, folder=folder, text=text, session=sid, drop=uuid.uuid4().hex[:12], dest_dir=folder)
     except Exception:
-        _end_turn()  # release the slot the staging never got to use
+        SESSION.release()  # release the slot the staging never got to use
         raise
     mail = [n for n in names if _is_mail(n)]
     # The question waits for its files (ADR-0121 point 1) but not for a PDF
@@ -2038,7 +1763,7 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     if queued and (waits or not (ready or stubs or now)):
         # The ready files of the same drop ride its question when it is asked.
         await asyncio.to_thread(jobs.annotate, [j["id"] for j in queued], beside=ready)
-        _end_turn()
+        SESSION.release()
         return JSONResponse({"jobs": queued, "waits": waits, "mail": mail, "session": sid,
                              "skipped": [{"name": n, "reason": why} for n, why in skipped]},
                             status_code=202)
@@ -2162,7 +1887,7 @@ async def chat_file_add(payload: dict):
     from silica.ui.web import jobs
 
     source = str(payload.get("source") or "")
-    _chat_rel(source, current_session_id or "")
+    _chat_rel(source, SESSION.chat.sid or "")
     notes = [source]
     vault = CONFIG.vault_path or ""
     done = [r for r in jobs._all() if r.get("vault") == vault and r["source"].get("path") == source
@@ -2171,12 +1896,12 @@ async def chat_file_add(payload: dict):
         notes = done[-1]["notes"]
     elif not source.endswith((".md", ".txt", ".markdown")):
         raise HTTPException(409, "that file is still being read")
-    if not _begin_turn():   # the one serialisation of vault writes (see /vault/import)
+    if not SESSION.claim():   # the one serialisation of vault writes (see /vault/import)
         raise HTTPException(409, "a turn is running: add it when it ends")
     try:
         added = await asyncio.to_thread(_add_to_vault, notes, [source])
     finally:
-        _end_turn()
+        SESSION.release()
     return {"notes": added}
 
 
@@ -2235,17 +1960,16 @@ async def redo_turn(payload: dict | None = None):
     files and its scope.
     ponytail: the last turn only; an earlier question is a rewind by ordinal,
     due when a student asks to edit one."""
-    global _collapsed
     from silica.obs import narration as _narr
 
     words = (payload or {}).get("text")
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
     try:
-        at = max((k for k, m in enumerate(messages) if m.get("role") == "user"), default=-1)
+        at = max((k for k, m in enumerate(SESSION.chat.messages) if m.get("role") == "user"), default=-1)
         if at < 0:
             raise HTTPException(409, "there is no question to ask again")
-        msg = dict(messages[at])
+        msg = dict(SESSION.chat.messages[at])
         content: Any = msg.get("content")
         if isinstance(content, list):   # an image turn cut short: its text part
             content = next((p.get("text") for p in content if p.get("type") == "text"), "")
@@ -2260,11 +1984,11 @@ async def redo_turn(payload: dict | None = None):
             if "silica_said" in msg or msg.get("silica_files"):
                 msg["silica_said"] = words
         msg["content"] = content
-        del messages[at:]
-        _collapsed = {c for c in _collapsed if c < at}
+        del SESSION.chat.messages[at:]
+        SESSION.chat.collapsed = {c for c in SESSION.chat.collapsed if c < at}
         _narr.NARRATOR.narrate(_narr.REWIND, "done", "asked again", {}, parent=None)
     except BaseException:
-        _end_turn()
+        SESSION.release()
         raise
     withhold = WITHHELD_WITH_FILES if msg.get("silica_files") and not content.startswith(NUCLEATE_ASK) else ()
     return _turn_response(content, workspace=msg.get("silica_workspace") or "", withhold=withhold, prebuilt=msg)
@@ -2295,12 +2019,12 @@ async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = F
         raise HTTPException(413, f"at most {_UPLOAD_MAX_FILES} files per request")
     if paths and len(paths) != len(files):
         raise HTTPException(400, "paths must name every file, in order")
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(409, "a turn is running: import when it ends")
     try:
         results, folders = await _import_files(files, paths or [""] * len(files))
     finally:
-        _end_turn()
+        SESSION.release()
     if obsidian:
         _mark_obsidian_root(obsidian, paths)
     if last and folders:
@@ -2432,7 +2156,7 @@ async def vault_fetch(payload: dict):
     if (hosted() and youtube_cookies() is None
             and host_matches(url if "://" in url else f"https://{url}", *_YT_DOMAINS)):
         return {"files": [{**row, "status": "refused", "reason": YOUTUBE_ON_SERVER}]}
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(409, "a turn is running: add the link when it ends")
     try:
         note = await asyncio.to_thread(fetch_to_inbox, url)
@@ -2452,7 +2176,7 @@ async def vault_fetch(payload: dict):
                    reason="that page could not be read: it may need a login, refuse automated "
                           "readers, or not be a web page")
     finally:
-        _end_turn()
+        SESSION.release()
     if row["status"] == "note":
         _embed_imported({str(Path(row["path"]).parent)})
         if workspace:
@@ -2486,7 +2210,7 @@ def workspaces_list():
         rows = [workspaces.summary(w) for w in workspaces.list_workspaces()]
     except Exception as exc:
         return _failure(exc)
-    return {"workspaces": rows, "current": current_workspace}
+    return {"workspaces": rows, "current": SESSION.chat.workspace}
 
 
 @app.post("/workspaces")
@@ -4172,13 +3896,13 @@ def tree_delete(payload: dict):
         raise HTTPException(400, "name a note or a folder")
     # The turn's slot, as an import takes it: a turn reading or patching a
     # note this deletes would fail mid-answer on a file the person removed.
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(409, "a turn is running: delete when it ends")
     try:
         res = delete_notes_with_restore_point(
             [(p, DRIVER.read_note(p).content) for p in paths], USER_DELETE_SOURCE)
     finally:
-        _end_turn()
+        SESSION.release()
     if not res["deleted"]:
         # The driver's text can carry the vault's absolute path, which the
         # hosted pilot does not show its tenants (ADR-0085): logged, not sent.
@@ -4289,12 +4013,12 @@ def tree_move(payload: dict):
     # reloads the one it holds open, or the editor would save the old link back.
     own = {src for src, _ in moves}
     rewritten = sorted(set().union(*(linked_from(src) for src in own)) - own)
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(409, "a turn is running: move when it ends")
     try:
         res = move_notes_with_restore_point(moves, USER_MOVE_SOURCE)
     finally:
-        _end_turn()
+        SESSION.release()
     if res["error"]:
         logger.warning("tree move stopped after %d of %d: %s", len(res["moved"]), len(moves), res["error"])
         res["error"] = f"{len(moves) - len(res['moved'])} of {len(moves)} could not be moved"
@@ -4317,12 +4041,12 @@ def tree_undo(payload: dict):
         raise HTTPException(404, "nothing to undo")
     if info["reverted_at"]:
         raise HTTPException(409, "already undone")
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(409, "a turn is running: undo when it ends")
     try:
         res = revert_run(run)
     finally:
-        _end_turn()
+        SESSION.release()
     return {"restored": res["reverted"],
             "skipped": [s["path"] for s in res["skipped"] + res["errors"]]}
 
@@ -4364,12 +4088,12 @@ def trash_restore(payload: dict):
     item = _trash_item(payload)
     if item["taken"]:
         raise HTTPException(409, "a note is at that path now")
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(409, "a turn is running: restore when it ends")
     try:
         why = restore_from_trash(item)
     finally:
-        _end_turn()
+        SESSION.release()
     if why:
         # the driver's text can carry the vault's absolute path (ADR-0085)
         logger.warning("trash restore of %s refused: %s", item["path"], why)
@@ -4531,7 +4255,7 @@ async def note_check(payload: dict, request: Request):
                 try:
                     ev = await asyncio.wait_for(q.get(), _SSE_POLL_S)
                 except asyncio.TimeoutError:
-                    if _stopping() or await request.is_disconnected():
+                    if session.stopping() or await request.is_disconnected():
                         return
                     continue
                 if ev is None:
@@ -4608,12 +4332,12 @@ async def note_check_keep(payload: dict):
     if not url.startswith(("https://", "http://")) or not quote or not claim:
         raise HTTPException(400, "name the page, its words and the claim")
     await asyncio.to_thread(_has_room, 1, len(quote) + len(claim))
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(409, "a turn is running: keep it when it ends")
     try:
         return {"ok": True, "path": await asyncio.to_thread(keep_check, claim, url, quote, canon)}
     finally:
-        _end_turn()
+        SESSION.release()
 
 
 @app.post("/changes/keep")
@@ -4757,14 +4481,14 @@ def note_history_restore(payload: dict):
     note = _history_note(str(payload.get("path", "")))
     version = str(payload.get("id", ""))
     body = _history_body(note, version)
-    if not _begin_turn():
+    if not SESSION.claim():
         raise HTTPException(409, "a turn is running: restore when it ends")
     try:
         prior = DRIVER.read_note(note).content
         DRIVER.overwrite(note, body, loss=Loss.RESTORE)
         push_landed(note, prior, body, kind="restore", of=version)
     finally:
-        _end_turn()
+        SESSION.release()
     return {"restored": note, "id": payload.get("id")}
 
 
@@ -5659,6 +5383,7 @@ def _write_brief(notes: int, topics: list[str], hubs: list[str]) -> str:
 
 @app.get("/messages")
 def get_messages():
+    messages = SESSION.chat.messages
     resolve = note_resolver()
     # A call whose result carries an error must not replay as a tick: the one
     # place the user checks whether a write landed is this transcript.
@@ -5682,7 +5407,7 @@ def get_messages():
     from silica.config import hosted
 
     turn_of: dict[int, dict] = {}
-    sid = _plain_sid(current_session_id) if hosted() and not demo() else ""
+    sid = _plain_sid(SESSION.chat.sid) if hosted() and not demo() else ""
     if sid:
         seqs = _user_turn_seqs(_session_beats(sid))
         users = [m for m in messages if m.get("role") == "user"]
@@ -5737,7 +5462,7 @@ def get_messages():
     # The breakdown goes as JSON in one header rather than three: it is one
     # reading of one number, and splitting it invites a client to read two of
     # the three and draw a ring that does not close.
-    meter = _ctx_meter()
+    meter = session.ctx_meter()
     return JSONResponse(data, headers={
         "X-Silica-Vault": CONFIG.vault_path or "",
         "X-Silica-Context-Tokens": str(meter["context_tokens"]),
@@ -5752,7 +5477,7 @@ def narration_replay(from_seq: int = 0, sid: str = ""):
     """Replay from a cursor — record zero by default: a joining client that
     replays everything cannot see a span whose opening it missed (ticket 08)."""
     from silica.obs import narration as _narr
-    target = sid or current_session_id
+    target = sid or SESSION.chat.sid
     if not target or not str(target).isalnum():
         return JSONResponse({"sid": None, "beats": []})
     path = _narr.narration_dir() / f"{target}.jsonl"
@@ -5763,12 +5488,7 @@ def narration_replay(from_seq: int = 0, sid: str = ""):
 # The GUI's own uvicorn server, so an endless response can ask whether the
 # process is leaving. None under TestClient and in the suite, where nothing is
 # shutting down and every stream is read to its end by its caller.
-_SERVER = None
 _SSE_POLL_S = 0.25   # four wakeups a second per open tab, against a 1s deadline
-
-
-def _stopping() -> bool:
-    return _SERVER is not None and bool(_SERVER.should_exit)
 
 
 def _beat_for_tab(rec: dict) -> bool:
@@ -5776,7 +5496,7 @@ def _beat_for_tab(rec: dict) -> bool:
     amendment): the work panel adopts any new sid and would drop the browser's
     run, and their seqs would move its Last-Event-ID cursor. Unless the browser
     itself has the phone's chat open."""
-    return not (_phone_sid and rec.get("sid") == _phone_sid and _phone_sid != current_session_id)
+    return not (SESSION.phone.sid and rec.get("sid") == SESSION.phone.sid and SESSION.phone.sid != SESSION.chat.sid)
 
 
 @app.get("/narration/sse")
@@ -5813,7 +5533,7 @@ async def narration_sse(request: Request, from_seq: int = 0):
 
     async def gen():
         try:
-            sid = current_session_id
+            sid = SESSION.chat.sid
             if sid:
                 path = _narr.narration_dir() / f"{sid}.jsonl"
                 for rec in _narr.read_beats(path, from_seq=cursor):
@@ -5830,7 +5550,7 @@ async def narration_sse(request: Request, from_seq: int = 0):
                 try:
                     rec = await asyncio.wait_for(q.get(), _SSE_POLL_S)
                 except asyncio.TimeoutError:
-                    if _stopping():
+                    if session.stopping():
                         return
                     continue
                 if isinstance(rec, tuple):
@@ -5853,15 +5573,14 @@ def list_sessions():
     # Current id rides a header so the body stays a plain list (matches /messages).
     # `live` marks the one chat a turn is running in, so the list can show a
     # working dot on it from any other tab (audit P18).
-    rows = [{**r, "live": bool(_busy and r.get("id") == current_session_id)}
-            for r in _list_sessions()]
-    return JSONResponse(rows, headers={"X-Silica-Session": current_session_id or ""})
+    rows = [{**r, "live": bool(SESSION.busy and r.get("id") == SESSION.chat.sid)}
+            for r in session.list_sessions()]
+    return JSONResponse(rows, headers={"X-Silica-Session": SESSION.chat.sid or ""})
 
 
 @app.post("/session/load")
 def load_session(payload: dict):
-    global current_session_id, _collapsed, current_workspace
-    if _busy:
+    if SESSION.busy:
         raise HTTPException(status_code=409, detail="a turn is already in progress")
     from silica.cli import _update_context_tokens
     from silica.obs import narration as _narr
@@ -5877,34 +5596,34 @@ def load_session(payload: dict):
             _narr.NARRATOR.resume(sid)   # continue appending to the same account
         except _narr.SessionBusy as e:
             raise HTTPException(status_code=409, detail=str(e)) from None
-        current_session_id = sid
+        SESSION.chat.sid = sid
     else:
         # Legacy snapshot: continue as a NEW narration session seeded with its
         # turns — emit new, recognise legacy (ticket 05).
         _narr.NARRATOR.close()
-        current_session_id = _narr.NARRATOR.ensure_session(driver="gui")
+        SESSION.chat.sid = _narr.NARRATOR.ensure_session(driver="gui")
         for m in replayed:
             _narr.NARRATOR.turn(m)
     # The narration records turns, never the seed, so a reopened chat used to
     # run with no system prompt, vault scope or memory at all. The TUI's
     # /resume already put a fresh seed in front; this is the same.
-    messages[:] = _seeded()[0] + replayed
-    _collapsed = set()
+    SESSION.chat.messages[:] = session.seeded()[0] + replayed
+    SESSION.chat.collapsed = set()
     # The scope its last turn ran in (ADR-0112 point 4): the seed holds no
     # workspace line, so it is written again here, as the seed is.
     last: dict = next((m for m in reversed(replayed) if m.get("role") == "user"), {})
-    ws = _resolve_workspace(str(last.get("silica_workspace") or ""))
+    ws = session.resolve_workspace(str(last.get("silica_workspace") or ""))
     if ws is not None:
-        _apply_workspace(ws)
+        session.apply_workspace(ws)
     # Its persona too (ADR-0127 point 3), read from the file as it is now; one
     # removed since leaves the chat without it rather than failing to open.
     from silica.kernel import personas
 
     if (worn := personas.available(CONFIG.vault_path or None).get(str(last.get(personas.TURN_KEY) or ""))):
-        personas.apply(messages, worn)
-    _seen_numbers.clear()
-    _seen_numbers.update(numbers_of_session(current_session_id))
-    _update_context_tokens(messages)
+        personas.apply(SESSION.chat.messages, worn)
+    SESSION.chat.seen_numbers.clear()
+    SESSION.chat.seen_numbers.update(numbers_of_session(SESSION.chat.sid))
+    _update_context_tokens(SESSION.chat.messages)
     return {"ok": True}
 
 
@@ -5935,10 +5654,10 @@ def delete_session(payload: dict):
     sid = str(payload.get("id", ""))
     if not sid.isalnum():
         raise HTTPException(status_code=404, detail="no such session")
-    if sid == current_session_id:
-        if _busy:
+    if sid == SESSION.chat.sid:
+        if SESSION.busy:
             raise HTTPException(status_code=409, detail="a turn is running in this chat")
-        _reset_session()  # releases the flock; the delete below takes it
+        SESSION.reset()  # releases the flock; the delete below takes it
     try:
         ok = _narr.delete_session(sid, CONFIG.vault_path or "")
     except _narr.SessionBusy as e:
@@ -6028,7 +5747,7 @@ def _turn_since(sid0: str | None, seq0: int) -> dict | None:
     """The turn a flag would point at: the first user beat narrated past where
     the session stood before the turn. None when this turn narrated none (the
     session was busy in another process), so no flag can point at a neighbour."""
-    sid = _plain_sid(current_session_id)
+    sid = _plain_sid(SESSION.chat.sid)
     if not sid:
         return None
     after = seq0 if sid == sid0 else 0
@@ -6075,15 +5794,15 @@ def flag_answer(payload: dict):
 @app.post("/reset")
 def reset():
 
-    _capture_own_session()
-    _reset_session()
+    session.capture_own_session()
+    SESSION.reset()
     return {"ok": True, "vault": CONFIG.vault_path}
 
 
 @app.post("/stop")
 def stop():
-    if current_cancel is not None:
-        current_cancel.set()
+    if SESSION.cancel is not None:
+        SESSION.cancel.set()
         from silica.obs import narration as _narr
         _narr.NARRATOR.cancel(driver="gui", target=None, scope="turn")
     return {"ok": True}
@@ -6297,7 +6016,7 @@ def get_settings():
     on_server = hosted()
     return {
         "env_path": st.short_path(resolve_env_path()),
-        "busy": _busy,
+        "busy": SESSION.busy,
         # No hosted row has a pick-list fed by /models (ADR-0104 point 3), so
         # the four probes would run on every opening of the panel for nothing.
         "sections": st.read_sections(probe=not on_server),
@@ -6318,7 +6037,7 @@ def _reject_if_busy_or_locked(key: str) -> None:
     """
     from silica.ui.web import settings as st
 
-    if _busy:
+    if SESSION.busy:
         raise HTTPException(status_code=409, detail="a response is running")
     if st.locked(key):
         raise HTTPException(status_code=409, detail=f"defined in the environment ({key})")
@@ -6381,7 +6100,7 @@ def _apply_vault_switch(path: str) -> dict:
     # in. The resolved absolute path is what the caches were just rebuilt for.
     result = {"ok": True, "values": {st.VAULT_KEY: switched.vault}}
     # The fresh-session seed carries the old vault's map until it is rebuilt.
-    _prewarm_seed()
+    session.prewarm_seed()
     notes = []
     if switched.write_dir:
         notes.append(f"writes confined to {switched.write_dir}/")
@@ -6491,11 +6210,10 @@ def instructions_view():
 def instructions_write(payload: dict):
     from silica.kernel import vault_instructions as vi
 
-    global _seed
     out = vi.write(CONFIG.vault_path or None, str(payload.get("text", "")))
     if not out["ok"]:
         raise HTTPException(status_code=400, detail=out["error"])
-    _seed = None   # built again by the next chat, with the new text (a prewarm could lose the race)
+    SESSION.seed = None   # built again by the next chat, with the new text (a prewarm could lose the race)
     return out
 
 
@@ -6756,7 +6474,7 @@ def serve(port: int = 8765) -> None:
     from silica.ui.banner import print_banner
     from silica.ui.console import CONSOLE
 
-    _reset_session()
+    SESSION.reset()
 
     # A hosted tenant listens on a Unix socket in its own directory, never on a
     # TCP port (ADR-0085 point 1): loopback is open to every tenant, because the
@@ -6769,7 +6487,6 @@ def serve(port: int = 8765) -> None:
     where = f"unix:{sock}" if sock else f"http://127.0.0.1:{port}"
     CONSOLE.print(f"  [dim]GUI live at[/] [cyan]{where}[/]\n")
 
-    global _SERVER
     # Built here rather than through uvicorn.run(), which keeps the Server to
     # itself: /narration/sse polls should_exit to end itself on the way out.
     # timeout_graceful_shutdown is the backstop under it, for the one stream
@@ -6786,12 +6503,12 @@ def serve(port: int = 8765) -> None:
     # every uvicorn line with arguments printed its format string verbatim
     # ("Started server process [%d]", "Uvicorn running on %s://%s:%d"). Piped
     # output escaped it, which is why it never showed in a captured log.
-    _SERVER = uvicorn.Server(uvicorn.Config(
+    SESSION.server = uvicorn.Server(uvicorn.Config(
         app, host="127.0.0.1", port=port, uds=sock, timeout_graceful_shutdown=1,
         log_config=None))
     try:
         try:
-            _SERVER.run()
+            SESSION.server.run()
         except KeyboardInterrupt:
             # uvicorn re-raises the signal it captured, AFTER it has shut down
             # cleanly, and `silica` is installed as cli:main - so the module's
@@ -6800,4 +6517,4 @@ def serve(port: int = 8765) -> None:
             # crash. The shutdown already happened; there is nothing to salvage.
             pass
     finally:
-        _capture_own_session()  # last chance: this conversation ends with the server
+        session.capture_own_session()  # last chance: this conversation ends with the server

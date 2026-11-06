@@ -40,18 +40,19 @@ class Vectors:
 def client(tmp_vault, tmp_path, monkeypatch):
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     monkeypatch.setattr("silica.kernel.recall.embed._index_path", lambda: tmp_path / "embeddings.json")
     tmp_vault.note("Corso/Lezione.md", "# Lezione\n\nsee [[Nuova]]\n")
     tmp_vault.note("Altro/Preso.md", "# Preso\n")
-    server._reset_session()
+    SESSION.reset()
     yield TestClient(server.app), server, Path(CONFIG.vault_path)
     with server._INDEX_LOCK:
         pending = list(server._INDEX_PENDING.values())
         server._INDEX_PENDING.clear()
     for timer in pending:
         timer.cancel()
-    server._end_turn()
+    SESSION.release()
 
 
 @pytest.fixture
@@ -258,8 +259,9 @@ def test_a_full_vault_is_refused_as_the_saves_are(client, embedder, monkeypatch)
 
 
 def test_it_is_written_while_a_turn_runs(client, embedder):
+    from silica.ui.web.session import SESSION
     tc, server, _ = client
-    assert server._begin_turn()
+    assert SESSION.claim()
     assert new(tc, folder="", name="Durante", text="x").status_code == 200
 
 
@@ -311,9 +313,10 @@ def test_undo_is_refused_twice_and_on_a_note_gone_says_so(client, embedder):
 
 
 def test_undo_waits_for_the_turn_as_the_other_tree_undos_do(client, embedder):
+    from silica.ui.web.session import SESSION
     tc, server, vault = client
     made = new(tc, folder="", name="Una", text="x").json()
-    assert server._begin_turn()
+    assert SESSION.claim()
     assert tc.post("/tree/undo", json={"run": made["run"]}).status_code == 409
     assert (vault / "Una.md").exists()
 

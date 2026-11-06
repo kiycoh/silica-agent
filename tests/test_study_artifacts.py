@@ -31,8 +31,9 @@ def test_the_chat_shows_the_cards_as_markdown(tmp_vault, tmp_path, monkeypatch):
 
     from silica.kernel.learn import artifacts
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     tmp_vault.note("ML/Dropout.md", "# Dropout\n\nIl dropout approssima il bagging di sottoreti.\n")
     _points(monkeypatch, {"ML/Dropout.md": ["Il dropout approssima il bagging di sottoreti."]})
     monkeypatch.setattr(artifacts, "_card_reply",
@@ -45,7 +46,7 @@ def test_the_chat_shows_the_cards_as_markdown(tmp_vault, tmp_path, monkeypatch):
     done = asyncio.run(collect())[-1]
     assert done["type"] == "done" and ":: il bagging di sottoreti" in done["answer"]
     assert "<li>" in done["html"] and "<pre" not in done["html"]
-    assert server.messages[-1] == {"role": "assistant", "content": done["answer"]}
+    assert SESSION.chat.messages[-1] == {"role": "assistant", "content": done["answer"]}
 
 
 def test_slides_follow_the_points_or_read_the_notes(tmp_vault, monkeypatch):

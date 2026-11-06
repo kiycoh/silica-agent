@@ -55,11 +55,12 @@ def client():
 
 
 def test_settings_reads_and_writes_them_and_the_next_chat_is_seeded_with_them(client):
+    from silica.ui.web import session
     tc, server = client
     assert tc.get("/instructions").json()["text"] == ""
     assert tc.put("/instructions", json={"text": "Cita gli articoli."}).status_code == 200
     assert tc.get("/instructions").json()["text"] == "Cita gli articoli."
-    assert any("Cita gli articoli." in m["content"] for m in server._seeded()[0]
+    assert any("Cita gli articoli." in m["content"] for m in session.seeded()[0]
                if m.get("origin") == vi.ORIGIN)
     assert tc.put("/instructions", json={"text": "x" * (vi.CAP + 5)}).status_code == 400
 

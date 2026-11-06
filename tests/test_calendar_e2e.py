@@ -152,9 +152,10 @@ def cal(tmp_vault):
     import uvicorn
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     _seed(tmp_vault)
-    server._reset_session()
+    SESSION.reset()
     port = _free_port()
     srv = uvicorn.Server(uvicorn.Config(server.app, host="127.0.0.1", port=port, log_level="warning"))
     th = threading.Thread(target=srv.run, daemon=True)

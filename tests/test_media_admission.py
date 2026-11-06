@@ -187,8 +187,9 @@ def drop(media, monkeypatch):
     from fastapi.testclient import TestClient
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     ran: dict = {}
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):

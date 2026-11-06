@@ -45,7 +45,8 @@ def _bind(f, real):
 @pytest.fixture
 def web(tmp_vault):
     from silica.ui.web import server
-    server._reset_session()
+    from silica.ui.web.session import SESSION
+    SESSION.reset()
     return TestClient(server.app)
 
 

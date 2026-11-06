@@ -75,9 +75,10 @@ def test_a_gui_turn_carries_the_paths_and_a_reopened_chat_shows_the_words(tmp_va
     from fastapi.testclient import TestClient
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     tmp_vault.note("Concepts/ML/Machine learning.md", "# Machine learning\n")
-    server._reset_session()
+    SESSION.reset()
     tc = TestClient(server.app)
     seen = {}
 
@@ -117,9 +118,10 @@ def test_the_chip_note_reaches_the_model_and_a_reopened_chat_draws_it(tmp_vault,
 
     from silica.model.providers import _to_wire
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     tmp_vault.note("Codice civile/Art. 1453.md", "# Art. 1453\n\nRisoluzione per inadempimento.\n")
-    server._reset_session()
+    SESSION.reset()
     tc = TestClient(server.app)
     seen = []
 

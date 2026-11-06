@@ -385,8 +385,9 @@ def test_a_refused_turn_is_counted_limited_and_says_when(fake, journal, tmp_vaul
     pytest.importorskip("fastapi")
     from silica.model import llm
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     made = []
     monkeypatch.setattr(llm, "_call_llm", lambda *a, **k: made.append(a[0]))
 
@@ -418,6 +419,7 @@ def test_what_needs_no_model_stays_at_the_limit(fake, tmp_vault, monkeypatch):
 
     from silica.model import llm
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     def no_model(*a, **k):
         raise AssertionError("a model was called")
@@ -426,7 +428,7 @@ def test_what_needs_no_model_stays_at_the_limit(fake, tmp_vault, monkeypatch):
     monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
     fake.body = key_record(month_spend=1.5)
     path = tmp_vault.note("Entropy.md", "# Entropy\n\nA measure of disorder.\n")
-    server._reset_session()
+    SESSION.reset()
     tc = TestClient(server.app)
     assert tc.get("/note", params={"path": path}).status_code == 200
     resp = tc.post("/vault/import", files=[("files", ("Lecture.md", b"# Lecture\n\nnotes", "text/markdown"))],

@@ -108,10 +108,11 @@ def test_a_gui_chat_wears_a_persona_with_no_model_and_a_reopened_chat_wears_it_a
 
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(CONFIG, "capture_sessions", False)
     _skill("parafrasi", "Bold the key terms.")
-    server._reset_session()
+    SESSION.reset()
     tc = TestClient(server.app)
     seen: list[list[dict]] = []
 
@@ -129,6 +130,6 @@ def test_a_gui_chat_wears_a_persona_with_no_model_and_a_reopened_chat_wears_it_a
     assert sent[-1][personas.TURN_KEY] == "parafrasi"
     sid = tc.get("/sessions").json()[0]["id"]
     tc.post("/reset")
-    assert personas.active(server.messages) == ""
+    assert personas.active(SESSION.chat.messages) == ""
     assert tc.post("/session/load", json={"id": sid}).status_code == 200
-    assert personas.active(server.messages) == "parafrasi"
+    assert personas.active(SESSION.chat.messages) == "parafrasi"

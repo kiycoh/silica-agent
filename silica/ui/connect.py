@@ -66,7 +66,7 @@ class BridgeServer:
         self._server: Any = None
         self._backend: Any = None  # the attached ws driver, while a plugin is connected
         self._bridge_file: Path | None = None
-        self._chat_task: Any = None  # the in-flight turn (one at a time — _begin_turn gates)
+        self._chat_task: Any = None  # the in-flight turn (one at a time: SESSION.claim gates)
         # Set by the auto-start helper below when the TUI hosts the bridge on
         # its own thread; _stop_bridge_thread needs it to reach that loop.
         self._host_loop: asyncio.AbstractEventLoop | None = None
@@ -175,12 +175,11 @@ class BridgeServer:
     # ------------------------------------------------------------------
 
     async def _route(self, ws: Any, frame: dict, backend: Any) -> None:
-        # ponytail: reaches across module seams into privates — web._begin_turn /
-        # web.current_cancel (the GUI's turn gate) and backend._on_frame (the ws
+        # ponytail: reaches across a module seam into backend._on_frame (the ws
         # driver's rpc demux). Deliberate for now: the bridge is the only second
-        # consumer, so promoting them to public API would be speculative. Promote
-        # to a shared public interface if a third caller needs the same gate/demux.
-        # The web import stays inside the chat branches: rpc frames must keep
+        # consumer, so promoting it to public API would be speculative. Promote
+        # to a shared public interface if a third caller needs the same demux.
+        # The web imports stay inside the chat branches: rpc frames must keep
         # working when the TUI hosts the bridge without the [gui] extra.
         kind = frame.get("type")
         if kind in ("rpc_result", "rpc_error"):
@@ -192,9 +191,9 @@ class BridgeServer:
                                  "error": "chat is unavailable: this bridge is hosted by a "
                                           "TUI session; use `silica --gui` or `silica connect`"})
                 return
-            from silica.ui.web import server as web
+            from silica.ui.web.session import SESSION
 
-            if not web._begin_turn():
+            if not SESSION.claim():
                 await _send(ws, {"type": "chat_error", "turnId": tid,
                                  "error": "a turn is already in progress"})
                 return
@@ -204,10 +203,10 @@ class BridgeServer:
         elif kind == "chat_cancel":
             if not self.chat_enabled:
                 return
-            from silica.ui.web import server as web
+            from silica.ui.web.session import SESSION
 
-            if web.current_cancel is not None:
-                web.current_cancel.set()
+            if SESSION.cancel is not None:
+                SESSION.cancel.set()
         elif kind == "event":
             logger.debug("bridge: metadata event: %s", frame)  # non-fatal, LINT audits later
 

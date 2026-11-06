@@ -33,7 +33,7 @@ import pytest
 pytest.importorskip("fastapi")
 
 from silica.kernel.report.graph_report import compute_report  # noqa: E402
-from silica.ui.web.server import _area_matrix, _area_of, _signal_areas  # noqa: E402
+from silica.ui.web.server import _area_matrix, _area_of, _signal_areas# noqa: E402
 
 from tests.webassets import app_js
 
