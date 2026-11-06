@@ -214,7 +214,7 @@ def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_wha
 
     from silica.config import CONFIG
 
-    out = plans.write_plan("Esame ML", "steps", "scheda", restrict="ML/", reach="relational", cards=[])
+    out = plans.write_plan(plans.PlanSpec("Esame ML", "steps", "scheda", restrict="ML/", reach="relational", cards=[]))
     text = (Path(CONFIG.vault_path) / out["path"]).read_text(encoding="utf-8")
     assert ("- [ ] Modelli lineari: [[Regressione lineare multipla]], [[Rete neurale multistrato]], "
             "[[Discriminante lineare di Fisher]] · not in the vault: lasso") in text
@@ -254,7 +254,7 @@ def test_legacy_syllabus_reads_as_a_steps_plan(vault):
 
 
 def test_write_plan_lands_through_the_gate_with_tree_steps_and_gaps(vault):
-    out = plans.write_plan("Esame", "steps", "[[Softmax]]\nMomentum di Nesterov", reach="relational", by="2026-10-20")
+    out = plans.write_plan(plans.PlanSpec("Esame", "steps", "[[Softmax]]\nMomentum di Nesterov", reach="relational", by="2026-10-20"))
     assert out["path"].endswith("Esame.md") and out["gaps"] == ["Momentum di Nesterov"]
     text = plans._read(out["path"])
     p = plans.read_plan(out["path"])
@@ -263,7 +263,7 @@ def test_write_plan_lands_through_the_gate_with_tree_steps_and_gaps(vault):
     assert "## Tree" in text and "## Steps" in text and "## Sessions" in text
     assert "- [ ] [[Softmax]]" in text and "Momentum di Nesterov: not in the vault" in text
     assert "mastery" not in text.lower()
-    folder = plans.write_plan("Area", "folder", "ML/")
+    folder = plans.write_plan(plans.PlanSpec("Area", "folder", "ML/"))
     ftext = plans._read(folder["path"])
     assert "## Steps" not in ftext and "[[ResNet]]" in ftext
 
@@ -433,8 +433,8 @@ def test_a_syllabus_line_says_how_it_matched_and_a_refused_line_is_a_gap(vault):
 
 def test_edit_plan_rewrites_the_fields_in_one_revertible_write_and_keeps_the_sessions(vault):
     vault.note("Plans/ML.md", PLAN)
-    out = plans.edit_plan("Plans/ML.md", "Machine Learning, again", "folder", "ML/", by="2099-01-01",
-                          objectives=["recall"], cards=[])
+    out = plans.edit_plan("Plans/ML.md", plans.PlanSpec("Machine Learning, again", "folder", "ML/", by="2099-01-01",
+                          objectives=["recall"], cards=[]))
     assert out["run"]
     p = plans.read_plan("Plans/ML.md")
     assert p["name"] == "Machine Learning, again" and p["scope"] == "folder" and p["target"] == "ML/"
@@ -446,7 +446,7 @@ def test_edit_plan_rewrites_the_fields_in_one_revertible_write_and_keeps_the_ses
 
 def test_a_refused_match_survives_edit_and_reword_and_the_readers_own_text_stays(vault):
     vault.note("Other/Teoria della probabilita.md", "# Teoria della probabilita\n\nEventi.\n")
-    out = plans.write_plan("Esame", "steps", "Softmax\nTeoria della mente", objectives=["explain"], cards=[], refused=[1])
+    out = plans.write_plan(plans.PlanSpec("Esame", "steps", "Softmax\nTeoria della mente", objectives=["explain"], cards=[], refused=[1]))
     path = out["path"]
     assert plans.read_plan(path)["refused"] == ["Teoria della mente"]
     # the reader writes under the plan
@@ -454,7 +454,7 @@ def test_a_refused_match_survives_edit_and_reword_and_the_readers_own_text_stays
     text = vault.read(full).replace("## Objectives", "Ripassare prima la parte sulle reti.\n\n## Objectives")
     vault.write(full, text + "\n## Mie note\n- chiedere al prof\n")
     # Reword sends no refusals: the stored ones hold
-    plans.edit_plan(path, "Esame", "steps", "Softmax\nTeoria della mente", objectives=["explain"], cards=[])
+    plans.edit_plan(path, plans.PlanSpec("Esame", "steps", "Softmax\nTeoria della mente", objectives=["explain"], cards=[]))
     p = plans.read_plan(path)
     assert p["refused"] == ["Teoria della mente"]
     assert plans.scope_of(p)["paths"] == ["ML/Softmax.md"]
@@ -462,13 +462,13 @@ def test_a_refused_match_survives_edit_and_reword_and_the_readers_own_text_stays
     assert "Ripassare prima la parte sulle reti." in body and "## Mie note\n- chiedere al prof" in body
     assert body.count("## Objectives") == 1 and body.count("## Steps") == 1
     # the edit form sends its own list, by line text or index: an undo clears it
-    plans.edit_plan(path, "Esame", "steps", "Softmax\nTeoria della mente", objectives=["explain"], cards=[], refused=[])
+    plans.edit_plan(path, plans.PlanSpec("Esame", "steps", "Softmax\nTeoria della mente", objectives=["explain"], cards=[], refused=[]))
     assert plans.read_plan(path)["refused"] == []
 
 
 def test_a_note_whose_title_has_a_comma_is_studied_as_one_note(vault):
     vault.note("ML/Sensazione, percezione.md", "# Sensazione, percezione\n\nUno.\n")
-    out = plans.write_plan("Senso", "notes", ["Sensazione, percezione", "Softmax"], objectives=["recall"], cards=[])
+    out = plans.write_plan(plans.PlanSpec("Senso", "notes", ["Sensazione, percezione", "Softmax"], objectives=["recall"], cards=[]))
     p = plans.read_plan(out["path"])
     assert plans.scope_of(p)["paths"] == ["ML/Sensazione, percezione.md", "ML/Softmax.md"]
     # a plan written before, as a comma string, still reads
@@ -544,8 +544,8 @@ def test_a_merge_loser_is_not_material_and_a_one_note_block_keeps_its_name(vault
     vault.note("ML/Set di validazione.md", "---\nsuperseded_by: '[[Rete ricorrente]]'\n---\n# x\n")
     found, missing = plans._topic_notes(["validazione"], *_meta_and_material())   # by its words, not its name
     assert found == ["ML/Rete ricorrente.md"] and missing == []
-    out = plans.write_plan("Esame", "steps", "Reti ricorrenti: rete ricorrente, momentum di nesterov\n[[Softmax]]",
-                           restrict="ML/", cards=[])
+    out = plans.write_plan(plans.PlanSpec("Esame", "steps", "Reti ricorrenti: rete ricorrente, momentum di nesterov\n[[Softmax]]",
+                           restrict="ML/", cards=[]))
     text = plans._read(out["path"])
     tree = text.split("## Tree", 1)[1].split("## Steps", 1)[0]
     assert "- Reti ricorrenti\n  - [[Rete ricorrente]]\n" in tree and "[[Reti ricorrenti]]" not in tree
@@ -598,7 +598,7 @@ def test_a_many_word_topic_meets_its_note_by_meaning(vault, monkeypatch):
     assert plans._topic_notes(["noise injection"], note_index.meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
     # a link met by meaning is marked in the plan note, the one to check
     scores["noise"]["ML/Iniezione di rumore negli input"] = 0.79
-    out = plans.write_plan("Esame", "steps", "Reti profonde: noise injection, architettura", restrict="ML/", cards=[])
+    out = plans.write_plan(plans.PlanSpec("Esame", "steps", "Reti profonde: noise injection, architettura", restrict="ML/", cards=[]))
     assert "- [ ] Reti profonde: [[Iniezione di rumore negli input]] (≈) · not in the vault: architettura" in plans._read(out["path"])
 
 
@@ -746,7 +746,7 @@ def test_a_step_line_s_weight_and_depth_stay_out_of_its_last_topic(vault):
 
     from silica.config import CONFIG
 
-    out = plans.write_plan("Programma ML", "steps", "Programma", restrict="ML/", reach="relational", cards=[])
+    out = plans.write_plan(plans.PlanSpec("Programma ML", "steps", "Programma", restrict="ML/", reach="relational", cards=[]))
     text = (Path(CONFIG.vault_path) / out["path"]).read_text(encoding="utf-8")
     assert ("- [ ] Ottimizzazione: [[Gradient descent]], [[Chain rule]] · not in the vault: lasso · weight 4"
             in text)

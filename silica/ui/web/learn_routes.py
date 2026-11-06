@@ -13,6 +13,7 @@ import logging
 import re
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -576,17 +577,6 @@ def write_plan(payload: dict):
     # a refused line by its index (this form) or its text (the plan note's `refused:`)
     refused = [int(i) if str(i).lstrip("-").isdigit() else str(i) for i in (payload.get("refused") or []) if str(i).strip()]
     chosen = obj.normalize(payload.get("objectives"))
-    # ADR-0131: the collections' roles the reader set, study hours a day, the
-    # assessment's parts ("none" clears them), a guide for the steps' depth;
-    # a key left out keeps what the plan says, or what Silica reads
-    declared = _declared(payload)
-    # roles the form sends back unchanged from the plan are the plan's, not a choice made now
-    declared_why = ("as the plan says" if payload.get("roles_kept")
-                    else "confirmed in the form" if payload.get("roles_confirmed") else "you set it")
-    hours = payload.get("hours") if "hours" in payload else None
-    assessment = payload.get("assessment") if "assessment" in payload else None
-    guide = str(payload.get("guide") or "") if "guide" in payload else None
-    matched = plans.parse_matched(payload.get("matched")) if "matched" in payload else None
     reference = payload.get("reference")
     if isinstance(reference, str) and reference.strip():
         try:
@@ -595,10 +585,21 @@ def write_plan(payload: dict):
             raise HTTPException(400, str(exc))
     if scope not in plans.SCOPES:
         raise HTTPException(400, f"scope must be one of {plans.SCOPES}")
+    # ADR-0131: a key left out keeps what the plan says, or what Silica reads
+    spec = plans.PlanSpec(
+        name, scope, target, by=payload.get("by") or None, restrict=restrict, objectives=chosen,
+        # no `refused` (Reword on the notes) keeps the plan's own refusals
+        refused=refused if "refused" in payload else None, declared=_declared(payload),
+        # roles the form sends back unchanged from the plan are the plan's, not a choice made now
+        declared_why=("as the plan says" if payload.get("roles_kept")
+                      else "confirmed in the form" if payload.get("roles_confirmed") else "you set it"),
+        hours=payload.get("hours"), assessment=payload.get("assessment"),
+        guide=str(payload.get("guide") or "") if "guide" in payload else None,
+        matched=plans.parse_matched(payload.get("matched")) if "matched" in payload else None,
+        reach=str(payload.get("reach") or "relational"))
     if payload.get("preview") or payload.get("cards_only"):
         try:
-            res = plans.resolve_scope(scope, target, restrict=restrict, refused=refused, declared=declared,
-                                      declared_why=declared_why, matched=matched)
+            res = plans.resolve(spec)
         except Exception as exc:
             raise HTTPException(400, str(exc))
         if payload.get("cards_only"):
@@ -616,34 +617,25 @@ def write_plan(payload: dict):
     cards = cards if isinstance(cards, list) else None
     if cards is None and payload.get("templates"):
         try:
-            cards = obj.propose(plans.resolve_scope(scope, target, restrict=restrict, refused=refused,
-                                                    declared=declared)["tree"], chosen, model=False)
+            # read without `matched`, as this path always has, so Save words the cards it worded
+            cards = obj.propose(plans.resolve(replace(spec, matched=None))["tree"], chosen, model=False)
         except Exception as exc:
             raise HTTPException(400, str(exc))
+    spec = replace(spec, cards=cards)
     if payload.get("path"):
         plan = plans.find_plan(str(payload["path"]))
         if plan is None:
             raise HTTPException(404, "no such plan")
         try:
-            # no `refused` (Reword on the notes) keeps the plan's own refusals
-            return plans.edit_plan(plan["path"], name or plan["name"], scope, target, by=payload.get("by") or None,
-                                   restrict=restrict, objectives=chosen, cards=cards,
-                                   refused=refused if "refused" in payload else None, declared=declared,
-                                   hours=hours, assessment=assessment, guide=guide, declared_why=declared_why,
-                                   matched=matched)
+            return plans.edit_plan(plan["path"], replace(spec, name=name or plan["name"]))
         except Exception as exc:
             raise HTTPException(400, str(exc))
     if not name:
         raise HTTPException(400, "a plan needs a name")
     try:
-        out = plans.write_plan(name, scope, target, by=payload.get("by") or None, restrict=restrict,
-                               objectives=chosen if "objectives" in payload else None,
-                               reach=str(payload.get("reach") or "relational"), cards=cards, refused=refused,
-                               declared=declared, hours=hours, assessment=assessment, guide=guide or "",
-                               declared_why=declared_why, matched=matched)
+        return plans.write_plan(replace(spec, objectives=chosen if "objectives" in payload else None))
     except Exception as exc:
         raise HTTPException(400, str(exc))
-    return out
 
 
 def _declared(payload: dict) -> dict[str, str] | None:

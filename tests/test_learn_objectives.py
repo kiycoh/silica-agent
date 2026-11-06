@@ -150,7 +150,7 @@ def test_node_readings_count_leaves_that_met_each_objective():
 # ------------------------------------------------------------------ the plan note
 
 def test_write_plan_carries_objectives_and_cards_and_reads_them_back(vault):
-    out = plans.write_plan("Esame", "notes", ["Margine geometrico", "Iperpiano"], objectives=["explain", "apply"])
+    out = plans.write_plan(plans.PlanSpec("Esame", "notes", ["Margine geometrico", "Iperpiano"], objectives=["explain", "apply"]))
     text = plans._read(out["path"])
     assert "objectives:" in text and "## Objectives" in text and "- explain · " in text and "- apply · " in text
     assert "Learn these notes: explain how and why, and apply to a case." in text
@@ -164,7 +164,7 @@ def test_write_plan_carries_objectives_and_cards_and_reads_them_back(vault):
 
 
 def test_a_plan_with_nothing_chosen_carries_proposed_cards_and_a_legacy_reach_still_reads(vault):
-    out = plans.write_plan("Auto", "notes", ["Margine geometrico"], objectives=[])
+    out = plans.write_plan(plans.PlanSpec("Auto", "notes", ["Margine geometrico"], objectives=[]))
     p = plans.read_plan(out["path"])
     assert p["objectives_chosen"] is False and p["cards"][0]["source"] == "proposed" and p["objectives"] == ["explain"]
     vault.note("Plans/Old.md", "---\ntype: plan\nscope: notes\ntarget: Iperpiano\nreach: extended\n---\n# Old\n\n## Tree\n- [[Iperpiano]]\n")

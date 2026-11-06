@@ -396,8 +396,8 @@ def plan_draft(read: dict) -> dict:
             "restrict": read.get("restrict") or "", "by": read.get("by") or None, "templates": True}
     if read.get("objectives"):
         body["objectives"] = read["objectives"]
-    d = pl.compose_plan(name, body["scope"], body["target"], by=body["by"], restrict=body["restrict"],
-                        objectives=body.get("objectives"), folder=PLANS_DIR, templates=True)
+    d = pl.compose_plan(pl.PlanSpec(name, body["scope"], body["target"], by=body["by"], restrict=body["restrict"],
+                                    objectives=body.get("objectives"), folder=PLANS_DIR, templates=True))
     plan = pl.read_plan(d["path"], frontmatter.dump(d["props"], d["body"]))
     return {"body": body, "plan": plan, "resolved": d["resolved"]}
 

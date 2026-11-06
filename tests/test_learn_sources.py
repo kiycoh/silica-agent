@@ -240,7 +240,7 @@ def test_the_plan_note_stores_roles_hours_and_assessment_and_an_edit_keeps_them(
     from silica.kernel.learn import objectives as obj
 
     monkeypatch.setattr(obj, "rewrite", lambda cards: cards)
-    out = plans.write_plan("Esame", "steps", "Syllabus", by="2026-11-10", objectives=[], hours=5)
+    out = plans.write_plan(plans.PlanSpec("Esame", "steps", "Syllabus", by="2026-11-10", objectives=[], hours=5))
     text = plans._read(out["path"])
     assert "materials: Slides" in text and "references: Pattern Learning Methods (Ann Smith)" in text
     assert "hours: '5'" in text or "hours: 5" in text
@@ -249,13 +249,13 @@ def test_the_plan_note_stores_roles_hours_and_assessment_and_an_edit_keeps_them(
     assert "[[Dropout]] (ref)" in text and "· 6 h" in text
     plan = plans.read_plan(out["path"])
     assert plan["hours"] == 5.0 and plan["assessment"][0] == {"part": "project", "days": 7}
-    plans.edit_plan(out["path"], "Esame", "steps", "Syllabus", by="2026-11-10", objectives=[],
-                    declared={"Pattern Learning Methods (Ann Smith)": "material", "Slides": "reference"})
+    plans.edit_plan(out["path"], plans.PlanSpec("Esame", "steps", "Syllabus", by="2026-11-10", objectives=[],
+                    declared={"Pattern Learning Methods (Ann Smith)": "material", "Slides": "reference"}))
     text = plans._read(out["path"])
     assert "materials: Pattern Learning Methods (Ann Smith)" in text and "references: Slides" in text
     assert "assessment: project 7 | oral" in text and ("hours: '5'" in text or "hours: 5" in text)
     assert "(you set it)" in text
-    plans.edit_plan(out["path"], "Esame", "steps", "Syllabus", by="2026-11-10", objectives=[], assessment="none")
+    plans.edit_plan(out["path"], plans.PlanSpec("Esame", "steps", "Syllabus", by="2026-11-10", objectives=[], assessment="none"))
     text = plans._read(out["path"])
     assert "assessment: none" in text and "## Assessment" not in text
     assert "materials: Pattern Learning Methods (Ann Smith)" in text   # the roles the reader set stay
@@ -277,7 +277,7 @@ def test_lecture_gaps_read_the_material_however_its_decks_are_named(course, monk
     from silica.kernel.learn import objectives as obj
 
     monkeypatch.setattr(obj, "rewrite", lambda cards: cards)
-    out = plans.write_plan("Gaps", "steps", "Syllabus", by="2026-11-10", objectives=[])
+    out = plans.write_plan(plans.PlanSpec("Gaps", "steps", "Syllabus", by="2026-11-10", objectives=[]))
     gaps, decks = plans.lecture_gaps(plans.read_plan(out["path"]))
     assert decks == 4 and "dropout" in gaps and "kernel trick" not in gaps
 
@@ -290,7 +290,7 @@ def test_depth_comes_from_a_guide_and_sets_the_proposed_objective(course, monkey
                                    "| 1 | regressione lineare, ridge regression, lasso regression | a fondo |\n"
                                    "| 2 | kernel trick, teorema di Mercer | una lettura |\n")
     assert plans.guide_candidates("Course") == ["Course/Guida.md"]
-    out = plans.write_plan("Guided", "steps", "Syllabus", by="2026-11-10", objectives=[], guide="Guida")
+    out = plans.write_plan(plans.PlanSpec("Guided", "steps", "Syllabus", by="2026-11-10", objectives=[], guide="Guida"))
     steps = {plans._step_label(s): s for s in plans.read_plan(out["path"])["steps"]}
     assert steps["Modelli lineari"]["depth"] == "deep" and steps["Metodi kernel"]["depth"] == "read"
     cards = {c["node"]: c["intention"] for c in plans.read_plan(out["path"])["cards"]}
@@ -442,12 +442,12 @@ def test_a_close_decision_is_to_confirm_and_no_plan_key_is_written_without_the_f
     monkeypatch.setattr(sources, "FOCUS_MARGIN", 0.01)
     monkeypatch.setattr(sources, "CONFIRM_FACTOR", 1e9)   # every focus win is close
     lines = "\n".join(r["text"] for r in plans.reference_rows(SYLLABUS)) + "\n"
-    out = plans.write_plan("Unsure", "steps", lines, by="2026-11-10", objectives=[])
+    out = plans.write_plan(plans.PlanSpec("Unsure", "steps", lines, by="2026-11-10", objectives=[]))
     text = plans._read(out["path"])
     assert "materials:" not in text and "to confirm" in text
-    out = plans.write_plan("Sure", "steps", lines, by="2026-11-10", objectives=[],
+    out = plans.write_plan(plans.PlanSpec("Sure", "steps", lines, by="2026-11-10", objectives=[],
                            declared={"Slides": "material", "Pattern Learning Methods (Ann Smith)": "reference"},
-                           declared_why="confirmed in the form")
+                           declared_why="confirmed in the form"))
     text = plans._read(out["path"])
     assert "materials: Slides" in text and "(confirmed in the form)" in text
 
@@ -467,9 +467,9 @@ def test_a_topic_no_source_meets_offers_the_steps_notes_and_keeps_the_readers_an
     res = plans.resolve_scope("steps", target, matched=said)
     node = next(n for n in res["tree"] if n["node"] == "Metodi kernel")
     assert not node.get("missing") and node["matched"] == said
-    out = plans.write_plan("Answered", "steps", target, by="2026-11-10", objectives=[], matched=said)
+    out = plans.write_plan(plans.PlanSpec("Answered", "steps", target, by="2026-11-10", objectives=[], matched=said))
     assert "matched: spazi di funzioni speciali -> Definizione di kernel" in plans._read(out["path"])
-    plans.edit_plan(out["path"], "Answered", "steps", target, by="2026-11-10", objectives=[])
+    plans.edit_plan(out["path"], plans.PlanSpec("Answered", "steps", target, by="2026-11-10", objectives=[]))
     assert plans.read_plan(out["path"])["matched"] == said        # Edit plan keeps the answer
 
 

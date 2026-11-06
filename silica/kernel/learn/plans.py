@@ -18,8 +18,10 @@ from __future__ import annotations
 import functools
 import logging
 import re
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from silica.kernel.base import note_index
 from silica.kernel.base.notekey import ledger_key
@@ -108,20 +110,12 @@ def read_plan(path: str, text: str | None = None) -> dict:
         "scope": scope, "target": target if not legacy else (target or path),
         "reach": reach, "reach_level": obj.level_of(objectives),
         "objectives": objectives, "objectives_chosen": bool(chosen), "cards": cards,
-        "by": str(data.get("by") or "") or None,
-        "restrict": str(data.get("restrict") or ""),
-        "refused": [x.strip() for x in str(data.get("refused") or "").split(" | ") if x.strip()],
-        "matched": parse_matched(data.get("matched")),
+        **{k.name: k.read(data.get(k.name)) for k in PLAN_KEYS},
         "created": str(data.get("created") or data.get("date") or "")[:10] or None,
         "status": str(data.get("status") or "active"),
         "completed": str(data.get("completed") or "") or None,
         "revisit": [str(x) for x in (data.get("revisit") or [])],
-        # ADR-0131: the collections' roles, study hours a day, the assessment
-        # read off the reference (or "none"), a guide for each step's depth
-        "materials": str(data.get("materials") or ""), "references": str(data.get("references") or ""),
-        "unused": str(data.get("unused") or ""), "hours": hours_of(data.get("hours")),
-        "assessment": parse_assessment(data.get("assessment")),
-        "assessment_set": "assessment" in data, "guide": str(data.get("guide") or ""),
+        "assessment_set": "assessment" in data,
         "steps": parse_steps(body), "sessions": session.parse_lines(_section(body, "Sessions")),
         "tree_links": section_links(body, "Tree"),
         "legacy": legacy,
@@ -154,6 +148,101 @@ def hours_of(value) -> float | None:
     except (TypeError, ValueError):
         return None
     return h if 0 < h <= 24 else None
+
+
+@dataclass
+class PlanSpec:
+    """What a plan is made from: the fields of Create plan and Edit plan, one
+    object through the form, `compose_plan`, `write_plan` and `edit_plan`.
+
+    None is a field the reader left alone: creation reads it off the material
+    and Edit plan keeps what the plan says. `declared` the roles of the
+    collections, `hours` study hours a day, `assessment` its parts ("none"
+    clears them), `guide` a note whose plan table gives each step's depth
+    (ADR-0131); `refused` holds line indexes from the form or texts from the
+    note, `matched` the reader's answers for topics no source met."""
+    name: str
+    scope: str
+    target: Any
+    by: str | None = None
+    restrict: str = ""
+    objectives: Any = None
+    cards: list[dict] | None = None
+    refused: Any = None
+    declared: dict[str, str] | None = None
+    declared_why: str = "you set it"
+    hours: Any = None
+    assessment: Any = None
+    guide: str | None = None
+    matched: dict[str, str] | None = None
+    reach: str = "relational"
+    folder: str = "Plans"
+    templates: bool = False
+
+
+def resolve(spec: PlanSpec) -> dict:
+    """`resolve_scope` for what a spec says."""
+    return resolve_scope(spec.scope, spec.target, restrict=spec.restrict, refused=spec.refused or (),
+                         declared=spec.declared, declared_why=spec.declared_why, matched=spec.matched)
+
+
+@dataclass(frozen=True)
+class _Made:
+    """What a plan key's value is written from."""
+    spec: PlanSpec
+    resolved: dict
+    assessment: str | None
+
+
+class PlanKey(NamedTuple):
+    """One optional frontmatter key of a plan: how `read_plan` reads it and what
+    the writers store, "" for no key. A string, because the gate stringifies a
+    list prop."""
+    name: str
+    read: Callable[[Any], Any]
+    write: Callable[[_Made], Any]
+
+
+def _text(value) -> str:
+    return str(value or "")
+
+
+def _role_key(made: _Made, key: str) -> str:
+    return _role_keys(made.resolved.get("sources") or []).get(key, "")
+
+
+def _hours_key(made: _Made) -> str:
+    h = hours_of(made.spec.hours)
+    return f"{h:g}" if h else ""
+
+
+def _guide_key(made: _Made) -> str:
+    guide = made.spec.guide
+    return (guide if str(guide).startswith("[[") else f"[[{Path(guide).stem}]]") if guide else ""
+
+
+# The one table of a plan's optional keys, in the order creation writes them. A
+# new key is a row here, and `preserve._LOSS_KEYS[Loss.PLAN]` beside it, which
+# sits below Learn and is held to this table by a test.
+PLAN_KEYS = (
+    PlanKey("by", lambda v: _text(v) or None, lambda m: _text(m.spec.by)),
+    PlanKey("restrict", _text, lambda m: m.spec.restrict),
+    # a "not this" is the reader's verdict: kept on the note so Edit plan and
+    # Reword re-resolve without the false match (ADR-0081 review)
+    PlanKey("refused", lambda v: [x.strip() for x in _text(v).split(" | ") if x.strip()],
+            lambda m: " | ".join(_refused_lines(m.resolved))),
+    # ADR-0131: the collections' roles, study hours a day, the assessment
+    # read off the reference (or "none"), a guide for each step's depth
+    PlanKey("materials", _text, lambda m: _role_key(m, "materials")),
+    PlanKey("references", _text, lambda m: _role_key(m, "references")),
+    PlanKey("unused", _text, lambda m: _role_key(m, "unused")),
+    PlanKey("matched", lambda v: parse_matched(v), lambda m: matched_text(_matched_kept(m.resolved))),
+    PlanKey("hours", lambda v: hours_of(v), _hours_key),
+    PlanKey("assessment", lambda v: parse_assessment(v), lambda m: m.assessment),
+    PlanKey("guide", _text, _guide_key),
+)
+# The keys every plan carries, which an edit rewrites whatever the form said.
+ALWAYS_KEYS = ("scope", "target", "objectives")
 
 
 def _title(body: str) -> str:
@@ -2453,18 +2542,13 @@ def close_plan(plan_path: str, reopen: bool = False) -> dict:
     return {"status": "completed", "completed": today}
 
 
-def write_plan(name: str, scope: str, target, reach: str = "relational", by: str | None = None,
-               restrict: str = "", folder: str = "Plans", objectives=None, cards: list[dict] | None = None,
-               refused=(), declared: dict[str, str] | None = None, hours=None, assessment=None,
-               guide: str = "", declared_why: str = "you set it", matched: dict[str, str] | None = None) -> dict:
+def write_plan(spec: PlanSpec) -> dict:
     """The note compose_plan composes, through the write gate
     (silica_write_note), which refuses a path that exists."""
     from silica.tools import TOOLS
 
-    d = compose_plan(name, scope, target, reach=reach, by=by, restrict=restrict, folder=folder,
-                     objectives=objectives, cards=cards, refused=refused, declared=declared, hours=hours,
-                     assessment=assessment, guide=guide, declared_why=declared_why, matched=matched)
-    out = TOOLS["silica_write_note"].fn(path=d["path"], body=d["body"], title=name, props=d["props"])
+    d = compose_plan(spec)
+    out = TOOLS["silica_write_note"].fn(path=d["path"], body=d["body"], title=spec.name, props=d["props"])
     if isinstance(out, dict) and out.get("error"):
         raise RuntimeError(out["error"])
     resolved = d["resolved"]
@@ -2472,11 +2556,7 @@ def write_plan(name: str, scope: str, target, reach: str = "relational", by: str
             "gaps": resolved["gaps"], "tree": resolved["tree"], "paths": resolved["paths"], "cards": d["cards"]}
 
 
-def compose_plan(name: str, scope: str, target, reach: str = "relational", by: str | None = None,
-                 restrict: str = "", folder: str = "Plans", objectives=None, cards: list[dict] | None = None,
-                 refused=(), declared: dict[str, str] | None = None, hours=None, assessment=None,
-                 guide: str = "", declared_why: str = "you set it", matched: dict[str, str] | None = None,
-                 templates: bool = False) -> dict:
+def compose_plan(spec: PlanSpec) -> dict:
     """{path, body, props, resolved, cards}: the plan note, not written. The
     chat's unsaved plan is this note read back (learn.offer.plan_draft), so
     its steps and calendar are the ones Memorize shows once it is saved.
@@ -2487,56 +2567,41 @@ def compose_plan(name: str, scope: str, target, reach: str = "relational", by: s
     `## Objectives`), tree, steps with a because clause and gaps, an empty
     Sessions section. Nothing about mastery goes in; every reading derives
     from the ledger. `reach` is accepted for the REPL's legacy call and
-    mapped to intentions when `objectives` is None. `declared` the roles of
-    the collections, `hours` study hours a day, `assessment` its parts (None
-    reads them off the reference, "none" clears them), `guide` a note whose
-    plan table gives each step's depth (ADR-0131)."""
+    mapped to intentions when `objectives` is None."""
     from datetime import date
 
     from silica.kernel.learn import objectives as obj
 
-    if scope not in SCOPES:
+    if spec.scope not in SCOPES:
         raise ValueError(f"scope must be one of {SCOPES}")
-    if reach not in REACH:
-        reach = "relational"
-    resolved = resolve_scope(scope, target, restrict=restrict, refused=refused, declared=declared,
-                             declared_why=declared_why, matched=matched)
-    parts, assessment_value = _parts_of(resolved, assessment) if scope == "steps" else ([], None)
-    resolved["parts"] = parts
-    if scope == "steps":
-        _depths(resolved["tree"], guide=guide, restrict=restrict)
-    chosen = obj.normalize(objectives) if objectives is not None else list(obj.REACH_TO_INTENTIONS[reach])
+    reach = spec.reach if spec.reach in REACH else "relational"
+    resolved = resolve(spec)
+    assessment = _with_parts(resolved, spec)
+    if spec.scope == "steps":
+        _depths(resolved["tree"], guide=spec.guide or "", restrict=spec.restrict)
+    chosen = obj.normalize(spec.objectives) if spec.objectives is not None else list(obj.REACH_TO_INTENTIONS[reach])
+    cards = spec.cards
     if cards is None:
-        cards = obj.propose(resolved["tree"], chosen, model=not templates)
+        cards = obj.propose(resolved["tree"], chosen, model=not spec.templates)
     cards = [c for c in cards if isinstance(c, dict) and c.get("source") in obj.SOURCES]
-    lines = _plan_body(name, scope, target, resolved, chosen, cards) + ["", "## Sessions", ""]
+    lines = _plan_body(spec.name, spec.scope, spec.target, resolved, chosen, cards) + ["", "## Sessions", ""]
     # the gate stringifies a list prop (`['explain']`), so the intentions go
     # as a comma string; `proposed by Silica` keeps the key present with
     # nothing chosen, which read_plan reads as "the cards say"
-    props = {"type": "plan", "scope": scope, "objectives": ", ".join(chosen) or "proposed by Silica",
-             "created": date.today().isoformat(), "target": target_text(scope, target)}
-    if by:
-        props["by"] = str(by)
-    if restrict:
-        props["restrict"] = restrict
-    refused_lines = _refused_lines(resolved)
-    if refused_lines:
-        # a "not this" is the reader's verdict: kept on the note so Edit plan
-        # and Reword re-resolve without the false match (ADR-0081 review);
-        # one string, because the gate stringifies a list prop
-        props["refused"] = " | ".join(refused_lines)
-    props.update(_role_keys(resolved.get("sources") or []))
-    kept = _matched_kept(resolved)
-    if kept:
-        props["matched"] = matched_text(kept)
-    if hours_of(hours):
-        props["hours"] = f"{hours_of(hours):g}"
-    if assessment_value:
-        props["assessment"] = assessment_value
-    if guide:
-        props["guide"] = f"[[{Path(guide).stem}]]" if not guide.startswith("[[") else guide
-    return {"path": f"{folder}/{name}.md", "body": "\n".join(lines), "props": props, "resolved": resolved,
+    props = {"type": "plan", "scope": spec.scope, "objectives": ", ".join(chosen) or "proposed by Silica",
+             "created": date.today().isoformat(), "target": target_text(spec.scope, spec.target)}
+    made = _Made(spec, resolved, assessment)
+    props.update({k.name: v for k in PLAN_KEYS if (v := k.write(made))})
+    return {"path": f"{spec.folder}/{spec.name}.md", "body": "\n".join(lines), "props": props, "resolved": resolved,
             "cards": cards}
+
+
+def _with_parts(resolved: dict, spec: PlanSpec) -> str | None:
+    """The assessment's parts on `resolved`, for the note's section, and the
+    `assessment:` value. Only a steps plan has them."""
+    parts, value = _parts_of(resolved, spec.assessment) if spec.scope == "steps" else ([], None)
+    resolved["parts"] = parts
+    return value
 
 
 def _refused_lines(resolved: dict) -> list[str]:
@@ -2750,10 +2815,7 @@ _VERB_DEPTH = (("deep", re.compile(r"\b(dimostr\w*|deriv\w*|prove|proofs?|derive
                ("read", re.compile(r"\b(cenni|overview|panoramica)\b", re.I)))
 
 
-def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = None, restrict: str = "",
-              objectives=None, cards: list[dict] | None = None, refused=None, declared: dict[str, str] | None = None,
-              hours=None, assessment=None, guide: str | None = None, declared_why: str = "you set it",
-              matched: dict[str, str] | None = None) -> dict:
+def edit_plan(plan_path: str, spec: PlanSpec) -> dict:
     """Edit plan (ADR-0081 §17): the same fields as creation, one revertible
     overwrite of the note. Only what creation generates is rewritten (the
     title, the goal line, Objectives, Tree, Steps); the reader's own text,
@@ -2767,33 +2829,33 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
     from silica.kernel.learn import objectives as obj
     from silica.kernel.base import frontmatter
 
-    if scope not in SCOPES:
+    if spec.scope not in SCOPES:
         raise ValueError(f"scope must be one of {SCOPES}")
     if not (_vault() / plan_path).is_file():
         raise ValueError(f"no plan at {plan_path!r}")
     old = read_plan(plan_path)
     from silica.kernel.learn import sources as so
 
-    kept = declared is None
-    declared = so.declared_of(old) if kept else declared
-    matched = old.get("matched") if matched is None else matched
-    resolved = resolve_scope(scope, target, restrict=restrict, refused=old["refused"] if refused is None else refused,
-                             declared=declared, declared_why="as the plan says" if kept else declared_why,
-                             matched=matched)
-    if assessment is None and old.get("assessment_set"):
-        assessment = assessment_text(old["assessment"])
-    hours = old.get("hours") if hours is None else hours
-    guide = old.get("guide") if guide is None else guide
-    parts, assessment_value = _parts_of(resolved, assessment) if scope == "steps" else ([], None)
-    resolved["parts"] = parts
-    if scope == "steps":
-        _depths(resolved["tree"], guide=_WIKILINK_RE.sub(r"\1", guide or ""), restrict=restrict)
-    chosen = obj.normalize(objectives)
+    kept = spec.declared is None
+    spec = replace(
+        spec, refused=old["refused"] if spec.refused is None else spec.refused,
+        declared=so.declared_of(old) if kept else spec.declared,
+        declared_why="as the plan says" if kept else spec.declared_why,
+        matched=old.get("matched") if spec.matched is None else spec.matched,
+        assessment=assessment_text(old["assessment"]) if spec.assessment is None and old.get("assessment_set") else spec.assessment,
+        hours=old.get("hours") if spec.hours is None else spec.hours,
+        guide=old.get("guide") if spec.guide is None else spec.guide)
+    resolved = resolve(spec)
+    assessment = _with_parts(resolved, spec)
+    if spec.scope == "steps":
+        _depths(resolved["tree"], guide=_WIKILINK_RE.sub(r"\1", spec.guide or ""), restrict=spec.restrict)
+    chosen = obj.normalize(spec.objectives)
+    cards = spec.cards
     if cards is None:
         cards = obj.propose(resolved["tree"], chosen)
     cards = [c for c in cards if isinstance(c, dict) and c.get("source") in obj.SOURCES]
-    generated = _split_sections(_plan_body(name, scope, target, resolved, chosen, cards))
-    refused_lines = _refused_lines(resolved)
+    generated = _split_sections(_plan_body(spec.name, spec.scope, spec.target, resolved, chosen, cards))
+    made = _Made(spec, resolved, assessment)
 
     def mutate(text: str) -> str:
         data, raw, body = frontmatter.split(text)
@@ -2818,18 +2880,15 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
         for title, lines in reversed(missing):
             out[at:at] = [f"## {title}", *lines, ""]
         keys = dict(data or {})
-        keys.update(scope=scope, target=target_text(scope, target), objectives=", ".join(chosen) or "proposed by Silica")
-        roles = _role_keys(resolved.get("sources") or [])
-        guide_link = (guide if str(guide).startswith("[[") else f"[[{Path(guide).stem}]]") if guide else ""
-        for k, v in (("by", by), ("restrict", restrict), ("refused", " | ".join(refused_lines)),
-                     ("materials", roles.get("materials")), ("references", roles.get("references")),
-                     ("unused", roles.get("unused")), ("hours", f"{hours_of(hours):g}" if hours_of(hours) else ""),
-                     ("assessment", assessment_value), ("guide", guide_link),
-                     ("matched", matched_text(_matched_kept(resolved)))):
+        keys.update(scope=spec.scope, target=target_text(spec.scope, spec.target), objectives=", ".join(chosen) or "proposed by Silica")
+        # `matched` joined the table's middle on creation and an edit has always
+        # added it last: a key's place in a note's frontmatter stays where it was
+        for k in sorted(PLAN_KEYS, key=lambda k: k.name == "matched"):
+            v = k.write(made)
             if v:
-                keys[k] = str(v)
+                keys[k.name] = str(v)
             else:
-                keys.pop(k, None)
+                keys.pop(k.name, None)
         return frontmatter.dump(keys, re.sub(r"\n{3,}", "\n\n", "\n".join(out)).rstrip("\n") + "\n")
 
     from silica.kernel.write.preserve import Loss

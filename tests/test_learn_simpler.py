@@ -33,7 +33,7 @@ def test_a_reference_bounded_by_two_notes_resolves_only_inside_them(vault):
 
 
 def test_a_plan_written_with_a_reference_keeps_both_prefixes(vault):
-    out = plans.write_plan("Two notes", "steps", "Chain rule\nSoftmax", restrict="ML/Chain rule.md | ML/Softmax.md")
+    out = plans.write_plan(plans.PlanSpec("Two notes", "steps", "Chain rule\nSoftmax", restrict="ML/Chain rule.md | ML/Softmax.md"))
     p = plans.read_plan(out["path"])
     assert p["scope"] == "steps" and p["restrict"] == "ML/Chain rule.md | ML/Softmax.md"
     assert plans.scope_of(p)["paths"] == ["ML/Chain rule.md", "ML/Softmax.md"]
@@ -46,7 +46,7 @@ def test_a_study_of_several_folders_and_notes_resolves_their_union(vault):
     assert [n["node"] for n in res["tree"]] == ["ML/Deep", "Note", "Softmax"]
     # a note under a folder already chosen is counted once
     assert plans.resolve_scope("folder", "ML/ | ML/Softmax.md")["paths"].count("ML/Softmax.md") == 1
-    out = plans.write_plan("Mixed", "folder", "ML/Deep/ | Softmax.md")
+    out = plans.write_plan(plans.PlanSpec("Mixed", "folder", "ML/Deep/ | Softmax.md"))
     assert plans.scope_of(plans.read_plan(out["path"]))["paths"] == ["ML/Deep/ResNet.md", "ML/Softmax.md"]
 
 
@@ -212,13 +212,13 @@ def test_two_ratings_at_once_write_one_ledger_line(client, tmp_path, monkeypatch
 
 
 def test_a_one_line_pasted_reference_reads_back_as_text(vault):
-    out = plans.write_plan("One line", "steps", "Softmax\n", restrict="ML/")
+    out = plans.write_plan(plans.PlanSpec("One line", "steps", "Softmax\n", restrict="ML/"))
     p = plans.read_plan(out["path"])
     assert p["target"] == "Softmax\n"                      # still text: Edit plan offers it as pasted
     assert plans.scope_of(p)["paths"] == ["ML/Softmax.md"]
     # a note's name stays a name
     vault.note("ML/Programma.md", "# Programma\n\n- Softmax\n- Chain rule\n")
-    q = plans.read_plan(plans.write_plan("By note", "steps", "Programma", restrict="ML/")["path"])
+    q = plans.read_plan(plans.write_plan(plans.PlanSpec("By note", "steps", "Programma", restrict="ML/"))["path"])
     assert q["target"] == "Programma" and plans.scope_of(q)["paths"] == ["ML/Softmax.md", "ML/Chain rule.md"]
 
 
