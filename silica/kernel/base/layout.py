@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -68,13 +68,9 @@ def vault_epoch(vault: str | None = None) -> str:
     if not root.is_dir():
         return ""
     try:
-        ignored = ignore_matcher(root)
         h = hashlib.sha1(str(root).encode("utf-8"))
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = sorted(
-                d for d in dirnames if not d.startswith(".") and not ignored(d)
-            )
-            for fn in sorted(filenames):
+        for dirpath, _dirnames, filenames in walk_tree(root):
+            for fn in filenames:
                 if not fn.endswith(".md"):
                     continue
                 p = Path(dirpath) / fn
@@ -124,12 +120,17 @@ def is_source_leaf(path: str) -> bool:
     if norm.startswith(SOURCES_DIR + "/"):
         return True
     try:
-        from silica.kernel.base.manifest import in_write_dir
-
-        composed = in_write_dir(SOURCES_DIR).replace("\\", "/").strip("/")
+        return norm.startswith(_source_roots())
     except Exception:  # config not resolvable — the bare root is the honest guess
         return False
-    return bool(composed) and norm.startswith(composed + "/")
+
+
+def _source_roots(write_dir: str | None = None) -> tuple[str, ...]:
+    """Both roots of the leaves as path prefixes. `write_dir` for a vault that
+    is not the active one, which is why a walk does not just ask is_source_leaf."""
+    from silica.kernel.base.manifest import in_write_dir
+
+    return SOURCES_DIR + "/", in_write_dir(SOURCES_DIR, write_dir).strip("/") + "/"
 
 
 # Directories never walked when sampling or indexing a vault: vendored trees and
@@ -197,6 +198,62 @@ def ignore_matcher(vault) -> Callable[[str], bool]:
     if not globs:
         return names.__contains__
     return lambda d: d in names or any(fnmatch(d, g) for g in globs)
+
+
+def walk_tree(vault, top=None, *, ignore: bool = True) -> Iterator[tuple[str, list[str], list[str]]]:
+    """`os.walk` of `vault`, or of `top` inside it, pruned the way every walk of
+    a vault is: hidden folders always, NOISE_DIRS and `.silicaignore` unless
+    `ignore=False`, both lists sorted. A caller may prune `dirnames` further.
+
+    `ignore=False` is for a walk that must see what the indexes hide, and each
+    one says why at its call: widening it changes what that walk returns.
+
+    Not silica_core.core.walk: that one serves the core's single root and reads
+    `.silicaignore` by path, so `docs/private` prunes there and not here (see
+    ignore_matcher), and adopting it would change what the indexes hold.
+    """
+    skip = ignore_matcher(vault) if ignore else None
+    for dirpath, dirnames, filenames in os.walk(vault if top is None else top):
+        dirnames[:] = sorted(d for d in dirnames
+                             if not d.startswith(".") and not (skip and skip(d)))
+        filenames.sort()
+        yield dirpath, dirnames, filenames
+
+
+def iter_notes(vault, *, scope: str = "reader", under: str = "",
+               ignore: bool = True) -> list[tuple[str, Path]]:
+    """(vault-relative path, Path) of a vault's notes, in path order: the one
+    answer to "how do I walk the vault".
+
+    `scope="reader"` is the reader's notes, without the verbatim leaves of both
+    roots; `scope="vault"` keeps them. Neither takes the pipeline's staging out:
+    a workspace may list an inbox handout, and Learn marks it itself. Silica's
+    root files stay too, because no walk here drops them: the two index builders
+    list assets from the same pass, so they walk `walk_tree` and ask
+    `is_vault_artifact`.
+
+    The roots are read off THIS vault and not the active one: doctor is routinely
+    pointed at a vault it has not opened. A bare `parts[0] == "sources"` was how
+    five walks read `silica/sources/` leaves as notes on a `write_dir: silica`
+    vault, and Learn offered them as study material.
+    """
+    root = Path(vault)
+    if under and any(p.startswith(".") for p in Path(under).parts):
+        return []
+    leaves = (SOURCES_DIR + "/",) if scope == "reader" else ()
+    found: list[str] = []
+    for dirpath, _dirnames, filenames in walk_tree(root, root / under if under else None, ignore=ignore):
+        rel_dir = os.path.relpath(dirpath, root).replace(os.sep, "/")
+        prefix = "" if rel_dir == "." else rel_dir + "/"
+        for name in filenames:
+            if name.endswith(".md") and not name.startswith("."):
+                rel = prefix + name
+                if not (leaves and rel.startswith(leaves)):
+                    found.append(rel)
+    # Path order and not walk order, which puts a folder's notes before its
+    # subfolders': `sorted(rglob)` was what every reader here relied on.
+    found.sort(key=lambda rel: rel.split("/"))
+    return [(rel, root / rel) for rel in found]
 
 
 def _is_under(base: Path, target: Path) -> bool:

@@ -132,7 +132,7 @@ def _notes_meta(vault: Path) -> dict[str, dict]:
     digest reads between vault changes cost one stat walk instead of a full
     re-parse.
     """
-    from silica.kernel.base.layout import SOURCES_DIR, ignore_matcher, is_staging_path, vault_epoch
+    from silica.kernel.base.layout import is_staging_path, iter_notes, vault_epoch
     from silica.kernel.base.noteshape import STAGED
 
     epoch = vault_epoch(str(vault))
@@ -141,17 +141,8 @@ def _notes_meta(vault: Path) -> dict[str, dict]:
         if hit is not None and hit[0] == epoch:
             return hit[1]
 
-    ignored = ignore_matcher(vault)
     out: dict[str, dict] = {}
-    for f in sorted(vault.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts):
-            continue
-        if any(ignored(p) for p in parts[:-1]):
-            continue
-        if parts[0] == SOURCES_DIR:
-            continue
-        rel = "/".join(parts)
+    for rel, f in iter_notes(vault):
         try:
             text = f.read_text(encoding="utf-8")
             mtime = f.stat().st_mtime

@@ -734,17 +734,17 @@ def source_key(source_file: str) -> str:
     return rel.rsplit("/", 1)[-1]
 
 
-def in_write_dir(rel_path: str) -> str:
+def in_write_dir(rel_path: str, write_dir: str | None = None) -> str:
     """`rel_path` composed into the write boundary; unchanged when already inside.
 
     The composer behind every folder Silica creates for its own bookkeeping
     (`done/`, `sources/`) the way `active_inbox_dir` composes the inbox. Those
     call sites build their path from a bare constant, which knows nothing about
     `write_dir` and so drops a folder at the root of a vault whose writes are
-    confined elsewhere.
+    confined elsewhere. `write_dir` names another vault's boundary.
     """
     rel = (rel_path or "").replace("\\", "/").strip("/")
-    write_dir = active_write_dir()
+    write_dir = active_write_dir() if write_dir is None else write_dir
     if not write_dir or not rel or within(rel, write_dir):
         return rel
     return f"{write_dir}/{rel}"

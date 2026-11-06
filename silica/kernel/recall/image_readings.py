@@ -243,10 +243,11 @@ def _vault_images() -> dict[str, Path | None]:
     Resolve per note through the driver's asset index if that stops holding.
     """
     from silica.config import CONFIG
-    root = Path(CONFIG.vault_path)
+    from silica.kernel.base.layout import walk_tree
+
     found: dict[str, Path | None] = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+    # ignore=False: an embed resolves wherever the image sits, as Obsidian shows it.
+    for dirpath, _dirnames, filenames in walk_tree(Path(CONFIG.vault_path), ignore=False):
         for f in filenames:
             if Path(f).suffix.lower() in _MIME:
                 found[f] = None if f in found else Path(dirpath) / f

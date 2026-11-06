@@ -46,7 +46,7 @@ from silica.kernel.write import preserve, session_changes
 from silica.kernel.link import ofm
 from silica.kernel.base.layout import is_vault_artifact
 from silica.kernel.base.durable import atomic_write_bytes
-from silica.kernel.base.layout import contain_in_vault, ignore_matcher, is_source_leaf
+from silica.kernel.base.layout import contain_in_vault, is_source_leaf, walk_tree
 from silica.kernel.write.notetype import stamp_type
 logger = logging.getLogger(__name__)
 
@@ -218,10 +218,8 @@ class ObsidianFSBackend(GraphIndexMixin):
         does not contain anyway. Directories only — os.walk classifies entries
         from the dirent type, so no note is stat'd here.
         """
-        skip = ignore_matcher(self.vault_path)
         stamps: dict[str, float] = {}
-        for root, dirs, _files in os.walk(self.vault_path):
-            dirs[:] = [d for d in dirs if not d.startswith(".") and not skip(d)]
+        for root, _dirs, _files in walk_tree(self.vault_path):
             try:
                 stamps[root] = os.stat(root).st_mtime
             except OSError:
@@ -472,16 +470,11 @@ class ObsidianFSBackend(GraphIndexMixin):
         self._roster_checked = time.monotonic()
 
         files_to_process = []
-        skip = ignore_matcher(self.vault_path)
 
-        # Pass 1: Find all markdown files and populate self._notes and self._graph nodes
-        for root, dirs, files in os.walk(self.vault_path):
-            # Skip hidden folders, plus vendored/build trees and whatever
-            # `.silicaignore` adds: a vault adopted as-is can be a repo root,
-            # where node_modules/ alone would flood the note graph with
-            # thousands of third-party READMEs.
-            dirs[:] = [d for d in dirs if not d.startswith(".") and not skip(d)]
-
+        # Pass 1: Find all markdown files and populate self._notes and self._graph nodes.
+        # Pruned: a vault adopted as-is can be a repo root, where node_modules/
+        # alone would flood the note graph with thousands of third-party READMEs.
+        for root, _dirs, files in walk_tree(self.vault_path):
             for file in files:
                 if not file.endswith(".md"):
                     # Asset census, same walk for free (the dirent is already
@@ -1584,10 +1577,10 @@ class ObsidianFSBackend(GraphIndexMixin):
         if not inbox_path.exists() or not inbox_path.is_dir():
             return []
         results = []
-        for root, dirs, files in os.walk(inbox_path):
-            # The inbox holds files awaiting conversion (PDFs etc.), not just
-            # notes — list everything except dotfiles (.trash, .DS_Store...).
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+        # The inbox holds files awaiting conversion (PDFs etc.), not just notes:
+        # list everything except dotfiles (.trash, .DS_Store...). ignore=False,
+        # because what a person drops here is what they asked to bring in.
+        for root, _dirs, files in walk_tree(self.vault_path, inbox_path, ignore=False):
             for file in files:
                 if file.startswith("."):
                     continue

@@ -19,7 +19,6 @@ on every drift that already happened.
 """
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -85,15 +84,6 @@ def _note_date(data: dict, body: str, md: Path) -> str:
     return datetime.fromtimestamp(md.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
-def _iter_notes(vault: Path):
-    skip = layout.ignore_matcher(vault)
-    for dirpath, dirnames, filenames in os.walk(vault):
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not skip(d))
-        for fn in sorted(filenames):
-            if fn.endswith(".md"):
-                yield Path(dirpath) / fn
-
-
 def propose(vault: Path | str, repo_root: Path | str | None = None,
             folder: str = "") -> list[Proposal]:
     """One Proposal per unbound note that names source, under `folder` when
@@ -110,8 +100,7 @@ def propose(vault: Path | str, repo_root: Path | str | None = None,
     cited = _citations(root, files)
     known = set(files)
     out: list[Proposal] = []
-    for md in _iter_notes(vault):
-        rel = md.relative_to(vault).as_posix()
+    for rel, md in layout.iter_notes(vault, scope="vault"):
         if scope and not rel.startswith(scope):
             continue
         try:

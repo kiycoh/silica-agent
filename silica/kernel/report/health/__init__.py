@@ -44,6 +44,7 @@ import re
 import tempfile
 from pathlib import Path
 
+from silica.kernel.base import layout
 from silica.kernel.base import frontmatter
 from silica.kernel.link.autolink import autolink, build_title_index
 from silica.kernel.report.health import lint
@@ -69,12 +70,10 @@ def iter_notes(vault: Path) -> list[Path]:
     """Sorted ``*.md`` under the vault, excluding dot-directories.
 
     Single source of truth for the harness digest and every probe, so a run
-    can never measure a note set the digest didn't hash.
+    can never measure a note set the digest didn't hash. `ignore=False` because
+    the digest pins a corpus: a `.silicaignore` edit must not read as a new one.
     """
-    return sorted(
-        p for p in vault.rglob("*.md")
-        if not any(part.startswith(".") for part in p.relative_to(vault).parts)
-    )
+    return [p for _rel, p in layout.iter_notes(vault, scope="vault", ignore=False)]
 
 
 def pair(a: str, b: str) -> tuple[str, str]:

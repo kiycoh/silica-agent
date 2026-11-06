@@ -466,7 +466,7 @@ def _literal_search(query: str, folder: str, k: int) -> dict:
     import time
 
     from silica.config import CONFIG, in_config_dir
-    from silica.kernel.base.layout import ignore_matcher, in_folder
+    from silica.kernel.base.layout import in_folder, iter_notes
     from silica.kernel.workspaces import in_scope
 
     needle = query.strip()
@@ -474,16 +474,11 @@ def _literal_search(query: str, folder: str, k: int) -> dict:
         return {"error": {"code": "bad_query",
                           "hint": "a literal search takes one exact string of 2 to 200 characters"}}
     vault = Path(CONFIG.vault_path or ".").expanduser().resolve()
-    ignored = ignore_matcher(vault)
     folded = needle.casefold()
     t0 = time.monotonic()
     found: list[tuple[int, str, list[dict]]] = []
     scanned = cut = 0
-    for f in sorted(vault.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts) or any(ignored(p) for p in parts[:-1]):
-            continue
-        rel = "/".join(parts)
+    for rel, f in iter_notes(vault, scope="vault"):
         if not in_folder(rel, folder) or not in_scope(rel):
             continue
         if time.monotonic() - t0 > _LITERAL_BUDGET_S:
@@ -1255,17 +1250,16 @@ def _raws_of(files: list[str]) -> dict[str, str]:
 
 def _vault_files_under(scope: str) -> list[str]:
     """Vault-relative files under `scope`, dotfiles and dot-dirs skipped."""
-    import os
-
     from silica.config import CONFIG
+    from silica.kernel.base.layout import walk_tree
 
     root = Path(CONFIG.vault_path or "")
     base = root / scope
     if not base.is_dir():
         return []
     out: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+    # ignore=False: /nucleate of a folder the person named reads that folder.
+    for dirpath, _dirnames, filenames in walk_tree(root, base, ignore=False):
         for name in filenames:
             if name.startswith("."):
                 continue

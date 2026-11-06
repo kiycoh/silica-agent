@@ -31,7 +31,6 @@ from pathlib import Path
 
 from silica.kernel.base import frontmatter
 from silica.kernel.base.noteshape import note_clock
-from silica.kernel.base.layout import SOURCES_DIR
 
 
 # vault -> (epoch, dated rows, paths of the notes the walk found no date for)
@@ -61,7 +60,7 @@ def _all_rows(vault: Path) -> list[tuple[str, str, str, str]]:
 def _scan(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
     """(the dated rows of `_all_rows`, the vault-relative paths of the notes
     the same walk found no date for), memoized together."""
-    from silica.kernel.base.layout import ignore_matcher, vault_epoch
+    from silica.kernel.base.layout import iter_notes, vault_epoch
 
     epoch = vault_epoch(str(vault))
     if epoch:
@@ -71,18 +70,10 @@ def _scan(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
 
     from silica.kernel.calendar.daily import daily_date, daily_rule
 
-    ignored = ignore_matcher(vault)
     days = daily_rule(vault)
     rows: list[tuple[str, str, str, str]] = []
     undated: list[str] = []
-    for f in sorted(vault.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts):
-            continue  # .obsidian, .trash, .silica
-        if any(ignored(p) for p in parts[:-1]):
-            continue  # .silicaignore / NOISE_DIRS: node_modules under a repo vault
-        if parts[0] == SOURCES_DIR:
-            continue  # verbatim leaves: reachable only via ## Sources links (§2)
+    for rel, f in iter_notes(vault):
         try:
             text = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -94,13 +85,12 @@ def _scan(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
         # about itself and outranks what its claims happen to carry. A daily
         # note's name is the next statement (ADR-0062): Obsidian named it after
         # its day, and a daily template need not write a date at all.
-        date = ((data or {}).get("date") or daily_date("/".join(parts), days)
-                or note_clock(text))
+        date = (data or {}).get("date") or daily_date(rel, days) or note_clock(text)
         if not date:
-            undated.append("/".join(parts))
+            undated.append(rel)
             continue
         label = str((data or {}).get("session_id") or f.stem)
-        rows.append((str(date)[:10], label, f.stem, "/".join(parts)))
+        rows.append((str(date)[:10], label, f.stem, rel))
 
     if epoch:
         _rows_memo.clear()

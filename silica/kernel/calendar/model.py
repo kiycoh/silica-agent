@@ -207,10 +207,9 @@ _scan_memo: dict[str, tuple[str, list[Event]]] = {}  # vault -> (epoch, events)
 
 
 def scan_events(vault: Path) -> list[Event]:
-    """Every Event note of `vault`. Walk parity with `timeline._all_rows`
-    (dot-parts, ignore_matcher, SOURCES_DIR); memoized on the vault's
-    file-state epoch like the timeline walk."""
-    from silica.kernel.base.layout import SOURCES_DIR, ignore_matcher, vault_epoch
+    """Every Event note of `vault`, memoized on its file-state epoch like the
+    timeline walk."""
+    from silica.kernel.base.layout import iter_notes, vault_epoch
 
     epoch = vault_epoch(str(vault))
     if epoch:
@@ -218,16 +217,8 @@ def scan_events(vault: Path) -> list[Event]:
         if hit is not None and hit[0] == epoch:
             return hit[1]
 
-    ignored = ignore_matcher(vault)
     events: list[Event] = []
-    for f in sorted(vault.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts):
-            continue  # .obsidian, .trash, .silica
-        if any(ignored(p) for p in parts[:-1]):
-            continue  # .silicaignore / NOISE_DIRS
-        if parts[0] == SOURCES_DIR:
-            continue  # verbatim leaves
+    for rel, f in iter_notes(vault):
         try:
             text = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
@@ -235,7 +226,7 @@ def scan_events(vault: Path) -> list[Event]:
         data, _raw, _body = frontmatter.split(text)
         if not is_event(data):
             continue
-        ev = parse_event(data, stem=f.stem, path="/".join(parts))
+        ev = parse_event(data, stem=f.stem, path=rel)
         if ev:
             events.append(ev)
 

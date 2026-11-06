@@ -36,6 +36,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from silica.kernel.base.home import resolve_vault_path
+from silica.kernel.base.layout import walk_tree
 from silica.kernel.base.notekey import note_key, note_ref
 from silica.kernel.base.noteshape import CLAIMS_END_RE
 
@@ -190,7 +191,6 @@ def _source_census(vault_path: str | None, memo_key: tuple | None) -> dict[str, 
     back as `done/<folder>/<name>`.
     """
     global _census_memo
-    import os
 
     from silica.kernel.base.manifest import active_done_dir, active_inbox_dir
 
@@ -205,9 +205,10 @@ def _source_census(vault_path: str | None, memo_key: tuple | None) -> dict[str, 
     for base in dict.fromkeys(b for b in (done, inbox) if b):
         top = Path(root) / base
         skip = (Path(root) / done).resolve() if done and base != done else None
-        for dirpath, dirnames, filenames in os.walk(top):
-            dirnames[:] = [d for d in dirnames if not d.startswith(".")
-                           and (skip is None or (Path(dirpath) / d).resolve() != skip)]
+        # ignore=False: a source stays in the ledger's census wherever it was filed.
+        for dirpath, dirnames, filenames in walk_tree(root, top, ignore=False):
+            dirnames[:] = [d for d in dirnames
+                           if skip is None or (Path(dirpath) / d).resolve() != skip]
             for fn in filenames:
                 rel = (Path(dirpath) / fn).relative_to(top).as_posix()
                 out.setdefault(fn, set()).add(rel)

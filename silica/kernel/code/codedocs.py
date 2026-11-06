@@ -42,7 +42,6 @@ class StaleDoc:
     details: list[str] = field(default_factory=list)
 
 
-_documents_of = documents_of  # internal alias (pre-rename call sites)
 
 
 def validate_documents(entries: list[str], root: Path | str) -> tuple[list[str], str | None]:
@@ -77,22 +76,15 @@ def iter_documenting_notes(vault: Path | str):
     which on the repo vault meant 242 residue notes of a killed probe counted
     as stale and a 17.8 s walk for 4 real notes (ADR-0038).
     """
-    vault = Path(vault)
-    skip = layout.ignore_matcher(vault)
-    for dirpath, dirnames, filenames in os.walk(vault):
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not skip(d))
-        for fn in sorted(filenames):
-            if not fn.endswith(".md"):
-                continue
-            md = Path(dirpath) / fn
-            try:
-                content = md.read_text(encoding="utf-8")
-            except OSError:
-                continue
-            data, _, body = frontmatter.split(content)
-            if not data or not _documents_of(data):
-                continue
-            yield md.relative_to(vault).as_posix(), data, body
+    for rel, md in layout.iter_notes(vault, scope="vault"):
+        try:
+            content = md.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        data, _, body = frontmatter.split(content)
+        if not data or not documents_of(data):
+            continue
+        yield rel, data, body
 
 
 def _skeleton_of(src: str, path: str, language):
@@ -168,7 +160,7 @@ def stale_docs(vault: Path | str, repo_root: Path | str | None = None,
     for _, data, _ in notes:
         recorded = str(data.get("code_ref") or "").strip()
         if recorded:
-            docs = _documents_of(data)
+            docs = documents_of(data)
             wanted.update(docs)
             by_ref.setdefault(recorded, set()).update(docs)
     latest = gitstate.latest_shas(root, sorted(wanted))
@@ -194,7 +186,7 @@ def _stale_for_note(root: Path, note_path: str, data: dict,
     if not recorded:
         return []  # unknown → not stale
     out: list[StaleDoc] = []
-    for code_path in _documents_of(data):
+    for code_path in documents_of(data):
         current = latest.get(code_path, "")
         if not current:
             continue  # path has no history → unknown, not stale
@@ -371,7 +363,7 @@ def read_warning(vault: Path | str, data: dict, repo_root: Path | str | None = N
     Soft on every failure: a banner is an aid, never a reason a read fails.
     """
     try:
-        docs = _documents_of(data)
+        docs = documents_of(data)
         if not docs:
             return ""
         root = Path(repo_root) if repo_root else roots.repo_root_for(Path(vault))

@@ -221,15 +221,12 @@ def okf_conformance(vault: Path | str) -> Census:
     A path that is not a directory raises instead of reading as an empty,
     conformant bundle: a zero-file scan is an invocation error, never a pass.
     """
-    from silica.kernel.base.layout import ignore_matcher
-
-    from silica.kernel.base.layout import DEFAULT_LOG_FILENAME
+    from silica.kernel.base.layout import DEFAULT_LOG_FILENAME, iter_notes
     from silica.kernel.base.manifest import load_manifest
 
     vault = Path(vault)
     if not vault.is_dir():
         raise NotADirectoryError(f"{vault} is not a vault directory")
-    ignored = ignore_matcher(vault)
     # Silica's own journal is not a note. §11.3's advice for it reads "rename
     # any `index`/`log` note by hand" — which the user cannot do, because the
     # next run writes it again. Read the write_dir off THIS vault, not the
@@ -240,13 +237,7 @@ def okf_conformance(vault: Path | str) -> Census:
         journal = DEFAULT_LOG_FILENAME
     out: list[Violation] = []
     scanned = 0
-    for f in sorted(vault.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts):
-            continue  # .obsidian, .trash, .silica
-        if any(ignored(p) for p in parts[:-1]):
-            continue  # .silicaignore / NOISE_DIRS: node_modules under a repo vault
-        rel = f.relative_to(vault).as_posix()
+    for rel, f in iter_notes(vault, scope="vault"):
         if rel == journal:
             continue
         scanned += 1
