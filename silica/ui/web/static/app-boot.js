@@ -6,7 +6,8 @@ if (document.documentElement.dataset.signout !== undefined) {
   window.fetch = async (...args) => {
     const r = await fetchNow(...args);
     if (r.status === 401 && r.headers.has("X-Silica-Signed-Out")) {
-      location.assign("/sign-in?next=" + encodeURIComponent(location.pathname + location.search));
+      // The hash too: the app's views and its open note live there, and the server never sees it.
+      location.assign("/sign-in?next=" + encodeURIComponent(location.pathname + location.search + location.hash));
     }
     return r;
   };

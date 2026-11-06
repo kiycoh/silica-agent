@@ -3111,6 +3111,8 @@ def test_only_the_gateways_401_sends_the_page_to_sign_in():
 
     boot = (Path(server.__file__).parent / "static" / "app-boot.js").read_text()
     assert 'r.status === 401 && r.headers.has("X-Silica-Signed-Out")' in boot
+    # The way back keeps the view and the open note, which live in the hash (e2e 2026-11-06).
+    assert "location.pathname + location.search + location.hash" in boot
 
 
 def test_every_view_row_says_what_the_view_is_for():
