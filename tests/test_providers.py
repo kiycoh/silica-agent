@@ -658,6 +658,9 @@ def test_a_bare_role_model_with_no_provider_stays_on_the_router():
     assert get_provider(cfg, role="judge").model == "openrouter/chat"
     cfg.worker_provider = "vllm"  # a named provider keeps the id, as it always did
     assert get_provider(cfg, role="worker").model == "qwen3"
+    # A prefix this tree does not list still routes: litellm knows it, silica need not.
+    cfg.worker_provider, cfg.worker_model = None, "together_ai/llama"
+    assert get_provider(cfg, role="worker").model == "together_ai/llama"
 
 
 def test_the_worker_key_stays_with_the_worker_model():

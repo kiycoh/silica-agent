@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from silica.model import llm
 from silica.model.limits import base_url
 from silica.model.llm import LLMResponse, openrouter_routing
-from silica.config import PROVIDER_PREFIXES, DEFAULT_EMBEDDING_MODEL, ensure_prefix
+from silica.config import DEFAULT_EMBEDDING_MODEL, ensure_prefix
 from silica.provider_table import PROVIDERS
 from silica.metrics import emit, ms_since, number, outcome_of
 
@@ -439,10 +439,11 @@ def resolve_role(role: str = "router", config: Any = None) -> tuple[str, str]:
         # The one role that inherits the chat's provider: hosted, a vision model
         # is one variable (config.vision_model), and it must not need a second.
         provider = provider or router_provider
-    # A bare id with no provider beside it names no endpoint, and litellm would
-    # refuse the call. It always meant the router here, so a config that worked
-    # keeps working; a prefixed id routes itself and runs as set.
-    if not model or (not provider and model.split("/", 1)[0] not in PROVIDER_PREFIXES):
+    # An id with no prefix and no provider beside it names no endpoint, and litellm
+    # would refuse the call. It always meant the router here, so a config that worked
+    # keeps working. Any prefix counts, not only PROVIDER_PREFIXES: litellm resolves far
+    # more of them (`together_ai/`, `groq/`) and the id runs as set.
+    if not model or (not provider and "/" not in model):
         # litellm resolves the endpoint from the prefix, so keep it (or restore
         # it when the user wrote a bare id). Ollama in particular MUST keep it:
         # the prefix is what routes it to /api/chat with an explicit num_ctx, and
