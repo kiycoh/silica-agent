@@ -16,7 +16,6 @@ import json
 import re
 import subprocess
 import unicodedata
-from collections.abc import Iterable
 from functools import lru_cache
 
 from pathlib import Path
@@ -24,8 +23,13 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
-from silica.kernel.recall.listing import natural_key, notes_under, vault_rel
+from silica.kernel.recall import engine
+from silica.kernel.recall import search as recall_search
+from silica.kernel.recall.listing import natural_key, notes_under, unconverted_under, vault_files_under, vault_rel
+from silica.sources import pdf_extract
 from silica.tools import Reads, tool
+
+engine.pdf_reader = pdf_extract
 
 
 # ---------------------------------------------------------------------------
@@ -166,46 +170,13 @@ def silica_search(query: Annotated[str, Field(description='Text to search for in
     try:
         from silica.kernel.code import codedocs
 
-        m = _stale_map()
+        m = recall_search.stale_map()
         flagged = {p: lvl for p in out["paths"]
                    if (lvl := codedocs.peek_level(m, p))}
         if flagged:
             out["stale"] = flagged
     except Exception:
         pass  # flags are an aid, never a reason a search fails
-    return out
-
-
-# The third stale level, beside codedocs' "cosmetic" and "structural": the
-# note was distilled from a source version that has since been re-nucleated.
-_STALE_SOURCE = "source"
-
-
-def _stale_map() -> dict[str, str]:
-    """`note_path.md -> level` for every note a reader should doubt.
-
-    Two ledgers, one flag. codedocs.peek answers for code notes after a commit;
-    the provenance drift map answers for notes whose source was re-nucleated
-    at another version. The code level wins when a note carries both: it is
-    the more specific claim. Each leg is guarded on its own, so a ledger that
-    cannot be read costs its flags and nothing else.
-    """
-    from silica.config import CONFIG
-
-    out: dict[str, str] = {}
-    try:
-        from silica.kernel.write import provenance
-
-        out.update({p: _STALE_SOURCE
-                    for p in provenance.drift_map(vault_path=CONFIG.vault_path)})
-    except Exception:
-        pass  # flags are an aid, never a reason a search fails
-    try:
-        from silica.kernel.code import codedocs
-
-        out.update(codedocs.peek(CONFIG.vault_path))
-    except Exception:
-        pass
     return out
 
 
@@ -289,7 +260,7 @@ def _unreadable(folder: str) -> dict | None:
     from silica.kernel.workspaces import in_scope
 
     try:
-        core = _engine()
+        core = engine.engine()
     except RuntimeError:
         return None
     got = core.unreadable(folder.strip().strip("/"))
@@ -313,96 +284,6 @@ def _unread_outside_raws(root: Path, paths: list[str]) -> dict | None:
     if not paths:
         return None
     return {"count": len(paths), "paths": paths[:_UNREADABLE_SHOWN]}
-
-# Its walk does not apply is_source_leaf: sources/ leaves are searchable here
-# and hidden from the fusion indexes, one vault with two rules (S3 of
-# docs/audits/2026-09-17-paper-backed-simplifications.md).
-def _engine():
-    """The retrieval engine, from the silica-core package (ADR-0043). It
-    carries its own CONFIG singleton, so the vault this tree serves is
-    mirrored into it at every call, and it gets its own index file: its
-    build drops every path its walk did not produce, so pointed at
-    `lexical.json` it would prune the fusion leg's entries (ADR-0029)."""
-    from silica.config import CONFIG
-    from silica_core import config as core_config
-    from silica_core import core
-
-    core.INDEX = "retrieval"
-    core_config.CONFIG.vault_path = CONFIG.vault_path
-    # A silica-core that renamed either name would go back to opening PDFs in
-    # this process without a word, so the engine refuses to run instead. The
-    # server installs the lock (0.10.1), but a wheel install resolves
-    # `silica-core>=0.10.1` to the newest release, untested here; 0.11.0 keeps
-    # both names (checked 2026-10-20).
-    if not (callable(getattr(core, "_pdf_text", None)) and callable(getattr(core, "_extract_cache", None))):
-        raise RuntimeError("silica-core no longer reads PDFs through _pdf_text: see silica/tools/atomic.py")
-    core._pdf_text = _pdf_text
-    return core
-
-
-# The tag on the page map this tree writes beside the engine's extraction:
-# silica-core's own map is a bare list, and its text kept the hidden lines.
-_PDF_READER = "pdf_extract/1"
-
-
-def _pdf_text(rel: str, full: Path) -> tuple[str, list[dict], str]:
-    """silica-core's `_pdf_text`, through which its index, its search windows
-    and `silica_read` open every PDF, read by `pdf_extract` instead: in the
-    limited child on the server (ADR-0098 H1) and without the text a student
-    never sees (H6). The engine opened each PDF it walked with PDFium in this
-    process and kept those lines, so a dropped PDF, which stays in the Inbox
-    while it converts, reached the server's own process at the next search
-    and its white text reached the turn (found 2026-10-20).
-
-    Same return and the same cache file, whose path `silica_read` hands out as
-    `extract_path`. The map beside it carries `_PDF_READER`, so a fresh
-    extraction the engine wrote before this is read again, never served.
-    The pages are the text alone (`vision=0`): the renders are the
-    conversion's, and up to 60 a file would be paid on every PDF the index
-    walks."""
-    import orjson
-
-    from silica.kernel.base.durable import atomic_write_bytes
-    from silica.sources import pdf_extract
-    from silica_core import core
-
-    cache = core._extract_cache(rel)
-    pages_file = cache.with_suffix(".json")
-    try:
-        if cache.stat().st_mtime >= full.stat().st_mtime:
-            saved = orjson.loads(pages_file.read_bytes())
-            if isinstance(saved, dict) and saved.get("reader") == _PDF_READER:
-                text = cache.read_text(encoding="utf-8", errors="replace")
-                return text, saved["pages"], "" if text else "no text layer"
-    except (OSError, ValueError):
-        pass  # no extraction yet, or a torn one: the read below writes it again
-    try:
-        data = pdf_extract.read(full, vision=0)
-    except Exception as exc:
-        # One file the reader refuses (encrypted, a bomb the child died of, not
-        # a PDF) is that file listed `unconverted` with its reason, as the
-        # engine's own reader did: the index build has no guard of its own and
-        # would stop for every other file. Only ADR-0087's sentences, written
-        # for the student, go out as they are; anything else can carry a path.
-        why = str(exc) if isinstance(exc, pdf_extract.PdfUnreadable) else type(exc).__name__
-        return "", [], f"unreadable: {why}"
-    bodies = ["\n".join(line for line, _size in page).strip() for page in data["pages"]]
-    parts: list[str] = []
-    pages: list[dict] = []
-    line, offset = 1, 0
-    for n, body in enumerate(bodies, 1):
-        chunk = body + "\n\n"
-        pages.append({"page": n, "line": line, "offset": offset})
-        parts.append(chunk)
-        line += chunk.count("\n")
-        offset += len(chunk)
-    text = "".join(parts) if any(bodies) else ""
-    pages = pages if text else []
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_bytes(cache, text.encode("utf-8"))
-    atomic_write_bytes(pages_file, orjson.dumps({"reader": _PDF_READER, "pages": pages}))
-    return text, pages, "" if text else "no text layer"
-
 
 def _scoped_search(engine, query: str, k: int, folder: str) -> dict:
     """`engine.search`, kept inside a workspace's members when the turn is
@@ -550,7 +431,7 @@ def _note_states(hits: list[dict]) -> None:
     from silica.kernel.base import frontmatter
     from silica.kernel.write.contested import SUPERSEDED_BY_KEY, lifecycle, trust
 
-    root = _engine()._root()
+    root = engine.engine()._root()
     seen: dict[str, dict] = {}
     # shortcut: the whole note is read for its frontmatter and its Sources
     # marker; 8 hits on 5.1 MB converted sidecars took 97 ms (2026-11-04).
@@ -625,7 +506,7 @@ def silica_search_context(
             if (unread := _unreadable(folder)) is not None:
                 lit["unreadable"] = unread
         return lit
-    r = _scoped_search(_engine(), query, k, folder)
+    r = _scoped_search(engine.engine(), query, k, folder)
     if "error" in r:
         return r
 
@@ -636,7 +517,7 @@ def silica_search_context(
     try:
         from silica.kernel.code import codedocs
 
-        stale_map = _stale_map()
+        stale_map = recall_search.stale_map()
     except Exception:
         stale_map = {}
         codedocs = None  # type: ignore[assignment]  # peek import failed: no flags this call
@@ -713,7 +594,7 @@ def silica_read(
     if in_config_dir(Path(CONFIG.vault_path or ".", path)):
         return {"error": {"code": "out_of_root",
                           "hint": f"{path!r} is Silica's own configuration, not vault content"}}
-    return _engine().read(path, start=start, end=end, section=section,
+    return engine.engine().read(path, start=start, end=end, section=section,
                           max_chars=max_chars, expect_version=expect_version)
 
 
@@ -1173,41 +1054,6 @@ def silica_unresolved() -> list:
 # List files
 # ---------------------------------------------------------------------------
 
-def _unconverted_under(folder: str) -> list[str]:
-    """Non-markdown files under `folder`, natural-sorted; `Images/` excluded.
-
-    `notes_under` lists .md only, so a folder holding nothing but PDFs came back
-    as {"total": 0, "files": []} — a payload indistinguishable from a folder
-    that is not there, and the agent duly reported it as non-existent. Naming
-    the unconverted files is the only way the caller can tell the two apart.
-    `Images/` is conversion output, not input, and outnumbers the notes 70:1.
-
-    Answers for source folders as well as the inbox: a research library is nine
-    folders of scanned books and one INDEX.md, and while the rule was
-    inbox-only every one of them read as empty.
-    """
-    from silica.kernel.base.layout import in_folder
-    from silica.kernel.base.manifest import active_inbox_dir
-
-    scope = vault_rel(folder)
-    if not scope:
-        return []
-    inbox = active_inbox_dir()
-    if inbox and in_folder(scope, inbox):
-        paths: Iterable[str] = (r.path for r in DRIVER.list_inbox_files())
-    else:
-        paths = _vault_files_under(scope)
-    return sorted(
-        (
-            p for p in paths
-            if not p.endswith(".md")
-            and in_folder(p, scope)
-            and "/Images/" not in p
-        ),
-        key=natural_key,
-    )
-
-
 def _raws_of(files: list[str]) -> dict[str, str]:
     """{file: the note naming it as its raw} for those of `files` a note names."""
     if not files:
@@ -1219,25 +1065,6 @@ def _raws_of(files: list[str]) -> dict[str, str]:
         return {}
     named = raws.index(Path(CONFIG.vault_path))
     return {f: named[f][0] for f in files if f in named}
-
-
-def _vault_files_under(scope: str) -> list[str]:
-    """Vault-relative files under `scope`, dotfiles and dot-dirs skipped."""
-    from silica.config import CONFIG
-    from silica.kernel.base.layout import walk_tree
-
-    root = Path(CONFIG.vault_path or "")
-    base = root / scope
-    if not base.is_dir():
-        return []
-    out: list[str] = []
-    # ignore=False: /nucleate of a folder the person named reads that folder.
-    for dirpath, _dirnames, filenames in walk_tree(root, base, ignore=False):
-        for name in filenames:
-            if name.startswith("."):
-                continue
-            out.append((Path(dirpath) / name).relative_to(root).as_posix())
-    return out
 
 
 def _prop_selector(prop: str) -> tuple[str, str] | None:
@@ -1331,8 +1158,8 @@ def silica_files(
                               "language; list a folder to see the values its notes carry.")
         return result
     # An inbox folder of PDFs is not an empty folder: say so, or the caller
-    # concludes the path does not exist. See _unconverted_under.
-    pending = _unconverted_under(folder) if folder else []
+    # concludes the path does not exist. See unconverted_under.
+    pending = unconverted_under(folder) if folder else []
     # A file some note names as its raw is converted (ADR-0129 point 1): on
     # the server it stays beside its notes since 2026-11-04, and listed as
     # unconverted it would be offered to /nucleate again.
@@ -1383,7 +1210,7 @@ def _source_folder_census() -> dict[str, int]:
     from silica.kernel.base.layout import is_inbox_path
 
     counts: Counter = Counter()
-    for p in _vault_files_under(""):
+    for p in vault_files_under(""):
         if p.endswith(".md") or "/" not in p or is_inbox_path(p):
             continue
         counts[p.split("/", 1)[0]] += 1
@@ -1871,7 +1698,7 @@ def _disk_changes(cut: float) -> list[dict]:
     from silica.kernel.workspaces import in_scope
 
     rows: list[tuple[float, str]] = []
-    for rel, full in _engine().walk():
+    for rel, full in engine.engine().walk():
         if full is None or not in_scope(rel):
             continue
         try:

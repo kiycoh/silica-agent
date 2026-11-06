@@ -16,48 +16,11 @@ from __future__ import annotations
 import json
 
 from silica.obs.events import ToolCompleteEvent
+from silica.kernel.recall.search import degraded_lines
 from silica.kernel.write.provenance import number_tokens, unfounded_numbers
 from silica.tools import TOOLS, Reads, tool_failed
 
 THIN_COVERAGE_HINT = "vault coverage was thin: /web to search the web"
-
-# The degraded line, one per leg: `<prefix>: the <role> <phrase><fix>` (ADR-0094
-# point 5). The prefix says what the answer lost, not which server failed: the
-# reader judges the answer, and "lexical only" is what changes how to read it.
-_LEG = {"embed": ("lexical only", "embedder", "SILICA_EMBEDDING_TIMEOUT", "embedding_timeout"),
-        "rerank": ("not reranked", "reranker", "SILICA_RERANK_TIMEOUT", "rerank_timeout")}
-_PHRASE = {"unreachable": "is unreachable", "loading": "is still loading",
-           "rejected": "refused the model name", "failed": "failed"}
-# Where to fix it, per surface. The GUI names its own panels; the REPL has none,
-# so both Settings pointers become the doctor; a tool result can be read by
-# either, so it names both. Loading has no fix: it ends.
-_FIX = {
-    "gui": {"unreachable": "start it in Settings, Endpoints",
-            "diagnose": "Settings, Diagnostics names the cause"},
-    "repl": {"unreachable": "run silica doctor", "diagnose": "run silica doctor"},
-    "tool": {"unreachable": "start it in Settings, Endpoints, or run silica doctor",
-             "diagnose": "Settings, Diagnostics names the cause, or run silica doctor"},
-}
-
-
-def degraded_lines(degraded: dict, surface: str = "gui") -> list[str]:
-    """One line per leg this call or turn ran without, the embedder first."""
-    from silica.config import CONFIG
-
-    lines = []
-    for leg in ("embed", "rerank"):
-        cause = degraded.get(leg)
-        if cause is None:
-            continue
-        prefix, role, knob, timeout_attr = _LEG[leg]
-        if cause == "slow":
-            phrase, fix = f"did not answer in {getattr(CONFIG, timeout_attr):g} s", f"raise {knob}"
-        else:
-            phrase = _PHRASE.get(cause, "failed")
-            fix = {"unreachable": _FIX[surface]["unreachable"],
-                   "loading": ""}.get(cause, _FIX[surface]["diagnose"])
-        lines.append(f"{prefix}: the {role} {phrase}" + (f" · {fix}" if fix else ""))
-    return lines
 
 # What an empty retrieval looks like is Tool.found_nothing. `silica_related`
 # declares none on purpose: it takes an existing note, so an empty result means

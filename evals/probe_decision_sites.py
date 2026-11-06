@@ -8,7 +8,7 @@ One question per site, the same `{state, questions}` body to both backends
                   `probe_sniff.build_items()` (63 heads, labels of 2026-09-19)
   orphan  noul    per (orphan, candidate) pair: should the candidate link to the
                   orphan? State and question are the production ones
-                  (`orphan.typed_state`, `LINK_QUESTION`). Candidates are `curate.link_candidates` on the test
+                  (`orphan.typed_state`, `LINK_QUESTION`). Candidates are `related.link_candidates` on the test
                   vault; a pair is positive when the vault already links the two
                   notes (either direction), else the label is hand-set in the
                   pairs file (`labeller` says whose). Baseline arm `llm`: the
@@ -119,7 +119,7 @@ def _stem(rel: str) -> str:
 
 
 def build_orphan(n: int) -> None:
-    from silica.tools.curate import link_candidates
+    from silica.kernel.report.related import link_candidates
 
     notes = _notes()
     by_stem = {_stem(r).lower(): r for r in notes}

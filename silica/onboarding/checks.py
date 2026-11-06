@@ -562,7 +562,7 @@ def language_status(vault: str) -> tuple[str | None, str | None, bool]:
 
 def reply_language_for(vault: str) -> str | None:
     """The language a surface with no message of the person's to follow
-    speaks for `vault`: the speech APIs (agent/stt.speech_lang).
+    speaks for `vault`: the speech APIs (ui/web/stt_routes.speech_lang).
 
     Explicit conventions win (`reply_language`, else `language`); the fallback
     is the vault's own authority (declared `cooccurrence_lang`, else detected

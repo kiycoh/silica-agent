@@ -19,12 +19,17 @@ from pydantic import Field
 
 from silica.agent.compaction import dedup_recall_excerpts
 from silica.driver import DRIVER
+from silica.kernel.recall import refresh
+from silica.kernel.recall import search as recall_search
+from silica.kernel.report import related as report_related
 from silica.tools import Reads, tool
 
 logger = logging.getLogger(__name__)
 
 
-from silica.kernel.base.layout import in_folder as _in_folder  # canonical folder-scope predicate
+# shortcut: only tools/runners.py still reads this name, and it is being split by
+# two other lanes. Drop it with the first of their merges, by 2026-11-20.
+from silica.kernel.base.layout import in_folder as _in_folder  # noqa: F401
 
 
 @tool(cls="composed", ingress=False)
@@ -270,136 +275,6 @@ def silica_backlink(new_titles: Annotated[list[str], Field(description='Titles o
     return {"added": total, "notes_modified": len(added_map), "details": added_map}
 
 
-def _stale_entry(stale_map: dict[str, str], r) -> dict:
-    """{"stale": level} for a flagged result, {} otherwise. Memory-lane
-    results are another vault (ADR-0019): never annotated, like cluster."""
-    if r.origin == "memory" or not stale_map:
-        return {}
-    from silica.kernel.code import codedocs
-
-    lvl = codedocs.peek_level(stale_map, r.path)
-    return {"stale": lvl} if lvl else {}
-
-
-def _peek_stale() -> dict[str, str]:
-    """The stale peek map for the active vault; {} on any failure (spec §5)."""
-    try:
-        from silica.config import CONFIG
-        from silica.kernel.code import codedocs
-
-        return codedocs.peek(CONFIG.vault_path)
-    except Exception:
-        return {}
-
-
-def degraded_fields(leg_stats: dict) -> dict[str, Any]:
-    """`degraded` and its `hint` for a retrieval reply, {} when no leg failed.
-
-    Spread right after `query` (ADR-0094 point 3): the GUI card keeps the first
-    1,200 characters of a result and the median recall result is 22,567 long
-    (2026-10-11), so a flag after `context` never reached the screen; a
-    compaction stub keeps the head too.
-    """
-    degraded = leg_stats.get("degraded")
-    if not degraded:
-        return {}
-    from silica.agent.recall_watch import degraded_lines
-
-    return {"degraded": dict(degraded), "hint": " · ".join(degraded_lines(degraded, "tool"))}
-
-
-# First-stage pool for _facade_search: over-fetch so dropping staging entries
-# still leaves k notes. 20 is the rerank pool the gate is calibrated on.
-_NOTE_POOL = 20
-
-
-def _facade_search(text: str, k: int, memory: bool = True, folder: str = "") -> dict[str, Any]:
-    """Fused embeddings + co-occurrence search for a fresh text, then reranked.
-
-    Shared core of silica_semantic_search, now routed
-    through perception.facade_retrieve — the same retrieval path perceive()
-    and the memory eval use. Returns ``{"results": [{path, name, score}, ...]}``
-    or ``{"error": ...}`` when no index is available at all. The two legs
-    abstain independently: an empty embedding index (or an offline embedder)
-    still serves co-occurrence results, and vice versa — mirroring how
-    perception and the run substrate consume the facade. (COLLISION does not:
-    it routes on the plain cosine search, ADR-0030.)
-    """
-    from silica.kernel.recall.perception import facade_retrieve
-
-    from silica.kernel.base.layout import is_inbox_path
-
-    # Staging outranks the notes distilled from it: a raw lecture repeats every
-    # term its notes split up, so it wins first-stage retrieval and then eats the
-    # top-k. Measured on the ML vault: asking whether a concept had a note, the
-    # inbox copy of the ASKING document answered its own question at score 1.0,
-    # three times. The inbox stays indexed (staging is source material and
-    # `silica_recall` still reaches it) — it just stops crowding the ranked list
-    # this tool returns, so over-fetch, drop staging, then cut to k.
-    from silica.model.providers import get_reranker
-    from silica.config import CONFIG
-    from silica.kernel.recall.rerank import rerank_related
-
-    # Filter BEFORE the cross-encoder, not after: reranking the wide pool and
-    # then dropping staging pays for documents that get thrown away, and on a
-    # local GPU a 20-document batch OOMs outright. This way the reranker still
-    # sees exactly k candidates, and they are all notes.
-    # One record for both calls (ADR-0094): the query embed marks `embed` in
-    # facade_retrieve, the cross-encoder marks `rerank` below. Kept apart, a
-    # search that lost its embedder read `reranked: true` and looked healthy.
-    from silica.kernel.workspaces import allow_keys
-
-    rr: dict = {"reranked": False}
-    # A chat opened in a workspace searches only its members (ADR-0112 point
-    # 4), and the personal-memory lane is another vault, so it sits out.
-    allow = allow_keys()
-    results, _query_vec = facade_retrieve(text, k=max(k, _NOTE_POOL), use_rerank=False,
-                                          use_memory=memory and allow is None, leg_stats=rr,
-                                          allow=allow)
-    if results is None:
-        return {**degraded_fields(rr),
-                "error": "No index available. Run silica_embed_refresh or silica_cooccurrence_refresh first."}
-    # is_inbox_path answers for the ACTIVE vault's staging roots; a memory-lane
-    # note whose vault happens to use the same folder name is not this vault's
-    # staging, and dropping it here silently shrank the guest lane (ADR-0019).
-    notes = [r for r in results
-             if r.origin == "memory" or not is_inbox_path(r.path or "")]
-    if folder:
-        from silica.kernel.base.layout import in_folder
-
-        # A folder of THIS vault never contains a memory-lane path.
-        notes = [r for r in notes if r.origin != "memory" and in_folder(r.path or "", folder)]
-    # Never answer empty because everything relevant was staged: if the vault has
-    # nothing else to say, staging IS the answer. A folder scope is different:
-    # empty there is the true answer, not a staging artefact.
-    results = (notes or (results if not folder else []))[:k]
-    reranker = get_reranker(CONFIG)
-    if reranker:
-        results = rerank_related(reranker, text, results, k=k, stats=rr)
-    stale_map = _peek_stale()
-    return {
-        **degraded_fields(rr),
-        # Which scale `score` is on. The cross-encoder abstains on pools it
-        # cannot read, and the surviving first-stage cosines live around 0.03
-        # where a rerank probability lives around 0.99 — same field, two scales.
-        # Without this a caller reads 0.03 as "nothing here" when it means
-        # "not scored". Never threshold across calls; compare within one.
-        "reranked": bool(rr.get("reranked", False)),
-        "results": [
-            {
-                "path": r.path,
-                "name": r.name,
-                "score": round(r.score, 4),
-                # Origin marker (ADR-0019): only when the note is NOT in the
-                # active vault, so single-vault payloads stay unchanged.
-                **({"origin": "memory"} if r.origin == "memory" else {}),
-                **_stale_entry(stale_map, r),
-            }
-            for r in results
-        ]
-    }
-
-
 @tool(cls="composed", ingress=False, parallel_safe=True, found_nothing="results")
 def silica_semantic_search(query: Annotated[str, Field(description='Free-form query text to embed and search against the vault index')], k: Annotated[int, Field(description='Number of results to return')] = 5, memory: Annotated[bool, Field(description='Include the personal-memory lane (ADR-0019). Pass false for questions scoped to THIS vault — repo and code questions — so an unrelated personal vault cannot occupy result slots.')] = True, folder: Annotated[str, Field(description="Only notes under this vault folder (e.g. 'docs/adr'). Empty = whole vault.")] = "") -> dict[str, Any]:
     """Find vault notes by MEANING (embeddings + co-occurrence fused, reranked).
@@ -412,7 +287,7 @@ def silica_semantic_search(query: Annotated[str, Field(description='Free-form qu
     silica_read_note before acting. The last result is not a cut-off: to
     decide whether a note exists, use silica_exists or silica_search.
     """
-    return _without_score({"query": query, **_facade_search(query, k=k, memory=memory, folder=folder)})
+    return _without_score({"query": query, **recall_search.facade_search(query, k=k, memory=memory, folder=folder)})
 
 
 def _without_score(out: dict[str, Any]) -> dict[str, Any]:
@@ -422,7 +297,7 @@ def _without_score(out: dict[str, Any]) -> dict[str, Any]:
     owner took it out (docs plans/llm-km-survey-cards.md, C2); the order is
     the ranking, and `evidence`, `embed` and `cooccur` keep the numbers that
     name their leg. /find, in the CLI and the web panel, reads
-    _facade_search and keeps the score for the person."""
+    facade_search and keeps the score for the person."""
     out = {key: v for key, v in out.items() if key != "reranked"}
     if isinstance(out.get("results"), list):
         out["results"] = [{key: v for key, v in r.items() if key != "score"} for r in out["results"]]
@@ -523,7 +398,7 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
                  mark_used=True, allow=allow)
     # Staleness is the ACTIVE vault's code lane; a peeked vault's paths would
     # only ever match it by coincidence.
-    stale_map = {} if peek else _peek_stale()
+    stale_map = {} if peek else recall_search.code_stale_map()
     if not peek:
         from silica.agent.memory_gate import returned_notes
 
@@ -537,7 +412,7 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
     # render(windowed=True) emits b.excerpt, so a note whose window IS its body
     # was delivered complete — measured: 3 of 9 calls in a chat were re-reads of
     # notes recall had already handed over whole.
-    out = {"query": query, **degraded_fields(rr),
+    out = {"query": query, **recall_search.degraded_fields(rr),
            "context": p.render(stale=stale_map or None),
            "notes": [b.path for b in p.blocks],
            # Active-vault and peeked notes: the caller can re-read both (the
@@ -698,148 +573,7 @@ def silica_related(note: Annotated[str, Field(description='Note name (wikilink-s
     names which retrieval legs actually ranked; an absent leg is not
     agreement.
     """
-    return _without_score(_related(note, k, memory))
-
-
-def _related(note: str, k: int = 5, memory: bool = True) -> dict[str, Any]:
-    """silica_related's payload with the fused `score` and `reranked`, for the
-    callers that are not the model: the reranker's contract is tested here."""
-    from silica.config import CONFIG
-    from silica.driver import DRIVER
-    from silica.kernel.recall.cooccurrence import (
-        CooccurStore, store_key, get_cooccur_store,
-    )
-    from silica.kernel.recall.embed import get_store
-    from silica.kernel.recall.relatedness import related_notes
-
-    # Resolve name-or-path to the canonical vault path (any backend), then reduce to
-    # the store keyspace via store_key (strip .md, posix, CASE-PRESERVED). This is
-    # the single source of truth for both index keyspaces: it makes the query hit the
-    # stored vectors/nodes AND lets related_notes exclude the query itself (blocking
-    # a raw ".md" path would let the note resurface among its own results). Never
-    # ledger_key here — its lowercasing misses the case-preserving stored keys.
-    try:
-        query_path = DRIVER.read_note(note).ref.path
-        resolved = bool(query_path)  # a backend returning '' must not pass as resolved
-    except Exception:
-        resolved = False
-    if not resolved:
-        query_path = note  # unresolved: treat the input itself as a path
-    note_path = query_path if resolved else ""  # pre-store_key form, for file_refs_of
-    query_path = store_key(query_path)
-
-    embed_store = get_store()
-    cooccur_store: CooccurStore | None
-    try:
-        cooccur_store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-        if len(cooccur_store) == 0:
-            cooccur_store = None
-    except Exception:
-        cooccur_store = None
-    if len(embed_store) == 0 and cooccur_store is None:
-        return {"note": note, "error": "No index available. Run silica_embed_refresh or silica_cooccurrence_refresh first."}
-
-    from silica.kernel.workspaces import allow_keys
-
-    allow = allow_keys()  # a workspace's turn ranks its members only (ADR-0112 point 4)
-    mem_embed = mem_cooccur = None
-    if memory and allow is None:
-        from silica.kernel.recall.memory_lane import memory_stores
-
-        mem_embed, mem_cooccur = memory_stores()  # ADR-0019 second recall lane
-    results = related_notes(
-        query_path,
-        embed_store=embed_store,
-        cooccur_store=cooccur_store,
-        memory_embed_store=mem_embed,
-        memory_cooccur_store=mem_cooccur,
-        k=k if allow is None else max(k, len(allow)),
-    )
-    if allow is not None:
-        results = [r for r in results if r.path in allow][:k]
-    # Same score contract as silica_semantic_search (ADR-0032): reorder-only
-    # within the fused top-k (membership stays first-stage, retrieval-gates 2a),
-    # query = the seed's bare title — the one measured rerank query shape. The
-    # raw RRF term 1/(60+rank) the payload used to expose as `score` cannot
-    # separate candidates by construction (measured 2026-08-25: six results
-    # inside [0.0159, 0.0164]).
-    rr: dict[str, Any] = {"reranked": False}
-    if results:
-        from silica.model.providers import get_reranker
-        from silica.kernel.recall.rerank import link_query, rerank_related
-
-        reranker = get_reranker(CONFIG)
-        if reranker:
-            results = rerank_related(reranker, link_query(query_path), results,
-                                     k=k, stats=rr)
-    # Cluster membership from the cached ctx (last Louvain run; {} when cold):
-    # tells the caller whether a candidate sits in the query's own knowledge
-    # area or across a cluster boundary. Memory-lane notes are another vault —
-    # never annotated.
-    from silica.kernel.graph.graph_export import cluster_hub_of, graph_distances, load_cluster_ctx
-
-    gctx_map = (load_cluster_ctx() or {}).get("ctx") or {}
-    # Structural distance: wikilink hops from the query to each result — the
-    # per-pair coherence read. High fused score + null (unreachable) or large
-    # distance = a missing link worth creating; distance 1 = already linked.
-    # Omitted entirely when the wikilink graph is unavailable.
-    dists = graph_distances(query_path)
-    stale_map = _peek_stale()
-    out: dict[str, Any] = {
-        "note": note,
-        "reranked": bool(rr.get("reranked", False)),
-        # Which legs actually ranked: an absent leg (cold index, lane off) is
-        # otherwise indistinguishable from unanimous agreement — 2026-08-25 the
-        # embed index was empty and six cooccur-only results read as consensus.
-        "legs": {
-            "embed": len(embed_store) > 0,
-            "cooccur": cooccur_store is not None,
-            "memory": mem_embed is not None or mem_cooccur is not None,
-        },
-        "results": [
-            {
-                "path": r.path,
-                "name": r.name,
-                "score": round(r.score, 4),
-                "evidence": r.evidence,
-                **({"embed": round(r.embed_score, 3)}
-                   if r.embed_score is not None else {}),
-                **({"cooccur": int(round(r.cooccur_weight))}
-                   if r.cooccur_weight is not None else {}),
-                **(
-                    {"cluster": hub}
-                    if r.origin != "memory" and (hub := cluster_hub_of(gctx_map, r.path))
-                    else {}
-                ),
-                **(
-                    {"distance": dists.get(r.path)}
-                    if dists is not None and r.origin != "memory"
-                    else {}
-                ),
-                **({"origin": "memory"} if r.origin == "memory" else {}),
-                **_stale_entry(stale_map, r),
-            }
-            for r in results
-        ],
-    }
-    if note_path:
-        try:
-            fr = DRIVER.file_refs_of(note_path)
-            files = {kind: v for kind, v in fr.items() if v and kind != "unresolved"}
-            if files:
-                # Structural section, not a retrieval leg: what the seed note
-                # references on disk (embeds, documents:). Never enters fusion
-                # (ADR-0018 boundary); omitted when empty to save tokens.
-                out["files"] = files
-        except Exception:
-            pass  # a backend without file refs must not fail the related call
-    if not results:
-        # Empty is ambiguous — say why so the caller acts instead of guessing.
-        if not resolved:
-            out["hint"] = f"note '{note}' did not resolve to a vault note — check the name/path."
-        elif len(embed_store) == 0:
-            out["hint"] = "embedding index empty — co-occurrence only. Run silica_embed_refresh for semantic neighbors."
-    return out
+    return _without_score(report_related.related(note, k, memory))
 
 
 @tool(cls="composed", ingress=False, parallel_safe=True, note_args=("note",))
@@ -923,80 +657,9 @@ def silica_embed_refresh(folder: Annotated[str, Field(description='Vault-relativ
     first if those report an empty index. Incremental: skips notes already
     indexed (unless force=True). Call after bulk writes to keep it fresh.
     """
-    from silica.model.providers import get_embedder
-    from silica.config import CONFIG
-    from silica.kernel.recall.embed import build_index
+    from silica.agent.vision import ask_chat_model
 
-    try:
-        all_refs = DRIVER.list_files(folder or None)
-    except Exception as e:
-        return {"error": f"Failed to list vault files: {e}"}
-
-    notes: list[tuple[str, str, str]] = []
-    errors: list[str] = []
-    for ref in all_refs:
-        path = ref.path or ref.name
-        name = ref.name or path
-        try:
-            nc = DRIVER.read_note(path)
-            # Raw, as the sweep and the write hook pass it: `_note_text` alone
-            # decides what a figure becomes, or the two paths sign the same
-            # note differently and re-embed each other's work.
-            body = nc.content or ""
-        except Exception as exc:
-            errors.append(f"{path}: {exc}")
-            continue
-        # Strip .md extension for index key
-        idx_path = path.removesuffix(".md")
-        notes.append((idx_path, name, body))
-
-    if not notes:
-        return {"error": "No notes found to index", "read_errors": errors}
-
-    # Images first: a reading changes the text a note embeds, and only this
-    # bulk pass pays the model for it (image_readings module docstring).
-    from silica.kernel.recall import image_readings
-    try:
-        from silica.agent.vision import ask_chat_model
-        images_read = image_readings.read_missing(((p, b) for p, _n, b in notes), ask=ask_chat_model)
-    except Exception as e:
-        # The index must not wait on the reader: a vault whose images cannot be
-        # read embeds as it did before ADR-0077, and the next /embed retries.
-        logger.warning("image reading failed, embedding without new readings: %s", e)
-        images_read = 0
-
-    try:
-        embedder = get_embedder(CONFIG)
-        # prune drops every indexed path missing from `notes`, so `notes` may
-        # only be trusted as the live set when EVERY listed note was read. A
-        # transient read failure (non-UTF-8 byte, permission blip, Obsidian
-        # mid-write) would otherwise evict a note that is still on disk, and no
-        # later incremental refresh re-adds what it never read.
-        store = build_index(embedder, notes, force=force, prune=not errors, folder=folder)
-    except Exception as e:
-        return {"error": f"Index build failed: {e}", "read_errors": errors}
-
-    out = {
-        "indexed": len(store),
-        "total_notes": len(notes),
-        "read_errors": errors,
-        "index_path": str(store._path),
-        "images_read": images_read,
-    }
-    # First whole-vault build also seeds the lexical index: the sweep maintains
-    # stores that exist and never builds one, and until 2026-09-01 no vault on
-    # the field had a lexical.json because it was a separate opt-in, so the
-    # cheap stage of silica_vaults (1.4 MB for 872 notes) never existed where
-    # the 18 MB embed store did. Whole vault only: a folder-scoped first build
-    # would leave a partial index the sweep then keeps partial.
-    from silica.kernel.base.home import index_dir
-    # New readings re-sign the notes that embed them, so the embed pass above
-    # caught them; the lexical store keys on nothing it could compare, so it is
-    # rebuilt whole (seconds, 1.4 MB on 872 notes) rather than left without them.
-    lexical_exists = (index_dir() / "lexical.json").is_file()
-    if (not folder and not lexical_exists) or (images_read and lexical_exists):
-        out["lexical"] = silica_lexical_refresh().get("indexed")
-    return out
+    return refresh.embed(folder, force, ask=ask_chat_model)
 
 
 @tool(cls="composed", collapse="eager", ingress=False)
@@ -1006,66 +669,7 @@ def silica_cooccurrence_refresh(folder: Annotated[str, Field(description='Vault-
     silica_vault_report signals. Incremental (force=True to redo). Seed once
     on an existing vault; writes keep it fresh afterwards.
     """
-    from silica.config import CONFIG
-    from silica.kernel.recall.cooccurrence import _index_path, build_index, get_cooccur_store
-
-    try:
-        all_refs = DRIVER.list_files(folder or None)
-    except Exception as e:
-        return {"error": f"Failed to list vault files: {e}"}
-
-    notes: list[tuple[str, str, str]] = []
-    errors: list[str] = []
-    for ref in all_refs:
-        path = ref.path or ref.name
-        name = ref.name or path
-        try:
-            # Pass RAW content: build_contribution strips frontmatter + media itself.
-            body = DRIVER.read_note(path).content or ""
-        except Exception as exc:
-            errors.append(f"{path}: {exc}")
-            continue
-        idx_path = path.removesuffix(".md")
-        notes.append((idx_path, name, body))
-
-    if not notes:
-        return {"error": "No notes found to index", "read_errors": errors}
-
-    store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-    try:
-        # prune=not errors: `notes` is the live set only when every listed note
-        # was actually read — see silica_embed_refresh. A note skipped by a
-        # transient read failure must not be un-edged and deleted.
-        # refreeze rides on force: `/cooccur --force` is the deliberate rebuild
-        # (and the doctor remedy for a wrong-frozen store language) — it
-        # re-processes every note, so re-detecting store.lang here is safe.
-        # A plain incremental /cooccur skips already-indexed notes and must NOT
-        # refreeze: flipping the language without re-stemming existing
-        # contributions would mix stemmers across node keys.
-        # prune: drop nodes for notes deleted out-of-band. save=False: one
-        # flush at the end after the prune.
-        build_index(
-            notes, store=store, lang=CONFIG.cooccurrence_lang,
-            force=force, refreeze=force, save=False, prune=not errors, folder=folder,
-        )
-    except Exception as e:
-        return {"error": f"Index build failed: {e}", "read_errors": errors}
-
-    # A refresh that indexed nothing must not rewrite the index. Every graph
-    # export calls this, the file is ~9.5 MB on a 700-note vault, and an
-    # unchanged rewrite still moves the mtime - which is what vault_version()
-    # digests, so the GUI's "vault changed" chip fired after every build of the
-    # graph it had just drawn. force still writes, and so does an absent file:
-    # skipping there would leave the vault with no index and nothing to say so.
-    if force or store.is_dirty() or not _index_path().exists():
-        store.save()
-
-    return {
-        "indexed": len(store),
-        "total_notes": len(notes),
-        "read_errors": errors,
-        "index_path": str(store._path),
-    }
+    return refresh.cooccurrence(folder, force)
 
 
 @tool(cls="composed", collapse="eager", ingress=False)
@@ -1075,58 +679,7 @@ def silica_lexical_refresh(folder: Annotated[str, Field(description='Vault-relat
     selector uses its term weights; run once on an existing vault, writes keep it fresh
     afterwards.
     """
-    from silica.kernel.recall.lexical import get_lexical_store
-
-    try:
-        all_refs = DRIVER.list_files(folder or None)
-    except Exception as e:
-        return {"error": f"Failed to list vault files: {e}"}
-
-    notes: list[tuple[str, str, str]] = []
-    errors: list[str] = []
-    for ref in all_refs:
-        path = ref.path or ref.name
-        name = ref.name or path
-        try:
-            # RAW content (matches the write-hook + cooccur): keeps a bulk-seeded
-            # index identical to an incrementally-maintained one.
-            body = DRIVER.read_note(path).content or ""
-        except Exception as exc:
-            errors.append(f"{path}: {exc}")
-            continue
-        idx_path = path.removesuffix(".md")
-        notes.append((idx_path, name, body))
-
-    if not notes:
-        return {"error": "No notes found to index", "read_errors": errors}
-
-    store = get_lexical_store()
-    if force:
-        for p in list(store.paths()):
-            if _in_folder(p, folder):
-                store.remove(p)
-    for idx_path, name, body in notes:
-        store.upsert(idx_path, name, body)
-
-    # GC: drop indexed notes no longer present in the (folder-scoped) vault.
-    # Scoped to the full LISTING, not the notes read this run: a note whose read
-    # failed transiently is still on disk, and evicting it here would silently
-    # cost recall forever (no later incremental refresh re-adds what it skipped).
-    current_paths = {(ref.path or ref.name).removesuffix(".md") for ref in all_refs}
-    stale_paths = [
-        p for p in store.paths()
-        if _in_folder(p, folder) and p not in current_paths
-    ]
-    for p in stale_paths:
-        store.remove(p)
-    store.save()
-
-    return {
-        "indexed": len(store),
-        "total_notes": len(notes),
-        "read_errors": errors,
-        "index_path": str(store._path),
-    }
+    return refresh.lexical(folder, force)
 
 
 def _covering_stem(path: Path) -> str:
@@ -1225,11 +778,11 @@ def silica_vault_report(
     # an "empty" vault that holds four PDFs must say so, or the caller reports
     # "nothing to do" over a folder full of work (observed 2026-08-15).
     try:
-        from silica.tools.atomic import _unconverted_under
+        from silica.kernel.recall.listing import unconverted_under
         from silica.kernel.base.manifest import active_inbox_dir
 
         inbox = active_inbox_dir()
-        pending = _unconverted_under(inbox) if inbox else []
+        pending = unconverted_under(inbox) if inbox else []
         if pending:
             result["inbox_pending"] = {
                 "total": len(pending),
@@ -1246,7 +799,8 @@ def silica_vault_report(
     try:
         if vault_path:
             from silica.kernel.base.manifest import active_done_dir
-            from silica.onboarding.wizard import unindexable_docs
+            from silica.kernel.base.layout import files_with
+            from silica.sources.convert import CONVERTIBLE_DOC_EXTS
 
             root = Path(vault_path)
             # rglob, not glob: the archive mirrors the inbox tree since
@@ -1266,7 +820,7 @@ def silica_vault_report(
                 pass
             docs = [
                 p.relative_to(root).as_posix()
-                for p in unindexable_docs(root)
+                for p in files_with(root, CONVERTIBLE_DOC_EXTS)
                 if p.stem not in converted_stems
                 and (_covering_stem(p) or p.stem) not in converted_stems
             ]

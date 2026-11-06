@@ -225,10 +225,10 @@ def test_on_the_server_an_rtf_past_the_ceiling_is_refused(tmp_vault, monkeypatch
 
 
 def test_on_the_server_duckdb_keeps_to_256_mb_and_two_threads(tmp_path, monkeypatch):
-    from silica.tools.tabular import _connect
+    from silica.kernel.text.tabular import connect
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
-    con = _connect(tmp_path)
+    con = connect(tmp_path)
     try:
         assert con.execute("SELECT current_setting('threads')").fetchone()[0] == 2
         limit = con.execute("SELECT current_setting('memory_limit')").fetchone()[0]

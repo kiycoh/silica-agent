@@ -198,7 +198,7 @@ class Coordinator:
 
     def _orphan_candidates(self, path: str, k: int = 3) -> list[dict]:
         """Link targets for an orphan, via the relatedness facade."""
-        from silica.tools.curate import link_candidates
+        from silica.kernel.report.related import link_candidates
 
         return link_candidates(path, k=k)
 

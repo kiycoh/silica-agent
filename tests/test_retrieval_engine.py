@@ -83,10 +83,10 @@ def test_the_engine_indexes_apart_from_the_fusion_leg(vault):
     fusion store it would prune the notes the sync lane maintains. The seam
     is what points it at its own file, so the build goes through the seam."""
     from silica.kernel.base import home
-    from silica.tools.atomic import _engine
+    from silica.kernel.recall.engine import engine
     from silica_core.kernel.recall import paths as core_paths
 
-    _engine().build_index()
+    engine().build_index()
     assert core_paths.index_file("retrieval").is_file()
     assert not home.index_file("lexical").is_file()
     assert not core_paths.index_file("lexical").is_file()
@@ -96,10 +96,10 @@ def test_the_seam_mirrors_the_vault_into_the_engine(vault, monkeypatch):
     """The engine's CONFIG is its own singleton, read from the same env: what
     this tree serves after a /vault switch reaches it only through the seam."""
     from silica.config import CONFIG
-    from silica.tools.atomic import _engine
+    from silica.kernel.recall.engine import engine
     from silica_core.config import CONFIG as CORE_CONFIG
 
     monkeypatch.setattr(CORE_CONFIG, "vault_path", "")
     monkeypatch.setattr(CONFIG, "vault_path", str(vault / "elsewhere"))
-    assert _engine().INDEX == "retrieval"
+    assert engine().INDEX == "retrieval"
     assert CORE_CONFIG.vault_path == str(vault / "elsewhere")

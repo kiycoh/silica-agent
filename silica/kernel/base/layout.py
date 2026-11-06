@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -25,6 +25,22 @@ from silica.kernel.base.manifest import within
 logger = logging.getLogger(__name__)
 
 DEFAULT_LOG_FILENAME = "log.md"
+
+
+# bounded walk — a repo-mode vault can be a source tree with node_modules, and
+# neither init nor a report may stall counting files it will only mention.
+DOC_SCAN_CAP = 20_000
+
+
+def files_with(vault: Path, exts: Collection[str], cap: int = DOC_SCAN_CAP) -> list[Path]:
+    """Files under `vault` with one of `exts`, of the first `cap` entries walked."""
+    out: list[Path] = []
+    for i, p in enumerate(vault.rglob("*")):
+        if i >= cap:
+            break
+        if p.suffix.lower() in exts and p.is_file():
+            out.append(p)
+    return out
 
 
 def in_folder(path: str, folder: str | None) -> bool:

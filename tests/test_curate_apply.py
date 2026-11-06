@@ -77,7 +77,7 @@ class _Capture:
 def test_apply_enqueues_correct_workitem_kinds(monkeypatch, tmp_path):
     cap = _Capture()
     monkeypatch.setattr(curate, "run_subagent_batch", cap)
-    monkeypatch.setattr(curate, "link_candidates", lambda p, k=5: [{"name": "N", "path": "N.md"}])
+    monkeypatch.setattr(curate.related, "link_candidates", lambda p, k=5: [{"name": "N", "path": "N.md"}])
     monkeypatch.setattr(curate, "_read_body", lambda p: "body of " + p)
     autolinked = {}
 
@@ -111,7 +111,7 @@ def test_apply_enqueues_correct_workitem_kinds(monkeypatch, tmp_path):
 
 def test_apply_appends_one_journal_line_idempotent_per_run(monkeypatch, tmp_path):
     monkeypatch.setattr(curate, "run_subagent_batch", _Capture())
-    monkeypatch.setattr(curate, "link_candidates", lambda p, k=5: [])
+    monkeypatch.setattr(curate.related, "link_candidates", lambda p, k=5: [])
     monkeypatch.setattr(curate, "_read_body", lambda p: "body")
     monkeypatch.setattr(curate, "_run_autolink", lambda srcs: {})
 

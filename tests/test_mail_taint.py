@@ -17,7 +17,6 @@ from silica.sources.registry import stage
 from silica.tools import TOOLS
 from silica.tools import atomic, graph  # noqa: F401  (registers the note-reading tools)
 from silica.agent import memory_gate as gate
-from silica.tools import user_memory
 from tests.mail_fixtures import ME, ME_FULL, PROF, msg, write_eml
 
 ASK = "ricordati che il relatore vuole il capitolo due entro venerdì"

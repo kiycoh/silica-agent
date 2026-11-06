@@ -207,10 +207,10 @@ _STAMP_TAIL = re.compile(r"\s*\((?:saved|the user's words,) \d{4}-\d{2}-\d{2}[^(
 def _note_version(rel: str) -> str | None:
     """silica-core's version of a vault file, the one silica_read serves
     (core.version_of, 0.12); None when it is not there, or the engine is not."""
-    from silica.tools.atomic import _engine
+    from silica.kernel.recall.engine import engine
 
     try:
-        return _engine().version_of(rel)
+        return engine().version_of(rel)
     except RuntimeError:
         return None  # the engine refused to start: no version is honest, a guess would read as changed
 

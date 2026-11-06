@@ -17,7 +17,8 @@ import openai
 import pytest
 
 from silica.model.providers import Reranker, why_of
-from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch, degraded_lines
+from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch
+from silica.kernel.recall.search import degraded_lines
 
 _REQ = httpx.Request("POST", "http://127.0.0.1:9/v1/embeddings")
 

@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from silica.agent import stt
+from silica.ui.web import stt_routes
 
 
 def _wav(samples: list[int], rate: int = 16000, channels: int = 1) -> bytes:
@@ -92,7 +93,7 @@ def test_speech_lang_prefers_the_fixed_dictation_language(monkeypatch):
         stt_lang = "it"
         vault_path = ""
 
-    assert stt.speech_lang(Cfg()) == "it"
+    assert stt_routes.speech_lang(Cfg()) == "it"
 
 
 def test_speech_lang_maps_the_vault_language_to_a_bcp47_tag(monkeypatch):
@@ -103,11 +104,11 @@ def test_speech_lang_maps_the_vault_language_to_a_bcp47_tag(monkeypatch):
         vault_path = "/some/vault"
 
     monkeypatch.setattr(checks, "reply_language_for", lambda v: "Italian")
-    assert stt.speech_lang(Cfg()) == "it"
+    assert stt_routes.speech_lang(Cfg()) == "it"
     monkeypatch.setattr(checks, "reply_language_for", lambda v: "de")
-    assert stt.speech_lang(Cfg()) == "de"
+    assert stt_routes.speech_lang(Cfg()) == "de"
     monkeypatch.setattr(checks, "reply_language_for", lambda v: "chinese")
-    assert stt.speech_lang(Cfg()) == "zh"
+    assert stt_routes.speech_lang(Cfg()) == "zh"
     # an unknown name is no tag at all: the browser's own default beats a guess
     monkeypatch.setattr(checks, "reply_language_for", lambda v: "klingon")
-    assert stt.speech_lang(Cfg()) == ""
+    assert stt_routes.speech_lang(Cfg()) == ""

@@ -28,6 +28,7 @@ from silica.agent.constraints import (
 )
 from silica.agent.loop import run_agent
 from silica.agent.sentinels import EMPTY_COMPLETION
+from silica.tools import tool_failed
 from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
 from silica.config import CONFIG, demo
 from silica.kernel import vault_files
