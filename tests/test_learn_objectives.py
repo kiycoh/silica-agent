@@ -36,7 +36,7 @@ def vault(tmp_vault, tmp_path, monkeypatch):
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
     monkeypatch.setattr(undo_journal, "_journal_path", lambda: tmp_path / "undo.db")
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: ("", "stop"))
     tmp_vault.note("ML/Margine geometrico.md", NOTE.replace("AI: true\n", "date: 2025-01-01\n"))
     tmp_vault.note("sources/Lezione 11.md", LEAF)
     tmp_vault.note("ML/Iperpiano.md", "---\ndate: 2025-01-01\n---\n# Iperpiano\n\nUn piano che separa lo spazio in due semispazi distinti.\n")
@@ -70,12 +70,12 @@ def test_cards_take_mager_shape_and_the_template_holds_without_a_model(vault):
 
 def test_the_model_rewrites_the_cards_and_a_garbled_reply_leaves_the_template(vault, monkeypatch):
     tree = [{"node": "Margine", "leaves": ["ML/Margine geometrico.md"]}]
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: (
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: (
         "OBJ 1\nTITLE: Spiegare perché il margine limita l'errore.\nCONDITIONS: senza consultare gli appunti\n"
         "CRITERION: collegare margine e bound con la giustificazione.\nEND\n", "stop"))
     cards = obj.propose(tree, ["explain"])
     assert cards[0]["title"].startswith("Spiegare") and cards[0]["criterion"].startswith("collegare")
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: ("nonsense", "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: ("nonsense", "stop"))
     assert obj.propose(tree, ["explain"])[0]["title"].startswith("Explain how")
 
 
@@ -92,7 +92,7 @@ def test_the_objectives_call_names_the_language_and_an_echoed_title_keeps_the_te
         return ("OBJ 1\nTITLE: explain (Explain how and why: Make relations, mechanisms and conditions of validity explicit.)\n"
                 "CONDITIONS: senza consultare gli appunti\nCRITERION: collegare margine e bound.\nEND\n", "stop")
 
-    monkeypatch.setattr(items, "_llm", reply)
+    monkeypatch.setattr(items, "ask_model", reply)
     card = obj.propose(tree, ["explain"])[0]
     assert "LANGUAGE: Italian" in seen["prompt"]
     assert card["title"].startswith("Explain how Margine geometrico")      # the template, not the echo
@@ -234,7 +234,7 @@ def test_the_model_contract_asks_one_item_per_point_and_parses_point_and_objecti
              "ITEM 2\nPATH: ML/Margine geometrico.md\nKIND: explain\nLEVEL: 3\nOBJECTIVE: explain\nPOINT: 2\nANCHOR: Definizione\n"
              "Q: Perche' limita l'errore?\nCRITERIA: il bound\nANSWER: perche' il bound dipende dal margine\n"
              f"SPAN: {pts[1]['text']}\nH1: pensa al bound\nEND\n")
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: (reply, "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: (reply, "stop"))
     got = items.generate([row])
     assert [it["point"] for it in got["ML/Margine geometrico.md"]] == [1, 2]
     built = items.build_session([row], [], n=2)

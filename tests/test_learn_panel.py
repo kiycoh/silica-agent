@@ -33,7 +33,7 @@ def client(tmp_vault, tmp_path, monkeypatch):
     from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: ("", "stop"))
     monkeypatch.setattr(grade, "_llm", lambda *a, **k: (
         "GRADE: partial\nPRECISE: no\nRUBRIC: the bound is missing\nFEEDBACK: Name the bound.\n"
         "PARAPHRASE: yes\nMISCONCEPTION: none\nNOTE_DEFECT: none\n", "stop"))
@@ -435,7 +435,7 @@ def test_scopes_typeahead_and_the_reading_route(client, monkeypatch):
     opts = c.get("/learn/scopes", params={"q": "iper"}).json()
     assert {"kind": "notes", "target": "Iperpiano", "label": "Iperpiano", "count": 1, "path": "ML/Iperpiano.md"} in opts
     assert c.get("/learn/scopes").json()[0] == {"kind": "folder", "target": "ML/", "label": "ML/", "count": 2}
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: ("KIND: folder\nTARGET: ML/\nONLY_IN: none\nNAME: Esame ML", "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: ("KIND: folder\nTARGET: ML/\nONLY_IN: none\nNAME: Esame ML", "stop"))
     r = c.post("/learn/plan/read", json={"sentence": "Esame di ML il 30 novembre 2099, devo saperlo spiegare"}).json()
     assert (r["scope"], r["target"], r["name"], r["by"], r["objectives"]) == ("folder", "ML/", "Esame ML", "2099-11-30", ["explain"])
 

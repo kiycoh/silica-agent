@@ -97,7 +97,7 @@ def reply_language(q: str, production: str) -> str:
     answer is too short to detect on."""
     from silica.kernel.text import language
 
-    return language.display_name(language.detect(f"{q} {production}"))
+    return language.named(f"{q} {production}")
 
 
 def rating_for(outcome: str, *, hints: int, told: bool, conf: int | None, precise: bool = False) -> int:

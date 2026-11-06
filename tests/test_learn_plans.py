@@ -5,6 +5,9 @@
 and written through the gates, the ledger over the checkbox."""
 from __future__ import annotations
 
+from silica.kernel.learn import pace, reference, sources, store
+from silica.kernel.learn import sentence as plan_sentence
+
 from datetime import datetime, timezone
 
 import pytest
@@ -13,6 +16,12 @@ import silica.tools.notes  # noqa: F401 — the write gate registers on import
 from silica.kernel.learn import plans
 
 DAY = 86400.0
+
+
+def _topic_notes(topics, notes, allowed):
+    """(notes covering the topics, topics no note covers), one note per topic."""
+    hits = sources.topic_hits(topics, notes, allowed)
+    return list(dict.fromkeys(p for p, _how in hits.values() if p)), [t for t, (p, _how) in hits.items() if not p]
 
 
 def _iso(ts: float) -> str:
@@ -193,20 +202,20 @@ def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_wha
     from silica.kernel.base import note_index
     from pathlib import Path as _P
     from silica.config import CONFIG as _C
-    found, missing = plans._topic_notes(["ada-boost", "random forest"], note_index.meta(_P(_C.vault_path)),
+    found, missing = _topic_notes(["ada-boost", "random forest"], note_index.meta(_P(_C.vault_path)),
                                         {"ML/AdaBoost.md"})
     assert found == ["ML/AdaBoost.md"] and missing == ["random forest"]
     # a one-word topic names a whole title, never one that merely holds the word
     vault.note("ML/Ottimizzazione del codice.md", "# x\n")
     vault.note("ML/Pooling.md", "# x\n")
     meta = note_index.meta(_P(_C.vault_path))
-    found, missing = plans._topic_notes(["ottimizzazione", "pooling"], meta,
+    found, missing = _topic_notes(["ottimizzazione", "pooling"], meta,
                                         {"ML/Ottimizzazione del codice.md", "ML/Pooling.md"})
     assert found == ["ML/Pooling.md"] and missing == ["ottimizzazione"]
     # ...unless the rest of the title is what the block lists too
     vault.note("ML/Underfitting e overfitting.md", "# x\n")
     meta = note_index.meta(_P(_C.vault_path))
-    found, missing = plans._topic_notes(["overfitting", "underfitting", "ottimizzazione"], meta,
+    found, missing = _topic_notes(["overfitting", "underfitting", "ottimizzazione"], meta,
                                         {"ML/Underfitting e overfitting.md", "ML/Ottimizzazione del codice.md"})
     assert found == ["ML/Underfitting e overfitting.md"] and missing == ["ottimizzazione"]
 
@@ -219,7 +228,7 @@ def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_wha
     assert ("- [ ] Modelli lineari: [[Regressione lineare multipla]], [[Rete neurale multistrato]], "
             "[[Discriminante lineare di Fisher]] · not in the vault: lasso") in text
     assert "- [ ] Reti neurali profonde: not in the vault (Dropout, apprendimento multi-task)" in text
-    steps = plans.parse_steps(text)
+    steps = reference.parse_steps(text)
     assert steps[0]["notes"] == ["Regressione lineare multipla", "Rete neurale multistrato",
                                  "Discriminante lineare di Fisher"]
 
@@ -319,7 +328,7 @@ def test_the_date_reader_takes_day_and_month_names_numbers_and_iso_and_never_a_p
     from datetime import date
 
     today = date(2026, 10, 8)
-    read = lambda s: plans.read_date(s, today)  # noqa: E731
+    read = lambda s: plan_sentence.read_date(s, today)  # noqa: E731
     assert read("Esame di Psicologia generale il 30 novembre: percezione") == ("2026-11-30", "")
     assert read("exam by Nov 30, 2026") == ("2026-11-30", "")
     assert read("deadline 2026-12-01") == ("2026-12-01", "")
@@ -333,44 +342,44 @@ def test_the_date_reader_takes_day_and_month_names_numbers_and_iso_and_never_a_p
 
 
 def test_the_verb_reader_finds_intentions_in_both_languages_and_skips_nouns():
-    assert plans.read_intentions("Devo saperle spiegare e applicare.") == ["explain", "apply"]
-    assert plans.read_intentions("I need to compare and evaluate the theories") == ["compare", "evaluate"]
-    assert plans.read_intentions("ricordare le date") == ["recall"]
-    assert plans.read_intentions("applicazioni web e valutazione") == []    # nouns name subjects
+    assert plan_sentence.read_intentions("Devo saperle spiegare e applicare.") == ["explain", "apply"]
+    assert plan_sentence.read_intentions("I need to compare and evaluate the theories") == ["compare", "evaluate"]
+    assert plan_sentence.read_intentions("ricordare le date") == ["recall"]
+    assert plan_sentence.read_intentions("applicazioni web e valutazione") == []    # nouns name subjects
 
 
 def test_the_reading_is_checked_against_the_vault_and_rescued_only_where_code_can_verify(vault, monkeypatch):
     from silica.kernel.learn import items
 
     def reply(text):
-        monkeypatch.setattr(items, "_llm", lambda *a, **k: (text, "stop"))
+        monkeypatch.setattr(items, "ask_model", lambda *a, **k: (text, "stop"))
 
     # no model: the date and the verbs are still read, Study stays empty and says why
     from silica.config import CONFIG
 
     monkeypatch.setattr(CONFIG, "model", "", raising=False)
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", None))
-    r = plans.read_sentence("Exam on 30 November 2099: I must explain softmax", today=None)
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: ("", None))
+    r = plan_sentence.read_sentence("Exam on 30 November 2099: I must explain softmax", today=None)
     assert r["by"] == "2099-11-30" and r["objectives"] == ["explain"] and r["scope"] == "" and r["model"] is False
     assert "No model" in r["said"][-1]
     # a listed subject that is no note: the list becomes a syllabus, whose resolver keeps gaps
     reply("KIND: notes\nTARGET: Softmax | Momentum di Nesterov\nONLY_IN: ML/\nNAME: Esame ML")
-    r = plans.read_sentence("Esame di ML: softmax e momentum di Nesterov")
+    r = plan_sentence.read_sentence("Esame di ML: softmax e momentum di Nesterov")
     assert r["scope"] == "steps" and r["target"] == "Softmax\nMomentum di Nesterov" and r["restrict"] == "ML/"
     assert r["name"] == "Esame ML" and "syllabus" in r["said"][0]
     # every name a note: notes, and a restriction is dropped as redundant
     reply("KIND: steps\nTARGET: Softmax | Chain rule\nONLY_IN: ML/\nNAME: Ripasso")
-    assert plans.read_sentence("Ripasso di ML: Softmax e Chain rule")["scope"] == "notes"
+    assert plan_sentence.read_sentence("Ripasso di ML: Softmax e Chain rule")["scope"] == "notes"
     # a folder named by its last segment; a restriction the sentence does not name is a guess, dropped
     reply("KIND: notes\nTARGET: Deep\nONLY_IN: none\nNAME: Deep")
-    r = plans.read_sentence("tutta la cartella Deep")
+    r = plan_sentence.read_sentence("tutta la cartella Deep")
     assert (r["scope"], r["target"]) == ("folder", "ML/Deep/")
     reply("KIND: steps\nTARGET: softmax | transformers\nONLY_IN: Other/\nNAME: x")
-    r = plans.read_sentence("softmax e transformers")
+    r = plan_sentence.read_sentence("softmax e transformers")
     assert r["restrict"] == "" and any("does not name Other/" in s for s in r["said"])
     # a folder that does not exist is dropped and said, never passed on
     reply("KIND: folder\nTARGET: Biology/\nONLY_IN: none\nNAME: Bio")
-    r = plans.read_sentence("all of biology")
+    r = plan_sentence.read_sentence("all of biology")
     assert r["scope"] == "" and "not a folder" in r["said"][-1]
 
 
@@ -378,7 +387,7 @@ def test_a_syllabus_named_in_the_sentence_is_the_reference_never_the_material(va
     from silica.kernel.learn import items
 
     def reply(text):
-        monkeypatch.setattr(items, "_llm", lambda *a, **k: (text, "stop"))
+        monkeypatch.setattr(items, "ask_model", lambda *a, **k: (text, "stop"))
 
     # a transparency sheet: a programme marker over a table, a name that says nothing
     vault.note("ML/Scheda ML.md", "# Scheda ML\n\n| CFU | 9 |\n| --- | --- |\n\nPROGRAMMA\n\n| ORE | Lezioni |\n| --- | --- |\n"
@@ -386,36 +395,36 @@ def test_a_syllabus_named_in_the_sentence_is_the_reference_never_the_material(va
     # a programme by its name, in bullets
     vault.note("ML/Programma del corso.md", "# Programma del corso\n\n- Softmax\n- Chain rule\n")
     reply("KIND: notes\nTARGET: Scheda ML\nONLY_IN: ML/\nNAME: Esame ML")
-    r = plans.read_sentence("Esame di ML il 30 novembre 2099, gli argomenti sono nella Scheda ML")
+    r = plan_sentence.read_sentence("Esame di ML il 30 novembre 2099, gli argomenti sono nella Scheda ML")
     assert (r["scope"], r["target"], r["restrict"]) == ("steps", "Scheda ML", "ML/")
     assert any("syllabus" in s for s in r["said"])
     assert [n["text"] for n in plans.resolve_scope("steps", r["target"])["tree"]] == [
         "Softmax e funzioni di attivazione", "Chain rule e retropropagazione"]
     # named with the extension of the file it was converted from, read back as a topic
     reply("KIND: topic\nTARGET: Programma del corso.pdf\nONLY_IN: none\nNAME: Esame")
-    assert plans.read_sentence("dal Programma del corso.pdf")["target"] == "Programma del corso"
+    assert plan_sentence.read_sentence("dal Programma del corso.pdf")["target"] == "Programma del corso"
     # a name no title equals, whose words one title alone holds
     reply("KIND: topic\nTARGET: scheda di ML\nONLY_IN: none\nNAME: Esame")
-    assert plans.read_sentence("prendi gli argomenti dalla scheda di ML")["target"] == "Scheda ML"
+    assert plan_sentence.read_sentence("prendi gli argomenti dalla scheda di ML")["target"] == "Scheda ML"
     # a title with a dot in it is not cut at the dot
     vault.note("ML/scheda.trasparenza - Reti.md", "# Reti\n\n- Softmax\n- Chain rule\n")
     reply("KIND: notes\nTARGET: scheda.trasparenza - Reti\nONLY_IN: none\nNAME: Esame")
-    assert plans.read_sentence("dalla scheda.trasparenza - Reti")["target"] == "scheda.trasparenza - Reti"
+    assert plan_sentence.read_sentence("dalla scheda.trasparenza - Reti")["target"] == "scheda.trasparenza - Reti"
     # a downloaded sheet's name, its words joined by underscores
     vault.note("ML/scheda_trasparenza_173558.md", "# x\n\n- Softmax\n- Chain rule\n")
     reply("KIND: notes\nTARGET: scheda_trasparenza_173558\nONLY_IN: none\nNAME: Esame")
-    assert plans.read_sentence("interrogami su scheda_trasparenza_173558")["scope"] == "steps"
+    assert plan_sentence.read_sentence("interrogami su scheda_trasparenza_173558")["scope"] == "steps"
     # a title that says nothing is a syllabus when the sentence calls it one
     vault.note("ML/Corso 2025.md", "# Corso 2025\n\n- Softmax\n- Chain rule\n")
     reply("KIND: notes\nTARGET: Corso 2025\nONLY_IN: none\nNAME: Esame")
-    assert plans.read_sentence("gli argomenti sono nel programma, Corso 2025")["scope"] == "steps"
-    assert plans.read_sentence("interrogami su Corso 2025")["scope"] == "notes"
+    assert plan_sentence.read_sentence("gli argomenti sono nel programma, Corso 2025")["scope"] == "steps"
+    assert plan_sentence.read_sentence("interrogami su Corso 2025")["scope"] == "notes"
     # an ordinary note is still the material, a bulleted one whose title holds "indice" too
     vault.note("ML/Indice di Gini.md", "# Indice di Gini\n\n- disuguaglianza\n- curva di Lorenz\n")
     reply("KIND: notes\nTARGET: Indice di Gini\nONLY_IN: none\nNAME: Gini")
-    assert plans.read_sentence("interrogami sull'Indice di Gini")["scope"] == "notes"
+    assert plan_sentence.read_sentence("interrogami sull'Indice di Gini")["scope"] == "notes"
     reply("KIND: notes\nTARGET: Softmax\nONLY_IN: none\nNAME: Softmax")
-    assert plans.read_sentence("interrogami su Softmax")["scope"] == "notes"
+    assert plan_sentence.read_sentence("interrogami su Softmax")["scope"] == "notes"
 
 
 def test_a_syllabus_line_says_how_it_matched_and_a_refused_line_is_a_gap(vault):
@@ -450,7 +459,7 @@ def test_a_refused_match_survives_edit_and_reword_and_the_readers_own_text_stays
     path = out["path"]
     assert plans.read_plan(path)["refused"] == ["Teoria della mente"]
     # the reader writes under the plan
-    full = str(plans._vault() / path)
+    full = str(store.vault() / path)
     text = vault.read(full).replace("## Objectives", "Ripassare prima la parte sulle reti.\n\n## Objectives")
     vault.write(full, text + "\n## Mie note\n- chiedere al prof\n")
     # Reword sends no refusals: the stored ones hold
@@ -479,11 +488,11 @@ def test_a_note_whose_title_has_a_comma_is_studied_as_one_note(vault):
 def test_the_date_reader_survives_a_leap_day_and_leaves_problem_set_alone():
     from datetime import date
 
-    assert plans.read_date("esame il 29 febbraio", date(2028, 3, 10)) == (None, "")
-    assert plans.read_date("esame il 29 febbraio", date(2027, 10, 1)) == ("2028-02-29", "")
-    assert plans.read_date("problem set 3 is due", date(2026, 10, 8)) == (None, "")
-    assert plans.read_date("on May 3", date(2026, 10, 8)) == ("2027-05-03", "")
-    assert plans.read_date("entro il 3 set", date(2026, 8, 1)) == ("2026-09-03", "")
+    assert plan_sentence.read_date("esame il 29 febbraio", date(2028, 3, 10)) == (None, "")
+    assert plan_sentence.read_date("esame il 29 febbraio", date(2027, 10, 1)) == ("2028-02-29", "")
+    assert plan_sentence.read_date("problem set 3 is due", date(2026, 10, 8)) == (None, "")
+    assert plan_sentence.read_date("on May 3", date(2026, 10, 8)) == ("2027-05-03", "")
+    assert plan_sentence.read_date("entro il 3 set", date(2026, 8, 1)) == ("2026-09-03", "")
 
 
 def test_an_empty_reply_is_not_reported_as_no_model(vault, monkeypatch):
@@ -491,8 +500,8 @@ def test_an_empty_reply_is_not_reported_as_no_model(vault, monkeypatch):
     from silica.kernel.learn import items
 
     monkeypatch.setattr(CONFIG, "model", "local/qwen", raising=False)
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", "stop"))
-    r = plans.read_sentence("softmax e chain rule")
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: ("", "stop"))
+    r = plan_sentence.read_sentence("softmax e chain rule")
     assert r["model"] is False and "returned nothing" in r["said"][-1]
 
 
@@ -538,11 +547,11 @@ def test_a_merge_loser_is_not_material_and_a_one_note_block_keeps_its_name(vault
     paths = plans.resolve_scope("folder", "ML/")["paths"]
     assert "ML/Rete ricorrente.md" in paths and "ML/Reti neurali ricorrenti.md" not in paths
     # the loser's name is its winner's: a syllabus topic or a plan step that names it lands there
-    assert plans.resolve_title("Reti neurali ricorrenti") == "ML/Rete ricorrente.md"
-    found, missing = plans._topic_notes(["reti neurali ricorrenti"], *_meta_and_material())
+    assert sources.resolve_title("Reti neurali ricorrenti") == "ML/Rete ricorrente.md"
+    found, missing = _topic_notes(["reti neurali ricorrenti"], *_meta_and_material())
     assert found == ["ML/Rete ricorrente.md"] and missing == []
     vault.note("ML/Set di validazione.md", "---\nsuperseded_by: '[[Rete ricorrente]]'\n---\n# x\n")
-    found, missing = plans._topic_notes(["validazione"], *_meta_and_material())   # by its words, not its name
+    found, missing = _topic_notes(["validazione"], *_meta_and_material())   # by its words, not its name
     assert found == ["ML/Rete ricorrente.md"] and missing == []
     out = plans.write_plan(plans.PlanSpec("Esame", "steps", "Reti ricorrenti: rete ricorrente, momentum di nesterov\n[[Softmax]]",
                            restrict="ML/", cards=[]))
@@ -588,14 +597,14 @@ def test_a_many_word_topic_meets_its_note_by_meaning(vault, monkeypatch):
     monkeypatch.setattr(providers, "get_embedder_or_none", lambda *a, **kw: Embedder())
     monkeypatch.setattr(CONFIG, "sim_title_threshold", 0.709)
     allowed = {"ML/Iniezione di rumore negli input.md", "ML/Diversità architetturale.md"}
-    found, missing = plans._topic_notes(["noise injection", "architettura"], note_index.meta(Path(CONFIG.vault_path)), allowed)
+    found, missing = _topic_notes(["noise injection", "architettura"], note_index.meta(Path(CONFIG.vault_path)), allowed)
     assert found == ["ML/Iniezione di rumore negli input.md"] and missing == ["architettura"]
     monkeypatch.setattr(CONFIG, "sim_title_threshold", 0.8)   # below the band: still not in the vault
-    assert plans._topic_notes(["noise injection"], note_index.meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
+    assert _topic_notes(["noise injection"], note_index.meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
     # inside the dedup band but under the plan's floor: a judge may see it, a plan does not link it
     monkeypatch.setattr(CONFIG, "sim_title_threshold", 0.709)
     scores["noise"]["ML/Iniezione di rumore negli input"] = 0.729
-    assert plans._topic_notes(["noise injection"], note_index.meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
+    assert _topic_notes(["noise injection"], note_index.meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
     # a link met by meaning is marked in the plan note, the one to check
     scores["noise"]["ML/Iniezione di rumore negli input"] = 0.79
     out = plans.write_plan(plans.PlanSpec("Esame", "steps", "Reti profonde: noise injection, architettura", restrict="ML/", cards=[]))
@@ -619,10 +628,10 @@ def test_a_topic_meets_its_note_by_alias_gloss_initials_or_segment(vault):
     topics = ["classificazione one-class", "stride", "reti learning vector quantization",
               "reti self organizing map: proprietà e loro algoritmi", "dropout", "sonno profondo e memoria"]
     # a spine convert named "<source>, <section>" (2026-10-26)
-    assert plans._named_otherwise("batch normalization", meta, allowed) == (
+    assert sources._named_otherwise("batch normalization", meta, allowed) == (
         "ML/Goodfellow, Batch normalization.md", "segment")
-    found = [plans._named_otherwise(t, meta, allowed)[0] for t in topics]
-    assert [plans._named_otherwise(t, meta, allowed)[1] for t in topics] == [
+    found = [sources._named_otherwise(t, meta, allowed)[0] for t in topics]
+    assert [sources._named_otherwise(t, meta, allowed)[1] for t in topics] == [
         "alias", "gloss", "initials", "initials", "segment", ""]
     assert found == ["ML/One-class classification.md", "ML/Convoluzione con passo (stride).md",
                      "ML/LVQ come estensione supervisionata.md", "ML/SOM e topologia.md",
@@ -654,14 +663,14 @@ def test_topic_matching_prefers_the_general_note_and_drops_siblings(vault, monke
 
     monkeypatch.setattr(providers, "get_embedder_or_none", lambda *a, **kw: Embedder())
     meta, allowed = _meta_and_material()
-    hits = plans.topic_hits(["regressione lineare multipla", "kernel", "kernel ridge", "algoritmi di apprendimento",
+    hits = sources.topic_hits(["regressione lineare multipla", "kernel", "kernel ridge", "algoritmi di apprendimento",
                              "retropropagazione per reti convolutive"], meta, allowed)
     assert hits["regressione lineare multipla"][0] == "ML/Supervisionato/Regressione lineare.md"
     assert hits["kernel"][0] == "ML/Definizione di kernel.md"
     assert hits["algoritmi di apprendimento"][0] is None          # a narrower note is not the topic
     assert hits["retropropagazione per reti convolutive"][0] == "ML/Backpropagation nelle reti convolutive.md"
     # a title vector met through one shared word is kept only when the rest translates
-    kept = plans._translated({"percettrone multistrato": "ML/Algoritmo del percettrone.md",
+    kept = sources._translated({"percettrone multistrato": "ML/Algoritmo del percettrone.md",
                               "autocodificatori regolarizzati": "ML/Autoencoder regolarizzati.md"})
     assert kept == {"autocodificatori regolarizzati": "ML/Autoencoder regolarizzati.md"}
 
@@ -674,11 +683,11 @@ def test_pace_counts_answers_a_day_before_the_final_pass():
 
     by = (date.today() + timedelta(days=18)).isoformat()
     week = [{"ts": (datetime.now(timezone.utc) - timedelta(days=d % 7)).isoformat()} for d in range(14)]
-    pace = plans.pace_of({"by": by}, 69, entries=week)
-    assert pace["answers"] == 173 and pace["per_day"] == 11          # 173 answers over 16 days
-    assert pace["say"].startswith("About 11 answers a day for 16 days, then 2 days of review: 69 notes")
-    assert "Lately you answer about 2 a day." in pace["say"]
-    assert "not answered yet" in plans.pace_of({"by": by}, 69, entries=[])["say"]
+    paced = pace.pace_of({"by": by}, 69, entries=week)
+    assert paced["answers"] == 173 and paced["per_day"] == 11          # 173 answers over 16 days
+    assert paced["say"].startswith("About 11 answers a day for 16 days, then 2 days of review: 69 notes")
+    assert "Lately you answer about 2 a day." in paced["say"]
+    assert "not answered yet" in pace.pace_of({"by": by}, 69, entries=[])["say"]
 
 
 def test_a_dated_plan_lays_its_steps_over_the_days_before_the_review():
@@ -690,7 +699,7 @@ def test_a_dated_plan_lays_its_steps_over_the_days_before_the_review():
         {"text": "Basi: [[A]], [[B]]", "notes": ["A", "B"]},
         {"text": "Lacuna: not in the vault", "notes": []},
         {"text": "Reti: [[C]], [[D]], [[E]], [[F]]", "notes": ["C", "D", "E", "F"]}]}
-    rows = plans.day_by_day(plan, today=date(2026, 10, 23))
+    rows = pace.day_by_day(plan, today=date(2026, 10, 23))
     assert [r["day"] for r in rows] == ["2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26",
                                         "2026-10-27", "2026-10-28", "2026-10-29"]
     labels = [[label for label, _n in r["steps"]] for r in rows]
@@ -701,11 +710,11 @@ def test_a_dated_plan_lays_its_steps_over_the_days_before_the_review():
     assert reti == ["C", "D", "E", "F"]
     # four notes over three days: rounded up, the third day had none
     assert all(notes for r in rows for label, notes in r["steps"] if label in ("Basi", "Reti"))
-    table = plans.day_by_day_table(rows)
+    table = pace.day_by_day_table(rows)
     assert table.startswith("| Day | Step | Notes |") and "| 2026-10-29 | Exam |" in table
-    assert plans.day_by_day({"steps": plan["steps"]}) is None and plans.day_by_day({"by": "2026-10-29"}) is None
+    assert pace.day_by_day({"steps": plan["steps"]}) is None and pace.day_by_day({"by": "2026-10-29"}) is None
     # fewer notes than days: each day names the note it goes on with
-    sparse = plans.day_by_day({"by": "2026-11-02", "steps": [
+    sparse = pace.day_by_day({"by": "2026-11-02", "steps": [
         {"text": "Solo: [[A]]", "notes": ["A"]},
         {"text": "Due: [[B]], [[C]]", "notes": ["B", "C"]}]}, today=date(2026, 10, 23))
     solo = [notes for r in sparse for label, notes in r["steps"] if label == "Solo"]
@@ -720,11 +729,11 @@ def test_the_syllabus_topics_no_lecture_deck_mentions(vault):
     vault.note("Corso/Scheda.md", "# Scheda\n\nPROGRAMMA\n\n- Reti profonde: dropout, kernel tricks, operazioni di pooling e convoluzione\n")
     vault.note("Corso/Lezione 1.md", "---\nsection: (outline)\n---\n# Lezione 1\n\n## Sources\n[^L1]: [[sources/c/Lezione 1]]\n")
     vault.note("sources/c/Lezione 1.md", "# Lezione 1\n\nIl kernel trick. Pooling e convoluzione nelle reti.\n")
-    plans._GAPS_CACHE.clear()
+    sources._GAPS_CACHE.clear()
     plan = {"scope": "steps", "target": "Scheda", "restrict": "Corso"}
-    gaps, decks = plans.lecture_gaps(plan)
+    gaps, decks = sources.lecture_gaps(plan)
     assert decks == 1 and gaps == ["dropout"]
-    assert plans.lecture_gaps({"scope": "folder", "target": "Corso"}) is None
+    assert sources.lecture_gaps({"scope": "folder", "target": "Corso"}) is None
 
 
 def test_a_step_line_s_weight_and_depth_stay_out_of_its_last_topic(vault):

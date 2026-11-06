@@ -40,14 +40,14 @@ def step_paths(plan: dict, notes: dict | None = None) -> list[list[str]]:
     gives them, with the vault's metadata read once: resolve_title alone reads
     it on every call, 0.08 s a title, which made a 241-note plan's page 27 s
     slower (measured 2026-10-27)."""
-    from silica.kernel.learn import plans
+    from silica.kernel.learn import sources, store
 
-    notes = notes if notes is not None else note_index.meta(plans._vault())
+    notes = notes if notes is not None else note_index.meta(store.vault())
     out = []
     for step in plan.get("steps") or []:
         seen: list[str] = []
         for title in step.get("notes") or []:
-            path = plans.resolve_title(title, notes)
+            path = sources.resolve_title(title, notes)
             if path and path not in seen:
                 seen.append(path)
         out.append(seen)

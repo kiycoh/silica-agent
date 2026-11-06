@@ -209,7 +209,7 @@ def _block(n: int, c: dict, fallback: str = "") -> str:
     # model copied them back as the TITLE and wrote the card in their English.
     lines = [f"OBJ {n}", f"INTENTION: {c['intention']}",
              # a near-empty note detects as the default language; the scope's own wins there
-             f"LANGUAGE: {fallback if len(sample) < 200 and fallback else language.display_name(language.detect(sample))}",
+             f"LANGUAGE: {fallback if len(sample) < 200 and fallback else language.named(sample)}",
              f"STEP: {c['node']}", "NOTES: " + "; ".join(items.title_of(p) for p in c["paths"][:4])]
     claims = []
     for p in c["paths"][:2]:
@@ -247,7 +247,7 @@ def parse_reply(text: str) -> dict[int, dict]:
 def rewrite(cards: list[dict]) -> list[dict]:
     """The model's wording on the first MAX_MODEL_CARDS non-gap cards; a
     failed or absent call leaves the templates, never a blank."""
-    from silica.kernel.learn.items import _llm
+    from silica.kernel.learn import items
 
     todo = [c for c in cards if c["source"] != "gap"][:MAX_MODEL_CARDS]
     if not todo:
@@ -256,10 +256,10 @@ def rewrite(cards: list[dict]) -> list[dict]:
     from silica.kernel.text import language
 
     scope_text = " ".join(read_note(p) for c in todo for p in c["paths"][:2])[:20000]
-    fallback = language.display_name(language.detect(scope_text)) if scope_text.strip() else ""
+    fallback = language.named(scope_text) if scope_text.strip() else ""
     blocks = "\n\n".join(_block(i, c, fallback) for i, c in enumerate(todo, 1))
     try:
-        text, _finish = _llm(PROPOSE_PROMPT.format(blocks=blocks), PROPOSE_MAX_TOKENS)
+        text, _finish = items.ask_model(PROPOSE_PROMPT.format(blocks=blocks), PROPOSE_MAX_TOKENS)
     except Exception as exc:
         logger.warning("learn: objectives call failed (%s)", exc)
         return cards

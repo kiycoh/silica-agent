@@ -22,7 +22,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from silica.kernel.base import note_index, noteshape
 from silica.kernel.base.notekey import ledger_key
-from silica.kernel.learn import items, reasons, session
+from silica.kernel.learn import items, pace, reasons, reference, session, store
+from silica.kernel.learn.reference import RESTRICT_SEP
 from silica.kernel.learn.schedule import DUE_R
 from silica.ui.web import render
 
@@ -272,7 +273,7 @@ def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
     # Read once for every title lookup below: steps_passed without it read the
     # vault's notes per step note, 84 epoch walks and 24 s of a 30 s Learn
     # home on a 2,166-note vault (2026-10-23, profiled).
-    notes = note_index.meta(plans._vault())
+    notes = note_index.meta(store.vault())
     scoped = plans.scope_of(p, notes=notes)
     node = mastery.node_readings(scoped["paths"], rows, entries, p.get("created"), p["objectives"])
     frontier = scoped["frontier"]
@@ -298,7 +299,7 @@ def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
         "steps_passed": passed, "all_met": node["all_met"], "met_by_objective": node["met_by_objective"],
         "percent": plans.percent_done(node["all_met"], node["coverage"][1], len(gaps)),
         "open_session": session.is_open(p["path"]),
-        "pace": plans.pace_of(p, len(scoped["paths"]) - node["all_met"], entries=entries),
+        "pace": pace.pace_of(p, len(scoped["paths"]) - node["all_met"], entries=entries),
     }
 
 
@@ -577,10 +578,10 @@ def write_plan(payload: dict):
     # a refused line by its index (this form) or its text (the plan note's `refused:`)
     refused = [int(i) if str(i).lstrip("-").isdigit() else str(i) for i in (payload.get("refused") or []) if str(i).strip()]
     chosen = obj.normalize(payload.get("objectives"))
-    reference = payload.get("reference")
-    if isinstance(reference, str) and reference.strip():
+    lines = payload.get("reference")
+    if isinstance(lines, str) and lines.strip():
         try:
-            scope, target, restrict = _with_reference(scope, target, restrict, reference)
+            scope, target, restrict = _with_reference(scope, target, restrict, lines)
         except Exception as exc:
             raise HTTPException(400, str(exc))
     if scope not in plans.SCOPES:
@@ -656,7 +657,7 @@ def _declared(payload: dict) -> dict[str, str] | None:
     return out
 
 
-def _with_reference(scope: str, target, restrict: str, reference: str) -> tuple[str, Any, str]:
+def _with_reference(scope: str, target, restrict: str, lines: str) -> tuple[str, Any, str]:
     """Study and a Reference as today's syllabus scope (ADR-0119): the
     reference's lines are the steps, and what is studied bounds where they
     are looked for. A folder stays a prefix, so a note added to it later is
@@ -665,13 +666,13 @@ def _with_reference(scope: str, target, restrict: str, reference: str) -> tuple[
     from silica.kernel.learn import plans
 
     if not scope:
-        return "steps", reference, ""
+        return "steps", lines, ""
     if scope == "folder":
-        return "steps", reference, plans.RESTRICT_SEP.join(plans.folder_parts(target))
+        return "steps", lines, RESTRICT_SEP.join(plans.folder_parts(target))
     paths = plans.resolve_scope(scope, target, restrict=restrict)["paths"]
     if not paths:
         raise ValueError("nothing to study resolves, so the reference has nowhere to be looked for")
-    return "steps", reference, plans.RESTRICT_SEP.join(paths)
+    return "steps", lines, RESTRICT_SEP.join(paths)
 
 
 def _preview(res: dict, chosen: list[str]) -> dict:
@@ -713,9 +714,9 @@ def plan_budget(payload: dict):
 
     steps = [{"hours": s.get("hours"), "unit": str(s.get("unit") or ""), "notes": [""] * int(s.get("notes") or 0)}
              for s in (payload.get("steps") or []) if isinstance(s, dict)]
-    parts = plans.parse_assessment(payload["assessment"]) if isinstance(payload.get("assessment"), str) else [
+    parts = reference.parse_assessment(payload["assessment"]) if isinstance(payload.get("assessment"), str) else [
         {"part": str(a.get("part")), "days": a.get("days")} for a in (payload.get("assessment") or []) if isinstance(a, dict)]
-    b = plans.budget({"by": payload.get("by"), "hours": plans.hours_of(payload.get("hours")), "steps": steps,
+    b = pace.budget({"by": payload.get("by"), "hours": plans.hours_of(payload.get("hours")), "steps": steps,
                       "assessment": parts})
     return {"say": b["say"] if b else "", "budget": b}
 
@@ -723,9 +724,9 @@ def plan_budget(payload: dict):
 @router.post("/plan/read")
 def read_plan_sentence(payload: dict):
     """The sentence of Create plan in, the four fields out (ADR-0081 §11)."""
-    from silica.kernel.learn import plans
+    from silica.kernel.learn import sentence
 
-    return plans.read_sentence(str(payload.get("sentence") or ""))
+    return sentence.read_sentence(str(payload.get("sentence") or ""))
 
 
 _SYLLABUS_NAME = re.compile(r"programm|syllab|indice|esame|exam|outline|course|corso", re.I)
@@ -737,11 +738,11 @@ def scope_options(q: str = ""):
     syllabus notes matching `q`, each with its kind, target and note count,
     from the note walk and the co-occurrence store."""
     from silica.config import CONFIG
-    from silica.kernel.learn import plans
+    from silica.kernel.learn import plans, sentence
 
     notes = note_index.meta(Path(CONFIG.vault_path))
     needle = q.strip().casefold()
-    folders = plans.folders_of(notes)
+    folders = sentence.folders_of(notes)
     fs = [f for f in folders if needle in f.casefold()] if needle else list(folders)
     fs.sort(key=lambda f: (needle and not f.rstrip("/").rsplit("/", 1)[-1].casefold().startswith(needle), -folders[f], f))
     out = [{"kind": "folder", "target": f, "label": f, "count": folders[f]} for f in fs[:6]]

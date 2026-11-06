@@ -6,6 +6,8 @@ their roles, steps made of outline rows, the reference's hours, the
 assessment, the depth, the guide."""
 from __future__ import annotations
 
+from silica.kernel.learn import pace, reference, store
+
 from datetime import date
 
 import pytest
@@ -102,7 +104,7 @@ def course(tmp_vault, tmp_path, monkeypatch):
 def _notes():
     from silica.kernel.base import note_index
 
-    return note_index.meta(plans._vault())
+    return note_index.meta(store.vault())
 
 
 def _stems(paths) -> list[str]:
@@ -123,8 +125,8 @@ def test_spines_group_into_a_book_by_its_file_and_a_series_by_its_folder(course)
 def test_a_role_is_read_for_the_reference_and_the_readers_choice_wins(course):
     notes = _notes()
     colls = sources.collections(notes, set(notes))
-    steps = [[sources.roots(t) for t in plans._topics(line) or [line]]
-             for line in plans.reference_lines(SYLLABUS)]
+    steps = [[sources.roots(t) for t in reference.line_topics(line) or [line]]
+             for line in (r["text"] for r in reference.reference_rows(SYLLABUS))]
     by_label = lambda roles: {c["label"]: roles[c["key"]]["role"] for c in colls}  # noqa: E731
     assert by_label(sources.roles(colls, SYLLABUS, "Syllabus", steps)) == {
         "Pattern Learning Methods (Ann Smith)": "reference", "Slides": "material"}
@@ -194,19 +196,19 @@ def test_a_glued_line_is_split_into_the_vaults_words():
 
 
 def test_reference_rows_keep_the_hours_and_a_guide_is_read_from_its_plan_table():
-    rows = plans.reference_rows(SYLLABUS)
+    rows = reference.reference_rows(SYLLABUS)
     assert [(r["hours"], r.get("unit")) for r in rows][:2] == [(4.0, "h"), (6.0, "h")]
     guide = ("# Guida\n\n- una nota qualunque\n\n| # | lezioni | cosa | profondità |\n|---|---|---|---|\n"
              "| 1 | L1 | regressione, ridge, lasso | a fondo |\n| 2 | L2 | kernel, Mercer | bene; una lettura RKHS |\n\n"
              "| ripetizione | dove |\n|---|---|\n| capacità e validazione | L6 |\n")
-    got = plans.reference_rows(guide)
+    got = reference.reference_rows(guide)
     assert [(r["text"], r["depth"]) for r in got] == [("regressione, ridge, lasso", "deep"), ("kernel, Mercer", "well")]
 
 
 def test_the_assessment_is_read_with_the_projects_lead_time():
-    assert plans.assessment_of(SYLLABUS) == [{"part": "project", "days": 7}, {"part": "oral", "days": None}]
-    assert plans.parse_assessment(plans.assessment_text([{"part": "project", "days": 7}])) == [{"part": "project", "days": 7}]
-    assert plans.assessment_text([]) == "none" and plans.parse_assessment("none") == []
+    assert reference.assessment_of(SYLLABUS) == [{"part": "project", "days": 7}, {"part": "oral", "days": None}]
+    assert reference.parse_assessment(reference.assessment_text([{"part": "project", "days": 7}])) == [{"part": "project", "days": 7}]
+    assert reference.assessment_text([]) == "none" and reference.parse_assessment("none") == []
 
 
 def test_the_calendar_weighs_the_references_hours_and_keeps_the_projects_days():
@@ -214,7 +216,7 @@ def test_the_calendar_weighs_the_references_hours_and_keeps_the_projects_days():
              {"text": "B: [[b]], [[c]], [[d]]", "notes": ["b", "c", "d"], "hours": 2.0, "unit": "h"}]
     plan = {"by": "2026-11-10", "steps": steps, "hours": 5.0,
             "assessment": [{"part": "project", "days": 7}, {"part": "oral", "days": None}]}
-    rows = plans.day_by_day(plan, today=date(2026, 10, 25))
+    rows = pace.day_by_day(plan, today=date(2026, 10, 25))
     study = [r for r in rows if any(label in ("A", "B") for label, _n in r["steps"])]
     assert study[-1]["day"] == "2026-11-02"   # 16 days, 7 of them the project's
     assert sum(1 for r in study if any(label == "A" for label, _n in r["steps"])) > \
@@ -222,18 +224,18 @@ def test_the_calendar_weighs_the_references_hours_and_keeps_the_projects_days():
     assert rows[9]["steps"][0][0].startswith("Project")
     assert any(label.startswith("Rehearse the oral") for r in rows if r["day"] == "2026-11-09" for label, _n in r["steps"])
     assert sum(h for r in study for h in r["hours"].values()) == pytest.approx(45.0)
-    say = plans.budget(plan, date(2026, 10, 25))["say"]
+    say = pace.budget(plan, date(2026, 10, 25))["say"]
     assert "8 h" in say and "45 h" in say and "Fewer" not in say
     bare = {"by": "2026-11-10", "steps": [{"text": "A", "notes": ["a"]}]}
-    assert plans.budget(bare, date(2026, 10, 25))["say"] == "Weighted by notes: the reference gives no hours."
+    assert pace.budget(bare, date(2026, 10, 25))["say"] == "Weighted by notes: the reference gives no hours."
 
 
 def test_step_lines_carry_and_shed_their_markers():
-    st = plans.parse_steps("## Steps\n- [ ] Modelli lineari: [[A]], [[B]] (ref) · not in the vault: x · 8 h · deep\n"
+    st = reference.parse_steps("## Steps\n- [ ] Modelli lineari: [[A]], [[B]] (ref) · not in the vault: x · 8 h · deep\n"
                            "- [ ] Labs: [[C]] · weight 3\n")
     assert (st[0]["hours"], st[0]["unit"], st[0]["depth"]) == (8.0, "h", "deep")
     assert (st[1]["hours"], st[1]["unit"]) == (3.0, "")
-    assert [plans._step_label(s) for s in st] == ["Modelli lineari", "Labs"]
+    assert [reference.step_label(s) for s in st] == ["Modelli lineari", "Labs"]
 
 
 def test_the_plan_note_stores_roles_hours_and_assessment_and_an_edit_keeps_them(course, monkeypatch):
@@ -268,9 +270,9 @@ def test_the_pace_counts_the_study_days_before_the_projects():
     today = real_date.today()
     plan = {"by": (today + timedelta(days=16)).isoformat(), "assessment": [{"part": "project", "days": 7}],
             "steps": [{"text": "A", "notes": ["a"], "hours": 4.0, "unit": "h"}]}
-    pace = plans.pace_of(plan, below=90)
-    assert pace["per_day"] == 25        # 225 answers over 9 study days, not 14
-    assert "then 7 days for the project" in pace["say"]
+    paced = pace.pace_of(plan, below=90)
+    assert paced["per_day"] == 25        # 225 answers over 9 study days, not 14
+    assert "then 7 days for the project" in paced["say"]
 
 
 def test_lecture_gaps_read_the_material_however_its_decks_are_named(course, monkeypatch):
@@ -278,7 +280,7 @@ def test_lecture_gaps_read_the_material_however_its_decks_are_named(course, monk
 
     monkeypatch.setattr(obj, "rewrite", lambda cards: cards)
     out = plans.write_plan(plans.PlanSpec("Gaps", "steps", "Syllabus", by="2026-11-10", objectives=[]))
-    gaps, decks = plans.lecture_gaps(plans.read_plan(out["path"]))
+    gaps, decks = sources.lecture_gaps(plans.read_plan(out["path"]))
     assert decks == 4 and "dropout" in gaps and "kernel trick" not in gaps
 
 
@@ -291,7 +293,7 @@ def test_depth_comes_from_a_guide_and_sets_the_proposed_objective(course, monkey
                                    "| 2 | kernel trick, teorema di Mercer | una lettura |\n")
     assert plans.guide_candidates("Course") == ["Course/Guida.md"]
     out = plans.write_plan(plans.PlanSpec("Guided", "steps", "Syllabus", by="2026-11-10", objectives=[], guide="Guida"))
-    steps = {plans._step_label(s): s for s in plans.read_plan(out["path"])["steps"]}
+    steps = {reference.step_label(s): s for s in plans.read_plan(out["path"])["steps"]}
     assert steps["Modelli lineari"]["depth"] == "deep" and steps["Metodi kernel"]["depth"] == "read"
     cards = {c["node"]: c["intention"] for c in plans.read_plan(out["path"])["cards"]}
     assert cards["Modelli lineari"] == "explain" and cards["Metodi kernel"] == "recall"
@@ -326,7 +328,7 @@ def test_a_reference_the_material_does_not_follow_gives_the_same_steps_and_says_
     """ADR-0131 amendment: aligned in its own order, a shuffled syllabus gave
     one block 89 notes and another 2 with nothing said; matched by words, the
     steps do not depend on the list's order, and the plan says how."""
-    lines = [r["text"] for r in plans.reference_rows(SYLLABUS)]
+    lines = [r["text"] for r in reference.reference_rows(SYLLABUS)]
     one = plans.resolve_scope("steps", "\n".join(lines) + "\n")
     two = plans.resolve_scope("steps", "\n".join(reversed(lines)) + "\n")
     steps = lambda res: {n["node"]: set(n.get("leaves") or []) for n in res["tree"]}  # noqa: E731
@@ -349,13 +351,13 @@ def _even_plan(created: str, by: str) -> dict:
 
 def test_the_calendar_is_of_the_steps_left():
     plan = _even_plan("2026-10-18", "2026-11-03")
-    rows = plans.day_by_day(plan, today=date(2026, 10, 25), passed=[True, False, False, False])
+    rows = pace.day_by_day(plan, today=date(2026, 10, 25), passed=[True, False, False, False])
     labels = [label for r in rows for label, _n in r["steps"]]
     assert "S0" not in labels and labels[0] == "S1"
     plan["steps"][1]["checked"] = True        # a checked box counts as done too
-    rows = plans.day_by_day(plan, today=date(2026, 10, 25), passed=[True, False, False, False])
+    rows = pace.day_by_day(plan, today=date(2026, 10, 25), passed=[True, False, False, False])
     assert [label for r in rows for label, _n in r["steps"]][0] == "S2"
-    say = plans.budget(plan, date(2026, 10, 25), [True, False, False, False])["say"]
+    say = pace.budget(plan, date(2026, 10, 25), [True, False, False, False])["say"]
     assert "16 h (8 h in the steps left)" in say
 
 
@@ -363,13 +365,13 @@ def test_today_says_how_far_behind_the_calendar_drawn_when_the_plan_was_made():
     # 16 days, 2 of review: 14 study days, four steps of 3.5 days; the
     # calendar made on the 18th has S2 on the 25th
     plan = _even_plan("2026-10-18", "2026-11-03")
-    t = plans.today_line(plan, [False] * 4, today=date(2026, 10, 25))
+    t = pace.today_line(plan, [False] * 4, today=date(2026, 10, 25))
     assert t["behind"] == 2 and t["expected"] == "S2" and t["first"] == "S0"
     assert "2 steps behind the calendar drawn when the plan was made: it had S2 for today" in t["say"]
     assert t["say"].startswith("Today: S0")
-    on_time = plans.today_line(plan, [True, True, False, False], today=date(2026, 10, 25))
+    on_time = pace.today_line(plan, [True, True, False, False], today=date(2026, 10, 25))
     assert on_time["behind"] == 0 and "behind" not in on_time["say"]
-    fresh = plans.today_line({**plan, "created": "2026-10-25"}, [False] * 4, today=date(2026, 10, 25))
+    fresh = pace.today_line({**plan, "created": "2026-10-25"}, [False] * 4, today=date(2026, 10, 25))
     assert fresh["behind"] is None
 
 
@@ -377,12 +379,12 @@ def test_a_stem_two_notes_share_resolves_as_the_walk_did():
     """The name index keeps the walk's answer: the exact path first, then the
     first note in the notes' order holding the stem."""
     notes = {"B/Regressione lineare.md": {}, "A/Sub/Regressione lineare.md": {}, "C/Altro.md": {}}
-    assert plans.resolve_title("Regressione lineare", notes) == "B/Regressione lineare.md"
-    assert plans.resolve_title("A/Sub/Regressione lineare", notes) == "A/Sub/Regressione lineare.md"
-    assert plans.resolve_title("regressione LINEARE", notes) == "B/Regressione lineare.md"
+    assert sources.resolve_title("Regressione lineare", notes) == "B/Regressione lineare.md"
+    assert sources.resolve_title("A/Sub/Regressione lineare", notes) == "A/Sub/Regressione lineare.md"
+    assert sources.resolve_title("regressione LINEARE", notes) == "B/Regressione lineare.md"
     notes["D/Nuova.md"] = {}
-    assert plans.resolve_title("Nuova", notes) == "D/Nuova.md"     # a grown dict rebuilds the index
-    assert plans.resolve_title("Nessuna", notes) is None
+    assert sources.resolve_title("Nuova", notes) == "D/Nuova.md"     # a grown dict rebuilds the index
+    assert sources.resolve_title("Nessuna", notes) is None
 
 
 def test_topic_vectors_stay_in_their_vault(tmp_path, monkeypatch):
@@ -394,14 +396,14 @@ def test_topic_vectors_stay_in_their_vault(tmp_path, monkeypatch):
         def embed(self, texts):
             return [[1.0] for _t in texts]
 
-    plans._VEC_MEMO.clear()
+    sources._VEC_MEMO.clear()
     for name, text in (("a", "topic of a"), ("b", "topic of b")):
         (tmp_path / name).mkdir()
         monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(tmp_path / name))
-        plans._embed([text], Emb())
-    stored = plans._vectors_on_disk()
+        sources._embed([text], Emb())
+    stored = sources._vectors_on_disk()
     assert set(stored) == {("m1", "topic of b")}               # b's index holds b's topics only
-    plans._VEC_MEMO.clear()
+    sources._VEC_MEMO.clear()
 
 
 def test_topic_vectors_survive_a_restart_and_never_cross_models(tmp_vault):
@@ -414,17 +416,17 @@ def test_topic_vectors_survive_a_restart_and_never_cross_models(tmp_vault):
             calls.extend(texts)
             return [[float(len(t)), 1.0] for t in texts]
 
-    plans._VEC_MEMO.clear()
-    assert plans._embed(["kernel trick"], Emb()) == [[12.0, 1.0]]
-    plans._VEC_MEMO.clear()                       # a new process: the disk answers
-    assert plans._embed(["kernel trick"], Emb()) == [[12.0, 1.0]] and calls == ["kernel trick"]
+    sources._VEC_MEMO.clear()
+    assert sources._embed(["kernel trick"], Emb()) == [[12.0, 1.0]]
+    sources._VEC_MEMO.clear()                       # a new process: the disk answers
+    assert sources._embed(["kernel trick"], Emb()) == [[12.0, 1.0]] and calls == ["kernel trick"]
 
     class Other(Emb):
         model = "m2"
 
-    plans._embed(["kernel trick"], Other())
+    sources._embed(["kernel trick"], Other())
     assert calls == ["kernel trick", "kernel trick"]   # another model embeds again
-    plans._VEC_MEMO.clear()
+    sources._VEC_MEMO.clear()
 
 
 def test_a_close_decision_is_to_confirm_and_no_plan_key_is_written_without_the_form(course, monkeypatch):
@@ -441,7 +443,7 @@ def test_a_close_decision_is_to_confirm_and_no_plan_key_is_written_without_the_f
     monkeypatch.setattr(obj, "rewrite", lambda cards: cards)
     monkeypatch.setattr(sources, "FOCUS_MARGIN", 0.01)
     monkeypatch.setattr(sources, "CONFIRM_FACTOR", 1e9)   # every focus win is close
-    lines = "\n".join(r["text"] for r in plans.reference_rows(SYLLABUS)) + "\n"
+    lines = "\n".join(r["text"] for r in reference.reference_rows(SYLLABUS)) + "\n"
     out = plans.write_plan(plans.PlanSpec("Unsure", "steps", lines, by="2026-11-10", objectives=[]))
     text = plans._read(out["path"])
     assert "materials:" not in text and "to confirm" in text
@@ -456,7 +458,7 @@ def test_a_topic_no_source_meets_offers_the_steps_notes_and_keeps_the_readers_an
     from silica.kernel.learn import objectives as obj
 
     monkeypatch.setattr(obj, "rewrite", lambda cards: cards)
-    lines = [r["text"] for r in plans.reference_rows(SYLLABUS)]
+    lines = [r["text"] for r in reference.reference_rows(SYLLABUS)]
     lines[1] = "Metodi kernel: kernel trick, teorema di Mercer, spazi di funzioni speciali"
     target = "\n".join(lines) + "\n"
     res = plans.resolve_scope("steps", target)
@@ -475,10 +477,10 @@ def test_a_topic_no_source_meets_offers_the_steps_notes_and_keeps_the_readers_an
 
 def test_a_topic_met_by_meaning_is_said_on_the_step_line_and_shed_by_its_label():
     node = {"node": "Reti", "by_meaning": [("percettrone multistrato", "Rete di percettroni")], "hours": 6.0, "unit": "h"}
-    tail = plans._marks(node)
+    tail = reference.step_marks(node)
     assert tail == " · by meaning, percettrone multistrato ≈ Rete di percettroni · 6 h"
-    step = plans.parse_steps("## Steps\n- [ ] Reti: [[A]]" + tail + "\n")[0]
-    assert plans._step_label({"text": "[[A]]" + tail, "notes": ["A"]}) == "A" and step["hours"] == 6.0
+    step = reference.parse_steps("## Steps\n- [ ] Reti: [[A]]" + tail + "\n")[0]
+    assert reference.step_label({"text": "[[A]]" + tail, "notes": ["A"]}) == "A" and step["hours"] == 6.0
     assert step["notes"] == ["A"]                 # no title in the tail becomes a note of the step
 
 
@@ -493,16 +495,16 @@ def test_a_note_met_by_meaning_across_the_material_by_unrelated_topics_is_generi
              1: [("tipi di task", 1.0), ("versione duale del percettrone", 1.0)],
              2: [("reti convolutive profonde", 1.0), ("percettrone multistrato", 1.0)]}
     aligned = {0: [0, 1], 1: [40, 41], 2: [90, 91]}
-    kept, generic = plans._without_generic(dense, asked, aligned, 100)
+    kept, generic = sources._without_generic(dense, asked, aligned, 100)
     assert generic == {"C/Apprendimento artificiale.md"}      # the perceptron comes back by name: not generic
     assert "C/Apprendimento artificiale.md" not in kept["tipi di task"]
     assert kept["percettrone multistrato"] == {"C/Rete di percettroni.md": (0.8, False)}
     near = {0: [0], 1: [10], 2: [20]}                          # the same steps close together: not generic
-    assert plans._without_generic(dense, asked, near, 100)[1] == set()
+    assert sources._without_generic(dense, asked, near, 100)[1] == set()
 
 
 def test_the_readers_answer_stays_in_its_step_when_an_earlier_step_holds_the_note():
     tree = [{"node": "A", "leaves": ["n/X.md", "n/Y.md"]},
             {"node": "B", "leaves": ["n/Z.md", "n/X.md"], "matched_paths": ["n/X.md"]}]
-    plans._one_note_per_step(tree, set())
+    sources._one_note_per_step(tree, set())
     assert tree[1]["leaves"] == ["n/Z.md", "n/X.md"] and tree[0]["leaves"] == ["n/X.md", "n/Y.md"]

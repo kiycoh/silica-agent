@@ -254,6 +254,7 @@ def draw(n: int, *, plan: dict | None = None, note: str = "", scope: Any = None,
     stepped = plan is not None and not note and str(step).isdigit()
     if stepped and plan is not None:
         from silica.kernel.learn import reading
+        from silica.kernel.learn.reference import step_label
 
         try:
             in_step = reading.step_notes(plan, int(str(step)))
@@ -263,7 +264,7 @@ def draw(n: int, *, plan: dict | None = None, note: str = "", scope: Any = None,
         frontier, revisit = list(scope), None
         if not sized:
             n = reading.session_size(len(scope))
-        origin = {**origin, "label": f"{plan['name']} · {plans._step_label(plan['steps'][int(str(step))])}"}
+        origin = {**origin, "label": f"{plan['name']} · {step_label(plan['steps'][int(str(step))])}"}
     teach = teach and bool(note)
     # a placement (ADR-0135 point 3): asked of a plan before it starts, on offer
     placing = plan is not None and not note and not stepped and placement

@@ -28,7 +28,7 @@ MONTHS = {
 }
 MONTH_RE = "|".join(sorted(MONTHS, key=len, reverse=True))
 
-_EN_FIRST = "|".join(sorted(("january", "february", "march", "april", "june", "july", "august", "september", "october",
+EN_FIRST = "|".join(sorted(("january", "february", "march", "april", "june", "july", "august", "september", "october",
                              "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept",
                              "oct", "nov", "dec"), key=len, reverse=True))
 # Every pattern carries its year. Numeric dates are day first, as both
@@ -37,7 +37,7 @@ _ABSOLUTE = (
     ("ymd", re.compile(r"(?<![\d/.-])(\d{4})-(\d{1,2})-(\d{1,2})(?![\d/-])")),
     ("dmy", re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th|°|º)?\s+(?:di\s+|of\s+)?({MONTH_RE})\.?,?\s+(\d{{4}})\b", re.I)),
     # "May" capitalised only, as plans.py rules: "you may 3 2026" is a verb.
-    ("mdy", re.compile(rf"\b((?i:{_EN_FIRST})|May)\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})\b")),
+    ("mdy", re.compile(rf"\b((?i:{EN_FIRST})|May)\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})\b")),
     ("num", re.compile(r"(?<![\d/.])(\d{1,2})([/.])(\d{1,2})\2(\d{4})(?![\d/.])")),
 )
 

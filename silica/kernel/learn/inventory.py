@@ -77,8 +77,8 @@ def _sha(text: str) -> str:
 def claim_id(stem: str, section: str, text: str) -> str:
     """sha1 of (leaf stem, section, normalized text), 12 hex: what the ledger
     and the align cache key on."""
-    from silica.kernel.learn.items import _norm
-    return hashlib.sha1(f"{stem}\x1f{section}\x1f{_norm(text)}".encode("utf-8")).hexdigest()[:12]
+    from silica.kernel.learn.items import norm
+    return hashlib.sha1(f"{stem}\x1f{section}\x1f{norm(text)}".encode("utf-8")).hexdigest()[:12]
 
 
 def _cut(text: str) -> list[str]:
@@ -162,7 +162,7 @@ def _language(text: str) -> str:
     from silica.kernel.text import language as lang_mod
     from silica.kernel.base.manifest import get_active_manifest
     return (get_active_manifest().conventions.language
-            or lang_mod.display_name(lang_mod.detect(text)) or "the source language")
+            or lang_mod.named(text) or "the source language")
 
 
 _COMPACT = re.compile(r"[\s$]+")

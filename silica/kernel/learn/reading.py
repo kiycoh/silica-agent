@@ -17,12 +17,15 @@ The order and the cards are a model's; the checks are code's: only the step's
 notes count, each once; a cycle keeps the lecture order; a link stays only
 when it names a note of the step; every sentence of a card's summary is held
 against the notes its call saw with the flashcards' gate
-(`artifacts._grounded`, formulas included), and one they do not hold is
+(`artifacts.grounded`, formulas included), and one they do not hold is
 marked, never dropped; an answer the next note does not hold is not shown.
 """
 from __future__ import annotations
 
 from silica.config import silica_home
+from silica.kernel.base.syntax import NAME_UNSAFE_RE, WIKILINK_NAME_RE
+from silica.kernel.learn import store
+from silica.kernel.learn.reference import step_label
 from silica.kernel.write.gate import journaled_write
 
 import hashlib
@@ -99,8 +102,7 @@ _FIELDS = ("OPENING", "DEFINITION", "MECHANISM", "EXAMPLE", "QUESTION", "ANSWER"
 _LABEL_RE = re.compile(r"^\s*(?:[-*]\s*)?\**\s*(" + "|".join(_FIELDS) + r")\s*\**\s*:\s*\**\s*(.*)$", re.I)
 _NONE_RE = re.compile(r"^\s*(?:none|nessun[oa]?|-|n/?a)\.?\s*$", re.I)
 _SENTENCE_RE = re.compile(r"(?<=[.!?;])\s+(?=[A-ZÀ-Ý$(])")
-_FENCE_SAFE_RE = re.compile(r'[\\/:*?"<>|#^\[\]]+')
-_WIKI_RE = re.compile(r"\[\[([^\]|#]+)(?:[^\]]*)\]\]")
+# A link with its alias, an embed's too: the words a card shows in place of it.
 _ANY_WIKI_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]")
 
 
@@ -109,14 +111,14 @@ _ANY_WIKI_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]")
 def step_notes(plan: dict, step: int) -> list[tuple[str, str]]:
     """[(title, path)] of a step's notes in the step's order, unresolved ones
     left out (a gap has no text to explain)."""
-    from silica.kernel.learn import plans
+    from silica.kernel.learn.sources import resolve_title
 
     steps = plan.get("steps") or []
     if not 0 <= step < len(steps):
         raise ValueError(f"no step {step + 1} in {plan.get('path')!r}")
     out, seen = [], set()
     for title in steps[step].get("notes") or []:
-        path = plans.resolve_title(title)
+        path = resolve_title(title)
         if path and path not in seen:
             seen.add(path)
             out.append((Path(path).stem, path))
@@ -134,10 +136,8 @@ def notes_hash(paths: list[str]) -> str:
 
 
 def reading_path(plan: dict, step: int) -> str:
-    from silica.kernel.learn import plans
-
-    label = plans._step_label((plan.get("steps") or [])[step])
-    safe = _FENCE_SAFE_RE.sub(" ", label).strip(" .") or f"Step {step + 1}"
+    label = step_label((plan.get("steps") or [])[step])
+    safe = NAME_UNSAFE_RE.sub(" ", label).strip(" .") or f"Step {step + 1}"
     plan_path = Path(plan["path"])
     # beside the plan, so outside every study folder a plan's restrict names
     return (plan_path.parent / f"{plan_path.stem}{FOLDER_SUFFIX}" / f"{step + 1:02d} {safe[:80].strip()}.md").as_posix()
@@ -304,7 +304,7 @@ def _formula_held(formula: str, note_keys: list[str], held_all: str) -> bool:
     the note's last link, and the verbatim check marked it (2026-10-26)."""
     from silica.kernel.learn import artifacts
 
-    key = artifacts._latex_key(formula)
+    key = artifacts.latex_key(formula)
     if key in held_all:
         return True
     parts = [p for p in key.split("=") if p]
@@ -322,30 +322,17 @@ def _formula_held(formula: str, note_keys: list[str], held_all: str) -> bool:
     return False
 
 
-def _held(sentence: str, notes_text: str, note_keys: list[str], held_all: str, held_words: set[str]) -> bool:
-    """The flashcards' gate (artifacts._grounded) with a chain's ends allowed."""
-    from silica.kernel.learn import artifacts
-
-    formulas = artifacts._MATH_RE.findall(sentence)
-    if any(not _formula_held(f, note_keys, held_all) for f in formulas):
-        return False
-    words = artifacts._words(sentence)
-    if not words or (formulas and len(words) <= 2):
-        return True
-    return sum(1 for w in words if w in held_words) >= artifacts.GROUNDED_SHARE * len(words)
-
-
 def mark_unheld(text: str, notes_text: str) -> tuple[str, int]:
     """The text with each sentence the notes do not hold marked, line breaks
     kept; and how many were marked. A line of formula alone is judged by its
     formula; a sentence of fewer than three content words is not judged. A
-    link is judged by its title's words (artifacts._words reads `[[x]]` as
+    link is judged by its title's words (artifacts.words reads `[[x]]` as
     x), so the caller adds the titles it allows to `notes_text`."""
     from silica.kernel.learn import artifacts
 
-    note_keys = [artifacts._latex_key(f) for f in artifacts._MATH_RE.findall(notes_text)]
-    held_all = artifacts._latex_key(notes_text)
-    held_words = artifacts._words(notes_text)
+    note_keys = [artifacts.latex_key(f) for f in artifacts.MATH_RE.findall(notes_text)]
+    held_all = artifacts.latex_key(notes_text)
+    held_words = artifacts.words(notes_text)
     marked = 0
     lines = []
     for line in text.splitlines():
@@ -354,8 +341,9 @@ def mark_unheld(text: str, notes_text: str) -> tuple[str, int]:
             continue
         parts = []
         for s in _SENTENCE_RE.split(line):
-            judged = artifacts._MATH_RE.search(s) or len(artifacts._words(s)) >= 3
-            if judged and not _held(s, notes_text, note_keys, held_all, held_words):
+            judged = artifacts.MATH_RE.search(s) or len(artifacts.words(s)) >= 3
+            # the flashcards' gate, with a chain's ends allowed
+            if judged and not artifacts.holds(s, held_words, lambda f: _formula_held(f, note_keys, held_all)):
                 parts.append(f"{s.rstrip()} {NOT_HELD}")
                 marked += 1
             else:
@@ -390,7 +378,7 @@ def _answer_key(text: str) -> str:
 
     text = _ANY_WIKI_RE.sub(lambda m: (m.group(2) or m.group(1)), text or "")
     text = re.sub(r"\*\*|\*|==|[«»“”\"']", "", text)
-    return artifacts._latex_key(text).casefold().rstrip(".;:")
+    return artifacts.latex_key(text).casefold().rstrip(".;:")
 
 
 def answer_held(answer: str, note_text: str) -> bool:
@@ -412,7 +400,7 @@ def _lede(path: str) -> str:
     # `[^\n]*` and not `.*` for a heading: under re.S, `.*$` ran from the
     # note's title to its end, so ADR-0132's ordering call saw every lede empty
     text = re.sub(r"<!--.*?-->|!\[\[[^\]]*\]\]|^#+\s[^\n]*$|\[\^[^\]]+\]", " ", _body(path, 20000), flags=re.M | re.S)
-    text = _WIKI_RE.sub(lambda m: m.group(1), text)
+    text = _ANY_WIKI_RE.sub(lambda m: m.group(1), text)
     return re.sub(r"\s+", " ", text).strip()[:LEDE_CHARS]
 
 
@@ -434,7 +422,7 @@ def _language(paths: list[str]) -> str:
     from silica.kernel.text import language
 
     sample = " ".join(items.read_note(p)[:1500] for p in paths[:6])
-    return language.display_name(language.detect(sample[:4000]))
+    return language.named(sample[:4000])
 
 
 def write_card(i: int, cards: list[dict], language: str, ask=None) -> dict:
@@ -530,11 +518,11 @@ def note_lede(path_or_text: str, *, is_text: bool = False) -> str:
 
 def holds_lede(text: str, lede: str) -> bool:
     """The card says the note's central claim, by the flashcards' gate
-    (`artifacts._grounded`): the lede's content words and formulas are in
+    (`artifacts.grounded`): the lede's content words and formulas are in
     the card. A lede the gate cannot read (no content words) is held."""
     from silica.kernel.learn import artifacts
 
-    return not artifacts._words(lede) or artifacts._grounded(lede, text or "")
+    return not artifacts.words(lede) or artifacts.grounded(lede, text or "")
 
 
 # ------------------------------------------------------------------ the note
@@ -615,16 +603,16 @@ def parse(text: str) -> list[dict]:
             continue
         head = re.match(r"^(Note|Notes|Outline):", line)
         if head:
-            cur["notes"] = _WIKI_RE.findall(line)
+            cur["notes"] = WIKILINK_NAME_RE.findall(line)
             cur["note"] = cur["notes"][0] if cur["notes"] else cur["title"]
             cur["spine"] = head.group(1) == "Outline"
             part = "text"
             continue
         if line.startswith("Moved up:"):
-            cur["needed_by"] = _WIKI_RE.findall(line)
+            cur["needed_by"] = WIKILINK_NAME_RE.findall(line)
             continue
         if line.startswith("Needs:"):
-            cur["needs"] = _WIKI_RE.findall(line)
+            cur["needs"] = WIKILINK_NAME_RE.findall(line)
             continue
         if line.strip() == PENDING:
             cur["pending"] = True
@@ -634,7 +622,7 @@ def parse(text: str) -> list[dict]:
             kind = c.group(1).lower()
             if kind == "quote":
                 part = "answer"
-                found = _WIKI_RE.findall(c.group(2))
+                found = WIKILINK_NAME_RE.findall(c.group(2))
                 cur["answer_from"] = found[0] if found else ""
             # an old reading's guess before the section and its own-words
             # prompt are not a card's closing question
@@ -695,7 +683,7 @@ def begin(plan_path: str, step: int, ask=None) -> dict:
         raise ValueError(f"step {step + 1} has no note in the vault to explain")
     ordered = order_cards(notes, ask or _ask)
     cards = [spine_card(c) if c["spine"] else {**c, "note": c["title"], "pending": True} for c in ordered["cards"]]
-    label = plans._step_label(plan["steps"][step])
+    label = step_label(plan["steps"][step])
     body = render(Path(plan["path"]).stem, step, cards, ordered["order"])
     path = reading_path(plan, step)
     # `written` scopes the reader's answers to this version: a rewrite asks
@@ -781,7 +769,7 @@ def reach(plan_path: str, step: int, n: int, ask=None) -> list[threading.Thread]
     if not 0 <= step < len(plan.get("steps") or []):
         raise ValueError(f"no step {step + 1} in {plan_path!r}")   # a plan edited under an open reading
     path = reading_path(plan, step)
-    if not (plans._vault() / path).is_file():
+    if not (store.vault() / path).is_file():
         return []
     cards = parse(items.read_note(path))
     after = next((c["n"] for c in cards if c["n"] > n and not c["spine"]), None)
@@ -803,12 +791,11 @@ def reach(plan_path: str, step: int, n: int, ask=None) -> list[threading.Thread]
 def _save(path: str, title: str, body: str, props: dict) -> None:
     """A new reading through the write gate; an existing one as one revertible
     overwrite (the plan note's own path, ADR-0039), frontmatter rewritten."""
-    from silica.kernel.learn import plans
     from silica.kernel.base import frontmatter
     from silica.tools import TOOLS
 
     full = f"# {title}\n\n{body}"
-    if not (plans._vault() / path).is_file():
+    if not (store.vault() / path).is_file():
         out = TOOLS["silica_write_note"].fn(path=path, body=full, title=title, props=props, template="none")
         if isinstance(out, dict) and out.get("error"):
             raise RuntimeError(out["error"])
@@ -846,10 +833,7 @@ def record(reading: str, card: int, kind: str, text: str, unknown: bool = False)
         raise ValueError(f"kind must be one of {KINDS}")
     row = {"t": time.time(), "reading": reading, "section": int(card), "kind": kind,
            "text": str(text or "")[:4000], "unknown": bool(unknown)}
-    p = _log()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    store.append_rows(_log(), [row])
     return row
 
 
@@ -859,11 +843,7 @@ def answers(reading: str, since: float = 0.0) -> dict[int, dict]:
     out: dict[int, dict] = {}
     if not p.is_file():
         return out
-    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
-        try:
-            r = json.loads(line)
-        except ValueError:
-            continue   # a torn last line from a crash mid-append: the rows before it stand
+    for r in store.parse_rows(p.read_text(encoding="utf-8", errors="replace")):
         if r.get("reading") == reading and r.get("kind") in KINDS and float(r.get("t") or 0) >= since:
             out.setdefault(int(r.get("section") or 0), {})[r["kind"]] = r
     return out
@@ -885,11 +865,11 @@ def state(plan_path: str, step: int) -> dict:
     path = reading_path(plan, step)
     steps = plan.get("steps") or []
     out = {"plan": plan["path"], "plan_name": plan["name"], "step": step, "steps": len(steps),
-           "label": plans._step_label(steps[step]), "hours": steps[step].get("hours"),
+           "label": step_label(steps[step]), "hours": steps[step].get("hours"),
            "notes": [p for _t, p in notes], "path": path, "exists": False, "cards": [],
            "stale": False, "answers": {}, "minutes": 0, "questions": session_size(len(notes)),
            "job": job_status(plan["path"], step)}
-    text = items.read_note(path) if (plans._vault() / path).is_file() else ""
+    text = items.read_note(path) if (store.vault() / path).is_file() else ""
     if text:
         data, _r, _b = frontmatter.split(text)
         cards = parse(text)

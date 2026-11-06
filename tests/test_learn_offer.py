@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """The study offer under a chat answer (silica/kernel/learn/offer.py): silent
 unless the ledger or the reader's words say the topic is hard."""
+
+from silica.kernel.learn import pace, sources
+from silica.kernel.learn import sentence as plan_sentence
 from silica.kernel.learn import offer
 
 
@@ -29,7 +32,7 @@ def test_two_misses_of_the_last_three_offer_practice_on_that_note():
 
 def test_a_note_last_answered_by_being_told_counts_too():
     led = [_e("ML/PCA.md", "2026-10-21", True, told=True)]
-    assert offer.struggling(["ML/PCA.md"], led) == ["ML/PCA.md"]
+    assert list(offer.struggles(["ML/PCA.md"], led)) == ["ML/PCA.md"]
 
 
 def test_saying_it_was_not_clear_is_enough_and_old_misses_do_not_count():
@@ -373,7 +376,7 @@ def test_learn_s_plan_reaches_the_turn_that_needs_it(monkeypatch):
     plan = {"path": "Plans/Esame.md", "name": "Esame", "by": "2026-11-10", "target": "Scheda", "scope": "steps",
             "steps": [{"text": "Basi: [[A]]", "notes": ["A"]}]}
     monkeypatch.setattr(pl, "read_plan", lambda path: plan)
-    monkeypatch.setattr(pl, "lecture_gaps", lambda p: (["dropout", "multi-task"], 32))
+    monkeypatch.setattr(sources, "lecture_gaps", lambda p: (["dropout", "multi-task"], 32))
     rows = [{"path": "Plans/Esame.md", "name": "Esame", "status": "active"}]
     block, appendix, draft = offer.plan_context("Prepara un piano di studio giorno per giorno fino all'esame", rows)
     assert draft is None   # the message names the open plan: no new one is read
@@ -384,8 +387,8 @@ def test_learn_s_plan_reaches_the_turn_that_needs_it(monkeypatch):
     assert "dropout, multi-task" in block and "32 lecture decks" in block and appendix == ""
     assert offer.plan_context("cos'è il dropout?", rows) == ("", "", None)
     # no plan open and no material named: the model asks for it and writes no plan
-    monkeypatch.setattr(pl, "read_sentence", lambda s: {"name": "", "scope": "", "target": ""})
-    monkeypatch.setattr(pl, "folders_of", lambda: {"ML/": 30, "ML/Deep/": 6, "Plans/": 2})
+    monkeypatch.setattr(plan_sentence, "read_sentence", lambda s: {"name": "", "scope": "", "target": ""})
+    monkeypatch.setattr(plan_sentence, "folders_of", lambda: {"ML/": 30, "ML/Deep/": 6, "Plans/": 2})
     block, appendix, draft = offer.plan_context("piano di studio per domani", [{**rows[0], "status": "completed"}])
     assert "Ask in one short question" in block and "Do not write a plan" in block
     assert "largest folders: ML/, ML/Deep/." in block and appendix == "" and draft is None
@@ -421,7 +424,7 @@ def test_a_plan_computed_in_the_chat_is_the_plan_the_click_saves(tmp_vault, tmp_
     tmp_vault.note("Plans/Esame.md", "# Esame\n")   # a note on the path: the draft takes the next name
     by = (date.today() + timedelta(days=20)).isoformat()
     asked = []
-    monkeypatch.setattr(pl, "read_sentence", lambda s: asked.append(s) or {
+    monkeypatch.setattr(plan_sentence, "read_sentence", lambda s: asked.append(s) or {
         "name": "Esame", "scope": "steps", "target": "[[Softmax]]\nMomentum di Nesterov", "restrict": "",
         "by": by, "objectives": []})
     block, appendix, draft = offer.plan_context("ML/, esame tra venti giorni", [], "fammi un piano di studio",
@@ -458,4 +461,4 @@ def test_a_plan_computed_in_the_chat_is_the_plan_the_click_saves(tmp_vault, tmp_
     assert out["path"] == "Plans/Esame 2.md" and out["gaps"] == ["Momentum di Nesterov"]
     saved = pl.read_plan(out["path"])
     assert saved["by"] == by and [s["text"] for s in saved["steps"]] == [s["text"] for s in shown["steps"]]
-    assert pl.day_by_day(saved) == pl.day_by_day(shown)   # the calendar shown is the one Memorize keeps
+    assert pace.day_by_day(saved) == pace.day_by_day(shown)   # the calendar shown is the one Memorize keeps
