@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import glob
+import itertools
 import json
 import logging
 import os
@@ -4866,6 +4867,64 @@ def note_save(payload: dict):
             "broken": _broken_links(landed, note_resolver())}
 
 
+@app.post("/note/new", dependencies=_SAME_ORIGIN)
+def note_new(payload: dict):
+    """A note written by hand (ADR-0155 points 7 to 9), `{folder, name, text}`:
+    `folder/name.md` holding exactly `text`, as one run under user:/write whose
+    undo sends it to the trash. `""` is the vault's root; an empty name with text
+    picks `Untitled`, `Untitled 2`. A folder that does not exist is made. Refused
+    with the sentence shown under the title: a taken path (409), a bad name or
+    Silica's own folder (400), a full vault (`_has_room`).
+
+    No turn slot: /note/save takes none, and a new path is one no turn is
+    reading (ADR-0155 point 17: writing does not wait for the model). A name
+    another folder holds is allowed (ADR-0114), and `same_name` says which."""
+    from silica.driver import DRIVER
+    from silica.kernel import publish
+    from silica.kernel.workspaces import _EDIT_LOCK
+    from silica.kernel.write.undo_journal import USER_WRITE_SOURCE
+    from silica.tools.wrapped import _vault_file, create_note_with_restore_point
+    from silica.ui.web.vault_import import MAX_NAME_BYTES
+
+    folder = str(payload.get("folder") or "").strip().strip("/")
+    name = " ".join(str(payload.get("name") or "").split())
+    text = str(payload.get("text") or "")
+    if folder and not all(_tree_name_ok(seg) for seg in folder.split("/")):
+        raise HTTPException(400, _BAD_NAME_WHY)
+    if name and not _tree_name_ok(name) or not name and not text:
+        raise HTTPException(400, _BAD_NAME_WHY)
+    if len(name.encode("utf-8")) > MAX_NAME_BYTES:
+        raise HTTPException(400, f"a name is at most {MAX_NAME_BYTES} bytes")
+    if folder and publish.never(f"{folder}/x.md"):
+        raise HTTPException(400, f"{folder} is Silica's own folder: write in another")
+    _has_room(1, len(text.encode("utf-8")))
+
+    def at(stem: str) -> str:
+        return f"{folder}/{stem}.md" if folder else f"{stem}.md"
+
+    # The workspace line edits' lock, as /note/save: one person, one writer here.
+    with _EDIT_LOCK:
+        try:
+            if not name:
+                stems = (f"Untitled {n}" if n > 1 else "Untitled" for n in itertools.count(1))
+                name = next(s for s in stems if not _vault_file(at(s)).exists())
+            path = at(name)
+            if _vault_file(path).exists():
+                raise FileExistsError(path)
+            run = create_note_with_restore_point(path, text, USER_WRITE_SOURCE)
+        except (FileExistsError, NotADirectoryError):
+            raise HTTPException(409, f"{at(name)} is already taken") from None
+        except ValueError:
+            # contain_in_vault: a folder that is a link out of the vault
+            raise HTTPException(400, _BAD_NAME_WHY) from None
+    _index_later(path)
+    landed = session_changes.current_text(path)
+    landed = text if landed is None else landed
+    other = next((p for p in DRIVER.notes_named(name) if p != path), None)
+    return {"ok": True, "path": path, "name": name, "text": landed, "etag": _etag(landed), "run": run,
+            "broken": _broken_links(landed, note_resolver()), **({"same_name": other} if other else {})}
+
+
 @app.post("/tree/delete", dependencies=_SAME_ORIGIN)
 def tree_delete(payload: dict):
     """Delete a note, or every note the rail shows under a folder, from the
@@ -5031,16 +5090,16 @@ def tree_move(payload: dict):
 
 @app.post("/tree/undo", dependencies=_SAME_ORIGIN)
 def tree_undo(payload: dict):
-    """The toast's undo for /tree/delete and /tree/move: the run back, every
-    note in it. Was /tree/undo-delete until ADR-0126."""
-    from silica.kernel.write.undo_journal import (USER_DELETE_SOURCE, USER_MOVE_SOURCE,
+    """The toast's undo for /tree/delete, /tree/move and /note/new: the run
+    back, every note in it. Was /tree/undo-delete until ADR-0126."""
+    from silica.kernel.write.undo_journal import (USER_DELETE_SOURCE, USER_MOVE_SOURCE, USER_WRITE_SOURCE,
                                                   get_undo_journal, revert_run)
 
     run = str(payload.get("run") or "")
     info = get_undo_journal().run_info(run) if run else None
-    # The id comes from the page: only a delete or a move the person made is
-    # this button's to take back; any other run is /revert's, with its own report.
-    if not info or info["source"] not in (USER_DELETE_SOURCE, USER_MOVE_SOURCE):
+    # The id comes from the page: only what the person did here is this
+    # button's to take back; any other run is /revert's, with its own report.
+    if not info or info["source"] not in (USER_DELETE_SOURCE, USER_MOVE_SOURCE, USER_WRITE_SOURCE):
         raise HTTPException(404, "nothing to undo")
     if info["reverted_at"]:
         raise HTTPException(409, "already undone")
