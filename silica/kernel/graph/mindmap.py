@@ -739,7 +739,8 @@ def _embed_sim():
     """
     try:
         from silica.kernel.recall.cooccurrence import cooccur_key
-        from silica.kernel.recall.embed import _cosine, get_store
+        from silica.kernel.base.vectors import cosine
+        from silica.kernel.recall.embed import get_store
 
         store = get_store()
         if len(store) == 0:
@@ -756,7 +757,7 @@ def _embed_sim():
 
     def sim(a: str, b: str) -> float:
         va, vb = _vec(a), _vec(b)
-        return _cosine(va, vb) if va is not None and vb is not None else 0.0
+        return cosine(va, vb) if va is not None and vb is not None else 0.0
 
     return sim
 

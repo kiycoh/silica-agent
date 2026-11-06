@@ -20,7 +20,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from silica.kernel.recall.paths import inbox_dir_for
+from silica.kernel.base.home import inbox_dir_for
 
 logger = logging.getLogger(__name__)
 

@@ -66,7 +66,7 @@ def _lock_file(key: str) -> Path | None:
     """
     if fcntl is None:
         return None
-    from silica.kernel.recall.paths import index_dir
+    from silica.kernel.base.home import index_dir
 
     d = index_dir() / "locks"
     d.mkdir(parents=True, exist_ok=True)
@@ -261,7 +261,7 @@ class WorkQueue:
         if not self._run_dir:
             return
         try:
-            from silica.kernel.recall.paths import atomic_write_bytes
+            from silica.kernel.base.durable import atomic_write_bytes
 
             self._run_dir.mkdir(parents=True, exist_ok=True)
             # The rename stays INSIDE the lock: snapshotting under it and

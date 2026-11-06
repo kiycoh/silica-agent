@@ -195,7 +195,7 @@ def fused_with(key: str, es, store, *, k: int = K, graph=None, mode: str = "leg"
     """
     from silica.kernel.recall import relatedness as R
     from silica.kernel.recall.cooccurrence import cooccur_key
-    from silica.kernel.graph.graph_export import is_vault_artifact
+    from silica.kernel.base.layout import is_vault_artifact
 
     blocked = {cooccur_key(key)}
     pool = max(k * 3, R._POOL_MIN)

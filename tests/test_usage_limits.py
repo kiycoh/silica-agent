@@ -84,6 +84,7 @@ def fake(monkeypatch, tmp_path):
     server = FakeOpenRouter()
     monkeypatch.setattr(usage_limits, "KEY_URL", server.url)
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
     monkeypatch.setenv("OPENROUTER_API_KEY", KEY)
     monkeypatch.setenv("SILICA_USAGE_WINDOW_SHARE", "0.1")  # $0.15 of $1.50
     monkeypatch.delenv("SILICA_HOSTED", raising=False)

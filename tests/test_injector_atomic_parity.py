@@ -28,7 +28,7 @@ def vault_fsm(tmp_path, monkeypatch):
     silica.driver._driver = None
 
     # Redirect ProgressLedger to tmp so tests don't pollute ~/.silica/runs
-    monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
 
     class _Ctx:
         def __init__(self):

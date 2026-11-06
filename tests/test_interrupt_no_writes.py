@@ -49,7 +49,7 @@ def test_interrupt_leaves_a_marker_outside_the_vault(monkeypatch, tmp_path):
     own notes (2026-10-12). The marker lives in the run's ledger dir, so the
     interrupt still writes nothing to the vault; the next run reads it."""
     import silica.kernel.progress as prog
-    monkeypatch.setattr(prog, "_RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(prog, "runs_dir", lambda: tmp_path / "runs")
     calls: list[str] = []
     fsm = _fsm(monkeypatch, calls, KeyboardInterrupt())
     try:
@@ -61,7 +61,7 @@ def test_interrupt_leaves_a_marker_outside_the_vault(monkeypatch, tmp_path):
 
 def test_a_crash_leaves_no_interrupt_marker(monkeypatch, tmp_path):
     import silica.kernel.progress as prog
-    monkeypatch.setattr(prog, "_RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(prog, "runs_dir", lambda: tmp_path / "runs")
     fsm = _fsm(monkeypatch, [], RuntimeError("boom"))
     try:
         fsm._run_loop()

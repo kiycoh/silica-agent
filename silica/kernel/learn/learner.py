@@ -157,7 +157,7 @@ def _notes_meta(vault: Path) -> dict[str, dict]:
     digest reads between vault changes cost one stat walk instead of a full
     re-parse.
     """
-    from silica.kernel.recall.paths import SOURCES_DIR, ignore_matcher, is_staging_path, vault_epoch
+    from silica.kernel.base.layout import SOURCES_DIR, ignore_matcher, is_staging_path, vault_epoch
 
     epoch = vault_epoch(str(vault))
     if epoch:
@@ -269,7 +269,7 @@ def prerequisites_map() -> dict[str, list[str]]:
     """
     try:
         from silica.config import CONFIG
-        from silica.kernel.recall.paths import vault_epoch
+        from silica.kernel.base.layout import vault_epoch
 
         vault = str(CONFIG.vault_path or "")
         epoch = vault_epoch(vault) if vault else ""
@@ -362,7 +362,7 @@ def drop_structural(prereq_map: dict[str, list[str]], notes: dict[str, dict]) ->
     paper's archived segment stood after each of its notes (2026-10-26).
     """
     from silica.kernel.recall.cooccurrence import cooccur_key
-    from silica.kernel.recall.paths import is_source_leaf
+    from silica.kernel.base.layout import is_source_leaf
 
     structural = {cooccur_key(p) for p, m in notes.items()
                   if m.get("spine") or m.get("kind") == "staged"
@@ -403,7 +403,8 @@ def _prereq_disk(sig: str, value: dict[str, list[str]] | None = None) -> dict[st
     directory; None when absent, stale or unreadable."""
     import orjson
 
-    from silica.kernel.recall.paths import atomic_write_bytes, index_dir
+    from silica.kernel.base.durable import atomic_write_bytes
+    from silica.kernel.base.home import index_dir
 
     path = index_dir() / "prerequisites.json"
     try:

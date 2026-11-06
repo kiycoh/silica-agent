@@ -37,9 +37,9 @@ def _frames(resp) -> list[dict]:
 
 
 def _flags() -> list[dict]:
-    from silica.kernel.recall.paths import _SILICA_HOME
+    from silica.config import silica_home
 
-    path = _SILICA_HOME / "flags.jsonl"
+    path = silica_home() / "flags.jsonl"
     return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
 

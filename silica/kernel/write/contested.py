@@ -275,7 +275,7 @@ def reliability_tier(content: str, *, has_source_leaf: bool | None = None) -> in
     if not ai or is_human_verified(data):
         return TIER_HUMAN
     if has_source_leaf is None:
-        from silica.kernel.recall.paths import SOURCES_MARKER
+        from silica.kernel.base.layout import SOURCES_MARKER
         has_source_leaf = SOURCES_MARKER in (content or "")
     return TIER_GROUNDED if has_source_leaf else TIER_DISTILLED
 

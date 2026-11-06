@@ -182,7 +182,7 @@ def test_an_upload_never_writes_through_a_planted_symlink(web, tmp_path, monkeyp
     inbox = _inbox(tmp_path)
     (inbox / "victim.eml").symlink_to(victim)
     # A drop writes to its chat's folder (ADR-0121 point 5): the link planted there.
-    from silica.kernel.recall.paths import chat_folder
+    from silica.kernel.base.layout import chat_folder
 
     folder = tmp_path / "vault" / chat_folder(server._open_session())
     folder.mkdir(parents=True)

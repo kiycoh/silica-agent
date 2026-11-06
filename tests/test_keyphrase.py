@@ -423,7 +423,7 @@ def test_recon_italian_drops_latex_and_structural_keeps_content():
 
 def _naive_mmr(vecs, theme, k, lam, rel):
     """Reference: the per-pair formulation, kept only as the correctness oracle."""
-    from silica.kernel.recall.embed import _cosine
+    from silica.kernel.base.vectors import cosine
 
     cand, sel = list(range(len(vecs))), []
     while cand and len(sel) < k:
@@ -431,7 +431,7 @@ def _naive_mmr(vecs, theme, k, lam, rel):
             i = max(cand, key=lambda i: rel[i])
         else:
             i = max(cand, key=lambda i: lam * rel[i]
-                    - (1 - lam) * max(_cosine(vecs[i], vecs[j]) for j in sel))
+                    - (1 - lam) * max(cosine(vecs[i], vecs[j]) for j in sel))
         sel.append(i)
         cand.remove(i)
     return sel
@@ -439,7 +439,7 @@ def _naive_mmr(vecs, theme, k, lam, rel):
 
 def test_mmr_ranks_full_pool_in_seconds_not_minutes():
     """RECON ranks POOL_SIZE=100 vectors of the embedder's real width on every
-    note. Recomputing each pair through _cosine (4 np.asarray per call) made
+    note. Recomputing each pair through cosine (4 np.asarray per call) made
     this 26-46s per note; it must cost a fraction of a second."""
     import random
     import time

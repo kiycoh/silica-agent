@@ -35,7 +35,7 @@ def vault(tmp_vault, tmp_path, monkeypatch):
     from silica.kernel.write import undo_journal
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
-    monkeypatch.setattr(undo_journal, "_DEFAULT_JOURNAL_PATH", tmp_path / "undo.db", raising=False)
+    monkeypatch.setattr(undo_journal, "_journal_path", lambda: tmp_path / "undo.db")
     monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", "stop"))
     tmp_vault.note("ML/Margine geometrico.md", NOTE.replace("AI: true\n", "date: 2025-01-01\n"))
     tmp_vault.note("sources/Lezione 11.md", LEAF)

@@ -23,7 +23,7 @@ import json
 import re
 from pathlib import Path
 
-from silica.config import CONFIG
+from silica.config import CONFIG, silica_home
 
 # 2,500 characters across both files is about 830 tokens at chars/3 and 1,250
 # at chars/2, the overflow-safe estimate; at 3.1 LLM calls a turn that is 2.6k
@@ -84,16 +84,15 @@ def disabled_reason() -> str:
 def memory_dir() -> Path:
     # Read through the module at call time: the test sandbox and a hosted
     # tenant (ADR-0071) move _SILICA_HOME, and a path bound at import would not.
-    from silica.kernel.recall import paths
 
-    return paths._SILICA_HOME / "memory"
+    return silica_home() / "memory"
 
 
 def path_for(scope: str, vault: str | None = None) -> Path | None:
     """The file behind a scope, None for the vault scope when no vault is open."""
     if scope == "user":
         return memory_dir() / "user.md"
-    from silica.kernel.recall.paths import vault_digest
+    from silica.kernel.base.home import vault_digest
 
     vault = vault if vault is not None else (CONFIG.vault_path or "")
     return memory_dir() / "vaults" / f"{vault_digest(vault)}.md" if vault else None
@@ -235,7 +234,7 @@ def _commit(path: Path, before: str, after: str, *, by: str = "you", session: st
     the entries `after` adds. Returns the undo token: the digest of what was
     written, so an undo can tell whether the file is still the one that write
     produced."""
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     # ponytail: no lock between processes. A TUI and a GUI saving within the
     # same read-modify-write window lose one of the two writes (each write is
@@ -389,7 +388,7 @@ def undo(scope: str, token: str, vault: str | None = None) -> dict:
     if path is None or prev is None or not prev.exists() or _digest(_read(path)) != token:
         return _refuse("Memory changed since that write, so undo would discard the later "
                        "change. Edit it in Settings > Memory instead.")
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     before = _read(prev)
     atomic_write_bytes(path, before.encode("utf-8"))

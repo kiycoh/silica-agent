@@ -278,7 +278,7 @@ def test_local_rerank_model_override(monkeypatch):
     """SILICA_LOCAL_RERANK_MODEL picks the served weights; unset keeps the
     shipped LOCAL_RERANK_MODEL."""
     from silica.model.providers import local_rerank_model
-    from silica.agent.rerank_serve import LOCAL_RERANK_MODEL
+    from silica.config import LOCAL_RERANK_MODEL
 
     assert local_rerank_model(_NoCfg()) == LOCAL_RERANK_MODEL
 

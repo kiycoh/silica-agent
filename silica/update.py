@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from silica.config import silica_home
 
 ROOT = Path(__file__).resolve().parent.parent  # repo root, or site-packages for a wheel
 
@@ -28,7 +29,8 @@ PACKAGE = "silica-agent"  # PyPI distribution name ([project].name in pyproject.
 # behind_count()'s wheel-side cache: latest released version string, mtime =
 # last check. Lives next to the user .env so `uv tool upgrade` (which replaces
 # the whole venv) cannot wipe it.
-CACHE = Path.home() / ".silica" / "pypi-latest"
+def _cache() -> Path:
+    return silica_home() / "pypi-latest"
 
 
 def _git(*args: str) -> subprocess.CompletedProcess:
@@ -245,13 +247,13 @@ def behind_count() -> int:
 def _pypi_behind() -> int:
     from silica import __version__
     try:
-        stale = not CACHE.exists() or time.time() - CACHE.stat().st_mtime > 86_400
+        stale = not _cache().exists() or time.time() - _cache().stat().st_mtime > 86_400
         if stale:
             # A daemon thread, not a Popen like the git side: the fetch is
             # pure Python here, and the thread dies with the process.
             import threading
             threading.Thread(target=_refresh_pypi_cache, daemon=True).start()
-        if CACHE.exists() and _newer(CACHE.read_text(), __version__):
+        if _cache().exists() and _newer(_cache().read_text(), __version__):
             return 1
     except Exception:
         pass  # unreadable cache / thread spawn failure → no nudge, like the git path
@@ -261,9 +263,9 @@ def _pypi_behind() -> int:
 def _refresh_pypi_cache() -> None:
     try:
         latest = _pypi_latest()
-        CACHE.parent.mkdir(parents=True, exist_ok=True)
-        tmp = CACHE.with_suffix(".tmp")
+        _cache().parent.mkdir(parents=True, exist_ok=True)
+        tmp = _cache().with_suffix(".tmp")
         tmp.write_text(latest)
-        tmp.replace(CACHE)  # atomic: a daemon thread can die mid-write
+        tmp.replace(_cache())  # atomic: a daemon thread can die mid-write
     except Exception:
         pass  # offline / PyPI down → cache stays stale, retried next launch

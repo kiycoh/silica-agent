@@ -13,8 +13,7 @@ ANSWER = "The gate defers what it cannot verify. " * 12
 
 @pytest.fixture
 def wal(tmp_path, monkeypatch):
-    import silica.kernel.recall.paths as paths
-    monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path / "silica-home")
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / "silica-home")
     vault = tmp_path / "vault"
     vault.mkdir()
     monkeypatch.setattr(CONFIG, "vault_path", str(vault))
@@ -47,13 +46,13 @@ def _run(inputs):
 
 
 def _envelopes(vault):
-    from silica.kernel.recall.paths import inbox_dir_for
+    from silica.kernel.base.home import inbox_dir_for
     d = inbox_dir_for(str(vault))
     return sorted(p.name for p in d.glob("*.json")) if d.is_dir() else []
 
 
 def _payload(vault, name):
-    from silica.kernel.recall.paths import inbox_dir_for
+    from silica.kernel.base.home import inbox_dir_for
     env = json.loads((inbox_dir_for(str(vault)) / name).read_text(encoding="utf-8"))
     return json.loads(env["payload"])
 

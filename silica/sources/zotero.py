@@ -278,7 +278,7 @@ _LEAF_MD5_RE = re.compile(r"^pdf_md5:\s*['\"]?([0-9a-f]{32})", re.MULTILINE)
 def _leaf_index(vault: str | Path | None = None) -> dict[str, tuple[str, str]]:
     """{zotero_key: (leaf basename, pdf_md5)} for the papers in a vault."""
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import load_manifest
 
     vault = Path(vault or CONFIG.vault_path or ".")
@@ -339,7 +339,7 @@ def _client_for(vault: str | Path, link) -> Zotero:
 
 
 def _state_path(vault: str | Path) -> Path:
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     return index_dir_for(str(vault)) / "zotero_state.json"
 
@@ -422,7 +422,7 @@ class ZoteroAdapter:
         return RawItem(target=target, text=paper.abstract, meta={"paper": paper})
 
     def to_stub(self, item: RawItem) -> GroundedStub:
-        from silica.kernel.recall.paths import SOURCES_DIR
+        from silica.kernel.base.layout import SOURCES_DIR
         from silica.kernel.base.manifest import in_write_dir
         from silica.kernel.base import frontmatter
 

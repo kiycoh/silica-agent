@@ -103,7 +103,7 @@ class TestLedgerSteering:
     def test_round_trip(self, tmp_path, monkeypatch):
         """Full cycle: vault_report seeds tasks → next → update("done") → done."""
         import silica.kernel.progress as prog_mod
-        monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+        monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
 
         from silica.kernel.progress import ProgressLedger
         from silica.tools.atomic import silica_ledger_next, silica_ledger_update
@@ -143,14 +143,14 @@ class TestLedgerSteering:
 
     def test_ledger_next_unknown_run(self, tmp_path, monkeypatch):
         import silica.kernel.progress as prog_mod
-        monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+        monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
         from silica.tools.atomic import silica_ledger_next
         res = silica_ledger_next("nonexistent_run_id")
         assert "error" in res
 
     def test_ledger_update_unknown_task(self, tmp_path, monkeypatch):
         import silica.kernel.progress as prog_mod
-        monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+        monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
         from silica.kernel.progress import ProgressLedger
         from silica.tools.atomic import silica_ledger_update
 
@@ -162,7 +162,7 @@ class TestLedgerSteering:
     def test_needs_confirmation_flag_propagated(self, tmp_path, monkeypatch):
         """propose tasks have needs_confirmation=True in their payload."""
         import silica.kernel.progress as prog_mod
-        monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+        monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
 
         from silica.kernel.progress import ProgressLedger
         from silica.tools.atomic import silica_ledger_next
@@ -192,7 +192,7 @@ class TestLedgerSteering:
         the agent as "this tool only takes one item".
         """
         import silica.kernel.progress as prog_mod
-        monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+        monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
 
         from silica.kernel.progress import ProgressLedger
         from silica.tools.atomic import silica_ledger_next
@@ -218,7 +218,7 @@ class TestLedgerSteering:
     def test_next_caps_a_fat_drain_and_says_what_is_left(self, tmp_path, monkeypatch):
         """The byte budget bounds one drain; `remaining` is how the agent knows."""
         import silica.kernel.progress as prog_mod
-        monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+        monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
 
         from silica.kernel.progress import ProgressLedger
         from silica.tools.atomic import silica_ledger_next, LEDGER_DRAIN_BYTES
@@ -368,7 +368,7 @@ def test_report_names_the_fixes_it_queues(tmp_vault, tmp_path, monkeypatch):
     which — the tool result must name tier + capability + reason for every
     queued task, so consent is informed instead of blind."""
     import silica.kernel.progress as prog_mod
-    monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
 
     tmp_vault.note("A.md", "# A\n\nalpha beta gamma.")
     tmp_vault.note("B.md", "# B\n\ndelta epsilon zeta.")
@@ -392,7 +392,7 @@ def test_report_names_unconverted_documents_anywhere_in_the_vault(tmp_vault, tmp
     from pathlib import Path
     from silica.config import CONFIG
 
-    monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
     tmp_vault.note("A.md", "# A\n\nalpha.")
     root = Path(CONFIG.vault_path)
     (root / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")
@@ -419,7 +419,7 @@ def test_report_result_carries_step_one_and_stops_before_the_ledger(tmp_vault, t
     elides the one instruction the "yes" turn depends on."""
     import silica.kernel.progress as prog_mod
     from silica.agent.compaction import STUB_FIELD_CHARS
-    monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
     tmp_vault.note("A.md", "# A\n\nalpha beta gamma.")
 
     from silica.tools.graph import silica_vault_report
@@ -439,7 +439,7 @@ def test_ledger_next_result_carries_the_apply_protocol(tmp_path, monkeypatch):
     from silica.agent.compaction import STUB_FIELD_CHARS
     from silica.kernel.progress import ProgressLedger
     from silica.tools.atomic import silica_ledger_next
-    monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
 
     progress = ProgressLedger.new(mode="analyst", inputs={})
     payloads = tmp_path / "runs" / progress.run_id / "payloads"

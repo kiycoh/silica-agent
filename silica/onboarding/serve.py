@@ -20,6 +20,8 @@ happens to sit in never reaches os.environ to begin with.
 """
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import logging
 import os
 import re
@@ -117,7 +119,7 @@ def ensure(label: str, base_url: str, command: str) -> bool:
         return True
     from silica.ui.console import CONSOLE
 
-    log_dir = Path.home() / ".silica" / "logs"
+    log_dir = silica_home() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{label}-server.log"
     # Never echo the URL or the command as configured: a proxy endpoint carries

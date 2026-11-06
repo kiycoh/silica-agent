@@ -70,7 +70,7 @@ def course(tmp_vault, tmp_path, monkeypatch):
     from silica.kernel.write import undo_journal
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
-    monkeypatch.setattr(undo_journal, "_DEFAULT_JOURNAL_PATH", tmp_path / "undo.db", raising=False)
+    monkeypatch.setattr(undo_journal, "_journal_path", lambda: tmp_path / "undo.db")
     sources._MEMO.clear()
     sources._VOCAB.clear()
     made: dict[str, list[str]] = {}

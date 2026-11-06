@@ -13,7 +13,7 @@ from silica.driver import DRIVER
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.templates import slugify
 from silica.kernel.base.manifest import within
-from silica.onboarding.adopt import SAFE_WRITE_DIR
+from silica.kernel.base.manifest import SAFE_WRITE_DIR
 from silica.kernel.base.markdown import extract_links
 
 logger = logging.getLogger(__name__)
@@ -1249,7 +1249,7 @@ def _admit(op: Op, batch: _Batch) -> Rejection | None:
         # Guard the whole configured inbox tree, not just the folders of the
         # current run — a patch aimed at a *different* Inbox subfolder used
         # to slip through validate and die (or land) at WRITE.
-        from silica.kernel.recall.paths import is_inbox_path
+        from silica.kernel.base.layout import is_inbox_path
         forbidden = (
             is_inbox_path(path)
             or any(_is_within_dir(path_abs, folder) for folder in batch.index.inbox_folders)

@@ -41,7 +41,19 @@ from silica import SHELL_ENV, VAULT_PINNED  # noqa: E402,F401
 # arbitrary command execution); the exception is gone with the layer that needed
 # it. Settings that belong to one directory are that directory's job to export —
 # `set -a; source .env; set +a` — which is explicit and outranks this file.
-USER_ENV = Path.home() / ".silica" / ".env"
+# ~/.silica unless SILICA_HOME moves it, the same rule silica-core reads for the
+# home the two distributions share (ADR-0043). Read from the real environment
+# only: the variable that says where the config lives cannot live in the config.
+_override = os.environ.get("SILICA_HOME", "").strip()
+_SILICA_HOME = Path(os.path.expanduser(_override)) if _override else Path.home() / ".silica"
+USER_ENV = _SILICA_HOME / ".env"
+
+
+def silica_home() -> Path:
+    """The runtime home. A function and not a constant so every reader sees one
+    binding at call time: the 21 sites that spelled `Path.home() / ".silica"` sat
+    outside the test sandbox and ignored SILICA_HOME while the engine obeyed it."""
+    return _SILICA_HOME
 
 
 def in_config_dir(path: str | Path) -> bool:
@@ -331,6 +343,16 @@ def model_from_env() -> tuple[str, str]:
             return models[0], key_env
     return "", ""
 
+
+# Multilingual by design: a vault is whatever language its owner writes in
+# (conventions.language), and bge-reranker-base is English/Chinese only.
+# mxbai-rerank-base-v2 (Apache-2.0, Qwen2.5-0.5B backbone) over bge-v2-m3 on the
+# link/orphan A/B (bench/local_rerank_query_ab.json, 609 masked wikilink pairs on
+# a 795-note Italian vault): mrr +0.055 over the fused baseline at p=2.5e-09,
+# where bge scored 125 wins / 100 losses at p=0.109, i.e. indistinguishable from
+# not reranking at all. Costs ~390ms per 10-doc call against bge's ~140ms served.
+# A HuggingFace repo id or a local directory, never a GGUF filename.
+LOCAL_RERANK_MODEL = "mixedbread-ai/mxbai-rerank-base-v2"
 
 DEFAULT_EMBEDDING_MODEL = "embeddinggemma-2"
 

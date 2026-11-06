@@ -276,7 +276,7 @@ def build() -> StructureMap:
 
 def structure_map() -> StructureMap:
     """The map for the current vault, memoized on its file-state epoch."""
-    from silica.kernel.recall.paths import vault_epoch
+    from silica.kernel.base.layout import vault_epoch
 
     try:
         epoch = vault_epoch()
@@ -528,7 +528,7 @@ def bursting(*, k: int = 12) -> list[dict]:
     falling back to the file's mtime exactly as it does: the two surfaces then
     burst on the same window or neither does.
     """
-    from silica.kernel.recall.paths import vault_epoch
+    from silica.kernel.base.layout import vault_epoch
 
     try:
         epoch = vault_epoch()
@@ -604,7 +604,7 @@ def semantic_shift(*, k: int = 12) -> list[dict]:
     paragraph-richest notes, <= 8 paragraphs each, embedded once per vault
     epoch — one cold pass is ~480 embedder calls' worth of texts, batched.
     """
-    from silica.kernel.recall.paths import vault_epoch
+    from silica.kernel.base.layout import vault_epoch
 
     try:
         epoch = vault_epoch()

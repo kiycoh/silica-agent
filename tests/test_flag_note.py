@@ -61,7 +61,7 @@ def test_flag_note_updates_register(tmp_vault):
 
 def test_digest_surfaces_and_clears_contested(tmp_path, tmp_vault, monkeypatch):
     import silica.kernel.progress as _mod
-    monkeypatch.setattr(_mod, "_RUNS_DIR", tmp_path)
+    monkeypatch.setattr(_mod, "runs_dir", lambda: tmp_path)
     from silica.kernel.progress import ProgressLedger
     from silica.tools.notes import silica_flag_note
 
@@ -78,7 +78,7 @@ def test_digest_surfaces_and_clears_contested(tmp_path, tmp_vault, monkeypatch):
 
 def test_digest_self_heals_resolved_contested(tmp_path, tmp_vault, monkeypatch):
     import silica.kernel.progress as _mod
-    monkeypatch.setattr(_mod, "_RUNS_DIR", tmp_path)
+    monkeypatch.setattr(_mod, "runs_dir", lambda: tmp_path)
     from silica.kernel import contested_register
     from silica.kernel.progress import ProgressLedger
 

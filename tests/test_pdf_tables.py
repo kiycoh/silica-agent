@@ -6,6 +6,8 @@ fakes: no network, no weights, no paid call.
 """
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import copy
 import hashlib
 import math
@@ -285,8 +287,7 @@ class _Download:
 
 
 def _home() -> Path:
-    from silica.kernel.recall import paths
-    return paths._SILICA_HOME / "models"
+    return silica_home() / "models"
 
 
 def test_a_hash_mismatch_refuses_and_leaves_nothing(monkeypatch):

@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 
 from silica.kernel.recall.cooccurrence import CooccurStore
-from silica.kernel.recall.paths import quarantine
+from silica.kernel.base.durable import quarantine
 from silica.kernel.write.provenance import append_record, read_records
 
 

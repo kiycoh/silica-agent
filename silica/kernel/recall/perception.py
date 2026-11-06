@@ -370,7 +370,7 @@ def _read_dated_body(path: str, origin: str = "vault") -> tuple[
     # `body` is the frontmatter-stripped text; for a body-only note split()
     # already returns the whole content as body. The old `or content` fallback
     # leaked YAML frontmatter into context whenever the body was empty (A7).
-    from silica.kernel.recall.paths import SOURCES_MARKER
+    from silica.kernel.base.layout import SOURCES_MARKER
     from silica.kernel.write.contested import lifecycle as note_lifecycle
     from silica.kernel.write.contested import trust as note_trust
 
@@ -601,7 +601,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
             leg_stats=leg_stats, recall_rank=recall_rank,
             lexical_rank=lexical_rank, allow=allow)
         if folder:
-            from silica.kernel.recall.paths import in_folder
+            from silica.kernel.base.layout import in_folder
 
             # Memory-lane paths resolve in another vault, so a folder of THIS
             # vault cannot contain them.

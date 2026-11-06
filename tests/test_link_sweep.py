@@ -218,7 +218,7 @@ def test_the_next_run_sweeps_what_an_interrupted_run_landed(tmp_vault, monkeypat
     from silica.kernel.write.provenance import append_record
     from silica.router.coordinator import Coordinator
 
-    monkeypatch.setattr(prog, "_RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(prog, "runs_dir", lambda: tmp_path / "runs")
     tmp_vault.note("T/A.md", "---\nAI: true\n---\n\nSee [[Never Written]] here.\n")
     append_record("Lezione 1.md", "sha-1", "stopped-run", ["T/A"])
     marker = prog.run_dir_for("stopped-run") / "interrupted"
@@ -248,7 +248,7 @@ def test_a_run_ends_by_reconciling_the_indexes_after_its_last_edit(tmp_vault, tm
     import silica.kernel.recall.sync as sync
     from silica.router.coordinator import Coordinator
 
-    monkeypatch.setattr(prog, "_RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(prog, "runs_dir", lambda: tmp_path / "runs")
     order: list[str] = []
     coord = Coordinator(inbox_files=["Inbox/x.md"], target_dir="T")
     monkeypatch.setattr(coord.fsm, "run", lambda: order.append("fsm") or {"final_status": "success"})

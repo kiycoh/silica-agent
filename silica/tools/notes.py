@@ -40,8 +40,9 @@ def _bind_documents(entries: list[str]) -> tuple[list[str], str | None, str | No
     """Validate a `documents:` binding against the repo. Returns
     (paths, code_ref, error) — on error the caller must not write."""
     from silica.config import CONFIG
-    from silica.kernel.code import codedocs, gitstate
-    from silica.kernel.recall.paths import repo_root_for
+    from silica.kernel.code import codedocs
+    from silica.kernel.base import gitstate
+    from silica.kernel.base.roots import repo_root_for
 
     root = repo_root_for(getattr(CONFIG, "vault_path", "") or "")
     if root is None:
@@ -117,7 +118,7 @@ def silica_patch_note(
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import contain_in_vault
+    from silica.kernel.base.layout import contain_in_vault
     from silica.kernel.write import templates as tpl
     from silica.kernel.write.bulk import execute_one
     from silica.kernel.write.checkpoints import get_checkpoint_store
@@ -385,7 +386,7 @@ def silica_write_note(
     from pathlib import Path, PurePosixPath
 
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import contain_in_vault
+    from silica.kernel.base.layout import contain_in_vault
     from silica.kernel.write import templates as tpl
     from silica.kernel.write.checkpoints import get_checkpoint_store
     from silica.kernel.workqueue import path_lease

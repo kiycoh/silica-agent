@@ -67,9 +67,9 @@ def _reset() -> None:
 
 def _live_file(vault: str | None = None) -> Path:
     from silica.config import CONFIG
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
-    return paths.index_dir_for(vault or CONFIG.vault_path) / LIVE_FILE
+    return home.index_dir_for(vault or CONFIG.vault_path) / LIVE_FILE
 
 
 def _save() -> None:
@@ -77,7 +77,7 @@ def _save() -> None:
     s = _LIVE
     if s is None:
         return
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     doc = dict(s)
     for k in _INT_KEYED:

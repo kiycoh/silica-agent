@@ -217,7 +217,7 @@ def _incoming_side(ctx: dict, source_basename: str) -> tuple[int, str | None]:
     instead — grounded while the verbatim source is reachable, distilled once
     it is not. The clock is whatever the source actually states, never today.
     """
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import in_write_dir
     from silica.kernel.write.contested import TIER_DISTILLED, TIER_GROUNDED
     from silica.kernel.write.provenance import source_event_date

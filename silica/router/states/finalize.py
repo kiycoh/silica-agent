@@ -447,7 +447,7 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
         logger.debug("CLEANUP: provenance append skipped (non-fatal): %s", exc)
 
 
-from silica.kernel.recall.paths import SOURCES_MARKER as _SOURCES_MARKER
+from silica.kernel.base.layout import SOURCES_MARKER as _SOURCES_MARKER
 
 
 def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
@@ -470,7 +470,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         from silica.kernel.write.contested import append_before_superseded
         from silica.kernel.write.ops import InverseOp, InverseOpKind
         from silica.kernel.write.templates import append_source
-        from silica.kernel.recall.paths import SOURCES_DIR
+        from silica.kernel.base.layout import SOURCES_DIR
         from silica.kernel.base.manifest import in_write_dir
         from silica.kernel.write.provenance import (
             attribute_lines,

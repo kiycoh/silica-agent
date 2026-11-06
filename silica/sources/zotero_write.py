@@ -142,7 +142,7 @@ def _web_url(leaf_rel: str) -> str:
 def notes_citing(leaf_rel: str) -> list[str]:
     """Names of the vault notes whose `## Sources` link the leaf."""
     from silica.driver import DRIVER
-    from silica.kernel.recall.paths import is_source_leaf
+    from silica.kernel.base.layout import is_source_leaf
 
     try:
         refs = DRIVER.backlinks(leaf_rel)
@@ -221,7 +221,7 @@ def _vectors(items: list[dict], embed) -> dict[str, list[float]]:
     embedded once, and only new or edited items cost an embedding call."""
     import hashlib
 
-    from silica.kernel.recall.paths import index_dir
+    from silica.kernel.base.home import index_dir
 
     cache_path = index_dir() / "zotero_vectors.json"
     try:

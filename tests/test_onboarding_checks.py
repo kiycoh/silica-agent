@@ -137,6 +137,7 @@ class TestCheckVault:
         import silica.onboarding.checks as checks
         monkeypatch.setattr(checks.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
         monkeypatch.chdir(tmp_path)
         r = checks.check_vault(_cfg(vault_path="", backend="fs"))
         assert r.status == "fail"
@@ -781,6 +782,8 @@ class TestCaptureHook:
         from silica.onboarding.checks import check_capture_hook
 
         monkeypatch.setenv("HOME", str(tmp_path))
+
+        monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
         vault = tmp_path / "vault"
         vault.mkdir()
         result = check_capture_hook(self._config(vault))
@@ -795,6 +798,8 @@ class TestCaptureHook:
         from silica.onboarding.checks import check_capture_hook
 
         monkeypatch.setenv("HOME", str(tmp_path))
+
+        monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
         vault = tmp_path / "vault"
         (vault / ".claude").mkdir(parents=True)
         (vault / ".claude" / "settings.json").write_text(json.dumps({
@@ -811,6 +816,8 @@ class TestCaptureHook:
         from silica.onboarding.checks import check_capture_hook
 
         monkeypatch.setenv("HOME", str(tmp_path))
+
+        monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
         vault = tmp_path / "vault"
         vault.mkdir()
         project = tmp_path / "repo"
@@ -919,6 +926,8 @@ def test_check_quarantine_sees_cross_vault_state_in_home(tmp_path, monkeypatch):
     import silica.onboarding.checks as checks
 
     monkeypatch.setenv("HOME", str(tmp_path))
+
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
     silica_home = tmp_path / ".silica"
     silica_home.mkdir()
     (silica_home / "undo_journal.db.corrupt.20260802T000000").write_bytes(b"x")

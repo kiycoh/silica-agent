@@ -4,7 +4,7 @@
 """Provenance + lever-liveness helpers shared by the benchmark runners.
 
 Provenance answers "which code, which data, which run produced this number":
-git SHA (via silica.kernel.code.gitstate), dataset path + sha256, a timestamped run
+git SHA (via silica.kernel.base.gitstate), dataset path + sha256, a timestamped run
 id. Liveness answers "was the lever I switched on actually live", so an A/B
 cannot silently compare baseline vs baseline (empty lexical index, dead
 reranker) or trust an unpinned nondeterministic provider route.
@@ -35,7 +35,7 @@ def run_id() -> str:
 
 def git_sha() -> str | None:
     """HEAD sha of the repo this code lives in, or None outside a git repo."""
-    from silica.kernel.code import gitstate
+    from silica.kernel.base import gitstate
 
     root = gitstate.find_repo_root(Path(__file__))
     return gitstate.head_ref(root) if root else None
@@ -90,7 +90,7 @@ def write_corpus_stamp(vault: Path, fields: dict, *, present: int) -> None:
     """Record how this corpus was built, next to the corpus itself."""
     import json
 
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     vault.mkdir(parents=True, exist_ok=True)
     blob = json.dumps({"fields": fields, "notes": present}, indent=2, sort_keys=True)
@@ -110,9 +110,9 @@ def wipe_index_namespace(vault: Path) -> None:
     """
     import shutil
 
-    from silica.kernel.recall import paths as kpaths
+    from silica.kernel.base import home
 
-    shutil.rmtree(kpaths.index_dir_for(str(vault)), ignore_errors=True)
+    shutil.rmtree(home.index_dir_for(str(vault)), ignore_errors=True)
 
 
 def corpus_reusable(vault: Path, fields: dict, *, present: int) -> bool:

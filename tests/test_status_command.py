@@ -9,7 +9,7 @@ from silica.cli import _handle_direct_shortcut
 
 def test_status_keeps_line_structure(tmp_path, monkeypatch, capsys):
     import silica.kernel.progress as prog_mod
-    monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
 
     from silica.kernel.progress import PlanStep, ProgressLedger, TaskLedger
 

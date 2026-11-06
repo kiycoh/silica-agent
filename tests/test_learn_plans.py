@@ -25,7 +25,7 @@ def vault(tmp_vault, tmp_path, monkeypatch):
     from silica.kernel.write import undo_journal
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
-    monkeypatch.setattr(undo_journal, "_DEFAULT_JOURNAL_PATH", tmp_path / "undo.db", raising=False)
+    monkeypatch.setattr(undo_journal, "_journal_path", lambda: tmp_path / "undo.db")
     for name in ("Gradient descent", "Chain rule", "Backpropagation", "Softmax"):
         tmp_vault.note(f"ML/{name}.md", f"---\ndate: 2026-01-01\n---\n# {name}\n\nBody of {name}.\n")
     tmp_vault.note("ML/Deep/ResNet.md", "---\ndate: 2026-01-01\n---\n# ResNet\n\nSkip connections.\n")

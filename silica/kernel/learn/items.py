@@ -66,7 +66,7 @@ def read_note(path: str) -> str:
     """The note's text, "" for a missing, unreadable or outside path. Learn
     reads paths that come from a URL (GET /learn/note?path=), and
     `vault / "/abs"` drops the vault root, so the path is contained first."""
-    from silica.kernel.recall.paths import contain_in_vault
+    from silica.kernel.base.layout import contain_in_vault
 
     try:
         return (_vault() / contain_in_vault(path, _vault())).read_text(encoding="utf-8")

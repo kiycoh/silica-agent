@@ -142,7 +142,7 @@ def _open_stores(vault: Path):
     from silica.config import CONFIG
     from silica.kernel.recall.cooccurrence import CooccurStore, _index_path_for
     from silica.kernel.recall.embed import EmbedStore
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     CONFIG.vault_path = str(vault)
     silica.driver._driver = None

@@ -182,3 +182,12 @@ def dump(data, body):
     nesting or code."""
     fm = yaml.safe_dump(data, allow_unicode=True, sort_keys=False).strip()
     return f"---\n{fm}\n---\n\n{body.lstrip(chr(10))}"
+
+
+def documents_of(data: dict) -> list[str]:
+    raw = (data or {}).get("documents")
+    if not raw:
+        return []
+    if isinstance(raw, str):
+        return [raw]
+    return [str(x) for x in raw if x]

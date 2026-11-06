@@ -10,7 +10,7 @@ from __future__ import annotations
 from silica.kernel.graph import graph_export as ge
 import silica.kernel.report.graph_report as gr
 import silica.router.states.setup as setup
-from silica.kernel.recall import paths
+from silica.kernel.base import home
 from silica.kernel.report.graph_report.models import ClusterStat, VaultReport
 
 
@@ -24,7 +24,7 @@ def _report():
 
 
 def _patch(monkeypatch, tmp_path, nodes, edges, counter):
-    monkeypatch.setattr(paths, "index_dir", lambda: tmp_path)
+    monkeypatch.setattr(home, "index_dir", lambda: tmp_path)
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (list(nodes), list(edges)))
 
     def fake_report(**kwargs):

@@ -10,8 +10,7 @@ import pytest
 @pytest.fixture
 def wal(tmp_path, monkeypatch):
     """A sandboxed ~/.silica and a vault directory that opts into capture."""
-    import silica.kernel.recall.paths as paths
-    monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path / "silica-home")
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / "silica-home")
     vault = tmp_path / "vault"
     vault.mkdir()
     (vault / "vault.yaml").write_text("", encoding="utf-8")
@@ -22,7 +21,7 @@ class TestEnvelope:
     def test_envelope_is_private_and_leaves_no_temp_file(self, wal):
         """Private conversation data: owner-only, and no half-written residue."""
         from silica.capture import write_envelope
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         write_envelope(str(wal), "claude-code-abc-end.json", _envelope())
 
@@ -46,7 +45,7 @@ class TestDrainSelection:
     def test_session_end_supersedes_the_precompacts_of_its_session(self, wal):
         """The end-of-session transcript is cumulative: it contains them."""
         from silica.capture import collect, write_envelope
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         v = str(wal)
         write_envelope(v, "claude-code-s1-precompact-20260801T090000Z.json",
@@ -62,7 +61,7 @@ class TestDrainSelection:
 
     def test_latest_precompact_wins_when_the_session_has_no_end(self, wal):
         from silica.capture import collect, write_envelope
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         v = str(wal)
         for stamp in ("20260801T090000Z", "20260801T110000Z", "20260801T100000Z"):
@@ -156,7 +155,7 @@ class TestOwnSessions:
 
     def test_the_end_of_a_session_writes_a_silica_envelope(self, wal):
         from silica.capture import capture_session
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         capture_session(_history(), session_id="s1", driver="tui")
 
@@ -173,7 +172,7 @@ class TestOwnSessions:
     def test_only_the_conversation_is_captured(self, wal):
         """Tool noise and system scaffolding are dropped at the source."""
         from silica.capture import capture_session
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         history = _history() + [
             {"role": "tool", "content": "{'hits': []}"},
@@ -212,7 +211,7 @@ class TestOwnSessions:
     def test_nothing_is_captured_while_the_knob_is_off(self, wal, monkeypatch):
         from silica.capture import capture_session
         from silica.config import CONFIG
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         monkeypatch.setattr(CONFIG, "capture_sessions", False)
 
@@ -228,7 +227,7 @@ class TestHousekeeping:
         import time
 
         from silica.capture import housekeep, mark_processed, write_envelope
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         v = str(wal)
         old = mark_processed(write_envelope(v, "chatgpt-old.json", _envelope(payload="a" * 500)))

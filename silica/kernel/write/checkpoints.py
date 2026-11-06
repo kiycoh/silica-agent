@@ -26,8 +26,10 @@ from __future__ import annotations
 import sqlite3
 import time
 from pathlib import Path
+from silica.config import silica_home
 
-_DEFAULT_CHECKPOINT_PATH = Path.home() / ".silica" / "checkpoints.db"
+def _checkpoint_path() -> Path:
+    return silica_home() / "checkpoints.db"
 
 # A row is live while it is on the undo chain: `undone = 0`. Rows written before
 # ADR-0144 carry no vault and stay visible from every vault, as they always were.
@@ -74,7 +76,7 @@ class CheckpointStore:
     """A persistent stack of full-note restore points, keyed by vault path."""
 
     def __init__(self, path: Path | str | None = None):
-        self._path = Path(path) if path else _DEFAULT_CHECKPOINT_PATH
+        self._path = Path(path) if path else _checkpoint_path()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row

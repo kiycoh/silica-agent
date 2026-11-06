@@ -594,7 +594,7 @@ def flag_cosine_near_titles(ops: list[dict], *, tau: float, embedder=None, store
     number of ops flagged.
     """
     from silica.kernel.recall.embed import _note_text
-    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.base.layout import is_inbox_path
 
     todo = [o for o in ops if o.get("op") == "write" and o.get("section") != SPINE_SECTION
             and not o.get("review") and (o.get("snippet") or "").strip()]
@@ -879,7 +879,7 @@ def bodies_workers_for(source_text: str) -> int:
     concurrent calls of ~8.2k tokens and 500d "Context size has been exceeded"
     39 times (2026-10-12). Unknown window: BODIES_WORKERS, as before.
     """
-    from silica.agent.compaction import TEXT_CHARS_PER_TOKEN
+    from silica.model.llm import TEXT_CHARS_PER_TOKEN
     from silica.model.providers import model_limits
     from silica.config import CONFIG
 

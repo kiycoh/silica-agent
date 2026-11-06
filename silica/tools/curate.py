@@ -93,7 +93,7 @@ def link_candidates(path: str, k: int = 5) -> list[dict]:
         from silica.config import CONFIG
         from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
         from silica.kernel.recall.embed import get_store
-        from silica.kernel.recall.paths import is_staging_path
+        from silica.kernel.base.layout import is_staging_path
         from silica.kernel.recall.relatedness import related_notes
 
         from silica.model.providers import get_reranker

@@ -222,7 +222,7 @@ def test_stale_count_serves_from_snapshot(tmp_path, monkeypatch):
     _write_note(vault, "m.md", ["src/m.py"], ref0)
     _commit(tmp_path, "src/m.py", "v2\n", "c2")
 
-    from silica.kernel.recall import paths as kpaths
-    monkeypatch.setattr(kpaths, "repo_root_for", lambda v: tmp_path)
+    from silica.kernel.base import roots
+    monkeypatch.setattr(roots, "repo_root_for", lambda v: tmp_path)
     assert codedocs.stale_count(vault) == len(codedocs.stale_docs(vault))
     assert codedocs._snapshot_path(vault).exists()   # the count warmed the cache

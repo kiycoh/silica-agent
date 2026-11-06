@@ -495,7 +495,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
             # Inbox notes index like any vault note but are staging, not merge
             # targets — validate rejects every Inbox path, so surfacing one as
             # the collision candidate guarantees a rejected op + steer churn.
-            from silica.kernel.recall.paths import is_inbox_path
+            from silica.kernel.base.layout import is_inbox_path
             hits = [h for h in hits if not is_inbox_path(h["path"])]
 
             if not hits:

@@ -35,7 +35,7 @@ from pathlib import Path
 from collections.abc import Callable
 from typing import Any, Literal
 
-from silica.kernel.recall.paths import resolve_vault_path
+from silica.kernel.base.home import resolve_vault_path
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +156,7 @@ def read_records(
             if not isinstance(records, list):
                 raise ValueError(f"expected JSON array, got {type(records).__name__}")
         except Exception as exc:
-            from silica.kernel.recall.paths import quarantine
+            from silica.kernel.base.durable import quarantine
 
             dest = quarantine(path)
             logger.warning("provenance: corrupt store quarantined to %s: %s", dest or path, exc)
@@ -358,7 +358,7 @@ def append_record(
         # appends (parallel nucleate workers) would each rewrite the whole
         # ledger from their own read and the last one wins, silently dropping
         # the other's record. The lease serializes the whole window.
-        from silica.kernel.recall.paths import atomic_write_bytes
+        from silica.kernel.base.durable import atomic_write_bytes
         from silica.kernel.workqueue import path_lease
 
         with path_lease(str(path)):
@@ -462,7 +462,7 @@ def _bare_note_ref(p: str) -> str:
     possible and degrade to a plain strip otherwise."""
     ref = p or ""
     try:
-        from silica.kernel.recall.paths import to_vault_relative
+        from silica.kernel.base.layout import to_vault_relative
 
         ref = to_vault_relative(ref, ensure_md=False)
     except Exception:
@@ -603,7 +603,7 @@ def rename_note(old_path: str, new_path: str, *, vault_path: str | None = None) 
         return list(dict.fromkeys(moved))
 
     try:
-        from silica.kernel.recall.paths import atomic_write_bytes
+        from silica.kernel.base.durable import atomic_write_bytes
         from silica.kernel.workqueue import path_lease
 
         with path_lease(str(path)):

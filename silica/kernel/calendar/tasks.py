@@ -136,7 +136,7 @@ _scan_memo: dict[str, tuple[str, list[Task]]] = {}
 
 def scan_tasks(vault: Path) -> list[Task]:
     """Every task of the vault, memoized on its file-state epoch like the timeline."""
-    from silica.kernel.recall.paths import SOURCES_DIR, ignore_matcher, vault_epoch
+    from silica.kernel.base.layout import SOURCES_DIR, ignore_matcher, vault_epoch
 
     vault = Path(vault)
     epoch = vault_epoch(str(vault))

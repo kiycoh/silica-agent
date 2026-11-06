@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from silica.config import CONFIG
 from silica.kernel.recall.embed import EmbedStore
-from silica.kernel.recall.paths import index_dir_for
+from silica.kernel.base.home import index_dir_for
 from silica.tools import graph
 
 

@@ -480,7 +480,7 @@ def _salience_filter(fsm: "InjectorFSM", chunks: list[dict]) -> int | None:
     """
     τ_theme = getattr(orch.CONFIG, "sim_threshold_theme", 0.35)
     from silica.model.providers import get_embedder_or_none
-    from silica.kernel.recall.embed import document_theme_vector, _cosine
+    from silica.kernel.base.vectors import document_theme_vector, cosine
     from silica.kernel.text.text import clean_body
     embedder = get_embedder_or_none(orch.CONFIG, "SALIENCE")
     if embedder is None:
@@ -519,7 +519,7 @@ def _salience_filter(fsm: "InjectorFSM", chunks: list[dict]) -> int | None:
 
             kept = []
             for c, v in zip(concepts, vecs):
-                score = _cosine(v, theme)
+                score = cosine(v, theme)
                 name = c.get("name", "") if isinstance(c, dict) else str(c)
                 if score < τ_theme:
                     logger.info(

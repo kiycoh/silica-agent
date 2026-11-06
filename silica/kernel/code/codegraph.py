@@ -30,8 +30,9 @@ from typing import Any
 
 import orjson
 
-from silica.kernel.code import codeast, gitstate
-from silica.kernel.recall import paths as _paths
+from silica.kernel.code import codeast
+from silica.kernel.base import gitstate
+from silica.kernel.base import durable, home, roots
 
 _TS_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 _TS_ALIAS_PREFIXES = ("@/", "~/")
@@ -158,7 +159,7 @@ STORE_VERSION = 5   # v5: Java calls link on a unique first-party definition (AD
 
 
 def store_path() -> Path:
-    return _paths.index_dir() / "codegraph.json"
+    return home.index_dir() / "codegraph.json"
 
 
 @dataclass
@@ -530,7 +531,7 @@ def load_codegraph(vault: Path | str) -> CodeGraph | None:
     """Valid store, or transparent full rebuild + save. None when the vault
     is not inside a git repo — the index is disabled and consumers report
     "no repo", degrading soft (never an error in place of a poorer result)."""
-    root = _paths.repo_root_for(vault)
+    root = roots.repo_root_for(vault)
     if root is None:
         return None
     sp = store_path()
@@ -541,9 +542,9 @@ def load_codegraph(vault: Path | str) -> CodeGraph | None:
             if data.get("version") == STORE_VERSION and _still_valid(data, root, current, sp):
                 return CodeGraph(head_ref=data.get("head_ref", ""), files=data.get("files", {}))
         except Exception:
-            _paths.quarantine(sp)  # corrupt derived store: aside for doctor, then rebuild
+            durable.quarantine(sp)  # corrupt derived store: aside for doctor, then rebuild
     graph = build_codegraph(root)
-    _paths.atomic_write_bytes(sp, _serialize(graph))
+    durable.atomic_write_bytes(sp, _serialize(graph))
     return graph
 
 
@@ -587,16 +588,17 @@ def compute_impact(vault: Path | str, range_spec: str | None = None) -> list[Imp
     """Changed supported files → change_level + documenting notes + 1-hop
     import-neighbor notes. None when the vault is not in a git repo (the
     consumer reports "no repo"). Zero LLM; sorted (structural, fan-in desc)."""
+    from silica.kernel.base.frontmatter import documents_of
     from silica.kernel.code import codedocs
 
-    root = _paths.repo_root_for(vault)
+    root = roots.repo_root_for(vault)
     if root is None:
         return None
     changed = gitstate.changed_paths(root, range_spec) or []
     graph = load_codegraph(vault)
     docmap: dict[str, list[str]] = {}
     for note_path, data, _ in codedocs.iter_documenting_notes(vault):
-        for p in codedocs.documents_of(data):
+        for p in documents_of(data):
             docmap.setdefault(p, []).append(note_path)
 
     new_ref: str | None

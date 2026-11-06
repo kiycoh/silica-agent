@@ -38,19 +38,19 @@ def _touch(path, offset: float) -> None:
 
 class TestTheEpoch:
     def test_stable_when_nothing_changed(self, bound_vault):
-        from silica.kernel.recall.paths import vault_epoch
+        from silica.kernel.base.layout import vault_epoch
 
         assert vault_epoch() == vault_epoch() != ""
 
     def test_an_edit_changes_it(self, bound_vault):
-        from silica.kernel.recall.paths import vault_epoch
+        from silica.kernel.base.layout import vault_epoch
 
         before = vault_epoch()
         _touch(bound_vault / "A.md", 5.0)
         assert vault_epoch() != before
 
     def test_unbound_vault_means_do_not_memoize(self, monkeypatch):
-        from silica.kernel.recall.paths import vault_epoch
+        from silica.kernel.base.layout import vault_epoch
 
         monkeypatch.setattr("silica.config.CONFIG.vault_path", "")
         assert vault_epoch() == ""

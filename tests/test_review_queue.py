@@ -51,7 +51,7 @@ def test_digest_includes_queue_depth_when_nonzero(tmp_path, monkeypatch):
     import silica.kernel.progress as prog_mod
     from silica.kernel.write.deferred import get_deferred_store
 
-    prog_mod._RUNS_DIR = tmp_path
+    prog_mod.runs_dir = lambda: tmp_path
     # conftest isolates the default store; populate it through the public seam.
     get_deferred_store().put("h1", "inbox/a.md", "Dir", None, [{"op": "write"}])
 
@@ -64,7 +64,7 @@ def test_digest_includes_queue_depth_when_nonzero(tmp_path, monkeypatch):
 def test_digest_omits_queue_line_when_empty(tmp_path, monkeypatch):
     import silica.kernel.progress as prog_mod
 
-    prog_mod._RUNS_DIR = tmp_path
+    prog_mod.runs_dir = lambda: tmp_path
 
     from silica.kernel.progress import ProgressLedger
     p = ProgressLedger.new(mode="inject", inputs={})
@@ -107,15 +107,15 @@ def test_anneal_command_is_dispatchable():
 def test_deferred_store_keyed_per_vault(tmp_path, monkeypatch):
     """Two vaults → two independent queues; switching back finds the bundle again."""
     from silica.kernel.write import deferred as deferred_mod
-    import silica.kernel.recall.paths as paths_mod
+    from silica.kernel.base import home
     from silica.config import CONFIG
 
-    monkeypatch.setattr(paths_mod, "_SILICA_HOME", tmp_path / "silica_home")
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / "silica_home")
     # Undo the conftest isolation stub: this test exercises real vault keying.
     monkeypatch.setattr(
-        deferred_mod, "_store_dir", lambda: paths_mod.index_dir() / "deferred"
+        deferred_mod, "_store_dir", lambda: home.index_dir() / "deferred"
     )
-    monkeypatch.setattr(deferred_mod, "_LEGACY_DEFERRED_DIR", tmp_path / "no_legacy")
+    monkeypatch.setattr(deferred_mod, "_legacy_deferred_dir", lambda: tmp_path / "no_legacy")
     deferred_mod._stores.clear()
 
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "vault_a"))
@@ -150,7 +150,7 @@ def test_legacy_global_store_adopted_once(tmp_path, monkeypatch):
         "rejected_ops": [{"op": "patch", "heading": "Bad", "path": "Bad.md"}],
         "rejection_reasons": {"Bad.md": "lint failed: ['e']"},
     }))
-    monkeypatch.setattr(deferred_mod, "_LEGACY_DEFERRED_DIR", legacy)
+    monkeypatch.setattr(deferred_mod, "_legacy_deferred_dir", lambda: legacy)
     deferred_mod._stores.clear()
 
     store = deferred_mod.get_deferred_store()

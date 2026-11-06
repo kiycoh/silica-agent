@@ -25,8 +25,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from silica.kernel.code import codeast, codedocs, gitstate
-from silica.kernel.recall import paths
+from silica.kernel.base.frontmatter import documents_of
+from silica.kernel.code import codeast, codedocs
+from silica.kernel.base import gitstate
+from silica.kernel.base import layout, roots
 from silica.kernel.base import frontmatter
 from silica.kernel.write import templates
 
@@ -84,7 +86,7 @@ def _note_date(data: dict, body: str, md: Path) -> str:
 
 
 def _iter_notes(vault: Path):
-    skip = paths.ignore_matcher(vault)
+    skip = layout.ignore_matcher(vault)
     for dirpath, dirnames, filenames in os.walk(vault):
         dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not skip(d))
         for fn in sorted(filenames):
@@ -99,7 +101,7 @@ def propose(vault: Path | str, repo_root: Path | str | None = None,
     whoever wrote it. The folder is the unit of consent: on the repo vault 92
     of 245 proposals were plans naming files they meant to touch (ADR-0038)."""
     vault = Path(vault)
-    root = Path(repo_root) if repo_root else paths.repo_root_for(vault)
+    root = Path(repo_root) if repo_root else roots.repo_root_for(vault)
     if root is None:
         return []
     scope = folder.strip().strip("/")
@@ -120,7 +122,7 @@ def propose(vault: Path | str, repo_root: Path | str | None = None,
         if data is None and raw is not None:
             continue  # a block that does not parse is not ours to rewrite
         data = data or {}
-        if codedocs.documents_of(data):
+        if documents_of(data):
             continue
         lanes: list[str] = []
         docs: list[str] = []

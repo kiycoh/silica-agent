@@ -256,7 +256,7 @@ def test_safe_mode_patch_is_rebased_onto_the_mirror(mirror_vault, monkeypatch):
 def test_patch_seeds_the_mirror_copy_from_the_original(mirror_vault):
     """The mirror is pasted over the vault, so a patched copy must start as the
     note itself — otherwise the paste drops everything the note already said."""
-    from silica.kernel.base.manifest import seed_mirror_copy
+    from silica.kernel.write.mirror import seed_mirror_copy
 
     original = mirror_vault / "Matematica" / "PCA.md"
     original.parent.mkdir(parents=True)
@@ -268,7 +268,7 @@ def test_patch_seeds_the_mirror_copy_from_the_original(mirror_vault):
 
 
 def test_seeding_never_overwrites_an_existing_mirror_copy(mirror_vault):
-    from silica.kernel.base.manifest import seed_mirror_copy
+    from silica.kernel.write.mirror import seed_mirror_copy
 
     (mirror_vault / "Matematica").mkdir()
     (mirror_vault / "Matematica" / "PCA.md").write_text("originale\n", encoding="utf-8")
@@ -396,7 +396,7 @@ def test_the_real_inbox_stays_forbidden_under_safe_mode(mirror_vault):
     boundary, so it named `silica/Inbox` and the user's own `Inbox/` stopped
     reading as an inbox — patch ops aimed at inbox notes stopped being rejected
     (two landed as mirror copies in a real run)."""
-    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.base.layout import is_inbox_path
 
     assert is_inbox_path("Inbox/giovanni_castelli.md") is True
     assert is_inbox_path("silica/Inbox/staged.md") is True

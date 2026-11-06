@@ -37,6 +37,7 @@ def _loading_server_cmd(port: int, load_seconds: float) -> str:
 
 def test_waits_for_load_not_just_for_the_port(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))  # logs under a throwaway ~/.silica
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
     port = _free_port()
     url = f"http://127.0.0.1:{port}/v1"
     started = time.monotonic()
@@ -55,6 +56,7 @@ def test_dead_server_fails_fast_and_loud(tmp_path, monkeypatch, capsys):
     """A bad model path kills llama-server at once — don't poll a corpse for 180s,
     and don't let the user find out later from quietly worse answers."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
     monkeypatch.setattr(serve, "_READY_TIMEOUT", 30.0)
     started = time.monotonic()
 
@@ -92,6 +94,8 @@ def test_a_serve_command_in_the_environment_is_spawned(tmp_path, monkeypatch):
     import subprocess
 
     monkeypatch.setenv("HOME", str(tmp_path))
+
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
     for key in ("SILICA_RERANK_SERVE_CMD", "SILICA_PROVIDER_SERVE_CMD",
                 "SILICA_STT_SERVE_CMD"):
         monkeypatch.delenv(key, raising=False)

@@ -16,7 +16,7 @@ from silica.kernel.progress import PlanStep, Run, RunManifestEntry
 def runs_dir(tmp_path, monkeypatch):
     """Redirect the runs root to an isolated tmp directory."""
     d = tmp_path / "runs"
-    monkeypatch.setattr(prog_mod, "_RUNS_DIR", d)
+    monkeypatch.setattr(prog_mod, "runs_dir", lambda: d)
     return d
 
 

@@ -320,14 +320,15 @@ def test_prerequisites_map_runs_the_real_pass(graph_nodes_edges, cooccur_store, 
     # untested: when V7 left the tuple it kept unpacking four values, swallowed
     # the ValueError and served {} to Learn and to the explore Path surface,
     # which then said "no reading order yet" over a built index.
-    from silica.kernel.recall import cooccurrence, paths
+    from silica.kernel.recall import cooccurrence
+    from silica.kernel.base import layout
     from silica.kernel.graph import graph_export
     from silica.kernel.learn import learner
     from silica.kernel.report.graph_report import cooccur_delta as cd
     monkeypatch.setattr(cd, "_REFD_MIN_RELATED", 1)
     monkeypatch.setattr(graph_export, "build_graph_data", lambda: graph_nodes_edges)
     monkeypatch.setattr(cooccurrence, "get_cooccur_store", lambda **_: cooccur_store)
-    monkeypatch.setattr(paths, "vault_epoch", lambda *_: "")
+    monkeypatch.setattr(layout, "vault_epoch", lambda *_: "")
     monkeypatch.setattr(learner, "_prereq_memo", {})
     assert "C" in learner.prerequisites_map().get("A", [])
 
@@ -578,7 +579,8 @@ def test_prerequisites_map_is_kept_while_its_inputs_are(graph_nodes_edges, coocc
     """An edit elsewhere moved the vault epoch and a plan page recomputed an
     unchanged map, 16 s of its first 34 (2026-10-23): keyed on the links and
     the index, it is reused, across processes too, and recomputed when a link moves."""
-    from silica.kernel.recall import cooccurrence, paths
+    from silica.kernel.recall import cooccurrence
+    from silica.kernel.base import layout
     from silica.kernel.graph import graph_export
     from silica.kernel.learn import learner
     from silica.kernel.report.graph_report import cooccur_delta as cd
@@ -588,7 +590,7 @@ def test_prerequisites_map_is_kept_while_its_inputs_are(graph_nodes_edges, coocc
     monkeypatch.setattr(cooccurrence, "get_cooccur_store", lambda **_: cooccur_store)
     # every read moves the epoch; the map also reads the notes' own (spines, hubs)
     epochs = (f"e{i}" for i in __import__("itertools").count(1))
-    monkeypatch.setattr(paths, "vault_epoch", lambda *_: next(epochs))
+    monkeypatch.setattr(layout, "vault_epoch", lambda *_: next(epochs))
     monkeypatch.setattr(learner, "_prereq_memo", {})
     calls = []
     real = cd._compute_cooccur_variables

@@ -17,6 +17,8 @@ are put back together from what was collected.
 """
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import hashlib
 import logging
 import os
@@ -123,9 +125,8 @@ def stitched(src: Path, data: dict) -> list:
 def _weights() -> Path | None:
     """The weights' path, fetched on first use; None when they cannot be had."""
     # Read per call: a test or a tenant (ADR-0071) moves it.
-    from silica.kernel.recall import paths
 
-    target = paths._SILICA_HOME / "models" / "layout.onnx"
+    target = silica_home() / "models" / "layout.onnx"
     if target.exists():
         return target
     try:

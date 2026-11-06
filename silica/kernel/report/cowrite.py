@@ -21,9 +21,9 @@ logger = logging.getLogger(__name__)
 
 def runs_root() -> Path:
     # Function, not constant: tests monkeypatch it.
-    from silica.kernel.recall.paths import _SILICA_HOME
+    from silica.config import silica_home
 
-    return _SILICA_HOME / "runs"
+    return silica_home() / "runs"
 
 
 def cowrite_transactions(vault: str, *, cap: int = 30) -> tuple[list[set[str]], int]:

@@ -47,8 +47,9 @@ def moc_target(name: str, target_dir: str) -> str:
       copy; `seed_mirror_copy` gives that copy the original's content first, so
       the block lands on top of what the note already said.
     """
-    from silica.kernel.recall.paths import is_inbox_path
-    from silica.kernel.base.manifest import in_write_dir, seed_mirror_copy
+    from silica.kernel.base.layout import is_inbox_path
+    from silica.kernel.base.manifest import in_write_dir
+    from silica.kernel.write.mirror import seed_mirror_copy
 
     resolved = resolve_note_path(name)
     # A source file shares its title with the notes distilled from it, so name

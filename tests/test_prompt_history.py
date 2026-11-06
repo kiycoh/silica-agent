@@ -18,6 +18,7 @@ _ADD = '/connect add {"tk":{"command":"x","env":{"API_KEY":"%s"}}}' % _SECRET
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
     return tmp_path
 
 

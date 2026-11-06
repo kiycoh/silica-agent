@@ -7,7 +7,7 @@ Asking "is every concept in this syllabus a note in my vault?" answered
 "missing" for concepts that had notes. Three independent causes, one test
 each -- see the docstrings on the code under test for the measurements.
 """
-from silica.kernel.recall import paths
+from silica.kernel.base import layout
 from silica.kernel.recall.rerank import rerank_related
 from silica.kernel.text.recon import is_concept
 from silica.kernel.text.overlay import overlay_for_lang
@@ -39,12 +39,12 @@ def test_real_concepts_survive_the_tail_rule():
 def test_source_leaf_matches_the_write_dir_copy(monkeypatch):
     """`silica/sources/Lezione 1.md` was answering every search, so verbatim
     lectures outranked the notes distilled from them."""
-    monkeypatch.setattr(paths, "is_source_leaf", paths.is_source_leaf)  # unwrapped
+    monkeypatch.setattr(layout, "is_source_leaf", layout.is_source_leaf)  # unwrapped
     from silica.kernel.base import manifest as vm
     monkeypatch.setattr(vm, "in_write_dir", lambda rel: f"silica/{rel}")
-    assert paths.is_source_leaf("sources/Lezione 1.md")        # legacy root
-    assert paths.is_source_leaf("silica/sources/Lezione 1.md")  # composed
-    assert not paths.is_source_leaf("silica/Informatica/Kernel trick.md")
+    assert layout.is_source_leaf("sources/Lezione 1.md")        # legacy root
+    assert layout.is_source_leaf("silica/sources/Lezione 1.md")  # composed
+    assert not layout.is_source_leaf("silica/Informatica/Kernel trick.md")
 
 
 def test_source_leaf_survives_an_unresolvable_manifest(monkeypatch):
@@ -54,8 +54,8 @@ def test_source_leaf_survives_an_unresolvable_manifest(monkeypatch):
         raise RuntimeError("no config")
 
     monkeypatch.setattr(vm, "in_write_dir", boom)
-    assert paths.is_source_leaf("sources/x.md")
-    assert not paths.is_source_leaf("silica/sources/x.md")
+    assert layout.is_source_leaf("sources/x.md")
+    assert not layout.is_source_leaf("silica/sources/x.md")
 
 
 # --- 3. one long candidate must not silence the whole pool -----------------

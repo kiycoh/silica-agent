@@ -171,7 +171,7 @@ def ingest_one(arm: str, out_json: Path) -> None:
         sweep(force=True)
     seconds = time.time() - t0
     peak = stop()
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
     notes = sorted(str(p.relative_to(vault)) for p in vault.rglob("*.md")
                    if target in str(p.relative_to(vault)) or "sources" in p.parts)
     out = {"arm": arm, "seconds": round(seconds, 1), "summary": summary,

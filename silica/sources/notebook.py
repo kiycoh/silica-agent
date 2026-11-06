@@ -13,8 +13,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from silica.config import CONFIG
-from silica.kernel.code import codeast, gitstate, ipynb
-from silica.kernel.recall import paths
+from silica.kernel.code import codeast, ipynb
+from silica.kernel.base import gitstate
+from silica.kernel.base import roots
 from silica.kernel.text.sanitize import strip_degenerate_runs
 from silica.sources.base import GroundedStub, RawItem
 from silica.sources.code import _repo_files, code_note_name, render_skeleton
@@ -29,13 +30,13 @@ class NotebookAdapter:
         # were never ingested at all. There they fall to convert() instead.
         vault = (CONFIG.vault_path or "").strip()
         return (target.lower().endswith(".ipynb") and bool(vault)
-                and paths.repo_root_for(vault) is not None)
+                and roots.repo_root_for(vault) is not None)
 
     def read(self, target: str) -> RawItem:
         vault = (CONFIG.vault_path or "").strip()
         if not vault:
             raise ValueError("no vault configured")
-        root = paths.repo_root_for(vault)
+        root = roots.repo_root_for(vault)
         if root is None:
             raise ValueError("no code-lane repo (vault is not inside its git repo)")
         try:

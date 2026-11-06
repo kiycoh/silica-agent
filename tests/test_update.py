@@ -188,7 +188,7 @@ def test_behind_count_wheel_uses_cache(tmp_path, monkeypatch):
     _wheel_root(tmp_path, monkeypatch, "uv", "tools", "silica-agent")
     monkeypatch.setattr(silica, "__version__", "1.0.0")
     cache = tmp_path / "pypi-latest"
-    monkeypatch.setattr(upd, "CACHE", cache)
+    monkeypatch.setattr(upd, "_cache", lambda: cache)
     cache.write_text("2.0.0")  # fresh mtime: no background refresh fires
     assert upd.behind_count() == 1
     cache.write_text("1.0.0")
@@ -197,17 +197,17 @@ def test_behind_count_wheel_uses_cache(tmp_path, monkeypatch):
 
 def test_behind_count_wheel_no_cache_is_quiet(tmp_path, monkeypatch):
     _wheel_root(tmp_path, monkeypatch, "uv", "tools", "silica-agent")
-    monkeypatch.setattr(upd, "CACHE", tmp_path / "absent")
+    monkeypatch.setattr(upd, "_cache", lambda: tmp_path / "absent")
     monkeypatch.setattr(upd, "_refresh_pypi_cache", lambda: None)  # no network in tests
     assert upd.behind_count() == 0
 
 
 def test_refresh_pypi_cache_writes_atomically(tmp_path, monkeypatch):
-    monkeypatch.setattr(upd, "CACHE", tmp_path / "cache" / "pypi-latest")
+    monkeypatch.setattr(upd, "_cache", lambda: tmp_path / "cache" / "pypi-latest")
     monkeypatch.setattr(upd, "_pypi_latest", lambda: "3.1.4")
     upd._refresh_pypi_cache()
-    assert upd.CACHE.read_text() == "3.1.4"
-    assert not upd.CACHE.with_suffix(".tmp").exists()
+    assert upd._cache().read_text() == "3.1.4"
+    assert not upd._cache().with_suffix(".tmp").exists()
 
 
 # --- wheel built from a git URL: the repository is the upstream --------------

@@ -1,6 +1,8 @@
 """Phase 3 tests — embedding store, cosine similarity, and semantic search tools."""
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import math
 from unittest.mock import MagicMock, patch
 
@@ -8,42 +10,42 @@ import pytest
 
 from silica.kernel.recall.embed import (
     EmbedStore,
-    _cosine,
     _note_text,
     _note_title_text,
     build_index,
     refresh_note,
 )
+from silica.kernel.base.vectors import cosine
 
 
 # ---------------------------------------------------------------------------
-# _cosine — pure maths
+# cosine — pure maths
 # ---------------------------------------------------------------------------
 
 def test_cosine_identical_vectors():
     v = [1.0, 0.0, 0.0]
-    assert _cosine(v, v) == pytest.approx(1.0)
+    assert cosine(v, v) == pytest.approx(1.0)
 
 
 def test_cosine_orthogonal_vectors():
     a = [1.0, 0.0]
     b = [0.0, 1.0]
-    assert _cosine(a, b) == pytest.approx(0.0)
+    assert cosine(a, b) == pytest.approx(0.0)
 
 
 def test_cosine_opposite_vectors():
     a = [1.0, 0.0]
     b = [-1.0, 0.0]
-    assert _cosine(a, b) == pytest.approx(-1.0)
+    assert cosine(a, b) == pytest.approx(-1.0)
 
 
 def test_cosine_zero_vector_returns_zero():
-    assert _cosine([0.0, 0.0], [1.0, 0.0]) == 0.0
-    assert _cosine([1.0, 0.0], [0.0, 0.0]) == 0.0
+    assert cosine([0.0, 0.0], [1.0, 0.0]) == 0.0
+    assert cosine([1.0, 0.0], [0.0, 0.0]) == 0.0
 
 
 def test_cosine_length_mismatch_returns_zero():
-    assert _cosine([1.0], [1.0, 2.0]) == 0.0
+    assert cosine([1.0], [1.0, 2.0]) == 0.0
 
 
 def test_cosine_normalised_vectors():
@@ -51,7 +53,7 @@ def test_cosine_normalised_vectors():
     a = [3.0 / 5, 4.0 / 5]
     b = [4.0 / 5, 3.0 / 5]
     expected = (3 * 4 + 4 * 3) / 25
-    assert _cosine(a, b) == pytest.approx(expected)
+    assert cosine(a, b) == pytest.approx(expected)
 
 
 # ---------------------------------------------------------------------------
@@ -604,7 +606,7 @@ def test_openai_embedder_empty_input():
 
 def test_index_path_is_keyed_by_vault(tmp_path, monkeypatch):
     from silica.config import CONFIG
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
     from silica.kernel.recall.embed import _index_path
 
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "v1"))
@@ -613,17 +615,17 @@ def test_index_path_is_keyed_by_vault(tmp_path, monkeypatch):
     p2 = _index_path()
     assert p1 != p2
     assert p1.name == "embeddings.json" and p2.name == "embeddings.json"
-    assert paths.index_dir() == p2.parent
+    assert home.index_dir() == p2.parent
 
 
 def test_index_path_falls_back_to_global_without_vault(monkeypatch):
     from silica.config import CONFIG
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
     monkeypatch.setattr(CONFIG, "vault_path", "")
     # The global (non-vault-namespaced) dir — _SILICA_HOME, not Path.home(),
     # so the invariant holds under the suite's home sandbox too.
-    assert paths.index_dir() == paths._SILICA_HOME / "index"
+    assert home.index_dir() == silica_home() / "index"
 
 
 def test_legacy_index_migrates_on_load(tmp_path, monkeypatch):
@@ -635,7 +637,7 @@ def test_legacy_index_migrates_on_load(tmp_path, monkeypatch):
     legacy.parent.mkdir(parents=True)
     legacy.write_bytes(orjson.dumps({"version": 1, "notes": {"old/note": {"vec": [1.0], "name": "old", "ts": 0}}}))
     keyed = tmp_path / "keyed" / "embeddings.json"
-    monkeypatch.setattr(embed_mod, "_LEGACY_INDEX_PATH", legacy)
+    monkeypatch.setattr(embed_mod, "_legacy_index_path", lambda: legacy)
     monkeypatch.setattr(embed_mod, "_index_path", lambda: keyed)
 
     store = EmbedStore()
@@ -666,7 +668,7 @@ def _fake_embedder(calls: list):
 def test_theme_vector_samples_book_sized_body():
     """A 40k-char body must cost a bounded, equispaced sample of blocks — not
     one embed input per 1200 chars (RECON paid 34 blocks per book segment)."""
-    from silica.kernel.recall.embed import document_theme_vector
+    from silica.kernel.base.vectors import document_theme_vector
 
     calls: list = []
     vec = document_theme_vector(_fake_embedder(calls), _marker_body(40))
@@ -683,7 +685,7 @@ def test_theme_vector_samples_book_sized_body():
 def test_theme_vector_short_body_embeds_every_block():
     """At or under the sample budget the behavior is bit-identical to before:
     every block is embedded, in order."""
-    from silica.kernel.recall.embed import document_theme_vector
+    from silica.kernel.base.vectors import document_theme_vector
 
     calls: list = []
     vec = document_theme_vector(_fake_embedder(calls), _marker_body(5))

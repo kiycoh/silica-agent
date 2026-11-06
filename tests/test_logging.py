@@ -292,11 +292,10 @@ def test_debug_records_land_in_the_file_log_while_the_terminal_stays_quiet(tmp_p
     the file is noise within a session."""
     import io
     import sys
-    import silica.kernel.recall.paths as paths
     from silica.cli import _setup_logging
     from silica.config import CONFIG
 
-    monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path)
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path)
     orig = CONFIG.debug_logging
     try:
         _setup_logging(debug=False)
@@ -320,7 +319,6 @@ def test_attach_file_log_freezes_the_terminal_level_before_opening_root(tmp_path
     own, so lowering root to DEBUG for the file must first pin the terminal
     handler at what root used to show."""
     import io
-    import silica.kernel.recall.paths as paths
     from silica.cli import _attach_file_log
 
     root = logging.getLogger()
@@ -328,7 +326,7 @@ def test_attach_file_log_freezes_the_terminal_level_before_opening_root(tmp_path
     try:
         for h in root.handlers[:]:
             root.removeHandler(h)
-        monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path)
+        monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path)
         logging.basicConfig(stream=io.StringIO(), level=logging.WARNING)
         _attach_file_log()
         assert root.level == logging.DEBUG
@@ -349,7 +347,6 @@ def test_a_hosted_tenant_opens_no_file_log(tmp_path, monkeypatch):
     SILICA_HOSTED=1 no silica.log is opened and root keeps the terminal's level
     instead of dropping to DEBUG for a file that does not exist."""
     import io
-    import silica.kernel.recall.paths as paths
     from silica.cli import _attach_file_log
 
     root = logging.getLogger()
@@ -357,7 +354,7 @@ def test_a_hosted_tenant_opens_no_file_log(tmp_path, monkeypatch):
     try:
         for h in root.handlers[:]:
             root.removeHandler(h)
-        monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path)
+        monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path)
         monkeypatch.setenv("SILICA_HOSTED", "1")
         logging.basicConfig(stream=io.StringIO(), level=logging.WARNING)
         _attach_file_log()

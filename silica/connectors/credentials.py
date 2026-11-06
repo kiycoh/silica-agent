@@ -22,6 +22,8 @@ in it ("GITHUB_TOKEN"). In the keyring that is service `silica`, user
 """
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import json
 import logging
 import os
@@ -54,9 +56,8 @@ def _keyring():
 
 def _dir() -> Path:
     # Read at call time, not import: the test sandbox and a vault switch move it.
-    from silica.kernel.recall import paths
 
-    return paths._SILICA_HOME / "credentials"
+    return silica_home() / "credentials"
 
 
 def folder() -> Path:
@@ -106,7 +107,7 @@ def _read_file(scope: str) -> dict[str, str]:
 
 
 def _write_file(scope: str, data: dict[str, str]) -> None:
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     # mode=0o600 rides on the temp file, which mkstemp already opened 0600, so
     # the replace never exposes the token under the umask's mode.

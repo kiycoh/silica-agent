@@ -37,12 +37,14 @@ from typing import Any
 
 import orjson
 
-from silica.kernel.recall.paths import atomic_write_bytes
+from silica.kernel.base.durable import atomic_write_bytes
+from silica.config import silica_home
 
 
 # Pre-C2 location: one global queue for every vault. Read once as a migration
 # source by get_deferred_store(), never written to again.
-_LEGACY_DEFERRED_DIR = Path.home() / ".silica" / "deferred"
+def _legacy_deferred_dir() -> Path:
+    return silica_home() / "deferred"
 
 # Fixed 30-day TTL (vault.yaml knob declined 2026-08-19; revisit only if
 # per-vault retention ever matters).
@@ -51,9 +53,9 @@ _DEFERRED_TTL_SECONDS = 30 * 24 * 3600
 
 def _store_dir() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
-    return paths.index_dir() / "deferred"
+    return home.index_dir() / "deferred"
 
 
 def _dedup_ops(ops: list[dict]) -> list[dict]:
@@ -275,7 +277,7 @@ def _adopt_legacy(store: DeferredStore) -> None:
     working); fixture-pollution bundles are irrecoverable test artifacts and
     are flushed. Best-effort: unreadable files are left in place.
     """
-    legacy = _LEGACY_DEFERRED_DIR
+    legacy = _legacy_deferred_dir()
     if not legacy.is_dir() or legacy == store._dir:
         return
     for p in legacy.glob("*.json"):

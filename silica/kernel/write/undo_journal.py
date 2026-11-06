@@ -12,10 +12,12 @@ import uuid
 from pathlib import Path
 
 from silica.kernel.write.ops import InverseOp, InverseOpKind
+from silica.config import silica_home
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_JOURNAL_PATH = Path.home() / ".silica" / "undo_journal.db"
+def _journal_path() -> Path:
+    return silica_home() / "undo_journal.db"
 
 
 # A delete from the chat is a one-op journal run under this source, so /undo
@@ -46,7 +48,7 @@ USER_WRITE_SOURCE = "user:/write"
 
 class UndoJournalStore:
     def __init__(self, path: Path | str | None = None):
-        self._path = Path(path) if path else _DEFAULT_JOURNAL_PATH
+        self._path = Path(path) if path else _journal_path()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         # WAL + per-thread connections; sqlite's busy_timeout serialises
         # writers, so no app-level lock. A thread's conn is closed only by GC when
@@ -69,7 +71,7 @@ class UndoJournalStore:
             # paths.quarantine: timestamped, never clobbered — the flat
             # ".corrupt" rename here overwrote the previous preserved copy on
             # the second corruption, and doctor's *.corrupt.* glob never saw it.
-            from silica.kernel.recall.paths import quarantine
+            from silica.kernel.base.durable import quarantine
             quarantine(self._path)
             for suffix in ("-wal", "-shm"):
                 # a stale WAL sidecar must not be replayed into the fresh db

@@ -180,7 +180,7 @@ def test_scan_finds_events_anywhere_and_skips_non_events(tmp_path):
 
 
 def test_scan_skips_dot_dirs_and_sources(tmp_path):
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     vault = tmp_path / "vault"
     vault.mkdir()
     _write(vault, ".trash/ghost.md", EVENT_NOTE)
@@ -202,11 +202,11 @@ def test_scan_memoized_on_vault_epoch(tmp_path, monkeypatch):
     vault.mkdir()
     _write(vault, "ok.md", EVENT_NOTE)
 
-    monkeypatch.setattr("silica.kernel.recall.paths.vault_epoch", lambda v=None: "epoch-1")
+    monkeypatch.setattr("silica.kernel.base.layout.vault_epoch", lambda v=None: "epoch-1")
     first = scan_events(vault)
     _write(vault, "later.md", EVENT_NOTE)
     assert scan_events(vault) is first  # same epoch: memo hit, no rescan
-    monkeypatch.setattr("silica.kernel.recall.paths.vault_epoch", lambda v=None: "epoch-2")
+    monkeypatch.setattr("silica.kernel.base.layout.vault_epoch", lambda v=None: "epoch-2")
     assert {e.stem for e in scan_events(vault)} == {"ok", "later"}
 
 

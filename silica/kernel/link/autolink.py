@@ -405,7 +405,7 @@ def backlink_pass(
     """
     import os as _os
     from silica.driver import DRIVER
-    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.base.layout import is_inbox_path
     from silica.kernel.base.manifest import active_write_dir, within
 
     # This path rewrites pre-existing notes without passing validate_operations,

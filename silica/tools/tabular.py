@@ -404,7 +404,7 @@ def silica_tables(folder: Annotated[str, Field(description='Vault-relative folde
     import os
 
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import ignore_matcher
+    from silica.kernel.base.layout import ignore_matcher
 
     vault = (CONFIG.vault_path or "").strip()
     if not vault:

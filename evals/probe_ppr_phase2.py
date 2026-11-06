@@ -167,7 +167,7 @@ def _legs(key: str, store, es, *, pool: int):
 
 def _fused(embed_rank, cooc_rank, edges_rank) -> dict[str, float]:
     """Reconstruct `_fuse`'s scores. Self-checked against `related_notes`."""
-    from silica.kernel.graph.graph_export import is_vault_artifact
+    from silica.kernel.base.layout import is_vault_artifact
     from silica.kernel.recall.relatedness import _rrf_fuse
 
     rankings = []

@@ -359,7 +359,7 @@ def fetch_cover(url: str, vault: str | None = None) -> dict | None:
     name = cover_file(url, ctype)
     cdir = store.covers_dir(vault)
     cdir.mkdir(parents=True, exist_ok=True)
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     atomic_write_bytes(cdir / name, resp.content, mode=0o600)
     return {"file": name, "type": ctype, "from": F.domain(final)}
@@ -448,7 +448,7 @@ def site_icon(domain: str, vault: str | None = None) -> tuple[str, str] | None:
     if not ctype:
         miss.touch()
         return None
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     atomic_write_bytes(path, body, mode=0o600)
     miss.unlink(missing_ok=True)

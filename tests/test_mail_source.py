@@ -344,7 +344,7 @@ def test_the_address_is_guessed_from_delivered_to_then_to(tmp_vault, tmp_path):
 
 def test_the_addresses_the_user_gave_are_kept_outside_the_vault(tmp_vault, tmp_path):
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     mail.remember_addresses(["Ada.Student@uni.example", " second@uni.example "])
     p = mail.plan(_mixed(tmp_path))

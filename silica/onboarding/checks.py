@@ -24,8 +24,8 @@ from silica.model.providers import (
     local_rerank_model,
     model_limits,
 )
-from silica.config import USER_ENV, SilicaConfig, embedder_defaults
-from silica.kernel.code import gitstate
+from silica.config import USER_ENV, SilicaConfig, embedder_defaults, silica_home
+from silica.kernel.base import gitstate
 from silica.kernel.scrub import scrub_credentials
 
 _HTTP_TIMEOUT = 3.0
@@ -447,7 +447,7 @@ def sample_vault_text(vault: str) -> str:
     the `/vault` info block in cli.py go through `detect_vault_language`
     below, which calls this — no duplicated sampling.
     """
-    from silica.kernel.graph.graph_export import is_vault_artifact
+    from silica.kernel.base.layout import is_vault_artifact
     from silica.kernel.base.manifest import load_manifest, resolve_done_dir
 
     root = Path(vault)
@@ -745,13 +745,13 @@ def live_probe(config: SilicaConfig) -> CheckResult:
 
 def check_quarantine(config: SilicaConfig) -> CheckResult:
     """Corrupt state files quarantined as *.corrupt.* — preserved, not lost."""
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     roots = [Path(p) for p in (config.vault_path,) if p]
     roots.append(index_dir_for(config.vault_path or ""))
     # ~/.silica holds cross-vault state (undo_journal.db, checkpoints): its
     # quarantined copies were invisible to doctor, the only surface for them.
-    roots.append(Path.home() / ".silica")
+    roots.append(silica_home())
     found = [p.name for r in roots if r.exists() for p in sorted(r.glob("*.corrupt.*"))]
     if found:
         return CheckResult(

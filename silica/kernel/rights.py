@@ -239,7 +239,7 @@ def place_images(body: str, plan: dict) -> str:
 # --- copies of remote images ---------------------------------------------------
 
 def _kept_dir(vault: Path) -> Path:
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     return index_dir_for(str(vault)) / "public_images"
 
@@ -261,7 +261,7 @@ def kept_image(name: str, vault: Path | None = None) -> Path | None:
 def _keep(url: str, data: bytes, ctype: str, vault: Path) -> Path:
     """A copy lasts: `build` remakes `assets/` from the vault, so without one every Publish would
     fetch again, and a site gone away would turn a copy back into a link (ADR-0153 point 20)."""
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     root = _kept_dir(vault)
     root.mkdir(parents=True, exist_ok=True)
@@ -332,7 +332,7 @@ def _read_sources(vault: Path, notes: dict, wanted: dict[str, list[str]], names:
     """One pass over the leaves in `sources/`, one held at a time: what each names as its file, the
     images it embeds, and the share of each wanted note. `wanted` is {leaf stem: [note paths]}.
     Returns {image key: file} and fills `names`, {leaf stem: file}, and each note's share."""
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.text.language import detect
     from silica.kernel.base.manifest import in_write_dir
     from silica.kernel.base import frontmatter

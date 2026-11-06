@@ -181,14 +181,14 @@ def filter_on_theme(
     vecs = embedder.embed(facts)
     if theme_tau <= 0:
         return facts, vecs, 0
-    from silica.kernel.recall.embed import _cosine, document_theme_vector
+    from silica.kernel.base.vectors import cosine, document_theme_vector
     theme = document_theme_vector(embedder, source)
     if not theme:
         return facts, vecs, 0
     kept: list[str] = []
     kept_vecs: list[list[float]] = []
     for f, v in zip(facts, vecs):
-        if _cosine(v, theme) >= theme_tau:
+        if cosine(v, theme) >= theme_tau:
             kept.append(f)
             kept_vecs.append(v)
     return kept, kept_vecs, len(facts) - len(kept)

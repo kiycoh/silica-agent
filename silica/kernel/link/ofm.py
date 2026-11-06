@@ -14,13 +14,6 @@ def is_lean(content):
 def wikilink(name):
     return f"[[{name}]]"
 
-def has_wikilink(content, name):
-    # Obsidian resolves links case-insensitively and with alias/heading
-    # suffixes: [[machine learning]], [[Machine Learning|ML]] and
-    # [[Machine learning#Storia]] all satisfy hub "Machine learning".
-    c, n = content.casefold(), name.casefold()
-    return any(f"[[{n}{suffix}" in c for suffix in ("]]", "|", "#"))
-
 from silica.kernel.base.markdown import parse_headings, _balanced, WIKILINK_TARGET_RE
 
 

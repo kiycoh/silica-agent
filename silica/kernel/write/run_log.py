@@ -22,12 +22,10 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from silica.kernel.recall.paths import resolve_vault_path
+from silica.kernel.base.home import resolve_vault_path
+from silica.kernel.base.layout import DEFAULT_LOG_FILENAME
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_LOG_FILENAME = "log.md"
-
 
 def _log_path(vault: str, filename: str) -> Path:
     """`<vault>/<write_dir>/<filename>` — the journal is Silica's own artifact.

@@ -85,9 +85,9 @@ def _blank() -> dict:
 
 def home(vault: str | None = None) -> Path:
     from silica.config import CONFIG
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
-    return paths.index_dir_for(vault or CONFIG.vault_path) / "discover"
+    return home.index_dir_for(vault or CONFIG.vault_path) / "discover"
 
 
 def covers_dir(vault: str | None = None) -> Path:
@@ -115,7 +115,7 @@ def load(vault: str | None = None) -> dict:
 
 
 def save(doc: dict, vault: str | None = None) -> None:
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     path = home(vault) / "discover.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -147,7 +147,7 @@ def save_vectors(vectors: dict, vault: str | None = None) -> None:
 
     import numpy as np
 
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     path = home(vault) / "vectors.npz"
     path.parent.mkdir(parents=True, exist_ok=True)

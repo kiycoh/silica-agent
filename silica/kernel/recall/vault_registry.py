@@ -109,11 +109,11 @@ def is_adopted(path: Path) -> bool:
 def served_vaults() -> list[Path]:
     """Vaults some Silica process has swept on this machine, from the
     `vault.json` markers in ~/.silica/index/*/ (newest marker first)."""
-    from silica.kernel.recall.paths import _SILICA_HOME
+    from silica.config import silica_home
 
     out: list[tuple[float, Path]] = []
     try:
-        markers = list((_SILICA_HOME / "index").glob("*/vault.json"))
+        markers = list((silica_home() / "index").glob("*/vault.json"))
     except OSError:
         return []
     for m in markers:
@@ -151,12 +151,12 @@ def orphan_indexes() -> tuple[list[tuple[Path, Path]], list[tuple[Path, Path]]]:
     nothing and is in neither list, because a one-way digest cannot say
     whose it was. `absent` are the folders on a drive that is not mounted:
     reported, never removed (`_on_absent_drive`)."""
-    from silica.kernel.recall.paths import _SILICA_HOME
+    from silica.config import silica_home
 
     gone: list[tuple[Path, Path]] = []
     absent: list[tuple[Path, Path]] = []
     try:
-        dirs = sorted(p for p in (_SILICA_HOME / "index").iterdir() if p.is_dir())
+        dirs = sorted(p for p in (silica_home() / "index").iterdir() if p.is_dir())
     except OSError:
         return gone, absent
     for d in dirs:
@@ -227,7 +227,8 @@ def lexical_for(vault: Path):
     """A vault's lexical store as it lies on disk, or None when absent/empty.
     Cached per index path and re-read on another process's write (DiskSynced)."""
     from silica.kernel.recall.lexical import LexicalStore
-    from silica.kernel.recall.paths import index_dir_for, path_keyed_singleton
+    from silica.kernel.base.home import index_dir_for
+    from silica.kernel.base.durable import path_keyed_singleton
 
     p = index_dir_for(str(vault)) / "lexical.json"
     if not p.is_file():
@@ -243,7 +244,7 @@ def coverage(vault: Path) -> dict:
     `level`: "indexed" (embed or cooccur present: silica_recall will answer),
     "lexical-only" (silica_vaults can score it, recall cannot see it), "cold".
     """
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     idx = index_dir_for(str(vault))
 
@@ -408,7 +409,7 @@ def probe(vault: Path, query: str, k: int = 3, query_vec=None, reranker=None, *,
 
 
 def _brief(vault: Path) -> str:
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     try:
         got = json.loads((index_dir_for(str(vault)) / "vault_brief.json").read_text(encoding="utf-8"))

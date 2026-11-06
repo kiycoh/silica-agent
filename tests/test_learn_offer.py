@@ -414,7 +414,7 @@ def test_a_plan_computed_in_the_chat_is_the_plan_the_click_saves(tmp_vault, tmp_
     from silica.kernel.write import undo_journal
     from silica.ui.web import learn_routes
 
-    monkeypatch.setattr(undo_journal, "_DEFAULT_JOURNAL_PATH", tmp_path / "undo.db", raising=False)
+    monkeypatch.setattr(undo_journal, "_journal_path", lambda: tmp_path / "undo.db")
     for name in ("Softmax", "Chain rule"):
         tmp_vault.note(f"ML/{name}.md", f"---\ndate: 2026-01-01\n---\n# {name}\n\nBody of {name}.\n")
     tmp_vault.note("Plans/Esame.md", "# Esame\n")   # a note on the path: the draft takes the next name

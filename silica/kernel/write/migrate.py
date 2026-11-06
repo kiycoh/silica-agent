@@ -262,7 +262,7 @@ MIGRATIONS = (PROVENANCE_HEADER, SOURCES_FOOTNOTE)
 def _iter_notes(vault: Path):
     # The same walk derive_documents uses; not imported from there because the
     # code lane sits below the write lane (import-linter contract).
-    from silica.kernel.recall.paths import ignore_matcher
+    from silica.kernel.base.layout import ignore_matcher
 
     skip = ignore_matcher(vault)
     for dirpath, dirnames, filenames in os.walk(vault):

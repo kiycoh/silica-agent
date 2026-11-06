@@ -718,7 +718,7 @@ def test_web_research_leaf_survives_context_compaction(tmp_vault, monkeypatch):
     fetches trips run_agent's compaction sweep, which rewrites the old tool
     results in `messages` to elision stubs *in place*. A leaf built by reading
     `messages` after the loop returns is then a list of stubs, not the pages."""
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
 
     monkeypatch.setattr(CONFIG, "tavily_api_key", "k")
     _patch_run_agent_then_compact(monkeypatch, body="Findings.", fetches=_PAGES)
@@ -980,7 +980,7 @@ def test_fetch_to_inbox_falls_back_to_its_own_namespace(tmp_vault, monkeypatch):
 
 
 def test_fetch_to_inbox_writes_a_source_leaf(tmp_vault, monkeypatch):
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
 
     _patch_web_fetch(monkeypatch, "Source: https://a.test/post\n\nTitle\n\nBody.")
     note_rel = wr.fetch_to_inbox("https://a.test/post")
@@ -1016,7 +1016,7 @@ def test_fetch_to_inbox_does_not_attach_a_stale_leaf_after_nucleate(tmp_vault, m
     """A note's sources/ leaf outlives /nucleate consuming the note itself
     (by design). A later /fetch that happens to produce the same title must
     not inherit that unrelated, stale leaf for its own new note."""
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
 
     _patch_web_fetch(monkeypatch, "Source: https://a.test/first\n\nSame Title\n\nPage A body.")
     note_a = wr.fetch_to_inbox("https://a.test/first")
@@ -1236,7 +1236,7 @@ def test_web_research_binds_citations_and_leaves_the_bank_in_the_leaf(
     assert "Citation audit: 1 marker(s)" in body
     assert body.count("## Sources") == 1
 
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
 
     leaf = (
         Path(CONFIG.vault_path) / SOURCES_DIR / Path(note_rel).name

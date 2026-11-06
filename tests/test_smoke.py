@@ -165,7 +165,7 @@ def test_inbox_indexing_and_external_reads(tmp_path):
         assert [h.ref.path for h in hits] == ["Inbox/meeting_notes.md"]
 
         # 5. But the inbox is still never a legal op target.
-        from silica.kernel.recall.paths import is_inbox_path
+        from silica.kernel.base.layout import is_inbox_path
         assert is_inbox_path("Inbox/meeting_notes.md")
 
         # 6. A file outside the vault is not readable through the driver: a

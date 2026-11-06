@@ -5,6 +5,8 @@ fields Claude Code expands; every secret in an entry is Class B and lives in
 the keyring, never in os.environ."""
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import json
 
 import pytest
@@ -25,9 +27,8 @@ def _saved() -> dict:
 
 def test_the_file_lives_in_silica_home_not_in_a_vault():
     from silica.connectors import mcp_config
-    from silica.kernel.recall import paths
 
-    assert mcp_config.path() == paths._SILICA_HOME / "mcp.json"
+    assert mcp_config.path() == silica_home() / "mcp.json"
 
 
 def test_a_pasted_claude_code_file_loads_as_is():

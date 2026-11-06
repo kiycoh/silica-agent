@@ -142,7 +142,7 @@ class Taxonomy(BaseModel):
         Atomic: this file is read back by every organize run (`from_yaml`), so
         a torn write would lose the accumulated taxonomy, not one run's output.
         """
-        from silica.kernel.recall.paths import atomic_write_bytes
+        from silica.kernel.base.durable import atomic_write_bytes
 
         doc = yaml.dump(self.model_dump(), allow_unicode=True, sort_keys=False,
                         default_flow_style=False)

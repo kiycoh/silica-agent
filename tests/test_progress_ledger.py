@@ -23,7 +23,7 @@ def _runs_dir_is_tmp(tmp_path, monkeypatch):
     """
     import silica.kernel.progress as _mod
 
-    monkeypatch.setattr(_mod, "_RUNS_DIR", tmp_path)
+    monkeypatch.setattr(_mod, "runs_dir", lambda: tmp_path)
 
 
 # ---------------------------------------------------------------------------

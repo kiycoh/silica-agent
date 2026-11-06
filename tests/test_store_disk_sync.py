@@ -17,7 +17,8 @@ from __future__ import annotations
 import pytest
 
 from silica.kernel.recall import cooccurrence as cooc
-from silica.kernel.recall import embed, lexical, paths
+from silica.kernel.recall import embed, lexical
+from silica.kernel.base import durable
 
 
 # --- per-store adapters: (module, accessor, constructor, put, value, drop) ---
@@ -197,7 +198,7 @@ def test_failed_write_keeps_entries_dirty(
         raise OSError("disk full")
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(paths, "atomic_write_bytes", _boom)
+        mp.setattr(durable, "atomic_write_bytes", _boom)
         with pytest.raises(OSError):
             mine.save()
 

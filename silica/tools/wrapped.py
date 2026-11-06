@@ -392,7 +392,7 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
                           kept as a best-effort hint for backends that support it.
       delete  → recreate_deleted(path, prior_content=<full body>)
     """
-    from silica.kernel.base.manifest import seed_mirror_copy
+    from silica.kernel.write.mirror import seed_mirror_copy
 
     ops = parse_ops(ops_data)
     patch_refs: list[NoteRef] = []

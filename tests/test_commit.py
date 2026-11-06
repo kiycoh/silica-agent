@@ -105,7 +105,7 @@ def test_delete_op_path_is_leased():
 
 def test_commit_unlinks_staging_file():
     """The ~/.silica/tmp ops file must not survive the call (no disk leak)."""
-    from silica.kernel.recall.paths import silica_tmp_dir
+    from silica.kernel.base.home import silica_tmp_dir
 
     before = set(silica_tmp_dir().glob("*.json"))
     with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \

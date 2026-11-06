@@ -21,13 +21,15 @@ from __future__ import annotations
 import sqlite3
 import time
 from pathlib import Path
+from silica.config import silica_home
 
-_DEFAULT_LEDGER_PATH = Path.home() / ".silica" / "ledger.db"
+def _ledger_path() -> Path:
+    return silica_home() / "ledger.db"
 
 
 class Ledger:
     def __init__(self, path: Path | str | None = None):
-        self._path = Path(path) if path else _DEFAULT_LEDGER_PATH
+        self._path = Path(path) if path else _ledger_path()
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._ensure_schema()

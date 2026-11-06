@@ -14,6 +14,8 @@ the reader as the same files, put outside their vault by the host's relay.
 """
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import datetime
 import json
 import os
@@ -376,11 +378,11 @@ _NAME = re.compile(r"^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$")
 
 def invitations_dir() -> Path:
     raw = os.environ.get("SILICA_INVITATIONS_DIR", "").strip()
-    return Path(raw) if raw else Path.home() / ".silica" / "invitations"
+    return Path(raw) if raw else silica_home() / "invitations"
 
 
 def _done_dir() -> Path:
-    return Path.home() / ".silica" / "invitations-done"
+    return silica_home() / "invitations-done"
 
 
 def _stamp(d: Path) -> str:

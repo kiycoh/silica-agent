@@ -124,7 +124,7 @@ def _prefers(candidate, incumbent) -> bool:
     answers False and grouping keeps its first hit exactly as before.
     """
     from silica.kernel.base.manifest import active_write_dir, within
-    from silica.onboarding.adopt import SAFE_WRITE_DIR
+    from silica.kernel.base.manifest import SAFE_WRITE_DIR
 
     if active_write_dir() != SAFE_WRITE_DIR:
         return False
@@ -167,7 +167,7 @@ def silica_recon(inbox_file: Annotated[str, Field(description='Path to the inbox
             continue
             
         # Group hits by ref
-        from silica.kernel.recall.paths import is_inbox_path
+        from silica.kernel.base.layout import is_inbox_path
         grouped = {}
         for h in hits:
             # Casefolded: the archive is `Done` since 2026-08-23 while a vault

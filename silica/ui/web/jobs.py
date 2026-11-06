@@ -32,7 +32,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from silica.config import CONFIG, hosted
+from silica.config import CONFIG, hosted, silica_home
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +65,10 @@ class Refused(ValueError):
 
 
 def jobs_dir() -> Path:
-    # paths._SILICA_HOME and not Path.home(): the suite repoints that one name
+    # silica_home() and not Path.home(): the suite repoints that one name
     # for every store under ~/.silica, as media_admission's counter relies on.
-    from silica.kernel.recall import paths
 
-    return paths._SILICA_HOME / "jobs"
+    return silica_home() / "jobs"
 
 
 def _path(job_id: str) -> Path:
@@ -109,7 +108,7 @@ def _all() -> list[dict]:
 def _write(rec: dict) -> None:
     import json
 
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     atomic_write_bytes(_path(rec["id"]), json.dumps(rec, sort_keys=True).encode("utf-8"), mode=0o600)
     _publish(rec)

@@ -132,8 +132,8 @@ def path_for(leaf: str) -> Path:
     """`<index_dir>/inventory/<leaf-stem>.json`, beside quiz.jsonl: machine
     facing, out of the vault the reader browses (D31 Location)."""
     from silica.config import CONFIG
-    from silica.kernel.recall import paths
-    return paths.index_dir_for(CONFIG.vault_path) / "inventory" / f"{Path(leaf).stem}.json"
+    from silica.kernel.base import home
+    return home.index_dir_for(CONFIG.vault_path) / "inventory" / f"{Path(leaf).stem}.json"
 
 
 def load(leaf: str) -> dict | None:
@@ -146,7 +146,7 @@ def load(leaf: str) -> dict | None:
 
 
 def _save(leaf: str, inv: dict) -> None:
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
     p = path_for(leaf)
     p.parent.mkdir(parents=True, exist_ok=True)
     # Atomic: the import job rewrites the file after every section while the

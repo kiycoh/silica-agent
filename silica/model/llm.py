@@ -34,6 +34,15 @@ import functools
 
 logger = logging.getLogger(__name__)
 
+# What new text will cost is counted at 2 chars a token, so the estimate does
+# not come in under the request. chars // 3 was assumed to overestimate and does
+# not: Qwen3.5 tokenizes the test vault's converted lecture slides at 2.05 to
+# 2.41 chars a token, 26 of 30 notes under 3 (2026-10-01), and a request judged
+# to fit overflowed a 32k window by 820 tokens. Text under 2 chars a token (CJK,
+# minified code) can still overflow; llama.cpp's 400 then names the real count
+# and the loop resends once (loop.py). clamp_max_tokens counts input the same way.
+TEXT_CHARS_PER_TOKEN = 2
+
 from silica.config import CONFIG, hosted
 from silica.metrics import emit
 
@@ -1008,7 +1017,7 @@ def _request_chars(messages: list) -> int:
     """The request's size as the output clamp should read it: the serialized
     messages, with each inline image counted as `_IMAGE_TOKENS` instead of its
     data URL's length."""
-    from silica.agent.compaction import TEXT_CHARS_PER_TOKEN
+    from silica.model.llm import TEXT_CHARS_PER_TOKEN
 
     chars = len(str(messages))
     for m in messages:

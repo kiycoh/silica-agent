@@ -148,7 +148,7 @@ def compute_report(
                  _mtimes_override, _quiz_override, _transactions_override)
     memo_key = None
     if all(o is None for o in overrides):
-        from silica.kernel.recall.paths import vault_epoch
+        from silica.kernel.base.layout import vault_epoch
 
         if epoch := vault_epoch():
             memo_key = (epoch,
@@ -569,7 +569,7 @@ def compute_report(
     # freshly-ingested library, 12 of 12 orphans were staging files and the
     # orphan term was 92% of the total energy.
     # ------------------------------------------------------------------
-    from silica.kernel.recall.paths import is_staging_path
+    from silica.kernel.base.layout import is_staging_path
 
     orphans: list[str] = sorted(
         nid for nid in real_ids

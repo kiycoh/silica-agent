@@ -149,7 +149,7 @@ class TestThemeFilter:
                                                     for t in texts])
 
     def test_off_theme_facts_are_excluded_before_judging(self):
-        with patch("silica.kernel.recall.embed.document_theme_vector",
+        with patch("silica.kernel.base.vectors.document_theme_vector",
                    return_value=[1.0, 0.0]):
             kept, vecs, off = rs.filter_on_theme(
                 ["on-theme fact", "off-theme fact"], "source body",
@@ -159,7 +159,7 @@ class TestThemeFilter:
         assert vecs == [[1.0, 0.0]]
 
     def test_tau_zero_keeps_everything(self):
-        with patch("silica.kernel.recall.embed.document_theme_vector",
+        with patch("silica.kernel.base.vectors.document_theme_vector",
                    return_value=[1.0, 0.0]):
             kept, vecs, off = rs.filter_on_theme(
                 ["on-theme fact", "off-theme fact"], "source body",
@@ -167,7 +167,7 @@ class TestThemeFilter:
         assert kept == ["on-theme fact", "off-theme fact"] and off == 0
 
     def test_missing_theme_vector_keeps_everything(self):
-        with patch("silica.kernel.recall.embed.document_theme_vector",
+        with patch("silica.kernel.base.vectors.document_theme_vector",
                    return_value=[]):
             kept, _vecs, off = rs.filter_on_theme(
                 ["on-theme fact", "off-theme fact"], "source body",

@@ -70,7 +70,7 @@ def test_undated_source_leaves_the_leaf_undated(tmp_vault):
     `_incoming_side` as the incoming clock of every future contest this leaf
     feeds — ingest noise wearing the event clock's uniform."""
     from silica.driver import DRIVER
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import in_write_dir
 
     tmp_vault.note("Inbox/nodate.md", "verbatim source words\n")

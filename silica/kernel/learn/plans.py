@@ -1467,7 +1467,7 @@ VEC_MAX = 4000
 
 
 def _embed(texts: list[str], embedder) -> list[list[float]]:
-    from silica.kernel.recall.paths import index_dir
+    from silica.kernel.base.home import index_dir
 
     model = str(getattr(embedder, "model", "") or type(embedder).__name__)
     memo = _VEC_MEMO.get(str(index_dir()))
@@ -1490,7 +1490,8 @@ def _vectors_on_disk(value: dict | None = None) -> dict:
     unreadable."""
     import orjson
 
-    from silica.kernel.recall.paths import atomic_write_bytes, index_dir
+    from silica.kernel.base.durable import atomic_write_bytes
+    from silica.kernel.base.home import index_dir
 
     path = index_dir() / "plan_vectors.json"
     try:

@@ -27,6 +27,8 @@ Every refusal is a `MediaRefused` whose text is the sentence the user reads.
 """
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import json
 import logging
 import math
@@ -72,12 +74,11 @@ def _shown(minutes: float) -> str:
 
 
 def _counter_path() -> Path:
-    # paths._SILICA_HOME and not Path.home() here: the test suite repoints
+    # silica_home() and not Path.home() here: the test suite repoints
     # that one name for every store under ~/.silica, so a test that forgets
     # this file still never writes the developer's real counter.
-    from silica.kernel.recall import paths
 
-    return paths._SILICA_HOME / "transcription-seconds.json"
+    return silica_home() / "transcription-seconds.json"
 
 
 def _month() -> str:
@@ -209,7 +210,7 @@ def charge(seconds: float) -> None:
     dollars of a silent file are capped by the key's own month anyway."""
     if not seconds or not _minutes(MONTHLY_MINUTES_ENV):
         return
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     ledger = _ledger()
     month = _month()

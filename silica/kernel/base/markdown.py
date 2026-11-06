@@ -515,3 +515,11 @@ def resolve_relative(target: str, source_path: str) -> str | None:
     if joined == ".." or joined.startswith("../"):
         return None
     return joined
+
+
+def has_wikilink(content, name):
+    # Obsidian resolves links case-insensitively and with alias/heading
+    # suffixes: [[machine learning]], [[Machine Learning|ML]] and
+    # [[Machine learning#Storia]] all satisfy hub "Machine learning".
+    c, n = content.casefold(), name.casefold()
+    return any(f"[[{n}{suffix}" in c for suffix in ("]]", "|", "#"))

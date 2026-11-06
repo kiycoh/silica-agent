@@ -7,12 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from silica.kernel.write.run_log import (
-    DEFAULT_LOG_FILENAME,
-    append_log_line,
-    format_nucleate_event,
-    tail_log,
-)
+from silica.kernel.base.layout import DEFAULT_LOG_FILENAME
+from silica.kernel.write.run_log import append_log_line, format_nucleate_event, tail_log
 
 
 def test_format_nucleate_event_matches_brief_shape():

@@ -9,8 +9,7 @@ import pytest
 
 @pytest.fixture
 def wal(tmp_path, monkeypatch):
-    import silica.kernel.recall.paths as paths
-    monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path / "silica-home")
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / "silica-home")
     vault = tmp_path / "vault"
     vault.mkdir()
     return vault
@@ -50,7 +49,7 @@ def _digest(value):
 class TestChatgptExport:
     def test_bare_conversations_json_becomes_one_envelope_per_chat(self, tmp_path, wal):
         from silica.capture import run_import
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         export = tmp_path / "conversations.json"
         export.write_text(json.dumps(
@@ -73,7 +72,7 @@ class TestChatgptExport:
     def test_tiny_conversations_are_skipped(self, tmp_path, wal):
         """A one-line "hi" costs an LLM call to learn it said nothing."""
         from silica.capture import run_import
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         one_message = _chatgpt_conversation("short")
         del one_message["mapping"]["b"]
@@ -104,7 +103,7 @@ class TestExportArchive:
         import zipfile
 
         from silica.capture import run_import
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         archive = tmp_path / "export.zip"
         with zipfile.ZipFile(archive, "w") as z:
@@ -119,7 +118,7 @@ class TestExportArchive:
 class TestLocalClaudeCodeTranscripts:
     def test_a_directory_of_transcripts_is_imported_by_session_id(self, tmp_path, wal):
         from silica.capture import run_import
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         projects = tmp_path / "projects"
         (projects / "-home-u-repo").mkdir(parents=True)
@@ -142,7 +141,7 @@ class TestLocalClaudeCodeTranscripts:
     def test_a_live_captured_session_is_not_imported_again(self, tmp_path, wal):
         """Retroactive import reuses the live envelope name, so the hook wins."""
         from silica.capture import run_import, write_envelope
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         write_envelope(str(wal), "claude-code-sess-1-end.json",
                        {"version": 1, "source": "claude-code", "event": "session_end",
@@ -161,7 +160,7 @@ class TestImportSubcommand:
     def test_import_reports_counts_and_how_to_drain(self, tmp_path, wal, monkeypatch, capsys):
         from silica.cli import _dispatch_subcommand
         from silica.config import CONFIG
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         # `import` bootstraps the vault like `connect`/`mcp` do, and that
         # bootstrap lets the working directory outrank a merely-configured
@@ -192,7 +191,7 @@ class TestImportSubcommand:
 class TestIdempotency:
     def test_importing_the_same_export_twice_creates_nothing_new(self, tmp_path, wal):
         from silica.capture import run_import
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         export = tmp_path / "conversations.json"
         export.write_text(json.dumps([_chatgpt_conversation("c1")]), encoding="utf-8")
@@ -207,7 +206,7 @@ class TestIdempotency:
         import os
 
         from silica.capture import mark_processed, run_import
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         export = tmp_path / "conversations.json"
         export.write_text(json.dumps([_chatgpt_conversation("c1")]), encoding="utf-8")
@@ -222,7 +221,7 @@ class TestIdempotency:
 class TestClaudeAiExport:
     def test_the_same_file_name_is_disambiguated_by_schema(self, tmp_path, wal):
         from silica.capture import run_import
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         export = tmp_path / "conversations.json"
         export.write_text(json.dumps([_claude_ai_conversation("u1")]), encoding="utf-8")

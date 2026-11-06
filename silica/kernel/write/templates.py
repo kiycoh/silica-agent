@@ -384,7 +384,7 @@ def ensure_hub_link(content: str, hub: str | None) -> str:
     present. Callers: patch_snippet (fresh append) and the duplicate-block
     branch of _execute_patch — the repair must land even when the snippet
     itself is skipped, or lint fails the op forever."""
-    from silica.kernel.link.ofm import has_wikilink
+    from silica.kernel.base.markdown import has_wikilink
     if not hub or has_wikilink(content, hub):
         return content
     if content.startswith("---\n"):
@@ -768,7 +768,7 @@ def stamp_documents(content: str, documents: list[str], code_ref: str | None = N
     end = content.find("\n---\n", 4)
     if end == -1:
         return content  # unterminated frontmatter — leave for the lint to flag
-    from silica.kernel.code.codedocs import documents_of
+    from silica.kernel.base.frontmatter import documents_of
 
     data, _, _ = frontmatter.split(content)
     merged = list(dict.fromkeys(documents_of(data if isinstance(data, dict) else {})

@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from silica.kernel.link import ofm
 from silica.kernel.base import frontmatter
+from silica.kernel.base.markdown import has_wikilink
 from silica.driver import DRIVER
 
 # Internal wire-format delimiter (`===SILICA-BODY N===`, garbled variants
@@ -94,7 +95,7 @@ def validate_note(path, hub, op_type=None):
             # Notes live in the vault, so the vault's validated code-lane root
             # (ADR-0019) is the right base — not a walk-up from the note file.
             from silica.config import CONFIG
-            from silica.kernel.recall.paths import repo_root_for
+            from silica.kernel.base.roots import repo_root_for
             warnings += check_documents_paths(
                 data, repo_root=repo_root_for(getattr(CONFIG, "vault_path", "") or "")
             )
@@ -103,7 +104,7 @@ def validate_note(path, hub, op_type=None):
         # hub wikilink: required for spoke write/patch; NOT for hub-index/reformat/merge
         # overwrites, and NOT for the hub note itself (a self-link is meaningless).
         is_hub_note = hub and Path(path).stem.casefold() == hub.casefold()
-        if op_type != "overwrite" and hub and not is_hub_note and not ofm.has_wikilink(content, hub):
+        if op_type != "overwrite" and hub and not is_hub_note and not has_wikilink(content, hub):
             errors.append(f"Missing wikilink to [[{hub}]]")
 
         # atomicity: skip for patch (append) only

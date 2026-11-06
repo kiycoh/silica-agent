@@ -395,7 +395,7 @@ def _note_dir(src: Path, inbox: str) -> str:
     try:
         # A file attached to a chat (ADR-0121 point 5) converts beside itself,
         # inside its chat's folder, never into the inbox it was kept out of.
-        from silica.kernel.recall.paths import is_chat_path
+        from silica.kernel.base.layout import is_chat_path
 
         rel = src.resolve().relative_to(vault)
         if is_chat_path(rel.as_posix()):
@@ -2279,9 +2279,9 @@ def _display_path(src: Path) -> str:
     machine and silica_query_table resolves vault-relative first. Outside the
     repo the absolute path is the only true name, so it stays.
     """
-    from silica.kernel.recall import paths as _rpaths
+    from silica.kernel.base import roots
 
-    root = _rpaths.repo_root_for(CONFIG.vault_path) if CONFIG.vault_path else None
+    root = roots.repo_root_for(CONFIG.vault_path) if CONFIG.vault_path else None
     if root is not None:
         try:
             return src.resolve().relative_to(Path(root).resolve()).as_posix()
@@ -3361,10 +3361,10 @@ def _provenance_fm(src: Path, md_text: str = "",
     # code_ref arms /stale for git-tracked files. A file outside the repo gets
     # no edge — the graph's universe is the repo.
     if src.suffix.lower() in TABULAR_EXTS and CONFIG.vault_path:
-        from silica.kernel.code import gitstate
-        from silica.kernel.recall import paths as _rpaths
+        from silica.kernel.base import gitstate
+        from silica.kernel.base import roots
 
-        root = _rpaths.repo_root_for(CONFIG.vault_path)
+        root = roots.repo_root_for(CONFIG.vault_path)
         if root is not None:
             rels: list[str] = []
             for m in (tabular_members or [src]):
@@ -3394,7 +3394,7 @@ def _write_leaf(src: Path, body: str, name: str, fields: dict) -> None:
     re-import of the same paper refreshes its text in place.
     """
     from silica.driver import DRIVER
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import in_write_dir
     from silica.kernel.base import frontmatter
 

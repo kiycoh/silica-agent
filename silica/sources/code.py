@@ -14,8 +14,9 @@ from functools import lru_cache
 from pathlib import Path, PurePosixPath
 
 from silica.config import CONFIG
-from silica.kernel.code import codeast, gitstate
-from silica.kernel.recall import paths
+from silica.kernel.code import codeast
+from silica.kernel.base import gitstate
+from silica.kernel.base import roots
 from silica.kernel.code.codegraph import classify_import, supported_files
 from silica.kernel.text.sanitize import strip_degenerate_runs
 from silica.kernel.base.manifest import active_inbox_dir, active_write_dir
@@ -151,7 +152,7 @@ class CodeAdapter:
         vault = (CONFIG.vault_path or "").strip()
         if not vault:
             raise ValueError("no vault configured")
-        root = paths.repo_root_for(vault)
+        root = roots.repo_root_for(vault)
         if root is None:
             raise ValueError("no code-lane repo (vault is not inside its git repo)")
         try:

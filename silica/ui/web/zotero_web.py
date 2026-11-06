@@ -147,7 +147,7 @@ def _inbox_key(zot, value: str) -> str:
 
 def _row(item: dict, leaves: dict, det: dict, counts, there: dict | None = None) -> dict:
     from silica.sources.citations import norm_id
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import in_write_dir
 
     data = item["data"]
@@ -288,7 +288,7 @@ def paper_context(leaf_rel: str, props: dict, backlinks: list[dict]) -> dict:
     is never copied into the vault (decision 10).
     """
     from silica.sources.citations import paper_neighbours
-    from silica.kernel.recall.paths import is_source_leaf
+    from silica.kernel.base.layout import is_source_leaf
 
     nb = paper_neighbours(leaf_rel) or {"cites": [], "cited_by": [], "missing": [], "labels": {}}
     name = lambda rel: {"name": nb["labels"].get(rel, rel), "path": rel}  # noqa: E731

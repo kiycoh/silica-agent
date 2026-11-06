@@ -9,7 +9,7 @@ validate_operations, and never widens on a malformed manifest.
 import pytest
 
 from silica.cli import resolve_vault_switch
-from silica.kernel.recall.paths import looks_like_code
+from silica.onboarding.code_probe import looks_like_code
 from silica.kernel.base.manifest import (
     active_write_dir,
     load_manifest,

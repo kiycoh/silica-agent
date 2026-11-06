@@ -18,7 +18,7 @@ from silica.config import (
     claim_env,
     model_from_env,
 )
-from silica.kernel.code import gitstate
+from silica.kernel.base import gitstate
 from silica.kernel.base.manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
 from silica.ui.banner import print_banner
@@ -252,7 +252,7 @@ def write_env(updates: dict[str, str]) -> Path:
     (2026-10-11). The file holds every API key the user has, so a crash
     mid-write must not truncate it and a group must not read it.
     """
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     path = resolve_env_path()
     base = path.read_text(encoding="utf-8") if path.exists() else ""
@@ -1085,7 +1085,7 @@ def _run_wizard_inner(
         base = example.read_text(encoding="utf-8") if example else ""
     # Atomic: a crash mid-write here would truncate the live .env — every API
     # key the user has — not just the values being merged.
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
     atomic_write_bytes(env_path, merge_env(base, updates).encode("utf-8"), mode=0o600)
     CONSOLE.print(f"  [green]{GLYPHS['ok']} Wrote {env_path}[/]")
 

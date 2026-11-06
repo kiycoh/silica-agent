@@ -209,7 +209,7 @@ def scan_events(vault: Path) -> list[Event]:
     """Every Event note of `vault`. Walk parity with `timeline._all_rows`
     (dot-parts, ignore_matcher, SOURCES_DIR); memoized on the vault's
     file-state epoch like the timeline walk."""
-    from silica.kernel.recall.paths import SOURCES_DIR, ignore_matcher, vault_epoch
+    from silica.kernel.base.layout import SOURCES_DIR, ignore_matcher, vault_epoch
 
     epoch = vault_epoch(str(vault))
     if epoch:

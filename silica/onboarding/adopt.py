@@ -30,23 +30,13 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from silica.kernel.recall.paths import (
-    NOISE_DIRS,
-    SILICAIGNORE_REL,
-    looks_like_code,
-)
+from silica.kernel.base.layout import NOISE_DIRS, SILICAIGNORE_REL
+from silica.onboarding.code_probe import looks_like_code
 from silica.kernel.base.manifest import MANIFEST_REL
 
-logger = logging.getLogger(__name__)
+from silica.kernel.base.manifest import CODE_WRITE_DIR, SAFE_WRITE_DIR
 
-# Where notes go in a source tree: visible and committable next to the code.
-CODE_WRITE_DIR = "docs/silica"
-# Where notes go in a prose vault: a staging folder that MIRRORS the vault tree,
-# so `silica/Projects/foo.md` becomes `Projects/foo.md` by pasting the folder's
-# contents over the root. This one name is also the switch for the mirror rules
-# (prompt wording, new-folder check) — `docs/silica` is Silica's own tree in a
-# repo, not a mirror of it, so those rules do not apply there.
-SAFE_WRITE_DIR = "silica"
+logger = logging.getLogger(__name__)
 
 _SILICAIGNORE_HEADER = """\
 # .silicaignore — directory names Silica never walks when indexing this vault.
@@ -170,8 +160,8 @@ def resolve_cwd_vault(cwd, home=None):
     land inside it is the separate `write_dir` axis (`onboarding.adopt`).
     """
     from pathlib import Path
-    from silica.kernel.code import gitstate
-    from silica.kernel.recall.paths import is_system_dir
+    from silica.kernel.base import gitstate
+    from silica.kernel.base.layout import is_system_dir
 
     cwd = Path(cwd).resolve()
     if cwd == Path(home or Path.home()).resolve() or cwd == Path(cwd.anchor):

@@ -31,6 +31,7 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from silica.kernel.base.layout import is_vault_artifact
 
 
 @dataclass
@@ -168,7 +169,7 @@ _NODE_GHOST_COLOR   = {"background": "#141619", "border": "#545d67",
 
 
 def _infer_type(path: str) -> str:
-    from silica.kernel.recall.paths import is_source_leaf
+    from silica.kernel.base.layout import is_source_leaf
 
     # A converted document is the paper's square (ADR-0070): a source, which
     # is what the square already says. paper_layer then re-types the leaves
@@ -182,26 +183,6 @@ def _infer_type(path: str) -> str:
     if "hub" in stem:
         return "hub"
     return "note"
-
-
-# Silica's own generated files at the vault ROOT (log.md, GRAPH_REPORT.md) are
-# tooling output, not knowledge notes. The driver indexes them like any note, so
-# without this filter GRAPH_REPORT.md's hundreds of `[[...]]` would make it the
-# top hub AND give every note it lists an incoming link — silently zeroing the
-# orphan count on the next run. Matched by root-relative stem only, so a genuine
-# note in a subfolder (e.g. "Concepts/log.md") stays in the graph.
-_VAULT_ROOT_ARTIFACT_STEMS = frozenset({"log", "GRAPH_REPORT"})
-
-
-def is_vault_artifact(note_id: str) -> bool:
-    """True if `note_id` is a Silica-generated file at the vault root.
-
-    Id form varies by caller (graph node ids carry `.md`; other callers may
-    not), so this matches on the `.md`-stripped stem and requires no path
-    separator — i.e. vault-root only.
-    """
-    stem = note_id.replace("\\", "/").removesuffix(".md")
-    return "/" not in stem and stem in _VAULT_ROOT_ARTIFACT_STEMS
 
 
 # A note a Silica feature runs on (ADR-0070): drawn, as a diamond, but not
@@ -657,9 +638,9 @@ def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
 
 def semantic_snapshot_path() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
-    return paths.index_dir() / "semantic_partition.json"
+    return home.index_dir() / "semantic_partition.json"
 
 
 def load_semantic_snapshot() -> tuple[dict[int, set[str]], int]:
@@ -683,7 +664,7 @@ def load_semantic_snapshot() -> tuple[dict[int, set[str]], int]:
 def save_semantic_snapshot(clusters: dict[int, list[str]], next_id: int) -> None:
     import orjson
 
-    from silica.kernel.recall.paths import vault_epoch
+    from silica.kernel.base.layout import vault_epoch
 
     try:
         p = semantic_snapshot_path()
@@ -1158,9 +1139,9 @@ def discourse_shape(n_nodes: int, giant: int, cluster_sizes: list[int]) -> str:
 
 def cluster_ctx_path() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
-    return paths.index_dir() / "clusters_ctx.json"
+    return home.index_dir() / "clusters_ctx.json"
 
 
 # Bumped when the ctx KEY SHAPE changes: a cache written under the old shape is
@@ -1245,7 +1226,7 @@ def wikilink_graph_cached(folder: str = ""):
     both read the graph and never mutate it. See graph_distances for the
     memo's bound and eviction.
     """
-    from silica.kernel.recall.paths import vault_epoch
+    from silica.kernel.base.layout import vault_epoch
 
     epoch = vault_epoch()
     G = _distance_graph_memo.get((epoch, folder)) if epoch else None

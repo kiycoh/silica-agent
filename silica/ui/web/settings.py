@@ -30,6 +30,7 @@ from pathlib import Path
 
 from silica import SHELL_ENV
 from silica.config import (
+    silica_home,
     CONFIG,
     HOSTED_PROVIDERS,
     PROVIDER_PREFIXES,
@@ -671,5 +672,5 @@ def start_endpoint(label: str) -> dict:
     if not url:
         return {"ok": False, "error": f"{label} has no base url"}
     ok = ensure(label, url, command)
-    log = Path.home() / ".silica" / "logs" / f"{label}-server.log"
+    log = silica_home() / "logs" / f"{label}-server.log"
     return {"ok": ok, "log": short_path(log)}

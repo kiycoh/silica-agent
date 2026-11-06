@@ -130,7 +130,7 @@ def test_foreign_store_cache_is_bounded_and_evicts_the_least_recently_used(tmp_p
     # silica_vaults loads one embed store per known vault and a peek adds its
     # co-occurrence store: unbounded, a process serving one vault ends up
     # holding every vault on the machine (108 MB for the repo vault alone).
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     memory_lane.clear()
     vaults = []

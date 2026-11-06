@@ -346,8 +346,8 @@ def handle_write(fsm: "InjectorFSM") -> None:
         # Best-effort incremental lexical (BM25) refresh — opt-in by index
         # presence, so vaults without a lexical index stay byte-identical.
         try:
-            from silica.kernel.recall import paths as _paths
-            if (_paths.index_dir() / "lexical.json").is_file():
+            from silica.kernel.base import home
+            if (home.index_dir() / "lexical.json").is_file():
                 from silica.kernel.recall.lexical import get_lexical_store
                 lex = get_lexical_store()
                 for op in ops:

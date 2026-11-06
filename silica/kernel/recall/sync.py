@@ -45,7 +45,8 @@ from pathlib import Path
 import orjson
 
 from silica.config import CONFIG
-from silica.kernel.recall.paths import atomic_write_bytes, disk_stamp, index_dir
+from silica.kernel.base.durable import atomic_write_bytes, disk_stamp
+from silica.kernel.base.home import index_dir
 
 logger = logging.getLogger(__name__)
 

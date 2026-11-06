@@ -305,7 +305,7 @@ def _vault_scope() -> str:
     vault while sitting on a repo full of Markdown.
     """
     from silica.kernel.base.manifest import active_write_dir
-    from silica.onboarding.adopt import SAFE_WRITE_DIR
+    from silica.kernel.base.manifest import SAFE_WRITE_DIR
 
     vault = CONFIG.vault_path
     write_dir = active_write_dir()
@@ -503,7 +503,7 @@ def _attach_file_log() -> None:
     """
     from logging.handlers import RotatingFileHandler
     from silica.config import hosted
-    from silica.kernel.recall.paths import _SILICA_HOME
+    from silica.config import silica_home
 
     # A hosted tenant keeps no file of its own (ADR-0100 point 1): the privacy
     # notice promises the system journal and 14 days, and this file held the
@@ -520,7 +520,7 @@ def _attach_file_log() -> None:
     for h in root.handlers:
         if h.level == logging.NOTSET:
             h.setLevel(shown)
-    path = _SILICA_HOME / "logs" / "silica.log"
+    path = silica_home() / "logs" / "silica.log"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         fh = RotatingFileHandler(path, maxBytes=10_000_000, backupCount=3, encoding="utf-8")
@@ -604,7 +604,7 @@ def switch_vault(arg: str) -> VaultSwitch:
     from pathlib import Path
 
     from silica.driver import reset_driver
-    from silica.kernel.recall.paths import repo_root_warning
+    from silica.kernel.base.roots import repo_root_warning
     from silica.kernel.recall.relatedness import reset_vault_caches
     from silica.kernel.text.overlay import reset_overlay_cache
     from silica.kernel.base.manifest import (
@@ -699,7 +699,7 @@ def _activate_repo_mode() -> None:
 def _announce_code_lane() -> None:
     """Eager repo-root resolution (ADR-0019): validate the vault⊂repo invariant
     once at startup / vault switch and surface a violation loudly."""
-    from silica.kernel.recall.paths import repo_root_warning
+    from silica.kernel.base.roots import repo_root_warning
 
     warn = repo_root_warning(CONFIG.vault_path)
     if warn:
@@ -1506,7 +1506,7 @@ def _dc_path(args: list[str], *, raw_input: str = "", **_) -> bool:
 def _dc_contested(args: list[str], **_) -> bool:
     """/contested — notes flagged with an unresolved contradiction."""
     from silica.driver import DRIVER
-    from silica.kernel.recall.paths import vault_epoch
+    from silica.kernel.base.layout import vault_epoch
     from silica.kernel.write.contested import CONTESTED_KEY, CONTRADICTIONS_KEY
 
     # The scan frontmatter-parses every note, so it runs once per
@@ -2816,7 +2816,7 @@ def _resolve_pick(pick: str, listed: list[str], inbox: str) -> str:
 
     # Same rule VALIDATE applies to every op, asked once here instead of once
     # per rejected op an hour of LLM calls later.
-    from silica.kernel.recall.paths import contain_in_vault, is_inbox_path
+    from silica.kernel.base.layout import contain_in_vault, is_inbox_path
 
     # The excerpt above is INGESTED DOCUMENT text, so this reply is an
     # injection channel and the string it carries becomes a write destination
@@ -3038,7 +3038,7 @@ def _episodic_distill(content: str, envelope: dict, *, run_id: str,
         capture_from_distill,
         key_vocabulary_section,
     )
-    from silica.kernel.recall.paths import vault_digest
+    from silica.kernel.base.home import vault_digest
     from silica.kernel.text.keyphrase import extract_keyphrases
     from silica.kernel.text.payload import build_concept_entry
 
@@ -3473,7 +3473,7 @@ def _nucleate_expand_folders(
             # dropped there to OCR). In a SOURCE folder they are a book
             # photographed page by page: converting each page as its own
             # document is hundreds of one-page runs of garbage.
-            from silica.kernel.recall.paths import is_inbox_path
+            from silica.kernel.base.layout import is_inbox_path
             if not is_inbox_path(f.rstrip("/") + "/x.md"):
                 photos = [p for p in pending
                           if Path(p).suffix.lower() in IMG_EXTS]
@@ -3800,7 +3800,7 @@ def _zotero_backlink(leaf: tuple[str, dict], run_id: str | None) -> None:
 
 
 def _leaf_rel(name: str) -> str:
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import in_write_dir
 
     return f"{in_write_dir(SOURCES_DIR)}/{name}"
@@ -4173,7 +4173,7 @@ def _sc_settings(args: list[str], **_) -> str | None:
         node[leaf] = val
     # Atomic: a torn vault.yaml parses as defaults, and default write_dir=""
     # is the whole vault root — the exact boundary this file exists to set.
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
     atomic_write_bytes(mf, _yaml.safe_dump(
         data, allow_unicode=True, sort_keys=False).encode("utf-8"))
     reset_manifest_cache()
@@ -4354,7 +4354,7 @@ def _sc_organize(args: list[str], **_) -> str | None:
     # whole run reports success on an empty plan. Normalize here, where the
     # user types the path, and refuse a scope outside the vault out loud.
     if scope:
-        from silica.kernel.recall.paths import to_vault_relative
+        from silica.kernel.base.layout import to_vault_relative
         try:
             scope = to_vault_relative(scope, ensure_md=False)
         except ValueError as exc:

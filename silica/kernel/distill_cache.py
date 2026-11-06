@@ -21,6 +21,8 @@ which is what a frozen arm needs and not what a live vault wants.
 """
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import hashlib
 import json
 import logging
@@ -39,7 +41,7 @@ def enabled() -> bool:
 def cache_root() -> Path:
     """Cache home. A function and not a constant so a test can point it away
     from the developer's real ~/.silica."""
-    return Path.home() / ".silica" / "cache" / "distill"
+    return silica_home() / "cache" / "distill"
 
 
 def prompt_fingerprint(prompt: str) -> str:
@@ -83,7 +85,7 @@ def load(namespace: str, key: str) -> dict | None:
 def store(namespace: str, key: str, reply: dict) -> None:
     """Record a reply. Callers store successes only: an error entry would
     freeze one transient provider fault into every later run of that arm."""
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     path = entry_path(namespace, key)
     try:

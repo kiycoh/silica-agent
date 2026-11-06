@@ -5,11 +5,10 @@ import pytest
 
 from silica.config import CONFIG
 from evals import recall_weights
-from silica.kernel.recall import paths
 
 
 def _bind(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path)
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path)
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path), raising=False)
 
 

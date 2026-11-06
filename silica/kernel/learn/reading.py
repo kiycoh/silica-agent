@@ -22,6 +22,8 @@ marked, never dropped; an answer the next note does not hold is not shown.
 """
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import hashlib
 import heapq
 import json
@@ -833,9 +835,9 @@ _FAILED: dict[tuple[str, int], dict[int, str]] = {}
 
 def _log() -> Path:
     from silica.config import CONFIG
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
-    return paths.index_dir_for(CONFIG.vault_path) / LOG_NAME
+    return home.index_dir_for(CONFIG.vault_path) / LOG_NAME
 
 
 def record(reading: str, card: int, kind: str, text: str, unknown: bool = False) -> dict:
@@ -928,9 +930,8 @@ _JOBS_LOCK = threading.Lock()
 
 
 def _jobs_dir() -> Path:
-    from silica.kernel.recall import paths
 
-    return paths._SILICA_HOME / "jobs"
+    return silica_home() / "jobs"
 
 
 def _job_records(plan_path: str, step: int) -> list[dict]:
@@ -951,7 +952,7 @@ def _job_records(plan_path: str, step: int) -> list[dict]:
 
 
 def _write_job(rec: dict) -> None:
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     root = _jobs_dir()
     root.mkdir(parents=True, exist_ok=True)

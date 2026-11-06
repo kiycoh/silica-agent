@@ -31,7 +31,7 @@ from pathlib import Path
 
 from silica.kernel.base import frontmatter
 from silica.kernel.write.contested import note_clock
-from silica.kernel.recall.paths import SOURCES_DIR
+from silica.kernel.base.layout import SOURCES_DIR
 
 
 # vault -> (epoch, dated rows, paths of the notes the walk found no date for)
@@ -61,7 +61,7 @@ def _all_rows(vault: Path) -> list[tuple[str, str, str, str]]:
 def _scan(vault: Path) -> tuple[list[tuple[str, str, str, str]], list[str]]:
     """(the dated rows of `_all_rows`, the vault-relative paths of the notes
     the same walk found no date for), memoized together."""
-    from silica.kernel.recall.paths import ignore_matcher, vault_epoch
+    from silica.kernel.base.layout import ignore_matcher, vault_epoch
 
     epoch = vault_epoch(str(vault))
     if epoch:

@@ -18,7 +18,7 @@ import json
 import silica.tools.curate as curate
 from silica.kernel.report.curator import CurationItem, CurationPlan
 from silica.kernel.report.graph_report import VaultReport
-from silica.kernel.write.run_log import DEFAULT_LOG_FILENAME
+from silica.kernel.base.layout import DEFAULT_LOG_FILENAME
 
 
 def _plan(*items: CurationItem) -> CurationPlan:

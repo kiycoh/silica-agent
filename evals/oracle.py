@@ -69,7 +69,7 @@ def cached_text(model: str, messages: list[dict], **kwargs) -> str:
         text = (resp.text or "").strip()
         if text:
             try:
-                from silica.kernel.recall.paths import atomic_write_bytes
+                from silica.kernel.base.durable import atomic_write_bytes
 
                 path.parent.mkdir(parents=True, exist_ok=True)
                 atomic_write_bytes(path, json.dumps(

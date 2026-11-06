@@ -20,7 +20,8 @@ import json
 import logging
 
 from silica.kernel.recall.cooccurrence import cooccur_key
-from silica.kernel.recall.paths import atomic_write_bytes, index_dir
+from silica.kernel.base.durable import atomic_write_bytes
+from silica.kernel.base.home import index_dir
 
 logger = logging.getLogger(__name__)
 

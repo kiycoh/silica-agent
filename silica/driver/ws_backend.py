@@ -37,8 +37,8 @@ from silica.driver.base import (
     Txn,
 )
 from silica.kernel.base.markdown import extract_links_typed
-from silica.kernel.graph.graph_export import is_vault_artifact
-from silica.kernel.recall.paths import is_source_leaf
+from silica.kernel.base.layout import is_vault_artifact
+from silica.kernel.base.layout import is_source_leaf
 from silica.kernel.write import preserve, session_changes
 from silica.kernel.base import frontmatter as fm
 from silica.kernel.write.notetype import stamp_type

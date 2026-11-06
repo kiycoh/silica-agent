@@ -15,7 +15,7 @@ import httpx
 import openai
 from pydantic import BaseModel
 
-from silica.agent.compaction import TEXT_CHARS_PER_TOKEN
+from silica.model.llm import TEXT_CHARS_PER_TOKEN
 from silica.model.llm import LLMResponse, openrouter_routing
 from silica.config import DEFAULT_EMBEDDING_MODEL, HOSTED_PROVIDERS, ensure_prefix
 from silica.metrics import emit, ms_since, number, outcome_of
@@ -625,7 +625,7 @@ def local_rerank_model(config: Any) -> str:
     The override was declined on 2026-08-19 while one cross-encoder served every
     machine; it exists since 2026-09-27 for a personal stack on jina-reranker-v3.5,
     whose CC-BY-NC licence keeps it out of the default."""
-    from silica.agent.rerank_serve import LOCAL_RERANK_MODEL
+    from silica.config import LOCAL_RERANK_MODEL
 
     return getattr(config, "local_rerank_model", "") or LOCAL_RERANK_MODEL
 

@@ -150,8 +150,8 @@ def _out_dir(arg: str | None) -> Path:
     if arg:
         return Path(arg).expanduser()
     from silica.config import CONFIG
-    from silica.kernel.recall import paths
-    return paths.index_dir_for(CONFIG.vault_path) / "g0"
+    from silica.kernel.base import home
+    return home.index_dir_for(CONFIG.vault_path) / "g0"
 
 
 def _build(leaves: list[str], out: Path, *, fresh: bool, force: bool) -> int:

@@ -32,7 +32,7 @@ _ZIP_EPOCH = 315_619_200
 
 
 def _state_path(vault: Path) -> Path:
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     return index_dir_for(str(vault)) / STATE
 
@@ -52,7 +52,7 @@ def load_state(vault: Path) -> dict:
 
 
 def save_state(vault: Path, state: dict) -> None:
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     path = _state_path(vault)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -183,7 +183,7 @@ def plan_additions(vault: Path, state: dict, top: str) -> Plan:
     the leaves they cite that the person has no copy of, and every path link
     in them rewritten for the root of the person's Obsidian vault."""
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import (
         active_done_dir,
         active_write_dir,

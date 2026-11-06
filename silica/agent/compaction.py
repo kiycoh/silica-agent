@@ -363,14 +363,6 @@ def compact_read_history(
     return updated
 
 
-# What new text will cost is counted at 2 chars a token, so the estimate does
-# not come in under the request. chars // 3 was assumed to overestimate and does
-# not: Qwen3.5 tokenizes the test vault's converted lecture slides at 2.05 to
-# 2.41 chars a token, 26 of 30 notes under 3 (2026-10-01), and a request judged
-# to fit overflowed a 32k window by 820 tokens. Text under 2 chars a token (CJK,
-# minified code) can still overflow; llama.cpp's 400 then names the real count
-# and the loop resends once (loop.py). clamp_max_tokens counts input the same way.
-TEXT_CHARS_PER_TOKEN = 2
 # A collapsed read is credited at chars // 3: under what it frees on that dense
 # text, so the estimate after a collapse stays high; over by a twelfth on English
 # prose (~4 chars a token), which the 2-char count on the added side absorbs.

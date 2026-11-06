@@ -23,7 +23,7 @@ from silica.tools import tool
 logger = logging.getLogger(__name__)
 
 
-from silica.kernel.recall.paths import in_folder as _in_folder  # canonical folder-scope predicate
+from silica.kernel.base.layout import in_folder as _in_folder  # canonical folder-scope predicate
 
 
 @tool(cls="composed")
@@ -36,7 +36,7 @@ def silica_graph_export(output_path: Annotated[str, Field(description="Vault-rel
     structural audit use silica_vault_report.
     """
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import contain_in_vault
+    from silica.kernel.base.layout import contain_in_vault
 
     # The model names this path (audit 2026-10-09, S1). It used to write any
     # file, and a title carrying newlines turned `~/.silica/.env` into a
@@ -326,7 +326,7 @@ def _facade_search(text: str, k: int, memory: bool = True, folder: str = "") -> 
     """
     from silica.kernel.recall.perception import facade_retrieve
 
-    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.base.layout import is_inbox_path
 
     # Staging outranks the notes distilled from it: a raw lecture repeats every
     # term its notes split up, so it wins first-stage retrieval and then eats the
@@ -364,7 +364,7 @@ def _facade_search(text: str, k: int, memory: bool = True, folder: str = "") -> 
     notes = [r for r in results
              if r.origin == "memory" or not is_inbox_path(r.path or "")]
     if folder:
-        from silica.kernel.recall.paths import in_folder
+        from silica.kernel.base.layout import in_folder
 
         # A folder of THIS vault never contains a memory-lane path.
         notes = [r for r in notes if r.origin != "memory" and in_folder(r.path or "", folder)]
@@ -986,7 +986,7 @@ def silica_embed_refresh(folder: Annotated[str, Field(description='Vault-relativ
     # cheap stage of silica_vaults (1.4 MB for 872 notes) never existed where
     # the 18 MB embed store did. Whole vault only: a folder-scoped first build
     # would leave a partial index the sweep then keeps partial.
-    from silica.kernel.recall.paths import index_dir
+    from silica.kernel.base.home import index_dir
     # New readings re-sign the notes that embed them, so the embed pass above
     # caught them; the lexical store keys on nothing it could compare, so it is
     # rebuilt whole (seconds, 1.4 MB on 872 notes) rather than left without them.

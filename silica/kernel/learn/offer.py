@@ -510,7 +510,7 @@ def mode() -> str:
 
 
 def _log_path():
-    from silica.kernel.recall.paths import index_dir
+    from silica.kernel.base.home import index_dir
 
     return index_dir() / "study_offers.jsonl"
 

@@ -125,7 +125,7 @@ def library(zot) -> dict:
 
 
 def _cache_path(vault: str) -> Path:
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     return index_dir_for(str(vault)) / "zotero_covers.json"
 
@@ -203,7 +203,7 @@ def _nearest(query: str, resolve) -> list[str]:
     four times as many, and keeps the first K_NEAREST notes left. The first
     call is the measured k=5 one, so a vault without them runs exactly the
     measured search."""
-    from silica.kernel.recall.paths import is_source_leaf, is_staging_path
+    from silica.kernel.base.layout import is_source_leaf, is_staging_path
 
     for k in (K_NEAREST, 4 * K_NEAREST):
         found = _search(query, k)

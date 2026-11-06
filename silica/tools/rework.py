@@ -295,7 +295,8 @@ def _fits_chat(text: str, share: float) -> bool:
     turn under the line where compaction starts, counted as the pre-call fit
     counts (2 chars a token). Past it the fit stubs the source once the
     result is in the call's arguments: hosted t06, 2026-10-22."""
-    from silica.agent.compaction import COMPACT_FRACTION, TEXT_CHARS_PER_TOKEN
+    from silica.agent.compaction import COMPACT_FRACTION
+    from silica.model.llm import TEXT_CHARS_PER_TOKEN
     from silica.config import CONFIG
 
     return len(text) * (1 + share) / TEXT_CHARS_PER_TOKEN <= COMPACT_FRACTION * CONFIG.max_context_tokens

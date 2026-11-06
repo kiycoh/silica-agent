@@ -197,7 +197,8 @@ def _scan_dedup_pairs(folder: str = "") -> tuple[list[dict], str | None]:
     """
     import numpy as np
 
-    from silica.kernel.recall.embed import get_store, _cosine
+    from silica.kernel.recall.embed import get_store
+    from silica.kernel.base.vectors import cosine
     from silica.config import CONFIG as _C
 
     store = get_store()
@@ -225,7 +226,7 @@ def _scan_dedup_pairs(folder: str = "") -> tuple[list[dict], str | None]:
         ponytail: memo, because the title gate below re-converted the same stored
         list on every candidate pair — 10 conversions per distinct vector, measured
         — and the conversion, not the dot product, was the cost (158 us -> 6.6 us
-        per pair). float64 specifically: `_cosine` asks for float64, so asarray on
+        per pair). float64 specifically: `cosine` asks for float64, so asarray on
         an already-float64 array is a no-op and the score stays bit-identical; a
         float32 cache would be re-copied on every call and is slower than no cache
         at all. Drop this if the title vectors ever arrive as arrays.
@@ -247,7 +248,7 @@ def _scan_dedup_pairs(folder: str = "") -> tuple[list[dict], str | None]:
             title_vec_p = _title_vec(p)
             title_vec_o = _title_vec(other)
             title_score = (
-                _cosine(title_vec_p, title_vec_o)
+                cosine(title_vec_p, title_vec_o)
                 # `is not None`, not truthiness: a numpy array raises on bool().
                 if title_vec_p is not None and title_vec_o is not None
                 else 0.0
@@ -411,7 +412,7 @@ def silica_generate_taxonomy(
     # through the vault choke point: to_yaml creates parent dirs and writes, so
     # an absolute or `..` path would plant a file anywhere on the filesystem.
     if save_path:
-        from silica.kernel.recall.paths import contain_in_vault
+        from silica.kernel.base.layout import contain_in_vault
         try:
             dest = Path(CONFIG.vault_path) / contain_in_vault(save_path, Path(CONFIG.vault_path))
         except ValueError as exc:

@@ -13,6 +13,8 @@ moves folders.
 """
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import logging
 import os
 import re
@@ -132,7 +134,7 @@ def host_reviews() -> dict:
 def claim_path() -> Path:
     """Where the account asks for a handle; silica-hosted bin/pages claims reads
     it as root, never through a link, and removes it once answered."""
-    return Path.home() / ".silica" / "handle-request.json"
+    return silica_home() / "handle-request.json"
 
 
 def _asked() -> str:
@@ -431,7 +433,7 @@ def never_dirs() -> tuple[str, ...]:
     """The folders Silica writes for its own work, never published and given
     no globe (ADR-0143 point 3): the text of every nucleated document sits in
     sources/, the inbox and its archive hold converted files."""
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import (
         active_done_dir,
         active_inbox_dir,
@@ -570,7 +572,7 @@ def site_root(h: str | None = None) -> Path:
     one folder per Public vault; `paused/<vault>` a vault's last publication
     while it is off; `private/<vault>` a Private vault, for the relay only."""
     base = os.environ.get("SILICA_PUBLIC_DIR", "").strip()
-    root = Path(base).expanduser() if base else Path.home() / ".silica" / "public"
+    root = Path(base).expanduser() if base else silica_home() / "public"
     return root / (h if h is not None else handle())
 
 

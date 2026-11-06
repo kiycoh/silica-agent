@@ -12,7 +12,7 @@ from silica.kernel.recall import vault_registry as reg
 @pytest.fixture
 def index(tmp_path, monkeypatch):
     """~/.silica/index under the suite's sandboxed home, one dir per case."""
-    from silica.kernel.recall.paths import _SILICA_HOME
+    from silica.config import silica_home
 
     media = tmp_path / "media"
     (media / "me").mkdir(parents=True)
@@ -29,7 +29,7 @@ def index(tmp_path, monkeypatch):
         "unplugged": ("vault.json", media / "me" / "Unplugged" / "vault"),
         "off-mounted": ("vault.json", media / "me" / "Mounted" / "removed"),
     }
-    base = _SILICA_HOME / "index"
+    base = silica_home() / "index"
     for name, (marker, folder) in cases.items():
         (base / name).mkdir(parents=True)
         (base / name / marker).write_text(json.dumps({"path": str(folder)}), encoding="utf-8")

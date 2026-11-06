@@ -26,7 +26,7 @@ import orjson
 
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.ops_io import load_ops
-from silica.kernel.recall.paths import silica_tmp_dir
+from silica.kernel.base.home import silica_tmp_dir
 
 logger = logging.getLogger(__name__)
 

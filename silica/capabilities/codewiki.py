@@ -309,8 +309,8 @@ def run_wiki(config, folder: str | None = None,
     from silica.agent.commit import commit_derived
     from silica.config import CONFIG
     from silica.kernel.base import frontmatter
-    from silica.kernel.code import gitstate
-    from silica.kernel.recall import paths
+    from silica.kernel.base import gitstate
+    from silica.kernel.base import roots
     from silica.kernel.code.codedocs import CHANGE_STRUCTURAL, invalidate_snapshot, snapshot
     from silica.kernel.code.codegraph import load_codegraph
     from silica.kernel.code.codewiki import (
@@ -323,7 +323,7 @@ def run_wiki(config, folder: str | None = None,
                 "reason": "no vault bound — bind the vault before running /wiki",
                 "written": [], "skipped": [], "failed": [], "parse_errors": 0}
     vault = Path(CONFIG.vault_path)
-    root = paths.repo_root_for(vault)
+    root = roots.repo_root_for(vault)
     if root is None:
         return {"status": "no_repo", "written": [], "skipped": [], "failed": [],
                 "parse_errors": 0}

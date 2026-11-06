@@ -2,7 +2,7 @@ import subprocess
 from pathlib import Path
 
 
-from silica.kernel.code import gitstate
+from silica.kernel.base import gitstate
 
 
 def _init_repo(path: Path) -> None:

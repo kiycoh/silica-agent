@@ -21,7 +21,7 @@ import pytest
 from silica.config import CONFIG
 from silica.kernel.recall import vault_registry as reg
 from silica.kernel.recall.lexical import LexicalStore
-from silica.kernel.recall.paths import index_dir_for
+from silica.kernel.base.home import index_dir_for
 
 VAULTS = {
     "bread": [

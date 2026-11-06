@@ -26,7 +26,8 @@ import numpy as np
 import orjson
 
 from silica.kernel.text import language
-from silica.kernel.recall.paths import DiskSynced, in_folder, quarantine
+from silica.kernel.base.durable import DiskSynced, quarantine
+from silica.kernel.base.layout import in_folder
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +47,9 @@ MAX_BODY_CHARS = 20_000
 
 def _index_path() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
-    return paths.index_file("cooccurrence")
+    return home.index_file("cooccurrence")
 
 
 def _index_path_for(vault: str) -> Path:
@@ -58,9 +59,9 @@ def _index_path_for(vault: str) -> Path:
     store must not silently fall back to whatever vault CONFIG currently
     points at (that would be a false cross-vault mismatch on a vault switch
     or a fresh `SilicaConfig()`). Tests monkeypatch this directly."""
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
-    return paths.index_dir_for(vault) / "cooccurrence.json"
+    return home.index_dir_for(vault) / "cooccurrence.json"
 
 
 def frozen_lang(vault: str) -> str | None:
@@ -339,7 +340,7 @@ def get_cooccur_store(lang: str = "english") -> "CooccurStore":
     ``embed.get_store``). ``lang`` only seeds an empty store; a loaded store
     keeps the language frozen on disk. Use ``clear()`` in tests.
     """
-    from silica.kernel.recall.paths import path_keyed_singleton
+    from silica.kernel.base.durable import path_keyed_singleton
     store = path_keyed_singleton(_STORE_CACHE, str(_index_path()), lambda: CooccurStore(lang=lang))
     store.sync_from_disk()
     return store
@@ -543,7 +544,7 @@ class CooccurStore(DiskSynced):
         invalidated with the other derived caches. Gives df (len of a posting) and
         the candidate set (union of query-stem postings) without an all-notes scan."""
         if self._stem_postings is None:
-            from silica.kernel.recall.paths import build_postings
+            from silica.kernel.base.durable import build_postings
             self._stem_postings = build_postings({p: self.note_nodes(p) for p in self._notes})
         return self._stem_postings
 
@@ -844,7 +845,7 @@ def build_index(
             ),
         )
     if prune:
-        from silica.kernel.recall.paths import in_folder
+        from silica.kernel.base.layout import in_folder
         live = {path for path, _, _ in notes}
         for p in [p for p in store.paths() if p not in live and in_folder(p, folder)]:
             store.delete_note(p)

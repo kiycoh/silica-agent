@@ -39,7 +39,7 @@ from typing import Any
 
 import httpx
 
-from silica.config import hosted
+from silica.config import hosted, silica_home
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ def budget_layers(data: dict[str, Any]) -> list[Layer]:
 
 
 def _state_path() -> Path:
-    return Path.home() / ".silica" / "usage_window.json"
+    return silica_home() / "usage_window.json"
 
 
 def _load_window() -> dict[str, float] | None:
@@ -155,7 +155,7 @@ def _load_window() -> dict[str, float] | None:
 
 
 def _save_window(state: dict[str, float]) -> None:
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     atomic_write_bytes(_state_path(), json.dumps(state).encode("utf-8"))
 

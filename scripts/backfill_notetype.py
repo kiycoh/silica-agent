@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from silica.kernel.recall.paths import ignore_matcher  # noqa: E402
+from silica.kernel.base.layout import ignore_matcher  # noqa: E402
 from silica.kernel.write.notetype import stamp_type    # noqa: E402
 
 

@@ -5,6 +5,8 @@
 next to the Python ones and expanded by the same dispatch."""
 from __future__ import annotations
 
+from silica.config import silica_home
+
 from pathlib import Path
 
 from silica.cli import _expand_workflow_shortcut as expand
@@ -33,10 +35,9 @@ def test_a_vault_skill_is_listed_and_expanded():
 def test_a_skill_never_shadows_a_python_command():
     """Dispatch asks _SHORTCUTS first, so a skill named /quiz would be listed
     and never run: it is left out of the list instead."""
-    from silica.kernel.recall import paths
     from silica.ui.commands import commands
 
-    _skill(paths._SILICA_HOME / "skills", "quiz", "home quiz")
+    _skill(silica_home() / "skills", "quiz", "home quiz")
     assert [c.name for c in commands()].count("/quiz") == 1
     assert "home quiz" not in expand("/quiz Concepts/ML")
 

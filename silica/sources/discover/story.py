@@ -383,7 +383,7 @@ def save(vault: str | None, sid: str, answer: str = "", question: str = "") -> s
 def unsave(vault: str | None, sid: str, path: str) -> None:
     """Undo a save: the note and its source leaf go."""
     from silica.driver import DRIVER
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
 
     for p in (path, f"{SOURCES_DIR}/{path.rsplit('/', 1)[-1]}"):
         try:

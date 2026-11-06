@@ -91,8 +91,8 @@ _cache: dict[str, object] = {"key": None, "store": None}
 
 
 def _path() -> Path:
-    from silica.kernel.recall import paths
-    return paths.index_file("image_readings")
+    from silica.kernel.base import home
+    return home.index_file("image_readings")
 
 
 def _load() -> dict:
@@ -110,7 +110,7 @@ def _load() -> dict:
 
 def _save(store: dict) -> None:
     import orjson
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
     atomic_write_bytes(_path(), orjson.dumps(store))
 
 

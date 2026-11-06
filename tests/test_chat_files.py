@@ -57,7 +57,7 @@ def _drain():
 
 
 def _folder(server) -> str:
-    from silica.kernel.recall.paths import chat_folder
+    from silica.kernel.base.layout import chat_folder
 
     return chat_folder(server.current_session_id)
 
@@ -331,7 +331,7 @@ def test_search_results_name_their_notes():
 
 
 def test_a_chat_file_converts_beside_itself_and_reports_its_pages(tmp_vault):
-    from silica.kernel.recall.paths import chat_folder
+    from silica.kernel.base.layout import chat_folder
 
     src = Path(tmp_vault.note(f"{chat_folder('abc123')}/paper.pdf", ""))
     assert conv._note_dir(src, "Inbox") == chat_folder("abc123")

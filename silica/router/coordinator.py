@@ -305,7 +305,7 @@ class Coordinator:
             # Runs a Ctrl+C stopped never reached this sweep (their marker is
             # Orchestrator._mark_interrupted). Only those this vault holds
             # records of are taken in and cleared: another vault's stays.
-            stopped = {p.parent.name for p in _progress._RUNS_DIR.glob("*/interrupted")}
+            stopped = {p.parent.name for p in _progress.runs_dir().glob("*/interrupted")}
             stopped &= {r.get("run_id") for r in records}
             notes = {
                 n

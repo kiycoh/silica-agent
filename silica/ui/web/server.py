@@ -2168,7 +2168,8 @@ def _save_attachments(images: list) -> list[Path]:
     import hashlib
 
     from silica.kernel.recall.image_readings import _MIME
-    from silica.kernel.recall.paths import atomic_write_bytes, attachments_dir
+    from silica.kernel.base.durable import atomic_write_bytes
+    from silica.kernel.base.home import attachments_dir
 
     if len(images) > _MAX_ATTACHED:
         raise HTTPException(status_code=400, detail=f"at most {_MAX_ATTACHED} images per message")
@@ -2211,7 +2212,7 @@ def _attached_images(content: str) -> tuple[str, list[dict]]:
 def attachment(name: str):
     """An image attached to a chat turn. The name is the content hash the server
     gave it, so nothing else under ~/.silica can be asked for by name."""
-    from silica.kernel.recall.paths import attachments_dir
+    from silica.kernel.base.home import attachments_dir
     path = attachments_dir() / name
     if not _ATTACHMENT_NAME_RE.fullmatch(name) or not path.is_file():
         raise HTTPException(status_code=404)
@@ -2821,7 +2822,7 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     turns. Otherwise the turn starts with the files that were ready."""
     if not _begin_turn():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
-    from silica.kernel.recall.paths import chat_folder
+    from silica.kernel.base.layout import chat_folder
     from silica.ui.web import jobs
 
     try:
@@ -2898,7 +2899,7 @@ def _chat_rel(rel: str, sid: str | None = None) -> tuple[str, str]:
     """(the chat folder, the rest of the path) for a file of a chat's folder;
     with `sid`, only of that chat. Anything else is refused: these routes copy
     what the browser names, and it names only its own chat's files."""
-    from silica.kernel.recall.paths import CHAT_DIR
+    from silica.kernel.base.layout import CHAT_DIR
 
     parts = Path(rel).parts
     at = parts.index(CHAT_DIR) if CHAT_DIR in parts else -1
@@ -3354,7 +3355,7 @@ def workspaces_membership(path: str, folder: bool = False):
 
 async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list[dict], set[str]]:
     from silica.config import hosted
-    from silica.kernel.recall.paths import ignore_matcher
+    from silica.kernel.base.layout import ignore_matcher
     from silica.kernel.base.manifest import (
         _UNRESOLVABLE_WRITE_DIR,
         active_write_dir,
@@ -4925,7 +4926,8 @@ def _write_asset(canon: str, data: bytes, suffix: str) -> str:
     second take ` 2`, and atomic_write_bytes would replace the first."""
     from datetime import datetime
 
-    from silica.kernel.recall.paths import atomic_write_bytes, contain_in_vault
+    from silica.kernel.base.durable import atomic_write_bytes
+    from silica.kernel.base.layout import contain_in_vault
     from silica.kernel.workspaces import _EDIT_LOCK
 
     root = Path(CONFIG.vault_path)
@@ -6383,9 +6385,9 @@ def _top_hubs(nodes: list[dict], edges: list[dict], top_n: int = 24) -> list[dic
 # bookkeeping never lands in a folder the user reads.
 
 def _brief_path() -> Path:
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
-    return paths.index_dir() / "vault_brief.json"
+    return home.index_dir() / "vault_brief.json"
 
 
 @app.get("/limits")
@@ -6777,7 +6779,7 @@ def delete_session(payload: dict):
     # student added to the vault stays, being the vault's now.
     import shutil
 
-    from silica.kernel.recall.paths import chat_folder
+    from silica.kernel.base.layout import chat_folder
 
     # Tolerated: a chat that never had a file has no folder, and a file the
     # system will not remove stays behind a deletion that already happened
@@ -6823,10 +6825,10 @@ def _user_turn_seqs(beats: list[dict]) -> list[int]:
 def _flagged(sid: str) -> set[int]:
     """The answers of `sid` already flagged, so a reopened chat says so and a
     second click is not a second flag."""
-    from silica.kernel.recall.paths import _SILICA_HOME
+    from silica.config import silica_home
 
     try:
-        lines = (_SILICA_HOME / "flags.jsonl").read_text(encoding="utf-8").splitlines()
+        lines = (silica_home() / "flags.jsonl").read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
         return set()
     out = set()
@@ -6869,7 +6871,7 @@ def flag_answer(payload: dict):
     """Append one flag to `<home>/flags.jsonl`: time, session, the seq of the
     user beat that opened the turn, and the student's own line."""
     from silica.config import hosted
-    from silica.kernel.recall.paths import _SILICA_HOME
+    from silica.config import silica_home
 
     if not hosted():
         raise HTTPException(status_code=404, detail="Not Found")
@@ -6886,7 +6888,7 @@ def flag_answer(payload: dict):
         raise HTTPException(status_code=404, detail="that answer is not in this chat")
     if seq in _flagged(sid):
         return {"ok": True, "already": True}  # one flag per answer; a second click is not news
-    path = _SILICA_HOME / "flags.jsonl"
+    path = silica_home() / "flags.jsonl"
     rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "session": sid,
            "answer": seq, "note": note}
     path.parent.mkdir(parents=True, exist_ok=True)

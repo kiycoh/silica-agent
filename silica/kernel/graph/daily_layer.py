@@ -90,10 +90,10 @@ _STORES: dict[str, Any] = {}
 
 def block_store():
     """The current vault's block store, one instance per file like get_store()."""
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
     from silica.kernel.recall.embed import EmbedStore
 
-    path = paths.index_file("daily_blocks")
+    path = home.index_file("daily_blocks")
     store = _STORES.get(str(path))
     if store is None:
         store = _STORES[str(path)] = EmbedStore(path)

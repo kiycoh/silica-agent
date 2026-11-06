@@ -29,6 +29,7 @@ Exit 0 when the arm meets its expectation, 1 otherwise.
 """
 from __future__ import annotations
 
+import silica.config as config
 import argparse
 import json
 import os
@@ -96,10 +97,9 @@ def main() -> int:
         os.environ["SILICA_EMBEDDING_BASE_URL"] = "http://127.0.0.1:9/v1"
 
     import silica.kernel.recall.embed as embed_mod
-    import silica.kernel.recall.paths as paths_mod
     import silica_core.kernel.recall.paths as core_paths_mod
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import vault_digest
+    from silica.kernel.base.home import vault_digest
     from silica.onboarding.serve import ready
 
     sandbox = Path(tempfile.mkdtemp(prefix="silica-0094-replay-"))
@@ -109,9 +109,9 @@ def main() -> int:
         print(f"no index for {a.vault} under {src}", file=sys.stderr)
         return 2
     shutil.copytree(src, sandbox / "index" / digest)
-    paths_mod._SILICA_HOME = sandbox
+    config._SILICA_HOME = sandbox
     core_paths_mod._SILICA_HOME = sandbox
-    embed_mod._LEGACY_INDEX_PATH = sandbox / "index" / "embeddings.json"
+    embed_mod._legacy_index_path = lambda: sandbox / "index" / "embeddings.json"
     CONFIG.vault_path = a.vault
 
     if a.arm == "running":

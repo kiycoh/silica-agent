@@ -141,7 +141,7 @@ def _maxsim(legs: Legs) -> list[tuple[str, float]] | None:
 # ---------------------------------------------------------------------------
 
 def _top(fused: dict[str, float], k: int) -> list[str]:
-    from silica.kernel.graph.graph_export import is_vault_artifact
+    from silica.kernel.base.layout import is_vault_artifact
 
     ranked = sorted(fused.items(), key=lambda kv: (-kv[1], kv[0]))
     return [p for p, _ in ranked if not is_vault_artifact(p)][:k]

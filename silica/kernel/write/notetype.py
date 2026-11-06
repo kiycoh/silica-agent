@@ -45,7 +45,7 @@ def derive_type(path: str, content: str) -> str:
     everything without a signal is a plain Note.
     """
     from silica.kernel.plans import VALID_STATUS
-    from silica.kernel.recall.paths import is_source_leaf
+    from silica.kernel.base.layout import is_source_leaf
 
     if is_source_leaf(path):
         return SOURCE
@@ -240,9 +240,9 @@ def okf_conformance(vault: Path | str) -> Census:
     A path that is not a directory raises instead of reading as an empty,
     conformant bundle: a zero-file scan is an invocation error, never a pass.
     """
-    from silica.kernel.recall.paths import ignore_matcher
+    from silica.kernel.base.layout import ignore_matcher
 
-    from silica.kernel.write.run_log import DEFAULT_LOG_FILENAME
+    from silica.kernel.base.layout import DEFAULT_LOG_FILENAME
     from silica.kernel.base.manifest import load_manifest
 
     vault = Path(vault)

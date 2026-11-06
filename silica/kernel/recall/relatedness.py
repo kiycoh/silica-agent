@@ -40,8 +40,8 @@ from typing import Callable
 
 from silica.kernel.recall.cooccurrence import CooccurStore, cooccur_key
 from silica.kernel.recall.embed import EmbedStore
-from silica.kernel.graph.graph_export import is_vault_artifact
-from silica.kernel.recall.paths import in_folder
+from silica.kernel.base.layout import is_vault_artifact
+from silica.kernel.base.layout import in_folder
 
 logger = logging.getLogger(__name__)
 
@@ -531,7 +531,7 @@ def _mirror_prefix() -> str:
     """
     try:
         from silica.kernel.base.manifest import active_write_dir
-        from silica.onboarding.adopt import SAFE_WRITE_DIR
+        from silica.kernel.base.manifest import SAFE_WRITE_DIR
 
         wd = active_write_dir()
         return wd + "/" if wd == SAFE_WRITE_DIR else ""

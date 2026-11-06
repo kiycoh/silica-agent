@@ -27,7 +27,7 @@ def _is_staging(path: str) -> bool:
     if p.startswith("done/") or "/done/" in p:
         return True
     try:
-        from silica.kernel.recall.paths import is_inbox_path  # lazy: CONFIG-backed
+        from silica.kernel.base.layout import is_inbox_path  # lazy: CONFIG-backed
         return is_inbox_path(path)
     except Exception:
         return p.startswith("inbox/") or "/inbox/" in p

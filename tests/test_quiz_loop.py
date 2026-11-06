@@ -141,7 +141,7 @@ def _vault_note(rel: str) -> None:
 def test_digest_surfaces_weak_notes(log, tmp_path):
     """A missed note reaches the human through the run digest, not only /graph."""
     import silica.kernel.progress as _mod
-    _mod._RUNS_DIR = tmp_path
+    _mod.runs_dir = lambda: tmp_path
 
     p = _mod.ProgressLedger.new(mode="chat", inputs={})
     assert "WEAK RECALL" not in p.digest()  # nothing graded yet: nothing to say
@@ -155,7 +155,7 @@ def test_digest_surfaces_weak_notes(log, tmp_path):
 def test_digest_retires_a_note_recalled_since_the_miss(log, tmp_path):
     """One old miss must not haunt the digest after the reader re-learns the note."""
     import silica.kernel.progress as _mod
-    _mod._RUNS_DIR = tmp_path
+    _mod.runs_dir = lambda: tmp_path
 
     _vault_note("Relearned.md")
     _vault_note("Struggling.md")

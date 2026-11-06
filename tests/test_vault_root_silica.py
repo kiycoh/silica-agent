@@ -27,7 +27,7 @@ def test_the_inbox_stays_inside_the_write_boundary(tmp_path, monkeypatch):
         f"docs/silica/{CONFIG.inbox_dir}/materiale.md"
     ]
     # And the staging area is still recognised as such at its new depth.
-    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.base.layout import is_inbox_path
 
     assert is_inbox_path(f"docs/silica/{CONFIG.inbox_dir}/materiale.md")
 
@@ -50,7 +50,7 @@ def test_an_existing_root_inbox_keeps_its_place_under_a_boundary(tmp_path, monke
     one missing.
     """
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.base.layout import is_inbox_path
     from silica.kernel.base.manifest import active_inbox_dir, reset_manifest_cache
     from silica.onboarding.checks import check_vault
 

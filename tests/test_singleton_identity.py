@@ -25,7 +25,7 @@ import re
 import pytest
 
 from silica.kernel.recall import cooccurrence, embed, lexical
-from silica.kernel.recall.paths import path_keyed_singleton
+from silica.kernel.base.durable import path_keyed_singleton
 
 # Every module exposing a process-lifetime store, with its accessor, its cache
 # dict and its clear(). New stores belong here; that is the point of the list.

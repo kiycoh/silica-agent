@@ -233,7 +233,7 @@ def test_to_markdown_folds_long_lists_into_callouts():
 
 
 def test_is_vault_artifact_matches_root_only():
-    from silica.kernel.graph.graph_export import is_vault_artifact
+    from silica.kernel.base.layout import is_vault_artifact
     assert is_vault_artifact("GRAPH_REPORT.md")
     assert is_vault_artifact("log")
     assert not is_vault_artifact("Concepts/log.md")   # a real note in a subfolder

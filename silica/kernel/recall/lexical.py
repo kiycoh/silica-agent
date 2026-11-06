@@ -25,7 +25,7 @@ from typing import Any
 
 import orjson
 
-from silica.kernel.recall.paths import DiskSynced
+from silica.kernel.base.durable import DiskSynced
 
 _BM25_K1 = 1.5
 _BM25_B = 0.75
@@ -33,8 +33,8 @@ _FUZZY_MIN = 0.82  # SequenceMatcher ratio floor for a fuzzy title/key hit
 
 
 def _index_path() -> Path:
-    from silica.kernel.recall import paths
-    return paths.index_file("lexical")
+    from silica.kernel.base import home
+    return home.index_file("lexical")
 
 
 def _tokens(text: str) -> list[str]:
@@ -88,7 +88,7 @@ class LexicalStore(DiskSynced):
 
     def _reindex(self) -> None:
         """Rebuild the derived postings/name_lower indexes from _docs/_name."""
-        from silica.kernel.recall.paths import build_postings
+        from silica.kernel.base.durable import build_postings
         self._postings = build_postings(self._docs)
         self._name_lower = {path: name.lower() for path, name in self._name.items()}
 
@@ -219,7 +219,7 @@ class LexicalStore(DiskSynced):
         except Exception:
             # Derived index: quarantine for doctor visibility, then
             # reset to empty (a rebuild repopulates it).
-            from silica.kernel.recall.paths import quarantine
+            from silica.kernel.base.durable import quarantine
             quarantine(self._path)
         return {}
 
@@ -258,7 +258,7 @@ _STORE_CACHE: dict[str, "LexicalStore"] = {}
 
 
 def get_lexical_store() -> "LexicalStore":
-    from silica.kernel.recall.paths import path_keyed_singleton
+    from silica.kernel.base.durable import path_keyed_singleton
     store = path_keyed_singleton(_STORE_CACHE, str(_index_path()), LexicalStore.load)
     store.sync_from_disk()
     return store

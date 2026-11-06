@@ -47,7 +47,7 @@ def _incoming_tier(vault, ref: str) -> int | None:
     is not. A `flagged:` ref has no source side at all and is not a claim-vs-
     claim contest, so it is not ranked.
     """
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.write.contested import TIER_DISTILLED, TIER_GROUNDED, ref_source
 
     basename = ref_source(ref)
@@ -160,7 +160,7 @@ def _incoming_clock(vault, ref: str) -> str | None:
     tell an undated claim from one demonstrably newer than the note.
     """
     from silica.kernel.base import frontmatter
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.write.contested import ref_source
 
     basename = ref_source(ref)

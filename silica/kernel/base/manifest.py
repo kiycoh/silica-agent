@@ -20,11 +20,20 @@ from pathlib import Path
 
 import yaml
 
-from silica.kernel.recall import paths
+from silica.kernel.base import roots
 
 logger = logging.getLogger(__name__)
 
 MANIFEST_REL = "vault.yaml"
+
+# Where notes go in a source tree: visible and committable next to the code.
+CODE_WRITE_DIR = "docs/silica"
+# Where notes go in a prose vault: a staging folder that MIRRORS the vault tree,
+# so `silica/Projects/foo.md` becomes `Projects/foo.md` by pasting the folder's
+# contents over the root. This one name is also the switch for the mirror rules
+# (prompt wording, new-folder check) — `docs/silica` is Silica's own tree in a
+# repo, not a mirror of it, so those rules do not apply there.
+SAFE_WRITE_DIR = "silica"
 
 
 @dataclass(frozen=True)
@@ -171,7 +180,7 @@ def default_sources(vault: str | Path) -> tuple[str, ...]:
     # no link or credential, and /nucleate reaches it only when it is enabled.
     out = ["prose", "mail"]
     try:
-        if vault and paths.repo_root_for(vault) is not None:
+        if vault and roots.repo_root_for(vault) is not None:
             out += ["code", "notebook"]
     except Exception:
         pass
@@ -384,7 +393,7 @@ def _block_span(lines: list[str], name: str = "zotero") -> tuple[int, int] | Non
 
 
 def _write_lines(vault: str | Path, mutate) -> Path:
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     path = Path(vault) / MANIFEST_REL
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
@@ -486,7 +495,7 @@ def set_write_dir(vault: str | Path, value: str) -> Path:
     Clearing writes `write_dir: ""` instead of deleting the line: "in place" is a
     decision the user made and the file should say so.
     """
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     path = Path(vault) / MANIFEST_REL
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
@@ -519,7 +528,7 @@ def set_distill_profile(vault: str | Path, profile: str) -> Path:
     """
     import yaml
 
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     path = Path(vault) / MANIFEST_REL
     data = {}
@@ -739,47 +748,6 @@ def in_write_dir(rel_path: str) -> str:
     if not write_dir or not rel or within(rel, write_dir):
         return rel
     return f"{write_dir}/{rel}"
-
-
-def seed_mirror_copy(path: str) -> None:
-    """Safe mode: copy the vault original into the mirror before it is enriched.
-
-    Every seam that ENRICHES an existing note (patch, hub MOC, parent MOC) works
-    on `silica/<same path>`; the mirror is a preview of the vault after the
-    paste, so that copy has to start as the note itself or pasting it would drop
-    everything the note already said. No-op outside safe mode, when the copy
-    already exists, or when there is no original — the caller's own read then
-    reports the miss exactly as before.
-
-    Goes through the DRIVER, not the filesystem: with the Obsidian bridge
-    attached, reads are answered by Obsidian's own vault index, and a copy
-    written straight to disk came back "file not found" to the very seam that
-    had just asked for it.
-
-    Best-effort: a copy that cannot be made leaves the read to report it.
-    """
-    from silica.driver import DRIVER
-    from silica.onboarding.adopt import SAFE_WRITE_DIR
-
-    if active_write_dir() != SAFE_WRITE_DIR or not within(path, SAFE_WRITE_DIR):
-        return
-    rel = path.replace("\\", "/").strip("/")[len(SAFE_WRITE_DIR) + 1:]
-    if not rel:
-        return
-    try:
-        DRIVER.read_note(path)
-        return  # the copy is already there
-    except Exception:
-        pass
-    try:
-        original = DRIVER.read_note(rel).content
-    except Exception:
-        return  # nothing to mirror — the caller's own read reports the miss
-    try:
-        DRIVER.create(path, original)
-        logger.debug("mirror: seeded '%s' from '%s'", path, rel)
-    except Exception as e:
-        logger.warning("mirror: could not seed '%s': %s", path, e)
 
 
 def apply_manifest_to_config() -> None:

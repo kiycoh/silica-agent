@@ -51,8 +51,8 @@ from silica.agent.compaction import (
     compact_read_history,
     eager_stub,
     fit_window,
-    TEXT_CHARS_PER_TOKEN,
 )
+from silica.model.llm import TEXT_CHARS_PER_TOKEN
 from silica.agent import read_scope
 from silica.agent.relevance import compact_by_relevance
 from silica.tools import user_memory as memory_gate

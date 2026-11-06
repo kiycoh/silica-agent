@@ -166,6 +166,7 @@ def _hosted_claims(monkeypatch, tmp):
     monkeypatch.delenv("SILICA_PUBLIC_HANDLE")
     monkeypatch.setenv("SILICA_HOST_DIR", str(tmp / "host"))
     monkeypatch.setenv("HOME", str(tmp / "home"))
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp / "home" / ".silica")
     (tmp / "host").mkdir()
     return tmp / "host" / "handle.json", tmp / "home" / ".silica" / "handle-request.json"
 
@@ -498,6 +499,7 @@ def test_an_invitation_is_listed_saved_as_a_private_copy_and_then_gone(client, m
     tc, tmp = client
     monkeypatch.setenv("SILICA_INVITATIONS_DIR", str(tmp / "invitations"))
     monkeypatch.setenv("HOME", str(tmp / "home"))
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp / "home" / ".silica")
     _invite(tmp)
     inv = tc.get("/vault/invitations").json()["invitations"]
     assert [(i["author"], i["vault"], i["title"], i["notes"]) for i in inv] == [("sara", "tesi", "Memoria", 3)]
@@ -523,6 +525,7 @@ def test_a_saved_private_copy_has_no_globe(client, monkeypatch):
     tc, tmp = client
     monkeypatch.setenv("SILICA_INVITATIONS_DIR", str(tmp / "invitations"))
     monkeypatch.setenv("HOME", str(tmp / "home"))
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp / "home" / ".silica")
     _invite(tmp)
     r = tc.post("/vault/invitations/save", json={"author": "sara", "vault": "tesi"}).json()
     (tmp / "vault" / "Saved").mkdir(exist_ok=True)

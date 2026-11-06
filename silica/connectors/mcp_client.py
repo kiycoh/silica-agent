@@ -19,6 +19,8 @@ imports and every call answers that the extra is missing.
 """
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import asyncio
 import concurrent.futures
 import contextvars
@@ -73,9 +75,8 @@ def _scrub(text: object) -> str:
 # --- the tool listing cache --------------------------------------------------
 
 def _cache_path() -> Path:
-    from silica.kernel.recall import paths
 
-    return paths._SILICA_HOME / "connectors" / "mcp-tools.json"
+    return silica_home() / "connectors" / "mcp-tools.json"
 
 
 def _read_cache() -> dict[str, Any]:
@@ -99,7 +100,7 @@ def cached_tools(key: str) -> list[dict[str, Any]]:
 
 
 def _write_cache(key: str, tools: list[dict[str, Any]]) -> None:
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     data = _read_cache()
     data[key] = {"tools": tools, "listed": _dt.datetime.now().isoformat(timespec="seconds")}
@@ -110,7 +111,7 @@ def _write_cache(key: str, tools: list[dict[str, Any]]) -> None:
 def forget_cache(key: str) -> None:
     data = _read_cache()
     if data.pop(key, None) is not None:
-        from silica.kernel.recall.paths import atomic_write_bytes
+        from silica.kernel.base.durable import atomic_write_bytes
 
         atomic_write_bytes(_cache_path(), json.dumps(data, indent=1).encode("utf-8"))
 
@@ -120,9 +121,8 @@ def forget_cache(key: str) -> None:
 def _errlog(key: str):
     """Where a stdio server's stderr goes: its own log, never the terminal the
     TUI is drawing on."""
-    from silica.kernel.recall import paths
 
-    folder = paths._SILICA_HOME / "logs"
+    folder = silica_home() / "logs"
     folder.mkdir(parents=True, exist_ok=True)
     safe = mcp_config.tool_name(key)[len("mcp__"):]
     return open(folder / f"mcp-{safe}.log", "a", encoding="utf-8")  # noqa: SIM115  closed with the session

@@ -236,7 +236,7 @@ def _vocabulary_hubs(vault_ctx: dict) -> list[str]:
     names were chapter slugs (`01-an-introduction-to-support-vector-machines`).
     Telling the model to reuse those is worse than telling it nothing.
     """
-    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.base.layout import is_inbox_path
 
     names = []
     for v in vault_ctx.values():

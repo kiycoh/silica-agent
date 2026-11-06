@@ -32,15 +32,6 @@ from urllib.parse import urlsplit
 
 logger = logging.getLogger("silica.rerank_serve")
 
-# Multilingual by design: a vault is whatever language its owner writes in
-# (conventions.language), and bge-reranker-base is English/Chinese only.
-# mxbai-rerank-base-v2 (Apache-2.0, Qwen2.5-0.5B backbone) over bge-v2-m3 on the
-# link/orphan A/B (bench/local_rerank_query_ab.json, 609 masked wikilink pairs on
-# a 795-note Italian vault): mrr +0.055 over the fused baseline at p=2.5e-09,
-# where bge scored 125 wins / 100 losses at p=0.109, i.e. indistinguishable from
-# not reranking at all. Costs ~390ms per 10-doc call against bge's ~140ms served.
-# A HuggingFace repo id or a local directory, never a GGUF filename.
-LOCAL_RERANK_MODEL = "mixedbread-ai/mxbai-rerank-base-v2"
 
 # Listwise rerankers: one forward pass over the query and ALL documents, loaded
 # through their own remote code (AutoModel + .rerank()), never as a CrossEncoder
@@ -175,7 +166,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    from silica.config import CONFIG
+    from silica.config import CONFIG, LOCAL_RERANK_MODEL
 
     url = urlsplit(CONFIG.rerank_base_url if "//" in CONFIG.rerank_base_url else f"//{CONFIG.rerank_base_url}")
     if url.hostname not in _LOOPBACK or not url.port:

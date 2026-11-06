@@ -25,11 +25,13 @@ from typing import Any, Literal
 
 import orjson
 from pydantic import TypeAdapter
+from silica.config import silica_home
 
 TaskStatus = Literal["pending", "running", "done", "failed", "skipped", "blocked", "deferred"]
 PlanStepKind = Literal["mechanical", "semantic", "gate", "txn"]
 
-_RUNS_DIR = Path.home() / ".silica" / "runs"
+def runs_dir() -> Path:
+    return silica_home() / "runs"
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +41,19 @@ def run_dir_for(run_id: str) -> Path:
 
     The single choke point for turning a run_id into a filesystem path. run_id
     is model-supplied (resume_run_id, silica_ledger_next/update), and
-    `_RUNS_DIR / run_id` silently DISCARDS the runs root when run_id is
+    `runs_dir() / run_id` silently DISCARDS the runs root when run_id is
     absolute and joins a `../` verbatim — so a crafted id would read or write
     ledgers anywhere on disk. Containment rather than a format regex: run ids
     already on disk must keep resuming whatever shape they have.
     """
-    from silica.kernel.recall.paths import contain_in_vault
+    from silica.kernel.base.layout import contain_in_vault
 
-    return _RUNS_DIR / contain_in_vault(run_id, _RUNS_DIR)
+    return runs_dir() / contain_in_vault(run_id, runs_dir())
 
 
 def _save_json(obj: Any, filename: str) -> Path:
     """Serialise a run-scoped dataclass to ~/.silica/runs/<run_id>/<filename>."""
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     run_dir = run_dir_for(obj.run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -745,14 +747,14 @@ def _ledger_vault(path: Path) -> str:
 def latest_run_id() -> str | None:
     """run_id of this vault's most recently modified run, or None.
 
-    Public replacement for reaching into the private _RUNS_DIR layout. Scoped
+    Public replacement for reaching into the runs folder's layout. Scoped
     to the active vault: the runs root is shared machine-wide.
     """
-    if not _RUNS_DIR.exists():
+    if not runs_dir().exists():
         return None
     vault = _active_vault()
     candidates = [
-        d for d in _RUNS_DIR.iterdir()
+        d for d in runs_dir().iterdir()
         if d.is_dir() and (d / "ledger.json").exists()
         and _ledger_vault(d / "ledger.json") == vault
     ]

@@ -18,6 +18,8 @@ LongMemEval adapter passes the simulated session date.
 """
 from __future__ import annotations
 
+from silica.config import silica_home
+
 import bisect
 import json
 import logging
@@ -28,7 +30,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, TypeAdapter, model_validator
 
-from silica.kernel.recall.embed import _cosine  # noqa: F401 — shared helper, re-exported for probes
+from silica.kernel.base.vectors import cosine  # noqa: F401 — shared helper, re-exported for probes
 
 logger = logging.getLogger(__name__)
 
@@ -420,13 +422,13 @@ class EpisodicStore:
             self.lived_days = sorted(doc.get("lived_days") or {
                 d for f in self.facts for d in map(_iso_day, f.days) if d})
         except Exception:
-            from silica.kernel.recall.paths import quarantine
+            from silica.kernel.base.durable import quarantine
 
             quarantine(self.path)
             self.next_id, self.facts, self.lived_days = 1, [], []
 
     def save(self) -> None:
-        from silica.kernel.recall.paths import atomic_write_bytes
+        from silica.kernel.base.durable import atomic_write_bytes
 
         doc: dict = {
             "schema_version": SCHEMA_VERSION,
@@ -659,7 +661,7 @@ class EpisodicStore:
             # the two None tests are what same_space already holds; mypy
             # cannot see through the name
             if same_space and query_vec is not None and fact.vec is not None:
-                score = _cosine(query_vec, fact.vec)
+                score = cosine(query_vec, fact.vec)
                 if score < floor:
                     continue
             else:
@@ -801,10 +803,10 @@ def episodic_home() -> Path:
     from silica.config import CONFIG
 
     raw = (getattr(CONFIG, "memory_vault", "") or "").strip()
-    return (Path(raw).expanduser() if raw else Path.home() / ".silica" / "vault").resolve()
+    return (Path(raw).expanduser() if raw else silica_home() / "vault").resolve()
 
 
 def store_path() -> Path:
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
-    return paths.index_dir_for(str(episodic_home())) / "episodic.json"
+    return home.index_dir_for(str(episodic_home())) / "episodic.json"

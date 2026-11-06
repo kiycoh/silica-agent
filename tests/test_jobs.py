@@ -96,7 +96,7 @@ def _inbox() -> Path:
 
 def _chat(server) -> str:
     """The open chat's folder of attached files, vault-relative (ADR-0121 point 5)."""
-    from silica.kernel.recall.paths import chat_folder
+    from silica.kernel.base.layout import chat_folder
 
     return chat_folder(server.current_session_id)
 

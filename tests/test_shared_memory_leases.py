@@ -15,13 +15,12 @@ import pytest
 fcntl = pytest.importorskip("fcntl")  # POSIX-only; point 1 no-ops elsewhere
 
 from silica.config import CONFIG
-from silica.kernel.recall import paths
 from silica.kernel.write import templates
 from silica.kernel import workqueue
 
 
 def test_flock_held_during_lease_and_released_after(tmp_path, monkeypatch):
-    monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path)
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path)
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path), raising=False)
 
     key = workqueue._lease_key("Foo/Bar.md")

@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 from collections import OrderedDict
 from pathlib import Path
 
-from silica.config import CONFIG
+from silica.config import CONFIG, silica_home
 
 
 def memory_vault() -> Path | None:
@@ -41,7 +41,7 @@ def memory_vault() -> Path | None:
     """
     raw = (getattr(CONFIG, "memory_vault", "") or "").strip()
     # Default mirrors cli.default_user_vault (kernel must not import cli).
-    mem = (Path(raw).expanduser() if raw else Path.home() / ".silica" / "vault").resolve()
+    mem = (Path(raw).expanduser() if raw else silica_home() / "vault").resolve()
     active = (getattr(CONFIG, "vault_path", "") or "").strip()
     if active and Path(active).resolve() == mem:
         return None
@@ -113,11 +113,11 @@ def stores_for(vault: str | Path):
     must cost that lane, not the active vault's answer.
     """
     try:
-        from silica.kernel.recall import paths
+        from silica.kernel.base import home
         from silica.kernel.recall.cooccurrence import CooccurStore
         from silica.kernel.recall.embed import EmbedStore
 
-        idx = paths.index_dir_for(str(vault))
+        idx = home.index_dir_for(str(vault))
         key = str(idx)
         hit = _CACHE.get(key)
         if hit is not None:

@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 import silica.kernel.write.checkpoints as checkpoints
-from silica.kernel.recall import paths
+from silica.kernel.base import roots
 from silica.kernel.base import frontmatter
 from silica.kernel.write import templates as tpl
 from silica.kernel.write.contested import TIER_HUMAN, reliability_tier
@@ -29,11 +29,11 @@ def vault(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.driver._driver", None)
     monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)
     checkpoints.get_checkpoint_store(tmp_path / "checkpoints.db")
-    paths.clear_repo_root_cache()
+    roots.clear_repo_root_cache()
     yield vault_dir
     monkeypatch.setattr("silica.driver._driver", None)
     monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)
-    paths.clear_repo_root_cache()
+    roots.clear_repo_root_cache()
 
 
 # --- silica_write_note ------------------------------------------------------

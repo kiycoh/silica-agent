@@ -14,7 +14,7 @@ from prompt_toolkit.completion import Completer, Completion, FuzzyCompleter
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.styles import Style
 
-from silica.config import CONFIG
+from silica.config import CONFIG, silica_home
 from silica.ui.commands import commands, unrecorded
 
 
@@ -39,7 +39,7 @@ _METER_WIDTH = 10
 
 
 def _history_path() -> Path:
-    p = Path.home() / ".silica"
+    p = silica_home()
     p.mkdir(parents=True, exist_ok=True)
     path = p / "history"
     # 0600 from the first byte: FileHistory appends with the umask's mode, and

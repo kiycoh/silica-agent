@@ -20,7 +20,8 @@ from silica.tools import TOOLS
 @pytest.fixture
 def vault(tmp_path, monkeypatch):
     from silica.config import CONFIG
-    from silica.kernel.recall import lexical, paths
+    from silica.kernel.base import home
+    from silica.kernel.recall import lexical
     from silica_core.kernel.recall import lexical as core_lexical
     from silica_core.kernel.recall import paths as core_paths
 
@@ -28,7 +29,7 @@ def vault(tmp_path, monkeypatch):
         "# LSM trees\n\n## Write path\n\nWrites land in a memtable.\n\n"
         "## Compaction\n\nLeveled compaction merges sorted runs.\n", encoding="utf-8")
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    for mod in (paths, core_paths):
+    for mod in (home, core_paths):
         monkeypatch.setattr(mod, "index_dir_for", lambda vault, _d=tmp_path / ".idx": _d)
     lexical.clear()
     core_lexical.clear()
@@ -81,13 +82,13 @@ def test_the_engine_indexes_apart_from_the_fusion_leg(vault):
     """Its build drops every path its own walk did not produce: pointed at the
     fusion store it would prune the notes the sync lane maintains. The seam
     is what points it at its own file, so the build goes through the seam."""
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
     from silica.tools.atomic import _engine
     from silica_core.kernel.recall import paths as core_paths
 
     _engine().build_index()
     assert core_paths.index_file("retrieval").is_file()
-    assert not paths.index_file("lexical").is_file()
+    assert not home.index_file("lexical").is_file()
     assert not core_paths.index_file("lexical").is_file()
 
 

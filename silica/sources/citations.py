@@ -106,7 +106,7 @@ def paper_layer(nodes: list[dict]) -> tuple[list[dict], list[dict]]:
     caller appends both. Nothing else in `nodes` is touched.
     """
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import is_source_leaf
+    from silica.kernel.base.layout import is_source_leaf
     from silica.kernel.base import frontmatter
 
     root = Path(CONFIG.vault_path or ".")
@@ -167,7 +167,7 @@ def _paper_leaves(vault: str | Path | None = None) -> dict[str, tuple[dict, set[
     """{vault-relative leaf path: (frontmatter, own ids, cited ids)} for every
     paper leaf, read through the mtime cache."""
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import load_manifest
     from silica.kernel.base import frontmatter
 

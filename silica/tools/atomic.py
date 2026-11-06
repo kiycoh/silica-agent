@@ -228,7 +228,7 @@ def _source_hits(query: str) -> list[dict] | None:
     driver already searched them.
     """
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import repo_root_for
+    from silica.kernel.base.roots import repo_root_for
 
     root = repo_root_for(getattr(CONFIG, "vault_path", "") or "")
     if root is None:
@@ -355,7 +355,7 @@ def _pdf_text(rel: str, full: Path) -> tuple[str, list[dict], str]:
     walks."""
     import orjson
 
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
     from silica.sources import pdf_extract
     from silica_core import core
 
@@ -466,7 +466,7 @@ def _literal_search(query: str, folder: str, k: int) -> dict:
     import time
 
     from silica.config import CONFIG, in_config_dir
-    from silica.kernel.recall.paths import ignore_matcher, in_folder
+    from silica.kernel.base.layout import ignore_matcher, in_folder
     from silica.kernel.workspaces import in_scope
 
     needle = query.strip()
@@ -544,7 +544,7 @@ def _note_states(hits: list[dict]) -> None:
     the document, and the tiers are about the notes made from it."""
     from datetime import date
 
-    from silica.kernel.recall.paths import is_source_leaf
+    from silica.kernel.base.layout import is_source_leaf
     from silica.kernel.base import frontmatter
     from silica.kernel.write.contested import SUPERSEDED_BY_KEY, lifecycle, trust
 
@@ -906,7 +906,7 @@ def _with_stale_banner(content: str, path: str = "", vault: str | None = None) -
         from silica.kernel.base import frontmatter
 
         data, _, _ = frontmatter.split(content)
-        if data and codedocs.documents_of(data):
+        if data and frontmatter.documents_of(data):
             warning = codedocs.read_warning(vault, data)
             if warning:
                 banners.append(warning)
@@ -985,7 +985,7 @@ def _image_file(image: str) -> Path | None:
     any file on the disk."""
     from silica.config import CONFIG
     from silica.kernel.recall import image_readings
-    from silica.kernel.recall.paths import attachments_dir
+    from silica.kernel.base.home import attachments_dir
 
     vault = Path(CONFIG.vault_path).resolve() if CONFIG.vault_path else None
     roots = [r for r in (vault, attachments_dir().resolve()) if r is not None]
@@ -1186,7 +1186,7 @@ def notes_under(folder: str) -> list[str]:
     was a model inventing filenames, which is not a failure worth re-earning to
     save four lines.
     """
-    from silica.kernel.recall.paths import in_folder
+    from silica.kernel.base.layout import in_folder
     from silica.kernel.base.manifest import active_inbox_dir
 
     scope = _vault_rel(folder)
@@ -1218,7 +1218,7 @@ def _unconverted_under(folder: str) -> list[str]:
     folders of scanned books and one INDEX.md, and while the rule was
     inbox-only every one of them read as empty.
     """
-    from silica.kernel.recall.paths import in_folder
+    from silica.kernel.base.layout import in_folder
     from silica.kernel.base.manifest import active_inbox_dir
 
     scope = _vault_rel(folder)
@@ -1310,7 +1310,7 @@ def _with_prop(files: list[str], key: str, value: str, folder: str) -> list[str]
     17. Unless the listing asks for the staging folder itself.
     """
     from silica.kernel.base.manifest import active_write_dir, within
-    from silica.onboarding.adopt import SAFE_WRITE_DIR
+    from silica.kernel.base.manifest import SAFE_WRITE_DIR
 
     skip_copies = (active_write_dir() == SAFE_WRITE_DIR
                    and not within(_vault_rel(folder), SAFE_WRITE_DIR))
@@ -1431,7 +1431,7 @@ def _source_folder_census() -> dict[str, int]:
     """Top-level folder -> count of non-markdown files under it, non-empty only."""
     from collections import Counter
 
-    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.base.layout import is_inbox_path
 
     counts: Counter = Counter()
     for p in _vault_files_under(""):

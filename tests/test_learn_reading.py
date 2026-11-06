@@ -95,7 +95,7 @@ def step_vault(tmp_vault, tmp_path, monkeypatch):
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
     monkeypatch.setattr(reading, "_log", lambda: tmp_path / "readings.jsonl")
-    monkeypatch.setattr(undo_journal, "_DEFAULT_JOURNAL_PATH", tmp_path / "undo.db", raising=False)
+    monkeypatch.setattr(undo_journal, "_journal_path", lambda: tmp_path / "undo.db")
     PROMPTS.clear()
     for title, body in NOTES.items():
         tmp_vault.note(f"Course/{title}.md", f"---\ntype: Note\n---\n\n# {title}\n\n{body}\n## Sources\n"

@@ -66,7 +66,7 @@ def folder_rel(target: str) -> str | None:
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import repo_root_for
+    from silica.kernel.base.roots import repo_root_for
 
     root = repo_root_for(CONFIG.vault_path) if CONFIG.vault_path else None
     if root is None:
@@ -92,7 +92,7 @@ def expand_folder(target: str, enabled: Sequence[str] | None = None) -> list[str
     """
     from silica.config import CONFIG
     from silica.kernel.code.codegraph import supported_files
-    from silica.kernel.recall.paths import repo_root_for
+    from silica.kernel.base.roots import repo_root_for
 
     rel = folder_rel(target)
     if rel is None:

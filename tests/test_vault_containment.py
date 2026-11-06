@@ -11,7 +11,7 @@ import pytest
 
 from silica.driver.base import NoteRef
 from silica.driver.fs_backend import ObsidianFSBackend
-from silica.kernel.recall.paths import contain_in_vault
+from silica.kernel.base.layout import contain_in_vault
 
 
 @pytest.fixture

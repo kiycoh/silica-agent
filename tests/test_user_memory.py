@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.config import CONFIG
+from silica.config import CONFIG, silica_home
 from silica.kernel import user_memory as um
 
 
@@ -24,12 +24,12 @@ def vault(tmp_path, monkeypatch):
 
 
 def test_the_two_files_live_outside_the_vault_under_the_silica_home(vault):
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
     user = um.path_for("user")
     work = um.path_for("vault")
-    assert user == paths._SILICA_HOME / "memory" / "user.md"
-    assert work == paths._SILICA_HOME / "memory" / "vaults" / f"{paths.vault_digest(str(vault))}.md"
+    assert user == silica_home() / "memory" / "user.md"
+    assert work == silica_home() / "memory" / "vaults" / f"{home.vault_digest(str(vault))}.md"
     assert vault not in user.parents and vault not in work.parents
 
 

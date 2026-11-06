@@ -27,6 +27,7 @@ from typing import Any
 
 from silica.config import hosted  # noqa: F401  callers read it as mcp_config.hosted()
 from silica.connectors import credentials
+from silica.config import silica_home
 
 # The words scrub_credentials already treats as secret (silica/kernel/scrub.py),
 # so one vocabulary decides both what is redacted and what is kept out of the
@@ -60,9 +61,8 @@ class Entry:
 
 
 def path() -> Path:
-    from silica.kernel.recall import paths
 
-    return paths._SILICA_HOME / "mcp.json"
+    return silica_home() / "mcp.json"
 
 
 def scope(key: str) -> str:
@@ -204,7 +204,7 @@ def read_raw() -> dict[str, Any]:
 
 
 def _write_raw(servers: dict[str, Any]) -> None:
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     path().parent.mkdir(parents=True, exist_ok=True)
     # 0600 although the file holds no secret by design: a hand edit can put a

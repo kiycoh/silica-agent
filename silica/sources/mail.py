@@ -341,7 +341,7 @@ def note_path(thread: Thread) -> str:
     """ADR-0090 point 3: `<sources>/mail/<date> <subject> <key6>.md`, from the
     thread's first message. `<key6>` is what keeps two "Re: meeting" threads
     of one day apart: without it the second would restage over the first."""
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import in_write_dir
 
     first = thread.mails[0]
@@ -872,7 +872,7 @@ def parse_limit(value) -> int:
 
 def _state_path(vault: str | None = None) -> Path:
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     return index_dir_for(vault or CONFIG.vault_path) / STATE_FILE
 
@@ -892,7 +892,7 @@ def load_state(vault: str | None = None) -> dict:
 def _save_state(state: dict, vault: str | None = None) -> None:
     import json
 
-    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.kernel.base.durable import atomic_write_bytes
 
     path = _state_path(vault)
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -5,7 +5,8 @@
 import json
 import subprocess
 
-from silica.kernel.code import codedocs, gitstate
+from silica.kernel.code import codedocs
+from silica.kernel.base import gitstate
 
 
 def _repo(path):

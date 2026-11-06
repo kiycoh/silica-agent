@@ -125,13 +125,12 @@ def test_history_is_scoped_to_the_vault(tmp_path, monkeypatch):
 
 
 def test_an_unwritable_ledger_never_blocks_the_write(tmp_path, monkeypatch):
-    import silica.kernel.recall.paths as paths_mod
 
     a = _vault(tmp_path, "a")
     monkeypatch.setattr(CONFIG, "vault_path", str(a))
     blocker = tmp_path / "home-is-a-file"
     blocker.write_text("", encoding="utf-8")
-    monkeypatch.setattr(paths_mod, "_SILICA_HOME", blocker)  # the index dir cannot be created
+    monkeypatch.setattr("silica.config._SILICA_HOME", blocker)  # the index dir cannot be created
 
     _note(a, "n.md", "n")
     session_changes.touched("n.md", None)  # must not raise: the note write already landed

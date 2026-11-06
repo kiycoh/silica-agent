@@ -90,7 +90,7 @@ def typed_state(orphan_path: str, orphan_text: str, candidate_path: str,
 
 
 def run_orphan(item: WorkItem, config: Any) -> dict[str, Any]:
-    from silica.kernel.recall.paths import is_staging_path
+    from silica.kernel.base.layout import is_staging_path
 
     target = item.target_path
     # A staging note (inbox, done/) is bookkeeping, not knowledge: the report

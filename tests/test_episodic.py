@@ -109,7 +109,7 @@ class _ModelEmbedder:
 
 def test_recall_falls_back_to_lexical_when_a_fact_vector_has_another_dimension(tmp_path):
     """The defect of 2026-10-05: a store embedded at 2560 dims (qwen3-embedding-4b)
-    queried with a 1024-dim jina vector. `_cosine` returns 0.0 on a length
+    queried with a 1024-dim jina vector. `cosine` returns 0.0 on a length
     mismatch, the floor dropped every fact, and the lexical leg never ran because
     the vector branch had already been chosen: the lane answered nothing."""
     store = _store(tmp_path)

@@ -216,7 +216,7 @@ def test_keep_writes_a_cited_inbox_note_and_its_leaf(tmp_vault, kept):
     assert "https://a.test/rw" in body
     assert body.count("## Sources") == 1, "the stored prose must not carry a block already"
 
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
 
     leaf = vault / SOURCES_DIR / "graph rewiring.md"
     assert leaf.is_file() and "a.test/rw" in leaf.read_text(encoding="utf-8")
@@ -344,7 +344,7 @@ def test_keep_carries_the_bank_into_the_leaf(tmp_vault, monkeypatch):
 
     note_rel = wr.keep_last()
 
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
 
     leaf = (
         Path(CONFIG.vault_path) / SOURCES_DIR / Path(note_rel).name

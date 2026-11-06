@@ -70,6 +70,7 @@ def _compute_code_signals(
         graph = load_codegraph(vault)
     if graph is None or not graph.files:
         return None, []
-    from silica.kernel.code.codedocs import documents_of, iter_documenting_notes
+    from silica.kernel.base.frontmatter import documents_of
+    from silica.kernel.code.codedocs import iter_documenting_notes
     docmap = {note: documents_of(data) for note, data, _ in iter_documenting_notes(vault)}
     return _coverage_from(graph, docmap), _import_autolinks_from(graph, docmap, wikilinks)

@@ -156,7 +156,8 @@ def _compute_cooccur_delta(
     # (nonsensical, B in expert ratings). Best-effort: skipped silently when
     # embeddings are unavailable.
     try:
-        from silica.kernel.recall.embed import get_store, _cosine
+        from silica.kernel.recall.embed import get_store
+        from silica.kernel.base.vectors import cosine
         _embed_store = get_store()
         if len(_embed_store) > 0:
             _cos_hi = 0.92
@@ -166,7 +167,7 @@ def _compute_cooccur_delta(
                 v_src = _embed_store.get_vec(a.source)
                 v_tgt = _embed_store.get_vec(a.target)
                 if v_src and v_tgt:
-                    cos = _cosine(v_src, v_tgt)
+                    cos = cosine(v_src, v_tgt)
                     if cos > _cos_hi or cos < _cos_lo:
                         continue  # too trivial or too alien
                 filtered.append(a)

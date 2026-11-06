@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 
 from silica.kernel.report.graph_report.models import DuplicatePair, VaultReport
-from silica.kernel.recall.paths import in_folder
+from silica.kernel.base.layout import in_folder
 
 logger = logging.getLogger(__name__)
 

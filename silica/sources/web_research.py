@@ -1173,7 +1173,7 @@ def _write_leaf(
     without re-reading megabytes of page text (spec §3.5).
     """
     try:
-        from silica.kernel.recall.paths import SOURCES_DIR
+        from silica.kernel.base.layout import SOURCES_DIR
 
         raw = "\n\n".join(r for r in results if r)
         if not raw:
@@ -1489,7 +1489,7 @@ def _unique_inbox_path(concept: str, fallback: str = "web-research") -> str:
 
     `fallback` names the note when the title slugifies to nothing (CJK, emoji,
     pure punctuation), so each command squats only its own namespace."""
-    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import active_inbox_dir
 
     inbox = active_inbox_dir() or "Inbox"

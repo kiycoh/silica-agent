@@ -24,7 +24,7 @@ def _repo(tmp_path: Path, monkeypatch) -> Path:
     (repo / "pkg.py").write_text("def follow_superseded_xyz(path):\n    return path\n", encoding="utf-8")
     subprocess.run(["git", "add", "pkg.py"], cwd=repo, check=True)
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import clear_repo_root_cache
+    from silica.kernel.base.roots import clear_repo_root_cache
 
     monkeypatch.setattr(CONFIG, "vault_path", str(repo))
     clear_repo_root_cache()

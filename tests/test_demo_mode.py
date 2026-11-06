@@ -149,7 +149,7 @@ def test_a_refused_route_runs_nothing_behind_it(sandbox, monkeypatch):
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import _SILICA_HOME
+    from silica.config import silica_home
     from silica.ui.web import settings as st
 
     tc, server, ran = sandbox
@@ -160,7 +160,7 @@ def test_a_refused_route_runs_nothing_behind_it(sandbox, monkeypatch):
     monkeypatch.setattr(st, "apply", boom)
     assert tc.post("/settings", json={"key": "SILICA_THEME", "value": "dark"}).status_code == 404
     assert tc.post("/flag", json={"session": "abc", "seq": 1, "note": "wrong"}).status_code == 404
-    assert not (_SILICA_HOME / "flags.jsonl").exists()
+    assert not (silica_home() / "flags.jsonl").exists()
     assert tc.post("/chat/files/add", files={"files": ("upload.md", b"# mine")}).status_code == 404
     assert tc.post("/vault/import", files={"files": ("upload.md", b"# mine")}).status_code == 404
     assert not list(Path(CONFIG.vault_path).rglob("upload.md"))
@@ -214,7 +214,7 @@ def test_a_refused_command_behind_a_persona_runs_nothing(sandbox, monkeypatch, c
 
 
 def test_an_image_or_a_story_is_refused_before_anything_is_saved(sandbox):
-    from silica.kernel.recall.paths import attachments_dir
+    from silica.kernel.base.home import attachments_dir
 
     tc, server, ran = sandbox
     png = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\0" * 16).decode()

@@ -1033,7 +1033,7 @@ def erase_slots(model: str) -> None:
 
 
 def reset_vault(scratch: Path, plant, home: Path | None = None) -> None:
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
     shutil.rmtree(scratch, ignore_errors=True)
     shutil.copytree(PRISTINE_VAULT, scratch, ignore=shutil.ignore_patterns(".obsidian"))
     src, dst = index_dir_for(str(PRISTINE_VAULT)), index_dir_for(str(scratch))

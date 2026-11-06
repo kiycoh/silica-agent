@@ -78,7 +78,7 @@ def capture_sim(facts: list[dict], vecs: dict[str, list[float]], *,
     by canonical key joins the nearest live head by cosine when >= tau.
     Stats: `embed_joins` and every fallback decision as (nearest_cos, joined)
     — the tau calibration curve. Pure function of (facts, vecs, tau)."""
-    from silica.kernel.recall.episodic import _cosine, normalize_key
+    from silica.kernel.recall.episodic import cosine, normalize_key
 
     by_nkey: dict[str, str] = {}   # nkey -> live head id (arm 1)
     live: dict[str, str] = {}      # live head id -> chain root id
@@ -93,7 +93,7 @@ def capture_sim(facts: list[dict], vecs: dict[str, list[float]], *,
             best, best_cos = None, 0.0
             for hid in live:
                 hv = vecs.get(hid)
-                c = _cosine(v, hv) if hv else 0.0
+                c = cosine(v, hv) if hv else 0.0
                 if c > best_cos:
                     best, best_cos = hid, c
             if best is not None:
@@ -147,7 +147,7 @@ def sim_vecs(facts: list[dict], repr_: str, vault: Path,
     degradation would read as "no signal"."""
     import hashlib
 
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     def content(f: dict) -> str:
         if repr_ == "text":
@@ -224,7 +224,7 @@ def _load_facts(vault: Path) -> list[dict]:
     # Through the product's own reader: the store is an npz archive since the
     # binary-format change, and a UTF-8 read of it dies on the zip magic.
     from silica.kernel.recall.episodic import read_store_doc
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     path = index_dir_for(str(vault)) / "episodic.json"
     if not path.is_file():

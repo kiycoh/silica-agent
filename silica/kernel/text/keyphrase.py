@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from silica.kernel.text import language
-from silica.kernel.recall.embed import _cosine, document_theme_vector
+from silica.kernel.base.vectors import cosine, document_theme_vector
 from silica.kernel.text.candidates import is_fragment, mine_candidates
 from silica.kernel.text.overlay import DomainOverlay, overlay_for_lang
 from silica.kernel.text.recon import is_concept, normalize
@@ -152,7 +152,7 @@ def _mmr(vecs, theme, k, lam: float = MMR_LAMBDA, rel=None) -> list[int]:
     Candidate-candidate similarity is taken once as a matrix and each candidate
     carries a running max against the already-picked set. The per-pair form
     re-derived every cosine on every iteration: on a real pool (POOL_SIZE=100
-    vectors of the embedder's width) that was ~166k `_cosine` calls, ~1.1M
+    vectors of the embedder's width) that was ~166k `cosine` calls, ~1.1M
     `np.asarray` conversions and 26-46s per note, which is 94% of RECON.
     Vectors must be uniform width — `_rerank` abstains before calling here.
     """
@@ -163,7 +163,7 @@ def _mmr(vecs, theme, k, lam: float = MMR_LAMBDA, rel=None) -> list[int]:
     M = M / np.where(norms == 0.0, 1.0, norms)  # a zero row stays zero → sim 0
     sim = M @ M.T
     if rel is None:
-        rel = [_cosine(v, theme) for v in vecs]
+        rel = [cosine(v, theme) for v in vecs]
     cand = list(range(len(vecs)))
     # Running max similarity to the picked set. -inf, not 0.0: cosine may be
     # negative and the per-pair form never clamped it.
@@ -214,14 +214,14 @@ def _rerank(
 
     structural = _structural_concepts(body, overlay)
     rel = [
-        _cosine(vecs[i], theme) + (STRUCT_BOOST if phrases[i].lower() in structural else 0.0)
+        cosine(vecs[i], theme) + (STRUCT_BOOST if phrases[i].lower() in structural else 0.0)
         for i in range(len(pool))
     ]
     order = _mmr(vecs, theme, k=len(pool), lam=MMR_LAMBDA, rel=rel)
 
     out: list[ConceptCandidate] = []
     for i in order:
-        ev = [f"embed:{_cosine(vecs[i], theme):.2f}"]
+        ev = [f"embed:{cosine(vecs[i], theme):.2f}"]
         if phrases[i].lower() in structural:
             ev.append("struct")
         out.append(ConceptCandidate(phrase=pool[i].phrase, score=rel[i], evidence=ev))

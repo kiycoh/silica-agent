@@ -849,7 +849,7 @@ def test_nucleate_stages_uploads_and_hands_files_to_the_agent(client, monkeypatc
     assert resp.status_code == 200
 
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import chat_folder
+    from silica.kernel.base.layout import chat_folder
 
     folder = chat_folder(server.current_session_id)
     saved = Path(CONFIG.vault_path) / folder / "note.md"
@@ -881,7 +881,7 @@ def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkey
 
     assert resp.status_code == 200
     user = next(m for m in ran["msgs"] if m["role"] == "user")["content"]
-    from silica.kernel.recall.paths import chat_folder
+    from silica.kernel.base.layout import chat_folder
 
     assert user.startswith(server.DROP_ASK)
     assert f'<file path="{chat_folder(server.current_session_id)}/bio.md">' in user and "## Inibizione" in user
@@ -1912,10 +1912,9 @@ class TestOwnSessionCapture:
 
     @pytest.fixture(autouse=True)
     def _opt_in(self, client, tmp_path, monkeypatch):
-        import silica.kernel.recall.paths as paths
         from silica.config import CONFIG
 
-        monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path / "silica-home")
+        monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / "silica-home")
         monkeypatch.setattr(CONFIG, "capture_sessions", True)
         _, server = client
         server.messages.extend([
@@ -1925,7 +1924,7 @@ class TestOwnSessionCapture:
 
     def _envelopes(self):
         from silica.config import CONFIG
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
         d = inbox_dir_for(CONFIG.vault_path)
         return sorted(p.name for p in d.glob("*.json")) if d.is_dir() else []
 

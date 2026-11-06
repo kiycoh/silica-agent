@@ -286,7 +286,7 @@ class TestT2ChunkContainment:
         from pathlib import Path
         from silica.config import CONFIG
         from silica.kernel.progress import RunManifestEntry
-        from silica.kernel.write.run_log import DEFAULT_LOG_FILENAME
+        from silica.kernel.base.layout import DEFAULT_LOG_FILENAME
 
         fsm = InjectorFSM("Inbox/lezione-07.md", "Concepts")
         fsm._chunks = [{"chunk": 0}, {"chunk": 1}]
@@ -338,7 +338,7 @@ class TestT3Resume:
         """resume_run_id causes the FSM to load the existing ProgressLedger."""
         import silica.kernel.progress as prog_mod
         # Redirect runs dir to a tmp directory for isolation
-        monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+        monkeypatch.setattr(prog_mod, "runs_dir", lambda: tmp_path / "runs")
         from silica.kernel.progress import ProgressLedger
 
         # Simulate a prior run

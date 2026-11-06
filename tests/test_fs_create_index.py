@@ -26,7 +26,7 @@ def test_fs_create_into_inbox_is_indexed(tmp_path, monkeypatch):
     being TARGETED by an op, and that is `is_inbox_path`'s job, not the index's.
     """
     from silica.config import CONFIG
-    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.base.layout import is_inbox_path
     monkeypatch.setattr(CONFIG, "inbox_dir", "Inbox")
     backend = ObsidianFSBackend(vault_path=str(tmp_path))
     backend._rebuild_index()

@@ -11,7 +11,7 @@ import types
 from pathlib import Path
 
 from silica.kernel.progress import RunManifestEntry
-from silica.kernel.write.run_log import DEFAULT_LOG_FILENAME
+from silica.kernel.base.layout import DEFAULT_LOG_FILENAME
 from silica.router.states import finalize
 
 

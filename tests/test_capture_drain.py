@@ -20,10 +20,9 @@ def _reset_manifest_cache():
 def vault(tmp_path, monkeypatch):
     """A real FS-backed vault plus a sandboxed WAL for it."""
     import silica.driver as driver_mod
-    import silica.kernel.recall.paths as paths
     from silica.driver import fs_backend
 
-    monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path / "silica-home")
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / "silica-home")
     v = tmp_path / "vault"
     v.mkdir()
     monkeypatch.setattr(CONFIG, "vault_path", str(v))
@@ -98,7 +97,7 @@ class TestDrain:
         self, vault, stub_coordinator
     ):
         from silica.capture import write_envelope
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         v = str(vault)
         env = write_envelope(v, "claude-code-s1-end.json", _envelope())
@@ -173,7 +172,7 @@ class TestDrain:
         assert leaked == []
 
     def test_unparseable_envelope_is_kept_for_autopsy(self, vault, stub_coordinator):
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         d = inbox_dir_for(str(vault))
         d.mkdir(parents=True, exist_ok=True)
@@ -190,7 +189,7 @@ class TestDrain:
     ):
         """Zero conversation turns is success, not failure."""
         from silica.capture import write_envelope
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         v = str(vault)
         write_envelope(v, "claude-code-s1-end.json",
@@ -296,7 +295,7 @@ class TestEpisodicRouting:
     ):
         from silica.capture import write_envelope
         from silica.kernel.recall.episodic import EpisodicStore
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         class _Never:
             def __init__(self, **kw):
@@ -322,7 +321,7 @@ class TestEpisodicRouting:
         """Provenance for the /graph overlay: which vault, which notes (spec §11)."""
         from silica.capture import write_envelope
         from silica.kernel.recall.episodic import EpisodicStore
-        from silica.kernel.recall.paths import vault_digest
+        from silica.kernel.base.home import vault_digest
 
         import silica.router.coordinator as coord_mod
         monkeypatch.setattr(coord_mod, "Coordinator", None)
@@ -382,7 +381,7 @@ class TestEpisodicRouting:
     def test_a_session_worth_no_facts_is_still_done(self, vault, store, monkeypatch):
         """Nothing worth remembering is success, not failure."""
         from silica.capture import write_envelope
-        from silica.kernel.recall.paths import inbox_dir_for
+        from silica.kernel.base.home import inbox_dir_for
 
         import silica.kernel.prep_delegation as prep
         monkeypatch.setattr(prep, "run_distiller",

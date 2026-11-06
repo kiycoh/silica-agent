@@ -139,7 +139,7 @@ def folder_titles(folder: str, exclude: str = "") -> list[str]:
     course folder with its textbook, enough to push it past MAX_CANDIDATES
     (2026-10-23)."""
     from silica.kernel.outline import _hidden_note
-    from silica.kernel.recall.paths import is_source_leaf
+    from silica.kernel.base.layout import is_source_leaf
     from silica.tools.atomic import notes_under
 
     return [Path(p).stem for p in notes_under(folder)

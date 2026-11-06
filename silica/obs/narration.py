@@ -59,13 +59,13 @@ _run_var: ContextVar[str | None] = ContextVar("narration_run", default=None)
 
 def narration_dir() -> Path:
     """Resolved per call, not at import: tests monkeypatch _SILICA_HOME."""
-    from silica.kernel.recall.paths import _SILICA_HOME
-    return _SILICA_HOME / "narration"
+    from silica.config import silica_home
+    return silica_home() / "narration"
 
 
 def _legacy_sessions_dir() -> Path:
-    from silica.kernel.recall.paths import _SILICA_HOME
-    return _SILICA_HOME / "web_sessions"
+    from silica.config import silica_home
+    return silica_home() / "web_sessions"
 
 
 def _title_from(text: str) -> str:

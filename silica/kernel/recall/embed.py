@@ -26,107 +26,23 @@ from typing import Any
 import numpy as np
 import orjson
 
-from silica.kernel.recall.paths import DiskSynced
+from silica.kernel.base.durable import DiskSynced
+from silica.config import silica_home
+from silica.kernel.base.vectors import MAX_CHARS
 
-_LEGACY_INDEX_PATH = Path.home() / ".silica" / "index" / "embeddings.json"
+def _legacy_index_path() -> Path:
+    return silica_home() / "index" / "embeddings.json"
 
 
 def _index_path() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
-    from silica.kernel.recall import paths
+    from silica.kernel.base import home
 
-    return paths.index_file("embeddings")
-
-# Maximum characters of note content to embed (title + body prefix).
-# Keeps embedding calls fast without losing most of the signal.
-_MAX_CHARS = 1200
-
-# Theme-vector sampling budget: at most this many _MAX_CHARS blocks are
-# embedded per document, equispaced across the body (document_theme_vector).
-_THEME_MAX_SEGMENTS = 8
-
+    return home.index_file("embeddings")
 
 # ---------------------------------------------------------------------------
 # Pure maths
 # ---------------------------------------------------------------------------
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    """Return cosine similarity in [−1, 1] between two vectors.
-
-    Returns 0.0 if either vector is the zero vector (degenerate case).
-    """
-    if len(a) != len(b):
-        return 0.0
-    va = np.asarray(a, dtype=np.float64)
-    vb = np.asarray(b, dtype=np.float64)
-    denom = float(np.linalg.norm(va) * np.linalg.norm(vb))
-    if denom == 0.0:
-        return 0.0
-    return float(va @ vb) / denom
-
-
-def centroid(vectors: list[list[float]]) -> list[float]:
-    """Component-wise mean of a list of vectors. Returns [] if empty or ragged."""
-    if not vectors:
-        return []
-    dim = len(vectors[0])
-    if any(len(v) != dim for v in vectors):
-        return []
-    return np.mean(np.asarray(vectors, dtype=np.float64), axis=0).tolist()
-
-
-# Theme vectors are requested twice per inbox file (RECON rerank + SALIENCE
-# gate) with an identical cleaned body — cache by content so the second call
-# is free. ponytail: crude clear-at-cap bound, fine for per-run lifetimes.
-# (model, body sha1, segment_chars, max_segments) -> centroid.
-_theme_cache: dict[tuple[str, str, int, int], list[float]] = {}
-_THEME_CACHE_MAX = 64
-
-
-def document_theme_vector(
-    embedder: Any, body: str, *, segment_chars: int = _MAX_CHARS,
-    max_segments: int = _THEME_MAX_SEGMENTS,
-) -> list[float]:
-    """Thematic centroid of a document: embed a bounded sample of body segments,
-    then average.
-
-    Robust on long notes. Returns [] if embedder fails or body is empty.
-    Cached per (model, body-hash, segment_chars, max_segments) — see
-    _theme_cache above.
-
-    Bodies over ``max_segments`` blocks are sampled equispaced rather than
-    embedded in full: both consumers (keyphrase MMR, SALIENCE at τ=0.35) use
-    this vector as a direction, not a faithful centroid, and walking a book
-    segment block-by-block made RECON's cost linear in the note size (34
-    embed inputs per 40k-char segment). ``max_segments=0`` disables sampling.
-    """
-    if not body.strip():
-        return []
-    import hashlib
-    key = (
-        getattr(embedder, "model", ""),
-        hashlib.sha1(body.encode("utf-8", "ignore")).hexdigest(),
-        segment_chars,
-        max_segments,
-    )
-    cached = _theme_cache.get(key)
-    if cached is not None:
-        return cached
-    segs = [body[i:i + segment_chars] for i in range(0, len(body), segment_chars)] or [body]
-    if max_segments and len(segs) > max_segments:
-        step = len(segs) / max_segments
-        segs = [segs[int(i * step)] for i in range(max_segments)]
-    try:
-        vecs = embedder.embed(segs)
-    except Exception:
-        return []
-    vec = centroid(vecs)
-    if vec:
-        if len(_theme_cache) >= _THEME_CACHE_MAX:
-            _theme_cache.clear()
-        _theme_cache[key] = vec
-    return vec
-
 
 # ---------------------------------------------------------------------------
 # Binary persistence (Fix 2A)
@@ -293,8 +209,8 @@ class EmbedStore(DiskSynced):
 
     def _read_disk(self) -> dict[str, dict[str, Any]]:
         src = self._path
-        if not src.exists() and src != _LEGACY_INDEX_PATH and _LEGACY_INDEX_PATH.exists():
-            src = _LEGACY_INDEX_PATH  # one-time soft migration: copied forward on next save()
+        if not src.exists() and src != _legacy_index_path() and _legacy_index_path().exists():
+            src = _legacy_index_path()  # one-time soft migration: copied forward on next save()
         if not src.exists():
             return {}
         try:
@@ -475,7 +391,7 @@ class EmbedStore(DiskSynced):
         Only notes carrying the field and sharing its modal dimension are placed
         in the matrix; a note missing the field (e.g. a legacy entry with no
         title_vec) or off-dimension falls through to a 0.0 score, matching the
-        old per-pair _cosine length guard. Zero vectors normalize to zero rows.
+        old per-pair cosine length guard. Zero vectors normalize to zero rows.
         """
         # ponytail: dense float32 in RAM, both matrices — 25 MB at 1.2k notes × 2560
         # dims, linear in vault size. Reopen at ~500 MB (~25k notes). float16 halves
@@ -537,7 +453,7 @@ class EmbedStore(DiskSynced):
         # heapq.nlargest(k, ...) is documented-equivalent to sorted(reverse=True)[:k]:
         # same top-k, same (score, path) desc tie-break, but O(N log k).
         # Notes outside the matrix (missing field, off-dim, or dim mismatch) score
-        # exactly 0.0 — _cosine's degenerate cases. A 0.0/negative note can only enter
+        # exactly 0.0 — cosine's degenerate cases. A 0.0/negative note can only enter
         # the top-k when the matrix yields fewer than k strictly-positive hits, since any
         # positive score outranks it. In that common case nlargest over the matrix alone
         # is bit-identical; only otherwise do we pay the full-vault scan to place the
@@ -694,7 +610,7 @@ def get_store() -> "EmbedStore":
     write, caught by stamp on every lookup (paths.DiskSynced). Use `clear()`
     in tests.
     """
-    from silica.kernel.recall.paths import path_keyed_singleton
+    from silica.kernel.base.durable import path_keyed_singleton
     with _STORE_CACHE_LOCK:
         store = path_keyed_singleton(_STORE_CACHE, str(_index_path()), EmbedStore)
     store.sync_from_disk()  # outside the cache lock: a reload takes the store's own
@@ -726,7 +642,7 @@ def _note_text(title: str, body: str, *, folder: str = "") -> str:
     from silica.kernel.text.media import figures_as_text
     prefix = f"[{folder}] " if folder else ""
     combined = f"{prefix}{title}\n\n{figures_as_text(body, image_readings.texts_by_name())}"
-    return combined[:_MAX_CHARS]
+    return combined[:MAX_CHARS]
 
 def _note_title_text(title: str, *, folder: str = "") -> str:
     """Title-only text for the secondary title-similarity embedding vector.
@@ -856,7 +772,7 @@ def build_index(
                          content_hash=_embed_signature(name, body, folder=f, model=_model))
 
     if prune:
-        from silica.kernel.recall.paths import in_folder
+        from silica.kernel.base.layout import in_folder
         live = {path for path, _, _ in notes}
         for p in [p for p in store.paths() if p not in live and in_folder(p, folder)]:
             store.delete(p)

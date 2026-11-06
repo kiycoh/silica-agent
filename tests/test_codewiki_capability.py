@@ -135,8 +135,8 @@ def wiki_env(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.model.providers.get_provider",
                         lambda config, role: fake)
     # keep the derived index inside the tmp vault
-    from silica.kernel.recall import paths as kpaths
-    monkeypatch.setattr(kpaths, "index_dir", lambda: vault / ".index")
+    from silica.kernel.base import home
+    monkeypatch.setattr(home, "index_dir", lambda: vault / ".index")
     (vault / ".index").mkdir(parents=True, exist_ok=True)
     # bind the write channel (DRIVER) at the tmp vault (canonical tmp_vault setup)
     import silica.config
@@ -163,8 +163,8 @@ def test_no_supported_source_aborts_before_llm(tmp_path, monkeypatch):
 
     fake = _FakeProvider('{"content": "should never be produced"}')
     monkeypatch.setattr("silica.model.providers.get_provider", lambda config, role: fake)
-    from silica.kernel.recall import paths as kpaths
-    monkeypatch.setattr(kpaths, "index_dir", lambda: vault / ".index")
+    from silica.kernel.base import home
+    monkeypatch.setattr(home, "index_dir", lambda: vault / ".index")
     (vault / ".index").mkdir(parents=True, exist_ok=True)
     import silica.config
     import silica.driver
@@ -317,9 +317,9 @@ def test_whitespace_only_note_body_does_not_crash(wiki_env):
 
 def test_no_repo_degrades_soft(tmp_path, monkeypatch):
     import silica.config
-    from silica.kernel.recall import paths as kpaths
+    from silica.kernel.base import roots
     monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(tmp_path))
-    monkeypatch.setattr(kpaths, "repo_root_for", lambda v: None)
+    monkeypatch.setattr(roots, "repo_root_for", lambda v: None)
     assert run_wiki(config=None)["status"] == "no_repo"
 
 

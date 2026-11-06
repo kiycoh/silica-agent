@@ -51,7 +51,7 @@ from silica.tools.composed import (  # noqa: F401  — see the `import time` not
 )
 from silica.kernel.write.ops import OpType
 from silica.kernel.write.ops_io import load_ops
-from silica.kernel.recall.paths import to_vault_relative
+from silica.kernel.base.layout import to_vault_relative
 from silica.router.base_fsm import BaseFSM
 # Imported for the states modules (and tests), which resolve patchable
 # collaborators through this module's namespace — see silica.router.states.
@@ -185,7 +185,7 @@ def _commit_docs_for_ops(
     yield None and never raise. Commits ONLY vault paths — the out-of-vault
     guard lives inside gitstate.commit_docs, so a bug cannot commit source files.
     """
-    from silica.kernel.code import gitstate
+    from silica.kernel.base import gitstate
     from pathlib import Path as _Path
 
     if git_commit != "auto" or not vault:
@@ -206,7 +206,7 @@ def _commit_docs_for_ops(
         return None
 
     try:
-        from silica.kernel.recall.paths import repo_root_for
+        from silica.kernel.base.roots import repo_root_for
 
         root = repo_root_for(vault)
         if root is None:
@@ -292,7 +292,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
             raise ValueError("At least one inbox file must be provided")
         self.inbox_files: list[str] = [to_vault_relative(f) for f in files]
         self.inbox_file: str = self.inbox_files[0]  # first file; compat with single-file callers
-        from silica.kernel.recall.paths import resolve_target_dir
+        from silica.kernel.base.layout import resolve_target_dir
         from silica.kernel.base.manifest import in_write_dir
         # Case-fold against the REAL tree first (the mirror often has no folder
         # for this note yet), then rebase into the write boundary. Rebasing here

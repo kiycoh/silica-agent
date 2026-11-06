@@ -1,10 +1,21 @@
 """Shared pytest fixtures for the silica-agent test suite."""
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
+import tempfile
 from pathlib import Path
 
-import pytest
+# Before anything imports silica. The per-test fixture below is not enough alone: an
+# atexit flush or a daemon thread writes after the fixture has restored the binding, and
+# the suite was rewriting the developer's real ~/.silica/index/embeddings.json that way
+# (found 2026-11-06 by running it under an empty HOME). Subprocesses inherit this too.
+_SUITE_HOME = tempfile.mkdtemp(prefix="silica-suite-home-")
+os.environ["SILICA_HOME"] = _SUITE_HOME
+atexit.register(shutil.rmtree, _SUITE_HOME, ignore_errors=True)  # first in, so it runs last
+
+import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -257,7 +268,7 @@ def _isolate_embed_legacy_path(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Non
     via the legacy-migration fallback. Any test that redirects _index_path to a
     non-existent tmp file would otherwise fall back to the developer's real index."""
     import silica.kernel.recall.embed as embed_mod
-    monkeypatch.setattr(embed_mod, "_LEGACY_INDEX_PATH", tmp_path / "legacy_embed.json")
+    monkeypatch.setattr(embed_mod, "_legacy_index_path", lambda: tmp_path / "legacy_embed.json")
 
 
 @pytest.fixture(autouse=True)
@@ -292,7 +303,7 @@ def _isolate_silica_home(tmp_path_factory, monkeypatch: pytest.MonkeyPatch):
 
     The ledger/undo-journal/checkpoint singletons are first-caller-wins (the
     path argument is ignored once initialised) and default to the developer's
-    real ~/.silica/*.db; paths._SILICA_HOME feeds tmp/, index/ and session
+    real ~/.silica/*.db; silica_home() feeds tmp/, index/ and session
     capture. An unpatched caller (orchestrator record, CLEANUP) would write
     real state, pin its store for the rest of the process, and let concurrent
     suite runs interfere with each other through the shared files.
@@ -301,12 +312,11 @@ def _isolate_silica_home(tmp_path_factory, monkeypatch: pytest.MonkeyPatch):
     _SILICA_HOME, and tests assert over tmp_path's exact contents.
     """
     home = tmp_path_factory.mktemp("silica-home")
-    import silica.kernel.recall.paths as paths_mod
     import silica.kernel.write.checkpoints as cp_mod
     import silica.kernel.write.ledger as ledger_mod
     import silica.kernel.write.undo_journal as journal_mod
 
-    monkeypatch.setattr(paths_mod, "_SILICA_HOME", home)
+    monkeypatch.setattr("silica.config._SILICA_HOME", home)
     # The retrieval engine (silica-core, ADR-0043) keys its index dir off its
     # own copy of the same constant.
     import silica_core.kernel.recall.paths as core_paths_mod
@@ -316,9 +326,6 @@ def _isolate_silica_home(tmp_path_factory, monkeypatch: pytest.MonkeyPatch):
     # every "link this vault" test was refused as linked elsewhere (2026-10-06).
     import silica.kernel.recall.vault_registry as registry_mod
     monkeypatch.setattr(registry_mod, "_obsidian_json", lambda: home / "obsidian.json")
-    monkeypatch.setattr(ledger_mod, "_DEFAULT_LEDGER_PATH", home / "ledger.db")
-    monkeypatch.setattr(journal_mod, "_DEFAULT_JOURNAL_PATH", home / "undo_journal.db")
-    monkeypatch.setattr(cp_mod, "_DEFAULT_CHECKPOINT_PATH", home / "checkpoints.db")
     singletons = ((ledger_mod, "_ledger"), (journal_mod, "_store"), (cp_mod, "_store"))
     for mod, attr in singletons:
         monkeypatch.setattr(mod, attr, None)
@@ -415,7 +422,7 @@ def _isolate_deferred_store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """
     from silica.kernel.write import deferred as deferred_mod
     monkeypatch.setattr(deferred_mod, "_store_dir", lambda: tmp_path / "deferred_store")
-    monkeypatch.setattr(deferred_mod, "_LEGACY_DEFERRED_DIR", tmp_path / "deferred_legacy")
+    monkeypatch.setattr(deferred_mod, "_legacy_deferred_dir", lambda: tmp_path / "deferred_legacy")
     deferred_mod._stores.clear()
     yield
     deferred_mod._stores.clear()
@@ -434,7 +441,7 @@ def _isolate_undo_journal(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     # when a test actually opens the journal, so tests that assert on tmp_path's
     # contents never see a stray undo_journal/ dir.
     import silica.kernel.write.undo_journal as uj
-    monkeypatch.setattr(uj, "_DEFAULT_JOURNAL_PATH", tmp_path / "undo_journal" / "j.db")
+    monkeypatch.setattr(uj, "_journal_path", lambda: tmp_path / "undo_journal" / "j.db")
     uj._store = None
     yield
     uj._store = None

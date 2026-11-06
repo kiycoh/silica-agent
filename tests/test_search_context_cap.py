@@ -18,7 +18,8 @@ from silica.tools import atomic
 @pytest.fixture
 def vault(tmp_path, monkeypatch):
     from silica.config import CONFIG
-    from silica.kernel.recall import lexical, paths
+    from silica.kernel.recall import lexical
+    from silica.kernel.base import home
 
     (tmp_path / "Folder").mkdir()
     for i in range(20):
@@ -29,7 +30,7 @@ def vault(tmp_path, monkeypatch):
         "bounds read amplification, and compaction runs in the background.\n",
         encoding="utf-8")
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    monkeypatch.setattr(paths, "index_dir_for", lambda vault, _d=tmp_path / ".idx": _d)
+    monkeypatch.setattr(home, "index_dir_for", lambda vault, _d=tmp_path / ".idx": _d)
     lexical.clear()
     from silica_core.kernel.recall import lexical as core_lexical, paths as core_paths
     monkeypatch.setattr(core_paths, "index_dir_for", lambda vault, _d=tmp_path / ".idx": _d)

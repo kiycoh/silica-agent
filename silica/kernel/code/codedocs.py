@@ -18,12 +18,14 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from silica.kernel.code import codeast, gitstate
+from silica.kernel.code import codeast
+from silica.kernel.base import gitstate
 
 from silica.kernel.base import frontmatter
 
-from silica.kernel.recall import paths
-from silica.kernel.code.gitstate import CommitInfo
+from silica.kernel.base import home, layout, roots
+from silica.kernel.base.gitstate import CommitInfo
+from silica.kernel.base.frontmatter import documents_of
 
 CHANGE_COSMETIC = "cosmetic"
 CHANGE_STRUCTURAL = "structural"
@@ -38,15 +40,6 @@ class StaleDoc:
     intervening: list[CommitInfo] = field(default_factory=list)
     change_level: str = CHANGE_STRUCTURAL   # conservative default (floor, not ceiling)
     details: list[str] = field(default_factory=list)
-
-
-def documents_of(data: dict) -> list[str]:
-    raw = (data or {}).get("documents")
-    if not raw:
-        return []
-    if isinstance(raw, str):
-        return [raw]
-    return [str(x) for x in raw if x]
 
 
 _documents_of = documents_of  # internal alias (pre-rename call sites)
@@ -85,7 +78,7 @@ def iter_documenting_notes(vault: Path | str):
     as stale and a 17.8 s walk for 4 real notes (ADR-0038).
     """
     vault = Path(vault)
-    skip = paths.ignore_matcher(vault)
+    skip = layout.ignore_matcher(vault)
     for dirpath, dirnames, filenames in os.walk(vault):
         dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not skip(d))
         for fn in sorted(filenames):
@@ -164,7 +157,7 @@ def stale_docs(vault: Path | str, repo_root: Path | str | None = None,
     """Return one StaleDoc per (note, changed path). Empty when git is absent.
     `notes` lets the snapshot pass the walk it already paid for."""
     vault = Path(vault)
-    root = Path(repo_root) if repo_root else paths.repo_root_for(vault)
+    root = Path(repo_root) if repo_root else roots.repo_root_for(vault)
     if root is None:
         return []
 
@@ -237,7 +230,7 @@ def _stale_for_note(root: Path, note_path: str, data: dict,
 
 def _snapshot_path(vault: Path | str) -> Path:
     """Cache file location; a function so tests redirect it (conftest)."""
-    return paths.index_dir_for(str(vault)) / "stale_snapshot.json"
+    return home.index_dir_for(str(vault)) / "stale_snapshot.json"
 
 
 def _doc_to_json(d: StaleDoc) -> dict:
@@ -276,7 +269,7 @@ def snapshot(vault: Path | str, repo_root: Path | str | None = None) -> list[Sta
     a stale path between cosmetic and structural are a declared residue.
     """
     vault = Path(vault)
-    root = Path(repo_root) if repo_root else paths.repo_root_for(vault)
+    root = Path(repo_root) if repo_root else roots.repo_root_for(vault)
     if root is None:
         return []
     head = gitstate.head_ref(root)
@@ -316,7 +309,7 @@ def peek(vault: Path | str, repo_root: Path | str | None = None) -> dict[str, st
     """
     try:
         vault = Path(vault)
-        root = Path(repo_root) if repo_root else paths.repo_root_for(vault)
+        root = Path(repo_root) if repo_root else roots.repo_root_for(vault)
         if root is None:
             return {}
         head = gitstate.head_ref(root)
@@ -381,7 +374,7 @@ def read_warning(vault: Path | str, data: dict, repo_root: Path | str | None = N
         docs = _documents_of(data)
         if not docs:
             return ""
-        root = Path(repo_root) if repo_root else paths.repo_root_for(Path(vault))
+        root = Path(repo_root) if repo_root else roots.repo_root_for(Path(vault))
         if root is None:
             return ""
         missing = [p for p in docs if not (root / p).exists()]

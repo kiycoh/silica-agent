@@ -419,7 +419,7 @@ import math as _math
 import statistics as _statistics
 
 from silica.kernel.recall import relatedness as _relatedness_mod
-from silica.kernel.recall.paths import in_folder as _path_in_scope
+from silica.kernel.base.layout import in_folder as _path_in_scope
 from silica.kernel.recall.relatedness import _concept_idf, _rank_cooccur_from_profile
 
 _snowball = __import__("snowballstemmer").stemmer("english").stemWord

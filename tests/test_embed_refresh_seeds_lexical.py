@@ -10,7 +10,7 @@ builds one, so the first build is where the cheap stage has to be born.
 """
 from __future__ import annotations
 
-from silica.kernel.recall.paths import index_dir
+from silica.kernel.base.home import index_dir
 
 
 class _Emb:

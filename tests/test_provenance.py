@@ -96,12 +96,12 @@ def test_append_record_resume_refire_is_present(tmp_path):
 
 def test_append_record_survives_unwritable_store(tmp_path, monkeypatch, caplog):
     """Best-effort: an I/O failure on write must not raise."""
-    import silica.kernel.recall.paths as paths_mod
+    from silica.kernel.base import durable
 
     def _boom(*a, **k):
         raise OSError("disk full")
 
-    monkeypatch.setattr(paths_mod, "atomic_write_bytes", _boom)
+    monkeypatch.setattr(durable, "atomic_write_bytes", _boom)
     with caplog.at_level(logging.WARNING, logger="silica.kernel.write.provenance"):
         out = append_record("a.md", "sha1", "r1", ["N1"], vault_path=str(tmp_path))
     # Nothing reached the disk, and the ledger says so: a proven absence, and
@@ -114,28 +114,28 @@ def test_append_record_survives_unwritable_store(tmp_path, monkeypatch, caplog):
 def test_append_record_is_present_when_the_error_came_after_the_replace(tmp_path, monkeypatch):
     """atomic_write_bytes can raise after os.replace landed: the record IS on
     disk, and calling it absent would double-append on the next nucleate."""
-    import silica.kernel.recall.paths as paths_mod
+    from silica.kernel.base import durable
 
-    real = paths_mod.atomic_write_bytes
+    real = durable.atomic_write_bytes
 
     def _late(path, data):
         real(path, data)
         raise OSError("late failure")
 
-    monkeypatch.setattr(paths_mod, "atomic_write_bytes", _late)
+    monkeypatch.setattr(durable, "atomic_write_bytes", _late)
     assert append_record("a.md", "sha1", "r1", ["N1"], vault_path=str(tmp_path)) == "present"
 
 
 def test_append_record_is_uncertain_when_the_store_cannot_be_read_back(tmp_path, monkeypatch, caplog):
     """Garbage on disk after a failed write is neither presence nor absence,
     and the ledger must not turn unreadable evidence into a proven absence."""
-    import silica.kernel.recall.paths as paths_mod
+    from silica.kernel.base import durable
 
     def _torn(path, data):
         Path(path).write_bytes(data[: len(data) // 2])
         raise OSError("torn")
 
-    monkeypatch.setattr(paths_mod, "atomic_write_bytes", _torn)
+    monkeypatch.setattr(durable, "atomic_write_bytes", _torn)
     with caplog.at_level(logging.WARNING, logger="silica.kernel.write.provenance"):
         out = append_record("a.md", "sha1", "r1", ["N1"], vault_path=str(tmp_path))
     assert out == "uncertain"
@@ -526,14 +526,14 @@ def test_rename_note_with_nothing_to_rename_writes_nothing(tmp_path):
 
 def test_rename_note_failure_is_absent_and_named(tmp_path, monkeypatch, caplog):
     from silica.kernel.write.provenance import note_authored_by, rename_note
-    import silica.kernel.recall.paths as paths_mod
+    from silica.kernel.base import durable
 
     append_record("a.md", "sha1", "r1", ["Concepts/A"], vault_path=str(tmp_path))
 
     def _boom(*a, **k):
         raise OSError("read-only vault")
 
-    monkeypatch.setattr(paths_mod, "atomic_write_bytes", _boom)
+    monkeypatch.setattr(durable, "atomic_write_bytes", _boom)
     with caplog.at_level(logging.WARNING, logger="silica.kernel.write.provenance"):
         out = rename_note("Concepts/A.md", "Archive/A.md", vault_path=str(tmp_path))
 

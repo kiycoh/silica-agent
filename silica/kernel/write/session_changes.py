@@ -176,7 +176,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_changes_session_path ON changes(session, p
 def _db_path(vault: str) -> Path | None:
     if not vault:
         return None  # no vault configured: nothing another session could look up
-    from silica.kernel.recall.paths import index_dir_for
+    from silica.kernel.base.home import index_dir_for
 
     return index_dir_for(vault) / "changes.db"
 

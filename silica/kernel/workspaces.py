@@ -67,7 +67,7 @@ def _frontmatters(vault: Path) -> dict[str, dict]:
     ceiling for the same pass (100 ms at p90 on a 2,000-note vault), cache it
     per index generation past that.
     """
-    from silica.kernel.recall.paths import vault_epoch
+    from silica.kernel.base.layout import vault_epoch
     from silica.kernel.learn.learner import _notes_meta
     from silica.kernel.base import frontmatter
 
@@ -93,7 +93,7 @@ def _mirror_copies(paths) -> set[str]:
     """Safe mode stages a patched note at `silica/<same path>`
     (vault_manifest.seed_mirror_copy): that copy counts as its original and is
     never a member of its own, as ADR-0109 point 1 counts it."""
-    from silica.onboarding.adopt import SAFE_WRITE_DIR
+    from silica.kernel.base.manifest import SAFE_WRITE_DIR
 
     prefix = SAFE_WRITE_DIR + "/"
     have = set(paths)
@@ -163,7 +163,7 @@ def _where_match(data: dict, line: str) -> bool:
 def members(ws: dict) -> dict[str, list[dict]]:
     """{path: [reason, ...]} in walk order. A reason is {"kind": listed |
     folder | where | derived, "via": the line or source that brought it}."""
-    from silica.kernel.recall.paths import in_folder
+    from silica.kernel.base.layout import in_folder
 
     fms = _frontmatters(_vault())
     mirrors = _mirror_copies(fms)

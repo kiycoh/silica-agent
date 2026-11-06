@@ -42,14 +42,15 @@ def context_vault(tmp_path, monkeypatch):
     """A real vault: silica_search_context ranks the retrieval engine's index,
     not driver hits, so its flags can only be probed on notes on disk."""
     from silica.config import CONFIG
-    from silica.kernel.recall import lexical, paths
+    from silica.kernel.recall import lexical
+    from silica.kernel.base import home
 
     (tmp_path / "F").mkdir()
     for name in ("A", "B"):
         (tmp_path / "F" / f"{name}.md").write_text(
             f"# {name}\n\nA memtable absorbs the write path.\n", encoding="utf-8")
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    monkeypatch.setattr(paths, "index_dir_for", lambda vault, _d=tmp_path / ".idx": _d)
+    monkeypatch.setattr(home, "index_dir_for", lambda vault, _d=tmp_path / ".idx": _d)
     lexical.clear()
     from silica_core.kernel.recall import lexical as core_lexical, paths as core_paths
     monkeypatch.setattr(core_paths, "index_dir_for", lambda vault, _d=tmp_path / ".idx": _d)

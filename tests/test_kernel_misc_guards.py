@@ -263,9 +263,9 @@ def test_run_dir_for_rejects_an_escaping_run_id(run_id):
 
 
 def test_run_dir_for_accepts_an_ordinary_run_id():
-    from silica.kernel.progress import _RUNS_DIR, run_dir_for
+    from silica.kernel.progress import run_dir_for, runs_dir
 
-    assert run_dir_for("0123456789abcdef") == _RUNS_DIR / "0123456789abcdef"
+    assert run_dir_for("0123456789abcdef") == runs_dir() / "0123456789abcdef"
 
 
 def test_progress_ledger_load_rejects_an_escaping_run_id():
@@ -288,18 +288,18 @@ def test_progress_save_is_atomic(tmp_path, monkeypatch):
     makes Run.resume silently fall back to a fresh run."""
     import silica.kernel.progress as progress_mod
 
-    monkeypatch.setattr(progress_mod, "_RUNS_DIR", tmp_path / "runs")
+    monkeypatch.setattr(progress_mod, "runs_dir", lambda: tmp_path / "runs")
     calls: list = []
 
-    from silica.kernel.recall import paths as paths_mod
+    from silica.kernel.base import durable
 
-    real = paths_mod.atomic_write_bytes
+    real = durable.atomic_write_bytes
 
     def spy(path, data):
         calls.append(path)
         real(path, data)
 
-    monkeypatch.setattr(paths_mod, "atomic_write_bytes", spy)
+    monkeypatch.setattr(durable, "atomic_write_bytes", spy)
 
     ledger = progress_mod.ProgressLedger.new(mode="test")
     written = ledger.save()
