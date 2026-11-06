@@ -25,7 +25,8 @@ import shutil
 from pathlib import Path
 from urllib.parse import quote
 
-from silica.kernel import publish
+from silica.kernel import publish, rights
+from silica.kernel.image_meta import strip_location
 
 logger = logging.getLogger(__name__)
 
@@ -367,7 +368,12 @@ def build(slug: str, vault: Path | None = None) -> dict:
     private = conf["visibility"] == "private"
     sel = publish.selection(vault)
     fms = sel["frontmatter"]
-    public = sorted(p for p, s in sel["notes"].items() if s == "on" and sel["vault_of"].get(p) == slug)
+    # Here and not in the screen: the check before Publish only reads these answers, so a wiki
+    # nobody looked at goes out as one nobody answered for (ADR-0153 points 20 and 26).
+    wiki = rights.read_wiki(slug, vault)
+    said = rights.answers(vault)
+    plan = rights.decide(wiki, said)
+    public = sorted(plan["notes"])
     on = set(public)
     titles = {p: _title(p, fms.get(p) or {}) for p in public}
     slugs = _slugs(public, titles)
@@ -396,12 +402,12 @@ def build(slug: str, vault: Path | None = None) -> dict:
         """The vault's name for an image a published note cites, copied once."""
         if target in copied:
             return copied[target]
-        found = _find_asset(target)
+        found = plan["files"].get(target) or _find_asset(target)
         if found is None:
             copied[target] = ""
             return ""
         name = f"{len(copied) + 1}-{publish.slugify(found.stem) or 'image'}{found.suffix.lower()}"
-        shutil.copyfile(found, build_dir / "assets" / name)
+        (build_dir / "assets" / name).write_bytes(strip_location(found.read_bytes()))
         copied[target] = name
         return name
 
@@ -435,8 +441,8 @@ def build(slug: str, vault: Path | None = None) -> dict:
         # body, and only _linkify stripped comments, so a `%% remark %%` the page hid went
         # out in the `.md` and into the room's text search, and hidden text reached the
         # vault of whoever saved the note.
-        body = _drop_title_heading(_strip_ofm_meta(body, html_comments=True), titles[p])
-        page_html = _linkify(body, resolve)
+        body = rights.place_images(_drop_title_heading(_strip_ofm_meta(body, html_comments=True), titles[p]), plan)
+        page_html = _linkify(body, resolve, remote_images=False)
         targets = set(_ANCHOR.findall(page_html))
         edges.update((p, html.unescape(t)) for t in targets if html.unescape(t) in on)
         page_html = _ANCHOR.sub(
@@ -445,16 +451,18 @@ def build(slug: str, vault: Path | None = None) -> dict:
         page_html = _ASSET_SRC.sub(
             lambda m: site.asset(slug, copy_asset(_unquote(m.group(1))), 1) if copy_asset(_unquote(m.group(1))) else "",
             page_html)
-        rendered[p] = {"html": page_html, "props": props, "body": body}
+        rendered[p] = {"html": page_html, "props": props, "body": body, "credit": plan["note_credits"].get(p, "")}
 
     shown = [p for p in public if p in rendered]
     pairs = {(min(a, b), max(a, b)) for a, b in edges if a in rendered and b in rendered and a != b}
     c = cover(shown, pairs, titles)
     today = datetime.date.today().isoformat()
     stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    blocked = rights.blocks(wiki, said, plan)
     manifest = {
         "v": 1, "handle": h, "slug": slug, "title": conf["title"], "line": conf["line"],
-        "license": conf["license"], "published": today, "listed": conf["listed"] and not private,
+        "license": conf["license"], "published": today, "listed": conf["listed"] and not private and not blocked,
+        "blocked": bool(blocked), "rights": rights.statement(wiki, said, plan, slugs),
         "url": vurl,
         "count": {"notes": len(shown), "links": len(pairs), "drawn": len(c["n"]), "areas": len(c["areas"])},
         "areas": c["areas"],
@@ -473,6 +481,8 @@ def build(slug: str, vault: Path | None = None) -> dict:
                 "vault": conf["title"]}
         if credit:
             kept.update({"author": f"@{credit}", **({"source": source} if source else {})})
+        if rendered[p]["credit"]:
+            kept["credit"] = rendered[p]["credit"]
         md = fm.dump(kept, _md_for_reader(rendered[p]["body"], resolve, href_of))
         notes_md[slugs[p]] = md
         if not private:
@@ -500,7 +510,9 @@ def build(slug: str, vault: Path | None = None) -> dict:
         shutil.rmtree(root / "paused" / slug, ignore_errors=True)
     _mark_published(slug, today, vault)
     state = last_published(h) or {"vaults": {}}
-    state["vaults"][slug] = {"published_at": stamp, "notes": shown}
+    # The reasons stay here, for the author: the manifest is public, and one of them says a note
+    # holds someone's personal data.
+    state["vaults"][slug] = {"published_at": stamp, "notes": shown, "blocked": blocked}
     (root / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
     write_page(vault)
     return {"vault": slug, "notes": len(shown), "links": len(pairs),
@@ -564,6 +576,7 @@ def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, bac
             + f'<main class="sheet"{_room(site, vslug, slug)}><div class="art-grid"><article class="art">'
             + crumb + banner
             + f'<p class="meta">{byline}</p><h1>{_esc(titles[p])}</h1>'
+            + (f'<p class="meta">From {_esc(r["credit"])}</p>' if r["credit"] else "")
             + (f'<p class="tags">{" · ".join(_esc(t) for t in tags)}</p>' if tags else "")
             + f'<div class="body">{r["html"]}</div>{actions}</article>'
             + (f'<aside class="side">{side}</aside>' if side else "") + "</div></main>\n"
@@ -702,15 +715,15 @@ def write_page(vault: Path | None = None) -> None:
 
 
 def set_listed(slug: str, listed: bool, vault: Path | None = None) -> None:
-    """"Listed in Pages" reaches the published manifest at once, since the
-    catalog reads only that; the rest of the vault waits for Publish."""
+    """Ask to list reaches the published manifest at once, since the host reads
+    the request there; the rest of the vault waits for Publish."""
     vault = vault or publish._vault()
     h = publish.handle(vault)
     path = publish.site_root(h) / "live" / slug / "vault.json" if h else None
     if path is None or not path.is_file():
         return
     m = json.loads(path.read_text(encoding="utf-8"))
-    m["listed"] = bool(listed)
+    m["listed"] = bool(listed) and not m.get("blocked")
     _atomic(path, json.dumps(m, ensure_ascii=False, separators=(",", ":")))
 
 

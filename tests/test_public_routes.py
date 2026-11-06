@@ -74,10 +74,47 @@ def test_listed_reaches_the_published_manifest_at_once(client):
 
     tc, tmp = client
     tc.post("/public/vault", json={"folder": "Memory"})
+    tc.post("/public/vault/memory", json={"license": "CC BY 4.0"})
     tc.post("/public/publish", json={"vault": "memory"})
     tc.post("/public/vault/memory", json={"listed": True})
     m = json.loads((tmp / "public" / "marta" / "live" / "memory" / "vault.json").read_text(encoding="utf-8"))
     assert m["listed"] is True
+
+
+def test_the_view_says_what_the_host_said_of_each_wiki(client, monkeypatch):
+    """`listed` is the author's request; what became of it is the host's (ADR-0153 point 7)."""
+    import json
+
+    tc, tmp = client
+    tc.post("/public/vault", json={"folder": "Memory"})
+    assert tc.get("/public").json()["vaults"][0]["review"] == {}
+    host = tmp / "host"
+    host.mkdir()
+    (host / "handle.json").write_text('{"handle": "marta"}', encoding="utf-8")
+    monkeypatch.setenv("SILICA_HOST_DIR", str(host))
+    assert tc.get("/public").json()["vaults"][0]["review"] == {}
+    said = {"state": "no", "since": "2026-11-06", "rule": "Rule 2: Name your sources.", "seen": "Copied text."}
+    (host / "wikis.json").write_text(json.dumps({"memory": said, "other": {"state": "in"}}), encoding="utf-8")
+    assert tc.get("/public").json()["vaults"][0]["review"] == said
+    (host / "wikis.json").write_text("half a file", encoding="utf-8")
+    assert tc.get("/public").json()["vaults"][0]["review"] == {}
+
+
+def test_a_blocked_wiki_says_why_and_a_request_does_not_reach_its_manifest(client):
+    import json
+
+    tc, tmp = client
+    tc.post("/public/vault", json={"folder": "Memory"})
+    assert tc.get("/public").json()["vaults"][0]["blocked"] == []
+    tc.post("/public/publish", json={"vault": "memory"})
+    v = tc.post("/public/vault/memory", json={"listed": True}).json()["vaults"][0]
+    assert "license" in v["blocked"][0]
+    m = json.loads((tmp / "public" / "marta" / "live" / "memory" / "vault.json").read_text(encoding="utf-8"))
+    # the manifest is public: the reasons are the author's, and one names a note with personal data
+    assert m["listed"] is False and m["blocked"] is True
+    tc.post("/public/vault/memory", json={"license": "CC BY 4.0"})
+    tc.post("/public/publish", json={"vault": "memory"})
+    assert tc.get("/public").json()["vaults"][0]["blocked"] == []
 
 
 def test_the_cover_is_the_graph_of_what_goes_out_and_nothing_private(client):
@@ -494,3 +531,90 @@ def test_the_upgrade_window_has_its_three_doors_and_a_page_reads_the_plan():
     assert 'ev.limit !== "month"' in js
     html = (Path(__file__).parents[1] / "silica/ui/web/static/index.html").read_text(encoding="utf-8")
     assert 'href="https://silica-agent.dev/#plans"' in html and ">Check it out<" in html
+
+
+# --- the check before Publish (ADR-0153) ---------------------------------------
+
+def _with_a_book(tmp_vault, tc, root: Path) -> None:
+    from silica.kernel.write.provenance import append_record
+
+    tmp_vault.note("sources/Book.md", '---\nsource_file: "/home/u/Book.pdf"\n---\nA chapter of a book.\n')
+    append_record("Book.md", "x", "r1", ["Memory/Forgetting curve"], vault_path=str(root / "vault"))
+    tc.post("/public/vault", json={"folder": "Memory"})
+
+
+def test_the_check_reads_a_wiki_and_refuses_an_unknown_one(client, tmp_vault):
+    tc, root = client
+    tc.post("/public/vault", json={"folder": "Memory"})
+    assert tc.get("/public/check", params={"vault": "memory"}).json()["ask"] is False
+    assert tc.get("/public/check", params={"vault": "nope"}).status_code == 400
+
+
+def test_an_answer_through_the_route_changes_what_goes_out(client, tmp_vault):
+    tc, root = client
+    _with_a_book(tmp_vault, tc, root)
+    first = tc.get("/public/check", params={"vault": "memory"}).json()
+    assert first["ask"] is True and first["count"]["notes"] == 1
+    said = tc.post("/public/check/answer", json={"vault": "memory", "key": "Book.pdf", "answer": "mine"}).json()
+    assert said["ask"] is False and said["count"]["notes"] == 2
+
+
+def test_an_answer_for_what_this_wiki_does_not_show_is_refused(client, tmp_vault):
+    tc, root = client
+    _with_a_book(tmp_vault, tc, root)
+    tc.get("/public/check", params={"vault": "memory"})
+    r = tc.post("/public/check/answer", json={"vault": "memory", "key": "Other.pdf", "answer": "mine"})
+    assert r.status_code == 400
+    r = tc.post("/public/check/answer", json={"vault": "memory", "key": "Book.pdf", "answer": "maybe"})
+    assert r.status_code == 400
+
+
+def test_the_check_writes_only_from_this_origin(client, tmp_vault):
+    tc, root = client
+    _with_a_book(tmp_vault, tc, root)
+    bad = {"Origin": "https://evil.test"}
+    r = tc.post("/public/check/answer", json={"vault": "memory", "key": "Book.pdf", "answer": "mine"}, headers=bad)
+    assert r.status_code == 403
+    r = tc.post("/public/check/note", json={"vault": "memory", "path": "Memory/Forgetting curve.md", "on": True},
+                headers=bad)
+    assert r.status_code == 403
+
+
+def test_a_note_is_marked_through_the_route_and_an_untouched_one_is_refused(client, tmp_vault):
+    from silica.kernel.write.ops import InverseOp, InverseOpKind
+    from silica.kernel.write.undo_journal import _content_hash, get_undo_journal
+
+    tc, root = client
+    _with_a_book(tmp_vault, tc, root)
+    note = "Memory/Forgetting curve.md"
+    store = get_undo_journal()
+    run = store.start_run(vault=str(root / "vault"))
+    store.record(run, InverseOp(kind=InverseOpKind.delete_created, path=note),
+                 _content_hash((root / "vault" / note).read_text(encoding="utf-8")))
+    tc.get("/public/check", params={"vault": "memory"})
+    r = tc.post("/public/check/note", json={"vault": "memory", "path": note, "on": True})
+    assert r.status_code == 400 and "Not edited" in r.json()["detail"]
+    tmp_vault.note(note, "Ebbinghaus, as I would put it.\n")
+    tc.get("/public/check", params={"vault": "memory"})
+    said = tc.post("/public/check/note", json={"vault": "memory", "path": note, "on": True}).json()
+    assert said["count"]["notes"] == 2
+    assert "rewritten: true" in (root / "vault" / note).read_text(encoding="utf-8")
+    said = tc.post("/public/check/note", json={"vault": "memory", "path": note, "on": False}).json()
+    assert said["count"]["notes"] == 1
+
+
+def test_a_kept_image_is_served_by_its_name_and_nothing_else_is(client):
+    tc, _ = client
+    assert tc.get("/public/check/image", params={"name": "../vault.yaml"}).status_code == 404
+    assert tc.get("/public/check/image", params={"name": "0" * 24 + ".png"}).status_code == 404
+
+
+def test_a_note_outside_the_wiki_cannot_be_marked(client, tmp_vault):
+    tc, root = client
+    _with_a_book(tmp_vault, tc, root)
+    tc.get("/public/check", params={"vault": "memory"})
+    for path in ("Courses/Exam plan June.md", "Memory/Spacing effect.md", "../vault.yaml"):
+        r = tc.post("/public/check/note", json={"vault": "memory", "path": path, "on": True})
+        assert r.status_code == 400
+        r = tc.post("/public/check/note", json={"vault": "memory", "path": path, "on": False})
+        assert r.status_code == 400

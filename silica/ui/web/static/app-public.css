@@ -636,7 +636,12 @@ body.drawer-recall #public-bar {
 .pg-lic select:focus { color: var(--accent); text-decoration-color: var(--accent); outline: none; }
 .pg-lic select:focus-visible { outline: 1px solid var(--accent); }
 
-.pg-lst { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-ctl); color: var(--ash); margin-right: 6px; }
+.lst-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: var(--fs-ctl); color: var(--text); }
+.lst-row p { flex: 1 1 22rem; margin: 0; }
+.lst-say { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: var(--fs-ctl); line-height: 1.5; }
+.lst-say dt { color: var(--ash-dim); }
+.lst-say dd { margin: 0; color: var(--frost); }
+@container (max-width: 420px) { .lst-say { grid-template-columns: minmax(0, 1fr); } .lst-say dd { margin-bottom: 4px; } }
 
 /* Off, Public, Private and Listed: the calendar's segment */
 .pg-seg {
@@ -817,4 +822,74 @@ body.drawer-recall #public-bar {
 .pg-ask-row {
   display: flex;
   justify-content: flex-end;
+}
+
+/* The check before Publish (ADR-0153 points 9, 20 and 26). Amber stays for the one thing that keeps
+   a wiki out of Wikis: a note Silica wrote and a link it cannot copy are facts, not alarms. */
+.pre-top { display: grid; justify-items: start; gap: 2px; }
+.pre-h { margin: 0; font-size: 26px; line-height: 1.25; font-weight: 700; letter-spacing: -.02em; color: var(--frost); }
+.pre-lead { margin: 0; font-size: 14.5px; color: var(--text); }
+.pre-p { margin: 0 0 6px; font-size: var(--fs-ctl); color: var(--text); max-width: 74ch; }
+.pre-hand { margin-top: 8px; }
+.pre-link { padding: 0; border: 0; background: none; font: inherit; font-size: 12.5px; color: var(--ash); cursor: pointer; text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
+.pre-link:hover { color: var(--accent); text-decoration-color: var(--accent); }
+.pre-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.pre-row .nm { min-width: 0; display: grid; justify-items: start; gap: 1px; }
+.pre-row .fn { font-size: 13.5px; color: var(--frost); overflow-wrap: anywhere; }
+.pre-row .fn.site { font: 500 13px var(--mono); }
+.pre-row .ct { font-size: var(--fs-meta); color: var(--ash-dim); }
+.pre-row button.ct { padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-meta); color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.pre-hint { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; font-size: 12.5px; color: var(--ash); }
+.pre-hint.go { color: var(--text); }
+.pre-lic { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--ash); }
+.pre-lic label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.pre-lic .wide { flex: 1 1 16rem; }
+.pre-lic select, .pre-lic input { min-height: 30px; padding: 2px 8px; font: inherit; font-size: var(--fs-ctl); color: var(--frost); background: var(--slate-2); border: 0; border-radius: var(--r-xs); box-shadow: inset 0 0 0 1px var(--line-2); }
+.pre-lic input { flex: 1; min-width: 0; }
+.pre-notes { grid-column: 1 / -1; display: grid; gap: 2px; max-height: 20rem; overflow-y: auto; padding: 4px 2px; }
+.pre-notes > p { margin: 0 0 4px; font-size: 12.5px; color: var(--ash); max-width: 70ch; }
+.pre-note { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; min-height: 30px; font-size: var(--fs-ctl); color: var(--frost); }
+label.pre-note { cursor: pointer; }
+.pre-note input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+.pre-note .t { min-width: 0; overflow-wrap: anywhere; }
+.pre-note .st { font-size: 12.5px; color: var(--ash); text-align: right; }
+.pre-note.off { color: var(--ash); }
+.pre-sheet { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px 8px; padding-top: 4px; }
+.pre-th { position: relative; display: grid; gap: 3px; min-width: 0; cursor: pointer; }
+.pre-th.still { cursor: default; }
+.pre-th img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #FFFDF9; border-radius: var(--r-xs); box-shadow: inset 0 0 0 1px var(--line); }
+.pre-th span { font-size: var(--fs-meta); color: var(--ash-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pre-th input { position: absolute; top: 6px; left: 6px; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.pre-th.off img { opacity: .35; }
+.pre-more { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.pre-bad { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline; }
+.pre-bad .fn { font-size: var(--fs-ctl); color: var(--text); overflow-wrap: anywhere; }
+.pre-bad .st { font-size: 12.5px; color: var(--ash); }
+.pp-box.wide ul.pre-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.pp-box.wide .pre-checks li { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr) auto; gap: 2px 10px; align-items: baseline; justify-content: stretch; padding: 7px 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; font-size: var(--fs-ctl); color: var(--text); }
+.pp-box.wide .pre-checks li:first-child { border-top: 0; }
+.pre-checks .n { font-weight: 600; color: var(--frost); text-align: right; font-variant-numeric: tabular-nums; }
+.pre-checks .what { font-size: 12.5px; color: var(--ash-dim); white-space: nowrap; }
+.pre-checks .what.stop { color: var(--warn); }
+.pp-box.wide ul.pre-found { list-style: none; margin: 0; padding: 2px 0 6px; display: grid; gap: 2px; }
+.pp-box.wide .pre-found li { padding: 0; border: 0; font-size: var(--fs-ctl); color: var(--text); }
+.pre-foot { position: sticky; bottom: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 12px 14px; background: var(--slate); border-radius: var(--r-sm); box-shadow: inset 0 0 0 1px var(--line-2); }
+.pre-foot .pp-dim { margin: 0; }
+.pre-sum { margin: 0; font-size: 14.5px; font-weight: 500; color: var(--frost); }
+.pre-sum .q { font-weight: 400; color: var(--ash); }
+@container (max-width: 900px) {
+  .pre-row { grid-template-columns: minmax(0, 1fr); }
+  .pre-note { grid-template-columns: 18px minmax(0, 1fr); }
+  .pre-note .st { grid-column: 2; text-align: left; }
+  .pre-checks .what { grid-column: 2; white-space: normal; }
+}
+@container (max-width: 560px) {
+  .pre-row .pg-seg { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .pre-row .pg-seg button { justify-content: flex-start; min-height: 44px; }
+}
+@media (pointer: coarse) {
+  .pre-link, .pre-row button.ct, .lst-row .st-btn { min-height: 44px; }
+  .pre-note { min-height: 44px; }
+  .pre-note input { width: 20px; height: 20px; }
+  .pre-th input { width: 24px; height: 24px; }
 }

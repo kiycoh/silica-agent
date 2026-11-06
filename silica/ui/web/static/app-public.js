@@ -237,6 +237,7 @@ async function loadPublicView() {
 // mark, every link between two of them a line, ink on the well and nothing in between. When a
 // vault opens it builds as the landing's Fig. 1 does: notes from the middle of the layout
 // outward, then each link drawn out from its first note, all at full ink, in 1.7 s.
+let pubCheck = null;
 let pubCover = null, pubCoverK = 1, pubCoverRun = 0, pubCoverHover = -1, pubCoverRank = null;
 let pubCoverEl = null, pubCoverOf = "";
 
@@ -574,6 +575,11 @@ function renderPublic(fresh) {
   count.textContent = `${st.vaults.length} of ${st.max} wikis`;
   const v = pubCurVault();
   if (v) pubCur = v.slug;
+  if (pubCheck && (!v || pubCheck.slug !== v.slug)) pubCheck = null;
+  if (pubCheck) {
+    paintCheck();
+    return;
+  }
   const frag = document.createDocumentFragment();
 
   // the vaults of this Page, one tab each, and the way to add one
@@ -662,12 +668,6 @@ function renderPublic(fresh) {
   title.addEventListener("change", () => save("title", title));
   title.addEventListener("keydown", (e) => { if (e.key === "Enter") title.blur(); });
   const ctl = mkEl("div", "pg-ctl");
-  if (v.visibility === "public" && st.url) {
-    const lst = mkEl("span", "pg-lst");
-    lst.append(mkEl("span", "", "Listed in Pages"), pgSeg("Listed in Pages", [["off", "Off"], ["on", "On"]], v.listed ? "on" : "off",
-      (x) => pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { listed: x === "on" })));
-    ctl.append(lst);
-  }
   const lock = st.private === "ok" ? null : mkEl("span", "pg-lock");
   if (lock) lock.innerHTML = pubSvg(12, false, true);
   ctl.append(pgSeg("Who can read this wiki", [["off", "Off"], ["public", "Public"], ["private", "Private", lock]], v.visibility, (x) => {
@@ -714,6 +714,7 @@ function renderPublic(fresh) {
   if (st.outside) notes.push(`${pubCount(st.outside)} with publish: true outside every wiki stay in your vault`);
   if (notes.length) goes.append(mkEl("p", "pp-dim", notes.join(" · ")));
   grid.append(goes);
+  if (v.visibility === "public" && st.url) grid.append(listingBox(v));
   if (v.visibility === "private") grid.append(readersBox(v));
   grid.append(invitesBox(false));
   frag.append(grid);
@@ -722,17 +723,8 @@ function renderPublic(fresh) {
   const go = mkEl("button", "pp-go", v.visibility === "off" ? `Turn on and publish ${pubCount(v.out)}` : `Publish ${pubCount(v.out)}`);
   go.type = "button";
   go.disabled = !v.out;
-  go.addEventListener("click", async () => {
-    go.disabled = true;
-    go.textContent = "publishing…";
-    const r = await pubPost("/public/publish", { vault: v.slug });
-    if (r && r.result) {
-      pubResult = r.result;
-      notify(`Published ${pubCount(r.result.notes)}${r.result.private ? ` for ${v.readers.length} ${v.readers.length === 1 ? "reader" : "readers"}` : ""}`, "info");
-    }
-    renderPublic();
-  });
-  row.append(go, mkEl("span", "pp-dim", v.visibility === "private"
+  go.addEventListener("click", () => startPublish(v, go));
+  row.append(go, mkEl("span", "pp-dim", inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
     ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
     : "Readers see the wiki as it is when you publish; a note written later in its folder goes out the next time."));
   if (v.visibility === "off") {
@@ -754,6 +746,371 @@ function renderPublic(fresh) {
   }
   if (fresh || pubCoverOf !== v.slug || (pubCover && pubCover.n.length + (pubCover.unlinked || 0) !== v.out)) loadPubCover(v.slug, !!fresh);
   else drawPubCover();
+}
+
+// --- the listing (ADR-0153 points 7, 8 and 13) -------------------------------------
+// `v.listed` is the author's request; `v.review` is the host's record of what became of it. The
+// host answers within a minute, so a request it has not read yet already reads as waiting.
+const LEAVES_WIKIS = "Publishing takes this wiki out of Wikis until it is reviewed again.";
+const inWikis = (v) => v.listed && v.review.state === "in";
+
+function listingRow(text, label, listed, v) {
+  const row = mkEl("div", "lst-row");
+  row.append(mkEl("p", "", text));
+  if (label) {
+    const b = mkEl("button", "st-btn", label);
+    b.type = "button";
+    b.addEventListener("click", () => pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { listed }));
+    row.append(b);
+  }
+  return row;
+}
+
+function listingNotice(r) {
+  const dl = mkEl("dl", "lst-say");
+  for (const [k, t] of [["Rule", r.rule], ["What was seen", r.seen], ["How it began", r.began],
+    ["Automated tools", r.tools], ["What you can do", r.remedy]]) dl.append(mkEl("dt", "", k), mkEl("dd", "", t));
+  return dl;
+}
+
+function listingBox(v) {
+  const r = v.review;
+  const since = r.since ? ` since ${pubDay(r.since)}` : "";
+  const box = (status, body) => { const b = ppBox("In Wikis", status, { wide: true }); b.append(body); return b; };
+  if (v.blocked.length) return box("Not listed", listingRow(v.blocked.join(" ")));
+  if (!v.listed) return box("Not listed", listingRow("Your wiki is reviewed before it enters Wikis. Until then it is reachable at its address and search engines leave it alone.", "Ask to list", true, v));
+  if (r.state === "in") return box("Listed", listingRow(`In Wikis${since}. A Publish takes it out until it is reviewed again.`, "Leave Wikis", false, v));
+  if (r.state === "out") return box("Changed", listingRow("Out of Wikis: it was published again after its review. It is waiting for review again, and it stays public at its address."));
+  if (r.state === "no") return box("Refused", listingNotice(r));
+  return box("Waiting", listingRow(`Waiting for review${since}. Your wiki stays public at its address meanwhile.`, "Withdraw", false, v));
+}
+
+// --- the check before Publish (ADR-0153 points 9, 20 and 26) -----------------------
+// One question, whose is it, for each file, folder of images and site this wiki shows. The server
+// decides and the build enforces; the screen draws what /public/check answers, so the count at
+// its foot is the count Publish will honour.
+const PRE_ANSWERS = [["mine", "Mine, or I have permission"], ["open", "Open or public domain"], ["else", "Someone else's"]];
+const PRE_SHEET = 10;
+const prePlural = (n, w) => `${n.toLocaleString("en-GB")} ${w}${n === 1 ? "" : "s"}`;
+const preOpen = (o) => !o.answer || (o.answer === "open" && !o.free && o.license !== "CC BY-ND");
+
+async function publishNow(v) {
+  const r = await pubPost("/public/publish", { vault: v.slug });
+  if (r) pubCheck = null;
+  if (r && r.result) {
+    pubResult = r.result;
+    notify(`Published ${pubCount(r.result.notes)}${r.result.private ? ` for ${v.readers.length} ${v.readers.length === 1 ? "reader" : "readers"}` : ""}`, "info");
+  }
+  renderPublic();
+}
+
+async function startPublish(v, go) {
+  go.disabled = true;
+  go.textContent = "checking…";
+  let c = null;
+  try {
+    const r = await fetch(`/public/check?vault=${encodeURIComponent(v.slug)}`);
+    c = await r.json().catch(() => null);
+    if (!r.ok) { notify(c?.detail || "The check could not run"); renderPublic(); return; }
+  } catch {
+    notify("My Wikis could not be reached");
+    renderPublic();
+    return;
+  }
+  if (c.ask) {
+    pubCheck = { slug: v.slug, data: c, open: new Set(), all: new Set(), old: false, personal: false };
+    $("#public-body").scrollTop = 0;
+    renderPublic();
+    return;
+  }
+  go.textContent = "publishing…";
+  await publishNow(v);
+}
+
+async function preSend(url, body) {
+  const d = await pubPost(url, { vault: pubCheck.slug, ...body });
+  if (d && pubCheck) {
+    pubCheck.data = d;
+    paintCheck();
+  }
+}
+const preAnswer = (row, change) => preSend("/public/check/answer", { key: row.key, answer: row.answer, license: row.license, credit: row.credit, off: row.off || [], ...change });
+
+// a redraw keeps the reader where they were: the control they used, and the place on the page
+function paintCheck() {
+  const body = $("#public-body");
+  const key = document.activeElement?.dataset?.key;
+  const top = body.scrollTop;
+  body.replaceChildren(checkSheet(pubCurVault()));
+  body.scrollTop = top;
+  if (key) body.querySelector(`[data-key="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
+}
+
+function preLink(text, key, onClick) {
+  const b = mkEl("button", "pre-link", text);
+  b.type = "button";
+  b.dataset.key = key;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+function preSeg(row) {
+  const seg = pgSeg(`Whose is ${row.name}`, PRE_ANSWERS, row.answer, (x) => preAnswer(row, { answer: row.answer === x ? "" : x }));
+  for (const b of seg.querySelectorAll("button")) b.dataset.key = `${row.key}|${b.dataset.v}`;
+  return seg;
+}
+
+function preLicense(row) {
+  if (row.answer !== "open") return null;
+  const box = mkEl("div", "pre-lic");
+  const lic = mkEl("label", "", "License ");
+  const s = document.createElement("select");
+  s.dataset.key = row.key + "|lic";
+  s.append(Object.assign(document.createElement("option"), { value: "", textContent: "Choose" }));
+  for (const l of pubCheck.data.licenses) s.append(Object.assign(document.createElement("option"), { value: l, textContent: l, selected: l === row.license }));
+  s.addEventListener("change", () => preAnswer(row, { license: s.value }));
+  lic.append(s);
+  const credit = mkEl("label", "wide", "Credit ");
+  const i = Object.assign(document.createElement("input"), { value: row.credit, placeholder: "Author, title", maxLength: 200 });
+  i.dataset.key = row.key + "|credit";
+  i.addEventListener("change", () => preAnswer(row, { credit: i.value }));
+  credit.append(i);
+  box.append(lic, credit);
+  return box;
+}
+
+function preOpenHint(o) {
+  if (!o.license) return "Choose its license, or it stays out.";
+  if (o.license === "CC BY-ND") return "CC BY-ND allows nothing made from it: it stays out.";
+  if (!o.free) return "Write its credit, or it stays out.";
+  return (o.credit ? "Goes out with this credit." : "Goes out.") + (o.license === "CC BY-SA" ? " This wiki must then be CC BY-SA too." : "");
+}
+
+function preFileHint(f) {
+  const base = f.answer === "mine" ? "Goes out. You are saying you wrote it or have permission."
+    : f.answer === "open" ? preOpenHint(f)
+    : f.answer === "else" ? "Not published, images included. It stays yours to use in the chat."
+    : "No answer yet: not published, images included.";
+  const stuck = f.free ? f.notes.filter((n) => !n.goes).length : 0;
+  const wrote = f.free ? 0 : f.notes.filter((n) => n.mine && n.goes).length;
+  return base
+    + (stuck ? ` ${stuck} of its notes also come from a file that stays, so they stay.` : "")
+    + (wrote ? ` ${prePlural(wrote, "note")} you wrote yourself ${wrote === 1 ? "goes" : "go"} out.` : "");
+}
+
+function preNotes(f) {
+  const box = mkEl("div", "pre-notes");
+  if (!f.free) box.append(mkEl("p", "", "Tick only the notes you wrote yourself. Copied or translated notes do not count, and the review reads what you tick."));
+  for (const n of f.notes) {
+    if (f.free) {
+      const row = mkEl("div", "pre-note" + (n.goes ? "" : " off"));
+      row.append(mkEl("span"), mkEl("span", "t", n.title), mkEl("span", "st", n.goes ? "Goes out" : `Not published: also from ${n.held}`));
+      box.append(row);
+    } else if (n.can) {
+      const row = mkEl("label", "pre-note");
+      const c = Object.assign(document.createElement("input"), { type: "checkbox", checked: n.mine });
+      c.dataset.key = "note|" + n.path;
+      c.addEventListener("change", () => preSend("/public/check/note", { path: n.path, on: c.checked }));
+      row.append(c, mkEl("span", "t", n.title), mkEl("span", "st", n.status));
+      box.append(row);
+    } else {
+      const row = mkEl("div", "pre-note off");
+      row.append(mkEl("span"), mkEl("span", "t", n.title), mkEl("span", "st", n.status));
+      box.append(row);
+    }
+  }
+  if (f.images.length) {
+    const sheet = mkEl("div", "pre-sheet");
+    for (const img of f.images) sheet.append(preTile(null, img));
+    box.append(sheet);
+  }
+  return box;
+}
+
+function preFileRow(f) {
+  const row = mkEl("div", "pre-row");
+  const open = pubCheck.open.has(f.key);
+  const flip = () => { open ? pubCheck.open.delete(f.key) : pubCheck.open.add(f.key); paintCheck(); };
+  const nm = mkEl("div", "nm");
+  const count = preLink(`${prePlural(f.notes.length, "note")}${f.images.length ? ` · ${prePlural(f.images.length, "image")}` : ""}`, f.key + "|o", flip);
+  count.className = "ct";
+  count.setAttribute("aria-expanded", String(open));
+  nm.append(mkEl("span", "fn", f.name), count);
+  const hint = mkEl("span", "pre-hint" + (f.free ? " go" : ""));
+  hint.append(mkEl("span", "", preFileHint(f)));
+  if (!f.free) {
+    const wrote = preLink("I wrote some of these", f.key + "|w", flip);
+    wrote.setAttribute("aria-expanded", String(open));
+    hint.append(wrote);
+  }
+  row.append(nm, preSeg(f));
+  const lic = preLicense(f);
+  if (lic) row.append(lic);
+  row.append(hint);
+  if (open) row.append(preNotes(f));
+  return row;
+}
+
+function preTile(g, img) {
+  const free = !!g && g.free;
+  const t = mkEl(free ? "label" : "div", "pre-th" + (free ? "" : " still") + (free && !img.on ? " off" : ""));
+  t.title = img.name;
+  if (free) {
+    const c = Object.assign(document.createElement("input"), { type: "checkbox", checked: img.on });
+    c.dataset.key = `${g.key}|${img.name}`;
+    c.setAttribute("aria-label", `Publish ${img.name}`);
+    c.addEventListener("change", () => {
+      const off = new Set(g.off);
+      if (c.checked) off.delete(img.name); else off.add(img.name);
+      preAnswer(g, { off: [...off] });
+    });
+    t.append(c);
+  }
+  t.append(Object.assign(document.createElement("img"), { src: img.src, alt: img.name, loading: "lazy" }), mkEl("span", "", img.note || img.name));
+  return t;
+}
+
+function preGroupHint(g) {
+  const site = g.kind === "site";
+  if (g.answer === "open") return preOpenHint(g);
+  if (g.answer === "mine") return site ? `Copied into your wiki, credited "from ${g.name}". Untick any that should stay a link.` : "Goes out. Untick any you cannot vouch for.";
+  if (g.answer === "else") return site ? `Stays a link to ${g.name}.` : "Not published.";
+  return site ? `No answer yet: stays a link to ${g.name}.` : "No answer yet: not published.";
+}
+
+function preGroupRow(g) {
+  const row = mkEl("div", "pre-row");
+  const nm = mkEl("div", "nm");
+  nm.append(mkEl("span", "fn" + (g.kind === "site" ? " site" : ""), g.name),
+    mkEl("span", "ct", g.images.length ? prePlural(g.images.length, "image") : prePlural(g.bad.length, "link")));
+  row.append(nm);
+  if (g.images.length) {
+    row.append(preSeg(g));
+    const lic = preLicense(g);
+    if (lic) row.append(lic);
+    const hint = mkEl("span", "pre-hint" + (g.free ? " go" : ""));
+    hint.append(mkEl("span", "", preGroupHint(g)));
+    row.append(hint);
+    const all = pubCheck.all.has(g.key);
+    const sheet = mkEl("div", "pre-sheet");
+    for (const img of all ? g.images : g.images.slice(0, PRE_SHEET)) sheet.append(preTile(g, img));
+    row.append(sheet);
+    const more = mkEl("div", "pre-more");
+    if (g.images.length > PRE_SHEET) {
+      more.append(preLink(all ? "Show fewer" : `Show all ${g.images.length}`, g.key + "|m", () => {
+        if (all) pubCheck.all.delete(g.key); else pubCheck.all.add(g.key);
+        paintCheck();
+      }));
+    }
+    if (g.free && g.images.length > 1) {
+      const allOn = g.images.every((i) => i.on);
+      more.append(preLink(allOn ? "Untick all" : "Tick all", g.key + "|t", () => preAnswer(g, { off: allOn ? g.images.map((i) => i.name) : [] })));
+    }
+    if (more.children.length) row.append(more);
+  }
+  for (const b of g.bad) {
+    const line = mkEl("div", "pre-bad");
+    line.append(mkEl("span", "fn", b.name), mkEl("span", "st", `${b.why}: stays a link`));
+    row.append(line);
+  }
+  return row;
+}
+
+function preCheckRow(n, text, what, stop, extra) {
+  const li = mkEl("li");
+  const words = mkEl("span", "", text);
+  if (extra) words.append(" ", extra);
+  li.append(mkEl("span", "n", n.toLocaleString("en-GB")), words, mkEl("span", "what" + (stop ? " stop" : ""), what));
+  return li;
+}
+
+function preAnsweredBefore(n, word) {
+  if (!n) return null;
+  const p = mkEl("p", "pp-dim pre-hand", `Answered before: ${prePlural(n, word)}. `);
+  p.append(preLink(pubCheck.old ? "Hide" : "Change", "old|" + word, () => { pubCheck.old = !pubCheck.old; paintCheck(); }));
+  return p;
+}
+
+function checkSheet(v) {
+  const c = pubCheck.data;
+  const frag = document.createDocumentFragment();
+  const top = mkEl("div", "pre-top");
+  top.append(preLink("Back", "back", () => { pubCheck = null; renderPublic(); }), mkEl("h2", "pre-h", "Before you publish"),
+    mkEl("p", "pre-lead", "Say once whose each thing is. What nobody answers for stays out."));
+  frag.append(top);
+
+  const files = c.files.filter((f) => !f.old || pubCheck.old);
+  if (c.files.length) {
+    const open = files.filter(preOpen).length;
+    const box = ppBox("Notes made from files", open ? `${open} with no answer` : "All answered", { wide: true });
+    box.append(mkEl("p", "pre-p", "Whose is each file? The answer holds for every note and image made from it. A note of two files follows the stricter answer."));
+    for (const f of files) box.append(preFileRow(f));
+    const said = preAnsweredBefore(c.files.filter((f) => f.old).length, "file");
+    if (said) box.append(said);
+    frag.append(box);
+  }
+
+  if (c.plain) {
+    const box = ppBox("Notes with no known source", c.plain.toLocaleString("en-GB"), { wide: true });
+    box.append(mkEl("p", "pre-p", "Silica cannot tell where these come from: you may have written them, pasted them, or made them in the chat. They go out, and publishing them says they are yours to publish."));
+    frag.append(box);
+  }
+
+  const groups = c.groups.filter((g) => !g.old || pubCheck.old);
+  if (c.groups.length || c.from_files) {
+    const open = groups.filter((g) => g.images.length && preOpen(g)).length;
+    const box = ppBox("Images", open ? `${open} with no answer` : "All answered", { wide: true });
+    box.append(mkEl("p", "pre-p", 'Nothing goes out until you say whose it is. An image with no answer stays out, and readers see "Image not published". One from another site stays a link.'));
+    if (c.from_files) {
+      const row = mkEl("div", "pre-row");
+      const nm = mkEl("div", "nm");
+      nm.append(mkEl("span", "fn", "From your files"), mkEl("span", "ct", prePlural(c.from_files, "image")));
+      row.append(nm, mkEl("span", "pre-hint", "They follow the file they came from."));
+      box.append(row);
+    }
+    for (const g of groups) box.append(preGroupRow(g));
+    const said = preAnsweredBefore(c.groups.filter((g) => g.old).length, "group");
+    if (said) box.append(said);
+    frag.append(box);
+  }
+
+  const k = c.checks;
+  if (k.personal.length || k.location || k.lost || k.nowhere) {
+    const box = ppBox("Other checks", null, { wide: true });
+    const ul = mkEl("ul", "pre-checks");
+    if (k.personal.length) {
+      const see = preLink("See them", "personal", () => { pubCheck.personal = !pubCheck.personal; paintCheck(); });
+      see.setAttribute("aria-expanded", String(pubCheck.personal));
+      ul.append(preCheckRow(k.personal.length, k.personal.length === 1 ? "note shows someone's personal data" : "notes show someone's personal data", "Keeps it out of Wikis", true, see));
+    }
+    if (k.location) ul.append(preCheckRow(k.location, k.location === 1 ? "image carries a location" : "images carry a location", "Removed at Publish"));
+    if (k.lost) ul.append(preCheckRow(k.lost, k.lost === 1 ? "link leads to a note that is not published" : "links lead to notes that are not published", "Become plain words"));
+    if (k.nowhere) ul.append(preCheckRow(k.nowhere, k.nowhere === 1 ? "link leads nowhere" : "links lead nowhere", "Become plain words"));
+    box.append(ul);
+    if (pubCheck.personal) {
+      const list = mkEl("ul", "pre-found");
+      for (const [title, what] of k.personal) list.append(mkEl("li", "", `${title}: ${what}`));
+      box.append(list);
+    }
+    frag.append(box);
+  }
+
+  const foot = mkEl("div", "pre-foot");
+  foot.setAttribute("role", "status");
+  const sum = mkEl("div");
+  const line = mkEl("p", "pre-sum", `Goes out: ${prePlural(c.count.notes, "note")}, ${prePlural(c.count.images, "image")}. `);
+  const links = c.count.links ? ` ${prePlural(c.count.links, "image")} ${c.count.links === 1 ? "stays a link" : "stay links"}.` : "";
+  line.append(mkEl("span", "q", `Not published: ${prePlural(c.count.stay, "note")}, ${prePlural(c.count.kept, "image")}.${links}`));
+  sum.append(line);
+  const wikis = inWikis(v) ? LEAVES_WIKIS : c.wikis;
+  if (wikis) sum.append(mkEl("p", "pp-dim", wikis));
+  const go = mkEl("button", "pp-go", `${v.visibility === "off" ? "Turn on and publish" : "Publish"} ${prePlural(c.count.notes, "note")}`);
+  go.type = "button";
+  go.disabled = !c.count.notes;
+  go.addEventListener("click", () => { go.disabled = true; go.textContent = "publishing…"; publishNow(v); });
+  foot.append(sum, go);
+  frag.append(foot);
+  return frag;
 }
 
 function readersBox(v) {

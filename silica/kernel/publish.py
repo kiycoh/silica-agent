@@ -99,21 +99,31 @@ def _host_dir() -> Path | None:
     return Path(raw) if raw else None
 
 
-def _host_answer() -> dict:
-    """The host's handle.json: {"handle": h} once the account has one,
-    {"asked": h, "refused": "taken" | "invalid"} after a claim it refused."""
+def _host_file(name: str) -> dict:
     import json
 
     d = _host_dir()
     if d is None:
         return {}
     try:
-        raw = json.loads((d / "handle.json").read_text(encoding="utf-8"))
+        raw = json.loads((d / name).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        # No answer yet, or one being replaced: the account reads as having no
-        # handle, which is what it has until the host's rename lands.
+        # No answer yet, or one being replaced: the account reads as having
+        # none, which is what it has until the host's rename lands.
         return {}
     return raw if isinstance(raw, dict) else {}
+
+
+def _host_answer() -> dict:
+    """The host's handle.json: {"handle": h} once the account has one,
+    {"asked": h, "refused": "taken" | "invalid"} after a claim it refused."""
+    return _host_file("handle.json")
+
+
+def host_reviews() -> dict:
+    """The host's wikis.json (ADR-0153 point 7), by slug: "state" is wait, in,
+    out or no, "since" its date, and a refusal adds the notice of point 13."""
+    return _host_file("wikis.json")
 
 
 def claim_path() -> Path:
@@ -516,10 +526,14 @@ def set_note(path: str, on: bool, vault: Path | None = None) -> str:
 
 
 def _write_publish(path: str, value: bool | None) -> None:
-    """Set or remove `publish:` through the driver, so the change is a session
-    change like any edit: the ledger keeps the old bytes and /undo restores
-    them. Not `overwrite`, which stamps a `type:` the person never asked for.
-    Lowercase YAML booleans, from the dumper."""
+    write_prop(path, "publish", value)
+
+
+def write_prop(path: str, key: str, value: bool | None) -> None:
+    """Set or remove a note's property through the driver, so the change is a
+    session change like any edit: the ledger keeps the old bytes and /undo
+    restores them. Not `overwrite`, which stamps a `type:` the person never
+    asked for. Lowercase YAML booleans, from the dumper."""
     from silica.driver import DRIVER
     from silica.kernel.write import frontmatter as fm
 
@@ -527,13 +541,13 @@ def _write_publish(path: str, value: bool | None) -> None:
     if data is None and raw is not None:
         raise ValueError(f"the properties of {path} do not parse; fix them before publishing it")
     if value is not None:
-        DRIVER.set_prop(path, "publish", value)
+        DRIVER.set_prop(path, key, value)
         return
     unset = getattr(DRIVER, "unset_prop", None)
     if unset is None:
         # The Obsidian bridge has no removal; Obsidian itself does.
-        raise ValueError(f"remove `publish:` from {path} in Obsidian")
-    unset(path, "publish")
+        raise ValueError(f"remove `{key}:` from {path} in Obsidian")
+    unset(path, key)
 
 
 # --- where the files go -------------------------------------------------------

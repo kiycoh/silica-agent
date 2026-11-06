@@ -92,6 +92,7 @@ def _view() -> dict:
     page_url = publish.page_url(vault)
     out_paths = {p for p, s in notes.items() if s == "on"}
     deg = _degrees(out_paths)
+    reviews = publish.host_reviews()
     vaults = []
     for v in sel["vaults"]:
         mine = [p for p in out_paths if of.get(p) == v["slug"]]
@@ -106,6 +107,8 @@ def _view() -> dict:
             "struck": sum(1 for p, s in notes.items() if s == "struck" and of.get(p) == v["slug"]),
             "new": sum(1 for p in mine if before and p not in before),
             "published_at": last.get(v["slug"], {}).get("published_at", ""),
+            "review": reviews.get(v["slug"], {}),
+            "blocked": last.get(v["slug"], {}).get("blocked", []) if v["visibility"] == "public" else [],
         })
     return {
         "available": publish.available(vault),
@@ -285,6 +288,81 @@ async def public_publish(payload: dict | None = None):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {**_view(), "result": out}
+
+
+# --- the check before Publish (ADR-0153 points 9, 20 and 26) --------------------
+
+# The facts of the wiki on the screen: reading them walks the notes and the sources, and an answer
+# changes only what is made of them. One process per account, so one screen.
+_WIKI: dict[str, dict] = {}
+
+
+def _sheet(slug: str, *, fresh: bool = False) -> dict:
+    from silica.kernel import rights
+    from silica.sources.discover.read import fetch_figure
+
+    if fresh or slug not in _WIKI:
+        _WIKI.clear()
+        _WIKI[slug] = rights.read_wiki(slug, fetch=fetch_figure)
+    return rights.sheet(_WIKI[slug], rights.answers())
+
+
+@router.get("/public/check")
+async def public_check(vault: str = ""):
+    try:
+        return await asyncio.to_thread(_sheet, vault, fresh=True)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/public/check/answer", dependencies=_SAME_ORIGIN)
+def public_check_answer(payload: dict):
+    """One answer, for a file, a folder of images or a site this wiki shows."""
+    from silica.kernel import rights
+
+    slug, key = str(payload.get("vault") or ""), str(payload.get("key") or "")
+    off = payload.get("off")
+    try:
+        sheet = _sheet(slug)
+        if key not in {row["key"] for row in sheet["files"] + sheet["groups"]}:
+            raise ValueError(f"nothing to answer for {key}")
+        rights.save_answer(key, str(payload.get("answer") or ""), license=str(payload.get("license") or ""),
+                           credit=str(payload.get("credit") or ""),
+                           off=[str(x) for x in off] if isinstance(off, list) else None)
+        return _sheet(slug)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.post("/public/check/note", dependencies=_SAME_ORIGIN)
+def public_check_note(payload: dict):
+    """A note the author says they wrote themselves, out of a file that stays (ADR-0153 point 26)."""
+    from silica.kernel import rights
+
+    slug, path, on = str(payload.get("vault") or ""), str(payload.get("path") or ""), bool(payload.get("on"))
+    try:
+        _sheet(slug)
+        wiki = _WIKI[slug]
+        # The facts name the note, so no read of the graph: on 1,748 notes that read is seconds.
+        rights.check_mark(wiki, path, on)
+        rights.set_rewritten(path, on)
+        wiki["notes"][path]["rewritten"] = on
+        return _sheet(slug)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/public/check/image")
+def public_check_image(name: str = ""):
+    """A kept copy of a remote image, so the screen shows it without the page leaving this origin."""
+    from fastapi.responses import FileResponse
+
+    from silica.kernel import rights
+
+    found = rights.kept_image(name)
+    if found is None:
+        raise HTTPException(404)
+    return FileResponse(found)
 
 
 # --- Save to Silica (ADR-0143 point 8, ADR-0151 point 8) -----------------------

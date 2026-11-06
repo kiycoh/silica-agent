@@ -365,6 +365,37 @@ def fetch_cover(url: str, vault: str | None = None) -> dict | None:
     return {"file": name, "type": ctype, "from": F.domain(final)}
 
 
+# What a wiki may copy (ADR-0153 point 20), each a type its pages can name by extension. Not avif:
+# the published files go by `_ASSET_EXTS`, and a copy nothing can show is worse than a link.
+_FIGURE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp",
+                 "image/bmp": ".bmp"}
+
+
+def fetch_figure(url: str) -> dict:
+    """One remote image for a wiki, through the guard the covers use: `data`, its `type`, and `why`
+    it cannot be copied, in the words the check before Publish shows. An SVG is refused for the
+    reason `icon_type` gives; `fetch_cover` is not reused because it writes to the covers folder
+    and names an SVG `.jpg`."""
+    try:
+        resp, _final = _get(url, None, types=("image/",), cap=COVER_CAP)
+    except wf.WrongType:
+        return {"data": b"", "type": "", "why": "Not an image"}
+    except wf.TooLarge:
+        return {"data": b"", "type": "", "why": "Over 2 MB"}
+    except Exception as exc:
+        # Unreachable, refused by the guard or a bad status: all one image that stays a link.
+        logger.debug("wiki: image %s refused: %s", url, exc)
+        return {"data": b"", "type": "", "why": "Could not be read"}
+    ctype = wf.content_type(resp)
+    if ctype == "image/svg+xml":
+        return {"data": b"", "type": "", "why": "An SVG"}
+    if ctype not in _FIGURE_TYPES:
+        return {"data": b"", "type": "", "why": "Not an image"}
+    if resp.status_code != 200 or not resp.content:
+        return {"data": b"", "type": "", "why": "Could not be read"}
+    return {"data": resp.content, "type": ctype, "why": ""}
+
+
 # --- site icons ----------------------------------------------------------------------
 # Measured 2026-11-02 on ten news and research sites: eight serve /favicon.ico,
 # the largest 15,086 bytes, so the cap leaves four times that.
