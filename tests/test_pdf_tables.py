@@ -97,6 +97,78 @@ def test_off_unless_the_setting_says_so(monkeypatch):
     assert pdf_tables.stitched(Path("x.pdf"), data) is data["pages"]
 
 
+class _Path:
+    def __init__(self, bounds):
+        import pypdfium2.raw as raw
+        self.type, self.bounds = raw.FPDF_PAGEOBJ_PATH, bounds
+
+    def get_bounds(self):
+        return self.bounds
+
+
+class _Page:
+    def __init__(self, paths):
+        self.paths, self.closed = paths, False
+
+    def get_size(self):
+        return 600.0, 800.0
+
+    def get_objects(self, max_depth):
+        return iter(self.paths)
+
+    def close(self):
+        self.closed = True
+
+
+ACROSS = (50, 700, 550, 701)
+DOWN = (100, 300, 101, 500)
+BLOCK = (50, 300, 550, 500)
+
+
+@pytest.mark.parametrize("paths, expected", [
+    ([], False),
+    ([ACROSS, ACROSS], False),            # a header and a footer rule
+    ([ACROSS] * 3, True),
+    ([DOWN], False),
+    ([DOWN] * 2, True),
+    ([BLOCK] * 9, False),                 # filled shapes are not rules
+    ([(50, 700, 60, 701)] * 9, False),    # a rule under one word
+])
+def test_thin_rules_are_a_sign_of_a_table(paths, expected):
+    page = _Page([_Path(p) for p in paths])
+    assert pdf_tables._signs_of_table({0: page}, 0, [["Running text", 10.0]]) is expected
+    assert page.closed
+
+
+@pytest.mark.parametrize("line, expected", [
+    ("Table 3. Results", True),
+    ("Tabella 2: importi", True),
+    ("Tab. IV", True),
+    ("The table 3 shows", False),         # in a sentence, not a caption
+    ("Tableware 3", False),
+])
+def test_a_caption_is_a_sign_of_a_table(line, expected):
+    assert pdf_tables._signs_of_table({0: _Page([])}, 0, [[line, 10.0]]) is expected
+
+
+def test_a_page_past_the_object_cap_stops_counting(monkeypatch):
+    monkeypatch.setattr(pdf_tables, "_MAX_OBJECTS", 2)
+    page = _Page([_Path(BLOCK), _Path(BLOCK), _Path(ACROSS), _Path(ACROSS), _Path(ACROSS)])
+    assert pdf_tables._signs_of_table({0: page}, 0, []) is False
+
+
+def test_a_page_with_no_sign_is_not_drawn(monkeypatch, tmp_path):
+    session = _on(monkeypatch, tmp_path, _Model())
+    monkeypatch.setattr(pdf_tables, "_signs_of_table", lambda doc, i, prod: False)
+    monkeypatch.setattr(pdf_tables, "_draw", lambda doc, i: pytest.fail("drew a page with no sign"))
+    src = tmp_path / "a.pdf"
+    src.write_bytes(b"%PDF-1.7")
+    monkeypatch.setattr("pypdfium2.PdfDocument", lambda path: SimpleNamespace(close=lambda: None))
+    data = {"pages": [[["text", 10.0]]], "no_text": [], "math_read": []}
+    assert pdf_tables.stitched(src, data) is data["pages"]
+    assert session
+
+
 def test_a_number_cut_from_a_longer_one_is_refused():
     table = "| a | b |\n| --- | --- |\n| x | 20 |"
     assert pdf_tables._accepted(table, "stop", "a b\nx 2024") is None
@@ -130,6 +202,7 @@ def _on(monkeypatch, tmp_path, model: _Model, boxes: list[tuple] | None = None) 
     fake.InferenceSession = inference
     monkeypatch.setitem(sys.modules, "onnxruntime", fake)
     monkeypatch.setattr(pdf_tables, "_weights", lambda: weights)
+    monkeypatch.setattr(pdf_tables, "_signs_of_table", lambda doc, i, prod: True)
 
     def provider(config, role="router"):
         assert role == "router"

@@ -47,6 +47,17 @@ _MAX_IOU = 0.45
 # A reading of a page gets the same (`convert._PAGE_MAX_TOKENS`); a table past
 # it stops at `finish_reason == "length"` and keeps its PDFium text.
 _MAX_TOKENS = 2500
+# Which pages reach the detector, measured 2026-11-06 on the bench and on 866 real
+# pages: 30 to 45% of pages with text, 98% of the 157 real pages with a table box
+# kept. End to end on the dev sets it costs -1.8 on tables [-6.8, +2.0], nothing
+# outside them, for a third less time. Three rules and not one: a page's header or footer draws one,
+# and a thin vertical rule is rarer, so two of those say more. A page past
+# _MAX_OBJECTS is a plot, whose paths stop saying anything about tables.
+_MIN_ACROSS = 3
+_MIN_DOWN = 2
+_THIN = 2.5
+_MAX_OBJECTS = 4000
+_CAPTION = re.compile(r"(?:table|tabella|tab\.|tabla|tableau|tabelle)\s*[0-9ivxlc]+\b", re.I)
 
 # No "plain text" here: in the bench's crop prompt those words made Qwen answer
 # tab-separated, olmOCR's tables 80.9 to 72.0. `_accepted` takes those that still do.
@@ -180,6 +191,34 @@ def _nms(rows: list[list[float]]) -> list[list[float]]:
         else:
             keep.append(r)
     return keep
+
+
+def _signs_of_table(doc, i: int, prod: list) -> bool:
+    """Whether a page is worth a detection: a caption in its lines, or thin rules
+    drawn on it. Milliseconds against a second a page for the detector, and the
+    pages it drops read as they always did. A borderless table with no caption is
+    the case it gives up: 8 of 103 boxed pages on the bench."""
+    import pypdfium2.raw as raw
+
+    if any(_CAPTION.match(text) for text, _ in prod):
+        return True
+    page = doc[i]
+    try:
+        width, height = page.get_size()
+        across = down = 0
+        for seen, obj in enumerate(page.get_objects(max_depth=2)):
+            if seen >= _MAX_OBJECTS:
+                break
+            if obj.type != raw.FPDF_PAGEOBJ_PATH:
+                continue
+            left, bottom, right, top = obj.get_bounds()
+            across += top - bottom <= _THIN and right - left >= 0.04 * width
+            down += right - left <= _THIN and top - bottom >= 0.008 * height
+            if across >= _MIN_ACROSS or down >= _MIN_DOWN:
+                return True
+        return False
+    finally:
+        page.close()
 
 
 def _draw(doc, i: int) -> tuple:
@@ -362,8 +401,8 @@ def _plan(src: Path, pages: list, candidates: list[int], session,
         for done, i in enumerate(candidates, 1):
             try:
                 with pdf_extract._PDFIUM:
-                    drawn = _draw(doc, i)
-                tables = _detect(session, *drawn)
+                    drawn = _draw(doc, i) if _signs_of_table(doc, i, pages[i]) else None
+                tables = _detect(session, *drawn) if drawn else []
                 plan = _collect(doc, i, pages[i], tables, grids) if tables else None
                 if plan:
                     plans.append(plan)
