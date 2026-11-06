@@ -35,21 +35,22 @@ def handle_recon(fsm: "InjectorFSM") -> None:
     coherence is carried by the substrate refreshed after each write, not by
     an up-front all-files pass.
     """
-    fi = fsm._current_file_idx
+    fi = fsm.file_idx
     inbox_file = fsm.inbox_files[fi]
     with phase(fsm, "recon", "recon"):
         # Warmed early by the distill prefetch window (warm_next_file): reuse
         # the recon it already ran instead of paying the pass twice.
-        warm = fsm.context.pop(f"warm_recon_{fi}", None)
+        pins = fsm.run_state.file(fi)
+        warm, pins.warm_recon = pins.warm_recon, None
         res = warm if warm is not None else _recon_for_lane(fsm, fi, inbox_file)
         if "error" in res:
-            fsm._progress_note("recon", "recon", "failed", error=res["error"])
+            fsm.progress_note("recon", "recon", "failed", error=res["error"])
             raise RuntimeError(f"Recon failed for {inbox_file}: {res['error']}")
-        # Accumulated across files — context["recon"] stays a list for uniformity
-        fsm.context.setdefault("recon", []).append(res)
+        # Accumulated across files
+        fsm.run_state.recon.append(res)
 
         # Surface any deferred ops from a previous run of this file
-        content_hash = fsm._file_content_hashes[fi] if fi < len(fsm._file_content_hashes) else ""
+        content_hash = fsm.file_content_hashes[fi] if fi < len(fsm.file_content_hashes) else ""
         if content_hash:
             from silica.kernel.write.deferred import get_deferred_store
             bundle = get_deferred_store().get(content_hash)
@@ -60,18 +61,11 @@ def handle_recon(fsm: "InjectorFSM") -> None:
                     "Call silica_deferred_retry('%s') to attempt them.",
                     rejected_count, inbox_file, content_hash[:8],
                 )
-                notice = {
+                fsm.run_state.deferred.append({
                     "inbox_file": inbox_file,
                     "content_hash": content_hash,
                     "rejected_count": rejected_count,
-                }
-                existing = fsm.context.get("deferred")
-                if existing is None:
-                    fsm.context["deferred"] = notice
-                elif isinstance(existing, list):
-                    existing.append(notice)
-                else:
-                    fsm.context["deferred"] = [existing, notice]
+                })
 
 
 def _recon_for_lane(fsm: "InjectorFSM", fi: int, inbox_file: str) -> dict:
@@ -95,11 +89,12 @@ def _recon_for_lane(fsm: "InjectorFSM", fi: int, inbox_file: str) -> dict:
     # `transcript`, `default` and `clip` on three consecutive runs
     # (2026-09-02), and the third would have sent it down the keyphrase
     # pipeline silently.
-    run_level = getattr(fsm, "distill_profile", None)
-    stamped = fsm.context.get(f"file_{fi}_form_origin") == "stamp"
-    profile = run_level or (fsm.context.get(f"file_{fi}_profile") if stamped else None)
+    run_level = fsm.distill_profile
+    pins = fsm.run_state.file(fi)
+    stamped = pins.form_origin == "stamp"
+    profile = run_level or (pins.profile if stamped else None)
     lane = lane_for(profile)
-    fsm.context[f"file_{fi}_lane"] = lane
+    pins.lane = lane
     if lane != "outline":
         return recon_file(inbox_file)
     return {"success": True, "outline_lane": True, "file": inbox_file,
@@ -179,7 +174,8 @@ def _pin_file_profile(fsm: "InjectorFSM", fi: int, inbox_file: str) -> None:
     a direct tool call bypassed the dispatch filing path: it distills under
     the vault fallback, with the verdict kept visible in context and the log.
     """
-    if getattr(fsm, "distill_profile", None) or f"file_{fi}_form" in fsm.context:
+    pins = fsm.run_state.file(fi)
+    if fsm.distill_profile or pins.form is not None:
         return
     import silica.kernel.forms as forms
 
@@ -196,9 +192,9 @@ def _pin_file_profile(fsm: "InjectorFSM", fi: int, inbox_file: str) -> None:
             inbox_file, res.origin, profile,
         )
     if profile:
-        fsm.context[f"file_{fi}_profile"] = profile
-    fsm.context[f"file_{fi}_form"] = res.form
-    fsm.context[f"file_{fi}_form_origin"] = res.origin
+        pins.profile = profile
+    pins.form = res.form
+    pins.form_origin = res.origin
     logger.info("PAYLOAD: %s profile=%s (%s)", inbox_file, profile or "default", res.origin)
 
 
@@ -258,15 +254,15 @@ def _attach_file_chunks(fsm: "InjectorFSM", fi: int, inbox_file: str,
     """Attach a file's chunks: flat list + index, pins, facts, tasks.
 
     The bookkeeping half of PAYLOAD, shared with warm_next_file — which is
-    why it never touches _current_chunk_idx (a warmed file is attached while
+    why it never touches chunk_idx (a warmed file is attached while
     the previous file is still being processed). Returns the first flat idx.
     """
     # Append this file's chunk group; flat indices continue after prior files'
-    start_flat = len(fsm._chunks)
-    fsm._file_chunks[fi] = {"source_file": inbox_file, "chunks": new_chunks}
+    start_flat = len(fsm.chunks)
+    fsm.file_chunks[fi] = {"source_file": inbox_file, "chunks": new_chunks}
     for ci, chunk in enumerate(new_chunks):
-        fsm._chunks.append(chunk)
-        fsm._chunk_flat_to_fi_ci[start_flat + ci] = (fi, ci)
+        fsm.chunks.append(chunk)
+        fsm.chunk_flat_to_fi_ci[start_flat + ci] = (fi, ci)
 
     # Cache-stable prompt: pin the distiller LANGUAGE once per file so the
     # rendered template prefix is byte-identical across this file's chunks
@@ -284,7 +280,7 @@ def _attach_file_chunks(fsm: "InjectorFSM", fi: int, inbox_file: str,
                 sample = _payload_sample_text(_chunk, limit=None) or _chunk.get("source_text", "")
                 if sample:
                     break
-            fsm.context[f"file_{fi}_language"] = lang_mod.display_name(lang_mod.detect(sample))
+            fsm.run_state.file(fi).language = lang_mod.display_name(lang_mod.detect(sample))
     except Exception as _lang_e:
         logger.debug("PAYLOAD: language pin skipped (non-fatal): %s", _lang_e, exc_info=True)
 
@@ -340,29 +336,30 @@ def handle_payload(fsm: "InjectorFSM") -> None:
     this runs again for the next file. A file warm_next_file already attached
     fast-paths: only the chunk cursor is positioned.
     """
-    fi = fsm._current_file_idx
+    fi = fsm.file_idx
     inbox_file = fsm.inbox_files[fi] if fi < len(fsm.inbox_files) else fsm.inbox_file
-    fsm._progress_note("payload", "payload", "running")
+    fsm.progress_note("payload", "payload", "running")
 
-    if fsm._file_chunks.get(fi, {}).get("chunks"):
+    if fsm.file_chunks.get(fi, {}).get("chunks"):
         # Warmed early by the distill prefetch window: chunks, pins and tasks
         # are attached — position the cursor where the normal path would have.
-        fsm.context["payload"] = fsm.context.pop(
-            f"warm_payload_{fi}", fsm.context.get("payload"))
-        fsm._current_chunk_idx = min(
-            flat for flat, (f, _c) in fsm._chunk_flat_to_fi_ci.items() if f == fi
+        pins = fsm.run_state.file(fi)
+        if pins.warm_payload is not None:
+            fsm.run_state.payload, pins.warm_payload = pins.warm_payload, None
+        fsm.chunk_idx = min(
+            flat for flat, (f, _c) in fsm.chunk_flat_to_fi_ci.items() if f == fi
         )
-        fsm._progress_note("payload", "payload", "done")
-        if "vault_graph_ctx" not in fsm.context:
-            fsm.context["vault_graph_ctx"] = build_vault_graph_ctx()
-        fsm._transition_success()
+        fsm.progress_note("payload", "payload", "done")
+        if fsm.run_state.vault_graph_ctx is None:
+            fsm.run_state.vault_graph_ctx = build_vault_graph_ctx()
+        fsm.transition_success()
         return
 
     # Current file's recon only — appended last by RECON
-    recon_cur = fsm.context["recon"][-1]
+    recon_cur = fsm.run_state.recon[-1]
 
     # The novelty gate runs inside _assemble_file_chunks and defers the concepts
-    # it diverts through _defer_ops, which attributes the bundle to whatever file
+    # it diverts through defer_ops, which attributes the bundle to whatever file
     # the CHUNK CURSOR points at. Until this file's chunks are attached the cursor
     # still sits on the previous file's last chunk, so file N's diversions would be
     # filed under file N-1's content hash and source path. Park the cursor on the
@@ -370,36 +367,36 @@ def handle_payload(fsm: "InjectorFSM") -> None:
     # _attach_file_chunks computes and returns) and claim the file's identity now:
     # a populated `chunks` list, not the key's presence, is what marks a file as
     # attached, and _attach_file_chunks replaces the whole entry a few lines below.
-    fsm._current_chunk_idx = len(fsm._chunks)
-    fsm._chunk_flat_to_fi_ci[fsm._current_chunk_idx] = (fi, 0)
-    fsm._file_chunks[fi] = {"source_file": inbox_file, "chunks": []}
+    fsm.chunk_idx = len(fsm.chunks)
+    fsm.chunk_flat_to_fi_ci[fsm.chunk_idx] = (fi, 0)
+    fsm.file_chunks[fi] = {"source_file": inbox_file, "chunks": []}
     # Same attribution reason: the stale entry here is the PREVIOUS file's payload,
-    # and _defer_ops falls back to it when the cursor has no chunk yet.
-    fsm.context.pop("payload", None)
+    # and defer_ops falls back to it when the cursor has no chunk yet.
+    fsm.run_state.payload = None
 
     try:
         res, new_chunks = _assemble_file_chunks(fsm, recon_cur)
     except RuntimeError as _pe:
-        fsm._progress_note("payload", "payload", "failed", error=str(_pe))
+        fsm.progress_note("payload", "payload", "failed", error=str(_pe))
         raise
-    fsm.context["payload"] = res
+    fsm.run_state.payload = res
     start_flat = _attach_file_chunks(fsm, fi, inbox_file, new_chunks)
-    fsm._current_chunk_idx = start_flat
+    fsm.chunk_idx = start_flat
 
-    fsm._progress_note("payload", "payload", "done")
+    fsm.progress_note("payload", "payload", "done")
     logger.info(
         "File %d/%d '%s': %d chunk(s) queued (flat %d–%d).",
         fi + 1, len(fsm.inbox_files), inbox_file,
-        len(new_chunks), start_flat, len(fsm._chunks) - 1,
+        len(new_chunks), start_flat, len(fsm.chunks) - 1,
     )
 
     # Build vault graph context (cluster/hub/pagerank) once per run — reused
     # across files (consumers accept bounded staleness). Consumed by COLLISION,
     # DELEGATE (distiller enrichment), AUTOLINK, and HUB_UPDATE.
-    if "vault_graph_ctx" not in fsm.context:
-        fsm.context["vault_graph_ctx"] = build_vault_graph_ctx()
+    if fsm.run_state.vault_graph_ctx is None:
+        fsm.run_state.vault_graph_ctx = build_vault_graph_ctx()
 
-    fsm._transition_success()
+    fsm.transition_success()
 
 
 def warm_next_file(fsm: "InjectorFSM") -> bool:
@@ -416,19 +413,20 @@ def warm_next_file(fsm: "InjectorFSM") -> bool:
     Returns True when chunks were attached.
     """
     try:
-        fi = fsm._next_uncommitted_file_idx(fsm._current_file_idx + 1)
-        if fi >= len(fsm.inbox_files) or fsm._file_chunks.get(fi, {}).get("chunks"):
+        fi = fsm.next_uncommitted_file_idx(fsm.file_idx + 1)
+        if fi >= len(fsm.inbox_files) or fsm.file_chunks.get(fi, {}).get("chunks"):
             return False
         inbox_file = fsm.inbox_files[fi]
         res = _recon_for_lane(fsm, fi, inbox_file)
         if "error" in res:
             return False
         payload_res, new_chunks = _assemble_file_chunks(fsm, res)
-        fsm.context[f"warm_recon_{fi}"] = res
-        fsm.context[f"warm_payload_{fi}"] = payload_res
+        pins = fsm.run_state.file(fi)
+        pins.warm_recon = res
+        pins.warm_payload = payload_res
         _attach_file_chunks(fsm, fi, inbox_file, new_chunks)
         dropped = _salience_filter(fsm, new_chunks)
-        fsm.context[f"file_{fi}_salience_done"] = True
+        pins.salience_done = True
         logger.info(
             "WARM: file %d/%d '%s' prepped early — %d chunk(s) attached%s",
             fi + 1, len(fsm.inbox_files), inbox_file, len(new_chunks),
@@ -450,23 +448,25 @@ def handle_salience(fsm: "InjectorFSM") -> None:
     pipeline); _on_pipeline_end restarts chunks from COLLISION, which is
     correct.  A file warm_next_file already filtered fast-paths.
     """
-    if fsm.context.pop(f"file_{fsm._current_file_idx}_salience_done", None):
-        fsm._transition_success()
+    pins = fsm.run_state.file(fsm.file_idx)
+    if pins.salience_done:
+        pins.salience_done = False
+        fsm.transition_success()
         return
 
-    fsm._get_chunks_from_context_if_empty()
-    cur_fi = fsm._current_file_idx
+    fsm.chunks_from_payload()
+    cur_fi = fsm.file_idx
     current_chunks = [
-        chunk for flat_idx, chunk in enumerate(fsm._chunks)
-        if fsm._chunk_flat_to_fi_ci.get(flat_idx, (0, 0))[0] == cur_fi
-    ] or fsm._chunks  # fallback: no fi map (legacy/test paths) → all chunks
+        chunk for flat_idx, chunk in enumerate(fsm.chunks)
+        if fsm.chunk_flat_to_fi_ci.get(flat_idx, (0, 0))[0] == cur_fi
+    ] or fsm.chunks  # fallback: no fi map (legacy/test paths) → all chunks
 
     dropped = _salience_filter(fsm, current_chunks)
     if dropped is not None:
-        fsm.context["salience_dropped"] = dropped
+        fsm.run_state.salience_dropped = dropped
         if dropped:
             logger.info("SALIENCE: %d concept(s) below thematic threshold removed", dropped)
-    fsm._transition_success()
+    fsm.transition_success()
 
 
 def _salience_filter(fsm: "InjectorFSM", chunks: list[dict]) -> int | None:

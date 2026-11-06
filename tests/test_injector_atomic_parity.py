@@ -13,6 +13,7 @@ import silica.kernel.progress as prog_mod
 from silica.kernel.write.ops import Op, OpType
 from silica.router import states
 from silica.router.orchestrator import InjectorFSM
+from silica.router.run_state import ChunkState
 
 
 def _patch(path: str, src: str = "m.md") -> Op:
@@ -48,13 +49,13 @@ def vault_fsm(tmp_path, monkeypatch):
             inbox.write_text("# test\ncontent\n", encoding="utf-8")
             fsm = InjectorFSM(inbox_file=str(inbox), target_dir="Concepts")
             # Patch noisy methods that require full pipeline setup
-            fsm._progress_note = lambda *a, **kw: None
+            fsm.progress_note = lambda *a, **kw: None
             fsm.manifest.record = lambda *a, **kw: None
             fsm.manifest.save = lambda *a, **kw: None
             # Set up chunk state
-            fsm._file_content_hashes = ["testhash"]
-            fsm._file_chunks = [{"source_file": str(inbox), "chunks": [{}]}]
-            fsm._chunk_flat_to_fi_ci = {0: (0, 0)}
+            fsm.file_content_hashes = ["testhash"]
+            fsm.file_chunks = [{"source_file": str(inbox), "chunks": [{}]}]
+            fsm.chunk_flat_to_fi_ci = {0: (0, 0)}
             return fsm
 
         def ops_path(self, ops: list[Op]) -> str:
@@ -81,7 +82,7 @@ def test_injector_write_defers_failing_note_keeps_siblings(vault_fsm, monkeypatc
     monkeypatch.setattr("silica.kernel.write.gate.lint_note", fake_lint)
 
     fsm = vault_fsm.make_fsm()
-    fsm.context["chunk"] = {"ops_path": vault_fsm.ops_path([_patch(a), _patch(bad), _patch(c)])}
+    fsm.run_state.chunks[fsm.chunk_idx] = ChunkState(ops_path=vault_fsm.ops_path([_patch(a), _patch(bad), _patch(c)]))
 
     # WRITE should use bulk_write_atomic — per-note lint is applied
     states.write.handle_write(fsm)
@@ -91,12 +92,12 @@ def test_injector_write_defers_failing_note_keeps_siblings(vault_fsm, monkeypatc
     assert "x" in vault_fsm.read(c)
     assert "x" not in vault_fsm.read(bad)
 
-    write_ctx = fsm.context.get("write", {})
+    write_ctx = fsm.run_state.write
     failed_paths = {f["path"] for f in write_ctx.get("failed", [])}
     assert bad in failed_paths
 
     # Surviving inverses should be accumulated on the FSM
-    committed_inv_paths = {inv.path for _, inv, _ in fsm._run_inverses}
+    committed_inv_paths = {inv.path for _, inv, _ in fsm.run_inverses}
     assert a in committed_inv_paths
     assert c in committed_inv_paths
     assert bad not in committed_inv_paths

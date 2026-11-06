@@ -32,10 +32,10 @@ def test_the_event_scope_is_the_track_a_frontend_files_it_under():
 
     fsm = InjectorFSM.__new__(InjectorFSM)
     fsm.inbox_files = ["Inbox/a.md"]
-    fsm._current_file_idx = 0
-    fsm._current_chunk_idx = 0
-    fsm._chunk_flat_to_fi_ci = {}
-    fsm._file_chunks = {}
+    fsm.file_idx = 0
+    fsm.chunk_idx = 0
+    fsm.chunk_flat_to_fi_ci = {}
+    fsm.file_chunks = {}
     assert {p for p in _ids() if fsm._phase_position(p)["scope"] == "file"} == set(FILE_PHASES)
     assert {p for p in _ids() if fsm._phase_position(p)["scope"] == "chunk"} == set(CHUNK_PHASES)
     assert fsm._phase_position("rollback")["scope"] == "exception"

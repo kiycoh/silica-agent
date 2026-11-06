@@ -157,7 +157,7 @@ class Coordinator:
         # AFTER finalize hashed them, so /revert's "modified since inject" guard
         # refused the run's own writes. Re-hash now: the run is truly over, and
         # this state is the one the guard should protect.
-        undo_run_id = getattr(self.fsm, "_undo_run_id", None)
+        undo_run_id = getattr(self.fsm, "undo_run_id", None)
         if undo_run_id:
             try:
                 from silica.kernel.write.undo_journal import get_undo_journal
@@ -253,7 +253,7 @@ class Coordinator:
         run's output is unchanged.
         """
         try:
-            recovered = int(getattr(self.fsm, "_annealed_ops", 0) or 0)
+            recovered = int(getattr(self.fsm, "annealed_ops", 0) or 0)
             parked = self._parked_ops()
             ledger = getattr(self.fsm, "warning_ledger", None)
             flagged = len(ledger.paths("soft_gate")) if ledger is not None else 0
@@ -274,7 +274,7 @@ class Coordinator:
         """
         from silica.kernel.write.deferred import get_deferred_store
 
-        hashes = set(getattr(self.fsm, "_file_content_hashes", None) or [])
+        hashes = set(getattr(self.fsm, "file_content_hashes", None) or [])
         if not hashes:
             return 0
         return sum(b.get("rejected_count", 0) for b in get_deferred_store().list_all()
@@ -340,7 +340,7 @@ class Coordinator:
         patched, from the undo journal's restore inverses; the oldest one per
         note, since a note two chunks patched is journaled twice."""
         out: dict[str, str] = {}
-        rid = getattr(self.fsm, "_undo_run_id", None)
+        rid = getattr(self.fsm, "undo_run_id", None)
         if not rid:
             return out
         try:
@@ -427,4 +427,4 @@ class Coordinator:
         consume(wq, BoundedSubAgent(self.config), self._stop,
                 parent_span=f"run-{getattr(self.fsm.progress, 'run_id', None) or 'adhoc'}",
                 run_id=getattr(self.fsm.progress, "run_id", None),
-                undo_run=lambda: getattr(self.fsm, "_undo_run_id", None))
+                undo_run=lambda: getattr(self.fsm, "undo_run_id", None))

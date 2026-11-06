@@ -17,6 +17,7 @@ from silica.kernel.write.provenance import (
     read_records,
 )
 from silica.router.states import finalize
+from silica.router.run_state import RunState
 
 KEPT = "$m_t = \\beta_1 m_{t-1} + (1 - \\beta_1) g_t$"
 LOST = "$\\epsilon_{stability} = 10^{-8}$"
@@ -34,8 +35,8 @@ def _fsm(entries, run_id, sha, ledger=None):
     return types.SimpleNamespace(
         manifest=types.SimpleNamespace(entries=entries),
         progress=types.SimpleNamespace(run_id=run_id),
-        _file_content_hashes=[sha],
-        context={},
+        file_content_hashes=[sha],
+        run_state=RunState(),
         warning_ledger=ledger,
     )
 
@@ -107,7 +108,7 @@ def test_a_note_this_run_patched_is_still_rechecked_whole_body(tmp_vault):
     vault = _seed(tmp_vault)
     ledger = _Ledger()
     fsm = _fsm([_entry("lez.md", "Corso/B")], "run2", "sha2", ledger)
-    fsm.context["grounding"] = [{"path": "Corso/B.md", "heading": "B", "source_basename": "lez.md",
+    fsm.run_state.grounding = [{"path": "Corso/B.md", "heading": "B", "source_basename": "lez.md",
                                  "spans": 1, "ungrounded": 0, "profile": "default"}]
     finalize._record_provenance(fsm, 0, "Inbox/lez.md")
 

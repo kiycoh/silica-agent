@@ -17,6 +17,7 @@ from silica.kernel.write.provenance import (
     grounding_counts,
 )
 from silica.kernel.write.validate import validate_operations
+from silica.router.run_state import RunState
 
 
 @pytest.fixture(autouse=True)
@@ -117,15 +118,15 @@ def test_record_provenance_sums_grounding_per_note_from_context(tmp_vault):
     fsm = types.SimpleNamespace(
         manifest=types.SimpleNamespace(entries=entries),
         progress=types.SimpleNamespace(run_id="run1"),
-        _file_content_hashes=["sha1"],
-        context={"grounding": [
+        file_content_hashes=["sha1"],
+        run_state=RunState(grounding=[
             {"path": "Corso/A.md", "heading": "A", "source_basename": "lez.md",
              "spans": 2, "ungrounded": 1, "profile": "default"},
             {"path": "Corso/A.md", "heading": "A", "source_basename": "lez.md",
              "spans": 3, "ungrounded": 0, "profile": "default"},
             {"path": "Corso/B.md", "heading": "B", "source_basename": "other.md",
              "spans": 1, "ungrounded": 1, "profile": "default"},
-        ]},
+        ]),
     )
     finalize._record_provenance(fsm, 0, "Inbox/lez.md")
     raw = json.loads((__import__("pathlib").Path(CONFIG.vault_path) / DEFAULT_PROVENANCE_FILENAME)

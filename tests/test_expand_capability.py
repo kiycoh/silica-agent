@@ -9,6 +9,8 @@ on success — after 2 short attempts the op stays in the deferred store, final.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from unittest.mock import patch
 
 from silica.config import CONFIG
@@ -134,15 +136,15 @@ class _FSM:
     hub = "Corso"
     target_dir = "Corso"
     inbox_file = "Inbox/lez.md"
-    _current_source_file = "Inbox/lez.md"
-    _current_content_hash = "hash9"
-    _current_chunk_idx = 0
-    progress = None
+    current_source_file = "Inbox/lez.md"
+    current_content_hash = "hash9"
+    chunk_idx = 0
+    progress = SimpleNamespace(run_id="")
 
     def __init__(self):
         from silica.kernel.workqueue import WorkQueue
         self.work_queue = WorkQueue()
-        self._chunks = [{
+        self.chunks = [{
             "batches": [{
                 "inbox_file": "Inbox/lez.md",
                 "concepts": [{

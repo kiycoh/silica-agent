@@ -31,7 +31,7 @@ def _fsm(entries, *, keep_sources=False, seen_override=None):
         manifest=types.SimpleNamespace(entries=entries),
         keep_sources=keep_sources,
         seen_override=seen_override,
-        _run_inverses=[],
+        run_inverses=[],
     )
 
 

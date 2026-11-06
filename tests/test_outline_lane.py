@@ -803,12 +803,12 @@ def _outliner_result(**over) -> dict:
 @patch("silica.router.states.distill.run_outliner")
 def test_delegate_routes_outline_chunks_to_the_outliner_and_fills_the_whitelist(mock_run, mock_vo):
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._chunks = [_outline_chunk()]
-    fsm._current_chunk_idx = 0
-    fsm.context["file_0_language"] = "Italian"
+    fsm.chunks = [_outline_chunk()]
+    fsm.chunk_idx = 0
+    fsm.run_state.file(0).language = "Italian"
     fsm.state = InjectorState.DELEGATE
     mock_run.return_value = _outliner_result(gaps=["Sezione persa"])
-    with patch.object(fsm, "_make_tmp", return_value="tmp.json"):
+    with patch.object(fsm, "make_tmp", return_value="tmp.json"):
         fsm.step()
     kw = mock_run.call_args.kwargs
     assert kw["source_text"] == "## Margine\ncorpo"
@@ -818,8 +818,8 @@ def test_delegate_routes_outline_chunks_to_the_outliner_and_fills_the_whitelist(
     assert kw["vault_outline"][0]["title"] == "Margine"
     assert kw["outline"] is None and kw["only_titles"] is None
     # VALIDATE's heading whitelist reads the chunk: the model's titles are now in it.
-    assert fsm._chunks[0]["batches"][0]["concepts"][0]["name"] == "Margine geometrico"
-    assert fsm.context["chunk_0_outline"]["spine"] == ["Margine geometrico"]
+    assert fsm.chunks[0]["batches"][0]["concepts"][0]["name"] == "Margine geometrico"
+    assert fsm.run_state.chunk(0).outline["spine"] == ["Margine geometrico"]
     assert fsm.state == InjectorState.SANITIZE
 
 
@@ -829,16 +829,16 @@ def test_delegate_steer_retry_regenerates_only_rejected_bodies(mock_run, mock_vo
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     chunk = _outline_chunk()
     chunk["batches"][0]["concepts"] = _outliner_result()["concepts"]
-    fsm._chunks = [chunk]
-    fsm._current_chunk_idx = 0
+    fsm.chunks = [chunk]
+    fsm.chunk_idx = 0
     fsm.state = InjectorState.DELEGATE
-    fsm.context["chunk_0_outline"] = _outliner_result()["outline"]
-    fsm.context["chunk_0_retry_payload"] = {**chunk, "batches": [{"inbox_file": "Inbox/test.md",
+    fsm.run_state.chunk(0).outline = _outliner_result()["outline"]
+    fsm.run_state.chunk(0).retry_payload = {**chunk, "batches": [{"inbox_file": "Inbox/test.md",
                                                                   "concepts": [{"name": "Margine geometrico"}]}]}
-    fsm.context["chunk_0_steer_context"] = "snippet too short"
-    fsm.context["chunk_0_hash"] = "h"
+    fsm.run_state.chunk(0).steer_context = "snippet too short"
+    fsm.run_state.chunk(0).hash = "h"
     mock_run.return_value = _outliner_result()
-    with patch.object(fsm, "_make_tmp", return_value="tmp.json"):
+    with patch.object(fsm, "make_tmp", return_value="tmp.json"):
         fsm.step()
     kw = mock_run.call_args.kwargs
     assert kw["only_titles"] == {"Margine geometrico"}
@@ -860,18 +860,18 @@ def test_delegate_steer_retry_keeps_the_whole_whitelist(mock_run, mock_vo):
     chunk["batches"][0]["concepts"] = [
         {"name": "Margine geometrico", "inbox_excerpt": "old"},
         {"name": "Iperpiano"}, {"name": "Lezione 10"}]
-    fsm._chunks = [chunk]
-    fsm._current_chunk_idx = 0
+    fsm.chunks = [chunk]
+    fsm.chunk_idx = 0
     fsm.state = InjectorState.DELEGATE
-    fsm.context["chunk_0_outline"] = _outliner_result()["outline"]
-    fsm.context["chunk_0_retry_payload"] = {**chunk, "batches": [{"inbox_file": "Inbox/test.md",
+    fsm.run_state.chunk(0).outline = _outliner_result()["outline"]
+    fsm.run_state.chunk(0).retry_payload = {**chunk, "batches": [{"inbox_file": "Inbox/test.md",
                                                                   "concepts": [{"name": "Margine geometrico"}]}]}
-    fsm.context["chunk_0_steer_context"] = "meta-description"
-    fsm.context["chunk_0_hash"] = "h"
+    fsm.run_state.chunk(0).steer_context = "meta-description"
+    fsm.run_state.chunk(0).hash = "h"
     mock_run.return_value = _outliner_result()  # concepts: the one retried title only
-    with patch.object(fsm, "_make_tmp", return_value="tmp.json"):
+    with patch.object(fsm, "make_tmp", return_value="tmp.json"):
         fsm.step()
-    concepts = fsm._chunks[0]["batches"][0]["concepts"]
+    concepts = fsm.chunks[0]["batches"][0]["concepts"]
     assert [c["name"] for c in concepts] == ["Margine geometrico", "Iperpiano", "Lezione 10"]
     assert concepts[0]["inbox_excerpt"] == ""  # the retried entry is the fresh one
 
@@ -891,15 +891,20 @@ def test_recon_skips_the_miner_on_the_outline_lane(monkeypatch):
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.state = InjectorState.RECON
     monkeypatch.setattr(states.setup, "_pin_file_profile",
-                        lambda fsm, fi, f: fsm.context.__setitem__(f"file_{fi}_profile", "default"))
+                        lambda fsm, fi, f: setattr(fsm.run_state.file(fi), "profile", "default"))
     monkeypatch.setattr(states.setup, "read_source_text", lambda rel: "## A\nbody")
     with patch("silica.router.states.setup.recon_file") as mock_recon:
         fsm.step()
     mock_recon.assert_not_called()
-    rec = fsm.context["recon"][-1]
+    rec = fsm.run_state.recon[-1]
     assert rec["outline_lane"] is True and rec["source_text"] == "## A\nbody"
-    assert fsm.context["file_0_lane"] == "outline"
+    assert fsm.run_state.file(0).lane == "outline"
     assert fsm.state == InjectorState.PAYLOAD
+
+
+def _pin(fsm, fi, profile, origin):
+    pins = fsm.run_state.file(fi)
+    pins.profile, pins.form_origin = profile, origin
 
 
 def test_recon_keeps_the_miner_for_memory_forms(monkeypatch):
@@ -907,26 +912,25 @@ def test_recon_keeps_the_miner_for_memory_forms(monkeypatch):
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.state = InjectorState.RECON
     monkeypatch.setattr(states.setup, "_pin_file_profile",
-                        lambda fsm, fi, f: fsm.context.update({f"file_{fi}_profile": "clip",
-                                                                f"file_{fi}_form_origin": "stamp"}))
+                        lambda fsm, fi, f: _pin(fsm, fi, "clip", "stamp"))
     with patch("silica.router.states.setup.recon_file", return_value={"success": True, "concepts": []}) as mock_recon:
         fsm.step()
     mock_recon.assert_called_once_with("Inbox/test.md")
-    assert fsm.context["file_0_lane"] == "keyphrase"
+    assert fsm.run_state.file(0).lane == "keyphrase"
 
 
 def test_collision_leaves_outline_chunks_untouched(monkeypatch):
     from silica.router.states import collision
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     chunk = _outline_chunk()
-    fsm._chunks = [chunk]
-    fsm._current_chunk_idx = 0
+    fsm.chunks = [chunk]
+    fsm.chunk_idx = 0
     store = MagicMock()
     store.__len__ = lambda _self: 5
     monkeypatch.setattr("silica.kernel.recall.embed.get_store", lambda: store)
     collision.collision_pass(fsm, 0)
-    assert fsm._chunks[0] == chunk
-    assert fsm._chunks[0]["lane"] == "outline" and fsm._chunks[0]["source_text"] == "## Margine\ncorpo"
+    assert fsm.chunks[0] == chunk
+    assert fsm.chunks[0]["lane"] == "outline" and fsm.chunks[0]["source_text"] == "## Margine\ncorpo"
 
 
 def test_near_title_gate_ignores_titles_that_differ_only_by_number(tmp_vault, monkeypatch):
@@ -968,7 +972,7 @@ def test_cold_intra_chunk_predicate_keeps_two_lectures_apart():
 def test_outline_language_follows_the_manifest_then_detection(monkeypatch):
     from silica.router.states import distill
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._chunks = [_outline_chunk("## Margine\nIl margine geometrico è la distanza euclidea dall'iperpiano di separazione.")]
+    fsm.chunks = [_outline_chunk("## Margine\nIl margine geometrico è la distanza euclidea dall'iperpiano di separazione.")]
     seen = {}
 
     def fake_run(**kw):
@@ -976,10 +980,10 @@ def test_outline_language_follows_the_manifest_then_detection(monkeypatch):
         return _outliner_result()
     monkeypatch.setattr(distill, "run_outliner", fake_run)
     monkeypatch.setattr(distill, "vault_outline", lambda *a, **k: [])
-    distill._run_outline_chunk(fsm, 0, fsm._chunks[0], None, None)
+    distill._run_outline_chunk(fsm, 0, fsm.chunks[0], None, None)
     assert seen["language"] == "Italian"          # no pin, no manifest: detected from the source
-    fsm.context["file_0_language"] = "French"
-    distill._run_outline_chunk(fsm, 0, fsm._chunks[0], None, None)
+    fsm.run_state.file(0).language = "French"
+    distill._run_outline_chunk(fsm, 0, fsm.chunks[0], None, None)
     assert seen["language"] == "French"           # the per-file pin wins
 
 
@@ -1042,13 +1046,12 @@ def test_recon_ignores_a_sniffed_clip_for_the_lane(monkeypatch):
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.state = InjectorState.RECON
     monkeypatch.setattr(states.setup, "_pin_file_profile",
-                        lambda fsm, fi, f: fsm.context.update({f"file_{fi}_profile": "clip",
-                                                                f"file_{fi}_form_origin": "sniff"}))
+                        lambda fsm, fi, f: _pin(fsm, fi, "clip", "sniff"))
     monkeypatch.setattr(states.setup, "read_source_text", lambda rel: "## A\nbody")
     with patch("silica.router.states.setup.recon_file") as mock_recon:
         fsm.step()
     mock_recon.assert_not_called()
-    assert fsm.context["file_0_lane"] == "outline"
+    assert fsm.run_state.file(0).lane == "outline"
 
 
 def test_outline_cross_edge_patch_is_flagged_as_a_relation():
@@ -1205,12 +1208,12 @@ def test_flag_cosine_near_titles_fails_open_without_an_embedder():
 @patch("silica.router.states.distill.run_outliner")
 def test_delegate_sends_the_outline_ops_through_the_cosine_door(mock_run, mock_flag, mock_vo):
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._chunks = [_outline_chunk()]
-    fsm._current_chunk_idx = 0
-    fsm.context["file_0_language"] = "Italian"
+    fsm.chunks = [_outline_chunk()]
+    fsm.chunk_idx = 0
+    fsm.run_state.file(0).language = "Italian"
     fsm.state = InjectorState.DELEGATE
     mock_run.return_value = _outliner_result()
-    with patch.object(fsm, "_make_tmp", return_value="tmp.json"):
+    with patch.object(fsm, "make_tmp", return_value="tmp.json"):
         fsm.step()
     assert mock_flag.call_args.args[0][0]["heading"] == "Margine geometrico"
 
@@ -1238,7 +1241,7 @@ def test_the_language_pin_reads_the_whole_first_chunk(monkeypatch):
     setup._attach_file_chunks(fsm, 0, "Inbox/test.md", [_outline_chunk(
         math + "## Margine\nIl margine geometrico è la distanza euclidea dall'iperpiano di separazione.")])
     assert len(math) > 4000
-    assert fsm.context["file_0_language"] == "Italian"
+    assert fsm.run_state.file(0).language == "Italian"
 
 
 def test_bodies_pool_fits_the_local_window(monkeypatch):

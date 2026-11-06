@@ -2,6 +2,7 @@
 import time
 
 from silica.router.prefetch import DistillPrefetcher
+from silica.router.run_state import ChunkState, FileState, RunState
 
 
 def test_submit_and_pop_returns_result():
@@ -61,13 +62,13 @@ def test_handle_collision_honors_prefetch_marker():
     from silica.router.states import collision as coll
 
     fsm = MagicMock()
-    fsm._current_chunk_idx = 2
-    fsm.context = {"chunk_2_collision_done": True}
+    fsm.chunk_idx = 2
+    fsm.run_state = RunState(chunks={2: ChunkState(collision_done=True)})
     with patch.object(coll, "collision_pass") as cp:
         coll.handle_collision(fsm)
     cp.assert_not_called()
-    fsm._transition_success.assert_called_once()
-    assert "chunk_2_collision_done" not in fsm.context  # marker consumed
+    fsm.transition_success.assert_called_once()
+    assert fsm.run_state.chunk(2).collision_done is False  # marker consumed
 
 
 from types import SimpleNamespace
@@ -78,14 +79,14 @@ def _stub_fsm(n_chunks=4, file_of=None, k_done=()):
     """Minimal FSM stand-in for _distill_inputs/_prefetch_ahead."""
     file_of = file_of or {}
     fsm = SimpleNamespace()
-    fsm._chunks = [{"schema_version": 1,
+    fsm.chunks = [{"schema_version": 1,
                     "batches": [{"inbox_file": "in.md", "concepts": [{"name": f"c{i}"}]}]}
                    for i in range(n_chunks)]
-    fsm._chunk_flat_to_fi_ci = {i: (file_of.get(i, 0), i) for i in range(n_chunks)}
-    fsm._current_file_idx = 0
-    fsm._file_chunks = {}
+    fsm.chunk_flat_to_fi_ci = {i: (file_of.get(i, 0), i) for i in range(n_chunks)}
+    fsm.file_idx = 0
+    fsm.file_chunks = {}
     fsm.inbox_file = "in.md"
-    fsm.context = {"file_0_language": "English"}
+    fsm.run_state = RunState(files={0: FileState(language="English")})
     fsm.target_dir = "Notes"
     fsm.hub = "[[Hub]]"
     fsm.manifest = MagicMock()
@@ -96,8 +97,9 @@ def _stub_fsm(n_chunks=4, file_of=None, k_done=()):
     fsm.progress.is_checkpoint_done.side_effect = (
         lambda task_id, h: "done.json" if any(f"c{d}_" in task_id for d in k_done) else None
     )
-    fsm._chunk_task_id = lambda cap, idx=None: f"f0_c{idx}_{cap}"
-    fsm._prefetcher = None
+    fsm.chunk_task_id = lambda cap, idx=None: f"f0_c{idx}_{cap}"
+    fsm.prefetcher = None
+    fsm.distill_profile = None
     return fsm
 
 
@@ -117,7 +119,7 @@ def test_prefetch_ahead_noop_at_k1():
     fsm = _stub_fsm()
     with patch.object(d.CONFIG, "distill_concurrency", 1, create=True):
         d._prefetch_ahead(fsm, 0)
-    assert fsm._prefetcher is None
+    assert fsm.prefetcher is None
 
 
 def test_prefetch_ahead_dispatches_window_and_runs_collision_for_lookahead():
@@ -131,10 +133,10 @@ def test_prefetch_ahead_dispatches_window_and_runs_collision_for_lookahead():
         d._prefetch_ahead(fsm, 1)
     # window = chunks 1,2,3; collision_pass early only for lookahead (2,3)
     assert seen == [2, 3]
-    assert fsm.context.get("chunk_2_collision_done") and fsm.context.get("chunk_3_collision_done")
-    assert 1 in fsm._prefetcher and 2 in fsm._prefetcher and 3 in fsm._prefetcher
-    assert 4 not in fsm._prefetcher
-    fsm._prefetcher.shutdown()
+    assert fsm.run_state.chunk(2).collision_done and fsm.run_state.chunk(3).collision_done
+    assert 1 in fsm.prefetcher and 2 in fsm.prefetcher and 3 in fsm.prefetcher
+    assert 4 not in fsm.prefetcher
+    fsm.prefetcher.shutdown()
 
 
 def test_prefetch_ahead_crosses_one_attached_file_boundary():
@@ -148,10 +150,10 @@ def test_prefetch_ahead_crosses_one_attached_file_boundary():
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"):
         d._prefetch_ahead(fsm, 0)
-    assert 0 in fsm._prefetcher and 1 in fsm._prefetcher
-    assert 2 in fsm._prefetcher      # next file's first chunk — now in flight
-    assert 3 not in fsm._prefetcher  # window size still caps the dispatch
-    fsm._prefetcher.shutdown()
+    assert 0 in fsm.prefetcher and 1 in fsm.prefetcher
+    assert 2 in fsm.prefetcher      # next file's first chunk — now in flight
+    assert 3 not in fsm.prefetcher  # window size still caps the dispatch
+    fsm.prefetcher.shutdown()
 
 
 def test_prefetch_ahead_never_crosses_two_boundaries():
@@ -161,9 +163,9 @@ def test_prefetch_ahead_never_crosses_two_boundaries():
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"):
         d._prefetch_ahead(fsm, 0)
-    assert 0 in fsm._prefetcher and 1 in fsm._prefetcher
-    assert 2 not in fsm._prefetcher  # a second file boundary is never crossed
-    fsm._prefetcher.shutdown()
+    assert 0 in fsm.prefetcher and 1 in fsm.prefetcher
+    assert 2 not in fsm.prefetcher  # a second file boundary is never crossed
+    fsm.prefetcher.shutdown()
 
 
 def test_prefetch_ahead_skips_steer_context_chunks():
@@ -172,14 +174,14 @@ def test_prefetch_ahead_skips_steer_context_chunks():
     # so dispatching one burns a full distill call for nothing.
     from silica.router.states import distill as d
     fsm = _stub_fsm(n_chunks=3)
-    fsm.context["chunk_1_steer_context"] = "## Steer feedback"
+    fsm.run_state.chunk(1).steer_context = "## Steer feedback"
     with patch.object(d.CONFIG, "distill_concurrency", 3, create=True), \
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"):
         d._prefetch_ahead(fsm, 0)
-    assert 0 in fsm._prefetcher and 2 in fsm._prefetcher
-    assert 1 not in fsm._prefetcher  # would be discarded at DELEGATE
-    fsm._prefetcher.shutdown()
+    assert 0 in fsm.prefetcher and 2 in fsm.prefetcher
+    assert 1 not in fsm.prefetcher  # would be discarded at DELEGATE
+    fsm.prefetcher.shutdown()
 
 
 def test_prefetch_ahead_warms_next_file_when_unattached():
@@ -187,11 +189,11 @@ def test_prefetch_ahead_warms_next_file_when_unattached():
     fsm = _stub_fsm(n_chunks=2)
 
     def _fake_warm(f):
-        flat = len(f._chunks)
-        f._chunks.append({"schema_version": 1,
+        flat = len(f.chunks)
+        f.chunks.append({"schema_version": 1,
                           "batches": [{"inbox_file": "next.md",
                                        "concepts": [{"name": "n0"}]}]})
-        f._chunk_flat_to_fi_ci[flat] = (1, 0)
+        f.chunk_flat_to_fi_ci[flat] = (1, 0)
         return True
 
     with patch.object(d.CONFIG, "distill_concurrency", 3, create=True), \
@@ -201,8 +203,8 @@ def test_prefetch_ahead_warms_next_file_when_unattached():
                side_effect=_fake_warm) as warm:
         d._prefetch_ahead(fsm, 0)
     warm.assert_called_once()
-    assert 2 in fsm._prefetcher  # warmed chunk entered the window
-    fsm._prefetcher.shutdown()
+    assert 2 in fsm.prefetcher  # warmed chunk entered the window
+    fsm.prefetcher.shutdown()
 
 
 def test_prefetch_ahead_warm_failure_falls_back_to_sequential():
@@ -213,9 +215,9 @@ def test_prefetch_ahead_warm_failure_falls_back_to_sequential():
          patch("silica.router.states.collision.collision_pass"), \
          patch("silica.router.states.setup.warm_next_file", return_value=False):
         d._prefetch_ahead(fsm, 0)
-    assert 0 in fsm._prefetcher and 1 in fsm._prefetcher
-    assert 2 not in fsm._prefetcher
-    fsm._prefetcher.shutdown()
+    assert 0 in fsm.prefetcher and 1 in fsm.prefetcher
+    assert 2 not in fsm.prefetcher
+    fsm.prefetcher.shutdown()
 
 
 def test_prefetch_ahead_skips_checkpoint_done_chunks():
@@ -225,20 +227,20 @@ def test_prefetch_ahead_skips_checkpoint_done_chunks():
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"):
         d._prefetch_ahead(fsm, 0)
-    assert 0 in fsm._prefetcher and 1 in fsm._prefetcher
-    assert 2 not in fsm._prefetcher  # already done in a prior run
-    fsm._prefetcher.shutdown()
+    assert 0 in fsm.prefetcher and 1 in fsm.prefetcher
+    assert 2 not in fsm.prefetcher  # already done in a prior run
+    fsm.prefetcher.shutdown()
 
 
 def test_prefetch_ahead_skips_empty_chunks():
     from silica.router.states import distill as d
     fsm = _stub_fsm(n_chunks=3)
-    fsm._chunks[1] = {"schema_version": 1, "batches": []}
-    fsm.context["chunk_1_collision_done"] = True  # collision already emptied it
+    fsm.chunks[1] = {"schema_version": 1, "batches": []}
+    fsm.run_state.chunk(1).collision_done = True  # collision already emptied it
     with patch.object(d.CONFIG, "distill_concurrency", 3, create=True), \
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"):
         d._prefetch_ahead(fsm, 0)
-    assert 0 in fsm._prefetcher and 2 in fsm._prefetcher
-    assert 1 not in fsm._prefetcher
-    fsm._prefetcher.shutdown()
+    assert 0 in fsm.prefetcher and 2 in fsm.prefetcher
+    assert 1 not in fsm.prefetcher
+    fsm.prefetcher.shutdown()

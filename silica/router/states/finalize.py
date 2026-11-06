@@ -17,6 +17,7 @@ from silica.config import CONFIG
 from silica.driver import DRIVER
 from silica.kernel.write.ops_io import load_ops
 from silica.router.phases import InjectorState, phase
+from silica.router.run_state import RunState
 
 if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
@@ -28,9 +29,9 @@ from silica.kernel.write.ops import OpType
 
 
 def handle_lint(fsm: "InjectorFSM") -> None:
-    fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "running")
+    fsm.progress_note(fsm.chunk_task_id("lint"), "lint", "running")
     try:
-        ops = load_ops(fsm._chunk_ctx["ops_path"])
+        ops = load_ops(fsm.chunk.ops_path)
     except Exception as e:
         raise RuntimeError(f"LINT: failed to read ops: {e}")
 
@@ -45,7 +46,7 @@ def handle_lint(fsm: "InjectorFSM") -> None:
     # the same tolerance, or a pre-existing issue in a patched user note aborts
     # the whole chunk (run 880b9aa9: f1_c0/f1_c1 died on an inherited
     # "frontmatter 'AI' missing" the WRITE phase had correctly waved through).
-    baselines = fsm._chunk_ctx.get("lint_baseline", {})
+    baselines = fsm.chunk.lint_baseline
     for path, op_type, hub in touched:
         new_errors = gate.new_lint_errors(path or "", op_type or "", hub or "", set(baselines.get(path, [])))
         if CONFIG.verbose:
@@ -57,20 +58,20 @@ def handle_lint(fsm: "InjectorFSM") -> None:
                 new_errors,
             )
         if new_errors:
-            fsm._chunk_ctx["abort_reason"] = f"Lint failed for {path}: {new_errors}"
-            fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
+            fsm.chunk.abort_reason = f"Lint failed for {path}: {new_errors}"
+            fsm.progress_note(fsm.chunk_task_id("lint"), "lint", "failed", error=fsm.chunk.abort_reason)
             fsm.state = InjectorState.ROLLBACK
             return
 
     # S3.2: Run graph-diff check
-    if fsm._pre_graph is None:
-        fsm._chunk_ctx["abort_reason"] = "Graph regression gate failed: pre-write snapshot is missing"
-        fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
+    if fsm.chunk.pre_graph is None:
+        fsm.chunk.abort_reason = "Graph regression gate failed: pre-write snapshot is missing"
+        fsm.progress_note(fsm.chunk_task_id("lint"), "lint", "failed", error=fsm.chunk.abort_reason)
         fsm.state = InjectorState.ROLLBACK
         return
     try:
         from silica.driver.base import NoteRef
-        snapshot_domain_dicts = fsm._chunk_ctx.get("snapshot_domain", [])
+        snapshot_domain_dicts = fsm.chunk.snapshot_domain
         if snapshot_domain_dicts:
             snapshot_domain = [NoteRef(**d) for d in snapshot_domain_dicts]
         else:
@@ -85,28 +86,28 @@ def handle_lint(fsm: "InjectorFSM") -> None:
         post_graph = DRIVER.graph_snapshot(snapshot_domain)
         from silica.kernel.graph_diff import check_graph_regression
         
-        created_paths = fsm._txn.created_paths if fsm._txn else []
+        created_paths = fsm.chunk.txn.created_paths if fsm.chunk.txn else []
         # Fold only chunks appended since the last LINT into the run-scoped stem
         # union (B8: was an O(chunks × concepts) rescan on every LINT). A chunk
         # collision-collapses after it is first folded, but its pre-collapse stems
         # only widen the allowed set — never manufacture a false regression.
         try:
             from silica.kernel.write.templates import slugify
-            chunks = getattr(fsm, "_chunks", [])
-            for chunk in chunks[fsm._run_concept_stems_n:]:
+            chunks = fsm.chunks
+            for chunk in chunks[fsm.run_concept_stems_n:]:
                 for batch in chunk.get("batches", []):
                     for concept in batch.get("concepts", []):
                         name = concept.get("name")
                         if name:
                             stem = os.path.splitext(os.path.basename(name))[0].lower()
-                            fsm._run_concept_stems.add(stem)
-                            fsm._run_concept_stems.add(slugify(stem))
-            fsm._run_concept_stems_n = len(chunks)
+                            fsm.run_concept_stems.add(stem)
+                            fsm.run_concept_stems.add(slugify(stem))
+            fsm.run_concept_stems_n = len(chunks)
         except Exception as _ce:
             logger.debug("Failed to extract run concept stems for graph check: %s", _ce)
 
-        deferred_stems = set(fsm._chunk_ctx.get("deferred_stems", []))
-        deferred_stems |= fsm._run_concept_stems
+        deferred_stems = set(fsm.chunk.deferred_stems)
+        deferred_stems |= fsm.run_concept_stems
 
         # Exempt every path a phase of THIS chunk mutated, from the
         # rollback transaction (the single source of truth: SNAPSHOT
@@ -120,18 +121,18 @@ def handle_lint(fsm: "InjectorFSM") -> None:
         patched_paths = frozenset(
             {p for op in ops
              if op.op in (OpType.patch, OpType.overwrite) and (p := op.touched_ref())}
-            | txn_touched_paths(fsm._txn)
+            | txn_touched_paths(fsm.chunk.txn)
         )
 
         success, errors = check_graph_regression(
-            fsm._pre_graph, post_graph, created_paths, frozenset(deferred_stems),
-            patched_paths, removed_paths=frozenset(txn_removed_paths(fsm._txn)),
+            fsm.chunk.pre_graph, post_graph, created_paths, frozenset(deferred_stems),
+            patched_paths, removed_paths=frozenset(txn_removed_paths(fsm.chunk.txn)),
         )
 
         if CONFIG.verbose:
             logger.info(
                 "[DEBUG Graph Regression Gate]: Pre-write graph size: %d nodes | Post-write graph size: %d nodes | Rule: forbid_new_orphans | Result: %s",
-                len(fsm._pre_graph.link_counts) if fsm._pre_graph and fsm._pre_graph.link_counts else 0,
+                len(fsm.chunk.pre_graph.link_counts) if fsm.chunk.pre_graph and fsm.chunk.pre_graph.link_counts else 0,
                 len(post_graph.link_counts) if post_graph and post_graph.link_counts else 0,
                 "PASSED" if success else f"FAILED: {errors}"
             )
@@ -173,19 +174,19 @@ def handle_lint(fsm: "InjectorFSM") -> None:
             if blocking_errors:
                 reason = f"Graph regression gate failed: {'; '.join(blocking_errors)}"
                 logger.warning("[Graph Regression Gate]: Blocking errors (triggering rollback): %s", "; ".join(blocking_errors))
-                fsm._chunk_ctx["abort_reason"] = reason
-                fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=reason)
+                fsm.chunk.abort_reason = reason
+                fsm.progress_note(fsm.chunk_task_id("lint"), "lint", "failed", error=reason)
                 fsm.state = InjectorState.ROLLBACK
                 return
     except Exception as e:
         logger.error("Failed to perform graph-diff check: %s", e)
-        fsm._chunk_ctx["abort_reason"] = f"Graph regression gate error during check: {e}"
-        fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
+        fsm.chunk.abort_reason = f"Graph regression gate error during check: {e}"
+        fsm.progress_note(fsm.chunk_task_id("lint"), "lint", "failed", error=fsm.chunk.abort_reason)
         fsm.state = InjectorState.ROLLBACK
         return
 
-    fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "done")
-    fsm._transition_success()
+    fsm.progress_note(fsm.chunk_task_id("lint"), "lint", "done")
+    fsm.transition_success()
 
 
 def _entries_of(fsm: "InjectorFSM", source_file: str) -> list:
@@ -215,26 +216,23 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
     Called on every file conclusion — the success path (last chunk's CLEANUP)
     AND the failure path (last chunk rolled back, so CLEANUP never runs for it).
     A file whose earlier chunks committed real notes must still be accounted
-    even when its last chunk fails; the `_files_logged` guard keeps the two
+    even when its last chunk fails; the `files_logged` guard keeps the two
     entry points from double-recording.
     """
     try:
         from silica.kernel.write.run_log import append_log_line, format_nucleate_event
 
         basename = os.path.basename(source_file)
-        logged = getattr(fsm, "_files_logged", None)
-        if logged is None:
-            logged = fsm._files_logged = set()
-        if fi in logged:
+        if fi in fsm.files_logged:
             return
-        logged.add(fi)
+        fsm.files_logged.add(fi)
         mine = _entries_of(fsm, source_file)
         new_count = sum(1 for e in mine if e.op == "write")
         patch_count = sum(1 for e in mine if e.op == "patch")
 
         deferred_count = 0
         extractive_rejected = 0
-        content_hashes = getattr(fsm, "_file_content_hashes", [])
+        content_hashes = fsm.file_content_hashes
         if fi < len(content_hashes):
             try:
                 from silica.kernel.write.deferred import get_deferred_store
@@ -250,28 +248,26 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
                 logger.debug("CLEANUP: deferred count lookup failed (non-fatal): %s", _de)
 
         # Stash the grounded per-file outcome before any log I/O: this is what
-        # the agent-facing tool result reports as actually written. Guarded so
-        # a context-less fsm stub can't sink the log append below.
-        ctx = getattr(fsm, "context", None)
-        if isinstance(ctx, dict):
-            entry = {"file": basename, "new": new_count, "patch": patch_count,
-                     "deferred": deferred_count}
-            if extractive_rejected:
-                # W1 (survey-provenance spec): a claim the extractive span
-                # gate dropped is declared in the run report, never silently
-                # folded into the aggregate "deferred".
-                entry["extractive_rejected"] = extractive_rejected
-            ambiguous = (ctx.get("ambiguous_links") or {}).get(basename)
-            if ambiguous:
-                # Links this file's notes carry that a shared name sends to
-                # another folder (ADR-0114); warnings.json names them.
-                entry["ambiguous_links"] = ambiguous
-            prior = (ctx.get("renucleated") or {}).get(basename)
-            if prior:
-                # The source was nucleated before at another version: the
-                # report says how many notes of that version stay beside these.
-                entry["renucleated_prior_notes"] = prior
-            ctx.setdefault("files_summary", []).append(entry)
+        # the agent-facing tool result reports as actually written.
+        rs = fsm.run_state
+        entry = {"file": basename, "new": new_count, "patch": patch_count,
+                 "deferred": deferred_count}
+        if extractive_rejected:
+            # W1 (survey-provenance spec): a claim the extractive span
+            # gate dropped is declared in the run report, never silently
+            # folded into the aggregate "deferred".
+            entry["extractive_rejected"] = extractive_rejected
+        ambiguous = rs.ambiguous_links.get(basename)
+        if ambiguous:
+            # Links this file's notes carry that a shared name sends to
+            # another folder (ADR-0114); warnings.json names them.
+            entry["ambiguous_links"] = ambiguous
+        prior = rs.renucleated.get(basename)
+        if prior:
+            # The source was nucleated before at another version: the
+            # report says how many notes of that version stay beside these.
+            entry["renucleated_prior_notes"] = prior
+        rs.files_summary.append(entry)
 
         event = format_nucleate_event(basename, new_count, patch_count, deferred_count)
         append_log_line(event, fsm.progress.run_id, dedup_key=f"`{basename}`")
@@ -279,16 +275,15 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
         logger.debug("CLEANUP: log.md append skipped (non-fatal): %s", exc)
 
 
-def _drain_grounding(ctx: dict, basename: str) -> dict[str, dict]:
+def _drain_grounding(rs: RunState, basename: str) -> dict[str, dict]:
     """The per-note grounding score for `basename`, summed over the validate
-    rounds DISTILL stacked in `ctx["grounding"]` (one row per accepted op: a
+    rounds DISTILL stacked in `rs.grounding` (one row per accepted op: a
     note patched three times has three rows). Rows of this source leave the
-    context so a resumed CLEANUP cannot count them twice; other sources' rows
+    state so a resumed CLEANUP cannot count them twice; other sources' rows
     stay for their own record."""
-    rows = list(ctx.get("grounding") or [])
     keep: list[Any] = []
     out: dict[str, dict] = {}
-    for g in rows:
+    for g in rs.grounding:
         if g.get("source_basename") != basename:
             keep.append(g)
             continue
@@ -296,8 +291,7 @@ def _drain_grounding(ctx: dict, basename: str) -> dict[str, dict]:
         acc = out.setdefault(key, {"spans": 0, "ungrounded": 0, "profile": g.get("profile") or "default"})
         acc["spans"] += int(g.get("spans") or 0)
         acc["ungrounded"] += int(g.get("ungrounded") or 0)
-    if rows and isinstance(ctx, dict):
-        ctx["grounding"] = keep
+    rs.grounding = keep
     return out
 
 
@@ -369,7 +363,7 @@ def _reverify_prior(fsm, key: str, source_file: str, sha256: str,
     text = _source_text_after_cleanup(source_file)
     if not text.strip():
         return {}, []
-    ledger = getattr(fsm, "warning_ledger", None)
+    ledger = fsm.warning_ledger
     grounding: dict[str, dict] = {}
     reverified: list[str] = []
     other_texts: dict[str, str] = {}
@@ -403,7 +397,7 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
     """Append one `<vault>/provenance.json` record (spec-hermes-coherence §3).
 
     Sibling projection to _log_nucleate_completion, at the same CLEANUP point:
-    reuses fsm._file_content_hashes[fi] — the sha256 already computed once
+    reuses fsm.file_content_hashes[fi] — the sha256 already computed once
     per file at RUN start (silica.router.orchestrator.InjectorFSM.run), the
     same value the /nucleate pre-check will later compare against. Recomputing
     it here would fail anyway: by CLEANUP the source file has already been
@@ -420,19 +414,16 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
 
         basename = os.path.basename(source_file)
         key = source_key(source_file)
-        content_hashes = getattr(fsm, "_file_content_hashes", [])
+        content_hashes = fsm.file_content_hashes
         sha256 = content_hashes[fi] if fi < len(content_hashes) else ""
         if not sha256:
             return
 
         notes = sorted({e.path for e in _entries_of(fsm, source_file) if is_deriving_op(e.op)})
 
-        # getattr: the record must land even from a caller without a context
-        # (a bookkeeping key must never cost the record; the except below
-        # would swallow it silently).
-        ctx = getattr(fsm, "context", None) or {}
-        partial = bool(ctx.get("has_partial_failure") or ctx.get("failed_chunks"))
-        grounding = _drain_grounding(ctx, basename)
+        rs = fsm.run_state
+        partial = bool(rs.has_partial_failure or rs.failed_chunks)
+        grounding = _drain_grounding(rs, basename)
         re_grounding, reverified = _reverify_prior(fsm, key, source_file, sha256, notes)
         grounding.update(re_grounding)  # whole-body row wins over the op row
         append_record(key, sha256, fsm.progress.run_id, notes, partial=partial,
@@ -455,7 +446,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
     run or web_research beside its own inbox note — every note this source
     produced (manifest write/patch entries, same derivation as provenance)
     gains a `## Sources` block linking the leaf. Idempotent on the link, so
-    a re-ingest never double-links. Inverses ride fsm._run_inverses, so the
+    a re-ingest never double-links. Inverses ride fsm.run_inverses, so the
     undo journal covers leaf and block like any other write of the run.
     Best-effort and must never block CLEANUP.
     """
@@ -510,9 +501,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
                 leaf_name, leaf_rel, leaf_exists = basename, flat, True
         leaf_stem = leaf_name.removesuffix(".md")
 
-        wants_leaf = getattr(fsm, "keep_sources", False) or bool(
-            getattr(fsm, "seen_override", None)
-        )
+        wants_leaf = fsm.keep_sources or bool(fsm.seen_override)
         if wants_leaf and not leaf_exists and not owner:
             source_text = DRIVER.read_note(source_file).content or ""
             # Single frontmatter block: keep the source BODY verbatim; the date
@@ -522,7 +511,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             # `date: <today>` here would be read back by _incoming_side as the
             # incoming clock of every future contest this leaf feeds.
             _data, _raw, body = frontmatter.split(source_text)
-            date = source_event_date(source_text, getattr(fsm, "seen_override", None))
+            date = source_event_date(source_text, fsm.seen_override)
             # Carry `source_file:` (stamped by convert on every converted inbox
             # note) into the leaf: this block otherwise replaces the source's
             # frontmatter wholesale, and the leaf is the only copy left once
@@ -538,7 +527,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             date_line = f"date: {date}\n" if date else ""
             leaf = f"---\n{date_line}source_id: {leaf_name}\n{carry}---\n\n{body.lstrip()}"
             DRIVER.create(leaf_rel, leaf)
-            fsm._run_inverses.append(
+            fsm.run_inverses.append(
                 (leaf_rel, InverseOp(kind=InverseOpKind.delete_created, path=leaf_rel), None)
             )
             leaf_exists = True
@@ -563,7 +552,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
                     continue
                 DRIVER.overwrite(
                     note_path, append_before_superseded(prior, f"\n{marker}: {basename}\n"))
-                fsm._run_inverses.append(
+                fsm.run_inverses.append(
                     (note_path,
                      InverseOp(kind=InverseOpKind.restore_version, path=note_path,
                                prior_content=prior),
@@ -632,7 +621,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             # CITE: verbatim lines gain their [^label] and the patch's own
             # definition gives way to the one that links the leaf.
             DRIVER.overwrite(note_path, new, loss=Loss.CITE)
-            fsm._run_inverses.append(
+            fsm.run_inverses.append(
                 (note_path,
                  InverseOp(kind=InverseOpKind.restore_version, path=note_path,
                            prior_content=prior),
@@ -677,20 +666,20 @@ def file_language(fsm: "InjectorFSM", fi: int, source_text: str) -> str | None:
     the outline claims came out in English on an Italian vault (2026-09-02)."""
     from silica.kernel.text import language as lang_mod
     from silica.kernel.base.manifest import get_active_manifest
-    return (fsm.context.get(f"file_{fi}_language")
+    return (fsm.run_state.file(fi).language
             or get_active_manifest().conventions.language
             or lang_mod.display_name(lang_mod.detect(source_text[:4000])))
 
 
 def handle_cleanup(fsm: "InjectorFSM") -> None:
-    fsm._get_chunks_from_context_if_empty()
-    fi, ci = fsm._chunk_flat_to_fi_ci.get(fsm._current_chunk_idx, (0, fsm._current_chunk_idx))
-    with phase(fsm, fsm._chunk_task_id("cleanup"), "cleanup"):
+    fsm.chunks_from_payload()
+    fi, ci = fsm.chunk_flat_to_fi_ci.get(fsm.chunk_idx, (0, fsm.chunk_idx))
+    with phase(fsm, fsm.chunk_task_id("cleanup"), "cleanup"):
         # Always write ledger for this chunk's ops (per chunk)
-        fsm._write_ledger_for_file(fi, "committed")
+        fsm.write_ledger_for_file(fi, "committed")
 
         # Archive the physical file only on the last chunk of its file group
-        file_group = fsm._file_chunks.get(fi, {})
+        file_group = fsm.file_chunks.get(fi, {})
         n_chunks_in_file = len(file_group.get("chunks", []))
         is_last_chunk_of_file = (ci + 1 >= n_chunks_in_file)
 
@@ -714,11 +703,11 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
                 _write_source_leaf(fsm, inbox_file_for_fi)
                 res = gate.archive_source(inbox_file_for_fi)
                 if "error" in res:
-                    fsm.context["cleanup_warning"] = res["error"]
+                    fsm.run_state.cleanup_warning = res["error"]
                 # Title-index run cache: the archived source moved out of its
                 # indexed path — drop its ref so AUTOLINK can't link to a stale
                 # inbox title.
-                _cached_refs = getattr(fsm, "_run_title_refs", None)
+                _cached_refs = fsm.run_title_refs
                 if _cached_refs is not None:
                     _src_abs = os.path.abspath(inbox_file_for_fi)
                     _cached_refs[:] = [
@@ -743,36 +732,37 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
 
         # Grounded outcome evidence: committed-chunk count lets the terminal
         # verdict (here and in ROLLBACK) tell "partial" from "failed".
-        fsm.context["committed_chunks"] = fsm.context.get("committed_chunks", 0) + 1
+        fsm.run_state.committed_chunks = fsm.run_state.committed_chunks + 1
 
         # Run-level verdict, recomputed each chunk's CLEANUP (last write wins).
         # no_ops is a whole-run property — it holds only when NO chunk had actionable
         # ops. A later chunk that had ops lifts a prior all-skip chunk's provisional
         # no_ops rather than staying stuck on it, in either order (A24).
-        if fsm.context.get("has_partial_failure"):
-            fsm.context["final_status"] = "partial"
-        elif fsm.context.get("run_had_ops"):
-            fsm.context["final_status"] = "Success"
+        if fsm.run_state.has_partial_failure:
+            fsm.run_state.final_status = "partial"
+        elif fsm.run_state.run_had_ops:
+            fsm.run_state.final_status = "Success"
         else:
-            fsm.context["final_status"] = "no_ops"
+            fsm.run_state.final_status = "no_ops"
 
         # Persist this run's inverses for /revert, with final content hash.
-        if fsm._undo_run_id and fsm._run_inverses:
-            for _path, inv, _ in fsm._run_inverses:
-                gate.record_landed(fsm._undo_run_id, inv)
-            fsm._run_inverses.clear()
+        if fsm.undo_run_id and fsm.run_inverses:
+            for _path, inv, _ in fsm.run_inverses:
+                gate.record_landed(fsm.undo_run_id, inv)
+            fsm.run_inverses.clear()
 
 
 def handle_rollback(fsm: "InjectorFSM") -> None:
-    fsm._progress_note("rollback", "rollback", "running")
-    snapshot_res = fsm._chunk_ctx.get("snapshot", {})
-    # fsm._txn.inverses is the single source of truth for rollback (C3 /
+    fsm.progress_note("rollback", "rollback", "running")
+    snapshot_res = fsm.chunk.snapshot
+    # fsm.chunk.txn.inverses is the single source of truth for rollback (C3 /
     # ADR-0009): SNAPSHOT seeds it and every phase that mutates a pre-existing
     # note appends to it. Fall back to the persisted snapshot dict only when
     # no live transaction exists (defensive — both share the per-chunk lifetime).
-    if fsm._txn is not None:
-        txn_id = fsm._txn.id
-        inverses = fsm._txn.inverses_serialized
+    txn_id: str | None
+    if fsm.chunk.txn is not None:
+        txn_id = fsm.chunk.txn.id
+        inverses = fsm.chunk.txn.inverses_serialized
     else:
         txn_id = snapshot_res.get("txn_id")
         inverses = snapshot_res.get("inverses", [])
@@ -782,16 +772,16 @@ def handle_rollback(fsm: "InjectorFSM") -> None:
         if not res.get("success", False):
             err_msg = "; ".join(res.get("errors", []))
             logger.error("Rollback partially failed: %s", err_msg)
-            fsm.context["rollback_error"] = err_msg
+            fsm.run_state.rollback_error = err_msg
         else:
             logger.info("Rollback complete for txn %s", txn_id)
-        fsm._write_ledger_rollback(txn_id)
+        fsm.write_ledger_rollback(txn_id)
 
     # Clean up the embedding index for notes that were created and then rolled back
     # to prevent stale phantom entries that would bias future candidate searches.
     created_paths: list[str] = []
-    if fsm._txn is not None and fsm._txn.created_paths:
-        created_paths = list(fsm._txn.created_paths)
+    if fsm.chunk.txn is not None and fsm.chunk.txn.created_paths:
+        created_paths = list(fsm.chunk.txn.created_paths)
     elif snapshot_res.get("created_paths"):
         created_paths = list(snapshot_res["created_paths"])
     if created_paths:
@@ -804,6 +794,6 @@ def handle_rollback(fsm: "InjectorFSM") -> None:
         except Exception as _ee:
             logger.debug("ROLLBACK: embed index cleanup failed (non-fatal): %s", _ee)
 
-    fsm._progress_note("rollback", "rollback", "done")
+    fsm.progress_note("rollback", "rollback", "done")
     # Contain the failure at chunk level instead of aborting the whole run
-    fsm._contain_chunk_failure()
+    fsm.contain_chunk_failure()

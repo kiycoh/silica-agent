@@ -51,8 +51,8 @@ def _doc_date(fsm: "InjectorFSM", idx: int) -> str:
     the run's start date. Best-effort: unreadable source returns "".
     """
     try:
-        fi = fsm._chunk_flat_to_fi_ci.get(idx, (None, None))[0]
-        chunk = fsm._file_chunks.get(fi) if fi is not None else None
+        fi = fsm.chunk_flat_to_fi_ci.get(idx, (None, None))[0]
+        chunk = fsm.file_chunks.get(fi) if fi is not None else None
         src = (chunk or {}).get("source_file") or fsm.inbox_file
         text = DRIVER.read_note(src).content or ""
         fm = FM_RE_TOLERANT.match(text)
@@ -70,7 +70,7 @@ def _enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed
     mark superseded. Without it the pair is judged as an incoming concept
     (legacy rejected shape). Best-effort: no queue (ad-hoc validate) → no-op.
     """
-    wq = getattr(fsm, "work_queue", None)
+    wq = fsm.work_queue
     if wq is None:
         return
     from silica.kernel.workqueue import WorkItem, batch_dedup_items
@@ -100,18 +100,18 @@ def _enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed
                 "candidate": m.group(1),
                 "score": 0.0,
                 "title_score": title_score,
-                # _current_source_file, NOT inbox_file: the latter is pinned to
+                # current_source_file, NOT inbox_file: the latter is pinned to
                 # inbox_files[0] for the whole run, so on a folder nucleation
                 # every worker's notes were filed under file 0 paired with
                 # another file's sha — two sha values for one source, which
                 # check_renucleate reads as "modified" and drifted_notes reads
                 # as derived from a superseded version.
-                "inbox_file": fsm._current_source_file,
+                "inbox_file": fsm.current_source_file,
                 "hub": fsm.hub,
-                "content_hash": fsm._current_content_hash,
+                "content_hash": fsm.current_content_hash,
                 # The provenance ledger is keyed on the FSM's own run id — what
                 # CLEANUP stamps and what the dangling-link sweep reads back.
-                "run_id": getattr(getattr(fsm, "progress", None), "run_id", "") or "",
+                "run_id": fsm.progress.run_id,
                 "target_dir": fsm.target_dir,
                 **({"loser_path": op.get("path", "")} if landed else {}),
             },
@@ -130,21 +130,21 @@ def _enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed
 def _enqueue_short_snippet_expands(fsm: "InjectorFSM", rejected_raw: list) -> None:
     """«snippet too short» rejections become live expand WorkItems.
 
-    The op is already parked in the deferred bundle by _defer_ops; the expand
+    The op is already parked in the deferred bundle by defer_ops; the expand
     worker re-prompts the LLM with the concept's inbox excerpt (max 2 attempts)
     and commits through the same gate — retry stays the exception. Called only
     for PARTIAL rejections: an all-rejected chunk re-delegates via the steer
     arc, and racing both would author the same notes twice. Best-effort: no
     queue (ad-hoc validate) → no-op.
     """
-    wq = getattr(fsm, "work_queue", None)
+    wq = fsm.work_queue
     if wq is None:
         return
     from silica.kernel.workqueue import WorkItem
 
     excerpts: dict[str, str] = {}
     try:
-        chunk = fsm._chunks[fsm._current_chunk_idx]
+        chunk = fsm.chunks[fsm.chunk_idx]
         for batch in chunk.get("batches", []):
             for c in batch.get("concepts", []):
                 if isinstance(c, dict) and c.get("name"):
@@ -167,10 +167,10 @@ def _enqueue_short_snippet_expands(fsm: "InjectorFSM", rejected_raw: list) -> No
                     "op": op,
                     "excerpt": excerpts.get(op.get("heading", ""), ""),
                     "reason": reason,
-                    "inbox_file": fsm._current_source_file,  # see the dedup item above
+                    "inbox_file": fsm.current_source_file,  # see the dedup item above
                     "hub": fsm.hub,
-                    "content_hash": fsm._current_content_hash,
-                    "run_id": getattr(getattr(fsm, "progress", None), "run_id", "") or "",
+                    "content_hash": fsm.current_content_hash,
+                    "run_id": fsm.progress.run_id,
                     "target_dir": fsm.target_dir,
                 },
                 reason=reason,
@@ -187,7 +187,7 @@ def _steer_retryable(fsm: "InjectorFSM", rejected_raw: list, idx: int) -> list:
     ops (not distiller-authored — steering the distiller about them is noise),
     and entries with no payload heading to rebuild a retry payload from.
     """
-    collision_ops = fsm.context.get(f"chunk_{idx}_collision_ops", []) or []
+    collision_ops = fsm.run_state.chunk(idx).collision_ops or []
     collision_keys = {
         (o.get("heading"), o.get("path")) for o in collision_ops if isinstance(o, dict)
     }
@@ -303,11 +303,10 @@ def _file_profile(fsm: "InjectorFSM", idx: int) -> str | None:
     (docs/specs/nucleation-forms.md). Both read sites (prompt and gate) go
     through here so they can never disagree on the lens.
     """
-    run_level = getattr(fsm, "distill_profile", None)
-    if run_level:
-        return run_level
-    fi = fsm._chunk_flat_to_fi_ci.get(idx, (fsm._current_file_idx, 0))[0]
-    return fsm.context.get(f"file_{fi}_profile")
+    if fsm.distill_profile:
+        return fsm.distill_profile
+    fi = fsm.chunk_flat_to_fi_ci.get(idx, (fsm.file_idx, 0))[0]
+    return fsm.run_state.file(fi).profile
 
 
 def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
@@ -317,7 +316,7 @@ def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
     prefetched call is immune to later FSM mutation. steer_context is always
     None — steer retries never go through the prefetcher.
     """
-    chunk = fsm._chunks[idx]
+    chunk = fsm.chunks[idx]
 
     ledger_digest: str | None = None
     try:
@@ -325,7 +324,7 @@ def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
     except Exception:
         pass
 
-    vault_ctx = fsm.context.get("vault_graph_ctx", {})
+    vault_ctx = fsm.run_state.vault_graph_ctx or {}
     enriched_chunk = _inject_graph_ctx(chunk, vault_ctx) if vault_ctx else chunk
 
     substrate: str | None = None
@@ -334,13 +333,13 @@ def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
         substrate = build_substrate(
             enriched_chunk,
             manifest_titles=fsm.manifest.titles(),
-            cleared_parents=fsm.context.get("run_cleared_parents"),
+            cleared_parents=fsm.run_state.run_cleared_parents,
             hub_names=_vocabulary_hubs(vault_ctx),
         )
     except Exception as _sub_e:
         logger.debug("DELEGATE: substrate build failed (non-fatal): %s", _sub_e)
 
-    fi = fsm._chunk_flat_to_fi_ci.get(idx, (fsm._current_file_idx, 0))[0]
+    fi = fsm.chunk_flat_to_fi_ci.get(idx, (fsm.file_idx, 0))[0]
     return dict(
         payload=enriched_chunk,
         target=fsm.target_dir,
@@ -349,7 +348,7 @@ def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
         steer_context=None,
         substrate=substrate,
         session_date=_doc_date(fsm, idx) or fsm.progress.started_at[:10],
-        language=fsm.context.get(f"file_{fi}_language"),
+        language=fsm.run_state.file(fi).language,
         profile=_file_profile(fsm, idx),
     )
 
@@ -367,33 +366,33 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
     k = int(getattr(CONFIG, "distill_concurrency", 1) or 1)
     if k <= 1:
         return
-    if fsm._prefetcher is None:
+    if fsm.prefetcher is None:
         from silica.router.prefetch import DistillPrefetcher
-        fsm._prefetcher = DistillPrefetcher(max_workers=k)
-    prefetcher = fsm._prefetcher
+        fsm.prefetcher = DistillPrefetcher(max_workers=k)
+    prefetcher = fsm.prefetcher
 
     from silica.router.states.collision import collision_pass
     from silica.router.states.setup import warm_next_file
 
-    fi_cur = fsm._chunk_flat_to_fi_ci.get(idx, (fsm._current_file_idx, 0))[0]
+    fi_cur = fsm.chunk_flat_to_fi_ci.get(idx, (fsm.file_idx, 0))[0]
     allowed_next: int | None = None  # the one file boundary the window may cross
     warmed = False
     j = idx
     while j < idx + k:
-        if j >= len(fsm._chunks):
+        if j >= len(fsm.chunks):
             # Window ran past the attached chunks: prep the next file early so
             # its first distill is in flight while this file's tail is written.
             if warmed or not warm_next_file(fsm):
                 break
             warmed = True
             continue  # re-check j against the grown flat list
-        fi_j = fsm._chunk_flat_to_fi_ci.get(j, (fi_cur, 0))[0]
+        fi_j = fsm.chunk_flat_to_fi_ci.get(j, (fi_cur, 0))[0]
         if fi_j != fi_cur:
             if allowed_next is None:
                 allowed_next = fi_j
             elif fi_j != allowed_next:
                 break  # never cross a second file boundary
-        if fsm.context.get(f"chunk_{j}_steer_context"):
+        if fsm.run_state.chunk(j).steer_context:
             # Steer chunks run inline by design: handle_delegate
             # discards any prefetched future for them, so dispatching one
             # burns a full distill call for nothing.
@@ -402,24 +401,24 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
         if j in prefetcher:
             j += 1
             continue
-        if j > idx and not fsm.context.get(f"chunk_{j}_collision_done"):
+        if j > idx and not fsm.run_state.chunk(j).collision_done:
             try:
                 collision_pass(fsm, j)
-                fsm.context[f"chunk_{j}_collision_done"] = True
+                fsm.run_state.chunk(j).collision_done = True
             except Exception as _ce:
                 logger.warning("prefetch: collision_pass(%d) failed (%s) — chunk stays sequential", j, _ce, exc_info=True)
                 j += 1
                 continue
-        if _chunk_concept_count(fsm._chunks[j]) == 0:
+        if _chunk_concept_count(fsm.chunks[j]) == 0:
             j += 1
             continue  # emptied by collision/novelty; the inline guard finishes it free
         # Content-addressed idempotency: never dispatch a chunk a prior run
         # already completed (same key derivation as handle_delegate).
-        j_hash = fsm.context.get(f"chunk_{j}_input_hash") or hashlib.sha256(
-            json.dumps(fsm._chunks[j], sort_keys=True).encode()
+        j_hash = fsm.run_state.chunk(j).input_hash or hashlib.sha256(
+            json.dumps(fsm.chunks[j], sort_keys=True).encode()
         ).hexdigest()
         try:
-            done = fsm.progress.is_checkpoint_done(fsm._chunk_task_id("validate", j), j_hash)
+            done = fsm.progress.is_checkpoint_done(fsm.chunk_task_id("validate", j), j_hash)
         except Exception:
             done = None
         if done:
@@ -456,12 +455,12 @@ def _run_outline_chunk(fsm: "InjectorFSM", idx: int, chunk: dict,
     check keep working unchanged. A steer retry reuses the stored outline and
     regenerates only the rejected bodies.
     """
-    fi = fsm._chunk_flat_to_fi_ci.get(idx, (fsm._current_file_idx, 0))[0]
-    inbox_file = (chunk.get("batches") or [{}])[0].get("inbox_file", "") or fsm._current_source_file
+    fi = fsm.chunk_flat_to_fi_ci.get(idx, (fsm.file_idx, 0))[0]
+    inbox_file = (chunk.get("batches") or [{}])[0].get("inbox_file", "") or fsm.current_source_file
     only: set[str] | None = None
     prior = None
     if retry_payload is not None:
-        saved = fsm.context.get(f"chunk_{idx}_outline")
+        saved = fsm.run_state.chunk(idx).outline
         prior = parse_outline(saved) if saved else None
         if prior is not None:
             only = {n for b in retry_payload.get("batches", [])
@@ -500,11 +499,11 @@ def _run_outline_chunk(fsm: "InjectorFSM", idx: int, chunk: dict,
         # it deferred all of Lezione 3 after one bad body (26 carried ops
         # rejected as "not present in payload concepts", 2026-09-05).
         fresh = {c.get("name") for c in concepts}
-        prev = (fsm._chunks[idx].get("batches") or [{}])[0].get("concepts") or []
+        prev = (fsm.chunks[idx].get("batches") or [{}])[0].get("concepts") or []
         concepts += [c for c in prev if c.get("name") not in fresh]
-    fsm._chunks[idx] = {**chunk, "batches": [{"inbox_file": inbox_file, "concepts": concepts}]}
+    fsm.chunks[idx] = {**chunk, "batches": [{"inbox_file": inbox_file, "concepts": concepts}]}
     if only is None:
-        fsm.context[f"chunk_{idx}_outline"] = res["outline"]
+        fsm.run_state.chunk(idx).outline = res["outline"]
     if fsm.warning_ledger is not None:
         for gap in res.get("gaps", []):
             fsm.warning_ledger.add(inbox_file, "outline_gap", f"no idea and no skip for section '{gap}'")
@@ -514,17 +513,18 @@ def _run_outline_chunk(fsm: "InjectorFSM", idx: int, chunk: dict,
 
 
 def handle_delegate(fsm: "InjectorFSM") -> None:
-    fsm._get_chunks_from_context_if_empty()
+    fsm.chunks_from_payload()
 
-    if not fsm._chunks or fsm._current_chunk_idx >= len(fsm._chunks):
+    if not fsm.chunks or fsm.chunk_idx >= len(fsm.chunks):
         raise RuntimeError("No chunks available for iterative processing.")
 
-    current_chunk = fsm._chunks[fsm._current_chunk_idx]
-    idx = fsm._current_chunk_idx
+    current_chunk = fsm.chunks[fsm.chunk_idx]
+    idx = fsm.chunk_idx
 
     # Partial-steer retry: VALIDATE parked a payload filtered to the rejected
     # concepts. Consume it in place of the full chunk.
-    retry_payload = fsm.context.pop(f"chunk_{idx}_retry_payload", None)
+    state = fsm.run_state.chunk(idx)
+    retry_payload, state.retry_payload = state.retry_payload, None
     if retry_payload is not None:
         current_chunk = retry_payload
 
@@ -537,38 +537,38 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
         # Use the pre-COLLISION hash stored by _handle_collision so the key is
         # based on the original source input, not the vault-state-dependent
         # post-COLLISION chunk (which changes when resumed after a partial run).
-        chunk_hash = fsm.context.get(f"chunk_{idx}_input_hash") or hashlib.sha256(
+        chunk_hash = fsm.run_state.chunk(idx).input_hash or hashlib.sha256(
             _json.dumps(current_chunk, sort_keys=True).encode()
         ).hexdigest()
-        saved_ops_path = fsm.progress.is_checkpoint_done(fsm._chunk_task_id("validate"), chunk_hash)
+        saved_ops_path = fsm.progress.is_checkpoint_done(fsm.chunk_task_id("validate"), chunk_hash)
         if saved_ops_path and os.path.exists(saved_ops_path):
             logger.info(
                 "DELEGATE chunk %d: content-addressed hit (hash=%s…) — skipping to SNAPSHOT",
                 idx,
                 chunk_hash[:8],
             )
-            fsm._chunk_ctx["ops_path"] = saved_ops_path  # per-chunk ns: every consumer reads _chunk_ctx
+            fsm.chunk.ops_path = saved_ops_path
             fsm.state = InjectorState.SNAPSHOT
             return
     else:
         # Steer retry is mid-chunk work: never content-addressed-skip, and keep
         # the first pass's hash so the checkpoint stays keyed to the source input.
-        chunk_hash = fsm.context.get(f"chunk_{idx}_hash", "") or hashlib.sha256(
+        chunk_hash = fsm.run_state.chunk(idx).hash or hashlib.sha256(
             _json.dumps(current_chunk, sort_keys=True).encode()
         ).hexdigest()
 
     _prefetch_ahead(fsm, idx)
 
-    logger.info("--- DISTILLING BATCH %d/%d ---", idx + 1, len(fsm._chunks))
-    fsm._progress_note(fsm._chunk_task_id("distill"), "distill", "running")
+    logger.info("--- DISTILLING BATCH %d/%d ---", idx + 1, len(fsm.chunks))
+    fsm.progress_note(fsm.chunk_task_id("distill"), "distill", "running")
 
     # Phase 6: pass steering correction if VALIDATE sent us back here.
     # Tier 2 cascade: the rejection IS the calibrated uncertainty signal, so
     # every steer retry escalates to the escalation model.
-    steer_context: str | None = fsm.context.get(f"chunk_{idx}_steer_context")
+    steer_context: str | None = fsm.run_state.chunk(idx).steer_context
     if steer_context:
         logger.info("DELEGATE chunk %d: re-attempt with steering correction (escalated)", idx)
-        fsm.context["escalations"] = fsm.context.get("escalations", 0) + 1
+        fsm.run_state.escalations = fsm.run_state.escalations + 1
 
     kwargs = _distill_inputs(fsm, idx)
     kwargs["escalate"] = bool(steer_context)
@@ -576,8 +576,8 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
         # Steer retries always run inline with the retry payload + feedback;
         # the prefetcher refuses re-submission of a popped idx by design.
         kwargs["payload"] = (
-            _inject_graph_ctx(current_chunk, fsm.context.get("vault_graph_ctx", {}))
-            if fsm.context.get("vault_graph_ctx") else current_chunk
+            _inject_graph_ctx(current_chunk, fsm.run_state.vault_graph_ctx or {})
+            if fsm.run_state.vault_graph_ctx else current_chunk
         )
         kwargs["steer_context"] = steer_context
 
@@ -595,11 +595,11 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
             # no-actionable-ops path finishes the chunk. (Also fixes the
             # latent waste: a COLLISION-emptied chunk used to burn a call.)
             logger.info("DELEGATE chunk %d: zero concepts, skipping distiller call", idx)
-            if fsm._prefetcher is not None:
-                fsm._prefetcher.pop(idx)  # discard any stale prefetched future
+            if fsm.prefetcher is not None:
+                fsm.prefetcher.pop(idx)  # discard any stale prefetched future
             chunk_result = {"updates": []}
         else:
-            fut = fsm._prefetcher.pop(idx) if fsm._prefetcher is not None else None
+            fut = fsm.prefetcher.pop(idx) if fsm.prefetcher is not None else None
             if fut is not None and kwargs["steer_context"] is None:
                 try:
                     chunk_result = fut.result()
@@ -613,15 +613,15 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
         # persisted ledger (inputs) so a finished run can be diagnosed without
         # checkpoint-mtime archaeology; saved by the "done" progress note below.
         _secs = round(time.monotonic() - _t0, 2)
-        fsm.context.setdefault("distill_secs", {})[idx] = _secs
-        fsm.progress.inputs.setdefault("distill_secs", {})[fsm._chunk_task_id("distill")] = _secs
+        fsm.run_state.distill_secs[idx] = _secs
+        fsm.progress.inputs.setdefault("distill_secs", {})[fsm.chunk_task_id("distill")] = _secs
         if "error" in chunk_result:
-            fsm._progress_note(fsm._chunk_task_id("distill"), "distill", "failed", error=chunk_result["error"])
+            fsm.progress_note(fsm.chunk_task_id("distill"), "distill", "failed", error=chunk_result["error"])
             raise RuntimeError(f"Distiller error on batch {idx}: {chunk_result['error']}")
 
         # Episodic lane: route personal/ephemeral facts to the short-term
         # store. Never fails the ingest (capture_from_distill swallows).
-        if getattr(fsm, "episodic_capture", True):
+        if fsm.episodic_capture:
             from silica.kernel.recall.episodic import capture_from_distill
             capture_from_distill(
                 chunk_result,
@@ -633,55 +633,56 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
                 seen=fsm.seen_override or fsm.progress.started_at[:10],
             )
 
-        distiller_path = fsm._make_tmp(chunk_result)
-        fsm._chunk_ctx["distiller_output_path"] = distiller_path
+        distiller_path = fsm.make_tmp(chunk_result)
+        fsm.chunk.distiller_output_path = distiller_path
         # Store chunk hash for knowledge-block write at VALIDATE
-        fsm.context[f"chunk_{idx}_hash"] = chunk_hash
-        fsm._progress_note(fsm._chunk_task_id("distill"), "distill", "done", output_ref=distiller_path)
-        fsm._transition_success()
+        fsm.run_state.chunk(idx).hash = chunk_hash
+        fsm.progress_note(fsm.chunk_task_id("distill"), "distill", "done", output_ref=distiller_path)
+        fsm.transition_success()
 
     except Exception as e:
         raise RuntimeError(f"Critical failure delegating batch {idx}: {e}")
 
 
 def handle_sanitize(fsm: "InjectorFSM") -> None:
-    with phase(fsm, fsm._chunk_task_id("sanitize"), "sanitize"):
+    with phase(fsm, fsm.chunk_task_id("sanitize"), "sanitize"):
         # The chunk's own inbox text anchors verbatim-body escape repair:
         # doublings the source contains survive, everything else collapses.
         # The full chunk is a superset of any steer-retry payload — a
         # superset only errs toward preserving, the safe direction.
-        source = payload_inbox_text(fsm._chunks[fsm._current_chunk_idx])
+        source = payload_inbox_text(fsm.chunks[fsm.chunk_idx])
         try:
-            with open(fsm._chunk_ctx["distiller_output_path"], encoding="utf-8") as f:
+            with open(fsm.chunk.distiller_output_path, encoding="utf-8") as f:
                 raw = f.read()
         except OSError as e:
             res = {"error": f"Failed to read distiller output: {e}"}
         else:
             res = sanitize_output(raw, verbatim_source=source or None)
         if "error" in res:
-            fsm._progress_note(fsm._chunk_task_id("sanitize"), "sanitize", "failed", error=res["error"])
+            fsm.progress_note(fsm.chunk_task_id("sanitize"), "sanitize", "failed", error=res["error"])
             raise RuntimeError(f"Sanitize failed: {res['error']}")
-        fsm._chunk_ctx["sanitized"] = res
+        fsm.chunk.sanitized = res
 
 
 def handle_validate(fsm: "InjectorFSM") -> None:
-    idx = fsm._current_chunk_idx
-    fsm._progress_note(fsm._chunk_task_id("validate"), "validate", "running")
-    sanitized = fsm._chunk_ctx["sanitized"]["parsed"]
+    idx = fsm.chunk_idx
+    fsm.progress_note(fsm.chunk_task_id("validate"), "validate", "running")
+    sanitized = fsm.chunk.sanitized["parsed"]
     ops_raw = sanitized.get("updates", sanitized) if isinstance(sanitized, dict) else sanitized
     if not isinstance(ops_raw, list):
         ops_raw = [ops_raw]
 
     # Merge collision-routed patch ops (Phase 5): prepend so they go through
     # the same validate→snapshot→write path as distiller-generated ops.
-    collision_ops = fsm.context.get(f"chunk_{idx}_collision_ops", [])
+    collision_ops = fsm.run_state.chunk(idx).collision_ops
     if collision_ops:
         ops_raw = list(collision_ops) + list(ops_raw)
 
     # Partial-steer retry: validated ops from the previous attempt re-enter the
     # gate ahead of the retry output — re-validation is deterministic, and the
     # path-dedup keeps the richer op if the model re-emitted one anyway.
-    carry_ops = fsm.context.pop(f"chunk_{idx}_carry_ops", None)
+    state = fsm.run_state.chunk(idx)
+    carry_ops, state.carry_ops = state.carry_ops, []
     if carry_ops:
         ops_raw = list(carry_ops) + list(ops_raw)
 
@@ -691,14 +692,14 @@ def handle_validate(fsm: "InjectorFSM") -> None:
     from silica.kernel.text.cohesion import cohesion_pass
     ops_raw = cohesion_pass(ops_raw)
 
-    fsm._get_chunks_from_context_if_empty()
+    fsm.chunks_from_payload()
 
     payloads: list[dict] = []
-    if fsm._chunks and fsm._current_chunk_idx < len(fsm._chunks):
-        payloads.append(fsm._chunks[fsm._current_chunk_idx])
+    if fsm.chunks and fsm.chunk_idx < len(fsm.chunks):
+        payloads.append(fsm.chunks[fsm.chunk_idx])
     else:
-        # Fallback to general payload if _chunks is not populated
-        payload_data = fsm.context.get("payload", {})
+        # Fallback to general payload if chunks is not populated
+        payload_data = fsm.run_state.payload or {}
         if "chunks" in payload_data:
             payloads.extend(payload_data["chunks"])
         elif "payload" in payload_data:
@@ -713,12 +714,12 @@ def handle_validate(fsm: "InjectorFSM") -> None:
         hub=fsm.hub,
         # Same profile as the prompt: an extractive run judged by the default
         # floor would reject its own (correct) verbatim output.
-        profile=_file_profile(fsm, fsm._current_chunk_idx),
+        profile=_file_profile(fsm, fsm.chunk_idx),
     )
 
     # C4: SNAPSHOT and WRITE read this file, so it holds what the gate kept.
-    ops_path = fsm._make_tmp(res["validated_ops"])
-    fsm.context["validate"] = res
+    ops_path = fsm.make_tmp(res["validated_ops"])
+    fsm.run_state.validate = res
 
     # Span-grounding warnings (warn-only, never a rejection) → run ledger,
     # persisted as <run_dir>/warnings.json alongside the orphan warnings.
@@ -735,8 +736,8 @@ def handle_validate(fsm: "InjectorFSM") -> None:
     # rides on the file's line in the run report (files_summary).
     ambiguous = res.get("ambiguous_links") or []
     if ambiguous:
-        src = os.path.basename(getattr(fsm, "_current_source_file", "") or "")
-        counts = fsm.context.setdefault("ambiguous_links", {})
+        src = os.path.basename(fsm.current_source_file)
+        counts = fsm.run_state.ambiguous_links
         counts[src] = counts.get(src, 0) + len(ambiguous)
         if fsm.warning_ledger is not None:
             by_note: dict[str, list[str]] = {}
@@ -747,7 +748,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
                 fsm.warning_ledger.add(note, "ambiguous_link", "; ".join(lines))
     # The score behind the warning, kept until CLEANUP writes it to the
     # provenance record (finalize._record_provenance drains it per source).
-    fsm.context.setdefault("grounding", []).extend(res.get("grounding", []))
+    fsm.run_state.grounding.extend(res.get("grounding", []))
 
     max_rate = REJECTION_RATE_MAX
 
@@ -775,16 +776,16 @@ def handle_validate(fsm: "InjectorFSM") -> None:
         # Provisional per-chunk verdict; CLEANUP overrides it to Success if any
         # chunk in the run had actionable ops (run_had_ops), fixing the sticky
         # run-global that mislabelled multi-chunk runs (A24).
-        fsm.context["final_status"] = "no_ops"
-        fsm._chunk_ctx["ops_path"] = ops_path
-        fsm._progress_note(fsm._chunk_task_id("validate"), "validate", "done")
+        fsm.run_state.final_status = "no_ops"
+        fsm.chunk.ops_path = ops_path
+        fsm.progress_note(fsm.chunk_task_id("validate"), "validate", "done")
         fsm.state = InjectorState.CLEANUP
         return
 
     # Run-global: any chunk with actionable ops makes the run not-no_ops, so a
     # later all-skip chunk can't drag a committing run back to no_ops (A24).
     if res.get("validated_count", 0) > 0:
-        fsm.context["run_had_ops"] = True
+        fsm.run_state.run_had_ops = True
 
     # Persist rejected ops to the deferred store so the model can retry them
     # later without re-running the expensive RECON → DELEGATE cycle.
@@ -798,12 +799,12 @@ def handle_validate(fsm: "InjectorFSM") -> None:
             (r.get("op", {}).get("path") or r.get("op", {}).get("heading") or "?"): r.get("reason", "")
             for r in rejected_raw if isinstance(r, dict)
         }
-        if fsm._defer_ops(deferred_ops, rejection_reasons, phase="VALIDATE"):
+        if fsm.defer_ops(deferred_ops, rejection_reasons, phase="VALIDATE"):
             logger.warning(
                 "VALIDATE: %d op(s) rejected and saved to deferred store (hash=%s…). "
                 "Use silica_deferred_retry to attempt them later.",
                 len(rejected_raw),
-                fsm._current_content_hash[:8],
+                fsm.current_content_hash[:8],
             )
 
     # Accumulate cleared parent references across chunks.
@@ -811,7 +812,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
     # distiller can anticipate in subsequent chunks or future runs.
     cleared = res.get("cleared_parents", [])
     if cleared:
-        fsm.context.setdefault("run_cleared_parents", []).extend(cleared)
+        fsm.run_state.run_cleared_parents.extend(cleared)
         logger.debug("VALIDATE: %d parent reference(s) cleared to hub fallback (tracked as forward refs)", len(cleared))
 
     # Unresolved inline wikilinks are kept verbatim as dangling forward-refs (no
@@ -831,7 +832,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
 
     from silica.kernel.prep_delegation import render_steer_feedback
 
-    steer_attempts = fsm.context.get(f"chunk_{idx}_steer_attempts", 0)
+    steer_attempts = fsm.run_state.chunk(idx).steer_attempts
     _max_steer = MAX_STEER_ATTEMPTS
 
     # Abort only when no validated ops remain — partial success is fine.
@@ -839,8 +840,8 @@ def handle_validate(fsm: "InjectorFSM") -> None:
         # Phase 6 steering arc: re-delegate with per-op rejection feedback.
         if steer_attempts < _max_steer:
             steer_attempts += 1
-            fsm.context[f"chunk_{idx}_steer_attempts"] = steer_attempts
-            fsm.context[f"chunk_{idx}_steer_context"] = render_steer_feedback(
+            fsm.run_state.chunk(idx).steer_attempts = steer_attempts
+            fsm.run_state.chunk(idx).steer_context = render_steer_feedback(
                 res.get("rejected_ops", []),
                 attempt=steer_attempts,
                 max_attempts=_max_steer,
@@ -851,29 +852,31 @@ def handle_validate(fsm: "InjectorFSM") -> None:
                 "VALIDATE: steer attempt %d/%d for chunk %d — re-delegating with correction.",
                 steer_attempts, _max_steer, idx,
             )
-            fsm._progress_note(fsm._chunk_task_id("validate"), "validate", "running",
+            fsm.progress_note(fsm.chunk_task_id("validate"), "validate", "running",
                                 error=f"steer {steer_attempts}/{_max_steer}")
             try:
-                fsm.progress.set_status(  # type: ignore[union-attr]
-                    fsm._chunk_task_id("distill"), "running",
+                fsm.progress.set_status(
+                    fsm.chunk_task_id("distill"), "running",
                     error=f"steer attempt {steer_attempts}"
                 )
-            except Exception:
-                pass
+            except KeyError as _ke:
+                # No distill task on record (a chunk the ledger never saw): the
+                # retry proceeds, the ledger is only its shadow.
+                logger.debug("VALIDATE: steer note skipped (%s)", _ke)
             fsm.state = InjectorState.DELEGATE
             return
         # Exhausted steering budget → defer and short-circuit.
         logger.warning("VALIDATE: steer budget exhausted (%d/%d) — deferring chunk %d.", steer_attempts, _max_steer, idx)
-        fsm._chunk_ctx["abort_reason"] = "All ops rejected — nothing to write"
+        fsm.chunk.abort_reason = "All ops rejected — nothing to write"
         # Provisional; CLEANUP overrides to Success if the run had ops elsewhere (A24).
-        fsm.context["final_status"] = "no_ops"
-        fsm._chunk_ctx["ops_path"] = ops_path
+        fsm.run_state.final_status = "no_ops"
+        fsm.chunk.ops_path = ops_path
         # "failed", not "done": CLEANUP archives a file only when none of its
         # tasks failed, and a chunk whose every op sits in the deferred store
         # must keep its source in the inbox (Lezione 3 went to Done/ with 0
         # notes, 2026-09-05).
-        fsm.context["has_partial_failure"] = True
-        fsm._progress_note(fsm._chunk_task_id("validate"), "validate", "failed",
+        fsm.run_state.has_partial_failure = True
+        fsm.progress_note(fsm.chunk_task_id("validate"), "validate", "failed",
                            error="all ops rejected — deferred")
         fsm.state = InjectorState.CLEANUP
         return
@@ -886,13 +889,13 @@ def handle_validate(fsm: "InjectorFSM") -> None:
     retryable = _steer_retryable(fsm, rejected_raw, idx) if rejected_raw else []
     if retryable and steer_attempts < _max_steer:
         retry_payload = _filter_chunk_to_concepts(
-            fsm._chunks[fsm._current_chunk_idx] if fsm._chunks else {},
+            fsm.chunks[fsm.chunk_idx] if fsm.chunks else {},
             {r["op"].get("heading", "") for r in retryable},
         )
         if retry_payload is not None:
             steer_attempts += 1
-            fsm.context[f"chunk_{idx}_steer_attempts"] = steer_attempts
-            fsm.context[f"chunk_{idx}_steer_context"] = render_steer_feedback(
+            fsm.run_state.chunk(idx).steer_attempts = steer_attempts
+            fsm.run_state.chunk(idx).steer_context = render_steer_feedback(
                 retryable,
                 attempt=steer_attempts,
                 max_attempts=_max_steer,
@@ -900,15 +903,15 @@ def handle_validate(fsm: "InjectorFSM") -> None:
                 partial=True,
                 ungrounded=res.get("ungrounded", []),
             )
-            fsm.context[f"chunk_{idx}_retry_payload"] = retry_payload
-            fsm.context.setdefault(f"chunk_{idx}_carry_ops", []).extend(
+            fsm.run_state.chunk(idx).retry_payload = retry_payload
+            fsm.run_state.chunk(idx).carry_ops.extend(
                 res.get("validated_ops", [])
             )
             logger.warning(
                 "VALIDATE: partial steer attempt %d/%d for chunk %d — re-delegating %d rejected op(s), carrying %d validated.",
                 steer_attempts, _max_steer, idx, len(retryable), res.get("validated_count", 0),
             )
-            fsm._progress_note(fsm._chunk_task_id("validate"), "validate", "running",
+            fsm.progress_note(fsm.chunk_task_id("validate"), "validate", "running",
                                 error=f"steer {steer_attempts}/{_max_steer} (partial)")
             fsm.state = InjectorState.DELEGATE
             return
@@ -916,24 +919,24 @@ def handle_validate(fsm: "InjectorFSM") -> None:
     # Knowledge-block consolidation (Phase 2): persist the validated ops to
     # a stable path in the run directory so they survive tmp cleanup and
     # enable content-addressed skip on re-runs.
-    chunk_hash = fsm.context.get(f"chunk_{idx}_hash", "")
+    chunk_hash = fsm.run_state.chunk(idx).hash
     kb_path: str = ops_path  # fallback to tmp if save fails
     if chunk_hash:
         try:
-            kb_path = fsm._save_knowledge_block(idx, ops_path)
+            kb_path = fsm.save_knowledge_block(idx, ops_path)
         except Exception as _kb_e:
             logger.debug("Knowledge-block save failed (non-fatal): %s", _kb_e)
 
-    fsm._chunk_ctx["ops_path"] = kb_path
-    fsm._progress_note(
+    fsm.chunk.ops_path = kb_path
+    fsm.progress_note(
         # Same id the resume check reads (handle_delegate / _prefetch_ahead call
-        # is_checkpoint_done on _chunk_task_id("validate")): a checkpoint filed
+        # is_checkpoint_done on chunk_task_id("validate")): a checkpoint filed
         # under any other id is invisible, and the real f{fi}_c{ci}_validate task
         # — set to "running" at the top of this handler — would never leave it.
-        fsm._chunk_task_id("validate"),
+        fsm.chunk_task_id("validate"),
         "validate",
         "done",
         output_ref=kb_path,
         content_hash=chunk_hash or None,
     )
-    fsm._transition_success()
+    fsm.transition_success()

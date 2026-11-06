@@ -686,15 +686,15 @@ def test_committed_file_counts_toward_bar_done():
     (len(inbox_files)) but is skipped before PAYLOAD, so it never enters the
     chunk map. It must still count as done, or the bar stalls below 100%.
 
-    _current_file_idx starts past the committed prefix, so the position the FSM
+    file_idx starts past the committed prefix, so the position the FSM
     reports already accounts for it — this pins that, not the old chunk-map count.
     """
     from silica.router.orchestrator import InjectorFSM
 
     with patch("silica.kernel.write.ledger.get_ledger"):
         fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
-    fsm._committed_file_indices = {0}          # file 0 already nucleated → skipped
-    fsm._current_file_idx = fsm._next_uncommitted_file_idx(0)
+    fsm.committed_file_indices = {0}          # file 0 already nucleated → skipped
+    fsm.file_idx = fsm.next_uncommitted_file_idx(0)
 
     pos = fsm._phase_position("recon")
     assert pos["file_idx"] == 1, "committed file not counted as behind us"
@@ -710,9 +710,9 @@ def test_phase_position_names_the_file_being_processed():
 
     with patch("silica.kernel.write.ledger.get_ledger"):
         fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
-    fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}   # only file 0 payloaded
-    fsm._current_chunk_idx = 1
-    fsm._current_file_idx = 1                            # advanced, RECON of file 1
+    fsm.chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}   # only file 0 payloaded
+    fsm.chunk_idx = 1
+    fsm.file_idx = 1                            # advanced, RECON of file 1
 
     pos = fsm._phase_position("recon")
     assert pos["source_file"] == "Inbox/b.md"
@@ -725,21 +725,21 @@ def test_phase_position_names_the_file_being_processed():
 
 def test_phase_position_chunk_total_is_per_file():
     """The run-wide chunk total does not exist until the last file is
-    partitioned (_chunks grows one file-group at a time), so the denominator
+    partitioned (chunks grows one file-group at a time), so the denominator
     shown must be the current file's."""
     from silica.router.orchestrator import InjectorFSM
 
     with patch("silica.kernel.write.ledger.get_ledger"):
         fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
-    fsm._file_chunks = {0: {"chunks": [{}, {}, {}]}, 1: {"chunks": [{}, {}]}}
-    fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1), 2: (0, 2), 3: (1, 0), 4: (1, 1)}
-    fsm._chunks = [{}] * 5
+    fsm.file_chunks = {0: {"chunks": [{}, {}, {}]}, 1: {"chunks": [{}, {}]}}
+    fsm.chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1), 2: (0, 2), 3: (1, 0), 4: (1, 1)}
+    fsm.chunks = [{}] * 5
 
-    fsm._current_file_idx, fsm._current_chunk_idx = 0, 1
+    fsm.file_idx, fsm.chunk_idx = 0, 1
     assert fsm._phase_position("distill")["chunk_total"] == 3
     assert fsm._phase_position("distill")["chunk_idx"] == 1
 
-    fsm._current_file_idx, fsm._current_chunk_idx = 1, 4
+    fsm.file_idx, fsm.chunk_idx = 1, 4
     pos = fsm._phase_position("distill")
     assert (pos["chunk_idx"], pos["chunk_total"]) == (1, 2), "counter must restart per file"
 
@@ -752,8 +752,8 @@ def test_failed_chunk_records_its_phase():
 
     with patch("silica.kernel.write.ledger.get_ledger"):
         fsm = InjectorFSM(inbox_files=["Inbox/a.md"], target_dir="Concepts")
-    fsm._progress_note("f0_c0_lint", "lint", "running")
-    fsm._progress_note("f0_c0_rollback", "rollback", "running")
+    fsm.progress_note("f0_c0_lint", "lint", "running")
+    fsm.progress_note("f0_c0_rollback", "rollback", "running")
     assert fsm._failed_phase_id() == "lint"
 
 

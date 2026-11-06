@@ -29,8 +29,6 @@ from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
 
-    from silica.driver.base import GraphSnapshot
-    from silica.kernel.write.ops import Txn
     from silica.driver.base import NoteRef
     from silica.kernel.write.undo_journal import InverseOp
     from silica.router.prefetch import DistillPrefetcher
@@ -43,22 +41,13 @@ from silica.kernel.write.ops_io import load_ops
 from silica.kernel.base.layout import to_vault_relative
 from silica.router.base_fsm import BaseFSM
 from silica.router.phases import InjectorState
+from silica.router.run_state import ChunkState, RunState
 
 logger = logging.getLogger(__name__)
 
 
 class InjectorFSM(BaseFSM[InjectorState]):
     """Deterministic state machine for the Injector pipeline (S2.3 complete)."""
-
-    # File indices already accounted in the run log — the success and failure
-    # paths both conclude a file, and this keeps them from double-recording.
-    _files_logged: set[int] | None = None
-    # Ops the anneal recovered from the deferred store; read by Coordinator.
-    _annealed_ops: int = 0
-    # The distill lane's read-ahead worker, owned by states.distill.
-    _prefetcher: DistillPrefetcher | None = None
-    # One vault listing per run, memoized for the title checks in states.linking.
-    _run_title_refs: list[NoteRef] | None = None
 
     def __init__(
         self,
@@ -120,12 +109,19 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self.distill_profile = distill_profile
 
         self.state = InjectorState.INIT
-        self.context: dict[str, Any] = {}
+        self.run_state = RunState()
+        # File indices already accounted in the run log — the success and failure
+        # paths both conclude a file, and this keeps them from double-recording.
+        self.files_logged: set[int] = set()
+        # Ops the anneal recovered from the deferred store; read by Coordinator.
+        self.annealed_ops: int = 0
+        # The distill lane's read-ahead worker, owned by states.distill.
+        self.prefetcher: DistillPrefetcher | None = None
+        # One vault listing per run, memoized for the title checks in states.linking.
+        self.run_title_refs: list[NoteRef] | None = None
         self._tmp_files: list[str] = []
-        self._txn: Txn | None = None  # holds the live Txn object for ROLLBACK
-        self._undo_run_id: str | None = None          # journal run for this inject
-        self._run_inverses: list[tuple[str, InverseOp, str | None]] = []  # (path, inverse, post_hash)
-        self._pre_graph: GraphSnapshot | None = None  # S3.2 pre-write graph snapshot
+        self.undo_run_id: str | None = None          # journal run for this inject
+        self.run_inverses: list[tuple[str, InverseOp, str | None]] = []  # (path, inverse, post_hash)
 
         # Optional producer channel to the leashed sub-agent pool.  Set by the
         # Coordinator; when None the FSM runs standalone (legacy behaviour) and
@@ -137,26 +133,26 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self.warning_ledger: Any | None = None
 
         # Per-file content info — populated by run() before _run_loop starts
-        self._file_canonicals: list[str] = []
-        self._file_content_hashes: list[str] = []
-        self._file_valid_from: list[str | None] = []  # source event clock; None → no stamp
-        self._committed_file_indices: set[int] = set()  # indices of already-committed files
+        self.file_canonicals: list[str] = []
+        self.file_content_hashes: list[str] = []
+        self.file_valid_from: list[str | None] = []  # source event clock; None → no stamp
+        self.committed_file_indices: set[int] = set()  # indices of already-committed files
 
         # Iterative chunk processing state fields
-        self._chunks: list[dict] = []
+        self.chunks: list[dict] = []
         # Monotonic union of every chunk's concept stems, for the LINT graph-diff
         # gate. Folded incrementally (only chunks appended since the last LINT) to
         # avoid an O(chunks × concepts) rescan on every chunk's LINT.
-        self._run_concept_stems: set[str] = set()
-        self._run_concept_stems_n: int = 0
-        self._current_chunk_idx: int = 0
+        self.run_concept_stems: set[str] = set()
+        self.run_concept_stems_n: int = 0
+        self.chunk_idx: int = 0
         # Per-file pipeline: setup states (RECON→SALIENCE) run one file at a
         # time; the FSM loops back to RECON for the next file after the current
         # file's chunks are written. Keyed by global inbox-file index so
         # committed-file skips never desync fi from inbox_files.
-        self._current_file_idx: int = 0
-        self._file_chunks: dict[int, dict] = {}  # fi → {"source_file": str, "chunks": [...]}
-        self._chunk_flat_to_fi_ci: dict[int, tuple[int, int]] = {}  # flat_idx → (file_idx, chunk_idx)
+        self.file_idx: int = 0
+        self.file_chunks: dict[int, dict] = {}  # fi → {"source_file": str, "chunks": [...]}
+        self.chunk_flat_to_fi_ci: dict[int, tuple[int, int]] = {}  # flat_idx → (file_idx, chunk_idx)
         self._last_running_phase: str = ""  # phase in flight, for the failure ledger
 
         # Run facade — TaskLedger (immutable plan, built from the phase table) +
@@ -209,18 +205,18 @@ class InjectorFSM(BaseFSM[InjectorState]):
         module, _, function = handler.partition(".")
         getattr(importlib.import_module(f"silica.router.states.{module}"), function)(self)
 
-    def _get_chunks_from_context_if_empty(self) -> None:
-        """Helper to extract chunks from self.context['payload'] if self._chunks is empty."""
-        if not self._chunks and "payload" in self.context:
-            res = self.context["payload"]
+    def chunks_from_payload(self) -> None:
+        """Helper to extract chunks from the run's payload if self.chunks is empty."""
+        res = self.run_state.payload
+        if not self.chunks and res is not None:
             if "chunks" in res:
-                self._chunks = res["chunks"]
+                self.chunks = res["chunks"]
             elif "payload" in res:
-                self._chunks = [res["payload"]]
+                self.chunks = [res["payload"]]
             else:
-                self._chunks = [res]
+                self.chunks = [res]
 
-    def _progress_note(
+    def progress_note(
         self,
         task_id: str,
         capability_name: str,
@@ -267,22 +263,22 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
     def _failed_phase_id(self) -> str:
         """The phase the current chunk died in, or "" if none was recorded."""
-        return getattr(self, "_last_running_phase", "") or ""
+        return self._last_running_phase
 
     def _phase_position(self, capability_name: str) -> dict:
         """Where the run is, for a PhaseEvent. Every event restates all of it.
 
-        file_idx comes from _current_file_idx, NOT from the chunk map: the map
+        file_idx comes from file_idx, NOT from the chunk map: the map
         still points into the previous file during the next file's
         RECON/PAYLOAD (it only gains that file's entries at its own
         PAYLOAD), so deriving it there names the wrong document.
 
         chunk_total is this FILE's chunk count. The run-wide total does not exist
-        until the last file is partitioned — `_chunks` grows one file-group at a
+        until the last file is partitioned — `chunks` grows one file-group at a
         time — so a run-wide denominator would keep moving under the reader.
         """
-        fi = self._current_file_idx
-        _, ci = self._chunk_flat_to_fi_ci.get(self._current_chunk_idx, (fi, 0))
+        fi = self.file_idx
+        _, ci = self.chunk_flat_to_fi_ci.get(self.chunk_idx, (fi, 0))
         scope = next((p.scope for p in InjectorState.phases() if p.id == capability_name), "chunk")
         return {
             "scope": scope,
@@ -291,16 +287,16 @@ class InjectorFSM(BaseFSM[InjectorState]):
             # A file-scope phase runs before this file has chunks; reporting the
             # previous file's chunk index there would rewind the counter.
             "chunk_idx": 0 if scope == "file" else ci,
-            "chunk_total": len(self._file_chunks.get(fi, {}).get("chunks", [])),
+            "chunk_total": len(self.file_chunks.get(fi, {}).get("chunks", [])),
             "source_file": self.inbox_files[fi] if fi < len(self.inbox_files) else "",
         }
 
     @property
-    def _chunk_ctx(self) -> dict:
-        """Per-chunk volatile state namespace — cleared atomically on each chunk boundary."""
-        return self.context.setdefault("chunk", {})
+    def chunk(self) -> ChunkState:
+        """The chunk under the cursor."""
+        return self.run_state.chunk(self.chunk_idx)
 
-    def _save_knowledge_block(self, chunk_idx: int, ops_path: str) -> str:
+    def save_knowledge_block(self, chunk_idx: int, ops_path: str) -> str:
         """Persist validated ops to a stable (non-tmp) path in the run directory.
 
         Returns the persistent path so it can be stored as a task output_ref
@@ -328,7 +324,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
             return False
         return True
 
-    def _defer_ops(
+    def defer_ops(
         self,
         rejected_ops: list[dict],
         rejection_reasons: dict[str, str],
@@ -353,7 +349,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         rejected_ops = kept
         if not rejected_ops:
             return False
-        content_hash = self._current_content_hash
+        content_hash = self.current_content_hash
         if not content_hash:
             logger.warning(
                 "%s: %d op(s) to defer but no content_hash — deferred store skipped.",
@@ -363,19 +359,16 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # Persist the payload the ops were validated against, so the deferred
         # retry re-validates with the same grounding/heading/collision checks
         # instead of the strictly weaker empty-payload pass (finding 2).
-        # Best-effort: an early defer site (SETUP) has no payload yet.
+        # An early defer site (SETUP) has no payload yet.
         payloads: list[dict] = []
-        try:
-            if self._chunks and self._current_chunk_idx < len(self._chunks):
-                payloads = [self._chunks[self._current_chunk_idx]]
-            else:
-                pd = self.context.get("payload", {})
-                if "chunks" in pd:
-                    payloads = list(pd["chunks"])
-                elif "payload" in pd:
-                    payloads = [pd["payload"]]
-        except Exception:
-            payloads = []
+        if self.chunks and self.chunk_idx < len(self.chunks):
+            payloads = [self.chunks[self.chunk_idx]]
+        else:
+            pd = self.run_state.payload or {}
+            if "chunks" in pd:
+                payloads = list(pd["chunks"])
+            elif "payload" in pd:
+                payloads = [pd["payload"]]
         try:
             from silica.kernel.write.deferred import get_deferred_store
             store = get_deferred_store()
@@ -395,7 +388,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 existing = {}
             store.put(
                 content_hash=content_hash,
-                source_path=self._current_source_file,
+                source_path=self.current_source_file,
                 target_dir=self.target_dir,
                 hub=self.hub,
                 rejected_ops=list(existing.get("rejected_ops", [])) + rejected_ops,
@@ -431,7 +424,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
             return
         # Keyed by basename: _log_nucleate_completion and files_summary read it
         # back by the file's name, the label they print.
-        self.context.setdefault("renucleated", {})[basename] = prior
+        self.run_state.renucleated[basename] = prior
         logger.warning(
             "NUCLEATE: %s changed since its last nucleation; %d note(s) derive from "
             "the previous version and stay in place (/revert --source %s removes them)",
@@ -444,14 +437,14 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
         # Compute per-file canonicals and content hashes; track committed status
         from silica.kernel.write.provenance import source_event_date
-        self._file_canonicals = []
-        self._file_content_hashes = []
-        self._file_valid_from = []
+        self.file_canonicals = []
+        self.file_content_hashes = []
+        self.file_valid_from = []
         # One is_committed() lookup per file: accumulate the committed indices here
         # and derive all_committed from the set (was a second pass of lookups).
         for i, inbox_file in enumerate(self.inbox_files):
             canonical = self._source_canonical_for(inbox_file)
-            self._file_canonicals.append(canonical)
+            self.file_canonicals.append(canonical)
             try:
                 content_bytes = DRIVER.read_note(inbox_file).content.encode("utf-8")
                 content_hash = hashlib.sha256(content_bytes).hexdigest()
@@ -462,37 +455,37 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 except OSError:
                     content_bytes = b""  # never carry the previous file's bytes forward
                     content_hash = ""
-            self._file_content_hashes.append(content_hash)
+            self.file_content_hashes.append(content_hash)
             self._note_renucleation(inbox_file, content_hash)
             # Resolve the event clock once per file, off the bytes already read.
             # None (undated source) stamps nothing: the run date is the ingest
             # clock, and stamping it as valid_from would feed note_clock a fake
             # freshness that defeats suppress_contest's recency veto.
-            self._file_valid_from.append(
+            self.file_valid_from.append(
                 source_event_date(
                     content_bytes.decode("utf-8", "replace"),
-                    getattr(self, "seen_override", None),
+                    self.seen_override,
                 )
             )
             if ledger.is_committed(canonical, content_hash=content_hash):
-                self._committed_file_indices.add(i)
+                self.committed_file_indices.add(i)
 
-        all_committed = len(self._committed_file_indices) == len(self.inbox_files)
+        all_committed = len(self.committed_file_indices) == len(self.inbox_files)
 
         # Compat keys for first file (used by single-file code paths and RECON)
-        self.context["source_canonical"] = self._file_canonicals[0] if self._file_canonicals else ""
-        self.context["source_content_hash"] = self._file_content_hashes[0] if self._file_content_hashes else ""
+        self.run_state.source_canonical = self.file_canonicals[0] if self.file_canonicals else ""
+        self.run_state.source_content_hash = self.file_content_hashes[0] if self.file_content_hashes else ""
 
         if all_committed:
-            self.context["final_status"] = "already_nucleated"
-            return self.context
+            self.run_state.final_status = "already_nucleated"
+            return self.run_state.result()
 
         # Only open a journal run when the pipeline will actually execute writes.
         # The ledger's run id travels with the journal row: it is the join
         # `/revert --source` needs, and the journal's own uuid is a different
         # keyspace that the ledger never sees.
-        self._undo_run_id = open_run(
-            self.inbox_file, ledger_run_id=getattr(getattr(self, "progress", None), "run_id", None))
+        self.undo_run_id = open_run(
+            self.inbox_file, ledger_run_id=self.progress.run_id)
 
         # Fix A: repair index drift before this run reads the indexes — crash
         # drift and out-of-band creates/edits/deletes (kernel/recall/sync.py).
@@ -502,15 +495,16 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
         # Per-file pipeline: start at the first uncommitted file (committed
         # files are skipped entirely — no recon/embedding spent on them).
-        self._current_file_idx = self._next_uncommitted_file_idx(0)
+        self.file_idx = self.next_uncommitted_file_idx(0)
 
         self.state = InjectorState.RECON
-        return self._run_loop()
+        self._run_loop()
+        return self.run_state.result()
 
-    def _run_loop(self) -> dict[str, Any]:
+    def _run_loop(self) -> None:
         cancelled = False
         try:
-            return super()._run_loop()
+            super()._run_loop()
         except KeyboardInterrupt:
             # Ctrl+C means "stop writing to my vault", so the finally below must
             # stay pure cleanup. _boundary_anneal is not cleanup: it sweeps the
@@ -522,8 +516,8 @@ class InjectorFSM(BaseFSM[InjectorState]):
             self._mark_interrupted()
             raise
         finally:
-            if self._prefetcher is not None:
-                self._prefetcher.shutdown()
+            if self.prefetcher is not None:
+                self.prefetcher.shutdown()
             if not cancelled:
                 self._boundary_anneal()
             self._flush_indexes()
@@ -545,6 +539,9 @@ class InjectorFSM(BaseFSM[InjectorState]):
             # landed notes keep their forward refs, as before this marker.
             logger.debug("interrupt marker not written: %s", exc)
 
+    def _record_error(self, message: str) -> None:
+        self.run_state.error = message
+
     def _on_step_error(self, exc: Exception) -> bool:
         """Best-effort phases skip to the next one; per-chunk phases route to
         ROLLBACK without the base's live-txn guard (WRITE can fail before the
@@ -554,10 +551,10 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 "FSM: best-effort phase %s failed (%s) — skipping to next phase",
                 self.state.name, exc,
             )
-            self._transition_success()
+            self.transition_success()
             return True
         if self.state.value.on_error == "rollback":
-            self._chunk_ctx["abort_reason"] = str(exc)
+            self.chunk.abort_reason = str(exc)
             self.state = self._rollback_state
             return True
         return False
@@ -587,12 +584,12 @@ class InjectorFSM(BaseFSM[InjectorState]):
             # entry (else /revert undoes the anneal and leaves the nucleation)
             # and carry the run's ledger id (else the dangling-link sweep, which
             # matches on progress.run_id, cannot see them).
-            with in_run(undo=self._undo_run_id, ledger=getattr(self.progress, "run_id", None)):
+            with in_run(undo=self.undo_run_id, ledger=self.progress.run_id):
                 res = sweep_deferred(steer=False)
             # Read back by the coordinator's coverage summary: the recovery was
             # info-level only, so a run that rescued a batch of ops said nothing
             # about it to the user who asked for the nucleation.
-            self._annealed_ops = int(res.get("written") or 0)
+            self.annealed_ops = int(res.get("written") or 0)
             if res.get("written"):
                 logger.info("boundary anneal: recovered %d deferred op(s)", res.get("written"))
                 self._lift_recovered_partial()
@@ -619,16 +616,16 @@ class InjectorFSM(BaseFSM[InjectorState]):
         recorded failed_chunks and keeps its verdict, and a file whose bundle
         survives the anneal really is partial.
         """
-        if not self.context.get("has_partial_failure") or self.context.get("failed_chunks"):
+        if not self.run_state.has_partial_failure or self.run_state.failed_chunks:
             return
         from silica.kernel.write.deferred import get_deferred_store
 
         store = get_deferred_store()
-        if any(store.get(h) for h in (self._file_content_hashes or []) if h):
+        if any(store.get(h) for h in (self.file_content_hashes or []) if h):
             return
-        self.context["has_partial_failure"] = False
-        self.context["final_status"] = (
-            "Success" if self.context.get("run_had_ops") else "no_ops"
+        self.run_state.has_partial_failure = False
+        self.run_state.final_status = (
+            "Success" if self.run_state.run_had_ops else "no_ops"
         )
 
     def _flush_indexes(self) -> None:
@@ -641,30 +638,30 @@ class InjectorFSM(BaseFSM[InjectorState]):
         never rewrites the index. Runs in the _run_loop finally so it fires on
         success, error, and Ctrl+C; a hard kill is repaired by the index sweep.
         """
-        ctx = getattr(self, "context", {})
-        if ctx.get("_embed_dirty"):
+        rs = self.run_state
+        if rs.embed_dirty:
             try:
                 from silica.kernel.recall.embed import get_store
                 get_store().save()
             except Exception as e:
                 logger.debug("flush: embed index save skipped (%s)", e)
-        if ctx.get("_cooccur_dirty"):
+        if rs.cooccur_dirty:
             try:
                 from silica.kernel.recall.cooccurrence import get_cooccur_store
                 get_cooccur_store().save()
             except Exception as e:
                 logger.debug("flush: cooccur index save skipped (%s)", e)
-        if ctx.get("_lexical_dirty"):
+        if rs.lexical_dirty:
             try:
                 from silica.kernel.recall.lexical import get_lexical_store
                 get_lexical_store().save()
             except Exception as e:
                 logger.debug("flush: lexical index save skipped (%s)", e)
 
-    def _next_uncommitted_file_idx(self, start: int) -> int:
+    def next_uncommitted_file_idx(self, start: int) -> int:
         """Return the first file index >= start not already committed in the ledger."""
         idx = start
-        committed = self._committed_file_indices  # always set in __init__
+        committed = self.committed_file_indices  # always set in __init__
         while idx < len(self.inbox_files) and idx in committed:
             logger.info("Skipping already-committed file %d: %s", idx, self.inbox_files[idx])
             idx += 1
@@ -676,10 +673,10 @@ class InjectorFSM(BaseFSM[InjectorState]):
         Returns True when a next file exists (state set to RECON), False when
         none remain (caller concludes the run).
         """
-        next_fi = self._next_uncommitted_file_idx(self._current_file_idx + 1)
+        next_fi = self.next_uncommitted_file_idx(self.file_idx + 1)
         if next_fi >= len(self.inbox_files):
             return False
-        self._current_file_idx = next_fi
+        self.file_idx = next_fi
         logger.info(
             "Advancing to file %d/%d: %s",
             next_fi + 1, len(self.inbox_files), self.inbox_files[next_fi],
@@ -689,23 +686,20 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
     def _on_pipeline_end(self) -> None:
         """Check if there are more chunks to process or if the queue is empty."""
-        # Clear the per-chunk volatile namespace atomically before advancing
-        self.context.pop("chunk", None)
-        self._txn = None
-        self._pre_graph = None
-        self._get_chunks_from_context_if_empty()
-        next_idx = self._next_uncommitted_chunk_idx(self._current_chunk_idx + 1)
+        self.run_state.chunks.pop(self.chunk_idx, None)
+        self.chunks_from_payload()
+        next_idx = self._next_uncommitted_chunk_idx(self.chunk_idx + 1)
         # A warm-attached next file's chunks sit in the flat list before its
         # RECON ever ran: a chunk belonging to a later file means THIS file is
         # done, and the per-file machinery must advance through RECON (the
         # warmed states fast-path via their guards; the cursor is positioned
         # by the warmed PAYLOAD).
-        if next_idx < len(self._chunks) and (
-            self._chunk_flat_to_fi_ci.get(next_idx, (self._current_file_idx, 0))[0]
-            == self._current_file_idx
+        if next_idx < len(self.chunks) and (
+            self.chunk_flat_to_fi_ci.get(next_idx, (self.file_idx, 0))[0]
+            == self.file_idx
         ):
-            self._current_chunk_idx = next_idx
-            logger.info("✔ Batch completed successfully. Advancing to batch %d", self._current_chunk_idx + 1)
+            self.chunk_idx = next_idx
+            logger.info("✔ Batch completed successfully. Advancing to batch %d", self.chunk_idx + 1)
             self.state = InjectorState.COLLISION
         elif self._advance_file_or_done():
             pass  # routed to RECON; the next phase event carries the new position
@@ -725,58 +719,51 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 pass
         return os.path.splitext(os.path.basename(inbox_file))[0].lower()
 
-    def _chunk_task_id(self, cap: str, idx: int | None = None) -> str:
+    def chunk_task_id(self, cap: str, idx: int | None = None) -> str:
         """Task ID for a chunk (default: current) using the f{fi}_c{ci}_{cap} scheme."""
-        flat = self._current_chunk_idx if idx is None else idx
-        fi, ci = self._chunk_flat_to_fi_ci.get(flat, (0, flat))
+        flat = self.chunk_idx if idx is None else idx
+        fi, ci = self.chunk_flat_to_fi_ci.get(flat, (0, flat))
         return f"f{fi}_c{ci}_{cap}"
 
-    def _contain_chunk_failure(self) -> None:
-        """Contain a per-chunk failure: mark failed tasks, reset context, advance.
+    def contain_chunk_failure(self) -> None:
+        """Contain a per-chunk failure: mark failed tasks, drop its state, advance.
 
         Called after rollback completes (or as a no-op when no txn existed).
         Preserves all previously committed chunks — only the failing chunk is
         affected.  If more chunks remain, the FSM restarts from COLLISION;
         otherwise it concludes with final_status="partial".
         """
-        idx = self._current_chunk_idx
-        fi, ci = self._chunk_flat_to_fi_ci.get(idx, (0, idx))
-        # Read abort_reason before clearing the chunk namespace
-        abort_reason = self._chunk_ctx.get("abort_reason", "chunk failure")
+        idx = self.chunk_idx
+        fi, ci = self.chunk_flat_to_fi_ci.get(idx, (0, idx))
+        # Read abort_reason before the chunk's state goes
+        abort_reason = self.chunk.abort_reason
+        if abort_reason is None:
+            abort_reason = "chunk failure"
 
         # Mark all f{fi}_c{ci}_* tasks that are not already done as failed
         prefix = f"f{fi}_c{ci}_"
         for task in self.progress.tasks:
             if task.id.startswith(prefix) and task.status not in ("done",):
-                try:
-                    self.progress.mark_failed(task.id, error=abort_reason[:200])
-                except Exception:
-                    pass
+                self.progress.mark_failed(task.id, error=abort_reason[:200])
         try:
             self.progress.save()
-        except Exception:
-            pass
+        except Exception as _e:
+            # The ledger is the run's shadow: a failed save costs the record of
+            # this failure, and containing the chunk still has to happen.
+            logger.debug("containment: progress save failed: %s", _e)
 
-        # Clear the per-chunk namespace atomically (prevents state leakage to next chunk).
-        # idx-keyed context keys (chunk_{idx}_*) are already safe — each chunk uses
-        # its own idx — so only the chunk namespace dict needs explicit teardown.
-        self.context.pop("chunk", None)
-        self._txn = None
-        self._pre_graph = None
-        # WRITE appends this chunk's op inverses to _run_inverses; CLEANUP clears it.
+        self.run_state.chunks.pop(self.chunk_idx, None)
+        # WRITE appends this chunk's op inverses to run_inverses; CLEANUP clears it.
         # A rolled-back chunk never reaches CLEANUP, so drop its now-stale inverses
         # here or the next chunk's CLEANUP journals them (corrupting /revert replay).
-        self._run_inverses.clear()
+        self.run_inverses.clear()
 
         # Record that at least one chunk failed (used by cleanup to set "partial").
-        # failed_chunks is the per-chunk ledger: context["error"] is last-write-wins,
-        # which once collapsed 6 batch failures into "batch 5 failed" and fed a
-        # false "5/6 ok" success report downstream.
-        self.context["has_partial_failure"] = True
+        self.run_state.has_partial_failure = True
         # `phase` is recorded structurally, not left to be parsed back out of the
         # error prose: a frontend replaying a stored run (no live phase stream)
         # can then still say WHERE each chunk died, not just that it did.
-        self.context.setdefault("failed_chunks", []).append(
+        self.run_state.failed_chunks.append(
             {"chunk": f"f{fi}_c{ci}", "phase": self._failed_phase_id(),
              "error": abort_reason[:200]}
         )
@@ -786,7 +773,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # real notes) would otherwise get no log.md line / files_summary entry.
         # Emit it here on the file boundary; _log_nucleate_completion is guarded
         # against double-recording the success path.
-        file_group = self._file_chunks.get(fi, {})
+        file_group = self.file_chunks.get(fi, {})
         n_chunks_in_file = len(file_group.get("chunks", []))
         if ci + 1 >= n_chunks_in_file:
             try:
@@ -798,18 +785,18 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 logger.debug("containment: per-file log skipped (non-fatal): %s", _le)
 
         # Advance to next uncommitted chunk, or conclude the run as partial
-        self._get_chunks_from_context_if_empty()
-        next_idx = self._next_uncommitted_chunk_idx(self._current_chunk_idx + 1)
+        self.chunks_from_payload()
+        next_idx = self._next_uncommitted_chunk_idx(self.chunk_idx + 1)
         # Same warm-attach guard as _on_pipeline_end: a next chunk belonging
         # to a later file must advance through RECON, not jump straight in.
-        if next_idx < len(self._chunks) and (
-            self._chunk_flat_to_fi_ci.get(next_idx, (self._current_file_idx, 0))[0]
-            == self._current_file_idx
+        if next_idx < len(self.chunks) and (
+            self.chunk_flat_to_fi_ci.get(next_idx, (self.file_idx, 0))[0]
+            == self.file_idx
         ):
-            self._current_chunk_idx = next_idx
+            self.chunk_idx = next_idx
             logger.info(
                 "Chunk f%d_c%d failed — advancing to chunk %d of %d.",
-                fi, ci, self._current_chunk_idx + 1, len(self._chunks),
+                fi, ci, self.chunk_idx + 1, len(self.chunks),
             )
             self.state = InjectorState.COLLISION
         elif self._advance_file_or_done():
@@ -821,62 +808,62 @@ class InjectorFSM(BaseFSM[InjectorState]):
             # "partial" implies something committed; with zero commits the honest
             # verdict is "failed" (the old unconditional "partial" helped sell a
             # fully-failed run as a mostly-successful one).
-            self.context["final_status"] = (
-                "partial" if self.context.get("committed_chunks") else "failed"
+            self.run_state.final_status = (
+                "partial" if self.run_state.committed_chunks else "failed"
             )
             self.state = InjectorState.DONE
 
     def _next_uncommitted_chunk_idx(self, start: int) -> int:
         """Return the first chunk index >= start whose file is not already committed."""
         idx = start
-        committed = self._committed_file_indices  # always set in __init__
-        while idx < len(self._chunks):
-            fi, _ = self._chunk_flat_to_fi_ci.get(idx, (0, 0))
+        committed = self.committed_file_indices  # always set in __init__
+        while idx < len(self.chunks):
+            fi, _ = self.chunk_flat_to_fi_ci.get(idx, (0, 0))
             if fi not in committed:
                 return idx
             # defensive. Committed files are pruned before PAYLOAD (the sole
-            # writer of _chunks), so their chunks never enter this list and this skip
+            # writer of chunks), so their chunks never enter this list and this skip
             # rarely fires — kept as a guard against that invariant drifting.
             logger.info("Skipping already-committed file %d chunk %d", fi, idx)
             idx += 1
         return idx
 
     @property
-    def _current_source_file(self) -> str:
+    def current_source_file(self) -> str:
         """Vault-relative path of the inbox file for the current chunk."""
-        fi, _ = self._chunk_flat_to_fi_ci.get(self._current_chunk_idx, (0, 0))
-        if fi in self._file_chunks:
-            return self._file_chunks[fi]["source_file"]
+        fi, _ = self.chunk_flat_to_fi_ci.get(self.chunk_idx, (0, 0))
+        if fi in self.file_chunks:
+            return self.file_chunks[fi]["source_file"]
         return self.inbox_file
 
     @property
-    def _current_content_hash(self) -> str:
+    def current_content_hash(self) -> str:
         """Content hash for the inbox file of the current chunk."""
-        fi, _ = self._chunk_flat_to_fi_ci.get(self._current_chunk_idx, (0, 0))
-        if self._file_content_hashes and fi < len(self._file_content_hashes):
-            return self._file_content_hashes[fi]
-        return self.context.get("source_content_hash", "")
+        fi, _ = self.chunk_flat_to_fi_ci.get(self.chunk_idx, (0, 0))
+        if self.file_content_hashes and fi < len(self.file_content_hashes):
+            return self.file_content_hashes[fi]
+        return self.run_state.source_content_hash
 
     # ------------------------------------------------------------------
     # Ledger helpers (C5)
     # ------------------------------------------------------------------
 
-    def _write_ledger_for_file(self, fi: int, status: str) -> None:
+    def write_ledger_for_file(self, fi: int, status: str) -> None:
         """Record this chunk's ops into the ledger, attributed to file fi."""
         try:
             from silica.kernel.write.ledger import get_ledger
             ledger = get_ledger()
-            txn_id = self._chunk_ctx.get("txn_id", "unknown")
+            txn_id = self.chunk.txn_id or "unknown"
 
-            # Use per-file canonical/hash when available; fall back to context
-            if fi < len(self._file_canonicals):
-                source_canonical = self._file_canonicals[fi]
-                content_hash = self._file_content_hashes[fi] if fi < len(self._file_content_hashes) else None
+            # Use per-file canonical/hash when available; fall back to the run's
+            if fi < len(self.file_canonicals):
+                source_canonical = self.file_canonicals[fi]
+                content_hash = self.file_content_hashes[fi] if fi < len(self.file_content_hashes) else None
             else:
-                source_canonical = self.context.get("source_canonical", "")
-                content_hash = self.context.get("source_content_hash")
+                source_canonical = self.run_state.source_canonical
+                content_hash = self.run_state.source_content_hash
 
-            ops = load_ops(self._chunk_ctx["ops_path"])
+            ops = load_ops(self.chunk.ops_path)
             for op in ops:
                 if op.op == OpType.skip:
                     continue
@@ -891,7 +878,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         except Exception as e:
             logger.warning("Failed to write ledger for file %d: %s", fi, e)
 
-    def _write_ledger_rollback(self, txn_id: str) -> None:
+    def write_ledger_rollback(self, txn_id: str) -> None:
         try:
             from silica.kernel.write.ledger import get_ledger
             get_ledger().mark_rolled_back(txn_id)

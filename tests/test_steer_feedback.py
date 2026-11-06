@@ -108,10 +108,10 @@ _VALIDATED_ALPHA = {"op": "write", "heading": "Alpha", "path": "TargetDir/Alpha.
 
 def _fsm_at_validate(parsed=None):
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._chunks = [_CHUNK]
-    fsm._current_chunk_idx = 0
-    fsm.context.setdefault("chunk", {})["sanitized"] = {"parsed": parsed if parsed is not None else []}
-    fsm.context["source_content_hash"] = ""  # deferred store: skipped
+    fsm.chunks = [_CHUNK]
+    fsm.chunk_idx = 0
+    fsm.chunk.sanitized = {"parsed": parsed if parsed is not None else []}
+    fsm.run_state.source_content_hash = ""  # deferred store: skipped
     fsm.state = InjectorState.VALIDATE
     return fsm
 
@@ -130,15 +130,15 @@ def test_partial_rejection_steers_only_rejected_concepts(mock_validate):
     fsm.step()
 
     assert fsm.state == InjectorState.DELEGATE
-    assert fsm.context["chunk_0_steer_attempts"] == 1
+    assert fsm.run_state.chunk(0).steer_attempts == 1
     # retry payload holds ONLY the rejected concept
-    retry = fsm.context["chunk_0_retry_payload"]
+    retry = fsm.run_state.chunk(0).retry_payload
     names = [c["name"] for b in retry["batches"] for c in b["concepts"]]
     assert names == ["Beta"]
     # validated ops carried forward for the merge on the next VALIDATE pass
-    assert fsm.context["chunk_0_carry_ops"] == [_VALIDATED_ALPHA]
+    assert fsm.run_state.chunk(0).carry_ops == [_VALIDATED_ALPHA]
     # structured feedback: header, verdict, accepted list
-    steer = fsm.context["chunk_0_steer_context"]
+    steer = fsm.run_state.chunk(0).steer_context
     assert steer.startswith("## STEERING CORRECTION")
     assert "Beta" in steer and "not in target folder" in steer
     assert "TargetDir/Alpha.md" in steer
@@ -162,8 +162,8 @@ def test_partial_rejection_specialized_lanes_do_not_steer(mock_validate):
     fsm.step()
 
     assert fsm.state == InjectorState.SNAPSHOT
-    assert "chunk_0_retry_payload" not in fsm.context
-    assert fsm.context.get("chunk_0_steer_attempts", 0) == 0
+    assert fsm.run_state.chunk(0).retry_payload is None
+    assert fsm.run_state.chunk(0).steer_attempts == 0
 
 
 @patch("silica.router.states.distill.validate_ops")
@@ -175,11 +175,11 @@ def test_partial_steer_respects_budget(mock_validate):
         "rejected_ops": [_rejection(heading="Beta")],
     }
     fsm = _fsm_at_validate()
-    fsm.context["chunk_0_steer_attempts"] = 2  # budget already exhausted
+    fsm.run_state.chunk(0).steer_attempts = 2  # budget already exhausted
     fsm.step()
 
     assert fsm.state == InjectorState.SNAPSHOT
-    assert "chunk_0_retry_payload" not in fsm.context
+    assert fsm.run_state.chunk(0).retry_payload is None
 
 
 @patch("silica.router.states.distill.validate_ops")
@@ -192,13 +192,13 @@ def test_carry_ops_merge_into_next_validate_pass(mock_validate):
     retry_op = {"op": "write", "heading": "Beta", "path": "TargetDir/Beta.md",
                 "source_basename": "test.md", "snippet": "beta body"}
     fsm = _fsm_at_validate(parsed={"updates": [retry_op]})
-    fsm.context["chunk_0_carry_ops"] = [_VALIDATED_ALPHA]
+    fsm.run_state.chunk(0).carry_ops = [_VALIDATED_ALPHA]
     fsm.step()
 
     headings = [o.heading for o in mock_validate.call_args.args[0]]
     # carry ops re-enter the gate FIRST (dedup keeps them ahead of re-emits)
     assert headings == ["Alpha", "Beta"]
-    assert "chunk_0_carry_ops" not in fsm.context
+    assert fsm.run_state.chunk(0).carry_ops == []
 
 
 # ---------------------------------------------------------------------------
@@ -209,21 +209,21 @@ def test_carry_ops_merge_into_next_validate_pass(mock_validate):
 def test_delegate_consumes_retry_payload_and_keeps_hash(mock_distiller):
     mock_distiller.return_value = {"updates": []}
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._chunks = [_CHUNK]
-    fsm._current_chunk_idx = 0
+    fsm.chunks = [_CHUNK]
+    fsm.chunk_idx = 0
     retry = {"schema_version": 1, "batches": [{
         "inbox_file": "Inbox/test.md",
         "concepts": [{"name": "Beta", "inbox_excerpt": "beta facts"}],
     }]}
-    fsm.context["chunk_0_retry_payload"] = retry
-    fsm.context["chunk_0_hash"] = "hash-from-first-pass"
-    fsm.context["chunk_0_steer_context"] = "## STEERING CORRECTION (attempt 1/2)\n..."
+    fsm.run_state.chunk(0).retry_payload = retry
+    fsm.run_state.chunk(0).hash = "hash-from-first-pass"
+    fsm.run_state.chunk(0).steer_context = "## STEERING CORRECTION (attempt 1/2)\n..."
     fsm.state = InjectorState.DELEGATE
     fsm.step()
 
     assert mock_distiller.call_args.kwargs["payload"] == retry
     assert mock_distiller.call_args.kwargs["steer_context"].startswith("## STEERING CORRECTION")
-    assert "chunk_0_retry_payload" not in fsm.context
+    assert fsm.run_state.chunk(0).retry_payload is None
     # knowledge-block checkpoint stays keyed to the original input hash
-    assert fsm.context["chunk_0_hash"] == "hash-from-first-pass"
+    assert fsm.run_state.chunk(0).hash == "hash-from-first-pass"
     assert fsm.state == InjectorState.SANITIZE

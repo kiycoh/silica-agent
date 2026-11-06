@@ -13,13 +13,17 @@ from pathlib import Path
 from silica.kernel.progress import RunManifestEntry
 from silica.kernel.base.layout import DEFAULT_LOG_FILENAME
 from silica.router.states import finalize
+from silica.router.run_state import RunState
 
 
 def _fake_fsm(entries, run_id, content_hashes):
     return types.SimpleNamespace(
         manifest=types.SimpleNamespace(entries=entries),
         progress=types.SimpleNamespace(run_id=run_id),
-        _file_content_hashes=content_hashes,
+        file_content_hashes=content_hashes,
+        run_state=RunState(),
+        files_logged=set(),
+        warning_ledger=None,
     )
 
 
@@ -145,11 +149,11 @@ def test_files_summary_counts_extractive_rejections(tmp_vault):
         },
     )
     fsm = _fake_fsm([], run_id="cafecafe0000", content_hashes=["hash0"])
-    fsm.context = {}
+    fsm.run_state = RunState()
 
     finalize._log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
 
-    [entry] = fsm.context["files_summary"]
+    [entry] = fsm.run_state.files_summary
     assert entry["deferred"] == 2
     assert entry["extractive_rejected"] == 1
 
@@ -166,10 +170,10 @@ def test_files_summary_omits_extractive_key_when_none(tmp_vault):
         rejection_reasons={"Dir/X.md": "snippet too short (10 < 80 chars)"},
     )
     fsm = _fake_fsm([], run_id="cafecafe0001", content_hashes=["hash0"])
-    fsm.context = {}
+    fsm.run_state = RunState()
 
     finalize._log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
 
-    [entry] = fsm.context["files_summary"]
+    [entry] = fsm.run_state.files_summary
     assert entry["deferred"] == 1
     assert "extractive_rejected" not in entry

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
+from typing import Any, TypedDict
 
 from silica.driver import DRIVER
 from silica.driver.base import NoteRef, GraphSnapshot
@@ -53,6 +53,25 @@ class OrganizerState(PipelineState):
 MOVE_FAILURE_MAX = 0.10
 
 
+class OrganizeResult(TypedDict, total=False):
+    """The run's state and silica_organize's reply in one: the tool returns this
+    dict as it stands, so a key set here reaches the model, in the order a run
+    set it. That is why it stays a dict and the injector's state does not."""
+    note_paths: list[str]
+    classifications: list[Any]
+    move_ops: list[Any]
+    move_results: list[dict]
+    move_failures: list[dict]
+    plan_summary: dict
+    snapshot: dict
+    txn_id: str
+    abort_reason: str
+    error: str
+    final_status: str
+    # Unread past CLASSIFY; kept because the reply has always carried it.
+    _cooccur_store: Any
+
+
 class OrganizerFSM(BaseFSM[OrganizerState]):
     """Deterministic state machine for the /organize pipeline."""
 
@@ -71,7 +90,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         self.move_uncategorized = move_uncategorized
 
         self.state = OrganizerState.INIT
-        self.context: dict[str, Any] = {
+        self.context: OrganizeResult = {
             "note_paths": [],
             "classifications": [],
             "move_ops": [],
@@ -80,7 +99,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         self._tmp_files: list[str] = []
         self._txn: Any = None  # Txn | None at runtime
         self._pre_graph: GraphSnapshot | None = None
-        self._undo_run_id: str | None = None
+        self.undo_run_id: str | None = None
 
         # BaseFSM contract
         self._phase_label = "Organizer"
@@ -92,6 +111,9 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             state: getattr(self, state.value.handler)
             for state in OrganizerState if state.value.handler
         }
+
+    def _record_error(self, message: str) -> None:
+        self.context["error"] = message
 
     def _on_step_error(self, exc: Exception) -> bool:
         """A failure with moves on record rolls them back; before any, the run
@@ -115,7 +137,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
                     f"Failed: {self.context.get('error', 'unknown error')}"
                 )
 
-        return self.context
+        return dict(self.context)
 
     # ------------------------------------------------------------------
     # State Handlers
@@ -144,7 +166,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
         logger.info("SCAN: found %d notes in scope '%s'", len(note_paths), self.scope or "(vault-wide)")
         self.context["note_paths"] = note_paths
-        self._transition_success()
+        self.transition_success()
 
     def _handle_classify(self) -> None:
         """L1 deterministic classification via co-occurrence stems."""
@@ -154,7 +176,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         if not note_paths:
             logger.info("CLASSIFY: no notes to classify — skipping")
             self.context["classifications"] = []
-            self._transition_success()
+            self.transition_success()
             return
 
         # Load co-occurrence store once and pass it in to avoid repeated disk reads
@@ -184,7 +206,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         )
         self.context["classifications"] = classifications
         self.context["_cooccur_store"] = cooccur_store   # pass through for ARBITRATE
-        self._transition_success()
+        self.transition_success()
 
     def _handle_arbitrate(self) -> None:
         """L2 LLM arbiter for notes in the ambiguous confidence band."""
@@ -199,7 +221,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
         if not self.llm_arbiter:
             logger.info("ARBITRATE: llm_arbiter=False — skipping")
-            self._transition_success()
+            self.transition_success()
             return
 
         ambiguous: list[tuple[str, str, list]] = [
@@ -210,7 +232,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
         if not ambiguous:
             logger.info("ARBITRATE: no ambiguous notes — skipping LLM call")
-            self._transition_success()
+            self.transition_success()
             return
 
         logger.info("ARBITRATE: sending %d ambiguous notes to LLM", len(ambiguous))
@@ -233,7 +255,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         except Exception as exc:
             # ARBITRATE is best-effort — log and continue with L1 results
             logger.warning("ARBITRATE: LLM arbiter failed (%s) — using L1 results", exc)
-            self._transition_success()
+            self.transition_success()
             return
 
         # Patch the classifications in-place
@@ -260,7 +282,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
         logger.info("ARBITRATE: %d notes reclassified by LLM", len(llm_choices))
         self.context["classifications"] = classifications
-        self._transition_success()
+        self.transition_success()
 
     def _handle_plan(self) -> None:
         """Generate MoveOp list from classifications."""
@@ -323,7 +345,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             self.state = OrganizerState.DONE
             return
 
-        self._transition_success()
+        self.transition_success()
 
     def _handle_snapshot(self) -> None:
         """Snapshot pre-move state for rollback (C3 strategy)."""
@@ -331,7 +353,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         if not move_ops:
             # Nothing to snapshot
             self.context["snapshot"] = {}
-            self._transition_success()
+            self.transition_success()
             return
 
         from silica.kernel.write.ops import InverseOp, InverseOpKind, Txn
@@ -339,7 +361,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
         # Open an undo-journal run so `/revert` can move these notes back later.
         # Only reached in apply mode with real moves (PLAN returns early on dry_run).
-        self._undo_run_id = gate.open_run(f"organize:{self.scope or 'vault'}")
+        self.undo_run_id = gate.open_run(f"organize:{self.scope or 'vault'}")
 
         # For move ops, the inverse is moving back (from_path → to_path becomes to_path → from_path)
         # We also pre-capture the pre-move graph snapshot for the lint gate.
@@ -370,14 +392,14 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         except Exception as exc:
             logger.warning("SNAPSHOT: pre-graph snapshot failed (%s) — lint gate will skip", exc)
 
-        self._transition_success()
+        self.transition_success()
 
     def _handle_move(self) -> None:
         """Execute moves via DRIVER.move() — graph-safe (wikilinks updated automatically)."""
         move_ops = self.context["move_ops"]
         if not move_ops:
             self.context["move_results"] = []
-            self._transition_success()
+            self.transition_success()
             return
 
         results = []
@@ -406,13 +428,13 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             "MOVE: completed — %d moved, %d failed",
             len(results), len(failures),
         )
-        self._transition_success()
+        self.transition_success()
 
     def _handle_lint(self) -> None:
         """Graph regression gate: check for unplanned orphans after moves."""
         if self._pre_graph is None:
             logger.info("LINT: no pre-graph snapshot — skipping graph regression")
-            self._transition_success()
+            self.transition_success()
             return
 
         move_ops = self.context["move_ops"]
@@ -425,7 +447,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             post_graph = DRIVER.graph_snapshot(refs_after)
         except Exception as exc:
             logger.warning("LINT: post-graph snapshot failed (%s) — skipping gate", exc)
-            self._transition_success()
+            self.transition_success()
             return
 
         try:
@@ -449,14 +471,14 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         except Exception as exc:
             logger.error("LINT: graph_diff check failed (%s) — treating as non-blocking", exc)
 
-        self._transition_success()
+        self.transition_success()
 
     def _handle_cleanup(self) -> None:
         """Mark run as committed in the ledger and journal move inverses for /revert."""
         self.context["final_status"] = "Success"
         self._write_ledger("committed")
         self._record_undo_inverses()
-        self._transition_success()
+        self.transition_success()
 
     def _record_undo_inverses(self) -> None:
         """Persist each committed move's inverse so `/revert <run>` can move it back.
@@ -464,13 +486,13 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         Only successful moves are journalled — a move that failed (or was rolled
         back before reaching CLEANUP) never lands here.
         """
-        if not self._undo_run_id:
+        if not self.undo_run_id:
             return
         from silica.kernel.write.ops import InverseOp, InverseOpKind
 
         for res in self.context.get("move_results", []):
             if res.get("success"):
-                gate.record_landed(self._undo_run_id, InverseOp(
+                gate.record_landed(self.undo_run_id, InverseOp(
                     kind=InverseOpKind.move_back, path=res["from"], to_path=res["to"]))
 
     def _handle_rollback(self) -> None:
@@ -492,7 +514,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         self.context["final_status"] = (
             f"Rolled Back: {self.context.get('abort_reason', 'unknown reason')}"
         )
-        self._transition_success()
+        self.transition_success()
 
     # ------------------------------------------------------------------
     # Ledger helpers

@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 from tests.fsm_patches import patch_run
 
 from silica.driver.fs_backend import ObsidianFSBackend
+from silica.router.run_state import ChunkState, RunState
 
 
 def _ref(name):
@@ -74,23 +75,19 @@ class _FakeFSM:
     """Minimal stand-in for InjectorFSM covering only what handle_autolink touches."""
 
     def __init__(self, ops_path):
-        self._current_chunk_idx = 0
-        self.context: dict = {}
-        self._chunk_ctx_dict = {"ops_path": ops_path}
-        self._run_title_refs = None  # the FSM declares this; the stand-in must too
+        self.chunk_idx = 0
+        self.run_state = RunState()
+        self.chunk = ChunkState(ops_path=ops_path)
+        self.run_title_refs = None  # the FSM declares this; the stand-in must too
 
-    def _progress_note(self, *args, **kwargs):
+    def progress_note(self, *args, **kwargs):
         pass
 
-    def _chunk_task_id(self, cap, idx=None):
+    def chunk_task_id(self, cap, idx=None):
         return f"{cap}-0"
 
-    def _transition_success(self):
+    def transition_success(self):
         pass
-
-    @property
-    def _chunk_ctx(self):
-        return self._chunk_ctx_dict
 
 
 def test_handle_autolink_passes_title_index_to_driver():

@@ -50,7 +50,7 @@ def test_put_without_payloads_stores_empty_list(store):
 
 
 def test_defer_ops_persists_current_chunk_payload(tmp_path, monkeypatch):
-    """The FSM funnel (_defer_ops) snapshots the current chunk's payload into
+    """The FSM funnel (defer_ops) snapshots the current chunk's payload into
     the bundle, so every defer site gets retry-time grounding parity for free."""
     from silica.kernel.write import deferred
     from silica.router.orchestrator import InjectorFSM
@@ -59,13 +59,13 @@ def test_defer_ops_persists_current_chunk_payload(tmp_path, monkeypatch):
     deferred._stores.clear()
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._file_content_hashes = ["hash-defer"]  # _current_content_hash property source
+    fsm.file_content_hashes = ["hash-defer"]  # current_content_hash property source
     chunk_payload = {"batches": [{"inbox_file": "Inbox/test.md",
                                   "concepts": [{"name": "C", "inbox_excerpt": "testo"}]}]}
-    fsm._chunks = [chunk_payload]
-    fsm._current_chunk_idx = 0
+    fsm.chunks = [chunk_payload]
+    fsm.chunk_idx = 0
 
-    assert fsm._defer_ops(
+    assert fsm.defer_ops(
         [{"op": "write", "path": "TargetDir/C.md", "heading": "C", "snippet": "corpo"}],
         {"TargetDir/C.md": "snippet too short"},
         phase="VALIDATE",
@@ -96,7 +96,7 @@ def test_put_stamps_per_op_rejection_reason_and_phase(store):
 
 
 def test_merge_keeps_first_phase_and_refreshes_reason(store):
-    """_defer_ops merges existing + new: merged ops keep the gate that first
+    """defer_ops merges existing + new: merged ops keep the gate that first
     deferred them; a re-deferred op picks up the fresh rejection reason."""
     store.put("h", "inbox/a.md", "Dir", None,
               [{"op": "write", "path": "Dir/A.md"}],
@@ -240,7 +240,7 @@ def test_deferred_store_populated_on_partial_rejection(tmp_path):
 
 
 def test_defer_ops_accumulates_across_phases(tmp_path, monkeypatch):
-    """_defer_ops must MERGE into the bundle, not overwrite it: COLLISION,
+    """defer_ops must MERGE into the bundle, not overwrite it: COLLISION,
     VALIDATE and WRITE all key on the same source content_hash, so a later
     phase (or chunk) deferring ops must not clobber an earlier phase's ops."""
     from silica.kernel.write import deferred as deferred_mod
@@ -248,17 +248,17 @@ def test_defer_ops_accumulates_across_phases(tmp_path, monkeypatch):
 
     # conftest's _isolate_deferred_store already points the default store at tmp.
     fsm = InjectorFSM("Inbox/lez.md", "TargetDir", hub="Hub")
-    fsm.context["source_content_hash"] = "shared-hash"
+    fsm.run_state.source_content_hash = "shared-hash"
 
     # COLLISION defers one op... (with a body: empty-payload ops are filtered out)
-    assert fsm._defer_ops(
+    assert fsm.defer_ops(
         [{"op": "write", "path": "TargetDir/A.md", "heading": "A",
           "source_basename": "lez.md", "snippet": "body A"}],
         {"A": "borderline"},
         phase="COLLISION",
     )
     # ...then VALIDATE defers another for the SAME content hash.
-    assert fsm._defer_ops(
+    assert fsm.defer_ops(
         [{"op": "write", "path": "TargetDir/B.md", "heading": "B",
           "source_basename": "lez.md", "snippet": "body B"}],
         {"TargetDir/B.md": "too generic"},
@@ -278,7 +278,7 @@ def test_defer_ops_skips_without_content_hash(tmp_path, monkeypatch):
 
     fsm = InjectorFSM("Inbox/lez.md", "TargetDir")
     # No source_content_hash set and no per-file hashes → empty hash.
-    assert fsm._defer_ops([{"op": "skip", "heading": "X"}], {}, phase="VALIDATE") is False
+    assert fsm.defer_ops([{"op": "skip", "heading": "X"}], {}, phase="VALIDATE") is False
     assert deferred_mod.get_deferred_store().list_all() == []
 
 
@@ -312,10 +312,10 @@ def test_defer_ops_drops_a_bundle_aimed_at_a_different_target(tmp_path, monkeypa
               [{"op": "write", "path": "Inbox/Book-of-Enoch/Uriel.md", "heading": "Uriel"}])
 
     fsm = InjectorFSM("Inbox/enoch.md", "Concepts/Apocrypha")
-    fsm._file_content_hashes = ["h-same"]
-    fsm._chunks = []
-    fsm._current_chunk_idx = 0
-    fsm._defer_ops(
+    fsm.file_content_hashes = ["h-same"]
+    fsm.chunks = []
+    fsm.chunk_idx = 0
+    fsm.defer_ops(
         [{"op": "write", "path": "Concepts/Apocrypha/Raphael.md", "heading": "Raphael",
           "snippet": "body"}],
         {"Concepts/Apocrypha/Raphael.md": "lint failed"},
@@ -338,10 +338,10 @@ def test_defer_ops_still_accumulates_within_one_target(tmp_path, monkeypatch):
                 "snippet": "body"}])
 
     fsm = InjectorFSM("Inbox/enoch.md", "Concepts/Apocrypha")
-    fsm._file_content_hashes = ["h-acc"]
-    fsm._chunks = []
-    fsm._current_chunk_idx = 0
-    fsm._defer_ops(
+    fsm.file_content_hashes = ["h-acc"]
+    fsm.chunks = []
+    fsm.chunk_idx = 0
+    fsm.defer_ops(
         [{"op": "write", "path": "Concepts/Apocrypha/Raphael.md", "heading": "Raphael",
           "snippet": "body"}],
         {}, phase="WRITE",

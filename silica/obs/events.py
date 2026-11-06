@@ -94,10 +94,10 @@ class PhaseEvent:
     needs no state machine of its own and a dropped event cannot strand a view
     on the wrong chunk — the next one re-declares where the run is.
 
-    `chunk_total` is the current FILE's chunk count, never the run's: `_chunks`
+    `chunk_total` is the current FILE's chunk count, never the run's: `chunks`
     is flat but grows one file-group at a time (states/setup.py), so a run-wide
     denominator would shrink the reported progress every time a later file is
-    partitioned. `file_idx` comes from `_current_file_idx`, which is correct
+    partitioned. `file_idx` comes from `file_idx`, which is correct
     during the file-scope phases; the chunk map is not (it still points into the
     previous file until that file's PAYLOAD lands).
 

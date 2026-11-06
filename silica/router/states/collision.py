@@ -255,7 +255,7 @@ def _run_embedder_free_dedup_leg(fsm: "InjectorFSM", idx: int, chunk: dict) -> N
     # check, so twins from the SAME chunk don't both get written. Embedder-free,
     # conservative predicate (title identity + near-verbatim MinHash).
     _before = sum(len(b.get("concepts", [])) for b in chunk.get("batches", []))
-    chunk = fsm._chunks[idx] = _collapse_near_dup_concepts(
+    chunk = fsm.chunks[idx] = _collapse_near_dup_concepts(
         chunk, is_near_dup=_cold_intra_chunk_near_dup
     )
     if sum(len(b.get("concepts", [])) for b in chunk.get("batches", [])) < _before:
@@ -283,8 +283,8 @@ def _run_embedder_free_dedup_leg(fsm: "InjectorFSM", idx: int, chunk: dict) -> N
     if not corpus:
         return
 
-    sig_cache = fsm.__dict__.setdefault("_minhash_sig_cache", {})
-    deferred = _embedder_free_near_dups(chunk, corpus, threshold=threshold, sig_cache=sig_cache)
+    deferred = _embedder_free_near_dups(chunk, corpus, threshold=threshold,
+                                        sig_cache=fsm.run_state.minhash_sig_cache)
     if not deferred:
         return
 
@@ -294,12 +294,12 @@ def _run_embedder_free_dedup_leg(fsm: "InjectorFSM", idx: int, chunk: dict) -> N
         kept = [c for c in batch.get("concepts", []) if id(c) not in dup_ids]
         if kept:
             new_batches.append(
-                {"inbox_file": batch.get("inbox_file", fsm._current_source_file), "concepts": kept}
+                {"inbox_file": batch.get("inbox_file", fsm.current_source_file), "concepts": kept}
             )
-    fsm._chunks[idx] = {**chunk, "batches": new_batches}
+    fsm.chunks[idx] = {**chunk, "batches": new_batches}
 
     deferred_op_dicts = [_deferred_op_dict(fsm, d, "minhash_near_dup") for d in deferred]
-    fsm._defer_ops(
+    fsm.defer_ops(
         deferred_op_dicts,
         {
             (d["concept"].get("name", str(i)) if isinstance(d["concept"], dict) else str(i)):
@@ -316,14 +316,16 @@ def _run_embedder_free_dedup_leg(fsm: "InjectorFSM", idx: int, chunk: dict) -> N
 
 def handle_collision(fsm: "InjectorFSM") -> None:
     """COLLISION state entry: run the pass unless a prefetch already did."""
-    idx = fsm._current_chunk_idx
-    if fsm.context.pop(f"chunk_{idx}_collision_done", False):
-        fsm._progress_note(fsm._chunk_task_id("collision", idx), "collision", "done",
+    idx = fsm.chunk_idx
+    state = fsm.run_state.chunk(idx)
+    if state.collision_done:
+        state.collision_done = False
+        fsm.progress_note(fsm.chunk_task_id("collision", idx), "collision", "done",
                            output_ref="prefetched")
-        fsm._transition_success()
+        fsm.transition_success()
         return
     collision_pass(fsm, idx)
-    fsm._transition_success()
+    fsm.transition_success()
 
 
 def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
@@ -353,16 +355,16 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     Re-entrant: takes an explicit chunk index so the distill prefetcher can run
     it early for lookahead chunks; performs no state transition.
     """
-    fsm._progress_note(fsm._chunk_task_id("collision", idx), "collision", "running")
+    fsm.progress_note(fsm.chunk_task_id("collision", idx), "collision", "running")
 
-    fsm._get_chunks_from_context_if_empty()
-    if fsm._chunks[idx].get("lane") == "outline":
+    fsm.chunks_from_payload()
+    if fsm.chunks[idx].get("lane") == "outline":
         # Nothing to route: the outline chunk has no concepts until DELEGATE
         # names them, and sameness for that lane is stage B's `same_as` plus
         # the dedup judge (kernel/outline.py). Measured 2026-09-02: this pass
         # rebuilt the chunk without `lane`/`source_text`, and Lezione 12 then
         # distilled as an empty keyphrase chunk (0 ops, no call).
-        fsm._progress_note(fsm._chunk_task_id("collision", idx), "collision", "done",
+        fsm.progress_note(fsm.chunk_task_id("collision", idx), "collision", "done",
                            output_ref="outline lane: no concepts to route")
         return
 
@@ -375,9 +377,9 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     from silica.kernel.recall.embed import get_store
 
     def _minhash_fallback() -> None:
-        fsm._get_chunks_from_context_if_empty()
-        _run_embedder_free_dedup_leg(fsm, idx, fsm._chunks[idx])
-        fsm._progress_note(fsm._chunk_task_id("collision", idx), "collision", "done")
+        fsm.chunks_from_payload()
+        _run_embedder_free_dedup_leg(fsm, idx, fsm.chunks[idx])
+        fsm.progress_note(fsm.chunk_task_id("collision", idx), "collision", "done")
 
     try:
         store = get_store()
@@ -394,8 +396,8 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
         _minhash_fallback()
         return
 
-    fsm._get_chunks_from_context_if_empty()
-    chunk = fsm._chunks[idx]
+    fsm.chunks_from_payload()
+    chunk = fsm.chunks[idx]
 
     pre_routed_ops: list[dict] = []
     deferred_concepts: list[dict] = []
@@ -462,13 +464,13 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
         return bool(denom) and float(va @ vb) / denom >= τ_high
 
     _before = sum(len(b.get("concepts", [])) for b in chunk.get("batches", []))
-    chunk = fsm._chunks[idx] = _collapse_near_dup_concepts(chunk, is_near_dup=_emb_near_dup)
+    chunk = fsm.chunks[idx] = _collapse_near_dup_concepts(chunk, is_near_dup=_emb_near_dup)
     _after = sum(len(b.get("concepts", [])) for b in chunk.get("batches", []))
     if _after < _before:
         logger.info("COLLISION: collapsed %d intra-chunk sibling near-dup concept(s)", _before - _after)
 
     for batch in chunk.get("batches", []):
-        inbox_file = batch.get("inbox_file", fsm._current_source_file)
+        inbox_file = batch.get("inbox_file", fsm.current_source_file)
         kept: list = []
 
         for concept in batch.get("concepts", []):
@@ -507,7 +509,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
 
             # Lower effective threshold for cluster hubs: merging into an
             # anchor note is safer than creating a competing shadow note.
-            _vault_ctx = fsm.context.get("vault_graph_ctx", {})
+            _vault_ctx = fsm.run_state.vault_graph_ctx or {}
             _match_key = existing_path.removesuffix(".md")
             _is_hub = _vault_ctx.get(_match_key, {}).get("is_hub", False)
             τ_eff = τ_high - (0.08 if _is_hub else 0.0)
@@ -572,7 +574,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
         deferred_op_dicts = [
             _deferred_op_dict(fsm, d, "collision_deferred") for d in deferred_concepts
         ]
-        fsm._defer_ops(
+        fsm.defer_ops(
             deferred_op_dicts,
             {
                 (d["concept"].get("name", str(i)) if isinstance(d["concept"], dict) else str(i)):
@@ -606,15 +608,15 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
                     "excerpt": excerpt,
                     "candidate": match.get("name", candidate_path),
                     "score": d.get("score"),
-                    "inbox_file": d.get("inbox_file", fsm._current_source_file),
+                    "inbox_file": d.get("inbox_file", fsm.current_source_file),
                     "hub": fsm.hub,
                     # C2 verdict routing: lets the dedup capability clean up
                     # (or author the distinct spoke from) the twin bundle.
-                    "content_hash": fsm._current_content_hash,
+                    "content_hash": fsm.current_content_hash,
                     # The provenance ledger is keyed on the FSM's own run id:
                     # without it the worker's notes land under the undo
                     # journal's id, which the dangling-link sweep cannot read.
-                    "run_id": getattr(getattr(fsm, "progress", None), "run_id", "") or "",
+                    "run_id": fsm.progress.run_id,
                     "target_dir": fsm.target_dir,
                 },
                 reason=f"borderline_similarity score={d.get('score', 0):.3f}",
@@ -627,7 +629,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
                 logger.debug("COLLISION: failed to enqueue dedup item: %s", _qe)
 
     # Store pre-routed ops for merging in VALIDATE (Phase 5)
-    fsm.context[f"chunk_{idx}_collision_ops"] = pre_routed_ops
+    fsm.run_state.chunk(idx).collision_ops = pre_routed_ops
 
     # Capture the idempotency hash BEFORE mutating the chunk.
     # COLLISION re-routes concepts based on what is currently in the vault,
@@ -635,17 +637,17 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     # already written their notes).  Hashing the pre-COLLISION chunk means
     # the key is stable across runs with the same source input.
     import json as _json
-    fsm.context[f"chunk_{idx}_input_hash"] = hashlib.sha256(
+    fsm.run_state.chunk(idx).input_hash = hashlib.sha256(
         _json.dumps(chunk, sort_keys=True).encode()
     ).hexdigest()
 
     # Replace chunk with filtered version (remove patched/deferred concepts)
-    fsm._chunks[idx] = {
+    fsm.chunks[idx] = {
         **chunk,  # keep every key the chunk carries (lane, source_text): a rebuild that drops them changes the lane
         "batches": modified_batches,
     }
 
-    fsm._progress_note(
-        fsm._chunk_task_id("collision", idx), "collision", "done",
+    fsm.progress_note(
+        fsm.chunk_task_id("collision", idx), "collision", "done",
         output_ref=f"{len(pre_routed_ops)} patch-routed, {len(deferred_concepts)} deferred",
     )

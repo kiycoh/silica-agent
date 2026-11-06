@@ -122,11 +122,11 @@ class _FakeLedger:
 def _fsm(queue, ledger):
     return SimpleNamespace(
         work_queue=queue, warning_ledger=ledger, inbox_file="in.md",
-        _current_source_file="in.md", hub="Hub", _current_content_hash="h",
+        current_source_file="in.md", hub="Hub", current_content_hash="h",
         target_dir="Corso", progress=SimpleNamespace(run_id="run-1"),
-        _chunks=[{"batches": [{"concepts": [
+        chunks=[{"batches": [{"concepts": [
             {"name": "Percettrone", "inbox_excerpt": "excerpt"}]}]}],
-        _current_chunk_idx=0,
+        chunk_idx=0,
     )
 
 
@@ -263,7 +263,7 @@ def test_coverage_line_counts_flagged_notes(tmp_path, monkeypatch):
     ledger.paths = lambda kind=None: ["Corso/Description.md", "Corso/Percettrone.md"]
     fsm = SimpleNamespace(
         progress=SimpleNamespace(inputs={}),
-        _file_content_hashes=[], _annealed_ops=0, warning_ledger=ledger,
+        file_content_hashes=[], annealed_ops=0, warning_ledger=ledger,
     )
     c = object.__new__(Coordinator)
     c.fsm = fsm
@@ -300,11 +300,11 @@ def test_boundary_anneal_settles_the_ops_the_sweep_landed_flagged(monkeypatch):
               "path": "Reti/Description.md", "snippet": LONG, "hub": "Reti",
               "review": "near_title candidate='Descriptor' path='Reti/Descriptor.md' ratio=0.90"}
     fake = SimpleNamespace(
-        _undo_run_id="undo-1", progress=SimpleNamespace(run_id="run-1"),
-        _annealed_ops=0, _lift_recovered_partial=lambda: None,
+        undo_run_id="undo-1", progress=SimpleNamespace(run_id="run-1"),
+        annealed_ops=0, _lift_recovered_partial=lambda: None,
         work_queue=_FakeQueue(), warning_ledger=_FakeLedger(),
-        _current_source_file="in.md", hub="Reti", _current_content_hash="h",
-        target_dir="Reti", _chunks=[], _current_chunk_idx=0,
+        current_source_file="in.md", hub="Reti", current_content_hash="h",
+        target_dir="Reti", chunks=[], chunk_idx=0,
     )
     store = SimpleNamespace(list_all=lambda: [{"content_hash": "fff6"}])
     with patch("silica.kernel.write.deferred.get_deferred_store", return_value=store), \
@@ -312,7 +312,7 @@ def test_boundary_anneal_settles_the_ops_the_sweep_landed_flagged(monkeypatch):
                return_value={"written": 1, "flagged_ops": [landed]}):
         InjectorFSM._boundary_anneal(fake)
 
-    assert fake._annealed_ops == 1
+    assert fake.annealed_ops == 1
     assert [r[:2] for r in fake.warning_ledger.rows] == [("Reti/Description.md", "soft_gate")]
     [item] = fake.work_queue.items
     assert item.kind == "dedup" and item.context["loser_path"] == "Reti/Description.md"

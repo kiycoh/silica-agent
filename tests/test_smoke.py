@@ -100,14 +100,14 @@ def test_verbose_fsm_logging(caplog):
         # Create FSM
         fsm = InjectorFSM(inbox_file="nonexistent.md", target_dir="tmp")
         
-        # Testing _make_tmp with verbose logging
+        # Testing make_tmp with verbose logging
         import shutil
         import tempfile
         tmp_dir = tempfile.mkdtemp()
         fsm.target_dir = tmp_dir
         
         with caplog.at_level(logging.DEBUG):
-            fsm._make_tmp({"test": "data"})
+            fsm.make_tmp({"test": "data"})
             assert any("Created staging file" in rec.message for rec in caplog.records)
             
         shutil.rmtree(tmp_dir)

@@ -16,6 +16,7 @@ from pathlib import Path
 from silica.kernel.write.ops import InverseOpKind
 from silica.kernel.progress import RunManifestEntry
 from silica.router.states import finalize
+from silica.router.run_state import RunState
 
 
 def _entry(source_basename: str, op: str, path: str) -> RunManifestEntry:
@@ -30,7 +31,7 @@ def _fsm(entries, *, keep_sources=False, seen_override=None):
         manifest=types.SimpleNamespace(entries=entries),
         keep_sources=keep_sources,
         seen_override=seen_override,
-        _run_inverses=[],
+        run_inverses=[],
     )
 
 
@@ -57,7 +58,7 @@ def test_keep_sources_writes_leaf_and_links(tmp_vault):
     assert "date: 2026-03-01" in leaf  # the source's own date is preserved
     note = _vault_file("Concepts/A.md").read_text(encoding="utf-8")
     assert "## Sources" in note and "[[sources/src]]" in note
-    kinds = [inv.kind for _, inv, _ in fsm._run_inverses]
+    kinds = [inv.kind for _, inv, _ in fsm.run_inverses]
     assert kinds == [InverseOpKind.delete_created, InverseOpKind.restore_version]
 
 
@@ -152,7 +153,7 @@ def test_plain_ingest_writes_no_leaf(tmp_vault):
 
     assert not _vault_file("sources/src.md").exists()
     assert "## Sources" not in _vault_file("Concepts/A.md").read_text(encoding="utf-8")
-    assert fsm._run_inverses == []
+    assert fsm.run_inverses == []
 
 
 def test_capture_always_writes_leaf_with_capture_date(tmp_vault):
@@ -219,7 +220,7 @@ def test_undo_removes_leaf_and_block(tmp_vault):
     from silica.tools.wrapped import silica_restore
 
     res = silica_restore(
-        txn_id="t0", inverses=[inv.model_dump() for _, inv, _ in fsm._run_inverses]
+        txn_id="t0", inverses=[inv.model_dump() for _, inv, _ in fsm.run_inverses]
     )
     assert res.get("success")
     assert not _vault_file("sources/src.md").exists()
@@ -241,19 +242,20 @@ def test_wired_before_archive(monkeypatch, tmp_vault):
                         lambda *a, **k: order.append(("archive", a[0])) or {"success": True})
 
     fsm = types.SimpleNamespace(
-        _get_chunks_from_context_if_empty=lambda: None,
-        _chunk_flat_to_fi_ci={0: (0, 0)},
-        _current_chunk_idx=0,
-        _progress_note=lambda *a, **k: None,
-        _write_ledger_for_file=lambda *a, **k: None,
-        _file_chunks={0: {"chunks": [{}], "source_file": "Inbox/a.md"}},
+        chunks_from_payload=lambda: None,
+        chunk_flat_to_fi_ci={0: (0, 0)},
+        chunk_idx=0,
+        progress_note=lambda *a, **k: None,
+        write_ledger_for_file=lambda *a, **k: None,
+        file_chunks={0: {"chunks": [{}], "source_file": "Inbox/a.md"}},
         progress=types.SimpleNamespace(tasks=[]),
         inbox_file="Inbox/a.md",
-        context={},
-        _undo_run_id=None,
-        _run_inverses=[],
-        _transition_success=lambda: None,
-        _chunk_task_id=lambda *a: "cleanup",
+        run_state=RunState(),
+        run_title_refs=None,
+        undo_run_id=None,
+        run_inverses=[],
+        transition_success=lambda: None,
+        chunk_task_id=lambda *a: "cleanup",
     )
     finalize.handle_cleanup(fsm)
 

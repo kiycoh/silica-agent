@@ -36,17 +36,17 @@ _VALIDATE_OK = {
 def _validated_fsm(chunk_hash: str = "deadbeef") -> InjectorFSM:
     """An FSM parked on the second file's first chunk, ready for VALIDATE."""
     fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
-    fsm._chunks = [{"batches": []}, {"batches": []}]
-    fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (1, 0)}
-    fsm._current_chunk_idx = 1
-    fsm._current_file_idx = 1
-    fsm._file_chunks = {
-        0: {"source_file": "Inbox/a.md", "chunks": [fsm._chunks[0]]},
-        1: {"source_file": "Inbox/b.md", "chunks": [fsm._chunks[1]]},
+    fsm.chunks = [{"batches": []}, {"batches": []}]
+    fsm.chunk_flat_to_fi_ci = {0: (0, 0), 1: (1, 0)}
+    fsm.chunk_idx = 1
+    fsm.file_idx = 1
+    fsm.file_chunks = {
+        0: {"source_file": "Inbox/a.md", "chunks": [fsm.chunks[0]]},
+        1: {"source_file": "Inbox/b.md", "chunks": [fsm.chunks[1]]},
     }
-    fsm.context["chunk_1_hash"] = chunk_hash
-    fsm.context["chunk_1_input_hash"] = chunk_hash
-    fsm._chunk_ctx["sanitized"] = {"parsed": {"updates": [_OP]}}
+    fsm.run_state.chunk(1).hash = chunk_hash
+    fsm.run_state.chunk(1).input_hash = chunk_hash
+    fsm.chunk.sanitized = {"parsed": {"updates": [_OP]}}
     fsm.state = InjectorState.VALIDATE
     return fsm
 
@@ -57,9 +57,9 @@ def test_validate_checkpoint_is_filed_under_the_id_the_readers_use():
     with patch.object(d, "validate_ops", return_value=_VALIDATE_OK):
         d.handle_validate(fsm)
 
-    task_id = fsm._chunk_task_id("validate")
+    task_id = fsm.chunk_task_id("validate")
     assert task_id == "f1_c0_validate"
-    assert fsm.progress.is_checkpoint_done(task_id, "deadbeef") == fsm._chunk_ctx["ops_path"]
+    assert fsm.progress.is_checkpoint_done(task_id, "deadbeef") == fsm.chunk.ops_path
 
     # The legacy "chunk_<flat idx>_validate" id must not be created at all: it
     # both hid the checkpoint and left the real task running forever.
@@ -77,13 +77,13 @@ def test_resume_skips_the_distiller_for_an_unchanged_chunk():
 
     # A resume re-enters DELEGATE for the same chunk with the same input hash.
     fsm.state = InjectorState.DELEGATE
-    fsm._chunk_ctx.pop("ops_path", None)
+    fsm.chunk.ops_path = ""
     with patch.object(d, "run_distiller",
                       side_effect=AssertionError("distiller re-ran a checkpointed chunk")):
         d.handle_delegate(fsm)
 
     assert fsm.state == InjectorState.SNAPSHOT
-    assert fsm._chunk_ctx["ops_path"]
+    assert fsm.chunk.ops_path
 
 
 # ----------------------------------------------------------------------
@@ -93,15 +93,15 @@ def test_resume_skips_the_distiller_for_an_unchanged_chunk():
 def _payload_fsm() -> InjectorFSM:
     """An FSM entering PAYLOAD for file 1 with file 0's chunk still under the cursor."""
     fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
-    fsm._file_content_hashes = ["hash-of-a", "hash-of-b"]
-    fsm._chunks = [{"batches": []}]
-    fsm._chunk_flat_to_fi_ci = {0: (0, 0)}
-    fsm._file_chunks = {0: {"source_file": "Inbox/a.md", "chunks": [fsm._chunks[0]]}}
-    fsm._current_chunk_idx = 0          # still file 0's chunk
-    fsm._current_file_idx = 1
-    fsm.context["recon"] = [{"concepts": []}]
-    fsm.context["payload"] = {"chunks": [{"batches": [{"inbox_file": "Inbox/a.md"}]}]}
-    fsm.context["vault_graph_ctx"] = {}
+    fsm.file_content_hashes = ["hash-of-a", "hash-of-b"]
+    fsm.chunks = [{"batches": []}]
+    fsm.chunk_flat_to_fi_ci = {0: (0, 0)}
+    fsm.file_chunks = {0: {"source_file": "Inbox/a.md", "chunks": [fsm.chunks[0]]}}
+    fsm.chunk_idx = 0          # still file 0's chunk
+    fsm.file_idx = 1
+    fsm.run_state.recon = [{"concepts": []}]
+    fsm.run_state.payload = {"chunks": [{"batches": [{"inbox_file": "Inbox/a.md"}]}]}
+    fsm.run_state.vault_graph_ctx = {}
     fsm.state = InjectorState.PAYLOAD
     return fsm
 
@@ -109,26 +109,26 @@ def _payload_fsm() -> InjectorFSM:
 
 
 def test_payload_reassembles_a_file_whose_chunks_never_attached():
-    """`_file_chunks[fi]` is claimed before assembly, so the warm fast-path must
+    """`file_chunks[fi]` is claimed before assembly, so the warm fast-path must
     key on the chunk list, not on the key's presence — otherwise a file that
     failed mid-assembly would fast-path with zero chunks on the next attempt."""
     fsm = _payload_fsm()
-    fsm._file_chunks[1] = {"source_file": "Inbox/b.md", "chunks": []}
+    fsm.file_chunks[1] = {"source_file": "Inbox/b.md", "chunks": []}
 
     res = {"chunks": [{"schema_version": 1, "batches": [
         {"inbox_file": "Inbox/b.md", "concepts": [{"name": "Beta", "excerpt": "y"}]}]}]}
     with patch.object(s, "payload_chunks", return_value=res):
         s.handle_payload(fsm)
 
-    assert fsm._file_chunks[1]["chunks"], "PAYLOAD fast-pathed on an empty chunk list"
-    assert fsm._current_chunk_idx == 1
-    assert fsm._chunk_flat_to_fi_ci[1] == (1, 0)
+    assert fsm.file_chunks[1]["chunks"], "PAYLOAD fast-pathed on an empty chunk list"
+    assert fsm.chunk_idx == 1
+    assert fsm.chunk_flat_to_fi_ci[1] == (1, 0)
 
 
 def test_warm_next_file_reprepares_a_file_whose_chunks_never_attached():
     fsm = _payload_fsm()
-    fsm._file_chunks[1] = {"source_file": "Inbox/b.md", "chunks": []}
-    fsm._current_file_idx = 0
+    fsm.file_chunks[1] = {"source_file": "Inbox/b.md", "chunks": []}
+    fsm.file_idx = 0
 
     with patch.object(s, "recon_file", return_value={"error": "boom"}) as recon:
         assert s.warm_next_file(fsm) is False

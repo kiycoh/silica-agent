@@ -193,7 +193,7 @@ def test_orchestrator_writes_content_hash(tmp_path, monkeypatch):
 
     fsm = InjectorFSM(inbox_file=str(inbox), target_dir="Concepts")
     expected_hash = hashlib.sha256(inbox.read_bytes()).hexdigest()
-    fsm.context["source_content_hash"] = expected_hash
+    fsm.run_state.source_content_hash = expected_hash
 
     # Build a minimal ops_path with one op
     import json, tempfile
@@ -208,13 +208,13 @@ def test_orchestrator_writes_content_hash(tmp_path, monkeypatch):
     try:
         with os.fdopen(fd, "w") as f:
             json.dump(ops_data, f)
-        fsm.context.setdefault("chunk", {})["ops_path"] = ops_path
-        fsm.context.setdefault("chunk", {})["txn_id"] = "t_test"
+        fsm.chunk.ops_path = ops_path
+        fsm.chunk.txn_id = "t_test"
 
         from silica.kernel.write.ledger import Ledger
         test_ledger = Ledger(tmp_path / "test.db")
         with patch("silica.kernel.write.ledger.get_ledger", return_value=test_ledger):
-            fsm._write_ledger_for_file(0, "committed")
+            fsm.write_ledger_for_file(0, "committed")
 
         # Verify the ledger row has the content_hash
         rows = test_ledger._conn.execute(

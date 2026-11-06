@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from silica.kernel.recall.embed import EmbedStore, refresh_note
 from silica.kernel.recall import cooccurrence as cooc
+from silica.router.run_state import RunState
 
 
 class _Emb:
@@ -70,7 +71,7 @@ def test_flush_indexes_persists_both_singletons(tmp_path, monkeypatch):
     assert not ei.exists() and not ci.exists()
 
     fsm = object.__new__(InjectorFSM)
-    fsm.context = {"_embed_dirty": True, "_cooccur_dirty": True}
+    fsm.run_state = RunState(embed_dirty=True, cooccur_dirty=True)
     fsm._flush_indexes()  # the end-of-run flush
     assert ei.exists() and ci.exists()
     assert embed.EmbedStore(path=ei).has("a")
@@ -87,6 +88,6 @@ def test_flush_skips_when_not_dirty(tmp_path, monkeypatch):
     embed.get_store().upsert("a", "A", [1.0, 0.0])  # in memory, but run not "dirty"
 
     fsm = object.__new__(InjectorFSM)
-    fsm.context = {}  # nothing deferred this run
+    fsm.run_state = RunState()  # nothing deferred this run
     fsm._flush_indexes()
     assert not ei.exists()  # untouched

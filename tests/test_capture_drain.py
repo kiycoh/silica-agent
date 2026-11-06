@@ -226,7 +226,7 @@ class TestDrain:
         assert env.is_file()  # retried by the next drain
 
     # Every terminal shape the FSM actually produces: Success/no_ops/partial/
-    # failed from finalize.py and _contain_chunk_failure, already_nucleated from
+    # failed from finalize.py and contain_chunk_failure, already_nucleated from
     # the ledger short-circuit, and a bare error from a run that never reached a
     # verdict. `error` alone does not mean the run failed — best-effort phases
     # record theirs and carry on (orchestrator._on_step_error).

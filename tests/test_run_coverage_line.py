@@ -35,8 +35,8 @@ def _coord(fsm):
 def _fsm(*, hashes=(), recovered=0):
     return SimpleNamespace(
         progress=SimpleNamespace(inputs={}),
-        _file_content_hashes=list(hashes),
-        _annealed_ops=recovered,
+        file_content_hashes=list(hashes),
+        annealed_ops=recovered,
     )
 
 

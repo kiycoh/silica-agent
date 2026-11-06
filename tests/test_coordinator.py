@@ -250,18 +250,18 @@ def test_interrupt_mid_drain_stops_workers_and_renderer():
 
 
 def test_consumer_threads_resolve_the_run_id_lazily_not_at_thread_entry():
-    """The pool is submitted BEFORE fsm.run(), so _undo_run_id is still None when
+    """The pool is submitted BEFORE fsm.run(), so undo_run_id is still None when
     a worker thread starts. Snapshotting it at entry pins None forever and every
     expand/dedup write skips the journal — read it per item instead."""
 
     fsm = _FakeFSM(0)
-    fsm._undo_run_id = None  # not opened yet, exactly as at pool submit time
+    fsm.undo_run_id = None  # not opened yet, exactly as at pool submit time
     coord = _coordinator_with(fsm, SilicaConfig())
 
     seen = {}
 
     def _fake_consume(wq, agent, stop=None, undo_run=None, **narration_kw):
-        fsm._undo_run_id = "run-xyz"          # the FSM opens its run meanwhile
+        fsm.undo_run_id = "run-xyz"          # the FSM opens its run meanwhile
         seen["at_item"] = undo_run() if undo_run else None
 
     with patch("silica.agent.subagent.consume", _fake_consume):

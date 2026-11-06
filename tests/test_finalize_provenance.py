@@ -3,7 +3,7 @@
 `_record_provenance` is the seam: a sibling projection to
 `_log_nucleate_completion` at the same CLEANUP point, appending one
 .silica/provenance.json record per (source, run) using data the FSM already
-has — the sha256 computed once at RUN start (`_file_content_hashes`) and the
+has — the sha256 computed once at RUN start (`file_content_hashes`) and the
 write/patch note paths already recorded in the manifest. Exercised directly
 against a minimal fake FSM, same style as tests/test_nucleate_log.py.
 """
@@ -16,13 +16,17 @@ from pathlib import Path
 from silica.kernel.progress import RunManifestEntry
 from silica.kernel.write.provenance import DEFAULT_PROVENANCE_FILENAME
 from silica.router.states import finalize
+from silica.router.run_state import RunState
 
 
 def _fake_fsm(entries, run_id, content_hashes):
     return types.SimpleNamespace(
         manifest=types.SimpleNamespace(entries=entries),
         progress=types.SimpleNamespace(run_id=run_id),
-        _file_content_hashes=content_hashes,
+        file_content_hashes=content_hashes,
+        run_state=RunState(),
+        files_logged=set(),
+        warning_ledger=None,
     )
 
 
@@ -117,19 +121,20 @@ def test_wired_into_handle_cleanup_on_archive(monkeypatch, tmp_vault):
     monkeypatch.setattr("silica.kernel.write.gate.archive_source", lambda *a, **k: {"success": True})
 
     fsm = types.SimpleNamespace(
-        _get_chunks_from_context_if_empty=lambda: None,
-        _chunk_flat_to_fi_ci={0: (0, 0)},
-        _current_chunk_idx=0,
-        _progress_note=lambda *a, **k: None,
-        _write_ledger_for_file=lambda *a, **k: None,
-        _file_chunks={0: {"chunks": [{}], "source_file": "Inbox/a.md"}},
+        chunks_from_payload=lambda: None,
+        chunk_flat_to_fi_ci={0: (0, 0)},
+        chunk_idx=0,
+        progress_note=lambda *a, **k: None,
+        write_ledger_for_file=lambda *a, **k: None,
+        file_chunks={0: {"chunks": [{}], "source_file": "Inbox/a.md"}},
         progress=types.SimpleNamespace(tasks=[]),
         inbox_file="Inbox/a.md",
-        context={},
-        _undo_run_id=None,
-        _run_inverses=[],
-        _transition_success=lambda: None,
-        _chunk_task_id=lambda *a: "cleanup",
+        run_state=RunState(),
+        run_title_refs=None,
+        undo_run_id=None,
+        run_inverses=[],
+        transition_success=lambda: None,
+        chunk_task_id=lambda *a: "cleanup",
     )
 
     finalize.handle_cleanup(fsm)
@@ -154,20 +159,21 @@ def test_partial_file_still_records_provenance(monkeypatch, tmp_vault):
     )
 
     fsm = types.SimpleNamespace(
-        _get_chunks_from_context_if_empty=lambda: None,
-        _chunk_flat_to_fi_ci={0: (0, 0)},
-        _current_chunk_idx=0,
-        _progress_note=lambda *a, **k: None,
-        _write_ledger_for_file=lambda *a, **k: None,
-        _file_chunks={0: {"chunks": [{}], "source_file": "Inbox/a.md"}},
+        chunks_from_payload=lambda: None,
+        chunk_flat_to_fi_ci={0: (0, 0)},
+        chunk_idx=0,
+        progress_note=lambda *a, **k: None,
+        write_ledger_for_file=lambda *a, **k: None,
+        file_chunks={0: {"chunks": [{}], "source_file": "Inbox/a.md"}},
         progress=types.SimpleNamespace(
             tasks=[types.SimpleNamespace(id="f0_c0_distill", status="failed")]),
         inbox_file="Inbox/a.md",
-        context={},
-        _undo_run_id=None,
-        _run_inverses=[],
-        _transition_success=lambda: None,
-        _chunk_task_id=lambda *a: "cleanup",
+        run_state=RunState(),
+        run_title_refs=None,
+        undo_run_id=None,
+        run_inverses=[],
+        transition_success=lambda: None,
+        chunk_task_id=lambda *a: "cleanup",
     )
 
     finalize.handle_cleanup(fsm)

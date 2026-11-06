@@ -33,9 +33,9 @@ def _run_title_refs(fsm: "InjectorFSM") -> list[typing.Any]:
     per-chunk disk scan this cache removes. ponytail: no invalidation beyond
     append/remove — the ingest path never renames vault notes mid-run.
     """
-    if fsm._run_title_refs is None:
-        fsm._run_title_refs = list(DRIVER.list_files())
-    return fsm._run_title_refs
+    if fsm.run_title_refs is None:
+        fsm.run_title_refs = list(DRIVER.list_files())
+    return fsm.run_title_refs
 
 
 def _backlink_neighbourhood(new_titles: list[str], touched_abs: set[str],
@@ -129,12 +129,12 @@ def handle_autolink(fsm: "InjectorFSM") -> None:
     non-fatal: they are logged and the FSM continues to LINT.  This is
     intentional — autolink only ADDs links; it can never break a valid note.
     """
-    fsm._progress_note(fsm._chunk_task_id("autolink"), "autolink", "running")
+    fsm.progress_note(fsm.chunk_task_id("autolink"), "autolink", "running")
 
     try:
         from silica.kernel.link.autolink import build_title_index
 
-        ops = load_ops(fsm._chunk_ctx["ops_path"])
+        ops = load_ops(fsm.chunk.ops_path)
         touched_paths = [
             ref
             for op in ops
@@ -142,8 +142,8 @@ def handle_autolink(fsm: "InjectorFSM") -> None:
         ]
 
         if not touched_paths:
-            fsm._progress_note(fsm._chunk_task_id("autolink"), "autolink", "done")
-            fsm._transition_success()
+            fsm.progress_note(fsm.chunk_task_id("autolink"), "autolink", "done")
+            fsm.transition_success()
             return
 
         all_refs = _run_title_refs(fsm)
@@ -174,13 +174,13 @@ def handle_autolink(fsm: "InjectorFSM") -> None:
                 logger.debug("AUTOLINK: skipped '%s' (non-fatal): %s", path, _ae)
 
         logger.info("AUTOLINK: finished — %d link(s) added across %d note(s)", total_added, len(touched_paths))
-        fsm.context["yield_links"] = fsm.context.get("yield_links", 0) + total_added
+        fsm.run_state.yield_links = fsm.run_state.yield_links + total_added
     except Exception as e:
         # AUTOLINK is best-effort: log and continue to LINT
         logger.warning("AUTOLINK: phase failed (non-fatal): %s", e)
 
-    fsm._progress_note(fsm._chunk_task_id("autolink"), "autolink", "done")
-    fsm._transition_success()
+    fsm.progress_note(fsm.chunk_task_id("autolink"), "autolink", "done")
+    fsm.transition_success()
 
 
 def handle_backlink(fsm: "InjectorFSM") -> None:
@@ -192,12 +192,12 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
     rollback inverses for any modified note so ROLLBACK and LINT graph-diff
     both cover the backlinks.
     """
-    fsm._progress_note(fsm._chunk_task_id("backlink"), "backlink", "running")
+    fsm.progress_note(fsm.chunk_task_id("backlink"), "backlink", "running")
 
     try:
         from silica.kernel.link.autolink import backlink_pass, build_title_index
 
-        ops = load_ops(fsm._chunk_ctx["ops_path"])
+        ops = load_ops(fsm.chunk.ops_path)
 
         hub_name_lower = (fsm.hub or "").strip("[]").lower()
         new_titles: list[str] = []
@@ -212,8 +212,8 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
                 new_titles.append(stem)
 
         if not new_titles:
-            fsm._progress_note(fsm._chunk_task_id("backlink"), "backlink", "done")
-            fsm._transition_success()
+            fsm.progress_note(fsm.chunk_task_id("backlink"), "backlink", "done")
+            fsm.transition_success()
             return
 
         touched_paths_abs: set[str] = {
@@ -226,8 +226,8 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
         neighbourhood = _backlink_neighbourhood(new_titles, touched_paths_abs, within_dir=fsm.target_dir)
 
         if not neighbourhood:
-            fsm._progress_note(fsm._chunk_task_id("backlink"), "backlink", "done")
-            fsm._transition_success()
+            fsm.progress_note(fsm.chunk_task_id("backlink"), "backlink", "done")
+            fsm.transition_success()
             return
 
         # Pre-read prior content before backlink_pass writes, for rollback inverses
@@ -242,13 +242,13 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
         title_index = build_title_index(all_refs)
         added_map = backlink_pass(new_titles, title_index=title_index, neighbourhood=neighbourhood)
 
-        if added_map and fsm._txn is not None:
+        if added_map and fsm.chunk.txn is not None:
             from silica.kernel.write.ops import InverseOp, InverseOpKind
-            existing_snapshot_paths = {d["path"] for d in fsm._chunk_ctx.get("snapshot_domain", [])}
+            existing_snapshot_paths = {d["path"] for d in fsm.chunk.snapshot_domain}
             for path_modified in added_map:
                 if path_modified not in existing_snapshot_paths:
                     stem = os.path.splitext(os.path.basename(path_modified))[0]
-                    fsm._chunk_ctx.setdefault("snapshot_domain", []).append(
+                    fsm.chunk.snapshot_domain.append(
                         {"name": stem, "path": path_modified}
                     )
                     existing_snapshot_paths.add(path_modified)
@@ -258,15 +258,15 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
                         path=path_modified,
                         prior_content=prior_contents[path_modified],
                     )
-                    fsm._txn.inverses.append(inverse)
+                    fsm.chunk.txn.inverses.append(inverse)
 
         total_links = sum(len(v) for v in added_map.values())
         logger.info(
             "BACKLINK: %d link(s) added to %d pre-existing note(s)", total_links, len(added_map)
         )
-        fsm.context["yield_links"] = fsm.context.get("yield_links", 0) + total_links
+        fsm.run_state.yield_links = fsm.run_state.yield_links + total_links
     except Exception as e:
         logger.warning("BACKLINK: phase failed (non-fatal): %s", e)
 
-    fsm._progress_note(fsm._chunk_task_id("backlink"), "backlink", "done")
-    fsm._transition_success()
+    fsm.progress_note(fsm.chunk_task_id("backlink"), "backlink", "done")
+    fsm.transition_success()

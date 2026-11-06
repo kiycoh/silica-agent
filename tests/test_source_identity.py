@@ -25,6 +25,7 @@ from silica.kernel.write.ops import InverseOp, InverseOpKind
 from silica.kernel.write.undo_journal import UndoJournalStore
 from silica.kernel.write.gate import resolve_source, revert_source
 from silica.router.states import finalize
+from silica.router.run_state import RunState
 
 
 def _vault() -> str:
@@ -41,7 +42,7 @@ def _fsm(entries, hashes, run_id="run-1", **kw):
     return types.SimpleNamespace(
         manifest=types.SimpleNamespace(entries=entries),
         progress=types.SimpleNamespace(run_id=run_id),
-        _file_content_hashes=hashes, context={}, _run_inverses=[], **kw)
+        file_content_hashes=hashes, run_state=RunState(), run_inverses=[], **kw)
 
 
 def _h(text: str) -> str:

@@ -14,6 +14,7 @@ from __future__ import annotations
 import types
 
 from silica.kernel.write.provenance import append_record
+from silica.router.run_state import RunState
 
 
 class TestTheFsmNotesIt:
@@ -21,23 +22,23 @@ class TestTheFsmNotesIt:
         from silica.router.orchestrator import InjectorFSM
 
         append_record("lec.md", "sha-v1", "r1", ["Concepts/A", "Concepts/B"])
-        fsm = types.SimpleNamespace(context={})
+        fsm = types.SimpleNamespace(run_state=RunState())
 
         InjectorFSM._note_renucleation(fsm, "Inbox/lec.md", "sha-v2")
 
-        assert fsm.context["renucleated"] == {"lec.md": 2}
+        assert fsm.run_state.renucleated == {"lec.md": 2}
 
     def test_an_unchanged_or_first_source_records_nothing(self, tmp_vault):
         from silica.router.orchestrator import InjectorFSM
 
         append_record("lec.md", "sha-v1", "r1", ["Concepts/A"])
-        fsm = types.SimpleNamespace(context={})
+        fsm = types.SimpleNamespace(run_state=RunState())
 
         InjectorFSM._note_renucleation(fsm, "Inbox/lec.md", "sha-v1")
         InjectorFSM._note_renucleation(fsm, "Inbox/new.md", "sha-x")
         InjectorFSM._note_renucleation(fsm, "Inbox/lec.md", "")  # unreadable file: no claim
 
-        assert "renucleated" not in fsm.context
+        assert fsm.run_state.renucleated == {}
 
 
 class TestTheRunReportCarriesIt:
@@ -50,13 +51,13 @@ class TestTheRunReportCarriesIt:
         fsm = types.SimpleNamespace(
             manifest=types.SimpleNamespace(entries=[entry]),
             progress=types.SimpleNamespace(run_id="run-1"),
-            _file_content_hashes=["sha-v2"],
-            context={"renucleated": {"lec.md": 2}},
+            file_content_hashes=["sha-v2"],
+            run_state=RunState(renucleated={"lec.md": 2}), files_logged=set(),
         )
 
         finalize._log_nucleate_completion(fsm, 0, "Inbox/lec.md")
 
-        (summary,) = fsm.context["files_summary"]
+        (summary,) = fsm.run_state.files_summary
         assert summary["renucleated_prior_notes"] == 2
 
     def test_a_first_nucleation_has_no_such_key(self, tmp_vault):
@@ -68,13 +69,13 @@ class TestTheRunReportCarriesIt:
         fsm = types.SimpleNamespace(
             manifest=types.SimpleNamespace(entries=[entry]),
             progress=types.SimpleNamespace(run_id="run-1"),
-            _file_content_hashes=["sha-v1"],
-            context={},
+            file_content_hashes=["sha-v1"],
+            run_state=RunState(), files_logged=set(),
         )
 
         finalize._log_nucleate_completion(fsm, 0, "Inbox/lec.md")
 
-        assert "renucleated_prior_notes" not in fsm.context["files_summary"][0]
+        assert "renucleated_prior_notes" not in fsm.run_state.files_summary[0]
 
 
 class TestTheCompletionLineSaysIt:

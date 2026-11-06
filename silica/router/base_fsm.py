@@ -27,7 +27,7 @@ class BaseFSM(Generic[StateT]):
         _error_state      — terminal-failure state
         _rollback_state   — rollback state (triggers txn revert on error)
         _HANDLERS         — dict mapping state → handler callable
-        state, context, _tmp_files
+        state, _tmp_files
     """
 
     # Annotated here for static analysis; values set by subclass __init__.
@@ -37,7 +37,6 @@ class BaseFSM(Generic[StateT]):
     _rollback_state: StateT
     _HANDLERS: dict[StateT, Callable[[], None]]
     state: StateT
-    context: dict[str, Any]
     _tmp_files: list[str]
 
     # ------------------------------------------------------------------
@@ -52,7 +51,7 @@ class BaseFSM(Generic[StateT]):
         else:
             raise RuntimeError(f"No handler defined for state {self.state}")
 
-    def _transition_success(self) -> None:
+    def transition_success(self) -> None:
         if self.state == self._rollback_state:
             self.state = self._error_state
             return
@@ -64,7 +63,7 @@ class BaseFSM(Generic[StateT]):
             else:
                 self._on_pipeline_end()
 
-    def _run_loop(self) -> dict[str, Any]:
+    def _run_loop(self) -> None:
         """Common while-loop: dispatch steps, route errors, clean up tmp files."""
         try:
             while self.state not in (self._done_state, self._error_state):
@@ -73,16 +72,19 @@ class BaseFSM(Generic[StateT]):
                     self.step()
                 except Exception as e:
                     logger.error("FSM Error in state %s: %s", self.state, e)
-                    self.context["error"] = str(e)
+                    self._record_error(str(e))
                     if not self._on_step_error(e):
                         self.state = self._error_state
         finally:
             self._cleanup_tmp()
-        return self.context
 
     # ------------------------------------------------------------------
     # Hooks — override in subclasses to change terminal behaviour
     # ------------------------------------------------------------------
+
+    def _record_error(self, message: str) -> None:
+        """Keep a handler's failure where this pipeline's result reads it."""
+        raise NotImplementedError
 
     def _on_pipeline_end(self) -> None:
         """Called when the phase sequence is exhausted."""
@@ -97,7 +99,7 @@ class BaseFSM(Generic[StateT]):
     # Shared tmp-file helpers
     # ------------------------------------------------------------------
 
-    def _make_tmp(self, content: Any, suffix: str = ".json") -> str:
+    def make_tmp(self, content: Any, suffix: str = ".json") -> str:
         """Write content as JSON to ~/.silica/tmp/ and track for cleanup."""
         import uuid
         path = str(silica_tmp_dir() / f"{uuid.uuid4().hex}{suffix}")

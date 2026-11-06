@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from silica.model.providers import get_provider
 from silica.config import SilicaConfig
+from silica.router.run_state import FileState, RunState
 
 
 def test_escalation_fields_default_unset():
@@ -99,31 +100,35 @@ def test_escalated_limits_resolve_escalation_model():
 def _delegate_fsm(chunk, steer=None):
     """Minimal FSM stand-in that survives handle_delegate end-to-end."""
     fsm = SimpleNamespace()
-    fsm._get_chunks_from_context_if_empty = MagicMock()
-    fsm._chunks = [chunk]
-    fsm._current_chunk_idx = 0
-    fsm._current_file_idx = 0
-    fsm._chunk_flat_to_fi_ci = {0: (0, 0)}
-    fsm._file_chunks = {}
+    fsm.chunks_from_payload = MagicMock()
+    fsm.chunks = [chunk]
+    fsm.chunk_idx = 0
+    fsm.file_idx = 0
+    fsm.chunk_flat_to_fi_ci = {0: (0, 0)}
+    fsm.file_chunks = {}
     fsm.inbox_file = "in.md"
     fsm.target_dir = "Notes"
     fsm.hub = "[[Hub]]"
     fsm.seen_override = None
-    fsm.context = {"file_0_language": "English"}
-    if steer:
-        fsm.context["chunk_0_steer_context"] = steer
+    fsm.run_state = RunState(files={0: FileState(language="English")})
+    fsm.chunk = fsm.run_state.chunk(0)
+    fsm.chunk.steer_context = steer
+    fsm.distill_profile = None
+    fsm.episodic_capture = True
+    fsm.work_queue = None
+    fsm.warning_ledger = None
+    fsm.current_source_file = "in.md"
     fsm.manifest = MagicMock()
     fsm.manifest.titles.return_value = []
     fsm.progress = MagicMock()
     fsm.progress.digest.return_value = "digest"
     fsm.progress.started_at = "2026-07-18T00:00:00"
     fsm.progress.is_checkpoint_done.return_value = None
-    fsm._chunk_task_id = lambda cap, idx=None: f"f0_c0_{cap}"
-    fsm._prefetcher = None
-    fsm._progress_note = MagicMock()
-    fsm._make_tmp = MagicMock(return_value="/tmp/distill.json")
-    fsm._chunk_ctx = {}
-    fsm._transition_success = MagicMock()
+    fsm.chunk_task_id = lambda cap, idx=None: f"f0_c0_{cap}"
+    fsm.prefetcher = None
+    fsm.progress_note = MagicMock()
+    fsm.make_tmp = MagicMock(return_value="/tmp/distill.json")
+    fsm.transition_success = MagicMock()
     return fsm
 
 
@@ -140,7 +145,7 @@ def test_first_attempt_does_not_escalate():
          patch("silica.kernel.recall.episodic.capture_from_distill"):
         d.handle_delegate(fsm)
     assert rd.call_args.kwargs["escalate"] is False
-    assert "escalations" not in fsm.context
+    assert fsm.run_state.escalations == 0
 
 
 def test_steer_retry_escalates_and_counts():
@@ -152,7 +157,7 @@ def test_steer_retry_escalates_and_counts():
         d.handle_delegate(fsm)
     assert rd.call_args.kwargs["escalate"] is True
     assert rd.call_args.kwargs["steer_context"].startswith("## Steering")
-    assert fsm.context["escalations"] == 1
+    assert fsm.run_state.escalations == 1
 
 
 def test_empty_chunk_skips_distiller_but_completes():
@@ -163,8 +168,8 @@ def test_empty_chunk_skips_distiller_but_completes():
          patch("silica.kernel.recall.episodic.capture_from_distill"):
         d.handle_delegate(fsm)
     rd.assert_not_called()
-    fsm._make_tmp.assert_called_once_with({"updates": []})
-    fsm._transition_success.assert_called_once()
+    fsm.make_tmp.assert_called_once_with({"updates": []})
+    fsm.transition_success.assert_called_once()
 
 
 def test_distill_secs_persisted_to_ledger_inputs():

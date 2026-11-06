@@ -9,6 +9,7 @@ runs — so the verdict describes a state the run left behind.
 from silica.kernel.write import deferred as deferred_mod
 import silica.router.anneal as anneal_mod
 from silica.router.orchestrator import InjectorFSM
+from silica.router.run_state import RunState
 
 
 class _Store:
@@ -26,11 +27,9 @@ class _Store:
 
 def _fsm(monkeypatch, *, left=(), written=3, **ctx):
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._file_content_hashes = ["h1"]
-    fsm.context.update(
-        {"has_partial_failure": True, "run_had_ops": True, "final_status": "partial"}
-    )
-    fsm.context.update(ctx)
+    fsm.file_content_hashes = ["h1"]
+    fsm.run_state = RunState(**{"has_partial_failure": True, "run_had_ops": True,
+                                "final_status": "partial", **ctx})
     monkeypatch.setattr(deferred_mod, "get_deferred_store", lambda: _Store(left))
     monkeypatch.setattr(anneal_mod, "sweep_deferred", lambda **kw: {"written": written})
     return fsm
@@ -41,8 +40,8 @@ def test_recovered_write_failures_lift_the_partial_verdict(monkeypatch):
 
     fsm._boundary_anneal()
 
-    assert fsm.context["final_status"] == "Success"
-    assert not fsm.context["has_partial_failure"]
+    assert fsm.run_state.final_status == "Success"
+    assert not fsm.run_state.has_partial_failure
 
 
 def test_a_bundle_still_deferred_keeps_the_partial_verdict(monkeypatch):
@@ -51,7 +50,7 @@ def test_a_bundle_still_deferred_keeps_the_partial_verdict(monkeypatch):
 
     fsm._boundary_anneal()
 
-    assert fsm.context["final_status"] == "partial"
+    assert fsm.run_state.final_status == "partial"
 
 
 def test_a_rolled_back_chunk_keeps_the_partial_verdict(monkeypatch):
@@ -60,7 +59,7 @@ def test_a_rolled_back_chunk_keeps_the_partial_verdict(monkeypatch):
 
     fsm._boundary_anneal()
 
-    assert fsm.context["final_status"] == "partial"
+    assert fsm.run_state.final_status == "partial"
 
 
 def test_an_anneal_that_recovered_nothing_changes_no_verdict(monkeypatch):
@@ -68,4 +67,4 @@ def test_an_anneal_that_recovered_nothing_changes_no_verdict(monkeypatch):
 
     fsm._boundary_anneal()
 
-    assert fsm.context["final_status"] == "partial"
+    assert fsm.run_state.final_status == "partial"

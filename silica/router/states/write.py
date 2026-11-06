@@ -190,17 +190,17 @@ def _commit_docs_for_ops(
 
 
 def handle_snapshot(fsm: "InjectorFSM") -> None:
-    with phase(fsm, fsm._chunk_task_id("snapshot"), "snapshot"):
+    with phase(fsm, fsm.chunk_task_id("snapshot"), "snapshot"):
         from silica.driver.base import NoteRef
 
         try:
-            ops = load_ops(fsm._chunk_ctx["ops_path"])
-            fsm._txn = build_txn(ops)
+            ops = load_ops(fsm.chunk.ops_path)
+            fsm.chunk.txn = build_txn(ops)
         except Exception as e:
             raise RuntimeError(f"SNAPSHOT failed: {e}")
-        fsm._chunk_ctx["txn_id"] = fsm._txn.id
-        fsm._chunk_ctx["snapshot"] = {"txn_id": fsm._txn.id, "created_paths": fsm._txn.created_paths,
-                                      "inverses": fsm._txn.inverses_serialized}
+        fsm.chunk.txn_id = fsm.chunk.txn.id
+        fsm.chunk.snapshot = {"txn_id": fsm.chunk.txn.id, "created_paths": fsm.chunk.txn.created_paths,
+                                      "inverses": fsm.chunk.txn.inverses_serialized}
 
         # S3.2: Take pre-write graph snapshot incrementally
         try:
@@ -248,8 +248,8 @@ def handle_snapshot(fsm: "InjectorFSM") -> None:
                                 logger.debug("Snapshot domain expansion: could not resolve '%s': %s", link_target, ex)
 
             snapshot_domain_list = list(snapshot_domain)
-            fsm._chunk_ctx["snapshot_domain"] = [{"name": r.name, "path": r.path} for r in snapshot_domain_list]
-            fsm._pre_graph = DRIVER.graph_snapshot(snapshot_domain_list)
+            fsm.chunk.snapshot_domain = [{"name": r.name, "path": r.path} for r in snapshot_domain_list]
+            fsm.chunk.pre_graph = DRIVER.graph_snapshot(snapshot_domain_list)
         except Exception as e:
             logger.error("Failed to take pre-write graph snapshot: %s", e)
             raise RuntimeError(f"Pre-write graph snapshot failed: {e}")
@@ -265,10 +265,10 @@ def _attach_section_images(fsm: "InjectorFSM", ops: list) -> None:
     same heading→section join payload.py uses to build the excerpt.
     """
     # One source file per chunk (same derivation as HUB_UPDATE below).
-    _fi, _ci = fsm._chunk_flat_to_fi_ci.get(fsm._current_chunk_idx, (0, 0))
+    _fi, _ci = fsm.chunk_flat_to_fi_ci.get(fsm.chunk_idx, (0, 0))
     source_file = (
-        fsm._file_chunks[_fi]["source_file"]
-        if _fi in fsm._file_chunks
+        fsm.file_chunks[_fi]["source_file"]
+        if _fi in fsm.file_chunks
         else fsm.inbox_file
     )
     if not source_file:
@@ -318,19 +318,18 @@ def _settle_flagged(fsm: "InjectorFSM", ops: list, committed: set[str]) -> None:
     ]
     if not flagged:
         return
-    ledger = getattr(fsm, "warning_ledger", None)
-    if ledger is not None:
+    if fsm.warning_ledger is not None:
         for f in flagged:
-            ledger.add(f["op"].get("path", ""), "soft_gate", f["reason"])
+            fsm.warning_ledger.add(f["op"].get("path", ""), "soft_gate", f["reason"])
     _enqueue_near_title_dedups(fsm, flagged, landed=True)
     _enqueue_short_snippet_expands(fsm, flagged)
 
 
 def handle_write(fsm: "InjectorFSM") -> None:
     from silica.kernel.write.gate import bulk_write_atomic
-    fsm._progress_note(fsm._chunk_task_id("write"), "write", "running")
+    fsm.progress_note(fsm.chunk_task_id("write"), "write", "running")
 
-    ops = load_ops(fsm._chunk_ctx["ops_path"])
+    ops = load_ops(fsm.chunk.ops_path)
     try:
         _attach_section_images(fsm, ops)
     except Exception as _ie:
@@ -340,11 +339,11 @@ def handle_write(fsm: "InjectorFSM") -> None:
     # writes. Resolved once per file in run(); an unresolved index leaves
     # valid_from None, which emits no stamp at all.
     try:
-        _valid_from = fsm._file_valid_from[fsm._current_file_idx]
+        _valid_from = fsm.file_valid_from[fsm.file_idx]
         for op in ops:
             if op.op in (OpType.write, OpType.patch):
                 op.valid_from = _valid_from
-    except (AttributeError, IndexError) as _ve:
+    except IndexError as _ve:
         logger.debug("WRITE: claim stamp skipped (%s)", _ve)
 
     result = bulk_write_atomic(ops, hub=fsm.hub, lint=True)
@@ -352,7 +351,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
 
     # Per-op lint tolerated these pre-existing violations (patch baseline);
     # hand them to the chunk LINT gate so it applies the same tolerance.
-    fsm._chunk_ctx["lint_baseline"] = {
+    fsm.chunk.lint_baseline = {
         r.path: r.baseline_errors for r in result.committed if r.baseline_errors
     }
 
@@ -360,13 +359,13 @@ def handle_write(fsm: "InjectorFSM") -> None:
     # CLEANUP after autolink finalises content → correct version-guard hashes).
     for r in result.committed:
         for inv in r.inverses:
-            fsm._run_inverses.append((r.path, inv, None))
+            fsm.run_inverses.append((r.path, inv, None))
 
     # Brief run-yield for the TUI summary: count NEW notes actually committed
     # (created_paths ∩ committed), accumulated across chunks/files.
-    created = {p.removesuffix(".md") for p in (fsm._txn.created_paths or [])} if fsm._txn else set()
+    created = {p.removesuffix(".md") for p in (fsm.chunk.txn.created_paths or [])} if fsm.chunk.txn else set()
     new_notes = sum(1 for r in result.committed if r.path.removesuffix(".md") in created)
-    fsm.context["yield_notes"] = fsm.context.get("yield_notes", 0) + new_notes
+    fsm.run_state.yield_notes = fsm.run_state.yield_notes + new_notes
 
     if result.failed:
         try:
@@ -379,7 +378,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
                 if (o := next((o for o in ops if o.touched_ref() == r.path), None)) is not None
             ]
             _errors = {r.path: (r.error or "lint/write failed") for r in result.failed}
-            fsm._defer_ops(_deferred, _errors, phase="WRITE")
+            fsm.defer_ops(_deferred, _errors, phase="WRITE")
             # The reasons used to live only in the deferred bundle: a verbose
             # run showed "2 op(s) failed lint/write" and nothing else.
             for _p, _e in _errors.items():
@@ -396,17 +395,17 @@ def handle_write(fsm: "InjectorFSM") -> None:
                     op.op = OpType.skip
                     op.reason = "Deferred because write/lint failed"
             from silica.kernel.write.ops_io import dump_ops
-            dump_ops(fsm._chunk_ctx["ops_path"], ops)
+            dump_ops(fsm.chunk.ops_path, ops)
         except Exception as _de:
             logger.debug("WRITE: deferred save/update failed (non-fatal): %s", _de)
-        fsm.context["has_partial_failure"] = True
+        fsm.run_state.has_partial_failure = True
 
     if not result.committed and result.failed:
-        fsm._progress_note(fsm._chunk_task_id("write"), "write", "failed",
+        fsm.progress_note(fsm.chunk_task_id("write"), "write", "failed",
                             error=f"all {len(result.failed)} ops failed lint/write")
 
     # Synthesise the legacy `write` result shape that downstream code reads.
-    fsm.context["write"] = {
+    fsm.run_state.write = {
         "success": True,
         "successful": len(result.committed),
         "failed": [{"path": r.path, "error": r.error} for r in result.failed],
@@ -418,13 +417,13 @@ def handle_write(fsm: "InjectorFSM") -> None:
         os.path.splitext(os.path.basename(r.path))[0].lower()
         for r in result.failed if r.path
     )
-    fsm._chunk_ctx["deferred_stems"] = list(_deferred_stems)
+    fsm.chunk.deferred_stems = list(_deferred_stems)
 
     # Register committed notes in the RunManifest and refresh embedding index.
     try:
         from silica.kernel.progress import RunManifestEntry
-        vault_ctx = fsm.context.get("vault_graph_ctx", {})
-        _chunk_source = getattr(fsm, "_current_source_file", "") or ""
+        vault_ctx = fsm.run_state.vault_graph_ctx or {}
+        _chunk_source = fsm.current_source_file
         for op in ops:
             path = op.touched_ref()
             if op.op not in (OpType.write, OpType.patch) or not path:
@@ -460,7 +459,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
             ):
                 # Mark the in-memory index dirty so the end-of-run flush knows
                 # to persist (and only then — no flush when nothing changed).
-                fsm.context["_embed_dirty"] = True
+                fsm.run_state.embed_dirty = True
         except Exception as _ee:
             logger.debug("WRITE: embed refresh skipped (%s)", _ee)
 
@@ -475,7 +474,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
             save=False,
         )
         if _n_cooccur:
-            fsm.context["_cooccur_dirty"] = True
+            fsm.run_state.cooccur_dirty = True
 
         # Best-effort incremental lexical (BM25) refresh — opt-in by index
         # presence, so vaults without a lexical index stay byte-identical.
@@ -498,7 +497,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
                         # Only mark dirty after a real upsert, so a run that
                         # indexed nothing never triggers a spurious index save
                         # (mirrors the embed/cooccur dirty-flag gating).
-                        fsm.context["_lexical_dirty"] = True
+                        fsm.run_state.lexical_dirty = True
                     except Exception as _re:
                         logger.debug("WRITE: lexical refresh failed for '%s': %s", path, _re)
         except Exception as _le:
@@ -516,34 +515,34 @@ def handle_write(fsm: "InjectorFSM") -> None:
         logger.debug("WRITE: git auto-commit skipped (%s)", _ge)
 
     if result.committed or not result.failed:
-        fsm._progress_note(fsm._chunk_task_id("write"), "write", "done")
+        fsm.progress_note(fsm.chunk_task_id("write"), "write", "done")
 
     # Title-index run cache (Tier 1): make this chunk's new notes visible to
     # later chunks' AUTOLINK/BACKLINK without a fresh full-vault scan. Only
     # append when the cache exists — first AUTOLINK builds it lazily.
-    _cached_refs = getattr(fsm, "_run_title_refs", None)
-    if _cached_refs is not None and fsm._txn is not None:
+    _cached_refs = fsm.run_title_refs
+    if _cached_refs is not None and fsm.chunk.txn is not None:
         from silica.driver.base import NoteRef
         _known = {os.path.abspath(r.path) for r in _cached_refs if getattr(r, "path", None)}
-        for _p in (fsm._txn.created_paths or []):
+        for _p in (fsm.chunk.txn.created_paths or []):
             if os.path.abspath(_p) not in _known:
                 _stem = os.path.splitext(os.path.basename(_p))[0]
                 _cached_refs.append(NoteRef(name=_stem, path=_p))
 
-    fsm._transition_success()
+    fsm.transition_success()
 
 
 def handle_hub_update(fsm: "InjectorFSM") -> None:
     """Append MOC links to the Hub note for all newly written notes."""
-    fsm._progress_note(fsm._chunk_task_id("hub_update"), "hub_update", "running")
+    fsm.progress_note(fsm.chunk_task_id("hub_update"), "hub_update", "running")
     if not fsm.hub:
         logger.info("HUB_UPDATE: no hub configured, skipping")
-        fsm._progress_note(fsm._chunk_task_id("hub_update"), "hub_update", "done")
-        fsm._transition_success()
+        fsm.progress_note(fsm.chunk_task_id("hub_update"), "hub_update", "done")
+        fsm.transition_success()
         return
 
     try:
-        ops = load_ops(fsm._chunk_ctx["ops_path"])
+        ops = load_ops(fsm.chunk.ops_path)
     except Exception as e:
         raise RuntimeError(f"HUB_UPDATE: failed to read ops: {e}")
 
@@ -573,15 +572,15 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
 
     if not hub_notes and not parent_notes:
         logger.info("HUB_UPDATE: no new notes to link, skipping")
-        fsm._progress_note(fsm._chunk_task_id("hub_update"), "hub_update", "done")
-        fsm._transition_success()
+        fsm.progress_note(fsm.chunk_task_id("hub_update"), "hub_update", "done")
+        fsm.transition_success()
         return
 
     hub_path = _moc_target(hub_name, fsm.target_dir)
     if not hub_path:  # the hub resolved to an inbox note — never a MOC target
         logger.info("HUB_UPDATE: hub '%s' is staging, skipping", hub_name)
-        fsm._progress_note(fsm._chunk_task_id("hub_update"), "hub_update", "done")
-        fsm._transition_success()
+        fsm.progress_note(fsm.chunk_task_id("hub_update"), "hub_update", "done")
+        fsm.transition_success()
         return
     from silica.driver.base import NoteRef
     hub_ref = NoteRef(name=hub_name, path=hub_path)
@@ -590,31 +589,31 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
         hub_note = DRIVER.read_note(hub_ref)
     except Exception as e:
         logger.warning("HUB_UPDATE: hub '%s' not readable: %s — skipping", hub_path, e)
-        fsm._progress_note(fsm._chunk_task_id("hub_update"), "hub_update", "done")
-        fsm._transition_success()
+        fsm.progress_note(fsm.chunk_task_id("hub_update"), "hub_update", "done")
+        fsm.transition_success()
         return
 
     # If hub pre-existed (not created in this txn), register a content-based
     # rollback inverse using the content we just read — more reliable than
     # history:restore whose version positions shift after each new write.
     hub_path_norm = hub_path.replace("\\", "/")
-    hub_is_new = fsm._txn is not None and any(
+    hub_is_new = fsm.chunk.txn is not None and any(
         p.replace("\\", "/") == hub_path_norm
-        for p in (fsm._txn.created_paths or [])
+        for p in (fsm.chunk.txn.created_paths or [])
     )
-    if not hub_is_new and fsm._txn is not None:
+    if not hub_is_new and fsm.chunk.txn is not None:
         from silica.kernel.write.ops import InverseOp, InverseOpKind
         hub_inverse = InverseOp(
             kind=InverseOpKind.restore_version,
             path=hub_path,
             prior_content=hub_note.content,
         )
-        fsm._txn.inverses.append(hub_inverse)
+        fsm.chunk.txn.inverses.append(hub_inverse)
 
     # Cross-cluster integrity check: warn when new notes land in a different
     # cluster from the hub.  This is informational only — the MOC link is
     # still written, but the log helps identify structural drift.
-    _gctx = fsm.context.get("vault_graph_ctx", {})
+    _gctx = fsm.run_state.vault_graph_ctx or {}
     _hub_key = hub_path.removesuffix(".md")
     _hub_cluster = _gctx.get(_hub_key, {}).get("cluster_id", -1)
     if _gctx and _hub_cluster >= 0:
@@ -630,10 +629,10 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
 
     # Derive the actual source file for this chunk (fsm.inbox_file is always
     # the first file and never updates in multi-file runs — use the flat index map).
-    _fi, _ci = fsm._chunk_flat_to_fi_ci.get(fsm._current_chunk_idx, (0, 0))
+    _fi, _ci = fsm.chunk_flat_to_fi_ci.get(fsm.chunk_idx, (0, 0))
     _source_file = (
-        fsm._file_chunks[_fi]["source_file"]
-        if _fi in fsm._file_chunks
+        fsm.file_chunks[_fi]["source_file"]
+        if _fi in fsm.file_chunks
         else fsm.inbox_file
     )
     source_name = os.path.splitext(os.path.basename(_source_file))[0]
@@ -667,9 +666,9 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
         raise RuntimeError(f"HUB_UPDATE: failed to update hub '{hub_path}': {e}")
 
     # Extend snapshot_domain so LINT's graph regression check covers the hub's new links
-    existing_paths = {d["path"] for d in fsm._chunk_ctx.get("snapshot_domain", [])}
+    existing_paths = {d["path"] for d in fsm.chunk.snapshot_domain}
     if hub_path not in existing_paths:
-        fsm._chunk_ctx.setdefault("snapshot_domain", []).append({"name": hub_name, "path": hub_path})
+        fsm.chunk.snapshot_domain.append({"name": hub_name, "path": hub_path})
 
     # Write MOC sections to specific parent notes (best-effort — only active when
     # the distiller emits op.parent, which requires the Block 4 prompt update).
@@ -689,22 +688,22 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
                 p_ref = _NR(name=parent_name, path=parent_path)
                 p_note = DRIVER.read_note(p_ref)
                 # Register rollback inverse for parent note
-                if fsm._txn is not None:
+                if fsm.chunk.txn is not None:
                     p_inverse = InverseOp(
                         kind=InverseOpKind.restore_version,
                         path=parent_path,
                         prior_content=p_note.content,
                     )
-                    fsm._txn.inverses.append(p_inverse)
+                    fsm.chunk.txn.inverses.append(p_inverse)
                 # Build and write parent MOC block (same language-aware heading,
                 # same deduplication logic as the hub section above).
                 p_heading = _moc_heading(source_name, p_note.content)
                 p_note_lines = [_moc_line(p, d) for p, d in p_new_notes]
                 new_p_content = _merge_moc_section(p_note.content, p_heading, p_note_lines)
                 DRIVER.overwrite(parent_path, new_p_content)
-                existing_paths = {d["path"] for d in fsm._chunk_ctx.get("snapshot_domain", [])}
+                existing_paths = {d["path"] for d in fsm.chunk.snapshot_domain}
                 if parent_path not in existing_paths:
-                    fsm._chunk_ctx.setdefault("snapshot_domain", []).append(
+                    fsm.chunk.snapshot_domain.append(
                         {"name": parent_name, "path": parent_path}
                     )
                 logger.info(
@@ -714,5 +713,5 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
             except Exception as _pe:
                 logger.warning("HUB_UPDATE: failed to update parent '%s': %s", parent_path, _pe)
 
-    fsm._progress_note(fsm._chunk_task_id("hub_update"), "hub_update", "done")
-    fsm._transition_success()
+    fsm.progress_note(fsm.chunk_task_id("hub_update"), "hub_update", "done")
+    fsm.transition_success()

@@ -207,8 +207,8 @@ class TestFSMThreading:
 
         fsm = InjectorFSM("Inbox/test.md", "TargetDir",
                           distill_profile="extractive")
-        fsm._chunks = [{"chunk_id": 0, "concepts": ["a"]}]
-        fsm._current_chunk_idx = 0
+        fsm.chunks = [{"chunk_id": 0, "concepts": ["a"]}]
+        fsm.chunk_idx = 0
         return fsm, InjectorState
 
     def test_delegate_hands_the_profile_to_the_distiller(self, monkeypatch):
@@ -225,7 +225,7 @@ class TestFSMThreading:
             return {"updates": []}
 
         with patch("silica.router.states.distill.run_distiller", side_effect=_run), \
-             patch.object(fsm, "_make_tmp", return_value="tmp.json"):
+             patch.object(fsm, "make_tmp", return_value="tmp.json"):
             fsm.step()
 
         assert seen["profile"] == "extractive"
@@ -235,7 +235,7 @@ class TestFSMThreading:
 
         fsm, InjectorState = self._fsm()
         fsm.state = InjectorState.VALIDATE
-        fsm._chunk_ctx["sanitized"] = {"parsed": {"updates": []}}
+        fsm.chunk.sanitized = {"parsed": {"updates": []}}
         seen = {}
 
         def _validate(ops, payloads, **kwargs):
@@ -245,7 +245,7 @@ class TestFSMThreading:
 
         with patch("silica.router.states.distill.validate_ops",
                    side_effect=_validate), \
-             patch.object(fsm, "_make_tmp", return_value="tmp.json"):
+             patch.object(fsm, "make_tmp", return_value="tmp.json"):
             fsm.step()
 
         assert seen["profile"] == "extractive"

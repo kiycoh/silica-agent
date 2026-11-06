@@ -7,6 +7,7 @@ profile resolution never has to guess what the ingress lane already knew.
 """
 
 from pathlib import Path
+from silica.router.run_state import FileState, RunState
 
 
 class TestSniffCallShape:
@@ -207,15 +208,15 @@ class TestPerFilePlumbing:
         from unittest.mock import MagicMock
 
         fsm = SimpleNamespace()
-        fsm._chunks = [{"schema_version": 1,
+        fsm.chunks = [{"schema_version": 1,
                         "batches": [{"inbox_file": "in.md",
                                      "concepts": [{"name": "c0"}]}]}]
-        fsm._chunk_flat_to_fi_ci = {0: (0, 0)}
-        fsm._current_file_idx = 0
-        fsm._current_chunk_idx = 0
-        fsm._file_chunks = {}
+        fsm.chunk_flat_to_fi_ci = {0: (0, 0)}
+        fsm.file_idx = 0
+        fsm.chunk_idx = 0
+        fsm.file_chunks = {}
         fsm.inbox_file = "in.md"
-        fsm.context = dict(pinned or {})
+        fsm.run_state = RunState(files={0: FileState(profile=pinned)} if pinned else {})
         fsm.target_dir = "Notes"
         fsm.hub = None
         fsm.distill_profile = run_level
@@ -224,21 +225,21 @@ class TestPerFilePlumbing:
         fsm.progress = MagicMock()
         fsm.progress.digest.return_value = "digest"
         fsm.progress.started_at = "2026-08-16T00:00:00"
-        fsm._chunk_task_id = lambda cap, idx=None: f"f0_c0_{cap}"
-        fsm._prefetcher = None
+        fsm.chunk_task_id = lambda cap, idx=None: f"f0_c0_{cap}"
+        fsm.prefetcher = None
         return fsm
 
     def test_file_profile_prefers_the_run_level_arg(self):
         from silica.router.states.distill import _file_profile
 
-        fsm = self._stub_fsm(pinned={"file_0_profile": "transcript"},
+        fsm = self._stub_fsm(pinned="transcript",
                              run_level="extractive")
         assert _file_profile(fsm, 0) == "extractive"
 
     def test_file_profile_reads_the_payload_pin(self):
         from silica.router.states.distill import _file_profile
 
-        fsm = self._stub_fsm(pinned={"file_0_profile": "transcript"})
+        fsm = self._stub_fsm(pinned="transcript")
         assert _file_profile(fsm, 0) == "transcript"
 
     def test_file_profile_defaults_to_none_when_nothing_is_pinned(self):
@@ -250,7 +251,7 @@ class TestPerFilePlumbing:
     def test_distill_inputs_carry_the_pinned_profile(self):
         from silica.router.states.distill import _distill_inputs
 
-        fsm = self._stub_fsm(pinned={"file_0_profile": "clip"})
+        fsm = self._stub_fsm(pinned="clip")
         kw = _distill_inputs(fsm, 0)
         assert kw["profile"] == "clip"
 
@@ -263,9 +264,9 @@ class TestPayloadPin:
         fsm = TestPerFilePlumbing()._stub_fsm()
         _pin_file_profile(fsm, 0, "Inbox/talk.md")
 
-        assert fsm.context["file_0_profile"] == "transcript"
-        assert fsm.context["file_0_form"] == "transcript"
-        assert fsm.context["file_0_form_origin"] == "stamp"
+        assert fsm.run_state.file(0).profile == "transcript"
+        assert fsm.run_state.file(0).form == "transcript"
+        assert fsm.run_state.file(0).form_origin == "stamp"
 
     def test_pin_is_skipped_when_the_run_names_a_profile(self, tmp_vault, monkeypatch):
         import silica.kernel.forms as forms
@@ -279,7 +280,7 @@ class TestPayloadPin:
         fsm = TestPerFilePlumbing()._stub_fsm(run_level="promotion")
         _pin_file_profile(fsm, 0, "Inbox/x.md")
 
-        assert "file_0_profile" not in fsm.context
+        assert fsm.run_state.file(0).profile is None
 
     def test_a_draft_verdict_inside_the_fsm_degrades_to_the_fallback(self, tmp_vault, monkeypatch):
         """Filing happens at dispatch; a draft that reaches the FSM anyway
@@ -292,9 +293,9 @@ class TestPayloadPin:
         fsm = TestPerFilePlumbing()._stub_fsm()
         _pin_file_profile(fsm, 0, "Inbox/vo.md")
 
-        assert fsm.context["file_0_profile"] == "default"
-        assert fsm.context["file_0_form"] == "draft"
-        assert fsm.context["file_0_form_origin"] == "sniff"
+        assert fsm.run_state.file(0).profile == "default"
+        assert fsm.run_state.file(0).form == "draft"
+        assert fsm.run_state.file(0).form_origin == "sniff"
 
 
 class TestLenses:

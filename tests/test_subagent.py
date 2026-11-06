@@ -590,7 +590,7 @@ def test_item_provenance_is_none_without_a_source():
 
 def test_dedup_items_carry_the_chunk_s_own_file_not_file_zero():
     """`fsm.inbox_file` is pinned to inbox_files[0] for the whole run while
-    `_current_content_hash` resolves per chunk, so on a folder nucleation every
+    `current_content_hash` resolves per chunk, so on a folder nucleation every
     worker's notes were filed under file 0 paired with another file's sha —
     source 0 ends up with records at two sha values, which check_renucleate
     reads as "modified" and drifted_notes reads as derived from a superseded
@@ -609,8 +609,8 @@ def test_dedup_items_carry_the_chunk_s_own_file_not_file_zero():
         work_queue=q,
         inbox_files=["Inbox/a.md", "Inbox/b.md", "Inbox/c.md"],
         inbox_file="Inbox/a.md",          # pinned to files[0], forever
-        _current_source_file="Inbox/c.md",  # the chunk actually being distilled
-        _current_content_hash="sha-of-c",
+        current_source_file="Inbox/c.md",  # the chunk actually being distilled
+        current_content_hash="sha-of-c",
         hub="Hub", target_dir="Target",
         progress=SimpleNamespace(run_id="run-9"),
     )
@@ -636,11 +636,11 @@ def test_expand_items_carry_the_same_triple():
 
     q = _Q()
     fsm = SimpleNamespace(
-        work_queue=q, inbox_file="Inbox/a.md", _current_source_file="Inbox/c.md",
-        _current_content_hash="sha-of-c", hub="Hub", target_dir="Target",
+        work_queue=q, inbox_file="Inbox/a.md", current_source_file="Inbox/c.md",
+        current_content_hash="sha-of-c", hub="Hub", target_dir="Target",
         progress=SimpleNamespace(run_id="run-9"),
-        _chunks=[{"batches": [{"concepts": [{"name": "Beta", "inbox_excerpt": "…"}]}]}],
-        _current_chunk_idx=0,
+        chunks=[{"batches": [{"concepts": [{"name": "Beta", "inbox_excerpt": "…"}]}]}],
+        chunk_idx=0,
     )
     _enqueue_short_snippet_expands(fsm, [
         {"op": {"heading": "Beta", "path": "Target/Beta.md"},

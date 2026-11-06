@@ -15,6 +15,7 @@ from silica.router.states import finalize
 from silica.router.orchestrator import InjectorFSM
 from silica.router.phases import InjectorState
 from silica.tools import TOOLS
+from silica.router.run_state import ChunkState
 
 
 # ---------------------------------------------------------------------------
@@ -112,11 +113,11 @@ class TestT1MultiFileInit:
             }]},
         ]
 
-        # No builtins.open patch here — _make_tmp needs real file I/O to ~/.silica/tmp
+        # No builtins.open patch here — make_tmp needs real file I/O to ~/.silica/tmp
         # We bypass run() by setting state directly so no inbox file open is needed
         fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
-        fsm._file_canonicals = ["inbox/a", "inbox/b"]
-        fsm._file_content_hashes = ["", ""]
+        fsm.file_canonicals = ["inbox/a", "inbox/b"]
+        fsm.file_content_hashes = ["", ""]
         # File 0 setup pass
         fsm.state = InjectorState.RECON
         fsm.step()  # RECON → PAYLOAD
@@ -231,50 +232,44 @@ class TestT2ChunkContainment:
         assert res["final_status"] == "partial"
 
         # Progress has partial failure flag
-        assert res.get("has_partial_failure") is True
+        assert fsm.run_state.has_partial_failure is True
 
     def test_context_reset_between_chunks(self):
-        """Per-chunk namespace is atomically cleared after _contain_chunk_failure."""
+        """Per-chunk namespace is atomically cleared after contain_chunk_failure."""
         fsm = InjectorFSM("Inbox/test.md", "Concepts")
         # Simulate state after a failed chunk using the chunk namespace
-        fsm.context["chunk"] = {
-            "ops_path": "/tmp/ops.json",
-            "sanitized": {"parsed": []},
-            "snapshot": {"txn_id": "txn_1", "inverses": []},
-            "txn_id": "txn_1",
-        }
-        # idx-keyed keys live outside the chunk namespace and are safe across chunks
-        fsm.context["chunk_0_collision_ops"] = []
-        fsm.context["chunk_0_hash"] = "abc123"
-        fsm._current_chunk_idx = 0
-        fsm._chunks = [{"chunk": 0}, {"chunk": 1}]
-        fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}
+        fsm.run_state.chunks[fsm.chunk_idx] = ChunkState(
+            ops_path="/tmp/ops.json",
+            sanitized={"parsed": []},
+            snapshot={"txn_id": "txn_1", "inverses": []},
+            txn_id="txn_1",
+        )
+        fsm.chunk_idx = 0
+        fsm.chunks = [{"chunk": 0}, {"chunk": 1}]
+        fsm.chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}
 
-        fsm._contain_chunk_failure()
+        fsm.contain_chunk_failure()
 
-        # The chunk namespace must be atomically cleared
-        assert fsm.context.get("chunk") is None
-        # idx-keyed keys are untouched (already safe per-chunk via idx)
-        assert "chunk_0_collision_ops" in fsm.context
-        assert "chunk_0_hash" in fsm.context
+        # The chunk's state goes whole, so nothing of it reaches the next one
+        assert 0 not in fsm.run_state.chunks
         # Advanced to next chunk
-        assert fsm._current_chunk_idx == 1
+        assert fsm.chunk_idx == 1
         assert fsm.state in (InjectorState.COLLISION, InjectorState.DELEGATE)
 
     def test_last_chunk_failure_goes_to_done(self):
         """When the only chunk fails, state → DONE with final_status='failed'
         (zero commits: 'partial' would oversell a fully-failed run)."""
         fsm = InjectorFSM("Inbox/test.md", "Concepts")
-        fsm._chunks = [{"chunk": 0}]
-        fsm._current_chunk_idx = 0
-        fsm._chunk_flat_to_fi_ci = {0: (0, 0)}
+        fsm.chunks = [{"chunk": 0}]
+        fsm.chunk_idx = 0
+        fsm.chunk_flat_to_fi_ci = {0: (0, 0)}
 
-        fsm._contain_chunk_failure()
+        fsm.contain_chunk_failure()
 
         assert fsm.state == InjectorState.DONE
-        assert fsm.context["final_status"] == "failed"
-        assert fsm.context.get("has_partial_failure") is True
-        assert len(fsm.context["failed_chunks"]) == 1  # per-chunk ledger, not last-error-wins
+        assert fsm.run_state.final_status == "failed"
+        assert fsm.run_state.has_partial_failure is True
+        assert len(fsm.run_state.failed_chunks) == 1  # per-chunk ledger, not last-error-wins
 
     def test_last_chunk_failure_still_records_file_outcome(self, tmp_vault):
         """A file whose LAST chunk fails never reaches CLEANUP, but its earlier
@@ -286,10 +281,10 @@ class TestT2ChunkContainment:
         from silica.kernel.base.layout import DEFAULT_LOG_FILENAME
 
         fsm = InjectorFSM("Inbox/lezione-07.md", "Concepts")
-        fsm._chunks = [{"chunk": 0}, {"chunk": 1}]
-        fsm._current_chunk_idx = 1  # last chunk of the file
-        fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}
-        fsm._file_chunks = {0: {"source_file": "Inbox/lezione-07.md",
+        fsm.chunks = [{"chunk": 0}, {"chunk": 1}]
+        fsm.chunk_idx = 1  # last chunk of the file
+        fsm.chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}
+        fsm.file_chunks = {0: {"source_file": "Inbox/lezione-07.md",
                                 "chunks": [{"chunk": 0}, {"chunk": 1}]}}
         # chunk 0 committed a real note before chunk 1 blew up
         fsm.manifest.entries.append(RunManifestEntry(
@@ -297,22 +292,22 @@ class TestT2ChunkContainment:
             source_basename="lezione-07.md", op="write",
         ))
 
-        fsm._contain_chunk_failure()
+        fsm.contain_chunk_failure()
 
         content = (Path(CONFIG.vault_path) / DEFAULT_LOG_FILENAME).read_text(encoding="utf-8")
         assert "nucleate `lezione-07.md` → 1 new, 0 patch" in content
-        assert fsm.context["files_summary"] == [
+        assert fsm.run_state.files_summary == [
             {"file": "lezione-07.md", "new": 1, "patch": 0, "deferred": 0}
         ]
 
     def test_file_outcome_logged_once_across_paths(self, tmp_vault):
         """The success (CLEANUP) and failure (containment) entry points must not
-        both record the same file — the _files_logged guard keeps it to one."""
+        both record the same file — the files_logged guard keeps it to one."""
         fsm = InjectorFSM("Inbox/lezione-07.md", "Concepts")
         from silica.router.states.finalize import _log_nucleate_completion
         _log_nucleate_completion(fsm, 0, "Inbox/lezione-07.md")
         _log_nucleate_completion(fsm, 0, "Inbox/lezione-07.md")
-        assert len(fsm.context["files_summary"]) == 1
+        assert len(fsm.run_state.files_summary) == 1
 
     def test_on_error_per_chunk_routes_to_rollback(self):
         """DELEGATE/SANITIZE/SNAPSHOT errors now route to ROLLBACK (not ERROR)."""
@@ -377,10 +372,10 @@ class TestT3Resume:
 
 class TestT4PerFileCleanup:
     def test_write_ledger_for_file_uses_per_file_canonical(self):
-        """_write_ledger_for_file records ops with the correct file's canonical."""
+        """write_ledger_for_file records ops with the correct file's canonical."""
         fsm = InjectorFSM("Inbox/a.md", "Concepts")
-        fsm._file_canonicals = ["inbox/a", "inbox/b"]
-        fsm._file_content_hashes = ["hash_a", "hash_b"]
+        fsm.file_canonicals = ["inbox/a", "inbox/b"]
+        fsm.file_content_hashes = ["hash_a", "hash_b"]
 
         mock_op = MagicMock()
         mock_op.op.value = "write"
@@ -388,9 +383,9 @@ class TestT4PerFileCleanup:
 
         with patch_run("load_ops", return_value=[mock_op]):
             with patch("silica.kernel.write.ledger.get_ledger") as mock_ledger:
-                fsm.context.setdefault("chunk", {})["ops_path"] = "/tmp/ops.json"
-                fsm.context.setdefault("chunk", {})["txn_id"] = "txn_1"
-                fsm._write_ledger_for_file(1, "committed")
+                fsm.chunk.ops_path = "/tmp/ops.json"
+                fsm.chunk.txn_id = "txn_1"
+                fsm.write_ledger_for_file(1, "committed")
         # source_canonical should be for fi=1 ("inbox/b")
         assert mock_ledger.return_value.record.called
         args = mock_ledger.return_value.record.call_args
@@ -404,12 +399,12 @@ class TestT4PerFileCleanup:
                 with patch("silica.kernel.write.ledger.get_ledger"):
                     fsm = InjectorFSM("Inbox/test.md", "Concepts")
                     # Two chunks under one file group
-                    fsm._file_chunks = {0: {"source_file": "Inbox/test.md", "chunks": [{"a": 1}, {"b": 2}]}}
-                    fsm._chunks = [{"a": 1}, {"b": 2}]
-                    fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}
-                    fsm._current_chunk_idx = 0  # ci=0, not last
-                    fsm.context["ops_path"] = "/tmp/ops.json"
-                    fsm.context["txn_id"] = "txn_1"
+                    fsm.file_chunks = {0: {"source_file": "Inbox/test.md", "chunks": [{"a": 1}, {"b": 2}]}}
+                    fsm.chunks = [{"a": 1}, {"b": 2}]
+                    fsm.chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}
+                    fsm.chunk_idx = 0  # ci=0, not last
+                    fsm.chunk.ops_path = "/tmp/ops.json"
+                    fsm.chunk.txn_id = "txn_1"
                     finalize.handle_cleanup(fsm)
         mock_cleanup.assert_not_called()
 
@@ -419,12 +414,12 @@ class TestT4PerFileCleanup:
             with patch_run("load_ops", return_value=[]):
                 with patch("silica.kernel.write.ledger.get_ledger"):
                     fsm = InjectorFSM("Inbox/test.md", "Concepts")
-                    fsm._file_chunks = {0: {"source_file": "Inbox/test.md", "chunks": [{"a": 1}, {"b": 2}]}}
-                    fsm._chunks = [{"a": 1}, {"b": 2}]
-                    fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}
-                    fsm._current_chunk_idx = 1  # ci=1, last chunk
-                    fsm.context["ops_path"] = "/tmp/ops.json"
-                    fsm.context["txn_id"] = "txn_1"
+                    fsm.file_chunks = {0: {"source_file": "Inbox/test.md", "chunks": [{"a": 1}, {"b": 2}]}}
+                    fsm.chunks = [{"a": 1}, {"b": 2}]
+                    fsm.chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}
+                    fsm.chunk_idx = 1  # ci=1, last chunk
+                    fsm.chunk.ops_path = "/tmp/ops.json"
+                    fsm.chunk.txn_id = "txn_1"
                     finalize.handle_cleanup(fsm)
         mock_cleanup.assert_called_once_with("Inbox/test.md")
 
@@ -445,8 +440,8 @@ class TestT5DeadCodeRemoved:
         mock_payload.return_value = {"chunks": [{"chunk_id": 0}]}
 
         fsm = InjectorFSM("Inbox/test.md", "Concepts")
-        fsm._file_canonicals = ["inbox/test"]
-        fsm._file_content_hashes = [""]
+        fsm.file_canonicals = ["inbox/test"]
+        fsm.file_content_hashes = [""]
         fsm.state = InjectorState.RECON
         with caplog.at_level(logging.DEBUG):
             fsm.step()  # RECON
@@ -649,12 +644,12 @@ def test_next_uncommitted_chunk_idx_skips_committed_files():
     from silica.router.orchestrator import InjectorFSM
 
     fsm = InjectorFSM(inbox_files=["Inbox/committed.md", "Inbox/new.md"], target_dir="Concepts")
-    fsm._chunks = [
+    fsm.chunks = [
         {"source_file": "Inbox/committed.md", "batches": []},
         {"source_file": "Inbox/new.md", "batches": [{"concepts": [{"title": "T"}]}]},
     ]
-    fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (1, 0)}
-    fsm._committed_file_indices = {0}  # file 0 is committed
+    fsm.chunk_flat_to_fi_ci = {0: (0, 0), 1: (1, 0)}
+    fsm.committed_file_indices = {0}  # file 0 is committed
 
     # From start=1, should return 1 (fi=1, not committed)
     assert fsm._next_uncommitted_chunk_idx(1) == 1
@@ -663,23 +658,23 @@ def test_next_uncommitted_chunk_idx_skips_committed_files():
     assert fsm._next_uncommitted_chunk_idx(0) == 1
 
     # With both committed, should return len(chunks) = 2 (exhausted)
-    fsm._committed_file_indices = {0, 1}
+    fsm.committed_file_indices = {0, 1}
     assert fsm._next_uncommitted_chunk_idx(0) == 2
 
 
 def test_current_source_file_returns_per_chunk_file():
-    """_current_source_file must return the file for the currently-processed chunk."""
+    """current_source_file must return the file for the currently-processed chunk."""
     from silica.router.orchestrator import InjectorFSM
 
     fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
-    fsm._file_chunks = {
+    fsm.file_chunks = {
         0: {"source_file": "Inbox/a.md", "chunks": [{}]},
         1: {"source_file": "Inbox/b.md", "chunks": [{}]},
     }
-    fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (1, 0)}
+    fsm.chunk_flat_to_fi_ci = {0: (0, 0), 1: (1, 0)}
 
-    fsm._current_chunk_idx = 0
-    assert fsm._current_source_file == "Inbox/a.md"
+    fsm.chunk_idx = 0
+    assert fsm.current_source_file == "Inbox/a.md"
 
-    fsm._current_chunk_idx = 1
-    assert fsm._current_source_file == "Inbox/b.md"
+    fsm.chunk_idx = 1
+    assert fsm.current_source_file == "Inbox/b.md"

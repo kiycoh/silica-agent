@@ -6,6 +6,8 @@ vault — that is how the four «Machine Learning» umbrella notes were born.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -184,9 +186,9 @@ def test_near_title_rejection_enqueues_dedup_workitem():
         hub = "Corso"
         target_dir = "Corso"
         inbox_file = "Inbox/lez.md"
-        _current_source_file = "Inbox/lez.md"
-        _current_content_hash = "hash9"
-        progress = None
+        current_source_file = "Inbox/lez.md"
+        current_content_hash = "hash9"
+        progress = SimpleNamespace(run_id="")
 
     rejected = [
         {"op": {"op": "write", "heading": "Description", "path": "Corso/Description.md",

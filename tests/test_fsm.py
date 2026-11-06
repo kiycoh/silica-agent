@@ -7,6 +7,7 @@ from silica.router import states
 from silica.router.orchestrator import InjectorFSM
 from silica.router.phases import InjectorState
 from silica.tools import TOOLS
+from silica.router.run_state import ChunkState
 
 
 @pytest.fixture(autouse=True)
@@ -117,16 +118,16 @@ def test_silica_run_injector_is_registered():
 @patch("silica.router.states.distill.run_distiller")
 def test_fsm_delegate_single_chunk(mock_run_distiller):
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._chunks = [
+    fsm.chunks = [
         {"chunk_id": 0, "concepts": ["a"]},
         {"chunk_id": 1, "concepts": ["b"]}
     ]
-    fsm._current_chunk_idx = 0
+    fsm.chunk_idx = 0
     fsm.state = InjectorState.DELEGATE
 
     mock_run_distiller.return_value = {"updates": [{"op": "write", "path": "notes/note1.md", "heading": "Note 1"}]}
 
-    with patch.object(fsm, "_make_tmp", return_value="temp_chunk_path.json") as mock_make_tmp:
+    with patch.object(fsm, "make_tmp", return_value="temp_chunk_path.json") as mock_make_tmp:
         fsm.step()
         
         call_kwargs = mock_run_distiller.call_args.kwargs
@@ -139,7 +140,7 @@ def test_fsm_delegate_single_chunk(mock_run_distiller):
         assert call_kwargs["session_date"] == fsm.progress.started_at[:10]
         mock_make_tmp.assert_called_once_with({"updates": [{"op": "write", "path": "notes/note1.md", "heading": "Note 1"}]})
         assert fsm.state == InjectorState.SANITIZE
-        assert fsm.context["chunk"]["distiller_output_path"] == "temp_chunk_path.json"
+        assert fsm.chunk.distiller_output_path == "temp_chunk_path.json"
 
 
 # Pin k=1: asserts the inline delegate's session_date + a single read_note; at
@@ -152,10 +153,10 @@ def test_fsm_delegate_dated_doc_anchors_session_date(mock_run_distiller):
     from silica.driver.base import NoteContent, NoteRef
 
     fsm = InjectorFSM("Inbox/journal.md", "TargetDir")
-    fsm._chunks = [{"chunk_id": 0, "concepts": ["a"]}]
-    fsm._file_chunks = {0: {"source_file": "Inbox/journal.md", "chunks": fsm._chunks}}
-    fsm._chunk_flat_to_fi_ci = {0: (0, 0)}
-    fsm._current_chunk_idx = 0
+    fsm.chunks = [{"chunk_id": 0, "concepts": ["a"]}]
+    fsm.file_chunks = {0: {"source_file": "Inbox/journal.md", "chunks": fsm.chunks}}
+    fsm.chunk_flat_to_fi_ci = {0: (0, 0)}
+    fsm.chunk_idx = 0
     fsm.state = InjectorState.DELEGATE
 
     mock_run_distiller.return_value = {"updates": [{"op": "write", "path": "notes/n.md", "heading": "N"}]}
@@ -167,7 +168,7 @@ def test_fsm_delegate_dated_doc_anchors_session_date(mock_run_distiller):
             "date: 9999-01-01 in the body must not match\n"
         ),
     )
-    with patch.object(fsm, "_make_tmp", return_value="tmp.json"), \
+    with patch.object(fsm, "make_tmp", return_value="tmp.json"), \
          patch("silica.router.states.distill.DRIVER") as driver:
         driver.read_note.return_value = doc
         fsm.step()
@@ -307,38 +308,38 @@ def test_fsm_gate_all_rejected_steers_then_defers(mock_validate, monkeypatch):
     mock_validate.return_value = all_rejected
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._chunks = [{"schema_version": 1, "batches": []}]
-    fsm._current_chunk_idx = 0
+    fsm.chunks = [{"schema_version": 1, "batches": []}]
+    fsm.chunk_idx = 0
     # Pin the historical two in-flight retries; the default is now 1 (the second
     # recovery moved to the boundary anneal) — covered separately below.
     monkeypatch.setattr("silica.router.states.distill.MAX_STEER_ATTEMPTS", 2)
-    fsm.context.setdefault("chunk", {})["sanitized"] = {"parsed": []}
+    fsm.chunk.sanitized = {"parsed": []}
     fsm.state = InjectorState.VALIDATE
 
     # First call: steer attempt 1 → go to DELEGATE
     fsm.step()
     assert fsm.state == InjectorState.DELEGATE
-    assert fsm.context.get("chunk_0_steer_attempts") == 1
-    assert fsm.context.get("chunk_0_steer_context") is not None
+    assert fsm.run_state.chunk(0).steer_attempts == 1
+    assert fsm.run_state.chunk(0).steer_context is not None
 
     # Put FSM back at VALIDATE and call again (simulating steer attempt 2)
-    fsm.context.setdefault("chunk", {})["sanitized"] = {"parsed": []}
+    fsm.chunk.sanitized = {"parsed": []}
     fsm.state = InjectorState.VALIDATE
     fsm.step()
     assert fsm.state == InjectorState.DELEGATE
-    assert fsm.context.get("chunk_0_steer_attempts") == 2
+    assert fsm.run_state.chunk(0).steer_attempts == 2
 
     # Third call: budget exhausted → CLEANUP with "no_ops"
-    fsm.context.setdefault("chunk", {})["sanitized"] = {"parsed": []}
+    fsm.chunk.sanitized = {"parsed": []}
     fsm.state = InjectorState.VALIDATE
     fsm.step()
     assert fsm.state == InjectorState.CLEANUP
-    assert fsm.context.get("final_status") == "no_ops"
+    assert fsm.run_state.final_status == "no_ops"
     # The deferred chunk is a file failure: CLEANUP archives only failure-free
     # files, and Lezione 3 (27 ops deferred, 0 landed) was moved to Done/ on
     # 2026-09-05 because the validate task read "done".
     assert any(t.id.startswith("f0_") and t.status == "failed" for t in fsm.progress.tasks)
-    assert fsm.context.get("has_partial_failure") is True
+    assert fsm.run_state.has_partial_failure is True
 
 
 @patch("silica.router.states.distill.validate_ops")
@@ -351,20 +352,20 @@ def test_fsm_default_steer_is_one_then_defers(mock_validate):
         "rejected_ops": [{"reason": "bad path"}], "validated_ops": [],
     }
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._chunks = [{"schema_version": 1, "batches": []}]
-    fsm._current_chunk_idx = 0
-    fsm.context.setdefault("chunk", {})["sanitized"] = {"parsed": []}
+    fsm.chunks = [{"schema_version": 1, "batches": []}]
+    fsm.chunk_idx = 0
+    fsm.chunk.sanitized = {"parsed": []}
     fsm.state = InjectorState.VALIDATE
 
     fsm.step()  # attempt 1 → DELEGATE
     assert fsm.state == InjectorState.DELEGATE
-    assert fsm.context.get("chunk_0_steer_attempts") == 1
+    assert fsm.run_state.chunk(0).steer_attempts == 1
 
-    fsm.context.setdefault("chunk", {})["sanitized"] = {"parsed": []}
+    fsm.chunk.sanitized = {"parsed": []}
     fsm.state = InjectorState.VALIDATE
     fsm.step()  # budget (1) exhausted → CLEANUP
     assert fsm.state == InjectorState.CLEANUP
-    assert fsm.context.get("final_status") == "no_ops"
+    assert fsm.run_state.final_status == "no_ops"
 
 
 @patch("silica.router.states.distill.validate_ops")
@@ -382,16 +383,16 @@ def test_fsm_gate_partial_rejection_continues(mock_validate):
     }
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm.context["payload"] = {"payload": {"chunk_id": 0}}
-    fsm.context.setdefault("chunk", {})["sanitized"] = {"parsed": []}
-    fsm.context["source_content_hash"] = ""  # no deferred store call
+    fsm.run_state.payload = {"payload": {"chunk_id": 0}}
+    fsm.chunk.sanitized = {"parsed": []}
+    fsm.run_state.source_content_hash = ""  # no deferred store call
     fsm.state = InjectorState.VALIDATE
 
     fsm.step()
 
     # Pipeline advances past VALIDATE (to SNAPSHOT)
     assert fsm.state == InjectorState.SNAPSHOT
-    assert "abort_reason" not in fsm.context.get("chunk", {})
+    assert fsm.chunk.abort_reason is None
 
 
 @patch("silica.kernel.write.gate.lint_note")
@@ -407,11 +408,11 @@ def test_fsm_graph_regression_orphan_is_warning(mock_open, mock_restore, mock_li
     run_driver.graph_snapshot.return_value = post_graph
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm.context.setdefault("chunk", {})["ops_path"] = "dummy_ops.json"
-    fsm._pre_graph = pre_graph
-    fsm._txn = MagicMock()
-    fsm._txn.created_paths = ["notes/NoteA.md"]
-    fsm.context.setdefault("chunk", {})["snapshot"] = {
+    fsm.chunk.ops_path = "dummy_ops.json"
+    fsm.chunk.pre_graph = pre_graph
+    fsm.chunk.txn = MagicMock()
+    fsm.chunk.txn.created_paths = ["notes/NoteA.md"]
+    fsm.chunk.snapshot = {
         "txn_id": "txn_123",
         "inverses": [],
     }
@@ -440,14 +441,14 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_lint, 
     run_driver.graph_snapshot.return_value = post_graph
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm.context.setdefault("chunk", {})["ops_path"] = "dummy_ops.json"
-    fsm._pre_graph = pre_graph
+    fsm.chunk.ops_path = "dummy_ops.json"
+    fsm.chunk.pre_graph = pre_graph
 
-    # self._txn is the single source of truth for rollback inverses (C3).
+    # chunk.txn is the single source of truth for rollback inverses (C3).
     inverses = [{"op": "delete", "path": "notes/NoteA.md"}]
     from silica.kernel.write.ops import Txn
-    fsm._txn = Txn(id="txn_123", created_paths=["notes/NoteA.md"], inverses=inverses)
-    fsm.context.setdefault("chunk", {})["snapshot"] = {
+    fsm.chunk.txn = Txn(id="txn_123", created_paths=["notes/NoteA.md"], inverses=inverses)
+    fsm.chunk.snapshot = {
         "txn_id": "txn_123",
         "inverses": inverses,
     }
@@ -463,24 +464,24 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_lint, 
                                            frozenset(), frozenset({"notes/NoteA.md"}),
                                            removed_paths=frozenset())
         assert fsm.state == InjectorState.ROLLBACK
-        assert "Graph regression gate failed: Broken backlinks" in fsm.context["chunk"]["abort_reason"]
+        assert "Graph regression gate failed: Broken backlinks" in fsm.chunk.abort_reason
 
     mock_restore.return_value = {"success": True}
     fsm.step()
     mock_restore.assert_called_once_with(txn_id="txn_123", inverses=inverses)
 
     assert fsm.state == InjectorState.DONE
-    assert fsm.context["final_status"] == "failed"  # zero commits: honest verdict, not "partial"
+    assert fsm.run_state.final_status == "failed"  # zero commits: honest verdict, not "partial"
 
 
 def _lint_gate_fsm(op_path: str):
     """LINT-state FSM with one committed patch op on op_path (graph gate green)."""
     from silica.kernel.write.ops import Op, OpType
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm.context.setdefault("chunk", {})["ops_path"] = "dummy_ops.json"
-    fsm._pre_graph = MagicMock()
-    fsm._txn = MagicMock()
-    fsm._txn.created_paths = []
+    fsm.chunk.ops_path = "dummy_ops.json"
+    fsm.chunk.pre_graph = MagicMock()
+    fsm.chunk.txn = MagicMock()
+    fsm.chunk.txn.created_paths = []
     fsm.state = InjectorState.LINT
     op = Op(op=OpType.patch, path=op_path, heading="H",
             source_basename="s.md", snippet="x", hub="Hub")
@@ -499,7 +500,7 @@ def test_fsm_lint_gate_tolerates_per_op_baseline(mock_lint, run_driver):
     run_driver.graph_snapshot.return_value = MagicMock()
 
     fsm, ops = _lint_gate_fsm("Topics/Legacy.md")
-    fsm.context["chunk"]["lint_baseline"] = {"Topics/Legacy.md": [inherited]}
+    fsm.chunk.lint_baseline = {"Topics/Legacy.md": [inherited]}
     with patch_run("load_ops", return_value=ops), \
          patch("silica.kernel.graph_diff.check_graph_regression", return_value=(True, [])):
         fsm.step()
@@ -516,14 +517,14 @@ def test_fsm_lint_gate_still_blocks_new_violations(mock_lint, run_driver):
     run_driver.graph_snapshot.return_value = MagicMock()
 
     fsm, ops = _lint_gate_fsm("Topics/Legacy.md")
-    fsm.context["chunk"]["lint_baseline"] = {
+    fsm.chunk.lint_baseline = {
         "Topics/Legacy.md": ["frontmatter 'AI' missing or not boolean"]
     }
     with patch_run("load_ops", return_value=ops):
         fsm.step()
 
     assert fsm.state == InjectorState.ROLLBACK
-    assert "unknown callout type" in fsm.context["chunk"]["abort_reason"]
+    assert "unknown callout type" in fsm.chunk.abort_reason
 
 
 @patch("silica.router.states.setup.recon_file")
@@ -616,12 +617,12 @@ def test_fsm_already_nucleated():
 def _make_fsm_at_collision(chunk_concepts: list, tmp_path=None) -> InjectorFSM:
     """Helper: build an FSM positioned at COLLISION with given chunk."""
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._chunks = [{"schema_version": 1, "batches": [
+    fsm.chunks = [{"schema_version": 1, "batches": [
         {"inbox_file": "Inbox/test.md", "concepts": chunk_concepts}
     ]}]
-    fsm._current_chunk_idx = 0
+    fsm.chunk_idx = 0
     fsm.state = InjectorState.COLLISION
-    fsm.context["source_content_hash"] = "abc123"
+    fsm.run_state.source_content_hash = "abc123"
     return fsm
 
 
@@ -647,12 +648,12 @@ def test_collision_high_similarity_routes_to_patch():
         fsm.step()
 
     assert fsm.state == InjectorState.DELEGATE
-    collision_ops = fsm.context.get("chunk_0_collision_ops", [])
+    collision_ops = fsm.run_state.chunk(0).collision_ops
     assert len(collision_ops) == 1
     assert collision_ops[0]["op"] == "patch"
     assert collision_ops[0]["path"] == "DL/Neural Networks.md"
     # Concept removed from modified chunk
-    remaining = fsm._chunks[0].get("batches", [])
+    remaining = fsm.chunks[0].get("batches", [])
     assert remaining == [] or all(len(b.get("concepts", [])) == 0 for b in remaining)
 
 
@@ -701,12 +702,12 @@ def test_collision_low_similarity_keeps_for_distillation():
         fsm.step()
 
     assert fsm.state == InjectorState.DELEGATE
-    collision_ops = fsm.context.get("chunk_0_collision_ops", [])
+    collision_ops = fsm.run_state.chunk(0).collision_ops
     assert collision_ops == []
     # Concept still in chunk
     concepts_left = [
         c
-        for b in fsm._chunks[0].get("batches", [])
+        for b in fsm.chunks[0].get("batches", [])
         for c in b.get("concepts", [])
     ]
     assert len(concepts_left) == 1
@@ -791,9 +792,9 @@ def test_collision_high_score_name_mismatch_deferred_to_judge():
         fsm.step()
 
     # No mechanical patch — the name disagreement forbids the fast path.
-    assert fsm.context.get("chunk_0_collision_ops", []) == []
+    assert fsm.run_state.chunk(0).collision_ops == []
     # Concept removed from the chunk — deferred to the judge, not written as new.
-    kept = [c for b in fsm._chunks[0].get("batches", []) for c in b.get("concepts", [])]
+    kept = [c for b in fsm.chunks[0].get("batches", []) for c in b.get("concepts", [])]
     assert not any(c["name"] == "MEMORY" for c in kept)
     # It landed in the deferred store (the ternary judge's queue).
     mock_deferred.put.assert_called_once()
@@ -828,7 +829,7 @@ def test_collision_high_score_acronym_match_still_patches():
         mock_driver.read_note.return_value = MagicMock()
         fsm.step()
 
-    ops = fsm.context.get("chunk_0_collision_ops", [])
+    ops = fsm.run_state.chunk(0).collision_ops
     assert len(ops) == 1
     assert ops[0]["op"] == "patch"
     assert ops[0]["path"] == "Agenti Autonomi/Modelli Linguistici Generativi (GPT).md"
@@ -857,12 +858,12 @@ def test_collision_borderline_deferred():
         fsm.step()
 
     assert fsm.state == InjectorState.DELEGATE
-    collision_ops = fsm.context.get("chunk_0_collision_ops", [])
+    collision_ops = fsm.run_state.chunk(0).collision_ops
     assert collision_ops == []
     # Concept removed from chunk (deferred)
     concepts_left = [
         c
-        for b in fsm._chunks[0].get("batches", [])
+        for b in fsm.chunks[0].get("batches", [])
         for c in b.get("concepts", [])
     ]
     assert concepts_left == []
@@ -940,10 +941,10 @@ def test_collision_does_not_consult_the_fused_facade():
 
     facade.assert_not_called()
     assert fsm.state == InjectorState.DELEGATE
-    assert fsm.context.get("chunk_0_collision_ops", []) == []
+    assert fsm.run_state.chunk(0).collision_ops == []
     concepts_left = [
         c
-        for b in fsm._chunks[0].get("batches", [])
+        for b in fsm.chunks[0].get("batches", [])
         for c in b.get("concepts", [])
     ]
     assert len(concepts_left) == 1
@@ -977,10 +978,10 @@ def test_collision_inbox_candidate_is_filtered():
         fsm.step()
 
     assert fsm.state == InjectorState.DELEGATE
-    assert fsm.context.get("chunk_0_collision_ops", []) == []
+    assert fsm.run_state.chunk(0).collision_ops == []
     concepts_left = [
         c
-        for b in fsm._chunks[0].get("batches", [])
+        for b in fsm.chunks[0].get("batches", [])
         for c in b.get("concepts", [])
     ]
     assert [c["name"] for c in concepts_left] == ["Support Vector Machines"]
@@ -998,11 +999,11 @@ def test_collision_empty_index_skips_transparently():
         fsm.step()
 
     assert fsm.state == InjectorState.DELEGATE
-    assert fsm.context.get("chunk_0_collision_ops", []) == []
+    assert fsm.run_state.chunk(0).collision_ops == []
     # Chunk is UNCHANGED (not modified by collision)
     concepts_left = [
         c
-        for b in fsm._chunks[0].get("batches", [])
+        for b in fsm.chunks[0].get("batches", [])
         for c in b.get("concepts", [])
     ]
     assert len(concepts_left) == 2
@@ -1059,16 +1060,16 @@ def test_fsm_short_circuit_no_ops(mock_validate):
         "total": 5, "validated_ops": []}
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm.context["payload"] = {"payload": {"chunk_id": 0}}
-    fsm.context.setdefault("chunk", {})["sanitized"] = {"parsed": []}
+    fsm.run_state.payload = {"payload": {"chunk_id": 0}}
+    fsm.chunk.sanitized = {"parsed": []}
     fsm.state = InjectorState.VALIDATE
 
-    with patch.object(fsm, "_make_tmp", return_value="dummy_ops.json"):
+    with patch.object(fsm, "make_tmp", return_value="dummy_ops.json"):
         fsm.step()
 
     # Verify transition directly to CLEANUP and final_status set to "no_ops"
     assert fsm.state == InjectorState.CLEANUP
-    assert fsm.context["final_status"] == "no_ops"
+    assert fsm.run_state.final_status == "no_ops"
 
 
 @patch("silica.router.states.setup.recon_file")
@@ -1156,18 +1157,18 @@ def test_handle_write_partial_failure_defers_and_continues(
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.state = InjectorState.WRITE
-    fsm.context["source_content_hash"] = "abc123hash"
-    fsm.context["chunk"] = {
-        "ops_path": str(ops_file),
-        "txn_id": "txn_test",
-        "snapshot": {"txn_id": "txn_test", "inverses": []},
-    }
+    fsm.run_state.source_content_hash = "abc123hash"
+    fsm.run_state.chunks[fsm.chunk_idx] = ChunkState(
+        ops_path=str(ops_file),
+        txn_id="txn_test",
+        snapshot={"txn_id": "txn_test", "inverses": []},
+    )
 
     fsm.step()
 
     # FSM advances to HUB_UPDATE — no rollback
     assert fsm.state == InjectorState.HUB_UPDATE
-    assert fsm.context.get("has_partial_failure") is True
+    assert fsm.run_state.has_partial_failure is True
 
     # Op B deferred under the source content hash
     bundle = deferred_store.get("abc123hash")
@@ -1202,24 +1203,24 @@ def test_handle_write_all_fail_defers_and_continues(mock_commit, tmp_path):
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.state = InjectorState.WRITE
-    fsm.context["source_content_hash"] = "xyz"
-    fsm.context["chunk"] = {
-        "ops_path": str(ops_file),
-        "txn_id": "txn_x",
-        "snapshot": {"txn_id": "txn_x", "inverses": []},
-    }
+    fsm.run_state.source_content_hash = "xyz"
+    fsm.run_state.chunks[fsm.chunk_idx] = ChunkState(
+        ops_path=str(ops_file),
+        txn_id="txn_x",
+        snapshot={"txn_id": "txn_x", "inverses": []},
+    )
 
     # All-fail: _handle_write defers and continues (no raise, no rollback).
     fsm.step()
 
     assert fsm.state == InjectorState.HUB_UPDATE
-    assert fsm.context.get("has_partial_failure") is True
-    write_ctx = fsm.context.get("write", {})
+    assert fsm.run_state.has_partial_failure is True
+    write_ctx = fsm.run_state.write
     assert write_ctx.get("successful") == 0
     assert len(write_ctx.get("failed", [])) == 1
 
 
-def test_hub_inverse_appears_in_chunk_ctx_snapshot(tmp_path):
+def test_hub_inverse_appears_in_the_chunk_snapshot(tmp_path):
     """After HUB_UPDATE, the hub rollback inverse must land in the txn's authoritative
     inverses list (the single source of truth read by ROLLBACK) — not in a stale dict."""
     import json
@@ -1236,22 +1237,20 @@ def test_hub_inverse_appears_in_chunk_ctx_snapshot(tmp_path):
         }], f)
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir", hub="Hub")
-    # _chunk_ctx is a property returning self.context.setdefault("chunk", {}),
-    # so seed the per-chunk state via context["chunk"] directly.
-    fsm.context["chunk"] = {
-        "ops_path": ops_path,
-        "snapshot": {"txn_id": "txn-001", "inverses": [], "created_paths": []},
-        "snapshot_domain": [],
-    }
-    fsm._current_chunk_idx = 0
-    fsm._chunk_flat_to_fi_ci = {0: (0, 0)}
-    fsm._file_chunks = {0: {"source_file": "Inbox/test.md", "chunks": [{}]}}
+    fsm.run_state.chunks[fsm.chunk_idx] = ChunkState(
+        ops_path=ops_path,
+        snapshot={"txn_id": "txn-001", "inverses": [], "created_paths": []},
+        snapshot_domain=[],
+    )
+    fsm.chunk_idx = 0
+    fsm.chunk_flat_to_fi_ci = {0: (0, 0)}
+    fsm.file_chunks = {0: {"source_file": "Inbox/test.md", "chunks": [{}]}}
 
     mock_hub_note = MagicMock()
     mock_hub_note.content = "# Hub\n\nExisting content\n"
 
     from silica.kernel.write.ops import Txn
-    fsm._txn = Txn(id="txn-001", created_paths=[], inverses=[])
+    fsm.chunk.txn = Txn(id="txn-001", created_paths=[], inverses=[])
 
     with patch_run("DRIVER") as mock_driver, \
          patch("silica.router.states.write.time") as mock_time:
@@ -1261,16 +1260,16 @@ def test_hub_inverse_appears_in_chunk_ctx_snapshot(tmp_path):
         mock_time.sleep.return_value = None
         states.write.handle_hub_update(fsm)
 
-    txn_inverses = fsm._txn.inverses_serialized
+    txn_inverses = fsm.chunk.txn.inverses_serialized
     assert any(
         inv.get("path", "").endswith("Hub.md") for inv in txn_inverses
     ), f"Hub inverse missing from txn.inverses; got: {txn_inverses}"
-    # The dual-write to _chunk_ctx['snapshot']['inverses'] is gone — the txn is
+    # The dual-write to chunk.snapshot['inverses'] is gone — the txn is
     # now the single source of truth, so the snapshot dict stays as SNAPSHOT left it.
-    assert fsm._chunk_ctx["snapshot"]["inverses"] == [], \
-        "Hub inverse must not be dual-written into _chunk_ctx['snapshot']['inverses']"
+    assert fsm.chunk.snapshot["inverses"] == [], \
+        "Hub inverse must not be dual-written into chunk.snapshot['inverses']"
     # Also confirm it did NOT land in stale context['snapshot'].
-    assert "snapshot" not in fsm.context or "inverses" not in fsm.context.get("snapshot", {}), \
+    assert "inverses" not in fsm.chunk.snapshot or not fsm.chunk.snapshot["inverses"], \
         "Hub inverse was written to stale context['snapshot']"
 
 
@@ -1293,15 +1292,15 @@ def test_hub_update_writes_parent_at_its_real_vault_path(tmp_path):
         }], f)
 
     fsm = InjectorFSM("Inbox/test.md", "testing", hub="Hub")
-    fsm.context["chunk"] = {
-        "ops_path": ops_path,
-        "snapshot": {"txn_id": "txn-001", "inverses": [], "created_paths": []},
-        "snapshot_domain": [],
-    }
-    fsm._current_chunk_idx = 0
-    fsm._chunk_flat_to_fi_ci = {0: (0, 0)}
-    fsm._file_chunks = {0: {"source_file": "Inbox/test.md", "chunks": [{}]}}
-    fsm._txn = Txn(id="txn-001", created_paths=[], inverses=[])
+    fsm.run_state.chunks[fsm.chunk_idx] = ChunkState(
+        ops_path=ops_path,
+        snapshot={"txn_id": "txn-001", "inverses": [], "created_paths": []},
+        snapshot_domain=[],
+    )
+    fsm.chunk_idx = 0
+    fsm.chunk_flat_to_fi_ci = {0: (0, 0)}
+    fsm.file_chunks = {0: {"source_file": "Inbox/test.md", "chunks": [{}]}}
+    fsm.chunk.txn = Txn(id="txn-001", created_paths=[], inverses=[])
 
     note = MagicMock()
     note.content = "# lezione_7\n\nExisting\n"
@@ -1332,8 +1331,8 @@ def test_hub_update_writes_parent_at_its_real_vault_path(tmp_path):
 def test_fsm_seen_override_reaches_episodic_capture(mock_run_distiller):
     """seen_override (bench knob) replaces the ingest day in capture_from_distill."""
     fsm = InjectorFSM("Inbox/test.md", "TargetDir", seen_override="2023-05-08")
-    fsm._chunks = [{"chunk_id": 0, "concepts": ["a"]}]
-    fsm._current_chunk_idx = 0
+    fsm.chunks = [{"chunk_id": 0, "concepts": ["a"]}]
+    fsm.chunk_idx = 0
     fsm.state = InjectorState.DELEGATE
     mock_run_distiller.return_value = {"updates": []}
 
@@ -1343,7 +1342,7 @@ def test_fsm_seen_override_reaches_episodic_capture(mock_run_distiller):
         captured["run_id"] = run_id
         captured["seen"] = seen
 
-    with patch.object(fsm, "_make_tmp", return_value="tmp.json"), \
+    with patch.object(fsm, "make_tmp", return_value="tmp.json"), \
          patch("silica.kernel.recall.episodic.capture_from_distill", side_effect=_rec):
         fsm.step()
 
@@ -1356,8 +1355,8 @@ def test_fsm_seen_override_reaches_episodic_capture(mock_run_distiller):
 def test_fsm_seen_default_is_ingest_day(mock_run_distiller):
     """Without the override the product behavior is unchanged: ingest day."""
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    fsm._chunks = [{"chunk_id": 0, "concepts": ["a"]}]
-    fsm._current_chunk_idx = 0
+    fsm.chunks = [{"chunk_id": 0, "concepts": ["a"]}]
+    fsm.chunk_idx = 0
     fsm.state = InjectorState.DELEGATE
     mock_run_distiller.return_value = {"updates": []}
 
@@ -1366,7 +1365,7 @@ def test_fsm_seen_default_is_ingest_day(mock_run_distiller):
     def _rec(result, *, run_id, seen, **kw):
         captured["seen"] = seen
 
-    with patch.object(fsm, "_make_tmp", return_value="tmp.json"), \
+    with patch.object(fsm, "make_tmp", return_value="tmp.json"), \
          patch("silica.kernel.recall.episodic.capture_from_distill", side_effect=_rec):
         fsm.step()
 
@@ -1380,14 +1379,14 @@ def test_fsm_can_run_without_feeding_the_episodic_store(mock_run_distiller):
     the store nests the chain inside itself: measured on a real run, one
     promotion turned the head into a summary of its own history."""
     fsm = InjectorFSM("Inbox/test.md", "TargetDir", episodic_capture=False)
-    fsm._chunks = [{"chunk_id": 0, "concepts": ["a"]}]
-    fsm._current_chunk_idx = 0
+    fsm.chunks = [{"chunk_id": 0, "concepts": ["a"]}]
+    fsm.chunk_idx = 0
     fsm.state = InjectorState.DELEGATE
     mock_run_distiller.return_value = {"updates": []}
 
     calls = []
 
-    with patch.object(fsm, "_make_tmp", return_value="tmp.json"), \
+    with patch.object(fsm, "make_tmp", return_value="tmp.json"), \
          patch("silica.kernel.recall.episodic.capture_from_distill",
                side_effect=lambda *a, **kw: calls.append(kw)):
         fsm.step()
@@ -1438,7 +1437,7 @@ def test_best_effort_failure_skips_to_next_phase():
     fsm._run_loop()
 
     assert fsm.state == InjectorState.DONE  # reached COLLISION, not ERROR
-    assert fsm.context.get("error") == "salience blew up"
+    assert fsm.run_state.error == "salience blew up"
 
 
 def test_recon_steps_straight_to_payload():
@@ -1447,10 +1446,10 @@ def test_recon_steps_straight_to_payload():
     state no longer exists on the enum."""
     fsm = InjectorFSM("Inbox/a.md", "TargetDir", inbox_files=["Inbox/a.md", "Inbox/b.md"])
     fsm.state = InjectorState.RECON
-    fsm.context["recon"] = [{"file": "Inbox/a.md", "new_concepts": ["PIL"], "collisions": []}]
+    fsm.run_state.recon = [{"file": "Inbox/a.md", "new_concepts": ["PIL"], "collisions": []}]
 
     with patch("silica.router.states.setup.handle_recon",
-               side_effect=lambda f: f._transition_success()):
+               side_effect=lambda f: f.transition_success()):
         fsm.step()
 
     assert fsm.state == InjectorState.PAYLOAD
