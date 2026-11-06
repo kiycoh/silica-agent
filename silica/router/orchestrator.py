@@ -11,7 +11,7 @@ Contracts applied (see silica_architecture_addendum.md):
   C1 — ops_path carries list[Op]-compatible dicts after VALIDATE.
   C2 — freshness via per-op postconditions in CLI backend.
   C3 — build_txn() builds InverseOp entries; ROLLBACK applies them.
-  C4 — VALIDATE overwrites ops_path; SNAPSHOT/WRITE read that same file.
+  C4 — VALIDATE writes what it kept to ops_path; SNAPSHOT/WRITE read that file.
   C5 — ledger records ops; CLEANUP only reachable from DONE state.
 
 S2.3 change: DELEGATE calls the real Distiller LLM via prep_delegation.
@@ -847,7 +847,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
             from silica.kernel.write.deferred import get_deferred_store
             if not get_deferred_store().list_all():
                 return
-            from silica.tools.pipeline import silica_anneal
+            from silica.router.anneal import sweep_deferred
 
             # This sweep writes inside the run's own `finally`, so its notes are
             # part of the run the user just started: they ride the run's journal
@@ -855,7 +855,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
             # and carry the run's ledger id (else the dangling-link sweep, which
             # matches on progress.run_id, cannot see them).
             with in_run(undo=self._undo_run_id, ledger=getattr(self.progress, "run_id", None)):
-                res = silica_anneal(steer=False)
+                res = sweep_deferred(steer=False)
             # Read back by the coordinator's coverage summary: the recovery was
             # info-level only, so a run that rescued a batch of ops said nothing
             # about it to the user who asked for the nucleation.

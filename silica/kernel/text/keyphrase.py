@@ -368,7 +368,7 @@ def extract_keyphrases(
     reach (see `_seed_structural`); if an `embedder` is given it ranks the pool
     (cosine-to-theme + MMR + structural boost), otherwise the structural-first /
     mined rank is used (degraded fallback). Returns [] only when both legs
-    abstain, which `silica_recon` already handles as an empty report.
+    abstain, which `recon_file` already handles as an empty report.
     """
     # Transient: the note keeps its LaTeX/images/fences on disk. fences=True is
     # the C1 fork ⚑ — the miner must never rank code identifiers as concepts.

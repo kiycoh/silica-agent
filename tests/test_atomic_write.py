@@ -15,7 +15,6 @@ def test_clean_patch_commits_and_returns_inverse(tmp_vault, monkeypatch):
     assert res.ok is True
     assert res.path == target
     assert res.reverted is False
-    assert res.post_hash is not None
     assert len(res.inverses) >= 1
     assert "body" in tmp_vault.read(target)
 

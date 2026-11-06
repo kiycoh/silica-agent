@@ -308,7 +308,7 @@ def test_boundary_anneal_settles_the_ops_the_sweep_landed_flagged(monkeypatch):
     )
     store = SimpleNamespace(list_all=lambda: [{"content_hash": "fff6"}])
     with patch("silica.kernel.write.deferred.get_deferred_store", return_value=store), \
-         patch("silica.tools.pipeline.silica_anneal",
+         patch("silica.router.anneal.sweep_deferred",
                return_value={"written": 1, "flagged_ops": [landed]}):
         InjectorFSM._boundary_anneal(fake)
 

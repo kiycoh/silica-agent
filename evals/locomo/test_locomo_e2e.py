@@ -79,11 +79,15 @@ def _patch_fsm_seams(monkeypatch):
     _StubCoordinator.calls = []
     _StubCoordinator.results = []
     import silica.router.coordinator as coord_mod
+    import silica.router.anneal as anneal_mod
     import silica.tools.pipeline as pipeline_mod
     monkeypatch.setattr(coord_mod, "Coordinator", _StubCoordinator)
-    monkeypatch.setattr(pipeline_mod, "silica_anneal",
-                        lambda steer=False, limit=0: {"bundles": 1, "written": 1,
-                                                      "still_deferred": 0})
+
+    def anneal(steer=False, limit=0):
+        return {"bundles": 1, "written": 1, "still_deferred": 0}
+
+    monkeypatch.setattr(pipeline_mod, "silica_anneal", anneal)
+    monkeypatch.setattr(anneal_mod, "sweep_deferred", anneal)
     monkeypatch.setattr(runner, "_clear_fsm_state", lambda: None)
     monkeypatch.setattr(runner, "_wipe_index_namespace", lambda vault: None)
 

@@ -248,7 +248,7 @@ def _execution_outcome_counts(
 
     `batch["summary"]` (run_subagent_batch -> WorkQueue.summary()) is already
     a Counter of each dispatched WorkItem's REAL terminal status (e.g.
-    "committed" via commit.py, "no_merge" for a dedup verdict of distinct,
+    "committed" via commit_ops, "no_merge" for a dedup verdict of distinct,
     "no_link" when the orphan worker found nothing worth linking, "no_change",
     "failed", "cancelled") — a batch where every dedup came back distinct
     must show up as "no_merge", not as though the planned dedup succeeded.

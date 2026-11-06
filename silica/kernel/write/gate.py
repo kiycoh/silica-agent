@@ -603,7 +603,6 @@ class NoteCommitResult:
     path: str
     op: str
     inverses: list[InverseOp] = field(default_factory=list)
-    post_hash: str | None = None
     error: str | None = None
     reverted: bool = False
     # Pre-write lint violations this op was allowed to inherit (patch baseline).
@@ -701,18 +700,8 @@ def _commit_note_atomic_unlocked(op: Op, *, hub: str | None = None, lint: bool =
                 reverted=reverted,
             )
 
-    # 4. success — capture post-write content hash
-    post_hash: str | None = None
-    if path:
-        try:
-            post_hash = undo_journal.content_hash(DRIVER.read_note(path).content)
-        except Exception:
-            # Tolerated: nothing journals this hash, the caller's record_landed
-            # re-reads the note once the chunk's later phases have settled it.
-            post_hash = None
-
     return NoteCommitResult(
-        ok=True, path=path, op=op_name, inverses=inverses, post_hash=post_hash,
+        ok=True, path=path, op=op_name, inverses=inverses,
         baseline_errors=sorted(baseline_errors),
     )
 

@@ -134,8 +134,8 @@ class Tool:
         # on this so a sensitive tool can never leak into the main agent by
         # mere registration. New sensitive tools are covered automatically.
         self.sensitive = sensitive
-        # Pipeline internals the FSM drives programmatically (recon, bulk_write,
-        # snapshot, ...): registered for dispatch but hidden from the main
+        # Tools no chat turn is offered (the repair loop's submit_repaired_ops,
+        # snapshot, restore): registered for dispatch but hidden from the main
         # agent's default toolset — same filter seam as `sensitive`. Still
         # reachable when named in AgentConstraints.tools.
         self.internal = internal
