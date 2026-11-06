@@ -567,7 +567,7 @@ def test_the_open_note_is_marked_in_the_tree():
     body = _fn(js, "function markOpenNote()")
     assert 'el.classList.toggle("open"' in body
     assert "markOpenNote();" in _fn(js, "function showDrawer(title)")
-    assert "markOpenNote();" in _fn(js, "function closeNote()")
+    assert "markOpenNote();" in _fn(js, "function closeNote(force = false)")
 
 
 def test_one_filter_heads_the_list_and_reads_both_lists():
@@ -631,7 +631,7 @@ def test_the_drawers_verbs_live_behind_the_title():
     assert ('<button type="button" id="note-title" aria-haspopup="menu" aria-expanded="false" '
             'aria-controls="note-menu">') in head
     menu = _block(head, '<div id="note-menu" role="menu"', "</header>")
-    assert re.findall(r'role="menuitem" id="([\w-]+)"', menu) == ["note-chat", "note-check-open", "note-test", "note-teach", "note-map",
+    assert re.findall(r'role="menuitem" id="([\w-]+)"', menu) == ["note-chat", "note-check-open", "note-test", "note-teach", "note-find", "note-map",
                                                                "note-diff-open"]
     for gone in ("note-summarize", "note-explain", "note-quiz", "note-relate", "note-learn"):
         assert gone not in INDEX, gone
@@ -654,7 +654,7 @@ def test_the_drawers_verbs_live_behind_the_title():
 def test_the_closed_drawer_is_inert():
     assert re.search(r'<aside id="note-panel"[^>]*\binert\b', INDEX)
     js = app_js()
-    assert "notePanel.inert = true;" in _fn(js, "function closeNote()")
+    assert "notePanel.inert = true;" in _fn(js, "function closeNote(force = false)")
     assert "notePanel.inert = false;" in _fn(js, "function showDrawer(title)")
 
 
@@ -772,7 +772,7 @@ def test_the_view_showing_is_marked_as_the_current_place():
 def test_the_chrome_reads_in_sentence_case_on_the_type_floor():
     css = app_css()
     assert "--fs-meta: 12px;" in css and "--fs-ctl: 13px;" in css
-    for sel in ("#side-tabs button {", ".side-bucket {", ':is(#note-menu, #attach-menu, #vault-add-menu) [role="menuitem"] {', ".sources-label {",
+    for sel in ("#side-tabs button {", ".side-bucket {", ':is(#note-menu, #nv-menu, #attach-menu, #vault-add-menu) [role="menuitem"] {', ".sources-label {",
                 ".thinking summary {", "details.fm summary {", ".sp-title {"):
         # a selector may be ruled more than once across the cut sheets; none of
         # its blocks may set caps, and the one that sizes it sizes it on the scale
@@ -813,7 +813,7 @@ def test_selected_is_a_frosted_box_and_never_a_bar():
 
 def test_the_note_is_a_reading_sheet_with_one_inset():
     css = app_css()
-    for sel in ("#note-edit .cm-content {", "#note-diff {"):
+    for sel in (":is(#note-edit,#nv-edit) .cm-content {", "#note-diff {"):
         blk = css[css.index(sel):]
         blk = blk[:blk.index("}")]
         assert "1.25rem" in blk, sel
@@ -823,7 +823,7 @@ def test_the_note_is_a_reading_sheet_with_one_inset():
     na = css[css.index(".na {"):]
     na = na[:na.index("}")]
     assert "border: none;" in na
-    callout = css[css.index(":is(.msg, #peek-body, #note-edit) .callout {"):]
+    callout = css[css.index(":is(.msg, #peek-body, #note-edit, #nv-edit) .callout {"):]
     callout = callout[:callout.index("}")]
     assert "border-left" not in callout
     js = (WEB / "app-notes.js").read_text(encoding="utf-8")

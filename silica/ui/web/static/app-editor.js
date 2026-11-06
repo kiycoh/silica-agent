@@ -480,6 +480,31 @@
         p.textContent = "changed since the check: these marks read the text as it was";
         box.append(p);
       }
+      // ADR-0110, amendment of 2026-11-06, point 8: the vault's verdict first,
+      // then the web's, side by side and never merged.
+      const webRow = (x) => {
+        const w = document.createElement("div");
+        w.className = "cm-chk-web";
+        const h = document.createElement("a");
+        h.href = x.url;
+        h.target = "_blank";
+        h.rel = "noopener noreferrer";
+        h.textContent = `${x.host} · read ${x.read}`;
+        const k = document.createElement("button");
+        k.type = "button";
+        k.className = "cm-chk-keep";
+        k.textContent = "keep in Inbox";
+        k.addEventListener("mousedown", (e) => { e.preventDefault(); hooksOf(view).keep(x); });
+        w.append(h, k);
+        return w;
+      };
+      for (const s of b.states) {
+        if (s.state !== "vault") continue;
+        const p = document.createElement("p");
+        p.className = "cm-chk-state cm-chk-vault";
+        p.textContent = `vault: ${s.say}`;
+        box.append(p);
+      }
       const findings = [...b.findings].sort((x, y) => RANK[x.grade] - RANK[y.grade]);
       for (const f of findings) {
         const row = document.createElement("div");
@@ -504,14 +529,21 @@
           a.addEventListener("mousedown", (e) => { e.preventDefault(); hooksOf(view).openAt(m[1], m[2] ? +m[2] : 0); });
           row.append(a);
         }
+        if (f.host) row.append(webRow(f));
         box.append(row);
       }
       for (const s of b.states) {
-        if (s.state === "supported" || s.state === "not a statement of fact") continue;
+        if (s.state === "supported" || s.state === "not a statement of fact" || s.state === "vault") continue;
         const p = document.createElement("p");
         p.className = "cm-chk-state";
         p.textContent = `${s.state}: ${s.say}`;
         box.append(p);
+        if (s.passage) {
+          const q = document.createElement("blockquote");
+          q.textContent = s.passage;
+          box.append(q);
+        }
+        if (s.host) box.append(webRow(s));
       }
       return box;
     }
@@ -793,16 +825,28 @@
   // --- keys -----------------------------------------------------------------
   // Mod-B / Mod-I wrap the selection, or unwrap it when it is already wrapped;
   // on a bare caret they leave it between the two marks, as Obsidian does.
+  // Asterisks are counted: one is italic, two bold, three both, so a bold word's
+  // two stars are not an italic's one.
+  const starsAt = (s, pos, dir) => {
+    let n = 0;
+    while (s.sliceDoc(dir < 0 ? pos - n - 1 : pos + n, dir < 0 ? pos - n : pos + n + 1) === "*") n++;
+    return n;
+  };
+  const starsSay = (run, n) => (n === 2 ? run >= 2 : run % 2 === 1);
   function toggleWrap(mark) {
     return (view) => {
-      const s = view.state, n = mark.length;
+      const s = view.state, n = mark.length, stars = mark[0] === "*";
       view.dispatch(s.changeByRange((r) => {
         const text = s.sliceDoc(r.from, r.to);
-        if (s.sliceDoc(r.from - n, r.from) === mark && s.sliceDoc(r.to, r.to + n) === mark) {
+        const around = stars ? starsSay(Math.min(starsAt(s, r.from, -1), starsAt(s, r.to, 1)), n)
+          : s.sliceDoc(r.from - n, r.from) === mark && s.sliceDoc(r.to, r.to + n) === mark;
+        if (around) {
           return { changes: [{ from: r.from - n, to: r.from }, { from: r.to, to: r.to + n }],
                    range: CM.EditorSelection.range(r.from - n, r.to - n) };
         }
-        if (text.length > 2 * n && text.startsWith(mark) && text.endsWith(mark)) {
+        const inside = stars ? starsSay(Math.min(/^\**/.exec(text)[0].length, /\**$/.exec(text)[0].length), n)
+          : text.startsWith(mark) && text.endsWith(mark);
+        if (text.length > 2 * n && inside) {
           return { changes: { from: r.from, to: r.to, insert: text.slice(n, -n) },
                    range: CM.EditorSelection.range(r.from, r.to - 2 * n) };
         }
@@ -898,6 +942,9 @@
       livePreview,
       linkPress,
       rowDrop,
+      // What a place adds to the note's editing (ADR-0155): `[[`, find, the
+      // door on an unresolved link; the tests' states have no hooks and none.
+      ...(inst.hooks && inst.hooks.extra ? inst.hooks.extra() : []),
       Prec.high(keymap.of(keys())),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       EditorView.contentAttributes.of({ spellcheck: "true", "aria-label": "note text" }),
@@ -928,7 +975,9 @@
         const fm = frontmatterEnd(text.slice(0, HEAD));
         const at = fm > 0 ? Math.min(fm + 1, text.length) : 0;
         const state = EditorState.create({ doc: text, selection: { anchor: at }, extensions: extensions(inst) });
-        view.setState(state.update({ effects: brokenEffect.of(missing) }).state);
+        // A note loaded under a caret that never left: no focus event will come,
+        // so the new state is told, or Live Preview reads the field as unfocused.
+        view.setState(state.update({ effects: [brokenEffect.of(missing), focusEffect.of(view.hasFocus)] }).state);
         view.scrollDOM.scrollTop = 0;
       },
       setMissing: (missing) => view.dispatch({ effects: brokenEffect.of(missing) }),
@@ -949,6 +998,13 @@
           effects: adoptEffect.of(null),
         });
       },
+      // The disk's bytes, taken over the field's by the person (ADR-0155 point
+      // 11): as adopt, but in the history, so Ctrl+Z brings back what they typed.
+      take(text) {
+        const cur = view.state.doc.toString();
+        if (cur === text) return;
+        view.dispatch({ changes: { from: 0, to: cur.length, insert: text }, effects: adoptEffect.of(null) });
+      },
       focus: () => view.focus(),
       // The source check (ADR-0110 point 11). startCheck pins the text the
       // check reads, so it goes after the save and before the request.
@@ -957,6 +1013,15 @@
       endCheck: () => view.dispatch({ effects: checkReset.of(null) }),
       showCheck: (show) => view.dispatch({ effects: checkShow.of(show) }),
       hasCheck: () => !!view.state.field(checkField).base,
+      checkFindings: () => view.state.field(checkField).findings,
+      // A ranged check (ADR-0110, amendment of 2026-11-06, point 4) replaces the
+      // marks of its blocks and no others; `first` and `last` are lines of the
+      // text as it stands, so the caller has rebased first.
+      dropCheck(first, last) {
+        const c = view.state.field(checkField), off = (x) => (x.end || x.line) < first || x.line > last;
+        view.dispatch({ effects: checkReplace.of({ findings: c.findings.filter(off), states: c.states.filter(off) }) });
+      },
+      openCheck: (line) => view.dispatch({ effects: checkOpen.of(line) }),
       closeCheckBox() {
         if (!view.state.field(checkField).open) return false;
         view.dispatch({ effects: checkOpen.of(0) });
@@ -1035,5 +1100,7 @@
     };
   }
 
-  window.LiveEditor = { create, extensions, buildDecorations, frontmatterEnd, language, focusEffect, brokenEffect };
+  // The link the server named as resolving nowhere, as the editor keys it.
+  const isMissing = (state, target) => state.field(broken).has(target);
+  window.LiveEditor = { create, extensions, buildDecorations, frontmatterEnd, language, focusEffect, brokenEffect, isMissing, toggleWrap };
 })();

@@ -229,7 +229,7 @@
   }
 }
 
-/* the note's globe, the pin's twin beside it (app-panels.css #note-pin) */
+/* the note's globe, the pin's twin beside it (app-panels.css :is(#note-pin,#note-centre)) */
 #note-pub {
   flex: none;
   display: grid;

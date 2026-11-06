@@ -90,6 +90,15 @@ def check_signature(path: Path, suffix: str) -> None:
         raise Refused(f"it is not a {suffix[1:].upper()} file (its first bytes are something else)")
 
 
+def image_suffix(head: bytes) -> str | None:
+    """A picture's suffix from its first 16 bytes, whatever its name says; None
+    for anything else, SVG among them, which has no signature here to match."""
+    for suffix in (".png", ".jpg", ".gif", ".webp"):
+        if head.startswith(_SIGNATURES[suffix]) and (suffix != ".webp" or head[8:12] == b"WEBP"):
+            return suffix
+    return None
+
+
 def clean_rel(raw: str) -> PurePosixPath:
     """The page's relative path as a path that cannot leave the folder it is
     joined to. Raises Refused when nothing safe is left of it."""

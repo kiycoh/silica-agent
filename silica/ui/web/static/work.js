@@ -782,6 +782,14 @@ function neighbourRows(d) {
         ? window.ghostWritePrompt(d.title, d.from)
         : 'Tell me about "' + d.title + '", grounded in what the vault already says.');
     });
+    if (d.ghost && window.writeGhost) {
+      // ADR-0155 point 9: the name is known, so the note is one press away and
+      // no model stands between the person and their own page.
+      const write = el("button", "wk-mini", "write it");
+      write.type = "button";
+      write.addEventListener("click", () => window.writeGhost(d.title, d.from));
+      acts.appendChild(write);
+    }
     acts.appendChild(ask);
     rh.appendChild(acts);
     body.appendChild(rh);
@@ -815,6 +823,8 @@ function neighbourRows(d) {
   let detailsTab = null;
   const TABS = [["content", "Content"], ["links", "Links"], ["place", "Place"], ["history", "History"]];
 
+  // The foot line's History (ADR-0155 point 10).
+  window.showNoteHistory = () => pickTab("history");
   function pickTab(key) {
     if (key === "history") hist = null;   // read afresh each time it is picked
     detailsTab = key;
@@ -1102,7 +1112,13 @@ function neighbourRows(d) {
     }
     // The two offers the old sections carried stay on their rows: they draft a
     // turn and send nothing, so the write still goes through the agent's gate.
-    const offer = r.tags.includes("unwritten") ? ["write it", window.writeGhostPrompt && window.writeGhostPrompt(r.name, d.title)]
+    if (r.tags.includes("unwritten") && window.writeGhost) {
+      const w = el("button", "wk-mini", "write it");
+      w.type = "button";
+      w.addEventListener("click", () => window.writeGhost(r.name, d.title));
+      tags.appendChild(w);
+    }
+    const offer = r.tags.includes("unwritten") ? ["open in chat", window.writeGhostPrompt && window.writeGhostPrompt(r.name, d.title)]
       : r.tags.includes("similar") ? ["link", window.linkNotesPrompt && window.linkNotesPrompt(d.title, r.name)]
       : null;
     if (offer && offer[1]) {

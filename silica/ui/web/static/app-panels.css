@@ -515,13 +515,13 @@ body.dragging #drop-hint {
 }
 
 /* --- note panel (right overlay drawer; read-only note view) ----------------- */
-:is(.msg, #peek-body, #note-edit) .note-link {
+:is(.msg, #peek-body, #note-edit, #nv-edit) .note-link {
   color: var(--frost);
   text-decoration: none;
   border-bottom: 1px solid var(--accent);
 }
 
-:is(.msg, #peek-body, #note-edit) .note-link.broken {
+:is(.msg, #peek-body, #note-edit, #nv-edit) .note-link.broken {
   color: var(--ash);
   border-bottom-color: var(--warn);
 }
@@ -700,7 +700,7 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 /* The tree row's pin, at the 24px target floor: lit while the note is in the
    rail, which is what tells you the pin took. The workspaces ◇ beside it
    (ADR-0112) wears the same button. */
-#note-pin,
+:is(#note-pin,#note-centre),
 #note-ws {
   flex: none;
   display: grid;
@@ -716,7 +716,7 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   transition: color var(--dur) var(--ease);
 }
 
-#note-pin:hover,
+:is(#note-pin,#note-centre):hover,
 #note-ws:hover {
   color: var(--frost);
 }
@@ -761,7 +761,7 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   box-shadow: 0 0 0 2px var(--sheet);
 }
 
-#note-pin.on {
+:is(#note-pin,#note-centre).on {
   color: var(--accent);
 }
 
@@ -774,7 +774,7 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 #note-info:focus-visible,
 #note-read:focus-visible,
 #note-raw:focus-visible,
-#note-pin:focus-visible,
+:is(#note-pin,#note-centre):focus-visible,
 #note-ws:focus-visible,
 #note-changes:focus-visible {
   outline: 1px solid var(--accent);
@@ -796,8 +796,8 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 
 /* The note's menu and a passage's bar: one raised surface, the --bubble step
    above the sheet, so it reads as over the text and not part of it. */
-#note-menu,
-#note-selbar {
+:is(#note-menu,#nv-menu),
+:is(#note-selbar,#nv-selbar) {
   position: absolute;
   z-index: 52;
   background: var(--bubble);
@@ -805,7 +805,7 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
 }
 
-#note-menu {
+:is(#note-menu,#nv-menu) {
   /* Block, against app-shell's `header > *`, which lays a header's children
      out in a row and would set the menu's groups side by side. */
   display: block;
@@ -824,13 +824,13 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   color: var(--ash-dim);
 }
 
-:is(#note-menu, #attach-menu, #vault-add-menu) [role="separator"] {
+:is(#note-menu, #nv-menu, #attach-menu, #vault-add-menu) [role="separator"] {
   height: 1px;
   margin: 6px 0.6rem;
   background: var(--line);
 }
 
-:is(#note-menu, #attach-menu, #vault-add-menu) [role="menuitem"] {
+:is(#note-menu, #nv-menu, #attach-menu, #vault-add-menu) [role="menuitem"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -847,21 +847,21 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   cursor: pointer;
 }
 
-:is(#note-menu, #attach-menu, #vault-add-menu) [role="menuitem"]:is(:hover, :focus-visible) {
+:is(#note-menu, #nv-menu, #attach-menu, #vault-add-menu) [role="menuitem"]:is(:hover, :focus-visible) {
   color: var(--frost);
   background: var(--sel-hover);
   outline: none;
 }
 
-#note-menu .arw {
+:is(#note-menu,#nv-menu) .arw {
   color: var(--ash-dim);
 }
 
-#note-menu [role="menuitem"]:is(:hover, :focus-visible) .arw {
+:is(#note-menu,#nv-menu) [role="menuitem"]:is(:hover, :focus-visible) .arw {
   color: var(--accent);
 }
 
-#note-selbar {
+:is(#note-selbar,#nv-selbar) {
   display: flex;
   gap: 2px;
   padding: 3px;
@@ -903,10 +903,10 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 /* The editor: CodeMirror in the reader's inset, size and leading, so flipping
    between the two moves nothing but the markup. The marks and the blocks it
    draws take the reader's own typesetting (the shared `:is(...)` rules in
-   app-chat.css list #note-edit); what is here is only what a line of source
+   app-chat.css list :is(#note-edit,#nv-edit)); what is here is only what a line of source
    needs that a rendered element does not. ID selectors on purpose: they beat
    CodeMirror's injected base theme without an !important. */
-#note-edit {
+:is(#note-edit,#nv-edit) {
   flex: 1;
   min-height: 0;
   font-size: 16px;
@@ -967,11 +967,11 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 /* The strip's links rest bare, as .wk-paper-a says: the reader's own rule
    for a link in the text (app-chat.css, an id selector) outranks the class,
    and underlined only the strip's <a>, not the <button> beside it. */
-#note-edit .note-paper a.wk-paper-a {
+:is(#note-edit,#nv-edit) .note-paper a.wk-paper-a {
   text-decoration: none;
 }
 
-#note-edit .note-paper a.wk-paper-a:hover {
+:is(#note-edit,#nv-edit) .note-paper a.wk-paper-a:hover {
   text-decoration: underline;
 }
 
@@ -992,32 +992,32 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   white-space: nowrap;
 }
 
-#note-edit .cm-editor {
+:is(#note-edit,#nv-edit) .cm-editor {
   height: 100%;
   color: inherit;
   background: transparent;
 }
 
 /* No focus ring: the caret is the state, and the whole pane is the field. */
-#note-edit .cm-editor.cm-focused {
+:is(#note-edit,#nv-edit) .cm-editor.cm-focused {
   outline: none;
 }
 
-#note-edit .cm-scroller {
+:is(#note-edit,#nv-edit) .cm-scroller {
   font-family: inherit;
   line-height: inherit;
   overflow-y: auto;
 }
 
-#note-edit .cm-content {
+:is(#note-edit,#nv-edit) .cm-content {
   padding: 0.4rem 1.25rem 2rem;
 }
 
-#note-edit .cm-line {
+:is(#note-edit,#nv-edit) .cm-line {
   padding: 0;
 }
 
-#note-edit .cm-cursor {
+:is(#note-edit,#nv-edit) .cm-cursor {
   border-left: 2px solid var(--accent);
 }
 
@@ -1025,14 +1025,14 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
    caret against. The reader's `img` rule (border, height auto) reaches them
    through the shared selector and gave each hidden `**` a 2px gap: put back
    what CodeMirror's own theme sets. */
-#note-edit img.cm-widgetBuffer {
+:is(#note-edit,#nv-edit) img.cm-widgetBuffer {
   border: 0;
   border-radius: 0;
   height: 1em;
 }
 
-#note-edit .cm-selectionBackground,
-#note-edit .cm-focused .cm-selectionBackground {
+:is(#note-edit,#nv-edit) .cm-selectionBackground,
+:is(#note-edit,#nv-edit) .cm-focused .cm-selectionBackground {
   background: var(--sel);
 }
 
@@ -1041,8 +1041,8 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
    --sel fill, never an accent bar. Laid over the element's own ground rather
    than in place of it, since a callout and a code line paint theirs; on the
    block it goes on what is drawn, not on the wrapper around its corners. */
-#note-edit .cm-line.cm-cite-line,
-#note-edit .cm-rendered-block.cm-cite-line>* {
+:is(#note-edit,#nv-edit) .cm-line.cm-cite-line,
+:is(#note-edit,#nv-edit) .cm-rendered-block.cm-cite-line>* {
   background-image: linear-gradient(var(--sel), var(--sel));
 }
 
@@ -1050,19 +1050,19 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
    before its colour does: error a double line (not wavy, which is the
    spellchecker's), warning dashed, nit dotted. Hollow is "changed since the
    check": the same line at half strength, so it never vouches for new text. */
-#note-edit .cm-chk-u {
+:is(#note-edit,#nv-edit) .cm-chk-u {
   text-decoration-line: underline;
   text-decoration-thickness: 1.5px;
   text-underline-offset: 3px;
   text-decoration-skip-ink: none;
 }
-#note-edit .cm-chk-u.cm-chk-error { text-decoration-style: double; text-decoration-color: var(--err); text-decoration-thickness: 1px; }
-#note-edit .cm-chk-u.cm-chk-warning { text-decoration-style: dashed; text-decoration-color: var(--warn); }
-#note-edit .cm-chk-u.cm-chk-nit { text-decoration-style: dotted; text-decoration-color: var(--ash-dim); }
-#note-edit .cm-chk-u.cm-chk-hollow { text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); }
+:is(#note-edit,#nv-edit) .cm-chk-u.cm-chk-error { text-decoration-style: double; text-decoration-color: var(--err); text-decoration-thickness: 1px; }
+:is(#note-edit,#nv-edit) .cm-chk-u.cm-chk-warning { text-decoration-style: dashed; text-decoration-color: var(--warn); }
+:is(#note-edit,#nv-edit) .cm-chk-u.cm-chk-nit { text-decoration-style: dotted; text-decoration-color: var(--ash-dim); }
+:is(#note-edit,#nv-edit) .cm-chk-u.cm-chk-hollow { text-decoration-color: color-mix(in srgb, currentColor 35%, transparent); }
 
 /* The glyph sits in the text's left inset, so the line does not move. */
-#note-edit .cm-chk-glyph {
+:is(#note-edit,#nv-edit) .cm-chk-glyph {
   display: inline-block;
   width: 14px;
   margin-left: -17px;
@@ -1074,20 +1074,20 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   vertical-align: 0.15em;
   cursor: pointer;
 }
-#note-edit .cm-chk-glyph.cm-chk-error { color: var(--err); }
-#note-edit .cm-chk-glyph.cm-chk-warning { color: var(--warn); }
-#note-edit .cm-chk-glyph.cm-chk-nit { color: var(--ash-dim); }
-#note-edit .cm-chk-cell { position: relative; }
-#note-edit .cm-chk-cell > .cm-chk-glyph {
+:is(#note-edit,#nv-edit) .cm-chk-glyph.cm-chk-error { color: var(--err); }
+:is(#note-edit,#nv-edit) .cm-chk-glyph.cm-chk-warning { color: var(--warn); }
+:is(#note-edit,#nv-edit) .cm-chk-glyph.cm-chk-nit { color: var(--ash-dim); }
+:is(#note-edit,#nv-edit) .cm-chk-cell { position: relative; }
+:is(#note-edit,#nv-edit) .cm-chk-cell > .cm-chk-glyph {
   position: absolute;
   left: -16px;
   top: 0.55em;
   margin: 0;
 }
-#note-edit .cm-chk-glyph:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+:is(#note-edit,#nv-edit) .cm-chk-glyph:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
 /* One box at a time, under its block, the text's full width. */
-#note-edit .cm-chk-box {
+:is(#note-edit,#nv-edit) .cm-chk-box {
   position: relative;
   margin: 0.3rem 0 0.6rem;
   padding: 0.55rem 2rem 0.6rem 0.75rem;
@@ -1097,7 +1097,7 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   font-size: 13.5px;
   line-height: 1.5;
 }
-#note-edit .cm-chk-close {
+:is(#note-edit,#nv-edit) .cm-chk-close {
   position: absolute;
   top: 0.3rem;
   right: 0.35rem;
@@ -1108,20 +1108,20 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   font-size: 15px;
   cursor: pointer;
 }
-#note-edit .cm-chk-f + .cm-chk-f { margin-top: 0.55rem; padding-top: 0.5rem; border-top: 1px solid var(--line); }
-#note-edit .cm-chk-head { font-weight: 600; color: var(--frost); }
-#note-edit .cm-chk-f.cm-chk-error .cm-chk-head { color: var(--err); }
-#note-edit .cm-chk-f.cm-chk-warning .cm-chk-head { color: var(--warn); }
-#note-edit .cm-chk-box p { margin: 0.15rem 0 0; }
-#note-edit .cm-chk-box blockquote {
+:is(#note-edit,#nv-edit) .cm-chk-f + .cm-chk-f { margin-top: 0.55rem; padding-top: 0.5rem; border-top: 1px solid var(--line); }
+:is(#note-edit,#nv-edit) .cm-chk-head { font-weight: 600; color: var(--frost); }
+:is(#note-edit,#nv-edit) .cm-chk-f.cm-chk-error .cm-chk-head { color: var(--err); }
+:is(#note-edit,#nv-edit) .cm-chk-f.cm-chk-warning .cm-chk-head { color: var(--warn); }
+:is(#note-edit,#nv-edit) .cm-chk-box p { margin: 0.15rem 0 0; }
+:is(#note-edit,#nv-edit) .cm-chk-box blockquote {
   margin: 0.3rem 0 0;
   padding-left: 0.6rem;
   border-left: 2px solid var(--line);
   color: var(--ash);
 }
-#note-edit .cm-chk-stale, #note-edit .cm-chk-state { color: var(--ash); }
-#note-edit .cm-chk-stale { margin: 0 0 0.35rem; font-style: italic; }
-#note-edit .cm-chk-src {
+:is(#note-edit,#nv-edit) .cm-chk-stale, :is(#note-edit,#nv-edit) .cm-chk-state { color: var(--ash); }
+:is(#note-edit,#nv-edit) .cm-chk-stale { margin: 0 0 0.35rem; font-style: italic; }
+:is(#note-edit,#nv-edit) .cm-chk-src {
   margin-top: 0.25rem;
   padding: 0;
   border: 0;
@@ -1132,30 +1132,30 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   overflow-wrap: anywhere;
   cursor: pointer;
 }
-#note-edit .cm-chk-src:hover { text-decoration: underline; }
+:is(#note-edit,#nv-edit) .cm-chk-src:hover { text-decoration: underline; }
 
 /* The strip over a checked note: the counts, each a toggle for its marks,
    then progress or what was searched. Two lines at most in a 320px drawer. */
-#note-check {
+:is(#note-check,#nv-check) {
   padding: 0.35rem 1.25rem 0.4rem;
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--ash);
   border-bottom: 1px solid var(--line);
 }
-#note-check .nc-row { display: flex; align-items: center; gap: 0.15rem 0.6rem; flex-wrap: wrap; }
-#note-check button { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
-#note-check .nc-t[aria-pressed="false"] { opacity: 0.55; text-decoration: line-through; }
-#note-check .nc-t.nc-error[data-n]:not([data-n="0"]) { color: var(--err); }
-#note-check .nc-t.nc-warning[data-n]:not([data-n="0"]) { color: var(--warn); }
-#note-check .nc-close { margin-left: auto; font-size: 14px; color: var(--ash); }
-#note-check .nc-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ash-dim); }
-#note-check .nc-act { color: var(--accent); }
-#note-check button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+:is(#note-check,#nv-check) .nc-row { display: flex; align-items: center; gap: 0.15rem 0.6rem; flex-wrap: wrap; }
+:is(#note-check,#nv-check) button { padding: 0; border: 0; background: none; font: inherit; color: inherit; cursor: pointer; }
+:is(#note-check,#nv-check) .nc-t[aria-pressed="false"] { opacity: 0.55; text-decoration: line-through; }
+:is(#note-check,#nv-check) .nc-t.nc-error[data-n]:not([data-n="0"]) { color: var(--err); }
+:is(#note-check,#nv-check) .nc-t.nc-warning[data-n]:not([data-n="0"]) { color: var(--warn); }
+:is(#note-check,#nv-check) .nc-close { margin-left: auto; font-size: 14px; color: var(--ash); }
+:is(#note-check,#nv-check) .nc-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ash-dim); }
+:is(#note-check,#nv-check) .nc-act { color: var(--accent); }
+:is(#note-check,#nv-check) button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 
 /* Headings keep their size with the caret on them, as Obsidian's do: only the
    `#` comes and goes, so the line does not jump when you step onto it. */
-#note-edit .cm-line.cm-h {
+:is(#note-edit,#nv-edit) .cm-line.cm-h {
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--frost);
@@ -1164,11 +1164,11 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
   padding-bottom: 0.15em;
 }
 
-#note-edit .cm-line.cm-h1 { font-size: 1.72em; }
-#note-edit .cm-line.cm-h2 { font-size: 1.45em; }
-#note-edit .cm-line.cm-h3 { font-size: 1.15em; }
+:is(#note-edit,#nv-edit) .cm-line.cm-h1 { font-size: 1.72em; }
+:is(#note-edit,#nv-edit) .cm-line.cm-h2 { font-size: 1.45em; }
+:is(#note-edit,#nv-edit) .cm-line.cm-h3 { font-size: 1.15em; }
 
-#note-edit .cm-line.cm-quote {
+:is(#note-edit,#nv-edit) .cm-line.cm-quote {
   border-left: 2px solid var(--line-2);
   padding-left: 0.7rem;
   color: var(--ash);
@@ -1177,44 +1177,44 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 
 /* Source that is being edited as source: a code block, a table, a formula or
    the properties with the caret inside. The grid font says "this is literal". */
-#note-edit .cm-line:is(.cm-codeblock, .cm-table, .cm-mathblock, .cm-fm) {
+:is(#note-edit,#nv-edit) .cm-line:is(.cm-codeblock, .cm-table, .cm-mathblock, .cm-fm) {
   font-family: var(--mono);
   font-size: 0.86em;
   background: var(--slate-2);
   padding: 0 0.85rem;
 }
 
-#note-edit .cm-line.cm-fm {
+:is(#note-edit,#nv-edit) .cm-line.cm-fm {
   color: var(--ash);
 }
 
-#note-edit .cm-math-src {
+:is(#note-edit,#nv-edit) .cm-math-src {
   font-family: var(--mono);
   font-size: 0.88em;
   color: var(--ash);
 }
 
-#note-edit .cm-bullet {
+:is(#note-edit,#nv-edit) .cm-bullet {
   color: var(--ash-dim);
   display: inline-block;
   width: 0.6em;
 }
 
-#note-edit .cm-task {
+:is(#note-edit,#nv-edit) .cm-task {
   margin: 0 0.45em 0 0;
   vertical-align: -0.1em;
   accent-color: var(--accent);
   cursor: pointer;
 }
 
-#note-edit .cm-hr {
+:is(#note-edit,#nv-edit) .cm-hr {
   display: inline-block;
   width: 100%;
   vertical-align: middle;
   border-top: 1px solid var(--line);
 }
 
-#note-edit .cm-link-live {
+:is(#note-edit,#nv-edit) .cm-link-live {
   cursor: pointer;
 }
 
@@ -1224,21 +1224,21 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 /* `normal` because CodeMirror lines are pre-wrap, and the server's HTML has a
    newline between every two tags: inherited, each one drew as a blank line
    inside callouts and around tables. A <pre> keeps its own. */
-#note-edit .cm-rendered {
+:is(#note-edit,#nv-edit) .cm-rendered {
   white-space: normal;
 }
 
-#note-edit .cm-rendered-block {
+:is(#note-edit,#nv-edit) .cm-rendered-block {
   padding: 0.35em 0;
   border-radius: var(--r-sm);
   cursor: text;
 }
 
-#note-edit .cm-rendered-block:hover {
+:is(#note-edit,#nv-edit) .cm-rendered-block:hover {
   box-shadow: 0 0 0 1px var(--line);
 }
 
-#note-edit .cm-rendering {
+:is(#note-edit,#nv-edit) .cm-rendering {
   font-family: var(--mono);
   font-size: 0.86em;
   color: var(--ash-dim);
@@ -1253,34 +1253,34 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar, #view-discover .dv-h
 /* Footnotes, which the reader drew and the editor did not until ADR-0059: a
    reference is a superscript number, cyan because a press goes to its
    definition; a definition is a quieter line under its number. */
-#note-edit sup.footnote-ref {
+:is(#note-edit,#nv-edit) sup.footnote-ref {
   padding: 0 0.1em;
   font-size: 0.72em;
   color: var(--accent);
   cursor: pointer;
 }
 
-#note-edit .cm-fn-src {
+:is(#note-edit,#nv-edit) .cm-fn-src {
   color: var(--ash);
 }
 
-#note-edit .cm-line.cm-footnote {
+:is(#note-edit,#nv-edit) .cm-line.cm-footnote {
   font-size: 0.88em;
   color: var(--ash);
 }
 
-#note-edit .cm-fn-label {
+:is(#note-edit,#nv-edit) .cm-fn-label {
   margin-right: 0.5em;
   color: var(--ash-dim);
   font-variant-numeric: tabular-nums;
 }
 
-#note-edit .cm-fn-label::after {
+:is(#note-edit,#nv-edit) .cm-fn-label::after {
   content: ".";
 }
 
-#note-edit [align="center"],
-#note-edit [align="center"] * {
+:is(#note-edit,#nv-edit) [align="center"],
+:is(#note-edit,#nv-edit) [align="center"] * {
   text-align: start;
 }
 

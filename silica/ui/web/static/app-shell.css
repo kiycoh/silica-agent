@@ -461,7 +461,7 @@ html:not([data-hosted]) .hp-hosted {
    ask a question through a route the door does not count; and a note's check
    sources, whose judge is one too. The Download rows follow the server on
    their own (loadVaultExport). */
-html[data-demo] :is(#attach, .mic, #vault-add, #vault-switch, #settings-btn, .redo-btn, .edit-btn, #note-check-open) {
+html[data-demo] :is(#attach, .mic, #vault-add, #vault-switch, #settings-btn, .redo-btn, .edit-btn, #note-check-open, #sel-check, #nv-selbar [data-check], #nv-menu [data-act="check"]) {
   display: none !important;
 }
 

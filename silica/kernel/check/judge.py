@@ -85,7 +85,7 @@ def which_passage(text: str, passages: list[dict], decide: Decide) -> dict | Non
     return passages[int(answers["rests_on"]["choice"]) - 1]
 
 
-def by_jev(text: str, passages: list[dict], decide: Decide) -> dict | None:
+def by_jev(text: str, passages: list[dict], decide: Decide, cite: bool = True) -> dict | None:
     """{kind, p, by, at?} or {state: "not checked", ...}; None when Jev
     answered nothing (unset, error, invalid), which is the fallback's turn."""
     answers = decide(_state(text, passages), QUESTION)
@@ -96,7 +96,10 @@ def by_jev(text: str, passages: list[dict], decide: Decide) -> dict | None:
     if p < THRESHOLDS.get(kind, 1.0):
         return {"state": "not checked", "kind": kind, "p": p, "by": "jev"}
     out = {"kind": kind, "p": p, "by": "jev"}
-    if kind in ("contradicted", "overstated", "off-point") and passages:
+    # "supported" only when `cite` asks: a checked selection prints what backs it
+    # (ADR-0110 amendment) and a web verdict must name its page, but a whole note
+    # draws nothing for a supported block, so it pays no decision per block for one.
+    if kind in (("supported",) if cite else ()) + ("contradicted", "overstated", "off-point") and passages:
         rest = which_passage(text, passages, decide)
         if rest:
             out["at"] = f"{rest['path']}:{rest['line']}"
@@ -159,10 +162,10 @@ def _quoted(evidence: str, passage: str) -> bool:
     return True
 
 
-def judge(text: str, passages: list[dict], *, decide: Decide | None, chat: Chat | None) -> dict | None:
+def judge(text: str, passages: list[dict], *, decide: Decide | None, chat: Chat | None, cite: bool = True) -> dict | None:
     """Jev first; the chat model only when Jev answered nothing."""
     if decide is not None:
-        verdict = by_jev(text, passages, decide)
+        verdict = by_jev(text, passages, decide, cite)
         if verdict is not None:
             return verdict
     return by_chat(text, passages, chat) if chat is not None else None
