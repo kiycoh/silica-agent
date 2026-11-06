@@ -28,12 +28,6 @@ logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
-# Template-scoped fence split: unlike frontmatter.FM_RE (whose trailing \s*
-# swallows every blank line after the closing fence), this stops at the first
-# newline so the template author's body spacing passes through unchanged.
-_TEMPLATE_FM_RE = re.compile(r"^---[ \t]*\n(.*?)\n---[ \t]*\n", re.DOTALL)
-
-
 def slugify(s: str) -> str:
     s = re.sub(r'[\\/:*?"<>|]', '', s)
     s = re.sub(r'\s+', ' ', s)  # normalise newlines, tabs, and multiple spaces to a single space
@@ -257,7 +251,7 @@ def render_note(template_source: str, fields: dict) -> str:
     def _sub_all(text: str) -> str:
         return _PLACEHOLDER_RE.sub(lambda m: str(_lookup(m.group(1)) or ""), text)
 
-    m = _TEMPLATE_FM_RE.match(template_source)
+    m = frontmatter.FM_RE_TEMPLATE.match(template_source)
     if not m:
         return _sub_all(template_source)
 
@@ -301,7 +295,7 @@ def _read_template(path) -> str | None:
     except OSError:
         return None
     source = source.replace("\r\n", "\n")
-    if source.startswith("---") and not _TEMPLATE_FM_RE.match(source):
+    if source.startswith("---") and not frontmatter.FM_RE_TEMPLATE.match(source):
         return None
     return source
 
@@ -348,7 +342,7 @@ def resolve_template(name: str | None = None) -> str:
 _RELATED_BLOCK_RE = re.compile(r"^related:[^\n]*(?:\n[ \t]*-[^\n]*)*", re.MULTILINE)
 
 
-def _add_to_related(content: str, end_idx: int, link: str) -> str:
+def _add_to_related(content: str, span: tuple[int, int], link: str) -> str:
     """Rewrite the `related:` block, in place, as a list ending in `link`.
 
     Splicing an item after a bare "related:" line, as this did until
@@ -373,11 +367,12 @@ def _add_to_related(content: str, end_idx: int, link: str) -> str:
         return yaml.safe_dump(x, default_flow_style=True, allow_unicode=True).strip()
 
     block = "related:\n" + "\n".join(f"  - {_item(x)}" for x in items)
-    head = content[4:end_idx]
+    start, end = span
+    head = content[start:end]
     new_head, n = _RELATED_BLOCK_RE.subn(lambda _m: block, head, count=1)
     if not n:
         new_head = f"{head}\n{block}"
-    out = "---\n" + new_head + content[end_idx:]
+    out = content[:start] + new_head + content[end:]
     check, _r, _b = frontmatter.split(out)
     if check is None or check.get("related") != items:
         logger.warning("ensure_hub_link: could not add %s to related: without "
@@ -396,13 +391,13 @@ def ensure_hub_link(content: str, hub: str | None) -> str:
     from silica.kernel.base.markdown import has_wikilink
     if not hub or has_wikilink(content, hub):
         return content
-    if content.startswith("---\n"):
-        end_idx = content.find("\n---\n", 4)
-        if end_idx == -1:
-            return content
-        return _add_to_related(content, end_idx, f"[[{hub}]]")
+    span = frontmatter.block(content)
+    if span:
+        return _add_to_related(content, span, f"[[{hub}]]")
+    if frontmatter.FM_OPEN_RE.match(content):
+        return content  # unterminated: a second block above it would hide it
     today = datetime.date.today().isoformat()
-    frontmatter = f"""---
+    block = f"""---
 parent note: "[[{hub}]]"
 related:
   - "[[{hub}]]"
@@ -410,7 +405,7 @@ last modified: {today}
 AI: true
 ---
 """
-    return frontmatter + content
+    return block + content
 
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s")
@@ -423,7 +418,7 @@ def _body_lines(content: str):
     a code fence: the only lines a heading test may look at."""
     lines = content.splitlines()
     start = 0
-    if content.startswith("---\n"):
+    if frontmatter.FM_OPEN_RE.match(content):
         for i in range(1, len(lines)):
             if lines[i].rstrip() == "---":
                 start = i + 1
@@ -700,14 +695,13 @@ def ensure_ai_flag(content: str, value: str = "true") -> str:
     or the `AI` key already exists (never overwrites the user's own value, and
     never upgrades an earlier `partial` to `true`).
     """
-    if not content.startswith("---\n"):
+    span = frontmatter.block(content)
+    if span is None:
+        return content  # none, or unterminated: leave it for the lint to flag
+    start, end = span
+    if _AI_KEY_RE.search(content[start:end]):
         return content
-    end_idx = content.find("\n---\n", 4)
-    if end_idx == -1:
-        return content  # unterminated frontmatter — leave for the lint to flag
-    if _AI_KEY_RE.search(content[4:end_idx]):
-        return content
-    return content[:end_idx] + f"\nAI: {value}" + content[end_idx:]
+    return content[:end] + f"\nAI: {value}" + content[end:]
 
 
 _LAST_MODIFIED_RE = re.compile(r"^last modified:.*$", re.MULTILINE)
@@ -728,16 +722,15 @@ def _stamp_agent(content: str) -> str:
     from silica.kernel.write.notetype import agent_id
 
     agent = agent_id()
-    if not agent or not content.startswith("---\n"):
+    span = frontmatter.block(content) if agent else None
+    if span is None:
         return content
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        return content
+    start, end = span
     val = agent.splitlines()[0].replace("\\", "\\\\").replace('"', '\\"')
     line = f'agent: "{val}"'
-    head = content[4:end]
+    head = content[start:end]
     if _AGENT_KEY_RE.search(head):
-        return "---\n" + _AGENT_KEY_RE.sub(line, head, count=1) + content[end:]
+        return content[:start] + _AGENT_KEY_RE.sub(line, head, count=1) + content[end:]
     return content[:end] + "\n" + line + content[end:]
 
 
@@ -760,17 +753,16 @@ def stamp_documents(content: str, documents: list[str], code_ref: str | None = N
     template. An existing block is replaced by the union, prior entries first,
     so patching a note adds a binding instead of dropping the old ones.
     """
-    if not documents or not content.startswith("---\n"):
-        return content
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        return content  # unterminated frontmatter — leave for the lint to flag
+    span = frontmatter.block(content) if documents else None
+    if span is None:
+        return content  # none, or unterminated: leave it for the lint to flag
+    start, end = span
     from silica.kernel.base.frontmatter import documents_of
 
     data, _, _ = frontmatter.split(content)
     merged = list(dict.fromkeys(documents_of(data if isinstance(data, dict) else {})
                                 + list(documents)))
-    head, tail = _DOCS_BLOCK_RE.sub("", content[4:end]).rstrip("\n"), content[end:]
+    head, tail = _DOCS_BLOCK_RE.sub("", content[start:end]).rstrip("\n"), content[end:]
     lines = "".join('  - "%s"\n' % p.replace("\\", "\\\\").replace('"', '\\"')
                     for p in merged)
     head = f"{head}\ndocuments:\n{lines}".rstrip("\n")
@@ -778,7 +770,7 @@ def stamp_documents(content: str, documents: list[str], code_ref: str | None = N
         line = f"code_ref: {code_ref}"
         head = (_CODE_REF_RE.sub(line, head, count=1)
                 if _CODE_REF_RE.search(head) else f"{head}\n{line}")
-    return "---\n" + head + tail
+    return content[:start] + head + tail
 
 
 _SOURCES_BLOCK_RE = re.compile(r"^sources:[^\n]*(?:\n[ \t]*-[^\n]*)*\n?", re.MULTILINE)
@@ -795,11 +787,10 @@ def stamp_sources(content: str, source_basename: str) -> str:
     an inert string carries the provenance without any of that. The content
     hash stays ledger-side (provenance.json) on purpose.
     """
-    if not source_basename or not content.startswith("---\n"):
-        return content
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        return content  # unterminated frontmatter — leave for the lint to flag
+    span = frontmatter.block(content) if source_basename else None
+    if span is None:
+        return content  # none, or unterminated: leave it for the lint to flag
+    start, end = span
     data, raw, _ = frontmatter.split(content)
     if data is None and raw is not None:
         # A block that does not parse has no prior list to union with: the
@@ -813,11 +804,11 @@ def stamp_sources(content: str, source_basename: str) -> str:
     merged = list(dict.fromkeys(
         [str(s) for s in (prior or []) if s] + [source_basename]
     ))
-    head, tail = _SOURCES_BLOCK_RE.sub("", content[4:end]).rstrip("\n"), content[end:]
+    head, tail = _SOURCES_BLOCK_RE.sub("", content[start:end]).rstrip("\n"), content[end:]
     lines = "".join('  - "%s"\n' % s.replace("\\", "\\\\").replace('"', '\\"')
                     for s in merged)
     head = f"{head}\nsources:\n{lines}".rstrip("\n")
-    return "---\n" + head + tail
+    return content[:start] + head + tail
 
 
 def stamp_citation(content: str, cite: dict[str, str]) -> str:
@@ -830,11 +821,10 @@ def stamp_citation(content: str, cite: dict[str, str]) -> str:
     the second one's DOI and authors under it. Values are inert quoted
     strings — like `sources:`, citation metadata must not enter the graph.
     """
-    if not cite or not content.startswith("---\n"):
-        return content
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        return content  # unterminated frontmatter — leave for the lint to flag
+    span = frontmatter.block(content) if cite else None
+    if span is None:
+        return content  # none, or unterminated: leave it for the lint to flag
+    start, end = span
     data, raw, _ = frontmatter.split(content)
     if data is None and raw is not None:
         return content  # unparseable: nothing to check first-writer-wins against
@@ -842,11 +832,11 @@ def stamp_citation(content: str, cite: dict[str, str]) -> str:
     out = {(k if k.startswith("source_") else f"source_{k}"): v for k, v in cite.items()}
     if existing & out.keys():
         return content
-    head, tail = content[4:end].rstrip("\n"), content[end:]
+    head, tail = content[start:end].rstrip("\n"), content[end:]
     for out_key, val in out.items():
         v = str(val).replace("\\", "\\\\").replace('"', '\\"')
         head = f'{head}\n{out_key}: "{v}"'
-    return "---\n" + head + tail
+    return content[:start] + head + tail
 
 
 # Every character YAML scans as a line break. `\n` and `\r` are the obvious
@@ -895,11 +885,10 @@ def upsert_props(content: str, props: dict[str, str]) -> str:
     One line also keeps the replace branch below (a one-line regex) honest on
     the next upsert.
     """
-    if not props or not content.startswith("---\n"):
+    span = frontmatter.block(content) if props else None
+    if span is None:
         return content
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        return content
+    start, end = span
     head = content[:end]
     for key, value in props.items():
         scalar = _yaml_scalar(value)
@@ -923,12 +912,12 @@ def upsert_props(content: str, props: dict[str, str]) -> str:
                 "scalar — no ':', no comment, no line break."
             )
         line_re = re.compile(rf"^{re.escape(key)}:.*$", re.MULTILINE)
-        if line_re.search(head[4:]):
+        if line_re.search(head[start:]):
             # re.sub calls the replacement eagerly, so the default-argument
             # capture the lambda used to carry was pinning values that cannot
             # change before it runs.
-            head = head[:4] + line_re.sub(
-                lambda _m: f"{key}: {scalar}", head[4:], count=1)
+            head = head[:start] + line_re.sub(
+                lambda _m: f"{key}: {scalar}", head[start:], count=1)
         else:
             head += f"\n{key}: {scalar}"
     return head + content[end:]
@@ -939,15 +928,14 @@ def drop_props(content: str, keys: tuple[str, ...] | list[str]) -> str:
     `upsert_props`: every other line stays byte-for-byte. The one caller is the
     GUI's "keep" on a write the gate marked `review:` (audit P4): the person has
     looked, so the verdict comes off the note the same way it went on."""
-    if not keys or not content.startswith("---\n"):
+    span = frontmatter.block(content) if keys else None
+    if span is None:
         return content
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        return content
+    start, end = span
     head = content[:end]
     for key in keys:
         line_re = re.compile(rf"^{re.escape(key)}:.*$\n?", re.MULTILINE)
-        head = head[:4] + line_re.sub("", head[4:])
+        head = head[:start] + line_re.sub("", head[start:])
     head = head.rstrip("\n")
     return head + content[end:]
 
@@ -967,7 +955,7 @@ def ensure_system_floor(content: str, prior: str | None = None) -> str:
       and refresh `last modified` to today.
     - no block anywhere: create the minimal one.
     """
-    if content.startswith("---\n"):
+    if frontmatter.FM_OPEN_RE.match(content):
         # A rewrite that keeps the prior body changed only its properties (an
         # alias, a superseded_by pointer), and the note stays its author's: a
         # dedup alias stamped AI: true on an owner's note (Variabile casuale,
@@ -978,13 +966,12 @@ def ensure_system_floor(content: str, prior: str | None = None) -> str:
     pm = frontmatter.FM_RE.match(prior) if prior else None
     if pm is None:
         return _stamp_agent(f"---\nAI: true\nlast modified: {today}\n---\n\n{content.lstrip(chr(10))}")
-    # Rebuild the prior block with canonical bare fences: FM_RE tolerates CRLF
-    # and fence-line whitespace, but the splices below assume exactly
-    # "---\n...\n---\n".
+    # The prior block goes back with canonical bare fences, so a CRLF prior does
+    # not make the new body inherit a fence it never had.
     block = "---\n" + pm.group(1) + "\n---\n"
     merged = ensure_ai_flag(block + "\n" + content.lstrip("\n"))
-    end_idx = merged.find("\n---\n", 4)
-    head, tail = merged[:end_idx], merged[end_idx:]
+    _start, end = frontmatter.block(merged)
+    head, tail = merged[:end], merged[end:]
     if _LAST_MODIFIED_RE.search(head):
         head = _LAST_MODIFIED_RE.sub(f"last modified: {today}", head, count=1)
     else:

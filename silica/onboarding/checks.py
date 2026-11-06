@@ -25,7 +25,7 @@ from silica.model.providers import (
     model_limits,
 )
 from silica.config import USER_ENV, SilicaConfig, embedder_defaults, silica_home
-from silica.kernel.base import gitstate
+from silica.kernel.base import frontmatter, gitstate
 from silica.kernel.scrub import scrub_credentials
 
 _HTTP_TIMEOUT = 3.0
@@ -482,9 +482,9 @@ def sample_vault_text(vault: str) -> str:
             head = f.read_text(encoding="utf-8", errors="ignore")[:2000]
         except Exception:
             continue
-        if head.startswith("---\n") and _AI_FLAG_RE.search(
-            head[: head.find("\n---\n", 4) if head.find("\n---\n", 4) != -1 else len(head)]
-        ):
+        # `head` may cut a long block short: its whole text is then the block.
+        span = frontmatter.block(head)
+        if head.startswith("---\n") and _AI_FLAG_RE.search(head[: span[1] if span else len(head)]):
             continue
         chunk = head[:_LANG_SAMPLE_PER_FILE_CHARS]
         parts.append(chunk)

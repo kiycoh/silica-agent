@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from silica.agent.commit import commit_ops
 from silica.model.decide import decide
 from silica.agent.bounds import orphan_bounds
+from silica.kernel.base.frontmatter import FM_RE_TOLERANT
 from silica.kernel.base.manifest import active_write_dir, within
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem
@@ -68,11 +69,8 @@ def _stem(path: str) -> str:
 
 
 def _strip_frontmatter(text: str) -> str:
-    if text.startswith("---"):
-        end = text.find("\n---", 3)
-        if end != -1:
-            return text[end + 4:].lstrip()
-    return text
+    m = FM_RE_TOLERANT.match(text)
+    return text[m.end():].lstrip() if m else text
 
 
 def typed_state(orphan_path: str, orphan_text: str, candidate_path: str,

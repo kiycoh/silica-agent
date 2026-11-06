@@ -24,7 +24,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Callable
 
-from silica.kernel.base.markdown import WIKILINK_TARGET_RE
+from silica.kernel.base.syntax import WIKILINK_TARGET_RE
 from silica.kernel.base.notekey import ledger_key
 from silica.kernel.write.ops import Op, OpType
 

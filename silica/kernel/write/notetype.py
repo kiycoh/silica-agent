@@ -67,12 +67,11 @@ def stamp_type(path: str, content: str) -> str:
     and the walker censuses it), when the YAML is unparseable (stamping into
     it would corrupt it further), and when `type` is already present.
     """
-    if not content.startswith("---\n"):
-        return content
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        return content  # unterminated frontmatter — the walker flags it
-    if _TYPE_KEY_RE.search(content[4:end]):
+    span = frontmatter.block(content)
+    if span is None:
+        return content  # none, or unterminated: the walker flags it
+    start, end = span
+    if _TYPE_KEY_RE.search(content[start:end]):
         return content
     data, _raw, _body = frontmatter.split(content)
     if data is None:
@@ -140,16 +139,16 @@ def _replace_verified(content: str, entries: list[dict]) -> str:
     """`content` with its `verified` block replaced by `entries` (dropped when
     empty). Requires a frontmatter block; the callers guarantee one."""
     if content.startswith("---\n---\n"):
-        fm, tail = "", content[4:]
+        fence, fm, tail = "---\n", "", content[4:]
     else:
-        end = content.find("\n---\n", 4)
-        fm, tail = content[4:end + 1], content[end + 1:]
+        start, end = frontmatter.block(content)
+        fence, fm, tail = content[:start], content[start:end + 1], content[end + 1:]
     fm = _VERIFIED_BLOCK_RE.sub("", fm)
     if fm and not fm.endswith("\n"):
         fm += "\n"
     if entries:
         fm += _render_verified(entries)
-    return "---\n" + fm + tail
+    return fence + fm + tail
 
 
 def stamp_verified(content: str, by: str, at: str) -> str:
@@ -161,7 +160,7 @@ def stamp_verified(content: str, by: str, at: str) -> str:
         raise ValueError(f"an attestation must name a person ({HUMAN_ACTOR_PREFIX}…), got {by!r}")
     content = content or ""
     entry = {"by": by.strip(), "at": at, "body_sha256": body_sha256(content)}
-    if not content.startswith("---\n"):
+    if not frontmatter.FM_OPEN_RE.match(content):
         return "---\n" + _render_verified([entry]) + "---\n\n" + content
     data, raw, _body = frontmatter.split(content)
     if data is None:

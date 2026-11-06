@@ -35,14 +35,11 @@ import functools
 import re
 from typing import Sequence
 
+from silica.kernel.base.frontmatter import FM_RE_TOLERANT
+
 # ---------------------------------------------------------------------------
 # Skip-region detection
 # ---------------------------------------------------------------------------
-
-# Matches the YAML frontmatter at the very top of a note (OFM convention).
-# \r?\n so Windows (CRLF) user notes touched by backlink_pass are protected too
-# — otherwise the whole frontmatter fails to match and becomes linkable.
-_FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*\r?\n?", re.DOTALL)
 
 # Inline code (`...`)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
@@ -136,7 +133,9 @@ def _block_skip_spans(text: str) -> list[tuple[int, int]]:
 # rename REWRITES wikilinks, headings and markdown-link hrefs, so those live in
 # FULL, never BASE. Fenced/indented code is always masked (see build_skip_mask).
 SKIP_PATTERNS_BASE = (
-    _FRONTMATTER_RE,
+    # Tolerant, so Windows (CRLF) user notes touched by backlink_pass are
+    # protected too: a block this misses becomes linkable.
+    FM_RE_TOLERANT,
     _INLINE_CODE_RE,
     _DISPLAY_MATH_RE,
     _INLINE_MATH_RE,
@@ -311,7 +310,7 @@ def autolink(
     # skip that title entirely regardless of where in the body it appears.
     # Path-qualified targets ([[topics/Python]]) also register their basename
     # ("python") so we don't add a second, redundant [[Python]] (audit §3).
-    from silica.kernel.base.markdown import WIKILINK_TARGET_RE
+    from silica.kernel.base.syntax import WIKILINK_TARGET_RE
     existing_links: set[str] = set()
     for _m in WIKILINK_TARGET_RE.findall(body):
         t = _m.strip().lower()

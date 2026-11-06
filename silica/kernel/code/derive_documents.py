@@ -161,7 +161,7 @@ def apply(vault: Path | str, proposals: list[Proposal]) -> int:
             content = DRIVER.read_note(p.note_path).content
         except Exception:  # noqa: BLE001 - gone or unreadable since propose(): nothing to stamp
             continue
-        if content.startswith("---\n"):
+        if frontmatter.FM_OPEN_RE.match(content):
             stamped = templates.stamp_documents(content, p.documents, p.code_ref)
         else:
             stamped = frontmatter.dump({"documents": list(p.documents),

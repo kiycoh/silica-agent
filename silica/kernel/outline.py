@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from collections.abc import Set as AbstractSet
 from typing import Callable
 
+from silica.kernel.base import frontmatter
 from silica.kernel.base.noteshape import SPINE_SECTION, is_spine
 from silica.kernel.text.media import strip_images
 
@@ -645,7 +646,6 @@ def _hidden_note(rel: str) -> bool:
     idea it lists."""
     try:
         from silica.driver import DRIVER
-        from silica.kernel.base import frontmatter
         data, _raw, _body = frontmatter.split(DRIVER.read_note(rel).content or "")
     except Exception:  # noqa: BLE001
         # Unreadable candidate: not a merge target, the judge would fail on it anyway.
@@ -725,7 +725,6 @@ def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozens
     the textbook wrote "LSTM" beside it (2026-10-23).
     """
     from silica.driver import DRIVER
-    from silica.kernel.base import frontmatter
     from silica.tools.atomic import notes_under
 
     rows: list[dict] = []
@@ -1264,7 +1263,6 @@ def translates(src: str) -> bool:
 # Stage A names a section that spans two headings as "A / B" or "A; B"
 # (11 of 137 ideas on the 2026-10-14 A/B lectures).
 _SECTION_PARTS = re.compile(r"\s*[/;]\s*")
-_FRONTMATTER_RE = re.compile(r"\A\s*---[ \t]*\n.*?\n---[ \t]*(?:\n|\Z)", re.S)
 _BODY_HEADING = re.compile(r"^(#{1,6})(?=\s)", re.M)
 
 
@@ -1300,7 +1298,7 @@ def partition_bodies(outline: Outline, src: str) -> tuple[str, dict[str, str]]:
     # Not the source's own frontmatter: a converted syllabus opens on its
     # `date:`/`source_file:` block and then a table, and that block landed in
     # the spine note's body as a second frontmatter (2026-10-23).
-    head = _FRONTMATTER_RE.sub("", src[:first], count=1).strip()
+    head = frontmatter.body_of(src[:first], frontmatter.FM_RE_SCAN).strip()
     lead: list[str] = [head] if head else []
     owner: Idea | None = None
     for m, nxt in zip(marks, marks[1:] + [None]):

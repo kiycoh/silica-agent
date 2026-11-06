@@ -121,7 +121,7 @@ def _frontmatter_yaml_error(c: Ctx) -> int:
 
 def _unclosed_frontmatter(c: Ctx) -> int:
     # opens with a `---` line at the very top but FM_RE found no closing delimiter
-    if re.match(r"\A---[ \t]*\r?\n", c.text) and frontmatter.FM_RE.match(c.text) is None:
+    if frontmatter.FM_OPEN_RE.match(c.text) and frontmatter.FM_RE.match(c.text) is None:
         return 1
     return 0
 

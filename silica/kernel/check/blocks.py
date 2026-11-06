@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from silica.kernel.base.frontmatter import FM_RE_TOLERANT
+
 MIN_WORDS = 6
 
 _FENCE = re.compile(r"^\s*(```|~~~)")
@@ -47,12 +49,11 @@ class Block:
 
 def body_start(content: str) -> int:
     """Index of the first body line: past a frontmatter block when there is one."""
-    lines = content.split("\n")
-    if lines and lines[0].strip() == "---":
-        for i in range(1, len(lines)):
-            if lines[i].strip() in ("---", "..."):
-                return i + 1
-    return 0
+    m = FM_RE_TOLERANT.match(content)
+    if not m:
+        return 0
+    n = content.count("\n", 0, m.end())
+    return n if content[m.end() - 1] == "\n" else n + 1
 
 
 def split(content: str) -> tuple[list[Block], dict[str, str]]:

@@ -5,7 +5,70 @@ import re
 import unicodedata
 import yaml
 
+from silica.kernel.base.syntax import WIKILINK_TARGET_RE
+
+# Where a frontmatter block ends, read four ways, each by what its reader needs.
+# Which notes parse is decided by the first; a reader that took a wider grammar
+# would show or skip what the write gate treats as body, so the others are named
+# here instead of being widened or typed again.
+#
+#   grammar          CRLF  EOF close  `...` close  leading blank  `--- ` fence
+#   FM_RE            yes   no         no           no             yes
+#   FM_RE_TEMPLATE   no    no         no           no             yes
+#   FM_RE_TOLERANT   yes   yes        yes          no             yes
+#   FM_RE_SCAN       yes   yes        yes          yes            yes
+#
+# The write gate's block, and with it every property read and write. Its
+# trailing \s* takes the blank lines after the closing fence with it. Widening
+# it to `...` or an unclosed last line is a decision about what the write gate
+# sees, not a refactor: those notes read as body today.
 FM_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n', re.DOTALL)
+
+# A template's split: stops at the first newline, so the template author's body
+# spacing passes through unchanged, which FM_RE's trailing \s* would swallow.
+FM_RE_TEMPLATE = re.compile(r"^---[ \t]*\n(.*?)\n---[ \t]*\n", re.DOTALL)
+
+# Every block a person would call one: what a mask must not rewrite, what a
+# prompt or a count leaves out, and `...` because YAML closes a document with it.
+# The lookbehind and not a required \n, so `---\n---\n` is a block with nothing
+# in it, and `-----` closes nothing: a table rule or a heavier line under the
+# opening fence was closing autolink's mask three characters in.
+FM_RE_TOLERANT = re.compile(
+    r"\A---[ \t]*\r?\n(.*?)(?<=\n)(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL)
+
+# The same with blank lines before it, for text that has been dedented or
+# trimmed and no longer starts where the file did: the scaffold scan, the heading
+# outline, the outline lane's lead. Never for a mask or a write, because Obsidian
+# reads a fence below a blank line as a rule, and the text after it is prose.
+FM_RE_SCAN = re.compile(
+    r"\A\s*---[ \t]*\r?\n(.*?)(?<=\n)(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL)
+
+# A note that opens a block, closed or not: the lint's unclosed fence, and the
+# writers that leave an unterminated block alone instead of adding a second one.
+FM_OPEN_RE = re.compile(r"---[ \t]*\r?\n")
+
+
+def block(content, grammar=FM_RE):
+    """(start, end) of the YAML between the fences, or None: `content[start:end]`
+    is the raw block and the closing fence opens at `end`, so a string splice
+    lands inside the block whatever its fences look like.
+
+    The one answer to where a block ends. A stamper splices here because it must
+    keep the person's bytes (its own `\\n` lines join a CRLF block as they are:
+    YAML reads both, and the driver hands a CRLF note over on LF anyway). Each
+    stamper used to ask `startswith("---\\n")` and `find("\\n---\\n", 4)`: a
+    `--- ` fence, which FM_RE accepts, was skipped, or closed at a rule further
+    down the body, and the stamp landed in the prose.
+    """
+    m = grammar.match(content)
+    return m.span(1) if m else None
+
+
+def body_of(content, grammar=FM_RE):
+    """`content` past its block; all of it when there is none."""
+    m = grammar.match(content)
+    return content[m.end():] if m else content
+
 
 def split(content):
     """Return (data_dict_or_None, raw_fm_or_None, body).
@@ -93,9 +156,6 @@ def documents_in(content):
     return [str(x).strip() for x in raw if str(x).strip()]
 
 
-_LINK_TARGET = re.compile(r"\[\[([^\]|#]+)")
-
-
 def requires_in(data) -> list[str]:
     """The note names a parsed frontmatter's `requires:` names (ADR-0145):
     `"[[Gradient descent]]"`, `[[A|alias]]` and `[[A#h]]` give their target,
@@ -107,7 +167,7 @@ def requires_in(data) -> list[str]:
         while isinstance(item, list):  # an unquoted [[A]] parses as nested YAML lists
             item = item[0] if item else ""
         text = str(item or "").strip()
-        m = _LINK_TARGET.search(text)
+        m = WIKILINK_TARGET_RE.search(text)
         name = (m.group(1) if m else text).strip()
         if name and name not in out:
             out.append(name)

@@ -21,6 +21,7 @@ import typing
 from functools import partial
 from typing import Any, TYPE_CHECKING
 
+from silica.kernel.base.frontmatter import FM_RE_TOLERANT
 from silica.router import orchestrator as orch
 from silica.kernel.outline import flag_cosine_near_titles, parse_outline, run_outliner, vault_outline
 from silica.kernel.prep_delegation import payload_inbox_text, run_distiller
@@ -38,7 +39,6 @@ _NEAR_TITLE_RE = re.compile(
 # Frontmatter `date:` of a source document. Two-step (block, then key inside
 # it) so a `date:` line in the body can never match; the YYYY-MM-DD prefix is
 # enough, quoted or datetime values included.
-_FM_BLOCK_RE = re.compile(r"\A---\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.S)
 _FM_DATE_RE = re.compile(r"^date:\s*['\"]?(\d{4}-\d{2}-\d{2})", re.M)
 
 
@@ -54,7 +54,7 @@ def _doc_date(fsm: "InjectorFSM", idx: int) -> str:
         chunk = fsm._file_chunks.get(fi) if fi is not None else None
         src = (chunk or {}).get("source_file") or fsm.inbox_file
         text = orch.DRIVER.read_note(src).content or ""
-        fm = _FM_BLOCK_RE.match(text)
+        fm = FM_RE_TOLERANT.match(text)
         m = _FM_DATE_RE.search(fm.group(1)) if fm else None
         return m.group(1) if m else ""
     except Exception:

@@ -35,7 +35,8 @@ from urllib.parse import unquote, quote
 # wikilinks and headings to rewrite them.
 # ---------------------------------------------------------------------------
 
-from silica.kernel.link.autolink import SKIP_PATTERNS_BASE, build_skip_mask, _FRONTMATTER_RE
+from silica.kernel.base.frontmatter import FM_RE_TOLERANT
+from silica.kernel.link.autolink import SKIP_PATTERNS_BASE, build_skip_mask
 
 
 def _build_skip_mask(text: str) -> list[bool]:
@@ -192,7 +193,7 @@ def _rewrite_frontmatter_wikilinks(
     rewrites those link-type properties on rename and so must we (A19). Rewrite
     them with an all-clear mask over the frontmatter substring only.
     """
-    m = _FRONTMATTER_RE.match(content)
+    m = FM_RE_TOLERANT.match(content)
     if not m:
         return content, 0
     block = m.group(0)

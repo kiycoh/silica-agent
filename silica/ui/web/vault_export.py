@@ -167,11 +167,12 @@ def _sha(p: Path) -> str | None:
 def _links(text: str):
     """The wikilinks of `text` outside code and math, its frontmatter's
     included: Silica writes links into properties too (rename.py, A19)."""
-    from silica.kernel.link.autolink import _FRONTMATTER_RE, SKIP_PATTERNS_BASE, build_skip_mask
+    from silica.kernel.base.frontmatter import FM_RE_TOLERANT
+    from silica.kernel.link.autolink import SKIP_PATTERNS_BASE, build_skip_mask
     from silica.kernel.link.rename import _WIKILINK_FULL_RE, _span_is_clear
 
     mask = build_skip_mask(text, SKIP_PATTERNS_BASE)
-    fm = _FRONTMATTER_RE.match(text)
+    fm = FM_RE_TOLERANT.match(text)
     if fm:
         mask[:fm.end()] = [False] * fm.end()
     return [m for m in _WIKILINK_FULL_RE.finditer(text) if _span_is_clear(mask, m.start(), m.end())]

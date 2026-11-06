@@ -77,6 +77,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from silica.config import CONFIG
+from silica.kernel.base import frontmatter
 from silica.kernel.text.sanitize import strip_degenerate_runs
 
 logger = logging.getLogger(__name__)
@@ -517,7 +518,6 @@ def is_skippable_chunk(note_rel: str) -> bool:
     unflagged files answer False — never blocks ingestion on a read error.
     """
     from silica.driver import DRIVER
-    from silica.kernel.base import frontmatter
 
     try:
         data, _, _ = frontmatter.split(DRIVER.read_note(note_rel).content)
@@ -910,7 +910,7 @@ def _first_prose_words(part: str) -> list[str]:
     """The first words of `part` below its frontmatter that are not a heading,
     an embed or a line Silica wrote ("> [page 3: ...]"), lowercased."""
     words: list[str] = []
-    for line in re.sub(r"\A---\n.*?\n---\n", "", part, flags=re.S).splitlines():
+    for line in frontmatter.body_of(part, frontmatter.FM_RE_TOLERANT).splitlines():
         t = line.strip()
         if not t or t.startswith(("#", "![", "> [page", "```")):
             continue
@@ -3396,7 +3396,6 @@ def _write_leaf(src: Path, body: str, name: str, fields: dict) -> None:
     from silica.driver import DRIVER
     from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import in_write_dir
-    from silica.kernel.base import frontmatter
 
     from silica.kernel.write.preserve import Loss
 
