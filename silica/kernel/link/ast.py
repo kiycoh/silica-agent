@@ -104,6 +104,35 @@ _CODE_MENTION_RE = re.compile(
 )
 
 
+_OPEN_ALIAS_RE = re.compile(r"\[\[[^\[\]\n]*\|[^\[\]\n]*$")
+_ALIAS_END_RE = re.compile(r"[^\[\]\n]*\]\]")
+
+
+def join_code_aliases(children: list) -> list:
+    """Inline tokens with a code span in a wikilink's alias back in one text token.
+
+    `[[Undo and revert|`/undo`]]` parses as text, code_inline, text, so neither
+    half is a link: the graph lost the edge and /note printed the brackets, on 6
+    of silica_wiki's notes (2026-11-06), while the drawer's editor, which parses
+    for itself, drew the link. On tokens and not on the source, so a fence or a
+    whole code span showing the same characters stays code.
+    """
+    out: list = []
+    i = 0
+    while i < len(children):
+        tok = children[i]
+        after = children[i + 1] if i + 1 < len(children) else None
+        if (tok.type == "code_inline" and out and out[-1].type == "text" and after is not None
+                and after.type == "text" and _OPEN_ALIAS_RE.search(out[-1].content)
+                and _ALIAS_END_RE.match(after.content)):
+            out[-1].content += tok.content + after.content
+            i += 2
+            continue
+        out.append(tok)
+        i += 1
+    return out
+
+
 def extract_links(content: str) -> list[str]:
     """Extract clean wikilinks (both [[target]] and ![[target]]).
 
@@ -177,7 +206,7 @@ def _extract_refs_ast(content: str) -> tuple[list[str], list[str], list[str]]:
         for t in toks:
             if t.type == "inline":
                 if t.children:
-                    walk(t.children)
+                    walk(join_code_aliases(t.children))
             elif t.type == "text":
                 text_pieces.append(t.content)
             elif t.type == "code_inline":

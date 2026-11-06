@@ -55,3 +55,25 @@ def test_adr_prose_reference_is_a_link():
     # The ADR corpus gets its graph from the reference it already writes.
     content = "Guardrail (keeps ADR-0001 intact); see ADR-0029.\nNot in `ADR-0002` code.\n"
     assert extract_links(content) == ["ADR-0001", "ADR-0029"]
+
+
+def test_a_code_span_in_an_alias_is_still_a_link():
+    from silica.kernel.link.ast import extract_links
+
+    assert extract_links("Use [[Undo and revert|`/undo`]] now.") == ["Undo and revert"]
+    assert extract_links("[[A|`x`]] then [[B|`y`]]") == ["A", "B"]
+
+
+def test_a_code_span_that_only_shows_a_link_stays_code():
+    from silica.kernel.link.ast import extract_links
+
+    assert extract_links("`[[A|b]]` and `[[C|`") == []
+    assert extract_links("```\n[[A|`x`]]\n```\n") == []
+    assert extract_links("[[A| `x` never closed") == []
+
+
+def test_the_reader_gets_a_link_and_not_the_brackets():
+    from silica.ui.web.server import _linkify
+
+    html = _linkify("Use [[Undo and revert|`/undo`]] now.", lambda name: name + ".md")
+    assert "[[" not in html and "note-link" in html and "/undo" in html
