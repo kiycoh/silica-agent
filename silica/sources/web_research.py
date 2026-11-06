@@ -1133,6 +1133,27 @@ def keep_last() -> str:
     return note_rel
 
 
+def keep_check(claim: str, url: str, quote: str, note: str) -> str:
+    """`keep in Inbox` on a web verdict (ADR-0110, amendment of 2026-11-06,
+    point 13): the page's words as one cited note, as `/keep` leaves a web turn.
+
+    The page's words arrive with the request, so this reads no turn state and a
+    verdict is keepable after a chat turn or a restart. `source: web` for what
+    that names in contested._KEPT_SOURCES: kept from the web, never vouched
+    for. No leaf: a check keeps a quote and not the page. /nucleate remains the
+    only path from the Inbox into the vault (ADR-0015).
+
+    Returns the note's vault-relative path."""
+    name = note.rsplit("/", 1)[-1].removesuffix(".md")
+    body = f"> {' '.join(quote.split())}\n\nRead while checking [[{name}]]: {' '.join(claim.split())}"
+    from silica.driver import DRIVER
+
+    note_rel = _unique_inbox_path(claim, fallback="web")
+    DRIVER.create(note_rel, _build_note(claim, body, [(url, urlsplit(url).hostname or url)], source="web",
+                                        force_sources=True))
+    return note_rel
+
+
 def _write_leaf(
     note_rel: str, results: list[str], bank: dict[str, _Quote] | None = None
 ) -> None:

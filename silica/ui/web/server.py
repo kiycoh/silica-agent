@@ -4856,6 +4856,16 @@ def _tree_paths(refs: list) -> list[str]:
     return out
 
 
+def _has_room(notes: int, size: int) -> None:
+    """A 400 past the vault's limits, the status `saved_page.save` reaches
+    through /vault/save. A laptop sets none, so this passes there."""
+    from silica.sources import saved_page
+
+    short = saved_page.room(notes, size)["short"]
+    if short:
+        raise HTTPException(400, f"this vault has no room for that: {short}")
+
+
 def _tree_name_ok(name: str) -> bool:
     """A note's or a folder's name the tree may write: a workspace's rule
     (ADR-0112), and no leading dot, which the index reads as hidden."""
@@ -5227,6 +5237,29 @@ def changes():
     """Every note this session has changed, oldest first, each with the
     judge's `review` sentence when the gate was unsure (audit P4)."""
     return _change_rows()
+
+
+@app.post("/note/check/keep", dependencies=_SAME_ORIGIN)
+async def note_check_keep(payload: dict):
+    """`keep in Inbox` in a web verdict's box (ADR-0110, amendment of
+    2026-11-06, point 13): `{path, url, quote, claim}` as one cited note in the
+    Inbox. Regime 2 of ADR-0015 and no third: the note waits for /nucleate. The
+    turn's slot, as /vault/fetch takes it for the same Inbox."""
+    from silica.sources.web_research import keep_check
+
+    canon = await asyncio.to_thread(lambda: note_resolver()(str(payload.get("path", ""))))
+    if not canon:
+        raise HTTPException(404, "note not found in vault")
+    url, quote, claim = (str(payload.get(k) or "").strip() for k in ("url", "quote", "claim"))
+    if not url.startswith(("https://", "http://")) or not quote or not claim:
+        raise HTTPException(400, "name the page, its words and the claim")
+    await asyncio.to_thread(_has_room, 1, len(quote) + len(claim))
+    if not _begin_turn():
+        raise HTTPException(409, "a turn is running: keep it when it ends")
+    try:
+        return {"ok": True, "path": await asyncio.to_thread(keep_check, claim, url, quote, canon)}
+    finally:
+        _end_turn()
 
 
 @app.post("/changes/keep", dependencies=_SAME_ORIGIN)

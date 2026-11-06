@@ -223,7 +223,7 @@ DEMO_OFF: dict[str, tuple[str, ...]] = {
         "/stt", "/flag",
         # model calls the door never counts: a turn outside POST /chat, the
         # injector, check sources' judge, the worker's sentence on the vault
-        "/turn/redo", "/phone", "/nucleate", "/note/check", "/vault_brief",
+        "/turn/redo", "/phone", "/nucleate", "/note/check", "/note/check/keep", "/vault_brief",
         # a job's turn (POST /jobs/{id}/turn) is a whole agent loop the door
         # never counts, whatever queued the job; with no upload there is none
         # to list, and the tray leaves itself as it was on a 404 (jobsFetch)

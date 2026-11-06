@@ -555,3 +555,47 @@ def test_a_torn_cache_costs_a_press_and_never_a_wrong_verdict(desk):
     run._cache_path(str(vault), "Drafts/memo.md").write_text("{torn", encoding="utf-8")
     press(tc)
     assert len(cached(vault)["web"]) == 1
+
+
+# -- keep in Inbox (point 13) --------------------------------------------------
+
+def keep(tc, **over):
+    return tc.post("/note/check/keep", json={"path": "Drafts/memo", "url": "https://www.example.org/rights",
+                                             "quote": "the end of\n 30 days", "claim": CLAIM, **over})
+
+
+def test_keep_writes_one_cited_note_in_the_inbox_with_no_web_turn_behind_it(desk):
+    from silica.sources import web_research as wr
+
+    tc, _, vault, *_ = desk
+    wr._LAST_WEB_TURN = None
+    body = keep(tc).json()
+    assert body["ok"] is True and body["path"].startswith("Inbox/")
+    text = (vault / body["path"]).read_text(encoding="utf-8")
+    assert "> the end of 30 days" in text and "[[memo]]" in text and CLAIM in text
+    assert "## Sources\n1. www.example.org " in text and "https://www.example.org/rights" in text
+    assert "source: web\n" in text and f"fetched: {date.today().isoformat()}" in text
+
+
+def test_keep_goes_nowhere_but_the_inbox_and_a_second_is_a_second_note(desk):
+    tc, _, vault, *_ = desk
+    first, second = keep(tc).json()["path"], keep(tc).json()["path"]
+    assert first != second and {p.rsplit("/", 1)[0] for p in (first, second)} == {"Inbox"}
+
+
+@pytest.mark.parametrize("over", [
+    {"url": "javascript:alert(1)"}, {"url": ""}, {"quote": ""}, {"claim": "  "}, {"url": "file:///etc/passwd"},
+])
+def test_keep_refuses_what_is_not_a_page_its_words_and_a_claim(desk, over):
+    tc, *_ = desk
+    assert keep(tc, **over).status_code == 400
+
+
+def test_keep_needs_a_note_a_free_turn_and_a_same_origin(desk):
+    tc, server, vault, *_ = desk
+    assert keep(tc, path="Nowhere/Nothing").status_code == 404
+    assert server._begin_turn()
+    assert keep(tc).status_code == 409
+    server._end_turn()
+    assert tc.post("/note/check/keep", json={}, headers={"Origin": "http://evil.example"}).status_code == 403
+    assert not (vault / "Inbox").exists()
