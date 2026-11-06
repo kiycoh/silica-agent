@@ -342,7 +342,7 @@ class UndoJournalStore:
             path = r["path"]
             try:
                 current = DRIVER.read_note(path).content
-                new_hash: str | None = _content_hash(current)
+                new_hash: str | None = content_hash(current)
             except Exception:
                 new_hash = None  # note absent — the stale guard handles it
             conn.execute(
@@ -448,8 +448,19 @@ import hashlib as _hashlib
 from silica.driver import DRIVER
 
 
-def _content_hash(text: str | None) -> str:
+def content_hash(text: str | None) -> str:
+    """The post-write hash: sha256 of the read-back text. revert_run compares it
+    and the checkpoint store labels by it, so a change of input here (CRLF
+    handling, say) must reach every recorded row or the guard refuses them all."""
     return _hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def active_vault() -> str | None:
+    """The active vault as a run stamps it and /revert filters by it: one
+    spelling, or a run recorded under another is invisible to its own revert."""
+    from silica.config import CONFIG
+
+    return (CONFIG.vault_path or "").strip() or None
 
 
 def written_notes(vault: str, *, store: UndoJournalStore | None = None) -> dict[str, str | None]:
@@ -491,7 +502,7 @@ def edited_since_write(vault: str, *, store: UndoJournalStore | None = None,
         if not post_hash:
             continue
         try:
-            current = _content_hash(DRIVER.read_note(path).content)
+            current = content_hash(DRIVER.read_note(path).content)
         except Exception:
             continue
         if current == post_hash or current in cp.hashes_for(path):
@@ -507,185 +518,3 @@ def _same_vault(recorded: str | None, want: Path) -> bool:
         return Path(recorded).resolve() == want
     except OSError:
         return False
-
-
-def revert_run(run_id: str, *, store: UndoJournalStore | None = None,
-               only_paths: set[str] | None = None) -> dict:
-    """Replay a run's inverses LIFO, refusing notes modified since the inject.
-
-    Version guard: re-read each note, hash it. If recorded post_hash exists and
-    the current hash differs (note edited since inject), skip it — don't clobber
-    newer work. Mark the run reverted when done.
-
-    `only_paths` scopes the replay to those notes (any spelling; folded through
-    provenance.note_key): the rest are skipped as outside the scope and the run
-    stays open, since what was not replayed is still undoable. A run scoped to
-    its whole footprint closes as an unscoped one does.
-    """
-    from silica.kernel.write.provenance import note_key
-    from silica.tools.wrapped import silica_restore
-
-    store = store or get_undo_journal()
-    entries = store.inverses_for(run_id)  # LIFO
-    scope = {note_key(p) for p in only_paths} if only_paths is not None else None
-    reverted: list[str] = []
-    skipped: list[dict] = []
-    stale: list[dict] = []
-    errors: list[dict] = []
-    applied_paths: set[str] = set()
-    out_of_scope = 0
-
-    for inv, post_hash in entries:
-        if scope is not None and note_key(inv.path) not in scope:
-            skipped.append({"path": inv.path, "reason": "outside the requested scope"})
-            out_of_scope += 1
-            continue
-        try:
-            current = DRIVER.read_note(inv.path).content
-            cur_hash: str | None = _content_hash(current)
-        except Exception:
-            cur_hash = None  # note absent
-
-        # Stale (B): the target note no longer exists in this vault, so there is
-        # nothing to restore or delete — the journal describes a vault that was
-        # reorganised or replaced. Report it honestly instead of counting an
-        # empty overwrite as an error or an absent delete as a revert.
-        # (recreate_deleted is exempt: an absent note is its expected precondition.)
-        if cur_hash is None and inv.kind in (
-            InverseOpKind.restore_version, InverseOpKind.delete_created, InverseOpKind.trash_created
-        ):
-            stale.append({"path": inv.path, "reason": "note absent (vault changed)"})
-            continue
-
-        # The guard belongs to the NEWEST inverse per path only: two chunks
-        # patching one note both carry the FINAL content's hash, so the older
-        # link of the chain can never match once the newer one applied. After
-        # the newest passes, the older ones are the chain's own history.
-        if (
-            inv.path not in applied_paths
-            and post_hash is not None and cur_hash is not None
-            and cur_hash != post_hash
-        ):
-            skipped.append({"path": inv.path, "reason": "modified since inject"})
-            continue
-
-        try:
-            res = silica_restore(txn_id=run_id, inverses=[inv.model_dump()])
-            if res["errors"]:
-                # silica_restore swallows per-op failures into its return value;
-                # route them to errors instead of miscounting as reverted.
-                errors.append({"path": inv.path, "error": "; ".join(res["errors"])})
-            else:
-                reverted.append(inv.path)
-                applied_paths.add(inv.path)
-        except Exception as e:
-            errors.append({"path": inv.path, "error": str(e)})
-
-    # A partial revert can delete notes that surviving (skipped) notes still
-    # link to — the run's own hub kept [[links]] to notes the revert removed.
-    # Sweep only the survivors this run wrote: they are journalled paths, so
-    # the edit stays inside the run's own footprint.
-    if reverted and skipped:
-        try:
-            from silica.kernel.link.sweep import sweep_dangling_links
-
-            sweep_dangling_links(sorted({s["path"] for s in skipped}))
-        except Exception as e:
-            logger.debug("revert: survivor link sweep failed (non-fatal): %s", e)
-
-    if not out_of_scope:
-        store.mark_reverted(run_id)
-    return {"run_id": run_id, "reverted": reverted, "skipped": skipped,
-            "stale": stale, "errors": errors}
-
-
-def restore_from_trash(item: dict, *, store: UndoJournalStore | None = None) -> str | None:
-    """Bring back one note of the trash, an item of `trashed()`, and take it
-    out of the trash; None when it is back, else why not (ADR-0128).
-
-    One note and not its run, which is what /undo and the tree's undo bring
-    back: a folder deleted at once is one item per note, and the person picks.
-    Not revert_run(only_paths=...): it sweeps the links of every note of the
-    run it skipped, and a note written since at another trashed path would be
-    edited by a restore that never named it."""
-    from silica.tools.wrapped import _vault_file, silica_restore
-
-    store = store or get_undo_journal()
-    inv = next((i for i, _ in store.inverses_for(item["run"])
-                if i.path == item["path"] and i.kind == InverseOpKind.recreate_deleted), None)
-    if inv is None:
-        return "not in the trash"
-    # silica_restore's recreate is an upsert: it would overwrite the note
-    if _vault_file(inv.path).exists():
-        return "a note is at that path now"
-    res = silica_restore(txn_id=item["run"], inverses=[inv.model_dump()])
-    if res["errors"]:
-        return res["errors"][0]
-    store.leave_trash(item["run"], inv.path)
-    return None
-
-
-def resolve_source(source: str, *, vault: str | None) -> tuple[str, list[str]]:
-    """`(key, candidates)` for what the user typed after `--source`.
-
-    A ledger key as written wins, then the key the path names
-    (`Inbox/CorsoA/Lezione 1.md`), then a bare name, which resolves only when
-    one source carries it: `candidates` lists every key of that name, and more
-    than one means the caller must ask which.
-    """
-    from silica.kernel.base.manifest import source_key
-    from silica.kernel.write.provenance import source_keys
-
-    keys = source_keys(vault_path=vault)
-    for k in (source, source_key(source)):
-        if k in keys:
-            return k, [k]
-    name = source.replace("\\", "/").rsplit("/", 1)[-1]
-    named = sorted(k for k in keys if k.rsplit("/", 1)[-1] == name)
-    return (named[0] if len(named) == 1 else source), named
-
-
-def revert_source(source: str, *, vault: str | None,
-                  store: UndoJournalStore | None = None) -> dict:
-    """Undo every journalled run that derived notes from `source` (ADR-0028).
-
-    The join is the ledger's run id, which the journal records at start_run:
-    the ledger says which runs touched the source and which notes each of
-    them attributed to it, the journal holds the inverses and the guard.
-    Newest run first, each scoped to its own ledger notes, so a hub another
-    source also patched is left to the guard rather than rewound past the
-    other source's work. Ledger runs with no active journal row (legacy rows
-    from before the join, a pruned journal, a run already reverted by id) are
-    reported under `unrevertable` with their note count, never acted on: the
-    ledger knows the paths but not the inverses, and deleting on a guess is
-    the one thing a revert must never do.
-    """
-    from silica.kernel.write.provenance import read_records
-
-    key, candidates = resolve_source(source, vault=vault)
-    if len(candidates) > 1:
-        # Two sources share the name (CorsoA/, CorsoB/ "Lezione 1.md"): reverting
-        # both deleted notes the user never asked about (ADR-0114). The caller
-        # names one; nothing is touched until then.
-        return {"source": source, "runs": [], "unrevertable": [], "ambiguous": candidates}
-    store = store or get_undo_journal()
-    notes_by_ledger_run: dict[str, set[str]] = {}
-    for r in read_records(key, vault_path=vault):
-        rid = r.get("run_id")
-        if rid:
-            notes_by_ledger_run.setdefault(rid, set()).update(r.get("notes") or [])
-    if not notes_by_ledger_run:
-        return {"source": source, "runs": [], "unrevertable": []}
-
-    runs: list[dict] = []
-    covered: set[str] = set()
-    for run_id in store.runs_for_ledger(list(notes_by_ledger_run), vault=vault):
-        ledger_id = (store.run_info(run_id) or {}).get("ledger_run_id") or ""
-        res = revert_run(run_id, store=store,
-                         only_paths=notes_by_ledger_run.get(ledger_id, set()))
-        res["ledger_run_id"] = ledger_id
-        runs.append(res)
-        covered.add(ledger_id)
-    unrevertable = [{"run_id": rid, "notes": len(notes)}
-                    for rid, notes in notes_by_ledger_run.items() if rid not in covered]
-    return {"source": source, "runs": runs, "unrevertable": unrevertable}

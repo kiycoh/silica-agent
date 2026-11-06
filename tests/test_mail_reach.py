@@ -15,7 +15,7 @@ import pytest
 from silica.sources import mail
 from silica.sources.registry import stage
 from silica.tools import TOOLS
-from silica.tools import atomic, composed  # noqa: F401  (registers the tools)
+import silica.cli  # noqa: F401  (registers the tools)
 from tests.mail_fixtures import ME, ME_FULL, PROF, msg, write_eml
 
 
@@ -48,7 +48,7 @@ def test_semantic_search_never_holds_a_mail_note(note, monkeypatch):
 
     monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
     from silica.kernel.recall.embed import get_store
-    from silica.tools.composed import silica_embed_refresh
+    from silica.tools.graph import silica_embed_refresh
 
     assert "error" not in silica_embed_refresh(force=True)
     assert not any(note.rsplit("/", 1)[-1][:-3] in p for p in get_store().paths())

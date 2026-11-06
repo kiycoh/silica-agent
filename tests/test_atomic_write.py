@@ -1,6 +1,6 @@
 # tests/test_atomic_write.py
 from silica.kernel.write.ops import Op, OpType
-from silica.kernel.write.atomic_write import commit_note_atomic, NoteCommitResult, bulk_write_atomic, AtomicBulkResult
+from silica.kernel.write.gate import commit_note_atomic, NoteCommitResult, bulk_write_atomic, AtomicBulkResult
 
 
 def _patch_op(path: str, snippet: str = "body") -> Op:
@@ -15,7 +15,6 @@ def test_clean_patch_commits_and_returns_inverse(tmp_vault, monkeypatch):
     assert res.ok is True
     assert res.path == target
     assert res.reverted is False
-    assert res.post_hash is not None
     assert len(res.inverses) >= 1
     assert "body" in tmp_vault.read(target)
 
@@ -30,7 +29,7 @@ def test_lint_failure_reverts_only_this_note(tmp_vault, monkeypatch):
         from silica.driver import DRIVER
         introduced = "[^" in DRIVER.read_note(note_name).content
         return {"success": not introduced, "errors": ["bad link"] if introduced else []}
-    monkeypatch.setattr("silica.tools.composed.silica_lint", fake_lint)
+    monkeypatch.setattr("silica.kernel.write.gate.lint_note", fake_lint)
     res = commit_note_atomic(_patch_op(target), lint=True)
     assert res.ok is False
     assert res.reverted is True
@@ -47,7 +46,7 @@ def test_failing_sibling_does_not_roll_back_others(tmp_vault, monkeypatch):
         from silica.driver import DRIVER
         introduced = "Roadmap" in note_name and "[^" in DRIVER.read_note(note_name).content
         return {"success": not introduced, "errors": ["bad"] if introduced else []}
-    monkeypatch.setattr("silica.tools.composed.silica_lint", fake_lint)
+    monkeypatch.setattr("silica.kernel.write.gate.lint_note", fake_lint)
 
     ops = [_patch_op(a), _patch_op(b), _patch_op(c)]
     result = bulk_write_atomic(ops, lint=True)

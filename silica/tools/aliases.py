@@ -171,8 +171,8 @@ def silica_aliases(apply: Annotated[bool, Field(description='If True, write the 
     if not apply or not groups:
         return result
 
-    from silica.agent.bounds import alias_consolidation_bounds
-    from silica.agent.commit import commit_ops
+    from silica.kernel.write.gate import alias_consolidation_bounds
+    from silica.kernel.write.gate import commit_ops
     from silica.kernel.base.frontmatter import add_alias
     from silica.kernel.write.ops import Op, OpType
 

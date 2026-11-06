@@ -16,8 +16,8 @@ import time
 import pytest
 
 from silica.driver import get_driver
-from silica.driver.base import Txn
-from silica.kernel.write.atomic_write import commit_note_atomic
+from silica.kernel.write.ops import Txn
+from silica.kernel.write.gate import commit_note_atomic
 from silica.kernel.write.bulk import execute_one
 from silica.kernel.write.ledger import Ledger
 from silica.kernel.write.ops import InverseOp, InverseOpKind, Op, OpType
@@ -46,7 +46,7 @@ def test_skipped_restore_does_not_report_reverted(tmp_vault, monkeypatch):
         inverses=[InverseOp(kind=InverseOpKind.restore_version,
                             path=target, prior_content=None)],
     )
-    monkeypatch.setattr("silica.tools.wrapped.build_txn", lambda ops: blind_txn)
+    monkeypatch.setattr("silica.kernel.write.gate.build_txn", lambda ops: blind_txn)
 
     # Fail only once the patch has appended its block, so the violation is newly
     # introduced (a pre-existing one is tolerated by the patch baseline).
@@ -54,7 +54,7 @@ def test_skipped_restore_does_not_report_reverted(tmp_vault, monkeypatch):
         from silica.driver import DRIVER
         introduced = "[^" in DRIVER.read_note(note_name).content
         return {"success": not introduced, "errors": ["bad link"] if introduced else []}
-    monkeypatch.setattr("silica.tools.composed.silica_lint", fake_lint)
+    monkeypatch.setattr("silica.kernel.write.gate.lint_note", fake_lint)
 
     res = commit_note_atomic(_patch_op(target), lint=True)
 
@@ -75,7 +75,7 @@ def test_successful_restore_still_reports_reverted(tmp_vault, monkeypatch):
         from silica.driver import DRIVER
         introduced = "[^" in DRIVER.read_note(note_name).content
         return {"success": not introduced, "errors": ["bad link"] if introduced else []}
-    monkeypatch.setattr("silica.tools.composed.silica_lint", fake_lint)
+    monkeypatch.setattr("silica.kernel.write.gate.lint_note", fake_lint)
 
     res = commit_note_atomic(_patch_op(target), lint=True)
 

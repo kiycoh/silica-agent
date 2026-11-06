@@ -75,13 +75,11 @@ def test_refusing_stops_before_the_changes_list_and_the_rpc(ws, monkeypatch):
 
 
 def test_a_restore_is_declared(ws, caplog):
-    from silica.driver.base import Txn
-    from silica.kernel.write.ops import InverseOp, InverseOpKind
+    from silica.kernel.write.preserve import Loss
 
     be, v = ws
     caplog.set_level(logging.WARNING, logger="silica.kernel.write.preserve")
-    inv = InverseOp(kind=InverseOpKind.restore_version, path="Notes/N.md", prior_content="old\n")
-    be.restore(Txn(id="t", refs=[], inverses=[inv]))
+    be.overwrite("Notes/N.md", "old\n", loss=Loss.RESTORE)
     assert not _warnings(caplog)
     assert (v / "Notes" / "N.md").read_text(encoding="utf-8") == "old\n"
 

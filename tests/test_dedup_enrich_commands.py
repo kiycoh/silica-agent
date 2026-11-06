@@ -80,7 +80,7 @@ def _read_note(path):
 
 
 def test_silica_dedup_builds_pair_targeting_larger_note():
-    from silica.tools.composed import silica_dedup
+    from silica.tools.runners import silica_dedup
     with patch("silica.kernel.recall.embed.EmbedStore", _FakeStore), \
          patch("silica.driver.DRIVER.read_note", side_effect=_read_note), \
          patch("silica.agent.subagent.run_subagent_batch", return_value={"items": 1, "summary": {"committed": 1}, "results": []}) as batch:
@@ -95,7 +95,7 @@ def test_silica_dedup_builds_pair_targeting_larger_note():
 
 
 def test_silica_dedup_requires_index():
-    from silica.tools.composed import silica_dedup
+    from silica.tools.runners import silica_dedup
 
     class _Empty(_FakeStore):
         def __len__(self):
@@ -109,13 +109,13 @@ def test_silica_dedup_requires_index():
 # --- silica_enrich_batch ------------------------------------------------------
 
 def test_silica_enrich_batch_requires_paths():
-    from silica.tools.composed import silica_enrich_batch
+    from silica.tools.runners import silica_enrich_batch
     res = silica_enrich_batch(note_paths=[])
     assert "error" in res
 
 
 def test_silica_enrich_batch_enqueues_items():
-    from silica.tools.composed import silica_enrich_batch
+    from silica.tools.runners import silica_enrich_batch
     paths = ["Notes/lean.md"]
     with patch("silica.agent.subagent.run_subagent_batch", return_value={"items": 1, "summary": {"committed": 1}, "results": []}) as batch:
         res = silica_enrich_batch(note_paths=paths)
@@ -223,7 +223,7 @@ def test_dedup_secondary_borderline_found_with_expanded_k():
     The key invariant: no pair should have B as a borderline partner of A
     (A→B is 0.90, above τ_high, and must be suppressed).
     """
-    from silica.tools.composed import silica_dedup
+    from silica.tools.runners import silica_dedup
 
     with patch("silica.kernel.recall.embed.EmbedStore", _ThreeNoteStore), \
          patch("silica.driver.DRIVER.read_note", side_effect=_read_three), \
@@ -283,7 +283,7 @@ def test_dedup_title_gate_promotes_low_fullscore_pair():
     topically distinct (ROS overview vs JSON serialization in ROS 2) so the
     full-note cosine falls below τ_low, but the titles are semantically linked.
     """
-    from silica.tools.composed import silica_dedup
+    from silica.tools.runners import silica_dedup
 
     with patch("silica.kernel.recall.embed.EmbedStore", _TitleGateStore), \
          patch("silica.driver.DRIVER.read_note", side_effect=_read_ros), \

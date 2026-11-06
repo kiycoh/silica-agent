@@ -80,13 +80,13 @@ def _build() -> dict:
 def _written(root: Path, *paths: str) -> None:
     """Stamp notes as Silica wrote them, so an untouched one reads untouched."""
     from silica.kernel.write.ops import InverseOp, InverseOpKind
-    from silica.kernel.write.undo_journal import _content_hash, get_undo_journal
+    from silica.kernel.write.undo_journal import content_hash, get_undo_journal
 
     store = get_undo_journal()
     run = store.start_run(vault=str(root))
     for p in paths:
         store.record(run, InverseOp(kind=InverseOpKind.delete_created, path=p),
-                     _content_hash((root / p).read_text(encoding="utf-8")))
+                     content_hash((root / p).read_text(encoding="utf-8")))
 
 
 # --- files ---------------------------------------------------------------------

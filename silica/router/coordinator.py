@@ -188,10 +188,10 @@ class Coordinator:
         the old ``compute_report`` rebuilt the whole report (~3.8s at 10k notes)
         and this fires up to twice per run (enqueue + reverify).
         """
-        from silica.agent.bounds import _norm_path
+        from silica.kernel.write.gate import norm_path
         try:
             from silica.driver import DRIVER
-            return {_norm_path(o.path) for o in DRIVER.orphans()}
+            return {norm_path(o.path) for o in DRIVER.orphans()}
         except Exception as e:
             logger.debug("orphan recompute failed (non-fatal): %s", e)
             return set()
@@ -203,7 +203,7 @@ class Coordinator:
         return link_candidates(path, k=k)
 
     def _enqueue_orphan_repairs(self, wq: Any, result: dict) -> None:
-        from silica.agent.bounds import _norm_path
+        from silica.kernel.write.gate import norm_path
         from silica.kernel.workqueue import WorkItem
 
         ledger = getattr(self.fsm, "warning_ledger", None)
@@ -213,7 +213,7 @@ class Coordinator:
         warned = ledger.paths("orphan")
         current = self._current_orphans()
         # Residual = warned notes that are STILL orphaned after the full run.
-        residual = [p for p in warned if not current or _norm_path(p) in current]
+        residual = [p for p in warned if not current or norm_path(p) in current]
 
         if len(residual) > MAX_ORPHAN_REPAIRS_PER_RUN:
             logger.warning(
@@ -404,8 +404,8 @@ class Coordinator:
         ledger = getattr(self.fsm, "warning_ledger", None)
         if ledger is None:
             return
-        from silica.agent.bounds import _norm_path
-        warned_keys = {_norm_path(p) for p in ledger.paths("orphan")}
+        from silica.kernel.write.gate import norm_path
+        warned_keys = {norm_path(p) for p in ledger.paths("orphan")}
         still = self._current_orphans() & warned_keys
         ow["residual_after"] = len(still)
         logger.info(

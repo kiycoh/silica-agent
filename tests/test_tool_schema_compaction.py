@@ -82,7 +82,7 @@ def test_every_registered_tool_defines_every_field_it_requires():
     """The invariant, over the real toolset — the compactor is the only thing
     between the params model and the wire."""
     import silica.tools.atomic          # noqa: F401  (registration side effect)
-    import silica.tools.composed        # noqa: F401
+    import silica.cli  # noqa: F401  registers every tool
     import silica.tools.graph           # noqa: F401
     import silica.tools.notes           # noqa: F401
     import silica.tools.runners         # noqa: F401

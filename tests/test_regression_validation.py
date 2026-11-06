@@ -83,7 +83,7 @@ def test_skip_ops_are_never_rejected(tmp_path):
 
 def test_validate_note_downgrades_size_limits_to_warnings():
     """validate_note must place max_lines and max_chars limit violations in warnings instead of errors."""
-    from silica.kernel.link.linter import validate_note
+    from silica.kernel.write.linter import validate_note
     from unittest.mock import MagicMock
     
     # Create content that exceeds max_lines (400) and max_chars (20000)
@@ -96,7 +96,7 @@ def test_validate_note_downgrades_size_limits_to_warnings():
         
     read_mock = MagicMock(return_value=FakeNoteContent())
     
-    with patch("silica.kernel.link.linter.DRIVER.read_note", read_mock):
+    with patch("silica.kernel.write.linter.DRIVER.read_note", read_mock):
         errors, warnings = validate_note("some_path.md", hub=None)
         
     # Verify size violations are warnings, not errors
@@ -172,14 +172,14 @@ Corpo della nota con [[Altra nota]].
 
 
 def _lint_note(content, path, hub, op_type="patch"):
-    from silica.kernel.link.linter import validate_note
+    from silica.kernel.write.linter import validate_note
     from unittest.mock import MagicMock
 
     class FakeNoteContent:
         pass
 
     FakeNoteContent.content = content
-    with patch("silica.kernel.link.linter.DRIVER.read_note", MagicMock(return_value=FakeNoteContent())):
+    with patch("silica.kernel.write.linter.DRIVER.read_note", MagicMock(return_value=FakeNoteContent())):
         return validate_note(path, hub=hub, op_type=op_type)
 
 

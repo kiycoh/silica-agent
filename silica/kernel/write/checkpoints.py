@@ -10,7 +10,7 @@ for a note also seeds the *original* (pre-patch) content as the immovable floor,
 so a chain of undos returns the note to exactly how it was before Silica touched it.
 
 This is deliberately separate from the FSM's transactional snapshot/rollback
-(silica_snapshot / silica_restore): that protects a whole pipeline run and is
+(gate.build_txn / gate.apply_inverses): that protects a whole pipeline run and is
 discarded on success, whereas this is a lightweight, user-facing edit history
 for single notes that survives across REPL sessions.
 
@@ -23,10 +23,14 @@ by autoincrement id. Keyed by vault-relative path within the row's vault.
 """
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 from pathlib import Path
 from silica.config import silica_home
+
+logger = logging.getLogger(__name__)
+
 
 def _checkpoint_path() -> Path:
     return silica_home() / "checkpoints.db"
@@ -60,16 +64,13 @@ def _outside_kind(path: str, text: str) -> str:
     """`run` when `text` is what a journaled run (/nucleate, Zotero, a
     migration) last wrote at `path`, else `hand`: both land between two of the
     chat's writes, and only one of them is the person editing outside Silica."""
-    import hashlib
+    from silica.kernel.write.undo_journal import active_vault, content_hash, get_undo_journal
 
     try:
-        from silica.config import CONFIG
-        from silica.kernel.write.undo_journal import get_undo_journal
-
-        post = get_undo_journal().newest_post_hash(path, (CONFIG.vault_path or "").strip() or None)
+        post = get_undo_journal().newest_post_hash(path, active_vault())
     except Exception:
         return "hand"  # no journal to ask: the body is still kept, only its label is the general one
-    return "run" if post == hashlib.sha256(text.encode("utf-8")).hexdigest() else "hand"
+    return "run" if post == content_hash(text) else "hand"
 
 
 class CheckpointStore:
@@ -168,12 +169,13 @@ class CheckpointStore:
         bodies Silica itself wrote or restored, which is what separates a hand
         edit from a tool write (undo_journal.edited_since_write). ``hand`` rows
         are the person's, so they stay out; undone rows were Silica's and stay in."""
-        import hashlib
+        from silica.kernel.write.undo_journal import content_hash
+
         rows = self._conn.execute(
             f"SELECT content FROM checkpoints WHERE {_SCOPE} AND kind != 'hand'",
             (path, _current_vault()),
         ).fetchall()
-        return {hashlib.sha256((r["content"] or "").encode("utf-8")).hexdigest() for r in rows}
+        return {content_hash(r["content"]) for r in rows}
 
     def absent_floor(self, path: str) -> bool:
         """True when only the floor is left and it stands for a note that did
@@ -295,19 +297,36 @@ class CheckpointStore:
         self._conn.commit()
 
 
-def push_landed(path: str, prior: str | None, asked: str, kind: str = "silica",
+def push_landed(path: str, prior: str | None, asked: str | None = None, kind: str = "silica",
                 of: str | None = None) -> int:
     """Push what the driver left on disk after a write, not what the caller
     asked for: the driver stamps a derived `type:` on overwrite, and a version
     that is not the disk read as a hand edit at the next /undo (reproduced
-    2026-11-01: /verify then /undo warned of edits nobody made)."""
+    2026-11-01: /verify then /undo warned of edits nobody made). A note
+    unreadable right after its own write keeps `asked`; with none, this raises."""
     from silica.driver import DRIVER
 
     try:
         landed = DRIVER.read_note(path).content
     except Exception:
-        landed = asked  # unreadable right after its own write: keep what was asked
+        if asked is None:
+            raise
+        landed = asked
     return get_checkpoint_store().push(path, prior, landed, kind=kind, of=of)
+
+
+def checkpoint_landed(path: str, prior: str | None, asked: str | None = None,
+                      kind: str = "silica") -> dict:
+    """push_landed as a tool's two result fields. A write that succeeded must
+    not be reported as failed because the undo bookkeeping hiccuped, but these
+    writes are offered as non-destructive on the strength of /undo, so a missing
+    restore point is logged and the result says so."""
+    try:
+        return {"checkpoint_depth": push_landed(path, prior, asked, kind=kind), "checkpoint_ok": True}
+    except Exception as e:
+        logger.warning("checkpoint push failed for '%s': %s; /undo has no restore point "
+                       "for this write", path, e)
+        return {"checkpoint_depth": None, "checkpoint_ok": False}
 
 
 _store: CheckpointStore | None = None

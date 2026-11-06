@@ -472,7 +472,7 @@ def test_the_mirror_copy_is_born_at_snapshot_time(mirror_vault):
 
     from silica.config import CONFIG
     from silica.kernel.write.ops import InverseOpKind
-    from silica.tools.wrapped import build_txn
+    from silica.kernel.write.gate import build_txn
 
     mirror_vault.note("Progetti/Foo.md", "# Foo\ncorpo originale\n")
     txn = build_txn([_op("patch", path="silica/Progetti/Foo.md", snippet="x" * 40)])
@@ -488,7 +488,7 @@ def test_a_mirror_copy_an_earlier_chunk_seeded_is_restored_not_deleted(mirror_va
     # an earlier chunk already enriched holds content of its own, and deleting
     # it would throw away every note distilled into it before this one.
     from silica.kernel.write.ops import InverseOpKind
-    from silica.tools.wrapped import build_txn
+    from silica.kernel.write.gate import build_txn
 
     mirror_vault.note("Progetti/Foo.md", "# Foo\ncorpo originale\n")
     mirror_vault.note("silica/Progetti/Foo.md", "# Foo\ngia' arricchita\n")

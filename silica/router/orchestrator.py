@@ -11,7 +11,7 @@ Contracts applied (see silica_architecture_addendum.md):
   C1 — ops_path carries list[Op]-compatible dicts after VALIDATE.
   C2 — freshness via per-op postconditions in CLI backend.
   C3 — build_txn() builds InverseOp entries; ROLLBACK applies them.
-  C4 — VALIDATE overwrites ops_path; SNAPSHOT/WRITE read that same file.
+  C4: VALIDATE writes what it kept to ops_path; SNAPSHOT/WRITE read that file.
   C5 — ledger records ops; CLEANUP only reachable from DONE state.
 
 S2.3 change: DELEGATE calls the real Distiller LLM via prep_delegation.
@@ -25,7 +25,7 @@ import logging
 import os
 # Unused in this file on purpose: silica/router/states/*.py do
 # `from silica.router import orchestrator as orch` and then reach `orch.time`
-# and `orch.silica_*` through this module's namespace, which is also the
+# and the stages below through this module's namespace, which is also the
 # attribute the suite patches. Ruff sees only this file, so it reads the whole
 # block as dead; deleting it takes six call sites and 46 tests with it.
 import time  # noqa: F401
@@ -35,20 +35,19 @@ from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
 
-    from silica.driver.base import Txn, GraphSnapshot
+    from silica.driver.base import GraphSnapshot
+    from silica.kernel.write.ops import Txn
     from silica.driver.base import NoteRef
     from silica.kernel.write.undo_journal import InverseOp
     from silica.router.prefetch import DistillPrefetcher
 
 from silica.driver import DRIVER
 from silica.config import CONFIG
-from silica.tools.composed import (  # noqa: F401  — see the `import time` note above
-    silica_lint,
-    silica_payload,
-    silica_recon,
-    silica_sanitize,
-    silica_validate_ops,
-)
+from silica.kernel.text.payload import payload_chunks  # noqa: F401  (see the `import time` note above)
+from silica.kernel.text.vault_recon import recon_file  # noqa: F401
+from silica.kernel.text.sanitize import sanitize_output  # noqa: F401
+from silica.kernel.write.gate import build_txn, in_run, open_run  # noqa: F401
+from silica.kernel.write.validate import validate_ops  # noqa: F401
 from silica.kernel.write.ops import OpType
 from silica.kernel.write.ops_io import load_ops
 from silica.kernel.base.layout import to_vault_relative
@@ -756,14 +755,11 @@ class InjectorFSM(BaseFSM[InjectorState]):
             return self.context
 
         # Only open a journal run when the pipeline will actually execute writes.
-        from silica.kernel.write.undo_journal import get_undo_journal
         # The ledger's run id travels with the journal row: it is the join
         # `/revert --source` needs, and the journal's own uuid is a different
         # keyspace that the ledger never sees.
-        self._undo_run_id = get_undo_journal().start_run(
-            source=self.inbox_file, vault=getattr(CONFIG, "vault_path", None) or None,
-            ledger_run_id=getattr(getattr(self, "progress", None), "run_id", None),
-        )
+        self._undo_run_id = open_run(
+            self.inbox_file, ledger_run_id=getattr(getattr(self, "progress", None), "run_id", None))
 
         # Fix A: repair index drift before this run reads the indexes — crash
         # drift and out-of-band creates/edits/deletes (kernel/recall/sync.py).
@@ -851,21 +847,15 @@ class InjectorFSM(BaseFSM[InjectorState]):
             from silica.kernel.write.deferred import get_deferred_store
             if not get_deferred_store().list_all():
                 return
-            from silica.agent.commit import _current_ledger_run, _current_undo_run
-            from silica.tools.pipeline import silica_anneal
+            from silica.router.anneal import sweep_deferred
 
             # This sweep writes inside the run's own `finally`, so its notes are
             # part of the run the user just started: they ride the run's journal
             # entry (else /revert undoes the anneal and leaves the nucleation)
             # and carry the run's ledger id (else the dangling-link sweep, which
             # matches on progress.run_id, cannot see them).
-            toks = (_current_undo_run.set(self._undo_run_id),
-                    _current_ledger_run.set(getattr(self.progress, "run_id", None)))
-            try:
-                res = silica_anneal(steer=False)
-            finally:
-                _current_undo_run.reset(toks[0])
-                _current_ledger_run.reset(toks[1])
+            with in_run(undo=self._undo_run_id, ledger=getattr(self.progress, "run_id", None)):
+                res = sweep_deferred(steer=False)
             # Read back by the coordinator's coverage summary: the recovery was
             # info-level only, so a run that rescued a batch of ops said nothing
             # about it to the user who asked for the nucleation.

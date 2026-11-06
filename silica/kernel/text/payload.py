@@ -158,3 +158,17 @@ def build_payload(recon_reports: list, window: int) -> dict:
             ))
         batches.append({"inbox_file": inbox_name, "concepts": concepts})
     return {"schema_version": 1, "batches": batches}
+
+
+def payload_chunks(recon_reports: list, max_concepts: int = 7, max_bytes: int = 80 * 1024) -> dict:
+    """Assembles payloads for the Distiller by pre-extracting snippets from the vault."""
+    from silica.kernel.partition import partition_by_concepts
+
+    # We use a default window of 450 chars
+    payload = build_payload(recon_reports, window=450)
+
+    # C4/S3.1: Always run partition_by_concepts if we have constraints
+    if max_concepts > 0 or max_bytes > 0:
+        return {"chunks": partition_by_concepts(payload, max_concepts, max_bytes)}
+
+    return {"payload": payload}

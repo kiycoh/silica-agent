@@ -372,3 +372,38 @@ def rewrite_links(
     )
 
     return result, n_wiki + n_md + n_fm
+
+
+def explicit_links(path: str) -> bool:
+    """Write the path into each bare wikilink of `path` whose name several
+    notes carry, so the note means the same notes after it moves: the
+    resolver reads a bare name as the same folder's namesake first, and a
+    move out of that folder would send the link to another folder's. A
+    unique name stays bare, as the person wrote it. Body links only: the
+    frontmatter's are the move's own rewrite (rename.py). Returns whether
+    it wrote. Under Loss.RENAME, the one reason a link target may change."""
+    from silica.driver import DRIVER
+    from silica.kernel.write.preserve import Loss
+
+    content = DRIVER.read_note(path).content
+    mask = _build_skip_mask(content)
+    resolved = {r.name.lower(): r.path for r in DRIVER.links(path) if r.path}
+    out: list[str] = []
+    at = 0
+    for m in _WIKILINK_FULL_RE.finditer(content):
+        target = m.group(2).strip()
+        if not target or "/" in target or not _span_is_clear(mask, m.start(), m.end()):
+            continue
+        if len(DRIVER.notes_named(target)) < 2:
+            continue
+        to = resolved.get(target.lower())
+        if not to:
+            continue
+        out.append(content[at:m.start()])
+        out.append(f"{m.group(1)}[[{to.removesuffix('.md')}{m.group(3) or ''}{m.group(4) or ''}]]")
+        at = m.end()
+    if not out:
+        return False
+    out.append(content[at:])
+    DRIVER.overwrite(path, "".join(out), loss=Loss.RENAME)
+    return True

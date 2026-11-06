@@ -9,7 +9,7 @@ the wizard's live /models validation."""
 import threading
 import time
 
-from silica.kernel.link.ofm import ofm_lint
+from silica.kernel.write.ofm import ofm_lint
 from silica.kernel.write.contested import (
     TIER_HUMAN,
     reliability_tier,

@@ -34,7 +34,7 @@ def test_ensure_ai_flag_stamps_missing_field_on_legacy_note():
     `AI` convention lack the field, and the OFM lint fails the whole note on a
     patch. ensure_ai_flag stamps `AI: true` (honest provenance) so the lint passes.
     """
-    from silica.kernel.link import ofm
+    from silica.kernel.write import ofm
     legacy = "---\ntags:\n  - statistica\n---\n# Varianza\nLa varianza misura la dispersione."
     stamped = ensure_ai_flag(legacy)
     assert "AI: true" in stamped.split("---")[1]
@@ -123,7 +123,7 @@ def test_floor_preserves_prior_frontmatter_on_bare_rewrite():
     """A model that omits frontmatter while rewriting means 'keep it', not
     'delete it': the prior block is re-injected verbatim, AI ensured,
     last modified refreshed — no silent metadata loss, lint green."""
-    from silica.kernel.link import ofm
+    from silica.kernel.write import ofm
     from silica.kernel.write.templates import ensure_system_floor
     prior = ("---\ntags:\n  - keep\naliases:\n  - K\ncustom: v\n"
              "last modified: 2020-01-01\n---\n\n# Old\n\nold body\n")

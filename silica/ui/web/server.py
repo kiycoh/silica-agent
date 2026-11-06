@@ -3672,7 +3672,7 @@ def _lean_limit() -> int:
     every row, and a copy would keep saying 600 for a year after the limit moved.
     """
     try:
-        from silica.kernel.link.ofm import LIMITS
+        from silica.kernel.write.ofm import LIMITS
 
         return int(LIMITS["lean_chars"])
     except Exception as exc:
@@ -4835,7 +4835,7 @@ def note_new(payload: dict):
     from silica.kernel import publish
     from silica.kernel.workspaces import _EDIT_LOCK
     from silica.kernel.write.undo_journal import USER_WRITE_SOURCE
-    from silica.tools.wrapped import _vault_file, create_note_with_restore_point
+    from silica.kernel.write.gate import create_note_with_restore_point, vault_file
     from silica.ui.web.vault_import import MAX_NAME_BYTES
 
     folder = str(payload.get("folder") or "").strip().strip("/")
@@ -4859,9 +4859,9 @@ def note_new(payload: dict):
         try:
             if not name:
                 stems = (f"Untitled {n}" if n > 1 else "Untitled" for n in itertools.count(1))
-                name = next(s for s in stems if not _vault_file(at(s)).exists())
+                name = next(s for s in stems if not vault_file(at(s)).exists())
             path = at(name)
-            if _vault_file(path).exists():
+            if vault_file(path).exists():
                 raise FileExistsError(path)
             run = create_note_with_restore_point(path, text, USER_WRITE_SOURCE)
         except (FileExistsError, NotADirectoryError):
@@ -4961,7 +4961,7 @@ def tree_delete(payload: dict):
     folder's other files and the directory itself stay."""
     from silica.driver import DRIVER
     from silica.kernel.write.undo_journal import USER_DELETE_SOURCE
-    from silica.tools.wrapped import delete_notes_with_restore_point
+    from silica.kernel.write.gate import delete_notes_with_restore_point
 
     note = str(payload.get("path") or "")
     folder = str(payload.get("folder") or "").strip().strip("/")
@@ -5055,7 +5055,8 @@ def tree_move(payload: dict):
     carry the vault's absolute path (ADR-0085): logged, not sent."""
     from silica.driver import DRIVER
     from silica.kernel.write.undo_journal import USER_MOVE_SOURCE
-    from silica.tools.wrapped import linked_from, move_notes_with_restore_point, move_preflight
+    from silica.kernel.link.rename import explicit_links
+    from silica.kernel.write.gate import linked_from, move_notes_with_restore_point, move_preflight
 
     skipped: list[str] = []
     if payload.get("name") is not None:
@@ -5102,7 +5103,7 @@ def tree_move(payload: dict):
     if not _begin_turn():
         raise HTTPException(409, "a turn is running: move when it ends")
     try:
-        res = move_notes_with_restore_point(moves, USER_MOVE_SOURCE)
+        res = move_notes_with_restore_point(moves, USER_MOVE_SOURCE, prepare=explicit_links)
     finally:
         _end_turn()
     if res["error"]:
@@ -5116,8 +5117,9 @@ def tree_move(payload: dict):
 def tree_undo(payload: dict):
     """The toast's undo for /tree/delete, /tree/move and /note/new: the run
     back, every note in it. Was /tree/undo-delete until ADR-0126."""
+    from silica.kernel.link.sweep import revert_and_sweep
     from silica.kernel.write.undo_journal import (USER_DELETE_SOURCE, USER_MOVE_SOURCE, USER_WRITE_SOURCE,
-                                                  get_undo_journal, revert_run)
+                                                  get_undo_journal)
 
     run = str(payload.get("run") or "")
     info = get_undo_journal().run_info(run) if run else None
@@ -5130,7 +5132,7 @@ def tree_undo(payload: dict):
     if not _begin_turn():
         raise HTTPException(409, "a turn is running: undo when it ends")
     try:
-        res = revert_run(run)
+        res = revert_and_sweep(run)
     finally:
         _end_turn()
     return {"restored": res["reverted"],
@@ -5142,11 +5144,11 @@ def _trash_items() -> list[dict]:
     `taken`: a note is at the item's path again, so its restore is refused."""
     from silica.config import CONFIG
     from silica.kernel.write.undo_journal import get_undo_journal
-    from silica.tools.wrapped import _vault_file
+    from silica.kernel.write.gate import vault_file
 
     items = get_undo_journal().trashed((CONFIG.vault_path or "").strip() or None)
     for t in items:
-        t["taken"] = _vault_file(t["path"]).exists()
+        t["taken"] = vault_file(t["path"]).exists()
     return items
 
 
@@ -5169,7 +5171,7 @@ def trash_list():
 @app.post("/trash/restore", dependencies=_SAME_ORIGIN)
 def trash_restore(payload: dict):
     """One note back from the trash, not the run it was deleted in."""
-    from silica.kernel.write.undo_journal import restore_from_trash
+    from silica.kernel.write.gate import restore_from_trash
 
     item = _trash_item(payload)
     if item["taken"]:

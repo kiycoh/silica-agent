@@ -11,10 +11,14 @@ Key invariant: touched_ref() returns op.path — NEVER a field named 'name'
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, model_validator
+
+if TYPE_CHECKING:
+    from silica.driver.base import NoteRef
 
 
 class OpType(str, Enum):
@@ -134,6 +138,26 @@ class InverseOp(BaseModel):
     version: int | None = None            # for restore_version
     prior_content: str | None = None      # for recreate_deleted
     to_path: str | None = None            # for move_back: where the note was moved to
+
+
+@dataclass
+class Txn:
+    """Transaction handle for snapshot/rollback.
+
+    Rollback strategies (C3 / ADR-0009):
+      - inverses:       authoritative list of InverseOp, consumed by
+                        gate.apply_inverses. Single source of truth.
+      - created_paths:  derived from inverses (delete_created entries); same reason.
+    """
+    id: str
+    refs: list[NoteRef] = field(default_factory=list)
+    created_paths: list[str] = field(default_factory=list)   # paths created by write ops
+    inverses: list = field(default_factory=list)              # list[InverseOp] — real field, not dynamic attr
+
+    @property
+    def inverses_serialized(self) -> list[dict]:
+        """Return a JSON-serializable list of dicts representing the inverse operations."""
+        return [inv.model_dump() if hasattr(inv, "model_dump") else dict(inv) for inv in self.inverses]
 
 
 class FailedOp(BaseModel):

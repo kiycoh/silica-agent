@@ -541,7 +541,7 @@ def write_prop(path: str, key: str, value: bool | None) -> None:
     `type:` the person never asked for. Lowercase YAML booleans, from the dumper."""
     from silica.driver import DRIVER
     from silica.kernel.base import frontmatter as fm
-    from silica.kernel.write.checkpoints import push_landed
+    from silica.kernel.write.checkpoints import checkpoint_landed
 
     prior = DRIVER.read_note(path).content
     data, raw, _body = fm.split(prior)
@@ -555,13 +555,9 @@ def write_prop(path: str, key: str, value: bool | None) -> None:
             # The Obsidian bridge has no removal; Obsidian itself does.
             raise ValueError(f"remove `{key}:` from {path} in Obsidian")
         unset(path, key)
-    try:
-        # `hand`: the person's click and no body of Silica's, or a note they edited would read
-        # as untouched to `edited_since_write` and could not be marked as theirs (ADR-0153 point 26).
-        push_landed(path, prior, prior, kind="hand")
-    except Exception as exc:
-        # The property is on disk: only /undo loses this step, as for a patch in tools/notes.py.
-        logger.warning("checkpoint push failed for '%s': %s; /undo has no restore point for it", path, exc)
+    # `hand`: the person's click and no body of Silica's, or a note they edited would read
+    # as untouched to `edited_since_write` and could not be marked as theirs (ADR-0153 point 26).
+    checkpoint_landed(path, prior, prior, kind="hand")
 
 
 # --- where the files go -------------------------------------------------------

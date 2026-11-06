@@ -114,7 +114,7 @@ def test_wired_into_handle_cleanup_on_archive(monkeypatch, tmp_vault):
         lambda fsm, fi, source_file: calls.append((fi, source_file)),
     )
     monkeypatch.setattr(finalize, "_log_nucleate_completion", lambda *a, **k: None)
-    monkeypatch.setattr("silica.tools.wrapped.silica_cleanup", lambda *a, **k: {"success": True})
+    monkeypatch.setattr("silica.kernel.write.gate.archive_source", lambda *a, **k: {"success": True})
 
     fsm = types.SimpleNamespace(
         _get_chunks_from_context_if_empty=lambda: None,
@@ -149,7 +149,7 @@ def test_partial_file_still_records_provenance(monkeypatch, tmp_vault):
     monkeypatch.setattr(finalize, "_log_nucleate_completion", lambda *a, **k: None)
     archived = []
     monkeypatch.setattr(
-        "silica.tools.wrapped.silica_cleanup",
+        "silica.kernel.write.gate.archive_source",
         lambda *a, **k: archived.append(a) or {"success": True},
     )
 

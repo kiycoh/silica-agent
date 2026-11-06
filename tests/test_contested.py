@@ -16,7 +16,7 @@ from silica.kernel.write.contested import (
     mark_contested,
 )
 from silica.kernel.base import frontmatter
-from silica.kernel.link.ofm import ofm_lint
+from silica.kernel.write.ofm import ofm_lint
 
 
 NOTE = """---

@@ -111,17 +111,8 @@ def test_move_destination_through_a_symlink_hop_stays_in_the_vault(
 
 
 # ---------------------------------------------------------------------------
-# The writes that do not take a path argument: append / set_prop / move sweep
+# The writes that do not take a path argument: set_prop / move sweep
 # ---------------------------------------------------------------------------
-
-def test_append_rejects_a_symlink_out_of_the_vault(backend, vault, outside):
-    victim = outside / "evil.md"
-    victim.write_text("original", encoding="utf-8")
-    (vault / "link.md").symlink_to(victim)
-    with pytest.raises(ValueError):
-        backend.append(NoteRef(name="link", path="link.md"), "pwned")
-    assert victim.read_text(encoding="utf-8") == "original"
-
 
 def test_set_prop_rejects_a_symlink_out_of_the_vault(backend, vault, outside):
     victim = outside / "evil.md"

@@ -16,9 +16,9 @@ from unittest.mock import patch
 import pytest
 
 from silica.driver.base import NoteContent, NoteRef
-from silica.kernel.write.atomic_write import commit_note_atomic
+from silica.kernel.write.gate import commit_note_atomic
 from silica.kernel.write.bulk import execute_operations
-from silica.kernel.write.ops import Op, OpType
+from silica.kernel.write.ops import Op, OpType, Txn
 
 
 @pytest.fixture
@@ -153,21 +153,6 @@ class _EdgeStrippingDriver:
         )
 
 
-class _CorruptingDriverWithVersions(_CorruptingDriver):
-    """_CorruptingDriver + snapshot_versions.
-
-    commit_note_atomic calls build_txn() directly (not through the mocked
-    silica_snapshot tool used by the commit_ops test above), and build_txn
-    unconditionally calls DRIVER.snapshot_versions(patch_refs) — so any fake
-    driver used with commit_note_atomic needs this method, even when
-    patch_refs is empty (write ops).
-    """
-
-    def snapshot_versions(self, refs):
-        from silica.driver.base import Txn
-        return Txn(id="test-txn")
-
-
 class _DeadChannelDriver:
     """read_note raises a RuntimeError shaped like a dead channel (CLI
     timeout / Obsidian down), NOT like a genuine "note not found" — used to
@@ -266,7 +251,7 @@ def test_delete_note_still_present_fails_verify(monkeypatch):
 
 def test_commit_ops_rolls_back_on_verify_mismatch(monkeypatch):
     import silica.kernel.write.bulk as bulk_mod
-    from silica.agent.commit import commit_ops
+    from silica.kernel.write.gate import commit_ops
 
     monkeypatch.setattr(bulk_mod, "DRIVER", _CorruptingDriver())
 
@@ -280,19 +265,19 @@ def test_commit_ops_rolls_back_on_verify_mismatch(monkeypatch):
     )
 
     with patch(
-        "silica.tools.composed.silica_validate_ops",
-        return_value={"validated_count": 1, "success": True},
+        "silica.kernel.write.gate.validate_ops",
+        return_value={"validated_count": 1, "success": True, "validated_ops": [op.model_dump()]},
     ), patch(
-        "silica.tools.wrapped.silica_snapshot",
-        return_value={"txn_id": "t1", "inverses": []},
+        "silica.kernel.write.gate.build_txn",
+        return_value=Txn(id="t1", inverses=[]),
     ), patch(
-        "silica.tools.composed.silica_lint", return_value={"success": True}
+        "silica.kernel.write.gate.lint_note", return_value={"success": True}
     ), patch(
-        "silica.tools.wrapped.silica_restore", return_value={"success": True}
+        "silica.kernel.write.gate.apply_inverses", return_value={"success": True}
     ) as restore:
         res = commit_ops([op], target_dir="Concepts")
 
-    # silica_lint is stubbed to always pass, so a rollback here can only be
+    # lint_note is stubbed to always pass, so a rollback here can only be
     # triggered by the bulk-write result — i.e. by the verify gate, not by an
     # unrelated lint failure reading from a different (real) backend.
     assert res["status"] == "rolled_back"
@@ -404,11 +389,11 @@ def test_commit_note_atomic_reverts_new_note_on_verify_mismatch(monkeypatch):
     """write op on a path that didn't exist -> corrupted note DID land ->
     exec raises post-write verify -> delete_created inverse removes it."""
     import silica.kernel.write.bulk as bulk_mod
-    import silica.tools.wrapped as wrapped_mod
+    import silica.kernel.write.gate as gate_mod
 
-    driver = _CorruptingDriverWithVersions()
+    driver = _CorruptingDriver()
     monkeypatch.setattr(bulk_mod, "DRIVER", driver)
-    monkeypatch.setattr(wrapped_mod, "DRIVER", driver)
+    monkeypatch.setattr(gate_mod, "DRIVER", driver)
 
     op = Op(
         op=OpType.write,
@@ -431,12 +416,12 @@ def test_commit_note_atomic_restores_prior_content_on_verify_mismatch(monkeypatc
     verify -> restore_version inverse (prior_content captured by build_txn
     before the write) puts the original content back exactly."""
     import silica.kernel.write.bulk as bulk_mod
-    import silica.tools.wrapped as wrapped_mod
+    import silica.kernel.write.gate as gate_mod
 
     original = "# Existing\n\nOriginal body.\n"
-    driver = _CorruptingDriverWithVersions(seed={"Concepts/Existing.md": original})
+    driver = _CorruptingDriver(seed={"Concepts/Existing.md": original})
     monkeypatch.setattr(bulk_mod, "DRIVER", driver)
-    monkeypatch.setattr(wrapped_mod, "DRIVER", driver)
+    monkeypatch.setattr(gate_mod, "DRIVER", driver)
 
     op = Op(
         op=OpType.patch,

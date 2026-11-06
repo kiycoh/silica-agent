@@ -51,7 +51,7 @@ TERMINAL_STATUSES = frozenset({
 })
 
 # Innermost open span of the current execution context. ContextVar and not a
-# Narrator attribute for the same reason commit.py uses one for provenance:
+# Narrator attribute for the same reason the write gate uses one for provenance:
 # subagent threads set their own value without seeing each other's.
 _parent_var: ContextVar[str | None] = ContextVar("narration_parent", default=None)
 _run_var: ContextVar[str | None] = ContextVar("narration_run", default=None)

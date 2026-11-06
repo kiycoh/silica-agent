@@ -81,7 +81,7 @@ class MailBlock:
     def _undo(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Take one import back by its run id. Only a run this vault's record
         names as a mail import: the row has no business reverting any other."""
-        from silica.kernel.write.undo_journal import revert_run
+        from silica.kernel.link.sweep import revert_and_sweep
         from silica.sources import mail
 
         run_id = str(payload.get("run_id") or "")
@@ -91,7 +91,7 @@ class MailBlock:
             return {"ok": False, "error": str(exc)}
         if not run_id or run_id not in runs:
             return {"ok": False, "error": "that is not a mail import of this vault"}
-        res = revert_run(run_id)
+        res = revert_and_sweep(run_id)
         return {"ok": True, "removed": len(res["reverted"]), "kept": len(res["skipped"]),
                 "gone": len(res["stale"]),
                 "errors": [f"{e['path']}: {e['error']}" for e in res["errors"]]}

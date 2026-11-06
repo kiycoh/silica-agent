@@ -67,13 +67,6 @@ def test_set_prop_invalidates_cache(tmp_path):
     assert "status: done" in content
 
 
-def test_append_invalidates_cache(tmp_path):
-    backend = _make_backend(tmp_path, {"note.md": "hello"})
-    assert backend.read_note("note.md").content == "hello"
-    backend.append("note.md", " world")
-    assert backend.read_note("note.md").content == "hello world"
-
-
 def test_delete_invalidates_cache(tmp_path):
     backend = _make_backend(tmp_path, {"note.md": "to be deleted"})
     assert backend.read_note("note.md").content == "to be deleted"

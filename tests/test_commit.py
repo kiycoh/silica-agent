@@ -1,12 +1,19 @@
-"""Tests for the commit_ops micro-gate (silica/agent/commit.py)."""
+"""Tests for the commit_ops micro-gate (silica/kernel/write/gate.py)."""
 from unittest.mock import patch
 
 import pytest
 
-from silica.agent.commit import commit_ops
-from silica.agent.bounds import dedup_bounds
-from silica.kernel.write.ops import Op, OpType
+from silica.kernel.write.gate import commit_ops
+from silica.kernel.write.gate import dedup_bounds
+from silica.kernel.write.ops import BulkResult, Op, OpType, Txn
 import silica.kernel.write.checkpoints as checkpoints
+
+
+_LANDED = BulkResult(ok=True, failed=[], results=[], total=1, successful=1)
+
+
+def _all_valid(ops, *_a, **_k):
+    return {"validated_count": len(ops), "success": True, "validated_ops": [o.model_dump() for o in ops]}
 
 
 def _patch_op(path="Concepts/Big.md"):
@@ -15,11 +22,11 @@ def _patch_op(path="Concepts/Big.md"):
 
 
 def test_commit_happy_path():
-    with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
-         patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t1", "inverses": []}), \
-         patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
-         patch("silica.tools.composed.silica_lint", return_value={"success": True}), \
-         patch("silica.tools.wrapped.silica_restore") as restore:
+    with patch("silica.kernel.write.gate.validate_ops", side_effect=_all_valid), \
+         patch("silica.kernel.write.gate.build_txn", return_value=Txn(id="t1", inverses=[])), \
+         patch("silica.kernel.write.gate.execute_operations", return_value=_LANDED), \
+         patch("silica.kernel.write.gate.lint_note", return_value={"success": True}), \
+         patch("silica.kernel.write.gate.apply_inverses") as restore:
         res = commit_ops([_patch_op()], target_dir="Concepts")
     assert res["status"] == "committed"
     assert res["committed"] == 1
@@ -30,14 +37,14 @@ def test_commit_rolls_back_on_lint_failure():
     """A violation the patch introduces (clean before the write, failing after)
     rolls it back. The lint is read twice on a patch: once for the note's own
     baseline, once after the write."""
-    with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
-         patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t9", "inverses": [{"kind": "restore_version", "path": "Concepts/Big.md"}]}), \
-         patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
-         patch("silica.tools.composed.silica_lint", side_effect=[
+    with patch("silica.kernel.write.gate.validate_ops", side_effect=_all_valid), \
+         patch("silica.kernel.write.gate.build_txn", return_value=Txn(id="t9", inverses=[{"kind": "restore_version", "path": "Concepts/Big.md"}])), \
+         patch("silica.kernel.write.gate.execute_operations", return_value=_LANDED), \
+         patch("silica.kernel.write.gate.lint_note", side_effect=[
              {"success": True, "errors": []},
              {"success": False, "errors": ["bad frontmatter"]},
          ]), \
-         patch("silica.tools.wrapped.silica_restore", return_value={"success": True}) as restore:
+         patch("silica.kernel.write.gate.apply_inverses", return_value={"success": True}) as restore:
         res = commit_ops([_patch_op()], target_dir="Concepts")
     assert res["status"] == "rolled_back"
     assert res["lint_failures"] == [{"path": "Concepts/Big.md", "errors": ["bad frontmatter"]}]
@@ -48,12 +55,12 @@ def test_commit_patch_tolerates_the_violations_the_note_already_had():
     """A patch cannot repair what the note carried before it (an unknown callout
     type the user writes by hand): the same violation before and after the
     write is not the patch's, and it lands. Review finding, 2026-09-19."""
-    with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
-         patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t9", "inverses": []}), \
-         patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
-         patch("silica.tools.composed.silica_lint",
+    with patch("silica.kernel.write.gate.validate_ops", side_effect=_all_valid), \
+         patch("silica.kernel.write.gate.build_txn", return_value=Txn(id="t9", inverses=[])), \
+         patch("silica.kernel.write.gate.execute_operations", return_value=_LANDED), \
+         patch("silica.kernel.write.gate.lint_note",
                return_value={"success": False, "errors": ["unknown callout type [!definizione]"]}), \
-         patch("silica.tools.wrapped.silica_restore") as restore:
+         patch("silica.kernel.write.gate.apply_inverses") as restore:
         res = commit_ops([_patch_op()], target_dir="Concepts")
     assert res["status"] == "committed", res
     restore.assert_not_called()
@@ -64,7 +71,7 @@ def test_commit_bounds_drops_forbidden_op_before_write():
     bounds = dedup_bounds("Concepts/Big.md")
     overwrite = Op(op=OpType.overwrite, heading="C", source_basename="i.md",
                    path="Concepts/Big.md", content="x")
-    with patch("silica.tools.composed.silica_validate_ops") as validate:
+    with patch("silica.kernel.write.gate.validate_ops") as validate:
         res = commit_ops([overwrite], target_dir="Concepts", bounds=bounds)
     # No actionable ops survived the bounds → validate never called.
     validate.assert_not_called()
@@ -90,11 +97,10 @@ def test_delete_op_path_is_leased():
         yield
 
     with patch("silica.kernel.workqueue.path_lease", side_effect=fake_path_lease), \
-         patch("silica.tools.composed.silica_validate_ops",
-               return_value={"validated_count": 1, "status": "ok", "rejected_ops": []}), \
-         patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t1", "inverses": []}), \
-         patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
-         patch("silica.tools.composed.silica_lint", return_value={"success": True}):
+         patch("silica.kernel.write.gate.validate_ops", side_effect=_all_valid), \
+         patch("silica.kernel.write.gate.build_txn", return_value=Txn(id="t1", inverses=[])), \
+         patch("silica.kernel.write.gate.execute_operations", return_value=_LANDED), \
+         patch("silica.kernel.write.gate.lint_note", return_value={"success": True}):
         delete_op = Op(op=OpType.delete, heading="Foo", source_basename="inbox.md", path="notes/Foo.md")
         commit_ops([delete_op], target_dir="notes")
 
@@ -108,10 +114,10 @@ def test_commit_unlinks_staging_file():
     from silica.kernel.base.home import silica_tmp_dir
 
     before = set(silica_tmp_dir().glob("*.json"))
-    with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
-         patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t1", "inverses": []}), \
-         patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
-         patch("silica.tools.composed.silica_lint", return_value={"success": True}):
+    with patch("silica.kernel.write.gate.validate_ops", side_effect=_all_valid), \
+         patch("silica.kernel.write.gate.build_txn", return_value=Txn(id="t1", inverses=[])), \
+         patch("silica.kernel.write.gate.execute_operations", return_value=_LANDED), \
+         patch("silica.kernel.write.gate.lint_note", return_value={"success": True}):
         commit_ops([_patch_op()], target_dir="Concepts")
     assert set(silica_tmp_dir().glob("*.json")) == before
 
@@ -142,7 +148,7 @@ def derived_vault(tmp_path, monkeypatch):
 def test_commit_derived_floors_bare_regen_with_prior_frontmatter(derived_vault):
     """A derived regen that omits the YAML block keeps the note's prior
     metadata and lands lint-green instead of rolling back."""
-    from silica.agent.commit import commit_derived
+    from silica.kernel.write.gate import commit_derived
     res = commit_derived("Wiki.md", "# Wiki\n\nregenerated\n")
     assert res["status"] == "committed", res
     landed = (derived_vault / "Wiki.md").read_text(encoding="utf-8")
@@ -153,7 +159,7 @@ def test_commit_derived_floors_bare_regen_with_prior_frontmatter(derived_vault):
 
 
 def test_commit_derived_first_write_gets_minimal_floor(derived_vault):
-    from silica.agent.commit import commit_derived
+    from silica.kernel.write.gate import commit_derived
     res = commit_derived("Fresh.md", "# Fresh\n\nbody\n")
     assert res["status"] == "committed", res
     landed = (derived_vault / "Fresh.md").read_text(encoding="utf-8")
@@ -165,7 +171,7 @@ def test_commit_derived_first_write_gets_minimal_floor(derived_vault):
 def test_commit_journals_inverses_when_in_batch_run():
     """Inside a batch run (ctxvar set), a clean commit records its inverses so
     /revert can undo the pass."""
-    from silica.agent.commit import _current_undo_run
+    from silica.kernel.write.gate import _current_undo_run
 
     inverses = [{"kind": "restore_version", "path": "Concepts/Big.md"}]
     recorded = []
@@ -176,10 +182,10 @@ def test_commit_journals_inverses_when_in_batch_run():
 
     token = _current_undo_run.set("RUNX")
     try:
-        with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
-             patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t1", "inverses": inverses}), \
-             patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
-             patch("silica.tools.composed.silica_lint", return_value={"success": True}), \
+        with patch("silica.kernel.write.gate.validate_ops", side_effect=_all_valid), \
+             patch("silica.kernel.write.gate.build_txn", return_value=Txn(id="t1", inverses=inverses)), \
+             patch("silica.kernel.write.gate.execute_operations", return_value=_LANDED), \
+             patch("silica.kernel.write.gate.lint_note", return_value={"success": True}), \
              patch("silica.kernel.write.undo_journal.get_undo_journal", return_value=_FakeJournal()), \
              patch("silica.driver.DRIVER.read_note", side_effect=RuntimeError("absent")):
             res = commit_ops([_patch_op()], target_dir="Concepts")
@@ -198,10 +204,10 @@ def test_commit_does_not_journal_outside_batch_run():
         def record(self, *a):
             recorded.append(a)
 
-    with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
-         patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t1", "inverses": [{"kind": "restore_version", "path": "x.md"}]}), \
-         patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
-         patch("silica.tools.composed.silica_lint", return_value={"success": True}), \
+    with patch("silica.kernel.write.gate.validate_ops", side_effect=_all_valid), \
+         patch("silica.kernel.write.gate.build_txn", return_value=Txn(id="t1", inverses=[{"kind": "restore_version", "path": "x.md"}])), \
+         patch("silica.kernel.write.gate.execute_operations", return_value=_LANDED), \
+         patch("silica.kernel.write.gate.lint_note", return_value={"success": True}), \
          patch("silica.kernel.write.undo_journal.get_undo_journal", return_value=_FakeJournal()):
         res = commit_ops([_patch_op()], target_dir="Concepts")
 
@@ -222,16 +228,15 @@ def _write_op(path="Concepts/Ack.md"):
 
 
 def _committed(fn):
-    with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
-         patch("silica.tools.wrapped.silica_snapshot",
-               return_value={"txn_id": "t2", "inverses": [{"kind": "delete_created", "path": "Concepts/Ack.md"}]}), \
-         patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
-         patch("silica.tools.composed.silica_lint", return_value={"success": True}):
+    with patch("silica.kernel.write.gate.validate_ops", side_effect=_all_valid), \
+         patch("silica.kernel.write.gate.build_txn", return_value=Txn(id="t2", inverses=[{"kind": "delete_created", "path": "Concepts/Ack.md"}])), \
+         patch("silica.kernel.write.gate.execute_operations", return_value=_LANDED), \
+         patch("silica.kernel.write.gate.lint_note", return_value={"success": True}):
         return fn()
 
 
 def test_worker_commit_appends_provenance_for_its_source(tmp_vault):
-    from silica.agent import commit as commit_mod
+    from silica.kernel.write import gate as commit_mod
     from silica.kernel.write.provenance import read_records
 
     tok = commit_mod._current_provenance.set(("3-rq2.md", "sha-abc"))
@@ -262,20 +267,20 @@ def _overwrite_op(path="Concepts/Ack.md"):
 
 
 def test_worker_commit_records_an_overwrite(tmp_vault):
-    """`overwrite` is the ONLY op four sub-agent profiles in agent/bounds.py may
+    """`overwrite` is the ONLY op four sub-agent profiles in the gate's bounds may
     emit, and what all three dedup merges emit. The ledger predicate listed only
     write/patch, so the majority of the lane's writes reached the vault with no
     record: /revert walked past them and check_renucleate reported the source as
     never nucleated."""
-    from silica.agent import commit as commit_mod
+    from silica.kernel.write import gate as commit_mod
     from silica.kernel.write.provenance import read_records
 
     tok = commit_mod._current_provenance.set(("3-rq2.md", "sha-ow", "run-fsm-1"))
     try:
-        with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
-             patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t3", "inverses": []}), \
-             patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
-             patch("silica.tools.composed.silica_lint", return_value={"success": True}):
+        with patch("silica.kernel.write.gate.validate_ops", side_effect=_all_valid), \
+             patch("silica.kernel.write.gate.build_txn", return_value=Txn(id="t3", inverses=[])), \
+             patch("silica.kernel.write.gate.execute_operations", return_value=_LANDED), \
+             patch("silica.kernel.write.gate.lint_note", return_value={"success": True}):
             res = commit_ops([_overwrite_op()], target_dir="Concepts")
     finally:
         commit_mod._current_provenance.reset(tok)
@@ -291,17 +296,17 @@ def test_worker_provenance_is_keyed_on_the_fsm_run_not_the_journal_run(tmp_vault
     own writer — matches on `fsm.progress.run_id`. The lane used to stamp the
     undo journal's uuid4 instead, a different keyspace, so the records matched
     nothing and the sweep still missed the notes they exist to attribute."""
-    from silica.agent import commit as commit_mod
+    from silica.kernel.write import gate as commit_mod
     from silica.kernel.write.provenance import read_records
 
     tok = commit_mod._current_provenance.set(("3-rq2.md", "sha-key", "run-fsm-2"))
     journal_tok = commit_mod._current_undo_run.set("undo-uuid-deadbeef")
     try:
-        with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
-             patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t4", "inverses": []}), \
-             patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
-             patch("silica.tools.composed.silica_lint", return_value={"success": True}), \
-             patch("silica.agent.commit._journal_inverses"):
+        with patch("silica.kernel.write.gate.validate_ops", side_effect=_all_valid), \
+             patch("silica.kernel.write.gate.build_txn", return_value=Txn(id="t4", inverses=[])), \
+             patch("silica.kernel.write.gate.execute_operations", return_value=_LANDED), \
+             patch("silica.kernel.write.gate.lint_note", return_value={"success": True}), \
+             patch("silica.kernel.write.gate.record_landed"):
             commit_ops([_write_op()], target_dir="Concepts")
     finally:
         commit_mod._current_undo_run.reset(journal_tok)
@@ -313,7 +318,7 @@ def test_worker_provenance_is_keyed_on_the_fsm_run_not_the_journal_run(tmp_vault
 
 def test_a_two_tuple_provenance_context_still_works(tmp_vault):
     """The run id is optional: older callers set (source, sha)."""
-    from silica.agent import commit as commit_mod
+    from silica.kernel.write import gate as commit_mod
     from silica.kernel.write.provenance import read_records
 
     tok = commit_mod._current_provenance.set(("3-rq2.md", "sha-2tuple"))

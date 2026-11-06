@@ -26,6 +26,7 @@ from typing import Any
 
 from silica.driver import DRIVER
 from silica.driver.base import NoteRef, GraphSnapshot
+from silica.kernel.write import gate
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.organize.taxonomy import Taxonomy
 from silica.router.base_fsm import BaseFSM
@@ -352,18 +353,12 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             self._transition_success()
             return
 
-        from silica.driver.base import Txn
-        from silica.kernel.write.ops import InverseOp, InverseOpKind
+        from silica.kernel.write.ops import InverseOp, InverseOpKind, Txn
         import uuid
 
         # Open an undo-journal run so `/revert` can move these notes back later.
         # Only reached in apply mode with real moves (PLAN returns early on dry_run).
-        from silica.config import CONFIG
-        from silica.kernel.write.undo_journal import get_undo_journal
-        self._undo_run_id = get_undo_journal().start_run(
-            source=f"organize:{self.scope or 'vault'}",
-            vault=getattr(CONFIG, "vault_path", None) or None,
-        )
+        self._undo_run_id = gate.open_run(f"organize:{self.scope or 'vault'}")
 
         # For move ops, the inverse is moving back (from_path → to_path becomes to_path → from_path)
         # We also pre-capture the pre-move graph snapshot for the lint gate.
@@ -490,49 +485,28 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         """
         if not self._undo_run_id:
             return
-        import hashlib
         from silica.kernel.write.ops import InverseOp, InverseOpKind
-        from silica.kernel.write.undo_journal import get_undo_journal
 
-        journal = get_undo_journal()
         for res in self.context.get("move_results", []):
-            if not res.get("success"):
-                continue
-            from_path, to_path = res["from"], res["to"]
-            try:
-                post = DRIVER.read_note(to_path).content
-                post_hash = hashlib.sha256((post or "").encode("utf-8")).hexdigest()
-            except Exception:
-                post_hash = None
-            journal.record(
-                self._undo_run_id,
-                InverseOp(kind=InverseOpKind.move_back, path=from_path, to_path=to_path),
-                post_hash,
-            )
+            if res.get("success"):
+                gate.record_landed(self._undo_run_id, InverseOp(
+                    kind=InverseOpKind.move_back, path=res["from"], to_path=res["to"]))
 
     def _handle_rollback(self) -> None:
-        """Undo moves by calling DRIVER.move() in reverse."""
+        """Undo the moves that landed, through the gate's one rollback executor."""
         snapshot = self.context.get("snapshot", {})
         inverses = snapshot.get("inverses", [])
 
         if not inverses:
             logger.info("ROLLBACK: no inverses to apply")
         else:
-            successful_dests = {res["to"] for res in self.context.get("move_results", [])}
-            for inv_dict in inverses:
-                from_path = inv_dict.get("path")       # original source
-                to_path = inv_dict.get("to_path")      # where we moved it
-                if not from_path or not to_path:
-                    continue
-                if to_path not in successful_dests:
-                    logger.debug("ROLLBACK: skipping restore for %s → %s (move did not succeed)", to_path, from_path)
-                    continue
-                # Reverse: move back from to_path → from_path
-                try:
-                    DRIVER.move(to_path, from_path)
-                    logger.info("ROLLBACK: restored %s → %s", to_path, from_path)
-                except Exception as exc:
-                    logger.error("ROLLBACK: failed to restore %s → %s: %s", to_path, from_path, exc)
+            landed = {res["to"] for res in self.context.get("move_results", [])}
+            res = gate.apply_inverses(snapshot.get("txn_id", ""),
+                                      [inv for inv in inverses if inv.get("to_path") in landed])
+            for applied in res["applied"]:
+                logger.info("ROLLBACK: %s", applied)
+            for error in res["errors"]:
+                logger.error("ROLLBACK: %s", error)
 
         self.context["final_status"] = (
             f"Rolled Back: {self.context.get('abort_reason', 'unknown reason')}"

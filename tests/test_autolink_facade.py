@@ -43,7 +43,7 @@ def test_autolink_focuses_on_cooccurrence_candidates(vault):
     cs.upsert_note("Concepts/Neural", build_contribution("Neural", "neural deep learning"))
     cs.save()
 
-    from silica.tools.composed import silica_autolink
+    from silica.tools.graph import silica_autolink
     silica_autolink(note_paths=["Concepts/Note A.md"], use_candidates=True)
 
     body = _body("Concepts/Note A.md")
@@ -58,7 +58,7 @@ def test_autolink_consumes_the_whole_list_in_one_call(vault):
     the list length on a second pass; `notes_scanned` is what tells the agent
     the batch is done. Without it the agent re-ran the same finished batch.
     """
-    from silica.tools.composed import silica_autolink
+    from silica.tools.graph import silica_autolink
     paths = ["Concepts/Note A.md", "Concepts/Neural.md", "Concepts/Sailing.md"]
 
     first = silica_autolink(note_paths=paths, use_candidates=False)
@@ -74,7 +74,7 @@ def test_autolink_consumes_the_whole_list_in_one_call(vault):
 def test_autolink_full_scan_fallback_when_no_signal(vault):
     # Empty embed + empty cooccur -> facade returns [] -> candidates stays None
     # -> full title scan still links (must NOT be suppressed to an empty list).
-    from silica.tools.composed import silica_autolink
+    from silica.tools.graph import silica_autolink
     silica_autolink(note_paths=["Concepts/Note A.md"], use_candidates=True)
 
     body = _body("Concepts/Note A.md")

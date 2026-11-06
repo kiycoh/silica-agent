@@ -45,8 +45,8 @@ VALID_KINDS = frozenset({"autolink", "orphan", "dedup"})
 def _norm_note_path(path: str) -> str:
     """Forward-slash, `.md`-suffixed note path for suffix matching.
 
-    Local to the kernel (curator.py can't import silica.agent.bounds across the
-    import-linter boundary); named apart from bounds._norm_path to avoid confusion.
+    Named apart from gate.norm_path, which drops the `.md` and folds case: this
+    key is matched as a path suffix.
     """
     p = path.strip().replace("\\", "/")
     return p if p.endswith(".md") else p + ".md"

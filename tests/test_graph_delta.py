@@ -357,7 +357,7 @@ def test_markdown_omits_delta_sections_when_empty(synthetic_graph):
 # ---------------------------------------------------------------------------
 
 def test_vault_report_tool_exposes_with_cooccurrence_flag():
-    import silica.tools.composed  # noqa: F401  (registers the tool)
+    import silica.cli  # noqa: F401  registers every tool
     from silica.tools import TOOLS
 
     # The args model is derived from the signature, so the schema the model

@@ -95,7 +95,7 @@ def test_dry_run_returns_groups_and_writes_nothing():
          patch("silica.driver.DRIVER.alias_index", return_value=[]), \
          patch("silica.tools.aliases._propose_groups",
                return_value={"Artificial Intelligence": ["AI system"]}), \
-         patch("silica.agent.commit.commit_ops") as commit:
+         patch("silica.kernel.write.gate.commit_ops") as commit:
         res = silica_aliases(apply=False)
     assert res["groups"] == {"Artificial Intelligence": ["AI system"]}
     assert res["accepted"] == 1
@@ -115,7 +115,7 @@ def test_apply_writes_aliases_through_the_gate():
                return_value={"Artificial Intelligence": ["AI system"]}), \
          patch("silica.driver.DRIVER.read_note",
                return_value=NoteContent(ref=_REFS[0], content="---\ntags: [x]\n---\n\nbody\n")), \
-         patch("silica.agent.commit.commit_ops", side_effect=_fake_commit):
+         patch("silica.kernel.write.gate.commit_ops", side_effect=_fake_commit):
         res = silica_aliases(apply=True)
 
     assert res["written"] == {"Concepts/Artificial Intelligence.md": 1}
@@ -131,7 +131,7 @@ def test_apply_is_idempotent_when_alias_already_declared():
                return_value={"Artificial Intelligence": ["AI system"]}), \
          patch("silica.driver.DRIVER.read_note",
                return_value=NoteContent(ref=_REFS[0], content="---\naliases: [AI system]\n---\n\nbody\n")), \
-         patch("silica.agent.commit.commit_ops") as commit:
+         patch("silica.kernel.write.gate.commit_ops") as commit:
         res = silica_aliases(apply=True)
     # note untouched: add_alias found the surface already declared
     assert res["written"] == {}

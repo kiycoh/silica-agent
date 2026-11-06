@@ -1146,11 +1146,10 @@ def plan(file: str | Path, *, me: tuple[str, ...] | None = None, label: str = ""
 def apply(p: Plan) -> dict:
     """Write a plan's threads in one undo run (point 6), so one /revert takes
     the whole import back; the /mail command and the Mail row share it."""
-    from silica.config import CONFIG
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.gate import open_run
     from silica.sources.registry import stage
 
-    run_id = get_undo_journal().start_run(source="mail", vault=CONFIG.vault_path.strip() or None)
+    run_id = open_run("mail")
     written, failed = 0, []
     for t in p.write:
         result = stage(MAIL, f"{p.file}#{t.key}", run_id=run_id)

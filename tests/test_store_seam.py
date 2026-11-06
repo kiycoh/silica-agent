@@ -83,7 +83,7 @@ def test_workers_never_touch_store():
 
     root = pathlib.Path(__file__).resolve().parent.parent / "silica"
     worker_reachable = sorted((root / "capabilities").glob("*.py"))
-    worker_reachable += [root / "agent" / "commit.py", root / "agent" / "subagent.py"]
+    worker_reachable += [root / "kernel" / "write" / "gate.py", root / "agent" / "subagent.py"]
 
     forbidden = (
         "EmbedStore", "CooccurStore", "get_store", "get_cooccur_store",

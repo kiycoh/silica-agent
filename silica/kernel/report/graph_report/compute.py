@@ -214,7 +214,7 @@ def compute_report(
     if analytics:
         try:
             from silica.kernel.write import contested as contested_kernel
-            from silica.kernel.link import ofm
+            from silica.kernel.write import ofm
             from silica.kernel.base import frontmatter
             from silica.kernel.learn.learner import _created_and_ai
             from silica.driver import DRIVER

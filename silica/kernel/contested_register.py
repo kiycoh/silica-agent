@@ -15,8 +15,12 @@ from __future__ import annotations
 
 import json
 
+import logging
+
 from silica.kernel.base.durable import atomic_write_bytes
 from silica.kernel.base.home import index_dir
+
+logger = logging.getLogger(__name__)
 
 
 def _register_path():
@@ -50,3 +54,13 @@ def discard(path: str) -> None:
     cur = entries()
     if path in cur:
         _save([p for p in cur if p != path])
+
+
+def note(path: str, contested: bool) -> None:
+    """Keep the worklist in step with a write that landed. A failure costs only
+    the digest line: the note's frontmatter is the truth and the digest heals
+    what it finds stale, while the write it follows must not fail for this."""
+    try:
+        add(path) if contested else discard(path)
+    except OSError as e:
+        logger.debug("contested register not updated for %s: %s", path, e)

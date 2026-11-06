@@ -14,7 +14,7 @@ from __future__ import annotations
 def _registry() -> dict:
     # Registration is an import side effect — same module set cli.py loads.
     import silica.tools.atomic  # noqa: F401
-    import silica.tools.composed  # noqa: F401
+    import silica.cli  # noqa: F401  registers every tool
     import silica.tools.wrapped  # noqa: F401
     import silica.tools.codedocs_tool  # noqa: F401
     import silica.tools.delegate_tool  # noqa: F401

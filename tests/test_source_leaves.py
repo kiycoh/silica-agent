@@ -237,7 +237,7 @@ def test_wired_before_archive(monkeypatch, tmp_vault):
                         lambda fsm, src: order.append(("leaf", src)))
     monkeypatch.setattr(finalize, "_record_provenance", lambda *a: None)
     monkeypatch.setattr(finalize, "_log_nucleate_completion", lambda *a: None)
-    monkeypatch.setattr("silica.tools.wrapped.silica_cleanup",
+    monkeypatch.setattr("silica.kernel.write.gate.archive_source",
                         lambda *a, **k: order.append(("archive", a[0])) or {"success": True})
 
     fsm = types.SimpleNamespace(
@@ -319,7 +319,7 @@ def test_embed_index_invisible(tmp_vault, monkeypatch):
             return [[1.0, 0.0] for _ in texts]
 
     monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
-    from silica.tools.composed import silica_embed_refresh
+    from silica.tools.graph import silica_embed_refresh
 
     res = silica_embed_refresh(force=True)
     assert "error" not in res
@@ -330,7 +330,7 @@ def test_embed_index_invisible(tmp_vault, monkeypatch):
 
 def test_cooccur_index_invisible(tmp_vault):
     _leafed_vault(tmp_vault)
-    from silica.tools.composed import silica_cooccurrence_refresh
+    from silica.tools.graph import silica_cooccurrence_refresh
 
     res = silica_cooccurrence_refresh(force=True)
     assert "error" not in res
@@ -341,7 +341,7 @@ def test_cooccur_index_invisible(tmp_vault):
 
 def test_lexical_index_invisible(tmp_vault):
     _leafed_vault(tmp_vault)
-    from silica.tools.composed import silica_lexical_refresh
+    from silica.tools.graph import silica_lexical_refresh
 
     res = silica_lexical_refresh(force=True)
     assert "error" not in res

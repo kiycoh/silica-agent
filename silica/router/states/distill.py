@@ -650,8 +650,13 @@ def handle_sanitize(fsm: "InjectorFSM") -> None:
         # The full chunk is a superset of any steer-retry payload — a
         # superset only errs toward preserving, the safe direction.
         source = payload_inbox_text(fsm._chunks[fsm._current_chunk_idx])
-        res = orch.silica_sanitize(fsm._chunk_ctx["distiller_output_path"],
-                                   verbatim_source=source or None)
+        try:
+            with open(fsm._chunk_ctx["distiller_output_path"], encoding="utf-8") as f:
+                raw = f.read()
+        except OSError as e:
+            res = {"error": f"Failed to read distiller output: {e}"}
+        else:
+            res = orch.sanitize_output(raw, verbatim_source=source or None)
         if "error" in res:
             fsm._progress_note(fsm._chunk_task_id("sanitize"), "sanitize", "failed", error=res["error"])
             raise RuntimeError(f"Sanitize failed: {res['error']}")
@@ -685,25 +690,24 @@ def handle_validate(fsm: "InjectorFSM") -> None:
     from silica.kernel.text.cohesion import cohesion_pass
     ops_raw = cohesion_pass(ops_raw)
 
-    ops_path = fsm._make_tmp(ops_raw)
-
     fsm._get_chunks_from_context_if_empty()
 
-    payload_paths: list[str] = []
+    payloads: list[dict] = []
     if fsm._chunks and fsm._current_chunk_idx < len(fsm._chunks):
-        payload_paths.append(fsm._make_tmp(fsm._chunks[fsm._current_chunk_idx]))
+        payloads.append(fsm._chunks[fsm._current_chunk_idx])
     else:
         # Fallback to general payload if _chunks is not populated
         payload_data = fsm.context.get("payload", {})
         if "chunks" in payload_data:
-            for chunk in payload_data["chunks"]:
-                payload_paths.append(fsm._make_tmp(chunk))
+            payloads.extend(payload_data["chunks"])
         elif "payload" in payload_data:
-            payload_paths.append(fsm._make_tmp(payload_data["payload"]))
+            payloads.append(payload_data["payload"])
 
-    res = orch.silica_validate_ops(
-        ops_path,
-        payload_paths=payload_paths,
+    from silica.kernel.write.ops_io import parse_ops
+
+    res = orch.validate_ops(
+        parse_ops(ops_raw),
+        payloads,
         target_dir=fsm.target_dir,
         hub=fsm.hub,
         # Same profile as the prompt: an extractive run judged by the default
@@ -711,9 +715,8 @@ def handle_validate(fsm: "InjectorFSM") -> None:
         profile=_file_profile(fsm, fsm._current_chunk_idx),
     )
 
-    if "error" in res:
-        raise RuntimeError(f"Validate failed: {res['error']}")
-
+    # C4: SNAPSHOT and WRITE read this file, so it holds what the gate kept.
+    ops_path = fsm._make_tmp(res["validated_ops"])
     fsm.context["validate"] = res
 
     # Span-grounding warnings (warn-only, never a rejection) → run ledger,

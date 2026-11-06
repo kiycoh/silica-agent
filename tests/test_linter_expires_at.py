@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import datetime
-from silica.kernel.link.linter import check_expires_at
+from silica.kernel.write.linter import check_expires_at
 
 
 def test_no_expires_at_returns_no_warning():
@@ -62,10 +62,10 @@ def test_check_expires_at_integrated_in_validate_note(tmp_path, monkeypatch):
     )
 
     from silica.driver.fs_backend import ObsidianFSBackend
-    import silica.kernel.link.linter as linter_mod
+    import silica.kernel.write.linter as linter_mod
     monkeypatch.setattr(linter_mod, "DRIVER", ObsidianFSBackend(str(tmp_path)))
 
-    from silica.kernel.link.linter import validate_note
+    from silica.kernel.write.linter import validate_note
     errors, warnings = validate_note(str(note_path), hub=None, op_type=None)
     assert any("expired" in w.lower() for w in warnings), f"warnings={warnings}"
 
@@ -85,10 +85,10 @@ def test_sentinel_leak_is_a_hard_error(tmp_path, monkeypatch):
     )
 
     from silica.driver.fs_backend import ObsidianFSBackend
-    import silica.kernel.link.linter as linter_mod
+    import silica.kernel.write.linter as linter_mod
     monkeypatch.setattr(linter_mod, "DRIVER", ObsidianFSBackend(str(tmp_path)))
 
-    from silica.kernel.link.linter import validate_note
+    from silica.kernel.write.linter import validate_note
     errors, _ = validate_note(str(note_path), hub=None, op_type=None)
     assert any("delimiter" in e.lower() for e in errors), f"errors={errors}"
 
@@ -101,9 +101,9 @@ def test_clean_note_has_no_sentinel_error(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     from silica.driver.fs_backend import ObsidianFSBackend
-    import silica.kernel.link.linter as linter_mod
+    import silica.kernel.write.linter as linter_mod
     monkeypatch.setattr(linter_mod, "DRIVER", ObsidianFSBackend(str(tmp_path)))
 
-    from silica.kernel.link.linter import validate_note
+    from silica.kernel.write.linter import validate_note
     errors, _ = validate_note(str(note_path), hub=None, op_type=None)
     assert not any("delimiter" in e.lower() for e in errors), f"errors={errors}"

@@ -323,9 +323,9 @@ def _only_marked(path: Path, written: str | None) -> bool:
     hashes the whole file, so the mark typed by hand reads as the edit it claims (ADR-0153 point 26).
     shortcut: a mark set through a tool that reformats the properties reads as an edit; compare
     bodies if the review ever meets one."""
-    from silica.kernel.write.undo_journal import _content_hash
+    from silica.kernel.write.undo_journal import content_hash
 
-    return _content_hash(_MARK.sub("", path.read_text(encoding="utf-8"), count=1)) == written
+    return content_hash(_MARK.sub("", path.read_text(encoding="utf-8"), count=1)) == written
 
 
 def _read_sources(vault: Path, notes: dict, wanted: dict[str, list[str]], names: dict[str, str]) -> dict:

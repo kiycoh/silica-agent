@@ -30,14 +30,14 @@ def vault(tmp_path, monkeypatch):
 
 
 def test_tool_is_registered():
-    import silica.tools.composed  # noqa: F401  — importing registers @tool fns
+    import silica.cli  # noqa: F401  registers every tool
     from silica.tools import TOOLS
     assert "silica_cooccurrence_refresh" in TOOLS
     assert TOOLS["silica_cooccurrence_refresh"].cls == "composed"
 
 
 def test_refresh_indexes_all_vault_notes(vault):
-    from silica.tools.composed import silica_cooccurrence_refresh
+    from silica.tools.graph import silica_cooccurrence_refresh
     res = silica_cooccurrence_refresh(folder="", force=True)
     assert res["indexed"] == 2
     assert res["total_notes"] == 2
@@ -55,7 +55,7 @@ def test_a_refresh_that_indexed_nothing_leaves_the_file_alone(vault, monkeypatch
     the graph it had just drawn -- with nothing changed."""
     from silica.kernel.recall.cooccurrence import _index_path
     from silica.kernel.recall.sync import disk_stamp, vault_version
-    from silica.tools.composed import silica_cooccurrence_refresh
+    from silica.tools.graph import silica_cooccurrence_refresh
 
     silica_cooccurrence_refresh(folder="")
     stamp, version = disk_stamp(_index_path()), vault_version()
@@ -78,7 +78,7 @@ def test_a_refresh_that_indexed_nothing_leaves_the_file_alone(vault, monkeypatch
 
 
 def test_refresh_builds_real_queryable_contributions(vault):
-    from silica.tools.composed import silica_cooccurrence_refresh
+    from silica.tools.graph import silica_cooccurrence_refresh
     silica_cooccurrence_refresh(force=True)
     store = CooccurStore()
     # "neural network architecture" -> neural<->network co-occurrence edge
@@ -93,7 +93,7 @@ def test_refresh_works_with_embedder_down(vault, monkeypatch):
         raise RuntimeError("LM Studio not running")
 
     monkeypatch.setattr(providers, "get_embedder", _boom)
-    from silica.tools.composed import silica_cooccurrence_refresh
+    from silica.tools.graph import silica_cooccurrence_refresh
     res = silica_cooccurrence_refresh(force=True)
     assert res.get("indexed") == 2  # embedder never touched
 
@@ -101,7 +101,7 @@ def test_refresh_works_with_embedder_down(vault, monkeypatch):
 def test_cli_cooccur_command_routes_to_tool():
     """'/cooccur --force' reaches silica_cooccurrence_refresh with force=True."""
     from unittest.mock import patch
-    import silica.tools.composed  # noqa: F401 — ensure tool is registered
+    import silica.cli  # noqa: F401  registers every tool
     from silica.cli import _handle_direct_shortcut
     from silica.tools import TOOLS
 
@@ -152,7 +152,7 @@ def test_force_rebuild_refreezes_wrong_frozen_language(tmp_path, monkeypatch):
     store.upsert_note("Note/Old", build_contribution("Old", "old english note", lang="english"))
     store.save()
 
-    from silica.tools.composed import silica_cooccurrence_refresh
+    from silica.tools.graph import silica_cooccurrence_refresh
     res = silica_cooccurrence_refresh(force=True)
     assert "error" not in res
     assert store.lang == "italian"
@@ -163,6 +163,6 @@ def test_refresh_empty_vault_returns_error(tmp_path, monkeypatch):
     vault_dir.mkdir()
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
-    from silica.tools.composed import silica_cooccurrence_refresh
+    from silica.tools.graph import silica_cooccurrence_refresh
     res = silica_cooccurrence_refresh()
     assert "error" in res

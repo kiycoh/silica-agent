@@ -8,7 +8,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from silica.kernel.link import ofm
+from silica.kernel.write import ofm
 from silica.kernel.base import frontmatter
 from silica.kernel.base.markdown import has_wikilink
 from silica.driver import DRIVER

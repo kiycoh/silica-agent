@@ -16,8 +16,8 @@ from typing import Any, Literal
 from pydantic import BaseModel
 from pydantic.json_schema import SkipJsonSchema
 
-from silica.agent.commit import commit_ops
-from silica.agent.bounds import dedup_bounds, dedup_spoke_bounds
+from silica.kernel.write.gate import commit_ops
+from silica.kernel.write.gate import dedup_bounds, dedup_spoke_bounds
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities._base import emit_feedback, load_prompt, read_or_skip
@@ -283,7 +283,7 @@ def _file_dominated_claim(
     """
     import datetime
 
-    from silica.agent.bounds import dedup_supersede_bounds
+    from silica.kernel.write.gate import dedup_supersede_bounds
     from silica.kernel.write.contested import (
         SUPERSEDED_HEADING,
         superseded_claim,
@@ -341,7 +341,7 @@ def _mark_merge_loser(ctx: dict, winner_path: str) -> None:
     if not loser_path or _note_key(loser_path) == _note_key(winner_path):
         return
     try:
-        from silica.agent.bounds import dedup_supersede_bounds
+        from silica.kernel.write.gate import dedup_supersede_bounds
         from silica.kernel.write.contested import mark_superseded_by
 
         prior = read_or_skip(loser_path)[0] or ""
@@ -402,7 +402,7 @@ def _record_absorbed_alias(ctx: dict, winner_path: str, hub: str | None) -> None
     if not concept or concept.lower() == winner_title.lower():
         return
     try:
-        from silica.agent.bounds import dedup_alias_bounds
+        from silica.kernel.write.gate import dedup_alias_bounds
         from silica.kernel.base.frontmatter import add_alias
 
         prior = read_or_skip(winner_path)[0] or ""
@@ -516,15 +516,6 @@ def _route_verdict(
             # 2026-09-03 the branches were exclusive and "Percettrone" left
             # no trace on "Percettrone di Rosenblatt" (run f30ace50).
             _record_absorbed_alias(ctx, candidate_path, hub)
-        if decision.verdict == "contradicts":
-            # Without this the judge's contradictions never reach the run
-            # digest worklist: only silica_flag_note used to feed the register,
-            # so LLM-detected ones were visible solely to a full-vault scan.
-            try:
-                from silica.kernel import contested_register
-                contested_register.add(candidate_path)
-            except Exception as e:
-                logger.debug("dedup: contested register add failed (non-fatal): %s", e)
     return result
 
 
@@ -615,7 +606,7 @@ def _settle_landed_distinct(item: WorkItem, ctx: dict, decision: DedupDecision) 
     trace a spoke gets, so the verdict survives in the note and nothing is
     written a second time under a slugified sibling path.
     """
-    from silica.agent.bounds import dedup_settle_bounds
+    from silica.kernel.write.gate import dedup_settle_bounds
     from silica.kernel.base import frontmatter
     from silica.kernel.write.templates import has_related_trace, related_trace, related_unjudged
 

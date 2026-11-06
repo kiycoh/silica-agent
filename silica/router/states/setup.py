@@ -99,7 +99,7 @@ def _recon_for_lane(fsm: "InjectorFSM", fi: int, inbox_file: str) -> dict:
     lane = lane_for(profile)
     fsm.context[f"file_{fi}_lane"] = lane
     if lane != "outline":
-        return orch.silica_recon(inbox_file)
+        return orch.recon_file(inbox_file)
     return {"success": True, "outline_lane": True, "file": inbox_file,
             "source_text": read_source_text(inbox_file)}
 
@@ -201,10 +201,10 @@ def _pin_file_profile(fsm: "InjectorFSM", fi: int, inbox_file: str) -> None:
 
 
 def _assemble_file_chunks(fsm: "InjectorFSM", recon_cur: dict) -> tuple[dict, list[dict]]:
-    """Recon result → (payload tool result, this file's chunk list).
+    """Recon result → (payload result, this file's chunk list).
 
-    The pure assembly core of PAYLOAD, shared with warm_next_file. Raises
-    RuntimeError when the payload tool errors; mutates no per-file FSM state.
+    The pure assembly core of PAYLOAD, shared with warm_next_file; mutates no
+    per-file FSM state.
     """
     if recon_cur.get("outline_lane"):
         # One chunk per file, the whole text, no concepts: COLLISION, SALIENCE
@@ -214,13 +214,10 @@ def _assemble_file_chunks(fsm: "InjectorFSM", recon_cur: dict) -> tuple[dict, li
                  "batches": [{"inbox_file": recon_cur.get("file", ""), "concepts": []}],
                  "source_text": recon_cur.get("source_text", "")}
         return {"chunks": [chunk]}, [chunk]
-    recon_path = fsm._make_tmp([recon_cur])
     phase_conf = fsm._get_recipe_phase("payload")
     max_concepts = phase_conf.get("partition_if_over", 200)
     max_bytes = int(os.getenv("DISTILLER_CHUNK_MAX_BYTES", str(30 * 1024)))
-    res = orch.silica_payload(recon_path, max_concepts=max_concepts, max_bytes=max_bytes)
-    if "error" in res:
-        raise RuntimeError(f"Payload failed: {res['error']}")
+    res = orch.payload_chunks([recon_cur], max_concepts=max_concepts, max_bytes=max_bytes)
 
     # Re-partition this file's payload (§3.6); fall back to the legacy
     # flat-chunk path when batch structure is absent (e.g. tests).

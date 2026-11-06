@@ -74,7 +74,7 @@ def new(tc, **payload):
 # -- the index follows the person (point 18) ----------------------------------
 
 def test_hand_written_text_is_found_after_a_let_go_with_the_chat_model_down(client, embedder):
-    from silica.tools.composed import silica_semantic_search
+    from silica.tools.graph import silica_semantic_search
 
     tc, *_ = client
     made = new(tc, folder="Corso", name="Faro", text="A note about a lighthouse.\n").json()

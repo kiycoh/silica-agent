@@ -45,7 +45,15 @@ from prompt_toolkit.patch_stdout import patch_stdout
 
 # Import tools to trigger registration via @tool decorator
 import silica.tools.atomic  # noqa: F401
-import silica.tools.composed  # noqa: F401
+import silica.tools.pipeline  # noqa: F401
+import silica.tools.notes  # noqa: F401
+import silica.tools.events  # noqa: F401
+import silica.tools.graph  # noqa: F401
+import silica.tools.aliases  # noqa: F401
+import silica.tools.curate  # noqa: F401
+import silica.tools.sessions  # noqa: F401
+import silica.tools.rework  # noqa: F401
+import silica.tools.runners  # noqa: F401
 import silica.tools.wrapped  # noqa: F401
 import silica.tools.codedocs_tool  # noqa: F401
 import silica.tools.delegate_tool  # noqa: F401
@@ -1660,7 +1668,8 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
     note the chat or /delete deleted, or move back a note the chat moved."""
     from silica.driver import DRIVER
     from silica.kernel.write.checkpoints import get_checkpoint_store
-    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE, get_undo_journal, revert_run
+    from silica.kernel.link.sweep import revert_and_sweep
+    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE, get_undo_journal
 
     store = get_checkpoint_store()
     journal = get_undo_journal()
@@ -1715,7 +1724,7 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
             deleted, moved = None, last_move
         note_path = deleted[1] if deleted else (last_write[0] if last_write else None)
     if moved:
-        res = revert_run(moved[0])
+        res = revert_and_sweep(moved[0])
         if res["reverted"]:
             CONSOLE.print(f"  Moved back: [bold]{moved[2]}[/] → {moved[1]}")
         else:
@@ -1725,7 +1734,7 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
         return True
     if deleted:
         user_deleted = (journal.run_info(deleted[0]) or {}).get("source") == USER_DELETE_SOURCE
-        res = revert_run(deleted[0])
+        res = revert_and_sweep(deleted[0])
         if res["reverted"]:
             # user:/delete is /delete and the tree's row menu alike (ADR-0123):
             # naming the command misnamed a delete the person made with a click
@@ -1761,7 +1770,7 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
         # Removed with a restore point, so a second /undo brings it back: on
         # hosted t06 (2026-10-22) a write card's revert removed a 21k-char note
         # the turn had written and nothing in the app could restore it.
-        from silica.tools.wrapped import delete_with_restore_point
+        from silica.kernel.write.gate import delete_with_restore_point
 
         try:
             res = delete_with_restore_point(
@@ -1801,8 +1810,8 @@ def _dc_delete(args: list[str], *, raw_input: str = "", **_) -> bool:
     from rich.markup import escape
 
     from silica.driver import DRIVER
+    from silica.kernel.write.gate import delete_with_restore_point
     from silica.kernel.write.undo_journal import USER_DELETE_SOURCE
-    from silica.tools.wrapped import delete_with_restore_point
 
     # Everything after the command is the path, as for /undo: note names
     # with spaces are the common case.
@@ -1849,8 +1858,8 @@ def _dc_trash(args: list[str], *, raw_input: str = "", **_) -> bool:
     from rich.markup import escape
 
     from silica.kernel.write.provenance import note_key
-    from silica.kernel.write.undo_journal import (USER_DELETE_SOURCE, get_undo_journal,
-                                                  restore_from_trash)
+    from silica.kernel.write.gate import restore_from_trash
+    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE, get_undo_journal
 
     journal = get_undo_journal()
     items = journal.trashed((CONFIG.vault_path or "").strip() or None)
@@ -1902,9 +1911,10 @@ def _revert_by_source(source: str, vault: str | None) -> bool:
     never guessed at (legacy runs predate the join and stay /revert <run-id>)."""
     from rich.markup import escape
 
-    from silica.kernel.write.undo_journal import revert_source
+    from silica.kernel.link.sweep import sweep_survivors
+    from silica.kernel.write.gate import revert_source
 
-    res = revert_source(source, vault=vault)
+    res = revert_source(source, vault=vault, after_run=sweep_survivors)
     if res.get("ambiguous"):
         CONSOLE.print(f"  {len(res['ambiguous'])} sources are named {escape(source)}; "
                       "nothing reverted. Name one:", soft_wrap=True)
@@ -1990,7 +2000,8 @@ def _dc_revert(args: list[str], *, raw_input: str = "", **_) -> bool:
 
 def _revert_one(run_id: str) -> bool:
     """One run taken back, journal and Zotero, and the line that says what it was."""
-    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
+    from silica.kernel.link.sweep import revert_and_sweep
+    from silica.kernel.write.undo_journal import get_undo_journal
 
     # Name WHAT is being reverted: the journal's run ids live in a different
     # id-space than the progress ledger's (log.md), so a bare id told the
@@ -2006,7 +2017,7 @@ def _revert_one(run_id: str) -> bool:
         from datetime import datetime as _dt
         when = _dt.fromtimestamp(info["started_at"]).strftime("%Y-%m-%d %H:%M")
     label = f" ({source}, started {when})" if source and when else ""
-    res = revert_run(run_id)
+    res = revert_and_sweep(run_id)
     _revert_zotero(run_id)
     stale = len(res.get("stale", []))
     line = (
@@ -2519,8 +2530,7 @@ def _file_drafts(
     import silica.kernel.forms as forms
     from silica.driver import DRIVER
     from silica.kernel.base import frontmatter
-    from silica.sources.registry import _record_inverse
-    from silica.tools.wrapped import silica_cleanup
+    from silica.kernel.write import gate
 
     kept: list[str] = []
 
@@ -2621,9 +2631,9 @@ def _file_drafts(
             prior = None
         DRIVER.upsert(note_rel, note)
         if undo_run:
-            _record_inverse(undo_run, note_rel, prior)
+            gate.record_landed(undo_run, gate.undo_of(note_rel, prior))
         _autolink_filed(note_rel, dest_dir)
-        silica_cleanup(f)
+        gate.archive_source(f)
         CONSOLE.print(
             f"  filed draft ({res.origin}): [bold]{note_rel}[/] — body kept intact"
         )
@@ -3892,7 +3902,7 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
 
     from silica.kernel.base.manifest import get_active_manifest
     from silica.sources.convert import convert
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.gate import open_run
 
     files, glob_miss = _nucleate_globs(files)
     if not files and glob_miss:
@@ -3905,9 +3915,7 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
     # itself (staged code, filed drafts). The FSM opens its own journal run per
     # dispatched unit, so on a multi-book batch /revert undoes one book at a
     # time, most recent first — run it again for the previous one.
-    undo_run = get_undo_journal().start_run(
-        source="nucleate", vault=CONFIG.vault_path.strip() or None
-    ) if files else None
+    undo_run = open_run("nucleate") if files else None
     ready_units, to_convert, staged, needs_agent, leaf_for = _nucleate_plan_units(
         files, enabled, run_root, undo_run)
 
@@ -4107,8 +4115,8 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
                     break
                 segs = []
             if i in leaf_prior and segs and undo_run:  # leaf_prior fills only under an undo_run
-                from silica.sources.registry import _record_inverse
-                _record_inverse(undo_run, _leaf_rel(leaf_for[src][0]), leaf_prior[i])
+                from silica.kernel.write import gate
+                gate.record_landed(undo_run, gate.undo_of(_leaf_rel(leaf_for[src][0]), leaf_prior[i]))
             pending = _submit(i + 1)
             if segs:
                 before = dispatched

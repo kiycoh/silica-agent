@@ -269,7 +269,7 @@ def test_write_plan_lands_through_the_gate_with_tree_steps_and_gaps(vault):
 
 
 def test_session_line_lands_through_the_journal_and_reverts(vault):
-    from silica.kernel.write.undo_journal import revert_run
+    from silica.kernel.write.gate import revert_run
 
     vault.note("Plans/ML.md", PLAN)
     before = plans._read("Plans/ML.md")

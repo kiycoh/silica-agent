@@ -237,12 +237,12 @@ class TestFSMThreading:
         fsm._chunk_ctx["sanitized"] = {"parsed": {"updates": []}}
         seen = {}
 
-        def _validate(ops_path, **kwargs):
+        def _validate(ops, payloads, **kwargs):
             seen.update(kwargs)
             return {"validated_count": 0, "rejected_count": 0,
                     "validated_ops": [], "rejected_ops": []}
 
-        with patch("silica.router.states.distill.orch.silica_validate_ops",
+        with patch("silica.router.states.distill.orch.validate_ops",
                    side_effect=_validate), \
              patch.object(fsm, "_make_tmp", return_value="tmp.json"):
             fsm.step()

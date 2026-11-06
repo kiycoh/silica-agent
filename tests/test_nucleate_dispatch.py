@@ -497,7 +497,8 @@ def test_nucleate_empty_folder_still_falls_back_to_the_agent(repo_vault):
 def test_nucleate_run_is_revertable(repo_vault):
     """The terminal lane skips the FSM, which is where journalling lived — so
     without its own run these writes were the only ones /revert could not see."""
-    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
+    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.gate import revert_run
 
     root, vault = repo_vault
     assert _expand_workflow_shortcut("/nucleate m.py") == ""
@@ -513,7 +514,8 @@ def test_nucleate_run_is_revertable(repo_vault):
 
 def test_nucleate_revert_restores_a_refreshed_note(repo_vault):
     """Re-nucleating an existing note must undo to its prior body, not delete it."""
-    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
+    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.gate import revert_run
 
     root, vault = repo_vault
     _expand_workflow_shortcut("/nucleate m.py")

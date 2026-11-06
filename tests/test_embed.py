@@ -467,7 +467,7 @@ def test_silica_semantic_search_empty_index(tmp_path, monkeypatch):
     # Ensure the store loaded by the tool sees an empty index
     monkeypatch.setattr("silica.kernel.recall.embed._index_path", lambda: tmp_path / "empty.json")
 
-    from silica.tools.composed import silica_semantic_search
+    from silica.tools.graph import silica_semantic_search
     result = silica_semantic_search(query="neural networks")
     assert "error" in result
 
@@ -488,7 +488,7 @@ def test_silica_semantic_search_uses_cooccurrence_when_embed_empty(tmp_path, mon
         force=True,
     )
 
-    from silica.tools.composed import silica_semantic_search
+    from silica.tools.graph import silica_semantic_search
     result = silica_semantic_search(query="neural network", k=5)
     assert "error" not in result
     paths = [r["path"] for r in result["results"]]
@@ -510,7 +510,7 @@ def test_silica_semantic_search_returns_results(tmp_path, monkeypatch):
     mock_embedder.embed.return_value = [[1.0, 0.0]]
 
     with patch("silica.model.providers.get_embedder", return_value=mock_embedder):
-        from silica.tools.composed import silica_semantic_search
+        from silica.tools.graph import silica_semantic_search
         result = silica_semantic_search(query="test", k=2)
 
     assert "error" not in result

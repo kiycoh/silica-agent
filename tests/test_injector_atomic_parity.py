@@ -78,7 +78,7 @@ def test_injector_write_defers_failing_note_keeps_siblings(vault_fsm, monkeypatc
         from silica.driver import DRIVER
         introduced = "Bad" in str(note_name) and "[^" in DRIVER.read_note(note_name).content
         return {"success": not introduced, "errors": ["e"] if introduced else []}
-    monkeypatch.setattr("silica.tools.composed.silica_lint", fake_lint)
+    monkeypatch.setattr("silica.kernel.write.gate.lint_note", fake_lint)
 
     fsm = vault_fsm.make_fsm()
     fsm.context["chunk"] = {"ops_path": vault_fsm.ops_path([_patch(a), _patch(bad), _patch(c)])}
@@ -134,7 +134,7 @@ def test_clean_batch_parity_old_vs_new(tmp_path, monkeypatch):
     monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault_b))
     silica.driver._driver = None
 
-    from silica.kernel.write.atomic_write import bulk_write_atomic
+    from silica.kernel.write.gate import bulk_write_atomic
     ops_b = [
         Op(op=OpType.patch, heading="H", source_basename="m.md",
            path=str(vault_b / name), snippet="fact", hub="Hub")
@@ -154,8 +154,9 @@ def test_revert_restores_clean_batch(tmp_path, monkeypatch):
     import hashlib
     import silica.config
     import silica.driver
-    from silica.kernel.write.atomic_write import bulk_write_atomic
-    from silica.kernel.write.undo_journal import UndoJournalStore, revert_run
+    from silica.kernel.write.gate import bulk_write_atomic
+    from silica.kernel.write.undo_journal import UndoJournalStore
+    from silica.kernel.write.gate import revert_run
 
     vault = tmp_path / "vault"
     vault.mkdir()

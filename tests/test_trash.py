@@ -42,7 +42,7 @@ def out(monkeypatch):
 
 
 def _delete(*names, source="user:/delete"):
-    from silica.tools.wrapped import delete_notes_with_restore_point
+    from silica.kernel.write.gate import delete_notes_with_restore_point
 
     notes = [(f"Corso/{n}.md", (Path(CONFIG.vault_path) / "Corso" / f"{n}.md").read_text())
              for n in names]
@@ -58,7 +58,7 @@ def _trash():
 # -- the journal --------------------------------------------------------------
 
 def test_the_trash_holds_the_users_and_the_chats_deletes_newest_first(vault):
-    from silica.kernel.write.undo_journal import revert_run
+    from silica.kernel.write.gate import revert_run
 
     _delete("A")
     _delete("B", source="chat:silica_delete")
@@ -70,7 +70,8 @@ def test_the_trash_holds_the_users_and_the_chats_deletes_newest_first(vault):
 
 
 def test_one_note_of_a_folder_delete_comes_back_alone(vault):
-    from silica.kernel.write.undo_journal import get_undo_journal, restore_from_trash
+    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.gate import restore_from_trash
 
     run = _delete("A", "B")
     item = next(t for t in _trash() if t["path"] == "Corso/A.md")
@@ -85,7 +86,7 @@ def test_one_note_of_a_folder_delete_comes_back_alone(vault):
 
 
 def test_a_note_written_since_at_the_path_is_not_overwritten(vault):
-    from silica.kernel.write.undo_journal import restore_from_trash
+    from silica.kernel.write.gate import restore_from_trash
 
     _delete("A")
     (vault / "Corso/A.md").write_text("# A\n\nnew\n", encoding="utf-8")

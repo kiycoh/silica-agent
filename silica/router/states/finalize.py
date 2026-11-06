@@ -15,6 +15,7 @@ import logging
 import os
 from typing import TYPE_CHECKING, Any
 
+from silica.kernel.write import gate
 from silica.router import orchestrator as orch
 
 if TYPE_CHECKING:
@@ -46,20 +47,16 @@ def handle_lint(fsm: "InjectorFSM") -> None:
     # "frontmatter 'AI' missing" the WRITE phase had correctly waved through).
     baselines = fsm._chunk_ctx.get("lint_baseline", {})
     for path, op_type, hub in touched:
-        res = orch.silica_lint(path, op_type=op_type or "", hub=hub or "")
-        new_errors = [
-            e for e in res.get("errors", []) if e not in set(baselines.get(path, []))
-        ]
+        new_errors = gate.new_lint_errors(path or "", op_type or "", hub or "", set(baselines.get(path, [])))
         if orch.CONFIG.verbose:
             logger.info(
-                "[DEBUG LINT Gate]: File: %s | Type: %s | Hub: %s | Success: %s | Errors: %s",
+                "[DEBUG LINT Gate]: File: %s | Type: %s | Hub: %s | New errors: %s",
                 path,
                 op_type,
                 hub,
-                res["success"],
-                res.get("errors", []),
+                new_errors,
             )
-        if not res["success"] and new_errors:
+        if new_errors:
             fsm._chunk_ctx["abort_reason"] = f"Lint failed for {path}: {new_errors}"
             fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
             fsm.state = orch.InjectorState.ROLLBACK
@@ -689,8 +686,6 @@ def file_language(fsm: "InjectorFSM", fi: int, source_text: str) -> str | None:
 
 
 def handle_cleanup(fsm: "InjectorFSM") -> None:
-    from silica.tools.wrapped import silica_cleanup
-
     fsm._get_chunks_from_context_if_empty()
     fi, ci = fsm._chunk_flat_to_fi_ci.get(fsm._current_chunk_idx, (0, fsm._current_chunk_idx))
     with orch.phase(fsm, fsm._chunk_task_id("cleanup"), "cleanup"):
@@ -720,7 +715,7 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
                 # at its inbox path. On failure the source stays in the inbox
                 # for retry, so nothing is lost by skipping the leaf here.
                 _write_source_leaf(fsm, inbox_file_for_fi)
-                res = silica_cleanup(inbox_file_for_fi)
+                res = gate.archive_source(inbox_file_for_fi)
                 if "error" in res:
                     fsm.context["cleanup_warning"] = res["error"]
                 # Title-index run cache: the archived source moved out of its
@@ -766,23 +761,8 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
 
         # Persist this run's inverses for /revert, with final content hash.
         if fsm._undo_run_id and fsm._run_inverses:
-            import hashlib
-            from silica.kernel.write.ops import InverseOpKind
-            from silica.kernel.write.undo_journal import get_undo_journal
-            journal = get_undo_journal()
-            for path, inv, _ in fsm._run_inverses:
-                try:
-                    post = orch.DRIVER.read_note(path).content
-                    post_hash = hashlib.sha256((post or "").encode("utf-8")).hexdigest()
-                except Exception:
-                    post_hash = None
-                    if inv.kind != InverseOpKind.recreate_deleted:
-                        # Note should exist after this write; without its hash the
-                        # /revert "modified since inject" guard can't protect it.
-                        logger.warning(
-                            "finalize: could not hash %s post-write; /revert guard "
-                            "disabled for it", path)
-                journal.record(fsm._undo_run_id, inv, post_hash)
+            for _path, inv, _ in fsm._run_inverses:
+                gate.record_landed(fsm._undo_run_id, inv)
             fsm._run_inverses.clear()
 
 
@@ -801,18 +781,13 @@ def handle_rollback(fsm: "InjectorFSM") -> None:
         inverses = snapshot_res.get("inverses", [])
 
     if txn_id and inverses:
-        from silica.tools.wrapped import silica_restore
-        try:
-            res = silica_restore(txn_id=txn_id, inverses=inverses)
-            if not res.get("success", False):
-                err_msg = "; ".join(res.get("errors", []))
-                logger.error("Rollback partially failed: %s", err_msg)
-                fsm.context["rollback_error"] = err_msg
-            else:
-                logger.info("Rollback complete for txn %s", txn_id)
-        except Exception as e:
-            logger.error("Rollback failed: %s", e)
-            fsm.context["rollback_error"] = str(e)
+        res = gate.apply_inverses(txn_id=txn_id, inverses=inverses)
+        if not res.get("success", False):
+            err_msg = "; ".join(res.get("errors", []))
+            logger.error("Rollback partially failed: %s", err_msg)
+            fsm.context["rollback_error"] = err_msg
+        else:
+            logger.info("Rollback complete for txn %s", txn_id)
         fsm._write_ledger_rollback(txn_id)
 
     # Clean up the embedding index for notes that were created and then rolled back

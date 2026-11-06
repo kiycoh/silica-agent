@@ -76,12 +76,10 @@ def test_surviving_appendix_bodies_are_injected_into_salvaged_ops():
     assert exc.value.ops[0]["content"] == "the verbatim body"
 
 
-def test_silica_sanitize_consumes_salvage_and_reports_it(tmp_path):
-    from silica.tools.pipeline import silica_sanitize
+def test_sanitize_consumes_salvage_and_reports_it():
+    from silica.kernel.text.sanitize import sanitize_output
 
-    p = tmp_path / "distill.json"
-    p.write_text(_truncated(20), encoding="utf-8")
-    out = silica_sanitize(str(p))
+    out = sanitize_output(_truncated(20))
     assert out["success"] is True
     assert [op["path"] for op in out["parsed"]] == ["A.md", "B.md"]
     assert out["salvaged"]["recovered_ops"] == 2

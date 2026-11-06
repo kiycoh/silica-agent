@@ -152,9 +152,9 @@ class TestDrain:
                 self.files = kw["inbox_files"]
 
             def run(self):
-                from silica.tools.wrapped import silica_cleanup
+                from silica.kernel.write.gate import archive_source
                 for f in self.files:
-                    assert silica_cleanup(f, "done").get("success")
+                    assert archive_source(f, "done").get("success")
                 return {"final_status": "Success"}
 
         import silica.router.coordinator as coord_mod

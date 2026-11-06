@@ -78,7 +78,8 @@ def test_revert_also_recreates_it(vault):
 
 
 def test_a_revert_never_overwrites_a_note_made_since_at_that_path(vault):
-    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
+    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.gate import revert_run
 
     _delete("Autoencoders")
     (vault / "Corso" / "Autoencoders.md").write_text("# Autoencoders\n\nwritten again by hand\n", encoding="utf-8")

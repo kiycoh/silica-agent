@@ -18,7 +18,6 @@ import asyncio
 import json
 import logging
 import threading
-import time
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +33,6 @@ from silica.driver.base import (
     Link,
     NoteContent,
     NoteRef,
-    Txn,
 )
 from silica.kernel.base.markdown import extract_links_typed
 from silica.kernel.base.layout import is_vault_artifact
@@ -42,7 +40,6 @@ from silica.kernel.base.layout import is_source_leaf
 from silica.kernel.write import preserve, session_changes
 from silica.kernel.base import frontmatter as fm
 from silica.kernel.write.notetype import stamp_type
-from silica.kernel.write.ops import InverseOp, InverseOpKind
 
 logger = logging.getLogger(__name__)
 
@@ -466,19 +463,7 @@ class ObsidianWSBackend(GraphIndexMixin):
 
     def overwrite(self, path: str, content: str, *, loss: preserve.Loss | None = None,
                   free=()) -> NoteRef:
-        return self._overwrite_raw(path, stamp_type(path, content),  # OKF §4.1 `type`
-                                   loss=loss, free=free)
-
-    def _overwrite_raw(self, path: str, content: str, *, loss: preserve.Loss | None = None,
-                       free=()) -> NoteRef:
-        """Write bytes as given. Rollback only: a restore is not an authored
-        write, so it must not acquire the derived `type` stamp that overwrite()
-        applies — undo has to return the prior bytes exactly.
-
-        ponytail: private, so the tool-level content undo (tools/wrapped.py)
-        still goes through the public seam and re-stamps a pre-backfill note.
-        Promote to a Protocol verb only if that divergence ever bites.
-        """
+        content = stamp_type(path, content)  # OKF §4.1 `type`
         prior, crlf = _disk_prior(path)
         preserve.check_write(path, prior, content, loss=loss, free=free)
         session_changes.touched_from_disk(path)
@@ -487,14 +472,6 @@ class ObsidianWSBackend(GraphIndexMixin):
         ref = NoteRef(name=name, path=path)
         self._patch_graph_add(path, ref, content)
         return ref
-
-    def append(self, ref: NoteRef | str, content: str) -> None:
-        path = self._path_arg(ref)
-        session_changes.touched_from_disk(path)
-        self._rpc("append", path=path, content=content)
-        # Optimistic patch — add any new links introduced by the fragment.
-        if self._is_graph_built and path in self._graph:
-            self._add_link_edges(path, content)
 
     def set_prop(self, ref: NoteRef | str, name: str, value: Any, type_: str = "text") -> None:
         path = self._path_arg(ref)
@@ -673,38 +650,3 @@ class ObsidianWSBackend(GraphIndexMixin):
             return min(matches, key=lambda r: (r.path.count("/"), r.path.lower())) if matches else None
         matched = self._notes_by_name.get(t.lower(), [])
         return min(matched, key=lambda r: namesake_order(r.path)) if matched else None
-
-    # ------------------------------------------------------------------
-    # Transactionality — content snapshots (no history over the bridge)
-    # ------------------------------------------------------------------
-
-    def snapshot_versions(self, refs: list[NoteRef]) -> Txn:
-        """Capture each ref's current body; restore() overwrites it back."""
-        inverses = []
-        for ref in refs:
-            path = ref.path or f"{ref.name}.md"
-            try:
-                content = self.read_note(ref).content
-            except Exception as e:
-                logger.warning("snapshot: could not read %s: %s", path, e)
-                continue
-            inverses.append(InverseOp(
-                kind=InverseOpKind.restore_version, path=path, prior_content=content,
-            ))
-        return Txn(id=f"txn_ws_{int(time.time())}", refs=refs, inverses=inverses)
-
-    def restore(self, txn: Txn) -> None:
-        """Rollback: overwrite snapshotted bodies back, delete created notes."""
-        for inv in txn.inverses:
-            kind = getattr(inv, "kind", None)
-            prior = getattr(inv, "prior_content", None)
-            if kind == InverseOpKind.restore_version and prior is not None:
-                self._overwrite_raw(inv.path, prior, loss=preserve.Loss.RESTORE)
-        for path in txn.created_paths:
-            try:
-                self.delete(path)
-            except RuntimeError as e:
-                if "not found" in str(e).lower():
-                    logger.info("restore: created note %s already absent", path)
-                else:
-                    raise

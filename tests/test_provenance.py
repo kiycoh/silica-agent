@@ -422,7 +422,7 @@ def test_a_successful_merge_still_unions_the_notes(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_overwrite_derives_a_note_like_write_and_patch():
-    """Four sub-agent profiles in agent/bounds.py may emit NOTHING BUT
+    """Four sub-agent profiles in the gate's bounds may emit NOTHING BUT
     overwrite, and all three dedup merges emit it. A predicate that lists only
     write/patch unrecords the majority of that lane."""
     from silica.kernel.write.ops import OpType

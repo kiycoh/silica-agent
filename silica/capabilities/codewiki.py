@@ -300,7 +300,7 @@ def run_wiki(config, folder: str | None = None,
     """
     from pathlib import Path
 
-    from silica.agent.commit import commit_derived
+    from silica.kernel.write.gate import commit_derived
     from silica.config import CONFIG
     from silica.kernel.base import frontmatter
     from silica.kernel.base import gitstate

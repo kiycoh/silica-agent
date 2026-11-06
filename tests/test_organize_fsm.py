@@ -486,7 +486,8 @@ class TestOrganizerFSMRollback:
             NoteRef(name="gpt-fail", path="gpt-fail.md"),
         ]
 
-        with patch("silica.router.organize_fsm.DRIVER") as mock_driver:
+        with patch("silica.router.organize_fsm.DRIVER") as mock_driver, \
+                patch("silica.kernel.write.gate.DRIVER", mock_driver):
             mock_driver.list_files.return_value = mock_refs
             
             # Mock move to succeed for "gpt-success.md" and fail for "gpt-fail.md"
@@ -516,6 +517,35 @@ class TestOrganizerFSMRollback:
         assert move_calls[1][0] == ("gpt-fail.md", "AI/gpt-fail.md")
         # Call 3: rollback gpt-success from AI/gpt-success back to gpt-success
         assert move_calls[2][0] == ("AI/gpt-success.md", "gpt-success.md")
+
+    def test_rollback_keeps_a_note_written_at_the_origin_since(self, tmp_path, monkeypatch):
+        """DRIVER.move replaces a file at the destination: a blind move back
+        destroys a note written at the origin after the move. /revert has
+        always refused that; the FSM's own rollback did not."""
+        from silica.config import CONFIG
+        from silica.driver.base import GraphSnapshot, NoteRef
+        from silica.kernel.organize.taxonomy import FolderRule, Taxonomy
+        from silica.router.organize_fsm import OrganizerFSM
+
+        monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
+        (tmp_path / "gpt-success.md").write_text("written since the move", encoding="utf-8")
+        taxonomy = Taxonomy(rules=[FolderRule(folder="AI", themes=[], keywords=["gpt"])],
+                            uncategorized="Misc")
+
+        def move(src, dst):
+            if "gpt-fail" in src:
+                raise RuntimeError("disk full")
+
+        with patch("silica.router.organize_fsm.DRIVER") as driver, \
+                patch("silica.kernel.write.gate.DRIVER", driver):
+            driver.list_files.return_value = [NoteRef(name="gpt-success", path="gpt-success.md"),
+                                              NoteRef(name="gpt-fail", path="gpt-fail.md")]
+            driver.move.side_effect = move
+            driver.graph_snapshot.return_value = GraphSnapshot()
+            result = OrganizerFSM(taxonomy=taxonomy, dry_run=False, llm_arbiter=False).run()
+
+        assert "Rolled Back:" in result.get("final_status", "")
+        assert ("AI/gpt-success.md", "gpt-success.md") not in [c[0] for c in driver.move.call_args_list]
 
 
 

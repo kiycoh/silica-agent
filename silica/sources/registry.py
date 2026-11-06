@@ -114,34 +114,6 @@ def adapter_for(target: str, enabled: Sequence[str] | None = None) -> SourceAdap
     return None
 
 
-def _record_inverse(run_id: str, path: str, prior: str | None) -> None:
-    """Journal one terminal-lane write so `/revert` can undo it.
-
-    Mirrors the FSM's C3 strategy (silica/tools/wrapped.py): a note that did not
-    exist is undone by deleting it, one that did by restoring the body read just
-    before the write. The post-hash comes from reading the note back, not from
-    the stub text, so it matches what `revert_run`'s modified-since guard
-    recomputes after any normalisation the backend applied on the way in.
-    """
-    from silica.driver import DRIVER
-    from silica.kernel.write.ops import InverseOp, InverseOpKind
-    from silica.kernel.write.undo_journal import _content_hash, get_undo_journal
-
-    inv = (
-        InverseOp(kind=InverseOpKind.restore_version, path=path, prior_content=prior)
-        if prior is not None
-        else InverseOp(kind=InverseOpKind.delete_created, path=path)
-    )
-    try:
-        post_hash = _content_hash(DRIVER.read_note(path).content)
-    except Exception:
-        # Without the hash /revert loses its "modified since" guard but still
-        # undoes the write — the journal entry is worth more than the guard.
-        post_hash = None
-        logger.warning("could not hash %s post-write; /revert guard disabled for it", path)
-    get_undo_journal().record(run_id, inv, post_hash)
-
-
 def stage(
     adapter: SourceAdapter, target: str, run_root: str = "", run_id: str | None = None
 ) -> dict:
@@ -192,11 +164,12 @@ def stage(
     # already computes real coverage, and codeast has NO guard for the
     # tree-sitter SIGSEGV of 2026-08-19 — its `except Exception` cannot catch a
     # native crash, and a batch over silica/ is what would trip it.
+    from silica.kernel.write import gate
     from silica.kernel.write.preserve import Loss
 
     # STAGED holds only under the inbox or sources/: a code note stage() writes
     # elsewhere (sources/code.py), which the person may have refined, is judged.
     DRIVER.upsert(stub.note_path, stub.body, loss=Loss.STAGED)  # re-ingesting refreshes the stub
     if run_id:
-        _record_inverse(run_id, stub.note_path, prior)
+        gate.record_landed(run_id, gate.undo_of(stub.note_path, prior))
     return {"status": "ok", "note_path": stub.note_path, "meta": dict(item.meta)}

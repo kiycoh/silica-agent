@@ -7,7 +7,7 @@ one-way latch set at WRITE, and CLEANUP computes final_status before the anneal
 runs — so the verdict describes a state the run left behind.
 """
 from silica.kernel.write import deferred as deferred_mod
-import silica.tools.pipeline as pipeline_mod
+import silica.router.anneal as anneal_mod
 from silica.router.orchestrator import InjectorFSM
 
 
@@ -32,7 +32,7 @@ def _fsm(monkeypatch, *, left=(), written=3, **ctx):
     )
     fsm.context.update(ctx)
     monkeypatch.setattr(deferred_mod, "get_deferred_store", lambda: _Store(left))
-    monkeypatch.setattr(pipeline_mod, "silica_anneal", lambda **kw: {"written": written})
+    monkeypatch.setattr(anneal_mod, "sweep_deferred", lambda **kw: {"written": written})
     return fsm
 
 

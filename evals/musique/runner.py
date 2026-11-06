@@ -98,7 +98,7 @@ def bind_vault(vault: Path) -> None:
 def load_corpus(corpus: list[dict], *, verbose: bool = False) -> dict:
     """Write one verbatim note per passage. Idempotent: existing note files
     are skipped, so a partial load can simply be rerun."""
-    from silica.agent.commit import commit_derived
+    from silica.kernel.write.gate import commit_derived
     from silica.config import CONFIG
 
     vault = Path(CONFIG.vault_path)

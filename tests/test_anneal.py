@@ -477,22 +477,15 @@ def test_the_boundary_anneal_rides_the_run_it_fires_inside(tmp_vault, monkeypatc
     undid the handful of recovered notes and left the whole nucleation on disk.
     The ledger id is separate and must be the FSM's progress run: that is what
     Coordinator._sweep_dangling_links matches on."""
-    from silica.agent import commit as commit_mod
-    from silica.kernel.write import undo_journal
+    from silica.kernel.write import gate, undo_journal
     from silica.kernel.write.provenance import read_records
-    from silica.tools import pipeline
 
     journal = _FakeJournal()
     monkeypatch.setattr(undo_journal, "get_undo_journal", lambda: journal)
 
     txn, ops, bundle = _recovery_args()
-    undo_tok = commit_mod._current_undo_run.set("fsm-undo-run")
-    ledger_tok = commit_mod._current_ledger_run.set("fsm-progress-run")
-    try:
-        pipeline._record_recovered_writes(txn, ops, "sha-x", bundle)
-    finally:
-        commit_mod._current_ledger_run.reset(ledger_tok)
-        commit_mod._current_undo_run.reset(undo_tok)
+    with gate.in_run(undo="fsm-undo-run", ledger="fsm-progress-run"):
+        gate.record_recovered(txn, ops, "sha-x", bundle)
 
     assert journal.started == [], "opened a journal run that outranks the FSM's"
     assert journal.recorded == ["fsm-undo-run"]
@@ -501,15 +494,14 @@ def test_the_boundary_anneal_rides_the_run_it_fires_inside(tmp_vault, monkeypatc
 
 
 def test_a_standalone_retry_still_opens_its_own_revertible_unit(tmp_vault, monkeypatch):
-    from silica.kernel.write import undo_journal
+    from silica.kernel.write import gate, undo_journal
     from silica.kernel.write.provenance import read_records
-    from silica.tools import pipeline
 
     journal = _FakeJournal()
     monkeypatch.setattr(undo_journal, "get_undo_journal", lambda: journal)
 
     txn, ops, bundle = _recovery_args()
-    pipeline._record_recovered_writes(txn, ops, "sha-y", bundle)
+    gate.record_recovered(txn, ops, "sha-y", bundle)
 
     assert journal.started and journal.started[0]["source"] == "anneal"
     assert journal.recorded == ["fresh-anneal-run"]
@@ -532,7 +524,7 @@ def test_submit_repaired_ops_is_internal_and_keeps_its_verdict(tmp_vault):
 
 def test_anneal_steer_commits_are_journaled_and_provenanced(tmp_vault, tmp_path, monkeypatch):
     # The old steer commit path called NEITHER _link_recovered_writes NOR
-    # _record_recovered_writes: steered notes were invisible to /revert and to
+    # gate.record_recovered: steered notes were invisible to /revert and to
     # provenance (the same 2026-08-18 defect the mechanical retry already
     # fixed). The tool path must do both.
     from silica.kernel.write.provenance import read_records

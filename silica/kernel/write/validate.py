@@ -1424,3 +1424,61 @@ def validate_operations(
         gone = {(r.op.path, r.op.heading) for r in rejected_ops}
         grounding_out[:] = [g for g in grounding_out if (g["path"], g["heading"]) not in gone]
     return validated_ops, rejected_ops
+
+
+def validate_ops(
+    ops: list[Op],
+    payloads: list | None = None,
+    target_dir: str = "",
+    hub: str | None = "",
+    future_ref_whitelist: list[str] | None = None,
+    profile: str | None = None,
+) -> dict:
+    """Pre-write gate: checks structural validity and reports the rejection rate.
+
+    C4: `validated_ops` is the coerced + deduped list, and it is what snapshot
+    and write must take, never the list passed in. A pure filter, even past the
+    old 10% threshold: abort or continue is the FSM's policy.
+    """
+    cleared_parents: list[dict] = []
+    cleared_links: list[dict] = []
+    ambiguous_links: list[dict] = []
+    ungrounded: list[dict] = []
+    grounding: list[dict] = []
+    normalized: dict[str, int] = {}
+    validated_ops, rejected_ops = validate_operations(
+        ops,
+        payloads or [],
+        target_dir,
+        hub=hub,
+        cleared_parents_out=cleared_parents,
+        future_ref_whitelist=future_ref_whitelist,
+        cleared_links_out=cleared_links,
+        ungrounded_out=ungrounded,
+        profile=profile,
+        normalized_out=normalized,
+        grounding_out=grounding,
+        ambiguous_links_out=ambiguous_links,
+    )
+
+    rejected_count = len(rejected_ops)
+    # C4 denominator: skip ops excluded from rejection rate
+    actionable = sum(1 for o in ops if o.op != OpType.skip)
+    return {
+        "success": True,
+        "total": len(ops),
+        "validated_count": len(validated_ops),
+        "rejected_count": rejected_count,
+        "rejection_rate": rejected_count / actionable if actionable > 0 else 0.0,
+        "validated_ops": [o.model_dump() for o in validated_ops],
+        "rejected_ops": [r.model_dump() for r in rejected_ops],
+        "cleared_parents": cleared_parents,
+        "cleared_links": cleared_links,
+        "ambiguous_links": ambiguous_links,
+        "ungrounded": ungrounded,
+        "grounding": grounding,
+        # Malformed-but-unambiguous ops repaired rather than rejected, per
+        # pattern. The reject total says an op failed; this says which prompt
+        # rule the model keeps missing.
+        "normalized": normalized,
+    }

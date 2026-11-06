@@ -38,14 +38,14 @@ def vault(tmp_path, monkeypatch):
 
 
 def test_tool_is_registered():
-    import silica.tools.composed  # noqa: F401 — importing registers @tool fns
+    import silica.cli  # noqa: F401  registers every tool
     from silica.tools import TOOLS
     assert "silica_lexical_refresh" in TOOLS
     assert TOOLS["silica_lexical_refresh"].cls == "composed"
 
 
 def test_refresh_indexes_all_vault_notes(vault):
-    from silica.tools.composed import silica_lexical_refresh
+    from silica.tools.graph import silica_lexical_refresh
     res = silica_lexical_refresh(folder="", force=True)
     assert res["indexed"] == 2
     assert res["total_notes"] == 2
@@ -56,7 +56,7 @@ def test_refresh_indexes_all_vault_notes(vault):
 
 
 def test_refresh_builds_real_queryable_contributions(vault):
-    from silica.tools.composed import silica_lexical_refresh
+    from silica.tools.graph import silica_lexical_refresh
     silica_lexical_refresh(force=True)
     store = get_lexical_store()
     # "sailing boat harbour" -> a rare token that should surface the Boats note.
@@ -68,7 +68,7 @@ def test_refresh_builds_real_queryable_contributions(vault):
 def test_refresh_persists_to_disk(vault):
     """The bulk-seed run must actually create lexical.json (the bootstrap gap
     this tool closes): a fresh LexicalStore.load() from disk finds it."""
-    from silica.tools.composed import silica_lexical_refresh
+    from silica.tools.graph import silica_lexical_refresh
     res = silica_lexical_refresh(force=True)
     from pathlib import Path
     idx_path = Path(res["index_path"])
@@ -82,7 +82,7 @@ def test_gc_drops_notes_removed_from_vault(vault):
     """A note deleted from the vault must be dropped from the index on the
     next refresh (mirrors the cooccurrence-refresh GC behaviour)."""
     from silica.driver import DRIVER
-    from silica.tools.composed import silica_lexical_refresh
+    from silica.tools.graph import silica_lexical_refresh
     silica_lexical_refresh(folder="", force=True)
     store = get_lexical_store()
     assert any(p.endswith("Boats") for p in store.paths())
@@ -101,7 +101,7 @@ def test_scoped_force_preserves_out_of_folder_entries(vault):
     """force=True rebuilds the SCANNED folder's slice of the index from empty;
     it must never wipe entries outside that scope (a scoped `--force` run
     must not delete unrelated, out-of-folder index data)."""
-    from silica.tools.composed import silica_lexical_refresh
+    from silica.tools.graph import silica_lexical_refresh
 
     # Seed a bogus entry outside the "Concepts" folder this run will scan.
     store = get_lexical_store()
@@ -129,7 +129,7 @@ def test_scoped_force_preserves_out_of_folder_entries(vault):
 def test_cli_lexical_command_routes_to_tool():
     """'/lexical --force' reaches silica_lexical_refresh with force=True."""
     from unittest.mock import patch
-    import silica.tools.composed  # noqa: F401 — ensure tool is registered
+    import silica.cli  # noqa: F401  registers every tool
     from silica.cli import _handle_direct_shortcut
     from silica.tools import TOOLS
 
@@ -160,6 +160,6 @@ def test_refresh_empty_vault_returns_error(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.driver._driver", None)
     import silica.kernel.recall.lexical as lex_mod
     monkeypatch.setattr(lex_mod, "_index_path", lambda: tmp_path / "lexical_index.json")
-    from silica.tools.composed import silica_lexical_refresh
+    from silica.tools.graph import silica_lexical_refresh
     res = silica_lexical_refresh()
     assert "error" in res
