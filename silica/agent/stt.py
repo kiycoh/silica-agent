@@ -45,6 +45,16 @@ def dictation_endpoint(config: Any) -> tuple[str, str]:
     return own, "SILICA_STT_DICTATION_BASE_URL"
 
 
+def transcriptions_url(base_url: str) -> str:
+    """A configured base URL as the transcription endpoint, for either client.
+
+    Users paste it with and without `/v1`, and a doubled or missing `/v1` is a
+    404 whose message says nothing about the cause.
+    """
+    base = base_url.rstrip("/")
+    return f"{base if base.endswith('/v1') else f'{base}/v1'}/audio/transcriptions"
+
+
 def local_stt_model(config: Any) -> str:
     """A faster-whisper size ("small", "large-v3-turbo"), a HuggingFace repo id,
     or a local CTranslate2 directory. One place, so the doctor names what runs."""

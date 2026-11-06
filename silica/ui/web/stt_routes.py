@@ -65,6 +65,7 @@ async def _stt_via_endpoint(url: str, clip: bytes) -> tuple[str, str]:
     the in-process lane before it reports anything."""
     import httpx
 
+    from silica.agent.stt import transcriptions_url
     from silica.metrics import outcome_of, transcribed
 
     form = {"model": CONFIG.stt_model, "response_format": "json"}
@@ -75,7 +76,7 @@ async def _stt_via_endpoint(url: str, clip: bytes) -> tuple[str, str]:
         async with httpx.AsyncClient(timeout=120.0) as client:
             for _ in range(2):
                 resp = await client.post(
-                    f"{url.rstrip('/')}/audio/transcriptions",
+                    transcriptions_url(url),
                     files={"file": ("clip.wav", clip, "audio/wav")},
                     data=form,
                     headers={"Authorization": f"Bearer {CONFIG.stt_api_key}"},

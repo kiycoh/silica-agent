@@ -2106,6 +2106,42 @@ def test_stt_forwards_the_clip_and_returns_the_text(client, monkeypatch, local_s
     assert seen["bytes"] == b"RIFFfake"
 
 
+def test_dictation_takes_a_base_url_without_v1_as_media_does(client, monkeypatch, local_stt):
+    """Users paste both shapes. Only the media client normalised, so a base URL
+    that worked for a lecture answered 404 to the microphone."""
+    from silica.config import CONFIG
+    app, server = client
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9", raising=False)
+    posted = []
+
+    class _Resp:
+        status_code, text = 200, ""
+
+        @staticmethod
+        def json():
+            return {"text": "ciao"}
+
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, files, data, headers):
+            posted.append(url)
+            return _Resp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    assert app.post("/stt", files={"audio": ("clip.wav", b"RIFFfake", "audio/wav")}).json()["via"] == "endpoint"
+    assert posted == ["http://localhost:9/v1/audio/transcriptions"]
+
+
 def test_stt_asks_again_without_auto_when_the_endpoint_rejects_it(client, monkeypatch, local_stt):
     """A hosted API (OpenRouter) answers 400 to language="auto", which
     whisper-server needs named; dictation retries without the field."""

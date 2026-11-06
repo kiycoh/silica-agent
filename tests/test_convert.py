@@ -1230,16 +1230,13 @@ def test_media_never_reaches_a_document_provider(tmp_vault, monkeypatch):
     assert conv.convert("clip.mkv")
 
 
-@pytest.mark.parametrize("base,expected", [
-    ("http://h:8080", "http://h:8080/v1"),
-    ("http://h:8080/", "http://h:8080/v1"),
-    ("http://h:8080/v1", "http://h:8080/v1"),
-    ("http://h:8080/v1/", "http://h:8080/v1"),
-])
-def test_asr_base_url_is_normalised(base, expected):
+@pytest.mark.parametrize("base", ["http://h:8080", "http://h:8080/", "http://h:8080/v1", "http://h:8080/v1/"])
+def test_asr_base_url_is_normalised(base):
     """Users paste both shapes; a doubled or missing /v1 is a 404 whose message
     says nothing about the cause."""
-    assert conv._asr_base(base) == expected
+    from silica.agent.stt import transcriptions_url
+
+    assert transcriptions_url(base) == "http://h:8080/v1/audio/transcriptions"
 
 
 def test_endpoint_provider_posts_multipart_and_asks_for_verbose_json(tmp_vault, monkeypatch):

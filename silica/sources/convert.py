@@ -2801,16 +2801,6 @@ def _media_to_audio(src: Path, workdir: Path, mp3: bool = False) -> Path:
     return out
 
 
-def _asr_base(url: str) -> str:
-    """Normalise a configured base URL to one ending in `/v1`.
-
-    Users paste both shapes, and a doubled or missing `/v1` is a 404 whose
-    message says nothing about the cause.
-    """
-    base = url.rstrip("/")
-    return base if base.endswith("/v1") else f"{base}/v1"
-
-
 def _paragraphs_at_pauses(payload: dict, gap_s: float) -> str:
     """A verbose_json transcript's own text, with a blank line at every pause.
 
@@ -2862,10 +2852,11 @@ def _asr_via_endpoint(audio: Path) -> str:
 
     import httpx
 
+    from silica.agent.stt import transcriptions_url
     from silica.metrics import outcome_of, transcribed
     from silica.sources.web_fetch import vtt_to_text
 
-    url = f"{_asr_base(CONFIG.stt_base_url)}/audio/transcriptions"
+    url = transcriptions_url(CONFIG.stt_base_url)
     data = {"model": CONFIG.stt_model, "response_format": "verbose_json",
             "timestamp_granularities[]": ["word", "segment"]}
     # Named, not omitted: whisper-server and whisper-cli both fall back to "en"
