@@ -276,7 +276,7 @@ def test_two_vaults_share_the_page_and_each_lists_the_other(marta, tmp_path):
     listing = json.loads((live / "vaults.json").read_text(encoding="utf-8"))
     assert sorted(v["slug"] for v in listing) == ["courses", "memory"]
     index = (live / "index.html").read_text(encoding="utf-8")
-    assert "2 vaults" in index and "Memoria" in index and "Courses" in index
+    assert "2 wikis ·" in index and "Memoria" in index and "Courses" in index
 
 
 def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta):

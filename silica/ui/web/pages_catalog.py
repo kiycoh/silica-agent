@@ -119,7 +119,7 @@ def render(entries: list[dict], app: str) -> str:
              '<span class="seg" role="group" aria-label="Sort" data-sort><button type="button" data-v="new" '
              'aria-pressed="true">Newest</button><button type="button" data-v="size" aria-pressed="false">Most notes'
              '</button><button type="button" data-v="az" aria-pressed="false">A to Z</button></span>'
-             f'<span class="cat-count num" data-count>{len(entries)} {"vault" if len(entries) == 1 else "vaults"} · '
+             f'<span class="cat-count num" data-count>{len(entries)} {"wiki" if len(entries) == 1 else "wikis"} · '
              f'{site._fmt(notes)} notes</span></div>'
              '<div class="ar-row" role="group" aria-label="Areas" data-areas-row hidden></div>')
     empty = "" if entries else "Nothing is listed yet."

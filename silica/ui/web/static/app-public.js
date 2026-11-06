@@ -192,7 +192,7 @@ function askCredit(path) {
   const pop = $("#note-pub-pop");
   const who = pubCredit(path);
   pop.querySelector(".np-text").textContent =
-    `This note is ${who}'s. Your vault will name ${who} as its author and link the original.`;
+    `This note is ${who}'s. Your wiki will name ${who} as its author and link the original.`;
   pop.dataset.path = path;
   pop.hidden = false;
   pop.querySelector('[data-np="yes"]').focus();
@@ -494,6 +494,8 @@ function pubAsk(st) {
       const v = input.value.trim().replace(/^@/, "").toLowerCase();
       if (pubHandleWhy(v, pubState.ask_handle.reserved || []) || !v) return;
       go.disabled = true;
+      // asked again after the stale line: the wait is this request's, or the line never leaves
+      pubAskSince = 0;
       // the reply is the view again: pubPost repaints it, and a laptop's overlay is gone with it
       if (!(await pubPost("/public/handle", { handle: v }))) go.disabled = false;
     });
@@ -709,9 +711,9 @@ function renderPublic(fresh) {
   else if (v.out > v.top.length) chips.append(mkEl("li", "more", `and ${(v.out - v.top.length).toLocaleString("en-GB")} more`));
   goes.append(chips);
   const notes = [];
-  if (v.struck) notes.push(`${pubCount(v.struck)} left out by their own globe`);
+  if (v.struck) notes.push(`${pubCount(v.struck)} left out by ${v.struck === 1 ? "its" : "their"} own globe`);
   if (v.new) notes.push(`${pubCount(v.new)} new since the last publish`);
-  if (st.outside) notes.push(`${pubCount(st.outside)} with publish: true outside every wiki stay in your vault`);
+  if (st.outside) notes.push(`${pubCount(st.outside)} with publish: true outside every wiki ${st.outside === 1 ? "stays" : "stay"} in your vault`);
   if (notes.length) goes.append(mkEl("p", "pp-dim", notes.join(" · ")));
   grid.append(goes);
   if (v.visibility === "public" && st.url) grid.append(listingBox(v));
@@ -894,7 +896,7 @@ function preFileHint(f) {
   const stuck = f.free ? f.notes.filter((n) => !n.goes).length : 0;
   const wrote = f.free ? 0 : f.notes.filter((n) => n.mine && n.goes).length;
   return base
-    + (stuck ? ` ${stuck} of its notes also come from a file that stays, so they stay.` : "")
+    + (stuck ? ` ${stuck} of its notes also ${stuck === 1 ? "comes" : "come"} from a file that stays, so ${stuck === 1 ? "it stays" : "they stay"}.` : "")
     + (wrote ? ` ${prePlural(wrote, "note")} you wrote yourself ${wrote === 1 ? "goes" : "go"} out.` : "");
 }
 
@@ -1081,7 +1083,7 @@ function checkSheet(v) {
     if (k.personal.length) {
       const see = preLink("See them", "personal", () => { pubCheck.personal = !pubCheck.personal; paintCheck(); });
       see.setAttribute("aria-expanded", String(pubCheck.personal));
-      ul.append(preCheckRow(k.personal.length, k.personal.length === 1 ? "note shows someone's personal data" : "notes show someone's personal data", "Keeps it out of Wikis", true, see));
+      ul.append(preCheckRow(k.personal_notes, k.personal_notes === 1 ? "note shows someone's personal data" : "notes show someone's personal data", "Keeps it out of Wikis", true, see));
     }
     if (k.location) ul.append(preCheckRow(k.location, k.location === 1 ? "image carries a location" : "images carry a location", "Removed at Publish"));
     if (k.lost) ul.append(preCheckRow(k.lost, k.lost === 1 ? "link leads to a note that is not published" : "links lead to notes that are not published", "Become plain words"));
@@ -1141,7 +1143,7 @@ function readersBox(v) {
     ul.append(li);
   }
   if (!v.readers.length) ul.append(mkEl("li", "pp-dim", "No readers yet: invite one by their handle."));
-  box.append(row, ul, mkEl("p", "pp-dim", "Each reader gets an invitation in their own Silica and saves the wiki there; nothing is written in their vault until they do. Removing a reader cancels an invitation not yet saved. A copy already saved stays theirs, with your name on every note, and cannot go on their own Page."));
+  box.append(row, ul, mkEl("p", "pp-dim", "Each reader gets an invitation in their own Silica and saves the wiki there; nothing is written in their vault until they do. Removing a reader cancels an invitation not yet saved. A copy already saved stays theirs, with your name on every note, and cannot go in their own wikis."));
   return box;
 }
 

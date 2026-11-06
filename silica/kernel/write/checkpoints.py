@@ -144,7 +144,9 @@ class CheckpointStore:
         """
         top = self._live(path, 1)
         if not top:
-            self._insert(path, prior_content or "", absent=prior_content is None, kind="original")
+            # A person's write seeds their own text: `hashes_for` must not take it for Silica's.
+            self._insert(path, prior_content or "", absent=prior_content is None,
+                         kind="hand" if kind == "hand" else "original")
         elif prior_content is not None and not _same_text(prior_content, top[0]["content"]):
             self._insert(path, prior_content, kind=_outside_kind(path, prior_content))
         self._insert(path, new_content, kind=kind, of=of)

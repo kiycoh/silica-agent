@@ -318,6 +318,42 @@ def test_a_note_the_author_edited_can_be_marked_and_then_goes_out_alone(stats, t
     assert "bayes.html" not in _names(stats)
 
 
+def test_a_mark_typed_on_a_note_nobody_touched_is_not_an_edit_and_does_not_release_it(stats):
+    note = stats / "Stats/Bayes.md"
+    _written(stats, "Stats/Bayes.md")
+    note.write_text("---\nrewritten: true\n---\n" + note.read_text(encoding="utf-8"), encoding="utf-8")
+    _say(ROSS, "else")
+    row = _row(_sheet(), "Bayes")
+    assert row["can"] is False and row["goes"] is False and row["status"].startswith("Not edited")
+
+
+def test_a_note_the_author_edited_can_be_marked_again_after_the_mark_is_taken_back(stats, tmp_vault):
+    from silica.kernel import rights
+
+    _written(stats, "Stats/Bayes.md")
+    tmp_vault.note("Stats/Bayes.md", "In my own words, after the exam.\n")
+    rights.set_rewritten("Stats/Bayes.md", True)
+    rights.set_rewritten("Stats/Bayes.md", False)
+    assert _row(_sheet(), "Bayes")["can"] is True
+
+
+def test_undo_takes_a_mark_back(stats, tmp_vault, capsys):
+    from silica.cli import _handle_direct_shortcut
+    from silica.kernel import rights
+
+    tmp_vault.note("Stats/Bayes.md", "In my own words, after the exam.\n")
+    rights.set_rewritten("Stats/Bayes.md", True)
+    assert "rewritten" in (stats / "Stats/Bayes.md").read_text(encoding="utf-8")
+    assert _handle_direct_shortcut("/undo Stats/Bayes.md", []) is True
+    assert "rewritten" not in (stats / "Stats/Bayes.md").read_text(encoding="utf-8")
+
+
+def test_one_note_with_two_kinds_of_data_counts_once(stats, tmp_vault):
+    tmp_vault.note("Stats/Hand note.md", "Write to a.b@example.org or +39 333 1234567.\n")
+    checks = _sheet()["checks"]
+    assert len(checks["personal"]) == 2 and checks["personal_notes"] == 1
+
+
 def test_a_note_copied_word_for_word_cannot_be_marked_and_a_hand_mark_does_not_release_it(stats, tmp_vault):
     from silica.kernel import rights
 
