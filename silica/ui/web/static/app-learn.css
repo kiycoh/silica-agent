@@ -3242,6 +3242,15 @@ button.lr-cell:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.lr-read-wait {
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-read-toc-i.pending:not(.cur) .tt {
+  color: var(--ash);
+}
+
 .lr-read-key {
   display: flex;
   flex-wrap: wrap;

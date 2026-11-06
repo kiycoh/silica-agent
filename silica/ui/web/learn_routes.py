@@ -1903,15 +1903,26 @@ def _step_of(payload_or_args) -> tuple[str, int]:
     return plan, int(step)
 
 
+def _reading_shown(plan: str, step: int) -> dict:
+    """The reading as the page reads it: a card that failed carries the sentence
+    the chat would say, so a limit's reset reaches the reader's clock the same way."""
+    from silica.kernel.learn import reading
+    from silica.ui.web import failures
+
+    st = reading.state(plan, step)
+    for c in st["cards"]:
+        if c.get("error"):
+            c["failure"] = failures.explain(c["error"])
+    return st
+
+
 @router.get("/reading")
 def reading_view(plan: str, step: int):
     """A step's reading as Learn shows it: its cards, whether the notes
     changed since it was written, what the reader wrote, the practice's size,
     and the job writing it, if one runs."""
-    from silica.kernel.learn import reading
-
     try:
-        return reading.state(plan, int(step))
+        return _reading_shown(plan, int(step))
     except ValueError as exc:
         raise HTTPException(404, str(exc))
 
@@ -1930,6 +1941,23 @@ def reading_write(payload: dict):
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return reading.start(plan["path"], step)
+
+
+@router.post("/reading/card", dependencies=_SAME_ORIGIN)
+def reading_card(payload: dict):
+    """The reader is at card `n`: it and the next one are written if they wait
+    (ADR-0134, amendment of 2026-11-06). Answers the reading as it stands."""
+    from silica.kernel.learn import reading
+
+    plan_path, step = _step_of(payload)
+    n = payload.get("n")
+    if not str(n).isdigit():
+        raise HTTPException(400, "n is a card's number")
+    try:
+        reading.reach(plan_path, step, int(str(n)))
+        return _reading_shown(plan_path, step)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
 
 
 @router.post("/reading/answer", dependencies=_SAME_ORIGIN)

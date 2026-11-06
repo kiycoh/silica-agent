@@ -4,7 +4,9 @@
 """A plan step read as a card per note (ADR-0132, as amended by ADR-0134).
 
 A reading is one note per step: a card per note of the step, each after the
-notes it needs, the lecture order breaking ties. A card summarises its note
+notes it needs, the lecture order breaking ties. The note is made with every
+card waiting, and a card is written when the reader reaches it, the next one
+ahead of them (ADR-0134, amendment of 2026-11-06). A card summarises its note
 and ends on a question that uses its concept to anticipate the next card's
 note, answered by a sentence copied from that note. A lecture's outline (a
 spine) is a card too, at its lecture place, with no call and no question.
@@ -26,7 +28,6 @@ import json
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # What the ordering call sees of a note: its opening, enough to tell what a
@@ -39,9 +40,6 @@ SECTION_CHARS = 9000
 # screens hold its definition, which is what the question anticipates.
 NEXT_CHARS = 3000
 SECTION_MAX_TOKENS = 2200
-# Calls of one step in flight at once: four keeps a 19-card step near a
-# minute on the hosted model without queueing the provider.
-PARALLEL = 4
 # The practice after a reading asks one question a note up to a session's cap
 # (the session route's own ceiling of 24).
 SESSION_MAX = 24
@@ -49,6 +47,7 @@ SESSION_MIN = 4
 # Reading speed for the minutes shown: technical prose with formulas.
 WORDS_PER_MINUTE = 150
 NOT_HELD = "*(not in the notes)*"
+PENDING = "*(not written yet)*"
 FOLDER_SUFFIX = " - readings"
 LOG_NAME = "readings.jsonl"
 # `seen`: the card was opened (standby until answered); `answer`: the card's
@@ -410,43 +409,13 @@ def _ask(prompt: str, max_tokens: int) -> str:
 
     # A cut reply parses as a finished card without its question, so it is never
     # kept: the same ask with room to finish, as the outline's stages do, then the
-    # step stops and says why, with what it wrote waiting in `_remembering`.
+    # card stays waiting and says why, and the cards already written stay.
     for budget in (max_tokens, max_tokens * 2):
         resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=budget,
                         temperature=0.2, reasoning=False)
         if resp.finish_reason != "length":
             return resp.text or ""
     raise ValueError(f"the model reached its output limit at {budget} tokens")
-
-
-def _remembering(plan_path: str, step: int, ask):
-    """(`ask` with each reply kept on disk, the call that drops them). A step's
-    calls are the same prompts in the same order, so a retry after the usage
-    window, a restart or a provider error pays only for the cards still missing.
-    Nothing is kept past a saved reading: Rewrite is asking for new words."""
-    from silica.kernel.recall.paths import atomic_write_bytes
-
-    name = hashlib.sha256(f"{plan_path}\0{step}".encode("utf-8")).hexdigest()[:16]
-    memo_path = _log().with_name(f"reading-memo-{name}.json")
-    try:
-        memo = json.loads(memo_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        memo = {}  # none kept, or a torn file: the worst case is paying for the calls again
-    lock = threading.Lock()
-
-    def call(prompt: str, max_tokens: int) -> str:
-        key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-        if key in memo:
-            return memo[key]
-        reply = ask(prompt, max_tokens)
-        if reply:
-            with lock:
-                memo[key] = reply
-                memo_path.parent.mkdir(parents=True, exist_ok=True)
-                atomic_write_bytes(memo_path, json.dumps(memo).encode("utf-8"), mode=0o600)
-        return reply
-
-    return call, lambda: memo_path.unlink(missing_ok=True)
 
 
 def _language(paths: list[str]) -> str:
@@ -563,33 +532,41 @@ def _quote(text: str) -> str:
     return "\n".join("> " + ln if ln.strip() else ">" for ln in text.strip().splitlines())
 
 
+def _card_lines(n: int, c: dict) -> list[str]:
+    lines = [f"## {n}. {c['title']}", ""]
+    if c.get("spine"):
+        lines += [f"Outline: [[{c['note']}]]", ""]
+        if c.get("text"):
+            lines += [c["text"], ""]
+        lines += [f"{k}. [[{p}]]" for k, p in enumerate(c.get("points") or [], 1)]
+        return lines + [""]
+    lines.append(f"Note: [[{c['note']}]]")
+    if c.get("needed_by"):
+        lines.append("Moved up: needed by " + ", ".join(f"[[{x}]]" for x in c["needed_by"]) + ".")
+    if c.get("pending"):
+        # what its call will be told, kept here so the note is the whole state
+        if c.get("needs"):
+            lines.append("Needs: " + ", ".join(f"[[{x}]]" for x in c["needs"]) + ".")
+        return lines + ["", PENDING, ""]
+    lines.append("")
+    if c.get("text"):
+        lines += [c["text"], ""]
+    if c.get("example"):
+        lines += [f"**Example** (worked by Silica, not from the notes). {c['example']}", ""]
+    if c.get("question"):
+        lines += ["> [!question] To finish the card", _quote(c["question"]), ""]
+        if c.get("answer"):
+            lines += [f"> [!quote] The note says, in [[{c['answer_from']}]]", _quote(c["answer"]), ""]
+    return lines
+
+
 def render(plan_stem: str, step: int, cards: list[dict], order: str) -> str:
     """The reading's body. Labels are English, as every string Silica writes
     into a vault; the parts are in the notes' language."""
     how = "each after the notes it needs" if order == "prerequisites" else "in the lectures' order"
     lines = [f"{len(cards)} cards, one a note of step {step + 1} of [[{plan_stem}]], {how}.", ""]
     for i, c in enumerate(cards, 1):
-        lines.append(f"## {i}. {c['title']}")
-        lines.append("")
-        if c.get("spine"):
-            lines += [f"Outline: [[{c['note']}]]", ""]
-            if c.get("text"):
-                lines += [c["text"], ""]
-            lines += [f"{k}. [[{p}]]" for k, p in enumerate(c.get("points") or [], 1)]
-            lines.append("")
-            continue
-        lines.append(f"Note: [[{c['note']}]]")
-        if c.get("needed_by"):
-            lines.append("Moved up: needed by " + ", ".join(f"[[{n}]]" for n in c["needed_by"]) + ".")
-        lines.append("")
-        if c.get("text"):
-            lines += [c["text"], ""]
-        if c.get("example"):
-            lines += [f"**Example** (worked by Silica, not from the notes). {c['example']}", ""]
-        if c.get("question"):
-            lines += ["> [!question] To finish the card", _quote(c["question"]), ""]
-            if c.get("answer"):
-                lines += [f"> [!quote] The note says, in [[{c['answer_from']}]]", _quote(c["answer"]), ""]
+        lines += _card_lines(i, c)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -601,8 +578,8 @@ _CALLOUT_RE = re.compile(r"^>\s*\[!(question|quote|example)\]([^\n]*)$", re.I)
 
 
 def _blank_card(n: int, title: str) -> dict:
-    return {"n": n, "title": title, "note": "", "notes": [], "spine": False, "needed_by": [], "text": "",
-            "example": "", "question": "", "answer": "", "answer_from": "", "points": []}
+    return {"n": n, "title": title, "note": "", "notes": [], "spine": False, "needed_by": [], "needs": [], "text": "",
+            "example": "", "question": "", "answer": "", "answer_from": "", "points": [], "pending": False}
 
 
 def parse(text: str) -> list[dict]:
@@ -634,6 +611,12 @@ def parse(text: str) -> list[dict]:
             continue
         if line.startswith("Moved up:"):
             cur["needed_by"] = _WIKI_RE.findall(line)
+            continue
+        if line.startswith("Needs:"):
+            cur["needs"] = _WIKI_RE.findall(line)
+            continue
+        if line.strip() == PENDING:
+            cur["pending"] = True
             continue
         c = _CALLOUT_RE.match(line)
         if c:
@@ -686,10 +669,11 @@ def minutes(cards: list[dict]) -> int:
     return max(1, round(words / WORDS_PER_MINUTE))
 
 
-def write_reading(plan_path: str, step: int, ask=None, progress=None) -> dict:
-    """Write (or rewrite) the reading of a step: {path, cards, order, marked,
-    answered}. `ask(prompt, max_tokens)` is the model call (tests pass their
-    own); `progress(done, total)` hears each finished card."""
+def begin(plan_path: str, step: int, ask=None) -> dict:
+    """Make or remake the reading's note: {path, cards, order, first}. One call
+    orders the step; spines need none, and every other card waits for its reader.
+    `first` is the first card that waits. A rewrite is this too, so the reader's
+    answers start over, as `written` says."""
     from silica.kernel.learn import plans
 
     plan = plans.find_plan(plan_path)
@@ -698,31 +682,10 @@ def write_reading(plan_path: str, step: int, ask=None, progress=None) -> dict:
     notes = step_notes(plan, step)
     if not notes:
         raise ValueError(f"step {step + 1} has no note in the vault to explain")
-    ask, forget = _remembering(plan["path"], step, ask or _ask)
-    language = _language([p for _t, p in notes])
-    ordered = order_cards(notes, ask)
-    cards = ordered["cards"]
-    total = sum(1 for c in cards if not c["spine"])
-    done = [0]
-    lock = threading.Lock()
-
-    def one(i):
-        if cards[i]["spine"]:
-            return spine_card(cards[i])
-        out = write_card(i, cards, language, ask)
-        with lock:
-            done[0] += 1
-            if progress:
-                progress(done[0], total)
-        return out
-
-    if progress:
-        progress(0, total)
-    # A card reads notes, never another card, so the calls stay parallel.
-    with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
-        written = list(pool.map(one, range(len(cards))))
+    ordered = order_cards(notes, ask or _ask)
+    cards = [spine_card(c) if c["spine"] else {**c, "note": c["title"], "pending": True} for c in ordered["cards"]]
     label = plans._step_label(plan["steps"][step])
-    body = render(Path(plan["path"]).stem, step, written, ordered["order"])
+    body = render(Path(plan["path"]).stem, step, cards, ordered["order"])
     path = reading_path(plan, step)
     # `written` scopes the reader's answers to this version: a rewrite asks
     # other questions, and an answer to the old card 3's is not the new one's
@@ -730,11 +693,98 @@ def write_reading(plan_path: str, step: int, ask=None, progress=None) -> dict:
              "notes_hash": notes_hash([p for _t, p in notes]), "order": ordered["order"],
              "written": str(int(time.time()))}
     _save(path, label, body, props)
-    forget()
-    asked = [c for c in written if c["question"]]
-    return {"path": path, "cards": len(written), "order": ordered["order"],
-            "marked": sum(c["marked"] for c in written), "answered": sum(1 for c in asked if c["answer"]),
-            "questions": len(asked)}
+    first = next((i for i, c in enumerate(cards, 1) if c.get("pending")), None)
+    return {"path": path, "cards": len(cards), "order": ordered["order"], "first": first}
+
+
+def _swap_card(text: str, n: int, lines: list[str]) -> str:
+    rows = text.split("\n")
+    heads = {i: int(m.group(1)) for i, row in enumerate(rows) if (m := _SEC_RE.match(row))}
+    start = next((i for i, k in heads.items() if k == n), None)
+    if start is None:
+        return text
+    end = next((i for i in heads if i > start), len(rows))
+    return "\n".join(rows[:start] + lines + rows[end:])
+
+
+def write_one(plan_path: str, step: int, n: int, ask=None) -> None:
+    """Write card n into the note; a card already written stays as it is. The
+    card's call sees what it always saw, its note and the next one, so a card
+    written alone reads as one written with the rest."""
+    from silica.kernel.learn import items, plans
+    from silica.kernel.write import frontmatter
+
+    plan = plans.find_plan(plan_path)
+    if plan is None:
+        raise ValueError(f"no plan at {plan_path!r}")
+    path_of = dict(step_notes(plan, step))
+    path = reading_path(plan, step)
+    text = items.read_note(path)
+    cards = parse(text)
+    for c in cards:
+        c["path"] = path_of.get(c["note"] or c["title"], "")
+    i = next((k for k, c in enumerate(cards) if c["n"] == n), None)
+    if i is None or not cards[i]["pending"]:
+        return
+    if not cards[i]["path"]:
+        raise ValueError(f"{cards[i]['title']} is no longer in this step: rewrite the reading")
+    for c in cards:
+        c["spine"] = c["spine"] or not c["path"]  # a note gone from the step: no card asks toward it
+    card = write_card(i, cards, _language(list(path_of.values())), ask or _ask)
+    stamp = str((frontmatter.split(text)[0] or {}).get("written"))
+
+    def mutate(now: str) -> str:
+        # A Rewrite while this call ran: the card belongs to the reading that went.
+        if str((frontmatter.split(now)[0] or {}).get("written")) != stamp:
+            return now
+        return _swap_card(now, n, _card_lines(n, card))
+
+    with _NOTE_LOCK:
+        plans._journaled(path, mutate, source="learn")
+
+
+def _write_behind(plan_path: str, step: int, n: int, ask) -> None:
+    error = ""
+    try:
+        write_one(plan_path, step, n, ask)
+    except Exception as exc:
+        # Tolerated: this thread has no caller, the card says why to whoever
+        # reaches it, reaching it asks again, and the other cards are untouched.
+        error = str(exc)[:300]
+    with _CARDS_LOCK:
+        _WRITING[(plan_path, step)].discard(n)
+        if error:
+            _FAILED[(plan_path, step)][n] = error
+
+
+def reach(plan_path: str, step: int, n: int, ask=None) -> list[threading.Thread]:
+    """The reader is at card n: it and the card after it get written if they
+    wait, each once. One ahead and no further, so a reader who stops pays for one
+    card they did not read and meets no wait while they read. A card that failed
+    is asked again here, and a limit refuses before any call is paid for."""
+    from silica.kernel.learn import items, plans
+
+    plan = plans.find_plan(plan_path)
+    if plan is None:
+        raise ValueError(f"no plan at {plan_path!r}")
+    path = reading_path(plan, step)
+    if not (plans._vault() / path).is_file():
+        return []
+    cards = parse(items.read_note(path))
+    after = next((c["n"] for c in cards if c["n"] > n and not c["spine"]), None)
+    key = (plan["path"], step)
+    threads = []
+    with _CARDS_LOCK:
+        writing, failed = _WRITING.setdefault(key, set()), _FAILED.setdefault(key, {})
+        for c in cards:
+            if c["pending"] and c["n"] in (n, after) and c["n"] not in writing:
+                writing.add(c["n"])
+                failed.pop(c["n"], None)
+                threads.append(threading.Thread(target=_write_behind, args=(*key, c["n"], ask), daemon=True,
+                                                name=f"reading-{step}-{c['n']}"))
+    for t in threads:
+        t.start()
+    return threads
 
 
 def _save(path: str, title: str, body: str, props: dict) -> None:
@@ -758,6 +808,14 @@ def _save(path: str, title: str, body: str, props: dict) -> None:
         return frontmatter.dump(keys, full)
 
     plans._journaled(path, mutate, source="learn")
+
+
+# What is being written now and why a card failed: kept in memory, because after
+# a restart a card that waits is simply asked for again when it is reached.
+_NOTE_LOCK = threading.Lock()   # two cards land in one note, read and written whole
+_CARDS_LOCK = threading.Lock()
+_WRITING: dict[tuple[str, int], set[int]] = {}
+_FAILED: dict[tuple[str, int], dict[int, str]] = {}
 
 
 # ------------------------------------------------------------------ the reader's answers
@@ -822,6 +880,10 @@ def state(plan_path: str, step: int) -> dict:
     if text:
         data, _r, _b = frontmatter.split(text)
         cards = parse(text)
+        with _CARDS_LOCK:
+            writing, failed = set(_WRITING.get((plan["path"], step), ())), dict(_FAILED.get((plan["path"], step), {}))
+        for c in cards:
+            c["writing"], c["error"] = c["n"] in writing, failed.get(c["n"], "") if c["pending"] else ""
         since = float(str((data or {}).get("written") or "0")) if str((data or {}).get("written") or "0").isdigit() else 0.0
         out.update(exists=True, cards=cards, minutes=minutes(cards), order=str((data or {}).get("order") or ""),
                    stale=str((data or {}).get("notes_hash") or "") != notes_hash([p for _t, p in notes]),
@@ -909,7 +971,9 @@ def job_status(plan_path: str, step: int) -> dict | None:
 
 
 def start(plan_path: str, step: int, ask=None) -> dict:
-    """Write the reading in a thread; one job a step at a time."""
+    """Make the reading's note and its first card in a thread; one job a step at
+    a time. The job's meter counts these calls; the cards `reach` writes later are
+    counted as any call is, and not on this record."""
     import uuid
 
     from silica.agent import llm
@@ -919,6 +983,8 @@ def start(plan_path: str, step: int, ask=None) -> dict:
         recs = _job_records(plan_path, step)
         if recs and recs[-1].get("state") == "running":
             return job_status(plan_path, step) or {}
+        with _CARDS_LOCK:
+            _FAILED.pop((plan_path, step), None)
         # one record a step: an earlier attempt, finished or stopped, goes,
         # so a failed step never piles records up in the directory
         for old in recs:
@@ -939,17 +1005,17 @@ def start(plan_path: str, step: int, ask=None) -> dict:
     base = ask or _ask
 
     def metered(*args, **kwargs):
-        # every model call of the reading goes through `ask`, on the job's
-        # thread and on the sections' pool threads alike: the scope is entered
-        # here, in the thread that makes the call (ADR-0135 point 8)
+        # the scope is entered here, in the thread that makes the call (ADR-0135 point 8)
         with llm.meter_scope(rec["meter"]):
             return base(*args, **kwargs)
 
     def run():
         try:
-            res = write_reading(plan_path, step, ask=metered, progress=lambda done, total: update(
-                progress={"done": done, "total": total}))
-            update(state="done", result_path=res["path"], marked=res["marked"], finished=time.time())
+            res = begin(plan_path, step, ask=metered)
+            update(progress={"done": 0, "total": res["cards"]})
+            if res["first"]:
+                write_one(plan_path, step, res["first"], ask=metered)
+            update(state="done", result_path=res["path"], marked=0, finished=time.time())
         except Exception as exc:
             # The job reports the failure to the page that polls it; the
             # thread has no caller to raise to.

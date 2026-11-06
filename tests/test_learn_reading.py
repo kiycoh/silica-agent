@@ -80,6 +80,14 @@ def fake_ask(prompt: str, max_tokens: int) -> str:
     return card_reply(title)
 
 
+def write_all() -> dict:
+    """The whole step, as a reader who reaches every card leaves it."""
+    out = reading.begin("Plans/Esame.md", 0, ask=fake_ask)
+    for c in reading.state("Plans/Esame.md", 0)["cards"]:
+        reading.write_one("Plans/Esame.md", 0, c["n"], ask=fake_ask)
+    return out
+
+
 @pytest.fixture
 def step_vault(tmp_vault, tmp_path, monkeypatch):
     import silica.kernel.report.quiz as quiz
@@ -247,14 +255,15 @@ def test_the_central_claim_is_the_first_lede_line_and_a_card_must_say_it():
 def test_a_reading_is_written_beside_the_plan_read_back_and_never_material(step_vault):
     from silica.kernel.report import learner
 
-    out = reading.write_reading("Plans/Esame.md", 0, ask=fake_ask)
+    out = write_all()
     assert out["path"] == "Plans/Esame - readings/01 Reti feedforward.md"
-    assert out["order"] == "prerequisites" and out["cards"] == 5 and out["questions"] == 4 and out["answered"] == 3
+    assert out["order"] == "prerequisites" and out["cards"] == 5
     # one needs call and one call a card that is not a spine
     assert len(PROMPTS) == 1 + 4
     st = reading.state("Plans/Esame.md", 0)
     assert st["exists"] and not st["stale"] and st["questions"] == reading.session_size(5)
     cards = st["cards"]
+    assert sum(bool(c["question"]) for c in cards) == 4 and sum(bool(c["answer"]) for c in cards) == 3
     assert [c["title"] for c in cards] == ["Neurone artificiale", "Funzione gradino", SPINE,
                                           "Condizioni per massimi e minimi", "Gradiente discendente"]
     first = cards[0]
@@ -289,7 +298,7 @@ def test_a_reading_written_before_the_cards_still_reads_as_cards():
 
 
 def test_a_changed_note_makes_the_reading_stale_and_a_rewrite_starts_the_readers_answers_over(step_vault):
-    out = reading.write_reading("Plans/Esame.md", 0, ask=fake_ask)
+    out = write_all()
     reading.record(out["path"], 1, "seen", "")
     reading.record(out["path"], 1, "answer", "la soglia")
     reading.record(out["path"], 2, "seen", "")
@@ -300,7 +309,7 @@ def test_a_changed_note_makes_the_reading_stale_and_a_rewrite_starts_the_readers
     step_vault.note("Course/Funzione gradino.md", "---\ntype: Note\n---\n\n# Funzione gradino\n\nCambiata del tutto.\n")
     assert reading.state("Plans/Esame.md", 0)["stale"]
     time.sleep(1.1)   # `written` is in whole seconds
-    reading.write_reading("Plans/Esame.md", 0, ask=fake_ask)
+    write_all()
     st = reading.state("Plans/Esame.md", 0)
     assert not st["stale"] and st["answers"] == {}
 
@@ -327,34 +336,78 @@ def test_a_card_cut_at_the_output_limit_asks_once_more_with_room_and_is_never_ke
         reading._ask("p", 100)
 
 
-def test_a_reading_stopped_halfway_keeps_what_it_paid_for_and_a_finished_one_keeps_nothing(step_vault):
-    """The usage window closing mid-step threw every finished card away, and
-    the retry paid for them again."""
-    paid: list[str] = []
+def test_a_reading_begins_with_one_call_and_every_card_waiting(step_vault):
+    """Nothing is paid for a card nobody reached (ADR-0134, amendment of 2026-11-06)."""
+    out = reading.begin("Plans/Esame.md", 0, ask=fake_ask)
+    assert len(PROMPTS) == 1 and out["cards"] == 5
+    st = reading.state("Plans/Esame.md", 0)
+    assert st["exists"] and [c["pending"] for c in st["cards"]].count(True) == 4       # the spine needs no call
+    assert next(c for c in st["cards"] if c["spine"])["points"]
+    needing = next(c for c in st["cards"] if c["title"] == "Gradiente discendente")
+    assert needing["needs"] == ["Condizioni per massimi e minimi"]                     # the order's reason, for its call
 
-    def stopping(prompt, max_tokens):
-        if len(paid) >= 2:
-            raise RuntimeError("usage limit reached: window, resets 18:00")
-        out = fake_ask(prompt, max_tokens)
-        paid.append(prompt)
-        return out
 
-    with pytest.raises(RuntimeError, match="usage limit"):
-        reading.write_reading("Plans/Esame.md", 0, ask=stopping)
-    assert not reading.state("Plans/Esame.md", 0)["exists"]
+def test_reaching_a_card_writes_it_and_the_next_and_nothing_past_that(step_vault):
+    reading.begin("Plans/Esame.md", 0, ask=fake_ask)
+    PROMPTS.clear()
+    for t in reading.reach("Plans/Esame.md", 0, 1, ask=fake_ask):
+        t.join()
+    st = reading.state("Plans/Esame.md", 0)
+    assert [c["n"] for c in st["cards"] if not c["pending"] and not c["spine"]] == [1, 2] and len(PROMPTS) == 2
+    for t in reading.reach("Plans/Esame.md", 0, 1, ask=fake_ask):                      # a second look costs nothing
+        t.join()
+    assert len(PROMPTS) == 2
+    far = max(c["n"] for c in st["cards"])
+    for t in reading.reach("Plans/Esame.md", 0, far, ask=fake_ask):                    # a jump to the last card
+        t.join()
+    assert len(PROMPTS) == 3
 
-    asked: list[str] = []
 
-    def resuming(prompt, max_tokens):
-        asked.append(prompt)
+def test_a_card_written_alone_asks_what_it_asked_with_the_others(step_vault):
+    """The card's own prompt is unchanged, so the quality is too: what the note
+    keeps for a waiting card rebuilds the same call."""
+    begun = reading.begin("Plans/Esame.md", 0, ask=fake_ask)
+    plan = __import__("silica.kernel.learn.plans", fromlist=["find_plan"]).find_plan("Plans/Esame.md")
+    ordered = reading.order_cards(reading.step_notes(plan, 0), fake_ask)
+    PROMPTS.clear()
+    cards = ordered["cards"]
+    n = next(i for i, c in enumerate(cards) if c["title"] == "Gradiente discendente")
+    reading.write_card(n, cards, "Italian", fake_ask)
+    whole = PROMPTS[-1]
+    reading.write_one("Plans/Esame.md", 0, n + 1, ask=fake_ask)
+    assert PROMPTS[-1] == whole and begun["order"] == ordered["order"]
+
+
+def test_a_stopped_card_says_why_and_leaves_the_others_and_a_second_visit_pays_only_for_it(step_vault):
+    """The usage window closing used to throw every finished card away."""
+    reading.begin("Plans/Esame.md", 0, ask=fake_ask)
+    reading.write_one("Plans/Esame.md", 0, 1, ask=fake_ask)
+
+    def stopped(prompt, max_tokens):
+        raise RuntimeError("usage limit reached: window, resets 2026-11-06T18:00:00Z")
+
+    for t in reading.reach("Plans/Esame.md", 0, 2, ask=stopped):
+        t.join()
+    st = reading.state("Plans/Esame.md", 0)
+    assert not st["cards"][0]["pending"] and st["cards"][0]["text"]
+    assert "usage limit" in st["cards"][1]["error"] and st["cards"][1]["pending"]
+    PROMPTS.clear()
+    for t in reading.reach("Plans/Esame.md", 0, 2, ask=fake_ask):
+        t.join()
+    st = reading.state("Plans/Esame.md", 0)
+    assert not st["cards"][1]["pending"] and not st["cards"][1]["error"] and len(PROMPTS) <= 2
+
+
+def test_a_card_finishing_after_a_rewrite_stays_out_of_the_new_reading(step_vault, monkeypatch):
+    reading.begin("Plans/Esame.md", 0, ask=fake_ask)
+
+    def rewritten_meanwhile(prompt, max_tokens):
+        monkeypatch.setattr(reading.time, "time", lambda: 9999999999)
+        reading.begin("Plans/Esame.md", 0, ask=fake_ask)
         return fake_ask(prompt, max_tokens)
 
-    done = reading.write_reading("Plans/Esame.md", 0, ask=resuming)
-    assert done["cards"] == 5 and asked and not set(asked) & set(paid)
-
-    asked.clear()
-    reading.write_reading("Plans/Esame.md", 0, ask=resuming)      # Rewrite asks for new words
-    assert set(paid) <= set(asked)
+    reading.write_one("Plans/Esame.md", 0, 1, ask=rewritten_meanwhile)
+    assert reading.state("Plans/Esame.md", 0)["cards"][0]["pending"]
 
 
 def test_a_steps_questions_take_turns_between_notes():
