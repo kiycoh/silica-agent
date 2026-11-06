@@ -442,3 +442,54 @@ def parse_json(raw: str, strict: bool = False):
         _inject_external_bodies(parsed, _bodies)
 
     return parsed, was_strict_clean
+
+
+def sanitize_output(raw_content: str, verbatim_source: str | None = None) -> dict:
+    """Validates and sanitizes the JSON returned by Distiller workers.
+
+    `verbatim_source` is the chunk's own inbox text; it anchors verbatim-body
+    escape repair per-site.
+    """
+    salvaged = None
+    try:
+        parsed_obj, was_clean = parse_json(raw_content, strict=False)
+    except TruncatedArray as t:
+        # max_tokens cut the payload: apply the clean leading ops instead of
+        # losing the whole chunk, and say so — the loss must reach the caller.
+        parsed_obj, was_clean = t.ops, False
+        salvaged = {"recovered_ops": len(t.ops), "lost_chars": len(t.tail)}
+        logger.warning(
+            "sanitize: distiller output truncated — recovered %d leading ops, "
+            "%d chars lost",
+            len(t.ops), len(t.tail),
+        )
+    except Exception as e:
+        return {"error": f"JSON Parse Error: {e}"}
+
+    # Normalize op content: strip .md from wikilinks, etc.
+    if isinstance(parsed_obj, list):
+        parsed_obj = normalize_ops(parsed_obj, verbatim_source=verbatim_source)
+    elif isinstance(parsed_obj, dict) and "updates" in parsed_obj:
+        parsed_obj["updates"] = normalize_ops(parsed_obj["updates"],
+                                              verbatim_source=verbatim_source)
+
+    # Axis enforcement (Layer 2): demote ops whose linked_axis is not in main_thematic_axes.
+    # Only activates when the distiller actually emitted axes — graceful degradation otherwise.
+    if isinstance(parsed_obj, dict):
+        axes = {a.strip().lower() for a in parsed_obj.get("main_thematic_axes", []) if a}
+        if axes:
+            for op in parsed_obj.get("updates", []):
+                if isinstance(op, dict) and op.get("op") in ("write", "patch"):
+                    la = (op.get("linked_axis") or "").strip().lower()
+                    if la and la not in axes:
+                        op["op"] = "skip"
+                        op["reason"] = f"unlinked_axis '{op.get('linked_axis')}' not in main_thematic_axes"
+
+    result = {
+        "success": True,
+        "parsed": parsed_obj,
+        "was_clean": was_clean
+    }
+    if salvaged:
+        result["salvaged"] = salvaged
+    return result

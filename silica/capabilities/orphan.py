@@ -26,9 +26,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from silica.agent.commit import commit_ops
+from silica.kernel.write.gate import commit_ops
 from silica.model.decide import decide
-from silica.agent.bounds import orphan_bounds
+from silica.kernel.write.gate import orphan_bounds
 from silica.kernel.base.manifest import active_write_dir, within
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem

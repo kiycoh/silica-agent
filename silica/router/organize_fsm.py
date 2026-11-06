@@ -26,6 +26,7 @@ from typing import Any
 
 from silica.driver import DRIVER
 from silica.driver.base import NoteRef, GraphSnapshot
+from silica.kernel.write import gate
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.organize.taxonomy import Taxonomy
 from silica.router.base_fsm import BaseFSM
@@ -357,12 +358,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
         # Open an undo-journal run so `/revert` can move these notes back later.
         # Only reached in apply mode with real moves (PLAN returns early on dry_run).
-        from silica.config import CONFIG
-        from silica.kernel.write.undo_journal import get_undo_journal
-        self._undo_run_id = get_undo_journal().start_run(
-            source=f"organize:{self.scope or 'vault'}",
-            vault=getattr(CONFIG, "vault_path", None) or None,
-        )
+        self._undo_run_id = gate.open_run(f"organize:{self.scope or 'vault'}")
 
         # For move ops, the inverse is moving back (from_path → to_path becomes to_path → from_path)
         # We also pre-capture the pre-move graph snapshot for the lint gate.
@@ -489,25 +485,12 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         """
         if not self._undo_run_id:
             return
-        import hashlib
         from silica.kernel.write.ops import InverseOp, InverseOpKind
-        from silica.kernel.write.undo_journal import get_undo_journal
 
-        journal = get_undo_journal()
         for res in self.context.get("move_results", []):
-            if not res.get("success"):
-                continue
-            from_path, to_path = res["from"], res["to"]
-            try:
-                post = DRIVER.read_note(to_path).content
-                post_hash = hashlib.sha256((post or "").encode("utf-8")).hexdigest()
-            except Exception:
-                post_hash = None
-            journal.record(
-                self._undo_run_id,
-                InverseOp(kind=InverseOpKind.move_back, path=from_path, to_path=to_path),
-                post_hash,
-            )
+            if res.get("success"):
+                gate.record_landed(self._undo_run_id, InverseOp(
+                    kind=InverseOpKind.move_back, path=res["from"], to_path=res["to"]))
 
     def _handle_rollback(self) -> None:
         """Undo moves by calling DRIVER.move() in reverse."""

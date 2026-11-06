@@ -337,26 +337,21 @@ def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, f
     """Write the chosen notes as one run of the undo journal, so `/revert`
     takes the whole save back (ADR-0151 point 8). Refused past the room
     left, naming the shortfall, before anything is written."""
-    import hashlib
     import shutil
 
     from silica.config import CONFIG
     from silica.driver import DRIVER
-    from silica.kernel.write.ops import InverseOp, InverseOpKind
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write import gate
 
     p = prepare_vault(url, areas, vault, named=named, files=files, private=private)
     if not p["files"]:
         raise ValueError("those notes are saved already" if p["already"] else "no note of that wiki was chosen")
     if p["room"]["short"]:
         raise ValueError(f"this vault has no room for that save: {p['room']['short']}")
-    journal = get_undo_journal()
-    run_id = journal.start_run(source="vault:save", vault=str(vault or CONFIG.vault_path or ""))
+    run_id = gate.open_run("vault:save", vault=str(vault) if vault else None)
     for path, text in p["files"].items():
         DRIVER.create(path, text)
-        post = DRIVER.read_note(path).content or ""
-        journal.record(run_id, InverseOp(kind=InverseOpKind.delete_created, path=path),
-                       hashlib.sha256(post.encode("utf-8")).hexdigest())
+        gate.record_landed(run_id, gate.undo_of(path, None))
     if assets is not None and assets.is_dir():
         # a Private vault's images travel with it, beside the notes that cite them as assets/<name>
         dest = Path(vault or CONFIG.vault_path or ".") / p["folder"] / "assets"

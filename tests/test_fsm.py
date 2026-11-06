@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock
+from silica.kernel.write.ops import Txn
 from silica.router import states
 from silica.router.orchestrator import InjectorFSM, InjectorState
 from silica.router.recipe_parser import load_recipe
@@ -176,15 +177,15 @@ def test_fsm_delegate_dated_doc_anchors_session_date(mock_run_distiller):
     assert mock_run_distiller.call_args.kwargs["session_date"] == "2024-03-12"
 
 
-@patch("silica.router.orchestrator.silica_recon")
-@patch("silica.router.orchestrator.silica_payload")
+@patch("silica.router.orchestrator.recon_file")
+@patch("silica.router.orchestrator.payload_chunks")
 @patch("silica.router.states.distill.run_distiller")
-@patch("silica.router.orchestrator.silica_sanitize")
-@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.sanitize_output")
+@patch("silica.router.orchestrator.validate_ops")
 @patch("silica.router.orchestrator.DRIVER")
-@patch("silica.tools.wrapped.silica_snapshot")
-@patch("silica.router.orchestrator.silica_lint")
-@patch("silica.tools.wrapped.silica_cleanup")
+@patch("silica.router.orchestrator.build_txn")
+@patch("silica.kernel.write.gate.lint_note")
+@patch("silica.kernel.write.gate.archive_source")
 @patch("silica.kernel.recall.embed.EmbedStore")
 def test_fsm_multi_chunk_loop(
     mock_embed_store, mock_cleanup, mock_lint, mock_snapshot, mock_driver,
@@ -201,8 +202,8 @@ def test_fsm_multi_chunk_loop(
     }
     mock_run_distiller.return_value = {"updates": [{"op": "write", "path": "notes/NoteA.md"}]}
     mock_sanitize.return_value = {"parsed": []}
-    mock_validate.return_value = {"success": True, "rejection_rate": 0.0, "validated_count": 1, "rejected_count": 0}
-    mock_snapshot.return_value = {"txn_id": "txn_123", "inverses": []}
+    mock_validate.return_value = {"success": True, "rejection_rate": 0.0, "validated_count": 1, "rejected_count": 0, "validated_ops": []}
+    mock_snapshot.return_value = Txn(id="txn_123", inverses=[])
     mock_lint.return_value = {"success": True}
     mock_cleanup.return_value = {"success": True}
 
@@ -285,7 +286,7 @@ def test_fsm_recipe_configuration():
     assert payload_conf.get("partition_if_over") == 7
 
 
-@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.validate_ops")
 def test_fsm_gate_all_rejected_steers_then_defers(mock_validate):
     # Phase 6: when ALL ops are rejected, VALIDATE steers back to DELEGATE (max 2
     # attempts). After the budget is exhausted, it goes to CLEANUP with "no_ops".
@@ -335,7 +336,7 @@ def test_fsm_gate_all_rejected_steers_then_defers(mock_validate):
     assert fsm.context.get("has_partial_failure") is True
 
 
-@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.validate_ops")
 def test_fsm_default_steer_is_one_then_defers(mock_validate):
     # Default max_steer_attempts is now 1: one in-flight steer, then the ops are
     # left for the boundary anneal instead of a second in-flight re-delegation.
@@ -361,7 +362,7 @@ def test_fsm_default_steer_is_one_then_defers(mock_validate):
     assert fsm.context.get("final_status") == "no_ops"
 
 
-@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.validate_ops")
 def test_fsm_gate_partial_rejection_continues(mock_validate):
     # When some ops pass and some are rejected, VALIDATE must continue the
     # pipeline (SNAPSHOT) and log a warning — it does NOT abort.
@@ -388,9 +389,9 @@ def test_fsm_gate_partial_rejection_continues(mock_validate):
     assert "abort_reason" not in fsm.context.get("chunk", {})
 
 
-@patch("silica.router.orchestrator.silica_lint")
+@patch("silica.kernel.write.gate.lint_note")
 @patch("silica.router.orchestrator.DRIVER")
-@patch("silica.tools.wrapped.silica_restore")
+@patch("silica.kernel.write.gate.apply_inverses")
 @patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
 @patch("builtins.open")
 def test_fsm_graph_regression_orphan_is_warning(mock_open, mock_restore, mock_driver, mock_lint):
@@ -423,9 +424,9 @@ def test_fsm_graph_regression_orphan_is_warning(mock_open, mock_restore, mock_dr
         assert fsm.state != InjectorState.ROLLBACK, "Orphan-only errors must not trigger ROLLBACK"
 
 
-@patch("silica.router.orchestrator.silica_lint")
+@patch("silica.kernel.write.gate.lint_note")
 @patch("silica.router.orchestrator.DRIVER")
-@patch("silica.tools.wrapped.silica_restore")
+@patch("silica.kernel.write.gate.apply_inverses")
 @patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
 @patch("builtins.open")
 def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver, mock_lint):
@@ -485,7 +486,7 @@ def _lint_gate_fsm(op_path: str):
     return fsm, [op]
 
 
-@patch("silica.router.orchestrator.silica_lint")
+@patch("silica.kernel.write.gate.lint_note")
 @patch("silica.router.orchestrator.DRIVER")
 @patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
 def test_fsm_lint_gate_tolerates_per_op_baseline(mock_driver, mock_lint):
@@ -507,7 +508,7 @@ def test_fsm_lint_gate_tolerates_per_op_baseline(mock_driver, mock_lint):
     assert fsm.state != InjectorState.ROLLBACK
 
 
-@patch("silica.router.orchestrator.silica_lint")
+@patch("silica.kernel.write.gate.lint_note")
 @patch("silica.router.orchestrator.DRIVER")
 @patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
 def test_fsm_lint_gate_still_blocks_new_violations(mock_driver, mock_lint):
@@ -528,15 +529,15 @@ def test_fsm_lint_gate_still_blocks_new_violations(mock_driver, mock_lint):
     assert "unknown callout type" in fsm.context["chunk"]["abort_reason"]
 
 
-@patch("silica.router.orchestrator.silica_recon")
-@patch("silica.router.orchestrator.silica_payload")
+@patch("silica.router.orchestrator.recon_file")
+@patch("silica.router.orchestrator.payload_chunks")
 @patch("silica.router.states.distill.run_distiller")
-@patch("silica.router.orchestrator.silica_sanitize")
-@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.sanitize_output")
+@patch("silica.router.orchestrator.validate_ops")
 @patch("silica.router.orchestrator.DRIVER")
-@patch("silica.tools.wrapped.silica_snapshot")
-@patch("silica.router.orchestrator.silica_lint")
-@patch("silica.tools.wrapped.silica_cleanup")
+@patch("silica.router.orchestrator.build_txn")
+@patch("silica.kernel.write.gate.lint_note")
+@patch("silica.kernel.write.gate.archive_source")
 def test_fsm_recipe_end_to_end_flow(
     mock_cleanup, mock_lint, mock_snapshot, mock_driver,
     mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon
@@ -546,8 +547,8 @@ def test_fsm_recipe_end_to_end_flow(
     mock_payload.return_value = {"payload": {"chunk_id": 0}}
     mock_run_distiller.return_value = {"updates": []}
     mock_sanitize.return_value = {"parsed": []}
-    mock_validate.return_value = {"success": True, "rejection_rate": 0.0, "validated_count": 1, "rejected_count": 0}
-    mock_snapshot.return_value = {"txn_id": "txn_123", "inverses": []}
+    mock_validate.return_value = {"success": True, "rejection_rate": 0.0, "validated_count": 1, "rejected_count": 0, "validated_ops": []}
+    mock_snapshot.return_value = Txn(id="txn_123", inverses=[])
     mock_lint.return_value = {"success": True}
     mock_cleanup.return_value = {"success": True}
 
@@ -1017,12 +1018,10 @@ def test_worker_read_only(mock_get_provider, mock_call_llm):
 
     mutation_tools = {
         "silica_run_injector",
-        "silica_bulk_write",
         "silica_move",
         "silica_delete",
         "silica_snapshot",
         "silica_restore",
-        "silica_cleanup",
     }
     for profile in (READER, ROUTER):
         for name in profile.tools:
@@ -1031,7 +1030,7 @@ def test_worker_read_only(mock_get_provider, mock_call_llm):
             assert name not in mutation_tools, f"profile '{profile.name}' exposes mutation tool '{name}'"
 
 
-@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.validate_ops")
 def test_fsm_short_circuit_no_ops(mock_validate):
     # Setup mock validation with 0 validated and 0 rejected (all skip/no-op)
     mock_validate.return_value = {
@@ -1039,8 +1038,7 @@ def test_fsm_short_circuit_no_ops(mock_validate):
         "validated_count": 0,
         "rejected_count": 0,
         "rejection_rate": 0.0,
-        "total": 5,
-    }
+        "total": 5, "validated_ops": []}
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.context["payload"] = {"payload": {"chunk_id": 0}}
@@ -1055,15 +1053,15 @@ def test_fsm_short_circuit_no_ops(mock_validate):
     assert fsm.context["final_status"] == "no_ops"
 
 
-@patch("silica.router.orchestrator.silica_recon")
-@patch("silica.router.orchestrator.silica_payload")
+@patch("silica.router.orchestrator.recon_file")
+@patch("silica.router.orchestrator.payload_chunks")
 @patch("silica.router.states.distill.run_distiller")
-@patch("silica.router.orchestrator.silica_sanitize")
-@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.sanitize_output")
+@patch("silica.router.orchestrator.validate_ops")
 @patch("silica.router.orchestrator.DRIVER")
-@patch("silica.tools.wrapped.silica_snapshot")
-@patch("silica.tools.wrapped.silica_restore")
-@patch("silica.tools.wrapped.silica_cleanup")
+@patch("silica.router.orchestrator.build_txn")
+@patch("silica.kernel.write.gate.apply_inverses")
+@patch("silica.kernel.write.gate.archive_source")
 def test_fsm_create_settle_timeout_rollback(
     mock_cleanup, mock_restore, mock_snapshot, mock_driver,
     mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon
@@ -1073,19 +1071,13 @@ def test_fsm_create_settle_timeout_rollback(
     mock_run_distiller.return_value = {"updates": []}
     mock_sanitize.return_value = {"parsed": [{"op": "write", "path": "test.md", "heading": "Test", "hub": "Hub", "source_basename": "test_fsm_settle.md"}]}
     
-    import json
-    def side_effect_validate(ops_json_path, **kwargs):
-        with open(ops_json_path, 'w', encoding='utf-8') as f:
-            json.dump([{"op": "write", "path": "test.md", "heading": "Test", "hub": "Hub", "source_basename": "test_fsm_settle.md"}], f)
-        return {
-            "success": True, "rejection_rate": 0.0, "validated_count": 1, "rejected_count": 0,
-        }
-    mock_validate.side_effect = side_effect_validate
-    
-    mock_snapshot.return_value = {
-        "txn_id": "txn_123",
-        "inverses": [{"kind": "delete_created", "path": "test.md"}]
+    mock_validate.return_value = {
+        "success": True, "rejection_rate": 0.0, "validated_count": 1, "rejected_count": 0,
+        "validated_ops": [{"op": "write", "path": "test.md", "heading": "Test", "hub": "Hub",
+                           "source_basename": "test_fsm_settle.md"}],
     }
+
+    mock_snapshot.return_value = Txn(id="txn_123", inverses=[{"kind": "delete_created", "path": "test.md"}])
     mock_restore.return_value = {"success": True}
     
     pre_graph = MagicMock()
@@ -1115,14 +1107,14 @@ def test_fsm_create_settle_timeout_rollback(
 # ---------------------------------------------------------------------------
 
 @patch("silica.kernel.write.deferred.get_deferred_store")
-@patch("silica.kernel.write.atomic_write.commit_note_atomic")
+@patch("silica.kernel.write.gate.commit_note_atomic")
 def test_handle_write_partial_failure_defers_and_continues(
     mock_commit, mock_get_store, tmp_path
 ):
     """Partial write failure: committed ops survive, failed ops land in deferred store,
     FSM continues to HUB_UPDATE (no rollback), has_partial_failure is set."""
     import json
-    from silica.kernel.write.atomic_write import NoteCommitResult
+    from silica.kernel.write.gate import NoteCommitResult
     from silica.kernel.write.deferred import DeferredStore
     from silica.kernel.write.ops import InverseOp, InverseOpKind
 
@@ -1171,7 +1163,7 @@ def test_handle_write_partial_failure_defers_and_continues(
     assert "Settle timeout" in bundle["rejection_reasons"].get("TargetDir/B.md", "")
 
 
-@patch("silica.kernel.write.atomic_write.commit_note_atomic")
+@patch("silica.kernel.write.gate.commit_note_atomic")
 def test_handle_write_all_fail_defers_and_continues(mock_commit, tmp_path):
     """When ALL ops fail lint/write, they are deferred and FSM continues (no rollback).
 
@@ -1180,7 +1172,7 @@ def test_handle_write_all_fail_defers_and_continues(mock_commit, tmp_path):
     with has_partial_failure set.
     """
     import json
-    from silica.kernel.write.atomic_write import NoteCommitResult
+    from silica.kernel.write.gate import NoteCommitResult
 
     ops_data = [
         {"op": "write", "path": "TargetDir/A.md", "heading": "A", "hub": "TargetDir",

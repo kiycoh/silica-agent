@@ -91,7 +91,7 @@ def test_heading_ambiguous_token_subset_still_rejects(tmp_vault):
 def test_patch_not_reverted_for_preexisting_violation(tmp_vault):
     """A patch to a user note carrying an [!definizione] callout must land —
     the pre-existing violation is not one the patch introduced."""
-    from silica.kernel.write.atomic_write import commit_note_atomic
+    from silica.kernel.write.gate import commit_note_atomic
     from silica.kernel.write.ops import Op, OpType
     from silica.driver import DRIVER
 
@@ -115,7 +115,7 @@ def test_patch_not_reverted_for_preexisting_violation(tmp_vault):
 def test_patch_reverted_for_newly_introduced_violation(tmp_vault):
     """The gate still bites: a snippet that introduces a NEW unknown callout is
     reverted, proving the baseline subtraction is not a blanket bypass."""
-    from silica.kernel.write.atomic_write import commit_note_atomic
+    from silica.kernel.write.gate import commit_note_atomic
     from silica.kernel.write.ops import Op, OpType
 
     path = "Math/Clean.md"

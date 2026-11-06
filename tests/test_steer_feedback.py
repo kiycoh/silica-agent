@@ -5,7 +5,6 @@ feedback with the previous output echoed beats a flat reasons blob, and the
 steer loop must also cover partial rejections, re-delegating only the
 rejected concepts while validated ops are carried forward.
 """
-import json
 from unittest.mock import patch
 
 from silica.kernel.prep_delegation import render_steer_feedback
@@ -120,7 +119,7 @@ def _fsm_at_validate(parsed=None):
     return fsm
 
 
-@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.validate_ops")
 def test_partial_rejection_steers_only_rejected_concepts(mock_validate):
     mock_validate.return_value = {
         "success": True, "rejection_rate": 0.5, "total": 2,
@@ -150,7 +149,7 @@ def test_partial_rejection_steers_only_rejected_concepts(mock_validate):
     assert "ungrounded claim" in steer
 
 
-@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.validate_ops")
 def test_partial_rejection_specialized_lanes_do_not_steer(mock_validate):
     # near-title → dedup judge; short snippet → expand worker: no steer arc.
     mock_validate.return_value = {
@@ -170,7 +169,7 @@ def test_partial_rejection_specialized_lanes_do_not_steer(mock_validate):
     assert fsm.context.get("chunk_0_steer_attempts", 0) == 0
 
 
-@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.validate_ops")
 def test_partial_steer_respects_budget(mock_validate):
     mock_validate.return_value = {
         "success": True, "rejection_rate": 0.5, "total": 2,
@@ -186,7 +185,7 @@ def test_partial_steer_respects_budget(mock_validate):
     assert "chunk_0_retry_payload" not in fsm.context
 
 
-@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.validate_ops")
 def test_carry_ops_merge_into_next_validate_pass(mock_validate):
     mock_validate.return_value = {
         "success": True, "rejection_rate": 0.0, "total": 2,
@@ -199,10 +198,7 @@ def test_carry_ops_merge_into_next_validate_pass(mock_validate):
     fsm.context["chunk_0_carry_ops"] = [_VALIDATED_ALPHA]
     fsm.step()
 
-    ops_path = mock_validate.call_args.args[0]
-    with open(ops_path, encoding="utf-8") as f:
-        ops = json.load(f)
-    headings = [o["heading"] for o in ops]
+    headings = [o.heading for o in mock_validate.call_args.args[0]]
     # carry ops re-enter the gate FIRST (dedup keeps them ahead of re-emits)
     assert headings == ["Alpha", "Beta"]
     assert "chunk_0_carry_ops" not in fsm.context

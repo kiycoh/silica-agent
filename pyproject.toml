@@ -231,9 +231,6 @@ name = "capabilities (procedural memory) does not import the decision cycle"
 type = "forbidden"
 source_modules = ["silica.capabilities"]
 forbidden_modules = ["silica.router"]
-# Direct imports only: the transitive path via agent.commit -> tools.composed
-# -> tools.runners -> router predates this contract and is a separate finding.
-allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
 name = "capabilities internals are private — consumers go through the package root"

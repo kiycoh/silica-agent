@@ -235,7 +235,7 @@ def test_execute_operations_all_success_ok_true(vault):
 # ---------------------------------------------------------------------------
 
 def test_silica_patch_note_happy_path(vault):
-    from silica.tools.composed import silica_patch_note
+    from silica.tools.notes import silica_patch_note
 
     out = silica_patch_note(
         name="Concepts/Existing.md",
@@ -252,7 +252,7 @@ def test_silica_patch_note_happy_path(vault):
 
 
 def test_silica_patch_note_note_not_found(vault):
-    from silica.tools.composed import silica_patch_note
+    from silica.tools.notes import silica_patch_note
 
     out = silica_patch_note(
         name="Concepts/Nope.md",
@@ -265,7 +265,7 @@ def test_silica_patch_note_note_not_found(vault):
 
 
 def test_silica_patch_note_undo_restores_original(vault):
-    from silica.tools.composed import silica_patch_note
+    from silica.tools.notes import silica_patch_note
 
     original = DRIVER.read_note("Concepts/Existing.md").content
 

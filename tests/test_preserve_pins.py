@@ -20,11 +20,10 @@ ROOT = Path(__file__).resolve().parents[1]
 LOSS_PINS = {
     ("silica/ui/web/server.py", "note_save", "Loss.PERSON"): 1,
     ("silica/cli.py", "_dc_verify", "Loss.PERSON"): 1,
-    ("silica/tools/wrapped.py", "create_note_with_restore_point", "Loss.PERSON"): 1,   # ADR-0155 point 8
-    ("silica/tools/wrapped.py", "silica_restore", "Loss.RESTORE"): 2,
+    ("silica/kernel/write/gate.py", "create_note_with_restore_point", "Loss.PERSON"): 1,   # ADR-0155 point 8
+    ("silica/kernel/write/gate.py", "apply_inverses", "Loss.RESTORE"): 2,
     ("silica/cli.py", "_dc_undo", "Loss.RESTORE"): 1,
     ("silica/ui/web/server.py", "note_history_restore", "Loss.RESTORE"): 1,   # ADR-0144 point 7
-    ("silica/agent/commit.py", "commit_derived", "Loss.RESTORE"): 1,
     ("silica/sources/convert.py", "_doc_to_md", "Loss.STAGED"): 3,   # ADR-0129 point 5: the parent note
     ("silica/sources/convert.py", "_convert_tabular", "Loss.STAGED"): 1,
     ("silica/sources/convert.py", "_write_leaf", "Loss.STAGED"): 1,
@@ -33,14 +32,14 @@ LOSS_PINS = {
     ("silica/cli.py", "_stage_envelope", "Loss.STAGED"): 1,
     ("silica/cli.py", "_promote", "Loss.STAGED"): 1,
     ("silica/ui/web/server.py", "_add_to_vault", "Loss.STAGED"): 1,   # ADR-0121 point 5
-    ("silica/agent/commit.py", "commit_derived", "Loss.DERIVED"): 1,
+    ("silica/kernel/write/gate.py", "commit_derived", "Loss.DERIVED"): 1,
     ("silica/kernel/write/migrate.py", "apply", "Loss.MIGRATE"): 1,
     ("silica/kernel/learn/plans.py", "edit_plan", "Loss.PLAN"): 1,
     ("silica/tools/notes.py", "silica_flag_note", "Loss.RESOLVE if clear else None"): 1,
     ("silica/router/states/finalize.py", "_write_source_leaf", "Loss.CITE"): 1,
     ("silica/kernel/link/sweep.py", "sweep_note", "Loss.UNLINK"): 1,
     ("silica/driver/fs_backend.py", "move", "preserve.Loss.RENAME"): 1,
-    ("silica/tools/wrapped.py", "explicit_links", "Loss.RENAME"): 1,   # ADR-0126 point 3
+    ("silica/kernel/link/rename.py", "explicit_links", "Loss.RENAME"): 1,   # ADR-0126 point 3
 }
 
 FREE_PINS = {
@@ -98,12 +97,13 @@ def test_every_free_key_set_is_pinned():
 def test_the_counts_the_record_states():
     from silica.kernel.write.preserve import _RELAX_ALL, Loss
 
-    # 26: ADR-0155 point 8 added a note written by hand; the ws backend's own
-    # restore, which no product code called, left with the driver's txn verbs.
-    assert sum(LOSS_PINS.values()) == 26
+    # 25: ADR-0155 point 8 added a note written by hand. Two RESTOREs went: the
+    # ws backend's own restore, which no product code called, and commit_derived's
+    # rollback, which now goes through gate.apply_inverses like every other.
+    assert sum(LOSS_PINS.values()) == 25
     off = sum(n for (_f, _fn, v), n in LOSS_PINS.items()
               if Loss[v.rsplit(".", 1)[-1].split()[0]] in _RELAX_ALL)
-    assert off == 20  # STAGED relaxes all, PERSON too: ADR-0129 point 5 and ADR-0155 point 8 add one each
+    assert off == 19  # STAGED relaxes all, PERSON too: ADR-0129 point 5 and ADR-0155 point 8 add one each
     assert sum(FREE_PINS.values()) == 8  # ADR-0143: unset_prop beside set_prop
 
 

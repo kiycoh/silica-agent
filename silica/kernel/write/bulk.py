@@ -3,7 +3,7 @@
 
 """Vault write executor — the single authorised path for applying Ops.
 
-Every write in Silica (FSM bulk write, deferred retry, interactive patch)
+Every write in Silica (the gate's three ways through, interactive patch)
 funnels through here. The per-op-type logic lives in small helpers; `execute_one`
 is the shared single-op entry point and `execute_operations` is the batch loop
 that aggregates results into a BulkResult.
@@ -266,6 +266,11 @@ def _execute_patch(op: Op, path: str) -> dict:
     err = _verify_landed(op, path, new_content)
     if err:
         raise VerifyMismatchError(err)
+    if op.contested_by:
+        # Here, where the flag is written: the judge's contradictions once
+        # reached the run digest only because each caller remembered to say so.
+        from silica.kernel import contested_register
+        contested_register.note(path, True)
     return {"path": path, "op": "patch", "success": True}
 
 
@@ -354,7 +359,8 @@ def execute_operations(ops: list[Op]) -> BulkResult:
 
     Each op is executed via execute_one; failures become FailedOp entries
     without aborting the batch. The return shape (ok/failed/results/total/
-    successful) is the contract consumed by silica_bulk_write and the FSM.
+    successful) is the contract consumed by gate.land_batch, which owns the
+    rollback this loop does not do.
     """
     results: list[dict] = []
     failed_ops: list[FailedOp] = []

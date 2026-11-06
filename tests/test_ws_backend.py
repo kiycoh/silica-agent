@@ -417,16 +417,16 @@ def test_rpc_timeout_drops_pending_entry(wbe):
 def test_rollback_round_trips_prior_content(wbe, monkeypatch):
     from silica.kernel.write.notetype import stamp_type
     from silica.kernel.write.ops import InverseOp, InverseOpKind
-    from silica.tools import wrapped
+    from silica.kernel.write import gate
 
-    monkeypatch.setattr(wrapped, "DRIVER", wbe)
+    monkeypatch.setattr(gate, "DRIVER", wbe)
     ref = NoteRef(name="Gradient", path="Concepts/Gradient.md")
     original = wbe.read_note(ref).content
     wbe.overwrite("Concepts/Gradient.md", "clobbered\n")
     created = wbe.create("Tmp/Scratch.md", "scratch\n")
-    res = wrapped.silica_restore(txn_id="t", inverses=[
-        InverseOp(kind=InverseOpKind.restore_version, path=ref.path, prior_content=original).model_dump(),
-        InverseOp(kind=InverseOpKind.delete_created, path=created.path).model_dump(),
+    res = gate.apply_inverses("t", [
+        InverseOp(kind=InverseOpKind.restore_version, path=ref.path, prior_content=original),
+        InverseOp(kind=InverseOpKind.delete_created, path=created.path),
     ])
     assert res["success"], res
     # The undo goes through the public seam, which stamps the derived `type`.

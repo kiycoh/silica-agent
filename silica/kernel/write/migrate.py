@@ -11,7 +11,6 @@ revertible journal run.
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 from collections.abc import Callable
@@ -324,33 +323,21 @@ def apply(vault: Path | str, plans: list[Plan], migration: Migration = PROVENANC
     """Rewrite every unskipped plan; (notes written, journal run id). The run
     is opened on the first write, so a listing that rewrites nothing leaves
     no empty run for /revert to find."""
-    from silica.driver import DRIVER
-    from silica.kernel.write.ops import InverseOp, InverseOpKind
+    from silica.kernel.write.gate import journaled_write
     from silica.kernel.write.preserve import Loss
-    from silica.kernel.write.undo_journal import get_undo_journal
 
-    journal = get_undo_journal()
     run_id = ""
     n = 0
     for p in plans:
         if p.skip:
             continue
-        before = DRIVER.read_note(p.path).content or ""
         try:
-            after = migration.apply(before)
+            # Confirmed per run and journaled as one revertible run (ADR-0039).
+            landed = journaled_write(p.path, migration.apply, source="migrate", loss=Loss.MIGRATE,
+                                     run=run_id, vault=str(vault))
         except Unrecognized:
             continue
-        if after == before:
-            continue
-        if not run_id:
-            run_id = journal.start_run(source="migrate", vault=str(vault))
-        # Confirmed per run and journaled as one revertible run (ADR-0039).
-        DRIVER.overwrite(p.path, after, loss=Loss.MIGRATE)
-        post = DRIVER.read_note(p.path).content or ""
-        journal.record(
-            run_id,
-            InverseOp(kind=InverseOpKind.restore_version, path=p.path, prior_content=before),
-            hashlib.sha256(post.encode("utf-8")).hexdigest(),
-        )
-        n += 1
+        if landed:
+            run_id = landed
+            n += 1
     return n, run_id

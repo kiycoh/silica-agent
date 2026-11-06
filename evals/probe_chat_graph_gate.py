@@ -63,7 +63,7 @@ WRITERS = {
     "silica_write_note", "silica_patch_note", "silica_move", "silica_delete", "silica_flag_note",
     "silica_run_injector", "silica_autolink", "silica_backlink", "silica_curate",
     "silica_event_create", "silica_event_update", "silica_dedup", "silica_enrich_batch",
-    "silica_anneal", "silica_bulk_write",
+    "silica_anneal",
 }
 # A writer call that needs a model to run: replayed as skipped on both trees.
 NEEDS_MODEL = {"silica_run_injector", "silica_curate", "silica_dedup", "silica_enrich_batch"}
@@ -251,20 +251,20 @@ def _slash(line: str) -> str:
 
 def _slash_delete(path: str) -> tuple[str, dict]:
     """/delete <path>, with the report its helper returned."""
-    import silica.tools.wrapped as wrapped
+    from silica.kernel.write import gate
 
     seen: dict = {}
-    real = wrapped.delete_with_restore_point
+    real = gate.delete_with_restore_point
 
     def spy(*a, **kw):
         seen.update(real(*a, **kw))
         return dict(seen)
 
-    wrapped.delete_with_restore_point = spy
+    gate.delete_with_restore_point = spy
     try:
         return _slash(f"/delete {path}"), seen
     finally:
-        wrapped.delete_with_restore_point = real
+        gate.delete_with_restore_point = real
 
 
 def g1_case(live: Live, path: str, refs: list[str], vault: Path) -> dict:

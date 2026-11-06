@@ -458,7 +458,8 @@ class TestDraftFiling:
         from pathlib import Path
 
         from silica.config import CONFIG
-        from silica.kernel.write.undo_journal import get_undo_journal, revert_run
+        from silica.kernel.write.undo_journal import get_undo_journal
+        from silica.kernel.write.gate import revert_run
 
         tmp_vault.note("Inbox/vo.md", "---\nform: draft\n---\n\ndraft body here\n")
         self._dispatch(tmp_vault, monkeypatch, "/nucleate Inbox/vo.md --target=Videos")

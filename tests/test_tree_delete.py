@@ -133,7 +133,7 @@ def test_a_refused_note_stops_the_folder_and_leaves_the_run(client, monkeypatch)
     """The notes before it stay deleted and undoable; the refused one's
     inverse leaves the run, so the undo neither skips it nor sweeps it."""
     import silica.driver
-    import silica.tools.wrapped as wrapped
+    from silica.kernel.write import gate
     from silica.kernel.write.undo_journal import get_undo_journal
 
     real = silica.driver.get_driver()
@@ -147,7 +147,7 @@ def test_a_refused_note_stops_the_folder_and_leaves_the_run(client, monkeypatch)
         def __getattr__(self, name):
             return getattr(real, name)
 
-    monkeypatch.setattr(wrapped, "DRIVER", Refuses())
+    monkeypatch.setattr(gate, "DRIVER", Refuses())
     tc, _, vault = client
     body = tc.post("/tree/delete", json={"folder": "Corso/ML"}).json()
     assert body["deleted"] == ["Corso/ML/Autoencoders.md"]

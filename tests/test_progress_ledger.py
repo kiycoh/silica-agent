@@ -380,7 +380,7 @@ def test_silica_ledger_digest_tool(tmp_path):
     p.set_status("recon", "done")
     p.save()
 
-    from silica.tools.composed import silica_ledger_digest
+    from silica.tools.runners import silica_ledger_digest
     result = silica_ledger_digest(run_id=p.run_id)
 
     assert "error" not in result
@@ -396,7 +396,7 @@ def test_silica_ledger_digest_tool_latest_run(tmp_path):
     p.add_task("recon", task_id="recon")
     p.save()
 
-    from silica.tools.composed import silica_ledger_digest
+    from silica.tools.runners import silica_ledger_digest
     result = silica_ledger_digest(run_id="")
 
     assert "error" not in result
@@ -405,6 +405,6 @@ def test_silica_ledger_digest_tool_latest_run(tmp_path):
 
 def test_silica_ledger_digest_tool_unknown_run(tmp_path):
 
-    from silica.tools.composed import silica_ledger_digest
+    from silica.tools.runners import silica_ledger_digest
     result = silica_ledger_digest(run_id="doesnotexist")
     assert "error" in result

@@ -119,7 +119,7 @@ class TestGenerateTaxonomyTool:
     def test_silica_generate_taxonomy_lists_files(self, tmp_path):
         from unittest.mock import MagicMock, patch
         from silica.driver.base import NoteRef
-        from silica.tools.composed import silica_generate_taxonomy
+        from silica.tools.runners import silica_generate_taxonomy
 
         with patch("silica.model.llm.call_llm") as mock_call_llm, \
              patch("silica.driver.DRIVER") as mock_driver:
@@ -165,7 +165,7 @@ class TestGenerateTaxonomyTool:
 
     def test_silica_generate_taxonomy_merge_includes_existing(self, tmp_path):
         from unittest.mock import MagicMock, patch
-        from silica.tools.composed import silica_generate_taxonomy
+        from silica.tools.runners import silica_generate_taxonomy
 
         save_file = tmp_path / "taxonomy.yaml"
         Taxonomy(
@@ -208,7 +208,7 @@ class TestGenerateTaxonomyTool:
     def test_silica_generate_taxonomy_merge_without_existing_file(self, tmp_path):
         """merge=True with no existing taxonomy behaves like a plain generation."""
         from unittest.mock import MagicMock, patch
-        from silica.tools.composed import silica_generate_taxonomy
+        from silica.tools.runners import silica_generate_taxonomy
 
         save_file = tmp_path / "taxonomy.yaml"  # does not exist yet
 

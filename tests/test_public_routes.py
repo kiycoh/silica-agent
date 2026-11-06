@@ -596,7 +596,7 @@ def test_the_check_writes_only_from_this_origin(client, tmp_vault):
 
 def test_a_note_is_marked_through_the_route_and_an_untouched_one_is_refused(client, tmp_vault):
     from silica.kernel.write.ops import InverseOp, InverseOpKind
-    from silica.kernel.write.undo_journal import _content_hash, get_undo_journal
+    from silica.kernel.write.undo_journal import content_hash, get_undo_journal
 
     tc, root = client
     _with_a_book(tmp_vault, tc, root)
@@ -604,7 +604,7 @@ def test_a_note_is_marked_through_the_route_and_an_untouched_one_is_refused(clie
     store = get_undo_journal()
     run = store.start_run(vault=str(root / "vault"))
     store.record(run, InverseOp(kind=InverseOpKind.delete_created, path=note),
-                 _content_hash((root / "vault" / note).read_text(encoding="utf-8")))
+                 content_hash((root / "vault" / note).read_text(encoding="utf-8")))
     tc.get("/public/check", params={"vault": "memory"})
     r = tc.post("/public/check/note", json={"vault": "memory", "path": note, "on": True})
     assert r.status_code == 400 and "Not edited" in r.json()["detail"]

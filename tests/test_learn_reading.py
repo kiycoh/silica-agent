@@ -470,10 +470,10 @@ def test_a_card_cut_twice_says_why_and_the_raw_text_never_reaches_a_hosted_page(
 def test_a_card_whose_note_left_the_step_says_so_and_no_call_is_paid(client):
     """That sentence is written for the reader: as a raw error it fell to "Something
     went wrong", and a hosted page, which has no detail, had nothing else."""
-    from silica.kernel.learn import plans
+    from silica.kernel.write.gate import journaled_write
 
     reading.begin("Plans/Esame.md", 0, ask=fake_ask)
-    plans._journaled("Plans/Esame.md", lambda t: t.replace("[[Funzione gradino]], ", ""), source="learn")
+    journaled_write("Plans/Esame.md", lambda t: t.replace("[[Funzione gradino]], ", ""), source="learn")
     PROMPTS.clear()
     n = next(c["n"] for c in _shown(client)["cards"] if c["title"] == "Funzione gradino")
     for t in reading.reach("Plans/Esame.md", 0, n, ask=fake_ask):

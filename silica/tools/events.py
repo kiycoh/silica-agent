@@ -103,7 +103,7 @@ def create_event(title: str, start: str, *, end: str = "", rrule: str = "",
     from silica.kernel.base.manifest import in_write_dir
     from silica.kernel.workqueue import path_lease
     from silica.kernel.write import templates as tpl
-    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.checkpoints import checkpoint_landed
 
     title = title.strip()
     if not title:
@@ -141,20 +141,9 @@ def create_event(title: str, start: str, *, end: str = "", rrule: str = "",
         except Exception as e:
             return {"error": f"Failed to create event note '{path}': {e}"}
 
-        checkpoint_depth = None
-        checkpoint_ok = False
-        try:
-            # What landed, not what was asked: the driver composes the frontmatter, and
-            # a stored body that is not the disk reads as a hand edit at the next write.
-            landed = DRIVER.read_note(ref.path).content
-            checkpoint_depth = get_checkpoint_store().push(path, None, landed)  # None: created, /undo removes it
-            checkpoint_ok = True
-        except Exception as e:
-            logger.warning("checkpoint push failed for '%s': %s — /undo has no "
-                           "restore point for this write", path, e)
+        checkpoint = checkpoint_landed(path, None)  # None: created, /undo removes it
 
-    return {"op": "write", "success": True, "path": ref.path or path,
-            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
+    return {"op": "write", "success": True, "path": ref.path or path, **checkpoint}
 
 
 @tool(cls="composed", collapse="eager")
@@ -166,7 +155,7 @@ def silica_event_update(note: Annotated[str, Field(description='Event note stem 
     from silica.kernel.calendar.model import scan_events, validate_event
     from silica.kernel.workqueue import path_lease
     from silica.kernel.base import frontmatter
-    from silica.kernel.write.checkpoints import push_landed
+    from silica.kernel.write.checkpoints import checkpoint_landed
     from silica.kernel.write.templates import upsert_props
 
     changes = {k: v.strip() for k, v in
@@ -203,12 +192,7 @@ def silica_event_update(note: Annotated[str, Field(description='Event note stem 
         except Exception as e:
             return {"error": f"Failed to update '{target.path}': {e}"}
 
-        checkpoint_ok = False
-        try:
-            push_landed(target.path, prior, new_content)
-            checkpoint_ok = True
-        except Exception as e:
-            logger.warning("checkpoint push failed for '%s': %s", target.path, e)
+        checkpoint_ok = checkpoint_landed(target.path, prior, new_content)["checkpoint_ok"]
 
     if "start" in changes or "rrule" in changes:
         # An event moved earlier than its mark would otherwise never remind.

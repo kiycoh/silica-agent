@@ -22,7 +22,8 @@ from silica.kernel.progress import RunManifestEntry
 from silica.kernel.base.manifest import archive_path_for, source_key
 from silica.kernel.write import provenance as P
 from silica.kernel.write.ops import InverseOp, InverseOpKind
-from silica.kernel.write.undo_journal import UndoJournalStore, resolve_source, revert_source
+from silica.kernel.write.undo_journal import UndoJournalStore
+from silica.kernel.write.gate import resolve_source, revert_source
 from silica.router.states import finalize
 
 

@@ -17,8 +17,8 @@ import logging
 import os
 from typing import Any
 
-from silica.agent.commit import commit_ops
-from silica.agent.bounds import expand_bounds
+from silica.kernel.write.gate import commit_ops
+from silica.kernel.write.gate import expand_bounds
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.validate import min_write_snippet_chars
 from silica.kernel.workqueue import WorkItem

@@ -18,7 +18,7 @@ def test_revert_invokes_revert_run(monkeypatch):
     def fake_revert(run_id, **kw):
         calls["run_id"] = run_id
         return {"run_id": run_id, "reverted": ["a.md"], "skipped": [], "errors": []}
-    monkeypatch.setattr("silica.kernel.write.undo_journal.revert_run", fake_revert)
+    monkeypatch.setattr("silica.kernel.link.sweep.revert_and_sweep", fake_revert)
 
     handled = _handle_direct_shortcut("/revert", [])
     assert handled is True

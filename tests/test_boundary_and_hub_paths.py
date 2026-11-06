@@ -54,30 +54,30 @@ def test_in_write_dir_composes_and_is_idempotent(mirror_vault):
 def test_archive_skips_a_source_outside_the_boundary(mirror_vault, monkeypatch):
     """The defect: `/nucleate` under safe mode moved the user's real inbox note
     to `<vault>/done/`, outside the mirror it was supposed to stay out of."""
-    from silica.tools import wrapped
+    from silica.kernel.write import gate
 
     moved: list[tuple[str, str]] = []
     # The module global, not an attribute ON the proxy: reading through the
     # proxy builds the real driver against this tmp vault and leaves it cached
     # for every later test.
-    monkeypatch.setattr(wrapped, "DRIVER", _RecordingDriver(moved))
+    monkeypatch.setattr(gate, "DRIVER", _RecordingDriver(moved))
 
-    res = wrapped.silica_cleanup("Inbox/note.md")
+    res = gate.archive_source("Inbox/note.md")
 
     assert moved == [], "a source outside the boundary must not be moved"
     assert res["skipped"] == "Inbox/note.md"
 
 
 def test_archive_of_a_source_inside_the_boundary_lands_inside_it(mirror_vault, monkeypatch):
-    from silica.tools import wrapped
+    from silica.kernel.write import gate
 
     moved: list[tuple[str, str]] = []
     # The module global, not an attribute ON the proxy: reading through the
     # proxy builds the real driver against this tmp vault and leaves it cached
     # for every later test.
-    monkeypatch.setattr(wrapped, "DRIVER", _RecordingDriver(moved))
+    monkeypatch.setattr(gate, "DRIVER", _RecordingDriver(moved))
 
-    wrapped.silica_cleanup("silica/Inbox/note.md")
+    gate.archive_source("silica/Inbox/note.md")
 
     assert moved == [("silica/Inbox/note.md", "silica/Done/note.md")]
 
@@ -86,7 +86,7 @@ def test_no_boundary_leaves_the_archive_at_the_vault_root(tmp_path, monkeypatch)
     """A vault that declares nothing behaves exactly as before."""
     from silica.kernel.base import manifest as vm
     from silica.config import CONFIG
-    from silica.tools import wrapped
+    from silica.kernel.write import gate
 
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     vm.reset_manifest_cache()
@@ -94,9 +94,9 @@ def test_no_boundary_leaves_the_archive_at_the_vault_root(tmp_path, monkeypatch)
     # The module global, not an attribute ON the proxy: reading through the
     # proxy builds the real driver against this tmp vault and leaves it cached
     # for every later test.
-    monkeypatch.setattr(wrapped, "DRIVER", _RecordingDriver(moved))
+    monkeypatch.setattr(gate, "DRIVER", _RecordingDriver(moved))
 
-    wrapped.silica_cleanup("Inbox/note.md")
+    gate.archive_source("Inbox/note.md")
 
     assert moved == [("Inbox/note.md", "Done/note.md")]
     vm.reset_manifest_cache()
@@ -110,15 +110,15 @@ def test_archive_mirrors_the_inbox_tree(tmp_path, monkeypatch):
     """
     from silica.kernel.base import manifest as vm
     from silica.config import CONFIG
-    from silica.tools import wrapped
+    from silica.kernel.write import gate
 
     (tmp_path / "Inbox" / "Kant" / "Critica").mkdir(parents=True)
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     vm.reset_manifest_cache()
     moved: list[tuple[str, str]] = []
-    monkeypatch.setattr(wrapped, "DRIVER", _RecordingDriver(moved))
+    monkeypatch.setattr(gate, "DRIVER", _RecordingDriver(moved))
 
-    wrapped.silica_cleanup("Inbox/Kant/Critica/ch3.md")
+    gate.archive_source("Inbox/Kant/Critica/ch3.md")
 
     assert moved == [("Inbox/Kant/Critica/ch3.md", "Done/Kant/Critica/ch3.md")]
     vm.reset_manifest_cache()
@@ -132,16 +132,16 @@ def test_archive_keeps_a_legacy_lowercase_done_where_it_is(tmp_path, monkeypatch
     """
     from silica.kernel.base import manifest as vm
     from silica.config import CONFIG
-    from silica.tools import wrapped
+    from silica.kernel.write import gate
 
     (tmp_path / "Inbox").mkdir()
     (tmp_path / "done").mkdir()
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     vm.reset_manifest_cache()
     moved: list[tuple[str, str]] = []
-    monkeypatch.setattr(wrapped, "DRIVER", _RecordingDriver(moved))
+    monkeypatch.setattr(gate, "DRIVER", _RecordingDriver(moved))
 
-    wrapped.silica_cleanup("Inbox/note.md")
+    gate.archive_source("Inbox/note.md")
 
     assert moved == [("Inbox/note.md", "done/note.md")]
     vm.reset_manifest_cache()
@@ -287,7 +287,7 @@ def test_collision_prefers_the_original_over_its_mirror_copy(mirror_vault):
     vault's state (real run: concept 'PCA' collided with the note that same run
     had written minutes earlier)."""
     from silica.driver.base import NoteRef
-    from silica.tools.pipeline import _prefers
+    from silica.kernel.text.vault_recon import _prefers
 
     original = NoteRef(name="PCA", path="Matematica/PCA.md")
     copy = NoteRef(name="PCA", path="silica/Matematica/PCA.md")
@@ -301,7 +301,7 @@ def test_collision_preference_is_inert_without_safe_mode(tmp_path, monkeypatch):
     from silica.kernel.base import manifest as vm
     from silica.config import CONFIG
     from silica.driver.base import NoteRef
-    from silica.tools.pipeline import _prefers
+    from silica.kernel.text.vault_recon import _prefers
 
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     vm.reset_manifest_cache()

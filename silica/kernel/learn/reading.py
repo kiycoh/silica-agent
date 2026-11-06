@@ -23,6 +23,7 @@ marked, never dropped; an answer the next note does not hold is not shown.
 from __future__ import annotations
 
 from silica.config import silica_home
+from silica.kernel.write.gate import journaled_write
 
 import hashlib
 import heapq
@@ -751,7 +752,7 @@ def write_one(plan_path: str, step: int, n: int, ask=None) -> None:
         return _swap_card(now, n, _card_lines(n, card))
 
     with _NOTE_LOCK:
-        plans._journaled(path, mutate, source="learn")
+        journaled_write(path, mutate, source="learn")
 
 
 def _write_behind(plan_path: str, step: int, n: int, ask) -> None:
@@ -820,7 +821,7 @@ def _save(path: str, title: str, body: str, props: dict) -> None:
         keys.update(props)
         return frontmatter.dump(keys, full)
 
-    plans._journaled(path, mutate, source="learn")
+    journaled_write(path, mutate, source="learn")
 
 
 # What is being written now and why a card failed: kept in memory, because after

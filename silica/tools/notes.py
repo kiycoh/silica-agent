@@ -3,13 +3,12 @@
 
 """Single-note tools — fast-path create/patch with /undo checkpoints.
 
-No temp-file + bulk_write round-trip: these are the interactive-edit
-counterparts of the batch pipeline in silica.tools.pipeline.
+The interactive-edit counterparts of the batch gate in kernel.write.gate: one
+note, no snapshot, a checkpoint for /undo instead of a journal run.
 """
 from __future__ import annotations
 
 
-import logging
 import re
 from typing import Annotated, Any
 
@@ -18,9 +17,6 @@ from pydantic import Field
 from silica.driver import DRIVER
 from silica.tools import tool
 from silica.kernel.write.ops import Op, OpType
-
-logger = logging.getLogger(__name__)
-
 
 # One description, two tools: write_note and patch_note bind `documents:` the
 # same way, and a model that learns the contract on one must read the same words
@@ -121,7 +117,7 @@ def silica_patch_note(
     from silica.kernel.base.layout import contain_in_vault
     from silica.kernel.write import templates as tpl
     from silica.kernel.write.bulk import execute_one
-    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.checkpoints import checkpoint_landed
     from silica.kernel.workqueue import path_lease
 
     docs: list[str] = []
@@ -204,23 +200,9 @@ def silica_patch_note(
             except Exception:
                 pass  # cache hygiene must never fail the write
 
-        # Record the resulting on-disk content as a restore point.
-        checkpoint_depth = None
-        checkpoint_ok = False
-        try:
-            new_content = DRIVER.read_note(path).content
-            checkpoint_depth = get_checkpoint_store().push(path, prior_content, new_content)
-            checkpoint_ok = True
-        except Exception as e:
-            # A patch that succeeded must not be reported as failed just because
-            # the undo bookkeeping hiccuped; undo is best-effort. But these
-            # writes are offered as non-destructive on the strength of /undo,
-            # so a missing restore point has to be visible, not silent.
-            logger.warning("checkpoint push failed for '%s': %s — /undo has no "
-                           "restore point for this write", path, e)
+        checkpoint = checkpoint_landed(path, prior_content)
 
-    return {**result, "note": name, "path": path,
-            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok,
+    return {**result, "note": name, "path": path, **checkpoint,
             **({"warning": mermaid_warning} if mermaid_warning else {})}
 
 
@@ -236,7 +218,8 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
     """
     import datetime
 
-    from silica.kernel.write.checkpoints import push_landed
+    from silica.kernel import contested_register
+    from silica.kernel.write.checkpoints import checkpoint_landed
     from silica.kernel.write.contested import (
         contested_refs,
         mark_contested,
@@ -282,23 +265,9 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
     except Exception as e:
         return {"error": f"Failed to write '{name}': {e}"}
 
-    try:
-        from silica.kernel import contested_register
-        contested_register.add(path) if still_contested else contested_register.discard(path)
-    except Exception:
-        pass  # digest index is best-effort; the note's frontmatter is the truth
-
-    checkpoint_depth = None
-    checkpoint_ok = False
-    try:
-        checkpoint_depth = push_landed(path, prior_content, new_content)
-        checkpoint_ok = True
-    except Exception as e:
-        logger.warning("checkpoint push failed for '%s': %s — /undo has no "
-                       "restore point for this write", path, e)
-
+    contested_register.note(path, still_contested)
     return {"note": name, "path": path, "contested": still_contested,
-            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
+            **checkpoint_landed(path, prior_content, new_content)}
 
 
 @tool(cls="composed", collapse="eager")
@@ -312,7 +281,7 @@ def silica_require(
     for a pair the user accepted; otherwise propose the pair. Revertible with /undo.
     """
     from silica.kernel.base import frontmatter
-    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.checkpoints import checkpoint_landed
 
     try:
         nc = DRIVER.read_note(name)
@@ -346,20 +315,10 @@ def silica_require(
             DRIVER.set_prop(path, "requires", [f"[[{n}]]" for n in wanted])
         else:
             unset(path, "requires")
-        new_content = DRIVER.read_note(path).content
     except Exception as e:
         return {"error": f"Failed to write '{name}': {e}"}
 
-    checkpoint_depth = None
-    checkpoint_ok = False
-    try:
-        checkpoint_depth = get_checkpoint_store().push(path, nc.content, new_content)
-        checkpoint_ok = True
-    except Exception as e:
-        logger.warning("checkpoint push failed for '%s': %s — /undo has no "
-                       "restore point for this write", path, e)
-    return {"note": name, "path": path, "requires": wanted,
-            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
+    return {"note": name, "path": path, "requires": wanted, **checkpoint_landed(path, nc.content)}
 
 
 @tool(cls="composed", collapse="eager")
@@ -388,7 +347,7 @@ def silica_write_note(
     from silica.config import CONFIG
     from silica.kernel.base.layout import contain_in_vault
     from silica.kernel.write import templates as tpl
-    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.checkpoints import checkpoint_landed
     from silica.kernel.workqueue import path_lease
 
     # `path` is model-supplied and this fast path never runs validate_operations,
@@ -469,18 +428,7 @@ def silica_write_note(
             except Exception:
                 pass  # cache hygiene must never fail the write
 
-        checkpoint_depth = None
-        checkpoint_ok = False
-        try:
-            # What landed, not what was asked: the driver composes the frontmatter, and
-            # a stored body that is not the disk reads as a hand edit at the next write.
-            landed = DRIVER.read_note(ref.path).content
-            checkpoint_depth = get_checkpoint_store().push(path, None, landed)  # None: created, /undo removes it
-            checkpoint_ok = True
-        except Exception as e:
-            logger.warning("checkpoint push failed for '%s': %s — /undo has no "
-                           "restore point for this write", path, e)
+        checkpoint = checkpoint_landed(path, None)  # None: created, /undo removes it
 
-    return {"op": "write", "success": True, "path": ref.path or path,
-            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok,
+    return {"op": "write", "success": True, "path": ref.path or path, **checkpoint,
             **({"warning": mermaid_warning} if mermaid_warning else {})}

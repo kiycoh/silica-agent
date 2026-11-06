@@ -84,20 +84,25 @@ def test_consume_cancelled_item_narrates_cancelled(narrator):
     assert sub[-1]["payload"]["phase"] == "pre_handle"
 
 
+def _stub_gate(monkeypatch, op, landed):
+    from silica.kernel.write import gate
+    from silica.kernel.write.ops import Txn
+
+    monkeypatch.setattr(gate, "validate_ops", lambda *a, **k: {
+        "validated_count": 1, "validated_ops": [op.model_dump()]})
+    monkeypatch.setattr(gate, "build_txn", lambda *a, **k: Txn(id="t" * 12))
+    monkeypatch.setattr(gate, "execute_operations", lambda *a, **k: landed)
+    monkeypatch.setattr(gate, "lint_note", lambda *a, **k: {"success": True})
+    return gate
+
+
 def test_commit_ops_narrates_proposed_then_committed(narrator, monkeypatch):
-    import silica.agent.commit as commit
-    import silica.tools.composed as composed
-    import silica.tools.wrapped as wrapped
-    from silica.kernel.write.ops import Op, OpType
+    from silica.kernel.write.ops import BulkResult, Op, OpType
 
     op = Op(op=OpType.patch, heading="X", source_basename="s.md", path="Concepts/X.md",
             snippet="body")
-    monkeypatch.setattr(composed, "silica_validate_ops", lambda *a, **k: {"validated_count": 1})
-    monkeypatch.setattr(commit, "load_ops", lambda _p: [op])
-    monkeypatch.setattr(wrapped, "silica_snapshot", lambda *a, **k: {"txn_id": "t" * 12, "inverses": []})
-    monkeypatch.setattr(composed, "silica_bulk_write", lambda *a, **k: {"successful": 1, "total": 1})
-    monkeypatch.setattr(composed, "silica_lint", lambda *a, **k: {"success": True})
-    res = commit.commit_ops([op])
+    gate = _stub_gate(monkeypatch, op, BulkResult(ok=True, failed=[], results=[], total=1, successful=1))
+    res = gate.commit_ops([op])
     assert res["status"] == "committed"
     writes = [b for b in _beats(narrator) if b["kind"] == "write"]
     assert [b["status"] for b in writes] == ["proposed", "committed"]
@@ -106,23 +111,19 @@ def test_commit_ops_narrates_proposed_then_committed(narrator, monkeypatch):
 
 
 def test_commit_ops_rollback_narrates_rolled_back(narrator, monkeypatch):
-    import silica.agent.commit as commit
-    import silica.tools.composed as composed
-    import silica.tools.wrapped as wrapped
-    from silica.kernel.write.ops import Op, OpType
+    from silica.kernel.write.ops import BulkResult, FailedOp, Op, OpType
 
     op = Op(op=OpType.patch, heading="X", source_basename="s.md", path="Concepts/X.md",
             snippet="body")
-    monkeypatch.setattr(composed, "silica_validate_ops", lambda *a, **k: {"validated_count": 1})
-    monkeypatch.setattr(commit, "load_ops", lambda _p: [op])
-    monkeypatch.setattr(wrapped, "silica_snapshot", lambda *a, **k: {"txn_id": "t" * 12, "inverses": []})
-    monkeypatch.setattr(composed, "silica_bulk_write", lambda *a, **k: {"error": "disk full"})
-    monkeypatch.setattr(wrapped, "silica_restore", lambda *a, **k: None)
-    res = commit.commit_ops([op])
+    gate = _stub_gate(monkeypatch, op, BulkResult(
+        ok=False, failed=[FailedOp(index=0, path="Concepts/X.md", error="disk full")],
+        results=[], total=1, successful=0))
+    monkeypatch.setattr(gate, "apply_inverses", lambda *a, **k: {"errors": []})
+    res = gate.commit_ops([op])
     assert res["status"] == "rolled_back"
     writes = [b for b in _beats(narrator) if b["kind"] == "write"]
     assert [b["status"] for b in writes] == ["proposed", "rolled_back"]
-    assert "disk full" in writes[1]["summary"]
+    assert "all write ops failed" in writes[1]["summary"]
 
 
 def test_gui_turn_roundtrip_replay_and_endpoints(narrator, monkeypatch, tmp_path):

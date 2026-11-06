@@ -18,8 +18,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from silica.agent.bounds import enrich_bounds
-from silica.agent.commit import commit_ops
+from silica.kernel.write.gate import enrich_bounds
+from silica.kernel.write.gate import commit_ops
 from silica.capabilities._base import emit_feedback, load_prompt, parse_content, read_or_skip
 from silica.kernel.workqueue import WorkItem
 from silica.kernel.write.ops import Op, OpType

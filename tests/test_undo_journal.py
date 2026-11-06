@@ -1,7 +1,8 @@
 # tests/test_undo_journal.py
 import hashlib
 from silica.kernel.write.ops import InverseOp, InverseOpKind
-from silica.kernel.write.undo_journal import UndoJournalStore, revert_run
+from silica.kernel.write.undo_journal import UndoJournalStore
+from silica.kernel.write.gate import revert_run
 
 
 def _inv(path: str, content: str = "old") -> InverseOp:
@@ -42,7 +43,7 @@ def test_last_active_run_ignores_reverted(tmp_path):
 def test_write_over_existing_note_yields_restore_inverse(tmp_vault):
     """A write op whose path already holds a note must undo by RESTORING it,
     not deleting it — else /revert turns an accidental clobber into data loss."""
-    from silica.tools.wrapped import build_txn
+    from silica.kernel.write.gate import build_txn
     from silica.kernel.write.ops import Op, OpType
 
     path = tmp_vault.note("Ideas/Note.md", "PRE-EXISTING body")
@@ -57,7 +58,7 @@ def test_write_over_existing_note_yields_restore_inverse(tmp_vault):
 def test_write_new_note_yields_delete_inverse(tmp_vault):
     """A write to a genuinely new path still undoes by deletion (unchanged)."""
     import os
-    from silica.tools.wrapped import build_txn
+    from silica.kernel.write.gate import build_txn
     from silica.kernel.write.ops import Op, OpType
 
     seed = tmp_vault.note("seed.md", "seed")            # materialise the vault
@@ -241,7 +242,8 @@ def test_end_of_run_edits_stay_revertable(tmp_vault, tmp_path):
     that — so /revert refused the run's own writes as "modified since inject"
     (6 of 10 in one real run). Re-hashing when the run is truly over restores
     coverage."""
-    from silica.kernel.write.undo_journal import UndoJournalStore, revert_run
+    from silica.kernel.write.undo_journal import UndoJournalStore
+    from silica.kernel.write.gate import revert_run
 
     store = UndoJournalStore(tmp_path / "j.db")
     p = tmp_vault.note("N.md", "written by the run")
@@ -265,7 +267,8 @@ def test_chained_inverses_for_one_path_all_apply(tmp_vault, tmp_path):
     FINAL content — so the older link of the chain always failed the guard.
     Once the newest inverse for a path passes and applies, the older ones are
     the chain's own history and apply unconditionally."""
-    from silica.kernel.write.undo_journal import UndoJournalStore, revert_run
+    from silica.kernel.write.undo_journal import UndoJournalStore
+    from silica.kernel.write.gate import revert_run
 
     store = UndoJournalStore(tmp_path / "j.db")
     p = tmp_vault.note("N.md", "final")
@@ -302,7 +305,8 @@ def test_partial_revert_unlinks_dangling_refs_in_survivors(tmp_vault, tmp_path):
     pointing at a dead target ([[Congestion Window]] in the hub, observed).
     After a partial revert the survivors' links to the deleted notes are
     unlinked back to plain text."""
-    from silica.kernel.write.undo_journal import UndoJournalStore, revert_run
+    from silica.kernel.link.sweep import revert_and_sweep
+    from silica.kernel.write.undo_journal import UndoJournalStore
 
     store = UndoJournalStore(tmp_path / "j.db")
     tmp_vault.note("Fresh.md", "# Fresh\n")
@@ -316,7 +320,7 @@ def test_partial_revert_unlinks_dangling_refs_in_survivors(tmp_vault, tmp_path):
     # The user edited the hub after the run: it must survive the revert...
     tmp_vault.write(hub, "my own words + see [[Fresh]] for more")
 
-    res = revert_run(run_id, store=store)
+    res = revert_and_sweep(run_id, store=store)
 
     assert res["reverted"] == ["Fresh.md"]
     assert [s["path"] for s in res["skipped"]] == ["hub.md"]
@@ -342,6 +346,7 @@ def test_match_runs_takes_a_journal_or_ledger_id_whole_or_by_prefix(tmp_path):
 def test_revert_by_the_id_status_prints_takes_back_every_journal_run_under_it(tmp_path, monkeypatch):
     from silica import cli
     from silica.config import CONFIG
+    from silica.kernel.link import sweep
     from silica.kernel.write import undo_journal
 
     store = UndoJournalStore(tmp_path / "j.db")
@@ -352,7 +357,7 @@ def test_revert_by_the_id_status_prints_takes_back_every_journal_run_under_it(tm
     reverted = []
     monkeypatch.setattr(CONFIG, "vault_path", "/v")
     monkeypatch.setattr(undo_journal, "get_undo_journal", lambda: store)
-    monkeypatch.setattr(undo_journal, "revert_run",
+    monkeypatch.setattr(sweep, "revert_and_sweep",
                         lambda run_id: reverted.append(run_id) or {"reverted": [], "skipped": [], "errors": []})
     monkeypatch.setattr(cli, "_revert_zotero", lambda run_id: None)
 

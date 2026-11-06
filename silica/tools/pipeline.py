@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Pipeline tools — the mechanical injector stages as system tools.
+"""Pipeline tools — the deferred-ops retry path.
 
-Recon → payload → sanitize → validate → bulk-write → lint, plus the
-deferred-ops retry path. The per-stage tools are registered internal=True:
-the InjectorFSM drives them programmatically and they are hidden from the
-main agent's default toolset (the full run lives in silica.tools.runners,
-exposed as silica_run_injector). Only the deferred retry is agent-facing.
+The injector's own stages are plain functions the FSM calls (kernel.text for
+recon, payload and sanitize, kernel.write for validate and the gate); the full
+run lives in silica.tools.runners, exposed as silica_run_injector. What is left
+here is what the model can reach: retrying and repairing what the gate deferred.
 """
 from __future__ import annotations
 
@@ -20,8 +19,7 @@ from pydantic import Field
 
 from silica.driver import DRIVER
 from silica.tools import tool
-from silica.kernel.write.ops import OpType
-from silica.kernel.write.ops_io import load_ops, dump_ops
+from silica.kernel.write.ops import BulkResult, Op, OpType
 
 logger = logging.getLogger(__name__)
 
@@ -94,344 +92,25 @@ def _link_recovered_writes(
         logger.warning("anneal: hub MOC update failed (non-fatal): %s", e)
 
 
-def _recon_embedder():
-    """Pool ranker for recon; None (=> mined-rank fallback) when unavailable.
+def _land_recovered(validated: list[Op], content_hash: str, bundle: dict) -> BulkResult:
+    """The whole landing of ops recovered outside the FSM: snapshot, write,
+    rollback on any failure, then the stages the FSM would have run. Both ways
+    in share it because each skipped a stage in turn: 5 of 94 notes sat on disk
+    with no inverse and no record on a 3-paper library gate (2026-08-18), so
+    `/revert` walked past them and `check_renucleate` reported the source as
+    never nucleated, and the old steer commit path skipped the edges as well.
+    The boundary anneal runs in the FSM's `finally`, after CLEANUP.
 
-    Module-level seam so tests can disable the network embedder (see conftest)
-    and keep recon deterministic; production uses the real embedder.
+    Edges before the record: the journal hashes what these two passes leave.
     """
-    try:
-        from silica.model.providers import get_embedder
-        from silica.config import CONFIG
-        return get_embedder(CONFIG)
-    except Exception:
-        return None
+    from silica.kernel.write import gate
 
-
-def _same_note(ref_a, ref_b) -> bool:
-    """Path-safe comparison between two NoteRefs — handles slashes, casing, and .md suffix."""
-    import os
-    def norm(r):
-        p = r.path or r.name
-        return os.path.normcase(p.replace("\\", "/").removesuffix(".md").strip("/"))
-    return norm(ref_a) == norm(ref_b)
-
-
-def _prefers(candidate, incumbent) -> bool:
-    """True when `candidate` is the vault original and `incumbent` its mirror copy.
-
-    Only under safe mode is a note ever present twice; everywhere else this
-    answers False and grouping keeps its first hit exactly as before.
-    """
-    from silica.kernel.base.manifest import active_write_dir, within
-    from silica.kernel.base.manifest import SAFE_WRITE_DIR
-
-    if active_write_dir() != SAFE_WRITE_DIR:
-        return False
-    a, b = candidate.path or "", incumbent.path or ""
-    return bool(a and b) and within(b, SAFE_WRITE_DIR) and not within(a, SAFE_WRITE_DIR)
-
-
-@tool(cls="composed", internal=True)
-def silica_recon(inbox_file: Annotated[str, Field(description='Path to the inbox file to analyze')], limit: Annotated[int, Field(description='Limit for concept extraction')] = 0) -> dict[str, Any]:
-    """Mechanical extraction of concepts from an inbox file and searching for collisions in the vault."""
-    from silica.kernel.text.recon import (
-        collision_priority, is_title_match, mentions_whole_word, rank_hits,
-    )
-    from silica.kernel.text.keyphrase import extract_keyphrases
-    from silica.config import CONFIG
-
-    try:
-        nc = DRIVER.read_note(inbox_file)
-    except RuntimeError:
-        return {"error": f"File not found: {inbox_file}"}
-
-    embedder = _recon_embedder()
-    cands = extract_keyphrases(
-        nc.content,
-        lang=CONFIG.cooccurrence_lang, embedder=embedder,
-    )
-
-    concepts = [c.phrase for c in cands]
-    if not concepts:
-        return {"file": inbox_file, "collisions": [], "new_concepts": []}
-
-    collisions = []
-    new_concepts = []
-    
-    batch = DRIVER.search_context_batch(concepts)   # one eval instead of N
-    for c in concepts:
-        hits = batch.get(c, [])
-        if not hits:
-            new_concepts.append(c)
-            continue
-            
-        # Group hits by ref
-        from silica.kernel.base.layout import is_inbox_path
-        grouped = {}
-        for h in hits:
-            # Casefolded: the archive is `Done` since 2026-08-23 while a vault
-            # that predates the rename keeps its `done`, and an archived source
-            # registered as a collision target dooms every downstream op.
-            _p = (h.ref.path or '').replace('\\', '/').casefold()
-            if '/done/' in _p or _p.startswith('done/'):
-                continue
-            # Inbox notes are staging, never collision targets: registering one
-            # as vault_collision dooms every downstream op (patch-the-inbox is
-            # forbidden, patch-the-right-note mismatches the expected collision).
-            if h.ref.path and is_inbox_path(h.ref.path):
-                continue
-            if _same_note(h.ref, nc.ref):
-                continue
-            # Whole-word only (see mentions_whole_word): the driver matched a
-            # substring, which is its contract, not this one's. ponytail: the
-            # driver caps materialized hits at 20 per note BEFORE this filter,
-            # so a note whose first 20 matching lines are all fragments hides a
-            # later whole-word line; reopen if a recon run misses a collision
-            # that `silica_search_context` shows on line 21 or beyond.
-            if not mentions_whole_word(c, h.snippet):
-                continue
-
-            name = h.ref.name
-            if name not in grouped:
-                grouped[name] = {"ref": h.ref, "count": 0}
-            elif _prefers(h.ref, grouped[name]["ref"]):
-                # Safe mode puts a preview copy of a note beside the note. They
-                # group under one name, so WHICH path answered was down to scan
-                # order — and the model was shown its own unmerged draft as the
-                # vault's state. The original always wins; the copy exists to be
-                # pasted over it, not to stand in for it.
-                grouped[name]["ref"] = h.ref
-            grouped[name]["count"] += 1
-            
-        if not grouped:
-            new_concepts.append(c)
-            continue
-            
-        raw_hits = []
-        for name, data in grouped.items():
-            in_t = is_title_match(c, name)
-            raw_hits.append({
-                "path": data["ref"].path or data["ref"].name,
-                "count": data["count"],
-                "in_title": in_t
-            })
-            
-        ranked = rank_hits(raw_hits)
-        collisions.append({
-            "name": c,
-            "total_hits": sum(h["count"] for h in raw_hits),
-            "best_match": "title" if ranked[0]["in_title"] else "body",
-            "hits": ranked
-        })
-        
-    collisions.sort(key=collision_priority)
-    new_concepts.sort()
-    
-    return {
-        "file": inbox_file,
-        "collisions": collisions,
-        "new_concepts": new_concepts,
-    }
-
-
-@tool(cls="composed", internal=True)
-def silica_payload(recon_report_path: Annotated[str, Field(description='Path to the recon report JSON file')], max_concepts: Annotated[int, Field(description='Maximum concepts per batch')] = 7, max_bytes: Annotated[int, Field(description='Maximum bytes (JSON size) per chunk')] = 80 * 1024) -> dict[str, Any]:
-    """Assembles payloads for the Distiller by pre-extracting snippets from the vault."""
-    import orjson
-    from silica.kernel.text.payload import build_payload
-    from silica.kernel.partition import partition_by_concepts
-    
-    try:
-        with open(recon_report_path, 'rb') as f:
-            recon_reports = orjson.loads(f.read())
-    except Exception as e:
-        return {"error": f"Failed to read recon report: {e}"}
-        
-    # We use a default window of 450 chars
-    payload = build_payload(recon_reports, window=450)
-    
-    # C4/S3.1: Always run partition_by_concepts if we have constraints
-    if max_concepts > 0 or max_bytes > 0:
-        chunks = partition_by_concepts(payload, max_concepts, max_bytes)
-        return {"chunks": chunks}
-        
-    return {"payload": payload}
-
-
-@tool(cls="composed", internal=True)
-def silica_sanitize(distiller_output_path: Annotated[str, Field(description='Path to the raw distiller output JSON file')],
-                    verbatim_source: Annotated[str | None, Field(description="The chunk's own inbox text; anchors verbatim-body escape repair per-site")] = None) -> dict[str, Any]:
-    """Validates and sanitizes the JSON returned by Distiller workers."""
-    from silica.kernel.text.sanitize import TruncatedArray, parse_json, normalize_ops
-
-    try:
-        with open(distiller_output_path, 'r', encoding='utf-8') as f:
-            raw_content = f.read()
-    except Exception as e:
-        return {"error": f"Failed to read distiller output: {e}"}
-
-    salvaged = None
-    try:
-        parsed_obj, was_clean = parse_json(raw_content, strict=False)
-    except TruncatedArray as t:
-        # max_tokens cut the payload: apply the clean leading ops instead of
-        # losing the whole chunk, and say so — the loss must reach the caller.
-        parsed_obj, was_clean = t.ops, False
-        salvaged = {"recovered_ops": len(t.ops), "lost_chars": len(t.tail)}
-        logger.warning(
-            "sanitize: distiller output truncated — recovered %d leading ops, "
-            "%d chars lost (%s)",
-            len(t.ops), len(t.tail), distiller_output_path,
-        )
-    except Exception as e:
-        return {"error": f"JSON Parse Error: {e}"}
-
-    # Normalize op content: strip .md from wikilinks, etc.
-    if isinstance(parsed_obj, list):
-        parsed_obj = normalize_ops(parsed_obj, verbatim_source=verbatim_source)
-    elif isinstance(parsed_obj, dict) and "updates" in parsed_obj:
-        parsed_obj["updates"] = normalize_ops(parsed_obj["updates"],
-                                              verbatim_source=verbatim_source)
-
-    # Axis enforcement (Layer 2): demote ops whose linked_axis is not in main_thematic_axes.
-    # Only activates when the distiller actually emitted axes — graceful degradation otherwise.
-    if isinstance(parsed_obj, dict):
-        axes = {a.strip().lower() for a in parsed_obj.get("main_thematic_axes", []) if a}
-        if axes:
-            for op in parsed_obj.get("updates", []):
-                if isinstance(op, dict) and op.get("op") in ("write", "patch"):
-                    la = (op.get("linked_axis") or "").strip().lower()
-                    if la and la not in axes:
-                        op["op"] = "skip"
-                        op["reason"] = f"unlinked_axis '{op.get('linked_axis')}' not in main_thematic_axes"
-
-    result = {
-        "success": True,
-        "parsed": parsed_obj,
-        "was_clean": was_clean
-    }
-    if salvaged:
-        result["salvaged"] = salvaged
-    return result
-
-
-@tool(cls="composed", internal=True)
-def silica_validate_ops(
-    ops_json_path: Annotated[str, Field(description='Path to the consolidated operations JSON file to validate')],
-    payload_paths: Annotated[list[str] | None, Field(description='Paths to the original payload JSON files')] = None,
-    target_dir: Annotated[str, Field(description='Target folder in the vault')] = "",
-    hub: Annotated[str, Field(description='Hub note name')] = "",
-    future_ref_whitelist: Annotated[list[str] | None, Field(description='Optional whitelist of future reference note names')] = None,
-    profile: Annotated[str | None, Field(description='Per-run distill profile (None = process-global resolution)')] = None,
-) -> dict[str, Any]:
-    """Pre-write gate: checks structural validity and applies rejection threshold (10%).
-
-    C4: After validation, OVERWRITES ops_json_path with the coerced + deduped
-    validated ops. Snapshot and bulk_write MUST read from the same ops_json_path
-    after this call — never from a pre-validation snapshot.
-    """
-    import orjson
-    from silica.kernel.write.validate import validate_operations
-
-    if payload_paths is None:
-        payload_paths = []
-
-    try:
-        ops = load_ops(ops_json_path)
-    except Exception as e:
-        return {"error": f"Failed to load operations: {e}"}
-
-    payloads = []
-    for path in payload_paths:
-        try:
-            with open(path, 'rb') as f:
-                payloads.append(orjson.loads(f.read()))
-        except Exception as e:
-            return {"error": f"Failed to load payload {path}: {e}"}
-
-    cleared_parents: list[dict] = []
-    cleared_links: list[dict] = []
-    ambiguous_links: list[dict] = []
-    ungrounded: list[dict] = []
-    grounding: list[dict] = []
-    normalized: dict[str, int] = {}
-    validated_ops, rejected_ops = validate_operations(
-        ops,
-        payloads,
-        target_dir,
-        hub=hub,
-        cleared_parents_out=cleared_parents,
-        future_ref_whitelist=future_ref_whitelist,
-        cleared_links_out=cleared_links,
-        ungrounded_out=ungrounded,
-        profile=profile,
-        normalized_out=normalized,
-        grounding_out=grounding,
-        ambiguous_links_out=ambiguous_links,
-    )
-
-    total = len(ops)
-    rejected_count = len(rejected_ops)
-    # C4 denominator: skip ops excluded from rejection rate
-    actionable = sum(1 for o in ops if o.op != OpType.skip)
-    rejection_rate = rejected_count / actionable if actionable > 0 else 0.0
-
-    # C4: Always overwrite ops_json_path with validated (coerced + deduped) ops —
-    # even when rejection_rate exceeds the old 10% threshold.  Policy (abort vs.
-    # continue) is the FSM's responsibility; the tool is a pure filter.
-    try:
-        dump_ops(ops_json_path, validated_ops)
-    except Exception as e:
-        return {"error": f"Failed to persist validated ops: {e}"}
-
-    return {
-        "success": True,
-        "total": total,
-        "validated_count": len(validated_ops),
-        "rejected_count": rejected_count,
-        "rejection_rate": rejection_rate,
-        "validated_ops": [o.model_dump() for o in validated_ops],
-        "rejected_ops": [r.model_dump() for r in rejected_ops],
-        "cleared_parents": cleared_parents,
-        "cleared_links": cleared_links,
-        "ambiguous_links": ambiguous_links,
-        "ungrounded": ungrounded,
-        "grounding": grounding,
-        # Malformed-but-unambiguous ops repaired rather than rejected, per
-        # pattern. The reject total says an op failed; this says which prompt
-        # rule the model keeps missing.
-        "normalized": normalized,
-    }
-
-
-@tool(cls="composed", collapse="eager", internal=True)
-def silica_bulk_write(ops_json_path: Annotated[str, Field(description='Path to the validated operations JSON file')]) -> dict[str, Any]:
-    """Applies write/patch/overwrite/delete operations in batch in the vault."""
-    from silica.kernel.write.bulk import execute_operations
-
-    try:
-        ops = load_ops(ops_json_path)
-    except Exception as e:
-        return {"error": f"Failed to load operations: {e}"}
-
-    res = execute_operations(ops)
-    return res.model_dump()
-
-
-@tool(cls="composed", internal=True)
-def silica_lint(note_name: Annotated[str, Field(description='Name of the note to lint')], op_type: Annotated[str, Field(description='Operation type (write/patch/overwrite) for conditional checks')] = "", hub: Annotated[str, Field(description='Hub note name for wikilink validation')] = "") -> dict[str, Any]:
-    """Post-write gate: executes the OFM linter to find structural regressions."""
-    from silica.kernel.write.linter import validate_note
-
-    errors, warnings = validate_note(note_name, hub=hub or None, op_type=op_type or None)
-
-    return {
-        "success": len(errors) == 0,
-        "note": note_name,
-        "errors": errors,
-        "warnings": warnings,
-    }
+    landing = gate.land_batch(validated, lint=False, partial_ok=False)
+    if landing.failure is None:
+        _link_recovered_writes(validated, bundle.get("target_dir", ""), bundle.get("hub"),
+                               bundle.get("source_path", ""))
+        gate.record_recovered(landing.txn, validated, content_hash, bundle)
+    return landing.bulk
 
 
 @tool(cls="composed", collapse="eager")
@@ -446,8 +125,6 @@ def silica_deferred_retry(content_hash: Annotated[str, Field(description='Conten
     from silica.kernel.write.deferred import get_deferred_store
     from silica.kernel.write.validate import validate_operations
     from silica.kernel.write.ops_io import parse_ops
-    from silica.tools.wrapped import build_txn
-    from silica.kernel.write.bulk import execute_operations
 
     store = get_deferred_store()
     bundle = store.get(content_hash)
@@ -492,26 +169,11 @@ def silica_deferred_retry(content_hash: Annotated[str, Field(description='Conten
         }
 
     try:
-        # Snapshot before writing for rollback safety
-        txn = build_txn(validated)
-
-        result = execute_operations(validated)
-        if not result.ok:
-            from silica.tools.wrapped import silica_restore
-            silica_restore(txn_id=txn.id, inverses=[i.model_dump() for i in txn.inverses])
-            failures = [f.model_dump() for f in result.failed]
-            return {"error": f"Deferred retry write failed: {failures}"}
+        result = _land_recovered(validated, content_hash, bundle)
     except Exception as e:
         return {"error": f"Deferred retry failed: {e}"}
-
-    # Recovered writes bypassed the FSM's AUTOLINK/HUB_UPDATE — give them edges.
-    _link_recovered_writes(validated, target_dir, hub, bundle.get("source_path", ""))
-    # ...and they bypassed CLEANUP, which is where the journal is flushed and
-    # provenance is appended. The boundary anneal runs in the FSM's `finally`,
-    # after both. Measured 2026-08-18 on a 3-paper library gate: 5 of 94 notes
-    # sat on disk with no inverse and no record, so `/revert` walked past them
-    # and `check_renucleate` reported the source as never nucleated.
-    _record_recovered_writes(txn, validated, content_hash, bundle)
+    if not result.ok:
+        return {"error": f"Deferred retry write failed: {[f.model_dump() for f in result.failed]}"}
 
     # Update or clear the deferred store
     if still_rejected:
@@ -541,63 +203,6 @@ def silica_deferred_retry(content_hash: Annotated[str, Field(description='Conten
     }
 
 
-def _record_recovered_writes(txn, validated, content_hash: str, bundle: dict) -> None:
-    """Journal + provenance for ops recovered outside the FSM's CLEANUP.
-
-    Joins the ambient run when there is one. The boundary anneal fires inside
-    the FSM's `finally`, so its writes belong to the run the user just started:
-    a fresh journal run carries a later `started_at`, `last_active_run` orders
-    by that, and `/revert` therefore undid the handful of recovered notes and
-    left the whole nucleation on disk. Only a STANDALONE `silica_deferred_retry`
-    — no run to join — opens its own revertible unit. Best-effort throughout:
-    the notes are already on disk, and failing here must not undo them.
-    """
-    import hashlib
-
-    from silica.agent.commit import _current_ledger_run, _current_undo_run
-    from silica.config import CONFIG
-    from silica.driver import DRIVER
-
-    try:
-        from silica.kernel.write.undo_journal import get_undo_journal
-
-        journal = get_undo_journal()
-        run_id = _current_undo_run.get() or journal.start_run(
-            source="anneal", vault=CONFIG.vault_path.strip() or None)
-        for inv in txn.inverses:
-            try:
-                post = DRIVER.read_note(inv.path).content
-                post_hash = hashlib.sha256((post or "").encode("utf-8")).hexdigest()
-            except Exception:
-                post_hash = None
-            journal.record(run_id, inv, post_hash)
-    except Exception as exc:
-        logger.debug("anneal: journal record failed (non-fatal): %s", exc)
-        run_id = ""
-
-    try:
-        from silica.kernel.base.manifest import source_key
-        from silica.kernel.write.provenance import append_record, is_deriving_op
-
-        source = source_key(bundle.get("source_path", "") or "")
-        notes = sorted({
-            (op.path or "").removesuffix(".md")
-            for op in validated
-            if is_deriving_op(op.op) and op.path
-        })
-        if source and content_hash and notes:
-            # The LEDGER's run id, which is not the journal's: every reader of
-            # this field (Coordinator._sweep_dangling_links) matches on
-            # `fsm.progress.run_id`, so stamping the journal's uuid4 here wrote
-            # a record nothing could ever find. A standalone retry has no run to
-            # name and stays "anneal". A separate record either way — the ledger
-            # is append-only history, never a rewrite of what CLEANUP recorded.
-            append_record(source, content_hash,
-                          _current_ledger_run.get() or "anneal", notes)
-    except Exception as exc:
-        logger.debug("anneal: provenance append failed (non-fatal): %s", exc)
-
-
 # collapse stays "lazy" (the default) on purpose: the verdict IS the feedback,
 # and an eager stub would erase the rejection reasons from the very history the
 # steer loop iterates on.
@@ -612,10 +217,8 @@ def submit_repaired_ops(content_hash: Annotated[str, Field(description='Hash of 
     """
     from silica.kernel.write.deferred import get_deferred_store
     from silica.kernel.text.sanitize import normalize_ops
-    from silica.kernel.write.bulk import execute_operations
     from silica.kernel.write.ops_io import parse_ops
     from silica.kernel.write.validate import validate_operations
-    from silica.tools.wrapped import build_txn
 
     store = get_deferred_store()
     bundle = store.get(content_hash)
@@ -651,19 +254,8 @@ def submit_repaired_ops(content_hash: Annotated[str, Field(description='Hash of 
         return {"written": [], "rejected": rejected,
                 "remaining": len([o for o in bundle.get("rejected_ops", [])
                                   if isinstance(o, dict)])}
-    txn = build_txn(validated)
-    bulk = execute_operations(validated)
-    if not bulk.ok:
-        from silica.tools.wrapped import silica_restore
-        silica_restore(txn_id=txn.id, inverses=[i.model_dump() for i in txn.inverses])
+    if not _land_recovered(validated, content_hash, bundle).ok:
         return {"error": "write failed; nothing was committed this call"}
-    # Same bookkeeping as the mechanical retry: these writes bypassed the FSM's
-    # AUTOLINK/HUB_UPDATE and CLEANUP. The old steer commit path skipped BOTH
-    # calls, so steered notes landed with no edges, no undo inverse and no
-    # provenance record — /revert walked past them (the 2026-08-18 defect,
-    # fixed for retry only).
-    _link_recovered_writes(validated, target_dir, hub, bundle.get("source_path", ""))
-    _record_recovered_writes(txn, validated, content_hash, bundle)
     # written ops are dropped from the bundle by heading match only —
     # an op the model renamed stays parked and re-anneals (writes are idempotent
     # via block_present), which is the safe direction.

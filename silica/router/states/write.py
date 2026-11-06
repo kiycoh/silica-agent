@@ -38,39 +38,20 @@ from silica.kernel.write.moc import (
 
 def handle_snapshot(fsm: "InjectorFSM") -> None:
     with orch.phase(fsm, fsm._chunk_task_id("snapshot"), "snapshot"):
-        from silica.tools.wrapped import silica_snapshot
-        res = silica_snapshot(fsm._chunk_ctx["ops_path"])
-        if "error" in res:
-            raise RuntimeError(f"SNAPSHOT failed: {res['error']}")
+        from silica.driver.base import NoteRef
 
-        fsm._chunk_ctx["snapshot"] = res
-        fsm._chunk_ctx["txn_id"] = res["txn_id"]
+        ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
         try:
-            from silica.driver.base import NoteRef
-            from silica.kernel.write.ops import InverseOp, Txn
-            inv = [InverseOp(**d) for d in res["inverses"]]
-
-            # Reconstruct refs for Txn from inverses
-            refs = []
-            for d in res["inverses"]:
-                if d.get("kind") == "restore_version":
-                    path = d.get("path")
-                    name = path.rsplit("/", 1)[-1].removesuffix(".md")
-                    refs.append(NoteRef(name=name, path=path))
-
-            fsm._txn = Txn(
-                id=res["txn_id"],
-                refs=refs,
-                created_paths=res.get("created_paths", []),
-                inverses=inv
-            )
+            fsm._txn = orch.build_txn(ops)
         except Exception as e:
-            raise RuntimeError(f"SNAPSHOT rebuild failed: {e}")
+            raise RuntimeError(f"SNAPSHOT failed: {e}")
+        fsm._chunk_ctx["txn_id"] = fsm._txn.id
+        fsm._chunk_ctx["snapshot"] = {"txn_id": fsm._txn.id, "created_paths": fsm._txn.created_paths,
+                                      "inverses": fsm._txn.inverses_serialized}
 
         # S3.2: Take pre-write graph snapshot incrementally
         try:
             from silica.kernel.base.markdown import extract_links as _extract_links
-            ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
             touched_refs = []
             snapshot_domain = set()
 
@@ -193,7 +174,7 @@ def _settle_flagged(fsm: "InjectorFSM", ops: list, committed: set[str]) -> None:
 
 
 def handle_write(fsm: "InjectorFSM") -> None:
-    from silica.kernel.write.atomic_write import bulk_write_atomic
+    from silica.kernel.write.gate import bulk_write_atomic
     fsm._progress_note(fsm._chunk_task_id("write"), "write", "running")
 
     ops = orch.load_ops(fsm._chunk_ctx["ops_path"])

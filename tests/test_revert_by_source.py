@@ -18,7 +18,8 @@ import sqlite3
 
 from silica.kernel.write.ops import InverseOp, InverseOpKind
 from silica.kernel.write.provenance import append_record
-from silica.kernel.write.undo_journal import UndoJournalStore, revert_run, revert_source
+from silica.kernel.write.undo_journal import UndoJournalStore
+from silica.kernel.write.gate import revert_run, revert_source
 
 
 def _h(text: str) -> str:
@@ -146,7 +147,7 @@ class TestTheReplCommand:
                                                 "stale": [], "errors": []}],
                     "unrevertable": [{"run_id": "fsm-legacy", "notes": 3}]}
 
-        monkeypatch.setattr("silica.kernel.write.undo_journal.revert_source", fake)
+        monkeypatch.setattr("silica.kernel.write.gate.revert_source", fake)
 
         assert _handle_direct_shortcut("/revert --source lec.md", []) is True
         assert calls["source"] == "lec.md"

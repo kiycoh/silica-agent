@@ -144,26 +144,26 @@ class TestReconBatch:
         target, so registering one poisons the payload's vault_collision and
         the distiller can never produce an acceptable op. The concept must be
         classified as new instead."""
-        import silica.tools.pipeline as pipe
+        import silica.kernel.text.vault_recon as pipe
         from silica.config import CONFIG
         monkeypatch.setattr(CONFIG, "defer_uncorroborated_concepts", False, raising=False)
         drv = _InboxHitDriver(_RECON_BODY)
         monkeypatch.setattr(pipe, "DRIVER", drv)
 
-        res = pipe.silica_recon("inbox/note.md")
+        res = pipe.recon_file("inbox/note.md")
 
         assert res["collisions"] == []
         assert res["new_concepts"]
 
     def test_recon_uses_batch_search_once(self, monkeypatch):
         """Hot path issues ONE batch call (N->1) and never per-concept search."""
-        import silica.tools.pipeline as pipe
+        import silica.kernel.text.vault_recon as pipe
         from silica.config import CONFIG
         monkeypatch.setattr(CONFIG, "defer_uncorroborated_concepts", False, raising=False)
         drv = _BatchSpyDriver(_RECON_BODY)
         monkeypatch.setattr(pipe, "DRIVER", drv)
 
-        res = pipe.silica_recon("inbox/note.md")
+        res = pipe.recon_file("inbox/note.md")
 
         assert drv.batch_calls == 1            # one eval for all concepts
         assert drv.single_calls == 0           # no per-concept rescan anymore
@@ -303,23 +303,23 @@ class _FragmentOnlyDriver(_BatchSpyDriver):
 
 class TestReconWholeWordEvidence:
     def test_fragment_only_hits_are_not_collisions(self, monkeypatch):
-        import silica.tools.pipeline as pipe
+        import silica.kernel.text.vault_recon as pipe
         from silica.config import CONFIG
         monkeypatch.setattr(CONFIG, "defer_uncorroborated_concepts", False, raising=False)
         monkeypatch.setattr(pipe, "DRIVER", _FragmentOnlyDriver(_RECON_BODY))
 
-        res = pipe.silica_recon("inbox/note.md")
+        res = pipe.recon_file("inbox/note.md")
 
         assert res["collisions"] == []
         assert res["new_concepts"]
 
     def test_fragment_lines_do_not_count_as_evidence(self, monkeypatch):
-        import silica.tools.pipeline as pipe
+        import silica.kernel.text.vault_recon as pipe
         from silica.config import CONFIG
         monkeypatch.setattr(CONFIG, "defer_uncorroborated_concepts", False, raising=False)
         monkeypatch.setattr(pipe, "DRIVER", _SubstringHitDriver(_RECON_BODY))
 
-        res = pipe.silica_recon("inbox/note.md")
+        res = pipe.recon_file("inbox/note.md")
 
         assert res["collisions"]
         for c in res["collisions"]:

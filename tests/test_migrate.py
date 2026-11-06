@@ -212,7 +212,8 @@ def test_propose_names_an_unrecognized_shape(tmp_path, monkeypatch):
 
 
 def test_apply_writes_journals_and_revert_restores_the_bytes(tmp_path, monkeypatch):
-    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
+    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.gate import revert_run
 
     v = _vault(tmp_path, monkeypatch)
     paths = ("ml/Margine.md", "other/Prose.md", "ml/Clean.md")

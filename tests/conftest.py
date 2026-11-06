@@ -195,8 +195,8 @@ def _no_recon_embedder(monkeypatch: pytest.MonkeyPatch) -> None:
     """Disable silica_recon's network embedder by default: recon falls back to the
     deterministic mined rank. Keeps the suite fast and offline; the rerank path is
     covered by test_keyphrase (FakeEmbedder) and the SILICA_EVAL golden eval."""
-    import silica.tools.pipeline as pipe_mod
-    monkeypatch.setattr(pipe_mod, "_recon_embedder", lambda: None)
+    import silica.kernel.text.vault_recon as recon_mod
+    monkeypatch.setattr(recon_mod, "_recon_embedder", lambda: None)
 
 
 @pytest.fixture(autouse=True)

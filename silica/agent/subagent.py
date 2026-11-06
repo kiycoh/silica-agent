@@ -67,7 +67,7 @@ def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None,
     items to be marked cancelled rather than dispatched.
     """
     from silica.obs.bus import BUS
-    from silica.agent.commit import _current_provenance, _current_undo_run
+    from silica.kernel.write.gate import in_run
     from silica.obs.events import WorkCancelledEvent
     from silica.obs import narration as _narr_mod
 
@@ -99,19 +99,14 @@ def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None,
         _narr_mod.NARRATOR.span_open(
             "subagent", item.id, f"{item.kind} {item.target_path}".strip(),
             {"kind": item.kind}, attach=True)
-        tok = _current_provenance.set(_item_provenance(item))
-        run_tok = (_current_undo_run.set(undo_run())
-                   if undo_run is not None else None)
         try:
-            res = agent.handle(item)
+            with in_run(provenance=_item_provenance(item),
+                        undo=undo_run() if undo_run is not None else None):
+                res = agent.handle(item)
         except BaseException:
             _narr_mod.NARRATOR.span_close("subagent", item.id, "failed",
                                           f"{item.kind} crashed", {"kind": item.kind})
             raise
-        finally:
-            _current_provenance.reset(tok)
-            if run_tok is not None:
-                _current_undo_run.reset(run_tok)
         wq.complete(item, res.get("status", "done"), res)
         status = res.get("status", "done")
         mapped = {"error": "failed", "cancelled": "cancelled"}.get(status, "done")
@@ -162,17 +157,13 @@ def run_subagent_batch(
 
     # One undo-journal run for the whole batch so /revert can undo the entire
     # /enrich or /dedup. Pool workers don't inherit contextvars, so
-    # each worker sets the same run id at entry (see commit._current_undo_run).
-    from silica.agent.commit import _current_undo_run
-    from silica.kernel.write.undo_journal import get_undo_journal
-    undo_run_id = get_undo_journal().start_run(
-        source=f"{items[0].kind}-batch",
-        vault=getattr(config, "vault_path", None) or None,
-    )
+    # each worker enters the same run itself.
+    from silica.kernel.write.gate import in_run, open_run
+    undo_run_id = open_run(f"{items[0].kind}-batch", vault=getattr(config, "vault_path", None) or None)
 
     def _worker():
-        _current_undo_run.set(undo_run_id)
-        return consume(wq, agent, cancel_token)
+        with in_run(undo=undo_run_id):
+            return consume(wq, agent, cancel_token)
 
     with ThreadPoolExecutor(max_workers=mw, thread_name_prefix="subagent") as ex:
         futures = [ex.submit(_worker) for _ in range(mw)]

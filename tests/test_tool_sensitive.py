@@ -96,18 +96,15 @@ def test_default_toolset_excludes_internal():
 
 
 def test_pipeline_stage_tools_are_internal():
-    """The FSM-driven injector stages must never surface in the chat toolset;
-    the agent-facing entry points must."""
-    import silica.tools.composed  # noqa: F401 — registers pipeline + wrapped tools
-    import silica.tools.wrapped  # noqa: F401
+    """The rollback tools must never surface in the chat toolset; the
+    agent-facing entry points must. The FSM's stages are plain functions."""
+    import silica.cli  # noqa: F401  registers every tool
 
-    internal = {
-        "silica_recon", "silica_payload", "silica_sanitize", "silica_validate_ops",
-        "silica_bulk_write", "silica_lint", "silica_snapshot", "silica_restore",
-        "silica_cleanup",
-    }
-    for name in internal:
+    for name in ("silica_snapshot", "silica_restore", "submit_repaired_ops"):
         assert TOOLS[name].internal is True, name
+    for name in ("silica_recon", "silica_payload", "silica_sanitize", "silica_validate_ops",
+                 "silica_bulk_write", "silica_lint", "silica_cleanup"):
+        assert name not in TOOLS, name
     for name in ("silica_run_injector", "silica_deferred_retry",
                  "silica_write_note", "silica_patch_note"):
         assert TOOLS[name].internal is False, name

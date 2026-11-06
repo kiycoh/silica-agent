@@ -153,7 +153,7 @@ def test_too_many_blocks_is_refused(tmp_vault, llm, monkeypatch):
 def test_the_tool_sits_in_the_chat_core_before_the_loader():
     from silica.agent.constraints import CHAT_CORE
     from silica.tools import TOOLS
-    import silica.tools.composed  # noqa: F401
+    import silica.cli  # noqa: F401  registers every tool
     assert CHAT_CORE[-2:] == ("silica_rework", "silica_load_tools")
     props = TOOLS["silica_rework"].json_schema()["function"]["parameters"]["properties"]
     assert set(props) == {"note", "instruction"}

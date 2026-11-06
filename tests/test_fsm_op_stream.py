@@ -17,7 +17,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from silica.kernel.write.atomic_write import AtomicBulkResult, NoteCommitResult
+from silica.kernel.write.ops import Txn
+from silica.kernel.write.gate import AtomicBulkResult, NoteCommitResult
 from silica.router.orchestrator import InjectorFSM, InjectorState
 
 INBOX = "Inbox/lezione.md"
@@ -113,18 +114,17 @@ def op_stream(monkeypatch):
         empty_index.__len__ = lambda _self: 0  # COLLISION -> embedder-free MinHash leg
 
         with (
-            patch("silica.router.orchestrator.silica_recon", return_value={"success": True}),
-            patch("silica.router.orchestrator.silica_payload", return_value={"chunks": [chunk]}),
+            patch("silica.router.orchestrator.recon_file", return_value={"success": True}),
+            patch("silica.router.orchestrator.payload_chunks", return_value={"chunks": [chunk]}),
             patch("silica.router.states.distill.run_distiller", side_effect=_fake_distiller),
             patch("silica.router.states.distill.orch.CONFIG.distill_concurrency", 1),
             patch("silica.kernel.recall.embed.get_store", return_value=empty_index),
-            patch("silica.kernel.write.atomic_write.bulk_write_atomic", side_effect=_capture),
+            patch("silica.kernel.write.gate.bulk_write_atomic", side_effect=_capture),
             patch("silica.router.orchestrator.DRIVER", driver),
             patch("silica.kernel.write.validate.DRIVER", driver),
-            patch("silica.router.orchestrator.silica_lint", return_value={"success": True}),
-            patch("silica.tools.wrapped.silica_snapshot",
-                  return_value={"txn_id": "txn_test", "inverses": []}),
-            patch("silica.tools.wrapped.silica_cleanup", return_value={"success": True}),
+            patch("silica.kernel.write.gate.lint_note", return_value={"success": True}),
+            patch("silica.router.orchestrator.build_txn", return_value=Txn(id="txn_test", inverses=[])),
+            patch("silica.kernel.write.gate.archive_source", return_value={"success": True}),
             patch("silica.kernel.graph_diff.check_graph_regression", return_value=(True, [])),
         ):
             fsm = InjectorFSM(INBOX, TARGET)

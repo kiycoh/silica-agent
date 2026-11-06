@@ -234,6 +234,29 @@ def sweep_note(rel_path: str, resolves, keep: frozenset[str] = frozenset()) -> d
     }
 
 
+def sweep_survivors(res: dict) -> None:
+    """After a partial revert. It can delete notes that surviving (skipped)
+    notes still link to: the run's own hub kept [[links]] to notes the revert
+    removed. Sweep only the survivors this run wrote: they are journalled
+    paths, so the edit stays inside the run's own footprint."""
+    if not (res["reverted"] and res["skipped"]):
+        return
+    try:
+        sweep_dangling_links(sorted({s["path"] for s in res["skipped"]}))
+    except Exception as e:
+        logger.debug("revert: survivor link sweep failed (non-fatal): %s", e)
+
+
+def revert_and_sweep(run_id: str, **kw) -> dict:
+    """gate.revert_run plus the link repair it leaves to this lane. What a
+    person's revert calls; the write lane does not reach up here."""
+    from silica.kernel.write import gate
+
+    res = gate.revert_run(run_id, **kw)
+    sweep_survivors(res)
+    return res
+
+
 def sweep_dangling_links(note_paths: list[str], priors: Mapping[str, str | None] | None = None) -> dict:
     """Unlink still-dangling wikilinks in the given run-written notes.
 

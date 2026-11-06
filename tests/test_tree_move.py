@@ -220,7 +220,7 @@ def test_a_torn_move_keeps_its_undo_and_names_no_server_path(client, monkeypatch
     """The driver renames first and rewrites referrers after: a failure in
     between leaves the file moved, so the inverse must stay."""
     import silica.driver
-    import silica.tools.wrapped as wrapped
+    from silica.kernel.write import gate
     from silica.kernel.write.undo_journal import get_undo_journal
 
     real = silica.driver.get_driver()
@@ -237,7 +237,7 @@ def test_a_torn_move_keeps_its_undo_and_names_no_server_path(client, monkeypatch
         def __getattr__(self, name):
             return getattr(real, name)
 
-    monkeypatch.setattr(wrapped, "DRIVER", Tears())
+    monkeypatch.setattr(gate, "DRIVER", Tears())
     tc, _, vault = client
     body = move(tc, paths=["CorsoA/Indice.md"], folder="Archivio").json()
     assert body["moved"] == [] and body["error"] == "1 of 1 could not be moved"
@@ -249,7 +249,7 @@ def test_a_torn_move_keeps_its_undo_and_names_no_server_path(client, monkeypatch
 
 def test_a_refusal_after_the_preflight_stops_the_set_and_keeps_what_moved(client, monkeypatch):
     import silica.driver
-    import silica.tools.wrapped as wrapped
+    from silica.kernel.write import gate
     from silica.kernel.write.undo_journal import get_undo_journal
 
     real = silica.driver.get_driver()
@@ -263,7 +263,7 @@ def test_a_refusal_after_the_preflight_stops_the_set_and_keeps_what_moved(client
         def __getattr__(self, name):
             return getattr(real, name)
 
-    monkeypatch.setattr(wrapped, "DRIVER", Refuses())
+    monkeypatch.setattr(gate, "DRIVER", Refuses())
     tc, _, vault = client
     body = move(tc, paths=["CorsoA/Indice.md", "CorsoA/Lezione 2.md", "CorsoA/Lezione 1.md"], folder="Archivio").json()
     assert [m["to"] for m in body["moved"]] == ["Archivio/Indice.md"]

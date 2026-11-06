@@ -120,9 +120,7 @@ def main() -> int:
             print(f"VOID: not ready: {', '.join(down)}", file=sys.stderr)
             return 2
 
-    import silica.tools.atomic  # noqa: F401  (registers the tools)
-    import silica.tools.composed  # noqa: F401
-    import silica.tools.graph  # noqa: F401
+    import silica.cli  # noqa: F401  (registers the tools)
     from silica.tools import TOOLS
 
     rows = []
