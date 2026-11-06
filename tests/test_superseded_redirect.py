@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 from silica.kernel.write.ops import OpType
 from silica.kernel.write.validate import validate_operations
+from tests.jobs import dedup_job
 
 LONG = "corpo della nota " * 30
 
@@ -108,11 +109,11 @@ def test_duplicate_with_landed_loser_records_alias_on_the_winner(tmp_vault):
     ctx = {"concept": "Percettrone", "candidate": "Percettrone di Rosenblatt",
            "loser_path": LOSER, "target_dir": "Corso", "hub": "Hub",
            "inbox_file": "Inbox/lez.md", "content_hash": "h"}
-    item = WorkItem(kind="dedup", target_path=WINNER, context=ctx)
+    item = WorkItem(kind="dedup", target_path=WINNER, context=dedup_job(ctx))
     with patch("silica.capabilities.dedup.commit_ops",
                return_value={"status": "committed", "committed": 1}) as commit, \
          patch("silica.kernel.write.deferred.get_deferred_store"):
-        res = _route_verdict(item, ctx, _decision("duplicate", addition="nuovo fatto"), None)
+        res = _route_verdict(item, item.context, _decision("duplicate", addition="nuovo fatto"), None)
 
     assert res["status"] == "committed"
     by_reason = {c.args[0][0].reason: c.args[0][0] for c in commit.call_args_list}
@@ -128,13 +129,13 @@ def test_duplicate_without_addition_records_alias_too():
     from silica.kernel.workqueue import WorkItem
 
     ctx = {"concept": "Percettrone", "loser_path": LOSER, "hub": "Hub"}
-    item = WorkItem(kind="dedup", target_path=WINNER, context=ctx)
+    item = WorkItem(kind="dedup", target_path=WINNER, context=dedup_job(ctx))
     with patch("silica.capabilities.dedup._mark_merge_loser") as mark, \
          patch("silica.capabilities.dedup._record_absorbed_alias") as alias:
-        res = _route_verdict(item, ctx, _decision("duplicate"), None)
+        res = _route_verdict(item, item.context, _decision("duplicate"), None)
     assert res["status"] == "no_merge"
-    mark.assert_called_once_with(ctx, WINNER)
-    alias.assert_called_once_with(ctx, WINNER, "Hub")
+    mark.assert_called_once_with(item.context, WINNER)
+    alias.assert_called_once_with(item.context, WINNER, "Hub")
 
 
 # ------------------------------------------------------- alias in the gate --
@@ -169,13 +170,13 @@ def test_a_note_is_never_marked_superseded_by_itself_and_a_namesake_is_linked_by
 
     tmp_vault.note("ML/Zero padding.md", "---\nAI: true\n---\n\n# Zero padding\n\ncorpo\n")
     with patch("silica.capabilities.dedup.commit_ops") as commit:
-        _mark_merge_loser({"loser_path": "ML/Zero padding.md"}, "ML/zero padding")
+        _mark_merge_loser(dedup_job(loser_path="ML/Zero padding.md"), "ML/zero padding")
     commit.assert_not_called()
 
     tmp_vault.note("Stat/Distribuzione normale.md", "---\nAI: partial\n---\n\n# Gauss\n\ncorpo\n")
     tmp_vault.note("ML/Distribuzione normale.md", "---\nAI: true\n---\n\n# Gauss\n\ncorpo\n")
     with patch("silica.capabilities.dedup.commit_ops") as commit:
-        _mark_merge_loser({"loser_path": "ML/Distribuzione normale.md"}, "Stat/Distribuzione normale.md")
+        _mark_merge_loser(dedup_job(loser_path="ML/Distribuzione normale.md"), "Stat/Distribuzione normale.md")
     marked = commit.call_args.args[0][0].content
     assert "superseded_by: '[[Stat/Distribuzione normale]]'" in marked
     tmp_vault.note("ML/Distribuzione normale.md", marked)
@@ -192,8 +193,8 @@ def test_a_lesson_outline_absorbs_no_concept(tmp_vault):
     tmp_vault.note("ML/Lezione 24.md", f'---\nsection: "{SPINE_SECTION}"\n---\n# Lezione 24\n\n1. [[Definizione di reti convolutive]]\n')
     tmp_vault.note("ML/Definizione di reti convolutive.md", "---\nAI: true\n---\n\n# x\n\ncorpo\n")
     ctx = {"concept": "Definizione di reti convolutive", "loser_path": "ML/Definizione di reti convolutive.md"}
-    item = WorkItem(kind="dedup", target_path="ML/Lezione 24.md", context=ctx)
+    item = WorkItem(kind="dedup", target_path="ML/Lezione 24.md", context=dedup_job(ctx))
     with patch("silica.capabilities.dedup.commit_ops") as commit:
-        res = _route_verdict(item, ctx, _decision("duplicate", addition="nuovo"), None)
+        res = _route_verdict(item, item.context, _decision("duplicate", addition="nuovo"), None)
     assert res["status"] == "no_merge" and res["verdict"] == "distinct"
     commit.assert_not_called()

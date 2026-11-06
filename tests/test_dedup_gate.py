@@ -11,7 +11,8 @@ from silica.capabilities.dedup import (
 )
 from silica.config import SilicaConfig
 from silica.kernel.write.ops import OpType
-from silica.kernel.workqueue import WorkItem
+from silica.kernel.workqueue import DedupFamily, WorkItem
+from tests.jobs import dedup_job
 
 
 def test_high_cosine_similar_size_passes():
@@ -50,7 +51,7 @@ def test_gate_on_low_score_skips_llm_and_authors_spoke(monkeypatch):
     item = WorkItem(
         kind="dedup",
         target_path="Concepts/Gradient Descent.md",
-        context={
+        context=dedup_job({
             "concept": "Discesa del gradiente",
             "excerpt": "Variante mini-batch con momentum.",
             "candidate": "Gradient Descent",
@@ -58,7 +59,7 @@ def test_gate_on_low_score_skips_llm_and_authors_spoke(monkeypatch):
             "hub": "Concepts",
             "target_dir": "Concepts",   # pipeline item
             "score": 0.30,              # well below the 0.85 gate threshold
-        },
+        }),
         reason="test",
     )
 
@@ -93,19 +94,14 @@ def test_gated_batch_decisions_full_length_and_index_aligned():
     _decide_dedup_batch, and the returned list must stay full-length and
     index-aligned to `concepts` so the caller's zip(concepts, decisions)
     never silently drops a concept."""
-    item = WorkItem(
-        kind="dedup",
-        target_path="Reti/MQTT.md",
-        context={"candidate": "MQTT", "hub": "Reti", "target_dir": "Reti"},
-        reason="test",
-    )
     candidate_body = "x" * 200
 
+    shared = {"candidate": "MQTT", "hub": "Reti", "target_dir": "Reti"}
     concepts = [
-        {"concept": "C0", "excerpt": "e" * 150, "score": 0.30},   # gate: low score
-        {"concept": "C1", "excerpt": "e" * 150, "score": 0.90},   # gate: passes
-        {"concept": "C2", "excerpt": "e" * 1000, "score": 0.90},  # gate: size mismatch
-        {"concept": "C3", "excerpt": "e" * 150, "score": 0.92},   # gate: passes
+        dedup_job(shared, concept="C0", excerpt="e" * 150, score=0.30),   # gate: low score
+        dedup_job(shared, concept="C1", excerpt="e" * 150, score=0.90),   # gate: passes
+        dedup_job(shared, concept="C2", excerpt="e" * 1000, score=0.90),  # gate: size mismatch
+        dedup_job(shared, concept="C3", excerpt="e" * 150, score=0.92),   # gate: passes
     ]
 
     llm_decisions = [
@@ -115,7 +111,7 @@ def test_gated_batch_decisions_full_length_and_index_aligned():
 
     with patch("silica.capabilities.dedup._decide_dedup_batch",
                return_value=llm_decisions) as mock_batch:
-        result = _gated_batch_decisions(SilicaConfig(), item, concepts, candidate_body)
+        result = _gated_batch_decisions(SilicaConfig(), DedupFamily(concepts), candidate_body)
 
     # Only the gated-IN subset (C1, C3) is sent to the LLM.
     mock_batch.assert_called_once()

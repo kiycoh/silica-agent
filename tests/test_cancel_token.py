@@ -12,7 +12,8 @@ from unittest.mock import patch
 
 import pytest
 
-from silica.kernel.workqueue import WorkItem
+from silica.kernel.workqueue import OrphanJob, WorkItem
+from tests.jobs import dedup_job
 from silica.config import SilicaConfig
 from silica.capabilities.dedup import run_dedup, DedupDecision
 from silica.capabilities.enrich import run_enrich
@@ -20,7 +21,12 @@ from silica.capabilities.orphan import run_orphan, OrphanLinkDecision
 
 
 def _item(kind: str, *, cancelled: bool = False) -> WorkItem:
-    item = WorkItem(kind=kind, target_path="Notes/Test.md", context={"hub": "Hub"})
+    job: object = {"hub": "Hub"}
+    if kind == "dedup":
+        job = dedup_job(hub="Hub")
+    elif kind == "orphan":
+        job = OrphanJob(candidates=[], hub="Hub")
+    item = WorkItem(kind=kind, target_path="Notes/Test.md", context=job)
     if cancelled:
         item.cancel_token.set()
     return item
@@ -92,7 +98,7 @@ def test_enrich_cancelled_between_llm_and_commit(config):
 
 def test_orphan_cancelled_before_llm(config):
     item = _item("orphan", cancelled=True)
-    item.context["candidates"] = [{"name": "Hub", "path": "Hub.md"}]
+    item.context.candidates = [{"name": "Hub", "path": "Hub.md"}]
     with patch("silica.driver.DRIVER.read_note", return_value=_MockNote()):
         result = run_orphan(item, config)
     assert result["status"] == "cancelled"
@@ -100,7 +106,7 @@ def test_orphan_cancelled_before_llm(config):
 
 def test_orphan_cancelled_between_llm_and_commit(config):
     item = _item("orphan")
-    item.context["candidates"] = [{"name": "Hub", "path": "Hub.md"}]
+    item.context.candidates = [{"name": "Hub", "path": "Hub.md"}]
 
     def fake_links(*a, **k):
         item.cancel_token.set()

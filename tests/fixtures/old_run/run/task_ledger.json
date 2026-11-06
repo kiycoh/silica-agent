@@ -1,0 +1,83 @@
+{
+  "run_id": "ac58c2470758451a8a8f61553d62f2d4",
+  "user_request": "inject Inbox/r.md → ML",
+  "checkpoints": [
+    {
+      "id": "recon",
+      "kind": "mechanical",
+      "objective": "silica_recon"
+    },
+    {
+      "id": "payload",
+      "kind": "mechanical",
+      "objective": "silica_payload"
+    },
+    {
+      "id": "salience",
+      "kind": "mechanical",
+      "objective": "salience"
+    },
+    {
+      "id": "collision",
+      "kind": "mechanical",
+      "objective": "collision"
+    },
+    {
+      "id": "distill",
+      "kind": "semantic",
+      "objective": "distiller"
+    },
+    {
+      "id": "sanitize",
+      "kind": "mechanical",
+      "objective": "silica_sanitize"
+    },
+    {
+      "id": "validate",
+      "kind": "gate",
+      "objective": "silica_validate_ops"
+    },
+    {
+      "id": "snapshot",
+      "kind": "txn",
+      "objective": "silica_snapshot"
+    },
+    {
+      "id": "write",
+      "kind": "mechanical",
+      "objective": "silica_bulk_write"
+    },
+    {
+      "id": "hub_update",
+      "kind": "mechanical",
+      "objective": "silica_hub_update"
+    },
+    {
+      "id": "autolink",
+      "kind": "mechanical",
+      "objective": "silica_autolink"
+    },
+    {
+      "id": "backlink",
+      "kind": "mechanical",
+      "objective": "silica_backlink"
+    },
+    {
+      "id": "lint",
+      "kind": "gate",
+      "objective": "silica_lint"
+    },
+    {
+      "id": "cleanup",
+      "kind": "mechanical",
+      "objective": "silica_cleanup"
+    },
+    {
+      "id": "rollback",
+      "kind": "txn",
+      "objective": "silica_restore"
+    }
+  ],
+  "facts": {},
+  "created_at": "2026-11-06T22:04:42.981251+00:00"
+}

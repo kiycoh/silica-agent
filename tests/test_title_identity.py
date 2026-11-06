@@ -206,11 +206,11 @@ def test_near_title_rejection_enqueues_dedup_workitem():
     it = items[0]
     assert it.kind == "dedup"
     assert it.target_path == "Corso/Descriptor.md"
-    assert it.context["concept"] == "Description"
-    assert it.context["excerpt"] == "corpo"
-    assert it.context["candidate"] == "Descriptor"
-    assert it.context["content_hash"] == "hash9"
-    assert it.context["target_dir"] == "Corso"
+    assert it.context.concept == "Description"
+    assert it.context.excerpt == "corpo"
+    assert it.context.candidate == "Descriptor"
+    assert it.context.content_hash == "hash9"
+    assert it.context.target_dir == "Corso"
 
 
 def test_write_gate_lets_unrelated_titles_through(tmp_vault):

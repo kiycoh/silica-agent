@@ -16,18 +16,19 @@ from silica.capabilities.dedup import DedupDecision, _route_verdict
 from silica.config import SilicaConfig
 from silica.kernel.workqueue import WorkItem
 from silica.kernel.write.provenance import append_record
+from tests.jobs import dedup_job
 
 
 def _item(path: str) -> WorkItem:
-    return WorkItem(kind="dedup", target_path=path, context={})
+    return WorkItem(kind="dedup", target_path=path, context=dedup_job({}))
 
 
 def _route(ctx, path="Concepts/A.md"):
     with patch("silica.capabilities.dedup.commit_ops", return_value={"status": "committed"}), \
-         patch("silica.capabilities.dedup._clean_twin_bundle"), \
+         patch("silica.capabilities.dedup.clean_twin_bundle"), \
          patch("silica.capabilities.dedup._record_absorbed_alias"), \
          patch("silica.capabilities.dedup.emit_feedback"):
-        return _route_verdict(_item(path), ctx,
+        return _route_verdict(_item(path), dedup_job(ctx),
                               DedupDecision(verdict="duplicate", addition="more", rationale="same"),
                               SilicaConfig())
 

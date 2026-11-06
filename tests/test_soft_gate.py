@@ -20,6 +20,7 @@ from unittest.mock import patch
 from silica.config import CONFIG
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.validate import validate_operations
+from tests.jobs import dedup_job, expand_job
 
 LONG = "corpo della nota " * 30  # 510 chars, over the 275 floor
 
@@ -151,8 +152,8 @@ def test_settle_flagged_records_ledger_and_asks_judge_with_loser_path():
     kinds = {it.kind: it for it in q.items}
     assert set(kinds) == {"dedup", "expand"}
     # The judge sees a note that exists: a duplicate verdict has a loser to mark.
-    assert kinds["dedup"].context["loser_path"] == "Corso/Description.md"
-    assert kinds["dedup"].context["title_score"] == 0.90
+    assert kinds["dedup"].context.loser_path == "Corso/Description.md"
+    assert kinds["dedup"].context.title_score == 0.90
     assert kinds["expand"].target_path == "Corso/Percettrone.md"
 
 
@@ -182,11 +183,11 @@ def test_duplicate_without_addition_still_marks_the_landed_loser():
     from silica.kernel.workqueue import WorkItem
 
     ctx = {"concept": "Description", "loser_path": "Corso/Description.md", "hub": "Hub"}
-    item = WorkItem(kind="dedup", target_path="Corso/Descriptor.md", context=ctx)
+    item = WorkItem(kind="dedup", target_path="Corso/Descriptor.md", context=dedup_job(ctx))
     with patch("silica.capabilities.dedup._mark_merge_loser") as mark:
-        res = _route_verdict(item, ctx, _decision("duplicate"), None)
+        res = _route_verdict(item, item.context, _decision("duplicate"), None)
     assert res["status"] == "no_merge"
-    mark.assert_called_once_with(ctx, "Corso/Descriptor.md")
+    mark.assert_called_once_with(item.context, "Corso/Descriptor.md")
 
 
 def test_distinct_on_landed_note_clears_flag_and_leaves_trace(tmp_vault):
@@ -200,11 +201,11 @@ def test_distinct_on_landed_note_clears_flag_and_leaves_trace(tmp_vault):
     ctx = {"concept": "Description", "candidate": "Descriptor",
            "loser_path": "Corso/Description.md", "target_dir": "Corso", "hub": "Hub",
            "content_hash": "h"}
-    item = WorkItem(kind="dedup", target_path="Corso/Descriptor.md", context=ctx)
+    item = WorkItem(kind="dedup", target_path="Corso/Descriptor.md", context=dedup_job(ctx))
     with patch("silica.capabilities.dedup.commit_ops",
                return_value={"status": "committed", "committed": 1}) as commit, \
          patch("silica.kernel.write.deferred.get_deferred_store"):
-        res = _route_distinct(item, ctx, _decision("distinct", rationale="different things"), None)
+        res = _route_distinct(item, item.context, _decision("distinct", rationale="different things"), None)
 
     assert res["status"] == "committed"
     [op] = commit.call_args.args[0]
@@ -228,12 +229,12 @@ def test_expand_overwrites_a_landed_short_note(tmp_vault):
 
     tmp_vault.note("Corso/Percettrone.md",
                    "---\nAI: true\nreview: snippet too short (50 < 275 chars)\n---\n\n# Percettrone\n\ncorto\n")
-    item = WorkItem(kind="expand", target_path="Corso/Percettrone.md", context={
+    item = WorkItem(kind="expand", target_path="Corso/Percettrone.md", context=expand_job({
         "op": {"op": "write", "heading": "Percettrone", "path": "Corso/Percettrone.md",
                "snippet": "corto", "source_basename": "lez.md"},
         "excerpt": "il percettrone separa due classi", "reason": "snippet too short",
         "hub": "Corso", "target_dir": "Corso", "inbox_file": "Inbox/lez.md", "content_hash": "h",
-    })
+    }))
     with patch("silica.capabilities.expand._author_body", return_value=LONG), \
          patch("silica.capabilities.expand.commit_ops",
                return_value={"status": "committed", "committed": 1}) as commit, \
@@ -281,11 +282,11 @@ def test_duplicate_without_addition_releases_the_parked_twin():
     from silica.kernel.workqueue import WorkItem
 
     ctx = {"concept": "iperpiano soddisfa", "content_hash": "h10", "hub": "Hub"}
-    item = WorkItem(kind="dedup", target_path="Corso/Iperpiano.md", context=ctx)
-    with patch("silica.capabilities.dedup._clean_twin_bundle") as clean:
-        res = _route_verdict(item, ctx, _decision("duplicate"), None)
+    item = WorkItem(kind="dedup", target_path="Corso/Iperpiano.md", context=dedup_job(ctx))
+    with patch("silica.capabilities.dedup.clean_twin_bundle") as clean:
+        res = _route_verdict(item, item.context, _decision("duplicate"), None)
     assert res["status"] == "no_merge"
-    clean.assert_called_once_with(ctx)
+    clean.assert_called_once_with("h10", "iperpiano soddisfa")
 
 
 def test_boundary_anneal_settles_the_ops_the_sweep_landed_flagged(monkeypatch):
@@ -315,4 +316,4 @@ def test_boundary_anneal_settles_the_ops_the_sweep_landed_flagged(monkeypatch):
     assert fake.annealed_ops == 1
     assert [r[:2] for r in fake.warning_ledger.rows] == [("Reti/Description.md", "soft_gate")]
     [item] = fake.work_queue.items
-    assert item.kind == "dedup" and item.context["loser_path"] == "Reti/Description.md"
+    assert item.kind == "dedup" and item.context.loser_path == "Reti/Description.md"

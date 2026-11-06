@@ -42,10 +42,10 @@ def test_dedup_workitems_collapses_confirmed_family_to_largest(monkeypatch):
     # A and C both merge INTO B (the largest of the confirmed component) — one
     # survivor, and the family ships as ONE batch item (one judge call).
     family = next(w for w in items if w.target_path == "B")
-    assert {c["concept"] for c in family.context["concepts"]} == {"A", "C"}
+    assert {c.concept for c in family.context.members} == {"A", "C"}
     # Borderline D-E untouched by the closure: larger (D) is the target, per-pair.
     single = next(w for w in items if w.target_path == "D")
-    assert single.context["concept"] == "E"
+    assert single.context.concept == "E"
     assert len(items) == 2
 
 
@@ -102,11 +102,11 @@ def test_apply_enqueues_correct_workitem_kinds(monkeypatch, tmp_path):
 
     # the dedup item is hydrated with an excerpt + concept from the partner
     dedup = next(it for it in cap.items if it.kind == "dedup")
-    assert dedup.context["excerpt"]
-    assert dedup.context["score"] == 0.9
+    assert dedup.context.excerpt
+    assert dedup.context.score == 0.9
     # the orphan item carries the offered candidates
     orphan = next(it for it in cap.items if it.kind == "orphan")
-    assert orphan.context["candidates"] == [{"name": "N", "path": "N.md"}]
+    assert orphan.context.candidates == [{"name": "N", "path": "N.md"}]
 
 
 def test_apply_appends_one_journal_line_idempotent_per_run(monkeypatch, tmp_path):

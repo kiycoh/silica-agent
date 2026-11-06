@@ -1,0 +1,339 @@
+{
+  "run_id": "ac58c2470758451a8a8f61553d62f2d4",
+  "mode": "inject",
+  "started_at": "2026-11-06T22:04:42.981238+00:00",
+  "last_updated": "2026-11-06T22:04:43.134257+00:00",
+  "inputs": {
+    "inbox_files": [
+      "Inbox/r.md"
+    ],
+    "inbox_file": "Inbox/r.md",
+    "target_dir": "ML",
+    "hub": "ML",
+    "sources": [
+      {
+        "inbox_file": "Inbox/r.md",
+        "concepts": 10,
+        "chunks": 2
+      }
+    ],
+    "distill_secs": {
+      "f0_c0_distill": 0.0
+    }
+  },
+  "tasks": [
+    {
+      "id": "recon",
+      "capability_name": "recon",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "payload",
+      "capability_name": "payload",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "recon"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c0_collision",
+      "capability_name": "collision",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": "0 patch-routed, 0 deferred",
+      "depends_on": [
+        "payload"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c0_distill",
+      "capability_name": "distill",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": "<HOME>/tmp/ca99481b27e9475693b07c4d2a50bd1a.json",
+      "depends_on": [
+        "f0_c0_collision"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c0_sanitize",
+      "capability_name": "sanitize",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c0_distill"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c0_validate",
+      "capability_name": "validate",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": "<HOME>/runs/ac58c2470758451a8a8f61553d62f2d4/checkpoints/chunk_0/validated_ops.json",
+      "depends_on": [
+        "f0_c0_sanitize"
+      ],
+      "attempts": 1,
+      "content_hash": "fc32e930aae0adf86580fae0341b9179881a6c61df4fd8f307d3de39b38eefcd",
+      "error": null
+    },
+    {
+      "id": "f0_c0_snapshot",
+      "capability_name": "snapshot",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c0_validate"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c0_write",
+      "capability_name": "write",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c0_snapshot"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c0_hub_update",
+      "capability_name": "hub_update",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c0_write"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c0_autolink",
+      "capability_name": "autolink",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c0_hub_update"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c0_backlink",
+      "capability_name": "backlink",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c0_autolink"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c0_lint",
+      "capability_name": "lint",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c0_backlink"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c0_cleanup",
+      "capability_name": "cleanup",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c0_lint"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c1_collision",
+      "capability_name": "collision",
+      "status": "done",
+      "input_ref": null,
+      "output_ref": "0 patch-routed, 0 deferred",
+      "depends_on": [
+        "f0_c0_cleanup"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c1_distill",
+      "capability_name": "distill",
+      "status": "running",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c1_collision"
+      ],
+      "attempts": 1,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c1_sanitize",
+      "capability_name": "sanitize",
+      "status": "pending",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c1_distill"
+      ],
+      "attempts": 0,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c1_validate",
+      "capability_name": "validate",
+      "status": "pending",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c1_sanitize"
+      ],
+      "attempts": 0,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c1_snapshot",
+      "capability_name": "snapshot",
+      "status": "pending",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c1_validate"
+      ],
+      "attempts": 0,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c1_write",
+      "capability_name": "write",
+      "status": "pending",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c1_snapshot"
+      ],
+      "attempts": 0,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c1_hub_update",
+      "capability_name": "hub_update",
+      "status": "pending",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c1_write"
+      ],
+      "attempts": 0,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c1_autolink",
+      "capability_name": "autolink",
+      "status": "pending",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c1_hub_update"
+      ],
+      "attempts": 0,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c1_backlink",
+      "capability_name": "backlink",
+      "status": "pending",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c1_autolink"
+      ],
+      "attempts": 0,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c1_lint",
+      "capability_name": "lint",
+      "status": "pending",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c1_backlink"
+      ],
+      "attempts": 0,
+      "content_hash": null,
+      "error": null
+    },
+    {
+      "id": "f0_c1_cleanup",
+      "capability_name": "cleanup",
+      "status": "pending",
+      "input_ref": null,
+      "output_ref": null,
+      "depends_on": [
+        "f0_c1_lint"
+      ],
+      "attempts": 0,
+      "content_hash": null,
+      "error": null
+    }
+  ],
+  "issues": [],
+  "cursor": "f0_c1_distill",
+  "vault": "<VAULT>"
+}

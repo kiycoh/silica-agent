@@ -96,7 +96,7 @@ def run_orphan(item: WorkItem, config: Any) -> dict[str, Any]:
     # filtered where candidates are made (curate.link_candidates).
     if is_staging_path(target):
         return {"status": "skipped", "reason": "staging note"}
-    candidates = item.context.get("candidates", [])  # [{"name":..., "path":...}]
+    candidates = item.context.candidates  # [{"name":..., "path":...}]
     if not candidates:
         return {"status": "no_candidates"}
 
@@ -124,7 +124,7 @@ def run_orphan(item: WorkItem, config: Any) -> dict[str, Any]:
 
     emit_feedback(item, "committing")
     title = os.path.splitext(os.path.basename(target))[0]
-    hub = item.context.get("hub")
+    hub = item.context.hub
     # The candidate paths come from the relatedness facade, whose keyspace is
     # store_key: '.md'-stripped. The driver reads either spelling, but the op
     # path is what gets written, so it has to be the real note.

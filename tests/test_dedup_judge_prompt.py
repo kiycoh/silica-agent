@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from silica.config import SilicaConfig
+from tests.jobs import dedup_job
 
 
 def test_neither_judge_prompt_carries_the_closeness_score():
@@ -25,8 +26,8 @@ def test_neither_judge_prompt_carries_the_closeness_score():
     with patch("silica.model.providers.get_provider", return_value=_Provider()):
         _decide_dedup(SilicaConfig(), concept="C", excerpt="e", candidate_name="N", candidate_body="b",
                       score=0.937, full_score=0.937, title_score=0.951)
-        _decide_dedup_batch(SilicaConfig(), concepts=[{"concept": "C", "excerpt": "e", "score": 0.937,
-                                                       "full_score": 0.937, "title_score": 0.951}],
+        _decide_dedup_batch(SilicaConfig(), concepts=[dedup_job(concept="C", excerpt="e", score=0.937,
+                                                                full_score=0.937, title_score=0.951)],
                             candidate_name="N", candidate_body="b")
     for prompt in prompts:
         assert "0.937" not in prompt and "0.951" not in prompt

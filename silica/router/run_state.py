@@ -19,6 +19,13 @@ if TYPE_CHECKING:
     from silica.kernel.write.ops import Txn
 
 
+def job_origin(fsm: Any) -> dict[str, Any]:
+    """What a background job inherits from the run that produced it. Named once,
+    because a job built by hand once left out `run_id`."""
+    return {"hub": fsm.hub, "content_hash": fsm.current_content_hash,
+            "run_id": fsm.progress.run_id, "target_dir": fsm.target_dir}
+
+
 @dataclass
 class FileState:
     """What one inbox file pins for all of its chunks, by its index in

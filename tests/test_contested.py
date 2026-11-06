@@ -16,6 +16,7 @@ from silica.kernel.write.contested import (
 )
 from silica.kernel.base import frontmatter
 from silica.kernel.write.ofm import ofm_lint
+from tests.jobs import dedup_job
 
 
 NOTE = """---
@@ -172,13 +173,13 @@ def test_run_dedup_contradicts_end_to_end(tmp_vault):
     item = WorkItem(
         kind="dedup",
         target_path="Farmacologia/Dosaggio Warfarin.md",
-        context={
+        context=dedup_job({
             "concept": "Dosaggio Warfarin",
             "excerpt": "Il dosaggio raccomandato è 50mg/die.",
             "candidate": "Dosaggio Warfarin",
             "inbox_file": "Inbox/appunti-cardiologia-2026.md",
             "hub": "Farmacologia",
-        },
+        }),
         reason="borderline_similarity score=0.78",
     )
     decision = DedupDecision(

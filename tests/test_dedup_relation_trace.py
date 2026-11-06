@@ -20,6 +20,7 @@ from silica.kernel.write.templates import (
     parse_related_traces,
     related_trace,
 )
+from tests.jobs import dedup_job
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +101,7 @@ def _item():
     return WorkItem(
         kind="dedup",
         target_path="Concepts/Gradient Descent.md",
-        context={},
+        context=dedup_job({}),
         reason="test",
     )
 
@@ -121,7 +122,7 @@ def _committed_op(ctx, decision):
         "silica.capabilities.dedup.commit_ops",
         return_value={"status": "committed", "committed": 1},
     ) as commit:
-        res = _route_distinct(_item(), ctx, decision, SilicaConfig())
+        res = _route_distinct(_item(), dedup_job(ctx), decision, SilicaConfig())
     assert res["status"] == "committed"
     ops = commit.call_args.args[0]
     assert len(ops) == 1
@@ -174,7 +175,7 @@ def test_ad_hoc_pair_writes_nothing():
     # No target_dir: historical contract, distinct means no write.
     with patch("silica.capabilities.dedup.commit_ops") as commit:
         res = _route_distinct(
-            _item(), _pipeline_ctx(target_dir=""), _decision(), SilicaConfig()
+            _item(), dedup_job(_pipeline_ctx(target_dir="")), _decision(), SilicaConfig()
         )
     assert res["status"] == "no_merge"
     assert commit.call_count == 0

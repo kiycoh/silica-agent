@@ -90,7 +90,7 @@ def test_silica_dedup_builds_pair_targeting_larger_note():
     assert len(items) == 1
     # The larger note (B) is the merge target; the smaller (A) is the source.
     assert items[0].target_path == "Concepts/B"
-    assert items[0].context["concept"] == "A"
+    assert items[0].context.concept == "A"
     assert res["pairs_found"] == 1
 
 
@@ -237,7 +237,7 @@ def test_dedup_secondary_borderline_found_with_expanded_k():
     # No item should represent the A↔B pair (score 0.90, above τ_high).
     items = batch.call_args.args[0]
     for item in items:
-        pair = {item.target_path, item.context["inbox_file"]}
+        pair = {item.target_path, item.context.inbox_file}
         assert pair != {"Folder/A", "Folder/B"}, "A↔B is above τ_high and must be excluded"
 
 
@@ -294,10 +294,10 @@ def test_dedup_title_gate_promotes_low_fullscore_pair():
     assert res["pairs_found"] >= 1, "Title gate must admit the ROS / JSON in ROS 2 pair"
 
     items = batch.call_args.args[0]
-    pair_paths = {items[0].target_path, items[0].context["inbox_file"]}
+    pair_paths = {items[0].target_path, items[0].context.inbox_file}
     assert "Robotica/ROS" in pair_paths
     assert "Robotica/JSON in ROS 2" in pair_paths
 
     # effective_score must be the title_score (0.85), not the full score (0.40)
-    assert items[0].context["score"] > 0.80
-    assert items[0].context["title_score"] >= 0.80
+    assert items[0].context.score > 0.80
+    assert items[0].context.title_score >= 0.80

@@ -15,6 +15,7 @@ from typing import Any, TYPE_CHECKING
 
 from silica.config import CONFIG
 from silica.driver import DRIVER
+from silica.router.run_state import job_origin
 
 if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
@@ -590,7 +591,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     # sub-agent's append-only patch never races the Injector's new-note writes;
     # the per-path lease covers the rare same-note overlap.
     if deferred_concepts and fsm.work_queue is not None:
-        from silica.kernel.workqueue import WorkItem, batch_dedup_items
+        from silica.kernel.workqueue import DedupJob, WorkItem, batch_dedup_items
         dedup_items = []
         for d in deferred_concepts:
             concept = d["concept"]
@@ -603,22 +604,17 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
             dedup_items.append(WorkItem(
                 kind="dedup",
                 target_path=candidate_path,
-                context={
-                    "concept": name,
-                    "excerpt": excerpt,
-                    "candidate": match.get("name", candidate_path),
-                    "score": d.get("score"),
-                    "inbox_file": d.get("inbox_file", fsm.current_source_file),
-                    "hub": fsm.hub,
-                    # C2 verdict routing: lets the dedup capability clean up
-                    # (or author the distinct spoke from) the twin bundle.
-                    "content_hash": fsm.current_content_hash,
-                    # The provenance ledger is keyed on the FSM's own run id:
-                    # without it the worker's notes land under the undo
-                    # journal's id, which the dangling-link sweep cannot read.
-                    "run_id": fsm.progress.run_id,
-                    "target_dir": fsm.target_dir,
-                },
+                # C2 verdict routing: the origin's hash and folder let the dedup
+                # capability clean up (or author the distinct spoke from) the
+                # twin bundle.
+                context=DedupJob(
+                    concept=name,
+                    excerpt=excerpt,
+                    candidate=match.get("name", candidate_path),
+                    score=d["score"],
+                    inbox_file=d.get("inbox_file", fsm.current_source_file),
+                    **job_origin(fsm),
+                ),
                 reason=f"borderline_similarity score={d.get('score', 0):.3f}",
             ))
         # Concepts hitting the same candidate note become ONE judge call.

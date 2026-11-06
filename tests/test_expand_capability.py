@@ -17,6 +17,7 @@ from silica.config import CONFIG
 from silica.kernel.write.ops import OpType
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities.expand import run_expand, MAX_EXPAND_ATTEMPTS
+from tests.jobs import expand_job
 
 _GOOD_BODY = "La matrice diagonale ha $D_{i,j}=0$ per $i \\neq j$. " * 9
 _SHORT_BODY = "troppo corto"
@@ -42,7 +43,7 @@ def _item(**ctx_overrides) -> WorkItem:
         "content_hash": "hash9",
     }
     context.update(ctx_overrides)
-    return WorkItem(kind="expand", target_path="Corso/Matrici diagonali.md", context=context)
+    return WorkItem(kind="expand", target_path="Corso/Matrici diagonali.md", context=expand_job(context))
 
 
 def test_expand_commits_authored_body_with_op_metadata():
@@ -171,11 +172,11 @@ def test_short_snippet_rejection_enqueues_expand_workitem():
     it = items[0]
     assert it.kind == "expand"
     assert it.target_path == "Corso/Matrici diagonali.md"
-    assert it.context["op"]["heading"] == "Matrici diagonali"
-    assert "D_{i,j}" in it.context["excerpt"]
-    assert it.context["content_hash"] == "hash9"
-    assert it.context["target_dir"] == "Corso"
-    assert it.context["hub"] == "Corso"
+    assert it.context.op["heading"] == "Matrici diagonali"
+    assert "D_{i,j}" in it.context.excerpt
+    assert it.context.content_hash == "hash9"
+    assert it.context.target_dir == "Corso"
+    assert it.context.hub == "Corso"
 
 
 def test_enqueue_expand_noop_without_queue():

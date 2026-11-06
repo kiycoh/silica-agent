@@ -31,7 +31,7 @@ from silica.agent.subagent import run_subagent_batch
 from silica.kernel.report.curator import CurationPlan, compose_curation_plan
 from silica.kernel.report.graph_report import compute_report
 from silica.kernel.write.run_log import append_log_line, format_curate_event
-from silica.kernel.workqueue import WorkItem
+from silica.kernel.workqueue import DedupJob, OrphanJob, WorkItem
 from silica.tools import tool
 
 logger = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ def _orphan_workitems(plan: CurationPlan) -> list[WorkItem]:
         items.append(WorkItem(
             kind="orphan",
             target_path=it.target,
-            context={"candidates": link_candidates(it.target)},
+            context=OrphanJob(candidates=link_candidates(it.target)),
             reason=it.reason or "curate orphan",
         ))
     return items
@@ -199,14 +199,7 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
             items.append(WorkItem(
                 kind="dedup",
                 target_path=canonical,
-                context={
-                    "concept": stem(m),
-                    "excerpt": body(m)[:4000],
-                    "candidate": stem(canonical),
-                    "score": sc,
-                    "inbox_file": m,
-                    "loser_path": m,
-                },
+                context=DedupJob.between_notes(loser=m, winner=canonical, loser_body=body(m), score=sc),
                 reason=f"curate dedup family → {stem(canonical)} (score={sc:.3f})",
             ))
 
@@ -226,14 +219,8 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
         items.append(WorkItem(
             kind="dedup",
             target_path=larger,
-            context={
-                "concept": stem(smaller),
-                "excerpt": smaller_body[:4000],
-                "candidate": stem(larger),
-                "score": it.score,
-                "inbox_file": smaller,
-                "loser_path": smaller,
-            },
+            context=DedupJob.between_notes(loser=smaller, winner=larger, loser_body=smaller_body,
+                                           score=it.score),
             reason=it.reason or f"curate dedup score={it.score:.3f}",
         ))
     # Family members share target_path=canonical by construction → one judge

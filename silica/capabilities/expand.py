@@ -21,26 +21,24 @@ from silica.kernel.write.gate import commit_ops
 from silica.kernel.write.gate import expand_bounds
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.validate import min_write_snippet_chars
-from silica.kernel.workqueue import WorkItem
-from silica.capabilities._base import NoteContent, emit_feedback, load_prompt, parse_content, read_or_skip
+from silica.kernel.workqueue import ExpandJob, WorkItem
+from silica.capabilities._base import NoteContent, clean_twin_bundle, emit_feedback, load_prompt, parse_content, read_or_skip
 
 logger = logging.getLogger(__name__)
 
 MAX_EXPAND_ATTEMPTS = 2
 
 
-def run_expand(item: WorkItem, config: Any) -> dict[str, Any]:
-    ctx = item.context
-    op_raw: dict = ctx.get("op", {}) or {}
+def run_expand(item: WorkItem[ExpandJob], config: Any) -> dict[str, Any]:
+    job = item.context
+    op_raw = job.op
     heading = op_raw.get("heading", "")
-    excerpt = (ctx.get("excerpt") or "").strip()
+    excerpt = job.excerpt.strip()
     if not excerpt:
         return {"status": "skipped", "reason": "no inbox excerpt to expand from"}
 
-    hub = ctx.get("hub")
-    source_basename = op_raw.get("source_basename") or os.path.basename(
-        ctx.get("inbox_file", "") or ""
-    )
+    hub = job.hub
+    source_basename = op_raw.get("source_basename") or os.path.basename(job.inbox_file)
 
     body = ""
     feedback = ""
@@ -85,7 +83,7 @@ def run_expand(item: WorkItem, config: Any) -> dict[str, Any]:
         tags=op_raw.get("tags") or None,
         related=op_raw.get("related") or None,
         parent=op_raw.get("parent") or None,
-        reason=f"expand retry: {ctx.get('reason', '')[:120]}",
+        reason=f"expand retry: {job.reason[:120]}",
     )
     # The thin note already landed (soft gate): re-author it in place. The
     # rendered content carries no `review:` key, so the flag clears with the
@@ -101,26 +99,13 @@ def run_expand(item: WorkItem, config: Any) -> dict[str, Any]:
         )
     result = commit_ops(
         [op],
-        target_dir=ctx.get("target_dir", "") or os.path.dirname(item.target_path),
+        target_dir=job.target_dir or os.path.dirname(item.target_path),
         hub=hub,
         bounds=expand_bounds(item.target_path, hub=hub, landed=landed),
     )
     if result.get("status") == "committed":
-        _clean_twin_bundle(ctx, heading)
+        clean_twin_bundle(job.content_hash, heading)
     return result
-
-
-def _clean_twin_bundle(ctx: dict, heading: str) -> None:
-    """Drop the expanded op from the deferred bundle VALIDATE parked (same
-    contract as dedup: only after a verified commit; best-effort)."""
-    content_hash = ctx.get("content_hash", "")
-    if not content_hash:
-        return
-    try:
-        from silica.kernel.write.deferred import get_deferred_store
-        get_deferred_store().remove_op(content_hash, heading)
-    except Exception as e:
-        logger.debug("expand: twin bundle cleanup failed (non-fatal): %s", e)
 
 
 def _author_body(

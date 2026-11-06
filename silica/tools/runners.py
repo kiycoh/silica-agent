@@ -282,7 +282,7 @@ def _pairs_to_items(pairs: list[dict]) -> list["WorkItem"]:
     place bodies are read and the larger/smaller split is decided. Optional
     full_score/title_score telemetry is propagated into context when present.
     """
-    from silica.kernel.workqueue import WorkItem
+    from silica.kernel.workqueue import DedupJob, WorkItem
 
     items: list[WorkItem] = []
     for pair in pairs:
@@ -305,23 +305,14 @@ def _pairs_to_items(pairs: list[dict]) -> list["WorkItem"]:
         else:
             larger, smaller, smaller_body = source, target, body_tgt
 
-        context = {
-            "concept": smaller.removesuffix(".md").rsplit("/", 1)[-1],
-            "excerpt": smaller_body[:4000],
-            "candidate": larger.removesuffix(".md").rsplit("/", 1)[-1],
-            "score": score,
-            "inbox_file": smaller,
-            # The loser is a real vault note here (unlike the FSM path, where
-            # inbox_file is a source document), so it can be marked on merge.
-            "loser_path": smaller,
-        }
+        job = DedupJob.between_notes(loser=smaller, winner=larger, loser_body=smaller_body, score=score)
         reason = f"dedup score={score:.3f}"
         if "full_score" in pair and "title_score" in pair:
-            context["full_score"] = pair["full_score"]
-            context["title_score"] = pair["title_score"]
+            job.full_score = pair["full_score"]
+            job.title_score = pair["title_score"]
             reason += f" (full={pair['full_score']:.3f} title={pair['title_score']:.3f})"
 
-        items.append(WorkItem(kind="dedup", target_path=larger, context=context, reason=reason))
+        items.append(WorkItem(kind="dedup", target_path=larger, context=job, reason=reason))
     return items
 
 
@@ -378,7 +369,7 @@ def silica_enrich_batch(note_paths: Annotated[list[str], Field(description='List
     from silica.kernel.workqueue import WorkItem
     from silica.agent.subagent import run_subagent_batch
 
-    items = [WorkItem(kind="enrich", target_path=p, context={}) for p in note_paths]
+    items: list[WorkItem] = [WorkItem(kind="enrich", target_path=p, context={}) for p in note_paths]
     res = run_subagent_batch(items, cancel_token=cancel_token)
     res["notes"] = len(items)
     return res

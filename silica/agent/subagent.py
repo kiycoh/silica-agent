@@ -22,7 +22,7 @@ from typing import Any
 
 from silica.config import CONFIG
 from silica.capabilities import CAPABILITIES, Capability
-from silica.kernel.workqueue import WorkItem
+from silica.kernel.workqueue import DedupFamily, DedupJob, ExpandJob, WorkItem
 
 logger = logging.getLogger(__name__)
 
@@ -37,20 +37,20 @@ def _item_provenance(item: Any) -> tuple[str, str, str] | None:
     dangling-link sweep and check_renucleate read back. It is NOT the undo
     journal's run id, which is a separate uuid4 keyspace.
     """
-    ctx = getattr(item, "context", None) or {}
-    sha = ctx.get("content_hash") or ""
-    run_id = ctx.get("run_id") or ""
-    src = ctx.get("inbox_file") or (ctx.get("op") or {}).get("source_basename") or ""
-    if not src:
-        # A dedup FAMILY batch: `inbox_file` is in _BATCH_CONCEPT_KEYS, so
-        # batch_dedup_items moved it into the per-concept entries and the shared
-        # context has no source left. One batch is always one file — the sha it
-        # carries is fsm._current_content_hash — so the first entry answers for all.
-        src = next((c.get("inbox_file") for c in (ctx.get("concepts") or [])
-                    if isinstance(c, dict) and c.get("inbox_file")), "")
+    job = item.context
+    if isinstance(job, DedupFamily):
+        # One batch is always one file — the sha it carries is
+        # fsm.current_content_hash — so the first member answers for all.
+        job = next((m for m in job.members if m.inbox_file), job.members[0])
+    if isinstance(job, ExpandJob):
+        src = job.inbox_file or job.op.get("source_basename") or ""
+    elif isinstance(job, DedupJob):
+        src = job.inbox_file
+    else:
+        return None
     from silica.kernel.base.manifest import source_key
 
-    return (source_key(src), sha, run_id) if src and sha else None
+    return (source_key(src), job.content_hash, job.run_id) if src and job.content_hash else None
 
 
 def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None,

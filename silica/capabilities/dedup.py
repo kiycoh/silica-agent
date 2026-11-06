@@ -19,8 +19,8 @@ from pydantic.json_schema import SkipJsonSchema
 from silica.kernel.base.notekey import store_key
 from silica.kernel.write.gate import commit_ops, dedup_bounds, dedup_spoke_bounds
 from silica.kernel.write.ops import Op, OpType
-from silica.kernel.workqueue import WorkItem
-from silica.capabilities._base import emit_feedback, load_prompt, read_or_skip
+from silica.kernel.workqueue import DedupFamily, DedupJob, WorkItem
+from silica.capabilities._base import clean_twin_bundle, emit_feedback, load_prompt, read_or_skip
 from silica.model.reply import parse_reply
 
 logger = logging.getLogger(__name__)
@@ -88,8 +88,8 @@ def passes_dedup_gate(
     return large / small <= max_ratio
 
 
-def run_dedup(item: WorkItem, config: Any) -> dict[str, Any]:
-    ctx = item.context
+def run_dedup(item: WorkItem[DedupJob | DedupFamily], config: Any) -> dict[str, Any]:
+    job = item.context
     candidate_path = item.target_path
     budget = 8000
 
@@ -101,65 +101,62 @@ def run_dedup(item: WorkItem, config: Any) -> dict[str, Any]:
     if item.cancel_token.is_set():
         return {"status": "cancelled"}
 
-    if ctx.get("concepts"):
-        return _run_batch(item, ctx["concepts"], candidate_body[:budget], config)
+    if isinstance(job, DedupFamily):
+        return _run_batch(item, job, candidate_body[:budget], config)
 
     if os.getenv("SILICA_DEDUP_GATE"):
-        eff = max(ctx.get("full_score", ctx.get("score", 0.0)),
-                  ctx.get("title_score", 0.0))
-        if not passes_dedup_gate(eff, len(ctx.get("excerpt", "")),
+        if not passes_dedup_gate(job.effective_score, len(job.excerpt),
                                  len(candidate_body[:budget])):
             gate_decision = DedupDecision(
                 verdict="distinct",
                 rationale="dedup gate: below threshold or size guard",
             )
-            return _route_verdict(item, ctx, gate_decision, config)
+            return _route_verdict(item, job, gate_decision, config)
 
     emit_feedback(item, "calling_llm")
     decision = _decide_dedup(
         config,
-        concept=ctx.get("concept", ""),
-        excerpt=ctx.get("excerpt", ""),
-        candidate_name=ctx.get("candidate", candidate_path),
+        concept=job.concept,
+        excerpt=job.excerpt,
+        candidate_name=job.candidate,
         candidate_body=candidate_body[:budget],
-        score=ctx.get("score", 0.0),
-        full_score=ctx.get("full_score", ctx.get("score", 0.0)),
-        title_score=ctx.get("title_score", 0.0),
-        author_spoke=bool(ctx.get("target_dir")),
-        hub=ctx.get("hub"),
+        score=job.score,
+        full_score=job.score if job.full_score is None else job.full_score,
+        title_score=job.title_score or 0.0,
+        author_spoke=bool(job.target_dir),
+        hub=job.hub,
     )
 
     if item.cancel_token.is_set():
         return {"status": "cancelled"}
 
-    return _route_verdict(item, ctx, decision, config)
+    return _route_verdict(item, job, decision, config)
 
 
 def _run_batch(
-    item: WorkItem, concepts: list[dict], candidate_body: str, config: Any
+    item: WorkItem, family: DedupFamily, candidate_body: str, config: Any
 ) -> dict[str, Any]:
     """Judge a family of concepts against one candidate in a single LLM call,
     then route every verdict through the exact same code as a single item."""
-    ctx = item.context
     emit_feedback(item, "calling_llm")
     if os.getenv("SILICA_DEDUP_GATE"):
-        decisions = _gated_batch_decisions(config, item, concepts, candidate_body)
+        decisions = _gated_batch_decisions(config, family, candidate_body)
     else:
+        lead = family.members[0]
         decisions = _decide_dedup_batch(
             config,
-            concepts=concepts,
-            candidate_name=ctx.get("candidate", item.target_path),
+            concepts=family.members,
+            candidate_name=lead.candidate,
             candidate_body=candidate_body,
-            author_spoke=bool(ctx.get("target_dir")),
-            hub=ctx.get("hub"),
+            author_spoke=bool(lead.target_dir),
+            hub=lead.hub,
         )
     results: list[dict[str, Any]] = []
-    for entry, decision in zip(concepts, decisions):
+    for job, decision in zip(family.members, decisions):
         if item.cancel_token.is_set():
             return {"status": "cancelled", "results": results}
-        sub_ctx = {k: v for k, v in ctx.items() if k != "concepts"} | entry
-        res = _route_verdict(item, sub_ctx, decision, config)
-        results.append({"concept": entry.get("concept", ""), **res})
+        res = _route_verdict(item, job, decision, config)
+        results.append({"concept": job.concept, **res})
     statuses = {r.get("status") for r in results}
     return {
         "status": statuses.pop() if len(statuses) == 1 else "partial",
@@ -169,22 +166,20 @@ def _run_batch(
 
 
 def _gated_batch_decisions(
-    config: Any, item: WorkItem, concepts: list[dict], candidate_body: str
+    config: Any, family: DedupFamily, candidate_body: str
 ) -> list[DedupDecision]:
     """SILICA_DEDUP_GATE batch path: concepts failing the cheap cosine+size gate
     skip the LLM and are pre-judged 'distinct' (clearly not duplicates); the rest
-    are judged in one batch call. Returned full-length and aligned to `concepts`,
-    so the caller's zip stays correct and every gated-out concept still routes
-    through the normal distinct path (authoring its spoke for pipeline items),
-    identical to an LLM 'distinct'.
+    are judged in one batch call. Returned full-length and aligned to the
+    members, so the caller's zip stays correct and every gated-out concept still
+    routes through the normal distinct path (authoring its spoke for pipeline
+    items), identical to an LLM 'distinct'.
     """
-    ctx = item.context
-    to_judge: list[dict] = []
+    lead = family.members[0]
+    to_judge: list[DedupJob] = []
     prejudged: dict[int, DedupDecision] = {}
-    for i, c in enumerate(concepts):
-        eff = max(c.get("full_score", c.get("score", 0.0)) or 0.0,
-                  c.get("title_score", 0.0) or 0.0)
-        if passes_dedup_gate(eff, len(c.get("excerpt", "")), len(candidate_body)):
+    for i, c in enumerate(family.members):
+        if passes_dedup_gate(c.effective_score, len(c.excerpt), len(candidate_body)):
             to_judge.append(c)
         else:
             prejudged[i] = DedupDecision(
@@ -195,21 +190,21 @@ def _gated_batch_decisions(
         _decide_dedup_batch(
             config,
             concepts=to_judge,
-            candidate_name=ctx.get("candidate", item.target_path),
+            candidate_name=lead.candidate,
             candidate_body=candidate_body,
-            author_spoke=bool(ctx.get("target_dir")),
-            hub=ctx.get("hub"),
+            author_spoke=bool(lead.target_dir),
+            hub=lead.hub,
         )
         if to_judge else []
     )
     judged_iter = iter(judged)
     return [
         prejudged[i] if i in prejudged else next(judged_iter, DedupDecision())
-        for i in range(len(concepts))
+        for i in range(len(family.members))
     ]
 
 
-def _incoming_side(ctx: dict, source_basename: str) -> tuple[int, str | None]:
+def _incoming_side(job: DedupJob, source_basename: str) -> tuple[int, str | None]:
     """(tier, event clock) of the claim arriving from this source.
 
     NOT `reliability_tier` of the source text: a raw document has no `AI` key
@@ -225,7 +220,7 @@ def _incoming_side(ctx: dict, source_basename: str) -> tuple[int, str | None]:
 
     from silica.kernel.base.manifest import source_key
 
-    inbox_file = ctx.get("inbox_file") or ""
+    inbox_file = job.inbox_file
     # The leaf sits at the source's path under sources/ (ADR-0114); by the bare
     # name alone a namesake's leaf would lend this claim its tier and date.
     leaf, _err = read_or_skip(
@@ -266,7 +261,7 @@ def _pair_provenance(candidate_path: str, source_basename: str) -> dict[str, Any
 
 
 def _file_dominated_claim(
-    ctx: dict, path: str, decision: Any, source_basename: str, hub: str | None
+    job: DedupJob, path: str, decision: Any, source_basename: str, hub: str | None
 ) -> dict | None:
     """§6.1-bis: file a claim the note strictly outranks, instead of contesting it.
 
@@ -294,7 +289,7 @@ def _file_dominated_claim(
     prior, _err = read_or_skip(path)
     if not prior:
         return None
-    incoming_tier, incoming_clock = _incoming_side(ctx, source_basename)
+    incoming_tier, incoming_clock = _incoming_side(job, source_basename)
     if not suppress_contest(prior, incoming_tier=incoming_tier,
                             incoming_clock=incoming_clock):
         return None
@@ -307,7 +302,7 @@ def _file_dominated_claim(
     result = commit_ops(
         [Op(
             op=OpType.overwrite,
-            heading=ctx.get("concept", "") or "superseded claim",
+            heading=job.concept or "superseded claim",
             source_basename=source_basename,
             path=path,
             content=filed,
@@ -325,7 +320,7 @@ def _file_dominated_claim(
     return result
 
 
-def _mark_merge_loser(ctx: dict, winner_path: str) -> None:
+def _mark_merge_loser(job: DedupJob, winner_path: str) -> None:
     """Point the absorbed note at the one that took its content.
 
     Only fires when the loser is a real vault note: `loser_path` is set by the
@@ -334,7 +329,7 @@ def _mark_merge_loser(ctx: dict, winner_path: str) -> None:
     concept that was never written has none. Best-effort — a committed merge
     must not be reported failed over a bookkeeping key.
     """
-    loser_path = ctx.get("loser_path")
+    loser_path = job.loser_path
     # Compared as notes, not strings: the index keys a note without ".md",
     # and a course run marked three notes superseded by themselves (Zero
     # padding, 2026-10-23), the only copy hidden from stage B and from Learn.
@@ -354,7 +349,7 @@ def _mark_merge_loser(ctx: dict, winner_path: str) -> None:
         commit_ops(
             [Op(
                 op=OpType.overwrite,
-                heading=ctx.get("concept", "") or "merged note",
+                heading=job.concept or "merged note",
                 source_basename=os.path.basename(loser_path),
                 path=loser_path,
                 content=marked,
@@ -381,7 +376,7 @@ def _is_spine(path: str) -> bool:
     return is_spine(data)
 
 
-def _record_absorbed_alias(ctx: dict, winner_path: str, hub: str | None) -> None:
+def _record_absorbed_alias(job: DedupJob, winner_path: str, hub: str | None) -> None:
     """Keep the surface form of a concept that was merged away.
 
     Runs beside _mark_merge_loser, not instead of it: a landed loser keeps a
@@ -397,7 +392,7 @@ def _record_absorbed_alias(ctx: dict, winner_path: str, hub: str | None) -> None
     a bookkeeping key. An alias that collides with a real note title is dropped
     downstream by build_alias_map, so no read is spent proving it here.
     """
-    concept = (ctx.get("concept") or "").strip()
+    concept = job.concept.strip()
     winner_title = os.path.basename(winner_path).removesuffix(".md")
     if not concept or concept.lower() == winner_title.lower():
         return
@@ -431,7 +426,7 @@ def _record_absorbed_alias(ctx: dict, winner_path: str, hub: str | None) -> None
 
 
 def _route_verdict(
-    item: WorkItem, ctx: dict, decision: DedupDecision, config: Any
+    item: WorkItem, job: DedupJob, decision: DedupDecision, config: Any
 ) -> dict[str, Any]:
     candidate_path = item.target_path
 
@@ -444,19 +439,19 @@ def _route_verdict(
                 "rationale": f"{os.path.basename(candidate_path)} is a lesson outline"}
 
     if decision.verdict == "distinct":
-        return _route_distinct(item, ctx, decision, config)
+        return _route_distinct(item, job, decision, config)
 
     if not decision.addition.strip():
         if decision.verdict == "duplicate":
             # A landed soft-gate note judged a pure duplicate: nothing to merge,
             # but the note is still on disk saying the same thing as the
             # candidate — point it at the winner (no-op without loser_path).
-            _mark_merge_loser(ctx, candidate_path)
-            _record_absorbed_alias(ctx, candidate_path, ctx.get("hub"))
+            _mark_merge_loser(job, candidate_path)
+            _record_absorbed_alias(job, candidate_path, job.hub)
             # The verdict is final, so the parked copy has nothing left to
             # wait for: release it, or the anneal re-validates it every run
             # until the TTL drops it (probe run 2026-09-02).
-            _clean_twin_bundle(ctx)
+            clean_twin_bundle(job.content_hash, job.concept)
         return {
             "status": "no_merge",
             "verdict": decision.verdict,
@@ -464,17 +459,17 @@ def _route_verdict(
         }
 
     emit_feedback(item, "committing")
-    hub = ctx.get("hub")
-    inbox_file = ctx.get("inbox_file", "")
+    hub = job.hub
+    inbox_file = job.inbox_file
     source_basename = os.path.basename(inbox_file) if inbox_file else "dedup"
     if decision.verdict == "contradicts":
-        filed = _file_dominated_claim(ctx, candidate_path, decision, source_basename, hub)
+        filed = _file_dominated_claim(job, candidate_path, decision, source_basename, hub)
         if filed is not None:
             return filed
         from silica.kernel.write.contested import contested_callout
         op = Op(
             op=OpType.patch,
-            heading=ctx.get("concept", "") or "contested claim",
+            heading=job.concept or "contested claim",
             source_basename=source_basename,
             path=candidate_path,
             snippet=contested_callout(decision.addition, source_basename),
@@ -485,7 +480,7 @@ def _route_verdict(
     else:
         op = Op(
             op=OpType.patch,
-            heading=ctx.get("concept", "") or "merged concept",
+            heading=job.concept or "merged concept",
             source_basename=source_basename,
             path=candidate_path,
             snippet=decision.addition,
@@ -503,28 +498,28 @@ def _route_verdict(
     result.setdefault("verdict", decision.verdict)
     from silica.kernel.base.manifest import source_key
 
-    incoming = source_key(ctx["inbox_file"]) if ctx.get("inbox_file") else source_basename
+    incoming = source_key(job.inbox_file) if job.inbox_file else source_basename
     result.setdefault("provenance", _pair_provenance(candidate_path, incoming))
     if result.get("status") == "committed":
-        _clean_twin_bundle(ctx)
+        clean_twin_bundle(job.content_hash, job.concept)
         if decision.verdict == "duplicate":
-            if ctx.get("loser_path"):
-                _mark_merge_loser(ctx, candidate_path)
+            if job.loser_path:
+                _mark_merge_loser(job, candidate_path)
             # The alias is recorded with or without a loser note: the loser's
             # pointer is read by the write gate only while the stub exists,
             # the alias on the winner is what outlives its deletion. Before
             # 2026-09-03 the branches were exclusive and "Percettrone" left
             # no trace on "Percettrone di Rosenblatt" (run f30ace50).
-            _record_absorbed_alias(ctx, candidate_path, hub)
+            _record_absorbed_alias(job, candidate_path, hub)
     return result
 
 
 def _route_distinct(
-    item: WorkItem, ctx: dict, decision: DedupDecision, config: Any
+    item: WorkItem, job: DedupJob, decision: DedupDecision, config: Any
 ) -> dict[str, Any]:
     """Distinct verdict routing (C2): the borderline concept becomes a spoke.
 
-    Pipeline items (context carries ``target_dir``) commit the spoke the judge
+    Pipeline items (a job with a ``target_dir``) commit the spoke the judge
     authored in the verdict call — or, when authoring failed, a mechanical
     write of the excerpt verbatim with provenance, refined right after
     (ADR-0001: mechanical inject + deferred refine). The parked twin bundle is
@@ -533,28 +528,28 @@ def _route_distinct(
     Ad-hoc pairs (two existing notes, no ``target_dir``) keep the historical
     contract: distinct → no write.
     """
-    target_dir = ctx.get("target_dir", "")
+    target_dir = job.target_dir
     no_merge = {"status": "no_merge", "verdict": "distinct", "rationale": decision.rationale}
     if not target_dir:
         return no_merge
-    if ctx.get("loser_path"):
-        return _settle_landed_distinct(item, ctx, decision)
+    if job.loser_path:
+        return _settle_landed_distinct(item, job, decision)
 
     from silica.kernel.write.templates import (
         has_related_trace, related_trace, related_unjudged, slugify,
     )
 
-    concept = ctx.get("concept", "")
-    candidate_name = ctx.get("candidate", "")
-    inbox_file = ctx.get("inbox_file", "")
+    concept = job.concept
+    candidate_name = job.candidate
+    inbox_file = job.inbox_file
     source_basename = os.path.basename(inbox_file) if inbox_file else "dedup"
-    hub = ctx.get("hub")
+    hub = job.hub
 
     title = decision.title.strip()
     body = decision.body.strip()
     mechanical = not (title and body)
     if mechanical:
-        excerpt = (ctx.get("excerpt") or "").strip()
+        excerpt = job.excerpt.strip()
         if not excerpt:
             return no_merge  # nothing to materialize the spoke from
         title = concept or candidate_name
@@ -596,11 +591,11 @@ def _route_distinct(
     result.setdefault("rationale", decision.rationale)
     result["spoke_path"] = spoke_path
     if result.get("status") == "committed":
-        _clean_twin_bundle(ctx)
+        clean_twin_bundle(job.content_hash, job.concept)
     return result
 
 
-def _settle_landed_distinct(item: WorkItem, ctx: dict, decision: DedupDecision) -> dict[str, Any]:
+def _settle_landed_distinct(item: WorkItem, job: DedupJob, decision: DedupDecision) -> dict[str, Any]:
     """`distinct` on a note that landed under a soft gate: the flag has done
     its job. Drop `review:` and leave the judged relation as the same typed
     trace a spoke gets, so the verdict survives in the note and nothing is
@@ -610,7 +605,7 @@ def _settle_landed_distinct(item: WorkItem, ctx: dict, decision: DedupDecision) 
     from silica.kernel.base import frontmatter
     from silica.kernel.write.templates import has_related_trace, related_trace, related_unjudged
 
-    path = ctx["loser_path"]
+    path = job.loser_path
     prior = read_or_skip(path)[0] or ""
     data, raw, body = frontmatter.split(prior)
     if data is None:
@@ -618,7 +613,7 @@ def _settle_landed_distinct(item: WorkItem, ctx: dict, decision: DedupDecision) 
             return {"status": "no_merge", "verdict": "distinct", "rationale": decision.rationale}
         data, body = {}, prior
     data.pop("review", None)
-    candidate_name = ctx.get("candidate", "")
+    candidate_name = job.candidate
     if candidate_name and not has_related_trace(body, candidate_name):
         body = body.rstrip("\n") + "\n\n" + (
             related_trace(candidate_name, decision.rationale) if decision.judged
@@ -628,7 +623,7 @@ def _settle_landed_distinct(item: WorkItem, ctx: dict, decision: DedupDecision) 
     result = commit_ops(
         [Op(
             op=OpType.overwrite,
-            heading=ctx.get("concept", "") or "judged distinct",
+            heading=job.concept or "judged distinct",
             source_basename=os.path.basename(path),
             path=path,
             content=frontmatter.dump(data, body),
@@ -636,31 +631,14 @@ def _settle_landed_distinct(item: WorkItem, ctx: dict, decision: DedupDecision) 
             reason=f"dedup distinct, flag cleared: {decision.rationale[:120]}",
         )],
         target_dir=os.path.dirname(path),
-        hub=ctx.get("hub"),
-        bounds=dedup_settle_bounds(path, hub=ctx.get("hub")),
+        hub=job.hub,
+        bounds=dedup_settle_bounds(path, hub=job.hub),
     )
     result.setdefault("verdict", "distinct")
     result.setdefault("rationale", decision.rationale)
     if result.get("status") == "committed":
-        _clean_twin_bundle(ctx)
+        clean_twin_bundle(job.content_hash, job.concept)
     return result
-
-
-def _clean_twin_bundle(ctx: dict) -> None:
-    """Drop this concept's op from the deferred bundle COLLISION parked.
-
-    Called only after a verified commit: the verdict has been routed into the
-    vault, so the parked copy is no longer the durable one. Best-effort — a
-    missing bundle (retry already flushed it, pre-C2 stub) is not an error.
-    """
-    content_hash = ctx.get("content_hash", "")
-    if not content_hash:
-        return
-    try:
-        from silica.kernel.write.deferred import get_deferred_store
-        get_deferred_store().remove_op(content_hash, ctx.get("concept", ""))
-    except Exception as e:
-        logger.debug("dedup: twin bundle cleanup failed (non-fatal): %s", e)
 
 
 def _judge_role(config: Any) -> str:
@@ -768,7 +746,7 @@ def _narrate_verdict(decision: DedupDecision, *, raw: str, concept: str, candida
 def _decide_dedup_batch(
     config: Any,
     *,
-    concepts: list[dict],
+    concepts: list[DedupJob],
     candidate_name: str,
     candidate_body: str,
     author_spoke: bool = False,
@@ -804,8 +782,8 @@ def _decide_dedup_batch(
     blocks = []
     for i, c in enumerate(concepts, 1):
         blocks.append(
-            f"---\nINCOMING CONCEPT {i}/{n}: {c.get('concept', '')}\n"
-            f"EXCERPT:\n{c.get('excerpt', '')}\n"
+            f"---\nINCOMING CONCEPT {i}/{n}: {c.concept}\n"
+            f"EXCERPT:\n{c.excerpt}\n"
         )
     user_message = (
         f"{prompt}{batch_note}\n\n"

@@ -204,7 +204,7 @@ class Coordinator:
 
     def _enqueue_orphan_repairs(self, wq: Any, result: dict) -> None:
         from silica.kernel.base.notekey import ledger_key
-        from silica.kernel.workqueue import WorkItem
+        from silica.kernel.workqueue import OrphanJob, WorkItem
 
         ledger = getattr(self.fsm, "warning_ledger", None)
         if ledger is None or len(ledger) == 0:
@@ -230,7 +230,7 @@ class Coordinator:
             wq.enqueue(WorkItem(
                 kind="orphan",
                 target_path=path,
-                context={"candidates": candidates, "hub": getattr(self.fsm, "hub", None)},
+                context=OrphanJob(candidates=candidates, hub=getattr(self.fsm, "hub", None)),
                 reason="residual_orphan",
             ))
             enqueued += 1

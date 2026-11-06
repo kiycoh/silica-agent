@@ -3,7 +3,12 @@ import json
 import threading
 import time
 
-from silica.kernel.workqueue import WorkQueue, WorkItem, path_lease
+import pytest
+
+from silica.kernel.workqueue import (
+    DedupFamily, DedupJob, ExpandJob, OrphanJob, WorkItem, WorkQueue, path_lease,
+)
+from tests.jobs import dedup_job
 
 
 def test_enqueue_claim_complete_roundtrip():
@@ -110,7 +115,7 @@ def test_persist_is_atomic_under_concurrent_enqueue(tmp_path):
     def enqueue_many(items):
         barrier.wait()
         for item in items:
-            wq.enqueue(WorkItem(kind="dedup", target_path=item, context={}, reason="test"))
+            wq.enqueue(WorkItem(kind="dedup", target_path=item, context=dedup_job({}), reason="test"))
 
     t1 = threading.Thread(target=enqueue_many, args=(["a.md", "b.md", "c.md"],))
     t2 = threading.Thread(target=enqueue_many, args=(["d.md", "e.md", "f.md"],))
@@ -119,3 +124,60 @@ def test_persist_is_atomic_under_concurrent_enqueue(tmp_path):
 
     saved = json.loads((tmp_path / "workqueue.json").read_bytes())
     assert len(saved) == 6, f"Expected 6 items, got {len(saved)}: {[s['target_path'] for s in saved]}"
+
+
+# ---------------------------------------------------------------------------
+# The typed jobs: refused when incomplete, unchanged on disk
+# ---------------------------------------------------------------------------
+
+def test_a_dedup_job_without_its_run_id_is_refused():
+    """COLLISION once built its items by hand without `run_id`, and nothing
+    noticed: the workers' notes went to the ledger under the journal's id."""
+    with pytest.raises(TypeError, match="run_id"):
+        DedupJob(concept="A", excerpt="e", candidate="B", score=0.7, inbox_file="in.md",
+                 hub="Hub", content_hash="h", target_dir="T")
+
+
+def _origin():
+    return {"hub": "Hub", "content_hash": "h", "run_id": "r", "target_dir": "T"}
+
+
+def test_workqueue_json_keeps_its_shape(tmp_path):
+    """Key for key and in order, as a run wrote them before the jobs were typed."""
+    collision = DedupJob(concept="A", excerpt="e", candidate="B", score=0.7,
+                         inbox_file="in.md", **_origin())
+    landed = DedupJob(concept="C", excerpt="f", candidate="B", score=0.0, title_score=0.9,
+                      inbox_file="in.md", loser_path="T/C.md", **_origin())
+    q = WorkQueue(run_dir=tmp_path)
+    q.enqueue(WorkItem(kind="dedup", target_path="T/B.md", context=collision))
+    q.enqueue(WorkItem(kind="dedup", target_path="T/B.md", context=DedupFamily([collision, landed])))
+    q.enqueue(WorkItem(kind="expand", target_path="T/D.md", context=ExpandJob(
+        op={"heading": "D"}, excerpt="x", reason="snippet too short", inbox_file="in.md", **_origin())))
+    q.enqueue(WorkItem(kind="orphan", target_path="T/E.md",
+                       context=OrphanJob(candidates=[{"name": "F", "path": "F.md"}], hub="Hub")))
+    q.enqueue(WorkItem(kind="enrich", target_path="T/G.md", context={"hub": "Hub"}))
+
+    rows = json.loads((tmp_path / "workqueue.json").read_text())
+    assert list(rows[0]) == ["kind", "target_path", "context", "reason", "id", "status", "result"]
+    contexts = [r["context"] for r in rows]
+    assert list(contexts[0].items()) == [
+        ("concept", "A"), ("excerpt", "e"), ("candidate", "B"), ("score", 0.7), ("inbox_file", "in.md"),
+        ("hub", "Hub"), ("content_hash", "h"), ("run_id", "r"), ("target_dir", "T")]
+    assert list(contexts[1]) == ["candidate", "hub", "content_hash", "run_id", "target_dir", "concepts"]
+    assert contexts[1]["concepts"] == [
+        {"concept": "A", "excerpt": "e", "score": 0.7, "inbox_file": "in.md"},
+        {"concept": "C", "excerpt": "f", "score": 0.0, "title_score": 0.9, "inbox_file": "in.md",
+         "loser_path": "T/C.md"}]
+    assert list(contexts[2]) == ["op", "excerpt", "reason", "inbox_file", "hub", "content_hash",
+                                 "run_id", "target_dir"]
+    assert contexts[3] == {"candidates": [{"name": "F", "path": "F.md"}], "hub": "Hub"}
+    assert contexts[4] == {"hub": "Hub"}
+
+
+def test_two_notes_make_a_job_with_no_run_behind_it():
+    job = DedupJob.between_notes(loser="Dir/Small.md", winner="Dir/Big.md",
+                                 loser_body="x" * 5000, score=0.8)
+    assert (job.concept, job.candidate, job.inbox_file, job.loser_path) == (
+        "Small", "Big", "Dir/Small.md", "Dir/Small.md")
+    assert len(job.excerpt) == 4000
+    assert (job.hub, job.content_hash, job.run_id, job.target_dir) == (None, "", "", "")

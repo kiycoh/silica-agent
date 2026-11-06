@@ -14,6 +14,8 @@ from silica.capabilities.orphan import run_orphan, OrphanLinkDecision
 from silica.config import SilicaConfig
 from silica.kernel.write.ops import OpType
 from silica.kernel.workqueue import WorkItem
+from tests.jobs import dedup_job
+from silica.kernel.workqueue import OrphanJob
 
 CONFIG = SilicaConfig()
 
@@ -56,13 +58,13 @@ def _item():
     return WorkItem(
         kind="dedup",
         target_path="Concepts/Gradient Descent.md",
-        context={
+        context=dedup_job({
             "concept": "Discesa del gradiente",
             "excerpt": "Variante mini-batch con momentum.",
             "candidate": "Gradient Descent",
             "inbox_file": "Inbox/ml.md",
             "hub": "Concepts",
-        },
+        }),
         reason="borderline_similarity score=0.78",
     )
 
@@ -234,8 +236,8 @@ def _seed_twin_bundle(content_hash: str = "hash1"):
 
 def _item_with_hash(content_hash: str = "hash1"):
     item = _item()
-    item.context["content_hash"] = content_hash
-    item.context["target_dir"] = "Concepts"
+    item.context.content_hash = content_hash
+    item.context.target_dir = "Concepts"
     return item
 
 
@@ -412,10 +414,10 @@ def _orphan_item():
     return WorkItem(
         kind="orphan",
         target_path="Notes/Lonely.md",
-        context={"candidates": [
+        context=OrphanJob(**{"candidates": [
             {"name": "Gradient Descent", "path": "Concepts/Gradient Descent"},
             {"name": "Backprop", "path": "Concepts/Backprop"},
-        ]},
+        ]}),
         reason="residual_orphan",
     )
 
@@ -465,10 +467,10 @@ def test_orphan_completes_the_md_suffix_on_candidate_paths():
     item = WorkItem(
         kind="orphan",
         target_path="Notes/Lonely.md",
-        context={"candidates": [
+        context=OrphanJob(**{"candidates": [
             {"name": "Bare", "path": "Concepts/Bare"},          # keyspace form
             {"name": "Suffixed", "path": "Concepts/Suffixed.md"},  # already a path
-        ]},
+        ]}),
         reason="residual_orphan",
     )
     decision = OrphanLinkDecision(links=["Bare", "Suffixed"], rationale="both")
@@ -485,7 +487,7 @@ def test_orphan_provenance_key_is_per_orphan():
         item = WorkItem(
             kind="orphan",
             target_path=orphan_path,
-            context={"candidates": [{"name": "Hub", "path": "Concepts/Hub.md"}]},
+            context=OrphanJob(**{"candidates": [{"name": "Hub", "path": "Concepts/Hub.md"}]}),
             reason="residual_orphan",
         )
         _, commit = _run_orphan_capturing(
@@ -503,7 +505,7 @@ def test_orphan_skips_candidates_outside_the_write_boundary():
     item = WorkItem(
         kind="orphan",
         target_path="docs/silica/Lonely.md",
-        context={"candidates": [{"name": "Readme", "path": "README.md"}]},
+        context=OrphanJob(**{"candidates": [{"name": "Readme", "path": "README.md"}]}),
         reason="residual_orphan",
     )
     decision = OrphanLinkDecision(links=["Readme"], rationale="related")
@@ -524,7 +526,7 @@ def test_orphan_no_link_when_model_picks_nothing_valid():
 
 
 def test_orphan_no_candidates():
-    res = run_orphan(WorkItem(kind="orphan", target_path="X.md", context={"candidates": []}), CONFIG)
+    res = run_orphan(WorkItem(kind="orphan", target_path="X.md", context=OrphanJob(**{"candidates": []})), CONFIG)
     assert res["status"] == "no_candidates"
 
 
@@ -536,7 +538,7 @@ def test_orphan_hub_is_none_when_context_has_no_hub():
     item = WorkItem(
         kind="orphan",
         target_path="notes/MyNote.md",
-        context={"candidates": [{"name": "Other", "path": "notes/Other.md"}]},
+        context=OrphanJob(**{"candidates": [{"name": "Other", "path": "notes/Other.md"}]}),
         reason="test",
     )
 
@@ -558,25 +560,17 @@ def test_orphan_hub_is_none_when_context_has_no_hub():
 # --- provenance attribution of work items (2026-08-18) ----------------------
 
 def test_item_provenance_reads_a_batched_dedup_context():
-    """batch_dedup_items moves `inbox_file` into the per-concept entries (it is
-    in _BATCH_CONCEPT_KEYS), so the shared context of a family batch has no
-    source at all. Shape copied verbatim from a real run's workqueue.json."""
+    """A family answers for its source through its first member. Values copied
+    from a real run's workqueue.json."""
     from types import SimpleNamespace
     from silica.agent.subagent import _item_provenance
+    from silica.kernel.workqueue import DedupFamily
 
-    item = SimpleNamespace(context={
-        "candidate": "Single Module",
-        "concepts": [
-            {"concept": "partitions", "excerpt": "…",
-             "inbox_file": "docs/silica/Inbox/physics_0607100v2/2-vi-conclusions.md"},
-            {"concept": "modularity", "excerpt": "…",
-             "inbox_file": "docs/silica/Inbox/physics_0607100v2/2-vi-conclusions.md"},
-        ],
-        "content_hash": "5f7e4c65",
-        "hub": "Papers",
-        "run_id": "run-77",
-        "target_dir": "docs/silica/Papers",
-    })
+    shared = {"candidate": "Single Module", "content_hash": "5f7e4c65", "hub": "Papers",
+              "run_id": "run-77", "target_dir": "docs/silica/Papers",
+              "inbox_file": "docs/silica/Inbox/physics_0607100v2/2-vi-conclusions.md"}
+    item = SimpleNamespace(context=DedupFamily([
+        dedup_job(shared, concept="partitions"), dedup_job(shared, concept="modularity")]))
     assert _item_provenance(item) == ("2-vi-conclusions.md", "5f7e4c65", "run-77")
 
 
@@ -584,7 +578,7 @@ def test_item_provenance_is_none_without_a_source():
     from types import SimpleNamespace
     from silica.agent.subagent import _item_provenance
 
-    assert _item_provenance(SimpleNamespace(context={"content_hash": "x"})) is None
+    assert _item_provenance(SimpleNamespace(context=dedup_job(content_hash="x"))) is None
     assert _item_provenance(SimpleNamespace(context={})) is None
 
 
@@ -677,7 +671,7 @@ def test_decide_dedup_batch_switches_thinking_off():
     provider.call_llm.return_value = MagicMock(text='{"decisions": []}', finish_reason="stop")
     with patch("silica.model.providers.get_provider", return_value=provider):
         _decide_dedup_batch(
-            CONFIG, concepts=[{"concept": "X", "excerpt": "e"}],
+            CONFIG, concepts=[dedup_job(concept="X", excerpt="e")],
             candidate_name="Y", candidate_body="b",
         )
     assert provider.call_llm.call_args.kwargs["reasoning"] is False

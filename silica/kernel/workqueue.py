@@ -30,9 +30,9 @@ import queue
 import threading
 from collections import Counter
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Generic, Iterator, TypeVar
 from uuid import uuid4
 
 import orjson
@@ -117,11 +117,111 @@ def path_lease(path: str) -> Iterator[None]:
 # WorkItem
 # ---------------------------------------------------------------------------
 
+class _Job:
+    def to_dict(self) -> dict[str, Any]:
+        """The context a persisted item carries in workqueue.json."""
+        return asdict(self)  # type: ignore[call-overload]
+
+
+@dataclass(kw_only=True)
+class DedupJob(_Job):
+    """One incoming concept, judged against the item's target note.
+
+    The fields without a default have none on purpose: a builder that forgets
+    one is refused here. COLLISION once left out `run_id`, nothing noticed, and
+    its workers' notes reached the provenance ledger under the undo journal's id.
+    """
+    concept: str
+    excerpt: str
+    candidate: str
+    score: float
+    full_score: float | None = None
+    title_score: float | None = None
+    inbox_file: str
+    hub: str | None
+    content_hash: str
+    run_id: str
+    # Where a distinct concept's spoke goes; "" (two existing notes) writes none.
+    target_dir: str
+    # A real note on the losing side: a duplicate verdict marks it superseded
+    # and a distinct one settles it. "" for a concept that was never written.
+    loser_path: str = ""
+
+    @classmethod
+    def between_notes(cls, *, loser: str, winner: str, loser_body: str, score: float,
+                      full_score: float | None = None,
+                      title_score: float | None = None) -> "DedupJob":
+        """Two notes already in the vault (/dedup, /curate): no run, no source.
+        The loser stands where the FSM path has a source document, and being a
+        real note it can be marked on merge."""
+        stem = lambda p: p.removesuffix(".md").rsplit("/", 1)[-1]  # noqa: E731
+        return cls(concept=stem(loser), excerpt=loser_body[:4000], candidate=stem(winner),
+                   score=score, full_score=full_score, title_score=title_score,
+                   inbox_file=loser, loser_path=loser,
+                   hub=None, content_hash="", run_id="", target_dir="")
+
+    @property
+    def effective_score(self) -> float:
+        full = self.score if self.full_score is None else self.full_score
+        return max(full or 0.0, self.title_score or 0.0)
+
+    def to_dict(self) -> dict[str, Any]:
+        out = asdict(self)
+        for key in ("full_score", "title_score"):
+            if out[key] is None:
+                del out[key]
+        if not self.loser_path:
+            del out["loser_path"]
+        return out
+
+
+_BATCH_CONCEPT_KEYS = ("concept", "excerpt", "score", "full_score", "title_score", "inbox_file", "loser_path")
+
+
 @dataclass
-class WorkItem:
+class DedupFamily(_Job):
+    """Jobs sharing a candidate note, judged in one call and routed one by one.
+    The candidate body is the bulk of the judge's prompt, so a family of N
+    judged per-item repeats it N times."""
+    members: list[DedupJob]
+
+    def to_dict(self) -> dict[str, Any]:
+        rows = [m.to_dict() for m in self.members]
+        shared = {k: v for k, v in rows[0].items() if k not in _BATCH_CONCEPT_KEYS}
+        shared["concepts"] = [{k: r[k] for k in _BATCH_CONCEPT_KEYS if k in r} for r in rows]
+        return shared
+
+
+@dataclass(kw_only=True)
+class ExpandJob(_Job):
+    """A write op rejected as too short, for the worker to author a body for."""
+    op: dict[str, Any]
+    excerpt: str
+    reason: str
+    inbox_file: str
+    hub: str | None
+    content_hash: str
+    run_id: str
+    target_dir: str
+
+
+@dataclass(kw_only=True)
+class OrphanJob(_Job):
+    """A note with no incoming link, and the notes it may be linked from."""
+    candidates: list[dict]
+    hub: str | None = None
+
+
+JobT = TypeVar("JobT")
+
+
+@dataclass
+class WorkItem(Generic[JobT]):
     kind: str                       # "dedup" | "enrich" | "orphan" | "expand"
     target_path: str                # vault-rel note the sub-agent may write
-    context: dict[str, Any] = field(default_factory=dict)
+    # The kind's job; a plain dict for the kinds with no fields of their own to
+    # declare (enrich's hub, a worker profile's goal and inputs).
+    context: JobT = field(default_factory=dict)  # type: ignore[assignment]
     reason: str = ""                # the FSM warning that produced this item
     id: str = field(default_factory=lambda: uuid4().hex)
     status: str = "pending"         # pending | done | failed | rejected
@@ -138,7 +238,7 @@ class WorkItem:
         return {
             "kind": self.kind,
             "target_path": self.target_path,
-            "context": self.context,
+            "context": self.context.to_dict() if isinstance(self.context, _Job) else self.context,
             "reason": self.reason,
             "id": self.id,
             "status": self.status,
@@ -277,7 +377,6 @@ class WorkQueue:
             pass
 
 
-_BATCH_CONCEPT_KEYS = ("concept", "excerpt", "score", "full_score", "title_score", "inbox_file", "loser_path")
 # Fixed cap bounds the batch prompt; raise it the day real families outgrow it.
 _MAX_FAMILY_BATCH = 8
 
@@ -289,8 +388,8 @@ def batch_dedup_items(items: list[WorkItem]) -> list[WorkItem]:
     /curate's union-find duplicate families both converge there by
     construction. The candidate body is the bulk of the judge's prompt, so a
     family of N concepts judged per-item repeats it N times; one batch item is
-    one judge call (the dedup capability fans the verdicts back out from
-    ``context["concepts"]``). Singletons and non-dedup items pass through
+    one judge call (the dedup capability fans the verdicts back out to the
+    family's members). Singletons and non-dedup items pass through
     untouched, so callers can apply this unconditionally before dispatch.
 
     Lives kernel-side (not in the dedup capability) so both producers — the
@@ -300,7 +399,7 @@ def batch_dedup_items(items: list[WorkItem]) -> list[WorkItem]:
     out: list[WorkItem] = []
     groups: dict[str, list[WorkItem]] = {}
     for it in items:
-        if it.kind == "dedup" and it.target_path and not it.context.get("concepts"):
+        if it.target_path and isinstance(it.context, DedupJob):
             groups.setdefault(it.target_path, []).append(it)
         else:
             out.append(it)
@@ -310,18 +409,10 @@ def batch_dedup_items(items: list[WorkItem]) -> list[WorkItem]:
             if len(chunk) == 1:
                 out.append(chunk[0])
                 continue
-            shared = {
-                k: v for k, v in chunk[0].context.items()
-                if k not in _BATCH_CONCEPT_KEYS
-            }
-            shared["concepts"] = [
-                {k: it.context[k] for k in _BATCH_CONCEPT_KEYS if k in it.context}
-                for it in chunk
-            ]
             out.append(WorkItem(
                 kind="dedup",
                 target_path=path,
-                context=shared,
+                context=DedupFamily([it.context for it in chunk]),
                 reason=f"dedup_family n={len(chunk)} → {path.rsplit('/', 1)[-1]}",
             ))
     return out

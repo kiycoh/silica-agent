@@ -5,6 +5,8 @@ from unittest.mock import patch
 from silica.capabilities.dedup import DedupDecision, _parse_batch, run_dedup
 from silica.config import SilicaConfig
 from silica.kernel.workqueue import WorkItem, batch_dedup_items
+from tests.jobs import dedup_job
+from silica.kernel.workqueue import DedupFamily
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +20,7 @@ def _item(target: str, concept: str, **ctx) -> WorkItem:
     return WorkItem(
         kind="dedup",
         target_path=target,
-        context={"concept": concept, "excerpt": f"about {concept}", "score": 0.7, **ctx},
+        context=dedup_job({"concept": concept, "excerpt": f"about {concept}", "score": 0.7, **ctx}),
         reason="test",
     )
 
@@ -37,12 +39,12 @@ def test_batch_groups_same_candidate_passes_singletons():
     out = batch_dedup_items(items)
     kinds = sorted((it.kind, it.target_path) for it in out)
     assert len(out) == 3
-    batch = next(it for it in out if it.context.get("concepts"))
+    batch = next(it for it in out if isinstance(it.context, DedupFamily))
     assert batch.target_path == "Dir/Hub.md"
-    assert [c["concept"] for c in batch.context["concepts"]] == ["A", "B"]
+    assert [c.concept for c in batch.context.members] == ["A", "B"]
     # shared keys hoisted, per-concept keys not duplicated at top level
-    assert batch.context["hub"] == "Hub"
-    assert "concept" not in batch.context
+    assert batch.context.to_dict()["hub"] == "Hub"
+    assert "concept" not in batch.context.to_dict()
     # singleton and non-dedup pass through untouched (same objects)
     assert items[2] in out and items[3] in out
     assert ("orphan", "Dir/X.md") in kinds
@@ -51,7 +53,7 @@ def test_batch_groups_same_candidate_passes_singletons():
 def test_batch_caps_family_size():
     items = [_item("Dir/Hub.md", f"C{i}") for i in range(10)]
     out = batch_dedup_items(items)
-    sizes = sorted(len(it.context["concepts"]) for it in out)
+    sizes = sorted(len(it.context.members) for it in out)
     assert sizes == [2, 8]
 
 
@@ -108,7 +110,7 @@ def test_judge_schema_omits_authoring_fields_unless_spoke_requested():
     with patch("silica.model.providers.get_provider", return_value=_Provider()):
         for spoke in (False, True):
             _decide_dedup(cfg, concept="C", excerpt="e", author_spoke=spoke, **common)
-            _decide_dedup_batch(cfg, concepts=[{"concept": "C", "excerpt": "e"}],
+            _decide_dedup_batch(cfg, concepts=[dedup_job(concept="C", excerpt="e")],
                                 author_spoke=spoke, **common)
 
     assert seen == [DedupVerdict, DedupVerdictBatch, DedupDecision, DedupBatchDecision]

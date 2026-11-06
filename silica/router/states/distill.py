@@ -24,6 +24,7 @@ from silica.driver import DRIVER
 from silica.kernel.text.sanitize import sanitize_output
 from silica.kernel.write.validate import validate_ops
 from silica.router.phases import MAX_STEER_ATTEMPTS, REJECTION_RATE_MAX, InjectorState, phase
+from silica.router.run_state import job_origin
 from silica.kernel.outline import flag_cosine_near_titles, parse_outline, run_outliner, vault_outline
 from silica.kernel.prep_delegation import payload_inbox_text, run_distiller
 
@@ -73,7 +74,7 @@ def _enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed
     wq = fsm.work_queue
     if wq is None:
         return
-    from silica.kernel.workqueue import WorkItem, batch_dedup_items
+    from silica.kernel.workqueue import DedupJob, WorkItem, batch_dedup_items
 
     items: list[WorkItem] = []
     for r in rejected_raw:
@@ -94,27 +95,22 @@ def _enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed
         items.append(WorkItem(
             kind="dedup",
             target_path=m.group(2),
-            context={
-                "concept": op.get("heading", ""),
-                "excerpt": op.get("snippet", ""),
-                "candidate": m.group(1),
-                "score": 0.0,
-                "title_score": title_score,
+            context=DedupJob(
+                concept=op.get("heading", ""),
+                excerpt=op.get("snippet", ""),
+                candidate=m.group(1),
+                score=0.0,
+                title_score=title_score,
                 # current_source_file, NOT inbox_file: the latter is pinned to
                 # inbox_files[0] for the whole run, so on a folder nucleation
                 # every worker's notes were filed under file 0 paired with
                 # another file's sha — two sha values for one source, which
                 # check_renucleate reads as "modified" and drifted_notes reads
                 # as derived from a superseded version.
-                "inbox_file": fsm.current_source_file,
-                "hub": fsm.hub,
-                "content_hash": fsm.current_content_hash,
-                # The provenance ledger is keyed on the FSM's own run id — what
-                # CLEANUP stamps and what the dangling-link sweep reads back.
-                "run_id": fsm.progress.run_id,
-                "target_dir": fsm.target_dir,
-                **({"loser_path": op.get("path", "")} if landed else {}),
-            },
+                inbox_file=fsm.current_source_file,
+                loser_path=op.get("path", "") if landed else "",
+                **job_origin(fsm),
+            ),
             reason=r.get("reason", "near_title"),
         ))
     # Same family collapse COLLISION applies: N rejections against one candidate
@@ -140,7 +136,7 @@ def _enqueue_short_snippet_expands(fsm: "InjectorFSM", rejected_raw: list) -> No
     wq = fsm.work_queue
     if wq is None:
         return
-    from silica.kernel.workqueue import WorkItem
+    from silica.kernel.workqueue import ExpandJob, WorkItem
 
     excerpts: dict[str, str] = {}
     try:
@@ -163,16 +159,13 @@ def _enqueue_short_snippet_expands(fsm: "InjectorFSM", rejected_raw: list) -> No
             wq.enqueue(WorkItem(
                 kind="expand",
                 target_path=op.get("path", ""),
-                context={
-                    "op": op,
-                    "excerpt": excerpts.get(op.get("heading", ""), ""),
-                    "reason": reason,
-                    "inbox_file": fsm.current_source_file,  # see the dedup item above
-                    "hub": fsm.hub,
-                    "content_hash": fsm.current_content_hash,
-                    "run_id": fsm.progress.run_id,
-                    "target_dir": fsm.target_dir,
-                },
+                context=ExpandJob(
+                    op=op,
+                    excerpt=excerpts.get(op.get("heading", ""), ""),
+                    reason=reason,
+                    inbox_file=fsm.current_source_file,  # see the dedup item above
+                    **job_origin(fsm),
+                ),
                 reason=reason,
             ))
         except Exception as _qe:

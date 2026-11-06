@@ -60,6 +60,22 @@ def read_or_skip(path: str) -> tuple[str, dict | None]:
         return "", {"status": "skipped", "reason": f"unreadable: {e}"}
 
 
+def clean_twin_bundle(content_hash: str, heading: str) -> None:
+    """Drop this concept's op from the deferred bundle it was parked in.
+
+    Called only after a verified commit: the verdict has been routed into the
+    vault, so the parked copy is no longer the durable one. Best-effort — a
+    missing bundle (retry already flushed it, pre-C2 stub) is not an error.
+    """
+    if not content_hash:
+        return
+    try:
+        from silica.kernel.write.deferred import get_deferred_store
+        get_deferred_store().remove_op(content_hash, heading)
+    except Exception as e:
+        logger.debug("twin bundle cleanup failed (non-fatal): %s", e)
+
+
 def load_prompt(name: str) -> str:
     """A prompt shipped with the capabilities. Raises when it is missing: a
     packaging miss must not reach the model as an empty instruction."""

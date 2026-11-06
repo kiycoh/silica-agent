@@ -6,11 +6,12 @@ from unittest.mock import MagicMock, patch
 from silica.capabilities.orphan import LINK_ACCEPT, run_orphan
 from silica.config import CONFIG
 from silica.kernel.workqueue import WorkItem
+from silica.kernel.workqueue import OrphanJob
 
 
 def _item(names):
     return WorkItem(kind="orphan", target_path="Notes/Lonely.md",
-                    context={"candidates": [{"name": n, "path": f"Concepts/{n}"} for n in names]},
+                    context=OrphanJob(**{"candidates": [{"name": n, "path": f"Concepts/{n}"} for n in names]}),
                     reason="residual_orphan")
 
 
@@ -79,7 +80,7 @@ def test_a_staging_orphan_is_left_alone(monkeypatch):
     monkeypatch.setattr("silica.kernel.base.manifest.active_done_dir", lambda: "Done")
     for target in ("Inbox/lecture.md", "Done/book/chapter-1.md"):
         item = WorkItem(kind="orphan", target_path=target,
-                        context={"candidates": [{"name": "A", "path": "Concepts/A"}]}, reason="residual_orphan")
+                        context=OrphanJob(**{"candidates": [{"name": "A", "path": "Concepts/A"}]}), reason="residual_orphan")
         with patch("silica.capabilities.orphan._decide_links") as llm:
             res = run_orphan(item, CONFIG)
         llm.assert_not_called()

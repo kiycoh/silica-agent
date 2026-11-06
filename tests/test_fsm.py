@@ -679,7 +679,7 @@ def test_collision_dedup_item_carries_the_run_id():
         fsm.step()
 
     [item] = fsm.work_queue.items()
-    assert item.context["run_id"] == fsm.progress.run_id != ""
+    assert item.context.run_id == fsm.progress.run_id != ""
 
 
 def test_collision_low_similarity_keeps_for_distillation():
@@ -912,9 +912,9 @@ def test_collision_borderline_defers_rematerializable_op_and_tags_workitem():
 
     items = fsm.work_queue.items()
     assert len(items) == 1
-    ctx = items[0].context
-    assert ctx["content_hash"] == "abc123"
-    assert ctx["target_dir"] == "TargetDir"
+    job = items[0].context
+    assert job.content_hash == "abc123"
+    assert job.target_dir == "TargetDir"
 
 
 def test_collision_does_not_consult_the_fused_facade():
@@ -1496,7 +1496,7 @@ def test_collision_routes_on_the_cosine_best_note_not_the_fused_winner():
     items = fsm.work_queue.items()
     assert len(items) == 1, "the cosine-best note at 0.80 is in the band and must reach the judge"
     assert items[0].target_path == "Stats/Stimatore di massima verosimiglianza.md"
-    assert items[0].context["score"] == 0.80
+    assert items[0].context.score == 0.80
 
 
 def test_txn_removed_paths_names_only_deleted_and_moved_notes():

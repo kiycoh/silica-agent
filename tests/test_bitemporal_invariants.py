@@ -22,6 +22,7 @@ from silica.kernel.write.contested import (
     mark_contested,
 )
 from silica.router.states import finalize
+from tests.jobs import dedup_job
 
 SUPERSEDED_TAIL = f"{SUPERSEDED_MARKER}\n\n> [!quote] Superseded 2026-07-25\n> claim vecchio.\n"
 
@@ -152,8 +153,8 @@ def test_equal_tier_contradiction_stays_contested(tmp_vault):
     item = WorkItem(
         kind="dedup",
         target_path="Farmacologia/Warfarin.md",
-        context={"concept": "Dosaggio", "excerpt": incoming, "candidate": "Warfarin",
-                 "hub": "Farmacologia", "inbox_file": "Inbox/appunti.md"},
+        context=dedup_job({"concept": "Dosaggio", "excerpt": incoming, "candidate": "Warfarin",
+                 "hub": "Farmacologia", "inbox_file": "Inbox/appunti.md"}),
         reason="dedup score=0.88",
     )
     decision = DedupDecision(verdict="contradicts", rationale="5 vs 50 mg",
@@ -211,9 +212,9 @@ def test_the_whole_arc_never_deletes_a_claim(tmp_vault):
     item = WorkItem(
         kind="dedup",
         target_path="Farmacologia/Warfarin.md",
-        context={"concept": "Dosaggio", "excerpt": claims[2], "candidate": "Warfarin",
+        context=dedup_job({"concept": "Dosaggio", "excerpt": claims[2], "candidate": "Warfarin",
                  "hub": "Farmacologia", "inbox_file": "Farmacologia/Dosaggio.md",
-                 "loser_path": "Farmacologia/Dosaggio.md"},
+                 "loser_path": "Farmacologia/Dosaggio.md"}),
         reason="dedup score=0.91",
     )
     decision = DedupDecision(verdict="duplicate", rationale="same claim",
@@ -287,9 +288,9 @@ def test_paths_without_an_event_clock_emit_no_stamp(tmp_vault):
     item = WorkItem(
         kind="dedup",
         target_path="Farmacologia/Warfarin.md",
-        context={"concept": "Dosaggio", "excerpt": "L'INR va controllato.",
+        context=dedup_job({"concept": "Dosaggio", "excerpt": "L'INR va controllato.",
                  "candidate": "Warfarin", "hub": "Farmacologia",
-                 "inbox_file": "Inbox/appunti.md"},
+                 "inbox_file": "Inbox/appunti.md"}),
         reason="dedup score=0.91",
     )
     decision = DedupDecision(verdict="duplicate", rationale="same claim",

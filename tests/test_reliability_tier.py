@@ -16,6 +16,7 @@ from silica.kernel.write.contested import (
     merge_rank,
     reliability_tier,
 )
+from tests.jobs import dedup_job
 
 HUMAN = "---\ntags:\n  - farmacologia\n---\n\n# X\n\nScritta a mano.\n"
 AGENT = "---\ntags:\n  - farmacologia\nAI: true\n---\n\n# X\n\nDistillata.\n"
@@ -168,9 +169,9 @@ def _contradiction_run(tmp_vault, *, target: str, source_text: str, leaf: str | 
     item = WorkItem(
         kind="dedup",
         target_path="Clinica/Warfarin.md",
-        context={"concept": "Dosaggio", "excerpt": "Il dosaggio è 50mg/die.",
+        context=dedup_job({"concept": "Dosaggio", "excerpt": "Il dosaggio è 50mg/die.",
                  "candidate": "Warfarin", "hub": "Clinica",
-                 "inbox_file": "Inbox/appunti.md"},
+                 "inbox_file": "Inbox/appunti.md"}),
         reason="dedup score=0.88",
     )
     decision = DedupDecision(verdict="contradicts", rationale="5 vs 50 mg",
@@ -253,7 +254,7 @@ def test_pairs_to_items_targets_the_human_note(tmp_vault):
     items = _pairs_to_items([{"source": "B.md", "target": "A.md", "score": 0.9}])
     assert len(items) == 1
     assert items[0].target_path == "A.md"          # human note is the target
-    assert items[0].context["loser_path"] == "B.md"
+    assert items[0].context.loser_path == "B.md"
 
 
 def test_pairs_to_items_falls_back_to_length_within_a_tier(tmp_vault):
@@ -264,7 +265,7 @@ def test_pairs_to_items_falls_back_to_length_within_a_tier(tmp_vault):
 
     items = _pairs_to_items([{"source": "A.md", "target": "B.md", "score": 0.9}])
     assert items[0].target_path == "B.md"          # the longer one, tier being equal
-    assert items[0].context["loser_path"] == "A.md"
+    assert items[0].context.loser_path == "A.md"
 
 
 def test_merge_marks_the_loser(tmp_vault):
@@ -282,12 +283,12 @@ def test_merge_marks_the_loser(tmp_vault):
     item = WorkItem(
         kind="dedup",
         target_path="Farmacologia/Warfarin.md",
-        context={
+        context=dedup_job({
             "concept": "Dosaggio", "excerpt": "Distillata.",
             "candidate": "Warfarin", "hub": "Farmacologia",
             "inbox_file": "Farmacologia/Dosaggio.md",
             "loser_path": "Farmacologia/Dosaggio.md",
-        },
+        }),
         reason="dedup score=0.91",
     )
     decision = DedupDecision(verdict="duplicate", rationale="same claim",
@@ -318,9 +319,9 @@ def test_fsm_dedup_never_marks_a_source_document(tmp_vault):
     item = WorkItem(
         kind="dedup",
         target_path="Farmacologia/Warfarin.md",
-        context={"concept": "Dosaggio", "excerpt": "Testo grezzo.",
+        context=dedup_job({"concept": "Dosaggio", "excerpt": "Testo grezzo.",
                  "candidate": "Warfarin", "hub": "Farmacologia",
-                 "inbox_file": "Inbox/appunti.md"},
+                 "inbox_file": "Inbox/appunti.md"}),
         reason="borderline_similarity score=0.78",
     )
     decision = DedupDecision(verdict="duplicate", rationale="same claim",
@@ -351,9 +352,9 @@ def test_fsm_dedup_keeps_the_absorbed_concept_as_an_alias(tmp_vault):
     item = WorkItem(
         kind="dedup",
         target_path="Farmacologia/Warfarin.md",
-        context={"concept": "Dosaggio", "excerpt": "Testo grezzo.",
+        context=dedup_job({"concept": "Dosaggio", "excerpt": "Testo grezzo.",
                  "candidate": "Warfarin", "hub": "Farmacologia",
-                 "inbox_file": "Inbox/appunti.md"},
+                 "inbox_file": "Inbox/appunti.md"}),
         reason="borderline_similarity score=0.78",
     )
     decision = DedupDecision(verdict="duplicate", rationale="same claim",
@@ -387,9 +388,9 @@ def test_dedup_does_not_alias_a_concept_that_is_the_winner_title(tmp_vault):
     item = WorkItem(
         kind="dedup",
         target_path="Farmacologia/Warfarin.md",
-        context={"concept": "warfarin", "excerpt": "Testo grezzo.",
+        context=dedup_job({"concept": "warfarin", "excerpt": "Testo grezzo.",
                  "candidate": "Warfarin", "hub": "Farmacologia",
-                 "inbox_file": "Inbox/appunti.md"},
+                 "inbox_file": "Inbox/appunti.md"}),
         reason="borderline_similarity score=0.78",
     )
     decision = DedupDecision(verdict="duplicate", rationale="same claim",

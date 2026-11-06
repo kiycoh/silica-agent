@@ -33,10 +33,10 @@ def test_ratio_becomes_title_score_and_clears_gate():
     }]
     _enqueue_near_title_dedups(_fsm(q), rejected)
     assert len(q.items) == 1
-    ctx = q.items[0].context
-    assert ctx["title_score"] == 0.90              # real ratio, not 0.0
+    job = q.items[0].context
+    assert job.title_score == 0.90              # real ratio, not 0.0
     # ratio 0.90 >= 0.85 threshold, similar sizes -> reaches the LLM judge
-    assert passes_dedup_gate(ctx["title_score"], 500, 600) is True
+    assert passes_dedup_gate(job.title_score, 500, 600) is True
     # sanity: the old degenerate score=0.0 would have force-gated it out
     assert passes_dedup_gate(0.0, 500, 600) is False
 
@@ -48,7 +48,7 @@ def test_missing_ratio_stays_zero():
         "reason": "near_title candidate='Betas' path='TargetDir/Betas.md'",
     }]
     _enqueue_near_title_dedups(_fsm(q), rejected)
-    assert q.items[0].context["title_score"] == 0.0  # graceful when absent
+    assert q.items[0].context.title_score == 0.0  # graceful when absent
 
 
 def test_rejections_against_one_candidate_become_one_judge_call():
@@ -69,7 +69,7 @@ def test_rejections_against_one_candidate_become_one_judge_call():
     assert len(q.items) == 2
     family = by_path["TargetDir/Betas.md"]
     # Two concepts, each keeping its own fuzzy ratio for the gate.
-    scores = sorted(c["title_score"] for c in family.context["concepts"])
+    scores = sorted(c.title_score for c in family.context.members)
     assert scores == [0.88, 0.90]
     # The singleton passes through unbatched, shape unchanged.
-    assert by_path["TargetDir/Gammas.md"].context["title_score"] == 0.91
+    assert by_path["TargetDir/Gammas.md"].context.title_score == 0.91
