@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from silica.model.providers import get_provider, Provider, PROVIDER_PRESETS
+from silica.model.providers import get_provider, Provider
 from silica.model.llm import LLMResponse
 from silica.kernel.write.ops import Op, OpType, DistillerOutput
 from silica.kernel.text.sanitize import parse_json
@@ -118,7 +118,6 @@ class TestProviderPresets:
 
         p = get_provider(Cfg())
         assert isinstance(p, Provider)
-        assert p.base_url == PROVIDER_PRESETS["lmstudio"]["base_url"]
         assert p.model == "lmstudio/test-model"
 
     def test_openrouter_preset_same_class(self):
@@ -131,18 +130,10 @@ class TestProviderPresets:
         assert isinstance(p, Provider)
         assert p.model == "openrouter/or-model"
 
-    def test_unknown_preset_falls_back_to_lmstudio(self):
-        class Cfg:
-            provider = "nonexistent-provider"
-            model = "m"
+    def test_every_provider_but_custom_has_a_base_url(self):
+        from silica.provider_table import PROVIDERS
 
-        p = get_provider(Cfg())
-        assert isinstance(p, Provider)
-        assert p.base_url == PROVIDER_PRESETS["lmstudio"]["base_url"]
-
-    def test_all_defined_presets_have_base_url(self):
-        for name, preset in PROVIDER_PRESETS.items():
-            assert "base_url" in preset, f"Preset {name!r} missing base_url"
+        assert {name for name, row in PROVIDERS.items() if not row.base_url} == {"custom"}
 
 
 # ---------------------------------------------------------------------------

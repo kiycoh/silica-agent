@@ -276,12 +276,14 @@ _MIN_DISTILLER_OUTPUT_TOKENS = 1024
 
 
 def estimate_prompt_tokens(text: str) -> int:
-    """Cheap, deterministic token estimate (~4 chars/token), rounded up.
+    """Cheap, deterministic token estimate, rounded up.
 
     Intentionally provider-agnostic: we only need a conservative figure to
     leave output headroom, not an exact tokenizer count.
     """
-    return (len(text) + 3) // 4
+    from silica.model.limits import ROUGH_CHARS_PER_TOKEN
+
+    return -(-len(text) // ROUGH_CHARS_PER_TOKEN)
 
 
 def compute_distiller_max_tokens(
@@ -445,32 +447,6 @@ def _stitch_bodies(parsed: dict, raw: str) -> None:
                 i, op.get("path") or op.get("heading") or "?")
 
 
-def _call_with_deadline(fn, seconds: float, cancel: "threading.Event | None" = None):
-    """Run fn() under a wall-clock deadline; raise TimeoutError past it.
-
-    The transport read-timeout cannot bound a hung distiller call: OpenRouter
-    trickles keep-alive bytes while "processing", and every byte resets httpx's
-    per-chunk read timer, so a dead upstream holds the socket open forever.
-    Only real elapsed time is trustworthy here.
-
-    `cancel` is set when the deadline fires. Without it the abandoned worker kept
-    its own retry schedule and went on issuing requests nobody was waiting for:
-    measured 2026-08-23 on a throttled OpenRouter pool, this deadline gave up at
-    300s and the orphan hit its 400s per-call cap at t+400 and started attempt
-    2/3, so the run's own dead calls were producing the 429s it was retrying for.
-    """
-    from silica.model.llm import run_with_deadline
-    try:
-        return run_with_deadline(
-            fn, seconds,
-            lambda: TimeoutError(f"distiller call exceeded {seconds:.0f}s wall-clock deadline"),
-        )
-    except TimeoutError:
-        if cancel is not None:
-            cancel.set()
-        raise
-
-
 def run_distiller(
     payload: dict,
     target: str,
@@ -614,16 +590,10 @@ def run_distiller(
     ceiling = int(os.getenv("DISTILLER_MAX_TOKENS", "0"))
     explicit_ceiling = ceiling > 0
     if not context_window or not ceiling:
-        from silica.model.providers import model_limits
-        # Same fallback chain as get_provider for the active role.
-        if escalate:
-            w_provider, w_model = (CONFIG.distill_escalation_provider,
-                                   CONFIG.distill_escalation_model)
-        else:
-            w_provider, w_model = CONFIG.worker_provider, CONFIG.worker_model
-        if not w_provider or not w_model:
-            w_provider, w_model = CONFIG.provider, CONFIG.model
-        window, out_cap = model_limits(w_provider, w_model)
+        from silica.model.limits import model_limits
+        from silica.model.providers import resolve_role
+        w_model, _key = resolve_role("escalation" if escalate else "worker")
+        window, out_cap = model_limits(w_model.split("/", 1)[0], w_model)
         context_window = context_window or window or 262144
         ceiling = ceiling or out_cap
     if not explicit_ceiling:
@@ -636,7 +606,8 @@ def run_distiller(
         # and a reasoning model may bill its whole trace against the ask.
         # DISTILLER_MAX_TOKENS stays the explicit override, both directions;
         # a genuine length cut still recovers via salvage_distiller_json.
-        ceiling = min(ceiling or (1 << 30), int(os.getenv("MAX_TOKENS", "32768")))
+        from silica.model.limits import default_max_tokens
+        ceiling = min(ceiling or (1 << 30), default_max_tokens())
     safety_margin = int(os.getenv("DISTILLER_TOKEN_SAFETY_MARGIN", "2048"))
     max_tokens = compute_distiller_max_tokens(
         budget_text,
@@ -650,26 +621,34 @@ def run_distiller(
         ceiling if ceiling > 0 else "none",
     )
 
-    deadline = float(os.getenv("DISTILLER_TIMEOUT", "300"))
+    from silica.model.limits import distiller_timeout
+    from silica.model.llm import run_with_deadline
+    from silica.model.providers import lane_on, resolve_role
+
+    deadline = distiller_timeout()
+    # The distiller pin is tied to the worker model's provider routing; an
+    # escalated call must not inherit it, so it runs on its bare role.
+    lane = "escalation" if escalate else "distiller"
 
     def _llm(msgs: list[dict], response_schema):
         nonlocal cache_ok
-        provider = None
-        try:
-            provider = get_provider(CONFIG, role="escalation" if escalate else "worker")
+
+        def bounded(on):
             abandoned = threading.Event()
-            return _call_with_deadline(lambda: provider.call_llm(
+            return run_with_deadline(lambda: on.call_llm(
                 messages=msgs,
                 tools=None,
                 response_schema=response_schema,
                 max_tokens=max_tokens,
-                # The distiller pin is tied to the worker model's provider routing;
-                # an escalated call must not inherit it.
-                openrouter_provider=None if escalate else CONFIG.openrouter_provider_distiller,
                 cancel=abandoned,
-            ), deadline, abandoned)
+            ), deadline, abandon=abandoned)
+
+        provider = None
+        try:
+            provider = get_provider(CONFIG, role=lane)
+            return bounded(provider)
         except Exception as e:
-            fallback_model = (CONFIG.distill_escalation_model or CONFIG.model) if escalate else CONFIG.model
+            fallback_model, _key = resolve_role("escalation" if escalate else "router")
             if provider is not None and fallback_model == provider.model:
                 # Same model, same stack (Provider routes through llm.call_llm too):
                 # a second full `deadline` round with the same retry schedule cannot
@@ -682,15 +661,7 @@ def run_distiller(
             # under one key.
             cache_ok = False
             logger.warning("Distiller call failed, retrying on %s: %s", fallback_model, e)
-            from silica.model.llm import call_llm
-            return _call_with_deadline(lambda: call_llm(
-                model=(CONFIG.distill_escalation_model or CONFIG.model) if escalate else CONFIG.model,
-                messages=msgs,
-                tools=None,
-                max_tokens=max_tokens,
-                response_format=response_schema,
-                openrouter_provider=None if escalate else CONFIG.openrouter_provider_distiller,
-            ), deadline)
+            return bounded(lane_on(fallback_model, "", CONFIG, lane))
 
     response = _llm(
         messages,

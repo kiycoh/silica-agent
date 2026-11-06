@@ -95,12 +95,12 @@ def _count_context_tokens(messages: list[dict], tools: list[dict] | None = None)
     count cost the GUI 161 MB at startup. A sum, so parts add up to the total.
     """
     # Counted on the WIRE form: the kept thinking trace would otherwise show up
-    # in the meter as context the provider is charged for, when `_to_wire` drops
+    # in the meter as context the provider is charged for, when `to_wire` drops
     # it before the request.
-    from silica.model.llm import _text_of
-    from silica.model.providers import _to_wire
+    from silica.model.limits import ROUGH_CHARS_PER_TOKEN
+    from silica.model.wire import text_of, to_wire
 
-    messages = [_to_wire(m) for m in messages]
+    messages = [to_wire(m) for m in messages]
     try:
         enc = _cl100k()
 
@@ -111,7 +111,7 @@ def _count_context_tokens(messages: list[dict], tools: list[dict] | None = None)
             return len(enc.encode(text, disallowed_special=()))
 
         total = sum(
-            n(_text_of(m.get("content"))
+            n(text_of(m.get("content"))
               + (json.dumps(m["tool_calls"]) if m.get("tool_calls") else ""))
             + _TOKENS_PER_MESSAGE
             for m in messages
@@ -119,7 +119,7 @@ def _count_context_tokens(messages: list[dict], tools: list[dict] | None = None)
         return total + (n(json.dumps(tools)) if tools else 0)
     except Exception:
         # No encoding (a broken tiktoken install): a rough meter beats none.
-        return sum(len(_text_of(m.get("content"))) for m in messages) // 4
+        return sum(len(text_of(m.get("content"))) for m in messages) // ROUGH_CHARS_PER_TOKEN
 
 
 def _chat_tool_schemas(messages: list[dict]) -> list[dict]:
@@ -4864,7 +4864,7 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
         if not CONFIG.model:
             CONSOLE.print("  Current model: [bold](not configured)[/]")
             return True
-        from silica.model.providers import model_limits
+        from silica.model.limits import model_limits
         window, out_cap = model_limits(CONFIG.provider, CONFIG.model)
         extra = ""
         if window:
@@ -4981,7 +4981,7 @@ def _resolve_context_budget() -> None:
     pinned = bool(os.getenv("SILICA_MAX_CONTEXT"))
     if pinned and CONFIG.provider != "openrouter":
         return
-    from silica.model.providers import model_limits
+    from silica.model.limits import model_limits
     window, _ = model_limits(CONFIG.provider, CONFIG.model)
     if window:
         # OpenRouter's window is the one it serves, so a pin left from a larger

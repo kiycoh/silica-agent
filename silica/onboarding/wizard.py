@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Callable
 
 from silica.config import (
-    HOSTED_PROVIDERS,
     USER_ENV,
     SilicaConfig,
     claim_env,
@@ -21,6 +20,7 @@ from silica.config import (
 from silica.kernel.base import gitstate
 from silica.kernel.base.manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
+from silica.provider_table import HOSTED, PROVIDERS
 from silica.ui.banner import print_banner
 from silica.ui.console import CONSOLE
 from silica.ui.style import GLYPHS
@@ -29,23 +29,11 @@ from silica.ui.style import GLYPHS
 # line seeded from .env.example, not just rewrite an already-active key.
 _KEY_RE = re.compile(r"^\s*#?\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
-# Human label for each hosted key prompt. The env var and the model pick-list
-# come from config.HOSTED_PROVIDERS, which the no-model fallback chain reads
-# too — one table, so a model id added for the wizard is also a model the
-# chain can pick up. First entry is what Enter accepts; `other` is appended by
+# Each hosted row of the provider table as a key prompt: (env var, model
+# pick-list, label). First model is what Enter accepts; `other` is appended by
 # _pick so any id stays reachable.
-_KEY_PROMPTS = {
-    "openrouter": "OpenRouter API key",
-    "gemini": "Google Gemini API key",
-    "openai": "OpenAI API key",
-    "groq": "Groq API key",
-    "deepseek": "DeepSeek API key",
-    "mistral": "Mistral API key",
-    "xai": "xAI (Grok) API key",
-}
 _HOSTED = {
-    name: (key_env, list(models), _KEY_PROMPTS[name])
-    for name, (key_env, models) in HOSTED_PROVIDERS.items()
+    name: (row.key_env, list(row.models), f"{row.label} API key") for name, row in HOSTED.items()
 }
 
 # Worker (sub-agent) suggestions: small and cheap, the job is dedup/enrich, not
@@ -187,21 +175,6 @@ def endpoint_model_ids(base_url: str, api_key: str = "") -> list[str]:
         return []
 
 
-# OpenAI-compatible /models base per hosted provider. Hand-kept like the model
-# lists were, but base URLs outlive model generations by years; a wrong or dead
-# entry only costs the live validation, never the wizard (fetch failure falls
-# back to the static list).
-_MODELS_BASE = {
-    "openrouter": "https://openrouter.ai/api/v1",
-    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
-    "openai": "https://api.openai.com/v1",
-    "groq": "https://api.groq.com/openai/v1",
-    "deepseek": "https://api.deepseek.com",
-    "mistral": "https://api.mistral.ai/v1",
-    "xai": "https://api.x.ai/v1",
-}
-
-
 def _live_hosted_models(provider: str, api_key: str, curated: list[str]) -> list[str]:
     """The hosted pick-list, validated against the provider's live `/models`.
 
@@ -211,7 +184,7 @@ def _live_hosted_models(provider: str, api_key: str, curated: list[str]) -> list
     whatever gets picked is a usable litellm model string. An unreachable
     /models must never block onboarding: the curated list returns verbatim.
     """
-    base = _MODELS_BASE.get(provider)
+    base = PROVIDERS[provider].base_url if provider in PROVIDERS else ""
     if not base:
         return list(curated)
     live = endpoint_model_ids(base, api_key=api_key)
@@ -372,9 +345,9 @@ def _ollama_installed_models() -> list[str]:
     """
     import httpx
 
-    from silica.model.providers import PROVIDER_PRESETS
+    from silica.model.limits import base_url as provider_url
 
-    base = PROVIDER_PRESETS["ollama"]["base_url"].removesuffix("/v1")
+    base = provider_url("ollama").removesuffix("/v1")
     try:
         data = httpx.get(f"{base}/api/tags", timeout=3.0).json()
         return [m["name"] for m in data.get("models", []) if m.get("name")]
@@ -736,7 +709,7 @@ def _run_wizard_inner(
         return True
 
     def step_provider() -> bool:
-        # The hosted PROVIDER_PRESETS entries that need a key, plus `custom`
+        # The hosted rows of the provider table that need a key, plus `custom`
         # for any other OpenAI-compatible URL (vLLM, llama.cpp, ...).
         for key in (
             "SILICA_PROVIDER", "SILICA_MODEL", "SILICA_PROVIDER_BASE_URL",
@@ -770,7 +743,7 @@ def _run_wizard_inner(
                     updates["SILICA_MODEL"] = current
                 state["provider"] = SilicaConfig().provider
                 return True
-        from silica.model.providers import PROVIDER_PRESETS
+        from silica.model.limits import base_url as provider_url
         provider = ""
         while provider not in ("lmstudio", "ollama", "custom", *_HOSTED):
             provider = _ask(
@@ -807,13 +780,13 @@ def _run_wizard_inner(
             while not model:
                 model = _ask(input_fn, "Model id served at that URL")
         elif provider == "ollama":
-            ollama_base = PROVIDER_PRESETS["ollama"]["base_url"].removesuffix("/v1")
+            ollama_base = provider_url("ollama").removesuffix("/v1")
             model = _ask_local_model(
                 input_fn, _ollama_installed_models(), "Ollama", ollama_base,
                 _recommend_local_chat("ollama"),
             )
         else:  # lmstudio — probe /models like the Ollama branch does with tags.
-            lmstudio_base = PROVIDER_PRESETS["lmstudio"]["base_url"]
+            lmstudio_base = provider_url("lmstudio")
             model = _ask_local_model(
                 input_fn, endpoint_model_ids(lmstudio_base), "LM Studio", lmstudio_base,
                 _recommend_local_chat("lmstudio"),
@@ -849,7 +822,7 @@ def _run_wizard_inner(
         for key in _EMBED_KEYS:
             updates.pop(key, None)
         _section("think", "Embeddings", 3, total())
-        from silica.model.providers import PROVIDER_PRESETS
+        from silica.model.limits import base_url as provider_url
         defaults = SilicaConfig()
         provider = state["provider"]
         answer = _ask(
@@ -866,7 +839,7 @@ def _run_wizard_inner(
         # Reuse the chat endpoint when it is local — it can usually serve
         # embeddings too, so a good setup needs no separate server.
         local = provider in ("lmstudio", "ollama")
-        local_base = PROVIDER_PRESETS[provider]["base_url"] if local else defaults.embedding_base_url
+        local_base = provider_url(provider) if local else defaults.embedding_base_url
         # ponytail: the "embed" substring is the ceiling — covers nomic-embed-text,
         # text-embedding-*; a served embedder without "embed" in its id needs the
         # explicit prompts below. Upgrade path: probe each model's capabilities.
@@ -935,8 +908,8 @@ def _run_wizard_inner(
         _section("worker", "Advanced options", 5, total())
         provider = state["provider"]
         if provider == "lmstudio":
-            from silica.model.providers import PROVIDER_PRESETS
-            options = endpoint_model_ids(PROVIDER_PRESETS["lmstudio"]["base_url"])
+            from silica.model.limits import base_url as provider_url
+            options = endpoint_model_ids(provider_url("lmstudio"))
         elif provider == "ollama":
             options = _ollama_installed_models()
         else:
@@ -952,9 +925,8 @@ def _run_wizard_inner(
         )
         if model:
             updates["SILICA_WORKER_MODEL"] = model
-            # get_provider(role="worker") falls back to the ROUTER model whenever
-            # worker_provider is unset, so a worker model alone is silently
-            # ignored — pin the provider with it, always.
+            # The provider is what restores the prefix of a bare id (resolve_role):
+            # pin it with the model, always.
             updates["SILICA_WORKER_PROVIDER"] = provider
         return True
 

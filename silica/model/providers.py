@@ -5,251 +5,30 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-import os
 import threading
 import time
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
-from urllib.parse import urlsplit
 import httpx
 import openai
 from pydantic import BaseModel
 
-from silica.model.llm import TEXT_CHARS_PER_TOKEN
+from silica.model import llm
+from silica.model.limits import base_url
 from silica.model.llm import LLMResponse, openrouter_routing
-from silica.config import DEFAULT_EMBEDDING_MODEL, HOSTED_PROVIDERS, ensure_prefix
+from silica.config import DEFAULT_EMBEDDING_MODEL, ensure_prefix
+from silica.provider_table import PROVIDERS
 from silica.metrics import emit, ms_since, number, outcome_of
 
 logger = logging.getLogger(__name__)
 
-_OLLAMA_DEFAULT_URL = "http://localhost:11434/v1"
+# The endpoints in the shape ui/web/settings.py reads them, its last reader:
+# every other one asks limits.base_url or provider_table.
+PROVIDER_PRESETS = {name: {"base_url": base_url(name)} for name in PROVIDERS if base_url(name)}
 
 
-def _ollama_base_url() -> str:
-    """Ollama's endpoint, honouring its own OLLAMA_HOST convention.
-
-    OLLAMA_HOST is what `ollama` itself reads, so a user who already points the
-    CLI at a remote box or a non-default port expects silica to follow. Accepts
-    every shape ollama does: `host`, `host:port`, `http://host:port`. Port
-    defaults to 11434, matching ollama's client.
-    """
-    raw = (os.getenv("OLLAMA_HOST") or "").strip()
-    if not raw:
-        return _OLLAMA_DEFAULT_URL
-    try:
-        u = urlsplit(raw if "://" in raw else f"http://{raw}")
-        return f"{u.scheme}://{u.hostname}:{u.port or 11434}/v1"
-    except ValueError:
-        # Falling back beats crashing every `silica` import on a typo'd env var;
-        # the endpoint check then reports localhost unreachable.
-        logger.warning("OLLAMA_HOST=%r is not a valid host — using %s", raw, _OLLAMA_DEFAULT_URL)
-        return _OLLAMA_DEFAULT_URL
-
-
-# Ollama loads a model with a 4096-token window unless told otherwise, and it
-# drops whatever does not fit in silence: HTTP 200, no warning (measured — a
-# 6645-token prompt came back with prompt_eval_count=2051, the tool definitions
-# gone, and the model answered in prose instead of calling a tool). The chat
-# toolset alone is ~8k tokens, so the default window cannot hold a single turn.
-# Pinned per request rather than left to the server's OLLAMA_CONTEXT_LENGTH,
-# which is invisible from inside silica: a user who never set it got garbage.
-_OLLAMA_DEFAULT_NUM_CTX = 16384
-
-
-def ollama_num_ctx() -> int:
-    """Context window silica pins on every Ollama request.
-
-    Costs VRAM — the KV cache scales with it — so OLLAMA_NUM_CTX raises or lowers
-    it. model_limits caps the effective value at the model's trained maximum.
-    """
-    raw = (os.getenv("OLLAMA_NUM_CTX") or "").strip()
-    if not raw:
-        return _OLLAMA_DEFAULT_NUM_CTX
-    try:
-        return max(int(raw), 1024)
-    except ValueError:
-        logger.warning("OLLAMA_NUM_CTX=%r is not an integer — using %d",
-                       raw, _OLLAMA_DEFAULT_NUM_CTX)
-        return _OLLAMA_DEFAULT_NUM_CTX
-
-
-# Hosted, OpenAI-compatible base URLs. litellm resolves the same prefixes
-# natively for the interactive loop; the presets below serve the
-# constrained-decoding/distiller path. Gemini goes through its OpenAI-compatible
-# endpoint; both loops read the same GEMINI_API_KEY. "custom" (any other
-# OpenAI-compatible URL) has no static row — its endpoint comes from
-# config.provider_base_url/_api_key (see get_provider).
-_HOSTED_BASE_URLS = {
-    "openrouter": "https://openrouter.ai/api/v1",
-    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
-    "openai": "https://api.openai.com/v1",
-    "groq": "https://api.groq.com/openai/v1",
-    "deepseek": "https://api.deepseek.com",
-    "mistral": "https://api.mistral.ai/v1",
-    "xai": "https://api.x.ai/v1",
-}
-
-PROVIDER_PRESETS = {
-    "lmstudio": {
-        "base_url": "http://localhost:1234/v1",
-        "api_key": "lm-studio"
-    },
-    "ollama": {
-        "base_url": _ollama_base_url(),
-        "api_key": "ollama"  # Ollama ignores it; the OpenAI SDK demands non-empty.
-    },
-    # Hosted rows derive their key env var from config.HOSTED_PROVIDERS — one
-    # table, so the two can't drift (they used to be kept in sync by hand).
-    **{
-        name: {"base_url": _HOSTED_BASE_URLS[name], "api_key_env": key_env}
-        for name, (key_env, _models) in HOSTED_PROVIDERS.items()
-    },
-}
-
-
-SILICA_CLI_OPEN = "<silica-cli>"
-SILICA_CLI_CLOSE = "</silica-cli>"
-
-
-# TTL memo, not lru_cache: limits move while silica runs (LM Studio reload
-# with a different context window), and a stale window mis-clamps every
-# request until restart. The TTL also un-sticks the (0,0) an unreachable
-# endpoint used to pin for the whole process. Price: one metadata call per
-# provider+model per window.
-_MODEL_LIMITS_TTL_S = 600.0
-_model_limits_memo: dict[tuple[str, str], tuple[float, tuple[int, int]]] = {}
-
-
-def model_limits(provider: str, model: str) -> tuple[int, int]:
-    """(context_window, max_output_tokens) as reported by the live provider,
-    memoized for _MODEL_LIMITS_TTL_S per (provider, model).
-
-    lmstudio   → GET {base}/api/v0/models: `loaded_context_length` (the window
-                 the model is loaded with RIGHT NOW, often below its max) with
-                 `max_context_length` as fallback. No output cap.
-    ollama     → the window silica pins per request (ollama_num_ctx), capped at
-                 the trained max from POST {base}/api/show
-                 `model_info["<arch>.context_length"]`. Neither the runtime's
-                 4096 default nor a Modelfile `num_ctx` can widen or narrow this:
-                 request options win over both. No output cap.
-    openrouter → GET /api/v1/models: `context_length` plus the top provider's
-                 `max_completion_tokens` (often far below the window — e.g.
-                 qwen3-8b: 131k ctx, 8k out).
-
-    (0, 0) means unknown/unreachable: callers keep their static defaults
-    (and the TTL retries the probe instead of pinning the failure).
-    """
-    import time
-
-    now = time.monotonic()
-    hit = _model_limits_memo.get((provider, model))
-    if hit is not None and now < hit[0]:
-        return hit[1]
-    value = _model_limits_fetch(provider, model)
-    _model_limits_memo[(provider, model)] = (now + _MODEL_LIMITS_TTL_S, value)
-    return value
-
-
-def _llama_props_window(base_url: str) -> int:
-    """llama-server's /props: the window one request gets. With a unified KV
-    (`kv_unified = 'true'` in b10053's load log, 4 slots) every slot reports
-    the whole cache, which concurrent requests share. Raises on a server that
-    has no /props (any other OpenAI-compatible one): the caller's (0, 0)."""
-    base = base_url.rstrip("/").removesuffix("/v1")
-    props = httpx.get(f"{base}/props", timeout=5.0).json()
-    return int((props.get("default_generation_settings") or {}).get("n_ctx") or 0)
-
-
-def _model_limits_fetch(provider: str, model: str) -> tuple[int, int]:
-    try:
-        if provider == "ollama":
-            base = PROVIDER_PRESETS["ollama"]["base_url"].removesuffix("/v1")
-            wanted = model.removeprefix("ollama/")
-            info = httpx.post(f"{base}/api/show", json={"model": wanted}, timeout=5.0).json()
-            mi = info.get("model_info") or {}
-            arch = mi.get("general.architecture", "")
-            trained = int(mi.get(f"{arch}.context_length") or next(
-                (v for k, v in mi.items() if k.endswith(".context_length")), 0) or 0)
-            if not trained:
-                return (0, 0)  # model not pulled / unknown arch → caller's default
-            return min(ollama_num_ctx(), trained), 0
-        if provider == "lmstudio":
-            base = PROVIDER_PRESETS["lmstudio"]["base_url"].removesuffix("/v1")
-            data = httpx.get(f"{base}/api/v0/models", timeout=5.0).json()["data"]
-            wanted = model.removeprefix("lmstudio/")
-            entry = next(m for m in data if m["id"] == wanted)
-            window = entry.get("loaded_context_length") or entry.get("max_context_length") or 0
-            return int(window), 0
-        if provider == "custom":
-            from silica.config import CONFIG
-            return _llama_props_window(CONFIG.provider_base_url or ""), 0
-        if provider == "openrouter":
-            data = httpx.get("https://openrouter.ai/api/v1/models", timeout=5.0).json()["data"]
-            wanted = model.removeprefix("openrouter/")
-            entry = next(m for m in data if m["id"] == wanted)
-            out_cap = (entry.get("top_provider") or {}).get("max_completion_tokens") or 0
-            return int(entry.get("context_length") or 0), int(out_cap)
-    except Exception as e:
-        logger.debug("model_limits(%s, %s) unavailable: %s", provider, model, e)
-    return (0, 0)
-
-
-def clamp_max_tokens(provider: str, model: str, requested: int | None, input_chars: int = 0) -> int:
-    """Output-token budget for a request: the caller's ask (or the MAX_TOKENS
-    default), never above the provider's live max_completion_tokens, never
-    above the window space left after the input.
-
-    Providers validate input + max_tokens <= context window upfront; without
-    this clamp a default above either limit makes them reject the request
-    (e.g. claude-sonnet-5 on OpenRouter: 128k output cap, 262144 window).
-    input_chars is the serialized request size, counted at
-    compaction.TEXT_CHARS_PER_TOKEN so the output budget errs small: // 3 was
-    assumed to overestimate and does not on converted slides (2.05 to 2.41 chars
-    a token on Qwen3.5, measured 2026-10-01).
-    """
-    # ponytail: 32768 default keeps the OpenRouter pool wide — cheap endpoints
-    # advertise smaller output caps and get dropped above this. 256k measured
-    # bad, 32768 measured good; in-between never A/B'd. Override via MAX_TOKENS;
-    # sweep the in-between only if real runs start finishing at this ceiling
-    # (finish_reason=length on distill).
-    want = requested if requested is not None else int(os.getenv("MAX_TOKENS", "32768"))
-    window, out_cap = model_limits(provider, model)
-    if out_cap:
-        want = min(want, out_cap)
-    if window:
-        # floor 1024 keeps the request well-formed when input nearly
-        # fills the window; compaction is the real defense at that point.
-        want = min(want, max(window - input_chars // TEXT_CHARS_PER_TOKEN, 1024))
-    return want
-
-
-# The OpenAI chat message, plus the two reasoning carriers a route reads back:
-# `reasoning_content` is what `llm._call_llm` hands a Jinja route, and
-# `thinking_blocks` Anthropic's own record of a turn. Everything else on a
-# history message is silica's own and stays home: an allow-list, because owners
-# name their keys where they live, and a list of keys to strip has to hear about
-# each new one. `silica_story` reached the provider for missing from it.
-WIRE_KEYS = frozenset({
-    "role", "content", "name", "tool_calls", "tool_call_id", "function_call", "refusal", "audio",
-    "reasoning_content", "thinking_blocks",
-})
-
-
-def _to_wire(msg: dict) -> dict:
-    """`msg` with everything but WIRE_KEYS dropped and the CLI marker rendered.
-
-    When ``origin == "cli"`` the content is wrapped in <silica-cli> markers so
-    the model can tell a harness directive apart from a human turn. A message
-    already in wire form is returned unchanged.
-    """
-    if msg.keys() <= WIRE_KEYS:
-        return msg
-    wire = {k: v for k, v in msg.items() if k in WIRE_KEYS}
-    if msg.get("origin") == "cli" and wire.get("content"):
-        wire["content"] = f"{SILICA_CLI_OPEN}{wire['content']}{SILICA_CLI_CLOSE}"
-    return wire
-
-
+@dataclass(frozen=True)
 class Provider:
     """The non-interactive LLM lane: distiller, capability workers, sub-agents.
 
@@ -263,15 +42,14 @@ class Provider:
 
     `model` carries its provider prefix (litellm resolves the endpoint from it);
     `api_key` is passed only when the role overrides what litellm would resolve.
+    `openrouter_pin` and `sdk_retries` are what a lane asks of its transport
+    (get_provider), so the lane's caller never has to say them.
     """
 
-    def __init__(self, base_url: str, api_key: str, model: str):
-        # Diagnostic only — NOT how the call is routed. llm.call_llm derives the
-        # api_base from the model prefix, so changing this steers nothing; it is
-        # kept because it is the endpoint a "which box answered?" question means.
-        self.base_url = base_url
-        self.api_key = api_key
-        self.model = model
+    model: str
+    api_key: str = ""
+    openrouter_pin: str | None = None
+    sdk_retries: int | None = None
 
     def call_llm(
         self,
@@ -279,17 +57,13 @@ class Provider:
         tools: list[dict] | None = None,
         response_schema: type[BaseModel] | None = None,
         max_tokens: int | None = None,
-        openrouter_provider: str | None = None,
         temperature: float | None = None,
         reasoning: bool | None = None,
         cancel: "threading.Event | None" = None,
-        sdk_retries: int | None = None,
     ) -> LLMResponse:
         """`cancel` marks the call abandoned: a caller that bounds this with its
         own wall-clock deadline sets it when that deadline fires, so retry_transient
         stops rescheduling instead of issuing requests nobody is waiting for."""
-        from silica.model.llm import call_llm  # lazy: llm.py imports this module
-
         # Structured decoding defaults to greedy: this path exists to extract a
         # fixed shape, and sampling at the provider default (0.8 on Ollama, 1.0
         # on OpenAI) buys variety nobody wants in an extraction. Ollama's
@@ -297,14 +71,14 @@ class Provider:
         # explicit temperature to override.
         if temperature is None and response_schema is not None:
             temperature = 0.0
-        return call_llm(
+        return llm.call_llm(
             model=self.model,
             messages=messages,
             tools=tools,
             max_tokens=max_tokens,
             response_format=response_schema,
             temperature=temperature,
-            openrouter_provider=openrouter_provider,
+            openrouter_provider=self.openrouter_pin,
             api_key=self.api_key or None,
             # Forwarded, not defaulted: a hybrid model bills its thinking
             # against max_tokens, and a structured worker call that cannot
@@ -313,7 +87,7 @@ class Provider:
             # lane's: the distiller's output is prose the trace may improve.
             reasoning=reasoning,
             cancel=cancel,
-            sdk_retries=sdk_retries,
+            sdk_retries=self.sdk_retries,
         )
 
 
@@ -622,93 +396,80 @@ def local_rerank_model(config: Any) -> str:
     return getattr(config, "local_rerank_model", "") or LOCAL_RERANK_MODEL
 
 
-def get_provider(config: Any, role: str = "router") -> Provider:
-    """Return an LLM provider for the given role.
+# The config fields behind each role: (model, provider).
+_ROLES = {
+    "worker": ("worker_model", "worker_provider"),
+    "judge": ("judge_model", "judge_provider"),
+    "escalation": ("distill_escalation_model", "distill_escalation_provider"),
+    "vision": ("vision_model", "vision_provider"),
+}
+# Lanes run on a role and ask their transport for something of their own (get_provider).
+_LANE_ROLE = {"distiller": "worker", "outline": "worker"}
 
-    role="router" (default) → uses config.provider / config.model (the main model).
-    role="worker"            → uses config.worker_provider / config.worker_model so
-                               leashed sub-agents can run on a separate small model.
-    role="escalation"        → uses config.distill_escalation_provider / _model for escalated steer retries.
-    role="judge"             → uses config.judge_provider / config.judge_model (spec M7); router when unset.
-    role="vision"            → uses config.vision_model, on config.vision_provider or the router's
-                               provider (ADR-0077 amendment 2026-10-21); router when unset.
 
-    When the worker role specifies an explicit worker_api_key it wins over the
-    preset; the endpoint always comes from the worker_provider preset.
+def resolve_role(role: str = "router", config: Any = None) -> tuple[str, str]:
+    """(model, key) a role runs on: its own model when one is set, else the router's.
+
+    "router"     → config.provider / config.model (the main model).
+    "worker"     → leashed sub-agents, on a separate small model.
+    "escalation" → escalated steer retries.
+    "judge"      → the verdicts (spec M7).
+    "vision"     → images (ADR-0077 amendment 2026-10-21).
+
+    The model decides, not the provider: litellm resolves the endpoint from the
+    model's prefix, so the provider field only restores a prefix the id was
+    written without. `key` is "" unless the role carries its own, which only the
+    worker can (SILICA_WORKER_API_KEY); the endpoint still comes from the model.
+
+    `config` is a parameter because the capability workers run on the config
+    they were handed; every other caller reads CONFIG.
     """
+    if config is None:
+        from silica.config import CONFIG
+
+        config = CONFIG
+    role = _LANE_ROLE.get(role, role)
+    fields = _ROLES.get(role)
     # `or ""` on every read: these fields are Optional on the config, and the
-    # "fall back to the router role" test below is a falsiness test either way.
-    provider_name: str
-    model_name: str
-    if role == "escalation":
-        provider_name = getattr(config, "distill_escalation_provider", "") or ""
-        model_name = getattr(config, "distill_escalation_model", "") or ""
-        if not model_name:
-            provider_name = getattr(config, "provider", "lmstudio") or ""
-            model_name = getattr(config, "model", "") or ""
-            role = "router"
-    elif role == "judge":
-        provider_name = getattr(config, "judge_provider", "") or ""
-        model_name = getattr(config, "judge_model", "") or ""
-        if not model_name:
-            provider_name = getattr(config, "provider", "lmstudio") or ""
-            model_name = getattr(config, "model", "") or ""
-            role = "router"
-    elif role == "vision":
-        # Unlike the judge, the model alone is enough: falling back to the
-        # router because the provider was left unset would send the pixels to
-        # a chat model that may take text only, the one case this role exists for.
-        model_name = getattr(config, "vision_model", "") or ""
-        provider_name = getattr(config, "vision_provider", "") or getattr(config, "provider", "lmstudio") or ""
-        if not model_name:
-            provider_name = getattr(config, "provider", "lmstudio") or ""
-            model_name = getattr(config, "model", "") or ""
-            role = "router"
-    elif role == "worker":
-        provider_name = getattr(config, "worker_provider", "") or ""
-        model_name = getattr(config, "worker_model", "") or ""
-        if not model_name:
-            provider_name = getattr(config, "provider", "lmstudio") or ""
-            model_name = getattr(config, "model", "") or ""
-            role = "router"
-    else:
-        provider_name = getattr(config, "provider", "lmstudio") or ""
-        model_name = getattr(config, "model", "") or ""
+    # router fallback below is a falsiness test either way.
+    model = (getattr(config, fields[0], "") or "") if fields else ""
+    router_provider = getattr(config, "provider", "lmstudio") or ""
+    if not model:
+        # litellm resolves the endpoint from the prefix, so keep it (or restore
+        # it when the user wrote a bare id). Ollama in particular MUST keep it:
+        # the prefix is what routes it to /api/chat with an explicit num_ctx, and
+        # the /v1 endpoint it would otherwise hit cannot size the context window
+        # and truncates window-sized prompts in silence (measured: 2051 of 6645
+        # prompt tokens kept at Ollama's 4096 default, zero tool calls, HTTP 200).
+        #
+        # Same rule as config.ensure_prefix, guard included: only a prefix
+        # litellm knows can resolve an endpoint, so an unlisted provider
+        # (SILICA_WORKER_PROVIDER=vllm) keeps its bare id, and pinning `vllm/` in
+        # front of it turns a routable model into a BadRequestError.
+        return ensure_prefix(getattr(config, "model", "") or "", router_provider), ""
+    provider = getattr(config, fields[1], "") or ""  # type: ignore[index]
+    if role == "vision":
+        # The one role that inherits the chat's provider: hosted, a vision model
+        # is one variable (config.vision_model), and it must not need a second.
+        provider = provider or router_provider
+    key = (getattr(config, "worker_api_key", None) or "") if role == "worker" else ""
+    return ensure_prefix(model, provider), key
 
-    preset = PROVIDER_PRESETS.get(provider_name)
-    if preset:
-        base_url = preset["base_url"]
-        api_key = preset.get("api_key", "lm-studio")
-        if "api_key_env" in preset:
-            api_key = os.getenv(preset["api_key_env"], "dummy-key")
-    else:
-        # custom / unknown provider: endpoint from config (SILICA_PROVIDER_BASE_URL
-        # / _API_KEY). Falls back to the lmstudio localhost default so a bare
-        # misconfig still points somewhere local rather than crashing.
-        base_url = getattr(config, "provider_base_url", "") or PROVIDER_PRESETS["lmstudio"]["base_url"]
-        api_key = getattr(config, "provider_api_key", "") or "dummy-key"
 
-    # Worker role: explicit api-key override takes precedence over the preset.
-    if role == "worker":
-        api_key = getattr(config, "worker_api_key", None) or api_key
+def get_provider(config: Any, role: str = "router") -> Provider:
+    """The LLM lane for `role` (resolve_role), or for one of the two lanes that
+    run on the worker and ask its transport for more:
 
-    # litellm resolves the endpoint from the prefix, so keep it (or restore it
-    # when the user wrote a bare id). Ollama in particular MUST keep it: the
-    # prefix is what routes it to /api/chat with an explicit num_ctx, and the
-    # /v1 endpoint it would otherwise hit cannot size the context window and
-    # truncates window-sized prompts in silence (measured: 2051 of 6645 prompt
-    # tokens kept at Ollama's 4096 default, zero tool calls, HTTP 200).
-    #
-    # Same rule as config.ensure_prefix, guard included: the roles below read
-    # the very fields it already prefixed, so re-deriving it without the guard
-    # made the two disagree. Only a prefix litellm knows can resolve an
-    # endpoint, so an unlisted provider (SILICA_WORKER_PROVIDER=vllm) keeps its
-    # bare id — config leaves it bare for exactly that reason, and pinning
-    # `vllm/` in front of it turns a routable model into a BadRequestError.
-    model_name = ensure_prefix(model_name, provider_name)
+    "distiller" → the worker on CONFIG.openrouter_provider_distiller's pin.
+    "outline"   → the same, with no client retries. Every outline call runs at
+                  temperature 0, so a 500 the client retried came back as the
+                  same reply, three times on Lezione 8 (llama-server,
+                  2026-10-12); the stage's loop and re-ask are the retries.
+    """
+    return lane_on(*resolve_role(role, config), config, role)
 
-    # The preset key is only worth passing when it is not what litellm would
-    # resolve on its own — the worker role's explicit override. `custom` needs
-    # no entry here: llm.call_llm reads provider_api_key off CONFIG directly.
-    override = api_key if (role == "worker" and getattr(config, "worker_api_key", None)) else ""
-    return Provider(base_url=base_url, api_key=override, model=model_name)
+
+def lane_on(model: str, key: str, config: Any, role: str) -> Provider:
+    """`role`'s lane on `model`: what a lane falls back on when its own model failed."""
+    pin = getattr(config, "openrouter_provider_distiller", None) if role in _LANE_ROLE else None
+    return Provider(model, key, openrouter_pin=pin, sdk_retries=0 if role == "outline" else None)

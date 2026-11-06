@@ -89,7 +89,7 @@ class _Turn:
 
 # The key a tool message carries once its call tainted the conversation by a
 # path, which no tool name in the history records. Stripped from the wire
-# (providers.INTERNAL_KEYS) and kept by the narration, so a reopened chat stays
+# (wire.WIRE_KEYS) and kept by the narration, so a reopened chat stays
 # tainted. Compaction rewrites a message's content, never its other keys.
 TAINT_KEY = "silica_taint"
 

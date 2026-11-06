@@ -12,11 +12,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from silica.model import providers as _providers
-from silica.model.providers import _model_limits_memo, model_limits
+from silica.model import limits as _limits
+from silica.model.limits import _model_limits_memo, model_limits
 
 # Taken at import, before conftest's autouse stub replaces it for every test.
-_REAL_PROPS_WINDOW = _providers._llama_props_window
+_REAL_PROPS_WINDOW = _limits._llama_props_window
 
 
 @pytest.fixture(autouse=True)
@@ -174,7 +174,7 @@ class TestFallbacks:
 class TestCliContextBudget:
     """_resolve_context_budget() sizes the REPL meter to the real window."""
 
-    @patch("silica.model.providers.model_limits", return_value=(131072, 0))
+    @patch("silica.model.limits.model_limits", return_value=(131072, 0))
     def test_sets_budget_from_provider(self, _limits, monkeypatch):
         from silica.cli import _resolve_context_budget
         from silica.config import CONFIG
@@ -185,7 +185,7 @@ class TestCliContextBudget:
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 131072
 
-    @patch("silica.model.providers.model_limits", return_value=(131072, 0))
+    @patch("silica.model.limits.model_limits", return_value=(131072, 0))
     def test_env_pin_wins_for_local_provider(self, _limits, monkeypatch):
         from silica.cli import _resolve_context_budget
         from silica.config import CONFIG
@@ -197,7 +197,7 @@ class TestCliContextBudget:
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 42000
 
-    @patch("silica.model.providers.model_limits", return_value=(1048576, 0))
+    @patch("silica.model.limits.model_limits", return_value=(1048576, 0))
     def test_env_pin_wins_on_openrouter_off_hosted(self, _limits, monkeypatch):
         # Regression 2026-10-27: a laptop's 65536 ran DeepSeek V4 Flash at 1M.
         from silica.cli import _resolve_context_budget
@@ -211,7 +211,7 @@ class TestCliContextBudget:
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 65536
 
-    @patch("silica.model.providers.model_limits", return_value=(131072, 0))
+    @patch("silica.model.limits.model_limits", return_value=(131072, 0))
     def test_env_pin_above_the_openrouter_window_is_cut_to_it(self, _limits, monkeypatch):
         from silica.cli import _resolve_context_budget
         from silica.config import CONFIG
@@ -223,7 +223,7 @@ class TestCliContextBudget:
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 131072
 
-    @patch("silica.model.providers.model_limits", return_value=(1000000, 0))
+    @patch("silica.model.limits.model_limits", return_value=(1000000, 0))
     def test_env_pin_wins_on_openrouter_when_hosted(self, _limits, monkeypatch):
         # The host's cap is a price decision, not a guess at the window: past
         # 32k prompt tokens the pilot's endpoint bills 3.3x
@@ -239,7 +239,7 @@ class TestCliContextBudget:
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 32000
 
-    @patch("silica.model.providers.model_limits", return_value=(0, 0))
+    @patch("silica.model.limits.model_limits", return_value=(0, 0))
     def test_unknown_window_keeps_default(self, _limits, monkeypatch):
         from silica.cli import _resolve_context_budget
         from silica.config import CONFIG
@@ -259,7 +259,7 @@ class TestLlamaCpp:
     @patch("silica.model.providers.httpx.get")
     def test_props_window(self, mock_get, monkeypatch):
         from silica.config import CONFIG
-        monkeypatch.setattr(_providers, "_llama_props_window", _REAL_PROPS_WINDOW)
+        monkeypatch.setattr(_limits, "_llama_props_window", _REAL_PROPS_WINDOW)
         monkeypatch.setattr(CONFIG, "provider_base_url", "http://127.0.0.1:1237/v1")
         mock_get.return_value = _http_response(
             {"total_slots": 4, "default_generation_settings": {"n_ctx": 32768}})
@@ -269,6 +269,6 @@ class TestLlamaCpp:
     @patch("silica.model.providers.httpx.get", side_effect=ConnectionError("not llama.cpp"))
     def test_no_props_is_unknown(self, _get, monkeypatch):
         from silica.config import CONFIG
-        monkeypatch.setattr(_providers, "_llama_props_window", _REAL_PROPS_WINDOW)
+        monkeypatch.setattr(_limits, "_llama_props_window", _REAL_PROPS_WINDOW)
         monkeypatch.setattr(CONFIG, "provider_base_url", "http://127.0.0.1:8000/v1")
         assert model_limits("custom", "custom/vllm-model") == (0, 0)

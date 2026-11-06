@@ -40,6 +40,7 @@ from typing import Any
 import httpx
 
 from silica.config import hosted, silica_home
+from silica.model.keys import ready_key
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ def window_share() -> float | None:
 def read_key() -> dict[str, Any]:
     """The key's own record from OpenRouter. Raises on any failure: the caller
     decides what a failed read means."""
-    key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    key = ready_key("openrouter").strip()
     if not key:
         raise LookupError("no OPENROUTER_API_KEY")
     resp = httpx.get(KEY_URL, headers={"Authorization": f"Bearer {key}"}, timeout=TIMEOUT_S)

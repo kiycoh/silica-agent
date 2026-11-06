@@ -22,7 +22,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable, Any
 import concurrent.futures as _cf
 import contextvars
-import re
 import threading
 import time
 import logging
@@ -42,7 +41,8 @@ from silica.obs.events import (
     ThinkingEndEvent,
     LLMStreamEvent,
 )
-from silica.model.llm import call_llm
+from silica.model.errors import context_overflow
+from silica.model.llm import call_llm, run_with_deadline
 from silica.obs import narration as _narr_mod
 from silica.agent.compaction import (
     dedup_recall_excerpts,
@@ -52,7 +52,7 @@ from silica.agent.compaction import (
     eager_stub,
     fit_window,
 )
-from silica.model.llm import TEXT_CHARS_PER_TOKEN
+from silica.model.limits import ROUGH_CHARS_PER_TOKEN, TEXT_CHARS_PER_TOKEN
 from silica.agent import read_scope
 from silica.agent.relevance import compact_by_relevance
 from silica.tools import user_memory as memory_gate
@@ -116,14 +116,10 @@ TURN_PROMPT_BUDGET = 400_000
 # The request goes out at most this full: the rest is the answer's room and the
 # estimate's slack. llama.cpp rejects a prompt over n_ctx outright.
 WINDOW_FILL = 0.9
-# That rejection names both counts. The loop collapses reads to fit the real
-# count and resends once, so an estimate that came in low (text under 2 chars a
-# token, compaction.TEXT_CHARS_PER_TOKEN) costs a stub instead of the turn.
-# ponytail: llama.cpp's wording only; LM Studio and vLLM word an overflow their
-# own way and still raise. Add a pattern the first time one shows up in a log.
-_LLAMA_OVERFLOW = re.compile(
-    r"request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)"
-)
+# That rejection names both counts (errors.context_overflow). The loop collapses
+# reads to fit the real count and resends once, so an estimate that came in low
+# (text under 2 chars a token, limits.TEXT_CHARS_PER_TOKEN) costs a stub instead
+# of the turn.
 # A note read this turn that will not fit is served as its passages densest in
 # the words of the read's query, or of the request when it gave none, instead
 # of a stub naming a re-read that cannot fit either (compaction.fit_window).
@@ -496,32 +492,16 @@ def run_agent(
         _llm_kwargs["on_delta"] = _stream_delta
 
     def _interruptible_llm(kwargs: dict):
-        """One call_llm on a *daemon* thread — see the comment in the loop
-        body for why (Ctrl+C delivery, no shutdown join, retry abandonment).
-        Caller clears `_abandon` first; this always sets it on the way out so
-        an orphaned worker stops retrying and streaming."""
-        _future: _cf.Future = _cf.Future()
-
-        def _llm_worker(k=dict(kwargs)):
-            try:
-                _future.set_result(call_llm(effective_model, messages, **k))
-            except BaseException as e:
-                _future.set_exception(e)
-
-        threading.Thread(target=_llm_worker, daemon=True, name="llm-call").start()
-        try:
-            # In slices, so a Stop is seen within 0.2 s and not when the model
-            # finishes: measured 12 s from the click to the stopped row while
-            # this waited on the whole generation (ADR-0121 point 7). Leaving
-            # sets `_abandon`, which ends the stream at its next chunk.
-            while True:
-                try:
-                    return _future.result(timeout=0.2)
-                except _cf.TimeoutError:
-                    if cancel_token is not None and cancel_token.is_set():
-                        raise _Stopped from None
-        finally:
-            _abandon.set()
+        """One call_llm off the loop's thread, so a Ctrl+C reaches the turn and a
+        Stop is seen within 0.2 s and not when the model finishes. Caller clears
+        `_abandon` first; leaving sets it, which ends the stream at its next
+        chunk and stops an orphaned worker retrying. sync litellm can't abort
+        the in-flight HTTP request: best we can do is stop waiting and stop
+        retrying."""
+        return run_with_deadline(
+            lambda k=dict(kwargs): call_llm(effective_model, messages, **k), None,
+            catch=BaseException, abandon=_abandon,
+            stop=cancel_token if cancel_token is not None else threading.Event(), on_stop=_Stopped)
 
     while iteration < max_iterations:
         if cancel_token is not None and cancel_token.is_set():
@@ -550,17 +530,6 @@ def run_agent(
 
         _emit(ThinkingStartEvent(iteration=iteration))
         try:
-            # Run the (synchronous, potentially slow) LLM call on a *daemon*
-            # thread so a Ctrl+C on the main thread raises KeyboardInterrupt out
-            # of _future.result() instead of being trapped in a C-level network
-            # recv(). Daemon matters: a non-daemon orphan (the old throwaway
-            # ThreadPoolExecutor worker) gets joined at interpreter shutdown,
-            # hanging exit for minutes while its retries die against executors
-            # already flagged shut ("cannot schedule new futures after shutdown").
-            # The finally sets `_abandon` so retry_transient stops rescheduling
-            # once nobody is waiting (harmless on success: the call already
-            # returned). ponytail: sync litellm can't abort the in-flight HTTP
-            # request — best we can do is stop waiting and stop retrying.
             slot = nullcontext() if _interactive else worker_slot()
             with slot:
                 _abandon.clear()
@@ -572,13 +541,14 @@ def run_agent(
                 try:
                     resp = _interruptible_llm(_llm_kwargs)
                 except Exception as e:
-                    over = _LLAMA_OVERFLOW.search(str(e))
+                    over = context_overflow(e)
                     if over is None:
                         raise
+                    sent, window = over
                     _pre_collapsed = set(collapsed)
                     collapsed, _ = fit_window(
-                        messages, collapsed, estimate=int(over[1]),
-                        limit=int(WINDOW_FILL * int(over[2])), tools=TOOLS,
+                        messages, collapsed, estimate=sent,
+                        limit=int(WINDOW_FILL * window), tools=TOOLS,
                         shrink=_fit_shrink, unsent_from=seen_len,
                     )
                     if collapsed == _pre_collapsed:
@@ -586,7 +556,7 @@ def run_agent(
                     recalled_excerpts.clear()
                     _narr_mod.NARRATOR.narrate(
                         "compaction", "done",
-                        f"server rejected {over[1]} tokens on {over[2]}: compacted "
+                        f"server rejected {sent} tokens on {window}: compacted "
                         f"{len(collapsed - _pre_collapsed)} message(s) and resent",
                         {"indices": sorted(collapsed - _pre_collapsed)}, parent=None)
                     _abandon.clear()
@@ -675,10 +645,10 @@ def run_agent(
         # backend a long turn could overrun the pinned window mid-flight and get
         # truncated in silence. `prompt_tokens` is the provider's own count of
         # what we just sent, so this costs no tokenizer pass; when a provider
-        # reports no usage, fall back to the same chars/4 estimate the meter uses.
+        # reports no usage, fall back to the same rough estimate the meter uses.
         prompt_tokens = resp.usage.get("prompt_tokens") or sum(
             _content_chars(m.get("content")) for m in messages
-        ) // 4
+        ) // ROUGH_CHARS_PER_TOKEN
         spent_prompt += prompt_tokens
         sent_tokens = prompt_tokens
         _pre_collapsed = set(collapsed)

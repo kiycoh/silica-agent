@@ -7090,7 +7090,7 @@ def get_config():
     """Session config for the header panel: the active model (read-only — Silica
     has no runtime model-switch op, so this mirrors the TUI's display-only
     /model) plus the one live toggle the web surfaces, thinking (/thinking)."""
-    from silica.model.providers import model_limits
+    from silica.model.limits import model_limits
 
     window = 0
     if CONFIG.model:

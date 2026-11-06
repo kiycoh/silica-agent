@@ -99,9 +99,9 @@ class TestAttach:
 
 class TestNeverSentToTheModel:
     def test_the_wire_drops_the_key(self):
-        from silica.model.providers import _to_wire
+        from silica.model.wire import to_wire
 
-        wire = _to_wire({"role": "assistant", "content": "a", turn_notes.KEY: [THIN]})
+        wire = to_wire({"role": "assistant", "content": "a", turn_notes.KEY: [THIN]})
         assert wire == {"role": "assistant", "content": "a"}
 
     def test_the_next_request_carries_no_key(self, client, monkeypatch):

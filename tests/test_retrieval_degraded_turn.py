@@ -236,11 +236,11 @@ def _resp(text: str = "", calls: list[tuple[str, dict]] | None = None):
 
 def scripted_llm(sent: list):
     """The turn's user text names the plan: `<tool>|<query>|<ctx>|<notes>`."""
-    from silica.model.providers import _to_wire
+    from silica.model.wire import to_wire
 
     def call(model, messages, tools=None, **kw):
         # What llm.call_llm hands the provider: the same transform, here.
-        sent.append([_to_wire(m) for m in messages])
+        sent.append([to_wire(m) for m in messages])
         last_user = max(i for i, m in enumerate(messages) if m.get("role") == "user")
         if tools is None or any(m.get("role") == "tool" for m in messages[last_user:]):
             return _resp(text=ANSWER)

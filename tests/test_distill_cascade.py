@@ -63,23 +63,30 @@ def _run(escalate):
     provider.call_llm.return_value = _fake_response()
     with patch.dict(os.environ, {"MODEL_CONTEXT_WINDOW": "0", "DISTILLER_MAX_TOKENS": "0"}), \
          patch("silica.model.providers.get_provider", return_value=provider) as gp, \
-         patch("silica.model.providers.model_limits", return_value=(262144, 8192)) as ml:
+         patch("silica.model.limits.model_limits", return_value=(262144, 8192)) as ml:
         run_distiller(payload={"schema_version": 1, "batches": []},
                       target="Notes", language="English", escalate=escalate)
     return gp, ml, provider
 
 
-def test_default_call_uses_worker_role_and_distiller_pin():
-    gp, _ml, provider = _run(escalate=False)
-    assert gp.call_args.kwargs.get("role") == "worker"
-    assert provider.call_llm.call_args.kwargs["openrouter_provider"] == \
-        CONFIG.openrouter_provider_distiller
+def test_default_call_runs_the_distiller_lane():
+    gp, _ml, _provider = _run(escalate=False)
+    assert gp.call_args.kwargs.get("role") == "distiller"
 
 
-def test_escalated_call_uses_escalation_role_and_drops_pin():
-    gp, _ml, provider = _run(escalate=True)
+def test_escalated_call_uses_escalation_role():
+    gp, _ml, _provider = _run(escalate=True)
     assert gp.call_args.kwargs.get("role") == "escalation"
-    assert provider.call_llm.call_args.kwargs["openrouter_provider"] is None
+
+
+def test_the_distiller_pin_rides_its_lane_and_not_the_escalation():
+    from silica.model.providers import get_provider
+
+    with patch.object(CONFIG, "openrouter_provider_distiller", "DeepInfra"):
+        assert get_provider(CONFIG, role="distiller").openrouter_pin == "DeepInfra"
+        assert get_provider(CONFIG, role="outline").openrouter_pin == "DeepInfra"
+        assert get_provider(CONFIG, role="escalation").openrouter_pin is None
+        assert get_provider(CONFIG, role="worker").openrouter_pin is None
 
 
 def test_escalated_limits_resolve_escalation_model():

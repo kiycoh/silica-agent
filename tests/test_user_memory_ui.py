@@ -65,10 +65,10 @@ def test_the_seed_has_no_memory_when_paused_or_incognito(on, monkeypatch):
 
 
 def test_the_memory_origin_never_reaches_the_wire(on):
-    from silica.model.providers import _to_wire
+    from silica.model.wire import to_wire
 
     um.save("user", "Name is Giulia")
-    wire = _to_wire(um.snapshot_message())
+    wire = to_wire(um.snapshot_message())
     assert "origin" not in wire and "Giulia" in wire["content"]
 
 

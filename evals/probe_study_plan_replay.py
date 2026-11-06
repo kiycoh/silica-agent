@@ -302,12 +302,12 @@ def _score(rx: str, want, text: str) -> dict:
 def run_variant(name: str, base: list[dict], seed: list[dict], ctx: Ctx, model: str,
                 tools, payload_path: Path | None = None) -> dict:
     from silica.model.llm import call_llm
-    from silica.model.providers import _to_wire
+    from silica.model.wire import to_wire
     msgs = seed + apply_variant(name, base, ctx)
     if payload_path is not None:
         # The exact bytes the provider sees: 63014 prompt tokens equal to the
         # recorded call is evidence, not identity (Astra, 2026-09-22).
-        wire = {"messages": [_to_wire(m) for m in msgs], "tools": tools}
+        wire = {"messages": [to_wire(m) for m in msgs], "tools": tools}
         raw = json.dumps(wire, ensure_ascii=False, sort_keys=True)
         payload_path.write_text(raw, encoding="utf-8")
     resp = call_llm(model, msgs, tools=tools)

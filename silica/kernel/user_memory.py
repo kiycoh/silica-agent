@@ -37,7 +37,7 @@ SCOPES = ("user", "vault")
 _BUDGETS = {"user": USER_BUDGET, "vault": VAULT_BUDGET}
 
 # The seed message carries this in `origin`, which the wire boundary strips
-# (providers.INTERNAL_KEYS), so /incognito can find the message again without
+# (wire.WIRE_KEYS), so /incognito can find the message again without
 # matching on its text.
 MESSAGE_ORIGIN = "user_memory"
 

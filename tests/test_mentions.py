@@ -115,7 +115,7 @@ def test_an_open_note_the_vault_no_longer_has_is_left_out():
 def test_the_chip_note_reaches_the_model_and_a_reopened_chat_draws_it(tmp_vault, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from silica.model.providers import _to_wire
+    from silica.model.wire import to_wire
     from silica.ui.web import server
 
     tmp_vault.note("Codice civile/Art. 1453.md", "# Art. 1453\n\nRisoluzione per inadempimento.\n")
@@ -134,7 +134,7 @@ def test_the_chip_note_reaches_the_model_and_a_reopened_chat_draws_it(tmp_vault,
     assert "The note open beside the chat" in seen[0]["content"]
     assert seen[0]["content"].endswith("Codice civile/Art. 1453.md\n</named-notes>")
     assert "named-notes" not in seen[1]["content"]          # a note the vault lacks names nothing
-    assert "silica_note" not in _to_wire(seen[0])            # silica's own key never reaches the provider
+    assert "silica_note" not in to_wire(seen[0])            # silica's own key never reaches the provider
     users = [m for m in tc.get("/messages").json() if m["role"] == "user"]
     assert [(u["content"], u["note"]) for u in users] == [
         ("cosa dice questo articolo?", "Codice civile/Art. 1453.md"), ("e questo?", "")]
