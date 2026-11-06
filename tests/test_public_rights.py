@@ -432,6 +432,33 @@ def test_personal_data_keeps_a_listed_wiki_out_of_the_catalog_and_the_screen_say
     assert json.loads((_live(stats) / "vault.json").read_text(encoding="utf-8"))["listed"] is False
 
 
+@pytest.mark.parametrize("answer", [{"answer": "mine"},
+                                    {"answer": "open", "license": "CC BY", "credit": "Ross, Probability"}])
+def test_a_note_copied_from_a_source_answered_mine_or_open_can_ask_to_enter_wikis(stats, tmp_vault, answer):
+    from silica.kernel import rights
+    from silica.kernel.publish import update_vault
+
+    update_vault("stats", {"license": "CC BY 4.0", "listed": True})
+    tmp_vault.note("Stats/Bayes.md", f"{BOOK}\n")
+    rights.save_answer(ROSS, **answer)
+    sheet = _sheet()
+    assert "copied word for word" in _row(sheet, "Bayes")["status"]
+    assert sheet["wikis"] == "It can ask to enter Wikis."
+    _build()
+    assert "bayes.html" in _names(stats)
+    assert json.loads((_live(stats) / "vault.json").read_text(encoding="utf-8"))["listed"] is True
+
+
+def test_a_note_copied_from_any_other_source_never_reaches_what_the_catalog_could_list(stats, tmp_vault):
+    from silica.kernel import rights
+
+    tmp_vault.note("Stats/Bayes.md", f"---\nrewritten: true\n---\n{BOOK}\n")
+    for answer in ({"answer": "else"}, {"answer": "open", "license": "CC BY-ND", "credit": "Ross"},
+                   {"answer": "open", "license": "CC BY"}):
+        rights.save_answer(ROSS, **answer)
+        assert "Stats/Bayes.md" not in rights.decide(rights.read_wiki("stats"), rights.answers())["notes"]
+
+
 def test_a_license_not_stated_keeps_a_wiki_out_of_the_catalog(stats):
     from silica.kernel.publish import update_vault
 
