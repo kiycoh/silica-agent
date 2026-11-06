@@ -577,7 +577,7 @@ body.drawer-recall #public-bar {
 
 .pg-sel:focus { border-color: var(--accent); }
 
-.pg-head { display: grid; gap: 2px; padding-top: 0.35rem; }
+.pg-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; padding-top: 0.35rem; }
 .pg-tl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .pg-tl .pg-ed-t { flex: 1 1 16rem; width: auto; min-width: 0; }
 .pg-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
