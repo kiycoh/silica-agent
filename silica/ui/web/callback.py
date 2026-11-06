@@ -137,9 +137,9 @@ def _note_refs(args: dict) -> list[str]:
 
 # The injector's two phase tracks, in run order, sent once at tool_start so the
 # client can draw the whole pipeline greyed out instead of growing it a row at a
-# time. rollback is absent by design: it is an exception branch (on_gate_fail in
-# recipes/injector.yaml), and listing it made every healthy run display a pending
-# "rollback" step that was never going to run.
+# time. rollback is absent by design: it is an exception branch, and listing it
+# made every healthy run display a pending "rollback" step that was never going
+# to run.
 _PHASE_TRACKS = {
     "file": list(FILE_PHASES.values()),
     "chunk": list(CHUNK_PHASES.values()),
@@ -246,7 +246,7 @@ def event_to_json(ev) -> dict | None:
                 out["memory_suggest"] = cmd
         return out
     if isinstance(ev, PhaseEvent):
-        # The label, not the recipe id: the client matches rows by exact string,
+        # The label, not the phase id: the client matches rows by exact string,
         # and no id->label rule it could apply covers hub_update/hub-update.
         # Guessing left the renamed phase grey for the whole run.
         return {"type": "phase", "phase": PHASE_LABELS.get(ev.phase, ev.phase),

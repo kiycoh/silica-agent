@@ -104,7 +104,7 @@ class PhaseEvent:
     No call_id: agent/loop.py dispatches tool calls strictly sequentially, so
     these attach unambiguously to the last injector call still running.
     """
-    phase: str          # recipe phase id, e.g. "distill"
+    phase: str          # phase id, e.g. "distill"
     status: str         # "running" | "done" | "failed"
     scope: str          # "file" | "chunk" | "exception" (rollback)
     file_idx: int

@@ -316,14 +316,12 @@ class TestT2ChunkContainment:
 
     def test_on_error_per_chunk_routes_to_rollback(self):
         """DELEGATE/SANITIZE/SNAPSHOT errors now route to ROLLBACK (not ERROR)."""
-        fsm = InjectorFSM("Inbox/test.md", "Concepts")
-        assert fsm._ON_ERROR[InjectorState.DELEGATE] == InjectorState.ROLLBACK
-        assert fsm._ON_ERROR[InjectorState.SANITIZE] == InjectorState.ROLLBACK
-        assert fsm._ON_ERROR[InjectorState.SNAPSHOT] == InjectorState.ROLLBACK
-        assert fsm._ON_ERROR[InjectorState.VALIDATE] == InjectorState.ROLLBACK
+        for state in (InjectorState.DELEGATE, InjectorState.SANITIZE,
+                      InjectorState.SNAPSHOT, InjectorState.VALIDATE):
+            assert state.value.on_error == "rollback"
         # Setup phases still abort
-        assert fsm._ON_ERROR[InjectorState.RECON] == InjectorState.ERROR
-        assert fsm._ON_ERROR[InjectorState.PAYLOAD] == InjectorState.ERROR
+        assert InjectorState.RECON.value.on_error == "abort"
+        assert InjectorState.PAYLOAD.value.on_error == "abort"
 
 
 # ---------------------------------------------------------------------------

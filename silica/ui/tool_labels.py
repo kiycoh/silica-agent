@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Callable
 from urllib.parse import urlsplit
 
+from silica.router.phases import InjectorState
 from silica.ui.style import GLYPHS
 
 
@@ -120,39 +121,19 @@ def injector_label(args: dict) -> str:
     return f"{files[0]}{extra}"
 
 
-# The injector recipe's two nested scopes, as the FSM actually runs them.
+# The injector's two nested scopes, as the FSM actually runs them.
 # File-scope phases run once per inbox file; the chunk cycle re-enters at
-# COLLISION/DELEGATE for every chunk of that file (orchestrator.py) and never at
+# COLLISION for every chunk of that file (orchestrator.py) and never at
 # RECON. Splitting them is what lets a frontend reset the chunk track per chunk
 # without wrongly clearing the file track.
-#
-# Hardcoded on purpose: this can only drift from an edit to
-# recipes/injector.yaml — which tests/test_phase_track.py pins.
-FILE_PHASES: dict[str, str] = {
-    "recon":      "recon",
-    "payload":    "payload",
-    "salience":   "salience",
-}
+FILE_PHASES: dict[str, str] = {p.id: p.shown for p in InjectorState.phases() if p.scope == "file"}
+CHUNK_PHASES: dict[str, str] = {p.id: p.shown for p in InjectorState.phases() if p.scope == "chunk"}
 
-CHUNK_PHASES: dict[str, str] = {
-    "collision":  "collision",
-    "distill":    "distill",
-    "sanitize":   "sanitize",
-    "validate":   "validate",
-    "snapshot":   "snapshot",
-    "write":      "write",
-    "hub_update": "hub-update",
-    "autolink":   "autolink",
-    "backlink":   "backlink",
-    "lint":       "lint",
-    "cleanup":    "cleanup",
-}
-
-# rollback carries on_gate_fail in the recipe: an exception branch, not a step.
-# It is deliberately absent from _PHASE_ORDER — as the 16th entry it rendered as
+# rollback is an exception branch, not a step.
+# It is deliberately absent from PHASE_ORDER: as the 16th entry it rendered as
 # "· rollback" pending on every healthy run, showing "everything went wrong" as
 # something about to happen. It is drawn only once it actually fires.
-PHASE_LABELS: dict[str, str] = {**FILE_PHASES, **CHUNK_PHASES, "rollback": "rollback"}
+PHASE_LABELS: dict[str, str] = {p.id: p.shown for p in InjectorState.phases()}
 
 
 PHASE_ORDER: list[str] = [*FILE_PHASES.values(), *CHUNK_PHASES.values()]

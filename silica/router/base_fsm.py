@@ -1,35 +1,33 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Shared FSM mechanics for InjectorFSM."""
+"""Shared FSM mechanics for the pipelines of silica.router.phases."""
 from __future__ import annotations
 
 import logging
 import os
-from enum import Enum
 from typing import Any, Callable, Generic, TypeVar
 
 import orjson
 
 from silica.kernel.base.home import silica_tmp_dir
+from silica.router.phases import PipelineState
 
 logger = logging.getLogger(__name__)
 
-StateT = TypeVar("StateT", bound=Enum)
+StateT = TypeVar("StateT", bound=PipelineState)
 
 
 class BaseFSM(Generic[StateT]):
     """Abstract base for deterministic pipeline state machines.
 
     Each subclass must set in __init__:
-        _phase_label      — log prefix ("Injector" / "Refiner")
+        _phase_label      — log prefix ("Injector" / "Organizer")
         _done_state       — terminal-success state
         _error_state      — terminal-failure state
         _rollback_state   — rollback state (triggers txn revert on error)
-        _phase_to_state   — dict mapping recipe phase-id → state enum member
         _HANDLERS         — dict mapping state → handler callable
-        _ON_ERROR         — dict mapping state → error-fallback state
-        state, context, _tmp_files, _txn, _recipe
+        state, context, _tmp_files
     """
 
     # Annotated here for static analysis; values set by subclass __init__.
@@ -37,14 +35,10 @@ class BaseFSM(Generic[StateT]):
     _done_state: StateT
     _error_state: StateT
     _rollback_state: StateT
-    _phase_to_state: dict[str, StateT]
     _HANDLERS: dict[StateT, Callable[[], None]]
-    _ON_ERROR: dict[StateT, StateT]
     state: StateT
     context: dict[str, Any]
     _tmp_files: list[str]
-    _txn: Any  # Txn | None at runtime
-    _recipe: dict
 
     # ------------------------------------------------------------------
     # Shared execution mechanics
@@ -59,30 +53,16 @@ class BaseFSM(Generic[StateT]):
             raise RuntimeError(f"No handler defined for state {self.state}")
 
     def _transition_success(self) -> None:
-        phases = self._recipe.get("phases", [])
-        sequence = [
-            p["id"]
-            for p in phases
-            if not p.get("on_gate_fail") and p.get("id") != "rollback" and p.get("id") != "cleanup"
-        ]
-        current_phase_id: str | None = None
-        for k, v in self._phase_to_state.items():
-            if v == self.state:
-                current_phase_id = k
-                break
-        if current_phase_id in sequence:
-            idx = sequence.index(current_phase_id)
-            if idx + 1 < len(sequence):
-                self.state = self._phase_to_state[sequence[idx + 1]]
-            else:
-                if "cleanup" in [p["id"] for p in phases]:
-                    self.state = self._phase_to_state["cleanup"]
-                else:
-                    self._on_pipeline_end()
-        elif self.state == self._phase_to_state.get("cleanup"):
-            self._on_pipeline_end()
-        elif self.state == self._rollback_state:
+        if self.state == self._rollback_state:
             self.state = self._error_state
+            return
+        steps = type(self.state).steps()
+        if self.state in steps:
+            idx = steps.index(self.state)
+            if idx + 1 < len(steps):
+                self.state = steps[idx + 1]  # type: ignore[assignment]
+            else:
+                self._on_pipeline_end()
 
     def _run_loop(self) -> dict[str, Any]:
         """Common while-loop: dispatch steps, route errors, clean up tmp files."""
@@ -94,13 +74,7 @@ class BaseFSM(Generic[StateT]):
                 except Exception as e:
                     logger.error("FSM Error in state %s: %s", self.state, e)
                     self.context["error"] = str(e)
-                    if self._on_step_error(e):
-                        continue
-                    next_state = self._ON_ERROR.get(self.state, self._error_state)
-                    if next_state == self._rollback_state and self._txn:
-                        self.context["abort_reason"] = str(e)
-                        self.state = self._rollback_state
-                    else:
+                    if not self._on_step_error(e):
                         self.state = self._error_state
         finally:
             self._cleanup_tmp()
@@ -111,26 +85,13 @@ class BaseFSM(Generic[StateT]):
     # ------------------------------------------------------------------
 
     def _on_pipeline_end(self) -> None:
-        """Called when the recipe sequence is exhausted (after cleanup, if any)."""
+        """Called when the phase sequence is exhausted."""
         self.state = self._done_state
 
     def _on_step_error(self, exc: Exception) -> bool:
-        """Called before the _ON_ERROR routing. Return True after setting
-        ``self.state`` yourself to keep the loop going; False for the default."""
+        """Called on a handler's failure. Return True after setting
+        ``self.state`` yourself to keep the loop going; False ends the run."""
         return False
-
-    # ------------------------------------------------------------------
-    # Shared recipe helpers
-    # ------------------------------------------------------------------
-
-    def _get_recipe_gate(self, name: str, default: Any) -> Any:
-        return self._recipe.get("gates", {}).get(name, default)
-
-    def _get_recipe_phase(self, phase_id: str) -> dict:
-        for phase in self._recipe.get("phases", []):
-            if phase.get("id") == phase_id:
-                return phase
-        return {}
 
     # ------------------------------------------------------------------
     # Shared tmp-file helpers

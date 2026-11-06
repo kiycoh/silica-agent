@@ -49,7 +49,6 @@ def _warm_stub(n_files=2, cur_fi=0):
     fsm.progress.add_task = _add_task
     fsm._make_tmp = lambda obj: (lambda p: (json.dump(obj, open(p, "w")), p)[1])(
         tempfile.mktemp(suffix=".json"))
-    fsm._get_recipe_phase = lambda name: {"partition_if_over": 200}
     fsm._progress_note = MagicMock()
     fsm._transition_success = MagicMock()
     return fsm
@@ -136,7 +135,6 @@ def test_on_pipeline_end_advances_file_when_next_chunk_crosses():
         _current_file_idx=0,
         _next_uncommitted_chunk_idx=lambda start: start,
         _advance_file_or_done=MagicMock(return_value=True),
-        _has_collision_phase=True,
         state=None,
     )
     InjectorFSM._on_pipeline_end(fsm)
@@ -164,7 +162,6 @@ def test_contain_chunk_failure_advances_file_when_next_chunk_crosses():
         _chunks=[{}, {}, {}],
         _next_uncommitted_chunk_idx=lambda start: start,
         _advance_file_or_done=MagicMock(return_value=True),
-        _has_collision_phase=True,
         state=None,
     )
     InjectorFSM._contain_chunk_failure(fsm)

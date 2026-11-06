@@ -63,129 +63,126 @@ def handle_lint(fsm: "InjectorFSM") -> None:
             return
 
     # S3.2: Run graph-diff check
-    regression_rule = fsm._get_recipe_gate("graph_regression", "forbid_new_orphans")
-    if regression_rule != "allow":
-        if fsm._pre_graph is None:
-            fsm._chunk_ctx["abort_reason"] = "Graph regression gate failed: pre-write snapshot is missing"
-            fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
-            fsm.state = InjectorState.ROLLBACK
-            return
+    if fsm._pre_graph is None:
+        fsm._chunk_ctx["abort_reason"] = "Graph regression gate failed: pre-write snapshot is missing"
+        fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
+        fsm.state = InjectorState.ROLLBACK
+        return
+    try:
+        from silica.driver.base import NoteRef
+        snapshot_domain_dicts = fsm._chunk_ctx.get("snapshot_domain", [])
+        if snapshot_domain_dicts:
+            snapshot_domain = [NoteRef(**d) for d in snapshot_domain_dicts]
+        else:
+            # Fallback to touched refs if snapshot_domain is missing
+            snapshot_domain = []
+            for op in ops:
+                path = op.touched_ref()
+                if path:
+                    name = os.path.splitext(os.path.basename(path))[0]
+                    snapshot_domain.append(NoteRef(name=name, path=path))
+        
+        post_graph = DRIVER.graph_snapshot(snapshot_domain)
+        from silica.kernel.graph_diff import check_graph_regression
+        
+        created_paths = fsm._txn.created_paths if fsm._txn else []
+        # Fold only chunks appended since the last LINT into the run-scoped stem
+        # union (B8: was an O(chunks × concepts) rescan on every LINT). A chunk
+        # collision-collapses after it is first folded, but its pre-collapse stems
+        # only widen the allowed set — never manufacture a false regression.
         try:
-            from silica.driver.base import NoteRef
-            snapshot_domain_dicts = fsm._chunk_ctx.get("snapshot_domain", [])
-            if snapshot_domain_dicts:
-                snapshot_domain = [NoteRef(**d) for d in snapshot_domain_dicts]
-            else:
-                # Fallback to touched refs if snapshot_domain is missing
-                snapshot_domain = []
-                for op in ops:
-                    path = op.touched_ref()
-                    if path:
-                        name = os.path.splitext(os.path.basename(path))[0]
-                        snapshot_domain.append(NoteRef(name=name, path=path))
-            
-            post_graph = DRIVER.graph_snapshot(snapshot_domain)
-            from silica.kernel.graph_diff import check_graph_regression
-            
-            created_paths = fsm._txn.created_paths if fsm._txn else []
-            # Fold only chunks appended since the last LINT into the run-scoped stem
-            # union (B8: was an O(chunks × concepts) rescan on every LINT). A chunk
-            # collision-collapses after it is first folded, but its pre-collapse stems
-            # only widen the allowed set — never manufacture a false regression.
-            try:
-                from silica.kernel.write.templates import slugify
-                chunks = getattr(fsm, "_chunks", [])
-                for chunk in chunks[fsm._run_concept_stems_n:]:
-                    for batch in chunk.get("batches", []):
-                        for concept in batch.get("concepts", []):
-                            name = concept.get("name")
-                            if name:
-                                stem = os.path.splitext(os.path.basename(name))[0].lower()
-                                fsm._run_concept_stems.add(stem)
-                                fsm._run_concept_stems.add(slugify(stem))
-                fsm._run_concept_stems_n = len(chunks)
-            except Exception as _ce:
-                logger.debug("Failed to extract run concept stems for graph check: %s", _ce)
+            from silica.kernel.write.templates import slugify
+            chunks = getattr(fsm, "_chunks", [])
+            for chunk in chunks[fsm._run_concept_stems_n:]:
+                for batch in chunk.get("batches", []):
+                    for concept in batch.get("concepts", []):
+                        name = concept.get("name")
+                        if name:
+                            stem = os.path.splitext(os.path.basename(name))[0].lower()
+                            fsm._run_concept_stems.add(stem)
+                            fsm._run_concept_stems.add(slugify(stem))
+            fsm._run_concept_stems_n = len(chunks)
+        except Exception as _ce:
+            logger.debug("Failed to extract run concept stems for graph check: %s", _ce)
 
-            deferred_stems = set(fsm._chunk_ctx.get("deferred_stems", []))
-            deferred_stems |= fsm._run_concept_stems
+        deferred_stems = set(fsm._chunk_ctx.get("deferred_stems", []))
+        deferred_stems |= fsm._run_concept_stems
 
-            # Exempt every path a phase of THIS chunk mutated, from the
-            # rollback transaction (the single source of truth: SNAPSHOT
-            # seeds it, every mutating phase appends). ops alone missed the
-            # HUB_UPDATE/AUTOLINK/BACKLINK edits, so a pre-existing dangling
-            # link in the hub's own planned-topic list read as "introduced"
-            # and rolled back a healthy chunk (3 of the 6 rollbacks, run
-            # 262e6847). validate deliberately keeps unresolved wikilinks in
-            # run-authored content as forward-refs, so rule 2's business is
-            # only notes this chunk never touched.
-            patched_paths = frozenset(
-                {p for op in ops
-                 if op.op in (OpType.patch, OpType.overwrite) and (p := op.touched_ref())}
-                | txn_touched_paths(fsm._txn)
+        # Exempt every path a phase of THIS chunk mutated, from the
+        # rollback transaction (the single source of truth: SNAPSHOT
+        # seeds it, every mutating phase appends). ops alone missed the
+        # HUB_UPDATE/AUTOLINK/BACKLINK edits, so a pre-existing dangling
+        # link in the hub's own planned-topic list read as "introduced"
+        # and rolled back a healthy chunk (3 of the 6 rollbacks, run
+        # 262e6847). validate deliberately keeps unresolved wikilinks in
+        # run-authored content as forward-refs, so rule 2's business is
+        # only notes this chunk never touched.
+        patched_paths = frozenset(
+            {p for op in ops
+             if op.op in (OpType.patch, OpType.overwrite) and (p := op.touched_ref())}
+            | txn_touched_paths(fsm._txn)
+        )
+
+        success, errors = check_graph_regression(
+            fsm._pre_graph, post_graph, created_paths, frozenset(deferred_stems),
+            patched_paths, removed_paths=frozenset(txn_removed_paths(fsm._txn)),
+        )
+
+        if CONFIG.verbose:
+            logger.info(
+                "[DEBUG Graph Regression Gate]: Pre-write graph size: %d nodes | Post-write graph size: %d nodes | Rule: forbid_new_orphans | Result: %s",
+                len(fsm._pre_graph.link_counts) if fsm._pre_graph and fsm._pre_graph.link_counts else 0,
+                len(post_graph.link_counts) if post_graph and post_graph.link_counts else 0,
+                "PASSED" if success else f"FAILED: {errors}"
             )
 
-            success, errors = check_graph_regression(
-                fsm._pre_graph, post_graph, created_paths, frozenset(deferred_stems),
-                patched_paths, removed_paths=frozenset(txn_removed_paths(fsm._txn)),
-            )
-
-            if CONFIG.verbose:
-                logger.info(
-                    "[DEBUG Graph Regression Gate]: Pre-write graph size: %d nodes | Post-write graph size: %d nodes | Rule: %s | Result: %s",
-                    len(fsm._pre_graph.link_counts) if fsm._pre_graph and fsm._pre_graph.link_counts else 0,
-                    len(post_graph.link_counts) if post_graph and post_graph.link_counts else 0,
-                    regression_rule,
-                    "PASSED" if success else f"FAILED: {errors}"
+        if not success:
+            orphan_errors = [e for e in errors if e.startswith("Unplanned orphans")]
+            drift_errors = [e for e in errors if e.startswith("Backlink drift")]
+            blocking_errors = [
+                e for e in errors
+                if not e.startswith("Unplanned orphans") and not e.startswith("Backlink drift")
+            ]
+            if drift_errors:
+                logger.warning(
+                    "[Graph Regression Gate]: Backlink drift (non-blocking): %s",
+                    "; ".join(drift_errors),
                 )
-
-            if not success:
-                orphan_errors = [e for e in errors if e.startswith("Unplanned orphans")]
-                drift_errors = [e for e in errors if e.startswith("Backlink drift")]
-                blocking_errors = [
-                    e for e in errors
-                    if not e.startswith("Unplanned orphans") and not e.startswith("Backlink drift")
-                ]
-                if drift_errors:
-                    logger.warning(
-                        "[Graph Regression Gate]: Backlink drift (non-blocking): %s",
-                        "; ".join(drift_errors),
-                    )
-                if orphan_errors:
-                    logger.warning(
-                        "[Graph Regression Gate]: Orphan warning (non-blocking): %s",
-                        "; ".join(orphan_errors),
-                    )
-                    # Record run-created notes that ended this chunk orphaned.
-                    # Acted on (if still orphaned) at end of run, not now —
-                    # AUTOLINK/BACKLINK or a later chunk may yet connect them.
-                    if fsm.warning_ledger is not None:
-                        try:
-                            from silica.kernel.graph_diff import normalize_ref
-                            post_orphan_keys = {normalize_ref(r) for r in post_graph.orphans}
-                            detail = "; ".join(orphan_errors)
-                            for op in ops:
-                                p = op.touched_ref()
-                                if not p or op.op != OpType.write:
-                                    continue
-                                name = os.path.splitext(os.path.basename(p))[0]
-                                if normalize_ref(NoteRef(name=name, path=p)) in post_orphan_keys:
-                                    fsm.warning_ledger.add(p, "orphan", detail)
-                        except Exception as _we:
-                            logger.debug("orphan warning record failed (non-fatal): %s", _we)
-                if blocking_errors:
-                    reason = f"Graph regression gate failed: {'; '.join(blocking_errors)}"
-                    logger.warning("[Graph Regression Gate]: Blocking errors (triggering rollback): %s", "; ".join(blocking_errors))
-                    fsm._chunk_ctx["abort_reason"] = reason
-                    fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=reason)
-                    fsm.state = InjectorState.ROLLBACK
-                    return
-        except Exception as e:
-            logger.error("Failed to perform graph-diff check: %s", e)
-            fsm._chunk_ctx["abort_reason"] = f"Graph regression gate error during check: {e}"
-            fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
-            fsm.state = InjectorState.ROLLBACK
-            return
+            if orphan_errors:
+                logger.warning(
+                    "[Graph Regression Gate]: Orphan warning (non-blocking): %s",
+                    "; ".join(orphan_errors),
+                )
+                # Record run-created notes that ended this chunk orphaned.
+                # Acted on (if still orphaned) at end of run, not now —
+                # AUTOLINK/BACKLINK or a later chunk may yet connect them.
+                if fsm.warning_ledger is not None:
+                    try:
+                        from silica.kernel.graph_diff import normalize_ref
+                        post_orphan_keys = {normalize_ref(r) for r in post_graph.orphans}
+                        detail = "; ".join(orphan_errors)
+                        for op in ops:
+                            p = op.touched_ref()
+                            if not p or op.op != OpType.write:
+                                continue
+                            name = os.path.splitext(os.path.basename(p))[0]
+                            if normalize_ref(NoteRef(name=name, path=p)) in post_orphan_keys:
+                                fsm.warning_ledger.add(p, "orphan", detail)
+                    except Exception as _we:
+                        logger.debug("orphan warning record failed (non-fatal): %s", _we)
+            if blocking_errors:
+                reason = f"Graph regression gate failed: {'; '.join(blocking_errors)}"
+                logger.warning("[Graph Regression Gate]: Blocking errors (triggering rollback): %s", "; ".join(blocking_errors))
+                fsm._chunk_ctx["abort_reason"] = reason
+                fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=reason)
+                fsm.state = InjectorState.ROLLBACK
+                return
+    except Exception as e:
+        logger.error("Failed to perform graph-diff check: %s", e)
+        fsm._chunk_ctx["abort_reason"] = f"Graph regression gate error during check: {e}"
+        fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
+        fsm.state = InjectorState.ROLLBACK
+        return
 
     fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "done")
     fsm._transition_success()

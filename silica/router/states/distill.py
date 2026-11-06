@@ -23,7 +23,7 @@ from silica.config import CONFIG
 from silica.driver import DRIVER
 from silica.kernel.text.sanitize import sanitize_output
 from silica.kernel.write.validate import validate_ops
-from silica.router.phases import InjectorState, phase
+from silica.router.phases import MAX_STEER_ATTEMPTS, REJECTION_RATE_MAX, InjectorState, phase
 from silica.kernel.outline import flag_cosine_near_titles, parse_outline, run_outliner, vault_outline
 from silica.kernel.prep_delegation import payload_inbox_text, run_distiller
 
@@ -749,7 +749,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
     # provenance record (finalize._record_provenance drains it per source).
     fsm.context.setdefault("grounding", []).extend(res.get("grounding", []))
 
-    max_rate = fsm._get_recipe_gate("rejection_rate_max", 0.10)
+    max_rate = REJECTION_RATE_MAX
 
     if CONFIG.verbose:
         total_ops = res.get("validated_count", 0) + res.get("rejected_count", 0)
@@ -832,11 +832,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
     from silica.kernel.prep_delegation import render_steer_feedback
 
     steer_attempts = fsm.context.get(f"chunk_{idx}_steer_attempts", 0)
-    # One in-flight steer by default: rejected ops are parked in the deferred
-    # store, and the second recovery pass now happens at the boundary via
-    # silica_anneal (batched, off the critical path). Raise the gate in a
-    # recipe if a lane wants the historical two in-flight retries.
-    _max_steer = fsm._get_recipe_gate("max_steer_attempts", 1)
+    _max_steer = MAX_STEER_ATTEMPTS
 
     # Abort only when no validated ops remain — partial success is fine.
     if res.get("validated_count", 0) == 0:

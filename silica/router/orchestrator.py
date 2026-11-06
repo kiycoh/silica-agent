@@ -21,8 +21,10 @@ S2.3 change: ledger.py integrated (CLEANUP writes 'committed', ROLLBACK marks 'r
 from __future__ import annotations
 
 import hashlib
+import importlib
 import logging
 import os
+from functools import partial
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -41,16 +43,8 @@ from silica.kernel.write.ops_io import load_ops
 from silica.kernel.base.layout import to_vault_relative
 from silica.router.base_fsm import BaseFSM
 from silica.router.phases import InjectorState
-from silica.router import states
 
 logger = logging.getLogger(__name__)
-
-
-# Recipe phases that run once per inbox file, before that file has any chunks.
-# Everything else in injector.yaml is per-chunk, except rollback (on_gate_fail).
-# Mirrored for display by _FILE_PHASES/_CHUNK_PHASES in silica/ui/renderer.py;
-# tests/test_phase_track.py pins both against the recipe.
-_FILE_SCOPE_PHASES = frozenset({"recon", "payload", "salience"})
 
 
 class InjectorFSM(BaseFSM[InjectorState]):
@@ -165,25 +159,13 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._chunk_flat_to_fi_ci: dict[int, tuple[int, int]] = {}  # flat_idx → (file_idx, chunk_idx)
         self._last_running_phase: str = ""  # phase in flight, for the failure ledger
 
-        # S3.3: Load the recipe for dynamic configuration. The recipe is bundled
-        # package data — if it's missing the install is broken; fail fast.
-        from silica.router.recipe_parser import load_recipe
-        self._recipe = load_recipe("injector")
-        self._has_collision_phase = any(
-            p.get("id") == "collision" for p in self._recipe.get("phases", [])
-        )
-
-        # Run facade — TaskLedger (immutable plan, built from the recipe) +
+        # Run facade — TaskLedger (immutable plan, built from the phase table) +
         # ProgressLedger (mutable state) + RunManifest (short-term memory)
         # under one run_id; the resume fallback dance lives in Run.resume.
         from silica.kernel.progress import PlanStep, Run
         _checkpoints = [
-            PlanStep(
-                id=p["id"],
-                kind=p.get("kind", "mechanical"),
-                objective=p.get("tool", p.get("worker", p["id"])),
-            )
-            for p in self._recipe.get("phases", [])
+            PlanStep(id=p.id, kind=p.kind, objective=p.objective or p.id)
+            for p in InjectorState.phases()
         ]
         _run_kwargs: dict[str, Any] = dict(
             mode="inject",
@@ -203,8 +185,11 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self.manifest = run.manifest
         self.task_ledger = run.task_ledger
         if not run.resumed:
-            self.progress.add_task("recon",   task_id="recon")
-            self.progress.add_task("payload", task_id="payload", depends_on=["recon"])
+            previous: list[str] = []
+            for p in InjectorState.phases():
+                if p.seeded:
+                    self.progress.add_task(p.id, task_id=p.id, depends_on=previous)
+                    previous = [p.id]
             self.progress.save()
 
         # BaseFSM contract
@@ -212,67 +197,17 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._done_state = InjectorState.DONE
         self._error_state = InjectorState.ERROR
         self._rollback_state = InjectorState.ROLLBACK
-        self._phase_to_state: dict[str, InjectorState] = {
-            "recon":      InjectorState.RECON,
-            "payload":    InjectorState.PAYLOAD,
-            "salience":   InjectorState.SALIENCE,
-            "collision":  InjectorState.COLLISION,
-            "distill":    InjectorState.DELEGATE,
-            "sanitize":   InjectorState.SANITIZE,
-            "validate":   InjectorState.VALIDATE,
-            "snapshot":   InjectorState.SNAPSHOT,
-            "write":      InjectorState.WRITE,
-            "hub_update": InjectorState.HUB_UPDATE,
-            "autolink":   InjectorState.AUTOLINK,
-            "backlink":   InjectorState.BACKLINK,
-            "lint":       InjectorState.LINT,
-            "cleanup":    InjectorState.CLEANUP,
-            "rollback":   InjectorState.ROLLBACK,
-        }
-
-        # S2.2.1: Handlers mapping and error policy.
         self._HANDLERS = {
-            InjectorState.RECON:      lambda: states.setup.handle_recon(self),
-            InjectorState.PAYLOAD:    lambda: states.setup.handle_payload(self),
-            InjectorState.SALIENCE:   lambda: states.setup.handle_salience(self),
-            InjectorState.COLLISION:  lambda: states.collision.handle_collision(self),
-            InjectorState.DELEGATE:   lambda: states.distill.handle_delegate(self),
-            InjectorState.SANITIZE:   lambda: states.distill.handle_sanitize(self),
-            InjectorState.VALIDATE:   lambda: states.distill.handle_validate(self),
-            InjectorState.SNAPSHOT:   lambda: states.write.handle_snapshot(self),
-            InjectorState.WRITE:      lambda: states.write.handle_write(self),
-            InjectorState.HUB_UPDATE: lambda: states.write.handle_hub_update(self),
-            InjectorState.AUTOLINK:   lambda: states.linking.handle_autolink(self),
-            InjectorState.BACKLINK:   lambda: states.linking.handle_backlink(self),
-            InjectorState.LINT:       lambda: states.finalize.handle_lint(self),
-            InjectorState.CLEANUP:    lambda: states.finalize.handle_cleanup(self),
-            InjectorState.ROLLBACK:   lambda: states.finalize.handle_rollback(self),
+            state: partial(self._dispatch, state.value.handler)
+            for state in InjectorState if state.value.handler
         }
 
-        self._ON_ERROR = {
-            # Setup phases: abort the whole run on failure
-            InjectorState.RECON: InjectorState.ERROR,
-            InjectorState.PAYLOAD: InjectorState.ERROR,
-            # Per-chunk phases: contain failure at chunk level via rollback
-            InjectorState.DELEGATE: InjectorState.ROLLBACK,
-            InjectorState.SANITIZE: InjectorState.ROLLBACK,
-            InjectorState.VALIDATE: InjectorState.ROLLBACK,
-            InjectorState.SNAPSHOT: InjectorState.ROLLBACK,
-            InjectorState.WRITE: InjectorState.ROLLBACK,
-            InjectorState.HUB_UPDATE: InjectorState.ROLLBACK,
-            InjectorState.LINT: InjectorState.ROLLBACK,
-        }
-
-        # Phases the recipe declares best_effort: an unhandled failure skips to
-        # the next phase instead of aborting the run (A26). Without this a
-        # best-effort phase whose handler doesn't self-guard (e.g. collision_pass
-        # tail) would route to ERROR — for post-write AUTOLINK/BACKLINK that
-        # bypasses ROLLBACK and strands a half-committed chunk.
-        self._best_effort_states = {
-            self._phase_to_state[p["id"]]
-            for p in self._recipe.get("phases", [])
-            if p.get("best_effort") and p.get("id") in self._phase_to_state
-        }
+    def _dispatch(self, handler: str) -> None:
+        """Run a handler by its table name. Resolved here and not imported at
+        the top: the handlers depend on this class, and the table that names
+        them sits below everything."""
+        module, _, function = handler.partition(".")
+        getattr(importlib.import_module(f"silica.router.states.{module}"), function)(self)
 
     def _get_chunks_from_context_if_empty(self) -> None:
         """Helper to extract chunks from self.context['payload'] if self._chunks is empty."""
@@ -316,16 +251,19 @@ class InjectorFSM(BaseFSM[InjectorState]):
             self._last_running_phase = capability_name
 
         # Surface the transition to whatever frontend is watching (no-op if none).
+        # On BUS rather than through a hook: the TUI is not the only frontend
+        # (the web turn subscribes too, silica/ui/web/turn.py). A subscriber that
+        # raises costs that frontend its display, never the run its notes.
         try:
+            from silica.obs.bus import BUS
             from silica.obs.events import PhaseEvent
-            from silica.ui.renderer import emit_phase
             from silica.obs import narration as _narr_mod
             pe = PhaseEvent(phase=capability_name, status=status,
                             **self._phase_position(capability_name))
-            emit_phase(pe)
+            BUS.publish("work/phase", pe)
             _narr_mod.NARRATOR.on_render_event(pe)   # durable twin of the bus event
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("phase event not delivered: %s", _e)
 
     def _failed_phase_id(self) -> str:
         """The phase the current chunk died in, or "" if none was recorded."""
@@ -345,9 +283,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         """
         fi = self._current_file_idx
         _, ci = self._chunk_flat_to_fi_ci.get(self._current_chunk_idx, (fi, 0))
-        scope = ("exception" if capability_name == "rollback"
-                 else "file" if capability_name in _FILE_SCOPE_PHASES
-                 else "chunk")
+        scope = next((p.scope for p in InjectorState.phases() if p.id == capability_name), "chunk")
         return {
             "scope": scope,
             "file_idx": fi,
@@ -613,14 +549,14 @@ class InjectorFSM(BaseFSM[InjectorState]):
         """Best-effort phases skip to the next one; per-chunk phases route to
         ROLLBACK without the base's live-txn guard (WRITE can fail before the
         txn is assigned) and record the reason in the per-chunk namespace."""
-        if self.state in self._best_effort_states:
+        if self.state.value.best_effort:
             logger.warning(
                 "FSM: best-effort phase %s failed (%s) — skipping to next phase",
                 self.state.name, exc,
             )
             self._transition_success()
             return True
-        if self._ON_ERROR.get(self.state) == self._rollback_state:
+        if self.state.value.on_error == "rollback":
             self._chunk_ctx["abort_reason"] = str(exc)
             self.state = self._rollback_state
             return True
@@ -770,8 +706,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         ):
             self._current_chunk_idx = next_idx
             logger.info("✔ Batch completed successfully. Advancing to batch %d", self._current_chunk_idx + 1)
-            # Restart per-chunk loop from COLLISION (Phase 5) if present, else DELEGATE
-            self.state = InjectorState.COLLISION if self._has_collision_phase else InjectorState.DELEGATE
+            self.state = InjectorState.COLLISION
         elif self._advance_file_or_done():
             pass  # routed to RECON; the next phase event carries the new position
         else:
@@ -876,7 +811,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 "Chunk f%d_c%d failed — advancing to chunk %d of %d.",
                 fi, ci, self._current_chunk_idx + 1, len(self._chunks),
             )
-            self.state = InjectorState.COLLISION if self._has_collision_phase else InjectorState.DELEGATE
+            self.state = InjectorState.COLLISION
         elif self._advance_file_or_done():
             logger.info("Chunk f%d_c%d failed (last chunk of file) — advancing to next file.", fi, ci)
         else:

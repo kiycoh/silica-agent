@@ -1,50 +1,61 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""The phase tables are hardcoded in two places away from the recipe.
+"""What a frontend draws and what the FSM stamps come from one table.
 
-The one thing that can make them drift is an edit to recipes/injector.yaml,
-and these tests are what fails on that day.
+They used to be hand-kept copies of a recipe, so these pinned the copies. Now
+the copies are derived, and what is left to hold is the meaning: every phase is
+drawn, in the run's order, under the scope the event carries, and the exception
+branch is not a step.
 """
 from __future__ import annotations
 
-from silica.router.orchestrator import _FILE_SCOPE_PHASES
-from silica.router.recipe_parser import load_recipe
-from silica.ui.tool_labels import CHUNK_PHASES, FILE_PHASES, PHASE_ORDER
+from silica.router.phases import InjectorState
+from silica.ui.tool_labels import CHUNK_PHASES, FILE_PHASES, PHASE_LABELS, PHASE_ORDER
 
 
-def _recipe_ids() -> list[str]:
-    return [p["id"] for p in load_recipe("injector")["phases"]]
+def _ids() -> list[str]:
+    return [p.id for p in InjectorState.phases()]
 
 
-def test_display_tables_cover_every_recipe_phase():
-    """A phase the recipe runs but no table knows renders as a bare id at best,
+def test_display_tables_cover_every_phase():
+    """A phase the run executes but no track knows renders as a bare id at best,
     and silently vanishes from the track at worst."""
-    ids = set(_recipe_ids())
-    covered = set(FILE_PHASES) | set(CHUNK_PHASES) | {"rollback"}
-    assert covered == ids, (
-        f"phase tables out of sync with recipes/injector.yaml — "
-        f"missing {ids - covered}, stale {covered - ids}"
-    )
+    assert set(FILE_PHASES) | set(CHUNK_PHASES) | {"rollback"} == set(_ids())
+    assert set(PHASE_LABELS) == set(_ids())
 
 
-def test_orchestrator_and_renderer_agree_on_file_scope():
-    """Two tables, one meaning: the scope the FSM stamps on a PhaseEvent must be
+def test_the_event_scope_is_the_track_a_frontend_files_it_under():
+    """Two readings, one meaning: the scope the FSM stamps on a PhaseEvent must be
     the scope the frontend files it under, or events land in the wrong track."""
-    assert set(_FILE_SCOPE_PHASES) == set(FILE_PHASES)
+    from silica.router.orchestrator import InjectorFSM
+
+    fsm = InjectorFSM.__new__(InjectorFSM)
+    fsm.inbox_files = ["Inbox/a.md"]
+    fsm._current_file_idx = 0
+    fsm._current_chunk_idx = 0
+    fsm._chunk_flat_to_fi_ci = {}
+    fsm._file_chunks = {}
+    assert {p for p in _ids() if fsm._phase_position(p)["scope"] == "file"} == set(FILE_PHASES)
+    assert {p for p in _ids() if fsm._phase_position(p)["scope"] == "chunk"} == set(CHUNK_PHASES)
+    assert fsm._phase_position("rollback")["scope"] == "exception"
 
 
 def test_rollback_is_not_a_step():
-    """rollback is on_gate_fail: an exception branch. As the 16th entry of the
-    ordered track it rendered as a pending "· rollback" on every healthy run —
-    "everything went wrong" shown as something about to happen."""
-    recipe = {p["id"]: p for p in load_recipe("injector")["phases"]}
-    assert recipe["rollback"].get("on_gate_fail") is True
+    """rollback is an exception branch. As the 16th entry of the ordered track it
+    rendered as a pending "· rollback" on every healthy run: "everything went
+    wrong" shown as something about to happen."""
+    assert InjectorState.ROLLBACK not in InjectorState.steps()
     assert "rollback" not in PHASE_ORDER
 
 
-def test_phase_order_follows_the_recipe():
+def test_phase_order_follows_the_run():
     """The track is a sequence, so its order has to be the run's order."""
-    ordered = [p for p in _recipe_ids() if p != "rollback"]
-    labels = {**FILE_PHASES, **CHUNK_PHASES}
-    assert PHASE_ORDER == [labels[p] for p in ordered]
+    assert PHASE_ORDER == [s.value.shown for s in InjectorState.steps()]
+    assert [s.value.id for s in InjectorState.steps()][:3] == list(FILE_PHASES)
+
+
+def test_the_label_is_what_the_client_matches():
+    """The client matches rows by exact string, and no id-to-label rule covers
+    this one."""
+    assert PHASE_LABELS["hub_update"] == "hub-update"

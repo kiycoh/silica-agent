@@ -6,7 +6,6 @@ from silica.kernel.write.ops import Txn
 from silica.router import states
 from silica.router.orchestrator import InjectorFSM
 from silica.router.phases import InjectorState
-from silica.router.recipe_parser import load_recipe
 from silica.tools import TOOLS
 
 
@@ -16,10 +15,6 @@ def _historical_snippet_floor(monkeypatch):
     # routing/coercion, not the length gate — pin their original floor.
     monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "100")
 
-
-# Loaded before any test patches builtins.open: tests that mock open() would
-# otherwise break the (fail-fast) recipe load inside InjectorFSM.__init__.
-_RECIPE = load_recipe("injector")
 
 def test_injector_fsm_initialization():
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
@@ -272,22 +267,32 @@ def test_fsm_multi_chunk_loop(mock_embed_store, mock_cleanup, mock_lint, mock_sn
     mock_cleanup.assert_called_once_with("Inbox/test.md")
 
 
-def test_fsm_recipe_configuration():
+def test_the_plan_a_run_persists_comes_from_the_table():
+    """What `asdict` writes to task_ledger.json, byte for byte: a resumed run
+    reads the plan it wrote, and the digest the distiller reads prints id(kind)."""
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    assert fsm._recipe is not None
-    assert fsm._recipe["name"] == "injector"
-    
-    # Check gates configuration
-    assert fsm._get_recipe_gate("rejection_rate_max", 0.05) == 0.10
-    assert fsm._get_recipe_gate("graph_regression", "allow") == "forbid_new_orphans"
-
-    # Check phases configuration
-    payload_conf = fsm._get_recipe_phase("payload")
-    assert payload_conf.get("partition_if_over") == 7
+    assert [(s.id, s.kind, s.objective) for s in fsm.task_ledger.checkpoints] == [
+        ("recon", "mechanical", "silica_recon"),
+        ("payload", "mechanical", "silica_payload"),
+        ("salience", "mechanical", "salience"),
+        ("collision", "mechanical", "collision"),
+        ("distill", "semantic", "distiller"),
+        ("sanitize", "mechanical", "silica_sanitize"),
+        ("validate", "gate", "silica_validate_ops"),
+        ("snapshot", "txn", "silica_snapshot"),
+        ("write", "mechanical", "silica_bulk_write"),
+        ("hub_update", "mechanical", "silica_hub_update"),
+        ("autolink", "mechanical", "silica_autolink"),
+        ("backlink", "mechanical", "silica_backlink"),
+        ("lint", "gate", "silica_lint"),
+        ("cleanup", "mechanical", "silica_cleanup"),
+        ("rollback", "txn", "silica_restore"),
+    ]
+    assert [(t.id, t.depends_on) for t in fsm.progress.tasks] == [("recon", []), ("payload", ["recon"])]
 
 
 @patch("silica.router.states.distill.validate_ops")
-def test_fsm_gate_all_rejected_steers_then_defers(mock_validate):
+def test_fsm_gate_all_rejected_steers_then_defers(mock_validate, monkeypatch):
     # Phase 6: when ALL ops are rejected, VALIDATE steers back to DELEGATE (max 2
     # attempts). After the budget is exhausted, it goes to CLEANUP with "no_ops".
     all_rejected = {
@@ -306,7 +311,7 @@ def test_fsm_gate_all_rejected_steers_then_defers(mock_validate):
     fsm._current_chunk_idx = 0
     # Pin the historical two in-flight retries; the default is now 1 (the second
     # recovery moved to the boundary anneal) — covered separately below.
-    fsm._recipe = {"gates": {"max_steer_attempts": 2}}
+    monkeypatch.setattr("silica.router.states.distill.MAX_STEER_ATTEMPTS", 2)
     fsm.context.setdefault("chunk", {})["sanitized"] = {"parsed": []}
     fsm.state = InjectorState.VALIDATE
 
@@ -338,7 +343,7 @@ def test_fsm_gate_all_rejected_steers_then_defers(mock_validate):
 
 @patch("silica.router.states.distill.validate_ops")
 def test_fsm_default_steer_is_one_then_defers(mock_validate):
-    # Default max_steer_attempts is now 1: one in-flight steer, then the ops are
+    # MAX_STEER_ATTEMPTS is now 1: one in-flight steer, then the ops are
     # left for the boundary anneal instead of a second in-flight re-delegation.
     mock_validate.return_value = {
         "success": True, "rejection_rate": 1.0, "total": 1,
@@ -391,7 +396,6 @@ def test_fsm_gate_partial_rejection_continues(mock_validate):
 
 @patch("silica.kernel.write.gate.lint_note")
 @patch("silica.kernel.write.gate.apply_inverses")
-@patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
 @patch("builtins.open")
 def test_fsm_graph_regression_orphan_is_warning(mock_open, mock_restore, mock_lint, run_driver):
     """Orphan-only regression errors must emit a WARNING and not trigger ROLLBACK."""
@@ -425,7 +429,6 @@ def test_fsm_graph_regression_orphan_is_warning(mock_open, mock_restore, mock_li
 
 @patch("silica.kernel.write.gate.lint_note")
 @patch("silica.kernel.write.gate.apply_inverses")
-@patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
 @patch("builtins.open")
 def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_lint, run_driver):
     """Blocking regression errors (broken backlinks, unresolved links) still trigger ROLLBACK."""
@@ -485,7 +488,6 @@ def _lint_gate_fsm(op_path: str):
 
 
 @patch("silica.kernel.write.gate.lint_note")
-@patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
 def test_fsm_lint_gate_tolerates_per_op_baseline(mock_lint, run_driver):
     """The gate must apply the same diff-aware tolerance as per-op lint
     (commit_note_atomic baseline): a pre-existing violation in a patched user
@@ -506,7 +508,6 @@ def test_fsm_lint_gate_tolerates_per_op_baseline(mock_lint, run_driver):
 
 
 @patch("silica.kernel.write.gate.lint_note")
-@patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
 def test_fsm_lint_gate_still_blocks_new_violations(mock_lint, run_driver):
     """Control for the baseline tolerance: a violation NOT in the baseline
     (introduced by this chunk, e.g. by autolink/hub mutations after per-op
@@ -1410,11 +1411,10 @@ def test_coordinator_forwards_the_episodic_capture_switch():
     assert coord.fsm.episodic_capture is False
 
 
-def test_best_effort_states_from_recipe():
-    # A26: salience/collision/autolink/backlink are best_effort in the
-    # recipe, so an unhandled failure in any of them must skip, not abort.
-    fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    assert fsm._best_effort_states == {
+def test_best_effort_states_from_the_table():
+    # A26: salience/collision/autolink/backlink are best_effort, so an
+    # unhandled failure in any of them must skip, not abort.
+    assert {s for s in InjectorState if s.value.best_effort} == {
         InjectorState.SALIENCE, InjectorState.COLLISION,
         InjectorState.AUTOLINK, InjectorState.BACKLINK,
     }

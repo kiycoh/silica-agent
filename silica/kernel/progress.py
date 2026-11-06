@@ -71,7 +71,7 @@ def _save_json(obj: Any, filename: str) -> Path:
 
 @dataclass
 class PlanStep:
-    """A single planned step from the recipe. Written once; never mutated."""
+    """A single planned step of the run. Written once; never mutated."""
     id: str
     kind: str          # PlanStepKind — str for forward-compat with new kinds
     objective: str     # tool / worker name or free-form description

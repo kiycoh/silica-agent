@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 import os
-from enum import Enum, auto
 from typing import Any
 
 from silica.driver import DRIVER
@@ -30,23 +29,28 @@ from silica.kernel.write import gate
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.organize.taxonomy import Taxonomy
 from silica.router.base_fsm import BaseFSM
+from silica.router.phases import Phase, PipelineState
 
 logger = logging.getLogger(__name__)
 
 
-class OrganizerState(Enum):
-    INIT      = auto()
-    SCAN      = auto()
-    CLASSIFY  = auto()
-    ARBITRATE = auto()
-    PLAN      = auto()
-    SNAPSHOT  = auto()
-    MOVE      = auto()
-    LINT      = auto()
-    CLEANUP   = auto()
-    ROLLBACK  = auto()
-    DONE      = auto()
-    ERROR     = auto()
+class OrganizerState(PipelineState):
+    INIT      = Phase("init")
+    SCAN      = Phase("scan", "_handle_scan")
+    CLASSIFY  = Phase("classify", "_handle_classify")
+    ARBITRATE = Phase("arbitrate", "_handle_arbitrate", kind="semantic")
+    PLAN      = Phase("plan", "_handle_plan")
+    SNAPSHOT  = Phase("snapshot", "_handle_snapshot", kind="txn")
+    MOVE      = Phase("move", "_handle_move", on_error="rollback")
+    LINT      = Phase("lint", "_handle_lint", kind="gate", on_error="rollback")
+    CLEANUP   = Phase("cleanup", "_handle_cleanup")
+    ROLLBACK  = Phase("rollback", "_handle_rollback", kind="txn", scope="exception")
+    DONE      = Phase("done")
+    ERROR     = Phase("error")
+
+
+# MOVE's gate: past this share of failed moves the run rolls back.
+MOVE_FAILURE_MAX = 0.10
 
 
 class OrganizerFSM(BaseFSM[OrganizerState]):
@@ -74,13 +78,9 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             "move_results": [],
         }
         self._tmp_files: list[str] = []
-        self._txn = None
+        self._txn: Any = None  # Txn | None at runtime
         self._pre_graph: GraphSnapshot | None = None
         self._undo_run_id: str | None = None
-
-        # Bundled package data — if it's missing the install is broken; fail fast.
-        from silica.router.recipe_parser import load_recipe
-        self._recipe = load_recipe("organizer")
 
         # BaseFSM contract
         self._phase_label = "Organizer"
@@ -88,38 +88,19 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         self._error_state = OrganizerState.ERROR
         self._rollback_state = OrganizerState.ROLLBACK
 
-        self._phase_to_state: dict[str, OrganizerState] = {
-            "scan":      OrganizerState.SCAN,
-            "classify":  OrganizerState.CLASSIFY,
-            "arbitrate": OrganizerState.ARBITRATE,
-            "plan":      OrganizerState.PLAN,
-            "snapshot":  OrganizerState.SNAPSHOT,
-            "move":      OrganizerState.MOVE,
-            "lint":      OrganizerState.LINT,
-            "cleanup":   OrganizerState.CLEANUP,
-            "rollback":  OrganizerState.ROLLBACK,
-        }
-
         self._HANDLERS = {
-            OrganizerState.SCAN:      self._handle_scan,
-            OrganizerState.CLASSIFY:  self._handle_classify,
-            OrganizerState.ARBITRATE: self._handle_arbitrate,
-            OrganizerState.PLAN:      self._handle_plan,
-            OrganizerState.SNAPSHOT:  self._handle_snapshot,
-            OrganizerState.MOVE:      self._handle_move,
-            OrganizerState.LINT:      self._handle_lint,
-            OrganizerState.CLEANUP:   self._handle_cleanup,
-            OrganizerState.ROLLBACK:  self._handle_rollback,
+            state: getattr(self, state.value.handler)
+            for state in OrganizerState if state.value.handler
         }
 
-        self._ON_ERROR = {
-            OrganizerState.SCAN:     OrganizerState.ERROR,
-            OrganizerState.CLASSIFY: OrganizerState.ERROR,
-            OrganizerState.PLAN:     OrganizerState.ERROR,
-            OrganizerState.SNAPSHOT: OrganizerState.ERROR,
-            OrganizerState.MOVE:     OrganizerState.ROLLBACK,
-            OrganizerState.LINT:     OrganizerState.ROLLBACK,
-        }
+    def _on_step_error(self, exc: Exception) -> bool:
+        """A failure with moves on record rolls them back; before any, the run
+        just ends."""
+        if self.state.value.on_error == "rollback" and self._txn:
+            self.context["abort_reason"] = str(exc)
+            self.state = self._rollback_state
+            return True
+        return False
 
     def run(self) -> dict[str, Any]:
         self.state = OrganizerState.SCAN
@@ -413,7 +394,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         self.context["move_results"] = results
         self.context["move_failures"] = failures
 
-        max_failure_rate = self._get_recipe_gate("move_failure_max", 0.10)
+        max_failure_rate = MOVE_FAILURE_MAX
         failure_rate = len(failures) / len(move_ops) if move_ops else 0.0
         if failure_rate > max_failure_rate:
             raise RuntimeError(

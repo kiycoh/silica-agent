@@ -10,10 +10,6 @@ from unittest.mock import patch
 from silica.kernel.prep_delegation import render_steer_feedback
 from silica.router.orchestrator import InjectorFSM
 from silica.router.phases import InjectorState
-from silica.router.recipe_parser import load_recipe
-
-# Loaded before any test patches builtins.open (same guard as test_fsm.py).
-_RECIPE = load_recipe("injector")
 
 
 def _rejection(heading="Beta", path="bad/Beta.md", reason="Path 'bad/Beta.md' not in target folder", **op_extra):

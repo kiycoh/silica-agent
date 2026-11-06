@@ -19,7 +19,7 @@ from silica.config import CONFIG
 from silica.driver import DRIVER
 from silica.kernel.text.payload import payload_chunks
 from silica.kernel.text.vault_recon import recon_file
-from silica.router.phases import phase
+from silica.router.phases import PARTITION_IF_OVER, InjectorState, phase
 
 if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
@@ -216,10 +216,8 @@ def _assemble_file_chunks(fsm: "InjectorFSM", recon_cur: dict) -> tuple[dict, li
                  "batches": [{"inbox_file": recon_cur.get("file", ""), "concepts": []}],
                  "source_text": recon_cur.get("source_text", "")}
         return {"chunks": [chunk]}, [chunk]
-    phase_conf = fsm._get_recipe_phase("payload")
-    max_concepts = phase_conf.get("partition_if_over", 200)
     max_bytes = int(os.getenv("DISTILLER_CHUNK_MAX_BYTES", str(30 * 1024)))
-    res = payload_chunks([recon_cur], max_concepts=max_concepts, max_bytes=max_bytes)
+    res = payload_chunks([recon_cur], max_concepts=PARTITION_IF_OVER, max_bytes=max_bytes)
 
     # Re-partition this file's payload (§3.6); fall back to the legacy
     # flat-chunk path when batch structure is absent (e.g. tests).
@@ -239,9 +237,9 @@ def _assemble_file_chunks(fsm: "InjectorFSM", recon_cur: dict) -> tuple[dict, li
         raw_payload = res["payload"]
 
     new_chunks: list[dict] = []
-    if raw_payload and max_concepts > 0:
+    if raw_payload:
         # Single-file recon → normally a single group; collect all defensively.
-        for fg in partition_by_file(raw_payload, max_concepts) or []:
+        for fg in partition_by_file(raw_payload, PARTITION_IF_OVER) or []:
             new_chunks.extend(fg.get("chunks", []))
 
     if not new_chunks:
@@ -317,7 +315,7 @@ def _attach_file_chunks(fsm: "InjectorFSM", fi: int, inbox_file: str,
 
     # Register per-chunk tasks with f{fi}_c{ci}_{cap} IDs and intra-file deps.
     # Existing ids are kept (resume re-runs PAYLOAD; warm may have registered).
-    caps = ("collision", "distill", "sanitize", "validate", "snapshot", "write", "hub_update", "autolink", "backlink", "lint", "cleanup")
+    caps = [p.id for p in InjectorState.phases() if p.scope == "chunk"]
     existing = {t.id for t in fsm.progress.tasks}
     prev_in_file = "payload"
     for ci in range(len(new_chunks)):
