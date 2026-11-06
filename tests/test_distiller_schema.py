@@ -269,9 +269,8 @@ class TestRunDistillerFallbackSchemaPassing:
 # ---------------------------------------------------------------------------
 
 def test_distiller_prompt_documents_concepts_field():
-    from pathlib import Path
-    import silica.capabilities as _c
-    prompt = (Path(_c.__file__).parent / "prompts" / "distiller_prompt.txt").read_text(encoding="utf-8")
+    from silica.kernel.prompts import load_prompt
+    prompt = load_prompt("distiller_prompt.txt")
     # A dedicated instruction block must exist (distinct from the INPUT payload's
     # per-batch "concepts" array, which predates #9).
     assert "Concept Keyphrases" in prompt

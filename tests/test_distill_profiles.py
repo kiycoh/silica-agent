@@ -5,7 +5,7 @@
 
 The distiller prompt splits into a fixed contract (distiller_prompt.txt,
 validator-aligned) and a profile-provided lens (rubric / quality / examples
-fragments under capabilities/prompts/profiles/<name>/). The `default`
+fragments under kernel/prompts/profiles/<name>/). The `default`
 profile must reproduce the pre-split prompt bit-identically; other profiles
 swap the lens without touching the contract sections the validator enforces.
 
@@ -19,10 +19,7 @@ from unittest import mock
 from silica.kernel import prep_delegation
 from silica.kernel.base.manifest import VaultConventions, VaultManifest, load_manifest
 
-PROFILES_DIR = (
-    Path(prep_delegation.__file__).resolve().parent.parent
-    / "capabilities" / "prompts" / "profiles"
-)
+PROFILES_DIR = Path(prep_delegation.__file__).resolve().parent / "prompts" / "profiles"
 
 PLACEHOLDERS = (
     "{LENS_RUBRIC}", "{LENS_QUALITY}", "{LENS_EXAMPLES}",

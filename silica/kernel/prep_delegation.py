@@ -20,24 +20,16 @@ import threading
 import typing
 from pathlib import Path
 
+from silica.kernel.prompts import PROMPT_DIR, load_prompt
+
 logger = logging.getLogger(__name__)
 
-# Distiller prompt template — vendored at install time
-_PROMPT_PATH = Path(__file__).resolve().parent.parent / "capabilities" / "prompts" / "distiller_prompt.txt"
-# Shared anti-slop fragment, appended to every body-writing prompt (enrich too).
-_ANTI_SLOP_PATH = _PROMPT_PATH.parent / "_anti_slop.txt"
 # Distill profiles: the template is the fixed validator-aligned contract; the
 # {LENS_RUBRIC}/{LENS_QUALITY}/{LENS_EXAMPLES} placeholders are filled from
 # profiles/<name>/{rubric,quality,examples}.md. `default` reproduces the
 # pre-split prompt bit-identically.
-_PROFILES_DIR = _PROMPT_PATH.parent / "profiles"
+_PROFILES_DIR = PROMPT_DIR / "profiles"
 _LENS_FRAGMENTS = ("rubric", "quality", "examples", "ephemeral_routing")
-
-
-def _load_prompt() -> str:
-    if not _PROMPT_PATH.exists():
-        raise FileNotFoundError(f"Distiller prompt not found: {_PROMPT_PATH}")
-    return _PROMPT_PATH.read_text(encoding="utf-8")
 
 
 def _vault_profiles_dir() -> Path | None:
@@ -126,7 +118,7 @@ def render_prompt(target: str, hub: str | None = None, source_text: str = "",
 
     conventions = get_active_manifest().conventions
     profile = profile or active_distill_profile()
-    body = _splice_lens(_load_prompt(), profile)
+    body = _splice_lens(load_prompt("distiller_prompt.txt"), profile)
     body = body.replace("{TARGET}", target)
     if hub:
         body = body.replace("{HUB_NAME}", hub)
@@ -147,9 +139,7 @@ def render_prompt(target: str, hub: str | None = None, source_text: str = "",
         "{CAPTURE_RULES}\n",
         f"## Vault capture rules\n{rules}\n\n" if rules else "",
     )
-    if _ANTI_SLOP_PATH.exists():  # optional fragment, missing file must not break nucleation
-        body += "\n\n" + _ANTI_SLOP_PATH.read_text(encoding="utf-8")
-    return body
+    return body + "\n\n" + load_prompt("_anti_slop.txt")
 
 
 def _payload_sample_text(payload: dict, limit: int | None = 4000) -> str:

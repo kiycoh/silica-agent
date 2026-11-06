@@ -5,8 +5,8 @@ Guards against a future refactor silently dropping the injection. Covers the
 distiller (nucleation, highest volume) via the pure render_prompt, plus the
 enrich prompt, plus the fragment's own content.
 """
-from silica.capabilities._base import load_prompt
 from silica.kernel.prep_delegation import render_prompt
+from silica.kernel.prompts import load_prompt
 
 SENTINEL = "no AI slop"  # heading of _anti_slop.txt
 
@@ -44,3 +44,15 @@ if __name__ == "__main__":
     test_fragment_loads_and_carries_key_rules()
     test_distiller_prompt_includes_fragment()
     print("ok")
+
+
+def test_a_prompt_that_did_not_ship_fails_loud():
+    """A packaging miss must stop the call, not send an empty instruction."""
+    import pytest
+
+    from silica.capabilities._base import load_prompt as capability_prompt
+
+    with pytest.raises(FileNotFoundError):
+        load_prompt("nonexistent.txt")
+    with pytest.raises(FileNotFoundError):
+        capability_prompt("nonexistent.txt")

@@ -60,8 +60,9 @@ def read_or_skip(path: str) -> tuple[str, dict | None]:
 
 
 def load_prompt(name: str) -> str:
-    path = _PROMPT_DIR / name
-    return path.read_text(encoding="utf-8") if path.exists() else ""
+    """A prompt shipped with the capabilities. Raises when it is missing: a
+    packaging miss must not reach the model as an empty instruction."""
+    return (_PROMPT_DIR / name).read_text(encoding="utf-8")
 
 
 def parse_content(raw: str, key: str = "content") -> str:

@@ -14,7 +14,8 @@ from __future__ import annotations
 import logging
 import os
 
-from silica.capabilities._base import NoteContent, load_prompt
+from silica.capabilities._base import NoteContent
+from silica.kernel.prompts import load_prompt
 from silica.kernel.code.codewiki import SubsystemDigest
 from silica.kernel.text.sanitize import strip_degenerate_runs
 
