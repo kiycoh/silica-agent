@@ -700,7 +700,7 @@ def write_page(vault: Path | None = None) -> None:
             + '<main class="sheet"><section class="wrap cat" aria-labelledby="pg-h"'
             + (f' data-one="{_esc(site.vault(entries[0]["slug"], 0))}"' if len(entries) == 1 else "") + ">"
             + f'<div class="cat-head grid"><h1 id="pg-h">@{_esc(h)}</h1>'
-            f'<p>{_plural(len(entries), "vault")} · {_plural(notes, "note")}. Read one here, or save a copy into '
+            f'<p>{_plural(len(entries), "wiki")} · {_plural(notes, "note")}. Read one here, or save a copy into '
             f'your own vault: every note in the copy keeps its author\'s name.</p></div>'
             + f'<div class="cat-grid">{cards}</div></section></main>\n'
             + foot(f"Wikis @{_esc(h)} chose to publish.", _app()))
