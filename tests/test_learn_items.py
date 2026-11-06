@@ -109,7 +109,7 @@ def test_hints_come_from_the_graph_and_the_outline_without_a_model(vault, monkey
     from silica.kernel.learn import learner
 
     monkeypatch.setattr(learner, "prerequisites_map", lambda: {"ml/margine geometrico": ["ML/Iperpiano.md"]})
-    hints = items.hints_for("ML/Margine geometrico.md")
+    hints = [text for _rung, text in items.hint_rungs("ML/Margine geometrico.md")]
     assert hints[0].startswith("Prerequisite")
     assert "Iperpiano" in hints[0]
     assert "Definizione" in hints[1] and "Relations" in hints[1]
@@ -169,7 +169,7 @@ def test_build_session_uses_one_batched_call_and_falls_back_to_mechanical_kinds(
                 "ITEM 2\nPATH: ML/Iperpiano.md\nKIND: recall\nLEVEL: 1\nANCHOR: Iperpiano\n"
                 "Q: Cos'e'?\nCRITERIA: x\nANSWER: y\nSPAN: frase che non esiste\nEND\n"), "stop"
 
-    monkeypatch.setattr(items, "_llm", fake_llm)
+    monkeypatch.setattr(items, "ask_model", fake_llm)
     picked = [
         {"path": "ML/Margine geometrico.md", "kind": "explain", "level": 3, "pool": "due"},
         {"path": "ML/Iperpiano.md", "kind": "recall", "level": 1, "pool": "due"},
@@ -181,7 +181,7 @@ def test_build_session_uses_one_batched_call_and_falls_back_to_mechanical_kinds(
     assert built[0]["hints"][0] == "Pensa al bond." or built[0]["hints"][0] == "Pensa al bound."
     assert "ML/Iperpiano.md" not in kinds          # no span, no claims to fall back on: dropped
     # without a model the mechanical kinds carry the session
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: ("", "stop"))
     built = items.build_session([{"path": "ML/Margine geometrico.md", "kind": "explain", "level": 3, "pool": "due"}])
     assert built and built[0]["kind"] in ("cloze", "structure") and built[0]["grader"] == "self"
 

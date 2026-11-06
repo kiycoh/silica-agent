@@ -36,7 +36,7 @@ def vault(tmp_vault, tmp_path, monkeypatch):
 def test_learn_items_returns_cues_without_the_answer_key(vault, monkeypatch):
     from silica.kernel.learn import items
 
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: ("", "stop"))
     out = TOOLS["silica_learn_items"].fn(n=4, target="")
     assert out["items"], out
     payload = json.dumps(out, ensure_ascii=False)
@@ -52,7 +52,7 @@ def test_learn_items_returns_cues_without_the_answer_key(vault, monkeypatch):
 def test_learn_items_scopes_to_a_folder_target(vault, monkeypatch):
     from silica.kernel.learn import items
 
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: ("", "stop"))
     out = TOOLS["silica_learn_items"].fn(n=4, target="ML/")
     assert all(it["path"].startswith("ML/") for it in out["items"])
     none = TOOLS["silica_learn_items"].fn(n=4, target="Nowhere/")

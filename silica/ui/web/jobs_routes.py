@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from silica.config import CONFIG
 from silica.kernel import vault_files
 from silica.sources import drop_turn
+from silica.kernel import job_records
 from silica.ui.web import jobs, session, sse
 from silica.ui.web.session import SESSION
 
@@ -33,8 +34,8 @@ def running_jobs():
     only and probes nothing remote, unlike GET /settings, which asks four
     endpoints for their models. No file names: the operator sees counts."""
     vault = CONFIG.vault_path or ""
-    rows = [{"id": r["id"], "state": r["state"], "kind": r.get("kind", "convert")}
-            for r in jobs._all() if r.get("state") in ("queued", "running") and r.get("vault") == vault]
+    rows = [{"id": r["id"], "state": r["state"], "kind": job_records.kind_of(r)}
+            for r in job_records.all_records() if r.get("state") in ("queued", "running") and r.get("vault") == vault]
     return {"turn": bool(SESSION.busy), "jobs": rows}
 
 
@@ -73,7 +74,7 @@ def offered_turn(job_id: str, payload: dict | None = None):
     # The slot first, then the record: a typed message that took this file in
     # (join_next) holds the slot while it marks the file answered.
     with session.turn_slot() as slot:
-        rec = jobs.read(job_id) if jobs._ID.fullmatch(job_id or "") else None
+        rec = jobs.read(job_id) if job_records.is_id(job_id) else None
         if rec is None or rec.get("state") != "done" or not rec.get("notes"):
             raise HTTPException(409, "this conversion has no note to offer")
         # A drop read from its PDF's text layer in its own turn is answered and

@@ -109,7 +109,7 @@ def test_an_item_joins_the_point_its_span_quotes_and_rests_on_the_point(tmp_vaul
         "SPAN: La fotosintesi si compone di due momenti distinti e separati tra loro\n"
         "ANSWER: Fase luminosa e ciclo di Calvin.\nQ: Quali sono le due fasi della fotosintesi?\n"
         "CRITERIA: fase luminosa; ciclo di Calvin\nH1: Una dipende dalla luce.")
-    monkeypatch.setattr(items, "_llm", lambda p, m: (reply, "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda p, m: (reply, "stop"))
     got = items.generate([{"path": PATH, "kind": "explain", "level": 3, "asks": asks, "objective": "explain"}])[PATH]
     by_point = {it["point"]: it for it in got}
     assert by_point[light["i"]]["q"].startswith("Da dove viene l'ossigeno")
@@ -128,7 +128,7 @@ def test_an_unlocated_span_falls_back_to_the_point_and_self_span_is_the_whole_po
         "SPAN: una frase che la nota non contiene in nessuna forma riconoscibile\n"
         "ANSWER: Fase luminosa e ciclo di Calvin.\nQ: Quali sono le due fasi della fotosintesi?\n"
         "CRITERIA: fase luminosa; ciclo di Calvin\nH1: Una dipende dalla luce.")
-    monkeypatch.setattr(items, "_llm", lambda p, m: (reply, "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda p, m: (reply, "stop"))
     got = items.generate([{"path": PATH, "kind": "explain", "level": 3, "asks": asks, "objective": "recall"}])[PATH]
     assert len(got) == 1
     it = got[0]
@@ -144,7 +144,7 @@ def test_the_model_may_downgrade_explain_to_recall_and_is_recorded_as_recall(tmp
         f"KIND: explain\nLEVEL: 3\nOBJECTIVE: recall\nPOINT: {first['i']}\nANCHOR: Fotosintesi\n"
         "SPAN: La fotosintesi è formata da due fasi\nANSWER: Fase luminosa e ciclo di Calvin.\n"
         "Q: Quali sono le due fasi della fotosintesi?\nCRITERIA: le due fasi\nH1: Una dipende dalla luce.")
-    monkeypatch.setattr(items, "_llm", lambda p, m: (reply, "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda p, m: (reply, "stop"))
     it = items.generate([{"path": PATH, "kind": "explain", "level": 3, "asks": asks, "objective": "explain"}])[PATH][0]
     assert (it["objective"], it["kind"], it["level"]) == ("recall", "recall", 1)
 

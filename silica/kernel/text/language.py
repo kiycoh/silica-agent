@@ -103,6 +103,17 @@ def stopwords_for(lang: str) -> frozenset[str]:
     return result
 
 
+def study_stopwords() -> frozenset[str]:
+    """Italian and English together, the two languages a study note is matched
+    in whichever it is written in. Held once: the union was rebuilt on each of
+    72,000 calls in one plan preview."""
+    global _study_stopwords
+    if _study_stopwords is None:
+        _study_stopwords = stopwords_for("italian") | stopwords_for("english")
+    return _study_stopwords
+
+
+_study_stopwords: frozenset[str] | None = None
 _voters_cache: dict[str, frozenset[str]] = {}
 
 
@@ -168,6 +179,11 @@ def resolve(lang: str, sample: str) -> str:
     Anything other than 'auto' is returned unchanged (sample ignored).
     """
     return detect(sample) if lang == "auto" else lang
+
+
+def named(text: str) -> str:
+    """The language `text` is in, as a prompt names it."""
+    return display_name(detect(text))
 
 
 def display_name(lang: str) -> str:

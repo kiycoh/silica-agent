@@ -15,6 +15,9 @@ names a number the turn did not read: the flagging form of the same gate.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
+
+from silica.kernel.base.syntax import WIKILINK_TARGET_RE
 
 # The share of an item's content words its note must hold. A card's answer is
 # a short phrase or a formula in the notes' words; half of its words leaves
@@ -28,19 +31,17 @@ _CARD_RE = re.compile(
     r"(?:::|(?:\*\*)?\b(?:answer|risposta)\b:?(?:\*\*)?)\s*(?P<a>.+?)\s*\[\[(?P<note>[^\]|#]+)",
     re.M | re.I)
 _BULLET_RE = re.compile(r"^\s*[-*+]\s+(?P<b>.+)$", re.M)
-_LINK_RE = re.compile(r"\[\[([^\]|#]+)")
 _WORD_RE = re.compile(r"[^\W\d_]{4,}")
-_SPACE_RE = re.compile(r"\s+")
 
 
-_MATH_RE = re.compile(r"\$\$?(.+?)\$\$?", re.S)
+MATH_RE = re.compile(r"\$\$?(.+?)\$\$?", re.S)
 
 
-def _words(text: str) -> set[str]:
-    from silica.kernel.text.language import stopwords_for
+def words(text: str) -> set[str]:
+    from silica.kernel.text.language import study_stopwords
 
-    stop = stopwords_for("italian") | stopwords_for("english")
-    text = _MATH_RE.sub(" ", _LINK_RE.sub(lambda m: m.group(1), text))
+    stop = study_stopwords()
+    text = MATH_RE.sub(" ", WIKILINK_TARGET_RE.sub(lambda m: m.group(1), text))
     return {w.casefold()[:6] for w in _WORD_RE.findall(text) if w.casefold() not in stop}
 
 
@@ -49,7 +50,7 @@ _LATEX_STYLE_RE = re.compile(r"\\(?:boldsymbol|mathbf|mathrm|mathit|pmb|bm|opera
 _LATEX_SAME = {"≤": "\\leq", "≥": "\\geq", "\\le ": "\\leq ", "\\ge ": "\\geq ", "−": "-", "·": "\\cdot"}
 
 
-def _latex_key(text: str) -> str:
+def latex_key(text: str) -> str:
     """A formula as the check compares it: the same LaTeX written two ways
     reads the same. The note wrote `\\xi_{i} = \\max \\left(0, ...\\right)` and
     the card `\\xi_i = \\max(0, ...)` (2026-10-23)."""
@@ -58,26 +59,30 @@ def _latex_key(text: str) -> str:
     return _LATEX_DROP_RE.sub("", _LATEX_STYLE_RE.sub("", text))
 
 
-def _grounded(item: str, note_text: str) -> bool:
-    """The item's content words are in the note, at GROUNDED_SHARE, and each
-    formula it writes is in the note, spaces aside. A formula answer led by a
-    function word ("Quando $y_i f(x) > \\gamma$") is judged by its formula,
-    not by "quando"."""
-    held_math = _latex_key(note_text)
-    formulas = _MATH_RE.findall(item)
-    if any(_latex_key(f) not in held_math for f in formulas):
+def holds(item: str, held_words: set[str], formula_held: Callable[[str], bool]) -> bool:
+    """The gate: each formula the item writes is held, and its content words
+    are, at GROUNDED_SHARE. A formula answer led by a function word ("Quando
+    $y_i f(x) > \\gamma$") is judged by its formula, not by "quando"."""
+    formulas = MATH_RE.findall(item)
+    if any(not formula_held(f) for f in formulas):
         return False
-    words = _words(item)
+    said = words(item)
     # a held formula with a word or two around it ("Quando $...$") is the formula
-    if not words or (formulas and len(words) <= 2):
+    if not said or (formulas and len(said) <= 2):
         return True
-    held = _words(note_text)
-    return sum(1 for w in words if w in held) >= GROUNDED_SHARE * len(words)
+    return sum(1 for w in said if w in held_words) >= GROUNDED_SHARE * len(said)
+
+
+def grounded(item: str, note_text: str) -> bool:
+    """The item stands on the note: its words are there, and each formula is,
+    spaces aside."""
+    held_math = latex_key(note_text)
+    return holds(item, words(note_text), lambda f: latex_key(f) in held_math)
 
 
 def _note_text(title: str) -> str | None:
     from silica.kernel.learn.items import read_note
-    from silica.kernel.learn.plans import resolve_title
+    from silica.kernel.learn.sources import resolve_title
 
     path = resolve_title(title.strip())
     return read_note(path) if path else None
@@ -89,13 +94,13 @@ def ungrounded_bullets(answer: str) -> tuple[int, int]:
     a slide citing none is not checked."""
     bad = total = 0
     for slide in re.split(r"^\s*---\s*$", answer, flags=re.M):
-        links = _LINK_RE.findall(slide)
+        links = WIKILINK_TARGET_RE.findall(slide)
         if not links:
             continue
         text = _note_text(links[-1])
         for m in _BULLET_RE.finditer(slide):
             total += 1
-            if text is None or not _grounded(m.group("b"), text):
+            if text is None or not grounded(m.group("b"), text):
                 bad += 1
     return bad, total
 
@@ -133,12 +138,13 @@ def study_points(targets: list[str], limit: int = STUDY_POINTS_MAX) -> tuple[lis
     footnoted claims gives no point and is read whole."""
     from pathlib import Path
 
-    from silica.kernel.learn import items, plans
+    from silica.kernel.learn import items
+    from silica.kernel.learn.sources import resolve_title
     from silica.kernel.recall.listing import notes_under
 
     paths: list[str] = []
     for t in targets:
-        hit = plans.resolve_title(t)
+        hit = resolve_title(t)
         if hit:
             paths.append(hit)
         else:
@@ -193,7 +199,8 @@ def _card_reply(prompt: str, retry: bool = False) -> str:
 def make_cards(targets: list[str], n: int = 12) -> dict:
     """{"titles", "cards": [(question, answer, note)], "dropped", "written"}:
     the cards the model wrote whose answer the note they cite holds, at most n."""
-    from silica.kernel.learn import items, plans
+    from silica.kernel.learn import items
+    from silica.kernel.learn.sources import resolve_title
     from silica.kernel.text import language
 
     titles, points = study_points(targets)
@@ -207,7 +214,7 @@ def make_cards(targets: list[str], n: int = 12) -> dict:
     else:
         texts, left = [], NOTE_CHARS
         for t in titles:
-            p = plans.resolve_title(t)
+            p = resolve_title(t)
             if p and left > 0:
                 body = items.read_note(p)[:left]
                 texts.append((t, body))
@@ -216,7 +223,7 @@ def make_cards(targets: list[str], n: int = 12) -> dict:
         sample = " ".join(body for _t, body in texts)
         used = [t for t, _b in texts]
     prompt = CARD_PROMPT.format(n=n, titles=", ".join(f"[[{t}]]" for t in used), ground=ground,
-                                names="; ".join(used), language=language.display_name(language.detect(sample[:4000])))
+                                names="; ".join(used), language=language.named(sample[:4000]))
     found = list(_CARD_RE.finditer(_card_reply(prompt)))
     if not found:
         found = list(_CARD_RE.finditer(_card_reply(prompt, retry=True)))
@@ -227,7 +234,7 @@ def make_cards(targets: list[str], n: int = 12) -> dict:
             continue
         seen.add(q.casefold())
         text = _note_text(note)
-        if text is None or not _grounded(a, text):
+        if text is None or not grounded(a, text):
             dropped += 1
             continue
         cards.append((q, a, note))

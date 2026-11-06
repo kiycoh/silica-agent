@@ -67,17 +67,17 @@ def probe(vault: str, note: str, objectives: list[str], out: Path, model: str | 
     prompt = items.GENERATE_PROMPT.format(notes=items.note_block(1, row))
     (out / "prompt.txt").write_text(prompt, encoding="utf-8")
     t0 = time.monotonic()
-    reply, finish = items._llm(prompt, items.GENERATE_MAX_TOKENS)
+    reply, finish = items.ask_model(prompt, items.GENERATE_MAX_TOKENS)
     seconds = round(time.monotonic() - t0, 1)
     (out / "reply.txt").write_text(reply, encoding="utf-8")
     # generate() on the reply just written: the product's join, fallback and
     # downgrade, without paying for the generation call twice
-    real = items._llm
-    items._llm = lambda p, n: (reply, finish) if p.startswith(items.GENERATE_TAG) else real(p, n)
+    real = items.ask_model
+    items.ask_model = lambda p, n: (reply, finish) if p.startswith(items.GENERATE_TAG) else real(p, n)
     try:
         made = items.generate([row]).get(note, [])
     finally:
-        items._llm = real
+        items.ask_model = real
     (out / "made.json").write_text(json.dumps(made, ensure_ascii=False, indent=1), encoding="utf-8")
     run = {"vault": CONFIG.vault_path, "note": note, "model": CONFIG.model, "objectives": objectives,
            "points": len(points), "asks": len(asks), "kept": len(made), "reply_chars": len(reply),

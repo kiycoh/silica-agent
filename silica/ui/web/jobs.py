@@ -5,10 +5,10 @@
 
 Every route that calls `convert()` records one job per file here and answers
 at once; one worker thread per process runs the jobs in the order they came.
-The record is a JSON file in `~/.silica/jobs/<id>.json`, written whole each
-time (temp file, then rename), so a process killed at any instant leaves the
-last state it reached: `running` is written before the conversion starts,
-`done` only after its notes are in the vault.
+The record is a JSON file in `~/.silica/jobs/<id>.json` (`kernel/job_records`,
+which Learn's readings share), written whole each time, so a process killed at
+any instant leaves the last state it reached: `running` is written before the
+conversion starts, `done` only after its notes are in the vault.
 
 Nothing resumes by itself. At startup a job still `queued` or `running`
 belonged to a process that is gone, and becomes `interrupted` (point 4): under
@@ -21,16 +21,15 @@ from __future__ import annotations
 import hashlib
 import logging
 import queue
-import re
 import shlex
 import threading
 import time
-import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from silica.config import CONFIG, hosted, silica_home
+from silica.config import CONFIG, hosted
+from silica.kernel import job_records
 from silica.sources import drop_turn
 
 logger = logging.getLogger(__name__)
@@ -41,10 +40,8 @@ INTERRUPTED = "the server restarted during this conversion"
 # Open 2, accepted 2026-10-13: a finished job's record goes after 30 days; a
 # failed or interrupted one stays until the student dismisses it.
 DONE_KEEP_S = 30 * 86400
-_ID = re.compile(r"[0-9a-f]{12}")
 _HASH_CHUNK = 1024 * 1024
 
-_LOCK = threading.Lock()   # every read-modify-write of a record
 _QUEUE: queue.Queue[str] = queue.Queue()
 # The ids this process queued. Startup recovery leaves them alone: the suite
 # starts the app many times in one process, and a job its worker is running
@@ -63,53 +60,20 @@ class Refused(ValueError):
     """A job action turned away. The text is the sentence the student reads."""
 
 
-def jobs_dir() -> Path:
-    # silica_home() and not Path.home(): the suite repoints that one name
-    # for every store under ~/.silica, as media_admission's counter relies on.
-
-    return silica_home() / "jobs"
-
-
 def _path(job_id: str) -> Path:
-    if not _ID.fullmatch(job_id or ""):
+    if not job_records.is_id(job_id):
         raise Refused("there is no such conversion")
-    return jobs_dir() / f"{job_id}.json"
+    return job_records.path_of(job_id)
 
 
 def read(job_id: str) -> dict | None:
-    import json
-
-    path = _path(job_id)  # outside the try: a malformed id is refused, not "missing"
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
-    except ValueError:
-        # Written whole by rename, so a record that does not parse was edited
-        # by hand or damaged on disk: it is reported as missing rather than
-        # taking the list of every other job down with it.
-        logger.warning("unreadable job record %s", job_id)
-        return None
-
-
-def _all() -> list[dict]:
-    out = []
-    root = jobs_dir()
-    if root.is_dir():
-        for f in root.glob("*.json"):
-            rec = read(f.stem) if _ID.fullmatch(f.stem) else None
-            if rec is not None:
-                out.append(rec)
-    out.sort(key=lambda r: r.get("created") or 0)
-    return out
+    # the path first: a malformed id is refused, not "missing"
+    return job_records.read(_path(job_id))
 
 
 def _write(rec: dict) -> None:
-    import json
-
-    from silica.kernel.base.durable import atomic_write_bytes
-
-    atomic_write_bytes(_path(rec["id"]), json.dumps(rec, sort_keys=True).encode("utf-8"), mode=0o600)
+    _path(rec["id"])
+    job_records.write(rec)
     _publish(rec)
 
 
@@ -118,7 +82,7 @@ def _conversion(rec: dict) -> bool:
     (ADR-0135 point 1) so a restart interrupts them and the release drain
     counts them, but the tray lists what waits on the next message (ADR-0117
     point 5), and a reading is not that: it stays in Learn's own view."""
-    return rec.get("kind", "convert") == "convert"
+    return job_records.kind_of(rec) == job_records.CONVERT
 
 
 def _publish(rec: dict) -> None:
@@ -131,7 +95,7 @@ def _publish(rec: dict) -> None:
 def _update(job_id: str, expect: tuple[str, ...] | None = None, **fields: Any) -> dict | None:
     """Apply `fields` to the record as it is on disk now, or do nothing and
     return None when the record is gone or its state is not in `expect`."""
-    with _LOCK:
+    with job_records.LOCK:
         rec = read(job_id)
         if rec is None or (expect is not None and rec.get("state") not in expect):
             return None
@@ -203,17 +167,17 @@ def record(path: str, *, origin: str, text: str = "", session: str | None = None
         seconds = admission.probe_seconds(absolute)
     digest = _sha256(absolute)
     rel = p.as_posix()
-    with _LOCK:
+    with job_records.LOCK:
         # The same bytes already waiting or converting: a second job would
         # transcribe and charge them twice (a drop sent again, /convert typed
         # while the drop's job runs).
-        for rec in _all():
+        for rec in job_records.all_records():
             if (rec.get("state") in ("queued", "running") and rec.get("vault") == vault
                     and rec["source"].get("path") == rel and rec["source"].get("sha256") == digest):
                 return public(rec)
         now = time.time()
         rec = {
-            "id": uuid.uuid4().hex[:12], "kind": "convert", "origin": origin,
+            "id": job_records.new_id(), "kind": job_records.CONVERT, "origin": origin,
             "source": {"path": rel, "name": absolute.name, "size": absolute.stat().st_size,
                        "sha256": digest},
             "dest_dir": dest_dir, "vault": vault, "text": text, "session": session,
@@ -407,7 +371,7 @@ def recover() -> int:
     skips everything."""
     stale = time.time() - DONE_KEEP_S
     n = 0
-    for rec in _all():
+    for rec in job_records.all_records():
         if rec["id"] in _LIVE:
             continue
         if rec.get("state") in ("queued", "running"):
@@ -446,7 +410,7 @@ def retry(job_id: str) -> dict:
             admission.admit(src)
         except admission.MediaRefused as exc:
             raise Refused(str(exc.args[0])) from None
-    with _LOCK:
+    with job_records.LOCK:
         cur = read(job_id)
         if cur is None or cur.get("state") not in ("failed", "interrupted"):
             raise Refused(f"{name} is not stopped, so there is nothing to retry")
@@ -462,7 +426,7 @@ def dismiss(job_id: str) -> None:
     """The student is done with a job. A failed or interrupted record goes
     (Open 2: kept until dismissed); a finished one is hidden and goes with the
     30-day prune; a job that has not ended cannot be dismissed."""
-    with _LOCK:
+    with job_records.LOCK:
         rec = read(job_id)
         if rec is None or not _conversion(rec):
             return
@@ -482,7 +446,7 @@ def _drop_of(rec: dict) -> list[dict]:
     """The jobs dropped together with `rec`, itself included, oldest first."""
     if not rec.get("drop"):
         return [rec]
-    return [r for r in _all() if r.get("drop") == rec["drop"] and r.get("vault") == rec.get("vault")]
+    return [r for r in job_records.all_records() if r.get("drop") == rec["drop"] and r.get("vault") == rec.get("vault")]
 
 
 def _answer(recs: list[dict]) -> tuple[list[str], list[dict], str]:
@@ -507,9 +471,9 @@ def join_next(session: str) -> tuple[list[str], list[dict], str] | None:
     message typed in that chat (ADR-0121 point 4), now marked answered; None
     when there are none. A drop whose other files are still being read waits
     for them, as its question does."""
-    with _LOCK:
+    with job_records.LOCK:
         vault = CONFIG.vault_path or ""
-        mine = [r for r in _all() if r.get("session") == session and r.get("vault") == vault
+        mine = [r for r in job_records.all_records() if r.get("session") == session and r.get("vault") == vault
                 and r.get("origin") == "drop" and not r.get("answered") and not r.get("dismissed")]
     ready = []
     for r in mine:
@@ -526,7 +490,7 @@ def join_next(session: str) -> tuple[list[str], list[dict], str] | None:
 def listing() -> list[dict]:
     """The jobs the student has not dismissed, in this vault, oldest first."""
     vault = CONFIG.vault_path or ""
-    return [public(rec) for rec in _all()
+    return [public(rec) for rec in job_records.all_records()
             if _conversion(rec) and not rec.get("dismissed") and rec.get("vault") == vault]
 
 
@@ -544,8 +508,8 @@ def settled(session: str | None) -> str:
         return ""
     vault = CONFIG.vault_path or ""
     lines: list[str] = []
-    with _LOCK:
-        for rec in _all():
+    with job_records.LOCK:
+        for rec in job_records.all_records():
             if (rec.get("session") != session or rec.get("told") or rec.get("vault") != vault
                     or rec.get("state") not in ("done", "failed", "interrupted")):
                 continue
