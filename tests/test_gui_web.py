@@ -3220,4 +3220,4 @@ def test_a_plan_computed_in_the_chat_is_offered_for_saving_with_one_click(client
     done = asyncio.run(collect())[-1]
     assert done["offer"]["commands"] == [{"label": "save it in Memorize", "save": draft}]
     js = (Path(server.__file__).parent / "static" / "app-chat.js").read_text(encoding="utf-8")
-    assert "} else if (c.save) {" in js and 'fetch("/learn/plan", { method: "POST"' in js
+    assert "} else if (c.save) {" in js and 'postJson("/learn/plan", body)' in js

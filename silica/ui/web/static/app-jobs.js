@@ -96,11 +96,7 @@ function jobOffer(j, kind) {
   }
   jobsById.delete(j.id);
   renderJobs();
-  const go = () => runTurn(fetch(`/jobs/${j.id}/turn`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ as: kind }),
-  }), "working", go);
+  const go = () => runTurn(postJson(`/jobs/${j.id}/turn`, { as: kind }), "working", go);
   go();
 }
 
@@ -127,10 +123,7 @@ function askDrop(j) {
 
 async function jobAddToVault(j) {
   try {
-    const r = await fetch("/chat/files/add", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source: j.source.path }),
-    });
+    const r = await postJson("/chat/files/add", { source: j.source.path });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { notify(typeof d.detail === "string" ? d.detail : `the server answered ${r.status}`); return; }
     announce(`${j.source.name} added to the Inbox`);

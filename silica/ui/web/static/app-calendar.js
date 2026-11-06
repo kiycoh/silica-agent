@@ -1218,9 +1218,7 @@ function calQuickCard(at, anchor) {
     save.disabled = more.disabled = true;
     err.hidden = true;
     try {
-      const r = await fetch("/calendar/event", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(v),
-      }).then((x) => x.json());
+      const r = await postJson("/calendar/event", v).then((x) => x.json());
       if (r.error) { err.textContent = r.error; err.hidden = false; return; }
       calCloseCard();
       notify("saved " + r.path, "info");
@@ -1317,10 +1315,7 @@ function calEventCard(e, anchor) {
 async function calSetStatus(e, status) {
   let r;
   try {
-    r = await fetch("/calendar/event/status", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: e.path, status }),
-    }).then((x) => x.json());
+    r = await postJson("/calendar/event/status", { path: e.path, status }).then((x) => x.json());
   } catch { r = { error: "couldn't reach the server" }; }
   if (r.error) { notify(r.error); return; }
   calCloseCard();

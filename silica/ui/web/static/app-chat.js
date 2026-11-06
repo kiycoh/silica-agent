@@ -133,10 +133,7 @@ function memoryLine(m) {
     undo.disabled = true;
     let resp = null, data = null;
     try {
-      resp = await fetch("/memory/undo", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scope: m.scope, token: m.token }),
-      });
+      resp = await postJson("/memory/undo", { scope: m.scope, token: m.token });
       data = await resp.json();
     } catch { /* reported below */ }
     if (resp && resp.ok) {
@@ -552,7 +549,7 @@ function stampReviewCards() {
     keep.addEventListener("click", async () => {
       keep.disabled = true;
       try {
-        const r = await fetch("/changes/keep", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
+        const r = await postJson("/changes/keep", { path });
         if (!r.ok) { notify("couldn't clear the review mark"); keep.disabled = false; return; }
       } catch { notify("couldn't clear the review mark"); keep.disabled = false; return; }
       loadChanges(); // the count drops and this card sheds its border
@@ -840,11 +837,7 @@ function openFlagSheet(turn, opener) {
   send.onclick = async () => {
     send.disabled = true;
     try {
-      const r = await fetch("/flag", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session: turn.session, seq: turn.seq, note: note.value.trim() }),
-      });
+      const r = await postJson("/flag", { session: turn.session, seq: turn.seq, note: note.value.trim() });
       if (!r.ok) throw new Error(String(r.status));
       const done = mkFlagDone();
       opener.replaceWith(done);
@@ -1820,7 +1813,7 @@ function turnNotes(notes) {
 async function savePlanOffer(body, line, btn) {
   btn.disabled = true;
   try {
-    const r = await fetch("/learn/plan", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const r = await postJson("/learn/plan", body);
     const out = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(out.detail || r.statusText);
     // Memorize reads its plans again when it next opens (lrWritePlan does the same)
@@ -2177,14 +2170,10 @@ function send(text, replay = false, images = []) {
   if (/^\/nucleate\b/.test(text.trim())) askNotify(); // a nucleate outlasts a glance at another tab
   noteSent();
   // The turn's promise, so a caller can wait for it to end (the bulk revert).
-  return runTurn(fetch("/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, ...(images.length ? { images } : {}),
+  return runTurn(postJson("/chat", { text, ...(images.length ? { images } : {}),
                            ...(chatWorkspace ? { workspace: chatWorkspace } : {}),
                            ...(note ? { note } : {}),
-                           ...(story ? { story: story.id, scope: story.scope } : {}) }),
-  }), "working", () => send(text, true, images));
+                           ...(story ? { story: story.id, scope: story.scope } : {}) }), "working", () => send(text, true, images));
 }
 
 // --- the last turn asked again (ADR-0121 point 7) -----------------------------
@@ -2258,11 +2247,7 @@ function redoLast(words) {
   } else {
     lastUserBody = body;
   }
-  const go = () => runTurn(fetch("/turn/redo", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(words === null ? {} : { text: words }),
-  }), "working", go);
+  const go = () => runTurn(postJson("/turn/redo", words === null ? {} : { text: words }), "working", go);
   go();
 }
 

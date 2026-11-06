@@ -9,10 +9,7 @@
 window.ST_CONNECTOR_RENDERERS = window.ST_CONNECTOR_RENDERERS || {};
 
 async function connAct(name, action, payload) {
-  const r = await fetch(`/connectors/${name}/${action}`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload || {}),
-  });
+  const r = await postJson(`/connectors/${name}/${action}`, payload);
   let d = {};
   try { d = await r.json(); } catch { /* an empty answer is still an answer */ }
   if (!r.ok || d.ok === false) {

@@ -1026,10 +1026,7 @@ function neighbourRows(d) {
       await saveEdit(drawerNote);
     let r;
     try {
-      r = await fetch("/note/history/restore", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: d.path, id: String(v.id) }),
-      });
+      r = await postJson("/note/history/restore", { path: d.path, id: String(v.id) });
     } catch { r = null; }
     if (!r || !r.ok) {
       hist.diff.note = r && r.status === 409 ? "A turn is running: restore when it ends."

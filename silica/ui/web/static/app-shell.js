@@ -648,10 +648,7 @@ async function moveFromTree(paths, folder, name) {
   if (typeof saveEdit === "function") await Promise.all(noteSessions.map((s) => saveEdit(s)));
   let r = null, data = null;
   try {
-    r = await fetch("/tree/move", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(name !== undefined ? { path: paths[0], name } : { paths, folder }),
-    });
+    r = await postJson("/tree/move", name !== undefined ? { path: paths[0], name } : { paths, folder });
     data = await r.json();
   } catch { /* reported below */ }
   if (!r || !r.ok) { notify((data && data.detail) || "couldn't move that"); return; }
@@ -694,9 +691,7 @@ async function undoTreeMove(run, moved) {
 async function undoTreeRun(run) {
   let r = null, data = null;
   try {
-    r = await fetch("/tree/undo", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run }),
-    });
+    r = await postJson("/tree/undo", { run });
     data = await r.json();
   } catch { /* reported below */ }
   if (!r || !r.ok) { notify((data && data.detail) || "couldn't undo that"); return null; }
@@ -891,10 +886,7 @@ async function deleteFromTree(note, folder, paths) {
   closeTreeMenu();
   let r = null, data = null;
   try {
-    r = await fetch("/tree/delete", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(paths ? { paths } : note ? { path: note } : { folder }),
-    });
+    r = await postJson("/tree/delete", paths ? { paths } : note ? { path: note } : { folder });
     data = await r.json();
   } catch { /* reported below */ }
   if (!r || !r.ok) { notify((data && data.detail) || "couldn't delete that"); return false; }
@@ -974,10 +966,7 @@ async function loadTrash() {
 async function trashAct(url, item, done) {
   let r = null, data = null;
   try {
-    r = await fetch(url, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(item.all ? { all: true } : { run: item.run, path: item.path }),
-    });
+    r = await postJson(url, item.all ? { all: true } : { run: item.run, path: item.path });
     data = await r.json();
   } catch { /* reported below */ }
   if (!r || !r.ok) { notify((data && data.detail) || "couldn't do that", "error"); loadTrash(); return; }
@@ -1318,7 +1307,7 @@ function openSessionMenu(row) {
   const del = item("delete", () => {}, "danger");
   armThenRun(del, "delete", "click again · this chat and its record are gone", async () => {
     try {
-      const r = await fetch("/session/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      const r = await postJson("/session/delete", { id });
       if (!r.ok) { notify(r.status === 409 ? "that chat is running; stop it first" : "couldn't delete that chat"); return; }
     } catch { notify("couldn't delete that chat"); return; }
     closeSessionMenus();
@@ -1349,7 +1338,7 @@ function renameSessionInline(row) {
     field.replaceWith(t);
     if (!save || !title || title === t.textContent) return;
     try {
-      const r = await fetch("/session/rename", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: row.dataset.id, title }) });
+      const r = await postJson("/session/rename", { id: row.dataset.id, title });
       if (!r.ok) { notify("couldn't rename that chat"); return; }
     } catch { notify("couldn't rename that chat"); return; }
     loadSessions();
@@ -1429,11 +1418,7 @@ async function openSession(id, fromUrl = false) {
   autoGrow(input);
   renderHighlight();
   try {
-    const r = await fetch("/session/load", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
+    const r = await postJson("/session/load", { id });
     if (!r.ok) {
       // A stale id is a notice over a working page, never a blank one.
       notify(r.status === 404 ? "That chat wasn't found. It may have been deleted." : "couldn't load that chat");

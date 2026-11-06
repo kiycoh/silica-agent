@@ -313,8 +313,7 @@ wsGroup.addEventListener("drop", async (e) => {
 
 async function createWorkspace(name, notes, folders) {
   try {
-    const r = await fetch("/workspaces", { method: "POST", headers: { "Content-Type": "application/json" },
-                                           body: JSON.stringify({ name, notes, folders }) });
+    const r = await postJson("/workspaces", { name, notes, folders });
     const d = await r.json();
     if (!r.ok) { notify(d.detail || "couldn't create that workspace"); return null; }
     wsOpen.add(d.path);
@@ -437,10 +436,7 @@ function closeWsMenu(refocus = false) {
 // The ◇ menu's toggle and a drop on a row: one line added or removed.
 async function wsSetLine(workspace, key, value, on) {
   try {
-    const r = await fetch("/workspaces/line", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspace, key, value, on }),
-    });
+    const r = await postJson("/workspaces/line", { workspace, key, value, on });
     if (!r.ok) throw new Error();
     return true;
   } catch { notify("couldn't change that workspace"); return false; }

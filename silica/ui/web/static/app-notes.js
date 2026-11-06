@@ -200,9 +200,7 @@ function addToVaultButton(source, chip) {
   b.addEventListener("click", async () => {
     b.disabled = true;
     try {
-      const r = await fetch("/chat/files/add", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source }),
-      });
+      const r = await postJson("/chat/files/add", { source });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { notify(typeof d.detail === "string" ? d.detail : `the server answered ${r.status}`); b.disabled = false; return; }
       b.replaceWith(mkEl("span", "mf-in", "in the vault"));
@@ -428,10 +426,7 @@ function askVaultLink() {
     let rows = [];
     let failed = "";
     try {
-      const r = await fetch("/vault/fetch", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, workspace: intoWorkspace }),
-      });
+      const r = await postJson("/vault/fetch", { url, workspace: intoWorkspace });
       if (r.ok) rows = (await r.json()).files;
       else failed = (await r.json().catch(() => ({}))).detail || `the server answered ${r.status}`;
     } catch {
@@ -1850,10 +1845,7 @@ function loadEditor() {
 // one place does differently.
 function sessionHooks(s, extra = {}) {
   return {
-    render: (text) => fetch("/note/render", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    }).then((r) => (r.ok ? r.json() : Promise.reject(r.status))).then((d) => d.html || ""),
+    render: (text) => postJson("/note/render", { text }).then((r) => (r.ok ? r.json() : Promise.reject(r.status))).then((d) => d.html || ""),
     openNote: openLinkedNote,
     change: () => typed(s),
     blur: () => { saveEdit(s); },
@@ -2020,10 +2012,7 @@ async function saveEdit(s = drawerNote) {
   }
   s.saving = (async () => {
     try {
-      const r = await fetch("/note/save", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path, text, etag: s.etag }),
-      });
+      const r = await postJson("/note/save", { path, text, etag: s.etag });
       const data = await r.json().catch(() => ({}));
       if (s.path !== path) return; // the field moved on; this save is history
       if (r.status === 409) {
@@ -2166,10 +2155,7 @@ async function writeBack(s) {
   const path = s.path, at = path.lastIndexOf("/");
   let r = null, d = {};
   try {
-    r = await fetch("/note/new", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folder: at < 0 ? "" : path.slice(0, at), name: noteStem(path), text: s.editor.getText() }),
-    });
+    r = await postJson("/note/new", { folder: at < 0 ? "" : path.slice(0, at), name: noteStem(path), text: s.editor.getText() });
     d = await r.json().catch(() => ({}));
   } catch { /* reported below */ }
   if (!r || !r.ok) { notify(d.detail || "couldn't write the note back"); return; }
@@ -2467,10 +2453,7 @@ async function checkSelection(s, web) {
 async function keepWebSource(s, x) {
   let r = null, d = {};
   try {
-    r = await fetch("/note/check/keep", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: s.path, url: x.url, quote: x.passage || "", claim: x.mark || "" }),
-    });
+    r = await postJson("/note/check/keep", { path: s.path, url: x.url, quote: x.passage || "", claim: x.mark || "" });
     d = await r.json().catch(() => ({}));
   } catch { /* reported below */ }
   if (!r || !r.ok) { notify(d.detail || "couldn't keep that page"); return; }
@@ -2492,9 +2475,7 @@ async function recheck(reopened = false, s = drawerNote) {
     if (!(await flushForCheck(s)) || s.path !== path) return;
     if (reopened) { s.editor.startCheck(); s.editor.showCheck(checkShown()); }
     const carried = s.editor.rebaseCheck();
-    const r = await fetch("/note/check", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, rules: true }),
-    });
+    const r = await postJson("/note/check", { path, rules: true });
     if (!r.ok) return;
     let report = null;
     await readLines(r, (ev) => { if (ev.event === "done") report = ev; });

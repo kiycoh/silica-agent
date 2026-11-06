@@ -51,8 +51,7 @@ function mailUndoLine(out) {
 // mail-pure:end
 
 async function mailAct(action, payload) {
-  const r = await fetch(`/connectors/mail/${action}`, { method: "POST",
-    headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload || {}) });
+  const r = await postJson(`/connectors/mail/${action}`, payload);
   let d = {};
   try { d = await r.json(); } catch { /* an empty answer is still an answer */ }
   if (!r.ok || d.ok === false) throw new Error(d.error || d.detail || `HTTP ${r.status}`);

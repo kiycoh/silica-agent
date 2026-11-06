@@ -199,11 +199,7 @@ async function stCommit(row, input, rowEl) {
   stNote(rowEl, "pending", "saving…");
   let resp = null, data = null;
   try {
-    resp = await fetch(row.confirm ? "/settings/confirm" : "/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: row.key, value }),
-    });
+    resp = await postJson(row.confirm ? "/settings/confirm" : "/settings", { key: row.key, value });
     data = await resp.json();
   } catch { /* falls through to the failure branch */ }
   if (!resp || !resp.ok || (data && data.ok === false)) {
@@ -589,10 +585,7 @@ async function renderEndpoints(host) {
         note.textContent = `starting ${e.label}… loading a model takes a while`;
         let out = null;
         try {
-          out = await (await fetch("/endpoints/start", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ label: e.label }),
-          })).json();
+          out = await (await postJson("/endpoints/start", { label: e.label })).json();
         } catch { /* reported below */ }
         if (out && out.ok) renderEndpoints(host);
         else {

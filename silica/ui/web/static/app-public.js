@@ -1153,7 +1153,7 @@ function invitesBox(alone) {
     const no = mkEl("button", "st-btn", "Decline");
     no.type = "button";
     no.addEventListener("click", async () => {
-      const r = await fetch("/vault/invitations/decline", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ author: inv.author, vault: inv.vault }) }).catch(() => null);
+      const r = await postJson("/vault/invitations/decline", { author: inv.author, vault: inv.vault }).catch(() => null);
       if (r && r.ok) { pubInvites = (await r.json()).invitations; renderPublic(); }
     });
     const yes = mkEl("button", "st-btn primary", "Save to Silica");
@@ -1315,10 +1315,7 @@ $("#save-go").addEventListener("click", async () => {
   const what = saveWhat;
   let r, d;
   try {
-    r = await fetch(what.invite ? "/vault/invitations/save" : "/vault/save", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(what.invite ? { author: what.invite.author, vault: what.invite.vault, areas: saveAreas } : { url: what.url, areas: saveAreas, notes: saveNotes }),
-    });
+    r = await postJson(what.invite ? "/vault/invitations/save" : "/vault/save", what.invite ? { author: what.invite.author, vault: what.invite.vault, areas: saveAreas } : { url: what.url, areas: saveAreas, notes: saveNotes });
     d = await r.json().catch(() => ({}));
   } catch {
     notify("the page could not be saved");
