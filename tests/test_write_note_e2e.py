@@ -359,3 +359,37 @@ def test_a_note_whose_file_left_is_a_choice_and_not_a_wedge(app):
     p.wait("centreNote.phase === 'gone'", 5, "the 404")
     p.js("[...document.querySelectorAll('#nv-foot .act')].find((b) => b.textContent === 'Let it go').click()")
     p.wait("centreNote.path === '' && activeTab !== 'note'", 5, "the way out")
+
+
+def test_the_glyph_moves_the_note_and_the_drawer_shuts(app):
+    p, _ = app
+    p.js("openNote('Topic/Source.md')")
+    p.wait("drawerNote.path === 'Topic/Source.md' && notePanel.classList.contains('open')", 8, "the note in the drawer")
+    time.sleep(0.5)  # the panel slides in: a press before it lands misses the glyph
+    p.click("document.querySelector('#note-centre')")
+    p.wait("centreNote.path === 'Topic/Source.md'", 8, "the note at the centre")
+    p.wait("!notePanel.classList.contains('open')", 5, "the drawer to shut")
+    assert "note=" not in p.js("location.hash")
+
+
+def test_a_click_in_the_text_leaves_the_source_open_beside_it(app):
+    p, _ = app
+    p.js("openCentre('Topic/Source.md')")
+    p.wait("centreNote.path === 'Topic/Source.md'", 8, "the note at the centre")
+    p.js("openNote('Topic/Other.md')")
+    p.wait("drawerNote.path === 'Topic/Other.md'", 8, "the source in the drawer")
+    p.click("document.querySelector('#nv-edit .cm-line')")
+    time.sleep(0.3)
+    assert p.js("notePanel.classList.contains('open')"), "a click in the text must not take the source away"
+    p.click("[...document.querySelectorAll('#nv-foot .nv-link')].find((b) => b.textContent === 'History')")
+    p.wait("detailsOn && lastNotePath === 'Topic/Source.md'", 8, "the note's details")
+    assert p.js("notePanel.classList.contains('open')")
+
+
+def test_the_crumb_opens_its_menu_on_a_real_press(app):
+    p, _ = app
+    p.js("openCentre('Topic/Source.md')")
+    p.wait("centreNote.path === 'Topic/Source.md'", 8, "the note at the centre")
+    p.click("document.querySelector('#nv-crumb')")
+    time.sleep(0.3)
+    assert p.js("document.querySelectorAll('#tree-menu button').length") >= 2

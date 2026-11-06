@@ -360,7 +360,7 @@ def desk(tmp_vault, monkeypatch):
 
         return search, lambda u: page(PAGE_30)
 
-    monkeypatch.setattr("silica.cli._check_judge", lambda: vault_judge)
+    monkeypatch.setattr("silica.cli._check_judge", lambda **_: vault_judge)
     monkeypatch.setattr("silica.cli._check_legs", lambda: (None, None, None))
     monkeypatch.setattr("silica.cli._check_web_legs", legs)
     server._reset_session()
@@ -380,7 +380,7 @@ def judged_web(monkeypatch, kind="contradicted", **kw):
             return {"kind": kind, "p": 0.9, "by": "jev", "at": passages[0]["path"] + ":0"}
         return None
 
-    monkeypatch.setattr("silica.cli._check_judge", lambda: judge)
+    monkeypatch.setattr("silica.cli._check_judge", lambda **_: judge)
 
 
 def test_a_press_streams_the_vault_then_the_web_then_done(desk):

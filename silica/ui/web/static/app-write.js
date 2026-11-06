@@ -423,7 +423,8 @@ async function openCentre(path, pos, { fromUrl = false } = {}) {
     s.editor.focus();
     return;
   }
-  if (drawerNote.path === path && !(await releaseNote(drawerNote))) return;
+  const fromDrawer = drawerNote.path === path;
+  if (fromDrawer && !(await releaseNote(drawerNote))) return;
   if (!(await settleField(s))) {
     if (activeTab !== "note") { showTab("note"); syncUrl(!fromUrl); }
     return;
@@ -439,10 +440,10 @@ async function openCentre(path, pos, { fromUrl = false } = {}) {
   if (seq !== centreSeq) return;
   if (!ed) { notify("couldn't load the editor"); return; }
   // One note, one session (ADR-0155 point 1): it leaves the drawer first.
-  if (drawerNote.path === data.path) {
-    if (!(await releaseNote(drawerNote))) return;
-    closeNote();
-  }
+  // One note, one session (ADR-0155 point 1): the drawer shuts on the note it let
+  // go, or stays open on a field no save reaches.
+  if (drawerNote.path === data.path && !(await releaseNote(drawerNote))) return;
+  if (fromDrawer || lastNotePath === data.path) closeNote();
   holdNote(s, data);
   s.folder = noteFolder(data.path);
   nvStrip.replaceChildren();
@@ -518,7 +519,8 @@ $("#nv-info").addEventListener("click", () => centreDetails());
 function folderInView() {
   for (const s of [centreNote, drawerNote]) {
     const f = s.path ? noteFolder(s.path) : "";
-    if (s.path && !ownFolder(f)) return f;
+    // Saved/ holds other people's copies: a person's own note does not start there.
+    if (s.path && !ownFolder(f) && !/^Saved(\/|$)/.test(f)) return f;
   }
   return centreNote.fresh ? centreNote.folder : "";
 }
@@ -888,7 +890,8 @@ $("#sel-quote").addEventListener("mousedown", (e) => {
   const text = passage(drawerNote);
   if (!text) return;
   const c = centreNote.editor.view, line = c.state.doc.lineAt(c.state.selection.main.head);
-  const block = `\n\n${quoted(text)}\n>\n> [[${mentionLink(drawerNote.path)}]]\n`;
+  // A blank line after it: the next words are not a lazy line of the quote.
+  const block = `\n\n${quoted(text)}\n>\n> [[${mentionLink(drawerNote.path)}]]\n\n`;
   c.dispatch({ changes: { from: line.to, insert: block }, selection: { anchor: line.to + block.length }, scrollIntoView: true });
   hideSelBar();
 });

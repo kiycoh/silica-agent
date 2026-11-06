@@ -2066,8 +2066,13 @@ async function saveEdit(s = drawerNote) {
 // Saved. A note in conflict waits for the person's choice, and typing is not one.
 function typed(s) {
   if (s.conflict || s.phase === "gone") { paintFoot(s); return; }
-  // A field with no note under it must not swallow words: they become a new note.
-  if (s === centreNote && !s.path && !s.fresh) s.fresh = true;
+  // A field with no note under it must not swallow words: at the centre they
+  // become a new note, and the drawer shuts on a note it no longer holds, so
+  // reaching this there is a defect that a toast at least says out loud.
+  if (!s.path && !s.fresh) {
+    if (s === centreNote) s.fresh = true;
+    else { notify("This field holds no note, so what you type here is not saved"); return; }
+  }
   setPhase(s, "saving");
   scheduleSave(s);
   if (s.onChange) s.onChange();
@@ -2976,7 +2981,9 @@ document.addEventListener("click", (e) => {
       // Explore's column too (find, Key, scope, compare): it picks what the
       // graph shows, and closing the note unfolded the column under the
       // pointer that had just reached for it.
-      !e.target.closest("#dock, #composer, #graph-side")) closeNote();
+      // And the note at the centre: the drawer is the source beside it (ADR-0155
+      // point 3), and a click in the text must not take the source away.
+      !e.target.closest("#dock, #composer, #graph-side, #view-note")) closeNote();
 });
 $("#note-close").addEventListener("click", () => closeNote()); // not as the handler: the click would pass as `force`
 // (Escape is handled once, at the bottom of this file, in priority order.)

@@ -868,7 +868,8 @@ $("#tree").addEventListener("contextmenu", (e) => {
   e.preventDefault();
   openTreeMenu(more, e.clientX, e.clientY);
 });
-document.addEventListener("click", (e) => { if (!e.target.closest("#tree-menu, .tree-more")) closeTreeMenu(); });
+// The crumb and the bar's check open this menu themselves, on this same click.
+document.addEventListener("click", (e) => { if (!e.target.closest("#tree-menu, .tree-more, #nv-crumb, #sel-check, [data-check]")) closeTreeMenu(); });
 document.addEventListener("keydown", (e) => {
   if (!treeMenu || !treeMenu.contains(document.activeElement)) return;
   if (e.key === "Escape") { e.preventDefault(); closeTreeMenu(true); return; }
