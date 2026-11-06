@@ -621,6 +621,88 @@ def shadowed(why: str) -> bool:
     return why == CONFIDENT_REASON and CONFIDENT_SHADOW
 
 
+def named_notes(text: str, titles: dict[str, str]) -> list[tuple[str, str]]:
+    """(title, path) of the notes a message names, the longest title first:
+    `titles` is {path: title}, the driver graph's. Six letters at least, so a
+    short title is not a word of the sentence, and never a source leaf."""
+    low = (text or "").casefold()
+    return sorted(((t, p) for p, t in titles.items()
+                   if len(t) >= 6 and t.casefold() in low and "/sources/" not in f"/{p}"), key=lambda tp: -len(tp[0]))
+
+
+def decide(text: str, refs: list[str], chat: str, plan_draft: dict | None = None) -> dict | None:
+    """The offer under the answer that just ended, or None: a plan the turn
+    computed or asked for, else a way to work on what the turn read (`refs`,
+    titles or paths as its calls named them). Owns the rule's whole sequence:
+    the mode, two offers a chat, none on a note whose offer went unused in the
+    last week, and in shadow mode only the record."""
+    from silica.config import withheld
+    from silica.kernel.graph import mindmap
+
+    if (plan_draft or asks_plan(text)) and "/learn" not in withheld("routes"):
+        # A plan asked of the chat: the one it computed, or the one Learn tracks.
+        from silica.kernel.learn.plans import list_plans
+
+        return plan_offer(text, list_plans(), plan_draft)
+    # The turn names its reads as the calls did, a title or a path; the
+    # ledger keys notes by path, so the titles are resolved first.
+    graph = mindmap._driver_graph()
+    _resolve, read = mindmap.answer_resolver(refs, graph=graph)
+    if says_lost(text):
+        # The note the reader named is the one the offer is about: a turn
+        # that read nothing (the local 9B answered "punti di supporto" from
+        # memory), or one whose first read was a neighbour ("Limite
+        # d'errore con slack" for "variabili slack di margine", 2026-10-23).
+        read = [p for _t, p in named_notes(text, graph[1])[:1]] + list(read)
+    if mode() == "off":
+        return None
+    offer = study_offer(text, [p if p.endswith(".md") else p + ".md" for p in read])
+    if offer is None:
+        return None
+    show = mode() == "on" and allowed(chat, offer["note"])
+    log_offer(chat, offer, shown=show)
+    return offer if show else None
+
+
+def decide_escalation(text: str, history: list[str], chat: str) -> str:
+    """The block that makes this turn's answer the aid, or "": the note the
+    reader names, stuck on it by the ledger, by an unused offer or by saying so
+    twice. Records an offer acted on first. In shadow mode the record only:
+    what would have fired, nothing shown; a shadowed reason the same in any
+    mode (ADR-0135 point 9)."""
+    from silica.kernel.graph import mindmap
+    from silica.kernel.learn.items import read_note
+    from silica.kernel.learn.quiz import entries
+
+    if mode() == "off":
+        return ""
+    log_acted(chat, text)
+    named = named_notes(text, mindmap._driver_graph()[1])
+    if not named:
+        return ""
+    name, path = named[0]
+    note = path if path.endswith(".md") else path + ".md"
+    why = escalation(note, chat, text, history, entries())
+    if not why:
+        return ""
+    shown = mode() == "on" and not shadowed(why)
+    _append({"chat": chat, "note": note, "escalated": True, "why": why, "displayed": shown})
+    return escalation_block(name, why, read_note(note)) if shown else ""
+
+
+def decide_aid(note: str, session: str) -> tuple[str, bool]:
+    """(why, shown) for a Learn miss on `note`, logged: "" when nothing
+    escalates. The session keeps which notes spent their one aid."""
+    from silica.kernel.learn import quiz
+
+    why = escalation(note, "", "", [], quiz.entries())
+    if not why:
+        return "", False
+    shown = mode() == "on" and not shadowed(why)
+    log_aid(note, session, why, shown)
+    return why, shown
+
+
 def confident_readout(entries: list[dict], records: list[dict] | None = None) -> dict:
     """The shadow reason's record against the ledger (ADR-0135 point 9): its
     fires, how many the next answer on the same note missed again, and the

@@ -681,19 +681,13 @@ def _escalate(s: dict, it: dict) -> dict | None:
     """The escalate rung after a miss (learn.offer): once a note a session,
     logged, and in shadow mode only logged."""
     from silica.kernel.learn import offer
-    from silica.kernel.learn import quiz
 
     if offer.mode() == "off" or it["path"] in s.setdefault("escalated", set()):
         return None
     try:
-        entries = quiz.entries()
-        why = offer.escalation(it["path"], "", "", [], entries)
-        if not why:
-            return None
-        if not offer.shadowed(why):
+        why, shown = offer.decide_aid(it["path"], s["id"])
+        if why and not offer.shadowed(why):
             s["escalated"].add(it["path"])   # a shadow fire never takes the session's one aid on the note
-        shown = offer.mode() == "on" and not offer.shadowed(why)
-        offer.log_aid(it["path"], s["id"], why, shown)
         if not shown:
             return None
         prereq = offer.weakest_prerequisite(it["path"])
