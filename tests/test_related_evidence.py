@@ -9,7 +9,7 @@ reads by that number is reading noise, and an absent leg (this vault's embed
 index was empty) is indistinguishable from full agreement. Same contract as
 silica_semantic_search: reranked flag, cross-encoder score when reranked,
 structural per-leg signals, legs named. The flag and the score stay in the
-core (`_related`); the tool's payload, which the model reads, drops both
+core (`related`); the tool's payload, which the model reads, drops both
 (owner, 2026-11-04, survey card C2).
 """
 from __future__ import annotations
@@ -74,9 +74,9 @@ class _Reranker:
 def test_reranked_scores_replace_rrf_residue(wired, monkeypatch):
     rr = _Reranker()
     monkeypatch.setattr("silica.model.providers.get_reranker", lambda *_a, **_k: rr)
-    from silica.tools.graph import _related
+    from silica.kernel.report.related import related
 
-    out = _related("A", k=5)
+    out = related("A", k=5)
     assert out["reranked"] is True
     assert rr.calls == 1
     scores = [r["score"] for r in out["results"]]
@@ -88,9 +88,9 @@ def test_reranked_scores_replace_rrf_residue(wired, monkeypatch):
 
 def test_without_a_reranker_the_flag_says_so(wired, monkeypatch):
     monkeypatch.setattr("silica.model.providers.get_reranker", lambda *_a, **_k: None)
-    from silica.tools.graph import _related
+    from silica.kernel.report.related import related
 
-    out = _related("A", k=5)
+    out = related("A", k=5)
     assert out["reranked"] is False
     assert all(r["score"] < 0.1 for r in out["results"])  # first-stage fusion scale
 
@@ -155,10 +155,11 @@ def test_doctor_recall_indexes_ok_when_both_stores_answer(tmp_path, monkeypatch)
 def test_the_model_gets_no_score_and_no_reranked_flag(wired, monkeypatch):
     rr = _Reranker()
     monkeypatch.setattr("silica.model.providers.get_reranker", lambda *_a, **_k: rr)
-    from silica.tools.graph import _related, silica_related
+    from silica.kernel.report.related import related
+    from silica.tools.graph import silica_related
 
     out = silica_related("A", k=5)
     assert "reranked" not in out and out["results"]
     assert not any("score" in r for r in out["results"])
     # Same notes in the same order: only the two fields are gone.
-    assert [r["path"] for r in out["results"]] == [r["path"] for r in _related("A", k=5)["results"]]
+    assert [r["path"] for r in out["results"]] == [r["path"] for r in related("A", k=5)["results"]]

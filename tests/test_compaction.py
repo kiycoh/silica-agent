@@ -82,7 +82,8 @@ def _msgs():
     ]
 
 
-_TOOLS = {"silica_read_note": NS(collapse="lazy")}
+_READ_NOTE = NS(collapse="lazy", note_args=("name",))
+_TOOLS = {"silica_read_note": _READ_NOTE}
 
 
 def test_no_collapse_under_budget():
@@ -182,9 +183,9 @@ def _rw_msgs(second_call: tuple[str, str]):
 
 
 _RW_TOOLS = {
-    "silica_read_note": NS(collapse="lazy"),
-    "silica_related": NS(collapse="lazy"),
-    "silica_patch_note": NS(collapse="eager"),
+    "silica_read_note": _READ_NOTE,
+    "silica_related": NS(collapse="lazy", note_args=("note",)),
+    "silica_patch_note": NS(collapse="eager", note_args=("name",), mutates="written"),
 }
 
 
@@ -201,7 +202,7 @@ def test_stale_read_collapses_under_budget():
 
 def test_stale_matches_a_path_write_against_a_name_read():
     m = _rw_msgs(("silica_write_note", '{"path": "Sub/Foo.md", "body": "..."}'))
-    tools = {**_RW_TOOLS, "silica_write_note": NS(collapse="eager")}
+    tools = {**_RW_TOOLS, "silica_write_note": NS(collapse="eager", note_args=("path",), mutates="written")}
     collapsed = compact_read_history(
         m, set(), prompt_tokens=1, budget=10**9, floor_turns=99, tools=tools
     )
@@ -303,7 +304,7 @@ def _slice_msgs(first: str, second: str):
     ]
 
 
-_SLICE_TOOLS = {"silica_read": NS(collapse="lazy")}
+_SLICE_TOOLS = {"silica_read": NS(collapse="lazy", note_args=("path",))}
 
 
 def test_a_later_slice_of_the_same_note_supersedes_nothing():

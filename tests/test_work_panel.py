@@ -126,7 +126,7 @@ def test_tools_carry_the_verb_and_the_target_the_renderer_would_print(tmp_path):
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run work.js")
 def test_a_write_tool_becomes_a_write_and_a_read_becomes_a_source(tmp_path):
     """The panel's two lists are derived, not separately reported: whether a
-    tool changed the vault is the same table `_TOOL_EFFECT` keys on."""
+    tool changed the vault is the same fact `Tool.mutates` declares."""
     run = _project(tmp_path, TRACE)
     assert [w["target"] for w in run["writes"]] == ["Filosofia/Morale.md"]
     assert "Morale" in [s["name"] for s in run["sources"]]
@@ -155,8 +155,9 @@ def test_the_verb_table_cannot_drift_from_the_renderer():
     """work.js carries its own copy of the verb table, because the narration
     payload holds the RAW tool name and the browser has no renderer. A copy that
     nothing checks is a copy that goes stale the next time a tool is added."""
-    from silica.ui.tool_labels import TOOL_DESC
+    from silica.tools import TOOLS
 
+    labels = {name: t.label for name, t in TOOLS.items() if t.label}
     src = WORK_JS.read_text()
     m = re.search(r"^const TOOL_VERBS = \{(.*?)^\};", src, re.S | re.M)
     assert m, "TOOL_VERBS not found in work.js"
@@ -164,12 +165,28 @@ def test_the_verb_table_cannot_drift_from_the_renderer():
                re.findall(r'"(\w+)":\s*\["([^"]*)",\s*(?:"([^"]*)"|null)\]', m.group(1))}
     js = js_full
     assert js, "no entries parsed out of TOOL_VERBS"
-    missing = sorted(set(TOOL_DESC) - set(js))
+    missing = sorted(set(labels) - set(js))
     assert not missing, f"work.js TOOL_VERBS is missing {missing}"
-    extra = sorted(set(js) - set(TOOL_DESC))
+    extra = sorted(set(js) - set(labels))
     assert not extra, f"work.js TOOL_VERBS invents {extra}"
-    for name, (verb, key) in TOOL_DESC.items():
+    for name, (verb, key) in labels.items():
         assert js_full[name] == (verb, key), f"{name}: {js_full[name]} != {(verb, key)}"
+
+
+def test_the_write_table_cannot_drift_from_what_the_tools_declare():
+    """H-EFFECT: `WRITE_OPS` and `NOTE_KEYS` are work.js's copies of two tool
+    facts, and the comments saying "same keys" were all that compared them."""
+    from silica.tools import TOOLS
+
+    src = WORK_JS.read_text()
+    block = re.search(r"^const WRITE_OPS = \{(.*?)^\};", src, re.S | re.M)
+    assert block, "WRITE_OPS not found in work.js"
+    assert set(re.findall(r'"(\w+)":', block.group(1))) == {
+        name for name, t in TOOLS.items() if t.mutates}
+    keys = re.search(r"^const NOTE_KEYS = \[(.*?)\];", src, re.M)
+    assert keys, "NOTE_KEYS not found in work.js"
+    assert set(re.findall(r'"(\w+)"', keys.group(1))) == {
+        k for t in TOOLS.values() for k in t.note_args}
 
 
 def test_the_panel_is_wired_into_the_page():

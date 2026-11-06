@@ -5,8 +5,13 @@
 
 This is the contract layer between the LLM and Silica's toolset.
 Every tool is a function decorated with @tool(ParamsModel, cls="atomic|composed|wrapped").
-The decorator auto-registers the tool in the global TOOLS dict.
+The decorator auto-registers the tool in the global TOOLS dict, and silica.tools.catalog
+is the one list of the modules that hold them: `catalog.load()` is what fills it.
 The LLM receives the JSON-schema of each tool's ParamsModel as its function definition.
+
+What a tool is, past its schema, is declared where the tool is (Tool.__init__): the
+agent loop, the compaction, the taint gate and the surfaces read these facts and hold
+no list of names of their own.
 
 Design (from SILICA.md §8.4):
   - Pydantic BaseModel for params → validates input AND generates JSON-schema
@@ -19,9 +24,9 @@ import inspect
 import json
 import logging
 import re
-from collections.abc import Container
+from collections.abc import Container, Iterable
 from contextvars import ContextVar
-from typing import Any, Callable, get_type_hints
+from typing import Any, Callable, NamedTuple, get_type_hints
 
 from pydantic import BaseModel, create_model
 
@@ -108,10 +113,20 @@ def _pointed(node: Any, reach: Container[str] | None) -> Any:
     return node
 
 
+class Reads(NamedTuple):
+    """Where a call that hands the model a note's own words names that note:
+    the arguments that hold it, and the result key that does."""
+
+    args: tuple[str, ...] = ()
+    result: str = ""
+
+
 class Tool:
     """Metadata and executor for a single registered tool."""
 
-    __slots__ = ("fn", "name", "description", "params_model", "cls", "collapse", "sensitive", "internal")
+    __slots__ = ("fn", "name", "description", "params_model", "cls", "collapse", "sensitive", "internal",
+                 "ingress", "mutates", "reads", "parallel_safe", "once_per_block", "note_args", "label",
+                 "found_nothing", "loads", "history_view", "reply_flag", "shrink")
 
     def __init__(
         self,
@@ -123,6 +138,19 @@ class Tool:
         collapse: str = "lazy",
         sensitive: bool = False,
         internal: bool = False,
+        *,
+        ingress: bool | None = None,
+        mutates: str = "",
+        reads: Reads | None = None,
+        parallel_safe: bool = False,
+        once_per_block: bool = False,
+        note_args: tuple[str, ...] = (),
+        label: tuple[str, str | None] | None = None,
+        found_nothing: str = "",
+        loads: Callable[[dict, Any], Iterable[Any]] | None = None,
+        history_view: Callable[[str, set[str]], str] | None = None,
+        reply_flag: str = "",
+        shrink: Callable[[dict, str], str | None] | None = None,
     ):
         self.fn = fn
         self.name = name
@@ -139,6 +167,42 @@ class Tool:
         # agent's default toolset — same filter seam as `sensitive`. Still
         # reachable when named in AgentConstraints.tools.
         self.internal = internal
+        # Does a result carry text from outside the user's own words and notes?
+        # The taint gate (ADR-0090) reads it. None is "never said", which a
+        # test refuses for a registered tool: a tool that brought a page in and
+        # defaulted to False would pass the gate without a word.
+        self.ingress = ingress
+        # What the call does to the note its arguments name: "written",
+        # "deleted", "moved", "" for none. A batch tool that names an ops file,
+        # or writes notes it does not name, says "": it voids no read of a note
+        # and gets no chip.
+        self.mutates = mutates
+        # Set on the tools that hand the model a note's own words. A title
+        # search lists candidates and reads none.
+        self.reads = reads
+        # A read one tool block may run beside others (ADR-0150): it takes its
+        # own locks and no progress callback. False, the default, runs serially.
+        self.parallel_safe = parallel_safe
+        # Two of it in one block lose a write of a shared file: the block runs
+        # serially instead.
+        self.once_per_block = once_per_block
+        # The arguments that name a note, in the order to try them.
+        self.note_args = note_args
+        # (verb, the argument shown as its target): `verb "target"` on screen.
+        self.label = label
+        # The result key that is empty when a vault search matched nothing.
+        self.found_nothing = found_nothing
+        # (args, result) -> tool names this call brings in: the loop offers each
+        # one it may. Only ever a successful call's.
+        self.loads = loads
+        # (result, the turn's memo) -> what the history keeps of a successful
+        # result. The loop empties the memo when compaction collapses one.
+        self.history_view = history_view
+        # The argument that asks for this result to stand as the turn's reply.
+        self.reply_flag = reply_flag
+        # (args, the request) -> the part of this read to serve when the whole
+        # does not fit the window, None for the stub (loop.FIT_NARROWS).
+        self.shrink = shrink
 
     def json_schema(self, reach: Container[str] | None = None) -> dict:
         """Return the OpenAI-compatible function schema for this tool, as a
@@ -187,8 +251,50 @@ class Tool:
 # Global tool registry — the single source of truth
 TOOLS: dict[str, Tool] = {}
 
+# Run before the chat's tool set is read, for what joins TOOLS from above this
+# layer (catalog.load adds the connectors): the reader, agent/constraints.py,
+# sits below them and may not import them.
+REGISTRARS: list[Callable[[], None]] = []
 
-def _model_from_signature(fn: Callable) -> type[BaseModel]:
+
+def note_keys(tools: dict[str, Any] | None = None) -> tuple[str, ...]:
+    """Every argument any tool declares as naming a note. Read off the arguments
+    and not off one tool's own: a reader also meets calls to a tool no longer
+    registered, in a stored chat."""
+    held = TOOLS if tools is None else tools
+    return tuple(dict.fromkeys(k for t in held.values() for k in getattr(t, "note_args", ())))
+
+
+def tool_failed(result: Any) -> bool:
+    """Did this tool result report a failure? A result is one only by an `error`
+    key: a plain string is output, and substring-sniffing it for "error" or
+    "failed" misclassifies grep hits and "0 errors" reports."""
+    if not result:
+        return False
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+        except (ValueError, RecursionError):
+            return False  # not JSON, or nested past the parser: plain-text output
+        return isinstance(parsed, dict) and "error" in parsed
+    return isinstance(result, dict) and "error" in result
+
+
+def found_nothing(name: str | None, result: object) -> bool:
+    """A vault search that matched nothing: the only call a `final` web answer
+    may stand beside and still end the turn (loop.py). An error is not nothing:
+    the chat model may owe the user a word about it."""
+    key = getattr(TOOLS.get(name or ""), "found_nothing", "")
+    if not key:
+        return False
+    try:
+        data = json.loads(result)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return False
+    return isinstance(data, dict) and "error" not in data and not data.get(key)
+
+
+def model_from_signature(fn: Callable) -> type[BaseModel]:
     """Build the tool input model from its annotated public parameters."""
     hints = get_type_hints(fn, include_extras=True)
     # Any, not tuple[Any, Any]: a typed splat would also bind create_model's
@@ -213,11 +319,13 @@ def tool(
     collapse: str = "lazy",
     sensitive: bool = False,
     internal: bool = False,
+    **facts: Any,
 ):
-    """Decorator that registers a function as a Silica tool.
+    """Decorator that registers a function as a Silica tool. `facts` are Tool's
+    keyword-only arguments: what the tool is, said where it is.
 
     Usage:
-        @tool(cls="atomic")
+        @tool(cls="atomic", ingress=False, note_args=("name",))
         def silica_read_note(name: str):
             '''Read a vault note by name (wikilink-style resolution).'''
             return DRIVER.read_note(name)
@@ -229,11 +337,11 @@ def tool(
         # indentation, and every "\n    " is its own token in a description sent
         # on every request.
         tool_desc = inspect.cleandoc(fn.__doc__ or "")
-        model = params_model or _model_from_signature(fn)
+        model = params_model or model_from_signature(fn)
         TOOLS[tool_name] = Tool(
             fn, tool_name, tool_desc, model, cls,
             collapse=collapse, sensitive=sensitive,
-            internal=internal,
+            internal=internal, **facts,
         )
         logger.debug("Registered tool: %s (class=%s, collapse=%s)", tool_name, cls, collapse)
         return fn

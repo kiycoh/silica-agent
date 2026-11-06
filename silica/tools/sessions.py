@@ -58,7 +58,9 @@ def _neighbour(msgs: list[dict], i: int) -> tuple[str, int] | None:
     return None
 
 
-@tool(cls="composed")
+# ingress: earlier answers, which may restate a page an earlier chat fetched. The
+# taint of that chat ends with it, its words do not.
+@tool(cls="composed", ingress=True)
 def silica_session_search(
     query: Annotated[str, Field(description="Words the earlier exchange used")],
     k: Annotated[int, Field(ge=1, le=30, description="Maximum number of matching messages")] = 8,

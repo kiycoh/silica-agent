@@ -515,8 +515,9 @@ def _hide_recall_window() -> None:
 
     from pydantic import create_model
 
-    import silica.cli  # noqa: F401  registers the full toolset
-    from silica.tools import TOOLS
+    from silica.tools import catalog
+
+    TOOLS = catalog.load()
 
     tool = copy.copy(TOOLS["silica_recall"])
     fields = {n: (f.annotation, f) for n, f in tool.params_model.model_fields.items()

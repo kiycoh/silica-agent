@@ -133,23 +133,3 @@ def transcribe_local(wav: bytes, *, lang: str, model: str) -> str:
         vad_filter=True,
     )
     return "".join(s.text for s in segments).strip()
-
-
-def speech_lang(config: Any) -> str:
-    """The BCP 47 tag the browser's speech APIs should use, "" when unknown.
-
-    The dictation language when it is fixed, else the vault's own language:
-    Learn reads a question aloud in the language the note is written in, and a
-    browser left to guess picks its UI language, which reads an Italian vault
-    with an English voice.
-    """
-    fixed = (config.stt_lang or "").strip()
-    if fixed and fixed != "auto":
-        return fixed
-    from silica.kernel.text.language import ISO
-    from silica.onboarding.checks import reply_language_for
-
-    name = (reply_language_for((config.vault_path or "").strip()) or "").strip().lower()
-    if name in ISO:
-        return ISO[name]
-    return name if len(name) == 2 and name.isalpha() else ""

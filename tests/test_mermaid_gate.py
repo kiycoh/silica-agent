@@ -108,6 +108,7 @@ def test_the_loop_marks_the_call_it_runs_for_the_model():
 
     class _Recorder:
         name, collapse, sensitive, internal, summarize = "fake_write", "eager", False, False, None
+        reply_flag, loads, history_view = "", None, None
 
         def json_schema(self, reach=None):
             return {"type": "function", "function": {"name": self.name, "description": "",

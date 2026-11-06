@@ -22,8 +22,8 @@
 // The narration payload carries the RAW tool name and the raw args, and the
 // browser has no renderer, so the verb table has to live here too. A copy that
 // nothing checks is a copy that goes stale on the next tool, so
-// tests/test_work_panel.py pins it entry-for-entry to _TOOL_DESC in
-// silica/ui/renderer.py and fails when the two disagree.
+// tests/test_work_panel.py pins it entry-for-entry to each tool's declared
+// label (silica/tools/__init__.py) and fails when the two disagree.
 const TOOL_VERBS = {
   "silica_search": ["search titles", "query"],
   "silica_search_context": ["search inside", "query"],
@@ -47,38 +47,30 @@ const TOOL_VERBS = {
   "silica_deferred_retry": ["deferred retry", null],
   "silica_anneal": ["anneal", null],
   "silica_inbox_ls": ["inbox", null],
-  "silica_recon": ["recon", "inbox_file"],
-  "silica_payload": ["payload", "recon_report_path"],
-  "silica_sanitize": ["sanitize", "distiller_output_path"],
-  "silica_validate_ops": ["validate", "ops_json_path"],
-  "silica_bulk_write": ["bulk write", "ops_json_path"],
-  "silica_lint": ["lint", "note_name"],
   "silica_run_injector": ["injector", "inbox_file"],
   "silica_delete": ["delete", "ref"],
   "silica_snapshot": ["snapshot", "ops_json_path"],
   "silica_restore": ["restore", "txn_id"],
-  "silica_cleanup": ["cleanup", "inbox_file"],
   "web_search": ["web search", "query"],
   "web_fetch": ["web fetch", "url"],
   "silica_web_answer": ["web answer", "question"],
 };
 
-// How a tool changes the vault. Same keys as _TOOL_EFFECT in web/callback.py,
-// and the reason a patch target is a WRITE here and never also a source: the
+// How a tool changes the vault. Same keys as the tools declaring `mutates`, and
+// the reason a patch target is a WRITE here and never also a source: the
 // panel's two lists are derived from one table, so a note cannot appear in both.
 const WRITE_OPS = {
   "silica_write_note": "write",
   "silica_patch_note": "patch",
   "silica_flag_note": "flag",
   "silica_require": "require",
-  "silica_bulk_write": "bulk write",
   "silica_restore": "restore",
   "silica_delete": "delete",
   "silica_move": "move",
 };
 
-// Arg keys that name a note, the allowlist from web/callback.py. Missing one
-// only drops a row from Sources; it never names the wrong note.
+// Arg keys that name a note: every tool's declared `note_args`. Missing one only
+// drops a row from Sources; it never names the wrong note.
 const NOTE_KEYS = ["name", "path", "note", "note_path", "ref"];
 
 

@@ -55,7 +55,7 @@ class AgentConstraints:
 # turns that instruction into a dead end. That constraint is what keeps
 # silica_curate, silica_dedup and silica_graph_export reachable (loadable
 # since ADR-0050) despite each having a slash command, and why this list is
-# 13 entries rather than 30.
+# 12 entries rather than 30.
 #
 # silica_anneal was here until 2026-08-23 and is deliberately NOT: it is the
 # only tool that resolves a deferred bundle, and the nucleate summary tells the
@@ -71,7 +71,6 @@ _CHAT_EXCLUDED = frozenset({
     "silica_deferred_list",      # deferred-ops bookkeeping, surfaced by the FSM
     "silica_deferred_flush",
     "silica_deferred_retry",
-    "silica_delegate",           # fan-out, driven by the Coordinator not by chat
     "silica_document",           # /wiki
     "silica_generate_taxonomy",  # /organize
     "silica_health",             # /status
@@ -153,6 +152,12 @@ def web_answer_constraints() -> AgentConstraints:
 # same reason: asked to rework a long text, the chat model answers it itself
 # and condenses it, and a load step is one more chance to do that. Also just
 # before the loader.
+# The review's step 2, silica_ledger_next and silica_ledger_update, is in the
+# core, not unlocked by the report: unlocked, the report's own turn read a
+# schema pointing at silica_ledger_next and did not have it. Offering the pair
+# did not by itself stop qwen3.5-9b from skipping the plan (seed_ledger=false,
+# 1 of 1 more run); removing that parameter did (silica_vault_report,
+# prompt-rules probe 2026-09-28).
 CHAT_CORE = (
     "silica_recall",
     "silica_search",
@@ -177,14 +182,6 @@ CHAT_CORE = (
     "silica_rework",
     "silica_load_tools",
 )
-
-# The review's step 2 is in the core, not unlocked by the report: unlocked, the
-# report's own turn read a schema pointing at silica_ledger_next and did not
-# have it. Offering the pair did not by itself stop qwen3.5-9b from skipping
-# the plan (seed_ledger=false, 1 of 1 more run); removing that parameter did
-# (silica_vault_report, prompt-rules probe 2026-09-28).
-_REVIEW_APPLY = ("silica_ledger_next", "silica_ledger_update")
-
 
 # What a turn from Telegram is offered (ADR-0089 point 5): the core's reads, in
 # the core's order, and nothing deferred, so no loader either. A Telegram
@@ -226,13 +223,12 @@ DEMO_MAX_ITERATIONS = 8
 
 
 def _eligible() -> dict:
-    from silica.tools import TOOLS
-    import silica.tools.loader  # noqa: F401  the core names it; register before reading TOOLS
-    from silica.connectors.mcp_tools import ensure_registered
+    from silica.tools import REGISTRARS, TOOLS
 
     # One `mcp__<key>` per configured server (ADR-0091), from the file alone
     # and once per process, so the loadable catalog it joins stays static.
-    ensure_registered()
+    for register in REGISTRARS:
+        register()
     # A view this account does not get takes its tools with it (ADR-0140): left
     # here, the loader would list them and the loop would run a direct call.
     from silica.config import demo, withheld

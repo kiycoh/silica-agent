@@ -16,6 +16,7 @@ from pydantic import Field
 
 from silica.driver import DRIVER
 from silica.tools import tool
+from silica.kernel.write.notes import write_note
 from silica.kernel.write.ops import Op, OpType
 
 # One description, two tools: write_note and patch_note bind `documents:` the
@@ -95,7 +96,8 @@ def _mermaid_gate(tool: str, path: str, text: str) -> tuple[dict | None, str | N
                       + "\n".join(errors))}, None
 
 
-@tool(cls="composed", collapse="eager")
+@tool(cls="composed", collapse="eager", ingress=False, mutates="written", note_args=("name",),
+      label=("patch note", "name"))
 def silica_patch_note(
     name: Annotated[str, Field(description='Name or vault-relative path of the note to patch')],
     heading: Annotated[str, Field(description='Concept/section heading the snippet is filed under')],
@@ -206,7 +208,8 @@ def silica_patch_note(
             **({"warning": mermaid_warning} if mermaid_warning else {})}
 
 
-@tool(cls="composed", collapse="eager")
+@tool(cls="composed", collapse="eager", ingress=False, mutates="written",
+      note_args=("name", "ref"), label=("flag note", "name"))
 def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relative path of the note to flag')], reason: Annotated[str, Field(description='Why the note is wrong or stale, in a few words')] = "", clear: Annotated[bool, Field(description='Clear a previously set flag instead of setting one')] = False,
                      ref: Annotated[str, Field(description="With clear: resolve only this entry of the note's `contradictions:` list, verbatim; default resolves every open one")] = "") -> dict[str, Any]:
     """Flag an EXISTING note as wrong or stale: marks `contested` in
@@ -270,7 +273,8 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
             **checkpoint_landed(path, prior_content, new_content)}
 
 
-@tool(cls="composed", collapse="eager")
+@tool(cls="composed", collapse="eager", ingress=False, mutates="written", note_args=("name",),
+      label=("require", "name"))
 def silica_require(
     name: Annotated[str, Field(description='Name or vault-relative path of the note that requires another')],
     prerequisite: Annotated[str, Field(description='Name or path of the note to read before it')],
@@ -321,7 +325,8 @@ def silica_require(
     return {"note": name, "path": path, "requires": wanted, **checkpoint_landed(path, nc.content)}
 
 
-@tool(cls="composed", collapse="eager")
+@tool(cls="composed", collapse="eager", ingress=False, mutates="written", note_args=("path",),
+      label=("write note", "path"))
 def silica_write_note(
     path: Annotated[str, Field(description="Vault-relative path for the new note (e.g. 'Computer Science/Computer Vision.md')")],
     body: Annotated[str, Field(description='Markdown body only — NO YAML frontmatter; it is applied mechanically from the vault template. ' + _MERMAID_RULE)],
@@ -342,93 +347,28 @@ def silica_write_note(
     exists: append with silica_patch_note<<; multi-note nucleation with gates
     and rollback: silica_run_injector>>. Checkpointed, revertible with /undo.
     """
-    from pathlib import Path, PurePosixPath
+    bound: list[str] = []
 
-    from silica.config import CONFIG
-    from silica.kernel.base.layout import contain_in_vault
-    from silica.kernel.write import templates as tpl
-    from silica.kernel.write.checkpoints import checkpoint_landed
-    from silica.kernel.workqueue import path_lease
+    def bind() -> tuple[list[str], str | None, str | None]:
+        docs, code_ref, err = _bind_documents(documents or [])
+        bound.extend(docs)
+        return docs, code_ref, err
 
-    # `path` is model-supplied and this fast path never runs validate_operations,
-    # so the vault boundary is enforced here — before the lease, so a rejected
-    # path never takes a lock — and as an error dict rather than the driver's
-    # exception, which the model cannot act on.
-    try:
-        path = contain_in_vault(path, Path(CONFIG.vault_path))
-    except ValueError as e:
-        return {"error": f"Refused path '{path}': {e}"}
+    warning: list[str] = []
 
-    # `AI:`, `last modified:` and `verified:` are the system floor and the human
-    # trust tier — a model writing them would hand the agent a lever on its own
-    # authority (OKF §5.2). Reject, never silently drop: the caller must know.
-    if props:
-        reserved = [k for k in props if k.strip().lower() in ("ai", "last modified", "verified")]
-        if reserved:
-            return {"error": f"Reserved frontmatter key(s) {reserved}: "
-                             "AI, last modified and verified are system-owned."}
-
-    docs: list[str] = []
-    code_ref: str | None = None
-    if documents:
-        docs, code_ref, err = _bind_documents(documents)
-        if err:
-            return {"error": err}
-
-    if template == "none":
-        content = body
-    else:
-        try:
-            source = tpl.resolve_template(template)
-        except tpl.TemplateNotFoundError as e:
-            return {"error": str(e)}
-        fields = tpl.prepare_fields(
-            title=title or PurePosixPath(path).stem,
-            body=body,
-            tags=tags,
-            related=related,
-            parent=parent,
-        )
-        content = tpl.render_note(source, fields)
-    content = tpl.ensure_system_floor(content)
-    if props:
-        try:
-            content = tpl.upsert_props(content, props)
-        except ValueError as e:
-            return {"error": str(e)}
-    if docs:
-        content = tpl.stamp_documents(content, docs, code_ref)
-
-    refused, mermaid_warning = _mermaid_gate("silica_write_note", path, body)
-    if refused:
+    def gate(landing: str) -> dict | None:
+        refused, mermaid_warning = _mermaid_gate("silica_write_note", landing, body)
+        if mermaid_warning:
+            warning.append(mermaid_warning)
         return refused
 
-    # The existence check and the create must be atomic: the fs backend's
-    # create() now raises on an existing note, but the pre-check under lease
-    # stays: it returns a friendly "use silica_patch_note" error instead of a
-    # backend exception, and cross-process it still guards other agents.
-    with path_lease(path):
+    out = write_note(path, body, title=title, tags=tags, related=related, parent=parent,
+                     template=template, props=props, bind=bind if documents else None, gate=gate)
+    if bound and out.get("success"):
         try:
-            DRIVER.read_note(path)
+            from silica.config import CONFIG
+            from silica.kernel.code import codedocs
+            codedocs.invalidate_snapshot(CONFIG.vault_path)
         except Exception:
-            pass  # missing note — the happy path
-        else:
-            return {"error": f"Note '{path}' already exists: use silica_patch_note to modify it."}
-
-        try:
-            ref = DRIVER.create(path, content)
-        except Exception as e:
-            return {"error": f"Failed to create note '{path}': {e}"}
-
-        if docs:
-            try:
-                from silica.config import CONFIG
-                from silica.kernel.code import codedocs
-                codedocs.invalidate_snapshot(CONFIG.vault_path)
-            except Exception:
-                pass  # cache hygiene must never fail the write
-
-        checkpoint = checkpoint_landed(path, None)  # None: created, /undo removes it
-
-    return {"op": "write", "success": True, "path": ref.path or path, **checkpoint,
-            **({"warning": mermaid_warning} if mermaid_warning else {})}
+            pass  # cache hygiene must never fail the write
+    return {**out, "warning": warning[0]} if warning and out.get("success") else out

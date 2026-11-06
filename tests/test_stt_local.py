@@ -17,6 +17,7 @@ import pytest
 
 from tests.config_factory import make_config
 from silica.agent import stt
+from silica.ui.web import stt_routes
 
 
 def _wav(samples: list[int], rate: int = 16000, channels: int = 1) -> bytes:
@@ -85,7 +86,7 @@ def test_the_model_setting_falls_back_to_the_shipped_size():
 
 
 def test_speech_lang_prefers_the_fixed_dictation_language(monkeypatch):
-    assert stt.speech_lang(make_config(stt_lang="it", vault_path="")) == "it"
+    assert stt_routes.speech_lang(make_config(stt_lang="it", vault_path="")) == "it"
 
 
 def test_speech_lang_maps_the_vault_language_to_a_bcp47_tag(monkeypatch):
@@ -93,11 +94,11 @@ def test_speech_lang_maps_the_vault_language_to_a_bcp47_tag(monkeypatch):
 
     cfg = make_config(stt_lang="auto", vault_path="/some/vault")
     monkeypatch.setattr(checks, "reply_language_for", lambda v: "Italian")
-    assert stt.speech_lang(cfg) == "it"
+    assert stt_routes.speech_lang(cfg) == "it"
     monkeypatch.setattr(checks, "reply_language_for", lambda v: "de")
-    assert stt.speech_lang(cfg) == "de"
+    assert stt_routes.speech_lang(cfg) == "de"
     monkeypatch.setattr(checks, "reply_language_for", lambda v: "chinese")
-    assert stt.speech_lang(cfg) == "zh"
+    assert stt_routes.speech_lang(cfg) == "zh"
     # an unknown name is no tag at all: the browser's own default beats a guess
     monkeypatch.setattr(checks, "reply_language_for", lambda v: "klingon")
-    assert stt.speech_lang(cfg) == ""
+    assert stt_routes.speech_lang(cfg) == ""

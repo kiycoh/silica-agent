@@ -8,6 +8,7 @@ were importing a 2,000-line tool module to list a folder.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from silica.driver import DRIVER
@@ -77,3 +78,57 @@ def vault_rel(path: str) -> str:
         except (ValueError, OSError):
             pass
     return path.replace("\\", "/").strip("/")
+
+
+def vault_files_under(scope: str) -> list[str]:
+    """Vault-relative files under `scope`, dotfiles and dot-dirs skipped."""
+    from silica.config import CONFIG
+    from silica.kernel.base.layout import walk_tree
+
+    root = Path(CONFIG.vault_path or "")
+    base = root / scope
+    if not base.is_dir():
+        return []
+    out: list[str] = []
+    # ignore=False: /nucleate of a folder the person named reads that folder.
+    for dirpath, _dirnames, filenames in walk_tree(root, base, ignore=False):
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            out.append((Path(dirpath) / name).relative_to(root).as_posix())
+    return out
+
+
+def unconverted_under(folder: str) -> list[str]:
+    """Non-markdown files under `folder`, natural-sorted; `Images/` excluded.
+
+    `notes_under` lists .md only, so a folder holding nothing but PDFs came back
+    as {"total": 0, "files": []} — a payload indistinguishable from a folder
+    that is not there, and the agent duly reported it as non-existent. Naming
+    the unconverted files is the only way the caller can tell the two apart.
+    `Images/` is conversion output, not input, and outnumbers the notes 70:1.
+
+    Answers for source folders as well as the inbox: a research library is nine
+    folders of scanned books and one INDEX.md, and while the rule was
+    inbox-only every one of them read as empty.
+    """
+    from silica.kernel.base.layout import in_folder
+    from silica.kernel.base.manifest import active_inbox_dir
+
+    scope = vault_rel(folder)
+    if not scope:
+        return []
+    inbox = active_inbox_dir()
+    if inbox and in_folder(scope, inbox):
+        paths: Iterable[str] = (r.path for r in DRIVER.list_inbox_files())
+    else:
+        paths = vault_files_under(scope)
+    return sorted(
+        (
+            p for p in paths
+            if not p.endswith(".md")
+            and in_folder(p, scope)
+            and "/Images/" not in p
+        ),
+        key=natural_key,
+    )

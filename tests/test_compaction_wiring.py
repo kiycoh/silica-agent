@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
+from silica.agent.compaction import dedup_recall_excerpts
 from silica.agent.loop import run_agent
 
 
@@ -20,11 +21,16 @@ class _FakeTool:
     sensitive = False
     internal = False
     summarize = None
+    parallel_safe = once_per_block = False
+    note_args: tuple[str, ...] = ()
+    mutates = reply_flag = found_nothing = ""
+    loads = history_view = reads = None
 
-    def __init__(self, name: str, collapse: str, result: str):
+    def __init__(self, name: str, collapse: str, result: str, **facts):
         self.name = name
         self.collapse = collapse
         self._result = result
+        vars(self).update(facts)
 
     def json_schema(self, reach=None):
         return {
@@ -257,7 +263,7 @@ def test_turn_memo_forgets_excerpts_the_compaction_collapsed(monkeypatch):
 
     ctx = "[#1 | notes/a | embed:0.5]\n" + ("yoga excerpt " * 400)
     result = json.dumps({"query": "q", "context": ctx, "notes": ["notes/a"], "partial": [], "facts": 0})
-    tool = _FakeTool("silica_recall", "lazy", result)
+    tool = _FakeTool("silica_recall", "lazy", result, history_view=dedup_recall_excerpts)
     calls = [0]
 
     def fake_call_llm(model, messages, **kw):

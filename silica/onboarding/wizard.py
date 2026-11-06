@@ -20,6 +20,7 @@ from silica.config import (
     USER_ENV,
 )
 from silica.kernel.base import gitstate
+from silica.kernel.base.layout import DOC_SCAN_CAP, files_with
 from silica.kernel.base.manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
 from silica.provider_table import HOSTED, PROVIDERS
@@ -473,12 +474,7 @@ def _ask_local_model(
     return _ask(input_fn, f"{label} model id", recommended)
 
 
-# bounded walk — a repo-mode vault can be a source tree with
-# node_modules, and init must not stall counting files it will only mention.
-_DOC_SCAN_CAP = 20_000
-
-
-def propose_form_fallback(vault: Path, cap: int = _DOC_SCAN_CAP) -> str | None:
+def propose_form_fallback(vault: Path, cap: int = DOC_SCAN_CAP) -> str | None:
     """Fallback distill profile to propose, from a mechanical `form:` census.
 
     docs/specs/nucleation-forms.md wizard step: no vault-wide auto-inference
@@ -556,7 +552,7 @@ def _offer_zotero(input_fn: Callable[[str], str], vault: Path) -> None:
         CONSOLE.print(f"  {GLYPHS['ok']} zotero: library {library}")
 
 
-def unindexable_docs(vault: Path, cap: int = _DOC_SCAN_CAP) -> list[Path]:
+def unindexable_docs(vault: Path, cap: int = DOC_SCAN_CAP) -> list[Path]:
     """Documents present in the vault that the index cannot read.
 
     The index is markdown-only (`fs_backend._build_index` skips every non-`.md`
@@ -573,13 +569,7 @@ def unindexable_docs(vault: Path, cap: int = _DOC_SCAN_CAP) -> list[Path]:
     """
     from silica.sources.convert import CONVERTIBLE_DOC_EXTS
 
-    out: list[Path] = []
-    for i, p in enumerate(vault.rglob("*")):
-        if i >= cap:
-            break
-        if p.suffix.lower() in CONVERTIBLE_DOC_EXTS and p.is_file():
-            out.append(p)
-    return out
+    return files_with(vault, CONVERTIBLE_DOC_EXTS, cap)
 
 
 def _warn_unindexable(vault: Path) -> None:

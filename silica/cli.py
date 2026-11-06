@@ -43,24 +43,10 @@ from silica.ui.home import print_home
 from silica.ui.prompt import build_session, bottom_toolbar, prompt_text
 from prompt_toolkit.patch_stdout import patch_stdout
 
-# Import tools to trigger registration via @tool decorator
-import silica.tools.atomic  # noqa: F401
-import silica.tools.pipeline  # noqa: F401
-import silica.tools.notes  # noqa: F401
-import silica.tools.events  # noqa: F401
-import silica.tools.graph  # noqa: F401
-import silica.tools.aliases  # noqa: F401
-import silica.tools.curate  # noqa: F401
-import silica.tools.sessions  # noqa: F401
-import silica.tools.rework  # noqa: F401
-import silica.tools.runners  # noqa: F401
-import silica.tools.wrapped  # noqa: F401
-import silica.tools.codedocs_tool  # noqa: F401
-import silica.tools.delegate_tool  # noqa: F401
-import silica.tools.loader  # noqa: F401
-import silica.tools.tabular  # noqa: F401
-import silica.sources.web_research  # noqa: F401  (registers the web_search, web_fetch, remember and plan tools)
+from silica.tools import catalog
 from silica.sources.web_research import WebTurn
+
+catalog.load()
 
 logger = logging.getLogger(__name__)
 
@@ -1032,13 +1018,13 @@ def _dc_find(args: list[str], *, raw_input: str = "", **_) -> bool:
         CONSOLE.print("  Usage: /find <query> [--k=N] [--min-trust=human|grounded|distilled|kept] "
                       "[--lifecycle=active|review|contested|superseded]")
         return True
-    from silica.tools.graph import _facade_search
+    from silica.kernel.recall.search import facade_search
 
     # The core and not the tool: the tool's payload drops `score` for the
     # model (graph._without_score), and this list shows it to the person.
     result = ""
     try:
-        parsed = _facade_search(query, k=k)
+        parsed = facade_search(query, k=k)
         result = json.dumps(parsed)
         results = parsed.get("results", [])
         if results and (min_trust or life):
@@ -1232,10 +1218,10 @@ def _check_legs():
     point 6: an Italian block over English sources)."""
     from silica.config import CONFIG
     from silica.kernel.check import run as check
-    from silica.tools.atomic import _engine
+    from silica.kernel.recall.engine import engine
 
     def search(query: str, k: int) -> list[dict]:
-        r = _engine().search(query, folder="", k=k)
+        r = engine().search(query, folder="", k=k)
         return r.get("hits") or []
 
     floor = check.dense_floor(str(CONFIG.embedding_model or ""))
@@ -3474,9 +3460,9 @@ def _nucleate_expand_folders(
             # first-class /nucleate input (each runs through convert below),
             # so a folder argument picks them up like it picks up notes.
             from silica.sources.convert import DOC_EXTS, IMG_EXTS
-            from silica.tools.atomic import _unconverted_under
+            from silica.kernel.recall.listing import unconverted_under
             pending = [
-                p for p in _unconverted_under(f)
+                p for p in unconverted_under(f)
                 if Path(p).suffix.lower() in DOC_EXTS
             ]
             # Images stay batch input only inside the inbox (screenshots
@@ -4315,13 +4301,13 @@ def _sc_report(args: list[str], **_) -> str | None:
 def _sc_enrich(args: list[str], **_) -> str | None:
     """/enrich [folder] — seed a batch ledger over a folder's notes."""
     from silica.driver import DRIVER
-    from silica.tools.graph import _in_folder
+    from silica.kernel.base.layout import in_folder
 
     folder = next(iter(_positional(args)), "")
 
-    # list_files(folder) pre-filters loosely (startswith); _in_folder tightens
+    # list_files(folder) pre-filters loosely (startswith); in_folder tightens
     # it so /enrich Foo never leaks into a sibling FooBar/ folder.
-    paths = [r.path for r in DRIVER.list_files(folder=folder) if _in_folder(r.path, folder)]
+    paths = [r.path for r in DRIVER.list_files(folder=folder) if in_folder(r.path, folder)]
     if not paths:
         return f"Error: no files found in '{folder}'."
 
