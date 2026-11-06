@@ -25,7 +25,7 @@ ASK = "ricordati che il relatore vuole il capitolo due entro venerdì"
 @pytest.fixture
 def vault(tmp_vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "user_memory", True)
-    monkeypatch.setattr(um, "_INCOGNITO", False)
+    monkeypatch.setattr("silica.obs.narration.INCOGNITO", False)
     token = gate.TURN.set(None)
     yield tmp_vault
     gate.TURN.reset(token)

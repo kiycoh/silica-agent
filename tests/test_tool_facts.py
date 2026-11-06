@@ -163,3 +163,74 @@ def test_the_rows_waiting_for_their_decorators_are_only_those():
         module = TOOLS[name].fn.__module__
         assert module in {"silica.tools.runners", "silica.tools.atomic",
                           "silica.sources.web_fetch", "silica.sources.web_research"}
+
+
+# --- the lanes the tool bodies moved to --------------------------------------
+
+def test_the_engine_refuses_to_run_without_a_pdf_reader(monkeypatch):
+    """Sources sits above recall, so the reader is handed over and not imported.
+    Unset, the engine must refuse: its own reader opens PDFs in this process."""
+    from silica.kernel.recall import engine
+
+    monkeypatch.setattr(engine, "pdf_reader", None)
+    with pytest.raises(RuntimeError, match="no PDF reader"):
+        engine.engine()
+
+
+def test_write_note_refuses_in_the_tools_order(tmp_path, monkeypatch):
+    """bind and gate are the tool's, and each runs where its refusal always
+    landed: a bad path and a reserved key before the binding, the whole note
+    built before the gate. A model reads these in this order."""
+    from silica.config import CONFIG
+    from silica.kernel.write.notes import write_note
+
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
+    seen: list[str] = []
+
+    def bind():
+        seen.append("bind")
+        return [], None, "bad binding"
+
+    def gate(path):
+        seen.append("gate")
+        return {"error": "bad diagram"}
+
+    assert "Refused path" in write_note("../out.md", "b", bind=bind)["error"]
+    assert "Reserved" in write_note("n.md", "b", props={"AI": "x"}, bind=bind)["error"]
+    assert seen == []
+    assert write_note("n.md", "b", bind=bind, gate=gate) == {"error": "bad binding"}
+    assert seen == ["bind"]
+    assert write_note("n.md", "b", template="no-such-template", gate=gate)["error"]
+    assert seen == ["bind"]
+    assert write_note("n.md", "b", gate=gate) == {"error": "bad diagram"}
+    assert seen == ["bind", "gate"]
+
+
+def test_write_note_needs_nothing_from_the_registry(tmp_path, monkeypatch):
+    """The Learn lane's way out of TOOLS["silica_write_note"].fn."""
+    from silica.config import CONFIG
+    from silica.kernel.write.notes import write_note
+
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("silica.tools.TOOLS", {})
+        out = write_note("Plans/n.md", "body", title="N")
+    assert out["success"] and out["path"] == "Plans/n.md"
+    assert "error" in write_note("Plans/n.md", "again")
+
+
+def test_the_three_refreshes_read_the_same_raw_body(monkeypatch):
+    """H-index-1: one loop, so the three cannot sign a note differently."""
+    from types import SimpleNamespace
+
+    from silica.kernel.recall import refresh
+
+    calls: list[str] = []
+    monkeypatch.setattr(refresh, "DRIVER", SimpleNamespace(
+        list_files=lambda folder: [SimpleNamespace(path="a/N.md", name="N"),
+                                   SimpleNamespace(path="a/Bad.md", name="Bad")],
+        read_note=lambda path: (calls.append(path) or SimpleNamespace(content="---\nk: v\n---\nraw"))
+        if path != "a/Bad.md" else (_ for _ in ()).throw(OSError("mid-write"))))
+    refs, notes, errors, refused = refresh._read_all("")
+    assert notes == [("a/N", "N", "---\nk: v\n---\nraw")]
+    assert errors == ["a/Bad.md: mid-write"] and len(refs) == 2 and refused is None

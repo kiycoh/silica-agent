@@ -593,8 +593,7 @@ def _user_memory_on_the_record(monkeypatch: pytest.MonkeyPatch) -> None:
     """/incognito is one flag per process (ADR-0076), and a TUI test that
     types it leaves it set when main() returns. The files themselves are
     already sandboxed by _isolate_silica_home."""
-    from silica.kernel import user_memory
-    monkeypatch.setattr(user_memory, "_INCOGNITO", False)
+    monkeypatch.setattr("silica.obs.narration.INCOGNITO", False)
 
 
 class MemoryKeyring:

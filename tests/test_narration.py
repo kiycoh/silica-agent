@@ -202,7 +202,7 @@ def test_an_incognito_session_stays_on_disk_and_leaves_the_list(narrator, monkey
     from silica.cli import _dc_incognito
     from silica.kernel import user_memory
 
-    monkeypatch.setattr(user_memory, "_INCOGNITO", False)
+    monkeypatch.setattr("silica.obs.narration.INCOGNITO", False)
     shown = _open(narrator)
     narrator.turn({"role": "user", "content": "a normal chat"})
     narrator.close()
