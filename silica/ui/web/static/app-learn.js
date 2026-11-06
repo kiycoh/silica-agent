@@ -3352,11 +3352,15 @@ function lrMissedList(wrap, r) {
   const again = new Map(r.items.filter((x) => x.retest).map((x) => [x.path, x.status === "met" ? "met" : "missed"]));
   const items = byPoint ? [] : r.items.filter((x) => !x.retest && ["missed", "assisted", "skipped"].includes(x.status));
   const n = pts.length + items.length;
-  // a skip is not a miss (ADR-0061): it is listed, and the head does not count it
-  const missedN = [...pts, ...items].filter((x) => x.status !== "skipped").length;
-  const skippedN = n - missedN;
+  // a skip is not a miss (ADR-0061), nor is a point the session ended before: both
+  // are listed, and the head counts neither
+  const missedN = [...pts, ...items].filter((x) => !["skipped", "open"].includes(x.status)).length;
+  const skippedN = [...pts, ...items].filter((x) => x.status === "skipped").length;
   const sec = lrEl("section", "lr-missed");
-  const metAgain = items.filter((x) => x.status !== "skipped").every((x) => again.get(x.path) === "met");
+  // by point there are no rows here, and every() on none said a session with no
+  // retest "met them when they came back"
+  const back = items.filter((x) => x.status !== "skipped");
+  const metAgain = back.length > 0 && back.every((x) => again.get(x.path) === "met");
   sec.appendChild(lrEl("h2", null, missedN ? `You missed ${lrPlural(missedN, byPoint ? "point" : "question")}`
     + (metAgain ? (missedN === 1 ? ", and met it when it came back" : ", and met them when they came back") : "") : "Nothing missed"));
   const t3 = r.tally3;
