@@ -85,7 +85,7 @@ def enabled() -> bool:
     return os.environ.get("SILICA_PDF_TABLES", "").strip() == "1"
 
 
-def stitched(src: Path, data: dict) -> list:
+def stitched(src: Path, data: dict, on_page=None) -> list:
     """`data["pages"]` with the tables of its pages rewritten, for `_pdf_markdown`:
     the same list when nothing changed. `data` is `pdf_extract.read`'s cached
     dict, so a page rewritten is a new list beside it and never an edit of it.
@@ -106,10 +106,7 @@ def stitched(src: Path, data: dict) -> list:
     session = _session() if candidates else None
     if session is None:
         return pages
-    from silica.sources import convert
-
-    # Here, on the calling thread: the job's ContextVar is not set in a pool's.
-    report = convert.PAGE_PROGRESS.get() or (lambda done, total: None)
+    report = on_page or (lambda done, total: None)
     plans, grids = _plan(src, pages, candidates, session, report)
     readings = _read_all(grids, report) if grids else {}
     if not readings:
@@ -499,7 +496,7 @@ def _read_all(grids: list[str], report: Callable[[int, int], None]) -> dict[int,
         return {}
     report(1, len(grids))
     with ThreadPoolExecutor(max_workers=convert._PAGE_READERS, thread_name_prefix="pdf-table") as pool:
-        # In order, on this thread: see `stitched`.
+        # In order, so a slow table holds the count back a little.
         for md in pool.map(guarded, grids[1:]):
             results.append(md)
             report(len(results), len(grids))

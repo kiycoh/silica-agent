@@ -516,11 +516,7 @@ def test_progress_is_reported_on_the_calling_thread(local, monkeypatch):
         assert threading.current_thread() is caller
         seen.append((done, total))
 
-    token = conv.PAGE_PROGRESS.set(report)
-    try:
-        pdf_tables.stitched(src, data)
-    finally:
-        conv.PAGE_PROGRESS.reset(token)
+    pdf_tables.stitched(src, data, report)
     assert seen == [(0, 2), (1, 2), (2, 2), (0, 2), (1, 2), (2, 2)]
 
 

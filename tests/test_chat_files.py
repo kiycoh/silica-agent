@@ -347,21 +347,18 @@ def test_a_chat_file_converts_beside_itself_and_reports_its_pages(tmp_vault):
     assert conv._note_dir(Path(tmp_vault.note("Inbox/x/paper.pdf", "")), "Inbox") == "Inbox/x"
 
     seen: list[tuple[int, int]] = []
-    token = conv.PAGE_PROGRESS.set(lambda done, total: seen.append((done, total)))
-    try:
-        data = {"images": {0: b"png0", 1: b"png1", 2: b"png2"}, "pages": [[("t", 0)]], "no_text": [0, 1, 2]}
-        import silica.agent.vision as vision
-        from silica.kernel.recall import image_readings
+    data = {"images": {0: b"png0", 1: b"png1", 2: b"png2"}, "pages": [[("t", 0)]], "no_text": [0, 1, 2]}
+    import silica.agent.vision as vision
+    from silica.kernel.recall import image_readings
 
-        real = image_readings.read_image
-        image_readings.read_image = lambda png, lang, prompt=None, ask=None: {"text": "read"}
-        vision_ask = vision.ask_chat_model
-        vision.ask_chat_model = lambda messages, max_tokens=0, **_: "read"
-        try:
-            conv._read_pages(data, Path(tmp_vault.note("work/.keep", "")).parent)
-        finally:
-            image_readings.read_image = real
-            vision.ask_chat_model = vision_ask
+    real = image_readings.read_image
+    image_readings.read_image = lambda png, lang, prompt=None, ask=None: {"text": "read"}
+    vision_ask = vision.ask_chat_model
+    vision.ask_chat_model = lambda messages, max_tokens=0, **_: "read"
+    try:
+        conv._read_pages(data, Path(tmp_vault.note("work/.keep", "")).parent,
+                         on_page=lambda done, total: seen.append((done, total)))
     finally:
-        conv.PAGE_PROGRESS.reset(token)
+        image_readings.read_image = real
+        vision.ask_chat_model = vision_ask
     assert seen[0] == (0, 3) and seen[-1] == (3, 3)

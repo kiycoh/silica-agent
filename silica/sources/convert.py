@@ -71,7 +71,6 @@ import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Callable, Sequence
-from contextvars import ContextVar
 from glob import escape as glob_escape, glob
 from html.parser import HTMLParser
 from pathlib import Path
@@ -245,7 +244,8 @@ _ASR_TIMEOUT_S = 7200
 _ASR_PARAGRAPH_GAP_S = 2.0
 
 
-def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = None) -> list[str]:
+def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = None, *,
+            on_page: Callable[[int, int], None] | None = None, beside: bool = False) -> list[str]:
     """Convert a non-`.md` document into one or more `.md` notes in the inbox.
 
     Returns the list of created note paths. A small document is a single note; a
@@ -260,6 +260,13 @@ def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = Non
     written once as that source leaf, references included, and every segment
     is named after it and carries ``source_leaf:`` so CLEANUP links its notes
     there instead of writing one leaf per segment.
+
+    ``on_page`` is called with (pages read, pages to read) while the chat model
+    reads a PDF's pages, the one slow part of a conversion that knows how far it
+    is (ADR-0121 point 1). ``beside`` is for a file the vault's + brought in: that
+    file sits where the person put it, at the top of the vault and not in the
+    inbox (owner, 2026-11-02), so its note goes beside it. /convert keeps its
+    contract, a note in the inbox.
     """
     # Strip first: a quoted path with a stray trailing space ("…book.pdf ") has
     # suffix ".pdf " — not in DOC_EXTS — and the rejection then prints ".pdf",
@@ -267,18 +274,7 @@ def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = Non
     target = target.strip()
     if Path(target).suffix.lower() not in formats.DOC_EXTS:
         raise ValueError(f"no converter for {Path(target).suffix.lower() or 'this file type'}")
-    return _doc_to_md(target, dest_dir, leaf)
-
-
-# Set by the job worker around one convert() (ADR-0121 point 1): called with
-# (pages read, pages to read) while the chat model reads a PDF's pages, the one
-# slow part of a conversion that knows how far it is.
-PAGE_PROGRESS: ContextVar[Callable[[int, int], None] | None] = ContextVar("page_progress", default=None)
-# Set by the job worker around the convert() of a file the vault's + brought in:
-# that file sits where the person put it, at the top of the vault and not in
-# the inbox (owner, 2026-11-02), so its note goes beside it. /convert keeps its
-# contract, a note in the inbox.
-BESIDE_SOURCE: ContextVar[bool] = ContextVar("beside_source", default=False)
+    return _doc_to_md(target, dest_dir, leaf, on_page, beside)
 
 
 def _in(folder: str, name: str) -> str:
@@ -287,7 +283,7 @@ def _in(folder: str, name: str) -> str:
     return f"{folder}/{name}" if folder else name
 
 
-def _note_dir(src: Path, inbox: str) -> str:
+def _note_dir(src: Path, inbox: str, beside: bool = False) -> str:
     """The folder a converted note goes to: the source's own folder when the
     source sits under the inbox, else the inbox itself.
 
@@ -295,14 +291,14 @@ def _note_dir(src: Path, inbox: str) -> str:
     `CorsoA/Lezione 1.pdf` and `CorsoB/Lezione 1.pdf` the same note, the second
     overwriting the first (reproduced 2026-10-13, ADR-0098 point 6), and a
     folder import is made of exactly such folders.
-    A file the vault's + imported (`BESIDE_SOURCE`) converts beside itself
-    wherever it sits in the vault: the same rule against the vault root.
+    A file the vault's + imported (`beside`) converts beside itself wherever it
+    sits in the vault: the same rule against the vault root.
     ponytail: a source outside the inbox given to /convert still lands at the
     inbox root, so two such sources with one name still collide; the upgrade is
-    `BESIDE_SOURCE` for /convert too, due when a /convert of a library reports it.
+    `beside` for /convert too, due when a /convert of a library reports it.
     """
     vault = Path(CONFIG.vault_path or ".").resolve()
-    if BESIDE_SOURCE.get():
+    if beside:
         try:
             rel = src.resolve().parent.relative_to(vault)
             return "" if rel == Path(".") else rel.as_posix()
@@ -628,15 +624,27 @@ def _reader_of(fmt: formats.Format):
     return globals()[fmt.reader]
 
 
-def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None) -> list[str]:
+def _read(reader, src: Path, workdir: Path, on_page) -> tuple[str, Path]:
+    """`reader` on `src`, handed `on_page` if it is one that can say how far it is.
+
+    Three of them can. Every other reader, and whatever fills `PDF_PROVIDERS`, is
+    a plain (src, workdir), so one more parameter on all of them would be noise.
+    """
+    if reader in (_via_pdfium, _via_pptx, _via_legacy_office):
+        return reader(src, workdir, on_page)
+    return reader(src, workdir)
+
+
+def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None,
+               on_page=None, beside: bool = False) -> list[str]:
     src = _resolve_input(target)
     suffix = src.suffix.lower()
     fmt = formats.FORMATS[suffix]
     if fmt.family == "tabular":
-        return _convert_tabular(src)
+        return _convert_tabular(src, beside)
     provider = _reader_of(fmt)
     with tempfile.TemporaryDirectory() as tmp:
-        md_text, images_src = provider(src, Path(tmp))
+        md_text, images_src = _read(provider, src, Path(tmp), on_page)
         read_from_image = not md_text.strip() and fmt.family == "image"
         if read_from_image:
             md_text = _image_reading_md(src)
@@ -672,7 +680,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
     from silica.kernel.base.manifest import active_inbox_dir
     from silica.kernel.write.preserve import Loss
 
-    inbox = _note_dir(src, active_inbox_dir() or "Inbox")
+    inbox = _note_dir(src, active_inbox_dir() or "Inbox", beside)
     stem = _note_stem(src)
     if leaf is not None:
         _write_leaf(src, body, *leaf)
@@ -821,7 +829,7 @@ def _first_prose_words(part: str) -> list[str]:
 # hand-faked modules in tests/test_convert.py — a library rename would drift the
 # fakes and pass silently. Add a real-install smoke test to catch API drift.
 
-def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
+def _via_pdfium(src: Path, workdir: Path, on_page=None) -> tuple[str, Path]:
     """Default provider — PDFium's text layer, headings from the outline or a
     line heuristic. No torch, no JVM, one ~3 MB wheel.
 
@@ -850,7 +858,7 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
     from silica.sources import pdf_extract, pdf_tables
 
     data = pdf_extract.read(src)
-    _read_pages(data, workdir, draw=lambda pages: pdf_extract.page_pngs(src, pages))
+    _read_pages(data, workdir, draw=lambda pages: pdf_extract.page_pngs(src, pages), on_page=on_page)
     if len(data["no_text"]) == data["n_pages"] and not data["read"]:
         raise pdf_extract.PdfUnreadable(_no_text_sentence(), "no_text")
     after = dict(data["readings"])
@@ -858,7 +866,7 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
         after[i] = f"> [page {i + 1}: no selectable text, not read]"
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)
-    pages = pdf_tables.stitched(src, data)
+    pages = pdf_tables.stitched(src, data, on_page)
     return _pdf_markdown(pages, data["toc"], after, set(data["math_read"])), images
 
 
@@ -889,7 +897,7 @@ def _no_text_sentence(ocr_provider: bool = False) -> str:
 _PAGE_READERS = 4
 
 
-def _read_pages(data: dict, workdir: Path, draw=None) -> None:
+def _read_pages(data: dict, workdir: Path, draw=None, on_page=None) -> None:
     """Send each rendered page to the chat model, a page without text
     (ADR-0087 amendment) for its words and a formula page (the amendment of
     2026-10-14) for a transcription with its formulas in LaTeX, and keep what
@@ -990,7 +998,7 @@ def _read_pages(data: dict, workdir: Path, draw=None) -> None:
                 yield batch
 
         results: list[tuple[int, dict | None]] = []
-        report = PAGE_PROGRESS.get() or (lambda done, total: None)
+        report = on_page or (lambda done, total: None)
         report(0, total)
         with ThreadPoolExecutor(max_workers=_PAGE_READERS, thread_name_prefix="pdf-page") as pool:
             for batch in batches():
@@ -1007,8 +1015,7 @@ def _read_pages(data: dict, workdir: Path, draw=None) -> None:
                         break
                     report(1, total)
                     batch = batch[1:]
-                # In order, so a slow page holds the count back a little;
-                # the calling thread is the one the job's PAGE_PROGRESS is set in.
+                # In order, so a slow page holds the count back a little.
                 for (i, _), reading in zip(batch, pool.map(guarded, batch)):
                     results.append((i, reading))
                     report(len(results), total)
@@ -1538,7 +1545,7 @@ def _pptx_table(frame: ET.Element) -> str:
     return "\n".join([lines[0], "|" + "---|" * width, *lines[1:]])
 
 
-def _via_pptx(src: Path, workdir: Path) -> tuple[str, Path]:
+def _via_pptx(src: Path, workdir: Path, on_page=None) -> tuple[str, Path]:
     """PPTX → markdown from the deck's XML, standard library only (ADR-0120).
 
     Slides in the presentation's order, each a `##` heading (its title, or
@@ -1603,7 +1610,7 @@ def _via_pptx(src: Path, workdir: Path) -> tuple[str, Path]:
         else:
             bare[n] = max(pictures)[1]
         parts[n] = out
-    readings = _read_slides(bare, written, images, parts, workdir)
+    readings = _read_slides(bare, written, images, parts, workdir, on_page)
     for n in bare:
         parts[n].insert(1, readings.get(n) or f"> [slide {n + 1}: no text, not read]")
     if not texty and not readings:
@@ -1677,7 +1684,7 @@ def _pptx_slide(z: zipfile.ZipFile, part: str, slide_area: int
 
 
 def _read_slides(bare: dict[int, str], written: dict[str, str], images: Path,
-                 parts: dict[int, list[str]], workdir: Path) -> dict[int, str]:
+                 parts: dict[int, list[str]], workdir: Path, on_page=None) -> dict[int, str]:
     """The chat model's reading of each slide with no text of its own, from its
     largest picture, through `_read_pages` like a PDF page without text: the
     same cap (`vision_pages`), the same 16 MiB of pictures a file, and the
@@ -1698,7 +1705,7 @@ def _read_slides(bare: dict[int, str], written: dict[str, str], images: Path,
     sample = " ".join(line for out in parts.values() for line in out[1:] if not line.startswith("!["))[:4000]
     data: dict = {"images": sent, "suffixes": suffixes, "unit": "slide",
                   "pages": [[(sample, 0.0)]], "no_text": sorted(sent)}
-    _read_pages(data, workdir)
+    _read_pages(data, workdir, on_page=on_page)
     return data["readings"]
 
 
@@ -2437,7 +2444,7 @@ def _duckdb_profile_bound(src: Path, members: list[Path] | None,
                        [list(r) for r in sample], label, categorical, members)
 
 
-def _convert_tabular(src: Path) -> list[str]:
+def _convert_tabular(src: Path, beside: bool = False) -> list[str]:
     """Data file → profile note in the inbox. The rows never enter the vault.
 
     ADR-0014 turns every source into prose, and for a data file the honest
@@ -2458,7 +2465,7 @@ def _convert_tabular(src: Path) -> list[str]:
     from silica.driver import DRIVER
     from silica.kernel.base.manifest import active_inbox_dir
 
-    inbox = _note_dir(src, active_inbox_dir() or "Inbox")
+    inbox = _note_dir(src, active_inbox_dir() or "Inbox", beside)
     stem = _family_stem(members) if len(members) > 1 else src.stem
     fm = _provenance_fm(src, md, tabular_members=members)
     note_rel = _in(inbox, f"{stem}.md")
@@ -2632,7 +2639,7 @@ def _legacy_office_to_pdf(src: Path, workdir: Path) -> Path:
     return pdfs[0]
 
 
-def _via_legacy_office(src: Path, workdir: Path) -> tuple[str, Path]:
+def _via_legacy_office(src: Path, workdir: Path, on_page=None) -> tuple[str, Path]:
     """Legacy/ODF → PDF → whichever PDF provider is configured.
 
     Deliberately routed back through the seam rather than pinned to the default:
@@ -2640,7 +2647,7 @@ def _via_legacy_office(src: Path, workdir: Path) -> tuple[str, Path]:
     it here too.
     """
     pdf = _legacy_office_to_pdf(src, workdir)
-    return _pdf_provider()(pdf, workdir)
+    return _read(_pdf_provider(), pdf, workdir, on_page)
 
 
 # --- media: ffmpeg demux + a speech-to-text provider ------------------------

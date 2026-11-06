@@ -342,17 +342,12 @@ def _converted(job_id: str, src: Path, dest_dir: str, beside: bool = False) -> l
     on the record as `progress` (ADR-0121 point 1): the slow part of a PDF,
     105 s for a 13-page paper with formulas, which the row could only count in
     minutes. One write a page; a page takes about 2 s."""
-    from silica.sources.convert import BESIDE_SOURCE, PAGE_PROGRESS, convert
+    from silica.sources.convert import convert
 
     def report(done: int, total: int) -> None:
         _update(job_id, expect=("running",), progress={"done": done, "total": total})
 
-    token, near = PAGE_PROGRESS.set(report), BESIDE_SOURCE.set(beside)
-    try:
-        return convert(str(src), dest_dir=dest_dir)
-    finally:
-        BESIDE_SOURCE.reset(near)
-        PAGE_PROGRESS.reset(token)
+    return convert(str(src), dest_dir=dest_dir, on_page=report, beside=beside)
 
 
 def _pages(src: Path) -> tuple[dict, str]:
