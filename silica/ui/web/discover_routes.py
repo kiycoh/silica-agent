@@ -15,22 +15,17 @@ import re
 import time
 from importlib import resources
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from silica.config import hosted
 from silica.sources.discover import feeds as F
 from silica.sources.discover import rank, read, store
 from silica.sources.discover import story as S
-
-
-def _require_same_origin(request: Request) -> None:
-    from silica.ui.web.server import _require_same_origin as check
-
-    check(request)
+from silica.ui.web import drop
 
 
 router = APIRouter(prefix="/discover")
-_SAME_ORIGIN = [Depends(_require_same_origin)]
 _COVER_NAME = re.compile(r"^[0-9a-f]{24}\.(?:jpg|png|webp|gif|avif)$")
 # A host name and nothing else: it becomes both a fetched address and a file name.
 _DOMAIN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
@@ -38,12 +33,6 @@ _IMAGE_HEADERS = {"Cache-Control": "private, max-age=86400", "Content-Security-P
 _TABS = ("foryou", "news", "research", "video")
 _FEEDBACK = (-1, 0, 1)
 _CATALOG_SHOWN = 40
-
-
-def _hosted() -> bool:
-    from silica.config import hosted
-
-    return hosted()
 
 
 def _label(doc: dict, bucket: str) -> str:
@@ -96,10 +85,9 @@ def _card(doc: dict, s: dict) -> dict:
 
 def _feed_row(f: dict) -> dict:
     st = f.get("state") or {}
-    hosted = _hosted()
     if f.get("kind") == "wikipedia":
         status, bad = "on demand", ""
-    elif f.get("kind") == "youtube" and hosted:
+    elif f.get("kind") == "youtube" and hosted():
         status, bad = "desktop app only", "warn"
     elif st.get("status") == "error":
         status = st.get("error", "failed") + (f" since {_age(st.get('since'))}" if st.get("since") else "")
@@ -145,10 +133,8 @@ def discover():
     failing = sum(1 for f in feeds if (f.get("state") or {}).get("status") in ("error", "refused"))
     topics = [{**t, "on": doc["topics"].get(t["key"], True)} for t in doc.get("topic_list") or []]
     from silica.kernel.base.manifest import active_inbox_dir
-    from silica.ui.web.server import YOUTUBE_ON_SERVER
-
-    return {"setup": bool(doc.get("setup")), "hosted": _hosted(), "reading": dict(read.PROGRESS) if reading else None,
-            "youtube_on_server": YOUTUBE_ON_SERVER, "inbox": active_inbox_dir() or "Inbox",
+    return {"setup": bool(doc.get("setup")), "hosted": hosted(), "reading": dict(read.PROGRESS) if reading else None,
+            "youtube_on_server": drop.YOUTUBE_ON_SERVER, "inbox": active_inbox_dir() or "Inbox",
             "read_at": doc.get("read_at") or 0, "tabs": tabs, "topics": topics,
             "buckets": {k: v for k, v in doc["buckets"].items()},
             "research_cats": [f.get("name", "").removeprefix("arXiv ") for f in doc["feeds"]
@@ -164,7 +150,7 @@ def status():
     return {"reading": dict(read.PROGRESS) if read.PROGRESS["running"] else None, "read_at": doc.get("read_at") or 0}
 
 
-@router.post("/read", dependencies=_SAME_ORIGIN)
+@router.post("/read")
 def read_now():
     """The refresh button: read again now, whatever the hour says."""
     return {"reading": read.start(force=True) and dict(read.PROGRESS)}
@@ -176,12 +162,12 @@ def setup_info():
     with store.LOCK:
         doc = store.load()
     counts = {b: sum(1 for f in doc["feeds"] if f["bucket"] == b) for b in store.BUCKETS}
-    return {"buckets": doc["buckets"], "counts": counts, "hosted": _hosted(),
+    return {"buckets": doc["buckets"], "counts": counts, "hosted": hosted(),
             "topics": [{k: v for k, v in t.items() if k != "paths"} for t in rank.vault_topics()],
             "catalog": _catalog_meta()}
 
 
-@router.post("/setup", dependencies=_SAME_ORIGIN)
+@router.post("/setup")
 def setup(payload: dict):
     """Start reading: the buckets picked and the vault topics switched on."""
     picked = payload.get("buckets") or {}
@@ -201,7 +187,7 @@ def setup(payload: dict):
     return {"ok": True}
 
 
-@router.post("/topics", dependencies=_SAME_ORIGIN)
+@router.post("/topics")
 def topics(payload: dict):
     key = str(payload.get("key") or "")
     with store.LOCK:
@@ -213,7 +199,7 @@ def topics(payload: dict):
     return {"ok": True}
 
 
-@router.post("/feedback", dependencies=_SAME_ORIGIN)
+@router.post("/feedback")
 def feedback(payload: dict):
     """More like this (1), Less like this (-1), or neither (0)."""
     sid, value = str(payload.get("id") or ""), payload.get("value")
@@ -281,13 +267,11 @@ def story(sid: str):
             "writing": dict(prog) if prog and (prog.get("running") or prog.get("error")) else None,
             "list": [{"title": a["title"], "url": a["url"], "domain": a.get("domain", ""), "lead": a.get("lead", "")}
                      for a in arts],
-            "related": related, "hosted": _hosted(), "youtube_on_server": _youtube_copy()}
+            "related": related, "hosted": hosted(), "youtube_on_server": _youtube_copy()}
 
 
 def _youtube_copy() -> str:
-    from silica.ui.web.server import YOUTUBE_ON_SERVER
-
-    return YOUTUBE_ON_SERVER
+    return drop.YOUTUBE_ON_SERVER
 
 
 def _related(doc: dict, s: dict) -> list[dict]:
@@ -309,7 +293,7 @@ def _related(doc: dict, s: dict) -> list[dict]:
     return [{"id": o["id"], "title": doc["articles"].get(o["articles"][0], {}).get("title", "")} for _, o in out[:3]]
 
 
-@router.post("/story/{sid}/write", dependencies=_SAME_ORIGIN)
+@router.post("/story/{sid}/write")
 def story_write(sid: str):
     """Write the story now: the first open, or Rewrite after it grew."""
     with store.LOCK:
@@ -319,7 +303,7 @@ def story_write(sid: str):
     return {"writing": dict(S.start_write(None, sid))}
 
 
-@router.post("/save", dependencies=_SAME_ORIGIN)
+@router.post("/save")
 async def save(payload: dict):
     sid = str(payload.get("id") or "")
     answer = str(payload.get("answer") or "")[:40_000]
@@ -331,7 +315,7 @@ async def save(payload: dict):
     return {"path": path}
 
 
-@router.post("/unsave", dependencies=_SAME_ORIGIN)
+@router.post("/unsave")
 async def unsave(payload: dict):
     sid, path = str(payload.get("id") or ""), str(payload.get("path") or "")
     with store.LOCK:
@@ -355,10 +339,10 @@ def feeds_list():
         if not rows and b in store.BUCKETS and b != "news":
             continue
         out.append({"key": b, "label": _label(doc, b), "on": bool(doc["buckets"].get(b)), "rows": rows})
-    return {"buckets": out, "hosted": _hosted(), "keep_days": store.KEEP_DAYS, "catalog": _catalog_meta()}
+    return {"buckets": out, "hosted": hosted(), "keep_days": store.KEEP_DAYS, "catalog": _catalog_meta()}
 
 
-@router.post("/buckets", dependencies=_SAME_ORIGIN)
+@router.post("/buckets")
 def bucket_toggle(payload: dict):
     key = str(payload.get("key") or "")
     with store.LOCK:
@@ -392,7 +376,7 @@ def _probe(url: str) -> tuple[str, str]:
     raise LookupError("no feed found")
 
 
-@router.post("/feeds", dependencies=_SAME_ORIGIN)
+@router.post("/feeds")
 async def feeds_add(payload: dict):
     """Add a feed by what the person typed, to a bucket, with tags."""
     raw = str(payload.get("url") or "").strip()
@@ -414,7 +398,7 @@ async def feeds_add(payload: dict):
             # A site with no feed is read through search, locally only
             # (ADR-0137 decision 6): the hosted pilot shares one address
             # across every tenant on the keyless lanes.
-            if _hosted():
+            if hosted():
                 raise HTTPException(422, "no feed found there, and the hosted pilot reads feeds only") from None
             kind = "site"
         except Exception as exc:
@@ -439,7 +423,7 @@ async def feeds_add(payload: dict):
     return {"feed": _feed_row(feed)}
 
 
-@router.post("/feeds/remove", dependencies=_SAME_ORIGIN)
+@router.post("/feeds/remove")
 def feeds_remove(payload: dict):
     fid = str(payload.get("id") or "")
     with store.LOCK:
@@ -452,7 +436,7 @@ def feeds_remove(payload: dict):
     return {"ok": True}
 
 
-@router.post("/opml", dependencies=_SAME_ORIGIN)
+@router.post("/opml")
 async def opml(file: UploadFile = File(...)):
     """Import OPML: every feed it lists, into News, with its folders as tags."""
     data = await file.read(2 * 1024 * 1024 + 1)
@@ -515,7 +499,7 @@ def catalog(q: str = ""):
             "meta": _catalog_meta()}
 
 
-@router.post("/catalog/add", dependencies=_SAME_ORIGIN)
+@router.post("/catalog/add")
 def catalog_add(payload: dict):
     """Adding a catalog topic adds its feeds as one bucket."""
     name = str(payload.get("name") or "")
@@ -539,7 +523,7 @@ def catalog_add(payload: dict):
     return {"ok": True, "feeds": len(cat["feeds"])}
 
 
-@router.post("/catalog/remove", dependencies=_SAME_ORIGIN)
+@router.post("/catalog/remove")
 def catalog_remove(payload: dict):
     key = "c:" + str(payload.get("name") or "")
     with store.LOCK:

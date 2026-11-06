@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from silica.config import CONFIG  # noqa: E402
 from silica.onboarding.wizard import merge_env, resolve_env_path  # noqa: E402
+from silica.onboarding import settings_ops
 from silica.ui.web import settings as st  # noqa: E402
 
 
@@ -28,8 +29,9 @@ def env_file(tmp_path, monkeypatch):
 @pytest.fixture
 def client(tmp_vault, tmp_path, monkeypatch):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    monkeypatch.setattr(server, "_busy", False)
+    monkeypatch.setattr(SESSION, "busy", False)
     return TestClient(server.app), server
 
 
@@ -48,10 +50,12 @@ def test_the_env_holds_keys_so_only_its_owner_reads_it(env_file):
     both end 0600: the file holds every API key the user has."""
     import os
 
-    st.write_env({"SILICA_MODEL": "a"})
+    from silica.onboarding.wizard import write_env
+
+    write_env({"SILICA_MODEL": "a"})
     assert os.stat(env_file).st_mode & 0o777 == 0o600
     os.chmod(env_file, 0o664)
-    st.write_env({"SILICA_MODEL": "b"})
+    write_env({"SILICA_MODEL": "b"})
     assert os.stat(env_file).st_mode & 0o777 == 0o600
 
 
@@ -72,8 +76,9 @@ def test_env_path_is_the_user_file_even_inside_a_repo(tmp_path, monkeypatch):
 
 
 def test_a_write_is_refused_while_a_turn_runs(client, env_file, monkeypatch):
+    from silica.ui.web.session import SESSION
     c, server = client
-    monkeypatch.setattr(server, "_busy", True)
+    monkeypatch.setattr(SESSION, "busy", True)
     r = c.post("/settings", json={"key": "SILICA_INBOX_DIR", "value": "Nope"})
     assert r.status_code == 409
     assert not env_file.exists()  # refused means nothing was written
@@ -131,9 +136,11 @@ def test_loopback_names_are_served(client, host):
 def test_changing_the_provider_writes_its_whole_group_at_once(env_file, monkeypatch):
     """No intermediate state where the provider is new and the model is old:
     both move in one merge_env, so there is no instant to observe them apart."""
+    from silica.onboarding import wizard
+
     writes = []
-    real_write = st.write_env
-    monkeypatch.setattr(st, "write_env", lambda u: (writes.append(dict(u)), real_write(u))[1])
+    real_write = wizard.write_env
+    monkeypatch.setattr(wizard, "write_env", lambda u: (writes.append(dict(u)), real_write(u))[1])
     monkeypatch.setattr(CONFIG, "model", "qwen3-32b")
     monkeypatch.setattr(CONFIG, "_provider", "lmstudio")
     # apply() makes the keys live by writing os.environ; declare them here so
@@ -197,14 +204,14 @@ def test_safe_mode_round_trips_through_vault_yaml_not_the_env(tmp_vault, env_fil
     (root / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")
     reset_manifest_cache()
     row = next(r for rows in st.sections().values() for r in rows
-               if r.key == st.SAFE_MODE_KEY)
+               if r.key == settings_ops.SAFE_MODE_KEY)
     assert st._value(row) == "true"
 
-    assert st.apply(st.SAFE_MODE_KEY, "false")["ok"] is True
+    assert st.apply(settings_ops.SAFE_MODE_KEY, "false")["ok"] is True
     assert st._value(row) == "false"
     assert 'write_dir: ""' in (root / "vault.yaml").read_text(encoding="utf-8")
 
-    result = st.apply(st.SAFE_MODE_KEY, "true")
+    result = st.apply(settings_ops.SAFE_MODE_KEY, "true")
     assert result["values"] == {"safe_mode": "true", "write_dir": "silica"}
     assert st._value(row) == "true"
     assert not env_file.exists()  # never an env var
@@ -218,7 +225,7 @@ def test_the_bug_payload_carries_no_api_key(tmp_vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "provider_api_key", secret)
     monkeypatch.setattr(CONFIG, "tavily_api_key", secret)
 
-    payload = st.bug_report()["payload"]
+    payload = settings_ops.bug_report(st.reportable())["payload"]
 
     assert secret not in payload
     assert "silica" in payload  # it still says something useful
@@ -228,10 +235,11 @@ def test_vault_switch_is_live_only_and_never_persists(client, env_file, tmp_path
     """A SILICA_VAULT line in the .env is ignored at boot (config.load_user_env),
     so persisting the switch would write a value nothing reads back and the
     panel would show a "file" origin for a vault the next launch will not use."""
+    from silica.ui.web import settings_routes
     _, server = client
     other = tmp_path / "other-vault"
     other.mkdir()
-    out = server._apply_vault_switch(str(other))
+    out = settings_routes._apply_vault_switch(str(other))
     assert out["ok"] and out["vault"] == str(other.resolve())
     assert CONFIG.vault_path == str(other.resolve())
     assert not env_file.exists() or "SILICA_VAULT" not in env_file.read_text()

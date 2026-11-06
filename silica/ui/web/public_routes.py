@@ -15,28 +15,18 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 
-from silica.ui.web.settings import _tilde
+from silica.kernel.text import note_parts
+from silica.onboarding import settings_ops
+from silica.ui.web import drop, session
 
 logger = logging.getLogger(__name__)
 
 
-def _require_same_origin(request: Request) -> None:
-    from silica.ui.web.server import _require_same_origin as check
-
-    check(request)
-
-
 router = APIRouter()
-_SAME_ORIGIN = [Depends(_require_same_origin)]
 # How many titles the view's "Goes out" shows of a vault, the best linked first.
 _GOES_OUT = 24
-
-
-def _title(path: str, fm: dict) -> str:
-    t = fm.get("title")
-    return t.strip() if isinstance(t, str) and t.strip() else path.rsplit("/", 1)[-1].removesuffix(".md")
 
 
 def _degrees(paths: set[str]) -> dict[str, int]:
@@ -97,13 +87,13 @@ def _view() -> dict:
     for v in sel["vaults"]:
         mine = [p for p in out_paths if of.get(p) == v["slug"]]
         before = set(last.get(v["slug"], {}).get("notes", []))
-        top = sorted(mine, key=lambda p: (-deg.get(p, 0), _title(p, fms.get(p) or {}).lower()))[:_GOES_OUT]
+        top = sorted(mine, key=lambda p: (-deg.get(p, 0), note_parts.title_of(p, fms.get(p) or {}).lower()))[:_GOES_OUT]
         vaults.append({
             **{k: v[k] for k in ("slug", "folder", "title", "line", "license", "visibility", "listed",
                                  "readers", "published", "downgraded")},
             "url": f"{page_url}/{v['slug']}/" if page_url else "",
             "out": len(mine),
-            "top": [_title(p, fms.get(p) or {}) for p in top],
+            "top": [note_parts.title_of(p, fms.get(p) or {}) for p in top],
             "struck": sum(1 for p, s in notes.items() if s == "struck" and of.get(p) == v["slug"]),
             "new": sum(1 for p in mine if before and p not in before),
             "published_at": last.get(v["slug"], {}).get("published_at", ""),
@@ -120,7 +110,7 @@ def _view() -> dict:
         # where the files are, on a laptop: the person serves them; a hosted
         # path names the server's disk and says nothing to the account. The home
         # folder reads as ~, as the bug report prints it: the line is read, not typed.
-        "dir": _tilde(str(publish.site_root(h) / "live")) if h and not hosted() else "",
+        "dir": settings_ops.tilde(str(publish.site_root(h) / "live")) if h and not hosted() else "",
         "private": publish.private_allowed(),
         "max": publish.max_vaults(),
         "plan": publish.paid_plan(),
@@ -144,7 +134,7 @@ def public_view():
     return _view()
 
 
-@router.post("/public/handle", dependencies=_SAME_ORIGIN)
+@router.post("/public/handle")
 def public_handle(payload: dict):
     """The handle My Wikis asks for on its first visit (ADR-0143 point 7, amended 2026-11-02)."""
     from silica.kernel import publish
@@ -191,8 +181,8 @@ def public_cover(vault: str = ""):
     if key in _COVER:
         return _COVER[key]
     fms = sel["frontmatter"]
-    c = cover(on, pairs, {p: _title(p, fms.get(p) or {}) for p in on})
-    result = {"n": [[*row, _title(p, fms.get(p) or {})] for row, p in zip(c["n"], c["nodes"])], "e": c["e"],
+    c = cover(on, pairs, {p: note_parts.title_of(p, fms.get(p) or {}) for p in on})
+    result = {"n": [[*row, note_parts.title_of(p, fms.get(p) or {})] for row, p in zip(c["n"], c["nodes"])], "e": c["e"],
               "areas": c["areas"], "unlinked": len(c["unlinked"])}
     # one entry: a view shows one vault, and an old picture is asked for again only on a switch
     _COVER.clear()
@@ -220,7 +210,7 @@ def _refresh_page() -> None:
         logger.warning("page: index not rewritten (%s)", exc)
 
 
-@router.post("/public/vault", dependencies=_SAME_ORIGIN)
+@router.post("/public/vault")
 def public_add_vault(payload: dict):
     from silica.kernel import publish
 
@@ -231,7 +221,7 @@ def public_add_vault(payload: dict):
     return {**_view(), "added": v["slug"]}
 
 
-@router.post("/public/vault/{slug}", dependencies=_SAME_ORIGIN)
+@router.post("/public/vault/{slug}")
 def public_update_vault(slug: str, payload: dict):
     from silica.kernel import publish
     from silica.ui.web.public_site import set_listed
@@ -249,7 +239,7 @@ def public_update_vault(slug: str, payload: dict):
     return _view()
 
 
-@router.post("/public/vault/{slug}/remove", dependencies=_SAME_ORIGIN)
+@router.post("/public/vault/{slug}/remove")
 def public_remove_vault(slug: str):
     from silica.kernel import publish
 
@@ -260,7 +250,7 @@ def public_remove_vault(slug: str):
     return _view()
 
 
-@router.post("/public/note", dependencies=_SAME_ORIGIN)
+@router.post("/public/note")
 def public_note(payload: dict):
     from silica.kernel import publish
 
@@ -271,7 +261,7 @@ def public_note(payload: dict):
     return _view()
 
 
-@router.post("/public/publish", dependencies=_SAME_ORIGIN)
+@router.post("/public/publish")
 async def public_publish(payload: dict | None = None):
     """Write one vault and put it out; the button reads "Turn on and
     publish" while the vault is Off, so it turns the vault Public first."""
@@ -315,7 +305,7 @@ async def public_check(vault: str = ""):
         raise HTTPException(400, str(exc))
 
 
-@router.post("/public/check/answer", dependencies=_SAME_ORIGIN)
+@router.post("/public/check/answer")
 def public_check_answer(payload: dict):
     """One answer, for a file, a folder of images or a site this wiki shows."""
     from silica.kernel import rights
@@ -334,7 +324,7 @@ def public_check_answer(payload: dict):
         raise HTTPException(400, str(exc))
 
 
-@router.post("/public/check/note", dependencies=_SAME_ORIGIN)
+@router.post("/public/check/note")
 def public_check_note(payload: dict):
     """A note the author says they wrote themselves, out of a file that stays (ADR-0153 point 26)."""
     from silica.kernel import rights
@@ -410,25 +400,20 @@ async def save_preview(request: Request, url: str = ""):
 
 
 async def _write_turn(fn, *args, **kwargs):
-    from silica.ui.web.server import _begin_turn, _embed_imported, _end_turn
-
-    if not _begin_turn():
-        raise HTTPException(409, "a turn is running: save when it ends")
-    try:
-        out = await asyncio.to_thread(fn, *args, **kwargs)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    except Exception as exc:
-        logger.warning("save failed: %s: %s", type(exc).__name__, exc)
-        raise HTTPException(502, "that page could not be read right now")
-    finally:
-        _end_turn()
+    with session.turn_slot("a turn is running: save when it ends"):
+        try:
+            out = await asyncio.to_thread(fn, *args, **kwargs)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        except Exception as exc:
+            logger.warning("save failed: %s: %s", type(exc).__name__, exc)
+            raise HTTPException(502, "that page could not be read right now")
     folder = out["folder"] if isinstance(out, dict) else str(Path(out).parent)
-    _embed_imported({folder})
+    drop.embed_imported({folder})
     return out
 
 
-@router.post("/vault/save", dependencies=_SAME_ORIGIN)
+@router.post("/vault/save")
 async def save_page(payload: dict):
     from silica.sources import saved_page
 
@@ -458,7 +443,7 @@ def invitation_preview(request: Request, author: str = "", vault: str = ""):
         raise HTTPException(400, str(exc))
 
 
-@router.post("/vault/invitations/save", dependencies=_SAME_ORIGIN)
+@router.post("/vault/invitations/save")
 async def invitation_save(payload: dict):
     from silica.sources import saved_page
 
@@ -467,7 +452,7 @@ async def invitation_save(payload: dict):
     return {"path": out["first"], **out}
 
 
-@router.post("/vault/invitations/decline", dependencies=_SAME_ORIGIN)
+@router.post("/vault/invitations/decline")
 def invitation_decline(payload: dict):
     from silica.sources import saved_page
 

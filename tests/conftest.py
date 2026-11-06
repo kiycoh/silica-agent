@@ -67,8 +67,8 @@ def _gui_answers_testclient_host(monkeypatch: pytest.MonkeyPatch) -> None:
 
     if importlib.util.find_spec("fastapi") is None:
         return
-    import silica.ui.web.server as server
-    monkeypatch.setattr(server, "_ALLOWED_HOSTS", server._ALLOWED_HOSTS | {"testserver"})
+    import silica.ui.web.security as security
+    monkeypatch.setattr(security, "_ALLOWED_HOSTS", security._ALLOWED_HOSTS | {"testserver"})
 
 
 @pytest.fixture(autouse=True)

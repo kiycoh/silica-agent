@@ -131,20 +131,22 @@ def test_gui_turn_roundtrip_replay_and_endpoints(narrator, monkeypatch, tmp_path
     and a reloaded session equals what the user saw."""
     from fastapi.testclient import TestClient
     from silica.ui.web import server
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
 
     narrator.close()   # the server owns its own session
-    server._reset_session()
+    SESSION.reset()
 
     def fake_run_agent(messages, model, tool_progress_callback=None,
                        cancel_token=None, **kw):
         messages.append({"role": "assistant", "content": "Reply"})
         return "Reply"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     tc = TestClient(server.app)
     tc.post("/chat", json={"text": "hello narration"})
 
-    sid = server.current_session_id
+    sid = SESSION.chat.sid
     assert sid
     body = tc.get("/narration").json()
     kinds = [b["kind"] for b in body["beats"]]
@@ -161,18 +163,19 @@ def test_gui_turn_roundtrip_replay_and_endpoints(narrator, monkeypatch, tmp_path
     # reset then load: the replay is the store (no snapshot anywhere)
     tc.post("/reset")
     assert tc.post("/session/load", json={"id": sid}).status_code == 200
-    assert server.messages[-1]["content"] == "Reply"
+    assert SESSION.chat.messages[-1]["content"] == "Reply"
 
 
 def test_gui_stop_narrates_cancel(narrator, monkeypatch):
     import threading
     from fastapi.testclient import TestClient
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server.current_cancel = threading.Event()
+    SESSION.cancel = threading.Event()
     tc = TestClient(server.app)
     tc.post("/stop")
-    assert server.current_cancel.is_set()
+    assert SESSION.cancel.is_set()
     beats = _beats(narrator)
     assert beats[-1]["kind"] == "cancel"
     assert beats[-1]["payload"]["driver"] == "gui"

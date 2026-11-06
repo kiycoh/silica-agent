@@ -58,8 +58,11 @@ def lane(tmp_vault, monkeypatch):
 @pytest.fixture
 def client(lane, monkeypatch):
     from silica.ui.web import server
+    from silica.ui.web import drop
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     ran: dict = {}
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -67,8 +70,8 @@ def client(lane, monkeypatch):
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
-    monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr(drop, "embed_imported", lambda folders: None)
     return TestClient(server.app), server, ran
 
 
@@ -96,9 +99,10 @@ def _inbox() -> Path:
 
 def _chat(server) -> str:
     """The open chat's folder of attached files, vault-relative (ADR-0121 point 5)."""
+    from silica.ui.web.session import SESSION
     from silica.kernel.base.layout import chat_folder
 
-    return chat_folder(server.current_session_id)
+    return chat_folder(SESSION.chat.sid)
 
 
 # --- point 1 and 3: the drop answers at once, behind a record ---------------------------
@@ -157,6 +161,7 @@ def test_a_drop_with_words_waits_for_its_files_then_asks_once(client, lane):
     The drop answers 202 and starts no turn; the record keeps the words, the
     chat and the files that were ready; the page asks once the drop is read,
     and a second ask (another tab) is refused."""
+    from silica.ui.web.session import SESSION
     tc, server, ran = client
     gate, _, _ = lane
     gate.clear()
@@ -172,7 +177,7 @@ def test_a_drop_with_words_waits_for_its_files_then_asks_once(client, lane):
     _drain()
     rec = _record(job["id"])
     assert rec["text"] == "what is this lecture about?"
-    assert rec["session"] and rec["session"] == server.current_session_id == r.json()["session"]
+    assert rec["session"] and rec["session"] == SESSION.chat.sid == r.json()["session"]
     assert rec["beside"] == [f"{_chat(server)}/note.md"]
     assert tc.post(f"/jobs/{job['id']}/turn", json={"as": "ask"}).status_code == 200
     assert ran["text"].startswith("what is this lecture about?")
@@ -402,6 +407,8 @@ def test_an_id_that_is_not_one_reaches_no_file(client):
 # --- point 5: transitions on the stream the browser holds --------------------------------
 
 def test_a_transition_reaches_the_narration_stream_as_a_job_event(client, monkeypatch):
+    from silica.ui.web import sse
+    from silica.ui.web.session import SESSION
     from types import SimpleNamespace
 
     from silica.obs.bus import BUS
@@ -409,8 +416,8 @@ def test_a_transition_reaches_the_narration_stream_as_a_job_event(client, monkey
 
     tc, server, _ = client
     stop = SimpleNamespace(should_exit=False)
-    monkeypatch.setattr(server, "_SERVER", stop)
-    monkeypatch.setattr(server, "_SSE_POLL_S", 0.01)
+    monkeypatch.setattr(SESSION, "server", stop)
+    monkeypatch.setattr(sse, "POLL_S", 0.01)
     body: list[str] = []
     t = threading.Thread(target=lambda: body.append(tc.get("/narration/sse").text), daemon=True)
     t.start()
@@ -434,6 +441,7 @@ def test_a_transition_reaches_the_narration_stream_as_a_job_event(client, monkey
 # --- point 6: a finished job offers the turn -----------------------------------------------
 
 def test_a_finished_job_offers_the_turn_and_never_starts_one(client):
+    from silica.sources import drop_turn
     tc, server, ran = client
     r = tc.post("/nucleate", files=[("files", ("talk.mp3", b"\0" * 64, "audio/mpeg"))])
     job = r.json()["jobs"][0]
@@ -443,7 +451,7 @@ def test_a_finished_job_offers_the_turn_and_never_starts_one(client):
     assert r.status_code == 200
     # The button is the student's choice, so it nucleates; a wordless drop no
     # longer does. Nucleating adds the file to the vault first (ADR-0121 point 5).
-    assert ran["text"].startswith(server.NUCLEATE_ASK) and "Inbox/talk.md" in ran["text"]
+    assert ran["text"].startswith(drop_turn.NUCLEATE_ASK) and "Inbox/talk.md" in ran["text"]
     assert (_inbox() / "talk.md").exists() and (_inbox() / "talk.mp3").exists()
     assert _record(job["id"])["dismissed"] is True
     # A drop's turn is asked once (ADR-0121 point 1): two tabs, one answer.
@@ -503,9 +511,10 @@ def test_a_turn_typed_after_the_conversion_names_its_note_once(client, pdfs, mon
 
 
 def test_a_failed_conversion_reaches_the_next_turn_with_its_reason(client):
+    from silica.ui.web.session import SESSION
     tc, server, ran = client
     tc.post("/chat", json={"text": "hi"})
-    _write(_rec("bbbbbbbbbbbb", "failed", session=server.current_session_id,
+    _write(_rec("bbbbbbbbbbbb", "failed", session=SESSION.chat.sid,
                 error="this recording could not be read"))
     _write(_rec("cccccccccccc", "done", session="another-chat", notes=["Inbox/b.md"]))
     tc.post("/chat", json={"text": "is it ready?"})
@@ -515,12 +524,13 @@ def test_a_failed_conversion_reaches_the_next_turn_with_its_reason(client):
 
 
 def test_the_offered_turn_tells_the_agent_so_the_next_one_does_not_repeat_it(client):
+    from silica.ui.web.session import SESSION
     tc, server, ran = client
     tc.post("/chat", json={"text": "hi"})  # the chat exists, so the drop's job is its
     r = tc.post("/nucleate", files=[("files", ("talk.mp3", b"\0" * 64, "audio/mpeg"))])
     job = r.json()["jobs"][0]
     _drain()
-    assert _record(job["id"])["session"] == server.current_session_id
+    assert _record(job["id"])["session"] == SESSION.chat.sid
     tc.post(f"/jobs/{job['id']}/turn", json={"as": "summarize"})
     assert f"{_chat(server)}/talk.md" in ran["text"] and "<converted-files>" not in ran["text"]
     tc.post("/chat", json={"text": "done?"})
@@ -647,7 +657,7 @@ def test_a_command_with_nothing_to_convert_runs_as_before(client):
 
 def test_the_release_drain_reads_jobs_and_the_turn_on_the_socket(client):
     """Host: localhost, no Origin, nothing remote: what bin/release sends."""
-    from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     tc, _, _ = client
     _write(_rec("a" * 12, "running"))
@@ -658,11 +668,11 @@ def test_the_release_drain_reads_jobs_and_the_turn_on_the_socket(client):
     assert r.json() == {"turn": False, "jobs": [
         {"id": "a" * 12, "state": "running", "kind": "convert"},
         {"id": "b" * 12, "state": "queued", "kind": "convert"}]}
-    assert server._begin_turn()
+    assert SESSION.claim()
     try:
         assert tc.get("/jobs/running", headers={"host": "localhost"}).json()["turn"] is True
     finally:
-        server._end_turn()
+        SESSION.release()
 
 
 def test_on_the_server_the_page_learns_the_edge_cap(client, monkeypatch):

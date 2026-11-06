@@ -10,8 +10,9 @@ from fastapi.testclient import TestClient  # noqa: E402
 @pytest.fixture
 def client(tmp_vault):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     tmp_vault.note("root.md", "# Root\n\nSee [[a]] and [[b]] and [[Missing note]].")
     tmp_vault.note("a.md", "# A\n\n[[b]]")
     tmp_vault.note("b.md", "# B")

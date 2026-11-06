@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""evals/ and scripts/ run in no gate (`testpaths` is tests/), yet they import
-product modules and private names. A rename in silica/ used to leave them broken
-until someone next ran a probe, so every `silica.*` name they import must resolve."""
+"""Every `silica.*` name imported anywhere must resolve. evals/ and scripts/ run in no
+gate (`testpaths` is tests/), and inside silica/ mypy skips unannotated function bodies,
+so a function-local import of a moved name only raises the day that line runs."""
 from __future__ import annotations
 
 import ast
@@ -25,9 +25,10 @@ def _imports(path: Path):
                     yield alias.name, None
 
 
-def test_every_silica_import_in_evals_and_scripts_resolves():
-    tracked = subprocess.check_output(["git", "ls-files", "evals/*.py", "scripts/*.py"], text=True, cwd=ROOT).split()
-    assert len(tracked) > 90, f"only {len(tracked)} files found"
+def test_every_silica_import_resolves():
+    tracked = subprocess.check_output(["git", "ls-files", "silica/*.py", "evals/*.py", "scripts/*.py"],
+                                      text=True, cwd=ROOT).split()
+    assert len(tracked) > 400, f"only {len(tracked)} files found"
     broken = []
     for rel in tracked:
         for module, name in _imports(ROOT / rel):

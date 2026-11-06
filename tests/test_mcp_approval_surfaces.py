@@ -84,10 +84,10 @@ def test_without_a_terminal_there_is_no_one_to_ask(monkeypatch):
 
 
 def test_a_connector_row_is_named_by_its_server_and_its_request():
-    from silica.ui.renderer import _tool_target, _tool_verb
+    from silica.ui.tool_labels import tool_target, tool_verb
 
-    assert _tool_verb("mcp__gmail") == "gmail"
-    assert _tool_target("mcp__gmail", {"request": "find the thesis thread"}) == "find the thesis thread"
+    assert tool_verb("mcp__gmail") == "gmail"
+    assert tool_target("mcp__gmail", {"request": "find the thesis thread"}) == "find the thesis thread"
 
 
 def test_a_call_that_did_not_run_reads_as_itself_not_as_a_failure():

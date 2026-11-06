@@ -24,9 +24,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 
 from silica.kernel.learn.schedule import DUE_R
+from silica.ui.web import render
 
 logger = logging.getLogger(__name__)
 
@@ -142,14 +143,7 @@ def _load_live() -> None:
     _LIVE = doc
 
 
-def _require_same_origin(request: Request) -> None:
-    from silica.ui.web.server import _require_same_origin as check
-
-    check(request)
-
-
 router = APIRouter(prefix="/learn", dependencies=[Depends(_load_live)])
-_SAME_ORIGIN = [Depends(_require_same_origin)]
 
 
 def _now() -> float:
@@ -308,7 +302,7 @@ def _preview_row(it: dict, scopes: dict[str, dict]) -> dict:
         detail.append("edited " + (datetime.fromtimestamp(it["mtime"], timezone.utc).strftime("%b %d") if it.get("mtime") else "recently"))
     elif it["pool"] == "unexplored":
         detail.append("AI-written" if it.get("ai") else "written by you")
-    elif typeof_num(it.get("S")):
+    elif isinstance(it.get("S"), (int, float)) and not isinstance(it.get("S"), bool):
         detail.append(f"holds ~{round(it['S'])} d est.")
     points = items.key_points(it["path"])
     objectives = _objectives_for(it["path"], scopes)
@@ -319,10 +313,6 @@ def _preview_row(it: dict, scopes: dict[str, dict]) -> dict:
             "attempts": it.get("attempts", 0), "last": it.get("last_event"),
             "also_in": _also_in(it["path"], scopes), "points": len(points), "questions": len(asks),
             "minutes": _minutes(len(asks)) if asks else 0, "objectives": objectives}
-
-
-def typeof_num(x) -> bool:
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
 # ---------------------------------------------------------------- Next: the queue that says why (ADR-0081)
@@ -716,7 +706,7 @@ def _live_info() -> dict | None:
             "title": (s["items"][cur - 1]["title"] if 0 < cur <= len(s["items"]) else "")}
 
 
-@router.post("/session", dependencies=_SAME_ORIGIN)
+@router.post("/session")
 def start_session(payload: dict):
     global _LIVE
     from silica.config import CONFIG
@@ -896,7 +886,7 @@ def _verdict_payload(v: dict, it: dict) -> dict:
     return out
 
 
-@router.post("/answer", dependencies=_SAME_ORIGIN)
+@router.post("/answer")
 def answer(payload: dict):
     from silica.kernel.learn import grade
 
@@ -926,7 +916,7 @@ def answer(payload: dict):
     return _verdict_payload(v, it)
 
 
-@router.post("/skip", dependencies=_SAME_ORIGIN)
+@router.post("/skip")
 def skip(payload: dict):
     """Skipping is not a wrong answer (refinement §22): the point stays open,
     nothing is recorded, the receipt says skipped."""
@@ -969,7 +959,7 @@ def _momentum(before: dict | None, after: dict | None, first_success: bool) -> s
 _RATE_LOCK = threading.Lock()
 
 
-@router.post("/rate", dependencies=_SAME_ORIGIN)
+@router.post("/rate")
 def rate(payload: dict):
     with _RATE_LOCK:
         return _rate(payload)
@@ -1169,7 +1159,7 @@ def _escalate(s: dict, it: dict) -> dict | None:
         return None
 
 
-@router.post("/aid", dependencies=_SAME_ORIGIN)
+@router.post("/aid")
 def aid(payload: dict):
     """The aid a rating escalated to, written when the reader asks for it
     (one click: the owner's call of 2026-10-23 on ASSISTments' experiments,
@@ -1178,7 +1168,6 @@ def aid(payload: dict):
     click is logged beside the escalation."""
     from silica.kernel.learn import offer
     from silica.kernel.graph.mindmap import answer_resolver
-    from silica.ui.web.server import _linkify
 
     s = _live(str(payload.get("id") or ""))
     it = _item(s, payload.get("i"))
@@ -1199,7 +1188,7 @@ def aid(payload: dict):
         offer.log_aid_opened(it["path"], s["id"])
         # the chat's resolver: a name two notes share links to this item's note
         resolve, _read = answer_resolver([it["path"]])
-        done[it["i"]] = {"text": text, "html": _linkify(text, resolve, remote_images=False)}
+        done[it["i"]] = {"text": text, "html": render.linkify(text, resolve, remote_images=False)}
         _save()
     return done[it["i"]]
 
@@ -1208,19 +1197,17 @@ MATH_MAX = 200        # formulas one page asks for at once; a session's page hol
 MATH_CHARS = 2000     # one formula's LaTeX; a note's longest display block is a few hundred
 
 
-@router.post("/math", dependencies=_SAME_ORIGIN)
+@router.post("/math")
 def math(payload: dict):
     """The formulas in Learn's text as MathML, converted as the chat's are
-    (server._mathml: the browser draws them, and a formula that does not
+    (render.mathml: the browser draws them, and a formula that does not
     convert comes back as written)."""
-    from silica.ui.web.server import _mathml
-
     tex = [str(t)[:MATH_CHARS] for t in (payload.get("tex") or [])][:MATH_MAX]
     display = list(payload.get("display") or [])
-    return {"mathml": [_mathml(t, bool(display[i]) if i < len(display) else False) for i, t in enumerate(tex)]}
+    return {"mathml": [render.mathml(t, bool(display[i]) if i < len(display) else False) for i, t in enumerate(tex)]}
 
 
-@router.post("/teach", dependencies=_SAME_ORIGIN)
+@router.post("/teach")
 def teach(payload: dict):
     from silica.kernel.learn import grade, items
 
@@ -1476,7 +1463,7 @@ def _next_line(rows: list[dict]) -> str:
     return f"Next session starts from {miss['title'] or miss['path']}." if miss else "Next session draws from what is due."
 
 
-@router.post("/close", dependencies=_SAME_ORIGIN)
+@router.post("/close")
 def close(payload: dict):
     global _LIVE, _LAST
     from silica.kernel.learn import plans
@@ -1656,7 +1643,7 @@ def objective_options():
     return [{"id": i, "label": obj.LABEL[i], "description": obj.DESCRIPTION[i]} for i in obj.INTENTIONS]
 
 
-@router.post("/plan", dependencies=_SAME_ORIGIN)
+@router.post("/plan")
 def write_plan(payload: dict):
     """Preview, objectives, create or edit (ADR-0081 §12 to §17). A preview
     is fast and model-free: the material, its marks and the plan's own
@@ -1809,7 +1796,7 @@ def _preview(res: dict, chosen: list[str]) -> dict:
             "session": 8, "path": None, "cards": []}
 
 
-@router.post("/plan/budget", dependencies=_SAME_ORIGIN)
+@router.post("/plan/budget")
 def plan_budget(payload: dict):
     """The hours under a plan's calendar for the form (ADR-0131 point 8),
     from the preview's steps, the date, the hours a day and the assessment,
@@ -1825,7 +1812,7 @@ def plan_budget(payload: dict):
     return {"say": b["say"] if b else "", "budget": b}
 
 
-@router.post("/plan/read", dependencies=_SAME_ORIGIN)
+@router.post("/plan/read")
 def read_plan_sentence(payload: dict):
     """The sentence of Create plan in, the four fields out (ADR-0081 §11)."""
     from silica.kernel.learn import plans
@@ -1871,7 +1858,7 @@ def scope_options(q: str = ""):
     return out
 
 
-@router.post("/revisit", dependencies=_SAME_ORIGIN)
+@router.post("/revisit")
 def revisit(payload: dict):
     from silica.kernel.learn import plans
 
@@ -1883,7 +1870,7 @@ def revisit(payload: dict):
     return {"queued": paths, "plan": plan["path"]}
 
 
-@router.post("/plan/close", dependencies=_SAME_ORIGIN)
+@router.post("/plan/close")
 def close_plan(payload: dict):
     from silica.kernel.learn import plans
 
@@ -1931,7 +1918,7 @@ def reading_view(plan: str, step: int):
         raise HTTPException(404, str(exc))
 
 
-@router.post("/reading/write", dependencies=_SAME_ORIGIN)
+@router.post("/reading/write")
 def reading_write(payload: dict):
     """Write or rewrite the reading in the background; the page polls GET /reading."""
     from silica.kernel.learn import plans, reading
@@ -1947,7 +1934,7 @@ def reading_write(payload: dict):
     return reading.start(plan["path"], step)
 
 
-@router.post("/reading/card", dependencies=_SAME_ORIGIN)
+@router.post("/reading/card")
 def reading_card(payload: dict):
     """The reader is at card `n`: it and the next one are written if they wait
     (ADR-0134, amendment of 2026-11-06). Answers the reading as it stands."""
@@ -1964,7 +1951,7 @@ def reading_card(payload: dict):
         raise HTTPException(404, str(exc))
 
 
-@router.post("/reading/answer", dependencies=_SAME_ORIGIN)
+@router.post("/reading/answer")
 def reading_answer(payload: dict):
     """A card opened, or the answer to its closing question: kept, never
     graded, never in the answer ledger. `section` is the card's number."""

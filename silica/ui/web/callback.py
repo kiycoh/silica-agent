@@ -21,12 +21,12 @@ from silica.obs.events import (
     ToolErrorEvent,
     ToolStartEvent,
 )
-from silica.ui.renderer import (  # same verb + target the TUI shows
-    _CHUNK_PHASES,
-    _FILE_PHASES,
-    _PHASE_LABELS,
-    _tool_target,
-    _tool_verb,
+from silica.ui.tool_labels import (  # same verb + target the TUI shows
+    CHUNK_PHASES,
+    FILE_PHASES,
+    PHASE_LABELS,
+    tool_target,
+    tool_verb,
 )
 
 # How a tool changes the vault, for the chat footer's grouping. Only the tools
@@ -141,8 +141,8 @@ def _note_refs(args: dict) -> list[str]:
 # recipes/injector.yaml), and listing it made every healthy run display a pending
 # "rollback" step that was never going to run.
 _PHASE_TRACKS = {
-    "file": list(_FILE_PHASES.values()),
-    "chunk": list(_CHUNK_PHASES.values()),
+    "file": list(FILE_PHASES.values()),
+    "chunk": list(CHUNK_PHASES.values()),
 }
 
 # final_status as the FSM writes it -> what the user is told. The FSM emits
@@ -200,8 +200,8 @@ def event_to_json(ev) -> dict | None:
         if ev.name == "silica_move" and isinstance(ev.args.get("to"), str):
             notes = [ev.args["to"].strip()]
         out: dict[str, Any] = {
-               "type": "tool_start", "name": _tool_verb(ev.name), "id": ev.call_id,
-               "target": _tool_target(ev.name, ev.args),
+               "type": "tool_start", "name": tool_verb(ev.name), "id": ev.call_id,
+               "target": tool_target(ev.name, ev.args),
                "effect": _TOOL_EFFECT.get(ev.name, "read"),
                "notes": notes}
         # The call's own arguments are the IN half of the expandable card: the
@@ -214,7 +214,7 @@ def event_to_json(ev) -> dict | None:
             out["pipeline"] = _PHASE_TRACKS
         return out
     if isinstance(ev, ToolCompleteEvent):
-        out = {"type": "tool_done", "name": _tool_verb(ev.name), "id": ev.call_id}  # noqa: F841 (same shape)
+        out = {"type": "tool_done", "name": tool_verb(ev.name), "id": ev.call_id}  # noqa: F841 (same shape)
         # Measured by the loop around the actual call, not by a client timer
         # started when the event was painted: an SSE frame can land a frame late
         # and a browser tab in the background stops scheduling altogether, so a
@@ -249,7 +249,7 @@ def event_to_json(ev) -> dict | None:
         # The label, not the recipe id: the client matches rows by exact string,
         # and no id->label rule it could apply covers hub_update/hub-update.
         # Guessing left the renamed phase grey for the whole run.
-        return {"type": "phase", "phase": _PHASE_LABELS.get(ev.phase, ev.phase),
+        return {"type": "phase", "phase": PHASE_LABELS.get(ev.phase, ev.phase),
                 "status": ev.status,
                 "scope": ev.scope, "source_file": ev.source_file,
                 "file_idx": ev.file_idx, "file_total": ev.file_total,
@@ -258,7 +258,7 @@ def event_to_json(ev) -> dict | None:
         # `plain` is the authored sentence (failures.py); `error` stays the
         # tool's own text, which the row discloses under it.
         from silica.ui.web.failures import sentence
-        return {"type": "tool_error", "name": _tool_verb(ev.name), "id": ev.call_id,
+        return {"type": "tool_error", "name": tool_verb(ev.name), "id": ev.call_id,
                 "error": ev.error, "plain": sentence(str(ev.error))}
 
     if isinstance(ev, BatchRunStartEvent):
@@ -294,7 +294,7 @@ def tool_calls_to_json(
         notes = _note_refs(args)
         if name == "silica_move" and isinstance(args.get("to"), str):
             notes = [args["to"].strip()]
-        line = {"name": _tool_verb(name), "target": _tool_target(name, args),
+        line = {"name": tool_verb(name), "target": tool_target(name, args),
                 "error": bool(failed and tc.get("id") in failed),
                 # The footer of a replayed turn (audit P4) is built from these
                 # two, exactly as the live turn builds it from tool_start.

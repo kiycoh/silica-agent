@@ -41,10 +41,11 @@ def _read_sse(response) -> list[dict]:
 def client(tmp_vault, tmp_path, monkeypatch):
     """Fresh module-level session per test, backed by a tmp fs vault."""
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     # SESSIONS_DIR is gone with the snapshot store: sessions live in the
     # narration under _SILICA_HOME, already tmp-isolated by conftest.
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 
@@ -139,7 +140,7 @@ def test_tool_card_payloads_are_capped_and_say_how_much_was_cut():
 
 
 def test_injector_start_carries_the_file_and_the_tracks():
-    """Regression: _tool_target read the legacy `inbox_file` key while every real
+    """Regression: tool_target read the legacy `inbox_file` key while every real
     caller passes `inbox_files`, so a nucleate run showed a bare "injector" with
     no document name at all. The two phase tracks ride along so the client can
     draw the pipeline greyed out instead of growing it a row at a time."""
@@ -334,31 +335,35 @@ def test_health_reports_only_what_needs_fixing(client, monkeypatch):
 
 def test_direct_command_runs_without_an_llm_round_trip(client, monkeypatch):
     """/plans is REPL-direct: the GUI must run it inline, not hand it to the agent."""
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def boom(*a, **kw):
         raise AssertionError("a direct command must not reach the agent")
 
-    monkeypatch.setattr(server, "run_agent", boom)
+    monkeypatch.setattr(turn, "run_agent", boom)
 
     events = _read_sse(tc.post("/chat", json={"text": "/plans"}))
     assert events[-1]["type"] == "done"
-    assert [m["content"] for m in server.messages if m["role"] == "user"] == ["/plans"]
+    assert [m["content"] for m in SESSION.chat.messages if m["role"] == "user"] == ["/plans"]
 
 
 def test_declined_direct_command_leaves_no_duplicate_user_turn(client, monkeypatch):
     """Every slash command is offered to the direct handler first; one it declines
     must fall through with exactly ONE user turn in history — the expanded one."""
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     tc.post("/chat", json={"text": "/summarize Concepts/RAG.md"})
-    users = [m["content"] for m in server.messages if m["role"] == "user"]
+    users = [m["content"] for m in SESSION.chat.messages if m["role"] == "user"]
     assert len(users) == 1, f"duplicated user turn: {users}"
     assert users[0] != "/summarize Concepts/RAG.md", "the agent got the raw command, not the expansion"
     # a reload draws what was typed, never the directive the model read
@@ -367,6 +372,8 @@ def test_declined_direct_command_leaves_no_duplicate_user_turn(client, monkeypat
 
 
 def test_chat_streams_events_and_appends_the_user_message(client, monkeypatch):
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -376,7 +383,7 @@ def test_chat_streams_events_and_appends_the_user_message(client, monkeypatch):
         messages.append({"role": "assistant", "content": "Hello"})
         return "Hello"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     resp = tc.post("/chat", json={"text": "hi there"})
     assert resp.status_code == 200
@@ -386,7 +393,7 @@ def test_chat_streams_events_and_appends_the_user_message(client, monkeypatch):
     assert "delta" in types
     assert types[-1] == "done"
     assert events[-1]["answer"] == "Hello"
-    assert any(m["role"] == "user" and m["content"] == "hi there" for m in server.messages)
+    assert any(m["role"] == "user" and m["content"] == "hi there" for m in SESSION.chat.messages)
 
 
 def test_inline_slash_command_reports_its_own_result_not_an_error(client, monkeypatch):
@@ -448,6 +455,8 @@ def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypa
     answer arrives as markdown (not a fenced text block) and carries the Sources
     block built from the trace. A direct handler here would append the captured
     answer a second time."""
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None,
@@ -463,7 +472,7 @@ def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypa
         messages.append({"role": "assistant", "content": "From the web: it swaps edges."})
         return "From the web: it swaps edges."
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     done = _read_sse(tc.post("/chat", json={"text": "/web graph rewiring"}))[-1]
     assert done["type"] == "done"
@@ -471,7 +480,7 @@ def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypa
     assert "## Sources (web)" in done["answer"]
     assert "https://a.test/rw" in done["answer"]
     # history carries what the user saw
-    assert server.messages[-1]["content"] == done["answer"]
+    assert SESSION.chat.messages[-1]["content"] == done["answer"]
 
 
 def test_bare_web_without_a_question_yields_one_usage_error(client):
@@ -484,6 +493,7 @@ def test_bare_web_without_a_question_yields_one_usage_error(client):
 def test_done_carries_the_hint_when_every_recall_missed(client, monkeypatch):
     """The thin-coverage hint is a `retrieval` turn note on the done event
     (ADR-0094 point 8; it was the `hint` field before)."""
+    from silica.ui.web import turn
     tc, server = client
     from silica.agent.recall_watch import THIN_COVERAGE_HINT
 
@@ -495,13 +505,14 @@ def test_done_carries_the_hint_when_every_recall_missed(client, monkeypatch):
         messages.append({"role": "assistant", "content": "I have nothing on that."})
         return "I have nothing on that."
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     done = _read_sse(tc.post("/chat", json={"text": "what is graph rewiring?"}))[-1]
     assert done["notes"] == [{"kind": "retrieval", "text": THIN_COVERAGE_HINT}]
 
 
 def test_a_turn_that_found_notes_carries_no_hint(client, monkeypatch):
+    from silica.ui.web import turn
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -512,7 +523,7 @@ def test_a_turn_that_found_notes_carries_no_hint(client, monkeypatch):
         messages.append({"role": "assistant", "content": "You wrote about it."})
         return "You wrote about it."
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     done = _read_sse(tc.post("/chat", json={"text": "what about RAG?"}))[-1]
     assert "notes" not in done
@@ -529,6 +540,8 @@ def test_an_unknown_slash_command_is_still_reported_as_unavailable(client):
 def test_run_turn_yields_raw_dicts_not_sse_frames(client, monkeypatch):
     """The transport-neutral core: raw wire dicts, no `data: ` framing, ending
     in one `done` dict. This is what both `--gui` (SSE) and `connect` (WS) wrap."""
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -536,18 +549,19 @@ def test_run_turn_yields_raw_dicts_not_sse_frames(client, monkeypatch):
         messages.append({"role": "assistant", "content": "Hi"})
         return "Hi"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     async def collect():
-        return [item async for item in server.run_turn("hello")]
+        from silica.ui.web import turn
+        return [item async for item in turn.run_turn("hello")]
 
     items = asyncio.run(collect())
     assert all(isinstance(i, dict) for i in items)  # dicts, not SSE strings
     assert any(i["type"] == "delta" and i["text"] == "Hi" for i in items[:-1])
     assert items[-1]["type"] == "done"
     assert items[-1]["answer"] == "Hi"
-    assert any(m["role"] == "user" and m["content"] == "hello" for m in server.messages)
-    assert server._busy is False  # gate freed on normal completion
+    assert any(m["role"] == "user" and m["content"] == "hello" for m in SESSION.chat.messages)
+    assert SESSION.busy is False  # gate freed on normal completion
 
 
 
@@ -555,6 +569,8 @@ def test_a_chat_image_rides_its_turn_and_history_keeps_only_its_path(client, mon
     """ADR-0077 point 3: the pixels go to the model once, as an image_url part;
     the transcript, the narration and every later turn carry the saved path,
     which silica_look opens again, never the base64."""
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     import base64
     tc, server = client
     seen = {}
@@ -564,14 +580,14 @@ def test_a_chat_image_rides_its_turn_and_history_keeps_only_its_path(client, mon
         messages.append({"role": "assistant", "content": "Un diagramma."})
         return "Un diagramma."
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     png = "data:image/png;base64," + base64.b64encode(b"\x89PNG fake").decode()
     events = _read_sse(tc.post("/chat", json={"text": "Cosa mostra?",
                                                "images": [{"name": "lavagna.png", "data": png}]}))
     assert events[-1]["type"] == "done"
     text, image = seen["content"]
     assert image == {"type": "image_url", "image_url": {"url": png}}
-    user = next(m for m in server.messages if m["role"] == "user" and "Cosa mostra?" in str(m["content"]))
+    user = next(m for m in SESSION.chat.messages if m["role"] == "user" and "Cosa mostra?" in str(m["content"]))
     assert isinstance(user["content"], str) and "base64" not in user["content"]
     saved = Path(user["content"].split("[image attached: ")[1].split("]")[0])
     assert saved.read_bytes() == b"\x89PNG fake" and text["text"] == user["content"]
@@ -580,6 +596,8 @@ def test_a_chat_image_rides_its_turn_and_history_keeps_only_its_path(client, mon
 def test_a_text_only_chat_model_gets_the_attached_image_as_words(client, monkeypatch):
     """ADR-0077 amendment 2026-10-21: with a vision model of its own, the chat
     model never receives pixels; the reading rides the turn, the path stays."""
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     import base64
     from silica import config as cfg_mod
     from silica.agent import vision
@@ -591,7 +609,7 @@ def test_a_text_only_chat_model_gets_the_attached_image_as_words(client, monkeyp
         messages.append({"role": "assistant", "content": "Una lavagna."})
         return "Una lavagna."
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     monkeypatch.setattr(cfg_mod.CONFIG, "vision_model", "openrouter/qwen/qwen3.7-flash-20260727")
     monkeypatch.setattr(vision, "ask_chat_model", lambda messages, max_tokens=700:
                         '{"kind": "photo", "description": "Una lavagna con due formule.", "text": ""}')
@@ -601,15 +619,16 @@ def test_a_text_only_chat_model_gets_the_attached_image_as_words(client, monkeyp
     assert events[-1]["type"] == "done"
     assert isinstance(seen["content"], str) and "base64" not in seen["content"]
     assert "Una lavagna con due formule." in seen["content"]
-    user = next(m for m in server.messages if m["role"] == "user" and "Cosa mostra?" in str(m["content"]))
+    user = next(m for m in SESSION.chat.messages if m["role"] == "user" and "Cosa mostra?" in str(m["content"]))
     assert "[image attached: " in user["content"] and "Una lavagna con due formule." not in user["content"]
 
 
 
 def test_a_reloaded_chat_shows_the_image_again_and_not_its_path(client, monkeypatch):
+    from silica.ui.web import turn
     import base64
     tc, server = client
-    monkeypatch.setattr(server, "run_agent", lambda messages, *a, **k: messages.append(
+    monkeypatch.setattr(turn, "run_agent", lambda messages, *a, **k: messages.append(
         {"role": "assistant", "content": "Ok."}) or "Ok.")
     png = "data:image/png;base64," + base64.b64encode(b"\x89PNG fake").decode()
     _read_sse(tc.post("/chat", json={"text": "Guarda", "images": [{"name": "a.png", "data": png}]}))
@@ -628,15 +647,18 @@ def test_chat_refuses_an_attachment_that_is_not_an_image(client):
 def test_run_turn_error_path_yields_one_error_and_frees_the_gate(client, monkeypatch):
     """A worker crash ends the stream with exactly one `error` dict, and the
     busy-gate is freed (never leave the UI stuck, never wedge the next turn)."""
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def boom(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         raise RuntimeError("kaboom")
 
-    monkeypatch.setattr(server, "run_agent", boom)
+    monkeypatch.setattr(turn, "run_agent", boom)
 
     async def collect():
-        return [item async for item in server.run_turn("hi")]
+        from silica.ui.web import turn
+        return [item async for item in turn.run_turn("hi")]
 
     items = asyncio.run(collect())
     assert sum(1 for i in items if i["type"] == "error") == 1
@@ -644,13 +666,14 @@ def test_run_turn_error_path_yields_one_error_and_frees_the_gate(client, monkeyp
     # The raw text rides `detail`; `error` is the authored sentence (P3).
     assert "kaboom" in items[-1]["detail"]
     assert "kaboom" not in items[-1]["error"]
-    assert server._busy is False
+    assert SESSION.busy is False
 
 
 def test_run_turn_abandonment_holds_gate_until_worker_exits(client, monkeypatch):
     """Consumer stops iterating mid-stream (dropped SSE/WS client): the worker
     is a zombie until it observes the cancel. The gate MUST stay closed until it
     actually exits, or a second turn mutates `messages` concurrently."""
+    from silica.ui.web import turn
     import threading
     import time
 
@@ -666,25 +689,28 @@ def test_run_turn_abandonment_holds_gate_until_worker_exits(client, monkeypatch)
         messages.append({"role": "assistant", "content": "partial"})
         return "partial"
 
-    monkeypatch.setattr(server, "run_agent", slow)
+    monkeypatch.setattr(turn, "run_agent", slow)
 
     async def scenario():
-        gen = server.run_turn("hi")
+        from silica.ui.web import turn
+        from silica.ui.web.session import SESSION
+        assert SESSION.claim()  # run_turn runs in a slot its caller took
+        gen = turn.run_turn("hi")
         first = await gen.__anext__()  # one delta, then abandon
         assert first["type"] == "delta"
         await asyncio.to_thread(started.wait, 1.0)
         await gen.aclose()  # GeneratorExit into run_turn
 
         # zombie still alive → gate closed, cancel signalled
-        assert server._busy is True
-        assert server.current_cancel is not None and server.current_cancel.is_set()
+        assert SESSION.busy is True
+        assert SESSION.cancel is not None and SESSION.cancel.is_set()
 
         # once the worker sees the cancel and exits, its done-callback frees the gate
         for _ in range(400):
-            if not server._busy:
+            if not SESSION.busy:
                 break
             await asyncio.sleep(0.005)
-        assert server._busy is False
+        assert SESSION.busy is False
 
     asyncio.run(scenario())
 
@@ -695,17 +721,19 @@ def test_a_turn_silent_past_the_keepalive_still_sends_a_byte(client, monkeypatch
     t01's /nucleate got a 524 at 124,990 ms (2026-10-23), while web turns that
     kept streaming ran past 300 s and ended done. A silent stretch sends a
     comment line, which the page's parser skips (no `data:` line)."""
+    from silica.ui.web import sse
+    from silica.ui.web import turn
     import time
 
     tc, server = client
-    monkeypatch.setattr(server, "_KEEPALIVE_S", 0.05)
+    monkeypatch.setattr(sse, "_KEEPALIVE_S", 0.05)
 
     def quiet(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         time.sleep(0.3)
         messages.append({"role": "assistant", "content": "late"})
         return "late"
 
-    monkeypatch.setattr(server, "run_agent", quiet)
+    monkeypatch.setattr(turn, "run_agent", quiet)
 
     resp = tc.post("/chat", json={"text": "hi"})
     assert ": keepalive\n\n" in resp.text
@@ -782,11 +810,14 @@ def test_a_stream_dropped_during_a_keepalive_still_holds_the_gate_for_the_worker
     """The keepalive waits on the turn's next event without owning it: a client
     dropped then must reach run_turn as before, so the zombie is cancelled and
     the gate stays closed until it exits."""
+    from silica.ui.web import sse
+    from silica.ui.web import turn
+    from silica.ui.web.session import TurnSlot
     import threading
     import time
 
     tc, server = client
-    monkeypatch.setattr(server, "_KEEPALIVE_S", 0.05)
+    monkeypatch.setattr(sse, "_KEEPALIVE_S", 0.05)
     started = threading.Event()
 
     def slow(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -797,22 +828,24 @@ def test_a_stream_dropped_during_a_keepalive_still_holds_the_gate_for_the_worker
         messages.append({"role": "assistant", "content": "partial"})
         return "partial"
 
-    monkeypatch.setattr(server, "run_agent", slow)
+    monkeypatch.setattr(turn, "run_agent", slow)
 
     async def scenario():
-        assert server._begin_turn() is True
-        stream = server._turn_response("hi").body_iterator
+        from silica.ui.web import sse
+        from silica.ui.web.session import SESSION
+        assert SESSION.claim() is True
+        stream = sse.turn_response(TurnSlot(), "hi").body_iterator
         assert await stream.__anext__() == ": keepalive\n\n"
         await asyncio.to_thread(started.wait, 1.0)
         await stream.aclose()
 
-        assert server._busy is True
-        assert server.current_cancel is not None and server.current_cancel.is_set()
+        assert SESSION.busy is True
+        assert SESSION.cancel is not None and SESSION.cancel.is_set()
         for _ in range(400):
-            if not server._busy:
+            if not SESSION.busy:
                 break
             await asyncio.sleep(0.005)
-        assert server._busy is False
+        assert SESSION.busy is False
 
     asyncio.run(scenario())
 
@@ -821,15 +854,18 @@ def test_sweep_frees_the_gate_when_no_worker_ever_started(client):
     """Never-iterated generator (client drops between POST and first __anext__):
     run_turn never runs, so the SSE background sweep frees the eagerly-claimed
     gate. Guards against a permanently 409-locked server."""
+    from silica.ui.web.session import SESSION
     tc, server = client
-    assert server._begin_turn() is True
-    assert server._busy is True
-    server.current_task = None  # no worker was created
-    server._sweep_if_orphaned()
-    assert server._busy is False
+    assert SESSION.claim() is True
+    assert SESSION.busy is True
+    SESSION.task = None  # no worker was created
+    SESSION.sweep_if_orphaned()
+    assert SESSION.busy is False
 
 
 def test_nucleate_stages_uploads_and_hands_files_to_the_agent(client, monkeypatch):
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     ran: dict = {}
@@ -839,7 +875,7 @@ def test_nucleate_stages_uploads_and_hands_files_to_the_agent(client, monkeypatc
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     resp = tc.post(
         "/nucleate",
@@ -851,7 +887,7 @@ def test_nucleate_stages_uploads_and_hands_files_to_the_agent(client, monkeypatc
     from silica.config import CONFIG
     from silica.kernel.base.layout import chat_folder
 
-    folder = chat_folder(server.current_session_id)
+    folder = chat_folder(SESSION.chat.sid)
     saved = Path(CONFIG.vault_path) / folder / "note.md"
     assert saved.exists()  # landed in the chat's own folder (ADR-0121 point 5)
     assert not (Path(CONFIG.vault_path) / "Inbox" / "note.md").exists()
@@ -867,6 +903,9 @@ def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkey
     """No words with the drop: the turn describes and asks (t03 2026-10-14 ran
     a 22-file nucleate off a bare drop), from the file's text when it fits
     (ADR-0121 point 2) and from an outline when it does not."""
+    from silica.ui.web import turn
+    from silica.sources import drop_turn
+    from silica.ui.web.session import SESSION
     tc, server = client
     ran: dict = {}
 
@@ -875,7 +914,7 @@ def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkey
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     body = b"# Enzimi\n\nuno due tre\n\n## Cinetica\n\nquattro\n\n## Inibizione\n\ncinque\n"
     resp = tc.post("/nucleate", files=[("files", ("bio.md", body, "text/markdown"))])
 
@@ -883,21 +922,23 @@ def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkey
     user = next(m for m in ran["msgs"] if m["role"] == "user")["content"]
     from silica.kernel.base.layout import chat_folder
 
-    assert user.startswith(server.DROP_ASK)
-    assert f'<file path="{chat_folder(server.current_session_id)}/bio.md">' in user and "## Inibizione" in user
-    monkeypatch.setattr(server, "_INLINE_CHARS", 10)
-    assert "sections: Enzimi; Cinetica; Inibizione" in server._compose_nucleate_turn(
-        "", [f"{chat_folder(server.current_session_id)}/bio.md"], [])
+    assert user.startswith(drop_turn.DROP_ASK)
+    assert f'<file path="{chat_folder(SESSION.chat.sid)}/bio.md">' in user and "## Inibizione" in user
+    monkeypatch.setattr(drop_turn, "_INLINE_CHARS", 10)
+    assert "sections: Enzimi; Cinetica; Inibizione" in drop_turn.compose_nucleate_turn(
+        "", [f"{chat_folder(SESSION.chat.sid)}/bio.md"], [])
 
 
 def test_a_dropped_file_lands_in_its_chat_inside_the_write_boundary(client, monkeypatch):
     """A vault that writes only under docs/silica keeps a chat's files there,
     not in a folder at the root of what may be a repository (ADR-0121 point 5)."""
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     from silica.config import CONFIG
     from silica.kernel.base.manifest import reset_manifest_cache
 
     tc, server = client
-    monkeypatch.setattr(server, "run_agent", lambda messages, *a, **kw: "ok")
+    monkeypatch.setattr(turn, "run_agent", lambda messages, *a, **kw: "ok")
     root = Path(CONFIG.vault_path)
     (root / "vault.yaml").write_text("write_dir: docs/silica\n", encoding="utf-8")
     reset_manifest_cache()
@@ -905,59 +946,63 @@ def test_a_dropped_file_lands_in_its_chat_inside_the_write_boundary(client, monk
     resp = tc.post("/nucleate", files=[("files", ("note.md", b"# Hi\n\nbody", "text/markdown"))])
 
     assert resp.status_code == 200
-    assert (root / f"docs/silica/.silica-chat/{server.current_session_id}/note.md").exists()
+    assert (root / f"docs/silica/.silica-chat/{SESSION.chat.sid}/note.md").exists()
     assert not (root / "Inbox/note.md").exists() and not (root / ".silica-chat").exists()
 
 
 def test_compose_nucleate_turn_defaults_empty_text_and_lists_files():
-    from silica.ui.web.server import DROP_ASK, _compose_nucleate_turn
+    from silica.sources.drop_turn import DROP_ASK, compose_nucleate_turn
 
     # empty instruction → describe and ask, never nucleate; markdown vs code stubs both listed
-    msg = _compose_nucleate_turn("", ["Inbox/a.md"], ["Code/b.md"])
+    msg = compose_nucleate_turn("", ["Inbox/a.md"], ["Code/b.md"])
     assert msg.startswith(DROP_ASK) and "Do not nucleate" in msg
     assert "Inbox/a.md" in msg and "Code/b.md" in msg
 
     # a real instruction is kept verbatim as the turn's lead
-    msg2 = _compose_nucleate_turn("summarize these", ["Inbox/a.md"], [])
+    msg2 = compose_nucleate_turn("summarize these", ["Inbox/a.md"], [])
     assert msg2.startswith("summarize these")
     assert "Inbox/a.md" in msg2
 
 
 def test_reset_restores_a_fresh_session(client, monkeypatch):
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         messages.append({"role": "assistant", "content": "a"})
         return "a"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     tc.post("/chat", json={"text": "hi"})
-    assert any(m["role"] == "user" for m in server.messages)
+    assert any(m["role"] == "user" for m in SESSION.chat.messages)
 
     r = tc.post("/reset")
     assert r.status_code == 200
-    assert not any(m["role"] in ("user", "assistant") for m in server.messages)
+    assert not any(m["role"] in ("user", "assistant") for m in SESSION.chat.messages)
 
 
 def test_stop_signals_the_in_flight_cancel_token(client):
+    from silica.ui.web.session import SESSION
     tc, server = client
     import threading
 
-    server.current_cancel = threading.Event()
+    SESSION.cancel = threading.Event()
     r = tc.post("/stop")
     assert r.status_code == 200
-    assert server.current_cancel.is_set()
+    assert SESSION.cancel.is_set()
 
 
 def test_messages_endpoint_returns_user_and_assistant_turns(client, monkeypatch):
+    from silica.ui.web import turn
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         messages.append({"role": "assistant", "content": "Reply"})
         return "Reply"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     tc.post("/chat", json={"text": "question"})
     data = tc.get("/messages").json()
@@ -968,12 +1013,13 @@ def test_messages_endpoint_returns_user_and_assistant_turns(client, monkeypatch)
 
 def test_messages_endpoint_replays_the_tool_calls_of_a_turn(client):
     """Reopening a chat has to show the steps, and a failed one as failed."""
+    from silica.ui.web.session import SESSION
     tc, server = client
     call = lambda cid, name, args: {  # noqa: E731
         "id": cid, "type": "function",
         "function": {"name": name, "arguments": json.dumps(args)},
     }
-    server.messages += [
+    SESSION.chat.messages += [
         {"role": "user", "content": "q"},
         {"role": "assistant", "content": "Let me look.", "silica_reasoning": "the vault may hold it",
          "tool_calls": [call("c1", "silica_read_note", {"name": "a.md"}),
@@ -993,13 +1039,15 @@ def test_messages_endpoint_replays_the_tool_calls_of_a_turn(client):
 
 
 def test_sessions_persist_across_reset_and_reload(client, monkeypatch):
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         messages.append({"role": "assistant", "content": "Reply one"})
         return "Reply one"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     tc.post("/chat", json={"text": "first question"})
     listed = tc.get("/sessions")
@@ -1011,12 +1059,12 @@ def test_sessions_persist_across_reset_and_reload(client, monkeypatch):
 
     # new chat clears the live session; the saved one survives on disk
     tc.post("/reset")
-    assert not any(m["role"] in ("user", "assistant") for m in server.messages)
+    assert not any(m["role"] in ("user", "assistant") for m in SESSION.chat.messages)
 
     r = tc.post("/session/load", json={"id": sid})
     assert r.status_code == 200
-    assert any(m.get("content") == "Reply one" for m in server.messages)
-    assert server.current_session_id == sid
+    assert any(m.get("content") == "Reply one" for m in SESSION.chat.messages)
+    assert SESSION.chat.sid == sid
 
     # unknown / path-traversal ids are rejected
     assert tc.post("/session/load", json={"id": "../../etc/passwd"}).status_code == 404
@@ -1024,7 +1072,7 @@ def test_sessions_persist_across_reset_and_reload(client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _linkify — resolvable note refs become .note-link anchors (token-stream, so
+# linkify — resolvable note refs become .note-link anchors (token-stream, so
 # code is never touched). Pure: driven by a fake dict resolver, no vault.
 # ---------------------------------------------------------------------------
 
@@ -1042,63 +1090,63 @@ def _fake_resolve(ref: str):
 
 
 def test_linkify_resolved_wikilink_becomes_clean_anchor():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("see [[Foo]] here", _fake_resolve)
+    html = linkify("see [[Foo]] here", _fake_resolve)
     assert '<a class="note-link" data-path="Foo.md">Foo</a>' in html
     assert "[[" not in html and "]]" not in html
 
 
 def test_linkify_wikilink_alias_shows_alias_but_resolves_target():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("read [[a/b|Bar]] now", _fake_resolve)
+    html = linkify("read [[a/b|Bar]] now", _fake_resolve)
     assert 'data-path="sub/a-b.md"' in html
     assert ">Bar</a>" in html
 
 
 def test_linkify_unresolved_wikilink_renders_as_broken_anchor():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("a [[nope]] ref", _fake_resolve)
+    html = linkify("a [[nope]] ref", _fake_resolve)
     assert '<a class="note-link broken">nope</a>' in html
     assert "data-path" not in html  # click is a no-op by construction
     assert "[[" not in html
 
 
 def test_linkify_pathlike_md_token_becomes_link_with_clean_name():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("open concepts/mind-maps.md today", _fake_resolve)
+    html = linkify("open concepts/mind-maps.md today", _fake_resolve)
     assert 'data-path="concepts/mind-maps.md"' in html
     assert ">mind-maps</a>" in html
 
 
 def test_linkify_bare_word_is_never_linked():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
     # `index` resolves in the fake index, but has no `/` and no `.md` → not a
     # link candidate, so predictability wins over resolvability.
-    html = _linkify("the index of notes", _fake_resolve)
+    html = linkify("the index of notes", _fake_resolve)
     assert "note-link" not in html
 
 
 def test_linkify_never_touches_code():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("run `concepts/x.md` inline", _fake_resolve)
+    html = linkify("run `concepts/x.md` inline", _fake_resolve)
     assert "note-link" not in html
     assert "<code>concepts/x.md</code>" in html
 
 
 def test_linkify_without_resolver_is_plain_render():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    assert _linkify("see [[Foo]] here").strip() == "<p>see [[Foo]] here</p>"
+    assert linkify("see [[Foo]] here").strip() == "<p>see [[Foo]] here</p>"
 
 
 # ---------------------------------------------------------------------------
-# _linkify — bare URLs. Shared corpus with the mdLite half (tests/link_cases.py).
+# linkify — bare URLs. Shared corpus with the mdLite half (tests/link_cases.py).
 # ---------------------------------------------------------------------------
 
 
@@ -1112,9 +1160,9 @@ def _basename_resolve(ref: str):
 
 @pytest.mark.parametrize("md, present, absent", URL_CASES)
 def test_linkify_url_contract(md, present, absent):
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify(md, _fake_resolve)
+    html = linkify(md, _fake_resolve)
     for frag in present:
         assert frag in html, html
     for frag in absent:
@@ -1122,22 +1170,22 @@ def test_linkify_url_contract(md, present, absent):
 
 
 def test_linkify_bare_url_is_not_swallowed_by_a_same_named_note():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
     # It used to render as `<a class="note-link" data-path="areas/chemistry.md">
     # chemistry</a>`: the URL disappeared from the page and the click opened an
     # unrelated note. Every web citation was one note name away from this.
-    html = _linkify("vedi https://en.wikipedia.org/wiki/chemistry ok", _basename_resolve)
+    html = linkify("vedi https://en.wikipedia.org/wiki/chemistry ok", _basename_resolve)
     assert '<a href="https://en.wikipedia.org/wiki/chemistry">' in html
     assert "note-link" not in html
 
 
 def test_linkify_never_nests_a_note_ref_inside_a_link():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
     # The link text carries a path, so the note pass fired inside the anchor and
     # emitted <a> within <a>, which the browser then unnests.
-    html = _linkify("[vedi chemistry.md](https://e.com)", _basename_resolve)
+    html = linkify("[vedi chemistry.md](https://e.com)", _basename_resolve)
     assert html.count("<a ") == 1, html
     assert "note-link" not in html
 
@@ -1145,9 +1193,9 @@ def test_linkify_never_nests_a_note_ref_inside_a_link():
 def test_embed_with_subpath_fragment_still_renders_image():
     # Obsidian embeds carry a #center/#heading subpath and a width alias:
     # the fragment must not defeat the asset-extension check (regression).
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("![[Pasted image 1.png#center|500]]", _fake_resolve)
+    html = linkify("![[Pasted image 1.png#center|500]]", _fake_resolve)
     assert '<img src="/asset?path=Pasted%20image%201.png"' in html
     assert 'width="500"' in html
     assert "note-link broken" not in html
@@ -1155,29 +1203,29 @@ def test_embed_with_subpath_fragment_still_renders_image():
 
 # ---------------------------------------------------------------------------
 # OFM sugar — highlights, tags, callouts, tasks, mermaid, comments/block-ids,
-# frontmatter. Same pure-resolver setup as the _linkify tests above.
+# frontmatter. Same pure-resolver setup as the linkify tests above.
 # ---------------------------------------------------------------------------
 
 def test_ofm_highlight_and_tag_render():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("a ==hot== take on #graph/theory", _fake_resolve)
+    html = linkify("a ==hot== take on #graph/theory", _fake_resolve)
     assert "<mark>hot</mark>" in html
     assert '<span class="tag">#graph/theory</span>' in html
 
 
 def test_ofm_sugar_never_fires_in_code():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("run `#foo` now\n\n```\n#bar\n==nope==\n```", _fake_resolve)
+    html = linkify("run `#foo` now\n\n```\n#bar\n==nope==\n```", _fake_resolve)
     assert 'class="tag"' not in html
     assert "<mark>" not in html
 
 
 def test_ofm_callout_gets_class_and_title():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("> [!warning] Watch out\n> the body", _fake_resolve)
+    html = linkify("> [!warning] Watch out\n> the body", _fake_resolve)
     assert 'class="callout callout-warning"' in html
     assert '<p class="callout-title">Watch out</p>' in html
     assert "the body" in html
@@ -1185,34 +1233,34 @@ def test_ofm_callout_gets_class_and_title():
 
 
 def test_ofm_plain_blockquote_is_untouched():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("> just a quote", _fake_resolve)
+    html = linkify("> just a quote", _fake_resolve)
     assert "callout" not in html
 
 
 def test_ofm_task_items_become_checkboxes():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("- [ ] open\n- [x] done", _fake_resolve)
+    html = linkify("- [ ] open\n- [x] done", _fake_resolve)
     assert html.count('<input type="checkbox" disabled') == 2
     assert 'disabled checked' in html
     assert "[ ]" not in html and "[x]" not in html
 
 
 def test_ofm_mermaid_fence_becomes_client_hook():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("```mermaid\ngraph TD; A-->B;\n```", _fake_resolve)
+    html = linkify("```mermaid\ngraph TD; A-->B;\n```", _fake_resolve)
     assert '<pre class="mermaid">' in html
     assert "A--&gt;B" in html  # content is escaped, mermaid.js reads textContent
-    assert "mermaid" not in _linkify("```python\nx = 1\n```", _fake_resolve)
+    assert "mermaid" not in linkify("```python\nx = 1\n```", _fake_resolve)
 
 
 def test_ofm_comments_and_block_ids_stripped():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("keep %%hidden%% this ^anchor-id\nnext line", _fake_resolve)
+    html = linkify("keep %%hidden%% this ^anchor-id\nnext line", _fake_resolve)
     assert "hidden" not in html
     assert "anchor-id" not in html
     assert "keep" in html and "next line" in html
@@ -1221,14 +1269,14 @@ def test_ofm_comments_and_block_ids_stripped():
 def test_ofm_strip_spares_fenced_code():
     # %% and trailing ^ids inside a fence are code, not OFM sugar — and a
     # lone %% in a fence must not pair with a prose %% and swallow the block.
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
     md = (
         "before %%gone%%\n\n"
         "```\n%% cell marker\nx = y ^2\n```\n\n"
         "after %%also gone%% end\n"
     )
-    html = _linkify(md, _fake_resolve)
+    html = linkify(md, _fake_resolve)
     assert "gone" not in html
     assert "%% cell marker" in html
     assert "x = y ^2" in html
@@ -1236,17 +1284,17 @@ def test_ofm_strip_spares_fenced_code():
 
 
 def test_ofm_image_embed_becomes_img_via_asset():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("see ![[img/pic 1.png]] and ![[shot.jpg|300]]", _fake_resolve)
+    html = linkify("see ![[img/pic 1.png]] and ![[shot.jpg|300]]", _fake_resolve)
     assert '<img src="/asset?path=img/pic%201.png" alt="pic 1">' in html
     assert '<img src="/asset?path=shot.jpg" alt="shot" width="300">' in html
 
 
 def test_markdown_relative_image_src_routes_through_asset():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("![alt](img/pic.png) ![ext](https://x.io/p.png)", _fake_resolve)
+    html = linkify("![alt](img/pic.png) ![ext](https://x.io/p.png)", _fake_resolve)
     assert 'src="/asset?path=img/pic.png"' in html
     assert 'src="https://x.io/p.png"' in html
 
@@ -1255,16 +1303,16 @@ def test_raw_html_relative_image_src_routes_through_asset():
     # A note written for GitHub uses <img src="..."> rather than ![alt](...), and
     # commonmark passes that through untouched — so the browser resolved it
     # against the page origin and every such image 404'd in the drawer.
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify('<p align="center"><img src="assets/demo.gif" alt="demo" width="900" /></p>', _fake_resolve)
+    html = linkify('<p align="center"><img src="assets/demo.gif" alt="demo" width="900" /></p>', _fake_resolve)
     assert 'src="/asset?path=assets/demo.gif"' in html
 
     # inline, single-quoted, and the three forms that must NOT be rewritten.
     # The single-quoted input is the point here, not the output quoting: the
     # sanitizer re-serializes every allowlisted tag from parsed attributes, so
     # it always emits double quotes whatever the note wrote.
-    html = _linkify(
+    html = linkify(
         "text <img src='img/a b.png'> and "
         '<img src="https://x.io/p.png"> and <img src="/asset?path=already.png"> and '
         '<img src="data:image/png;base64,AA">',
@@ -1280,7 +1328,7 @@ def test_raw_html_allowlist_drops_handlers_and_script_schemes():
     """The allowlist is the only thing between a nucleated document and the DOM:
     app.js writes this render with innerHTML, so anything executable that gets
     through runs on the GUI's own origin."""
-    from silica.ui.web.server import _sanitize_html
+    from silica.ui.web.render import _sanitize_html
 
     # Case is HTMLParser's problem, whitespace inside the name is the browser's,
     # and neither may reach the output.
@@ -1302,24 +1350,24 @@ def test_unterminated_script_keeps_the_rest_of_the_note():
     """markdown-it's raw-text rule runs to the closing tag or to EOF, so one
     stray `<script>` line hands the WHOLE remaining note over as one html_block.
     Dropping that as a script body emptied every note from that line down."""
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("intro\n\n<script>\n\nthe rest of the note\n\n## a heading", _fake_resolve)
+    html = linkify("intro\n\n<script>\n\nthe rest of the note\n\n## a heading", _fake_resolve)
     assert "the rest of the note" in html
     assert "## a heading" in html
     assert "<script" not in html
     # …while a body that closes with its own tag is still a script, not prose.
-    assert "alert(1)" not in _linkify("intro\n\n<script>alert(1)</script>\n\nafter", _fake_resolve)
+    assert "alert(1)" not in linkify("intro\n\n<script>alert(1)</script>\n\nafter", _fake_resolve)
 
 
 def test_fence_gets_pygments_spans():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify('```python\ndef f():\n    return "x"\n```', _fake_resolve)
+    html = linkify('```python\ndef f():\n    return "x"\n```', _fake_resolve)
     assert '<span class="k">def</span>' in html
     assert 'language-python' in html
     # unknown language degrades to a plain escaped fence
-    assert "<span" not in _linkify("```nolang\nx\n```", _fake_resolve)
+    assert "<span" not in linkify("```nolang\nx\n```", _fake_resolve)
 
 
 def test_command_output_fence_is_the_class_the_stylesheet_wraps():
@@ -1329,9 +1377,9 @@ def test_command_output_fence_is_the_class_the_stylesheet_wraps():
     tail of a message runs off the right edge, which is how /fetch's yt-dlp
     error hid the pip command it prescribes."""
 
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    assert 'class="language-text"' in _linkify("```text\nFetched\n```", _fake_resolve)
+    assert 'class="language-text"' in linkify("```text\nFetched\n```", _fake_resolve)
     css = app_css()
     rule = css.split("pre code.language-text {")[1].split("}")[0]
     assert "white-space: pre-wrap" in rule
@@ -1361,12 +1409,12 @@ def test_asset_endpoint_serves_vault_images_and_closes_traversal(client, tmp_vau
 
 
 def test_latex_inline_and_block_become_mathml():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("energy $E=mc^2$ here", _fake_resolve)
+    html = linkify("energy $E=mc^2$ here", _fake_resolve)
     assert "<math" in html and "$" not in html
 
-    html = _linkify("$$\n\\frac{a}{b}\n$$", _fake_resolve)
+    html = linkify("$$\n\\frac{a}{b}\n$$", _fake_resolve)
     assert '<div class="math">' in html
     assert 'display="block"' in html
 
@@ -1375,13 +1423,13 @@ def test_display_math_inside_a_paragraph_leaves_no_dollar_on_screen():
     """A `$$...$$` line inside a paragraph or a quote is display math, as Obsidian and Pandoc
     read it. The block rule cannot interrupt a paragraph, and the inline rule alone ate one `$`
     of each pair: an answer showed "tali che $" and "$5 · (1,0) + ... = b$" (2026-11-01)."""
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
     for text in ("Eppure\n$$5 \\cdot (1,0) = b$$\nquindi b sta nello span",
                  "> **tali che**\n> $$x_1 + x_2 = b$$\n"):
-        html = _linkify(text, _fake_resolve)
+        html = linkify(text, _fake_resolve)
         assert "$" not in html and 'display="block"' in html, html
-    assert "<math" not in _linkify("costs $$5 and $$10 today", _fake_resolve)
+    assert "<math" not in linkify("costs $$5 and $$10 today", _fake_resolve)
 
 
 def test_latex_text_argument_cannot_smuggle_markup_into_mtext():
@@ -1389,41 +1437,41 @@ def test_latex_text_argument_cannot_smuggle_markup_into_mtext():
     latex2mathml copies a `\\text{…}` argument into <mtext> character for
     character. <mtext> is a MathML text integration point, so the browser parses
     what it finds there with HTML rules — a live element with a live handler."""
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify(r"$$\text{<img/src=x/onerror=alert(1)>}$$", _fake_resolve)
+    html = linkify(r"$$\text{<img/src=x/onerror=alert(1)>}$$", _fake_resolve)
     assert "<img" not in html and "<mtext>" not in html
     assert "math-err" in html and "&lt;img/src=x/onerror=alert(1)&gt;" in html
     # `\href`/`\style` put a note-authored URL and declaration on the element.
-    assert 'href="' not in _linkify(r"$\href{javascript:alert(1)}{x}$", _fake_resolve)
-    assert 'style="' not in _linkify(r"$\style{color:red}{x}$", _fake_resolve)
+    assert 'href="' not in linkify(r"$\href{javascript:alert(1)}{x}$", _fake_resolve)
+    assert 'style="' not in linkify(r"$\style{color:red}{x}$", _fake_resolve)
     # Ordinary formulas, including the ones whose text really does say "<".
-    assert "<math" in _linkify(r"$\text{a < b}$", _fake_resolve)
-    assert "<math" in _linkify(r"$\fcolorbox{red}{white}{x}$", _fake_resolve)
+    assert "<math" in linkify(r"$\text{a < b}$", _fake_resolve)
+    assert "<math" in linkify(r"$\fcolorbox{red}{white}{x}$", _fake_resolve)
 
 
 def test_latex_prose_dollars_and_code_stay_literal():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("costs $5 and $10 today", _fake_resolve)
+    html = linkify("costs $5 and $10 today", _fake_resolve)
     assert "<math" not in html
-    html = _linkify("run `$x^2$` inline", _fake_resolve)
+    html = linkify("run `$x^2$` inline", _fake_resolve)
     assert "<math" not in html and "$x^2$" in html
 
 
 def test_split_frontmatter_returns_props_and_body():
-    from silica.ui.web.server import _split_frontmatter
+    from silica.kernel.text.note_parts import split_frontmatter
 
-    props, body = _split_frontmatter("---\ntags: [a, b]\nstatus: seed\n---\n# Title\n")
+    props, body = split_frontmatter("---\ntags: [a, b]\nstatus: seed\n---\n# Title\n")
     assert props == {"tags": ["a", "b"], "status": "seed"}
     assert body == "# Title\n"
 
 
 def test_split_frontmatter_absent_or_non_mapping_is_none():
-    from silica.ui.web.server import _split_frontmatter
+    from silica.kernel.text.note_parts import split_frontmatter
 
-    assert _split_frontmatter("# no fm")[0] is None
-    assert _split_frontmatter("---\n- just\n- a list\n---\nbody")[0] is None
+    assert split_frontmatter("# no fm")[0] is None
+    assert split_frontmatter("---\n- just\n- a list\n---\nbody")[0] is None
 
 
 def test_note_endpoint_renders_frontmatter_properties_box(client, tmp_vault):
@@ -1681,6 +1729,7 @@ def test_messages_endpoint_reports_context_token_headers(client, monkeypatch):
 
 
 def test_chat_done_html_linkifies_a_cited_note(client, tmp_vault, monkeypatch):
+    from silica.ui.web import turn
     tc, server = client
     tmp_vault.note("Foo.md", "# Foo")
 
@@ -1688,7 +1737,7 @@ def test_chat_done_html_linkifies_a_cited_note(client, tmp_vault, monkeypatch):
         messages.append({"role": "assistant", "content": "look at [[Foo]]"})
         return "look at [[Foo]]"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     events = _read_sse(tc.post("/chat", json={"text": "where?"}))
     done = events[-1]
     assert done["type"] == "done"
@@ -1717,7 +1766,7 @@ def test_graph_route_builds_unified_export(client, monkeypatch):
 def test_top_hubs_ranks_by_resolved_degree():
     """The map landing picker ranks notes by resolved-link degree, skips ghost
     and unlinked nodes, and caps the list."""
-    from silica.ui.web.server import _top_hubs
+    from silica.kernel.report.brief import top_hubs
 
     nodes = [
         {"id": "a", "path": "a.md", "label": "A", "type": "note"},
@@ -1730,10 +1779,10 @@ def test_top_hubs_ranks_by_resolved_degree():
         {"from": "a", "to": "g", "type": "EXTRACTED"},   # a has degree 2
         {"from": "a", "to": "b", "type": "AMBIGUOUS"},   # unresolved: ignored
     ]
-    hubs = _top_hubs(nodes, edges, top_n=10)
+    hubs = top_hubs(nodes, edges, top_n=10)
     assert [h["path"] for h in hubs] == ["a.md", "b.md"]  # a(2) > b(1); c(0) dropped
     assert hubs[0]["degree"] == 2 and hubs[0]["name"] == "A"
-    assert _top_hubs(nodes, edges, top_n=1) == hubs[:1]   # cap honored
+    assert top_hubs(nodes, edges, top_n=1) == hubs[:1]   # cap honored
 
 
 def test_config_is_the_headers_cheap_read_and_no_longer_writes(client, monkeypatch):
@@ -1796,9 +1845,9 @@ def test_metrics_endpoint_shapes_the_report_for_the_dashboard(client, tmp_vault)
 def test_metrics_caps_the_uncapped_lists_without_hiding_the_count(client, tmp_vault, monkeypatch):
     # orphans/dangling are exhaustive in the report; the view gets a slice, and
     # totals keeps the true length so a cut list can't read as the whole list.
-    from silica.ui.web import server
+    from silica.ui.web import metrics_routes
 
-    monkeypatch.setattr(server, "_METRICS_ROWS", 2)
+    monkeypatch.setattr(metrics_routes, "_METRICS_ROWS", 2)
     tc, _server = client
     for i in range(5):
         tmp_vault.note(f"O{i}.md", "no links")
@@ -1815,9 +1864,9 @@ def test_metrics_caps_autolink_candidates(client, tmp_vault, monkeypatch):
     # px tall. Same contract as the lists above: slice the rows, keep the count.
     from silica.kernel.report import graph_report
     from silica.kernel.report.graph_report.models import AutolinkCandidate
-    from silica.ui.web import server
+    from silica.ui.web import metrics_routes
 
-    monkeypatch.setattr(server, "_METRICS_ROWS", 2)
+    monkeypatch.setattr(metrics_routes, "_METRICS_ROWS", 2)
     tmp_vault.note("A.md", "solo")
     real = graph_report.compute_report
 
@@ -1856,10 +1905,10 @@ def test_metrics_gaps_carry_the_sizes_that_rank_them(client, tmp_vault):
 
 
 def test_degree_histogram_bins_are_heavy_tail_shaped_and_trim_empty_tail():
-    from silica.ui.web.server import _degree_histogram
+    from silica.kernel.report.vault_shape import degree_histogram
 
     # 3 isolated, 2 leaves, 1 note at degree 7 (the 5-8 bucket).
-    bins = _degree_histogram({"a": 0, "b": 0, "c": 0, "d": 1, "e": 1, "f": 7})
+    bins = degree_histogram({"a": 0, "b": 0, "c": 0, "d": 1, "e": 1, "f": 7})
     assert [(b["label"], b["count"]) for b in bins] == [
         ("0", 3), ("1", 2), ("2", 0), ("3-4", 0), ("5-8", 1),
     ]
@@ -1868,11 +1917,11 @@ def test_degree_histogram_bins_are_heavy_tail_shaped_and_trim_empty_tail():
     assert not any(b["label"].endswith("+") for b in bins)
 
     # A hub past the last named bucket lands in the open-ended one.
-    top = _degree_histogram({"h": 400})[-1]
+    top = degree_histogram({"h": 400})[-1]
     assert top["label"] == "65+" and top["count"] == 1
 
     # Never returns an empty axis, even for an empty vault.
-    assert len(_degree_histogram({})) == 1
+    assert len(degree_histogram({})) == 1
 
 
 def test_metrics_reports_a_degree_distribution_over_every_note(client, tmp_vault):
@@ -1912,12 +1961,13 @@ class TestOwnSessionCapture:
 
     @pytest.fixture(autouse=True)
     def _opt_in(self, client, tmp_path, monkeypatch):
+        from silica.ui.web.session import SESSION
         from silica.config import CONFIG
 
         monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / "silica-home")
         monkeypatch.setattr(CONFIG, "capture_sessions", True)
         _, server = client
-        server.messages.extend([
+        SESSION.chat.messages.extend([
             {"role": "user", "content": "does the GUI capture its own chats?"},
             {"role": "assistant", "content": "Only when you opt in. " * 20},
         ])
@@ -1936,8 +1986,9 @@ class TestOwnSessionCapture:
         assert len(self._envelopes()) == 1
 
     def test_shutting_the_server_down_flushes_the_live_chat(self, client, monkeypatch):
+        from silica.ui.web.session import SESSION
         _, server = client
-        monkeypatch.setattr(server, "_reset_session", lambda: None)  # keep the history
+        monkeypatch.setattr(SESSION, "reset", lambda: None)  # keep the history
         import uvicorn
         # Server.run, not uvicorn.run: serve() builds the Server itself so the
         # beat stream can read should_exit. Patching the call serve() no longer
@@ -1946,7 +1997,7 @@ class TestOwnSessionCapture:
         ran: list[bool] = []
         monkeypatch.setattr(uvicorn.Server, "run",
                             lambda self, sockets=None: ran.append(True))
-        monkeypatch.setattr(server, "print_banner", lambda: None, raising=False)
+        monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
 
         server.serve(port=0)
 
@@ -1988,16 +2039,18 @@ def local_stt(monkeypatch):
 
 
 def test_stt_status_reports_an_unconfigured_endpoint(client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "", raising=False)
     body = app.get("/stt").json()
     assert body["ok"] is False
     assert "SILICA_STT_BASE_URL" in body["detail"]
 
 
 def test_stt_status_probes_the_endpoint_rather_than_trusting_the_setting(client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
     from silica.onboarding import serve
 
     monkeypatch.setattr(serve, "ready", lambda url: False)
@@ -2010,9 +2063,10 @@ def test_stt_status_probes_the_endpoint_rather_than_trusting_the_setting(client,
 
 
 def test_stt_forwards_the_clip_and_returns_the_text(client, monkeypatch, local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_lang", "it", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_lang", "it", raising=False)
     seen = {}
 
     class _Resp:
@@ -2055,9 +2109,10 @@ def test_stt_forwards_the_clip_and_returns_the_text(client, monkeypatch, local_s
 def test_stt_asks_again_without_auto_when_the_endpoint_rejects_it(client, monkeypatch, local_stt):
     """A hosted API (OpenRouter) answers 400 to language="auto", which
     whisper-server needs named; dictation retries without the field."""
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_lang", "auto", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_lang", "auto", raising=False)
     langs = []
 
     class _Resp:
@@ -2091,8 +2146,9 @@ def test_stt_asks_again_without_auto_when_the_endpoint_rejects_it(client, monkey
 
 
 def test_stt_rejects_an_empty_recording(client, monkeypatch):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
     assert app.post("/stt", files={"audio": ("clip.wav", b"", "audio/wav")}).status_code == 400
 
 
@@ -2116,9 +2172,10 @@ class _RefusingClient:
 
 def test_stt_status_offers_the_in_process_transcriber_when_the_endpoint_is_down(
         client, monkeypatch, local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_local_model", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_local_model", "", raising=False)
     from silica.onboarding import serve
 
     monkeypatch.setattr(serve, "ready", lambda url: False)
@@ -2132,27 +2189,30 @@ def test_stt_status_offers_the_in_process_transcriber_when_the_endpoint_is_down(
 def test_stt_status_for_reading_aloud_never_loads_the_model(client, monkeypatch, local_stt):
     """Learn asks the same probe for the language and the voice consent; a
     reader who only listens must not pay 480 MB for a microphone never opened."""
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "", raising=False)
     assert app.get("/stt", params={"warm": 0}).json()["via"] == "local"
     assert local_stt["warmed"] == []
 
 
 def test_stt_status_says_which_browser_lane_is_allowed_and_in_what_language(
         client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_browser", "on-device", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_lang", "it", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_browser", "on-device", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_lang", "it", raising=False)
     body = app.get("/stt").json()
     assert body["ok"] is False and body["browser"] == "on-device" and body["lang"] == "it"
 
 
 def test_stt_falls_back_in_process_when_the_endpoint_refuses(client, monkeypatch, local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_lang", "it", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_local_model", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_lang", "it", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_local_model", "", raising=False)
     import httpx
 
     monkeypatch.setattr(httpx, "AsyncClient", _RefusingClient)
@@ -2163,15 +2223,17 @@ def test_stt_falls_back_in_process_when_the_endpoint_refuses(client, monkeypatch
 
 
 def test_stt_with_no_endpoint_configured_goes_straight_in_process(client, monkeypatch, local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "", raising=False)
     resp = app.post("/stt", files={"audio": ("clip.wav", b"RIFFclip", "audio/wav")})
     assert resp.json()["via"] == "local"
 
 
 def test_stt_reports_both_failures_when_both_transcribers_fail(client, monkeypatch, local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
     import httpx
 
     from silica.agent import stt
@@ -2189,8 +2251,9 @@ def test_stt_reports_both_failures_when_both_transcribers_fail(client, monkeypat
 
 
 def test_stt_without_any_transcriber_is_a_503_not_a_bad_microphone(client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "", raising=False)
     resp = app.post("/stt", files={"audio": ("clip.wav", b"RIFFclip", "audio/wav")})
     assert resp.status_code == 503
 
@@ -2198,9 +2261,10 @@ def test_stt_without_any_transcriber_is_a_503_not_a_bad_microphone(client, monke
 def test_dictation_goes_to_its_own_endpoint_not_the_convert_one(client, monkeypatch, no_local_stt):
     """whisper-server transcribes one request at a time: a clip sent to the one
     busy with a lecture for /convert waits for the whole lecture."""
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_dictation_base_url", "http://localhost:8/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_dictation_base_url", "http://localhost:8/v1", raising=False)
     from silica.onboarding import serve
 
     probed: list[str] = []
@@ -2223,9 +2287,10 @@ def test_dictation_goes_to_its_own_endpoint_not_the_convert_one(client, monkeypa
 
 
 def test_an_empty_dictation_endpoint_turns_off_only_dictation(client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_dictation_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_dictation_base_url", "", raising=False)
     monkeypatch.delenv("SILICA_HOSTED", raising=False)
     from silica.onboarding import serve
 
@@ -2242,8 +2307,9 @@ def test_an_empty_dictation_endpoint_turns_off_only_dictation(client, monkeypatc
 
 def test_a_hosted_tenant_is_not_told_to_install_or_configure_anything(
         client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_dictation_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_dictation_base_url", "", raising=False)
     monkeypatch.setenv("SILICA_HOSTED", "1")
     body = app.get("/stt").json()
     assert body["ok"] is False and body["hosted"] is True
@@ -2262,14 +2328,15 @@ def test_index_stamps_the_configured_theme_preference(client, monkeypatch):
     JS after load flashes the wrong palette for a frame. So `/` carries
     SILICA_THEME through to the attribute the <head> script reads.
     """
+    from silica.config import CONFIG
     app, server = client
     for pref in ("light", "dark", "auto"):
-        monkeypatch.setattr(server.CONFIG, "theme", pref, raising=False)
+        monkeypatch.setattr(CONFIG, "theme", pref, raising=False)
         assert f'data-theme-pref="{pref}"' in app.get("/").text
 
     # An unknown value degrades to auto rather than stamping something the CSS
     # has no block for, which would silently pin the app to dark.
-    monkeypatch.setattr(server.CONFIG, "theme", "sepia", raising=False)
+    monkeypatch.setattr(CONFIG, "theme", "sepia", raising=False)
     assert 'data-theme-pref="auto"' in app.get("/").text
 
 
@@ -2511,10 +2578,11 @@ def test_gui_seed_is_the_tui_seed(tmp_vault, monkeypatch):
     import datetime as dt
 
     from silica.cli import seed_messages
-    from silica.ui.web import server
+    from silica.ui.web.session import SESSION
+    from silica.ui.web import session
 
-    server._build_seed()
-    gui = [m["content"] for m in server._seed[0]]
+    session.build_seed()
+    gui = [m["content"] for m in SESSION.seed[0]]
     tui = [m["content"] for m in seed_messages()]
 
     # Same messages, two differences: the GUI prompt carries the math block, and
@@ -2535,12 +2603,13 @@ def test_vault_brief_is_off_when_the_setting_is_off(client, monkeypatch):
     endpoint answers without touching a provider — the counted line the browser
     renders beside it is what keeps the landing from going blank."""
     from silica.config import CONFIG
-    from silica.ui.web import server
+    from silica.ui.web import metrics_routes
+    from silica.kernel.report import brief
 
     monkeypatch.setattr(CONFIG, "vault_brief", False)
-    monkeypatch.setattr(server, "_write_brief",
+    monkeypatch.setattr(brief, "write_brief",
                         lambda *a: pytest.fail("a disabled brief called the model"))
-    assert server.vault_brief() == {"enabled": False, "text": ""}
+    assert metrics_routes.vault_brief() == {"enabled": False, "text": ""}
 
 
 def test_vault_brief_replays_its_cache_until_the_corpus_shape_changes(
@@ -2555,10 +2624,11 @@ def test_vault_brief_replays_its_cache_until_the_corpus_shape_changes(
     index picks a new file up instead."""
     from silica.config import CONFIG
     from silica.kernel.graph import graph_export
-    from silica.ui.web import server
+    from silica.ui.web import metrics_routes
+    from silica.kernel.report import brief
 
     monkeypatch.setattr(CONFIG, "vault_brief", True)
-    monkeypatch.setattr(server, "_brief_path", lambda: tmp_path / "brief.json")
+    monkeypatch.setattr(brief, "brief_path", lambda: tmp_path / "brief.json")
 
     nodes = [{"id": "a", "path": "a.md", "label": "a"},
              {"id": "b", "path": "b.md", "label": "b"}]
@@ -2566,16 +2636,16 @@ def test_vault_brief_replays_its_cache_until_the_corpus_shape_changes(
     monkeypatch.setattr(graph_export, "detect_communities", lambda *_a: [])
 
     calls = []
-    monkeypatch.setattr(server, "_write_brief",
+    monkeypatch.setattr(brief, "write_brief",
                         lambda n, t, h: calls.append(n) or f"about {n} notes")
 
-    assert server.vault_brief()["text"] == "about 2 notes"
-    assert server.vault_brief() == {"enabled": True, "text": "about 2 notes",
+    assert metrics_routes.vault_brief()["text"] == "about 2 notes"
+    assert metrics_routes.vault_brief() == {"enabled": True, "text": "about 2 notes",
                                     "cached": True}
     assert calls == [2], "the second call should have replayed the cache"
 
     nodes.append({"id": "c", "path": "c.md", "label": "c"})
-    assert server.vault_brief()["text"] == "about 3 notes"
+    assert metrics_routes.vault_brief()["text"] == "about 3 notes"
     assert calls == [2, 3]
 
 
@@ -2584,16 +2654,17 @@ def test_vault_brief_survives_a_provider_that_is_not_there(
     """A landing that 500s because a worker model is down would be worse than a
     landing with one fewer line on it."""
     from silica.config import CONFIG
-    from silica.ui.web import server
+    from silica.ui.web import metrics_routes
+    from silica.kernel.report import brief
 
     monkeypatch.setattr(CONFIG, "vault_brief", True)
-    monkeypatch.setattr(server, "_brief_path", lambda: tmp_path / "brief.json")
+    monkeypatch.setattr(brief, "brief_path", lambda: tmp_path / "brief.json")
 
     def _boom(*_a, **_k):
         raise ConnectionError("no worker here")
 
     monkeypatch.setattr("silica.model.providers.get_provider", _boom)
-    assert server.vault_brief() == {"enabled": True, "text": ""}
+    assert metrics_routes.vault_brief() == {"enabled": True, "text": ""}
     assert not (tmp_path / "brief.json").exists(), "an empty brief was cached"
 
 
@@ -2953,12 +3024,14 @@ def test_the_beat_stream_ends_when_the_server_is_leaving(client, monkeypatch):
     while the wait is still polite — and no cancelled connection task prints
     the 40-line ASGI traceback that reads as a crash under a Ctrl+C.
     """
+    from silica.ui.web import sse
+    from silica.ui.web.session import SESSION
     import threading
     from types import SimpleNamespace
 
     c, server = client
-    monkeypatch.setattr(server, "_SERVER", SimpleNamespace(should_exit=True))
-    monkeypatch.setattr(server, "_SSE_POLL_S", 0.01)
+    monkeypatch.setattr(SESSION, "server", SimpleNamespace(should_exit=True))
+    monkeypatch.setattr(sse, "POLL_S", 0.01)
     # Read in a thread with a join deadline: a regression here is a HANG, and a
     # hung suite says less than a red test does.
     done: list[int] = []
@@ -2978,19 +3051,21 @@ def test_serve_keeps_a_handle_on_the_server_it_runs(monkeypatch):
     import uvicorn
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
+    from silica.ui.web import session
 
-    monkeypatch.setattr(server, "_SERVER", None)
+    monkeypatch.setattr(SESSION, "server", None)
     ran: list[bool] = []
     monkeypatch.setattr(uvicorn.Server, "run",
                         lambda self, sockets=None: ran.append(True))
-    monkeypatch.setattr(server, "_reset_session", lambda: None)
-    monkeypatch.setattr(server, "_capture_own_session", lambda: None)
+    monkeypatch.setattr(SESSION, "reset", lambda: None)
+    monkeypatch.setattr(session, "capture_own_session", lambda: None)
     monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
 
     server.serve(port=8799)
     assert ran == [True], "the fake never ran: this test would bind a real port"
-    assert server._SERVER is not None, "nothing can ask this server to stop"
-    assert server._SERVER.config.timeout_graceful_shutdown == 1
+    assert SESSION.server is not None, "nothing can ask this server to stop"
+    assert SESSION.server.config.timeout_graceful_shutdown == 1
 
 
 def test_a_hosted_tenant_listens_on_its_socket_and_answers_to_its_public_name(monkeypatch, tmp_path):
@@ -2998,20 +3073,22 @@ def test_a_hosted_tenant_listens_on_its_socket_and_answers_to_its_public_name(mo
     forwards the public Host unchanged, which the loopback check would refuse."""
     import uvicorn
 
-    from silica.ui.web import server
+    from silica.ui.web import security, server
+    from silica.ui.web.session import SESSION
+    from silica.ui.web import session
 
     sock = str(tmp_path / "gui.sock")
     monkeypatch.setenv("SILICA_GUI_SOCKET", sock)
     monkeypatch.setenv("SILICA_GUI_HOSTS", " Silica.Example.dev , ")
-    monkeypatch.setattr(server, "_SERVER", None)
+    monkeypatch.setattr(SESSION, "server", None)
     monkeypatch.setattr(uvicorn.Server, "run", lambda self, sockets=None: None)
-    monkeypatch.setattr(server, "_reset_session", lambda: None)
-    monkeypatch.setattr(server, "_capture_own_session", lambda: None)
+    monkeypatch.setattr(SESSION, "reset", lambda: None)
+    monkeypatch.setattr(session, "capture_own_session", lambda: None)
     monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
 
     server.serve(port=8799)
-    assert server._SERVER.config.uds == sock
-    assert server._public_hosts() == {"silica.example.dev"}
+    assert SESSION.server.config.uds == sock
+    assert security._public_hosts() == {"silica.example.dev"}
 
 
 def test_serve_exits_quietly_on_the_signal_uvicorn_re_raises(monkeypatch, tmp_path):
@@ -3025,15 +3102,17 @@ def test_serve_exits_quietly_on_the_signal_uvicorn_re_raises(monkeypatch, tmp_pa
     import uvicorn
 
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
+    from silica.ui.web import session
 
     def interrupted(self, sockets=None):
         raise KeyboardInterrupt
 
     flushed: list[bool] = []
-    monkeypatch.setattr(server, "_SERVER", None)
+    monkeypatch.setattr(SESSION, "server", None)
     monkeypatch.setattr(uvicorn.Server, "run", interrupted)
-    monkeypatch.setattr(server, "_reset_session", lambda: None)
-    monkeypatch.setattr(server, "_capture_own_session", lambda: flushed.append(True))
+    monkeypatch.setattr(SESSION, "reset", lambda: None)
+    monkeypatch.setattr(session, "capture_own_session", lambda: flushed.append(True))
     monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
 
     server.serve(port=8799)   # must not raise
@@ -3043,6 +3122,7 @@ def test_serve_exits_quietly_on_the_signal_uvicorn_re_raises(monkeypatch, tmp_pa
 def test_a_chat_turn_is_offered_the_core_and_can_load_the_rest(client, monkeypatch):
     """ADR-0050: the GUI builds the same constraints as the REPL, the core
     offered and every other chat tool loadable."""
+    from silica.ui.web import turn
     from silica.agent.constraints import CHAT_CORE, loadable
 
     tc, server = client
@@ -3054,7 +3134,7 @@ def test_a_chat_turn_is_offered_the_core_and_can_load_the_rest(client, monkeypat
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     _read_sse(tc.post("/chat", json={"text": "quali note sono orfane?"}))
     c = seen["c"]
     assert c.interactive and set(c.tools) <= set(CHAT_CORE)
@@ -3131,18 +3211,19 @@ def test_every_view_row_says_what_the_view_is_for():
 def test_an_aliased_link_in_a_table_cell_keeps_the_row_whole():
     """The model writes `[[Note|alias]]` in a table where Obsidian asks for
     `\\|`; its pipe ended the cell and split the row (an aid's table, 2026-10-23)."""
-    from silica.ui.web import server
+    from silica.ui.web import render
 
     table = "| Aspetto | Reti |\n|---|---|\n| Movimenti | a meno di [[Attenzione|attenzione]] |\n"
-    html = server._linkify(table, resolve=lambda r: "ML/Attenzione.md" if r.startswith("Attenzione") else None)
+    html = render.linkify(table, resolve=lambda r: "ML/Attenzione.md" if r.startswith("Attenzione") else None)
     row = html[html.index("<tbody"):]
     assert row.count("<td") == 2 and '<a class="note-link" data-path="ML/Attenzione.md">attenzione</a>' in row
-    assert server._escape_table_aliases("prose [[A|b]]\n") == "prose [[A|b]]\n"
+    assert render._escape_table_aliases("prose [[A|b]]\n") == "prose [[A|b]]\n"
 
 
 def test_a_reader_saying_it_is_unclear_gets_a_read_only_turn(client, monkeypatch):
     """Asked "non ho capito il Boosting", the local 9B wrote a note of its own
     (2026-10-23): the turn says read-only."""
+    from silica.ui.web import turn
     _tc, server = client
     seen = {}
 
@@ -3151,16 +3232,18 @@ def test_a_reader_saying_it_is_unclear_gets_a_read_only_turn(client, monkeypatch
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     async def collect():
-        return [item async for item in server.run_turn("non ho capito il Boosting")]
+        from silica.ui.web import turn
+        return [item async for item in turn.run_turn("non ho capito il Boosting")]
 
     asyncio.run(collect())
     assert "READ-ONLY" in seen["content"]
 
     async def plain():
-        return [item async for item in server.run_turn("cos'è il boosting?")]
+        from silica.ui.web import turn
+        return [item async for item in turn.run_turn("cos'è il boosting?")]
 
     asyncio.run(plain())
     assert "READ-ONLY" not in seen["content"]
@@ -3169,19 +3252,21 @@ def test_a_reader_saying_it_is_unclear_gets_a_read_only_turn(client, monkeypatch
 def test_an_absolute_value_in_a_table_cell_keeps_the_row_whole():
     """`$|x|$` in a table row split the row at its bars (2026-10-23); they
     become \\vert, and a norm's \\| becomes \\Vert, which draw the same."""
-    from silica.ui.web import server
+    from silica.ui.web import render
 
     table = "| Posizione | Condizione |\n|---|---|\n| Esterno | $|y_i f(x)| > \\gamma$ |\n| Norma | $\\|\\xi\\|_2$ |\n"
-    body = server._linkify(table)
+    body = render.linkify(table)
     body = body[body.index("<tbody"):]
     assert [row.count("<td") for row in body.split("</tr>")[:2]] == [2, 2]
     assert "&#x0007C;" in body and "&#x02016;" in body
-    assert server._escape_table_aliases("prose $|x|$\n") == "prose $|x|$\n"
+    assert render._escape_table_aliases("prose $|x|$\n") == "prose $|x|$\n"
 
 
 def test_a_plan_request_ends_on_the_calendar_learn_computed(client, monkeypatch):
     """The calendar is appended by code under the answer and stored with it:
     told to copy it, the 9B merged days (2026-10-23)."""
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     _tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -3189,21 +3274,23 @@ def test_a_plan_request_ends_on_the_calendar_learn_computed(client, monkeypatch)
         messages.append({"role": "assistant", "content": "Ecco come studiare."})
         return "Ecco come studiare."
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
-    monkeypatch.setattr(server, "_plan_context", lambda text, messages: ("[block]", "| Day | Step | Notes |\n|---|---|---|\n| 2026-10-23 | Basi |  |", None))
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "_plan_context", lambda text, messages: ("[block]", "| Day | Step | Notes |\n|---|---|---|\n| 2026-10-23 | Basi |  |", None))
 
     async def collect():
-        return [item async for item in server.run_turn("piano di studio fino all'esame")]
+        from silica.ui.web import turn
+        return [item async for item in turn.run_turn("piano di studio fino all'esame")]
 
     done = asyncio.run(collect())[-1]
     assert done["answer"].startswith("Ecco come studiare.") and done["answer"].endswith("| 2026-10-23 | Basi |  |")
-    assert server.messages[-1]["content"] == done["answer"]
+    assert SESSION.chat.messages[-1]["content"] == done["answer"]
 
 
 def test_a_plan_computed_in_the_chat_is_offered_for_saving_with_one_click(client, monkeypatch):
     """The line under the answer carries what the Memorize form posts, and
     the page saves it on the click itself: the reader finds the plan in
     Memorize with no command to send (owner, 2026-11-03)."""
+    from silica.ui.web import turn
     _tc, server = client
     draft = {"name": "Esame ML", "scope": "folder", "target": "ML/", "restrict": "", "by": "2026-12-10", "templates": True}
 
@@ -3211,13 +3298,67 @@ def test_a_plan_computed_in_the_chat_is_offered_for_saving_with_one_click(client
         messages.append({"role": "assistant", "content": "Il piano copre ML/."})
         return "Il piano copre ML/."
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
-    monkeypatch.setattr(server, "_plan_context", lambda text, messages: ("[block]", "Plan computed by Memorize", draft))
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "_plan_context", lambda text, messages: ("[block]", "Plan computed by Memorize", draft))
 
     async def collect():
-        return [item async for item in server.run_turn("ML/, esame il 10 dicembre")]
+        from silica.ui.web import turn
+        return [item async for item in turn.run_turn("ML/, esame il 10 dicembre")]
 
     done = asyncio.run(collect())[-1]
     assert done["offer"]["commands"] == [{"label": "save it in Memorize", "save": draft}]
     js = (Path(server.__file__).parent / "static" / "app-chat.js").read_text(encoding="utf-8")
     assert "} else if (c.save) {" in js and 'postJson("/learn/plan", body)' in js
+
+
+def test_the_slot_is_freed_however_its_block_ends(client):
+    from silica.ui.web.session import SESSION, turn_slot
+
+    with pytest.raises(ValueError):
+        with turn_slot():
+            assert SESSION.busy is True
+            raise ValueError
+    assert SESSION.busy is False
+
+
+def test_a_slot_handed_off_stays_held_for_the_stream_that_took_it(client):
+    """The one exit that must not release: `run_turn`'s finally frees it, and
+    `sweep_if_orphaned` when the stream's body never runs."""
+    from silica.ui.web.session import SESSION, turn_slot
+
+    with turn_slot() as slot:
+        slot.hand_off()
+    assert SESSION.busy is True
+    SESSION.sweep_if_orphaned()
+    assert SESSION.busy is False
+
+
+def test_a_second_claim_is_refused_with_the_sentence_the_site_gave(client):
+    from fastapi import HTTPException
+
+    from silica.ui.web.session import SESSION, turn_slot
+
+    with turn_slot():
+        with pytest.raises(HTTPException) as refused:
+            with turn_slot("a turn is running: move when it ends"):
+                pass
+        assert SESSION.busy is True, "the refused claim must not free the holder's slot"
+    assert (refused.value.status_code, refused.value.detail) == (409, "a turn is running: move when it ends")
+
+
+def test_a_bad_message_after_the_claim_does_not_leave_the_gate_shut(client, monkeypatch):
+    """`join_next` ran outside the hand-paired release, so its failure held the
+    gate until a restart: every later POST answered 409."""
+    from silica.ui.web import jobs
+    from silica.ui.web.session import SESSION
+
+    tc, _server = client
+    SESSION.chat.sid = "abc123"
+
+    def broken(_sid):
+        raise RuntimeError("the job store is unreadable")
+
+    monkeypatch.setattr(jobs, "join_next", broken)
+    bad = TestClient(tc.app, raise_server_exceptions=False).post("/chat", json={"text": "hello"})
+    assert bad.status_code == 500
+    assert SESSION.busy is False

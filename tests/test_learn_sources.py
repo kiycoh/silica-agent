@@ -307,8 +307,9 @@ def test_the_form_previews_sources_and_the_budget_route_answers(course):
     from fastapi.testclient import TestClient
 
     from silica.ui.web import learn_routes, server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     learn_routes._reset()
     client = TestClient(server.app)
     out = client.post("/learn/plan", json={"scope": "", "target": "", "reference": "Syllabus", "preview": True},

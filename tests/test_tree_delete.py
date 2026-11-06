@@ -13,7 +13,7 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from silica.ui.web.graph_view import render_tree  # noqa: E402
+from silica.ui.web.file_tree import frame_tree, rail_tree  # noqa: E402
 
 STATIC = Path(__file__).resolve().parents[1] / "silica" / "ui" / "web" / "static"
 
@@ -21,6 +21,7 @@ STATIC = Path(__file__).resolve().parents[1] / "silica" / "ui" / "web" / "static
 @pytest.fixture
 def client(tmp_vault):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     tmp_vault.note("Corso/ML/Autoencoders.md", "# Autoencoders\n\nsee [[VAE]]\n")
     tmp_vault.note("Corso/ML/VAE.md", "# VAE\n")
@@ -30,15 +31,15 @@ def client(tmp_vault):
     tmp_vault.note("Corso/Stat/Regressione.md", "# Regressione\n\nlike [[VAE]]\n")
     from silica.config import CONFIG
 
-    server._reset_session()
+    SESSION.reset()
     yield TestClient(server.app), server, Path(CONFIG.vault_path)
-    server._end_turn()  # a test that claimed the turn's slot must not leave it claimed
+    SESSION.release()  # a test that claimed the turn's slot must not leave it claimed
 
 
 # -- the tree -----------------------------------------------------------------
 
 def test_the_rail_row_carries_the_menu_and_no_diamond():
-    html = render_tree([{"id": "a/b/c.md", "path": "a/b/c.md", "type": "note"}], actions=True)
+    html = rail_tree([{"id": "a/b/c.md", "path": "a/b/c.md", "type": "note"}])
     assert 'class="tree-more" data-note="a/b/c.md"' in html
     # the folder's own path, as the ◇ carried it: the drag onto a workspace reads it
     assert 'class="tree-more" data-folder="a"' in html and 'data-folder="a/b"' in html
@@ -46,7 +47,7 @@ def test_the_rail_row_carries_the_menu_and_no_diamond():
 
 
 def test_the_frame_tree_has_no_menu():
-    assert "tree-more" not in render_tree([{"id": "a/c.md", "path": "a/c.md", "type": "note"}])
+    assert "tree-more" not in frame_tree([{"id": "a/c.md", "path": "a/c.md", "type": "note"}])
 
 
 def test_no_script_or_style_still_looks_for_the_diamond():
@@ -112,9 +113,10 @@ def test_an_empty_folder_is_not_found(client):
 # -- what the menu may not do -------------------------------------------------
 
 def test_a_running_turn_refuses_the_delete_and_the_undo(client):
+    from silica.ui.web.session import SESSION
     tc, server, vault = client
     run = tc.post("/tree/delete", json={"path": "Corso/ML/Indice.md"}).json()["run"]
-    assert server._begin_turn()
+    assert SESSION.claim()
     assert tc.post("/tree/delete", json={"path": "Corso/ML/VAE.md"}).status_code == 409
     assert tc.post("/tree/undo", json={"run": run}).status_code == 409
     assert (vault / "Corso/ML/VAE.md").exists()

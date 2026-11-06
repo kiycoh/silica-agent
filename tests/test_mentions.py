@@ -75,9 +75,11 @@ def test_a_gui_turn_carries_the_paths_and_a_reopened_chat_shows_the_words(tmp_va
     from fastapi.testclient import TestClient
 
     from silica.ui.web import server
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
 
     tmp_vault.note("Concepts/ML/Machine learning.md", "# Machine learning\n")
-    server._reset_session()
+    SESSION.reset()
     tc = TestClient(server.app)
     seen = {}
 
@@ -86,7 +88,7 @@ def test_a_gui_turn_carries_the_paths_and_a_reopened_chat_shows_the_words(tmp_va
         messages.append({"role": "assistant", "content": "Ok."})
         return "Ok."
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     r = tc.post("/chat", json={"text": "Spiega [[Machine learning]]"})
     events = [json.loads(line[6:]) for line in r.text.splitlines() if line.startswith("data: ")]
     assert events[-1]["type"] == "done"
@@ -117,9 +119,11 @@ def test_the_chip_note_reaches_the_model_and_a_reopened_chat_draws_it(tmp_vault,
 
     from silica.model.wire import to_wire
     from silica.ui.web import server
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
 
     tmp_vault.note("Codice civile/Art. 1453.md", "# Art. 1453\n\nRisoluzione per inadempimento.\n")
-    server._reset_session()
+    SESSION.reset()
     tc = TestClient(server.app)
     seen = []
 
@@ -128,7 +132,7 @@ def test_the_chip_note_reaches_the_model_and_a_reopened_chat_draws_it(tmp_vault,
         messages.append({"role": "assistant", "content": "Ok."})
         return "Ok."
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     tc.post("/chat", json={"text": "cosa dice questo articolo?", "note": "Codice civile/Art. 1453.md"})
     tc.post("/chat", json={"text": "e questo?", "note": "Gone.md"})
     assert "The note open beside the chat" in seen[0]["content"]

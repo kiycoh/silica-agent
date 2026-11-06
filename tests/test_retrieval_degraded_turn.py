@@ -272,6 +272,8 @@ def gui(rig, monkeypatch):
     """The GUI's run_turn over the real run_agent, each RecallWatch kept."""
     from silica.agent.loop import run_agent
     from silica.ui.web import server
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
 
     watches: list = []
 
@@ -295,13 +297,13 @@ def gui(rig, monkeypatch):
             **({"max_iterations": max_iter["n"]} if max_iter["n"] else {}))
         return run_agent(messages, model, cb, cancel_token=cancel_token, constraints=constraints)
 
-    monkeypatch.setattr(server, "RecallWatch", Spy)
-    monkeypatch.setattr(server, "run_agent", chat_turn)
-    server._reset_session()
+    monkeypatch.setattr(turn, "RecallWatch", Spy)
+    monkeypatch.setattr(turn, "run_agent", chat_turn)
+    SESSION.reset()
     sent: list = []
     yield SimpleNamespace(tc=TestClient(server.app), server=server, watches=watches,
                           sent=sent, llm=scripted_llm(sent), max_iter=max_iter)
-    server._reset_session()
+    SESSION.reset()
 
 
 def _read_sse(response) -> list[dict]:
@@ -310,6 +312,8 @@ def _read_sse(response) -> list[dict]:
 
 
 def run_turns(gui, plans: list[str]) -> list[SimpleNamespace]:
+    from silica.ui.web.session import SESSION
+
     out = []
     with patch("silica.agent.loop.call_llm", gui.llm):
         for plan in plans:
@@ -320,7 +324,7 @@ def run_turns(gui, plans: list[str]) -> list[SimpleNamespace]:
             watch = gui.watches[before]
             out.append(SimpleNamespace(
                 result=watch.results[0], watch=watch, done=done,
-                stored=gui.server.messages[-1].get(turn_notes.KEY, [])))
+                stored=SESSION.chat.messages[-1].get(turn_notes.KEY, [])))
     return out
 
 
@@ -356,11 +360,13 @@ NONE = {"result": 0, "watch": 0, "done": 0, "stored": 0}
 def _reload_holds(gui, turns) -> None:
     """The reload arm over a marked arm: /messages, both compactions forced,
     then /session/load, each giving every turn the notes its frame carried."""
+    from silica.config import CONFIG
+    from silica.ui.web.session import SESSION
     from silica.agent import relevance
     from silica.agent.compaction import compact_read_history
     from silica.tools import TOOLS
 
-    tc, server = gui.tc, gui.server
+    tc = gui.tc
     live = [t.done["notes"] for t in turns]
 
     def replayed() -> list:
@@ -369,13 +375,13 @@ def _reload_holds(gui, turns) -> None:
 
     assert replayed() == live
     with patch.object(relevance, "ENABLED", True), \
-            patch.object(server.CONFIG, "decision_model", "stub/model"), \
+            patch.object(CONFIG, "decision_model", "stub/model"), \
             patch.object(relevance, "decide", lambda state, q: {"needed": {"noul": 0.0}}):
-        relevance.compact_by_relevance(server.messages, TOOLS)
-    compact_read_history(server.messages, set(), prompt_tokens=10**7, budget=1,
+        relevance.compact_by_relevance(SESSION.chat.messages, TOOLS)
+    compact_read_history(SESSION.chat.messages, set(), prompt_tokens=10**7, budget=1,
                          floor_turns=1, tools=TOOLS)
     assert replayed() == live
-    sid = server.current_session_id
+    sid = SESSION.chat.sid
     tc.post("/reset")
     assert tc.post("/session/load", json={"id": sid}).status_code == 200
     assert replayed() == live

@@ -434,11 +434,12 @@ def client(step_vault, monkeypatch):
 
     from silica.kernel.learn import grade, items
     from silica.ui.web import learn_routes, server
+    from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", "stop"))
     monkeypatch.setattr(grade, "_llm", lambda *a, **k: ("", "stop"))
     monkeypatch.setattr(reading, "_ask", fake_ask)
-    server._reset_session()
+    SESSION.reset()
     learn_routes._reset()
     return TestClient(server.app, headers={"Origin": "http://testserver"})
 

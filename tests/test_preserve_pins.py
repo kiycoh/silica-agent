@@ -18,12 +18,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 LOSS_PINS = {
-    ("silica/ui/web/server.py", "note_save", "Loss.PERSON"): 1,
+    ("silica/ui/web/notes_routes.py", "note_save", "Loss.PERSON"): 1,
     ("silica/cli.py", "_dc_verify", "Loss.PERSON"): 1,
     ("silica/kernel/write/gate.py", "create_note_with_restore_point", "Loss.PERSON"): 1,   # ADR-0155 point 8
     ("silica/kernel/write/gate.py", "apply_inverses", "Loss.RESTORE"): 2,
     ("silica/cli.py", "_dc_undo", "Loss.RESTORE"): 1,
-    ("silica/ui/web/server.py", "note_history_restore", "Loss.RESTORE"): 1,   # ADR-0144 point 7
+    ("silica/ui/web/notes_routes.py", "note_history_restore", "Loss.RESTORE"): 1,   # ADR-0144 point 7
     ("silica/sources/convert.py", "_doc_to_md", "Loss.STAGED"): 3,   # ADR-0129 point 5: the parent note
     ("silica/sources/convert.py", "_convert_tabular", "Loss.STAGED"): 1,
     ("silica/sources/convert.py", "_write_leaf", "Loss.STAGED"): 1,
@@ -31,7 +31,7 @@ LOSS_PINS = {
     ("silica/tools/codedocs_tool.py", "silica_document", "Loss.STAGED"): 1,
     ("silica/cli.py", "_stage_envelope", "Loss.STAGED"): 1,
     ("silica/cli.py", "_promote", "Loss.STAGED"): 1,
-    ("silica/ui/web/server.py", "_add_to_vault", "Loss.STAGED"): 1,   # ADR-0121 point 5
+    ("silica/kernel/vault_files.py", "add_to_vault", "Loss.STAGED"): 1,   # ADR-0121 point 5
     ("silica/kernel/write/gate.py", "commit_derived", "Loss.DERIVED"): 1,
     ("silica/kernel/write/migrate.py", "apply", "Loss.MIGRATE"): 1,
     ("silica/kernel/learn/plans.py", "edit_plan", "Loss.PLAN"): 1,

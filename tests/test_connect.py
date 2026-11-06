@@ -32,10 +32,9 @@ from silica.driver.base import NoteRef  # noqa: E402
 @pytest.fixture
 def bridge_env(tmp_vault, tmp_path, monkeypatch):
     """Fresh web-session state + driver singleton around each bridge test."""
-    from silica.ui.web import server as web
+    from silica.ui.web.session import SESSION
 
-    web._reset_session()
-    yield web
+    SESSION.reset()
 
 
 def _run(scenario, **srv_kwargs) -> None:
@@ -166,14 +165,14 @@ async def _recv_chat(ws):
         return frame
 
 def test_chat_streams_events_then_done(bridge_env, monkeypatch):
-    web = bridge_env
+    from silica.ui.web import turn
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         tool_progress_callback(LLMStreamEvent("content", "Hello", 0))
         messages.append({"role": "assistant", "content": "Hello"})
         return "Hello"
 
-    monkeypatch.setattr(web, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     async def scenario(srv):
         ws, _ = await _dial(srv)
@@ -196,7 +195,7 @@ def test_chat_streams_events_then_done(bridge_env, monkeypatch):
 
 
 def test_second_chat_while_busy_is_refused(bridge_env, monkeypatch):
-    web = bridge_env
+    from silica.ui.web import turn
     release = threading.Event()
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -205,7 +204,7 @@ def test_second_chat_while_busy_is_refused(bridge_env, monkeypatch):
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(web, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     async def scenario(srv):
         ws, _ = await _dial(srv)
@@ -225,7 +224,7 @@ def test_second_chat_while_busy_is_refused(bridge_env, monkeypatch):
 
 
 def test_chat_cancel_sets_the_cancel_token(bridge_env, monkeypatch):
-    web = bridge_env
+    from silica.ui.web import turn
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         tool_progress_callback(LLMStreamEvent("content", "…", 0))
@@ -234,7 +233,7 @@ def test_chat_cancel_sets_the_cancel_token(bridge_env, monkeypatch):
         messages.append({"role": "assistant", "content": answer})
         return answer
 
-    monkeypatch.setattr(web, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     async def scenario(srv):
         ws, _ = await _dial(srv)

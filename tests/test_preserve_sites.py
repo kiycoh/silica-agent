@@ -22,8 +22,9 @@ def _warnings(caplog):
 @pytest.fixture
 def client(tmp_vault):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app)
 
 

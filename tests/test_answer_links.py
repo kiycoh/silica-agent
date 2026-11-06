@@ -13,9 +13,9 @@ GRAPH = ({p: None for p in PATHS}, {}, None)
 
 
 def _html(answer: str, refs) -> str:
-    from silica.ui.web.server import _answer_html
+    from silica.ui.web.render import answer_html
 
-    return _answer_html(answer, refs, graph=GRAPH)
+    return answer_html(answer, refs, graph=GRAPH)
 
 
 def test_matches_lists_every_note_a_name_can_mean_and_the_old_resolver_keeps_the_first():

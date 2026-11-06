@@ -27,8 +27,9 @@ WORK = (WEB / "work.js").read_text(encoding="utf-8")
 @pytest.fixture
 def client(tmp_vault, tmp_path, monkeypatch):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 
@@ -138,16 +139,18 @@ def test_a_reload_restores_the_draft_under_what_was_typed_since():
 # --- P3. Stop is an outcome; failure rides the message -------------------------
 
 def test_a_stopped_turn_keeps_the_partial_answer_and_adds_an_outcome_row(client, monkeypatch):
+    from silica.ui.web import turn
     tc, server = client
 
     def stops(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         cancel_token.set()
         return "(silica: cancelled)"
 
-    monkeypatch.setattr(server, "run_agent", stops)
+    monkeypatch.setattr(turn, "run_agent", stops)
 
     async def collect():
-        return [item async for item in server.run_turn("hi")]
+        from silica.ui.web import turn
+        return [item async for item in turn.run_turn("hi")]
 
     items = asyncio.run(collect())
     done = items[-1]
@@ -162,10 +165,17 @@ def test_a_stopped_turn_keeps_the_partial_answer_and_adds_an_outcome_row(client,
 
 
 def test_no_route_serialises_str_exc_into_a_user_facing_field():
-    text = (WEB.parent / "server.py").read_text(encoding="utf-8")
+    # Named one by one: learn, discover, public and skills have sentences of
+    # their own in ValueErrors, and this was never about them.
+    routes = "\n".join((WEB.parent / f"{m}.py").read_text(encoding="utf-8") for m in (
+        "server", "security", "session", "turn", "sse", "flags", "note_ops", "chat_routes", "files_routes",
+        "notes_routes", "tree_routes", "explore_routes", "metrics_routes", "settings_routes", "stt_routes",
+        "calendar_routes", "workspaces_routes", "jobs_routes"))
+    assert "str(exc)" not in routes, "a route hands the raw exception to the person again"
     # _skip_reason is the one exemption: it hands the converter's text to the
     # agent turn on a laptop, where the paths in it are the owner's own, and on
     # a hosted tenant it returns a fixed sentence instead (ADR-0085 point 5).
+    text = (WEB.parent / "drop.py").read_text(encoding="utf-8")
     start = text.index("def _skip_reason(")
     text = text[:start] + text[text.index("\n\n\n", start):]
     assert "str(exc)" not in text, "a route hands the raw exception to the person again"
@@ -249,10 +259,11 @@ def test_ninety_seconds_without_a_frame_names_the_stall():
 
 
 def test_stop_signals_the_cancel_token_and_the_done_frame_says_so(client):
+    from silica.ui.web.session import SESSION
     tc, server = client
-    server.current_cancel = threading.Event()
+    SESSION.cancel = threading.Event()
     assert tc.post("/stop").status_code == 200
-    assert server.current_cancel.is_set()
+    assert SESSION.cancel.is_set()
 
 
 # --- P4. Review-requested write card; cards that survive reload ---------------
@@ -323,15 +334,16 @@ def test_revert_copy_names_what_it_takes_back_and_what_stays():
 
 
 def test_a_reopened_session_shows_the_same_writes_and_reads_as_the_live_one(client, monkeypatch):
+    from silica.ui.web.session import SESSION
     tc, server = client
-    server.messages.append({"role": "user", "content": "patch it"})
-    server.messages.append({"role": "assistant", "content": "", "tool_calls": [
+    SESSION.chat.messages.append({"role": "user", "content": "patch it"})
+    SESSION.chat.messages.append({"role": "assistant", "content": "", "tool_calls": [
         {"id": "c1", "type": "function", "function": {"name": "silica_patch_note", "arguments": json.dumps({"name": "Etica", "heading": "H", "snippet": "s"})}},
         {"id": "c2", "type": "function", "function": {"name": "silica_read_note", "arguments": json.dumps({"name": "Morale"})}},
     ]})
-    server.messages.append({"role": "tool", "tool_call_id": "c1", "content": "ok"})
-    server.messages.append({"role": "tool", "tool_call_id": "c2", "content": "body"})
-    server.messages.append({"role": "assistant", "content": "done"})
+    SESSION.chat.messages.append({"role": "tool", "tool_call_id": "c1", "content": "ok"})
+    SESSION.chat.messages.append({"role": "tool", "tool_call_id": "c2", "content": "body"})
+    SESSION.chat.messages.append({"role": "assistant", "content": "done"})
     data = tc.get("/messages").json()
     tools = [t for m in data for t in m["tools"]]
     assert {"name": "patch note", "effect": "written", "notes": ["Etica"]}.items() <= tools[0].items()
@@ -537,12 +549,13 @@ def test_delete_asks_first_and_names_the_consequence(client, tmp_path):
 
 
 def test_rename_and_delete_reach_the_narration_store(client, monkeypatch):
+    from silica.ui.web.session import SESSION
     tc, server = client
     from silica.obs import narration as _narr
 
     sid = _narr.NARRATOR.ensure_session(driver="gui")
     _narr.NARRATOR.turn({"role": "user", "content": "first question"})
-    server.current_session_id = sid
+    SESSION.chat.sid = sid
     assert tc.get("/sessions").json()[0]["title"] == "first question"
     assert tc.post("/session/rename", json={"id": sid, "title": "renamed"}).status_code == 200
     assert tc.get("/sessions").json()[0]["title"] == "renamed"
@@ -554,10 +567,10 @@ def test_rename_and_delete_reach_the_narration_store(client, monkeypatch):
 
 
 def test_tree_rows_drop_the_extension_and_folders_carry_counts():
-    from silica.ui.web.graph_view import render_tree
+    from silica.ui.web.file_tree import rail_tree
 
-    html = render_tree([{"id": "a/b.md", "path": "a/b.md", "type": "note"},
-                        {"id": "a/c.md", "path": "a/c.md", "type": "note"}], actions=True)
+    html = rail_tree([{"id": "a/b.md", "path": "a/b.md", "type": "note"},
+                      {"id": "a/c.md", "path": "a/c.md", "type": "note"}])
     assert '<span class="tree-n">2</span>' in html
     assert ">b</a>" in html and "b.md</a>" not in html
 
@@ -691,13 +704,14 @@ def test_a_late_response_from_the_previous_vault_never_paints():
 
 
 def test_a_failed_tool_row_keeps_its_reason_on_replay(client):
+    from silica.ui.web.session import SESSION
     tc, server = client
-    server.messages.append({"role": "user", "content": "read it"})
-    server.messages.append({"role": "assistant", "content": "", "tool_calls": [
+    SESSION.chat.messages.append({"role": "user", "content": "read it"})
+    SESSION.chat.messages.append({"role": "assistant", "content": "", "tool_calls": [
         {"id": "c1", "type": "function", "function": {"name": "silica_read_note", "arguments": json.dumps({"name": "Ghost"})}},
     ]})
-    server.messages.append({"role": "tool", "tool_call_id": "c1", "content": json.dumps({"error": "'Ghost' not found in vault"})})
-    server.messages.append({"role": "assistant", "content": "sorry"})
+    SESSION.chat.messages.append({"role": "tool", "tool_call_id": "c1", "content": json.dumps({"error": "'Ghost' not found in vault"})})
+    SESSION.chat.messages.append({"role": "assistant", "content": "sorry"})
     tools = [t for m in tc.get("/messages").json() for t in m["tools"]]
     assert tools[0]["error"] is True
     assert tools[0]["reason"] == "That note isn't in the vault under that name."

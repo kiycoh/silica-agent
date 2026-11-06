@@ -48,13 +48,14 @@ def app(tmp_vault):
 
     import silica.cli  # noqa: F401  # fills the tool registry the graph export runs through
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
     capo = "[[Capo XIV - Della risoluzione del contratto]]"
     tmp_vault.note(NOTE, f"# Art. 1453\n\nNei contratti con prestazioni corrispettive...\n\n{capo}\n")
     tmp_vault.note(OTHER, f"# Art. 1455\n\nIl contratto non si può risolvere...\n\n{capo}\n")
     tmp_vault.note("Codice civile/Capo XIV - Della risoluzione del contratto.md",
                    "# Capo XIV\n\n- [[Art. 1453 c.c. - Risolubilità del contratto per inadempimento]]\n")
-    server._reset_session()
+    SESSION.reset()
     port = _free_port()
     srv = uvicorn.Server(uvicorn.Config(server.app, host="127.0.0.1", port=port, log_level="warning"))
     th = threading.Thread(target=srv.run, daemon=True)

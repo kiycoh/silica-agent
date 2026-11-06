@@ -19,17 +19,19 @@ MD = ("---\ntitle: Spacing effect\ntags:\n- memory\nvault: Memoria\n---\n"
 def client(tmp_vault, tmp_path, monkeypatch):
     from silica.kernel.base.manifest import reset_manifest_cache
     from silica.ui.web import server
+    from silica.ui.web import drop
+    from silica.ui.web.session import SESSION
 
     for k in ("SILICA_HOSTED", "SILICA_VIEWS", "SILICA_PUBLIC_BASE", "SILICA_PUBLIC_HOSTS"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("SILICA_PUBLIC_DIR", str(tmp_path / "public"))
     monkeypatch.setenv("SILICA_PUBLIC_HANDLE", "marta")
-    monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
+    monkeypatch.setattr(drop, "embed_imported", lambda folders: None)
     reset_manifest_cache()
     tmp_vault.note("Memory/Spacing effect.md", "Spaced reviews. [[Forgetting curve]], [[Exam plan June]].\n")
     tmp_vault.note("Memory/Forgetting curve.md", "Ebbinghaus.\n")
     tmp_vault.note("Courses/Exam plan June.md", "Private plan.\n")
-    server._reset_session()
+    SESSION.reset()
     yield TestClient(server.app), Path(tmp_path)
     reset_manifest_cache()
 

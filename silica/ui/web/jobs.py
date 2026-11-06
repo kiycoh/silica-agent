@@ -30,9 +30,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-
 from silica.config import CONFIG, hosted, silica_home
+from silica.sources import drop_turn
 
 logger = logging.getLogger(__name__)
 
@@ -491,17 +490,15 @@ def _answer(recs: list[dict]) -> tuple[list[str], list[dict], str]:
     carries: the notes the model reads (the converted ones, then the drop's
     files that were ready at once), one `silica_files` entry per file, and
     the words typed with the drop."""
-    from silica.ui.web.server import _file_entry
-
     notes: list[str] = []
     files: list[dict] = []
     for r in recs:
         # Told: the turn carries the notes, so `settled` would repeat them.
         _update(r["id"], answered=True, dismissed=True, told=True)
         notes += r.get("notes") or []
-        files.append(_file_entry(r["source"]["path"], r.get("notes") or []))
+        files.append(drop_turn.file_entry(r["source"]["path"], r.get("notes") or []))
     beside = list(dict.fromkeys(p for r in recs for p in r.get("beside") or []))
-    files += [_file_entry(p) for p in beside]
+    files += [drop_turn.file_entry(p) for p in beside]
     return notes + beside, files, (recs[0].get("text") or "") if recs else ""
 
 
@@ -584,7 +581,7 @@ def from_command(text: str, session: str | None) -> dict | None:
     ponytail: a folder, a glob or a Zotero key still converts inside the turn,
     because only `_sc_nucleate` expands them. Its trigger fired on 2026-10-23
     (hosted t01, kind nucleate cut at 124,990 ms) and the turn's keepalive
-    (server._KEEPALIVE_S) answered the cut instead; a turn still dies with its
+    (sse._KEEPALIVE_S) answered the cut instead; a turn still dies with its
     tab and with a release. The upgrade is the same split after expansion, due
     when a turn line of kind nucleate ends cancelled past 125000 ms again.
     """
@@ -659,112 +656,3 @@ def _owed(files: list[str]) -> list[str]:
         if not (seen and (seen["inbox"] or seen["done"])):
             out.append(f)
     return out
-
-
-# --- routes ----------------------------------------------------------------------------
-
-def _require_same_origin(request: Request) -> None:
-    from silica.ui.web.server import _require_same_origin as check
-
-    check(request)
-
-
-router = APIRouter(prefix="/jobs")
-_SAME_ORIGIN = [Depends(_require_same_origin)]
-
-
-def _refused(exc: Refused) -> HTTPException:
-    return HTTPException(409, str(exc.args[0]))
-
-
-@router.get("")
-def list_jobs():
-    """What the browser asks for on load and on every reconnect of the
-    narration stream (point 5): an event it missed is read back here."""
-    return {"jobs": listing()}
-
-
-@router.get("/running")
-def running_jobs():
-    """What a restart would lose (point 8), for the operator's release drain:
-    the turn slot and the jobs not yet ended. It reads this process's state
-    only and probes nothing remote, unlike GET /settings, which asks four
-    endpoints for their models. No file names: the operator sees counts."""
-    from silica.ui.web import server
-
-    vault = CONFIG.vault_path or ""
-    rows = [{"id": r["id"], "state": r["state"], "kind": r.get("kind", "convert")}
-            for r in _all() if r.get("state") in ("queued", "running") and r.get("vault") == vault]
-    return {"turn": bool(server._busy), "jobs": rows}
-
-
-@router.post("/{job_id}/retry", dependencies=_SAME_ORIGIN)
-def retry_job(job_id: str):
-    try:
-        return retry(job_id)
-    except Refused as exc:
-        raise _refused(exc) from None
-
-
-@router.post("/{job_id}/dismiss", dependencies=_SAME_ORIGIN)
-def dismiss_job(job_id: str):
-    try:
-        dismiss(job_id)
-    except Refused as exc:
-        raise _refused(exc) from None
-    return {"ok": True}
-
-
-@router.post("/{job_id}/turn", dependencies=_SAME_ORIGIN)
-def offered_turn(job_id: str, payload: dict | None = None):
-    """The turn a read file offers (ADR-0121 points 1 and 6). The job never
-    starts it: the page that holds the chat asks, for the drop's question as
-    soon as its last file is done, or on a click.
-
-    `as` is what the turn does: "ask" reruns the words typed with the drop,
-    "summarize" and "quiz" compose their request, "nucleate" copies the files
-    into the Inbox and nucleates the copies. `{"ask": true}` is the older
-    spelling of "ask". A drop is answered once: a second ask, from another tab,
-    is refused, which is what keeps two tabs from answering it twice."""
-    from silica.ui.web import server
-
-    body = payload or {}
-    kind = str(body.get("as") or ("ask" if body.get("ask") else "nucleate"))
-    if kind not in ("ask", "summarize", "quiz", "nucleate"):
-        raise HTTPException(400, "a read file offers ask, summarize, quiz or nucleate")
-    # The slot first, then the record: a typed message that took this file in
-    # (join_next) holds the slot while it marks the file answered.
-    if not server._begin_turn():
-        raise HTTPException(409, "a turn is already in progress")
-    try:
-        rec = read(job_id) if _ID.fullmatch(job_id or "") else None
-        if rec is None or rec.get("state") != "done" or not rec.get("notes"):
-            raise HTTPException(409, "this conversion has no note to offer")
-        # A drop read from its PDF's text layer in its own turn is answered and
-        # still offers the rest (ADR-0099 amendment 2026-10-20); one asked from
-        # its row is dismissed too, which ends its row in every tab.
-        if rec.get("dismissed") or (kind == "ask" and rec.get("answered")):
-            raise HTTPException(409, "this file's turn was already asked")
-        group = _drop_of(rec)
-        if any(g.get("state") != "done" for g in group):
-            raise HTTPException(409, "the other files dropped with it are still being read")
-        if kind == "ask" and not (rec.get("text") or "").strip():
-            kind = "summarize"
-        notes, files, words = _answer(group)
-        names = ", ".join(f["name"] for f in files)
-        if kind == "nucleate":
-            # Copied into the Inbox first (ADR-0121 point 5): the injector reads
-            # inbox files, and nucleating is the student adding them to the vault.
-            # The one composed turn still offered the injector.
-            inbox = server._add_to_vault(notes, [f["source"] for f in files])
-            return server._turn_response(
-                server._compose_nucleate_turn(server.NUCLEATE_ASK, inbox, [], inline=False),
-                files=files, said=f"Nucleate {names}")
-        words, said = {"ask": (words, words.strip()),
-                       "summarize": (server.SUMMARIZE_ASK, f"Summarize {names}"),
-                       "quiz": (server.QUIZ_ASK, f"Quiz me on {names}")}[kind]
-        return server._turn_response(server._compose_nucleate_turn(words, notes, []),
-                                     withhold=server.WITHHELD_WITH_FILES, files=files, said=said)
-    except BaseException:
-        server._end_turn()
-        raise

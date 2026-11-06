@@ -26,11 +26,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 
 from silica import SHELL_ENV
 from silica.config import (
-    silica_home,
     CONFIG,
     HOSTED_PROVIDERS,
     PROVIDER_PREFIXES,
@@ -38,6 +36,7 @@ from silica.config import (
     claim_env,
     hosted,
 )
+from silica.onboarding import settings_ops
 
 
 @dataclass(frozen=True)
@@ -71,12 +70,6 @@ class Row:
 VAULT_KEY = "SILICA_VAULT"
 EMBED_KEYS = ("SILICA_EMBEDDING_MODEL", "SILICA_EMBEDDING_BASE_URL")
 
-# The one row that is not an env var. Safe mode is a *view* over `write_dir` in
-# vault.yaml — reading it as `bool(active_write_dir())` and writing it there is
-# what keeps the manifest the single source of truth instead of adding a second
-# boundary the enforcement seam would have to learn about.
-SAFE_MODE_KEY = "safe_mode"
-
 _EMBED_WARN = "changing this invalidates every stored vector"
 
 # The rows a hosted account sees and may write (ADR-0104 point 1). sections()
@@ -91,27 +84,6 @@ HOSTED_ROWS: dict[str, tuple[str, ...]] = {
                 "SILICA_GRAPH_PARTICLES", "SILICA_GRAPH_SHADING"),
     "Memory": ("SILICA_MEMORY",),
 }
-
-# The four endpoints serve.py knows how to start, and the env key that names the
-# command for each. One table for the model pick-lists and the Endpoints section.
-ENDPOINTS: tuple[tuple[str, str], ...] = (
-    ("chat", "SILICA_PROVIDER_SERVE_CMD"),
-    ("embeddings", "SILICA_EMBEDDING_SERVE_CMD"),
-    ("rerank", "SILICA_RERANK_SERVE_CMD"),
-    ("stt", "SILICA_STT_SERVE_CMD"),
-)
-
-
-def base_urls() -> dict[str, str]:
-    """Where each endpoint is expected to answer, right now."""
-    from silica.onboarding.serve import chat_base_url
-
-    return {
-        "chat": chat_base_url(CONFIG),
-        "embeddings": CONFIG.embedding_base_url,
-        "rerank": CONFIG.rerank_base_url,
-        "stt": CONFIG.stt_base_url,
-    }
 
 
 def _hosted_key_rows() -> tuple[Row, ...]:
@@ -146,7 +118,7 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 warn="switching rebuilds every index for the new folder"),
             Row("SILICA_INBOX_DIR", "inbox_dir", "inbox folder", "text",
                 "where nucleated files land"),
-            Row(SAFE_MODE_KEY, "", "safe mode", "toggle",
+            Row(settings_ops.SAFE_MODE_KEY, "", "safe mode", "toggle",
                 "new notes land in a staging folder that mirrors your vault · "
                 "paste its contents over the vault to file them in place"),
             Row("write_dir", "", "write dir", "readonly",
@@ -301,7 +273,7 @@ def _value(row: Row) -> str:
     CONFIG field of their own."""
     if row.kind == "readonly":
         return _readonly_value(row.key)
-    if row.key == SAFE_MODE_KEY:
+    if row.key == settings_ops.SAFE_MODE_KEY:
         from silica.kernel.base.manifest import active_write_dir
 
         # An unresolvable declaration reads as on (it is truthy, and every write
@@ -375,7 +347,7 @@ def _probe_models() -> dict[str, list[str]]:
 
     from silica.onboarding.wizard import endpoint_model_ids
 
-    urls = base_urls()
+    urls = settings_ops.base_urls()
     distinct = sorted({u for u in urls.values() if u})
     if not distinct:
         return {}
@@ -469,42 +441,6 @@ def provider_group(provider: str) -> dict[str, str]:
     return updates
 
 
-def write_env(updates: dict[str, str]) -> Path:
-    """Persist keys into the .env that wins at boot (wizard.write_env).
-
-    merge_env never deletes a line it did not write, so hand-edits and comments
-    survive.
-    """
-    from silica.onboarding.wizard import write_env as _write_env
-
-    return _write_env(updates)
-
-
-def apply_safe_mode(on: bool) -> dict:
-    """Flip the write boundary in the active vault's `vault.yaml`.
-
-    Turning it back on re-derives the boundary from the vault's content rather
-    than restoring a remembered value: a source tree keeps its declared
-    `docs/silica`, a prose vault gets the mirror. No "previous write_dir" is
-    stored anywhere, so there is none to go stale against a vault that changed.
-    """
-    from silica.kernel.base.manifest import MANIFEST_REL, set_write_dir
-    from silica.onboarding.adopt import write_dir_for
-
-    vault = (CONFIG.vault_path or "").strip()
-    if not vault or not Path(vault).is_dir():
-        return {"ok": False, "error": "no vault to confine writes in"}
-    declared = write_dir_for(vault) if on else ""
-    try:
-        path = set_write_dir(vault, declared)
-    except OSError as exc:
-        return {"ok": False, "error": f"could not write {MANIFEST_REL} ({exc})"}
-    return {"ok": True, "path": short_path(path), "values": {
-        SAFE_MODE_KEY: "true" if declared else "false",
-        "write_dir": declared or "the vault root",
-    }}
-
-
 def apply(key: str, value) -> dict:
     """Apply one row: mutate CONFIG, then persist every key it drags.
 
@@ -512,16 +448,18 @@ def apply(key: str, value) -> dict:
     with its new value, so the panel can resync the rows it did not edit.
     ``{ok: False, error}`` when the key is unknown, locked, or unusable.
     """
+    from silica.onboarding.wizard import write_env
+
     rows = _applicable()
     row = rows.get(key)
     if row is None:
         return {"ok": False, "error": f"not a setting: {key}"}
     if key in SHELL_ENV:
         return {"ok": False, "error": f"defined in the environment ({key})"}
-    if key == SAFE_MODE_KEY:
+    if key == settings_ops.SAFE_MODE_KEY:
         # Not an env var: the manifest is the store, so none of the .env
         # machinery below applies to this row.
-        return apply_safe_mode(_truthy(value))
+        return settings_ops.apply_safe_mode(_truthy(value))
     if row.kind == "enum" and str(value) not in _enum_options(row):
         # The <select> is closed but a POST does not come from it, and on hosted
         # the narrowed set is the boundary (browser speech without "cloud").
@@ -550,26 +488,12 @@ def apply(key: str, value) -> dict:
         # Keys with no CONFIG field of their own (the hosted API keys) are read
         # from the environment at call time, so this is what makes them live.
         claim_env({env_key: env_val})
+    # merge_env never deletes a line it did not write, so hand-edits and comments survive.
     path = write_env(updates)
-    return {"ok": True, "path": short_path(path), "values": {
+    return {"ok": True, "path": settings_ops.short_path(path), "values": {
         k: _shown(rows[k]) if k in rows else v for k, v in updates.items()
     }}
 
-
-def short_path(path: Path) -> str:
-    """A path as the panel says it: `~` for home, `./` for the working directory."""
-    text = str(path)
-    try:
-        return f"./{path.relative_to(Path.cwd())}"
-    except ValueError:
-        pass
-    try:
-        return f"~/{path.relative_to(Path.home())}"
-    except ValueError:
-        return text
-
-
-# --- bug report --------------------------------------------------------------
 
 # What a bug report may carry. An allow-list, not a deny-list: every secret row
 # is excluded by construction rather than by remembering to exclude it, so a key
@@ -582,95 +506,8 @@ _REPORTABLE = (
     "SILICA_PDF_PROVIDER", "SILICA_TOOL_PROGRESS", "SILICA_MAX_CONTEXT",
 )
 
-_STATUS_MARK = {"ok": "ok", "warn": "warn", "fail": "FAIL", "unknown": "?"}
 
-
-def _tilde(text: str) -> str:
-    """Shorten the home directory to `~`. A vault path is a real name on a real
-    disk and this is headed for a public issue tracker."""
-    home = str(Path.home())
-    return text.replace(home, "~") if home else text
-
-
-def bug_report() -> dict:
-    """The diagnostic block a bug report attaches, and where to file it.
-
-    Built here rather than in the browser for one reason: in the browser the API
-    keys are in the DOM, one field away from whatever reads the panel. Nothing
-    that can see a key ever builds this.
-    """
-    from silica import __version__
-    from silica.onboarding.checks import run_checks
-
+def reportable() -> list[tuple[str, str]]:
+    """(label, value) of each row a bug report may name; a row with no value says nothing."""
     rows = {r.key: r for rows_ in sections().values() for r in rows_}
-    lines = [f"silica {__version__}", f"vault: {_tilde(CONFIG.vault_path or '(none)')}"]
-    for key in _REPORTABLE:
-        row = rows.get(key)
-        value = _value(row) if row else ""
-        if row is not None and value:
-            lines.append(f"{row.label}: {_tilde(value)}")
-    lines.append("")
-    lines.append("checks:")
-    for r in run_checks(CONFIG):
-        lines.append(f"  [{_STATUS_MARK.get(r.status, r.status)}] {r.name}: {_tilde(r.detail)}")
-    return {
-        "payload": "\n".join(lines),
-        "issues_url": "https://github.com/kiycoh/silica-agent/issues/new",
-    }
-
-
-# --- endpoints ---------------------------------------------------------------
-
-def endpoint_status() -> list[dict]:
-    """The four endpoints, probed concurrently: url, reachability, how many
-    models each advertises, and whether silica has a command to start it.
-
-    Reachability is `serve.ready` — a real request, because llama.cpp answers
-    503 while it loads and an open port therefore lies.
-    """
-    from concurrent.futures import ThreadPoolExecutor
-
-    from silica.onboarding.serve import is_local, ready
-    from silica.onboarding.wizard import endpoint_model_ids
-
-    urls = base_urls()
-
-    def probe(item: tuple[str, str]) -> dict:
-        label, cmd_key = item
-        url = urls.get(label, "")
-        up = bool(url) and ready(url)
-        return {
-            "label": label,
-            "url": url,
-            "up": up,
-            "models": len(endpoint_model_ids(url)) if up else 0,
-            "local": bool(url) and is_local(url),
-            "command": os.getenv(cmd_key, "").strip(),
-            "command_key": cmd_key,
-        }
-
-    with ThreadPoolExecutor(max_workers=len(ENDPOINTS)) as pool:
-        return list(pool.map(probe, ENDPOINTS))
-
-
-def start_endpoint(label: str) -> dict:
-    """Start one local endpoint from the command its env key names.
-
-    The command is never editable from the browser: `serve.ensure` runs it
-    through a shell on the justification that it came from a file the user wrote
-    by hand, and a web field that writes the .env would make that false.
-    """
-    from silica.onboarding.serve import ensure
-
-    match = next((c for lbl, c in ENDPOINTS if lbl == label), None)
-    if match is None:
-        return {"ok": False, "error": f"unknown endpoint: {label}"}
-    command = os.getenv(match, "").strip()
-    if not command:
-        return {"ok": False, "error": f"no start command set ({match})"}
-    url = base_urls().get(label, "")
-    if not url:
-        return {"ok": False, "error": f"{label} has no base url"}
-    ok = ensure(label, url, command)
-    log = silica_home() / "logs" / f"{label}-server.log"
-    return {"ok": ok, "log": short_path(log)}
+    return [(rows[key].label, value) for key in _REPORTABLE if key in rows and (value := _value(rows[key]))]

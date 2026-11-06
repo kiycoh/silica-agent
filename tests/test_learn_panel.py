@@ -29,6 +29,7 @@ def client(tmp_vault, tmp_path, monkeypatch):
     from silica.kernel.learn import quiz
     from silica.kernel.learn import grade, items
     from silica.ui.web import learn_routes, server
+    from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
     monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", "stop"))
@@ -42,7 +43,7 @@ def client(tmp_vault, tmp_path, monkeypatch):
     q = tmp_vault.note("ML/Iperpiano.md", "---\ndate: 2025-01-01\n---\n# Iperpiano\n\nUn piano.[^Lezione-11]\n\n## Sources\n[^Lezione-11]: [[sources/Lezione 11]]\n")
     os.utime(q, (old, old))
     tmp_vault.note("Plans/ML.md", "---\ntype: plan\nscope: folder\ntarget: ML/\nreach: relational\ncreated: 2026-01-01\n---\n# ML plan\n\n## Tree\n- ML\n\n## Sessions\n")
-    server._reset_session()
+    SESSION.reset()
     learn_routes._reset()
     return TestClient(server.app), server
 

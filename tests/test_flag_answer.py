@@ -21,14 +21,16 @@ from fastapi.testclient import TestClient  # noqa: E402
 @pytest.fixture
 def client(tmp_vault, _fresh_narrator, monkeypatch):
     from silica.ui.web import server
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
 
     def answers(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         messages.append({"role": "assistant", "content": "forty-two"})
         return "forty-two"
 
-    monkeypatch.setattr(server, "run_agent", answers)
+    monkeypatch.setattr(turn, "run_agent", answers)
     return TestClient(server.app), server
 
 
@@ -44,14 +46,16 @@ def _flags() -> list[dict]:
 
 
 def test_a_hosted_turn_names_its_turn_and_a_flag_points_at_it(client, monkeypatch):
+    from silica.ui.web import flags
+    from silica.ui.web.session import SESSION
     tc, server = client
     monkeypatch.setenv("SILICA_HOSTED", "1")
     tc.post("/chat", json={"text": "first"})
     done = _frames(tc.post("/chat", json={"text": "what is six times seven?"}))[-1]
     turn = done["turn"]
-    assert turn["session"] == server.current_session_id
+    assert turn["session"] == SESSION.chat.sid
     # the pointer resolves to this turn's own user beat, not the first turn's
-    beats = server._session_beats(turn["session"])
+    beats = flags.session_beats(turn["session"])
     opened = next(b for b in beats if b["seq"] == turn["seq"])
     assert opened["payload"]["message"]["content"] == "what is six times seven?"
 

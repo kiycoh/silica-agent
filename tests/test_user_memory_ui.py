@@ -26,8 +26,9 @@ def on(tmp_vault, monkeypatch):
 @pytest.fixture
 def client(on):
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 
@@ -159,14 +160,16 @@ def test_tui_incognito_also_stops_capture_and_clears_with_a_new_process(on, monk
 # --- the GUI ------------------------------------------------------------------
 
 def test_gui_remember_saves_and_undo_takes_it_back(client, monkeypatch):
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     tc, server = client
-    monkeypatch.setattr(server, "run_agent", MagicMock(side_effect=AssertionError("no model")))
+    monkeypatch.setattr(turn, "run_agent", MagicMock(side_effect=AssertionError("no model")))
     done = _sse(tc.post("/chat", json={"text": "/remember test entry"}))[-1]
     assert done["type"] == "done" and done["answer"] == "Saved to memory: test entry"
     mem = done["memory"]
     assert mem["action"] == "save" and mem["scope"] == "vault" and mem["token"]
     assert um.read("vault") == "- test entry\n"
-    assert [m["content"] for m in server.messages if m["role"] == "user"] == ["/remember test entry"]
+    assert [m["content"] for m in SESSION.chat.messages if m["role"] == "user"] == ["/remember test entry"]
 
     r = tc.post("/memory/undo", json={"scope": "vault", "token": mem["token"]})
     assert r.status_code == 200 and um.read("vault") == ""
@@ -183,51 +186,55 @@ def test_gui_remember_refused_has_no_undo(client, monkeypatch):
 
 
 def test_gui_incognito_is_per_chat(client, monkeypatch):
+    from silica.ui.web.session import SESSION
     tc, server = client
     um.save("user", "Name is Giulia")
-    server._reset_session()
-    assert "Giulia" in _memory_msgs(server.messages)[0]["content"]
+    SESSION.reset()
+    assert "Giulia" in _memory_msgs(SESSION.chat.messages)[0]["content"]
 
     flushed = MagicMock()
     monkeypatch.setattr("silica.capture.capture_session", flushed)
     done = _sse(tc.post("/chat", json={"text": "/incognito"}))[-1]
     assert done["type"] == "done" and "incognito" in done["answer"]
     assert um.incognito()
-    assert "Giulia" not in _memory_msgs(server.messages)[0]["content"]
+    assert "Giulia" not in _memory_msgs(SESSION.chat.messages)[0]["content"]
 
     tc.post("/reset")                       # a new chat is back on the record
     flushed.assert_not_called()             # ...and the incognito one was never flushed
     assert not um.incognito()
-    assert "Giulia" in _memory_msgs(server.messages)[0]["content"]
+    assert "Giulia" in _memory_msgs(SESSION.chat.messages)[0]["content"]
 
 
 def test_a_new_chat_reads_memory_changed_since_the_seed_was_built(client):
+    from silica.ui.web.session import SESSION
     tc, server = client
-    assert _memory_msgs(server.messages) == []
+    assert _memory_msgs(SESSION.chat.messages) == []
     tc.put("/memory/user", json={"text": "- Name is Giulia"})
     tc.post("/reset")
-    assert "Giulia" in _memory_msgs(server.messages)[0]["content"]
+    assert "Giulia" in _memory_msgs(SESSION.chat.messages)[0]["content"]
 
 
 def test_a_reopened_gui_chat_starts_from_the_seed(client, monkeypatch):
     """The narration stores turns only, so a loaded chat used to run with no
     system prompt and no memory; it now gets a fresh seed in front, as the
     TUI's /resume does."""
+    from silica.ui.web import turn
+    from silica.ui.web.session import SESSION
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         messages.append({"role": "assistant", "content": "Reply"})
         return "Reply"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     tc.post("/chat", json={"text": "first question"})
     sid = tc.get("/sessions").json()[0]["id"]
     um.save("user", "Name is Giulia")
     tc.post("/reset")
     assert tc.post("/session/load", json={"id": sid}).status_code == 200
-    assert server.messages[0]["role"] == "system"
-    assert _memory_msgs(server.messages)
-    assert [m["content"] for m in server.messages if m["role"] != "system"] == ["first question", "Reply"]
+    assert SESSION.chat.messages[0]["role"] == "system"
+    assert _memory_msgs(SESSION.chat.messages)
+    assert [m["content"] for m in SESSION.chat.messages if m["role"] != "system"] == ["first question", "Reply"]
 
 
 def test_tool_done_carries_the_write_for_the_saved_line():

