@@ -438,7 +438,7 @@ def _naive_mmr(vecs, theme, k, lam, rel):
 
 
 def test_mmr_ranks_full_pool_in_seconds_not_minutes():
-    """RECON ranks POOL_SIZE=100 vectors of the embedder's real width on every
+    """RECON ranks the pool of 100 vectors of the embedder's real width on every
     note. Recomputing each pair through cosine (4 np.asarray per call) made
     this 26-46s per note; it must cost a fraction of a second."""
     import random
@@ -446,7 +446,7 @@ def test_mmr_ranks_full_pool_in_seconds_not_minutes():
     from silica.kernel.text.keyphrase import _mmr
 
     random.seed(7)
-    dim, n = 2560, 100  # Qwen3-Embedding-4B width, POOL_SIZE
+    dim, n = 2560, 100  # Qwen3-Embedding-4B width, the pool
     vecs = [[random.random() for _ in range(dim)] for _ in range(n)]
     theme = [random.random() for _ in range(dim)]
     rel = [random.random() for _ in range(n)]

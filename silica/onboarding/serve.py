@@ -20,7 +20,7 @@ happens to sit in never reaches os.environ to begin with.
 """
 from __future__ import annotations
 
-from silica.config import silica_home
+from silica.config import CONFIG, live_env, silica_home
 
 import logging
 import os
@@ -37,7 +37,16 @@ from silica.kernel.scrub import scrub_credentials
 logger = logging.getLogger(__name__)
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
-_READY_TIMEOUT = float(os.getenv("SILICA_SERVE_TIMEOUT", "180"))
+
+# The four endpoints this module can start, and the env key that names the command
+# for each. One table for the start at boot, the model pick-lists and the Endpoints
+# section.
+ENDPOINTS: tuple[tuple[str, str], ...] = (
+    ("chat", "SILICA_PROVIDER_SERVE_CMD"),
+    ("embeddings", "SILICA_EMBEDDING_SERVE_CMD"),
+    ("rerank", "SILICA_RERANK_SERVE_CMD"),
+    ("stt", "SILICA_STT_SERVE_CMD"),
+)
 
 
 def is_local(base_url: str) -> bool:
@@ -139,7 +148,7 @@ def ensure(label: str, base_url: str, command: str) -> bool:
             command, shell=True, stdout=log, stderr=subprocess.STDOUT,
             start_new_session=True,
         )
-    deadline = time.monotonic() + _READY_TIMEOUT
+    deadline = time.monotonic() + CONFIG.serve_timeout
     while time.monotonic() < deadline:
         if ready(base_url):
             logger.info("%s ready at %s", label, shown)
@@ -154,7 +163,7 @@ def ensure(label: str, base_url: str, command: str) -> bool:
             return _fail(label, f"server exited with code {code}", log_path)
         time.sleep(0.25)
     return _fail(
-        label, f"did not come up within {_READY_TIMEOUT:.0f}s", log_path
+        label, f"did not come up within {CONFIG.serve_timeout:.0f}s", log_path
     )
 
 
@@ -289,18 +298,21 @@ def ensure_local_servers(config=None) -> None:
     Best-effort and silent when nothing is configured: with no *_SERVE_CMD set
     this does not even probe, so startup cost for a hosted setup is zero.
     """
-    from silica.config import CONFIG
-
     cfg = config or CONFIG
-    for label, key, get_url in (
-        ("chat", "SILICA_PROVIDER_SERVE_CMD", lambda: chat_base_url(cfg)),
-        ("embeddings", "SILICA_EMBEDDING_SERVE_CMD", lambda: cfg.embedding_base_url),
-        ("rerank", "SILICA_RERANK_SERVE_CMD", lambda: cfg.rerank_base_url),
-        ("stt", "SILICA_STT_SERVE_CMD", lambda: cfg.stt_base_url),
-    ):
-        command = os.getenv(key, "").strip()
+    for label, key in ENDPOINTS:
+        command = live_env(key)
         if command:
-            ensure(label, get_url(), with_cache_ram(label, with_mmproj(label, command)))
+            ensure(label, base_urls(cfg)[label], with_cache_ram(label, with_mmproj(label, command)))
+
+
+def base_urls(cfg) -> dict[str, str]:
+    """Where each endpoint is expected to answer, right now."""
+    return {
+        "chat": chat_base_url(cfg),
+        "embeddings": cfg.embedding_base_url,
+        "rerank": cfg.rerank_base_url,
+        "stt": cfg.stt_base_url,
+    }
 
 
 def chat_base_url(cfg) -> str:

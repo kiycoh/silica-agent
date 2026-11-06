@@ -39,10 +39,10 @@ def memory_vault() -> Path | None:
     path equality — nested vaults are out of scope, ADR-0019) or does not
     exist on disk yet.
     """
-    raw = (getattr(CONFIG, "memory_vault", "") or "").strip()
+    raw = (CONFIG.memory_vault or "").strip()
     # Default mirrors cli.default_user_vault (kernel must not import cli).
     mem = (Path(raw).expanduser() if raw else silica_home() / "vault").resolve()
-    active = (getattr(CONFIG, "vault_path", "") or "").strip()
+    active = (CONFIG.vault_path or "").strip()
     if active and Path(active).resolve() == mem:
         return None
     if not mem.is_dir():
@@ -96,7 +96,7 @@ def embed_store_for(vault: str | Path):
     from silica.config import CONFIG
 
     v = Path(vault).resolve()
-    active = (getattr(CONFIG, "vault_path", "") or "").strip()
+    active = (CONFIG.vault_path or "").strip()
     if active and Path(active).resolve() == v:
         from silica.kernel.recall.embed import get_store
 

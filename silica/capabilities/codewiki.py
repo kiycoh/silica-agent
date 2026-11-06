@@ -12,8 +12,8 @@ import/call facts only (spec 2026-07-12, ADR-0009 intact).
 from __future__ import annotations
 
 import logging
-import os
 
+from silica.config import live_env
 from silica.capabilities._base import NoteContent, parse_content
 from silica.kernel.prompts import load_prompt
 from silica.kernel.code.codewiki import SubsystemDigest
@@ -138,13 +138,12 @@ def _call_worker(config, system_prompt: str, user_message: str) -> NoteContent:
     from silica.model.providers import get_provider
 
     provider = get_provider(config, role="worker")
-    wiki_tokens = os.getenv("WIKI_MAX_TOKENS")
     response = provider.call_llm(
         messages=[{"role": "system", "content": system_prompt + load_prompt("_anti_slop.txt")},
                   {"role": "user", "content": user_message}],
         tools=None,
         response_schema=NoteContent,
-        max_tokens=int(wiki_tokens) if wiki_tokens else None,
+        max_tokens=live_env("WIKI_MAX_TOKENS"),
     )
     return NoteContent(content=parse_content(response.text or ""))
 

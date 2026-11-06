@@ -9,10 +9,9 @@ usage read are requests too, and a benched key must sit out for them as well.
 from __future__ import annotations
 
 import logging
-import os
 import time
 
-from silica.config import CONFIG
+from silica.config import CONFIG, env_raw, live_env
 from silica.model.errors import status_of
 from silica.provider_table import PROVIDERS
 
@@ -38,10 +37,10 @@ def key_pool(model: str) -> list[str]:
     if row is None or not row.key_env:
         return []
     env = row.key_env
-    first = CONFIG.provider_api_key if prefix == "custom" else os.getenv(env, "")
+    first = CONFIG.provider_api_key if prefix == "custom" else live_env(env)
     keys = [first]
     n = 2
-    while sibling := os.getenv(f"{env}_{n}", ""):
+    while sibling := env_raw(f"{env}_{n}"):
         keys.append(sibling)
         n += 1
     return [k for k in keys if k]

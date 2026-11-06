@@ -29,6 +29,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
 from urllib.parse import urlsplit
+from silica.config import RERANK_PORT
 
 logger = logging.getLogger("silica.rerank_serve")
 
@@ -172,7 +173,7 @@ def main() -> int:
     if url.hostname not in _LOOPBACK or not url.port:
         logger.error(
             "SILICA_RERANK_BASE_URL must name a loopback host and a port, e.g. "
-            "http://127.0.0.1:1235/v1 (got %r)", CONFIG.rerank_base_url,
+            "http://127.0.0.1:%d/v1 (got %r)", RERANK_PORT, CONFIG.rerank_base_url,
         )
         return 2
     _Served.model = CONFIG.local_rerank_model or LOCAL_RERANK_MODEL

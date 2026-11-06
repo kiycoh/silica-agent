@@ -24,6 +24,7 @@ import re
 import sys
 from pathlib import Path
 
+from silica.config import public_save_url
 from silica.ui.web import public_site as site
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,59}$")
@@ -161,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--handles", type=Path, required=True)
     ap.add_argument("--approved", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--app", default=os.environ.get("SILICA_PUBLIC_SAVE_URL", "") or "https://app.silica-agent.dev")
+    ap.add_argument("--app", default=public_save_url())
     a = ap.parse_args(argv)
     n = write(a.public, a.handles, a.approved, a.out, a.app.rstrip("/"))
     print(f"pages: {n} listed")

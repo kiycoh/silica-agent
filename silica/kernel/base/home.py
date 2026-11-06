@@ -31,7 +31,7 @@ def resolve_vault_path(vault_path: str | None = None) -> str | None:
     try:
         from silica.config import CONFIG
 
-        return getattr(CONFIG, "vault_path", None) or None
+        return CONFIG.vault_path or None
     except Exception:
         return None
 
@@ -114,4 +114,4 @@ def index_dir() -> Path:
     resolved vault path; legacy global ~/.silica/index/ when no vault is
     configured. Per-vault state follows the vault (ADR-0014), so /vault
     switch no longer serves another vault's entries."""
-    return index_dir_for(getattr(CONFIG, "vault_path", "") or "")
+    return index_dir_for(CONFIG.vault_path or "")

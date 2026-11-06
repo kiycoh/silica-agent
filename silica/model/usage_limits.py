@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 from dataclasses import dataclass
@@ -39,7 +38,7 @@ from typing import Any
 
 import httpx
 
-from silica.config import hosted, silica_home
+from silica.config import hosted, live_env, silica_home
 from silica.model.keys import ready_key
 
 logger = logging.getLogger(__name__)
@@ -86,7 +85,7 @@ def window_share() -> float | None:
     None: no window. Read per call, like hosted(), so a test or a restart with a
     new env file needs no reload. The share is also the switch for the check
     before each call: without one a laptop makes no extra request."""
-    raw = os.environ.get("SILICA_USAGE_WINDOW_SHARE", "").strip()
+    raw = live_env("SILICA_USAGE_WINDOW_SHARE")
     if not raw:
         return None
     try:

@@ -40,7 +40,7 @@ def _bind_documents(entries: list[str]) -> tuple[list[str], str | None, str | No
     from silica.kernel.base import gitstate
     from silica.kernel.base.roots import repo_root_for
 
-    root = repo_root_for(getattr(CONFIG, "vault_path", "") or "")
+    root = repo_root_for(CONFIG.vault_path or "")
     if root is None:
         return [], None, "no repo for this vault: `documents:` needs codebase mode"
     docs, err = codedocs.validate_documents(entries, root)

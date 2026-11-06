@@ -113,7 +113,7 @@ def _meter_shown(s: dict) -> dict | None:
     without SILICA_TOKEN_METER counts nothing, and a zero would be false."""
     from silica.model import llm
 
-    return dict(s.get("meter") or llm.new_meter()) if llm._METER_ON else None
+    return dict(s.get("meter") or llm.new_meter()) if llm.meter_on() else None
 
 
 def _drop_file(s: dict) -> None:

@@ -79,7 +79,7 @@ def _vault_key() -> str:
     """The active vault as the ledger keys it: resolved path, '' when unset."""
     from silica.config import CONFIG
 
-    raw = (getattr(CONFIG, "vault_path", "") or "").strip()
+    raw = (CONFIG.vault_path or "").strip()
     return str(Path(raw).resolve()) if raw else ""
 
 

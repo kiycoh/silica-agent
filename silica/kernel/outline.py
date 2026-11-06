@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from collections.abc import Set as AbstractSet
 from typing import Callable
 
+from silica.config import live_env
 from silica.kernel.base import frontmatter
 from silica.kernel.base.noteshape import SPINE_SECTION, is_spine
 from silica.kernel.base.syntax import HEADING_RE, section_end
@@ -270,7 +271,7 @@ def lane_for(profile: str | None) -> str:
     (the A/B rerun knob).
     """
     from silica.config import CONFIG
-    if (getattr(CONFIG, "nucleate_lane", "outline") or "outline") != "outline":
+    if (CONFIG.nucleate_lane or "outline") != "outline":
         return "keyphrase"
     return "keyphrase" if (profile or "default") in ("clip", "promotion") else "outline"
 
@@ -900,7 +901,7 @@ def _cache_layout() -> bool:
     The default layout puts each stage's own prompt first, and the t03 run
     (2026-10-14) resent the same 10.5k-token source six times, cached only
     when a retry repeated a call whole."""
-    return os.getenv("SILICA_OUTLINE_CACHE", "").strip() == "1"
+    return live_env("SILICA_OUTLINE_CACHE")
 
 
 def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False,
@@ -1241,7 +1242,7 @@ def verbatim_bodies() -> bool:
     0.88 against 0.87 (95% CI of the difference -0.08..+0.08, 70 turns each);
     on a 541-page book, $0.1198 to $0.0303. The model-written bodies also
     left 15% of the lectures' prose out of the notes, the lookup 3%."""
-    return os.getenv("SILICA_OUTLINE_BODIES", "").strip().lower() != "llm"
+    return live_env("SILICA_OUTLINE_BODIES").strip().lower() != "llm"
 
 
 def translates(src: str) -> bool:

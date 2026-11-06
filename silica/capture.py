@@ -267,9 +267,9 @@ def capture_session(messages: list[dict], *, session_id: str, driver: str,
     from silica.config import CONFIG
 
     try:
-        if not getattr(CONFIG, "capture_sessions", False):
+        if not CONFIG.capture_sessions:
             return None
-        vault = (getattr(CONFIG, "vault_path", "") or "").strip()
+        vault = (CONFIG.vault_path or "").strip()
         if not vault:
             return None
         turns = [

@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pydantic import BaseModel
+from silica.config import live_env
 from silica.driver import DRIVER
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.templates import slugify
@@ -92,10 +93,8 @@ def min_write_snippet_chars(profile: str | None = None) -> int:
     authoring, reached a promotion run and rejected its verbatim body at
     '0 < 275'."""
     if profile in EXTRACTIVE_PROFILES:
-        return int(os.getenv("SILICA_EXTRACTIVE_MIN_SNIPPET_CHARS",
-                             str(EXTRACTIVE_MIN_SNIPPET_CHARS)))
-    return int(os.getenv("SILICA_MIN_WRITE_SNIPPET_CHARS",
-                         str(MIN_WRITE_SNIPPET_CHARS)))
+        return live_env("SILICA_EXTRACTIVE_MIN_SNIPPET_CHARS", EXTRACTIVE_MIN_SNIPPET_CHARS)
+    return live_env("SILICA_MIN_WRITE_SNIPPET_CHARS", MIN_WRITE_SNIPPET_CHARS)
 
 
 # --- meta-description shape gate (audit 2026-07-23, finding 1) ---------------
@@ -527,7 +526,7 @@ class Grounding:
         self._grounding_out = grounding_out
         self._source_text_cache: dict[str, str] = {}
         self.profile = profile or active_distill_profile()
-        self.enforce_extractive = (os.getenv("SILICA_EXTRACTIVE_ENFORCE") == "1"
+        self.enforce_extractive = (live_env("SILICA_EXTRACTIVE_ENFORCE")
                                    or self.profile in EXTRACTIVE_PROFILES)
 
     def full_source_text(self, basename: str) -> str:
@@ -1072,7 +1071,7 @@ def _validate_write(op: Op, batch: _Batch) -> Rejection | _Skip | None:
     # (verbatim-selected content is grounded by construction, and the
     # source's own wording must not be judged); env kill-switch for
     # eval arms, same pattern as the length floor.
-    if not batch.grounding.enforce_extractive and os.getenv("SILICA_META_SHAPE_CHECK", "1") != "0":
+    if not batch.grounding.enforce_extractive and live_env("SILICA_META_SHAPE_CHECK"):
         _shape_reason = meta_description_reason(op.snippet or "")
         if _shape_reason:
             return Rejection(op=op, reason=_shape_reason)
@@ -1226,7 +1225,7 @@ def _admit(op: Op, batch: _Batch) -> Rejection | None:
                 from silica.config import CONFIG
                 from silica.kernel.text.text import stem_word
 
-                lang = getattr(CONFIG, "cooccurrence_lang", "auto")
+                lang = CONFIG.cooccurrence_lang
                 hs = frozenset(
                     stem_word(t, lang=lang) for t in _heading_key(heading).split()
                 )
@@ -1315,7 +1314,7 @@ def validate_operations(
     # below repairs a FORGOTTEN prefix for free, but an INVENTED subtree is
     # indistinguishable from a correct one — hence the check further down.
     mirror = write_root == SAFE_WRITE_DIR
-    vault_root = (getattr(CONFIG, "vault_path", "") or "").strip()
+    vault_root = (CONFIG.vault_path or "").strip()
 
     # The run's landing folder follows the ops into the boundary. Without this
     # the rebase below moves every write into `write_root/` while target_dir

@@ -504,9 +504,9 @@ def mode() -> str:
     first, with the rule replayed on 4,163 real students (ASSISTments:
     the next answer wrong 55.1% after it fires, 23.6% after silence);
     `shadow` stays one variable away for a tenant."""
-    import os
+    from silica.config import live_env
 
-    value = (os.getenv("SILICA_STUDY_OFFER") or "on").strip().lower()
+    value = live_env("SILICA_STUDY_OFFER").strip().lower()
     return value if value in ("on", "shadow", "off") else "on"
 
 

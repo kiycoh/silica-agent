@@ -20,6 +20,7 @@ from pathlib import Path
 
 import yaml
 
+from silica.config import env_raw
 from silica.kernel.base import roots
 
 logger = logging.getLogger(__name__)
@@ -560,7 +561,7 @@ def get_active_manifest() -> VaultManifest:
     if _cached is None:
         from silica.config import CONFIG
 
-        _cached = load_manifest((getattr(CONFIG, "vault_path", "") or "").strip())
+        _cached = load_manifest((CONFIG.vault_path or "").strip())
     return _cached
 
 
@@ -624,9 +625,9 @@ def active_inbox_dir() -> str:
     from silica.config import CONFIG
 
     return resolve_inbox_dir(
-        getattr(CONFIG, "vault_path", "") or "",
+        CONFIG.vault_path or "",
         active_write_dir(),
-        getattr(CONFIG, "inbox_dir", "") or "",
+        CONFIG.inbox_dir or "",
     )
 
 
@@ -677,7 +678,7 @@ def active_done_dir() -> str:
     from silica.config import CONFIG
 
     return resolve_done_dir(
-        getattr(CONFIG, "vault_path", "") or "",
+        CONFIG.vault_path or "",
         active_write_dir(),
     )
 
@@ -724,7 +725,7 @@ def source_key(source_file: str) -> str:
     if os.path.isabs(rel):
         from silica.config import CONFIG
 
-        vault = (getattr(CONFIG, "vault_path", "") or "").replace("\\", "/").rstrip("/")
+        vault = (CONFIG.vault_path or "").replace("\\", "/").rstrip("/")
         if vault and rel.startswith(vault + "/"):
             rel = rel[len(vault) + 1:]
     rel = rel.strip("/")
@@ -757,7 +758,7 @@ def apply_manifest_to_config() -> None:
     from silica.config import CONFIG
 
     m = get_active_manifest()
-    if os.getenv("SILICA_COOCCURRENCE_LANG") is None:
+    if env_raw("SILICA_COOCCURRENCE_LANG") is None:
         # "auto" mirrors the config-level default for this field (per-store
         # detection, frozen at build — see kernel/cooccurrence.py). A vault
         # without a declared cooccurrence_lang must NOT be silently pinned to

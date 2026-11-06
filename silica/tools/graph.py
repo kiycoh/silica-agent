@@ -499,7 +499,7 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
 
         # The window is an allow set, applied inside each leg like a
         # workspace's and intersected with it (ADR-0148 point 2).
-        keys, undated = dated_window(Path(getattr(CONFIG, "vault_path", "") or ".").expanduser(),
+        keys, undated = dated_window(Path(CONFIG.vault_path or ".").expanduser(),
                                      since, until, keep=in_scope if allow is not None else None)
         allow = keys if allow is None else allow & keys
         window = {"since": since, "until": until, "dated": len(allow), "undated": undated}
@@ -629,7 +629,7 @@ def _peek_target(vault: str) -> str | dict | None:
     except ValueError as e:
         return {"error": str(e), "hint": "silica_vaults lists the vaults this machine knows",
                 "context": "", "notes": [], "partial": [], "facts": 0}
-    active = (getattr(CONFIG, "vault_path", "") or "").strip()
+    active = (CONFIG.vault_path or "").strip()
     if active and Path(active).resolve() == target:
         return None
     return str(target)
@@ -650,7 +650,7 @@ def silica_vaults(query: Annotated[str, Field(description='Question to score eac
 
     out = vault_registry.route(query, k=k)
     active = next((r["path"] for r in out["vaults"] if r["active"]),
-                  (getattr(CONFIG, "vault_path", "") or ""))
+                  (CONFIG.vault_path or ""))
     return {"query": query, "active": active, **out}
 
 
@@ -666,7 +666,7 @@ def silica_timeline(start: Annotated[str, Field(description='Inclusive ISO start
     from silica.config import CONFIG
     from silica.kernel.write.timeline import timeline
 
-    vault = Path(getattr(CONFIG, "vault_path", "") or "").expanduser()
+    vault = Path(CONFIG.vault_path or "").expanduser()
     if not vault.is_dir():
         return {"error": "No vault configured."}
     from silica.kernel.workspaces import active_scope, in_scope
@@ -1205,7 +1205,7 @@ def silica_vault_report(
             logger.debug("silica_vault_report: cluster ctx warm skipped (%s)", exc)
 
     # 2. Determine output path
-    vault_path = getattr(CONFIG, "vault_path", None) or ""
+    vault_path = CONFIG.vault_path or ""
     if vault_path:
         report_path = str(Path(vault_path) / "GRAPH_REPORT.md")
     else:
@@ -1357,7 +1357,7 @@ def silica_health() -> dict[str, Any]:
     from silica.kernel.recall.embed import get_store
     from silica.kernel.report.health import fusion_probe, integrity_probe
 
-    vault = Path(getattr(CONFIG, "vault_path", "") or "").expanduser()
+    vault = Path(CONFIG.vault_path or "").expanduser()
     if not vault.is_dir():
         return {"error": "No vault configured."}
 

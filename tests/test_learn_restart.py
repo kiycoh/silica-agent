@@ -7,6 +7,7 @@ back when memory has none. `learn_routes._reset()` is the restart."""
 # ruff: noqa: F811  the client fixture is imported, so every test that takes it reads as a redefinition
 from __future__ import annotations
 
+from silica.config import CONFIG
 import json
 
 import pytest
@@ -53,13 +54,13 @@ def test_the_receipt_says_what_the_session_cost_only_where_calls_are_metered(cli
     from silica.ui.web import learn_routes
 
     c, _ = client
-    monkeypatch.setattr(llm, "_METER_ON", False)
+    monkeypatch.setattr(CONFIG, "token_meter", False)
     s = _start(c, plan="Plans/ML.md")
     assert c.post("/learn/close", json={"id": s["id"]}).json()["meter"] is None   # a laptop: no line, never 0
 
     import collections
 
-    monkeypatch.setattr(llm, "_METER_ON", True)
+    monkeypatch.setattr(CONFIG, "token_meter", True)
     monkeypatch.setattr(llm, "emit", lambda *a, **k: None)
     monkeypatch.setattr(llm, "_meter", collections.defaultdict(lambda: [0, 0, 0, 0]))
     monkeypatch.setattr(llm, "_meter_totals", [0, 0, 0, 0])

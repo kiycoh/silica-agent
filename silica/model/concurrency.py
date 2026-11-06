@@ -24,7 +24,7 @@ _sem_size: int | None = None
 
 def _get_sem() -> threading.BoundedSemaphore:
     global _sem, _sem_size
-    size = max(1, int(getattr(CONFIG, "worker_max_concurrent", 4)))
+    size = max(1, int(CONFIG.worker_max_concurrent))
     with _lock:
         if _sem is None or _sem_size != size:
             _sem = threading.BoundedSemaphore(size)

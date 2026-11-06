@@ -483,7 +483,7 @@ def compute_report(
                 # two copies of "what counts as written together" would drift
                 # the moment either learned about a third kind of transaction.
                 transactions, dropped_runs = coupling_transactions(
-                    str(getattr(_CFG, "vault_path", "") or ""), sources_of, set(real_ids),
+                    str(_CFG.vault_path or ""), sources_of, set(real_ids),
                 )
             adj, dropped_big = _signals.coupling_adjacency(transactions, report_dropped=True)
             if dropped_runs or dropped_big:
@@ -689,7 +689,7 @@ def compute_report(
         try:
             from silica.config import CONFIG as _CFG
             from silica.kernel.report.graph_report.code_signals import _compute_code_signals
-            vault_path = getattr(_CFG, "vault_path", "") or ""
+            vault_path = _CFG.vault_path or ""
             if vault_path:
                 wl = {(min(u, v), max(u, v)) for u, v in G_und.edges()}
                 cov, import_autolinks = _compute_code_signals(vault_path, wl)

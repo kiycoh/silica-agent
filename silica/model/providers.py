@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from silica.model import llm
 from silica.model.limits import base_url
 from silica.model.llm import LLMResponse, openrouter_routing
-from silica.config import DEFAULT_EMBEDDING_MODEL, ensure_prefix
+from silica.config import ensure_prefix
 from silica.provider_table import PROVIDERS
 from silica.metrics import emit, ms_since, number, outcome_of
 
@@ -264,13 +264,13 @@ class OpenAIEmbedder:
 def get_embedder(config: Any) -> OpenAIEmbedder:
     """Return an embedder configured from SilicaConfig."""
     return OpenAIEmbedder(
-        base_url=getattr(config, "embedding_base_url", "http://localhost:1234/v1"),
-        api_key=getattr(config, "embedding_api_key", "lm-studio"),
-        model=getattr(config, "embedding_model", DEFAULT_EMBEDDING_MODEL),
-        query_prefix=getattr(config, "embedding_query_prefix", ""),
-        document_prefix=getattr(config, "embedding_document_prefix", ""),
-        read_timeout=getattr(config, "embedding_timeout", 60.0),
-        query_base_url=getattr(config, "embedding_query_base_url", ""),
+        base_url=config.embedding_base_url,
+        api_key=config.embedding_api_key,
+        model=config.embedding_model,
+        query_prefix=config.embedding_query_prefix,
+        document_prefix=config.embedding_document_prefix,
+        read_timeout=config.embedding_timeout,
+        query_base_url=config.embedding_query_base_url,
     )
 
 
@@ -375,13 +375,13 @@ def get_reranker(config: Any) -> Reranker | None:
     server (`silica.agent.rerank_serve`); while it is down or loading, this
     client abstains and the fused order stands.
     """
-    base_url = getattr(config, "rerank_base_url", "")
-    model = getattr(config, "rerank_model", "")
+    base_url = config.rerank_base_url
+    model = config.rerank_model
     if not (base_url and model):
         return None
     return Reranker(
-        base_url=base_url, model=model, api_key=getattr(config, "rerank_api_key", ""),
-        timeout=getattr(config, "rerank_timeout", 5.0),
+        base_url=base_url, model=model, api_key=config.rerank_api_key,
+        timeout=config.rerank_timeout,
     )
 
 
@@ -393,7 +393,7 @@ def local_rerank_model(config: Any) -> str:
     whose CC-BY-NC licence keeps it out of the default."""
     from silica.config import LOCAL_RERANK_MODEL
 
-    return getattr(config, "local_rerank_model", "") or LOCAL_RERANK_MODEL
+    return config.local_rerank_model or LOCAL_RERANK_MODEL
 
 
 # The config fields behind each role: (model, provider).
@@ -432,9 +432,9 @@ def resolve_role(role: str = "router", config: Any = None) -> tuple[str, str]:
     fields = _ROLES.get(role)
     # `or ""` on every read: these fields are Optional on the config, and the
     # router fallback below is a falsiness test either way.
-    model = (getattr(config, fields[0], "") or "") if fields else ""
-    router_provider = getattr(config, "provider", "lmstudio") or ""
-    provider = (getattr(config, fields[1], "") or "") if fields else ""
+    model = (getattr(config, fields[0]) or "") if fields else ""
+    router_provider = config.provider or ""
+    provider = (getattr(config, fields[1]) or "") if fields else ""
     if role == "vision":
         # The one role that inherits the chat's provider: hosted, a vision model
         # is one variable (config.vision_model), and it must not need a second.
@@ -455,8 +455,8 @@ def resolve_role(role: str = "router", config: Any = None) -> tuple[str, str]:
         # litellm knows can resolve an endpoint, so an unlisted provider
         # (SILICA_WORKER_PROVIDER=vllm) keeps its bare id, and pinning `vllm/` in
         # front of it turns a routable model into a BadRequestError.
-        return ensure_prefix(getattr(config, "model", "") or "", router_provider), ""
-    key = (getattr(config, "worker_api_key", None) or "") if role == "worker" else ""
+        return ensure_prefix(config.model or "", router_provider), ""
+    key = (config.worker_api_key or "") if role == "worker" else ""
     return ensure_prefix(model, provider), key
 
 
@@ -475,5 +475,5 @@ def get_provider(config: Any, role: str = "router") -> Provider:
 
 def lane_on(model: str, key: str, config: Any, role: str) -> Provider:
     """`role`'s lane on `model`: what a lane falls back on when its own model failed."""
-    pin = getattr(config, "openrouter_provider_distiller", None) if role in _LANE_ROLE else None
+    pin = config.openrouter_provider_distiller if role in _LANE_ROLE else None
     return Provider(model, key, openrouter_pin=pin, sdk_retries=0 if role == "outline" else None)

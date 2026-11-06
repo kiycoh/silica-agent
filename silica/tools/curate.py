@@ -161,7 +161,7 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
     """
     from silica.config import CONFIG
 
-    tau_high = getattr(CONFIG, "sim_threshold_high", 0.85)
+    tau_high = CONFIG.sim_threshold_high
     pairs = list(plan.by_kind("dedup"))
 
     _body_cache: dict[str, str] = {}
@@ -401,7 +401,7 @@ def silica_curate(
     execution = apply_curation_plan(
         plan,
         config=CONFIG,
-        vault_path=getattr(CONFIG, "vault_path", None),
+        vault_path=CONFIG.vault_path,
         cancel_token=cancel_token,
     )
     result["status"] = execution.get("status", "applied")

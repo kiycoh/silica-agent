@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import pytest
 
+from tests.config_factory import make_config
 from silica.onboarding.checks import check_memory_lane
 
 
-class _Cfg:
-    def __init__(self, vault: str, memory: str) -> None:
-        self.vault_path = vault
-        self.memory_vault = memory
+def _cfg(vault: str, memory: str):
+    return make_config(vault_path=vault, memory_vault=memory)
 
 
 @pytest.fixture
@@ -38,7 +37,7 @@ def test_a_divergent_memory_vault_is_named(two_vaults, monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", str(active))
     monkeypatch.setattr(CONFIG, "memory_vault", str(other))
 
-    r = check_memory_lane(_Cfg(str(active), str(other)))
+    r = check_memory_lane(_cfg(str(active), str(other)))
 
     assert r.status == "warn"
     assert str(other) in r.detail
@@ -52,7 +51,7 @@ def test_the_lane_abstains_when_it_is_the_active_vault(two_vaults, monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", str(active))
     monkeypatch.setattr(CONFIG, "memory_vault", str(active))
 
-    r = check_memory_lane(_Cfg(str(active), str(active)))
+    r = check_memory_lane(_cfg(str(active), str(active)))
 
     assert r.status == "ok"
 
@@ -65,7 +64,7 @@ def test_a_memory_vault_that_does_not_exist_reads_as_off(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", str(active))
     monkeypatch.setattr(CONFIG, "memory_vault", str(tmp_path / "nope"))
 
-    r = check_memory_lane(_Cfg(str(active), str(tmp_path / "nope")))
+    r = check_memory_lane(_cfg(str(active), str(tmp_path / "nope")))
 
     assert r.status == "ok"
 

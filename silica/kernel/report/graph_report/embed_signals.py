@@ -49,12 +49,10 @@ def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
     probabilistic — pairs sitting exactly at the threshold have ~11% miss odds
     (see banded_duplicate_pairs) — which the judge-not-merge contract absorbs.
     """
-    from silica.config import CONFIG
     from silica.driver import DRIVER
     from silica.kernel.base import frontmatter
-    from silica.kernel.report.minhash_dedup import banded_duplicate_pairs, minhash_signature
+    from silica.kernel.report.minhash_dedup import DUP_THRESHOLD, banded_duplicate_pairs, minhash_signature
 
-    threshold = getattr(CONFIG, "minhash_dup_threshold", 0.6)
     sigs: dict[str, tuple[int, ...]] = {}
     for nid in report.pagerank_map:  # every real node, always populated
         if not in_folder(nid, report.scope):
@@ -75,7 +73,7 @@ def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
             sigs[nid] = sig
 
     out = [DuplicatePair(source=a, target=b, score=round(score, 4))
-           for a, b, score in banded_duplicate_pairs(sigs, threshold=threshold)]
+           for a, b, score in banded_duplicate_pairs(sigs, threshold=DUP_THRESHOLD)]
     out.sort(key=_pair_key)
     return out
 
@@ -116,8 +114,8 @@ def _compute_duplicate_pairs(
 
     from silica.config import CONFIG
 
-    tau_high = getattr(CONFIG, "sim_threshold_high", 0.85)
-    tau_low = getattr(CONFIG, "sim_threshold_low", 0.75)
+    tau_high = CONFIG.sim_threshold_high
+    tau_low = CONFIG.sim_threshold_low
 
     borderline: list[DuplicatePair] = []
     confirmed: list[DuplicatePair] = []

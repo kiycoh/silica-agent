@@ -35,7 +35,7 @@ from silica.agent.recall_watch import (
     numbers_of_session,
     unfounded_in_turn,
 )
-from silica.config import CONFIG
+from silica.config import claim_env, CONFIG, env_raw, GUI_PORT, live_env
 from silica.onboarding.adopt import resolve_cwd_vault
 from silica.prompts import _lang_rule, system_prompt
 from silica.ui.console import CONSOLE
@@ -1238,7 +1238,7 @@ def _check_legs():
         r = _engine().search(query, folder="", k=k)
         return r.get("hits") or []
 
-    floor = check.dense_floor(str(getattr(CONFIG, "embedding_model", "") or ""))
+    floor = check.dense_floor(str(CONFIG.embedding_model or ""))
     if floor is None:
         return search, None, None
     try:
@@ -4960,7 +4960,7 @@ def _autolaunch_wizard_if_unconfigured() -> None:
     this — the caller then prints the hint and drops into the offline REPL."""
     if _model_configured():
         return
-    if not sys.stdin.isatty() or os.getenv("SILICA_WIZARD_DONE") == "1":
+    if not sys.stdin.isatty() or live_env("SILICA_WIZARD_DONE"):
         return
     import silica.onboarding.wizard as wizard_mod
     if wizard_mod.run_wizard() != 0:
@@ -4969,7 +4969,7 @@ def _autolaunch_wizard_if_unconfigured() -> None:
     # imported by value across the codebase, so reassigning it wouldn't reach
     # those aliases. execve inherits the wizard's os.environ updates; the guard
     # env var stops an infinite relaunch if config still doesn't resolve.
-    os.environ["SILICA_WIZARD_DONE"] = "1"
+    claim_env({"SILICA_WIZARD_DONE": "1"})
     os.execve(sys.executable, [sys.executable, *sys.argv], os.environ)
 
 
@@ -4986,7 +4986,7 @@ def _resolve_context_budget() -> None:
     """
     if not _model_configured():
         return
-    pinned = bool(os.getenv("SILICA_MAX_CONTEXT"))
+    pinned = bool(env_raw("SILICA_MAX_CONTEXT"))
     if pinned and CONFIG.provider != "openrouter":
         return
     from silica.model.limits import model_limits
@@ -5003,12 +5003,12 @@ def _ensure_servers() -> None:
     ensure_local_servers()
 
 
-_CLI_HELP = """\
+_CLI_HELP = f"""\
 silica — your personal note curator agent
 
 Usage:
   silica                     open the REPL in the current folder's vault
-  silica --gui [--port N]    serve the web GUI (default http://localhost:8765)
+  silica --gui [--port N]    serve the web GUI (default http://localhost:{GUI_PORT})
   silica doctor [--live]     check the environment (--json for machine output)
   silica init [--advanced]   first-run wizard
   silica connect             bridge to the Obsidian desktop app
@@ -5221,7 +5221,7 @@ def _start_reminder_daemon() -> None:
 
 
 def _gui_port() -> int:
-    """Parse `--port N` / `--port=N` from argv (default 8765)."""
+    """Parse `--port N` / `--port=N` from argv (default GUI_PORT)."""
     for i, a in enumerate(sys.argv):
         raw = a.split("=", 1)[1] if a.startswith("--port=") else (
             sys.argv[i + 1] if a == "--port" and i + 1 < len(sys.argv) else None
@@ -5231,7 +5231,7 @@ def _gui_port() -> int:
                 return int(raw)
             except ValueError:
                 pass
-    return 8765
+    return GUI_PORT
 
 
 def main():

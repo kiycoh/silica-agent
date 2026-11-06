@@ -179,7 +179,7 @@ def sweep(*, force: bool = False, uncapped: bool = False) -> SweepStats:
     global _last_sweep
     stats = SweepStats()
     _mark_namespace()
-    if not getattr(CONFIG, "index_sweep", True):
+    if not CONFIG.index_sweep:
         stats.skipped = True
         return stats
     now = time.monotonic()
@@ -203,7 +203,7 @@ def _mark_namespace() -> None:
     makes, gate or no gate, so it is where "this vault was served here" is
     cheapest to record (one stat per call). Ahead of the config gate on purpose:
     the gate is about scanning notes, not about remembering the vault."""
-    vault = (getattr(CONFIG, "vault_path", "") or "").strip()
+    vault = (CONFIG.vault_path or "").strip()
     if not vault:
         return  # legacy global namespace: no vault to name
     marker = index_dir() / "vault.json"

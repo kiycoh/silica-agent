@@ -5,7 +5,7 @@ from silica.ui.renderer import make_progress_callback, _redact
 from silica.ui.console import CONSOLE
 from silica.obs.events import ToolStartEvent, ToolCompleteEvent, ToolErrorEvent
 from silica.agent.loop import run_agent
-from silica.model.llm import _LOCAL_LLM_TIMEOUT, LLMResponse, ToolCall
+from silica.model.llm import LLMResponse, ToolCall
 from silica.tools import TOOLS
 
 def test_verbose_slash_command_cycle():
@@ -317,7 +317,7 @@ def test_llm_openrouter_include_reasoning(mock_completion, monkeypatch):
         assert sent["messages"] == messages
         assert sent["max_tokens"] == 256000
         assert sent["include_reasoning"] is True
-        assert sent["timeout"] == _LOCAL_LLM_TIMEOUT - 10  # SILICA_LLM_TIMEOUT reaches litellm
+        assert sent["timeout"] == CONFIG.llm_timeout - 10  # SILICA_LLM_TIMEOUT reaches litellm
 
         # Test openrouter model with show_thinking=False and verbose=True
         CONFIG.show_thinking = False
@@ -331,13 +331,13 @@ def test_llm_openrouter_include_reasoning(mock_completion, monkeypatch):
         assert sent["messages"] == messages
         assert sent["max_tokens"] == 256000
         assert sent["include_reasoning"] is True
-        assert sent["timeout"] == _LOCAL_LLM_TIMEOUT - 10  # SILICA_LLM_TIMEOUT reaches litellm
+        assert sent["timeout"] == CONFIG.llm_timeout - 10  # SILICA_LLM_TIMEOUT reaches litellm
         
         # Test non-openrouter model
         call_llm(model="openai/gpt-4o", messages=messages)
         args, kwargs = mock_completion.call_args
         assert "include_reasoning" not in kwargs
-        assert kwargs.get("timeout") == _LOCAL_LLM_TIMEOUT - 10
+        assert kwargs.get("timeout") == CONFIG.llm_timeout - 10
         
     finally:
         CONFIG.show_thinking = orig_thinking

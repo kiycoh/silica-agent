@@ -35,6 +35,7 @@ import os
 import sys
 from pathlib import Path
 
+from silica.config import env_raw
 from silica.kernel.recall.rerank import _WINDOW_CHARS, best_window
 
 # Stage-one pool per stage (lexical, embed), independent of the titles shown.
@@ -70,7 +71,7 @@ def _obsidian_json() -> Path:
     if sys.platform == "darwin":
         cands = [home / "Library/Application Support/obsidian/obsidian.json"]
     elif os.name == "nt":
-        cands = [Path(os.environ.get("APPDATA") or (home / "AppData/Roaming")) / "obsidian/obsidian.json"]
+        cands = [Path(env_raw("APPDATA") or (home / "AppData/Roaming")) / "obsidian/obsidian.json"]
     else:
         cands = [home / ".config/obsidian/obsidian.json",
                  home / ".var/app/md.obsidian.Obsidian/config/obsidian/obsidian.json",
@@ -188,7 +189,7 @@ def known_vaults() -> list[Path]:
         seen.add(r)
         out.append(r)
 
-    active = (getattr(CONFIG, "vault_path", "") or "").strip()
+    active = (CONFIG.vault_path or "").strip()
     if active:
         add(active)
     mem = memory_vault()  # None when it coincides with the active vault or is absent
@@ -420,7 +421,7 @@ def describe(vault: Path, query: str = "", k: int = 3, query_vec=None, reranker=
     from silica.kernel.base.manifest import load_manifest
 
     v = Path(vault).resolve()
-    active = (getattr(CONFIG, "vault_path", "") or "").strip()
+    active = (CONFIG.vault_path or "").strip()
     manifest = load_manifest(v)
     cov = coverage(v)
     row = {

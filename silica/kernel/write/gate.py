@@ -1228,7 +1228,7 @@ def archive_source(inbox_file: str, done_dir: str = "") -> dict[str, Any]:
     try:
         from silica.config import CONFIG
 
-        vault = (getattr(CONFIG, "vault_path", "") or "").strip()
+        vault = (CONFIG.vault_path or "").strip()
         if vault and "/" in target:
             (Path(vault) / target).parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
