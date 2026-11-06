@@ -224,8 +224,7 @@ def _decide_links(
     body: str,
     candidates: list[dict],
 ) -> OrphanLinkDecision:
-    from silica.model.providers import get_provider
-    from silica.kernel.text.sanitize import parse_json
+    from silica.model.ask import ask_json
 
     prompt = load_prompt("orphan_prompt.txt")
     cand_block = "\n".join(
@@ -236,22 +235,12 @@ def _decide_links(
         f"{prompt}\n\n---\nORPHAN NOTE ({target_path}):\n{body}\n\n"
         f"---\nCANDIDATES:\n{cand_block}\n"
     )
-    provider = get_provider(config, role="worker")
-    response = provider.call_llm(
-        messages=[{"role": "user", "content": user_message}],
-        tools=None,
-        response_schema=OrphanLinkDecision,
-        max_tokens=512,
+    parsed = ask_json([{"role": "user", "content": user_message}], config=config,
+                      schema=OrphanLinkDecision, max_tokens=512)
+    if not isinstance(parsed, dict):
+        return OrphanLinkDecision(links=[], rationale="unparseable decision")
+    links = parsed.get("links", [])
+    return OrphanLinkDecision(
+        links=[str(x) for x in links] if isinstance(links, list) else [],
+        rationale=str(parsed.get("rationale", "")),
     )
-    raw = response.text or ""
-    try:
-        parsed, _ = parse_json(raw, strict=False)
-        if isinstance(parsed, dict):
-            links = parsed.get("links", [])
-            return OrphanLinkDecision(
-                links=[str(x) for x in links] if isinstance(links, list) else [],
-                rationale=str(parsed.get("rationale", "")),
-            )
-    except Exception as e:
-        logger.debug("orphan link decision parse failed: %s", e)
-    return OrphanLinkDecision(links=[], rationale="unparseable decision")

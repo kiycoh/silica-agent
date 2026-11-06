@@ -739,8 +739,7 @@ def learn_aid(item: dict, why: str, production: str, prereq: str | None) -> str:
     """The aid's Markdown, from the item's note and the reader's answer."""
     from pathlib import Path
 
-    from silica.model.llm import call_llm
-    from silica.config import CONFIG
+    from silica.model.ask import ask_once
     from silica.kernel.learn import grade, items
 
     try:
@@ -756,9 +755,7 @@ def learn_aid(item: dict, why: str, production: str, prereq: str | None) -> str:
                                points="\n".join(f"- {p}" for p in points) or "- (none)", q=item.get("q", ""),
                                answer=item.get("answer") or item.get("claim", ""), production=production or "(none)",
                                prereq=pre, language=grade.reply_language(item.get("q", ""), production))
-    resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=AID_MAX_TOKENS,
-                    temperature=0.2, reasoning=False)
-    return (resp.text or "").strip()
+    return (ask_once(prompt, max_tokens=AID_MAX_TOKENS, temperature=0.2).text or "").strip()
 
 
 def log_aid(note: str, session: str, why: str, displayed: bool) -> None:

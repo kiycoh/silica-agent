@@ -226,9 +226,9 @@ def _sniff_llm(text: str, *, structured: bool = False) -> str:
     )
     raw = (resp.text or "").strip()
     if structured:
-        from silica.kernel.text.sanitize import parse_json
+        from silica.model.reply import parse_reply
 
-        parsed, _ = parse_json(raw, strict=False)
+        parsed = parse_reply(raw)
         return str(parsed.get("form", "")).lower() if isinstance(parsed, dict) else ""
     return raw.split()[0].strip(".,:;\"'`").lower() if raw else ""
 

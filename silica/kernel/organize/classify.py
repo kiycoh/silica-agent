@@ -291,8 +291,8 @@ def _llm_arbitrate(
         return {}
 
     from silica.model.llm import call_llm
+    from silica.model.reply import parse_reply
     from silica.config import CONFIG
-    from silica.kernel.text.sanitize import parse_json
 
     # Build a concise prompt listing all ambiguous notes and their candidate folders
     folder_list = "\n".join(
@@ -329,11 +329,11 @@ def _llm_arbitrate(
             tools=None,
             response_format=ArbitrationResult,
         )
-        parsed, _ = parse_json(response.text or "", strict=False)
     except Exception as exc:
         logger.warning("LLM arbiter failed (%s) — falling back to uncategorized", exc)
         return {note_path: taxonomy.uncategorized for note_path, _s, _r in ambiguous}
 
+    parsed = parse_reply(response.text)
     assignments = parsed.get("assignments") if isinstance(parsed, dict) else None
     if not isinstance(assignments, list):
         logger.warning("LLM arbiter response missing 'assignments' list: %r — falling back", parsed)

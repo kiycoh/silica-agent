@@ -60,7 +60,7 @@ def test_residue_judge_calls_the_judge_model(monkeypatch):
     assert seen["model"] == "judge-small"
     monkeypatch.setattr(cfg_mod.CONFIG, "judge_model", "")
     residue._llm("prompt", 10)
-    assert seen["model"] == "writer"
+    assert seen["model"].endswith("writer")  # the router's, prefixed as get_provider always did
 
 
 def test_dedup_judge_asks_for_the_judge_role_only_when_configured(monkeypatch):

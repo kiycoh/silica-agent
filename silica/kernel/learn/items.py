@@ -839,14 +839,12 @@ GENERATE_MAX_TOKENS = 4096
 def _llm(prompt: str, max_tokens: int) -> tuple[str, str | None]:
     """One deterministic call; (text, finish_reason). ("", None) without a
     configured model, so the mechanical kinds carry the session."""
-    from silica.model.llm import call_llm
     from silica.config import CONFIG
+    from silica.model.ask import ask_once
 
-    model = CONFIG.model
-    if not model:
+    if not CONFIG.model:
         return "", None
-    resp = call_llm(model, [{"role": "user", "content": prompt}],
-                    max_tokens=max_tokens, temperature=0, reasoning=False)
+    resp = ask_once(prompt, max_tokens=max_tokens)
     return resp.text or "", resp.finish_reason
 
 

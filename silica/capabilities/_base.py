@@ -17,6 +17,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from silica.kernel.workqueue import WorkItem
+from silica.model.reply import parse_reply
 
 logger = logging.getLogger(__name__)
 
@@ -70,11 +71,5 @@ def parse_content(raw: str, key: str = "content") -> str:
 
     Returns ``""`` on any parse failure — the callers' no-op signal.
     """
-    from silica.kernel.text.sanitize import parse_json
-    try:
-        parsed, _ = parse_json(raw, strict=False)
-        if isinstance(parsed, dict) and key in parsed:
-            return str(parsed[key])
-    except Exception as e:
-        logger.debug("content parse failed: %s", e)
-    return ""
+    parsed = parse_reply(raw)
+    return str(parsed[key]) if isinstance(parsed, dict) and key in parsed else ""

@@ -105,7 +105,6 @@ def _enrich_note(config: Any, target_path: str, original: str, hub: str | None) 
         ],
         tools=None,
         response_schema=NoteAddition,
-        max_tokens=int(os.getenv("MAX_TOKENS", "32768")),
     )
     return parse_content(response.text or "", key="addition")
 
