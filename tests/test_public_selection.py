@@ -232,3 +232,19 @@ def test_a_slug_folds_accents(vault):
     from silica.kernel.publish import slugify
 
     assert slugify("Perché la memoria è fragile?") == "perche-la-memoria-e-fragile"
+
+
+def test_the_plan_is_the_hosts_words_and_only_an_account_that_can_still_buy_it_gets_them(monkeypatch):
+    """silica-agent names no plan (ADR-0140 point 3): the list is host.env's, and a
+    paying account, or one on a host that sets none, has no window to open."""
+    from silica.kernel import publish
+
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv("SILICA_PAID_PLAN", "Private wikis | 20 wikis instead of 3 |")
+    monkeypatch.setenv("SILICA_VIEWS", "graph,public")
+    assert publish.paid_plan() == ["Private wikis", "20 wikis instead of 3"]
+    monkeypatch.setenv("SILICA_VIEWS", "all")
+    assert publish.paid_plan() == []
+    monkeypatch.setenv("SILICA_VIEWS", "graph,public")
+    monkeypatch.delenv("SILICA_PAID_PLAN")
+    assert publish.paid_plan() == []

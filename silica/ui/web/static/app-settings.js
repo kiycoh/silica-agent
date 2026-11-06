@@ -776,7 +776,7 @@ function stSetBusy(busy) {
 // let Tab walk out under the panel. The trap is one function over whichever
 // is open, innermost first (a sheet inside the settings modal wins), and every
 // close hands focus back to its opener.
-const DIALOGS = ["#flag-sheet", "#st-sheet", "#save-sheet", "#note-pub-pop", "#st-modal", "#stt-panel", "#help-panel", "#vault-panel", "#ctx-panel"];
+const DIALOGS = ["#flag-sheet", "#st-sheet", "#save-sheet", "#upgrade-sheet", "#note-pub-pop", "#st-modal", "#stt-panel", "#help-panel", "#vault-panel", "#ctx-panel"];
 function openDialogScope() {
   for (const sel of DIALOGS) {
     const el = $(sel);

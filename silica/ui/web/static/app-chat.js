@@ -1862,6 +1862,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       // and took the typed question with it.
       attachFailure(lastUserBody, said, ev.detail || "", retry);
       announce("the turn failed: " + said);
+      if (typeof upgradeAtLimit === "function") upgradeAtLimit(ev, said);
     }
     followBottom();
   }

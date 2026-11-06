@@ -120,6 +120,7 @@ def _view() -> dict:
         "dir": _tilde(str(publish.site_root(h) / "live")) if h and not hosted() else "",
         "private": publish.private_allowed(),
         "max": publish.max_vaults(),
+        "plan": publish.paid_plan(),
         "licenses": list(publish.LICENSES),
         "vaults": vaults,
         "turned_off": turned,

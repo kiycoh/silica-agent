@@ -398,9 +398,38 @@ const pubDay = (iso) => {
   return isNaN(d) ? iso : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 };
 
+// The one window a Free account meets at what a paid account adds (ADR-0140,
+// amendment of 2026-11-06). The list is the host's: on a host that sets none,
+// and for an account with nothing left to buy, nothing here opens.
+let upgradeFrom = null;
+const upgradeOn = () => !!pubState?.plan?.length;
+
+function upgradeOpen(head, why) {
+  upgradeFrom = document.activeElement;
+  $("#upgrade-h").textContent = head;
+  $("#upgrade-why").textContent = why;
+  $("#upgrade-list").replaceChildren(...pubState.plan.map((line) => mkEl("li", "", line)));
+  $("#upgrade-sheet").hidden = false;
+  $("#upgrade-go").focus();
+}
+
+function upgradeClose() {
+  $("#upgrade-sheet").hidden = true;
+  upgradeFrom?.focus?.();
+  upgradeFrom = null;
+}
+
+// The month only: a window reopens within hours and its sentence says when, and
+// a sale at every stop would be noise to the account that meets them most.
+function upgradeAtLimit(ev, said) {
+  if (ev.limit !== "month" || !upgradeOn()) return;
+  const [head, ...rest] = said.split(/(?<=\.)\s+/);
+  upgradeOpen(head.replace(/\.$/, ""), [...rest, "Reading, search and the graph keep working."].join(" "));
+}
+
 function upsellText(why) {
   if (why === "hosted") return [document.createTextNode("A Private wiki is read only by the accounts you name, which needs Silica hosted: on this computer there is no one to deliver it to.")];
-  const a = Object.assign(document.createElement("a"), { href: "https://silica-agent.dev/#hosted", target: "_blank", rel: "noopener", textContent: "What a paid account includes" });
+  const a = Object.assign(document.createElement("a"), { href: "https://silica-agent.dev/#plans", target: "_blank", rel: "noopener", textContent: "What a paid account includes" });
   return [document.createTextNode("A Private wiki is read only by the accounts you name. It comes with a paid account: "), a, document.createTextNode(".")];
 }
 
@@ -562,9 +591,14 @@ function renderPublic(fresh) {
   }
   const add = mkEl("button", "pg-tab add", "+ New wiki");
   add.type = "button";
-  add.disabled = st.vaults.length >= st.max;
+  const full = st.vaults.length >= st.max;
+  add.disabled = full && !upgradeOn();
   if (add.disabled) add.title = `you can publish ${st.max} wikis at most`;
-  add.addEventListener("click", () => { pubAdding = !pubAdding; renderPublic(); });
+  add.addEventListener("click", () => {
+    if (full) { upgradeOpen(`A free account publishes ${st.max} wikis`, "Remove one to add another, or move to a paid account."); return; }
+    pubAdding = !pubAdding;
+    renderPublic();
+  });
   tabs.append(add);
   frag.append(tabs);
 
@@ -638,6 +672,7 @@ function renderPublic(fresh) {
   if (lock) lock.innerHTML = pubSvg(12, false, true);
   ctl.append(pgSeg("Who can read this wiki", [["off", "Off"], ["public", "Public"], ["private", "Private", lock]], v.visibility, (x) => {
     if (x === v.visibility) return;
+    if (x === "private" && upgradeOn()) { upgradeOpen("Private wikis come with a paid account", "A Private wiki is read only by the accounts you name."); return; }
     if (x === "private" && st.private !== "ok") { status.hidden = false; status.replaceChildren(...upsellText(st.private)); return; }
     pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { visibility: x });
   }));
@@ -915,6 +950,10 @@ function closeSaveSheet() {
   saveNotes = null;
 }
 
+$("#upgrade-not").addEventListener("click", upgradeClose);
+// stopped here, or the one Escape handler closes whatever lies under the window too
+$("#upgrade-sheet").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); upgradeClose(); } });
+$("#upgrade-sheet").addEventListener("click", (e) => { if (e.target === e.currentTarget) upgradeClose(); });
 $("#save-cancel").addEventListener("click", closeSaveSheet);
 $("#save-sheet").addEventListener("keydown", (e) => { if (e.key === "Escape") closeSaveSheet(); });
 $("#save-go").addEventListener("click", async () => {

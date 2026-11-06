@@ -761,6 +761,20 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
     </div>
   </div>
 
+  <!-- What a paid account adds (ADR-0140, amendment of 2026-11-06): one window, opened by
+       the fourth wiki, Private and a month spent; app-public.js writes its words -->
+  <div id="upgrade-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="upgrade-h">
+    <div class="pg-ask-card">
+      <h2 class="pg-ask-h" id="upgrade-h"></h2>
+      <p class="pg-ask-p" id="upgrade-why"></p>
+      <div class="up-inc"><b>A paid account includes</b><ul id="upgrade-list"></ul></div>
+      <div class="pg-ask-row">
+        <a class="pp-go" id="upgrade-go" href="https://silica-agent.dev/#plans" target="_blank" rel="noopener">Check it out</a>
+        <button type="button" id="upgrade-not">Not now</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Save to Silica (ADR-0143 point 8, ADR-0151 point 8): a page's link lands here with
        ?save=; nothing is written until the person presses save -->
   <div id="save-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="save-sheet-title">

@@ -332,6 +332,69 @@
   display: none;
 }
 
+#upgrade-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: var(--scrim);
+}
+
+#upgrade-sheet[hidden] {
+  display: none;
+}
+
+#upgrade-sheet .pg-ask-row {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 8px;
+}
+
+#upgrade-go {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+#upgrade-not {
+  height: 36px;
+  padding: 0 12px;
+  color: var(--ash);
+  background: none;
+  border: 0;
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  cursor: pointer;
+}
+
+#upgrade-not:hover {
+  color: var(--frost);
+}
+
+.up-inc {
+  display: grid;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-ctl);
+}
+
+.up-inc b {
+  color: var(--frost);
+  font-weight: 600;
+}
+
+.up-inc ul {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding-left: 16px;
+  color: var(--text);
+}
+
 .sv-card {
   display: grid;
   gap: 2px;

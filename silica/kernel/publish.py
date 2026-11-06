@@ -314,6 +314,15 @@ def max_vaults() -> int:
     return FREE_VAULTS if private_allowed() == "paid" else MAX_VAULTS
 
 
+def paid_plan() -> list[str]:
+    """What the upgrade window lists, in the host's words and beside its numbers:
+    silica-agent names no plan (ADR-0140 point 3). Empty for an account with
+    nothing left to buy and on a host that sets none, and then no window opens."""
+    if private_allowed() != "paid":
+        return []
+    return [line.strip() for line in os.environ.get("SILICA_PAID_PLAN", "").split("|") if line.strip()]
+
+
 def enforce_tier(vault: Path | None = None) -> list[str]:
     """A Private vault of an account that lost Private turns Off (ADR-0151
     point 10); returns the slugs it turned. Readers keep what they saved,
