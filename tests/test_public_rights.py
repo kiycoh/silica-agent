@@ -361,6 +361,15 @@ def test_personal_data_is_found(text, found):
     assert personal_data(text) == [found]
 
 
+def test_the_check_reads_what_goes_out_and_not_what_is_hidden():
+    from silica.kernel.rights import _body, personal_data
+
+    # a diagram's own %% comment is code: read as a remark it hid all that followed from the check
+    fenced = "```mermaid\n%% a note\nflowchart LR\n```\n\nmario.rossi@example.com\n"
+    assert personal_data(_body(fenced)) == ["an email"]
+    assert personal_data(_body("%% mario.rossi@example.com %%\n<!-- mario.rossi@example.com -->\nplain\n")) == []
+
+
 @pytest.mark.parametrize("text", [
     "In 1998 2004 and 2011 the rate was 3.14159 and 2.71828.",
     "IT60 X054 2811 1010 0000 0123 457 is not a real account.",

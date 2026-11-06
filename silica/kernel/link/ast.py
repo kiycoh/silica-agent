@@ -390,6 +390,78 @@ def get_non_code_text(body: str) -> str:
     return "".join(text_pieces)
 
 
+# One alternation, because the first opener wins: run as two subs, the %% inside
+# `<!-- 5%% -->` paired with a %% paragraphs below and took the note between them.
+# `<!-->` and `<!--->` are whole comments to markdown-it. `open` is one never closed:
+# markdown-it's html_block runs to the end, and Obsidian hides a lone %% the same way.
+_HIDDEN = re.compile(r"%%.*?%%|<!--(?:-?>|.*?-->)|(?P<open>%%|<!--).*\Z", re.S)
+_BLOCK_ID = re.compile(r"[ \t]+\^[\w-]+[ \t]*$", re.M)
+# Inline code span: a backtick run closed by an equal-length run, in one paragraph as
+# markdown-it reads it: across a blank line, two stray backticks parked the remark
+# between them. Parked before the %%/^ subs so span contents read as code, not markup.
+_CODE_SPAN = re.compile(r"(`+)(?:(?!\n[ \t]*\n)[\s\S])*?\1")
+_PARKED = re.compile(r"\x00(\d+)\x00")
+
+
+def _code_lines(text: str) -> set[int]:
+    """The lines markdown-it reads as code: a fence at any depth, in a quote or a list, and
+    an indented block, which no pattern on one line can tell from a list's continuation."""
+    return {n for tok in _MD.parse(text) if tok.type in ("fence", "code_block") and tok.map
+            for n in range(*tok.map)}
+
+
+# Inline spans are parked as \x00 sentinels for the length of the sub, the
+# same trick mdLite plays client-side; pathological nested backtick runs can
+# still fool the span regex, which costs a stripped %% inside them, cosmetic.
+def strip_ofm_meta(text: str, published: bool = False) -> str:
+    """Strip %%comments%% and trailing ^block-ids, sparing code, where %% and ^
+    are code (a lone %% in a fence would otherwise pair with a prose %% and
+    swallow everything between). A comment already open beats the code below
+    it: an author comments a block out by wrapping it, and a fence decided
+    first let that block out.
+    `published` is for text that leaves as Markdown, where nothing else hides
+    a comment: an HTML one, which the renderer's allowlist drops from a page
+    alone, and a %% never closed. A drawer keeps both, since a chat answer may
+    say "100%% sure". The check before Publish reads through here too, so what
+    it reads is what goes out: its own pattern took a diagram's %% comment for
+    a remark to the end of the note, and an address below it was never read."""
+    if "%%" not in text and "<!--" not in text and not _BLOCK_ID.search(text):
+        return text
+    code = _code_lines(text)
+    pieces: list[str] = []
+    run: list[str] = []
+
+    def _hide(m: "re.Match[str]") -> str:
+        closed_remark = m.group(0).startswith("%%") and not m["open"]
+        return "" if published or closed_remark else m.group(0)
+
+    def _comment_open() -> bool:
+        return any(m["open"] for m in _HIDDEN.finditer(_CODE_SPAN.sub("", "\n".join(run))))
+
+    def _flush() -> None:
+        if run:
+            spans: list[str] = []
+
+            def _park(m: "re.Match[str]") -> str:
+                spans.append(m.group(0))
+                return f"\x00{len(spans) - 1}\x00"
+
+            parked = _CODE_SPAN.sub(_park, "\n".join(run))
+            cleaned = _BLOCK_ID.sub("", _HIDDEN.sub(_hide, parked))
+            pieces.append(
+                _PARKED.sub(lambda m: spans[int(m.group(1))], cleaned))
+            run.clear()
+
+    for i, line in enumerate(text.split("\n")):
+        if i in code and not _comment_open():
+            _flush()
+            pieces.append(line)
+        else:
+            run.append(line)
+    _flush()
+    return "\n".join(pieces)
+
+
 def resolve_relative(target: str, source_path: str) -> str | None:
     """Vault-rooted form of a `./`/`../` link target, joined against the source
     note's folder; None when the walk escapes the vault root (no note can match,

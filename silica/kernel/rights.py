@@ -41,8 +41,6 @@ _OUT = "*Image not published*"
 
 _WORD = re.compile(r"\w+", re.U)
 _SOURCES_TAIL = re.compile(r"^## Sources.*", re.S | re.M)
-# What the build strips before anything is read (`_strip_ofm_meta`), so a remark is no finding.
-_HIDDEN = re.compile(r"%%.*?(?:%%|\Z)|<!--.*?(?:-->|\Z)", re.S)
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp")
 _WIKI_EMBED = re.compile(r"!\[\[([^\]]+)\]\]")
 # One level of brackets inside the address: Wikipedia's file names carry them.
@@ -278,9 +276,11 @@ def _title(path: str, fm: dict) -> str:
 
 
 def _body(text: str) -> str:
+    """A note as it goes out, so a remark the build strips is no finding, and text it keeps is read."""
+    from silica.kernel.link.ast import strip_ofm_meta
     from silica.kernel.write import frontmatter
 
-    return _HIDDEN.sub("", frontmatter.split(text)[2])
+    return strip_ofm_meta(frontmatter.split(text)[2], published=True)
 
 
 def _folder_of(path: str, root: str) -> str:
