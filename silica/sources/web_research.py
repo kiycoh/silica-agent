@@ -228,23 +228,15 @@ def _harvest_page(event) -> None:
 from silica.kernel.text.text import squash as _squash  # noqa: E402
 
 
-@tool(cls="atomic", sensitive=True)
-def web_search(query: str) -> str:
-    """Search the web for a single query. Returns a JSON list of
-    {title, url, content} results. Use iteratively to research a concept."""
-    global _DEAD
+def search_lanes(query: str) -> tuple[list[dict[str, str]], str]:
+    """(hits, the lane that answered): DuckDuckGo, then the backstops. Raises
+    DuckDuckGo's ValueError when no lane answers.
 
-    if _DEAD >= _DEAD_LANES_LIMIT:
-        raise ValueError(
-            f"web search is unavailable: {_DEAD} consecutive queries exhausted "
-            "every lane (DuckDuckGo, Mojeek, Wikipedia and Tavily where "
-            "configured). Not retrying. Write up what you already have, or "
-            "retry later / set SILICA_TAVILY_API_KEY."
-        )
+    Holds no state: `web_search` keeps the turn's `_LANES` and `_DEAD` around
+    it, so a selection's check (ADR-0110 amendment, point 7), which runs beside
+    a chat turn, leaves both alone."""
     try:
-        compact = _ddg_search(query)
-        _LANES.append("duckduckgo")
-        _DEAD = 0
+        return _ddg_search(query), "duckduckgo"
     except ValueError as ddg_err:
         # DDG is the primary lane and runs first even when a key is set: it is
         # the whole web, and no vendor sees the query. The backstops only run
@@ -261,22 +253,38 @@ def web_search(query: str) -> str:
             backstops.insert(1, (lambda q: _tavily_search(q, key), "tavily"))
         for backstop, lane in backstops:
             try:
-                compact = backstop(query)
+                return backstop(query), lane
             except Exception:
                 # A lane that is merely challenged and a lane that is broken
                 # (drifted selectors, dead key, changed schema) look identical
                 # from here, and `_lane_line` only ever names who answered. This
                 # is the one place the difference is visible.
                 logger.debug("web_search backstop %s failed", lane, exc_info=True)
-                continue
-            _LANES.append(lane)
-            _DEAD = 0
-            break
-        else:
-            # The DDG message is the one that names the escape hatch, so a
-            # total failure surfaces that one rather than a backstop's.
-            _DEAD += 1
-            raise ddg_err from None
+        # The DDG message is the one that names the escape hatch, so a
+        # total failure surfaces that one rather than a backstop's.
+        raise ddg_err from None
+
+
+@tool(cls="atomic", sensitive=True)
+def web_search(query: str) -> str:
+    """Search the web for a single query. Returns a JSON list of
+    {title, url, content} results. Use iteratively to research a concept."""
+    global _DEAD
+
+    if _DEAD >= _DEAD_LANES_LIMIT:
+        raise ValueError(
+            f"web search is unavailable: {_DEAD} consecutive queries exhausted "
+            "every lane (DuckDuckGo, Mojeek, Wikipedia and Tavily where "
+            "configured). Not retrying. Write up what you already have, or "
+            "retry later / set SILICA_TAVILY_API_KEY."
+        )
+    try:
+        compact, lane = search_lanes(query)
+    except ValueError:
+        _DEAD += 1
+        raise
+    _LANES.append(lane)
+    _DEAD = 0
     return json.dumps(compact, ensure_ascii=False)
 
 
