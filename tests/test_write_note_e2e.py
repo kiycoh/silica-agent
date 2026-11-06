@@ -175,7 +175,7 @@ def test_a_refused_title_does_not_take_the_text_with_it(app):
     p.type("A paragraph worth keeping.")
     time.sleep(1.2)
     assert p.js("window.__posts") == 0, "a refused name is asked once, not once per keystroke"
-    assert "another name" in p.js("document.querySelector('#nv-foot .nv-st').textContent")
+    assert "Not saved" in p.js("document.querySelector('#nv-foot .nv-st').textContent")
     p.js("document.querySelector('.tab[data-tab=\"calendar\"]').click()")
     p.wait("!centreNote.fresh", 5, "the note under another name")
     time.sleep(0.5)
@@ -393,3 +393,30 @@ def test_the_crumb_opens_its_menu_on_a_real_press(app):
     p.click("document.querySelector('#nv-crumb')")
     time.sleep(0.3)
     assert p.js("document.querySelectorAll('#tree-menu button').length") >= 2
+
+
+def test_keys_after_enter_on_a_title_are_the_texts(app):
+    p, vault = app
+    p.js("writeNote({ folder: 'Topic' })")
+    p.wait("document.activeElement.id === 'nv-title'", 5, "the title's caret")
+    p.type("Racy")
+    _press_enter(p)
+    for ch in "First words":  # no pause: the write is still in flight
+        p.send("Input.dispatchKeyEvent", {"type": "keyDown", "text": ch, "key": ch})
+        p.send("Input.dispatchKeyEvent", {"type": "keyUp", "key": ch})
+    p.wait("!centreNote.fresh && document.querySelector('#nv-foot .nv-st').textContent.startsWith('Saved')", 6, "the save")
+    assert (vault / "Topic" / "Racy.md").read_text(encoding="utf-8") == "First words"
+    assert p.js("document.querySelector('#nv-title').value") == "Racy"
+
+
+def test_a_new_note_that_cannot_be_written_is_held_on_a_reload(app):
+    p, _ = app
+    p.js("writeNote({ folder: 'Topic' })")
+    p.wait("document.activeElement.id === 'nv-title'", 5, "the title's caret")
+    p.type("Other")
+    _press_enter(p)
+    p.wait("!document.querySelector('#nv-msg').hidden", 5, "the refusal")
+    p.js("centreNote.editor.focus()")
+    p.type("Worth keeping.")
+    time.sleep(1)
+    assert p.js("fieldHeld(centreNote)") is True

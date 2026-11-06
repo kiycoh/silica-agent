@@ -139,7 +139,7 @@ function findPanel(view) {
     let total = 0, at = 0;
     const cur = q.getCursor(view.state), head = view.state.selection.main.from;
     for (let r = cur.next(); !r.done && total < 999; r = cur.next()) { total++; if (r.value.from <= head) at = total; }
-    n.textContent = total ? `${at || 1} of ${total}` : "no match";
+    n.textContent = total ? `${at || 1} of ${total >= 999 ? "999+" : total}` : "no match";
   };
   const commit = () => {
     view.dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: find.value, replace: repl.value })) });
@@ -259,7 +259,10 @@ nvTitle.addEventListener("input", () => {
 nvTitle.addEventListener("keydown", (e) => {
   if (e.key !== "Enter" && e.key !== "ArrowDown") return;
   e.preventDefault();
-  commitTitle().then((ok) => { if (ok) centreNote.editor.focus(); });
+  // The caret moves now and the write runs behind it: at typing speed the next
+  // keys are the text's, and waiting for the answer sent them into the file's name.
+  centreNote.editor.focus();
+  commitTitle().then((ok) => { if (!ok) nvTitle.focus(); });
 });
 nvTitle.addEventListener("blur", () => { if (nvTitle.value.trim()) commitTitle(); });
 
@@ -270,6 +273,12 @@ async function commitTitle() {
   if (!name) return true;
   if (s.fresh) { await createFresh(s); return !s.fresh; }
   if (!s.path || name === stemOf(s.path)) return true;
+  // Enter moves the caret, which blurs the title: one press, one rename.
+  s.renaming ||= renameCentre(s, name).finally(() => { s.renaming = null; });
+  return s.renaming;
+}
+
+async function renameCentre(s, name) {
   await saveEdit(s);
   let r = null, d = {};
   try {
@@ -323,7 +332,7 @@ function createFresh(s = centreNote, leaving = false) {
     s.editor.setMissing(s.broken);
     s.touched = true;
     s.at = new Date();
-    nvTitle.value = d.name;
+    if (document.activeElement !== nvTitle) nvTitle.value = d.name; // not over keys still going in
     growTitle();
     titleSay(d.same_name ? `${noteFolder(d.same_name) || "The vault root"} also holds a note called ${d.name}. A bare link reaches the nearer one.` : "");
     paintCentre();
@@ -331,7 +340,7 @@ function createFresh(s = centreNote, leaving = false) {
     if (s.editor.getText() !== d.text) scheduleSave(s);
     notify(`Wrote ${d.name} in ${s.folder || "the vault root"}` + (refused ? `: ${name} was taken` : ""), "info",
            { label: "undo", run: () => undoWrite(d) });
-    await loadVaultInfo();
+    loadVaultInfo();
     syncUrl(false);
   })().finally(() => { s.creating = null; });
   return s.creating;

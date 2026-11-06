@@ -1930,7 +1930,9 @@ async function releaseNote(s = drawerNote, unless = null) {
 }
 
 // The field holds text the disk does not, and saving cannot put it there now.
-const fieldHeld = (s) => !!s.path && !!s.editor && (s.conflict || s.phase === "retry" || s.phase === "gone");
+const fieldHeld = (s) => !!s.editor && (s.fresh
+  ? (s.phase === "retry" || s.phase === "refused") && !!s.editor.getText().trim()
+  : !!s.path && (s.conflict || s.phase === "retry" || s.phase === "gone"));
 
 function sayHeld(s) {
   const away = s === centreNote && activeTab !== "note";
@@ -2096,7 +2098,7 @@ function paintFoot(s) {
   else if (s.phase === "saving") st.textContent = "Saving…";
   else if (s.phase === "refused") {
     st.classList.add("warn");
-    st.append(mkEl("span", "dot"), document.createTextNode("Not saved: give it another name"));
+    st.append(mkEl("span", "dot"), document.createTextNode("Not saved: the reason is under the title"));
   } else if (s.phase === "gone") {
     st.classList.add("warn");
     st.append(mkEl("span", "dot"), document.createTextNode("Its file is gone"));
