@@ -2,7 +2,8 @@
 # Copyright (C) 2026 Alessandro Carosia
 
 """What a tool call and a run's phases are called on screen, for the TUI and the web alike.
-Plain tables and two pure functions, so the web's event map loads no terminal renderer."""
+Each tool's verb is its own label (Tool.label); what is here is pure, so the web's event
+map loads no terminal renderer."""
 from __future__ import annotations
 
 from typing import Callable

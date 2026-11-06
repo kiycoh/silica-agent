@@ -79,7 +79,7 @@ def stale_map() -> dict[str, str]:
 
         out.update(codedocs.peek(CONFIG.vault_path))
     except Exception:
-        pass
+        pass  # the code ledger's flags go, the search and the provenance flags stay
     return out
 
 
