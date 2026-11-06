@@ -776,6 +776,8 @@ def reach(plan_path: str, step: int, n: int, ask=None) -> list[threading.Thread]
     plan = plans.find_plan(plan_path)
     if plan is None:
         raise ValueError(f"no plan at {plan_path!r}")
+    if not 0 <= step < len(plan.get("steps") or []):
+        raise ValueError(f"no step {step + 1} in {plan_path!r}")   # a plan edited under an open reading
     path = reading_path(plan, step)
     if not (plans._vault() / path).is_file():
         return []

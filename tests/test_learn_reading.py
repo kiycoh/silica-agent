@@ -482,6 +482,11 @@ def test_a_card_whose_note_left_the_step_says_so_and_no_call_is_paid(client):
     assert card["failure"]["error"] == "Funzione gradino is no longer in this step: rewrite the reading"
 
 
+def test_reaching_a_step_the_plan_no_longer_has_is_a_404(client):
+    r = client.post("/learn/reading/card", json={"plan": "Plans/Esame.md", "step": 9, "n": 1})
+    assert r.status_code == 404
+
+
 def test_a_job_that_failed_reaches_the_page_as_a_sentence(client):
     """Its raw text was a toast: "couldn't write the reading: litellm.BadRequestError..."."""
     def refused(prompt, max_tokens):
