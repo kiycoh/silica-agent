@@ -14,17 +14,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from silica.config import CONFIG
+from silica.kernel.base.formats import PROSE_EXTS
 from silica.kernel.text.sanitize import strip_degenerate_runs
 from silica.sources.base import GroundedStub, RawItem
-
-_EXTS = (".md", ".txt")
 
 
 class ProseAdapter:
     name = "prose"
 
     def matches(self, target: str) -> bool:
-        return target.lower().endswith(_EXTS)
+        return target.lower().endswith(PROSE_EXTS)
 
     def read(self, target: str) -> RawItem:
         p = Path(target)

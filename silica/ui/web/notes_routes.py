@@ -95,7 +95,7 @@ def _raw_found(canon: str, props: dict | None) -> tuple[str, Path | None]:
     """The note's `source_file` and the file it names in the vault, which is
     None when the file is gone or not one Silica brings in as a raw."""
     from silica.kernel import raws
-    from silica.sources.convert import DOC_EXTS
+    from silica.kernel.base.formats import DOC_EXTS
 
     value = (props or {}).get("source_file")
     if not isinstance(value, str) or not CONFIG.vault_path:
@@ -114,7 +114,7 @@ def _raw_of(canon: str, props: dict | None) -> dict | None:
     for (ADR-0129: "A note whose source_file does not resolve inside the
     vault offers neither")."""
     from silica.config import hosted
-    from silica.sources.convert import DOC_EXTS
+    from silica.kernel.base.formats import DOC_EXTS
 
     props = props or {}
     value, found = _raw_found(canon, props)

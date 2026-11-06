@@ -26,15 +26,10 @@ from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
 
+from silica.kernel.base.formats import IMAGE_MIME
 from silica.kernel.base.syntax import IMAGE_RE
 
 logger = logging.getLogger(__name__)
-
-# Raster formats a vision projector takes. SVG is a document and remote URLs
-# are not the vault's, so both stay unread.
-_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-         ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp"}
-
 
 # English on purpose: the prompt is the model's, and the reading's language is
 # named in it. "Never 'This image'": 50 of 50 free-form 9B captions opened by
@@ -148,7 +143,7 @@ def _embedded(body: str) -> list[str]:
         if raw.startswith(("http://", "https://")):
             continue
         name = os.path.basename(raw)
-        if Path(name).suffix.lower() in _MIME and name not in out:
+        if Path(name).suffix.lower() in IMAGE_MIME and name not in out:
             out.append(name)
     return out
 
@@ -190,7 +185,7 @@ def image_part(path: Path) -> dict:
     """`path` as an OpenAI `image_url` content part. A data URL, because neither
     a local llama-server nor a hosted provider can open a vault path."""
     data = base64.b64encode(path.read_bytes()).decode()
-    return {"type": "image_url", "image_url": {"url": f"data:{_MIME[path.suffix.lower()]};base64,{data}"}}
+    return {"type": "image_url", "image_url": {"url": f"data:{IMAGE_MIME[path.suffix.lower()]};base64,{data}"}}
 
 def read_image(path: Path, language: str, *, ask: Callable[[list[dict]], str],
                prompt: str = _PROMPT) -> dict | None:
@@ -203,7 +198,7 @@ def read_image(path: Path, language: str, *, ask: Callable[[list[dict]], str],
     means "no vision here" (stop) or "this image" (skip). A PDF's page is
     not read here: convert.py transcribes it as markdown (`PAGE_PROMPT`)."""
     from silica.model.reply import parse_reply
-    if path.suffix.lower() not in _MIME:
+    if path.suffix.lower() not in IMAGE_MIME:
         return None
     reply = ask([{"role": "user", "content": [
         image_part(path), {"type": "text", "text": prompt.format(language=language)},
@@ -246,7 +241,7 @@ def _vault_images() -> dict[str, Path | None]:
     # ignore=False: an embed resolves wherever the image sits, as Obsidian shows it.
     for dirpath, _dirnames, filenames in walk_tree(Path(CONFIG.vault_path), ignore=False):
         for f in filenames:
-            if Path(f).suffix.lower() in _MIME:
+            if Path(f).suffix.lower() in IMAGE_MIME:
                 found[f] = None if f in found else Path(dirpath) / f
     return found
 

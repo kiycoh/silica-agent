@@ -582,7 +582,7 @@ def _tree_raws() -> dict[str, list[str]]:
     each with the notes naming it, from the notes' `source_file` and never
     from the disk: an embedded image or a figure Silica extracted is no raw."""
     from silica.kernel import raws
-    from silica.sources.convert import DOC_EXTS
+    from silica.kernel.base.formats import DOC_EXTS
 
     if not CONFIG.vault_path:
         return {}

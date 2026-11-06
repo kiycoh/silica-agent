@@ -22,6 +22,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs, urlsplit
 
+from silica.kernel.base.formats import IMAGE_SUFFIX
 from silica.sources import web_fetch as wf
 from silica.sources.discover import feeds as F
 from silica.sources.discover import store
@@ -365,12 +366,6 @@ def fetch_cover(url: str, vault: str | None = None) -> dict | None:
     return {"file": name, "type": ctype, "from": F.domain(final)}
 
 
-# What a wiki may copy (ADR-0153 point 20), each a type its pages can name by extension. Not avif:
-# the published files go by `_ASSET_EXTS`, and a copy nothing can show is worse than a link.
-_FIGURE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp",
-                 "image/bmp": ".bmp"}
-
-
 def fetch_figure(url: str) -> dict:
     """One remote image for a wiki, through the guard the covers use: `data`, its `type`, and `why`
     it cannot be copied, in the words the check before Publish shows. An SVG is refused for the
@@ -389,7 +384,10 @@ def fetch_figure(url: str) -> dict:
     ctype = wf.content_type(resp)
     if ctype == "image/svg+xml":
         return {"data": b"", "type": "", "why": "An SVG"}
-    if ctype not in _FIGURE_TYPES:
+    # What a wiki may copy (ADR-0153 point 20), each a type its pages can name by
+    # extension. Not avif: the published files go by SHOWN_IMAGE_EXTS, and a copy
+    # nothing can show is worse than a link.
+    if ctype not in IMAGE_SUFFIX:
         return {"data": b"", "type": "", "why": "Not an image"}
     if resp.status_code != 200 or not resp.content:
         return {"data": b"", "type": "", "why": "Could not be read"}

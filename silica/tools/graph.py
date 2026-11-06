@@ -1136,7 +1136,7 @@ def _covering_stem(path: Path) -> str:
     families exist nowhere else, which bounds a wrong answer here to
     suppressing one hint about one CSV.
     """
-    from silica.sources.convert import TABULAR_EXTS
+    from silica.kernel.base.formats import TABULAR_EXTS
 
     if not path.suffix.lower().endswith(TABULAR_EXTS):
         return ""

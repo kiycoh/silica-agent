@@ -15,6 +15,7 @@ import os
 import re
 from collections.abc import Mapping
 
+from silica.kernel.base.formats import VISUAL_MEDIA_EXTS, ext_alternation
 from silica.kernel.base.noteshape import BODY_END_RE
 
 # ---------------------------------------------------------------------------
@@ -23,13 +24,7 @@ from silica.kernel.base.noteshape import BODY_END_RE
 
 # Obsidian-flavored image embed: ![[path/to/file.ext]] or ![[file.ext|300]]
 # Matches any file extension that looks like a raster/vector image or media.
-_IMAGE_EXTENSIONS = r"(?:jpe?g|png|gif|webp|svg|bmp|tiff?|avif|mp4|mov|avi|mkv|pdf)"
-
-# Plain-tuple form of the same extensions, for endswith() checks when re-attaching.
-_IMG_EXT_TUPLE = (
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp",
-    ".tif", ".tiff", ".avif", ".mp4", ".mov", ".avi", ".mkv", ".pdf",
-)
+_IMAGE_EXTENSIONS = ext_alternation(VISUAL_MEDIA_EXTS)
 
 _OFM_IMAGE_RE = re.compile(
     rf"!\[\[([^\]]*\.{_IMAGE_EXTENSIONS})(\|[^\]]*)?\]\]",
@@ -158,7 +153,7 @@ def _add_embed(out: list[str], raw: str) -> None:
     if raw.startswith(("http://", "https://", "mailto:")):
         return
     base = os.path.basename(raw.split("|", 1)[0].strip())  # drop OFM |size hint
-    if not base.lower().endswith(_IMG_EXT_TUPLE):
+    if not base.lower().endswith(VISUAL_MEDIA_EXTS):
         return
     embed = f"![[{base}]]"
     if embed not in out:

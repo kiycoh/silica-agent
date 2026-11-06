@@ -21,7 +21,9 @@ from __future__ import annotations
 import json
 import re
 
-EMBED = re.compile(r"!\[\[([^\]|\n]+?\.(?:png|jpe?g|gif|webp|bmp|svg))(?:\|[^\]\n]*)?\]\]", re.I)
+from silica.kernel.base.formats import SHOWN_IMAGE_EXTS, ext_alternation
+
+EMBED = re.compile(rf"!\[\[([^\]|\n]+?\.{ext_alternation(SHOWN_IMAGE_EXTS)})(?:\|[^\]\n]*)?\]\]", re.I)
 _WORD = re.compile(r"[^\W\d_]{4,}")
 # Four letters or more already drops most function words; these are the ones
 # that are not, in the two languages the vaults are written in.

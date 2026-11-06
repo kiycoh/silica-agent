@@ -774,7 +774,7 @@ def _pdf_lane(config: SilicaConfig) -> str:
     proves nothing about mineru, and a pin to an absent binary reads as working
     right up to the conversion that fails.
     """
-    from silica.sources.convert import PDF_PROVIDERS, resolve_pdf_provider
+    from silica.sources.convert import PDF_PROVIDERS, has_mineru, resolve_pdf_provider
 
     name = resolve_pdf_provider(getattr(config, "pdf_provider", "") or "pdfium")
     if name not in PDF_PROVIDERS:
@@ -783,7 +783,7 @@ def _pdf_lane(config: SilicaConfig) -> str:
         # "a scan yields nothing" until the ADR-0087 amendment; since then
         # _read_pages sends each page without text to the chat model.
         return f"{name} — no OCR, a page without text goes to the chat model if it takes images"
-    if name == "mineru" and not shutil.which("mineru"):
+    if name == "mineru" and not has_mineru():
         return f"{name} — OCR provider set but not on PATH"
     return f"{name} — OCR available"
 
@@ -793,12 +793,14 @@ def _mineru_lane() -> str:
 
     Its own row and not a footnote to the PDF one: .xlsx reaches mineru
     whatever SILICA_PDF_PROVIDER says, because no other backend opens it at all
-    (`_MINERU_ONLY_EXTS` in sources/convert.py), and the pdf row — which only
+    (its row in kernel/base/formats.py), and the pdf row — which only
     ever reports the PDF lane — never said so. Since ADR-0120 an image without
     mineru is read by the chat model and a .pptx from its own XML, so the
     missing line names what that leaves: no OCR, and no .xlsx.
     """
-    if shutil.which("mineru"):
+    from silica.sources.convert import has_mineru
+
+    if has_mineru():
         return "ok (OCR, figures, images, .xlsx)"
     return "missing (no OCR: images go to the chat model; .xlsx cannot convert)"
 
@@ -837,7 +839,7 @@ def check_converters(config: SilicaConfig) -> CheckResult:
     `-convert-to`, so the conversion it is asked for opens a GUI wizard instead.
     Reading that here beats meeting it mid-conversion.
     """
-    from silica.sources.convert import probe_soffice
+    from silica.sources.convert import has_mineru, probe_soffice
 
     ffmpeg = shutil.which("ffmpeg")
     status, detail = probe_soffice()
@@ -858,7 +860,7 @@ def check_converters(config: SilicaConfig) -> CheckResult:
     # is the same defect the `scope` sentence exists to fix: an install
     # instruction for a tool the user already has reads as a fault report.
     absent = []
-    if not shutil.which("mineru"):
+    if not has_mineru():
         absent.append("mineru for OCR and .xlsx (`pip install 'mineru[full]'`)")
     if not ffmpeg:
         absent.append("ffmpeg for audio/video")

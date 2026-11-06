@@ -184,7 +184,7 @@ def test_on_the_server_the_pdf_stays_as_the_raw_of_its_note(client, monkeypatch)
     became. ADR-0087 point 5's list with its audio (amendment of 2026-10-14)
     and ADR-0120's documents, images and CSV: a video is not offered or
     taken, and a .docx that is not one is refused by its bytes, and goes."""
-    from silica.ui.web.vault_import import HOSTED_EXTENSIONS
+    from silica.kernel.base.formats import HOSTED_EXTENSIONS
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
     tc, _ = client

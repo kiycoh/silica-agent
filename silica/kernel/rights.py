@@ -20,6 +20,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
 from silica.kernel.base import notekey
+from silica.kernel.base.formats import IMAGE_SUFFIX, SHOWN_IMAGE_EXTS
 from silica.kernel import publish
 from silica.kernel.base.noteshape import SOURCES_TAIL_RE
 from silica.kernel.base.syntax import EMBED_RE, LINK_TARGET_RE
@@ -43,7 +44,6 @@ _CREDIT_MAX = 200
 _OUT = "*Image not published*"
 
 _WORD = re.compile(r"\w+", re.U)
-_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp")
 # One level of brackets inside the address: Wikipedia's file names carry them.
 _MD_IMAGE = re.compile(r"!\[([^\]]*)\]\(\s*<?((?:[^()\s>]|\([^()\s]*\))+)>?(?:\s+[\"'][^)]*[\"'])?\s*\)")
 _HTML_IMAGE = re.compile(r"<img\b[^>]*?\bsrc\s*=\s*[\"']?([^\"'\s>]+)[\"']?[^>]*>", re.I)
@@ -51,8 +51,6 @@ _REMOTE = re.compile(r"(?:https?:)?//", re.I)
 # The mark's line, with the block around it when it is the note's only property.
 _MARK = re.compile(r"\A---\r?\nrewritten:\s*true[ \t]*\r?\n---\r?\n|^rewritten:\s*true[ \t]*\r?\n", re.M)
 _KEPT_NAME = re.compile(r"[0-9a-f]{24}\.[a-z]+")
-_TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp",
-          "image/bmp": ".bmp"}
 _PERSONAL = (
     ("an email", re.compile(r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}", re.I)),
     ("a phone", re.compile(r"(?<![\d.,])(?:\+\d{1,3}[ .-]?\d{2,4}[ .-]?\d{3,4}[ .-]?\d{3,4}"
@@ -157,7 +155,7 @@ def personal_data(text: str) -> list[str]:
 # --- what a note embeds --------------------------------------------------------
 
 def _is_image(target: str) -> bool:
-    return target.lower().endswith(_IMAGE_EXTS)
+    return target.lower().endswith(SHOWN_IMAGE_EXTS)
 
 
 def _embeds(body: str) -> tuple[list[str], list[str]]:
@@ -265,7 +263,7 @@ def _keep(url: str, data: bytes, ctype: str, vault: Path) -> Path:
 
     root = _kept_dir(vault)
     root.mkdir(parents=True, exist_ok=True)
-    path = root / (hashlib.sha256(url.encode("utf-8")).hexdigest()[:24] + _TYPES.get(ctype, ".jpg"))
+    path = root / (hashlib.sha256(url.encode("utf-8")).hexdigest()[:24] + IMAGE_SUFFIX.get(ctype, ".jpg"))
     atomic_write_bytes(path, data, mode=0o600)
     return path
 
@@ -298,7 +296,7 @@ def _images_on_disk(vault: Path) -> dict[str, Path]:
     shows up."""
     out: dict[str, Path] = {}
     for p in sorted(vault.rglob("*")):
-        if p.suffix.lower() in _IMAGE_EXTS and p.is_file() \
+        if p.suffix.lower() in SHOWN_IMAGE_EXTS and p.is_file() \
                 and not any(s.startswith(".") for s in p.relative_to(vault).parts):
             out.setdefault(p.name.casefold(), p)
     return out

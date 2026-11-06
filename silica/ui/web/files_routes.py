@@ -40,9 +40,10 @@ def supported_types():
     (`drop.is_mail`). On the server both lists are ADR-0087 point 5's: the host
     has no mineru and no LibreOffice, and offered 60 extensions until then."""
     from silica.config import hosted
+    from silica.kernel.base.formats import HOSTED_EXTENSIONS
     from silica.sources.mail import SUFFIXES
     from silica.sources.registry import supported_nucleate_extensions
-    from silica.ui.web.vault_import import HOSTED_EXTENSIONS, importable_extensions
+    from silica.ui.web.vault_import import importable_extensions
 
     on_server = hosted()
     exts = list(HOSTED_EXTENSIONS) if on_server else supported_nucleate_extensions()

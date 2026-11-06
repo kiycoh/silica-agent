@@ -168,7 +168,7 @@ def _sha256(path: Path) -> str:
 
 
 def _is_media(name: str) -> bool:
-    from silica.sources.convert import MEDIA_EXTS
+    from silica.kernel.base.formats import MEDIA_EXTS
 
     return Path(name).suffix.lower() in MEDIA_EXTS
 
@@ -595,7 +595,8 @@ def from_command(text: str, session: str | None) -> dict | None:
     except ValueError:
         return None  # the command's own parser names the unbalanced quote
     from silica.cli import _positional, _rejoin_spaced_paths, _str_flag
-    from silica.sources.convert import DOC_EXTS, _resolve_input
+    from silica.kernel.base.formats import DOC_EXTS
+    from silica.sources.convert import _resolve_input
 
     args = _rejoin_spaced_paths(parts[1:])
     files = _positional(args)
@@ -633,8 +634,9 @@ def _owed(files: list[str]) -> list[str]:
     conversion: no source claims them, and no earlier conversion of the same
     file sits in the inbox or in done/ (the batch resume `_sc_nucleate` does)."""
     from silica.cli import _prior_conversions
+    from silica.kernel.base.formats import DOC_EXTS
     from silica.kernel.base.manifest import get_active_manifest
-    from silica.sources.convert import DOC_EXTS, _resolve_input
+    from silica.sources.convert import _resolve_input
     from silica.sources.registry import adapter_for
 
     enabled = get_active_manifest().sources

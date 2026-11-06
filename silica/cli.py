@@ -3475,7 +3475,7 @@ def _nucleate_expand_folders(
             # agent as an unresolvable name. Unconverted files are
             # first-class /nucleate input (each runs through convert below),
             # so a folder argument picks them up like it picks up notes.
-            from silica.sources.convert import DOC_EXTS, IMG_EXTS
+            from silica.kernel.base.formats import DOC_EXTS, IMG_EXTS
             from silica.tools.atomic import _unconverted_under
             pending = [
                 p for p in _unconverted_under(f)

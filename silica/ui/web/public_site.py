@@ -26,6 +26,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from silica.kernel import publish, rights
+from silica.kernel.base.formats import SHOWN_IMAGE_EXTS
 from silica.kernel.base.markdown import strip_ofm_meta
 from silica.kernel.image_meta import strip_location
 from silica.kernel.text import note_parts
@@ -268,7 +269,7 @@ def _md_for_reader(body: str, resolve, href_of) -> str:
         # `Note\\` in a table, where the alias's bar is escaped: unresolved, the link went out as its words
         target = target.split("#", 1)[0].strip().rstrip("\\")
         display = alias.strip() or target.rsplit("/", 1)[-1].removesuffix(".md")
-        if bang and "." + target.rsplit(".", 1)[-1].lower() in render.ASSET_EXTS:
+        if bang and "." + target.rsplit(".", 1)[-1].lower() in SHOWN_IMAGE_EXTS:
             name = href_of(("asset", target))
             return f"![{display}]({name})" if name else ""
         hit = resolve(target)

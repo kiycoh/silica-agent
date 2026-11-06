@@ -489,7 +489,7 @@ def main() -> int:
     from silica.cli import _activate_repo_mode, _ensure_servers
     from silica.config import CONFIG
     from silica.kernel.base.manifest import apply_manifest_to_config
-    from silica.sources.convert import CONVERTIBLE_DOC_EXTS
+    from silica.kernel.base.formats import CONVERTIBLE_DOC_EXTS
 
     _activate_repo_mode()
     apply_manifest_to_config()

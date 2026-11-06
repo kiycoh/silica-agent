@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from silica.config import CONFIG, SilicaConfig
+from silica.kernel.base import formats
 from silica.sources import convert as conv
 
 
@@ -33,7 +34,7 @@ def test_unknown_extension_raises(target):
         conv.convert(target)
 
 
-@pytest.mark.parametrize("ext", conv.DOC_EXTS)
+@pytest.mark.parametrize("ext", formats.DOC_EXTS)
 def test_every_doc_ext_reaches_the_converter(ext, tmp_vault):
     """Dispatch accepts the extension — it fails later, on the missing file."""
     with pytest.raises(ValueError, match="file not found"):
@@ -224,7 +225,7 @@ def test_fb2_sections_become_headings_and_paragraphs(tmp_vault):
 def test_xps_and_mobi_are_no_longer_convertible(ext, tmp_vault):
     """MuPDF opened them; nothing in the base install does now, and a format
     nobody has asked for is declared unsupported rather than half-read."""
-    assert ext not in conv.DOC_EXTS and ext not in conv.CONVERTIBLE_DOC_EXTS
+    assert ext not in formats.DOC_EXTS and ext not in formats.CONVERTIBLE_DOC_EXTS
     with pytest.raises(ValueError, match="no converter"):
         conv.convert(f"legacy{ext}")
 
@@ -603,7 +604,7 @@ def test_pdf_mineru_provider_success(tmp_vault, monkeypatch):
 # --- images and OOXML: mineru is the only backend ---------------------------
 
 
-@pytest.mark.parametrize("ext", conv.IMG_EXTS + conv.OFFICE_EXTS)
+@pytest.mark.parametrize("ext", formats.IMG_EXTS + formats.OFFICE_EXTS)
 def test_image_and_office_route_to_mineru_whatever_the_provider_says(
     ext, tmp_vault, monkeypatch
 ):
@@ -748,7 +749,7 @@ def _fake_soffice(monkeypatch, *, writes_pdf=True, returncode=0, stderr="", hang
     monkeypatch.setattr(conv.subprocess, "run", run)
 
 
-@pytest.mark.parametrize("ext", conv.LEGACY_OFFICE_EXTS)
+@pytest.mark.parametrize("ext", formats.LEGACY_OFFICE_EXTS)
 def test_legacy_office_goes_through_libreoffice_then_the_pdf_seam(
     ext, tmp_vault, monkeypatch
 ):
@@ -1003,8 +1004,8 @@ def _no_subprocess(monkeypatch):
 def test_only_the_two_binary_formats_still_need_an_office_suite():
     """Regression guard on the routing itself: widening this back to ODF/RTF/xls
     should be a failing test, not a 240 MB dependency quietly coming back."""
-    assert set(conv.LEGACY_OFFICE_EXTS) == {".doc", ".ppt"}
-    assert set(conv._PURE_PY_OFFICE_EXTS) == {".odt", ".odp", ".ods", ".rtf", ".xls"}
+    assert set(formats.LEGACY_OFFICE_EXTS) == {".doc", ".ppt"}
+    assert set(formats.exts_of("office")) == {".odt", ".odp", ".ods", ".rtf", ".xls"}
 
 
 def test_odt_is_read_with_no_office_suite_and_no_subprocess(tmp_vault, monkeypatch):
@@ -1176,7 +1177,7 @@ def _fake_wav(monkeypatch):
     monkeypatch.setattr(conv, "_media_to_audio", to_audio)
 
 
-@pytest.mark.parametrize("ext", conv.MEDIA_EXTS)
+@pytest.mark.parametrize("ext", formats.MEDIA_EXTS)
 def test_every_media_ext_reaches_the_asr_lane(ext, tmp_vault, monkeypatch):
     _fake_wav(monkeypatch)
     _fake_asr(monkeypatch)

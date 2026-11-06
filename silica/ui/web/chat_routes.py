@@ -48,8 +48,8 @@ def _save_attachments(images: list) -> list[Path]:
     import binascii
     import hashlib
 
-    from silica.kernel.recall.image_readings import _MIME
     from silica.kernel.base.durable import atomic_write_bytes
+    from silica.kernel.base.formats import IMAGE_SUFFIX
     from silica.kernel.base.home import attachments_dir
 
     if len(images) > _MAX_ATTACHED:
@@ -58,7 +58,7 @@ def _save_attachments(images: list) -> list[Path]:
     for img in images:
         name = str((img or {}).get("name") or "image")
         m = re.match(r"data:(image/[\w.+-]+);base64,(.+)", str((img or {}).get("data") or ""), re.S)
-        ext = next((e for e, mime in _MIME.items() if m and mime == m.group(1)), None)
+        ext = IMAGE_SUFFIX.get(m.group(1)) if m else None
         if m is None or ext is None:
             raise HTTPException(status_code=400, detail=f"{name}: not an image the chat model reads "
                                                         "(png, jpg, webp, gif, bmp)")

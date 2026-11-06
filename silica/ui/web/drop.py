@@ -16,6 +16,7 @@ from typing import Any
 from fastapi import HTTPException, UploadFile
 
 from silica.config import CONFIG
+from silica.kernel.base.formats import INGEST_LABELS
 from silica.kernel.recall import note_index
 from silica.metrics import emit
 from silica.ui.web.failures import explain as _failure
@@ -126,12 +127,11 @@ async def stage_uploads(files: list[UploadFile], folder: str | None = None, **jo
     blocked /stop, leaving a visible Stop button that could not be served.
     """
     from silica.config import hosted
+    from silica.kernel.base.formats import HOSTED_EXTENSIONS, IMG_EXTS
     from silica.kernel.base.manifest import active_write_dir, get_active_manifest, resolve_inbox_dir
     from silica.sources import pdf_extract
-    from silica.sources.convert import IMG_EXTS
     from silica.sources.registry import adapter_for, stage
     from silica.ui.web import jobs
-    from silica.ui.web.vault_import import HOSTED_EXTENSIONS
 
     if len(files) > UPLOAD_MAX_FILES:
         raise HTTPException(413, f"at most {UPLOAD_MAX_FILES} files per drop")
@@ -234,21 +234,9 @@ def _skip_reason(exc: Exception | str) -> str:
     return "it could not be converted"
 
 
-# Extensions the ingest line may name. A suffix is part of the file's name,
-# which is the student's text, so anything outside this list is "other".
-_INGEST_EXTS = frozenset({
-    ".pdf", ".md", ".markdown", ".txt", ".docx", ".pptx", ".xlsx", ".odt", ".ods",
-    ".epub", ".rtf", ".html", ".htm", ".csv", ".json", ".ipynb", ".py",
-    ".png", ".jpg", ".jpeg", ".mp3", ".m4a", ".wav",
-    # ADR-0120's additions to the hosted list, so its uploads count by type
-    ".fb2", ".odp", ".webp", ".gif", ".aac", ".flac", ".ogg", ".opus", ".wma",
-    ".3gp", ".3g2", ".aiff", ".aif", ".aifc", ".amr", ".au", ".snd",
-})
-
-
 def _ingest_ext(name: str) -> str:
     ext = Path(name).suffix.lower()
-    return ext if ext in _INGEST_EXTS else "other"
+    return ext if ext in INGEST_LABELS else "other"
 
 
 def is_mail(name: str) -> bool:

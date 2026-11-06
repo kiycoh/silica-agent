@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import quote as _quote
 
 from silica.config import CONFIG
+from silica.kernel.base.formats import SHOWN_IMAGE_EXTS
 from silica.kernel.base.markdown import strip_ofm_meta as _strip_ofm_meta
 from silica.kernel.graph.mindmap import answer_resolver
 from silica.kernel.text import note_parts
@@ -25,7 +26,6 @@ WIKILINK = re.compile(r"(!?)\[\[([^\]\[]+)\]\]")  # optional ! marks an embed
 _TRAIL = ".,;:!?)"  # sentence punctuation to peel off a bare path token
 
 # Vault attachments the drawer may inline; served only through /asset.
-ASSET_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
 
 # An SVG is a document, not just a picture: an <img> context runs none of its
 # scripts, but /asset is a same-origin URL a note can link and the address bar
@@ -347,7 +347,7 @@ def _linkify_text(text: str, resolve, mentions=None) -> str:
         # Obsidian subpath (#center alignment hint, #heading anchor): irrelevant
         # to serving a raster attachment, and it would defeat the ext check.
         target = target.split("#", 1)[0].strip()
-        if bang and "." + target.rsplit(".", 1)[-1].lower() in ASSET_EXTS:
+        if bang and "." + target.rsplit(".", 1)[-1].lower() in SHOWN_IMAGE_EXTS:
             out.append(_embed_img(target, alias))
         else:
             hit = resolve(target)
@@ -725,7 +725,7 @@ def find_asset(path: str) -> Path | None:
     answer that draws as a broken image."""
     if not path or not CONFIG.vault_path:
         return None
-    if Path(path).suffix.lower() not in ASSET_EXTS:
+    if Path(path).suffix.lower() not in SHOWN_IMAGE_EXTS:
         return None
     root = Path(CONFIG.vault_path).resolve()
     target = (root / path).resolve()
@@ -734,6 +734,6 @@ def find_asset(path: str) -> Path | None:
         # escaped: rglob reads the name as a pattern, so `fig[1].png` matched
         # fig1.png and a name holding `**` raised ValueError mid-answer
         found = next((p for p in root.rglob(glob.escape(Path(path).name)) if p.is_file()), None)
-    if found is None or not found.is_relative_to(root) or found.suffix.lower() not in ASSET_EXTS:
+    if found is None or not found.is_relative_to(root) or found.suffix.lower() not in SHOWN_IMAGE_EXTS:
         return None
     return found
