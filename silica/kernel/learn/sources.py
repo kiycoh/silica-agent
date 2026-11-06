@@ -19,6 +19,9 @@ import statistics
 from collections import Counter
 from pathlib import Path
 
+from silica.kernel.base.layout import is_source_leaf
+from silica.kernel.base.syntax import WIKILINK_TARGET_RE
+
 MATERIAL, REFERENCE, UNUSED = "material", "reference", "unused"
 ROLES = (MATERIAL, REFERENCE, UNUSED)
 
@@ -35,7 +38,6 @@ ORDER_MARGIN = 0.2
 FOCUS_MARGIN = 0.15
 
 _ROW_RE = re.compile(r"^\s*\d+[.)]\s+\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]:?\s*(.*)$")
-_LEAF_RE = re.compile(r"\[\[(sources/[^\]|#]+)")
 _LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]")
 _PRACTICE_RE = re.compile(r"^##\s+Concepts practised\s*$", re.M)
 # A cell, line or heading that introduces a reference's books: what the
@@ -50,6 +52,13 @@ def _vault() -> Path:
     from silica.config import CONFIG
 
     return Path(CONFIG.vault_path)
+
+
+def _leaf_links(text: str) -> list[str]:
+    """The verbatim leaves `text` links. By `is_source_leaf` and not by spelling:
+    a leaf link is composed with the write dir (finalize), so `[[silica/sources/`
+    on a confined vault, and a bare `[[sources/` found none there."""
+    return [t for t in WIKILINK_TARGET_RE.findall(text) if is_source_leaf(t)]
 
 
 def _read(path: str) -> str:
@@ -109,10 +118,10 @@ def collections(notes: dict, allowed: set[str]) -> list[dict]:
     vault = _vault()
     found: list[tuple[str, str, str]] = []   # (spine, leaf, source_file)
     for sp in spines:
-        m = _LEAF_RE.search(_read(sp))
-        if not m:
+        links = _leaf_links(_read(sp))
+        if not links:
             continue   # an outline the reader wrote: no source behind it
-        leaf = m.group(1).removesuffix(".md")
+        leaf = links[0].removesuffix(".md")
         parsed = parsed_note(vault, leaf + ".md", body=False)
         data = (parsed[0] if parsed else None) or {}
         found.append((sp, leaf, str(data.get("source_file") or "")))
@@ -173,7 +182,7 @@ def note_collections(paths, colls: list[dict]) -> dict[str, set[str]]:
             if r["note"]:
                 out.setdefault(r["note"], set()).add(c["key"])
     for p in paths:
-        for leaf in _LEAF_RE.findall(_read(p)):
+        for leaf in _leaf_links(_read(p)):
             k = leaf_key.get(leaf.removesuffix(".md"))
             if k:
                 out.setdefault(p, set()).add(k)

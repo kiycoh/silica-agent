@@ -91,3 +91,63 @@ def test_the_raws_walk_reads_a_dot_named_note(tmp_path):
     for rel in (".dot.md", "private/p.md"):
         (v / rel).write_text("---\nsource_file: x.pdf\n---\n", encoding="utf-8")
     assert {n for n, _f in raws.named(v)} == {".dot.md", "private/p.md"}
+
+
+# --- a `write_dir` vault keeps its leaves under the write dir ------------------
+
+@pytest.fixture
+def confined(tmp_path, monkeypatch):
+    from silica.config import CONFIG
+    from silica.kernel.base import manifest
+
+    (tmp_path / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")
+    for rel in ("A.md", "silica/Note.md", "silica/sources/Leaf.md", "sources/Old leaf.md"):
+        p = tmp_path / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("---\ndate: 2026-01-02\n---\n- [ ] a task 📅 2026-01-03\n", encoding="utf-8")
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path), raising=False)
+    monkeypatch.setattr(manifest, "_cached", None)
+    return tmp_path
+
+
+def test_a_composed_leaf_is_no_note_of_the_reader(confined):
+    assert _rels(confined) == ["A.md", "silica/Note.md"]
+    assert "silica/sources/Leaf.md" in _rels(confined, scope="vault")
+
+
+def test_the_roots_are_read_off_the_vault_walked_and_not_the_active_one(confined, tmp_path_factory):
+    other = tmp_path_factory.mktemp("other")
+    (other / "vault.yaml").write_text("write_dir: mine\n", encoding="utf-8")
+    for rel in ("silica/sources/Kept.md", "mine/sources/Gone.md"):
+        p = other / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("x\n", encoding="utf-8")
+    assert _rels(other) == ["silica/sources/Kept.md"]
+
+
+def test_the_timeline_the_calendar_and_learn_leave_a_composed_leaf_out(confined):
+    from silica.config import CONFIG  # noqa: F401
+    from silica.kernel.calendar import tasks
+    from silica.kernel.learn.learner import _notes_meta
+    from silica.kernel.recall.requires import written_requires
+    from silica.kernel.write import timeline
+
+    (confined / "silica/sources/Leaf.md").write_text(
+        "---\nevent_start: 2026-02-02\nrequires: ['[[A]]']\n---\n- [ ] t 📅 2026-02-03\n", encoding="utf-8")
+    assert "silica/sources/Leaf.md" not in _notes_meta(confined)
+    assert "silica/sources/Leaf.md" not in {r[3] for r in timeline._scan(confined)[0]}
+    assert written_requires(confined) == {}
+    assert all(t.path != "silica/sources/Leaf.md" for t in tasks.scan_tasks(confined))
+
+
+def test_collections_find_a_leaf_under_the_write_dir(confined):
+    """Leaf links are composed with the write dir (finalize), so `[[sources/`
+    alone found none on such a vault."""
+    from silica.kernel.learn import sources
+
+    (confined / "silica/sources/Book.md").write_text("---\nsource_file: book.pdf\n---\ntext\n", encoding="utf-8")
+    (confined / "silica/Lesson.md").write_text(
+        '---\nsection: "(outline)"\n---\n1. [[A]]: one\n\n## Sources\n- [[silica/sources/Book]]\n', encoding="utf-8")
+    colls = sources.collections({"silica/Lesson.md": {"spine": True, "mtime": 1}}, {"silica/Lesson.md"})
+    assert [c["leaves"] for c in colls] == [{"silica/sources/Book": "silica/Lesson.md"}]
+    assert sources.note_collections(["silica/Lesson.md"], colls)["silica/Lesson.md"] == {colls[0]["key"]}

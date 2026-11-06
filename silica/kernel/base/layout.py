@@ -237,10 +237,12 @@ def iter_notes(vault, *, scope: str = "reader", under: str = "",
     five walks read `silica/sources/` leaves as notes on a `write_dir: silica`
     vault, and Learn offered them as study material.
     """
+    from silica.kernel.base.manifest import load_manifest
+
     root = Path(vault)
     if under and any(p.startswith(".") for p in Path(under).parts):
         return []
-    leaves = (SOURCES_DIR + "/",) if scope == "reader" else ()
+    leaves = _source_roots(load_manifest(root).write_dir or "") if scope == "reader" else ()
     found: list[str] = []
     for dirpath, _dirnames, filenames in walk_tree(root, root / under if under else None, ignore=ignore):
         rel_dir = os.path.relpath(dirpath, root).replace(os.sep, "/")
