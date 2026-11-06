@@ -190,7 +190,7 @@ def seeded() -> tuple[list[dict], int]:
     """
     from silica.kernel import user_memory
 
-    cached, built_for = SESSION.seed, SESSION.seed_vault  # read once: /instructions can set _seed to None meanwhile
+    cached, built_for = SESSION.seed, SESSION.seed_vault  # read once: /instructions can clear the seed meanwhile
     seed_msgs, seed_tokens = cached if cached is not None and built_for == CONFIG.vault_path else build_seed()
     msgs = [dict(m) for m in seed_msgs]  # per-message copy; the seed's own dicts stay untouched
     if user_memory.refresh_snapshot(msgs):
@@ -207,7 +207,7 @@ def apply_workspace(ws: dict | None) -> None:
     """The system line of a chat opened in a workspace (ADR-0112 point 4,
     Open 3): what the scope does, then the workspace note's body as the
     user's standing instructions. Written once and edited in place, never
-    removed: compaction counts messages by index (`_collapsed`), so a removal
+    removed: compaction counts messages by index (`collapsed`), so a removal
     or a late insert would shift every one it recorded."""
     from silica.kernel import workspaces
 
@@ -225,7 +225,7 @@ def apply_workspace(ws: dict | None) -> None:
     if SESSION.chat.collapsed:
         # ponytail: a chat compacted before it was first opened in a workspace
         # gets the scope without the line; the UI opens a workspace chat only
-        # as a new chat, so this needs an API caller. Rebase `_collapsed` if
+        # as a new chat, so this needs an API caller. Rebase `collapsed` if
         # that ever shows up in the pilot's logs.
         logger.info("workspace line skipped: the chat is already compacted")
         return

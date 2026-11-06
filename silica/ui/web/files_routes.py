@@ -37,7 +37,7 @@ def supported_types():
     """Extensions the pickers offer: `extensions` drives the chat `+`'s
     `accept`, `import` the vault `+`'s and its folder filter (ADR-0098 point 3).
     `mail` is the Mail row's picker, kept apart: the composer stages no mail
-    (`_is_mail`). On the server both lists are ADR-0087 point 5's: the host
+    (`drop.is_mail`). On the server both lists are ADR-0087 point 5's: the host
     has no mineru and no LibreOffice, and offered 60 extensions until then."""
     from silica.config import hosted
     from silica.sources.mail import SUFFIXES
@@ -334,7 +334,7 @@ def _list_imports_in(ref: str, results: list[dict]) -> None:
 @router.post("/mail/upload")
 async def mail_upload(request: Request, name: str):
     """The Mail row's export (ADR-0090 point 5), saved into the inbox inside
-    the write boundary as `_stage_uploads` saves a drop, and not staged: the
+    the write boundary as `drop.stage_uploads` saves a drop, and not staged: the
     row's dry run comes next, and nothing is written before its Import.
 
     The body is the file itself and `name` its name, not a multipart form:

@@ -28,6 +28,7 @@ from urllib.parse import quote
 from silica.kernel import publish, rights
 from silica.kernel.base.markdown import strip_ofm_meta
 from silica.kernel.image_meta import strip_location
+from silica.kernel.text import note_parts
 from silica.ui.web import render
 
 logger = logging.getLogger(__name__)
@@ -64,11 +65,6 @@ def _esc(text) -> str:
     return html.escape("" if text is None else str(text), quote=True)
 
 
-def _title(path: str, fm: dict) -> str:
-    t = fm.get("title")
-    return t.strip() if isinstance(t, str) and t.strip() else path.rsplit("/", 1)[-1].removesuffix(".md")
-
-
 def _tags(fm: dict) -> list[str]:
     raw = fm.get("tags")
     items = raw if isinstance(raw, list) else [raw] if isinstance(raw, str) else []
@@ -97,12 +93,12 @@ def _author(fm: dict, h: str) -> str:
     return "" if not a or a == h else a
 
 
-def _fmt(n: int) -> str:
+def fmt(n: int) -> str:
     return f"{n:,}"
 
 
 def _plural(n: int, one: str, many: str = "") -> str:
-    return f"{_fmt(n)} {one if n == 1 else (many or one + 's')}"
+    return f"{fmt(n)} {one if n == 1 else (many or one + 's')}"
 
 
 def _day(iso: str) -> str:
@@ -375,7 +371,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     plan = rights.decide(wiki, said)
     public = sorted(plan["notes"])
     on = set(public)
-    titles = {p: _title(p, fms.get(p) or {}) for p in public}
+    titles = {p: note_parts.title_of(p, fms.get(p) or {}) for p in public}
     slugs = _slugs(public, titles)
     site = _Site(h, publish.page_url(vault))
     vurl = site.absolute(site.vault(slug, 0))
@@ -576,7 +572,7 @@ def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, bac
         side += f'<div><h2>Linked from</h2><ul>{linked}</ul></div>'
     if more_html:
         side += (f'<div><h2>More from {_esc(conf["title"])}</h2><ul>{more_html}'
-                 f'<li><a href="{_esc(site.vault(vslug, 1))}">All {_fmt(len(shown))} notes</a></li></ul></div>')
+                 f'<li><a href="{_esc(site.vault(vslug, 1))}">All {fmt(len(shown))} notes</a></li></ul></div>')
     page = (head + "<body>\n" + top(site.catalog(), _app(), page=site.page(1), h=h)
             + f'<main class="sheet"{_room(site, vslug, slug)}><div class="art-grid"><article class="art">'
             + crumb + banner
@@ -597,13 +593,13 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
     vslug = m["slug"]
     url = m["url"] or "index.html"
     unl = len(m["unlinked"])
-    caption = (f'<span class="num">{_fmt(count["drawn"])}</span> of <span class="num">{_fmt(count["notes"])}</span> '
-               f'notes drawn · <span class="num">{_fmt(count["links"])}</span> links'
-               + (f' · the <span class="num">{_fmt(unl)}</span> {"note" if unl == 1 else "notes"} with no link '
+    caption = (f'<span class="num">{fmt(count["drawn"])}</span> of <span class="num">{fmt(count["notes"])}</span> '
+               f'notes drawn · <span class="num">{fmt(count["links"])}</span> links'
+               + (f' · the <span class="num">{fmt(unl)}</span> {"note" if unl == 1 else "notes"} with no link '
                   f'{"is" if unl == 1 else "are"} in the wiki but not in the picture' if unl else ""))
-    facts = [("Notes", f'<span class="num">{_fmt(count["notes"])}</span>'),
-             ("Links", f'<span class="num">{_fmt(count["links"])}</span>'),
-             ("Areas", f'<span class="num">{_fmt(count["areas"])}</span>'),
+    facts = [("Notes", f'<span class="num">{fmt(count["notes"])}</span>'),
+             ("Links", f'<span class="num">{fmt(count["links"])}</span>'),
+             ("Areas", f'<span class="num">{fmt(count["areas"])}</span>'),
              ("Published", _esc(_day(m["published"]))),
              ("License", "Not stated by the author" if m["license"] == "not stated" else _esc(m["license"]))]
     dl = "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in facts)
@@ -613,7 +609,7 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
     owner = ' form="save"' if site.base else " disabled"
     areas = "".join(
         f'<li data-area="{i}"><label><input type="checkbox" name="areas" value="{i}"{owner} checked>'
-        f'<span class="nm">{_esc(name)}</span><span class="ct num">{_fmt(size)}</span></label></li>'
+        f'<span class="nm">{_esc(name)}</span><span class="ct num">{fmt(size)}</span></label></li>'
         for i, name, size in rows)
     by_area: dict[int, list[tuple[str, str]]] = {}
     for row in m["n"]:
@@ -621,7 +617,7 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
     for title, slug in m["unlinked"]:
         by_area.setdefault(-1, []).append((title, slug))
     notes = "".join(
-        f'<details><summary>{_esc(name)}<span class="num">{_fmt(size)}</span></summary><ul>'
+        f'<details><summary>{_esc(name)}<span class="num">{fmt(size)}</span></summary><ul>'
         + "".join(f'<li><a href="{_esc(site.note(vslug, s, 1))}">{_esc(t)}</a></li>'
                   for t, s in sorted(by_area.get(i, []), key=lambda x: x[0].lower()))
         + "</ul></details>" for i, name, size in rows)
@@ -654,8 +650,8 @@ def card(e: dict, href: str, graph: str, who: bool = True) -> str:
     prints from `graph`, the title, the line, the handle and the counts."""
     notes, areas = e["count"]["notes"], e["count"]["areas"]
     meta = ((f'<span class="who">@{_esc(e["handle"])}</span>' if who else "")
-            + f'<span><span class="num">{_fmt(notes)}</span> {"note" if notes == 1 else "notes"}</span>'
-            f'<span data-in><span class="num">{_fmt(areas)}</span> {"area" if areas == 1 else "areas"}</span>')
+            + f'<span><span class="num">{fmt(notes)}</span> {"note" if notes == 1 else "notes"}</span>'
+            f'<span data-in><span class="num">{fmt(areas)}</span> {"area" if areas == 1 else "areas"}</span>')
     return (f'<a class="vcard" href="{_esc(href)}" data-graph="{_esc(graph)}" data-title="{_esc(e["title"])}"'
             f' data-line="{_esc(e["line"])}" data-who="{_esc(e["handle"])}" data-notes="{int(e["count"]["notes"])}"'
             f' data-date="{_esc(e["published"])}" data-areas="{_esc(json.dumps(e["areas"], ensure_ascii=False))}">'

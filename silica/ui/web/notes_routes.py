@@ -85,7 +85,7 @@ def _saved_identity(props: dict | None) -> dict:
 
 # The raws the drawer shows in the browser's own viewer (ADR-0129 point 1);
 # every other one is a download.
-# shortcut: PDF only, the one type checked in an iframe under _ASSET_HEADERS'
+# shortcut: PDF only, the one type checked in an iframe under ASSET_HEADERS'
 # sandbox (Chrome 156, Firefox 158, 2026-11-03); images and audio, which the
 # ADR also lets open, join when that is checked for them.
 _RAW_OPENS = (".pdf",)
@@ -324,7 +324,7 @@ def note_new(payload: dict):
     undo sends it to the trash. `""` is the vault's root; an empty name with text
     picks `Untitled`, `Untitled 2`. A folder that does not exist is made. Refused
     with the sentence shown under the title: a taken path (409), a bad name or
-    Silica's own folder (400), a full vault (`_has_room`).
+    Silica's own folder (400), a full vault (`has_room`).
 
     No turn slot: /note/save takes none, and a new path is one no turn is
     reading (ADR-0155 point 17: writing does not wait for the model). A name

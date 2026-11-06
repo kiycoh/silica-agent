@@ -71,7 +71,7 @@ def turn_response(slot: TurnSlot, text: str, attachments: "Sequence[Path]" = (),
         # The done frame names the turn a flag would point at (ADR-0100 point
         # 6), hosted only: the one place a flag exists. Not a demo's, whose
         # flags would die unread with its HOME (ADR-0139 point 6). Read where
-        # the session stood first, since the _busy gate lets only this turn
+        # the session stood first, since the gate lets only this turn
         # narrate in it.
         flaggable = hosted() and not demo()
         sid0 = SESSION.chat.sid

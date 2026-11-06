@@ -41,10 +41,10 @@ _SUGGEST_MIN_DIST = 3
 
 
 # A wikilink SPLIT INTO ITS PARTS, which is what the two readers below need and
-# what `_WIKILINK` (line 173, the linkifier's) deliberately does not do: that one
+# what `render.WIKILINK` (the linkifier's) deliberately does not do: that one
 # keeps `Target|alias` whole because it re-emits the link, while these two have
 # to resolve the target and display the alias separately. Naming them apart is
-# not style — the first version of this reused `_WIKILINK` and shadowed the
+# not style — the first version of this reused `WIKILINK` and shadowed the
 # linkifier, and every note in the app rendered without its links.
 # `[[Target#anchor|alias]]`, and either half can be absent.
 _WIKI_REF = re.compile(r"!?\[\[([^\]|#]*)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]")
@@ -129,7 +129,7 @@ def key_snippets(body: str) -> list[dict]:
 
     out: list[dict] = []
     for heading, chunk in parts:
-        # _plain BEFORE _first_sentence, not after: the cut lands mid-sentence
+        # plain BEFORE first_sentence, not after: the cut lands mid-sentence
         # by design, so a `==highlight==` whose closing mark falls past the
         # limit would otherwise keep its opening one and nothing to close it.
         text = first_sentence(plain(_lead_prose(chunk)))
@@ -184,7 +184,7 @@ def link_line(src: str, target: str, limit: int = 240) -> tuple[int, str]:
     """The line of `src` a wikilink to `target` is written on, and its words.
 
     Counted in the whole file, frontmatter included, because the drawer opens
-    at that number. Not _bridge_passage's filter: a link in a table or under a
+    at that number. Not bridge_passage's filter: a link in a table or under a
     heading is still written somewhere, and on Cultura (2026-11-05) any line
     holding the link found 1,248 of 1,263. (0, "") when no line names it: a
     link through an alias of the note resolves and spells another name.

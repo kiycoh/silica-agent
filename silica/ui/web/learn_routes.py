@@ -302,7 +302,7 @@ def _preview_row(it: dict, scopes: dict[str, dict]) -> dict:
         detail.append("edited " + (datetime.fromtimestamp(it["mtime"], timezone.utc).strftime("%b %d") if it.get("mtime") else "recently"))
     elif it["pool"] == "unexplored":
         detail.append("AI-written" if it.get("ai") else "written by you")
-    elif typeof_num(it.get("S")):
+    elif isinstance(it.get("S"), (int, float)) and not isinstance(it.get("S"), bool):
         detail.append(f"holds ~{round(it['S'])} d est.")
     points = items.key_points(it["path"])
     objectives = _objectives_for(it["path"], scopes)
@@ -313,10 +313,6 @@ def _preview_row(it: dict, scopes: dict[str, dict]) -> dict:
             "attempts": it.get("attempts", 0), "last": it.get("last_event"),
             "also_in": _also_in(it["path"], scopes), "points": len(points), "questions": len(asks),
             "minutes": _minutes(len(asks)) if asks else 0, "objectives": objectives}
-
-
-def typeof_num(x) -> bool:
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
 # ---------------------------------------------------------------- Next: the queue that says why (ADR-0081)

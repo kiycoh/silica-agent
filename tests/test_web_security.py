@@ -401,7 +401,7 @@ def test_the_upload_caps_are_the_documented_ones():
 
     assert drop.UPLOAD_MAX_BYTES == 256 * 1024 * 1024
     assert drop.UPLOAD_MAX_FILES == 32
-    assert drop.MAIL_UPLOAD_MAX_BYTES == 8 * 1024 ** 3   # a RAM ceiling, measured (server.py)
+    assert drop.MAIL_UPLOAD_MAX_BYTES == 8 * 1024 ** 3   # a RAM ceiling, measured (drop.py)
 
 
 def _no_llm(monkeypatch, server):

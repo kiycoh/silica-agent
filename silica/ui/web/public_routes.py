@@ -17,6 +17,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from silica.kernel.text import note_parts
 from silica.onboarding import settings_ops
 from silica.ui.web import drop, session
 
@@ -26,11 +27,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 # How many titles the view's "Goes out" shows of a vault, the best linked first.
 _GOES_OUT = 24
-
-
-def _title(path: str, fm: dict) -> str:
-    t = fm.get("title")
-    return t.strip() if isinstance(t, str) and t.strip() else path.rsplit("/", 1)[-1].removesuffix(".md")
 
 
 def _degrees(paths: set[str]) -> dict[str, int]:
@@ -91,13 +87,13 @@ def _view() -> dict:
     for v in sel["vaults"]:
         mine = [p for p in out_paths if of.get(p) == v["slug"]]
         before = set(last.get(v["slug"], {}).get("notes", []))
-        top = sorted(mine, key=lambda p: (-deg.get(p, 0), _title(p, fms.get(p) or {}).lower()))[:_GOES_OUT]
+        top = sorted(mine, key=lambda p: (-deg.get(p, 0), note_parts.title_of(p, fms.get(p) or {}).lower()))[:_GOES_OUT]
         vaults.append({
             **{k: v[k] for k in ("slug", "folder", "title", "line", "license", "visibility", "listed",
                                  "readers", "published", "downgraded")},
             "url": f"{page_url}/{v['slug']}/" if page_url else "",
             "out": len(mine),
-            "top": [_title(p, fms.get(p) or {}) for p in top],
+            "top": [note_parts.title_of(p, fms.get(p) or {}) for p in top],
             "struck": sum(1 for p, s in notes.items() if s == "struck" and of.get(p) == v["slug"]),
             "new": sum(1 for p in mine if before and p not in before),
             "published_at": last.get(v["slug"], {}).get("published_at", ""),
@@ -185,8 +181,8 @@ def public_cover(vault: str = ""):
     if key in _COVER:
         return _COVER[key]
     fms = sel["frontmatter"]
-    c = cover(on, pairs, {p: _title(p, fms.get(p) or {}) for p in on})
-    result = {"n": [[*row, _title(p, fms.get(p) or {})] for row, p in zip(c["n"], c["nodes"])], "e": c["e"],
+    c = cover(on, pairs, {p: note_parts.title_of(p, fms.get(p) or {}) for p in on})
+    result = {"n": [[*row, note_parts.title_of(p, fms.get(p) or {})] for row, p in zip(c["n"], c["nodes"])], "e": c["e"],
               "areas": c["areas"], "unlinked": len(c["unlinked"])}
     # one entry: a view shows one vault, and an old picture is asked for again only on a switch
     _COVER.clear()

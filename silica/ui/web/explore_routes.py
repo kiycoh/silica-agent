@@ -331,9 +331,9 @@ def context(path: str = "", name: str = "", ghost: bool = False):
     # frontmatter `related:` is a hand-written claim, so it is shown as written
     # and resolved only for the click target; an unresolvable entry still lists.
     # The hand writing it is usually Obsidian's, which writes `- "[[B]]"` — and
-    # neither resolve() nor _clean_name() sees through the brackets, so every
+    # neither resolve() nor clean_name() sees through the brackets, so every
     # such entry used to come back named "[[B]]" with an empty path: a dead row
-    # under a heading that promises a connection. _fm_ref splits the two jobs.
+    # under a heading that promises a connection. fm_ref splits the two jobs.
     fm_raw = (props or {}).get("related") or []
     if not isinstance(fm_raw, (list, tuple)):
         fm_raw = [fm_raw]
@@ -393,9 +393,9 @@ def context(path: str = "", name: str = "", ghost: bool = False):
 
 @router.get("/concept")
 def concept(term: str = "", k: int = 20):
-    """The notes that carry one concept — the click target of the context
-    drawer's cloud, which lights them all in the graph at once. Paths are
-    resolved back to graph keys so the ids match the nodes the viewer holds."""
+    """The notes that carry one concept, with paths resolved back to graph keys
+    so the ids match the nodes a viewer holds. The page stopped asking this when
+    the drawer moved to /concepts; the route stays while a path is a contract."""
     from silica.tools.graph import silica_concepts
 
     resolve = note_resolver()

@@ -115,7 +115,7 @@ async def stage_uploads(files: list[UploadFile], folder: str | None = None, **jo
     (file name, reason) for each file no lane took, and the job records
     (`job` carries the drop's text and session into each). The semantic step
     (nucleate? summarize?) is the agent's, driven by the user's message: see
-    `_compose_nucleate_turn`.
+    `drop_turn.compose_nucleate_turn`.
 
     `folder`, vault-relative, takes the place of the inbox: a chat's drop is
     written to the chat's own folder (ADR-0121 point 5).
@@ -159,7 +159,7 @@ async def stage_uploads(files: list[UploadFile], folder: str | None = None, **jo
         # fallback rather than resolving to the Inbox itself.
         dest = inbox / (Path(f.filename or "").name or "dropped")
         if is_mail(dest.name):
-            continue  # never written: see _is_mail
+            continue  # never written: see is_mail
         # The file's ingest line (ADR-0100 point 3). The page counts come from
         # the conversion's own read (pdf_extract.report), never a second parse
         # here, which would double the untrusted PDF work ADR-0087 keeps in a

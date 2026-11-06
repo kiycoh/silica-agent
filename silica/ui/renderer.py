@@ -38,7 +38,7 @@ def emit_phase(event) -> None:
     """Called by InjectorFSM to surface a phase transition to whoever is watching.
 
     Publishes on BUS rather than calling a registered hook: the TUI is not the
-    only frontend any more (the web turn subscribes too, silica/ui/web/server.py),
+    only frontend any more (the web turn subscribes too, silica/ui/web/turn.py),
     and a module-global hook admits exactly one consumer and cannot be observed
     from a test without writing into that global.
     """

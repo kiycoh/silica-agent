@@ -679,7 +679,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         if stopped:
             pass
         elif isinstance(watch, WebTurn):
-            # Before _linkify and before the compaction sweep: the Sources block
+            # Before linkify and before the compaction sweep: the Sources block
             # belongs to what the user sees AND to what the history carries.
             answer = watch.attribute(answer, messages)
         elif watch.web_answer:
@@ -801,7 +801,7 @@ _PHONE_LINE = (
 def _narrating_phone():
     """Point the narrator at the phone's session for one turn, then at the
     browser's chat as it stands when the turn ends: New chat may have replaced
-    it meanwhile (_reset_session), and reopening the one held at the start
+    it meanwhile (Session.reset), and reopening the one held at the start
     would append the next chat's turns to the file the student left. No
     browser turn narrates in between, because the gate is the phone's."""
     from silica.obs import narration as _narr
@@ -826,7 +826,7 @@ def _narrating_phone():
             except _narr.SessionBusy:
                 # Another process took the browser's file while the phone held
                 # the narrator. Nothing is lost by going on: the browser's next
-                # turn meets the same SessionBusy in _narrate_user_turn, which
+                # turn meets the same SessionBusy in narrate_user_turn, which
                 # is where it is reported.
                 logger.warning("narration not restored after a phone turn")
 

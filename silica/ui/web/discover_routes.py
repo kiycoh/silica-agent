@@ -18,6 +18,7 @@ from importlib import resources
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from silica.config import hosted
 from silica.sources.discover import feeds as F
 from silica.sources.discover import rank, read, store
 from silica.sources.discover import story as S
@@ -32,12 +33,6 @@ _IMAGE_HEADERS = {"Cache-Control": "private, max-age=86400", "Content-Security-P
 _TABS = ("foryou", "news", "research", "video")
 _FEEDBACK = (-1, 0, 1)
 _CATALOG_SHOWN = 40
-
-
-def _hosted() -> bool:
-    from silica.config import hosted
-
-    return hosted()
 
 
 def _label(doc: dict, bucket: str) -> str:
@@ -90,10 +85,9 @@ def _card(doc: dict, s: dict) -> dict:
 
 def _feed_row(f: dict) -> dict:
     st = f.get("state") or {}
-    hosted = _hosted()
     if f.get("kind") == "wikipedia":
         status, bad = "on demand", ""
-    elif f.get("kind") == "youtube" and hosted:
+    elif f.get("kind") == "youtube" and hosted():
         status, bad = "desktop app only", "warn"
     elif st.get("status") == "error":
         status = st.get("error", "failed") + (f" since {_age(st.get('since'))}" if st.get("since") else "")
@@ -139,7 +133,7 @@ def discover():
     failing = sum(1 for f in feeds if (f.get("state") or {}).get("status") in ("error", "refused"))
     topics = [{**t, "on": doc["topics"].get(t["key"], True)} for t in doc.get("topic_list") or []]
     from silica.kernel.base.manifest import active_inbox_dir
-    return {"setup": bool(doc.get("setup")), "hosted": _hosted(), "reading": dict(read.PROGRESS) if reading else None,
+    return {"setup": bool(doc.get("setup")), "hosted": hosted(), "reading": dict(read.PROGRESS) if reading else None,
             "youtube_on_server": drop.YOUTUBE_ON_SERVER, "inbox": active_inbox_dir() or "Inbox",
             "read_at": doc.get("read_at") or 0, "tabs": tabs, "topics": topics,
             "buckets": {k: v for k, v in doc["buckets"].items()},
@@ -168,7 +162,7 @@ def setup_info():
     with store.LOCK:
         doc = store.load()
     counts = {b: sum(1 for f in doc["feeds"] if f["bucket"] == b) for b in store.BUCKETS}
-    return {"buckets": doc["buckets"], "counts": counts, "hosted": _hosted(),
+    return {"buckets": doc["buckets"], "counts": counts, "hosted": hosted(),
             "topics": [{k: v for k, v in t.items() if k != "paths"} for t in rank.vault_topics()],
             "catalog": _catalog_meta()}
 
@@ -273,7 +267,7 @@ def story(sid: str):
             "writing": dict(prog) if prog and (prog.get("running") or prog.get("error")) else None,
             "list": [{"title": a["title"], "url": a["url"], "domain": a.get("domain", ""), "lead": a.get("lead", "")}
                      for a in arts],
-            "related": related, "hosted": _hosted(), "youtube_on_server": _youtube_copy()}
+            "related": related, "hosted": hosted(), "youtube_on_server": _youtube_copy()}
 
 
 def _youtube_copy() -> str:
@@ -345,7 +339,7 @@ def feeds_list():
         if not rows and b in store.BUCKETS and b != "news":
             continue
         out.append({"key": b, "label": _label(doc, b), "on": bool(doc["buckets"].get(b)), "rows": rows})
-    return {"buckets": out, "hosted": _hosted(), "keep_days": store.KEEP_DAYS, "catalog": _catalog_meta()}
+    return {"buckets": out, "hosted": hosted(), "keep_days": store.KEEP_DAYS, "catalog": _catalog_meta()}
 
 
 @router.post("/buckets")
@@ -404,7 +398,7 @@ async def feeds_add(payload: dict):
             # A site with no feed is read through search, locally only
             # (ADR-0137 decision 6): the hosted pilot shares one address
             # across every tenant on the keyless lanes.
-            if _hosted():
+            if hosted():
                 raise HTTPException(422, "no feed found there, and the hosted pilot reads feeds only") from None
             kind = "site"
         except Exception as exc:

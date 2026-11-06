@@ -76,7 +76,7 @@ _ALLOWED_HOSTS = {"loopback", *_public_hosts()}
 
 async def hosted_image_policy(request: Request, call_next):
     """On the server, the page draws only its own images (ADR-0098 H6): the
-    layer under `_linkify(remote_images=False)`, and the one that also covers
+    layer under `render.linkify(remote_images=False)`, and the one that also covers
     notes, the drawer and the editor's preview. The page loads nothing from
     another origin, so only web images inside notes stop drawing; locally
     they still draw (the ADR's open item 3). A response with its own policy

@@ -16,6 +16,12 @@ def clean_name(ref: str) -> str:
     return ref.rsplit("/", 1)[-1].removesuffix(".md")
 
 
+def title_of(path: str, fm: dict) -> str:
+    """A note's title as a published page names it: its `title:`, else its file."""
+    t = fm.get("title")
+    return t.strip() if isinstance(t, str) and t.strip() else path.rsplit("/", 1)[-1].removesuffix(".md")
+
+
 def split_frontmatter(text: str) -> tuple[dict | None, str]:
     """Split a leading YAML frontmatter block. Returns (props, body); props is
     None unless the block parses to a mapping."""

@@ -1997,7 +1997,7 @@ class TestOwnSessionCapture:
         ran: list[bool] = []
         monkeypatch.setattr(uvicorn.Server, "run",
                             lambda self, sockets=None: ran.append(True))
-        monkeypatch.setattr(server, "print_banner", lambda: None, raising=False)
+        monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
 
         server.serve(port=0)
 
