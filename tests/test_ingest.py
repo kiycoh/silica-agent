@@ -65,3 +65,19 @@ def test_owed_leaves_a_glob_or_a_folder_to_the_command(tmp_vault):
     (Path(CONFIG.vault_path) / "Inbox" / "dir").mkdir(parents=True)
     assert ingest.owed(["Inbox/*.pdf"]) == []
     assert ingest.owed(["Inbox/dir"]) == []
+
+
+def test_a_real_tool_call_announces_nothing_of_its_own(tmp_vault, runs):
+    """The agent loop draws a tool's block. Only a typed /nucleate, which no loop
+    runs, says so on `work/tool`: said here too, the web would draw it twice."""
+    from silica.obs.bus import BUS
+    from silica.tools.runners import silica_run_injector
+
+    said: list = []
+    BUS.subscribe("work/tool", said.append)
+    try:
+        tmp_vault.note("Inbox/body.md", "# A chapter\n\nProse.\n")
+        silica_run_injector(inbox_files=["Inbox/body.md"], target_dir="T")
+    finally:
+        BUS.unsubscribe("work/tool", said.append)
+    assert runs and said == []
