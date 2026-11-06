@@ -354,7 +354,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     from silica.driver import DRIVER
     from silica.kernel.recall.mindmap import note_resolver
     from silica.kernel.write import frontmatter as fm
-    from silica.ui.web.server import _find_asset, _linkify
+    from silica.ui.web.server import _find_asset, _linkify, _strip_ofm_meta
 
     vault = vault or publish._vault()
     h = publish.handle(vault)
@@ -431,7 +431,11 @@ def build(slug: str, vault: Path | None = None) -> dict:
             continue
         props, _raw, body = fm.split(text)
         props = props or {}
-        body = _drop_title_heading(body, titles[p])
+        # Once, here: the page, the `.md`, notes.json and the description all read this
+        # body, and only _linkify stripped comments, so a `%% remark %%` the page hid went
+        # out in the `.md` and into the room's text search, and hidden text reached the
+        # vault of whoever saved the note.
+        body = _drop_title_heading(_strip_ofm_meta(body, html_comments=True), titles[p])
         page_html = _linkify(body, resolve)
         targets = set(_ANCHOR.findall(page_html))
         edges.update((p, html.unescape(t)) for t in targets if html.unescape(t) in on)
