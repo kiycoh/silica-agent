@@ -134,7 +134,7 @@ def silica_run_injector(
 def project_injector_result(result: dict, run_id: str | None, files_total: int,
                             skipped: int = 0) -> dict[str, Any]:
     """What a Coordinator run returns to its caller: this tool's result, and the
-    one a typed /nucleate hands the chat's block (cli._sc_nucleate)."""
+    one a typed /nucleate hands the chat's block (ingest.nucleate)."""
     # Agent-facing projection: outcomes only, never the raw FSM context. The
     # raw context once fed a confabulated success report — planned concepts in
     # payload.chunks read as "created notes", and a last-write-wins error field

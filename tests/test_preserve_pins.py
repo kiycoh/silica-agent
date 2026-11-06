@@ -29,8 +29,8 @@ LOSS_PINS = {
     ("silica/sources/convert.py", "_write_leaf", "Loss.STAGED"): 1,
     ("silica/sources/registry.py", "stage", "Loss.STAGED"): 1,
     ("silica/tools/codedocs_tool.py", "silica_document", "Loss.STAGED"): 1,
-    ("silica/cli.py", "_stage_envelope", "Loss.STAGED"): 1,
-    ("silica/cli.py", "_promote", "Loss.STAGED"): 1,
+    ("silica/sources/ingest.py", "_stage_envelope", "Loss.STAGED"): 1,
+    ("silica/sources/ingest.py", "promote", "Loss.STAGED"): 1,
     ("silica/kernel/vault_files.py", "add_to_vault", "Loss.STAGED"): 1,   # ADR-0121 point 5
     ("silica/kernel/write/gate.py", "commit_derived", "Loss.DERIVED"): 1,
     ("silica/kernel/write/migrate.py", "apply", "Loss.MIGRATE"): 1,

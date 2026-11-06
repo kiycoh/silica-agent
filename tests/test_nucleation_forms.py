@@ -6,6 +6,7 @@ clip by construction. Both stamp `form:` into frontmatter so downstream
 profile resolution never has to guess what the ingress lane already knew.
 """
 
+from silica.sources import ingest
 from pathlib import Path
 
 
@@ -448,7 +449,7 @@ class TestDraftFiling:
         assert (Path(CONFIG.vault_path) / "Videos" / "Local still loses on thumbnails.md").is_file()
 
     def test_a_heading_title_loses_what_obsidian_refuses_in_a_name(self):
-        from silica.cli import _draft_title
+        from silica.sources.ingest import _draft_title
 
         assert _draft_title("# Machine Learning: guida allo studio\n", "g") == \
             "Machine Learning - guida allo studio"
@@ -698,7 +699,7 @@ def test_a_txt_draft_is_read_and_filed_too(tmp_vault, monkeypatch):
 
 
 def test_a_txt_draft_files_under_auto_target_too(tmp_vault, monkeypatch):
-    """_pick_target_folder must read a .txt source: with no --target the ep180
+    """pick_target_folder must read a .txt source: with no --target the ep180
     case died there and fell back to distillation."""
     from pathlib import Path
 
@@ -852,7 +853,7 @@ class TestFileDraftsParallelResolve:
             return forms.Form("study", "default", "sniff")
         with _patch.object(forms, "read_source_text", side_effect=lambda f: f), \
              _patch.object(forms, "resolve", side_effect=fake_resolve):
-            kept = cli._file_drafts(list(files), "Target", None)
+            kept = ingest.file_drafts(list(files), "Target", None, cli.CONSOLE)
         assert kept == files
 
     def test_folder_vote_overrides_a_lone_verdict(self, monkeypatch):
@@ -869,7 +870,7 @@ class TestFileDraftsParallelResolve:
         forms._sniff_memo.clear()
         with _patch.object(forms, "read_source_text", side_effect=lambda f: f), \
              _patch.object(forms, "sniff_form", side_effect=lambda text: verdict[text]):
-            kept = cli._file_drafts(list(verdict), "Target", None)
+            kept = ingest.file_drafts(list(verdict), "Target", None, cli.CONSOLE)
         assert kept == list(verdict)  # nothing filed
         # RECON re-resolves the same text later: the pinned memo answers, no LLM call.
         with _patch.object(forms, "call_llm", side_effect=AssertionError("re-sniffed")):
@@ -883,7 +884,7 @@ class TestFileDraftsParallelResolve:
 
         with _patch.object(forms, "read_source_text",
                            side_effect=RuntimeError("boom")):
-            kept = cli._file_drafts(["Inbox/x.md"], "Target", None)
+            kept = ingest.file_drafts(["Inbox/x.md"], "Target", None, cli.CONSOLE)
         assert kept == ["Inbox/x.md"]
 
 

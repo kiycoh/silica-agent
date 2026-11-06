@@ -1039,7 +1039,7 @@ GATE6_FIRES = 10
 def _nucleated_pdfs() -> set[str]:
     """Basenames of the documents /nucleate converted, from the `source_file`
     every converted segment carries, in the inbox (a run in progress) and in
-    done/ (a finished one): the places cli._prior_conversions reads."""
+    done/ (a finished one): the places ingest.prior_conversions reads."""
     from silica.config import CONFIG
     from silica.driver import DRIVER
     from silica.kernel.base.manifest import active_done_dir, active_inbox_dir

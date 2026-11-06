@@ -5,6 +5,7 @@
 its paper's leaf; a paper with no PDF is written as its leaf on the spot."""
 from __future__ import annotations
 
+from silica.sources import ingest
 from pathlib import Path
 
 import pytest
@@ -38,7 +39,7 @@ def test_a_citekey_dispatches_to_zotero_only_where_zotero_is_on():
 def test_a_zotero_target_queues_its_pdf_with_its_leaf(tmp_vault, fake):
     fake.add_paper()
 
-    plan = cli._nucleate_plan_units(["@packerMemGPTLLMsOperating2024"], _ENABLED, {}, None)
+    plan = ingest.plan_units(["@packerMemGPTLLMsOperating2024"], _ENABLED, {}, None, cli.CONSOLE)
 
     assert plan.to_convert == [_PDF]
     name, fields = plan.leaf_for[_PDF]
@@ -52,7 +53,7 @@ def test_a_renamed_citekey_keeps_the_leaf_the_paper_already_has(tmp_vault, fake)
     fake.add_paper()
     tmp_vault.note("sources/@oldKey2024.md", "---\nzotero_key: 8H4AC8GW\n---\n\nold text\n")
 
-    plan = cli._nucleate_plan_units(["@packerMemGPTLLMsOperating2024"], _ENABLED, {}, None)
+    plan = ingest.plan_units(["@packerMemGPTLLMsOperating2024"], _ENABLED, {}, None, cli.CONSOLE)
 
     assert plan.leaf_for[_PDF][0] == "@oldKey2024.md"
 
@@ -61,7 +62,7 @@ def test_a_paper_without_a_pdf_is_written_as_its_leaf(tmp_vault, fake):
     item, _ = fake.add_paper()
     del item["links"]["attachment"]
 
-    plan = cli._nucleate_plan_units(["zotero://select/library/items/8H4AC8GW"], _ENABLED, {}, None)
+    plan = ingest.plan_units(["zotero://select/library/items/8H4AC8GW"], _ENABLED, {}, None, cli.CONSOLE)
 
     assert plan.to_convert == []
     assert plan.staged == 1
@@ -72,7 +73,7 @@ def test_a_paper_without_a_pdf_is_written_as_its_leaf(tmp_vault, fake):
 def test_a_closed_zotero_skips_the_target_and_says_why(tmp_vault, fake, capsys):
     fake.refuse = True
 
-    plan = cli._nucleate_plan_units(["@packerMemGPTLLMsOperating2024"], _ENABLED, {}, None)
+    plan = ingest.plan_units(["@packerMemGPTLLMsOperating2024"], _ENABLED, {}, None, cli.CONSOLE)
 
     assert plan.to_convert == [] and plan.ready_units == []
     assert "not running" in capsys.readouterr().out
@@ -120,7 +121,7 @@ def test_an_imported_paper_gets_its_backlink_note_in_zotero(tmp_vault, fake, mon
 
     monkeypatch.setattr("silica.sources.convert.convert", _convert)
     monkeypatch.setattr(coord_mod, "Coordinator", _Run)
-    monkeypatch.setattr(cli, "_pick_target_folder", lambda files: "Papers")
+    monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "Papers")
 
     cli._sc_nucleate(["@packerMemGPTLLMsOperating2024", "--target=Papers"])
 

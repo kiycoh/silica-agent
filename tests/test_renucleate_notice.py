@@ -79,7 +79,7 @@ class TestTheRunReportCarriesIt:
 
 class TestTheCompletionLineSaysIt:
     def test_the_line_names_the_count_and_the_way_back(self):
-        from silica.cli import _nucleate_result_line
+        from silica.sources.ingest import _nucleate_result_line
 
         line = _nucleate_result_line({"final_status": "Success",
                                       "renucleated": {"lec.md": 2}})
@@ -88,6 +88,6 @@ class TestTheCompletionLineSaysIt:
         assert "/revert --source lec.md" in line
 
     def test_a_plain_run_has_no_such_clause(self):
-        from silica.cli import _nucleate_result_line
+        from silica.sources.ingest import _nucleate_result_line
 
         assert "revert" not in _nucleate_result_line({"final_status": "Success"})

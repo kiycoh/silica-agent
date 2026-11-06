@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from silica.sources import ingest
 from silica.kernel.write.ops import Txn
 from silica.router.states import finalize
 from silica.router.orchestrator import InjectorFSM, InjectorState
@@ -603,12 +604,11 @@ class TestT7NucleateShortcut:
         assert calls[0]["hub"] == "AI"
 
     def test_nucleate_missing_target_falls_back_when_pick_fails(self, monkeypatch):
-        import silica.cli as cli_mod
 
         def boom(files):
             raise ValueError("no llm")
 
-        monkeypatch.setattr(cli_mod, "_pick_target_folder", boom)
+        monkeypatch.setattr(ingest, "pick_target_folder", boom)
         msg, _ = self._expand("/nucleate Inbox/a.md", monkeypatch)
         assert msg is not None and "silica_run_injector" in msg
         assert "target_dir=<chosen folder>" in msg

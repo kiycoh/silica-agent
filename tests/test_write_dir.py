@@ -572,7 +572,7 @@ def test_nucleate_announces_the_write_dir_rebased_target(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     reset_manifest_cache()
 
-    from silica.cli import _announced_target
+    from silica.sources.ingest import _announced_target
     assert _announced_target("appunti") == "silica/appunti"
 
 
@@ -582,5 +582,5 @@ def test_announced_target_is_identity_without_a_boundary(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     reset_manifest_cache()
 
-    from silica.cli import _announced_target
+    from silica.sources.ingest import _announced_target
     assert _announced_target("appunti") == "appunti"

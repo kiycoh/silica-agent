@@ -112,15 +112,15 @@ def _no_form_sniff_network(monkeypatch: pytest.MonkeyPatch) -> None:
 def _no_batch_folder_pick_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """A /nucleate batch with no --target asks the chat model for every unit's
     folder in one call (ADR-0133), and the batch tests that patch only
-    `_pick_target_folder` would send it to the developer's model. Raising is a
+    `pick_target_folder` would send it to the developer's model. Raising is a
     failed call, after which each unit is picked alone, as those tests expect.
-    Tests of the batch call patch `cli._pick_batch_folders` back themselves."""
-    import silica.cli as cli
+    Tests of the batch call patch `ingest.pick_batch_folders` back themselves."""
+    from silica.sources import ingest
 
     def _offline(*a, **k):
         raise RuntimeError("batch folder pick disabled in tests")
 
-    monkeypatch.setattr(cli, "_pick_batch_folders", _offline)
+    monkeypatch.setattr(ingest, "pick_batch_folders", _offline)
 
 
 @pytest.fixture(autouse=True)

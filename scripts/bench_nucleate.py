@@ -266,7 +266,8 @@ def subagent_seconds(sid: str) -> dict[str, float]:
 def measure(sample: list[dict], target_dir: str, profile: str) -> list[dict]:
     from silica.obs.bus import BUS
     from silica.obs.narration import NARRATOR
-    from silica.cli import _nucleate_prepare
+    from silica.sources.ingest import prepare_unit
+    from silica.ui.console import CONSOLE
     from silica.kernel.write.undo_journal import get_undo_journal
     from silica.config import CONFIG
     from silica.router.coordinator import Coordinator
@@ -295,7 +296,7 @@ def measure(sample: list[dict], target_dir: str, profile: str) -> list[dict]:
             print(f"    convert failed: {exc}")
             continue
         t_conv = time.perf_counter() - t0
-        mfs = _nucleate_prepare(segs, target_dir, profile or None, undo_run)
+        mfs = prepare_unit(segs, target_dir, profile or None, undo_run, CONSOLE)
         if not mfs:
             # Already distilled, all apparatus, or filed as a draft. Zero
             # seconds for zero work would drag the median toward "instant".

@@ -341,7 +341,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
     from silica.obs.bus import BUS
     BUS.subscribe("work/phase", on_phase)
     # A typed /nucleate runs the injector with no agent call around it, and
-    # says so on "work/tool" (cli._sc_nucleate), so its block draws as the
+    # says so on "work/tool" (ingest.nucleate), so its block draws as the
     # agent's does.
     BUS.subscribe("work/tool", on_phase)
 
@@ -468,7 +468,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                 return handled or expanded == "", expanded, capture.get()
 
             # Pumped as the agent's turn is: a command that runs the injector
-            # streams its block and phases while it works (cli._sc_nucleate),
+            # streams its block and phases while it works (ingest.nucleate),
             # and they reached no one while this awaited the thread whole. Held
             # as the turn's task, so a dropped tab keeps the gate shut until
             # the work ends instead of freeing it under a running import.

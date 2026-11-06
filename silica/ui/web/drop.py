@@ -109,7 +109,7 @@ async def write_stream(chunks, dest: Path, cap: int, too_big: str) -> None:
 async def stage_uploads(files: list[UploadFile], folder: str | None = None, **job: Any
                          ) -> tuple[list[str], list[str], list[tuple[str, str]], list[dict]]:
     """Write uploads to Inbox and mechanically stage them, mirroring the inline
-    half of `/nucleate` (silica/cli.py): code/notebooks become skeleton stubs,
+    half of `/nucleate` (silica/sources/ingest.py): code/notebooks become skeleton stubs,
     prose stays as-is, and a file that needs convert() becomes a job.
     Returns (ready, stubs, skipped, queued): markdown notes ready for the
     injector/reading, code stub note paths already written to the vault,

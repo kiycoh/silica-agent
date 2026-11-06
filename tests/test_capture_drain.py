@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from silica.sources import ingest
 from silica.config import CONFIG
 
 
@@ -51,8 +52,7 @@ def stub_coordinator(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_llm_target_pick(monkeypatch):
-    import silica.cli as cli_mod
-    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "Sessions")
+    monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "Sessions")
 
 
 TRANSCRIPT = "\n".join(json.dumps(row) for row in (

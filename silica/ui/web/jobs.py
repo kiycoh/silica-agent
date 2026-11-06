@@ -579,7 +579,7 @@ def from_command(text: str, session: str | None) -> dict | None:
     /nucleate turns into jobs only for the files it names that need a
     conversion it has not had; it does not run now, and the jobs offer it.
     ponytail: a folder, a glob or a Zotero key still converts inside the turn,
-    because only `_sc_nucleate` expands them. Its trigger fired on 2026-10-23
+    because only `ingest.nucleate` expands them. Its trigger fired on 2026-10-23
     (hosted t01, kind nucleate cut at 124,990 ms) and the turn's keepalive
     (sse._KEEPALIVE_S) answered the cut instead; a turn still dies with its
     tab and with a release. The upgrade is the same split after expansion, due
@@ -594,11 +594,12 @@ def from_command(text: str, session: str | None) -> dict | None:
         parts = shlex.split(text.strip())
     except ValueError:
         return None  # the command's own parser names the unbalanced quote
-    from silica.cli import _positional, _rejoin_spaced_paths, _str_flag
+    from silica.cli import _positional, _str_flag
     from silica.kernel.base.formats import DOC_EXTS
     from silica.sources.convert import _resolve_input
+    from silica.sources.ingest import rejoin_spaced_paths
 
-    args = _rejoin_spaced_paths(parts[1:])
+    args = rejoin_spaced_paths(parts[1:])
     files = _positional(args)
     target = _str_flag(args, "--target")
     if not files:
@@ -632,11 +633,11 @@ def from_command(text: str, session: str | None) -> dict | None:
 def _owed(files: list[str]) -> list[str]:
     """The files of a /nucleate that name one document each and still need a
     conversion: no source claims them, and no earlier conversion of the same
-    file sits in the inbox or in done/ (the batch resume `_sc_nucleate` does)."""
-    from silica.cli import _prior_conversions
+    file sits in the inbox or in done/ (the batch resume `ingest.plan_units` does)."""
     from silica.kernel.base.formats import DOC_EXTS
     from silica.kernel.base.manifest import get_active_manifest
     from silica.sources.convert import _resolve_input
+    from silica.sources.ingest import prior_conversions
     from silica.sources.registry import adapter_for
 
     enabled = get_active_manifest().sources
@@ -653,7 +654,7 @@ def _owed(files: list[str]) -> list[str]:
             return []  # a folder: the whole command runs as before
         if src.suffix.lower() not in DOC_EXTS or adapter_for(f, enabled=enabled) is not None:
             continue  # a note or code: staged by the command, no conversion
-        prior = _prior_conversions() if prior is None else prior
+        prior = prior_conversions() if prior is None else prior
         seen = prior.get(str(src))
         if not (seen and (seen["inbox"] or seen["done"])):
             out.append(f)
