@@ -58,22 +58,17 @@ def run(raw: str, console) -> None:
     if verb != "import" or not file:
         console.print(USAGE)
         return
-    me = tuple(a for a in (flags.get("me") or "").split(",") if a.strip())
     try:
         limit = mail.parse_limit(flags.get("limit"))
-        if me:
-            # Kept on the user's word, dry run or not: typing the address is
-            # the confirmation the prefill asks for (point 4).
-            me = mail.remember_addresses(me)
-        p = mail.plan(file, me=me or None, label=flags.get("label", ""),
-                      all_="all" in flags, limit=limit)
+        p = mail.plan_typed(file, flags.get("me") or "", label=flags.get("label", ""),
+                            all_="all" in flags, limit=limit)
     except (OSError, ValueError) as exc:
         console.print(f"  [yellow]Mail: {escape(str(exc))}[/]")
         return
     _show(p, file, limit, console)
     if "apply" not in flags:
         return
-    if p.guessed and not p.takeout:
+    if mail.unconfirmed(p):
         console.print(f"  Confirm your address first: /mail import {escape(file)} "
                       f"--me={escape(','.join(p.me)) or 'you@example.org'} --apply")
         return

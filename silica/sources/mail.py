@@ -795,7 +795,7 @@ def _defaults_hold(file: str, src: Path) -> None:
     defaults. A keyed target comes from /mail import, which already planned it,
     or from a user who typed the key, which is the same choice --all makes."""
     p = plan(src)
-    if p.guessed and not p.takeout:
+    if unconfirmed(p):
         raise ValueError(f"no address of yours is recorded for this vault; /mail import {file} "
                          "shows the thread and asks for it")
     if p.write:
@@ -851,6 +851,22 @@ MAIL = MailAdapter()
 MAX_THREADS = 200
 STATE_FILE = "mail_import.json"
 LIMIT_ERROR = "--limit takes a whole number of threads, 1 or more"
+
+
+def plan_typed(file: str | Path, me: str, *, label: str = "", all_: bool = False, limit=None) -> Plan:
+    """`plan` on what a person typed: `me` the addresses as written, kept on their
+    word, dry run or not, because typing one is the confirmation the prefill asks
+    for (point 4). `limit` is raw or already parsed."""
+    typed = tuple(a for a in (me or "").split(",") if a.strip())
+    if typed:
+        typed = remember_addresses(typed)
+    return plan(file, me=typed or None, label=label, all_=all_, limit=parse_limit(limit))
+
+
+def unconfirmed(p: Plan) -> bool:
+    """Whose mail this is rests on a guess nobody confirmed, so nothing is written.
+    Takeout's Sent label says it outright."""
+    return p.guessed and not p.takeout
 
 
 def parse_limit(value) -> int:

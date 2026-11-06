@@ -449,6 +449,25 @@ def unlink(zot: Zotero) -> dict:
     return {"notes": len(notes), "collections": removed}
 
 
+def _journal_run() -> str:
+    from silica.config import CONFIG
+    from silica.kernel.write.undo_journal import get_undo_journal
+
+    return get_undo_journal().start_run(source="zotero", vault=CONFIG.vault_path.strip() or None)
+
+
+def file_in_a_run(zot: Zotero, moves: list[tuple[str, str]], inbox: str) -> tuple[int, str]:
+    """`file_items` under a journal run of its own: (moved, run), for /revert."""
+    run = _journal_run()
+    return file_items(zot, moves, inbox, run_id=run), run
+
+
+def groups_in_a_run(zot: Zotero, plan: dict[str, list[str]]) -> tuple[int, str]:
+    """`write_groups` under a journal run of its own: (changed, run), for /revert."""
+    run = _journal_run()
+    return write_groups(zot, plan, run_id=run), run
+
+
 def authorize(zot: Zotero) -> bool:
     """Ask Zotero for a write key; Zotero raises its own Allow dialog.
 

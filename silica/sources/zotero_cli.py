@@ -23,9 +23,7 @@ def _collection_key(zot, value: str) -> str:
 
 def run(tokens: list[str], console) -> None:
     """/zotero [file|group|unlink|grant] [--apply|--yes]."""
-    from silica.config import CONFIG
     from silica.kernel.base.manifest import get_active_manifest
-    from silica.kernel.write.undo_journal import get_undo_journal
     from silica.sources import zotero, zotero_write
 
     verb = next((t for t in tokens if not t.startswith("--")), "")
@@ -34,7 +32,6 @@ def run(tokens: list[str], console) -> None:
         console.print("  This vault is not linked to Zotero: Settings › Zotero › Use in this vault.")
         return
     zot = zotero.client()
-    vault = CONFIG.vault_path.strip() or None
     try:
         if verb == "":
             _status(zot, console)
@@ -52,9 +49,7 @@ def run(tokens: list[str], console) -> None:
             rows = zotero_write.suggest_filing(zot, inbox)
             sure = [r for r in rows if r["votes"] == 3]
             if "--apply" in tokens:
-                run = get_undo_journal().start_run(source="zotero", vault=vault)
-                n = zotero_write.file_items(zot, [(r["key"], r["first"]) for r in sure],
-                                            inbox, run_id=run)
+                n, _ = zotero_write.file_in_a_run(zot, [(r["key"], r["first"]) for r in sure], inbox)
                 console.print(f"  Moved {n} item(s) out of {link.inbox} · recorded in "
                               "zotero.jsonl · undo: /revert")
                 return
@@ -71,8 +66,7 @@ def run(tokens: list[str], console) -> None:
             for label, keys in plan.items():
                 console.print(f"    {label}  {len(keys)} paper(s)")
             if "--apply" in tokens:
-                run = get_undo_journal().start_run(source="zotero", vault=vault)
-                n = zotero_write.write_groups(zot, plan, run_id=run)
+                n, _ = zotero_write.groups_in_a_run(zot, plan)
                 console.print(f"  Wrote {len(plan)} group(s) under Silica groups, {n} membership "
                               "change(s) · undo: /revert")
             else:

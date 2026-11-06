@@ -243,20 +243,12 @@ def covers_start() -> dict:
     return zotero_covers.start((CONFIG.vault_path or "").strip())
 
 
-def _journal_run() -> str:
-    from silica.kernel.write.undo_journal import get_undo_journal
-
-    return get_undo_journal().start_run(source="zotero", vault=CONFIG.vault_path.strip() or None)
-
-
 def file(moves: list[list[str]]) -> dict:
     link = _link()
     if not link or not link.inbox:
         raise zotero.ZoteroError("no inbox collection set: Settings › Zotero › Inbox collection")
     zot = zotero.client()
-    run = _journal_run()
-    moved = zotero_write.file_items(zot, [(k, t) for k, t in moves],
-                                    _inbox_key(zot, link.inbox), run_id=run)
+    moved, run = zotero_write.file_in_a_run(zot, [(k, t) for k, t in moves], _inbox_key(zot, link.inbox))
     return {"moved": moved, "run": run}
 
 
@@ -277,8 +269,7 @@ def groups_preview() -> dict:
 
 def groups_write() -> dict:
     plan = zotero_write.compute_group_plan()
-    run = _journal_run()
-    changed = zotero_write.write_groups(zotero.client(), plan, run_id=run)
+    changed, run = zotero_write.groups_in_a_run(zotero.client(), plan)
     return {"groups": len(plan), "changed": changed, "run": run}
 
 
