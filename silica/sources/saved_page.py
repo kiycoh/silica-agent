@@ -32,7 +32,7 @@ _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")
 
 def allowed_hosts() -> set[str]:
     # the hosted pages' host (ADR-0143 point 6): the apex is the landing, on GitHub Pages
-    raw = os.environ.get("SILICA_PUBLIC_HOSTS", "").strip() or "pages.silica-agent.dev"
+    raw = os.environ.get("SILICA_PUBLIC_HOSTS", "").strip() or "wikis.silica-agent.dev"
     return {h.strip().lower() for h in raw.split(",") if h.strip()}
 
 
