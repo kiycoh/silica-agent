@@ -129,10 +129,10 @@ def test_the_row_runs_end_to_end_through_the_panel_routes(web, tmp_path):
 # --- a real export: past the drop cap, under its own (gap 1, 2026-10-12) -----------
 
 def test_an_export_past_the_drop_cap_still_lands(web, tmp_path, monkeypatch):
-    from silica.ui.web import server
+    from silica.ui.web import drop
 
     tc, vault = web
-    monkeypatch.setattr(server, "_UPLOAD_MAX_BYTES", 256)   # a Takeout file is no drop
+    monkeypatch.setattr(drop, "UPLOAD_MAX_BYTES", 256)   # a Takeout file is no drop
     box = write_mbox(tmp_path / "big.mbox", [msg(mid=f"<b{i}@x.example>", plain="x" * 200)
                                              for i in range(8)])
     assert box.stat().st_size > 256
@@ -142,10 +142,10 @@ def test_an_export_past_the_drop_cap_still_lands(web, tmp_path, monkeypatch):
 
 
 def test_an_export_past_the_mail_cap_is_refused_and_leaves_no_partial_file(web, monkeypatch):
-    from silica.ui.web import server
+    from silica.ui.web import drop
 
     tc, vault = web
-    monkeypatch.setattr(server, "_MAIL_UPLOAD_MAX_BYTES", 256)
+    monkeypatch.setattr(drop, "MAIL_UPLOAD_MAX_BYTES", 256)
     r = _upload(tc, "huge.mbox", b"From x\n" + b"y" * 4096)
     assert r.status_code == 413 and "/mail import" in r.json()["detail"]
     assert not list(vault.rglob("huge.mbox"))

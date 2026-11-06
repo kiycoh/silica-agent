@@ -397,11 +397,11 @@ def test_render_html_escapes_the_discourse_badge_too():
 def test_the_upload_caps_are_the_documented_ones():
     """Pinned as values: the caps are what stops a drag-drop from filling the
     disk, and loosening one silently is the failure mode."""
-    from silica.ui.web import server
+    from silica.ui.web import drop
 
-    assert server._UPLOAD_MAX_BYTES == 256 * 1024 * 1024
-    assert server._UPLOAD_MAX_FILES == 32
-    assert server._MAIL_UPLOAD_MAX_BYTES == 8 * 1024 ** 3   # a RAM ceiling, measured (server.py)
+    assert drop.UPLOAD_MAX_BYTES == 256 * 1024 * 1024
+    assert drop.UPLOAD_MAX_FILES == 32
+    assert drop.MAIL_UPLOAD_MAX_BYTES == 8 * 1024 ** 3   # a RAM ceiling, measured (server.py)
 
 
 def _no_llm(monkeypatch, server):
@@ -420,12 +420,13 @@ def test_an_oversized_upload_is_refused_and_leaves_no_partial_file(client, monke
     part already written must not stay behind in the vault."""
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.ui.web import drop
     from silica.ui.web.session import SESSION
 
     tc, _server = client
     _no_llm(monkeypatch, server)
-    monkeypatch.setattr(server, "_UPLOAD_MAX_BYTES", 256)
-    monkeypatch.setattr(server, "_UPLOAD_CHUNK", 64)  # several chunks land first
+    monkeypatch.setattr(drop, "UPLOAD_MAX_BYTES", 256)
+    monkeypatch.setattr(drop, "UPLOAD_CHUNK", 64)  # several chunks land first
 
     resp = tc.post(
         "/nucleate",
@@ -441,13 +442,14 @@ def test_an_oversized_upload_is_refused_and_leaves_no_partial_file(client, monke
 def test_too_many_files_in_one_drop_are_refused_before_anything_is_written(client, monkeypatch):
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.ui.web import drop
     from silica.ui.web.session import SESSION
 
     tc, _server = client
     _no_llm(monkeypatch, server)
     files = [
         ("files", (f"n{i}.md", b"body", "text/markdown"))
-        for i in range(server._UPLOAD_MAX_FILES + 1)
+        for i in range(drop.UPLOAD_MAX_FILES + 1)
     ]
     resp = tc.post("/nucleate", files=files, data={"text": ""})
     assert resp.status_code == 413

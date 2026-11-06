@@ -192,6 +192,7 @@ class TestReplay:
     def test_both_compactions_leave_the_key(self, client, monkeypatch):
         """Relevance and budget compaction rewrite tool results, never the
         assistant answer: forced over a history whose tool results all qualify."""
+        from silica.config import CONFIG
         from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         from silica.agent import relevance
@@ -219,7 +220,7 @@ class TestReplay:
         assert before.count([THIN]) == 3
 
         monkeypatch.setattr(relevance, "ENABLED", True)
-        monkeypatch.setattr(server.CONFIG, "decision_model", "stub/model")
+        monkeypatch.setattr(CONFIG, "decision_model", "stub/model")
         monkeypatch.setattr(relevance, "decide",
                             lambda state, q: {"needed": {"noul": 0.0}})
         dropped = relevance.compact_by_relevance(SESSION.chat.messages, TOOLS)

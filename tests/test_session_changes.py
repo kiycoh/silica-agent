@@ -13,7 +13,7 @@ def _clean_ledger():
 
 
 def _rows():
-    from silica.ui.web.server import _change_rows
+    from silica.ui.web.tree_routes import _change_rows
     return {r["path"]: r for r in _change_rows()}
 
 
@@ -73,7 +73,7 @@ def test_a_write_that_changed_nothing_is_not_a_change(tmp_vault):
 
 
 def test_diff_marks_the_lines_that_left_and_arrived(tmp_vault):
-    from silica.ui.web.server import changes_diff
+    from silica.ui.web.tree_routes import changes_diff
     from silica.driver import DRIVER
 
     tmp_vault.note("Notes/Edit.md", "keep\ndrop\ntail\n")
@@ -88,7 +88,7 @@ def test_diff_marks_the_lines_that_left_and_arrived(tmp_vault):
 
 
 def test_a_gap_marker_only_appears_where_lines_were_skipped(tmp_vault):
-    from silica.ui.web.server import changes_diff
+    from silica.ui.web.tree_routes import changes_diff
     from silica.driver import DRIVER
 
     # Edit on line 1: nothing was skipped above it, so the diff must not open on
@@ -105,7 +105,7 @@ def test_a_gap_marker_only_appears_where_lines_were_skipped(tmp_vault):
 
 
 def test_a_created_note_opens_on_its_first_line(tmp_vault):
-    from silica.ui.web.server import changes_diff
+    from silica.ui.web.tree_routes import changes_diff
     from silica.driver import DRIVER
 
     DRIVER.create("Notes/Fresh.md", "one\ntwo\n")
@@ -114,7 +114,7 @@ def test_a_created_note_opens_on_its_first_line(tmp_vault):
 
 
 def test_untracked_note_has_an_empty_diff(tmp_vault):
-    from silica.ui.web.server import changes_diff
+    from silica.ui.web.tree_routes import changes_diff
 
     tmp_vault.note("Notes/Quiet.md", "never touched\n")
     assert changes_diff(path="Notes/Quiet.md")["lines"] == []

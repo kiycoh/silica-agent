@@ -1845,9 +1845,9 @@ def test_metrics_endpoint_shapes_the_report_for_the_dashboard(client, tmp_vault)
 def test_metrics_caps_the_uncapped_lists_without_hiding_the_count(client, tmp_vault, monkeypatch):
     # orphans/dangling are exhaustive in the report; the view gets a slice, and
     # totals keeps the true length so a cut list can't read as the whole list.
-    from silica.ui.web import server
+    from silica.ui.web import metrics_routes
 
-    monkeypatch.setattr(server, "_METRICS_ROWS", 2)
+    monkeypatch.setattr(metrics_routes, "_METRICS_ROWS", 2)
     tc, _server = client
     for i in range(5):
         tmp_vault.note(f"O{i}.md", "no links")
@@ -1864,9 +1864,9 @@ def test_metrics_caps_autolink_candidates(client, tmp_vault, monkeypatch):
     # px tall. Same contract as the lists above: slice the rows, keep the count.
     from silica.kernel.report import graph_report
     from silica.kernel.report.graph_report.models import AutolinkCandidate
-    from silica.ui.web import server
+    from silica.ui.web import metrics_routes
 
-    monkeypatch.setattr(server, "_METRICS_ROWS", 2)
+    monkeypatch.setattr(metrics_routes, "_METRICS_ROWS", 2)
     tmp_vault.note("A.md", "solo")
     real = graph_report.compute_report
 
@@ -2039,16 +2039,18 @@ def local_stt(monkeypatch):
 
 
 def test_stt_status_reports_an_unconfigured_endpoint(client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "", raising=False)
     body = app.get("/stt").json()
     assert body["ok"] is False
     assert "SILICA_STT_BASE_URL" in body["detail"]
 
 
 def test_stt_status_probes_the_endpoint_rather_than_trusting_the_setting(client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
     from silica.onboarding import serve
 
     monkeypatch.setattr(serve, "ready", lambda url: False)
@@ -2061,9 +2063,10 @@ def test_stt_status_probes_the_endpoint_rather_than_trusting_the_setting(client,
 
 
 def test_stt_forwards_the_clip_and_returns_the_text(client, monkeypatch, local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_lang", "it", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_lang", "it", raising=False)
     seen = {}
 
     class _Resp:
@@ -2106,9 +2109,10 @@ def test_stt_forwards_the_clip_and_returns_the_text(client, monkeypatch, local_s
 def test_stt_asks_again_without_auto_when_the_endpoint_rejects_it(client, monkeypatch, local_stt):
     """A hosted API (OpenRouter) answers 400 to language="auto", which
     whisper-server needs named; dictation retries without the field."""
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_lang", "auto", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_lang", "auto", raising=False)
     langs = []
 
     class _Resp:
@@ -2142,8 +2146,9 @@ def test_stt_asks_again_without_auto_when_the_endpoint_rejects_it(client, monkey
 
 
 def test_stt_rejects_an_empty_recording(client, monkeypatch):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
     assert app.post("/stt", files={"audio": ("clip.wav", b"", "audio/wav")}).status_code == 400
 
 
@@ -2167,9 +2172,10 @@ class _RefusingClient:
 
 def test_stt_status_offers_the_in_process_transcriber_when_the_endpoint_is_down(
         client, monkeypatch, local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_local_model", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_local_model", "", raising=False)
     from silica.onboarding import serve
 
     monkeypatch.setattr(serve, "ready", lambda url: False)
@@ -2183,27 +2189,30 @@ def test_stt_status_offers_the_in_process_transcriber_when_the_endpoint_is_down(
 def test_stt_status_for_reading_aloud_never_loads_the_model(client, monkeypatch, local_stt):
     """Learn asks the same probe for the language and the voice consent; a
     reader who only listens must not pay 480 MB for a microphone never opened."""
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "", raising=False)
     assert app.get("/stt", params={"warm": 0}).json()["via"] == "local"
     assert local_stt["warmed"] == []
 
 
 def test_stt_status_says_which_browser_lane_is_allowed_and_in_what_language(
         client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_browser", "on-device", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_lang", "it", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_browser", "on-device", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_lang", "it", raising=False)
     body = app.get("/stt").json()
     assert body["ok"] is False and body["browser"] == "on-device" and body["lang"] == "it"
 
 
 def test_stt_falls_back_in_process_when_the_endpoint_refuses(client, monkeypatch, local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_lang", "it", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_local_model", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_lang", "it", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_local_model", "", raising=False)
     import httpx
 
     monkeypatch.setattr(httpx, "AsyncClient", _RefusingClient)
@@ -2214,15 +2223,17 @@ def test_stt_falls_back_in_process_when_the_endpoint_refuses(client, monkeypatch
 
 
 def test_stt_with_no_endpoint_configured_goes_straight_in_process(client, monkeypatch, local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "", raising=False)
     resp = app.post("/stt", files={"audio": ("clip.wav", b"RIFFclip", "audio/wav")})
     assert resp.json()["via"] == "local"
 
 
 def test_stt_reports_both_failures_when_both_transcribers_fail(client, monkeypatch, local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
     import httpx
 
     from silica.agent import stt
@@ -2240,8 +2251,9 @@ def test_stt_reports_both_failures_when_both_transcribers_fail(client, monkeypat
 
 
 def test_stt_without_any_transcriber_is_a_503_not_a_bad_microphone(client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "", raising=False)
     resp = app.post("/stt", files={"audio": ("clip.wav", b"RIFFclip", "audio/wav")})
     assert resp.status_code == 503
 
@@ -2249,9 +2261,10 @@ def test_stt_without_any_transcriber_is_a_503_not_a_bad_microphone(client, monke
 def test_dictation_goes_to_its_own_endpoint_not_the_convert_one(client, monkeypatch, no_local_stt):
     """whisper-server transcribes one request at a time: a clip sent to the one
     busy with a lecture for /convert waits for the whole lecture."""
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_dictation_base_url", "http://localhost:8/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_dictation_base_url", "http://localhost:8/v1", raising=False)
     from silica.onboarding import serve
 
     probed: list[str] = []
@@ -2274,9 +2287,10 @@ def test_dictation_goes_to_its_own_endpoint_not_the_convert_one(client, monkeypa
 
 
 def test_an_empty_dictation_endpoint_turns_off_only_dictation(client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
-    monkeypatch.setattr(server.CONFIG, "stt_dictation_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_dictation_base_url", "", raising=False)
     monkeypatch.delenv("SILICA_HOSTED", raising=False)
     from silica.onboarding import serve
 
@@ -2293,8 +2307,9 @@ def test_an_empty_dictation_endpoint_turns_off_only_dictation(client, monkeypatc
 
 def test_a_hosted_tenant_is_not_told_to_install_or_configure_anything(
         client, monkeypatch, no_local_stt):
+    from silica.config import CONFIG
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_dictation_base_url", "", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_dictation_base_url", "", raising=False)
     monkeypatch.setenv("SILICA_HOSTED", "1")
     body = app.get("/stt").json()
     assert body["ok"] is False and body["hosted"] is True
@@ -2313,14 +2328,15 @@ def test_index_stamps_the_configured_theme_preference(client, monkeypatch):
     JS after load flashes the wrong palette for a frame. So `/` carries
     SILICA_THEME through to the attribute the <head> script reads.
     """
+    from silica.config import CONFIG
     app, server = client
     for pref in ("light", "dark", "auto"):
-        monkeypatch.setattr(server.CONFIG, "theme", pref, raising=False)
+        monkeypatch.setattr(CONFIG, "theme", pref, raising=False)
         assert f'data-theme-pref="{pref}"' in app.get("/").text
 
     # An unknown value degrades to auto rather than stamping something the CSS
     # has no block for, which would silently pin the app to dark.
-    monkeypatch.setattr(server.CONFIG, "theme", "sepia", raising=False)
+    monkeypatch.setattr(CONFIG, "theme", "sepia", raising=False)
     assert 'data-theme-pref="auto"' in app.get("/").text
 
 
@@ -2587,13 +2603,13 @@ def test_vault_brief_is_off_when_the_setting_is_off(client, monkeypatch):
     endpoint answers without touching a provider — the counted line the browser
     renders beside it is what keeps the landing from going blank."""
     from silica.config import CONFIG
-    from silica.ui.web import server
+    from silica.ui.web import metrics_routes
     from silica.kernel.report import brief
 
     monkeypatch.setattr(CONFIG, "vault_brief", False)
     monkeypatch.setattr(brief, "write_brief",
                         lambda *a: pytest.fail("a disabled brief called the model"))
-    assert server.vault_brief() == {"enabled": False, "text": ""}
+    assert metrics_routes.vault_brief() == {"enabled": False, "text": ""}
 
 
 def test_vault_brief_replays_its_cache_until_the_corpus_shape_changes(
@@ -2608,7 +2624,7 @@ def test_vault_brief_replays_its_cache_until_the_corpus_shape_changes(
     index picks a new file up instead."""
     from silica.config import CONFIG
     from silica.kernel.graph import graph_export
-    from silica.ui.web import server
+    from silica.ui.web import metrics_routes
     from silica.kernel.report import brief
 
     monkeypatch.setattr(CONFIG, "vault_brief", True)
@@ -2623,13 +2639,13 @@ def test_vault_brief_replays_its_cache_until_the_corpus_shape_changes(
     monkeypatch.setattr(brief, "write_brief",
                         lambda n, t, h: calls.append(n) or f"about {n} notes")
 
-    assert server.vault_brief()["text"] == "about 2 notes"
-    assert server.vault_brief() == {"enabled": True, "text": "about 2 notes",
+    assert metrics_routes.vault_brief()["text"] == "about 2 notes"
+    assert metrics_routes.vault_brief() == {"enabled": True, "text": "about 2 notes",
                                     "cached": True}
     assert calls == [2], "the second call should have replayed the cache"
 
     nodes.append({"id": "c", "path": "c.md", "label": "c"})
-    assert server.vault_brief()["text"] == "about 3 notes"
+    assert metrics_routes.vault_brief()["text"] == "about 3 notes"
     assert calls == [2, 3]
 
 
@@ -2638,7 +2654,7 @@ def test_vault_brief_survives_a_provider_that_is_not_there(
     """A landing that 500s because a worker model is down would be worse than a
     landing with one fewer line on it."""
     from silica.config import CONFIG
-    from silica.ui.web import server
+    from silica.ui.web import metrics_routes
     from silica.kernel.report import brief
 
     monkeypatch.setattr(CONFIG, "vault_brief", True)
@@ -2648,7 +2664,7 @@ def test_vault_brief_survives_a_provider_that_is_not_there(
         raise ConnectionError("no worker here")
 
     monkeypatch.setattr("silica.model.providers.get_provider", _boom)
-    assert server.vault_brief() == {"enabled": True, "text": ""}
+    assert metrics_routes.vault_brief() == {"enabled": True, "text": ""}
     assert not (tmp_path / "brief.json").exists(), "an empty brief was cached"
 
 

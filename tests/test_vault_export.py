@@ -212,10 +212,10 @@ def _import(tc, folder, obsidian):
 
 
 def test_the_plus_marks_a_folder_that_held_obsidian(hosted, monkeypatch):
-    from silica.ui.web import server
+    from silica.ui.web import drop
     from silica.ui.web import vault_export as ve
 
-    monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
+    monkeypatch.setattr(drop, "embed_imported", lambda folders: None)
     assert _import(hosted, "MyVault", "MyVault").status_code == 200
     assert _import(hosted, "Other", "NotInThisBatch").status_code == 200
     assert ve.load_state(_vault())["roots"] == ["MyVault"]
@@ -223,11 +223,12 @@ def test_the_plus_marks_a_folder_that_held_obsidian(hosted, monkeypatch):
 
 def test_a_laptop_marks_nothing(tmp_vault, monkeypatch):
     from silica.ui.web import server
+    from silica.ui.web import drop
     from silica.ui.web.session import SESSION
     from silica.ui.web import vault_export as ve
 
     monkeypatch.delenv("SILICA_HOSTED", raising=False)
-    monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
+    monkeypatch.setattr(drop, "embed_imported", lambda folders: None)
     SESSION.reset()
     assert _import(TestClient(server.app), "MyVault", "MyVault").status_code == 200
     assert ve.load_state(_vault())["roots"] == []

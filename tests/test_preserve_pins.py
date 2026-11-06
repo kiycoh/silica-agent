@@ -18,12 +18,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 LOSS_PINS = {
-    ("silica/ui/web/server.py", "note_save", "Loss.PERSON"): 1,
+    ("silica/ui/web/notes_routes.py", "note_save", "Loss.PERSON"): 1,
     ("silica/cli.py", "_dc_verify", "Loss.PERSON"): 1,
     ("silica/tools/wrapped.py", "create_note_with_restore_point", "Loss.PERSON"): 1,   # ADR-0155 point 8
     ("silica/tools/wrapped.py", "silica_restore", "Loss.RESTORE"): 2,
     ("silica/cli.py", "_dc_undo", "Loss.RESTORE"): 1,
-    ("silica/ui/web/server.py", "note_history_restore", "Loss.RESTORE"): 1,   # ADR-0144 point 7
+    ("silica/ui/web/notes_routes.py", "note_history_restore", "Loss.RESTORE"): 1,   # ADR-0144 point 7
     ("silica/agent/commit.py", "commit_derived", "Loss.RESTORE"): 1,
     ("silica/driver/ws_backend.py", "restore", "preserve.Loss.RESTORE"): 1,
     ("silica/sources/convert.py", "_doc_to_md", "Loss.STAGED"): 3,   # ADR-0129 point 5: the parent note

@@ -360,12 +360,13 @@ NONE = {"result": 0, "watch": 0, "done": 0, "stored": 0}
 def _reload_holds(gui, turns) -> None:
     """The reload arm over a marked arm: /messages, both compactions forced,
     then /session/load, each giving every turn the notes its frame carried."""
+    from silica.config import CONFIG
     from silica.ui.web.session import SESSION
     from silica.agent import relevance
     from silica.agent.compaction import compact_read_history
     from silica.tools import TOOLS
 
-    tc, server = gui.tc, gui.server
+    tc = gui.tc
     live = [t.done["notes"] for t in turns]
 
     def replayed() -> list:
@@ -374,7 +375,7 @@ def _reload_holds(gui, turns) -> None:
 
     assert replayed() == live
     with patch.object(relevance, "ENABLED", True), \
-            patch.object(server.CONFIG, "decision_model", "stub/model"), \
+            patch.object(CONFIG, "decision_model", "stub/model"), \
             patch.object(relevance, "decide", lambda state, q: {"needed": {"noul": 0.0}}):
         relevance.compact_by_relevance(SESSION.chat.messages, TOOLS)
     compact_read_history(SESSION.chat.messages, set(), prompt_tokens=10**7, budget=1,

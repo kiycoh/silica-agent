@@ -172,7 +172,7 @@ def test_signal_areas_counts_the_whole_list_not_the_shipped_slice():
     Twenty lean notes in one area must tally twenty. Recomputed from the slice
     this reads twelve, and every area past the cut reads clean.
     """
-    from silica.ui.web.server import _METRICS_ROWS
+    from silica.ui.web.metrics_routes import _METRICS_ROWS
 
     members = [f"a/n{i}.md" for i in range(20)] + ["b/h1.md", "b/h2.md"]
     report = SimpleNamespace(
@@ -256,8 +256,8 @@ def test_the_area_treemap_gets_every_field_it_reads():
 
     # What `/metrics` puts on a cluster, read off the endpoint's own literal so
     # a renamed key fails here rather than rendering blank in a browser.
-    server = (Path(__file__).resolve().parents[1] / "silica" / "ui" / "web" / "server.py").read_text()
-    cluster = re.search(r'"clusters": \[\s*\{([^}]*)\}', server, re.S)
+    routes = (Path(__file__).resolve().parents[1] / "silica" / "ui" / "web" / "metrics_routes.py").read_text()
+    cluster = re.search(r'"clusters": \[\s*\{([^}]*)\}', routes, re.S)
     assert cluster, "the /metrics clusters literal moved"
     shipped = set(re.findall(r'"(\w+)":', cluster.group(1)))
 
@@ -306,8 +306,8 @@ def test_shape_and_metrics_ship_the_same_area(two_triangles):
     `/metrics` in the gaps pane. Testing only one of them leaves the other free
     to drift, and the surface that breaks is whichever is opened second.
     """
-    server = (Path(__file__).resolve().parents[1] / "silica" / "ui" / "web" / "server.py").read_text()
-    lit = re.search(r"    areas = \[\n        \{(.*?)\}\n        for g in ids", server, re.S)
+    routes = (Path(__file__).resolve().parents[1] / "silica" / "ui" / "web" / "metrics_routes.py").read_text()
+    lit = re.search(r"    areas = \[\n        \{(.*?)\}\n        for g in ids", routes, re.S)
     assert lit, "the /shape areas literal moved"
     shape_keys = set(re.findall(r'"(\w+)":', lit.group(1)))
     metrics_keys = set(area_matrix(two_triangles)["areas"][0])

@@ -14,10 +14,11 @@ def client(tmp_vault, monkeypatch):
     from silica.config import CONFIG
     from silica.sources import pdf_extract
     from silica.ui.web import server
+    from silica.ui.web import drop
     from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
-    monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
+    monkeypatch.setattr(drop, "embed_imported", lambda folders: None)
     pdf_extract._CACHE.clear()
     SESSION.reset()
     return TestClient(server.app), server
@@ -282,7 +283,7 @@ def test_a_link_becomes_a_note_in_the_inbox(client, monkeypatch):
 
 def test_on_the_server_a_youtube_link_is_refused_before_any_request(client, monkeypatch):
     from silica.sources import web_fetch
-    from silica.ui.web.server import YOUTUBE_ON_SERVER
+    from silica.ui.web.drop import YOUTUBE_ON_SERVER
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
     monkeypatch.setattr(web_fetch, "fetch_page", lambda url: pytest.fail("a request went out"))
@@ -297,7 +298,7 @@ def test_on_the_server_with_cookies_a_youtube_link_is_fetched_and_a_wall_is_name
     """With the operator's account cookies the server tries; when YouTube
     asks again (the account gone), the student gets the audio's way round."""
     from silica.sources import web_fetch
-    from silica.ui.web.server import YOUTUBE_ON_SERVER
+    from silica.ui.web.drop import YOUTUBE_ON_SERVER
 
     jar = tmp_path / "cookies.txt"
     jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")

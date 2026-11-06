@@ -419,13 +419,14 @@ def test_what_needs_no_model_stays_at_the_limit(fake, tmp_vault, monkeypatch):
 
     from silica.model import llm
     from silica.ui.web import server
+    from silica.ui.web import drop
     from silica.ui.web.session import SESSION
 
     def no_model(*a, **k):
         raise AssertionError("a model was called")
 
     monkeypatch.setattr(llm, "_call_llm", no_model)
-    monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
+    monkeypatch.setattr(drop, "embed_imported", lambda folders: None)
     fake.body = key_record(month_spend=1.5)
     path = tmp_vault.note("Entropy.md", "# Entropy\n\nA measure of disorder.\n")
     SESSION.reset()
@@ -447,6 +448,7 @@ def test_hosted_dictation_at_a_limit_says_which_and_when(fake, monkeypatch, tmp_
 
     from silica.agent import stt
     from silica.ui.web import server
+    from silica.ui.web import stt_routes
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
     fake.body = key_record(month_spend=1.5)
@@ -454,7 +456,7 @@ def test_hosted_dictation_at_a_limit_says_which_and_when(fake, monkeypatch, tmp_
     async def endpoint(url, clip):
         return "", 'transcription failed (403): {"error":{"message":"Key limit exceeded","code":403}}'
 
-    monkeypatch.setattr(server, "_stt_via_endpoint", endpoint)
+    monkeypatch.setattr(stt_routes, "_stt_via_endpoint", endpoint)
     monkeypatch.setattr(stt, "dictation_endpoint", lambda cfg: ("https://openrouter.ai/api/v1", "SILICA_STT_BASE_URL"))
     monkeypatch.setattr(stt, "has_local_stt", lambda: False)
     resp = TestClient(server.app).post("/stt", files={"audio": ("clip.wav", b"RIFFfake", "audio/wav")})

@@ -29,10 +29,12 @@ def _fm(path: Path) -> dict:
 def client(tmp_vault, monkeypatch):
     from silica.sources import pdf_extract
     from silica.ui.web import server
+    from silica.ui.web import drop
+    from silica.config import CONFIG
     from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
-    monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
+    monkeypatch.setattr(drop, "embed_imported", lambda folders: None)
     pdf_extract._CACHE.clear()
     SESSION.reset()
     return TestClient(server.app)

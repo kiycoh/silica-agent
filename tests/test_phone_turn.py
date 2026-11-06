@@ -204,11 +204,12 @@ def test_a_deleted_phone_chat_starts_over(phone):
 
 
 def test_the_phone_beats_stay_off_the_browser_tab(phone):
+    from silica.ui.web import chat_routes
     from silica.ui.web.session import SESSION
     tc, server, _ = phone
     tc.post("/phone/turn", json={"text": "first"})
     phone_sid = SESSION.phone.sid
-    assert not server._beat_for_tab({"sid": phone_sid})
-    assert server._beat_for_tab({"sid": "browser"})
+    assert not chat_routes._beat_for_tab({"sid": phone_sid})
+    assert chat_routes._beat_for_tab({"sid": "browser"})
     SESSION.chat.sid = phone_sid   # the browser opened the phone's chat
-    assert server._beat_for_tab({"sid": phone_sid})
+    assert chat_routes._beat_for_tab({"sid": phone_sid})

@@ -3,13 +3,17 @@
 
 """What Settings › Zotero and Explore › Library ask the server (ADR-0055).
 
-Plain functions returning dicts, so server.py stays a list of thin routes and
-the logic is tested without a browser. A ZoteroError becomes a 409 there.
+Plain functions returning dicts, so the logic is tested without a browser, and
+most of them are routes as they stand: see the table at the end. A ZoteroError
+becomes a 409 at the app, through `refused`.
 """
 from __future__ import annotations
 
 import os
 from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from silica.config import CONFIG
 from silica.sources import zotero, zotero_write
@@ -326,3 +330,44 @@ def labels() -> dict[str, str]:
 
 def unlink() -> dict:
     return zotero_write.unlink(zotero.client())
+
+
+async def refused(_request: Request, exc: Exception) -> JSONResponse:
+    # A ZoteroError is a sentence written for the person (what failed and
+    # where to fix it), never a raw transport error: zotero.Zotero.send
+    # turns httpx's URL-bearing text into one before it gets here.
+    return JSONResponse({"detail": exc.args[0] if exc.args else "Zotero failed"}, status_code=409)
+
+
+# Sync defs: every route talks to Zotero over HTTP, so they run in the
+# threadpool and a slow Zotero never stalls the event loop that streams turns.
+router = APIRouter(prefix="/zotero")
+
+
+@router.post("/link")
+def _link_route(payload: dict):
+    return link(bool(payload.get("on")))
+
+
+@router.post("/setting")
+def _setting_route(payload: dict):
+    try:
+        return setting(str(payload.get("key", "")), payload.get("value"))
+    except KeyError:
+        raise HTTPException(status_code=400, detail="not a Zotero setting")
+
+
+@router.post("/file")
+def _file_route(payload: dict):
+    return file(list(payload.get("moves") or []))
+
+
+# response_model=None: these functions annotate their returns for the type
+# checker, and FastAPI would otherwise read that as a schema to validate against.
+for _method, _path, _fn in (
+    ("GET", "/status", status), ("POST", "/grant", grant), ("GET", "/library", library),
+    ("GET", "/collection", collection), ("GET", "/item", item), ("GET", "/groups", groups_preview),
+    ("POST", "/groups", groups_write), ("GET", "/peek", peek), ("GET", "/covers", covers_status),
+    ("POST", "/covers", covers_start), ("GET", "/labels", labels), ("POST", "/unlink", unlink),
+):
+    router.add_api_route(_path, _fn, methods=[_method], response_model=None)

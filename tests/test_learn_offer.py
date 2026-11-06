@@ -269,11 +269,11 @@ def test_said_unclear_the_offer_is_about_the_note_named_not_one_missed_elsewhere
 
 
 def test_saying_it_was_unclear_never_becomes_a_skill(monkeypatch, tmp_path):
-    import silica.ui.web.server as srv
+    from silica.config import CONFIG
     from silica.ui.web import turn
     from silica.kernel import proposed_skills as ps
 
-    monkeypatch.setattr(srv.CONFIG, "vault_path", str(tmp_path))
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
     monkeypatch.setattr(ps, "detect", lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked")))
     assert turn._skill_after_turn("non ho capito la Lezione 14", []) == (None, None)

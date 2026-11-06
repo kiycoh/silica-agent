@@ -40,6 +40,7 @@ class Vectors:
 def client(tmp_vault, tmp_path, monkeypatch):
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.ui.web import notes_routes
     from silica.ui.web.session import SESSION
 
     monkeypatch.setattr("silica.kernel.recall.embed._index_path", lambda: tmp_path / "embeddings.json")
@@ -47,9 +48,9 @@ def client(tmp_vault, tmp_path, monkeypatch):
     tmp_vault.note("Altro/Preso.md", "# Preso\n")
     SESSION.reset()
     yield TestClient(server.app), server, Path(CONFIG.vault_path)
-    with server._INDEX_LOCK:
-        pending = list(server._INDEX_PENDING.values())
-        server._INDEX_PENDING.clear()
+    with notes_routes._INDEX_LOCK:
+        pending = list(notes_routes._INDEX_PENDING.values())
+        notes_routes._INDEX_PENDING.clear()
     for timer in pending:
         timer.cancel()
     SESSION.release()
@@ -89,8 +90,9 @@ def test_hand_written_text_is_found_after_a_let_go_with_the_chat_model_down(clie
 
 
 def test_a_save_schedules_one_refresh_and_each_save_moves_it_on(client, embedder, monkeypatch):
+    from silica.ui.web import notes_routes
     tc, server, _ = client
-    monkeypatch.setattr(server, "_INDEX_AFTER_S", 0.2)
+    monkeypatch.setattr(notes_routes, "_INDEX_AFTER_S", 0.2)
     etag = tc.get("/note/raw", params={"path": "Corso/Lezione"}).json()["etag"]
     for i in range(3):
         etag = tc.post("/note/save", json={"path": "Corso/Lezione", "etag": etag, "text": f"zebra {i}\n"}).json()["etag"]
@@ -101,14 +103,15 @@ def test_a_save_schedules_one_refresh_and_each_save_moves_it_on(client, embedder
         time.sleep(0.02)
     time.sleep(0.3)
     assert len(embedder.calls) == 1 and "zebra 2" in embedder.calls[0][0]
-    assert not server._INDEX_PENDING
+    assert not notes_routes._INDEX_PENDING
 
 
 def test_a_save_that_changes_nothing_schedules_nothing(client, embedder):
+    from silica.ui.web import notes_routes
     tc, server, vault = client
     raw = tc.get("/note/raw", params={"path": "Corso/Lezione"}).json()
     tc.post("/note/save", json={"path": raw["path"], "etag": raw["etag"], "text": raw["text"]})
-    assert not server._INDEX_PENDING
+    assert not notes_routes._INDEX_PENDING
 
 
 def test_a_let_go_with_nothing_pending_is_free_and_answers_ok(client, embedder):
@@ -163,8 +166,9 @@ def test_a_note_deleted_before_its_refresh_is_left_alone(client, embedder):
 
 
 def test_a_timer_from_another_vault_reads_nothing_here(client, embedder):
+    from silica.ui.web import notes_routes
     _, server, _ = client
-    server._index_due("Corso/Lezione", "/some/other/vault")
+    notes_routes._index_due("Corso/Lezione", "/some/other/vault")
     assert embedder.calls == []
 
 
@@ -366,8 +370,9 @@ def test_a_clash_takes_the_next_number(client, monkeypatch):
 
 
 def test_past_20_mb_is_refused(client, monkeypatch):
+    from silica.ui.web import drop
     tc, server, vault = client
-    monkeypatch.setattr(server, "_MAX_IMAGE_BYTES", len(PNG) - 1)
+    monkeypatch.setattr(drop, "MAX_IMAGE_BYTES", len(PNG) - 1)
     assert paste(tc, PNG).status_code == 400
     assert not list(vault.rglob("Pasted image*"))
 
@@ -378,9 +383,10 @@ def test_a_note_that_does_not_resolve_is_404(client):
 
 
 def test_a_full_vault_refuses_an_image(client, monkeypatch):
+    from silica.ui.web import drop
     monkeypatch.setenv("SILICA_VAULT_MAX_MB", "1")
     tc, server, vault = client
-    monkeypatch.setattr(server, "_MAX_IMAGE_BYTES", 8 * 2**20)
+    monkeypatch.setattr(drop, "MAX_IMAGE_BYTES", 8 * 2**20)
     r = paste(tc, PNG + b"\0" * (2 * 2**20))
     assert r.status_code == 400 and "this vault may hold" in r.json()["detail"]
 

@@ -48,8 +48,8 @@ def test_the_tree_carries_a_pin_only_where_there_is_a_rail_to_pin_into():
 
 
 def test_the_rail_asks_for_the_pins_and_the_frame_does_not():
-    server = (ROOT / "silica" / "ui" / "web" / "server.py").read_text()
-    assert "render_tree(nodes, actions=True, raws=_tree_raws())" in server
+    routes = (ROOT / "silica" / "ui" / "web" / "explore_routes.py").read_text()
+    assert "render_tree(nodes, actions=True, raws=_tree_raws())" in routes
     frame = (ROOT / "silica" / "ui" / "web" / "graph_view.py").read_text()
     assert "tree_html = render_tree(nodes)" in frame
 

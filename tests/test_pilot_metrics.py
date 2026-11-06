@@ -385,10 +385,11 @@ def test_a_media_transcription_writes_its_seconds_and_cost_never_its_text(journa
 
 
 def test_a_dictation_writes_an_stt_line_on_the_dictation_lane(client, journal, monkeypatch):
+    from silica.config import CONFIG
     import httpx
 
     app, server = client
-    monkeypatch.setattr(server.CONFIG, "stt_dictation_base_url", "http://x/v1", raising=False)
+    monkeypatch.setattr(CONFIG, "stt_dictation_base_url", "http://x/v1", raising=False)
     replies = iter([httpx.Response(200, json={"text": MARKER, "usage": {"seconds": 4.0, "cost": 0.00008}}),
                     httpx.Response(502, text=MARKER)])
 

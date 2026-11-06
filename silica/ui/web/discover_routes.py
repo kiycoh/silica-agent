@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse
 from silica.sources.discover import feeds as F
 from silica.sources.discover import rank, read, store
 from silica.sources.discover import story as S
+from silica.ui.web import drop
 
 
 router = APIRouter(prefix="/discover")
@@ -138,10 +139,8 @@ def discover():
     failing = sum(1 for f in feeds if (f.get("state") or {}).get("status") in ("error", "refused"))
     topics = [{**t, "on": doc["topics"].get(t["key"], True)} for t in doc.get("topic_list") or []]
     from silica.kernel.base.manifest import active_inbox_dir
-    from silica.ui.web.server import YOUTUBE_ON_SERVER
-
     return {"setup": bool(doc.get("setup")), "hosted": _hosted(), "reading": dict(read.PROGRESS) if reading else None,
-            "youtube_on_server": YOUTUBE_ON_SERVER, "inbox": active_inbox_dir() or "Inbox",
+            "youtube_on_server": drop.YOUTUBE_ON_SERVER, "inbox": active_inbox_dir() or "Inbox",
             "read_at": doc.get("read_at") or 0, "tabs": tabs, "topics": topics,
             "buckets": {k: v for k, v in doc["buckets"].items()},
             "research_cats": [f.get("name", "").removeprefix("arXiv ") for f in doc["feeds"]
@@ -278,9 +277,7 @@ def story(sid: str):
 
 
 def _youtube_copy() -> str:
-    from silica.ui.web.server import YOUTUBE_ON_SERVER
-
-    return YOUTUBE_ON_SERVER
+    return drop.YOUTUBE_ON_SERVER
 
 
 def _related(doc: dict, s: dict) -> list[dict]:
