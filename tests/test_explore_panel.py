@@ -615,3 +615,12 @@ def test_the_map_is_a_click_in_the_graph_and_no_surface_of_its_own():
         assert gone not in app, gone
     handler = _block(app, '$("#note-map").addEventListener("click"', "\n});")
     assert 'graphMode = "graph"' in handler and "focusGraphNode(note)" in handler
+
+
+def test_a_hidden_tab_lets_go_of_its_stream():
+    """Six streams fill Chrome's six connections to a host on HTTP/1.1: the seventh tab
+    never loaded. No JS runner here, so this pins the wiring; the behaviour was read in a
+    real browser with real background tabs."""
+    js = WORK_JS.read_text()
+    assert 'if (document.hidden) { es?.close(); es = null; } else if (!es) connect();' in js
+    assert 'if (!document.hidden) connect();' in js

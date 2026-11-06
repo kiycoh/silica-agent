@@ -1650,6 +1650,16 @@ function neighbourRows(d) {
     es.onerror = () => { /* EventSource retries by itself; a closed panel is not an error to report */ };
   }
 
+  // One stream per tab, and over a laptop's HTTP/1.1 Chrome keeps six connections to a
+  // host: with six tabs of this server open the seventh never loaded, past 60 s (measured
+  // 2026-11-06). A hidden tab lets go of its stream, so only the tabs in view count. Its
+  // return replays the run with no cursor, because a cursor from before a /reset would skip
+  // the new session's first beats; `ingest` takes each beat once, and `silica:stream-open`
+  // reads back the jobs it missed.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { es?.close(); es = null; } else if (!es) connect();
+  });
+
   render();
-  connect();
+  if (!document.hidden) connect();
 })();
