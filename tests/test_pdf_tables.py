@@ -390,6 +390,15 @@ def test_a_length_stop_keeps_the_text(local, monkeypatch):
     assert pdf_tables.stitched(src, data) is data["pages"]
 
 
+def test_a_row_wider_than_its_header_keeps_the_text():
+    ragged = "| N | h |\n| --- | --- |\n| base | 6 | 8 |"
+    assert pdf_tables._accepted(ragged, "stop", "N h base 6 8") is None
+    even = "| | N | h |\n| --- | --- | --- |\n| base | 6 | 8 |"
+    assert pdf_tables._accepted(even, "stop", "N h base 6 8") == even
+    escaped = "| a | b |\n| --- | --- |\n| x\\|y | 1 |"
+    assert pdf_tables._accepted(escaped, "stop", "a b x|y 1") == escaped
+
+
 def test_rowspan_is_not_a_printed_digit():
     html = '<table><tr><td rowspan="7">Alpha</td><td>12</td></tr></table>'
     assert pdf_tables._accepted(html, "stop", "Alpha 12") == html
