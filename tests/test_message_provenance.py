@@ -53,3 +53,16 @@ class ToWireTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_a_key_nobody_registered_never_reaches_the_provider():
+    """The wire is an allow-list: `silica_story` rode to the provider for missing
+    from a list of keys to strip."""
+    wire = _to_wire({"role": "user", "content": "q", "silica_story": {"title": "t"}})
+    assert wire == {"role": "user", "content": "q"}
+
+
+def test_the_reasoning_a_route_reads_back_survives():
+    msg = {"role": "assistant", "content": "a", "reasoning_content": "r", "thinking_blocks": [],
+           "tool_calls": [], "silica_reasoning": "r"}
+    assert set(_to_wire(msg)) == {"role", "content", "reasoning_content", "thinking_blocks", "tool_calls"}

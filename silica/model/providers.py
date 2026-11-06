@@ -223,36 +223,28 @@ def clamp_max_tokens(provider: str, model: str, requested: int | None, input_cha
     return want
 
 
-# Keys the history carries for silica's own use and the provider must never see.
-# `origin` is turn provenance; `silica_reasoning` is the model's thinking, kept
-# so a reopened chat can replay the trace it showed while streaming — sending it
-# back would re-bill a multi-thousand-token trace on every later iteration of the
-# tool loop, which is exactly why it used to be thrown away. `silica_taint`
-# marks the tool message whose result tainted the conversation by a path
-# (user_memory.TAINT_KEY, ADR-0090 point 8). `silica_turn_notes` is what the
-# chat drew under an answer (ADR-0094, agent/turn_notes.py): the reader's
-# line, never the model's.
-# `silica_workspace` is the workspace a user turn ran in (ADR-0112 point 4),
-# kept on the turn so a reopened chat knows its scope. `silica_reads` is the
-# notes a turn read, kept on its answer so a reopened chat links it the same;
-# `silica_persona` the persona a turn ran under (both ADR-0127). `silica_note`
-# is the note that was open beside the chat when the user asked, so a reopened
-# chat draws "with <note>" under the question as it did live.
-INTERNAL_KEYS = ("origin", "silica_reasoning", "silica_taint", "silica_turn_notes", "silica_workspace",
-                 "silica_files", "silica_said", "silica_reads", "silica_persona", "silica_note")
+# The OpenAI chat message, plus the two reasoning carriers a route reads back:
+# `reasoning_content` is what `llm._call_llm` hands a Jinja route, and
+# `thinking_blocks` Anthropic's own record of a turn. Everything else on a
+# history message is silica's own and stays home: an allow-list, because owners
+# name their keys where they live, and a list of keys to strip has to hear about
+# each new one. `silica_story` reached the provider for missing from it.
+WIRE_KEYS = frozenset({
+    "role", "content", "name", "tool_calls", "tool_call_id", "function_call", "refusal", "audio",
+    "reasoning_content", "thinking_blocks",
+})
 
 
 def _to_wire(msg: dict) -> dict:
-    """Strip internal fields and render the CLI marker for the wire.
+    """`msg` with everything but WIRE_KEYS dropped and the CLI marker rendered.
 
-    The OpenAI message object rejects unknown fields, so `INTERNAL_KEYS` must
-    never reach the SDK. When ``origin == "cli"`` the content is wrapped in
-    <silica-cli> markers so the model can tell a harness directive apart from a
-    human turn. Messages carrying none of them are returned unchanged.
+    When ``origin == "cli"`` the content is wrapped in <silica-cli> markers so
+    the model can tell a harness directive apart from a human turn. A message
+    already in wire form is returned unchanged.
     """
-    if not any(k in msg for k in INTERNAL_KEYS):
+    if msg.keys() <= WIRE_KEYS:
         return msg
-    wire = {k: v for k, v in msg.items() if k not in INTERNAL_KEYS}
+    wire = {k: v for k, v in msg.items() if k in WIRE_KEYS}
     if msg.get("origin") == "cli" and wire.get("content"):
         wire["content"] = f"{SILICA_CLI_OPEN}{wire['content']}{SILICA_CLI_CLOSE}"
     return wire

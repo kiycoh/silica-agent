@@ -87,9 +87,9 @@ def test_the_line_is_capped():
 
 
 def test_the_persona_never_reaches_the_provider():
-    from silica.model.providers import INTERNAL_KEYS
+    from silica.model.providers import _to_wire
 
-    assert personas.TURN_KEY in INTERNAL_KEYS
+    assert personas.TURN_KEY not in _to_wire({"role": "user", "content": "q", personas.TURN_KEY: "tutor"})
 
 
 # --- the GUI turn ---------------------------------------------------------------
