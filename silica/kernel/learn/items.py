@@ -661,9 +661,7 @@ def hint_rungs(path: str) -> list[tuple[str, str]]:
 
     out: list[tuple[str, str]] = []
     try:
-        # keyed by the note's own case; key_of folds it, so compare folded
-        key = learner.key_of(path)
-        prereqs = next((v for k, v in learner.prerequisites_map().items() if learner.key_of(k) == key), [])
+        prereqs = learner.prerequisites_of(path)
     except Exception:
         prereqs = []
     names = [Path(p).stem for p in prereqs][:4]
