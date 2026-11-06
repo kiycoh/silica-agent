@@ -45,8 +45,6 @@ def silica_run_injector(
     only the failed chunks. For a single quick note,
     silica_write_note/silica_patch_note are cheaper.
     """
-    from silica.router.coordinator import Coordinator
-
     files: list[str] = list(inbox_files or [])
     if inbox_file and inbox_file not in files:
         files.insert(0, inbox_file)
@@ -59,107 +57,17 @@ def silica_run_injector(
     # {HUB_NAME}" to the letter and every op comes back with hub="{HUB_NAME}"
     # and path="/<title>.md" — all rejected by lint, after a full LLM run, and
     # the hub auto-creator drops a junk `{HUB_NAME}.md` in the vault root. The
-    # CLI always resolves a target before dispatching (cli.py:1226); this guard
+    # CLI always resolves a target before dispatching (ingest.nucleate); this guard
     # covers the agent-tool path, whose contract already says to pass one.
     # Asked before conversion: a PDF is minutes of work to transcode and it
     # would all be thrown away here.
     if not target_dir.strip():
         return {"error": "No target_dir specified. Pick the vault folder for these notes and pass it as target_dir."}
 
-    # The FSM re-reads inbox files as prose, so a file no adapter claims (PDF,
-    # EPUB, other binaries) has to be transcoded first. `/nucleate` has always
-    # done that inline; the agent tool used to answer "ask the user to run
-    # /convert", which in a REPL means telling the user to type, themselves, the
-    # thing they just asked for — and in a library of 74 scanned books that
-    # instruction stands between the user and the entire corpus.
-    from silica.kernel.base.manifest import get_active_manifest
-    from silica.sources.registry import adapter_for
+    from silica.sources.ingest import run_injector
 
-    enabled = get_active_manifest().sources
-    if any(adapter_for(f, enabled=enabled) is None for f in files):
-        from silica.sources.convert import convert
-
-        resolved: list[str] = []
-        rejected: list[str] = []
-        for f in files:
-            if adapter_for(f, enabled=enabled) is not None:
-                resolved.append(f)
-                continue
-            try:
-                resolved.extend(convert(f, dest_dir=target_dir))
-            except (ValueError, RuntimeError) as exc:
-                rejected.append(f"{f} ({exc})")
-        if rejected:
-            return {"error": f"Not ingestible as-is: {'; '.join(rejected)}."}
-        files = list(dict.fromkeys(resolved))
-        if not files:
-            return {"error": "Conversion produced no markdown to nucleate."}
-
-    # Apparatus is not content — the same filter /nucleate applies (cli.py's
-    # _prepare_unit). This is THE tool for "nucleate this file", and the path
-    # the web drag-drop takes, so a filter that lived only
-    # in the CLI was no filter at all: a references list or a venue checklist
-    # arriving here was distilled into venue/journal/ethics notes. The raw chunk
-    # stays in the inbox for lookup, exactly as on the CLI side.
-    from silica.sources.convert import is_skippable_chunk
-
-    kept = [f for f in files if not is_skippable_chunk(f)]
-    skipped = len(files) - len(kept)
-    if not kept:
-        return {"error": "Only apparatus sections (references, contents, venue "
-                         "checklists) were given — nothing to nucleate. They stay "
-                         "in the inbox for lookup."}
-    files = kept
-
-    coordinator = Coordinator(
-        inbox_files=files,
-        target_dir=target_dir,
-        hub=hub or None,
-        resume_run_id=resume_run_id or None,
-        # On by default, matching /nucleate. The leaf lives in `sources/`, which
-        # is retrieval-invisible by construction, so it costs disk and nothing
-        # else — and it is what makes a note's verbatim source reachable at all
-        # (reliability_tier reads exactly that). It was set only on the CLI side
-        # while Coordinator defaults it False, so the same file nucleated through
-        # this tool — the web drag-drop — silently produced
-        # notes whose source could never be checked.
-        keep_sources=keep_sources,
-        cancel_token=cancel_token,
-    )
-    result = coordinator.run()
-    return project_injector_result(result, getattr(coordinator.fsm.progress, "run_id", None),
-                                   len(files), skipped)
-
-
-def project_injector_result(result: dict, run_id: str | None, files_total: int,
-                            skipped: int = 0) -> dict[str, Any]:
-    """What a Coordinator run returns to its caller: this tool's result, and the
-    one a typed /nucleate hands the chat's block (ingest.nucleate)."""
-    # Agent-facing projection: outcomes only, never the raw FSM context. The
-    # raw context once fed a confabulated success report — planned concepts in
-    # payload.chunks read as "created notes", and a last-write-wins error field
-    # hid 5 of 6 batch failures.
-    failed = result.get("failed_chunks", [])
-    projected: dict[str, Any] = {
-        "final_status": result.get("final_status", "unknown"),
-        "run_id": run_id,
-        "chunks_committed": result.get("committed_chunks", 0),
-        "chunks_failed": len(failed),
-        "failed_chunks": failed,
-        "files_summary": result.get("files_summary", []),
-        "subagents": result.get("subagents", {}),
-        # What the run actually yielded. Both frontends build their completion
-        # line from these; until they were projected here the keys existed only
-        # inside fsm.context and every summary read "1 file · 3m12s", never the
-        # note and link counts it was written to show.
-        "yield_notes": result.get("yield_notes", 0),
-        "yield_links": result.get("yield_links", 0),
-        "files_total": files_total,
-        "apparatus_skipped": skipped,
-    }
-    if result.get("error"):
-        projected["error"] = result["error"]
-    return projected
+    return run_injector(files, target_dir, hub=hub, resume_run_id=resume_run_id,
+                        keep_sources=keep_sources, cancel_token=cancel_token)
 
 
 @tool(cls="composed")

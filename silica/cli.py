@@ -37,6 +37,7 @@ from silica.agent.recall_watch import (
 from silica.config import CONFIG
 from silica.onboarding.adopt import resolve_cwd_vault
 from silica.prompts import _lang_rule, system_prompt
+from silica.sources import ingest
 from silica.ui.console import CONSOLE
 from silica.ui.home import print_home
 from silica.ui.prompt import build_session, bottom_toolbar, prompt_text
@@ -59,7 +60,6 @@ import silica.tools.delegate_tool  # noqa: F401
 import silica.tools.loader  # noqa: F401
 import silica.tools.tabular  # noqa: F401
 import silica.sources.web_research  # noqa: F401  (registers the web_search, web_fetch, remember and plan tools)
-from silica.sources import ingest
 from silica.sources.web_research import WebTurn
 
 logger = logging.getLogger(__name__)
@@ -2528,12 +2528,6 @@ def _expand_web_turn(user_input: str, messages: list[dict]) -> tuple[str, str] |
 # spans every other. Each takes the tokens AFTER the command word. The two extras
 # (`user_input`, `progress`) are passed to every handler and absorbed by `**_`, so
 # a handler's signature names exactly what it reads.
-
-
-# --- /nucleate: one phase per function --------------------------------------
-# The lane is glob -> folder -> plan -> dispatch. Each phase names its inputs and
-# its outputs instead of reaching into 400 lines of shared locals, so a change to
-# (say) folder expansion no longer has to be read against the dispatch loop.
 
 
 def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:

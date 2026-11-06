@@ -73,7 +73,8 @@ def test_nucleate_md_with_target_dispatches_fsm_directly(stub_coordinator):
     assert msg == ""  # handled inline — no agent turn
     assert stub_coordinator == [
         {"inbox_files": ["Inbox/a.md"], "target_dir": "Concepts/AI", "hub": None,
-         "keep_sources": True, "seen_override": None, "distill_profile": None}
+         "keep_sources": True, "seen_override": None, "distill_profile": None,
+         "resume_run_id": None, "cancel_token": None, "episodic_capture": True}
     ]
 
 

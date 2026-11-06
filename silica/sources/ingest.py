@@ -19,7 +19,7 @@ import re
 import sys
 import uuid
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from silica.config import CONFIG
 
@@ -676,9 +676,8 @@ def drain_wal(console) -> str:
         target_dir = "Sessions"
     console.print(f"  drain: {len(files)} conversation(s) → [bold]{target_dir}[/]")
 
-    from silica.router.coordinator import Coordinator
     try:
-        result = Coordinator(inbox_files=files, target_dir=target_dir).run()
+        result, _ = distill(files, target_dir, keep_sources=False)
     finally:
         # Unstaging is not part of the happy path: a crash or a Ctrl+C must not
         # leave a raw conversation sitting in a committable vault.
@@ -774,8 +773,6 @@ def promote(keys: list[str], console) -> str:
         )
         return ""
 
-    from silica.router.coordinator import Coordinator
-
     console.print(f"  promote: [bold]{entity}[/] → {target_dir}")
     # episodic_capture off: the stub is a render of the store, so distilling it
     # back in would nest the chain inside itself once per promotion.
@@ -785,9 +782,8 @@ def promote(keys: list[str], console) -> str:
     # "time-bound personal" (the ingest-direction diversion). The promotion
     # lens selects verbatim, one note per entity, and never re-emits
     # ephemerals; the gate enforces extractivity at the lower floor.
-    result = Coordinator(inbox_files=[rel], target_dir=target_dir,
-                         episodic_capture=False,
-                         distill_profile="promotion").run()
+    result, _ = distill([rel], target_dir, keep_sources=False, episodic_capture=False,
+                        profile="promotion")
     status = result.get("final_status") or result.get("error") or "done"
     # The FSM names the note, so the ledger CLEANUP appends is the only place
     # the path can be read back from. Last record wins: a re-promotion of the
@@ -865,6 +861,125 @@ def rejoin_spaced_paths(tokens: list[str]) -> list[str]:
             out.append(tok)
             i += 1
     return out
+
+
+def distill(files: list[str], target_dir: str, *, keep_sources: bool, hub: str = "", seen: str = "",
+            profile: str = "", resume_run_id: str = "", cancel_token=None,
+            episodic_capture: bool = True) -> tuple[dict, str | None]:
+    """The one entry into the Coordinator: the run's result, and its run id.
+
+    `keep_sources` has no default here, because the Coordinator's is False: every
+    way in says what it wants, and the drain and a promotion mean False. It was
+    set only on the CLI side once, so the same file nucleated through the agent
+    tool silently produced notes whose source could never be checked.
+    """
+    from silica.router.coordinator import Coordinator
+
+    coordinator = Coordinator(
+        inbox_files=files, target_dir=target_dir, hub=hub or None, keep_sources=keep_sources,
+        seen_override=seen or None, distill_profile=profile or None,
+        resume_run_id=resume_run_id or None, cancel_token=cancel_token,
+        episodic_capture=episodic_capture,
+    )
+    result = coordinator.run()
+    return result, getattr(getattr(getattr(coordinator, "fsm", None), "progress", None), "run_id", None)
+
+
+def project_result(result: dict, run_id: str | None, files_total: int,
+                   skipped: int = 0) -> dict[str, Any]:
+    """What a Coordinator run returns to its caller: the injector tool's result,
+    and the one a typed /nucleate hands the chat's block."""
+    # Agent-facing projection: outcomes only, never the raw FSM context. The
+    # raw context once fed a confabulated success report — planned concepts in
+    # payload.chunks read as "created notes", and a last-write-wins error field
+    # hid 5 of 6 batch failures.
+    failed = result.get("failed_chunks", [])
+    projected: dict[str, Any] = {
+        "final_status": result.get("final_status", "unknown"),
+        "run_id": run_id,
+        "chunks_committed": result.get("committed_chunks", 0),
+        "chunks_failed": len(failed),
+        "failed_chunks": failed,
+        "files_summary": result.get("files_summary", []),
+        "subagents": result.get("subagents", {}),
+        # What the run actually yielded. Both frontends build their completion
+        # line from these; until they were projected here the keys existed only
+        # inside fsm.context and every summary read "1 file · 3m12s", never the
+        # note and link counts it was written to show.
+        "yield_notes": result.get("yield_notes", 0),
+        "yield_links": result.get("yield_links", 0),
+        "files_total": files_total,
+        "apparatus_skipped": skipped,
+    }
+    if result.get("error"):
+        projected["error"] = result["error"]
+    return projected
+
+
+def split_apparatus(files: list[str]) -> tuple[list[str], list[str]]:
+    """(content, apparatus): the files worth distilling, and the ones that only
+    surround a work. Apparatus is not content, and both ways in filter it: a
+    filter that lived only in the CLI was no filter at all, since the injector
+    tool is what the web drag-drop takes, and a references list or a venue
+    checklist arriving there was distilled into venue/journal/ethics notes. The
+    raw file stays in the inbox for lookup."""
+    from silica.sources.convert import is_skippable_chunk
+
+    apparatus = [f for f in files if is_skippable_chunk(f)]
+    return [f for f in files if f not in apparatus], apparatus
+
+
+def run_injector(files: list[str], target_dir: str, *, hub: str = "", resume_run_id: str = "",
+                 keep_sources: bool = True, cancel_token=None) -> dict[str, Any]:
+    """The agent tool's way in: convert what no adapter claims, drop the apparatus,
+    run, and project the result."""
+    # The FSM re-reads inbox files as prose, so a file no adapter claims (PDF,
+    # EPUB, other binaries) has to be transcoded first. `/nucleate` has always
+    # done that inline; the agent tool used to answer "ask the user to run
+    # /convert", which in a REPL means telling the user to type, themselves, the
+    # thing they just asked for — and in a library of 74 scanned books that
+    # instruction stands between the user and the entire corpus.
+    from silica.kernel.base.manifest import get_active_manifest
+    from silica.sources.registry import adapter_for
+
+    enabled = get_active_manifest().sources
+    if any(adapter_for(f, enabled=enabled) is None for f in files):
+        from silica.sources.convert import convert
+
+        resolved: list[str] = []
+        rejected: list[str] = []
+        for f in files:
+            if adapter_for(f, enabled=enabled) is not None:
+                resolved.append(f)
+                continue
+            try:
+                resolved.extend(convert(f, dest_dir=target_dir))
+            except (ValueError, RuntimeError) as exc:
+                rejected.append(f"{f} ({exc})")
+        if rejected:
+            return {"error": f"Not ingestible as-is: {'; '.join(rejected)}."}
+        files = list(dict.fromkeys(resolved))
+        if not files:
+            return {"error": "Conversion produced no markdown to nucleate."}
+
+    kept, apparatus = split_apparatus(files)
+    if not kept:
+        return {"error": "Only apparatus sections (references, contents, venue "
+                         "checklists) were given — nothing to nucleate. They stay "
+                         "in the inbox for lookup."}
+    # keep_sources on by default, matching /nucleate. The leaf lives in `sources/`,
+    # which is retrieval-invisible by construction, so it costs disk and nothing
+    # else, and it is what makes a note's verbatim source reachable at all
+    # (reliability_tier reads exactly that).
+    result, run_id = distill(kept, target_dir, hub=hub, resume_run_id=resume_run_id,
+                             keep_sources=keep_sources, cancel_token=cancel_token)
+    return project_result(result, run_id, len(kept), len(apparatus))
+
+
+# --- /nucleate: one phase per function --------------------------------------
+# The lane is glob -> folder -> plan -> dispatch. Each phase names its inputs and
+# its outputs instead of reaching into 400 lines of shared locals, so a change to
+# (say) folder expansion no longer has to be read against the dispatch loop.
 
 
 class _NucleatePlan(NamedTuple):
@@ -1086,12 +1201,51 @@ def _nucleate_zotero(
     return out, leaf_for, staged
 
 
+def triage(target: str, enabled, run_root: str = "", undo_run: str | None = None) -> dict | None:
+    """What a file's source does with it: None when no source claims it, so it is
+    the converter's; else the status `stage` reports, `distill` for prose that
+    stays as it is and `ok` for a stub already written."""
+    from silica.sources.registry import adapter_for, stage
+
+    adapter = adapter_for(target, enabled=enabled)
+    return None if adapter is None else stage(adapter, target, run_root, undo_run)
+
+
+def owed(files: list[str]) -> list[str]:
+    """The files of a /nucleate that name one document each and still need a
+    conversion: no source claims them, and no earlier conversion of the same
+    file sits in the inbox or in done/ (the batch resume of `plan_units`).
+    [] when one of them is a glob or a folder: the whole command runs as before."""
+    from silica.kernel.base.formats import DOC_EXTS
+    from silica.kernel.base.manifest import get_active_manifest
+    from silica.sources.convert import _resolve_input
+    from silica.sources.registry import adapter_for
+
+    enabled = get_active_manifest().sources
+    out: list[str] = []
+    converted: dict | None = None
+    for f in files:
+        if any(ch in f for ch in "*?["):
+            return []
+        try:
+            src = _resolve_input(f)
+        except ValueError:
+            continue  # a Zotero key, or a missing file: the command says which
+        if src.is_dir():
+            return []
+        if src.suffix.lower() not in DOC_EXTS or adapter_for(f, enabled=enabled) is not None:
+            continue  # a note or code: staged by the command, no conversion
+        converted = prior_conversions() if converted is None else converted
+        seen = converted.get(str(src))
+        if not (seen and (seen["inbox"] or seen["done"])):
+            out.append(f)
+    return out
+
+
 def plan_units(
     files: list[str], enabled, run_root: dict[str, str], undo_run, console
 ) -> _NucleatePlan:
     """Triage every resolved file into staged-now, ready-to-distill, or to-convert."""
-    from silica.sources.registry import adapter_for, stage
-
     files, leaf_for, staged = _nucleate_zotero(files, enabled, undo_run, console)
     md_files: list[str] = []
     needs_agent = not files  # only flags given (dropped --folder=) → agent infers
@@ -1103,8 +1257,8 @@ def plan_units(
     ready_units: list[tuple[str, list[str]]] = []
     to_convert: list[str] = []
     for f in files:
-        adapter = adapter_for(f, enabled=enabled)
-        if adapter is None:
+        result = triage(f, enabled, run_root.get(f, ""), undo_run)
+        if result is None:
             # No source claims this file type → the converter lane (PDF
             # today). A bare name or folder (no suffix) is a resolvable
             # intent the flag parser couldn't read — agent, not converter.
@@ -1139,7 +1293,6 @@ def plan_units(
                 continue
             to_convert.append(f)
             continue
-        result = stage(adapter, f, run_root.get(f, ""), undo_run)
         if result["status"] == "distill":
             md_files.append(f)
         elif result["status"] == "ok":
@@ -1195,14 +1348,10 @@ def prepare_unit(
     # convert() upserts the same chunk paths, so dedup keeps each once.
     mfs = list(dict.fromkeys(mfs))
 
-    # Apparatus is not content: skip flagged chunks (convert marks them
-    # `references: true` / `boilerplate: true`) and Excalidraw drawings.
-    # The raw file stays in the inbox for lookup — never venue/journal/ethics
-    # notes, never a note made of a drawing's JSON.
-    from silica.sources.convert import is_skippable_chunk
-    ref_chunks = [mf for mf in mfs if is_skippable_chunk(mf)]
+    # Flagged chunks (convert marks them `references: true` / `boilerplate: true`)
+    # and Excalidraw drawings: never a note made of a drawing's JSON.
+    mfs, ref_chunks = split_apparatus(mfs)
     if ref_chunks:
-        mfs = [mf for mf in mfs if mf not in ref_chunks]
         console.print(
             f"  [dim]skipped {len(ref_chunks)} non-content file(s) "
             f"(references, contents, venue checklists, a document's list of parts, Excalidraw drawings) — "
@@ -1456,8 +1605,6 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
         from silica.obs import narration as _narr_mod
         from silica.obs.bus import BUS
         from silica.obs.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
-        from silica.router.coordinator import Coordinator
-        from silica.tools.runners import project_injector_result
 
         head = f"{label}: " if (batch and label) else ""
         console.print(
@@ -1479,12 +1626,8 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
         _tell(ToolStartEvent(name, args, call_id, 0))
         started = _time.monotonic()
         try:
-            coordinator = Coordinator(
-                inbox_files=mfs, target_dir=unit_target, hub=hub or None,
-                keep_sources=keep_sources, seen_override=seen or None,
-                distill_profile=profile or None,
-            )
-            result = coordinator.run()
+            result, run_id = distill(mfs, unit_target, hub=hub, keep_sources=keep_sources,
+                                     seen=seen, profile=profile)
         except ValueError as exc:
             # A path outside the vault (or any other rejected argument) is
             # user error, not a crash: the batch moves to the next unit.
@@ -1494,9 +1637,8 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
         except BaseException as exc:
             _tell(ToolErrorEvent(name, call_id, str(exc) or type(exc).__name__, 0))
             raise
-        run_id = getattr(getattr(getattr(coordinator, "fsm", None), "progress", None), "run_id", None)
         _tell(ToolCompleteEvent(name, args, call_id,
-                                json.dumps(project_injector_result(result, run_id, len(mfs)), default=str),
+                                json.dumps(project_result(result, run_id, len(mfs)), default=str),
                                 _time.monotonic() - started, 0))
         console.print(
             f"  {_at()}{head}nucleate finished: "

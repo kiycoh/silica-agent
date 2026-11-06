@@ -266,11 +266,10 @@ def subagent_seconds(sid: str) -> dict[str, float]:
 def measure(sample: list[dict], target_dir: str, profile: str) -> list[dict]:
     from silica.obs.bus import BUS
     from silica.obs.narration import NARRATOR
-    from silica.sources.ingest import prepare_unit
+    from silica.sources.ingest import distill, prepare_unit
     from silica.ui.console import CONSOLE
     from silica.kernel.write.undo_journal import get_undo_journal
     from silica.config import CONFIG
-    from silica.router.coordinator import Coordinator
     from silica.sources.convert import convert
 
     clock = PhaseClock()
@@ -303,10 +302,7 @@ def measure(sample: list[dict], target_dir: str, profile: str) -> list[dict]:
             print("    nothing to distill (already nucleated / apparatus) — excluded")
             continue
         t1 = time.perf_counter()
-        result = Coordinator(
-            inbox_files=mfs, target_dir=target_dir, hub=None,
-            keep_sources=True, distill_profile=profile or None,
-        ).run()
+        result, _ = distill(mfs, target_dir, keep_sources=True, profile=profile)
         t_nuc = time.perf_counter() - t1
         cov = result.get("coverage") or {}
         rows.append({
