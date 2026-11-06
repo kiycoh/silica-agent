@@ -66,24 +66,28 @@ For each note, which other notes must a student have read to understand it, beca
 Write one line per note, and nothing else:
 N: the numbers of the notes it needs, separated by commas, or none"""
 
-CARD_PROMPT = """You write one card of a study reading for a university student. The card summarises this note:
+# "the note" named by its title, from the card's own parts to the closing question: with
+# two notes on the page and both called "this note", DeepSeek V4 Flash, the hosted model,
+# summarised the one read last on 5 of 10 cards (a walk of the owner's wiki, 2026-11-06),
+# and the check below cannot see it, because the next note's words are held text.
+CARD_PROMPT = """You write one card of a study reading for a university student, on "{title}". The card summarises this note:
 {note}
 
 The notes read before this one: {before}.{needs}
 {next_intro}
 {next}
 
-Write in {language}, with formulas in $...$ as the note writes them. Use only what the note says, except in EXAMPLE. No history, anecdotes, curiosities or motivation. At the end of a sentence that uses a note, before its full stop, write that note's link as [[title]], with only these titles: {titles}.
+Write in {language}, with formulas in $...$ as "{title}" writes them. OPENING, DEFINITION and MECHANISM use only what "{title}" says. No history, anecdotes, curiosities or motivation. At the end of a sentence that uses a note, before its full stop, write that note's link as [[title]], with only these titles: {titles}.
 
 Reply with these labelled parts, each label at the start of its own line, and nothing else:
-OPENING: one sentence tying this note's concept to a concept an earlier note explains, when the notes give a reason, with that note linked; or none. Speak of the concepts, never of cards.
-DEFINITION: what the concept is, in two or three sentences in the note's words.
-MECHANISM: how it works and why. Write each formula on its own line, then say in place what it does.
-EXAMPLE: one concrete case worked through, with small numbers where the topic allows, using the note's symbols.
+OPENING: one sentence tying the concept of "{title}" to a concept an earlier note explains, when the notes give a reason, with that note linked; or none. Speak of the concepts, never of cards.
+DEFINITION: what "{title}" is about, in two or three sentences in its own words.
+MECHANISM: how it works and why, as "{title}" explains it. Write each formula on its own line, then say in place what it does.
+EXAMPLE: one concrete case of "{title}" worked through, with small numbers where the topic allows, using its symbols.
 QUESTION: {question}
 ANSWER: the one sentence of {answer_from} that answers QUESTION, copied exactly."""
 
-_NEXT_INTRO = "The next card is about this note; read it only to ask the question at the end:"
+_NEXT_INTRO = "The card after this one is on another note, shown here only for QUESTION and ANSWER; none of it goes in the other parts:"
 _NEXT_QUESTION = "one question that uses this card's concept to anticipate what the next note says; the next note must answer it."
 # The last card has no next note: it asks on its own (ADR-0134 point 2).
 _LAST_INTRO = "This is the last card of the reading."
@@ -440,7 +444,7 @@ def write_card(i: int, cards: list[dict], language: str, ask=None) -> dict:
     before = [c["title"] for c in cards[:i] if not c["spine"]]
     needs = f' It needs: {", ".join(card["needs"])}.' if card.get("needs") else ""
     prompt = CARD_PROMPT.format(
-        note=f"### {card['title']}\n{note}", before="; ".join(before) or "none", needs=needs,
+        title=card["title"], note=f"### {card['title']}\n{note}", before="; ".join(before) or "none", needs=needs,
         next_intro=_NEXT_INTRO if nxt else _LAST_INTRO, next=f"### {nxt['title']}\n{nxt_text}" if nxt else "",
         language=language, titles="; ".join(titles), question=_NEXT_QUESTION if nxt else _LAST_QUESTION,
         answer_from="the next note" if nxt else "the note above")
