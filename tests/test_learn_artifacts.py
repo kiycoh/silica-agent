@@ -75,14 +75,14 @@ def test_slide_points_are_checked_against_the_slide_s_note(tmp_vault):
 
 def test_a_formula_answer_is_judged_by_its_formula():
     note = "# Slack\n\nUn punto e' esterno al margine quando $y_i f(x_i) > \\gamma$.\n"
-    assert artifacts._grounded("Quando $y_i f(x_i) > \\gamma$", note)
-    assert not artifacts._grounded("Quando $y_i f(x_i) < 0$", note)
+    assert artifacts.grounded("Quando $y_i f(x_i) > \\gamma$", note)
+    assert not artifacts.grounded("Quando $y_i f(x_i) < 0$", note)
 
 
 def test_the_same_formula_written_two_ways_is_held():
     note = "$$\\xi_{i} = \\max \\left(0, \\gamma - y_{i} f \\left(\\boldsymbol{x}^{(i)}\\right)\\right)$$"
-    assert artifacts._grounded("$\\xi_i = \\max(0, \\gamma - y_i f(x^{(i)}))$", note)
-    assert not artifacts._grounded("$\\xi_i = \\max(0, 1 - y_i f(x^{(i)}))$", note)
+    assert artifacts.grounded("$\\xi_i = \\max(0, \\gamma - y_i f(x^{(i)}))$", note)
+    assert not artifacts.grounded("$\\xi_i = \\max(0, 1 - y_i f(x^{(i)}))$", note)
 
 
 def test_a_folder_hands_over_its_text_within_one_budget(tmp_vault, monkeypatch):

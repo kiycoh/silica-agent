@@ -8,6 +8,8 @@ by a question whose answer the next note holds, the reader's answers kept
 apart from the ledger, the practice with its notes in turn."""
 from __future__ import annotations
 
+from silica.kernel.learn import store
+
 import time
 
 import pytest
@@ -279,9 +281,9 @@ def test_a_reading_is_written_beside_the_plan_read_back_and_never_material(step_
     assert cards[1]["question"] and not cards[1]["answer"]
     assert cards[2]["spine"] and cards[2]["points"] == ["Neurone artificiale", "Gradiente discendente"]
     assert cards[3]["needed_by"] == ["Gradiente discendente"]
-    meta = note_index.meta(plans._vault())[out["path"]]
+    meta = note_index.meta(store.vault())[out["path"]]
     assert meta["kind"] == "reading" and not noteshape.is_material(meta)
-    text = (plans._vault() / out["path"]).read_text(encoding="utf-8")
+    text = (store.vault() / out["path"]).read_text(encoding="utf-8")
     assert "type: reading" in text and "AI: true" in text and "notes_hash:" in text
     assert "> [!question] To finish the card" in text and "Do not confuse" not in text
 
@@ -433,14 +435,15 @@ def client(step_vault, monkeypatch):
     from fastapi.testclient import TestClient
 
     from silica.kernel.learn import grade, items
-    from silica.ui.web import learn_routes, server
+    from silica.kernel.learn import session as learn_session
+    from silica.ui.web import server
     from silica.ui.web.session import SESSION
 
-    monkeypatch.setattr(items, "_llm", lambda *a, **k: ("", "stop"))
+    monkeypatch.setattr(items, "ask_model", lambda *a, **k: ("", "stop"))
     monkeypatch.setattr(grade, "_llm", lambda *a, **k: ("", "stop"))
     monkeypatch.setattr(reading, "_ask", fake_ask)
     SESSION.reset()
-    learn_routes._reset()
+    learn_session._reset()
     return TestClient(server.app, headers={"Origin": "http://testserver"})
 
 
@@ -556,13 +559,14 @@ def _until_written(c):
 
 
 def test_a_reading_job_is_a_record_the_chat_tray_never_lists_and_a_restart_interrupts(client):
+    from silica.kernel import job_records
     from silica.ui.web import jobs
 
     c = client
     assert c.post("/learn/reading/write", json={"plan": "Plans/Esame.md", "step": 0}).json()["state"] in ("running", "done")
     st = _until_written(c)
     assert st["job"]["state"] == "done" and st["job"]["path"]
-    recs = [r for r in jobs._all() if r.get("kind") == "reading"]
+    recs = [r for r in job_records.all_records() if r.get("kind") == "reading"]
     assert len(recs) == 1 and recs[0]["plan"] == "Plans/Esame.md" and recs[0]["step"] == 0
     assert c.get("/jobs").json()["jobs"] == []            # the chat's tray: what waits on the next message
     assert c.post(f"/jobs/{recs[0]['id']}/retry").status_code == 409
@@ -577,4 +581,4 @@ def test_a_reading_job_is_a_record_the_chat_tray_never_lists_and_a_restart_inter
     # Writing it again replaces the stopped record: one record a step.
     c.post("/learn/reading/write", json={"plan": "Plans/Esame.md", "step": 0})
     assert _until_written(c)["job"]["state"] == "done"
-    assert len([r for r in jobs._all() if r.get("kind") == "reading"]) == 1
+    assert len([r for r in job_records.all_records() if r.get("kind") == "reading"]) == 1

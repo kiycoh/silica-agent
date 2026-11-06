@@ -308,7 +308,7 @@ def steps_passed(plan: dict, entries: list[dict] | None = None, notes: dict | No
     """A step passes when every note in it met every objective of the plan
     without help after the plan was written (D17, D27). The checkbox is
     presentation; this is truth."""
-    from silica.kernel.learn.plans import resolve_title
+    from silica.kernel.learn.sources import resolve_title
 
     if entries is None:
         from silica.kernel.learn import quiz

@@ -211,6 +211,14 @@ def test_the_plan_sections_are_the_ones_plans_generates():
     assert PLAN_SECTIONS == frozenset(_GENERATED)
 
 
+def test_the_plan_keys_a_re_scope_may_lose_are_the_ones_plans_writes():
+    """`preserve` sits below Learn, so it cannot read the table: this holds the two."""
+    from silica.kernel.learn.plans import ALWAYS_KEYS, PLAN_KEYS
+    from silica.kernel.write.preserve import _LOSS_KEYS
+
+    assert _LOSS_KEYS[Loss.PLAN] == frozenset(ALWAYS_KEYS) | {k.name for k in PLAN_KEYS}
+
+
 def test_resolve_drops_the_provenance_header_left_empty_by_the_move():
     # contested._extract_contradiction_callouts prunes a pre-2026-09-04 patch
     # header whose only content was the callout it moved (found by the

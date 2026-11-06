@@ -5,11 +5,11 @@
 the study plan's deadline (ADR-0081) and the source check (ADR-0110 point 5,
 the module ADR-0107 shares).
 
-The month names are shared; the readers are not. `plans.read_date` reads a
+The month names are shared; the readers are not. `sentence.read_date` reads a
 plan's deadline sentence and resolves a year-less day forward to the next such
 day. A check must never do that, because a date given without a year is not
 one a writer can be held to. So `find_dates` requires a year, and its patterns
-stay apart from `plans._DATE_RES` on purpose.
+stay apart from `sentence._DATE_RES` on purpose.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ MONTHS = {
 }
 MONTH_RE = "|".join(sorted(MONTHS, key=len, reverse=True))
 
-_EN_FIRST = "|".join(sorted(("january", "february", "march", "april", "june", "july", "august", "september", "october",
+EN_FIRST = "|".join(sorted(("january", "february", "march", "april", "june", "july", "august", "september", "october",
                              "november", "december", "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept",
                              "oct", "nov", "dec"), key=len, reverse=True))
 # Every pattern carries its year. Numeric dates are day first, as both
@@ -36,8 +36,8 @@ _EN_FIRST = "|".join(sorted(("january", "february", "march", "april", "june", "j
 _ABSOLUTE = (
     ("ymd", re.compile(r"(?<![\d/.-])(\d{4})-(\d{1,2})-(\d{1,2})(?![\d/-])")),
     ("dmy", re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th|°|º)?\s+(?:di\s+|of\s+)?({MONTH_RE})\.?,?\s+(\d{{4}})\b", re.I)),
-    # "May" capitalised only, as plans.py rules: "you may 3 2026" is a verb.
-    ("mdy", re.compile(rf"\b((?i:{_EN_FIRST})|May)\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})\b")),
+    # "May" capitalised only, as learn/sentence.py rules: "you may 3 2026" is a verb.
+    ("mdy", re.compile(rf"\b((?i:{EN_FIRST})|May)\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})\b")),
     ("num", re.compile(r"(?<![\d/.])(\d{1,2})([/.])(\d{1,2})\2(\d{4})(?![\d/.])")),
 )
 

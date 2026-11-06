@@ -24,6 +24,7 @@ from silica.kernel.learn.schedule import DUE_R, events_by_key
 logger = logging.getLogger(__name__)
 
 DEFAULT_N = 8
+SESSION_MAX = 24   # the most questions one session asks
 AMNESTY_FACTOR = 2   # due > 2n: one calm line, the capped session, never the backlog
 # engram's copy (MIT): a break is not a debt.
 AMNESTY_LINE = "{due} due after a break is spacing doing its job, not a debt. This session takes {n}; the rest waits."
@@ -111,7 +112,7 @@ def conflicts(notes: dict[str, dict]) -> list[str]:
     try:
         drifted = {note_key(n) for n, _src in drifted_notes(vault_path=str(vault))}
     except Exception:
-        drifted = set()
+        drifted = set()   # drift is an extra reason to ask: the contested notes above still stand
     if drifted:
         out += [p for p in notes if note_key(p) in drifted and p not in out]
     return out

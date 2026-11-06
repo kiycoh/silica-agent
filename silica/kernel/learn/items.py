@@ -24,6 +24,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from silica.kernel.base.syntax import WIKILINK_FLAT_RE
+from silica.kernel.learn import store
+from silica.kernel.learn.reference import HEADING_LINE_RE
+
 logger = logging.getLogger(__name__)
 
 BLANK = "____"
@@ -33,7 +37,6 @@ MAX_CLAIMS_PER_NOTE = 12
 # total coverage; the points left open come back as a follow-up.
 MAX_QUESTIONS = 8
 MINUTES_PER_QUESTION = 1.3
-POINT_KINDS = ("definition", "mechanism", "condition", "step", "limit", "relation", "claim")
 KINDS = ("recall", "cloze", "explain", "teach", "structure", "contrast", "apply",
          "transfer", "predict", "contradiction")
 # The axis each kind measures (get-it's four, as coverage, never a score).
@@ -46,20 +49,19 @@ LEVEL_OF = {"cloze": 1, "recall": 1, "predict": 1, "structure": 3, "explain": 3,
 
 _FOOTNOTE_RE = re.compile(r"\[\^([A-Za-z0-9_-]+)\]")
 _FOOTDEF_RE = re.compile(r"^\[\^([A-Za-z0-9_-]+)\]:\s*\[\[([^\]|]+)(?:\|[^\]]*)?\]\]")
-_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*?)\s*$")
-_WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 _WIKILINK_ALIAS_RE = re.compile(r"!?\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 # `- derived from [[X]]: why` (this note is the subject) and
 # `- [[X]] defines this (Lezione 11): why` (X is the subject, patched in).
 _REL_OUT_RE = re.compile(r"^- ([a-z][a-z ]*?) \[\[([^\]|]+)(?:\|[^\]]*)?\]\](?: \(([^)]*)\))?:\s*(.*)$")
 _REL_IN_RE = re.compile(r"^- \[\[([^\]|]+)(?:\|[^\]]*)?\]\] ([a-z][a-z ]*?) this(?: \(([^)]*)\))?:\s*(.*)$")
+# Headings no question is drawn from, by prefix and at any level. Wider than
+# noteshape.CLAIMS_END_RE, which ends a note's claims: this also leaves out the
+# note's links and a reader's own additions, wherever they sit.
 _SKIP_SECTIONS = ("relations", "sources", "superseded", "additional notes")
 
 
-def _vault() -> Path:
-    from silica.config import CONFIG
-
-    return Path(CONFIG.vault_path)
+def minutes(questions: int) -> int:
+    return max(1, round(questions * MINUTES_PER_QUESTION))
 
 
 def read_note(path: str) -> str:
@@ -69,7 +71,7 @@ def read_note(path: str) -> str:
     from silica.kernel.base.layout import contain_in_vault
 
     try:
-        return (_vault() / contain_in_vault(path, _vault())).read_text(encoding="utf-8")
+        return (store.vault() / contain_in_vault(path, store.vault())).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError, ValueError):
         # a path that escapes the vault reads as no note, which the routes
         # already answer with a 404; never as the file it names
@@ -85,7 +87,7 @@ def title_of(path: str, text: str | None = None) -> str:
     if t:
         return t
     for line in body.splitlines():
-        m = _HEADING_RE.match(line)
+        m = HEADING_LINE_RE.match(line)
         if m and len(m.group(1)) == 1:
             return m.group(2)
     return Path(path).stem
@@ -97,7 +99,7 @@ def headings_of(text: str) -> list[str]:
         if line.startswith("```"):
             fence = not fence
             continue
-        m = _HEADING_RE.match(line)
+        m = HEADING_LINE_RE.match(line)
         if m and not fence:
             out.append(m.group(2))
     return out
@@ -128,7 +130,7 @@ def plain_block(s: str) -> str:
     return "\n   ".join(plain(x) for x in s.splitlines() if plain(x))
 
 
-def _norm(s: str) -> str:
+def norm(s: str) -> str:
     # plain() on both sides: a model copies "percezione corrente" from a line
     # that reads "**percezione corrente**", and the exact pass must still hit
     return plain(s).casefold().rstrip(".,;:!? ")
@@ -148,14 +150,14 @@ def span_of(text: str, leaf_text: str) -> tuple[int, str]:
     """
     from silica.kernel.write.provenance import GROUNDING_FLOOR, _local_match_fraction
 
-    needle = _norm(text)
+    needle = norm(text)
     if len(needle) < 8:
         return 0, ""
     lines = leaf_text.splitlines()
     for width in (1, 2, 3):
         for i in range(len(lines)):
             window = " ".join(lines[i:i + width])
-            if needle in _norm(window):
+            if needle in norm(window):
                 return i + 1, " ".join(window.split())
     best, at, span, won, tied = (0.0, 0, 0.0), 0, "", "", False
     # The matched fraction never exceeds the characters the two share, so a
@@ -166,7 +168,7 @@ def span_of(text: str, leaf_text: str) -> tuple[int, str]:
     for width in (1, 2):
         for i in range(len(lines)):
             raw = " ".join(lines[i:i + width])
-            window = _norm(raw)
+            window = norm(raw)
             share = sum((chars & Counter(window)).values()) / len(needle)
             if share < GROUNDING_FLOOR or share < best[0]:
                 continue
@@ -187,7 +189,7 @@ _leaf_memo: dict[str, tuple[float, str]] = {}
 
 
 def leaf_text(leaf: str) -> str:
-    p = _vault() / leaf
+    p = store.vault() / leaf
     try:
         mtime = p.stat().st_mtime
     except OSError:
@@ -225,7 +227,7 @@ def claims_of(path: str, text: str | None = None) -> list[dict]:
             continue
         if fence:
             continue
-        m = _HEADING_RE.match(line)
+        m = HEADING_LINE_RE.match(line)
         if m:
             heading = m.group(2)
             skip = any(heading.casefold().startswith(s) for s in _SKIP_SECTIONS)
@@ -308,7 +310,7 @@ def _prose_blocks(body: str, title: str) -> list[dict]:
             continue
         if fence or math:
             continue
-        m = _HEADING_RE.match(line)
+        m = HEADING_LINE_RE.match(line)
         if m:
             flush()
             heading = m.group(2)
@@ -502,7 +504,7 @@ def _head_term(claim: str, title: str, path: str) -> str:
         if len(cand) >= 4 and cand.casefold() in low:
             i = low.index(cand.casefold())
             return claim[i:i + len(cand)]
-    links = _WIKILINK_RE.findall(claim)
+    links = WIKILINK_FLAT_RE.findall(claim)
     if links:
         return links[0]
     words = [w for w in re.findall(r"[^\W\d_]{6,}", claim)]
@@ -561,7 +563,7 @@ def relations_of(path: str, text: str | None = None) -> list[dict]:
     title = title_of(path, text)
     out, inside = [], False
     for line in text.splitlines():
-        m = _HEADING_RE.match(line)
+        m = HEADING_LINE_RE.match(line)
         if m:
             inside = m.group(2).casefold().startswith("relations")
             continue
@@ -650,33 +652,29 @@ def grounded(item: dict) -> bool:
 
 
 def _match_heading(anchor: str, headings: list[str]) -> str | None:
-    want = _norm(anchor)
+    want = norm(anchor)
     for h in headings:
-        if _norm(h) == want:
+        if norm(h) == want:
             return h
     for h in headings:
-        if want and (want in _norm(h) or _norm(h) in want) and len(want) >= 4:
+        if want and (want in norm(h) or norm(h) in want) and len(want) >= 4:
             return h
     return None
 
 
-def hints_for(path: str) -> list[str]:
-    """H2 (the prerequisites the vault knows) and H3 (the heading tree), no
-    model. Only nonempty rungs, so the budget of two counts real help. H1,
-    the orient rung, is the model's own and rides the item from the batch."""
-    return [text for _rung, text in hint_rungs(path)]
-
-
 def hint_rungs(path: str) -> list[tuple[str, str]]:
-    """hints_for with each hint's rung, so a ledger line can say which ones
-    the reader saw (ADR-0135 point 5)."""
+    """H2 (the prerequisites the vault knows) and H3 (the heading tree), no
+    model, each with its rung so a ledger line can say which ones the reader
+    saw (ADR-0135 point 5). Only nonempty rungs, so the budget of two counts
+    real help. H1, the orient rung, is the model's own and rides the item from
+    the batch."""
     from silica.kernel.learn import learner
 
     out: list[tuple[str, str]] = []
     try:
         prereqs = learner.prerequisites_of(path)
     except Exception:
-        prereqs = []
+        prereqs = []   # no graph: the heading rung below still helps
     names = [Path(p).stem for p in prereqs][:4]
     if names:
         out.append(("H2", "Prerequisites the vault names: " + ", ".join(names) + ". What did they say?"))
@@ -836,7 +834,7 @@ END
 GENERATE_MAX_TOKENS = 4096
 
 
-def _llm(prompt: str, max_tokens: int) -> tuple[str, str | None]:
+def ask_model(prompt: str, max_tokens: int) -> tuple[str, str | None]:
     """One deterministic call; (text, finish_reason). ("", None) without a
     configured model, so the mechanical kinds carry the session."""
     from silica.config import CONFIG
@@ -855,7 +853,7 @@ def lede_of(text: str) -> str:
     _d, _r, body = frontmatter.split(text)
     para: list[str] = []
     for line in body.splitlines():
-        if _HEADING_RE.match(line) or not line.strip():
+        if HEADING_LINE_RE.match(line) or not line.strip():
             if para:
                 break
             continue
@@ -871,7 +869,7 @@ def note_block(n: int, row: dict) -> str:
     lines = [f"NOTE {n}", f"PATH: {path}", f"TITLE: {title_of(path, text)}",
              # named, not "the language of the note": asked that way the
              # model wrote CRITERIA in English for an Italian note
-             f"LANGUAGE: {language.display_name(language.detect(text))}",
+             f"LANGUAGE: {language.named(text)}",
              f"KIND: {row.get('kind', 'recall')}", f"LEVEL: {row.get('level', 1)}",
              f"OBJECTIVE: {row.get('objective') or ''}",
              "HEADINGS: " + " · ".join(headings_of(text)[:12])]
@@ -926,15 +924,15 @@ def _point_holding(span: str, points: dict[int, dict]) -> int:
     provenance gate's fuzzy match at its floor; 0 when none does."""
     from silica.kernel.write.provenance import GROUNDING_FLOOR, _local_match_fraction
 
-    needle = _norm(span)
+    needle = norm(span)
     if len(needle) < 8:
         return 0
     for i, p in points.items():
-        if needle in _norm(p["text"]):
+        if needle in norm(p["text"]):
             return i
     best, at = 0.0, 0
     for i, p in points.items():
-        frac = _local_match_fraction(needle, _norm(p["text"]))
+        frac = _local_match_fraction(needle, norm(p["text"]))
         if frac > best:
             best, at = frac, i
     return at if best >= GROUNDING_FLOOR else 0
@@ -948,7 +946,7 @@ def generate(rows: list[dict]) -> dict[str, list[dict]]:
         return {}
     blocks = "\n\n".join(note_block(i, r) for i, r in enumerate(rows, 1))
     try:
-        out, finish = _llm(GENERATE_PROMPT.format(notes=blocks), GENERATE_MAX_TOKENS)
+        out, finish = ask_model(GENERATE_PROMPT.format(notes=blocks), GENERATE_MAX_TOKENS)
     except Exception as exc:
         logger.warning("learn: generation call failed (%s)", exc)
         return {}

@@ -65,6 +65,7 @@ ALLOWED = {
     "kernel/report/graph_report/compute.py": "store-file stat only (_index_path, for the report memo's freshness key), no store construction, not relatedness ranking",
     "kernel/learn/learner.py":     "concept-centrality read via CooccurStore.note_nodes/adjacency (unexplored-pool ranking), not relatedness ranking",
     "kernel/learn/plans.py":        "topic scope (learn-suite D23): stem_postings/neighbors reads for the notes carrying a term and its neighbour concepts, the same reads silica_concepts makes; constructs no ranking",
+    "kernel/learn/sources.py":      "a plan's topics against note titles (ADR-0131): _note_title_text and title_cosine_top_k, a topic met by its title vector, checked by the sibling test; no relatedness ranking of notes",
     "kernel/report/structure.py":   "keyspace normalization (store_key) plus paths/note_nodes/node_label for the burst window (V6), same reads as learner.py; constructs no ranking",
     "kernel/recall/note_index.py":  "index maintenance for one saved note (ADR-0155 point 18): refresh_note and build_index, not relatedness ranking",
     "ui/web/explore_routes.py":     "hands get_cooccur_store() to compare_sets for /compare (ADR-0047); constructs no ranking",
