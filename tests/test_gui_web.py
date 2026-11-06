@@ -1024,7 +1024,7 @@ def test_sessions_persist_across_reset_and_reload(client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# _linkify — resolvable note refs become .note-link anchors (token-stream, so
+# linkify — resolvable note refs become .note-link anchors (token-stream, so
 # code is never touched). Pure: driven by a fake dict resolver, no vault.
 # ---------------------------------------------------------------------------
 
@@ -1042,63 +1042,63 @@ def _fake_resolve(ref: str):
 
 
 def test_linkify_resolved_wikilink_becomes_clean_anchor():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("see [[Foo]] here", _fake_resolve)
+    html = linkify("see [[Foo]] here", _fake_resolve)
     assert '<a class="note-link" data-path="Foo.md">Foo</a>' in html
     assert "[[" not in html and "]]" not in html
 
 
 def test_linkify_wikilink_alias_shows_alias_but_resolves_target():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("read [[a/b|Bar]] now", _fake_resolve)
+    html = linkify("read [[a/b|Bar]] now", _fake_resolve)
     assert 'data-path="sub/a-b.md"' in html
     assert ">Bar</a>" in html
 
 
 def test_linkify_unresolved_wikilink_renders_as_broken_anchor():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("a [[nope]] ref", _fake_resolve)
+    html = linkify("a [[nope]] ref", _fake_resolve)
     assert '<a class="note-link broken">nope</a>' in html
     assert "data-path" not in html  # click is a no-op by construction
     assert "[[" not in html
 
 
 def test_linkify_pathlike_md_token_becomes_link_with_clean_name():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("open concepts/mind-maps.md today", _fake_resolve)
+    html = linkify("open concepts/mind-maps.md today", _fake_resolve)
     assert 'data-path="concepts/mind-maps.md"' in html
     assert ">mind-maps</a>" in html
 
 
 def test_linkify_bare_word_is_never_linked():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
     # `index` resolves in the fake index, but has no `/` and no `.md` → not a
     # link candidate, so predictability wins over resolvability.
-    html = _linkify("the index of notes", _fake_resolve)
+    html = linkify("the index of notes", _fake_resolve)
     assert "note-link" not in html
 
 
 def test_linkify_never_touches_code():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("run `concepts/x.md` inline", _fake_resolve)
+    html = linkify("run `concepts/x.md` inline", _fake_resolve)
     assert "note-link" not in html
     assert "<code>concepts/x.md</code>" in html
 
 
 def test_linkify_without_resolver_is_plain_render():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    assert _linkify("see [[Foo]] here").strip() == "<p>see [[Foo]] here</p>"
+    assert linkify("see [[Foo]] here").strip() == "<p>see [[Foo]] here</p>"
 
 
 # ---------------------------------------------------------------------------
-# _linkify — bare URLs. Shared corpus with the mdLite half (tests/link_cases.py).
+# linkify — bare URLs. Shared corpus with the mdLite half (tests/link_cases.py).
 # ---------------------------------------------------------------------------
 
 
@@ -1112,9 +1112,9 @@ def _basename_resolve(ref: str):
 
 @pytest.mark.parametrize("md, present, absent", URL_CASES)
 def test_linkify_url_contract(md, present, absent):
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify(md, _fake_resolve)
+    html = linkify(md, _fake_resolve)
     for frag in present:
         assert frag in html, html
     for frag in absent:
@@ -1122,22 +1122,22 @@ def test_linkify_url_contract(md, present, absent):
 
 
 def test_linkify_bare_url_is_not_swallowed_by_a_same_named_note():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
     # It used to render as `<a class="note-link" data-path="areas/chemistry.md">
     # chemistry</a>`: the URL disappeared from the page and the click opened an
     # unrelated note. Every web citation was one note name away from this.
-    html = _linkify("vedi https://en.wikipedia.org/wiki/chemistry ok", _basename_resolve)
+    html = linkify("vedi https://en.wikipedia.org/wiki/chemistry ok", _basename_resolve)
     assert '<a href="https://en.wikipedia.org/wiki/chemistry">' in html
     assert "note-link" not in html
 
 
 def test_linkify_never_nests_a_note_ref_inside_a_link():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
     # The link text carries a path, so the note pass fired inside the anchor and
     # emitted <a> within <a>, which the browser then unnests.
-    html = _linkify("[vedi chemistry.md](https://e.com)", _basename_resolve)
+    html = linkify("[vedi chemistry.md](https://e.com)", _basename_resolve)
     assert html.count("<a ") == 1, html
     assert "note-link" not in html
 
@@ -1145,9 +1145,9 @@ def test_linkify_never_nests_a_note_ref_inside_a_link():
 def test_embed_with_subpath_fragment_still_renders_image():
     # Obsidian embeds carry a #center/#heading subpath and a width alias:
     # the fragment must not defeat the asset-extension check (regression).
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("![[Pasted image 1.png#center|500]]", _fake_resolve)
+    html = linkify("![[Pasted image 1.png#center|500]]", _fake_resolve)
     assert '<img src="/asset?path=Pasted%20image%201.png"' in html
     assert 'width="500"' in html
     assert "note-link broken" not in html
@@ -1155,29 +1155,29 @@ def test_embed_with_subpath_fragment_still_renders_image():
 
 # ---------------------------------------------------------------------------
 # OFM sugar — highlights, tags, callouts, tasks, mermaid, comments/block-ids,
-# frontmatter. Same pure-resolver setup as the _linkify tests above.
+# frontmatter. Same pure-resolver setup as the linkify tests above.
 # ---------------------------------------------------------------------------
 
 def test_ofm_highlight_and_tag_render():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("a ==hot== take on #graph/theory", _fake_resolve)
+    html = linkify("a ==hot== take on #graph/theory", _fake_resolve)
     assert "<mark>hot</mark>" in html
     assert '<span class="tag">#graph/theory</span>' in html
 
 
 def test_ofm_sugar_never_fires_in_code():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("run `#foo` now\n\n```\n#bar\n==nope==\n```", _fake_resolve)
+    html = linkify("run `#foo` now\n\n```\n#bar\n==nope==\n```", _fake_resolve)
     assert 'class="tag"' not in html
     assert "<mark>" not in html
 
 
 def test_ofm_callout_gets_class_and_title():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("> [!warning] Watch out\n> the body", _fake_resolve)
+    html = linkify("> [!warning] Watch out\n> the body", _fake_resolve)
     assert 'class="callout callout-warning"' in html
     assert '<p class="callout-title">Watch out</p>' in html
     assert "the body" in html
@@ -1185,34 +1185,34 @@ def test_ofm_callout_gets_class_and_title():
 
 
 def test_ofm_plain_blockquote_is_untouched():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("> just a quote", _fake_resolve)
+    html = linkify("> just a quote", _fake_resolve)
     assert "callout" not in html
 
 
 def test_ofm_task_items_become_checkboxes():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("- [ ] open\n- [x] done", _fake_resolve)
+    html = linkify("- [ ] open\n- [x] done", _fake_resolve)
     assert html.count('<input type="checkbox" disabled') == 2
     assert 'disabled checked' in html
     assert "[ ]" not in html and "[x]" not in html
 
 
 def test_ofm_mermaid_fence_becomes_client_hook():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("```mermaid\ngraph TD; A-->B;\n```", _fake_resolve)
+    html = linkify("```mermaid\ngraph TD; A-->B;\n```", _fake_resolve)
     assert '<pre class="mermaid">' in html
     assert "A--&gt;B" in html  # content is escaped, mermaid.js reads textContent
-    assert "mermaid" not in _linkify("```python\nx = 1\n```", _fake_resolve)
+    assert "mermaid" not in linkify("```python\nx = 1\n```", _fake_resolve)
 
 
 def test_ofm_comments_and_block_ids_stripped():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("keep %%hidden%% this ^anchor-id\nnext line", _fake_resolve)
+    html = linkify("keep %%hidden%% this ^anchor-id\nnext line", _fake_resolve)
     assert "hidden" not in html
     assert "anchor-id" not in html
     assert "keep" in html and "next line" in html
@@ -1221,14 +1221,14 @@ def test_ofm_comments_and_block_ids_stripped():
 def test_ofm_strip_spares_fenced_code():
     # %% and trailing ^ids inside a fence are code, not OFM sugar — and a
     # lone %% in a fence must not pair with a prose %% and swallow the block.
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
     md = (
         "before %%gone%%\n\n"
         "```\n%% cell marker\nx = y ^2\n```\n\n"
         "after %%also gone%% end\n"
     )
-    html = _linkify(md, _fake_resolve)
+    html = linkify(md, _fake_resolve)
     assert "gone" not in html
     assert "%% cell marker" in html
     assert "x = y ^2" in html
@@ -1236,17 +1236,17 @@ def test_ofm_strip_spares_fenced_code():
 
 
 def test_ofm_image_embed_becomes_img_via_asset():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("see ![[img/pic 1.png]] and ![[shot.jpg|300]]", _fake_resolve)
+    html = linkify("see ![[img/pic 1.png]] and ![[shot.jpg|300]]", _fake_resolve)
     assert '<img src="/asset?path=img/pic%201.png" alt="pic 1">' in html
     assert '<img src="/asset?path=shot.jpg" alt="shot" width="300">' in html
 
 
 def test_markdown_relative_image_src_routes_through_asset():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("![alt](img/pic.png) ![ext](https://x.io/p.png)", _fake_resolve)
+    html = linkify("![alt](img/pic.png) ![ext](https://x.io/p.png)", _fake_resolve)
     assert 'src="/asset?path=img/pic.png"' in html
     assert 'src="https://x.io/p.png"' in html
 
@@ -1255,16 +1255,16 @@ def test_raw_html_relative_image_src_routes_through_asset():
     # A note written for GitHub uses <img src="..."> rather than ![alt](...), and
     # commonmark passes that through untouched — so the browser resolved it
     # against the page origin and every such image 404'd in the drawer.
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify('<p align="center"><img src="assets/demo.gif" alt="demo" width="900" /></p>', _fake_resolve)
+    html = linkify('<p align="center"><img src="assets/demo.gif" alt="demo" width="900" /></p>', _fake_resolve)
     assert 'src="/asset?path=assets/demo.gif"' in html
 
     # inline, single-quoted, and the three forms that must NOT be rewritten.
     # The single-quoted input is the point here, not the output quoting: the
     # sanitizer re-serializes every allowlisted tag from parsed attributes, so
     # it always emits double quotes whatever the note wrote.
-    html = _linkify(
+    html = linkify(
         "text <img src='img/a b.png'> and "
         '<img src="https://x.io/p.png"> and <img src="/asset?path=already.png"> and '
         '<img src="data:image/png;base64,AA">',
@@ -1280,7 +1280,7 @@ def test_raw_html_allowlist_drops_handlers_and_script_schemes():
     """The allowlist is the only thing between a nucleated document and the DOM:
     app.js writes this render with innerHTML, so anything executable that gets
     through runs on the GUI's own origin."""
-    from silica.ui.web.server import _sanitize_html
+    from silica.ui.web.render import _sanitize_html
 
     # Case is HTMLParser's problem, whitespace inside the name is the browser's,
     # and neither may reach the output.
@@ -1302,24 +1302,24 @@ def test_unterminated_script_keeps_the_rest_of_the_note():
     """markdown-it's raw-text rule runs to the closing tag or to EOF, so one
     stray `<script>` line hands the WHOLE remaining note over as one html_block.
     Dropping that as a script body emptied every note from that line down."""
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("intro\n\n<script>\n\nthe rest of the note\n\n## a heading", _fake_resolve)
+    html = linkify("intro\n\n<script>\n\nthe rest of the note\n\n## a heading", _fake_resolve)
     assert "the rest of the note" in html
     assert "## a heading" in html
     assert "<script" not in html
     # …while a body that closes with its own tag is still a script, not prose.
-    assert "alert(1)" not in _linkify("intro\n\n<script>alert(1)</script>\n\nafter", _fake_resolve)
+    assert "alert(1)" not in linkify("intro\n\n<script>alert(1)</script>\n\nafter", _fake_resolve)
 
 
 def test_fence_gets_pygments_spans():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify('```python\ndef f():\n    return "x"\n```', _fake_resolve)
+    html = linkify('```python\ndef f():\n    return "x"\n```', _fake_resolve)
     assert '<span class="k">def</span>' in html
     assert 'language-python' in html
     # unknown language degrades to a plain escaped fence
-    assert "<span" not in _linkify("```nolang\nx\n```", _fake_resolve)
+    assert "<span" not in linkify("```nolang\nx\n```", _fake_resolve)
 
 
 def test_command_output_fence_is_the_class_the_stylesheet_wraps():
@@ -1329,9 +1329,9 @@ def test_command_output_fence_is_the_class_the_stylesheet_wraps():
     tail of a message runs off the right edge, which is how /fetch's yt-dlp
     error hid the pip command it prescribes."""
 
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    assert 'class="language-text"' in _linkify("```text\nFetched\n```", _fake_resolve)
+    assert 'class="language-text"' in linkify("```text\nFetched\n```", _fake_resolve)
     css = app_css()
     rule = css.split("pre code.language-text {")[1].split("}")[0]
     assert "white-space: pre-wrap" in rule
@@ -1361,12 +1361,12 @@ def test_asset_endpoint_serves_vault_images_and_closes_traversal(client, tmp_vau
 
 
 def test_latex_inline_and_block_become_mathml():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("energy $E=mc^2$ here", _fake_resolve)
+    html = linkify("energy $E=mc^2$ here", _fake_resolve)
     assert "<math" in html and "$" not in html
 
-    html = _linkify("$$\n\\frac{a}{b}\n$$", _fake_resolve)
+    html = linkify("$$\n\\frac{a}{b}\n$$", _fake_resolve)
     assert '<div class="math">' in html
     assert 'display="block"' in html
 
@@ -1375,13 +1375,13 @@ def test_display_math_inside_a_paragraph_leaves_no_dollar_on_screen():
     """A `$$...$$` line inside a paragraph or a quote is display math, as Obsidian and Pandoc
     read it. The block rule cannot interrupt a paragraph, and the inline rule alone ate one `$`
     of each pair: an answer showed "tali che $" and "$5 · (1,0) + ... = b$" (2026-11-01)."""
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
     for text in ("Eppure\n$$5 \\cdot (1,0) = b$$\nquindi b sta nello span",
                  "> **tali che**\n> $$x_1 + x_2 = b$$\n"):
-        html = _linkify(text, _fake_resolve)
+        html = linkify(text, _fake_resolve)
         assert "$" not in html and 'display="block"' in html, html
-    assert "<math" not in _linkify("costs $$5 and $$10 today", _fake_resolve)
+    assert "<math" not in linkify("costs $$5 and $$10 today", _fake_resolve)
 
 
 def test_latex_text_argument_cannot_smuggle_markup_into_mtext():
@@ -1389,41 +1389,41 @@ def test_latex_text_argument_cannot_smuggle_markup_into_mtext():
     latex2mathml copies a `\\text{…}` argument into <mtext> character for
     character. <mtext> is a MathML text integration point, so the browser parses
     what it finds there with HTML rules — a live element with a live handler."""
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify(r"$$\text{<img/src=x/onerror=alert(1)>}$$", _fake_resolve)
+    html = linkify(r"$$\text{<img/src=x/onerror=alert(1)>}$$", _fake_resolve)
     assert "<img" not in html and "<mtext>" not in html
     assert "math-err" in html and "&lt;img/src=x/onerror=alert(1)&gt;" in html
     # `\href`/`\style` put a note-authored URL and declaration on the element.
-    assert 'href="' not in _linkify(r"$\href{javascript:alert(1)}{x}$", _fake_resolve)
-    assert 'style="' not in _linkify(r"$\style{color:red}{x}$", _fake_resolve)
+    assert 'href="' not in linkify(r"$\href{javascript:alert(1)}{x}$", _fake_resolve)
+    assert 'style="' not in linkify(r"$\style{color:red}{x}$", _fake_resolve)
     # Ordinary formulas, including the ones whose text really does say "<".
-    assert "<math" in _linkify(r"$\text{a < b}$", _fake_resolve)
-    assert "<math" in _linkify(r"$\fcolorbox{red}{white}{x}$", _fake_resolve)
+    assert "<math" in linkify(r"$\text{a < b}$", _fake_resolve)
+    assert "<math" in linkify(r"$\fcolorbox{red}{white}{x}$", _fake_resolve)
 
 
 def test_latex_prose_dollars_and_code_stay_literal():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("costs $5 and $10 today", _fake_resolve)
+    html = linkify("costs $5 and $10 today", _fake_resolve)
     assert "<math" not in html
-    html = _linkify("run `$x^2$` inline", _fake_resolve)
+    html = linkify("run `$x^2$` inline", _fake_resolve)
     assert "<math" not in html and "$x^2$" in html
 
 
 def test_split_frontmatter_returns_props_and_body():
-    from silica.ui.web.server import _split_frontmatter
+    from silica.kernel.text.note_parts import split_frontmatter
 
-    props, body = _split_frontmatter("---\ntags: [a, b]\nstatus: seed\n---\n# Title\n")
+    props, body = split_frontmatter("---\ntags: [a, b]\nstatus: seed\n---\n# Title\n")
     assert props == {"tags": ["a", "b"], "status": "seed"}
     assert body == "# Title\n"
 
 
 def test_split_frontmatter_absent_or_non_mapping_is_none():
-    from silica.ui.web.server import _split_frontmatter
+    from silica.kernel.text.note_parts import split_frontmatter
 
-    assert _split_frontmatter("# no fm")[0] is None
-    assert _split_frontmatter("---\n- just\n- a list\n---\nbody")[0] is None
+    assert split_frontmatter("# no fm")[0] is None
+    assert split_frontmatter("---\n- just\n- a list\n---\nbody")[0] is None
 
 
 def test_note_endpoint_renders_frontmatter_properties_box(client, tmp_vault):
@@ -3131,13 +3131,13 @@ def test_every_view_row_says_what_the_view_is_for():
 def test_an_aliased_link_in_a_table_cell_keeps_the_row_whole():
     """The model writes `[[Note|alias]]` in a table where Obsidian asks for
     `\\|`; its pipe ended the cell and split the row (an aid's table, 2026-10-23)."""
-    from silica.ui.web import server
+    from silica.ui.web import render
 
     table = "| Aspetto | Reti |\n|---|---|\n| Movimenti | a meno di [[Attenzione|attenzione]] |\n"
-    html = server._linkify(table, resolve=lambda r: "ML/Attenzione.md" if r.startswith("Attenzione") else None)
+    html = render.linkify(table, resolve=lambda r: "ML/Attenzione.md" if r.startswith("Attenzione") else None)
     row = html[html.index("<tbody"):]
     assert row.count("<td") == 2 and '<a class="note-link" data-path="ML/Attenzione.md">attenzione</a>' in row
-    assert server._escape_table_aliases("prose [[A|b]]\n") == "prose [[A|b]]\n"
+    assert render._escape_table_aliases("prose [[A|b]]\n") == "prose [[A|b]]\n"
 
 
 def test_a_reader_saying_it_is_unclear_gets_a_read_only_turn(client, monkeypatch):
@@ -3169,14 +3169,14 @@ def test_a_reader_saying_it_is_unclear_gets_a_read_only_turn(client, monkeypatch
 def test_an_absolute_value_in_a_table_cell_keeps_the_row_whole():
     """`$|x|$` in a table row split the row at its bars (2026-10-23); they
     become \\vert, and a norm's \\| becomes \\Vert, which draw the same."""
-    from silica.ui.web import server
+    from silica.ui.web import render
 
     table = "| Posizione | Condizione |\n|---|---|\n| Esterno | $|y_i f(x)| > \\gamma$ |\n| Norma | $\\|\\xi\\|_2$ |\n"
-    body = server._linkify(table)
+    body = render.linkify(table)
     body = body[body.index("<tbody"):]
     assert [row.count("<td") for row in body.split("</tr>")[:2]] == [2, 2]
     assert "&#x0007C;" in body and "&#x02016;" in body
-    assert server._escape_table_aliases("prose $|x|$\n") == "prose $|x|$\n"
+    assert render._escape_table_aliases("prose $|x|$\n") == "prose $|x|$\n"
 
 
 def test_a_plan_request_ends_on_the_calendar_learn_computed(client, monkeypatch):

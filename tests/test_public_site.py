@@ -149,20 +149,20 @@ def test_what_a_page_hides_does_not_ride_out_in_its_md_or_notes_json(marta, tmp_
     ("- item\n\n    %% secret %%\n\n    b\n", ["secret"], ["b"]),
 ])
 def test_a_published_body_keeps_code_and_loses_every_comment(body, gone, kept):
-    from silica.ui.web.server import _strip_ofm_meta
+    from silica.kernel.base.markdown import strip_ofm_meta
 
-    out = _strip_ofm_meta(body, published=True)
+    out = strip_ofm_meta(body, published=True)
     assert not [w for w in gone if w in out], out
     assert all(w in out for w in kept), out
 
 
 def test_the_drawer_keeps_what_only_a_published_body_loses():
-    from silica.ui.web.server import _strip_ofm_meta
+    from silica.kernel.base.markdown import strip_ofm_meta
 
     # markdown-it hides an HTML comment there, and a lone %% in a chat answer is not a remark
-    assert _strip_ofm_meta("a <!-- b --> c") == "a <!-- b --> c"
-    assert _strip_ofm_meta("100%% sure\n\nthe rest\n") == "100%% sure\n\nthe rest\n"
-    assert _strip_ofm_meta("<!-- 5%% -->\nreal\n%% gone %%\n") == "<!-- 5%% -->\nreal\n\n"
+    assert strip_ofm_meta("a <!-- b --> c") == "a <!-- b --> c"
+    assert strip_ofm_meta("100%% sure\n\nthe rest\n") == "100%% sure\n\nthe rest\n"
+    assert strip_ofm_meta("<!-- 5%% -->\nreal\n%% gone %%\n") == "<!-- 5%% -->\nreal\n\n"
 
 
 def test_a_link_in_a_table_stays_a_link_in_the_md(marta, tmp_vault):

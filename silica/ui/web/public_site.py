@@ -6,7 +6,7 @@ Public vaults, and for each vault its own page, one page and one markdown
 file per note, its images, and two files the script and a reader's Silica
 read (`vault.json`, `notes.json`).
 
-Rendered by the note drawer's own renderer (`server._linkify`), so a page
+Rendered by the note drawer's own renderer (`render.linkify`), so a page
 reads as the note reads in the app, with one difference that is the point:
 the resolver only knows the vault's published notes, so a link to anything
 else comes out as its words (ADR-0143 point 4). A vault is built in a
@@ -26,7 +26,9 @@ from pathlib import Path
 from urllib.parse import quote
 
 from silica.kernel import publish, rights
+from silica.kernel.base.markdown import strip_ofm_meta
 from silica.kernel.image_meta import strip_location
+from silica.ui.web import render
 
 logger = logging.getLogger(__name__)
 
@@ -264,21 +266,19 @@ def _md_for_reader(body: str, resolve, href_of) -> str:
     embedded image points at the vault's copy.
     shortcut: wikilinks inside a code fence are rewritten too; split on fences
     if a published note ever shows one mangled."""
-    from silica.ui.web.server import _ASSET_EXTS, _WIKILINK
-
     def sub(m: re.Match) -> str:
         bang, inner = m.group(1), m.group(2)
         target, _, alias = inner.partition("|")
         # `Note\\` in a table, where the alias's bar is escaped: unresolved, the link went out as its words
         target = target.split("#", 1)[0].strip().rstrip("\\")
         display = alias.strip() or target.rsplit("/", 1)[-1].removesuffix(".md")
-        if bang and "." + target.rsplit(".", 1)[-1].lower() in _ASSET_EXTS:
+        if bang and "." + target.rsplit(".", 1)[-1].lower() in render.ASSET_EXTS:
             name = href_of(("asset", target))
             return f"![{display}]({name})" if name else ""
         hit = resolve(target)
         return f"[{display}]({href_of(('note', hit))})" if hit else display
 
-    return _WIKILINK.sub(sub, body)
+    return render.WIKILINK.sub(sub, body)
 
 
 def cover(nodes: list[str], pairs: set[tuple[str, str]], titles: dict[str, str]) -> dict:
@@ -356,7 +356,6 @@ def build(slug: str, vault: Path | None = None) -> dict:
     from silica.driver import DRIVER
     from silica.kernel.graph.mindmap import answer_resolver, note_resolver
     from silica.kernel.base import frontmatter as fm
-    from silica.ui.web.server import _find_asset, _linkify, _strip_ofm_meta
 
     vault = vault or publish._vault()
     h = publish.handle(vault)
@@ -408,7 +407,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
         """The vault's name for an image a published note cites, copied once."""
         if target in copied:
             return copied[target]
-        found = plan["files"].get(target) or _find_asset(target)
+        found = plan["files"].get(target) or render.find_asset(target)
         if found is None:
             copied[target] = ""
             return ""
@@ -444,11 +443,11 @@ def build(slug: str, vault: Path | None = None) -> dict:
         props, _raw, body = fm.split(text)
         props = props or {}
         # Once, here: the page, the `.md`, notes.json and the description all read this
-        # body, and only _linkify stripped comments, so a `%% remark %%` the page hid went
+        # body, and only render.linkify stripped comments, so a `%% remark %%` the page hid went
         # out in the `.md` and into the room's text search, and hidden text reached the
         # vault of whoever saved the note.
-        body = rights.place_images(_drop_title_heading(_strip_ofm_meta(body, published=True), titles[p]), plan)
-        page_html = _linkify(body, resolve, remote_images=False)
+        body = rights.place_images(_drop_title_heading(strip_ofm_meta(body, published=True), titles[p]), plan)
+        page_html = render.linkify(body, resolve, remote_images=False)
         targets = set(_ANCHOR.findall(page_html))
         edges.update((p, html.unescape(t)) for t in targets if html.unescape(t) in on)
         page_html = _ANCHOR.sub(

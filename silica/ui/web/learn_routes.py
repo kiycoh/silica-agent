@@ -27,6 +27,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from silica.kernel.learn.schedule import DUE_R
+from silica.ui.web import render
 
 logger = logging.getLogger(__name__)
 
@@ -1171,7 +1172,6 @@ def aid(payload: dict):
     click is logged beside the escalation."""
     from silica.kernel.learn import offer
     from silica.kernel.graph.mindmap import answer_resolver
-    from silica.ui.web.server import _linkify
 
     s = _live(str(payload.get("id") or ""))
     it = _item(s, payload.get("i"))
@@ -1192,7 +1192,7 @@ def aid(payload: dict):
         offer.log_aid_opened(it["path"], s["id"])
         # the chat's resolver: a name two notes share links to this item's note
         resolve, _read = answer_resolver([it["path"]])
-        done[it["i"]] = {"text": text, "html": _linkify(text, resolve, remote_images=False)}
+        done[it["i"]] = {"text": text, "html": render.linkify(text, resolve, remote_images=False)}
         _save()
     return done[it["i"]]
 
@@ -1204,13 +1204,11 @@ MATH_CHARS = 2000     # one formula's LaTeX; a note's longest display block is a
 @router.post("/math")
 def math(payload: dict):
     """The formulas in Learn's text as MathML, converted as the chat's are
-    (server._mathml: the browser draws them, and a formula that does not
+    (render.mathml: the browser draws them, and a formula that does not
     convert comes back as written)."""
-    from silica.ui.web.server import _mathml
-
     tex = [str(t)[:MATH_CHARS] for t in (payload.get("tex") or [])][:MATH_MAX]
     display = list(payload.get("display") or [])
-    return {"mathml": [_mathml(t, bool(display[i]) if i < len(display) else False) for i, t in enumerate(tex)]}
+    return {"mathml": [render.mathml(t, bool(display[i]) if i < len(display) else False) for i, t in enumerate(tex)]}
 
 
 @router.post("/teach")

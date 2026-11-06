@@ -68,15 +68,15 @@ def test_a_figure_whose_file_is_gone_is_left_out():
 
 
 def test_an_asset_name_is_found_literally_not_as_a_glob(tmp_path, monkeypatch):
-    """_find_asset's basename fallback (shared by /asset and the placement) used
+    """find_asset's basename fallback (shared by /asset and the placement) used
     the name as an rglob pattern: `fig[1].png` found fig1.png, and a `**` in a
     name raised ValueError while an answer was being finished."""
     from silica.config import CONFIG
-    from silica.ui.web.server import _find_asset
+    from silica.ui.web.render import find_asset
 
     (tmp_path / "img").mkdir()
     (tmp_path / "img" / "fig1.png").write_bytes(b"x")
     (tmp_path / "img" / "fig[1].png").write_bytes(b"x")
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    assert _find_asset("fig[1].png") == (tmp_path / "img" / "fig[1].png").resolve()
-    assert _find_asset("a**b.png") is None
+    assert find_asset("fig[1].png") == (tmp_path / "img" / "fig[1].png").resolve()
+    assert find_asset("a**b.png") is None

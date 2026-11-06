@@ -34,9 +34,9 @@ def client(tmp_vault, tmp_path, monkeypatch):
 
 def _render(body: str) -> str:
     """A note body as the drawer would hand it to innerHTML."""
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    return _linkify(body, None)
+    return linkify(body, None)
 
 
 def _live_markup(rendered: str) -> list[tuple[str, dict[str, str]]]:
@@ -473,18 +473,18 @@ _FOREIGN_IMAGES = [
 
 @pytest.mark.parametrize("answer", _FOREIGN_IMAGES)
 def test_an_answer_draws_no_image_from_another_origin(answer):
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify(answer, None, remote_images=False)
+    html = linkify(answer, None, remote_images=False)
     leaving = [a["src"] for tag, a in _live_markup(html)
                if tag == "img" and not a["src"].startswith(("/asset?", "data:image/"))]
     assert leaving == []
 
 
 def test_an_answer_keeps_the_vaults_own_images():
-    from silica.ui.web.server import _linkify
+    from silica.ui.web.render import linkify
 
-    html = _linkify("![a](assets/a.png) ![d](data:image/png;base64,iVBORw0KGgo=)",
+    html = linkify("![a](assets/a.png) ![d](data:image/png;base64,iVBORw0KGgo=)",
                     None, remote_images=False)
     srcs = [a["src"] for tag, a in _live_markup(html) if tag == "img"]
     assert len(srcs) == 2

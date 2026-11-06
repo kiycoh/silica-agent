@@ -78,24 +78,24 @@ def test_leaked_containers_parse_and_scalars_stay_strings():
 # --- OFM strip vs inline code spans ----------------------------------------
 
 def test_strip_ofm_spares_inline_code_spans():
-    from silica.ui.web.server import _strip_ofm_meta
+    from silica.kernel.base.markdown import strip_ofm_meta
 
     src = "keep `a %% b` and drop %%this%% but keep ``x %% y``\n"
-    out = _strip_ofm_meta(src)
+    out = strip_ofm_meta(src)
     assert "`a %% b`" in out
     assert "``x %% y``" in out
     assert "%%this%%" not in out
 
     fenced = "```\ncode %% stays\n```\nprose %%goes%% here\n"
-    out = _strip_ofm_meta(fenced)
+    out = strip_ofm_meta(fenced)
     assert "code %% stays" in out
     assert "%%goes%%" not in out
 
 
 def test_strip_ofm_spares_block_ids_in_spans():
-    from silica.ui.web.server import _strip_ofm_meta
+    from silica.kernel.base.markdown import strip_ofm_meta
 
-    out = _strip_ofm_meta("code `line ^ref` prose ^blockid\n")
+    out = strip_ofm_meta("code `line ^ref` prose ^blockid\n")
     assert "`line ^ref`" in out
     assert "^blockid" not in out
 
