@@ -27,6 +27,7 @@ from silica.agent.constraints import (
     web_turn_constraints,
 )
 from silica.agent.loop import _EMPTY_COMPLETION, _is_tool_failure, run_agent
+from silica.agent.mentions import image_mark
 from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
 from silica.config import CONFIG, demo
 from silica.kernel import vault_files
@@ -574,7 +575,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # re-sent with every later turn and stored with the session.
         images = [] if text.startswith("/") else list(attachments)
         if images:
-            agent_msg += "".join(f"\n\n[image attached: {p}]" for p in images)
+            agent_msg += "".join(image_mark(p) for p in images)
         msg: dict[str, Any] = {"role": "user", "content": agent_msg}
         if text.startswith("/"):
             msg["origin"] = "cli"

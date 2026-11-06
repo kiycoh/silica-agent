@@ -436,3 +436,13 @@ def test_a_refused_title_does_not_pull_the_keys_back_into_it(app):
     p.wait("!document.querySelector('#nv-msg').hidden", 5, "the reason")
     assert p.js("centreNote.editor.getText()") == "Body typed at once"
     assert p.js("document.querySelector('#nv-title').value") == "Other"
+
+
+def test_the_pickers_accept_what_the_server_serves(app):
+    """The chat's + offers the images even where no converter reads them, read from
+    /supported_types now and not from a list of the page's own."""
+    p, _vault = app
+    d = json.loads(p.js("fetch('/supported_types').then((r) => r.text())"))
+    want = ",".join(dict.fromkeys([*d["extensions"], ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"]))
+    p.wait(f"document.querySelector('#nucleate-file').accept === {json.dumps(want)}", 5, "the chat's accept")
+    p.wait(f"typeof vaultImportMax !== 'undefined' && vaultImportMax === {d['import_max']}", 5, "the import cap")

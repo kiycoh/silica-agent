@@ -40,6 +40,17 @@ OPEN, CLOSE = "<named-notes>", "</named-notes>"
 # and Discover's story block (ADR-0137 point 8) with them.
 STRIP = re.compile(r"\n*<(named-notes|converted-files|discover-story)>.*?</\1>", re.S)
 
+# An image a turn carries, as its message holds it: the saved path, which the
+# transcript and every later turn keep where the base64 would be re-sent. Here, with
+# the other things that are in a message and are not the person's words, because a
+# tool reads it back too and the web server is no import for a tool.
+IMAGE_MARK = "[image attached: "
+IMAGE_MARK_RE = re.compile(r"\n*\[image attached: ([^\]\n]+)\]")
+
+
+def image_mark(path: object) -> str:
+    return f"\n\n{IMAGE_MARK}{path}]"
+
 
 def refs(text: str) -> list[str]:
     """The note targets `text` links to, in order, each once."""

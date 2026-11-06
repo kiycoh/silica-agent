@@ -38,17 +38,21 @@ def supported_types():
     `accept`, `import` the vault `+`'s and its folder filter (ADR-0098 point 3).
     `mail` is the Mail row's picker, kept apart: the composer stages no mail
     (`drop.is_mail`). On the server both lists are ADR-0087 point 5's: the host
-    has no mineru and no LibreOffice, and offered 60 extensions until then."""
+    has no mineru and no LibreOffice, and offered 60 extensions until then.
+    `images` ride the chat's `+` even where no converter reads them: they go with
+    the message. `import_max` is what one vault `+` may hold, for the page to say
+    so before it sends the first of its batches."""
     from silica.config import hosted
-    from silica.kernel.base.formats import HOSTED_EXTENSIONS
+    from silica.kernel.base.formats import HOSTED_EXTENSIONS, IMAGE_MIME
     from silica.sources.mail import SUFFIXES
     from silica.sources.registry import supported_nucleate_extensions
-    from silica.ui.web.vault_import import importable_extensions
+    from silica.ui.web.vault_import import MAX_FILES_PER_IMPORT, importable_extensions
 
     on_server = hosted()
     exts = list(HOSTED_EXTENSIONS) if on_server else supported_nucleate_extensions()
     return {"extensions": exts, "import": importable_extensions(on_server), "mail": list(SUFFIXES),
-            "upload_max_mb": _EDGE_MAX_MB if on_server else None}
+            "upload_max_mb": _EDGE_MAX_MB if on_server else None,
+            "images": list(IMAGE_MIME), "import_max": MAX_FILES_PER_IMPORT}
 
 
 @router.post("/nucleate")

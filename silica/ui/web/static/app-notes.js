@@ -286,7 +286,7 @@ fetch("/supported_types")
   .then((r) => r.json())
   // Images are offered even when no converter reads them: they go to the chat.
   .then((d) => {
-    nucleateInput.accept = [...new Set([...(d.extensions || []), ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"])].join(",");
+    nucleateInput.accept = [...new Set([...(d.extensions || []), ...(d.images || [])])].join(",");
     uploadMaxMb = d.upload_max_mb || 0;
   })
   .catch(() => {}); // accept="" just means the picker shows all files
@@ -361,14 +361,18 @@ function importBatches(files, maxFiles, maxBytes) {
 // vault's own +, which imports into no workspace.
 let vaultImportWorkspace = "";
 $("#vault-add").addEventListener("click", (e) => { if (e.isTrusted) vaultImportWorkspace = ""; }, true);
-const VAULT_IMPORT_MAX = 500;
 // From /supported_types. A folder picker ignores `accept`, so the same list
 // filters what a folder hands over before anything is sent; while it is empty
 // nothing is filtered here, and the server's own check still holds.
 let vaultImportTypes = [];
+let vaultImportMax = Infinity;
 fetch("/supported_types")
   .then((r) => r.json())
-  .then((d) => { vaultImportTypes = d.import || []; vaultFilesInput.accept = vaultImportTypes.join(","); })
+  .then((d) => {
+    vaultImportTypes = d.import || [];
+    vaultFilesInput.accept = vaultImportTypes.join(",");
+    vaultImportMax = d.import_max || Infinity;
+  })
   .catch(() => {});
 
 // Fixed under the +, not inside the drawer: the drawer scrolls and clips, and
@@ -489,8 +493,8 @@ async function importToVault(files, fromFolder) {
   wanted.splice(0, wanted.length, ...fits);
   const folder = fromFolder && wanted[0] ? relOf(wanted[0]).split("/")[0] : "";
   showSidePane("side-vault"); // the import reports in the notes
-  if (wanted.length > VAULT_IMPORT_MAX) {
-    renderVaultImport({ failed: `${wanted.length} files Silica reads are in it, and one import takes at most ${VAULT_IMPORT_MAX}: pick a smaller folder` });
+  if (wanted.length > vaultImportMax) {
+    renderVaultImport({ failed: `${wanted.length} files Silica reads are in it, and one import takes at most ${vaultImportMax}: pick a smaller folder` });
     return;
   }
   const rows = [];
