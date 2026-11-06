@@ -663,6 +663,31 @@ def test_collision_high_similarity_routes_to_patch():
     assert remaining == [] or all(len(b.get("concepts", [])) == 0 for b in remaining)
 
 
+def test_collision_dedup_item_carries_the_run_id():
+    """COLLISION's workers file their notes under the FSM's run id. Without it
+    `_item_provenance` yields "" and the ledger row falls back to the undo
+    journal's id, a keyspace the dangling-link sweep never reads."""
+    from silica.kernel.workqueue import WorkQueue
+
+    fsm = _make_fsm_at_collision([{"name": "Deep Nets", "inbox_excerpt": "About deep nets."}])
+    fsm.work_queue = WorkQueue()
+    mock_store = MagicMock()
+    mock_store.__len__ = lambda _: 5
+    mock_store.cosine_top_k.return_value = [{"path": "DL/Neural Networks.md", "name": "Neural Networks", "score": 0.75}]
+    mock_embedder = MagicMock()
+    mock_embedder.embed.return_value = [[0.1, 0.2, 0.3]]
+
+    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
+         patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
+         patch("silica.model.providers.get_embedder", return_value=mock_embedder):
+        mock_cfg.sim_threshold_high = 0.85
+        mock_cfg.sim_threshold_low = 0.65
+        fsm.step()
+
+    [item] = fsm.work_queue.items()
+    assert item.context["run_id"] == fsm.progress.run_id != ""
+
+
 def test_collision_low_similarity_keeps_for_distillation():
     """score ≤ τ_low → concept kept in chunk for normal distillation, no patch ops."""
     fsm = _make_fsm_at_collision([{"name": "Quantum Entanglement", "inbox_excerpt": "Something unrelated."}])

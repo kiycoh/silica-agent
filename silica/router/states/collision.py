@@ -613,6 +613,10 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
                     # C2 verdict routing: lets the dedup capability clean up
                     # (or author the distinct spoke from) the twin bundle.
                     "content_hash": fsm._current_content_hash,
+                    # The provenance ledger is keyed on the FSM's own run id:
+                    # without it the worker's notes land under the undo
+                    # journal's id, which the dangling-link sweep cannot read.
+                    "run_id": getattr(getattr(fsm, "progress", None), "run_id", "") or "",
                     "target_dir": fsm.target_dir,
                 },
                 reason=f"borderline_similarity score={d.get('score', 0):.3f}",
