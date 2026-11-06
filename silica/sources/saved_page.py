@@ -219,15 +219,19 @@ def _fetch_json(url: str):
     return resp.json()
 
 
-def _chosen(manifest: dict, areas) -> list[str]:
-    """The note slugs of the areas picked; every note when none are named.
-    -1 is the notes with no link, which the vault's page lists as an area."""
+def _chosen(manifest: dict, areas, named=None) -> list[str]:
+    """The note slugs of what a reader picked, whole areas and notes by name
+    (ADR-0151, amendment of 2026-11-06, point 8); every note when neither is
+    given. -1 is the notes with no link, which the vault's page lists as an
+    area; an area that holds nothing, the -2 a page sends beside `notes`, takes
+    nothing, so a Silica that reads only `areas` offers none instead of all."""
     rows = [(r[2], r[5]) for r in manifest.get("n", []) if isinstance(r, list) and len(r) >= 6]
     rows += [(-1, r[1]) for r in manifest.get("unlinked", []) if isinstance(r, list) and len(r) >= 2]
-    if areas is None:
+    if areas is None and named is None:
         return [slug for _a, slug in rows]
-    want = {int(a) for a in areas if str(a).lstrip("-").isdigit()}
-    return [slug for a, slug in rows if a in want]
+    want = {int(a) for a in areas or () if str(a).lstrip("-").isdigit()}
+    names = set(named or ())
+    return [slug for a, slug in rows if a in want or slug in names]
 
 
 def _vault_files(url: str) -> tuple[dict, dict]:
@@ -235,9 +239,13 @@ def _vault_files(url: str) -> tuple[dict, dict]:
     return _fetch_json(clean + "vault.json"), _fetch_json(clean + "notes.json")
 
 
-def prepare_vault(url: str, areas=None, vault: Path | None = None, *, files=None, private: bool = False) -> dict:
+def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None, files=None,
+                  private: bool = False) -> dict:
     """What the save sheet shows for a vault, and every note it would write.
-    `files` is (manifest, notes) already read, as an invitation's are."""
+    `files` is (manifest, notes) already read, as an invitation's are. A note
+    already saved from this vault stays as it is and is counted, not written:
+    a reader saves a vault in pieces, and the notes of one vault share one
+    folder (ADR-0151, amendment of 2026-11-06, point 10)."""
     from silica.kernel.vault_manifest import in_write_dir
     from silica.kernel.write import frontmatter as fm
 
@@ -250,28 +258,40 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, files=None
     if not isinstance(manifest, dict) or not isinstance(notes, dict):
         raise ValueError("that vault could not be read")
     title = t if isinstance(t := manifest.get("title"), str) else vslug
-    chosen = [s for s in _chosen(manifest, areas) if isinstance(notes.get(s), str)]
-    folder = in_write_dir(f"{SAVED_DIR}/@{handle}/{_folder_name(title)}")
-    if _exists(folder):
-        folder = f"{folder} ({datetime.date.today().isoformat()})"
-    base = url if url.endswith("/") else ""
+    chosen = [s for s in _chosen(manifest, areas, named) if isinstance(notes.get(s), str)]
     today = datetime.date.today().isoformat()
+    folder = in_write_dir(f"{SAVED_DIR}/@{handle}/{_folder_name(title)}")
+    if private and _exists(folder):
+        # a Private copy carries no `source` to know its notes by, so a second one stays apart
+        folder = f"{folder} ({today})"
+    base = url if url.endswith("/") else ""
+    mine = saved_copies(handle, vault)
     names: dict[str, str] = {}
     titles: dict[str, str] = {}
     taken: set[str] = set()
+    already: set[str] = set()
     for slug in chosen:
         props, _raw, _body = fm.split(notes[slug])
-        t = (props or {}).get("title")
+        props = props or {}
+        _who, src = _credit(props, handle, base + slug if base else "")
+        if src in mine:
+            # in `names` all the same: a link from a note of this save opens the copy that stayed
+            already.add(slug)
+            names[slug] = mine[src].removesuffix(".md")
+            continue
+        t = props.get("title")
         titles[slug] = t.strip() if isinstance(t, str) and t.strip() else slug.replace("-", " ")
         name = _FOLDER_UNSAFE.sub(" ", titles[slug]).strip() or slug
         n, cand = 2, name
-        while cand.lower() in taken:
+        # the disk too: the folder may hold another note of that title, from an earlier save
+        while cand.lower() in taken or _exists(f"{folder}/{cand}.md"):
             cand, n = f"{name} {n}", n + 1
         taken.add(cand.lower())
         names[slug] = f"{folder}/{cand}"
-    mine = saved_copies(handle, vault)
     out = {}
     for slug in chosen:
+        if slug in already:
+            continue
         props, _raw, body = fm.split(notes[slug])
         props = props or {}
 
@@ -297,13 +317,13 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, files=None
         out[names[slug] + ".md"] = fm.dump(note, new_body)
     adding = sum(len(t.encode("utf-8")) for t in out.values())
     return {"url": url, "title": title, "author": f"@{handle}", "folder": folder,
-            "notes": len(out), "of": len(_chosen(manifest, None)),
+            "notes": len(out), "already": len(already), "of": len(_chosen(manifest, None)),
             "areas": manifest.get("areas", []), "room": room(len(out), adding, vault),
             "license": manifest.get("license", ""), "files": out}
 
 
-def save_vault(url: str, areas=None, vault: Path | None = None, *, files=None, private: bool = False,
-               assets: Path | None = None) -> dict:
+def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, files=None,
+               private: bool = False, assets: Path | None = None) -> dict:
     """Write the chosen notes as one run of the undo journal, so `/revert`
     takes the whole save back (ADR-0151 point 8). Refused past the room
     left, naming the shortfall, before anything is written."""
@@ -315,9 +335,9 @@ def save_vault(url: str, areas=None, vault: Path | None = None, *, files=None, p
     from silica.kernel.write.ops import InverseOp, InverseOpKind
     from silica.kernel.write.undo_journal import get_undo_journal
 
-    p = prepare_vault(url, areas, vault, files=files, private=private)
+    p = prepare_vault(url, areas, vault, named=named, files=files, private=private)
     if not p["files"]:
-        raise ValueError("no note of that vault was chosen")
+        raise ValueError("those notes are saved already" if p["already"] else "no note of that vault was chosen")
     if p["room"]["short"]:
         raise ValueError(f"this vault has no room for that save: {p['room']['short']}")
     journal = get_undo_journal()

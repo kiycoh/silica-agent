@@ -296,6 +296,15 @@ def _areas(raw) -> list[int] | None:
     return [int(a) for a in items if str(a).strip().lstrip("-").isdigit()]
 
 
+def _names(raw) -> list[str] | None:
+    """`?notes=a,b` or a JSON list: the notes a reader picked by name, beside any whole areas;
+    None is none named. Only ever compared with a manifest's slugs, so a stray word picks nothing."""
+    if raw is None or raw == "" or raw == []:
+        return None
+    items = raw if isinstance(raw, list) else str(raw).split(",")
+    return [str(s).strip() for s in items if str(s).strip()]
+
+
 @router.get("/vault/save/preview")
 async def save_preview(request: Request, url: str = ""):
     """What the confirm card shows. A GET that only reads: the page it names
@@ -303,9 +312,10 @@ async def save_preview(request: Request, url: str = ""):
     from silica.sources import saved_page
 
     areas = _areas([a for v in request.query_params.getlist("areas") for a in v.split(",")])
+    named = _names([s for v in request.query_params.getlist("notes") for s in v.split(",")])
     try:
         if saved_page.is_vault(url):
-            p = await asyncio.to_thread(saved_page.prepare_vault, url, areas)
+            p = await asyncio.to_thread(saved_page.prepare_vault, url, areas, named=named)
             p.pop("files")
             return {**p, "kind": "vault", "chosen": areas}
         p = await asyncio.to_thread(saved_page.prepare, url)
@@ -320,13 +330,13 @@ async def save_preview(request: Request, url: str = ""):
     return {**p, "kind": "note"}
 
 
-async def _write_turn(fn, *args):
+async def _write_turn(fn, *args, **kwargs):
     from silica.ui.web.server import _begin_turn, _embed_imported, _end_turn
 
     if not _begin_turn():
         raise HTTPException(409, "a turn is running: save when it ends")
     try:
-        out = await asyncio.to_thread(fn, *args)
+        out = await asyncio.to_thread(fn, *args, **kwargs)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except Exception as exc:
@@ -345,7 +355,8 @@ async def save_page(payload: dict):
 
     url = str(payload.get("url") or "")
     if saved_page.is_vault(url):
-        out = await _write_turn(saved_page.save_vault, url, _areas(payload.get("areas")))
+        out = await _write_turn(saved_page.save_vault, url, _areas(payload.get("areas")),
+                                named=_names(payload.get("notes")))
         return {"path": out["first"], **out}
     return {"path": await _write_turn(saved_page.save, url)}
 

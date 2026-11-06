@@ -814,17 +814,19 @@ new MutationObserver(() => stampSaved($("#log"))).observe($("#log"), { childList
 
 let saveWhat = null;   // {url} or {invite}
 let saveAreas = null;  // the area indexes ticked, null for all of them
+let saveNotes = null;  // the notes a page named beside its whole areas, null for none
 
 function saveAreasQuery() {
-  if (saveAreas === null) return "";
-  return saveAreas.length ? saveAreas.map((a) => "&areas=" + a).join("") : "&areas=none";
+  const named = saveNotes ? "&notes=" + saveNotes.join(",") : "";
+  if (saveAreas === null) return named;
+  return (saveAreas.length ? saveAreas.map((a) => "&areas=" + a).join("") : "&areas=none") + named;
 }
 
 async function openSaveSheet(what) {
   const sheet = $("#save-sheet");
   const card = $("#save-card");
   const go = $("#save-go");
-  if (what !== saveWhat) saveAreas = what.areas === undefined ? null : what.areas;
+  if (what !== saveWhat) { saveAreas = what.areas === undefined ? null : what.areas; saveNotes = what.notes || null; }
   saveWhat = what;
   go.disabled = true;
   go.textContent = "save";
@@ -887,17 +889,20 @@ async function openSaveSheet(what) {
     li.append(lab);
     areas.append(li);
   }
-  parts.push(mkEl("p", "st-sheet-text", `${pubCount(p.notes)} of ${p.of.toLocaleString("en-GB")}, into ${p.folder}/. Links between them stay links${what.invite ? "; a link to a note you leave out keeps its words" : `; a link to a note you leave out opens ${p.author}'s page`}.`), areas);
+  parts.push(mkEl("p", "st-sheet-text", `${pubCount(p.notes + p.already)} of ${p.of.toLocaleString("en-GB")}, into ${p.folder}/. Links between them stay links${what.invite ? "; a link to a note you leave out keeps its words" : `; a link to a note you leave out opens ${p.author}'s page`}.`));
+  if (p.already) parts.push(mkEl("p", "st-sheet-text", `${p.already.toLocaleString("en-GB")} of these ${p.already === 1 ? "is already in your vault and stays as it is" : "are already in your vault and stay as they are"}.`));
+  // a selection was made on the page, note by note: the sheet confirms it, areas could not say it
+  if (!saveNotes) parts.push(areas);
   const room = p.room;
   if (room.max_notes || room.max_mb) {
     parts.push(mkEl("p", "st-sheet-text" + (room.short ? " sv-over" : ""), room.short
-      ? `This save does not fit: ${room.short}. Choose fewer areas.`
+      ? `This save does not fit: ${room.short}. Choose fewer ${saveNotes ? "notes" : "areas"}.`
       : `Your vault holds ${room.notes.toLocaleString("en-GB")} notes${room.max_notes ? ` of ${room.max_notes.toLocaleString("en-GB")}` : ""}; after saving, ${(room.notes + p.notes).toLocaleString("en-GB")}.`));
   }
   if (p.license) parts.push(mkEl("p", "st-sheet-text", `License: ${p.license === "not stated" ? "not stated by the author" : p.license}.`));
   parts.push(mkEl("p", "sv-snap", `This saves the vault as it is today, as one write you can take back. If ${p.author} edits or removes a note later, your copy stays as saved.`));
   card.replaceChildren(...parts);
-  go.textContent = `save ${pubCount(p.notes)}`;
+  go.textContent = p.notes ? `save ${pubCount(p.notes)}` : "nothing new to save";
   go.disabled = !p.notes || !!room.short;
   if (!go.disabled) go.focus();
 }
@@ -907,6 +912,7 @@ function closeSaveSheet() {
   $("#save-card").replaceChildren();
   saveWhat = null;
   saveAreas = null;
+  saveNotes = null;
 }
 
 $("#save-cancel").addEventListener("click", closeSaveSheet);
@@ -919,7 +925,7 @@ $("#save-go").addEventListener("click", async () => {
   try {
     r = await fetch(what.invite ? "/vault/invitations/save" : "/vault/save", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(what.invite ? { author: what.invite.author, vault: what.invite.vault, areas: saveAreas } : { url: what.url, areas: saveAreas }),
+      body: JSON.stringify(what.invite ? { author: what.invite.author, vault: what.invite.vault, areas: saveAreas } : { url: what.url, areas: saveAreas, notes: saveNotes }),
     });
     d = await r.json().catch(() => ({}));
   } catch {
@@ -939,13 +945,14 @@ $("#save-go").addEventListener("click", async () => {
   openNote(d.path);
 });
 
-// A page's button opens the app on ?save=<page>[&areas=..]; the address leaves the bar at once,
+// A page's button opens the app on ?save=<page>[&areas=..][&notes=..]; the address leaves the bar at once,
 // so a reload does not ask again.
 (() => {
   const qs = new URLSearchParams(location.search);
   const q = qs.get("save");
   if (!q) return;
   const areas = qs.getAll("areas").flatMap((a) => a.split(",")).filter((a) => /^-?\d+$/.test(a)).map(Number);
+  const notes = qs.getAll("notes").flatMap((n) => n.split(",")).filter((n) => /^[a-z0-9-]+$/.test(n));
   history.replaceState(null, "", location.pathname + location.hash);
-  openSaveSheet({ url: q, areas: areas.length ? areas : null });
+  openSaveSheet({ url: q, areas: areas.length ? areas : null, notes: notes.length ? notes : null });
 })();

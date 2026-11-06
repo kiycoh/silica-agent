@@ -363,9 +363,57 @@ def test_a_vault_saves_the_areas_picked_as_one_revertible_run(client, vault_fetc
     assert f"source: {PAGE}" in text and "author: '@marta'" in text and "form: clip" in text
     runs = get_undo_journal()._conn().execute("SELECT COUNT(*) FROM inverses WHERE run_id = ?", (r["run"],)).fetchone()[0]
     assert runs == 2
-    # a second save of the vault goes beside the first, dated
-    again = tc.post("/vault/save", json={"url": BASE}).json()
-    assert again["notes"] == 3 and again["folder"].startswith("Saved/@marta/Memoria (")
+
+
+def test_a_later_save_adds_to_the_same_folder_and_leaves_what_is_there(client, vault_fetched):
+    """Saving one area again used to write its notes a second time with no warning, in a dated
+    folder (2026-11-06): a reader who saves in pieces now has one folder and no double."""
+    tc, tmp = client
+    tc.post("/vault/save", json={"url": BASE, "notes": ["forgetting-curve"]})
+    folder = tmp / "vault" / "Saved/@marta/Memoria"
+    kept = folder / "Forgetting curve.md"
+    kept.write_text(kept.read_text(encoding="utf-8") + "\nMy own margin note.\n", encoding="utf-8")
+    p = tc.get("/vault/save/preview", params={"url": BASE}).json()
+    assert (p["notes"], p["already"], p["of"], p["folder"]) == (2, 1, 3, "Saved/@marta/Memoria")
+    r = tc.post("/vault/save", json={"url": BASE}).json()
+    assert r["notes"] == 2 and r["folder"] == "Saved/@marta/Memoria"
+    assert sorted(f.name for f in folder.iterdir()) == ["Diary.md", "Forgetting curve.md", "Spacing effect.md"]
+    assert "My own margin note." in kept.read_text(encoding="utf-8")
+    # a link to the note that stayed opens that copy, as one saved in the same write would
+    assert "[[Saved/@marta/Memoria/Forgetting curve|Forgetting curve]]" in (folder / "Spacing effect.md").read_text(encoding="utf-8")
+    p = tc.get("/vault/save/preview", params={"url": BASE}).json()
+    assert (p["notes"], p["already"]) == (0, 3)
+    assert "saved already" in tc.post("/vault/save", json={"url": BASE}).json()["detail"]
+
+
+def test_a_new_note_never_lands_on_a_file_the_folder_already_holds(client, vault_fetched):
+    tc, tmp = client
+    folder = tmp / "vault" / "Saved/@marta/Memoria"
+    folder.mkdir(parents=True)
+    (folder / "Diary.md").write_text("My own diary, no source.\n", encoding="utf-8")
+    tc.post("/vault/save", json={"url": BASE, "notes": ["diary"]})
+    assert (folder / "Diary.md").read_text(encoding="utf-8") == "My own diary, no source.\n"
+    assert "Alone." in (folder / "Diary 2.md").read_text(encoding="utf-8")
+
+
+def test_a_reader_saves_whole_areas_and_single_notes_in_one_address(client, vault_fetched):
+    tc, tmp = client
+    p = tc.get("/vault/save/preview", params={"url": BASE, "areas": "0", "notes": "diary"}).json()
+    assert (p["notes"], p["of"]) == (3, 3)
+    p = tc.get("/vault/save/preview", params={"url": BASE, "notes": "forgetting-curve,no-such-note"}).json()
+    assert p["notes"] == 1
+    r = tc.post("/vault/save", json={"url": BASE, "notes": ["diary"]}).json()
+    assert r["notes"] == 1
+    assert [f.name for f in (tmp / "vault" / "Saved/@marta/Memoria").iterdir()] == ["Diary.md"]
+
+
+def test_the_area_a_page_sends_beside_notes_takes_nothing_so_an_old_silica_offers_nothing(client, vault_fetched):
+    """A Silica before `notes` reads `areas` alone: -2 must show it no note, not the whole vault,
+    and must not get in the way of one that reads both (amendment of 2026-11-06, Open 1)."""
+    tc, _ = client
+    assert tc.get("/vault/save/preview", params={"url": BASE, "areas": "-2"}).json()["notes"] == 0
+    both = tc.get("/vault/save/preview", params={"url": BASE, "areas": "-2", "notes": "diary"}).json()
+    assert both["notes"] == 1
 
 
 def test_a_vault_save_past_the_room_left_is_refused_naming_the_shortfall(client, vault_fetched, monkeypatch):

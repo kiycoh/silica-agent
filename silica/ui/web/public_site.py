@@ -178,7 +178,7 @@ def _report(url: str, site: _Site) -> str:
     if not to:
         return ""
     href = (f"mailto:{to}?subject={quote('Report: ' + url)}" if "@" in to and "://" not in to else to)
-    return f'<a class="btn-o" href="{_esc(href)}">Report</a>'
+    return f'<a class="btn-o report" href="{_esc(href)}">Report</a>'
 
 
 def _app() -> str:
@@ -187,10 +187,10 @@ def _app() -> str:
 
 
 def _save_form(url: str, label: str, form_id: str = "save") -> str:
-    """Save into a Silica the reader names (ADR-0151 point 8). Without the
-    script, two submit buttons, one per Silica the page knows; the script
-    adds another address and remembers the choice. A GET, as ADR-0143 point
-    8 asks: the reader's Silica asks before it writes."""
+    """Save into a Silica the reader names (ADR-0151 point 8): two submit
+    buttons, one per Silica the page knows, for a reader without the script.
+    With it the room asks instead, and reads the two addresses from here. A
+    GET, as ADR-0143 point 8 asks: the reader's Silica asks before it writes."""
     return (f'<form class="vp-save" id="{form_id}" method="get" action="{_esc(_app())}/" data-save>'
             f'<input type="hidden" name="save" value="{_esc(url)}">'
             f'<details class="where"><summary class="btn">{_esc(label)}</summary>'
@@ -198,11 +198,19 @@ def _save_form(url: str, label: str, form_id: str = "save") -> str:
             f'<div class="row"><button type="submit" class="btn btn--small" formaction="{_esc(_app())}/">'
             f'Silica hosted</button><button type="submit" class="btn-o" formaction="{LOCAL_APP}/">'
             f'Silica on this computer</button></div>'
-            f'<div class="row other" hidden><input class="sel" data-other placeholder="https://" '
-            f'aria-label="Address of your Silica"><button type="button" class="btn-o" data-go>Another address'
-            f'</button></div>'
             f'<p class="dim">Your Silica asks before it writes anything, and every note keeps its author\'s '
             f'name.</p></div></details></form>')
+
+
+def _room(site: _Site, vslug: str, note: str = "") -> str:
+    """What the script reads to turn a vault's page, or a note's, into the room (ADR-0151, amendment
+    of 2026-11-06). Absolute on the host: caddy also serves the vault at /@h/<vault> with no slash,
+    where a relative "vault.json" would name the Page's folder instead."""
+    here = f"{site.root}/{vslug}/" if site.base else ""
+    vaults = f"{site.root}/vaults.json" if site.base else "../vaults.json"
+    return (f' data-room="{_esc(here)}vault.json" data-here="{_esc(here)}" data-vaults="{_esc(vaults)}"'
+            + ("" if site.base else ' data-ext=".html"')
+            + (f' data-note="{_esc(note)}"' if note else ""))
 
 
 def _head(title: str, desc: str, site: _Site, lvl: int, *, canonical: str = "", md: str = "",
@@ -549,7 +557,8 @@ def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, bac
         side += (f'<div><h2>More from {_esc(conf["title"])}</h2><ul>{more_html}'
                  f'<li><a href="{_esc(site.vault(vslug, 1))}">All {_fmt(len(shown))} notes</a></li></ul></div>')
     page = (head + "<body>\n" + top(site.catalog(), _app(), page=site.page(1), h=h)
-            + '<main class="sheet"><div class="art-grid"><article class="art">' + crumb + banner
+            + f'<main class="sheet"{_room(site, vslug, slug)}><div class="art-grid"><article class="art">'
+            + crumb + banner
             + f'<p class="meta">{byline}</p><h1>{_esc(titles[p])}</h1>'
             + (f'<p class="tags">{" · ".join(_esc(t) for t in tags)}</p>' if tags else "")
             + f'<div class="body">{r["html"]}</div>{actions}</article>'
@@ -559,8 +568,9 @@ def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, bac
 
 
 def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
-    """A vault's own page (ADR-0151 point 4): the cover, the facts, Save by
-    areas, Report, every note by area, and the author's other vaults."""
+    """A vault's own page (ADR-0151 point 4) as a reader without the script
+    has it: the cover, the facts, Save by areas, Report and every note by area.
+    With the script the same address opens as the room (`_room`)."""
     count = m["count"]
     vslug = m["slug"]
     url = m["url"] or "index.html"
@@ -600,31 +610,20 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
              + f'<a href="{_esc(site.page(1))}">@{_esc(h)}</a> / {_esc(m["title"])}</nav>')
     head = _head(f"{m['title']} · @{h}", m["line"] or f"{_plural(count['notes'], 'note')} by @{h}", site, 1,
                  canonical=m["url"], lang=lang)
-    vaults_json = f"{site.root}/vaults.json" if site.base else "../vaults.json"
-    # absolute on the host: caddy also serves the vault at /@h/<vault> with no slash, where a
-    # relative "vault.json" would name the Page's folder instead
-    here = f"{site.root}/{vslug}/" if site.base else ""
     return (head + "<body>\n" + top(site.catalog(), _app(), page=site.page(1), h=h)
-            + f'<main class="sheet"><section class="wrap vp grid" aria-labelledby="vp-h"'
-            f' data-vaults="{_esc(vaults_json)}" data-self="{_esc(vslug)}" data-root="{_esc(site.page(1))}"'
-            f' data-here="{_esc(here)}">'
+            + f'<main class="sheet"{_room(site, vslug)}><section class="wrap vp grid" aria-labelledby="vp-h">'
             + crumb
-            + f'<figure class="vp-cover"><div class="well" data-cover="{_esc(here)}vault.json">{_svg(c)}'
-            f'<canvas role="img" aria-label="{_esc(m["title"])} as a graph of its notes"></canvas>'
-            f'<div class="ctip" hidden></div></div><figcaption>{caption}</figcaption></figure>'
+            + f'<figure class="vp-cover"><div class="well">{_svg(c)}</div><figcaption>{caption}</figcaption>'
+            f'</figure>'
             + f'<div class="vp-side"><h1 id="vp-h">{_esc(m["title"])}</h1>'
-            f'<p class="vp-by">by <a href="{_esc(site.page(1))}">@{_esc(h)}</a><span data-of></span></p>'
+            f'<p class="vp-by">by <a href="{_esc(site.page(1))}">@{_esc(h)}</a></p>'
             + (f'<p class="vp-line">{_esc(m["line"])}</p>' if m["line"] else "")
             + f'<dl class="facts">{dl}</dl>{save}'
             f'<div class="row"><a class="btn-o" href="#notes">Read the notes</a>{_report(url, site)}</div></div>'
             + f'<div class="vp-areas"><div class="vp-areas-head"><h2>Areas</h2>'
-            f'<p>Choose what to save.<span data-all hidden> <button type="button" class="linkish" data-pick="all">'
-            f'All</button> · <button type="button" class="linkish" data-pick="none">None</button></span></p>'
-            f'<span class="sum"><span class="num" data-sum>{_fmt(count["notes"])}</span> of '
-            f'<span class="num">{_fmt(count["notes"])}</span> notes chosen</span></div>'
+            f'<p>Choose what to save.</p></div>'
             f'<ul class="areas">{areas}</ul></div>'
             + f'<div class="vp-notes" id="notes"><h2>The notes</h2>{notes}</div>'
-            + f'<div class="vp-more" data-more hidden><h2>Also by @{_esc(h)}</h2><div class="cat-grid"></div></div>'
             + "</section></main>\n" + foot(f"A vault @{_esc(h)} chose to publish.", _app()))
 
 
@@ -646,8 +645,10 @@ def card(e: dict, href: str, graph: str, who: bool = True) -> str:
 def write_page(vault: Path | None = None) -> None:
     """The Page, `/@handle/` (ADR-0151 point 3): the account's Public vaults
     from their published manifests, and `vaults.json`, which a vault's page
-    reads for "Also by". With no Public vault the Page goes, so its address
-    answers that there is no page; a laptop's copy of the sheet goes with it."""
+    reads for "Also by". One Public vault is one map to open, so `data-one`
+    sends the script there (amendment of 2026-11-06, item 3). With no Public
+    vault the Page goes, so its address answers that there is no page; a
+    laptop's copy of the sheet goes with it."""
     vault = vault or publish._vault()
     h = publish.handle(vault)
     if not h:
@@ -679,7 +680,8 @@ def write_page(vault: Path | None = None) -> None:
     head = _head(f"@{h} · Silica", f"{_plural(len(entries), 'vault')} by @{h}", site, 0,
                  canonical=site.absolute(site.page(0)), lang=lang)
     page = (head + "<body>\n" + top(site.catalog(), _app(), current="page", page=site.page(0), h=h)
-            + '<main class="sheet"><section class="wrap cat" aria-labelledby="pg-h">'
+            + '<main class="sheet"><section class="wrap cat" aria-labelledby="pg-h"'
+            + (f' data-one="{_esc(site.vault(entries[0]["slug"], 0))}"' if len(entries) == 1 else "") + ">"
             + f'<div class="cat-head grid"><h1 id="pg-h">@{_esc(h)}</h1>'
             f'<p>{_plural(len(entries), "vault")} · {_plural(notes, "note")}. Read one here, or save a copy into '
             f'your own vault: every note in the copy keeps its author\'s name.</p></div>'

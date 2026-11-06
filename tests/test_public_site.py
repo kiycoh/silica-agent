@@ -153,6 +153,45 @@ def test_with_an_address_links_are_absolute_and_every_page_can_be_saved_and_repo
     assert not (_live(marta) / "_s").exists()  # the host serves the sheet
 
 
+def test_a_vault_and_a_note_name_the_room_and_keep_their_page_for_a_reader_without_the_script(marta, monkeypatch):
+    from silica.ui.web.public_site import build
+
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
+    build("memory")
+    vault = _live(marta) / "memory"
+    index = (vault / "index.html").read_text(encoding="utf-8")
+    room = 'data-room="/@marta/memory/vault.json" data-here="/@marta/memory/" data-vaults="/@marta/vaults.json"'
+    assert f'<main class="sheet" {room}>' in index
+    # all of it still there with no script: the picture, Save by areas, and every note
+    assert "<svg" in index and 'name="areas"' in index and 'href="/@marta/memory/spacing-effect"' in index
+    note = (vault / "spacing-effect.html").read_text(encoding="utf-8")
+    assert f'<main class="sheet" {room} data-note="spacing-effect">' in note
+    assert 'class="body"' in note and "Linked from" in note
+    assert "data-other" not in index + note  # another address is the room's to ask, behind a link
+
+
+def test_a_page_built_without_a_host_tells_the_room_its_files_end_in_html(marta):
+    from silica.ui.web.public_site import build
+
+    build("memory")
+    index = (_live(marta) / "memory" / "index.html").read_text(encoding="utf-8")
+    assert 'data-room="vault.json" data-here="" data-vaults="../vaults.json" data-ext=".html"' in index
+
+
+def test_a_page_of_one_public_vault_sends_the_script_to_that_map(marta, monkeypatch):
+    from silica.kernel.publish import add_vault, set_visibility
+    from silica.ui.web.public_site import build
+
+    monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
+    build("memory")
+    page = (_live(marta) / "index.html").read_text(encoding="utf-8")
+    assert 'data-one="/@marta/memory/"' in page and "vcard" in page  # the card stays for no script
+    other = add_vault("Courses")["slug"]
+    set_visibility(other, "public")
+    build(other)
+    assert "data-one" not in (_live(marta) / "index.html").read_text(encoding="utf-8")
+
+
 def test_without_an_address_there_is_no_save_and_the_folder_opens_from_disk(marta):
     from silica.ui.web.public_site import build
 
