@@ -632,7 +632,10 @@ function renderAbout(host, data) {
   stInfoRow(host, "version", `silica ${data.version}`);
   // No "updates": a tenant cannot update itself. No "report a bug": it opens
   // a public GitHub issue, and /bug_report is refused on hosted.
-  if (data.hosted) return;
+  if (data.hosted) {
+    if (document.documentElement.dataset.signout !== undefined) renderSignOutEverywhere(host);
+    return;
+  }
   stInfoRow(host, "updates", data.behind
     ? `${data.behind} commit${data.behind === 1 ? "" : "s"} behind · update with \`silica update\``
     : "up to date");
@@ -645,6 +648,25 @@ function renderAbout(host, data) {
   const ctl = stEl("div", "st-ctl");
   ctl.appendChild(btn);
   row.appendChild(ctl);
+  host.appendChild(row);
+}
+
+// A session lasts a week idle (ADR-0154 point 6), so a shared PC left signed in needs a
+// way out from somewhere else. A form for the reason the menu's Sign out is one.
+function renderSignOutEverywhere(host) {
+  const row = stEl("div", "st-row");
+  row.dataset.search = "sign out everywhere session device account";
+  const label = stEl("div", "st-label");
+  label.appendChild(stEl("span", "st-name", "sign out everywhere"));
+  label.appendChild(stEl("div", "st-help", "ends every session of this account, this window's too"));
+  row.appendChild(label);
+  const form = stEl("form", "st-ctl");
+  form.method = "post";
+  form.action = "/sign-out/everywhere";
+  const btn = stEl("button", "st-btn st-safe", "sign out everywhere");
+  btn.type = "submit";
+  form.appendChild(btn);
+  row.appendChild(form);
   host.appendChild(row);
 }
 
@@ -928,6 +950,8 @@ if (document.documentElement.dataset.user) {
   $("#vp-email").textContent = document.documentElement.dataset.user;
   $("#vp-user").hidden = false;
 }
+// Stamped behind the gateway alone (index(), ADR-0154): under Access the route is not there.
+if (document.documentElement.dataset.signout !== undefined) $("#vp-signout").hidden = false;
 
 function toggleVaultPanel(e) {
   e.stopPropagation();

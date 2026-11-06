@@ -3088,6 +3088,31 @@ def test_index_names_the_hosted_account_and_nobody_else(client, monkeypatch):
     assert "data-user" not in app.get("/").text.split(">", 2)[1]
 
 
+def test_index_offers_sign_out_behind_the_gateway_alone(client, monkeypatch):
+    """ADR-0154: X-Silica-Email is the gateway's and names the account, and only there
+    does /sign-out exist. Under Access the row would answer 404."""
+    app, _server = client
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    head = app.get("/", headers={"X-Silica-Email": 'm.rossi@example.com"><b>'}).text.split(">", 2)[1]
+    assert 'data-user="m.rossi@example.com&quot;&gt;&lt;b&gt;" data-signout' in head
+    access = {"Cf-Access-Authenticated-User-Email": "m.rossi@example.com"}
+    head = app.get("/", headers=access).text.split(">", 2)[1]
+    assert 'data-user="m.rossi@example.com"' in head and "data-signout" not in head
+    # The gateway's word wins if both arrive; Caddy drops Access's on the gateway's host.
+    both = {**access, "X-Silica-Email": "other@example.com"}
+    assert 'data-user="other@example.com"' in app.get("/", headers=both).text.split(">", 2)[1]
+    monkeypatch.delenv("SILICA_HOSTED", raising=False)
+    assert "data-signout" not in app.get("/", headers=both).text.split(">", 2)[1]
+
+
+def test_only_the_gateways_401_sends_the_page_to_sign_in():
+    """A connector's service can answer 401 too, and that must not sign anyone out."""
+    from silica.ui.web import server
+
+    boot = (Path(server.__file__).parent / "static" / "app-boot.js").read_text()
+    assert 'r.status === 401 && r.headers.has("X-Silica-Signed-Out")' in boot
+
+
 def test_every_view_row_says_what_the_view_is_for():
     """ADR-0111 point 1: the rail's icons had a name and no purpose, and a
     pilot user asked for the terms before the functions (2026-10-15)."""
