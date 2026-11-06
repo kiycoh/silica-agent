@@ -3349,14 +3349,19 @@ function lrMissedList(wrap, r) {
   const byPoint = !!r.points?.length;
   const pts = byPoint ? r.points.filter((p) => p.status !== "met") : [];
   // a retest is told on its missed question's row, never a row of its own (ADR-0135 point 4)
-  const again = new Map(r.items.filter((x) => x.retest).map((x) => [x.path, x.status === "met" ? "met" : "missed"]));
+  // one the session ended before was never asked: it read "asked again, missed"
+  const again = new Map(r.items.filter((x) => x.retest && x.status !== "open").map((x) => [x.path, x.status === "met" ? "met" : "missed"]));
   const items = byPoint ? [] : r.items.filter((x) => !x.retest && ["missed", "assisted", "skipped"].includes(x.status));
   const n = pts.length + items.length;
-  // a skip is not a miss (ADR-0061): it is listed, and the head does not count it
-  const missedN = [...pts, ...items].filter((x) => x.status !== "skipped").length;
-  const skippedN = n - missedN;
+  // a skip is not a miss (ADR-0061), nor is a point the session ended before: both
+  // are listed, and the head counts neither
+  const missedN = [...pts, ...items].filter((x) => !["skipped", "open"].includes(x.status)).length;
+  const skippedN = [...pts, ...items].filter((x) => x.status === "skipped").length;
   const sec = lrEl("section", "lr-missed");
-  const metAgain = items.filter((x) => x.status !== "skipped").every((x) => again.get(x.path) === "met");
+  // by point there are no rows here, and every() on none said a session with no
+  // retest "met them when they came back"
+  const back = items.filter((x) => x.status !== "skipped");
+  const metAgain = back.length > 0 && back.every((x) => again.get(x.path) === "met");
   sec.appendChild(lrEl("h2", null, missedN ? `You missed ${lrPlural(missedN, byPoint ? "point" : "question")}`
     + (metAgain ? (missedN === 1 ? ", and met it when it came back" : ", and met them when they came back") : "") : "Nothing missed"));
   const t3 = r.tally3;
@@ -3682,13 +3687,20 @@ const lrReadKey = (r) => r.plan + "#" + r.step;
 
 async function lrFetchRead(r) {
   const key = lrReadKey(r);
+  const prev = lrRead && lrRead.key === key ? lrRead : null;
+  let d = null;
   try {
-    const d = await (await fetch(`/learn/reading?plan=${encodeURIComponent(r.plan)}&step=${r.step}`)).json();
-    if (d.detail) throw new Error(d.detail);
-    const prev = lrRead && lrRead.key === key ? lrRead : null;
-    lrRead = { key, data: d, view: prev && prev.data?.exists ? prev.view : undefined, drafts: prev?.drafts || {},
-               polling: !!prev?.polling, listOpen: !!prev?.listOpen, reached: prev?.reached };
-  } catch (e) { lrRead = { key, error: String(e.message || e) }; }
+    d = await (await fetch(`/learn/reading?plan=${encodeURIComponent(r.plan)}&step=${r.step}`)).json();
+  } catch {
+    // Tolerated: no answer says nothing about the step, and one poll across a
+    // restart read "not in the plan any more" and took the reader's drafts with it.
+    // A reading on screen stays and the poll asks again.
+    if (prev?.data) return;
+  }
+  if (!d) lrRead = { key, error: "The server did not answer. Reload to try again." };
+  else if (d.detail) lrRead = { key, error: "That step is not in the plan any more." };
+  else lrRead = { key, data: d, view: prev && prev.data?.exists ? prev.view : undefined, drafts: prev?.drafts || {},
+                  polling: !!prev?.polling, listOpen: !!prev?.listOpen, reached: prev?.reached };
   if (lrRoute.view === "read" && lrReadKey(lrRoute) === key) lrRender();
 }
 
@@ -3697,13 +3709,20 @@ function lrReadPoll(r) {
   lrRead.polling = true;
   const tick = async () => {
     if (lrRoute.view !== "read" || !lrRead || lrReadKey(lrRoute) !== lrRead.key) { if (lrRead) lrRead.polling = false; return; }
+    // The reader left the card this waited on: the render below would take the
+    // focus from the answer they started, and the next keys would go nowhere.
+    const left = lrReadOpen();
+    if (left && !left.pending && lrRead.data.job?.state !== "running") { lrRead.polling = false; return; }
     await lrFetchRead(r);
     const j = lrRead?.data?.job;
     // Only while the page has nothing else to show: a card written ahead of the
     // reader waits for them, and a render now would take the answer they are typing.
     const open = lrReadOpen();
-    if ((j && j.state === "running") || (open?.pending && !open.failure)) { setTimeout(tick, 1500); return; }
+    if ((j && j.state === "running") || (open?.pending && open.writing && !open.failure)) { setTimeout(tick, 1500); return; }
     if (lrRead) lrRead.polling = false;
+    // Waiting and nothing writes it: its call went with a Rewrite or a restart, and
+    // only a reach asks again, so the reader sat on "Writing this card" for good.
+    if (open?.pending && !open.failure) { lrReadReach(r, open.n); return; }
     // an open card already says why, in the reader's clock; the job only holds the raw text
     if (j?.state === "error" && !open?.failure) notify("couldn't write the reading: " + j.error);
     lrRender();
@@ -3797,7 +3816,7 @@ function lrRenderRead(body) {
   }
   if (lrRead.error) {
     lrBar({ crumb: ["Reading"], back });
-    body.appendChild(lrEl("p", "lr-help", "That step is not in the plan any more."));
+    body.appendChild(lrEl("p", "lr-help", lrRead.error));
     return;
   }
   const d = lrRead.data;
@@ -3953,8 +3972,14 @@ function lrReadWaiting(d, c, i) {
   card.appendChild(eb);
   if (c.failure) {
     const kept = d.cards.filter((x) => !x.pending && !x.spine).length;
-    card.append(lrEl("p", null, limitSentence(c.failure)), lrEl("p", "lr-help", kept
-      ? `${kept === 1 ? "The card" : `The ${kept} cards`} already written stay here, and this one is written when you come back to it.`
+    card.appendChild(lrEl("p", null, limitSentence(c.failure)));
+    if (c.failure.detail && c.failure.detail !== c.failure.error) {
+      const more = lrEl("details", "te-detail");
+      more.append(lrEl("summary", null, "detail"), lrEl("pre", null, c.failure.detail));
+      card.appendChild(more);
+    }
+    card.appendChild(lrEl("p", "lr-help", kept
+      ? `${kept === 1 ? "The card already written stays" : `The ${kept} cards already written stay`} here, and this one is written when you come back to it.`
       : "It is written when you come back to it."));
     return card;
   }
@@ -4028,7 +4053,7 @@ function lrReadQuestion(d, c, r, last) {
       const k = lrEl("span", "k");
       k.append(last ? "The note says · " : "The next note says · ", lrReadLink(c.answer_from, c.answer_from, d));
       const v = lrEl("span", "v");
-      v.appendChild(lrMd(lrEl("mark", "lr-ans"), c.answer));
+      v.appendChild(lrReadInline(lrEl("mark", "lr-ans"), c.answer, d));
       says.append(k, v);
       box.appendChild(says);
       box.appendChild(lrEl("span", "lr-help", "Not graded. Compare, then go on."));

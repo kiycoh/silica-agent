@@ -161,8 +161,14 @@ def test_fields_read_through_bold_labels_and_keep_their_lines():
 def test_a_link_stays_only_when_it_names_a_note_of_the_step():
     titles = ["Neurone artificiale", "Funzione gradino"]
     text = "Uno [[neurone artificiale|il neurone]], due [[Wikipedia]], tre [[Altro|testo]], quattro [[Funzione gradino#Uscita]]."
-    assert reading.keep_step_links(text, titles) == ("Uno [[Neurone artificiale]], due Wikipedia, tre testo, "
+    assert reading.keep_step_links(text, titles) == ("Uno [[Neurone artificiale|il neurone]], due Wikipedia, tre testo, "
                                                      "quattro [[Funzione gradino]].")
+
+
+def test_an_answer_copied_with_its_link_shown_as_other_words_is_still_held():
+    """The hosted model copied a sentence whose link shows other words than its title."""
+    sentence = "A [[Study plans|plan]] decides the goals, and the goals decide the rest."
+    assert reading.answer_held(reading.keep_step_links(sentence, ["Study plans"]), sentence)
 
 
 def test_a_sentence_the_notes_do_not_hold_is_marked_and_kept():
@@ -435,6 +441,66 @@ def client(step_vault, monkeypatch):
     server._reset_session()
     learn_routes._reset()
     return TestClient(server.app, headers={"Origin": "http://testserver"})
+
+
+def _shown(c):
+    return c.get("/learn/reading", params={"plan": "Plans/Esame.md", "step": 0}).json()
+
+
+def test_a_card_cut_twice_says_why_and_the_raw_text_never_reaches_a_hosted_page(client, monkeypatch):
+    """It read "Something went wrong on this turn. The detail says what." with no
+    detail on the page (2026-11-06, in the browser, on a reply cut at both budgets)."""
+    from silica.ui.web import failures
+
+    reading.begin("Plans/Esame.md", 0, ask=fake_ask)
+
+    def cut(prompt, max_tokens):
+        raise ValueError("the model reached its output limit at 4400 tokens")
+
+    for t in reading.reach("Plans/Esame.md", 0, 1, ask=cut):
+        t.join()
+    card = _shown(client)["cards"][0]
+    assert "ran out of room" in card["failure"]["error"] and "4400" in card["failure"]["detail"]
+    assert "error" not in card, "the page reads the sentence and the disclosed detail, never the raw field"
+    monkeypatch.setattr(failures, "hosted", lambda: True)
+    card = _shown(client)["cards"][0]
+    assert "ran out of room" in card["failure"]["error"] and card["failure"]["detail"] == ""
+
+
+def test_a_card_whose_note_left_the_step_says_so_and_no_call_is_paid(client):
+    """That sentence is written for the reader: as a raw error it fell to "Something
+    went wrong", and a hosted page, which has no detail, had nothing else."""
+    from silica.kernel.learn import plans
+
+    reading.begin("Plans/Esame.md", 0, ask=fake_ask)
+    plans._journaled("Plans/Esame.md", lambda t: t.replace("[[Funzione gradino]], ", ""), source="learn")
+    PROMPTS.clear()
+    n = next(c["n"] for c in _shown(client)["cards"] if c["title"] == "Funzione gradino")
+    for t in reading.reach("Plans/Esame.md", 0, n, ask=fake_ask):
+        t.join()
+    card = next(c for c in _shown(client)["cards"] if c["n"] == n)
+    assert card["failure"]["error"] == "Funzione gradino is no longer in this step: rewrite the reading"
+
+
+def test_reaching_a_step_the_plan_no_longer_has_is_a_404(client):
+    r = client.post("/learn/reading/card", json={"plan": "Plans/Esame.md", "step": 9, "n": 1})
+    assert r.status_code == 404
+
+
+def test_a_job_that_failed_reaches_the_page_as_a_sentence(client):
+    """Its raw text was a toast: "couldn't write the reading: litellm.BadRequestError..."."""
+    def refused(prompt, max_tokens):
+        if "study reading" in prompt:
+            raise RuntimeError("litellm.BadRequestError: OpenAIException - a provider's own words")
+        return fake_ask(prompt, max_tokens)
+
+    reading.start("Plans/Esame.md", 0, ask=refused)
+    for _ in range(100):
+        st = _shown(client)
+        if st["job"] and st["job"]["state"] != "running":
+            break
+        time.sleep(0.05)
+    assert st["job"]["state"] == "error" and "litellm" not in st["job"]["error"]
 
 
 def test_the_routes_write_a_reading_keep_the_readers_words_and_start_its_practice(client):

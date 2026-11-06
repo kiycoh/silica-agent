@@ -79,6 +79,10 @@
   font-size: var(--fs-meta);
   margin-left: 0.6rem;
   white-space: nowrap;
+  /* without these it ran under the Back button at 390 px */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* list rows and quiet controls are buttons for the keyboard, not for the
@@ -1415,6 +1419,9 @@ button.lr-exp:hover {
   max-width: 48rem;
   margin: 0 auto;
   display: grid;
+  /* an implicit column takes its widest child's minimum: at 390 px the page ran 59 px
+     past the view, cut "Another session" and scrolled sideways */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.9rem;
   padding: 0.4rem 0 1rem;
 }
@@ -1949,6 +1956,7 @@ button.lr-exp:hover {
 /* --- receipt ---------------------------------------------------------------- */
 .lr-followup {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
   padding: 0.9rem 1rem;
@@ -1956,8 +1964,9 @@ button.lr-exp:hover {
   border-radius: var(--r-sm);
 }
 
+/* the basis wraps the buttons under the text at 390 px, where it stood a word a line */
 .lr-followup .t {
-  flex: 1;
+  flex: 1 1 14rem;
   display: grid;
   gap: 0.1rem;
   min-width: 0;

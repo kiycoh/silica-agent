@@ -38,6 +38,8 @@ _CLASSES: list[tuple[re.Pattern[str], str]] = [
      "That note isn't in the vault under that name."),
     (re.compile(r"context length|too many tokens|max_tokens", re.I),
      "The conversation outgrew the model's context. Start a new chat, or narrow the question."),
+    (re.compile(r"reached its output limit"),
+     "The model ran out of room before it finished, so nothing was kept."),
 ]
 
 FALLBACK = "Something went wrong on this turn. The detail says what."
@@ -47,7 +49,8 @@ FALLBACK = "Something went wrong on this turn. The detail says what."
 # the fallback would replace the one message that says what to type.
 # "not run: declined" is a connector call the user refused (ADR-0091): an
 # outcome they chose, which the fallback would misread as a fault.
-_AUTHORED = re.compile(r"\bUsage:|not available in this session|has nothing to search for|^not run: ")
+_AUTHORED = re.compile(r"\bUsage:|not available in this session|has nothing to search for|^not run: "
+                       r"|^the server restarted while|is no longer in this step: rewrite")
 
 
 # A usage limit reached (ADR-0102 point 6): one sentence per layer, each naming
