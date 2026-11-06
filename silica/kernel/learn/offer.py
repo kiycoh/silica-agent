@@ -147,6 +147,9 @@ _TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$", re.M)
 _STEP_RE = re.compile(r"^\s*\d+[.)]\s+\S", re.M)
 
 
+# Where a note's content ends for its shape. Not noteshape.BODY_END_RE, which is
+# `##` only and takes "## Sources of error" for the tail: here a heading of any
+# level, and only the whole word.
 _SERVICE_RE = re.compile(r"^#{1,6}\s+(?:Relations|Sources)\s*$", re.M)
 
 

@@ -915,14 +915,14 @@ def _related_notes(path: str) -> list[dict]:
         for p in learner.prerequisites_of(path)[:3]:
             out.append({"path": p, "why": "a prerequisite the vault names"})
     except Exception:
-        pass
+        pass   # a suggestion on the receipt: no graph costs this line, never the close
     try:
         title = items.title_of(path)
         for r in items.relations_of(path)[:3]:
             other = r["object"] if r["subject"] == title else r["subject"]
             out.append({"path": other, "why": f"{r['label']} in the note's relations"})
     except Exception:
-        pass
+        pass   # a note gone or unparsable since the session: the receipt stands without its relations
     return out[:4]
 
 

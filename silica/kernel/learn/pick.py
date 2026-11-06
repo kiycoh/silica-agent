@@ -112,7 +112,7 @@ def conflicts(notes: dict[str, dict]) -> list[str]:
     try:
         drifted = {note_key(n) for n, _src in drifted_notes(vault_path=str(vault))}
     except Exception:
-        drifted = set()
+        drifted = set()   # drift is an extra reason to ask: the contested notes above still stand
     if drifted:
         out += [p for p in notes if note_key(p) in drifted and p not in out]
     return out

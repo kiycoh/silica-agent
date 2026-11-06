@@ -54,6 +54,9 @@ _WIKILINK_ALIAS_RE = re.compile(r"!?\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 # `- [[X]] defines this (Lezione 11): why` (X is the subject, patched in).
 _REL_OUT_RE = re.compile(r"^- ([a-z][a-z ]*?) \[\[([^\]|]+)(?:\|[^\]]*)?\]\](?: \(([^)]*)\))?:\s*(.*)$")
 _REL_IN_RE = re.compile(r"^- \[\[([^\]|]+)(?:\|[^\]]*)?\]\] ([a-z][a-z ]*?) this(?: \(([^)]*)\))?:\s*(.*)$")
+# Headings no question is drawn from, by prefix and at any level. Wider than
+# noteshape.CLAIMS_END_RE, which ends a note's claims: this also leaves out the
+# note's links and a reader's own additions, wherever they sit.
 _SKIP_SECTIONS = ("relations", "sources", "superseded", "additional notes")
 
 
@@ -671,7 +674,7 @@ def hint_rungs(path: str) -> list[tuple[str, str]]:
     try:
         prereqs = learner.prerequisites_of(path)
     except Exception:
-        prereqs = []
+        prereqs = []   # no graph: the heading rung below still helps
     names = [Path(p).stem for p in prereqs][:4]
     if names:
         out.append(("H2", "Prerequisites the vault names: " + ", ".join(names) + ". What did they say?"))

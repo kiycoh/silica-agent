@@ -538,7 +538,7 @@ def cycles_among(paths: list[str]) -> list[list[str]]:
         # read raw, no key of it matched and no cycle was ever found
         prereqs = {ledger_key(k): v for k, v in learner.prerequisites_map().items()}
     except Exception:
-        return []
+        return []   # no graph to read: the plan reports no cycle, all an unknown graph can say
     keys = {ledger_key(p): p for p in paths}
     graph = {k: [ledger_key(x) for x in prereqs.get(k, []) if ledger_key(x) in keys] for k in keys}
     out: list[list[str]] = []
@@ -689,6 +689,7 @@ def _tree_of(plan: dict, paths: list[str], notes: dict | None = None) -> list[di
             target = notes_of(target) or plan["tree_links"]
         return resolve_scope(plan["scope"], target, restrict=plan.get("restrict", ""))["tree"]
     except Exception:
+        # a scope that will not resolve still shows the plan, as one node over its paths
         return [{"node": plan["name"], "children": [], "leaves": paths}]
 
 
@@ -706,7 +707,7 @@ def _relations_in(paths: list[str], items_mod) -> list[tuple[str, str]]:
                 if op:
                     out.append((p, op))
         except Exception:
-            continue
+            continue   # one note's relations that do not parse cost that note, not the reading
     try:
         prereqs = learner.prerequisites_map()
         keys = {ledger_key(p): p for p in paths}
@@ -716,7 +717,7 @@ def _relations_in(paths: list[str], items_mod) -> list[tuple[str, str]]:
                 if pk in keys:
                     out.append((p, keys[pk]))
     except Exception:
-        pass
+        pass   # no prerequisite graph: integration reads the typed relations alone
     seen: set[tuple[str, str]] = set()
     uniq = []
     for a, b in out:

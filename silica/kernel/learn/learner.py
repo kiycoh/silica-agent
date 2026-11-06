@@ -69,7 +69,7 @@ def gain_fn(entries: list[dict], store=None):
             measured = _measured_stems(entries, getattr(store, "lang", "en"))
             adj_mass = {s: sum(nb.values()) for s, nb in store.adjacency().items()}
         except Exception:
-            store = None
+            store = None   # a store that does not read ranks as no store: by authorship alone
 
     def gain(r: dict) -> float:
         if store is None:
@@ -77,7 +77,7 @@ def gain_fn(entries: list[dict], store=None):
         try:
             nodes = store.note_nodes(r["path"])
         except Exception:
-            return 0.0
+            return 0.0   # a note the store does not hold has no gain to rank by
         return sum(adj_mass.get(s, 0.0) for s in nodes if s not in measured)
 
     return gain
