@@ -2852,47 +2852,27 @@ def _asr_via_endpoint(audio: Path) -> str:
 
     import httpx
 
-    from silica.agent.stt import transcriptions_url
-    from silica.metrics import outcome_of, transcribed
+    from silica.agent.stt import post_transcription, transcribed, transcriptions_url
+    from silica.metrics import outcome_of
     from silica.sources.web_fetch import vtt_to_text
 
-    url = transcriptions_url(CONFIG.stt_base_url)
     data = {"model": CONFIG.stt_model, "response_format": "verbose_json",
             "timestamp_granularities[]": ["word", "segment"]}
     # Named, not omitted: whisper-server and whisper-cli both fall back to "en"
     # when a request names no language (server.cpp:113, cli.cpp:84, read
     # 2026-10-13), so omitting it turned an Italian lecture into English.
-    lang = CONFIG.stt_lang.strip() or "auto"
-    data["language"] = lang
-    mime = "audio/mpeg" if audio.suffix == ".mp3" else "audio/wav"
-
-    def post() -> httpx.Response:
-        with audio.open("rb") as fh:
-            return httpx.post(
-                url,
-                files={"file": (audio.name, fh, mime)},
-                data=data,
-                headers={"Authorization": f"Bearer {CONFIG.stt_api_key}"},
-                timeout=_ASR_TIMEOUT_S,
-            )
-
+    data["language"] = CONFIG.stt_lang.strip() or "auto"
     started = time.monotonic()
     try:
-        resp = post()
-        # ...but a hosted API takes an ISO-639-1 code or nothing: OpenRouter
-        # answered 400 to "auto" on MAI-Transcribe-2, whisper-large-v3,
-        # qwen3-asr-1.7b and scribe-v2 (2026-10-13), and detects the language
-        # itself when the field is absent. The retry costs one more upload;
-        # telling the two servers apart by their URL is a guess.
-        if resp.status_code == 400 and lang == "auto":
-            del data["language"]
-            resp = post()
+        resp = post_transcription(CONFIG.stt_base_url, audio, name=audio.name, form=data,
+                                  mime="audio/mpeg" if audio.suffix == ".mp3" else "audio/wav",
+                                  api_key=CONFIG.stt_api_key, timeout=_ASR_TIMEOUT_S)
     except httpx.HTTPError as e:
         transcribed("media", started, outcome_of(e))
         raise ValueError(
             # whisper-server serves /inference unless told otherwise, and
             # answers 404 on this path (measured 2026-10-13)
-            f"no transcription server at {url}: {e}. Start one (whisper.cpp: "
+            f"no transcription server at {transcriptions_url(CONFIG.stt_base_url)}: {e}. Start one (whisper.cpp: "
             "`whisper-server -m <model> --inference-path /v1/audio/transcriptions`), "
             "point SILICA_STT_BASE_URL at it, or "
             "set SILICA_STT_PROVIDER=whispercpp"

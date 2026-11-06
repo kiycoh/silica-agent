@@ -393,20 +393,7 @@ def test_a_dictation_writes_an_stt_line_on_the_dictation_lane(client, journal, m
     replies = iter([httpx.Response(200, json={"text": MARKER, "usage": {"seconds": 4.0, "cost": 0.00008}}),
                     httpx.Response(502, text=MARKER)])
 
-    class _Client:
-        def __init__(self, **kw):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-        async def post(self, url, **kw):
-            return next(replies)
-
-    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(httpx, "post", lambda url, **kw: next(replies))
     from silica.agent import stt as local
 
     monkeypatch.setattr(local, "has_local_stt", lambda: False)
