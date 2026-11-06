@@ -316,3 +316,105 @@ def test_undo_waits_for_the_turn_as_the_other_tree_undos_do(client, embedder):
     assert server._begin_turn()
     assert tc.post("/tree/undo", json={"run": made["run"]}).status_code == 409
     assert (vault / "Una.md").exists()
+
+
+# -- /note/asset (point 15) ----------------------------------------------------
+
+def paste(tc, data, note="Corso/Lezione", name="anything.png"):
+    return tc.post("/note/asset", data={"note": note}, files={"file": (name, data)})
+
+
+@pytest.mark.parametrize("data, ext", [(PNG, "png"), (JPEG, "jpg"), (GIF, "gif"), (WEBP, "webp")])
+def test_a_pasted_image_lands_beside_the_note_and_asset_serves_it(client, data, ext):
+    tc, _, vault = client
+    # the bytes name the type, whatever the name says
+    body = paste(tc, data, name="clip.bin").json()
+    assert body["ok"] is True and body["path"].startswith("Corso/attachments/Pasted image ")
+    assert body["path"].endswith(f".{ext}")
+    assert (vault / body["path"]).read_bytes() == data
+    name = body["path"].rsplit("/", 1)[-1]
+    assert body["embed"] == f"![[{name}]]"
+    for ref in (body["path"], name):       # the embed names it by its bare name
+        served = tc.get("/asset", params={"path": ref})
+        assert served.status_code == 200 and served.content == data
+
+
+@pytest.mark.parametrize("data", [SVG, b"<?xml version='1.0'?>" + SVG, b"not an image at all", b""])
+def test_anything_else_is_refused_whatever_its_name_says(client, data):
+    tc, _, vault = client
+    r = paste(tc, data, name="innocent.png")
+    assert r.status_code == 400 and "PNG, JPEG, GIF or WebP" in r.json()["detail"]
+    assert not list(vault.rglob("Pasted image*"))
+
+
+def test_a_clash_takes_the_next_number(client, monkeypatch):
+    import datetime as dt
+
+    class Frozen(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 11, 6, 12, 0, 1)
+
+    monkeypatch.setattr(dt, "datetime", Frozen)
+    tc, *_ = client
+    first, second = (paste(tc, PNG).json()["path"] for _ in range(2))
+    assert first == "Corso/attachments/Pasted image 20261106120001.png"
+    assert second == "Corso/attachments/Pasted image 20261106120001 2.png"
+
+
+def test_past_20_mb_is_refused(client, monkeypatch):
+    tc, server, vault = client
+    monkeypatch.setattr(server, "_MAX_IMAGE_BYTES", len(PNG) - 1)
+    assert paste(tc, PNG).status_code == 400
+    assert not list(vault.rglob("Pasted image*"))
+
+
+def test_a_note_that_does_not_resolve_is_404(client):
+    tc, *_ = client
+    assert paste(tc, PNG, note="Nowhere/Nothing").status_code == 404
+
+
+def test_a_full_vault_refuses_an_image(client, monkeypatch):
+    monkeypatch.setenv("SILICA_VAULT_MAX_MB", "1")
+    tc, server, vault = client
+    monkeypatch.setattr(server, "_MAX_IMAGE_BYTES", 8 * 2**20)
+    r = paste(tc, PNG + b"\0" * (2 * 2**20))
+    assert r.status_code == 400 and "this vault may hold" in r.json()["detail"]
+
+
+@pytest.mark.parametrize("setting, expected", [
+    ("./Immagini", "Corso/Immagini"),
+    ("./", "Corso"),
+    ("/", ""),
+    ("", ""),
+    ("Allegati/Foto", "Allegati/Foto"),
+])
+def test_obsidians_setting_is_read_as_obsidian_reads_it(client, setting, expected):
+    tc, _, vault = client
+    (vault / ".obsidian").mkdir()
+    (vault / ".obsidian/app.json").write_text(json.dumps({"attachmentFolderPath": setting}), encoding="utf-8")
+    path = paste(tc, PNG).json()["path"]
+    assert path.rpartition("/")[0] == expected
+    assert (vault / path).is_file()
+
+
+@pytest.mark.parametrize("raw", ['{"other": 1}', "not json", '{"attachmentFolderPath": 3}', "[1]"])
+def test_a_setting_that_names_no_folder_is_attachments_beside_the_note(client, raw):
+    tc, _, vault = client
+    (vault / ".obsidian").mkdir()
+    (vault / ".obsidian/app.json").write_text(raw, encoding="utf-8")
+    assert paste(tc, PNG).json()["path"].startswith("Corso/attachments/")
+
+
+def test_a_setting_that_leaves_the_vault_does_not_place_a_file_there(client):
+    tc, _, vault = client
+    (vault / ".obsidian").mkdir()
+    (vault / ".obsidian/app.json").write_text('{"attachmentFolderPath": "../outside"}', encoding="utf-8")
+    assert paste(tc, PNG).json()["path"].startswith("Corso/attachments/")
+    assert not (vault.parent / "outside").exists()
+
+
+def test_a_note_at_the_root_keeps_its_folder_at_the_root(client):
+    tc, _, vault = client
+    (vault / "Radice.md").write_text("x", encoding="utf-8")
+    assert paste(tc, PNG, note="Radice").json()["path"].startswith("attachments/Pasted image ")

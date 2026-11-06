@@ -4925,6 +4925,77 @@ def note_new(payload: dict):
             "broken": _broken_links(landed, note_resolver()), **({"same_name": other} if other else {})}
 
 
+@app.post("/note/asset", dependencies=_SAME_ORIGIN)
+async def note_asset(note: str = Form(""), file: UploadFile = File(...)):
+    """An image pasted or dropped into a note (ADR-0155 point 15): the file in
+    the note's attachment folder as `Pasted image <stamp>.ext`. Told by its first
+    bytes, so an SVG named `.png` is refused: /asset's sandbox guards a navigated
+    document, and a picture needs none of what an SVG can carry."""
+    from silica.ui.web import vault_import as vi
+
+    canon = await asyncio.to_thread(lambda: note_resolver()(note))
+    if not canon:
+        raise HTTPException(404, "note not found in vault")
+    data = bytearray()
+    while chunk := await file.read(_UPLOAD_CHUNK):
+        data.extend(chunk)
+        if len(data) > _MAX_IMAGE_BYTES:
+            raise HTTPException(400, f"larger than {_MAX_IMAGE_BYTES // 2**20} MB")
+    suffix = vi.image_suffix(bytes(data[:16]))
+    if suffix is None:
+        raise HTTPException(400, "not a PNG, JPEG, GIF or WebP image")
+    await asyncio.to_thread(_has_room, 0, len(data))
+    path = await asyncio.to_thread(_write_asset, canon, bytes(data), suffix)
+    return {"ok": True, "path": path, "embed": f"![[{path.rsplit('/', 1)[-1]}]]"}
+
+
+def _attachment_folder(canon: str) -> str:
+    """Where a pasted image of this note goes, vault-relative: what Obsidian's
+    `attachmentFolderPath` says, read as Obsidian does (`./x` under the note's
+    folder, `/` or empty the vault's root, else a folder of the vault), and with
+    no such setting `attachments/` beside the note. A vault here is often the
+    person's Obsidian vault, and an image Silica files elsewhere is lost to them."""
+    beside = canon.rpartition("/")[0]
+    try:
+        app_json = (Path(CONFIG.vault_path) / ".obsidian" / "app.json").read_text(encoding="utf-8")
+        setting = json.loads(app_json).get("attachmentFolderPath")
+    except (OSError, ValueError, AttributeError):
+        setting = None  # no Obsidian here, or a file it would not read either
+    if not isinstance(setting, str):
+        return f"{beside}/attachments".lstrip("/")
+    if setting.startswith("./"):
+        return f"{beside}/{setting[2:]}".strip("/")
+    return setting.strip("/")
+
+
+def _write_asset(canon: str, data: bytes, suffix: str) -> str:
+    """The bytes under a free `Pasted image` name; its vault-relative path.
+    Under `_EDIT_LOCK` because the name is chosen by looking: two pastes in one
+    second take ` 2`, and atomic_write_bytes would replace the first."""
+    from datetime import datetime
+
+    from silica.kernel.recall.paths import atomic_write_bytes, contain_in_vault
+    from silica.kernel.workspaces import _EDIT_LOCK
+
+    root = Path(CONFIG.vault_path)
+    stem = f"Pasted image {datetime.now():%Y%m%d%H%M%S}"
+    try:
+        folder = contain_in_vault(f"{_attachment_folder(canon)}/{stem}{suffix}".lstrip("/"), root).rpartition("/")[0]
+    except ValueError:
+        # `../x` in app.json, or a link out of the vault: a setting does not
+        # get to place a file outside it.
+        folder = f"{canon.rpartition('/')[0]}/attachments".lstrip("/")
+
+    def named(n: int) -> str:
+        return f"{folder}/{stem}{f' {n}' if n > 1 else ''}{suffix}".lstrip("/")
+
+    with _EDIT_LOCK:
+        rel = next(r for r in map(named, itertools.count(1)) if not (root / r).exists())
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(root / rel, data)
+    return rel
+
+
 @app.post("/tree/delete", dependencies=_SAME_ORIGIN)
 def tree_delete(payload: dict):
     """Delete a note, or every note the rail shows under a folder, from the

@@ -214,7 +214,7 @@ def served_views() -> frozenset[str]:
 DEMO_OFF: dict[str, tuple[str, ...]] = {
     "routes": (
         # an upload is personal data, and an import reaches the internet
-        "/chat/files/add", "/vault/import", "/vault/fetch", "/vault/save", "/mail/upload",
+        "/chat/files/add", "/vault/import", "/vault/fetch", "/vault/save", "/mail/upload", "/note/asset",
         # Settings and what only Settings reaches. The Caddy block that refuses
         # /settings/*, /endpoints, /zotero and /bug_report on a tenant's route
         # never sees the demo's hostname (ADR-0139 point 4).
