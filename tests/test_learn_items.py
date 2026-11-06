@@ -201,3 +201,42 @@ def test_a_note_without_footnotes_grounds_on_its_own_lines(tmp_vault):
                   "span": "misura l'incertezza media di una variabile casuale discreta", "source": {"leaf": "", "line": 0}}
     assert items.grounded(model_item) and model_item["source"]["leaf"] == "Old/Entropia.md" and model_item["source"]["self"] is True
     assert "CLAIMS:" in items.note_block(1, {"path": "Old/Entropia.md", "kind": "recall", "level": 1})
+
+
+# One line per character, the same sentence on each: the shape of a leaf
+# generated from a dictionary's data.
+TEMPLATED = "\n".join(
+    f"{c}: Phonosemantic compound. {meaning} represents the meaning and {sound} represents the sound."
+    for c, meaning, sound in (("妈", "女", "马"), ("清", "氵", "青"), ("請", "言", "青"), ("情", "忄", "青"), ("晴", "日", "青")))
+
+
+def test_an_edited_line_of_a_templated_leaf_lands_on_the_line_holding_its_characters():
+    """Live defect 2026-11-06: a note of 情 with meaning and sound swapped
+    tied with every line of the leaf and took the first, so the grader saw
+    妈's line, failed the right answer and confirmed the note's false claim."""
+    line, span = items.span_of("Phonosemantic compound. 青 represents the meaning and 忄 represents the sound.", TEMPLATED)
+    assert line == 4
+    assert span.startswith("情:") and "晴" not in span
+
+
+def test_a_claim_that_ties_across_different_lines_grounds_nowhere():
+    """Four lines hold 青 and none holds 雨: any of them would be a citation
+    the leaf does not support, so the item goes instead."""
+    claim = "Phonosemantic compound. 青 represents the meaning and 雨 represents the sound."
+    assert items.span_of(claim, TEMPLATED) == (0, "")
+
+
+def test_the_same_line_twice_is_not_a_tie():
+    """A converted PDF repeats its running header: both copies say the same."""
+    leaf = "Capitolo primo, il margine geometrico\ncorpo del testo\nCapitolo primo, il margine geometrico"
+    assert items.span_of("Capitolo primo: il margine geometrico", leaf)[0] == 1
+
+
+def test_a_claim_wrapped_over_two_lines_keeps_both():
+    """A narrower window wins only a tie: a claim the second line completes
+    matches better over both, and the grader must see the whole sentence."""
+    leaf = ("Il margine geometrico limita l'errore atteso del classificatore lineare\n"
+            "sui dati separabili del problema.\nAltra riga.")
+    line, span = items.span_of("Il margine geometrico limita l'errore atteso del classificatore lineare sui dati separati del problema", leaf)
+    assert line == 1
+    assert span.endswith("problema.")

@@ -140,7 +140,11 @@ def span_of(text: str, leaf_text: str) -> tuple[int, str]:
     Exact after whitespace and case folding first, over windows of up to
     three lines because a converted PDF wraps a sentence anywhere; then the
     provenance gate's local fuzzy match, so a claim the writer tightened by
-    a word still grounds. (0, "") is the grounding failure the caller drops.
+    a word still grounds. (0, "") is the grounding failure the caller drops,
+    and so is a fuzzy tie between lines that differ: a wrong citation shows
+    the reader a line that says nothing about the claim, and the grader then
+    fails a right answer against it (seen 2026-11-06 on a leaf of one
+    templated line per character).
     """
     from silica.kernel.write.provenance import GROUNDING_FLOOR, _local_match_fraction
 
@@ -153,21 +157,30 @@ def span_of(text: str, leaf_text: str) -> tuple[int, str]:
             window = " ".join(lines[i:i + width])
             if needle in _norm(window):
                 return i + 1, " ".join(window.split())
-    best, at, span = 0.0, 0, ""
+    best, at, span, won, tied = (0.0, 0, 0.0), 0, "", "", False
     # The matched fraction never exceeds the characters the two share, so a
-    # window whose share is under the floor, or not above the best so far,
-    # cannot change the answer and skips difflib: the alignment was 10.8 s
-    # of a 20.6 s Learn home over eight textbook notes (2026-10-23, profiled).
+    # window whose share is under the floor, or under the best so far, cannot
+    # change the answer and skips difflib: the alignment was 10.8 s of a
+    # 20.6 s Learn home over eight textbook notes (2026-10-23, profiled).
     chars = Counter(needle)
-    for i in range(len(lines)):
-        window = _norm(" ".join(lines[i:i + 2]))
-        share = sum((chars & Counter(window)).values()) / len(needle)
-        if share < GROUNDING_FLOOR or share <= best:
-            continue
-        frac = _local_match_fraction(needle, window)
-        if frac > best:
-            best, at, span = frac, i + 1, " ".join(" ".join(lines[i:i + 2]).split())
-    return (at, span) if best >= GROUNDING_FLOOR else (0, "")
+    for width in (1, 2):
+        for i in range(len(lines)):
+            raw = " ".join(lines[i:i + width])
+            window = _norm(raw)
+            share = sum((chars & Counter(window)).values()) / len(needle)
+            if share < GROUNDING_FLOOR or share < best[0]:
+                continue
+            # The fraction alone ties on two claims that differ by a character
+            # or two, because blocks under 3 characters do not count: the
+            # narrower window, then the one sharing more characters, is the
+            # line that names what the claim names. Width comes before share
+            # since a second line adds characters without adding a match.
+            rank = (_local_match_fraction(needle, window), -width, share)
+            if rank > best:
+                best, at, span, won, tied = rank, i + 1, " ".join(raw.split()), window, False
+            elif rank == best and window != won:
+                tied = True
+    return (at, span) if best[0] >= GROUNDING_FLOOR and not tied else (0, "")
 
 
 _leaf_memo: dict[str, tuple[float, str]] = {}
