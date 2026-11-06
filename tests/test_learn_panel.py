@@ -28,7 +28,8 @@ def client(tmp_vault, tmp_path, monkeypatch):
 
     from silica.kernel.learn import quiz
     from silica.kernel.learn import grade, items
-    from silica.ui.web import learn_routes, server
+    from silica.kernel.learn import session as learn_session
+    from silica.ui.web import server
     from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
@@ -44,7 +45,7 @@ def client(tmp_vault, tmp_path, monkeypatch):
     os.utime(q, (old, old))
     tmp_vault.note("Plans/ML.md", "---\ntype: plan\nscope: folder\ntarget: ML/\nreach: relational\ncreated: 2026-01-01\n---\n# ML plan\n\n## Tree\n- ML\n\n## Sessions\n")
     SESSION.reset()
-    learn_routes._reset()
+    learn_session._reset()
     return TestClient(server.app), server
 
 
@@ -108,9 +109,9 @@ def test_answer_rate_close_writes_one_line_per_item_and_a_receipt(client, tmp_pa
     assert f"session: {s['id']}" in plans._read("Plans/ML.md")
     live = c.get("/learn/receipt", params={"id": s["id"]}).json()
     assert live["recorded"] == 1 and live["from_ledger"] is False      # still in memory: the full one
-    from silica.ui.web import learn_routes
+    from silica.kernel.learn import session as learn_session
 
-    learn_routes._reset()                                              # a restart: the ledger's own
+    learn_session._reset()                                              # a restart: the ledger's own
     rebuilt = c.get("/learn/receipt", params={"id": s["id"]}).json()
     assert rebuilt["recorded"] == 1 and rebuilt["from_ledger"] is True and rebuilt["items"][0]["rating"] == 2
 

@@ -72,9 +72,9 @@ def test_the_walk_drops_the_second_question_of_a_placed_step_and_placed_is_deriv
     assert len(rc["items"]) == 3                                 # the dropped question was never asked
 
     # placed is not passed: a plan session still asks the placed step, after the rest
-    from silica.ui.web import learn_routes
+    from silica.kernel.learn import session as learn_session
 
-    assert learn_routes._placed_notes(two) == {f"Course/{ORDER[0]}.md", f"Course/{ORDER[1]}.md"}
+    assert learn_session._placed_notes(two) == {f"Course/{ORDER[0]}.md", f"Course/{ORDER[1]}.md"}
 
 
 def test_a_hint_or_just_tell_me_never_places_a_step(two):

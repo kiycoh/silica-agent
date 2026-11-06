@@ -17,11 +17,11 @@ from tests.test_learn_panel import _start, client  # noqa: E402,F401
 
 def test_the_rungs_of_an_item_follow_its_hints_and_the_line_keeps_those_shown(client, tmp_path):
     from silica.kernel.learn import grade, items
-    from silica.ui.web import learn_routes
+    from silica.kernel.learn import session as learn_session
 
     c, _ = client
     s = _start(c, plan="Plans/ML.md")
-    it = learn_routes._LIVE["items"][0]
+    it = learn_session._LIVE["items"][0]
     assert len(it["rungs"]) == len(it["hints"]) and set(it["rungs"]) <= {"H1", "H2", "H3"}
     assert [r for r, _t in items.hint_rungs(it["path"])] == [r for r in it["rungs"] if r != "H1"]
     if not it["hints"]:

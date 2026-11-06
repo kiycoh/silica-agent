@@ -306,11 +306,12 @@ def test_align_gives_each_row_to_one_step_in_order():
 def test_the_form_previews_sources_and_the_budget_route_answers(course):
     from fastapi.testclient import TestClient
 
-    from silica.ui.web import learn_routes, server
+    from silica.kernel.learn import session as learn_session
+    from silica.ui.web import server
     from silica.ui.web.session import SESSION
 
     SESSION.reset()
-    learn_routes._reset()
+    learn_session._reset()
     client = TestClient(server.app)
     out = client.post("/learn/plan", json={"scope": "", "target": "", "reference": "Syllabus", "preview": True},
                       headers={"Origin": "http://testserver"}).json()

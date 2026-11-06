@@ -29,11 +29,11 @@ def _miss(c, s, i):
 
 def test_a_model_kind_miss_is_asked_again_now_in_a_mechanical_kind(client, monkeypatch, tmp_path):
     from silica.kernel.learn import items
-    from silica.ui.web import learn_routes
+    from silica.kernel.learn import session as learn_session
 
     c, _ = client
     s = _start(c, plan="Plans/ML.md")
-    live = learn_routes._LIVE
+    live = learn_session._LIVE
     live["items"][0].update(kind="explain")               # as if the model had written it
     calls = []
 
@@ -64,11 +64,11 @@ def test_a_model_kind_miss_is_asked_again_now_in_a_mechanical_kind(client, monke
 
 def test_a_mechanical_miss_gets_a_generated_retest_in_the_background(client, monkeypatch):
     from silica.kernel.learn import items
-    from silica.ui.web import learn_routes
+    from silica.kernel.learn import session as learn_session
 
     c, _ = client
     s = _start(c, plan="Plans/ML.md")
-    live = learn_routes._LIVE
+    live = learn_session._LIVE
     live["items"][0].update(kind="cloze")
     monkeypatch.setattr(items, "build_session", lambda rows, backfill=None, n=None: [dict(_item(rows[0]["kind"]), i=1)])
     r = _miss(c, s, live["items"][0]["i"])
@@ -84,13 +84,13 @@ def test_a_mechanical_miss_gets_a_generated_retest_in_the_background(client, mon
 
 
 def test_no_retest_for_a_met_answer_a_placement_or_past_the_cap(client, monkeypatch):
-    from silica.ui.web import learn_routes
+    from silica.kernel.learn import session as learn_session
 
     c, _ = client
     _start(c, plan="Plans/ML.md")
-    live = learn_routes._LIVE
+    live = learn_session._LIVE
     it = dict(live["items"][0], kind="explain")
-    assert learn_routes._retest(live, it, {"correct": True}) is None
-    assert learn_routes._retest(live, {**it, "placement": {"step": 0, "rank": 0}}, {"correct": False}) is None
-    live["retested"] = {f"n{k}" for k in range(learn_routes.RETEST_MAX)}
-    assert learn_routes._retest(live, it, {"correct": False}) is None
+    assert learn_session._retest(live, it, {"correct": True}) is None
+    assert learn_session._retest(live, {**it, "placement": {"step": 0, "rank": 0}}, {"correct": False}) is None
+    live["retested"] = {f"n{k}" for k in range(learn_session.RETEST_MAX)}
+    assert learn_session._retest(live, it, {"correct": False}) is None

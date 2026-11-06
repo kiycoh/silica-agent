@@ -77,6 +77,7 @@ def list_plans() -> list[dict]:
 def read_plan(path: str, text: str | None = None) -> dict:
     """The note as a plan: scope kind, target, reach, deadline, steps, sessions."""
     from silica.kernel.base import frontmatter
+    from silica.kernel.learn import session
 
     if text is None:
         text = (_vault() / path).read_text(encoding="utf-8")
@@ -118,10 +119,10 @@ def read_plan(path: str, text: str | None = None) -> dict:
         # ADR-0131: the collections' roles, study hours a day, the assessment
         # read off the reference (or "none"), a guide for each step's depth
         "materials": str(data.get("materials") or ""), "references": str(data.get("references") or ""),
-        "unused": str(data.get("unused") or ""), "hours": _hours_of(data.get("hours")),
+        "unused": str(data.get("unused") or ""), "hours": hours_of(data.get("hours")),
         "assessment": parse_assessment(data.get("assessment")),
         "assessment_set": "assessment" in data, "guide": str(data.get("guide") or ""),
-        "steps": parse_steps(body), "sessions": parse_sessions(body),
+        "steps": parse_steps(body), "sessions": session.parse_lines(_section(body, "Sessions")),
         "tree_links": section_links(body, "Tree"),
         "legacy": legacy,
     }
@@ -147,7 +148,7 @@ def matched_text(matched: dict[str, str]) -> str:
     return " | ".join(f"{t} -> {n}" for t, n in matched.items())
 
 
-def _hours_of(value) -> float | None:
+def hours_of(value) -> float | None:
     try:
         h = float(str(value).replace(",", "."))
     except (TypeError, ValueError):
@@ -236,25 +237,6 @@ def _marks(node: dict) -> str:
     if node.get("depth") in ("deep", "well", "read"):
         out += f" · {node['depth']}"
     return out
-
-
-def parse_sessions(body: str) -> list[dict]:
-    out = []
-    for line in _section(body, "Sessions"):
-        line = line.strip()
-        if not line.startswith("- "):
-            continue
-        parts = [p.strip() for p in line[2:].split(" · ")]
-        m = re.match(r"(\d+) item", parts[1] if len(parts) > 1 else "")
-        met = next((x[len("met: "):] for x in parts if x.startswith("met: ")), "")
-        out.append({"date": parts[0][:10], "items": int(m.group(1)) if m else 0,
-                    "line": line[2:], "session": _session_id(line), "met": met})
-    return out
-
-
-def _session_id(line: str) -> str:
-    m = re.search(r"session:\s*([0-9a-f]{8,32})", line)
-    return m.group(1) if m else ""
 
 
 # ---------------------------------------------------------------- scope resolution
@@ -1727,7 +1709,7 @@ def planned_paths() -> set[str] | None:
             out.update(scope_of(p)["paths"])
         except Exception as exc:
             # A plan whose scope will not resolve covers nothing here, as it
-            # covers nothing in Learn's rows (learn_routes._plan_scopes): its
+            # covers nothing in Learn's rows (session.plan_scopes): its
             # never-practised notes wait out of Next until the plan reads.
             logger.debug("planned_paths: scope of %s not resolved (%s)", p["path"], exc)
     return out
@@ -1841,7 +1823,7 @@ def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | No
     import math
     from datetime import date, datetime, timedelta, timezone
 
-    from silica.kernel.learn.pick import FINAL_DAYS
+    from silica.kernel.learn.pick import FINAL_DAYS, SESSION_MAX
 
     if not plan.get("by"):
         return None
@@ -1859,7 +1841,7 @@ def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | No
     study_days = b["study_days"] if b and b.get("window") else max(1, days_left - FINAL_DAYS)
     answers = math.ceil(below * ATTEMPTS_PER_NOTE)
     per_day = -(-answers // study_days)  # ceil
-    size = max(1, min(24, per_day)) if below else n_default
+    size = max(1, min(SESSION_MAX, per_day)) if below else n_default
     since = (datetime.now(timezone.utc) - timedelta(days=RECENT_PACE_DAYS)).isoformat()
     recent = sum(1 for e in (entries or []) if str(e.get("ts") or "") >= since) / RECENT_PACE_DAYS
     final = (f", then {b['window']} days for the project" if b and b.get("window")
@@ -2392,10 +2374,12 @@ def percent_done(met: int, notes: int, gaps: int) -> int:
 def append_session(plan_path: str, line: str) -> str:
     """The session's summary line under `## Sessions`, once: a retry with
     the same session id appends nothing."""
-    sid = _session_id("- " + line)
+    from silica.kernel.learn import session
+
+    sid = session.line_id(line)
 
     def mutate(text: str) -> str:
-        if sid and f"session: {sid}" in text:
+        if sid and session.has_line(text, sid):
             return text
         lines = text.rstrip("\n").split("\n")
         idx = next((i for i, ln in enumerate(lines) if (h := _HEADING_RE.match(ln)) and h.group(2).casefold().startswith("sessions")), None)
@@ -2545,8 +2529,8 @@ def compose_plan(name: str, scope: str, target, reach: str = "relational", by: s
     kept = _matched_kept(resolved)
     if kept:
         props["matched"] = matched_text(kept)
-    if _hours_of(hours):
-        props["hours"] = f"{_hours_of(hours):g}"
+    if hours_of(hours):
+        props["hours"] = f"{hours_of(hours):g}"
     if assessment_value:
         props["assessment"] = assessment_value
     if guide:
@@ -2839,7 +2823,7 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
         guide_link = (guide if str(guide).startswith("[[") else f"[[{Path(guide).stem}]]") if guide else ""
         for k, v in (("by", by), ("restrict", restrict), ("refused", " | ".join(refused_lines)),
                      ("materials", roles.get("materials")), ("references", roles.get("references")),
-                     ("unused", roles.get("unused")), ("hours", f"{_hours_of(hours):g}" if _hours_of(hours) else ""),
+                     ("unused", roles.get("unused")), ("hours", f"{hours_of(hours):g}" if hours_of(hours) else ""),
                      ("assessment", assessment_value), ("guide", guide_link),
                      ("matched", matched_text(_matched_kept(resolved)))):
             if v:

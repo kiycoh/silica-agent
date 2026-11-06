@@ -62,6 +62,10 @@ def _vault() -> Path:
     return Path(CONFIG.vault_path)
 
 
+def minutes(questions: int) -> int:
+    return max(1, round(questions * MINUTES_PER_QUESTION))
+
+
 def read_note(path: str) -> str:
     """The note's text, "" for a missing, unreadable or outside path. Learn
     reads paths that come from a URL (GET /learn/note?path=), and

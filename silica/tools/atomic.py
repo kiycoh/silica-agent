@@ -1917,33 +1917,17 @@ def silica_learn_items(n: Annotated[int, Field(description='Session size (defaul
     """
     import uuid
 
-    from silica.kernel.learn import items, pick, plans
-
-    scope = frontier = revisit = None
-    plan_path = ""
-    t = (target or "").strip()
-    if t:
-        plan = plans.find_plan(t)
-        if plan is not None:
-            scoped = plans.scope_of(plan)
-            scope, frontier, revisit, plan_path = scoped["paths"], scoped["frontier"], scoped["revisit"], plan["path"]
-        else:
-            from silica.config import CONFIG
-            from silica.kernel.base import note_index
-
-            prefix = t.replace("\\", "/").casefold()
-            notes = note_index.meta(Path(CONFIG.vault_path))
-            scope = [p for p in notes if p.casefold().startswith(prefix)]
+    from silica.kernel.learn import items, plans, session
     from silica.kernel.workspaces import active_scope
 
-    if (ws := active_scope()) is not None:  # a workspace's turn studies its members only
-        scope = [p for p in (scope if scope is not None else ws["paths"]) if p in ws["paths"]]
-    picked = pick.session(n=max(1, n), scope=scope, frontier=frontier, revisit=revisit)
-    if plan_path and plan is not None:  # plan_path is only set from a found plan
-        plans.assign_objectives(plan, picked["items"])
-    built = items.build_session(picked["items"], picked["backfill"], n=max(1, n))
+    t = (target or "").strip()
+    plan = plans.find_plan(t) if t else None
+    ws = active_scope()  # a workspace's turn studies its members only
+    drawn = session.draw(max(1, n), plan=plan, scope=t.replace("\\", "/") if t and plan is None else None,
+                         paced=False, within=ws["paths"] if ws is not None else None)
+    picked, built = drawn["picked"], drawn["built"]
     return {
-        "session": uuid.uuid4().hex, "plan": plan_path, "n": n,
+        "session": uuid.uuid4().hex, "plan": plan["path"] if plan else "", "n": n,
         "items": items.cue_payload(built),
         "due": picked["due"], "unexplored": picked["unexplored"],
         "amnesty": picked["amnesty"],

@@ -20,7 +20,7 @@ from silica.kernel.base.notekey import ledger_key
 
 PER_STEP = 2
 # Ten steps of two, twenty questions: under the session's cap of 24
-# (learn_routes.start_session). A longer plan places its first ten steps.
+# (session.start). A longer plan places its first ten steps.
 MAX_STEPS = 10
 ORIGIN = "placement"
 
