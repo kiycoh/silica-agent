@@ -214,12 +214,10 @@ def test_a_name_tries_notes_spread_across_its_part(tmp_path):
 def test_2d_lays_out_with_forceatlas2_and_only_in_a_worker():
     """d3 keeps 3D and a 2D frame with no worker (ADR-0136, step b in 2D)."""
     assert 'const ENGINE_2D = NO_WORKER || typeof Worker === "undefined" ? "d3" : "fa2";' in FRAME_JS
-    assert 'engine: is2D() ? ENGINE_2D : "d3", unit: layoutUnit,' in FRAME_JS
-    assert 'if (m.init.engine === "fa2") { faInit(m.init.unit); faForces(m.init.forces, links); }' in FRAME_JS
-    # A 2D layout settled by one engine never seeds the other as its own,
-    # and a cached FA2 layout restarts at the unit it stopped at.
+    assert 'engine: is2D() ? ENGINE_2D : "d3",' in FRAME_JS
+    assert 'if (m.init.engine === "fa2") { faInit(); faForces(m.init.forces, links); }' in FRAME_JS
+    # A 2D layout settled by one engine never seeds the other as its own.
     assert '":" + (is2D() ? ENGINE_2D : "d3")' in FRAME_JS
-    assert "unit: SIM && SIM.last ? SIM.last.unit : 1" in FRAME_JS
 
 
 def test_the_renderer_and_the_layout_cache_start_over_once():
@@ -227,23 +225,18 @@ def test_the_renderer_and_the_layout_cache_start_over_once():
     layout settled with every line pulling is not the backbone's."""
     assert re.search(r'const MODE_KEY = "silica-graph-mode-2";\nlet mode = "2d";', FRAME_JS)
     assert 'if (localStorage.getItem(MODE_KEY) === "3d") mode = "3d";' in FRAME_JS
-    assert "if (rebuild) try { localStorage.setItem(MODE_KEY, m); }" in FRAME_JS
-    # -3: a 2D layout settled without the area pull (AREA_PULL) is not its own
-    assert 'const LAYOUT_KEY = "silica-graph-layout-3";' in FRAME_JS
+    assert "if (rebuild && remember) try { localStorage.setItem(MODE_KEY, m); }" in FRAME_JS
+    # -4: a hit is shown as it stands, so a layout saved before the overlap pass
+    # or under a force slider would be shown for good (ADR-0152)
+    assert 'const LAYOUT_KEY = "silica-graph-layout-4";' in FRAME_JS
 
 
 def test_with_the_atlas_on_a_line_shows_for_the_note_in_hand_only():
     quiet = FRAME_JS[FRAME_JS.index("const quietNow = l =>"):].split("\n")[0]
     assert "atlasOn()" in quiet and "!AB" in quiet and 'l.type !== "COVERS"' in quiet
-    assert "(hoverId || focusIds.length) && !l._dim" in quiet
+    assert "(hoverId || focusIds.length || LINK_SEL) && !l._dim" in quiet
     # the atlas names its notes; drawNode's own labels stand down
     node = FRAME_JS[FRAME_JS.index("function drawNode("):FRAME_JS.index("// --- an arrangement, drawn")]
-    assert "if (atlas || (scale < 1.5" in node
+    assert 'if (atlas || ARR || namesMode !== "auto" ||' in node
 
 
-def test_a_drag_holds_forceatlas2_running_from_a_settled_layout():
-    """A settled run has spent its budget: the hold has to open it again, or
-    the notes around a dragged one never answer the drag (2026-10-28)."""
-    assert "if (fa) { fa.hold = m.target > 0; faRestart(); }" in FRAME_JS
-    step = FRAME_JS[FRAME_JS.index("function faStep() {"):FRAME_JS.index("function faRestart()")]
-    assert step.index("if (!fa.left)") < step.index("if (fa.hold) return true;")

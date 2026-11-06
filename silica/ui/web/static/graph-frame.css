@@ -237,11 +237,11 @@ body.host-drawer-open #hud{display:none}
    shows only while Key is open, so the picture keeps the width (silica-host-side). */
 body.key-folded #hud{display:none}
 /* The foot, at the two bottom corners: on the left the chips that move the
-   camera and the sim, on the right the simulation's forces and its size. The
+   camera and the names, on the right the layout's state and the rebuild. The
    bottom edge is the one nothing else claims - the HUD is top-right, the focus
    bar top-centre, the labels are in the field - and the corners leave its
    middle to the app's composer. Each bar takes at most half the width, so on
-   a narrow frame the count wraps above Forces instead of meeting the chips.
+   a narrow frame the chips wrap instead of meeting the count.
    Embedded, the app floats its dock over this frame's foot and posts its
    height (silica-host-dock), which a run line, the answer card and a
    multi-row draft all grow during a turn; both bars ride 12px above it.
@@ -267,37 +267,49 @@ body.embedded.foot-lift{--foot:calc(var(--dock-h,72px) + 12px)}
         border-radius:10px;background:var(--glass);backdrop-filter:var(--glass-blur);
         box-shadow:var(--glass-edge);transition:bottom .22s cubic-bezier(.2,.8,.2,1)}
 #gstat{left:12px;flex-wrap:wrap}
-/* Forces is the first child and lands in the corner; the state reads into it. */
+/* The rebuild is the first child and lands in the corner; the state reads into it. */
 #gsim{right:12px;flex-direction:row-reverse}
 /* One group, one grammar: the tabs' (app-panels.css .stab). A control is a
    borderless 8px pill inside the group, pressed is --sel. */
-:is(#gstat,#gsim) button,#forces-fold>summary{padding:5px 10px;background:none;border:0;border-radius:8px;
+:is(#gstat,#gsim) button{padding:5px 10px;background:none;border:0;border-radius:8px;
                color:var(--ash);font:inherit;cursor:pointer;
                transition:background .18s cubic-bezier(.2,.8,.2,1),color .18s cubic-bezier(.2,.8,.2,1)}
-:is(#gstat,#gsim) button:hover,#forces-fold>summary:hover{background:var(--sel-hover);color:var(--frost)}
-:is(#gstat,#gsim) button:focus-visible,#forces-fold>summary:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
+:is(#gstat,#gsim) button:hover{background:var(--sel-hover);color:var(--frost)}
+:is(#gstat,#gsim) button:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
 /* The renderer pair is one control inside the group: a hairline after it
    says the two halves belong together and fit is a different act. */
 #gstat .seg{border:0;background:none;gap:2px;padding-right:4px;margin-right:2px;
             border-right:1px solid var(--line-2);border-radius:0}
 #gstat .seg button.active{background:var(--sel);color:var(--frost);font-weight:500}
-/* The layout's state, the one live word of the count it replaced: the
-   figures are in the head of the Forces panel, beside what they size. */
-#gsim .num{padding:0 8px 0 10px;max-width:150px;overflow:hidden;text-overflow:ellipsis;
+/* The layout's state and the graph's size, the figures the corner still owes. */
+#gsim .num{padding:0 8px 0 10px;max-width:190px;overflow:hidden;text-overflow:ellipsis;
            font-variant-numeric:tabular-nums;white-space:nowrap}
-/* Forces opens upward from the bar, over the picture: the panel it used to
-   fold out of is the key now, and a slider is not a key. */
-#forces-fold{position:relative}
-#forces-fold>summary{list-style:none;user-select:none}
-#forces-fold>summary::-webkit-details-marker{display:none}
-#forces-fold>summary::after{content:" ▴";color:var(--ash-dim)}
-#forces-fold[open]>summary::after{content:" ▾"}
-#forces-fold[open]>summary{background:var(--sel);color:var(--frost)}
-#forces-fold>.fold-body{position:absolute;right:-2px;bottom:calc(100% + 8px);width:216px;margin:0;
-                        padding:12px;border-radius:10px;background:var(--glass);
-                        backdrop-filter:var(--glass-blur);box-shadow:var(--glass-edge),var(--lift);
-                        font-size:12px;color:var(--ash)}
-#gsize{color:var(--ash-dim);font-variant-numeric:tabular-nums;margin-bottom:2px}
+/* A note open beside the frame leaves it 560px at 1440: the chips keep one row
+   and the count, which is also on the key's rows, gives way. */
+@media (max-width:760px){
+  #gsize{display:none}
+  #gstat{max-width:calc(100% - 190px)}
+}
+/* Clusters and Flow are 2D: there the renderer pair has nothing to offer. */
+body.arranged #mode-toggle{display:none}
+/* A clicked link's tag (ADR-0152): the chrome's material over the print. */
+#link-tag{position:absolute;z-index:4;max-width:340px;padding:8px 10px 9px;font-size:12.5px;
+          line-height:1.45;color:var(--text);background:var(--slate-2);border:1px solid var(--line-2);
+          border-radius:8px;box-shadow:0 10px 28px -12px rgb(0 0 0 / .7)}
+#link-tag[hidden],#layout-note[hidden]{display:none}
+#link-tag .ends{color:var(--frost);font-size:13px;font-weight:500}
+#link-tag .ends i{font-style:normal;color:var(--ash-dim);padding:0 4px}
+#link-tag .kind{color:var(--ash);margin-top:2px}
+#link-tag .ln{margin-top:6px}
+#link-tag .ln .n{margin-right:6px;font-weight:600;font-size:12px;color:var(--ash-dim);font-variant-numeric:tabular-nums}
+#link-tag .open{display:block;margin-top:6px;padding:0;background:none;border:0;cursor:pointer;font:inherit;
+                font-weight:500;color:var(--accent);text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
+#link-tag .open:focus-visible{outline:1px solid var(--accent);outline-offset:2px}
+/* What an arrangement cannot draw, in the band the focus banner uses. */
+#layout-note{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:5;
+             max-width:min(520px,calc(100% - 40px));padding:6px 10px;font-size:12px;color:var(--ash);
+             border-radius:10px;background:var(--glass);backdrop-filter:var(--glass-blur);box-shadow:var(--glass-edge)}
+body.embedded #layout-note{top:58px;left:12px;transform:none}
 #drawer{width:260px;flex-shrink:0;background:var(--slate);border-left:1px solid var(--line);
          padding:18px 16px;overflow-y:auto;display:none;flex-direction:column;gap:12px}
 #drawer.open{display:flex}
@@ -333,10 +345,6 @@ body.embedded.foot-lift{--foot:calc(var(--dock-h,72px) + 12px)}
            white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tree-note:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
 .tree-note:hover{background:var(--slate-2);border-left-color:var(--accent);color:var(--frost)}
-.force-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;
-            color:var(--ash);margin-top:6px}
-.force-row .fv{color:var(--ash-dim);font-size:12px}
-.force-slider{width:100%;accent-color:var(--accent);cursor:pointer;margin-top:2px}
 /* renderer switch — two halves of one control, so it reads as "one of these
    two", not as two independent buttons */
 .seg{display:flex;border:1px solid var(--line-2);background:var(--slate-2)}

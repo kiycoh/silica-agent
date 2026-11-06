@@ -3874,11 +3874,6 @@ def shape():
     return {
         "areas": areas,
         "matrix": matrix,
-        # Every link that joins two areas, rarest pair first: the matrix's
-        # off-diagonal cells unrolled into the wikilinks behind them. The same
-        # over the semantic zones, and each note's zone, went with the graph's
-        # zones (ADR-0136): /shape no longer runs the semantic partition.
-        "bridges": _bridge_rows(real, edges, {a["id"]: a["label"] for a in areas}),
         # Every real note, for the containment view. Three fields, not the whole
         # node: the treemap needs a path, an area and a weight, and shipping the
         # colour/font/title the canvas uses would triple the payload for nothing.
@@ -4402,14 +4397,36 @@ def map_layout(payload: dict):
     return arrange_in_vault(root, lit, community_of)
 
 
+@app.get("/link")
+def link_written(request: Request):
+    """Where a clicked link is written (ADR-0152): the note, the line, its words.
+
+    A wikilink edge is one per pair, so the line may be in either end. Only
+    keys in the vault index resolve, which keeps a path out of the vault out of
+    the read, as /note does. Asked per click and not shipped on the export:
+    1,263 lines on Cultura would ride every graph for one look.
+    """
+    from silica.kernel.recall.mindmap import note_resolver
+
+    resolve = note_resolver()
+    a, b = (resolve(request.query_params.get(k, "")) for k in ("from", "to"))
+    if not a or not b:
+        return {"path": "", "line": 0, "text": ""}
+    for src, target in ((a, b), (b, a)):
+        line, text = _link_line(src, target)
+        if line:
+            return {"path": src, "line": line, "text": text}
+    return {"path": "", "line": 0, "text": ""}
+
+
 @app.get("/path")
 def prereq_path(note: str = ""):
     """The prerequisite ladder around one note (V2, RefD): read-order space.
 
-    The fifth explore surface exists because the other four cannot show
-    DIRECTION. graph and map lay notes out by how they connect, folders by
-    where they are filed, areas by how two groups couple: all four are
-    undirected, and "what do I read before this" has no answer in any of them.
+    Flow reads this (ADR-0152), because the other surfaces cannot show
+    DIRECTION: the graph and the Map lay notes out by how they connect, Clusters
+    by area, Folders by where they are filed. All are undirected, and "what do
+    I read before this" has no answer in any of them.
 
     Empty `note` returns the landing instead of an error, like /map: the notes
     that root the biggest ladders, which is the one list that cannot be got
@@ -4426,8 +4443,8 @@ def prereq_path(note: str = ""):
     if not m.prereq:
         return {
             "picks": [],
-            # The one thing that makes this surface empty, said as the surface
-            # itself rather than as a blank pane: RefD needs the co-occurrence
+            # The one thing that leaves Flow empty, said by Flow itself rather
+            # than as a bare graph: RefD needs the co-occurrence
             # index, and a vault that never built one has no reading order to
             # show, not a reading order of length zero.
             "hint": "no reading order yet: the prerequisite direction is derived from the "
@@ -5449,40 +5466,6 @@ def _row(path: str) -> dict:
     return {"name": _clean_name(path), "path": path}
 
 
-def _bridge_rows(nodes: list[dict], edges: list[dict], name_of: dict[int, str]) -> list[dict]:
-    """area_bridges' rows dressed for the explore surface: names, part labels
-    and the sentence that carries the link.
-
-    `name_of` names the areas by their hub note's title (ADR-0058 Decision 5).
-    The row says `part`, not `area`: one producer shipped the areas and the
-    semantic zones until ADR-0136 pruned the second reading, and the surface
-    still reads `part`.
-
-    No shared concepts, measured: `shared_concepts` on the 74 bridges of the
-    728-note test vault (2026-09-22) labelled every row, with "definizione",
-    "dati", "cos", "analisi" as the typical terms, because for two notes the
-    c-TF-IDF labeller returns their shared frequent tokens, not a topic. A
-    wikilink someone wrote across two areas is evidence by itself; the
-    corroborated-only rule belongs to PROPOSED links, which have no author.
-    """
-    from silica.kernel.recall.graph_export import area_bridges
-
-    rows = area_bridges(nodes, edges)
-
-    def end(path: str, part: int) -> dict:
-        return {"name": _clean_name(path), "path": path, "part_id": part,
-                "part": name_of.get(part, f"#{part}")}
-
-    return [{
-        "a": end(r["a"], r["area_a"]), "b": end(r["b"], r["area_b"]),
-        "links_between": r["links_between"], "joined": r["joined"],
-        "scaffold": r["scaffold"],
-        # A scaffold link has no sentence by definition (frontmatter, heading
-        # line), so the row says so instead of quoting a `## [[Title]]`.
-        "passage": "" if r["scaffold"] else _bridge_passage(r["a"], r["b"]),
-    } for r in rows]
-
-
 def _bridge_passage(src: str, target: str, limit: int = 240) -> str:
     """The sentence in `src` that carries its wikilink to `target`, as prose.
 
@@ -5517,6 +5500,42 @@ def _bridge_passage(src: str, target: str, limit: int = 240) -> str:
                         out = out[:limit].rsplit(" ", 1)[0] + "…"
                     return out
     return ""
+
+
+def _link_line(src: str, target: str, limit: int = 240) -> tuple[int, str]:
+    """The line of `src` a wikilink to `target` is written on, and its words.
+
+    Counted in the whole file, frontmatter included, because the drawer opens
+    at that number. Not _bridge_passage's filter: a link in a table or under a
+    heading is still written somewhere, and on Cultura (2026-11-05) any line
+    holding the link found 1,248 of 1,263. (0, "") when no line names it: a
+    link through an alias of the note resolves and spells another name.
+    """
+    from silica.driver import get_driver
+    from silica.driver.base import NoteRef
+
+    try:
+        content = get_driver().read_note(NoteRef(name=_clean_name(src), path=src)).content
+    except Exception:
+        logger.debug("link: source unreadable %s", src, exc_info=True)
+        return 0, ""
+    want = _clean_name(target).lower()
+    lines = content.splitlines()
+    # The body before the frontmatter: a sentence says why the link is there,
+    # and a `related:` entry only that it is.
+    head = len(lines) - len(_split_frontmatter(content)[1].splitlines())
+    for number in [*range(head, len(lines)), *range(head)]:
+        raw = lines[number]
+        for m in _WIKI_REF.finditer(raw):
+            if _clean_name((m.group(1) or "").strip()).lower() != want:
+                continue
+            line = _LIST_OR_QUOTE.sub("", raw)
+            said = next((s for s in _SENTENCE_END.split(line) if m.group(0) in s), line)
+            out = " ".join(_plain(said).split()).strip("'\"")
+            if len(out) > limit:
+                out = out[:limit].rsplit(" ", 1)[0] + "…"
+            return number + 1, out
+    return 0, ""
 
 
 def _note_concepts(target: str, k: int = 18) -> list[dict]:

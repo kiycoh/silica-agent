@@ -939,6 +939,27 @@ def _stamp_load_bearing(nodes: list[dict], G_und, bet: dict[str, float]) -> None
             n["strands"] = strands.get(nid, 0)
 
 
+def _size_by_links(nodes: list[dict], G_und) -> None:
+    """A note's size is how many notes it links with (ADR-0152), counted on the
+    graph betweenness reads: resolved wikilinks, each neighbour once. A note
+    Silica runs on counts for nothing, as its tooltip says.
+
+    A drawn disc's area is proportional to `size`, so the area grows with the
+    links and the radius with their root: 51 links draws 2.9 times the radius of
+    2. Betweenness drew radii from 6.0 to 7.65 on Cultura (2026-11-05), which
+    said nothing and said it twice with the hub ring. `links` rides along: the
+    frame's Key names and Clusters read it, and they must agree with the size.
+    """
+    from silica.kernel.recall.graph_export import NATIVE_TYPES
+
+    native = {n["id"] for n in nodes if n.get("type") in NATIVE_TYPES}
+    for n in nodes:
+        if n.get("type") == "ghost" or n["id"] in native:
+            continue
+        n["links"] = len(set(G_und[n["id"]]) - {n["id"]} - native) if n["id"] in G_und else 0
+        n["size"] = round(16 + 3.5 * n["links"], 2)
+
+
 def _stamp_collections(nodes: list[dict]) -> None:
     """Zotero collection names onto the paper nodes, for the scope picker's
     Collections group (ADR-0055 "Scoping").
@@ -1089,21 +1110,20 @@ def export_graph(
     linked = any(c.size >= ATLAS_MIN_AREA for c in communities)
     zones = [] if linked else detect_semantic_partition(nodes, sim)
 
-    # Betweenness → node size (bottleneck nodes swell) + discourse-shape badge,
-    # from one shared nx build over the wikilinks. Base size 16 for ordinary nodes.
+    # Betweenness for the hub ring + discourse-shape badge, from one shared nx
+    # build over the wikilinks.
     bet, giant = canvas_metrics(nodes, edges)
     if bet:
         for n in nodes:
             if n.get("type") != "ghost":
-                b = round(bet.get(n["id"], 0.0), 4)
-                n["betweenness"] = b
-                n["size"] = round(16 + 40 * b, 2)
+                n["betweenness"] = round(bet.get(n["id"], 0.0), 4)
     discourse = discourse_shape(
         sum(1 for n in nodes if n.get("type") != "ghost"),
         giant, [c.size for c in communities],
     )
 
     G_und = edge_graph(nodes, edges)
+    _size_by_links(nodes, G_und)
     _stamp_load_bearing(nodes, G_und, bet)
 
     # Gap particles ride the wikilink layer (they answer a linking question).

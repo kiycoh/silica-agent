@@ -123,35 +123,16 @@ def _two_triangles(tmp_vault, c_body: str) -> None:
     tmp_vault.note("F.md", "[[D]] [[E]]")
 
 
-def test_shape_ships_the_bridges_with_the_sentence_that_carries_the_link(client, tmp_vault):
-    _two_triangles(tmp_vault, "[[A]] [[B]]\n\nThe proof in C leans on [[D]] for its lemma. A second sentence.\n")
-    rows = client.get("/shape").json()["bridges"]
-    assert [(r["a"]["name"], r["b"]["name"]) for r in rows] == [("C", "D")]
-    row = rows[0]
-    assert row["links_between"] == 1 and row["joined"] == 9 and "score" not in row
-    assert row["scaffold"] is False and "other" not in row
-    assert row["a"]["part"] and row["b"]["part"] and row["a"]["part"] != row["b"]["part"]
-    assert row["a"]["path"] == "C.md" and row["b"]["path"] == "D.md"
-    assert row["passage"] == "The proof in C leans on D for its lemma."
-    assert "concepts" not in row   # measured generic on 74/74 rows of the test vault: not shipped
-
-
 def test_a_link_carried_by_a_bullet_or_a_quote_still_has_its_passage(client, tmp_vault):
     """31 of 55 prose bridges on the test vault had no passage because the
     snippet rule refuses list items and quotes. Here they ARE the prose:
     `- **Hazard**: [[Funzione matematica]] chiave per...` is the sentence."""
+    from silica.ui.web.server import _bridge_passage
+
     _two_triangles(tmp_vault, "[[A]] [[B]]\n\n- **Lemma**: rests on [[D]] for the bound.\n")
-    row = client.get("/shape").json()["bridges"][0]
-    assert row["passage"] == "Lemma: rests on D for the bound."
+    assert _bridge_passage("C.md", "D.md") == "Lemma: rests on D for the bound."
     tmp_vault.write(tmp_vault.note("C.md"), "[[A]] [[B]]\n\n> To do it, [[D|derive]] the log-likelihood.\n")
-    row = client.get("/shape").json()["bridges"][0]
-    assert row["passage"] == "To do it, derive the log-likelihood."
-
-
-def test_a_frontmatter_bridge_has_no_sentence_to_show(client, tmp_vault):
-    _two_triangles(tmp_vault, "---\nrelated:\n  - \"[[D]]\"\n---\n[[A]] [[B]]\n")
-    row = client.get("/shape").json()["bridges"][0]
-    assert row["scaffold"] is True and row["passage"] == ""
+    assert _bridge_passage("C.md", "D.md") == "To do it, derive the log-likelihood."
 
 
 def test_shape_ships_the_areas_reading_and_the_colours_bridges_paints_with(client, tmp_vault):
@@ -165,4 +146,4 @@ def test_shape_ships_the_areas_reading_and_the_colours_bridges_paints_with(clien
     assert "zone_bridges" not in s and "zones" not in s
     assert [(a["color"], a["color_paper"]) for a in s["areas"]] == [
         (_community_color(a["id"]), _community_color(a["id"], on_paper=True)) for a in s["areas"]]
-    assert {r["a"]["part"] for r in s["bridges"]} <= {a["label"] for a in s["areas"]}
+    assert "bridges" not in s, "a row read a note each for a surface that is gone (ADR-0152)"

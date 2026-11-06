@@ -692,48 +692,25 @@ function scatter(points, {
 // the accent by inter-area link count, the diagonal is neutral and carries the
 // area's own cohesion. A shared ramp would put a 0.11 cohesion and 11 links in
 // the same ink and invite reading one as the other.
-//
-// `swatch` folds the grid into the Areas column (ADR-0064): the heads become
-// the parts' colour dots, the names move to the caller's readout, and the
-// cells take the width they are given instead of a fixed 22px. A head or the
-// diagonal then calls `onPart`, which puts that part at the centre.
-function couplingMatrix(areas, matrix, { dense = true, onPair = null, swatch = null, onPart = null } = {}) {
+function couplingMatrix(areas, matrix, { dense = true } = {}) {
   let max = 1;
   for (let i = 0; i < areas.length; i++) {
     for (let j = 0; j < areas.length; j++) if (i !== j) max = Math.max(max, matrix[i][j]);
   }
   const wrap = mkEl("div", "smx-scroll");
-  const g = mkEl("div", "smx" + (swatch ? " fit" : dense ? " dense" : ""));
+  const g = mkEl("div", "smx" + (dense ? " dense" : ""));
   g.style.setProperty("--cols", areas.length);
   g.appendChild(mkEl("div", "smx-corner"));
-  const dot = (a, cls) => {
-    const h = mkEl("button", "smx-sw " + cls);
-    h.type = "button";
-    h.dataset.part = a.id;
-    h.style.setProperty("--c", swatch(a));
-    h.setAttribute("aria-label", `${a.label}, ${a.size} notes` + (onPart ? ": put it at the centre" : ""));
-    if (onPart) h.addEventListener("click", (e) => { e.stopPropagation(); onPart(a.id); });
-    return h;
-  };
   for (const a of areas) {
-    if (swatch) {
-      const h = dot(a, "smx-col");
-      h.tabIndex = -1;   // the row's dot is the keyboard's way to the same part
-      g.appendChild(h);
-      continue;
-    }
     const h = mkEl("div", "smx-col", a.label);
     h.title = `${a.label} · ${a.size} notes · cohesion ${a.cohesion}`;
     g.appendChild(h);
   }
   areas.forEach((a, i) => {
-    if (swatch) g.appendChild(dot(a, "smx-row"));
-    else {
-      const lbl = mkEl("div", "smx-row", a.label);
-      lbl.title = `${a.label} · ${a.size} notes`;
-      if (a.path) { lbl.dataset.path = a.path; lbl.classList.add("clickable"); }
-      g.appendChild(lbl);
-    }
+    const lbl = mkEl("div", "smx-row", a.label);
+    lbl.title = `${a.label} · ${a.size} notes`;
+    if (a.path) { lbl.dataset.path = a.path; lbl.classList.add("clickable"); }
+    g.appendChild(lbl);
     areas.forEach((b, j) => {
       const v = matrix[i][j];
       if (i === j) {
@@ -741,14 +718,11 @@ function couplingMatrix(areas, matrix, { dense = true, onPair = null, swatch = n
         // leading zero: slicing it off 1.00 printed ".00", so a perfectly
         // cohesive area read as the least cohesive one on the grid.
         const coh = a.cohesion >= 1 ? "1" : a.cohesion ? a.cohesion.toFixed(2).slice(1) : "";
-        // Folded, a cell is ~18px and ".55" does not fit in it: the cohesion
-        // rides the caller's readout instead.
-        const c = mkEl("div", "smx-cell diag", swatch ? "" : coh);
+        const c = mkEl("div", "smx-cell diag", coh);
         c.dataset.i = a.id;
         c.dataset.j = a.id;
         c.title = a.cohesion == null ? `${a.label}: ${a.size} notes`
           : `${a.label}: cohesion ${a.cohesion}, ${a.intra} linked pairs inside ${a.size} notes`;
-        if (onPart) c.addEventListener("click", (e) => { e.stopPropagation(); onPart(a.id); });
         g.appendChild(c);
         return;
       }
@@ -758,19 +732,6 @@ function couplingMatrix(areas, matrix, { dense = true, onPair = null, swatch = n
       if (v) {
         c.style.setProperty("--i", Math.sqrt(v / max).toFixed(3));
         c.title = `${a.label} ↔ ${b.label}: ${v} linked note pairs`;
-        // The cell is the entry to the links it counts, where a surface exists
-        // to list them (explore). The metrics tab draws this grid with nowhere
-        // to go, so the hook is an option and the cell stays a number there.
-        if (onPair) {
-          c.classList.add("smx-open");
-          c.setAttribute("role", "button");
-          c.tabIndex = 0;
-          c.title += " · open them";
-          c.addEventListener("click", (e) => { e.stopPropagation(); onPair(a.id, b.id); });
-          c.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPair(a.id, b.id); }
-          });
-        }
       } else {
         c.title = `${a.label} ↮ ${b.label}: nothing links them`;
       }
