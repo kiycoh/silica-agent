@@ -275,6 +275,18 @@ def _isolate_cooccurrence_index(tmp_path, monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.fixture(autouse=True)
+def _no_table_weights(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The table step stays off unless a test turns it on.
+
+    onnxruntime is in a developer's env through [stt] or [all], and every test
+    gets a fresh _SILICA_HOME, so each PDF converted anywhere in the suite would
+    fetch 76 MB from HuggingFace. tests/test_pdf_tables.py keeps the real one.
+    """
+    from silica.sources import pdf_tables
+    monkeypatch.setattr(pdf_tables, "_weights", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_silica_home(tmp_path_factory, monkeypatch: pytest.MonkeyPatch):
     """Sandbox every ~/.silica default under the test's tmp dir.
 
