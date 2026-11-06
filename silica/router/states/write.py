@@ -40,8 +40,8 @@ def handle_snapshot(fsm: "InjectorFSM") -> None:
     with orch.phase(fsm, fsm._chunk_task_id("snapshot"), "snapshot"):
         from silica.driver.base import NoteRef
 
-        ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
         try:
+            ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
             fsm._txn = orch.build_txn(ops)
         except Exception as e:
             raise RuntimeError(f"SNAPSHOT failed: {e}")
