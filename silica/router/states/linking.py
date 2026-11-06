@@ -107,7 +107,7 @@ def _relevance_candidates(title_index: list[str]):
     from silica.config import CONFIG
     from silica.kernel.recall.relatedness import neighbours_above
 
-    floor = float(getattr(CONFIG, "autolink_min_sim", 0.0) or 0.0)
+    floor = float(CONFIG.autolink_min_sim or 0.0)
     known = set(title_index)
 
     def candidates(path: str) -> list[str]:

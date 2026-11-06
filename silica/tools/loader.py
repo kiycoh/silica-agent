@@ -18,7 +18,7 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
-from silica.tools import TOOLS, Tool, _model_from_signature, pointed
+from silica.tools import TOOLS, Tool, model_from_signature, pointed
 
 # The catalog line is the first sentence of the tool's own description, cut
 # here: 33 deferred tools at 90 chars is ~750 tokens, and the gist is enough to
@@ -71,7 +71,12 @@ class _LoaderTool(Tool):
         return schema
 
 
+def _named(args: dict, _result: Any) -> list[str]:
+    return args.get("names") or []
+
+
 TOOLS["silica_load_tools"] = _LoaderTool(
     silica_load_tools, "silica_load_tools", _DESCRIPTION,
-    _model_from_signature(silica_load_tools), "atomic", collapse="never",
+    model_from_signature(silica_load_tools), "atomic", collapse="never",
+    ingress=False, loads=_named,
 )

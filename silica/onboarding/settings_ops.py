@@ -5,10 +5,9 @@
 and the diagnostics a bug report carries. The panel's table sits above this and names them."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from silica.config import CONFIG, silica_home
+from silica.config import CONFIG, live_env, silica_home
 
 
 # The one row that is not an env var. Safe mode is a *view* over `write_dir` in
@@ -18,26 +17,11 @@ from silica.config import CONFIG, silica_home
 SAFE_MODE_KEY = "safe_mode"
 
 
-# The four endpoints serve.py knows how to start, and the env key that names the
-# command for each. One table for the model pick-lists and the Endpoints section.
-ENDPOINTS: tuple[tuple[str, str], ...] = (
-    ("chat", "SILICA_PROVIDER_SERVE_CMD"),
-    ("embeddings", "SILICA_EMBEDDING_SERVE_CMD"),
-    ("rerank", "SILICA_RERANK_SERVE_CMD"),
-    ("stt", "SILICA_STT_SERVE_CMD"),
-)
-
-
 def base_urls() -> dict[str, str]:
     """Where each endpoint is expected to answer, right now."""
-    from silica.onboarding.serve import chat_base_url
+    from silica.onboarding import serve
 
-    return {
-        "chat": chat_base_url(CONFIG),
-        "embeddings": CONFIG.embedding_base_url,
-        "rerank": CONFIG.rerank_base_url,
-        "stt": CONFIG.stt_base_url,
-    }
+    return serve.base_urls(CONFIG)
 
 
 def apply_safe_mode(on: bool) -> dict:
@@ -122,7 +106,7 @@ def endpoint_status() -> list[dict]:
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    from silica.onboarding.serve import is_local, ready
+    from silica.onboarding.serve import ENDPOINTS, is_local, ready
     from silica.onboarding.wizard import endpoint_model_ids
 
     urls = base_urls()
@@ -137,7 +121,7 @@ def endpoint_status() -> list[dict]:
             "up": up,
             "models": len(endpoint_model_ids(url)) if up else 0,
             "local": bool(url) and is_local(url),
-            "command": os.getenv(cmd_key, "").strip(),
+            "command": live_env(cmd_key),
             "command_key": cmd_key,
         }
 
@@ -152,12 +136,12 @@ def start_endpoint(label: str) -> dict:
     through a shell on the justification that it came from a file the user wrote
     by hand, and a web field that writes the .env would make that false.
     """
-    from silica.onboarding.serve import ensure
+    from silica.onboarding.serve import ENDPOINTS, ensure
 
     match = next((c for lbl, c in ENDPOINTS if lbl == label), None)
     if match is None:
         return {"ok": False, "error": f"unknown endpoint: {label}"}
-    command = os.getenv(match, "").strip()
+    command = live_env(match)
     if not command:
         return {"ok": False, "error": f"no start command set ({match})"}
     url = base_urls().get(label, "")

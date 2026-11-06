@@ -98,9 +98,10 @@ def test_read_note_shows_the_reading_under_the_embed(vault, monkeypatch):
 
 def test_bulk_embed_reads_images_first_and_embeds_raw_bodies(monkeypatch):
     from silica.kernel.recall import embed as embed_mod
+    from silica.kernel.recall import refresh
     from silica.tools import graph
     body = "![](images/x.jpg)\n\n<details>\n<summary>chart</summary>\n\nY axis\n</details>\n"
-    monkeypatch.setattr(graph, "DRIVER", SimpleNamespace(
+    monkeypatch.setattr(refresh, "DRIVER", SimpleNamespace(
         list_files=lambda folder: [SimpleNamespace(path="S.md", name="S")],
         read_note=lambda path: SimpleNamespace(content=body)))
     order = []

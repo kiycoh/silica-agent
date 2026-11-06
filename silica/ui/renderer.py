@@ -107,8 +107,7 @@ def _synthetic_tool_desc(name: str, args: dict) -> str:
     if name == "silica_run_injector":
         label = tool_labels.injector_label(args)
         return f'injector [bold]"{escape(label)}"[/bold]' if label else "injector"
-    verb, key = tool_labels.connector_desc(name) or tool_labels.TOOL_DESC.get(
-        name, (name.removeprefix("silica_").replace("_", " "), None))
+    verb, key = tool_labels.tool_desc(name)
     val = args.get(key, "") if key else ""
     if val:
         val = tool_labels.TARGET_FMT.get(name, str)(str(val))

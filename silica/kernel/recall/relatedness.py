@@ -291,7 +291,7 @@ def _rank_cooccur_from_profile(
         return None
     from silica.config import CONFIG
 
-    bm25 = bool(getattr(CONFIG, "cooccur_bm25", False))
+    bm25 = bool(CONFIG.cooccur_bm25)
     idf = _concept_idf(cooccur_store, set(profile), scope=scope)
     postings = cooccur_store.stem_postings()
     lens, avgdl = cooccur_store.doc_lengths() if bm25 else ({}, 1.0)

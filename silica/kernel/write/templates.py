@@ -256,7 +256,7 @@ def resolve_template(name: str | None = None) -> str:
     from silica.kernel.base.manifest import get_active_manifest
 
     conv = get_active_manifest().conventions
-    tdir = Path((getattr(CONFIG, "vault_path", "") or "").strip()) / conv.templates_dir
+    tdir = Path((CONFIG.vault_path or "").strip()) / conv.templates_dir
     if name:
         if _bad_template_name(name):
             raise TemplateNotFoundError(

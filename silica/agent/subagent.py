@@ -129,7 +129,7 @@ def run_subagent_batch(
 ) -> dict[str, Any]:
     """Run a batch of WorkItems through leashed sub-agents in parallel.
 
-    Used by the ad-hoc /dedup, /enrich commands and silica_delegate
+    Used by the ad-hoc /dedup, /enrich commands
     (out of the inject pipeline).  A pre-closed WorkQueue drained by the shared
     ``consume`` loop — the exact engine the Coordinator runs in-pipeline — so
     both paths get identical cancel/bookkeeping semantics.  BoundedSubAgent is
@@ -147,7 +147,7 @@ def run_subagent_batch(
         for it in items:
             it.cancel_token = cancel_token
 
-    mw = max(1, int(max_workers or getattr(config, "subagent_max_concurrent", 3) or 3))
+    mw = max(1, int(max_workers or config.subagent_max_concurrent or 3))
     agent = BoundedSubAgent(config)
 
     wq = WorkQueue()

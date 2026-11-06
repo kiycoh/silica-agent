@@ -93,7 +93,7 @@ def run_orphan(item: WorkItem, config: Any) -> dict[str, Any]:
     # A staging note (inbox, done/) is bookkeeping, not knowledge: the report
     # does not count it as an orphan, and the owner ruled on 2026-09-27 that
     # the orphan pass leaves staging alone both ways. The candidate side is
-    # filtered where candidates are made (curate.link_candidates).
+    # filtered where candidates are made (kernel.report.related.link_candidates).
     if is_staging_path(target):
         return {"status": "skipped", "reason": "staging note"}
     candidates = item.context.candidates  # [{"name":..., "path":...}]

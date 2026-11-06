@@ -20,7 +20,6 @@ from __future__ import annotations
 import html
 import json
 import logging
-import os
 import time
 from collections import Counter
 from pathlib import Path
@@ -28,13 +27,13 @@ from urllib.parse import quote
 
 import httpx
 
+from silica.config import GUI_PORT, claim_env
 from silica.sources.zotero import Zotero, ZoteroError, _is_paper
 
 logger = logging.getLogger(__name__)
 
 TAG = "silica"
 GROUPS_NAME = "Silica groups"
-_WEB_PORT = 8765  # silica.ui.web.server.serve's default
 
 
 # --- ledger -------------------------------------------------------------------
@@ -133,10 +132,10 @@ def _web_url(leaf_rel: str) -> str:
     """The web UI's link, only while it is up: a dead link in Zotero is worse
     than none."""
     try:
-        httpx.get(f"http://127.0.0.1:{_WEB_PORT}/", timeout=0.2)
+        httpx.get(f"http://127.0.0.1:{GUI_PORT}/", timeout=0.2)
     except httpx.HTTPError:
         return ""
-    return f"http://127.0.0.1:{_WEB_PORT}/#explore/graph?note={quote(leaf_rel)}"
+    return f"http://127.0.0.1:{GUI_PORT}/#explore/graph?note={quote(leaf_rel)}"
 
 
 def notes_citing(leaf_rel: str) -> list[str]:
@@ -468,5 +467,5 @@ def authorize(zot: Zotero) -> bool:
     remember = bool(data.get("remember"))
     if remember and zot.api_key:
         wizard.write_env({"SILICA_ZOTERO_API_KEY": zot.api_key})
-        os.environ["SILICA_ZOTERO_API_KEY"] = zot.api_key
+        claim_env({"SILICA_ZOTERO_API_KEY": zot.api_key})
     return remember

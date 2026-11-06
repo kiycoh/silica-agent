@@ -89,7 +89,7 @@ def test_a_staging_orphan_is_left_alone(monkeypatch):
 
 def test_link_candidates_never_offer_a_staging_note(monkeypatch):
     from silica.kernel.recall.relatedness import RelatedNote
-    from silica.tools.curate import link_candidates
+    from silica.kernel.report.related import link_candidates
 
     monkeypatch.setattr("silica.kernel.base.manifest.active_done_dir", lambda: "Done")
     store = MagicMock()

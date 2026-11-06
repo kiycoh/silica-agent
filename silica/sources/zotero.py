@@ -20,7 +20,6 @@ identity fields reach the leaf only through yaml.safe_dump.
 from __future__ import annotations
 
 import logging
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +27,7 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 
+from silica.config import live_env
 from silica.sources.base import GroundedStub, RawItem
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,7 @@ def client() -> Zotero:
 
     link = get_active_manifest().zotero
     return Zotero(server_id=link.library if link else "",
-                  api_key=os.getenv("SILICA_ZOTERO_API_KEY", ""))
+                  api_key=live_env("SILICA_ZOTERO_API_KEY"))
 
 
 def importing_client() -> Zotero:
@@ -335,7 +335,7 @@ def linked_elsewhere(library: str, vault: str | Path) -> Path | None:
 # --- detection at session open (ADR-0055 decision 9, ADR-0038) ------------------
 
 def _client_for(vault: str | Path, link) -> Zotero:
-    return Zotero(server_id=link.library, api_key=os.getenv("SILICA_ZOTERO_API_KEY", ""))
+    return Zotero(server_id=link.library, api_key=live_env("SILICA_ZOTERO_API_KEY"))
 
 
 def _state_path(vault: str | Path) -> Path:

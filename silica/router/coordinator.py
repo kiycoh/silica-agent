@@ -101,7 +101,7 @@ class Coordinator:
             logger.debug("work event: %s", e)
         BUS.subscribe("work/*", _log_work_event)
 
-        max_workers = max(1, int(getattr(self.config, "subagent_max_concurrent", 3)))
+        max_workers = max(1, int(self.config.subagent_max_concurrent))
         pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="subagent")
         futures = [pool.submit(self._consume, wq) for _ in range(max_workers)]
 
@@ -198,7 +198,7 @@ class Coordinator:
 
     def _orphan_candidates(self, path: str, k: int = 3) -> list[dict]:
         """Link targets for an orphan, via the relatedness facade."""
-        from silica.tools.curate import link_candidates
+        from silica.kernel.report.related import link_candidates
 
         return link_candidates(path, k=k)
 
@@ -361,7 +361,7 @@ class Coordinator:
         """Whether Silica wrote this note whole (`AI: true`), not patched it."""
         from pathlib import Path
 
-        vault = (getattr(self.config, "vault_path", "") or "").strip()
+        vault = (self.config.vault_path or "").strip()
         rel = note if note.endswith(".md") else note + ".md"
         try:
             return "\nAI: true" in (Path(vault) / rel).read_text(encoding="utf-8", errors="replace")[:2048]
@@ -378,7 +378,7 @@ class Coordinator:
 
             started = getattr(self, "_run_started", None)
             target = getattr(self.fsm, "target_dir", "") or ""
-            vault = (getattr(self.config, "vault_path", "") or "").strip()
+            vault = (self.config.vault_path or "").strip()
             if not target or not vault or started is None:
                 return out
             base = Path(vault) / target

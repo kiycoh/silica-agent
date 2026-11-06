@@ -2,6 +2,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from tests.config_factory import make_config
 from silica.model.providers import get_provider
 from silica.config import SilicaConfig
 from silica.router.run_state import FileState, RunState
@@ -26,8 +27,8 @@ def test_escalation_provider_bare_model_defaults_lmstudio():
 
 
 def test_escalation_role_uses_escalation_config():
-    cfg = SimpleNamespace(
-        distill_escalation_provider="openrouter",
+    cfg = make_config(
+        _distill_escalation_provider="openrouter",
         distill_escalation_model="openrouter/big/model",
         provider="lmstudio", model="local-model",
     )
@@ -37,8 +38,8 @@ def test_escalation_role_uses_escalation_config():
 
 
 def test_escalation_role_falls_back_to_router():
-    cfg = SimpleNamespace(
-        distill_escalation_provider=None, distill_escalation_model=None,
+    cfg = make_config(
+        _distill_escalation_provider=None, distill_escalation_model=None,
         provider="lmstudio", model="qwen3-30b",
     )
     p = get_provider(cfg, role="escalation")

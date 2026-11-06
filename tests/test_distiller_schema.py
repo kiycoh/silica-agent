@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from tests.config_factory import make_config
 from silica.model.providers import get_provider, Provider
 from silica.model.llm import LLMResponse
 from silica.kernel.write.ops import Op, OpType, DistillerOutput
@@ -112,21 +113,13 @@ class TestParseJsonFallback:
 
 class TestProviderPresets:
     def test_lmstudio_preset_base_url(self):
-        class Cfg:
-            provider = "lmstudio"
-            model = "test-model"
-
-        p = get_provider(Cfg())
+        p = get_provider(make_config(provider="lmstudio", model="test-model"))
         assert isinstance(p, Provider)
         assert p.model == "lmstudio/test-model"
 
     def test_openrouter_preset_same_class(self):
-        class Cfg:
-            provider = "openrouter"
-            model = "or-model"
-
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}):
-            p = get_provider(Cfg())
+            p = get_provider(make_config(provider="openrouter", model="or-model"))
         assert isinstance(p, Provider)
         assert p.model == "openrouter/or-model"
 

@@ -137,7 +137,7 @@ def test_nearest_drops_paper_leaves_and_asks_again(monkeypatch):
 
 def test_the_search_is_this_vaults_alone(monkeypatch):
     """The memory lane is another vault: the relation drawn is this one's."""
-    import silica.tools.graph as graph_tools
+    from silica.kernel.recall import search
 
     seen = {}
 
@@ -151,7 +151,7 @@ def test_the_search_is_this_vaults_alone(monkeypatch):
         seen.update(k=k, memory=memory)
         return {"results": [{"path": "N1.md"}]}
 
-    monkeypatch.setattr(graph_tools, "_facade_search", facade)
+    monkeypatch.setattr(search, "facade_search", facade)
     assert zc._search("q", 5) == ["N1.md"] and seen == {"k": 5, "memory": False}
 
 

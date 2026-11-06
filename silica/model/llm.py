@@ -34,7 +34,7 @@ import functools
 
 logger = logging.getLogger(__name__)
 
-from silica.config import CONFIG, hosted
+from silica.config import CONFIG, hosted, live_env
 from silica.metrics import emit
 from silica.model import limits
 from silica.model.errors import shared_pool, status_of
@@ -180,24 +180,6 @@ def _falls_back(exc: BaseException) -> bool:
     return isinstance(exc, (_litellm().Timeout, _litellm().APIConnectionError))
 
 
-_LOCAL_LLM_TIMEOUT = float(os.getenv("SILICA_LLM_TIMEOUT", "130"))
-# Wall-clock backstop we enforce ourselves (> the litellm timeout below, so litellm's
-# own timeout wins if it ever fires). litellm's `timeout` kwarg does NOT fire on a
-# provider that accepts the request then never sends a body: observed, OpenRouter
-# holding an ESTAB socket idle ~58min, zero retries, the whole process wedged on one
-# call. Kept 10s above the 120s litellm timeout so litellm fires first on a normal
-# timeout and this only catches the silent-hang case.
-#
-# Overridable because the default cannot tell "hung" from "slow" on a non-streaming
-# call, and a slow reasoning model lives inside the band: measured 2026-08-23 on
-# openrouter/stealth/ox-alpha, the distiller shape (8.1k prompt -> 4k completion) took
-# 78s alone and 106-112s with the default k=3 prefetch in flight, i.e. the run kills
-# its own healthy calls. Raise it for such a model (SILICA_LLM_TIMEOUT=400), or drop
-# SILICA_DISTILL_CONCURRENCY to 1. The real repair is to stream the distiller call so
-# the deadline resets per chunk (_bounded_stream already does that for the loop) and
-# no wall-clock number has to be guessed at all.
-
-
 # How often a wait that can be stopped looks at its stop flag: measured 12 s from
 # a click to the stopped row while the loop waited on a whole generation
 # (ADR-0121 point 7).
@@ -247,7 +229,7 @@ def run_with_deadline(fn, timeout: float | None, on_timeout=None, *, catch: type
 
     # Caller's name plus a marker per nesting level: retry_transient logs from
     # *inside* this worker, and two deadlines nest per distiller call
-    # (DISTILLER_TIMEOUT outside, _LOCAL_LLM_TIMEOUT inside), so the default
+    # (DISTILLER_TIMEOUT outside, CONFIG.llm_timeout inside), so the default
     # "Thread-18 (_work)" hides which lane a retry belongs to. The suffix is not
     # decoration: a bare copy let an abandoned worker log as "MainThread" long
     # after the main thread had given up on it.
@@ -275,7 +257,7 @@ def run_with_deadline(fn, timeout: float | None, on_timeout=None, *, catch: type
 
 def _bounded(fn, timeout: float, model: str):
     """Run fn() but raise litellm.Timeout if it exceeds `timeout` seconds, routing
-    the silent-hang case into the normal transient-retry path (see _LOCAL_LLM_TIMEOUT)."""
+    the silent-hang case into the normal transient-retry path (see CONFIG.llm_timeout)."""
     return run_with_deadline(
         fn, timeout,
         lambda: _litellm().Timeout(
@@ -547,7 +529,10 @@ class ToolCall:
 # A hosted tenant meters always and writes each call as an llm_call line
 # (ADR-0100 point 3): its process dies by SIGTERM, so the atexit table never
 # printed there.
-_METER_ON = os.getenv("SILICA_TOKEN_METER") == "1" or hosted()
+def meter_on() -> bool:
+    return CONFIG.token_meter or hosted()
+
+
 _meter: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0, 0, 0])  # site -> [calls, prompt, completion, cached]
 # The same four counts over every call-site, so a chat turn's usage is the
 # difference between two readings (meter_totals, ui/web/server.py run_turn).
@@ -631,7 +616,7 @@ def _cacheable(model: str) -> bool:
         return True
     # ponytail: an env gate while the A/B runs (2026-10-15); drop it, and the
     # check with it, once the arm is adopted or refuted.
-    return (os.getenv("SILICA_QWEN_CACHE", "").strip() == "1" and m.startswith("openrouter/")
+    return (live_env("SILICA_QWEN_CACHE") and m.startswith("openrouter/")
             and any(k in m for k in _OPENROUTER_CACHEABLE))
 
 
@@ -787,7 +772,7 @@ class LLMResponse:
     request: dict = field(default_factory=dict)
 
     def __post_init__(self):
-        if _METER_ON and self.usage:
+        if meter_on() and self.usage:
             site, prompt, completion, cached = _meter_record(self.usage)
             # usage carries OpenRouter's cost only on a non-streamed call:
             # stream_chunk_builder rebuilds usage without it (ADR-0100 Context).
@@ -1097,7 +1082,7 @@ def _trace_on() -> bool:
     iteration, so a traced chat turn writes O(iterations x history) bytes;
     the doctor's 100MB-per-session warning is the ceiling. Read per call, not
     at import, so a REPL can export it mid-session."""
-    return os.getenv("SILICA_TRACE_LLM") == "1"
+    return live_env("SILICA_TRACE_LLM")
 
 
 def _session_open() -> bool:
@@ -1267,7 +1252,7 @@ def _call_llm(
     # later. Tied to SILICA_LLM_TIMEOUT: a fixed 120 here made the documented
     # override (=400 for a slow reasoning model) unable to lengthen any call,
     # and four thinking judge calls on a local 9B timed out at 120 s (2026-10-08).
-    kwargs["timeout"] = _LOCAL_LLM_TIMEOUT - 10
+    kwargs["timeout"] = CONFIG.llm_timeout - 10
 
     # api_key is a credential and extra_headers is the fixed attribution block:
     # neither belongs in a file. Tool schemas collapse to names because the
@@ -1295,7 +1280,7 @@ def _call_llm(
             model, kwargs,
             lambda: retry_transient(
                 lambda: with_keys(keys, kwargs, lambda: _bounded(
-                    lambda: lm.completion(**kwargs), _LOCAL_LLM_TIMEOUT, model)),
+                    lambda: lm.completion(**kwargs), CONFIG.llm_timeout, model)),
                 _TRANSIENT, cancel=cancel, on_retry=on_retry, pool_attempts=pool_attempts))
     else:
         def _stream_once():
@@ -1310,7 +1295,7 @@ def _call_llm(
             _stream = _bounded_stream(
                 lambda: lm.completion(
                     **kwargs, stream=True, stream_options={"include_usage": True}),
-                _LOCAL_LLM_TIMEOUT, model)
+                CONFIG.llm_timeout, model)
             for chunk in _stream:
                 if cancel is not None and cancel.is_set():
                     # Nobody waits for this answer (the loop left on Stop):

@@ -13,7 +13,7 @@ Three steps, each with its own guarantee:
   /revert. No model is asked whether two requests are alike.
 - **Draft**, one worker call, which sees only the person's own instructions:
   never a tool result, a note, a pasted document or an answer. That is the
-  form user memory's untainted gate takes here (silica/tools/user_memory.py):
+  form user memory's untainted gate takes here (silica/agent/memory_gate.py):
   what could carry someone else's instruction never reaches the call that
   writes the skill, so no session needs to have been untainted, which a study
   session that opened a PDF never is.

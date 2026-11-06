@@ -13,7 +13,7 @@ moves folders.
 """
 from __future__ import annotations
 
-from silica.config import silica_home
+from silica.config import live_env, public_base, silica_home, view_words
 
 import logging
 import os
@@ -69,7 +69,7 @@ def handle(vault: Path | None = None) -> str:
     has no page rather than one named after its vault folder."""
     from silica.config import hosted
 
-    env = os.environ.get("SILICA_PUBLIC_HANDLE", "").strip()
+    env = live_env("SILICA_PUBLIC_HANDLE")
     if env or hosted():
         # The host's answer before the unit's env: a claim granted after the
         # process started is in the file, and the env catches up at the next start.
@@ -100,7 +100,7 @@ def handle_problem(h: str) -> str:
 def _host_dir() -> Path | None:
     """The folder the host writes for this account alone (root's, readable by
     the account's group), None on a host that does not take claims."""
-    raw = os.environ.get("SILICA_HOST_DIR", "").strip()
+    raw = live_env("SILICA_HOST_DIR")
     return Path(raw) if raw else None
 
 
@@ -153,12 +153,12 @@ def handle_state(vault: Path | None = None) -> dict:
     waiting for the host, and the last one it refused."""
     from silica.config import hosted
 
-    if os.environ.get("SILICA_PUBLIC_HANDLE", "").strip():
+    if live_env("SILICA_PUBLIC_HANDLE"):
         return {"ask": False}
     if hosted():
         # A host without the claims pass, or without a public address, would
         # leave the request unanswered: the view says the operator gives handles.
-        if _host_dir() is None or not os.environ.get("SILICA_PUBLIC_BASE", "").strip() or handle():
+        if _host_dir() is None or not live_env("SILICA_PUBLIC_BASE") or handle():
             return {"ask": False}
         out: dict = {"ask": True, "pending": _asked(), "reserved": sorted(RESERVED_HANDLES)}
         ans = _host_answer()
@@ -200,7 +200,7 @@ def claim(h: str, vault: Path | None = None) -> None:
 
 def page_url(vault: Path | None = None) -> str:
     """The page's address, "" when no SILICA_PUBLIC_BASE says where it is served."""
-    base = os.environ.get("SILICA_PUBLIC_BASE", "").strip().rstrip("/")
+    base = public_base()
     h = handle(vault)
     return f"{base}/@{h}" if base and h else ""
 
@@ -316,8 +316,7 @@ def private_allowed() -> str:
 
     if not hosted():
         return "hosted"
-    names = {v.strip() for v in os.environ.get("SILICA_VIEWS", "").split(",")}
-    return "ok" if names & {"all", "private"} else "paid"
+    return "ok" if view_words() & {"all", "private"} else "paid"
 
 
 def max_vaults() -> int:
@@ -335,7 +334,7 @@ def paid_plan() -> list[str]:
     nothing left to buy and on a host that sets none, and then no window opens."""
     if private_allowed() != "paid":
         return []
-    return [line.strip() for line in os.environ.get("SILICA_PAID_PLAN", "").split("|") if line.strip()]
+    return [line.strip() for line in live_env("SILICA_PAID_PLAN").split("|") if line.strip()]
 
 
 def enforce_tier(vault: Path | None = None) -> list[str]:
@@ -567,7 +566,7 @@ def site_root(h: str | None = None) -> Path:
     two vaults keeps two pages. `live/` is what the host serves, the Page and
     one folder per Public vault; `paused/<vault>` a vault's last publication
     while it is off; `private/<vault>` a Private vault, for the relay only."""
-    base = os.environ.get("SILICA_PUBLIC_DIR", "").strip()
+    base = live_env("SILICA_PUBLIC_DIR")
     root = Path(base).expanduser() if base else silica_home() / "public"
     return root / (h if h is not None else handle())
 

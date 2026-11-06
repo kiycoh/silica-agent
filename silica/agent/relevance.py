@@ -27,12 +27,11 @@ from silica.model.decide import decide
 
 logger = logging.getLogger(__name__)
 
-# On wherever a decision model is set (SILICA_DECISION_MODEL, ADR-0044); the
-# flag is the probe's `no_relevance` arm. Probe of 2026-09-30 on qwen3.5-9b,
-# 5 runs per arm (docs/evaluation/compaction-2026-09-30.md): a conversation
-# that changes subject every turn went from 207k to 103k prompt tokens
-# (median, Mann-Whitney p=0.008), 20 of 20 cases passing in both arms.
-ENABLED = True
+# On wherever a decision model is set (SILICA_DECISION_MODEL, ADR-0044). Probe of
+# 2026-09-30 on qwen3.5-9b, 5 runs per arm (docs/evaluation/compaction-2026-09-30.md):
+# a conversation that changes subject every turn went from 207k to 103k prompt
+# tokens (median, Mann-Whitney p=0.008), 20 of 20 cases passing in both arms.
+
 # LiteLLM's TypeSafe compaction guardrail ships 0.2, with no measurement on
 # its page. On the probe every result a follow-up still needed scored 0.68 or
 # more (29 verdicts) and every out-of-scope one 0.37 or less (15), so 0.2
@@ -77,7 +76,7 @@ def compact_by_relevance(messages: list[dict], tools: dict) -> list[int]:
     decision keeps the result, which is what the history held before."""
     from silica.config import CONFIG
 
-    if not ENABLED or not CONFIG.decision_model:
+    if not CONFIG.decision_model:
         return []  # off: no candidate scan for a verdict nobody asks for
     candidates = relevance_candidates(messages, tools, MIN_CHARS)
     if not candidates:

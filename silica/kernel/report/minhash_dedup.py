@@ -26,6 +26,9 @@ from random import Random
 _MERSENNE = (1 << 61) - 1   # prime modulus for the (a·h + b) hash family
 _MASK32 = (1 << 32) - 1
 _K = 3                      # char-shingle width (short labels survive; mirrors Graphify)
+# A constant and not a setting: its three readers asked CONFIG for a field that never
+# existed, so this default is the only value that has ever run.
+DUP_THRESHOLD = 0.6
 
 Signature = tuple[int, ...]
 

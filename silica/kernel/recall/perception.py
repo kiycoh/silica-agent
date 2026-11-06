@@ -197,7 +197,7 @@ def _peek_dir(vault: str | None) -> str | None:
     from silica.config import CONFIG
 
     p = Path(vault).expanduser().resolve()
-    active = (getattr(CONFIG, "vault_path", "") or "").strip()
+    active = (CONFIG.vault_path or "").strip()
     if active and Path(active).resolve() == p:
         return None
     return str(p)

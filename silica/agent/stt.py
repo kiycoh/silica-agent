@@ -39,7 +39,7 @@ def dictation_endpoint(config: Any) -> tuple[str, str]:
     """`(url, env key)` of the endpoint the microphone sends to: its own setting
     when present, even an empty one, which turns the endpoint lane off; else
     the one /convert uses. The key is for the sentence that says it is empty."""
-    own = getattr(config, "stt_dictation_base_url", None)
+    own = config.stt_dictation_base_url
     if own is None:
         return config.stt_base_url, "SILICA_STT_BASE_URL"
     return own, "SILICA_STT_DICTATION_BASE_URL"
@@ -48,7 +48,7 @@ def dictation_endpoint(config: Any) -> tuple[str, str]:
 def local_stt_model(config: Any) -> str:
     """A faster-whisper size ("small", "large-v3-turbo"), a HuggingFace repo id,
     or a local CTranslate2 directory. One place, so the doctor names what runs."""
-    return (getattr(config, "stt_local_model", "") or "").strip() or LOCAL_STT_MODEL
+    return (config.stt_local_model or "").strip() or LOCAL_STT_MODEL
 
 
 # One lock for load and download both: the warm-up started by the status probe
@@ -133,23 +133,3 @@ def transcribe_local(wav: bytes, *, lang: str, model: str) -> str:
         vad_filter=True,
     )
     return "".join(s.text for s in segments).strip()
-
-
-def speech_lang(config: Any) -> str:
-    """The BCP 47 tag the browser's speech APIs should use, "" when unknown.
-
-    The dictation language when it is fixed, else the vault's own language:
-    Learn reads a question aloud in the language the note is written in, and a
-    browser left to guess picks its UI language, which reads an Italian vault
-    with an English voice.
-    """
-    fixed = (getattr(config, "stt_lang", "") or "").strip()
-    if fixed and fixed != "auto":
-        return fixed
-    from silica.kernel.text.language import ISO
-    from silica.onboarding.checks import reply_language_for
-
-    name = (reply_language_for((getattr(config, "vault_path", "") or "").strip()) or "").strip().lower()
-    if name in ISO:
-        return ISO[name]
-    return name if len(name) == 2 and name.isalpha() else ""

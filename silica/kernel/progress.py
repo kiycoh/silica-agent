@@ -732,7 +732,7 @@ def _active_vault() -> str:
     try:
         from silica.config import CONFIG
 
-        return str(getattr(CONFIG, "vault_path", "") or "")
+        return str(CONFIG.vault_path or "")
     except Exception:
         return ""
 

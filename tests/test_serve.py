@@ -7,6 +7,7 @@ import socket
 import sys
 import time
 
+from silica.config import CONFIG
 from silica.onboarding import serve
 
 
@@ -57,7 +58,7 @@ def test_dead_server_fails_fast_and_loud(tmp_path, monkeypatch, capsys):
     and don't let the user find out later from quietly worse answers."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
-    monkeypatch.setattr(serve, "_READY_TIMEOUT", 30.0)
+    monkeypatch.setattr(CONFIG, "serve_timeout", 30.0)
     started = time.monotonic()
 
     cmd = "echo 'failed to open GGUF file' >&2; exit 1"

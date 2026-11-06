@@ -135,11 +135,8 @@ def test_interrupt_sets_cancel_event_on_abandoned_call():
     assert captured["cancel"].is_set()
 
 
-def test_bus_receives_events_during_run():
-    """run_agent publishes agent/* events to BUS even with no callback."""
-    from silica.obs import bus as bus_mod
+def test_the_callback_receives_events_during_run():
     received = []
-    bus_mod.BUS.subscribe("agent/*", received.append)
 
     def fake_call_llm(*a, **k):
         return _fake_resp(text="hi")
@@ -148,6 +145,7 @@ def test_bus_receives_events_during_run():
         run_agent(
             messages=[{"role": "user", "content": "hi"}],
             model="test",
+            tool_progress_callback=received.append,
         )
 
     # At minimum ThinkingStartEvent and ThinkingEndEvent should arrive.

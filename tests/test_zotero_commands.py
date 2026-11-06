@@ -132,6 +132,22 @@ def test_zotero_grant_says_whether_the_key_was_kept(fake, tmp_path, monkeypatch,
     assert "not kept" in capsys.readouterr().out
 
 
+def test_a_kept_key_outlives_the_first_model_call(fake, tmp_path, monkeypatch):
+    """B6: the first model call runs drop_foreign_env, which took a key written
+    straight to os.environ back out, so the grant lasted until that call."""
+    from silica.config import drop_foreign_env
+
+    monkeypatch.setenv("SILICA_ZOTERO_API_KEY", "")  # restored at teardown, whatever the grant writes
+    monkeypatch.delenv("SILICA_ZOTERO_API_KEY")
+    monkeypatch.setattr("silica.onboarding.wizard.resolve_env_path", lambda: tmp_path / ".env")
+    fake.authorize_answer = {"key": "s" * 32, "remember": True}
+
+    _handle_direct_shortcut("/zotero grant", [])
+    drop_foreign_env()
+
+    assert os.environ["SILICA_ZOTERO_API_KEY"] == "s" * 32
+
+
 def test_zotero_status_shows_what_changed_since_the_last_session(fake, monkeypatch, capsys):
     monkeypatch.setattr(z, "_client_for", lambda vault, link: z.client())
     z.detect(CONFIG.vault_path)

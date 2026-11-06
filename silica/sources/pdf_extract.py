@@ -32,6 +32,7 @@ import os
 import re
 import sys
 import threading
+from silica.config import live_env
 
 # ADR-0087 point 2's table, measured there: the library's largest PDF is 20 MB
 # and its longest paper 135 pages; the 803-page book takes 3.8 s, 364 MB and
@@ -163,7 +164,7 @@ def vision_pages() -> int:
     Read per call, as `hosted()` reads its flag: the child gets an empty
     environment, so the number goes to it as an argument, and a test or a
     tenant's restart changes it without a reload."""
-    raw = os.environ.get("SILICA_PDF_VISION_PAGES", "").strip()
+    raw = live_env("SILICA_PDF_VISION_PAGES")
     try:
         return max(0, int(raw)) if raw else VISION_PAGES
     except ValueError:
@@ -177,7 +178,7 @@ def every_page() -> bool:
     layout model fits a tenant to pick the pages. Then `vision_pages()`
     is the size of one batch of pages drawn, not a cap on the file. Spelled "1"
     alone and read per call, as `hosted()` is."""
-    return os.environ.get("SILICA_PDF_EVERY_PAGE", "").strip() == "1"
+    return live_env("SILICA_PDF_EVERY_PAGE")
 
 
 # --- the read, on either side of the process boundary -------------------------

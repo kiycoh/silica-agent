@@ -252,9 +252,6 @@ forbidden_modules = [
   "silica.capabilities.dedup",
   "silica.capabilities.enrich",
   "silica.capabilities.orphan",
-  "silica.capabilities.profile",
-  "silica.capabilities.profiles_builtin",
-  "silica.capabilities.runtime",
 ]
 # Direct imports only: reaching internals through the package root is the
 # sanctioned path (the root re-exports the seam).

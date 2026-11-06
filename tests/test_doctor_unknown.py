@@ -12,10 +12,8 @@ unreachable in the same session.
 An unprobed or half-answering endpoint reads as unknown: not a failure, since
 nothing is known to be broken, and not ok, since nothing is known to work.
 """
-from types import SimpleNamespace
-
-
 from silica.onboarding import checks
+from tests.config_factory import make_config
 
 
 class _Resp:
@@ -31,7 +29,7 @@ def _config(**over):
     base = dict(model="m", provider="lmstudio", provider_base_url="",
                 rerank_base_url="", rerank_model="")
     base.update(over)
-    return SimpleNamespace(**base)
+    return make_config(**base)
 
 
 class TestTheStatusExists:

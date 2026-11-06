@@ -14,27 +14,27 @@ them in a GUI reopens that verdict for someone with no harness to re-run the
 gate, and a vault degraded by `sim_threshold_high = 0.95` gives no sign of it.
 They stay env vars.
 
-Persistence is live *and* durable. Live is free: nearly every consumer reads the
-CONFIG singleton at call time rather than capturing it at import. Durable means
-writing the key into the .env that would win at the next boot — which is not
-always the user-level one, because config.py layers project-then-user with
-`override=False`. Same reason a key the shell already exported is reported
-`locked`: no write to any .env can outrank it, so the control is disabled rather
-than accepting an edit we know evaporates.
+Persistence is live *and* durable. Live is free: a consumer reads the CONFIG field
+or `live_env` at call time rather than capturing it at import. Durable means
+writing the key into ~/.silica/.env, the one file config.py layers, under the
+environment. A key the shell already exported is therefore reported `locked`: no
+write to the file can outrank it, so the control is disabled rather than accepting
+an edit we know evaporates.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field, replace
 
 from silica import SHELL_ENV
 from silica.config import (
-    CONFIG,
-    HOSTED_PROVIDERS,
-    PROVIDER_PREFIXES,
-    USER_ENV,
     claim_env,
+    CONFIG,
     hosted,
+    HOSTED_PROVIDERS,
+    live_env,
+    PROVIDER_PREFIXES,
+    RERANK_PORT,
+    USER_ENV,
 )
 from silica.onboarding import settings_ops
 
@@ -145,7 +145,7 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 "reorders recall results · optional", models_of="rerank",
                 curated=tuple(RERANK_MODELS)),
             Row("SILICA_RERANK_BASE_URL", "rerank_base_url", "reranker url", "text",
-                "empty turns reranking off · the [rerank] extra serves 127.0.0.1:1235/v1"),
+                f"empty turns reranking off · the [rerank] extra serves 127.0.0.1:{RERANK_PORT}/v1"),
             Row("SILICA_WORKER_MODEL", "worker_model", "worker model", "text",
                 "used for distilling · falls back to the chat model", models_of="chat"),
             Row("SILICA_FALLBACK_MODELS", "fallback_models", "fallback models", "text",
@@ -280,11 +280,11 @@ def _value(row: Row) -> str:
         # is being rejected): flipping the toggle off is then the repair.
         return "true" if active_write_dir() else "false"
     if row.attr:
-        val = getattr(CONFIG, row.attr, "")
+        val = getattr(CONFIG, row.attr)
         if isinstance(val, bool):
             return "true" if val else "false"
         return "" if val is None else str(val)
-    return os.getenv(row.key, "")
+    return live_env(row.key)
 
 
 def _shown(row: Row) -> str:
@@ -394,6 +394,8 @@ def _env_text(row: Row, value: str) -> str:
 
 
 def _truthy(value) -> bool:
+    """What a POST may say for a toggle, not how a setting is read: the panel writes
+    True or False, the one spelling config.true_word reads back."""
     return str(value).strip().lower() in ("true", "1", "t", "on", "yes")
 
 

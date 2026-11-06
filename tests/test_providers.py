@@ -8,15 +8,14 @@ import pytest
 from unittest.mock import MagicMock, patch
 from pydantic import BaseModel
 
+from tests.config_factory import make_config
 from silica.model.providers import get_provider, Provider
 from silica.config import PROVIDER_PREFIXES
 from silica.model.llm import LLMResponse
 
 
-class DummyConfig:
-    def __init__(self, provider: str, model: str):
-        self.provider = provider
-        self.model = model
+def DummyConfig(provider: str, model: str):
+    return make_config(provider=provider, model=model)
 
 
 class SchemaModel(BaseModel):
@@ -40,13 +39,9 @@ class TestProviders(unittest.TestCase):
             self.assertEqual(provider_or.model, "openrouter/or-model")
 
     def test_get_provider_custom_uses_config_endpoint(self):
-        class CustomConfig:
-            provider = "custom"
-            model = "custom/my-model"
-            provider_base_url = "http://localhost:8000/v1"
-            provider_api_key = "sk-local"
-
-        provider = get_provider(CustomConfig())
+        provider = get_provider(make_config(
+            provider="custom", model="custom/my-model",
+            provider_base_url="http://localhost:8000/v1", provider_api_key="sk-local"))
         self.assertIsInstance(provider, Provider)
         # `custom/` is the prefix llm.call_llm turns into openai/ + api_base
         # from provider_base_url, so it must survive.
@@ -60,17 +55,14 @@ class TestProviders(unittest.TestCase):
         the id turns a bare model into a BadRequestError. get_provider re-derives
         the same prefix and must apply the same guard.
         """
-        class UnknownWorkerConfig:
-            provider = "lmstudio"
-            model = "lmstudio/qwen3-8b"
-            worker_provider = "vllm"          # not in PROVIDER_PREFIXES
-            worker_model = "qwen3-4b"         # so config leaves it bare
-            worker_api_key = None
-            provider_base_url = "http://box:8000/v1"
-            provider_api_key = "k"
+        config = make_config(
+            provider="lmstudio", model="lmstudio/qwen3-8b",
+            worker_provider="vllm",           # not in PROVIDER_PREFIXES
+            worker_model="qwen3-4b",          # so config leaves it bare
+            worker_api_key=None, provider_base_url="http://box:8000/v1", provider_api_key="k")
 
         self.assertNotIn("vllm", PROVIDER_PREFIXES)
-        provider = get_provider(UnknownWorkerConfig(), role="worker")
+        provider = get_provider(config, role="worker")
         self.assertEqual(provider.model, "qwen3-4b")
 
     def test_get_provider_empty_model_stays_empty(self):
@@ -79,13 +71,9 @@ class TestProviders(unittest.TestCase):
         self.assertEqual(provider.model, "")
 
     def test_get_provider_worker(self):
-        class DummyWorkerConfig:
-            def __init__(self, provider, model, worker_provider=None, worker_model=None, worker_api_key=None):
-                self.provider = provider
-                self.model = model
-                self.worker_provider = worker_provider
-                self.worker_model = worker_model
-                self.worker_api_key = worker_api_key
+        def DummyWorkerConfig(provider, model, worker_provider=None, worker_model=None, worker_api_key=None):
+            return make_config(provider=provider, model=model, worker_provider=worker_provider,
+                               worker_model=worker_model, worker_api_key=worker_api_key)
 
         # 1. Fallback to router when worker not configured
         config_fallback = DummyWorkerConfig("openrouter", "or-model")
@@ -329,13 +317,12 @@ def test_call_llm_ollama_routes_via_ollama_chat(monkeypatch):
 def test_get_provider_ollama_avoids_the_v1_endpoint(monkeypatch):
     """/v1 cannot size the context window (it ignores num_ctx and reloads the
     model at 4096), so the distiller path must go through /api/chat instead."""
-    from types import SimpleNamespace
     from pydantic import BaseModel
     from silica.model import llm as llm_mod
     from silica.model import providers
 
     monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
-    config = SimpleNamespace(provider="ollama", model="ollama/gemma3:4b")
+    config = make_config(provider="ollama", model="ollama/gemma3:4b")
     provider = providers.get_provider(config)
 
     assert isinstance(provider, providers.Provider)
@@ -634,13 +621,11 @@ def test_a_role_runs_on_its_own_model_without_a_provider_beside_it():
     """A worker or judge model alone used to be ignored by get_provider and obeyed
     by run_worker, residue and grade, so one setting ran two models: Settings
     writes SILICA_WORKER_MODEL alone and says it is used."""
-    from types import SimpleNamespace
-
     from silica.model.providers import resolve_role
 
-    cfg = SimpleNamespace(provider="lmstudio", model="chat", worker_api_key="wk",
-                          worker_model="openrouter/w", worker_provider=None,
-                          judge_model="openrouter/j", judge_provider=None)
+    cfg = make_config(provider="lmstudio", model="chat", worker_api_key="wk",
+                      worker_model="openrouter/w", worker_provider=None,
+                      judge_model="openrouter/j", judge_provider=None)
     assert resolve_role("worker", cfg) == ("openrouter/w", "wk")
     assert get_provider(cfg, role="judge").model == "openrouter/j"
     assert resolve_role("escalation", cfg) == ("lmstudio/chat", "")
@@ -649,11 +634,9 @@ def test_a_role_runs_on_its_own_model_without_a_provider_beside_it():
 def test_a_bare_role_model_with_no_provider_stays_on_the_router():
     """It names no endpoint, so litellm would refuse the call: before the role
     resolver this config ran on the router, and it must not start failing."""
-    from types import SimpleNamespace
-
-    cfg = SimpleNamespace(provider="openrouter", model="openrouter/chat", worker_api_key="",
-                          worker_model="qwen3", worker_provider=None,
-                          judge_model="qwen3", judge_provider=None)
+    cfg = make_config(provider="openrouter", model="openrouter/chat", worker_api_key="",
+                      worker_model="qwen3", worker_provider=None,
+                      judge_model="qwen3", judge_provider=None)
     assert get_provider(cfg, role="worker").model == "openrouter/chat"
     assert get_provider(cfg, role="judge").model == "openrouter/chat"
     cfg.worker_provider = "vllm"  # a named provider keeps the id, as it always did
@@ -664,9 +647,7 @@ def test_a_bare_role_model_with_no_provider_stays_on_the_router():
 
 
 def test_the_worker_key_stays_with_the_worker_model():
-    from types import SimpleNamespace
-
     from silica.model.providers import resolve_role
 
-    cfg = SimpleNamespace(provider="openrouter", model="chat", worker_api_key="wk", worker_model="")
+    cfg = make_config(provider="openrouter", model="chat", worker_api_key="wk", worker_model="")
     assert resolve_role("worker", cfg) == ("openrouter/chat", "")

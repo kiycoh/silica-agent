@@ -1664,7 +1664,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       const c = claimed[ev.id];
       if (c) {
         // A result that is an error landed nothing, as the replay of the same
-        // turn already says (ev.failed is the server's _is_tool_failure).
+        // turn already says (ev.failed is the server's tool_failed).
         claimRefs({ notes: c.refs, effect: c.effect, error: !!ev.failed, name: c.verb,
                     refused: ev.refused }, touched, failed);
         delete claimed[ev.id];

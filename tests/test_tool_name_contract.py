@@ -16,7 +16,7 @@ Silica's shape of the same drift is `silica/agent/loop.py`:
 `if name in TOOLS` is the right runtime behaviour -- raising mid-turn over a
 toolset typo would be worse than proceeding -- which is exactly why it is
 silent. Rename a tool and the `/web` lane quietly runs with three tools instead
-of four, or a capability worker loses its reader. No exception, no log, and a
+of four. No exception, no log, and a
 suite that only checks that the lane still answers stays green.
 
 So the contract is enforced statically here: every literal tool name anywhere in
@@ -31,18 +31,19 @@ naming a dead tool costs one wasted model call, not a silently amputated lane.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
 
-import silica.cli  # noqa: F401  registers every tool module
-from silica.tools import TOOLS
+from silica.tools import TOOLS, catalog
 
 SILICA_ROOT = Path(__file__).resolve().parent.parent / "silica"
 
 
 def _tool_names() -> set[str]:
-    assert TOOLS, "importing silica.cli must populate the registry"
+    catalog.load()
+    assert TOOLS, "catalog.load must populate the registry"
     return set(TOOLS)
 
 
@@ -56,18 +57,18 @@ def test_web_turn_constraints_names_only_real_tools():
     assert not missing, f"/web lane names tools that do not exist: {sorted(missing)}"
 
 
-def test_every_builtin_worker_profile_names_only_real_tools():
-    """A profile whose tools vanish becomes a worker with no tools at all, which
-    the loop reports as a plain empty answer."""
-    from silica.capabilities import profiles_builtin as pb
-    from silica.capabilities.profile import WorkerProfile
+def test_every_tool_a_plan_can_name_exists():
+    """The plan writes these into ledger tasks, silica_ledger_next serves them and
+    the loop loads what they name, so a dead one reaches the model as a task it
+    cannot run. `_IRREVERSIBLE` carried `silica_bulk_move` for months, and a tool
+    missing from it is an irreversible step the plan may mark auto."""
+    from silica.kernel import analyst_plan
 
-    names = _tool_names()
-    profiles = [v for v in vars(pb).values() if isinstance(v, WorkerProfile)]
-    assert profiles, "no built-in profiles found; this test would pass vacuously"
-    for profile in profiles:
-        missing = set(profile.tools) - names
-        assert not missing, f"profile {profile.name!r} names {sorted(missing)}"
+    src = Path(analyst_plan.__file__).read_text(encoding="utf-8")
+    named = set(re.findall(r'capability_name="(\w+)"', src))
+    assert named, "no capability_name literal found; this test would pass vacuously"
+    missing = (named | analyst_plan._IRREVERSIBLE) - _tool_names()
+    assert not missing, f"the plan names tools that do not exist: {sorted(missing)}"
 
 
 def test_chat_exclusions_all_exist():

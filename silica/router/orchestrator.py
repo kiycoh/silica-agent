@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from silica.router.prefetch import DistillPrefetcher
 
 from silica.driver import DRIVER
-from silica.config import CONFIG
+from silica.config import CONFIG, live_env
 from silica.kernel.write.gate import in_run, open_run
 from silica.kernel.write.ops import OpType
 from silica.kernel.write.ops_io import load_ops
@@ -247,16 +247,15 @@ class InjectorFSM(BaseFSM[InjectorState]):
             self._last_running_phase = capability_name
 
         # Surface the transition to whatever frontend is watching (no-op if none).
-        # On BUS rather than through a hook: the TUI is not the only frontend
-        # (the web turn subscribes too, silica/ui/web/turn.py). A subscriber that
-        # raises costs that frontend its display, never the run its notes.
+        # A subscriber that raises costs that frontend its display, never the
+        # run its notes.
         try:
-            from silica.obs.bus import BUS
             from silica.obs.events import PhaseEvent
+            from silica.obs.bus import emit_phase
             from silica.obs import narration as _narr_mod
             pe = PhaseEvent(phase=capability_name, status=status,
                             **self._phase_position(capability_name))
-            BUS.publish("work/phase", pe)
+            emit_phase(pe)
             _narr_mod.NARRATOR.on_render_event(pe)   # durable twin of the bus event
         except Exception as _e:
             logger.debug("phase event not delivered: %s", _e)
@@ -268,7 +267,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
     def _phase_position(self, capability_name: str) -> dict:
         """Where the run is, for a PhaseEvent. Every event restates all of it.
 
-        file_idx comes from file_idx, NOT from the chunk map: the map
+        file_idx is the FSM's own cursor, NOT read from the chunk map: the map
         still points into the previous file during the next file's
         RECON/PAYLOAD (it only gains that file's entries at its own
         PAYLOAD), so deriving it there names the wrong document.
@@ -570,8 +569,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         accumulates many unfixable bundles, gate on this-run deferrals instead.
         Kill-switch: SILICA_BOUNDARY_ANNEAL=0.
         """
-        import os
-        if os.getenv("SILICA_BOUNDARY_ANNEAL", "1") == "0":
+        if not live_env("SILICA_BOUNDARY_ANNEAL"):
             return
         try:
             from silica.kernel.write.deferred import get_deferred_store
@@ -709,7 +707,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
     def _source_canonical_for(self, inbox_file: str) -> str:
         """Vault-relative canonical path for an arbitrary inbox file (no .md, lowercase)."""
-        vault_path = getattr(CONFIG, "vault_path", None) or ""
+        vault_path = CONFIG.vault_path or ""
         if vault_path:
             try:
                 from pathlib import Path as _P

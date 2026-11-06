@@ -1,6 +1,7 @@
 """Phase 3 tests — embedding store, cosine similarity, and semantic search tools."""
 from __future__ import annotations
 
+from tests.config_factory import make_config
 from silica.config import silica_home
 
 import math
@@ -568,7 +569,6 @@ def test_queries_go_to_their_own_server_and_documents_stay_on_the_index_one():
     """llama-server answers first in, first out: a query sent during 64-input
     index batches waited 161 s at p95 (2026-10-13, config.py), so a host may give
     queries a server of their own."""
-    from types import SimpleNamespace
 
     from silica.model.providers import OpenAIEmbedder, get_embedder
 
@@ -589,7 +589,7 @@ def test_queries_go_to_their_own_server_and_documents_stay_on_the_index_one():
     assert OpenAIEmbedder("http://x/v1", "k", "m").query_client is None
     assert OpenAIEmbedder("http://x/v1", "k", "m", query_base_url="http://x/v1").query_client is None
 
-    cfg = SimpleNamespace(embedding_base_url="http://index/v1", embedding_query_base_url="http://query/v1")
+    cfg = make_config(embedding_base_url="http://index/v1", embedding_query_base_url="http://query/v1")
     assert get_embedder(cfg).query_base_url == "http://query/v1"
 
 

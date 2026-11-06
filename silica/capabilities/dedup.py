@@ -16,6 +16,7 @@ from typing import Any, Literal
 from pydantic import BaseModel
 from pydantic.json_schema import SkipJsonSchema
 
+from silica.config import live_env
 from silica.kernel.base.notekey import store_key
 from silica.kernel.write.gate import commit_ops, dedup_bounds, dedup_spoke_bounds
 from silica.kernel.write.ops import Op, OpType
@@ -104,7 +105,7 @@ def run_dedup(item: WorkItem[DedupJob | DedupFamily], config: Any) -> dict[str, 
     if isinstance(job, DedupFamily):
         return _run_batch(item, job, candidate_body[:budget], config)
 
-    if os.getenv("SILICA_DEDUP_GATE"):
+    if live_env("SILICA_DEDUP_GATE"):
         if not passes_dedup_gate(job.effective_score, len(job.excerpt),
                                  len(candidate_body[:budget])):
             gate_decision = DedupDecision(
@@ -139,7 +140,7 @@ def _run_batch(
     """Judge a family of concepts against one candidate in a single LLM call,
     then route every verdict through the exact same code as a single item."""
     emit_feedback(item, "calling_llm")
-    if os.getenv("SILICA_DEDUP_GATE"):
+    if live_env("SILICA_DEDUP_GATE"):
         decisions = _gated_batch_decisions(config, family, candidate_body)
     else:
         lead = family.members[0]
@@ -644,7 +645,7 @@ def _settle_landed_distinct(item: WorkItem, job: DedupJob, decision: DedupDecisi
 def _judge_role(config: Any) -> str:
     """The dedup verdict's role: the judge model when one is configured
     (spec M7), else the worker it always ran on."""
-    return "judge" if getattr(config, "judge_model", None) else "worker"
+    return "judge" if config.judge_model else "worker"
 
 
 def _decision_of(parsed: dict) -> DedupDecision:

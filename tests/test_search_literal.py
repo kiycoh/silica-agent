@@ -15,7 +15,7 @@ import os
 import pytest
 
 import silica.tools.notes  # noqa: F401  (the write gate registers on import)
-from silica.agent.recall_watch import found_nothing
+from silica.tools import found_nothing
 from silica.kernel import workspaces as wsk
 from silica.tools import atomic
 

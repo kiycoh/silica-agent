@@ -9,13 +9,12 @@ mutates its state.
 from __future__ import annotations
 
 import logging
-import os
 import time
 from typing import TYPE_CHECKING
 
+from silica.config import CONFIG, live_env
 from silica.kernel.forms import read_source_text
 from silica.kernel.outline import lane_for
-from silica.config import CONFIG
 from silica.driver import DRIVER
 from silica.kernel.text.payload import payload_chunks
 from silica.kernel.text.vault_recon import recon_file
@@ -212,7 +211,7 @@ def _assemble_file_chunks(fsm: "InjectorFSM", recon_cur: dict) -> tuple[dict, li
                  "batches": [{"inbox_file": recon_cur.get("file", ""), "concepts": []}],
                  "source_text": recon_cur.get("source_text", "")}
         return {"chunks": [chunk]}, [chunk]
-    max_bytes = int(os.getenv("DISTILLER_CHUNK_MAX_BYTES", str(30 * 1024)))
+    max_bytes = live_env("DISTILLER_CHUNK_MAX_BYTES")
     res = payload_chunks([recon_cur], max_concepts=PARTITION_IF_OVER, max_bytes=max_bytes)
 
     # Re-partition this file's payload (§3.6); fall back to the legacy
@@ -475,7 +474,7 @@ def _salience_filter(fsm: "InjectorFSM", chunks: list[dict]) -> int | None:
     The SALIENCE core, shared with warm_next_file. Returns the dropped count,
     or None when no embedder is available (gate skipped, chunks untouched).
     """
-    τ_theme = getattr(CONFIG, "sim_threshold_theme", 0.35)
+    τ_theme = CONFIG.sim_threshold_theme
     from silica.model.providers import get_embedder_or_none
     from silica.kernel.base.vectors import document_theme_vector, cosine
     from silica.kernel.text.text import clean_body
