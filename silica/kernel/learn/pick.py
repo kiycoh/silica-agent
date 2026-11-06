@@ -101,7 +101,7 @@ def conflicts(notes: dict[str, dict]) -> list[str]:
     vault = Path(CONFIG.vault_path)
     out: list[str] = []
     for path in notes:
-        parsed = learner.parsed_note(vault, path)
+        parsed = learner.parsed_note(vault, path, body=False)
         if parsed is None:
             continue
         data = parsed[0]

@@ -106,15 +106,20 @@ def is_material(meta: dict) -> bool:
 
 
 _meta_memo: dict[str, tuple[str, dict[str, dict]]] = {}  # vault -> (epoch, meta)
-_parsed_memo: dict[str, tuple[float, Any, str]] = {}  # file -> (mtime, frontmatter, body)
+_parsed_memo: dict[str, tuple[float, Any]] = {}  # file -> (mtime, frontmatter)
 
 
-def parsed_note(vault: Path, path: str) -> tuple[Any, str] | None:
-    """(frontmatter, body) of a note, parsed once per mtime; None when it
-    cannot be read. A Learn session read every note's YAML three times
+def parsed_note(vault: Path, path: str, *, body: bool = True) -> tuple[Any, str] | None:
+    """(frontmatter, body) of a note, its YAML parsed once per mtime; None when
+    it cannot be read. A Learn session read every note's YAML three times
     (contrast pairs, conflicts, the plan list), about 4 s each on a 2,166-note
     vault (2026-10-23, profiled). The frontmatter is shared: read it, never
-    change it."""
+    change it.
+
+    The memo holds no body: the YAML was the cost, and the bodies were a whole
+    second copy of the vault, 102 MiB of t20's 1 GB before anyone opened Learn
+    (2026-11-06). body=False is for a caller that wants the frontmatter alone:
+    a hit then opens no file, and the body comes back empty."""
     from silica.kernel.write import frontmatter
 
     f = vault / path
@@ -123,15 +128,20 @@ def parsed_note(vault: Path, path: str) -> tuple[Any, str] | None:
     except OSError:
         return None
     hit = _parsed_memo.get(str(f))
-    if hit is not None and hit[0] == mtime:
-        return hit[1], hit[2]
+    if hit is not None and hit[0] != mtime:
+        hit = None
+    if hit is not None and not body:
+        return hit[1], ""
     try:
         text = f.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return None
-    data, _raw, body = frontmatter.split(text)
-    _parsed_memo[str(f)] = (mtime, data, body)
-    return data, body
+    if hit is not None:
+        m = frontmatter.FM_RE.match(text)
+        return hit[1], text[m.end():] if m else text
+    data, _raw, rest = frontmatter.split(text)
+    _parsed_memo[str(f)] = (mtime, data)
+    return data, rest if body else ""
 
 
 
