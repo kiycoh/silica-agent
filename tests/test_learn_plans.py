@@ -759,3 +759,24 @@ def test_a_step_line_s_weight_and_depth_stay_out_of_its_last_topic(vault):
     text = (Path(CONFIG.vault_path) / out["path"]).read_text(encoding="utf-8")
     assert ("- [ ] Ottimizzazione: [[Gradient descent]], [[Chain rule]] · not in the vault: lasso · weight 4"
             in text)
+
+
+def test_a_plan_lands_inside_the_write_boundary_where_publish_keeps_it_out(vault, monkeypatch):
+    """On a vault with `write_dir` a plan went to root Plans/ while `never_dirs`
+    named `silica/Plans`, so Silica's own plan note could be published."""
+    from silica.kernel import publish
+    from silica.kernel.learn import offer
+
+    monkeypatch.setattr("silica.kernel.base.manifest.active_write_dir", lambda: "silica")
+    made = plans.compose_plan(plans.PlanSpec("Esame", "notes", ["Softmax"], objectives=["explain"], cards=[]))
+    assert made["path"] == "silica/Plans/Esame.md" and publish.never(made["path"])
+    # the chat's draft moves its name off the path the note would take
+    (store.vault() / "silica/Plans").mkdir(parents=True)
+    (store.vault() / "silica/Plans/Esame.md").write_text("# Esame\n", encoding="utf-8")
+    draft = offer.plan_draft({"name": "Esame", "scope": "notes", "target": ["Softmax"]})
+    assert draft["body"]["name"] == "Esame 2" and draft["plan"]["path"] == "silica/Plans/Esame 2.md"
+
+
+def test_a_vault_with_no_write_dir_keeps_its_plans_at_the_root(vault):
+    made = plans.compose_plan(plans.PlanSpec("Esame", "notes", ["Softmax"], objectives=["explain"], cards=[]))
+    assert made["path"] == "Plans/Esame.md"

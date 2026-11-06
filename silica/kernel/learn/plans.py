@@ -877,6 +877,7 @@ def compose_plan(spec: PlanSpec) -> dict:
     mapped to intentions when `objectives` is None."""
     from datetime import date
 
+    from silica.kernel.base.manifest import in_write_dir
     from silica.kernel.learn import objectives as obj
 
     if spec.scope not in SCOPES:
@@ -899,7 +900,7 @@ def compose_plan(spec: PlanSpec) -> dict:
              "created": date.today().isoformat(), "target": target_text(spec.scope, spec.target)}
     made = _Made(spec, resolved, assessment)
     props.update({k.name: v for k in PLAN_KEYS if (v := k.write(made))})
-    return {"path": f"{spec.folder}/{spec.name}.md", "body": "\n".join(lines), "props": props, "resolved": resolved,
+    return {"path": f"{in_write_dir(spec.folder)}/{spec.name}.md", "body": "\n".join(lines), "props": props, "resolved": resolved,
             "cards": cards}
 
 

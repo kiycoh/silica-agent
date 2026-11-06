@@ -376,7 +376,8 @@ def plan_draft(read: dict) -> dict:
     back, not written: {body, plan, resolved}. `body` is what the line under
     the answer posts to /learn/plan, the Memorize form's own save, so the
     click writes the plan this turn showed. The name moves to "<name> 2" when
-    Plans/<name>.md exists, because the write gate refuses a path that does."""
+    its path exists, because the write gate refuses a path that does."""
+    from silica.kernel.base.manifest import in_write_dir
     from silica.kernel.learn import plans as pl
     from silica.kernel.learn.sentence import name_of
     from silica.kernel.publish import PLANS_DIR
@@ -389,7 +390,7 @@ def plan_draft(read: dict) -> dict:
         # passes over: the material names it instead, as in read_sentence
         base = name_of(read["scope"], read["target"]) or "Plan"
     name, n = base, 2
-    while (store.vault() / PLANS_DIR / f"{name}.md").exists():
+    while (store.vault() / in_write_dir(PLANS_DIR) / f"{name}.md").exists():
         name, n = f"{base} {n}", n + 1
     body = {"name": name, "scope": read["scope"], "target": read["target"],
             "restrict": read.get("restrict") or "", "by": read.get("by") or None, "templates": True}
