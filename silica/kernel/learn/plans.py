@@ -65,7 +65,7 @@ def list_plans() -> list[dict]:
     vault = _vault()
     out = []
     for path in _notes_meta(vault):
-        parsed = parsed_note(vault, path)
+        parsed = parsed_note(vault, path, body=False)
         if parsed is None or not is_plan(parsed[0]):
             continue
         try:

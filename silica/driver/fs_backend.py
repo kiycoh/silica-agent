@@ -63,6 +63,13 @@ _MAX_HITS_PER_NOTE = 20
 # (scripts/bench_scale_levers.py) reads and flips this seam.
 _BODY_CACHE_CAP = 16384
 
+# A note longer than this stays on disk: the bound above counts notes, and a
+# converted book is not one. t20's 97 books, 49 MiB of text, held 102 MiB of its
+# 1 GB. Without them a search over all 97 went from 0.6 to 0.8 s on the host
+# (2026-11-06). At 64k chars 72 of them and 37 of t19's 66 go uncached, and no
+# other tenant's note.
+_BODY_CACHE_MAX_CHARS = 65_536
+
 # Debounce on the out-of-band roster re-check (_roster_drifted). `_ensure_index`
 # runs on every read op and several land in one agent turn, so the whole-tree
 # directory walk needs the same brake the index sweep uses for the same reason
@@ -167,8 +174,9 @@ class ObsidianFSBackend(GraphIndexMixin):
         # re-reads for a bounded footprint instead of growing to every body
         # in RAM. Plain dict as the LRU: hits reinsert, eviction pops the
         # oldest key (insertion order).
-        # abs-path str -> (mtime, content read on LF, the bytes were CRLF-dominant)
-        self._body_cache: dict[str, tuple[float, str, bool]] = {}
+        # abs-path str -> (mtime, content read on LF or None past
+        # _BODY_CACHE_MAX_CHARS, the bytes were CRLF-dominant)
+        self._body_cache: dict[str, tuple[float, str | None, bool]] = {}
         # {directory -> mtime} as of the last full rebuild. POSIX bumps a
         # directory's mtime when a file inside it is created, deleted or
         # renamed, and NOT when one is edited in place — which is exactly the
@@ -754,11 +762,14 @@ class ObsidianFSBackend(GraphIndexMixin):
             self._body_cache.pop(key, None)
             raise
         hit = self._body_cache.pop(key, None)
-        if hit is not None and hit[0] == mtime:
+        if hit is not None and hit[0] == mtime and hit[1] is not None:
             self._body_cache[key] = hit  # reinsert: most recently used
             return hit[1]
         content, crlf = _read_lf(full)
-        self._body_cache[key] = (mtime, content, crlf)
+        # The entry stays when the text does not: _crlf reads it, and a CRLF
+        # note with no entry would be written back as LF.
+        held = content if len(content) <= _BODY_CACHE_MAX_CHARS else None
+        self._body_cache[key] = (mtime, held, crlf)
         while len(self._body_cache) > _BODY_CACHE_CAP:
             del self._body_cache[next(iter(self._body_cache))]
         return content

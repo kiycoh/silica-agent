@@ -113,7 +113,7 @@ def collections(notes: dict, allowed: set[str]) -> list[dict]:
         if not m:
             continue   # an outline the reader wrote: no source behind it
         leaf = m.group(1).removesuffix(".md")
-        parsed = parsed_note(vault, leaf + ".md")
+        parsed = parsed_note(vault, leaf + ".md", body=False)
         data = (parsed[0] if parsed else None) or {}
         found.append((sp, leaf, str(data.get("source_file") or "")))
     shared = Counter(sf for _sp, _l, sf in found if sf)
