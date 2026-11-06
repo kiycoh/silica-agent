@@ -436,7 +436,7 @@ def test_repair_json_escapes_keeps_latex_backslashes():
 def test_default_ask_accepts_literal_newlines_inside_strings(monkeypatch):
     from types import SimpleNamespace
     reply = '{"bodies": {"A": "riga uno\nriga due"}}'
-    monkeypatch.setattr("silica.kernel.prep_delegation._call_with_deadline", lambda fn, *a, **k: SimpleNamespace(text=reply, finish_reason="stop"))
+    monkeypatch.setattr("silica.model.llm.run_with_deadline", lambda fn, *a, **k: SimpleNamespace(text=reply, finish_reason="stop"))
     monkeypatch.setattr("silica.model.providers.get_provider", lambda *a, **k: SimpleNamespace(call_llm=lambda **k: None))
     assert ol._default_ask(ol.STAGE_BODIES_TAG + " x", "u", max_tokens=10)["bodies"]["A"] == "riga uno\nriga due"
 
@@ -462,7 +462,7 @@ def test_parse_bodies_text_falls_back_to_headings_that_name_the_titles():
 def test_default_ask_raw_returns_text_and_retries_without_a_marker(monkeypatch):
     from types import SimpleNamespace
     replies = iter(["   ", "### IDEA: A\ncorpo \\alpha"])
-    monkeypatch.setattr("silica.kernel.prep_delegation._call_with_deadline",
+    monkeypatch.setattr("silica.model.llm.run_with_deadline",
                         lambda fn, *a, **k: SimpleNamespace(text=next(replies), finish_reason="stop"))
     monkeypatch.setattr("silica.model.providers.get_provider", lambda *a, **k: SimpleNamespace(call_llm=lambda **k: None))
     assert ol._default_ask(ol.STAGE_BODIES_TAG + " x", "u", max_tokens=10, raw=True) == {"text": "### IDEA: A\ncorpo \\alpha"}
@@ -741,7 +741,7 @@ def test_default_ask_with_a_prefix_puts_the_source_in_the_system_message(monkeyp
         sent.update(k)
         return SimpleNamespace(text='{"ideas": []}', finish_reason="stop")
 
-    monkeypatch.setattr("silica.kernel.prep_delegation._call_with_deadline", lambda fn, *a, **k: fn())
+    monkeypatch.setattr("silica.model.llm.run_with_deadline", lambda fn, *a, **k: fn())
     monkeypatch.setattr("silica.model.providers.get_provider", lambda *a, **k: SimpleNamespace(call_llm=call_llm))
     ol._default_ask(ol.STAGE_A_TAG + "\nrules", "", max_tokens=10, prefix="the source")
     assert sent["messages"][0] == {"role": "system", "content": ol.SOURCE_HEAD + "the source"}
@@ -1248,12 +1248,12 @@ def test_bodies_pool_fits_the_local_window(monkeypatch):
     monkeypatch.setattr(CONFIG, "worker_model", None)
     monkeypatch.setattr(CONFIG, "_provider", "custom")
     monkeypatch.setattr(CONFIG, "model", "custom/qwen3.5-4b")
-    monkeypatch.setattr("silica.model.providers.model_limits", lambda p, m: (32768, 0))
+    monkeypatch.setattr("silica.model.limits.model_limits", lambda p, m: (32768, 0))
     src = "x" * 16000                     # a 16 KB lecture
     assert ol.bodies_workers_for(src) == 2
-    monkeypatch.setattr("silica.model.providers.model_limits", lambda p, m: (65536, 0))
+    monkeypatch.setattr("silica.model.limits.model_limits", lambda p, m: (65536, 0))
     assert ol.bodies_workers_for(src) == 5
-    monkeypatch.setattr("silica.model.providers.model_limits", lambda p, m: (0, 0))
+    monkeypatch.setattr("silica.model.limits.model_limits", lambda p, m: (0, 0))
     assert ol.bodies_workers_for(src) == ol.BODIES_WORKERS   # unknown window: as before
     monkeypatch.setattr(CONFIG, "_provider", "openrouter")
     assert ol.bodies_workers_for(src) == ol.BODIES_WORKERS   # hosted: independent contexts
@@ -1266,12 +1266,21 @@ def test_outline_calls_skip_the_sdk_retries(monkeypatch):
 
     class _P:
         def call_llm(self, **kw):
-            seen.update(kw)
             return type("R", (), {"text": '{"ideas": []}', "finish_reason": "stop"})()
 
-    monkeypatch.setattr("silica.model.providers.get_provider", lambda *a, **k: _P())
+    def lane(config, role):
+        seen["role"] = role
+        return _P()
+
+    from silica.config import CONFIG
+    from silica.model.providers import get_provider
+
+    monkeypatch.setattr("silica.model.providers.get_provider", lane)
     ol._default_ask(ol.STAGE_GAP_TAG, "u", max_tokens=10)
-    assert seen.get("sdk_retries") == 0
+    assert seen["role"] == "outline"
+    monkeypatch.undo()
+    assert get_provider(CONFIG, role="outline").sdk_retries == 0
+    assert get_provider(CONFIG, role="distiller").sdk_retries is None
 
 
 def test_skeleton_writes_a_shouted_heading_the_way_the_lecture_spells_it():

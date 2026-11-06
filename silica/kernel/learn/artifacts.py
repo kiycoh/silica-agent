@@ -182,14 +182,12 @@ CARD_TITLES_SHOWN = 3    # notes named in the deck's title; a folder's thirty wo
 
 
 def _card_reply(prompt: str, retry: bool = False) -> str:
-    from silica.model.llm import call_llm
-    from silica.config import CONFIG
+    from silica.model.ask import ask_once
 
     msgs = [{"role": "user", "content": prompt}]
     if retry:
         msgs += [{"role": "user", "content": CARD_RETRY}]
-    resp = call_llm(CONFIG.model, msgs, max_tokens=CARD_MAX_TOKENS, temperature=0.2, reasoning=False)
-    return resp.text or ""
+    return ask_once(msgs, max_tokens=CARD_MAX_TOKENS, temperature=0.2).text or ""
 
 
 def make_cards(targets: list[str], n: int = 12) -> dict:

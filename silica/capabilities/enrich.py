@@ -20,7 +20,8 @@ from pydantic import BaseModel
 
 from silica.agent.bounds import enrich_bounds
 from silica.agent.commit import commit_ops
-from silica.capabilities._base import emit_feedback, load_prompt, parse_content, read_or_skip
+from silica.capabilities._base import emit_feedback, parse_content, read_or_skip
+from silica.kernel.prompts import load_prompt
 from silica.kernel.workqueue import WorkItem
 from silica.kernel.write.ops import Op, OpType
 
@@ -104,7 +105,6 @@ def _enrich_note(config: Any, target_path: str, original: str, hub: str | None) 
         ],
         tools=None,
         response_schema=NoteAddition,
-        max_tokens=int(os.getenv("MAX_TOKENS", "32768")),
     )
     return parse_content(response.text or "", key="addition")
 

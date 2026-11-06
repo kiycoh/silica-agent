@@ -39,7 +39,9 @@ def run_worker(
     config: Any,
     cancel_token: Any = None,
 ) -> WorkerResult:
-    worker_model = getattr(config, "worker_model", None) or getattr(config, "model", None)
+    from silica.model.providers import resolve_role
+
+    worker_model, _key = resolve_role("worker", config)
     if not worker_model:
         return WorkerResult(status="error", detail="no worker_model configured")
 

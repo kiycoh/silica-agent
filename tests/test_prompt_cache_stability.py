@@ -25,7 +25,7 @@ def _capture_messages(**kwargs):
     provider = MagicMock()
     provider.call_llm.return_value = _fake_response()
     with patch("silica.model.providers.get_provider", return_value=provider), \
-         patch("silica.model.providers.model_limits", return_value=(262144, 8192)):
+         patch("silica.model.limits.model_limits", return_value=(262144, 8192)):
         run_distiller(payload={"schema_version": 1, "batches": []},
                       target="Notes", **kwargs)
     return provider.call_llm.call_args.kwargs["messages"]

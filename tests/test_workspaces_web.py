@@ -137,9 +137,9 @@ def test_a_reopened_chat_keeps_the_scope_of_its_last_turn(client, monkeypatch):
 
 
 def test_the_internal_key_never_reaches_the_provider():
-    from silica.model.providers import INTERNAL_KEYS
+    from silica.model.wire import to_wire
 
-    assert "silica_workspace" in INTERNAL_KEYS
+    assert "silica_workspace" not in to_wire({"role": "user", "content": "q", "silica_workspace": "a/b"})
 
 
 def test_the_joined_note_and_the_workspace_edit_are_among_this_chats_changes(client, monkeypatch):

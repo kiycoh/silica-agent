@@ -21,11 +21,12 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import time
 from typing import Any
 
 import httpx
+
+from silica.model.keys import ready_key
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def decide(state: Any, questions: dict[str, dict], *,
         resp = httpx.post(
             DECISIONS_URL,
             json={"model": model, "state": state, "questions": questions},
-            headers={"Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY', '')}"},
+            headers={"Authorization": f"Bearer {ready_key('openrouter')}"},
             timeout=timeout_s,
         )
     except Exception as e:  # httpx transport errors, timeouts

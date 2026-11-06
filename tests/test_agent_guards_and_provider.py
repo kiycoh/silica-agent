@@ -127,8 +127,7 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
         mock_completion.return_value = litellm_mock_response(
             text="Truncated structured", finish_reason="length")
 
-        provider = Provider(base_url="http://dummy", api_key="dummy",
-                            model="lmstudio/test-model")
+        provider = Provider("lmstudio/test-model", "dummy")
         resp = provider.call_llm(messages=[], max_tokens=4000)
 
         self.assertEqual(mock_completion.call_args[1].get("max_tokens"), 4000)
@@ -139,16 +138,15 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
     @patch("litellm.completion")
     def test_distiller_path_honors_openrouter_provider(self, mock_completion):
         # The distiller lane routes through the same call_llm as the chat loop
-        # now, but its own pin (openrouter_provider=) must still reach the wire
+        # now, but its own pin (Provider.openrouter_pin) must still reach the wire
         # — and must not leak onto a local endpoint.
         from silica.config import CONFIG
         from tests.llm_mocks import litellm_mock_response
 
         mock_completion.return_value = litellm_mock_response(text="ok")
 
-        prov = Provider(base_url="https://openrouter.ai/api/v1", api_key="k",
-                        model="openrouter/xiaomi/mimo-v2.5")
-        prov.call_llm(messages=[], openrouter_provider="DigitalOcean")
+        prov = Provider("openrouter/xiaomi/mimo-v2.5", "k", openrouter_pin="DigitalOcean")
+        prov.call_llm(messages=[])
         self.assertEqual(
             mock_completion.call_args[1]["extra_body"]["provider"],
             {"order": ["DigitalOcean"], "allow_fallbacks": False},
@@ -157,8 +155,7 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
         # No explicit override: falls back to CONFIG.openrouter_provider.
         mock_completion.reset_mock()
         with patch.object(CONFIG, "openrouter_provider", "Together"):
-            prov = Provider(base_url="https://openrouter.ai/api/v1", api_key="k",
-                            model="openrouter/m")
+            prov = Provider("openrouter/m", "k")
             prov.call_llm(messages=[])
         self.assertEqual(
             mock_completion.call_args[1]["extra_body"]["provider"],
@@ -167,9 +164,8 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
 
         # Local (non-openrouter) model: never injected.
         mock_completion.reset_mock()
-        prov = Provider(base_url="http://localhost:1234/v1", api_key="k",
-                        model="lmstudio/m")
-        prov.call_llm(messages=[], openrouter_provider="DigitalOcean")
+        prov = Provider("lmstudio/m", "k", openrouter_pin="DigitalOcean")
+        prov.call_llm(messages=[])
         self.assertNotIn("extra_body", mock_completion.call_args[1])
 
     def test_distiller_provider_config_falls_back_to_general_pin(self):

@@ -144,7 +144,7 @@ def test_delivery_lock_serializes_two_tickers(tmp_path):
 def test_model_limits_ttl_serves_hits_and_expires(monkeypatch):
     import time as _time
 
-    from silica.model import providers
+    from silica.model import limits
 
     calls = {"n": 0}
 
@@ -152,19 +152,19 @@ def test_model_limits_ttl_serves_hits_and_expires(monkeypatch):
         calls["n"] += 1
         return (100, 10)
 
-    monkeypatch.setattr(providers, "_model_limits_fetch", fetch)
+    monkeypatch.setattr(limits, "_model_limits_fetch", fetch)
     clock = {"t": 1000.0}
     monkeypatch.setattr(_time, "monotonic", lambda: clock["t"])
-    providers._model_limits_memo.clear()
+    limits._model_limits_memo.clear()
 
-    assert providers.model_limits("x", "m") == (100, 10)
-    assert providers.model_limits("x", "m") == (100, 10)
+    assert limits.model_limits("x", "m") == (100, 10)
+    assert limits.model_limits("x", "m") == (100, 10)
     assert calls["n"] == 1  # within the TTL: memo hit, no probe
 
-    clock["t"] += providers._MODEL_LIMITS_TTL_S + 1
-    assert providers.model_limits("x", "m") == (100, 10)
+    clock["t"] += limits._MODEL_LIMITS_TTL_S + 1
+    assert limits.model_limits("x", "m") == (100, 10)
     assert calls["n"] == 2  # expired: refetched (a reloaded model is seen)
-    providers._model_limits_memo.clear()
+    limits._model_limits_memo.clear()
 
 
 # --- energy series ----------------------------------------------------------

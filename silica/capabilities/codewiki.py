@@ -14,7 +14,8 @@ from __future__ import annotations
 import logging
 import os
 
-from silica.capabilities._base import NoteContent, load_prompt
+from silica.capabilities._base import NoteContent, parse_content
+from silica.kernel.prompts import load_prompt
 from silica.kernel.code.codewiki import SubsystemDigest
 from silica.kernel.text.sanitize import strip_degenerate_runs
 
@@ -135,24 +136,17 @@ _OVERVIEW_SYSTEM = (
 
 def _call_worker(config, system_prompt: str, user_message: str) -> NoteContent:
     from silica.model.providers import get_provider
-    from silica.kernel.text.sanitize import parse_json
 
     provider = get_provider(config, role="worker")
+    wiki_tokens = os.getenv("WIKI_MAX_TOKENS")
     response = provider.call_llm(
         messages=[{"role": "system", "content": system_prompt + load_prompt("_anti_slop.txt")},
                   {"role": "user", "content": user_message}],
         tools=None,
         response_schema=NoteContent,
-        max_tokens=int(os.getenv("WIKI_MAX_TOKENS", os.getenv("MAX_TOKENS", "32768"))),
+        max_tokens=int(wiki_tokens) if wiki_tokens else None,
     )
-    raw = response.text or ""
-    try:
-        parsed, _ = parse_json(raw, strict=False)
-        if isinstance(parsed, dict) and "content" in parsed:
-            return NoteContent(content=str(parsed["content"]))
-    except Exception as e:
-        logger.debug("codewiki parse failed: %s", e)
-    return NoteContent(content="")
+    return NoteContent(content=parse_content(response.text or ""))
 
 
 def generate_subsystem_note(d: SubsystemDigest, digest_text: str, config) -> NoteContent:

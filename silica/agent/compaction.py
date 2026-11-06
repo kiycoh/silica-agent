@@ -26,6 +26,8 @@ import json
 import re
 from typing import Any, Callable
 
+from silica.model.limits import FREED_CHARS_PER_TOKEN
+
 MIN_COLLAPSE_CHARS = 200  # don't collapse a body smaller than its own stub
 
 # Fixed knobs (config promotion declined 2026-08-19; revisit only with a real
@@ -139,7 +141,7 @@ def turn_tail(tool_name: str, body: str, seen: bool) -> str:
     # then stubs one more read to make the same room.
     if not seen:
         return f"too large for this turn's window: re-call {tool_name} for a part, by lines or query"
-    cost = max(100, round(len(body) / _CHARS_PER_TOKEN, -2))
+    cost = max(100, round(len(body) / FREED_CHARS_PER_TOKEN, -2))
     return f"you read it in full this turn (~{cost} tokens); re-call {tool_name} only for lines you need"
 
 
@@ -363,12 +365,6 @@ def compact_read_history(
     return updated
 
 
-# A collapsed read is credited at chars // 3: under what it frees on that dense
-# text, so the estimate after a collapse stays high; over by a twelfth on English
-# prose (~4 chars a token), which the 2-char count on the added side absorbs.
-_CHARS_PER_TOKEN = 3
-
-
 def fit_window(
     messages: list[dict],
     collapsed: set[int],
@@ -430,7 +426,7 @@ def fit_window(
             tail = turn_tail(name, body, seen) if i > turn_start else None
             m["content"] = read_stub(name, arguments, body, "to fit the context window", tail)
             updated.add(i)
-        estimate -= (len(body) - len(m["content"])) // _CHARS_PER_TOKEN
+        estimate -= (len(body) - len(m["content"])) // FREED_CHARS_PER_TOKEN
     return updated, estimate
 
 

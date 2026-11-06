@@ -91,6 +91,6 @@ def test_read_refs_names_this_turn_only_and_survives_a_stubbed_result():
 
 
 def test_reads_never_reach_the_provider():
-    from silica.model.providers import INTERNAL_KEYS
+    from silica.model.wire import to_wire
 
-    assert READS_KEY in INTERNAL_KEYS
+    assert READS_KEY not in to_wire({"role": "assistant", "content": "a", READS_KEY: ["n.md"]})

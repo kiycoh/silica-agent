@@ -81,14 +81,12 @@ _FIELD_RE = re.compile(r"^([A-Z_]+):\s*(.*)$")
 def _llm(prompt: str, max_tokens: int) -> tuple[str, str | None]:
     """The judge model when one is configured (epistemic-state M7): the
     verdict then comes from a model that did not write the notes it grades."""
-    from silica.model.llm import call_llm
-    from silica.config import CONFIG
+    from silica.model.ask import ask_once
+    from silica.model.providers import resolve_role
 
-    model = CONFIG.judge_model or CONFIG.model
-    if not model:
+    if not resolve_role("judge")[0]:
         return "", None
-    resp = call_llm(model, [{"role": "user", "content": prompt}],
-                    max_tokens=max_tokens, temperature=0, reasoning=False)
+    resp = ask_once(prompt, max_tokens=max_tokens, role="judge")
     return resp.text or "", resp.finish_reason
 
 

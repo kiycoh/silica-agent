@@ -398,7 +398,7 @@ def silica_generate_taxonomy(
 
     from silica.model.llm import call_llm
     from silica.config import CONFIG
-    from silica.kernel.text.sanitize import parse_json
+    from silica.model.reply import parse_reply
     from silica.kernel.organize.taxonomy import (
         TAXONOMY_GENERATION_PROMPT,
         TAXONOMY_MERGE_BLOCK,
@@ -485,10 +485,8 @@ def silica_generate_taxonomy(
         pass
 
     if not isinstance(taxonomy_dict, dict):
-        parsed, _ = parse_json(raw, strict=False)
-        if isinstance(parsed, dict):
-            taxonomy_dict = parsed
-        else:
+        taxonomy_dict = parse_reply(raw)
+        if not isinstance(taxonomy_dict, dict):
             return {"error": f"LLM returned unparseable output: {raw[:300]}"}
 
     try:

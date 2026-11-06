@@ -18,12 +18,9 @@ from typing import Callable, Literal
 
 import httpx
 
-from silica.model.providers import (
-    PROVIDER_PRESETS,
-    has_local_rerank,
-    local_rerank_model,
-    model_limits,
-)
+from silica.model.limits import base_url as provider_base_url, model_limits
+from silica.model.providers import has_local_rerank, local_rerank_model
+from silica.provider_table import HOSTED, PROVIDERS
 from silica.config import USER_ENV, SilicaConfig, embedder_defaults, silica_home
 from silica.kernel.base import gitstate
 from silica.kernel.scrub import scrub_credentials
@@ -130,7 +127,7 @@ def check_chat_model(config: SilicaConfig) -> CheckResult:
             "SILICA_MODEL is not set, and no provider key is exported",
             "run `silica init`; search and the graph work without one",
         )
-    key_env = PROVIDER_PRESETS.get(config.provider, {}).get("api_key_env")
+    key_env = HOSTED[config.provider].key_env if config.provider in HOSTED else ""
     if key_env and not os.getenv(key_env):
         return CheckResult(
             "chat model", "fail",
@@ -146,8 +143,9 @@ def check_chat_endpoint(config: SilicaConfig) -> CheckResult:
         # fallback. Warning on it every run trains the operator to skim the
         # column where a real degradation appears.
         return CheckResult("chat endpoint", "unknown", "skipped — no model configured")
-    if config.provider in ("lmstudio", "ollama"):
-        base_url = PROVIDER_PRESETS[config.provider]["base_url"]
+    row = PROVIDERS.get(config.provider)
+    if row is not None and row.fixed_key:  # a local server, at the row's address
+        base_url = provider_base_url(config.provider)
     elif config.provider == "custom":
         base_url = config.provider_base_url
         if not base_url:
@@ -160,7 +158,7 @@ def check_chat_endpoint(config: SilicaConfig) -> CheckResult:
         return CheckResult(
             "chat endpoint", "unknown", f"{config.provider} (hosted, not probed)"
         )
-    label = {"lmstudio": "LM Studio", "ollama": "Ollama"}.get(config.provider, "the endpoint")
+    label = row.label if row is not None else "the endpoint"
     try:
         resp = httpx.get(f"{base_url.rstrip('/')}/models", timeout=_HTTP_TIMEOUT)
     except Exception:

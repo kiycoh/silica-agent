@@ -275,11 +275,10 @@ def draft(asks: list[str], config) -> dict | None:
     """One worker call over the person's instructions; None when it fails,
     overruns DRAFT_TIMEOUT_S or answers something that is not a skill."""
     import threading
-    from concurrent.futures import ThreadPoolExecutor
-    from concurrent.futures import TimeoutError as Late
 
+    from silica.model.llm import run_with_deadline
     from silica.model.providers import get_provider
-    from silica.kernel.text.sanitize import parse_json
+    from silica.model.reply import parse_reply
 
     cancel = threading.Event()
     user = "The person's requests, one per chat:\n\n" + "\n".join(f"- {a}" for a in asks)
@@ -290,21 +289,13 @@ def draft(asks: list[str], config) -> dict | None:
                                            {"role": "user", "content": user}],
                                  tools=None, max_tokens=2000, cancel=cancel)
 
-    pool = ThreadPoolExecutor(1)
     try:
-        reply = pool.submit(call).result(timeout=DRAFT_TIMEOUT_S)
-    except Late:
-        cancel.set()
+        reply = run_with_deadline(call, DRAFT_TIMEOUT_S, abandon=cancel)
+    except TimeoutError:
         logger.warning("skill draft overran %.0f s; no proposal this turn", DRAFT_TIMEOUT_S)
         return None
-    finally:
-        pool.shutdown(wait=False)
-    try:
-        out, _ = parse_json(reply.text or "", strict=False)
-    except Exception as e:
-        # A reply that is not JSON proposes nothing; the next repetition asks again.
-        logger.info("skill draft unparsable: %s", e)
-        return None
+    # A reply that is not JSON proposes nothing; the next repetition asks again.
+    out = parse_reply(reply.text)
     if not isinstance(out, dict) or not all(isinstance(out.get(k), str) and out[k].strip()
                                             for k in ("name", "description", "body")):
         return None

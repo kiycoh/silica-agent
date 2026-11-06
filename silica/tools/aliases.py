@@ -98,8 +98,7 @@ def _propose_groups(titles: list[str], config: Any) -> dict:
 
 def _propose_groups_single(titles: list[str], config: Any) -> dict:
     """One LLM call over one title chunk → {canonical: [variants]}."""
-    from silica.model.providers import get_provider
-    from silica.kernel.text.sanitize import parse_json
+    from silica.model.ask import ask_json
 
     system_prompt = (
         "You maintain the alias vocabulary of a personal knowledge vault. "
@@ -120,21 +119,12 @@ def _propose_groups_single(titles: list[str], config: Any) -> dict:
         '- Return ONLY a JSON object: {"Title": ["variant", ...], ...}\n\n'
         "Titles:\n" + "\n".join(titles)
     )
-    provider = get_provider(config, role="worker")
-    response = provider.call_llm(
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        tools=None,
-        max_tokens=int(os.getenv("MAX_TOKENS", "32768")),
-    )
-    try:
-        parsed, _ = parse_json(response.text or "", strict=False)
-    except Exception as e:
-        logger.warning("aliases: proposal parse failed: %s", e)
+    parsed = ask_json([{"role": "system", "content": system_prompt},
+                       {"role": "user", "content": user_prompt}], config=config)
+    if not isinstance(parsed, dict):
+        logger.warning("aliases: proposal parse failed")
         return {}
-    return parsed if isinstance(parsed, dict) else {}
+    return parsed
 
 
 @tool(cls="composed")

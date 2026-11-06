@@ -21,6 +21,7 @@ from silica.agent.bounds import dedup_bounds, dedup_spoke_bounds
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities._base import emit_feedback, load_prompt, read_or_skip
+from silica.model.reply import parse_reply
 
 logger = logging.getLogger(__name__)
 
@@ -677,6 +678,23 @@ def _judge_role(config: Any) -> str:
     return "judge" if getattr(config, "judge_model", None) else "worker"
 
 
+def _decision_of(parsed: dict) -> DedupDecision:
+    raw_verdict = parsed.get("verdict")
+    verdict: VerdictLabel
+    if raw_verdict not in ("duplicate", "distinct", "contradicts"):
+        # Legacy binary schema, or anything unrecognised → conservative.
+        verdict = "duplicate" if parsed.get("is_duplicate") is True else "distinct"
+    else:
+        verdict = raw_verdict
+    return DedupDecision(
+        verdict=verdict,
+        rationale=str(parsed.get("rationale", "")),
+        addition=str(parsed.get("addition", "")),
+        title=str(parsed.get("title", "") or ""),
+        body=str(parsed.get("body", "") or ""),
+    )
+
+
 def _decide_dedup(
     config: Any,
     *,
@@ -695,7 +713,6 @@ def _decide_dedup(
     score in front of it pushed it to merge (ADR-0030). The arguments stay so
     callers and probes keep their shape."""
     from silica.model.providers import get_provider
-    from silica.kernel.text.sanitize import parse_json
 
     prompt = load_prompt("dedup_prompt.txt")
     if author_spoke:
@@ -732,28 +749,10 @@ def _decide_dedup(
         reasoning=False,
     )
     raw = response.text or ""
-    decision: DedupDecision | None = None
-    try:
-        parsed, _ = parse_json(raw, strict=False)
-        if isinstance(parsed, dict):
-            raw_verdict = parsed.get("verdict")
-            verdict: VerdictLabel
-            if raw_verdict not in ("duplicate", "distinct", "contradicts"):
-                # Legacy binary schema, or anything unrecognised → conservative.
-                legacy = parsed.get("is_duplicate")
-                verdict = "duplicate" if legacy is True else "distinct"
-            else:
-                verdict = raw_verdict
-            decision = DedupDecision(
-                verdict=verdict,
-                rationale=str(parsed.get("rationale", "")),
-                addition=str(parsed.get("addition", "")),
-                title=str(parsed.get("title", "") or ""),
-                body=str(parsed.get("body", "") or ""),
-            )
-    except Exception as e:
-        logger.debug("dedup decision parse failed: %s", e)
-    if decision is None:
+    parsed = parse_reply(raw)
+    if isinstance(parsed, dict):
+        decision = _decision_of(parsed)
+    else:
         # Conservative default: when in doubt, do not merge and do not contest.
         decision = DedupDecision(verdict="distinct", rationale="unparseable decision", judged=False)
     _narrate_verdict(decision, raw=raw, concept=concept, candidate=candidate_name)
@@ -840,37 +839,14 @@ def _parse_batch(raw: str, n: int) -> list[DedupDecision]:
     as the single path (distinct, no authorship → mechanical spoke or
     no_merge downstream) — never to a merge.
     """
-    from silica.kernel.text.sanitize import parse_json
-
     def fallback() -> DedupDecision:
         return DedupDecision(
             verdict="distinct", rationale="missing from batch response", judged=False)
 
-    decisions: list[DedupDecision] = []
-    try:
-        parsed, _ = parse_json(raw, strict=False)
-        entries = parsed.get("decisions") if isinstance(parsed, dict) else parsed
-        if isinstance(entries, list):
-            for e in entries[:n]:
-                if not isinstance(e, dict):
-                    decisions.append(fallback())
-                    continue
-                raw_verdict = e.get("verdict")
-                verdict: VerdictLabel
-                if raw_verdict not in ("duplicate", "distinct", "contradicts"):
-                    # Legacy binary schema, or anything unrecognised → conservative.
-                    verdict = "duplicate" if e.get("is_duplicate") is True else "distinct"
-                else:
-                    verdict = raw_verdict
-                decisions.append(DedupDecision(
-                    verdict=verdict,
-                    rationale=str(e.get("rationale", "")),
-                    addition=str(e.get("addition", "")),
-                    title=str(e.get("title", "") or ""),
-                    body=str(e.get("body", "") or ""),
-                ))
-    except Exception as e:
-        logger.debug("dedup batch parse failed: %s", e)
+    parsed = parse_reply(raw)
+    entries = parsed.get("decisions") if isinstance(parsed, dict) else parsed
+    decisions = [_decision_of(e) if isinstance(e, dict) else fallback()
+                 for e in (entries[:n] if isinstance(entries, list) else [])]
     while len(decisions) < n:
         decisions.append(fallback())
     return decisions

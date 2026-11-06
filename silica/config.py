@@ -25,6 +25,7 @@ from dotenv import dotenv_values
 # load_dotenv can blur an exported pin into a .env value. Re-exported here
 # because this is where every caller expects to find it.
 from silica import SHELL_ENV, VAULT_PINNED  # noqa: E402,F401
+from silica.provider_table import HOSTED, PROVIDERS
 
 # The one ambient .env. Layered *under* the real environment (override=False),
 # so a key the shell exported stays a deliberate per-invocation pin. It is the
@@ -268,13 +269,8 @@ def withheld(part: str) -> frozenset[str]:
 
 # Provider prefixes that map a `prefix/model` string to an endpoint and get
 # auto-prefixed onto a bare model. Single source for the three checks below
-# (provider, distill_escalation_provider, ensure_prefix). "custom" routes to
-# SILICA_PROVIDER_BASE_URL/_API_KEY; the rest to PROVIDER_PRESETS in
-# agent.providers (kept a subset of this set — see test_providers).
-PROVIDER_PREFIXES = frozenset({
-    "openrouter", "lmstudio", "ollama", "gemini",
-    "openai", "groq", "deepseek", "mistral", "xai", "custom",
-})
+# (provider, distill_escalation_provider, ensure_prefix).
+PROVIDER_PREFIXES = frozenset(PROVIDERS)
 
 
 def ensure_prefix(model: str, provider: str | None) -> str:
@@ -284,7 +280,7 @@ def ensure_prefix(model: str, provider: str | None) -> str:
     PROVIDER_PREFIXES does not name an endpoint — it just makes a bare id that
     would have worked unroutable. Those keep the id as written.
 
-    Module-level because agent.providers.get_provider re-derives the same prefix
+    Module-level because model.providers.resolve_role derives the same prefix
     from the same fields: two copies of this rule drifted apart once already
     (the copy without the guard emitted `vllm/qwen`).
     """
@@ -293,30 +289,10 @@ def ensure_prefix(model: str, provider: str | None) -> str:
             return f"{provider}/{model}"
     return model
 
-# Hosted providers in fallback order: (API key env var, model ids best first).
-# One table, three readers — `model_from_env` takes the head of the first entry
-# whose key is exported, the wizard offers the whole list as a pick-list, and
-# agent.providers derives its PROVIDER_PRESETS hosted rows from it. Lives here
-# rather than beside PROVIDER_PRESETS because config is imported on every path,
-# including the ones that must not pay for the openai SDK.
-# The wizard validates this list against each provider's live /models before
-# offering it (wizard._live_hosted_models), so stale ids stop being offered.
-# ponytail: the static heads still back model_from_env, which must stay
-# HTTP-free on config load — a head can rot for env-derived defaults; refresh
-# it when a provider retires a model.
+# Hosted providers in fallback order: (API key env var, model ids best first),
+# the view of provider_table that the no-model chain and the Settings panel read.
 HOSTED_PROVIDERS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "openrouter": ("OPENROUTER_API_KEY", (
-        "openrouter/deepseek/deepseek-v4-flash",
-        "openrouter/anthropic/claude-sonnet-5",
-        "openrouter/google/gemini-3.5-flash",
-        "openrouter/mistralai/mistral-small-2603",
-    )),
-    "gemini": ("GEMINI_API_KEY", ("gemini/gemini-2.5-flash",)),
-    "openai": ("OPENAI_API_KEY", ("openai/gpt-4o",)),
-    "groq": ("GROQ_API_KEY", ("groq/llama-3.3-70b-versatile",)),
-    "deepseek": ("DEEPSEEK_API_KEY", ("deepseek/deepseek-chat",)),
-    "mistral": ("MISTRAL_API_KEY", ("mistral/mistral-large-latest",)),
-    "xai": ("XAI_API_KEY", ("xai/grok-2-latest",)),
+    name: (row.key_env, row.models) for name, row in HOSTED.items()
 }
 
 

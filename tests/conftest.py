@@ -233,7 +233,7 @@ def _no_real_llama_props(monkeypatch: pytest.MonkeyPatch) -> None:
     model_limits reads /props for `custom/` (2026-10-12) every custom call's
     max_tokens clamp would hit the live chat server. Unknown, as before.
     tests/test_model_limits.py puts the real function back where it tests it."""
-    monkeypatch.setattr("silica.model.providers._llama_props_window", lambda base_url: 0)
+    monkeypatch.setattr("silica.model.limits._llama_props_window", lambda base_url: 0)
 
 
 @pytest.fixture(autouse=True)

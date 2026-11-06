@@ -9,7 +9,7 @@ because the frame is never stored: the thin-coverage hint it used to carry was
 gone from every reloaded chat. The message is what the narration beat records,
 what `/messages` reads and what `/session/load` rebuilds, and both compactions
 rewrite only tool results, so a note survives every path the answer does.
-`providers.INTERNAL_KEYS` keeps it off the wire.
+`wire.to_wire` keeps it off the wire.
 """
 from __future__ import annotations
 

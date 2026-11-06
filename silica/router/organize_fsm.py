@@ -206,11 +206,11 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
     def _handle_arbitrate(self) -> None:
         """L2 LLM arbiter for notes in the ambiguous confidence band."""
+        from silica.kernel.organize.arbitrate import llm_arbitrate
         from silica.kernel.organize.classify import (
             Classification,
-            _DEFAULT_TAU_HIGH,
-            _DEFAULT_TAU_LOW,
-            _llm_arbitrate,
+            DEFAULT_TAU_HIGH,
+            DEFAULT_TAU_LOW,
         )
 
         classifications: list[Classification] = self.context["classifications"]
@@ -223,7 +223,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         ambiguous: list[tuple[str, str, list]] = [
             (c.note_path, "", [])
             for c in classifications
-            if c.evidence not in ("keyword", "llm") and _DEFAULT_TAU_LOW <= c.confidence < _DEFAULT_TAU_HIGH
+            if c.evidence not in ("keyword", "llm") and DEFAULT_TAU_LOW <= c.confidence < DEFAULT_TAU_HIGH
         ]
 
         if not ambiguous:
@@ -247,7 +247,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             enriched_ambiguous.append((note_path, snippet, self.taxonomy.rules))
 
         try:
-            llm_choices = _llm_arbitrate(enriched_ambiguous, self.taxonomy)
+            llm_choices = llm_arbitrate(enriched_ambiguous, self.taxonomy)
         except Exception as exc:
             # ARBITRATE is best-effort — log and continue with L1 results
             logger.warning("ARBITRATE: LLM arbiter failed (%s) — using L1 results", exc)

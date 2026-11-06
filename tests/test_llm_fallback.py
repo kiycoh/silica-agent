@@ -13,6 +13,7 @@ from unittest.mock import patch
 import litellm
 import pytest
 
+from silica.model import keys as keys_mod
 from silica.model import llm as llm_mod
 from silica.model.llm import call_llm
 from tests.llm_mocks import litellm_mock_response
@@ -24,14 +25,14 @@ MSGS = [{"role": "user", "content": "hi"}]
 def _clean(monkeypatch):
     from silica.config import CONFIG
 
-    llm_mod._benched.clear()
+    keys_mod._benched.clear()
     llm_mod._held.clear()
     monkeypatch.setattr(llm_mod.time, "sleep", lambda s: None)   # retry backoff, not under test
     monkeypatch.setattr(CONFIG, "fallback_models", "")
     for n in ("", "_2", "_3"):
         monkeypatch.delenv(f"GROQ_API_KEY{n}", raising=False)
     yield
-    llm_mod._benched.clear()
+    keys_mod._benched.clear()
     llm_mod._held.clear()
 
 
@@ -82,7 +83,7 @@ def test_a_pool_of_refused_keys_ends_in_the_error(monkeypatch):
             pytest.raises(litellm.AuthenticationError):
         call_llm("groq/a", MSGS)
     assert c.call_count == 2
-    assert set(llm_mod._benched) == {"k1", "k2"}
+    assert set(keys_mod._benched) == {"k1", "k2"}
 
 
 def test_a_down_endpoint_falls_back_and_stays_behind(monkeypatch):

@@ -879,16 +879,14 @@ def bodies_workers_for(source_text: str) -> int:
     concurrent calls of ~8.2k tokens and 500d "Context size has been exceeded"
     39 times (2026-10-12). Unknown window: BODIES_WORKERS, as before.
     """
-    from silica.model.llm import TEXT_CHARS_PER_TOKEN
-    from silica.model.providers import model_limits
-    from silica.config import CONFIG
+    from silica.model.limits import TEXT_CHARS_PER_TOKEN, model_limits
+    from silica.model.providers import resolve_role
 
-    provider, model = CONFIG.worker_provider, CONFIG.worker_model
-    if not provider or not model:
-        provider, model = CONFIG.provider, CONFIG.model
+    model, _key = resolve_role("worker")
+    provider = model.split("/", 1)[0]
     if provider != "custom":
         return BODIES_WORKERS
-    window, _ = model_limits(provider, model or "")
+    window, _ = model_limits(provider, model)
     if not window:
         return BODIES_WORKERS
     per_call = (len(STAGE_BODIES) + len(source_text)) // TEXT_CHARS_PER_TOKEN + BODIES_REPLY_TOKENS
@@ -924,10 +922,12 @@ def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False,
     else:
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     import threading
+    from silica.model.errors import unreadable_reply
+    from silica.model.limits import distiller_timeout
+    from silica.model.llm import run_with_deadline
     from silica.model.providers import get_provider
     from silica.config import CONFIG
-    from silica.kernel.prep_delegation import _call_with_deadline
-    provider = get_provider(CONFIG, role="worker")
+    provider = get_provider(CONFIG, role="outline")
     schema_for_retry = next((m for tag, m in SCHEMA_BY_TAG.items() if system.startswith(tag)), None)
     last = ""
     for attempt in range(2):
@@ -943,26 +943,19 @@ def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False,
         # live run of this lane (2026-09-02) sat ten minutes on one such call.
         def _once(temperature: float, schema=schema):
             abandoned = threading.Event()
-            return _call_with_deadline(lambda: provider.call_llm(
+            return run_with_deadline(lambda: provider.call_llm(
                 messages=messages,
                 tools=None, response_schema=schema, max_tokens=max_tokens, temperature=temperature,
-                reasoning=False, openrouter_provider=CONFIG.openrouter_provider_distiller, cancel=abandoned,
-                # Temperature 0: a 500 the client retried came back as the same
-                # reply, three times on Lezione 8 (llama-server, 2026-10-12). This
-                # loop and the stage's re-ask are the retries.
-                sdk_retries=0,
-            ), float(os.getenv("DISTILLER_TIMEOUT", "300")), abandoned)
+                reasoning=False, cancel=abandoned,
+            ), distiller_timeout(), abandon=abandoned)
 
-        from litellm import InternalServerError
         try:
             resp = _once(0.0)
-        except InternalServerError as exc:
-            # llama-server b10053 500s a finished Qwen3.5 reply its chat parser
-            # cannot read ("does not match the expected peg-native format").
+        except Exception as exc:
             # At temperature 0 every retry is that reply again: Lezione 8 lost
             # the same 4 ideas twice (2026-10-12). One ask off zero is a
-            # different reply; any other 500 is the caller's, as before.
-            if "does not match the expected" not in str(exc):
+            # different reply; any other failure is the caller's, as before.
+            if not unreadable_reply(exc):
                 raise
             logger.warning("outline stage: server could not parse the reply, asking once at 0.3")
             resp = _once(0.3)
@@ -993,6 +986,16 @@ def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False,
         if resp.finish_reason == "length":
             max_tokens *= 2  # a cut JSON: the same ask with room to finish
     raise ValueError(f"outline stage returned no {'bodies' if raw else 'JSON'} after retry ({last})")
+
+
+def _stage_may_fail(exc: Exception) -> bool:
+    """A stage reply nothing could be read from, a call past its deadline, or a
+    server 500, which since 2026-10-12 includes the reply llama-server b10053
+    cannot parse: on temperature 0 it is the same on every retry, and it rolled
+    back Lezione 8 whole. What fails here costs the stage, not the lecture."""
+    from silica.model.errors import server_fault
+
+    return isinstance(exc, (ValueError, TimeoutError)) or server_fault(exc)
 
 
 def _match_bodies(reply: dict, titles: list[str],
@@ -1160,18 +1163,16 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
             f'- "{t}" (section: {section_of[t]})' for t in batch)
         if steer_context:
             user += "\n\nPREVIOUS ATTEMPT WAS REJECTED:\n" + steer_context
-        from litellm import InternalServerError
         try:
             reply = ask(bodies_prompt, user, max_tokens=12000, raw=True,
                         **({"prefix": src} if cached else {}))
-        except (ValueError, TimeoutError, InternalServerError) as exc:
+        except Exception as exc:
+            if not _stage_may_fail(exc):
+                raise
             # One batch must not take the lecture down: Lezione 8 landed 0
             # notes when a batch failed twice (2026-09-05). Its titles go to
             # the re-ask and, at worst, land as claim-only notes flagged for
             # review, which the source kept in the inbox does not.
-            # InternalServerError since 2026-10-12: llama-server b10053 500s a
-            # finished Qwen3.5 reply its chat parser cannot read, the same reply
-            # on every retry at temperature 0, and it rolled back Lezione 8 whole.
             logger.warning("outline bodies: batch of %d failed (%s); asking again for its titles", len(batch), exc)
             return {}
         bodies = _parse_bodies_text(reply["text"], batch) if "text" in reply else reply
@@ -1204,13 +1205,14 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     gaps = [] if verbatim and only_titles is None else coverage_gaps(outline, source_headings(src))
     existing = {r["title"]: r["path"] for r in vault_outline}
     if vault_outline and only_titles is None:
-        from litellm import InternalServerError
         try:
             reply = ask(STAGE_B.format(lang=language, rels=", ".join(CROSS_RELATIONS)),
                         "EXISTING NOTES:\n" + "\n".join(f"{r.get('lesson', '')} | {r['title']} | {r.get('claim', '')}" for r in vault_outline)
                         + "\n\nNEW SOURCE IDEAS:\n" + "\n".join(f"{i.title} | {i.claim}" for i in outline.ideas),
                         max_tokens=4000)
-        except (ValueError, TimeoutError, InternalServerError) as exc:
+        except Exception as exc:
+            if not _stage_may_fail(exc):
+                raise
             # The cross-lecture edges are the one optional stage: the ideas and
             # bodies above are the lecture. Qwen3.5-9B ran stage B past 30k chars
             # twice (finish=length at 4000 and 8000 tokens, 2026-10-12) and the

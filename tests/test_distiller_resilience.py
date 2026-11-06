@@ -16,9 +16,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from silica.model.llm import LLMResponse
+from silica.model.llm import LLMResponse, run_with_deadline
 from silica.kernel.prep_delegation import (
-    _call_with_deadline,
     compute_distiller_max_tokens,
     estimate_prompt_tokens,
     run_distiller,
@@ -160,7 +159,7 @@ class TestRunDistillerSalvage:
 # ---------------------------------------------------------------------------
 
 class TestRunDistillerDynamicBudget:
-    @patch("silica.model.providers.model_limits", return_value=(0, 0))
+    @patch("silica.model.limits.model_limits", return_value=(0, 0))
     @patch("silica.model.providers.get_provider")
     def test_default_ask_bounded_by_max_tokens(self, mock_get_provider, _limits, monkeypatch):
         # 2026-08-21: the "use all headroom" default is refuted — the June
@@ -181,7 +180,7 @@ class TestRunDistillerDynamicBudget:
         sent = mock_provider.call_llm.call_args.kwargs["max_tokens"]
         assert sent == 32768
 
-    @patch("silica.model.providers.model_limits", return_value=(100_000, 8_000))
+    @patch("silica.model.limits.model_limits", return_value=(100_000, 8_000))
     @patch("silica.model.providers.get_provider")
     def test_window_and_output_cap_from_provider(self, mock_get_provider, _limits, monkeypatch):
         monkeypatch.delenv("MODEL_CONTEXT_WINDOW", raising=False)
@@ -199,7 +198,7 @@ class TestRunDistillerDynamicBudget:
         # otherwise a model like OpenRouter qwen3-8b (131k ctx, 8k out) 400s.
         assert sent == 8_000
 
-    @patch("silica.model.providers.model_limits", return_value=(0, 0))
+    @patch("silica.model.limits.model_limits", return_value=(0, 0))
     @patch("silica.model.providers.get_provider")
     def test_provider_unknown_falls_back_to_default_window(self, mock_get_provider, _limits, monkeypatch):
         monkeypatch.delenv("MODEL_CONTEXT_WINDOW", raising=False)
@@ -217,7 +216,7 @@ class TestRunDistillerDynamicBudget:
         # Unknown provider: default window fallback, ask still MAX_TOKENS-bound.
         assert sent == 32768
 
-    @patch("silica.model.providers.model_limits", return_value=(999_999, 999_999))
+    @patch("silica.model.limits.model_limits", return_value=(999_999, 999_999))
     @patch("silica.model.providers.get_provider")
     def test_env_overrides_skip_provider_lookup(self, mock_get_provider, mock_limits, monkeypatch):
         monkeypatch.setenv("MODEL_CONTEXT_WINDOW", "50000")
@@ -257,13 +256,13 @@ class TestRunDistillerDynamicBudget:
 class TestWallClockDeadline:
     def test_hung_call_raises_timeout(self):
         with pytest.raises(TimeoutError, match="wall-clock deadline"):
-            _call_with_deadline(lambda: time.sleep(5), 0.05)
+            run_with_deadline(lambda: time.sleep(5), 0.05)
 
     def test_value_and_error_pass_through(self):
-        assert _call_with_deadline(lambda: 42, 1.0) == 42
+        assert run_with_deadline(lambda: 42, 1.0) == 42
 
         def boom():
             raise ValueError("upstream")
 
         with pytest.raises(ValueError, match="upstream"):
-            _call_with_deadline(boom, 1.0)
+            run_with_deadline(boom, 1.0)

@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""LLM wrapper — agentic loop calls via litellm.
+"""One model call through litellm: retries, key pools, fallback, the wall-clock
+bound, the request as each provider wants it and the reply as the agent reads it.
 
-Handles the interactive agentic loop (tool-calling, multi-turn). Provider
-selection for the Distiller's constrained decoding path is in model/providers.py
-(openai SDK directly, per ADR-0008 §M2). This module handles everything else.
+Everything that talks to a chat model ends in `call_llm`. Roles and the lanes
+that run on them are model/providers.py, above this module.
 """
 from __future__ import annotations
 
@@ -34,17 +34,13 @@ import functools
 
 logger = logging.getLogger(__name__)
 
-# What new text will cost is counted at 2 chars a token, so the estimate does
-# not come in under the request. chars // 3 was assumed to overestimate and does
-# not: Qwen3.5 tokenizes the test vault's converted lecture slides at 2.05 to
-# 2.41 chars a token, 26 of 30 notes under 3 (2026-10-01), and a request judged
-# to fit overflowed a 32k window by 820 tokens. Text under 2 chars a token (CJK,
-# minified code) can still overflow; llama.cpp's 400 then names the real count
-# and the loop resends once (loop.py). clamp_max_tokens counts input the same way.
-TEXT_CHARS_PER_TOKEN = 2
-
 from silica.config import CONFIG, hosted
 from silica.metrics import emit
+from silica.model import limits
+from silica.model.errors import shared_pool, status_of
+from silica.model.keys import key_pool, with_keys
+from silica.model.wire import text_of, to_wire
+from silica.provider_table import PROVIDERS
 
 
 @functools.cache
@@ -76,18 +72,6 @@ _COOLDOWN_CAP = 20.0   # ceiling on the floor delay
 _RATE_LIMIT_ATTEMPTS = 6  # 429s get more tries than other transients (backoff to ~1min)
 
 
-def _shared_pool(exc: BaseException) -> bool:
-    """A 429 the provider's shared capacity raised, not our key's own limit.
-
-    OpenRouter names the source (`limit_source`) in the error body. The floor
-    above paces our requests against a limit they count towards; a shared
-    pool's is every other customer's traffic, so pacing ourselves frees nothing
-    and only makes the user wait. On hosted t06 2026-10-21 the floor a failed
-    turn left behind accounts for 32 of the next turn's 96 s (ADR-0124).
-    """
-    return "upstream_provider_shared_pool" in str(exc)
-
-
 def retry_transient(fn, exceptions: tuple, attempts: int = 3, base_delay: float = 1.0, jitter: float = 0.0, cancel: threading.Event | None = None, on_retry=None, pool_attempts: int | None = None):
     """Call fn(), retrying on transient exceptions with exponential backoff.
 
@@ -110,7 +94,7 @@ def retry_transient(fn, exceptions: tuple, attempts: int = 3, base_delay: float 
     not a narration call: this helper is generic, and the one caller that
     narrates (call_llm) is the only one that knows the span it belongs to.
 
-    `pool_attempts` caps the tries on a shared-pool 429 (_shared_pool) for a
+    `pool_attempts` caps the tries on a shared-pool 429 (shared_pool) for a
     caller that has somewhere else to go: call_llm passes it while a fallback
     model is left in the chain, which answers sooner than the pool clears.
     """
@@ -126,7 +110,7 @@ def retry_transient(fn, exceptions: tuple, attempts: int = 3, base_delay: float 
             return result
         except exceptions as e:
             if getattr(e, "status_code", None) == 429:
-                if _shared_pool(e):
+                if shared_pool(e):
                     ceiling = pool_attempts or _RATE_LIMIT_ATTEMPTS
                 else:
                     _run_cooldown = min(_run_cooldown + _COOLDOWN_STEP, _COOLDOWN_CAP)
@@ -159,15 +143,6 @@ def retry_transient(fn, exceptions: tuple, attempts: int = 3, base_delay: float 
 
 # --- key pools and fallback models (ADR-0063) ----------------------------------
 
-# How long a key sits out once the endpoint blamed it. A rate limit clears in
-# about the minute _RATE_LIMIT_ATTEMPTS already backs off over, so 60 s, not
-# the hour Hermes Agent benches a key for after a second 429. An unpaid key
-# (402) does not clear by waiting: the hour Hermes uses. A refused key (401,
-# 403) gets the hour too, where Hermes waits 5 minutes: it has an OAuth token
-# to refresh first, and a static key here has nothing that could change.
-_KEY_BENCH_S = {429: 60.0, 401: 3600.0, 402: 3600.0, 403: 3600.0}
-_benched: dict[str, float] = {}   # key -> monotonic time it may serve again
-
 # A model whose endpoint failed sits behind the rest of its chain this long.
 # Without it every iteration of a turn would pay the dead endpoint's whole
 # retry budget again (three attempts, up to 130 s each on a hung socket)
@@ -185,59 +160,6 @@ _POOL_ATTEMPTS = 3
 _held: dict[str, float] = {}   # model -> monotonic time it leads its chain again
 
 
-def _status(exc: BaseException) -> int | None:
-    status = getattr(exc, "status_code", None)
-    return status if isinstance(status, int) else None
-
-
-def key_pool(model: str) -> list[str]:
-    """The keys `model` may be called with: its provider's key variable, then
-    the numbered siblings (OPENROUTER_API_KEY_2, _3, ...) up to the first gap.
-    custom/ reads SILICA_PROVIDER_API_KEY the same way. Fewer than two keys is
-    no pool, and the call goes out exactly as it did before pools."""
-    from silica.config import HOSTED_PROVIDERS
-
-    prefix = model.split("/", 1)[0]
-    if prefix == "custom":
-        env, first = "SILICA_PROVIDER_API_KEY", CONFIG.provider_api_key
-    elif prefix in HOSTED_PROVIDERS:
-        env = HOSTED_PROVIDERS[prefix][0]
-        first = os.getenv(env, "")
-    else:
-        return []
-    keys = [first]
-    n = 2
-    while sibling := os.getenv(f"{env}_{n}", ""):
-        keys.append(sibling)
-        n += 1
-    return [k for k in keys if k]
-
-
-def _with_keys(keys: list[str], kwargs: dict, call):
-    """One attempt, made with each key in turn while the endpoint blames the
-    key; any other failure, or the last key's, goes up to the retry policy.
-    Fill-first: the first healthy key serves until it is benched."""
-    if len(keys) < 2:
-        return call()
-    now = time.monotonic()
-    ready = [k for k in keys if _benched.get(k, 0.0) <= now]
-    order = ready + sorted((k for k in keys if k not in ready), key=lambda k: _benched[k])
-    last: BaseException | None = None
-    for key in order:
-        kwargs["api_key"] = key
-        try:
-            return call()
-        except Exception as e:
-            bench = _KEY_BENCH_S.get(_status(e) or 0)
-            if bench is None:
-                raise
-            _benched[key] = time.monotonic() + bench
-            logger.warning("key ...%s for %s sits out %.0fs: %s", key[-4:], kwargs["model"], bench, e)
-            last = e
-    assert last is not None
-    raise last
-
-
 def fallback_chain(model: str) -> list[str]:
     """`model`, then CONFIG.fallback_models in order; a model held after a
     failure moves behind the others until its hold expires."""
@@ -252,7 +174,7 @@ def _falls_back(exc: BaseException) -> bool:
     """The endpoint's failure, not the request's: another model may answer.
     A 400 (a malformed request, a context the window cannot hold) is the
     request's and would fail anywhere; compaction owns the window."""
-    status = _status(exc)
+    status = status_of(exc)
     if status is not None:
         return status in (401, 402, 403, 404, 408, 429) or status >= 500
     return isinstance(exc, (_litellm().Timeout, _litellm().APIConnectionError))
@@ -276,18 +198,44 @@ _LOCAL_LLM_TIMEOUT = float(os.getenv("SILICA_LLM_TIMEOUT", "130"))
 # no wall-clock number has to be guessed at all.
 
 
-def run_with_deadline(fn, timeout: float, on_timeout, *, catch: type = Exception):
+# How often a wait that can be stopped looks at its stop flag: measured 12 s from
+# a click to the stopped row while the loop waited on a whole generation
+# (ADR-0121 point 7).
+_STOP_POLL_S = 0.2
+
+
+def run_with_deadline(fn, timeout: float | None, on_timeout=None, *, catch: type = Exception,
+                      abandon: threading.Event | None = None,
+                      stop: threading.Event | None = None, on_stop=None):
     """Run fn() on a daemon thread, joining up to `timeout` seconds.
 
-    Past the deadline, raise `on_timeout()`; if fn raised (of type `catch`),
-    re-raise it on the caller thread; otherwise return fn()'s value. The only
-    wall-clock bound we control — a transport read-timeout can silently not fire
-    when the provider trickles keep-alive bytes.
+    Past the deadline, raise `on_timeout()` (TimeoutError when not given); if fn
+    raised (of type `catch`), re-raise it on the caller thread; otherwise return
+    fn()'s value. The only wall-clock bound we control: a transport read-timeout
+    can silently not fire when the provider trickles keep-alive bytes, and every
+    byte resets httpx's per-chunk read timer, so a dead upstream holds the socket
+    open forever. Only real elapsed time is trustworthy here.
 
-    ponytail: on timeout the worker thread is abandoned (daemon) — a blocked
-    C-level socket read can't be force-cancelled. Bounded by the caller's retry
-    cap / single-turn use; swap for a cancellable HTTP client if abandoned
-    threads ever pile up.
+    `stop` replaces the deadline with a flag: the wait ends with `on_stop()`
+    within _STOP_POLL_S of the flag going up, and otherwise lasts as long as fn.
+    A wait in short joins also leaves a Ctrl+C to the main thread instead of
+    trapping it in a C-level recv().
+
+    `abandon` is set on the way out, whatever the way. Without it an abandoned
+    worker keeps its own retry schedule and goes on issuing requests nobody is
+    waiting for: measured 2026-08-23 on a throttled OpenRouter pool, the deadline
+    gave up at 300s and the orphan hit its 400s per-call cap at t+400 and started
+    attempt 2/3, so the run's own dead calls were producing the 429s it was
+    retrying for. Harmless on success: the call already returned.
+
+    Daemon matters: a non-daemon orphan gets joined at interpreter shutdown,
+    hanging exit for minutes while its retries die against executors already
+    flagged shut ("cannot schedule new futures after shutdown").
+
+    shortcut: on timeout the worker thread is abandoned, as a blocked C-level
+    socket read can't be force-cancelled. Bounded by the caller's retry cap or
+    single-turn use; swap for a cancellable HTTP client at the first process seen
+    holding 50 abandoned threads.
     """
     box: dict = {}
 
@@ -306,9 +254,20 @@ def run_with_deadline(fn, timeout: float, on_timeout, *, catch: type = Exception
     th = threading.Thread(target=_work, daemon=True,
                           name=f"{threading.current_thread().name}~dl")
     th.start()
-    th.join(timeout)
-    if th.is_alive():
-        raise on_timeout()
+    try:
+        if stop is None:
+            th.join(timeout)
+            if th.is_alive():
+                raise on_timeout() if on_timeout else TimeoutError(
+                    f"model call exceeded {timeout:.0f}s wall-clock deadline")
+        else:
+            while th.is_alive():
+                th.join(_STOP_POLL_S)
+                if th.is_alive() and stop.is_set():
+                    raise on_stop()
+    finally:
+        if abandon is not None:
+            abandon.set()
     if "e" in box:
         raise box["e"]
     return box["r"]
@@ -335,8 +294,8 @@ def _bounded_stream(make_iter, per_chunk_timeout: float, model: str):
     path as a blocking next() that never returns. A per-chunk deadline catches
     that without capping a healthy long stream — the clock resets on every chunk.
 
-    ponytail: pump thread is daemon and abandoned on timeout, same trade as
-    _bounded; swap for a cancellable HTTP client if abandoned threads pile up.
+    shortcut: pump thread is daemon and abandoned on timeout, same trade and same
+    upgrade as run_with_deadline.
     """
     import queue
 
@@ -638,11 +597,14 @@ def _scope_record(prompt: int, completion: int, cost) -> None:
             counter["usd"] = (counter.get("usd") or 0.0) + float(cost)
 
 
+_MODEL_DIR = os.path.dirname(__file__)
+
+
 def _meter_site() -> str:
     f: FrameType | None = sys._getframe(2)  # skip _meter_site + _meter_record
     while f is not None:
         name = f.f_code.co_filename
-        if not (name.endswith(("llm.py", "providers.py")) or name == "<string>"):
+        if not (name.startswith(_MODEL_DIR) or name == "<string>"):
             return f"{os.path.basename(name)}:{f.f_code.co_name}"
         f = f.f_back
     return "?"
@@ -697,9 +659,8 @@ def _keep_openrouter_cache_markers(litellm) -> None:
     OpenrouterConfig._supports_cache_control_in_content = supports  # type: ignore[method-assign]
 
 
-# Routes whose server renders the conversation with the model's own Jinja chat
-# template (llama-server, LM Studio, vLLM behind `custom`). Qwen3.5's template
-# raises "System message must be at the beginning" on any system message past
+# The routes with `jinja_template` in provider_table render the conversation
+# with the model's own chat template. Qwen3.5's template raises "System message must be at the beginning" on any system message past
 # index 0 (measured 2026-09-27 on llama-server), and the interactive loop sends a
 # leading block of four (cli._fresh_messages) plus mid-run notes (agent/loop.py).
 # The same template also expects the reasoning of the turn in flight back:
@@ -710,7 +671,6 @@ def _keep_openrouter_cache_markers(litellm) -> None:
 # a local server bills nothing for it.
 # Hosted routes take them as they are and carry cache markers on them, and
 # Ollama renders with its own Go templates, so neither is rewritten.
-_JINJA_ROUTES = ("custom/", "lmstudio/")
 
 
 def _one_leading_system(messages: list[dict]) -> list[dict]:
@@ -724,16 +684,10 @@ def _one_leading_system(messages: list[dict]) -> list[dict]:
     out: list[dict] = []
     if head:
         out.append({"role": "system", "content": "\n\n".join(
-            _text_of(m.get("content")) for m in messages[:head])})
+            text_of(m.get("content")) for m in messages[:head])})
     out += [{**m, "role": "user"} if m.get("role") == "system" else m
             for m in messages[head:]]
     return out
-
-
-def _text_of(content) -> str:
-    if isinstance(content, str):
-        return content
-    return "".join(p.get("text", "") for p in content or [] if isinstance(p, dict))
 
 
 def _cache_marked(msg: dict) -> dict:
@@ -1017,15 +971,13 @@ def _request_chars(messages: list) -> int:
     """The request's size as the output clamp should read it: the serialized
     messages, with each inline image counted as `_IMAGE_TOKENS` instead of its
     data URL's length."""
-    from silica.model.llm import TEXT_CHARS_PER_TOKEN
-
     chars = len(str(messages))
     for m in messages:
         parts = m.get("content") if isinstance(m, dict) else None
         for part in parts if isinstance(parts, list) else ():
             url = (part.get("image_url") or {}).get("url", "") if isinstance(part, dict) else ""
             if isinstance(url, str) and url.startswith("data:"):
-                chars += _IMAGE_TOKENS * TEXT_CHARS_PER_TOKEN - len(url)
+                chars += _IMAGE_TOKENS * limits.TEXT_CHARS_PER_TOKEN - len(url)
     return max(chars, 0)
 
 
@@ -1051,12 +1003,11 @@ def call_llm(
     batch entry points pay one dict lookup and nothing else.
     """
     from silica.obs.narration import NARRATOR
-    from silica.model.providers import _to_wire  # lazy: providers.py imports this module
     import uuid as _uuid
     cid = f"c-{_uuid.uuid4().hex[:8]}"
     t0 = time.time()
     trace = _trace_on()
-    wire = [_to_wire(m) for m in messages] if trace else None
+    wire = [to_wire(m) for m in messages] if trace else None
     retries = 0
     chain = fallback_chain(model)
     used = chain[0]
@@ -1099,7 +1050,7 @@ def call_llm(
                         or (cancel is not None and cancel.is_set())):
                     raise
                 _held[used] = time.monotonic() + (
-                    _POOL_HOLD_S if _shared_pool(e) else _FALLBACK_HOLD_S)
+                    _POOL_HOLD_S if shared_pool(e) else _FALLBACK_HOLD_S)
                 logger.warning("llm %s failed (%s); trying %s", used, str(e)[:120], chain[n + 1])
                 NARRATOR.narrate(
                     "call", "running", f"llm {used} failed, trying {chain[n + 1]}: {str(e)[:80]}",
@@ -1204,20 +1155,21 @@ def _call_llm(
         tool_count = len(tools) if tools else 0
         logger.info("LLM call: model=%s | msg=%d | tools=%d", model, len(messages), tool_count)
 
-    # lazy: providers.py imports this module
-    from silica.model.providers import PROVIDER_PRESETS, clamp_max_tokens, ollama_num_ctx, _to_wire
+    # Bare ids route nowhere of ours: only `prefix/` names a provider.
+    prefix, slash, bare_model = model.partition("/")
+    row = PROVIDERS.get(prefix) if slash else None
 
     # The wire boundary: strips the internal `origin` field and renders the
     # <silica-cli> marker. The interactive loop calls this module directly, so
     # without it `origin` reached the provider verbatim (litellm forwards unknown
     # message keys) and the CLI marker was never applied on the chat path.
     # Idempotent, so the provider paths that already ran it are unaffected.
-    jinja = model.startswith(_JINJA_ROUTES)
+    jinja = row is not None and row.jinja_template
     if jinja:
         messages = [{**m, "reasoning_content": m["silica_reasoning"]}
                     if m.get("role") == "assistant" and m.get("silica_reasoning") else m
                     for m in messages]
-    messages = [_to_wire(m) for m in messages]
+    messages = [to_wire(m) for m in messages]
     if jinja:
         messages = _one_leading_system(messages)
 
@@ -1228,7 +1180,7 @@ def _call_llm(
     kwargs: dict = {
         "model": model,
         "messages": _with_prompt_cache(model, messages),
-        "max_tokens": clamp_max_tokens(model.split("/", 1)[0], model, max_tokens, input_chars),
+        "max_tokens": limits.clamp_max_tokens(prefix, model, max_tokens, input_chars),
     }
     if sdk_retries is not None:
         # The OpenAI client retries every 5xx twice on its own, below
@@ -1263,30 +1215,30 @@ def _call_llm(
         if rt:
             kwargs["extra_body"] = rt
 
-    # Ollama: route via litellm's `ollama_chat/` provider (/api/chat — native
-    # tool calls + chat templating) rather than `ollama/` (/api/generate, which
-    # emulates tools by injecting JSON into the prompt). This is a tool-heavy
-    # agentic loop, so the chat endpoint is the correct one. Users keep writing
-    # `ollama/` in config; clamp_max_tokens above already ran on that prefix.
+    # A prefix litellm has no good route for goes out under its `wire_prefix`.
+    # Users keep writing `ollama/` in config; clamp_max_tokens above already ran
+    # on that prefix.
+    if row is not None and row.wire_prefix:
+        kwargs["model"] = f"{row.wire_prefix}/{bare_model}"
+    if row is not None and row.wire_prefix == "openai":
+        # litellm's generic route knows no endpoint of its own: the row's, or for
+        # `custom` the user's.
+        kwargs["api_base"] = limits.base_url(prefix) or CONFIG.provider_base_url or None
+        kwargs["api_key"] = row.fixed_key or CONFIG.provider_api_key or "dummy-key"
+
     if model.startswith("ollama/"):
-        kwargs["model"] = "ollama_chat/" + model.split("/", 1)[1]
         # Without this the model loads at Ollama's 4096-token default and the
         # ~8k-token toolset is truncated away in silence, so the model answers in
         # prose instead of calling a tool (measured: 2051 of 6645 prompt tokens
         # kept, zero tool calls at 4096; the same request calls the right tool at
         # 8192). /api/chat is the only Ollama endpoint that accepts this.
-        kwargs["num_ctx"] = ollama_num_ctx()
+        kwargs["num_ctx"] = limits.ollama_num_ctx()
         # litellm resolves Ollama's endpoint from OLLAMA_API_BASE alone, so
         # without this the chat path talks to localhost while doctor and
         # model_limits honour OLLAMA_HOST and talk to the box the user configured.
-        kwargs["api_base"] = PROVIDER_PRESETS["ollama"]["base_url"].removesuffix("/v1")
+        kwargs["api_base"] = limits.base_url("ollama").removesuffix("/v1")
 
-    # Custom OpenAI-compatible endpoint: litellm has no `custom/` provider, so
-    # route via its generic openai/ path with an explicit api_base/api_key.
     if model.startswith("custom/"):
-        kwargs["model"] = "openai/" + model.split("/", 1)[1]
-        kwargs["api_base"] = CONFIG.provider_base_url or None
-        kwargs["api_key"] = CONFIG.provider_api_key or "dummy-key"
         if reasoning is False and model not in _REASONING_MANDATORY:
             # The openrouter knob above never reached a local server, so a
             # hybrid model thought through the whole budget and answered "":
@@ -1304,16 +1256,6 @@ def _call_llm(
                 # top-level, llama.cpp, vLLM and SGLang read it from the body.
                 kwargs.setdefault("extra_body", {})["top_k"] = card.pop("top_k")
                 kwargs.update(card)
-
-    # LM Studio: litellm's registry has no `lmstudio` (BadRequestError), and its
-    # `lm_studio` dialect resolves api_base only from LM_STUDIO_API_BASE — no
-    # localhost default. Same generic openai/ route, pinned to the preset
-    # endpoint the OpenAI-SDK path (get_provider) already uses.
-    if model.startswith("lmstudio/"):
-        preset = PROVIDER_PRESETS["lmstudio"]
-        kwargs["model"] = "openai/" + model.split("/", 1)[1]
-        kwargs["api_base"] = preset["base_url"]
-        kwargs["api_key"] = preset["api_key"]
 
     if api_key:
         kwargs["api_key"] = api_key  # after the prefix blocks, so an override wins
@@ -1352,7 +1294,7 @@ def _call_llm(
         response = _without_refused_reasoning(
             model, kwargs,
             lambda: retry_transient(
-                lambda: _with_keys(keys, kwargs, lambda: _bounded(
+                lambda: with_keys(keys, kwargs, lambda: _bounded(
                     lambda: lm.completion(**kwargs), _LOCAL_LLM_TIMEOUT, model)),
                 _TRANSIENT, cancel=cancel, on_retry=on_retry, pool_attempts=pool_attempts))
     else:
@@ -1395,7 +1337,7 @@ def _call_llm(
 
         response = _without_refused_reasoning(
             model, kwargs, lambda: retry_transient(
-                lambda: _with_keys(keys, kwargs, _stream_once),
+                lambda: with_keys(keys, kwargs, _stream_once),
                 _TRANSIENT, cancel=cancel, on_retry=on_retry, pool_attempts=pool_attempts))
         if response is None:
             raise RuntimeError(f"LLM stream from {model} produced no chunks")
@@ -1427,8 +1369,8 @@ def _call_llm(
     # name is re-sent on every later iteration of the tool loop (litellm forwards
     # it verbatim, and ollama_chat maps it to `thinking`), which re-bills a
     # multi-thousand-token trace once per iteration for nothing — no provider but
-    # Anthropic consumes it, and Anthropic wants thinking_blocks. `_to_wire`
-    # strips this one at the wire boundary, so it costs the provider nothing and
+    # Anthropic consumes it, and Anthropic wants thinking_blocks. `to_wire`
+    # leaves this one out at the wire boundary, so it costs the provider nothing and
     # a reopened chat can still show the thinking that produced the answer.
     if trace:
         assistant_msg["silica_reasoning"] = trace

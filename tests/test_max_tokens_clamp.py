@@ -3,44 +3,44 @@
 
 """clamp_max_tokens: output budget fits both the out_cap and the window."""
 
-from silica.model import providers
+from silica.model import limits
 
 
 def test_default_is_32k(monkeypatch):
     # 32768 keeps the OpenRouter endpoint pool wide (256k was measured bad).
     monkeypatch.delenv("MAX_TOKENS", raising=False)
-    monkeypatch.setattr(providers, "model_limits", lambda p, m: (0, 0))
-    assert providers.clamp_max_tokens("", "gpt-4", None) == 32768
+    monkeypatch.setattr(limits, "model_limits", lambda p, m: (0, 0))
+    assert limits.clamp_max_tokens("", "gpt-4", None) == 32768
 
 
 def test_env_overrides_default(monkeypatch):
     monkeypatch.setenv("MAX_TOKENS", "8192")
-    monkeypatch.setattr(providers, "model_limits", lambda p, m: (0, 0))
-    assert providers.clamp_max_tokens("", "gpt-4", None) == 8192
+    monkeypatch.setattr(limits, "model_limits", lambda p, m: (0, 0))
+    assert limits.clamp_max_tokens("", "gpt-4", None) == 8192
 
 
 def test_default_clamped_to_out_cap(monkeypatch):
     monkeypatch.delenv("MAX_TOKENS", raising=False)
-    monkeypatch.setattr(providers, "model_limits", lambda p, m: (262144, 32000))
-    assert providers.clamp_max_tokens("openrouter", "anthropic/claude-sonnet-5", None) == 32000
+    monkeypatch.setattr(limits, "model_limits", lambda p, m: (262144, 32000))
+    assert limits.clamp_max_tokens("openrouter", "anthropic/claude-sonnet-5", None) == 32000
 
 
 def test_explicit_below_cap_untouched(monkeypatch):
-    monkeypatch.setattr(providers, "model_limits", lambda p, m: (262144, 128000))
-    assert providers.clamp_max_tokens("openrouter", "anthropic/claude-sonnet-5", 4096) == 4096
+    monkeypatch.setattr(limits, "model_limits", lambda p, m: (262144, 128000))
+    assert limits.clamp_max_tokens("openrouter", "anthropic/claude-sonnet-5", 4096) == 4096
 
 
 def test_explicit_above_cap_clamped(monkeypatch):
-    monkeypatch.setattr(providers, "model_limits", lambda p, m: (262144, 128000))
-    assert providers.clamp_max_tokens("openrouter", "anthropic/claude-sonnet-5", 300000) == 128000
+    monkeypatch.setattr(limits, "model_limits", lambda p, m: (262144, 128000))
+    assert limits.clamp_max_tokens("openrouter", "anthropic/claude-sonnet-5", 300000) == 128000
 
 
 def test_window_shrinks_budget(monkeypatch):
     # 8k window, input estimated at 6000 tokens (12000 chars // 2) → 2192 left
-    monkeypatch.setattr(providers, "model_limits", lambda p, m: (8192, 0))
-    assert providers.clamp_max_tokens("ollama", "llama3", 65536, input_chars=12000) == 2192
+    monkeypatch.setattr(limits, "model_limits", lambda p, m: (8192, 0))
+    assert limits.clamp_max_tokens("ollama", "llama3", 65536, input_chars=12000) == 2192
 
 
 def test_window_floor_when_input_fills_it(monkeypatch):
-    monkeypatch.setattr(providers, "model_limits", lambda p, m: (8192, 0))
-    assert providers.clamp_max_tokens("ollama", "llama3", 65536, input_chars=100000) == 1024
+    monkeypatch.setattr(limits, "model_limits", lambda p, m: (8192, 0))
+    assert limits.clamp_max_tokens("ollama", "llama3", 65536, input_chars=100000) == 1024

@@ -69,20 +69,12 @@ _VERDICT_RE = re.compile(r"^\s*(\d+)\s*[:.)]\s*(yes|no)\b", re.M | re.I)
 
 
 def _llm(prompt: str, max_tokens: int) -> tuple[str, str | None]:
-    from silica.model.llm import call_llm
-    from silica.config import CONFIG
+    from silica.model.ask import ask_once
 
-    # temperature=0: factscore-judge parity. reasoning=False: both calls here
-    # are mechanical extraction, and a hybrid model bills its thinking against
-    # max_tokens — with thinking on, a 31KB source spent all 3864 completion
-    # tokens on the trace and returned an empty reply (the "parsed 0 facts"
-    # and the 45/45 / 92/92 judge failures of run 5e88feb0). temperature=0
-    # alone never fixed it: whether the model thinks is the router's call, not
-    # the temperature's.
-    # The judge model when one is configured (spec M7): the coverage verdict
-    # then comes from a model that did not write the notes it grades.
-    resp = call_llm(CONFIG.judge_model or CONFIG.model, [{"role": "user", "content": prompt}],
-                    max_tokens=max_tokens, temperature=0, reasoning=False)
+    # temperature=0: factscore-judge parity. The judge model when one is
+    # configured (spec M7): the coverage verdict then comes from a model that
+    # did not write the notes it grades.
+    resp = ask_once(prompt, max_tokens=max_tokens, role="judge")
     if not resp.text:
         logger.warning("residue: empty reply (finish=%s, completion=%s tokens, "
                        "%d chars of reasoning, budget %d)", resp.finish_reason,

@@ -51,7 +51,6 @@ class TestProviders(unittest.TestCase):
         # `custom/` is the prefix llm.call_llm turns into openai/ + api_base
         # from provider_base_url, so it must survive.
         self.assertEqual(provider.model, "custom/my-model")
-        self.assertIn("localhost:8000", provider.base_url)
 
     def test_get_provider_leaves_unknown_prefix_off(self):
         """A provider outside PROVIDER_PREFIXES must not be prefixed onto the model.
@@ -93,7 +92,6 @@ class TestProviders(unittest.TestCase):
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "or-key"}):
             provider = get_provider(config_fallback, role="worker")
             self.assertEqual(provider.model, "openrouter/or-model")
-            self.assertIn("openrouter.ai", provider.base_url)
             # No override: litellm resolves OPENROUTER_API_KEY itself.
             self.assertEqual(provider.api_key, "")
 
@@ -102,7 +100,6 @@ class TestProviders(unittest.TestCase):
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "worker-or-key"}):
             provider = get_provider(config_worker_or, role="worker")
             self.assertEqual(provider.model, "openrouter/worker-or-model")
-            self.assertIn("openrouter.ai", provider.base_url)
 
         # 3. Worker explicit api-key override — the one case that must reach the
         # wire as an explicit credential, since litellm cannot know about it.
@@ -113,7 +110,6 @@ class TestProviders(unittest.TestCase):
         )
         provider = get_provider(config_worker_override, role="worker")
         self.assertEqual(provider.model, "openrouter/worker-or-model")
-        self.assertIn("openrouter.ai", provider.base_url)
         self.assertEqual(provider.api_key, "custom-key")
 
 
@@ -132,14 +128,12 @@ class TestProviders(unittest.TestCase):
                                usage={"prompt_tokens": 7})
 
         with patch.object(llm_mod, "call_llm", fake_call_llm):
-            provider = Provider(base_url="http://dummy", api_key="KEY",
-                                model="openrouter/vendor/m")
+            provider = Provider("openrouter/vendor/m", "KEY", openrouter_pin="together")
             resp = provider.call_llm(
                 messages=[{"role": "user", "content": "hi"}],
                 tools=[{"type": "function"}],
                 response_schema=SchemaModel,
                 max_tokens=512,
-                openrouter_provider="together",
             )
 
         self.assertEqual(captured["model"], "openrouter/vendor/m")
@@ -169,7 +163,7 @@ class TestProviders(unittest.TestCase):
                                assistant_message={"role": "assistant"}, usage={})
 
         with patch.object(llm_mod, "call_llm", fake_call_llm):
-            Provider(base_url="http://dummy", api_key="", model="lmstudio/m").call_llm(
+            Provider("lmstudio/m").call_llm(
                 messages=[{"role": "user", "content": "hi"}])
         self.assertIsNone(captured["api_key"])
 
@@ -185,7 +179,7 @@ class TestProviders(unittest.TestCase):
                                assistant_message={"role": "assistant"}, usage={})
 
         with patch.object(llm_mod, "call_llm", fake_call_llm):
-            Provider(base_url="http://d", api_key="", model="lmstudio/m").call_llm(
+            Provider("lmstudio/m").call_llm(
                 messages=[{"role": "user", "content": "hi"}])
         self.assertIsNone(captured["temperature"])
 
@@ -197,6 +191,14 @@ def test_presets_are_a_subset_of_known_prefixes():
     from silica.config import PROVIDER_PREFIXES
 
     assert set(PROVIDER_PRESETS) <= PROVIDER_PREFIXES
+
+
+def test_a_hosted_row_carries_everything_its_readers_need():
+    """The wizard and the doctor read the row; a hosted provider missing a key
+    variable, an endpoint or a model would fail there and not here."""
+    from silica.provider_table import HOSTED
+
+    assert HOSTED and all(row.key_env and row.base_url and row.models for row in HOSTED.values())
 
 
 def test_call_llm_custom_routes_via_openai(monkeypatch):
@@ -244,7 +246,7 @@ def test_call_llm_lmstudio_routes_via_openai(monkeypatch):
     localhost default — so the generic openai/ route with the preset URL is
     the only self-contained path."""
     from silica.model import llm
-    from silica.model.providers import PROVIDER_PRESETS
+    from silica.provider_table import PROVIDERS
 
     captured: dict = {}
 
@@ -272,15 +274,15 @@ def test_call_llm_lmstudio_routes_via_openai(monkeypatch):
     resp = llm.call_llm("lmstudio/qwen3-30b", [{"role": "user", "content": "hi"}])
 
     assert captured["model"] == "openai/qwen3-30b"
-    assert captured["api_base"] == PROVIDER_PRESETS["lmstudio"]["base_url"]
-    assert captured["api_key"] == PROVIDER_PRESETS["lmstudio"]["api_key"]
+    assert captured["api_base"] == PROVIDERS["lmstudio"].base_url
+    assert captured["api_key"] == PROVIDERS["lmstudio"].fixed_key
     assert resp.text == "ok"
 
 
 def test_call_llm_ollama_routes_via_ollama_chat(monkeypatch):
     """An ollama/ model reaches litellm as ollama_chat/<id> so tool calls use
     /api/chat (native) rather than /api/generate (prompt-emulated)."""
-    from silica.model import llm, providers
+    from silica.model import limits, llm
 
     captured: dict = {}
 
@@ -305,13 +307,12 @@ def test_call_llm_ollama_routes_via_ollama_chat(monkeypatch):
 
     monkeypatch.setattr(llm._litellm(), "completion", fake_completion)
     # Don't let clamp_max_tokens probe a live Ollama during the test.
-    monkeypatch.setattr(providers, "model_limits", lambda p, m: (0, 0))
+    monkeypatch.setattr(limits, "model_limits", lambda p, m: (0, 0))
     monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
-    # The preset is the single endpoint authority (doctor and model_limits read
-    # the same one, resolved from OLLAMA_HOST at import). Patching it here proves
-    # the chat path follows it instead of litellm's hardcoded localhost.
-    monkeypatch.setitem(providers.PROVIDER_PRESETS["ollama"], "base_url",
-                        "http://gpu-box:11500/v1")
+    # limits.base_url is the single endpoint authority (doctor and model_limits
+    # read the same one, resolved from OLLAMA_HOST at import). Patching it here
+    # proves the chat path follows it instead of litellm's hardcoded localhost.
+    monkeypatch.setattr(limits, "_OLLAMA_BASE", "http://gpu-box:11500/v1")
 
     llm.call_llm("ollama/llama3.2:3b", [{"role": "user", "content": "hi"}])
 
@@ -376,7 +377,7 @@ def test_get_provider_ollama_avoids_the_v1_endpoint(monkeypatch):
     ],
 )
 def test_ollama_base_url_honours_ollama_host(env, expected, monkeypatch):
-    from silica.model.providers import _ollama_base_url
+    from silica.model.limits import _ollama_base_url
 
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     if env is not None:
@@ -545,7 +546,7 @@ class ProviderReasoningForwardingTests(unittest.TestCase):
                                assistant_message={"role": "assistant"}, usage={})
 
         with patch.object(llm_mod, "call_llm", fake_call_llm):
-            Provider(base_url="http://dummy", api_key="", model="openrouter/v/m").call_llm(
+            Provider("openrouter/v/m").call_llm(
                 messages=[{"role": "user", "content": "judge"}],
                 reasoning=False,
             )
@@ -565,7 +566,7 @@ class ProviderReasoningForwardingTests(unittest.TestCase):
                                assistant_message={"role": "assistant"}, usage={})
 
         with patch.object(llm_mod, "call_llm", fake_call_llm):
-            Provider(base_url="http://dummy", api_key="", model="openrouter/v/m").call_llm(
+            Provider("openrouter/v/m").call_llm(
                 messages=[{"role": "user", "content": "x"}],
             )
         self.assertIsNone(captured["reasoning"])
@@ -627,3 +628,42 @@ def test_embedder_read_timeout_comes_from_config(monkeypatch):
     # compose passes `${SILICA_EMBEDDING_TIMEOUT:-}`: unset there is "" here.
     monkeypatch.setenv("SILICA_EMBEDDING_TIMEOUT", "")
     assert get_embedder(SilicaConfig()).client.timeout.read == 60.0
+
+
+def test_a_role_runs_on_its_own_model_without_a_provider_beside_it():
+    """A worker or judge model alone used to be ignored by get_provider and obeyed
+    by run_worker, residue and grade, so one setting ran two models: Settings
+    writes SILICA_WORKER_MODEL alone and says it is used."""
+    from types import SimpleNamespace
+
+    from silica.model.providers import resolve_role
+
+    cfg = SimpleNamespace(provider="lmstudio", model="chat", worker_api_key="wk",
+                          worker_model="openrouter/w", worker_provider=None,
+                          judge_model="openrouter/j", judge_provider=None)
+    assert resolve_role("worker", cfg) == ("openrouter/w", "wk")
+    assert get_provider(cfg, role="judge").model == "openrouter/j"
+    assert resolve_role("escalation", cfg) == ("lmstudio/chat", "")
+
+
+def test_a_bare_role_model_with_no_provider_stays_on_the_router():
+    """It names no endpoint, so litellm would refuse the call: before the role
+    resolver this config ran on the router, and it must not start failing."""
+    from types import SimpleNamespace
+
+    cfg = SimpleNamespace(provider="openrouter", model="openrouter/chat", worker_api_key="",
+                          worker_model="qwen3", worker_provider=None,
+                          judge_model="qwen3", judge_provider=None)
+    assert get_provider(cfg, role="worker").model == "openrouter/chat"
+    assert get_provider(cfg, role="judge").model == "openrouter/chat"
+    cfg.worker_provider = "vllm"  # a named provider keeps the id, as it always did
+    assert get_provider(cfg, role="worker").model == "qwen3"
+
+
+def test_the_worker_key_stays_with_the_worker_model():
+    from types import SimpleNamespace
+
+    from silica.model.providers import resolve_role
+
+    cfg = SimpleNamespace(provider="openrouter", model="chat", worker_api_key="wk", worker_model="")
+    assert resolve_role("worker", cfg) == ("openrouter/chat", "")

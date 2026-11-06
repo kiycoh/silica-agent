@@ -189,9 +189,9 @@ def test_the_taint_outlives_the_turn_that_read_the_note(note, monkeypatch):
 
 
 def test_the_taint_mark_never_reaches_the_provider():
-    from silica.model.providers import _to_wire
+    from silica.model.wire import to_wire
 
-    wire = _to_wire({"role": "tool", "tool_call_id": "c", "content": "{}",
+    wire = to_wire({"role": "tool", "tool_call_id": "c", "content": "{}",
                      "silica_taint": "the mail note x.md"})
     assert "silica_taint" not in wire
 

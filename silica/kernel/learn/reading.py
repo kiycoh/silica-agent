@@ -415,15 +415,13 @@ def _lede(path: str) -> str:
 
 
 def _ask(prompt: str, max_tokens: int) -> str:
-    from silica.model.llm import call_llm
-    from silica.config import CONFIG
+    from silica.model.ask import ask_once
 
     # A cut reply parses as a finished card without its question, so it is never
     # kept: the same ask with room to finish, as the outline's stages do, then the
     # card stays waiting and says why, and the cards already written stay.
     for budget in (max_tokens, max_tokens * 2):
-        resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=budget,
-                        temperature=0.2, reasoning=False)
+        resp = ask_once(prompt, max_tokens=budget, temperature=0.2)
         if resp.finish_reason != "length":
             return resp.text or ""
     raise ValueError(f"the model reached its output limit at {budget} tokens")

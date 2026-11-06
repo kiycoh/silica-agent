@@ -202,18 +202,15 @@ def read_image(path: Path, language: str, *, ask: Callable[[list[dict]], str],
     Raises whatever `ask` raises: the caller decides whether a refused call
     means "no vision here" (stop) or "this image" (skip). A PDF's page is
     not read here: convert.py transcribes it as markdown (`PAGE_PROMPT`)."""
-    from silica.kernel.text.sanitize import parse_json
+    from silica.model.reply import parse_reply
     if path.suffix.lower() not in _MIME:
         return None
     reply = ask([{"role": "user", "content": [
         image_part(path), {"type": "text", "text": prompt.format(language=language)},
     ]}])
-    try:
-        parsed, _ = parse_json(reply, strict=False)
-    except Exception:
-        # A reply that is not JSON is a reading we cannot store; the image
-        # stays unread and the next /embed asks again.
-        return None
+    # A reply that is not JSON is a reading we cannot store; the image stays
+    # unread and the next /embed asks again.
+    parsed = parse_reply(reply)
     if not isinstance(parsed, dict) or not (parsed.get("description") or parsed.get("text")):
         return None
     return {"kind": str(parsed.get("kind") or "").strip(),

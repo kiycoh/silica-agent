@@ -22,7 +22,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Callable, Any
 import concurrent.futures as _cf
 import contextvars
-import re
 import threading
 import time
 import logging
@@ -42,7 +41,8 @@ from silica.obs.events import (
     ThinkingEndEvent,
     LLMStreamEvent,
 )
-from silica.model.llm import call_llm
+from silica.model.errors import context_overflow
+from silica.model.llm import call_llm, run_with_deadline
 from silica.obs import narration as _narr_mod
 from silica.agent.compaction import (
     dedup_recall_excerpts,
@@ -52,9 +52,11 @@ from silica.agent.compaction import (
     eager_stub,
     fit_window,
 )
-from silica.model.llm import TEXT_CHARS_PER_TOKEN
+from silica.model.limits import ROUGH_CHARS_PER_TOKEN, TEXT_CHARS_PER_TOKEN
 from silica.agent import read_scope
 from silica.agent.relevance import compact_by_relevance
+from silica.agent.sentinels import CANCELLED, MAX_ITERATIONS, is_sentinel
+from silica.agent.sentinels import EMPTY_COMPLETION as _EMPTY_COMPLETION
 from silica.tools import user_memory as memory_gate
 from silica.config import CONFIG
 from silica.model.concurrency import worker_slot
@@ -107,6 +109,10 @@ ToolProgressCallback = Callable[[RenderEvent], None] | None
 # a budget line on every iteration is noise the model learns to skip, and the
 # number only changes the right move once finishing IS the right move.
 BUDGET_NOTICE_AT = 2
+# Iterations of a turn no constraint capped: the hard safety net, lowered from 50.
+# The lanes that hold a turn tighter name their own beside their reasons
+# (constraints, connectors.mcp_tools, profiles, ANNEAL_STEER_ITERATIONS).
+DEFAULT_MAX_ITERATIONS = 20
 # Prompt tokens one turn may spend across its LLM calls before it lands with
 # the tool-less final turn. The iteration cap alone let a factual question
 # spend 300k tokens re-reading one lecture (12 of 26 live runs, 2026-09-22);
@@ -116,14 +122,10 @@ TURN_PROMPT_BUDGET = 400_000
 # The request goes out at most this full: the rest is the answer's room and the
 # estimate's slack. llama.cpp rejects a prompt over n_ctx outright.
 WINDOW_FILL = 0.9
-# That rejection names both counts. The loop collapses reads to fit the real
-# count and resends once, so an estimate that came in low (text under 2 chars a
-# token, compaction.TEXT_CHARS_PER_TOKEN) costs a stub instead of the turn.
-# ponytail: llama.cpp's wording only; LM Studio and vLLM word an overflow their
-# own way and still raise. Add a pattern the first time one shows up in a log.
-_LLAMA_OVERFLOW = re.compile(
-    r"request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)"
-)
+# That rejection names both counts (errors.context_overflow). The loop collapses
+# reads to fit the real count and resends once, so an estimate that came in low
+# (text under 2 chars a token, limits.TEXT_CHARS_PER_TOKEN) costs a stub instead
+# of the turn.
 # A note read this turn that will not fit is served as its passages densest in
 # the words of the read's query, or of the request when it gave none, instead
 # of a stub naming a re-read that cannot fit either (compaction.fit_window).
@@ -153,12 +155,6 @@ def _fit_shrink(name: str, arguments: str, body: str) -> str | None:
         # the stub the caller falls back to is what the fit wrote before.
         logger.warning("fit narrowing failed for %s (%s): stubbed", args["name"], exc)
         return None
-
-# What a turn that produced neither text nor a tool call returns. A sentinel and
-# not "": every caller gates its output on the returned string being truthy, so
-# an empty return renders as silence and the user cannot tell a broken provider
-# call from a turn that never ran.
-_EMPTY_COMPLETION = "(silica: the model returned an empty response)"
 
 _FINAL_TURN_INSTRUCTION = (
     "The tool phase of this turn is over and no tools are available now. "
@@ -425,8 +421,8 @@ def run_agent(
     max_iterations = (
         constraints.max_iterations
         if (constraints is not None and constraints.max_iterations is not None)
-        else 20
-    )  # Hard safety cap lowered from 50
+        else DEFAULT_MAX_ITERATIONS
+    )
 
     # Track consecutive failures for the same (tool_name, args) pair
     # Key: (tool_name, args_json_string)
@@ -496,37 +492,38 @@ def run_agent(
         _llm_kwargs["on_delta"] = _stream_delta
 
     def _interruptible_llm(kwargs: dict):
-        """One call_llm on a *daemon* thread — see the comment in the loop
-        body for why (Ctrl+C delivery, no shutdown join, retry abandonment).
-        Caller clears `_abandon` first; this always sets it on the way out so
-        an orphaned worker stops retrying and streaming."""
-        _future: _cf.Future = _cf.Future()
-
+        """One call_llm off the loop's thread, so a Ctrl+C reaches the turn and a
+        Stop is seen within 0.2 s and not when the model finishes. Caller clears
+        `_abandon` first; leaving sets it, which ends the stream at its next
+        chunk and stops an orphaned worker retrying. sync litellm can't abort
+        the in-flight HTTP request: best we can do is stop waiting and stop
+        retrying."""
+        # A named frame and not a lambda: it is the token meter's call-site label
+        # for the loop, and the hosted llm_call lines carry it.
         def _llm_worker(k=dict(kwargs)):
-            try:
-                _future.set_result(call_llm(effective_model, messages, **k))
-            except BaseException as e:
-                _future.set_exception(e)
+            return call_llm(effective_model, messages, **k)
 
-        threading.Thread(target=_llm_worker, daemon=True, name="llm-call").start()
-        try:
-            # In slices, so a Stop is seen within 0.2 s and not when the model
-            # finishes: measured 12 s from the click to the stopped row while
-            # this waited on the whole generation (ADR-0121 point 7). Leaving
-            # sets `_abandon`, which ends the stream at its next chunk.
-            while True:
-                try:
-                    return _future.result(timeout=0.2)
-                except _cf.TimeoutError:
-                    if cancel_token is not None and cancel_token.is_set():
-                        raise _Stopped from None
-        finally:
-            _abandon.set()
+        return run_with_deadline(
+            _llm_worker, None, catch=BaseException, abandon=_abandon,
+            stop=cancel_token if cancel_token is not None else threading.Event(), on_stop=_Stopped)
+
+    def _reask_without_reasoning(reply, kwargs: dict):
+        """`reply`, or when the answer went into the reasoning and the reply came
+        back empty, the same call once more with reasoning off, the knob V4
+        honours (llm.py). Seen on hosted t06's landing (2026-10-22), 2.8k chars
+        of answer there under "maximum iterations", and in a chapter rework
+        probe's last step at 64k the same night. A tool call counts only where
+        tools were on offer: the landing turn has none to run."""
+        if ((reply.tool_calls and kwargs.get("tools")) or (reply.text or "").strip()
+                or not (reply.reasoning or "").strip()):
+            return reply
+        _abandon.clear()
+        return _interruptible_llm({**kwargs, "reasoning": False})
 
     while iteration < max_iterations:
         if cancel_token is not None and cancel_token.is_set():
             logger.info("Agent loop cancelled at iteration %d", iteration)
-            return "(silica: cancelled)"
+            return CANCELLED
         iteration += 1
         logger.debug("Agent loop iteration %d", iteration)
 
@@ -550,17 +547,6 @@ def run_agent(
 
         _emit(ThinkingStartEvent(iteration=iteration))
         try:
-            # Run the (synchronous, potentially slow) LLM call on a *daemon*
-            # thread so a Ctrl+C on the main thread raises KeyboardInterrupt out
-            # of _future.result() instead of being trapped in a C-level network
-            # recv(). Daemon matters: a non-daemon orphan (the old throwaway
-            # ThreadPoolExecutor worker) gets joined at interpreter shutdown,
-            # hanging exit for minutes while its retries die against executors
-            # already flagged shut ("cannot schedule new futures after shutdown").
-            # The finally sets `_abandon` so retry_transient stops rescheduling
-            # once nobody is waiting (harmless on success: the call already
-            # returned). ponytail: sync litellm can't abort the in-flight HTTP
-            # request — best we can do is stop waiting and stop retrying.
             slot = nullcontext() if _interactive else worker_slot()
             with slot:
                 _abandon.clear()
@@ -572,13 +558,14 @@ def run_agent(
                 try:
                     resp = _interruptible_llm(_llm_kwargs)
                 except Exception as e:
-                    over = _LLAMA_OVERFLOW.search(str(e))
+                    over = context_overflow(e)
                     if over is None:
                         raise
+                    sent, window = over
                     _pre_collapsed = set(collapsed)
                     collapsed, _ = fit_window(
-                        messages, collapsed, estimate=int(over[1]),
-                        limit=int(WINDOW_FILL * int(over[2])), tools=TOOLS,
+                        messages, collapsed, estimate=sent,
+                        limit=int(WINDOW_FILL * window), tools=TOOLS,
                         shrink=_fit_shrink, unsent_from=seen_len,
                     )
                     if collapsed == _pre_collapsed:
@@ -586,7 +573,7 @@ def run_agent(
                     recalled_excerpts.clear()
                     _narr_mod.NARRATOR.narrate(
                         "compaction", "done",
-                        f"server rejected {over[1]} tokens on {over[2]}: compacted "
+                        f"server rejected {sent} tokens on {window}: compacted "
                         f"{len(collapsed - _pre_collapsed)} message(s) and resent",
                         {"indices": sorted(collapsed - _pre_collapsed)}, parent=None)
                     _abandon.clear()
@@ -594,7 +581,7 @@ def run_agent(
         except _Stopped:
             logger.info("Agent loop stopped during the model call at iteration %d", iteration)
             _narr_mod.NARRATOR.thought_close("")   # the thought this call opened ends here
-            return "(silica: cancelled)"
+            return CANCELLED
         except BaseException:
             # A call that raises never reaches thought_close below, and a thought
             # left open reads as a run still going to every projection of the
@@ -605,20 +592,14 @@ def run_agent(
         finally:
             _emit(ThinkingEndEvent(iteration=iteration))
         thought = resp.reasoning or ""
-        if not resp.tool_calls and not (resp.text or "").strip() and thought.strip():
-            # The answer went into the reasoning and the reply came back empty,
-            # as on hosted t06's landing (2026-10-22, below) and in a chapter
-            # rework probe's last step at 64k the same night. Asked once more
-            # with reasoning off, the knob V4 honours (llm.py); a failure keeps
-            # the empty reply, which the caller names.
-            try:
-                _abandon.clear()
-                resp = _interruptible_llm({**_llm_kwargs, "reasoning": False})
-            except _Stopped:
-                _narr_mod.NARRATOR.thought_close(thought)
-                return "(silica: cancelled)"
-            except Exception as e:
-                logger.warning("re-asking an answer left in the reasoning failed: %s", e)
+        try:
+            resp = _reask_without_reasoning(resp, _llm_kwargs)
+        except _Stopped:
+            _narr_mod.NARRATOR.thought_close(thought)
+            return CANCELLED
+        except Exception as e:
+            # The empty reply stands, and the caller names it.
+            logger.warning("re-asking an answer left in the reasoning failed: %s", e)
         # Closed here and not in the adapter: the reasoning text only exists
         # once resp does, and the durable thought carries it whole (spec §4).
         _narr_mod.NARRATOR.thought_close(thought or resp.reasoning or "")
@@ -675,10 +656,10 @@ def run_agent(
         # backend a long turn could overrun the pinned window mid-flight and get
         # truncated in silence. `prompt_tokens` is the provider's own count of
         # what we just sent, so this costs no tokenizer pass; when a provider
-        # reports no usage, fall back to the same chars/4 estimate the meter uses.
+        # reports no usage, fall back to the same rough estimate the meter uses.
         prompt_tokens = resp.usage.get("prompt_tokens") or sum(
             _content_chars(m.get("content")) for m in messages
-        ) // 4
+        ) // ROUGH_CHARS_PER_TOKEN
         spent_prompt += prompt_tokens
         sent_tokens = prompt_tokens
         _pre_collapsed = set(collapsed)
@@ -857,7 +838,7 @@ def run_agent(
             messages.append(tool_msg)
             _narr_mod.NARRATOR.turn(tool_msg)
             if (not failed and tc.name == "silica_web_answer" and (tc.args or {}).get("final")
-                    and not str(result).startswith("(silica:")):
+                    and not is_sentinel(str(result))):
                 final_answer = tool_msg
 
             # Update convergence guard
@@ -945,7 +926,7 @@ def run_agent(
     # `_abandon` cleared so the TUI still streams this closing answer.
     if cancel_token is not None and cancel_token.is_set():
         logger.info("Agent loop cancelled before the final turn")
-        return "(silica: cancelled)"
+        return CANCELLED
     messages.append({"role": "system", "content": _FINAL_TURN_INSTRUCTION})
     _narr_mod.NARRATOR.turn(messages[-1])
     _emit(ThinkingStartEvent(iteration=iteration))
@@ -958,13 +939,7 @@ def run_agent(
             final_kwargs["cancel"] = _abandon
             final = _interruptible_llm(final_kwargs)
             thought = final.reasoning or ""
-            if not (final.text or "").strip() and thought.strip():
-                # The answer went into the reasoning and the reply came back
-                # empty: hosted t06's landing (2026-10-22) wrote 2.8k chars of
-                # answer there and showed "maximum iterations". Asked once more
-                # with reasoning off, the knob V4 honours (llm.py).
-                _abandon.clear()
-                final = _interruptible_llm({**final_kwargs, "reasoning": False})
+            final = _reask_without_reasoning(final, final_kwargs)
     except Exception as e:
         from silica.model.usage_limits import UsageLimited
 
@@ -972,11 +947,11 @@ def run_agent(
         if isinstance(e, UsageLimited):
             raise  # the student is owed the reset time, not "maximum iterations" (ADR-0102)
         logger.warning("Forced final turn failed (%s)", e)
-        return "(silica: maximum iterations reached)"
+        return MAX_ITERATIONS
     finally:
         _emit(ThinkingEndEvent(iteration=iteration))
     _narr_mod.NARRATOR.thought_close(thought or final.reasoning or "")
-    text = (final.text or "").strip() or "(silica: maximum iterations reached)"
+    text = (final.text or "").strip() or MAX_ITERATIONS
     text = _declare_links(text) if _interactive else text
     # Into the history and not narrated here, as the normal path does: the
     # caller's final beat records it after attribution, figures and the turn
