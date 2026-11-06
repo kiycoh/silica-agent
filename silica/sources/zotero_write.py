@@ -20,7 +20,6 @@ from __future__ import annotations
 import html
 import json
 import logging
-import os
 import time
 from collections import Counter
 from pathlib import Path
@@ -28,6 +27,7 @@ from urllib.parse import quote
 
 import httpx
 
+from silica.config import claim_env
 from silica.sources.zotero import Zotero, ZoteroError, _is_paper
 
 logger = logging.getLogger(__name__)
@@ -468,5 +468,5 @@ def authorize(zot: Zotero) -> bool:
     remember = bool(data.get("remember"))
     if remember and zot.api_key:
         wizard.write_env({"SILICA_ZOTERO_API_KEY": zot.api_key})
-        os.environ["SILICA_ZOTERO_API_KEY"] = zot.api_key
+        claim_env({"SILICA_ZOTERO_API_KEY": zot.api_key})
     return remember
