@@ -1222,11 +1222,11 @@ def silica_vault_report(
     # an "empty" vault that holds four PDFs must say so, or the caller reports
     # "nothing to do" over a folder full of work (observed 2026-08-15).
     try:
-        from silica.tools.atomic import _unconverted_under
+        from silica.kernel.recall.listing import unconverted_under
         from silica.kernel.base.manifest import active_inbox_dir
 
         inbox = active_inbox_dir()
-        pending = _unconverted_under(inbox) if inbox else []
+        pending = unconverted_under(inbox) if inbox else []
         if pending:
             result["inbox_pending"] = {
                 "total": len(pending),

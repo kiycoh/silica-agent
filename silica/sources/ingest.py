@@ -1059,9 +1059,9 @@ def _nucleate_expand_folders(
             # first-class /nucleate input (each runs through convert below),
             # so a folder argument picks them up like it picks up notes.
             from silica.kernel.base.formats import DOC_EXTS, IMG_EXTS
-            from silica.tools.atomic import _unconverted_under
+            from silica.kernel.recall.listing import unconverted_under
             pending = [
-                p for p in _unconverted_under(f)
+                p for p in unconverted_under(f)
                 if Path(p).suffix.lower() in DOC_EXTS
             ]
             # Images stay batch input only inside the inbox (screenshots

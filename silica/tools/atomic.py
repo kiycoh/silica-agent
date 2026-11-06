@@ -15,7 +15,6 @@ from typing import Annotated, Any
 import re
 import subprocess
 import unicodedata
-from collections.abc import Iterable
 from functools import lru_cache
 
 from pathlib import Path
@@ -23,7 +22,9 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
-from silica.kernel.recall.listing import natural_key, notes_under, vault_rel
+from silica.kernel.recall.listing import (
+    natural_key, notes_under, unconverted_under, vault_files_under, vault_rel,
+)
 from silica.tools import tool
 
 
@@ -1154,41 +1155,6 @@ def silica_unresolved() -> list:
 # List files
 # ---------------------------------------------------------------------------
 
-def _unconverted_under(folder: str) -> list[str]:
-    """Non-markdown files under `folder`, natural-sorted; `Images/` excluded.
-
-    `notes_under` lists .md only, so a folder holding nothing but PDFs came back
-    as {"total": 0, "files": []} — a payload indistinguishable from a folder
-    that is not there, and the agent duly reported it as non-existent. Naming
-    the unconverted files is the only way the caller can tell the two apart.
-    `Images/` is conversion output, not input, and outnumbers the notes 70:1.
-
-    Answers for source folders as well as the inbox: a research library is nine
-    folders of scanned books and one INDEX.md, and while the rule was
-    inbox-only every one of them read as empty.
-    """
-    from silica.kernel.base.layout import in_folder
-    from silica.kernel.base.manifest import active_inbox_dir
-
-    scope = vault_rel(folder)
-    if not scope:
-        return []
-    inbox = active_inbox_dir()
-    if inbox and in_folder(scope, inbox):
-        paths: Iterable[str] = (r.path for r in DRIVER.list_inbox_files())
-    else:
-        paths = _vault_files_under(scope)
-    return sorted(
-        (
-            p for p in paths
-            if not p.endswith(".md")
-            and in_folder(p, scope)
-            and "/Images/" not in p
-        ),
-        key=natural_key,
-    )
-
-
 def _raws_of(files: list[str]) -> dict[str, str]:
     """{file: the note naming it as its raw} for those of `files` a note names."""
     if not files:
@@ -1200,25 +1166,6 @@ def _raws_of(files: list[str]) -> dict[str, str]:
         return {}
     named = raws.index(Path(CONFIG.vault_path))
     return {f: named[f][0] for f in files if f in named}
-
-
-def _vault_files_under(scope: str) -> list[str]:
-    """Vault-relative files under `scope`, dotfiles and dot-dirs skipped."""
-    from silica.config import CONFIG
-    from silica.kernel.base.layout import walk_tree
-
-    root = Path(CONFIG.vault_path or "")
-    base = root / scope
-    if not base.is_dir():
-        return []
-    out: list[str] = []
-    # ignore=False: /nucleate of a folder the person named reads that folder.
-    for dirpath, _dirnames, filenames in walk_tree(root, base, ignore=False):
-        for name in filenames:
-            if name.startswith("."):
-                continue
-            out.append((Path(dirpath) / name).relative_to(root).as_posix())
-    return out
 
 
 def _prop_selector(prop: str) -> tuple[str, str] | None:
@@ -1312,8 +1259,8 @@ def silica_files(
                               "language; list a folder to see the values its notes carry.")
         return result
     # An inbox folder of PDFs is not an empty folder: say so, or the caller
-    # concludes the path does not exist. See _unconverted_under.
-    pending = _unconverted_under(folder) if folder else []
+    # concludes the path does not exist. See listing.unconverted_under.
+    pending = unconverted_under(folder) if folder else []
     # A file some note names as its raw is converted (ADR-0129 point 1): on
     # the server it stays beside its notes since 2026-11-04, and listed as
     # unconverted it would be offered to /nucleate again.
@@ -1364,7 +1311,7 @@ def _source_folder_census() -> dict[str, int]:
     from silica.kernel.base.layout import is_inbox_path
 
     counts: Counter = Counter()
-    for p in _vault_files_under(""):
+    for p in vault_files_under(""):
         if p.endswith(".md") or "/" not in p or is_inbox_path(p):
             continue
         counts[p.split("/", 1)[0]] += 1

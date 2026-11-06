@@ -2295,7 +2295,7 @@ def _family_stem(members: list[Path] | None) -> str:
 def _bind_members(con, members: list[Path]) -> None:
     """CREATE VIEW t over a shard family — one list-read, schema shared.
 
-    Same quoting contract as tools/tabular._bind_source. List order is the
+    Same quoting contract as duck.bind_source. List order is the
     sorted member order, so the evenly spaced sample walks shard 01 → NN.
     """
     quoted = ", ".join("'" + str(m).replace("'", "''") + "'" for m in members)
@@ -2347,7 +2347,7 @@ def _duckdb_profile(src: Path, members: list[Path] | None = None) -> str:
     With `members`, one profile over the whole shard family (same header, one
     schema): stats and sample describe the union, which is the table a reader
     actually reasons about."""
-    from silica.tools.tabular import _connect, utf8_source
+    from silica.sources.duck import connect, utf8_source
 
     # Non-utf-8 members are re-encoded into `tmp` and DuckDB is confined there
     # instead: the reader validates encoding and refuses the original outright.
@@ -2358,23 +2358,23 @@ def _duckdb_profile(src: Path, members: list[Path] | None = None) -> str:
         bound = [utf8_source(m, tmpdir) for m in files]
         moved = [b.parent == tmpdir for b in bound]
         if any(moved) and not all(moved):
-            # `_connect` allows exactly ONE directory, so a mixed family has to
+            # `connect` allows exactly ONE directory, so a mixed family has to
             # be read entirely from the temp dir; the utf-8 members ride along.
             bound = [b if mv else Path(shutil.copy2(m, tmpdir / m.name))
                      for m, b, mv in zip(files, bound, moved)]
-        return _duckdb_profile_bound(src, members, bound, _connect(bound[0].parent))
+        return _duckdb_profile_bound(src, members, bound, connect(bound[0].parent))
 
 
 def _duckdb_profile_bound(src: Path, members: list[Path] | None,
                           bound: list[Path], con) -> str:
     """`_duckdb_profile` with the encoding/confinement question already settled."""
-    from silica.tools.tabular import _bind_source
+    from silica.sources.duck import bind_source
 
     try:
         if members and len(members) > 1:
             _bind_members(con, bound)
         else:
-            _bind_source(con, bound[0])
+            bind_source(con, bound[0])
         n_rows = con.execute("SELECT count(*) FROM t").fetchone()[0]
         stats = con.execute(
             "SELECT column_name, column_type, min, max, approx_unique, "

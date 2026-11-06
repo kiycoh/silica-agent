@@ -27,6 +27,7 @@ from typing import Any
 
 from pydantic import Field
 
+from silica.sources.duck import SNIFFED_EXTS, bind_source, connect, utf8_source
 from silica.tools import tool
 
 logger = logging.getLogger(__name__)
@@ -39,43 +40,10 @@ READABLE_EXTS = (".csv", ".tsv", ".txt", ".parquet", ".json", ".ndjson")
 # the whole downstream path (sniffing, confinement, caps) shared instead of
 # duplicated per format.
 SHEET_EXTS = (".xlsx", ".xlsm", ".xls")
-# Text formats are sniffed on the WHOLE file (sample_size=-1), not DuckDB's
-# default 20480-row head: a column typed on its head either errors on the first
-# odd row past the sample or — worse — bakes a type the data does not keep.
-# Parquet/JSON carry their own types, so the knob does not apply to them.
-_SNIFFED_EXTS = (".csv", ".tsv", ".txt")
 
 # Rows are capped in bytes as well as in count: `limit` alone never sees that
 # 200 rows of a wide table is a six-figure token payload.
 _PAYLOAD_BYTE_CAP = 50_000
-
-
-def _connect(data_dir: Path):
-    """A DuckDB connection that can read `data_dir` and nothing else.
-
-    The order is load-bearing and was verified, not assumed: `allowed_directories`
-    on its own confines nothing (it read /etc/passwd and wrote via COPY TO). It
-    is an allowlist carved out of `enable_external_access=false`, so the access
-    flag must be dropped *after* the directory is named, and the configuration
-    locked *after* both — otherwise the model's SQL can simply widen it back.
-    """
-    import duckdb
-
-    from silica.config import hosted
-
-    con = duckdb.connect()
-    if hosted():
-        # The tenant's cgroup is 1 GB (silica@.service MemoryMax=1G) and
-        # DuckDB's default is 80% of the machine's memory. A 100 MB CSV's
-        # profile peaked at 283 MB for the whole process (2026-10-17), so
-        # 256 MB for DuckDB's own buffers is past it, and a spill or an
-        # out-of-memory error is the query's, not the tenant's (ADR-0120).
-        con.execute("SET memory_limit='256MB'")
-        con.execute("SET threads=2")
-    con.execute("SET allowed_directories=[?]", [str(data_dir)])
-    con.execute("SET enable_external_access=false")
-    con.execute("SET lock_configuration=true")
-    return con
 
 
 def _select_only(sql: str) -> str:
@@ -103,52 +71,6 @@ def _select_only(sql: str) -> str:
             "the query must be a SELECT (WITH … SELECT is fine)"
         )
     return stmt.query.strip().rstrip(";")
-
-
-def _bind_source(con, path: Path) -> None:
-    """CREATE VIEW t over `path` — read per query, never copied.
-
-    Interpolated because a path cannot be a prepared-statement parameter in
-    FROM; the path is resolved and real, and the quote-doubling closes the
-    only injection route left.
-    """
-    quoted = str(path).replace("'", "''")
-    if path.suffix.lower() in _SNIFFED_EXTS:
-        con.execute(
-            f"CREATE VIEW t AS SELECT * FROM read_csv('{quoted}', sample_size=-1)"
-        )
-    else:
-        con.execute(f"CREATE VIEW t AS SELECT * FROM '{quoted}'")
-
-
-# Western-European ladder, tried in order. utf-8 first so a correct file is
-# never re-encoded; cp1252 before latin-1 because Windows exports put curly
-# quotes and the ellipsis in the C1 range (ISTAT's "…" is 0x85, which latin-1
-# reads as the NEL control); latin-1 last because it decodes every byte and
-# so can never itself raise.
-_TEXT_ENCODINGS = ("utf-8", "cp1252", "latin-1")
-
-
-def utf8_source(src: Path, tmpdir: Path) -> Path:
-    """`src` when it is already utf-8, else a re-encoded copy under `tmpdir`.
-
-    DuckDB's reader validates encoding and refuses anything else outright —
-    including bytes its own `encoding='latin-1'` rejects (0x85 again) — so the
-    decode happens here, in Python, where the ladder is ours to pick. Measured
-    on a real public-data vault: 4 of 26 CSVs were not utf-8.
-    """
-    raw = src.read_bytes()
-    for enc in _TEXT_ENCODINGS:
-        try:
-            text = raw.decode(enc)
-        except UnicodeDecodeError:
-            continue
-        if enc == "utf-8":
-            return src            # the common case copies nothing
-        out = tmpdir / src.name
-        out.write_text(text, encoding="utf-8")
-        return out
-    return src  # undecodable by latin-1 is impossible; bind and let DuckDB speak
 
 
 def _pick_sheet(names: list[str], sheet: str) -> str:
@@ -276,13 +198,13 @@ def silica_query_table(
     with tempfile.TemporaryDirectory() as tmp:
         if suffix in SHEET_EXTS:
             sheet_name, bound = _sheet_to_csv(src, sheet, Path(tmp))
-        elif suffix in _SNIFFED_EXTS:
+        elif suffix in SNIFFED_EXTS:
             bound = utf8_source(src, Path(tmp))
         else:
             bound = src
-        con = _connect(bound.parent)
+        con = connect(bound.parent)
         try:
-            _bind_source(con, bound)
+            bind_source(con, bound)
             schema = dict(
                 (row[0], row[1]) for row in con.execute("DESCRIBE t").fetchall()
             )
@@ -365,10 +287,10 @@ def _describe_table(src: Path) -> dict[str, Any]:
         quoted = str(path).replace("'", "''")
         rel = (
             f"read_csv('{quoted}', sample_size={_CATALOG_SNIFF_ROWS})"
-            if path.suffix.lower() in _SNIFFED_EXTS
+            if path.suffix.lower() in SNIFFED_EXTS
             else f"'{quoted}'"
         )
-        # A bare connection, not _connect's sandbox: the SQL here is ours (a
+        # A bare connection, not duck.connect's sandbox: the SQL here is ours (a
         # DESCRIBE over a resolved vault path), never model-authored.
         con = duckdb.connect()
         try:
@@ -380,7 +302,7 @@ def _describe_table(src: Path) -> dict[str, Any]:
     try:
         return {"columns": describe(src)}
     except Exception as first:
-        if src.suffix.lower() in _SNIFFED_EXTS:
+        if src.suffix.lower() in SNIFFED_EXTS:
             # Retry through the encoding ladder before giving up: public-data
             # exports are routinely cp1252 (4 of 26 CSVs on a real vault) and
             # DuckDB refuses them outright.

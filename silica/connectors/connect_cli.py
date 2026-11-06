@@ -16,7 +16,7 @@ start with a slash are read as slash commands by the registry parity test.
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from silica.connectors.mcp_block import McpBlock
@@ -155,7 +155,7 @@ def _line(prompt: str) -> str:
     return ask(prompt)
 
 
-def terminal_asks() -> dict[str, Callable]:
+def terminal_asks() -> dict[str, Any]:
     """What `run` asks with on a terminal, for the surface that has one."""
     return {"ask_secret": _hidden, "ask_yes": _yes, "ask_line": _line}
 
