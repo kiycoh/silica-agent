@@ -79,6 +79,14 @@ _YT_SIGN_IN = "Sign in to confirm"
 YOUTUBE_COOKIES_ENV = "SILICA_YOUTUBE_COOKIES"
 
 
+class WrongType(ValueError):
+    """The server's content type is not one the caller reads."""
+
+
+class TooLarge(ValueError):
+    """The body passed the caller's ceiling."""
+
+
 class YoutubeBlocked(ValueError):
     """YouTube asked for a sign-in this session does not have."""
 
@@ -536,12 +544,12 @@ def _refuse_binary(resp: httpx.Response, url: str, types: tuple[str, ...] = _TEX
     text for a page, feeds for Discover, `image/` for a cover."""
     ctype = content_type(resp)
     if ctype and not ctype.startswith(types):
-        raise ValueError(f"refusing to read {ctype} content at {url}")
+        raise WrongType(f"refusing to read {ctype} content at {url}")
     if not ctype and "text/" not in types:
         # A caller that reads no text (a cover) takes a body only on its
         # word: an untyped one can be anything, and a page has no business
         # being saved as an image.
-        raise ValueError(f"refusing untyped content at {url}")
+        raise WrongType(f"refusing untyped content at {url}")
 
 
 def _decoded_headers(headers: httpx.Headers) -> httpx.Headers:
@@ -570,7 +578,7 @@ def _read_capped(resp: httpx.Response, url: str, cap: int = _MAX_BODY_BYTES) -> 
     for chunk in resp.iter_bytes():
         total += len(chunk)
         if total > cap:
-            raise ValueError(
+            raise TooLarge(
                 f"body at {url} passed {cap} bytes; refusing to read on"
             )
         if time.monotonic() > deadline:

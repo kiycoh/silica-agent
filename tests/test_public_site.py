@@ -36,10 +36,12 @@ def marta(tmp_vault, tmp_path, monkeypatch):
     (Path(tmp_path) / "vault" / "hypnogram.png").write_bytes(PNG)
     (Path(tmp_path) / "vault" / "private-scan.png").write_bytes(PNG + b"x")
     from silica.kernel.publish import add_vault, set_visibility, update_vault
+    from silica.kernel.rights import save_answer
 
     add_vault("Memory")
     update_vault("memory", {"title": "Memoria", "line": "How remembering works."})
     set_visibility("memory", "public")
+    save_answer("folder:Memory", "mine")
     yield Path(tmp_path)
     reset_manifest_cache()
 

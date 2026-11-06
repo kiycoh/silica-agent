@@ -516,10 +516,14 @@ def set_note(path: str, on: bool, vault: Path | None = None) -> str:
 
 
 def _write_publish(path: str, value: bool | None) -> None:
-    """Set or remove `publish:` through the driver, so the change is a session
-    change like any edit: the ledger keeps the old bytes and /undo restores
-    them. Not `overwrite`, which stamps a `type:` the person never asked for.
-    Lowercase YAML booleans, from the dumper."""
+    write_prop(path, "publish", value)
+
+
+def write_prop(path: str, key: str, value: bool | None) -> None:
+    """Set or remove a note's property through the driver, so the change is a
+    session change like any edit: the ledger keeps the old bytes and /undo
+    restores them. Not `overwrite`, which stamps a `type:` the person never
+    asked for. Lowercase YAML booleans, from the dumper."""
     from silica.driver import DRIVER
     from silica.kernel.write import frontmatter as fm
 
@@ -527,13 +531,13 @@ def _write_publish(path: str, value: bool | None) -> None:
     if data is None and raw is not None:
         raise ValueError(f"the properties of {path} do not parse; fix them before publishing it")
     if value is not None:
-        DRIVER.set_prop(path, "publish", value)
+        DRIVER.set_prop(path, key, value)
         return
     unset = getattr(DRIVER, "unset_prop", None)
     if unset is None:
         # The Obsidian bridge has no removal; Obsidian itself does.
-        raise ValueError(f"remove `publish:` from {path} in Obsidian")
-    unset(path, "publish")
+        raise ValueError(f"remove `{key}:` from {path} in Obsidian")
+    unset(path, key)
 
 
 # --- where the files go -------------------------------------------------------

@@ -446,6 +446,27 @@ def _content_hash(text: str | None) -> str:
     return _hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
+def written_notes(vault: str, *, store: UndoJournalStore | None = None) -> dict[str, str | None]:
+    """{path: newest post-write hash} of every note the journal holds for `vault`, reverted runs
+    left out. A note absent from it has no record here: the journal is per machine, keyed by the
+    vault's path, and can be pruned."""
+    store = store or get_undo_journal()
+    conn = store._conn()
+    want = Path(vault).resolve()
+    run_ids = [r["run_id"] for r in conn.execute(
+        "SELECT run_id, vault FROM runs WHERE reverted_at IS NULL AND vault IS NOT NULL"
+    ).fetchall() if _same_vault(r["vault"], want)]
+    if not run_ids:
+        return {}
+    marks = ",".join("?" * len(run_ids))
+    latest: dict[str, str | None] = {}
+    for r in conn.execute(
+        f"SELECT path, post_hash FROM inverses WHERE run_id IN ({marks}) ORDER BY id", run_ids
+    ).fetchall():
+        latest[r["path"]] = r["post_hash"]
+    return latest
+
+
 def edited_since_write(vault: str, *, store: UndoJournalStore | None = None,
                        checkpoints=None) -> list[str]:
     """Notes the gate wrote into `vault` whose current body matches neither
@@ -459,21 +480,8 @@ def edited_since_write(vault: str, *, store: UndoJournalStore | None = None,
 
     store = store or get_undo_journal()
     cp = checkpoints or get_checkpoint_store()
-    conn = store._conn()
-    want = Path(vault).resolve()
-    run_ids = [r["run_id"] for r in conn.execute(
-        "SELECT run_id, vault FROM runs WHERE reverted_at IS NULL AND vault IS NOT NULL"
-    ).fetchall() if _same_vault(r["vault"], want)]
-    if not run_ids:
-        return []
-    marks = ",".join("?" * len(run_ids))
-    latest: dict[str, str | None] = {}
-    for r in conn.execute(
-        f"SELECT path, post_hash FROM inverses WHERE run_id IN ({marks}) ORDER BY id", run_ids
-    ).fetchall():
-        latest[r["path"]] = r["post_hash"]
     edited: list[str] = []
-    for path, post_hash in latest.items():
+    for path, post_hash in written_notes(vault, store=store).items():
         if not post_hash:
             continue
         try:
