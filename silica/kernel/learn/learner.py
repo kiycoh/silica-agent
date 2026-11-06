@@ -25,18 +25,12 @@ from pathlib import Path
 from typing import Any
 
 from silica.kernel.base import noteshape
+from silica.kernel.base.notekey import ledger_key
 from silica.kernel.learn.schedule import DUE_R, WEAK_R, note_state, view  # noqa: F401  re-exported v1 names
 
 logger = logging.getLogger(__name__)
 
 DAY = 86400.0
-
-
-def key_of(path: str) -> str:
-    """The join keyspace: quiz.key (posix, no .md, casefolded)."""
-    from silica.kernel.learn import quiz
-
-    return quiz.key(path)
 
 
 def _created_and_ai(text: str, mtime: float) -> tuple[float, bool]:
@@ -299,18 +293,18 @@ def prerequisites_map() -> dict[str, list[str]]:
 
 
 def prerequisites_of(path: str) -> list[str]:
-    """One note's prerequisites. The map keeps a note's case and `key_of` folds it,
-    so a lookup by `key_of` finds nothing on a real map."""
-    key = key_of(path)
-    return next((v for k, v in prerequisites_map().items() if key_of(k) == key), [])
+    """One note's prerequisites. The map keeps a note's case and `ledger_key` folds it,
+    so a lookup by `ledger_key` finds nothing on a real map."""
+    key = ledger_key(path)
+    return next((v for k, v in prerequisites_map().items() if ledger_key(k) == key), [])
 
 
 def _written_keys(vault: str) -> dict[str, list[str]]:
     """The written prerequisites (ADR-0145) in the store keyspace prerequisites_map speaks."""
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
     from silica.kernel.recall.requires import written_requires
 
-    return {cooccur_key(d): [cooccur_key(q) for q in qs]
+    return {store_key(d): [store_key(q) for q in qs]
             for d, qs in written_requires(vault).items()}
 
 
@@ -343,11 +337,11 @@ def drop_structural(prereq_map: dict[str, list[str]], notes: dict[str, dict]) ->
     the YOLO paper's spine two rungs up, before every note; without them, each
     paper's archived segment stood after each of its notes (2026-10-26).
     """
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
     from silica.kernel.base.layout import is_source_leaf
     from silica.kernel.base.noteshape import STAGED
 
-    structural = {cooccur_key(p) for p, m in notes.items()
+    structural = {store_key(p) for p, m in notes.items()
                   if m.get("spine") or m.get("kind") == STAGED
                   or Path(p).stem.casefold() == Path(p).parent.name.casefold()}
 
@@ -409,12 +403,12 @@ def _topological(rows: list[dict], prereqs: dict[str, list[str]], order_key) -> 
     cycle (RefD is antisymmetric per pair but chains can close) leaves the
     remaining rows in `order_key` order at the end, so the picker never stalls.
     """
-    by_key = {key_of(r["path"]): r for r in rows}
+    by_key = {ledger_key(r["path"]): r for r in rows}
     indeg: dict[str, int] = {k: 0 for k in by_key}
     dependents: dict[str, list[str]] = {k: [] for k in by_key}
     for k in by_key:
         for p in prereqs.get(k, ()):
-            pk = key_of(p)
+            pk = ledger_key(p)
             if pk in by_key and pk != k:
                 indeg[k] += 1
                 dependents[pk].append(k)
@@ -429,8 +423,8 @@ def _topological(rows: list[dict], prereqs: dict[str, list[str]], order_key) -> 
                 ready.append(d)
         ready.sort(key=lambda k: order_key(by_key[k]))
     if len(out) < len(rows):
-        done = {key_of(r["path"]) for r in out}
-        out += sorted((r for r in rows if key_of(r["path"]) not in done), key=order_key)
+        done = {ledger_key(r["path"]) for r in out}
+        out += sorted((r for r in rows if ledger_key(r["path"]) not in done), key=order_key)
     return out
 
 
@@ -497,8 +491,8 @@ def review_queue(
     # known (R at or above the due line). Unknown prerequisites (not a note in
     # this view) do not block: absence of evidence is not a blocker.
     prereqs = _prereqs_override if _prereqs_override is not None else prerequisites_map()
-    prereq_paths = {key_of(k): list(v) for k, v in prereqs.items()}   # display form
-    prereq_keys = {k: [key_of(p) for p in v] for k, v in prereq_paths.items()}
+    prereq_paths = {ledger_key(k): list(v) for k, v in prereqs.items()}   # display form
+    prereq_keys = {k: [ledger_key(p) for p in v] for k, v in prereq_paths.items()}
     for k, r in rows.items():
         mine = prereq_keys.get(k, [])
         r["prereqs"] = prereq_paths.get(k, [])

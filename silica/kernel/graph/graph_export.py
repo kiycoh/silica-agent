@@ -252,7 +252,8 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
     # Provenance is a third grouping of the graph, disjoint from both Louvain
     # partitions (ADR-0023 names two; this is neither): read off the ledger,
     # never computed from topology. One inversion for the whole payload.
-    from silica.kernel.write.provenance import note_key, sources_by_note
+    from silica.kernel.write.provenance import sources_by_note
+    from silica.kernel.base.notekey import note_key
 
     by_note = sources_by_note()
 
@@ -388,22 +389,22 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
     vault, via EmbedStore.cosine_top_k_batch). Empty list when the embed index is
     absent.
     """
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
     from silica.kernel.recall.embed import get_store
 
     store = get_store()
     if len(store) == 0:
         return []
 
-    # Store keyspace is stripped-.md/posix/case-preserved (cooccur_key); node ids
-    # carry '.md'. Map both through cooccur_key so a store hit resolves to its node.
+    # Store keyspace is stripped-.md/posix/case-preserved (store_key); node ids
+    # carry '.md'. Map both through store_key so a store hit resolves to its node.
     # A daily note is neither a source nor a neighbour here: its whole-note
     # vector is mostly its template, which made every day the nearest note to
     # every other day (ADR-0062). daily_edges relates it by its blocks instead.
     # A plan or an event (ADR-0070) is not offered either: a plan's vector is
     # the centroid of the notes its tree lists, which would take a neighbour
     # slot from each of them.
-    id_by_key = {cooccur_key(n["id"]): n["id"] for n in nodes
+    id_by_key = {store_key(n["id"]): n["id"] for n in nodes
                  if n.get("type") not in ("ghost", "daily", *NATIVE_TYPES)}
 
     # One matmul for the whole vault, not one matvec per note: this is the only
@@ -417,7 +418,7 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
     idx = 0
     for key, nid in id_by_key.items():
         for cand in neighbours.get(key, ()):
-            tid = id_by_key.get(cooccur_key(cand["path"]))
+            tid = id_by_key.get(store_key(cand["path"]))
             if tid is None or tid == nid:
                 continue
             p = (nid, tid) if nid < tid else (tid, nid)
@@ -592,7 +593,7 @@ def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
             }
 
     # Fetch community labels from the co-occurrence index; degrade to {} on any failure.
-    # Member ids carry '.md'; CooccurStore.note_nodes normalises via cooccur_key, so
+    # Member ids carry '.md'; CooccurStore.note_nodes normalises via store_key, so
     # no manual strip is needed here (single source of truth for the key).
     from silica.kernel.recall.cooccurrence import get_cooccur_store
     try:
@@ -856,7 +857,8 @@ def shared_concepts(pairs, *, k: int = 3) -> dict[tuple[str, str], list[str]]:
     the gates refuted (docs/adr/0027), so no index means no proposals rather
     than proposals nobody checked.
     """
-    from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.base.notekey import store_key
 
     try:
         store = get_cooccur_store()
@@ -868,7 +870,7 @@ def shared_concepts(pairs, *, k: int = 3) -> dict[tuple[str, str], list[str]]:
     out: dict[tuple[str, str], list[str]] = {}
     for a, b in pairs:
         try:
-            common = set(store.note_nodes(cooccur_key(a))) & set(store.note_nodes(cooccur_key(b)))
+            common = set(store.note_nodes(store_key(a))) & set(store.note_nodes(store_key(b)))
         except Exception:
             continue
         if common:

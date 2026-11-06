@@ -111,7 +111,7 @@ def test_related_notes_excludes_the_query_when_it_carries_md(tmp_path):
 
 
 def test_embed_ranking_normalises_the_query_keyspace(tmp_path):
-    """_embed_ranking resolves the vector through cooccur_key, so '<path>.md'
+    """_embed_ranking resolves the vector through store_key, so '<path>.md'
     finds the same vector as the stripped key instead of abstaining."""
     es = _embed_store(tmp_path)
     assert _embed_ranking(es, "A.md", k=5, exclude={"A"}) == \

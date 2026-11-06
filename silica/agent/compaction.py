@@ -26,6 +26,8 @@ import json
 import re
 from typing import Any, Callable
 
+from silica.kernel.base.notekey import stem
+
 MIN_COLLAPSE_CHARS = 200  # don't collapse a body smaller than its own stub
 
 # Fixed knobs (config promotion declined 2026-08-19; revisit only with a real
@@ -180,8 +182,7 @@ def _note_key(arguments: str) -> str:
     for k in _NOTE_ARG_KEYS:
         v = args.get(k)
         if isinstance(v, str) and v.strip():
-            stem = v.strip().replace("\\", "/").rsplit("/", 1)[-1]
-            return stem.removesuffix(".md").lower()
+            return stem(v.strip()).lower()
     return ""
 
 

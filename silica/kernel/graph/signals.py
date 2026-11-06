@@ -11,7 +11,7 @@ contract in relatedness._fuse) when they cannot rank, never with [].
 
 Keyspace: these functions do not know about '.md'. Callers hand in one
 keyspace and get the same one back; the report and the facade bridge at
-their own seams (cooccur_key), as every other signal does.
+their own seams (store_key), as every other signal does.
 """
 from __future__ import annotations
 

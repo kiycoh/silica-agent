@@ -457,7 +457,7 @@ def test_orphan_patches_the_neighbour_not_the_orphan():
 
 
 def test_orphan_completes_the_md_suffix_on_candidate_paths():
-    """Candidate paths arrive in the relatedness keyspace (cooccur_key, no '.md').
+    """Candidate paths arrive in the relatedness keyspace (store_key, no '.md').
 
     The driver reads either spelling, but the op path is what gets WRITTEN, so a
     bare key would patch a file that does not exist.

@@ -167,18 +167,18 @@ def _structural_ranking(graph, query_path: str, *, k: int, exclude: set[str]):
     """
     if graph is None:
         return None
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
     from silica.kernel.graph.signals import adamic_adar_ranking
 
-    key_of = {cooccur_key(n): n for n in graph.nodes}
-    gid = key_of.get(cooccur_key(query_path))
+    key_of = {store_key(n): n for n in graph.nodes}
+    gid = key_of.get(store_key(query_path))
     if gid is None:
         return None
     blocked_ids = {key_of[x] for x in exclude if x in key_of}
     ranking = adamic_adar_ranking(graph, gid, k=k, exclude=blocked_ids)
     if not ranking:
         return None
-    return [(cooccur_key(n), s) for n, s in ranking]
+    return [(store_key(n), s) for n, s in ranking]
 
 
 def fused_with(key: str, es, store, *, k: int = K, graph=None, mode: str = "leg",
@@ -194,10 +194,10 @@ def fused_with(key: str, es, store, *, k: int = K, graph=None, mode: str = "leg"
     introduces one (the 2026-08-22 corroboration arm).
     """
     from silica.kernel.recall import relatedness as R
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
     from silica.kernel.base.layout import is_vault_artifact
 
-    blocked = {cooccur_key(key)}
+    blocked = {store_key(key)}
     pool = max(k * 3, R._POOL_MIN)
     rankings = []
     e = R._embed_ranking(es, key, k=pool, exclude=blocked)

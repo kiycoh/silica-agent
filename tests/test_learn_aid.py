@@ -13,6 +13,7 @@ import pytest
 
 pytest.importorskip("fastapi")
 
+from silica.kernel.base.notekey import ledger_key  # noqa: E402
 from silica.kernel.learn import offer  # noqa: E402
 from tests.test_learn_panel import client  # noqa: E402,F401
 
@@ -80,12 +81,12 @@ def test_shadow_mode_logs_the_aid_and_shows_none(client, tmp_path, monkeypatch):
 def test_the_prerequisite_attached_is_the_one_held_least(monkeypatch):
     from silica.kernel.learn import learner
 
-    monkeypatch.setattr(learner, "prerequisites_map", lambda: {learner.key_of(NOTE): ["ML/A.md", "ML/B.md", "ML/C.md"]})
-    rows = {learner.key_of("ML/A.md"): {"attempts": 3, "R": 0.95}, learner.key_of("ML/B.md"): {"attempts": 2, "R": 0.6},
-            learner.key_of("ML/C.md"): {"attempts": 0, "R": None}}
+    monkeypatch.setattr(learner, "prerequisites_map", lambda: {ledger_key(NOTE): ["ML/A.md", "ML/B.md", "ML/C.md"]})
+    rows = {ledger_key("ML/A.md"): {"attempts": 3, "R": 0.95}, ledger_key("ML/B.md"): {"attempts": 2, "R": 0.6},
+            ledger_key("ML/C.md"): {"attempts": 0, "R": None}}
     monkeypatch.setattr(learner, "view", lambda *a, **k: rows)
     assert offer.weakest_prerequisite(NOTE) == "ML/C.md"           # never practised first
-    rows[learner.key_of("ML/C.md")] = {"attempts": 4, "R": 0.99}
+    rows[ledger_key("ML/C.md")] = {"attempts": 4, "R": 0.99}
     assert offer.weakest_prerequisite(NOTE) == "ML/B.md"           # then the lowest recall
 
 

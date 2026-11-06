@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timezone
 
 from silica.kernel.base import noteshape
+from silica.kernel.base.notekey import ledger_key
 from silica.kernel.learn import learner
 
 DAY = 86400.0
@@ -107,7 +108,7 @@ def test_legacy_lines_map_to_again_and_good():
         {"ts": ts, "path": "Rated Miss.md", "correct": False, "rating": 1},
     ]
     v = learner.view(_notes_override=notes, _entries_override=entries, now_ts=now)
-    k = learner.key_of
+    k = ledger_key
     assert v[k("Legacy Ok.md")]["S"] == v[k("Rated Ok.md")]["S"]
     assert v[k("Legacy Miss.md")]["S"] == v[k("Rated Miss.md")]["S"]
     assert v[k("Legacy Ok.md")]["S"] > v[k("Legacy Miss.md")]["S"]
@@ -123,7 +124,7 @@ def test_rating_overrides_correct_for_scheduling():
     entries = [{"ts": ts, "path": "A.md", "correct": True, "rating": 2},
                {"ts": ts, "path": "B.md", "correct": True, "rating": 3}]
     v = learner.view(_notes_override=notes, _entries_override=entries, now_ts=now)
-    a, b = v[learner.key_of("A.md")], v[learner.key_of("B.md")]
+    a, b = v[ledger_key("A.md")], v[ledger_key("B.md")]
     assert a["S"] < b["S"]
     assert a["correct"] == 1 and a["misses"] == 0
 
@@ -133,9 +134,9 @@ def test_view_rows_carry_due_and_state():
     notes = {"A.md": {"created": now - 10 * DAY, "ai": False},
              "Bot.md": {"created": now - 10 * DAY, "ai": True}}
     v = learner.view(_notes_override=notes, _entries_override=[], now_ts=now)
-    a = v[learner.key_of("A.md")]
+    a = v[ledger_key("A.md")]
     assert a["due"] is not None and math.isclose(a["due"], now - 10 * DAY + 90 * DAY, abs_tol=DAY)
-    bot = v[learner.key_of("Bot.md")]
+    bot = v[ledger_key("Bot.md")]
     assert bot["due"] is None and bot["state"] == "new" and bot["attempts"] == 0
 
 
@@ -183,7 +184,7 @@ def test_ledger_joins_no_matter_the_path_spelling():
     notes = {"Concepts/RAG.md": {"created": now - 400 * DAY, "ai": False}}
     entries = [{"ts": _iso(now - DAY), "path": "concepts/rag", "correct": True}]
     v = learner.view(_notes_override=notes, _entries_override=entries, now_ts=now)
-    row = v[learner.key_of("Concepts/RAG.md")]
+    row = v[ledger_key("Concepts/RAG.md")]
     assert row["correct"] == 1 and row["R"] > 0.9
 
 
@@ -216,10 +217,10 @@ def test_view_reads_frontmatter_from_the_vault(tmp_vault, monkeypatch):
     tmp_vault.note("Robot.md", "---\nAI: true\n---\nnucleated\n")
     tmp_vault.note("Undated.md", "no frontmatter at all\n")
     v = learner.view()
-    user = v[learner.key_of("User.md")]
+    user = v[ledger_key("User.md")]
     assert learner.WEAK_R < user["R"] < learner.DUE_R          # months old: in the pool, not the digest
-    assert v[learner.key_of("Robot.md")]["R"] is None        # AI: true, never quizzed
-    assert v[learner.key_of("Undated.md")]["R"] > 0.9        # mtime fallback: just written
+    assert v[ledger_key("Robot.md")]["R"] is None        # AI: true, never quizzed
+    assert v[ledger_key("Undated.md")]["R"] > 0.9        # mtime fallback: just written
 
 
 def test_review_queue_leaves_a_never_practised_note_outside_every_plan_out():

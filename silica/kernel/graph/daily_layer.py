@@ -156,7 +156,7 @@ def daily_edges(nodes: list[dict]) -> list[dict]:
     0.399, so no cut separates them on the data there is.
     """
     from silica.config import CONFIG
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
     from silica.kernel.recall.embed import get_store
 
     days = [n for n in nodes if n.get("type") == "daily"]
@@ -165,9 +165,9 @@ def daily_edges(nodes: list[dict]) -> list[dict]:
     store, bstore = get_store(), block_store()
     if len(store) == 0 or len(bstore) == 0:
         return []
-    id_of = {cooccur_key(n["id"]): n["id"] for n in nodes
+    id_of = {store_key(n["id"]): n["id"] for n in nodes
              if n.get("type") not in ("ghost", "daily")}
-    exclude = {cooccur_key(n["id"]) for n in days}
+    exclude = {store_key(n["id"]) for n in days}
     vault = Path(CONFIG.vault_path or ".")
     edges: list[dict] = []
     for d in days:
@@ -184,7 +184,7 @@ def daily_edges(nodes: list[dict]) -> list[dict]:
             # outside a folder-scoped build, and the next one in it still says
             # what the block is about.
             for hit in store.cosine_top_k(vec, k=5, exclude=exclude):
-                tid = id_of.get(cooccur_key(hit["path"]))
+                tid = id_of.get(store_key(hit["path"]))
                 if tid is None:
                     continue
                 # A 0.0 is a vector of another dimension (a model swap), not a

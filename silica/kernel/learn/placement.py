@@ -15,6 +15,8 @@ and never stored, and placed is not passed (`mastery.steps_passed`).
 """
 from __future__ import annotations
 
+from silica.kernel.base.notekey import ledger_key
+
 PER_STEP = 2
 # Ten steps of two, twenty questions: under the session's cap of 24
 # (learn_routes.start_session). A longer plan places its first ten steps.
@@ -26,7 +28,7 @@ def _ordered(paths: list[str]) -> list[str]:
     """`paths` in prerequisite order, the step's own order breaking ties."""
     from silica.kernel.learn import learner
 
-    prereqs = {learner.key_of(k): v for k, v in learner.prerequisites_map().items()}
+    prereqs = {ledger_key(k): v for k, v in learner.prerequisites_map().items()}
     place = {p: i for i, p in enumerate(paths)}
     rows = [{"path": p} for p in paths]
     return [r["path"] for r in learner._topological(rows, prereqs, lambda r: place[r["path"]])]
@@ -72,7 +74,7 @@ def candidates(plan: dict, view: dict | None = None, steps: list[list[str]] | No
     out: list[dict] = []
     taken: set[str] = set()
     for step in range(min(MAX_STEPS, len(steps))):
-        paths = [p for p in steps[step] if learner.key_of(p) in view and p not in taken]
+        paths = [p for p in steps[step] if ledger_key(p) in view and p not in taken]
         if not paths:
             continue
         order = _ordered(paths)
@@ -83,7 +85,7 @@ def candidates(plan: dict, view: dict | None = None, steps: list[list[str]] | No
             picks.append(order[0])
         for rank, p in enumerate(picks[:PER_STEP]):
             taken.add(p)
-            out.append({**view[learner.key_of(p)], "path": p, "pool": ORIGIN, "kind": kind,
+            out.append({**view[ledger_key(p)], "path": p, "pool": ORIGIN, "kind": kind,
                         "level": LEVEL_OF[kind], "objective": kind, "step": step, "rank": rank})
     return out
 

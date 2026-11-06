@@ -734,11 +734,11 @@ def reading_path(
 def _embed_sim():
     """(id, id) -> stored-vector cosine, or None when the embed index is empty.
 
-    Ids carry .md, store keys don't — bridged through cooccur_key like
+    Ids carry .md, store keys don't — bridged through store_key like
     knn_edges. Vectors are cached per id; a missing vector abstains with 0.0.
     """
     try:
-        from silica.kernel.recall.cooccurrence import cooccur_key
+        from silica.kernel.base.notekey import store_key
         from silica.kernel.base.vectors import cosine
         from silica.kernel.recall.embed import get_store
 
@@ -752,7 +752,7 @@ def _embed_sim():
 
     def _vec(nid: str):
         if nid not in cache:
-            cache[nid] = store.get_vec(cooccur_key(nid))
+            cache[nid] = store.get_vec(store_key(nid))
         return cache[nid]
 
     def sim(a: str, b: str) -> float:

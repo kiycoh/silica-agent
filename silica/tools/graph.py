@@ -704,17 +704,17 @@ def _related(note: str, k: int = 5, memory: bool = True) -> dict[str, Any]:
     from silica.config import CONFIG
     from silica.driver import DRIVER
     from silica.kernel.recall.cooccurrence import (
-        CooccurStore, cooccur_key, get_cooccur_store,
+        CooccurStore, store_key, get_cooccur_store,
     )
     from silica.kernel.recall.embed import get_store
     from silica.kernel.recall.relatedness import related_notes
 
     # Resolve name-or-path to the canonical vault path (any backend), then reduce to
-    # the store keyspace via cooccur_key (strip .md, posix, CASE-PRESERVED). This is
+    # the store keyspace via store_key (strip .md, posix, CASE-PRESERVED). This is
     # the single source of truth for both index keyspaces: it makes the query hit the
     # stored vectors/nodes AND lets related_notes exclude the query itself (blocking
     # a raw ".md" path would let the note resurface among its own results). Never
-    # _norm_path here — its lowercasing misses the case-preserving stored keys.
+    # ledger_key here — its lowercasing misses the case-preserving stored keys.
     try:
         query_path = DRIVER.read_note(note).ref.path
         resolved = bool(query_path)  # a backend returning '' must not pass as resolved
@@ -722,8 +722,8 @@ def _related(note: str, k: int = 5, memory: bool = True) -> dict[str, Any]:
         resolved = False
     if not resolved:
         query_path = note  # unresolved: treat the input itself as a path
-    note_path = query_path if resolved else ""  # pre-cooccur_key form, for file_refs_of
-    query_path = cooccur_key(query_path)
+    note_path = query_path if resolved else ""  # pre-store_key form, for file_refs_of
+    query_path = store_key(query_path)
 
     embed_store = get_store()
     cooccur_store: CooccurStore | None
@@ -863,7 +863,7 @@ def silica_concepts(term: Annotated[str, Field(description="A single word/concep
 
     if note:
         # The note's own concept vector is already stored per note by the index —
-        # no extraction, no LLM. note_nodes() applies cooccur_key to the path itself.
+        # no extraction, no LLM. note_nodes() applies store_key to the path itself.
         from silica.driver import DRIVER
 
         try:

@@ -25,19 +25,13 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from silica.kernel.base.markdown import WIKILINK_TARGET_RE
+from silica.kernel.base.notekey import ledger_key
 from silica.kernel.write.ops import Op, OpType
 
 
 def _wikilinks(text: str) -> set[str]:
     """Return the set of wikilink targets in `text` (case-insensitive, trimmed)."""
     return {m.strip().lower() for m in WIKILINK_TARGET_RE.findall(text or "") if m.strip()}
-
-
-def _norm_path(path: str | None) -> str:
-    """Canonical comparison key for a vault path: posix, no .md, lowercase."""
-    if not path:
-        return ""
-    return path.replace("\\", "/").removesuffix(".md").lower()
 
 
 def make_backlink_guard(orphan_title: str) -> Callable[[Op, str], str | None]:
@@ -48,7 +42,7 @@ def make_backlink_guard(orphan_title: str) -> Callable[[Op, str], str | None]:
     orphan lowers the orphan's in-degree. Any other link is a no-op that would
     still report the orphan as repaired.
     """
-    want = _norm_path(orphan_title).rsplit("/", 1)[-1]
+    want = ledger_key(orphan_title).rsplit("/", 1)[-1]
 
     def guard(op: Op, original: str) -> str | None:
         added = op.content if op.content is not None else (op.snippet or "")
@@ -74,10 +68,10 @@ class CapabilityBounds:
     content_guard: Callable[[Op, str], str | None] | None = None
 
     def allows_path(self, path: str | None) -> bool:
-        norm = _norm_path(path)
+        norm = ledger_key(path)
         if not norm:
             return False
-        forbidden_norms = {_norm_path(p) for p in self.forbidden_paths}
+        forbidden_norms = {ledger_key(p) for p in self.forbidden_paths}
         if norm in forbidden_norms:
             return False
         # Bare-name forbidden entries (no "/" or "\") may be matched by the
@@ -86,11 +80,11 @@ class CapabilityBounds:
         # where a note named "Foo.md" is blocked by hub="Foo" even when the hub
         # is actually a different full path like "other/Foo".
         bare_forbidden = {
-            _norm_path(p)
+            ledger_key(p)
             for p in self.forbidden_paths
             if "/" not in p and "\\" not in p
         }
-        if bare_forbidden and _norm_path(os.path.basename(path or "")) in bare_forbidden:
+        if bare_forbidden and ledger_key(os.path.basename(path or "")) in bare_forbidden:
             return False
         return bool(self.target_predicate(path or ""))
 
@@ -175,12 +169,12 @@ def dedup_bounds(larger_path: str, *, hub: str | None = None) -> CapabilityBound
     is "larger" is decided mechanically by the framework (via ofm.metrics), not by
     the model.
     """
-    larger_key = _norm_path(larger_path)
+    larger_key = ledger_key(larger_path)
     forbidden = frozenset({hub} if hub else set())
     return CapabilityBounds(
         name="dedup",
         allowed_ops=frozenset({OpType.patch}),
-        target_predicate=lambda p: _norm_path(p) == larger_key,
+        target_predicate=lambda p: ledger_key(p) == larger_key,
         forbidden_paths=forbidden,
     )
 
@@ -193,11 +187,11 @@ def _single_overwrite_bounds(path: str, name: str, *, hub: str | None) -> Capabi
     key), never a model-authored body — which is why they may overwrite where
     dedup_bounds must stay patch-only. They differ ONLY in that log name.
     """
-    key = _norm_path(path)
+    key = ledger_key(path)
     return CapabilityBounds(
         name=name,
         allowed_ops=frozenset({OpType.overwrite}),
-        target_predicate=lambda p: _norm_path(p) == key,
+        target_predicate=lambda p: ledger_key(p) == key,
         forbidden_paths=frozenset({hub} if hub else set()),
     )
 
@@ -234,11 +228,11 @@ def alias_consolidation_bounds(canonical_path: str) -> CapabilityBounds:
 def _single_write_bounds(spoke_path: str, name: str, *, hub: str | None) -> CapabilityBounds:
     """One-note write envelope: a single `write` of the framework-derived
     `spoke_path`, hub never touchable. `name` sets log attribution."""
-    spoke_key = _norm_path(spoke_path)
+    spoke_key = ledger_key(spoke_path)
     return CapabilityBounds(
         name=name,
         allowed_ops=frozenset({OpType.write}),
-        target_predicate=lambda p: _norm_path(p) == spoke_key,
+        target_predicate=lambda p: ledger_key(p) == spoke_key,
         forbidden_paths=frozenset({hub} if hub else set()),
     )
 
@@ -281,11 +275,11 @@ def enrich_bounds(target_path: str, *, hub: str | None = None) -> CapabilityBoun
     An addition cannot lose what the note says, which is why this envelope
     carries no content guard where the overwrite it replaced needed one.
     """
-    target_key = _norm_path(target_path)
+    target_key = ledger_key(target_path)
     return CapabilityBounds(
         name="enricher",
         allowed_ops=frozenset({OpType.patch}),
-        target_predicate=lambda p: _norm_path(p) == target_key,
+        target_predicate=lambda p: ledger_key(p) == target_key,
         forbidden_paths=frozenset({hub} if hub else set()),
     )
 
@@ -305,12 +299,12 @@ def orphan_bounds(
     Permits `patch` against the offered neighbours only, each introducing a
     wikilink to `orphan_title`.  Never overwrites, deletes, or creates.
     """
-    allowed = {_norm_path(p) for p in neighbour_paths if p}
+    allowed = {ledger_key(p) for p in neighbour_paths if p}
     forbidden = frozenset({hub} if hub else set())
     return CapabilityBounds(
         name="orphan",
         allowed_ops=frozenset({OpType.patch}),
-        target_predicate=lambda p: _norm_path(p) in allowed,
+        target_predicate=lambda p: ledger_key(p) in allowed,
         forbidden_paths=forbidden,
         content_guard=make_backlink_guard(orphan_title),
     )

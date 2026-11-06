@@ -307,7 +307,7 @@ def _images_on_disk(vault: Path) -> dict[str, Path]:
 def _hand_edits(vault: Path) -> tuple[dict[str, str | None], set[str]]:
     """({note key: what Silica last wrote, as a hash}, note keys edited since). Both empty when it
     cannot be read: every note then has no record, which the screen says and the review reads."""
-    from silica.kernel.write.provenance import note_key
+    from silica.kernel.base.notekey import note_key
     from silica.kernel.write.undo_journal import edited_since_write, written_notes
 
     try:
@@ -368,7 +368,8 @@ def _read_sources(vault: Path, notes: dict, wanted: dict[str, list[str]], names:
 def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict] | None = None) -> dict:
     """The facts of one wiki. `fetch` brings a remote image with no kept copy: the screen passes one,
     the build does not, since a Publish must not wait on a stranger's site."""
-    from silica.kernel.write.provenance import note_key, read_records
+    from silica.kernel.write.provenance import read_records
+    from silica.kernel.base.notekey import note_key
 
     vault = vault or publish._vault()
     conf = publish.find(slug, vault)

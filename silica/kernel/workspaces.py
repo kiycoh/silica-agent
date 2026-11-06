@@ -16,6 +16,7 @@ import threading
 from contextvars import ContextVar
 from pathlib import Path
 
+from silica.kernel.base.notekey import store_key
 from silica.kernel.base.noteshape import NOT_MEMBERS, WORKSPACE, type_word
 
 LINES = ("notes", "folders", "where")
@@ -372,17 +373,12 @@ def create_workspace(name: str, notes=(), folders=()) -> str:
 _SCOPE: ContextVar[dict | None] = ContextVar("silica_workspace_scope", default=None)
 
 
-def key_of(path: str) -> str:
-    """The keyspace the embed and co-occurrence stores use: no `.md`."""
-    return path.replace("\\", "/").strip("/").removesuffix(".md")
-
-
 def open_scope(ws: dict):
     """Narrow this turn's retrieval to `ws`'s members; returns the token for
     `close_scope`."""
     paths = frozenset(members(ws))
     return _SCOPE.set({"path": ws["path"], "name": ws["name"], "paths": paths,
-                       "keys": frozenset(key_of(p) for p in paths)})
+                       "keys": frozenset(store_key(p) for p in paths)})
 
 
 def close_scope(token) -> None:
@@ -402,7 +398,7 @@ def allow_keys() -> frozenset[str] | None:
 
 def in_scope(path: str) -> bool:
     s = _SCOPE.get()
-    return s is None or key_of(path) in s["keys"]
+    return s is None or store_key(path) in s["keys"]
 
 
 def instructions_message(ws: dict, count: int) -> str:

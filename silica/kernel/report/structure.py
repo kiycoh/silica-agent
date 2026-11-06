@@ -305,12 +305,12 @@ def note_structure(node_id: str) -> dict:
     here and an entry that no longer resolves to a node is dropped rather than
     shipped as a dead row.
     """
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
 
     m = structure_map()
     if not m.degree:
         return {}
-    key = cooccur_key(node_id)
+    key = store_key(node_id)
     known = set(m.degree)
 
     def _gid(store_key: str) -> str | None:
@@ -423,7 +423,7 @@ def ladder(root: str, *, hops: int = 3, cap: int = 60) -> dict:
     around, so a caller never has to translate between the two keyspaces to
     find its own root in the answer. Empty string when nothing was built.
     """
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
 
     m = structure_map()
     if not m.prereq:
@@ -450,7 +450,7 @@ def ladder(root: str, *, hops: int = 3, cap: int = 60) -> dict:
             fwd.setdefault(g, set()).add(d)
             back.setdefault(d, set()).add(g)
 
-    root_key = cooccur_key(root)
+    root_key = store_key(root)
     root_gid = _gid(root_key) or (root if root in known else None)
     if root_gid is None:
         return {"root": "", "nodes": [], "edges": [], "cycles": 0, "truncated": False}

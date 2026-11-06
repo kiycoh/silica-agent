@@ -97,7 +97,8 @@ def conflicts(notes: dict[str, dict]) -> list[str]:
     `contradiction` events in the ledger."""
     from silica.config import CONFIG
     from silica.kernel.learn import learner
-    from silica.kernel.write.provenance import drifted_notes, note_key
+    from silica.kernel.write.provenance import drifted_notes
+    from silica.kernel.base.notekey import note_key
 
     vault = Path(CONFIG.vault_path)
     out: list[str] = []

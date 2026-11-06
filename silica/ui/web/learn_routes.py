@@ -27,6 +27,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from silica.kernel.base import noteshape
+from silica.kernel.base.notekey import ledger_key
 from silica.kernel.learn.schedule import DUE_R
 
 logger = logging.getLogger(__name__)
@@ -270,9 +271,8 @@ def learn_home():
 def _session_row(it: dict, evs_by: dict[str, list[dict]], now: float) -> dict:
     """A note of the next session as the home lists it (ADR-0119, D): its
     reason in ADR-0081's words and the mark of its last answer."""
-    from silica.kernel.learn import learner
 
-    evs = evs_by.get(learner.key_of(it["path"]), [])
+    evs = evs_by.get(ledger_key(it["path"]), [])
     title = " · ".join(_stem(x) for x in it["pair"]) if it.get("pair") else _stem(it["path"])
     mark = "never" if not evs else {"met": "full", "assisted": "half", "missed": "open"}[_outcome(evs[-1])]
     return {"path": it["path"], "title": title, "why": _reason(it, evs, now, pool=it["pool"]), "mark": mark,
@@ -295,7 +295,7 @@ def _recent(rows: dict, now: float) -> list[dict]:
     meta = learner._notes_meta(Path(CONFIG.vault_path))
     fresh = [(m["mtime"], p) for p, m in meta.items()
              if noteshape.is_material(m) and (m.get("mtime") or 0) >= now - RECENT_DAYS * 86400
-             and learner.key_of(p) in rows]
+             and ledger_key(p) in rows]
     fresh.sort(reverse=True)
     return [{"path": p, "title": _stem(p)} for _t, p in fresh[:RECENT_N]]
 
@@ -358,12 +358,11 @@ def _outcome(e: dict) -> str:
 
 
 def _events_of(entries: list[dict]) -> dict[str, list[dict]]:
-    from silica.kernel.learn import learner
 
     out: dict[str, list[dict]] = {}
     for e in entries:
         if e.get("path"):
-            out.setdefault(learner.key_of(str(e["path"])), []).append(e)
+            out.setdefault(ledger_key(str(e["path"])), []).append(e)
     for evs in out.values():
         evs.sort(key=lambda e: str(e.get("ts")))
     return out
@@ -467,7 +466,6 @@ def _plan_next_why(p: dict, row: dict | None, evs: list[dict], now: float, misse
 
 
 def _next_groups(entries: list[dict], rows: dict, preview: dict, plan_rows: list[dict], scopes: dict, now: float) -> dict:
-    from silica.kernel.learn import learner
 
     evs_by = _events_of(entries)
     lately = _missed_lately(evs_by, _lately_cutoff(entries, now))
@@ -478,19 +476,19 @@ def _next_groups(entries: list[dict], rows: dict, preview: dict, plan_rows: list
         if p["status"] == "completed":
             continue
         nxt = (p.get("next") or {}).get("path")
-        evs = evs_by.get(learner.key_of(nxt), []) if nxt else []
+        evs = evs_by.get(ledger_key(nxt), []) if nxt else []
         if nxt:
             taken.add(nxt)
         plans_g.append({"path": p["path"], "name": p["name"],
-                        "why": _plan_next_why(p, rows.get(learner.key_of(nxt or "")), evs, now, by_miss.get(nxt or "")),
+                        "why": _plan_next_why(p, rows.get(ledger_key(nxt or "")), evs, now, by_miss.get(nxt or "")),
                         "next": p.get("next"), "open_session": p.get("open_session"), "by": p.get("by"), "group": "plans"})
     missed = []
     for m in lately:
         # the ledger outlives a renamed or deleted note; its row would open a 404
-        if m["path"] in taken or learner.key_of(m["path"]) not in rows:
+        if m["path"] in taken or ledger_key(m["path"]) not in rows:
             continue
         taken.add(m["path"])
-        k = learner.key_of(m["path"])
+        k = ledger_key(m["path"])
         missed.append(_next_row(m["path"], _stem(m["path"]), _reason(rows.get(k, {}), evs_by.get(k, []), now, misses=m["misses"]),
                                 "missed", scopes, questions=len(m["misses"])))
     due: list[dict] = []
@@ -503,7 +501,7 @@ def _next_groups(entries: list[dict], rows: dict, preview: dict, plan_rows: list
         if (group == "due" and len(due) >= NEXT_DUE_N) or (group == "never" and len(never) >= NEXT_NEVER_N):
             continue
         taken.add(it["path"])
-        k = learner.key_of(it["path"])
+        k = ledger_key(it["path"])
         title = " · ".join(_stem(x) for x in it["pair"]) if it.get("pair") else _stem(it["path"])
         row = _next_row(it["path"], title, _reason(it, evs_by.get(k, []), now, pool=it["pool"]), group, scopes,
                         pair=it.get("pair"), in_session=id(it) in in_session)
@@ -528,11 +526,10 @@ def _mix(preview_items: list[dict], groups: dict) -> str:
 def _history(path: str, entries: list[dict]) -> list[dict]:
     """Every ledger line of one note, newest first: the log ADR-0081 reads on
     request instead of a permanent mistakes list."""
-    from silica.kernel.learn import learner
 
-    key = learner.key_of(path)
+    key = ledger_key(path)
     out = []
-    for e in sorted((e for e in entries if learner.key_of(str(e.get("path") or "")) == key),
+    for e in sorted((e for e in entries if ledger_key(str(e.get("path") or "")) == key),
                     key=lambda e: str(e.get("ts")), reverse=True):
         o = _outcome(e)
         word = ("told the answer" if e.get("told") else "met with a hint" if o == "assisted"
@@ -640,7 +637,7 @@ def note_detail(path: str):
         raise HTTPException(404, f"no note at {path!r}")
     entries = quiz.entries()
     rows = learner.view(_entries_override=entries)
-    row = rows.get(learner.key_of(path)) or {}
+    row = rows.get(ledger_key(path)) or {}
     scopes = _plan_scopes(plans.list_plans())
     points = items.key_points(path, text)
     objectives = _objectives_for(path, scopes)
@@ -658,13 +655,13 @@ def note_detail(path: str):
         out_points.append({"i": 0, "kind": "relation", "heading": "Relations", "line": 0,
                            "objective": by_point[0][0]["objective"], "questions": len(by_point[0])})
     leaves = sorted({c["leaf"] for c in points if c.get("leaf") and not c.get("self")})
-    last = max((t for e in entries if learner.key_of(str(e.get("path") or "")) == learner.key_of(path) and (t := e.get("ts"))),
+    last = max((t for e in entries if ledger_key(str(e.get("path") or "")) == ledger_key(path) and (t := e.get("ts"))),
                default=None)
-    misses = sum(1 for e in entries if learner.key_of(str(e.get("path") or "")) == learner.key_of(path) and not e.get("correct"))
+    misses = sum(1 for e in entries if ledger_key(str(e.get("path") or "")) == ledger_key(path) and not e.get("correct"))
     now = _now()
     history = _history(path, entries)
-    evs = _events_of(entries).get(learner.key_of(path), [])
-    lately = next((m for m in _missed_lately({learner.key_of(path): evs}, _lately_cutoff(entries, now))), None) if evs else None
+    evs = _events_of(entries).get(ledger_key(path), [])
+    lately = next((m for m in _missed_lately({ledger_key(path): evs}, _lately_cutoff(entries, now))), None) if evs else None
     stale_row = {**row, "mtime": (learner._notes_meta(Path(CONFIG.vault_path)).get(path) or {}).get("mtime")}
     stale_row["stale"] = bool(evs and stale_row["mtime"] and stale_row["mtime"] > (_ts(evs[-1].get("ts")) or now) + 1.0)
     reason = _reason(stale_row, evs, now, misses=lately["misses"] if lately else None)
@@ -830,7 +827,7 @@ def _note_rows(note: str, only=None, objectives: list[str] | None = None) -> dic
     from silica.kernel.learn import learner
 
     rows = learner.view()
-    r = rows.get(learner.key_of(note))
+    r = rows.get(ledger_key(note))
     if r is None:
         raise HTTPException(404, f"no note at {note!r}")
     text = items.read_note(note)
@@ -1005,7 +1002,7 @@ def _rate(payload: dict):
         correct, rating, grader, proposed = sg["correct"], sg["rating"], "self", None
     else:
         correct = bool(v.get("correct"))
-    key = learner.key_of(it["path"])
+    key = ledger_key(it["path"])
     before = learner.view().get(key)
     entry = {
         "path": it["path"], "correct": correct, "rating": rating, "kind": it["kind"], "level": it["level"],
@@ -1089,7 +1086,7 @@ def _retest(s: dict, it: dict, entry: dict) -> dict | None:
     if it["path"] in done or len(done) >= RETEST_MAX:
         return None
     done.add(it["path"])
-    row = {**(learner.view().get(learner.key_of(it["path"])) or {}), "path": it["path"], "pool": "retest",
+    row = {**(learner.view().get(ledger_key(it["path"])) or {}), "path": it["path"], "pool": "retest",
            "objective": it.get("objective")}
     if it["kind"] not in MECHANICAL:
         made = items.build_session([{**row, "kind": "cloze", "level": LEVEL_OF["cloze"]}], [], n=1)
@@ -1587,7 +1584,7 @@ def plan_detail(path: str):
     mis = {m["path"]: m["misconception"] for m in rep.get("misconceptions") or []}
     lately = []
     for m in _missed_lately(evs_by, _lately_cutoff(entries, now)):
-        k = learner.key_of(m["path"])
+        k = ledger_key(m["path"])
         lately.append({"path": m["path"], "title": _stem(m["path"]), "questions": len(m["misses"]),
                        "why": _reason(view.get(k, {}), evs_by.get(k, []), now, misses=m["misses"]),
                        "misconception": mis.get(m["path"], "")})
@@ -1595,10 +1592,10 @@ def plan_detail(path: str):
     skip = {x["path"] for x in lately} | {(rep.get("next") or {}).get("path")}
     order = {pth: i for i, pth in enumerate(rep["paths"])}
     cands = [pth for pth in rep["paths"] if pth not in skip]
-    cands.sort(key=lambda pth: (not (view.get(learner.key_of(pth), {}).get("attempts") and (view.get(learner.key_of(pth), {}).get("R") or 1) < DUE_R),
-                                bool(view.get(learner.key_of(pth), {}).get("attempts")), order[pth]))
+    cands.sort(key=lambda pth: (not (view.get(ledger_key(pth), {}).get("attempts") and (view.get(ledger_key(pth), {}).get("R") or 1) < DUE_R),
+                                bool(view.get(ledger_key(pth), {}).get("attempts")), order[pth]))
     rep["after"] = [{"path": pth, "title": _stem(pth),
-                     "why": _reason(view.get(learner.key_of(pth), {}), evs_by.get(learner.key_of(pth), []), now)}
+                     "why": _reason(view.get(ledger_key(pth), {}), evs_by.get(ledger_key(pth), []), now)}
                     for pth in cands[:3]]
     return rep
 
@@ -1632,7 +1629,7 @@ def learn_map():
     for pth, meta in notes.items():
         if not noteshape.is_material(meta):
             continue
-        k = learner.key_of(pth)
+        k = ledger_key(pth)
         row, evs = rows.get(k) or {}, evs_by.get(k, [])
         mark = "never" if not evs else {"met": "full", "assisted": "half", "missed": "open"}[_outcome(evs[-1])]
         lately = _missed_lately({k: evs}, cutoff) if evs else []
@@ -1793,7 +1790,7 @@ def _preview(res: dict, chosen: list[str]) -> dict:
     evs_by = _events_of(entries)
     marks = {}
     for pth in res["paths"]:
-        evs = evs_by.get(learner.key_of(pth), [])
+        evs = evs_by.get(ledger_key(pth), [])
         marks[pth] = "never" if not evs else {"met": "full", "assisted": "half", "missed": "open"}[_outcome(evs[-1])]
     infer = []
     if not chosen:

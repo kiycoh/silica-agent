@@ -36,6 +36,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from silica.kernel.base.home import resolve_vault_path
+from silica.kernel.base.notekey import note_key, note_ref
 from silica.kernel.base.noteshape import CLAIMS_END_RE
 
 logger = logging.getLogger(__name__)
@@ -456,35 +457,6 @@ def drifted_notes(
     return out
 
 
-def _bare_note_ref(p: str) -> str:
-    """A note reference in the ledger's own spelling: vault-relative POSIX, no
-    `.md`. Provenance stores RunManifestEntry.path in exactly this form; a
-    caller may pass an absolute or `.md`-suffixed path, so relativize when
-    possible and degrade to a plain strip otherwise."""
-    ref = p or ""
-    try:
-        from silica.kernel.base.layout import to_vault_relative
-
-        ref = to_vault_relative(ref, ensure_md=False)
-    except Exception:
-        ref = ref.replace("\\", "/").strip("/")
-    return ref.removesuffix(".md")
-
-
-def note_key(p: str) -> str:
-    """The comparable key of a note reference: `_bare_note_ref`, casefolded.
-
-    Public because the undo journal scopes a revert by the ledger's note set
-    and must fold its own (possibly absolute) inverse paths the same way;
-    two spellings of this rule would disagree on exactly the rename cases
-    the ledger exists to survive.
-    """
-    return _bare_note_ref(p).casefold()
-
-
-_norm_note_ref = note_key
-
-
 def already_distilled(source: str, sha256: str, *, vault_path: str | None = None) -> bool:
     """True when the last record for `source` is this exact content, from a
     run that completed and wrote at least one note. A zero-yield record (all
@@ -517,11 +489,11 @@ def note_authored_by(
     patches. Matches any recorded version of the source (an A->B->A edit still
     counts). Absent/unreadable ledger degrades to False.
     """
-    target = _norm_note_ref(note_path)
+    target = note_key(note_path)
     if not target:
         return False
     for r in read_records(source, vault_path=vault_path, by_name=True):
-        if any(_norm_note_ref(n) == target for n in (r.get("notes") or [])):
+        if any(note_key(n) == target for n in (r.get("notes") or [])):
             return True
     return False
 
@@ -593,7 +565,7 @@ def rename_note(old_path: str, new_path: str, *, vault_path: str | None = None) 
     if not path:
         return "absent"
     old_key = note_key(old_path)
-    new_bare = _bare_note_ref(new_path)
+    new_bare = note_ref(new_path)
     if not old_key or not new_bare:
         return "absent"
 

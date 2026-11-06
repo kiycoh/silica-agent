@@ -292,7 +292,7 @@ def propose(vault: Path | str, folder: str = "", migration: Migration = PROVENAN
     hand-edited note and an unrecognised block are listed with the reason
     and never rewritten. Reads through DRIVER for the edit check, so `vault`
     must be the active one."""
-    from silica.kernel.write.provenance import note_key
+    from silica.kernel.base.notekey import note_key
 
     vault = Path(vault)
     scope = folder.strip().strip("/")

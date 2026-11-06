@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from silica.kernel.base.notekey import ledger_key
 from silica.kernel.base.noteshape import is_plan
 
 logger = logging.getLogger(__name__)
@@ -1795,11 +1796,11 @@ def cycles_among(paths: list[str]) -> list[list[str]]:
     try:
         # the map is keyed by path in the note's own case and key_of folds it:
         # read raw, no key of it matched and no cycle was ever found
-        prereqs = {learner.key_of(k): v for k, v in learner.prerequisites_map().items()}
+        prereqs = {ledger_key(k): v for k, v in learner.prerequisites_map().items()}
     except Exception:
         return []
-    keys = {learner.key_of(p): p for p in paths}
-    graph = {k: [learner.key_of(x) for x in prereqs.get(k, []) if learner.key_of(x) in keys] for k in keys}
+    keys = {ledger_key(p): p for p in paths}
+    graph = {k: [ledger_key(x) for x in prereqs.get(k, []) if ledger_key(x) in keys] for k in keys}
     out: list[list[str]] = []
     state: dict[str, int] = {}
     stack: list[str] = []
@@ -2335,10 +2336,10 @@ def _relations_in(paths: list[str], items_mod) -> list[tuple[str, str]]:
             continue
     try:
         prereqs = learner.prerequisites_map()
-        keys = {learner.key_of(p): p for p in paths}
+        keys = {ledger_key(p): p for p in paths}
         for k, p in keys.items():
             for pre in prereqs.get(k, []):
-                pk = learner.key_of(pre)
+                pk = ledger_key(pre)
                 if pk in keys:
                     out.append((p, keys[pk]))
     except Exception:
@@ -2754,7 +2755,7 @@ def _depths(tree: list[dict], guide: str = "", restrict: str = "") -> None:
         if verb and not n.get("depth"):
             n["depth"] = verb
     try:
-        prereqs = {learner.key_of(k): [learner.key_of(x) for x in v] for k, v in learner.prerequisites_map().items()}
+        prereqs = {ledger_key(k): [ledger_key(x) for x in v] for k, v in learner.prerequisites_map().items()}
     except Exception as exc:  # noqa: BLE001
         # no graph or no index: depth stays what the guide and the verbs said
         logger.info("plan depth: no prerequisite map (%s)", exc)
@@ -2762,7 +2763,7 @@ def _depths(tree: list[dict], guide: str = "", restrict: str = "") -> None:
     step_of: dict[str, int] = {}
     for idx, n in enumerate(nodes):
         for p in n["leaves"]:
-            step_of.setdefault(learner.key_of(p), idx)
+            step_of.setdefault(ledger_key(p), idx)
     rests_on: dict[str, int] = {}
     for dep, pres in prereqs.items():
         d = step_of.get(dep)
@@ -2772,10 +2773,10 @@ def _depths(tree: list[dict], guide: str = "", restrict: str = "") -> None:
             s_ = step_of.get(pre)
             if s_ is not None and s_ < d:
                 rests_on[pre] = rests_on.get(pre, 0) + 1
-    score = [sum(rests_on.get(learner.key_of(p), 0) for p in n["leaves"]) for n in nodes]
+    score = [sum(rests_on.get(ledger_key(p), 0) for p in n["leaves"]) for n in nodes]
     for n in nodes:
-        lead = max(n["leaves"], key=lambda p: rests_on.get(learner.key_of(p), 0))
-        if rests_on.get(learner.key_of(lead), 0):
+        lead = max(n["leaves"], key=lambda p: rests_on.get(ledger_key(p), 0))
+        if rests_on.get(ledger_key(lead), 0):
             n["lead"] = lead
     open_ = [i for i, n in enumerate(nodes) if not n.get("depth")]
     # Too few edges say nothing: on the course two of thirteen steps had a

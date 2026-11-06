@@ -356,11 +356,11 @@ def compute_report(
                 logger.warning("graph_report: quiz log unreadable (%s)", exc)
                 quiz_stats = {}
         if mtimes or quiz_stats:
-            from silica.kernel.learn.quiz import key as _quiz_key
+            from silica.kernel.base.notekey import ledger_key
 
             now_ts = datetime.now(timezone.utc).timestamp()
             for nid in real_ids:
-                q = quiz_stats.get(_quiz_key(nid)) or {}
+                q = quiz_stats.get(ledger_key(nid)) or {}
                 ts = mtimes.get(nid)
                 if q.get("last"):
                     try:
@@ -470,7 +470,7 @@ def compute_report(
         # V3: transactions = frontmatter `sources:` (one per cited source) plus
         # the notes each run wrote together (manifest, scoped to this vault).
         try:
-            from silica.kernel.recall.cooccurrence import cooccur_key as _ck
+            from silica.kernel.base.notekey import store_key
 
             if _transactions_override is not None:
                 transactions = [set(t) for t in _transactions_override]
@@ -490,7 +490,7 @@ def compute_report(
                 logger.info("graph_report: coupling dropped %d over-cap transaction(s)",
                             dropped_runs + dropped_big)
             coupling_map = {
-                _ck(a): {_ck(b): round(w, 4) for b, w in row.items()} for a, row in adj.items()
+                store_key(a): {store_key(b): round(w, 4) for b, w in row.items()} for a, row in adj.items()
             }
             seen_cp: set[tuple[str, str]] = set()
             for a, row in adj.items():

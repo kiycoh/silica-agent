@@ -152,7 +152,7 @@ def test_ghost_context_is_a_subject_of_its_own(client):
 
 
 def test_concept_endpoint_returns_graph_keys(client, monkeypatch):
-    """The recall stores key on cooccur_key (path minus .md), the graph on the
+    """The recall stores key on store_key (path minus .md), the graph on the
     full path. /concept resolves back, or the ids never match a node and the
     focus lights nothing."""
     from silica.ui.web import server

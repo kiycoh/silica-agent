@@ -32,7 +32,7 @@ def in_folder(path: str, folder: str | None) -> bool:
     Single source of truth for folder-scoping: index reconciliation
     (embed/cooccur build_index), the /embed, /cooccur, /dedup tools, the
     graph-report signals, and the cooccur/relatedness scope filters. The `.md`
-    strip is a no-op on keyspaces that are already suffix-free (cooccur_key).
+    strip is a no-op on keyspaces that are already suffix-free (store_key).
     """
     if not folder:
         return True

@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from pydantic.json_schema import SkipJsonSchema
 
 from silica.agent.commit import commit_ops
+from silica.kernel.base.notekey import store_key
 from silica.agent.bounds import dedup_bounds, dedup_spoke_bounds
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem
@@ -368,7 +369,7 @@ def _mark_merge_loser(ctx: dict, winner_path: str) -> None:
 
 
 def _note_key(path: str) -> str:
-    return path.removesuffix(".md").casefold()
+    return store_key(path).casefold()
 
 
 def _is_spine(path: str) -> bool:

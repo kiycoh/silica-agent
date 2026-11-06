@@ -96,7 +96,7 @@ def test_current_orphans_uses_driver_graph_not_full_report(monkeypatch):
     """
     import silica.driver as drv
     from silica.driver.base import NoteRef
-    from silica.agent.bounds import _norm_path
+    from silica.kernel.base.notekey import ledger_key
 
     coord = _coordinator_with(SimpleNamespace(target_dir="Concepts"), SilicaConfig())
     monkeypatch.setattr(
@@ -111,7 +111,7 @@ def test_current_orphans_uses_driver_graph_not_full_report(monkeypatch):
 
     monkeypatch.setattr(gr, "compute_report", _boom)
 
-    assert coord._current_orphans() == {_norm_path("Concepts/Lonely.md")}
+    assert coord._current_orphans() == {ledger_key("Concepts/Lonely.md")}
 
 
 def test_coordinator_enqueues_only_residual_orphans_and_reverifies():

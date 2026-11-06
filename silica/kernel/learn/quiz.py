@@ -19,6 +19,8 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+from silica.kernel.base.notekey import ledger_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,11 +29,6 @@ def log_path() -> Path:
     from silica.kernel.base import home
 
     return home.index_dir_for(CONFIG.vault_path) / "quiz.jsonl"
-
-
-def key(path: str) -> str:
-    """Comparison key: the report's node ids carry `.md` and real-world case."""
-    return str(path).replace("\\", "/").removesuffix(".md").lower()
 
 
 def record(results: list[dict]) -> int:
@@ -185,7 +182,7 @@ def stats() -> dict[str, dict]:
             path = str(rec["path"])
         except (ValueError, KeyError, TypeError):
             continue  # one torn or hand-edited line must not blind the rest
-        s = out.setdefault(key(path), {"path": path, "misses": 0, "correct": 0, "last": ""})
+        s = out.setdefault(ledger_key(path), {"path": path, "misses": 0, "correct": 0, "last": ""})
         s["correct" if rec.get("correct") else "misses"] += 1
         ts = str(rec.get("ts") or "")
         if ts > s["last"]:

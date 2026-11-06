@@ -28,6 +28,7 @@ import orjson
 from silica.kernel.text import language
 from silica.kernel.base.durable import DiskSynced, quarantine
 from silica.kernel.base.layout import in_folder
+from silica.kernel.base.notekey import store_key
 
 logger = logging.getLogger(__name__)
 
@@ -108,16 +109,6 @@ def tokenize(
     from silica.kernel.text import text as text_seam
 
     return text_seam.tokens(text, lang=stem_lang, stopword_lang=stopword_lang)
-
-
-def cooccur_key(path: str) -> str:
-    """Canonical key for the co-occurrence keyspace — single source of truth.
-
-    Producers store the stripped path ('notes/foo'); consumers pass graph node
-    ids that carry '.md' ('notes/foo.md'). Normalising here, at the store's own
-    boundary, means the two can no longer diverge into ghost keys. Idempotent.
-    """
-    return (path or "").replace("\\", "/").removesuffix(".md")
 
 
 def build_contribution(
@@ -468,14 +459,14 @@ class CooccurStore(DiskSynced):
 
     # --- mutation ---
     def upsert_note(self, path: str, contribution: dict[str, Any]) -> None:
-        key = cooccur_key(path)
+        key = store_key(path)
         self._notes[key] = contribution
         self._dirty.add(key)
         self._gone.discard(key)
         self._invalidate()
 
     def delete_note(self, path: str) -> None:
-        key = cooccur_key(path)
+        key = store_key(path)
         self._notes.pop(key, None)
         self._gone.add(key)
         self._dirty.discard(key)
@@ -509,7 +500,7 @@ class CooccurStore(DiskSynced):
         per visited node (mindmap.reading_path) stays O(V+E). Fresh dict per
         call, like note_nodes: callers may mutate their result.
         """
-        return dict(self.note_adjacency().get(cooccur_key(path), {}))
+        return dict(self.note_adjacency().get(store_key(path), {}))
 
     # --- lookup ---
     def paths(self) -> list[str]:
@@ -528,7 +519,7 @@ class CooccurStore(DiskSynced):
         call still returns a fresh copy so callers may mutate their result
         without corrupting the cache.
         """
-        key = cooccur_key(path)
+        key = store_key(path)
         cached = self._note_nodes_cache.get(key)
         if cached is None:
             contrib = self._notes.get(key)

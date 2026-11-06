@@ -615,7 +615,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     # {} — no lexical index — keeps the scan bit-identical to the unweighted one.
     wts = window_weights(query) if query else {}
     grounding = _grounding_labels()
-    from silica.kernel.write.provenance import note_key
+    from silica.kernel.base.notekey import note_key
     blocks: list[NoteBlock] = []
     exists = _resolver()
     unresolved = 0

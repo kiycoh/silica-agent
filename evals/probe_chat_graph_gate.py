@@ -116,17 +116,19 @@ def state_diff(live: tuple, full: tuple) -> dict:
 
 def rule1(pre, post) -> set[str]:
     """Unplanned orphans as graph_diff computes them, nothing created."""
-    from silica.kernel.graph_diff import normalize_path, normalize_ref
+    from silica.kernel.graph_diff import normalize_ref
+    from silica.kernel.base.notekey import gate_key
 
     new = {normalize_ref(r) for r in post.orphans} - {normalize_ref(r) for r in pre.orphans}
-    return new & {normalize_path(k) for k in pre.link_counts}
+    return new & {gate_key(k) for k in pre.link_counts}
 
 
 def rule2(pre, post) -> set[tuple[str, str]]:
     """New unresolved links as graph_diff computes them, nothing exempt."""
-    from silica.kernel.graph_diff import normalize_link, normalize_path
+    from silica.kernel.graph_diff import normalize_link
+    from silica.kernel.base.notekey import gate_key
 
-    observed = {normalize_path(k) for k in pre.link_counts}
+    observed = {gate_key(k) for k in pre.link_counts}
     new = ({normalize_link(lk.source, lk.target) for lk in post.unresolved}
            - {normalize_link(lk.source, lk.target) for lk in pre.unresolved})
     return {(s, t) for s, t in new if s in observed}
@@ -268,7 +270,7 @@ def _slash_delete(path: str) -> tuple[str, dict]:
 
 
 def g1_case(live: Live, path: str, refs: list[str], vault: Path) -> dict:
-    from silica.kernel.graph_diff import normalize_path
+    from silica.kernel.base.notekey import gate_key
 
     original = (vault / path).read_text(encoding="utf-8")
     pre_state, pre = live.full()
@@ -290,8 +292,8 @@ def g1_case(live: Live, path: str, refs: list[str], vault: Path) -> dict:
     # (b)
     post_state, post = live.full()
     landed = not (vault / path).exists()
-    orphaned = {normalize_path(p) for p in report.get("orphaned") or []}
-    dangling = {(normalize_path(d["note"]), normalize_path(d["link"])) for d in report.get("dangling") or []}
+    orphaned = {gate_key(p) for p in report.get("orphaned") or []}
+    dangling = {(gate_key(d["note"]), gate_key(d["link"])) for d in report.get("dangling") or []}
     want1, want2 = rule1(pre, post), rule2(pre, post)
     live_ok = live.state() == post_state
     out["b"] = landed and orphaned == want1 and dangling == want2 and live_ok

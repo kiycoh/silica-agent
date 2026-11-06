@@ -1848,7 +1848,7 @@ def _dc_trash(args: list[str], *, raw_input: str = "", **_) -> bool:
 
     from rich.markup import escape
 
-    from silica.kernel.write.provenance import note_key
+    from silica.kernel.base.notekey import note_key
     from silica.kernel.write.undo_journal import (USER_DELETE_SOURCE, get_undo_journal,
                                                   restore_from_trash)
 

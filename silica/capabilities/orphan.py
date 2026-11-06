@@ -129,7 +129,7 @@ def run_orphan(item: WorkItem, config: Any) -> dict[str, Any]:
     title = os.path.splitext(os.path.basename(target))[0]
     hub = item.context.get("hub")
     # The candidate paths come from the relatedness facade, whose keyspace is
-    # cooccur_key: '.md'-stripped. The driver reads either spelling, but the op
+    # store_key: '.md'-stripped. The driver reads either spelling, but the op
     # path is what gets written, so it has to be the real note.
     neighbours = list(dict.fromkeys(
         p if p.endswith(".md") else p + ".md" for n in valid if (p := by_name[n])

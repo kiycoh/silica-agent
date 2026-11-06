@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 
-from silica.kernel.recall.cooccurrence import cooccur_key
+from silica.kernel.base.notekey import store_key
 from silica.kernel.base.durable import atomic_write_bytes
 from silica.kernel.base.home import index_dir
 
@@ -49,7 +49,7 @@ def bump(paths: list[str]) -> None:
     """Increment the weight of each note in `paths` by 1, once each.
 
     Normalizes every path to the canonical (no-`.md`, case-preserved) key via
-    `cooccur_key` before deduping and incrementing, so the same note reached
+    `store_key` before deduping and incrementing, so the same note reached
     via two different tool calls in one turn (e.g. silica_recall then
     silica_read_note) counts once. Best-effort: an I/O failure logs and
     returns rather than raising — a persisted weight is a nice-to-have, not
@@ -57,7 +57,7 @@ def bump(paths: list[str]) -> None:
     """
     if not paths:
         return
-    keys = {cooccur_key(p) for p in paths}
+    keys = {store_key(p) for p in paths}
     try:
         weights = _load()
         for key in keys:

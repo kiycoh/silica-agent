@@ -582,7 +582,7 @@ def test_the_hub_vocabulary_is_capped_like_its_siblings():
 
 def test_neighbours_above_excludes_the_query_note_itself(tmp_path, monkeypatch):
     """The self-exclusion passed the raw `.md` path into a store keyed by
-    cooccur_key (no `.md`), so it never matched and every note was its own
+    store_key (no `.md`), so it never matched and every note was its own
     closest neighbour (cosine 1.0). Downstream autolink's self_title guard
     happened to hide it — the recall keyspace mismatch class, again."""
     import silica.kernel.recall.embed as embed_mod

@@ -37,6 +37,8 @@ from uuid import uuid4
 
 import orjson
 
+from silica.kernel.base.notekey import ledger_key
+
 try:  # POSIX only; Windows falls back to the in-process lock alone.
     import fcntl
 except ImportError:  # pragma: no cover - non-POSIX
@@ -51,10 +53,6 @@ logger = logging.getLogger(__name__)
 
 _LEASES: dict[str, threading.Lock] = {}
 _LEASES_GUARD = threading.Lock()
-
-
-def _lease_key(path: str) -> str:
-    return (path or "").replace("\\", "/").removesuffix(".md").lower()
 
 
 def _lock_file(key: str) -> Path | None:
@@ -88,7 +86,7 @@ def path_lease(path: str) -> Iterator[None]:
     for same-process writers). ``commit_ops`` acquires multiple leases in sorted
     order, so cross-process acquisition order is consistent and deadlock-free.
     """
-    key = _lease_key(path)
+    key = ledger_key(path)
     with _LEASES_GUARD:
         lock = _LEASES.setdefault(key, threading.Lock())
     lock.acquire()
