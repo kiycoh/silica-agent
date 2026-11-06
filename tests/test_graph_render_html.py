@@ -165,10 +165,11 @@ class TestRenderSanity:
         assert "inDeg[e.to]" in html
 
     def test_fit_button_uses_graph_zoom(self, small_graph):
-        """Fit graph button should call Graph.zoomToFit, not network.fit."""
+        """Fit frames the free width in 2D and is the lib's zoomToFit in 3D."""
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
-        assert "Graph.zoomToFit(400, 40)" in html
+        assert "fitFree(400);" in html
+        assert "Graph.zoomToFit(ms, pad, only);" in html
         assert "network.fit(" not in html
 
     def test_node_visibility_accessor(self, small_graph):
@@ -299,7 +300,7 @@ class TestFocusDim:
     def test_clear_focus_zooms_to_fit(self, small_graph):
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
-        assert "Graph.zoomToFit(600, 40)" in html
+        assert "fitFree(600);" in html
 
     def test_direct_node_click_dims_without_camera_fly(self, small_graph):
         """Clicking a node in the view itself dims non-neighbours like tree/search
@@ -312,7 +313,7 @@ class TestFocusDim:
         assert ".onNodeClick((n, e) => clickNote(n, e))" in html
         body = html[html.index("function clickNote("):]
         body = body[:body.index("\n}\n")]
-        assert "selectNode(node); applyFocus(node.id);" in body
+        assert body.index("selectNode(node);") < body.index("applyFocus(node.id);")
         assert "focusNode(" not in body
 
     def test_parent_can_sync_focus_by_path(self, small_graph):
@@ -416,7 +417,7 @@ class TestBigVaultPerfKnobs:
         """
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
-        assert html.index("applyForces(false, G)") < html.index("G.graphData(")
+        assert html.index("applyForces(G);") < html.index("G.graphData(")
 
     def test_low_node_resolution(self, small_graph):
         nodes, edges = small_graph
@@ -477,7 +478,7 @@ class TestWebGLLinks2D:
         # the cost twice, and a lib line over a band would cut it; it keeps the
         # citations (their arrowhead), a written requires (its chevrons) and the
         # photon carriers visible
-        assert '.linkVisibility(l => !l._hidden && !quietNow(l) && (!GLLinks || l.type === "CITES" || l.requires || libOwnsLink(l)))' in html
+        assert '(!GLLinks || l.type === "CITES" || l.requires || libOwnsLink(l)))' in html
         assert '.linkCanvasObjectMode(l => GLLinks ? "replace" : l.type === "CITES" || l.requires ? "after" : null)' in html
         # and the layer reads every visible link, covers included: what the
         # atlas quiets is its mat (test_graph_frame), not a hidden link
@@ -566,7 +567,7 @@ class TestLayoutWorker:
         links is the one signal that belongs to this digest."""
         html = self._js(small_graph)
         assert 'if (k === "links" && a.length && fed) fed();' in html
-        assert 'inert(G.d3Force(name), name === "link" ? () => setTimeout(() => simInit(S)) : null)' in html
+        assert 'inert(G.d3Force(name), S && name === "link" ? () => setTimeout(() => simInit(S)) : null)' in html
         assert "if (SIM !== S || S.inited) return;" in html
 
     def test_the_same_forces_in_the_same_order(self, small_graph):
@@ -575,13 +576,6 @@ class TestLayoutWorker:
         assert '.force("center", d3.forceCenter()).force("follow", follow)' in html
         # float64, the precision d3 summed them in on the lib's side
         assert "const strengths = new Float64Array(links.length);" in html
-
-    def test_a_post_from_a_run_that_is_over_changes_nothing(self, small_graph):
-        """A done already in flight when a reheat starts would stop the lib's
-        engine on a run the worker has only begun."""
-        html = self._js(small_graph)
-        assert "S.post({ reheat: 1, gen: ++S.gen });" in html
-        assert "if (d.gen === S.gen) {" in html
 
     def test_what_the_main_thread_writes_reaches_the_worker(self, small_graph):
         html = self._js(small_graph)
@@ -592,11 +586,8 @@ class TestLayoutWorker:
         assert "n.__wx = NaN;" in _block_of(html, "function restoreArranged(")
 
     def test_a_turn_of_writes_lands_as_one(self, small_graph):
-        """autoLayout reheats and then holds: posted apart, the worker ticked
-        in between as often as the scheduler let it, and the same click gave
-        different layouts. One message per turn holds at alpha 1, which is
-        what the lib does for a click on a waking loop (same positions,
-        2026-10-26)."""
+        """What the main thread writes in one turn reaches the worker as one
+        message, so a tick cannot fall between two of its writes."""
         html = self._js(small_graph)
         assert "queueMicrotask(() => { this.queued = false; const ops = this.box; this.box = []; w.postMessage({ ops }); });" in html
         assert "if (sim) for (const op of m.ops) apply(op);" in html
@@ -629,25 +620,26 @@ class TestHostDrawerHidesTheHud:
         assert 'classList.toggle("host-drawer-open", !!e.data.open)' in html
 
 
-class TestDragReheat:
-    """d3AlphaMin gates tick(), and alpha only rises inside tick().
+class TestTheLayoutHolds:
+    """ADR-0152: the layout is worked out once. A note cannot be dragged and
+    nothing starts the engine again, so nothing here can undo the overlap pass."""
 
-    So a settled graph could never answer a drag: the bundles reheat with
-    d3AlphaTarget(0.3).resetCountdown(), the gate saw the old alpha and stopped
-    the engine on the same frame, and only the grabbed node moved. The pair of
-    handlers below is the whole fix — lifting the gate without restoring it
-    would leave the layout running forever instead.
-    """
-
-    def test_drag_lifts_the_alpha_gate_and_dragend_puts_it_back(self, small_graph):
+    def test_a_note_cannot_be_dragged_and_nothing_reheats(self, small_graph):
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="")
-        assert ".onNodeDrag(" in html
-        assert "G.d3AlphaMin(0);" in html
-        assert ".onNodeDragEnd(() => { simDrag(false); G.d3AlphaMin(ALPHA_MIN); })" in html
-        # under the layout worker the lib's reheat only keeps time: the worker
-        # is the one told to climb toward 0.3 and back
-        assert "S.post(on ? { target: 0.3, gen: ++S.gen } : { target: 0 });" in html
+        assert ".enableNodeDrag(false)" in html
+        for gone in (".onNodeDrag(", "simDrag", "autoLayout", "d3ReheatSimulation()", "onForceSlider"):
+            assert gone not in html, gone
+
+    def test_a_cache_hit_runs_no_engine_at_all(self, small_graph):
+        nodes, edges = small_graph
+        html = render_html(nodes, edges, lib_js="")
+        assert "SIM = seeded ? null : buildSim(G);" in html
+        assert ".cooldownTicks(0)" in html, "the lib's engine stops on its first frame, without a tick"
+        # and its forces go inert all the same, so no tick can walk the picture
+        assert "if (seeded || S)" in html
+        stop = html[html.index(".onEngineStop(() => {"):]
+        assert "G.cooldownTicks(0);" in stop[:400]
 
 
 # ---------------------------------------------------------------------------
@@ -711,11 +703,8 @@ class TestCameraFitAndWarmup:
     def test_a_seeded_layout_runs_no_synchronous_warmup(self, small_graph):
         nodes, edges = small_graph
         js = render_html(nodes, edges, lib_js="// dummy")
-        assert "function WARMUP_TICKS(seeded)" in js, \
-            "warmup must be able to see whether the positions were seeded"
-        assert "if (seeded) return 0;" in js, \
-            "a seeded layout must not also run a warmup: the cache IS the warmup, " \
-            "and running one consumes the whole alpha schedule before any frame"
+        assert "const warm = seeded ? 0 : WARMUP_TICKS();" in js, \
+            "a cached layout must not also run a warmup: the cache IS the layout"
 
     def test_the_deferred_fit_waits_for_a_painted_frame(self, small_graph):
         nodes, edges = small_graph

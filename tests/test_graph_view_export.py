@@ -101,10 +101,8 @@ def test_export_graph_has_density_forces_panel(monkeypatch, tmp_path):
     html = out.read_text(encoding="utf-8")
 
     assert "FORCE_SCALE" in html            # auto-scaling baseline present
-    for sid in ("sl-repel", "sl-dist", "sl-center"):
-        assert f'id="{sid}"' in html        # the three live sliders
-    assert "d3ReheatSimulation" in html     # sliders reheat, never rebuild
-    assert "silica-graph-forces" in html    # slider persistence key
+    # The layout is worked out once and holds (ADR-0152): nothing steers it.
+    assert "sl-repel" not in html and "d3ReheatSimulation()" not in html
 
 
 def test_export_graph_raises_when_vendored_asset_missing(monkeypatch, tmp_path):

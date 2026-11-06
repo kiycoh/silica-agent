@@ -182,11 +182,11 @@ def test_the_pane_draws_the_note_on_every_view():
     """The node scope was gated on Explore and Metrics, so a note read from
     Chat, Learn or Calendar could not show its place at all (ADR-0075). The
     note open in the drawer is the subject now, whichever view opened it; the
-    three graph selections keep their gate."""
+    two graph selections keep their gate."""
     branch = _block(WORK_JS.read_text(), "function renderCtx() {", 'scope.textContent = "";')
     assert "if (node) { renderNode(); return; }" in branch
     assert "view === \"metrics\") && node" not in branch
-    for sel in ("compare", "concepts", "bridge"):
+    for sel in ("compare", "concepts"):
         assert f'view === "graph" && {sel}' in branch
 
 
@@ -326,12 +326,12 @@ def test_the_tabs_are_the_only_place_the_surfaces_are_named():
     for gone in ('id="legend"', 'id="lg-layout"', 'id="layout-modes"', 'id="lg-areas"', 'id="lg-surface"'):
         assert gone not in html, f"{gone} is back"
     modes = _modes(app)
-    # ADR-0064: Bridges took the name Areas and the matrix with it, so the
-    # mode id that names one part and its neighbours is "areas"
     # ADR-0088: the Map is what a click on a note lays out in the graph, so it
     # is no longer a surface of its own.
-    assert [m for m, _ in modes] == ["graph", "path", "folders", "areas", "read"], modes
-    assert [g for _, g in modes] == ["0", "0", "1", "1", "1"], "pictures of the links, then readings of the shape"
+    # ADR-0152: Flow replaced Path and Clusters replaced Areas and its matrix,
+    # both drawn in the frame.
+    assert [m for m, _ in modes] == ["graph", "flow", "clusters", "folders", "read"], modes
+    assert [g for _, g in modes] == ["0", "0", "0", "1", "1"], "pictures of the links, then readings of the shape"
     # ADR-0066: the Library tab is pushed wherever Zotero answers, read-only
     # where this vault does not hold the link, and always in the third group.
     lib = app[app.index('LAYOUT_MODES.push(["library", "Library"'):]
@@ -366,8 +366,8 @@ def test_the_right_column_holds_find_scope_compare_over_the_key():
     app, css = app_js(), app_css()
     side = _block(INDEX.read_text(), '<div id="graph-side">', '<div id="graph-loading"')
     assert 'id="node-search"' in side and 'id="graph-picks"' in side
-    assert '$("#graph-side").hidden = isShape || isLibrary;' in app
-    assert '$("#graph-bar").classList.toggle("by-side", !(isShape || isLibrary));' in app
+    assert '$("#graph-side").hidden = inPane;' in app
+    assert '$("#graph-bar").classList.toggle("by-side", !inPane);' in app
     # the pickers land in the column, not on the line under the tabs
     line = _block(app, "function buildSurfaceLine()", "\n}\n")
     assert "picks.appendChild(buildScopePicker());" in line
@@ -390,12 +390,12 @@ def test_the_renderer_has_one_home_the_frames_foot_bar():
     picture, the foot how it is made. The renderer was a segment in the app's
     legend AND the HUD's Renderer section, hidden embedded, with an ask/answer
     pair to keep the two in step; on the foot bar it has one home in both
-    contexts, embedded and the exported graph.html. Forces opens from there."""
+    contexts, embedded and the exported graph.html."""
     app, markup, css, js = app_js(), FRAME_HTML.read_text(), FRAME_CSS.read_text(), FRAME_JS.read_text()
     foot = _block(markup, '<div id="gstat">', '<div id="hud">')
-    assert 'id="mode-toggle"' in foot and 'id="forces-fold"' in foot
+    assert 'id="mode-toggle"' in foot and 'id="names-toggle"' in foot
     hud = _block(markup, '<div id="hud">', '<div id="drawer">')
-    assert "mode-toggle" not in hud and "forces-fold" not in hud and "Renderer" not in hud
+    assert "mode-toggle" not in hud and "names-toggle" not in hud and "Renderer" not in hud
     for gone in ("silica-set-renderer", "silica-renderer", "syncRenderer", "renderer-tabs",
                  "renderer-section", "silica-legend-h", "--legend-h", "syncLegendOffset"):
         assert gone not in app + markup + css + js, f"{gone} is back"
@@ -416,8 +416,8 @@ def test_fit_is_offered_once_and_reheat_is_gone():
 
 
 def test_the_foot_is_two_corners_anchored_beside_the_dock():
-    """What you press bottom-left, the simulation (Forces and its size)
-    bottom-right, so the open composer has the middle. Since ADR-0072 both sit
+    """What you press bottom-left, the layout's state and its size bottom-right,
+    so the open composer has the middle. Since ADR-0072 both sit
     on the frame's bottom edge and the app caps its unfolded composer between
     them; under 912px of dock it cannot, says so (`lift`), and they ride above
     the dock, whose height the app posts because a run line, the answer card
@@ -425,9 +425,9 @@ def test_the_foot_is_two_corners_anchored_beside_the_dock():
     markup, css, js = FRAME_HTML.read_text(), FRAME_CSS.read_text(), FRAME_JS.read_text()
     left = _block(markup, '<div id="gstat">', '<div id="gsim">')
     right = _block(markup, '<div id="gsim">', '<div id="hud">')
-    for chip in ('id="mode-toggle"', 'onclick="fitGraph()"', 'onclick="autoLayout()"'):
+    for chip in ('id="mode-toggle"', 'id="names-toggle"', 'onclick="fitGraph()"'):
         assert chip in left and chip not in right, chip
-    assert 'id="forces-fold"' in right and 'id="gstat-n"' in right
+    assert 'id="gsize"' in right and 'id="gstat-n"' in right
     assert "body{--foot:12px}" in css and "body.embedded{--foot:16px}" in css
     assert "body.embedded.foot-lift{--foot:calc(var(--dock-h,72px) + 12px)}" in css
     assert '"silica-host-dock"' in js and 'classList.toggle("foot-lift", !!e.data.lift)' in js
@@ -445,34 +445,10 @@ def test_the_settle_count_includes_the_warmup_it_cannot_observe():
     js = FRAME_JS.read_text()
     # the lib's own engine counts its ticks; under the layout worker the count
     # comes off the worker's total in simSync, which subtracts the same warmup
-    assert ".onEngineTick(() => { if (SIM) return simSync(SIM); simTicks++; descendTick(); })" in js
+    assert ".onEngineTick(() => { if (SIM) return simSync(SIM); simTicks++; })" in js
     assert 'paintStat("settled in " + gnum(warmupRun + simTicks) + " ticks");' in js
     assert "warmupRun = warm;" in js
-    assert "simTicks = Math.max(0, d.total - S.base - warmupRun);" in js
-
-
-def test_auto_layout_finishes_the_descent_a_reheat_only_starts():
-    """The alpha gate freezes a layout at tick ~300 whatever the forces still
-    say. Measured 2026-09-21 on the 1,195-node test vault: the next reheat still
-    moved every node 100 units on average; after one auto-layout it moved 21,
-    after two 13. auto-layout holds alpha instead of decaying it and lets go on
-    a residual or a budget, and the budget is not optional: the median step
-    plateaus at ~3 units on that vault, above any eps that means "at rest"."""
-    markup, js = FRAME_HTML.read_text(), FRAME_JS.read_text()
-    assert 'onclick="autoLayout()"' in markup
-    body = _block(js, "function autoLayout() {", "\n}")
-    assert "Graph.d3AlphaMin(0);" in body       # the drag deadlock, same cure
-    assert "applyForces(true);" in body          # still the one definition of "stir it"
-    assert "Graph.d3AlphaDecay(0);" in body      # the hold: alpha never cools
-    tick = _block(js, "function descendTick() {", "\n}")
-    assert "r < RESIDUAL_EPS || --residualTicks === 0" in tick
-    assert "Graph.d3AlphaDecay(FAST_DECAY).d3AlphaMin(ALPHA_MIN);" in tick
-    # the lib's own engine counts its ticks; under the layout worker the count
-    # comes off the worker's total in simSync, which subtracts the same warmup
-    assert ".onEngineTick(() => { if (SIM) return simSync(SIM); simTicks++; descendTick(); })" in js
-    # the residual is the median step, not the max: one hub's Barnes-Hut noise
-    # would otherwise report a settled graph as moving
-    assert "return st[st.length >> 1] || 0;" in _block(js, "function residual() {", "\n}")
+    assert "simTicks = Math.max(0, d.total - warmupRun);" in js
 
 
 # --- 5. the rail's floor -----------------------------------------------------
@@ -543,136 +519,21 @@ def test_a_lit_concept_can_be_put_out_by_the_pill_that_lit_it():
     assert "focusGraphNodes([])" in light
 
 
-def test_the_ladder_footer_roots_path_before_it_enters_the_tab():
-    """Path has no root-replay on tab-enter, the way map does.
-
-    showTab -> setGraphMode("path") -> drawPath() reads pathRootedPath and
-    nothing else, so pre-setting graphMode the way the map button does starts an
-    UNROOTED draw first -- and the landing measures forty ladders, so it also
-    finishes last and overwrites the rooted one. rootPath has to run before the
-    tab click, not after it.
-    """
+def test_the_ladder_footer_roots_flow_before_it_enters_the_tab():
+    """The tab's arrival replays the root, so the root has to be set first: a
+    tab click before it would ask the frame for the vault's first pick and
+    arrange a note the reader did not come from."""
     app = app_js()
     body = _block(app, "window.openLadder = (note) => {", "};")
-    assert 'graphMode = "path"' not in body, "pre-setting the mode races the rooted draw"
-    assert body.index("rootPath(note)") < body.index('.tab[data-tab="graph"]')
+    assert body.index("rootFlow(note)") < body.index('.tab[data-tab="graph"]')
     # and the panel is the only caller: it knows its note and nothing about modes
     assert "window.openLadder" in WORK_JS.read_text()
 
 
-# --- 4. areas: one part and its neighbours, over the coupling of every pair --
-# ADR-0060 drew WHICH links join one part to the others; ADR-0064 folds the
-# matrix that says HOW MANY into the same surface, under the drawing's index.
-
-def test_areas_is_one_shape_view_fed_by_the_shape_load():
-    """One /shape load feeds it like the other pane surfaces: a second endpoint
-    would be a second build of the same graph that can disagree with the
-    matrix beside it. The matrix's own surface is gone, and so is the zones'
-    reading beside the areas' (ADR-0136)."""
-    app = app_js()
-    views = _block(app, "const SHAPE_VIEWS = {", "};")
-    assert "areas: renderAreas" in views and "bridges" not in views
-    body = _block(app, "function renderAreas(s) {", "\n}")
-    assert "s.bridges" in body and "s.zone" not in body and "bridgePartition" not in body
-    assert "couplingMatrix(" in body and "s.matrix" in body
-    assert "function renderBridges(" not in app
-
-
-def test_an_old_bridges_link_lands_on_areas():
-    """#explore/bridges was the surface's address from ADR-0045 to ADR-0064: a
-    bookmark of it opens the surface it became, not the Graph."""
+def test_a_bookmark_of_a_replaced_surface_lands_on_what_it_became():
+    """#explore/bridges, /areas and /path open what they became, not the Graph."""
     parse = _block(app_js(), "function parseHash() {", "\n}")
-    assert '"bridges"' in parse and '"areas"' in parse
-
-
-def test_the_centre_is_the_scope_and_defaults_to_the_rarest_link():
-    """Decision 1: one state across Graph and Areas, so the centre is read
-    from the scope and written back to it; with no scope, the source part of
-    the row ADR-0045 ranks first."""
-    body = _block(app_js(), "function renderAreas(s) {", "\n}")
-    assert "graphScope.kind === kind" in body and "setGraphScope(scopeOf(id))" in body
-    assert "rows[0].a.part_id" in body
-
-
-def test_a_coupling_cell_opens_its_pair():
-    """Decision 4: a cell (A, B) on the centre opens the other end's group in
-    place; off it, it recentres on A with the B spoke open."""
-    app = app_js()
-    grid = _block(app, "function couplingMatrix(areas, matrix,", "\n}")
-    assert "onPair(a.id, b.id)" in grid
-    body = _block(app, "function renderAreas(s) {", "\n}")
-    assert "onPair: openPair" in body and "openBridges(x, y)" in body
-    opener = _block(app, "function openBridges(x, y)", "\n}")
-    assert "bridgeSpoke = y" in opener and "setGraphScope(" in opener and 'setGraphMode("areas")' in opener
-    assert "bridgePair" not in app, "the flat list's pair filter is gone with the list"
-
-
-def test_the_matrix_holds_only_the_parts_that_link():
-    """ADR-0064: a part with no link to another is a row and a column of empty
-    cells (8 of 22 areas on the test vault); the drawing already says so by
-    drawing its disc alone, so the grid leaves it out."""
-    body = _block(app_js(), "function renderAreas(s) {", "\n}")
-    assert ".some((v, j) => j !== i && v)" in body
-
-
-def test_the_folded_matrix_names_its_parts_by_colour_and_one_renderer_draws_it():
-    """Two renderers over one payload is two places to fix a contrast bug: the
-    column's grid is couplingMatrix with swatch heads, not a second grid."""
-    grid = _block(app_js(), "function couplingMatrix(areas, matrix,", "\n}")
-    assert "swatch" in grid and "onPart" in grid
-    assert "c.dataset.i = a.id" in grid and "c.dataset.j = b.id" in grid
-    css = app_css()
-    assert ".smx.fit {" in css and ".smx-sw {" in css
-
-
-def test_the_index_is_a_layer_over_the_matrix():
-    """ADR-0064: a group opens in place and the list grows down over the
-    matrix, which never moves; where the list covers it, the glass blur keeps
-    the rows readable. The column reserves the closed index of the busiest
-    centre, so a recentre does not move the matrix either."""
-    css = _block(app_css(), "/* bridges: one part and its neighbours", "/* the sentence that carries a link")
-    layer = _block(css, ".ego-index {", "}")
-    assert "position: absolute" in layer and "backdrop-filter: var(--glass-blur)" in layer
-    assert ".ego-reserve {" in css
-    body = _block(app_js(), "function renderAreas(s) {", "\n}")
-    assert '"--slots"' in body
-
-
-def test_the_gestures_go_where_the_decision_sends_them():
-    """Decision 4: a line fills the work panel (renderBridge), a neighbour
-    becomes the centre, a dot opens its note, "show in graph" scopes the Graph."""
-    body = _block(app_js(), "function renderAreas(s) {", "\n}")
-    assert 'new CustomEvent("silica:bridge"' in body
-    assert "pickEgo(id)" in body
-    assert "openNote(end.path)" in body
-    assert 'setGraphMode("graph")' in body
-    # every mark's click stops at the mark, or the pane's own handler clears the
-    # work panel the line has just filled
-    assert body.count("ev.stopPropagation()") >= 5
-
-
-def test_nothing_on_areas_is_told_apart_by_width_or_dashes():
-    """Decision 3 and ADR-0058 Decision 11: the count is a label and the part a
-    colour; a frontmatter link is fainter, because dashed means absent."""
-    body = _block(app_js(), "function renderAreas(s) {", "\n}")
-    assert "stroke-width" not in body and "r: RD" in body
-    css = _block(app_css(), "/* bridges: one part and its neighbours", "/* the sentence that carries a link")
-    rules = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
-    assert "dasharray" not in rules
-    widths = set(re.findall(r"\.ego-ln-ink \{[^}]*stroke-width: ([\d.]+)", rules))
-    assert widths == {"1.5"}
-    for sel in (".ego-ln:hover .ego-ln-ink,\n.ego-ln.on .ego-ln-ink {", ".ego-ln.fm .ego-ln-ink {", ".ego-ln.off .ego-ln-ink {"):
-        assert "stroke-width" not in _block(rules, sel, "}")
-
-
-def test_the_index_is_the_keyboard_way_through():
-    """Decision 6: grouped by neighbour in ring order; the arrows walk it, and
-    the selection is painted in place so the focus survives it."""
-    body = _block(app_js(), "function renderAreas(s) {", "\n}")
-    assert '"ArrowDown"' in body and "next.focus()" in body
-    assert "aria-expanded" in body
-    pick = _block(body, "function pickLink(m) {", "\n  }")
-    assert "paint()" in pick and "drawShape()" not in pick
+    assert 'const moved = { bridges: "clusters", areas: "clusters", path: "flow" };' in parse
 
 
 def test_no_two_classic_scripts_declare_one_top_level_name():
@@ -698,12 +559,11 @@ def test_no_two_classic_scripts_declare_one_top_level_name():
 
 def test_a_pane_surface_writes_itself_into_the_url_like_the_graph_does():
     """P7: the surface is state. setGraphMode synced the URL on its last line,
-    after the pane views (folders, areas, bridges, read, path) had already
-    returned, so #explore/areas never appeared and Back walked past four of
-    the seven surfaces. Measured in the browser 2026-09-22: setGraphMode("read")
-    left the hash at #explore/areas. The sync has to come before that return."""
+    after the pane views had already returned, so their addresses never appeared
+    and Back walked past them. Measured in the browser 2026-09-22. The sync has
+    to come before that return."""
     body = _block(app_js(), "function setGraphMode(m) {", "\n}")
-    assert body.index("syncUrl(false)") < body.index("if (isShape || isPath || isLibrary) {"), \
+    assert body.index("syncUrl(false)") < body.index("if (inPane) {"), \
         "the URL sync sits after the pane views' early return"
 
 

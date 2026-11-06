@@ -63,9 +63,21 @@ ALL_EDGES.forEach(e => {
 });
 
 let focusIds = [];  // the focused set; [] = nothing focused
-// The arrangement (ADR-0088): {root, layout: {id: [x, y, cost]}, wedges, rIn,
-// centre} while a single-note focus is laid out as the Map, else null.
+// The arrangement (ADR-0088): {kind, root, layout: {id: [x, y, cost]}, wedges,
+// rIn, centre} while the notes stand somewhere other than the settled layout,
+// else null. kind "map" is a single-note focus; "clusters" and "flow" are the
+// tabs of those names (ADR-0152), which add `heads`, and `edges` for Flow.
 let ARR = null;
+// The tab the app is on: "network", "clusters" or "flow". A focus arranges the
+// Map on the network only (arrangeFocus).
+let LAYOUT = "network";
+// The link clicked (ADR-0152), or null. It outranks hover and focus: the reader
+// is looking at one line.
+let LINK_SEL = null;
+// {t, grow, t0, ring, end, ready, travelling, then} while the notes arrive on
+// the circle (ADR-0152), else null. Nothing that reads a settled position runs
+// meanwhile, so it waits in `then` or for arrivalDone.
+let ARRIVAL = null;
 
 // Highlight a SET of nodes and their 1-hop neighbours; dim everything else.
 // A set, not one id: the context drawer lights every note carrying a concept,
@@ -86,7 +98,10 @@ function computeFocus(ids) {
 // else the focus's (ADR-0088 amendment). Since a click arranges, the hover is
 // where the old click's look went, and it is that look exactly (markDim).
 function paintDim() {
-  markDim(hoverId ? [hoverId] : focusIds, incident, ALL_NODES, ALL_EDGES);
+  if (LINK_SEL) markOnly([LINK_SEL.from, LINK_SEL.to], LINK_SEL, ALL_NODES, ALL_EDGES);
+  // Flow lights its ladder and nothing the ladder's notes happen to link to.
+  else if (ARR && ARR.kind === "flow") markOnly(Object.keys(ARR.layout), null, ALL_NODES, ALL_EDGES);
+  else markDim(hoverId ? [hoverId] : focusIds, incident, ALL_NODES, ALL_EDGES);
 }
 
 // A hover is a look, not a focus: focusIds, the banner and an arrangement stay
@@ -125,7 +140,7 @@ function updateFocusBar() {
     const n = RAW_NODES.filter(x => x.group === SCOPE.id).length;
     parts.push("area <b>" + escHtml(COMM_HUBS[SCOPE.id] || "#" + SCOPE.id) + "</b> · " + n + " notes");
   }
-  if (focusIds.length) {
+  if (focusIds.length && LAYOUT !== "flow") {
     const lit = litSet(focusIds, incident);
     const nearby = Math.max(0, lit.size - focusIds.length);
     // One note focused: its name is already on screen above this bar, in the
@@ -145,10 +160,10 @@ const escHtml = s => String(s).replace(/[&<>]/g, c => (
   {'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 
 // --- A paper is a square (ADR-0055) -----------------------------------------
-// Colour is the community, size is betweenness and the rings are hub, orphan
-// and cut vertex, so shape is the one channel left. The square keeps the AREA
-// of the disc it replaces (side r * sqrt(pi)): size has to read as betweenness
-// across both shapes, and an inscribed square would read 36% smaller at the
+// Colour is the community, size is links and the rings are hub, orphan and cut
+// vertex, so shape is the one channel left. The square keeps the AREA of the
+// disc it replaces (side r * sqrt(pi)): size has to read as links across both
+// shapes, and an inscribed square would read 36% smaller at the
 // same value. A missing paper is the same square broken, the frame's mark for
 // an absence. The values are what the 3D shader reads as uSilShape.x.
 // An outside paper (ADR-0066) is a paper too, drawn hollow on the rim. A
@@ -512,6 +527,14 @@ function markDim(ids, incident, nodes, edges) {
   edges.forEach(e => { e._dim = on.size > 0 && !on.has(e.from) && !on.has(e.to); });
 }
 
+// The same look for a set that is exactly what stays lit: its notes and the one
+// edge `keep`, with no neighbours (a clicked link's two ends, Flow's ladder).
+function markOnly(ids, keep, nodes, edges) {
+  const on = new Set(ids);
+  nodes.forEach(n => { n._dim = !on.has(n.id); });
+  edges.forEach(e => { e._dim = e !== keep; });
+}
+
 // The note under a point, in graph units: the nearest visible one whose hit
 // radius (`radius(n)`) reaches it, or null.
 function nearestHit(nodes, p, radius) {
@@ -520,6 +543,28 @@ function nearestHit(nodes, p, radius) {
     if (n._hidden || n.x == null) continue;
     const d = Math.hypot(n.x - p.x, n.y - p.y);
     if (d <= radius(n) && d < bd) { bd = d; best = n; }
+  }
+  return best;
+}
+
+// The link under a point, in graph units: the nearest one on show within
+// `reach`. Asked at click time only, so the lib's link picking stays off
+// (linkPointerAreaPaint). A written link beats an inferred one lying as close:
+// the k-NN lines outnumber the wikilinks, and the line a reader aims at is
+// usually the one they wrote. `at`: id -> note.
+const LINK_WRITTEN = { EXTRACTED: 1, CITES: 1 };
+function nearestLink(edges, p, reach, at) {
+  let best = null, bd = Infinity;
+  for (const l of edges) {
+    if (l._hidden || l._dim) continue;
+    const a = at(l.from), b = at(l.to);
+    if (!a || !b || a.x == null || b.x == null) continue;
+    const dx = b.x - a.x, dy = b.y - a.y, len = dx * dx + dy * dy;
+    const u = len ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / len)) : 0;
+    const d = Math.hypot(p.x - a.x - u * dx, p.y - a.y - u * dy);
+    if (d > reach) continue;
+    const rank = LINK_WRITTEN[l.type] ? d : d * 1.5;
+    if (rank < bd) { bd = rank; best = l; }
   }
   return best;
 }
@@ -663,6 +708,129 @@ function clearRing(points, centre, R) {
   return out;
 }
 
+// --- what a layout that holds can afford (ADR-0152) -------------------------
+// Worked out once, so a last pass can move overlapping discs apart by their
+// drawn size, which ForceAtlas2 cannot (adjustSizes is off: it doubled the
+// iterations and cost the purity ADR-0136 measured). In place. Pairs through a
+// grid sized for nine discs in ten, and the larger of two is the one that looks
+// for the other: on alex_second_brain one note holds 852 links, and a grid of
+// the largest disc took 900 ms for 120 rounds. 600 rounds is what that vault
+// needs to reach no overlap at all (2026-11-06).
+const SPREAD_ROUNDS = 600, GOLDEN = 2.399963;
+function spreadDiscs(x, y, r, gap) {
+  const n = x.length, sorted = Float64Array.from(r).sort();
+  const cell = 2 * (sorted[Math.floor(n * 0.9)] || 1) + gap;
+  const key = (i, j) => i * 73856093 ^ j * 19349663;
+  for (let round = 0; round < SPREAD_ROUNDS; round++) {
+    const grid = new Map();
+    for (let i = 0; i < n; i++) {
+      const k = key(Math.floor(x[i] / cell), Math.floor(y[i] / cell));
+      if (grid.has(k)) grid.get(k).push(i); else grid.set(k, [i]);
+    }
+    let moved = 0;
+    for (let i = 0; i < n; i++) {
+      const cx = Math.floor(x[i] / cell), cy = Math.floor(y[i] / cell);
+      const span = Math.ceil((2 * r[i] + gap) / cell);
+      for (let gx = cx - span; gx <= cx + span; gx++) for (let gy = cy - span; gy <= cy + span; gy++) {
+        for (const j of grid.get(key(gx, gy)) || []) {
+          if (r[j] > r[i] || (r[j] === r[i] && j <= i)) continue;
+          let dx = x[j] - x[i], dy = y[j] - y[i], d = Math.hypot(dx, dy);
+          const min = r[i] + r[j] + gap;
+          if (d >= min) continue;
+          // Two notes on one point have no bearing: the golden angle spreads them.
+          if (d < 1e-6) { dx = Math.cos(i * GOLDEN); dy = Math.sin(i * GOLDEN); d = 1; }
+          const push = (min - d) / 2 / d;
+          x[i] -= dx * push; y[i] -= dy * push;
+          x[j] += dx * push; y[j] += dy * push;
+          moved++;
+        }
+      }
+    }
+    if (!moved) break;
+  }
+}
+
+// The circle the notes arrive on: rows [{id, area, links, r}] in area order,
+// biggest area first, most linked first inside one, clockwise from the top, so
+// the ring reads as arcs of one colour. Each note gets an arc its own size.
+// Returns id -> {x, y, rank}, rank 0 to 1 along the circle of radius R.
+function arrivalRing(rows, R) {
+  const size = new Map();
+  rows.forEach(r => size.set(r.area, (size.get(r.area) || 0) + 1));
+  const order = rows.slice().sort((a, b) => size.get(b.area) - size.get(a.area) ||
+    (a.area < b.area ? -1 : a.area > b.area ? 1 : 0) || b.links - a.links || (a.id < b.id ? -1 : 1));
+  const total = order.reduce((t, r) => t + r.r, 0) || 1, at = new Map();
+  let done = 0;
+  order.forEach((r, i) => {
+    const th = -Math.PI / 2 + 2 * Math.PI * (done + r.r / 2) / total;
+    at.set(r.id, { x: R * Math.cos(th), y: R * Math.sin(th), rank: i / Math.max(1, order.length - 1) });
+    done += r.r;
+  });
+  return at;
+}
+
+// Clusters (ADR-0152): each group a disc of notes, most linked in the middle,
+// the discs on one ring clockwise from the top, biggest first. groups:
+// [{key, name, color, ids, r}], ids and r in the order the disc fills. Each
+// note takes the area its drawn disc needs, so a big note never sits on a small
+// one. The ring starts where its arcs add up, and grows until no two neighbours
+// touch: a chord is shorter than its arc, so a big disc beside a small one
+// overlaps on the first answer. `unit`: graph units to a pixel at the fit.
+// Returns {layout, heads}.
+function clusterRing(groups, unit) {
+  const gap = 2 * unit, pad = 34 * unit;
+  const G = groups.map(g => {
+    let acc = 0, top = 0;
+    const pos = g.r.map((r, j) => {
+      const d = j ? Math.sqrt(acc / 0.7) : 0;
+      acc += (r + gap) ** 2;
+      top = Math.max(top, r);
+      return [d * Math.cos(j * GOLDEN), d * Math.sin(j * GOLDEN)];
+    });
+    return { ...g, pos, R: Math.sqrt(acc / 0.7) + top };
+  }).sort((a, b) => b.ids.length - a.ids.length || (a.name < b.name ? -1 : 1));
+  const total = G.reduce((t, g) => t + 2 * g.R + pad, 0);
+  let th = -Math.PI / 2;
+  for (const g of G) {
+    const span = 2 * Math.PI * (2 * g.R + pad) / total;
+    g.th = th + span / 2;
+    th += span;
+  }
+  let ring = G.length > 1 ? total / (2 * Math.PI) : 0;
+  const clear = () => G.every((g, i) => {
+    const h = G[(i + 1) % G.length];
+    return g === h || 2 * ring * Math.abs(Math.sin((g.th - h.th) / 2)) >= g.R + h.R + pad;
+  });
+  while (!clear()) ring *= 1.05;
+  const layout = {}, heads = [];
+  for (const g of G) {
+    const cx = ring * Math.cos(g.th), cy = ring * Math.sin(g.th);
+    g.ids.forEach((id, j) => { layout[id] = [cx + g.pos[j][0], cy + g.pos[j][1]]; });
+    heads.push({ key: g.key, name: g.name, color: g.color, n: g.ids.length, cx, cy, R: g.R, th: g.th });
+  }
+  return { layout, heads };
+}
+
+// Flow (ADR-0152): a ladder as columns, read first on the left, this note at
+// (0, 0), what it unlocks on the right. levels: [{depth, ids}]. A level taller
+// than FLOW_ROWS takes as many columns as it needs. `unit`: graph units to a
+// pixel at the fit. Returns {layout, heads}, one head per level, at the top of
+// its first column.
+const FLOW_ROWS = 16;
+function flowColumns(levels, unit) {
+  const row = 21 * unit, col = 250 * unit, cols = [];
+  for (const { depth, ids } of levels.filter(l => l.ids.length).sort((a, b) => a.depth - b.depth))
+    for (let c = 0; c * FLOW_ROWS < ids.length; c++)
+      cols.push({ depth, ids: ids.slice(c * FLOW_ROWS, (c + 1) * FLOW_ROWS), first: c === 0, n: ids.length });
+  const at = cols.findIndex(c => c.depth === 0), layout = {}, heads = [];
+  cols.forEach((c, i) => {
+    const x = (i - at) * col;
+    c.ids.forEach((id, j) => { layout[id] = [x, (j - (c.ids.length - 1) / 2) * row]; });
+    if (c.first) heads.push({ depth: c.depth, n: c.n, x, y: -(Math.min(FLOW_ROWS, c.n) - 1) / 2 * row - 26 * unit });
+  });
+  return { layout, heads };
+}
+
 // frame-pure:end
 
 function applyFocus(ids) { computeFocus(ids); refreshPaint(); arrangeFocus(); }
@@ -682,6 +850,9 @@ let arrSeq = 0;                // a newer focus drops the answer to an older one
 const arrangeable = n => !!n && !!n.path && !isRim(n) && n.type !== "ghost" && n.type !== "missing";
 
 function arrangeFocus() {
+  // Clusters and Flow are arrangements already, where a focus only lights; and
+  // on the circle there is no place yet to arrange from (arrivalDone asks again).
+  if (LAYOUT !== "network" || ARRIVAL) return;
   const seq = ++arrSeq;
   const root = focusIds.length === 1 ? NODE_BY_ID[focusIds[0]] : null;
   if (!arrangeable(root)) { disarrange(true, true); return; }
@@ -720,7 +891,7 @@ function applyArrangement(root, out) {
     if (h) home[id] = h;
   }
   const fit = fitArrangement(out.nodes, out.wedges || [], out.r_in || 0, home, root.id);
-  ARR = { root: root.id, layout: fit.layout, wedges: fit.wedges, rIn: fit.rIn, centre };
+  ARR = { kind: "map", root: root.id, layout: fit.layout, wedges: fit.wedges, rIn: fit.rIn, centre };
   const from = positionsNow();
   restoreArranged(ALL_NODES, ARR_SAVED, true);   // a re-root lets the last clearing go
   placeArranged(ALL_NODES, ARR.layout, centre, ARR_SAVED, !is2D());
@@ -739,8 +910,9 @@ function applyArrangement(root, out) {
 
 // `refilter` false: the caller runs the filters itself right after (a scope,
 // a compare) or a rebuild reads the flags (a mode switch). `play`: slide back
-// instead of jumping, for a return the reader asked for.
-function disarrange(refilter = true, play = false) {
+// instead of jumping, for a return the reader asked for. `fit`: frame the
+// layout the notes are going back to, which only this moment can measure.
+function disarrange(refilter = true, play = false, fit = false) {
   arrSeq++;   // an answer still in flight is for a focus that is gone
   // The saved layout outlives ARR while a return is playing: a scope arriving
   // mid-slide still has to put it back.
@@ -755,7 +927,8 @@ function disarrange(refilter = true, play = false) {
   if (play && Graph) {
     const from = positionsNow();
     restoreArranged(ALL_NODES, ARR_SAVED, true);
-    playFrom(from, settle);
+    if (fit) fitFree(800);
+    playFrom(from, settle, fit ? LAYOUT_PLAY : undefined);
   } else {
     stopPlay();
     settle();
@@ -767,7 +940,12 @@ function disarrange(refilter = true, play = false) {
 // it stands now. On the way it is pinned at each step, so a simulation still
 // running cannot pull it off the path; at the end it gets the pins it was
 // given. A jump read as the picture being swapped for another one.
-const ARR_PLAY_MS = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 650;
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const ARR_PLAY_MS = REDUCED ? 0 : 650;
+const EASE_MAP = u => u < 0.5 ? 4 * u * u * u : 1 - Math.pow(2 - 2 * u, 3) / 2;
+const EASE_OUT = u => 1 - Math.pow(1 - u, 4);
+// A whole vault moves further than a ring does, and leaves in turn.
+const LAYOUT_PLAY = { ms: REDUCED ? 0 : 900, spread: REDUCED ? 0 : 320, rank: n => (n.__layoutRank || 0), ease: EASE_OUT };
 let playRaf = 0;
 function positionsNow() {
   const at = new Map();
@@ -775,7 +953,9 @@ function positionsNow() {
   return at;
 }
 function stopPlay() { cancelAnimationFrame(playRaf); playRaf = 0; }
-function playFrom(from, done) {
+// `spread`: the last note leaves that much after the first; `rank`: 0 to 1, when
+// in that span a note leaves.
+function playFrom(from, done, { ms = ARR_PLAY_MS, spread = 0, rank = () => 0, ease = EASE_MAP } = {}) {
   stopPlay();
   const moves = [];
   for (const n of ALL_NODES) {
@@ -785,26 +965,30 @@ function playFrom(from, done) {
   }
   // The camera frames over 700-900 ms while the notes slide: no hover until
   // both have stopped (see hoverNote).
-  hoverQuietUntil = performance.now() + Math.max(ARR_PLAY_MS, 900) + 100;
+  const total = ms + spread;
+  hoverQuietUntil = performance.now() + Math.max(total, 900) + 100;
   const t0 = performance.now(), flat = is2D();
   const step = now => {
-    const u = ARR_PLAY_MS ? Math.min(1, Math.max(0, now - t0) / ARR_PLAY_MS) : 1;
-    const e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(2 - 2 * u, 3) / 2;
+    const t = Math.max(0, now - t0), over = t >= total;
     for (const [n, a, b] of moves) {
-      if (u === 1) { Object.assign(n, b); continue; }
+      if (over) { Object.assign(n, b); continue; }
+      const e = ease(ms ? Math.min(1, Math.max(0, t - spread * rank(n)) / ms) : 1);
       n.x = n.fx = a[0] + (b.x - a[0]) * e;
       n.y = n.fy = a[1] + (b.y - a[1]) * e;
       if (!flat) n.z = n.fz = a[2] + ((b.z || 0) - a[2]) * e;
     }
     pushMeshes();
-    if (u < 1) { playRaf = requestAnimationFrame(step); return; }
+    // force-graph pauses its redraw when nothing it knows of moved, and a note
+    // sliding under a still camera is not something it knows of.
+    if (flat && Graph) Graph.nodeColor(nodeColor);
+    if (!over) { playRaf = requestAnimationFrame(step); return; }
     playRaf = 0;
     if (done) done();
   };
   // The first step now, not on the next frame: the caller has already put
   // every note at its end, and a paint before the step would show it there.
   step(t0);
-  if (Graph) wake(ARR_PLAY_MS + 200);
+  if (Graph) wake(total + 200);
 }
 
 // 3D moves a mesh only inside an engine tick, and a settled graph runs none;
@@ -843,7 +1027,7 @@ function freeWidth() {
 // is ~880px, which leaves 176px a side. Narrower, the outer names wait.
 const ARR_RING_W = 0.6, ARR_RING_H = 0.84;
 function frameArrangement() {
-  if (!ARR) return;
+  if (!ARR || ARR.kind !== "map") return;
   const { centre: c, layout } = ARR;
   const R = arrRadius();
   const W = Graph.width(), H = Graph.height(), free = freeWidth();
@@ -873,7 +1057,355 @@ function frameArrangement() {
   wake(1000);
 }
 
-function fitGraph() { Graph.zoomToFit(400, 40); wake(600); }
+function fitGraph() {
+  if (ARR && ARR.kind !== "map") { frameLayout(); return; }
+  fitFree(400);
+}
+
+// The lib's zoomToFit frames the canvas, and the key stands over its right edge
+// (freeWidth): with a note counted in pixels (KREF) the outer ones went under it.
+function fitFree(ms, pad = 40, only = n => !n._hidden) {
+  wake(ms + 200);
+  if (!is2D()) { Graph.zoomToFit(ms, pad, only); return; }
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const n of ALL_NODES) {
+    if (n.x == null || !only(n)) continue;
+    x0 = Math.min(x0, n.x); x1 = Math.max(x1, n.x);
+    y0 = Math.min(y0, n.y); y1 = Math.max(y1, n.y);
+  }
+  if (x0 > x1) return;
+  const W = Graph.width(), H = Graph.height(), free = freeWidth();
+  const k = Math.min((free - 2 * pad) / Math.max(1, x1 - x0), (H - 2 * pad) / Math.max(1, y1 - y0));
+  if (!(k > 0)) return;
+  Graph.centerAt((x0 + x1) / 2 + (W - free) / 2 / k, (y0 + y1) / 2, ms);
+  Graph.zoom(k, ms);
+}
+
+// --- the arrival (ADR-0152) -------------------------------------------------
+// A layout that had to be computed is computed out of sight. The notes land
+// whole around a circle in area order (DESIGN.md: a lighter print means a lower
+// tier, so nothing fades), their links draw out, and the circle holds until the
+// worker is done; each note then travels to its place, leaving in the circle's
+// order. On a cache hit none of this runs. Reduced motion: the circle stands at
+// once and the notes go to their places in one step.
+const ARRIVE_RING = REDUCED ? 0 : 1000, ARRIVE_LINKS = REDUCED ? 0 : 650, ARRIVE_HOLD = REDUCED ? 0 : 200;
+const ARRIVE_TRAVEL = REDUCED ? 0 : 950, ARRIVE_SPREAD = REDUCED ? 0 : 450;
+
+function arrivalStart() {
+  const A = ARRIVAL, W = Graph.width(), free = freeWidth();
+  const at = arrivalRing(RAW_NODES.filter(n => !n._hidden).map(n =>
+    ({ id: n.id, area: n.group == null ? -1 : n.group, links: n.links || 0, r: nodeRadius(n) })),
+    // A frame loaded behind another surface has no size yet.
+    0.42 * (Math.min(free, Graph.height()) || 800) / KREF);
+  for (const n of RAW_NODES) {
+    const p = at.get(n.id);
+    n.__rank = p ? p.rank : 1;
+    if (!p) continue;
+    // __wx with x, or simFlush would hand the circle to the worker as a move.
+    n.x = n.__wx = p.x; n.y = n.__wy = p.y;
+  }
+  A.ring = positionsNow();
+  A.cx = (W - free) / 2 / KREF;
+  Graph.centerAt(A.cx, 0);
+  Graph.zoom(KREF);
+  A.t0 = performance.now();
+  requestAnimationFrame(arrivalStep);
+}
+
+function arrivalStep(now) {
+  const A = ARRIVAL;
+  if (!A || A.travelling) return;
+  A.t = now - A.t0;
+  const g = ARRIVE_LINKS ? Math.min(1, Math.max(0, (A.t - ARRIVE_RING) / ARRIVE_LINKS)) : 1;
+  A.grow = EASE_OUT(g);
+  Graph.nodeColor(nodeColor);   // the redraw (see playFrom)
+  wake(300);
+  if (A.t < ARRIVE_RING + ARRIVE_LINKS + ARRIVE_HOLD) { requestAnimationFrame(arrivalStep); return; }
+  A.ready = true;
+  if (A.end) arrivalTravel();
+}
+
+// The worker's last post. Its layout, spread and saved, is where the notes are
+// going; they stay on the circle until the circle has finished drawing.
+function landArrival(d) {
+  const A = ARRIVAL, was = KREF;
+  warmupRun = 0; simTicks = d.total;
+  RAW_NODES.forEach((n, i) => { n.x = d.p[3 * i]; n.y = d.p[3 * i + 1]; });
+  spreadLayout();
+  saveLayout();
+  dropSim();
+  A.end = positionsNow();
+  // The layout's fit is known now, and a disc is counted from it. The circle
+  // goes over to the layout's units: the same picture, on the same pixels.
+  const s = was / KREF;
+  for (const p of A.ring.values()) { p[0] *= s; p[1] *= s; }
+  for (const n of RAW_NODES) { const p = A.ring.get(n.id); if (p) { n.x = p[0]; n.y = p[1]; } }
+  Graph.centerAt(A.cx * s, 0);
+  Graph.zoom(KREF);
+  if (A.ready) arrivalTravel();
+}
+
+function arrivalTravel() {
+  const A = ARRIVAL;
+  A.travelling = true; A.t = Infinity; A.grow = 1;
+  // The notes at their ends for what measures them; playFrom takes them back.
+  for (const n of RAW_NODES) { const p = A.end.get(n.id); if (p) { n.x = p[0]; n.y = p[1]; } }
+  measureGraphRadius();
+  if (RIM) placeRim();
+  const ms = ARRIVE_TRAVEL + ARRIVE_SPREAD;
+  fitFree(ms);
+  fitPending = false;
+  playFrom(A.ring, arrivalDone, { ms: ARRIVE_TRAVEL, spread: ARRIVE_SPREAD, rank: n => n.__rank, ease: EASE_OUT });
+}
+
+function arrivalDone() {
+  const then = ARRIVAL.then;
+  ARRIVAL = null;
+  atlasMemo = null;
+  paintStat("settled in " + gnum(warmupRun + simTicks) + " ticks");
+  applyFilters();   // the atlas comes on, and the links go back under it
+  if (then) then();
+  if (focusIds.length) arrangeFocus();
+}
+
+// The layout as it settled gives the fit a disc is counted from (KREF), at the
+// frame's size on a 1440px window so a layout does not depend on the window it
+// was computed in, and the overlap pass moves the notes apart at that size (see
+// spreadDiscs). A ghost is the far end of a link and hidden until asked for: it
+// pushes nothing.
+function spreadLayout() {
+  const notes = RAW_NODES.filter(n => n.type !== "ghost");
+  const x = notes.map(n => n.x || 0), y = notes.map(n => n.y || 0);
+  const span = v => Math.max(1, Math.max(...v) - Math.min(...v));
+  KREF = Math.min(880 / span(x), 820 / span(y));
+  spreadDiscs(x, y, notes.map(nodeRadius), 1.4 / KREF);
+  notes.forEach((n, i) => { n.x = x[i]; n.y = y[i]; });
+}
+
+// --- Clusters and Flow (ADR-0152) -------------------------------------------
+// The tabs of those names: two more kinds of the ADR-0088 arrangement, whole-
+// vault where the Map is one note's. 2D only, since what they draw around the
+// notes is canvas; a tab picked in 3D goes to 2D without changing the choice
+// the renderer remembers, and comes back.
+let back3D = false;
+function setLayout(kind, root) {
+  if (ARRIVAL) { ARRIVAL.then = () => setLayout(kind, root); return; }
+  if (kind === LAYOUT && kind !== "flow") return;
+  if (kind !== "network" && !is2D()) {
+    back3D = true;
+    setMode("2d", false);
+    if (ARRIVAL) { ARRIVAL.then = () => setLayout(kind, root); return; }
+    fitPending = false;   // the arrangement frames itself
+  }
+  LAYOUT = kind;
+  document.body.classList.toggle("arranged", kind !== "network");
+  arrSeq++;   // a Map still on its way belongs to the tab just left
+  flowSeq++;
+  sayLayout("");
+  selectLink(null);
+  if (kind === "clusters") applyClusters();
+  else if (kind === "flow") setFlow(root || (focusIds.length === 1 ? focusIds[0] : ""));
+  else {
+    disarrange(true, true, true);
+    paintDim();
+    refreshPaint();
+    if (back3D) { back3D = false; setMode("3d", false); }
+    else if (focusIds.length) arrangeFocus();
+  }
+}
+
+// One line over the picture, for what an arrangement cannot draw.
+function sayLayout(text) {
+  const el = document.getElementById("layout-note");
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+// Puts the notes where `arr` says and plays them there from `from`.
+function placeLayout(arr, from) {
+  restoreArranged(ALL_NODES, ARR_SAVED, true);
+  ARR = arr;
+  placeArranged(ALL_NODES, arr.layout, arr.centre, ARR_SAVED, false);
+  const moving = RAW_NODES.filter(n => n.id in arr.layout);
+  moving.forEach((n, i) => { n.__layoutRank = i / Math.max(1, moving.length - 1); });
+  paintDim();
+  applyFilters();
+  refreshPaint();
+  frameLayout();
+  playFrom(from, null, LAYOUT_PLAY);
+}
+
+// Clusters and Flow leave room round their picture for their heads: a head
+// stands outside its disc, a note's name to the right of its column.
+const LAYOUT_ROOM = { clusters: [165, 70], flow: [40, 60] }, FLOW_NAME = 190;
+function frameLayout() {
+  if (!ARR || ARR.kind === "map") return;   // asked for on a frame: the tab may have changed
+  const { centre: c, layout, heads, kind } = ARR;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const take = (x, y, r = 0) => {
+    x0 = Math.min(x0, x - r); x1 = Math.max(x1, x + r);
+    y0 = Math.min(y0, y - r); y1 = Math.max(y1, y + r);
+  };
+  for (const id in layout) take(c.x + layout[id][0], c.y + layout[id][1]);
+  for (const h of heads) kind === "clusters" ? take(c.x + h.cx, c.y + h.cy, h.R) : take(c.x + h.x, c.y + h.y);
+  const W = Graph.width(), H = Graph.height(), free = freeWidth(), [px, py] = LAYOUT_ROOM[kind];
+  const right = kind === "flow" ? FLOW_NAME : px;
+  const k = Math.max(0.01, Math.min((free - px - right) / Math.max(1, x1 - x0),
+    (H - 2 * py) / Math.max(1, y1 - y0), kind === "flow" ? 4 * KREF : Infinity));
+  ARR.k = k;
+  // the picture's middle at the middle of what is free of the key and the names
+  const dx = ((W - free) / 2 + (right - px) / 2) / k;
+  Graph.centerAt((x0 + x1) / 2 + dx, (y0 + y1) / 2, 800);
+  Graph.zoom(k, 800);
+  wake(1000);
+}
+
+function applyClusters(from = positionsNow()) {
+  const count = new Map(), by = new Map();
+  const shown = RAW_NODES.filter(n => !n._hidden && n.x != null);
+  for (const n of shown) count.set(n.group, (count.get(n.group) || 0) + 1);
+  for (const n of shown) {
+    // A note with no link is an area of one, and 39 of them on Cultura would
+    // be 39 specks on the ring: they gather as one group.
+    const key = n.group >= 0 && count.get(n.group) > 1 ? n.group : "none";
+    if (!by.has(key)) by.set(key, []);
+    by.get(key).push(n);
+  }
+  const groups = [...by].map(([key, ns]) => {
+    ns.sort((a, b) => (b.links || 0) - (a.links || 0) || (a.id < b.id ? -1 : 1));
+    return { key, name: key === "none" ? "No area" : COMM_HUBS[key] || COMM_LABELS[key] || "#" + key,
+             color: key === "none" ? GP.line : baseColor(ns[0]),
+             ids: ns.map(n => n.id), r: ns.map(nodeRadius) };
+  });
+  if (!groups.length) return;
+  const { layout, heads } = clusterRing(groups, 1 / KREF);
+  placeLayout({ kind: "clusters", root: null, layout, heads, wedges: [], rIn: 0, centre: { x: 0, y: 0, z: 0 } }, from);
+}
+
+// Each area's ground, the atlas's own mix (ATLAS_GROUND): an opaque ink under
+// its notes, so a dim never shows through it.
+function drawGround(ctx) {
+  ctx.save();
+  for (const h of ARR.heads) {
+    ctx.beginPath();
+    ctx.arc(h.cx, h.cy, h.R, 0, 2 * Math.PI);
+    ctx.fillStyle = towardFloor(h.color, ATLAS_GROUND);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// /path's answer, or null where there is no server to ask: the Flow tab is the
+// app's, but a request can still fail, and the tab then says so.
+const readPath = note => fetch("/path?note=" + encodeURIComponent(note || ""))
+  .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+  .catch(err => { console.warn("reading order unavailable:", err.message); return null; });
+const hasLadder = d => !!d && !!d.levels && d.levels.filter(l => l.notes.length).length > 1;
+
+let flowSeq = 0;
+async function setFlow(root) {
+  const seq = ++flowSeq, flowing = ARR && ARR.kind === "flow";
+  if (flowing && root === ARR.root) return;
+  sayLayout("Reading the order");   // the first answer on a big vault takes seconds
+  const asked = root ? await readPath(root) : null;
+  if (seq !== flowSeq) return;
+  let d = asked;
+  if (root && !hasLadder(asked) && flowing) {   // the ladder on screen stays
+    sayLayout("No reading order around " + linkName(root));
+    return;
+  }
+  if (!hasLadder(d)) {
+    // No note named, or one with no ladder on the way in: the note that shows
+    // an order best. The tab is never an empty promise.
+    const land = await readPath("");
+    if (seq !== flowSeq) return;
+    const pick = land && land.picks && land.picks[0];
+    d = pick ? await readPath(pick.path) : null;
+    if (seq !== flowSeq) return;
+    if (!hasLadder(d)) {
+      if (ARR) disarrange(true, true, true);
+      sayLayout((land && land.hint) || "No note has a prerequisite yet.");
+      return;
+    }
+  }
+  const notes = {};
+  const levels = d.levels.map(l => {
+    const ids = l.notes.map(n => n.path).filter(id => NODE_BY_ID[id]);
+    ids.forEach(id => { notes[id] = 1; });
+    return { depth: l.depth, ids: ids.sort(byAreaThenLinks) };
+  });
+  const id = d.root.path, n = NODE_BY_ID[id];
+  if (!n) return;
+  const home = ARR_SAVED.get(id) || n;
+  const { layout, heads } = flowColumns(levels, 1 / KREF);
+  const from = positionsNow();
+  placeLayout({ kind: "flow", root: id, layout, heads, wedges: [], rIn: 0,
+    edges: (d.edges || []).filter(e => notes[e.from] && notes[e.to]),
+    centre: { x: home.x || 0, y: home.y || 0, z: 0 } }, from);
+  const foot = [];
+  if (asked && !hasLadder(asked)) foot.push("No reading order around " + linkName(root));
+  if (d.truncated) foot.push("Cut at 60 notes: the ladder continues past this");
+  // A cycle is a disagreement the vault really contains, so it is reported; the
+  // edges that close it are dropped from the layout.
+  if (d.cycles) foot.push(d.cycles + (d.cycles === 1 ? " note is" : " notes are") + " in a prerequisite cycle: their edges are not drawn");
+  sayLayout(foot.join(" · "));
+  if (window.parent !== window) window.parent.postMessage({ type: "silica-flow-root", path: id }, "*");
+}
+
+function byAreaThenLinks(a, b) {
+  const p = NODE_BY_ID[a], q = NODE_BY_ID[b];
+  return (p.group ?? -1) - (q.group ?? -1) || (q.links || 0) - (p.links || 0) || (a < b ? -1 : 1);
+}
+
+// A prerequisite is not a wikilink, so Flow draws its own wires, left to right.
+// No arrowhead: only a citation has one (graph invariant 12), and the columns
+// already say which way a ladder reads.
+function drawWires(ctx, scale) {
+  ctx.save();
+  ctx.lineWidth = 1.2 / scale;
+  ctx.strokeStyle = GP.ghostLabel;
+  ctx.beginPath();
+  for (const e of ARR.edges) {
+    const a = NODE_BY_ID[e.from], b = NODE_BY_ID[e.to];
+    if (!a || !b) continue;
+    const mx = (a.x + b.x) / 2;
+    ctx.moveTo(a.x, a.y);
+    ctx.bezierCurveTo(mx, a.y, mx, b.y, b.x, b.y);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+const flowRung = d => d === 0 ? "This note" : d === -1 ? "Read first" : d === 1 ? "Unlocks"
+  : d < 0 ? (-d) + " steps before" : d + " steps after";
+// Clusters' and Flow's names. Heads first, biggest first, in every names mode:
+// they are what the arrangement says, not a name of a note. Then the notes:
+// what a hover or a focus lights, then what the mode asks for. Auto climbs by
+// zoom over the fit, as it does on the atlas.
+function drawLayoutNames(ctx, scale) {
+  const { kind, heads, centre: c, layout } = ARR, items = [], gap = 8 / scale;
+  if (kind === "clusters") {
+    for (const h of heads.slice().sort((a, b) => b.n - a.n)) {
+      const cos = Math.cos(h.th), sin = Math.sin(h.th);
+      items.push({ text: clip(h.name, 30) + " · " + gnum(h.n), px: 12.5, x: h.cx + (h.R + gap) * cos, y: h.cy + (h.R + gap) * sin,
+        align: cos > 0.25 ? "left" : cos < -0.25 ? "right" : "center", ink: GP.label });
+    }
+  } else {
+    for (const h of heads) items.push({ text: flowRung(h.depth) + (h.depth ? " · " + gnum(h.n) : ""), px: 12.5,
+      x: c.x + h.x, y: c.y + h.y, align: "left", ink: GP.label });
+  }
+  const z = scale / (ARR.k || scale), lit = new Set(hoverId ? [hoverId] : focusIds);
+  const wanted = n => kind === "flow" || lit.has(n.id) || namesMode === "all" || (namesMode === "key" && isKey(n)) ||
+    (namesMode === "auto" && (z >= 3.6 || (z >= 1.8 && isKey(n))));
+  if (namesMode !== "off") {
+    const deg = n => (n.links || 0) + (lit.has(n.id) ? 1e6 : 0) + (n.id === ARR.root ? 2e6 : 0);
+    Object.keys(layout).map(id => NODE_BY_ID[id]).filter(n => n && !n._dim && !n._hidden && wanted(n))
+      .sort((p, q) => deg(q) - deg(p)).forEach(n => items.push({ text: clip(n.label, 34), px: 11.5,
+        x: n.x + (kind === "flow" ? arrangedRadius(n, scale) : drawnRadius(n, scale)) + 4 / scale,
+        y: n.y, align: "left", ink: GP.label }));
+  }
+  paintNames(ctx, scale, items);
+}
 
 // --- what the layout is doing, bottom-left ----------------------------------
 // Ticks and not seconds: a tick is the layout's own unit, so the same graph
@@ -892,102 +1424,16 @@ const gnum = n => n.toLocaleString("en-US");
 function paintStat(tail) {
   const el = document.getElementById("gstat-n");
   if (!el) return;
-  // The corner keeps the live word; the size moved into the head of Forces
-  // (ADR-0072), where the forces it sizes are.
   el.textContent = tail;
   const size = document.getElementById("gsize");
   if (size) size.textContent = gnum(RAW_NODES.length) + " nodes · " + gnum(RAW_EDGES.length) + " edges";
 }
 
-// The chip beside fit. It had a reheat chip beside it until 2026-10-06, when
-// the user removed it: a reheat is applyForces(true), the perturbation a force
-// slider still makes, and this chip finishes what it only starts.
-// "settled" above means COLD, not at rest: the alpha
-// gate stops the sim at tick ~300 whatever the forces still say, and a reheat
-// exposes that residual for 66 ticks and freezes it again a quarter of the way
-// down (integrated push 1/FAST_DECAY = 10 against 1/0.0228 = 44 for a cold
-// build). Watching a reheat, the nodes visibly "want" to go somewhere and stop.
-// This finishes the descent instead of stirring: alpha is HELD where the
-// reheat put it, and the tick rule v' = 0.6 (v + alpha F) then walks toward
-// its fixed point v = 1.5 alpha F, so the per-node step IS the residual force.
-// Same basin, same mental map: this is not a new layout, it is the one the
-// reheat kept pointing at.
-//
-// Measured 2026-09-21 on the 1,195-node test vault. 3D: a reheat after the
-// cold build moved every node 100 units on average (max 412); after one
-// 600-tick hold the same reheat moved 21, after two 13, after three 14 and a
-// second reheat 10: that is the floor, Barnes-Hut noise the reheat itself
-// adds. 2D: 117 after the cold build, 15 after one hold, 15 again on a
-// second reheat. The hold at alpha ~1 was stable (largest step bounded at 10-20 units,
-// no ringing) and descended 3x faster than a hold at 0.3; the value d3's drag
-// uses was the safe guess, not the right one. Pairwise distances changed 9%
-// (median) across a hold, so the motion is a rearrangement, not a rotation.
-//
-// The budget is the terminator on a vault this size, not the residual: the
-// median step plateaus at ~3 units by tick 300 and stays there while the
-// nodes keep sliding along a flat valley (540 units each per 600 ticks, and
-// the reheat floor no longer improves). The eps fires only where a layout
-// truly converges. One click is one budget; the chip shows the step, and a
-// second click continues from where the first left off.
-// The budget is ticks, and under the layout worker (see "the layout in a
-// worker") a tick no longer waits for a frame: on the 23,836-edge vault a
-// descent took 11.4 s on the lib's engine and 5.2 s in the worker, to the same
-// positions (2026-10-26). Without a worker every tick is painted again, and
-// the budget costs what the renderer costs.
-const RESIDUAL_EPS = 0.5;      // graph units per tick; saveLayout rounds to 1 anyway
-const RESIDUAL_BUDGET = 600;   // 2x the 300-tick cold schedule, at 3x its alpha
-let residualTicks = 0;         // > 0 while a descent is running
-
-// Median per-node step of the last tick, i.e. the residual force (see above).
-// The median and not the max: the max is one hub's Barnes-Hut noise, measured
-// 3-10x the median, and would report a settled graph as moving. 2D nodes have
-// no vz; `|| 0` keeps the two renderers on one function.
-function residual() {
-  const st = RAW_NODES.map(n => Math.hypot(n.vx || 0, n.vy || 0, n.vz || 0));
-  st.sort((a, b) => a - b);
-  return st[st.length >> 1] || 0;
-}
-
-function autoLayout() {
-  simTicks = 0; warmupRun = 0;
-  residualTicks = RESIDUAL_BUDGET;
-  if (SIM) { SIM.base = SIM.total; SIM.post({ descend: [RESIDUAL_EPS, RESIDUAL_BUDGET] }); }
-  paintStat("descending");   // the click answers before the first tick does
-  // Same deadlock as a drag (see onNodeDrag): the gate would stop the engine
-  // on the settled alpha before the reheat could lift it. descendTick puts it
-  // back. Neither bundle links d3AlphaTarget out of its inner kapsule, so the
-  // hold is the decay itself: the reheat sets alpha to 1 on the FAST_DECAY
-  // schedule and a zero decay then never runs it. (renderBudget paints one
-  // frame synchronously inside applyForces, so the hold lands at 0.9 when
-  // that frame ticked; both were measured stable.)
-  Graph.d3AlphaMin(0);
-  applyForces(true);
-  Graph.d3AlphaDecay(0);
-}
-
-// One tick of a running descent: paint the residual, and when it is under eps
-// (or the budget is spent) let alpha cool so the usual settle lands in
-// onEngineStop, which caches the polished positions like any other.
-function descendTick() {
-  if (!residualTicks) return;
-  if (SIM) {   // the rule runs in the worker, per tick; this only says how far it got
-    residualTicks = SIM.descending;
-    if (residualTicks) paintStat("descending, step " + SIM.residual.toFixed(2));
-    return;
-  }
-  const r = residual();
-  paintStat("descending, step " + r.toFixed(2));
-  if (r < RESIDUAL_EPS || --residualTicks === 0) {
-    residualTicks = 0;
-    Graph.d3AlphaDecay(FAST_DECAY).d3AlphaMin(ALPHA_MIN);
-  }
-}
-
 // Undim AND reframe — the background click means "show me everything again".
 function clearFocus() {
   applyFocus(null);
-  Graph.zoomToFit(600, 40);
-  wake(700);   // the refit is a camera tween; it needs frames to run
+  if (ARR && ARR.kind !== "map") { frameLayout(); return; }
+  fitFree(600);
 }
 
 // Re-pass the colour accessors so the renderer repaints without touching the
@@ -1266,45 +1712,32 @@ const ALPHA_MIN = 0.001;      // d3's own convergence point, reached at tick ~30
 // 2D take three times as long to settle for the identical layout. Weighting the
 // warmup by the renderer buys back a comparable settle time in both.
 //
-// Two things the plain `() => is2D() ? 240 : 150` got wrong on a big vault.
-//
-// It ran a warmup even when the layout was SEEDED. Seeded means FAST_DECAY, and
-// FAST_DECAY reaches ALPHA_MIN at tick 66 — inside either count. So the engine
-// stopped in the middle of the synchronous warmup, before the renderer had ever
-// drawn a frame, and the fit deferred to onEngineStop then measured a scene
-// whose meshes were all still sitting at the origin. Camera 41 units from the
-// centre of a 3,900-unit graph: the 2D -> 3D switch opening fully zoomed in.
-// A cached layout does not need a warmup. It IS the warmup.
-//
-// And the counts were absolute, while the cost of a tick is not. Every warmup
+// The counts are not absolute, since the cost of a tick is not. Every warmup
 // tick is a frame the browser cannot paint, and a tick is roughly linear in
 // links: measured 8.94ms at 12,232 links (link 2.5 + charge 6.4), so the 240
 // tuned at ~4.5k links stopped being ~0.8s of freeze and became ~2.1s. Hold the
 // freeze near what it was tuned to be, rather than the number of ticks.
 const WARMUP_REF_EDGES = 4566;   // the graph the counts above were tuned on
-function WARMUP_TICKS(seeded) {
-  if (seeded) return 0;
+function WARMUP_TICKS() {
   const base = is2D() ? 240 : 150;
   const scale = Math.min(1, WARMUP_REF_EDGES / Math.max(1, RAW_EDGES.length));
   return Math.max(30, Math.round(base * scale));
 }
 
-// --- Layout cache: pay the 300 ticks once, not once per load ----------------
-// The honest gate above costs about twice the ticks of the wrong one. Cached
-// positions hand that back from the second load on: seed x/y/z from the last
-// settled layout and raise the decay so the sim only has to rerelax, ~66 ticks,
-// which the warmup then swallows whole. The graph opens already settled.
+// --- Layout cache: the layout is worked out once (ADR-0152) -----------------
+// A hit is the picture: the notes go where they were saved and no engine runs,
+// neither the worker nor the lib's. A rerelaxation here would only undo the
+// overlap pass, which the forces know nothing about.
 //
-// One slot per renderer, holding its own fingerprint — a slot per fingerprint
-// would accumulate a dead entry for every force-slider position ever dragged.
-// The fingerprint covers the node set AND the force multipliers: a layout
-// settled under different forces is not this layout.
+// One slot per renderer, holding its own fingerprint, the node set and the
+// engine.
 // -2 since ADR-0136: a layout settled under every line pulling is not one the
 // backbone would reach, and a fingerprint hit would seed it as if it were.
 // -3 since the area pull (AREA_PULL): a 2D layout settled without it is not
 // one ForceAtlas2 reaches with it.
-const LAYOUT_KEY = "silica-graph-layout-3";
-const FAST_DECAY = 0.1;   // alpha 1 -> ALPHA_MIN in ~66 ticks
+// -4 since ADR-0152: a hit is now shown as it stands, and a layout saved before
+// the overlap pass, or under a force slider, would be shown for good.
+const LAYOUT_KEY = "silica-graph-layout-4";
 const COLD_DECAY = 0.0228;   // d3's own: alpha 1 -> ALPHA_MIN in ~300 ticks
 const NODE_FP = (() => {
   let h = RAW_NODES.length;
@@ -1314,16 +1747,11 @@ const NODE_FP = (() => {
 })();
 // The engine too: a 2D layout settled by ForceAtlas2 is not the one d3 settles
 // in a frame with no worker, and either would seed the other as its own.
-const layoutFp = () => NODE_FP + ":" + forceMul.repel.toFixed(3) + ":" +
-  forceMul.dist.toFixed(3) + ":" + forceMul.center.toFixed(2) + ":" + (is2D() ? ENGINE_2D : "d3");
-// ForceAtlas2's own unit over the frame's, as the cached layout was settled at
-// (the worker's faUnit), so a seeded run starts where it stopped; 1 for d3.
-let layoutUnit = 1;
+const layoutFp = () => NODE_FP + ":" + (is2D() ? ENGINE_2D : "d3");
 
-// True when the positions were seeded, i.e. the sim only has to rerelax.
+// True when the positions came from the cache, i.e. nothing has to run.
 function loadLayout() {
   let saved = null;
-  layoutUnit = 1;
   try { saved = JSON.parse(localStorage.getItem(LAYOUT_KEY + "-" + mode)); } catch (e) {}
   if (!saved || saved.fp !== layoutFp() || !saved.pos) return false;
   // Positions are keyed by id, not by index: a vault that gained a note between
@@ -1337,7 +1765,7 @@ function loadLayout() {
     hit++;
   });
   if (hit !== RAW_NODES.length) return false;
-  layoutUnit = saved.unit || 1;
+  KREF = saved.kref || DISC_PX;
   return true;
 }
 
@@ -1353,32 +1781,73 @@ function saveLayout() {
   });
   try {
     localStorage.setItem(LAYOUT_KEY + "-" + mode, JSON.stringify(
-      { fp: layoutFp(), pos: pos, unit: SIM && SIM.last ? SIM.last.unit : 1 }));
+      { fp: layoutFp(), pos: pos, kref: KREF }));
   } catch (e) { /* quota or blocked storage -> next load just re-settles */ }
 }
 
 // --- 2D labels: node radius + zoom LOD --------------------------------------
-// Base size is whatever the smallest real note got (16 today, or 16+40*b once
-// betweenness sizing runs); anything above it is a node that stands out, and
-// those are the ones worth a label before you have zoomed in.
+// Base size is whatever the smallest real note got (16 with no links, plus 3.5
+// a link: graph_view._size_by_links); anything above it is a node that stands
+// out, and those are the ones worth a label before you have zoomed in.
 const BASE_SIZE = RAW_NODES.reduce(
   (m, n) => n.type === "ghost" ? m : Math.min(m, n.size || 16), Infinity);
 const NODE_REL_SIZE = 1.5;  // r = sqrt(val) * this — 16 => 6px, a 56 hub => 11px
-const nodeRadius = n => Math.sqrt(Math.max(0, n.size || 16)) * NODE_REL_SIZE;
+// A layout is thousands of units across and a note a dozen: at the fit of a
+// vault this size a disc was under a pixel, and the grey dots the reader took
+// for notes were their atlas cells (2026-11-06, Cultura, 0.05x). So a radius is
+// counted in pixels at the settled layout's fit: KREF is that fit's zoom, kept
+// with the layout, and DISC_PX puts 2 links at 3.4px and 51 at 10px, the sizes
+// the draft showed. Past the fit a disc grows with the root of the zoom, so a
+// note stays a note and the room round it opens up.
+const DISC_PX = 0.477;
+let KREF = DISC_PX;
+const nodeRadius = n => Math.sqrt(Math.max(0, n.size || 16)) * NODE_REL_SIZE * DISC_PX / KREF;
+const drawnRadius = (n, k) => nodeRadius(n) * (k > KREF ? Math.sqrt(KREF / k) : 1);
 
-// Circle + text. Below ~0.6 zoom only dots (at that scale the text is a smear
-// and the labels outnumber the pixels); 0.6-1.5 the standouts; above 1.5 all of
-// them. Font size divides by the zoom so text keeps a constant SCREEN size.
+// --- which names show (ADR-0152) --------------------------------------------
+// Auto is the climb with the zoom (atlasZoom), and the default. Off, Key and All
+// override it: nothing, the most linked tenth, every name that fits. Key reads
+// the size the reader sees, not the hub ring, so a big disc is a named one.
+const NAMES_KEY = "silica-graph-names";
+let namesMode = "auto";
+try {
+  const v = localStorage.getItem(NAMES_KEY);
+  if (v === "off" || v === "key" || v === "all") namesMode = v;
+} catch (e) { /* blocked storage -> the default */ }
+const _links = RAW_NODES.filter(n => n.type !== "ghost").map(n => n.links || 0).sort((a, b) => a - b);
+const KEY_MIN = Math.max(1, _links.length ? _links[Math.floor(_links.length * 0.9)] : 1);
+const isKey = n => (n.links || 0) >= KEY_MIN;
+function setNames(m) {
+  namesMode = m;
+  try { localStorage.setItem(NAMES_KEY, m); } catch (e) {}
+  syncNames();
+  if (Graph) refreshPaint();
+}
+function syncNames() {
+  document.querySelectorAll("#names-toggle button").forEach(b => {
+    b.classList.toggle("active", b.dataset.names === namesMode);
+    b.setAttribute("aria-pressed", String(b.dataset.names === namesMode));
+  });
+}
+
+// Circle + text. Below RING_ZOOM times the fit only dots (at that scale the text
+// is a smear and the labels outnumber the pixels), then the standouts, and from
+// twice that all of them. Font size divides by the zoom so text keeps a constant
+// SCREEN size.
+const RING_ZOOM = 1.6;
 function drawNode(n, ctx, scale) {
-  // The vault around an arrangement is drawn as it always is, dimmed.
-  if (ARR && ARR.layout[n.id]) { drawArrangedNode(n, ctx, scale); return; }
+  // On the circle a note is not there until its turn, then there whole.
+  if (ARRIVAL && !(ARRIVAL.t >= (n.__rank || 0) * ARRIVE_RING)) return;
+  // The vault around an arrangement is drawn as it always is, dimmed. Clusters
+  // holds every note at its own size: a floor would pile them up in a disc.
+  if (ARR && ARR.kind !== "clusters" && ARR.layout[n.id]) { drawArrangedNode(n, ctx, scale); return; }
   if (isRim(n)) { drawRimPaper(n, ctx, scale); return; }
   // A note a scoped paper's line ends on is what the reader came to the rim
   // for, and at the zoom that fits the rim it is a pixel with no name: it
   // keeps a disc of 7px on screen and its label, as the rim keeps its squares.
   const covering = COVERING && COVERING.has(n.id);
-  const r = covering ? Math.max(nodeRadius(n), 3.5 / scale)
-    : n._ctx ? Math.max(nodeRadius(n), 1 / scale) : nodeRadius(n);
+  const r0 = drawnRadius(n, scale);
+  const r = covering ? Math.max(r0, 3.5 / scale) : n._ctx ? Math.max(r0, 1 / scale) : r0;
   markPath(ctx, n, r);
   if (n.type === "missing") {
     // Hollow, since nothing is there to fill, and in graph units like the
@@ -1394,7 +1863,7 @@ function drawNode(n, ctx, scale) {
     ctx.fill();
   }
   if (covering && !n._dim) { drawNodeLabel(n, ctx, scale, r); return; }
-  if (n._dim || n._ctx || scale < 0.6) return;             // dimmed or context: dot only
+  if (n._dim || n._ctx || scale < RING_ZOOM * KREF) return;   // dimmed or context: dot only
   const atlas = atlasOn();
   // The ring is detail, so it lives behind the same zoom gate as the labels.
   // Drawing it at every scale flooded the zoomed-out view: rings outnumbered
@@ -1425,8 +1894,8 @@ function drawNode(n, ctx, scale) {
     ctx.stroke();
   }
   // The atlas names its notes by what fits on screen (atlasZoom), all at once and never
-  // overlapping (drawAtlasNames).
-  if (atlas || (scale < 1.5 && (n.size || 16) <= BASE_SIZE)) return;  // mid zoom: standouts
+  // overlapping (drawAtlasNames), which also draws Off, Key and All.
+  if (atlas || ARR || namesMode !== "auto" || (scale < 2 * RING_ZOOM * KREF && (n.size || 16) <= BASE_SIZE)) return;  // mid zoom: standouts
   drawNodeLabel(n, ctx, scale, r);
 }
 
@@ -1437,7 +1906,7 @@ function drawNode(n, ctx, scale) {
 // because holding one back depends on every name before it.
 const ARR_DOT_PX = 4, ARR_ROOT_PX = 7;
 const arrangedRadius = (n, scale) =>
-  Math.max(nodeRadius(n), (n.id === ARR.root ? ARR_ROOT_PX : ARR_DOT_PX) / scale);
+  Math.max(nodeRadius(n) * KREF, n.id === ARR.root ? ARR_ROOT_PX : ARR_DOT_PX) / scale;
 function drawArrangedNode(n, ctx, scale) {
   const root = n.id === ARR.root;
   const r = arrangedRadius(n, scale);
@@ -1499,6 +1968,7 @@ function drawWedges(ctx, scale) {
 // Priority as on the Map: the root, then the ring by how linked each note is,
 // then the area names. A name that would collide waits for zoom (keepLabels).
 function drawArrangedNames(ctx, scale) {
+  if (namesMode === "off") return;
   const { centre: c, wedges, root } = ARR;
   const items = [];
   const deg = id => (outDeg[id] || 0) + (inDeg[id] || 0);
@@ -1526,10 +1996,16 @@ function drawArrangedNames(ctx, scale) {
     items.push({ text: name + " · " + w.n, px: 12, x: c.x + (w.r + 8 / scale) * cos,
       y: c.y + (w.r + 8 / scale) * Math.sin(a), align, ink: GP.ghostLabel });
   }
+  paintNames(ctx, scale, items);
+}
+
+// items in priority order: {text, px, x, y, align, ink}. Names that fit, each
+// on a halo of the floor; the rest wait for zoom.
+function paintNames(ctx, scale, items) {
   ctx.save();
   ctx.textBaseline = "middle";
   const boxes = items.map(it => {
-    ctx.font = (it.px / scale) + "px Lexend, system-ui, sans-serif";
+    ctx.font = (it.px / scale) + "px " + ATLAS_FONT;
     const w = ctx.measureText(it.text).width, h = it.px * 1.2 / scale;
     const x0 = it.align === "left" ? it.x : it.align === "right" ? it.x - w : it.x - w / 2;
     return { x0, y0: it.y - h / 2, x1: x0 + w, y1: it.y + h / 2 };
@@ -1539,7 +2015,7 @@ function drawArrangedNames(ctx, scale) {
   ctx.lineJoin = "round";
   items.forEach((it, i) => {
     if (!keep[i]) return;
-    ctx.font = (it.px / scale) + "px Lexend, system-ui, sans-serif";
+    ctx.font = (it.px / scale) + "px " + ATLAS_FONT;
     ctx.textAlign = it.align;
     // A halo in the floor's colour masks the lines under a name (rule 4).
     ctx.lineWidth = 3 / scale;
@@ -1644,7 +2120,7 @@ function drawCiteArrow(l, ctx) {
   const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
   if (!len) return;
   const ux = dx / len, uy = dy / len;
-  const tip = markEdge(b, nodeRadius(b), ux, uy);
+  const tip = markEdge(b, drawnRadius(b, Graph.zoom()), ux, uy);
   if (len < tip + ARROW_2D) return;   // the two marks overlap: no line to point along
   const tx = b.x - ux * tip, ty = b.y - uy * tip;
   const bx = tx - ux * ARROW_2D, by = ty - uy * ARROW_2D, w = ARROW_2D * ARROW_W;
@@ -1667,9 +2143,9 @@ function drawRequires(l, ctx, k) {
   const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
   if (!len) return;
   const ux = dx / len, uy = dy / len, px = 1 / (k || 1), arm = 4 * px;
-  const end = len - markEdge(b, nodeRadius(b), ux, uy) - 8 * px;
+  const end = len - markEdge(b, drawnRadius(b, Graph.zoom()), ux, uy) - 8 * px;
   ctx.beginPath();
-  for (let d = markEdge(a, nodeRadius(a), ux, uy) + 10 * px; d <= end; d += 16 * px) {
+  for (let d = markEdge(a, drawnRadius(a, Graph.zoom()), ux, uy) + 10 * px; d <= end; d += 16 * px) {
     const x = a.x + ux * d, y = a.y + uy * d;
     ctx.moveTo(x - ux * arm - uy * arm, y - uy * arm + ux * arm);
     ctx.lineTo(x, y);
@@ -1695,7 +2171,7 @@ function paintNodeArea(n, color, ctx, scale) {
 function hitRadius(n, k) {
   return ARR && ARR.layout[n.id] ? arrangedRadius(n, k) + 3 / k
     : isRim(n) ? rimHalf(n, k) * 1.5
-    : COVERING && COVERING.has(n.id) ? Math.max(nodeRadius(n), 3.5 / k) + 2 : nodeRadius(n) + 2;
+    : COVERING && COVERING.has(n.id) ? Math.max(drawnRadius(n, k), 3.5 / k) + 2 / k : drawnRadius(n, k) + 2 / k;
 }
 
 // 2D's hover, picked off the positions with the click's own hit radius rather
@@ -1706,7 +2182,7 @@ function hitRadius(n, k) {
 // flip set off the next (looping in the owner's tab, 2026-10-11). Asked on a
 // pointer move only, so a note sliding under a still pointer relights nothing.
 function pickHover2D(e) {
-  if (!Graph || !is2D()) return;
+  if (!Graph || !is2D() || ARRIVAL) return;
   if (e.target !== document.querySelector("#graph canvas")) { hoverNote(null); return; }   // over the key, not the graph
   hoverNote(noteAt2D(e));
 }
@@ -1723,9 +2199,109 @@ function noteAt2D(e) {
 // as an empty click: the Map played back and the hover left the note lit over
 // the force layout (owner, 2026-10-11). 3D raycasts and keeps the lib's note.
 function clickNote(node, e) {
+  if (ARRIVAL) return;
   if (is2D() && e) node = noteAt2D(e);
-  if (node) { selectNode(node); applyFocus(node.id); }
-  else { closeDrawer(); clearFocus(); }
+  if (node) {
+    selectLink(null);
+    selectNode(node);
+    if (LAYOUT === "flow" && arrangeable(node)) setFlow(node.id);
+    else applyFocus(node.id);
+    return;
+  }
+  const link = is2D() && e ? linkAt2D(e) : null;
+  if (link) { selectLink(link); return; }
+  selectLink(null);
+  closeDrawer();
+  clearFocus();
+}
+
+// --- a clicked link (ADR-0152) ----------------------------------------------
+// It prints in frost, its two notes stay lit, the rest dims, and a tag in the
+// chrome's material stands at its middle and says what it is. The direction is
+// written, A → B, because only a citation draws an arrowhead.
+const LINK_HIT_PX = 5;
+function linkAt2D(e) {
+  const c = document.querySelector("#graph canvas").getBoundingClientRect();
+  const p = Graph.screen2GraphCoords(e.clientX - c.left, e.clientY - c.top);
+  return nearestLink(ALL_EDGES, p, LINK_HIT_PX / Graph.zoom(), id => NODE_BY_ID[id]);
+}
+
+function selectLink(l) {
+  if (l === LINK_SEL || (!l && !LINK_SEL)) return;
+  LINK_SEL = l;
+  paintDim();
+  if (Graph) refreshPaint();
+  const tag = document.getElementById("link-tag");
+  tag.hidden = !l;
+  if (l) { fillLinkTag(tag, l); placeLinkTag(); }
+}
+
+const linkName = (id) => { const n = NODE_BY_ID[id]; return n ? n.label : id; };
+function linkKind(l) {
+  if (l.requires) return "Written prerequisite, in the requires of " + linkName(l.from);
+  return { EXTRACTED: "Wikilink, written in " + linkName(l.from),
+    CITES: "Citation: this note cites the paper",
+    SIMILAR: "Similar notes: neighbours by what they say, never written",
+    PROPOSED: "Proposed link: the two notes share a concept and are not linked",
+    GAP: "Structural gap: a bridge between two areas that could exist and does not",
+    COUPLED: "Coupled notes: linked to the same notes, not to each other",
+    COVERS: "Covered: this note covers the paper" }[l.type] || l.type;
+}
+function fillLinkTag(tag, l) {
+  const a = NODE_BY_ID[l.from], b = NODE_BY_ID[l.to];
+  let more = "";
+  if (l.type === "PROPOSED" && (l.shared || []).length)
+    more = '<div class="ln">Shares ' + escHtml(l.shared.join(", ")) + "</div>";
+  if (l.type === "GAP" && a && b)
+    more = '<div class="ln">' + escHtml(areaOf(a) || "No area") + " and " + escHtml(areaOf(b) || "No area") + "</div>";
+  tag.innerHTML = '<div class="ends">' + escHtml(linkName(l.from)) + "<i>→</i>" + escHtml(linkName(l.to)) +
+    '</div><div class="kind"></div>' + more;
+  tag.querySelector(".kind").textContent = linkKind(l);
+  if (l.type !== "EXTRACTED") return;
+  // Asked on click: the export carries no line. Tolerated, as the Map is: a
+  // graph exported to a file has no server to ask, and the tag still says what
+  // the link is.
+  fetch("/link?from=" + encodeURIComponent(l.from) + "&to=" + encodeURIComponent(l.to))
+    .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+    .then(d => { if (LINK_SEL === l) fillLinkLine(tag, l, d); })
+    .catch(err => console.warn("link line unavailable:", err.message));
+}
+function fillLinkLine(tag, l, d) {
+  const box = document.createElement("div");
+  box.className = "ln";
+  if (!d.line) box.textContent = "No line names it: it resolves through another name.";
+  else {
+    tag.querySelector(".kind").textContent = (l.requires ? "Written prerequisite, in " : "Wikilink, written in ") + linkName(d.path);
+    const n = document.createElement("span");
+    n.className = "n";
+    n.textContent = "line " + d.line;
+    const q = document.createElement("q");
+    q.textContent = d.text;
+    box.append(n, q);
+  }
+  tag.appendChild(box);
+  if (d.line && window.parent !== window) {
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "open";
+    open.textContent = "Open " + linkName(d.path) + " at line " + d.line;
+    open.addEventListener("click", () => {
+      selectLink(null);   // the note's own focus takes over the picture
+      window.parent.postMessage({ type: "silica-open-line", path: d.path, line: d.line }, "*");
+    });
+    tag.appendChild(open);
+  }
+  placeLinkTag();
+}
+// Every painted frame, so it stays on its link through a pan or a zoom.
+function placeLinkTag() {
+  if (!LINK_SEL) return;
+  const tag = document.getElementById("link-tag");
+  const a = NODE_BY_ID[LINK_SEL.from], b = NODE_BY_ID[LINK_SEL.to];
+  const s = Graph.graph2ScreenCoords((a.x + b.x) / 2, (a.y + b.y) / 2);
+  const w = tag.offsetWidth, h = tag.offsetHeight, free = freeWidth();
+  tag.style.left = Math.max(8, Math.min(free - w - 8, s.x - w / 2)) + "px";
+  tag.style.top = Math.max(8, Math.min(Graph.height() - h - 8, s.y - h - 12)) + "px";
 }
 
 // --- Edge weight: what you wrote outranks what was inferred -----------------
@@ -1786,7 +2362,7 @@ const isDashed = l => ABSENT.has(l.type) || l.type === "COVERS";
 // 1:3 gap to ink, which is DASH_2D's 2px against 6px and the legend swatch's
 // too: one ratio, so the two views and the key under them draw one pattern.
 const DASH_GAP = 0.25;                                     // of the period
-const DASH_PERIOD = () => 0.10 * baseDist() * forceMul.dist;
+const DASH_PERIOD = () => 0.10 * baseDist();
 // Two, so even the shortest link still reads as broken; the ceiling is what
 // keeps the buffer a fixed allocation. 24 covers a link 2.4x the layout's own
 // spacing - past that the dashes lengthen again, which is the old behaviour and
@@ -1816,7 +2392,8 @@ const SCREEN_2D = { GAP: [8, 3], COUPLED: [8, 3], PROPOSED: [4, 3], COVERS: [4, 
 const SCREEN_INK = LIGHT ? { 4: 0.55, 8: 0.16 } : { 4: 0.42, 8: 0.14 };
 // Every written link is 1 px, so width says one thing: a band is inferred.
 // Hover, focus and Compare dim; none of them reach this.
-const width2D = l => SCREEN_2D[l.type] ? SCREEN_2D[l.type][1] : 1;
+// The clicked link is the one drawn wider, while it is clicked (ADR-0152).
+const width2D = l => l === LINK_SEL ? 2 : SCREEN_2D[l.type] ? SCREEN_2D[l.type][1] : 1;
 // With the atlas on, every link the atlas used to hide prints as a mat over
 // the cells at this share, and what is being read prints over it whole (the
 // owner, 2026-11-01: "in atlas si potessero vedere i link, ma meno opachi").
@@ -1840,7 +2417,8 @@ function linkPaint(l) {
   // so it takes the dim at once.
   const f = !is2D() && libOwnsLink(l) ? (l._dim ? 1 : 0) : l._fade || 0;
   const q = Math.round(f * FADE_STEPS);
-  const key = (q ? "d" + q : "") + (l._ctx ? "x" : "") + (is2D() ? "2" : "3") +
+  const sel = l === LINK_SEL;
+  const key = (sel ? "S" : "") + (q ? "d" + q : "") + (l._ctx ? "x" : "") + (is2D() ? "2" : "3") +
     (AB ? (l._ab ? "C" : "c") : "");
   if (l.__paintKey === key) return l.__paint;
   // The share of the ground the 2D ink covers: what it was mixed onto the
@@ -1848,7 +2426,8 @@ function linkPaint(l) {
   let out, cover = 1;
   // A context wikilink under the rim (ADR-0066 amendment) is drawn as the
   // focus dims one: the structure is there, and it is not what is being read.
-  if (q >= FADE_STEPS || l._ctx || (AB && !on)) out = GP.linkDim;
+  if (sel) out = GP.label;   // frost, at full ink
+  else if (q >= FADE_STEPS || l._ctx || (AB && !on)) out = GP.linkDim;
   else {
     const c = l.color || {};
     // A covers line is the accent, read from the theme's own token.
@@ -2124,11 +2703,12 @@ uniform int posW;
 uniform vec3 m0, m1;       // graph units -> device px: the canvas's own transform
 uniform vec2 size;         // device px
 uniform float dpr;
+uniform float grow;        // 0 to 1: how far a link reaches from its first note (the arrival)
 out vec4 vColor; out float vD; out float vHalf; flat out vec2 vScreen;
 vec2 at(uint i) { return texelFetch(pos, ivec2(int(i) % posW, int(i) / posW), 0).xy; }
 vec2 dev(vec2 p) { return vec2(dot(m0, vec3(p, 1.)), dot(m1, vec3(p, 1.))); }
 void main() {
-  vec2 a = dev(at(ends.x)), b = dev(at(ends.y)), d = b - a;
+  vec2 a = dev(at(ends.x)), b = mix(a, dev(at(ends.y)), grow), d = b - a;
   float L = length(d);
   vec2 u = L > 0. ? d / L : vec2(1., 0.);
   vHalf = width * dpr * .5;
@@ -2282,7 +2862,7 @@ function buildGLLinks() {
     instBuf: gl.createBuffer(), cornerBuf: gl.createBuffer(), vao: gl.createVertexArray(),
     count: 0, mat: 0, over: false, dirty: true, rgba: new Map(),
     lay, fbo: gl.createFramebuffer(), fboTex: gl.createTexture(),
-    u: Object.fromEntries(["pos", "posW", "m0", "m1", "size", "dpr", "over", "ground"]
+    u: Object.fromEntries(["pos", "posW", "m0", "m1", "size", "dpr", "over", "ground", "grow"]
       .map(k => [k, gl.getUniformLocation(prog, k)])),
     uLay: { t: gl.getUniformLocation(lay, "t"), share: gl.getUniformLocation(lay, "share") },
   };
@@ -2555,6 +3135,7 @@ function drawGLLinks(ctx, scale) {
     gl.uniform3f(L.u.m0, m.a, m.c, m.e); gl.uniform3f(L.u.m1, m.b, m.d, m.f);
     gl.uniform2f(L.u.size, W, H);
     gl.uniform1f(L.u.dpr, m.a / scale);   // the lib's lineWidth is width / scale, under dpr * scale
+    gl.uniform1f(L.u.grow, ARRIVAL ? ARRIVAL.grow : 1);
     gl.uniform1f(L.u.over, L.over ? 1 : 0);
     gl.uniform3fv(L.u.ground, glRGBA(GP.bg).slice(0, 3).map(v => v / 255));
     gl.activeTexture(gl.TEXTURE0);
@@ -2696,7 +3277,7 @@ const RING_S_PX = 1.6, RING_C_PX = 1.3, RING_GAP_PX = 1.2, RING_MIN_PX = 13;
 // filling ~120px: at 20 the chords and the width wobble both read, at 32
 // neither does. 2048 triangles a node against 72, ~2.4M a frame on the
 // reference vault - and the render budget only pays for them while something
-// moves. Revisit at 5k notes, or if a weak iGPU ever drops frames on a drag.
+// moves. Revisit at 5k notes, or if a weak iGPU ever drops frames on an orbit.
 const NODE_RES = 32;
 // The bundle caches one sphere geometry per node VALUE, and size is
 // round(16 + 40*betweenness, 2) - a near-continuous float, so it was caching
@@ -3037,7 +3618,7 @@ function renderBudget() {
   clearInterval(idleTick); idleTick = null;
   // A cold build's warmup runs in the worker: paint nothing until it lands,
   // which is what the lib's synchronous warmup showed too.
-  if (SIM && !SIM.ready) { Graph.pauseAnimation(); return; }
+  if (SIM && !SIM.ready && !ARRIVAL) { Graph.pauseAnimation(); return; }
   if (simRunning || performance.now() < awakeUntil) { Graph.resumeAnimation(); return; }
   Graph.pauseAnimation();
   // resumeAnimation() runs one cycle synchronously and re-arms rAF;
@@ -3162,10 +3743,7 @@ function drsOnPaint() {
 // the same tick.
 function fitWhenPainted(G) {
   wake(1200);
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    G.zoomToFit(400, 40);
-    wake(600);
-  }));
+  requestAnimationFrame(() => requestAnimationFrame(() => fitFree(400)));
 }
 
 // Every force the layout runs sees the notes alone (ADR-0066 decision 3: the
@@ -3210,14 +3788,12 @@ function rimless(real) {
 // (`inert`: they still take their settings and still resolve the link ends,
 // which is where the worker reads them from), and each of its ticks copies the
 // worker's latest positions in. So everything that listens to that engine -
-// onEngineStop, the 3D meshes, simRunning, the drag gate - runs as before. The
-// schedule the app sets on the lib (decay, the gate, a reheat) is forwarded
-// from this instance's own methods, which keeps the seven places that set it
-// as they were.
+// onEngineStop, the 3D meshes, simRunning - runs as before. It works once, on
+// a cold build, and is dropped when it is done (ADR-0152).
 //
 // What the main thread writes wins, and reaches the worker on the next frame:
-// a pin (a drag, the Map) by its fx, a free note put back (an arrangement let
-// go, the areas left) by its x differing from the last x the worker gave it.
+// a pin (the Map, on a 3D layout still settling) by its fx, a free note put back
+// by its x differing from the last x the worker gave it.
 // No Worker, or ?noworker in the address, and the frame lays out as it always
 // did; a worker that fails reloads the frame with ?noworker.
 let SIM = null;
@@ -3257,10 +3833,10 @@ function inert(real, fed) {
 // rule for both engines: 0.702 after 1,000 iterations, against 0.685 at the
 // Jaccard itself.
 // FA2 has no alpha. A run stops when the median note moves less than FA2_EPS
-// graph units an iteration, after FA2_MIN of them, or after FA2_BUDGET; a
-// drag holds it running; a reheat (a slider, autoLayout) starts the count again.
+// graph units an iteration, after FA2_MIN of them, or after FA2_BUDGET. There is
+// one run: nothing starts it again (ADR-0152).
 const FA2_SCALING = 2, FA2_THETA = 1, FA2_MIN = 100, FA2_BUDGET = 1500;
-const FA2_EPS = RESIDUAL_EPS;
+const FA2_EPS = 0.5;   // graph units per iteration; saveLayout rounds to 1 anyway
 // No worker, no FA2: the lib's own engine is d3.
 const ENGINE_2D = NO_WORKER || typeof Worker === "undefined" ? "d3" : "fa2";
 
@@ -3271,8 +3847,8 @@ const FOLLOW = ${FOLLOW};
 ${followNative}
 const PPN = 10, FA2_SCALING = ${FA2_SCALING}, FA2_THETA = ${FA2_THETA};
 const FA2_MIN = ${FA2_MIN}, FA2_BUDGET = ${FA2_BUDGET}, FA2_EPS = ${FA2_EPS};
-let sim = null, nodes = [], S = null, min = 0, descend = null, running = false;
-let ticks = 0, total = 0, residual = 0, gen = 0, fa = null;
+let sim = null, nodes = [], S = null, min = 0, running = false;
+let ticks = 0, total = 0, fa = null;
 const pinned = new Set();
 const follow = Object.assign(a => followNative(nodes, a), { initialize() {} });
 // A message, not setTimeout(0): nested timeouts clamp to 4ms, a third of a tick.
@@ -3284,13 +3860,6 @@ function step() {
   if (fa) return faStep();
   if (min > 0 && sim.alpha() < min) { running = false; return false; }
   sim.tick(); ticks++; total++;
-  if (descend) {
-    const st = nodes.map(n => Math.hypot(n.vx || 0, n.vy || 0, n.vz || 0)).sort((a, b) => a - b);
-    residual = st[st.length >> 1] || 0;
-    if (residual < descend[0] || --descend[1] === 0) {
-      descend = null; sim.alphaDecay(${FAST_DECAY}); min = ${ALPHA_MIN};
-    }
-  }
   return true;
 }
 function run() {
@@ -3308,8 +3877,7 @@ function post() {
     const n = nodes[i];
     p[3 * i] = n.x; p[3 * i + 1] = n.y; p[3 * i + 2] = n.z || 0;
   }
-  postMessage({ p, ticks, total, residual, gen, unit: fa ? fa.U : 1,
-    descending: descend ? descend[1] : 0, done: !running }, [p.buffer]);
+  postMessage({ p, ticks, total, done: !running }, [p.buffer]);
   ticks = 0;
 }
 
@@ -3318,12 +3886,11 @@ function post() {
 // not scale-free (scaled up 2x by its scalingRatio, the course stood at 0.643
 // after 1,000 iterations against 0.702); a post multiplies it by U, which puts
 // the median pulling line at one rest length, the frame's unit, and a pin or a
-// note put back comes in divided by U. A layout seeded from the cache starts
-// at the U it was saved with, so it starts where it settled.
-function faInit(unit) {
+// note put back comes in divided by U.
+function faInit() {
   const n = nodes.length, N = new Float32Array(n * PPN);
-  fa = { N, E: new Float32Array(0), U: unit || 1, rest: 1, opt: null, prev: new Float32Array(2 * n),
-         st: new Float32Array(n), left: FA2_BUDGET, iters: 0, hold: false };
+  fa = { N, E: new Float32Array(0), U: 1, rest: 1, opt: null, prev: new Float32Array(2 * n),
+         st: new Float32Array(n), left: FA2_BUDGET, iters: 0 };
   for (let i = 0; i < n; i++) {
     N[i * PPN] = nodes[i].x / fa.U; N[i * PPN + 1] = nodes[i].y / fa.U;
     N[i * PPN + 7] = 1; N[i * PPN + 8] = 1;   // convergence, size
@@ -3344,7 +3911,7 @@ function faForces(f, links) {
   });
   fa.E = E; fa.rest = f.distance;
   fa.opt = { linLogMode: false, outboundAttractionDistribution: true, adjustSizes: false,
-    edgeWeightInfluence: 1, scalingRatio: FA2_SCALING * f.repel, strongGravityMode: false,
+    edgeWeightInfluence: 1, scalingRatio: FA2_SCALING, strongGravityMode: false,
     gravity: f.center, slowDown: 1, barnesHutOptimize: true, barnesHutTheta: FA2_THETA };
 }
 function faFollow() {
@@ -3376,16 +3943,12 @@ function faStep() {
   faFollow();
   for (let i = 0; i < n; i++) st[i] = Math.hypot(N[i * PPN] - P[2 * i], N[i * PPN + 1] - P[2 * i + 1]);
   st.sort();
-  residual = (st[n >> 1] || 0) * fa.U;
+  const residual = (st[n >> 1] || 0) * fa.U;
   ticks++; total++; fa.iters++;
-  if (fa.hold) return true;
-  if (descend) {
-    if (residual < descend[0] || --descend[1] === 0) { descend = null; fa.left = 0; }
-  } else if (--fa.left > 0 && fa.iters >= FA2_MIN && residual < FA2_EPS) fa.left = 0;
+  if (--fa.left > 0 && fa.iters >= FA2_MIN && residual < FA2_EPS) fa.left = 0;
   if (!fa.left) running = false;
   return running;
 }
-function faRestart() { fa.left = FA2_BUDGET; fa.iters = 0; }
 
 function forces(f) {
   S = f.strengths;
@@ -3393,14 +3956,12 @@ function forces(f) {
   sim.force("charge").strength(f.charge).distanceMax(f.chargeMax);
   sim.force("center").strength(f.center);
 }
-let LINKS = null;
 onmessage = ({ data: m }) => {
   if (m.init) {
     const { dim, x, y, z, links, follow: near } = m.init;
     nodes = Array.from({ length: x.length }, (_, i) =>
       ({ index: i, x: x[i], y: y[i], z: z[i], vx: 0, vy: 0, vz: 0 }));
     near.forEach((f, i) => { if (f) nodes[i]._follow = f.map(j => nodes[j]); });
-    LINKS = links;
     const L = [];
     for (let i = 0; i < links.length; i += 2) L.push({ source: links[i], target: links[i + 1] });
     // The lib's force order (link, charge, center, then the native notes'
@@ -3410,7 +3971,7 @@ onmessage = ({ data: m }) => {
       .force("center", d3.forceCenter()).force("follow", follow)
       .alphaDecay(m.init.decay);
     forces(m.init.forces);
-    if (m.init.engine === "fa2") { faInit(m.init.unit); faForces(m.init.forces, links); }
+    if (m.init.engine === "fa2") { faInit(); faForces(m.init.forces, links); }
     min = m.init.min;
     // The warmup, unposted as the lib's synchronous loop was unpainted.
     if (fa) {
@@ -3427,8 +3988,6 @@ onmessage = ({ data: m }) => {
   if (sim) for (const op of m.ops) apply(op);
 };
 function apply(m) {
-  if (m.gen) gen = m.gen;
-  if (m.forces) { forces(m.forces); if (fa) faForces(m.forces, LINKS); }
   if (m.moved) for (let k = 0; k < m.moved.length; k += 4) {
     const i = m.moved[k], n = nodes[i];
     n.x = m.moved[k + 1]; n.y = m.moved[k + 2]; n.z = m.moved[k + 3];
@@ -3448,17 +4007,6 @@ function apply(m) {
       pinned.add(i);
     }
   }
-  if (m.decay !== undefined) sim.alphaDecay(m.decay);
-  if (m.min !== undefined) min = m.min;
-  if (m.target !== undefined) {
-    sim.alphaTarget(m.target);
-    // A drag holds FA2 running and its end lets it settle: either way the
-    // budget opens again, since a settled run has spent it.
-    if (fa) { fa.hold = m.target > 0; faRestart(); }
-    if (m.target || fa) kick();
-  }
-  if (m.descend) { descend = m.descend.slice(); if (fa) { faRestart(); kick(); } }
-  if (m.reheat) { sim.alpha(1); if (fa) faRestart(); kick(); }
 }`;
 
 // Built with the instance and before its data: it takes the lib's schedule
@@ -3476,15 +4024,8 @@ function buildSim(G) {
   }
   const S = {
     w, url, G, ready: false, inited: false, last: null, applied: null, pins: [],
-    total: 0, base: 0, residual: 0, descending: 0, dragging: false,
-    // Bumped by every message that starts a run: a post from before it (a
-    // done, a descent's count) is about a run that is over and changes nothing.
-    gen: 0,
     min: G.d3AlphaMin(), decay: G.d3AlphaDecay(), warm: G.warmupTicks(),
-    // One message per turn of the main thread, its writes in order: posted
-    // one by one, the worker could tick between a reheat and the hold that
-    // follows it in autoLayout, and the descent held at whatever alpha the
-    // scheduler let through (2026-10-26).
+    // One message per turn of the main thread, its writes in order.
     box: [], queued: false,
     post(m) {
       if (!this.inited) return;
@@ -3497,6 +4038,9 @@ function buildSim(G) {
   w.onmessage = ({ data }) => {
     if (SIM !== S) return;
     S.last = data;
+    // On the circle nothing reads a post but the last: the lib's engine, which
+    // would copy them onto the notes, is standing still.
+    if (ARRIVAL) { if (data.done) landArrival(data); return; }
     if (!S.ready) { S.ready = true; renderBudget(); }
   };
   // Loud and recovered: the same frame again, on the lib's engine. Reloaded
@@ -3511,22 +4055,12 @@ function buildSim(G) {
     u.searchParams.set("noworker", "1");
     location.replace(u.href);
   };
-  const libReheat = G.d3ReheatSimulation.bind(G);
   G.warmupTicks(0).d3AlphaDecay(0).d3AlphaMin(0);   // the lib's alpha holds: its engine only keeps time
-  G.d3AlphaDecay = v => v === undefined ? S.decay : (S.decay = v, S.post({ decay: v }), G);
-  G.d3AlphaMin = v => v === undefined ? S.min : (S.min = v, S.post({ min: v }), G);
-  G.d3ReheatSimulation = () => {
-    simFlush(S);
-    S.post({ reheat: 1, gen: ++S.gen });
-    G.cooldownTicks(Infinity);
-    libReheat();
-    return G;
-  };
   return S;
 }
 
 // What the forces are set to, read off the lib's own (inert) force objects:
-// applyForces keeps writing them, and the strengths are d3's accessors run over
+// applyForces writes them, and the strengths are d3's accessors run over
 // the same link array the lib resolved, in float64 so the sums do not drift.
 function simForces(G) {
   const link = G.d3Force("link"), charge = G.d3Force("charge"), center = G.d3Force("center");
@@ -3537,8 +4071,6 @@ function simForces(G) {
     strengths, distance: link.distance()(links[0] || {}, 0, links),
     charge: charge.strength()(RAW_NODES[0] || {}, 0, RAW_NODES), chargeMax: charge.distanceMax(),
     center: center.strength(),
-    // ForceAtlas2's repulsion has no d3 charge to read it off (FA2_SCALING).
-    repel: forceMul.repel,
   };
 }
 
@@ -3562,10 +4094,11 @@ function simInit(S) {
   S.w.postMessage({ init: {
     dim: is2D() ? 2 : 3, x, y, z, links: pairs, forces: simForces(G),
     decay: S.decay, min: S.min, warm: S.warm,
-    engine: is2D() ? ENGINE_2D : "d3", unit: layoutUnit,
+    engine: is2D() ? ENGINE_2D : "d3",
     follow: RAW_NODES.map(n => n._follow ? n._follow.map(m => index.get(m)) : null),
   } }, [x.buffer, y.buffer, z.buffer, pairs.buffer]);
   simFlush(S);
+  if (ARRIVAL) arrivalStart();   // after the worker has its seed: the circle is no place to start from
 }
 
 // The main thread's writes since the last frame: every pin, when the set
@@ -3601,25 +4134,10 @@ function simSync(S) {
       n.x = n.__wx = p[3 * i]; n.y = n.__wy = p[3 * i + 1];
       if (!flat) n.z = n.__wz = p[3 * i + 2];
     }
-    S.total = d.total;
-    simTicks = Math.max(0, d.total - S.base - warmupRun);
-    if (d.gen === S.gen) {
-      S.residual = d.residual; S.descending = d.descending;
-      descendTick();
-      if (d.done) S.G.cooldownTicks(0);
-    }
+    simTicks = Math.max(0, d.total - warmupRun);
+    if (d.done) S.G.cooldownTicks(0);
   }
   for (const n of RAW_NODES) { n.vx = 0; n.vy = 0; if (!flat) n.vz = 0; }
-}
-
-// A drag is a run too: the lib reheats its own engine toward 0.3 on every drag
-// event, which here only keeps the clock going; the worker has to be told.
-function simDrag(on) {
-  const S = SIM;
-  if (!S || S.dragging === on) return;
-  S.dragging = on;
-  simFlush(S);
-  S.post(on ? { target: 0.3, gen: ++S.gen } : { target: 0 });
 }
 
 function dropSim() {
@@ -3657,19 +4175,24 @@ function buildGraph() {
     : new ForceGraph3D(el, { rendererConfig: { antialias: false } });
   if (is2D()) GLLinks = buildGLLinks();
   syncCanvasSize(G);   // the bundle's default is the size at its load, not now
-  // Seeded positions and the decay that goes with them, decided before the data
-  // lands: on a cache hit the whole rerelaxation fits inside the warmup, so the
-  // graph appears already settled instead of unfolding a layout you have
-  // watched unfold before.
+  // Decided before the data lands: a cache hit is the picture, and the lib's
+  // engine stops on its first frame without a tick, its cooldown already spent.
   const seeded = loadLayout();
-  const warm = WARMUP_TICKS(seeded);
+  if (!seeded) KREF = DISC_PX;
+  // A cold 3D build starts from the lib's own seed. With z left at the 0 a 2D
+  // cache hit writes, it started flat on the 2D layout, stayed flat (median z 4
+  // against a radius of 2,325) and was then kept for good. No z reseeds all three.
+  if (!seeded && !is2D()) RAW_NODES.forEach(n => { delete n.z; });
+  const warm = seeded ? 0 : WARMUP_TICKS();
   warmupRun = warm; simTicks = 0;
-  paintStat("settling");
+  paintStat(seeded ? "settled" : "settling");
   G.warmupTicks(warm)
     .d3AlphaMin(ALPHA_MIN)
-    .d3AlphaDecay(seeded ? FAST_DECAY : COLD_DECAY)
-    .cooldownTicks(Infinity)   // alpha is the gate; see ALPHA_MIN
+    .d3AlphaDecay(COLD_DECAY)
+    .cooldownTicks(0)   // a cold build lifts it below, where it knows who settles
     .cooldownTime(Infinity)
+    // The layout is the picture, so a note stays where it was put (ADR-0152).
+    .enableNodeDrag(false)
     // Under the WebGL links the floor is the canvas below them (buildGLLinks).
     .backgroundColor(GLLinks ? "transparent" : GP.bg)
     .linkSource("from").linkTarget("to")
@@ -3701,38 +4224,28 @@ function buildGraph() {
       : (LIGHT ? DATA.colors.gap_paper : DATA.colors.gap))
     .linkDirectionalParticleWidth(l => l.type === "SIMILAR" ? 1.5 : 2)
     .nodeVisibility(n => !n._hidden)
-    .linkVisibility(l => !l._hidden && !quietNow(l) && (!GLLinks || l.type === "CITES" || l.requires || libOwnsLink(l)))
+    .linkVisibility(l => !l._hidden && !quietNow(l) && !(ARRIVAL && !ARRIVAL.grow) &&
+      (!GLLinks || l.type === "CITES" || l.requires || libOwnsLink(l)))
     .onNodeClick((n, e) => clickNote(n, e))
     // 3D only: 2D picks its hover itself (pickHover2D). One argument, since
     // the lib's second is the previous node.
     .onNodeHover(n => { if (!is2D()) hoverNote(n); })
     .onBackgroundClick(e => clickNote(null, e))
-    // The alpha gate and a drag deadlock each other. Both bundles reheat a drag
-    // the d3 way — d3AlphaTarget(0.3).resetCountdown() on every drag event — but
-    // alpha only climbs toward that target INSIDE tick(), and tick() is exactly
-    // what the gate refuses to run while alpha still sits at the settled value
-    // it stopped on. So the engine stops again on the same frame, forever. The
-    // grabbed node still follows the pointer (both libs write its position
-    // directly), which is why the symptom is one node moving through a graph
-    // that has stopped answering. Lift the gate for the drag and let alpha do
-    // what it was going to do; dragend puts the gate back, alphaTarget returns
-    // to 0, and the layout settles into onEngineStop as usual.
-    .onNodeDrag(() => {
-      simDrag(true);
-      if (simRunning) return;
-      simRunning = true;
-      G.d3AlphaMin(0);
-      renderBudget();   // a still pointer stops waking the loop mid-drag
-    })
-    .onNodeDragEnd(() => { simDrag(false); G.d3AlphaMin(ALPHA_MIN); })
-    .onEngineTick(() => { if (SIM) return simSync(SIM); simTicks++; descendTick(); })
+    .onEngineTick(() => { if (SIM) return simSync(SIM); simTicks++; })
     .onEngineStop(() => {
-      G.cooldownTicks(Infinity);   // the worker's stop (simSync) was a cooldown of 0
+      // It holds from here (ADR-0152): a cooldown of 0 leaves the lib's engine
+      // no tick to run if anything starts it again.
+      G.cooldownTicks(0);
       simRunning = false;
-      residualTicks = 0;
-      paintStat("settled in " + gnum(warmupRun + simTicks) + " ticks");
+      if (ARRIVAL) { renderBudget(); return; }   // it lands when the worker is done (landArrival)
+      if (!seeded) {
+        if (is2D()) spreadLayout();
+        paintStat("settled in " + gnum(warmupRun + simTicks) + " ticks");
+        saveLayout();
+        dropSim();
+      }
+      pushMeshes();   // 3D moves a mesh only in a tick, and a hit runs none
       atlasMemo = null;   // positions just moved
-      saveLayout();
       measureGraphRadius();   // the label thresholds are a fraction of it
       if (RIM) placeRim();
       if (fitPending) { fitPending = false; fitWhenPainted(G); }
@@ -3763,10 +4276,10 @@ function buildGraph() {
       .nodePointerAreaPaint(paintNodeArea)
       // The picking canvas repaints on a ~800ms debounce, and its link pass
       // strokes every edge at width+4px — 40-80ms on this vault, landing as a
-      // visible hitch once or twice a second through any pan. Nothing hovers
-      // or clicks a link here (no linkLabel, no onLinkHover), so the pass
-      // buys nothing: paint no link areas at all. Node picking keeps its own
-      // painter above. Measured: worst 2D frame 78ms -> 9ms.
+      // visible hitch once or twice a second through any pan. A clicked link
+      // is found at click time (nearestLink), so the pass buys nothing: paint
+      // no link areas at all. Node picking keeps its own painter above.
+      // Measured: worst 2D frame 78ms -> 9ms.
       .linkPointerAreaPaint(() => {})
       // Pre, not Post: the atlas is the ground the notes stand on. 2D only:
       // the 3D bundle hands out no THREE, so there an area is a colour and a
@@ -3778,12 +4291,17 @@ function buildGraph() {
         drsOnPaint();
         const under = underCtx(ctx);
         drawAtlas(under, scale);   // first, so an arrangement clears it too
-        if (ARR) { drawWedges(under, scale); return; }
+        if (ARRIVAL) return;
+        if (ARR) { ({ map: drawWedges, clusters: drawGround, flow: drawWires })[ARR.kind](under, scale); return; }
         drawRim(under, scale);
       })
       .onRenderFramePost((ctx, scale) => {
         drawGLLinks(ctx, scale);
-        ARR ? drawArrangedNames(ctx, scale) : drawAtlasNames(ctx, scale);
+        if (ARRIVAL) return;
+        placeLinkTag();
+        if (!ARR) drawAtlasNames(ctx, scale);
+        else if (ARR.kind === "map") drawArrangedNames(ctx, scale);
+        else drawLayoutNames(ctx, scale);
       });
   } else {
     // Perf on big vaults (1200+ notes): the bundle gives every link its own
@@ -3838,19 +4356,24 @@ function buildGraph() {
   }
   if (RIM_NODES.length)
     for (const name of ["link", "charge", "center"]) G.d3Force(name, rimless(G.d3Force(name)));
-  SIM = buildSim(G);
-  if (SIM) {
-    const S = SIM;
+  // A hit needs no worker, and its forces go inert all the same: a tick here
+  // would be the lib's own d3 walking a picture the reader is looking at.
+  SIM = seeded ? null : buildSim(G);
+  const S = SIM;
+  // A cold 2D build arrives on the circle, the lib's engine standing still with
+  // the worker running beside it. Without a worker the layout has nowhere to
+  // settle out of sight, and it settles in view, as a cold 3D build does.
+  ARRIVAL = S && is2D() && RAW_NODES.length > 1 ? { t: -1, grow: 0 } : null;
+  if (!seeded && !ARRIVAL) G.cooldownTicks(Infinity);
+  if (seeded || S)
     for (const name of ["link", "charge", "center"])
-      G.d3Force(name, inert(G.d3Force(name), name === "link" ? () => setTimeout(() => simInit(S)) : null));
-  }
+      G.d3Force(name, inert(G.d3Force(name), S && name === "link" ? () => setTimeout(() => simInit(S)) : null));
   // Forces before the data, and the data last of all. The warmup loop runs the
   // moment graphData lands, so anything set afterwards shapes only the animated
   // tail: with the tuned forces arriving late, the bulk of the layout was being
   // built by d3's untouched defaults and then nudged at low alpha. Widening the
   // warmup made that worse, which is how it surfaced.
-  applyForces(false, G);
-  residualTicks = 0;   // a rebuild is a cold start, whatever a descent was doing
+  applyForces(G);
   G.graphData({ nodes: ALL_NODES, links: ALL_EDGES });
   return G;
 }
@@ -3859,8 +4382,9 @@ function buildGraph() {
 // community filter, the focused set and the search box all live outside the
 // instance. The camera cannot be preserved — there is no sane mapping from a 3D
 // camera to a 2D pan/zoom — so it refits once the new layout settles.
-function setMode(m) {
+function setMode(m, remember = true) {
   if (m === mode && Graph) return;
+  if (ARRIVAL) return;   // the circle ends in a few seconds, and it owns the notes
   const rebuild = Graph !== null;   // a switch always refits; a first build may not
   // The plane of a 3D arrangement is not a 2D one: put the layout back, build,
   // and arrange the same focus again in the new mode.
@@ -3869,7 +4393,7 @@ function setMode(m) {
   mode = m;
   // Only a switch is a choice: the first build writing its default here is
   // what made the old key unable to tell the two apart (MODE_KEY).
-  if (rebuild) try { localStorage.setItem(MODE_KEY, m); } catch (e) {}
+  if (rebuild && remember) try { localStorage.setItem(MODE_KEY, m); } catch (e) {}
   document.querySelectorAll("#mode-toggle button")
     .forEach(b => b.classList.toggle("active", b.dataset.mode === m));
   // The rings are a canvas draw. Leaving their legend up in 3D would promise a
@@ -3934,65 +4458,16 @@ function announceScopes() {
 
 // Slider multipliers persist across sessions; the baseline is never persisted
 // (recomputed from the current graph each load).
-const FORCES_KEY = "silica-graph-forces";
-let forceMul = { repel: 1, dist: 1, center: 1 };
-try {
-  Object.assign(forceMul, JSON.parse(localStorage.getItem(FORCES_KEY)) || {});
-} catch (e) { /* corrupt or blocked storage -> auto defaults */ }
-
 // G is passed explicitly during a build, where the instance is not yet the
 // global one: the forces have to be in place before graphData runs the warmup.
-function applyForces(reheat, G) {
-  G = G || Graph;
+function applyForces(G) {
   // distanceMax bounds both over-dispersion and per-tick cost on big graphs.
-  G.d3Force("charge").strength(baseCharge() * forceMul.repel).distanceMax(600 * FORCE_SCALE);
+  G.d3Force("charge").strength(baseCharge()).distanceMax(600 * FORCE_SCALE);
   // The worker runs its own follow; the lib's engine needs one only alone.
   G.d3Force("follow", SIM ? null : followForce);
-  G.d3Force("link").distance(baseDist() * forceMul.dist).strength(linkStrength());
-  // Center capped at 1: d3 forceCenter shifts positions directly, >1 oscillates.
-  G.d3Force("center").strength(Math.min(1, forceMul.center));
-  if (SIM && SIM.inited) SIM.post({ forces: simForces(G) });
-  // A slider moves an already-settled layout, so the reheat is a perturbation,
-  // not a cold start: the fast decay is the right budget for it, and without it
-  // dragging a slider would cost the full 300-tick schedule every time.
-  if (reheat) {
-    G.d3AlphaDecay(FAST_DECAY).d3ReheatSimulation();
-    simRunning = true;
-    renderBudget();
-  }
+  G.d3Force("link").distance(baseDist()).strength(linkStrength());
+  G.d3Force("center").strength(1);
 }
-
-// Log-scale track for the multiplier sliders: x1 sits mid-track and the
-// useful 0.2-1 range gets half the travel instead of a sliver.
-const fromSlider = v => Math.pow(10, +v);
-const toSlider = m => Math.log10(m);
-
-function syncForceUI() {
-  document.getElementById("sl-repel").value = toSlider(forceMul.repel);
-  document.getElementById("sl-dist").value = toSlider(forceMul.dist);
-  document.getElementById("sl-center").value = forceMul.center;
-  document.getElementById("fv-repel").textContent = forceMul.repel.toFixed(1) + "\u00d7";
-  document.getElementById("fv-dist").textContent = forceMul.dist.toFixed(1) + "\u00d7";
-  document.getElementById("fv-center").textContent = (+forceMul.center).toFixed(2);
-}
-
-function onForceSlider() {
-  forceMul.repel = fromSlider(document.getElementById("sl-repel").value);
-  forceMul.dist = fromSlider(document.getElementById("sl-dist").value);
-  forceMul.center = +document.getElementById("sl-center").value;
-  try { localStorage.setItem(FORCES_KEY, JSON.stringify(forceMul)); } catch (e) {}
-  syncForceUI();
-  applyForces(true);
-}
-
-function resetForces() {
-  forceMul = { repel: 1, dist: 1, center: 1 };
-  try { localStorage.removeItem(FORCES_KEY); } catch (e) {}
-  syncForceUI();
-  applyForces(true);
-}
-
-syncForceUI();
 
 // --- What pulls (ADR-0136) ---------------------------------------------------
 // The notes a resolved wikilink reaches, over the edges Louvain and the
@@ -4060,6 +4535,9 @@ const atlasOn = () => showAtlas && is2D() && !!ATLAS_BY;
 // (ATLAS_LINES), where the draft filled a 1.15 R ring under the cells: that
 // ring was a 15px band at 5x fit.
 const ATLAS_R = 0.74;
+// Never less than this much ground round a note at the fit: a cell inside its
+// own disc is no ground at all, now that a disc is counted in pixels (KREF).
+const ATLAS_PX = 10.5;
 // The colour's share of a cell's ground, over the floor: the draft's 0.28 on
 // graphite and 0.2 on paper, where a tint reads stronger.
 const ATLAS_GROUND = LIGHT ? 0.2 : 0.28;
@@ -4102,7 +4580,7 @@ function countryHue(c, n) {
 const ATLAS_SIDES = 24, ATLAS_SETTLE_MS = 66;
 let atlasMemo = null, atlasNow = null;
 function atlasGeometry() {
-  const R = ATLAS_R * baseDist() * forceMul.dist;
+  const R = Math.max(ATLAS_R * baseDist(), ATLAS_PX / KREF);
   if (atlasMemo && simRunning && atlasMemo.R === R && performance.now() - atlasMemo.at < ATLAS_SETTLE_MS) return atlasMemo;
   const on = [];
   let sum = 0;
@@ -4205,7 +4683,9 @@ function atlasLayer(g) {
 // draws the same polygons and segments, one path per colour.
 function drawAtlas(ctx, scale) {
   atlasNow = null;   // what the WebGL layer draws this frame, if anything
-  if (!atlasOn() || ARR) return;
+  // On the circle the links print as the mat they will rest as, over no ground:
+  // at full ink 14,563 chords filled alex_second_brain's circle solid.
+  if (!atlasOn() || ARR || ARRIVAL) return;
   const g = atlasNow = atlasGeometry();
   if (!g.n) return;
   const z = g.zoom = atlasZoom(2 * g.R * scale, g.countries);
@@ -4252,8 +4732,11 @@ const ATLAS_CAPS = { area: 12, sub: 20, note: 30, ctx: 4 };
 const ATLAS_CONTEXT_MIN = 20, ATLAS_CONTEXT_ALPHA = 0.45;
 const clip = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
 function drawAtlasNames(ctx, scale) {
-  const g = atlasNow;
-  if (!g || !g.n) return;
+  if (namesMode === "off") return;
+  const g = atlasNow, auto = namesMode === "auto";
+  // Auto climbs the atlas, so without one it is drawNode's. Key and All read
+  // the notes themselves, atlas or not.
+  if (auto && (!g || !g.n)) return;
   const tl = Graph.screen2GraphCoords(0, 0), br = Graph.screen2GraphCoords(freeWidth(), Graph.height());
   const view = { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y };
   const seen = p => p.x >= view.x0 && p.x <= view.x1 && p.y >= view.y0 && p.y <= view.y1;
@@ -4270,12 +4753,15 @@ function drawAtlasNames(ctx, scale) {
                  spots: around(p) });
   const context = p =>
     items.push({ kind: "ctx", quiet: true, lines: [[clip(p.name, 32).toUpperCase(), 11, 600, GP.label]], spots: around(p) });
-  const lit = hoverId ? [hoverId] : focusIds;
+  const lit = LINK_SEL ? [LINK_SEL.from, LINK_SEL.to] : hoverId ? [hoverId] : focusIds;
   if (lit.length) {
     const roots = new Set(lit);
     for (const id of lit) { const n = NODE_BY_ID[id]; if (n && !n._hidden) note(n, 13, 600, GP.accent); }
     RAW_NODES.filter(n => !n._dim && !n._hidden && !roots.has(n.id) && seen(n))
       .sort((p, q) => deg(q) - deg(p)).forEach(n => note(n, 11, 500, GP.label));
+  } else if (!auto) {
+    RAW_NODES.filter(n => !n._hidden && n.type !== "ghost" && seen(n) && (namesMode === "all" || isKey(n)))
+      .sort((p, q) => deg(q) - deg(p)).forEach(n => note(n, 11.5, 500, GP.label, "note"));
   } else {
     const z = g.zoom || atlasZoom(2 * g.R * scale, g.countries);
     const here = new Map();
@@ -4308,7 +4794,7 @@ function drawAtlasNames(ctx, scale) {
       return { x, y, x0: x - w / 2 - 3 / scale, y0: y - h / 2, x1: x + w / 2 + 3 / scale, y1: y + h / 2 };
     });
   });
-  const took = placeLabels(alts, view, items.map(it => it.kind), lit.length ? null : ATLAS_CAPS);
+  const took = placeLabels(alts, view, items.map(it => it.kind), lit.length || !auto ? null : ATLAS_CAPS);
   // The quiet names first, so the names they frame are drawn over them.
   for (const quiet of [true, false]) took.forEach((k, i) => {
     if (k < 0 || !!items[i].quiet !== quiet) return;
@@ -4341,7 +4827,7 @@ function updateAtlas() {
 // or in focus, the ones markDim leaves lit. Not under a comparison, whose
 // reading is the lines between its two parts, nor a collection's covers, the
 // lines the rim is drawn for.
-const quietNow = l => atlasOn() && !AB && l.type !== "COVERS" && !((hoverId || focusIds.length) && !l._dim);
+const quietNow = l => atlasOn() && !AB && l.type !== "COVERS" && !((hoverId || focusIds.length || LINK_SEL) && !l._dim);
 
 // Same split as computeFocus/applyFocus: flags on the shared objects here,
 // repaint only when there is no rebuild coming to read them for free.
@@ -4540,7 +5026,7 @@ function updateEdgeFilter() {
 
 // --- areas: named by their hub note ----------------------------------------
 // The hub note's name, not the community's c-TF-IDF label: it is what the
-// Areas surface and the scope picker call the area, and a title the reader
+// Clusters tab and the scope picker call the area, and a title the reader
 // wrote (ADR-0058). graph_view sends a name only for the areas of more than
 // one note; for the rest this is "", which says nothing rather than repeating
 // the note's own name as its area.
@@ -4620,15 +5106,17 @@ function positionNodeLabels() {
     // An arrangement names its own notes, lit or not (the 2D ring does the
     // same); the vault around it stays unnamed, as the focus left it.
     if (ARR ? !(n.id in ARR.layout) : n._dim) continue;
+    if (namesMode === "off" || (namesMode === "key" && !isKey(n))) continue;
     const d = Math.hypot(n.x - p.x, n.y - p.y, (n.z || 0) - p.z);
     // An arrangement (ADR-0088) is looked at from as far as it takes to hold
     // it, and every note on its plane is one the reader asked for: no
-    // distance rule, only the pool.
-    if (!ARR && d > far) continue;
+    // distance rule, only the pool. Key and All were asked for the same way.
+    const asked = ARR || namesMode !== "auto";
+    if (!asked && d > far) continue;
     // Between near and far only the standouts, exactly the rule 2D applies
     // between zoom 0.6 and 1.5. Ghosts are names nothing carries; they are
     // already the most numerous thing in the frame and stay unnamed.
-    if (!ARR && d > near && ((n.size || 16) <= BASE_SIZE || n.type === "ghost")) continue;
+    if (!asked && d > near && ((n.size || 16) <= BASE_SIZE || n.type === "ghost")) continue;
     if (!inFrontOfCamera(n)) continue;
     cand.push([d, n]);
   }
@@ -4705,6 +5193,7 @@ buildNodeLabels();
 // label loop: the loop's own state is declared above in this section, and a
 // bring-up from further up the file would read it before it is initialised.
 fitPending = is2D();
+syncNames();
 setMode(mode);
 announceScopes();
 document.getElementById("st-ghost-row").classList.toggle("off", !showAmbiguous);
@@ -4732,6 +5221,7 @@ function setScope(scope) {
   // Into or out of a collection the context colours change, and 3D reads a
   // node's colour only on an accessor re-pass (refreshPaint).
   const repaint = (SCOPE && SCOPE.kind === "collection") || (scope && scope.kind === "collection");
+  const from = positionsNow();   // Clusters plays from where its notes stand
   disarrange(false);   // the filters and the fit below read the free layout
   SCOPE = scope || null;
   placeRim();   // before the filters and the fit, which both read its positions
@@ -4740,19 +5230,19 @@ function setScope(scope) {
   applyFilters();
   if (repaint) refreshPaint();
   updateFocusBar();
-  fitScope();
+  if (LAYOUT === "clusters" && !ARRIVAL) applyClusters(from);
+  else fitScope();
 }
 
-// A scope set while this frame is hidden (the Library tab's "Show on graph",
-// the Areas surface's way to the Graph: both scope, then switch) fitted a
-// canvas of no size, and the zoom clamped to its floor of 0.01, an empty
+// A scope set while this frame is hidden (the Library tab's "Show on graph"
+// scopes, then switches) fitted a canvas of no size, and the zoom clamped to its floor of 0.01, an empty
 // picture (seen 2026-10-06). So the fit waits for the frame to have a size.
 let scopeFitPending = false;
 function fitScope() {
   const el = document.getElementById("graph");
   if (!el.clientWidth || !el.clientHeight || !Graph.width()) { scopeFitPending = true; return; }
   scopeFitPending = false;
-  if (SCOPE) { Graph.zoomToFit(400, 50, n => !n._hidden); wake(600); } else fitGraph();
+  if (SCOPE) fitFree(400, 50); else fitGraph();
 }
 // Both bundles take the window's size once, when their script runs, as the
 // default of `width` and `height`, and never follow it. A frame loaded while
@@ -4780,8 +5270,11 @@ window.addEventListener("resize", () => {
   if (scopeFitPending) requestAnimationFrame(fitScope);
   // The click that arranges also opens the note drawer, which narrows this
   // frame a moment later: the arrangement is framed again for the new size.
-  if (ARR) requestAnimationFrame(frameArrangement);
+  reframe();
 });
+function reframe() {
+  if (ARR) requestAnimationFrame(ARR.kind === "map" ? frameArrangement : frameLayout);
+}
 
 // --- Communities legend: sort by size, toggling ascending <-> descending ----
 let communitySortAsc = true;
@@ -4883,7 +5376,7 @@ function focusNode(node) {
   wake(1100);   // 900ms tween, either mode — it needs frames to actually fly
   if (is2D()) {
     Graph.centerAt(node.x || 0, node.y || 0, 900);
-    Graph.zoom(2.5, 900);
+    Graph.zoom(Math.max(Graph.zoom(), 3.2 * KREF), 900);
     return;
   }
   const r = Math.hypot(node.x || 0, node.y || 0, node.z || 0) || 1;
@@ -4970,7 +5463,7 @@ window.addEventListener("message", e => {
   }
   // The app's compare picker: two parts on show, the links inside each faded.
   if (e.data && e.data.type === "silica-compare") {
-    disarrange(false);   // two parts where they sit, not around one note
+    if (LAYOUT === "network") disarrange(false);   // two parts where they sit, not around one note
     const d = e.data.a && e.data.b ? { a: new Set(e.data.a), b: new Set(e.data.b) } : null;
     AB = d;
     RAW_EDGES.forEach(l => {
@@ -4979,8 +5472,11 @@ window.addEventListener("message", e => {
     });
     refreshPaint();
     applyFilters();
-    if (d) { Graph.zoomToFit(400, 50, n => !n._hidden); wake(600); } else fitGraph();
+    if (LAYOUT !== "network") return;
+    if (d) fitFree(400, 50); else fitGraph();
   }
+  // The app's tabs: the arrangement the frame shows (ADR-0152).
+  if (e.data && e.data.type === "silica-arrange") setLayout(e.data.kind, e.data.root);
   // The app's scope picker, or this frame's area list by way of the app: show
   // one part of the vault where it sits.
   if (e.data && e.data.type === "silica-scope") setScope(e.data.scope);
@@ -4989,7 +5485,7 @@ window.addEventListener("message", e => {
   // (selectNode would) — the user is searching the cloud, not inspecting yet.
   if (e.data && e.data.type === "silica-goto-path") {
     const n = NODE_BY_ID[e.data.path];
-    if (n) { focusNode(n); applyFocus(n.id); }
+    if (n && !ARRIVAL) { focusNode(n); applyFocus(n.id); }
   }
   // The note drawer covers this frame's right edge, which is where the HUD is.
   // Its width comes with the message because the drawer is resizable — the
@@ -4997,6 +5493,9 @@ window.addEventListener("message", e => {
   if (e.data && e.data.type === "silica-host-drawer") {
     document.body.classList.toggle("host-drawer-open", !!e.data.open);
     document.body.style.setProperty("--drawer-w", (e.data.width || 0) + "px");
+    // The key comes back with the drawer gone, after the resize that framed for
+    // a width with no key in it.
+    reframe();
   }
   // The app's dock floats over this frame's foot and grows during a turn; the
   // corner bars park above it (graph-frame.css --foot).
@@ -5011,6 +5510,7 @@ window.addEventListener("message", e => {
     document.body.style.setProperty("--side-h", (h ? h + 8 : 0) + "px");
     // false only from a folded column with Key shut; an older host sends none
     document.body.classList.toggle("key-folded", e.data.key === false);
+    reframe();   // the same, from the folded column
   }
 });
 
@@ -5049,7 +5549,8 @@ document.getElementById("file-tree").addEventListener("click", e => {
 document.addEventListener("keydown", e => {
   if (e.key !== "Escape") return;
   if (e.target && e.target.id === "search") return;
-  if (focusIds.length) { closeDrawer(); clearFocus(); }
+  if (LINK_SEL) selectLink(null);
+  else if (focusIds.length) { closeDrawer(); clearFocus(); }
   else if (SCOPE) pickScope(null);
 });
 
@@ -5069,11 +5570,11 @@ document.addEventListener("keydown", e => {
   document.getElementById("graph-wrap").addEventListener(t, e => {
     wake();
     if (e.type !== "pointermove") fitPending = false;
-    else if (!e.buttons) pickHover2D(e);   // a held button is a pan or a drag
+    else if (!e.buttons) pickHover2D(e);   // a held button is a pan
     // Camera manipulation drops the resolution BEFORE the first heavy paint:
     // capture phase runs ahead of d3-zoom's own handlers, so the very frame
     // this gesture dirties already paints at the motion ratio. A move with a
-    // button held is a drag (camera or node), a wheel notch is a zoom; hover
+    // button held is a pan, a wheel notch is a zoom; hover
     // and plain clicks never blur. Restore rides the usual no-paints timer.
     if (e.type === "wheel" || (e.type === "pointermove" && e.buttons))
       setRes(DRS_SCALE);

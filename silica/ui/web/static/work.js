@@ -460,7 +460,6 @@ function neighbourRows(d) {
   const bootTab = document.querySelector(".tab.active");
   let view = bootTab ? bootTab.dataset.tab : "chat";
   let node = null, nodeCtx = null;  // on explore: the node pointed at, and its context
-  let bridge = null;                // on explore: the bridge clicked, a /shape row
   let concepts = null;              // on explore: the concepts lit together, a /concepts payload
   let compare = null;               // on explore: two parts side by side, a /compare payload
 
@@ -620,7 +619,7 @@ function neighbourRows(d) {
   // implied between two headings.
   //
   // Rungs only, never the edges: this column is 310px and the wires between
-  // rungs are what the Path surface exists to draw. The footer hands off to it
+  // rungs are what Flow exists to draw. The footer hands off to it
   // rather than growing a second, smaller drawing of the same DAG here.
   const rungLabel = (n) => (n === 0 ? "●" : (n < 0 ? "−" : "+") + Math.abs(n));
 
@@ -1239,7 +1238,7 @@ function neighbourRows(d) {
   // structure.cut_layout), each in its area's colour, the vault's side dimmed
   // as the graph dims context, and the cut a dashed line through the note,
   // named at its foot. It draws the cut and not the reading order, which
-  // ADR-0075 notes against the "rungs only, never the edges" rule above: Path
+  // ADR-0075 notes against the "rungs only, never the edges" rule above: Flow
   // still owns the DAG. Its areas were level-set blobs, the graph's own, until
   // ADR-0136 pruned them with the graph's (the owner, 2026-10-28).
   function cutSvg(b, title, W) {
@@ -1454,12 +1453,11 @@ function neighbourRows(d) {
   // The drawer's details, and node mode. A note is drawn on every view now
   // (ADR-0075): it is the note open in the drawer, read from Chat as much as
   // from Explore, and its details are one button away wherever it was opened.
-  // The three graph selections keep their gate: a bridge or a set of concepts
+  // The two graph selections keep their gate: a comparison or a set of concepts
   // picked on Explore is not a subject on a view that cannot show it.
   function renderCtx() {
     if (view === "graph" && compare) { renderCompare(); return; }
     if (view === "graph" && concepts) { renderConcepts(); return; }
-    if (view === "graph" && bridge) { renderBridge(); return; }
     if (node) { renderNode(); return; }
     scope.textContent = "";
     head.textContent = "";
@@ -1468,49 +1466,8 @@ function neighbourRows(d) {
     e.appendChild(el("div", "wk-empty-t", "Nothing selected"));
     e.appendChild(el("div", "wk-empty-d",
       "Open a note and its info button shows its links and its place in the vault. "
-      + "A bridge, a set of concepts or a comparison picked on Explore lands here."));
+      + "A set of concepts or a comparison picked on Explore lands here."));
     body.appendChild(e);
-  }
-
-  // A bridge picked on the Areas surface: the pair, why it counts, the
-  // sentence that joins it. The two notes are one click from the node view,
-  // the pair's spoke one click back on Areas (ADR-0060).
-  function renderBridge() {
-    const r = bridge;
-    // The chip, not the head: a bridge is the reading that is NOT a node,
-    // which is the one case the chip exists for.
-    scope.textContent = "bridge";
-    head.textContent = "";
-    head.className = "wk-num";
-    body.textContent = "";
-    const rh = el("div", "wk-run");
-    rh.appendChild(el("div", "wk-run-t", r.a.name + " ↔ " + r.b.name));
-    const areas = el("div", "wk-run-m");
-    areas.appendChild(el("span", "wk-num", r.a.part + " ↔ " + r.b.part));
-    rh.appendChild(areas);
-    const why = el("div", "wk-run-m");
-    why.appendChild(el("span", "wk-num strong", r.links_between === 1
-      ? "the only link between these two areas"
-      : "one of " + r.links_between + " links between these two areas"));
-    if (r.scaffold) why.appendChild(el("span", "wk-num", "frontmatter"));
-    rh.appendChild(why);
-    body.appendChild(rh);
-    body.appendChild(el("p", "brg-quote" + (r.passage ? "" : " none"), r.passage
-      || (r.scaffold ? "Listed in the frontmatter of " + r.a.name + ": no sentence carries this link."
-                     : "No sentence in " + r.a.name + " quotes this link.")));
-    const acts = el("div", "wk-acts");
-    for (const end of [r.a, r.b]) {
-      const b = el("button", "wk-mini", end.name);
-      b.title = "open this note";
-      b.addEventListener("click", () => { if (window.showNode) window.showNode({ path: end.path }); });
-      acts.appendChild(b);
-    }
-    if (window.openBridges) {
-      const l = el("button", "wk-mini", "this pair on Areas");
-      l.addEventListener("click", () => window.openBridges(r.a.part_id, r.b.part_id));
-      acts.appendChild(l);
-    }
-    body.appendChild(acts);
   }
 
   // The concepts lit together: the reading InfraNodus calls "read the passages".
@@ -1658,7 +1615,6 @@ function neighbourRows(d) {
     const d = e.detail;
     node = d ? d.node : null;
     nodeCtx = d ? d.context : null;
-    bridge = null;   // a node, or a background click, takes the pair's place
     concepts = null; compare = null;
     // Which view of the drawer shows it is app-notes.js's to decide (ADR-0075):
     // a note opens on its text or its details, a subject with no text on this
@@ -1667,16 +1623,12 @@ function neighbourRows(d) {
   });
   // One fetch, two surfaces: app.js loads /metrics for the view and hands the
   // same payload here rather than this file measuring the vault a second time.
-  document.addEventListener("silica:bridge", (e) => {
-    bridge = e.detail; node = null; nodeCtx = null; concepts = null; compare = null;
-    render();
-  });
   document.addEventListener("silica:concepts", (e) => {
-    concepts = e.detail; if (concepts) { node = null; nodeCtx = null; bridge = null; compare = null; }
+    concepts = e.detail; if (concepts) { node = null; nodeCtx = null; compare = null; }
     render();
   });
   document.addEventListener("silica:compare", (e) => {
-    compare = e.detail; if (compare) { node = null; nodeCtx = null; bridge = null; concepts = null; }
+    compare = e.detail; if (compare) { node = null; nodeCtx = null; concepts = null; }
     render();
   });
 

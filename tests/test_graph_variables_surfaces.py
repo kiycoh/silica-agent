@@ -487,36 +487,6 @@ def test_only_the_cut_is_painted_as_a_warning():
 # the path surface, the metrics rows and the calendar strip
 # ---------------------------------------------------------------------------
 
-def test_path_is_a_pane_surface_that_keeps_the_root_search():
-    """It renders where the shape views render and is not one of them: they are
-    three readings of one /shape load, this one is rooted on a note and needs
-    the search they hide."""
-    app = app_js()
-    body = app.split("function setGraphMode(m) {")[1].split("\n}")[0]
-    assert 'const isPath = m === "path";' in body
-    # The Zotero Library (ADR-0055) shares the pane too, and hides the search.
-    assert '$("#shape-pane").hidden = !(isShape || isPath || isLibrary);' in body
-    assert '$("#node-search-wrap").hidden = isShape || isLibrary;' in body
-    assert "drawPath();" in body
-
-
-def test_the_shape_click_defers_to_the_re_root_button():
-    """Both handlers live on #shape-pane, and registration order on one node is
-    not a contract. The generic one declines rather than the specific one
-    shouting."""
-    app = app_js()
-    assert 'if (e.target.closest("[data-root]")) return;' in app
-    assert "rootPath(b.dataset.root)" in app
-
-
-def test_the_ladder_wires_are_measured_from_the_chips_not_laid_out():
-    app = app_js()
-    assert "function drawPathWires()" in app
-    assert "getBoundingClientRect()" in app.split("function drawPathWires()")[1][:900]
-    # and they redraw on resize, because the chips are text of unknown width
-    assert "ResizeObserver" in app.split("function drawPathWires()")[1][:2000]
-
-
 def test_bursting_is_a_card_and_not_a_worklist_row():
     """A worklist is what needs attention. A burst needs none: it is what the
     fortnight turned out to be about, so it is a card in Activity."""

@@ -84,18 +84,14 @@ def test_the_area_list_is_the_answer_to_the_row_that_counts_it():
 
 
 def test_the_mechanics_are_on_the_foot_bar_and_not_in_the_key():
-    """The panel is the Graph's key and nothing else (ADR-0058): the forces and
-    the rebuild are what you reach for once, when the simulation itself is
-    wrong, so they open from the bar that runs it."""
+    """The panel is the Graph's key and nothing else (ADR-0058): the renderer,
+    the names and the rebuild are on the bar at the foot. The forces went with
+    ADR-0152, since a layout worked out once has nothing to steer."""
     html = _render()
-    hud = _hud(html)
-    assert "forces-fold" not in hud
     foot = html[html.index('<div id="gstat">'):html.index('<div id="hud">')]
-    fold = foot[foot.index('<details id="forces-fold">'):]
-    for control in ("sl-repel", "sl-dist", "sl-center", "resetForces()",
-                    "onForceSlider()", "location.reload()"):
-        assert control in fold, f"{control} is not under the Forces fold"
-    assert '<details id="forces-fold" open' not in foot
+    for control in ('id="mode-toggle"', 'id="names-toggle"', "location.reload()"):
+        assert control in foot and control not in _hud(html), control
+    assert "forces-fold" not in html and "sl-repel" not in html
 
 
 def test_nothing_the_frame_drives_lost_its_id():
@@ -106,8 +102,7 @@ def test_nothing_the_frame_drives_lost_its_id():
     for el in ("cb-extracted", "cb-ambiguous", "cb-gaps", "cb-similar",
                "state-legend", "st-hub", "st-orphan", "st-ghost",
                "st-ghost-row", "legend-box", "sort-communities", "gstat",
-               "mode-toggle",
-               "sl-repel", "sl-dist", "sl-center", "fv-repel", "fv-dist", "fv-center"):
+               "mode-toggle", "names-toggle", "gsize", "link-tag", "layout-note"):
         assert f'id="{el}"' in html, f"{el} is gone from the frame"
 
 
@@ -116,7 +111,7 @@ def test_the_nodes_rows_hide_with_the_rings_and_the_heading_keeps_size():
     block. The heading stays outside it: it carries the one mark no row names,
     size, and 3D draws size too."""
     hud = _hud(_render())
-    assert hud.index("size = how much the vault routes through it") < hud.index('<div id="state-legend">')
+    assert hud.index("size = how many notes it links with") < hud.index('<div id="state-legend">')
     block = hud[hud.index('<div id="state-legend">'):]
     assert "hub<span" in block and "load-bearing" not in hud.split('<div id="state-legend">')[0]
     js = FRAME_JS.read_text()

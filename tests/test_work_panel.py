@@ -224,10 +224,10 @@ def test_the_scope_chip_rides_the_shared_header_and_nothing_renames_it():
     # nothing writes over the segment's name: the two readings set the chip
     assert "work-title" not in js and "wk-title" not in html
     # "node" is not among them: the pane's own head names what was pointed at,
-    # and the chip earns its place on the readings that are not a node, a
-    # bridge pointed at on the graph (ADR-0045) and its kin. The report was one
-    # until ADR-0084 retired it with its only entry.
-    assert sorted(re.findall(r'scope\.textContent = "(\w*)"', js)) == ["", "", "bridge", "compare", "concepts"]
+    # and the chip earns its place on the readings that are not a node. The
+    # report was one until ADR-0084 retired it with its only entry, and the
+    # bridge until ADR-0152 retired Areas.
+    assert sorted(re.findall(r'scope\.textContent = "(\w*)"', js)) == ["", "", "compare", "concepts"]
 
 
 def test_the_toggle_restores_a_mode_rather_than_picking_one():

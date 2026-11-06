@@ -265,7 +265,7 @@ def _run_frame(body: str, *, light: bool, mode: str = "2d") -> object:
         f"const LIGHT = {json.dumps(light)}, GP = {json.dumps(gp)}, AB = null;\n"
         f"const is2D = () => {json.dumps(mode == '2d')};\n"
         "const FADE_STEPS = 16, PARTICLES = false, libOwnsLink = () => false;\n"
-        "let GLLinks = null, ALL_EDGES = [], ATLAS = false;\n"
+        "let GLLinks = null, ALL_EDGES = [], ATLAS = false, LINK_SEL = null;\n"
         "const atlasOn = () => ATLAS;\nlet quietNow = () => false;\n")
     out = subprocess.run([_NODE, "-e", stubs + paint + "\n" + stride + "\n" + pack + "\n" + body],
                          capture_output=True, text=True, timeout=60)
@@ -587,7 +587,7 @@ def test_with_the_layer_up_the_lib_draws_no_link_line():
     line: the citation's arrowhead, a written requires' chevrons (ADR-0145)
     and the photons, which ride only a link the lib counts as visible."""
     js = _frame_js()
-    assert ".linkVisibility(l => !l._hidden && !quietNow(l) && (!GLLinks || l.type === \"CITES\" || l.requires || libOwnsLink(l)))" in js
+    assert '(!GLLinks || l.type === "CITES" || l.requires || libOwnsLink(l)))' in js
     assert '.linkCanvasObjectMode(l => GLLinks ? "replace" : l.type === "CITES" || l.requires ? "after" : null)' in js
     arrow = js[js.index("function drawCiteArrow("):]
     assert arrow.index('if (l.type !== "CITES") return;') < arrow.index("ctx.fill();")

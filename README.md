@@ -72,7 +72,7 @@ Silica is single-user: one person, one vault. There are no per-person permission
 - Each note `/nucleate` writes carries a `## Sources` block that leads to the source's verbatim copy in `sources/`. Passage search returns those copies, so a figure or a sentence can be checked in the source's own words; search by meaning and the graph leave them out, so there a source never competes with the notes made from it.
 - Ask the last question again, or edit it. The chat also searches your earlier chats for what was asked and answered.
 
-  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/chat.png" alt="A chat answer listing the notes found by search, with each claim linked to its note and one link marked as having no note" width="820" />
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/chat.png" alt="A chat answer built from the notes found by search, with each claim linked to its note" width="820" />
   <br/>
   <sub>Every claim links to the note it came from; a link with no note behind it says so.</sub>
 
@@ -85,27 +85,27 @@ Silica is single-user: one person, one vault. There are no per-person permission
 - No single score: estimated retention, depth (Facts, Parts, Mechanisms, New contexts), the relations you answered on and the misconceptions noted are shown apart. A note never asked counts as never practised, not as failed.
 - 3 misses in a row on a note put a worked example from it one click away; it never appears unasked. A plan over a folder, some notes or a topic paces you to its date, and that day shows in the Calendar.
 
-  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/learn.png" alt="The Memorize tab: questions waiting from earlier sessions, the ones missed, and study plans" width="820" />
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/learn.png" alt="The Memorize tab: a box to name what to learn, and the questions waiting for a first session" width="820" />
   <br/>
-  <sub>Questions waiting from earlier sessions, the ones you missed, and your plans.</sub>
+  <sub>Name what to learn, or start on the questions already waiting.</sub>
 
 **See how notes connect.** The vault as a map: what sits together, what joins it, and what to read first.
 
 - `/path "RAG" "Transformers"` walks the reading path between two notes over your wikilinks and the concept graph, `/relate` names the kind of each link, `/graph` and `/map` draw it.
 
-  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/explore-path.png" alt="One note in its reading order: the note to read first above it, the notes it unlocks below" width="820" />
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/explore-flow.png" alt="One note in its reading order, drawn in the graph: the note to read first on the left, the notes it unlocks on the right, the rest of the vault dimmed" width="820" />
   <br/>
-  <sub>One note in its reading order: what to read first, and what it unlocks.</sub>
+  <sub>One note in its reading order, in the graph: what to read first, and what it unlocks.</sub>
 
 - On the graph, a click makes a note the centre of its own map. In 2D the areas are an atlas: each note owns the ground nearest it, and zooming in names the sub-areas, then the notes.
-- In Explore, Folders shades each folder by how much it mixes areas. Areas shows one area and the links to its neighbours over the coupling of every pair, each link with the sentence that carries it. Read gives the whole vault a reading order from its hubs.
+- In Explore, Clusters gathers each area in one place on a ring, Flow puts one note in its reading order inside the graph, and Folders shades each folder by how much it mixes areas. Click a link to read the line it is written on. Read gives the whole vault a reading order from its hubs.
 - Compare one folder or area with another: the panel says what characterises each and quotes the links that join them.
 - Click a concept to light the notes that treat it; a second concept narrows them to the notes that treat both, and the panel quotes the lines.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/explore-graph-3d.png" alt="The vault as a 3D graph: notes coloured by area, edge types and node shapes listed in the legend" width="820" />
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/screenshots/explore-graph-3d.png" alt="The vault as a 3D graph: notes coloured by area, the edge types listed in the key" width="820" />
   <br/>
-  <sub>The same vault in 3D, coloured by the 23 areas it sorts itself into. A note's size is how much the vault routes through it.</sub>
+  <sub>The same vault in 3D, coloured by the 24 areas it sorts itself into. A note's size is how many notes it links with.</sub>
 </p>
 
 **Trust what it writes.** Every write is checked, shown to you and reversible.

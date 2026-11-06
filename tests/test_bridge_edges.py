@@ -42,7 +42,7 @@ def test_no_edge_is_told_apart_by_width():
     js = FRAME_JS.read_text()
     # 2D: a written link is 1 px and a band as wide as its screen (ADR-0146);
     # the dim never reaches the width
-    assert "const width2D = l => SCREEN_2D[l.type] ? SCREEN_2D[l.type][1] : 1;" in js
+    assert "const width2D = l => l === LINK_SEL ? 2 : SCREEN_2D[l.type] ? SCREEN_2D[l.type][1] : 1;" in js
     assert "G.linkWidth(1)" in js
     assert "G.linkWidth(0)" in js                     # 3D: the merged 1px lines
     assert "G.linkWidth(l => ((" not in js and "linkWidth(Graph.linkWidth())" not in js
@@ -72,15 +72,6 @@ def test_a_scoped_area_keeps_the_far_end_of_its_links():
     # wikilink under the rim (ADR-0066 amendment).
     assert "const beyond = reach && a && b && !inScope(a) && !inScope(b);" in filt
     assert "(beyond && !e._ctx)" in filt
-
-
-def test_the_work_panel_still_reads_a_bridge():
-    """The Bridges surface is where a bridge is read now; the work panel keeps
-    the reading, and the pair detail keeps its way into the list."""
-    work = (WEB / "work.js").read_text()
-    explore = (WEB / "app-explore.js").read_text()
-    assert 'addEventListener("silica:bridge"' in work and "function renderBridge()" in work
-    assert "window.openBridges = " in explore and "window.openBridges" in work
 
 
 def test_the_frame_names_an_area_by_its_hub_like_the_shape_surfaces_do():

@@ -369,7 +369,6 @@
 #vp-notices > summary::before,
 .thinking summary::before,
 details.fm summary::before,
-.ego-gh::after,
 .lg-caret,
 .lr-dr > summary::before,
 .lr-prev > summary .chev,
@@ -389,16 +388,11 @@ details.fm summary::before,
   transition: transform var(--dur) var(--ease);
 }
 
-.ego-gh::after {
-  margin: 0 0 0 4px;
-}
-
 #tree details[open] > summary::before,
 #trash-group[open] > summary::before,
 #vp-notices[open] > summary::before,
 .thinking[open] summary::before,
 details.fm[open] summary::before,
-.ego-gh.open::after,
 .lr-dr[open] > summary::before,
 .lr-prev[open] > summary .chev,
 .lr-ob details[open] summary .chev,

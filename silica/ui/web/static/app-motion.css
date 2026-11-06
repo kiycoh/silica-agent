@@ -150,29 +150,6 @@
   animation: fade-in 220ms var(--ease);
 }
 
-/* --- Areas ---------------------------------------------------------------------
-   Discs scale about their own centre during the recentre, not about the SVG
-   origin, so the transform box is the circle. The ghost is the previous
-   drawing, kept over the new one for the length of its fade (morphEgo). */
-.ego-disc,
-.ego-nb,
-.ego-dot {
-  transform-box: fill-box;
-  transform-origin: center;
-}
-
-.ego-ghost {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-/* the index's selection fades like every other --sel row in the app */
-.ego-gh,
-.ego-row {
-  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-
 /* --- theme ----------------------------------------------------------------------
    A theme change is a crossfade of the whole document (applyThemePref starts a
    view transition). The default is 250ms linear; the house curve instead. */

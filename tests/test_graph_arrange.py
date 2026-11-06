@@ -259,7 +259,7 @@ def test_a_hover_is_a_look_and_leaves_the_focus_where_it_was():
 
 def test_the_arrangement_dims_the_vault_instead_of_hiding_it():
     assert "ARR" not in _fn("computeFilters")
-    assert "ARR && ARR.layout[n.id]" in _fn("drawNode")
+    assert 'ARR && ARR.kind !== "clusters" && ARR.layout[n.id]' in _fn("drawNode")
 
 
 def test_leaving_the_arrangement_by_hand_plays_it_back():

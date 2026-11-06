@@ -242,20 +242,16 @@ $("#vault-switch").addEventListener("click", async () => {
 // labels: pictures of the links, readings of the shape, then the library.
 const LAYOUT_MODES = [
   ["graph", "Graph", "wikilink structure + semantic k-NN overlay; the panel at the right is its key", 0],
-  // The only surface that is not undirected: the others lay notes out by how
-  // they connect, where they are filed, or how two groups couple, and none of
-  // them can answer "what do I read BEFORE this".
-  ["path", "Path", "reading order around one note: what RefD says comes before it, and what it unlocks", 0],
-  // Three surfaces over the same graph that are NOT link-space: the graph
-  // lays notes out by how they connect, so it cannot show where a note
-  // SITS, how two areas couple as a whole, or what order the vault could be
-  // read in.
+  // Two arrangements of the Graph's own notes, asked for by name (ADR-0152).
+  // Flow is the only reading that is not undirected: the others lay notes out
+  // by how they connect or where they are filed, and none of them can answer
+  // "what do I read BEFORE this". Clusters took over from Areas and its matrix.
+  ["flow", "Flow", "reading order around one note, drawn in the graph: what comes before it, and what it unlocks", 0],
+  ["clusters", "Clusters", "the notes gathered by area, the areas on one ring; the links stay drawn", 0],
+  // Two surfaces over the same graph that are NOT link-space: the graph lays
+  // notes out by how they connect, so it cannot show where a note SITS or what
+  // order the vault could be read in.
   ["folders", "Folders", "the vault as folders, shaded by how much each folder mixes areas", 1],
-  // One surface for how areas couple (ADR-0064): the drawing says WHICH links
-  // join one area to the others, the matrix under its index HOW MANY join
-  // every pair. They were two tabs, Areas and Bridges, and a reader crossed
-  // between them on every cell they opened.
-  ["areas", "Areas", "one area and the wikilinks to its neighbours, over the coupling of every pair", 1],
   ["read", "Read", "a reading order derived from hubs and their links", 1],
 ];
 
@@ -1468,9 +1464,11 @@ function parseHash() {
   const parts = path.split("/");
   const params = new URLSearchParams(query || "");
   const arg = decodeURIComponent(parts[1] || "");
-  // #explore/bridges was this surface's address until ADR-0064 took the name
-  // Areas: a bookmark of it lands on what it became, not on the Graph.
-  return { slug: parts[0] || "", arg: parts[0] === "explore" && arg === "bridges" ? "areas" : arg,
+  // A bookmark of a surface that was replaced lands on what it became, not on
+  // the Graph: Bridges became Areas (ADR-0064), Areas Clusters and Path Flow
+  // (ADR-0152).
+  const moved = { bridges: "clusters", areas: "clusters", path: "flow" };
+  return { slug: parts[0] || "", arg: parts[0] === "explore" ? moved[arg] || arg : arg,
            note: params.get("note") || "" };
 }
 

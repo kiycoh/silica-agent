@@ -1,170 +1,14 @@
-// --- path: the reading order around one note (V2, RefD) ----------------------
-// The sixth surface, and the only directed one. Rungs are LONGEST-path depth,
-// not hop count: on a ladder a shortcut edge would otherwise put a note on the
-// same rung as its own prerequisite, and the rung is the whole reading.
-//
-// Wires are drawn after layout from the chips' own boxes rather than laid out
-// in SVG: the chips are text of unpredictable width, and measuring what the
-// browser already placed is the only way the two can agree. They are redrawn on
-// resize for the same reason.
-let pathRootedPath = null;
-let pathWireObserver = null;
-let pathEdges = [];
-
-function rootPath(path) {
-  pathRootedPath = path;
-  if (graphMode !== "path") setGraphMode("path");
-  else drawPath();
+// --- flow: the reading order around one note (ADR-0152) ----------------------
+// The ladder RefD gives a note, drawn by the frame with the graph's own marks.
+// This is the one place that knows how to enter it rooted somewhere.
+function rootFlow(path) {
+  flowRoot = path;
+  if (graphMode !== "flow") setGraphMode("flow");
+  else replayGraphArrange();
   closeNodeResults();
 }
 
-async function drawPath() {
-  const pane = $("#shape-pane");
-  pane.innerHTML = "";
-  $("#shape-loading").hidden = false;
-  let d;
-  try {
-    d = await (await fetch("/path?note=" + encodeURIComponent(pathRootedPath || ""))).json();
-  } catch {
-    d = { error: "couldn't read the reading order" };
-  }
-  $("#shape-loading").hidden = true;
-  if (graphMode !== "path") return; // the reader switched surface mid-flight
-  pane.innerHTML = "";
-  // A re-root is a new reading of the vault, so it arrives like a surface does.
-  pane.appendChild(renderPath(d)).classList.add("surface-in");
-  drawPathWires();
-}
-
-function pathRungLabel(depth) {
-  if (depth === 0) return "this note";
-  if (depth === -1) return "read first";
-  if (depth === 1) return "unlocks";
-  return depth < 0 ? (-depth) + " steps before" : depth + " steps after";
-}
-
-function renderPath(d) {
-  const wrap = mkEl("div", "pl-wrap");
-  if (d.error) {
-    wrap.appendChild(mkEl("p", "pl-empty", d.error));
-    return wrap;
-  }
-  // The landing. A picker of notes to start from, ranked differently: a note
-  // roots a ladder by what reads around it, which the file tree cannot say.
-  if (d.picks) {
-    wrap.appendChild(mkEl("div", "pl-h", "Pick a note to place in its reading order"));
-    if (d.hint) wrap.appendChild(mkEl("p", "pl-empty", d.hint));
-    if (!d.picks.length && !d.hint) {
-      wrap.appendChild(mkEl("p", "pl-empty",
-        "no note has a prerequisite yet. RefD only speaks where the co-occurrence "
-        + "index has enough related notes to compare."));
-    }
-    const list = mkEl("div", "pl-picks");
-    for (const pk of d.picks) {
-      const row = mkEl("button", "pl-pick");
-      row.type = "button";
-      row.dataset.root = pk.path;
-      row.appendChild(mkEl("span", "pl-pick-n", pk.name));
-      row.appendChild(mkEl("span", "pl-pick-d",
-        pk.before + " before · " + pk.after + " after"));
-      list.appendChild(row);
-    }
-    wrap.appendChild(list);
-    return wrap;
-  }
-
-  const head = mkEl("div", "pl-h");
-  head.appendChild(mkEl("span", "pl-h-t", (d.root && d.root.name) || "reading order"));
-  wrap.appendChild(head);
-  if (d.hint) {
-    wrap.appendChild(mkEl("p", "pl-empty", d.hint));
-    return wrap;
-  }
-
-  const lad = mkEl("div", "pl");
-  const wires = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  wires.setAttribute("class", "pl-wires");
-  wires.setAttribute("aria-hidden", "true");
-  lad.appendChild(wires);
-  for (const lv of d.levels) {
-    const rung = mkEl("div", "pl-rung" + (lv.depth === 0 ? " here" : ""));
-    rung.appendChild(mkEl("div", "pl-lbl", pathRungLabel(lv.depth)));
-    const notes = mkEl("div", "pl-notes");
-    for (const n of lv.notes) {
-      const chip = mkEl("div", "pl-n" + (n.root ? " root" : "") + (n.cyclic ? " cyc" : ""));
-      chip.dataset.path = n.path;
-      chip.dataset.plId = n.path;
-      chip.appendChild(mkEl("span", "pl-n-t", n.name));
-      if (!n.root) {
-        const re = mkEl("button", "pl-re", "⤴");
-        re.type = "button";
-        re.dataset.root = n.path;
-        re.title = "place this note in its own reading order";
-        notes.appendChild(chip);
-        chip.appendChild(re);
-      } else {
-        notes.appendChild(chip);
-      }
-    }
-    rung.appendChild(notes);
-    lad.appendChild(rung);
-  }
-  wrap.appendChild(lad);
-
-  const foot = [];
-  if (d.truncated) foot.push("cut at 60 notes: the ladder continues past this");
-  // A cycle is a disagreement the vault really contains, not corrupt data, so
-  // it is reported rather than hidden. The edges that close it are dropped from
-  // the layout, which is why the count is worth stating at all.
-  if (d.cycles) {
-    foot.push(d.cycles + (d.cycles === 1 ? " note is" : " notes are")
-      + " in a prerequisite cycle: their edges are not drawn");
-  }
-  if (foot.length) wrap.appendChild(mkEl("p", "pl-foot", foot.join(" · ")));
-  pathEdges = d.edges || [];
-  return wrap;
-}
-
-function drawPathWires() {
-  const lad = $("#shape-pane").querySelector(".pl");
-  const svg = lad && lad.querySelector(".pl-wires");
-  if (!svg) return;
-  const box = lad.getBoundingClientRect();
-  svg.setAttribute("viewBox", "0 0 " + Math.round(box.width) + " " + Math.round(box.height));
-  svg.setAttribute("width", Math.round(box.width));
-  svg.setAttribute("height", Math.round(box.height));
-  while (svg.firstChild) svg.removeChild(svg.firstChild);
-  const at = (path) => {
-    const el = lad.querySelector('[data-pl-id="' + CSS.escape(path) + '"]');
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { x: r.left - box.left + r.width / 2, top: r.top - box.top, bot: r.bottom - box.top };
-  };
-  for (const e of pathEdges) {
-    const a = at(e.from), b = at(e.to);
-    if (!a || !b) continue;
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    const y1 = a.bot, y2 = b.top;
-    const mid = (y1 + y2) / 2;
-    path.setAttribute("d", "M" + a.x + " " + y1 + " C" + a.x + " " + mid
-      + " " + b.x + " " + mid + " " + b.x + " " + y2);
-    path.setAttribute("class", "pl-wire");
-    svg.appendChild(path);
-  }
-  if (!pathWireObserver && window.ResizeObserver) {
-    pathWireObserver = new ResizeObserver(() => {
-      if (graphMode === "path") drawPathWires();
-    });
-    pathWireObserver.observe($("#shape-pane"));
-  }
-}
-
-$("#shape-pane").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-root]");
-  if (b) rootPath(b.dataset.root);
-});
-
-// --- explore note search (graph: fly the camera · path: root the ladder) -------
+// --- explore note search (graph: fly the camera · flow: root the ladder) -------
 // A fuzzy ranked picker over the vault's notes, indexed from the sidebar tree —
 // same title→prefix→substring→path ranking the graph viewer's own search uses.
 let noteIdx = [];      // [{name, path, ln, lp}]
@@ -222,8 +66,9 @@ function moveNodeSel(d) {
 }
 
 function pickNote(path) {
-  if (graphMode === "path") {
-    rootPath(path);
+  if (graphMode === "flow") {
+    rootFlow(path);
+    openNote(path);
   } else { // network: fly the graph camera to the note and open it, as a click on its node does
     const f = $("#graph-frame");
     if (f.contentWindow) f.contentWindow.postMessage({ type: "silica-goto-path", path }, "*");
@@ -1714,17 +1559,11 @@ $("#note-map").addEventListener("click", () => {
 });
 
 // The same jump for the reading order, which the node panel's ladder footer
-// hands off to. Exported rather than duplicated: the drawer knows which note it
-// is on and nothing else about explore's modes, and rootPath is the one place
-// that knows how to enter Path rooted somewhere.
+// hands off to: the drawer knows which note it is on and nothing else about
+// explore's modes.
 window.openLadder = (note) => {
   if (!note) return;
-  // rootPath BEFORE the tab, and no pre-set graphMode: path has no replay on
-  // tab-enter - showTab's setGraphMode(graphMode) draws off pathRootedPath
-  // and nothing else. Pre-setting the mode therefore started an UNROOTED draw
-  // first, and the landing measures forty ladders, so it also finished last
-  // and overwrote the rooted one: Path opened on the picker every time.
-  rootPath(note);
+  rootFlow(note);
   document.querySelector('.tab[data-tab="graph"]').click();
 };
 
@@ -2671,5 +2510,9 @@ window.addEventListener("message", (e) => {
   // scope is the app's, so the picker shows it and compare is measured
   // against it, and the frame applies it when setGraphScope posts it back.
   if (e.data.type === "silica-pick-scope") setGraphScope(e.data.scope || null);
+  // The tag of a clicked link opens its note at the line it is written on.
+  if (e.data.type === "silica-open-line") openNote(e.data.path, e.data.line);
+  // Flow re-rooted in the frame: the next load of it starts where the reader is.
+  if (e.data.type === "silica-flow-root") flowRoot = e.data.path;
 });
 
