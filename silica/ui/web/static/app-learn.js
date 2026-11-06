@@ -3349,7 +3349,8 @@ function lrMissedList(wrap, r) {
   const byPoint = !!r.points?.length;
   const pts = byPoint ? r.points.filter((p) => p.status !== "met") : [];
   // a retest is told on its missed question's row, never a row of its own (ADR-0135 point 4)
-  const again = new Map(r.items.filter((x) => x.retest).map((x) => [x.path, x.status === "met" ? "met" : "missed"]));
+  // one the session ended before was never asked: it read "asked again, missed"
+  const again = new Map(r.items.filter((x) => x.retest && x.status !== "open").map((x) => [x.path, x.status === "met" ? "met" : "missed"]));
   const items = byPoint ? [] : r.items.filter((x) => !x.retest && ["missed", "assisted", "skipped"].includes(x.status));
   const n = pts.length + items.length;
   // a skip is not a miss (ADR-0061), nor is a point the session ended before: both
