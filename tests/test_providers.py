@@ -627,3 +627,17 @@ def test_embedder_read_timeout_comes_from_config(monkeypatch):
     # compose passes `${SILICA_EMBEDDING_TIMEOUT:-}`: unset there is "" here.
     monkeypatch.setenv("SILICA_EMBEDDING_TIMEOUT", "")
     assert get_embedder(SilicaConfig()).client.timeout.read == 60.0
+
+
+def test_a_role_runs_on_its_own_model_without_a_provider_beside_it():
+    """A worker or judge model alone used to be ignored by get_provider and obeyed
+    by run_worker, residue and grade, so one setting ran two models: Settings
+    writes SILICA_WORKER_MODEL alone and says it is used."""
+    from types import SimpleNamespace
+
+    cfg = SimpleNamespace(provider="lmstudio", model="chat", worker_api_key="wk",
+                          worker_model="openrouter/w", worker_provider=None,
+                          judge_model="openrouter/j", judge_provider=None)
+    worker = get_provider(cfg, role="worker")
+    assert (worker.model, worker.api_key) == ("openrouter/w", "wk")
+    assert get_provider(cfg, role="judge").model == "openrouter/j"

@@ -643,14 +643,14 @@ def get_provider(config: Any, role: str = "router") -> Provider:
     if role == "escalation":
         provider_name = getattr(config, "distill_escalation_provider", "") or ""
         model_name = getattr(config, "distill_escalation_model", "") or ""
-        if not provider_name or not model_name:
+        if not model_name:
             provider_name = getattr(config, "provider", "lmstudio") or ""
             model_name = getattr(config, "model", "") or ""
             role = "router"
     elif role == "judge":
         provider_name = getattr(config, "judge_provider", "") or ""
         model_name = getattr(config, "judge_model", "") or ""
-        if not provider_name or not model_name:
+        if not model_name:
             provider_name = getattr(config, "provider", "lmstudio") or ""
             model_name = getattr(config, "model", "") or ""
             role = "router"
@@ -667,7 +667,7 @@ def get_provider(config: Any, role: str = "router") -> Provider:
     elif role == "worker":
         provider_name = getattr(config, "worker_provider", "") or ""
         model_name = getattr(config, "worker_model", "") or ""
-        if not provider_name or not model_name:
+        if not model_name:
             provider_name = getattr(config, "provider", "lmstudio") or ""
             model_name = getattr(config, "model", "") or ""
             role = "router"
