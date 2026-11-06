@@ -3100,18 +3100,20 @@ def _episodic_distill(content: str, envelope: dict, *, run_id: str,
 def _discard_staged(rel: str) -> None:
     """Remove a staged transcript from the vault, wherever the run left it.
 
-    A successful FSM run archives the source into `done/`, so both paths are
-    tried: the point is that no conversation text stays in the vault after the
-    drain, archived or not.
+    A successful FSM run archives the source, so both paths are tried: the point
+    is that no conversation text stays in the vault after the drain, archived or
+    not. `archive_path_for` and not a spelled folder: `done/<name>` missed the
+    `Done/` archive on a case-sensitive filesystem, and the miss went unseen.
     """
-    from pathlib import Path as _Path
-
     from silica.driver import DRIVER
+    from silica.kernel.base.manifest import archive_path_for
 
-    for candidate in (rel, f"done/{_Path(rel).name}"):
+    for candidate in (rel, archive_path_for(rel)):
         try:
             DRIVER.delete(candidate)
         except Exception:
+            # One of the two is always absent: the run either archived the
+            # source or left it, and the other delete has nothing to find.
             continue
 
 

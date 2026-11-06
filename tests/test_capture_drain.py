@@ -140,10 +140,12 @@ class TestDrain:
     def test_no_conversation_text_survives_the_fsm_archiving_its_source(
         self, vault, monkeypatch
     ):
-        """A successful run moves the source to done/ before the drain unstages it.
+        """A successful run moves the source to Done/ before the drain unstages it.
 
-        The stub runs the real archive call CLEANUP makes (finalize.py), so the
-        assertion is the invariant and not a guess about where the file went.
+        The stub runs the real archive call CLEANUP makes (finalize.py), with no
+        folder, so the assertion is the invariant and not a guess about where the
+        file went: passing "done" here once hid that the drain looked in `done/`
+        while the archive is `Done/`.
         """
         from silica.capture import write_envelope
 
@@ -154,7 +156,7 @@ class TestDrain:
             def run(self):
                 from silica.kernel.write.gate import archive_source
                 for f in self.files:
-                    assert archive_source(f, "done").get("success")
+                    assert archive_source(f).get("success")
                 return {"final_status": "Success"}
 
         import silica.router.coordinator as coord_mod
