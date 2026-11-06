@@ -325,20 +325,36 @@ def test_the_loopback_spellings_are_one_origin(client):
     assert bad.status_code == 403
 
 
-def test_every_state_changing_route_carries_the_guard():
-    """The guard is per-route, so a new POST added without it is a new hole.
-    This is the check that catches that, not the per-route cases above."""
+def _mutation_routes(routes):
+    """(method, path) of every state-changing route, included routers too: FastAPI
+    0.162 keeps an included router as one entry with no `methods`, which hid 47 of
+    the 99 from the walk this test used to do."""
+    for route in routes:
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            yield from _mutation_routes(included.routes)
+            continue
+        for method in sorted((getattr(route, "methods", None) or set()) - {"GET", "HEAD", "OPTIONS"}):
+            yield method, route.path
+
+
+def test_every_state_changing_route_refuses_a_foreign_origin():
+    """Asserted by effect and not by naming the guard, so it holds wherever the
+    guard lives. This is what catches a new POST added without it."""
     from silica.ui.web import server
 
-    unguarded = []
-    for route in server.app.routes:
-        methods = getattr(route, "methods", set()) or set()
-        if not (methods - {"GET", "HEAD", "OPTIONS"}):
-            continue
-        deps = [d.call for d in route.dependant.dependencies]
-        if server._require_same_origin not in deps:
-            unguarded.append(f"{sorted(methods)} {route.path}")
-    assert not unguarded, f"state-changing routes without the origin guard: {unguarded}"
+    routes = sorted(set(_mutation_routes(server.app.routes)))
+    # The floor is what keeps this honest: the day the walk goes blind again it
+    # fails here, not silently with fewer routes to check. 99 on 2026-11-06.
+    assert len(routes) >= 99, f"the walk sees {len(routes)} state-changing routes"
+    tc = TestClient(server.app, raise_server_exceptions=False)
+    open_doors = []
+    for method, path in routes:
+        url = re.sub(r"\{[^}]*\}", "x", path)
+        got = tc.request(method, url, headers={"Origin": "https://attacker.example", "Host": "localhost:8765"})
+        if got.status_code != 403:
+            open_doors.append(f"{method} {path} -> {got.status_code}")
+    assert not open_doors, f"state-changing routes a foreign origin reached: {open_doors}"
 
 
 # --- graph document title -----------------------------------------------------
