@@ -81,6 +81,25 @@ def vault_rel(path: str) -> str:
     return path.replace("\\", "/").strip("/")
 
 
+def vault_files_under(scope: str) -> list[str]:
+    """Vault-relative files under `scope`, dotfiles and dot-dirs skipped."""
+    from silica.config import CONFIG
+    from silica.kernel.base.layout import walk_tree
+
+    root = Path(CONFIG.vault_path or "")
+    base = root / scope
+    if not base.is_dir():
+        return []
+    out: list[str] = []
+    # ignore=False: /nucleate of a folder the person named reads that folder.
+    for dirpath, _dirnames, filenames in walk_tree(root, base, ignore=False):
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            out.append((Path(dirpath) / name).relative_to(root).as_posix())
+    return out
+
+
 def unconverted_under(folder: str) -> list[str]:
     """Non-markdown files under `folder`, natural-sorted; `Images/` excluded.
 
@@ -114,22 +133,3 @@ def unconverted_under(folder: str) -> list[str]:
         ),
         key=natural_key,
     )
-
-
-def vault_files_under(scope: str) -> list[str]:
-    """Vault-relative files under `scope`, dotfiles and dot-dirs skipped."""
-    from silica.config import CONFIG
-    from silica.kernel.base.layout import walk_tree
-
-    root = Path(CONFIG.vault_path or "")
-    base = root / scope
-    if not base.is_dir():
-        return []
-    out: list[str] = []
-    # ignore=False: /nucleate of a folder the person named reads that folder.
-    for dirpath, _dirnames, filenames in walk_tree(root, base, ignore=False):
-        for name in filenames:
-            if name.startswith("."):
-                continue
-            out.append((Path(dirpath) / name).relative_to(root).as_posix())
-    return out

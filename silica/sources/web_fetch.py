@@ -37,6 +37,7 @@ from urllib.parse import unquote, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 
+from silica.config import live_env
 from silica.tools import tool
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,7 @@ def youtube_cookies() -> Path | None:
     operator set SILICA_YOUTUBE_COOKIES to a readable file; None otherwise."""
     import os
 
-    raw = os.environ.get(YOUTUBE_COOKIES_ENV, "").strip()
+    raw = live_env(YOUTUBE_COOKIES_ENV)
     path = Path(raw) if raw else None
     return path if path is not None and os.access(path, os.R_OK) else None
 _WP_DOMAINS: tuple[str, ...] = ("wikipedia.org",)

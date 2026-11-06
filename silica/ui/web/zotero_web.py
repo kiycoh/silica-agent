@@ -9,13 +9,12 @@ becomes a 409 at the app, through `refused`.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from silica.config import CONFIG
+from silica.config import CONFIG, live_env
 from silica.sources import zotero, zotero_write
 
 
@@ -28,7 +27,7 @@ def _link():
 def _probe_client() -> "zotero.Zotero":
     link = _link()
     return zotero.Zotero(server_id=link.library if link else "",
-                         api_key=os.getenv("SILICA_ZOTERO_API_KEY", ""))
+                         api_key=live_env("SILICA_ZOTERO_API_KEY"))
 
 
 def _bbt(zot) -> bool:

@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from silica.router.prefetch import DistillPrefetcher
 
 from silica.driver import DRIVER
-from silica.config import CONFIG
+from silica.config import CONFIG, live_env
 from silica.kernel.text.payload import payload_chunks  # noqa: F401  (see the `import time` note above)
 from silica.kernel.text.vault_recon import recon_file  # noqa: F401
 from silica.kernel.text.sanitize import sanitize_output  # noqa: F401
@@ -521,7 +521,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # Surface the transition to whatever frontend is watching (no-op if none).
         try:
             from silica.obs.events import PhaseEvent
-            from silica.ui.renderer import emit_phase
+            from silica.obs.bus import emit_phase
             from silica.obs import narration as _narr_mod
             pe = PhaseEvent(phase=capability_name, status=status,
                             **self._phase_position(capability_name))
@@ -840,8 +840,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         accumulates many unfixable bundles, gate on this-run deferrals instead.
         Kill-switch: SILICA_BOUNDARY_ANNEAL=0.
         """
-        import os
-        if os.getenv("SILICA_BOUNDARY_ANNEAL", "1") == "0":
+        if not live_env("SILICA_BOUNDARY_ANNEAL"):
             return
         try:
             from silica.kernel.write.deferred import get_deferred_store
@@ -983,7 +982,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
     def _source_canonical_for(self, inbox_file: str) -> str:
         """Vault-relative canonical path for an arbitrary inbox file (no .md, lowercase)."""
-        vault_path = getattr(CONFIG, "vault_path", None) or ""
+        vault_path = CONFIG.vault_path or ""
         if vault_path:
             try:
                 from pathlib import Path as _P

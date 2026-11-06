@@ -2309,7 +2309,7 @@ def _family_stem(members: list[Path] | None) -> str:
 def _bind_members(con, members: list[Path]) -> None:
     """CREATE VIEW t over a shard family — one list-read, schema shared.
 
-    Same quoting contract as duck.bind_source. List order is the
+    Same quoting contract as kernel/text/tabular.bind_source. List order is the
     sorted member order, so the evenly spaced sample walks shard 01 → NN.
     """
     quoted = ", ".join("'" + str(m).replace("'", "''") + "'" for m in members)
@@ -2361,7 +2361,7 @@ def _duckdb_profile(src: Path, members: list[Path] | None = None) -> str:
     With `members`, one profile over the whole shard family (same header, one
     schema): stats and sample describe the union, which is the table a reader
     actually reasons about."""
-    from silica.sources.duck import connect, utf8_source
+    from silica.kernel.text.tabular import connect, utf8_source
 
     # Non-utf-8 members are re-encoded into `tmp` and DuckDB is confined there
     # instead: the reader validates encoding and refuses the original outright.
@@ -2382,7 +2382,7 @@ def _duckdb_profile(src: Path, members: list[Path] | None = None) -> str:
 def _duckdb_profile_bound(src: Path, members: list[Path] | None,
                           bound: list[Path], con) -> str:
     """`_duckdb_profile` with the encoding/confinement question already settled."""
-    from silica.sources.duck import bind_source
+    from silica.kernel.text.tabular import bind_source
 
     try:
         if members and len(members) > 1:

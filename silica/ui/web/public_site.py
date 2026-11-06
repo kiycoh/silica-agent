@@ -25,6 +25,7 @@ import shutil
 from pathlib import Path
 from urllib.parse import quote
 
+from silica.config import GUI_PORT, live_env, public_save_url
 from silica.kernel import publish, rights
 from silica.kernel.base.formats import SHOWN_IMAGE_EXTS
 from silica.kernel.base.markdown import strip_ofm_meta
@@ -51,7 +52,7 @@ _LANGS = {"italian": "it", "english": "en", "spanish": "es", "french": "fr",
 # near a second; reopen if a vault this large asks for every mark (count them in the caption)
 _COVER_MAX = 1500
 # The local Silica a reader may save into (ADR-0151 point 8), `silica --gui`'s default port.
-LOCAL_APP = "http://localhost:8765"
+LOCAL_APP = f"http://localhost:{GUI_PORT}"
 _BRAND = ('<svg viewBox="0 0 256 256" aria-hidden="true"><path class="i" d="M16 112 L144 112 L144 240 '
           'L112 240 L112 144 L16 144 Z M16 64 L192 64 L192 240 L160 240 L160 96 L16 96 Z M16 16 L240 16 '
           'L240 240 L208 240 L208 48 L16 48 Z"/><path class="s" d="M16 160 L96 160 L96 240 L16 240 Z"/></svg>')
@@ -174,7 +175,7 @@ def _report(url: str, site: _Site) -> str:
                 f'placeholder="What should be looked at? (optional)" aria-label="Details"></textarea>'
                 f'<div class="row"><button type="submit" class="btn btn--small">Send report</button></div>'
                 f'</form></details>')
-    to = os.environ.get("SILICA_PUBLIC_REPORT", "").strip()
+    to = live_env("SILICA_PUBLIC_REPORT")
     if not to:
         return ""
     href = (f"mailto:{to}?subject={quote('Report: ' + url)}" if "@" in to and "://" not in to else to)
@@ -183,7 +184,7 @@ def _report(url: str, site: _Site) -> str:
 
 def _app() -> str:
     """The hosted app a reader is sent to: to save a page, or to join."""
-    return os.environ.get("SILICA_PUBLIC_SAVE_URL", "").strip().rstrip("/") or "https://app.silica-agent.dev"
+    return public_save_url()
 
 
 def _save_form(url: str, label: str, form_id: str = "save") -> str:

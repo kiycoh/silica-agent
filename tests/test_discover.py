@@ -321,7 +321,7 @@ def test_a_near_floor_belongs_to_the_embedder_it_was_measured_on():
     assert rank.near_at("jina-embeddings-v5-text-small-retrieval") == rank.NEAR_AT == 0.40
     assert rank.near_at("perplexity/pplx-embed-v1-0.6b") == rank.NEAR_AT   # never measured, not the 4b
     assert rank.near_at("") == rank.NEAR_AT
-    assert set(rank.NEAR_AT_BY_MODEL) <= set(EMBEDDER_DEFAULTS)
+    assert all(0 < float(row.get("near_at", rank.NEAR_AT)) < 1 for row in EMBEDDER_DEFAULTS.values())
 
 
 def test_near_notes_keep_what_clears_the_configured_embedders_floor(tmp_vault, monkeypatch):

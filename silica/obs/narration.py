@@ -38,6 +38,14 @@ logger = logging.getLogger(__name__)
 
 BEAT_TOPIC = "narration/beat"   # BUS topic carrying each appended record
 
+# This session off the record (/incognito). Here and not with user memory, which
+# reads it too, because the session file it marks is here. Process-level, not per
+# conversation: the TUI and the GUI each run one chat session per process (the GUI
+# resets it on a new chat), and the tool that checks it runs in that process. A
+# flag on `messages` would be lost to every rebuild of the list (/clear, /resume,
+# a GUI session load).
+INCOGNITO = False
+
 # Core kinds (spec §4). The set is open: extension kinds carry an owner
 # prefix ("codewiki/index") and a free payload; projections render unknowns
 # through the mandatory `summary`, never drop them.
@@ -134,8 +142,7 @@ class Narrator:
                 # Born incognito (/incognito typed before the first turn): the
                 # mark goes in now, because the toggle ran before there was a
                 # file to mark. A toggle in an open session marks it itself.
-                from silica.kernel import user_memory
-                if user_memory.incognito():
+                if INCOGNITO:
                     self._append_locked(INCOGNITO_BEAT)
             return sid
 

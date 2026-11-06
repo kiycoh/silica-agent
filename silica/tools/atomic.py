@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
+import json
 import re
 import subprocess
 import unicodedata
@@ -22,10 +23,13 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
-from silica.kernel.recall.listing import (
-    natural_key, notes_under, unconverted_under, vault_files_under, vault_rel,
-)
-from silica.tools import tool
+from silica.kernel.recall import engine
+from silica.kernel.recall import search as recall_search
+from silica.kernel.recall.listing import natural_key, notes_under, unconverted_under, vault_files_under, vault_rel
+from silica.sources import pdf_extract
+from silica.tools import Reads, tool
+
+engine.pdf_reader = pdf_extract
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +80,12 @@ def _fold(text: str) -> str:
 _SEARCH_CAP = 40
 
 
-@tool(cls="atomic")
+# Two tools, two verbs. Both read "search" until 2026-08-27, and the panel then
+# showed the same `search "boosting"` line answering `{"paths": []}` once and a
+# page of body snippets the next: same badge, same argument, nothing on screen
+# saying one matches titles and the other matches text.
+@tool(cls="atomic", ingress=False, parallel_safe=True, found_nothing="paths",
+      label=("search titles", "query"))
 def silica_search(query: Annotated[str, Field(description='Text to search for in note names in the vault')]) -> dict:
     """Search for notes by NAME/title match. Returns the paths of matching notes.
 
@@ -131,7 +140,7 @@ def silica_search(query: Annotated[str, Field(description='Text to search for in
     literal = [row for row in scored if row[0] < 4]
     ranked = literal or scored
     out: dict = {"paths": [row[-1] for row in ranked[:_SEARCH_CAP]], "matched": len(ranked)}
-    from silica.tools.user_memory import returned_notes
+    from silica.agent.memory_gate import returned_notes
 
     returned_notes(out["paths"])  # a mail note's subject is a stranger's text (ADR-0090 point 8)
     if not ranked:
@@ -161,46 +170,13 @@ def silica_search(query: Annotated[str, Field(description='Text to search for in
     try:
         from silica.kernel.code import codedocs
 
-        m = _stale_map()
+        m = recall_search.stale_map()
         flagged = {p: lvl for p in out["paths"]
                    if (lvl := codedocs.peek_level(m, p))}
         if flagged:
             out["stale"] = flagged
     except Exception:
         pass  # flags are an aid, never a reason a search fails
-    return out
-
-
-# The third stale level, beside codedocs' "cosmetic" and "structural": the
-# note was distilled from a source version that has since been re-nucleated.
-_STALE_SOURCE = "source"
-
-
-def _stale_map() -> dict[str, str]:
-    """`note_path.md -> level` for every note a reader should doubt.
-
-    Two ledgers, one flag. codedocs.peek answers for code notes after a commit;
-    the provenance drift map answers for notes whose source was re-nucleated
-    at another version. The code level wins when a note carries both: it is
-    the more specific claim. Each leg is guarded on its own, so a ledger that
-    cannot be read costs its flags and nothing else.
-    """
-    from silica.config import CONFIG
-
-    out: dict[str, str] = {}
-    try:
-        from silica.kernel.write import provenance
-
-        out.update({p: _STALE_SOURCE
-                    for p in provenance.drift_map(vault_path=CONFIG.vault_path)})
-    except Exception:
-        pass  # flags are an aid, never a reason a search fails
-    try:
-        from silica.kernel.code import codedocs
-
-        out.update(codedocs.peek(CONFIG.vault_path))
-    except Exception:
-        pass
     return out
 
 
@@ -232,7 +208,7 @@ def _source_hits(query: str) -> list[dict] | None:
     from silica.config import CONFIG
     from silica.kernel.base.roots import repo_root_for
 
-    root = repo_root_for(getattr(CONFIG, "vault_path", "") or "")
+    root = repo_root_for(CONFIG.vault_path or "")
     if root is None:
         return None
     try:
@@ -284,7 +260,7 @@ def _unreadable(folder: str) -> dict | None:
     from silica.kernel.workspaces import in_scope
 
     try:
-        core = _engine()
+        core = engine.engine()
     except RuntimeError:
         return None
     got = core.unreadable(folder.strip().strip("/"))
@@ -308,96 +284,6 @@ def _unread_outside_raws(root: Path, paths: list[str]) -> dict | None:
     if not paths:
         return None
     return {"count": len(paths), "paths": paths[:_UNREADABLE_SHOWN]}
-
-# Its walk does not apply is_source_leaf: sources/ leaves are searchable here
-# and hidden from the fusion indexes, one vault with two rules (S3 of
-# docs/audits/2026-09-17-paper-backed-simplifications.md).
-def _engine():
-    """The retrieval engine, from the silica-core package (ADR-0043). It
-    carries its own CONFIG singleton, so the vault this tree serves is
-    mirrored into it at every call, and it gets its own index file: its
-    build drops every path its walk did not produce, so pointed at
-    `lexical.json` it would prune the fusion leg's entries (ADR-0029)."""
-    from silica.config import CONFIG
-    from silica_core import config as core_config
-    from silica_core import core
-
-    core.INDEX = "retrieval"
-    core_config.CONFIG.vault_path = CONFIG.vault_path
-    # A silica-core that renamed either name would go back to opening PDFs in
-    # this process without a word, so the engine refuses to run instead. The
-    # server installs the lock (0.10.1), but a wheel install resolves
-    # `silica-core>=0.10.1` to the newest release, untested here; 0.11.0 keeps
-    # both names (checked 2026-10-20).
-    if not (callable(getattr(core, "_pdf_text", None)) and callable(getattr(core, "_extract_cache", None))):
-        raise RuntimeError("silica-core no longer reads PDFs through _pdf_text: see silica/tools/atomic.py")
-    core._pdf_text = _pdf_text
-    return core
-
-
-# The tag on the page map this tree writes beside the engine's extraction:
-# silica-core's own map is a bare list, and its text kept the hidden lines.
-_PDF_READER = "pdf_extract/1"
-
-
-def _pdf_text(rel: str, full: Path) -> tuple[str, list[dict], str]:
-    """silica-core's `_pdf_text`, through which its index, its search windows
-    and `silica_read` open every PDF, read by `pdf_extract` instead: in the
-    limited child on the server (ADR-0098 H1) and without the text a student
-    never sees (H6). The engine opened each PDF it walked with PDFium in this
-    process and kept those lines, so a dropped PDF, which stays in the Inbox
-    while it converts, reached the server's own process at the next search
-    and its white text reached the turn (found 2026-10-20).
-
-    Same return and the same cache file, whose path `silica_read` hands out as
-    `extract_path`. The map beside it carries `_PDF_READER`, so a fresh
-    extraction the engine wrote before this is read again, never served.
-    The pages are the text alone (`vision=0`): the renders are the
-    conversion's, and up to 60 a file would be paid on every PDF the index
-    walks."""
-    import orjson
-
-    from silica.kernel.base.durable import atomic_write_bytes
-    from silica.sources import pdf_extract
-    from silica_core import core
-
-    cache = core._extract_cache(rel)
-    pages_file = cache.with_suffix(".json")
-    try:
-        if cache.stat().st_mtime >= full.stat().st_mtime:
-            saved = orjson.loads(pages_file.read_bytes())
-            if isinstance(saved, dict) and saved.get("reader") == _PDF_READER:
-                text = cache.read_text(encoding="utf-8", errors="replace")
-                return text, saved["pages"], "" if text else "no text layer"
-    except (OSError, ValueError):
-        pass  # no extraction yet, or a torn one: the read below writes it again
-    try:
-        data = pdf_extract.read(full, vision=0)
-    except Exception as exc:
-        # One file the reader refuses (encrypted, a bomb the child died of, not
-        # a PDF) is that file listed `unconverted` with its reason, as the
-        # engine's own reader did: the index build has no guard of its own and
-        # would stop for every other file. Only ADR-0087's sentences, written
-        # for the student, go out as they are; anything else can carry a path.
-        why = str(exc) if isinstance(exc, pdf_extract.PdfUnreadable) else type(exc).__name__
-        return "", [], f"unreadable: {why}"
-    bodies = ["\n".join(line for line, _size in page).strip() for page in data["pages"]]
-    parts: list[str] = []
-    pages: list[dict] = []
-    line, offset = 1, 0
-    for n, body in enumerate(bodies, 1):
-        chunk = body + "\n\n"
-        pages.append({"page": n, "line": line, "offset": offset})
-        parts.append(chunk)
-        line += chunk.count("\n")
-        offset += len(chunk)
-    text = "".join(parts) if any(bodies) else ""
-    pages = pages if text else []
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_bytes(cache, text.encode("utf-8"))
-    atomic_write_bytes(pages_file, orjson.dumps({"reader": _PDF_READER, "pages": pages}))
-    return text, pages, "" if text else "no text layer"
-
 
 def _scoped_search(engine, query: str, k: int, folder: str) -> dict:
     """`engine.search`, kept inside a workspace's members when the turn is
@@ -545,7 +431,7 @@ def _note_states(hits: list[dict]) -> None:
     from silica.kernel.base import frontmatter
     from silica.kernel.write.contested import SUPERSEDED_BY_KEY, lifecycle, trust
 
-    root = _engine()._root()
+    root = engine.engine()._root()
     seen: dict[str, dict] = {}
     # shortcut: the whole note is read for its frontmatter and its Sources
     # marker; 8 hits on 5.1 MB converted sidecars took 97 ms (2026-11-04).
@@ -572,7 +458,8 @@ def _note_states(hits: list[dict]) -> None:
         hit.update(seen[path])
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, parallel_safe=True, reads=Reads(result="hits"),
+      found_nothing="notes_matched", label=("search inside", "query"))
 def silica_search_context(
     query: Annotated[str, Field(description='Words to look for inside note bodies; the vault vocabulary, not a question')],
     folder: Annotated[str, Field(description='Only notes under this vault-relative folder')] = "",
@@ -609,7 +496,7 @@ def silica_search_context(
         lit = _literal_search(query, folder, k)
         if "error" not in lit:
             _note_states(lit["hits"])
-            from silica.tools.user_memory import returned_notes
+            from silica.agent.memory_gate import returned_notes
 
             returned_notes(h["path"] for h in lit["hits"])  # the taint gate (ADR-0090 point 8)
             src = _source_hits(query)
@@ -619,7 +506,7 @@ def silica_search_context(
             if (unread := _unreadable(folder)) is not None:
                 lit["unreadable"] = unread
         return lit
-    r = _scoped_search(_engine(), query, k, folder)
+    r = _scoped_search(engine.engine(), query, k, folder)
     if "error" in r:
         return r
 
@@ -630,7 +517,7 @@ def silica_search_context(
     try:
         from silica.kernel.code import codedocs
 
-        stale_map = _stale_map()
+        stale_map = recall_search.stale_map()
     except Exception:
         stale_map = {}
         codedocs = None  # type: ignore[assignment]  # peek import failed: no flags this call
@@ -649,7 +536,7 @@ def silica_search_context(
         hits.append(hit)
     _note_states(hits)
 
-    from silica.tools.user_memory import returned_notes
+    from silica.agent.memory_gate import returned_notes
 
     returned_notes(h["path"] for h in hits)  # the taint gate's paths (ADR-0090 point 8)
     out: dict = {
@@ -677,7 +564,9 @@ def silica_search_context(
     return out
 
 
-@tool(cls="atomic")
+# ingress: any file under the root (PDFs, downloads), not only notes the user wrote.
+@tool(cls="atomic", ingress=True, parallel_safe=True, note_args=("path",),
+      reads=Reads(args=("path",), result="path"))
 def silica_read(
     path: Annotated[str, Field(description='Vault-relative file path (from a silica_search_context hit or silica_files)')],
     start: Annotated[int, Field(description='First line, 1-based')] = 1,
@@ -705,7 +594,7 @@ def silica_read(
     if in_config_dir(Path(CONFIG.vault_path or ".", path)):
         return {"error": {"code": "out_of_root",
                           "hint": f"{path!r} is Silica's own configuration, not vault content"}}
-    return _engine().read(path, start=start, end=end, section=section,
+    return engine.engine().read(path, start=start, end=end, section=section,
                           max_chars=max_chars, expect_version=expect_version)
 
 
@@ -801,7 +690,17 @@ def narrowed_read(name: str, query: str) -> str | None:
     return whole[:len(whole) - len(body)] + annotate(narrowed)
 
 
-@tool(cls="atomic")
+def _read_fit(args: dict, request: str) -> str | None:
+    """Tool.shrink, the probe's `fitnarrow` arm: this read's passages, densest in
+    the words of its query or of the request when it gave none."""
+    query = str(args.get("query") or "").strip() or request
+    if args.get("vault") or not args.get("name") or not query:
+        return None
+    return narrowed_read(str(args["name"]), query)
+
+
+@tool(cls="atomic", ingress=False, parallel_safe=True, note_args=("name",),
+      reads=Reads(args=("name",)), label=("read", "name"), shrink=_read_fit)
 def silica_read_note(
     name: Annotated[str, Field(description='Name of the note to read (wikilink style, without file extension)')],
     query: Annotated[str, Field(description="Words of what you need from the note, in its vocabulary (e.g. "
@@ -821,7 +720,7 @@ def silica_read_note(
         from silica.kernel.recall.vault_registry import resolve_known
 
         target = resolve_known(vault)  # ValueError names the rule and the fix
-        active = (getattr(CONFIG, "vault_path", "") or "").strip()
+        active = (CONFIG.vault_path or "").strip()
         if not active or Path(active).resolve() != target:
             reader = reader_for(str(target))
             if shared := _shared_name(reader, name):
@@ -835,7 +734,7 @@ def silica_read_note(
         return shared
     nc = DRIVER.read_note(name)
     body, path = nc.content or "", nc.ref.path or ""
-    from silica.tools.user_memory import returned_notes
+    from silica.agent.memory_gate import returned_notes
 
     returned_notes([path])  # the taint gate's path (ADR-0090 point 8)
     whole = _with_stale_banner(body, path=path)
@@ -931,7 +830,7 @@ def _returned_by_name(name: str) -> None:
     """Hand the taint gate the path `name` resolves to (ADR-0090 point 8):
     props and outline return a mail note's subject and sender, a stranger's
     text, and tainted nothing (found end to end 2026-10-12)."""
-    from silica.tools.user_memory import returned_notes
+    from silica.agent.memory_gate import returned_notes
 
     try:
         path = DRIVER.read_note(name).ref.path or ""
@@ -940,7 +839,7 @@ def _returned_by_name(name: str) -> None:
     returned_notes([path])
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, parallel_safe=True, note_args=("name",), label=("props", "name"))
 def silica_props(name: Annotated[str, Field(description='Name of the note to read the frontmatter properties from')]) -> dict:
     """Reads the frontmatter properties of a note (saves tokens, does not read the body)."""
     props = DRIVER.props_of(name)
@@ -948,7 +847,8 @@ def silica_props(name: Annotated[str, Field(description='Name of the note to rea
     return props
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, parallel_safe=True, note_args=("name",),
+      reads=Reads(args=("name",)), label=("outline", "name"))
 def silica_outline(name: Annotated[str, Field(description='Name of the note to display the heading tree of')]) -> list:
     """Displays the heading tree (H1-H6) of a note."""
     headings = DRIVER.outline(name)
@@ -960,14 +860,14 @@ def silica_outline(name: Annotated[str, Field(description='Name of the note to d
 # Graph
 # ---------------------------------------------------------------------------
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, parallel_safe=True, note_args=("name",), label=("links", "name"))
 def silica_links(name: Annotated[str, Field(description='Name of the note to list outgoing links from')]) -> list:
     """Lists outgoing links from a note (connected notes)."""
     refs = DRIVER.links(name)
     return [r.path for r in refs]
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, parallel_safe=True, note_args=("name",), label=("backlinks", "name"))
 def silica_backlinks(name: Annotated[str, Field(description='Name of the note to list incoming links (backlinks) for')]) -> list:
     """Lists incoming links (backlinks) pointing to a note."""
     refs = DRIVER.backlinks(name)
@@ -1031,7 +931,7 @@ def _question_pages(path: Path, question: str, n: int) -> list[int]:
     return [i for i in sorted(range(len(pages)), key=lambda i: -score[i])[:n] if score[i] > 0]
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False)
 def silica_look(
     image: Annotated[str, Field(description="The image: its file name as a note embeds it "
                                             "(e.g. 'Pasted image 20250716182448.png'), a vault-relative "
@@ -1094,7 +994,7 @@ def silica_look(
                                  max_tokens=1200)
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, parallel_safe=True)
 def silica_file_links(target: Annotated[str, Field(description='A note (name or path), OR a file path/basename (e.g. foto.jpg, analysis.ipynb, src/mod.py)')]) -> dict:
     """Note↔file connections, both directions. Given a note: the files it
     references (image/media/notebook embeds + `documents:` frontmatter) as
@@ -1126,7 +1026,7 @@ def silica_file_links(target: Annotated[str, Field(description='A note (name or 
     return out
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, parallel_safe=True, label=("orphans", None))
 def silica_orphans() -> dict:
     """Lists orphan notes (notes with no incoming links) in the vault.
 
@@ -1144,7 +1044,7 @@ def silica_orphans() -> dict:
     return out
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, parallel_safe=True, label=("unresolved links", None))
 def silica_unresolved() -> list:
     """Lists unresolved wikilinks in the vault (links pointing to non-existent notes)."""
     links = DRIVER.unresolved()
@@ -1205,7 +1105,7 @@ def _with_prop(files: list[str], key: str, value: str, folder: str) -> list[str]
     return out
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, parallel_safe=True, label=("list files", "folder"))
 def silica_files(
     folder: Annotated[str, Field(description='Optional folder path to filter results')] = "",
     prop: Annotated[str, Field(description='Optional "key: value": only notes whose frontmatter '
@@ -1259,7 +1159,7 @@ def silica_files(
                               "language; list a folder to see the values its notes carry.")
         return result
     # An inbox folder of PDFs is not an empty folder: say so, or the caller
-    # concludes the path does not exist. See listing.unconverted_under.
+    # concludes the path does not exist. See unconverted_under.
     pending = unconverted_under(folder) if folder else []
     # A file some note names as its raw is converted (ADR-0129 point 1): on
     # the server it stays beside its notes since 2026-11-04, and listed as
@@ -1318,7 +1218,7 @@ def _source_folder_census() -> dict[str, int]:
     return dict(counts.most_common(_FILES_CAP))
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, parallel_safe=True, note_args=("path",), label=("exists", "path"))
 def silica_exists(path: Annotated[str, Field(description='Relative path of the note in the vault')]) -> bool:
     """Verifies a file exists in the vault — notes, inbox, and source files
     alike (PDFs too). `read_note` only opens markdown: "I cannot read it" is
@@ -1346,7 +1246,7 @@ def silica_exists(path: Annotated[str, Field(description='Relative path of the n
 # Deferred Op Store
 # ---------------------------------------------------------------------------
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, label=("deferred list", None))
 def silica_deferred_list() -> list:
     """List all pending deferred op bundles (concepts rejected by the validator in previous runs).
 
@@ -1357,7 +1257,7 @@ def silica_deferred_list() -> list:
     return get_deferred_store().list_all()
 
 
-@tool(cls="atomic", collapse="eager")
+@tool(cls="atomic", collapse="eager", ingress=False, label=("deferred flush", None))
 def silica_deferred_flush(content_hash: Annotated[str, Field(description='Content hash of the deferred bundle to permanently discard')]) -> dict:
     """Discard a deferred op bundle — marks those rejected ops as permanently skipped."""
     from silica.kernel.write.deferred import get_deferred_store
@@ -1367,7 +1267,7 @@ def silica_deferred_flush(content_hash: Annotated[str, Field(description='Conten
     return {"removed": False, "error": f"No deferred bundle found for {content_hash[:8]}…"}
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, label=("inbox", None))
 def silica_inbox_ls() -> list:
     """Lists all files in the Inbox folder (inbox_dir), including non-markdown
     files (PDFs etc.). Non-markdown files cannot be read or nucleated directly:
@@ -1381,7 +1281,7 @@ def silica_inbox_ls() -> list:
 # Graph path / explain
 # ---------------------------------------------------------------------------
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, parallel_safe=True)
 def silica_graph_path(source: Annotated[str, Field(description='Source note name or vault-relative path')], target: Annotated[str, Field(description='Target note name or vault-relative path')], max_paths: Annotated[int, Field(description='Maximum number of shortest paths to return')] = 1) -> dict:
     """Shortest connection(s) between two notes over the resolved wikilink graph.
 
@@ -1437,7 +1337,7 @@ def silica_graph_path(source: Annotated[str, Field(description='Source note name
         return {"error": f"Node not found: {exc}"}
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, note_args=("note",))
 def silica_graph_explain(note: Annotated[str, Field(description='Note name or vault-relative path to explain')], depth: Annotated[int, Field(description='Neighbourhood depth (1=direct links only)')] = 1) -> dict:
     """Explain a note's structural position: cluster, degree rank, betweenness,
     out-links, backlinks, cross-cluster bridges. Low degree + high betweenness
@@ -1603,7 +1503,18 @@ _LEDGER_NEXT = (
 )
 
 
-@tool(cls="atomic")
+def _plan_capabilities(_args: dict, result: Any) -> list:
+    """Tool.loads: the plan names the tools to run. A loadable one left unoffered
+    is a call llama.cpp's grammar cannot emit: handed `silica_backlink`,
+    qwen3.5-9b called `silica_backlinks`, a read (prompt-rules probe, 2026-09-28)."""
+    try:
+        tasks = json.loads(result).get("tasks") or []
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return []  # an error or a done reply names no task: nothing to load
+    return [task.get("capability") for task in tasks if isinstance(task, dict)]
+
+
+@tool(cls="atomic", ingress=False, loads=_plan_capabilities)
 def silica_ledger_next(run_id: Annotated[str, Field(description='Run ID returned by silica_vault_report')]) -> dict:
     """Return EVERY task that is ready to run now, as `tasks` — not one task.
 
@@ -1658,7 +1569,7 @@ def silica_ledger_next(run_id: Annotated[str, Field(description='Run ID returned
     return {"tasks": tasks, "remaining": len(ready) - len(tasks), "next": _LEDGER_NEXT}
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False)
 def silica_ledger_update(run_id: Annotated[str, Field(description='Run ID')], task_id: Annotated[str, Field(description='Task ID returned by silica_ledger_next')], status: Annotated[str, Field(description='Outcome: done | failed | skipped | blocked')], error: Annotated[str, Field(description="Error message if status is 'failed'")] = "") -> dict:
     """Mark a task's outcome on the run's ProgressLedger and persist it.
 
@@ -1757,7 +1668,7 @@ def silica_record_quiz(results: Annotated[list, Field(description='One entry per
     return {"recorded": written, "wrong": sum(1 for e in entries if not e["correct"])}
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False)
 def silica_doctor(live: Annotated[bool, Field(description='Also run one tiny PAID completion against the configured model — proves the model actually answers, not just that the config looks right. Off by default because it costs money.')] = False) -> dict:
     """Silica's own health: model, endpoints, vault, indexes, hooks — the
     `silica doctor` checks as data. Call when a capability behaves as if off
@@ -1788,7 +1699,7 @@ def _disk_changes(cut: float) -> list[dict]:
     from silica.kernel.workspaces import in_scope
 
     rows: list[tuple[float, str]] = []
-    for rel, full in _engine().walk():
+    for rel, full in engine.engine().walk():
         if full is None or not in_scope(rel):
             continue
         try:
@@ -1802,7 +1713,7 @@ def _disk_changes(cut: float) -> list[dict]:
             for t, rel in rows]
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False)
 def silica_changes(scope: Annotated[str, Field(description="'session' = this process (default); 'vault' = every session on this vault, rows with session/ts/mine; 'disk' = every file changed on disk after `since`, outside edits included")] = "session", since: Annotated[str, Field(description='vault and disk scopes: ISO-8601; only rows first touched after it (pass the last `ts` you saw)')] = "", limit: Annotated[int, Field(description='vault and disk scopes: newest rows kept')] = 200) -> dict:
     """What changed in the vault: path, created/modified/moved/deleted, lines
     added/removed, measured against the file as it is now (an /undo empties

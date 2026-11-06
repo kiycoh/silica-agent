@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from silica.config import public_base
 from silica.kernel.text import note_parts
 from silica.onboarding import settings_ops
 from silica.ui.web import drop, session
@@ -104,7 +104,7 @@ def _view() -> dict:
         "available": publish.available(vault),
         "handle": h,
         "ask_handle": publish.handle_state(vault),
-        "base": os.environ.get("SILICA_PUBLIC_BASE", "").strip().rstrip("/"),
+        "base": public_base(),
         "url": page_url,
         "hosted": hosted(),
         # where the files are, on a laptop: the person serves them; a hosted

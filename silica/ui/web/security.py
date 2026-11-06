@@ -5,11 +5,11 @@
 write comes from. Nothing here knows a route, so every router sits above it."""
 from __future__ import annotations
 
-import os
 from urllib.parse import urlsplit as _urlsplit
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
+from silica.config import live_env
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
@@ -67,7 +67,7 @@ def same_origin_writes(request: Request) -> None:
 # the socket it listens on is reachable by the proxy alone (serve()). An
 # environment variable and not a setting, so the GUI can never widen itself.
 def _public_hosts() -> set[str]:
-    return {h.strip().lower() for h in os.environ.get("SILICA_GUI_HOSTS", "").split(",") if h.strip()}
+    return {h.strip().lower() for h in live_env("SILICA_GUI_HOSTS").split(",") if h.strip()}
 
 
 _ALLOWED_HOSTS = {"loopback", *_public_hosts()}

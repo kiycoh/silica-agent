@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests.config_factory import make_config
 from silica.obs import narration as narr
 
 
@@ -343,7 +344,7 @@ def test_dedup_judge_verdict_is_a_beat_with_the_raw_reply(narrator, monkeypatch)
         def call_llm(self, **kw):
             return SimpleNamespace(text='{"verdict": "duplicate", "rationale": "same thing"}')
     monkeypatch.setattr("silica.model.providers.get_provider", lambda cfg, role="worker": P())
-    d = dedup._decide_dedup(SimpleNamespace(judge_model=None), concept="A", excerpt="e",
+    d = dedup._decide_dedup(make_config(judge_model=None), concept="A", excerpt="e",
                             candidate_name="B", candidate_body="b")
     assert d.verdict == "duplicate"
     j = [b for b in _beats(narrator) if b["kind"] == "dedup/judge"][-1]
@@ -361,7 +362,7 @@ def test_dedup_parse_failure_is_a_failed_judge_beat(narrator, monkeypatch):
         def call_llm(self, **kw):
             return SimpleNamespace(text="not json at all")
     monkeypatch.setattr("silica.model.providers.get_provider", lambda cfg, role="worker": P())
-    d = dedup._decide_dedup(SimpleNamespace(judge_model=None), concept="A", excerpt="e",
+    d = dedup._decide_dedup(make_config(judge_model=None), concept="A", excerpt="e",
                             candidate_name="B", candidate_body="b")
     assert d.judged is False
     j = [b for b in _beats(narrator) if b["kind"] == "dedup/judge"][-1]

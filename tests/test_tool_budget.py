@@ -17,7 +17,7 @@ import pytest
 
 import silica.tools as T
 from silica.agent.constraints import (
-    _CHAT_EXCLUDED, _REVIEW_APPLY, CHAT_CORE, chat_deferred, chat_tools, loadable,
+    _CHAT_EXCLUDED, CHAT_CORE, chat_deferred, chat_tools, loadable,
 )
 from silica.model.llm import _with_prompt_cache
 
@@ -89,7 +89,7 @@ def test_chat_tools_keeps_the_multi_turn_review_protocol():
     # are in the core: unlocked only after a report, they were missing from the
     # report's own turn and the local model stopped seeding the run.
     import silica.cli  # noqa: F401
-    for name in ("silica_vault_report", *_REVIEW_APPLY):
+    for name in ("silica_vault_report", "silica_ledger_next", "silica_ledger_update"):
         assert name in chat_tools() and name in CHAT_CORE
 
 

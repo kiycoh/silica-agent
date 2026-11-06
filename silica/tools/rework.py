@@ -334,7 +334,7 @@ def _target(folder: str, stem: str) -> str:
     return path
 
 
-@tool(cls="composed", collapse="eager")
+@tool(cls="composed", collapse="eager", ingress=False, note_args=("note",))
 def silica_rework(
     note: Annotated[str | None, Field(description="Name or path of the note to rework. Leave it out when the text is pasted in the user's message: the tool takes it from there.")] = None,
     instruction: Annotated[str | None, Field(description="What the user asked for, in their words: register, audience, purpose.")] = None,

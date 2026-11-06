@@ -28,6 +28,7 @@ from typing import Any, Callable
 
 from silica.model.limits import FREED_CHARS_PER_TOKEN
 from silica.kernel.base.notekey import stem
+from silica.tools import note_keys
 
 MIN_COLLAPSE_CHARS = 200  # don't collapse a body smaller than its own stub
 
@@ -37,21 +38,10 @@ COMPACT_FRACTION = 0.6   # collapse old reads once history crosses 60% of the wi
 COMPACT_FLOOR_TURNS = 3  # the last N assistant turns are never collapsed
 STUB_FIELD_CHARS = 500   # per-field budget in a collapsed read stub
 
-# Tools whose call invalidates any earlier read of the same note: once one of
-# these has run, the body sitting in history is factually wrong, not merely old.
-MUTATING_TOOLS = frozenset({
-    "silica_write_note",
-    "silica_patch_note",
-    "silica_flag_note",
-    "silica_require",
-    "silica_move",
-    "silica_delete",
-})
-
-# Arg keys that name a note, in resolution order — the tools disagree on the
-# spelling (`name` for reads and patches, `path` for writes, `ref` for
-# move/delete, `note` for the graph lane).
-_NOTE_ARG_KEYS = ("name", "note", "path", "ref")
+# The one note argument that does not reach here: a mind map's `note_path` names
+# the note it was drawn from, and its result is the map. No edit of that note
+# makes the map wrong, so the chat footer is that argument's only reader.
+_DRAWN_FROM = "note_path"
 
 
 def generic_projection(result: dict) -> str:
@@ -162,7 +152,14 @@ def eager_stub(tool: Any, result_str: str) -> str:
     return generic_projection(parsed)
 
 
-def _note_key(arguments: str) -> str:
+def _read_keys(tools: dict) -> tuple[str, ...]:
+    """The argument names that identify a note here. The tools disagree on the
+    spelling (`name` for reads and patches, `path` for writes, `ref` for
+    move/delete, `note` for the graph lane), so each declares its own."""
+    return tuple(k for k in note_keys(tools) if k != _DRAWN_FROM)
+
+
+def _note_key(keys: tuple[str, ...], arguments: str) -> str:
     """Note identity from a tool call's JSON arguments, or "" if it names none.
 
     Reads take a wikilink name ("Computer Vision"), writes take a vault path
@@ -180,14 +177,14 @@ def _note_key(arguments: str) -> str:
         return ""
     if not isinstance(args, dict):
         return ""
-    for k in _NOTE_ARG_KEYS:
+    for k in keys:
         v = args.get(k)
         if isinstance(v, str) and v.strip():
             return stem(v.strip()).lower()
     return ""
 
 
-def _read_view(arguments: str) -> str:
+def _read_view(keys: tuple[str, ...], arguments: str) -> str:
     """The part of a read's arguments that is NOT the note: the slice it asked
     for (start/end/section/max_chars...), canonical so key order is irrelevant.
     "" for a whole-note read. Two reads are the same read only when note AND
@@ -201,7 +198,7 @@ def _read_view(arguments: str) -> str:
         return ""
     if not isinstance(args, dict):
         return ""
-    rest = {k: v for k, v in args.items() if k not in _NOTE_ARG_KEYS and v not in ("", None)}
+    rest = {k: v for k, v in args.items() if k not in keys and v not in ("", None)}
     return json.dumps(rest, sort_keys=True, ensure_ascii=False) if rest else ""
 
 
@@ -215,8 +212,9 @@ def _invalidated_reads(
     Two provable cases, both read straight off the call sequence and neither
     needing a token count:
 
-      STALE       a mutating tool touched the note after the read, so the body
-                  in history no longer describes the note on disk.
+      STALE       a tool that mutates the note (Tool.mutates) ran after the
+                  read, so the body in history no longer describes the note on
+                  disk: factually wrong, not merely old.
       SUPERSEDED  the *same* read was re-issued later, so the earlier copy is
                   redundant. Keyed per tool AND per view, not per note:
                   `silica_related` on a note the model read earlier answers a
@@ -225,6 +223,7 @@ def _invalidated_reads(
 
     Only the latest occurrence of each key matters, so one forward pass.
     """
+    keys = _read_keys(tools)
     last_mutation: dict[str, int] = {}
     last_read: dict[tuple[str, str, str], int] = {}
     for i, m in enumerate(messages):
@@ -233,13 +232,14 @@ def _invalidated_reads(
         for tc in m.get("tool_calls") or []:
             fn = tc.get("function", {})
             name = fn.get("name", "")
-            key = _note_key(fn.get("arguments", "{}"))
+            tool = tools.get(name)
+            key = _note_key(keys, fn.get("arguments", "{}"))
             if not key:
                 continue
-            if name in MUTATING_TOOLS:
+            if getattr(tool, "mutates", ""):
                 last_mutation[key] = i
-            elif getattr(tools.get(name), "collapse", None) == "lazy":
-                last_read[(name, key, _read_view(fn.get("arguments", "{}")))] = i
+            elif getattr(tool, "collapse", None) == "lazy":
+                last_read[(name, key, _read_view(keys, fn.get("arguments", "{}")))] = i
 
     if not last_mutation and not last_read:
         return {}
@@ -254,14 +254,14 @@ def _invalidated_reads(
         tool = tools.get(name) if name else None
         if tool is None or getattr(tool, "collapse", "lazy") != "lazy":
             continue
-        key = _note_key(arguments)
+        key = _note_key(keys, arguments)
         if not key:
             continue
         # The call that produced this result sits at an index below j, so a
         # strictly-greater index is always a *later* turn — never itself.
         if last_mutation.get(key, -1) > j:
             out[j] = "— the note was edited afterwards, so this copy is stale"
-        elif last_read.get((name, key, _read_view(arguments)), -1) > j:
+        elif last_read.get((name, key, _read_view(keys, arguments)), -1) > j:
             out[j] = "— a later call of the same read superseded it"
     return out
 

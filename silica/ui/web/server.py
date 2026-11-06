@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import html as _html
 import logging
-import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -21,7 +20,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from silica.config import CONFIG, demo
+from silica.config import CONFIG, demo, GUI_PORT, live_env
 from silica.kernel import vault_files
 from silica.sources.zotero import ZoteroError
 from silica.ui.web import (
@@ -81,8 +80,11 @@ async def _lifespan(app: FastAPI):
     """Host the Obsidian bridge for the GUI session — the plugin dials in and
     the driver hot-swaps to ws (falls back on drop). No-op without the
     [connect] extra or when the vault has no .obsidian/."""
+    from silica.tools import catalog
     from silica.ui.connect import maybe_start_bridge
     from silica.ui.web import jobs
+
+    catalog.load()
 
     # Before the first request (ADR-0099 point 4): a job this process did not
     # queue and that never ended was cut by the restart, and the student is
@@ -210,7 +212,7 @@ def index(request: Request):
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
-def serve(port: int = 8765) -> None:
+def serve(port: int = GUI_PORT) -> None:
     """Apply config, print the address, then block on uvicorn. No browser is
     opened: the person opens the address the banner prints."""
     import uvicorn
@@ -225,7 +227,7 @@ def serve(port: int = 8765) -> None:
     # shared embedder lives there, so a port would let one tenant's process
     # reach another's GUI. uvicorn makes the socket 0666; the directory's
     # permissions are what keep it the proxy's alone.
-    sock = os.environ.get("SILICA_GUI_SOCKET", "").strip() or None
+    sock = live_env("SILICA_GUI_SOCKET") or None
 
     print_banner()
     where = f"unix:{sock}" if sock else f"http://127.0.0.1:{port}"

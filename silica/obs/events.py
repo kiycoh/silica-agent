@@ -116,14 +116,6 @@ class PhaseEvent:
 
 
 @dataclass(slots=True)
-class WorkCompleteEvent:
-    item_id: str
-    kind: str
-    status: str     # "done" | "no_merge" | "no_change" | "skipped" | "error"
-    duration_s: float
-
-
-@dataclass(slots=True)
 class WorkCancelledEvent:
     item_id: str
     kind: str

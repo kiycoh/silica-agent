@@ -217,11 +217,16 @@ def test_the_check_never_writes(firm):
 
 
 def test_a_dense_floor_belongs_to_an_embedder_silica_ships_a_row_for():
-    """A cosine floor is a property of one embedder (ADR-0078); a key that names
-    no row would sit unused while every check said "no vectors"."""
+    """A cosine floor is a property of one embedder (ADR-0078), and None, for an
+    embedder nobody measured, decides no absence at all."""
     from silica.config import EMBEDDER_DEFAULTS
 
-    assert set(run.DENSE_FLOORS) <= set(EMBEDDER_DEFAULTS)
+    assert run.dense_floor("embeddinggemma-2") == 0.645
+    assert run.dense_floor("jina-embeddings-v5-text-small-retrieval") == 0.26
+    assert run.dense_floor("perplexity/pplx-embed-v1-4b") is None
+    assert run.dense_floor("text-embedding-qwen3-embedding-0.6b") is None
+    assert run.dense_floor("") is None
+    assert all(0 < float(row["dense_floor"]) < 1 for row in EMBEDDER_DEFAULTS.values() if "dense_floor" in row)
     assert 0 < run.LEXICAL_FLOOR < 1
 
 

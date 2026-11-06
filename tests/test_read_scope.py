@@ -23,7 +23,6 @@ def note(monkeypatch):
         read_note=lambda name: NoteContent(ref=NoteRef(name=name, path="F/L32.md"), content=LONG)))
     monkeypatch.setattr(provenance, "drift_map", lambda **k: {})
     monkeypatch.setattr(rerank, "window_weights", lambda q: {})
-    monkeypatch.setattr(read_scope, "ENABLED", True)
     monkeypatch.setattr("silica.config.CONFIG.decision_model", "jev")
     read_scope.REQUESTS.set(("Cos'è il boosting secondo la Lezione 32?",))
     asked = []
@@ -59,12 +58,12 @@ def test_no_decision_reads_the_whole_note(note, monkeypatch):
     assert atomic.silica_read_note("Lezione 32", query="boosting") == LONG
 
 
-@pytest.mark.parametrize("change", ["disabled", "no_query", "no_request"])
+@pytest.mark.parametrize("change", ["no_decision_model", "no_query", "no_request"])
 def test_nothing_to_decide_asks_nothing(note, monkeypatch, change):
     note.verdict("part", 0.9)
     query = "boosting"
-    if change == "disabled":
-        monkeypatch.setattr(read_scope, "ENABLED", False)
+    if change == "no_decision_model":
+        monkeypatch.setattr("silica.config.CONFIG.decision_model", "")
     elif change == "no_query":
         query = ""
     else:
@@ -80,6 +79,7 @@ def test_run_agent_hands_the_turns_requests_to_the_tools(monkeypatch):
 
     class Probe:
         name, collapse, sensitive, internal, summarize = "probe", "lazy", False, False, None
+        reply_flag, loads, history_view = "", None, None
 
         def json_schema(self, reach=None):
             return {"type": "function", "function": {"name": "probe", "description": "",

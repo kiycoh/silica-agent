@@ -97,7 +97,7 @@ def validate_note(path, hub, op_type=None):
             from silica.config import CONFIG
             from silica.kernel.base.roots import repo_root_for
             warnings += check_documents_paths(
-                data, repo_root=repo_root_for(getattr(CONFIG, "vault_path", "") or "")
+                data, repo_root=repo_root_for(CONFIG.vault_path or "")
             )
             warnings += check_plan_status(data)
 

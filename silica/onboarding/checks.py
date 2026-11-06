@@ -20,7 +20,15 @@ import httpx
 from silica.model.limits import base_url as provider_base_url, model_limits
 from silica.model.providers import has_local_rerank, local_rerank_model
 from silica.provider_table import HOSTED, PROVIDERS
-from silica.config import USER_ENV, SilicaConfig, embedder_defaults, silica_home
+from silica.config import (
+    embedder_defaults,
+    env_raw,
+    live_env,
+    RERANK_PORT,
+    silica_home,
+    SilicaConfig,
+    USER_ENV,
+)
 from silica.kernel import vault_language
 from silica.kernel.base import gitstate
 from silica.kernel.scrub import scrub_credentials
@@ -104,7 +112,7 @@ def check_ignored_env(config: SilicaConfig) -> CheckResult:
         return CheckResult("stray .env", "ok", "none above the working directory")
     stranded = sorted(
         k for k, v in dotenv_values(path).items()
-        if k and v is not None and os.getenv(k) != v
+        if k and v is not None and env_raw(k) != v
     )
     if not stranded:
         return CheckResult(
@@ -128,7 +136,7 @@ def check_chat_model(config: SilicaConfig) -> CheckResult:
             "run `silica init`; search and the graph work without one",
         )
     key_env = HOSTED[config.provider].key_env if config.provider in HOSTED else ""
-    if key_env and not os.getenv(key_env):
+    if key_env and not live_env(key_env):
         return CheckResult(
             "chat model", "fail",
             f"{config.model} — provider {config.provider} but {key_env} is unset",
@@ -345,11 +353,11 @@ def check_rerank(config: SilicaConfig) -> CheckResult:
     rather than staying silent because the failure mode is invisible — rerank
     just never runs, and the results look plausible.
     """
-    serve_cmd = os.getenv("SILICA_RERANK_SERVE_CMD", "").strip()
+    serve_cmd = live_env("SILICA_RERANK_SERVE_CMD")
     # An install made before ADR-0073 reranked in-process with no key at all;
     # now the extra runs as a server, and nothing starts it without the command.
     gap = has_local_rerank() and not serve_cmd
-    key = getattr(config, "rerank_api_key", "")
+    key = config.rerank_api_key
     if config.rerank_base_url and config.rerank_model:
         url = f"{config.rerank_base_url.rstrip('/')}/rerank"
         try:
@@ -411,7 +419,7 @@ def _rerank_gap(config: SilicaConfig) -> CheckResult:
         "rerank", "warn",
         "[rerank] installed, no SILICA_RERANK_SERVE_CMD: rerank is off",
         "run `silica init`, or add to ~/.silica/.env: "
-        "SILICA_RERANK_BASE_URL=http://127.0.0.1:1235/v1 "
+        f"SILICA_RERANK_BASE_URL=http://127.0.0.1:{RERANK_PORT}/v1 "
         f"SILICA_RERANK_MODEL={local_rerank_model(config)} "
         f"SILICA_RERANK_SERVE_CMD={serve_command()}",
     )
@@ -551,7 +559,7 @@ def live_probe(config: SilicaConfig) -> CheckResult:
     (`silica doctor --live`, `silica_doctor(live=True)`); one implementation so
     the CLI and the tool cannot drift.
     """
-    if not (getattr(config, "model", "") or "").strip():
+    if not (config.model or "").strip():
         return CheckResult("live probe", "warn", "skipped — no model configured",
                            "run silica init to set one")
     from silica.model.llm import call_llm
@@ -616,7 +624,7 @@ def _pdf_lane(config: SilicaConfig) -> str:
     """
     from silica.sources.convert import PDF_PROVIDERS, has_mineru, resolve_pdf_provider
 
-    name = resolve_pdf_provider(getattr(config, "pdf_provider", "") or "pdfium")
+    name = resolve_pdf_provider(config.pdf_provider or "pdfium")
     if name not in PDF_PROVIDERS:
         return f"{name} — unknown provider (known: {', '.join(PDF_PROVIDERS)})"
     if name == "pdfium":
@@ -829,7 +837,7 @@ def check_session_capture(config: SilicaConfig) -> CheckResult:
     Off is a legitimate choice, so this never warns — it only says the knob
     exists, and where the memory goes when it is on.
     """
-    if getattr(config, "capture_sessions", False):
+    if config.capture_sessions:
         return CheckResult(
             "own sessions", "ok",
             "captured to the WAL; /nucleate distills them into episodic memory",

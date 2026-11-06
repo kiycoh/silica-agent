@@ -8,6 +8,7 @@ the two, and memory-lane results are never flagged (another vault)."""
 from types import SimpleNamespace
 
 from silica.kernel.code import codedocs
+from silica.kernel.recall import search
 from silica.tools import graph
 
 
@@ -28,13 +29,13 @@ def _patch_retrieve(monkeypatch, results):
 
 def test_stale_entry_flags_vault_results():
     m = {"wiki/m.md": "structural"}
-    assert graph._stale_entry(m, _r("wiki/m")) == {"stale": "structural"}
-    assert graph._stale_entry(m, _r("other/n")) == {}
+    assert search.stale_entry(m, _r("wiki/m")) == {"stale": "structural"}
+    assert search.stale_entry(m, _r("other/n")) == {}
 
 
 def test_stale_entry_never_flags_memory_lane():
     m = {"wiki/m.md": "structural"}
-    assert graph._stale_entry(m, _r("wiki/m", origin="memory")) == {}
+    assert search.stale_entry(m, _r("wiki/m", origin="memory")) == {}
 
 
 def test_semantic_search_flags_stale_results(monkeypatch):
@@ -51,7 +52,7 @@ def test_semantic_search_fresh_vault_payload_unchanged(monkeypatch):
     out = graph.silica_semantic_search("q")
     # No `score` and no `reranked`: the model reads the order (survey card C2).
     assert set(out["results"][0]) == {"path", "name"} and "reranked" not in out
-    assert "score" in graph._facade_search("q", k=5)["results"][0]  # /find still shows it
+    assert "score" in search.facade_search("q", k=5)["results"][0]  # /find still shows it
 
 
 def test_peek_failure_never_fails_the_search(monkeypatch):

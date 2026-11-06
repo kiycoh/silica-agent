@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from silica.config import CONFIG, live_env
 from silica.kernel.text import language
 from silica.kernel.base.vectors import cosine, document_theme_vector
 from silica.kernel.text.candidates import is_fragment, mine_candidates
@@ -51,10 +52,6 @@ from silica.kernel.text.text import clean_body
 TOKENS_PER_CONCEPT = 20
 MIN_CONCEPTS = 1          # a note may map to a single concept — no forced padding
 MAX_CONCEPTS = 40
-# Candidates the miner proposes (also the rerank pool); operator knob. The
-# legacy name SILICA_YAKE_POOL stays recognized: a pin in someone's ~/.silica/.env
-# must not silently revert to the default because the extractor changed.
-POOL_SIZE = int(os.getenv("SILICA_KEYPHRASE_POOL") or os.getenv("SILICA_YAKE_POOL") or "100")
 
 # Rerank knobs (Phase 2 — tune via the eval).
 MMR_LAMBDA = 0.6          # relevance vs diversity in MMR; lower = more diverse
@@ -84,7 +81,7 @@ def _pool_leg(text: str, overlay: DomainOverlay, lang: str) -> list[ConceptCandi
     working unchanged.
     """
     mined = mine_candidates(
-        text, lang=lang, stopwords=frozenset(overlay.stopwords), top=POOL_SIZE,
+        text, lang=lang, stopwords=frozenset(overlay.stopwords), top=CONFIG.keyphrase_pool,
     )
     out: list[ConceptCandidate] = []
     for c in mined:
@@ -151,7 +148,7 @@ def _mmr(vecs, theme, k, lam: float = MMR_LAMBDA, rel=None) -> list[int]:
 
     Candidate-candidate similarity is taken once as a matrix and each candidate
     carries a running max against the already-picked set. The per-pair form
-    re-derived every cosine on every iteration: on a real pool (POOL_SIZE=100
+    re-derived every cosine on every iteration: on a real pool (CONFIG.keyphrase_pool=100
     vectors of the embedder's width) that was ~166k `cosine` calls, ~1.1M
     `np.asarray` conversions and 26-46s per note, which is 94% of RECON.
     Vectors must be uniform width — `_rerank` abstains before calling here.
@@ -343,13 +340,13 @@ def _complete_phrases(
 
 
 def _cutoff(content: str, ranked: list[ConceptCandidate]) -> list[ConceptCandidate]:
-    # Operator knobs, same idiom as POOL_SIZE. Read at call time (not import) so a
+    # Operator knobs, read at call time (not import) so a
     # harness A/B arm can coarsen extraction in-process without an import-timing
     # race: lowering the cap keeps the top-ranked (most salient) concepts and
     # drops the trivial tail (peripheral single-mention atoms), so fewer notes are
     # nucleated. Defaults bit-identical to the module constants.
-    max_c = int(os.getenv("SILICA_MAX_CONCEPTS", str(MAX_CONCEPTS)))
-    per_tok = int(os.getenv("SILICA_TOKENS_PER_CONCEPT", str(TOKENS_PER_CONCEPT)))
+    max_c = live_env("SILICA_MAX_CONCEPTS", MAX_CONCEPTS)
+    per_tok = live_env("SILICA_TOKENS_PER_CONCEPT", TOKENS_PER_CONCEPT)
     n_tok = len(content.split())
     k = max(MIN_CONCEPTS, min(max_c, n_tok // max(1, per_tok)))
     return ranked[:min(k, len(ranked))]

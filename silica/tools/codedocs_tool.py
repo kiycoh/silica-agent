@@ -19,7 +19,7 @@ from pydantic import Field
 from silica.tools import tool
 
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False, note_args=("path",))
 def silica_document(path: Annotated[str, Field(description='Repo-relative path to the source file to document')]) -> dict:
     """Extract a shallow AST skeleton from a source code file and stage it as a
     documentation stub in Inbox/ (never directly in the vault). Sets
@@ -49,7 +49,7 @@ def silica_document(path: Annotated[str, Field(description='Repo-relative path t
 _IMPACT_CAP = 100  # entries; a diff wider than this is a rewrite, not a change
 
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False)
 def silica_impact(range_spec: Annotated[str, Field(description="Git range or ref (e.g. 'HEAD~3..HEAD', 'main..HEAD', one SHA = that ref vs the working tree). Empty = uncommitted changes vs HEAD.")] = "") -> dict:
     """Which notes a code change touches: changed source files (working tree
     vs HEAD by default, or a git range) classified cosmetic/structural, each
@@ -60,7 +60,7 @@ def silica_impact(range_spec: Annotated[str, Field(description="Git range or ref
     from silica.config import CONFIG
     from silica.kernel.code.codegraph import compute_impact
 
-    vault = str(getattr(CONFIG, "vault_path", "") or "").strip()
+    vault = str(CONFIG.vault_path or "").strip()
     if not vault:
         return {"status": "error", "message": "no vault configured"}
     try:

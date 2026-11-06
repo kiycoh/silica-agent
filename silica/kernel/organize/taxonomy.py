@@ -161,7 +161,7 @@ def default_taxonomy_path() -> Path:
     """Default taxonomy path: vault root, with legacy _silica/ fallback when
     only the old location exists."""
     from silica.config import CONFIG
-    base = Path(getattr(CONFIG, "vault_path", "") or Path.cwd())
+    base = Path(CONFIG.vault_path or Path.cwd())
     new = base / _DEFAULT_TAXONOMY_REL
     legacy = base / _LEGACY_TAXONOMY_REL
     if not new.exists() and legacy.exists():
@@ -177,7 +177,7 @@ def load_taxonomy(path: str | Path | None = None) -> Taxonomy:
 
     if path:
         p = Path(path)
-        vault = getattr(CONFIG, "vault_path", "") or ""
+        vault = CONFIG.vault_path or ""
         if not p.is_absolute() and vault:
             vp = Path(vault) / p
             if vp.exists():

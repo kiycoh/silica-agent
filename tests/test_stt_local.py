@@ -15,7 +15,9 @@ import wave
 import numpy as np
 import pytest
 
+from tests.config_factory import make_config
 from silica.agent import stt
+from silica.ui.web import stt_routes
 
 
 def _wav(samples: list[int], rate: int = 16000, channels: int = 1) -> bytes:
@@ -79,35 +81,24 @@ def test_bytes_that_are_not_a_wav_are_refused(model):
 
 
 def test_the_model_setting_falls_back_to_the_shipped_size():
-    class Cfg:
-        stt_local_model = ""
-
-    assert stt.local_stt_model(Cfg()) == stt.LOCAL_STT_MODEL
-    Cfg.stt_local_model = "large-v3-turbo"
-    assert stt.local_stt_model(Cfg()) == "large-v3-turbo"
+    assert stt.local_stt_model(make_config(stt_local_model="")) == stt.LOCAL_STT_MODEL
+    assert stt.local_stt_model(make_config(stt_local_model="large-v3-turbo")) == "large-v3-turbo"
 
 
 def test_speech_lang_prefers_the_fixed_dictation_language(monkeypatch):
-    class Cfg:
-        stt_lang = "it"
-        vault_path = ""
-
-    assert stt.speech_lang(Cfg()) == "it"
+    assert stt_routes.speech_lang(make_config(stt_lang="it", vault_path="")) == "it"
 
 
 def test_speech_lang_maps_the_vault_language_to_a_bcp47_tag(monkeypatch):
     from silica.kernel import vault_language
 
-    class Cfg:
-        stt_lang = "auto"
-        vault_path = "/some/vault"
-
+    cfg = make_config(stt_lang="auto", vault_path="/some/vault")
     monkeypatch.setattr(vault_language, "reply_language_for", lambda v: "Italian")
-    assert stt.speech_lang(Cfg()) == "it"
+    assert stt_routes.speech_lang(cfg) == "it"
     monkeypatch.setattr(vault_language, "reply_language_for", lambda v: "de")
-    assert stt.speech_lang(Cfg()) == "de"
+    assert stt_routes.speech_lang(cfg) == "de"
     monkeypatch.setattr(vault_language, "reply_language_for", lambda v: "chinese")
-    assert stt.speech_lang(Cfg()) == "zh"
+    assert stt_routes.speech_lang(cfg) == "zh"
     # an unknown name is no tag at all: the browser's own default beats a guess
     monkeypatch.setattr(vault_language, "reply_language_for", lambda v: "klingon")
-    assert stt.speech_lang(Cfg()) == ""
+    assert stt_routes.speech_lang(cfg) == ""

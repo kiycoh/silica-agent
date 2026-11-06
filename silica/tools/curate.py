@@ -28,6 +28,7 @@ from typing import Any
 from pydantic import Field
 
 from silica.agent.subagent import run_subagent_batch
+from silica.kernel.report import related
 from silica.kernel.report.curator import CurationPlan, compose_curation_plan
 from silica.kernel.report.graph_report import compute_report
 from silica.kernel.write.run_log import append_log_line, format_curate_event
@@ -74,60 +75,6 @@ def _run_autolink(sources: list[str]) -> dict[str, Any]:
 
 
 
-def link_candidates(path: str, k: int = 5) -> list[dict]:
-    """Link targets to offer for an orphan note: ``[{"name", "path"}, ...]``.
-
-    Fuses embeddings + co-occurrence (RRF): pure candidate generation, no cosine
-    thresholding, so it still produces targets when the embedding index is empty
-    (the co-occurrence leg carries the routing on its own). A reranker, when one
-    is configured, tightens a wider pool down to `k`.
-
-    Lives here rather than beside `related_notes`: it needs `get_reranker`, and
-    kernel.recall.relatedness must not reach into silica.agent — the structural
-    modules that import it are contractually agent-free (see import-linter).
-
-    Any failure degrades to `[]`, which every caller treats as a safe no-op:
-    the orphan worker only links among the candidates it was offered.
-    """
-    try:
-        from silica.config import CONFIG
-        from silica.kernel.recall.cooccurrence import get_cooccur_store
-        from silica.kernel.base.notekey import store_key
-        from silica.kernel.recall.embed import get_store
-        from silica.kernel.base.layout import is_staging_path
-        from silica.kernel.recall.relatedness import related_notes
-
-        from silica.model.providers import get_reranker
-        from silica.kernel.recall.rerank import link_query, rerank_related
-
-        # store_key (case-PRESERVED, .md-stripped) is the store keyspace; ledger_key
-        # would lowercase and miss the case-preserving stored keys -> empty results.
-        key = store_key(path)
-        reranker = get_reranker(CONFIG)
-        pool = max(k, 20) if reranker else k
-        embed_store = get_store()
-        cooccur_store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-        # Staging (inbox, done/) is never a link target: the orphan pass writes
-        # INTO the chosen candidate, and on 2026-09-27 the owner ruled both out
-        # (inbox: 28 of 200 gate candidates; done/: 2 of 16 field links went
-        # into archived source chapters). Excluded inside each leg, before the
-        # pool is cut, so k survivors remain.
-        staging = {p for store in (embed_store, cooccur_store) if store is not None
-                   for p in store.paths() if is_staging_path(p)}
-        results = related_notes(
-            key,
-            embed_store=embed_store,
-            cooccur_store=cooccur_store,
-            k=pool,
-            exclude=staging,
-        )
-        if reranker:
-            results = rerank_related(reranker, link_query(key), results, k=k)
-        return [{"name": r.name, "path": r.path} for r in results]
-    except Exception as e:
-        logger.debug("link candidate lookup failed for %r (non-fatal): %s", path, e)
-        return []
-
 # ---------------------------------------------------------------------------
 # plan → WorkItems
 # ---------------------------------------------------------------------------
@@ -138,7 +85,7 @@ def _orphan_workitems(plan: CurationPlan) -> list[WorkItem]:
         items.append(WorkItem(
             kind="orphan",
             target_path=it.target,
-            context={"candidates": link_candidates(it.target)},
+            context={"candidates": related.link_candidates(it.target)},
             reason=it.reason or "curate orphan",
         ))
     return items
@@ -161,7 +108,7 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
     """
     from silica.config import CONFIG
 
-    tau_high = getattr(CONFIG, "sim_threshold_high", 0.85)
+    tau_high = CONFIG.sim_threshold_high
     pairs = list(plan.by_kind("dedup"))
 
     _body_cache: dict[str, str] = {}
@@ -336,7 +283,7 @@ def apply_curation_plan(
 # tool
 # ---------------------------------------------------------------------------
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False)
 def silica_curate(
     apply: Annotated[bool, Field(description='If True, enqueue/execute the plan; default is a dry-run that only returns the plan.')] = False,
     folder: Annotated[str, Field(description='Vault-relative folder to scope the audit (empty = whole vault)')] = "",
@@ -401,7 +348,7 @@ def silica_curate(
     execution = apply_curation_plan(
         plan,
         config=CONFIG,
-        vault_path=getattr(CONFIG, "vault_path", None),
+        vault_path=CONFIG.vault_path,
         cancel_token=cancel_token,
     )
     result["status"] = execution.get("status", "applied")

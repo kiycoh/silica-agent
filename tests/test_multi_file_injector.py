@@ -510,7 +510,7 @@ class TestT6DirectShortcuts:
             received_query.append(text)
             return {"results": []}
 
-        with patch("silica.tools.graph._facade_search", capture_search):
+        with patch("silica.kernel.recall.search.facade_search", capture_search):
             with patch("silica.cli.CONSOLE"):
                 result = _handle_direct_shortcut("/find Neural Networks", [])
 

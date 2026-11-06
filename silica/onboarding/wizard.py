@@ -4,7 +4,6 @@
 """`silica init` — interactive setup wizard. Writes .env, then runs the doctor checks."""
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys
@@ -12,12 +11,16 @@ from pathlib import Path
 from typing import Callable
 
 from silica.config import (
-    USER_ENV,
-    SilicaConfig,
     claim_env,
+    env_raw,
+    live_env,
     model_from_env,
+    RERANK_PORT,
+    SilicaConfig,
+    USER_ENV,
 )
 from silica.kernel.base import gitstate
+from silica.kernel.base.layout import DOC_SCAN_CAP, files_with
 from silica.kernel.base.manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
 from silica.provider_table import HOSTED, PROVIDERS
@@ -376,7 +379,7 @@ def _rerank_server_updates() -> dict[str, str]:
     """The keys that point recall at the [rerank] extra's own server (ADR-0073),
     or {} when the user already runs a reranker of their own: a serve command,
     or a base URL with no command (a server started by hand)."""
-    if os.getenv("SILICA_RERANK_SERVE_CMD") or os.getenv("SILICA_RERANK_BASE_URL"):
+    if env_raw("SILICA_RERANK_SERVE_CMD") or env_raw("SILICA_RERANK_BASE_URL"):
         return {}
     import json
 
@@ -385,7 +388,7 @@ def _rerank_server_updates() -> dict[str, str]:
     from silica.config import CONFIG
 
     return {
-        "SILICA_RERANK_BASE_URL": "http://127.0.0.1:1235/v1",
+        "SILICA_RERANK_BASE_URL": f"http://127.0.0.1:{RERANK_PORT}/v1",
         # The server ignores the request's model; this names it for the log line.
         "SILICA_RERANK_MODEL": local_rerank_model(CONFIG),
         # A dotenv double-quoted value: the shell quoting inside it (a venv path
@@ -471,12 +474,7 @@ def _ask_local_model(
     return _ask(input_fn, f"{label} model id", recommended)
 
 
-# bounded walk — a repo-mode vault can be a source tree with
-# node_modules, and init must not stall counting files it will only mention.
-_DOC_SCAN_CAP = 20_000
-
-
-def propose_form_fallback(vault: Path, cap: int = _DOC_SCAN_CAP) -> str | None:
+def propose_form_fallback(vault: Path, cap: int = DOC_SCAN_CAP) -> str | None:
     """Fallback distill profile to propose, from a mechanical `form:` census.
 
     docs/specs/nucleation-forms.md wizard step: no vault-wide auto-inference
@@ -554,11 +552,29 @@ def _offer_zotero(input_fn: Callable[[str], str], vault: Path) -> None:
         CONSOLE.print(f"  {GLYPHS['ok']} zotero: library {library}")
 
 
+def unindexable_docs(vault: Path, cap: int = DOC_SCAN_CAP) -> list[Path]:
+    """Documents present in the vault that the index cannot read.
+
+    The index is markdown-only (`fs_backend._build_index` skips every non-`.md`
+    file), so a vault of PDFs answers every question with nothing until
+    `/convert` turns them into notes. Onboarding is the one place that sees the
+    vault before the user asks their first question, so it is where the gap gets
+    named.
+
+    `CONVERTIBLE_DOC_EXTS`, not the full `DOC_EXTS`: the converter also takes
+    images and media, and those sitting in a vault are attachments, not documents
+    someone is waiting to ingest. Counting them would greet a user who pastes
+    screenshots with "500 documents to convert", and would count the figures
+    Silica itself extracted into `<inbox>/Images`.
+    """
+    from silica.kernel.base.formats import CONVERTIBLE_DOC_EXTS
+
+    return files_with(vault, CONVERTIBLE_DOC_EXTS, cap)
+
+
 def _warn_unindexable(vault: Path) -> None:
     """One line naming the documents `/convert` still has to bring in."""
-    from silica.sources.ingest import unindexable_docs
-
-    docs = unindexable_docs(vault, _DOC_SCAN_CAP)
+    docs = unindexable_docs(vault)
     if not docs:
         return
     names = ", ".join(p.name for p in docs[:3])
@@ -737,7 +753,7 @@ def _run_wizard_inner(
             # hand-kept suggestions to still exist.
             key = ""
             while not key:
-                key = _ask(input_fn, key_prompt, os.getenv(key_env, ""), secret=True)
+                key = _ask(input_fn, key_prompt, live_env(key_env), secret=True)
             updates[key_env] = key
             model = _pick(
                 input_fn, "Model — pick a number or type an id",
@@ -972,7 +988,7 @@ def _run_wizard_inner(
             ).lower()
         if answer in ("y", "yes"):
             updates["SILICA_RERANK_BASE_URL"] = _ask(
-                input_fn, "Reranker base URL", "http://localhost:1235/v1"
+                input_fn, "Reranker base URL", f"http://localhost:{RERANK_PORT}/v1"
             )
             updates["SILICA_RERANK_MODEL"] = _pick(
                 input_fn, "Reranker model — pick a number or type an id",

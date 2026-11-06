@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from silica.agent import loop
 from silica.obs.events import ToolCompleteEvent, ToolStartEvent
 from silica.tools import TOOLS, Tool
-from silica.tools import user_memory as memory_gate
+from silica.agent import memory_gate
 
 
 class _Args(BaseModel):
@@ -48,9 +48,7 @@ def _run(names, register, *, callback=None):
 @pytest.fixture
 def register(monkeypatch):
     def reg(name, fn, read=True):
-        monkeypatch.setitem(TOOLS, name, Tool(fn, name, "doc", _Args, "atomic"))
-        if read:
-            monkeypatch.setattr(loop, "PARALLEL_READS", loop.PARALLEL_READS | {name})
+        monkeypatch.setitem(TOOLS, name, Tool(fn, name, "doc", _Args, "atomic", parallel_safe=read))
     return reg
 
 

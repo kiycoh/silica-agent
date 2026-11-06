@@ -34,21 +34,6 @@ from silica.ui import tool_labels
 
 logger = logging.getLogger(__name__)
 
-def emit_phase(event) -> None:
-    """Called by InjectorFSM to surface a phase transition to whoever is watching.
-
-    Publishes on BUS rather than calling a registered hook: the TUI is not the
-    only frontend any more (the web turn subscribes too, silica/ui/web/turn.py),
-    and a module-global hook admits exactly one consumer and cannot be observed
-    from a test without writing into that global.
-    """
-    try:
-        from silica.obs.bus import BUS
-        BUS.publish("work/phase", event)
-    except Exception:
-        pass
-
-
 _batch_run_hook: Callable[[RenderEvent], None] | None = None
 
 
@@ -122,8 +107,7 @@ def _synthetic_tool_desc(name: str, args: dict) -> str:
     if name == "silica_run_injector":
         label = tool_labels.injector_label(args)
         return f'injector [bold]"{escape(label)}"[/bold]' if label else "injector"
-    verb, key = tool_labels.connector_desc(name) or tool_labels.TOOL_DESC.get(
-        name, (name.removeprefix("silica_").replace("_", " "), None))
+    verb, key = tool_labels.tool_desc(name)
     val = args.get(key, "") if key else ""
     if val:
         val = tool_labels.TARGET_FMT.get(name, str)(str(val))

@@ -19,7 +19,7 @@ def vault(tmp_path, monkeypatch):
     v.mkdir()
     monkeypatch.setattr(CONFIG, "vault_path", str(v))
     monkeypatch.setattr(CONFIG, "user_memory", True)
-    monkeypatch.setattr(um, "_INCOGNITO", False)
+    monkeypatch.setattr("silica.obs.narration.INCOGNITO", False)
     return v
 
 

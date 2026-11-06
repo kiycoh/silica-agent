@@ -226,7 +226,7 @@ def test_on_the_server_an_rtf_past_the_ceiling_is_refused(tmp_vault, monkeypatch
 
 
 def test_on_the_server_duckdb_keeps_to_256_mb_and_two_threads(tmp_path, monkeypatch):
-    from silica.sources.duck import connect
+    from silica.kernel.text.tabular import connect
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
     con = connect(tmp_path)

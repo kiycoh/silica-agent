@@ -27,111 +27,14 @@ from typing import Any
 
 from pydantic import Field
 
-from silica.sources.duck import SNIFFED_EXTS, bind_source, connect, utf8_source
+from silica.kernel.text import tabular as sandbox
 from silica.tools import tool
 
 logger = logging.getLogger(__name__)
 
-# Everything DuckDB binds from a bare path with no extension loaded.
-READABLE_EXTS = (".csv", ".tsv", ".txt", ".parquet", ".json", ".ndjson")
-# Spreadsheets: one sheet per call, extracted in-process to a temp CSV that is
-# then queried like any other. The direct route (DuckDB's `excel` extension)
-# needs INSTALL, which the sandbox below blocks by design — the detour keeps
-# the whole downstream path (sniffing, confinement, caps) shared instead of
-# duplicated per format.
-SHEET_EXTS = (".xlsx", ".xlsm", ".xls")
-
 # Rows are capped in bytes as well as in count: `limit` alone never sees that
 # 200 rows of a wide table is a six-figure token payload.
 _PAYLOAD_BYTE_CAP = 50_000
-
-
-def _select_only(sql: str) -> str:
-    """The one statement in `sql` if it is a SELECT, else ValueError.
-
-    Parsed by DuckDB, not pattern-matched: a keyword blocklist misses `ATTACH`,
-    misreads a column literally named "drop", and is exactly the flimsy half of
-    a choice where the correct half costs the same one call.
-    """
-    import duckdb
-
-    try:
-        statements = duckdb.extract_statements(sql)
-    except Exception as e:
-        raise ValueError(f"unparsable SQL: {e}") from e
-    if len(statements) != 1:
-        raise ValueError(
-            f"expected exactly 1 statement, got {len(statements)} — "
-            "this tool reads, so it runs one SELECT per call"
-        )
-    stmt = statements[0]
-    if stmt.type != duckdb.StatementType.SELECT:
-        raise ValueError(
-            f"{stmt.type.name} rejected: silica_query_table is read-only, "
-            "the query must be a SELECT (WITH … SELECT is fine)"
-        )
-    return stmt.query.strip().rstrip(";")
-
-
-def _pick_sheet(names: list[str], sheet: str) -> str:
-    """The requested sheet name, or the only one; ambiguity is a teaching error."""
-    if sheet:
-        if sheet in names:
-            return sheet
-        raise ValueError(f"sheet {sheet!r} not found — this workbook has: {', '.join(names)}")
-    if len(names) == 1:
-        return names[0]
-    # Guessing (say, the first sheet) would answer from the wrong table without
-    # any signal that it did; the retry costs one call and names the choices.
-    raise ValueError(
-        "this workbook has several sheets — pass sheet= to pick one of: " + ", ".join(names)
-    )
-
-
-def _sheet_rows(src: Path, sheet: str):
-    """(sheet name, iterator of value rows) for a workbook, values not formulas."""
-    if src.suffix.lower() == ".xls":
-        import xlrd  # base dependency; convert.py reads .xls with it too
-
-        # logfile: xlrd narrates parse trivia straight to stdout otherwise.
-        book = xlrd.open_workbook(str(src), logfile=io.StringIO())
-        name = _pick_sheet(book.sheet_names(), sheet)
-        sh = book.sheet_by_name(name)
-
-        def cell(c):
-            # Dates are bare floats in BIFF; only the cell type says so.
-            if c.ctype == xlrd.XL_CELL_DATE:
-                return xlrd.xldate_as_datetime(c.value, book.datemode)
-            return c.value
-
-        return name, ([cell(c) for c in sh.row(r)] for r in range(sh.nrows))
-    from openpyxl import load_workbook
-
-    wb = load_workbook(src, read_only=True, data_only=True)
-    name = _pick_sheet(wb.sheetnames, sheet)
-    return name, (list(r) for r in wb[name].iter_rows(values_only=True))
-
-
-def _sheet_to_csv(src: Path, sheet: str, workdir: Path) -> tuple[str, Path]:
-    """Extract one sheet to a CSV under `workdir`; (sheet name, csv path).
-
-    A CSV round-trip on purpose: datetimes go out as ISO strings and numbers as
-    their repr, both of which the full-file sniff recovers unambiguously — and
-    typed values that openpyxl/xlrd already resolved (a formula's cached value,
-    a BIFF date float) arrive as data, not artifacts.
-    """
-    import csv
-
-    name, rows = _sheet_rows(src, sheet)
-    out = workdir / "sheet.csv"
-    with out.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
-        for row in rows:
-            writer.writerow(
-                "" if v is None else v.isoformat() if hasattr(v, "isoformat") else v
-                for v in row
-            )
-    return name, out
 
 
 def _fit_rows(rows: list[list[Any]]) -> list[list[Any]]:
@@ -144,7 +47,7 @@ def _fit_rows(rows: list[list[Any]]) -> list[list[Any]]:
     return rows
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, note_args=("path",))
 def silica_query_table(
     path: Annotated[str, Field(description='Path to the data file to query (.csv/.tsv/.parquet/.json, or .xlsx/.xls for one sheet at a time)')], sql: Annotated[str, Field(description="A single read-only SELECT. The file is bound to the table name `t` — e.g. SELECT region, avg(score) FROM t GROUP BY 1. When the columns are unknown, call with `SUMMARIZE t` first: one call returns every column's type, min/max, distinct count and null share, without spending rows.")], limit: Annotated[int, Field(description='Max rows returned; the reply flags whether it truncated')] = 200, sheet: Annotated[str, Field(description='Excel files only: which sheet to query. Omit for single-sheet workbooks; a multi-sheet workbook rejects the call and lists its sheet names.')] = ""
 ) -> dict[str, Any]:
@@ -182,29 +85,29 @@ def silica_query_table(
     if not src.is_file():
         raise ValueError(f"{src} is not a file")
     suffix = src.suffix.lower()
-    if suffix not in (*READABLE_EXTS, *SHEET_EXTS):
+    if suffix not in (*sandbox.READABLE_EXTS, *sandbox.SHEET_EXTS):
         raise ValueError(
             f"{suffix or 'no extension'} is not a tabular format — "
-            f"expected one of {', '.join((*READABLE_EXTS, *SHEET_EXTS))}"
+            f"expected one of {', '.join((*sandbox.READABLE_EXTS, *sandbox.SHEET_EXTS))}"
         )
-    if sheet and suffix not in SHEET_EXTS:
+    if sheet and suffix not in sandbox.SHEET_EXTS:
         raise ValueError(f"sheet= applies to Excel files only, not {suffix}")
 
-    inner = _select_only(sql)
+    inner = sandbox.select_only(sql)
     sheet_name = ""
     # The temp dir is the confinement boundary for the sheet path: the workbook
     # is read in-process BEFORE any model SQL runs, so the SQL can only see the
     # one extracted sheet.
     with tempfile.TemporaryDirectory() as tmp:
-        if suffix in SHEET_EXTS:
-            sheet_name, bound = _sheet_to_csv(src, sheet, Path(tmp))
-        elif suffix in SNIFFED_EXTS:
-            bound = utf8_source(src, Path(tmp))
+        if suffix in sandbox.SHEET_EXTS:
+            sheet_name, bound = sandbox.sheet_to_csv(src, sheet, Path(tmp))
+        elif suffix in sandbox.SNIFFED_EXTS:
+            bound = sandbox.utf8_source(src, Path(tmp))
         else:
             bound = src
-        con = connect(bound.parent)
+        con = sandbox.connect(bound.parent)
         try:
-            bind_source(con, bound)
+            sandbox.bind_source(con, bound)
             schema = dict(
                 (row[0], row[1]) for row in con.execute("DESCRIBE t").fetchall()
             )
@@ -252,7 +155,7 @@ def silica_query_table(
 # .txt is prose more often than a table and .json is config more often than
 # records, so listing them would bury the real tables under false positives.
 # Both stay queryable by explicit path through silica_query_table.
-_CENSUS_EXTS = (".csv", ".tsv", ".parquet", ".ndjson", *SHEET_EXTS)
+_CENSUS_EXTS = (".csv", ".tsv", ".parquet", ".ndjson", *sandbox.SHEET_EXTS)
 _CATALOG_FILE_CAP = 500  # files walked before the census itself truncates
 # Head sample, not query_table's whole-file sniff: a catalog is orientation,
 # and the full sniff on a hundred-file vault costs seconds per call, while a
@@ -268,7 +171,7 @@ def _describe_table(src: Path) -> dict[str, Any]:
     """
     import duckdb
 
-    if src.suffix.lower() in SHEET_EXTS:
+    if src.suffix.lower() in sandbox.SHEET_EXTS:
         # Sheets only, no per-sheet schema: opening every sheet of every
         # workbook is a query_table call's worth of work per file.
         try:
@@ -287,10 +190,10 @@ def _describe_table(src: Path) -> dict[str, Any]:
         quoted = str(path).replace("'", "''")
         rel = (
             f"read_csv('{quoted}', sample_size={_CATALOG_SNIFF_ROWS})"
-            if path.suffix.lower() in SNIFFED_EXTS
+            if path.suffix.lower() in sandbox.SNIFFED_EXTS
             else f"'{quoted}'"
         )
-        # A bare connection, not duck.connect's sandbox: the SQL here is ours (a
+        # A bare connection, not sandbox.connect: the SQL here is ours (a
         # DESCRIBE over a resolved vault path), never model-authored.
         con = duckdb.connect()
         try:
@@ -302,19 +205,19 @@ def _describe_table(src: Path) -> dict[str, Any]:
     try:
         return {"columns": describe(src)}
     except Exception as first:
-        if src.suffix.lower() in SNIFFED_EXTS:
+        if src.suffix.lower() in sandbox.SNIFFED_EXTS:
             # Retry through the encoding ladder before giving up: public-data
             # exports are routinely cp1252 (4 of 26 CSVs on a real vault) and
             # DuckDB refuses them outright.
             try:
                 with tempfile.TemporaryDirectory() as tmp:
-                    return {"columns": describe(utf8_source(src, Path(tmp)))}
+                    return {"columns": describe(sandbox.utf8_source(src, Path(tmp)))}
             except Exception:
                 pass
         return {"error": f"{type(first).__name__}: {first}"}
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False)
 def silica_tables(folder: Annotated[str, Field(description='Vault-relative folder to scope the census; empty = the whole vault')] = "", column: Annotated[str, Field(description='Case-insensitive substring filter: only tables with a matching column name return, with the matches named')] = "", limit: Annotated[int, Field(description='Max tables described in the reply')] = 50) -> dict[str, Any]:
     """Census of the vault's tabular files (.csv/.tsv/.parquet/.ndjson, Excel):
     path, size and column schema per file, filterable by column name — the

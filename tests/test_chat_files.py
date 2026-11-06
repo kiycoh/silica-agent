@@ -263,7 +263,7 @@ def test_stop_runs_no_further_tool_of_the_batch(monkeypatch):
 
     # The serial path, which every block holding a write takes. A block of
     # reads only starts its calls together (ADR-0150): see the test below.
-    monkeypatch.setattr(loop, "PARALLEL_READS", frozenset())
+    monkeypatch.setattr(TOOLS["silica_exists"], "parallel_safe", False)
 
     token = threading.Event()
     ran: list[str] = []

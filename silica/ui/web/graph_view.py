@@ -670,7 +670,7 @@ def _coupled_edges(G_und, nodes: list[dict], top_k: int = 12) -> list[dict]:
 
     ids = {n["id"] for n in nodes if n.get("type") != "ghost"}
     transactions, _dropped = coupling_transactions(
-        str(getattr(CONFIG, "vault_path", "") or ""), _sources_of(nodes), ids,
+        str(CONFIG.vault_path or ""), _sources_of(nodes), ids,
     )
     adj = coupling_adjacency(transactions)
     pairs: list[tuple[str, str, float]] = []
@@ -700,7 +700,7 @@ def _sources_of(nodes: list[dict]) -> dict[str, list[str]]:
 
     from silica.config import CONFIG
 
-    root = Path(str(getattr(CONFIG, "vault_path", "") or ""))
+    root = Path(str(CONFIG.vault_path or ""))
     if not root.is_dir():
         return {}
     out: dict[str, list[str]] = {}

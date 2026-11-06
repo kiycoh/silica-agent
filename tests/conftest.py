@@ -139,8 +139,17 @@ def _no_page_reading_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _load_tools_registry() -> None:
+    """Fill TOOLS as every entry point does: the facts the loop, the compaction
+    and the taint gate read are in it, and a test file run alone must see them."""
+    from silica.tools import catalog
+
+    catalog.load()
+
+
 @pytest.fixture(autouse=True)
-def _restore_tools_registry() -> None:
+def _restore_tools_registry(_load_tools_registry) -> None:
     """Undo any registration a test leaves in the global TOOLS dict.
 
     TOOLS is module-level and `@tool` writes into it at import time; ten test
@@ -584,8 +593,7 @@ def _user_memory_on_the_record(monkeypatch: pytest.MonkeyPatch) -> None:
     """/incognito is one flag per process (ADR-0076), and a TUI test that
     types it leaves it set when main() returns. The files themselves are
     already sandboxed by _isolate_silica_home."""
-    from silica.kernel import user_memory
-    monkeypatch.setattr(user_memory, "_INCOGNITO", False)
+    monkeypatch.setattr("silica.obs.narration.INCOGNITO", False)
 
 
 class MemoryKeyring:

@@ -12,14 +12,11 @@ plan's exam date unasked, was refused, and told the user "Ho salvato il
 contesto" (narration 6aebe4c1e7f8). The owner removed the gate the same day
 (ADR-0076, amendment 2026-10-23): a save is not something to ask leave for.
 
-What stays is a property of the turn, not a line in the prompt:
+What stays is a property of the turn, not a line in the prompt, and the loop
+keeps it (silica/agent/memory_gate.py):
 
 - untainted: no tool that brings outside content into the conversation has
-  run in it, on this turn or any earlier one. A page read on turn N is still
-  in context on turn N+1: Trojan Hippo (arXiv 2605.01970, §6.2) found
-  filtering on the user message unsound for tool-call memories and
-  per-session no-untrusted-write sound. With unasked saves a page no longer
-  needs the user to say "remember", so this gate is the whole defence.
+  run in it, on this turn or any earlier one.
 - a chat turn the user started: a batch or a worker loop writes nothing.
 
 `/remember <text>` and the Settings editor never come through here: those are
@@ -29,39 +26,21 @@ from __future__ import annotations
 
 import json
 import re
-from contextvars import ContextVar
-from collections.abc import Iterable
-from dataclasses import dataclass, field, replace
 from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
+from silica.agent import memory_gate
 from silica.tools import tool
 
-# Tools whose result carries content from outside the user's own words and
-# notes. One set, read by both halves of the taint gate (history at turn
-# start, results inside the turn).
-INGRESS = frozenset({
-    "silica_web_answer",    # an answer composed from fetched web pages
-    "silica_run_injector",  # an ingested file's text, distilled into the turn
-    "silica_read",          # any file under the root (PDFs, downloads), not only notes the user wrote
-    "web_fetch",            # /web: a page's text
-    "web_search",           # /web: result titles and snippets
-    "find_in_page",         # /web: lines grepped out of a fetched page
-    "remember",             # /web: a verbatim quote banked from a page (not this tool)
-    # Earlier answers, which may restate a page an earlier chat fetched: the
-    # taint of that chat ends with it, its words do not.
-    "silica_session_search",
-})
 
-# An MCP connector (ADR-0091) brings a third party's text in, whatever the
-# server is: its tools are `mcp__<key>`, one per configured server, so the
-# set above cannot name them and the prefix does.
-_INGRESS_PREFIX = "mcp__"
+def _mail_note_among(paths: list[str]) -> str:
+    from silica.sources.mail import mail_note_among
+
+    return mail_note_among(paths)
 
 
-def _ingress(name: str) -> bool:
-    return name in INGRESS or name.startswith(_INGRESS_PREFIX)
+memory_gate.mail_check = _mail_note_among
 
 # The bare `/remember` expands to this (cli._SHORTCUTS).
 REMEMBER_DIRECTIVE = "/remember: the user asks you to keep something from this conversation."
@@ -71,108 +50,6 @@ REMEMBER_DIRECTIVE = "/remember: the user asks you to keep something from this c
 _SUGGEST = ("Tell the user that nothing was saved, and that they can save it themselves "
             "with /remember <text> (when this result has a `suggest`, that is the exact "
             "command to give them) or in Settings > Memory.")
-
-
-@dataclass
-class _Turn:
-    request: str            # the current user request, the last user message
-    directive: bool         # that message is a harness directive (origin cli)
-    chat: bool              # an interactive chat turn, not a batch or worker loop
-    tainted_by: str = ""    # the first ingress tool this conversation ran
-    # Vault paths the running tool's result holds, handed over by the tool
-    # itself (returned_notes) and checked by after_tool (ADR-0090 point 8).
-    returned: list[str] = field(default_factory=list)
-    # Every path the turn's tools returned, in order: a save names the last
-    # few as where its entry came from (survey card C7).
-    read: list[str] = field(default_factory=list)
-
-
-# The key a tool message carries once its call tainted the conversation by a
-# path, which no tool name in the history records. Stripped from the wire
-# (wire.WIRE_KEYS) and kept by the narration, so a reopened chat stays
-# tainted. Compaction rewrites a message's content, never its other keys.
-TAINT_KEY = "silica_taint"
-
-
-# Set by run_agent at entry, like read_scope.REQUESTS: tools run on the loop's
-# thread and see it; a call from anywhere else (a batch, a test) sees
-# None and is refused, because nothing shows that a user asked.
-_TURN: ContextVar[_Turn | None] = ContextVar("user_memory_turn", default=None)
-
-
-def _called(messages: list[dict]) -> list[str]:
-    # Assistant tool calls, never tool results: compaction rewrites results
-    # into stubs but leaves the calls alone, so the record survives a sweep.
-    return [str((tc.get("function") or {}).get("name") or "")
-            for m in messages if m.get("role") == "assistant"
-            for tc in m.get("tool_calls") or ()]
-
-
-def begin_turn(messages: list[dict], *, chat: bool) -> _Turn:
-    request, directive = "", False
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            request, directive = str(m.get("content") or ""), m.get("origin") == "cli"
-            break
-    turn = _Turn(request, directive, chat,
-                 next((n for n in _called(messages) if _ingress(n)), "")
-                 or next((str(m[TAINT_KEY]) for m in messages
-                          if m.get("role") == "tool" and m.get(TAINT_KEY)), ""))
-    _TURN.set(turn)
-    return turn
-
-
-def returned_notes(paths: Iterable[str]) -> None:
-    """A note-reading tool hands the gate the vault paths its result holds,
-    from its own result objects: recall strips frontmatter from the text the
-    model sees, so the mail stamp could never be read off it (ADR-0090
-    point 8). Outside a turn there is nothing to taint."""
-    turn = _TURN.get()
-    if turn is not None:
-        turn.returned.extend(str(p) for p in paths if p)
-
-
-def own_returns() -> list[str]:
-    """Give the calling context a turn of its own whose `returned` starts
-    empty, and hand back that list. A read running beside others of its block
-    (ADR-0150) collects its paths there, and the loop credits them to its own
-    call before `after_tool`: on the shared list, the first call's taint mark
-    would carry what its siblings returned."""
-    turn = _TURN.get()
-    if turn is None:
-        return []
-    mine = replace(turn, returned=[])
-    _TURN.set(mine)
-    return mine.returned
-
-
-def after_tool(turn: _Turn, name: str) -> str:
-    """Taint the turn on what the call brought in; returns the taint this call
-    added, "" when it added none, for the loop to mark the tool message with."""
-    before = turn.tainted_by
-    if _ingress(name) and not turn.tainted_by:
-        turn.tainted_by = name
-    returned, turn.returned = turn.returned, []
-    turn.read.extend(p for p in returned if p not in turn.read)
-    if returned and not turn.tainted_by:
-        from silica.sources.mail import mail_note_among
-
-        try:
-            hit = mail_note_among(returned)
-        except (OSError, ValueError):
-            # The import record cannot be read, so no returned note can be
-            # told apart from a mail note: refusing memory for this
-            # conversation is the failure the gate can afford (/remember stays
-            # open), a turn that crashes on every note read is not.
-            turn.tainted_by = "an unreadable mail import record"
-        else:
-            if hit:
-                turn.tainted_by = f"the mail note {hit}"
-    # silica_web_answer runs a run_agent of its own on this thread, which
-    # opened its own turn; without this the rest of the outer turn would be
-    # judged against the inner one's request.
-    _TURN.set(turn)
-    return turn.tainted_by if turn.tainted_by != before else ""
 
 
 # "Dimentica che preferisco risposte brevi" became a replace with "prefers long
@@ -252,7 +129,7 @@ def _gate() -> str:
 
     if why := um.disabled_reason():
         return why
-    turn = _TURN.get()
+    turn = memory_gate.TURN.get()
     if turn is None or not turn.chat:
         return f"Nothing was saved: memory is written only from a chat turn the user started. {_SUGGEST}"
     if turn.tainted_by:
@@ -266,7 +143,7 @@ def _gate() -> str:
     return ""
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False)
 def silica_remember(
     action: Annotated[Literal["save", "replace", "forget"], Field(
         description="save adds text; replace swaps the entry containing old for text; "
@@ -303,7 +180,7 @@ def silica_remember(
         return out
     import datetime as dt
 
-    turn = _TURN.get()
+    turn = memory_gate.TURN.get()
     if action != "forget" and turn and not turn.directive and forget_only(turn.request):
         return {"error": "Nothing was saved: the user asked only to forget. Call forget with "
                          "the entry's [id] and write no new entry; if they want something "

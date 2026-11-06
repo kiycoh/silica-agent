@@ -374,8 +374,7 @@ def _reload_holds(gui, turns) -> None:
                 if m["role"] == "assistant" and m["content"] == ANSWER]
 
     assert replayed() == live
-    with patch.object(relevance, "ENABLED", True), \
-            patch.object(CONFIG, "decision_model", "stub/model"), \
+    with patch.object(CONFIG, "decision_model", "stub/model"), \
             patch.object(relevance, "decide", lambda state, q: {"needed": {"noul": 0.0}}):
         relevance.compact_by_relevance(SESSION.chat.messages, TOOLS)
     compact_read_history(SESSION.chat.messages, set(), prompt_tokens=10**7, budget=1,

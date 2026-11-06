@@ -353,7 +353,7 @@ def _caller() -> tuple[str, str]:
 def _vault() -> str | None:
     from silica.config import CONFIG
 
-    return (getattr(CONFIG, "vault_path", "") or "").strip() or None
+    return (CONFIG.vault_path or "").strip() or None
 
 
 def _untouched_draft(path: str, prior: str) -> bool:

@@ -19,12 +19,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
+from silica.config import live_env
 from silica.kernel.base import frontmatter
 from silica.kernel.base.noteshape import OKF_CODE, OKF_NOTE, OKF_PLAN, OKF_SOURCE, verified_entries
 
@@ -96,7 +96,7 @@ def agent_id() -> str:
     callers that need a name fall back to `user` themselves rather than this
     function guessing one.
     """
-    return os.environ.get("SILICA_AGENT_ID", "").strip()
+    return live_env("SILICA_AGENT_ID")
 
 
 def is_human_verified(data: dict | None) -> bool:

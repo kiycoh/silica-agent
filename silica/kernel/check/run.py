@@ -19,6 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from silica.config import embedder_defaults
 from silica.kernel.check import GRADES, ORDER
 from silica.kernel.check import blocks as blk
 from silica.kernel.check import pool as pl
@@ -43,14 +44,13 @@ LEXICAL_FLOOR = 0.3
 # mounted, dates counted as sources (point 4.3): no-source blocks at most
 # 0.234, sourced blocks with no link, name, identifier or date at least 0.294.
 # A thinner absolute margin than Gemma's, the same re-measure condition.
-DENSE_FLOORS: dict[str, float] = {"embeddinggemma-2": 0.645, "jina-embeddings-v5-text-small": 0.26}
+# Both floors sit on the embedder's row (config.EMBEDDER_DEFAULTS: 0.645, 0.26).
 
 
 def dense_floor(model: str) -> float | None:
-    """The floor for the configured embedder id, matched the way its config
-    row is (config.embedder_defaults: the key inside the id)."""
-    m = (model or "").lower()
-    return next((v for k, v in DENSE_FLOORS.items() if k in m), None)
+    """The floor on the embedder's row, None for an id with no measured one."""
+    floor = embedder_defaults(model).get("dense_floor")
+    return float(floor) if floor else None
 PASSAGES = 5
 SEARCH_WIDTH = 200
 # Point 13: a pass over more model calls than this starts only on the

@@ -217,13 +217,13 @@ def find(q: str = "", k: int = 5):
     """Direct semantic-search panel: calls the tool straight, same pattern as /graph and /map."""
     # The core and not the tool, whose payload drops `score` for the model
     # (graph._without_score): this panel shows it to the person.
-    from silica.tools.graph import _facade_search
+    from silica.kernel.recall.search import facade_search
 
     q = q.strip()
     if not q:
         return HTMLResponse("<p style='font-family:monospace;color:#8a93a3'>usage: /find &lt;query&gt; [--k=N]</p>")
     try:
-        parsed = _facade_search(q, k=k)
+        parsed = facade_search(q, k=k)
     except Exception as exc:
         return HTMLResponse(
             f"<p style='font-family:monospace'>find unavailable: {_html.escape(_failure(exc)['error'])}"

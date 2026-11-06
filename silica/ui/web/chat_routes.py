@@ -16,8 +16,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from silica.agent import turn_notes
-from silica.agent.loop import _is_tool_failure
 from silica.agent.mentions import IMAGE_MARK, IMAGE_MARK_RE
+from silica.tools import tool_failed
 from silica.agent.recall_watch import numbers_of_session, read_refs, READS_KEY
 from silica.config import CONFIG, demo
 from silica.kernel.base.formats import IMAGE_SUFFIX, ext_alternation
@@ -272,7 +272,7 @@ def get_messages():
     # place the user checks whether a write landed is this transcript.
     failed = {
         m["tool_call_id"] for m in messages
-        if m.get("role") == "tool" and m.get("tool_call_id") and _is_tool_failure(m.get("content"))
+        if m.get("role") == "tool" and m.get("tool_call_id") and tool_failed(m.get("content"))
     }
     # Tool results, which the loop below skips over: a nucleate run's outcome
     # (notes, links, which chunks died and where) exists nowhere else, so

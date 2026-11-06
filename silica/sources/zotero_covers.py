@@ -176,7 +176,7 @@ def _search(query: str, k: int) -> list[str]:
     pool of long notes as well as on a reranker that is down."""
     from silica.model.providers import get_embedder
     from silica.config import CONFIG
-    from silica.tools.graph import _facade_search
+    from silica.kernel.recall.search import facade_search
 
     try:
         get_embedder(CONFIG).embed([query], query=True)
@@ -185,7 +185,7 @@ def _search(query: str, k: int) -> list[str]:
                            "alone is not the measured search") from exc
     # The core, not the tool: the tool drops `reranked` for the model
     # (graph._without_score), and the unreranked count below reads it.
-    res = _facade_search(query, k=k, memory=False)
+    res = facade_search(query, k=k, memory=False)
     if "error" in res:
         raise RuntimeError(res["error"])
     if not res.get("reranked"):

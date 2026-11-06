@@ -7,10 +7,9 @@ writes it as a JSON line into the journal, and the nightly rollup in
 silica-hosted counts it from there. A local install never logs one.
 """
 import logging
-import os
 import time
 
-from silica.config import hosted
+from silica.config import hosted, live_env
 
 _LOG = logging.getLogger("silica.metrics")
 
@@ -26,7 +25,7 @@ def emit(event: str, **fields) -> None:
     # objection (notice v1.1 section 9) bin/tenant sets SILICA_METRICS_OPTOUT
     # in the tenant's env file and restarts the unit, and the tests flip both
     # without a reload.
-    if not hosted() or os.environ.get("SILICA_METRICS_OPTOUT", "").strip() == "1":
+    if not hosted() or live_env("SILICA_METRICS_OPTOUT"):
         return
     _LOG.info(event, extra={"metrics": fields})
 

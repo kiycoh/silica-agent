@@ -204,7 +204,7 @@ class RetryLog(logging.Handler):
     """Counts the retries the LLM layer already logs, per file.
 
     Not a nicety: in the pilot run one call hit the 130s silent-hang backstop
-    (`_LOCAL_LLM_TIMEOUT` in model/llm.py) and retried, which was ~48% of that
+    (`CONFIG.llm_timeout`) and retried, which was ~48% of that
     file's wall-clock. An ETA fitted over a sample that silently contained a
     stalled provider measures the provider's bad afternoon, not the pipeline.
     """

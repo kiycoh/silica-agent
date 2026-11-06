@@ -35,13 +35,11 @@ def _history(current: str = "E la Lezione 30?") -> list[dict]:
 
 @pytest.fixture
 def on(monkeypatch):
-    monkeypatch.setattr(relevance, "ENABLED", True)
     monkeypatch.setattr("silica.config.CONFIG.decision_model", "typesafe/jev-1.13")
 
 
-def test_no_decision_model_asks_nothing(monkeypatch):
-    monkeypatch.setattr(relevance, "ENABLED", True)  # conftest pins the model to ""
-    msgs = _history()
+def test_no_decision_model_asks_nothing():
+    msgs = _history()  # conftest pins the model to ""
     with patch.object(relevance, "decide") as d:
         assert relevance.compact_by_relevance(msgs, TOOLS) == []
     d.assert_not_called()
@@ -49,15 +47,6 @@ def test_no_decision_model_asks_nothing(monkeypatch):
 
 def _answers(p):
     return None if p is None else {"needed": {"type": "noul", "noul": p}}
-
-
-def test_disabled_asks_nothing(monkeypatch):
-    monkeypatch.setattr(relevance, "ENABLED", False)
-    msgs = _history()
-    with patch.object(relevance, "decide") as d:
-        assert relevance.compact_by_relevance(msgs, TOOLS) == []
-    d.assert_not_called()
-    assert msgs[3]["content"] == BIG
 
 
 @pytest.mark.parametrize("p,kept", [(0.05, False), (0.9, True), (None, True),

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
@@ -18,6 +19,26 @@ router = APIRouter()
 # 180 s of 16 kHz mono 16-bit PCM is 5.76 MB, Learn's take ceiling (app-learn.js);
 # the cap is generous enough for that and still refuses a body that was never a clip.
 _STT_MAX_BYTES = 8 * 1024 * 1024
+
+
+def speech_lang(config: Any) -> str:
+    """The BCP 47 tag the browser's speech APIs should use, "" when unknown.
+
+    The dictation language when it is fixed, else the vault's own language:
+    Learn reads a question aloud in the language the note is written in, and a
+    browser left to guess picks its UI language, which reads an Italian vault
+    with an English voice.
+    """
+    fixed = (config.stt_lang or "").strip()
+    if fixed and fixed != "auto":
+        return fixed
+    from silica.kernel.text.language import ISO
+    from silica.kernel.vault_language import reply_language_for
+
+    name = (reply_language_for((config.vault_path or "").strip()) or "").strip().lower()
+    if name in ISO:
+        return ISO[name]
+    return name if len(name) == 2 and name.isalpha() else ""
 
 
 @router.get("/stt")
@@ -40,7 +61,7 @@ def stt_status(warm: bool = True):
     from silica.onboarding.serve import ready
 
     url, key = local.dictation_endpoint(CONFIG)
-    base = {"url": url, "browser": CONFIG.stt_browser, "lang": local.speech_lang(CONFIG),
+    base = {"url": url, "browser": CONFIG.stt_browser, "lang": speech_lang(CONFIG),
             "hosted": hosted()}
     if url and ready(url):
         return {**base, "ok": True, "via": "endpoint", "detail": ""}
