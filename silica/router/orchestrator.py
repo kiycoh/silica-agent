@@ -983,7 +983,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
     def _source_canonical_for(self, inbox_file: str) -> str:
         """Vault-relative canonical path for an arbitrary inbox file (no .md, lowercase)."""
-        vault_path = getattr(CONFIG, "vault_path", None) or ""
+        vault_path = CONFIG.vault_path or ""
         if vault_path:
             try:
                 from pathlib import Path as _P

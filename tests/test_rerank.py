@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import httpx
 
+from tests.config_factory import make_config
 from silica.kernel.recall.rerank import (best_window, best_windows,
                                           best_window_spans, rerank_related,
                                           window_weights)
@@ -243,10 +244,8 @@ def test_client_abstains_on_transport_error(monkeypatch):
     assert rr.scores("q", ["d0"]) is None   # abstain, never raise
 
 
-class _NoCfg:
-    rerank_base_url = ""
-    rerank_model = ""
-    rerank_api_key = ""
+def _no_cfg(**overrides):
+    return make_config(rerank_base_url="", rerank_model="", rerank_api_key="", **overrides)
 
 
 def _extra(monkeypatch, present: bool):
@@ -258,18 +257,14 @@ def test_get_reranker_disabled_without_config_even_with_the_extra(monkeypatch):
     """No in-process leg (ADR-0073): the [rerank] extra serves through its own
     server, so with no endpoint configured the pass is off, not loaded here."""
     _extra(monkeypatch, True)
-    assert get_reranker(_NoCfg()) is None
+    assert get_reranker(_no_cfg()) is None
 
 
 def test_get_reranker_enabled_with_config(monkeypatch):
     _extra(monkeypatch, True)
 
-    class _Cfg:
-        rerank_base_url = "http://x/v1"
-        rerank_model = "bge-reranker"
-        rerank_api_key = "k"
-        rerank_timeout = 30.0
-    rr = get_reranker(_Cfg())
+    rr = get_reranker(make_config(rerank_base_url="http://x/v1", rerank_model="bge-reranker",
+                                  rerank_api_key="k", rerank_timeout=30.0))
     assert isinstance(rr, Reranker) and rr.url == "http://x/v1/rerank"
     assert rr.timeout == 30.0   # SILICA_RERANK_TIMEOUT reaches the client
 
@@ -280,11 +275,8 @@ def test_local_rerank_model_override(monkeypatch):
     from silica.model.providers import local_rerank_model
     from silica.config import LOCAL_RERANK_MODEL
 
-    assert local_rerank_model(_NoCfg()) == LOCAL_RERANK_MODEL
-
-    class _Cfg(_NoCfg):
-        local_rerank_model = "/models/jina-reranker-v3.5"
-    assert local_rerank_model(_Cfg()) == "/models/jina-reranker-v3.5"
+    assert local_rerank_model(_no_cfg()) == LOCAL_RERANK_MODEL
+    assert local_rerank_model(_no_cfg(local_rerank_model="/models/jina-reranker-v3.5")) == "/models/jina-reranker-v3.5"
 
 
 def test_rerank_updates_scores_to_match_the_new_order():

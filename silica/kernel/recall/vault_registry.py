@@ -188,7 +188,7 @@ def known_vaults() -> list[Path]:
         seen.add(r)
         out.append(r)
 
-    active = (getattr(CONFIG, "vault_path", "") or "").strip()
+    active = (CONFIG.vault_path or "").strip()
     if active:
         add(active)
     mem = memory_vault()  # None when it coincides with the active vault or is absent
@@ -420,7 +420,7 @@ def describe(vault: Path, query: str = "", k: int = 3, query_vec=None, reranker=
     from silica.kernel.base.manifest import load_manifest
 
     v = Path(vault).resolve()
-    active = (getattr(CONFIG, "vault_path", "") or "").strip()
+    active = (CONFIG.vault_path or "").strip()
     manifest = load_manifest(v)
     cov = coverage(v)
     row = {

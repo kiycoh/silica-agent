@@ -3,6 +3,7 @@ names a key, `.env.example`, the Settings panel and the doctor, is held to that
 table here, so a key added to one of them alone fails instead of drifting."""
 from __future__ import annotations
 
+import ast
 import dataclasses
 import re
 from pathlib import Path
@@ -57,3 +58,17 @@ def test_live_env_refuses_a_key_with_no_row():
 
     with pytest.raises(KeyError):
         live_env("SILICA_NOT_A_SETTING")
+
+
+def test_no_read_of_a_setting_falls_back_to_a_default_of_its_own():
+    """`getattr(CONFIG, "x", d)` on a class that always has `x` only ever answers
+    when `x` was renamed, and then with a stale value, in silence."""
+    receivers = {"CONFIG", "config", "cfg", "self.config", "orch.CONFIG", "_CFG"}
+    found = []
+    for path in (ROOT / "silica").rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "getattr"
+                    and len(node.args) == 3 and ast.get_source_segment(source, node.args[0]) in receivers):
+                found.append(f"{path.relative_to(ROOT)}:{node.lineno}")
+    assert found == []

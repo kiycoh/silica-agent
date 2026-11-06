@@ -41,7 +41,7 @@ _KEEP = frozenset({"non", "not", "no", "senza", "without", "back", "forward"})
 
 def _vault_lang() -> str | None:
     from silica.config import CONFIG
-    lang = getattr(CONFIG, "cooccurrence_lang", "auto") or "auto"
+    lang = CONFIG.cooccurrence_lang or "auto"
     return None if lang == "auto" else lang
 
 

@@ -608,7 +608,7 @@ class ObsidianWSBackend(GraphIndexMixin):
     def _repatch_from_disk(self, paths: list[str]) -> None:
         from silica.config import CONFIG
 
-        root = (getattr(CONFIG, "vault_path", "") or "").strip()
+        root = (CONFIG.vault_path or "").strip()
         for path in paths:
             try:
                 if not root:

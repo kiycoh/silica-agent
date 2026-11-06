@@ -363,7 +363,7 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
     attached yet — same ≤ k-1 staleness class as within-file lookahead, which
     the 2026-07-18 k=1-vs-k=3 A/B bounded), never a second one.
     """
-    k = int(getattr(orch.CONFIG, "distill_concurrency", 1) or 1)
+    k = int(orch.CONFIG.distill_concurrency or 1)
     if k <= 1:
         return
     if fsm._prefetcher is None:

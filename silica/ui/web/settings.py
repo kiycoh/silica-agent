@@ -280,7 +280,7 @@ def _value(row: Row) -> str:
         # is being rejected): flipping the toggle off is then the repair.
         return "true" if active_write_dir() else "false"
     if row.attr:
-        val = getattr(CONFIG, row.attr, "")
+        val = getattr(CONFIG, row.attr)
         if isinstance(val, bool):
             return "true" if val else "false"
         return "" if val is None else str(val)

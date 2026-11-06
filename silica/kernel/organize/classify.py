@@ -137,7 +137,7 @@ def _get_file_fs_year(note_path: str) -> int | None:
     """Retrieve the filesystem modification year for a note path."""
     from pathlib import Path
     from silica.config import CONFIG
-    vault_path = getattr(CONFIG, "vault_path", "")
+    vault_path = CONFIG.vault_path
     if not vault_path:
         return None
     full_path = Path(vault_path) / note_path

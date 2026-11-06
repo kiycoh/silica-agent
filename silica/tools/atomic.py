@@ -231,7 +231,7 @@ def _source_hits(query: str) -> list[dict] | None:
     from silica.config import CONFIG
     from silica.kernel.base.roots import repo_root_for
 
-    root = repo_root_for(getattr(CONFIG, "vault_path", "") or "")
+    root = repo_root_for(CONFIG.vault_path or "")
     if root is None:
         return None
     try:
@@ -820,7 +820,7 @@ def silica_read_note(
         from silica.kernel.recall.vault_registry import resolve_known
 
         target = resolve_known(vault)  # ValueError names the rule and the fix
-        active = (getattr(CONFIG, "vault_path", "") or "").strip()
+        active = (CONFIG.vault_path or "").strip()
         if not active or Path(active).resolve() != target:
             reader = reader_for(str(target))
             if shared := _shared_name(reader, name):

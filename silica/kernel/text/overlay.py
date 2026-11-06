@@ -213,7 +213,7 @@ def get_active_overlay() -> DomainOverlay:
         return _cached_overlay
 
     from silica.config import CONFIG
-    vault = getattr(CONFIG, "vault_path", "") or ""
+    vault = CONFIG.vault_path or ""
     overlay_path = None
     if vault:
         new = Path(vault) / _OVERLAY_REL
@@ -263,7 +263,7 @@ def overlay_for_lang(lang: str) -> DomainOverlay:
         return _lang_overlay_cache[key]
 
     from silica.config import CONFIG
-    vault = getattr(CONFIG, "vault_path", "") or ""
+    vault = CONFIG.vault_path or ""
     if vault:
         new = Path(vault) / _OVERLAY_REL
         legacy = Path(vault) / _LEGACY_OVERLAY_REL

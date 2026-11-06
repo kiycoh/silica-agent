@@ -60,7 +60,7 @@ def silica_impact(range_spec: Annotated[str, Field(description="Git range or ref
     from silica.config import CONFIG
     from silica.kernel.code.codegraph import compute_impact
 
-    vault = str(getattr(CONFIG, "vault_path", "") or "").strip()
+    vault = str(CONFIG.vault_path or "").strip()
     if not vault:
         return {"status": "error", "message": "no vault configured"}
     try:

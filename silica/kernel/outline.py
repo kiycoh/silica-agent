@@ -270,7 +270,7 @@ def lane_for(profile: str | None) -> str:
     (the A/B rerun knob).
     """
     from silica.config import CONFIG
-    if (getattr(CONFIG, "nucleate_lane", "outline") or "outline") != "outline":
+    if (CONFIG.nucleate_lane or "outline") != "outline":
         return "keyphrase"
     return "keyphrase" if (profile or "default") in ("clip", "promotion") else "outline"
 

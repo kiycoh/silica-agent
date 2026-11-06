@@ -568,7 +568,7 @@ class EpisodicStore:
         if ttl_days is None:
             from silica.config import CONFIG
 
-            ttl_days = int(getattr(CONFIG, "episodic_ttl_days", 90))
+            ttl_days = int(CONFIG.episodic_ttl_days)
         if ttl_days <= 0:
             return 0
         expired_ids: set[str] = set()
@@ -644,11 +644,11 @@ class EpisodicStore:
         if ttl_days is None:
             from silica.config import CONFIG
 
-            ttl_days = int(getattr(CONFIG, "episodic_ttl_days", 90))
+            ttl_days = int(CONFIG.episodic_ttl_days)
         if floor is None:
             from silica.config import CONFIG
 
-            floor = float(getattr(CONFIG, "episodic_recall_floor", 0.5))
+            floor = float(CONFIG.episodic_recall_floor)
         q_tokens = _tokens(query_text)
         hits: list[FactHit] = []
         for fact in self.live_facts():
@@ -688,7 +688,7 @@ class EpisodicStore:
         if min_days is None:
             from silica.config import CONFIG
 
-            min_days = int(getattr(CONFIG, "episodic_nucleation_days", 3))
+            min_days = int(CONFIG.episodic_nucleation_days)
         out: list[NucleationCandidate] = []
         for head in self.live_facts():
             if head.promoted:
@@ -802,7 +802,7 @@ def episodic_home() -> Path:
     """
     from silica.config import CONFIG
 
-    raw = (getattr(CONFIG, "memory_vault", "") or "").strip()
+    raw = (CONFIG.memory_vault or "").strip()
     return (Path(raw).expanduser() if raw else silica_home() / "vault").resolve()
 
 

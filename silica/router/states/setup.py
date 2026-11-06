@@ -475,7 +475,7 @@ def _salience_filter(fsm: "InjectorFSM", chunks: list[dict]) -> int | None:
     The SALIENCE core, shared with warm_next_file. Returns the dropped count,
     or None when no embedder is available (gate skipped, chunks untouched).
     """
-    τ_theme = getattr(orch.CONFIG, "sim_threshold_theme", 0.35)
+    τ_theme = orch.CONFIG.sim_threshold_theme
     from silica.model.providers import get_embedder_or_none
     from silica.kernel.base.vectors import document_theme_vector, cosine
     from silica.kernel.text.text import clean_body

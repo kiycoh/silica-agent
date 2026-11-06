@@ -1238,7 +1238,7 @@ def _check_legs():
         r = _engine().search(query, folder="", k=k)
         return r.get("hits") or []
 
-    floor = check.dense_floor(str(getattr(CONFIG, "embedding_model", "") or ""))
+    floor = check.dense_floor(str(CONFIG.embedding_model or ""))
     if floor is None:
         return search, None, None
     try:

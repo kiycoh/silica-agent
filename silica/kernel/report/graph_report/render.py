@@ -518,7 +518,7 @@ def write_report(report: VaultReport, output_path: str) -> dict:
             from silica.config import CONFIG
             from silica.kernel.report.vault_energy import vault_energy
 
-            vault = getattr(CONFIG, "vault_path", None)
+            vault = CONFIG.vault_path
             if vault:
                 energy_path = Path(vault) / ".silica" / "energy.json"
                 prev: float | None = None

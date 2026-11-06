@@ -560,7 +560,7 @@ def get_active_manifest() -> VaultManifest:
     if _cached is None:
         from silica.config import CONFIG
 
-        _cached = load_manifest((getattr(CONFIG, "vault_path", "") or "").strip())
+        _cached = load_manifest((CONFIG.vault_path or "").strip())
     return _cached
 
 
@@ -624,9 +624,9 @@ def active_inbox_dir() -> str:
     from silica.config import CONFIG
 
     return resolve_inbox_dir(
-        getattr(CONFIG, "vault_path", "") or "",
+        CONFIG.vault_path or "",
         active_write_dir(),
-        getattr(CONFIG, "inbox_dir", "") or "",
+        CONFIG.inbox_dir or "",
     )
 
 
@@ -677,7 +677,7 @@ def active_done_dir() -> str:
     from silica.config import CONFIG
 
     return resolve_done_dir(
-        getattr(CONFIG, "vault_path", "") or "",
+        CONFIG.vault_path or "",
         active_write_dir(),
     )
 
@@ -724,7 +724,7 @@ def source_key(source_file: str) -> str:
     if os.path.isabs(rel):
         from silica.config import CONFIG
 
-        vault = (getattr(CONFIG, "vault_path", "") or "").replace("\\", "/").rstrip("/")
+        vault = (CONFIG.vault_path or "").replace("\\", "/").rstrip("/")
         if vault and rel.startswith(vault + "/"):
             rel = rel[len(vault) + 1:]
     rel = rel.strip("/")

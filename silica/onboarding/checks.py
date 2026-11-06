@@ -349,7 +349,7 @@ def check_rerank(config: SilicaConfig) -> CheckResult:
     # An install made before ADR-0073 reranked in-process with no key at all;
     # now the extra runs as a server, and nothing starts it without the command.
     gap = has_local_rerank() and not serve_cmd
-    key = getattr(config, "rerank_api_key", "")
+    key = config.rerank_api_key
     if config.rerank_base_url and config.rerank_model:
         url = f"{config.rerank_base_url.rstrip('/')}/rerank"
         try:
@@ -711,7 +711,7 @@ def live_probe(config: SilicaConfig) -> CheckResult:
     (`silica doctor --live`, `silica_doctor(live=True)`); one implementation so
     the CLI and the tool cannot drift.
     """
-    if not (getattr(config, "model", "") or "").strip():
+    if not (config.model or "").strip():
         return CheckResult("live probe", "warn", "skipped — no model configured",
                            "run silica init to set one")
     from silica.model.llm import call_llm
@@ -776,7 +776,7 @@ def _pdf_lane(config: SilicaConfig) -> str:
     """
     from silica.sources.convert import PDF_PROVIDERS, resolve_pdf_provider
 
-    name = resolve_pdf_provider(getattr(config, "pdf_provider", "") or "pdfium")
+    name = resolve_pdf_provider(config.pdf_provider or "pdfium")
     if name not in PDF_PROVIDERS:
         return f"{name} — unknown provider (known: {', '.join(PDF_PROVIDERS)})"
     if name == "pdfium":
@@ -987,7 +987,7 @@ def check_session_capture(config: SilicaConfig) -> CheckResult:
     Off is a legitimate choice, so this never warns — it only says the knob
     exists, and where the memory goes when it is on.
     """
-    if getattr(config, "capture_sessions", False):
+    if config.capture_sessions:
         return CheckResult(
             "own sessions", "ok",
             "captured to the WAL; /nucleate distills them into episodic memory",

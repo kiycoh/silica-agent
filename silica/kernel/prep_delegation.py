@@ -36,7 +36,7 @@ def _vault_profiles_dir() -> Path | None:
     """<vault>/.silica/profiles/ for the active vault; None when unbound."""
     from silica.config import CONFIG
 
-    vault = (getattr(CONFIG, "vault_path", "") or "").strip()
+    vault = (CONFIG.vault_path or "").strip()
     return Path(vault) / ".silica" / "profiles" if vault else None
 
 

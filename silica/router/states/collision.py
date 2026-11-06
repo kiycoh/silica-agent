@@ -240,7 +240,7 @@ def _cold_intra_chunk_near_dup(a: tuple, b: tuple) -> bool:
     # Only compare excerpts, and only when both carry enough text to be meaningful.
     if len(ea) < 40 or len(eb) < 40:
         return False
-    thr = getattr(orch.CONFIG, "minhash_dup_threshold", 0.6)
+    from silica.kernel.report.minhash_dedup import DUP_THRESHOLD as thr
     sa, sb = minhash_signature(ea), minhash_signature(eb)
     return bool(sa and sb) and estimate_jaccard(sa, sb) >= thr
 
@@ -266,7 +266,7 @@ def _run_embedder_free_dedup_leg(fsm: "InjectorFSM", idx: int, chunk: dict) -> N
             _before - sum(len(b.get("concepts", [])) for b in chunk.get("batches", [])),
         )
 
-    threshold = getattr(orch.CONFIG, "minhash_dup_threshold", 0.6)
+    from silica.kernel.report.minhash_dedup import DUP_THRESHOLD as threshold
     try:
         corpus: dict[str, str] = {}
         # "" matches every note name → full-vault enumeration. Acceptable on this

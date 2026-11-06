@@ -93,7 +93,7 @@ def reader_for(vault: str) -> ObsidianDriver:
     from silica.config import CONFIG
 
     target = str(Path(vault).expanduser().resolve())
-    active = (getattr(CONFIG, "vault_path", "") or "").strip()
+    active = (CONFIG.vault_path or "").strip()
     if active and str(Path(active).resolve()) == target:
         return get_driver()
     with _driver_lock:

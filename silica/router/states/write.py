@@ -300,7 +300,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
             # The run-end sweep that embeds patches skips a driver with no
             # mtime_of (the ws backend) and an index_sweep turned off.
             swept = (getattr(orch.DRIVER, "mtime_of", None) is not None
-                     and getattr(orch.CONFIG, "index_sweep", True))
+                     and orch.CONFIG.index_sweep)
             if orch._refresh_embeddings_for_ops(
                 ops, committed_paths, read_body=lambda p: orch.DRIVER.read_note(p).content or "",
                 embedder=get_embedder(orch.CONFIG), store=get_store(), patches=not swept,

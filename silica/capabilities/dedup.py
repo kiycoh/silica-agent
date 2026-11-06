@@ -666,7 +666,7 @@ def _clean_twin_bundle(ctx: dict) -> None:
 def _judge_role(config: Any) -> str:
     """The dedup verdict's role: the judge model when one is configured
     (spec M7), else the worker it always ran on."""
-    return "judge" if getattr(config, "judge_model", None) else "worker"
+    return "judge" if config.judge_model else "worker"
 
 
 def _decision_of(parsed: dict) -> DedupDecision:

@@ -1226,7 +1226,7 @@ def _admit(op: Op, batch: _Batch) -> Rejection | None:
                 from silica.config import CONFIG
                 from silica.kernel.text.text import stem_word
 
-                lang = getattr(CONFIG, "cooccurrence_lang", "auto")
+                lang = CONFIG.cooccurrence_lang
                 hs = frozenset(
                     stem_word(t, lang=lang) for t in _heading_key(heading).split()
                 )
@@ -1315,7 +1315,7 @@ def validate_operations(
     # below repairs a FORGOTTEN prefix for free, but an INVENTED subtree is
     # indistinguishable from a correct one — hence the check further down.
     mirror = write_root == SAFE_WRITE_DIR
-    vault_root = (getattr(CONFIG, "vault_path", "") or "").strip()
+    vault_root = (CONFIG.vault_path or "").strip()
 
     # The run's landing folder follows the ops into the boundary. Without this
     # the rebase below moves every write into `write_root/` while target_dir
