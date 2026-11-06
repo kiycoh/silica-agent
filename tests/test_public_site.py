@@ -165,6 +165,15 @@ def test_the_drawer_keeps_what_only_a_published_body_loses():
     assert _strip_ofm_meta("<!-- 5%% -->\nreal\n%% gone %%\n") == "<!-- 5%% -->\nreal\n\n"
 
 
+def test_a_link_in_a_table_stays_a_link_in_the_md(marta, tmp_vault):
+    from silica.ui.web.public_site import build
+
+    tmp_vault.note("Memory/Table.md", "| Note | What |\n|---|---|\n| [[Spacing effect\\|the effect]] | x |\n")
+    build("memory")
+    md = (_live(marta) / "memory" / "table.md").read_text(encoding="utf-8")
+    assert "[the effect](" in md and "spacing-effect" in md
+
+
 def test_only_images_a_published_note_cites_are_copied(marta):
     from silica.ui.web.public_site import build
 
@@ -315,7 +324,7 @@ def test_two_vaults_share_the_page_and_each_lists_the_other(marta, tmp_path):
     listing = json.loads((live / "vaults.json").read_text(encoding="utf-8"))
     assert sorted(v["slug"] for v in listing) == ["courses", "memory"]
     index = (live / "index.html").read_text(encoding="utf-8")
-    assert "2 vaults" in index and "Memoria" in index and "Courses" in index
+    assert "2 wikis" in index and "Memoria" in index and "Courses" in index
 
 
 def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta):

@@ -269,7 +269,8 @@ def _md_for_reader(body: str, resolve, href_of) -> str:
     def sub(m: re.Match) -> str:
         bang, inner = m.group(1), m.group(2)
         target, _, alias = inner.partition("|")
-        target = target.split("#", 1)[0].strip()
+        # `Note\\` in a table, where the alias's bar is escaped: unresolved, the link went out as its words
+        target = target.split("#", 1)[0].strip().rstrip("\\")
         display = alias.strip() or target.rsplit("/", 1)[-1].removesuffix(".md")
         if bang and "." + target.rsplit(".", 1)[-1].lower() in _ASSET_EXTS:
             name = href_of(("asset", target))
@@ -594,8 +595,8 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
     unl = len(m["unlinked"])
     caption = (f'<span class="num">{_fmt(count["drawn"])}</span> of <span class="num">{_fmt(count["notes"])}</span> '
                f'notes drawn · <span class="num">{_fmt(count["links"])}</span> links'
-               + (f' · the <span class="num">{_fmt(unl)}</span> notes with no link are in the wiki but not in '
-                  f'the picture' if unl else ""))
+               + (f' · the <span class="num">{_fmt(unl)}</span> {"note" if unl == 1 else "notes"} with no link '
+                  f'{"is" if unl == 1 else "are"} in the wiki but not in the picture' if unl else ""))
     facts = [("Notes", f'<span class="num">{_fmt(count["notes"])}</span>'),
              ("Links", f'<span class="num">{_fmt(count["links"])}</span>'),
              ("Areas", f'<span class="num">{_fmt(count["areas"])}</span>'),
@@ -647,9 +648,10 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
 def card(e: dict, href: str, graph: str, who: bool = True) -> str:
     """One vault as a card, on a Page and in Pages: the cover the script
     prints from `graph`, the title, the line, the handle and the counts."""
+    notes, areas = e["count"]["notes"], e["count"]["areas"]
     meta = ((f'<span class="who">@{_esc(e["handle"])}</span>' if who else "")
-            + f'<span><span class="num">{_fmt(e["count"]["notes"])}</span> notes</span>'
-            f'<span data-in><span class="num">{_fmt(e["count"]["areas"])}</span> areas</span>')
+            + f'<span><span class="num">{_fmt(notes)}</span> {"note" if notes == 1 else "notes"}</span>'
+            f'<span data-in><span class="num">{_fmt(areas)}</span> {"area" if areas == 1 else "areas"}</span>')
     return (f'<a class="vcard" href="{_esc(href)}" data-graph="{_esc(graph)}" data-title="{_esc(e["title"])}"'
             f' data-line="{_esc(e["line"])}" data-who="{_esc(e["handle"])}" data-notes="{int(e["count"]["notes"])}"'
             f' data-date="{_esc(e["published"])}" data-areas="{_esc(json.dumps(e["areas"], ensure_ascii=False))}">'
@@ -700,7 +702,7 @@ def write_page(vault: Path | None = None) -> None:
             + '<main class="sheet"><section class="wrap cat" aria-labelledby="pg-h"'
             + (f' data-one="{_esc(site.vault(entries[0]["slug"], 0))}"' if len(entries) == 1 else "") + ">"
             + f'<div class="cat-head grid"><h1 id="pg-h">@{_esc(h)}</h1>'
-            f'<p>{_plural(len(entries), "vault")} · {_plural(notes, "note")}. Read one here, or save a copy into '
+            f'<p>{_plural(len(entries), "wiki")} · {_plural(notes, "note")}. Read one here, or save a copy into '
             f'your own vault: every note in the copy keeps its author\'s name.</p></div>'
             + f'<div class="cat-grid">{cards}</div></section></main>\n'
             + foot(f"Wikis @{_esc(h)} chose to publish.", _app()))

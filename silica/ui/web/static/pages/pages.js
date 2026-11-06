@@ -163,8 +163,7 @@
       <section class="view" aria-label="Map of the wiki"><canvas class="map" role="img"></canvas><canvas class="names" aria-hidden="true"></canvas>
       <div class="mb"><div class="seg" data-arr role="group" aria-label="Arrangement"><button type="button" data-v="map" aria-pressed="true">Map</button><button type="button" data-v="clusters" aria-pressed="false">Clusters</button></div>
       <span class="lab nm-seg">Names</span><div class="seg nm-seg" data-nms role="group" aria-label="Names"><button type="button" data-v="auto" aria-pressed="true">Auto</button><button type="button" data-v="off" aria-pressed="false">Off</button><button type="button" data-v="key" aria-pressed="false">Key</button><button type="button" data-v="all" aria-pressed="false">All</button></div>
-      <button type="button" class="btn-o pickb" aria-pressed="false">Choose</button></div>
-      <p class="hint" hidden>Click a note to choose it, or draw around a group. Esc ends.</p>
+      <button type="button" class="btn-o pickb" aria-pressed="false">Choose</button><p class="hint" hidden>Click a note to choose it, or draw around a group. Esc ends.</p></div>
       <div class="ctip" hidden></div><div class="ltag" hidden></div><p class="cap"></p>
       <div class="zoom"><button type="button" aria-label="Zoom in">+</button><button type="button" aria-label="Zoom out">&#8722;</button><button type="button" aria-label="Fit the map">&#9633;</button></div></section>
       <article class="drawer" tabindex="-1" hidden></article><dialog class="svc" aria-label="Save into which Silica?"></dialog>`;
@@ -684,7 +683,9 @@
       start.append(el("h2", "rh", "Start here"));
       for (const n of m.areas.slice(0, 3).map((_, i) => ranked.find((r) => r.area === i)).filter(Boolean)) sl.append(row(n));
       start.append(sl);
-      parts.push(start, areasBlock());
+      // a wiki with no link has no area to start from, and a heading over nothing
+      if (sl.children.length) parts.push(start);
+      parts.push(areasBlock());
       if (others.length) {
         const more = el("div"), ml = el("ul", "rl");
         more.append(el("h2", "rh", `Also by @${m.handle}`));
@@ -878,11 +879,11 @@
       for (const m of list) {
         m.c.hidden = false; grid.append(m.c);
         const inArea = $("[data-in]", m.c), hit = m.areas.find(([a]) => a === S.area);
-        inArea.innerHTML = S.area && hit ? `<span class="num">${fmt(hit[1])}</span> in ` : `<span class="num">${fmt(m.areas.length)}</span> areas`;
+        inArea.innerHTML = S.area && hit ? `<span class="num">${fmt(hit[1])}</span> in ` : `<span class="num">${fmt(m.areas.length)}</span> ${m.areas.length === 1 ? "area" : "areas"}`;
         if (S.area && hit) inArea.append(S.area);
       }
       const notes = list.reduce((t, m) => t + m.notes, 0);
-      count.textContent = `${list.length} ${list.length === 1 ? "wiki" : "wikis"} · ${fmt(notes)} notes`;
+      count.textContent = `${list.length} ${list.length === 1 ? "wiki" : "wikis"} · ${fmt(notes)} ${notes === 1 ? "note" : "notes"}`;
       empty.hidden = list.length > 0;
       empty.textContent = qq ? `No wiki matches "${S.q.trim()}"${S.area ? ` in ${S.area}` : ""}. Search reads titles, lines, areas and handles.`
         : `No wiki has an area called ${S.area}.`;
