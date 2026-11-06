@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from silica.model import llm
 from silica.model.limits import base_url
 from silica.model.llm import LLMResponse, openrouter_routing
-from silica.config import DEFAULT_EMBEDDING_MODEL, ensure_prefix
+from silica.config import PROVIDER_PREFIXES, DEFAULT_EMBEDDING_MODEL, ensure_prefix
 from silica.provider_table import PROVIDERS
 from silica.metrics import emit, ms_since, number, outcome_of
 
@@ -418,7 +418,7 @@ def resolve_role(role: str = "router", config: Any = None) -> tuple[str, str]:
 
     The model decides, not the provider: litellm resolves the endpoint from the
     model's prefix, so the provider field only restores a prefix the id was
-    written without. `key` is "" unless the role carries its own, which only the
+    written without, and an id with neither falls to the router. `key` is "" unless the role carries its own, which only the
     worker can (SILICA_WORKER_API_KEY); the endpoint still comes from the model.
 
     `config` is a parameter because the capability workers run on the config
@@ -434,7 +434,15 @@ def resolve_role(role: str = "router", config: Any = None) -> tuple[str, str]:
     # router fallback below is a falsiness test either way.
     model = (getattr(config, fields[0], "") or "") if fields else ""
     router_provider = getattr(config, "provider", "lmstudio") or ""
-    if not model:
+    provider = (getattr(config, fields[1], "") or "") if fields else ""
+    if role == "vision":
+        # The one role that inherits the chat's provider: hosted, a vision model
+        # is one variable (config.vision_model), and it must not need a second.
+        provider = provider or router_provider
+    # A bare id with no provider beside it names no endpoint, and litellm would
+    # refuse the call. It always meant the router here, so a config that worked
+    # keeps working; a prefixed id routes itself and runs as set.
+    if not model or (not provider and model.split("/", 1)[0] not in PROVIDER_PREFIXES):
         # litellm resolves the endpoint from the prefix, so keep it (or restore
         # it when the user wrote a bare id). Ollama in particular MUST keep it:
         # the prefix is what routes it to /api/chat with an explicit num_ctx, and
@@ -447,11 +455,6 @@ def resolve_role(role: str = "router", config: Any = None) -> tuple[str, str]:
         # (SILICA_WORKER_PROVIDER=vllm) keeps its bare id, and pinning `vllm/` in
         # front of it turns a routable model into a BadRequestError.
         return ensure_prefix(getattr(config, "model", "") or "", router_provider), ""
-    provider = getattr(config, fields[1], "") or ""  # type: ignore[index]
-    if role == "vision":
-        # The one role that inherits the chat's provider: hosted, a vision model
-        # is one variable (config.vision_model), and it must not need a second.
-        provider = provider or router_provider
     key = (getattr(config, "worker_api_key", None) or "") if role == "worker" else ""
     return ensure_prefix(model, provider), key
 

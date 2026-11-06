@@ -646,6 +646,20 @@ def test_a_role_runs_on_its_own_model_without_a_provider_beside_it():
     assert resolve_role("escalation", cfg) == ("lmstudio/chat", "")
 
 
+def test_a_bare_role_model_with_no_provider_stays_on_the_router():
+    """It names no endpoint, so litellm would refuse the call: before the role
+    resolver this config ran on the router, and it must not start failing."""
+    from types import SimpleNamespace
+
+    cfg = SimpleNamespace(provider="openrouter", model="openrouter/chat", worker_api_key="",
+                          worker_model="qwen3", worker_provider=None,
+                          judge_model="qwen3", judge_provider=None)
+    assert get_provider(cfg, role="worker").model == "openrouter/chat"
+    assert get_provider(cfg, role="judge").model == "openrouter/chat"
+    cfg.worker_provider = "vllm"  # a named provider keeps the id, as it always did
+    assert get_provider(cfg, role="worker").model == "qwen3"
+
+
 def test_the_worker_key_stays_with_the_worker_model():
     from types import SimpleNamespace
 
