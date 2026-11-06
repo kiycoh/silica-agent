@@ -89,6 +89,18 @@ def test_the_prerequisite_attached_is_the_one_held_least(monkeypatch):
     assert offer.weakest_prerequisite(NOTE) == "ML/B.md"           # then the lowest recall
 
 
+def test_the_prerequisites_are_found_in_the_map_as_it_really_is_keyed(monkeypatch):
+    """The map keeps a note's case and the join key folds it, so `.get(key_of(path))`
+    missed every note of the owner's step (18 of 18, 2026-11-06) while the test above,
+    whose fake map is keyed by key_of, passed."""
+    from silica.kernel.report import learner
+
+    monkeypatch.setattr(learner, "prerequisites_map", lambda: {"ML/Note": ["ML/A.md"]})
+    monkeypatch.setattr(learner, "view", lambda *a, **k: {})
+    assert learner.prerequisites_of("ML/Note.md") == ["ML/A.md"]
+    assert offer.weakest_prerequisite("ML/Note.md") == "ML/A.md"
+
+
 def test_a_note_carries_its_study_tools_and_a_session_its_aid():
     """NotebookLM's Studio row in Learn: each form of the note one button that
     writes its command into the chat, except the explanation of a note in a

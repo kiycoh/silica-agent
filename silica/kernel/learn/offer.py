@@ -723,7 +723,7 @@ def weakest_prerequisite(path: str) -> str | None:
     from silica.kernel.report import learner
 
     try:
-        prereqs = learner.prerequisites_map().get(learner.key_of(path), [])
+        prereqs = learner.prerequisites_of(path)
         rows = learner.view()
     except Exception:
         return None  # a store that does not read costs the attachment, never the aid

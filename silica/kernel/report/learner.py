@@ -306,6 +306,13 @@ def prerequisites_map() -> dict[str, list[str]]:
             return {}  # no readable vault either: the queue orders by gain alone, as before
 
 
+def prerequisites_of(path: str) -> list[str]:
+    """One note's prerequisites. The map keeps a note's case and `key_of` folds it,
+    so a lookup by `key_of` finds nothing on a real map."""
+    key = key_of(path)
+    return next((v for k, v in prerequisites_map().items() if key_of(k) == key), [])
+
+
 def _written_keys(vault: str) -> dict[str, list[str]]:
     """The written prerequisites (ADR-0145) in the store keyspace prerequisites_map speaks."""
     from silica.kernel.recall.cooccurrence import cooccur_key

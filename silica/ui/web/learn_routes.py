@@ -1422,7 +1422,7 @@ def _related_notes(path: str) -> list[dict]:
 
     out = []
     try:
-        for p in learner.prerequisites_map().get(learner.key_of(path), [])[:3]:
+        for p in learner.prerequisites_of(path)[:3]:
             out.append({"path": p, "why": "a prerequisite the vault names"})
     except Exception:
         pass
