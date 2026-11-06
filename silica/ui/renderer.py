@@ -8,7 +8,6 @@ import logging
 import sys
 import time
 from typing import Callable
-from urllib.parse import urlsplit
 from rich.live import Live
 from rich.padding import Padding
 from rich.spinner import Spinner
@@ -31,6 +30,7 @@ from silica.obs.events import (
 from silica.config import CONFIG
 from silica.ui.console import CONSOLE
 from silica.ui.style import GLYPHS
+from silica.ui import tool_labels
 
 logger = logging.getLogger(__name__)
 
@@ -114,172 +114,26 @@ def _head_result(text: str) -> str:
     return result
 
 
-# tool → (verb, arg key shown as the bold target). Command-form grammar: `verb "target"`.
-_TOOL_DESC: dict[str, tuple[str, str | None]] = {
-    # Two tools, two verbs. Both read "search" until 2026-08-27, and the panel
-    # then showed the same `search "boosting"` line answering `{"paths": []}`
-    # once and a page of body snippets the next — same badge, same argument,
-    # nothing on screen saying one matches titles and the other matches text.
-    "silica_search": ("search titles", "query"),
-    "silica_search_context": ("search inside", "query"),
-    "silica_read_note": ("read", "name"),
-    "silica_write_note": ("write note", "path"),
-    "silica_patch_note": ("patch note", "name"),
-    "silica_flag_note": ("flag note", "name"),
-    "silica_require": ("require", "name"),
-    "silica_record_quiz": ("record quiz", None),
-    "silica_review_queue": ("review queue", None),
-    "silica_props": ("props", "name"),
-    "silica_outline": ("outline", "name"),
-    "silica_links": ("links", "name"),
-    "silica_backlinks": ("backlinks", "name"),
-    "silica_orphans": ("orphans", None),
-    "silica_unresolved": ("unresolved links", None),
-    "silica_files": ("list files", "folder"),
-    "silica_exists": ("exists", "path"),
-    "silica_deferred_list": ("deferred list", None),
-    "silica_deferred_flush": ("deferred flush", None),
-    "silica_deferred_retry": ("deferred retry", None),
-    "silica_anneal": ("anneal", None),
-    "silica_inbox_ls": ("inbox", None),
-    "silica_recon": ("recon", "inbox_file"),
-    "silica_payload": ("payload", "recon_report_path"),
-    "silica_sanitize": ("sanitize", "distiller_output_path"),
-    "silica_validate_ops": ("validate", "ops_json_path"),
-    "silica_bulk_write": ("bulk write", "ops_json_path"),
-    "silica_lint": ("lint", "note_name"),
-    "silica_run_injector": ("injector", "inbox_file"),
-    "silica_delete": ("delete", "ref"),
-    "silica_snapshot": ("snapshot", "ops_json_path"),
-    "silica_restore": ("restore", "txn_id"),
-    "silica_cleanup": ("cleanup", "inbox_file"),
-    "web_search": ("web search", "query"),
-    "web_fetch": ("web fetch", "url"),
-    # The question the chat model handed to the web lane — it rewords the user's
-    # own, and this row is the only place that rewording is ever visible. Without
-    # it a wrong answer reads as "web search is bad" rather than "it asked
-    # something else".
-    "silica_web_answer": ("web answer", "question"),
-}
-
-# Value transforms for targets that are unreadable raw. Beside _TOOL_DESC and
-# applied by both readers below, so the next one lands in one place instead of
-# growing a third copied branch in each of two near-duplicate functions.
-_TARGET_FMT: dict[str, Callable[[str], str]] = {
-    # The host, not the URL. Live, "which sources" is a site you judge at a
-    # glance; the full URL with its title arrives at the end of the turn anyway,
-    # in the answer's own `## Sources (web)` block.
-    "web_fetch": lambda url: urlsplit(url).netloc or url,
-}
-
-
-def _connector_desc(name: str) -> tuple[str, str] | None:
-    """An MCP connector (ADR-0091) is named by its server, and its target is
-    the request it carried: one per configured server, so no table holds it."""
-    return (name[len("mcp__"):], "request") if name.startswith("mcp__") else None
-
-
-def _tool_verb(name: str) -> str:
-    verb, _ = _connector_desc(name) or _TOOL_DESC.get(
-        name, (name.removeprefix("silica_").replace("_", " "), None))
-    return verb
-
-
-def _tool_target(name: str, args: dict) -> str:
-    """The one argument that names what the tool acted on, as plain text.
-
-    Same table as `_synthetic_tool_desc`, without the rich markup, so the web
-    transcript can name the note a write touched instead of showing a bare verb.
-    """
-    if name == "silica_move":
-        return f'{args.get("ref", "")} {GLYPHS["arrow"]} {args.get("to", "")}'.strip()
-    if name == "silica_run_injector":
-        return _injector_label(args)
-    _, key = _connector_desc(name) or _TOOL_DESC.get(name, ("", None))
-    val = str(args.get(key) or "").strip() if key else ""
-    return _TARGET_FMT.get(name, str)(val) if val else ""
-
-
-def _injector_files(args: dict) -> list[str]:
-    """The inbox files of a run_injector call, plural key first.
-
-    `inbox_file` is the legacy singular; every real caller passes `inbox_files`
-    (the CLI tells the agent to, silica/cli.py). Reading only the singular is why
-    the web transcript showed a bare "injector" with no filename at all.
-    """
-    files = args.get("inbox_files")
-    files = [f for f in files if isinstance(f, str) and f.strip()] if isinstance(files, list) else []
-    single = args.get("inbox_file")
-    if isinstance(single, str) and single.strip() and single not in files:
-        files.insert(0, single)
-    return files
-
-
-def _injector_label(args: dict) -> str:
-    files = _injector_files(args)
-    if not files:
-        return ""
-    extra = f" +{len(files) - 1}" if len(files) > 1 else ""
-    return f"{files[0]}{extra}"
-
-
 def _synthetic_tool_desc(name: str, args: dict) -> str:
     """Compact command-form description; the target argument is the only bold element."""
     if name == "silica_move":
         ref, to = args.get("ref", ""), args.get("to", "")
         return f'move [bold]"{escape(str(ref))}"[/bold] {GLYPHS["arrow"]} [bold]"{escape(str(to))}"[/bold]'
     if name == "silica_run_injector":
-        label = _injector_label(args)
+        label = tool_labels.injector_label(args)
         return f'injector [bold]"{escape(label)}"[/bold]' if label else "injector"
-    verb, key = _connector_desc(name) or _TOOL_DESC.get(
+    verb, key = tool_labels.connector_desc(name) or tool_labels.TOOL_DESC.get(
         name, (name.removeprefix("silica_").replace("_", " "), None))
     val = args.get(key, "") if key else ""
     if val:
-        val = _TARGET_FMT.get(name, str)(str(val))
+        val = tool_labels.TARGET_FMT.get(name, str)(str(val))
         return f'{verb} [bold]"{escape(str(val))}"[/bold]'
     return verb
-
-
-# The injector recipe's two nested scopes, as the FSM actually runs them.
-# File-scope phases run once per inbox file; the chunk cycle re-enters at
-# COLLISION/DELEGATE for every chunk of that file (orchestrator.py) and never at
-# RECON. Splitting them is what lets a frontend reset the chunk track per chunk
-# without wrongly clearing the file track.
-#
-# Hardcoded on purpose: this can only drift from an edit to
-# recipes/injector.yaml — which tests/test_phase_track.py pins.
-_FILE_PHASES: dict[str, str] = {
-    "recon":      "recon",
-    "payload":    "payload",
-    "salience":   "salience",
-}
-
-_CHUNK_PHASES: dict[str, str] = {
-    "collision":  "collision",
-    "distill":    "distill",
-    "sanitize":   "sanitize",
-    "validate":   "validate",
-    "snapshot":   "snapshot",
-    "write":      "write",
-    "hub_update": "hub-update",
-    "autolink":   "autolink",
-    "backlink":   "backlink",
-    "lint":       "lint",
-    "cleanup":    "cleanup",
-}
-
-# rollback carries on_gate_fail in the recipe: an exception branch, not a step.
-# It is deliberately absent from _PHASE_ORDER — as the 16th entry it rendered as
-# "· rollback" pending on every healthy run, showing "everything went wrong" as
-# something about to happen. It is drawn only once it actually fires.
-_PHASE_LABELS: dict[str, str] = {**_FILE_PHASES, **_CHUNK_PHASES, "rollback": "rollback"}
 
 # Tools whose ✓ lines never collapse into `✓ verb ×N`. For these the target IS
 # the payload — `✓ web fetch ×5` throws away the five sites the answer was read
 # from, which is the whole reason the line is printed.
 _NO_AGGREGATE = frozenset({"web_search", "web_fetch"})
-
-_PHASE_ORDER: list[str] = [*_FILE_PHASES.values(), *_CHUNK_PHASES.values()]
 _MICRO_PHASE_ORDER: tuple[str, ...] = ("reading", "calling_llm", "committing")
 
 
@@ -297,12 +151,12 @@ def _stage_track(pipeline_phases: list[dict], console_width: int) -> "Text":
     start_map: dict[str, float] = {e["phase"]: e["start"] for e in pipeline_phases if e.get("start")}
 
     running_idx = next(
-        (i for i, p in enumerate(_PHASE_ORDER) if status_map.get(p) == "running"),
+        (i for i, p in enumerate(tool_labels.PHASE_ORDER) if status_map.get(p) == "running"),
         None,
     )
     if running_idx is None:
         done_indices = [
-            i for i, p in enumerate(_PHASE_ORDER)
+            i for i, p in enumerate(tool_labels.PHASE_ORDER)
             if status_map.get(p) in ("done", "failed")
         ]
         center = done_indices[-1] if done_indices else 0
@@ -310,13 +164,13 @@ def _stage_track(pipeline_phases: list[dict], console_width: int) -> "Text":
         center = running_idx
 
     start = max(0, center - 3)
-    end = min(len(_PHASE_ORDER), center + 4)
+    end = min(len(tool_labels.PHASE_ORDER), center + 4)
 
     t = Text()
     if start > 0:
         t.append("… ", style="dim")
     for i in range(start, end):
-        phase = _PHASE_ORDER[i]
+        phase = tool_labels.PHASE_ORDER[i]
         st = status_map.get(phase, "pending")
         if st == "done":
             t.append(f"✓ {phase}", style="dim")
@@ -332,7 +186,7 @@ def _stage_track(pipeline_phases: list[dict], console_width: int) -> "Text":
             t.append(f"· {phase}", style="dim")
         if i < end - 1:
             t.append("  ")
-    if end < len(_PHASE_ORDER):
+    if end < len(tool_labels.PHASE_ORDER):
         t.append("  …", style="dim")
     # Keep the track on a single line: on a narrow console the ±3 window would wrap,
     # changing the panel height between frames and tearing the Live region. Crop with
@@ -399,7 +253,7 @@ class _ProgressRenderer:
         dur_str = f" [dim]{dur}[/]" if dur else ""
         if run["count"] > 1:
             CONSOLE.print(
-                f"  [tool.ok]{GLYPHS['ok']}[/] {_tool_verb(run['name'])}"
+                f"  [tool.ok]{GLYPHS['ok']}[/] {tool_labels.tool_verb(run['name'])}"
                 f" [dim]×{run['count']}[/]{dur_str}"
             )
         else:
@@ -483,7 +337,7 @@ class _ProgressRenderer:
                 completed=min(event.file_idx, event.file_total),
                 total=event.file_total,
             )
-        label = _PHASE_LABELS.get(phase, phase)
+        label = tool_labels.PHASE_LABELS.get(phase, phase)
         if status == "running":
             now = time.monotonic()
             self._phase_start_times[phase] = now
@@ -760,7 +614,7 @@ class _ProgressRenderer:
                 self._active_tools[event.call_id] = {"name": event.name, "args": event.args}
                 if event.name == "silica_run_injector":
                     self._injector_call_id = event.call_id
-                    files = _injector_files(event.args)
+                    files = tool_labels._injector_files(event.args)
                     self._inject_file_count = max(1, len(files))
                     self._inject_inbox_label = str(files[0] if files else "?")
                     self._pipeline_phases = []

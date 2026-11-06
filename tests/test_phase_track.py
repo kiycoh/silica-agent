@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from silica.router.orchestrator import _FILE_SCOPE_PHASES
 from silica.router.recipe_parser import load_recipe
-from silica.ui.renderer import _CHUNK_PHASES, _FILE_PHASES, _PHASE_ORDER
+from silica.ui.tool_labels import CHUNK_PHASES, FILE_PHASES, PHASE_ORDER
 
 
 def _recipe_ids() -> list[str]:
@@ -21,7 +21,7 @@ def test_display_tables_cover_every_recipe_phase():
     """A phase the recipe runs but no table knows renders as a bare id at best,
     and silently vanishes from the track at worst."""
     ids = set(_recipe_ids())
-    covered = set(_FILE_PHASES) | set(_CHUNK_PHASES) | {"rollback"}
+    covered = set(FILE_PHASES) | set(CHUNK_PHASES) | {"rollback"}
     assert covered == ids, (
         f"phase tables out of sync with recipes/injector.yaml — "
         f"missing {ids - covered}, stale {covered - ids}"
@@ -31,7 +31,7 @@ def test_display_tables_cover_every_recipe_phase():
 def test_orchestrator_and_renderer_agree_on_file_scope():
     """Two tables, one meaning: the scope the FSM stamps on a PhaseEvent must be
     the scope the frontend files it under, or events land in the wrong track."""
-    assert set(_FILE_SCOPE_PHASES) == set(_FILE_PHASES)
+    assert set(_FILE_SCOPE_PHASES) == set(FILE_PHASES)
 
 
 def test_rollback_is_not_a_step():
@@ -40,11 +40,11 @@ def test_rollback_is_not_a_step():
     "everything went wrong" shown as something about to happen."""
     recipe = {p["id"]: p for p in load_recipe("injector")["phases"]}
     assert recipe["rollback"].get("on_gate_fail") is True
-    assert "rollback" not in _PHASE_ORDER
+    assert "rollback" not in PHASE_ORDER
 
 
 def test_phase_order_follows_the_recipe():
     """The track is a sequence, so its order has to be the run's order."""
     ordered = [p for p in _recipe_ids() if p != "rollback"]
-    labels = {**_FILE_PHASES, **_CHUNK_PHASES}
-    assert _PHASE_ORDER == [labels[p] for p in ordered]
+    labels = {**FILE_PHASES, **CHUNK_PHASES}
+    assert PHASE_ORDER == [labels[p] for p in ordered]

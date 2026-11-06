@@ -145,7 +145,7 @@ def test_the_verb_table_cannot_drift_from_the_renderer():
     """work.js carries its own copy of the verb table, because the narration
     payload holds the RAW tool name and the browser has no renderer. A copy that
     nothing checks is a copy that goes stale the next time a tool is added."""
-    from silica.ui.renderer import _TOOL_DESC
+    from silica.ui.tool_labels import TOOL_DESC
 
     src = WORK_JS.read_text()
     m = re.search(r"^const TOOL_VERBS = \{(.*?)^\};", src, re.S | re.M)
@@ -154,11 +154,11 @@ def test_the_verb_table_cannot_drift_from_the_renderer():
                re.findall(r'"(\w+)":\s*\["([^"]*)",\s*(?:"([^"]*)"|null)\]', m.group(1))}
     js = js_full
     assert js, "no entries parsed out of TOOL_VERBS"
-    missing = sorted(set(_TOOL_DESC) - set(js))
+    missing = sorted(set(TOOL_DESC) - set(js))
     assert not missing, f"work.js TOOL_VERBS is missing {missing}"
-    extra = sorted(set(js) - set(_TOOL_DESC))
+    extra = sorted(set(js) - set(TOOL_DESC))
     assert not extra, f"work.js TOOL_VERBS invents {extra}"
-    for name, (verb, key) in _TOOL_DESC.items():
+    for name, (verb, key) in TOOL_DESC.items():
         assert js_full[name] == (verb, key), f"{name}: {js_full[name]} != {(verb, key)}"
 
 

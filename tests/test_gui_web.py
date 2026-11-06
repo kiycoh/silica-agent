@@ -140,7 +140,7 @@ def test_tool_card_payloads_are_capped_and_say_how_much_was_cut():
 
 
 def test_injector_start_carries_the_file_and_the_tracks():
-    """Regression: _tool_target read the legacy `inbox_file` key while every real
+    """Regression: tool_target read the legacy `inbox_file` key while every real
     caller passes `inbox_files`, so a nucleate run showed a bare "injector" with
     no document name at all. The two phase tracks ride along so the client can
     draw the pipeline greyed out instead of growing it a row at a time."""
