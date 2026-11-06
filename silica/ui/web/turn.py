@@ -29,7 +29,7 @@ from silica.agent.constraints import (
 from silica.agent.loop import _EMPTY_COMPLETION, _is_tool_failure, run_agent
 from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
 from silica.config import CONFIG, demo
-from silica.kernel import vault_files
+from silica.kernel import job_records, vault_files
 from silica.kernel.graph.mindmap import note_resolver
 from silica.metrics import emit
 from silica.model.llm import meter_totals
@@ -855,7 +855,7 @@ def files_shown(files: Any) -> list[dict]:
             continue
         f = dict(f)
         if not f.get("notes") and f.get("job"):
-            rec = jobs.read(f["job"]) if jobs._ID.fullmatch(str(f["job"])) else None
+            rec = jobs.read(f["job"]) if job_records.is_id(str(f["job"])) else None
             f["notes"] = (rec or {}).get("notes") or []
         try:
             _, rest = vault_files.chat_rel(f["source"])

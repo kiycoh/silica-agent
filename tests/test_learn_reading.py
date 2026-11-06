@@ -559,13 +559,14 @@ def _until_written(c):
 
 
 def test_a_reading_job_is_a_record_the_chat_tray_never_lists_and_a_restart_interrupts(client):
+    from silica.kernel import job_records
     from silica.ui.web import jobs
 
     c = client
     assert c.post("/learn/reading/write", json={"plan": "Plans/Esame.md", "step": 0}).json()["state"] in ("running", "done")
     st = _until_written(c)
     assert st["job"]["state"] == "done" and st["job"]["path"]
-    recs = [r for r in jobs._all() if r.get("kind") == "reading"]
+    recs = [r for r in job_records.all_records() if r.get("kind") == "reading"]
     assert len(recs) == 1 and recs[0]["plan"] == "Plans/Esame.md" and recs[0]["step"] == 0
     assert c.get("/jobs").json()["jobs"] == []            # the chat's tray: what waits on the next message
     assert c.post(f"/jobs/{recs[0]['id']}/retry").status_code == 409
@@ -580,4 +581,4 @@ def test_a_reading_job_is_a_record_the_chat_tray_never_lists_and_a_restart_inter
     # Writing it again replaces the stopped record: one record a step.
     c.post("/learn/reading/write", json={"plan": "Plans/Esame.md", "step": 0})
     assert _until_written(c)["job"]["state"] == "done"
-    assert len([r for r in jobs._all() if r.get("kind") == "reading"]) == 1
+    assert len([r for r in job_records.all_records() if r.get("kind") == "reading"]) == 1

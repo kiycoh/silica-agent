@@ -22,7 +22,7 @@ marked, never dropped; an answer the next note does not hold is not shown.
 """
 from __future__ import annotations
 
-from silica.config import silica_home
+from silica.kernel import job_records
 from silica.kernel.base.syntax import NAME_UNSAFE_RE, WIKILINK_NAME_RE
 from silica.kernel.learn import store
 from silica.kernel.learn.reference import step_label
@@ -30,7 +30,6 @@ from silica.kernel.write.gate import journaled_write
 
 import hashlib
 import heapq
-import json
 import re
 import threading
 import time
@@ -897,47 +896,28 @@ def step_of_note(plan: dict, note_path: str) -> int | None:
 
 # ------------------------------------------------------------------ writing in the background
 #
-# A reading is a record in the conversions' jobs directory (ADR-0099, here
-# ADR-0135 point 1), written whole on every change: the server's startup
-# recovery turns a job a restart cut into `interrupted`, where an in-memory
-# job vanished and the page polled one that no longer existed. Kernel code
-# writes the record in the registry's format itself instead of importing the
-# web layer; the registry keeps these out of the chat's tray and its retry.
+# A reading is a record beside the conversions (`kernel/job_records`, ADR-0135
+# point 1), written whole on every change: the server's startup recovery turns
+# a job a restart cut into `interrupted`, where an in-memory job vanished and
+# the page polled one that no longer existed. The registry keeps these out of
+# the chat's tray and its retry.
 
 JOB_KIND = "reading"
 INTERRUPTED = "the server restarted while this reading was being written"
-_JOBS_LOCK = threading.Lock()
-
-
-def _jobs_dir() -> Path:
-
-    return silica_home() / "jobs"
 
 
 def _job_records(plan_path: str, step: int) -> list[dict]:
     """This vault's reading jobs for one step, oldest first."""
     from silica.config import CONFIG
 
-    vault, out = str(CONFIG.vault_path or ""), []
-    root = _jobs_dir()
-    for f in root.glob("*.json") if root.is_dir() else []:
-        try:
-            rec = json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue  # the registry's own reader skips such a file the same way
-        if (rec.get("kind") == JOB_KIND and rec.get("vault") == vault
-                and rec.get("plan") == plan_path and rec.get("step") == step):
-            out.append(rec)
-    return sorted(out, key=lambda r: r.get("created") or 0)
+    vault = str(CONFIG.vault_path or "")
+    return [r for r in job_records.all_records() if r.get("kind") == JOB_KIND and r.get("vault") == vault
+            and r.get("plan") == plan_path and r.get("step") == step]
 
 
 def _write_job(rec: dict) -> None:
-    from silica.kernel.base.durable import atomic_write_bytes
-
-    root = _jobs_dir()
-    root.mkdir(parents=True, exist_ok=True)
     rec["updated"] = time.time()
-    atomic_write_bytes(root / f"{rec['id']}.json", json.dumps(rec, sort_keys=True).encode("utf-8"), mode=0o600)
+    job_records.write(rec)
 
 
 def job_status(plan_path: str, step: int) -> dict | None:
@@ -966,12 +946,10 @@ def start(plan_path: str, step: int, ask=None) -> dict:
     """Make the reading's note and its first card in a thread; one job a step at
     a time. The job's meter counts these calls; the cards `reach` writes later are
     counted as any call is, and not on this record."""
-    import uuid
-
     from silica.model import llm
     from silica.config import CONFIG
 
-    with _JOBS_LOCK:
+    with job_records.LOCK:
         recs = _job_records(plan_path, step)
         if recs and recs[-1].get("state") == "running":
             return job_status(plan_path, step) or {}
@@ -980,9 +958,9 @@ def start(plan_path: str, step: int, ask=None) -> dict:
         # one record a step: an earlier attempt, finished or stopped, goes,
         # so a failed step never piles records up in the directory
         for old in recs:
-            (_jobs_dir() / f"{old['id']}.json").unlink(missing_ok=True)
+            job_records.path_of(old["id"]).unlink(missing_ok=True)
         now = time.time()
-        rec = {"id": uuid.uuid4().hex[:12], "kind": JOB_KIND, "origin": "learn", "plan": plan_path, "step": step,
+        rec = {"id": job_records.new_id(), "kind": JOB_KIND, "origin": "learn", "plan": plan_path, "step": step,
                "source": {"path": plan_path, "name": f"{Path(plan_path).stem}, step {step + 1}"},
                "vault": str(CONFIG.vault_path or ""), "session": None, "drop": "", "state": "running",
                "created": now, "started": now, "finished": None, "error": "", "dismissed": False,
@@ -990,7 +968,7 @@ def start(plan_path: str, step: int, ask=None) -> dict:
         _write_job(rec)
 
     def update(**fields) -> None:
-        with _JOBS_LOCK:
+        with job_records.LOCK:
             rec.update(fields)
             _write_job(rec)
 
