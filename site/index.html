@@ -271,7 +271,7 @@ tr.flat td.v { color: var(--ash); }
 .fine { font-size: var(--t-5); color: var(--ash); }
 .run p code, .dens p code, .figcap code { font: 500 max(.82em, 12px)/1 var(--mono); color: var(--frost); }
 .fine code { font: 500 max(.85em, 12px)/1 var(--mono); color: var(--frost); }
-.fine a, .run a, .facts a, .legal a { color: var(--frost); text-decoration-color: var(--accent); }
+.fine a, .run a:not(.btn), .facts a, .legal a { color: var(--frost); text-decoration-color: var(--accent); }
 
 /* your notes */
 .facts { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2rem clamp(1rem, 2.2vw, 2.25rem); }
