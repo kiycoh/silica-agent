@@ -45,7 +45,6 @@ const LR_CONF = [["certain", 90], ["pretty sure", 70], ["half unsure", 50], ["gu
 const LR_RATING = { 1: "again", 2: "hard", 3: "good", 4: "easy" };
 const LR_LEVEL = { 1: "Facts", 2: "Parts", 3: "Mechanisms", 4: "New contexts" };
 const LR_OBJ = { recall: "Recall information", explain: "Explain how and why", apply: "Apply to a case", compare: "Compare and distinguish", evaluate: "Evaluate and justify" };
-const LR_OBJ_SHORT = { recall: "recall", explain: "explain", apply: "apply", compare: "compare", evaluate: "evaluate" };
 const LR_OBJ_DESC = {
   recall: "Restate definitions, facts or steps without looking them up.",
   explain: "Make relations, mechanisms and conditions of validity explicit.",
@@ -751,7 +750,7 @@ function lrPlanRow(p, on, completed = false) {
   else if (p.by && !completed) t.appendChild(mkEl("span", "due", `by ${lrDate(p.by)}`));
   b.appendChild(t);
   if (completed) {
-    const met = Object.entries(p.met_by_objective || {}).map(([o, n]) => `${LR_OBJ_SHORT[o] || o} met on ${n} of ${p.coverage[1]} notes`);
+    const met = Object.entries(p.met_by_objective || {}).map(([o, n]) => `${o} met on ${n} of ${p.coverage[1]} notes`);
     b.appendChild(mkEl("div", "n", (p.steps ? `${p.steps_passed || 0} of ${p.steps} steps` : met.join(" · ") || `${p.coverage[1]} notes`) + ` · closed ${lrDate(p.completed)} · ${lrPlural(p.sessions, "session")}`));
     return b;
   }
@@ -945,7 +944,7 @@ function lrRenderPlanDetail(right, p) {
   if (p.next) {
     next.appendChild(mkEl("span", "v", `${p.next.step ? `step ${p.next.step}, ` : ""}${p.next.title}`));
     const bits = [];
-    if (p.objectives.length > 1) bits.push(LR_OBJ_SHORT[p.next.objective] || p.next.objective);
+    if (p.objectives.length > 1) bits.push(p.next.objective);
     if (live) bits.push("in the open session");
     if (bits.length) next.appendChild(mkEl("span", "m", " · " + bits.join(" · ")));
   } else next.appendChild(mkEl("span", "v", p.complete ? "every note met every objective" : p.gaps?.length ? "not started" : "nothing pending"));
@@ -1089,7 +1088,7 @@ function lrRenderPlanDetail(right, p) {
 function lrCompletion(p) {
   const r = p.readings;
   const box = mkEl("div", "lr-done");
-  const objs = p.objectives.map((o) => LR_OBJ_SHORT[o] || o);
+  const objs = p.objectives;
   const steps = p.steps || [];
   let say = "no note met without help yet";
   if (r.all_met) {
@@ -1159,7 +1158,7 @@ function lrPlanTree(p) {
   const th = mkEl("thead");
   const hr = mkEl("tr");
   hr.append(mkEl("th", null, "topic"), mkEl("th", "pr", "practised"));
-  for (const o of p.objectives) hr.appendChild(mkEl("th", "ob", `${LR_OBJ_SHORT[o] || o} met`));
+  for (const o of p.objectives) hr.appendChild(mkEl("th", "ob", `${o} met`));
   th.appendChild(hr);
   t.appendChild(th);
   const tb = mkEl("tbody");
@@ -1285,7 +1284,7 @@ function lrObjRow(c, { edit = null, remove = null } = {}) {
   const t = mkEl("span", "t", c.title);
   // the 9B opens 6 in 21 titles with another intention's verb (ADR-0081 §16)
   if (c.reads_as) { const a = mkEl("em", "amb"); a.append(lrMark("warn", ""), `reads as ${c.reads_as}`); t.appendChild(a); }
-  sum.append(mkEl("span", "chev"), mkEl("span", "n", c.node), mkEl("span", "i", LR_OBJ_SHORT[c.intention] || ""), t);
+  sum.append(mkEl("span", "chev"), mkEl("span", "n", c.node), mkEl("span", "i", LR_OBJ[c.intention] ? c.intention : ""), t);
   det.appendChild(sum);
   const dl = mkEl("dl", "lr-kv");
   const kv = (k, v) => { if (v) dl.append(mkEl("dt", null, k), mkEl("dd", null, v)); };
@@ -1400,7 +1399,7 @@ function lrRenderNoteDetail(right, n) {
       sec.appendChild(grid);
     }
     grid.append(mkEl("span", "i num", pt.i ? String(pt.i) : "+"), mkEl("span", "p", lrCap(pt.kind)), mkEl("span", "h", pt.line ? `line ${pt.line}` : ""),
-      mkEl("span", "k", (LR_OBJ_SHORT[pt.objective] || pt.objective) + (pt.questions > 1 ? ` · ${pt.questions} questions` : "")));
+      mkEl("span", "k", pt.objective + (pt.questions > 1 ? ` · ${pt.questions} questions` : "")));
   }
   const rest = n.points.filter((pt) => !pt.objective);
   if (rest.length) {
@@ -2378,7 +2377,7 @@ function lrGoalsSection() {
   chips.setAttribute("role", "group"); chips.setAttribute("aria-label", "what you want to be able to do");
   for (const o of Object.keys(LR_OBJ)) {
     const on = lrForm.objectives.includes(o);
-    const c = lrBtn("lr-chip" + (on ? " on" : ""), lrCap(LR_OBJ_SHORT[o]), () => {
+    const c = lrBtn("lr-chip" + (on ? " on" : ""), lrCap(o), () => {
       lrForm.objectives = on ? lrForm.objectives.filter((x) => x !== o) : Object.keys(LR_OBJ).filter((x) => x === o || lrForm.objectives.includes(x));
       lrPreviewScope();
     });
@@ -2398,12 +2397,12 @@ function lrGoalsSection() {
     const bits = [...by].map(([o, parts]) => [o, parts.length <= 2 ? lrAnd(parts.map(short)) : `${parts.length} parts`]);
     const line = mkEl("p", "lr-help");
     line.append("Nothing chosen: Silica asks ");
-    bits.forEach(([o, where], i) => { line.append(mkEl("b", null, LR_OBJ_SHORT[o] || o), ` on ${where}`); line.append(i < bits.length - 2 ? ", " : i === bits.length - 2 ? " and " : "."); });
+    bits.forEach(([o, where], i) => { line.append(mkEl("b", null, o), ` on ${where}`); line.append(i < bits.length - 2 ? ", " : i === bits.length - 2 ? " and " : "."); });
     line.append(" Pick any to ask the same on every part.");
     sec.appendChild(line);
   } else {
     const parts = p.parts || 0;
-    const names = lrForm.objectives.map((o) => LR_OBJ_SHORT[o]);
+    const names = lrForm.objectives;
     sec.appendChild(mkEl("p", "lr-help", `${lrCap(lrAnd(names))}, on each of the ${lrPlural(parts, "part")}${p.gaps?.length ? `. ${p.gaps.length > 1 ? "The gaps get" : "The gap gets"} an objective to define, never met` : ""}.`));
   }
   return sec;
@@ -3438,7 +3437,7 @@ function lrRenderReceipt(body) {
   const t3 = r.tally3;
   const npts = r.points?.length ? r.points.filter((p) => p.i).length : 0;
   const eyebrow = ["Receipt", `${lrPlural(r.items.length, "question")}${npts ? ` on ${lrPlural(npts, "key point")}` : ""}`];
-  if (r.objectives?.length) eyebrow.push(r.objectives.map((x) => LR_OBJ_SHORT[x] || x).join(", "));
+  if (r.objectives?.length) eyebrow.push(r.objectives.join(", "));
   if (r.from_ledger) eyebrow.push("rebuilt from the ledger: recorded events only");
   const again = r.from_ledger ? null : lrBtn("ghost box", `Another session on ${o.kind === "vault" ? "the vault" : o.kind === "note" ? "this note" : o.label}`,
     () => learnStartSession(o.kind === "plan" ? { plan: o.path } : o.kind === "note" ? { note: o.path } : {}));
@@ -3519,7 +3518,7 @@ function lrRenderReceipt(body) {
     for (const x of moved) {
       m.appendChild(mkEl("span", "lbl", x.path === lastPath ? "" : noteStem(x.path)));
       lastPath = x.path;
-      m.appendChild(mkEl("span", "lr-help", x.what === "hold" ? "hold, est." : x.what_label ? (LR_OBJ_SHORT[x.what] || x.what) + (x.plan ? ` (${x.plan})` : "") : x.what));
+      m.appendChild(mkEl("span", "lr-help", x.what === "hold" ? "hold, est." : x.what_label ? x.what + (x.plan ? ` (${x.plan})` : "") : x.what));
       const ft = mkEl("span", "n num", `${x.from} → `);
       ft.appendChild(mkEl("b", null, x.to));
       m.appendChild(ft);
@@ -3556,7 +3555,7 @@ function lrRenderReceipt(body) {
         }
         const name = mkEl("span", "p");
         name.append(lrMark(lrStatusMark(p.status), p.status === "met" ? "met without help" : ""), p.kind);
-        grid.append(name, mkEl("span", "k", LR_OBJ_SHORT[p.objective] || p.objective));
+        grid.append(name, mkEl("span", "k", p.objective));
       }
     }
   });
@@ -3569,7 +3568,7 @@ function lrRenderReceipt(body) {
     for (const x of r.items) {
       const tr = mkEl("tr");
       tr.appendChild(mkEl("th", null, r.note ? (x.point?.i ? `${x.point.i} · ${x.point.kind || ""}` : "relation") : x.title || noteStem(x.path)));
-      tr.appendChild(mkEl("td", null, `${LR_OBJ_SHORT[x.objective] || x.objective_label || ""} · ${x.kind}`));
+      tr.appendChild(mkEl("td", null, `${LR_OBJ[x.objective] ? x.objective : x.objective_label || ""} · ${x.kind}`));
       const st = x.status || (x.skip ? "not_scored" : x.correct ? "met" : x.correct === false ? "missed" : "open");
       const word = st === "not_scored" ? "not scored" : st === "met" || st === "assisted" ? "met" : st === "missed" ? "not met" : st === "skipped" ? "skipped" : x.answered ? "not rated" : "not answered";
       const marker = x.skip ? "source mismatch" : st === "skipped" ? "not recorded" : x.marker || "";

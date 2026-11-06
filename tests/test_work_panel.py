@@ -87,6 +87,16 @@ def _project(tmp_path, beats: list[dict]) -> dict:
     return json.loads(out.stdout)
 
 
+def test_a_new_core_beat_kind_is_decided_in_the_panel_too():
+    """narration.fold builds a span tree and projectRun builds run rows, so they
+    stay two functions, but both read one vocabulary and only this ties them: a
+    new kind in CORE_KINDS fails here until projectRun takes it or skips it."""
+    from silica.obs.narration import CORE_KINDS
+
+    handled = set(re.findall(r'if \(kind === "(\w+)"\)', _pure_block()))
+    assert handled | {"subagent", "run", "work", "compaction"} == set(CORE_KINDS)
+
+
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run work.js")
 def test_a_call_folds_into_the_thought_that_ran_it(tmp_path):
     """One row, not two. The call and the thought open and close as one span in
