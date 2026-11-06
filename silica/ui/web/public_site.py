@@ -269,7 +269,8 @@ def _md_for_reader(body: str, resolve, href_of) -> str:
     def sub(m: re.Match) -> str:
         bang, inner = m.group(1), m.group(2)
         target, _, alias = inner.partition("|")
-        target = target.split("#", 1)[0].strip()
+        # `Note\\` in a table, where the alias's bar is escaped: unresolved, the link went out as its words
+        target = target.split("#", 1)[0].strip().rstrip("\\")
         display = alias.strip() or target.rsplit("/", 1)[-1].removesuffix(".md")
         if bang and "." + target.rsplit(".", 1)[-1].lower() in _ASSET_EXTS:
             name = href_of(("asset", target))
@@ -353,7 +354,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     relay when Private (ADR-0151 points 3, 9). Returns what went out, for
     the view's line after Publish."""
     from silica.driver import DRIVER
-    from silica.kernel.recall.mindmap import note_resolver
+    from silica.kernel.recall.mindmap import answer_resolver, note_resolver
     from silica.kernel.write import frontmatter as fm
     from silica.ui.web.server import _find_asset, _linkify, _strip_ofm_meta
 
@@ -382,11 +383,16 @@ def build(slug: str, vault: Path | None = None) -> dict:
     lang = _LANGS.get(_language().strip().lower(), "")
 
     base_resolve = note_resolver()
+    # A name two notes share is the one going out, as an answer's is the one it read (ADR-0114):
+    # the first by path went out as words, so saving a note named like your own unlinked yours.
+    shared_resolve, _read = answer_resolver(public)
 
     def resolve(ref: str) -> str:
         # "" and not None: the renderer then writes the words with no
         # "broken" mark, which would say that a note stands behind them.
         hit = base_resolve(ref)
+        if hit not in on:
+            hit = shared_resolve(ref)
         return hit if hit in on else ""
 
     root = publish.site_root(h)
@@ -441,7 +447,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
         # body, and only _linkify stripped comments, so a `%% remark %%` the page hid went
         # out in the `.md` and into the room's text search, and hidden text reached the
         # vault of whoever saved the note.
-        body = rights.place_images(_drop_title_heading(_strip_ofm_meta(body, html_comments=True), titles[p]), plan)
+        body = rights.place_images(_drop_title_heading(_strip_ofm_meta(body, published=True), titles[p]), plan)
         page_html = _linkify(body, resolve, remote_images=False)
         targets = set(_ANCHOR.findall(page_html))
         edges.update((p, html.unescape(t)) for t in targets if html.unescape(t) in on)
@@ -594,8 +600,8 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
     unl = len(m["unlinked"])
     caption = (f'<span class="num">{_fmt(count["drawn"])}</span> of <span class="num">{_fmt(count["notes"])}</span> '
                f'notes drawn · <span class="num">{_fmt(count["links"])}</span> links'
-               + (f' · the <span class="num">{_fmt(unl)}</span> notes with no link are in the wiki but not in '
-                  f'the picture' if unl else ""))
+               + (f' · the <span class="num">{_fmt(unl)}</span> {"note" if unl == 1 else "notes"} with no link '
+                  f'{"is" if unl == 1 else "are"} in the wiki but not in the picture' if unl else ""))
     facts = [("Notes", f'<span class="num">{_fmt(count["notes"])}</span>'),
              ("Links", f'<span class="num">{_fmt(count["links"])}</span>'),
              ("Areas", f'<span class="num">{_fmt(count["areas"])}</span>'),
@@ -647,9 +653,10 @@ def _vault_page(m: dict, c: dict, site: _Site, h: str, lang: str) -> str:
 def card(e: dict, href: str, graph: str, who: bool = True) -> str:
     """One vault as a card, on a Page and in Pages: the cover the script
     prints from `graph`, the title, the line, the handle and the counts."""
+    notes, areas = e["count"]["notes"], e["count"]["areas"]
     meta = ((f'<span class="who">@{_esc(e["handle"])}</span>' if who else "")
-            + f'<span><span class="num">{_fmt(e["count"]["notes"])}</span> notes</span>'
-            f'<span data-in><span class="num">{_fmt(e["count"]["areas"])}</span> areas</span>')
+            + f'<span><span class="num">{_fmt(notes)}</span> {"note" if notes == 1 else "notes"}</span>'
+            f'<span data-in><span class="num">{_fmt(areas)}</span> {"area" if areas == 1 else "areas"}</span>')
     return (f'<a class="vcard" href="{_esc(href)}" data-graph="{_esc(graph)}" data-title="{_esc(e["title"])}"'
             f' data-line="{_esc(e["line"])}" data-who="{_esc(e["handle"])}" data-notes="{int(e["count"]["notes"])}"'
             f' data-date="{_esc(e["published"])}" data-areas="{_esc(json.dumps(e["areas"], ensure_ascii=False))}">'

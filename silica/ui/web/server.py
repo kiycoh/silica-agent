@@ -49,6 +49,7 @@ from silica.agent.recall_watch import (
     unfounded_in_turn,
 )
 from silica.config import CONFIG, demo
+from silica.kernel.link.ast import strip_ofm_meta as _strip_ofm_meta
 from silica.kernel.recall.mindmap import answer_resolver, note_resolver
 from silica.metrics import emit
 from silica.kernel.write import session_changes
@@ -375,16 +376,6 @@ _ASSET_HEADERS = {
 # --- OFM (Obsidian-flavored markdown) sugar ----------------------------------
 # ==highlight== | #tag (letter-first, so #123 and hex colors stay literal)
 _MARK_OR_TAG = re.compile(r"==([^=\n]+)==|(?<![\w#])#([A-Za-z_][\w/-]*)")
-_COMMENT = re.compile(r"%%.*?%%", re.S)
-# To the end when unterminated: markdown-it's html_block runs there too, so a page
-# hides that text as well, and it must not ride out in a published note's `.md`.
-_HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
-_BLOCK_ID = re.compile(r"[ \t]+\^[\w-]+[ \t]*$", re.M)
-_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")
-# Inline code span: a backtick run closed by an equal-length run. Parked
-# before the %%/^ subs so span contents read as code, not markup.
-_CODE_SPAN = re.compile(r"(`+)[\s\S]*?\1")
-_PARKED = re.compile(r"\x00(\d+)\x00")
 _CALLOUT_HEAD = re.compile(r"\[!(\w+)\][+-]?[ \t]*(.*)")  # first line of a callout quote
 _TASK_HEAD = re.compile(r"^\[([ xX])\][ \t]+")  # first inline text of a task list item
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.S)
@@ -874,52 +865,6 @@ def _highlight(code: str, lang: str, _attrs: str) -> str:
     except Exception:  # no/unknown language — markdown-it escapes it plain
         return ""
     return highlight(code, lexer, HtmlFormatter(nowrap=True))
-
-
-# Inline spans are parked as \x00 sentinels for the length of the sub, the
-# same trick mdLite plays client-side; pathological nested backtick runs can
-# still fool the span regex, which costs a stripped %% inside them, cosmetic.
-def _strip_ofm_meta(text: str, html_comments: bool = False) -> str:
-    """Strip %%comments%% and trailing ^block-ids, sparing fenced code and
-    inline `code spans` where %% and ^ are code (a lone %% in a fence would
-    otherwise pair with a prose %% and swallow everything between).
-    `html_comments` is for text that leaves as Markdown: the renderer's
-    allowlist drops `<!-- -->` from HTML, and nothing drops it from a `.md`."""
-    pieces: list[str] = []
-    run: list[str] = []
-    fence: tuple[str, int] | None = None  # (marker char, marker length)
-
-    def _flush() -> None:
-        if run:
-            spans: list[str] = []
-
-            def _park(m: "re.Match[str]") -> str:
-                spans.append(m.group(0))
-                return f"\x00{len(spans) - 1}\x00"
-
-            parked = _CODE_SPAN.sub(_park, "\n".join(run))
-            cleaned = _BLOCK_ID.sub("", _COMMENT.sub("", parked))
-            if html_comments:
-                cleaned = _HTML_COMMENT.sub("", cleaned)
-            pieces.append(
-                _PARKED.sub(lambda m: spans[int(m.group(1))], cleaned))
-            run.clear()
-
-    for line in text.split("\n"):
-        m = _FENCE.match(line)
-        if fence is None:
-            if m:
-                _flush()
-                fence = (m.group(1)[0], len(m.group(1)))
-                pieces.append(line)
-            else:
-                run.append(line)
-        else:
-            pieces.append(line)
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1]:
-                fence = None
-    _flush()
-    return "\n".join(pieces)
 
 
 def _is_own_image(src: str) -> bool:

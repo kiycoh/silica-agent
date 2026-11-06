@@ -296,10 +296,14 @@ details > summary::-webkit-details-marker { display: none; }
 .pickb { height: 30px; min-height: 30px; background: var(--slate); }
 .pickb[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-vivid); }
 .pickb[aria-pressed="true"]:hover { color: var(--on-vivid); }
-.hint { position: absolute; left: 14px; top: 46px; z-index: 2; padding: 2px 8px; border-radius: var(--r-xs); background: var(--void); font-size: 12.5px; color: var(--frost); }
-.cap { position: absolute; left: 14px; bottom: 8px; font-size: 12px; color: var(--ash-dim); background: var(--void); padding: 1px 6px; border-radius: var(--r-xs); }
+/* under the toolbar however it wraps, and never between a pointer and the note beneath */
+.hint { position: absolute; left: 4px; top: calc(100% + 5px); width: max-content; max-width: calc(100vw - 48px); padding: 2px 8px; border-radius: var(--r-xs); background: var(--void); font-size: 12.5px; color: var(--frost); pointer-events: none; }
+.cap { position: absolute; left: 14px; bottom: 8px; font-size: 12px; color: var(--ash-dim); background: var(--void); padding: 1px 6px; border-radius: var(--r-xs); pointer-events: none; }
 .zoom { position: absolute; right: 10px; bottom: 10px; display: grid; gap: 4px; z-index: 2; transition: right var(--dur) var(--ease); }
 .has-note .zoom { right: calc(var(--dw) + 22px); }
+/* wraps beside the drawer, which took Choose under it at 1,200 px and All at 1,000 */
+.has-note .mb { right: calc(var(--dw) + 22px); }
+.has-note .hint { width: auto; right: 0; }
 .zoom button { width: 32px; height: 32px; padding: 0; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--slate); color: var(--ash); cursor: pointer; font-size: 15px; }
 .zoom button:hover { color: var(--accent); border-color: var(--accent); }
 .view .ctip { z-index: 3; }
@@ -353,6 +357,7 @@ dialog.svc::backdrop { background: rgb(13 14 15 / .45); }
   .rl input[type=checkbox] { width: 20px; height: 20px; }
   .mb .lab, .mb .nm-seg { display: none; }
   .has-note .zoom { right: 10px; }
+  .has-note .mb { right: auto; }
   .drawer { --pad: 18px; position: fixed; top: 9%; left: 0; right: 0; bottom: 0; width: auto; border-radius: var(--r) var(--r) 0 0; overscroll-behavior: contain; }
 }
 @media (max-width: 900px) {

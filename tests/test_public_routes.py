@@ -462,6 +462,17 @@ def test_the_area_a_page_sends_beside_notes_takes_nothing_so_an_old_silica_offer
     assert both["notes"] == 1
 
 
+def test_a_link_in_a_table_row_escapes_its_bar_and_one_in_prose_does_not():
+    from silica.sources.saved_page import _MD_LINK, _wikilink
+
+    def write(text):
+        return _MD_LINK.sub(lambda m: _wikilink(m, "Saved/@a/W/Hub", m.group(1)), text)
+
+    assert write("| [hub](https://x/y) | a |") == "| [[Saved/@a/W/Hub\\|hub]] | a |"
+    assert write("  | a | [hub](https://x/y) |") == "  | a | [[Saved/@a/W/Hub\\|hub]] |"
+    assert write("one\nsee [hub](https://x/y) | not a row") == "one\nsee [[Saved/@a/W/Hub|hub]] | not a row"
+
+
 def test_a_vault_save_past_the_room_left_is_refused_naming_the_shortfall(client, vault_fetched, monkeypatch):
     tc, tmp = client
     monkeypatch.setenv("SILICA_VAULT_MAX_NOTES", "4")
