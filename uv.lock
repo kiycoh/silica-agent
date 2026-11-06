@@ -3646,6 +3646,7 @@ all = [
     { name = "latex2mathml" },
     { name = "mcp" },
     { name = "mdit-py-plugins" },
+    { name = "onnxruntime" },
     { name = "python-multipart" },
     { name = "sentence-transformers" },
     { name = "uvicorn" },
@@ -3681,6 +3682,9 @@ rerank = [
 stt = [
     { name = "faster-whisper" },
 ]
+tables = [
+    { name = "onnxruntime" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -3700,6 +3704,7 @@ requires-dist = [
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "networkx", specifier = ">=3" },
     { name = "numpy", specifier = ">=2.4.6" },
+    { name = "onnxruntime", marker = "extra == 'tables'", specifier = ">=1.20" },
     { name = "openai" },
     { name = "openpyxl", specifier = ">=3.1" },
     { name = "orjson" },
@@ -3715,7 +3720,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16" },
     { name = "scipy", marker = "extra == 'dev'", specifier = ">=1.17.1" },
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=3.0" },
-    { name = "silica-agent", extras = ["connect", "connectors", "gui", "mcp", "rerank", "stt"], marker = "extra == 'all'" },
+    { name = "silica-agent", extras = ["connect", "connectors", "gui", "mcp", "rerank", "stt", "tables"], marker = "extra == 'all'" },
     { name = "silica-core", specifier = ">=0.12.0" },
     { name = "snowballstemmer" },
     { name = "stop-words", specifier = ">=2025.11.4" },
@@ -3727,7 +3732,7 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'connect'", specifier = ">=16.0" },
     { name = "xlrd", specifier = ">=2.0" },
 ]
-provides-extras = ["gui", "dev", "connect", "mcp", "connectors", "rerank", "stt", "all"]
+provides-extras = ["gui", "dev", "connect", "mcp", "connectors", "rerank", "stt", "tables", "all"]
 
 [[package]]
 name = "silica-core"

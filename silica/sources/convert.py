@@ -937,7 +937,9 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
     read the same way, and its reading stands in for its text below the
     headings (the amendment of 2026-10-14); unread, it keeps its text. With
     `pdf_extract.every_page()`, the server's setting, every page with text is
-    read so (the amendment of 2026-11-01). Figures are not extracted (the images dir comes back empty): PDFium exposes image objects, but
+    read so (the amendment of 2026-11-01). On this machine, with the [tables]
+    extra and `SILICA_PDF_TABLES=1`, a table on a page whose text stands is rewritten as a table from its
+    own characters (`pdf_tables`, the amendment of 2026-11-06). Figures are not extracted (the images dir comes back empty): PDFium exposes image objects, but
     turning them into files needs Pillow, which the base install does not carry;
     mineru (installed separately) is the path for a document whose figures are
     the point. The file itself is opened only in `pdf_extract`, in a child with
@@ -950,7 +952,7 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
             "pypdfium2 not installed — `pip install 'pypdfium2>=5'`, "
             "or set SILICA_PDF_PROVIDER to mineru/docling/opendataloader"
         ) from None
-    from silica.sources import pdf_extract
+    from silica.sources import pdf_extract, pdf_tables
 
     data = pdf_extract.read(src)
     _read_pages(data, workdir, draw=lambda pages: pdf_extract.page_pngs(src, pages))
@@ -961,7 +963,8 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
         after[i] = f"> [page {i + 1}: no selectable text, not read]"
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)
-    return _pdf_markdown(data["pages"], data["toc"], after, set(data["math_read"])), images
+    pages = pdf_tables.stitched(src, data)
+    return _pdf_markdown(pages, data["toc"], after, set(data["math_read"])), images
 
 
 def _no_text_sentence(ocr_provider: bool = False) -> str:

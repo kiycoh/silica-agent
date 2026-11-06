@@ -149,6 +149,13 @@ rerank = ["sentence-transformers>=3.0"]
 # Downloads ~480 MB of weights on first use; SILICA_STT_BASE_URL still wins when
 # a server answers there.
 stt = ["faster-whisper>=1.2"]
+# Opt-in table reading for the PDFium provider (ADR-0087 amendment 2026-11-06):
+# a layout model boxes each table and the chat model rewrites the characters
+# inside it, which PDFium's text keeps as words without rows or columns.
+# onnxruntime and not torch; with SILICA_PDF_TABLES=1, downloads ~76 MB of weights
+# on the first PDF. Local only: sources/pdf_tables.py is a no-op on hosted,
+# installed there or not.
+tables = ["onnxruntime>=1.20"]
 # There is no [pdf] extra. It was removed on 2026-09-02: it installed the mineru
 # CLI, which nothing here imports — sources/convert.py shells out to it, exactly
 # as it shells out to soffice, ffmpeg and whisper-cli, none of which we install
@@ -159,8 +166,9 @@ stt = ["faster-whisper>=1.2"]
 # says whether it is on PATH. See SILICA_PDF_PROVIDER and ADR-0011.
 # Everything except [dev]. Self-referential extra: pip resolves it back to this
 # same project. Note it inherits [rerank], so it pulls torch and downloads
-# ~2 GB of weights on first rerank, and [stt], ~480 MB on first dictation.
-all = ["silica-agent[gui,connect,mcp,connectors,rerank,stt]"]
+# ~2 GB of weights on first rerank, [stt], ~480 MB on first dictation, and
+# [tables], ~76 MB on the first PDF converted.
+all = ["silica-agent[gui,connect,mcp,connectors,rerank,stt,tables]"]
 
 [project.scripts]
 silica = "silica.entry:main"
@@ -384,5 +392,7 @@ module = [
     # The [stt] extra, the same case: ci.yml syncs without it, and the wheel
     # ships no py.typed, so mypy failed exactly where the extra was installed.
     "faster_whisper", "faster_whisper.*",
+    # The [tables] extra, the same case again.
+    "onnxruntime", "onnxruntime.*",
 ]
 ignore_missing_imports = true
