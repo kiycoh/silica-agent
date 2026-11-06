@@ -296,7 +296,7 @@ def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta):
         assert mode & 0o004, (p, oct(mode))
 
 
-def test_the_catalog_lists_only_listed_vaults_under_the_handle_the_host_gave(marta, monkeypatch, tmp_path):
+def test_the_catalog_lists_only_what_the_host_approved_under_the_handle_it_gave(marta, monkeypatch, tmp_path):
     import json
 
     from silica.ui.web import pages_catalog
@@ -312,22 +312,29 @@ def test_the_catalog_lists_only_listed_vaults_under_the_handle_the_host_gave(mar
     tsv = tmp_path / "handles.tsv"
     tsv.write_text("marta\tt01\n", encoding="utf-8")
     out = tmp_path / "pages"
-    assert pages_catalog.write(host, tsv, out, "https://app.test") == 0
+    wikis = tmp_path / "wikis.tsv"
+    assert pages_catalog.write(host, tsv, wikis, out, "https://app.test") == 0
     m = host / "t01" / "marta" / "live" / "memory" / "vault.json"
     m.write_text(m.read_text(encoding="utf-8").replace('"listed":false', '"listed":true'), encoding="utf-8")
+    # a manifest's `listed` is its author's request (ADR-0153 point 7): alone it lists nothing
+    assert pages_catalog.write(host, tsv, wikis, out, "https://app.test") == 0
+    wikis.write_text("t01\tmemory\tabc\t2026-11-06\n", encoding="utf-8")
     # an account that wrote a manifest under a handle it does not hold is not listed
     (host / "t02" / "kiycoh" / "live" / "x").mkdir(parents=True)
     (host / "t02" / "kiycoh" / "live" / "x" / "vault.json").write_text(
         json.dumps({"listed": True, "title": "Fake", "handle": "kiycoh"}), encoding="utf-8")
     tsv.write_text("marta\tt01\nkiycoh\tt03\n", encoding="utf-8")
-    assert pages_catalog.write(host, tsv, out, "https://app.test") == 1
+    assert pages_catalog.write(host, tsv, wikis, out, "https://app.test") == 1
     index = (out / "index.html").read_text(encoding="utf-8")
     assert 'href="/@marta/memory/"' in index and "Memoria" in index and "Fake" not in index
     assert (out / "_s" / "pages.js").is_file() and (out / "_s" / "archivo-latin.woff2").is_file()
     # a hostile title is text, never markup
     m.write_text(m.read_text(encoding="utf-8").replace('"Memoria"', '"<script>x</script>"'), encoding="utf-8")
-    pages_catalog.write(host, tsv, out, "https://app.test")
+    pages_catalog.write(host, tsv, wikis, out, "https://app.test")
     assert "<script>x" not in (out / "index.html").read_text(encoding="utf-8")
+    # an approved wiki its author took back asks for nothing, so the host's row alone lists nothing
+    m.write_text(m.read_text(encoding="utf-8").replace('"listed":true', '"listed":false'), encoding="utf-8")
+    assert pages_catalog.write(host, tsv, wikis, out, "https://app.test") == 0
 
 
 def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(marta, tmp_vault):

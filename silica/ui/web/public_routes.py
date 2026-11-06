@@ -92,6 +92,7 @@ def _view() -> dict:
     page_url = publish.page_url(vault)
     out_paths = {p for p, s in notes.items() if s == "on"}
     deg = _degrees(out_paths)
+    reviews = publish.host_reviews()
     vaults = []
     for v in sel["vaults"]:
         mine = [p for p in out_paths if of.get(p) == v["slug"]]
@@ -106,6 +107,8 @@ def _view() -> dict:
             "struck": sum(1 for p, s in notes.items() if s == "struck" and of.get(p) == v["slug"]),
             "new": sum(1 for p in mine if before and p not in before),
             "published_at": last.get(v["slug"], {}).get("published_at", ""),
+            "review": reviews.get(v["slug"], {}),
+            "blocked": last.get(v["slug"], {}).get("blocked", []) if v["visibility"] == "public" else [],
         })
     return {
         "available": publish.available(vault),

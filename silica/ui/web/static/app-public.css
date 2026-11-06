@@ -636,7 +636,12 @@ body.drawer-recall #public-bar {
 .pg-lic select:focus { color: var(--accent); text-decoration-color: var(--accent); outline: none; }
 .pg-lic select:focus-visible { outline: 1px solid var(--accent); }
 
-.pg-lst { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-ctl); color: var(--ash); margin-right: 6px; }
+.lst-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: var(--fs-ctl); color: var(--text); }
+.lst-row p { flex: 1 1 22rem; margin: 0; }
+.lst-say { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: var(--fs-ctl); line-height: 1.5; }
+.lst-say dt { color: var(--ash-dim); }
+.lst-say dd { margin: 0; color: var(--frost); }
+@container (max-width: 420px) { .lst-say { grid-template-columns: minmax(0, 1fr); } .lst-say dd { margin-bottom: 4px; } }
 
 /* Off, Public, Private and Listed: the calendar's segment */
 .pg-seg {
@@ -883,7 +888,7 @@ label.pre-note { cursor: pointer; }
   .pre-row .pg-seg button { justify-content: flex-start; min-height: 44px; }
 }
 @media (pointer: coarse) {
-  .pre-link, .pre-row button.ct { min-height: 44px; }
+  .pre-link, .pre-row button.ct, .lst-row .st-btn { min-height: 44px; }
   .pre-note { min-height: 44px; }
   .pre-note input { width: 20px; height: 20px; }
   .pre-th input { width: 24px; height: 24px; }

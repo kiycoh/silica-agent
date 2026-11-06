@@ -668,12 +668,6 @@ function renderPublic(fresh) {
   title.addEventListener("change", () => save("title", title));
   title.addEventListener("keydown", (e) => { if (e.key === "Enter") title.blur(); });
   const ctl = mkEl("div", "pg-ctl");
-  if (v.visibility === "public" && st.url) {
-    const lst = mkEl("span", "pg-lst");
-    lst.append(mkEl("span", "", "Listed in Pages"), pgSeg("Listed in Pages", [["off", "Off"], ["on", "On"]], v.listed ? "on" : "off",
-      (x) => pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { listed: x === "on" })));
-    ctl.append(lst);
-  }
   const lock = st.private === "ok" ? null : mkEl("span", "pg-lock");
   if (lock) lock.innerHTML = pubSvg(12, false, true);
   ctl.append(pgSeg("Who can read this wiki", [["off", "Off"], ["public", "Public"], ["private", "Private", lock]], v.visibility, (x) => {
@@ -720,6 +714,7 @@ function renderPublic(fresh) {
   if (st.outside) notes.push(`${pubCount(st.outside)} with publish: true outside every wiki stay in your vault`);
   if (notes.length) goes.append(mkEl("p", "pp-dim", notes.join(" · ")));
   grid.append(goes);
+  if (v.visibility === "public" && st.url) grid.append(listingBox(v));
   if (v.visibility === "private") grid.append(readersBox(v));
   grid.append(invitesBox(false));
   frag.append(grid);
@@ -729,7 +724,7 @@ function renderPublic(fresh) {
   go.type = "button";
   go.disabled = !v.out;
   go.addEventListener("click", () => startPublish(v, go));
-  row.append(go, mkEl("span", "pp-dim", v.visibility === "private"
+  row.append(go, mkEl("span", "pp-dim", inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
     ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
     : "Readers see the wiki as it is when you publish; a note written later in its folder goes out the next time."));
   if (v.visibility === "off") {
@@ -751,6 +746,43 @@ function renderPublic(fresh) {
   }
   if (fresh || pubCoverOf !== v.slug || (pubCover && pubCover.n.length + (pubCover.unlinked || 0) !== v.out)) loadPubCover(v.slug, !!fresh);
   else drawPubCover();
+}
+
+// --- the listing (ADR-0153 points 7, 8 and 13) -------------------------------------
+// `v.listed` is the author's request; `v.review` is the host's record of what became of it. The
+// host answers within a minute, so a request it has not read yet already reads as waiting.
+const LEAVES_WIKIS = "Publishing takes this wiki out of Wikis until it is reviewed again.";
+const inWikis = (v) => v.listed && v.review.state === "in";
+
+function listingRow(text, label, listed, v) {
+  const row = mkEl("div", "lst-row");
+  row.append(mkEl("p", "", text));
+  if (label) {
+    const b = mkEl("button", "st-btn", label);
+    b.type = "button";
+    b.addEventListener("click", () => pubPost(`/public/vault/${encodeURIComponent(v.slug)}`, { listed }));
+    row.append(b);
+  }
+  return row;
+}
+
+function listingNotice(r) {
+  const dl = mkEl("dl", "lst-say");
+  for (const [k, t] of [["Rule", r.rule], ["What was seen", r.seen], ["How it began", r.began],
+    ["Automated tools", r.tools], ["What you can do", r.remedy]]) dl.append(mkEl("dt", "", k), mkEl("dd", "", t));
+  return dl;
+}
+
+function listingBox(v) {
+  const r = v.review;
+  const since = r.since ? ` since ${pubDay(r.since)}` : "";
+  const box = (status, body) => { const b = ppBox("In Wikis", status, { wide: true }); b.append(body); return b; };
+  if (v.blocked.length) return box("Not listed", listingRow(v.blocked.join(" ")));
+  if (!v.listed) return box("Not listed", listingRow("Your wiki is reviewed before it enters Wikis. Until then it is reachable at its address and search engines leave it alone.", "Ask to list", true, v));
+  if (r.state === "in") return box("Listed", listingRow(`In Wikis${since}. A Publish takes it out until it is reviewed again.`, "Leave Wikis", false, v));
+  if (r.state === "out") return box("Changed", listingRow("Out of Wikis: it was published again after its review. It is waiting for review again, and it stays public at its address."));
+  if (r.state === "no") return box("Refused", listingNotice(r));
+  return box("Waiting", listingRow(`Waiting for review${since}. Your wiki stays public at its address meanwhile.`, "Withdraw", false, v));
 }
 
 // --- the check before Publish (ADR-0153 points 9, 20 and 26) -----------------------
@@ -1070,7 +1102,8 @@ function checkSheet(v) {
   const links = c.count.links ? ` ${prePlural(c.count.links, "image")} ${c.count.links === 1 ? "stays a link" : "stay links"}.` : "";
   line.append(mkEl("span", "q", `Not published: ${prePlural(c.count.stay, "note")}, ${prePlural(c.count.kept, "image")}.${links}`));
   sum.append(line);
-  if (c.wikis) sum.append(mkEl("p", "pp-dim", c.wikis));
+  const wikis = inWikis(v) ? LEAVES_WIKIS : c.wikis;
+  if (wikis) sum.append(mkEl("p", "pp-dim", wikis));
   const go = mkEl("button", "pp-go", `${v.visibility === "off" ? "Turn on and publish" : "Publish"} ${prePlural(c.count.notes, "note")}`);
   go.type = "button";
   go.disabled = !c.count.notes;

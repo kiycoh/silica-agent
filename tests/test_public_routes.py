@@ -81,6 +81,42 @@ def test_listed_reaches_the_published_manifest_at_once(client):
     assert m["listed"] is True
 
 
+def test_the_view_says_what_the_host_said_of_each_wiki(client, monkeypatch):
+    """`listed` is the author's request; what became of it is the host's (ADR-0153 point 7)."""
+    import json
+
+    tc, tmp = client
+    tc.post("/public/vault", json={"folder": "Memory"})
+    assert tc.get("/public").json()["vaults"][0]["review"] == {}
+    host = tmp / "host"
+    host.mkdir()
+    (host / "handle.json").write_text('{"handle": "marta"}', encoding="utf-8")
+    monkeypatch.setenv("SILICA_HOST_DIR", str(host))
+    assert tc.get("/public").json()["vaults"][0]["review"] == {}
+    said = {"state": "no", "since": "2026-11-06", "rule": "Rule 2: Name your sources.", "seen": "Copied text."}
+    (host / "wikis.json").write_text(json.dumps({"memory": said, "other": {"state": "in"}}), encoding="utf-8")
+    assert tc.get("/public").json()["vaults"][0]["review"] == said
+    (host / "wikis.json").write_text("half a file", encoding="utf-8")
+    assert tc.get("/public").json()["vaults"][0]["review"] == {}
+
+
+def test_a_blocked_wiki_says_why_and_a_request_does_not_reach_its_manifest(client):
+    import json
+
+    tc, tmp = client
+    tc.post("/public/vault", json={"folder": "Memory"})
+    assert tc.get("/public").json()["vaults"][0]["blocked"] == []
+    tc.post("/public/publish", json={"vault": "memory"})
+    v = tc.post("/public/vault/memory", json={"listed": True}).json()["vaults"][0]
+    assert "license" in v["blocked"][0]
+    m = json.loads((tmp / "public" / "marta" / "live" / "memory" / "vault.json").read_text(encoding="utf-8"))
+    # the manifest is public: the reasons are the author's, and one names a note with personal data
+    assert m["listed"] is False and m["blocked"] is True
+    tc.post("/public/vault/memory", json={"license": "CC BY 4.0"})
+    tc.post("/public/publish", json={"vault": "memory"})
+    assert tc.get("/public").json()["vaults"][0]["blocked"] == []
+
+
 def test_the_cover_is_the_graph_of_what_goes_out_and_nothing_private(client):
     """The view's cover (ADR-0146 point 4): the notes that go out, the links between them, laid
     out once; a private note it links to is neither a mark nor a line."""

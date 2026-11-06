@@ -458,11 +458,11 @@ def build(slug: str, vault: Path | None = None) -> dict:
     c = cover(shown, pairs, titles)
     today = datetime.date.today().isoformat()
     stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
-    blocked = bool(rights.blocks(wiki, said, plan))
+    blocked = rights.blocks(wiki, said, plan)
     manifest = {
         "v": 1, "handle": h, "slug": slug, "title": conf["title"], "line": conf["line"],
         "license": conf["license"], "published": today, "listed": conf["listed"] and not private and not blocked,
-        "blocked": blocked, "rights": rights.statement(wiki, said, plan, slugs),
+        "blocked": bool(blocked), "rights": rights.statement(wiki, said, plan, slugs),
         "url": vurl,
         "count": {"notes": len(shown), "links": len(pairs), "drawn": len(c["n"]), "areas": len(c["areas"])},
         "areas": c["areas"],
@@ -510,7 +510,9 @@ def build(slug: str, vault: Path | None = None) -> dict:
         shutil.rmtree(root / "paused" / slug, ignore_errors=True)
     _mark_published(slug, today, vault)
     state = last_published(h) or {"vaults": {}}
-    state["vaults"][slug] = {"published_at": stamp, "notes": shown}
+    # The reasons stay here, for the author: the manifest is public, and one of them says a note
+    # holds someone's personal data.
+    state["vaults"][slug] = {"published_at": stamp, "notes": shown, "blocked": blocked}
     (root / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
     write_page(vault)
     return {"vault": slug, "notes": len(shown), "links": len(pairs),
@@ -713,8 +715,8 @@ def write_page(vault: Path | None = None) -> None:
 
 
 def set_listed(slug: str, listed: bool, vault: Path | None = None) -> None:
-    """"Listed in Pages" reaches the published manifest at once, since the
-    catalog reads only that; the rest of the vault waits for Publish."""
+    """Ask to list reaches the published manifest at once, since the host reads
+    the request there; the rest of the vault waits for Publish."""
     vault = vault or publish._vault()
     h = publish.handle(vault)
     path = publish.site_root(h) / "live" / slug / "vault.json" if h else None

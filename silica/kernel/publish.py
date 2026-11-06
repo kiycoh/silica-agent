@@ -99,21 +99,31 @@ def _host_dir() -> Path | None:
     return Path(raw) if raw else None
 
 
-def _host_answer() -> dict:
-    """The host's handle.json: {"handle": h} once the account has one,
-    {"asked": h, "refused": "taken" | "invalid"} after a claim it refused."""
+def _host_file(name: str) -> dict:
     import json
 
     d = _host_dir()
     if d is None:
         return {}
     try:
-        raw = json.loads((d / "handle.json").read_text(encoding="utf-8"))
+        raw = json.loads((d / name).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        # No answer yet, or one being replaced: the account reads as having no
-        # handle, which is what it has until the host's rename lands.
+        # No answer yet, or one being replaced: the account reads as having
+        # none, which is what it has until the host's rename lands.
         return {}
     return raw if isinstance(raw, dict) else {}
+
+
+def _host_answer() -> dict:
+    """The host's handle.json: {"handle": h} once the account has one,
+    {"asked": h, "refused": "taken" | "invalid"} after a claim it refused."""
+    return _host_file("handle.json")
+
+
+def host_reviews() -> dict:
+    """The host's wikis.json (ADR-0153 point 7), by slug: "state" is wait, in,
+    out or no, "since" its date, and a refusal adds the notice of point 13."""
+    return _host_file("wikis.json")
 
 
 def claim_path() -> Path:

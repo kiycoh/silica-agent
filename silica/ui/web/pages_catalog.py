@@ -7,10 +7,13 @@ The host runs this every two minutes over every account's published
 manifests, as data: an account wrote each `vault.json`, so nothing in one is
 trusted beyond its shape. The handle is the folder the host's map gives the
 account, never the one a manifest claims, so an account cannot list a vault
-under another's name; a vault is listed only when its own manifest says so.
+under another's name. A manifest's `listed` is only its author's request: a
+vault is listed when the host's own list, which root alone writes, names it
+too (ADR-0153 point 7), and a list that is missing lists nothing.
 
     python -m silica.ui.web.pages_catalog --public /srv/silica/public \\
-        --handles /etc/silica/handles.tsv --out /srv/silica/pages
+        --handles /etc/silica/handles.tsv --approved /etc/silica/wikis.tsv \\
+        --out /srv/silica/pages
 """
 from __future__ import annotations
 
@@ -67,7 +70,16 @@ def handles(path: Path) -> list[tuple[str, str]]:
     return out
 
 
-def collect(public: Path, pairs: list[tuple[str, str]]) -> list[dict]:
+def approved(path: Path) -> set[tuple[str, str]]:
+    """(account id, slug) from the host's list, bin/pages' to write. By id, so a handle that
+    changes hands does not carry a review with it."""
+    if not path.is_file():
+        return set()
+    rows = (line.split("\t") for line in path.read_text(encoding="utf-8").splitlines())
+    return {(r[0], r[1]) for r in rows if len(r) >= 2 and _ID.match(r[0]) and _SLUG.match(r[1])}
+
+
+def collect(public: Path, pairs: list[tuple[str, str]], ok: set[tuple[str, str]]) -> list[dict]:
     out = []
     for h, acct in pairs:
         live = public / acct / h / "live"
@@ -75,8 +87,8 @@ def collect(public: Path, pairs: list[tuple[str, str]]) -> list[dict]:
             continue
         for d in sorted(live.iterdir()):
             f = d / "vault.json"
-            if not (_SLUG.match(d.name) and d.is_dir() and not d.is_symlink() and f.is_file()
-                    and not f.is_symlink()):
+            if not ((acct, d.name) in ok and _SLUG.match(d.name) and d.is_dir() and not d.is_symlink()
+                    and f.is_file() and not f.is_symlink()):
                 continue
             try:
                 if f.stat().st_size > _MAX_MANIFEST:
@@ -118,8 +130,9 @@ def render(entries: list[dict], app: str) -> str:
             'name.</p></div>' + tools
             + f'<div class="cat-grid">{cards}</div><p class="cat-empty" data-empty{"" if not entries else " hidden"}>'
             f'{empty}</p>'
-            '<div class="cat-join"><span><b>List your own.</b> In Silica, open My Wikis, set a wiki to Public and turn on '
-            'Listed in Pages.</span><span>Something here should not be? Open the wiki and press Report.</span></div>'
+            '<div class="cat-join"><span><b>List your own.</b> In Silica, open My Wikis, set a wiki to Public and ask to '
+            'list it. It is reviewed first.</span><span>Something here should not be? Open the wiki and press Report.'
+            '</span></div>'
             '</section></main>\n'
             + site.foot("Every wiki here is a copy its author chose to publish, served as static files.", app))
 
@@ -131,9 +144,9 @@ def _write(path: Path, data: bytes) -> None:
     os.replace(tmp, path)
 
 
-def write(public: Path, handles_tsv: Path, out: Path, app: str) -> int:
+def write(public: Path, handles_tsv: Path, wikis_tsv: Path, out: Path, app: str) -> int:
     """Write the index and the static files the public host serves; returns the vaults listed."""
-    entries = collect(public, handles(handles_tsv)) if handles_tsv.is_file() else []
+    entries = collect(public, handles(handles_tsv), approved(wikis_tsv)) if handles_tsv.is_file() else []
     out.mkdir(parents=True, exist_ok=True)
     (out / "_s").mkdir(exist_ok=True)
     for name, data in site.static_files().items():
@@ -146,10 +159,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--public", type=Path, required=True)
     ap.add_argument("--handles", type=Path, required=True)
+    ap.add_argument("--approved", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--app", default=os.environ.get("SILICA_PUBLIC_SAVE_URL", "") or "https://app.silica-agent.dev")
     a = ap.parse_args(argv)
-    n = write(a.public, a.handles, a.out, a.app.rstrip("/"))
+    n = write(a.public, a.handles, a.approved, a.out, a.app.rstrip("/"))
     print(f"pages: {n} listed")
     return 0
 
