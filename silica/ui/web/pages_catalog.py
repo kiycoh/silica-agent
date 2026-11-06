@@ -103,7 +103,7 @@ def render(entries: list[dict], app: str) -> str:
             '</head>\n')
     tools = ('<div class="cat-tools" hidden><label class="search"><svg viewBox="0 0 24 24" aria-hidden="true">'
              '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input type="search" '
-             'placeholder="Search titles, areas and authors" autocomplete="off" aria-label="Search vaults"></label>'
+             'placeholder="Search titles, areas and authors" autocomplete="off" aria-label="Search wikis"></label>'
              '<span class="seg" role="group" aria-label="Sort" data-sort><button type="button" data-v="new" '
              'aria-pressed="true">Newest</button><button type="button" data-v="size" aria-pressed="false">Most notes'
              '</button><button type="button" data-v="az" aria-pressed="false">A to Z</button></span>'
@@ -118,10 +118,10 @@ def render(entries: list[dict], app: str) -> str:
             'name.</p></div>' + tools
             + f'<div class="cat-grid">{cards}</div><p class="cat-empty" data-empty{"" if not entries else " hidden"}>'
             f'{empty}</p>'
-            '<div class="cat-join"><span><b>List your own.</b> In Silica, open My Wikis, set a vault to Public and turn on '
-            'Listed in Pages.</span><span>Something here should not be? Open the vault and press Report.</span></div>'
+            '<div class="cat-join"><span><b>List your own.</b> In Silica, open My Wikis, set a wiki to Public and turn on '
+            'Listed in Pages.</span><span>Something here should not be? Open the wiki and press Report.</span></div>'
             '</section></main>\n'
-            + site.foot("Every vault here is a copy its author chose to publish, served as static files.", app))
+            + site.foot("Every wiki here is a copy its author chose to publish, served as static files.", app))
 
 
 def _write(path: Path, data: bytes) -> None:

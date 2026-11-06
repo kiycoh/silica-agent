@@ -332,7 +332,7 @@ const vaultFilesInput = $("#vault-files");
 const vaultFolderInput = $("#vault-folder");
 const vaultImportBox = $("#vault-import");
 // The server's cap per request (_UPLOAD_MAX_FILES), and ADR-0098 H2's cap per
-// import, the free tier's note count: past it a folder is a job, not a pick.
+// import: past it a folder is a job, not a pick.
 const VAULT_IMPORT_BATCH = 32;
 // And a cap in bytes. The edge cuts a request whose origin sends no byte for
 // 125 s, and the origin cannot answer before the whole body is in: on

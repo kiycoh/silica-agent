@@ -287,7 +287,7 @@ def vault_of(path: str, items: list[dict]) -> dict | None:
 def find(slug: str, vault: Path | None = None) -> dict:
     v = next((v for v in vaults(vault) if v["slug"] == slug), None)
     if v is None:
-        raise ValueError(f"no vault {slug!r} on this page")
+        raise ValueError(f"no wiki {slug!r} on this page")
     return v
 
 
@@ -346,10 +346,10 @@ def add_vault(folder: str, vault: Path | None = None) -> dict:
         raise ValueError(f"{folder} is not a folder of this vault")
     limit = max_vaults()
     if len(items) >= limit:
-        raise ValueError(f"a page holds {limit} vaults at most")
+        raise ValueError(f"you can publish {limit} wikis at most")
     for v in items:
         if _within(folder, v["folder"]) or _within(v["folder"], folder):
-            raise ValueError(f"{folder} overlaps the vault {v['title']} ({v['folder']})")
+            raise ValueError(f"{folder} overlaps the wiki {v['title']} ({v['folder']})")
     base = slugify(folder.rsplit("/", 1)[-1]) or "vault"
     slug, n, taken = base, 2, {v["slug"] for v in items} | _RESERVED_SLUGS
     while slug in taken:
@@ -368,7 +368,7 @@ def update_vault(slug: str, changes: dict, vault: Path | None = None) -> dict:
     items = vaults(vault)
     v = next((x for x in items if x["slug"] == slug), None)
     if v is None:
-        raise ValueError(f"no vault {slug!r} on this page")
+        raise ValueError(f"no wiki {slug!r} on this page")
     if "title" in changes:
         v["title"] = str(changes["title"] or "").strip()[:80] or v["folder"].rsplit("/", 1)[-1]
     if "line" in changes:
@@ -397,9 +397,9 @@ def remove_vault(slug: str, vault: Path | None = None) -> None:
     items = vaults(vault)
     v = next((x for x in items if x["slug"] == slug), None)
     if v is None:
-        raise ValueError(f"no vault {slug!r} on this page")
+        raise ValueError(f"no wiki {slug!r} on this page")
     if v["visibility"] != "off":
-        raise ValueError("turn the vault Off before removing it")
+        raise ValueError("turn the wiki Off before removing it")
     root = site_root(handle(vault))
     shutil.rmtree(root / "paused" / slug, ignore_errors=True)
     _save_vaults([x for x in items if x["slug"] != slug], vault)
@@ -495,10 +495,10 @@ def set_note(path: str, on: bool, vault: Path | None = None) -> str:
     if fm is None:
         raise ValueError(f"{path} is not a note of this vault")
     if fm.get("shared") == "private":
-        raise ValueError(f"{path} is a copy of a Private vault and stays yours alone")
+        raise ValueError(f"{path} is a copy of a Private wiki and stays yours alone")
     items = vaults(vault)
     if vault_of(path, items) is None:
-        raise ValueError(f"{path} is in no vault in My Wikis: make its folder a vault first")
+        raise ValueError(f"{path} is in no wiki: make its folder a wiki first")
     clip = fm.get("form") == "clip"
     value = (True if clip else None) if on else (None if clip else False)
     _write_publish(path, value)
@@ -546,14 +546,14 @@ def set_visibility(slug: str, vis: str, vault: Path | None = None) -> dict:
     Publish builds it where only the relay reads (point 9)."""
     vault = vault or _vault()
     if vis not in VISIBILITY:
-        raise ValueError("a vault is off, public or private")
+        raise ValueError("a wiki is off, public or private")
     if vis == "private" and private_allowed() != "ok":
         raise ValueError("Private needs a paid account on Silica hosted"
                          if private_allowed() == "paid" else "Private works between accounts on Silica hosted")
     items = vaults(vault)
     v = next((x for x in items if x["slug"] == slug), None)
     if v is None:
-        raise ValueError(f"no vault {slug!r} on this page")
+        raise ValueError(f"no wiki {slug!r} on this page")
     v["visibility"], v["downgraded"] = vis, False
     _save_vaults(items, vault)
     h = handle(vault)

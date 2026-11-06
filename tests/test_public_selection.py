@@ -57,7 +57,7 @@ def test_a_note_outside_every_vault_never_goes_out_even_with_its_own_true(vault,
         "---\npublish: true\n---\nPrivate plan.\n", encoding="utf-8")
     add_vault("Memory")
     assert _states()["Courses/Exam plan June.md"] == "off"
-    with pytest.raises(ValueError, match="no vault"):
+    with pytest.raises(ValueError, match="no wiki"):
         set_note("Courses/Exam plan June.md", True)
 
 
@@ -89,7 +89,7 @@ def test_a_laptop_holds_twenty_vaults_and_none_inside_another(vault, tmp_path):
         (Path(tmp_path) / "vault" / f"F{i}").mkdir()
         add_vault(f"F{i}")
     (Path(tmp_path) / "vault" / "OneTooMany").mkdir()
-    with pytest.raises(ValueError, match="20 vaults"):
+    with pytest.raises(ValueError, match="20 wikis"):
         add_vault("OneTooMany")
 
 
@@ -102,14 +102,14 @@ def test_free_makes_three_and_a_downgrade_loses_none_it_had(vault, tmp_path, mon
     monkeypatch.setenv("SILICA_VIEWS", "graph,public")
     for i in range(3):
         add_vault(f"F{i}")
-    with pytest.raises(ValueError, match="3 vaults"):
+    with pytest.raises(ValueError, match="3 wikis"):
         add_vault("F3")
 
     monkeypatch.setenv("SILICA_VIEWS", "all")
     add_vault("F3")
     add_vault("F4")
     monkeypatch.setenv("SILICA_VIEWS", "graph,public")
-    with pytest.raises(ValueError, match="3 vaults"):
+    with pytest.raises(ValueError, match="3 wikis"):
         add_vault("Memory")
     # a write rewrites every row it read: the fifth must come through it
     update_vault(vaults()[0]["slug"], {"title": "Renamed"})
