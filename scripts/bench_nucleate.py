@@ -295,7 +295,8 @@ def measure(sample: list[dict], target_dir: str, profile: str) -> list[dict]:
             print(f"    convert failed: {exc}")
             continue
         t_conv = time.perf_counter() - t0
-        mfs = prepare_unit(segs, target_dir, profile or None, undo_run, CONSOLE)
+        mfs = prepare_unit(segs, target_dir, profile or None, undo_run, CONSOLE,
+                           CONSOLE.input if sys.stdin.isatty() else None)
         if not mfs:
             # Already distilled, all apparatus, or filed as a draft. Zero
             # seconds for zero work would drag the median toward "instant".
