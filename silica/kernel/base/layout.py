@@ -99,6 +99,17 @@ def vault_epoch(vault: str | None = None) -> str:
 # explicit `## Sources` wikilink and silica_read_note.
 SOURCES_DIR = "sources"
 
+# Two answers to which folders hold no subject, kept apart because they answer for
+# different things. A folder pick (`ingest`) must keep off what Silica itself
+# writes, or it offers the archive as a target. A topic (`discover.rank`) reads the
+# top of the person's own tree, where `assets` and `templates` say nothing and a
+# hand-made inbox is spelled two ways; it has always kept `Done` as a topic, which
+# changes what Discover ranks if it goes, so it stays until someone measures that.
+# Compared casefolded: the archive is `Done` since 2026-08-23 while a vault that
+# predates the rename keeps its `done`, and one set must answer for both spellings.
+NOT_A_DESTINATION = frozenset({"done", "sources", "images", "logs", "attachments"})
+NOT_A_TOPIC = frozenset({"sources", "attachments", "assets", "templates", "_inbox", "inbox"})
+
 
 # Two rules disagree (probe 2026-09-17): this hides leaves from every index
 # built on list_files, while the silica-core engine behind silica_search_context

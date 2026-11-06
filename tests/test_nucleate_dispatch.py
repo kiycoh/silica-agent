@@ -905,9 +905,11 @@ def test_a_gpu_out_of_memory_stops_the_conversions_after_the_first(
         tmp_vault.note(f"Inbox/lib/{name}.pdf", "%PDF")
     tried: list[str] = []
 
+    from silica.sources.convert import GpuOutOfMemory
+
     def _oom(target, dest_dir=""):
         tried.append(target)
-        raise ValueError("mineru failed: CUDA out of memory. Tried to allocate 20.00 MiB")
+        raise GpuOutOfMemory("mineru failed: CUDA out of memory. Tried to allocate 20.00 MiB")
 
     monkeypatch.setattr("silica.sources.convert.convert", _oom)
     monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "T")

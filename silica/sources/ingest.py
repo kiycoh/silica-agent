@@ -152,9 +152,7 @@ def file_drafts(
         data = dict(data or {})
         data["form"] = "draft"
         data.setdefault("source_file", Path(f).name)
-        fm_lines = "".join(f"{k}: {json.dumps(v) if isinstance(v, str) else v}\n"
-                           for k, v in data.items())
-        note = f"---\n{fm_lines}---\n\n{body.strip()}\n"
+        note = frontmatter.dump(data, f"{body.strip()}\n")
         lab = str(data.get("source_file", "")).lower().endswith(".ipynb")
         if lab:
             from silica.kernel.link import labs
@@ -201,13 +199,6 @@ def _autolink_filed(note_rel: str, folder: str, console) -> None:
         return
     if added:
         console.print(f"  [dim]{note_rel}: linked {len(added)} note(s) it names[/]")
-
-
-# Silica's own bookkeeping folders — never a destination for a concept note.
-# Casefolded at the comparison: the archive is `Done` since 2026-08-23 while a
-# vault that predates the rename keeps its `done`, and one set must answer for
-# both spellings or the older vault starts offering its archive as a target.
-_CENSUS_SKIP = {"done", "sources", "images", "logs", "attachments"}
 
 
 def prior_conversions() -> dict[str, dict]:
@@ -327,6 +318,7 @@ def _listed_folders(inbox: str) -> list[str]:
     """The folders a pick is shown as existing: never the inbox, a dot-folder
     or a census-skipped one."""
     from silica.driver import DRIVER
+    from silica.kernel.base.layout import NOT_A_DESTINATION
 
     # Note parents (any depth) PLUS the shallow tree of folders that hold
     # anything at all. A research library is folders of PDFs: censusing note
@@ -339,7 +331,7 @@ def _listed_folders(inbox: str) -> list[str]:
     return sorted(
         f for f in folders - {".", inbox}
         if not f.startswith(f"{inbox}/")
-        and not any(part.startswith(".") or part.casefold() in _CENSUS_SKIP
+        and not any(part.startswith(".") or part.casefold() in NOT_A_DESTINATION
                     for part in Path(f).parts)
     )
 
@@ -611,6 +603,10 @@ def _discard_staged(rel: str) -> None:
 # The FSM's verdict is the criterion, not `context["error"]`: best-effort phases
 # record an error and carry on to Success (orchestrator._on_step_error).
 _DRAIN_SETTLED = {"Success", "no_ops", "already_nucleated"}
+# Where a drain's notes go when the folder pick fails. A fixed folder and not a
+# stop, as `promote` has: nobody is there to finish it, and the staged transcript
+# has to leave the vault with this run.
+_DRAIN_FALLBACK_DIR = "Sessions"
 
 
 def drain_wal(console) -> str:
@@ -632,7 +628,7 @@ def drain_wal(console) -> str:
         return ""
 
     from silica.kernel.base.manifest import active_inbox_dir
-    from silica.sources.transcript import render
+    from silica.sources.transcript import SOURCE_SILICA, render
     inbox = active_inbox_dir() or "Inbox"
     staged: dict = {}
     episodic = 0
@@ -642,7 +638,7 @@ def drain_wal(console) -> str:
             body = render(envelope)
             # Own sessions never take the note path (spec §11), so they are
             # never staged: no vault write, nothing to undo afterwards.
-            rel = ("" if not body or envelope.get("source") == "silica"
+            rel = ("" if not body or envelope.get("source") == SOURCE_SILICA
                    else _stage_envelope(body, env_path.stem, inbox))
         except Exception as exc:
             logger.warning("drain: unreadable envelope %s (%s)", env_path.name, exc)
@@ -673,7 +669,7 @@ def drain_wal(console) -> str:
         target_dir = pick_target_folder(files)
     except Exception as exc:
         logger.debug("drain: auto-target pick failed (non-fatal): %s", exc)
-        target_dir = "Sessions"
+        target_dir = _DRAIN_FALLBACK_DIR
     console.print(f"  drain: {len(files)} conversation(s) → [bold]{target_dir}[/]")
 
     try:
@@ -1126,18 +1122,14 @@ def _converted_notes_of(sources: list[str]) -> set[str]:
     return out
 
 
-_MD_EMBED_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)>\s]+)")
-
-
-_WIKI_EMBED_RE = re.compile(r"!\[\[([^\]|#]+)")
-
-
 def _embedded_in(notes: list[str]) -> tuple[set[str], set[str]]:
     """What `notes` embed: vault-relative paths from `![](rel)` (resolved
     against the note's folder) and the names in `![[name]]`, which Obsidian
     resolves by name anywhere in the vault, casefolded."""
     import posixpath
     from urllib.parse import unquote
+
+    from silica.kernel.base.syntax import EMBEDDED_ADDRESS_RE, EMBEDDED_NAME_RE
 
     paths: set[str] = set()
     names: set[str] = set()
@@ -1150,10 +1142,10 @@ def _embedded_in(notes: list[str]) -> tuple[set[str], set[str]]:
             # its figures then convert as before, which is today's behaviour.
             continue
         base = posixpath.dirname(note)
-        for target in _MD_EMBED_RE.findall(text):
+        for target in EMBEDDED_ADDRESS_RE.findall(text):
             if "://" not in target:
                 paths.add(posixpath.normpath(posixpath.join(base, unquote(target))))
-        names.update(t.strip().rsplit("/", 1)[-1].casefold() for t in _WIKI_EMBED_RE.findall(text))
+        names.update(t.strip().rsplit("/", 1)[-1].casefold() for t in EMBEDDED_NAME_RE.findall(text))
     return paths, names
 
 
@@ -1492,7 +1484,7 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
     cannot be resolved from the arguments alone.
     """
     from silica.kernel.base.manifest import get_active_manifest
-    from silica.sources.convert import convert
+    from silica.sources.convert import GpuOutOfMemory, convert
     from silica.kernel.write.gate import open_run
 
     files, glob_miss = _nucleate_globs(files, console)
@@ -1686,7 +1678,7 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
                 segs = pending.result()
             except (ValueError, RuntimeError) as e:
                 console.print(f"  [yellow]Skipped {src}: {e}[/]")
-                if "CUDA out of memory" in str(e):
+                if isinstance(e, GpuOutOfMemory):
                     # The GPU stays full until something else lets go of it, so
                     # every later file fails the same way: 129 in a row at ~8 s
                     # each beside a 9B chat server (2026-10-12). They stay in

@@ -2305,3 +2305,30 @@ def test_each_segment_of_a_split_source_carries_its_readers_title(tmp_vault, mon
 def test_a_segments_title_drops_its_section_label(heading, title):
     """Headings mineru gave six arXiv papers (2026-10-26)."""
     assert conv._segment_title("P", f"{heading}\n\nbody\n", 2) == title
+
+
+@pytest.mark.parametrize("raised", [ValueError, RuntimeError])
+def test_a_full_gpu_is_named_where_the_tools_words_are_read(tmp_vault, monkeypatch, raised):
+    """A batch stops on the type, not on a sentence it would have to know. Every
+    caller keeps catching what the reader raised."""
+    src = tmp_vault.note("Inbox/scan.pdf", "%PDF")
+
+    def full(*a, **k):
+        raise raised("mineru failed: CUDA out of memory. Tried to allocate 20.00 MiB")
+
+    monkeypatch.setattr(conv, "_doc_to_md", full)
+    with pytest.raises(conv.GpuOutOfMemory, match="CUDA out of memory") as caught:
+        conv.convert(src)
+    assert isinstance(caught.value, ValueError) and isinstance(caught.value, RuntimeError)
+
+
+def test_another_failure_keeps_its_own_type(tmp_vault, monkeypatch):
+    src = tmp_vault.note("Inbox/scan.pdf", "%PDF")
+
+    def broken(*a, **k):
+        raise ValueError("mineru failed: no space left")
+
+    monkeypatch.setattr(conv, "_doc_to_md", broken)
+    with pytest.raises(ValueError) as caught:
+        conv.convert(src)
+    assert type(caught.value) is ValueError

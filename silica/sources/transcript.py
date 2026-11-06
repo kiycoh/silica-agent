@@ -20,6 +20,15 @@ from silica.kernel.text.sanitize import strip_degenerate_runs
 
 Turn = tuple[str, str, str]  # role, text, iso timestamp
 
+# The words of an envelope, written by `silica/capture.py` and read here and by the
+# drain: `format` picks the parser, and `source` tells Silica's own sessions, which
+# never take the note path, from a vendor's.
+FORMAT_CLAUDE_CODE = "claude-code-jsonl"
+FORMAT_SILICA = "silica-session"
+FORMAT_CHATGPT = "chatgpt-mapping"
+FORMAT_CLAUDE_AI = "claude-ai-messages"
+SOURCE_SILICA = "silica"
+
 
 def _text_blocks(content) -> str:
     """The human-readable text of one message, tool noise dropped.
@@ -132,10 +141,10 @@ def _parse_silica_session(payload: str) -> list[Turn]:
 
 
 _PARSERS = {
-    "claude-code-jsonl": _parse_claude_code_jsonl,
-    "silica-session": _parse_silica_session,
-    "chatgpt-mapping": _parse_chatgpt_mapping,
-    "claude-ai-messages": _parse_claude_ai_messages,
+    FORMAT_CLAUDE_CODE: _parse_claude_code_jsonl,
+    FORMAT_SILICA: _parse_silica_session,
+    FORMAT_CHATGPT: _parse_chatgpt_mapping,
+    FORMAT_CLAUDE_AI: _parse_claude_ai_messages,
 }
 
 

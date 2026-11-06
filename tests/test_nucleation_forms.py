@@ -1060,3 +1060,18 @@ class TestAskIsTheSurfaces:
                                         ask=lambda q: asked.append(q) or "n")
         assert msg == "" and "looks like a draft of yours" in asked[0]
         assert runs[0]["inbox_files"] == ["Inbox/mine.md"]
+
+
+class TestFiledFrontmatter:
+    def test_an_empty_property_stays_empty_and_a_name_stays_readable(self, tmp_vault):
+        """Rendered by hand, an empty `tags:` came back as the tag `None`: 195 of
+        2,418 real notes had a property that would (2026-11-06)."""
+        from silica.cli import _expand_workflow_shortcut
+        from silica.kernel.base import frontmatter
+
+        tmp_vault.note("Inbox/mine.md", "---\nform: draft\ntags:\ntitle: \"caffè: note\"\n---\n\n# Mine\n\nHalf.\n")
+        assert _expand_workflow_shortcut("/nucleate Inbox/mine.md --target=T") == ""
+        filed = (Path(tmp_vault.note("T/.keep", "")).parent / "Mine.md").read_text(encoding="utf-8")
+        data, _, body = frontmatter.split(filed)
+        assert data["tags"] is None and data["title"] == "caffè: note" and data["form"] == "draft"
+        assert "caffè" in filed and body.strip().startswith("# Mine")

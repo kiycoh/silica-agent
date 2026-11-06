@@ -93,6 +93,17 @@ EMBED_RE = re.compile(r"!\[\[([^\]]+)\]\]")
 # image's address. A title after the address is left out of it.
 IMAGE_RE = re.compile(r"!\[\[([^\]|]+?)(?:\|[^\]]*)?\]\]|!\[[^\]]*\]\(([^)\s]+)[^)]*\)")
 MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
+# What a note embeds, for telling a document's own figures from a loose screenshot
+# (`ingest._embedded_in`). Looser than IMAGE_RE, because a miss here converts a
+# figure as a source: an address may open with spaces and sit in `<...>`, and an
+# embed's name ends at its `#heading` and needs no closing bracket.
+#
+# Three more image patterns live with their readers and stay there, each a subset
+# chosen for what it guards: `saved_page._MD_IMAGE` remote addresses only,
+# `rights._MD_IMAGE` the alt text and one level of brackets in the address, and
+# `mail._IMAGE_REF_RE` every shape a stranger's mail can use to fetch a pixel.
+EMBEDDED_ADDRESS_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)>\s]+)")
+EMBEDDED_NAME_RE = re.compile(r"!\[\[([^\]|#]+)")
 
 # --- code -------------------------------------------------------------------
 

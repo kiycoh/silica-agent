@@ -244,6 +244,12 @@ _ASR_TIMEOUT_S = 7200
 _ASR_PARAGRAPH_GAP_S = 2.0
 
 
+class GpuOutOfMemory(ValueError, RuntimeError):
+    """The GPU was full: the next file fails the same way until something else
+    lets go of it. Both bases, because a reader's failure reaches its callers as
+    either, and each of them already catches what it caught before."""
+
+
 def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = None, *,
             on_page: Callable[[int, int], None] | None = None, beside: bool = False) -> list[str]:
     """Convert a non-`.md` document into one or more `.md` notes in the inbox.
@@ -274,7 +280,14 @@ def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = Non
     target = target.strip()
     if Path(target).suffix.lower() not in formats.DOC_EXTS:
         raise ValueError(f"no converter for {Path(target).suffix.lower() or 'this file type'}")
-    return _doc_to_md(target, dest_dir, leaf, on_page, beside)
+    try:
+        return _doc_to_md(target, dest_dir, leaf, on_page, beside)
+    except (ValueError, RuntimeError) as exc:
+        # The one place a tool's text is read for what it means. Any reader can
+        # say it: the sentence comes from the OCR tool's own stderr.
+        if "CUDA out of memory" in str(exc):
+            raise GpuOutOfMemory(str(exc)) from exc
+        raise
 
 
 def _in(folder: str, name: str) -> str:

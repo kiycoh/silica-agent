@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from silica.kernel.base.layout import NOT_A_TOPIC
 from silica.sources.discover import store
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,6 @@ NEAR_AT_BY_MODEL: dict[str, float] = {"pplx-embed-v1-4b": 0.28}
 _NEAR_K = 3
 _TOPICS_SHOWN = 8
 _TAG_SCAN = 3000           # notes read for their tags on the first run
-_SKIP_DIRS = {"sources", "attachments", "assets", "templates", "_inbox", "inbox"}
 
 
 def near_at(model: str) -> float:
@@ -154,7 +154,7 @@ def vault_topics(vault: str | None = None) -> list[dict]:
     root = Path(vault or CONFIG.vault_path)
     for i, path in enumerate(notes):
         top = topic_of(path)
-        if top and top.lower() not in _SKIP_DIRS and not top.startswith("."):
+        if top and top.lower() not in NOT_A_TOPIC and not top.startswith("."):
             folders[top] = folders.get(top, 0) + 1
         if i < _TAG_SCAN:
             try:

@@ -46,9 +46,6 @@ _TABLE_CLASS = 5
 # that is paid to read what the box holds.
 _MIN_SCORE = 0.2
 _MAX_IOU = 0.45
-# A reading of a page gets the same (`convert._PAGE_MAX_TOKENS`); a table past
-# it stops at `finish_reason == "length"` and keeps its PDFium text.
-_MAX_TOKENS = 2500
 # Which pages reach the detector, measured 2026-11-06 on the bench and on 866 real
 # pages: 30 to 45% of pages with text, 98% of the 157 real pages with a table box
 # kept. End to end on the dev sets it costs -1.8 on tables [-6.8, +2.0], nothing
@@ -459,14 +456,17 @@ def _accepted(text: str | None, finish_reason: str | None, grid: str) -> str | N
 
 
 def _read_one(grid: str) -> str | None:
-    from silica.model.providers import get_provider
     from silica.config import CONFIG
+    from silica.model.providers import get_provider
+    from silica.sources.convert import _PAGE_MAX_TOKENS
 
     # The router and not the vision role: this is text, so any chat model reads
     # it. temperature 0 and reasoning=False for `vision.ask_chat_model`'s reasons.
+    # A page's own allowance: a table past it stops at `finish_reason == "length"`
+    # and keeps its PDFium text.
     resp = get_provider(CONFIG).call_llm(
         messages=[{"role": "user", "content": f"{_PROMPT}\n\n{grid}"}],
-        max_tokens=_MAX_TOKENS, temperature=0.0, reasoning=False)
+        max_tokens=_PAGE_MAX_TOKENS, temperature=0.0, reasoning=False)
     return _accepted(resp.text, resp.finish_reason, grid)
 
 
