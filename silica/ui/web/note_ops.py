@@ -10,7 +10,6 @@ import re
 from fastapi import HTTPException
 
 
-
 def has_room(notes: int, size: int) -> None:
     """A 400 past the vault's limits, the status `saved_page.save` reaches
     through /vault/save. A laptop sets none, so this passes there."""
@@ -31,11 +30,6 @@ def tree_name_ok(name: str) -> bool:
 
 BAD_NAME_WHY = "a name cannot be empty, start with a dot or hold / \\ : * ? \" < > | # ^ [ ]"
 
-
-# --- what this session changed (GET /changes, /changes/diff) ------------------
-# The ledger and the tally are the driver's (silica.kernel.write.session_changes),
-# shared with the REPL's /changes. All that is added here is a display name and
-# the line-by-line rendering, which only a drawer needs.
 
 _DIFF_CONTEXT = 3
 # A hard line cap, tail dropped with a count — a decided constant, not a

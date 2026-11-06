@@ -13,13 +13,6 @@ from silica.kernel.text import note_parts
 logger = logging.getLogger(__name__)
 
 
-# --- context explorer (GET /context) -----------------------------------------
-# One blocking call, all of it deterministic and LLM-free. Measured on a
-# 718-note vault, warm: related 0.01s, concepts(note=) 0.06s, outline/links/
-# unresolved 0.00s. The first call in a fresh process pays ~0.9s to load the
-# co-occurrence store — once, in a long-lived server. So: no progressive fill,
-# no client-side hybrid, one endpoint that returns the whole drawer.
-
 # Below this a note reads faster whole than as an extract, so the snippets
 # section is dropped rather than duplicating the reader.
 _SNIPPET_MIN_BODY = 700

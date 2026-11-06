@@ -89,7 +89,4 @@ def turn_response(slot: TurnSlot, text: str, attachments: "Sequence[Path]" = (),
     )
 
 
-# The GUI's own uvicorn server, so an endless response can ask whether the
-# process is leaving. None under TestClient and in the suite, where nothing is
-# shutting down and every stream is read to its end by its caller.
 POLL_S = 0.25   # four wakeups a second per open tab, against a 1s deadline

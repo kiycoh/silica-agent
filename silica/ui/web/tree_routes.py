@@ -232,6 +232,11 @@ def trash_erase(payload: dict):
     return {"erased": len(items)}
 
 
+# --- what this session changed (GET /changes, /changes/diff) ------------------
+# The ledger and the tally are the driver's (silica.kernel.write.session_changes),
+# shared with the REPL's /changes. All that is added here is a display name and
+# the line-by-line rendering, which only a drawer needs.
+
 def _review_of(path: str) -> str:
     """The judge's sentence on a note the soft gate landed with `review:` set
     (kernel/write/validate.py), or "". Read off the file each time: keep

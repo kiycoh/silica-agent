@@ -64,7 +64,9 @@ class Session:
     # the suite one test inherited another test's seed, whose numbers then read as
     # evidence the turn had seen (test_unread_numbers_chat, 2026-10-31).
     seed_vault: str | None = None
-    # The uvicorn server, once serve() built it: a stream polls it to end itself.
+    # The GUI's own uvicorn server, so an endless response can ask whether the
+    # process is leaving. None under TestClient and in the suite, where nothing is
+    # shutting down and every stream is read to its end by its caller.
     server: Any = None
 
     def claim(self) -> bool:

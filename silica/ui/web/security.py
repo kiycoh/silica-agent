@@ -57,7 +57,6 @@ def same_origin_writes(request: Request) -> None:
         require_same_origin(request)
 
 
-
 # The names this server answers to. It binds 127.0.0.1 only (serve()), so a
 # browser that reached it legitimately typed a loopback name. A page on any
 # other name got here by DNS rebinding (its name re-resolved to 127.0.0.1), and

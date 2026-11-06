@@ -75,7 +75,6 @@ def _save_attachments(images: list) -> list[Path]:
     return out
 
 
-
 _ATTACHED_RE = re.compile(r"\n*\[image attached: ([^\]\n]+)\]")
 _ATTACHMENT_NAME_RE = re.compile(r"[0-9a-f]{16}\.(?:png|jpg|webp|gif|bmp)")
 
