@@ -376,6 +376,9 @@ _ASSET_HEADERS = {
 # ==highlight== | #tag (letter-first, so #123 and hex colors stay literal)
 _MARK_OR_TAG = re.compile(r"==([^=\n]+)==|(?<![\w#])#([A-Za-z_][\w/-]*)")
 _COMMENT = re.compile(r"%%.*?%%", re.S)
+# To the end when unterminated: markdown-it's html_block runs there too, so a page
+# hides that text as well, and it must not ride out in a published note's `.md`.
+_HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
 _BLOCK_ID = re.compile(r"[ \t]+\^[\w-]+[ \t]*$", re.M)
 _FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")
 # Inline code span: a backtick run closed by an equal-length run. Parked
@@ -876,10 +879,12 @@ def _highlight(code: str, lang: str, _attrs: str) -> str:
 # Inline spans are parked as \x00 sentinels for the length of the sub, the
 # same trick mdLite plays client-side; pathological nested backtick runs can
 # still fool the span regex, which costs a stripped %% inside them, cosmetic.
-def _strip_ofm_meta(text: str) -> str:
+def _strip_ofm_meta(text: str, html_comments: bool = False) -> str:
     """Strip %%comments%% and trailing ^block-ids, sparing fenced code and
     inline `code spans` where %% and ^ are code (a lone %% in a fence would
-    otherwise pair with a prose %% and swallow everything between)."""
+    otherwise pair with a prose %% and swallow everything between).
+    `html_comments` is for text that leaves as Markdown: the renderer's
+    allowlist drops `<!-- -->` from HTML, and nothing drops it from a `.md`."""
     pieces: list[str] = []
     run: list[str] = []
     fence: tuple[str, int] | None = None  # (marker char, marker length)
@@ -894,6 +899,8 @@ def _strip_ofm_meta(text: str) -> str:
 
             parked = _CODE_SPAN.sub(_park, "\n".join(run))
             cleaned = _BLOCK_ID.sub("", _COMMENT.sub("", parked))
+            if html_comments:
+                cleaned = _HTML_COMMENT.sub("", cleaned)
             pieces.append(
                 _PARKED.sub(lambda m: spans[int(m.group(1))], cleaned))
             run.clear()

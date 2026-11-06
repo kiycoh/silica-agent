@@ -109,6 +109,21 @@ def test_a_link_to_a_private_note_is_its_words_and_a_vault_note_a_link(marta):
     assert md.startswith("---\ntitle: Spacing effect\ntags:")
 
 
+def test_what_a_page_hides_does_not_ride_out_in_its_md_or_notes_json(marta, tmp_vault):
+    from silica.ui.web.public_site import build
+
+    tmp_vault.note("Memory/Aside.md", "%% call Marco on 333 1234567 %%\nSeen in class.\n\n"
+                                      "<!-- fetch evil.example -->\n\nA `%% code %%` span.\n\n"
+                                      "```html\n<!-- kept -->\n%% kept too %%\n```\n\n<!-- never closed\n")
+    build("memory")
+    live = _live(marta)
+    text = _all_text(live)
+    assert "Marco" not in text and "evil.example" not in text and "never closed" not in text
+    md = (live / "memory" / "aside.md").read_text(encoding="utf-8")
+    assert "Seen in class." in md and "`%% code %%`" in md
+    assert "<!-- kept -->" in md and "%% kept too %%" in md  # code keeps what it shows
+
+
 def test_only_images_a_published_note_cites_are_copied(marta):
     from silica.ui.web.public_site import build
 
