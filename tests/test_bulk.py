@@ -321,7 +321,7 @@ def test_overwrite_no_prior_block_gets_minimal_floor(vault):
 def test_write_uses_vault_default_template(vault):
     """e2e for the spec: a pipeline write op into a vault carrying a custom
     default template lands matching the template skeleton."""
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
     (vault / "templates").mkdir()
     (vault / "templates" / "spoke.md").write_text(
         "---\nsource-template: spoke\ntags: {{tags}}\nlast modified: {{date}}\n"

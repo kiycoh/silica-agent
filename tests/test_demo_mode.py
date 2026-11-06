@@ -26,7 +26,7 @@ from silica.agent.constraints import (  # noqa: E402
     chat_tools,
     web_answer_constraints,
 )
-from silica.agent.events import ToolCompleteEvent  # noqa: E402
+from silica.obs.events import ToolCompleteEvent  # noqa: E402
 from silica.agent.recall_watch import THIN_COVERAGE_HINT  # noqa: E402
 from silica.config import DEMO_OFF, demo, served_views, withheld  # noqa: E402
 from tests.webassets import WEB  # noqa: E402

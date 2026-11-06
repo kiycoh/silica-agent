@@ -163,7 +163,7 @@ def _embedded(vault, notes) -> None:
 
 
 def _fake_embedder(monkeypatch, vec) -> None:
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     class _E:
         def embed(self, texts, query=False):
@@ -189,7 +189,7 @@ def test_probe_falls_back_to_embeddings_when_there_is_no_lexical_index(tmp_path,
 
 
 def _fake_reranker(monkeypatch, liked: str) -> None:
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     class _R:
         def scores(self, query, docs):
@@ -199,7 +199,7 @@ def _fake_reranker(monkeypatch, liked: str) -> None:
 
 
 def _no_reranker(monkeypatch) -> None:
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     monkeypatch.setattr(providers, "get_reranker", lambda cfg: None)
 
@@ -243,7 +243,7 @@ def test_lexical_hits_count_notes_matching_two_query_terms(tmp_path):
 
 
 def test_scoreboard_without_an_embedder_still_answers(tmp_path, monkeypatch):
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     a, v = _adopted(tmp_path, "a"), _adopted(tmp_path, "v")
     _embedded(v, [("N", "N", [1.0, 0.0])])
@@ -297,7 +297,7 @@ def test_probe_pool_is_wider_than_the_titles_it_shows(tmp_path, monkeypatch):
         (v / f"E{i}.md").write_text("gold" if i == 5 else "dust", encoding="utf-8")
     _fake_embedder(monkeypatch, [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0, 0])
     _fake_reranker(monkeypatch, liked="gold")
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     row = reg.probe(v, "q", k=2, reranker=providers.get_reranker(None))
     assert row["top"] == ["E5", "E0"] and len(row["top"]) == 2
@@ -318,7 +318,7 @@ def test_probe_with_an_abstaining_reranker_keeps_nomination_order_and_says_unsco
 
 
 def test_a_row_the_reranker_could_not_score_is_marked_and_sorted_last(tmp_path, monkeypatch):
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     a, near, far = (_adopted(tmp_path, n) for n in ("a", "near", "far"))
     _embedded(near, [("N", "Near note", [1.0, 0.0])])
@@ -383,7 +383,7 @@ def _two_vaults(tmp_path, monkeypatch):
 
 
 def _scoring(monkeypatch, model: str, near: float, far: float) -> None:
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     class _R:
         def scores(self, query, docs):
@@ -423,7 +423,7 @@ def test_home_is_unknown_without_a_reranker(tmp_path, monkeypatch):
 
 
 def test_home_is_unknown_while_an_indexed_vault_could_not_be_probed(tmp_path, monkeypatch):
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     _a, near, far = _two_vaults(tmp_path, monkeypatch)
     _scoring(monkeypatch, "bge-reranker-v2-m3-Q8_0", near=1.2, far=-5.0)

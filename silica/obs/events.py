@@ -76,7 +76,7 @@ RenderEvent = (ToolProgressEvent | ReasoningEvent | ThinkingStartEvent | Thinkin
                | LLMStreamEvent | BatchRunStartEvent | ApprovalRequestEvent)
 
 
-# --- work-queue events (published on silica.agent.bus.BUS) -------------------
+# --- work-queue events (published on silica.obs.bus.BUS) -------------------
 
 @dataclass(slots=True)
 class WorkFeedbackEvent:

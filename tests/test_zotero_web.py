@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from silica.config import CONFIG
-from silica.kernel.vault_manifest import load_manifest, set_zotero
+from silica.kernel.base.manifest import load_manifest, set_zotero
 from silica.sources import zotero as z
 from silica.sources import zotero_write as zw
 from tests.zotero_fake import SERVER_ID, FakeZotero

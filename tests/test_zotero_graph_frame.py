@@ -141,7 +141,7 @@ def test_a_closed_zotero_leaves_the_collections_out(tmp_vault, monkeypatch, tmp_
 
 
 def test_citations_stay_out_of_the_partitions_and_betweenness(tmp_vault, monkeypatch, tmp_path):
-    import silica.kernel.recall.graph_export as ge
+    from silica.kernel.graph import graph_export as ge
     import silica.ui.web.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")

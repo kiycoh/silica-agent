@@ -5,7 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from silica.config import CONFIG
-import silica.agent.concurrency as conc
+from silica.model import concurrency as conc
 
 
 def test_worker_slot_enforces_global_ceiling(monkeypatch):

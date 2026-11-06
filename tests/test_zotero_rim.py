@@ -18,7 +18,7 @@ import shutil
 import pytest
 
 from silica.config import CONFIG
-from silica.kernel.vault_manifest import load_manifest, set_zotero
+from silica.kernel.base.manifest import load_manifest, set_zotero
 from silica.sources import zotero as z
 from silica.sources import zotero_covers as zc
 from silica.sources import zotero_write as zw
@@ -145,7 +145,7 @@ def test_the_search_is_this_vaults_alone(monkeypatch):
         def embed(self, texts, query=False):
             return [[1.0]]
 
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: Up())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: Up())
 
     def facade(query, k, memory=True, folder=""):
         seen.update(k=k, memory=memory)
@@ -162,7 +162,7 @@ def test_a_search_without_the_embedder_stops_the_pass(monkeypatch):
         def embed(self, texts, query=False):
             raise ConnectionError("Connection error.")
 
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: Down())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: Down())
     with pytest.raises(RuntimeError, match="embedder stopped answering"):
         zc._search("q", 5)
 
@@ -176,7 +176,7 @@ def test_a_pass_reads_the_library_searches_once_per_paper_and_keeps_its_versions
     f.clone(item, "PPPP0002", collections=[temporal["key"]], title="Two")
     f.items["8H4AC8GW"]["data"]["collections"] = []
     monkeypatch.setattr(z, "client", lambda: z.Zotero(transport=f.transport()))
-    monkeypatch.setattr("silica.kernel.recall.mindmap.note_resolver", lambda: (lambda p: p))
+    monkeypatch.setattr("silica.kernel.graph.mindmap.note_resolver", lambda: (lambda p: p))
     monkeypatch.setattr("silica.kernel.recall.sync.vault_version", lambda: "v1")
     searched = []
 

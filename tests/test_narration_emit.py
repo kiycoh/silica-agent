@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import pytest
 
-import silica.agent.narration as narr
+from silica.obs import narration as narr
 
 
 @pytest.fixture()
@@ -21,7 +21,7 @@ def _beats(narrator):
 
 
 def test_call_llm_wrapper_narrates_the_envelope(narrator, monkeypatch):
-    import silica.agent.llm as llm
+    from silica.model import llm
 
     monkeypatch.setattr(llm, "_call_llm", lambda *a, **k: llm.LLMResponse(
         text="hi", usage={"prompt_tokens": 900, "completion_tokens": 40}))
@@ -33,7 +33,7 @@ def test_call_llm_wrapper_narrates_the_envelope(narrator, monkeypatch):
 
 
 def test_call_llm_failure_closes_the_span_failed(narrator, monkeypatch):
-    import silica.agent.llm as llm
+    from silica.model import llm
 
     def boom(*a, **k):
         raise RuntimeError("provider down")
@@ -194,7 +194,7 @@ def test_repl_sessions_resume_handlers(narrator, monkeypatch, capsys):
     messages: list[dict] = []
     assert _handle_slash_command("/resume 1", messages) is True
     assert [m["content"] for m in messages] == ["seed", "prima domanda", "prima risposta"]
-    from silica.agent.narration import NARRATOR
+    from silica.obs.narration import NARRATOR
     assert NARRATOR.sid == sid              # appending continues the same account
 
     assert _handle_slash_command("/resume 99", []) is True   # graceful, no raise
@@ -207,7 +207,7 @@ def test_repl_sessions_resume_handlers(narrator, monkeypatch, capsys):
 # the judges narrate their verdicts under an owner-prefixed kind.
 
 def _fake_resp(**kw):
-    import silica.agent.llm as llm
+    from silica.model import llm
     base = dict(text="hi", usage={"prompt_tokens": 9, "completion_tokens": 4})
     base.update(kw)
     return llm.LLMResponse(**base)
@@ -218,7 +218,7 @@ def _done_call(narrator):
 
 
 def test_call_beat_carries_the_reasoning_trace(narrator, monkeypatch):
-    import silica.agent.llm as llm
+    from silica.model import llm
 
     monkeypatch.setattr(llm, "_call_llm", lambda *a, **k: _fake_resp(reasoning="because"))
     llm.call_llm("test/model", [{"role": "user", "content": "q"}])
@@ -226,7 +226,7 @@ def test_call_beat_carries_the_reasoning_trace(narrator, monkeypatch):
 
 
 def test_trace_flag_records_messages_request_and_reply(narrator, monkeypatch):
-    import silica.agent.llm as llm
+    from silica.model import llm
 
     monkeypatch.setenv("SILICA_TRACE_LLM", "1")
     monkeypatch.setattr(llm, "_call_llm", lambda *a, **k: _fake_resp(
@@ -240,7 +240,7 @@ def test_trace_flag_records_messages_request_and_reply(narrator, monkeypatch):
 
 
 def test_without_the_trace_flag_the_call_beat_stays_an_envelope(narrator, monkeypatch):
-    import silica.agent.llm as llm
+    from silica.model import llm
 
     monkeypatch.delenv("SILICA_TRACE_LLM", raising=False)
     monkeypatch.setattr(llm, "_call_llm", lambda *a, **k: _fake_resp())
@@ -250,7 +250,7 @@ def test_without_the_trace_flag_the_call_beat_stays_an_envelope(narrator, monkey
 
 
 def test_trace_flag_records_messages_on_a_failed_call_too(narrator, monkeypatch):
-    import silica.agent.llm as llm
+    from silica.model import llm
 
     monkeypatch.setenv("SILICA_TRACE_LLM", "1")
 
@@ -266,7 +266,7 @@ def test_trace_flag_records_messages_on_a_failed_call_too(narrator, monkeypatch)
 
 def test_request_record_keeps_the_wire_kwargs_but_never_the_key(monkeypatch):
     import litellm
-    import silica.agent.llm as llm
+    from silica.model import llm
     from tests.llm_mocks import litellm_mock_response
 
     seen = {}
@@ -287,7 +287,7 @@ def test_request_record_keeps_the_wire_kwargs_but_never_the_key(monkeypatch):
 
 def test_openrouter_asks_for_reasoning_whenever_a_session_is_open(narrator, monkeypatch):
     import litellm
-    import silica.agent.llm as llm
+    from silica.model import llm
     from silica.config import CONFIG
     from tests.llm_mocks import litellm_mock_response
 
@@ -309,7 +309,7 @@ def test_openrouter_asks_for_reasoning_whenever_a_session_is_open(narrator, monk
 
 def test_a_transient_retry_narrates_on_the_open_call_span(narrator, monkeypatch):
     import litellm
-    import silica.agent.llm as llm
+    from silica.model import llm
     from tests.llm_mocks import litellm_mock_response
 
     monkeypatch.setattr(llm.time, "sleep", lambda s: None)
@@ -338,7 +338,7 @@ def test_dedup_judge_verdict_is_a_beat_with_the_raw_reply(narrator, monkeypatch)
     class P:
         def call_llm(self, **kw):
             return SimpleNamespace(text='{"verdict": "duplicate", "rationale": "same thing"}')
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda cfg, role="worker": P())
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda cfg, role="worker": P())
     d = dedup._decide_dedup(SimpleNamespace(judge_model=None), concept="A", excerpt="e",
                             candidate_name="B", candidate_body="b")
     assert d.verdict == "duplicate"
@@ -356,7 +356,7 @@ def test_dedup_parse_failure_is_a_failed_judge_beat(narrator, monkeypatch):
     class P:
         def call_llm(self, **kw):
             return SimpleNamespace(text="not json at all")
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda cfg, role="worker": P())
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda cfg, role="worker": P())
     d = dedup._decide_dedup(SimpleNamespace(judge_model=None), concept="A", excerpt="e",
                             candidate_name="B", candidate_body="b")
     assert d.judged is False

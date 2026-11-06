@@ -23,7 +23,7 @@ TARGET = "X7DB9QVX"
 
 @pytest.fixture
 def fake(tmp_vault):
-    from silica.kernel.vault_manifest import set_zotero
+    from silica.kernel.base.manifest import set_zotero
     f = FakeZotero()
     f.add_paper()
     set_zotero(CONFIG.vault_path, "library", SERVER_ID)
@@ -197,7 +197,7 @@ def test_groups_create_silica_groups_once_and_record_its_key(fake):
 
     zw.write_groups(_zot(fake), plan, run_id="run1")
 
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
     top = [c for c in fake.collections.values() if c["data"]["name"] == "Silica groups"]
     [sub] = [c for c in fake.collections.values() if c["data"]["name"] == "memory · agents"]
     assert len(top) == 1

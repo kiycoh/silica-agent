@@ -230,7 +230,7 @@ def outline(text: str, language: str, cancel_token: Any = None) -> str:
     the whole of it: a block sees a thousand words and cannot tell where a
     chapter's parts begin. Paragraph numbers and not quoted first words, because
     asked to quote eight words Qwen copied whole paragraphs (2026-10-16)."""
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.config import CONFIG
 
     paras = re.split(r"\n\s*\n", text.strip())
@@ -274,7 +274,7 @@ def _ask(request: str) -> tuple[str, str]:
     """(kind, register) the request asks for, by one decision call: "full"
     and "readable", the measured defaults, unless Jev is on and sure
     (ADR-0116, amendment 2026-10-23)."""
-    from silica.agent.decide import decide
+    from silica.model.decide import decide
     from silica.config import CONFIG
 
     if not CONFIG.decision_model or not request:
@@ -309,7 +309,7 @@ def _prompt(instruction: str, language: str, kind: str = "full", register: str =
 
 def _rework(block: str, instruction: str, language: str, cancel_token: Any,
             kind: str = "full", register: str = "readable") -> str:
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.config import CONFIG
 
     messages = [{"role": "system", "content": _prompt(instruction, language, kind, register)},
@@ -346,7 +346,7 @@ def silica_rework(
     """Rework a long text in full: rewrite, rephrase, modernise or simplify its wording, or change its register, keeping every passage in order at about its length. The text is a note, or a text of more than about 700 words the user pasted in their message. The tool reads it itself and writes the result to a new note, so call it directly: do not read the note first, and do not copy a pasted text into the call. Use it whenever the user asks to rework, rewrite, rephrase or modernise such a text, also more concisely ("summarising where possible"): when that fits your reply the tool says so and you write it. Not for a summary, an outline or study notes: those are not a rework, do them yourself."""
     from silica.config import CONFIG
     from silica.driver import DRIVER
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.tools.notes import silica_write_note
 
     request = _request()

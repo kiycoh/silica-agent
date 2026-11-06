@@ -81,7 +81,7 @@ def test_eager_tool_result_is_projected_in_history_but_full_in_event():
         "content": "written=3; ops=<50 items> ⟨↻ re-call to expand⟩",
     }]
     # the TUI event still carried the fat payload
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
     complete = [e for e in events if isinstance(e, ToolCompleteEvent)]
     assert complete and complete[0].result == fat
 

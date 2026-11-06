@@ -167,7 +167,7 @@ _HISTORY: dict[str, tuple[float, list[str], bool]] = {}
 
 
 def _history(vault: str, current: str | None) -> list[tuple[str, list[str], bool]]:
-    from silica.agent import narration
+    from silica.obs import narration
 
     out = []
     for row in narration.list_sessions(vault):
@@ -278,7 +278,7 @@ def draft(asks: list[str], config) -> dict | None:
     from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as Late
 
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
     from silica.kernel.text.sanitize import parse_json
 
     cancel = threading.Event()

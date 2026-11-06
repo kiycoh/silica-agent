@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 
 from silica.kernel.link.autolink import build_title_index
-from silica.kernel.link.health.preservation import COMPOSERS, preservation
-from silica.kernel.write import frontmatter
+from silica.kernel.report.health.preservation import COMPOSERS, preservation
+from silica.kernel.base import frontmatter
 from silica.kernel.write.preserve import SYSTEM_KEYS, lost
 
 FIXTURES = Path(__file__).parent / "fixtures" / "preserve"
@@ -122,7 +122,7 @@ def test_the_rule_catches_every_corruption_that_changed_a_note(corrupt):
 def test_t5_joins_the_integrity_rate(tmp_path, monkeypatch):
     import shutil
 
-    from silica.kernel.link.health import integrity_probe, preservation as pv
+    from silica.kernel.report.health import integrity_probe, preservation as pv
 
     for name in ("human mixed.md", "related null.md"):
         shutil.copy(FIXTURES / name, tmp_path / name)

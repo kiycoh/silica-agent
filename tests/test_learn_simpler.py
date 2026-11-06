@@ -192,7 +192,7 @@ def test_two_ratings_at_once_write_one_ledger_line(client, tmp_path, monkeypatch
     import json
     import threading
 
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     c, _ = client
     s = c.post("/learn/session", json={"note": "ML/Margine geometrico.md"}).json()

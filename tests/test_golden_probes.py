@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
-from silica.kernel.link.health import integrity_probe, lint
+from silica.kernel.report.health import integrity_probe, lint
 from evals.golden import probe_classify, probe_links
 
 

@@ -90,7 +90,7 @@ def _overlay():
 def _maybe_embedder():
     """Real embedder if the endpoint answers, else None (eval degrades to YAKE rank)."""
     try:
-        from silica.agent.providers import get_embedder
+        from silica.model.providers import get_embedder
         from silica.config import CONFIG
         emb = get_embedder(CONFIG)
         emb.embed(["probe"])  # force a real call so a dead endpoint => None

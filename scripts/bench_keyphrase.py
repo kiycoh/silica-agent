@@ -53,7 +53,7 @@ def main() -> int:
 
     embedder = None
     if args.embedder:
-        from silica.agent.providers import get_embedder
+        from silica.model.providers import get_embedder
         from silica.config import CONFIG
         embedder = get_embedder(CONFIG)
         embedder.embed(["probe"])  # a dead endpoint fails here, not silently per note

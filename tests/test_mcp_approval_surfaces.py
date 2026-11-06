@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.agent.events import ApprovalRequestEvent
+from silica.obs.events import ApprovalRequestEvent
 from tests.webassets import WEB
 
 

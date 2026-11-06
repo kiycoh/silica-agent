@@ -10,7 +10,7 @@ recall. This module applies that pass to an already-retrieved pool: it reorders,
 never retrieves, and abstains (leaves the pool's order untouched) whenever the
 reranker is absent or errors, mirroring a down leg in the facade.
 
-The reranker CLIENT lives in agent/providers.py (Reranker/get_reranker); this module
+The reranker CLIENT lives in model/providers.py (Reranker/get_reranker); this module
 holds only the note-aware reorder, so the client stays a plain HTTP provider.
 """
 import re
@@ -167,7 +167,7 @@ def _read_body(path: str, *, origin: str = "vault") -> tuple[str, str]:
             content = DRIVER.read_note(path).content or ""
         except Exception:
             return "", ""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     _data, _raw, body = frontmatter.split(content)
     name = path.rsplit("/", 1)[-1].removesuffix(".md")

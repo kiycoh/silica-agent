@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 import pytest
 
-from silica.agent.events import ToolCompleteEvent
+from silica.obs.events import ToolCompleteEvent
 from silica.agent.recall_watch import RecallWatch
 from silica.cli import _expand_web_turn
 from silica.config import CONFIG
@@ -409,7 +409,7 @@ def test_the_sub_loops_searches_reach_the_outer_ui(monkeypatch):
     mints them per request), and the web UI indexes its rows by id, so a bare
     inner id can close an outer row.
     """
-    from silica.agent.events import LLMStreamEvent, ToolStartEvent
+    from silica.obs.events import LLMStreamEvent, ToolStartEvent
     from silica.tools import TOOLS
 
     monkeypatch.setattr(wr, "_LAST_WEB_TURN", None)

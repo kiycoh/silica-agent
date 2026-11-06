@@ -17,7 +17,7 @@ LEAF = "sources/@packerMemGPTLLMsOperating2024.md"
 
 @pytest.fixture
 def fake(tmp_vault, monkeypatch):
-    from silica.kernel.vault_manifest import set_zotero
+    from silica.kernel.base.manifest import set_zotero
 
     f = FakeZotero()
     f.add_paper()
@@ -112,7 +112,7 @@ def test_diagnostics_says_an_old_zotero_is_read_only(fake):
 
 
 def test_diagnostics_lists_zotero_only_for_a_linked_vault(fake):
-    from silica.kernel.vault_manifest import unlink_zotero
+    from silica.kernel.base.manifest import unlink_zotero
     from silica.onboarding.checks import run_checks
 
     assert "zotero" in [r.name for r in run_checks(CONFIG)]

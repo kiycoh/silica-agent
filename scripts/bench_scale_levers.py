@@ -50,7 +50,7 @@ def make_vault(root: Path, n: int) -> Path:
 
 
 def bench_learner_memo(root: Path) -> None:
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     for n in SIZES:
         vault = make_vault(root / "learner", n) if not (root / "learner" / f"vault_{n}").exists() else root / "learner" / f"vault_{n}"

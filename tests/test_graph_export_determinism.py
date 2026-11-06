@@ -15,7 +15,7 @@ other processes.
 """
 from __future__ import annotations
 
-from silica.kernel.recall.graph_export import detect_communities, edge_graph
+from silica.kernel.graph.graph_export import detect_communities, edge_graph
 
 
 def _nodes(*ids):

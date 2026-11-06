@@ -5,12 +5,7 @@ import json
 
 import networkx as nx
 
-from silica.kernel.recall.mindmap import (
-    MapMaterials,
-    _resolve_in,
-    build_mapview,
-    mapview_to_canvas,
-)
+from silica.kernel.graph.mindmap import MapMaterials, _resolve_in, build_mapview, mapview_to_canvas
 
 _MUTED = "#5a6372"
 
@@ -102,7 +97,7 @@ def _two_area_view():
 def test_wedges_tile_the_circle_and_hold_their_notes():
     import math
 
-    from silica.kernel.recall.mindmap import _wedges
+    from silica.kernel.graph.mindmap import _wedges
 
     mv = _two_area_view()
     rest = [n for n in mv.nodes if n.hop > 0]

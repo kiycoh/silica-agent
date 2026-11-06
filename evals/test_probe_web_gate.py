@@ -49,7 +49,7 @@ def test_bank_validity_checks_quotes_against_their_pages():
 def test_record_run_freezes_trace_bank_and_oneshot_body(tmp_vault, monkeypatch, tmp_path):
     """The frozen file carries everything replay needs, and the recorded note
     is arm A: composition is disabled for the duration of the run."""
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
 
     def fake_run_agent(messages, model, tool_progress_callback=None,
                        constraints=None, **kw):

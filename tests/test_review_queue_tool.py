@@ -15,7 +15,7 @@ from silica.tools import TOOLS
 
 @pytest.fixture
 def log(tmp_path, monkeypatch):
-    import silica.kernel.report.quiz as quiz
+    from silica.kernel.learn import quiz
 
     p = tmp_path / "quiz.jsonl"
     monkeypatch.setattr(quiz, "log_path", lambda: p)

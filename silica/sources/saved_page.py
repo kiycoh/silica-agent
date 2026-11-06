@@ -97,7 +97,7 @@ def saved_copies(handle: str, vault: Path | None = None) -> dict[str, str]:
     is not found and its link stays a web link; widen to every note's
     `source:` if moved copies turn out common."""
     from silica.kernel.publish import frontmatters
-    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.base.manifest import in_write_dir
 
     folder = in_write_dir(f"{SAVED_DIR}/@{handle}") + "/"
     out: dict[str, str] = {}
@@ -128,8 +128,8 @@ def _credit(props: dict, handle: str, url: str) -> tuple[str, str]:
 
 def prepare(url: str, vault: Path | None = None) -> dict:
     """What the confirm card shows, and the note it would write."""
-    from silica.kernel.vault_manifest import in_write_dir
-    from silica.kernel.write import frontmatter as fm
+    from silica.kernel.base.manifest import in_write_dir
+    from silica.kernel.base import frontmatter as fm
 
     url, handle, slug = page_of(url)
     text = _fetch_markdown(url)
@@ -254,8 +254,8 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
     already saved from this vault stays as it is and is counted, not written:
     a reader saves a vault in pieces, and the notes of one vault share one
     folder (ADR-0151, amendment of 2026-11-06, point 10)."""
-    from silica.kernel.vault_manifest import in_write_dir
-    from silica.kernel.write import frontmatter as fm
+    from silica.kernel.base.manifest import in_write_dir
+    from silica.kernel.base import frontmatter as fm
 
     if files is None:
         url, handle, vslug = vault_of(url)

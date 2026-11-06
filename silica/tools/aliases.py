@@ -98,7 +98,7 @@ def _propose_groups(titles: list[str], config: Any) -> dict:
 
 def _propose_groups_single(titles: list[str], config: Any) -> dict:
     """One LLM call over one title chunk → {canonical: [variants]}."""
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
     from silica.kernel.text.sanitize import parse_json
 
     system_prompt = (
@@ -183,7 +183,7 @@ def silica_aliases(apply: Annotated[bool, Field(description='If True, write the 
 
     from silica.agent.bounds import alias_consolidation_bounds
     from silica.agent.commit import commit_ops
-    from silica.kernel.write.frontmatter import add_alias
+    from silica.kernel.base.frontmatter import add_alias
     from silica.kernel.write.ops import Op, OpType
 
     path_by_title = {r.name.lower(): r.path for r in scoped_refs if getattr(r, "name", "")}

@@ -1803,7 +1803,7 @@ _LEAF = ("@smith2024.md", {"zotero_key": "ABCD1234", "citekey": "smith2024",
 
 
 def _read_split(rel):
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     return frontmatter.split((Path(CONFIG.vault_path) / rel).read_text(encoding="utf-8"))
 
 
@@ -1942,7 +1942,7 @@ def test_csv_profile_carries_documents_edge_inside_a_repo(tmp_vault):
 
     [note_rel] = conv.convert(str(p))
 
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     data, _, _ = frontmatter.split(_inbox_note(note_rel).read_text(encoding="utf-8"))
     assert data["documents"] == ["data/m.csv"]     # repo-relative, the graph keyspace
     assert data.get("code_ref")                    # arms /stale for tracked files
@@ -1954,7 +1954,7 @@ def test_csv_profile_outside_a_repo_gets_no_documents_edge(tmp_vault):
 
     [note_rel] = conv.convert(str(p))
 
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     data, _, _ = frontmatter.split(_inbox_note(note_rel).read_text(encoding="utf-8"))
     assert "documents" not in (data or {})
 

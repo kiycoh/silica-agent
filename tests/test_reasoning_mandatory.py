@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 import litellm
 
-from silica.agent.llm import call_llm
+from silica.model.llm import call_llm
 from tests.llm_mocks import litellm_mock_response
 
 _REFUSAL = ('OpenrouterException - {"error":{"message":"Reasoning is mandatory '
@@ -29,7 +29,7 @@ def _refuses_the_knob(**kwargs):
 
 
 def test_refused_knob_falls_back_to_thinking_on():
-    from silica.agent import llm as llm_mod
+    from silica.model import llm as llm_mod
 
     llm_mod._REASONING_MANDATORY.discard("openrouter/test/model")
     with patch("litellm.completion", side_effect=_refuses_the_knob) as completion:
@@ -42,7 +42,7 @@ def test_refused_knob_falls_back_to_thinking_on():
 
 
 def test_refusal_is_remembered_so_it_is_paid_once():
-    from silica.agent import llm as llm_mod
+    from silica.model import llm as llm_mod
 
     llm_mod._REASONING_MANDATORY.discard("openrouter/test/model")
     with patch("litellm.completion", side_effect=_refuses_the_knob):
@@ -59,7 +59,7 @@ def test_other_bad_requests_still_raise():
     """Only the reasoning refusal is absorbed — a wrong model id must surface."""
     import pytest
 
-    from silica.agent import llm as llm_mod
+    from silica.model import llm as llm_mod
 
     llm_mod._REASONING_MANDATORY.discard("openrouter/test/model")
 
@@ -76,7 +76,7 @@ def test_other_bad_requests_still_raise():
 def test_custom_endpoint_gets_the_llama_cpp_thinking_switch():
     """The openrouter knob never reached a local server: Learn's item call on
     llama-server Qwen3.5-9B thought for 65 s and answered "" (2026-10-06)."""
-    from silica.agent import llm as llm_mod
+    from silica.model import llm as llm_mod
 
     llm_mod._REASONING_MANDATORY.discard("custom/qwen-local")
     with patch("litellm.completion", return_value=litellm_mock_response("ok")) as completion:
@@ -90,7 +90,7 @@ def test_custom_endpoint_gets_the_llama_cpp_thinking_switch():
 
 
 def test_custom_host_that_rejects_the_switch_is_retried_without():
-    from silica.agent import llm as llm_mod
+    from silica.model import llm as llm_mod
 
     llm_mod._REASONING_MANDATORY.discard("custom/strict-host")
 
@@ -122,7 +122,7 @@ def test_sdk_retries_reach_the_client():
 def test_a_model_on_anthropic_gets_room_for_the_thinking_the_knob_cannot_stop():
     """The knob reaches OpenRouter only, and Sonnet 5.5 thinks by default inside
     max_tokens: at 2,200 it ended 10 of 18 reading cards mid-sentence."""
-    from silica.agent import llm as llm_mod
+    from silica.model import llm as llm_mod
 
     msgs = [{"role": "user", "content": "hi"}]
     with patch("litellm.completion", return_value=litellm_mock_response("ok")) as completion:

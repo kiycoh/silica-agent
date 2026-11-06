@@ -243,7 +243,7 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
     singletons, sweep and CONFIG are never touched — this is the memory lane
     (ADR-0019) pointed where the caller says, not a vault switch.
     """
-    from silica.agent.providers import get_embedder, get_reranker
+    from silica.model.providers import get_embedder, get_reranker
     from silica.config import CONFIG
     from silica.kernel.recall.cooccurrence import get_cooccur_store
     from silica.kernel.recall.embed import get_store
@@ -288,7 +288,7 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
         except Exception as exc:
             query_vec = None  # embed leg abstains; co-occurrence may still carry
             if leg_stats is not None:
-                from silica.agent.providers import why_of
+                from silica.model.providers import why_of
 
                 leg_stats.setdefault("degraded", {}).setdefault("embed", why_of(exc))
 
@@ -356,7 +356,7 @@ def _read_dated_body(path: str, origin: str = "vault") -> tuple[
                 path if path.endswith(".md") else path + ".md").content or ""
         except Exception:
             return "", None, None, [], "", "active", False, []
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     data, _raw, body = frontmatter.split(content)
     # data is None for a body-only note (no frontmatter) or a YAML error —
@@ -398,7 +398,7 @@ def _recall_facts(perception: Perception, query: str, query_vec, *, now: str,
         embedder = query_model = None
         if use_embedder:
             try:
-                from silica.agent.providers import get_embedder
+                from silica.model.providers import get_embedder
                 from silica.config import CONFIG
                 from silica.kernel.recall.embed import embedder_identity
 
@@ -465,7 +465,7 @@ def _resolver():
     context, never a crash on the answer path."""
     try:
         from silica.driver import DRIVER
-        from silica.kernel.recall.mindmap import note_resolver
+        from silica.kernel.graph.mindmap import note_resolver
 
         base = note_resolver()
         aliases = {a.strip().lower() for _p, al in DRIVER.alias_index() for a in al}

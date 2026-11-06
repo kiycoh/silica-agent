@@ -4,7 +4,7 @@ inter_cluster, the /shape matrix and the gap/bridge ranking used to count the
 same contingency table in three loops that agreed by hand."""
 import pytest
 
-from silica.kernel.recall.graph_export import area_hubs, area_tally
+from silica.kernel.graph.graph_export import area_hubs, area_tally
 
 
 def _clique(prefix, n, group):
@@ -48,7 +48,7 @@ def test_the_report_names_the_hub_the_tally_does_not_the_directed_degree_one(mon
     728-note vault 6 of 103 areas got two names. Here f has four mutual links
     (directed 9, pairs 5) and a six plain ones (directed 6, pairs 6). One area
     by fiat: Louvain splits every small graph that shows the difference."""
-    from silica.kernel.recall import graph_export as ge
+    from silica.kernel.graph import graph_export as ge
     from silica.kernel.report.graph_report import compute as cm
 
     def one_area(nodes, edges):
@@ -88,7 +88,7 @@ def test_the_report_the_matrix_and_the_ranking_read_one_tally(client, tmp_vault)
     tmp_vault.note("D.md", "[[E]] [[F]] [[C]]")
     tmp_vault.note("E.md", "[[D]] [[F]]")
     tmp_vault.note("F.md", "[[D]] [[E]]")
-    from silica.kernel.recall.graph_export import build_graph_data, detect_communities
+    from silica.kernel.graph.graph_export import build_graph_data, detect_communities
     from silica.kernel.report.graph_report.compute import compute_report
 
     nodes, edges = build_graph_data(folder="")

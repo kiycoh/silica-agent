@@ -291,7 +291,7 @@ def load_question_vault(vault: Path, inst: dict, distill: bool = False,
     if reuse:
         existing = sorted(sess_dir.glob("s*.md")) if sess_dir.is_dir() else []
         if _shared.corpus_reusable(vault, fields, present=len(existing)):
-            from silica.kernel.write import frontmatter
+            from silica.kernel.base import frontmatter
 
             index = {}
             for f in existing:

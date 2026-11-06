@@ -6,7 +6,7 @@ Jev decides, one typed choice per block, and the chat model answers only when
 Jev answers nothing.
 
 The two legs come in as arguments, `decide(state, questions)` with
-agent/decide.py's contract and `chat(prompt) -> str`, so the kernel stays clear
+model/decide.py's contract and `chat(prompt) -> str`, so the kernel stays clear
 of the agent and a test hands in a dict.
 """
 from __future__ import annotations

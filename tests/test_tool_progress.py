@@ -3,9 +3,9 @@ from silica.config import CONFIG
 from silica.cli import _handle_slash_command
 from silica.ui.renderer import make_progress_callback, _redact
 from silica.ui.console import CONSOLE
-from silica.agent.events import ToolStartEvent, ToolCompleteEvent, ToolErrorEvent
+from silica.obs.events import ToolStartEvent, ToolCompleteEvent, ToolErrorEvent
 from silica.agent.loop import run_agent
-from silica.agent.llm import _LOCAL_LLM_TIMEOUT, LLMResponse, ToolCall
+from silica.model.llm import _LOCAL_LLM_TIMEOUT, LLMResponse, ToolCall
 from silica.tools import TOOLS
 
 def test_verbose_slash_command_cycle():
@@ -159,7 +159,7 @@ def test_web_fetches_are_never_collapsed_into_one_line(capsys, monkeypatch):
     what a future tidy-up of `_flush_ok_run` would silently undo, taking the
     feature with it while the suite stayed green.
     """
-    from silica.agent.events import ThinkingEndEvent
+    from silica.obs.events import ThinkingEndEvent
 
     monkeypatch.setattr(CONSOLE, "_force_terminal", True)
     monkeypatch.setattr(CONFIG, "tool_progress", "new")
@@ -178,7 +178,7 @@ def test_web_fetches_are_never_collapsed_into_one_line(capsys, monkeypatch):
 
 
 def test_reasoning_event_renders_when_enabled(capsys):
-    from silica.agent.events import ReasoningEvent
+    from silica.obs.events import ReasoningEvent
     from silica.ui.renderer import make_progress_callback
     orig_thinking = CONFIG.show_thinking
     orig_tool_progress = CONFIG.tool_progress
@@ -230,7 +230,7 @@ def test_reasoning_event_renders_when_enabled(capsys):
 
 @patch("litellm.completion")
 def test_llm_captures_reasoning(mock_completion):
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     
     mock_message = MagicMock()
     mock_message.content = "My answer"
@@ -281,7 +281,7 @@ def test_llm_captures_reasoning(mock_completion):
 
 @patch("litellm.completion")
 def test_llm_openrouter_include_reasoning(mock_completion, monkeypatch):
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
 
     # Pin the output budget: the expected max_tokens must not track the
     # developer's .env MAX_TOKENS.
@@ -440,8 +440,8 @@ def _make_mock_batch(kind: str = "refine") -> dict:
 
 
 def test_batch_micro_phase_tracked_from_work_feedback(monkeypatch):
-    import silica.agent.bus as bus_mod
-    from silica.agent.events import WorkFeedbackEvent
+    from silica.obs import bus as bus_mod
+    from silica.obs.events import WorkFeedbackEvent
     from silica.ui.renderer import make_progress_callback
 
     # Logic-only test: pin off-terminal so the batch panel (full of MagicMocks)
@@ -463,8 +463,8 @@ def test_batch_micro_phase_tracked_from_work_feedback(monkeypatch):
 
 
 def test_batch_micro_phase_ignored_for_wrong_kind():
-    import silica.agent.bus as bus_mod
-    from silica.agent.events import WorkFeedbackEvent
+    from silica.obs import bus as bus_mod
+    from silica.obs.events import WorkFeedbackEvent
     from silica.ui.renderer import make_progress_callback
 
     orig_bus = bus_mod.BUS
@@ -484,8 +484,8 @@ def test_batch_micro_phase_ignored_for_wrong_kind():
 
 def test_batch_micro_phase_resets_on_ledger_next_complete(monkeypatch):
     import json
-    import silica.agent.bus as bus_mod
-    from silica.agent.events import WorkFeedbackEvent, ToolCompleteEvent
+    from silica.obs import bus as bus_mod
+    from silica.obs.events import WorkFeedbackEvent, ToolCompleteEvent
     from silica.ui.renderer import make_progress_callback
 
     # Logic-only test: pin off-terminal (see sibling) to avoid rendering MagicMocks.
@@ -525,8 +525,8 @@ def test_batch_bar_advances_per_ledger_update_not_per_next(monkeypatch):
     completions would undercount a 5-task run as 1. The bar counts the
     per-task ledger_update instead."""
     import json
-    import silica.agent.bus as bus_mod
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs import bus as bus_mod
+    from silica.obs.events import ToolCompleteEvent
     from silica.ui.renderer import make_progress_callback
 
     monkeypatch.setattr(CONSOLE, "_force_terminal", False)
@@ -587,7 +587,7 @@ def test_injector_progress_not_given_its_own_live():
     progress bar above the panel on small consoles. The outer self._live drives it."""
     from unittest.mock import patch
     from rich.console import Console
-    from silica.agent.events import ToolStartEvent
+    from silica.obs.events import ToolStartEvent
     from silica.ui.renderer import make_progress_callback
 
     orig_mode = CONFIG.tool_progress
@@ -609,7 +609,7 @@ def test_injector_single_file_has_no_bar():
     """A 0/1→1/1 bar is noise: the file bar only appears for multi-file runs."""
     from unittest.mock import patch
     from rich.console import Console
-    from silica.agent.events import ToolStartEvent
+    from silica.obs.events import ToolStartEvent
     from silica.ui.renderer import make_progress_callback
 
     orig_mode = CONFIG.tool_progress
@@ -627,7 +627,7 @@ def test_injector_single_file_has_no_bar():
 
 
 def _phase(phase, status, *, scope="chunk", fi=0, ft=1, ci=0, ct=0, src="", elapsed=None):
-    from silica.agent.events import PhaseEvent
+    from silica.obs.events import PhaseEvent
     return PhaseEvent(phase=phase, status=status, scope=scope, file_idx=fi,
                       file_total=ft, chunk_idx=ci, chunk_total=ct,
                       source_file=src, elapsed=elapsed)
@@ -760,7 +760,7 @@ def test_failed_chunk_records_its_phase():
 def test_injector_bar_total_is_file_count():
     from unittest.mock import patch
     from rich.console import Console
-    from silica.agent.events import ToolStartEvent
+    from silica.obs.events import ToolStartEvent
     from silica.ui.renderer import make_progress_callback
 
     orig_mode = CONFIG.tool_progress
@@ -840,7 +840,7 @@ def test_injector_summary_shows_yield(capsys):
     import json
     from unittest.mock import patch
     from rich.console import Console
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
     from silica.ui.renderer import make_progress_callback
 
     orig_mode = CONFIG.tool_progress
@@ -874,7 +874,7 @@ def test_injector_projection_carries_yield_counts():
     from unittest.mock import MagicMock, patch as _patch
 
     with _patch("silica.router.coordinator.Coordinator") as Coord, \
-         _patch("silica.kernel.vault_manifest.get_active_manifest") as manifest, \
+         _patch("silica.kernel.base.manifest.get_active_manifest") as manifest, \
          _patch("silica.sources.registry.adapter_for", return_value=object()):
         manifest.return_value.sources = []
         inst = MagicMock()

@@ -329,7 +329,7 @@ def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
 
     substrate: str | None = None
     try:
-        from silica.kernel.recall.run_substrate import build_substrate
+        from silica.router.run_substrate import build_substrate
         substrate = build_substrate(
             enriched_chunk,
             manifest_titles=fsm.manifest.titles(),
@@ -436,7 +436,7 @@ def _segment_title(inbox_file: str) -> str | None:
     """The `segment_title` convert writes on each segment of a split source,
     or None: the spine is then named after the file, as before."""
     from silica.driver import DRIVER
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     try:
         data, _, _ = frontmatter.split(DRIVER.read_note(inbox_file).content or "")

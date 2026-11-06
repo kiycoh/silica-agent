@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from silica.config import CONFIG
-from silica.kernel.vault_manifest import (
+from silica.kernel.base.manifest import (
     apply_manifest_to_config,
     get_active_manifest,
     load_manifest,

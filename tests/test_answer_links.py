@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from silica.agent.recall_watch import READS_KEY, read_refs
-from silica.kernel.recall.mindmap import _matches_in, _resolve_in, answer_resolver
+from silica.kernel.graph.mindmap import _matches_in, _resolve_in, answer_resolver
 
 PATHS = ["Corso B/Lezione 16.md", "Inbox/ml/Lezione 16.md", "Inbox/ml/Lezione 6.md",
          "Percettrone.md", "ML.md"]
@@ -91,6 +91,6 @@ def test_read_refs_names_this_turn_only_and_survives_a_stubbed_result():
 
 
 def test_reads_never_reach_the_provider():
-    from silica.agent.providers import INTERNAL_KEYS
+    from silica.model.providers import INTERNAL_KEYS
 
     assert READS_KEY in INTERNAL_KEYS

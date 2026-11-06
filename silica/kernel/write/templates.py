@@ -12,8 +12,8 @@ import re
 
 import yaml
 
-from silica.kernel.write import frontmatter
-from silica.kernel.write.frontmatter import clean_tag  # canonical; do not redefine
+from silica.kernel.base import frontmatter
+from silica.kernel.base.frontmatter import clean_tag  # canonical; do not redefine
 
 logger = logging.getLogger(__name__)
 
@@ -307,7 +307,7 @@ def resolve_template(name: str | None = None) -> str:
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
 
     conv = get_active_manifest().conventions
     tdir = Path((getattr(CONFIG, "vault_path", "") or "").strip()) / conv.templates_dir

@@ -33,7 +33,7 @@ DAY = 86400.0
 
 def key_of(path: str) -> str:
     """The join keyspace: quiz.key (posix, no .md, casefolded)."""
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     return quiz.key(path)
 
@@ -55,7 +55,7 @@ def _note_meta(text: str, mtime: float) -> tuple[float, bool, str, dict]:
     AttentionCandidate already lives with. The type rides along so the
     pickers can keep plan and syllabus notes out of the study material.
     """
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.write.contested import note_clock
 
     data, _raw, _body = frontmatter.split(text)
@@ -120,7 +120,7 @@ def parsed_note(vault: Path, path: str, *, body: bool = True) -> tuple[Any, str]
     second copy of the vault, 102 MiB of t20's 1 GB before anyone opened Learn
     (2026-11-06). body=False is for a caller that wants the frontmatter alone:
     a hit then opens no file, and the body comes back empty."""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     f = vault / path
     try:
@@ -278,7 +278,7 @@ def prerequisites_map() -> dict[str, list[str]]:
             return hit[1]
 
         from silica.kernel.recall.cooccurrence import get_cooccur_store
-        from silica.kernel.recall.graph_export import build_graph_data, edge_graph
+        from silica.kernel.graph.graph_export import build_graph_data, edge_graph
         from silica.kernel.report.graph_report.compute import _empty_report
         from silica.kernel.report.graph_report.cooccur_delta import _compute_cooccur_variables
 
@@ -486,7 +486,7 @@ def review_queue(
     calibration read /learn builds a syllabus from. `planned` narrows global
     mode as off_plan_dropped says: pass `plans.planned_paths()`.
     """
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     entries = _entries_override if _entries_override is not None else quiz.entries()
     notes_meta = _notes_override

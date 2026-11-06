@@ -8,9 +8,9 @@ import pytest
 from unittest.mock import MagicMock, patch
 from pydantic import BaseModel
 
-from silica.agent.providers import get_provider, Provider
+from silica.model.providers import get_provider, Provider
 from silica.config import PROVIDER_PREFIXES
-from silica.agent.llm import LLMResponse
+from silica.model.llm import LLMResponse
 
 
 class DummyConfig:
@@ -120,8 +120,8 @@ class TestProviders(unittest.TestCase):
     def test_provider_forwards_every_argument_to_the_llm_layer(self):
         """The whole class is a delegation now: anything it drops is a feature
         the distiller/worker lane silently loses."""
-        from silica.agent import llm as llm_mod
-        from silica.agent.providers import Provider
+        from silica.model import llm as llm_mod
+        from silica.model.providers import Provider
 
         captured: dict = {}
 
@@ -158,8 +158,8 @@ class TestProviders(unittest.TestCase):
     def test_provider_sends_no_api_key_when_it_has_none(self):
         """An empty key must arrive as None, not "": litellm treats the empty
         string as an explicit credential and stops resolving the env var."""
-        from silica.agent import llm as llm_mod
-        from silica.agent.providers import Provider
+        from silica.model import llm as llm_mod
+        from silica.model.providers import Provider
 
         captured: dict = {}
 
@@ -174,8 +174,8 @@ class TestProviders(unittest.TestCase):
         self.assertIsNone(captured["api_key"])
 
     def test_unstructured_call_sends_no_temperature(self):
-        from silica.agent import llm as llm_mod
-        from silica.agent.providers import Provider
+        from silica.model import llm as llm_mod
+        from silica.model.providers import Provider
 
         captured: dict = {}
 
@@ -193,7 +193,7 @@ class TestProviders(unittest.TestCase):
 def test_presets_are_a_subset_of_known_prefixes():
     """Every preset name must be an auto-prefixable provider prefix, else its
     bare model never gets `provider/` prepended and routing silently breaks."""
-    from silica.agent.providers import PROVIDER_PRESETS
+    from silica.model.providers import PROVIDER_PRESETS
     from silica.config import PROVIDER_PREFIXES
 
     assert set(PROVIDER_PRESETS) <= PROVIDER_PREFIXES
@@ -202,7 +202,7 @@ def test_presets_are_a_subset_of_known_prefixes():
 def test_call_llm_custom_routes_via_openai(monkeypatch):
     """A custom/ model reaches litellm as openai/<id> with an explicit api_base,
     since litellm has no `custom/` provider."""
-    from silica.agent import llm
+    from silica.model import llm
 
     captured: dict = {}
 
@@ -243,8 +243,8 @@ def test_call_llm_lmstudio_routes_via_openai(monkeypatch):
     `lm_studio` dialect resolves api_base only from LM_STUDIO_API_BASE — no
     localhost default — so the generic openai/ route with the preset URL is
     the only self-contained path."""
-    from silica.agent import llm
-    from silica.agent.providers import PROVIDER_PRESETS
+    from silica.model import llm
+    from silica.model.providers import PROVIDER_PRESETS
 
     captured: dict = {}
 
@@ -280,7 +280,7 @@ def test_call_llm_lmstudio_routes_via_openai(monkeypatch):
 def test_call_llm_ollama_routes_via_ollama_chat(monkeypatch):
     """An ollama/ model reaches litellm as ollama_chat/<id> so tool calls use
     /api/chat (native) rather than /api/generate (prompt-emulated)."""
-    from silica.agent import llm, providers
+    from silica.model import llm, providers
 
     captured: dict = {}
 
@@ -330,8 +330,8 @@ def test_get_provider_ollama_avoids_the_v1_endpoint(monkeypatch):
     model at 4096), so the distiller path must go through /api/chat instead."""
     from types import SimpleNamespace
     from pydantic import BaseModel
-    from silica.agent import llm as llm_mod
-    from silica.agent import providers
+    from silica.model import llm as llm_mod
+    from silica.model import providers
 
     monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
     config = SimpleNamespace(provider="ollama", model="ollama/gemma3:4b")
@@ -376,7 +376,7 @@ def test_get_provider_ollama_avoids_the_v1_endpoint(monkeypatch):
     ],
 )
 def test_ollama_base_url_honours_ollama_host(env, expected, monkeypatch):
-    from silica.agent.providers import _ollama_base_url
+    from silica.model.providers import _ollama_base_url
 
     monkeypatch.delenv("OLLAMA_HOST", raising=False)
     if env is not None:
@@ -387,19 +387,19 @@ def test_ollama_base_url_honours_ollama_host(env, expected, monkeypatch):
 @pytest.fixture
 def fresh_warn_state():
     """warn_down_once dedups per process; each test needs a clean slate."""
-    from silica.agent import providers
+    from silica.model import providers
 
     providers._warned_down.clear()
     yield
     providers._warned_down.clear()
 
 
-@patch("silica.agent.providers.openai.OpenAI")
+@patch("silica.model.providers.openai.OpenAI")
 def test_embedder_on_openrouter_sends_the_models_own_pin(mock_openai_cls, monkeypatch):
     """The pilot's zero-retention pin for the index lives in
     OPENROUTER_PROVIDER_BY_MODEL like the chat's; the chat's provider ORDER is
     not an embedding provider and must not follow. A local server gets nothing."""
-    from silica.agent.providers import OpenAIEmbedder
+    from silica.model.providers import OpenAIEmbedder
     from silica.config import CONFIG
 
     monkeypatch.setattr(CONFIG, "openrouter_provider_by_model",
@@ -420,9 +420,9 @@ def test_embedder_on_openrouter_sends_the_models_own_pin(mock_openai_cls, monkey
     assert mock_client.embeddings.create.call_args.kwargs["extra_body"] is None
 
 
-@patch("silica.agent.providers.openai.OpenAI")
+@patch("silica.model.providers.openai.OpenAI")
 def test_embedder_counts_what_a_metered_index_costs(mock_openai_cls, monkeypatch):
-    from silica.agent import providers
+    from silica.model import providers
 
     events = []
     monkeypatch.setattr(providers, "emit", lambda name, **kw: events.append((name, kw)))
@@ -435,17 +435,17 @@ def test_embedder_counts_what_a_metered_index_costs(mock_openai_cls, monkeypatch
     assert events[0][0] == "embed" and events[0][1]["usd"] == 2.5e-7 and events[0][1]["tokens"] == 3
 
 
-@patch("silica.agent.providers.openai.OpenAI")
+@patch("silica.model.providers.openai.OpenAI")
 def test_embedder_down_warns_once_and_still_raises(mock_openai_cls, caplog, fresh_warn_state):
     """A down embedder degrades recall silently — the warning is what says so."""
-    from silica.agent.providers import OpenAIEmbedder
+    from silica.model.providers import OpenAIEmbedder
 
     mock_client = MagicMock()
     mock_openai_cls.return_value = mock_client
     mock_client.embeddings.create.side_effect = ConnectionError("connection refused")
 
     embedder = OpenAIEmbedder(base_url="http://localhost:1234/v1", api_key="k", model="m")
-    with caplog.at_level("WARNING", logger="silica.agent.providers"):
+    with caplog.at_level("WARNING", logger="silica.model.providers"):
         for _ in range(2):
             # Callers keep their own fail-open guards: the exception must survive.
             with pytest.raises(ConnectionError):
@@ -456,15 +456,15 @@ def test_embedder_down_warns_once_and_still_raises(mock_openai_cls, caplog, fres
     assert "embedder unreachable at http://localhost:1234/v1" in warnings[0].getMessage()
 
 
-@patch("silica.agent.providers.httpx.post")
+@patch("silica.model.providers.httpx.post")
 def test_reranker_down_warns_once_and_abstains(mock_post, caplog, fresh_warn_state):
     """Rerank keeps abstaining (None), but no longer without telling anyone."""
-    from silica.agent.providers import Reranker
+    from silica.model.providers import Reranker
 
     mock_post.side_effect = ConnectionError("connection refused")
     reranker = Reranker(base_url="http://127.0.0.1:1235/v1", model="bge")
 
-    with caplog.at_level("WARNING", logger="silica.agent.providers"):
+    with caplog.at_level("WARNING", logger="silica.model.providers"):
         assert reranker.scores("q", ["a"]) is None
         assert reranker.scores("q", ["b"]) is None
 
@@ -473,11 +473,11 @@ def test_reranker_down_warns_once_and_abstains(mock_post, caplog, fresh_warn_sta
     assert "reranker unreachable at http://127.0.0.1:1235/v1/rerank" in warnings[0].getMessage()
 
 
-@patch("silica.agent.providers.openai.OpenAI")
+@patch("silica.model.providers.openai.OpenAI")
 def test_embedder_wrong_model_is_not_reported_as_down(mock_openai_cls, caplog, fresh_warn_state):
     """A 404 means something IS listening — telling the user to start a server
     would send them after the wrong problem."""
-    from silica.agent.providers import OpenAIEmbedder
+    from silica.model.providers import OpenAIEmbedder
 
     mock_client = MagicMock()
     mock_openai_cls.return_value = mock_client
@@ -489,7 +489,7 @@ def test_embedder_wrong_model_is_not_reported_as_down(mock_openai_cls, caplog, f
     mock_client.embeddings.create.side_effect = not_found
 
     embedder = OpenAIEmbedder(base_url="http://localhost:1234/v1", api_key="k", model="typo-model")
-    with caplog.at_level("WARNING", logger="silica.agent.providers"):
+    with caplog.at_level("WARNING", logger="silica.model.providers"):
         with pytest.raises(openai.NotFoundError):
             embedder.embed(["text"])
 
@@ -498,11 +498,11 @@ def test_embedder_wrong_model_is_not_reported_as_down(mock_openai_cls, caplog, f
     assert "unreachable" not in warning.getMessage()
 
 
-@patch("silica.agent.providers.httpx.post")
+@patch("silica.model.providers.httpx.post")
 def test_reranker_down_then_wrong_model_each_warn_once(mock_post, caplog, fresh_warn_state):
     """Dedup keys on the kind, so the second problem still surfaces once the
     first is fixed — otherwise starting the server would silence the typo."""
-    from silica.agent.providers import Reranker
+    from silica.model.providers import Reranker
 
     reranker = Reranker(base_url="http://127.0.0.1:1235/v1", model="typo-model")
     rejected = MagicMock()
@@ -512,7 +512,7 @@ def test_reranker_down_then_wrong_model_each_warn_once(mock_post, caplog, fresh_
         response=httpx.Response(404, request=httpx.Request("POST", reranker.url)),
     )
 
-    with caplog.at_level("WARNING", logger="silica.agent.providers"):
+    with caplog.at_level("WARNING", logger="silica.model.providers"):
         mock_post.side_effect = httpx.ConnectError("connection refused")
         assert reranker.scores("q", ["a"]) is None
         assert reranker.scores("q", ["a"]) is None  # same kind: deduped
@@ -533,9 +533,9 @@ class ProviderReasoningForwardingTests(unittest.TestCase):
         the dedup judge came back finish=length with its JSON cut mid-string
         (2026-08-23 run, deepseek-v4-flash). The knob exists on llm.call_llm;
         the Provider lane silently dropped it."""
-        import silica.agent.llm as llm_mod
-        from silica.agent.llm import LLMResponse
-        from silica.agent.providers import Provider
+        from silica.model import llm as llm_mod
+        from silica.model.llm import LLMResponse
+        from silica.model.providers import Provider
 
         captured: dict = {}
 
@@ -553,9 +553,9 @@ class ProviderReasoningForwardingTests(unittest.TestCase):
 
     def test_reasoning_defaults_to_provider_choice(self):
         """Unset ⇒ None on the wire, so every other worker keeps its current behaviour."""
-        import silica.agent.llm as llm_mod
-        from silica.agent.llm import LLMResponse
-        from silica.agent.providers import Provider
+        from silica.model import llm as llm_mod
+        from silica.model.llm import LLMResponse
+        from silica.model.providers import Provider
 
         captured: dict = {}
 
@@ -575,7 +575,7 @@ def test_jinja_routes_get_one_leading_system_message(monkeypatch):
     """Qwen3.5's chat template raises on a system message past index 0: on the
     custom/ and lmstudio/ routes the leading block folds into one message and a
     mid-run system note becomes a user turn; hosted routes are sent untouched."""
-    from silica.agent import llm
+    from silica.model import llm
 
     captured = {}
 
@@ -618,7 +618,7 @@ def test_embedder_read_timeout_comes_from_config(monkeypatch):
     # A CPU embedder needs minutes for one 32-note batch, so the 60 s read
     # guard must be a knob: measured 2026-10-02 on 2 ARM cores, /embed of 22
     # notes timed out twice on batch 0 and indexed nothing.
-    from silica.agent.providers import OpenAIEmbedder, get_embedder
+    from silica.model.providers import OpenAIEmbedder, get_embedder
     from silica.config import SilicaConfig
 
     assert OpenAIEmbedder("http://x/v1", "k", "m").client.timeout.read == 60.0

@@ -9,7 +9,7 @@ import inspect
 import pytest
 
 from silica import cli
-from silica.agent.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
+from silica.obs.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
 
 
 def _start(name="silica_dedup"):

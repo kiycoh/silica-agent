@@ -38,7 +38,7 @@ def web(tmp_vault, tmp_path):
 
 def _inbox(tmp_path) -> Path:
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import active_write_dir, resolve_inbox_dir
+    from silica.kernel.base.manifest import active_write_dir, resolve_inbox_dir
 
     rel = resolve_inbox_dir(CONFIG.vault_path, active_write_dir(), CONFIG.inbox_dir or "Inbox")
     inbox = tmp_path / "vault" / rel
@@ -418,7 +418,7 @@ def test_links_and_tags_in_a_body_make_no_node_no_edge_and_no_tag(web, tmp_vault
     """A stranger's `[[Secret]]` in a body made a node of the Explore graph and
     an edge from the mail note, and `#urgent` a tag in the vault."""
     from silica.kernel.link import autolink
-    from silica.kernel.recall.graph_export import build_graph_data
+    from silica.kernel.graph.graph_export import build_graph_data
 
     tc, _ = web
     tmp_vault.note("Notes/Existing.md", "# Existing\n\nThe owner's own note.\n")
@@ -441,7 +441,7 @@ def test_links_and_tags_in_a_body_make_no_node_no_edge_and_no_tag(web, tmp_vault
 
 
 def test_every_link_form_the_graph_reads_is_inert_in_a_body(tmp_vault):
-    from silica.kernel.link.ast import extract_links
+    from silica.kernel.base.markdown import extract_links
 
     body = mail.render(_thread(msg(mid="<a@x.example>", plain=(
         "Wiki [[Secret]] [[Path/To|alias]] [[[Triple]]] and an embed ![[Secret]]\n"
@@ -457,7 +457,7 @@ def test_no_header_a_stranger_wrote_puts_a_link_in_the_note(tmp_vault, tmp_path)
     """The stamp is the note too, and Silica's graph reads its frontmatter:
     a Message-ID, a thread id, a sender, a subject or an attachment name that
     spells a link made an edge from the note."""
-    from silica.kernel.link.ast import extract_links
+    from silica.kernel.base.markdown import extract_links
     from silica.sources.registry import stage
 
     path = write_raw(tmp_path / "hdr.eml", (
@@ -481,7 +481,7 @@ def test_a_link_the_rules_miss_is_caught_by_the_graphs_own_reader():
     """CommonMark lets a destination start on the next line, which the
     per-line rules do not match: the backstop reads the body as the graph
     does and takes every bracket out."""
-    from silica.kernel.link.ast import extract_links
+    from silica.kernel.base.markdown import extract_links
 
     body = mail.render(_thread(msg(mid="<a@x.example>", plain="See [x](\nSecret.md) here.")))
     assert extract_links(body) == [] and "Secret.md" in body

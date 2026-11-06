@@ -84,7 +84,7 @@ def wired(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.kernel.recall.embed.get_store", lambda: es)
     monkeypatch.setattr("silica.kernel.recall.cooccurrence.get_cooccur_store", lambda **_: st)
     monkeypatch.setattr("silica.driver.DRIVER", _fake_driver({"Alpha": "A", "A": "A", "B": "B"}))
-    monkeypatch.setattr("silica.agent.providers.get_reranker", lambda *_a, **_k: None)
+    monkeypatch.setattr("silica.model.providers.get_reranker", lambda *_a, **_k: None)
     spy = _LaneSpy()
     monkeypatch.setattr("silica.kernel.recall.memory_lane.memory_stores", spy)
     return spy
@@ -211,7 +211,7 @@ def test_semantic_search_inbox_filter_spares_memory_origin(monkeypatch):
     ]
     monkeypatch.setattr("silica.kernel.recall.perception.facade_retrieve",
                         lambda *a, **k: (results, None))
-    monkeypatch.setattr("silica.agent.providers.get_reranker", lambda *_a, **_k: None)
+    monkeypatch.setattr("silica.model.providers.get_reranker", lambda *_a, **_k: None)
     from silica.tools.graph import silica_semantic_search
 
     out = silica_semantic_search("q", k=5)

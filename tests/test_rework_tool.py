@@ -59,7 +59,7 @@ def llm(monkeypatch):
         calls.append({"messages": messages, **kw})
         return SimpleNamespace(text="RW " + messages[-1]["content"])
 
-    monkeypatch.setattr("silica.agent.llm.call_llm", fake)
+    monkeypatch.setattr("silica.model.llm.call_llm", fake)
     monkeypatch.setattr("silica.config.CONFIG.decision_model", "")
     return calls
 
@@ -81,7 +81,7 @@ def test_under_the_floor_it_sends_the_text_back_without_a_call(tmp_vault, llm):
 
 def test_a_note_is_reworked_block_by_block_into_a_note_beside_it(tmp_vault, llm, monkeypatch):
     from silica.agent import read_scope
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     monkeypatch.setattr(read_scope, "REQUESTS", read_scope.ContextVar("t", default=()))
     body = "\n\n".join(_para(400) for _ in range(6))
     tmp_vault.note("Lit/Chapter.md", "---\ntags: [x]\n---\n" + body)
@@ -118,7 +118,7 @@ def test_one_failed_block_writes_nothing(tmp_vault, monkeypatch):
         n["i"] += 1
         return SimpleNamespace(text="" if n["i"] == 2 else "ok")
 
-    monkeypatch.setattr("silica.agent.llm.call_llm", flaky)
+    monkeypatch.setattr("silica.model.llm.call_llm", flaky)
     tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(6)))
     out = rework.silica_rework(note="Chapter")
     assert out["ok"] is False and "nothing was written" in out["error"]
@@ -128,7 +128,7 @@ def test_one_failed_block_writes_nothing(tmp_vault, monkeypatch):
 def test_jev_saying_shorter_sends_the_request_back(tmp_vault, llm, monkeypatch):
     monkeypatch.setattr("silica.config.CONFIG.decision_model", "typesafe/jev")
     verdict = {"choice": "shorter", "probabilities": {"shorter": 0.9, "full": 0.1}}
-    monkeypatch.setattr("silica.agent.decide.decide", lambda state, q: {"kind": verdict})
+    monkeypatch.setattr("silica.model.decide.decide", lambda state, q: {"kind": verdict})
     _requests(monkeypatch, "Rielabora [[Chapter]] in una versione più breve")
     tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(3)))
     out = rework.silica_rework(note="Chapter")
@@ -189,7 +189,7 @@ def _outline_llm(monkeypatch, reply):
             raise reply
         return SimpleNamespace(text=reply)
 
-    monkeypatch.setattr("silica.agent.llm.call_llm", fake)
+    monkeypatch.setattr("silica.model.llm.call_llm", fake)
     monkeypatch.setattr("silica.config.CONFIG.decision_model", "")
     return calls
 
@@ -227,7 +227,7 @@ def test_a_failed_outline_still_writes_the_rework(tmp_vault, monkeypatch):
 
 
 def test_a_heading_opening_a_mid_text_block_is_dropped_unless_the_source_opens_with_one(monkeypatch):
-    monkeypatch.setattr("silica.agent.llm.call_llm",
+    monkeypatch.setattr("silica.model.llm.call_llm",
                         lambda model, messages, **kw: SimpleNamespace(text="## Invented\n\nBody."))
     assert rework._rework("words mid-section", "x", "Italian", None) == "Body."
     assert rework._rework("## Real\n\nwords", "x", "Italian", None).startswith("## Invented")
@@ -244,7 +244,7 @@ def test_the_blocks_are_told_the_texts_language_by_name(tmp_vault, llm):
 
 def _jev(monkeypatch, kind, register="readable"):
     monkeypatch.setattr("silica.config.CONFIG.decision_model", "typesafe/jev")
-    monkeypatch.setattr("silica.agent.decide.decide", lambda state, q: {
+    monkeypatch.setattr("silica.model.decide.decide", lambda state, q: {
         "kind": {"choice": kind, "probabilities": {kind: 0.9}},
         "register": {"choice": register, "probabilities": {register: 0.9}}})
 
@@ -290,7 +290,7 @@ def test_a_shorter_version_asked_discursive_says_so_to_the_chat(tmp_vault, llm, 
 
 def test_an_unsure_register_keeps_the_measured_default(tmp_vault, llm, monkeypatch):
     monkeypatch.setattr("silica.config.CONFIG.decision_model", "typesafe/jev")
-    monkeypatch.setattr("silica.agent.decide.decide", lambda state, q: {
+    monkeypatch.setattr("silica.model.decide.decide", lambda state, q: {
         "kind": {"choice": "full", "probabilities": {"full": 0.9}},
         "register": {"choice": "discursive", "probabilities": {"discursive": 0.55}}})
     tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(3)))

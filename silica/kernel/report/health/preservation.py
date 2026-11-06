@@ -20,7 +20,8 @@ from collections.abc import Callable
 
 from silica.kernel.link.autolink import autolink
 from silica.kernel.link.sweep import _prune_related, _unlink_body
-from silica.kernel.write import frontmatter, templates
+from silica.kernel.base import frontmatter
+from silica.kernel.write import templates
 from silica.kernel.write.contested import (
     append_before_superseded,
     mark_contested,

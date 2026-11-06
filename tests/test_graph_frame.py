@@ -119,7 +119,7 @@ def _edge_colors(paper: bool) -> dict[str, str]:
     floor they land on (graph_view's comment on _EDGE_COLOR_SIMILAR_PARTICLE),
     so their luminance is chosen to hide, not to separate.
     """
-    import silica.kernel.recall.graph_export as ge
+    from silica.kernel.graph import graph_export as ge
     import silica.ui.web.graph_view as gv
 
     out = {}
@@ -232,7 +232,7 @@ def _tokens(light: bool) -> dict[str, str]:
 def _edge(kind: str) -> dict:
     """An edge as the server sends it: colour pair and opacity from the
     exporters' own constants (CITES carries none and takes the fallback)."""
-    import silica.kernel.recall.graph_export as ge
+    from silica.kernel.graph import graph_export as ge
     import silica.ui.web.graph_view as gv
 
     pair = {"EXTRACTED": (ge._EDGE_COLOR_EXTRACTED, ge._EDGE_COLOR_EXTRACTED_PAPER, 0.72),
@@ -251,7 +251,7 @@ def _edge(kind: str) -> dict:
 def _run_frame(body: str, *, light: bool, mode: str = "2d") -> object:
     """The frame's edge paint (LINK_ALPHA_2D through linkPaint) and its 2D
     packer, under the globals they read, then `body`, whose last line prints."""
-    import silica.kernel.recall.graph_export as ge
+    from silica.kernel.graph import graph_export as ge
 
     js = _frame_js()
     paint = js[js.index("const LINK_ALPHA_2D"):js.index("// --- 3D: every link in ONE LineSegments")]

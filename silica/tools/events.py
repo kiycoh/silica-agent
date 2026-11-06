@@ -81,7 +81,7 @@ def _free_path(folder: str, stem: str) -> str:
 def event_note_path(title: str, start: str, rrule: str = "") -> dict[str, Any]:
     """The path `create_event` would write right now, for the calendar's quick
     card to name before it saves (ADR-0118 point 1): the note is the event."""
-    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.base.manifest import in_write_dir
 
     stem, err = _event_stem(title.strip(), start, rrule)
     if err:
@@ -100,7 +100,7 @@ def create_event(title: str, start: str, *, end: str = "", rrule: str = "",
     take the `AI: true` floor every model write gets, which Learn reads as
     "written by the AI"."""
     from silica.kernel.calendar.model import validate_event
-    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.base.manifest import in_write_dir
     from silica.kernel.workqueue import path_lease
     from silica.kernel.write import templates as tpl
     from silica.kernel.write.checkpoints import get_checkpoint_store
@@ -165,7 +165,7 @@ def silica_event_update(note: Annotated[str, Field(description='Event note stem 
     from silica.kernel.calendar import reminders as rem
     from silica.kernel.calendar.model import scan_events, validate_event
     from silica.kernel.workqueue import path_lease
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.write.checkpoints import push_landed
     from silica.kernel.write.templates import upsert_props
 
@@ -257,14 +257,14 @@ def silica_agenda(start: Annotated[str, Field(description="Window start: 'today'
 
     log_lines: list[str] = []
     try:
-        from silica.kernel.recall.run_log import tail_log
+        from silica.kernel.write.run_log import tail_log
         log_lines = tail_log(1000, vault_path=str(vault))
     except OSError:
         pass  # no journal yet
 
     review_rows: list[dict] = []
     try:
-        from silica.kernel.report import learner
+        from silica.kernel.learn import learner
         event_paths = {e.path for e in events}
         # Event notes are schedule, not study material: on a fresh vault the
         # picker marks every note unexplored and today's row would flood with

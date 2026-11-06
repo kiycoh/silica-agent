@@ -20,7 +20,7 @@ import threading
 from types import SimpleNamespace
 from typing import Any
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 
 from silica.kernel.text import language
 from silica.kernel.text.media import strip_images

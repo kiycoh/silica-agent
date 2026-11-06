@@ -218,11 +218,11 @@ def _incoming_side(ctx: dict, source_basename: str) -> tuple[int, str | None]:
     it is not. The clock is whatever the source actually states, never today.
     """
     from silica.kernel.recall.paths import SOURCES_DIR
-    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.base.manifest import in_write_dir
     from silica.kernel.write.contested import TIER_DISTILLED, TIER_GROUNDED
     from silica.kernel.write.provenance import source_event_date
 
-    from silica.kernel.vault_manifest import source_key
+    from silica.kernel.base.manifest import source_key
 
     inbox_file = ctx.get("inbox_file") or ""
     # The leaf sits at the source's path under sources/ (ADR-0114); by the bare
@@ -373,7 +373,7 @@ def _note_key(path: str) -> str:
 
 def _is_spine(path: str) -> bool:
     from silica.kernel.outline import SPINE_SECTION
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     rel = path if path.endswith(".md") else path + ".md"
     data, _raw, _body = frontmatter.split(read_or_skip(rel)[0] or "")
@@ -402,7 +402,7 @@ def _record_absorbed_alias(ctx: dict, winner_path: str, hub: str | None) -> None
         return
     try:
         from silica.agent.bounds import dedup_alias_bounds
-        from silica.kernel.write.frontmatter import add_alias
+        from silica.kernel.base.frontmatter import add_alias
 
         prior = read_or_skip(winner_path)[0] or ""
         aliased = add_alias(prior, concept)
@@ -500,7 +500,7 @@ def _route_verdict(
     )
     result.setdefault("rationale", decision.rationale)
     result.setdefault("verdict", decision.verdict)
-    from silica.kernel.vault_manifest import source_key
+    from silica.kernel.base.manifest import source_key
 
     incoming = source_key(ctx["inbox_file"]) if ctx.get("inbox_file") else source_basename
     result.setdefault("provenance", _pair_provenance(candidate_path, incoming))
@@ -615,7 +615,7 @@ def _settle_landed_distinct(item: WorkItem, ctx: dict, decision: DedupDecision) 
     written a second time under a slugified sibling path.
     """
     from silica.agent.bounds import dedup_settle_bounds
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.write.templates import has_related_trace, related_trace, related_unjudged
 
     path = ctx["loser_path"]
@@ -665,7 +665,7 @@ def _clean_twin_bundle(ctx: dict) -> None:
     if not content_hash:
         return
     try:
-        from silica.kernel.recall.deferred import get_deferred_store
+        from silica.kernel.write.deferred import get_deferred_store
         get_deferred_store().remove_op(content_hash, ctx.get("concept", ""))
     except Exception as e:
         logger.debug("dedup: twin bundle cleanup failed (non-fatal): %s", e)
@@ -694,7 +694,7 @@ def _decide_dedup(
     `title_score`) is not shown to the judge (ADR-0079 decision 3): a closeness
     score in front of it pushed it to merge (ADR-0030). The arguments stay so
     callers and probes keep their shape."""
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
     from silica.kernel.text.sanitize import parse_json
 
     prompt = load_prompt("dedup_prompt.txt")
@@ -765,7 +765,7 @@ def _narrate_verdict(decision: DedupDecision, *, raw: str, concept: str, candida
     default reads as `distinct` everywhere downstream, and `judged=False` only
     survives into a note trace when a spoke is born. Here the failure is a
     `failed` beat a reader can grep before the vault shows the damage."""
-    from silica.agent.narration import NARRATOR
+    from silica.obs.narration import NARRATOR
 
     NARRATOR.narrate(
         "dedup/judge", "done" if decision.judged else "failed",
@@ -790,7 +790,7 @@ def _decide_dedup_batch(
     array contract and the numbered concept blocks, so the judging criteria
     cannot drift between the per-item and the family path.
     """
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
 
     prompt = load_prompt("dedup_prompt.txt")
     n = len(concepts)

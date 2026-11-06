@@ -32,7 +32,7 @@ from collections import Counter
 from contextvars import ContextVar
 from types import FrameType
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 
 logger = logging.getLogger(__name__)
 

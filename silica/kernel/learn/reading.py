@@ -150,7 +150,7 @@ def is_spine(path: str) -> bool:
     place, never a prerequisite, written with no call."""
     from silica.kernel.learn import items
     from silica.kernel.outline import SPINE_SECTION
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     data, _raw, _body = frontmatter.split(items.read_note(path))
     return isinstance(data, dict) and str(data.get("section") or "") == SPINE_SECTION
@@ -398,7 +398,7 @@ def answer_held(answer: str, note_text: str) -> bool:
 
 def _body(path: str, limit: int) -> str:
     from silica.kernel.learn import items
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     _d, _r, body = frontmatter.split(items.read_note(path))
     return body.strip()[:limit]
@@ -413,7 +413,7 @@ def _lede(path: str) -> str:
 
 
 def _ask(prompt: str, max_tokens: int) -> str:
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.config import CONFIG
 
     # A cut reply parses as a finished card without its question, so it is never
@@ -515,7 +515,7 @@ def is_copy(text: str, note_text: str) -> bool:
 def note_lede(path_or_text: str, *, is_text: bool = False) -> str:
     """A note's central claim: its first blockquote line, the one-line lede
     a nucleated note opens on; else its first sentence."""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     body = frontmatter.split(path_or_text)[2] if is_text else _body(path_or_text, 20000)
     body = re.sub(r"<!--.*?-->", " ", body, flags=re.S)
@@ -596,7 +596,7 @@ def parse(text: str) -> list[dict]:
     keeps working as long as the `## N. title` headings stay. A reading
     written before the cards (ADR-0132's sections) reads as cards of its
     sections, without a question, until it is rewritten."""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     _d, _r, body = frontmatter.split(text or "")
     cards: list[dict] = []
@@ -721,7 +721,7 @@ def write_one(plan_path: str, step: int, n: int, ask=None) -> None:
     card's call sees what it always saw, its note and the next one, so a card
     written alone reads as one written with the rest."""
     from silica.kernel.learn import items, plans
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     plan = plans.find_plan(plan_path)
     if plan is None:
@@ -802,7 +802,7 @@ def _save(path: str, title: str, body: str, props: dict) -> None:
     """A new reading through the write gate; an existing one as one revertible
     overwrite (the plan note's own path, ADR-0039), frontmatter rewritten."""
     from silica.kernel.learn import plans
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.tools import TOOLS
 
     full = f"# {title}\n\n{body}"
@@ -874,7 +874,7 @@ def state(plan_path: str, step: int) -> dict:
     cards, whether the notes changed since, the reader's answers, the
     minutes and the practice's size."""
     from silica.kernel.learn import items, plans
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     plan = plans.find_plan(plan_path)
     if plan is None:
@@ -969,7 +969,7 @@ def job_status(plan_path: str, step: int) -> dict | None:
     state = rec.get("state")
     out = {"state": state, "done": prog.get("done", 0), "total": prog.get("total", 0),
            "error": rec.get("error", ""), "started": rec.get("started")}
-    from silica.agent import llm
+    from silica.model import llm
 
     out["meter"] = dict(rec.get("meter") or llm.new_meter()) if llm._METER_ON else None
     if state == "done":
@@ -987,7 +987,7 @@ def start(plan_path: str, step: int, ask=None) -> dict:
     counted as any call is, and not on this record."""
     import uuid
 
-    from silica.agent import llm
+    from silica.model import llm
     from silica.config import CONFIG
 
     with _JOBS_LOCK:

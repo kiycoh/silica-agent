@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.vault_manifest import in_write_dir
+from silica.kernel.base.manifest import in_write_dir
 
 
 class _RecordingDriver:
@@ -30,7 +30,7 @@ class _RecordingDriver:
 @pytest.fixture
 def mirror_vault(tmp_path, monkeypatch):
     """A vault declaring `write_dir: silica`, active for the manifest lookups."""
-    import silica.kernel.vault_manifest as vm
+    from silica.kernel.base import manifest as vm
     from silica.config import CONFIG
 
     (tmp_path / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")
@@ -84,7 +84,7 @@ def test_archive_of_a_source_inside_the_boundary_lands_inside_it(mirror_vault, m
 
 def test_no_boundary_leaves_the_archive_at_the_vault_root(tmp_path, monkeypatch):
     """A vault that declares nothing behaves exactly as before."""
-    import silica.kernel.vault_manifest as vm
+    from silica.kernel.base import manifest as vm
     from silica.config import CONFIG
     from silica.tools import wrapped
 
@@ -108,7 +108,7 @@ def test_archive_mirrors_the_inbox_tree(tmp_path, monkeypatch):
     Flattening onto a basename made the move unrecoverable by hand: `/revert`
     records no inverse for it, so the structure is the only undo the user has.
     """
-    import silica.kernel.vault_manifest as vm
+    from silica.kernel.base import manifest as vm
     from silica.config import CONFIG
     from silica.tools import wrapped
 
@@ -130,7 +130,7 @@ def test_archive_keeps_a_legacy_lowercase_done_where_it_is(tmp_path, monkeypatch
     The rename would fork the archive in two on a case-sensitive filesystem,
     leaving half the user's sources under a folder nothing reads any more.
     """
-    import silica.kernel.vault_manifest as vm
+    from silica.kernel.base import manifest as vm
     from silica.config import CONFIG
     from silica.tools import wrapped
 
@@ -256,7 +256,7 @@ def test_safe_mode_patch_is_rebased_onto_the_mirror(mirror_vault, monkeypatch):
 def test_patch_seeds_the_mirror_copy_from_the_original(mirror_vault):
     """The mirror is pasted over the vault, so a patched copy must start as the
     note itself — otherwise the paste drops everything the note already said."""
-    from silica.kernel.vault_manifest import seed_mirror_copy
+    from silica.kernel.base.manifest import seed_mirror_copy
 
     original = mirror_vault / "Matematica" / "PCA.md"
     original.parent.mkdir(parents=True)
@@ -268,7 +268,7 @@ def test_patch_seeds_the_mirror_copy_from_the_original(mirror_vault):
 
 
 def test_seeding_never_overwrites_an_existing_mirror_copy(mirror_vault):
-    from silica.kernel.vault_manifest import seed_mirror_copy
+    from silica.kernel.base.manifest import seed_mirror_copy
 
     (mirror_vault / "Matematica").mkdir()
     (mirror_vault / "Matematica" / "PCA.md").write_text("originale\n", encoding="utf-8")
@@ -298,7 +298,7 @@ def test_collision_prefers_the_original_over_its_mirror_copy(mirror_vault):
 
 
 def test_collision_preference_is_inert_without_safe_mode(tmp_path, monkeypatch):
-    import silica.kernel.vault_manifest as vm
+    from silica.kernel.base import manifest as vm
     from silica.config import CONFIG
     from silica.driver.base import NoteRef
     from silica.tools.pipeline import _prefers
@@ -514,7 +514,7 @@ def test_graph_context_is_keyed_the_way_its_consumers_look_it_up():
     lookup, so the whole graph-context feature was inert — 0 hits in 717 on a
     real vault. Cluster narrowing, hub detection, cross-cluster warnings and the
     distiller's graph_context were all reading an empty answer."""
-    from silica.kernel.recall.graph_export import ctx_from_report
+    from silica.kernel.graph.graph_export import ctx_from_report
 
     class _Cluster:
         cluster_id = 3
@@ -540,7 +540,7 @@ def test_a_cluster_cache_of_the_old_key_shape_is_discarded(tmp_path, monkeypatch
     """Without a version the stale cache is indistinguishable from a fresh one,
     and every consumer would keep missing after the fix."""
     import orjson
-    import silica.kernel.recall.graph_export as ge
+    from silica.kernel.graph import graph_export as ge
 
     p = tmp_path / "cluster_ctx.json"
     monkeypatch.setattr(ge, "cluster_ctx_path", lambda: p)
@@ -571,7 +571,7 @@ def test_staging_hubs_are_not_offered_as_vault_vocabulary():
 
 def test_the_hub_vocabulary_is_capped_like_its_siblings():
     """Unbounded, it could outweigh every other section of the substrate."""
-    from silica.kernel.recall.run_substrate import build_substrate
+    from silica.router.run_substrate import build_substrate
 
     out = build_substrate({"schema_version": 1, "batches": []}, manifest_titles=[],
                           hub_names=[f"Concetto molto lungo numero {i}" for i in range(200)])

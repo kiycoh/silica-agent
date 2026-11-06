@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 from silica.kernel.link.autolink import autolink, build_title_index
 
 # (!?) embed marker, target, optional #anchor, optional |alias

@@ -8,12 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from silica.kernel.vault_manifest import (
-    MANIFEST_REL,
-    load_manifest,
-    set_zotero,
-    unlink_zotero,
-)
+from silica.kernel.base.manifest import MANIFEST_REL, load_manifest, set_zotero, unlink_zotero
 
 
 def _yaml(vault: Path, text: str) -> Path:

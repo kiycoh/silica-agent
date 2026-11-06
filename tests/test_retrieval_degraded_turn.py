@@ -236,7 +236,7 @@ def _resp(text: str = "", calls: list[tuple[str, dict]] | None = None):
 
 def scripted_llm(sent: list):
     """The turn's user text names the plan: `<tool>|<query>|<ctx>|<notes>`."""
-    from silica.agent.providers import _to_wire
+    from silica.model.providers import _to_wire
 
     def call(model, messages, tools=None, **kw):
         # What llm.call_llm hands the provider: the same transform, here.

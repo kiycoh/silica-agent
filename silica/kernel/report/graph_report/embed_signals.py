@@ -50,7 +50,7 @@ def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
     """
     from silica.config import CONFIG
     from silica.driver import DRIVER
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.report.minhash_dedup import banded_duplicate_pairs, minhash_signature
 
     threshold = getattr(CONFIG, "minhash_dup_threshold", 0.6)

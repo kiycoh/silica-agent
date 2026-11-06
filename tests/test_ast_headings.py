@@ -1,6 +1,6 @@
-"""`parse_headings` (kernel/link/ast.py): a note's YAML frontmatter is not a
+"""`parse_headings` (kernel/base/markdown.py): a note's YAML frontmatter is not a
 heading, though its closing `---` is a setext underline to CommonMark."""
-from silica.kernel.link.ast import parse_headings
+from silica.kernel.base.markdown import parse_headings
 
 
 def test_frontmatter_is_not_the_outline_s_first_heading():

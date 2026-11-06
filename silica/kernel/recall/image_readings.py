@@ -255,7 +255,7 @@ def _vault_images() -> dict[str, Path | None]:
 
 def _language(body: str) -> str:
     from silica.kernel.text import language as lang_mod
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
     return (get_active_manifest().conventions.language
             or lang_mod.display_name(lang_mod.detect(body)) or "the language of the note")
 

@@ -121,7 +121,7 @@ class TestGenerateTaxonomyTool:
         from silica.driver.base import NoteRef
         from silica.tools.composed import silica_generate_taxonomy
 
-        with patch("silica.agent.llm.call_llm") as mock_call_llm, \
+        with patch("silica.model.llm.call_llm") as mock_call_llm, \
              patch("silica.driver.DRIVER") as mock_driver:
             
             mock_driver.list_files.return_value = [
@@ -173,7 +173,7 @@ class TestGenerateTaxonomyTool:
             uncategorized="Misc",
         ).to_yaml(save_file)
 
-        with patch("silica.agent.llm.call_llm") as mock_call_llm, \
+        with patch("silica.model.llm.call_llm") as mock_call_llm, \
              patch("silica.driver.DRIVER") as mock_driver:
             mock_driver.list_files.return_value = []
 
@@ -212,7 +212,7 @@ class TestGenerateTaxonomyTool:
 
         save_file = tmp_path / "taxonomy.yaml"  # does not exist yet
 
-        with patch("silica.agent.llm.call_llm") as mock_call_llm, \
+        with patch("silica.model.llm.call_llm") as mock_call_llm, \
              patch("silica.driver.DRIVER") as mock_driver:
             mock_driver.list_files.return_value = []
 

@@ -3,7 +3,7 @@
 
 """Graph viewer — the force-graph HTML emitter for the vault wikilink graph.
 
-Split out of `silica.kernel.recall.graph_export` (which keeps the deterministic *data*
+Split out of `silica.kernel.graph.graph_export` (which keeps the deterministic *data*
 role: build_graph_data / detect_communities). This module owns only the viewer:
 it turns nodes/edges/communities into a fully self-contained HTML file.
 
@@ -41,7 +41,7 @@ from pathlib import Path
 
 # The edge colours ride along so each legend swatch and the edges it stands for
 # cannot drift apart: they were two literals of the same hex until one moved.
-from silica.kernel.recall.graph_export import (
+from silica.kernel.graph.graph_export import (
     _EDGE_COLOR_AMBIGUOUS,
     _EDGE_COLOR_AMBIGUOUS_PAPER,
     _EDGE_COLOR_EXTRACTED,
@@ -429,7 +429,7 @@ def _frame_context(
     ) if n_papers else ""
     missing_row = ""
     if missing:
-        from silica.kernel.recall.citations import MISSING_MIN
+        from silica.sources.citations import MISSING_MIN
 
         missing_row = (
             f'<label class="filter-row" style="margin-top:4px" title="Ids cited by at least '
@@ -530,7 +530,7 @@ def _frame_context(
     # It counts what the matrix counts: a one-note area is a row of zeroes
     # there and a row of noise here, so the 81 of them are one trailing row.
     # The bar is the rail list's reason to exist, the shape of the distribution.
-    from silica.kernel.recall.graph_export import area_hubs, area_tally
+    from silica.kernel.graph.graph_export import area_hubs, area_tally
 
     label_by_id = {n["id"]: n.get("label") or n["id"].rsplit("/", 1)[-1] for n in nodes}
     areas = sorted((c for c in communities if c.size > 1), key=lambda c: (-c.size, c.id))
@@ -763,7 +763,7 @@ def _gap_edges(nodes: list[dict], edges: list[dict], top_k: int = 5) -> list[dic
     amber directional-particle links — WebGL has no dashed line, so motion, not
     a dash pattern, is what sets a gap apart. score rides along for the title map.
     """
-    from silica.kernel.recall.graph_export import structural_gaps
+    from silica.kernel.graph.graph_export import structural_gaps
 
     return [
         {
@@ -796,7 +796,7 @@ def _proposed_edges(G_und, nodes: list[dict], top_k: int = 12) -> list[dict]:
     autolink under, so the layer and the curator cannot disagree about what
     is worth proposing.
     """
-    from silica.kernel.recall.signals import structural_links
+    from silica.kernel.graph.signals import structural_links
 
     ranked = structural_links(G_und, top_k=top_k * 4)
     return _corroborate(
@@ -813,7 +813,7 @@ def _coupled_edges(G_und, nodes: list[dict], top_k: int = 12) -> list[dict]:
     uses, so the layer cannot claim a pair the report does not carry.
     """
     from silica.config import CONFIG
-    from silica.kernel.recall.signals import coupling_adjacency
+    from silica.kernel.graph.signals import coupling_adjacency
     from silica.kernel.report.cowrite import coupling_transactions
 
     ids = {n["id"] for n in nodes if n.get("type") != "ghost"}
@@ -883,7 +883,7 @@ def _corroborate(
     the thing the gates refuted. The store read itself belongs to
     graph_export, which already owns the frame's other label lookups.
     """
-    from silica.kernel.recall.graph_export import shared_concepts
+    from silica.kernel.graph.graph_export import shared_concepts
 
     shared_of = shared_concepts([(u, v) for u, v, _s in pairs])
     out: list[dict] = []
@@ -917,7 +917,7 @@ def _stamp_load_bearing(nodes: list[dict], G_und, bet: dict[str, float]) -> None
 
     Best-effort: a graph nx cannot read leaves every node exactly as it was.
     """
-    from silica.kernel.recall.signals import load_bearing
+    from silica.kernel.graph.signals import load_bearing
     from silica.kernel.report.structure import cut_component_sizes
 
     try:
@@ -950,7 +950,7 @@ def _size_by_links(nodes: list[dict], G_und) -> None:
     said nothing and said it twice with the hub ring. `links` rides along: the
     frame's Key names and Clusters read it, and they must agree with the size.
     """
-    from silica.kernel.recall.graph_export import NATIVE_TYPES
+    from silica.kernel.graph.graph_export import NATIVE_TYPES
 
     native = {n["id"] for n in nodes if n.get("type") in NATIVE_TYPES}
     for n in nodes:
@@ -1067,7 +1067,7 @@ def export_graph(
     success, path, nodes, edges (wikilinks), similar (k-NN), communities,
     unresolved, gaps.
     """
-    from silica.kernel.recall.graph_export import (
+    from silica.kernel.graph.graph_export import (
         build_graph_data,
         canvas_metrics,
         backbone_links,
@@ -1087,7 +1087,7 @@ def export_graph(
     cites: list[dict] = []
     missing: list[dict] = []
     try:
-        from silica.kernel.recall.citations import paper_layer
+        from silica.sources.citations import paper_layer
         cites, missing = paper_layer(nodes)
     except Exception as exc:
         logger.warning("graph_view: citation layer skipped (%s)", exc)
@@ -1097,7 +1097,7 @@ def export_graph(
     outside, covers, covers_meta = _zotero_layer(nodes)
     sim = knn_edges(nodes, k=knn_k)                  # embedding k-NN overlay
     communities = detect_communities(nodes, edges)   # Louvain on the wikilinks
-    from silica.kernel.recall.daily_layer import neutral_lone_dailies
+    from silica.kernel.graph.daily_layer import neutral_lone_dailies
 
     neutral_lone_dailies(nodes)   # a day alone in its community is not a hue
     # The provinces of the atlas, and the ties the layout pulls on (ADR-0136).

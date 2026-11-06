@@ -220,7 +220,7 @@ def commit_ops(
 
         # The write-gate lane (spec §4): what is about to touch the vault and
         # why, narrated from the material this function already computed.
-        from silica.agent import narration as _narr_mod
+        from silica.obs import narration as _narr_mod
         import uuid as _uuid
         _wid = f"w-{_uuid.uuid4().hex[:8]}"
         _narr_mod.NARRATOR.narrate(

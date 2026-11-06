@@ -10,7 +10,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def _fresh_bus(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the global BUS singleton for every test to prevent cross-test contamination."""
-    import silica.agent.bus as bus_mod
+    from silica.obs import bus as bus_mod
     monkeypatch.setattr(bus_mod, "BUS", bus_mod.EventBus())
 
 
@@ -19,7 +19,7 @@ def _fresh_narrator(monkeypatch: pytest.MonkeyPatch):
     """Fresh NARRATOR per test, same contract as _fresh_bus: the singleton
     holds an open file handle + flock, so a leaked one would pin a tmp dir
     (and a beat from one test could land in another's session)."""
-    import silica.agent.narration as narration_mod
+    from silica.obs import narration as narration_mod
     fresh = narration_mod.Narrator()
     monkeypatch.setattr(narration_mod, "NARRATOR", fresh)
     # The ambient span/run are ContextVars set by consume() and the
@@ -75,7 +75,7 @@ def _no_openrouter_key_read(monkeypatch: pytest.MonkeyPatch) -> None:
     hosted test whose failure text holds a 403 would otherwise send the key in
     ~/.silica/.env to openrouter.ai. Port 9 refuses at once, which every caller
     takes as a failed read; tests/test_usage_limits.py serves a fake instead."""
-    import silica.agent.usage_limits as usage_limits
+    from silica.model import usage_limits
     monkeypatch.setattr(usage_limits, "KEY_URL", "http://127.0.0.1:9/api/v1/key")
 
 
@@ -166,7 +166,7 @@ def _restore_tools_registry() -> None:
 def _reset_run_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the process-wide 429 pacing floor so it can't leak between tests
     (a leaked cooldown would make a later real retry sleep for seconds)."""
-    import silica.agent.llm as llm_mod
+    from silica.model import llm as llm_mod
     monkeypatch.setattr(llm_mod, "_run_cooldown", 0.0)
 
 
@@ -222,7 +222,7 @@ def _no_real_llama_props(monkeypatch: pytest.MonkeyPatch) -> None:
     model_limits reads /props for `custom/` (2026-10-12) every custom call's
     max_tokens clamp would hit the live chat server. Unknown, as before.
     tests/test_model_limits.py puts the real function back where it tests it."""
-    monkeypatch.setattr("silica.agent.providers._llama_props_window", lambda base_url: 0)
+    monkeypatch.setattr("silica.model.providers._llama_props_window", lambda base_url: 0)
 
 
 @pytest.fixture(autouse=True)
@@ -397,7 +397,7 @@ def _isolate_cluster_ctx_cache(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Non
     real ~/.silica index AND a cache from one test could leak into the next. Per
     tmp_path keeps each test's cache private and out of the real index.
     """
-    import silica.kernel.recall.graph_export as ge_mod
+    from silica.kernel.graph import graph_export as ge_mod
     monkeypatch.setattr(
         ge_mod, "cluster_ctx_path", lambda: tmp_path / "clusters_ctx.json"
     )
@@ -413,7 +413,7 @@ def _isolate_deferred_store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     ['e']» bundles). Also points the legacy migration source at an empty tmp
     dir so the one-shot adoption never reads the real ~/.silica/deferred.
     """
-    import silica.kernel.recall.deferred as deferred_mod
+    from silica.kernel.write import deferred as deferred_mod
     monkeypatch.setattr(deferred_mod, "_store_dir", lambda: tmp_path / "deferred_store")
     monkeypatch.setattr(deferred_mod, "_LEGACY_DEFERRED_DIR", tmp_path / "deferred_legacy")
     deferred_mod._stores.clear()
@@ -479,7 +479,7 @@ def _reset_manifest_cache() -> None:
     cached manifest — with its vault.yaml-derived conventions — into whichever
     test runs next in the same process.
     """
-    import silica.kernel.vault_manifest as manifest_mod
+    from silica.kernel.base import manifest as manifest_mod
     manifest_mod.reset_manifest_cache()
 
 

@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""_table_column_mismatch (silica/kernel/link/health/lint.py) used to gate a
+"""_table_column_mismatch (silica/kernel/report/health/lint.py) used to gate a
 row on a compound condition (`s.startswith("|") or "|" in s and count>=2`)
 and then immediately re-check `not s.startswith("|")` right after, so the
 second disjunct's headerless-pipe-row branch could never reach the counting
 logic below it — it was always discarded by the very next check. Collapsing
 to the single leading-pipe test changes nothing observable; these pin that."""
-from silica.kernel.link.health import lint
+from silica.kernel.report.health import lint
 
 
 def test_leading_pipe_row_with_wrong_column_count_is_flagged():

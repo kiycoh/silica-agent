@@ -15,7 +15,7 @@ import pytest
 
 import silica.kernel.write.checkpoints as checkpoints
 from silica.kernel.calendar.reminders import load_marks, save_marks
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 from silica.tools.events import silica_agenda, silica_event_create, silica_event_update
 
 
@@ -78,7 +78,7 @@ def test_create_all_day_from_date_only(vault):
 
 
 def test_create_lands_inside_the_write_boundary(vault, monkeypatch):
-    monkeypatch.setattr("silica.kernel.vault_manifest.active_write_dir",
+    monkeypatch.setattr("silica.kernel.base.manifest.active_write_dir",
                         lambda: "silica")
     res = silica_event_create(title="Scoped", start="2026-08-20")
     assert res["path"].startswith("silica/calendar/")
@@ -154,7 +154,7 @@ def test_agenda_review_axis_excludes_event_notes(vault, monkeypatch):
     (vault / "lecture.md").write_text("---\ndate: 2026-08-20\n---\nnotes\n",
                                       encoding="utf-8")
     monkeypatch.setattr(
-        "silica.kernel.report.learner.review_queue",
+        "silica.kernel.learn.learner.review_queue",
         lambda limit=10, **_: [{"path": "calendar/2026-08-20 Dentist.md", "why": "unexplored"},
                                {"path": "lecture.md", "why": "unexplored"}])
     res = silica_agenda()  # review lands on today's row

@@ -99,7 +99,7 @@ def test_an_unparseable_judge_reply_drops_rows_instead_of_zeroing_them(monkeypat
     never mint one — it would push every gate the wrong way and look like data.
     parse_json raises on garbage, so the drop happens one level up in run_arm;
     this pins that the arm swallows it and loses the batch rather than the run."""
-    monkeypatch.setattr("silica.agent.llm.call_llm",
+    monkeypatch.setattr("silica.model.llm.call_llm",
                         lambda **kw: type("R", (), {"text": "not json at all"})())
     notes = [{"key": "a", "title": "A", "body": "b", "chars": 1, "degree": 0}]
     assert run_arm(notes, "m") == {}
@@ -108,7 +108,7 @@ def test_an_unparseable_judge_reply_drops_rows_instead_of_zeroing_them(monkeypat
 def test_out_of_range_indices_are_rejected(monkeypatch):
     """A schema-valid index of 99 (or -1) must not wrap onto another note's key."""
     monkeypatch.setattr(
-        "silica.agent.llm.call_llm",
+        "silica.model.llm.call_llm",
         lambda **kw: type("R", (), {"text": '{"scores": [{"index": 99, "memory": 1,'
                                             '"comprehension": 1, "structure": 1,'
                                             '"application": 1},'

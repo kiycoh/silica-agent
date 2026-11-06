@@ -7,7 +7,7 @@ dropped from the pool."""
 from __future__ import annotations
 
 from silica.kernel.recall.relatedness import RelatedNote, dedupe_mirror_shadows
-from silica.kernel.vault_manifest import reset_manifest_cache
+from silica.kernel.base.manifest import reset_manifest_cache
 
 
 def _activate(tmp_path, monkeypatch, manifest: str):

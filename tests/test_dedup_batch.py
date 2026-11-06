@@ -105,7 +105,7 @@ def test_judge_schema_omits_authoring_fields_unless_spoke_requested():
 
     cfg = SilicaConfig()
     common = {"candidate_name": "N", "candidate_body": "body"}
-    with patch("silica.agent.providers.get_provider", return_value=_Provider()):
+    with patch("silica.model.providers.get_provider", return_value=_Provider()):
         for spoke in (False, True):
             _decide_dedup(cfg, concept="C", excerpt="e", author_spoke=spoke, **common)
             _decide_dedup_batch(cfg, concepts=[{"concept": "C", "excerpt": "e"}],

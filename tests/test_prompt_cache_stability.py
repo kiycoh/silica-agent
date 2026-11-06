@@ -24,8 +24,8 @@ def _capture_messages(**kwargs):
     """Run run_distiller with a fake provider; return the messages sent."""
     provider = MagicMock()
     provider.call_llm.return_value = _fake_response()
-    with patch("silica.agent.providers.get_provider", return_value=provider), \
-         patch("silica.agent.providers.model_limits", return_value=(262144, 8192)):
+    with patch("silica.model.providers.get_provider", return_value=provider), \
+         patch("silica.model.providers.model_limits", return_value=(262144, 8192)):
         run_distiller(payload={"schema_version": 1, "batches": []},
                       target="Notes", **kwargs)
     return provider.call_llm.call_args.kwargs["messages"]

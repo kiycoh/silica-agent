@@ -261,7 +261,7 @@ def _embed(texts: list[str]):
     flat, not a feed that breaks."""
     import numpy as np
 
-    from silica.agent.providers import get_embedder_or_none
+    from silica.model.providers import get_embedder_or_none
     from silica.config import CONFIG
 
     emb = get_embedder_or_none(CONFIG, "discover grouping", level="info")

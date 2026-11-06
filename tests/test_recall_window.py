@@ -16,7 +16,7 @@ BODY = "Kalman filter covariance prediction update gain innovation residual smoo
 
 @pytest.fixture
 def vault(tmp_vault, monkeypatch):
-    import silica.agent.providers as prov
+    from silica.model import providers as prov
     from silica.tools.graph import silica_cooccurrence_refresh
 
     tmp_vault.note("Diary/January.md", "---\ndate: 2026-01-10\n---\n# January\n\n" + BODY)

@@ -181,7 +181,7 @@ def test_build_contribution_reads_only_the_first_max_body_chars():
 
 def test_strip_fences_keyed_on_manifest_sources(monkeypatch):
     from silica.kernel.recall import cooccurrence
-    from silica.kernel import vault_manifest
+    from silica.kernel.base import manifest as vault_manifest
 
     def _manifest(sources):
         return vault_manifest.VaultManifest(sources=sources)

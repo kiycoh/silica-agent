@@ -14,7 +14,8 @@ import math
 
 import pytest
 
-from silica.kernel.recall import daily_layer, embed, graph_export
+from silica.kernel.graph import daily_layer, graph_export
+from silica.kernel.recall import embed
 
 DAILY = """---
 tags:

@@ -264,7 +264,7 @@ def coverage(vault: Path) -> dict:
 
 def _query_vec(query: str):
     """The query embedding, or None when the embedder is unreachable."""
-    from silica.agent.providers import EMBED_ERRORS, get_embedder
+    from silica.model.providers import EMBED_ERRORS, get_embedder
     from silica.config import CONFIG
 
     try:
@@ -288,7 +288,7 @@ def _embed_store(vault: Path):
 def _reranker():
     """The configured cross-encoder, or None. `get_reranker` only constructs a
     client; every failure surfaces later as `scores() is None`."""
-    from silica.agent.providers import get_reranker
+    from silica.model.providers import get_reranker
     from silica.config import CONFIG
 
     return get_reranker(CONFIG)
@@ -305,7 +305,7 @@ def reranker_name(reranker) -> str | None:
 
 
 def _body(vault: Path, path: str) -> str:
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     try:
         _data, _raw, body = frontmatter.split(
@@ -420,7 +420,7 @@ def _brief(vault: Path) -> str:
 def describe(vault: Path, query: str = "", k: int = 3, query_vec=None, reranker=None) -> dict:
     from silica.config import CONFIG
     from silica.kernel.recall.memory_lane import memory_vault
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
 
     v = Path(vault).resolve()
     active = (getattr(CONFIG, "vault_path", "") or "").strip()

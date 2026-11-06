@@ -16,7 +16,7 @@ def _cfg(**over):
 
 
 def test_vision_role_falls_back_to_the_chat_model():
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
 
     assert get_provider(_cfg(), role="vision").model == get_provider(_cfg(), role="router").model
 
@@ -24,7 +24,7 @@ def test_vision_role_falls_back_to_the_chat_model():
 def test_a_vision_model_set_alone_rides_the_chat_provider():
     # Falling back to the router for want of a provider would send the pixels
     # to the text-only chat model this role exists to avoid.
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
 
     assert get_provider(_cfg(vision_model="qwen/qwen3.7-flash-20260727"), role="vision").model == QWEN
 

@@ -22,7 +22,7 @@ ROSS = "Ross (Z-Library).pdf"
 def stats(tmp_vault, tmp_path, monkeypatch):
     """A wiki of a book in two segments, lecture slides, hand notes and pasted images."""
     from silica.kernel.publish import add_vault, set_visibility
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
     from silica.kernel.write.provenance import append_record
 
     monkeypatch.setenv("SILICA_PUBLIC_DIR", str(tmp_path / "public"))

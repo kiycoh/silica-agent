@@ -26,7 +26,7 @@ class _Reply:
 
 
 def _pick_with(monkeypatch, reply: str, source_rel: str = "Inbox/01-src.md"):
-    import silica.agent.llm as llm
+    from silica.model import llm
     from silica.cli import _pick_target_folder
 
     monkeypatch.setattr(llm, "call_llm", lambda *a, **k: _Reply(reply))
@@ -213,7 +213,7 @@ def test_web_search_closes_a_renderer_it_owns(tmp_vault, monkeypatch):
 # --- the injector failure line names the phase that failed ------------------
 
 def test_injector_failure_names_the_failed_phase(monkeypatch):
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
     from silica.config import CONFIG
     from silica.ui.console import CONSOLE
     from silica.ui.renderer import make_progress_callback
@@ -327,7 +327,7 @@ def test_folder_pick_prompt_says_when_the_vault_has_no_folders(tmp_vault, monkey
     nothing. 2026-08-23 run: the model spent 473 tokens of reasoning on "the
     user says 'Existing folders:' but then nothing follows" before guessing.
     An empty census is an answer, and the prompt has to state it."""
-    import silica.agent.llm as llm
+    from silica.model import llm
     from silica.cli import _pick_target_folder
 
     captured: dict = {}
@@ -349,7 +349,7 @@ def test_folder_pick_turns_thinking_off(tmp_vault, monkeypatch):
     """2026-10-12, /nucleate on llama-server Qwen3.5-9B: the pick thought for
     30 s, hit its 2048-token cap with no answer (finish=length, text='') and
     the batch fell back to a full agent turn to choose the folder."""
-    import silica.agent.llm as llm
+    from silica.model import llm
     from silica.cli import _pick_target_folder
 
     captured: dict = {}
@@ -371,7 +371,7 @@ def test_folder_pick_lands_on_the_existing_folder_it_spells_differently(tmp_vaul
     """2026-10-12, three runs of the same 14 lectures, three answers: the 9B
     made a new `machine_learning` beside the vault's `Machine learning`, a 4B
     named the inbox folder itself and the batch fell back to an agent turn."""
-    monkeypatch.setattr("silica.agent.llm.call_llm", lambda *a, **k: _Reply(reply))
+    monkeypatch.setattr("silica.model.llm.call_llm", lambda *a, **k: _Reply(reply))
     from silica.cli import _pick_target_folder
 
     tmp_vault.note("Machine learning/Machine learning.md", "hub\n")
@@ -383,7 +383,7 @@ def test_folder_pick_lands_on_the_existing_folder_it_spells_differently(tmp_vaul
 def test_folder_pick_prompt_names_the_file_not_its_inbox_folder(tmp_vault, monkeypatch):
     """The excerpt header carried `Inbox/machine_learning/Lezione 1.md` and the
     model answered with the folder it read there."""
-    import silica.agent.llm as llm
+    from silica.model import llm
     from silica.cli import _pick_target_folder
 
     captured: dict = {}
@@ -402,7 +402,7 @@ def test_folder_pick_prompt_names_the_file_not_its_inbox_folder(tmp_vault, monke
 
 
 def test_folder_pick_prompt_lists_existing_folders(tmp_vault, monkeypatch):
-    import silica.agent.llm as llm
+    from silica.model import llm
     from silica.cli import _pick_target_folder
 
     captured: dict = {}

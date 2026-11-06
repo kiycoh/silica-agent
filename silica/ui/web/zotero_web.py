@@ -16,7 +16,7 @@ from silica.sources import zotero, zotero_write
 
 
 def _link():
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
 
     return get_active_manifest().zotero
 
@@ -67,7 +67,7 @@ def status() -> dict:
 def link(on: bool) -> dict:
     """Write or remove the `zotero:` block. Raises ZoteroError when there is no
     library to link or another vault already links it (decision 10)."""
-    from silica.kernel.vault_manifest import set_zotero, unlink_zotero
+    from silica.kernel.base.manifest import set_zotero, unlink_zotero
 
     if not on:
         unlink_zotero(CONFIG.vault_path)
@@ -87,7 +87,7 @@ _SETTABLE = {"backlinks": bool, "inbox": str}
 
 
 def setting(key: str, value) -> dict:
-    from silica.kernel.vault_manifest import set_zotero
+    from silica.kernel.base.manifest import set_zotero
 
     kind = _SETTABLE.get(key)
     if kind is None:
@@ -146,9 +146,9 @@ def _inbox_key(zot, value: str) -> str:
 
 
 def _row(item: dict, leaves: dict, det: dict, counts, there: dict | None = None) -> dict:
-    from silica.kernel.recall.citations import norm_id
+    from silica.sources.citations import norm_id
     from silica.kernel.recall.paths import SOURCES_DIR
-    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.base.manifest import in_write_dir
 
     data = item["data"]
     key = item["key"]
@@ -176,7 +176,7 @@ def collection(key: str) -> dict:
     """One collection's papers. The inbox collection also carries the two
     filing suggestions per row; any other is sorted by how often the library
     cites each paper."""
-    from silica.kernel.recall.citations import cited_counts
+    from silica.sources.citations import cited_counts
 
     zot = zotero.client()
     items = _papers(zot, f"/collections/{key}/items/top")
@@ -287,7 +287,7 @@ def paper_context(leaf_rel: str, props: dict, backlinks: list[dict]) -> dict:
     Collections are read live and are [] while Zotero is closed: membership
     is never copied into the vault (decision 10).
     """
-    from silica.kernel.recall.citations import paper_neighbours
+    from silica.sources.citations import paper_neighbours
     from silica.kernel.recall.paths import is_source_leaf
 
     nb = paper_neighbours(leaf_rel) or {"cites": [], "cited_by": [], "missing": [], "labels": {}}
@@ -319,7 +319,7 @@ def paper_context(leaf_rel: str, props: dict, backlinks: list[dict]) -> dict:
 def labels() -> dict[str, str]:
     """{leaf path: "Surname Year"} for every paper leaf: what a read chip in
     chat says instead of the citekey stem. No Zotero call, the leaves suffice."""
-    from silica.kernel.recall.citations import _label_base, _paper_leaves
+    from silica.sources.citations import _label_base, _paper_leaves
 
     return {rel: _label_base(data) for rel, (data, _, _) in _paper_leaves().items()}
 

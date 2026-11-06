@@ -392,7 +392,7 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
                           kept as a best-effort hint for backends that support it.
       delete  → recreate_deleted(path, prior_content=<full body>)
     """
-    from silica.kernel.vault_manifest import seed_mirror_copy
+    from silica.kernel.base.manifest import seed_mirror_copy
 
     ops = parse_ops(ops_data)
     patch_refs: list[NoteRef] = []
@@ -643,7 +643,7 @@ def silica_cleanup(inbox_file: Annotated[str, Field(description='Vault-relative 
     root; empty asks `active_done_dir`, which keeps a pre-2026-08-23 `done/`
     where it is rather than renaming it.
     """
-    from silica.kernel.vault_manifest import archive_path_for, active_write_dir, within
+    from silica.kernel.base.manifest import archive_path_for, active_write_dir, within
 
     write_root = active_write_dir()
     if write_root and not within(inbox_file, write_root):

@@ -24,7 +24,7 @@ from pathlib import Path
 
 # Gated probes (fusion_probe, integrity_probe) live in kernel.health — shared
 # with the silica_health tool; iter_notes re-exported so probes keep one source.
-from silica.kernel.link.health import fusion_probe, integrity_probe, iter_notes  # noqa: F401
+from silica.kernel.report.health import fusion_probe, integrity_probe, iter_notes  # noqa: F401
 from evals.golden import (
     probe_classify,
     probe_correlate,
@@ -333,7 +333,7 @@ def main(argv=None) -> int:
 
     if args.rerank_ab:
         import silica.driver
-        from silica.agent.providers import get_reranker
+        from silica.model.providers import get_reranker
         from silica.config import CONFIG
 
         store, embed_store = _open_stores(vault)

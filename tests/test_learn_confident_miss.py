@@ -48,7 +48,7 @@ def test_a_confident_miss_in_a_session_is_logged_not_shown_and_keeps_the_notes_a
     recs = [x for x in offer._records() if x.get("why") == offer.CONFIDENT_REASON]
     assert len(recs) == 1 and recs[0]["displayed"] is False and recs[0]["session"] == s["id"]
     assert it["path"] not in (learn_routes._LIVE.get("escalated") or set())
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     out = offer.confident_readout(quiz.entries())
     assert out["fires"] == 1 and out["followed_by_miss"] == 0 and out["sessions"] == 1

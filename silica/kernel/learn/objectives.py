@@ -100,7 +100,7 @@ def infer(path: str, text: str | None = None) -> str:
     a contested note asks for a judgement, a procedure for an application,
     a note with relations for an explanation, an atomic note for recall."""
     from silica.kernel.learn import items
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     text = items.read_note(path) if text is None else text
     data, _raw, body = frontmatter.split(text)

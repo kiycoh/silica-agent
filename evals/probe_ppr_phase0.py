@@ -28,7 +28,7 @@ import statistics
 import time
 from pathlib import Path
 
-from silica.kernel.link.health import K, eligible_pairs, wikilink_graph
+from silica.kernel.report.health import K, eligible_pairs, wikilink_graph
 
 HOPS = 3
 ALPHA = 0.5

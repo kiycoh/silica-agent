@@ -62,7 +62,7 @@ def _store_path(vault_path: str | None) -> Path | None:
         return None
     root = Path(resolved)
     try:
-        from silica.kernel.vault_manifest import in_write_dir
+        from silica.kernel.base.manifest import in_write_dir
 
         composed = root / in_write_dir(DEFAULT_PROVENANCE_FILENAME)
     except Exception as exc:
@@ -92,7 +92,7 @@ def source_event_date(source_text: str, seen_override: str | None = None) -> str
     if seen_override:
         return str(seen_override)
     try:
-        from silica.kernel.write import frontmatter
+        from silica.kernel.base import frontmatter
 
         data, _raw, _body = frontmatter.split(source_text or "")
         date = (data or {}).get("date")
@@ -190,7 +190,7 @@ def _source_census(vault_path: str | None, memo_key: tuple | None) -> dict[str, 
     global _census_memo
     import os
 
-    from silica.kernel.vault_manifest import active_done_dir, active_inbox_dir
+    from silica.kernel.base.manifest import active_done_dir, active_inbox_dir
 
     root = resolve_vault_path(vault_path)
     if not root:
@@ -1086,7 +1086,7 @@ def attribute_lines(note: str, source: str, label: str) -> str:
     it attributes), everything from `## Sources` or `## Superseded` onward, and
     any line already carrying this label — re-running over a note is a no-op.
     """
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     if not label or not source.strip():
         return note
@@ -1178,8 +1178,8 @@ def citation_of(source_basename: str, *, vault_path: str | None = None) -> dict[
 
     result: dict[str, str] = {}
     try:
-        from silica.kernel.vault_manifest import active_inbox_dir
-        from silica.kernel.write import frontmatter
+        from silica.kernel.base.manifest import active_inbox_dir
+        from silica.kernel.base import frontmatter
 
         root = resolve_vault_path(vault_path)
         inbox = active_inbox_dir()

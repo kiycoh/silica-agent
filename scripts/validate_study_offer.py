@@ -255,7 +255,7 @@ def main() -> int:
     if args:
         os.environ["SILICA_VAULT"] = args[0]
     from silica.kernel.learn import offer
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     entries = quiz.entries()
     result = offer.replay(entries)

@@ -26,7 +26,7 @@ INDEX = (WEB / "index.html").read_text(encoding="utf-8")
 def client(tmp_vault, tmp_path, monkeypatch):
     import os
 
-    import silica.kernel.report.quiz as quiz
+    from silica.kernel.learn import quiz
     from silica.kernel.learn import grade, items
     from silica.ui.web import learn_routes, server
 

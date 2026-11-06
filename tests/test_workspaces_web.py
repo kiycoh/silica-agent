@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 # the write gate registers on import
 import silica.tools.notes  # noqa: E402,F401
-from silica.agent.events import ToolCompleteEvent  # noqa: E402
+from silica.obs.events import ToolCompleteEvent  # noqa: E402
 
 WS = """---
 type: workspace
@@ -137,7 +137,7 @@ def test_a_reopened_chat_keeps_the_scope_of_its_last_turn(client, monkeypatch):
 
 
 def test_the_internal_key_never_reaches_the_provider():
-    from silica.agent.providers import INTERNAL_KEYS
+    from silica.model.providers import INTERNAL_KEYS
 
     assert "silica_workspace" in INTERNAL_KEYS
 

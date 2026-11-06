@@ -602,7 +602,7 @@ def flag_cosine_near_titles(ops: list[dict], *, tau: float, embedder=None, store
         return 0
     try:
         if embedder is None or store is None:
-            from silica.agent.providers import get_embedder_or_none
+            from silica.model.providers import get_embedder_or_none
             from silica.config import CONFIG
             from silica.kernel.recall.embed import get_store
             embedder = embedder or get_embedder_or_none(CONFIG, "outline dedup")
@@ -645,7 +645,7 @@ def _hidden_note(rel: str) -> bool:
     idea it lists."""
     try:
         from silica.driver import DRIVER
-        from silica.kernel.write import frontmatter
+        from silica.kernel.base import frontmatter
         data, _raw, _body = frontmatter.split(DRIVER.read_note(rel).content or "")
     except Exception:  # noqa: BLE001
         # Unreadable candidate: not a merge target, the judge would fail on it anyway.
@@ -725,7 +725,7 @@ def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozens
     the textbook wrote "LSTM" beside it (2026-10-23).
     """
     from silica.driver import DRIVER
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.tools.atomic import notes_under
 
     rows: list[dict] = []
@@ -766,7 +766,7 @@ def _nearest_rows(rows: list[dict], query: str) -> list[dict]:
     if not texts:
         return rows[:MAX_OUTLINE_ROWS]
     try:
-        from silica.agent.providers import get_embedder_or_none
+        from silica.model.providers import get_embedder_or_none
         from silica.config import CONFIG
         from silica.kernel.recall.embed import get_store
 
@@ -880,7 +880,7 @@ def bodies_workers_for(source_text: str) -> int:
     39 times (2026-10-12). Unknown window: BODIES_WORKERS, as before.
     """
     from silica.agent.compaction import TEXT_CHARS_PER_TOKEN
-    from silica.agent.providers import model_limits
+    from silica.model.providers import model_limits
     from silica.config import CONFIG
 
     provider, model = CONFIG.worker_provider, CONFIG.worker_model
@@ -924,7 +924,7 @@ def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False,
     else:
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     import threading
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
     from silica.config import CONFIG
     from silica.kernel.prep_delegation import _call_with_deadline
     provider = get_provider(CONFIG, role="worker")
@@ -1251,7 +1251,7 @@ def translates(src: str) -> bool:
     the vault's: an English textbook nucleated into an Italian course vault
     (2026-10-23). There the bodies stage writes the body, translating."""
     from silica.kernel.text import language as lang_mod
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
 
     declared = (get_active_manifest().conventions.language or "").strip().casefold()
     if not declared:

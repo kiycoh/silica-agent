@@ -461,7 +461,7 @@ def _accepted(text: str | None, finish_reason: str | None, grid: str) -> str | N
 
 
 def _read_one(grid: str) -> str | None:
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
     from silica.config import CONFIG
 
     # The router and not the vision role: this is text, so any chat model reads

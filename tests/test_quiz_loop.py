@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from silica.kernel.report import quiz
+from silica.kernel.learn import quiz
 from silica.kernel.report.graph_report import compute_report
 
 
@@ -204,7 +204,7 @@ def test_replay_over_a_mixed_ledger_is_byte_identical_and_drops_nothing(log):
     import json
     import time
 
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     quiz.record([{"path": "A.md", "correct": True}])
     quiz.record([{"path": "A.md", "correct": False, "rating": 1, "kind": "recall", "conf": 90}])

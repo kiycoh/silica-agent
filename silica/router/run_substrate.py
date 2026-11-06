@@ -55,7 +55,7 @@ def build_substrate(
         or None if the substrate cannot be built.
     """
     try:
-        from silica.agent.providers import get_embedder
+        from silica.model.providers import get_embedder
         from silica.config import CONFIG
         from silica.kernel.recall.embed import get_store
         from silica.driver import DRIVER
@@ -126,7 +126,7 @@ def build_substrate(
         # {} when cold — annotation simply absent). Same cluster = cohesion,
         # different cluster = deliberate bridge: the distiller's parent choice
         # needs to know which.
-        from silica.kernel.recall.graph_export import cluster_hub_of, load_cluster_ctx
+        from silica.kernel.graph.graph_export import cluster_hub_of, load_cluster_ctx
         gctx_map = (load_cluster_ctx() or {}).get("ctx") or {}
 
         lines: list[str] = []

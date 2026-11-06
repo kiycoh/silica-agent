@@ -106,7 +106,7 @@ def test_grounding_drops_an_item_whose_span_is_not_in_the_leaf(vault):
 
 
 def test_hints_come_from_the_graph_and_the_outline_without_a_model(vault, monkeypatch):
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     monkeypatch.setattr(learner, "prerequisites_map", lambda: {"ml/margine geometrico": ["ML/Iperpiano.md"]})
     hints = items.hints_for("ML/Margine geometrico.md")

@@ -40,7 +40,7 @@ def _block(vault: Path) -> dict:
     """The raw `public:` block of vault.yaml; {} when absent or malformed."""
     import yaml
 
-    from silica.kernel.vault_manifest import MANIFEST_REL
+    from silica.kernel.base.manifest import MANIFEST_REL
 
     path = vault / MANIFEST_REL
     if not path.is_file():
@@ -179,7 +179,7 @@ def claim(h: str, vault: Path | None = None) -> None:
     import json
 
     from silica.config import hosted
-    from silica.kernel.vault_manifest import set_block_key
+    from silica.kernel.base.manifest import set_block_key
 
     h = h.strip().lstrip("@").lower()
     if why := handle_problem(h):
@@ -282,7 +282,7 @@ def vaults(vault: Path | None = None) -> list[dict]:
 
 def _save_vaults(items: list[dict], vault: Path) -> None:
     """Write `vaults:` and drop ADR-0143's keys, which it replaces."""
-    from silica.kernel.vault_manifest import set_block_key, unset_block_key
+    from silica.kernel.base.manifest import set_block_key, unset_block_key
 
     keep = ("folder", "slug", "title", "line", "license", "visibility", "listed", "readers", "published")
     rows = [{k: v[k] for k in keep if v.get(k) not in ("", [], None, False)}
@@ -432,7 +432,7 @@ def never_dirs() -> tuple[str, ...]:
     no globe (ADR-0143 point 3): the text of every nucleated document sits in
     sources/, the inbox and its archive hold converted files."""
     from silica.kernel.recall.paths import SOURCES_DIR
-    from silica.kernel.vault_manifest import (
+    from silica.kernel.base.manifest import (
         active_done_dir,
         active_inbox_dir,
         get_active_manifest,
@@ -538,7 +538,7 @@ def write_prop(path: str, key: str, value: bool | None) -> None:
     checkpoints and not the session's ledger. Not `overwrite`, which stamps a
     `type:` the person never asked for. Lowercase YAML booleans, from the dumper."""
     from silica.driver import DRIVER
-    from silica.kernel.write import frontmatter as fm
+    from silica.kernel.base import frontmatter as fm
     from silica.kernel.write.checkpoints import push_landed
 
     prior = DRIVER.read_note(path).content

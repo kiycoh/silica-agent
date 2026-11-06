@@ -86,7 +86,7 @@ def main() -> int:
     if args.vault:
         CONFIG.vault_path = str(Path(args.vault).resolve())
 
-    from silica.agent.providers import Reranker, get_embedder
+    from silica.model.providers import Reranker, get_embedder
     if not (CONFIG.rerank_base_url and CONFIG.rerank_model):
         print("no reranker configured: set SILICA_RERANK_BASE_URL and SILICA_RERANK_MODEL", file=sys.stderr)
         return 2

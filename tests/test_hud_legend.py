@@ -132,7 +132,7 @@ def test_one_atlas_row_replaces_the_blobs_and_the_zones_and_names_its_partition(
     Colour section; the atlas is one, on by default. It draws the areas, or
     the zones on a vault with no area of 3 notes, and says so (ADR-0023: a
     surface names the partition it shows). With neither it has no row."""
-    from silica.kernel.recall.graph_export import Community
+    from silica.kernel.graph.graph_export import Community
     from silica.ui.web.graph_view import Zone, render_html
     nodes = [{"id": f"{i}.md", "label": str(i), "type": "note", "group": 0, "sgroup": 0,
               "size": 3, "path": f"{i}.md"} for i in range(3)]

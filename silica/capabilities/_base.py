@@ -31,9 +31,9 @@ class NoteContent(BaseModel):
 
 def emit_feedback(item: WorkItem, phase: str, detail: str = "") -> None:
     """Publish a WorkFeedbackEvent to the global bus (best-effort)."""
-    from silica.agent.bus import BUS
-    from silica.agent.events import WorkFeedbackEvent
-    from silica.agent import narration as _narr_mod
+    from silica.obs.bus import BUS
+    from silica.obs.events import WorkFeedbackEvent
+    from silica.obs import narration as _narr_mod
     BUS.publish("work/feedback", WorkFeedbackEvent(item.id, item.kind, phase, detail))
     # The work lane (spec §4): repeated running beats on one id are progress
     # updates; the terminal lands in consume() where the outcome exists.

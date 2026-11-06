@@ -204,7 +204,7 @@ class RetryLog(logging.Handler):
     """Counts the retries the LLM layer already logs, per file.
 
     Not a nicety: in the pilot run one call hit the 130s silent-hang backstop
-    (`_LOCAL_LLM_TIMEOUT` in agent/llm.py) and retried, which was ~48% of that
+    (`_LOCAL_LLM_TIMEOUT` in model/llm.py) and retried, which was ~48% of that
     file's wall-clock. An ETA fitted over a sample that silently contained a
     stalled provider measures the provider's bad afternoon, not the pipeline.
     """
@@ -224,14 +224,14 @@ class RetryLog(logging.Handler):
             return
         self.timeouts += 1
         # Which lane stalled, not just how often: the retry is logged from
-        # agent/llm.py for every call site alike, and "the provider is slow"
+        # model/llm.py for every call site alike, and "the provider is slow"
         # and "the residue lane's 15k-token prompts are slow" call for
         # different fixes. Same walk _meter_site does, from the handler's
         # thread — the failing call is still on this stack.
         frame = sys._getframe()
         while frame:
             f = frame.f_code.co_filename
-            if "/silica/" in f and "agent/llm.py" not in f and "logging" not in f:
+            if "/silica/" in f and "model/llm.py" not in f and "logging" not in f:
                 site = f"{Path(f).parent.name}/{Path(f).name}:{frame.f_code.co_name}"
                 self.sites[site] = self.sites.get(site, 0) + 1
                 return
@@ -244,10 +244,10 @@ def subagent_seconds(sid: str) -> dict[str, float]:
     The phase clock cannot see these: the curator runs on the Coordinator's own
     thread pool, beside the FSM, and in the pilot run the workers plus residue
     plus conversion were 73% of the wall-clock the phase table did not explain.
-    The narration already spans every worker (agent/narration.py span_open
+    The narration already spans every worker (obs/narration.py span_open
     "subagent"), so this is a reader, not new instrumentation.
     """
-    from silica.agent.narration import narration_dir, read_beats
+    from silica.obs.narration import narration_dir, read_beats
 
     open_at: dict[str, tuple[float, str]] = {}
     out: dict[str, float] = {}
@@ -264,8 +264,8 @@ def subagent_seconds(sid: str) -> dict[str, float]:
 
 
 def measure(sample: list[dict], target_dir: str, profile: str) -> list[dict]:
-    from silica.agent.bus import BUS
-    from silica.agent.narration import NARRATOR
+    from silica.obs.bus import BUS
+    from silica.obs.narration import NARRATOR
     from silica.cli import _nucleate_prepare
     from silica.kernel.write.undo_journal import get_undo_journal
     from silica.config import CONFIG
@@ -275,7 +275,7 @@ def measure(sample: list[dict], target_dir: str, profile: str) -> list[dict]:
     clock = PhaseClock()
     BUS.subscribe("work/phase", clock)
     retries = RetryLog()
-    llm_log = logging.getLogger("silica.agent.llm")
+    llm_log = logging.getLogger("silica.model.llm")
     llm_log.addHandler(retries)
     llm_log.setLevel(logging.WARNING)
     sid = NARRATOR.ensure_session(driver="bench_nucleate")
@@ -488,7 +488,7 @@ def main() -> int:
 
     from silica.cli import _activate_repo_mode, _ensure_servers
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import apply_manifest_to_config
+    from silica.kernel.base.manifest import apply_manifest_to_config
     from silica.sources.convert import CONVERTIBLE_DOC_EXTS
 
     _activate_repo_mode()

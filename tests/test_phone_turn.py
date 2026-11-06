@@ -9,7 +9,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from silica.agent.events import ToolStartEvent
+from silica.obs.events import ToolStartEvent
 from tests.test_pilot_metrics import journal  # noqa: F401  the hosted journal fixture
 
 WRITES = {"silica_write_note", "silica_patch_note", "silica_move", "silica_flag_note",
@@ -78,7 +78,7 @@ def test_a_phone_turn_is_refused_while_another_holds_the_gate(phone):
 
 
 def test_the_phone_narrates_its_own_session_and_gives_the_browsers_back(phone):
-    from silica.agent import narration
+    from silica.obs import narration
     from silica.config import CONFIG
 
     tc, server, _ = phone
@@ -150,7 +150,7 @@ def test_new_chat_during_a_phone_turn_keeps_the_gate_and_the_old_chat_clean(phon
     """The browser cannot see a phone turn, so its New chat can land in the
     middle of one: the gate stays the phone's, and the narrator ends on the
     new chat, not on the file the student left."""
-    from silica.agent import narration
+    from silica.obs import narration
 
     tc, server, _ = phone
     old = server._open_session()
@@ -175,7 +175,7 @@ def test_new_chat_during_a_phone_turn_keeps_the_gate_and_the_old_chat_clean(phon
 
 
 def test_a_deleted_phone_chat_starts_over(phone):
-    from silica.agent import narration
+    from silica.obs import narration
 
     tc, server, _ = phone
     tc.post("/phone/turn", json={"text": "first"})

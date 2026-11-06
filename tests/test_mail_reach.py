@@ -46,7 +46,7 @@ def test_semantic_search_never_holds_a_mail_note(note, monkeypatch):
         def embed(self, texts, query=False):
             return [[1.0, 0.0] for _ in texts]
 
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _Emb())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
     from silica.kernel.recall.embed import get_store
     from silica.tools.composed import silica_embed_refresh
 

@@ -190,7 +190,7 @@ def test_safe_mode_round_trips_through_vault_yaml_not_the_env(tmp_vault, env_fil
     boundary from the vault's content, so there is no remembered value to rot."""
     from pathlib import Path
 
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
     from silica.ui.web import settings as st
 
     root = Path(CONFIG.vault_path)

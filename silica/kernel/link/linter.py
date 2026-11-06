@@ -9,7 +9,7 @@ import re
 import sys
 from pathlib import Path
 from silica.kernel.link import ofm
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 from silica.driver import DRIVER
 
 # Internal wire-format delimiter (`===SILICA-BODY N===`, garbled variants

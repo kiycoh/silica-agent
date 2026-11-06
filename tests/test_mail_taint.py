@@ -160,7 +160,7 @@ def test_the_taint_outlives_the_turn_that_read_the_note(note, monkeypatch):
     still in context on turn N+1, when the user says "remember"."""
     from silica.agent import loop
     from silica.agent.constraints import AgentConstraints
-    from silica.agent.llm import ToolCall
+    from silica.model.llm import ToolCall
 
     def call(cid, name, args):
         m = {"role": "assistant", "tool_calls": [{"id": cid, "type": "function",
@@ -189,7 +189,7 @@ def test_the_taint_outlives_the_turn_that_read_the_note(note, monkeypatch):
 
 
 def test_the_taint_mark_never_reaches_the_provider():
-    from silica.agent.providers import _to_wire
+    from silica.model.providers import _to_wire
 
     wire = _to_wire({"role": "tool", "tool_call_id": "c", "content": "{}",
                      "silica_taint": "the mail note x.md"})

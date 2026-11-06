@@ -253,7 +253,7 @@ def test_run_question_retrieval_only_records_gold_in_context(monkeypatch):
 def _scripted_run_agent(script):
     """Fake run_agent: fires ToolCompleteEvents from `script` (list of
     (name, args, result_json, iteration)) then returns script's answer."""
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
 
     def fake(messages, model, tool_progress_callback=None, progress=None,
              cancel_token=None, constraints=None, temperature=None):

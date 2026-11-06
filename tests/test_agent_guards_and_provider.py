@@ -3,8 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 from silica.config import SilicaConfig
-from silica.agent.providers import Provider
-from silica.agent.llm import LLMResponse, ToolCall, call_llm
+from silica.model.providers import Provider
+from silica.model.llm import LLMResponse, ToolCall, call_llm
 from silica.agent.loop import run_agent, _is_tool_failure
 from silica.tools import TOOLS, Tool
 from silica.kernel.prep_delegation import run_distiller
@@ -105,8 +105,8 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
         with patch.object(CONFIG, "openrouter_provider_by_model", table), \
                 patch.object(CONFIG, "openrouter_provider", ""), \
                 patch.object(CONFIG, "fallback_models", "openrouter/z-ai/glm-5.3-flash"), \
-                patch("silica.agent.llm.time.sleep"), \
-                patch.dict("silica.agent.llm._held", clear=True):
+                patch("silica.model.llm.time.sleep"), \
+                patch.dict("silica.model.llm._held", clear=True):
             call_llm(model="openrouter/qwen/qwen3.7-flash-20260727", messages=[])
         sent = {c[1]["model"]: c[1]["extra_body"].get("provider") for c in mock_completion.call_args_list}
         self.assertEqual(sent["openrouter/qwen/qwen3.7-flash-20260727"],
@@ -114,7 +114,7 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
         self.assertEqual(sent["openrouter/z-ai/glm-5.3-flash"], {"zdr": True})
 
     def test_a_broken_pin_table_fails_the_call_instead_of_unpinning(self):
-        from silica.agent.llm import openrouter_routing
+        from silica.model.llm import openrouter_routing
         from silica.config import CONFIG
         with patch.object(CONFIG, "openrouter_provider_by_model", "{not json"):
             with self.assertRaises(ValueError):
@@ -183,7 +183,7 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
             os.environ.pop("OPENROUTER_PROVIDER_DISTILLER", None)
             self.assertEqual(SilicaConfig().openrouter_provider_distiller, "General")
 
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.get_provider")
     def test_run_distiller_accepts_complete_output_at_length_limit(self, mock_get_provider):
         # New contract (#1): finish_reason == "length" is no longer fatal by
         # itself. When the emitted JSON is complete and parseable, use it.
@@ -201,7 +201,7 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
         self.assertNotIn("error", res)
         self.assertEqual(res["updates"], [])
 
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.get_provider")
     def test_run_distiller_errors_only_on_unrecoverable_truncation(self, mock_get_provider):
         # A length-truncated response with no complete `updates` entry to
         # salvage still surfaces an error.

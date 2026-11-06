@@ -16,7 +16,7 @@ import openai
 from pydantic import BaseModel
 
 from silica.agent.compaction import TEXT_CHARS_PER_TOKEN
-from silica.agent.llm import LLMResponse, openrouter_routing
+from silica.model.llm import LLMResponse, openrouter_routing
 from silica.config import DEFAULT_EMBEDDING_MODEL, HOSTED_PROVIDERS, ensure_prefix
 from silica.metrics import emit, ms_since, number, outcome_of
 
@@ -262,7 +262,7 @@ class Provider:
     """The non-interactive LLM lane: distiller, capability workers, sub-agents.
 
     One `call_llm(messages, ...) -> LLMResponse`, routed through the same
-    `silica.agent.llm.call_llm` the interactive loop uses, so both lanes share
+    `silica.model.llm.call_llm` the interactive loop uses, so both lanes share
     one retry policy, one wire boundary, one max-token clamp and one set of
     per-provider quirks (ollama's num_ctx, lmstudio's api_base, openrouter's
     routing pin). This used to be a second stack on the raw openai SDK, which
@@ -296,7 +296,7 @@ class Provider:
         """`cancel` marks the call abandoned: a caller that bounds this with its
         own wall-clock deadline sets it when that deadline fires, so retry_transient
         stops rescheduling instead of issuing requests nobody is waiting for."""
-        from silica.agent.llm import call_llm  # lazy: llm.py imports this module
+        from silica.model.llm import call_llm  # lazy: llm.py imports this module
 
         # Structured decoding defaults to greedy: this path exists to extract a
         # fixed shape, and sampling at the provider default (0.8 on Ollama, 1.0

@@ -24,7 +24,7 @@ pytest.importorskip("fastapi")  # run_turn lives in the web server module
 from websockets.asyncio.client import connect  # noqa: E402
 from websockets.exceptions import ConnectionClosed  # noqa: E402
 
-from silica.agent.events import LLMStreamEvent  # noqa: E402
+from silica.obs.events import LLMStreamEvent  # noqa: E402
 from silica.config import CONFIG  # noqa: E402
 from silica.driver.base import NoteRef  # noqa: E402
 

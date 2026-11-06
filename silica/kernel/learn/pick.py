@@ -60,7 +60,7 @@ def contrast_pairs(notes: dict[str, dict]) -> list[tuple[str, str]]:
     it. Kill by 2026-12-31 if the ledger shows zero `contrast` events.
     """
     from silica.config import CONFIG
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
     from silica.kernel.write.templates import parse_related_traces
 
     vault = Path(CONFIG.vault_path)
@@ -95,7 +95,7 @@ def conflicts(notes: dict[str, dict]) -> list[str]:
     (provenance drift). ponytail: pool D; kill by 2026-12-31 with zero
     `contradiction` events in the ledger."""
     from silica.config import CONFIG
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
     from silica.kernel.write.provenance import drifted_notes, note_key
 
     vault = Path(CONFIG.vault_path)
@@ -177,7 +177,7 @@ def session(
     """
     from datetime import datetime, timezone
 
-    from silica.kernel.report import learner, quiz
+    from silica.kernel.learn import learner, quiz
 
     now = now_ts if now_ts is not None else datetime.now(timezone.utc).timestamp()
     entries = _entries_override if _entries_override is not None else quiz.entries()

@@ -28,7 +28,7 @@ _STRUCTURE_KINDS = ("structure", "contrast", "contradiction")
 
 
 def _key(path: str) -> str:
-    from silica.kernel.report.quiz import key
+    from silica.kernel.learn.quiz import key
 
     return key(path)
 
@@ -142,7 +142,7 @@ def objectives_met(paths: list[str], objectives: list[str], entries: list[dict] 
     objective the plan did not choose is still read (it is evidence for
     that intention) but never counted toward the plan's."""
     if entries is None:
-        from silica.kernel.report import quiz
+        from silica.kernel.learn import quiz
 
         entries = quiz.entries()
     return {p: {o: objective_status(evs, o, since) for o in objectives} for p, evs in by_path(entries, paths).items()}
@@ -150,7 +150,7 @@ def objectives_met(paths: list[str], objectives: list[str], entries: list[dict] 
 
 def depth_by_path(paths: list[str], entries: list[dict] | None = None, since: str | None = None) -> dict[str, dict]:
     if entries is None:
-        from silica.kernel.report import quiz
+        from silica.kernel.learn import quiz
 
         entries = quiz.entries()
     return {p: depth_of(evs, since) for p, evs in by_path(entries, paths).items()}
@@ -333,7 +333,7 @@ def steps_passed(plan: dict, entries: list[dict] | None = None, notes: dict | No
     from silica.kernel.learn.plans import resolve_title
 
     if entries is None:
-        from silica.kernel.report import quiz
+        from silica.kernel.learn import quiz
 
         entries = quiz.entries()
     objectives = plan.get("objectives") or ["explain"]
@@ -350,7 +350,7 @@ def steps_passed(plan: dict, entries: list[dict] | None = None, notes: dict | No
 
 def status_line(plan: str = "") -> str:
     """The readings in one line for `/learn --status [plan]`."""
-    from silica.kernel.report import learner, quiz
+    from silica.kernel.learn import learner, quiz
 
     rows = learner.view()
     entries = quiz.entries()

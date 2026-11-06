@@ -494,7 +494,7 @@ class CooccurStore(DiskSynced):
         per vault mutation by the first reader.
         """
         if self._note_adj is None:
-            from silica.kernel.link.correlate import compute_edges
+            from silica.kernel.recall.correlate import compute_edges
 
             self._note_adj = compute_edges(
                 {path: self.note_nodes(path) for path in self._notes},
@@ -771,7 +771,7 @@ def _strip_fences_for_active_vault() -> bool:
     vault treats them as noise. Degrades to False (legacy: keep fences) on any
     failure, so a missing/broken manifest never changes today's behavior.
     """
-    from silica.kernel import vault_manifest
+    from silica.kernel.base import manifest as vault_manifest
 
     try:
         return "code" not in vault_manifest.get_active_manifest().sources

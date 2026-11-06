@@ -101,7 +101,7 @@ def _decision(verdict, addition="", rationale="why"):
 def test_duplicate_with_landed_loser_records_alias_on_the_winner(tmp_vault):
     from silica.capabilities.dedup import _route_verdict
     from silica.kernel.workqueue import WorkItem
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     tmp_vault.note(WINNER, "---\nAI: partial\n---\n\n# Rosenblatt\n\ncorpo\n")
     tmp_vault.note(LOSER, "---\nAI: true\n---\n\n# Percettrone\n\ncorpo\n")
@@ -111,7 +111,7 @@ def test_duplicate_with_landed_loser_records_alias_on_the_winner(tmp_vault):
     item = WorkItem(kind="dedup", target_path=WINNER, context=ctx)
     with patch("silica.capabilities.dedup.commit_ops",
                return_value={"status": "committed", "committed": 1}) as commit, \
-         patch("silica.kernel.recall.deferred.get_deferred_store"):
+         patch("silica.kernel.write.deferred.get_deferred_store"):
         res = _route_verdict(item, ctx, _decision("duplicate", addition="nuovo fatto"), None)
 
     assert res["status"] == "committed"

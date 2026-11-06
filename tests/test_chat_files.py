@@ -190,7 +190,7 @@ def test_messages_serve_the_typed_words_and_the_files(chat):
 
 
 def test_a_drop_names_its_chat_at_once(chat):
-    from silica.agent import narration
+    from silica.obs import narration
 
     tc, server, _ = chat
     tc.post("/nucleate", data={"text": "riassumi i findings\nper favore"},
@@ -202,7 +202,7 @@ def test_a_drop_names_its_chat_at_once(chat):
 # --- point 7: the last turn asked again -----------------------------------------------------
 
 def test_redo_regenerates_and_edit_replaces_the_words_keeping_the_files(chat):
-    from silica.agent import narration
+    from silica.obs import narration
 
     tc, server, turns = chat
     tc.post("/chat", json={"text": "prima domanda"})

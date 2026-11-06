@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-import silica.agent.llm as llm
+from silica.model import llm
 
 
 class _RateLimit(Exception):

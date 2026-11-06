@@ -90,7 +90,7 @@ def write_all() -> dict:
 
 @pytest.fixture
 def step_vault(tmp_vault, tmp_path, monkeypatch):
-    import silica.kernel.report.quiz as quiz
+    from silica.kernel.learn import quiz
     from silica.kernel.write import undo_journal
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
@@ -259,7 +259,7 @@ def test_the_central_claim_is_the_first_lede_line_and_a_card_must_say_it():
 # ------------------------------------------------------------------ the note
 
 def test_a_reading_is_written_beside_the_plan_read_back_and_never_material(step_vault):
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     out = write_all()
     assert out["path"] == "Plans/Esame - readings/01 Reti feedforward.md"
@@ -327,7 +327,7 @@ def test_a_card_cut_at_the_output_limit_asks_once_more_with_room_and_is_never_ke
     the owner's step (2026-11-02), with nothing on screen to say so."""
     from types import SimpleNamespace
 
-    from silica.agent import llm
+    from silica.model import llm
 
     budgets, finishes = [], ["length", "stop"]
 
@@ -532,7 +532,7 @@ def test_the_routes_write_a_reading_keep_the_readers_words_and_start_its_practic
         assert a != b or all(x == a for x in paths[paths.index(b):])
     note = c.get("/learn/note", params={"path": "Course/Gradiente discendente.md"}).json()
     assert note["reading"] == {"plan": "Plans/Esame.md", "step": 0}
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     assert quiz.entries() == []   # a card's answer is never an answer in the ledger
 

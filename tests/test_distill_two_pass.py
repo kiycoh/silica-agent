@@ -112,11 +112,11 @@ def distill_env(monkeypatch):
     def _no_network(*a, **k):
         raise RuntimeError("litellm fallback must never reach the network in tests")
 
-    monkeypatch.setattr("silica.agent.llm.call_llm", _no_network)
+    monkeypatch.setattr("silica.model.llm.call_llm", _no_network)
 
     def _run(payload, responses, **kwargs):
         fake = _FakeProvider(responses)
-        monkeypatch.setattr("silica.agent.providers.get_provider",
+        monkeypatch.setattr("silica.model.providers.get_provider",
                             lambda *a, **k: fake)
         result = prep_delegation.run_distiller(
             payload=payload, target="Target", session_date="2026-08-02",

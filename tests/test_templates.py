@@ -154,7 +154,7 @@ def test_floor_creates_minimal_block_when_no_prior():
 def test_stamp_sources_unions_and_is_idempotent():
     """A note written by one source and patched by another lists both; re-stamping
     an already-listed source must be byte-identical (re-ingest safety)."""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     base = "---\nAI: true\n---\n\n# N\nbody\n"
     two = stamp_sources(stamp_sources(base, "lec-01.md"), "lec-02.md")
@@ -224,7 +224,7 @@ def test_crlf_template_renders_lists_not_reprs(tpl_vault):
 
 import pytest
 
-from silica.kernel.vault_manifest import reset_manifest_cache
+from silica.kernel.base.manifest import reset_manifest_cache
 
 
 @pytest.fixture
@@ -367,7 +367,7 @@ def test_stamp_sources_after_a_frontmatter_dump_round_trip():
     """
     import yaml
 
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     note = frontmatter.dump({"type": "Note", "sources": ["a.md"]}, "body\n")
     assert "\nsources:\n- a.md\n" in note, "safe_dump stopped writing flush-left"
@@ -383,7 +383,7 @@ def test_stamp_documents_after_a_frontmatter_dump_round_trip():
     """`documents:` splices with the same regex, so it fails the same way."""
     import yaml
 
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.write.templates import stamp_documents
 
     note = frontmatter.dump({"type": "Note", "documents": ["a.pdf"]}, "body\n")
@@ -399,7 +399,7 @@ def test_stamp_citation_does_not_duplicate_keys_after_a_sources_splice():
     present, but reads them through `frontmatter.split`, which returns None on
     broken YAML. A note the sources splice had just broken therefore had every
     citation key appended a second time (`source_title` twice, 2026-08-23)."""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.write.templates import stamp_citation
 
     note = frontmatter.dump(

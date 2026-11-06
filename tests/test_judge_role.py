@@ -14,13 +14,13 @@ def _cfg(**over):
 
 
 def test_judge_role_falls_back_to_the_router_model():
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
 
     assert get_provider(_cfg(), role="judge").model == get_provider(_cfg(), role="router").model
 
 
 def test_judge_role_uses_its_own_model_when_set():
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
 
     p = get_provider(_cfg(judge_provider="lmstudio", judge_model="judge-small"), role="judge")
     assert p.model.endswith("judge-small")
@@ -53,7 +53,7 @@ def test_residue_judge_calls_the_judge_model(monkeypatch):
         seen["model"] = model
         return types.SimpleNamespace(text="1: yes", finish_reason="stop", completion_tokens=3)
 
-    monkeypatch.setattr("silica.agent.llm.call_llm", fake_call_llm)
+    monkeypatch.setattr("silica.model.llm.call_llm", fake_call_llm)
     monkeypatch.setattr(cfg_mod.CONFIG, "model", "writer")
     monkeypatch.setattr(cfg_mod.CONFIG, "judge_model", "judge-small")
     residue._llm("prompt", 10)
@@ -76,7 +76,7 @@ def test_dedup_judge_asks_for_the_judge_role_only_when_configured(monkeypatch):
         seen.append(role)
         return types.SimpleNamespace(call_llm=lambda **kw: (_ for _ in ()).throw(RuntimeError("stop")))
 
-    monkeypatch.setattr("silica.agent.providers.get_provider", fake_get_provider)
+    monkeypatch.setattr("silica.model.providers.get_provider", fake_get_provider)
     for cfg in (_cfg(), _cfg(judge_model="judge-small", judge_provider="lmstudio")):
         try:
             dedup._decide_dedup(cfg, concept="c", excerpt="excerpt",

@@ -1,7 +1,7 @@
-"""`_balanced` (kernel/link/ast.py): the delimiter counts read markdown-it's
+"""`_balanced` (kernel/base/markdown.py): the delimiter counts read markdown-it's
 text pieces so `$$` inside code stays invisible; the pieces must not be glued
 together, or adjacent inline math forms a fake `$$` across a token boundary."""
-from silica.kernel.link.ast import _balanced
+from silica.kernel.base.markdown import _balanced
 
 
 def test_inline_math_on_adjacent_list_items_is_not_an_unbalanced_block():

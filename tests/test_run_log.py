@@ -1,4 +1,4 @@
-"""Tests for silica.kernel.recall.run_log — the human-readable <vault>/log.md journal.
+"""Tests for silica.kernel.write.run_log — the human-readable <vault>/log.md journal.
 
 Pure kernel helper: format the nucleate-completion event, append idempotently
 per run_id, and read back the tail for vault-map injection.
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from silica.kernel.recall.run_log import (
+from silica.kernel.write.run_log import (
     DEFAULT_LOG_FILENAME,
     append_log_line,
     format_nucleate_event,
@@ -160,7 +160,7 @@ def test_tail_log_missing_file_returns_empty(tmp_path):
 def test_format_revert_event_names_source_and_counts():
     """log.md said "8 new notes" after a /revert had taken 4 of them back out —
     the journal must narrate the revert too, or it lies by omission."""
-    from silica.kernel.recall.run_log import format_revert_event
+    from silica.kernel.write.run_log import format_revert_event
 
     assert format_revert_event("nucleate", 4, 6) == \
         "revert (nucleate) → 4 note(s) restored, 6 kept (modified since)"
@@ -175,7 +175,7 @@ def test_format_revert_event_names_source_and_counts():
 
 def test_append_lands_inside_write_dir(tmp_path, monkeypatch):
     import silica.config
-    import silica.kernel.vault_manifest as vm
+    from silica.kernel.base import manifest as vm
 
     vault = tmp_path / "vault"
     (vault / "silica").mkdir(parents=True)
@@ -192,7 +192,7 @@ def test_append_lands_inside_write_dir(tmp_path, monkeypatch):
 def test_tail_still_reads_a_legacy_root_log(tmp_path, monkeypatch):
     """Vaults written before the boundary fix keep their journal at the root."""
     import silica.config
-    import silica.kernel.vault_manifest as vm
+    from silica.kernel.base import manifest as vm
 
     vault = tmp_path / "vault"
     (vault / "silica").mkdir(parents=True)
@@ -208,7 +208,7 @@ def test_provenance_store_also_lands_inside_write_dir(tmp_path, monkeypatch):
     """Same leak as the journal: pointing Silica at a library dropped both
     `log.md` and `provenance.json` in the user's root."""
     import silica.config
-    import silica.kernel.vault_manifest as vm
+    from silica.kernel.base import manifest as vm
     from silica.kernel.write.provenance import DEFAULT_PROVENANCE_FILENAME, _store_path
 
     vault = tmp_path / "vault"
@@ -221,7 +221,7 @@ def test_provenance_store_also_lands_inside_write_dir(tmp_path, monkeypatch):
 
 def test_provenance_store_keeps_a_legacy_root_file(tmp_path, monkeypatch):
     import silica.config
-    import silica.kernel.vault_manifest as vm
+    from silica.kernel.base import manifest as vm
     from silica.kernel.write.provenance import DEFAULT_PROVENANCE_FILENAME, _store_path
 
     vault = tmp_path / "vault"

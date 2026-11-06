@@ -12,9 +12,9 @@ from pydantic import BaseModel
 from silica.driver import DRIVER
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.templates import slugify
-from silica.kernel.vault_manifest import within
+from silica.kernel.base.manifest import within
 from silica.onboarding.adopt import SAFE_WRITE_DIR
-from silica.kernel.link.ast import extract_links
+from silica.kernel.base.markdown import extract_links
 
 logger = logging.getLogger(__name__)
 
@@ -537,7 +537,7 @@ class Grounding:
         `<archive>/<basename>` stays last in line: sources archived before
         2026-08-23 kept no folder structure and still have to be readable."""
         if basename not in self._source_text_cache:
-            from silica.kernel.vault_manifest import active_done_dir, archive_path_for
+            from silica.kernel.base.manifest import active_done_dir, archive_path_for
 
             text = ""
             inbox_path = self._index.source_files.get(basename)
@@ -1303,7 +1303,7 @@ def validate_operations(
     """
     from silica.config import CONFIG
     from silica.kernel.write.ops_io import parse_ops
-    from silica.kernel.vault_manifest import active_write_dir
+    from silica.kernel.base.manifest import active_write_dir
     ops_parsed = parse_ops(ops)
     ops = [op.model_copy(deep=True) for op in ops_parsed]
 

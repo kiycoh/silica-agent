@@ -242,7 +242,7 @@ def test_run_agent_opens_the_turn_and_taints_on_an_ingress_result(vault, monkeyp
     from pydantic import BaseModel
 
     from silica.agent import loop
-    from silica.agent.llm import ToolCall
+    from silica.model.llm import ToolCall
     from silica.tools import TOOLS, Tool
 
     class _Path(BaseModel):

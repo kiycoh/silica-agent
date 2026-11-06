@@ -26,7 +26,7 @@ from silica.kernel import proposed_skills as ps
 
 def _chats():
     """vault -> [(start, sid, user messages)], from the narration files."""
-    from silica.agent import narration
+    from silica.obs import narration
 
     out = defaultdict(list)
     for f in sorted(narration.narration_dir().glob("*.jsonl")):

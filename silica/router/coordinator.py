@@ -71,7 +71,7 @@ class Coordinator:
 
         from silica.kernel.workqueue import WorkQueue
         from silica.router.warning_ledger import WarningLedger
-        from silica.agent.bus import BUS
+        from silica.obs.bus import BUS
 
         # Sweep scope marker: files under target_dir modified from here on are
         # candidates for the end-of-run dangling-link sweep.
@@ -79,7 +79,7 @@ class Coordinator:
 
         run_dir = getattr(self.fsm.progress, "run_dir", None)
         _run_id = getattr(self.fsm.progress, "run_id", None)
-        from silica.agent import narration as _narr_mod
+        from silica.obs import narration as _narr_mod
         # The run span (spec §4). set_run binds the ambient run id so every
         # beat this thread emits joins the existing ledger id space; consumer
         # threads start with empty contexts, so their beats attribute through
@@ -272,7 +272,7 @@ class Coordinator:
         Keyed on the run's own content hashes: the store is per-vault, so an
         unrelated bundle from another file must not read as this run's debt.
         """
-        from silica.kernel.recall.deferred import get_deferred_store
+        from silica.kernel.write.deferred import get_deferred_store
 
         hashes = set(getattr(self.fsm, "_file_content_hashes", None) or [])
         if not hashes:

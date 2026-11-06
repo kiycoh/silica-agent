@@ -17,7 +17,7 @@ MD = ("---\ntitle: Spacing effect\ntags:\n- memory\nvault: Memoria\n---\n"
 
 @pytest.fixture
 def client(tmp_vault, tmp_path, monkeypatch):
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
     from silica.ui.web import server
 
     for k in ("SILICA_HOSTED", "SILICA_VIEWS", "SILICA_PUBLIC_BASE", "SILICA_PUBLIC_HOSTS"):
@@ -214,7 +214,7 @@ def test_a_laptop_takes_its_handle_into_the_vault_unless_it_already_published(cl
     assert v["handle"] == "marta-v" and v["ask_handle"] == {"ask": False}
     assert publish._block((tmp / "vault"))["handle"] == "marta-v"
     # a laptop that already has a page under its folder's name is not asked
-    from silica.kernel.vault_manifest import unset_block_key
+    from silica.kernel.base.manifest import unset_block_key
 
     unset_block_key((tmp / "vault"), publish.PUBLIC_KEY, "handle")
     (tmp / "public" / publish.handle((tmp / "vault"))).mkdir(parents=True)

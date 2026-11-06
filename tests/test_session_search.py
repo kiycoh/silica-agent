@@ -5,7 +5,7 @@
 their words, each hit with the other half of its exchange."""
 from __future__ import annotations
 
-from silica.agent import narration
+from silica.obs import narration
 from silica.tools.sessions import silica_session_search
 
 

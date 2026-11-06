@@ -301,7 +301,7 @@ def _value(row: Row) -> str:
     if row.kind == "readonly":
         return _readonly_value(row.key)
     if row.key == SAFE_MODE_KEY:
-        from silica.kernel.vault_manifest import active_write_dir
+        from silica.kernel.base.manifest import active_write_dir
 
         # An unresolvable declaration reads as on (it is truthy, and every write
         # is being rejected): flipping the toggle off is then the repair.
@@ -335,7 +335,7 @@ def _readonly_value(key: str) -> str:
         # qwen3.7-flash-20260727, measured 2026-10-14).
         return f"{CONFIG.max_context_tokens:,} tokens"
     if key == "write_dir":
-        from silica.kernel.vault_manifest import get_active_manifest
+        from silica.kernel.base.manifest import get_active_manifest
 
         declared = get_active_manifest().write_dir
         if declared is None:
@@ -447,7 +447,7 @@ def provider_group(provider: str) -> dict[str, str]:
     list, or whatever a local endpoint actually advertises. Neither answers → the
     model is left alone and the user picks it in the row below.
     """
-    from silica.agent.providers import PROVIDER_PRESETS
+    from silica.model.providers import PROVIDER_PRESETS
     from silica.onboarding.wizard import endpoint_model_ids
 
     updates = {"SILICA_PROVIDER": provider}
@@ -487,7 +487,7 @@ def apply_safe_mode(on: bool) -> dict:
     `docs/silica`, a prose vault gets the mirror. No "previous write_dir" is
     stored anywhere, so there is none to go stale against a vault that changed.
     """
-    from silica.kernel.vault_manifest import MANIFEST_REL, set_write_dir
+    from silica.kernel.base.manifest import MANIFEST_REL, set_write_dir
     from silica.onboarding.adopt import write_dir_for
 
     vault = (CONFIG.vault_path or "").strip()

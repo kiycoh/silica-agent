@@ -18,7 +18,7 @@ from silica.kernel.code import codeast, gitstate
 from silica.kernel.recall import paths
 from silica.kernel.code.codegraph import classify_import, supported_files
 from silica.kernel.text.sanitize import strip_degenerate_runs
-from silica.kernel.vault_manifest import active_inbox_dir, active_write_dir
+from silica.kernel.base.manifest import active_inbox_dir, active_write_dir
 from silica.sources.base import GroundedStub, RawItem
 
 

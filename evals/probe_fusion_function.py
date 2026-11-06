@@ -141,7 +141,7 @@ def _maxsim(legs: Legs) -> list[tuple[str, float]] | None:
 # ---------------------------------------------------------------------------
 
 def _top(fused: dict[str, float], k: int) -> list[str]:
-    from silica.kernel.recall.graph_export import is_vault_artifact
+    from silica.kernel.graph.graph_export import is_vault_artifact
 
     ranked = sorted(fused.items(), key=lambda kv: (-kv[1], kv[0]))
     return [p for p, _ in ranked if not is_vault_artifact(p)][:k]
@@ -240,7 +240,7 @@ def _timed(fn, keys: list[str]) -> tuple[dict[str, list[str]], float]:
 
 def run(vault: Path, *, verbose: bool = True) -> dict:
     from silica.config import CONFIG
-    from silica.kernel.link.health import eligible_pairs, wikilink_graph
+    from silica.kernel.report.health import eligible_pairs, wikilink_graph
     from silica.kernel.recall import relatedness as R
 
     store, es = _stores(vault)

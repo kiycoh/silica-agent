@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from contextvars import ContextVar
 
-from silica.agent.decide import decide
+from silica.model.decide import decide
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ from typing import Any
 
 import json
 
-from silica.agent.events import (
+from silica.obs.events import (
     ApprovalRequestEvent,
     BatchRunStartEvent,
     LLMStreamEvent,

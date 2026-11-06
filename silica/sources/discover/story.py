@@ -100,7 +100,7 @@ def bank_quotes(title: str, arts: list[dict], texts: list[str]) -> tuple[dict, l
     """(bank, terms, questions): one tool-less call proposes quotes, and only the ones
     each article contains verbatim (up to whitespace and typography) are
     banked, as `remember` would bank them."""
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.config import CONFIG
 
     fenced = "\n\n".join(f'<article n="{i}" url="{a["url"]}">\n{t}\n</article>'

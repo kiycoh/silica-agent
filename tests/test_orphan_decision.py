@@ -76,7 +76,7 @@ def test_off_by_default_never_asks(monkeypatch):
 
 
 def test_a_staging_orphan_is_left_alone(monkeypatch):
-    monkeypatch.setattr("silica.kernel.vault_manifest.active_done_dir", lambda: "Done")
+    monkeypatch.setattr("silica.kernel.base.manifest.active_done_dir", lambda: "Done")
     for target in ("Inbox/lecture.md", "Done/book/chapter-1.md"):
         item = WorkItem(kind="orphan", target_path=target,
                         context={"candidates": [{"name": "A", "path": "Concepts/A"}]}, reason="residual_orphan")
@@ -90,12 +90,12 @@ def test_link_candidates_never_offer_a_staging_note(monkeypatch):
     from silica.kernel.recall.relatedness import RelatedNote
     from silica.tools.curate import link_candidates
 
-    monkeypatch.setattr("silica.kernel.vault_manifest.active_done_dir", lambda: "Done")
+    monkeypatch.setattr("silica.kernel.base.manifest.active_done_dir", lambda: "Done")
     store = MagicMock()
     store.paths.return_value = ["Concepts/A", "Inbox/chapter", "Done/book/chapter-vi"]
     with patch("silica.kernel.recall.embed.get_store", return_value=store), \
          patch("silica.kernel.recall.cooccurrence.get_cooccur_store", return_value=None), \
-         patch("silica.agent.providers.get_reranker", return_value=None), \
+         patch("silica.model.providers.get_reranker", return_value=None), \
          patch("silica.kernel.recall.relatedness.related_notes",
                return_value=[MagicMock(spec=RelatedNote, name="A", path="Concepts/A")]) as rel:
         link_candidates("Notes/Lonely.md", k=3)

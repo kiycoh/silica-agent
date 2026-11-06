@@ -473,7 +473,7 @@ class ProgressLedger:
                 parts.append(section)
 
         try:
-            from silica.kernel.recall.deferred import get_deferred_store
+            from silica.kernel.write.deferred import get_deferred_store
             depth = get_deferred_store().queue_depth()
             if depth > 0:
                 parts.append(f"REVIEW QUEUE: {depth} bundle(s) pending — run /review to inspect")
@@ -526,7 +526,7 @@ class ProgressLedger:
         # tested would be a guess, and the digest must stay silent until
         # something was measured (quiz.py's own contract).
         try:
-            from silica.kernel.report import learner
+            from silica.kernel.learn import learner
 
             weak = sorted(
                 (

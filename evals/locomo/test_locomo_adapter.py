@@ -11,8 +11,8 @@ evidence session yields a correct verdict.
 """
 from __future__ import annotations
 
-import silica.agent.llm as llm_mod
-from silica.agent.llm import LLMResponse
+from silica.model import llm as llm_mod
+from silica.model.llm import LLMResponse
 from evals.locomo import runner
 
 

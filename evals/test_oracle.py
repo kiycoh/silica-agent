@@ -21,7 +21,7 @@ def _patch(monkeypatch, tmp_path, replies: list[str]) -> list:
         return _Resp(replies[min(len(calls) - 1, len(replies) - 1)])
 
     monkeypatch.setattr(oracle, "_CACHE_DIR", tmp_path / "oracle")
-    monkeypatch.setattr("silica.agent.llm.call_llm", fake)
+    monkeypatch.setattr("silica.model.llm.call_llm", fake)
     monkeypatch.setattr(oracle.time, "sleep", lambda s: None)
     return calls
 

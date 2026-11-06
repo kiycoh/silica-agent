@@ -184,8 +184,13 @@ def plan_additions(vault: Path, state: dict, top: str) -> Plan:
     in them rewritten for the root of the person's Obsidian vault."""
     from silica.config import CONFIG
     from silica.kernel.recall.paths import SOURCES_DIR
-    from silica.kernel.vault_manifest import active_done_dir, active_write_dir, in_write_dir, resolve_inbox_dir
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base.manifest import (
+        active_done_dir,
+        active_write_dir,
+        in_write_dir,
+        resolve_inbox_dir,
+    )
+    from silica.kernel.base import frontmatter
 
     inbox = resolve_inbox_dir(str(vault), active_write_dir(), CONFIG.inbox_dir or "Inbox")
     bases = [b for b in (inbox, active_done_dir(), in_write_dir(SOURCES_DIR)) if b]

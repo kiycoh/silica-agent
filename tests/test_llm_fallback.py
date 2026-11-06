@@ -13,8 +13,8 @@ from unittest.mock import patch
 import litellm
 import pytest
 
-from silica.agent import llm as llm_mod
-from silica.agent.llm import call_llm
+from silica.model import llm as llm_mod
+from silica.model.llm import call_llm
 from tests.llm_mocks import litellm_mock_response
 
 MSGS = [{"role": "user", "content": "hi"}]

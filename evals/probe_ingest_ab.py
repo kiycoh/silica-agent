@@ -143,7 +143,7 @@ def ingest_one(arm: str, out_json: Path) -> None:
 
     files, target = corpus(os.environ.get("PROBE_CORPUS", "lectures"))
 
-    import silica.agent.llm as llm
+    from silica.model import llm
 
     # The run's own log beside its numbers: a rejection or a steer otherwise
     # leaves one stderr line and no reason (lever 2's first run, 2026-10-15).

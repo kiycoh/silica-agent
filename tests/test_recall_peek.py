@@ -43,7 +43,7 @@ def _embedded(vault, notes) -> None:
 
 
 def _fake_embedder(monkeypatch, vec) -> None:
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     class _E:
         def embed(self, texts, query=False):

@@ -60,7 +60,7 @@ def test_render_digest_contains_facts_and_residue():
 
 def test_generate_subsystem_note_grounds_prompt(monkeypatch):
     fake = _FakeProvider('{"content": "## kernel\\nProse [[router]]"}')
-    monkeypatch.setattr("silica.agent.providers.get_provider",
+    monkeypatch.setattr("silica.model.providers.get_provider",
                         lambda config, role: fake)
     d = _digest()
     text = render_digest(d)
@@ -73,7 +73,7 @@ def test_generate_subsystem_note_grounds_prompt(monkeypatch):
 
 def test_generate_empty_output_maps_to_empty_content(monkeypatch):
     fake = _FakeProvider("not json at all")
-    monkeypatch.setattr("silica.agent.providers.get_provider",
+    monkeypatch.setattr("silica.model.providers.get_provider",
                         lambda config, role: fake)
     note = generate_subsystem_note(_digest(), "digest text", config=None)
     assert note.content == ""
@@ -81,7 +81,7 @@ def test_generate_empty_output_maps_to_empty_content(monkeypatch):
 
 def test_generate_overview_includes_project_info(monkeypatch):
     fake = _FakeProvider('{"content": "# Architecture\\n[[kernel]]"}')
-    monkeypatch.setattr("silica.agent.providers.get_provider",
+    monkeypatch.setattr("silica.model.providers.get_provider",
                         lambda config, role: fake)
     note = generate_overview(
         summaries=[("kernel", "does kernel things")],
@@ -132,7 +132,7 @@ def _mkrepo(tmp_path):
 def wiki_env(tmp_path, monkeypatch):
     root, vault = _mkrepo(tmp_path)
     fake = _FakeProvider('{"content": "Behavioral prose about the subsystem."}')
-    monkeypatch.setattr("silica.agent.providers.get_provider",
+    monkeypatch.setattr("silica.model.providers.get_provider",
                         lambda config, role: fake)
     # keep the derived index inside the tmp vault
     from silica.kernel.recall import paths as kpaths
@@ -162,7 +162,7 @@ def test_no_supported_source_aborts_before_llm(tmp_path, monkeypatch):
     vault.mkdir()
 
     fake = _FakeProvider('{"content": "should never be produced"}')
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda config, role: fake)
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda config, role: fake)
     from silica.kernel.recall import paths as kpaths
     monkeypatch.setattr(kpaths, "index_dir", lambda: vault / ".index")
     (vault / ".index").mkdir(parents=True, exist_ok=True)
@@ -328,7 +328,7 @@ def test_no_repo_degrades_soft(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_conventions_wiki_dir_parsed(tmp_path):
-    from silica.kernel.vault_manifest import _parse_conventions
+    from silica.kernel.base.manifest import _parse_conventions
     assert _parse_conventions({"conventions": {"wiki_dir": "docs/wiki"}}).wiki_dir == "docs/wiki"
     assert _parse_conventions({}).wiki_dir == ""
 
@@ -351,7 +351,7 @@ def test_page_write_invalidates_the_stale_snapshot(wiki_env):
 def test_conventions_wiki_dir_rejects_escape(tmp_path):
     # vault.yaml is user-authored: traversal/absolute paths must never reach
     # the write path (they would scatter notes outside the vault)
-    from silica.kernel.vault_manifest import _parse_conventions
+    from silica.kernel.base.manifest import _parse_conventions
     for bad in ("../elsewhere", "a/../../b", "/abs/path", "C:/win", "..\\up"):
         assert _parse_conventions({"conventions": {"wiki_dir": bad}}).wiki_dir == "", bad
 

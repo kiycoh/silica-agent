@@ -53,7 +53,7 @@ def test_the_turn_names_its_reads_by_title_and_the_offer_resolves_them(monkeypat
     """A chat turn names a read note as its tool call did, often a bare title;
     the rule needs the path the ledger keys it by (seen in the app: no offer
     under an answer that had read "Teorema di Novikoff")."""
-    import silica.kernel.recall.mindmap as mm
+    from silica.kernel.graph import mindmap as mm
     import silica.ui.web.server as srv
 
     monkeypatch.setattr(srv, "read_refs", lambda messages: ["Teorema di Novikoff"])
@@ -61,7 +61,7 @@ def test_the_turn_names_its_reads_by_title_and_the_offer_resolves_them(monkeypat
                         lambda refs, graph=None: (None, ["ML/Teorema di Novikoff.md"] if refs == ["Teorema di Novikoff"] else []))
     monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto"}, None))
     monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
-    monkeypatch.setattr("silica.kernel.report.quiz.entries", lambda: [])
+    monkeypatch.setattr("silica.kernel.learn.quiz.entries", lambda: [])
     # the offer log's caps and declines are tested on their own
     monkeypatch.setattr(offer, "log_offer", lambda *a, **kw: None)
     o = srv._study_offer("non ho capito il teorema", [])
@@ -234,14 +234,14 @@ def test_the_escalated_aid_takes_the_form_the_note_calls_for():
 def test_the_chat_escalation_in_shadow_logs_and_adds_nothing(monkeypatch, tmp_path):
     import json
 
-    import silica.kernel.recall.mindmap as mm
+    from silica.kernel.graph import mindmap as mm
     import silica.ui.web.server as srv
     from silica.kernel.learn import items
 
     monkeypatch.setattr(offer, "_log_path", lambda: tmp_path / "offers.jsonl")
     monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
     monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Lezione 14.md": "Lezione 14"}, None))
-    monkeypatch.setattr("silica.kernel.report.quiz.entries", lambda: [])
+    monkeypatch.setattr("silica.kernel.learn.quiz.entries", lambda: [])
     monkeypatch.setattr(items, "read_note", lambda path: SPINE)
     lost = [{"role": "user", "content": "non ho capito la Lezione 14"}]
     monkeypatch.setenv("SILICA_STUDY_OFFER", "shadow")
@@ -340,7 +340,7 @@ def test_an_aid_s_effect_is_read_off_its_randomized_experiments(tmp_path):
 def test_jev_reads_what_the_word_list_misses(monkeypatch):
     """The list first, instant; Jev on a short message it did not match, once
     per message; nothing asked without a decision model or for a command."""
-    import silica.agent.decide as dec
+    from silica.model import decide as dec
 
     calls = []
 

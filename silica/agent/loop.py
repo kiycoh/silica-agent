@@ -31,8 +31,8 @@ import json
 if TYPE_CHECKING:
     from silica.kernel.progress import ProgressLedger
 
-import silica.agent.bus as _bus_mod
-from silica.agent.events import (
+from silica.obs import bus as _bus_mod
+from silica.obs.events import (
     ToolStartEvent,
     ToolCompleteEvent,
     ToolErrorEvent,
@@ -42,8 +42,8 @@ from silica.agent.events import (
     ThinkingEndEvent,
     LLMStreamEvent,
 )
-from silica.agent.llm import call_llm
-from silica.agent import narration as _narr_mod
+from silica.model.llm import call_llm
+from silica.obs import narration as _narr_mod
 from silica.agent.compaction import (
     dedup_recall_excerpts,
     COMPACT_FLOOR_TURNS,
@@ -57,7 +57,7 @@ from silica.agent import read_scope
 from silica.agent.relevance import compact_by_relevance
 from silica.tools import user_memory as memory_gate
 from silica.config import CONFIG
-from silica.agent.concurrency import worker_slot
+from silica.model.concurrency import worker_slot
 from silica.agent.constraints import AgentConstraints
 from silica.tools import MODEL_CALL, TOOLS, Tool
 from contextlib import nullcontext
@@ -966,7 +966,7 @@ def run_agent(
                 _abandon.clear()
                 final = _interruptible_llm({**final_kwargs, "reasoning": False})
     except Exception as e:
-        from silica.agent.usage_limits import UsageLimited
+        from silica.model.usage_limits import UsageLimited
 
         _narr_mod.NARRATOR.thought_close("", status="failed")  # as above: no open thought outlives its call
         if isinstance(e, UsageLimited):

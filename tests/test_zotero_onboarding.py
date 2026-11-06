@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.vault_manifest import load_manifest, set_zotero
+from silica.kernel.base.manifest import load_manifest, set_zotero
 from silica.onboarding import wizard
 from silica.sources import zotero as z
 from tests.zotero_fake import SERVER_ID, FakeZotero

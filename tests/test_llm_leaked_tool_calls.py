@@ -2,7 +2,7 @@
 markup as a final answer. Verbatim capture from the L3 gate (eBPF-A)."""
 import json
 
-from silica.agent.llm import build_assistant_message, recover_leaked_tool_calls
+from silica.model.llm import build_assistant_message, recover_leaked_tool_calls
 
 LEAKED = (
     '<｜DSML｜tool_calls>\n<｜DSML｜invoke name="web_fetch">\n'

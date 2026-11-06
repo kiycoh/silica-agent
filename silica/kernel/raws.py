@@ -49,7 +49,7 @@ def fields(path: Path) -> dict:
         with open(path, encoding="utf-8", errors="replace") as fh:
             head = fh.read(_HEAD)
         if head.startswith("---") and "source_file:" in head:
-            from silica.kernel.write import frontmatter
+            from silica.kernel.base import frontmatter
 
             data, _, _ = frontmatter.split(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
@@ -120,7 +120,7 @@ def index(vault: Path) -> dict[str, list[str]]:
     the document's parent note first, then the parts in their order, and
     the archive's copies last: the rail opens the first, and a part filed in
     done/ by /nucleate is the older copy of one still in the inbox."""
-    from silica.kernel.vault_manifest import active_done_dir
+    from silica.kernel.base.manifest import active_done_dir
 
     root = vault.resolve()
     done = (active_done_dir() or "").strip("/") + "/"

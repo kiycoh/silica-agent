@@ -19,7 +19,7 @@ INDEX_HTML = (STATIC_SRC / "index.html").read_text(encoding="utf-8")
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from silica.agent.events import (  # noqa: E402
+from silica.obs.events import (  # noqa: E402
     BatchRunStartEvent,
     LLMStreamEvent,
     ReasoningEvent,
@@ -125,7 +125,7 @@ def test_tool_card_payloads_are_capped_and_say_how_much_was_cut():
     ellipsis and one that was truncated are indistinguishable once you print
     "…" and say nothing. An argument-less call carries no card at all, or the
     disclosure costs a click to show "{}"."""
-    from silica.agent.events import ToolCompleteEvent, ToolStartEvent
+    from silica.obs.events import ToolCompleteEvent, ToolStartEvent
     from silica.ui.web.callback import _CARD_CHARS, event_to_json
 
     long = "x" * (_CARD_CHARS + 37)
@@ -143,7 +143,7 @@ def test_injector_start_carries_the_file_and_the_tracks():
     caller passes `inbox_files`, so a nucleate run showed a bare "injector" with
     no document name at all. The two phase tracks ride along so the client can
     draw the pipeline greyed out instead of growing it a row at a time."""
-    from silica.agent.events import ToolStartEvent
+    from silica.obs.events import ToolStartEvent
     from silica.ui.web.callback import event_to_json
 
     ev = event_to_json(ToolStartEvent(
@@ -157,7 +157,7 @@ def test_injector_start_carries_the_file_and_the_tracks():
 
 
 def test_phase_event_restates_the_whole_position():
-    from silica.agent.events import PhaseEvent
+    from silica.obs.events import PhaseEvent
     from silica.ui.web.callback import event_to_json
 
     assert event_to_json(PhaseEvent(
@@ -174,7 +174,7 @@ def test_phase_wire_sends_labels_the_track_can_match():
     string, and a phase whose id differs from its label (hub_update -> hub-update)
     needs its own rule, so any guess the client makes leaves it grey for the whole
     run. The server maps."""
-    from silica.agent.events import PhaseEvent
+    from silica.obs.events import PhaseEvent
     from silica.ui.web.callback import _PHASE_TRACKS, event_to_json
 
     every = _PHASE_TRACKS["file"] + _PHASE_TRACKS["chunk"]
@@ -720,8 +720,8 @@ def test_a_typed_nucleate_draws_the_injector_block_and_narrates_a_running_tool(c
     Chats mark never lit (local repro 2026-10-23, after hosted t01's run). It
     now reads as the injector call the agent makes."""
     import silica.router.coordinator as rc
-    from silica.agent.bus import BUS
-    from silica.agent.events import PhaseEvent
+    from silica.obs.bus import BUS
+    from silica.obs.events import PhaseEvent
 
     tc, server = client
 
@@ -894,7 +894,7 @@ def test_a_dropped_file_lands_in_its_chat_inside_the_write_boundary(client, monk
     """A vault that writes only under docs/silica keeps a chat's files there,
     not in a folder at the root of what may be a repository (ADR-0121 point 5)."""
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
 
     tc, server = client
     monkeypatch.setattr(server, "run_agent", lambda messages, *a, **kw: "ok")
@@ -1657,7 +1657,7 @@ def test_find_endpoint_renders_results_as_note_links(client, tmp_path, monkeypat
 
     mock_embedder = MagicMock()
     mock_embedder.embed.return_value = [[1.0, 0.0]]
-    with patch("silica.agent.providers.get_embedder", return_value=mock_embedder):
+    with patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         r = tc.get("/find", params={"q": "gears", "k": 1})
 
     assert r.status_code == 200
@@ -2301,7 +2301,7 @@ def test_the_graph_document_carries_both_palettes(tmp_path, monkeypatch):
     embeds it, the OS when it is opened off disk — so a light session cannot end
     at the iframe boundary.
     """
-    import silica.kernel.recall.graph_export as ge
+    from silica.kernel.graph import graph_export as ge
     from silica.ui.web import graph_view as gv
 
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (
@@ -2326,7 +2326,7 @@ def test_community_colour_has_a_paper_band():
     The dark band is picked to survive a near-black floor; reusing it on paper
     puts every community dot at roughly the contrast of the page it sits on.
     """
-    from silica.kernel.recall.graph_export import _community_color, _zone_color
+    from silica.kernel.graph.graph_export import _community_color, _zone_color
 
     for i in range(6):
         assert _community_color(i) != _community_color(i, on_paper=True)
@@ -2555,7 +2555,7 @@ def test_vault_brief_replays_its_cache_until_the_corpus_shape_changes(
     stamp, and building it out of real notes would make it a check on when the
     index picks a new file up instead."""
     from silica.config import CONFIG
-    from silica.kernel.recall import graph_export
+    from silica.kernel.graph import graph_export
     from silica.ui.web import server
 
     monkeypatch.setattr(CONFIG, "vault_brief", True)
@@ -2593,7 +2593,7 @@ def test_vault_brief_survives_a_provider_that_is_not_there(
     def _boom(*_a, **_k):
         raise ConnectionError("no worker here")
 
-    monkeypatch.setattr("silica.agent.providers.get_provider", _boom)
+    monkeypatch.setattr("silica.model.providers.get_provider", _boom)
     assert server.vault_brief() == {"enabled": True, "text": ""}
     assert not (tmp_path / "brief.json").exists(), "an empty brief was cached"
 

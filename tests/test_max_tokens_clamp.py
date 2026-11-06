@@ -3,7 +3,7 @@
 
 """clamp_max_tokens: output budget fits both the out_cap and the window."""
 
-from silica.agent import providers
+from silica.model import providers
 
 
 def test_default_is_32k(monkeypatch):

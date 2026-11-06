@@ -872,7 +872,7 @@ def run_one(arm: str, case: str, model: str, max_prompt_tokens: int, out_json: P
     apply_arm(arm)
     _stub_egress()
     from silica.agent import loop as _loop
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     from silica.agent.constraints import AgentConstraints, chat_tools
     try:  # the same probe drives a tree from before the chat core (ADR-0050)
         from silica.agent.constraints import chat_deferred

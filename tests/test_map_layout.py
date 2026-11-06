@@ -5,12 +5,7 @@ import math
 
 import networkx as nx
 
-from silica.kernel.recall.mindmap import (
-    BOX_H,
-    BOX_W,
-    MapMaterials,
-    build_mapview,
-)
+from silica.kernel.graph.mindmap import BOX_H, BOX_W, MapMaterials, build_mapview
 
 
 def _materials(latent=()):
@@ -170,7 +165,7 @@ def _star(n: int) -> nx.Graph:
 def test_arrange_keeps_every_given_note_and_adds_none():
     # No cap: the graph already draws the whole lit set, so all of it is laid
     # out, and a note of the vault the caller did not light stays out.
-    from silica.kernel.recall.mindmap import arrange_mapview
+    from silica.kernel.graph.mindmap import arrange_mapview
 
     g = _star(40)
     g.add_edge("n00.md", "elsewhere.md")
@@ -182,7 +177,7 @@ def test_arrange_keeps_every_given_note_and_adds_none():
 def test_arrange_reads_the_community_it_is_given():
     # The frame sends the group each dot is painted with, so a wedge and the
     # dots inside it cannot disagree on colour.
-    from silica.kernel.recall.mindmap import arrange_mapview
+    from silica.kernel.graph.mindmap import arrange_mapview
 
     mv = arrange_mapview("root.md", ["n00.md", "n01.md"], graph=_star(2),
                          community_of={"root.md": 3, "n00.md": 7, "n01.md": 9}, sim=None)
@@ -192,7 +187,7 @@ def test_arrange_reads_the_community_it_is_given():
 def test_arrange_prices_an_unlinked_note_by_its_similarity_to_the_root():
     # A note lit by the k-NN, a gap or a proposal has no wikilink to the root;
     # it is a latent tie with the strength of its similarity, as on the Map.
-    from silica.kernel.recall.mindmap import arrange_mapview
+    from silica.kernel.graph.mindmap import arrange_mapview
 
     sims = {"x.md": 0.9, "y.md": 0.45}
     mv = arrange_mapview("root.md", ["x.md", "y.md"], graph=nx.Graph(), community_of={},
@@ -204,7 +199,7 @@ def test_arrange_prices_an_unlinked_note_by_its_similarity_to_the_root():
 def test_arrange_parks_what_it_cannot_price_on_the_rim():
     # An unresolved link has no file and no vector: nothing says how near it
     # is, so it sits past every note that has a price.
-    from silica.kernel.recall.mindmap import arrange_mapview
+    from silica.kernel.graph.mindmap import arrange_mapview
 
     ghost = "__unresolved__Pattern recognition"
     mv = arrange_mapview("root.md", ["n00.md", "n01.md", ghost], graph=_star(2),
@@ -216,7 +211,7 @@ def test_arrange_parks_what_it_cannot_price_on_the_rim():
 
 
 def test_the_arrangement_payload_carries_positions_and_wedges_that_tile_the_circle():
-    from silica.kernel.recall.mindmap import arrange_mapview, arrangement_payload
+    from silica.kernel.graph.mindmap import arrange_mapview, arrangement_payload
 
     g = _star(6)
     groups = {f"n{i:02d}.md": i % 3 for i in range(6)}

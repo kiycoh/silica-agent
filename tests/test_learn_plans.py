@@ -21,7 +21,7 @@ def _iso(ts: float) -> str:
 
 @pytest.fixture
 def vault(tmp_vault, tmp_path, monkeypatch):
-    import silica.kernel.report.quiz as quiz
+    from silica.kernel.learn import quiz
     from silica.kernel.write import undo_journal
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
@@ -72,7 +72,7 @@ def test_ledger_over_checkbox(vault):
     """A ticked step with no evidence is not passed; an unticked step whose
     notes held the reach after the plan was written is."""
     from silica.kernel.learn import mastery
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     vault.note("Plans/ML.md", PLAN)
     p = plans.read_plan("Plans/ML.md")
@@ -90,7 +90,7 @@ def test_ledger_over_checkbox(vault):
 def test_the_bar_reads_100_exactly_when_the_plan_is_complete(vault):
     """ADR-0141: notes met over notes, a step not in the vault one unit no
     answer meets, floored; 100 and Mark completed come together or not at all."""
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     def met(*names):
         quiz.record([{"path": f"ML/{n}.md", "correct": True, "rating": 3, "level": 3, "kind": "explain", "hints": 0}
@@ -112,7 +112,7 @@ def test_the_bar_reads_100_exactly_when_the_plan_is_complete(vault):
 
 
 def test_a_prerequisite_cycle_is_reported_not_linearized(vault, monkeypatch):
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     vault.note("Plans/ML.md", PLAN)
     monkeypatch.setattr(learner, "prerequisites_map", lambda: {
@@ -190,7 +190,7 @@ def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_wha
     assert deep["gap"] is True and deep["missing"] == ["Dropout", "apprendimento multi-task"]
     # a hyphenated topic meets its joined title
     vault.note("ML/AdaBoost.md", "# AdaBoost\n")
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.learn.learner import _notes_meta
     from pathlib import Path as _P
     from silica.config import CONFIG as _C
     found, missing = plans._topic_notes(["ada-boost", "random forest"], _notes_meta(_P(_C.vault_path)),
@@ -292,7 +292,7 @@ def test_revisit_and_completion_write_only_frontmatter_keys(vault):
     assert plans.close_plan("Plans/ML.md")["status"] == "active"
     assert plans.close_plan("Plans/ML.md", reopen=True)["status"] == "active"
     vault.note("Plans/Done.md", PLAN.replace("- [ ] Momentum di Nesterov: not in the vault\n", "").replace("scope: steps", "scope: steps"))
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     quiz.record([{"path": p, "correct": True, "rating": 3, "level": 3, "kind": "explain", "hints": 0}
                  for p in ("ML/Gradient descent.md", "ML/Chain rule.md", "ML/Backpropagation.md")])
@@ -521,7 +521,7 @@ def _meta_and_material():
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.report.learner import _notes_meta, is_material
+    from silica.kernel.learn.learner import _notes_meta, is_material
 
     meta = _notes_meta(Path(CONFIG.vault_path))
     return meta, {p for p, m in meta.items() if is_material(m)}
@@ -557,10 +557,10 @@ def test_a_many_word_topic_meets_its_note_by_meaning(vault, monkeypatch):
     since "Diversità architetturale" was as near as the right answers (2026-10-23)."""
     from pathlib import Path
 
-    import silica.agent.providers as providers
+    from silica.model import providers
     import silica.kernel.recall.embed as embed
     from silica.config import CONFIG
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.learn.learner import _notes_meta
 
     vault.note("ML/Iniezione di rumore negli input.md", "# x\n")
     vault.note("ML/Diversità architetturale.md", "# x\n")
@@ -633,7 +633,7 @@ def test_topic_matching_prefers_the_general_note_and_drops_siblings(vault, monke
     beat the general note, a one-word topic met a method named after it, a
     sibling met through one shared word, a narrower note, a translation the
     words could not see."""
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     for t in ("Regressione lineare bayesiana", "Kernel CCA", "Definizione di kernel", "Algoritmo del percettrone",
               "Algoritmi con tassi di apprendimento adattivi", "Definizione di reti convolutive",

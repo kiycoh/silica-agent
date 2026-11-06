@@ -22,7 +22,7 @@ def test_neither_judge_prompt_carries_the_closeness_score():
             prompts.append(messages[0]["content"])
             return SimpleNamespace(text='{"verdict": "distinct", "rationale": "r"}')
 
-    with patch("silica.agent.providers.get_provider", return_value=_Provider()):
+    with patch("silica.model.providers.get_provider", return_value=_Provider()):
         _decide_dedup(SilicaConfig(), concept="C", excerpt="e", candidate_name="N", candidate_body="b",
                       score=0.937, full_score=0.937, title_score=0.951)
         _decide_dedup_batch(SilicaConfig(), concepts=[{"concept": "C", "excerpt": "e", "score": 0.937,

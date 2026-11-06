@@ -56,8 +56,8 @@ import httpx
 from pydantic import Field
 
 from silica.agent.constraints import AgentConstraints
-from silica.agent.events import LLMStreamEvent, ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
-from silica.agent.llm import call_llm
+from silica.obs.events import LLMStreamEvent, ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
+from silica.model.llm import call_llm
 from silica.agent.loop import run_agent
 from silica.config import CONFIG
 from silica.kernel.write.templates import slugify
@@ -897,8 +897,8 @@ def _seed(question: str, watch) -> list[dict]:
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    from silica.agent.llm import build_assistant_message
-    from silica.agent.narration import NARRATOR
+    from silica.model.llm import build_assistant_message
+    from silica.obs.narration import NARRATOR
 
     def emit(event) -> None:
         watch(event)
@@ -1490,7 +1490,7 @@ def _unique_inbox_path(concept: str, fallback: str = "web-research") -> str:
     `fallback` names the note when the title slugifies to nothing (CJK, emoji,
     pure punctuation), so each command squats only its own namespace."""
     from silica.kernel.recall.paths import SOURCES_DIR
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir
 
     inbox = active_inbox_dir() or "Inbox"
     slug = slugify(concept) or fallback

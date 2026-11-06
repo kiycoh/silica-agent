@@ -101,7 +101,7 @@ def note_state(created_ts: float, is_ai: bool, events: list, now_ts: float) -> d
 
 def events_by_key(entries: list[dict]) -> dict[str, list]:
     """{note key: [(ts, rating, correct)]} over the ledger."""
-    from silica.kernel.report.quiz import key
+    from silica.kernel.learn.quiz import key
 
     out: dict[str, list] = {}
     for e in entries:
@@ -140,8 +140,8 @@ def view(
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.report import quiz
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.learn import quiz
+    from silica.kernel.learn.learner import _notes_meta
 
     now = now_ts if now_ts is not None else datetime.now(timezone.utc).timestamp()
     notes = _notes_override

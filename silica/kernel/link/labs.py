@@ -65,7 +65,7 @@ def _ranked(titles: list[str], text: str) -> list[str]:
 
 
 def _ask_worker(system: str, user: str) -> str:
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
     from silica.config import CONFIG
 
     provider = get_provider(CONFIG, role="worker")

@@ -19,7 +19,7 @@ LONG = ("Il percettrone separa due classi con un iperpiano appreso per "
 
 
 def _park(monkeypatch, tmp_path):
-    from silica.kernel.recall import deferred
+    from silica.kernel.write import deferred
 
     monkeypatch.setattr(deferred, "_store_dir", lambda: tmp_path / "deferred")
     deferred._stores.clear()

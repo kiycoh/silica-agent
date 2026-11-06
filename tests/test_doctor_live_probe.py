@@ -36,7 +36,7 @@ def _probe(resp):
     # passed anyway on a developer machine, because a provider key in the
     # environment resolves a model — the outcome hung on whose machine ran it,
     # which is how this reached CI green-locally and red there.
-    with patch("silica.agent.llm.call_llm", _fake_call_llm), \
+    with patch("silica.model.llm.call_llm", _fake_call_llm), \
          patch.object(CONFIG, "model", "test/probe-model"):
         return cli._doctor_live_probe(), seen.get("max_tokens")
 

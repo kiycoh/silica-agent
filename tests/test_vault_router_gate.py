@@ -100,7 +100,7 @@ HOMELESS = [
 
 
 def _served_reranker():
-    from silica.agent.providers import Reranker
+    from silica.model.providers import Reranker
     from silica.kernel.recall.vault_registry import _HOME_FLOOR_MODEL
 
     base = os.environ.get("SILICA_RERANK_BASE_URL") or "http://127.0.0.1:1235"
@@ -134,7 +134,7 @@ def _vault(tmp_path, alias: str):
 
 
 def test_router_sends_each_question_home_and_refuses_the_homeless(tmp_path, monkeypatch):
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     rr = _served_reranker()
     paths = {alias: _vault(tmp_path, alias).resolve() for alias in VAULTS}

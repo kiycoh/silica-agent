@@ -458,7 +458,7 @@ def replay(narration: Path, out: Path, model: str, *, call=None,
         raise SystemExit(f"R holds {len(r)} of {R_SIZE}: replays start on "
                          f"{R_REPLAY_FROM.isoformat()}, while real answers may still arrive")
     if call is None:
-        from silica.agent.llm import call_llm
+        from silica.model.llm import call_llm
         from silica.cli import seed_messages
 
         seed = seed_messages(math=True)

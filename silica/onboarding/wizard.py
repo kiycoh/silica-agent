@@ -19,7 +19,7 @@ from silica.config import (
     model_from_env,
 )
 from silica.kernel.code import gitstate
-from silica.kernel.vault_manifest import MANIFEST_REL
+from silica.kernel.base.manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
 from silica.ui.banner import print_banner
 from silica.ui.console import CONSOLE
@@ -372,7 +372,7 @@ def _ollama_installed_models() -> list[str]:
     """
     import httpx
 
-    from silica.agent.providers import PROVIDER_PRESETS
+    from silica.model.providers import PROVIDER_PRESETS
 
     base = PROVIDER_PRESETS["ollama"]["base_url"].removesuffix("/v1")
     try:
@@ -393,7 +393,7 @@ def _rerank_extra_present() -> bool:
     """Whether the optional [rerank] extra is importable. Guarded find_spec
     (via has_local_rerank) — never raises."""
     try:
-        from silica.agent.providers import has_local_rerank
+        from silica.model.providers import has_local_rerank
         return has_local_rerank()
     except Exception:
         return False
@@ -407,7 +407,7 @@ def _rerank_server_updates() -> dict[str, str]:
         return {}
     import json
 
-    from silica.agent.providers import local_rerank_model
+    from silica.model.providers import local_rerank_model
     from silica.agent.rerank_serve import serve_command
     from silica.config import CONFIG
 
@@ -550,7 +550,7 @@ def _offer_form_fallback(input_fn: Callable[[str], str], vault: Path) -> None:
     )
     if answer.lower() not in ("y", "yes"):
         return
-    from silica.kernel.vault_manifest import set_distill_profile
+    from silica.kernel.base.manifest import set_distill_profile
 
     set_distill_profile(vault, profile)
     CONSOLE.print(f"  {GLYPHS['ok']} conventions.distill_profile: {profile}")
@@ -559,7 +559,7 @@ def _offer_form_fallback(input_fn: Callable[[str], str], vault: Path) -> None:
 def _offer_zotero(input_fn: Callable[[str], str], vault: Path) -> None:
     """One question when Zotero answers on 127.0.0.1:23119 (ADR-0055): no
     step of its own, because most vaults have no Zotero beside them."""
-    from silica.kernel.vault_manifest import load_manifest, set_zotero
+    from silica.kernel.base.manifest import load_manifest, set_zotero
     from silica.sources import zotero
 
     if load_manifest(vault).zotero is not None:
@@ -770,7 +770,7 @@ def _run_wizard_inner(
                     updates["SILICA_MODEL"] = current
                 state["provider"] = SilicaConfig().provider
                 return True
-        from silica.agent.providers import PROVIDER_PRESETS
+        from silica.model.providers import PROVIDER_PRESETS
         provider = ""
         while provider not in ("lmstudio", "ollama", "custom", *_HOSTED):
             provider = _ask(
@@ -849,7 +849,7 @@ def _run_wizard_inner(
         for key in _EMBED_KEYS:
             updates.pop(key, None)
         _section("think", "Embeddings", 3, total())
-        from silica.agent.providers import PROVIDER_PRESETS
+        from silica.model.providers import PROVIDER_PRESETS
         defaults = SilicaConfig()
         provider = state["provider"]
         answer = _ask(
@@ -935,7 +935,7 @@ def _run_wizard_inner(
         _section("worker", "Advanced options", 5, total())
         provider = state["provider"]
         if provider == "lmstudio":
-            from silica.agent.providers import PROVIDER_PRESETS
+            from silica.model.providers import PROVIDER_PRESETS
             options = endpoint_model_ids(PROVIDER_PRESETS["lmstudio"]["base_url"])
         elif provider == "ollama":
             options = _ollama_installed_models()

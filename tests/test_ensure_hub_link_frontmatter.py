@@ -13,7 +13,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from silica.kernel.write.frontmatter import split
+from silica.kernel.base.frontmatter import split
 from silica.kernel.write.templates import ensure_hub_link
 
 

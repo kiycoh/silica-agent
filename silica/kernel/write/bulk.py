@@ -181,7 +181,7 @@ def _execute_patch(op: Op, path: str) -> dict:
             "Missing 'heading', 'snippet', or 'source_basename' for patch operation"
         )
 
-    from silica.kernel.vault_manifest import seed_mirror_copy
+    from silica.kernel.base.manifest import seed_mirror_copy
     seed_mirror_copy(path)
     try:
         nc = DRIVER.read_note(path)

@@ -20,7 +20,7 @@ def _reply(text):
 class TestDecompose:
     def test_parses_fact_lines(self):
         out = "- Enoch ascends to heaven.\n- The Watchers descend on Hermon.\nnoise\n- Azazel teaches metallurgy."
-        with patch("silica.agent.llm.call_llm", return_value=_reply(out)):
+        with patch("silica.model.llm.call_llm", return_value=_reply(out)):
             facts = rs.decompose_facts("source text")
         assert facts == ["Enoch ascends to heaven.",
                          "The Watchers descend on Hermon.",
@@ -30,7 +30,7 @@ class TestDecompose:
         # A hybrid model bills thinking against max_tokens: with reasoning on,
         # a 31KB source burned all 3864 completion tokens on the trace and
         # returned an empty reply, which reads as "parsed 0 facts".
-        with patch("silica.agent.llm.call_llm", return_value=_reply("- a fact")) as llm:
+        with patch("silica.model.llm.call_llm", return_value=_reply("- a fact")) as llm:
             rs.decompose_facts("source text")
         assert llm.call_args.kwargs["reasoning"] is False
 
@@ -39,13 +39,13 @@ class TestDecompose:
         # fragment would be judged unsupported and declared missing.
         cut = SimpleNamespace(text="- Enoch ascends.\n- The Watchers descend on Herm",
                               finish_reason="length", usage={}, reasoning=None)
-        with patch("silica.agent.llm.call_llm", return_value=cut):
+        with patch("silica.model.llm.call_llm", return_value=cut):
             assert rs.decompose_facts("source text") == ["Enoch ascends."]
 
     def test_empty_reply_degrades_to_none(self):
         # None = "could not decompose" (skip verification), distinct from
         # "decomposed to zero facts" which would falsely mean full coverage.
-        with patch("silica.agent.llm.call_llm", return_value=_reply("")):
+        with patch("silica.model.llm.call_llm", return_value=_reply("")):
             assert rs.decompose_facts("source text") is None
 
 
@@ -91,13 +91,13 @@ class TestGatherEvidence:
 class TestJudge:
     def test_batched_verdicts_parse(self):
         replies = iter([_reply("1: yes\n2: no")])
-        with patch("silica.agent.llm.call_llm", side_effect=lambda *a, **k: next(replies)):
+        with patch("silica.model.llm.call_llm", side_effect=lambda *a, **k: next(replies)):
             verdicts = rs.judge_covered(["covered fact", "missing fact"],
                                         ["evidence a", "evidence b"])
         assert verdicts == [True, False]
 
     def test_garbled_line_is_judge_failure_not_verdict(self):
-        with patch("silica.agent.llm.call_llm", return_value=_reply("1: yes\nnonsense")):
+        with patch("silica.model.llm.call_llm", return_value=_reply("1: yes\nnonsense")):
             verdicts = rs.judge_covered(["a", "b"], ["ea", "eb"])
         assert verdicts == [True, None]
 
@@ -105,21 +105,21 @@ class TestJudge:
         # Parity with the factscore judge: free temperature on a
         # reasoning-class router model produced empty/misnumbered replies
         # in-run (45/45 and 92/92 judge failures, run 5e88feb0).
-        with patch("silica.agent.llm.call_llm", return_value=_reply("1: yes")) as llm:
+        with patch("silica.model.llm.call_llm", return_value=_reply("1: yes")) as llm:
             rs.judge_covered(["a"], ["ea"])
         assert llm.call_args.kwargs.get("temperature") == 0
 
     def test_zero_parse_batch_retries_exactly_once(self):
         replies = iter([_reply("thinking out loud, no verdicts"),
                         _reply("1: yes\n2: no")])
-        with patch("silica.agent.llm.call_llm",
+        with patch("silica.model.llm.call_llm",
                    side_effect=lambda *a, **k: next(replies)) as llm:
             verdicts = rs.judge_covered(["a", "b"], ["ea", "eb"])
         assert verdicts == [True, False]
         assert llm.call_count == 2
 
     def test_zero_parse_twice_degrades_without_third_call(self):
-        with patch("silica.agent.llm.call_llm",
+        with patch("silica.model.llm.call_llm",
                    return_value=_reply("still nothing parsable")) as llm:
             verdicts = rs.judge_covered(["a", "b"], ["ea", "eb"])
         assert verdicts == [None, None]
@@ -129,14 +129,14 @@ class TestJudge:
 class TestDecomposeRetry:
     def test_empty_parse_retries_exactly_once(self):
         replies = iter([_reply("no fact lines here"), _reply("- a real fact")])
-        with patch("silica.agent.llm.call_llm",
+        with patch("silica.model.llm.call_llm",
                    side_effect=lambda *a, **k: next(replies)) as llm:
             facts = rs.decompose_facts("source")
         assert facts == ["a real fact"]
         assert llm.call_count == 2
 
     def test_empty_parse_twice_degrades_to_none(self):
-        with patch("silica.agent.llm.call_llm", return_value=_reply("nothing")) as llm:
+        with patch("silica.model.llm.call_llm", return_value=_reply("nothing")) as llm:
             assert rs.decompose_facts("source") is None
         assert llm.call_count == 2
 
@@ -265,7 +265,7 @@ class TestDropApparatus:
     def test_decompose_filters_apparatus(self):
         out = ("- The lecture is Lezione 14.\n"
                "- La chain rule calcola i delta dei livelli nascosti.")
-        with patch("silica.agent.llm.call_llm", return_value=_reply(out)):
+        with patch("silica.model.llm.call_llm", return_value=_reply(out)):
             facts = rs.decompose_facts(self.SRC)
         assert facts == ["La chain rule calcola i delta dei livelli nascosti."]
 
@@ -276,13 +276,13 @@ class TestDropApparatus:
 
 class TestDecomposeLanguage:
     def test_prompt_names_the_language(self):
-        with patch("silica.agent.llm.call_llm", return_value=_reply("- un fatto")) as llm:
+        with patch("silica.model.llm.call_llm", return_value=_reply("- un fatto")) as llm:
             rs.decompose_facts("testo", language="Italian")
         prompt = llm.call_args.args[1][0]["content"]
         assert "Italian" in prompt
 
     def test_no_language_keeps_the_prompt_silent(self):
-        with patch("silica.agent.llm.call_llm", return_value=_reply("- a fact")) as llm:
+        with patch("silica.model.llm.call_llm", return_value=_reply("- a fact")) as llm:
             rs.decompose_facts("text")
         prompt = llm.call_args.args[1][0]["content"]
         assert "language" not in prompt.lower()
@@ -323,7 +323,7 @@ class TestJudgeRunawayIsAFailure:
 
     def _judge(self, text, finish="stop"):
         reply = SimpleNamespace(text=text, finish_reason=finish, usage={}, reasoning=None)
-        with patch("silica.agent.llm.call_llm", return_value=reply) as llm:
+        with patch("silica.model.llm.call_llm", return_value=reply) as llm:
             out = rs.judge_covered(["f1", "f2", "f3"], ["e1", "e2", "e3"])
         return out, llm
 
@@ -370,7 +370,7 @@ class TestJudgeReport:
 
     def test_reports_each_batch_with_raw_reply_and_parse_count(self):
         seen = []
-        with patch("silica.agent.llm.call_llm", return_value=_reply("1: yes\n2: no")):
+        with patch("silica.model.llm.call_llm", return_value=_reply("1: yes\n2: no")):
             rs.judge_covered(["a", "b"], ["ea", "eb"], on_verdict=seen.append)
         assert seen == [{"raw": "1: yes\n2: no", "parsed": 2, "total": 2, "runaway": False,
                          "attempt": 1, "verdicts": [True, False]}]
@@ -378,12 +378,12 @@ class TestJudgeReport:
     def test_reports_the_runaway_and_the_retry(self):
         seen = []
         replies = iter([_reply("2: no\n1024: no"), _reply("1: yes\n2: yes")])
-        with patch("silica.agent.llm.call_llm", side_effect=lambda *a, **k: next(replies)):
+        with patch("silica.model.llm.call_llm", side_effect=lambda *a, **k: next(replies)):
             rs.judge_covered(["a", "b"], ["ea", "eb"], on_verdict=seen.append)
         assert [(r["attempt"], r["runaway"], r["parsed"]) for r in seen] == [(1, True, 2), (2, False, 2)]
 
     def test_reports_a_call_failure(self):
         seen = []
-        with patch("silica.agent.llm.call_llm", side_effect=RuntimeError("down")):
+        with patch("silica.model.llm.call_llm", side_effect=RuntimeError("down")):
             rs.judge_covered(["a"], ["ea"], on_verdict=seen.append)
         assert seen[0]["raw"] is None and "down" in seen[0]["error"] and seen[0]["parsed"] == 0

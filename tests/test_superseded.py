@@ -7,7 +7,8 @@ section produces byte-identical output to the pre-Fase-B append.
 """
 from __future__ import annotations
 
-from silica.kernel.write import frontmatter, templates
+from silica.kernel.base import frontmatter
+from silica.kernel.write import templates
 from silica.kernel.write.contested import (
     SUPERSEDED_HEADING,
     append_before_superseded,

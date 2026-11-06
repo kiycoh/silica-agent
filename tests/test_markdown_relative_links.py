@@ -13,7 +13,7 @@ generator".
 from __future__ import annotations
 
 from silica.driver.fs_backend import ObsidianFSBackend
-from silica.kernel.link.ast import resolve_relative
+from silica.kernel.base.markdown import resolve_relative
 
 
 # ---------------------------------------------------------------------------

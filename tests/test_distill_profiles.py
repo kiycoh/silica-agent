@@ -17,11 +17,7 @@ from unittest import mock
 
 
 from silica.kernel import prep_delegation
-from silica.kernel.vault_manifest import (
-    VaultConventions,
-    VaultManifest,
-    load_manifest,
-)
+from silica.kernel.base.manifest import VaultConventions, VaultManifest, load_manifest
 
 PROFILES_DIR = (
     Path(prep_delegation.__file__).resolve().parent.parent
@@ -55,7 +51,7 @@ def _render(profile: str | None = None, **kw) -> str:
     )
     m = VaultManifest(sources=("prose",), conventions=conv)
     with mock.patch(
-        "silica.kernel.vault_manifest.get_active_manifest", return_value=m
+        "silica.kernel.base.manifest.get_active_manifest", return_value=m
     ):
         return prep_delegation.render_prompt(
             "Target/Dir", hub="HubNote", language="English",

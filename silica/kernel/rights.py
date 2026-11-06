@@ -72,7 +72,7 @@ def answers(vault: Path | None = None) -> dict:
 def save_answer(key: str, answer: str, *, license: str = "", credit: str = "",
                 off: list[str] | None = None, vault: Path | None = None) -> None:
     """Record one answer; "" takes it back, so the thing is asked again."""
-    from silica.kernel.vault_manifest import set_block_key
+    from silica.kernel.base.manifest import set_block_key
 
     if answer and answer not in ANSWERS:
         raise ValueError(f"not an answer: {answer}")
@@ -279,8 +279,8 @@ def _title(path: str, fm: dict) -> str:
 
 def _body(text: str) -> str:
     """A note as it goes out, so a remark the build strips is no finding, and text it keeps is read."""
-    from silica.kernel.link.ast import strip_ofm_meta
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base.markdown import strip_ofm_meta
+    from silica.kernel.base import frontmatter
 
     return strip_ofm_meta(frontmatter.split(text)[2], published=True)
 
@@ -334,8 +334,8 @@ def _read_sources(vault: Path, notes: dict, wanted: dict[str, list[str]], names:
     Returns {image key: file} and fills `names`, {leaf stem: file}, and each note's share."""
     from silica.kernel.recall.paths import SOURCES_DIR
     from silica.kernel.text.language import detect
-    from silica.kernel.vault_manifest import in_write_dir
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base.manifest import in_write_dir
+    from silica.kernel.base import frontmatter
 
     traced: dict[str, str] = {}
     credits: dict[str, str] = {}

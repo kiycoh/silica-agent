@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.recall import citations as c
+from silica.sources import citations as c
 
 
 @pytest.mark.parametrize("raw, want", [

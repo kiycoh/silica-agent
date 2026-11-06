@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 
 # The four values derive_type can produce. Free-form per §4.1 — this is
 # Silica's vocabulary, not the spec's.
@@ -242,8 +242,8 @@ def okf_conformance(vault: Path | str) -> Census:
     """
     from silica.kernel.recall.paths import ignore_matcher
 
-    from silica.kernel.recall.run_log import DEFAULT_LOG_FILENAME
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.write.run_log import DEFAULT_LOG_FILENAME
+    from silica.kernel.base.manifest import load_manifest
 
     vault = Path(vault)
     if not vault.is_dir():

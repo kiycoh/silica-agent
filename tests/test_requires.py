@@ -10,8 +10,8 @@ import networkx as nx
 import pytest
 
 from silica.kernel.recall.requires import resolve
-from silica.kernel.report.learner import with_written
-from silica.kernel.write.frontmatter import requires_in
+from silica.kernel.learn.learner import with_written
+from silica.kernel.base.frontmatter import requires_in
 
 
 def test_requires_in_reads_every_spelling_of_a_link_once():
@@ -44,7 +44,7 @@ def test_the_written_list_replaces_the_inferred_one_and_drops_the_reverse_edge()
 
 def test_prerequisites_map_carries_what_the_person_wrote(tmp_vault, monkeypatch):
     from silica.kernel.recall.cooccurrence import cooccur_key
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     tmp_vault.note("ML/Backprop.md", '---\nrequires: ["[[Chain rule]]"]\n---\n\n# Backprop\n')
     tmp_vault.note("Math/Chain rule.md", "# Chain rule\n")
@@ -54,7 +54,7 @@ def test_prerequisites_map_carries_what_the_person_wrote(tmp_vault, monkeypatch)
 
 
 def test_reading_path_prefers_and_names_a_written_prerequisite():
-    from silica.kernel.recall.mindmap import reading_path
+    from silica.kernel.graph.mindmap import reading_path
 
     g = nx.Graph()
     g.add_edges_from([("a.md", "c.md"), ("c.md", "b.md")])
@@ -94,7 +94,7 @@ def _requires(rel: str) -> list[str]:
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     data, _raw, _body = frontmatter.split((Path(CONFIG.vault_path) / rel).read_text())
     return frontmatter.requires_in(data)
@@ -140,7 +140,7 @@ def test_an_entry_already_there_is_no_write_wherever_it_sits(vault):
 # -- Explore (B2) --------------------------------------------------------------
 
 def test_the_graph_flags_a_written_requires_on_its_wikilink_and_keys_it_apart(tmp_vault):
-    from silica.kernel.recall.graph_export import build_graph_data
+    from silica.kernel.graph.graph_export import build_graph_data
     from silica.ui.web.graph_view import render_html
 
     tmp_vault.note("ML/Backprop.md", '---\nrequires: ["[[Chain rule]]"]\n---\n\n# Backprop\n\nsee [[Adam]]\n')

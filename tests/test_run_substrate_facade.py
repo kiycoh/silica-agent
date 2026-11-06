@@ -6,11 +6,11 @@ the embedding leg alone would miss, and still works when the embedder is down.
 """
 from __future__ import annotations
 
-import silica.agent.providers as providers
+from silica.model import providers
 import silica.kernel.recall.embed as embed_mod
 from silica.kernel.recall.embed import EmbedStore
 from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
-from silica.kernel.recall.run_substrate import build_substrate
+from silica.router.run_substrate import build_substrate
 
 
 class _FakeEmbedder:
@@ -164,7 +164,7 @@ def test_substrate_annotates_degree_and_cluster(tmp_path, monkeypatch):
     es.save()
     monkeypatch.setattr(providers, "get_embedder", lambda *a, **k: _FakeEmbedder([1.0, 0.0]))
 
-    import silica.kernel.recall.graph_export as ge
+    from silica.kernel.graph import graph_export as ge
     ge.save_cluster_ctx(
         [2, 1], {"Concepts/Near": {"cluster_id": 0, "hub": "Concepts/ML.md", "is_hub": False}}
     )

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from silica.kernel.code import codeast, gitstate
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 
 from silica.kernel.recall import paths
 from silica.kernel.code.gitstate import CommitInfo

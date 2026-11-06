@@ -60,7 +60,7 @@ def list_plans() -> list[dict]:
     ponytail: scans every note's frontmatter on request; index it when the
     vault passes 5k notes.
     """
-    from silica.kernel.report.learner import _notes_meta, parsed_note
+    from silica.kernel.learn.learner import _notes_meta, parsed_note
 
     vault = _vault()
     out = []
@@ -78,7 +78,7 @@ def list_plans() -> list[dict]:
 
 def read_plan(path: str, text: str | None = None) -> dict:
     """The note as a plan: scope kind, target, reach, deadline, steps, sessions."""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     if text is None:
         text = (_vault() / path).read_text(encoding="utf-8")
@@ -266,7 +266,7 @@ def resolve_title(name: str, notes: dict | None = None) -> str | None:
     merge loser resolves to the note it points at: a dedup pass made
     "Retropropagazione" a loser of "Backpropagation", and a syllabus that
     names retropropagazione called it not in the vault (2026-10-23)."""
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.learn.learner import _notes_meta
 
     notes = notes if notes is not None else _notes_meta(_vault())
     hit = _by_name(name, notes)
@@ -353,7 +353,7 @@ def resolve_scope(kind: str, target, restrict: str = "", refused=(), declared: d
     context; a step that names a concept with no note of its own is a gap
     until new-material targets (extension 1) exist.
     """
-    from silica.kernel.report.learner import _notes_meta, is_material
+    from silica.kernel.learn.learner import _notes_meta, is_material
 
     notes = _notes_meta(_vault())
     # A note's path is a prefix of itself only, so a list of notes and a
@@ -446,7 +446,7 @@ def _topic_scope(term: str, allowed: set[str]) -> dict:
     except Exception as exc:
         logger.debug("learn: topic scope without the store (%s)", exc)
         posting, neighbours = {}, []
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.learn.learner import _notes_meta
 
     notes = _notes_meta(_vault())
     # Carriers ranked by how much of the term they carry, the way silica_concepts lists them.
@@ -511,7 +511,7 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
     for a topic no material row holds, and a topic not in the vault only
     when no source's text holds it either."""
     from silica.kernel.learn import sources as so
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     # a line break says pasted text: "Iperpiano" alone names the note to read
     # the syllabus from, "Iperpiano\n" is one line to match (ADR-0119)
@@ -930,7 +930,7 @@ def _gap_candidates(tree: list[dict], notes: dict) -> None:
     try:
         from collections import Counter
 
-        from silica.agent.providers import get_embedder_or_none
+        from silica.model.providers import get_embedder_or_none
         from silica.config import CONFIG
         from silica.kernel.recall.embed import _note_title_text, get_store
 
@@ -1341,7 +1341,7 @@ def _translating(words: list[str], tied: list[str], stems: dict[str, set[str]]) 
     try:
         import numpy as np
 
-        from silica.agent.providers import get_embedder_or_none
+        from silica.model.providers import get_embedder_or_none
         from silica.config import CONFIG
 
         embedder = get_embedder_or_none(CONFIG, "plan topics", level="info")
@@ -1393,7 +1393,7 @@ def _translated_pairs(pairs: list[tuple[str, str]]) -> set[tuple[str, str]]:
     try:
         import numpy as np
 
-        from silica.agent.providers import get_embedder_or_none
+        from silica.model.providers import get_embedder_or_none
         from silica.config import CONFIG
 
         embedder = get_embedder_or_none(CONFIG, "plan topics", level="info")
@@ -1432,7 +1432,7 @@ def _by_title_vector(topics: list[str], allowed: set[str]) -> dict[str, str]:
     try:
         from collections import Counter
 
-        from silica.agent.providers import get_embedder_or_none
+        from silica.model.providers import get_embedder_or_none
         from silica.config import CONFIG
         from silica.kernel.recall.embed import _note_title_text, get_store
 
@@ -1530,7 +1530,7 @@ def _dense_rows(topics: list[str], row_notes: set[str]) -> dict[str, dict[str, t
     try:
         from collections import Counter
 
-        from silica.agent.providers import get_embedder_or_none
+        from silica.model.providers import get_embedder_or_none
         from silica.config import CONFIG
         from silica.kernel.recall.embed import _note_title_text, get_store
 
@@ -1693,7 +1693,7 @@ def scope_of(plan: dict, notes: dict | None = None) -> dict:
     The vault's notes are read once and handed to every title lookup: each
     lookup used to read them itself, a vault walk per note, and a plan of 16
     syllabus steps over 60 notes took 56 s to open (2026-10-23, profiled)."""
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.learn.learner import _notes_meta
 
     notes = notes if notes is not None else _notes_meta(_vault())
     if plan["scope"] == "steps":
@@ -1792,7 +1792,7 @@ def _read(path: str) -> str:
 def cycles_among(paths: list[str]) -> list[list[str]]:
     """Prerequisite cycles among the plan's notes (V2 edges), reported on
     the plan rather than silently linearized (os-taxonomy's lesson)."""
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     try:
         # the map is keyed by path in the note's own case and key_of folds it:
@@ -2164,8 +2164,8 @@ def _material_of(plan: dict, notes: dict) -> tuple[list[dict], dict, str, list[d
     reference's body, its rows), the roles as the plan states them or as
     ADR-0131 reads them."""
     from silica.kernel.learn import sources as so
-    from silica.kernel.report.learner import is_material
-    from silica.kernel.write import frontmatter
+    from silica.kernel.learn.learner import is_material
+    from silica.kernel.base import frontmatter
 
     ref = resolve_title(plan.get("target") or "", notes) if plan.get("scope") == "steps" else None
     if not ref:
@@ -2189,7 +2189,7 @@ def lecture_gaps(plan: dict, notes: dict | None = None) -> tuple[list[str], int]
     (all of them for one or two), read as roots so a plural meets its
     singular; activity lines and lines still glued are not judged."""
     from silica.kernel.learn import sources as so
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.learn.learner import _notes_meta
 
     # 5.6 s on the course's 32 decks, most of it the title vectors: once per
     # plan note as written, since its syllabus and its folder are the input
@@ -2242,7 +2242,7 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
     it in the note when a plan passes 500 leaves.
     """
     from silica.kernel.learn import items, mastery
-    from silica.kernel.report import learner, quiz
+    from silica.kernel.learn import learner, quiz
 
     entries = entries if entries is not None else quiz.entries()
     view = view if view is not None else learner.view(_entries_override=entries)
@@ -2322,7 +2322,7 @@ def _tree_of(plan: dict, paths: list[str], notes: dict | None = None) -> list[di
 
 def _relations_in(paths: list[str], items_mod) -> list[tuple[str, str]]:
     """The typed relations whose both endpoints sit in the scope, plus the V2 edges."""
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     by_title = {Path(p).stem.casefold(): p for p in paths}
     out: list[tuple[str, str]] = []
@@ -2445,7 +2445,7 @@ def append_session(plan_path: str, line: str) -> str:
 
 
 def _set_keys(text: str, updates: dict) -> str:
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     data, raw, body = frontmatter.split(text)
     if data is None:
@@ -2487,7 +2487,7 @@ def close_plan(plan_path: str, reopen: bool = False) -> dict:
         _journaled(plan_path, lambda t: _set_keys(t, {"status": None, "completed": None}),
                    free=("status", "completed"))
         return {"status": "active", "completed": None}
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     entries = quiz.entries()
     if not completion(plan, entries):
@@ -2710,7 +2710,7 @@ def guide_candidates(restrict: str = "") -> list[str]:
     """The notes in the bound a plan could take its steps' depth from: a
     table whose header names a depth or a difficulty (ADR-0131 point 11),
     as a study guide writes one. Read once per notes epoch and bound."""
-    from silica.kernel.report.learner import _notes_meta, is_material, parsed_note
+    from silica.kernel.learn.learner import _notes_meta, is_material, parsed_note
 
     vault = _vault()
     notes = _notes_meta(vault)
@@ -2736,7 +2736,7 @@ def _depths(tree: list[dict], guide: str = "", restrict: str = "") -> None:
     later steps rest on it (prerequisite edges from their notes into its
     notes), the top third deep and the bottom third read. Each step's lead,
     the note later steps rest on most, opens its objective."""
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     nodes = [n for n in tree if not n.get("gap") and n.get("leaves") and "practice" not in n]
     if guide:
@@ -2811,7 +2811,7 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
     ADR-0131's `declared`, `hours`, `assessment` and `guide`: None keeps
     what the plan says."""
     from silica.kernel.learn import objectives as obj
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     if scope not in SCOPES:
         raise ValueError(f"scope must be one of {SCOPES}")
@@ -3069,7 +3069,7 @@ _READ_FIELD_RE = re.compile(r"^\s*(KIND|TARGET|ONLY_IN|NAME)\s*:\s*(.*?)\s*$", r
 
 def folders_of(notes: dict | None = None) -> dict[str, int]:
     """{folder path with a trailing slash: notes under it, subfolders included}."""
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.learn.learner import _notes_meta
 
     notes = notes if notes is not None else _notes_meta(_vault())
     out: dict[str, int] = {}
@@ -3143,7 +3143,7 @@ def _syllabus_note(name: str, notes: dict, sentence: str = "") -> str | None:
     # "_" is a word character to \b, and a downloaded sheet is "scheda_trasparenza_173558"
     if not path or not (SYLLABUS_WORD_RE.search(Path(path).stem.replace("_", " ")) or SYLLABUS_WORD_RE.search(sentence)):
         return None
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     try:
         _d, _r, body = frontmatter.split((_vault() / path).read_text(encoding="utf-8"))
@@ -3217,7 +3217,7 @@ def read_sentence(sentence: str, today=None) -> dict:
     import time
 
     from silica.kernel.learn.items import _llm
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.learn.learner import _notes_meta
 
     sentence = " ".join(str(sentence or "").split())[:1200]
     by, why_date = read_date(sentence, today)

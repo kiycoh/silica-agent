@@ -47,7 +47,7 @@ def _entry(src, path):
 
 def _seed(tmp_vault):
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import archive_path_for
+    from silica.kernel.base.manifest import archive_path_for
 
     vault = Path(CONFIG.vault_path)
     tmp_vault.note("Corso/A.md", f"# A\n\nfirst moment {KEPT} stays.\n")
@@ -127,7 +127,7 @@ def test_reverify_checks_a_multi_source_note_against_every_source(tmp_vault):
     more sources. Checking such a note against the one source being
     re-nucleated read every span from the other source as lost."""
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import archive_path_for
+    from silica.kernel.base.manifest import archive_path_for
 
     vault = _seed(tmp_vault)
     tmp_vault.note("Corso/A.md", f"# A\n\nfirst {KEPT} and second {OTHER} moment.\n")

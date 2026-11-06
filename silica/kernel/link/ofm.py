@@ -21,14 +21,14 @@ def has_wikilink(content, name):
     c, n = content.casefold(), name.casefold()
     return any(f"[[{n}{suffix}" in c for suffix in ("]]", "|", "#"))
 
-from silica.kernel.link.ast import parse_headings, _balanced, WIKILINK_TARGET_RE
+from silica.kernel.base.markdown import parse_headings, _balanced, WIKILINK_TARGET_RE
 
 
 # ---------------------------------------------------------------------------
 # OFM structural linter (calibrated against golden notes)
 # ---------------------------------------------------------------------------
 
-from silica.kernel.write import frontmatter as _fm
+from silica.kernel.base import frontmatter as _fm
 
 # Obsidian callout types (canonical + aliases), matched case-insensitively
 CALLOUT_TYPES = frozenset({
@@ -57,7 +57,7 @@ def _effective_limits() -> dict:
     the same dict, bit-identical. Single source shared with
     `prep_delegation.render_prompt`'s `{MAX_TAGS}` placeholder.
     """
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
 
     conv = get_active_manifest().conventions
     return {**LIMITS, "max_tags": conv.max_tags}
@@ -65,7 +65,7 @@ def _effective_limits() -> dict:
 
 def _effective_callout_types() -> frozenset:
     """Base CALLOUT_TYPES plus the active vault's `extra_callouts`."""
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
 
     conv = get_active_manifest().conventions
     if not conv.extra_callouts:
@@ -135,7 +135,7 @@ def ofm_lint(content, stem=None):
     # `\n` (`\ne`, `\neq`, `\nabla`) and every patch to such a note would fail
     # lint forever (real incident: 2026-07-17 nucleate run, Distribuzioni
     # condizionate.md).
-    from .ast import get_non_code_text, extract_callouts
+    from silica.kernel.base.markdown import get_non_code_text, extract_callouts
     from silica.kernel.text.text import MATH_SPANS
     naked = get_non_code_text(body)
     if "\\n" in MATH_SPANS.sub(" ", naked):

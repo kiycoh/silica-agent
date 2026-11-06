@@ -94,7 +94,7 @@ def library(zot) -> dict:
     library's version, read live: membership is never copied into the vault
     (ADR-0055 decision 10). The version is read first, so a library that moves
     during the read is stamped older than its content and reads stale."""
-    from silica.kernel.recall.citations import _label_base
+    from silica.sources.citations import _label_base
     from silica.kernel.text.sanitize import strip_degenerate_runs
     from silica.sources.zotero import _authors_of, _is_paper
 
@@ -174,7 +174,7 @@ def _search(query: str, k: int) -> list[str]:
     from another search is not this one, so the pass stops instead. A pool the
     cross-encoder abstained on is counted, not refused: its gate fires on one
     pool of long notes as well as on a reranker that is down."""
-    from silica.agent.providers import get_embedder
+    from silica.model.providers import get_embedder
     from silica.config import CONFIG
     from silica.tools.graph import _facade_search
 
@@ -219,7 +219,7 @@ def _nearest(query: str, resolve) -> list[str]:
 
 def _pass(vault: str) -> None:
     from silica.config import CONFIG
-    from silica.kernel.recall.mindmap import note_resolver
+    from silica.kernel.graph.mindmap import note_resolver
     from silica.kernel.recall.sync import vault_version
     from silica.sources.zotero import client
 

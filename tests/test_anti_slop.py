@@ -35,7 +35,7 @@ def test_enrich_prompt_includes_fragment(monkeypatch):
             seen["system"] = messages[0]["content"]
             return SimpleNamespace(text='{"addition": "x"}')
 
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: _Provider())
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda *a, **k: _Provider())
     assert _enrich_note(None, "Notes/T.md", "# T\n\nbody", None) == "x"
     assert SENTINEL in seen["system"]
 

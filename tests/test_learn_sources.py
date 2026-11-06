@@ -66,7 +66,7 @@ SUMMARY = {
 
 @pytest.fixture
 def course(tmp_vault, tmp_path, monkeypatch):
-    import silica.kernel.report.quiz as quiz
+    from silica.kernel.learn import quiz
     from silica.kernel.write import undo_journal
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
@@ -100,7 +100,7 @@ def course(tmp_vault, tmp_path, monkeypatch):
 
 
 def _notes():
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.learn.learner import _notes_meta
 
     return _notes_meta(plans._vault())
 

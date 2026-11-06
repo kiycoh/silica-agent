@@ -117,7 +117,7 @@ def _clean_twin_bundle(ctx: dict, heading: str) -> None:
     if not content_hash:
         return
     try:
-        from silica.kernel.recall.deferred import get_deferred_store
+        from silica.kernel.write.deferred import get_deferred_store
         get_deferred_store().remove_op(content_hash, heading)
     except Exception as e:
         logger.debug("expand: twin bundle cleanup failed (non-fatal): %s", e)
@@ -132,7 +132,7 @@ def _author_body(
     hub: str | None = None,
     feedback: str = "",
 ) -> str:
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
 
     prompt = load_prompt("expand_prompt.txt")
     hub_hint = f"\nParent note: [[{hub}]]" if hub else ""

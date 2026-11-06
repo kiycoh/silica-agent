@@ -59,7 +59,7 @@ class TestIngressStamps:
     def test_fetch_note_is_stamped_form_clip(self, tmp_vault, monkeypatch):
         import silica.sources.web_fetch as wf
         from silica.config import CONFIG
-        from silica.kernel.write import frontmatter
+        from silica.kernel.base import frontmatter
         from silica.sources.web_research import fetch_to_inbox
 
         monkeypatch.setattr(
@@ -354,7 +354,7 @@ class TestDraftFiling:
         from pathlib import Path
 
         from silica.config import CONFIG
-        from silica.kernel.write import frontmatter
+        from silica.kernel.base import frontmatter
 
         body = "rough VO pass, ignore the ums\n\nthe number that convinced me was five months\n"
         tmp_vault.note("Inbox/vo-ep180.md", f"---\nform: draft\n---\n\n{body}")
@@ -701,7 +701,7 @@ def test_a_txt_draft_files_under_auto_target_too(tmp_vault, monkeypatch):
     case died there and fell back to distillation."""
     from pathlib import Path
 
-    import silica.agent.llm as llm
+    from silica.model import llm
     import silica.kernel.forms as forms
     import silica.router.coordinator as rc
     from silica.config import CONFIG
@@ -816,7 +816,7 @@ def test_a_filed_draft_lands_inside_the_write_dir(tmp_vault, monkeypatch):
     import silica.kernel.forms as forms
     import silica.router.coordinator as rc
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
 
     tmp_vault.note("vault.yaml", "write_dir: silica\n")
     reset_manifest_cache()

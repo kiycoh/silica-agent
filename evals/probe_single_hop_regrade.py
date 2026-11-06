@@ -14,7 +14,7 @@ import collections
 import json
 import sys
 
-from silica.agent.llm import call_llm
+from silica.model.llm import call_llm
 
 MODEL = "openrouter/deepseek/deepseek-v4-flash"
 CONV, METRICS = "conv-26", "bench/ab_c26_verbatim_agent.metrics.json"

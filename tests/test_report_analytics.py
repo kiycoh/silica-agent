@@ -140,7 +140,7 @@ def test_vault_graph_ctx_has_no_pagerank_field(monkeypatch):
     monkeypatch.setattr(gr, "compute_report", lambda *a, **k: fake)
     # build_vault_graph_ctx first snapshots the graph for the cluster-cache key
     # (Scaling E); keep this hermetic (don't touch the real vault).
-    import silica.kernel.recall.graph_export as ge
+    from silica.kernel.graph import graph_export as ge
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (
         [{"id": "A", "type": "note"}, {"id": "B", "type": "note"}, {"id": "Z", "type": "note"}],
         [{"from": "A", "to": "B", "type": "EXTRACTED"}],

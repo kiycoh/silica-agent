@@ -47,7 +47,7 @@ def test_expand_commits_authored_body_with_op_metadata():
     with patch("silica.capabilities.expand._author_body", return_value=_GOOD_BODY) as author, \
          patch("silica.capabilities.expand.commit_ops",
                return_value={"status": "committed", "committed": 1}) as commit, \
-         patch("silica.kernel.recall.deferred.get_deferred_store") as store:
+         patch("silica.kernel.write.deferred.get_deferred_store") as store:
         res = run_expand(_item(), CONFIG)
 
     assert res["status"] == "committed"
@@ -74,7 +74,7 @@ def test_expand_retries_once_then_commits():
                side_effect=[_SHORT_BODY, _GOOD_BODY]) as author, \
          patch("silica.capabilities.expand.commit_ops",
                return_value={"status": "committed", "committed": 1}), \
-         patch("silica.kernel.recall.deferred.get_deferred_store"):
+         patch("silica.kernel.write.deferred.get_deferred_store"):
         res = run_expand(_item(), CONFIG)
 
     assert res["status"] == "committed"
@@ -86,7 +86,7 @@ def test_expand_retries_once_then_commits():
 def test_expand_gives_up_after_max_attempts():
     with patch("silica.capabilities.expand._author_body", return_value=_SHORT_BODY) as author, \
          patch("silica.capabilities.expand.commit_ops") as commit, \
-         patch("silica.kernel.recall.deferred.get_deferred_store") as store:
+         patch("silica.kernel.write.deferred.get_deferred_store") as store:
         res = run_expand(_item(), CONFIG)
 
     assert res["status"] == "still_short"
@@ -106,7 +106,7 @@ def test_expand_failed_commit_keeps_deferred_twin():
     with patch("silica.capabilities.expand._author_body", return_value=_GOOD_BODY), \
          patch("silica.capabilities.expand.commit_ops",
                return_value={"status": "rolled_back", "committed": 0}), \
-         patch("silica.kernel.recall.deferred.get_deferred_store") as store:
+         patch("silica.kernel.write.deferred.get_deferred_store") as store:
         res = run_expand(_item(), CONFIG)
 
     assert res["status"] == "rolled_back"
@@ -196,6 +196,6 @@ def test_author_body_turns_thinking_off():
             return type("R", (), {"text": '{"content": "corpo"}'})()
 
     provider = _Provider()
-    with patch("silica.agent.providers.get_provider", return_value=provider):
+    with patch("silica.model.providers.get_provider", return_value=provider):
         assert _author_body(CONFIG, concept="X", excerpt="e", source_basename="lez.md") == "corpo"
     assert provider.kw.get("reasoning") is False

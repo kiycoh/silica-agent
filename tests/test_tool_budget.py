@@ -19,7 +19,7 @@ import silica.tools as T
 from silica.agent.constraints import (
     _CHAT_EXCLUDED, _REVIEW_APPLY, CHAT_CORE, chat_deferred, chat_tools, loadable,
 )
-from silica.agent.llm import _with_prompt_cache
+from silica.model.llm import _with_prompt_cache
 
 
 def _all_tools():
@@ -261,7 +261,7 @@ def test_cache_breakpoint_applies_to_qwen_on_openrouter_only_behind_the_gate(mon
 def test_litellm_keeps_the_breakpoint_on_a_qwen_openrouter_request():
     from litellm.llms.openrouter.chat.transformation import OpenrouterConfig
 
-    from silica.agent.llm import _litellm
+    from silica.model.llm import _litellm
 
     _litellm()
     cfg = OpenrouterConfig()

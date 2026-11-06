@@ -853,7 +853,7 @@ def test_key_tokens_stemmed_entity_prefix_dropped():
 
 
 def _schema(**kw):
-    from silica.kernel.vault_manifest import EpisodicKeySchema
+    from silica.kernel.base.manifest import EpisodicKeySchema
 
     return EpisodicKeySchema(**kw)
 

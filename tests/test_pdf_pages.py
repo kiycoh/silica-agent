@@ -361,7 +361,7 @@ def test_an_image_part_does_not_count_as_its_base64_in_the_output_budget():
     """A 120 KB page PNG is 160k characters of data URL; read as text it left
     no window, and the reply was cut to the clamp's 1024 floor (2026-10-13:
     completion_tokens 1024 at max_tokens 2500 and at 6000)."""
-    from silica.agent import llm
+    from silica.model import llm
 
     data = "data:image/png;base64," + "A" * 160_000
     with_image = [{"role": "user", "content": [
@@ -400,7 +400,8 @@ def test_a_reply_cut_at_the_budget_says_so(monkeypatch):
     import importlib
     from types import SimpleNamespace
 
-    from silica.agent import providers, vision
+    from silica.model import providers
+    from silica.agent import vision
 
     vision = importlib.reload(vision)  # the real ask, under conftest's offline one
     finish = []
@@ -550,7 +551,7 @@ def test_a_batch_that_cannot_be_drawn_keeps_its_pages_text(pdfium_vault, monkeyp
 
 def test_a_usage_limit_mid_file_stops_drawing_the_batches_left(pdfium_vault, monkeypatch):
     from silica.agent import vision
-    from silica.agent.usage_limits import UsageLimited
+    from silica.model.usage_limits import UsageLimited
     from silica.sources import pdf_extract
     from silica.sources.convert import convert
 

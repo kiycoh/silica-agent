@@ -49,7 +49,7 @@ def test_a_session_comes_back_after_a_restart_where_it_was(client):
 
 
 def test_the_receipt_says_what_the_session_cost_only_where_calls_are_metered(client, monkeypatch):
-    from silica.agent import llm
+    from silica.model import llm
     from silica.ui.web import learn_routes
 
     c, _ = client

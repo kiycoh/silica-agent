@@ -91,7 +91,7 @@ def math_font_pages(pdf) -> set[int]:
 def ask_qwen(png: Path) -> dict:
     """The production page reading (`convert._read_pages` -> read_image ->
     ask_chat_model), with the LaTeX prompt and the raw reply kept."""
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
     from silica.config import CONFIG
     from silica.kernel.recall import image_readings
 
@@ -220,7 +220,7 @@ def run_production(out: Path) -> None:
     """The gate after the amendment shipped: `convert()` itself on the three
     lectures, in the child under the hosted env, so the trigger, the
     markdown prompt and the body replacement are the ones a tenant gets."""
-    import silica.agent.llm as llm
+    from silica.model import llm
 
     calls: list[dict] = []
     real_emit = llm.emit

@@ -68,7 +68,7 @@ def silica_session_search(
     Returns matching messages with their session id, title and last-active
     date, each with the other half of its exchange. For what the notes say,
     use silica_search instead."""
-    from silica.agent import narration
+    from silica.obs import narration
     from silica.config import CONFIG
     from silica.kernel.recall.lexical import LexicalStore
 

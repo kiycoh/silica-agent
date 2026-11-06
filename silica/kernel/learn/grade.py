@@ -81,7 +81,7 @@ _FIELD_RE = re.compile(r"^([A-Z_]+):\s*(.*)$")
 def _llm(prompt: str, max_tokens: int) -> tuple[str, str | None]:
     """The judge model when one is configured (epistemic-state M7): the
     verdict then comes from a model that did not write the notes it grades."""
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.config import CONFIG
 
     model = CONFIG.judge_model or CONFIG.model

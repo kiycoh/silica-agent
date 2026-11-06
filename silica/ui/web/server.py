@@ -37,8 +37,8 @@ from silica.agent.constraints import (
     chat_tools,
     web_turn_constraints,
 )
-from silica.agent.events import LLMStreamEvent, ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
-from silica.agent.llm import meter_totals
+from silica.obs.events import LLMStreamEvent, ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
+from silica.model.llm import meter_totals
 from silica.agent.loop import _EMPTY_COMPLETION, _is_tool_failure, run_agent
 from silica.agent import turn_notes
 from silica.agent.recall_watch import (
@@ -50,8 +50,8 @@ from silica.agent.recall_watch import (
     unfounded_in_turn,
 )
 from silica.config import CONFIG, demo
-from silica.kernel.link.ast import strip_ofm_meta as _strip_ofm_meta
-from silica.kernel.recall.mindmap import answer_resolver, note_resolver
+from silica.kernel.base.markdown import strip_ofm_meta as _strip_ofm_meta
+from silica.kernel.graph.mindmap import answer_resolver, note_resolver
 from silica.metrics import emit
 from silica.kernel.write import session_changes
 from silica.sources.web_research import WebTurn
@@ -74,7 +74,7 @@ _busy = False  # one turn at a time; a second /chat is refused with 409
 current_session_id: str | None = None  # narration sid of the live conversation
 current_workspace: str | None = None  # vault path of the workspace this chat is opened in (ADR-0112)
 # The store moved to ~/.silica/narration (docs/specs/narration/spec.md §5);
-# legacy web_sessions/*.json are read forever through silica.agent.narration.
+# legacy web_sessions/*.json are read forever through silica.obs.narration.
 
 
 # Fresh-session seed, precomputed so /reset ("new chat") is instant instead of
@@ -129,7 +129,7 @@ def _prewarm_learn() -> None:
     that wait, which the click then pays."""
     try:
         from silica.kernel.learn import plans
-        from silica.kernel.report import learner
+        from silica.kernel.learn import learner
 
         learner._notes_meta(plans._vault())
         plans.list_plans()
@@ -159,7 +159,7 @@ def _seeded() -> tuple[list[dict], int]:
 
 def _reset_session() -> None:
     global current_cancel, current_task, _busy, current_session_id, current_workspace
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     from silica.kernel import user_memory
 
     # A phone turn (ADR-0089 amendment) holds the gate and the narrator while
@@ -311,7 +311,7 @@ def _open_session() -> str | None:
     """The live chat's session, opened now when its first turn has not come
     yet; idempotent, as the turn's own `ensure_session` is."""
     global current_session_id
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     try:
         current_session_id = _narr.NARRATOR.ensure_session(driver="gui", sid=current_session_id)
     except _narr.SessionBusy as e:   # another process owns it: the turn will say so
@@ -323,7 +323,7 @@ def _narrate_user_turn(msg: dict) -> None:
     """Session born at the first user turn (spec §5), then the turn beat.
     Runs on the worker thread; ensure_session is idempotent per turn."""
     global current_session_id
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     try:
         current_session_id = _narr.NARRATOR.ensure_session(
             driver="gui", sid=current_session_id)
@@ -344,7 +344,7 @@ def _list_sessions() -> list[dict]:
     """Saved conversations for the current vault, newest first, both stores.
     _save_session is gone with the snapshot model: appending turn beats IS
     the save (spec §5), so a refresh/close can no longer lose history."""
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     return _narr.list_sessions(CONFIG.vault_path or "")
 
 
@@ -945,7 +945,7 @@ def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> s
     from mdit_py_plugins.dollarmath import dollarmath_plugin
     from mdit_py_plugins.footnote import footnote_plugin
 
-    from silica.kernel.link.ast import join_code_aliases
+    from silica.kernel.base.markdown import join_code_aliases
 
     text = _escape_table_aliases(_strip_ofm_meta(text or ""))
     md = (
@@ -1037,7 +1037,7 @@ def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dic
     a proposal written from a request the person made in enough chats, or
     else the installed skill that answers it, offered as the next turn. An
     incognito chat proposes nothing: it asked to leave no trace."""
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     from silica.kernel import proposed_skills as ps
     from silica.kernel import user_memory
 
@@ -1091,7 +1091,7 @@ def _study_offer(text: str, messages: list[dict], plan_draft: dict | None = None
         # The turn names its reads as the calls did, a title or a path; the
         # ledger keys notes by path, so the titles are resolved first.
         from silica.kernel.learn.offer import says_lost
-        from silica.kernel.recall.mindmap import _driver_graph, answer_resolver
+        from silica.kernel.graph.mindmap import _driver_graph, answer_resolver
 
         graph = _driver_graph()
         _resolve, read = answer_resolver(read_refs(messages), graph=graph)
@@ -1136,8 +1136,8 @@ def _escalation(text: str, messages: list[dict]) -> str:
     try:
         chat = current_session_id or ""
         learn_offer.log_acted(chat, text)
-        from silica.kernel.recall.mindmap import _driver_graph
-        from silica.kernel.report.quiz import entries
+        from silica.kernel.graph.mindmap import _driver_graph
+        from silica.kernel.learn.quiz import entries
 
         low = (text or "").casefold()
         named = sorted(((t, p) for p, t in _driver_graph()[1].items()
@@ -1365,7 +1365,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         except RuntimeError:
             pass  # loop already closed: the turn is gone, the event is moot
 
-    from silica.agent.bus import BUS
+    from silica.obs.bus import BUS
     BUS.subscribe("work/phase", on_phase)
     # A typed /nucleate runs the injector with no agent call around it, and
     # says so on "work/tool" (cli._sc_nucleate), so its block draws as the
@@ -1388,7 +1388,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         worn = (await asyncio.to_thread(personas.command, text, messages, CONFIG.vault_path or None,
                                         not _collapsed) if text.startswith("/") else None)
         if worn is not None and not worn[1]:
-            from silica.agent import narration as _narr
+            from silica.obs import narration as _narr
 
             messages.append({"role": "user", "content": text, "origin": "cli"})
             _narrate_user_turn(messages[-1])
@@ -1431,7 +1431,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             # in a code block: the chat draws this as a Saved line with Undo,
             # from the `memory` the done frame carries. Bare /remember goes on
             # to the expansion below, which asks the model.
-            from silica.agent import narration as _narr
+            from silica.obs import narration as _narr
             from silica.cli import remember_text
             from silica.kernel import user_memory
 
@@ -1454,7 +1454,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             # code block, and the formulas on the cards would not render.
             import shlex
 
-            from silica.agent import narration as _narr
+            from silica.obs import narration as _narr
             from silica.cli import _int_flag, _positional, _str_flag
             from silica.kernel.learn.artifacts import flashcards
 
@@ -1535,7 +1535,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                 shown = Text.from_ansi(captured_out).plain.strip()
                 answer = f"```text\n{shown}\n```" if shown else "```text\n(done)\n```"
                 messages.append({"role": "assistant", "content": answer})
-                from silica.agent import narration as _narr
+                from silica.obs import narration as _narr
                 _narr.NARRATOR.turn(messages[-1])
 
                 # Yield a fake agent turn with the direct result
@@ -1754,7 +1754,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             messages[-1][READS_KEY] = refs
         # Final-assistant turn beat, post-attribution (see loop.py).
         if messages and messages[-1].get("role") == "assistant":
-            from silica.agent import narration as _narr
+            from silica.obs import narration as _narr
             _narr.NARRATOR.turn(messages[-1])
         _update_context_tokens(messages)
         _collapsed = _compact_context(messages, _collapsed)
@@ -1915,7 +1915,7 @@ def _narrating_phone():
     would append the next chat's turns to the file the student left. No
     browser turn narrates in between, because the gate is the phone's."""
     global _phone_sid
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
 
     _narr.NARRATOR.close()
     try:
@@ -1946,7 +1946,7 @@ def _phone_turn(text: str, cancel: threading.Event) -> dict:
     """One phone turn, whole: `{"answer": ...}`, or `{"error": ...}` with the
     sentence the browser would show, a usage limit's reset included."""
     global _phone_collapsed
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     from silica.cli import _compact_context, _update_context_tokens, seed_messages
 
     # The browser reopened the phone's session from the chat list and now
@@ -2464,7 +2464,7 @@ async def _stage_uploads(files: list[UploadFile], folder: str | None = None, **j
     blocked /stop, leaving a visible Stop button that could not be served.
     """
     from silica.config import hosted
-    from silica.kernel.vault_manifest import active_write_dir, get_active_manifest, resolve_inbox_dir
+    from silica.kernel.base.manifest import active_write_dir, get_active_manifest, resolve_inbox_dir
     from silica.sources import pdf_extract
     from silica.sources.convert import IMG_EXTS
     from silica.sources.registry import adapter_for, stage
@@ -2874,7 +2874,7 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
 def _name_session(sid: str, title: str) -> None:
     """A chat named by its drop (ADR-0121 point 1): a session with no turn yet
     is unlisted, and a deferred question has none until its file is read."""
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
 
     title = title.strip()
     _narr.rename_session(sid, title[:57] + "…" if len(title) > 58 else title, CONFIG.vault_path or "")
@@ -2909,7 +2909,7 @@ def _chat_rel(rel: str, sid: str | None = None) -> tuple[str, str]:
 
 
 def _inbox_rel() -> str:
-    from silica.kernel.vault_manifest import active_write_dir, resolve_inbox_dir
+    from silica.kernel.base.manifest import active_write_dir, resolve_inbox_dir
 
     return resolve_inbox_dir(CONFIG.vault_path or ".", active_write_dir(), CONFIG.inbox_dir or "Inbox")
 
@@ -3048,7 +3048,7 @@ async def redo_turn(payload: dict | None = None):
     ponytail: the last turn only; an earlier question is a rewind by ordinal,
     due when a student asks to edit one."""
     global _collapsed
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
 
     words = (payload or {}).get("text")
     if not _begin_turn():
@@ -3355,7 +3355,11 @@ def workspaces_membership(path: str, folder: bool = False):
 async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list[dict], set[str]]:
     from silica.config import hosted
     from silica.kernel.recall.paths import ignore_matcher
-    from silica.kernel.vault_manifest import _UNRESOLVABLE_WRITE_DIR, active_write_dir, get_active_manifest
+    from silica.kernel.base.manifest import (
+        _UNRESOLVABLE_WRITE_DIR,
+        active_write_dir,
+        get_active_manifest,
+    )
     from silica.sources import pdf_extract
     from silica.sources.media_admission import MediaRefused
     from silica.sources.registry import adapter_for, stage
@@ -3533,7 +3537,7 @@ async def mail_upload(request: Request, name: str):
     The body is the file itself and `name` its name, not a multipart form:
     Starlette spools a form's file to the temp dir first, which is RAM where
     /tmp is a tmpfs, and an export runs to gigabytes."""
-    from silica.kernel.vault_manifest import active_write_dir, resolve_inbox_dir
+    from silica.kernel.base.manifest import active_write_dir, resolve_inbox_dir
     from silica.sources.mail import SUFFIXES
 
     name = Path(name).name  # a client-chosen name never adds a directory
@@ -3699,7 +3703,7 @@ def _area_matrix(report) -> dict | None:
     # The colours too, though the gaps card paints none: the row is /shape's
     # row, and an area's colour is a function of its id in both producers
     # (detect_communities), so shipping it keeps the two payloads one shape.
-    from silica.kernel.recall.graph_export import _community_color
+    from silica.kernel.graph.graph_export import _community_color
 
     return {
         "areas": [
@@ -3779,7 +3783,7 @@ def shape():
     plus community detection — and splitting them into three routes would pay it
     three times for surfaces a reader flips between.
     """
-    from silica.kernel.recall.graph_export import build_graph_data, detect_communities
+    from silica.kernel.graph.graph_export import build_graph_data, detect_communities
 
     try:
         nodes, edges = build_graph_data(folder="")
@@ -3797,7 +3801,7 @@ def shape():
     # One tally with the report and the gap/bridge ranking (area_tally): linked
     # pairs counted once, hubs by degree with ties to the larger id. This loop
     # used to live here a third time and picked hubs by file order.
-    from silica.kernel.recall.graph_export import area_hubs, area_tally
+    from silica.kernel.graph.graph_export import area_hubs, area_tally
 
     t = area_tally(real, edges)
     sizes, intra, inter, deg, hub_of = dict(t.sizes), t.intra, t.inter, t.deg, area_hubs(t)
@@ -4341,7 +4345,7 @@ def map_layout(payload: dict):
     because a hub lights dozens of paths; guarded like a write because it reads
     the vault on another page's say-so.
     """
-    from silica.kernel.recall.mindmap import arrange_in_vault
+    from silica.kernel.graph.mindmap import arrange_in_vault
 
     root, ids, groups = payload.get("root"), payload.get("ids"), payload.get("groups") or {}
     if not isinstance(root, str) or not isinstance(ids, list) or not isinstance(groups, dict):
@@ -4361,7 +4365,7 @@ def link_written(request: Request):
     the read, as /note does. Asked per click and not shipped on the export:
     1,263 lines on Cultura would ride every graph for one look.
     """
-    from silica.kernel.recall.mindmap import note_resolver
+    from silica.kernel.graph.mindmap import note_resolver
 
     resolve = note_resolver()
     a, b = (resolve(request.query_params.get(k, "")) for k in ("from", "to"))
@@ -4387,7 +4391,7 @@ def prereq_path(note: str = ""):
     that root the biggest ladders, which is the one list that cannot be got
     from the file tree.
     """
-    from silica.kernel.recall.mindmap import note_resolver
+    from silica.kernel.graph.mindmap import note_resolver
     from silica.kernel.report.structure import ladder, structure_map
 
     try:
@@ -4685,7 +4689,7 @@ def _index_note(key: str) -> None:
     note. `_EMBED_LOCK` because /embed and an import write the same store. Each
     leg fails alone and is left to /embed: the text is safe on disk, and a stale
     vector costs a search, never a keystroke."""
-    from silica.agent.providers import get_embedder_or_none
+    from silica.model.providers import get_embedder_or_none
     from silica.driver import DRIVER
     from silica.kernel.recall.cooccurrence import build_index
     from silica.kernel.recall.embed import refresh_note
@@ -4966,7 +4970,7 @@ def tree_delete(payload: dict):
     elif note:
         paths = _tree_paths([note])
     elif folder:
-        from silica.kernel.recall.graph_export import build_graph_data
+        from silica.kernel.graph.graph_export import build_graph_data
 
         nodes, _edges = build_graph_data(folder=folder)
         paths = sorted(n["path"] for n in nodes if n.get("type") != "ghost" and n.get("path"))
@@ -5232,7 +5236,7 @@ async def note_check(payload: dict, request: Request):
     from silica.cli import _check_judge, _check_legs, _check_web_legs
     from silica.kernel.check import run as check
     from silica.kernel.check import web as check_web
-    from silica.kernel.vault_manifest import active_write_dir
+    from silica.kernel.base.manifest import active_write_dir
     from silica.metrics import ms_since, outcome_of
 
     # Off the event loop: the resolver reads the driver's graph, and every
@@ -5926,7 +5930,7 @@ def _note_structure(canon: str) -> dict:
 def _cut_figure(layout: dict) -> dict:
     """The cut's neighbourhood dressed for the drawer: names, and each area's
     hue in both themes, the frame's own (ADR-0075, Place)."""
-    from silica.kernel.recall.graph_export import area_color
+    from silica.kernel.graph.graph_export import area_color
 
     nodes = [{**{k: v for k, v in n.items() if k != "id"}, **_row(n["id"])} for n in layout["nodes"]]
     areas = sorted({n["area"] for n in nodes if n["area"] >= 0})
@@ -6198,7 +6202,7 @@ def _select(nodes: list[dict], sel: str, edges: list | None = None
         pre = rest if rest.endswith("/") else rest + "/"
         return {n["id"] for n in real if n["id"].startswith(pre)}, pre
     if kind == "area" and rest.lstrip("-").isdigit():
-        from silica.kernel.recall.graph_export import area_hubs, area_tally
+        from silica.kernel.graph.graph_export import area_hubs, area_tally
 
         gid = int(rest)
         ids = {n["id"] for n in real if n.get("group", -1) == gid}
@@ -6216,7 +6220,7 @@ def compare(a: str = "", b: str = ""):
     from silica.config import CONFIG
     from silica.kernel.recall.compare import compare_sets
     from silica.kernel.recall.cooccurrence import get_cooccur_store
-    from silica.kernel.recall.graph_export import build_graph_data, detect_communities, knn_edges
+    from silica.kernel.graph.graph_export import build_graph_data, detect_communities, knn_edges
 
     try:
         nodes, edges = build_graph_data(folder="")
@@ -6229,7 +6233,7 @@ def compare(a: str = "", b: str = ""):
     except Exception:
         logger.debug("compare: semantic layer unavailable", exc_info=True)
     if a.startswith("collection") or b.startswith("collection"):
-        from silica.kernel.recall.citations import paper_layer
+        from silica.sources.citations import paper_layer
         from silica.ui.web.graph_view import _stamp_collections
 
         paper_layer(nodes)
@@ -6318,7 +6322,7 @@ def vault_info():
     graph view so the numbers can't disagree between the two surfaces."""
     from silica.kernel.check.web import is_open as check_web_open
     from silica.kernel.publish import never_dirs
-    from silica.kernel.recall.graph_export import build_graph_data
+    from silica.kernel.graph.graph_export import build_graph_data
     from silica.ui.web.graph_view import render_tree
 
     try:
@@ -6392,7 +6396,7 @@ def limits():
     empty list off hosted, where the key has no limit or the model is not on
     OpenRouter.
     Sync, so FastAPI runs the read of the key on its thread pool."""
-    from silica.agent.usage_limits import status
+    from silica.model.usage_limits import status
 
     return {"limits": status(CONFIG.model or "")}
 
@@ -6409,7 +6413,7 @@ def vault_brief(refresh: int = 0):
     if not CONFIG.vault_brief:
         return {"enabled": False, "text": ""}
 
-    from silica.kernel.recall.graph_export import build_graph_data, detect_communities
+    from silica.kernel.graph.graph_export import build_graph_data, detect_communities
 
     try:
         nodes, edges = build_graph_data(folder="")
@@ -6453,7 +6457,7 @@ def _write_brief(notes: int, topics: list[str], hubs: list[str]) -> str:
     """
     if not topics and not hubs:
         return ""
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
 
     prompt = (
         "Below are the topic labels of the largest link clusters in a personal "
@@ -6514,7 +6518,7 @@ def get_messages():
             done = _flagged(sid)
             turn_of = {id(m): {"session": sid, "seq": s, "flagged": s in done}
                        for m, s in zip(users, seqs)}
-    from silica.kernel.recall.mindmap import _driver_graph
+    from silica.kernel.graph.mindmap import _driver_graph
 
     graph = _driver_graph()   # once for every answer below, as `resolve` is for the rest
     data = []
@@ -6575,7 +6579,7 @@ def get_messages():
 def narration_replay(from_seq: int = 0, sid: str = ""):
     """Replay from a cursor — record zero by default: a joining client that
     replays everything cannot see a span whose opening it missed (ticket 08)."""
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     target = sid or current_session_id
     if not target or not str(target).isalnum():
         return JSONResponse({"sid": None, "beats": []})
@@ -6607,8 +6611,8 @@ def _beat_for_tab(rec: dict) -> bool:
 async def narration_sse(request: Request, from_seq: int = 0):
     """Live beats. The SSE `id:` field is the seq, so the browser's own
     Last-Event-ID header is the reconnect cursor — no custom client state."""
-    from silica.agent import narration as _narr
-    from silica.agent.bus import BUS
+    from silica.obs import narration as _narr
+    from silica.obs.bus import BUS
 
     last = request.headers.get("last-event-id")
     cursor = int(last) if last and last.isdigit() else from_seq
@@ -6688,7 +6692,7 @@ def load_session(payload: dict):
     if _busy:
         raise HTTPException(status_code=409, detail="a turn is already in progress")
     from silica.cli import _update_context_tokens
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
 
     sid = str(payload.get("id", ""))
     if not sid.isalnum():  # ids are hex — blocks path traversal
@@ -6735,7 +6739,7 @@ def load_session(payload: dict):
 @app.post("/session/rename", dependencies=_SAME_ORIGIN)
 def rename_session(payload: dict):
     """The chat list's rename (audit P18): a title beat, never a rewrite."""
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
 
     sid = str(payload.get("id", ""))
     title = str(payload.get("title", "")).strip()[:120]
@@ -6754,7 +6758,7 @@ def rename_session(payload: dict):
 def delete_session(payload: dict):
     """Delete one chat. The open one is closed first and the tab lands on a
     fresh session, so the record and the conversation go together."""
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
 
     sid = str(payload.get("id", ""))
     if not sid.isalnum():
@@ -6796,14 +6800,14 @@ _FLAG_NOTE_MAX = 300
 
 
 def _session_beats(sid: str) -> list[dict]:
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
 
     return list(_narr.read_beats(_narr.narration_dir() / f"{sid}.jsonl"))
 
 
 def _user_turn_seqs(beats: list[dict]) -> list[int]:
     """The seqs of the user `turn` beats, in file order."""
-    from silica.agent.narration import REWIND
+    from silica.obs.narration import REWIND
 
     out = []
     for b in beats:
@@ -6908,7 +6912,7 @@ def reset():
 def stop():
     if current_cancel is not None:
         current_cancel.set()
-        from silica.agent import narration as _narr
+        from silica.obs import narration as _narr
         _narr.NARRATOR.cancel(driver="gui", target=None, scope="turn")
     return {"ok": True}
 
@@ -7084,7 +7088,7 @@ def get_config():
     """Session config for the header panel: the active model (read-only — Silica
     has no runtime model-switch op, so this mirrors the TUI's display-only
     /model) plus the one live toggle the web surfaces, thinking (/thinking)."""
-    from silica.agent.providers import model_limits
+    from silica.model.providers import model_limits
 
     window = 0
     if CONFIG.model:

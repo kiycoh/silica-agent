@@ -119,7 +119,7 @@ def test_orphan_cancelled_between_llm_and_commit(config):
 
 def test_feedback_events_published_on_normal_run(config):
     """WorkFeedbackEvent is published to BUS for each phase on a normal run."""
-    import silica.agent.bus as bus_mod
+    from silica.obs import bus as bus_mod
     received = []
     bus_mod.BUS.subscribe("work/feedback", received.append)
 

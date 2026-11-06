@@ -305,6 +305,6 @@ def chat_base_url(cfg) -> str:
     """Where the chat provider is served — the preset URL unless one is pinned."""
     if cfg.provider_base_url:
         return cfg.provider_base_url
-    from silica.agent.providers import PROVIDER_PRESETS
+    from silica.model.providers import PROVIDER_PRESETS
 
     return PROVIDER_PRESETS.get(cfg.provider, {}).get("base_url", "")

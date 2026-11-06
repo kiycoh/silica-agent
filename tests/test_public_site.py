@@ -10,7 +10,7 @@ PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 
 @pytest.fixture
 def marta(tmp_vault, tmp_path, monkeypatch):
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
 
     monkeypatch.setenv("SILICA_PUBLIC_DIR", str(tmp_path / "public"))
     monkeypatch.setenv("SILICA_PUBLIC_HANDLE", "marta")

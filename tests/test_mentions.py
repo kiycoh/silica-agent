@@ -115,7 +115,7 @@ def test_an_open_note_the_vault_no_longer_has_is_left_out():
 def test_the_chip_note_reaches_the_model_and_a_reopened_chat_draws_it(tmp_vault, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from silica.agent.providers import _to_wire
+    from silica.model.providers import _to_wire
     from silica.ui.web import server
 
     tmp_vault.note("Codice civile/Art. 1453.md", "# Art. 1453\n\nRisoluzione per inadempimento.\n")

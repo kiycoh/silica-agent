@@ -73,7 +73,7 @@ class _Reranker:
 
 def test_reranked_scores_replace_rrf_residue(wired, monkeypatch):
     rr = _Reranker()
-    monkeypatch.setattr("silica.agent.providers.get_reranker", lambda *_a, **_k: rr)
+    monkeypatch.setattr("silica.model.providers.get_reranker", lambda *_a, **_k: rr)
     from silica.tools.graph import _related
 
     out = _related("A", k=5)
@@ -87,7 +87,7 @@ def test_reranked_scores_replace_rrf_residue(wired, monkeypatch):
 
 
 def test_without_a_reranker_the_flag_says_so(wired, monkeypatch):
-    monkeypatch.setattr("silica.agent.providers.get_reranker", lambda *_a, **_k: None)
+    monkeypatch.setattr("silica.model.providers.get_reranker", lambda *_a, **_k: None)
     from silica.tools.graph import _related
 
     out = _related("A", k=5)
@@ -99,7 +99,7 @@ def test_payload_carries_structural_leg_signals(wired, monkeypatch):
     # embed_score / cooccur_weight already live on RelatedNote; the payload must
     # stop dropping them — callers threshold structurally, not by parsing
     # evidence strings.
-    monkeypatch.setattr("silica.agent.providers.get_reranker", lambda *_a, **_k: None)
+    monkeypatch.setattr("silica.model.providers.get_reranker", lambda *_a, **_k: None)
     from silica.tools.graph import silica_related
 
     out = silica_related("A", k=5)
@@ -118,7 +118,7 @@ def test_legs_are_named_so_an_absent_leg_is_visible(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.driver.DRIVER", _fake_driver())
     monkeypatch.setattr("silica.kernel.recall.memory_lane.memory_stores",
                         lambda: (None, None))
-    monkeypatch.setattr("silica.agent.providers.get_reranker", lambda *_a, **_k: None)
+    monkeypatch.setattr("silica.model.providers.get_reranker", lambda *_a, **_k: None)
     from silica.tools.graph import silica_related
 
     out = silica_related("A", k=5)
@@ -154,7 +154,7 @@ def test_doctor_recall_indexes_ok_when_both_stores_answer(tmp_path, monkeypatch)
 
 def test_the_model_gets_no_score_and_no_reranked_flag(wired, monkeypatch):
     rr = _Reranker()
-    monkeypatch.setattr("silica.agent.providers.get_reranker", lambda *_a, **_k: rr)
+    monkeypatch.setattr("silica.model.providers.get_reranker", lambda *_a, **_k: rr)
     from silica.tools.graph import _related, silica_related
 
     out = silica_related("A", k=5)

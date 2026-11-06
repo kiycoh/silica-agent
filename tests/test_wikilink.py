@@ -1,4 +1,4 @@
-from silica.kernel.link.ast import extract_links
+from silica.kernel.base.markdown import extract_links
 
 def test_extract_links():
     content = """
@@ -28,7 +28,7 @@ def test_intra_note_anchors_are_not_note_links():
 
 
 def test_extract_links_typed_splits_scaffold_from_prose():
-    from silica.kernel.link.ast import extract_links, extract_links_typed
+    from silica.kernel.base.markdown import extract_links, extract_links_typed
     content = (
         "---\n"
         "parent note: \"[[Hub]]\"\n"
@@ -45,7 +45,7 @@ def test_extract_links_typed_splits_scaffold_from_prose():
 
 
 def test_extract_links_typed_prose_wins_over_a_scaffold_mention():
-    from silica.kernel.link.ast import extract_links_typed
+    from silica.kernel.base.markdown import extract_links_typed
     content = "---\nrelated:\n  - \"[[X]]\"\n---\n\nBody cites [[X]] in a sentence.\n"
     assert extract_links_typed(content) == {"X": False}
 
@@ -58,14 +58,14 @@ def test_adr_prose_reference_is_a_link():
 
 
 def test_a_code_span_in_an_alias_is_still_a_link():
-    from silica.kernel.link.ast import extract_links
+    from silica.kernel.base.markdown import extract_links
 
     assert extract_links("Use [[Undo and revert|`/undo`]] now.") == ["Undo and revert"]
     assert extract_links("[[A|`x`]] then [[B|`y`]]") == ["A", "B"]
 
 
 def test_a_code_span_that_only_shows_a_link_stays_code():
-    from silica.kernel.link.ast import extract_links
+    from silica.kernel.base.markdown import extract_links
 
     assert extract_links("`[[A|b]]` and `[[C|`") == []
     assert extract_links("```\n[[A|`x`]]\n```\n") == []

@@ -8,7 +8,7 @@ import pytest
 
 @pytest.fixture
 def vault(tmp_vault, tmp_path, monkeypatch):
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
 
     monkeypatch.delenv("SILICA_PUBLIC_HANDLE", raising=False)
     monkeypatch.setenv("SILICA_PUBLIC_DIR", str(tmp_path / "public"))

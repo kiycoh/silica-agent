@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.write import frontmatter as fm
+from silica.kernel.base import frontmatter as fm
 
 
 def test_mapping_frontmatter_parses_to_a_dict():

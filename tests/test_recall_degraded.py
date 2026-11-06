@@ -16,7 +16,7 @@ import httpx
 import openai
 import pytest
 
-from silica.agent.providers import Reranker, why_of
+from silica.model.providers import Reranker, why_of
 from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch, degraded_lines
 
 _REQ = httpx.Request("POST", "http://127.0.0.1:9/v1/embeddings")
@@ -51,7 +51,7 @@ def _rerank_reply(monkeypatch, payload=None, exc=None):
             raise exc
         return httpx.Response(200, json=payload, request=httpx.Request("POST", url))
 
-    monkeypatch.setattr("silica.agent.providers.httpx.post", post)
+    monkeypatch.setattr("silica.model.providers.httpx.post", post)
 
 
 class TestRerankerFailure:
@@ -134,7 +134,7 @@ def test_facade_retrieve_names_the_query_embed_cause(monkeypatch):
     monkeypatch.setattr("silica.kernel.recall.embed.get_store", lambda: _Store())
     monkeypatch.setattr("silica.kernel.recall.cooccurrence.get_cooccur_store",
                         lambda lang=None: [])
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda config: _Slow())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda config: _Slow())
     stats: dict = {}
     assert perception.facade_retrieve("q", k=3, use_memory=False, leg_stats=stats) == (None, None)
     assert stats["degraded"] == {"embed": "slow"}
@@ -262,7 +262,7 @@ class TestTheLine:
 def _done(name: str, payload: dict):
     import json
 
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
 
     return ToolCompleteEvent(name=name, args={}, call_id="c", result=json.dumps(payload),
                              duration_s=0.0, iteration=1)

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ def build(checked: str, notes: dict[str, Note], keys: tuple[str, ...], write_dir
     rewrite checked against it would be held by a summary instead of the
     notes). Never another party's material, unless the person links or
     names it (`named`)."""
-    from silica.kernel.recall.graph_export import is_vault_artifact
+    from silica.kernel.graph.graph_export import is_vault_artifact
 
     wd = (write_dir or "").strip("/")
     candidates = {p for p in notes if p != checked and not is_vault_artifact(p)

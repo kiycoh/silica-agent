@@ -10,7 +10,7 @@ import pytest
 
 from silica.cli import resolve_vault_switch
 from silica.kernel.recall.paths import looks_like_code
-from silica.kernel.vault_manifest import (
+from silica.kernel.base.manifest import (
     active_write_dir,
     load_manifest,
     reset_manifest_cache,
@@ -216,7 +216,7 @@ def test_safe_mode_never_overrules_a_code_vaults_own_boundary(tmp_path):
 # --- the safe-mode toggle ----------------------------------------------------
 
 def test_toggle_round_trip_keeps_the_rest_of_the_manifest(tmp_path):
-    from silica.kernel.vault_manifest import set_write_dir
+    from silica.kernel.base.manifest import set_write_dir
 
     (tmp_path / "vault.yaml").write_text(
         "# hand-written\nsources: [prose]\nwrite_dir: silica\n", encoding="utf-8"
@@ -234,7 +234,7 @@ def test_toggle_round_trip_keeps_the_rest_of_the_manifest(tmp_path):
 
 
 def test_toggle_declares_the_field_on_a_manifest_that_lacks_it(tmp_path):
-    from silica.kernel.vault_manifest import set_write_dir
+    from silica.kernel.base.manifest import set_write_dir
 
     (tmp_path / "vault.yaml").write_text("sources: [prose]\n", encoding="utf-8")
     set_write_dir(tmp_path, "silica")

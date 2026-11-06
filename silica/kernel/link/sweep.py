@@ -30,7 +30,7 @@ import re
 import unicodedata
 from collections.abc import Mapping
 
-from silica.kernel.link.ast import NON_MD_EXTENSIONS
+from silica.kernel.base.markdown import NON_MD_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ def sweep_note(rel_path: str, resolves, keep: frozenset[str] = frozenset()) -> d
     """Sweep one note; returns {"path", "stripped", "relinked"} when edited.
     `keep`: the link targets the note held before the run."""
     from silica.driver import DRIVER
-    from silica.kernel.write.frontmatter import FM_RE
+    from silica.kernel.base.frontmatter import FM_RE
 
     try:
         nc = DRIVER.read_note(rel_path)

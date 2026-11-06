@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from silica.agent import turn_notes
-from silica.agent.events import ToolCompleteEvent
+from silica.obs.events import ToolCompleteEvent
 from silica.agent.recall_watch import THIN_COVERAGE_HINT
 from silica.config import CONFIG
 
@@ -40,7 +40,7 @@ def _turn(answer: str, *events: ToolCompleteEvent):
     as the loop's _emit sends it to both, then the answer lands as the final
     assistant message, the way the loop leaves it."""
     def run(messages, model=None, tool_progress_callback=None, cancel_token=None, **kw):
-        from silica.agent import narration
+        from silica.obs import narration
 
         for ev in events:
             tool_progress_callback(ev)
@@ -202,7 +202,7 @@ def _repl(inputs, turns, monkeypatch):
 
 class TestRepl:
     def test_kept_across_turns_emptied_by_clear_rebuilt_by_resume(self, tmp_vault, monkeypatch):
-        from silica.agent import narration as narr
+        from silica.obs import narration as narr
 
         first: list[str] = []
 

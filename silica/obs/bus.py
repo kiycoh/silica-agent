@@ -4,7 +4,7 @@
 """Thread-safe synchronous pub-sub event bus.
 
 BUS is a process-global singleton importable anywhere. Tests should
-monkeypatch silica.agent.bus.BUS with a fresh EventBus() per test to
+monkeypatch silica.obs.bus.BUS with a fresh EventBus() per test to
 avoid cross-test contamination.
 """
 from __future__ import annotations

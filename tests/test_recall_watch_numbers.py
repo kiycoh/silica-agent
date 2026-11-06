@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import json
 
-import silica.agent.narration as narr
-from silica.agent.events import ToolCompleteEvent, ToolStartEvent
+from silica.obs import narration as narr
+from silica.obs.events import ToolCompleteEvent, ToolStartEvent
 from silica.agent.recall_watch import (
     RecallWatch,
     numbers_from_beats,

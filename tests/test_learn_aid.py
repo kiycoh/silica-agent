@@ -25,7 +25,7 @@ class _Reply:
 
 
 def _miss_twice():
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     quiz.record([{"path": NOTE, "correct": False, "rating": 1, "kind": "explain", "level": 3, "q": "?"}] * 2)
 
@@ -38,7 +38,7 @@ def _third_miss(c):
 
 
 def test_the_third_miss_in_a_row_writes_the_aid_from_the_note(client, tmp_path, monkeypatch):
-    import silica.agent.llm as llm
+    from silica.model import llm
 
     c, _ = client
     monkeypatch.setattr(offer, "_log_path", lambda: tmp_path / "offers.jsonl")
@@ -78,7 +78,7 @@ def test_shadow_mode_logs_the_aid_and_shows_none(client, tmp_path, monkeypatch):
 
 
 def test_the_prerequisite_attached_is_the_one_held_least(monkeypatch):
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     monkeypatch.setattr(learner, "prerequisites_map", lambda: {learner.key_of(NOTE): ["ML/A.md", "ML/B.md", "ML/C.md"]})
     rows = {learner.key_of("ML/A.md"): {"attempts": 3, "R": 0.95}, learner.key_of("ML/B.md"): {"attempts": 2, "R": 0.6},
@@ -93,7 +93,7 @@ def test_the_prerequisites_are_found_in_the_map_as_it_really_is_keyed(monkeypatc
     """The map keeps a note's case and the join key folds it, so `.get(key_of(path))`
     missed every note of the owner's step (18 of 18, 2026-11-06) while the test above,
     whose fake map is keyed by key_of, passed."""
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     monkeypatch.setattr(learner, "prerequisites_map", lambda: {"ML/Note": ["ML/A.md"]})
     monkeypatch.setattr(learner, "view", lambda *a, **k: {})

@@ -113,7 +113,7 @@ def test_bulk_embed_reads_images_first_and_embeds_raw_bodies(monkeypatch):
         order.append(("embed", notes))
         return Store()
     monkeypatch.setattr(embed_mod, "build_index", build)
-    import silica.agent.providers as providers
+    from silica.model import providers
     monkeypatch.setattr(providers, "get_embedder", lambda cfg: object())
     graph.silica_embed_refresh()
     assert [step for step, _ in order] == ["read", "embed"]

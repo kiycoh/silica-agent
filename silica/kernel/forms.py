@@ -20,8 +20,8 @@ from typing import Literal, NamedTuple
 
 from pydantic import BaseModel
 
-from silica.agent.decide import decide
-from silica.agent.llm import call_llm
+from silica.model.decide import decide
+from silica.model.llm import call_llm
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ def _looks_like_notebook_export(text: str) -> bool:
     A `.ipynb` that convert() reads itself (a study vault, no code lane)
     arrives stamped `form: draft` and never reaches this rule.
     """
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     _, body, _ = frontmatter.split(text)
     lines = [ln for ln in (body or text).splitlines() if ln.strip()][:6]
@@ -133,7 +133,7 @@ def profile_for(form: str) -> str:
 
 def stamped_form(text: str) -> str:
     """The ingress `form:` stamp out of the frontmatter; "" if absent/unknown."""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     data, _, _ = frontmatter.split(text)
     if not isinstance(data, dict):
@@ -167,7 +167,7 @@ def sniff_form(text: str) -> str:
     if key in _sniff_memo:
         return _sniff_memo[key]
     try:
-        # Typed decision first (agent/decide.py, off unless
+        # Typed decision first (model/decide.py, off unless
         # SILICA_DECISION_MODEL is set): a confident verdict replaces the
         # LLM call; uncertainty, `unsure` and any failure fall through to it.
         word = _sniff_decide(text) or _sniff_llm(text)
@@ -250,7 +250,7 @@ def resolve(text: str, *, allow_sniff: bool = True) -> Form:
     # disk, and honoring it re-files the same segment on every later run.
     # Draft-only: media conversions legitimately carry source_file AND
     # form: transcript.
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     data, _, _ = frontmatter.split(text)
     converted = bool(isinstance(data, dict) and data.get("source_file"))

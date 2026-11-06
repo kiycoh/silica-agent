@@ -62,7 +62,7 @@ _LIMIT_SENTENCES = {
     "week": "You have used this week's allowance.",
     "month": "You have used this month's allowance.",
 }
-# UsageLimited's own text (silica.agent.usage_limits), which is all a tool's
+# UsageLimited's own text (silica.model.usage_limits), which is all a tool's
 # failure carries by the time a sub-agent's refusal reaches the transcript.
 _LIMIT_TEXT = re.compile(r"usage limit reached: (window|week|month), resets (\S+)")
 _DAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -128,7 +128,7 @@ def _limit_of(exc: BaseException | str, raw: str) -> tuple[str, str | None] | No
     # OpenRouter outside call_llm and meets the limit as a 403.
     if not (hosted() and forbidden):
         return None
-    from silica.agent.usage_limits import spent_layer
+    from silica.model.usage_limits import spent_layer
 
     hit = spent_layer()
     return (hit.layer, hit.resets_at) if hit is not None else None

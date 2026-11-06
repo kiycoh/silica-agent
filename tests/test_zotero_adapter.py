@@ -123,7 +123,7 @@ def test_a_paper_without_a_pdf_becomes_a_terminal_leaf_from_its_abstract(tmp_vau
     adapter = z.ZOTERO
     stub = adapter.to_stub(adapter.read("zotero://select/library/items/8H4AC8GW"))
 
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     data, _, body = frontmatter.split(stub.body)
     assert stub.lane == "terminal"
     assert stub.note_path == "sources/@packerMemGPTLLMsOperating2024.md"

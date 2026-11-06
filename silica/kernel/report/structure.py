@@ -222,8 +222,8 @@ def build() -> StructureMap:
     """Compute the map from scratch. `structure_map()` is the memoized door."""
     import networkx as nx
 
-    from silica.kernel.recall import signals
-    from silica.kernel.recall.graph_export import wikilink_graph_cached
+    from silica.kernel.graph import signals
+    from silica.kernel.graph.graph_export import wikilink_graph_cached
 
     G = wikilink_graph_cached()
     if G.number_of_nodes() == 0:
@@ -247,7 +247,7 @@ def build() -> StructureMap:
 
     prereq: dict[str, list[str]] = {}
     try:
-        from silica.kernel.report.learner import prerequisites_map
+        from silica.kernel.learn.learner import prerequisites_map
 
         prereq = prerequisites_map()
     except Exception as exc:
@@ -363,7 +363,7 @@ def _cut_detail(node_id: str, m: StructureMap) -> dict:
     """
     import networkx as nx
 
-    from silica.kernel.recall.graph_export import wikilink_graph_cached
+    from silica.kernel.graph.graph_export import wikilink_graph_cached
 
     try:
         G = wikilink_graph_cached()
@@ -398,7 +398,7 @@ def _areas(m: StructureMap, G) -> dict[str, int]:
     """
     hit = getattr(m, "_areas", None)
     if hit is None:
-        from silica.kernel.recall.graph_export import louvain_sorted
+        from silica.kernel.graph.graph_export import louvain_sorted
 
         hit = {n: i for i, c in enumerate(louvain_sorted(G)) for n in c}
         object.__setattr__(m, "_areas", hit)
@@ -551,8 +551,8 @@ def _build_burst(k: int) -> list[dict]:
     from silica.driver import DRIVER
     from silica.driver.base import NoteRef
     from silica.kernel.recall.cooccurrence import get_cooccur_store
-    from silica.kernel.recall.signals import burst
-    from silica.kernel.report.learner import _created_and_ai
+    from silica.kernel.graph.signals import burst
+    from silica.kernel.learn.learner import _created_and_ai
 
     store = get_cooccur_store()
     if len(store) == 0:
@@ -631,7 +631,7 @@ def _paragraphs(body: str, *, min_chars: int = 200, cap: int = 8) -> list[str]:
 
 
 def _build_shift(k: int) -> list[dict]:
-    from silica.agent.providers import get_embedder
+    from silica.model.providers import get_embedder
     from silica.config import CONFIG
     from silica.driver import DRIVER
 

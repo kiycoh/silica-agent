@@ -161,7 +161,7 @@ def _language(text: str) -> str:
     math (Lezione 7 of the Machine Learning course, 2026-10-05), and counting
     stopwords over a whole leaf costs nothing next to one model call."""
     from silica.kernel.text import language as lang_mod
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
     return (get_active_manifest().conventions.language
             or lang_mod.display_name(lang_mod.detect(text)) or "the source language")
 

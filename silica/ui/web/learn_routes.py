@@ -100,7 +100,7 @@ def _save() -> None:
 
 def _metered(s: dict):
     """The session's own count of its model calls (ADR-0135 point 8)."""
-    from silica.agent import llm
+    from silica.model import llm
 
     return llm.meter_scope(s.setdefault("meter", llm.new_meter()))
 
@@ -108,7 +108,7 @@ def _metered(s: dict):
 def _meter_shown(s: dict) -> dict | None:
     """What the session cost, or None where nothing is metered: a laptop
     without SILICA_TOKEN_METER counts nothing, and a zero would be false."""
-    from silica.agent import llm
+    from silica.model import llm
 
     return dict(s.get("meter") or llm.new_meter()) if llm._METER_ON else None
 
@@ -200,7 +200,7 @@ def _objectives_for(path: str, scopes: dict[str, dict]) -> list[str]:
 @router.get("")
 def learn_home():
     from silica.kernel.learn import mastery, pick, plans
-    from silica.kernel.report import learner, quiz
+    from silica.kernel.learn import learner, quiz
 
     entries = quiz.entries()
     now = _now()
@@ -269,7 +269,7 @@ def learn_home():
 def _session_row(it: dict, evs_by: dict[str, list[dict]], now: float) -> dict:
     """A note of the next session as the home lists it (ADR-0119, D): its
     reason in ADR-0081's words and the mark of its last answer."""
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     evs = evs_by.get(learner.key_of(it["path"]), [])
     title = " · ".join(_stem(x) for x in it["pair"]) if it.get("pair") else _stem(it["path"])
@@ -288,7 +288,7 @@ def _recent(rows: dict, now: float) -> list[dict]:
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     # the view's rows carry no mtime; the note walk does, and says what is material
     meta = learner._notes_meta(Path(CONFIG.vault_path))
@@ -357,7 +357,7 @@ def _outcome(e: dict) -> str:
 
 
 def _events_of(entries: list[dict]) -> dict[str, list[dict]]:
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     out: dict[str, list[dict]] = {}
     for e in entries:
@@ -466,7 +466,7 @@ def _plan_next_why(p: dict, row: dict | None, evs: list[dict], now: float, misse
 
 
 def _next_groups(entries: list[dict], rows: dict, preview: dict, plan_rows: list[dict], scopes: dict, now: float) -> dict:
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     evs_by = _events_of(entries)
     lately = _missed_lately(evs_by, _lately_cutoff(entries, now))
@@ -527,7 +527,7 @@ def _mix(preview_items: list[dict], groups: dict) -> str:
 def _history(path: str, entries: list[dict]) -> list[dict]:
     """Every ledger line of one note, newest first: the log ADR-0081 reads on
     request instead of a permanent mistakes list."""
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     key = learner.key_of(path)
     out = []
@@ -586,7 +586,7 @@ def _last_session(entries: list[dict]) -> dict | None:
 
 def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
     from silica.kernel.learn import mastery, objectives as obj, plans
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.learn.learner import _notes_meta
 
     # Read once for every title lookup below: steps_passed without it read the
     # vault's notes per step note, 84 epoch walks and 24 s of a 30 s Learn
@@ -632,7 +632,7 @@ def note_detail(path: str):
 
     from silica.config import CONFIG
     from silica.kernel.learn import items, plans
-    from silica.kernel.report import learner, quiz
+    from silica.kernel.learn import learner, quiz
 
     text = items.read_note(path)
     if not text:
@@ -781,7 +781,7 @@ def start_session(payload: dict):
             from pathlib import Path
 
             from silica.config import CONFIG
-            from silica.kernel.report import learner
+            from silica.kernel.learn import learner
 
             prefix = scope.casefold()
             scope = [p for p in learner._notes_meta(Path(CONFIG.vault_path)) if p.casefold().startswith(prefix)]
@@ -793,7 +793,7 @@ def start_session(payload: dict):
                               deadline=plan.get("by") if plan else None)
         if plan is not None:
             plans.assign_objectives(plan, picked["items"])
-    from silica.agent import llm
+    from silica.model import llm
 
     meter = llm.new_meter()
     with llm.meter_scope(meter):
@@ -826,7 +826,7 @@ def _note_rows(note: str, only=None, objectives: list[str] | None = None) -> dic
     asks to practise is practised whether or not the schedule would pick
     it. Its `asks` size the session on the key points (D28)."""
     from silica.kernel.learn import items, plans
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     rows = learner.view()
     r = rows.get(learner.key_of(note))
@@ -978,7 +978,7 @@ def rate(payload: dict):
 def _rate(payload: dict):
     from silica.kernel.learn import objectives as obj
     from silica.kernel.learn.items import AXIS
-    from silica.kernel.report import learner, quiz
+    from silica.kernel.learn import learner, quiz
 
     s = _live(str(payload.get("id") or ""))
     it = _item(s, payload.get("i"))
@@ -1080,7 +1080,7 @@ def _retest(s: dict, it: dict, entry: dict) -> dict | None:
     lands. Returns the cue of an item appended now."""
     from silica.kernel.learn import items
     from silica.kernel.learn.items import LEVEL_OF, MECHANICAL
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     if entry["correct"] or it.get("retest") or it.get("placement") or s.get("mode") == "teach":
         return None
@@ -1110,7 +1110,7 @@ def _append_retest(s: dict, new: dict, missed_kind: str) -> dict:
 
 
 def _generate_retest(s: dict, row: dict, missed_kind: str) -> None:
-    from silica.agent import llm
+    from silica.model import llm
     from silica.kernel.learn import items
 
     try:
@@ -1131,7 +1131,7 @@ def _placed_notes(plan: dict) -> set[str]:
     """The notes of the steps a placement placed, which a plan session
     takes after every other first attempt."""
     from silica.kernel.learn import placement
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     entries = quiz.entries()
     if not any(e.get("origin") == placement.ORIGIN for e in entries):
@@ -1146,7 +1146,7 @@ def _escalate(s: dict, it: dict) -> dict | None:
     from pathlib import Path
 
     from silica.kernel.learn import offer
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     if offer.mode() == "off" or it["path"] in s.setdefault("escalated", set()):
         return None
@@ -1177,7 +1177,7 @@ def aid(payload: dict):
     and kept for a reload. Reading it records nothing in the ledger; the
     click is logged beside the escalation."""
     from silica.kernel.learn import offer
-    from silica.kernel.recall.mindmap import answer_resolver
+    from silica.kernel.graph.mindmap import answer_resolver
     from silica.ui.web.server import _linkify
 
     s = _live(str(payload.get("id") or ""))
@@ -1274,7 +1274,7 @@ def _status_of(it: dict, v: dict, rec: dict | None, skipped: bool) -> str:
 
 def _receipt(s: dict) -> dict:
     from silica.kernel.learn import mastery, objectives as obj, plans
-    from silica.kernel.report import learner, quiz
+    from silica.kernel.learn import learner, quiz
 
     recorded = [s["recorded"][i] for i in sorted(s["recorded"])]
     entries = quiz.entries()
@@ -1418,7 +1418,7 @@ def _points_covered(s: dict, rows: list[dict]) -> list[dict]:
 
 def _related_notes(path: str) -> list[dict]:
     from silica.kernel.learn import items
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     out = []
     try:
@@ -1511,7 +1511,7 @@ def close(payload: dict):
 @router.get("/receipt")
 def receipt(id: str):
     from silica.kernel.learn import mastery, objectives as obj
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     if _LAST and _LAST["id"] == id:
         return _LAST
@@ -1557,7 +1557,7 @@ def receipt(id: str):
 @router.get("/plans")
 def list_plans():
     from silica.kernel.learn import plans
-    from silica.kernel.report import learner, quiz
+    from silica.kernel.learn import learner, quiz
 
     entries = quiz.entries()
     rows = learner.view(_entries_override=entries)
@@ -1570,7 +1570,7 @@ def plan_detail(path: str):
     rows, a misconception line joined to its row) and After this (three
     in-scope rows with reasons)."""
     from silica.kernel.learn import plans
-    from silica.kernel.report import learner, quiz
+    from silica.kernel.learn import learner, quiz
 
     p = plans.find_plan(path)
     if p is None:
@@ -1611,7 +1611,7 @@ def learn_map():
 
     from silica.config import CONFIG
     from silica.kernel.learn import plans
-    from silica.kernel.report import learner, quiz
+    from silica.kernel.learn import learner, quiz
 
     entries = quiz.entries()
     now = _now()
@@ -1784,7 +1784,7 @@ def _preview(res: dict, chosen: list[str]) -> dict:
     `to review` counts practised notes under the target, as the plan does,
     where the old preview counted every note the schedule held due."""
     from silica.kernel.learn import mastery, objectives as obj
-    from silica.kernel.report import learner, quiz
+    from silica.kernel.learn import learner, quiz
 
     entries = quiz.entries()
     view = learner.view(_entries_override=entries)
@@ -1845,7 +1845,7 @@ def scope_options(q: str = ""):
 
     from silica.config import CONFIG
     from silica.kernel.learn import items, plans
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     notes = learner._notes_meta(Path(CONFIG.vault_path))
     needle = q.strip().casefold()

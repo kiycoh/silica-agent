@@ -22,7 +22,7 @@ def _patch_retrieve(monkeypatch, results):
                         lambda text, k, **kw: (results, None), raising=False)
     # The facade reranks the surviving notes itself now; these tests assert the
     # stale-flag projection, so keep the cross-encoder out of the payload.
-    import silica.agent.providers as providers_mod
+    from silica.model import providers as providers_mod
     monkeypatch.setattr(providers_mod, "get_reranker", lambda cfg: None)
 
 

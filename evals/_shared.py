@@ -148,7 +148,7 @@ def assert_reranker_live(config) -> None:
     """A configured reranker whose server is down silently abstains and fakes
     rerank == embed-only. Probe it once; fail fast if it will not answer. No
     reranker configured is not a lie (config records reranker=None), so pass."""
-    from silica.agent.providers import get_reranker
+    from silica.model.providers import get_reranker
 
     rr = get_reranker(config)
     if rr is None:

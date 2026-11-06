@@ -134,7 +134,7 @@ _OVERVIEW_SYSTEM = (
 
 
 def _call_worker(config, system_prompt: str, user_message: str) -> NoteContent:
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
     from silica.kernel.text.sanitize import parse_json
 
     provider = get_provider(config, role="worker")
@@ -308,7 +308,7 @@ def run_wiki(config, folder: str | None = None,
 
     from silica.agent.commit import commit_derived
     from silica.config import CONFIG
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.code import gitstate
     from silica.kernel.recall import paths
     from silica.kernel.code.codedocs import CHANGE_STRUCTURAL, invalidate_snapshot, snapshot
@@ -316,7 +316,7 @@ def run_wiki(config, folder: str | None = None,
     from silica.kernel.code.codewiki import (
         build_digests, cross_edges, edges_ref, partition, render_mermaid,
     )
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
 
     if not (CONFIG.vault_path or "").strip():
         return {"status": "error",

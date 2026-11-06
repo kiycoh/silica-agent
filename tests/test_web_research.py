@@ -454,7 +454,7 @@ def _patch_run_agent(monkeypatch, body, tool_results=None):
     """Fake run_agent: replay a web_search trace the way the real loop does —
     a ToolCompleteEvent per call *and* the same payload appended to `messages`
     — then return the body."""
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
 
     captured = {}
 
@@ -674,7 +674,7 @@ def _patch_run_agent_then_compact(monkeypatch, body, fetches):
     after run_agent returns would find.
     """
     from silica.agent.compaction import COMPACT_FLOOR_TURNS, compact_read_history
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
     from silica.tools import TOOLS
 
     def fake_run_agent(messages, model, tool_progress_callback=None, constraints=None, **kw):
@@ -1096,7 +1096,7 @@ _QUOTE_PAGE = (
 
 def _fetched(page=_QUOTE_PAGE, call_id="f1"):
     """Feed the guardian the event the real loop emits after a web_fetch."""
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
 
     wr._harvest_page(ToolCompleteEvent(
         name="web_fetch", args={"url": "https://s.test/a"}, call_id=call_id,
@@ -1208,7 +1208,7 @@ def test_web_research_binds_citations_and_leaves_the_bank_in_the_leaf(
     """End to end: the note carries [n] markers bound to the mechanical Sources
     block, a phantom marker is stripped and audited, a disobedient model-written
     Sources section is cut, and the leaf carries the bank for /nucleate."""
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
 
     def fake_run_agent(messages, model, tool_progress_callback=None,
                        constraints=None, **kw):
@@ -1370,7 +1370,7 @@ def test_compose_findings_drops_sections_citing_only_phantoms(monkeypatch):
 
 def _run_agent_banking_one_quote(monkeypatch, body="One-shot body [Q1]."):
     """Fake loop: fetches a page, banks Q1, returns `body` as its final message."""
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
 
     def fake_run_agent(messages, model, tool_progress_callback=None,
                        constraints=None, **kw):

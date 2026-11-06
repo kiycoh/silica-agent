@@ -293,7 +293,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self.inbox_files: list[str] = [to_vault_relative(f) for f in files]
         self.inbox_file: str = self.inbox_files[0]  # first file; compat with single-file callers
         from silica.kernel.recall.paths import resolve_target_dir
-        from silica.kernel.vault_manifest import in_write_dir
+        from silica.kernel.base.manifest import in_write_dir
         # Case-fold against the REAL tree first (the mirror often has no folder
         # for this note yet), then rebase into the write boundary. Rebasing here
         # rather than in validate's local copy is what makes HUB_UPDATE and
@@ -521,9 +521,9 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
         # Surface the transition to whatever frontend is watching (no-op if none).
         try:
-            from silica.agent.events import PhaseEvent
+            from silica.obs.events import PhaseEvent
             from silica.ui.renderer import emit_phase
-            from silica.agent import narration as _narr_mod
+            from silica.obs import narration as _narr_mod
             pe = PhaseEvent(phase=capability_name, status=status,
                             **self._phase_position(capability_name))
             emit_phase(pe)
@@ -645,7 +645,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         except Exception:
             payloads = []
         try:
-            from silica.kernel.recall.deferred import get_deferred_store
+            from silica.kernel.write.deferred import get_deferred_store
             store = get_deferred_store()
             existing = store.get(content_hash) or {}
             # Accumulation is per-run. A bundle saved against a DIFFERENT target
@@ -689,7 +689,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         """
         if not content_hash:
             return  # an unreadable file makes no claim about its history
-        from silica.kernel.vault_manifest import source_key
+        from silica.kernel.base.manifest import source_key
         from silica.kernel.write.provenance import check_renucleate
 
         basename = os.path.basename(inbox_file)
@@ -848,7 +848,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         if os.getenv("SILICA_BOUNDARY_ANNEAL", "1") == "0":
             return
         try:
-            from silica.kernel.recall.deferred import get_deferred_store
+            from silica.kernel.write.deferred import get_deferred_store
             if not get_deferred_store().list_all():
                 return
             from silica.agent.commit import _current_ledger_run, _current_undo_run
@@ -898,7 +898,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         """
         if not self.context.get("has_partial_failure") or self.context.get("failed_chunks"):
             return
-        from silica.kernel.recall.deferred import get_deferred_store
+        from silica.kernel.write.deferred import get_deferred_store
 
         store = get_deferred_store()
         if any(store.get(h) for h in (self._file_content_hashes or []) if h):

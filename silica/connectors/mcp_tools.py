@@ -201,8 +201,12 @@ def _forward(progress: Any, key: str):
     without their arguments (the card showed them), and nothing streamed."""
     if progress is None:
         return None
-    from silica.agent.events import (ApprovalRequestEvent, ToolCompleteEvent, ToolErrorEvent,
-                                     ToolStartEvent)
+    from silica.obs.events import (
+        ApprovalRequestEvent,
+        ToolCompleteEvent,
+        ToolErrorEvent,
+        ToolStartEvent,
+    )
 
     def forward(event) -> None:
         if isinstance(event, ApprovalRequestEvent):

@@ -1,7 +1,7 @@
 """Tests for silica/kernel/write/provenance.py (spec-hermes-coherence §3).
 
 Note<->source drift via sha256 provenance records. Pure filesystem module
-(stdlib json/hashlib/datetime), mirroring silica/kernel/recall/run_log.py: append
+(stdlib json/hashlib/datetime), mirroring silica/kernel/write/run_log.py: append
 is best-effort (never raises), absence of the store degrades to "no
 records" everywhere.
 """

@@ -144,7 +144,7 @@ def discover():
     feeds = read.readable(doc)
     failing = sum(1 for f in feeds if (f.get("state") or {}).get("status") in ("error", "refused"))
     topics = [{**t, "on": doc["topics"].get(t["key"], True)} for t in doc.get("topic_list") or []]
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir
     from silica.ui.web.server import YOUTUBE_ON_SERVER
 
     return {"setup": bool(doc.get("setup")), "hosted": _hosted(), "reading": dict(read.PROGRESS) if reading else None,

@@ -32,8 +32,8 @@ from pathlib import Path
 
 from evals.golden.probe_fusion import _pair_ranks, _score_pairs
 from evals.golden.runner import _open_stores
-from silica.agent.providers import Reranker
-from silica.kernel.link.health import K, eligible_pairs, wikilink_graph
+from silica.model.providers import Reranker
+from silica.kernel.report.health import K, eligible_pairs, wikilink_graph
 from silica.kernel.recall.relatedness import related_notes
 from silica.kernel.recall.rerank import link_query, rerank_related
 

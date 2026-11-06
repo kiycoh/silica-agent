@@ -95,7 +95,7 @@ def _expand(turn: str) -> dict:
 
 def run_case(name: str, model: str, pristine: Path) -> dict:
     from evals.probe_prompt_ab import _stub_egress
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
     from silica.agent.loop import run_agent
     from silica.cli import seed_messages

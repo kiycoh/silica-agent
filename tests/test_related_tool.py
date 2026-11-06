@@ -120,7 +120,7 @@ def test_empty_embed_but_isolated_note_hints_embed_refresh(tmp_path, monkeypatch
 # --- Tier B: structural distance on silica_related results ---------------
 
 def _patch_graph(monkeypatch, nodes, edges):
-    import silica.kernel.recall.graph_export as ge
+    from silica.kernel.graph import graph_export as ge
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (list(nodes), list(edges)))
 
 
@@ -156,7 +156,7 @@ def test_related_distance_null_when_unreachable(tmp_path, monkeypatch):
 
 def test_related_omits_distance_when_graph_unavailable(tmp_path, monkeypatch):
     from silica.tools.graph import silica_related
-    import silica.kernel.recall.graph_export as ge
+    from silica.kernel.graph import graph_export as ge
     _wire(monkeypatch, tmp_path, names={"Alpha": "A"})
     monkeypatch.setattr(
         ge, "build_graph_data",

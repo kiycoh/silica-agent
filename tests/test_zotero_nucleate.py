@@ -79,7 +79,7 @@ def test_a_closed_zotero_skips_the_target_and_says_why(tmp_vault, fake, capsys):
 
 
 def test_the_pipeline_hands_the_leaf_to_the_converter(tmp_vault, fake, monkeypatch):
-    from silica.kernel.vault_manifest import set_zotero
+    from silica.kernel.base.manifest import set_zotero
     set_zotero(CONFIG.vault_path, "library", SERVER_ID)
     fake.add_paper()
     seen: list = []
@@ -98,7 +98,7 @@ def test_the_pipeline_hands_the_leaf_to_the_converter(tmp_vault, fake, monkeypat
 def test_an_imported_paper_gets_its_backlink_note_in_zotero(tmp_vault, fake, monkeypatch):
     """ADR-0055 decision 7: one `silica`-tagged child note per imported paper,
     written after the run, so it can list the notes the run produced."""
-    from silica.kernel.vault_manifest import set_zotero
+    from silica.kernel.base.manifest import set_zotero
     import silica.router.coordinator as coord_mod
 
     set_zotero(CONFIG.vault_path, "library", SERVER_ID)

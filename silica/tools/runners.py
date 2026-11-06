@@ -72,7 +72,7 @@ def silica_run_injector(
     # /convert", which in a REPL means telling the user to type, themselves, the
     # thing they just asked for — and in a library of 74 scanned books that
     # instruction stands between the user and the entire corpus.
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
     from silica.sources.registry import adapter_for
 
     enabled = get_active_manifest().sources
@@ -395,7 +395,7 @@ def silica_generate_taxonomy(
     """
     from pathlib import Path
 
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.config import CONFIG
     from silica.kernel.text.sanitize import parse_json
     from silica.kernel.organize.taxonomy import (

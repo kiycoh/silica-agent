@@ -45,7 +45,7 @@ def _by_note(props):
 
 
 def test_adr_regex_is_the_link_lane_twin():
-    from silica.kernel.link.ast import ADR_REF_RE
+    from silica.kernel.base.markdown import ADR_REF_RE
     assert dd.ADR_REF_RE.pattern == ADR_REF_RE.pattern
 
 

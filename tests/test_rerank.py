@@ -9,7 +9,7 @@ import httpx
 from silica.kernel.recall.rerank import (_best_window, best_window, best_windows,
                                           best_window_spans, rerank_related,
                                           window_weights)
-from silica.agent.providers import Reranker, get_reranker
+from silica.model.providers import Reranker, get_reranker
 
 
 class _Fake:
@@ -250,7 +250,7 @@ class _NoCfg:
 
 
 def _extra(monkeypatch, present: bool):
-    from silica.agent import providers as p
+    from silica.model import providers as p
     monkeypatch.setattr(p, "has_local_rerank", lambda: present)
 
 
@@ -277,7 +277,7 @@ def test_get_reranker_enabled_with_config(monkeypatch):
 def test_local_rerank_model_override(monkeypatch):
     """SILICA_LOCAL_RERANK_MODEL picks the served weights; unset keeps the
     shipped LOCAL_RERANK_MODEL."""
-    from silica.agent.providers import local_rerank_model
+    from silica.model.providers import local_rerank_model
     from silica.agent.rerank_serve import LOCAL_RERANK_MODEL
 
     assert local_rerank_model(_NoCfg()) == LOCAL_RERANK_MODEL

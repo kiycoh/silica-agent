@@ -239,7 +239,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             snippet = ""
             try:
                 nc = DRIVER.read_note(note_path)
-                from silica.kernel.write import frontmatter
+                from silica.kernel.base import frontmatter
                 _data, _fm, body = frontmatter.split(nc.content)
                 snippet = body[:300]
             except Exception:

@@ -68,8 +68,8 @@ def _frontmatters(vault: Path) -> dict[str, dict]:
     per index generation past that.
     """
     from silica.kernel.recall.paths import vault_epoch
-    from silica.kernel.report.learner import _notes_meta
-    from silica.kernel.write import frontmatter
+    from silica.kernel.learn.learner import _notes_meta
+    from silica.kernel.base import frontmatter
 
     epoch = vault_epoch(str(vault))
     hit = _fm_memo.get(str(vault))
@@ -101,7 +101,7 @@ def _mirror_copies(paths) -> set[str]:
 
 
 def read_workspace(path: str, text: str | None = None) -> dict:
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     if text is None:
         text = (_vault() / path).read_text(encoding="utf-8")
@@ -345,8 +345,8 @@ def create_workspace(name: str, notes=(), folders=()) -> str:
     """A new workspace note under `Workspaces/` inside the write boundary, as
     plans are written under `Plans/`. Returns its vault path."""
     from silica.driver import DRIVER
-    from silica.kernel.vault_manifest import in_write_dir
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base.manifest import in_write_dir
+    from silica.kernel.base import frontmatter
 
     name = " ".join(str(name).split())
     # a leading dot is a hidden file the walk never lists: a workspace no one sees

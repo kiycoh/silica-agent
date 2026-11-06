@@ -310,7 +310,7 @@ def silica_require(
     (ADR-0145). Memorize orders study by it and /path follows it. Call it only
     for a pair the user accepted; otherwise propose the pair. Revertible with /undo.
     """
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.write.checkpoints import get_checkpoint_store
 
     try:

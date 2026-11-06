@@ -21,7 +21,7 @@ PROPS = {
 
 def _call(write_dir: str = "silica", **kw):
     with patch("silica.tools.atomic.DRIVER") as drv, \
-         patch("silica.kernel.vault_manifest.active_write_dir", return_value=write_dir):
+         patch("silica.kernel.base.manifest.active_write_dir", return_value=write_dir):
         drv.list_files.return_value = [SimpleNamespace(path=p) for p in PROPS]
         drv.props_of.side_effect = lambda p: PROPS[p]
         return silica_files(**kw)

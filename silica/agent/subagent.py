@@ -48,7 +48,7 @@ def _item_provenance(item: Any) -> tuple[str, str, str] | None:
         # carries is fsm._current_content_hash — so the first entry answers for all.
         src = next((c.get("inbox_file") for c in (ctx.get("concepts") or [])
                     if isinstance(c, dict) and c.get("inbox_file")), "")
-    from silica.kernel.vault_manifest import source_key
+    from silica.kernel.base.manifest import source_key
 
     return (source_key(src), sha, run_id) if src and sha else None
 
@@ -66,10 +66,10 @@ def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None,
     checked before each item so a producer crash or user cancel causes pending
     items to be marked cancelled rather than dispatched.
     """
-    from silica.agent.bus import BUS
+    from silica.obs.bus import BUS
     from silica.agent.commit import _current_provenance, _current_undo_run
-    from silica.agent.events import WorkCancelledEvent
-    from silica.agent import narration as _narr_mod
+    from silica.obs.events import WorkCancelledEvent
+    from silica.obs import narration as _narr_mod
 
     # Thread contexts are born empty: rebind the run/parent anchors the
     # submitting thread held, so children attribute to the run span.

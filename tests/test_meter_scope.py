@@ -9,7 +9,7 @@ import threading
 
 import pytest
 
-from silica.agent import llm
+from silica.model import llm
 
 
 @pytest.fixture

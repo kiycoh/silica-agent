@@ -103,7 +103,7 @@ def test_learn_items(vault, monkeypatch):
 
 
 def test_recall_semantic_and_bm25(vault, monkeypatch):
-    import silica.agent.providers as prov
+    from silica.model import providers as prov
     from silica.tools.atomic import silica_search_context
     from silica.tools.graph import silica_cooccurrence_refresh, silica_recall, silica_semantic_search
 

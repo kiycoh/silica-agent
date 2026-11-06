@@ -137,7 +137,7 @@ def test_interrupt_sets_cancel_event_on_abandoned_call():
 
 def test_bus_receives_events_during_run():
     """run_agent publishes agent/* events to BUS even with no callback."""
-    import silica.agent.bus as bus_mod
+    from silica.obs import bus as bus_mod
     received = []
     bus_mod.BUS.subscribe("agent/*", received.append)
 
@@ -151,7 +151,7 @@ def test_bus_receives_events_during_run():
         )
 
     # At minimum ThinkingStartEvent and ThinkingEndEvent should arrive.
-    from silica.agent.events import ThinkingStartEvent, ThinkingEndEvent
+    from silica.obs.events import ThinkingStartEvent, ThinkingEndEvent
     types = [type(e) for e in received]
     assert ThinkingStartEvent in types
     assert ThinkingEndEvent in types

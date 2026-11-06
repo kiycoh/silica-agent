@@ -115,7 +115,7 @@ def node_color(community: int) -> str:
     """Community colour, shared with /graph; muted slate for -1 (no community)."""
     if community < 0:
         return _MUTED
-    from silica.kernel.recall.graph_export import _community_color
+    from silica.kernel.graph.graph_export import _community_color
     return _community_color(community)
 
 
@@ -764,7 +764,7 @@ def _embed_sim():
 def gather_materials(root: str, *, latent_k: int = 10) -> MapMaterials:
     """Collect wikilink graph, titles, global communities, the latent leg and
     the embedding similarity closure."""
-    from silica.kernel.recall.graph_export import build_graph_data, detect_communities
+    from silica.kernel.graph.graph_export import build_graph_data, detect_communities
     from silica.kernel.recall.relatedness import related_notes
 
     _notes, titles, undirected = _driver_graph()

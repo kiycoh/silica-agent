@@ -24,7 +24,7 @@ from typing import Any
 
 from silica.kernel.calendar.daily import daily_date, daily_notes, daily_rule
 from silica.kernel.calendar.tasks import FIELD_START
-from silica.kernel.recall.graph_export import _NODE_DEFAULT_COLOR, similar_edge
+from silica.kernel.graph.graph_export import _NODE_DEFAULT_COLOR, similar_edge
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def blocks(text: str) -> list[str]:
     would relate every day to the same note. Tasks' signifiers are cut off a
     list item, since a due date says nothing about what the task is about.
     """
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     _, _, body = frontmatter.split(text)
     out: list[str] = []

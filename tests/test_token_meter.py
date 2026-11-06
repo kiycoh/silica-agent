@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Token meter attributes usage to the calling frame, not the LLM plumbing."""
-from silica.agent import llm
+from silica.model import llm
 
 
 def _distill(usage):

@@ -35,7 +35,7 @@ RECENT = 3    # answers looked at per note
 MISSES = 2    # of the RECENT that were wrong for a note to count as a struggle
 
 
-# Jev (agent/decide.py) reads what the word list misses. On 80 labelled
+# Jev (model/decide.py) reads what the word list misses. On 80 labelled
 # messages (40 saying the student did not follow, 40 questions, requests and
 # "ho capito", 2026-10-23) the list caught 12 of the 40, Jev 39 at p >= 0.6,
 # neither said yes to a negative (the highest at 0.37), Jev at p50 0.32 s.
@@ -59,7 +59,7 @@ LOST_QUESTION = {"lost": {
 
 @functools.lru_cache(maxsize=512)
 def _jev_lost(text: str) -> bool:
-    from silica.agent.decide import decide
+    from silica.model.decide import decide
 
     answers = decide({"message": text}, LOST_QUESTION)
     return bool(answers and answers["lost"]["probabilities"].get("yes", 0.0) >= LOST_ACCEPT)
@@ -88,7 +88,7 @@ def struggles(paths: list[str], entries: list[dict]) -> dict[str, str]:
     wrong 43.6% of the time, after a confident miss 40.9%, after silence
     36.6%, so it counts (the owner's call, 2026-10-23)."""
     from silica.kernel.learn.mastery import BLIND_SPOT_CONF, CALIBRATION_MIN, FRAGILE_CONF, eligible
-    from silica.kernel.report.quiz import key
+    from silica.kernel.learn.quiz import key
 
     calibrated = sum(1 for e in entries if eligible(e)) >= CALIBRATION_MIN
     by_key: dict[str, list[dict]] = {}
@@ -125,7 +125,7 @@ def study_offer(text: str, reads: list[str], entries: list[dict] | None = None) 
     if not notes:
         return None
     if entries is None:
-        from silica.kernel.report.quiz import entries as ledger
+        from silica.kernel.learn.quiz import entries as ledger
 
         entries = ledger()
     hard = struggles(notes, entries)
@@ -165,7 +165,7 @@ def shape_forms(text: str) -> list[str]:
     note a table (the course, 2026-10-23: AdaGrad, an algorithm in formulas,
     came out a table). Relations and Sources are the note's links, not its
     content: they count for the map, never for items."""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     spine = bool(re.search(r"^section:\s*['\"]?\(outline\)", text, re.M))
     _data, _raw, body = frontmatter.split(text)
@@ -380,7 +380,7 @@ def plan_draft(read: dict) -> dict:
     Plans/<name>.md exists, because the write gate refuses a path that does."""
     from silica.kernel.learn import plans as pl
     from silica.kernel.publish import PLANS_DIR
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     base = read.get("name") or ""
     if not base or asks_plan(base):
@@ -591,7 +591,7 @@ def escalation(note: str, chat: str, text: str, history: list[str], entries: lis
     """Why the next answer on `note` should be the aid itself, or "": three
     misses in a row, two more misses after an offer on it was ignored, or a
     reader still lost after an answer in this chat already said so."""
-    from silica.kernel.report.quiz import key
+    from silica.kernel.learn.quiz import key
 
     evs = sorted((e for e in entries if key(str(e.get("path") or "")) == key(note)), key=lambda e: str(e.get("ts")))
     if len(evs) >= ESCALATE_MISSES and not any(e.get("correct") for e in evs[-ESCALATE_MISSES:]):
@@ -625,7 +625,7 @@ def confident_readout(entries: list[dict], records: list[dict] | None = None) ->
     """The shadow reason's record against the ledger (ADR-0135 point 9): its
     fires, how many the next answer on the same note missed again, and the
     Learn sessions it was seen in. It acts at 20 sessions and half followed."""
-    from silica.kernel.report.quiz import key
+    from silica.kernel.learn.quiz import key
 
     from datetime import datetime
 
@@ -720,7 +720,7 @@ def weakest_prerequisite(path: str) -> str | None:
     """The prerequisite of `path` the reader holds least: never practised
     first, then the lowest estimated recall. The report's escalate rung
     attaches it, as the H2 hint already names prerequisites."""
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     try:
         prereqs = learner.prerequisites_of(path)
@@ -739,7 +739,7 @@ def learn_aid(item: dict, why: str, production: str, prereq: str | None) -> str:
     """The aid's Markdown, from the item's note and the reader's answer."""
     from pathlib import Path
 
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.config import CONFIG
     from silica.kernel.learn import grade, items
 
@@ -777,7 +777,7 @@ def replay(entries: list[dict], records: list[dict] | None = None) -> dict:
     offer have fired on what came before, and was that answer then wrong? A
     rule worth its line fires before misses more than before hits. Plus how
     often a shown offer was acted on. Counts only; reading them is the point."""
-    from silica.kernel.report.quiz import key
+    from silica.kernel.learn.quiz import key
 
     by_note: dict[str, list[dict]] = {}
     for e in entries:

@@ -16,7 +16,7 @@ from silica.config import CONFIG
 
 @pytest.fixture(autouse=True)
 def _reset_manifest_cache():
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
     reset_manifest_cache()
     yield
     reset_manifest_cache()
@@ -206,7 +206,7 @@ def test_batch_pick_reads_one_line_per_unit(tmp_vault, monkeypatch):
     """The reply is untrusted text: every line goes through the single pick's
     containment and spelling rules, a bad line costs its unit only, and one
     subject spelt two ways in a reply lands in one folder."""
-    import silica.agent.llm as llm
+    from silica.model import llm
 
     tmp_vault.note("Machine learning/old.md", "# old\n")
     tmp_vault.note("Inbox/x.md", "# x\n")
@@ -697,7 +697,7 @@ def test_nucleate_missing_target_still_warns_on_renucleate(repo_vault, capsys, m
 
 def test_settings_sets_and_shows_vault_yaml(repo_vault, capsys):
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import get_active_manifest, reset_manifest_cache
+    from silica.kernel.base.manifest import get_active_manifest, reset_manifest_cache
 
     msg = _expand_workflow_shortcut("/settings conventions.language italian")
     assert msg == ""
@@ -755,7 +755,7 @@ def test_run_injector_projects_outcomes_not_raw_context(repo_vault, monkeypatch)
 def test_auto_target_refuses_a_pick_inside_the_inbox(tmp_vault, monkeypatch):
     """A pick under the inbox is rejected at the source, not 20 LLM calls later
     at VALIDATE, where it costs a whole run and writes nothing."""
-    import silica.agent.llm as llm
+    from silica.model import llm
     from silica.cli import _pick_target_folder
 
     class _R:
@@ -772,7 +772,7 @@ def test_auto_target_refuses_a_pick_inside_the_inbox(tmp_vault, monkeypatch):
 def test_folder_census_offers_folders_that_hold_no_markdown(tmp_vault, monkeypatch):
     """A researcher's library is folders of PDFs. Censusing only .md parents
     hides the whole taxonomy and leaves the model nothing to pick."""
-    import silica.agent.llm as llm
+    from silica.model import llm
     from silica.cli import _pick_target_folder
 
     seen: dict = {}
@@ -814,7 +814,7 @@ def _library(tmp_vault, monkeypatch):
     tmp_vault.note("04-massoneria/memphis.pdf", "%PDF memphis")
     tmp_vault.note("04-massoneria/_foto/set-a/p1.jpg", "img")
     tmp_vault.note("04-massoneria/_foto/set-a/p2.jpg", "img")
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
     reset_manifest_cache()
 
     converted: list[str] = []
@@ -970,7 +970,7 @@ def test_an_unchanged_already_distilled_segment_is_dropped(
     from silica.kernel.write.provenance import append_record, content_sha256
 
     tmp_vault.note("vault.yaml", "write_dir: silica\n")
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
     reset_manifest_cache()
     tmp_vault.note("silica/Inbox/b/01-x.md", "segment one\n")
     tmp_vault.note("silica/Inbox/b/02-y.md", "segment two\n")
@@ -990,7 +990,7 @@ def test_a_zero_yield_record_does_not_freeze_the_failure(
     from silica.kernel.write.provenance import append_record, content_sha256
 
     tmp_vault.note("vault.yaml", "write_dir: silica\n")
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
     reset_manifest_cache()
     tmp_vault.note("silica/Inbox/b/01-x.md", "segment one\n")
     append_record("01-x.md", content_sha256("silica/Inbox/b/01-x.md"),
@@ -1032,7 +1032,7 @@ def test_next_book_converts_while_the_previous_distills(
     tmp_vault.note("vault.yaml", "write_dir: silica\n")
     tmp_vault.note("04-massoneria/alpha.pdf", "%PDF alpha")
     tmp_vault.note("04-massoneria/beta.pdf", "%PDF beta")
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
     reset_manifest_cache()
 
     timeline: list[str] = []

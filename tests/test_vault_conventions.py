@@ -11,11 +11,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from silica.config import CONFIG
-from silica.kernel.vault_manifest import (
-    VaultConventions,
-    load_manifest,
-    reset_manifest_cache,
-)
+from silica.kernel.base.manifest import VaultConventions, load_manifest, reset_manifest_cache
 
 # NB: the conftest.py `_reset_manifest_cache` autouse fixture clears the
 # module-level manifest cache before every test; `reset_manifest_cache()` is
@@ -175,7 +171,7 @@ def test_render_prompt_capture_rules_injected(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    from silica.kernel import vault_manifest
+    from silica.kernel.base import manifest as vault_manifest
     from silica.kernel.prep_delegation import render_prompt
 
     vault_manifest.reset_manifest_cache()
@@ -264,7 +260,7 @@ def test_render_prompt_uses_vault_conventions(tmp_path, monkeypatch):
     assert "{MAX_TAGS}" not in rendered
 
 
-@patch("silica.agent.providers.get_provider")
+@patch("silica.model.providers.get_provider")
 def test_run_distiller_wires_payload_excerpts_into_language_detection(
     mock_get_provider, monkeypatch
 ):

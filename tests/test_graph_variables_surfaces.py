@@ -68,8 +68,8 @@ def test_note_structure_carries_the_scales_and_names_what_a_bridge_strands(monke
     """A - CUT - B, and B in a triangle with C and B2: CUT strands A alone."""
     G = nx.Graph([("A.md", "CUT.md"), ("CUT.md", "B.md"), ("B.md", "C.md"),
                   ("C.md", "B2.md"), ("B.md", "B2.md")])
-    monkeypatch.setattr("silica.kernel.recall.graph_export.wikilink_graph_cached", lambda folder="": G)
-    monkeypatch.setattr("silica.kernel.report.learner.prerequisites_map", lambda: {})
+    monkeypatch.setattr("silica.kernel.graph.graph_export.wikilink_graph_cached", lambda folder="": G)
+    monkeypatch.setattr("silica.kernel.learn.learner.prerequisites_map", lambda: {})
     m = structure.build()
     monkeypatch.setattr(structure, "structure_map", lambda: m)
     st = structure.note_structure("CUT.md")
@@ -122,13 +122,13 @@ def test_two_leaves_of_one_note_are_not_drawn_on_one_point():
 
 def test_a_bridge_ships_its_layout_with_the_areas_the_graph_colours():
     """One Louvain, one seed, one graph: the drawer's blobs are the frame's."""
-    from silica.kernel.recall.graph_export import louvain_sorted
+    from silica.kernel.graph.graph_export import louvain_sorted
 
     G = nx.Graph([("A.md", "CUT.md"), ("CUT.md", "B.md"), ("B.md", "C.md"),
                   ("C.md", "B2.md"), ("B.md", "B2.md")])
     m = structure.StructureMap(degree=dict(G.degree()))
     import unittest.mock as um
-    with um.patch("silica.kernel.recall.graph_export.wikilink_graph_cached", lambda folder="": G):
+    with um.patch("silica.kernel.graph.graph_export.wikilink_graph_cached", lambda folder="": G):
         out = structure._cut_detail("CUT.md", m)
     area = {n: i for i, c in enumerate(louvain_sorted(G)) for n in c}
     assert {n["id"]: n["area"] for n in out["layout"]["nodes"]} == {n: area[n] for n in G}
@@ -234,7 +234,7 @@ def test_proposed_layer_keeps_only_pairs_a_shared_concept_corroborates(monkeypat
     import silica.ui.web.graph_view as gv
 
     monkeypatch.setattr(
-        "silica.kernel.recall.graph_export.shared_concepts",
+        "silica.kernel.graph.graph_export.shared_concepts",
         lambda pairs, k=3: {("A", "D"): ["gradient"]},
     )
     out = gv._corroborate(
@@ -249,7 +249,7 @@ def test_proposed_layer_is_empty_without_an_index(monkeypatch):
     import silica.ui.web.graph_view as gv
 
     monkeypatch.setattr(
-        "silica.kernel.recall.graph_export.shared_concepts", lambda pairs, k=3: {})
+        "silica.kernel.graph.graph_export.shared_concepts", lambda pairs, k=3: {})
     assert gv._corroborate([("A", "D", 2.0)], [_n("A"), _n("D")], 10,
                            kind="COUPLED", color="#000", paper="#fff") == []
 
@@ -340,7 +340,7 @@ def test_every_edge_layer_has_a_colour_of_its_own():
     """The zone-crossing highlight once reused the similar layer's azure - the
     same hex - so ticking it changed nothing anyone could see. Every edge
     colour the frame can draw at once has to differ from every other."""
-    from silica.kernel.recall import graph_export as ge
+    from silica.kernel.graph import graph_export as ge
     from silica.ui.web import graph_view as gv
 
     # By NAME first: graph_view re-imports three of graph_export's constants, and
@@ -569,7 +569,7 @@ def test_context_ships_the_scales_and_the_notes_behind_a_bridge(client, tmp_vaul
     cut = st["cut"]
     assert [(n["name"], n["path"], n["side"]) for n in cut["nodes"]] == [("A", "A.md", "note"), ("B", "B.md", "behind")]
     assert "id" not in cut["nodes"][0] and cut["edges"] == [[0, 1]]
-    from silica.kernel.recall.graph_export import area_color
+    from silica.kernel.graph.graph_export import area_color
     assert cut["colors"] == {"3": [area_color(3), area_color(3, on_paper=True)]}
 
 

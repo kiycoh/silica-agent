@@ -71,7 +71,7 @@ def call(backend: str, state, questions: dict, timeout: float = 30.0) -> dict:
     import httpx
 
     import silica.config  # noqa: F401  loads ~/.silica/.env, where OPENROUTER_API_KEY lives
-    from silica.agent.decide import _validate
+    from silica.model.decide import _validate
 
     if backend == "jev":
         url, model = JEV_URL, JEV_MODEL

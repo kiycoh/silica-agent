@@ -58,12 +58,12 @@ def client(tmp_vault, tmp_path, monkeypatch):
 def embedder(monkeypatch):
     """An embedder that answers, and a chat model that fails the test if asked."""
     vectors = Vectors()
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda config: vectors)
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda config: vectors)
 
     def down(*a, **kw):
         raise AssertionError("hand writing must not reach a chat model")
 
-    monkeypatch.setattr("silica.agent.llm.call_llm", down)
+    monkeypatch.setattr("silica.model.llm.call_llm", down)
     return vectors
 
 
@@ -132,7 +132,7 @@ def test_a_failing_embedder_is_left_to_embed_and_the_save_stands(client, monkeyp
         def embed(self, texts, *, query=False):
             raise ConnectionError("no embedder here")
 
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda config: Down())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda config: Down())
     tc, _, vault = client
     made = new(tc, folder="", name="Bozza", text="zebra\n").json()
     assert tc.post("/note/let-go", json={"path": made["path"]}).json() == {"ok": True}
@@ -145,7 +145,7 @@ def test_no_embedder_does_nothing(client, monkeypatch):
         raise RuntimeError("no embedder configured")
 
     built = []
-    monkeypatch.setattr("silica.agent.providers.get_embedder", none)
+    monkeypatch.setattr("silica.model.providers.get_embedder", none)
     monkeypatch.setattr("silica.kernel.recall.cooccurrence.build_index", lambda *a, **kw: built.append(a))
     tc, *_ = client
     path = new(tc, folder="", name="Bozza", text="zebra\n").json()["path"]

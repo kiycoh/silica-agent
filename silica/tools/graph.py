@@ -70,9 +70,9 @@ def graph_export(output_path: str, folder: str = "", title: str = "Vault Graph",
     try:
         from pathlib import Path
 
-        from silica.agent.providers import get_embedder
+        from silica.model.providers import get_embedder
         from silica.config import CONFIG
-        from silica.kernel.recall import daily_layer
+        from silica.kernel.graph import daily_layer
 
         daily_layer.refresh_blocks(get_embedder(CONFIG), Path(CONFIG.vault_path or "."))
     except Exception as exc:
@@ -91,7 +91,7 @@ def silica_mindmap(note_path: Annotated[str, Field(description='Vault-relative p
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.recall.mindmap import (
+    from silica.kernel.graph.mindmap import (
         build_mapview,
         gather_materials,
         mapview_to_canvas,
@@ -160,7 +160,7 @@ def silica_autolink(note_paths: Annotated[list[str] | None, Field(description='L
     cooccur_store = None
     if use_candidates:
         try:
-            from silica.agent.providers import get_embedder
+            from silica.model.providers import get_embedder
             from silica.config import CONFIG
             from silica.kernel.recall.embed import get_store
             store = get_store()
@@ -335,7 +335,7 @@ def _facade_search(text: str, k: int, memory: bool = True, folder: str = "") -> 
     # three times. The inbox stays indexed (staging is source material and
     # `silica_recall` still reaches it) — it just stops crowding the ranked list
     # this tool returns, so over-fetch, drop staging, then cut to k.
-    from silica.agent.providers import get_reranker
+    from silica.model.providers import get_reranker
     from silica.config import CONFIG
     from silica.kernel.recall.rerank import rerank_related
 
@@ -762,7 +762,7 @@ def _related(note: str, k: int = 5, memory: bool = True) -> dict[str, Any]:
     # inside [0.0159, 0.0164]).
     rr: dict[str, Any] = {"reranked": False}
     if results:
-        from silica.agent.providers import get_reranker
+        from silica.model.providers import get_reranker
         from silica.kernel.recall.rerank import link_query, rerank_related
 
         reranker = get_reranker(CONFIG)
@@ -773,7 +773,7 @@ def _related(note: str, k: int = 5, memory: bool = True) -> dict[str, Any]:
     # tells the caller whether a candidate sits in the query's own knowledge
     # area or across a cluster boundary. Memory-lane notes are another vault —
     # never annotated.
-    from silica.kernel.recall.graph_export import cluster_hub_of, graph_distances, load_cluster_ctx
+    from silica.kernel.graph.graph_export import cluster_hub_of, graph_distances, load_cluster_ctx
 
     gctx_map = (load_cluster_ctx() or {}).get("ctx") or {}
     # Structural distance: wikilink hops from the query to each result — the
@@ -920,7 +920,7 @@ def silica_embed_refresh(folder: Annotated[str, Field(description='Vault-relativ
     first if those report an empty index. Incremental: skips notes already
     indexed (unless force=True). Call after bulk writes to keep it fresh.
     """
-    from silica.agent.providers import get_embedder
+    from silica.model.providers import get_embedder
     from silica.config import CONFIG
     from silica.kernel.recall.embed import build_index
 
@@ -1195,7 +1195,7 @@ def silica_vault_report(
     # Whole-vault only: a folder-scoped map would clobber the global one.
     if not folder:
         try:
-            from silica.kernel.recall.graph_export import ctx_from_report, save_cluster_ctx
+            from silica.kernel.graph.graph_export import ctx_from_report, save_cluster_ctx
 
             save_cluster_ctx(
                 [report.totals.get("notes", 0), report.totals.get("links", 0)],
@@ -1223,7 +1223,7 @@ def silica_vault_report(
     # "nothing to do" over a folder full of work (observed 2026-08-15).
     try:
         from silica.tools.atomic import _unconverted_under
-        from silica.kernel.vault_manifest import active_inbox_dir
+        from silica.kernel.base.manifest import active_inbox_dir
 
         inbox = active_inbox_dir()
         pending = _unconverted_under(inbox) if inbox else []
@@ -1242,7 +1242,7 @@ def silica_vault_report(
     # whose converted .md already exists (inbox or done/) are not re-reported.
     try:
         if vault_path:
-            from silica.kernel.vault_manifest import active_done_dir
+            from silica.kernel.base.manifest import active_done_dir
             from silica.onboarding.wizard import unindexable_docs
 
             root = Path(vault_path)
@@ -1355,7 +1355,7 @@ def silica_health() -> dict[str, Any]:
     from silica.config import CONFIG
     from silica.kernel.recall.cooccurrence import get_cooccur_store
     from silica.kernel.recall.embed import get_store
-    from silica.kernel.link.health import fusion_probe, integrity_probe
+    from silica.kernel.report.health import fusion_probe, integrity_probe
 
     vault = Path(getattr(CONFIG, "vault_path", "") or "").expanduser()
     if not vault.is_dir():

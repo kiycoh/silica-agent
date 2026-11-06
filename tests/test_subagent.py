@@ -212,7 +212,7 @@ def test_dedup_contradicts_without_claim_is_no_merge():
 def _seed_twin_bundle(content_hash: str = "hash1"):
     """Seed the (conftest-isolated) deferred store with the borderline bundle
     COLLISION would have written for _item()'s concept plus one sibling op."""
-    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.deferred import get_deferred_store
 
     store = get_deferred_store()
     store.put(
@@ -360,7 +360,7 @@ def _decide_with_raw(raw_text: str):
 
     provider = MagicMock()
     provider.call_llm.return_value = MagicMock(text=raw_text)
-    with patch("silica.agent.providers.get_provider", return_value=provider):
+    with patch("silica.model.providers.get_provider", return_value=provider):
         return _decide_dedup(
             CONFIG, concept="X", excerpt="e", candidate_name="Y", candidate_body="b",
         )
@@ -657,7 +657,7 @@ def _decide_capturing_call(raw_text: str) -> dict:
 
     provider = MagicMock()
     provider.call_llm.return_value = MagicMock(text=raw_text, finish_reason="stop")
-    with patch("silica.agent.providers.get_provider", return_value=provider):
+    with patch("silica.model.providers.get_provider", return_value=provider):
         _decide_dedup(CONFIG, concept="X", excerpt="e", candidate_name="Y", candidate_body="b")
     return provider.call_llm.call_args.kwargs
 
@@ -675,7 +675,7 @@ def test_decide_dedup_batch_switches_thinking_off():
 
     provider = MagicMock()
     provider.call_llm.return_value = MagicMock(text='{"decisions": []}', finish_reason="stop")
-    with patch("silica.agent.providers.get_provider", return_value=provider):
+    with patch("silica.model.providers.get_provider", return_value=provider):
         _decide_dedup_batch(
             CONFIG, concepts=[{"concept": "X", "excerpt": "e"}],
             candidate_name="Y", candidate_body="b",

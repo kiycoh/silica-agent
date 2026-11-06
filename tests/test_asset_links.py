@@ -14,7 +14,7 @@ from silica.driver.fs_backend import ObsidianFSBackend
 # ---------------------------------------------------------------------------
 
 def test_extract_file_refs_all_syntaxes():
-    from silica.kernel.link.ast import extract_file_refs, extract_links
+    from silica.kernel.base.markdown import extract_file_refs, extract_links
 
     content = (
         "# N\n\n"
@@ -32,7 +32,7 @@ def test_extract_file_refs_all_syntaxes():
 def test_file_targets_no_longer_phantom_note_links():
     # Before the extension list grew, [[analysis.ipynb]] / [[clip.mov]] read as
     # dangling NOTE links; they are file refs.
-    from silica.kernel.link.ast import extract_file_refs, extract_links
+    from silica.kernel.base.markdown import extract_file_refs, extract_links
 
     assert extract_links("[[analysis.ipynb]] [[clip.mov]]") == []
     assert extract_file_refs("[[analysis.ipynb]] [[clip.mov]]") == [
@@ -40,7 +40,7 @@ def test_file_targets_no_longer_phantom_note_links():
 
 
 def test_extract_file_refs_fast_path_and_normalization():
-    from silica.kernel.link.ast import extract_file_refs
+    from silica.kernel.base.markdown import extract_file_refs
 
     assert extract_file_refs("plain prose, no refs at all") == []
     assert extract_file_refs("![[img.png|300]]") == ["img.png"]      # size hint
@@ -48,7 +48,7 @@ def test_extract_file_refs_fast_path_and_normalization():
 
 
 def test_extract_refs_typed_matches_links_typed():
-    from silica.kernel.link.ast import extract_links_typed, extract_refs_typed
+    from silica.kernel.base.markdown import extract_links_typed, extract_refs_typed
 
     content = (
         "---\nrelated:\n  - \"[[X]]\"\n---\n\n"
@@ -157,7 +157,7 @@ def test_silica_file_links_both_directions(asset_vault, monkeypatch):
 def test_tabular_targets_are_file_refs_not_note_links():
     # A profile note names its data file (convert.py TABULAR_EXTS); as note
     # targets these were phantom dangling links, invisible to file_backlinks.
-    from silica.kernel.link.ast import extract_file_refs, extract_links
+    from silica.kernel.base.markdown import extract_file_refs, extract_links
 
     body = "[[vendite.csv]] [[data/log.tsv]] ![[frame.parquet]]"
     assert extract_links(body) == []
@@ -170,7 +170,7 @@ def test_tabular_targets_are_file_refs_not_note_links():
 # ---------------------------------------------------------------------------
 
 def test_backtick_path_mentions_extracted():
-    from silica.kernel.link.ast import extract_refs_typed
+    from silica.kernel.base.markdown import extract_refs_typed
 
     content = (
         "# N\n\n"
@@ -187,7 +187,7 @@ def test_backtick_path_mentions_extracted():
 def test_backtick_mentions_survive_the_marker_fast_path():
     # A note with no [[ ]] and no ]( still reaches the parser when it carries
     # a path-shaped inline cite.
-    from silica.kernel.link.ast import extract_refs_typed
+    from silica.kernel.base.markdown import extract_refs_typed
 
     _, _, mentions = extract_refs_typed("only a `data/m.csv` cite, no links")
     assert mentions == ["data/m.csv"]

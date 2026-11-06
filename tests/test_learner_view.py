@@ -10,7 +10,7 @@ import math
 import time
 from datetime import datetime, timezone
 
-from silica.kernel.report import learner
+from silica.kernel.learn import learner
 
 DAY = 86400.0
 
@@ -209,7 +209,7 @@ def test_unexplored_ranking_prefers_unmeasured_central_concepts():
 
 
 def test_view_reads_frontmatter_from_the_vault(tmp_vault, monkeypatch):
-    import silica.kernel.report.quiz as quiz
+    from silica.kernel.learn import quiz
     monkeypatch.setattr(quiz, "log_path", lambda: __import__("pathlib").Path("/nonexistent/quiz.jsonl"))
     tmp_vault.note("User.md", "---\ndate: 2026-01-01\n---\nwritten by hand\n")
     tmp_vault.note("Robot.md", "---\nAI: true\n---\nnucleated\n")

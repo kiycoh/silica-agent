@@ -184,7 +184,7 @@ def after_tool(turn: _Turn, name: str) -> str:
 # that only asks to forget is not recognised, and a replace can write the
 # opposite preference again. Upgrade path, once the first hosted user
 # (ADR-0071) writes in a third language: a typed decision on the current
-# request (silica/agent/decide.py, as read_scope.py asks one) with these
+# request (silica/model/decide.py, as read_scope.py asks one) with these
 # patterns kept as the offline fallback.
 _NOT_FORGET = re.compile(r"\b(?:non\s+(?:ti\s+)?(?:dimentic|scord)\w*|(?:don['’]?t|do\s+not|never)\s+forget)",
                          re.IGNORECASE)
@@ -310,7 +310,7 @@ def silica_remember(
                          "else kept, they will say so."}
     if action != "forget" and (why := _date_mismatch(text, dt.date.today())):
         return {"error": why}
-    from silica.agent import narration
+    from silica.obs import narration
 
     # The chat it came from (survey card D3): the date reaches the model, the
     # session is kept for the person.

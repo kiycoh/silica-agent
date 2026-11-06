@@ -113,7 +113,7 @@ def _read_body(note_path: str) -> str | None:
     """Read a note's body (frontmatter stripped) via the driver; None on failure."""
     try:
         from silica.driver import DRIVER
-        from silica.kernel.write import frontmatter
+        from silica.kernel.base import frontmatter
         nc = DRIVER.read_note(note_path)
         _data, _fm, body = frontmatter.split(nc.content)
         return body
@@ -290,7 +290,7 @@ def _llm_arbitrate(
     if not ambiguous:
         return {}
 
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.config import CONFIG
     from silica.kernel.text.sanitize import parse_json
 

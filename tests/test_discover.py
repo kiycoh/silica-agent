@@ -248,7 +248,7 @@ def test_only_quotes_the_article_contains_are_banked(monkeypatch):
         {"article": 2, "quote": "Turnout was 77%.", "why": "turnout"},
         {"article": 9, "quote": "Turnout was 77%.", "why": "no such article"}],
         "terms": ["Knesset"], "questions": ["Who won?", "What next?", "Why?"]})
-    monkeypatch.setattr("silica.agent.llm.call_llm", lambda *a, **k: SimpleNamespace(text="```json\n" + reply + "\n```"))
+    monkeypatch.setattr("silica.model.llm.call_llm", lambda *a, **k: SimpleNamespace(text="```json\n" + reply + "\n```"))
     arts = [{"url": "https://a.test/1"}, {"url": "https://b.test/2"}]
     bank, terms, qs = S.bank_quotes("H", arts, ["Intro. The vote was close. End.", "Turnout was 77%."])
     assert [(k, q.url) for k, q in bank.items()] == [("Q1", "https://a.test/1"), ("Q2", "https://b.test/2")]

@@ -7,7 +7,7 @@ Louvain recomputes only when the graph has grown enough to matter.
 """
 from __future__ import annotations
 
-import silica.kernel.recall.graph_export as ge
+from silica.kernel.graph import graph_export as ge
 import silica.kernel.report.graph_report as gr
 import silica.router.states.setup as setup
 from silica.kernel.recall import paths

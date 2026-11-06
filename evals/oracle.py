@@ -62,7 +62,7 @@ def cached_text(model: str, messages: list[dict], **kwargs) -> str:
         except Exception as exc:  # corrupt entry = miss; the write below replaces it
             logger.warning("oracle: unreadable cache entry %s (%s)", path.name, exc)
 
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
 
     for attempt in range(_ATTEMPTS):
         resp = call_llm(model, messages, **kwargs)

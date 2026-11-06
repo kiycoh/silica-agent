@@ -100,7 +100,7 @@ def collections(notes: dict, allowed: set[str]) -> list[dict]:
     split into segments), else by the leaf's folder (a series). The hub note
     is no key: the course's book hub was merged into another note
     (2026-10-25). Computed once per notes-meta epoch and bound."""
-    from silica.kernel.report.learner import parsed_note
+    from silica.kernel.learn.learner import parsed_note
 
     spines = sorted((p for p in allowed if notes.get(p, {}).get("spine")), key=natural_key)
     memo_key = (str(_vault()), tuple(spines), tuple(notes[p].get("mtime", 0) for p in spines))

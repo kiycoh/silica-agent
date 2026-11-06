@@ -24,7 +24,7 @@ def _collection_key(zot, value: str) -> str:
 def run(tokens: list[str], console) -> None:
     """/zotero [file|group|unlink|grant] [--apply|--yes]."""
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
     from silica.kernel.write.undo_journal import get_undo_journal
     from silica.sources import zotero, zotero_write
 

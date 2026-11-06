@@ -6,7 +6,7 @@ run still announced `nucleate finished: partial`. has_partial_failure is a
 one-way latch set at WRITE, and CLEANUP computes final_status before the anneal
 runs — so the verdict describes a state the run left behind.
 """
-import silica.kernel.recall.deferred as deferred_mod
+from silica.kernel.write import deferred as deferred_mod
 import silica.tools.pipeline as pipeline_mod
 from silica.router.orchestrator import InjectorFSM
 

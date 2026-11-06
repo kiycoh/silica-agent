@@ -65,7 +65,7 @@ def test_the_seed_has_no_memory_when_paused_or_incognito(on, monkeypatch):
 
 
 def test_the_memory_origin_never_reaches_the_wire(on):
-    from silica.agent.providers import _to_wire
+    from silica.model.providers import _to_wire
 
     um.save("user", "Name is Giulia")
     wire = _to_wire(um.snapshot_message())
@@ -231,7 +231,7 @@ def test_a_reopened_gui_chat_starts_from_the_seed(client, monkeypatch):
 
 
 def test_tool_done_carries_the_write_for_the_saved_line():
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
     from silica.ui.web.callback import event_to_json
 
     ok = json.dumps({"ok": True, "action": "save", "scope": "user", "text": "- Likes tea",
@@ -249,7 +249,7 @@ def test_tool_done_carries_the_write_for_the_saved_line():
 def test_the_terminal_prints_the_models_write_even_with_tool_progress_off(monkeypatch, capsys):
     """The TUI's half of the saved line: the model saves unasked, so a write
     the user cannot see is one they never check (ADR-0076 §7)."""
-    from silica.agent.events import ToolCompleteEvent
+    from silica.obs.events import ToolCompleteEvent
     from silica.ui.renderer import make_progress_callback
 
     monkeypatch.setattr(CONFIG, "tool_progress", "off")

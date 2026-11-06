@@ -223,7 +223,7 @@ def test_facts_from_a_previous_embedder_still_reach_the_context(tmp_path, monkey
 
     EpisodicStore().capture([{"key": "user.dog.name", "text": "My dog is named Zephyr"}],
                             run_id="s1", seen="2026-01-01", embedder=_E("old", [1.0, 0.0]))
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     monkeypatch.setattr(providers, "get_embedder", lambda _cfg: _E("new", [0.0, 1.0]))
     from silica.kernel.recall.perception import perceive
@@ -431,7 +431,7 @@ def test_headingless_note_renders_without_sec_segment(tmp_path, monkeypatch):
 
 def _study_vault(tmp_path, monkeypatch, prereqs):
     _bind(tmp_path / "v", monkeypatch)
-    import silica.kernel.report.learner as learner
+    from silica.kernel.learn import learner
     monkeypatch.setattr(learner, "prerequisites_map", lambda: prereqs)
 
 
@@ -486,7 +486,7 @@ def test_study_order_keeps_contested_demoted(tmp_path, monkeypatch):
 
 def test_study_order_survives_unavailable_prereq_map(tmp_path, monkeypatch):
     _bind(tmp_path / "v", monkeypatch)
-    import silica.kernel.report.learner as learner
+    from silica.kernel.learn import learner
 
     def _boom():
         raise RuntimeError("no cooccur depth")
@@ -505,7 +505,7 @@ def test_study_order_survives_unavailable_prereq_map(tmp_path, monkeypatch):
 def test_orient_prepends_vault_map_and_default_off(tmp_path, monkeypatch):
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", "alpha body")
-    import silica.kernel.recall.vault_map as vm
+    from silica.kernel.report import vault_map as vm
     monkeypatch.setattr(vm, "build_vault_map", lambda: "## Vault map\n- Notes: 1")
     from evals.recall_arms import perceive
 
@@ -521,7 +521,7 @@ def test_orient_prepends_vault_map_and_default_off(tmp_path, monkeypatch):
 def test_orient_fails_open_when_map_unavailable(tmp_path, monkeypatch):
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", "alpha body")
-    import silica.kernel.recall.vault_map as vm
+    from silica.kernel.report import vault_map as vm
 
     def _boom():
         raise RuntimeError("no cooccur index")

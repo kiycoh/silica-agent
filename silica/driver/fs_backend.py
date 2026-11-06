@@ -23,7 +23,12 @@ from pathlib import Path
 from collections.abc import Sequence
 from typing import Any
 import networkx as nx
-from silica.kernel.link.ast import ADR_REF_RE, NON_MD_EXTENSIONS, extract_refs_typed, resolve_relative
+from silica.kernel.base.markdown import (
+    ADR_REF_RE,
+    NON_MD_EXTENSIONS,
+    extract_refs_typed,
+    resolve_relative,
+)
 
 from silica.driver.base import (
     namesake_order,
@@ -36,10 +41,10 @@ from silica.driver.base import (
     NoteRef,
     Txn,
 )
-from silica.kernel.write import frontmatter as fm
+from silica.kernel.base import frontmatter as fm
 from silica.kernel.write import preserve, session_changes
 from silica.kernel.link import ofm
-from silica.kernel.recall.graph_export import is_vault_artifact
+from silica.kernel.graph.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import (
     atomic_write_bytes,
     contain_in_vault,
@@ -1575,7 +1580,7 @@ class ObsidianFSBackend(GraphIndexMixin):
 
     def list_inbox_files(self) -> list[NoteRef]:
         """List all files in the inbox directory."""
-        from silica.kernel.vault_manifest import active_inbox_dir
+        from silica.kernel.base.manifest import active_inbox_dir
         inbox = active_inbox_dir()
         if not inbox:
             return []

@@ -404,7 +404,7 @@ def test_an_id_that_is_not_one_reaches_no_file(client):
 def test_a_transition_reaches_the_narration_stream_as_a_job_event(client, monkeypatch):
     from types import SimpleNamespace
 
-    from silica.agent.bus import BUS
+    from silica.obs.bus import BUS
     from silica.ui.web import jobs
 
     tc, server, _ = client

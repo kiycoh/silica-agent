@@ -205,7 +205,7 @@ def build_vault_map(
         # Tail of log.md — the agent sees what happened recently without
         # having to open the run JSON (Task 2: human-readable append-only journal).
         try:
-            from silica.kernel.recall.run_log import tail_log
+            from silica.kernel.write.run_log import tail_log
 
             recent = tail_log(log_tail)
             if recent:

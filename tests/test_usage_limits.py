@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from silica.agent import usage_limits
-from silica.agent.usage_limits import UsageLimited
+from silica.model import usage_limits
+from silica.model.usage_limits import UsageLimited
 
 KEY = "sk-or-v1-tenant-own-key-for-tests"
 T0 = 1_760_000_000.0  # 2025-10-09T08:53:20Z
@@ -135,7 +135,7 @@ def test_the_window_reopens_after_five_hours(fake, tmp_path):
 
 def test_a_failed_read_lets_the_call_through(fake, tmp_path, caplog):
     fake.status = 500
-    with caplog.at_level("WARNING", logger="silica.agent.usage_limits"):
+    with caplog.at_level("WARNING", logger="silica.model.usage_limits"):
         usage_limits.check()
     assert "the call goes ahead" in caplog.text and KEY not in caplog.text
     assert not window_file(tmp_path).exists()
@@ -167,7 +167,7 @@ def test_a_spent_week_or_month_refuses_before_calling(fake, tmp_path, record, la
 
 
 def test_call_llm_refuses_without_calling_the_model(fake, monkeypatch):
-    from silica.agent import llm
+    from silica.model import llm
 
     made = []
     monkeypatch.setattr(llm, "_call_llm", lambda *a, **k: made.append(a[0]))
@@ -180,7 +180,7 @@ def test_call_llm_refuses_without_calling_the_model(fake, monkeypatch):
 def test_nothing_changes_without_a_share(fake, monkeypatch):
     """The single-user GUI (point 4): no share, no read before a call, and a
     spent month is OpenRouter's to refuse, as before."""
-    from silica.agent import llm
+    from silica.model import llm
 
     monkeypatch.delenv("SILICA_USAGE_WINDOW_SHARE")
     fake.body = key_record(month_spend=1.5)
@@ -191,7 +191,7 @@ def test_nothing_changes_without_a_share(fake, monkeypatch):
 
 
 def test_a_model_off_openrouter_is_never_checked(fake, monkeypatch):
-    from silica.agent import llm
+    from silica.model import llm
 
     monkeypatch.setattr(llm, "_call_llm", lambda *a, **k: llm.LLMResponse(text="ok"))
     llm.call_llm("custom/qwen3.5-9b", [{"role": "user", "content": "hi"}])
@@ -214,7 +214,7 @@ def test_the_share_must_be_a_share(fake, monkeypatch):
 
 
 def test_decide_is_refused_like_a_call(fake, monkeypatch):
-    from silica.agent import decide
+    from silica.model import decide
     from silica.config import CONFIG
 
     monkeypatch.setattr(CONFIG, "decision_model", "typesafe/jev")
@@ -382,7 +382,7 @@ def journal(monkeypatch):
 
 def test_a_refused_turn_is_counted_limited_and_says_when(fake, journal, tmp_vault, monkeypatch):
     pytest.importorskip("fastapi")
-    from silica.agent import llm
+    from silica.model import llm
     from silica.ui.web import server
 
     server._reset_session()
@@ -415,7 +415,7 @@ def test_what_needs_no_model_stays_at_the_limit(fake, tmp_vault, monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
-    from silica.agent import llm
+    from silica.model import llm
     from silica.ui.web import server
 
     def no_model(*a, **k):

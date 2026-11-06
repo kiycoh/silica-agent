@@ -373,7 +373,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     τ_high = orch.CONFIG.sim_threshold_high
     τ_low = orch.CONFIG.sim_threshold_low
 
-    from silica.agent.providers import get_embedder_or_none
+    from silica.model.providers import get_embedder_or_none
     from silica.kernel.recall.embed import get_store
 
     def _minhash_fallback() -> None:

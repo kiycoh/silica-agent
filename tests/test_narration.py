@@ -12,10 +12,17 @@ import threading
 
 import pytest
 
-import silica.agent.narration as narr
-from silica.agent.narration import (
-    ViewState, fold, fold_all, list_sessions, load_session_messages,
-    messages_from_beats, prune, read_beats, store_stats,
+from silica.obs import narration as narr
+from silica.obs.narration import (
+    ViewState,
+    fold,
+    fold_all,
+    list_sessions,
+    load_session_messages,
+    messages_from_beats,
+    prune,
+    read_beats,
+    store_stats,
 )
 
 
@@ -63,7 +70,7 @@ def test_appends_are_thread_safe_gap_free(narrator):
 
 
 def test_bus_carries_the_appended_record(narrator):
-    from silica.agent.bus import BUS
+    from silica.obs.bus import BUS
     got = []
     BUS.subscribe(narr.BEAT_TOPIC, got.append)
     _open(narrator)
@@ -134,7 +141,7 @@ def test_span_attach_parents_inner_beats(narrator):
 
 
 def test_render_event_adapter_tool_lifecycle(narrator):
-    from silica.agent.events import ToolStartEvent, ToolCompleteEvent
+    from silica.obs.events import ToolStartEvent, ToolCompleteEvent
     sid = _open(narrator)
     narrator.on_render_event(ToolStartEvent("silica_recall", {"q": "x"}, "c1", 1))
     assert narr.current_parent() == "c1"   # writes inside the tool attribute to it

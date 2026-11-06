@@ -218,7 +218,7 @@ def build_items() -> list[Item]:
         "capabilities-workers-refactor.md", "ponytail-debt-fixes.md",
         "web-research-plan-steering.md", "graph-tree-focus.md")], "draft", "en", "plan")
     # unsure: code, and session handoffs (a record, but authored and finished)
-    _files(items, [REPO / "silica/agent/decide.py"], "unsure", "en", "code")
+    _files(items, [REPO / "silica/model/decide.py"], "unsure", "en", "code")
     _files(items, [REPO / "docs/handoffs" / n for n in (
         "2026-06-10-steering-refactor.md", "2026-06-19-keyphrase-optimization.md")],
            "unsure", "en", "handoff")
@@ -270,7 +270,7 @@ def _recording_call_llm(real):
 
 def run_item(it: Item) -> dict:
     import silica.kernel.forms as forms
-    from silica.agent.decide import decide
+    from silica.model.decide import decide
 
     a, ta, ea = _timed(lambda: forms._sniff_llm(it.text))
     ua = getattr(_LAST, "usage", None)

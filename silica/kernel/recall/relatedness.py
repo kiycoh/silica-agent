@@ -40,7 +40,7 @@ from typing import Callable
 
 from silica.kernel.recall.cooccurrence import CooccurStore, cooccur_key
 from silica.kernel.recall.embed import EmbedStore
-from silica.kernel.recall.graph_export import is_vault_artifact
+from silica.kernel.graph.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import in_folder
 
 logger = logging.getLogger(__name__)
@@ -530,7 +530,7 @@ def _mirror_prefix() -> str:
     a repo, not a mirror of it, so no dedupe applies there.
     """
     try:
-        from silica.kernel.vault_manifest import active_write_dir
+        from silica.kernel.base.manifest import active_write_dir
         from silica.onboarding.adopt import SAFE_WRITE_DIR
 
         wd = active_write_dir()

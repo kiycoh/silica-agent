@@ -31,7 +31,7 @@ def _e(path, days_ago, **kw):
 
 @pytest.fixture
 def vault(tmp_vault, tmp_path, monkeypatch):
-    import silica.kernel.report.quiz as quiz
+    from silica.kernel.learn import quiz
     from silica.kernel.write import undo_journal
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
@@ -173,7 +173,7 @@ def test_a_plan_with_nothing_chosen_carries_proposed_cards_and_a_legacy_reach_st
 
 
 def test_steps_pass_and_plans_complete_per_objective(vault):
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     vault.note("Plans/Steps.md", "---\ntype: plan\nscope: steps\ntarget: Plans/Steps.md\nobjectives: [explain, apply]\ncreated: 2026-01-01\n---\n# Steps\n\n## Steps\n- [ ] [[Iperpiano]]: first\n\n## Sessions\n")
     p = plans.read_plan("Plans/Steps.md")

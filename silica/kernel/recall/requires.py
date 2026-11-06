@@ -42,7 +42,7 @@ def written_requires(vault: str | Path) -> dict[str, list[str]]:
     notes view makes (dot dirs, .silicaignore and the verbatim sources are not
     notes). Only a frontmatter that names `requires` is parsed as YAML."""
     from silica.kernel.recall.paths import SOURCES_DIR, ignore_matcher, vault_epoch
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     root = Path(vault)
     key = str(root)

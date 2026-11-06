@@ -114,9 +114,9 @@ def run_one(kind: str, arm: str, out_file: Path) -> None:
     for name in WRITE_TOOLS:
         if name in TOOLS:
             TOOLS[name].fn = lambda **kw: {"error": "read-only probe: nothing was written"}
-    from silica.kernel.vault_manifest import apply_manifest_to_config
+    from silica.kernel.base.manifest import apply_manifest_to_config
     apply_manifest_to_config()
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
     from silica.agent.loop import run_agent
     from silica.cli import _expand_workflow_shortcut, seed_messages

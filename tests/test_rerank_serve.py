@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from silica.agent import rerank_serve as rs
-from silica.agent.providers import Reranker
+from silica.model.providers import Reranker
 
 
 @pytest.fixture

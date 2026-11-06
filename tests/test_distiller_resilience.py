@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from silica.agent.llm import LLMResponse
+from silica.model.llm import LLMResponse
 from silica.kernel.prep_delegation import (
     _call_with_deadline,
     compute_distiller_max_tokens,
@@ -116,7 +116,7 @@ class TestSalvage:
 # ---------------------------------------------------------------------------
 
 class TestRunDistillerSalvage:
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.get_provider")
     def test_truncated_length_response_salvages_partial(self, mock_get_provider):
         mock_provider = MagicMock()
         mock_get_provider.return_value = mock_provider
@@ -138,7 +138,7 @@ class TestRunDistillerSalvage:
         assert len(result["updates"]) == 1
         assert result["updates"][0]["heading"] == "Done"
 
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.get_provider")
     def test_unrecoverable_truncation_returns_error(self, mock_get_provider):
         mock_provider = MagicMock()
         mock_get_provider.return_value = mock_provider
@@ -160,8 +160,8 @@ class TestRunDistillerSalvage:
 # ---------------------------------------------------------------------------
 
 class TestRunDistillerDynamicBudget:
-    @patch("silica.agent.providers.model_limits", return_value=(0, 0))
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.model_limits", return_value=(0, 0))
+    @patch("silica.model.providers.get_provider")
     def test_default_ask_bounded_by_max_tokens(self, mock_get_provider, _limits, monkeypatch):
         # 2026-08-21: the "use all headroom" default is refuted — the June
         # truncation story was hub_desc's raw slice, not the output budget
@@ -181,8 +181,8 @@ class TestRunDistillerDynamicBudget:
         sent = mock_provider.call_llm.call_args.kwargs["max_tokens"]
         assert sent == 32768
 
-    @patch("silica.agent.providers.model_limits", return_value=(100_000, 8_000))
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.model_limits", return_value=(100_000, 8_000))
+    @patch("silica.model.providers.get_provider")
     def test_window_and_output_cap_from_provider(self, mock_get_provider, _limits, monkeypatch):
         monkeypatch.delenv("MODEL_CONTEXT_WINDOW", raising=False)
         monkeypatch.delenv("DISTILLER_MAX_TOKENS", raising=False)
@@ -199,8 +199,8 @@ class TestRunDistillerDynamicBudget:
         # otherwise a model like OpenRouter qwen3-8b (131k ctx, 8k out) 400s.
         assert sent == 8_000
 
-    @patch("silica.agent.providers.model_limits", return_value=(0, 0))
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.model_limits", return_value=(0, 0))
+    @patch("silica.model.providers.get_provider")
     def test_provider_unknown_falls_back_to_default_window(self, mock_get_provider, _limits, monkeypatch):
         monkeypatch.delenv("MODEL_CONTEXT_WINDOW", raising=False)
         monkeypatch.delenv("DISTILLER_MAX_TOKENS", raising=False)
@@ -217,8 +217,8 @@ class TestRunDistillerDynamicBudget:
         # Unknown provider: default window fallback, ask still MAX_TOKENS-bound.
         assert sent == 32768
 
-    @patch("silica.agent.providers.model_limits", return_value=(999_999, 999_999))
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.model_limits", return_value=(999_999, 999_999))
+    @patch("silica.model.providers.get_provider")
     def test_env_overrides_skip_provider_lookup(self, mock_get_provider, mock_limits, monkeypatch):
         monkeypatch.setenv("MODEL_CONTEXT_WINDOW", "50000")
         monkeypatch.setenv("DISTILLER_MAX_TOKENS", "5000")
@@ -234,7 +234,7 @@ class TestRunDistillerDynamicBudget:
         assert sent == 5000
         mock_limits.assert_not_called()
 
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.get_provider")
     def test_explicit_ceiling_is_respected(self, mock_get_provider, monkeypatch):
         monkeypatch.setenv("MODEL_CONTEXT_WINDOW", "262144")
         monkeypatch.setenv("DISTILLER_MAX_TOKENS", "5000")

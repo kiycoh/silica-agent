@@ -84,7 +84,7 @@ class _StubProvider:
 def _enrich_prompt(monkeypatch, hub) -> str:
     sink: list = []
     monkeypatch.setattr(
-        "silica.agent.providers.get_provider", lambda *a, **k: _StubProvider(sink)
+        "silica.model.providers.get_provider", lambda *a, **k: _StubProvider(sink)
     )
     monkeypatch.setattr(
         "silica.kernel.context_builder.build_context",
@@ -193,7 +193,7 @@ def _spy_embed_build_index(monkeypatch) -> dict:
         "silica.kernel.recall.embed.build_index", fake_build_index
     )
     monkeypatch.setattr(
-        "silica.agent.providers.get_embedder", lambda *a, **k: object()
+        "silica.model.providers.get_embedder", lambda *a, **k: object()
     )
     return seen
 
@@ -225,20 +225,20 @@ def test_embed_refresh_prunes_on_a_clean_pass(vault, monkeypatch):
 
 @pytest.mark.parametrize("raw", ["", ".", "./", "././", "  ./  ", "./."])
 def test_safe_rel_dir_root_forms(raw):
-    from silica.kernel.vault_manifest import _safe_rel_dir
+    from silica.kernel.base.manifest import _safe_rel_dir
 
     assert _safe_rel_dir(raw) == ""
 
 
 @pytest.mark.parametrize("raw", ["../out", "/abs/path", "./..", "a/../../b"])
 def test_safe_rel_dir_still_rejects_escapes(raw):
-    from silica.kernel.vault_manifest import _safe_rel_dir
+    from silica.kernel.base.manifest import _safe_rel_dir
 
     assert _safe_rel_dir(raw) is None
 
 
 def test_load_manifest_survives_a_root_write_dir(tmp_path):
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
 
     (tmp_path / "vault.yaml").write_text(
         "write_dir: ./\nconventions:\n  wiki_dir: ././\n  templates_dir: ./\n",

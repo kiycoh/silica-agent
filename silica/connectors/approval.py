@@ -29,7 +29,7 @@ import uuid
 import weakref
 from typing import Any, Callable
 
-from silica.agent.events import ApprovalRequestEvent
+from silica.obs.events import ApprovalRequestEvent
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ def pending() -> list[ApprovalRequestEvent]:
 def _narrate(server: str, tool: str, verdict: str) -> None:
     """One beat per card, for Gate 5 (approvals per use, read off the
     narration)."""
-    from silica.agent.narration import NARRATOR
+    from silica.obs.narration import NARRATOR
 
     NARRATOR.narrate("approval", "done", f"{server} › {tool}: {verdict}",
                      {"server": server, "tool": tool, "verdict": verdict})

@@ -41,7 +41,7 @@ import time
 from pathlib import Path
 
 from evals.probe_ppr_phase0 import ppr
-from silica.kernel.link.health import K, eligible_pairs, wikilink_graph
+from silica.kernel.report.health import K, eligible_pairs, wikilink_graph
 
 HOPS = 2          # fixed in phase 0 (section 5-bis): hops=3 is over the 50ms budget
 ALPHA = 0.5       # and buys no reach, the 3-hop closure is already saturated
@@ -167,7 +167,7 @@ def _legs(key: str, store, es, *, pool: int):
 
 def _fused(embed_rank, cooc_rank, edges_rank) -> dict[str, float]:
     """Reconstruct `_fuse`'s scores. Self-checked against `related_notes`."""
-    from silica.kernel.recall.graph_export import is_vault_artifact
+    from silica.kernel.graph.graph_export import is_vault_artifact
     from silica.kernel.recall.relatedness import _rrf_fuse
 
     rankings = []

@@ -13,7 +13,7 @@ import pytest
 
 import silica.kernel.write.checkpoints as checkpoints
 from silica.kernel.recall import paths
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 from silica.kernel.write import templates as tpl
 from silica.kernel.write.contested import TIER_HUMAN, reliability_tier
 from silica.tools.events import silica_event_create

@@ -116,7 +116,7 @@ def one(opts: argparse.Namespace) -> None:
     """A single case, in this process: HOME and SILICA_VAULT are the parent's
     fresh directories."""
     from silica.agent import loop
-    from silica.agent import narration as narr
+    from silica.obs import narration as narr
     from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
     from silica.cli import seed_messages
     from silica.config import CONFIG

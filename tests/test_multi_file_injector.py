@@ -286,7 +286,7 @@ class TestT2ChunkContainment:
         from pathlib import Path
         from silica.config import CONFIG
         from silica.kernel.progress import RunManifestEntry
-        from silica.kernel.recall.run_log import DEFAULT_LOG_FILENAME
+        from silica.kernel.write.run_log import DEFAULT_LOG_FILENAME
 
         fsm = InjectorFSM("Inbox/lezione-07.md", "Concepts")
         fsm._chunks = [{"chunk": 0}, {"chunk": 1}]

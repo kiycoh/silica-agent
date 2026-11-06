@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from pydantic import BaseModel
 
-from silica.agent.llm import call_llm, LLMResponse
+from silica.model.llm import call_llm, LLMResponse
 
 from tests.llm_mocks import litellm_mock_response as _mock_completion
 

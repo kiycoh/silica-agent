@@ -2,7 +2,7 @@
 """knn_edges: store-key↔node-id mapping, self-exclusion, undirected dedup."""
 from __future__ import annotations
 
-from silica.kernel.recall import graph_export
+from silica.kernel.graph import graph_export
 
 
 class _FakeStore:

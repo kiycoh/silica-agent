@@ -41,7 +41,7 @@ _WEB_PORT = 8765  # silica.ui.web.server.serve's default
 
 def ledger_path() -> Path:
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.base.manifest import in_write_dir
 
     return Path(CONFIG.vault_path or ".") / in_write_dir("zotero.jsonl")
 
@@ -244,7 +244,7 @@ def _vectors(items: list[dict], embed) -> dict[str, list[float]]:
 
 
 def _default_embed(texts: list[str]) -> list[list[float]]:
-    from silica.agent.providers import get_embedder
+    from silica.model.providers import get_embedder
     from silica.config import CONFIG
 
     return get_embedder(CONFIG).embed(texts)
@@ -310,8 +310,8 @@ def group_plan(nodes: list[dict], edges: list[dict], zones: dict[int, str]) -> d
 
 def compute_group_plan() -> dict[str, list[str]]:
     """The plan for this vault now: graph, zones, papers."""
-    from silica.kernel.recall.citations import paper_layer
-    from silica.kernel.recall.graph_export import (
+    from silica.sources.citations import paper_layer
+    from silica.kernel.graph.graph_export import (
         build_graph_data,
         detect_semantic_partition,
         knn_edges,
@@ -325,7 +325,7 @@ def compute_group_plan() -> dict[str, list[str]]:
 
 def _groups_root(zot: Zotero, run_id: str) -> str:
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import get_active_manifest, set_zotero
+    from silica.kernel.base.manifest import get_active_manifest, set_zotero
 
     link = get_active_manifest().zotero
     # A vault with no link used to create "Silica groups" in whatever library
@@ -430,7 +430,7 @@ def unlink(zot: Zotero) -> dict:
     """Remove from Zotero what Silica owns: its tagged notes and its groups.
     Items are never touched."""
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import get_active_manifest, set_zotero
+    from silica.kernel.base.manifest import get_active_manifest, set_zotero
 
     notes = [i for i in zot.paged("/items", tag=TAG) if i["data"].get("itemType") == "note"]
     for note in notes:

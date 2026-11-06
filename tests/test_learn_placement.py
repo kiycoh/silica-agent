@@ -28,7 +28,7 @@ def two(step_vault):
 
 
 def test_two_candidates_a_step_deepest_first(two, monkeypatch):
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     # the second note of each step needs the first: the deepest is the second
     monkeypatch.setattr(learner, "prerequisites_map", lambda: {

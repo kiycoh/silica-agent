@@ -1,7 +1,7 @@
 """Tests for the DeferredStore and the VALIDATE partial-write gate."""
 import pytest
 
-from silica.kernel.recall.deferred import DeferredStore
+from silica.kernel.write.deferred import DeferredStore
 
 
 # ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ def test_put_without_payloads_stores_empty_list(store):
 def test_defer_ops_persists_current_chunk_payload(tmp_path, monkeypatch):
     """The FSM funnel (_defer_ops) snapshots the current chunk's payload into
     the bundle, so every defer site gets retry-time grounding parity for free."""
-    from silica.kernel.recall import deferred
+    from silica.kernel.write import deferred
     from silica.router.orchestrator import InjectorFSM
 
     monkeypatch.setattr(deferred, "_store_dir", lambda: tmp_path / "deferred")
@@ -142,7 +142,7 @@ def test_deferred_sweeps_expired_on_open(tmp_path):
     """A bundle older than the TTL is unlinked when the store re-opens; a fresh
     one (and one with no timestamp) survives."""
     import orjson, time
-    from silica.kernel.recall.deferred import DeferredStore, _DEFERRED_TTL_SECONDS
+    from silica.kernel.write.deferred import DeferredStore, _DEFERRED_TTL_SECONDS
 
     d = tmp_path / "deferred"
     store = DeferredStore(path=d)
@@ -207,7 +207,7 @@ def test_validate_returns_validated_and_rejected_lists(tmp_path):
 
 def test_deferred_store_populated_on_partial_rejection(tmp_path):
     """When some ops are rejected, deferred store must receive the rejected ops."""
-    from silica.kernel.recall.deferred import DeferredStore
+    from silica.kernel.write.deferred import DeferredStore
 
     store = DeferredStore(path=tmp_path / "deferred")
 
@@ -243,7 +243,7 @@ def test_defer_ops_accumulates_across_phases(tmp_path, monkeypatch):
     """_defer_ops must MERGE into the bundle, not overwrite it: COLLISION,
     VALIDATE and WRITE all key on the same source content_hash, so a later
     phase (or chunk) deferring ops must not clobber an earlier phase's ops."""
-    import silica.kernel.recall.deferred as deferred_mod
+    from silica.kernel.write import deferred as deferred_mod
     from silica.router.orchestrator import InjectorFSM
 
     # conftest's _isolate_deferred_store already points the default store at tmp.
@@ -273,7 +273,7 @@ def test_defer_ops_accumulates_across_phases(tmp_path, monkeypatch):
 
 def test_defer_ops_skips_without_content_hash(tmp_path, monkeypatch):
     """No content_hash → nothing persisted, returns False (no crash)."""
-    import silica.kernel.recall.deferred as deferred_mod
+    from silica.kernel.write import deferred as deferred_mod
     from silica.router.orchestrator import InjectorFSM
 
     fsm = InjectorFSM("Inbox/lez.md", "TargetDir")
@@ -302,7 +302,7 @@ def test_defer_ops_drops_a_bundle_aimed_at_a_different_target(tmp_path, monkeypa
     book left 41 ops pointing into the inbox, and the successful re-run reported
     "34 new, 42 deferred" — reading, to the user, as half the book dropped. The
     stale ops are unretryable too: their paths are the ones VALIDATE rejects."""
-    from silica.kernel.recall import deferred
+    from silica.kernel.write import deferred
     from silica.router.orchestrator import InjectorFSM
 
     monkeypatch.setattr(deferred, "_store_dir", lambda: tmp_path / "deferred")
@@ -327,7 +327,7 @@ def test_defer_ops_drops_a_bundle_aimed_at_a_different_target(tmp_path, monkeypa
 
 
 def test_defer_ops_still_accumulates_within_one_target(tmp_path, monkeypatch):
-    from silica.kernel.recall import deferred
+    from silica.kernel.write import deferred
     from silica.router.orchestrator import InjectorFSM
 
     monkeypatch.setattr(deferred, "_store_dir", lambda: tmp_path / "deferred")
@@ -382,7 +382,7 @@ def test_retry_over_a_bundle_with_no_ops_clears_it(tmp_path, monkeypatch):
 
     store = DeferredStore(path=tmp_path / "deferred")
     (tmp_path / "deferred" / "legacy.json").write_bytes(_residue_only_bundle("legacy"))
-    monkeypatch.setattr("silica.kernel.recall.deferred.get_deferred_store", lambda: store)
+    monkeypatch.setattr("silica.kernel.write.deferred.get_deferred_store", lambda: store)
 
     res = silica_deferred_retry("legacy")
 

@@ -35,7 +35,7 @@ from silica.kernel.recall.paths import (
     SILICAIGNORE_REL,
     looks_like_code,
 )
-from silica.kernel.vault_manifest import MANIFEST_REL
+from silica.kernel.base.manifest import MANIFEST_REL
 
 logger = logging.getLogger(__name__)
 

@@ -14,7 +14,7 @@ from silica.kernel.write.contested import (
     reliability_tier,
     trust,
 )
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 
 
 # --- lifecycle ---------------------------------------------------------------

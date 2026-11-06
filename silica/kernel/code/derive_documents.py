@@ -27,7 +27,8 @@ from pathlib import Path
 
 from silica.kernel.code import codeast, codedocs, gitstate
 from silica.kernel.recall import paths
-from silica.kernel.write import frontmatter, templates
+from silica.kernel.base import frontmatter
+from silica.kernel.write import templates
 
 
 @dataclass(frozen=True)
@@ -39,7 +40,7 @@ class Proposal:
 
 
 _ADR_NOTE_RE = re.compile(r"^(\d{4})-")
-# Twin of `silica.kernel.link.ast.ADR_REF_RE`, spelled again here because the
+# Twin of `silica.kernel.base.markdown.ADR_REF_RE`, spelled again here because the
 # code lane may not import the link lane (import-linter: "text and code lanes
 # sit low"). tests/test_derive_documents.py pins the two patterns equal.
 ADR_REF_RE = re.compile(r"\bADR-(\d{4})\b")

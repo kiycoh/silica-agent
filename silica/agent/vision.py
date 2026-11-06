@@ -15,7 +15,7 @@ def ask_chat_model(messages: list[dict], max_tokens: int = 700, cut: str = "") -
     The name predates the vision role: unset, it is still the chat model.
     `cut` is appended when the answer stopped at `max_tokens`, so a page read
     in part does not pass for the whole of it."""
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
     from silica.config import CONFIG
     # temperature 0 skips ADR-0080's card sampling: the same bytes should give
     # the same words. reasoning=False because a thinking pass spends the budget

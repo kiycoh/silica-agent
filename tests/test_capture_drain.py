@@ -10,7 +10,7 @@ from silica.config import CONFIG
 
 @pytest.fixture(autouse=True)
 def _reset_manifest_cache():
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
     reset_manifest_cache()
     yield
     reset_manifest_cache()

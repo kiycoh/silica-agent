@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import math
 
-from silica.kernel.recall import daily_layer, embed, graph_export
+from silica.kernel.graph import daily_layer, graph_export
+from silica.kernel.recall import embed
 from tests.test_daily_layer import _Store
 from tests.test_zotero_graph_frame import STATIC, _pure, needs_node
 

@@ -289,7 +289,7 @@ def cover(nodes: list[str], pairs: set[tuple[str, str]], titles: dict[str, str])
     link is not drawn and belongs to no area."""
     import networkx as nx
 
-    from silica.kernel.recall.graph_export import hub_of, louvain_sorted
+    from silica.kernel.graph.graph_export import hub_of, louvain_sorted
 
     g = nx.Graph()
     # sorted: Louvain and the layout both follow insertion order, and the view's preview and the
@@ -354,8 +354,8 @@ def build(slug: str, vault: Path | None = None) -> dict:
     relay when Private (ADR-0151 points 3, 9). Returns what went out, for
     the view's line after Publish."""
     from silica.driver import DRIVER
-    from silica.kernel.recall.mindmap import answer_resolver, note_resolver
-    from silica.kernel.write import frontmatter as fm
+    from silica.kernel.graph.mindmap import answer_resolver, note_resolver
+    from silica.kernel.base import frontmatter as fm
     from silica.ui.web.server import _find_asset, _linkify, _strip_ofm_meta
 
     vault = vault or publish._vault()
@@ -735,7 +735,7 @@ def set_listed(slug: str, listed: bool, vault: Path | None = None) -> None:
 
 
 def _language() -> str:
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
 
     return get_active_manifest().conventions.language or ""
 

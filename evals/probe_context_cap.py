@@ -210,9 +210,9 @@ def run_one(arm: str, case: str, model: str, max_usd: float, out_json: Path) -> 
     from evals.probe_prompt_ab import _calls_from_narration, _stub_egress
     from evals.probe_study_plan_replay import Ctx, score_v2
     from silica.agent import loop as _loop
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
-    from silica.agent.llm import _cached_tokens
+    from silica.model.llm import _cached_tokens
     from silica.agent.loop import run_agent
     from silica.cli import seed_messages
     from silica.config import CONFIG

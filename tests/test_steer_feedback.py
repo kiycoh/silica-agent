@@ -81,7 +81,7 @@ def test_render_includes_ungrounded_spans_as_advisory():
 
 def test_distiller_prompt_carries_contrastive_examples():
     from silica.kernel.prep_delegation import render_prompt
-    with patch("silica.kernel.vault_manifest.get_active_manifest") as mm:
+    with patch("silica.kernel.base.manifest.get_active_manifest") as mm:
         mm.return_value.conventions.language = "English"
         mm.return_value.conventions.max_tags = 3
         prompt = render_prompt(target="TargetDir", hub="Hub")

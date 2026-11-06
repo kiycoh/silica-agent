@@ -631,7 +631,7 @@ def resolve_source(source: str, *, vault: str | None) -> tuple[str, list[str]]:
     one source carries it: `candidates` lists every key of that name, and more
     than one means the caller must ask which.
     """
-    from silica.kernel.vault_manifest import source_key
+    from silica.kernel.base.manifest import source_key
     from silica.kernel.write.provenance import source_keys
 
     keys = source_keys(vault_path=vault)

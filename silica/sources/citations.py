@@ -107,7 +107,7 @@ def paper_layer(nodes: list[dict]) -> tuple[list[dict], list[dict]]:
     """
     from silica.config import CONFIG
     from silica.kernel.recall.paths import is_source_leaf
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     root = Path(CONFIG.vault_path or ".")
     papers: dict[str, tuple[set[str], set[str], str]] = {}
@@ -168,8 +168,8 @@ def _paper_leaves(vault: str | Path | None = None) -> dict[str, tuple[dict, set[
     paper leaf, read through the mtime cache."""
     from silica.config import CONFIG
     from silica.kernel.recall.paths import SOURCES_DIR
-    from silica.kernel.vault_manifest import load_manifest
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base.manifest import load_manifest
+    from silica.kernel.base import frontmatter
 
     vault = Path(vault or CONFIG.vault_path or ".")
     rel_root = Path(load_manifest(vault).write_dir or "") / SOURCES_DIR

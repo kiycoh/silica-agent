@@ -13,7 +13,7 @@ from __future__ import annotations
 import orjson
 import pytest
 
-from silica.kernel.recall import graph_export as ge
+from silica.kernel.graph import graph_export as ge
 
 
 def _nodes(*ids):
@@ -190,7 +190,7 @@ def test_note_with_no_similar_edge_is_not_a_zone(monkeypatch):
     The regression that made the viewer draw 737 labelled hulls on an 886-note
     vault whose embed index held 135 notes (2026-08-24).
     """
-    from silica.kernel.recall import graph_export as ge
+    from silica.kernel.graph import graph_export as ge
 
     # 20 notes, 18 of them embedded: 90% coverage, so the layer is drawn (the
     # coverage gate is a separate rule, tested below) and the two vectorless
@@ -221,7 +221,7 @@ def _ring(ids):
 
 
 def test_semantic_coverage_counts_notes_a_similar_edge_reaches():
-    from silica.kernel.recall.graph_export import semantic_coverage
+    from silica.kernel.graph.graph_export import semantic_coverage
 
     nodes = [{"id": f"n{i}.md"} for i in range(5)] + [{"id": "g.md", "type": "ghost"}]
     edges = [_sim("n0.md", "n1.md"), {"from": "n2.md", "to": "n3.md", "type": "EXTRACTED"}]
@@ -236,7 +236,7 @@ def test_thin_embed_index_withholds_the_zones(monkeypatch):
     15% coverage agreed with the full partition at ARI 0.363 on an 887-note
     vault (2026-08-24), while looking exactly as confident.
     """
-    from silica.kernel.recall import graph_export as ge
+    from silica.kernel.graph import graph_export as ge
 
     monkeypatch.setattr(ge, "load_semantic_snapshot", lambda: ({}, 0))
     monkeypatch.setattr(ge, "save_semantic_snapshot", lambda *a, **k: None)

@@ -27,7 +27,7 @@ def _vault(tmp_path, monkeypatch):
     (v / "Boats.md").write_text("# Boats\n\nsailing boat harbour\n", encoding="utf-8")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(v))
     monkeypatch.setattr("silica.driver._driver", None)
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _Emb())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
     return v
 
 

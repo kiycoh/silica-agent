@@ -208,7 +208,7 @@ def _on(monkeypatch, tmp_path, model: _Model, boxes: list[tuple] | None = None) 
         assert role == "router"
         return model
 
-    monkeypatch.setattr("silica.agent.providers.get_provider", provider)
+    monkeypatch.setattr("silica.model.providers.get_provider", provider)
     return session
 
 

@@ -150,7 +150,7 @@ def _first_gold_rank(gold: set[int], ranked: list[int]) -> int | None:
 
 
 def _embed_queries(texts: list[str]) -> list[list[float]] | None:
-    from silica.agent.providers import get_embedder
+    from silica.model.providers import get_embedder
     from silica.config import CONFIG
 
     emb = get_embedder(CONFIG)
@@ -183,7 +183,7 @@ def probe(
     When a reranker is configured (CONFIG.rerank_*), the cross-encoder reorders
     the fused first-stage top-k (reorder-only + granularity gate live in
     rerank_related; membership always belongs to the first stage)."""
-    from silica.agent.providers import get_reranker
+    from silica.model.providers import get_reranker
     from silica.config import CONFIG
     from silica.kernel.recall.cooccurrence import get_cooccur_store
     from silica.kernel.recall.embed import get_store

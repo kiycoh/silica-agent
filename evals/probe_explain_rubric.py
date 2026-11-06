@@ -160,7 +160,7 @@ def sample_notes(vault: Path, store, n: int, seed: str) -> list[dict]:
     long thin tail would leave that correlation undefined at the top end, and an
     undefined correlation passes the gate for the wrong reason.
     """
-    from silica.kernel.link.health import iter_notes, wikilink_graph
+    from silica.kernel.report.health import iter_notes, wikilink_graph
 
     adj = wikilink_graph(vault, store)
     rows: list[dict] = []
@@ -215,7 +215,7 @@ def score_batch(notes: list[dict], model: str, *, title_only: bool = False) -> d
     zero is a real score on this rubric ("no evidence"), so faking one would
     push every gate the wrong way and look like a finding.
     """
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.kernel.text.sanitize import parse_json
 
     blocks = "\n\n".join(

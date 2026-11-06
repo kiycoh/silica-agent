@@ -135,7 +135,7 @@ def test_a_second_upload_of_a_name_is_numbered_not_overwritten(client):
 
 
 def test_an_import_lands_in_the_write_folder_when_writes_are_confined(client, monkeypatch):
-    from silica.kernel import vault_manifest
+    from silica.kernel.base import manifest as vault_manifest
 
     tc, _ = client
     monkeypatch.setattr(vault_manifest, "active_write_dir", lambda: "docs/silica")

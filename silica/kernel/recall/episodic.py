@@ -721,7 +721,7 @@ def capture_from_distill(result: dict, *, run_id: str, seen: str,
             return
         embedder = None
         try:
-            from silica.agent.providers import get_embedder
+            from silica.model.providers import get_embedder
             from silica.config import CONFIG
 
             embedder = get_embedder(CONFIG)
@@ -732,7 +732,7 @@ def capture_from_distill(result: dict, *, run_id: str, seen: str,
         # no enforcement.
         schema = None
         try:
-            from silica.kernel.vault_manifest import load_manifest
+            from silica.kernel.base.manifest import load_manifest
 
             schema = load_manifest(episodic_home()).conventions.episodic_keys
         except Exception:

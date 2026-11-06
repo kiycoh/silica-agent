@@ -3,7 +3,7 @@ can't emit parallel tool_calls cram N objects into one arguments string)."""
 
 import json
 
-from silica.agent.llm import expand_tool_calls
+from silica.model.llm import expand_tool_calls
 
 
 def test_concatenated_objects_fan_out_to_separate_calls():

@@ -4,7 +4,7 @@ person, and a button or slash-command turn takes their earlier messages' languag
 or the notes'."""
 from __future__ import annotations
 
-from silica.kernel.vault_manifest import load_manifest
+from silica.kernel.base.manifest import load_manifest
 from silica.prompts import SYSTEM_PROMPT, system_prompt
 
 

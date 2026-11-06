@@ -65,7 +65,7 @@ def _index_stores_sig(with_embeddings: bool, with_cooccurrence: bool,
         from silica.kernel.recall.cooccurrence import _index_path as _cooccur_path
         files.append(_cooccur_path())
     if analytics:
-        from silica.kernel.report.quiz import log_path
+        from silica.kernel.learn.quiz import log_path
         files.append(log_path())
     sig: list[tuple[int, int] | None] = []
     for p in files:
@@ -125,7 +125,7 @@ def compute_report(
     Pass _nodes_edges_override for testing without a live driver.
     """
     import networkx as nx
-    from silica.kernel.recall.graph_export import (
+    from silica.kernel.graph.graph_export import (
         NATIVE_TYPES,
         area_bridges,
         area_hubs,
@@ -215,8 +215,8 @@ def compute_report(
         try:
             from silica.kernel.write import contested as contested_kernel
             from silica.kernel.link import ofm
-            from silica.kernel.write import frontmatter
-            from silica.kernel.report.learner import _created_and_ai
+            from silica.kernel.base import frontmatter
+            from silica.kernel.learn.learner import _created_and_ai
             from silica.driver import DRIVER
 
             tiers: Counter = Counter()
@@ -347,7 +347,7 @@ def compute_report(
     if analytics:
         quiz_stats = _quiz_override
         if quiz_stats is None:
-            from silica.kernel.report import quiz as _quiz
+            from silica.kernel.learn import quiz as _quiz
 
             try:
                 quiz_stats = _quiz.stats()
@@ -355,7 +355,7 @@ def compute_report(
                 logger.warning("graph_report: quiz log unreadable (%s)", exc)
                 quiz_stats = {}
         if mtimes or quiz_stats:
-            from silica.kernel.report.quiz import key as _quiz_key
+            from silica.kernel.learn.quiz import key as _quiz_key
 
             now_ts = datetime.now(timezone.utc).timestamp()
             for nid in real_ids:
@@ -429,7 +429,7 @@ def compute_report(
     # structural core carries them (nucleate's hub choice can read coreness);
     # surprise needs betweenness and the ranked rows are analytics-only.
     # ------------------------------------------------------------------
-    from silica.kernel.recall import signals as _signals
+    from silica.kernel.graph import signals as _signals
 
     core_map: dict[str, int] = {}
     articulation_set: set[str] = set()
@@ -792,7 +792,7 @@ def _discourse_state(G_und, clusters: list[ClusterStat]) -> str:
     the shared discourse_shape rule (single source, also used by the graph HUD)."""
     import networkx as nx
 
-    from silica.kernel.recall.graph_export import discourse_shape
+    from silica.kernel.graph.graph_export import discourse_shape
 
     giant = max((len(c) for c in nx.connected_components(G_und)), default=0)
     return discourse_shape(G_und.number_of_nodes(), giant, [c.size for c in clusters])

@@ -12,8 +12,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from silica.agent import providers as _providers
-from silica.agent.providers import _model_limits_memo, model_limits
+from silica.model import providers as _providers
+from silica.model.providers import _model_limits_memo, model_limits
 
 # Taken at import, before conftest's autouse stub replaces it for every test.
 _REAL_PROPS_WINDOW = _providers._llama_props_window
@@ -59,22 +59,22 @@ OPENROUTER_MODELS = {
 
 
 class TestLMStudio:
-    @patch("silica.agent.providers.httpx.get")
+    @patch("silica.model.providers.httpx.get")
     def test_loaded_context_wins_over_max(self, mock_get):
         mock_get.return_value = _http_response(LMSTUDIO_MODELS)
         assert model_limits("lmstudio", "qwen3-8b") == (8192, 0)
 
-    @patch("silica.agent.providers.httpx.get")
+    @patch("silica.model.providers.httpx.get")
     def test_falls_back_to_max_context_when_not_loaded(self, mock_get):
         mock_get.return_value = _http_response(LMSTUDIO_MODELS)
         assert model_limits("lmstudio", "other-model") == (4096, 0)
 
-    @patch("silica.agent.providers.httpx.get")
+    @patch("silica.model.providers.httpx.get")
     def test_strips_lmstudio_prefix(self, mock_get):
         mock_get.return_value = _http_response(LMSTUDIO_MODELS)
         assert model_limits("lmstudio", "lmstudio/qwen3-8b") == (8192, 0)
 
-    @patch("silica.agent.providers.httpx.get")
+    @patch("silica.model.providers.httpx.get")
     def test_queries_rest_api_not_openai_compat(self, mock_get):
         mock_get.return_value = _http_response(LMSTUDIO_MODELS)
         model_limits("lmstudio", "qwen3-8b")
@@ -103,59 +103,59 @@ class TestOllama:
         # A developer with OLLAMA_NUM_CTX exported must not shift these assertions.
         monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
 
-    @patch("silica.agent.providers.httpx.post")
+    @patch("silica.model.providers.httpx.post")
     def test_pinned_window_wins_below_trained_max(self, mock_post):
         mock_post.return_value = _http_response(OLLAMA_WIDE)
         assert model_limits("ollama", "llama3.1") == (16384, 0)
 
-    @patch("silica.agent.providers.httpx.post")
+    @patch("silica.model.providers.httpx.post")
     def test_trained_max_caps_the_pin(self, mock_post):
         mock_post.return_value = _http_response(OLLAMA_NARROW)
         assert model_limits("ollama", "qwen2.5") == (8192, 0)
 
-    @patch("silica.agent.providers.httpx.post")
+    @patch("silica.model.providers.httpx.post")
     def test_env_override_is_honoured(self, mock_post, monkeypatch):
         monkeypatch.setenv("OLLAMA_NUM_CTX", "65536")
         mock_post.return_value = _http_response(OLLAMA_WIDE)
         assert model_limits("ollama", "llama3.1") == (65536, 0)
 
-    @patch("silica.agent.providers.httpx.post")
+    @patch("silica.model.providers.httpx.post")
     def test_strips_ollama_prefix_and_posts_show(self, mock_post):
         mock_post.return_value = _http_response(OLLAMA_WIDE)
         model_limits("ollama", "ollama/llama3.1")
         assert mock_post.call_args.args[0].endswith("/api/show")
         assert mock_post.call_args.kwargs["json"] == {"model": "llama3.1"}
 
-    @patch("silica.agent.providers.httpx.post")
+    @patch("silica.model.providers.httpx.post")
     def test_missing_model_info_returns_zero(self, mock_post):
         mock_post.return_value = _http_response({"parameters": ""})
         assert model_limits("ollama", "ghost") == (0, 0)
 
 
 class TestOpenRouter:
-    @patch("silica.agent.providers.httpx.get")
+    @patch("silica.model.providers.httpx.get")
     def test_context_window_and_output_cap(self, mock_get):
         mock_get.return_value = _http_response(OPENROUTER_MODELS)
         assert model_limits("openrouter", "qwen/qwen3-8b") == (131072, 8192)
 
-    @patch("silica.agent.providers.httpx.get")
+    @patch("silica.model.providers.httpx.get")
     def test_strips_openrouter_prefix(self, mock_get):
         mock_get.return_value = _http_response(OPENROUTER_MODELS)
         assert model_limits("openrouter", "openrouter/qwen/qwen3-8b") == (131072, 8192)
 
-    @patch("silica.agent.providers.httpx.get")
+    @patch("silica.model.providers.httpx.get")
     def test_null_top_provider(self, mock_get):
         mock_get.return_value = _http_response(OPENROUTER_MODELS)
         assert model_limits("openrouter", "foo/bar") == (8192, 0)
 
 
 class TestFallbacks:
-    @patch("silica.agent.providers.httpx.get")
+    @patch("silica.model.providers.httpx.get")
     def test_unknown_model_returns_zero(self, mock_get):
         mock_get.return_value = _http_response(LMSTUDIO_MODELS)
         assert model_limits("lmstudio", "not-in-catalog") == (0, 0)
 
-    @patch("silica.agent.providers.httpx.get")
+    @patch("silica.model.providers.httpx.get")
     def test_http_error_returns_zero(self, mock_get):
         mock_get.side_effect = ConnectionError("refused")
         assert model_limits("lmstudio", "qwen3-8b") == (0, 0)
@@ -163,7 +163,7 @@ class TestFallbacks:
     def test_unknown_provider_returns_zero(self):
         assert model_limits("some-future-preset", "m") == (0, 0)
 
-    @patch("silica.agent.providers.httpx.get")
+    @patch("silica.model.providers.httpx.get")
     def test_result_is_cached_per_process(self, mock_get):
         mock_get.return_value = _http_response(LMSTUDIO_MODELS)
         model_limits("lmstudio", "qwen3-8b")
@@ -174,7 +174,7 @@ class TestFallbacks:
 class TestCliContextBudget:
     """_resolve_context_budget() sizes the REPL meter to the real window."""
 
-    @patch("silica.agent.providers.model_limits", return_value=(131072, 0))
+    @patch("silica.model.providers.model_limits", return_value=(131072, 0))
     def test_sets_budget_from_provider(self, _limits, monkeypatch):
         from silica.cli import _resolve_context_budget
         from silica.config import CONFIG
@@ -185,7 +185,7 @@ class TestCliContextBudget:
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 131072
 
-    @patch("silica.agent.providers.model_limits", return_value=(131072, 0))
+    @patch("silica.model.providers.model_limits", return_value=(131072, 0))
     def test_env_pin_wins_for_local_provider(self, _limits, monkeypatch):
         from silica.cli import _resolve_context_budget
         from silica.config import CONFIG
@@ -197,7 +197,7 @@ class TestCliContextBudget:
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 42000
 
-    @patch("silica.agent.providers.model_limits", return_value=(1048576, 0))
+    @patch("silica.model.providers.model_limits", return_value=(1048576, 0))
     def test_env_pin_wins_on_openrouter_off_hosted(self, _limits, monkeypatch):
         # Regression 2026-10-27: a laptop's 65536 ran DeepSeek V4 Flash at 1M.
         from silica.cli import _resolve_context_budget
@@ -211,7 +211,7 @@ class TestCliContextBudget:
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 65536
 
-    @patch("silica.agent.providers.model_limits", return_value=(131072, 0))
+    @patch("silica.model.providers.model_limits", return_value=(131072, 0))
     def test_env_pin_above_the_openrouter_window_is_cut_to_it(self, _limits, monkeypatch):
         from silica.cli import _resolve_context_budget
         from silica.config import CONFIG
@@ -223,7 +223,7 @@ class TestCliContextBudget:
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 131072
 
-    @patch("silica.agent.providers.model_limits", return_value=(1000000, 0))
+    @patch("silica.model.providers.model_limits", return_value=(1000000, 0))
     def test_env_pin_wins_on_openrouter_when_hosted(self, _limits, monkeypatch):
         # The host's cap is a price decision, not a guess at the window: past
         # 32k prompt tokens the pilot's endpoint bills 3.3x
@@ -239,7 +239,7 @@ class TestCliContextBudget:
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 32000
 
-    @patch("silica.agent.providers.model_limits", return_value=(0, 0))
+    @patch("silica.model.providers.model_limits", return_value=(0, 0))
     def test_unknown_window_keeps_default(self, _limits, monkeypatch):
         from silica.cli import _resolve_context_budget
         from silica.config import CONFIG
@@ -256,7 +256,7 @@ class TestLlamaCpp:
     Before it, (0, 0) sent the distiller's budget to the 262144 fallback and
     left the bodies pool blind to a 32k unified KV (2026-10-12)."""
 
-    @patch("silica.agent.providers.httpx.get")
+    @patch("silica.model.providers.httpx.get")
     def test_props_window(self, mock_get, monkeypatch):
         from silica.config import CONFIG
         monkeypatch.setattr(_providers, "_llama_props_window", _REAL_PROPS_WINDOW)
@@ -266,7 +266,7 @@ class TestLlamaCpp:
         assert model_limits("custom", "custom/qwen3.5-4b") == (32768, 0)
         assert mock_get.call_args.args[0] == "http://127.0.0.1:1237/props"
 
-    @patch("silica.agent.providers.httpx.get", side_effect=ConnectionError("not llama.cpp"))
+    @patch("silica.model.providers.httpx.get", side_effect=ConnectionError("not llama.cpp"))
     def test_no_props_is_unknown(self, _get, monkeypatch):
         from silica.config import CONFIG
         monkeypatch.setattr(_providers, "_llama_props_window", _REAL_PROPS_WINDOW)

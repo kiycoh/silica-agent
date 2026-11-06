@@ -11,7 +11,7 @@ import types
 from pathlib import Path
 
 from silica.kernel.progress import RunManifestEntry
-from silica.kernel.recall.run_log import DEFAULT_LOG_FILENAME
+from silica.kernel.write.run_log import DEFAULT_LOG_FILENAME
 from silica.router.states import finalize
 
 
@@ -50,7 +50,7 @@ def test_writes_projected_new_and_patch_counts(tmp_vault):
 
 def test_includes_deferred_count_from_deferred_store(tmp_vault, monkeypatch, tmp_path):
     from silica.config import CONFIG
-    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.deferred import get_deferred_store
 
     # conftest isolates the default store; populate it through the public seam.
     get_deferred_store().put(
@@ -128,7 +128,7 @@ def test_never_raises_on_broken_fsm(tmp_vault):
 
 
 def test_files_summary_counts_extractive_rejections(tmp_vault):
-    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.deferred import get_deferred_store
 
     get_deferred_store().put(
         content_hash="hash0",
@@ -155,7 +155,7 @@ def test_files_summary_counts_extractive_rejections(tmp_vault):
 
 
 def test_files_summary_omits_extractive_key_when_none(tmp_vault):
-    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.deferred import get_deferred_store
 
     get_deferred_store().put(
         content_hash="hash0",

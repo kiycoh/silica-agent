@@ -184,7 +184,7 @@ def test_error_text_is_scrubbed_of_credentials():
 def _run_connector(request, answers, *responses, cancel=None):
     """Run mcp__mail's sub-loop on a scripted model; `answers` answers each
     approval card in order (True run, False deny, None leave unanswered)."""
-    from silica.agent.events import ApprovalRequestEvent
+    from silica.obs.events import ApprovalRequestEvent
     from silica.tools import TOOLS
 
     cards = []
@@ -325,7 +325,7 @@ def test_the_sub_loop_stops_at_eight_steps():
 
 
 def test_each_card_is_narrated_for_the_approvals_per_use_gate(calls_file, monkeypatch):
-    from silica.agent import narration
+    from silica.obs import narration
     from silica.connectors import mcp_tools
 
     beats = []
@@ -484,7 +484,7 @@ def test_a_declined_call_tells_the_chat_not_to_ask_again(calls_file):
 
 
 def test_a_declined_call_reads_as_not_run_on_the_surface(calls_file):
-    from silica.agent.events import ApprovalRequestEvent, ToolCompleteEvent, ToolErrorEvent
+    from silica.obs.events import ApprovalRequestEvent, ToolCompleteEvent, ToolErrorEvent
     from silica.connectors import mcp_tools
     from silica.tools import TOOLS
 

@@ -87,7 +87,7 @@ def test_refresh_builds_real_queryable_contributions(vault):
 
 def test_refresh_works_with_embedder_down(vault, monkeypatch):
     """The stable leg: bulk-seed must succeed even when the embedder is down."""
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     def _boom(*a, **k):
         raise RuntimeError("LM Studio not running")

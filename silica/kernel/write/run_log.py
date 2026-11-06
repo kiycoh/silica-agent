@@ -36,7 +36,7 @@ def _log_path(vault: str, filename: str) -> Path:
     dropped in the user's root, beside their own README. Reads fall back to a
     root journal written before this: legacy stays readable forever.
     """
-    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.base.manifest import in_write_dir
 
     root = Path(vault)
     try:

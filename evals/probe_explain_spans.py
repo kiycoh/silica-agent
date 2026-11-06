@@ -222,8 +222,8 @@ def load_bodies(vault: Path) -> dict[str, dict]:
     the suffix, and by lowercased title, because a wikilink cites the title
     while retrieval returns a path.
     """
-    from silica.kernel.write import frontmatter
-    from silica.kernel.link.health import iter_notes
+    from silica.kernel.base import frontmatter
+    from silica.kernel.report.health import iter_notes
 
     out: dict[str, dict] = {}
     for p in iter_notes(vault):
@@ -280,7 +280,7 @@ def _blocks(pack: list[dict]) -> str:
 
 
 def expose(concept: str, pack: list[dict], model: str) -> str:
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
 
     resp = call_llm(
         model=model,
@@ -300,7 +300,7 @@ def anchor(explanation: str, pack: list[dict], model: str) -> list[dict]:
     empty span: a decline is a real answer on this instrument, so faking one
     would push H1 towards a harness failure and look like a finding.
     """
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.kernel.text.sanitize import parse_json
 
     resp = call_llm(

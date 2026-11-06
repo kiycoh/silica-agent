@@ -3,14 +3,14 @@
 
 """Reranker A/B over the fused ranking (opt-in, informational).
 
-The gated fusion probe itself lives in ``silica.kernel.link.health.fusion_probe``
+The gated fusion probe itself lives in ``silica.kernel.report.health.fusion_probe``
 (also served by the silica_health tool); the runner calls it directly. This
 module keeps only the reranker A/B — it depends on an HTTP provider, so it is
 neither deterministic nor free: never gated, never in the baseline.
 """
 from __future__ import annotations
 
-from silica.kernel.link.health import K, eligible_pairs, wikilink_graph
+from silica.kernel.report.health import K, eligible_pairs, wikilink_graph
 
 
 def _pair_ranks(eligible: list[tuple[str, str]],

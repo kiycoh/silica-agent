@@ -292,7 +292,7 @@ def test_sweep_save_does_not_clobber_the_other_process(index_path, monkeypatch):
         read_note=lambda ref: SimpleNamespace(content="body"),
         mtime_of=lambda ref: 1.0,
     ))
-    monkeypatch.setattr("silica.agent.providers.get_embedder",
+    monkeypatch.setattr("silica.model.providers.get_embedder",
                         lambda cfg: SimpleNamespace(model="fake", embed=lambda t: [[1.0, 0, 0]] * len(t)))
     stats = sync.sweep(force=True)
 

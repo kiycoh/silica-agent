@@ -108,8 +108,8 @@ class Ctx:
 
     def __init__(self) -> None:
         from silica.driver import DRIVER
-        from silica.kernel.recall.mindmap import note_resolver
-        from silica.kernel.write import frontmatter
+        from silica.kernel.graph.mindmap import note_resolver
+        from silica.kernel.base import frontmatter
         self.resolve = note_resolver()
         self._driver = DRIVER
         self._fm = frontmatter
@@ -301,8 +301,8 @@ def _score(rx: str, want, text: str) -> dict:
 
 def run_variant(name: str, base: list[dict], seed: list[dict], ctx: Ctx, model: str,
                 tools, payload_path: Path | None = None) -> dict:
-    from silica.agent.llm import call_llm
-    from silica.agent.providers import _to_wire
+    from silica.model.llm import call_llm
+    from silica.model.providers import _to_wire
     msgs = seed + apply_variant(name, base, ctx)
     if payload_path is not None:
         # The exact bytes the provider sees: 63014 prompt tokens equal to the

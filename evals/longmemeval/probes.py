@@ -379,7 +379,7 @@ def main() -> None:
     if args.embed_tau:
         embedder = None
         try:
-            from silica.agent.providers import get_embedder
+            from silica.model.providers import get_embedder
             from silica.config import CONFIG
 
             embedder = get_embedder(CONFIG)

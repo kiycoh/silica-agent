@@ -645,7 +645,7 @@ def test_collision_high_similarity_routes_to_patch():
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.router.orchestrator.DRIVER") as mock_driver, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
-         patch("silica.agent.providers.get_embedder", return_value=mock_embedder):
+         patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
         mock_driver.read_note.return_value = MagicMock()  # graph confirms node exists
@@ -675,7 +675,7 @@ def test_collision_low_similarity_keeps_for_distillation():
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
-         patch("silica.agent.providers.get_embedder", return_value=mock_embedder):
+         patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
 
@@ -724,7 +724,7 @@ def test_collision_embeds_concept_with_excerpt():
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
-         patch("silica.agent.providers.get_embedder", return_value=mock_embedder):
+         patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
 
@@ -765,8 +765,8 @@ def test_collision_high_score_name_mismatch_deferred_to_judge():
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
-         patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
-         patch("silica.kernel.recall.deferred.get_deferred_store", return_value=mock_deferred):
+         patch("silica.model.providers.get_embedder", return_value=mock_embedder), \
+         patch("silica.kernel.write.deferred.get_deferred_store", return_value=mock_deferred):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
         fsm.step()
@@ -803,7 +803,7 @@ def test_collision_high_score_acronym_match_still_patches():
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.router.orchestrator.DRIVER") as mock_driver, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
-         patch("silica.agent.providers.get_embedder", return_value=mock_embedder):
+         patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
         mock_driver.read_note.return_value = MagicMock()
@@ -830,8 +830,8 @@ def test_collision_borderline_deferred():
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
-         patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
-         patch("silica.kernel.recall.deferred.get_deferred_store", return_value=mock_deferred):
+         patch("silica.model.providers.get_embedder", return_value=mock_embedder), \
+         patch("silica.kernel.write.deferred.get_deferred_store", return_value=mock_deferred):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
 
@@ -876,8 +876,8 @@ def test_collision_borderline_defers_rematerializable_op_and_tags_workitem():
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
-         patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
-         patch("silica.kernel.recall.deferred.get_deferred_store", return_value=mock_deferred):
+         patch("silica.model.providers.get_embedder", return_value=mock_embedder), \
+         patch("silica.kernel.write.deferred.get_deferred_store", return_value=mock_deferred):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
 
@@ -912,7 +912,7 @@ def test_collision_does_not_consult_the_fused_facade():
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
-         patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
+         patch("silica.model.providers.get_embedder", return_value=mock_embedder), \
          patch("silica.kernel.recall.relatedness.related_notes_for_query") as facade:
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
@@ -950,7 +950,7 @@ def test_collision_inbox_candidate_is_filtered():
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.router.orchestrator.DRIVER") as mock_driver, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
-         patch("silica.agent.providers.get_embedder", return_value=mock_embedder):
+         patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
         mock_driver.read_note.return_value = MagicMock()  # graph would confirm the node
@@ -989,8 +989,8 @@ def test_collision_empty_index_skips_transparently():
     assert len(concepts_left) == 2
 
 
-@patch("silica.agent.llm.call_llm")
-@patch("silica.agent.providers.get_provider")
+@patch("silica.model.llm.call_llm")
+@patch("silica.model.providers.get_provider")
 def test_worker_read_only(mock_get_provider, mock_call_llm):
     # Test 1: Verify that run_distiller calls call_llm with tools=None (single-shot variant)
     from silica.kernel.prep_delegation import run_distiller
@@ -1114,7 +1114,7 @@ def test_fsm_create_settle_timeout_rollback(
 # WRITE partial-failure containment (Fase A → B)
 # ---------------------------------------------------------------------------
 
-@patch("silica.kernel.recall.deferred.get_deferred_store")
+@patch("silica.kernel.write.deferred.get_deferred_store")
 @patch("silica.kernel.write.atomic_write.commit_note_atomic")
 def test_handle_write_partial_failure_defers_and_continues(
     mock_commit, mock_get_store, tmp_path
@@ -1123,7 +1123,7 @@ def test_handle_write_partial_failure_defers_and_continues(
     FSM continues to HUB_UPDATE (no rollback), has_partial_failure is set."""
     import json
     from silica.kernel.write.atomic_write import NoteCommitResult
-    from silica.kernel.recall.deferred import DeferredStore
+    from silica.kernel.write.deferred import DeferredStore
     from silica.kernel.write.ops import InverseOp, InverseOpKind
 
     ops_data = [
@@ -1481,9 +1481,9 @@ def test_collision_routes_on_the_cosine_best_note_not_the_fused_winner():
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
-         patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
+         patch("silica.model.providers.get_embedder", return_value=mock_embedder), \
          patch("silica.kernel.recall.relatedness.related_notes_for_query", return_value=fused_winner), \
-         patch("silica.kernel.recall.deferred.get_deferred_store", return_value=mock_deferred):
+         patch("silica.kernel.write.deferred.get_deferred_store", return_value=mock_deferred):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.75
         fsm.step()

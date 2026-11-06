@@ -51,7 +51,7 @@ def decide(state: Any, questions: dict[str, dict], *,
         logger.debug("decision disabled (SILICA_DECISION_MODEL unset)")
         return None
     t0 = time.time()
-    from silica.agent.usage_limits import UsageLimited, check
+    from silica.model.usage_limits import UsageLimited, check
 
     try:
         # The same key and the same limits as call_llm (ADR-0102 point 5).
@@ -115,7 +115,7 @@ def _log(model: str, outcome: str, t0: float, detail: str, *,
     calls, so a session trace shows the decision next to what it replaced."""
     duration = round(time.time() - t0, 3)
     logger.info("decision %s %s %.3fs %s", model, outcome, duration, detail)
-    from silica.agent.narration import NARRATOR
+    from silica.obs.narration import NARRATOR
 
     NARRATOR.narrate(
         "call", "done" if outcome == "done" else "failed",

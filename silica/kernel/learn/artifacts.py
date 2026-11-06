@@ -182,7 +182,7 @@ CARD_TITLES_SHOWN = 3    # notes named in the deck's title; a folder's thirty wo
 
 
 def _card_reply(prompt: str, retry: bool = False) -> str:
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.config import CONFIG
 
     msgs = [{"role": "user", "content": prompt}]

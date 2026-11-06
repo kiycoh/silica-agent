@@ -1,6 +1,6 @@
 
 from silica.kernel.recall.cooccurrence import CooccurStore, build_index
-from silica.kernel.recall.vault_map import build_vault_map
+from silica.kernel.report.vault_map import build_vault_map
 
 
 def test_empty_store_returns_none(tmp_path):
@@ -30,7 +30,7 @@ def test_populated_store_yields_map(tmp_path):
 
 def test_inject_appends_system_message(monkeypatch):
     import silica.cli as cli
-    import silica.kernel.recall.vault_map as vm
+    from silica.kernel.report import vault_map as vm
 
     monkeypatch.setattr(vm, "build_vault_map", lambda **k: "## Vault map\n- Note: 3")
     messages = [{"role": "system", "content": "SYSTEM_PROMPT"}]
@@ -44,7 +44,7 @@ def test_inject_appends_system_message(monkeypatch):
 
 def test_inject_noop_when_map_is_none(monkeypatch):
     import silica.cli as cli
-    import silica.kernel.recall.vault_map as vm
+    from silica.kernel.report import vault_map as vm
 
     monkeypatch.setattr(vm, "build_vault_map", lambda **k: None)
     messages = [{"role": "system", "content": "SYSTEM_PROMPT"}]
@@ -56,7 +56,7 @@ def test_inject_noop_when_map_is_none(monkeypatch):
 
 def test_inject_swallows_errors(monkeypatch):
     import silica.cli as cli
-    import silica.kernel.recall.vault_map as vm
+    from silica.kernel.report import vault_map as vm
 
     def _boom(**k):
         raise RuntimeError("index corrotto")
@@ -85,7 +85,7 @@ def _populated_store(tmp_path):
 
 def test_log_tail_appears_when_log_exists(tmp_vault, tmp_path):
     from silica.config import CONFIG
-    from silica.kernel.recall.run_log import append_log_line
+    from silica.kernel.write.run_log import append_log_line
 
     store = _populated_store(tmp_path)
     append_log_line(
@@ -144,7 +144,7 @@ def test_contested_line_absent_when_no_contested_notes(tmp_vault, tmp_path):
 def test_degraded_map_warns_once(tmp_path, monkeypatch, caplog):
     """A block that fails open must not degrade the session self-model in
     silence: DEBUG was the only trace before."""
-    import silica.kernel.recall.vault_map as vm
+    from silica.kernel.report import vault_map as vm
 
     store = CooccurStore(path=tmp_path / "cooccur.json")
     build_index([("ml/embeddings.md", "Embeddings",
@@ -166,7 +166,7 @@ def test_degraded_map_warns_once(tmp_path, monkeypatch, caplog):
 
 
 def test_total_failure_warns_instead_of_looking_like_an_empty_vault(monkeypatch, caplog):
-    import silica.kernel.recall.vault_map as vm
+    from silica.kernel.report import vault_map as vm
 
     class Boom:
         def __len__(self): raise RuntimeError("index unreadable")

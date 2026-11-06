@@ -88,7 +88,7 @@ def test_clean_write_has_no_review(tmp_vault):
 
 def test_write_stamps_review_in_frontmatter(tmp_vault):
     from silica.kernel.write.bulk import _execute_write
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     op = Op(op=OpType.write, heading="Description", source_basename="lez.md",
             path="Corso/Description.md", snippet=LONG, hub="Corso",
@@ -192,7 +192,7 @@ def test_duplicate_without_addition_still_marks_the_landed_loser():
 def test_distinct_on_landed_note_clears_flag_and_leaves_trace(tmp_vault):
     from silica.capabilities.dedup import _route_distinct
     from silica.kernel.workqueue import WorkItem
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.write.templates import has_related_trace
 
     tmp_vault.note("Corso/Description.md",
@@ -203,7 +203,7 @@ def test_distinct_on_landed_note_clears_flag_and_leaves_trace(tmp_vault):
     item = WorkItem(kind="dedup", target_path="Corso/Descriptor.md", context=ctx)
     with patch("silica.capabilities.dedup.commit_ops",
                return_value={"status": "committed", "committed": 1}) as commit, \
-         patch("silica.kernel.recall.deferred.get_deferred_store"):
+         patch("silica.kernel.write.deferred.get_deferred_store"):
         res = _route_distinct(item, ctx, _decision("distinct", rationale="different things"), None)
 
     assert res["status"] == "committed"
@@ -224,7 +224,7 @@ def test_expand_overwrites_a_landed_short_note(tmp_vault):
     from silica.capabilities.expand import run_expand
     from silica.config import CONFIG
     from silica.kernel.workqueue import WorkItem
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     tmp_vault.note("Corso/Percettrone.md",
                    "---\nAI: true\nreview: snippet too short (50 < 275 chars)\n---\n\n# Percettrone\n\ncorto\n")
@@ -237,7 +237,7 @@ def test_expand_overwrites_a_landed_short_note(tmp_vault):
     with patch("silica.capabilities.expand._author_body", return_value=LONG), \
          patch("silica.capabilities.expand.commit_ops",
                return_value={"status": "committed", "committed": 1}) as commit, \
-         patch("silica.kernel.recall.deferred.get_deferred_store"):
+         patch("silica.kernel.write.deferred.get_deferred_store"):
         res = run_expand(item, CONFIG)
 
     assert res["status"] == "committed"
@@ -255,7 +255,7 @@ def test_expand_overwrites_a_landed_short_note(tmp_vault):
 
 def test_coverage_line_counts_flagged_notes(tmp_path, monkeypatch):
     from silica.router.coordinator import Coordinator
-    from silica.kernel.recall import deferred
+    from silica.kernel.write import deferred
 
     monkeypatch.setattr(deferred, "_store_dir", lambda: tmp_path / "deferred")
     deferred._stores.clear()
@@ -307,7 +307,7 @@ def test_boundary_anneal_settles_the_ops_the_sweep_landed_flagged(monkeypatch):
         target_dir="Reti", _chunks=[], _current_chunk_idx=0,
     )
     store = SimpleNamespace(list_all=lambda: [{"content_hash": "fff6"}])
-    with patch("silica.kernel.recall.deferred.get_deferred_store", return_value=store), \
+    with patch("silica.kernel.write.deferred.get_deferred_store", return_value=store), \
          patch("silica.tools.pipeline.silica_anneal",
                return_value={"written": 1, "flagged_ops": [landed]}):
         InjectorFSM._boundary_anneal(fake)

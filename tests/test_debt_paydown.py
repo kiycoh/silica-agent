@@ -56,7 +56,7 @@ def test_lint_accepts_partial_and_still_rejects_other_strings():
 def test_leaked_containers_parse_and_scalars_stay_strings():
     import json
 
-    from silica.agent.llm import recover_leaked_tool_calls
+    from silica.model.llm import recover_leaked_tool_calls
 
     body = (
         '<DSMLtool_calls><DSMLinvoke name="t">'
@@ -103,7 +103,7 @@ def test_strip_ofm_spares_block_ids_in_spans():
 # --- report memo key vs quiz log -------------------------------------------
 
 def test_report_memo_key_moves_when_the_quiz_log_does(tmp_path, monkeypatch):
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
     from silica.kernel.report.graph_report import compute
 
     log = tmp_path / "quiz.jsonl"
@@ -144,7 +144,7 @@ def test_delivery_lock_serializes_two_tickers(tmp_path):
 def test_model_limits_ttl_serves_hits_and_expires(monkeypatch):
     import time as _time
 
-    import silica.agent.providers as providers
+    from silica.model import providers
 
     calls = {"n": 0}
 

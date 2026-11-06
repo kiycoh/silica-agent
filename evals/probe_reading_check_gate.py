@@ -49,7 +49,7 @@ COUNT: Counter = Counter()
 
 
 def _chat(model: str):
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
 
     def chat(prompt: str) -> str:
         with _lock:
@@ -69,7 +69,7 @@ def _chat(model: str):
 
 def _decide(memo_path: Path, fresh: bool):
     """Jev, memoised by its exact request across arms; `fresh` asks again."""
-    from silica.agent.decide import decide
+    from silica.model.decide import decide
 
     memo: dict[str, object] = {}
     if memo_path.is_file():

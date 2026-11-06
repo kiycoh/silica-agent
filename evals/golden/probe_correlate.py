@@ -24,8 +24,8 @@ from __future__ import annotations
 
 import contextlib
 
-from silica.kernel.link.health import pair as _pair
-from silica.kernel.link.health import wikilink_graph as _wikilink_graph
+from silica.kernel.report.health import pair as _pair
+from silica.kernel.report.health import wikilink_graph as _wikilink_graph
 
 # Per-note expanded ranking depth — matches graph_report's _cooccur_ranking(k=10).
 EXPANDED_K = 10

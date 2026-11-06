@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.vault_manifest import reset_manifest_cache
+from silica.kernel.base.manifest import reset_manifest_cache
 
 _COLLISION = "Matematica/Statistica/Correlazione lineare.md"
 _BODY = "corpo dell'arricchimento " * 12

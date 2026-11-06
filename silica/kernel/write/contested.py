@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 from silica.kernel.write.notetype import HUMAN_ACTOR_PREFIX, is_human_verified
 
 CONTESTED_KEY = "contested"

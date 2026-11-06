@@ -4,7 +4,7 @@
 """LLM wrapper — agentic loop calls via litellm.
 
 Handles the interactive agentic loop (tool-calling, multi-turn). Provider
-selection for the Distiller's constrained decoding path is in agent/providers.py
+selection for the Distiller's constrained decoding path is in model/providers.py
 (openai SDK directly, per ADR-0008 §M2). This module handles everything else.
 """
 from __future__ import annotations
@@ -517,7 +517,7 @@ def _openrouter_session_id() -> str:
     Latency showed no separable effect — a single burst swung 3s to 108s on that
     free shared pool, which swamps anything the routing does.
     """
-    from silica.agent.narration import NARRATOR  # lazy, as call_llm's own beat does
+    from silica.obs.narration import NARRATOR  # lazy, as call_llm's own beat does
 
     return NARRATOR.sid or _PROCESS_SESSION
 
@@ -549,7 +549,7 @@ def openrouter_routing(provider_list: str | None = None, model: str = "") -> dic
     is False: an explicit pin means "these providers or fail" — silently bouncing
     to an unpinned (maybe rate-limited) provider is exactly the surprise this knob
     exists to prevent. Shared by both LLM paths — litellm (call_llm) and the
-    openai SDK (agent/providers.py) — so the pin applies everywhere openrouter is used.
+    openai SDK (model/providers.py) — so the pin applies everywhere openrouter is used.
     """
     if CONFIG.openrouter_provider_by_model.strip() and model:
         own = _provider_table(CONFIG.openrouter_provider_by_model).get(model.removeprefix("openrouter/"))
@@ -1041,8 +1041,8 @@ def call_llm(
     not at each caller (spec §4). No open session → narrate() no-ops, so
     batch entry points pay one dict lookup and nothing else.
     """
-    from silica.agent.narration import NARRATOR
-    from silica.agent.providers import _to_wire  # lazy: providers.py imports this module
+    from silica.obs.narration import NARRATOR
+    from silica.model.providers import _to_wire  # lazy: providers.py imports this module
     import uuid as _uuid
     cid = f"c-{_uuid.uuid4().hex[:8]}"
     t0 = time.time()
@@ -1056,7 +1056,7 @@ def call_llm(
         # grading, the capability workers and every iteration of a turn pass
         # the same check. Raises UsageLimited before any span opens: a call
         # refused is a call never made, and the turn's error says so.
-        from silica.agent.usage_limits import check
+        from silica.model.usage_limits import check
 
         check()
 
@@ -1141,7 +1141,7 @@ def _trace_on() -> bool:
 
 
 def _session_open() -> bool:
-    from silica.agent.narration import NARRATOR  # lazy, as the wrapper above
+    from silica.obs.narration import NARRATOR  # lazy, as the wrapper above
     return NARRATOR.sid is not None
 
 
@@ -1195,12 +1195,8 @@ def _call_llm(
         tool_count = len(tools) if tools else 0
         logger.info("LLM call: model=%s | msg=%d | tools=%d", model, len(messages), tool_count)
 
-    from silica.agent.providers import (  # lazy: providers.py imports this module
-        PROVIDER_PRESETS,
-        clamp_max_tokens,
-        ollama_num_ctx,
-        _to_wire,
-    )
+    # lazy: providers.py imports this module
+    from silica.model.providers import PROVIDER_PRESETS, clamp_max_tokens, ollama_num_ctx, _to_wire
 
     # The wire boundary: strips the internal `origin` field and renders the
     # <silica-cli> marker. The interactive loop calls this module directly, so

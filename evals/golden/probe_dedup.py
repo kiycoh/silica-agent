@@ -87,7 +87,7 @@ def _cos(a, b) -> float:
 
 def run(vault, store, *, embed_store=None, verbose: bool = False) -> dict:
     from silica.config import CONFIG
-    from silica.kernel.link.health import iter_notes
+    from silica.kernel.report.health import iter_notes
     from silica.kernel.recall.paths import is_inbox_path
     from silica.router.states.collision import _names_agree, route_concept
 

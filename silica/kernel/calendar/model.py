@@ -29,7 +29,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 
 logger = logging.getLogger(__name__)
 

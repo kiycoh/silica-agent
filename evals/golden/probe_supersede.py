@@ -159,7 +159,7 @@ def _incoming_clock(vault, ref: str) -> str | None:
     None means "this side shows no date", which is what lets `suppress_contest`
     tell an undated claim from one demonstrably newer than the note.
     """
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.recall.paths import SOURCES_DIR
     from silica.kernel.write.contested import ref_source
 
@@ -198,8 +198,8 @@ def score_fixture(vault=None, *, recency_guard: bool = True, verbose: bool = Fal
     decision itself comes from `suppress_contest`, the production predicate —
     scoring a restatement of it here would measure the wrong thing.
     """
-    from silica.kernel.write import frontmatter
-    from silica.kernel.link.health import iter_notes
+    from silica.kernel.base import frontmatter
+    from silica.kernel.report.health import iter_notes
     from silica.kernel.write.contested import (
         contested_refs,
         reliability_tier,
@@ -265,7 +265,7 @@ def score_fixture(vault=None, *, recency_guard: bool = True, verbose: bool = Fal
 
 
 def run(vault, *, embed_store=None, cooccur_store=None, verbose: bool = False) -> dict:
-    from silica.kernel.link.health import iter_notes
+    from silica.kernel.report.health import iter_notes
     from silica.kernel.write.contested import contested_refs, reliability_tier
 
     contested = 0

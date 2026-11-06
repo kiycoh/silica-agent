@@ -44,9 +44,9 @@ import re
 import tempfile
 from pathlib import Path
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 from silica.kernel.link.autolink import autolink, build_title_index
-from silica.kernel.link.health import lint
+from silica.kernel.report.health import lint
 from silica.kernel.text.sanitize import normalize_ops
 
 # Facade depth measured; matches the k of every production related_notes surface.
@@ -213,7 +213,7 @@ def _t4_sanitize(body, stem) -> dict:
 
 def integrity_probe(vault: Path, *, verbose: bool = False) -> dict:
     from silica.driver.fs_backend import ObsidianFSBackend  # lazy: kernel stays driver-free at import
-    from silica.kernel.link.health.preservation import preservation
+    from silica.kernel.report.health.preservation import preservation
 
     all_md = iter_notes(vault)
     title_index = build_title_index([p.stem for p in all_md])

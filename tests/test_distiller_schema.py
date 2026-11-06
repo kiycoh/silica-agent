@@ -16,8 +16,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from silica.agent.providers import get_provider, Provider, PROVIDER_PRESETS
-from silica.agent.llm import LLMResponse
+from silica.model.providers import get_provider, Provider, PROVIDER_PRESETS
+from silica.model.llm import LLMResponse
 from silica.kernel.write.ops import Op, OpType, DistillerOutput
 from silica.kernel.text.sanitize import parse_json
 
@@ -150,7 +150,7 @@ class TestProviderPresets:
 # ---------------------------------------------------------------------------
 
 class TestRunDistillerSchemaPassing:
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.get_provider")
     def test_response_schema_passed_to_provider(self, mock_get_provider):
         """run_distiller must pass DistillerOutput as response_schema."""
         mock_provider = MagicMock()
@@ -174,7 +174,7 @@ class TestRunDistillerSchemaPassing:
 
         assert "updates" in result
 
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.get_provider")
     def test_malformed_response_recovered_by_parse_json(self, mock_get_provider):
         """Malformed output (code-fence wrapped) must not raise — simulates OpenRouter."""
         mock_provider = MagicMock()
@@ -191,7 +191,7 @@ class TestRunDistillerSchemaPassing:
         )
         assert "updates" in result
 
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.get_provider")
     def test_empty_response_returns_error_dict(self, mock_get_provider):
         mock_provider = MagicMock()
         mock_get_provider.return_value = mock_provider
@@ -215,7 +215,7 @@ class TestRunDistillerSchemaPassing:
 
 class TestRunDistillerFallbackSchemaPassing:
     @patch("litellm.completion")
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.get_provider")
     def test_fallback_passes_response_format_to_litellm(self, mock_get_provider, mock_completion):
         """The litellm fallback must request response_format=DistillerOutput,
         exactly like the primary provider path does via response_schema."""
@@ -238,7 +238,7 @@ class TestRunDistillerFallbackSchemaPassing:
         assert "updates" in result
 
     @patch("litellm.completion")
-    @patch("silica.agent.providers.get_provider")
+    @patch("silica.model.providers.get_provider")
     def test_fallback_still_salvages_truncated_prefix(self, mock_get_provider, mock_completion):
         """The truncated-prefix salvage (#1) must keep working when the response
         came from the litellm fallback rather than the primary provider."""

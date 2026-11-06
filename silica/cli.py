@@ -97,8 +97,8 @@ def _count_context_tokens(messages: list[dict], tools: list[dict] | None = None)
     # Counted on the WIRE form: the kept thinking trace would otherwise show up
     # in the meter as context the provider is charged for, when `_to_wire` drops
     # it before the request.
-    from silica.agent.llm import _text_of
-    from silica.agent.providers import _to_wire
+    from silica.model.llm import _text_of
+    from silica.model.providers import _to_wire
 
     messages = [_to_wire(m) for m in messages]
     try:
@@ -197,7 +197,7 @@ class _TurnInterrupt:
         self._lock = threading.Lock()
 
     def __call__(self, event) -> None:
-        from silica.agent.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
+        from silica.obs.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
 
         if isinstance(event, ToolStartEvent):
             with self._lock:
@@ -266,7 +266,7 @@ def _inject_vault_map(messages: list[dict]) -> None:
     # recomputed once per session; no storage/refresh.
     """
     try:
-        from silica.kernel.recall.vault_map import build_vault_map
+        from silica.kernel.report.vault_map import build_vault_map
 
         vault_map = build_vault_map()
         if vault_map:
@@ -304,7 +304,7 @@ def _vault_scope() -> str:
     this the model reads "vault" as the folder it writes in and reports an empty
     vault while sitting on a repo full of Markdown.
     """
-    from silica.kernel.vault_manifest import active_write_dir
+    from silica.kernel.base.manifest import active_write_dir
     from silica.onboarding.adopt import SAFE_WRITE_DIR
 
     vault = CONFIG.vault_path
@@ -384,7 +384,7 @@ def _reply_language() -> str:
     """
     if not CONFIG.vault_path:
         return ""
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
 
     conv = load_manifest(CONFIG.vault_path).conventions
     return conv.reply_language or conv.language or ""
@@ -607,7 +607,7 @@ def switch_vault(arg: str) -> VaultSwitch:
     from silica.kernel.recall.paths import repo_root_warning
     from silica.kernel.recall.relatedness import reset_vault_caches
     from silica.kernel.text.overlay import reset_overlay_cache
-    from silica.kernel.vault_manifest import (
+    from silica.kernel.base.manifest import (
         apply_manifest_to_config,
         get_active_manifest,
         reset_manifest_cache,
@@ -851,7 +851,7 @@ def _dc_status(args: list[str], **_) -> bool:
     below it stays: it answers recovery, which narration refuses to carry.
     """
     if not args:
-        from silica.agent import narration as _narr
+        from silica.obs import narration as _narr
         sid = _narr.NARRATOR.sid
         if sid is not None:
             st = _narr.fold_all(_narr.read_beats(_narr.narration_dir() / f"{sid}.jsonl"))
@@ -1060,7 +1060,7 @@ def _epistemic_filter(results: list[dict], min_trust: str, life: str) -> tuple[l
     read off each note's frontmatter (contested.trust / .lifecycle). A row
     whose note cannot be read is dropped: an unreadable note has no trust."""
     from silica.driver import DRIVER
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.write.contested import TRUST_ORDER, lifecycle, trust
 
     floor = TRUST_ORDER.get(min_trust, 0)
@@ -1160,7 +1160,7 @@ def _dc_check(args: list[str], **_) -> bool:
     from silica.config import CONFIG
     from silica.driver import DRIVER
     from silica.kernel.check import run as check
-    from silica.kernel.vault_manifest import active_write_dir
+    from silica.kernel.base.manifest import active_write_dir
 
     name = " ".join(_positional(args))
     if not name:
@@ -1191,8 +1191,8 @@ def _dc_check(args: list[str], **_) -> bool:
 def _check_judge(cite: bool = True):
     """Jev decides a block's verdict; the chat model answers only when Jev
     answers nothing (ADR-0110 point 7, the owner's decision of 2026-10-24)."""
-    from silica.agent.decide import decide
-    from silica.agent.providers import get_provider
+    from silica.model.decide import decide
+    from silica.model.providers import get_provider
     from silica.config import CONFIG
     from silica.kernel.check import judge as jd
 
@@ -1234,7 +1234,7 @@ def _check_legs():
     if floor is None:
         return search, None, None
     try:
-        from silica.agent.providers import get_embedder
+        from silica.model.providers import get_embedder
         from silica.kernel.check.dense import leg
 
         dense = leg(get_embedder(CONFIG))
@@ -1460,7 +1460,7 @@ def _dc_plans(args: list[str], **_) -> bool:
 
 def _dc_path(args: list[str], *, raw_input: str = "", **_) -> bool:
     """/path <noteA> <noteB> — the shortest link path between two notes."""
-    from silica.kernel.recall.mindmap import note_resolver, reading_path
+    from silica.kernel.graph.mindmap import note_resolver, reading_path
     try:
         toks = shlex.split(raw_input.strip())[1:]  # honours quoted titles with spaces
     except ValueError:
@@ -1926,7 +1926,7 @@ def _revert_by_source(source: str, vault: str | None) -> bool:
         line = f"  Nothing to revert — the ledger has no record of {source}."
     CONSOLE.print(line)
     try:
-        from silica.kernel.recall.run_log import append_log_line, format_revert_event
+        from silica.kernel.write.run_log import append_log_line, format_revert_event
         for r in runs:
             append_log_line(
                 format_revert_event(source, len(r["reverted"]), len(r["skipped"])),
@@ -2017,7 +2017,7 @@ def _revert_one(run_id: str) -> bool:
     CONSOLE.print(line)
     # log.md narrated the run's writes; it must narrate the take-back too.
     try:
-        from silica.kernel.recall.run_log import append_log_line, format_revert_event
+        from silica.kernel.write.run_log import append_log_line, format_revert_event
         append_log_line(
             format_revert_event(source, len(res["reverted"]), len(res["skipped"])),
             run_id,
@@ -2091,7 +2091,7 @@ def _dc_connect(args: list[str], *, raw_input: str = "", **_) -> bool:
 def _dc_review(args: list[str], **_) -> bool:
     """/review [--flush=<hash>] — the deferred store: write bundles parked
     by a gate, listed or flushed. Not the study queue: that is /learn."""
-    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.deferred import get_deferred_store
     store = get_deferred_store()
     flush_hash = _str_flag(args, "--flush")
     if flush_hash:
@@ -2271,7 +2271,7 @@ def _dc_remember(args: list[str], *, raw_input: str = "", **_) -> bool:
     text = remember_text(raw_input)
     if not text:
         return False
-    from silica.agent import narration
+    from silica.obs import narration
 
     out = user_memory.save("vault", text, session=narration.NARRATOR.sid or "")
     if not out["ok"]:
@@ -2320,7 +2320,7 @@ def _dc_incognito(args: list[str], *, messages: list[dict] | None = None, **_) -
     on = not user_memory.incognito()
     user_memory.set_incognito(on)
     if on:
-        from silica.agent import narration as _narr
+        from silica.obs import narration as _narr
         b = _narr.INCOGNITO_BEAT
         # No-op before the first turn: ensure_session marks the session at birth.
         _narr.NARRATOR.narrate(b["kind"], b["status"], b["summary"], {}, parent=None)
@@ -2443,7 +2443,7 @@ def _seed_batch_ledger(cap: str, payloads: list[dict], *, kind: str, label: str)
     import orjson
     from silica.kernel.progress import PlanStep, Run
     from silica.ui.renderer import emit_batch_event
-    from silica.agent.events import BatchRunStartEvent
+    from silica.obs.events import BatchRunStartEvent
 
     run = Run.new(
         mode="analyst",
@@ -2459,7 +2459,7 @@ def _seed_batch_ledger(cap: str, payloads: list[dict], *, kind: str, label: str)
         task.input_ref = payload_path
     run.save()
     emit_batch_event(BatchRunStartEvent(run_id=run.run_id, kind=kind, label=label, total=len(payloads)))
-    from silica.agent import narration as _narr_mod
+    from silica.obs import narration as _narr_mod
     # Left running on purpose: a seeded ledger IS pending until executed, and
     # a projection showing it running is the truth, not a leak.
     _narr_mod.NARRATOR.span_open(
@@ -2480,7 +2480,7 @@ def _announced_target(target_dir: str) -> str:
     nothing. Display-only: the Coordinator still takes the raw target.
     """
     try:
-        from silica.kernel.vault_manifest import in_write_dir
+        from silica.kernel.base.manifest import in_write_dir
 
         return in_write_dir(target_dir)
     except Exception:
@@ -2518,7 +2518,7 @@ def _file_drafts(
 
     import silica.kernel.forms as forms
     from silica.driver import DRIVER
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.sources.registry import _record_inverse
     from silica.tools.wrapped import silica_cleanup
 
@@ -2594,7 +2594,7 @@ def _file_drafts(
         # The filed copy is a Silica write like any other: composed into the
         # write boundary. A bare-folder pick used to land the draft in the
         # user's source tree, beside their own files.
-        from silica.kernel.vault_manifest import in_write_dir
+        from silica.kernel.base.manifest import in_write_dir
         dest_dir = in_write_dir(dest_dir)
         data, _, body = frontmatter.split(text)
         data = dict(data or {})
@@ -2670,8 +2670,8 @@ def _prior_conversions() -> dict[str, dict]:
     from pathlib import Path
 
     from silica.driver import DRIVER
-    from silica.kernel.vault_manifest import active_done_dir, active_inbox_dir
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base.manifest import active_done_dir, active_inbox_dir
+    from silica.kernel.base import frontmatter
 
     out: dict[str, dict] = {}
     vault = Path(CONFIG.vault_path or "")
@@ -2744,9 +2744,9 @@ def _pick_target_folder(md_files: list[str]) -> str:
     """
     from pathlib import Path
 
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
 
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir
 
     inbox = active_inbox_dir() or "Inbox"
     listed = _listed_folders(inbox)
@@ -2860,8 +2860,8 @@ def _pick_batch_folders(briefs: list[tuple[str, str]]) -> dict[int, str]:
     unreadable or lands in the inbox is left out, and the caller picks for it
     alone.
     """
-    from silica.agent.llm import call_llm
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.model.llm import call_llm
+    from silica.kernel.base.manifest import active_inbox_dir
 
     inbox = active_inbox_dir() or "Inbox"
     listed = _listed_folders(inbox)
@@ -2924,7 +2924,7 @@ def _unit_brief(label: str, mfs: list[str]) -> tuple[str, str]:
     from pathlib import Path
 
     from silica.kernel.forms import read_source_text
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.sources.convert import is_skippable_chunk
 
     first = next((f for f in mfs if not is_skippable_chunk(f)), mfs[0])
@@ -3131,7 +3131,7 @@ def _drain_wal() -> str:
         CONSOLE.print("  nothing captured to drain.")
         return ""
 
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir
     from silica.sources.transcript import render
     inbox = active_inbox_dir() or "Inbox"
     staged: dict = {}
@@ -3234,7 +3234,7 @@ def _promote(args: list[str]) -> str:
 
     from silica.driver import DRIVER
     from silica.kernel.recall.episodic import promotion_stub
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir
 
     # The key names an attribute, the promotion writes the entity it belongs to:
     # `user.dog.name` and `user.dog.breed` are one note about one dog.
@@ -3297,7 +3297,7 @@ def _promote(args: list[str]) -> str:
 
     from silica.kernel.write.provenance import read_records
 
-    from silica.kernel.vault_manifest import source_key
+    from silica.kernel.base.manifest import source_key
 
     notes = list((read_records(source_key(rel)) or [{}])[-1].get("notes") or [])
     # CLEANUP's record lists the run's hub note first ("Life/Life"): the stamp
@@ -3692,7 +3692,7 @@ def _units_by_source(md_files: list[str]) -> list[tuple[str, list[str]]]:
     no label, then one unit per converted source, labelled with its name, in
     the order each source first appears."""
     from silica.driver import DRIVER
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     groups: dict[str, list[str]] = {}
     for f in md_files:
@@ -3741,7 +3741,7 @@ def _nucleate_prepare(
         if not mfs:
             return []  # everything was filed; reported above
 
-    from silica.kernel.vault_manifest import source_key
+    from silica.kernel.base.manifest import source_key
     from silica.kernel.write.provenance import (
         already_distilled, check_renucleate, content_sha256,
     )
@@ -3781,7 +3781,7 @@ def _zotero_backlink(leaf: tuple[str, dict], run_id: str | None) -> None:
     """The paper's `Silica · <title>` note in Zotero, after its run: only then
     does the vault hold the notes it lists (ADR-0055 decision 7). Best-effort,
     since the vault side of the import has already succeeded."""
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
     from silica.sources import zotero, zotero_write
 
     link = get_active_manifest().zotero
@@ -3801,7 +3801,7 @@ def _zotero_backlink(leaf: tuple[str, dict], run_id: str | None) -> None:
 
 def _leaf_rel(name: str) -> str:
     from silica.kernel.recall.paths import SOURCES_DIR
-    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.base.manifest import in_write_dir
 
     return f"{in_write_dir(SOURCES_DIR)}/{name}"
 
@@ -3890,7 +3890,7 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
             CONSOLE.print(f"  [yellow]--seen ignored: {seen!r} is not YYYY-MM-DD[/]")
             seen = ""
 
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
     from silica.sources.convert import convert
     from silica.kernel.write.undo_journal import get_undo_journal
 
@@ -4003,9 +4003,9 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
         # (~40% of a nucleate run's tokens for a handful of decision tokens).
         import time as _time
 
-        from silica.agent import narration as _narr_mod
-        from silica.agent.bus import BUS
-        from silica.agent.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
+        from silica.obs import narration as _narr_mod
+        from silica.obs.bus import BUS
+        from silica.obs.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
         from silica.router.coordinator import Coordinator
         from silica.tools.runners import project_injector_result
 
@@ -4143,7 +4143,7 @@ def _sc_settings(args: list[str], **_) -> str | None:
     # YAML comments are not preserved; hand-edit the file to keep them.
     import yaml as _yaml
     from pathlib import Path as _P
-    from silica.kernel.vault_manifest import MANIFEST_REL, reset_manifest_cache
+    from silica.kernel.base.manifest import MANIFEST_REL, reset_manifest_cache
     _KEYS = {"cooccurrence_lang", "conventions.language",
              "conventions.reply_language", "conventions.max_tags"}
     mf = _P(CONFIG.vault_path) / MANIFEST_REL
@@ -4796,7 +4796,7 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
         return False  # Signal to exit
 
     if cmd.startswith("/sessions"):
-        from silica.agent import narration as _narr
+        from silica.obs import narration as _narr
         arg = cmd.split(None, 2)[1:] if len(cmd.split()) > 1 else []
         if arg and arg[0] == "prune":
             # Deletion is the user's sentence to write: an explicit age, no
@@ -4820,7 +4820,7 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
         return True
 
     if cmd.startswith("/resume"):
-        from silica.agent import narration as _narr
+        from silica.obs import narration as _narr
         parts = cmd.split()
         if len(parts) != 2:
             CONSOLE.print("  usage: /resume <n|id>  (list with /sessions)")
@@ -4864,7 +4864,7 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
         if not CONFIG.model:
             CONSOLE.print("  Current model: [bold](not configured)[/]")
             return True
-        from silica.agent.providers import model_limits
+        from silica.model.providers import model_limits
         window, out_cap = model_limits(CONFIG.provider, CONFIG.model)
         extra = ""
         if window:
@@ -4981,7 +4981,7 @@ def _resolve_context_budget() -> None:
     pinned = bool(os.getenv("SILICA_MAX_CONTEXT"))
     if pinned and CONFIG.provider != "openrouter":
         return
-    from silica.agent.providers import model_limits
+    from silica.model.providers import model_limits
     window, _ = model_limits(CONFIG.provider, CONFIG.model)
     if window:
         # OpenRouter's window is the one it serves, so a pin left from a larger
@@ -5150,7 +5150,7 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         # Dispatch runs before main()'s setup (unlike --gui) — do it here.
         _activate_repo_mode()
         _announce_code_lane()
-        from silica.kernel.vault_manifest import apply_manifest_to_config
+        from silica.kernel.base.manifest import apply_manifest_to_config
         apply_manifest_to_config()
         _resolve_context_budget()
         _setup_logging(debug="--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging)
@@ -5234,7 +5234,7 @@ def main():
         sys.exit(code)
     _activate_repo_mode()
     _announce_code_lane()
-    from silica.kernel.vault_manifest import apply_manifest_to_config
+    from silica.kernel.base.manifest import apply_manifest_to_config
     apply_manifest_to_config()
     _resolve_context_budget()
     debug_mode = "--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging
@@ -5404,7 +5404,7 @@ def main():
                 messages[:] = _fresh_messages()
                 collapsed = set()  # indices reset with the history
                 seen_numbers = set()
-                from silica.agent import narration as _narr
+                from silica.obs import narration as _narr
                 _narr.NARRATOR.close()          # next user turn opens a fresh sid
                 session_id = uuid.uuid4().hex[:12]
                 continue
@@ -5414,7 +5414,7 @@ def main():
                 # From the narration the history came back from. A /resume that
                 # failed left the narrator on this session, whose narration holds
                 # what the live set does.
-                from silica.agent import narration as _narr
+                from silica.obs import narration as _narr
 
                 seen_numbers = numbers_of_session(_narr.NARRATOR.sid)
             if result is False:
@@ -5460,7 +5460,7 @@ def main():
 
         # Born at the first user turn (spec §5); idempotent afterwards. The
         # sid is capture's session_id so the two records share one id space.
-        from silica.agent import narration as _narr
+        from silica.obs import narration as _narr
         _narr.NARRATOR.ensure_session(driver="tui", sid=session_id)
         session_id = _narr.NARRATOR.sid or session_id   # /resume may have switched it
         _narr.NARRATOR.turn(msg)
@@ -5528,7 +5528,7 @@ def main():
             collapsed = _compact_context(messages, collapsed)
         except KeyboardInterrupt:
             callback.close()
-            from silica.agent import narration as _narr
+            from silica.obs import narration as _narr
             _narr.NARRATOR.cancel(driver="tui", target=None, scope="turn")
             CONSOLE.print("\n  [dim](interrupted)[/]")
         except Exception as e:
@@ -5544,7 +5544,7 @@ def main():
     # Every exit from the REPL passes here: /exit, Ctrl+D, Ctrl+C at the prompt.
     if not user_memory.incognito():
         capture_session(messages, session_id=session_id, driver="tui")
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
     _narr.NARRATOR.close()
 
 

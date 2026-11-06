@@ -20,7 +20,7 @@ import pytest
 from pydantic import BaseModel
 
 from silica.agent import turn_notes
-from silica.agent.events import ToolCompleteEvent
+from silica.obs.events import ToolCompleteEvent
 from silica.agent.recall_watch import THIN_COVERAGE_HINT
 
 pytest.importorskip("fastapi")
@@ -99,7 +99,7 @@ class TestAttach:
 
 class TestNeverSentToTheModel:
     def test_the_wire_drops_the_key(self):
-        from silica.agent.providers import _to_wire
+        from silica.model.providers import _to_wire
 
         wire = _to_wire({"role": "assistant", "content": "a", turn_notes.KEY: [THIN]})
         assert wire == {"role": "assistant", "content": "a"}
@@ -273,7 +273,7 @@ class TestLandingTurn:
 
     def test_a_landing_turn_keeps_its_notes_live_and_on_both_replays(
             self, client, monkeypatch, empty_recall):
-        from silica.agent import narration as narr
+        from silica.obs import narration as narr
         from silica.agent.loop import run_agent
 
         tc, server = client

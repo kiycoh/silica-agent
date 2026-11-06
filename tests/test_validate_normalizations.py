@@ -49,7 +49,7 @@ def test_a_write_rebased_into_the_write_dir_is_counted(tmp_vault, monkeypatch):
 
     monkeypatch.setattr(validate_mod, "active_write_dir", lambda: "Notes",
                         raising=False)
-    monkeypatch.setattr("silica.kernel.vault_manifest.active_write_dir",
+    monkeypatch.setattr("silica.kernel.base.manifest.active_write_dir",
                         lambda: "Notes")
     counts: dict = {}
     validate_operations([_write_op("Outside", "Elsewhere/Outside.md")], [],

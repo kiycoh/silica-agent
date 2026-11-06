@@ -8,7 +8,7 @@ import threading
 import litellm
 import pytest
 
-from silica.agent.llm import _bounded
+from silica.model.llm import _bounded
 
 
 def test_bounded_raises_timeout_on_hang():

@@ -10,13 +10,13 @@ from silica.driver.fs_backend import ObsidianFSBackend
 
 def test_the_inbox_stays_inside_the_write_boundary(tmp_path, monkeypatch):
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
 
     (tmp_path / "vault.yaml").write_text("write_dir: docs/silica\n", encoding="utf-8")
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     reset_manifest_cache()
 
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir
 
     assert active_inbox_dir() == f"docs/silica/{CONFIG.inbox_dir}"
 
@@ -34,7 +34,7 @@ def test_the_inbox_stays_inside_the_write_boundary(tmp_path, monkeypatch):
 
 def test_no_boundary_leaves_the_inbox_at_the_vault_root(tmp_path, monkeypatch):
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import active_inbox_dir, reset_manifest_cache
+    from silica.kernel.base.manifest import active_inbox_dir, reset_manifest_cache
 
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     reset_manifest_cache()
@@ -51,7 +51,7 @@ def test_an_existing_root_inbox_keeps_its_place_under_a_boundary(tmp_path, monke
     """
     from silica.config import CONFIG
     from silica.kernel.recall.paths import is_inbox_path
-    from silica.kernel.vault_manifest import active_inbox_dir, reset_manifest_cache
+    from silica.kernel.base.manifest import active_inbox_dir, reset_manifest_cache
     from silica.onboarding.checks import check_vault
 
     (tmp_path / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")

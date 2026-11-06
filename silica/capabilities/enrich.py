@@ -73,7 +73,7 @@ def run_enrich(item: WorkItem, config: Any) -> dict[str, Any]:
 
 def _enrich_note(config: Any, target_path: str, original: str, hub: str | None) -> str:
     """The LLM seam: the markdown to append, or "" when it has nothing to add."""
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
     from silica.kernel.context_builder import build_context
 
     rules = [

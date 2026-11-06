@@ -314,7 +314,7 @@ def test_vault_outline_reads_claims_and_skips_spines(tmp_vault):
 def test_past_the_cap_stage_b_sees_the_notes_nearest_the_chunk(tmp_vault, monkeypatch):
     """A cut by name hid every note past "P" of a 746-note course folder from
     the textbook's stage B, so it wrote "LSTM" beside "Reti LSTM" (2026-10-23)."""
-    import silica.agent.providers as providers
+    from silica.model import providers
     import silica.kernel.recall.embed as embed
 
     for t in ("Apprendimento", "Kernel", "Reti LSTM", "Rete ricorrente"):
@@ -437,7 +437,7 @@ def test_default_ask_accepts_literal_newlines_inside_strings(monkeypatch):
     from types import SimpleNamespace
     reply = '{"bodies": {"A": "riga uno\nriga due"}}'
     monkeypatch.setattr("silica.kernel.prep_delegation._call_with_deadline", lambda fn, *a, **k: SimpleNamespace(text=reply, finish_reason="stop"))
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: SimpleNamespace(call_llm=lambda **k: None))
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda *a, **k: SimpleNamespace(call_llm=lambda **k: None))
     assert ol._default_ask(ol.STAGE_BODIES_TAG + " x", "u", max_tokens=10)["bodies"]["A"] == "riga uno\nriga due"
 
 
@@ -464,7 +464,7 @@ def test_default_ask_raw_returns_text_and_retries_without_a_marker(monkeypatch):
     replies = iter(["   ", "### IDEA: A\ncorpo \\alpha"])
     monkeypatch.setattr("silica.kernel.prep_delegation._call_with_deadline",
                         lambda fn, *a, **k: SimpleNamespace(text=next(replies), finish_reason="stop"))
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: SimpleNamespace(call_llm=lambda **k: None))
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda *a, **k: SimpleNamespace(call_llm=lambda **k: None))
     assert ol._default_ask(ol.STAGE_BODIES_TAG + " x", "u", max_tokens=10, raw=True) == {"text": "### IDEA: A\ncorpo \\alpha"}
 
 
@@ -665,7 +665,7 @@ def test_verbatim_bodies_partition_the_source_with_no_bodies_or_gap_call(monkeyp
 def test_a_vault_that_translates_has_the_bodies_written_not_looked_up(tmp_vault, monkeypatch):
     """An English textbook in an Italian vault: a looked-up body stayed English
     under an Italian title, so translation intent brings the bodies stage back."""
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
 
     monkeypatch.setenv("SILICA_OUTLINE_BODIES", "verbatim")
     tmp_vault.note("vault.yaml", "conventions:\n  language: Italian\n")
@@ -742,7 +742,7 @@ def test_default_ask_with_a_prefix_puts_the_source_in_the_system_message(monkeyp
         return SimpleNamespace(text='{"ideas": []}', finish_reason="stop")
 
     monkeypatch.setattr("silica.kernel.prep_delegation._call_with_deadline", lambda fn, *a, **k: fn())
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: SimpleNamespace(call_llm=call_llm))
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda *a, **k: SimpleNamespace(call_llm=call_llm))
     ol._default_ask(ol.STAGE_A_TAG + "\nrules", "", max_tokens=10, prefix="the source")
     assert sent["messages"][0] == {"role": "system", "content": ol.SOURCE_HEAD + "the source"}
     assert sent["messages"][1]["content"].startswith(ol.STAGE_A_TAG)
@@ -1000,7 +1000,7 @@ def test_default_ask_gives_up_at_the_distiller_deadline(monkeypatch):
                 time.sleep(0.05)
             return None
 
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda cfg, role="worker": _Provider())
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda cfg, role="worker": _Provider())
     monkeypatch.setenv("DISTILLER_TIMEOUT", "0.2")
     t0 = time.time()
     with pytest.raises(TimeoutError):
@@ -1025,7 +1025,7 @@ def test_default_ask_uses_a_response_schema_and_retries_once_on_no_json(monkeypa
                 return SimpleNamespace(text="I will now think about the lecture", finish_reason="length")
             return SimpleNamespace(text='{"ideas": []}', finish_reason="stop")
 
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda cfg, role="worker": _Provider())
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda cfg, role="worker": _Provider())
     out = ol._default_ask(ol.STAGE_A, "src", max_tokens=100)
     assert out == {"ideas": []}
     assert len(calls) == 2
@@ -1228,7 +1228,7 @@ def test_the_language_pin_reads_the_whole_first_chunk(monkeypatch):
     # Italian (2026-10-06). Detection costs 4.5 ms on a 50,000-character
     # lecture, so the pin reads the whole chunk.
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
     from silica.router.states import setup
     monkeypatch.setattr(CONFIG, "vault_path", "")  # no manifest: the pin is detected
     reset_manifest_cache()
@@ -1248,12 +1248,12 @@ def test_bodies_pool_fits_the_local_window(monkeypatch):
     monkeypatch.setattr(CONFIG, "worker_model", None)
     monkeypatch.setattr(CONFIG, "_provider", "custom")
     monkeypatch.setattr(CONFIG, "model", "custom/qwen3.5-4b")
-    monkeypatch.setattr("silica.agent.providers.model_limits", lambda p, m: (32768, 0))
+    monkeypatch.setattr("silica.model.providers.model_limits", lambda p, m: (32768, 0))
     src = "x" * 16000                     # a 16 KB lecture
     assert ol.bodies_workers_for(src) == 2
-    monkeypatch.setattr("silica.agent.providers.model_limits", lambda p, m: (65536, 0))
+    monkeypatch.setattr("silica.model.providers.model_limits", lambda p, m: (65536, 0))
     assert ol.bodies_workers_for(src) == 5
-    monkeypatch.setattr("silica.agent.providers.model_limits", lambda p, m: (0, 0))
+    monkeypatch.setattr("silica.model.providers.model_limits", lambda p, m: (0, 0))
     assert ol.bodies_workers_for(src) == ol.BODIES_WORKERS   # unknown window: as before
     monkeypatch.setattr(CONFIG, "_provider", "openrouter")
     assert ol.bodies_workers_for(src) == ol.BODIES_WORKERS   # hosted: independent contexts
@@ -1269,7 +1269,7 @@ def test_outline_calls_skip_the_sdk_retries(monkeypatch):
             seen.update(kw)
             return type("R", (), {"text": '{"ideas": []}', "finish_reason": "stop"})()
 
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: _P())
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda *a, **k: _P())
     ol._default_ask(ol.STAGE_GAP_TAG, "u", max_tokens=10)
     assert seen.get("sdk_retries") == 0
 
@@ -1323,12 +1323,12 @@ def test_a_reply_the_server_cannot_parse_is_asked_once_more_off_temperature_zero
             return type("R", (), {"text": "### IDEA: A\ncorpo", "finish_reason": "stop"})()
 
     parse = "The model produced output that does not match the expected peg-native format"
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: _P(parse))
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda *a, **k: _P(parse))
     assert ol._default_ask(ol.STAGE_BODIES_TAG, "u", max_tokens=10, raw=True) == {"text": "### IDEA: A\ncorpo"}
     assert seen == [0.0, 0.3]
 
     seen.clear()
-    monkeypatch.setattr("silica.agent.providers.get_provider",
+    monkeypatch.setattr("silica.model.providers.get_provider",
                         lambda *a, **k: _P("Context size has been exceeded."))
     with pytest.raises(litellm.InternalServerError):
         ol._default_ask(ol.STAGE_BODIES_TAG, "u", max_tokens=10, raw=True)

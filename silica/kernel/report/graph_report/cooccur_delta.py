@@ -297,7 +297,7 @@ def _compute_cooccur_variables(
     """
     from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
     from silica.kernel.recall.relatedness import _cooccur_ranking
-    from silica.kernel.recall.signals import burst, refd_edges
+    from silica.kernel.graph.signals import burst, refd_edges
 
     try:
         store = cooccur_store if cooccur_store is not None else get_cooccur_store()

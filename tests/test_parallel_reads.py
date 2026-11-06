@@ -16,7 +16,7 @@ import pytest
 from pydantic import BaseModel
 
 from silica.agent import loop
-from silica.agent.events import ToolCompleteEvent, ToolStartEvent
+from silica.obs.events import ToolCompleteEvent, ToolStartEvent
 from silica.tools import TOOLS, Tool
 from silica.tools import user_memory as memory_gate
 

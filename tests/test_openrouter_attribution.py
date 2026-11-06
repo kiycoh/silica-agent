@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from silica.agent.llm import call_llm
+from silica.model.llm import call_llm
 from tests.llm_mocks import litellm_mock_response
 
 
@@ -30,7 +30,7 @@ def test_openrouter_call_names_silica():
 def test_session_id_is_the_narration_sid():
     """One id across both records: the OpenRouter session and the file under
     ~/.silica/narration are readable against each other only if they match."""
-    from silica.agent import narration as narr
+    from silica.obs import narration as narr
 
     with patch.object(type(narr.NARRATOR), "sid", property(lambda self: "abc123def456")):
         body = _sent("openrouter/test/model").get("extra_body") or {}
@@ -53,7 +53,7 @@ def test_session_id_survives_provider_routing_and_the_reasoning_knob():
 def test_batch_lane_without_a_narration_session_still_groups():
     """nucleate / subagents / the distill pool open no narration session; one id
     per process still beats N loose generations in the dashboard."""
-    from silica.agent import narration as narr
+    from silica.obs import narration as narr
 
     with patch.object(type(narr.NARRATOR), "sid", property(lambda self: None)):
         first = (_sent("openrouter/test/model").get("extra_body") or {}).get("session_id")

@@ -252,7 +252,7 @@ def is_source_leaf(path: str) -> bool:
     if norm.startswith(SOURCES_DIR + "/"):
         return True
     try:
-        from silica.kernel.vault_manifest import in_write_dir
+        from silica.kernel.base.manifest import in_write_dir
 
         composed = in_write_dir(SOURCES_DIR).replace("\\", "/").strip("/")
     except Exception:  # config not resolvable — the bare root is the honest guess
@@ -834,7 +834,7 @@ CHAT_DIR = ".silica-chat"
 def chat_folder(session: str) -> str:
     """A chat's folder, vault-relative, inside the write boundary: a vault that
     writes only under docs/silica (a repository) gets no folder at its root."""
-    from silica.kernel.vault_manifest import active_write_dir
+    from silica.kernel.base.manifest import active_write_dir
 
     base = active_write_dir().strip("/")
     return f"{base}/{CHAT_DIR}/{session}" if base else f"{CHAT_DIR}/{session}"
@@ -858,7 +858,7 @@ def is_inbox_path(path: str) -> bool:
     being rejected.
     """
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import active_inbox_dir, in_write_dir
+    from silica.kernel.base.manifest import active_inbox_dir, in_write_dir
 
     p = path.replace("\\", "/").lstrip("/").casefold()
     inbox = (getattr(CONFIG, "inbox_dir", "") or "").strip("/")
@@ -877,9 +877,9 @@ def is_staging_path(path: str) -> bool:
     `kernel/graph_diff._is_staging` is an older, looser copy (any `done/`
     segment) kept for the regression gate.
     """
-    from silica.kernel.vault_manifest import active_done_dir, in_write_dir
+    from silica.kernel.base.manifest import active_done_dir, in_write_dir
 
-    from silica.kernel.recall.run_log import DEFAULT_LOG_FILENAME
+    from silica.kernel.write.run_log import DEFAULT_LOG_FILENAME
 
     p = (path or "").replace("\\", "/").lstrip("/")
     if is_inbox_path(p):

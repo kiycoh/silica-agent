@@ -10,7 +10,7 @@ import logging
 
 import pytest
 
-from silica.agent.events import LLMStreamEvent, ToolErrorEvent, ToolStartEvent
+from silica.obs.events import LLMStreamEvent, ToolErrorEvent, ToolStartEvent
 from silica.ui.logging import HostedJsonFormatter
 
 MARKER = "student-wrote-this-7f3a"
@@ -112,7 +112,7 @@ def test_emit_is_silent_off_the_hosted_service_and_after_an_objection(journal, m
 
 
 def test_each_model_call_writes_an_llm_call_line(journal, monkeypatch):
-    from silica.agent import llm
+    from silica.model import llm
 
     monkeypatch.setattr(llm, "_METER_ON", True)
     monkeypatch.setattr(llm, "_meter", collections.defaultdict(lambda: [0, 0, 0, 0]))  # no exit table
@@ -153,7 +153,7 @@ def client(tmp_vault, tmp_path, monkeypatch):
 
 
 def test_a_chat_turn_writes_one_turn_line(client, journal, monkeypatch):
-    from silica.agent import llm
+    from silica.model import llm
 
     _, server = client
     monkeypatch.setattr(llm, "_METER_ON", True)
@@ -278,7 +278,7 @@ class _Status(Exception):
 def _embedder(reply):
     from types import SimpleNamespace
 
-    from silica.agent.providers import OpenAIEmbedder
+    from silica.model.providers import OpenAIEmbedder
 
     e = OpenAIEmbedder(base_url="http://x/v1", api_key="k", model="m")
 
@@ -314,7 +314,7 @@ def test_an_embed_call_writes_its_lane_inputs_and_tokens(journal):
 def test_a_rerank_call_writes_its_documents_and_the_providers_cost(journal, monkeypatch):
     import httpx
 
-    from silica.agent import providers
+    from silica.model import providers
 
     replies = iter([
         httpx.Response(200, json={"results": [{"index": 1, "relevance_score": 0.9},

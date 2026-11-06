@@ -59,7 +59,7 @@ def test_warm_next_file_attaches_chunks_and_marks():
     fsm = _warm_stub()
     with patch.object(st.orch, "silica_recon", return_value=_recon_res()) as rec, \
          patch.object(st.orch, "silica_payload", return_value=_payload_res()), \
-         patch("silica.agent.providers.get_embedder_or_none", return_value=None):
+         patch("silica.model.providers.get_embedder_or_none", return_value=None):
         assert st.warm_next_file(fsm) is True
     rec.assert_called_once_with("Inbox/f1.md")
     assert len(fsm._chunks) == 2
@@ -119,7 +119,7 @@ def test_handle_payload_skips_reassembly_for_warmed_file():
 def test_handle_salience_skips_when_warm_marker():
     fsm = _warm_stub(cur_fi=1)
     fsm.context["file_1_salience_done"] = True
-    with patch("silica.agent.providers.get_embedder_or_none") as emb:
+    with patch("silica.model.providers.get_embedder_or_none") as emb:
         st.handle_salience(fsm)
     emb.assert_not_called()
     fsm._transition_success.assert_called_once()

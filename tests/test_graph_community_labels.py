@@ -12,11 +12,7 @@ import json
 from unittest.mock import patch
 
 
-from silica.kernel.recall.graph_export import (
-    Community,
-    _community_color,
-    detect_communities,
-)
+from silica.kernel.graph.graph_export import Community, _community_color, detect_communities
 from silica.ui.web.graph_view import render_html
 
 

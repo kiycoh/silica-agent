@@ -114,7 +114,7 @@ def _maybe_assemble(
 
 
 def _study_order(blocks: list[product.NoteBlock]) -> list[product.NoteBlock]:
-    from silica.kernel.report.learner import prerequisites_map
+    from silica.kernel.learn.learner import prerequisites_map
 
     try:
         prerequisites = prerequisites_map() or {}
@@ -183,7 +183,7 @@ def perceive(
         perception.blocks = _study_order(perception.blocks)
     if orient:
         try:
-            from silica.kernel.recall.vault_map import build_vault_map
+            from silica.kernel.report.vault_map import build_vault_map
 
             perception.orientation = build_vault_map() or ""
         except Exception:

@@ -126,7 +126,7 @@ def test_sweep_embeds_missing_note(tmp_path, monkeypatch, enabled):
     _seed_embed(embed, None, files)
     files["c"] = "a body about c"
     monkeypatch.setattr("silica.driver.DRIVER", _driver(files))
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _Emb())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
 
     stats = sync.sweep(force=True)
     assert stats.embedded == 1          # only c — a, b hash-match and stamp only
@@ -143,7 +143,7 @@ def test_sweep_skips_embeds_past_cap(tmp_path, monkeypatch, enabled):
     files = {"a": "body a"} | {f"n{i}": f"body {i}" for i in range(5)}
     monkeypatch.setattr("silica.driver.DRIVER", _driver(files))
     embedder = _DownEmb()  # embed() raising would fail the test if reached
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: embedder)
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: embedder)
 
     stats = sync.sweep(force=True)
     assert stats.embedded == 0          # 5 changed > cap 2 → defer to /embed
@@ -160,7 +160,7 @@ def test_sweep_reembeds_out_of_band_edit(tmp_path, monkeypatch, enabled):
     monkeypatch.setattr(embed, "_index_path", lambda: tmp_path / "embeddings.json")
     files = {"a": "body a", "b": "body b"}
     _seed_embed(embed, None, files)
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _Emb())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
     monkeypatch.setattr("silica.driver.DRIVER", _driver(dict(files)))
     sync.sweep(force=True)              # baseline: everything stamped at mtime 1.0
 
@@ -181,12 +181,12 @@ def test_sweep_touch_only_stamps_without_reembed(tmp_path, monkeypatch, enabled)
     monkeypatch.setattr(embed, "_index_path", lambda: tmp_path / "embeddings.json")
     files = {"a": "body a"}
     _seed_embed(embed, None, files)
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _Emb())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
     monkeypatch.setattr("silica.driver.DRIVER", _driver(files))
     sync.sweep(force=True)
 
     embedder = _Emb()
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: embedder)
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: embedder)
     monkeypatch.setattr("silica.driver.DRIVER", _driver(files, mtimes={"a": 2.0}))
     stats = sync.sweep(force=True)
 
@@ -208,12 +208,12 @@ def test_sweep_embedder_down_leaves_changed_unstamped(tmp_path, monkeypatch, ena
 
     # Establish the stamp baseline with a working embedder first, so the edit
     # below is a real change rather than an unstamped first sighting.
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _Emb())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
     monkeypatch.setattr("silica.driver.DRIVER", _driver(dict(files)))
     sync.sweep(force=True)
     assert sync._load_stamps()["a"] == 1.0
 
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _DownEmb())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _DownEmb())
     files["a"] = "sailing boat harbour regatta wind"
     monkeypatch.setattr("silica.driver.DRIVER", _driver(files, mtimes={"a": 2.0}))
     stats = sync.sweep(force=True)
@@ -274,7 +274,7 @@ def test_sweep_prunes_out_of_band_deletion(tmp_path, monkeypatch, enabled):
     monkeypatch.setattr(embed, "_index_path", lambda: tmp_path / "embeddings.json")
     files = {"a": "body a", "b": "body b", "c": "body c"}
     _seed_embed(embed, None, files)
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _Emb())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
 
     del files["c"]  # deleted out-of-band
     monkeypatch.setattr("silica.driver.DRIVER", _driver(files))
@@ -304,7 +304,7 @@ def test_sweep_refuses_prune_when_view_half_missing(tmp_path, monkeypatch, enabl
     import silica.kernel.recall.embed as embed
     monkeypatch.setattr(embed, "_index_path", lambda: tmp_path / "embeddings.json")
     _seed_embed(embed, None, {f"n{i}": f"body {i}" for i in range(100)})
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _Emb())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
 
     live = {f"n{i}": f"body {i}" for i in range(40)}  # 60/100 absent
     monkeypatch.setattr("silica.driver.DRIVER", _driver(live))
@@ -349,7 +349,7 @@ def test_a_run_end_sweep_embeds_past_the_cap(tmp_path, monkeypatch, enabled):
     monkeypatch.setattr(sync, "_RECONCILE_CAP", 2)
     files = {"a": "body a"} | {f"n{i}": f"body {i}" for i in range(5)}
     monkeypatch.setattr("silica.driver.DRIVER", _driver(files))
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _Emb())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
 
     stats = sync.sweep(force=True, uncapped=True)
     assert stats.embedded == 5

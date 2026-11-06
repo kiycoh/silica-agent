@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from silica.agent.events import ToolCompleteEvent
+from silica.obs.events import ToolCompleteEvent
 from silica.ui.web.callback import event_to_json, tool_calls_to_json
 
 REFUSAL = {

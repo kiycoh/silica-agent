@@ -12,7 +12,7 @@ import pytest
 
 from silica.driver import fs_backend
 from silica.driver.fs_backend import ObsidianFSBackend
-from silica.kernel.report import learner
+from silica.kernel.learn import learner
 
 
 def test_a_long_note_reads_whole_and_only_a_short_one_is_held(tmp_path, monkeypatch):

@@ -212,6 +212,6 @@ def test_the_probe_contract_tracks_the_shipped_explain_prompt():
 def test_an_unparseable_anchor_reply_returns_no_claims(monkeypatch):
     """Minting a row per claim with an empty span would push H1 towards a
     harness failure and look like a finding."""
-    monkeypatch.setattr("silica.agent.llm.call_llm",
+    monkeypatch.setattr("silica.model.llm.call_llm",
                         lambda **kw: type("R", (), {"text": "not json at all"})())
     assert anchor("some explanation", PACK, "m") == []

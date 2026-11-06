@@ -1,10 +1,10 @@
-"""Tests for silica/agent/bus.py — EventBus pub-sub mechanics."""
+"""Tests for silica/obs/bus.py — EventBus pub-sub mechanics."""
 from __future__ import annotations
 
 import threading
 
 
-from silica.agent.bus import EventBus
+from silica.obs.bus import EventBus
 
 
 def test_subscribe_and_publish():
@@ -70,7 +70,7 @@ def test_subscriber_exception_is_isolated(caplog):
     bus.subscribe("t", bad)
     bus.subscribe("t", good.append)
 
-    with caplog.at_level(logging.ERROR, logger="silica.agent.bus"):
+    with caplog.at_level(logging.ERROR, logger="silica.obs.bus"):
         bus.publish("t", "ev")
 
     assert good == ["ev"]

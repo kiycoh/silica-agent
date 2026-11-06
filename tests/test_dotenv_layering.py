@@ -98,7 +98,7 @@ def test_an_exported_key_still_outranks_the_user_dotenv(tmp_path):
 # decided which files silica reads. Importing the module that owns litellm is
 # the only honest way to catch it.
 _PROBE_VIA_LITELLM = (
-    "import silica.agent.llm, json, os; "
+    "import silica.model.llm, json, os; "
     "print(json.dumps({k: os.getenv(k) for k in "
     "('SILICA_WORKER_MODEL', 'SILICA_EMBEDDING_SERVE_CMD')} | {'worker_model': ''}))"
 )

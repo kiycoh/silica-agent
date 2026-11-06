@@ -101,7 +101,7 @@ def _recon_embedder():
     and keep recon deterministic; production uses the real embedder.
     """
     try:
-        from silica.agent.providers import get_embedder
+        from silica.model.providers import get_embedder
         from silica.config import CONFIG
         return get_embedder(CONFIG)
     except Exception:
@@ -123,7 +123,7 @@ def _prefers(candidate, incumbent) -> bool:
     Only under safe mode is a note ever present twice; everywhere else this
     answers False and grouping keeps its first hit exactly as before.
     """
-    from silica.kernel.vault_manifest import active_write_dir, within
+    from silica.kernel.base.manifest import active_write_dir, within
     from silica.onboarding.adopt import SAFE_WRITE_DIR
 
     if active_write_dir() != SAFE_WRITE_DIR:
@@ -443,7 +443,7 @@ def silica_deferred_retry(content_hash: Annotated[str, Field(description='Conten
     - Ops that still fail remain in the deferred store.
     - If the bundle is fully cleared, it is removed from the deferred store.
     """
-    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.deferred import get_deferred_store
     from silica.kernel.write.validate import validate_operations
     from silica.kernel.write.ops_io import parse_ops
     from silica.tools.wrapped import build_txn
@@ -576,7 +576,7 @@ def _record_recovered_writes(txn, validated, content_hash: str, bundle: dict) ->
         run_id = ""
 
     try:
-        from silica.kernel.vault_manifest import source_key
+        from silica.kernel.base.manifest import source_key
         from silica.kernel.write.provenance import append_record, is_deriving_op
 
         source = source_key(bundle.get("source_path", "") or "")
@@ -610,7 +610,7 @@ def submit_repaired_ops(content_hash: Annotated[str, Field(description='Hash of 
     under "written" or "renamed" (renamed = written, but under a heading no
     parked op carries, so the original stays deferred).
     """
-    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.deferred import get_deferred_store
     from silica.kernel.text.sanitize import normalize_ops
     from silica.kernel.write.bulk import execute_operations
     from silica.kernel.write.ops_io import parse_ops
@@ -691,7 +691,7 @@ def silica_anneal(steer: Annotated[bool, Field(description="After the mechanical
     model in a bounded repair loop per bundle, steered by the per-op
     ``rejection_reason`` stamps and the validator's live verdicts.
     """
-    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.deferred import get_deferred_store
 
     store = get_deferred_store()
     bundles = store.list_all()
@@ -747,7 +747,7 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
     from silica.agent.constraints import AgentConstraints
     from silica.agent.loop import run_agent
     from silica.config import CONFIG
-    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.deferred import get_deferred_store
 
     store = get_deferred_store()
     bundle = store.get(content_hash)

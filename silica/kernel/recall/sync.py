@@ -310,7 +310,7 @@ def _sweep(stats: SweepStats, uncapped: bool = False) -> SweepStats:
     embed_ok = True
     if embed_seeded:
         try:
-            from silica.agent.providers import get_embedder
+            from silica.model.providers import get_embedder
             from silica.kernel.recall.embed import _embed_signature, build_index, embedder_identity
             embedder = get_embedder(CONFIG)
             model = embedder_identity(embedder)

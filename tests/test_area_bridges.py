@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Bridges: the wikilinks that join two areas, ranked by how rare their pair of
 areas is (ADR-0045). One ranking feeds the report row and the explore surface."""
-from silica.kernel.recall.graph_export import area_bridges
+from silica.kernel.graph.graph_export import area_bridges
 from silica.kernel.report.graph_report.compute import compute_report
 
 
@@ -139,7 +139,7 @@ def test_shape_ships_the_areas_reading_and_the_colours_bridges_paints_with(clien
     """ADR-0060: an area carries the colour its notes wear on the graph, so a
     disc and the dots it stands for agree. The zone rows it shipped beside them
     went with the graph's zones (ADR-0136)."""
-    from silica.kernel.recall.graph_export import _community_color
+    from silica.kernel.graph.graph_export import _community_color
 
     _two_triangles(tmp_vault, "[[A]] [[B]] [[D]]")
     s = client.get("/shape").json()

@@ -63,7 +63,7 @@ def test_recall_tool_forwards_folder(monkeypatch):
 def test_semantic_search_folder_filters_results(monkeypatch):
     monkeypatch.setattr("silica.kernel.recall.perception.facade_retrieve",
                         lambda *a, **k: (_results(MIXED), None))
-    monkeypatch.setattr("silica.agent.providers.get_reranker", lambda *_a, **_k: None)
+    monkeypatch.setattr("silica.model.providers.get_reranker", lambda *_a, **_k: None)
     from silica.tools.graph import silica_semantic_search
 
     out = silica_semantic_search("q", k=5, memory=False, folder="docs/adr")

@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from silica.agent.providers import get_provider
+from silica.model.providers import get_provider
 from silica.config import SilicaConfig
 
 
@@ -62,8 +62,8 @@ def _run(escalate):
     provider = MagicMock()
     provider.call_llm.return_value = _fake_response()
     with patch.dict(os.environ, {"MODEL_CONTEXT_WINDOW": "0", "DISTILLER_MAX_TOKENS": "0"}), \
-         patch("silica.agent.providers.get_provider", return_value=provider) as gp, \
-         patch("silica.agent.providers.model_limits", return_value=(262144, 8192)) as ml:
+         patch("silica.model.providers.get_provider", return_value=provider) as gp, \
+         patch("silica.model.providers.model_limits", return_value=(262144, 8192)) as ml:
         run_distiller(payload={"schema_version": 1, "batches": []},
                       target="Notes", language="English", escalate=escalate)
     return gp, ml, provider

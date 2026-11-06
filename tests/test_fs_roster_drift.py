@@ -147,7 +147,7 @@ def test_out_of_band_create_reaches_the_embed_index(vault_dir, monkeypatch):
     then write it a second time as new. test_index_sync.py cannot catch this:
     it stubs the driver out, which is exactly the layer that was lying.
     """
-    import silica.agent.providers as providers
+    from silica.model import providers
     import silica.driver as driver_mod
     from silica.kernel.recall import sync
     from silica.kernel.recall.embed import build_index, get_store

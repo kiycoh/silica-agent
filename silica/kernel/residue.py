@@ -69,7 +69,7 @@ _VERDICT_RE = re.compile(r"^\s*(\d+)\s*[:.)]\s*(yes|no)\b", re.M | re.I)
 
 
 def _llm(prompt: str, max_tokens: int) -> tuple[str, str | None]:
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.config import CONFIG
 
     # temperature=0: factscore-judge parity. reasoning=False: both calls here
@@ -206,7 +206,7 @@ def _best_paragraphs(body: str, fact: str, n: int = 3) -> list[str]:
     """The n paragraphs of ``body`` sharing the most content words with
     ``fact`` — lexical windowing so a 30KB aggregate note contributes a
     focused excerpt instead of blowing up the judge prompt."""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     body = frontmatter.split(body)[2]
     if len(body) < _WINDOW_ABOVE_CHARS:
         n = len(body)

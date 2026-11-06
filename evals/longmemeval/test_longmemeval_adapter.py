@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import json
 
-import silica.agent.llm as llm_mod
-from silica.agent.llm import LLMResponse
+from silica.model import llm as llm_mod
+from silica.model.llm import LLMResponse
 from evals.longmemeval import runner
 
 
@@ -575,12 +575,12 @@ def test_judge_retries_empty_reply_before_none(monkeypatch):
         return _types.SimpleNamespace(text="" if len(calls) == 1 else "yes")
 
     monkeypatch.setattr("time.sleep", lambda s: None)  # backoff is not the test
-    monkeypatch.setattr("silica.agent.llm.call_llm", fake)
+    monkeypatch.setattr("silica.model.llm.call_llm", fake)
     assert runner.judge("m", "multi-session", "q", "gold", "resp") is True
     assert len(calls) == 2
 
     calls.clear()
-    monkeypatch.setattr("silica.agent.llm.call_llm",
+    monkeypatch.setattr("silica.model.llm.call_llm",
                         lambda *a, **k: _types.SimpleNamespace(text=""))
     # q2, not q: the phase-1 verdict is frozen in the oracle cache, and the
     # identical request would be served from it without reaching call_llm.

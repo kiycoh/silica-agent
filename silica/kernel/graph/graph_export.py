@@ -229,7 +229,7 @@ def stamp_native(nodes: list[dict], vault: Path) -> None:
     build; memoize on vault_epoch as _notes_meta does if a 5k-note vault makes
     /graph wait on it.
     """
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     for n in nodes:
         # A day stays a triangle: the shape Obsidian's own setting gave it.
@@ -308,7 +308,7 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
     # A daily note is the one Obsidian declares (ADR-0062), typed here so every
     # consumer of the payload (export, /shape, the report) sees the same nodes.
     from silica.config import CONFIG
-    from silica.kernel.recall.daily_layer import stamp_daily
+    from silica.kernel.graph.daily_layer import stamp_daily
 
     stamp_daily(nodes, Path(CONFIG.vault_path or "."))
     stamp_native(nodes, Path(CONFIG.vault_path or "."))
@@ -454,7 +454,7 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
             idx += 1
     # A daily note's relations come from its blocks (ADR-0062), here and not in
     # the export, so /shape's zones are drawn over the same edges the graph is.
-    from silica.kernel.recall.daily_layer import daily_edges
+    from silica.kernel.graph.daily_layer import daily_edges
 
     return edges + daily_edges(nodes)
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import types
 
 from silica.kernel.progress import RunManifestEntry
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 from silica.kernel.write.contested import (
     STAMP_RE,
     SUPERSEDED_HEADING,
@@ -71,7 +71,7 @@ def test_undated_source_leaves_the_leaf_undated(tmp_vault):
     feeds — ingest noise wearing the event clock's uniform."""
     from silica.driver import DRIVER
     from silica.kernel.recall.paths import SOURCES_DIR
-    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.base.manifest import in_write_dir
 
     tmp_vault.note("Inbox/nodate.md", "verbatim source words\n")
     tmp_vault.note("Concepts/B.md", "# B\n\nbody\n")

@@ -342,7 +342,7 @@ def note_path(thread: Thread) -> str:
     thread's first message. `<key6>` is what keeps two "Re: meeting" threads
     of one day apart: without it the second would restage over the first."""
     from silica.kernel.recall.paths import SOURCES_DIR
-    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.base.manifest import in_write_dir
 
     first = thread.mails[0]
     date = first.date.date().isoformat() if first.date else "undated"
@@ -626,7 +626,7 @@ def _no_images(text: str) -> str:
 # A body's `[[Secret]]` made a node of the Explore graph and an edge from the
 # mail note, and `#urgent` a tag (2026-10-12). Each form is reduced to its text,
 # as `_unlinked` reduces a heading. Silica's graph reads links through a
-# markdown parse (kernel/link/ast.py), so a backslash escape or an entity that
+# markdown parse (kernel/base/markdown.py), so a backslash escape or an entity that
 # decodes to `[` is a link there too: both are written so they stay as typed.
 _ESCAPE_RE = re.compile(r"\\(?=[!-/:-@\[-`{-~])")
 _ENTITY_RE = re.compile(r"&(?=#\d+;|#[xX][0-9a-fA-F]+;|[A-Za-z][A-Za-z0-9]*;)")
@@ -638,7 +638,7 @@ _LOCAL_LINK_RE = re.compile(
 # name nothing. Footnote definitions are among them; Silica's parser reads one
 # as a link too.
 _REF_DEF_RE = re.compile(r"\[([^\[\]\n]+)\]:")
-_ADR_REF_RE = re.compile(r"\bADR-(\d{4})\b")  # kernel/link/ast.py's numbered-decision link
+_ADR_REF_RE = re.compile(r"\bADR-(\d{4})\b")  # kernel/base/markdown.py's numbered-decision link
 # Obsidian's inline tag: `#` at a word's start, with a letter in what follows,
 # so "#12" and a URL's "page#anchor" stay as written.
 _INLINE_TAG_RE = re.compile(r"(?:^|(?<=[\s(\[{<>\"'*_,;!|]))#(?=[\w/-]*[^\W\d])(?=[\w/-])")
@@ -658,7 +658,7 @@ def _inert(text: str) -> str:
     `&lt;` also shows inside a code block, where nothing needed escaping: a
     cosmetic cost taken because telling code from prose in text a stranger
     shaped is where a renderer and this pass would disagree."""
-    from silica.kernel.link.ast import extract_links
+    from silica.kernel.base.markdown import extract_links
 
     text = _ENTITY_RE.sub("&amp;", _ESCAPE_RE.sub(r"\\\\", _CONTROL_RE.sub("", text)))
     text = _TAG_OPEN_RE.sub("&lt;", _no_links(_no_images(text)))
@@ -832,7 +832,7 @@ class MailAdapter:
                        meta={"thread": thread, "origin": src.name})
 
     def to_stub(self, item: RawItem) -> GroundedStub:
-        from silica.kernel.write import frontmatter
+        from silica.kernel.base import frontmatter
 
         thread: Thread = item.meta["thread"]
         path = note_path(thread)
@@ -1006,7 +1006,7 @@ def _norm(path: str) -> str:
 
 def _stamped(path: str) -> bool:
     from silica.config import CONFIG
-    from silica.kernel.write.frontmatter import FM_RE
+    from silica.kernel.base.frontmatter import FM_RE
 
     p = Path(CONFIG.vault_path or ".") / (_norm(path) + ".md")
     try:
@@ -1044,8 +1044,8 @@ def _nucleated_pdfs() -> set[str]:
     done/ (a finished one): the places cli._prior_conversions reads."""
     from silica.config import CONFIG
     from silica.driver import DRIVER
-    from silica.kernel.vault_manifest import active_done_dir, active_inbox_dir
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base.manifest import active_done_dir, active_inbox_dir
+    from silica.kernel.base import frontmatter
 
     rels = [r.path for r in DRIVER.list_inbox_files() if r.path.endswith(".md")] \
         if active_inbox_dir() else []
@@ -1076,7 +1076,7 @@ def gate6(vault: str | None = None) -> dict:
 def _ids_at(path: str) -> set[str] | None:
     """`mail_ids` of the note at `path`; None when there is no note there."""
     from silica.config import CONFIG
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     try:
         text = (Path(CONFIG.vault_path or ".") / path).read_text(encoding="utf-8", errors="replace")

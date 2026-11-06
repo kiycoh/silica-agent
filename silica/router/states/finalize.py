@@ -225,7 +225,7 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
     entry points from double-recording.
     """
     try:
-        from silica.kernel.recall.run_log import append_log_line, format_nucleate_event
+        from silica.kernel.write.run_log import append_log_line, format_nucleate_event
 
         basename = os.path.basename(source_file)
         logged = getattr(fsm, "_files_logged", None)
@@ -243,7 +243,7 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
         content_hashes = getattr(fsm, "_file_content_hashes", [])
         if fi < len(content_hashes):
             try:
-                from silica.kernel.recall.deferred import get_deferred_store
+                from silica.kernel.write.deferred import get_deferred_store
                 bundle = get_deferred_store().get(content_hashes[fi])
                 if bundle:
                     deferred_count = len(bundle.get("rejected_ops", []))
@@ -311,7 +311,7 @@ def _source_text_after_cleanup(source_file: str) -> str:
     """The source's text once CLEANUP has archived it: same three candidates
     validate's `_full_source_text` tries, "" when none reads."""
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import active_done_dir, archive_path_for
+    from silica.kernel.base.manifest import active_done_dir, archive_path_for
 
     root = CONFIG.vault_path or ""
     for cand in (source_file, archive_path_for(source_file),
@@ -334,7 +334,7 @@ def _archived_source_text(key: str) -> str:
     spans then read as lost, which keeps the note drifted rather than vouching
     for it with the other lecture's text."""
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import active_done_dir
+    from silica.kernel.base.manifest import active_done_dir
 
     root = os.path.join(CONFIG.vault_path or "", active_done_dir())
     found = [os.path.join(root, key)] if os.path.isfile(os.path.join(root, key)) else []
@@ -362,7 +362,7 @@ def _reverify_prior(fsm, key: str, source_file: str, sha256: str,
     2026-09-04: snippet 2/2 grounded, body still on the old constant).
     The whole body is what a reader gets, so its score wins."""
     from silica.driver import DRIVER
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.write.provenance import (
         grounding_counts, read_records, sources_of, ungrounded_spans)
 
@@ -421,7 +421,7 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
     effort and must never block CLEANUP.
     """
     try:
-        from silica.kernel.vault_manifest import source_key
+        from silica.kernel.base.manifest import source_key
         from silica.kernel.write.provenance import append_record, is_deriving_op
 
         basename = os.path.basename(source_file)
@@ -466,12 +466,12 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
     Best-effort and must never block CLEANUP.
     """
     try:
-        from silica.kernel.write import frontmatter
+        from silica.kernel.base import frontmatter
         from silica.kernel.write.contested import append_before_superseded
         from silica.kernel.write.ops import InverseOp, InverseOpKind
         from silica.kernel.write.templates import append_source
         from silica.kernel.recall.paths import SOURCES_DIR
-        from silica.kernel.vault_manifest import in_write_dir
+        from silica.kernel.base.manifest import in_write_dir
         from silica.kernel.write.provenance import (
             attribute_lines,
             footnote_label,
@@ -479,7 +479,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             source_event_date,
         )
 
-        from silica.kernel.vault_manifest import source_key
+        from silica.kernel.base.manifest import source_key
 
         basename = os.path.basename(source_file)
         # A segment of a one-node source (a Zotero paper, ADR-0055) names the
@@ -682,7 +682,7 @@ def file_language(fsm: "InjectorFSM", fi: int, source_text: str) -> str | None:
     whenever the manifest declares a language, so without the middle rung
     the outline claims came out in English on an Italian vault (2026-09-02)."""
     from silica.kernel.text import language as lang_mod
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
     return (fsm.context.get(f"file_{fi}_language")
             or get_active_manifest().conventions.language
             or lang_mod.display_name(lang_mod.detect(source_text[:4000])))

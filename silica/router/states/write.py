@@ -69,7 +69,7 @@ def handle_snapshot(fsm: "InjectorFSM") -> None:
 
         # S3.2: Take pre-write graph snapshot incrementally
         try:
-            from silica.kernel.link.ast import extract_links as _extract_links
+            from silica.kernel.base.markdown import extract_links as _extract_links
             ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
             touched_refs = []
             snapshot_domain = set()
@@ -314,7 +314,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
 
         # Best-effort incremental embed index refresh
         try:
-            from silica.agent.providers import get_embedder
+            from silica.model.providers import get_embedder
             from silica.kernel.recall.embed import get_store
             # The run-end sweep that embeds patches skips a driver with no
             # mtime_of (the ws backend) and an index_sweep turned off.

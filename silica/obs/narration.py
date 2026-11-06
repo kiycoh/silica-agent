@@ -232,7 +232,7 @@ class Narrator:
             self._seq = rec["seq"]
             # Inside the lock on purpose: a live consumer must never observe
             # N+1 before N. RLock, so a subscriber that narrates cannot deadlock.
-            from silica.agent.bus import BUS
+            from silica.obs.bus import BUS
             BUS.publish(BEAT_TOPIC, rec)
             return rec
 
@@ -241,7 +241,7 @@ class Narrator:
                "run": _run_var.get(), **partial}
         self._append_raw(rec)
         self._seq = rec["seq"]
-        from silica.agent.bus import BUS
+        from silica.obs.bus import BUS
         BUS.publish(BEAT_TOPIC, rec)
         return rec
 
@@ -325,7 +325,7 @@ class Narrator:
         (ticket 01 Q9). Thinking start maps here; the close is explicit in
         loop.py where the reasoning text exists.
         """
-        from silica.agent import events as ev
+        from silica.obs import events as ev
         if self._sid is None:
             return
         if isinstance(event, ev.ToolStartEvent):

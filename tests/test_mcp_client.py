@@ -18,7 +18,7 @@ import pytest
 from pydantic import BaseModel
 
 from silica.agent.constraints import AgentConstraints
-from silica.agent.llm import ToolCall
+from silica.model.llm import ToolCall
 from silica.agent.loop import run_agent
 from silica.tools import Tool
 from tests.mcp_helpers import configure

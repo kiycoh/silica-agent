@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import litellm
 import pytest
 
-from silica.agent.llm import call_llm
+from silica.model.llm import call_llm
 from tests.llm_mocks import litellm_mock_response
 
 
@@ -39,7 +39,7 @@ def test_cut_stream_is_retried_not_answered():
 
     with patch("litellm.completion", side_effect=lambda **k: iter([_opening_chunk()])), \
          patch("litellm.stream_chunk_builder", side_effect=built), \
-         patch("silica.agent.llm.time.sleep"):
+         patch("silica.model.llm.time.sleep"):
         res = call_llm(model="test/model", messages=[{"role": "user", "content": "hi"}],
                        on_delta=lambda t, c: None)
 
@@ -53,7 +53,7 @@ def test_spent_budget_is_not_retried():
 
     with patch("litellm.completion", side_effect=lambda **k: iter([_opening_chunk()])), \
          patch("litellm.stream_chunk_builder", return_value=built) as builder, \
-         patch("silica.agent.llm.time.sleep"):
+         patch("silica.model.llm.time.sleep"):
         res = call_llm(model="test/model", messages=[{"role": "user", "content": "hi"}],
                        on_delta=lambda t, c: None)
 
@@ -66,7 +66,7 @@ def test_cut_stream_that_never_recovers_raises():
     """Six cut streams in a row surface as an error, never as an empty answer."""
     with patch("litellm.completion", side_effect=lambda **k: iter([_opening_chunk()])), \
          patch("litellm.stream_chunk_builder", return_value=_built(None)), \
-         patch("silica.agent.llm.time.sleep"), \
+         patch("silica.model.llm.time.sleep"), \
          pytest.raises(litellm.APIConnectionError):
         call_llm(model="test/model", messages=[{"role": "user", "content": "hi"}],
                  on_delta=lambda t, c: None)

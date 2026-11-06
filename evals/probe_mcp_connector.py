@@ -68,7 +68,7 @@ def _scratch_home(root: Path) -> Path:
 
 
 def run(out: Path) -> int:
-    from silica.agent.events import ApprovalRequestEvent
+    from silica.obs.events import ApprovalRequestEvent
     from silica.connectors import mcp_client, mcp_tools
     from silica.connectors.mcp_tools import TOOLS
     from tests.mcp_fixture_server import MAILBOX_WRITES

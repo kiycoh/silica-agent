@@ -16,7 +16,7 @@ from rich.text import Text
 from rich.markup import escape
 from rich.console import Group, RenderableType
 from rich.progress import Progress, BarColumn, MofNCompleteColumn, TaskID, TimeElapsedColumn
-from silica.agent.events import (
+from silica.obs.events import (
     ApprovalRequestEvent,
     ToolStartEvent,
     ToolCompleteEvent,
@@ -43,7 +43,7 @@ def emit_phase(event) -> None:
     from a test without writing into that global.
     """
     try:
-        from silica.agent.bus import BUS
+        from silica.obs.bus import BUS
         BUS.publish("work/phase", event)
     except Exception:
         pass
@@ -386,7 +386,7 @@ class _ProgressRenderer:
         # Register as batch hook so emit_batch_event reaches this renderer
         global _batch_run_hook
         _batch_run_hook = self.__call__
-        from silica.agent.bus import BUS
+        from silica.obs.bus import BUS
         BUS.subscribe("work/feedback", self._on_work_feedback)
         BUS.subscribe("work/phase", self._on_pipeline_phase)
 
@@ -940,7 +940,7 @@ class _ProgressRenderer:
         self._stream_buf = ""
         self._injector_call_id = None
         self._inject_pos = {}
-        from silica.agent.bus import BUS
+        from silica.obs.bus import BUS
         BUS.unsubscribe("work/feedback", self._on_work_feedback)
         BUS.unsubscribe("work/phase", self._on_pipeline_phase)
         if self._batch is not None:

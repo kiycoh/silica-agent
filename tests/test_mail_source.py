@@ -253,7 +253,7 @@ def test_read_refuses_a_file_that_names_more_than_one_thread(tmp_path):
 
 
 def test_a_thread_target_becomes_a_terminal_note_stamped_as_mail(tmp_vault, tmp_path):
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     path = _two_threads(tmp_path)
     stub = mail.MAIL.to_stub(mail.MAIL.read(f"{path}#<t1@x.example>"))
@@ -422,7 +422,7 @@ def test_a_bare_eml_is_written_only_under_the_import_defaults(tmp_vault, tmp_pat
 
 def test_nucleate_reaches_the_adapter_in_a_vault_with_default_sources(tmp_vault):
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
     from silica.sources.registry import ALL_ADAPTERS, adapter_for
 
     assert ALL_ADAPTERS[-1] is mail.MAIL

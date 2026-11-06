@@ -23,7 +23,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from silica.agent.compaction import read_stub, relevance_candidates
-from silica.agent.decide import decide
+from silica.model.decide import decide
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ def compact_by_relevance(messages: list[dict], tools: dict) -> list[int]:
         if p is not None and p < DROP_BELOW:
             messages[i]["content"] = read_stub(name, arguments, messages[i]["content"], _WHY)
             dropped.append(i)
-    from silica.agent.narration import NARRATOR
+    from silica.obs.narration import NARRATOR
 
     NARRATOR.narrate("compaction", "done",
                      f"relevance: {len(dropped)} of {len(candidates)} result(s) elided",

@@ -84,7 +84,7 @@ def active_distill_profile() -> str:
     Never raises: the validator asks on every ingest op, and a missing or
     unreadable manifest must read as the default profile, not an error."""
     try:
-        from silica.kernel.vault_manifest import get_active_manifest
+        from silica.kernel.base.manifest import get_active_manifest
 
         declared = get_active_manifest().conventions.distill_profile
     except Exception:
@@ -106,7 +106,7 @@ def render_prompt(target: str, hub: str | None = None, source_text: str = "",
     own date). Empty ⇒ "unknown", and the prompt rule keeps source wording.
 
     MAX_TAGS comes from the active vault's `conventions:` block
-    (silica/kernel/vault_manifest.py) — single source shared with
+    (silica/kernel/base/manifest.py) — single source shared with
     `ofm.ofm_lint`'s max-tags check. A vault without a manifest gets today's
     default (3), so this is bit-identical when unconfigured.
 
@@ -122,7 +122,7 @@ def render_prompt(target: str, hub: str | None = None, source_text: str = "",
     "English", ...), never None.
     """
     from silica.kernel.text import language as lang_mod
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
 
     conventions = get_active_manifest().conventions
     profile = profile or active_distill_profile()
@@ -469,7 +469,7 @@ def _call_with_deadline(fn, seconds: float, cancel: "threading.Event | None" = N
     300s and the orphan hit its 400s per-call cap at t+400 and started attempt
     2/3, so the run's own dead calls were producing the 429s it was retrying for.
     """
-    from silica.agent.llm import run_with_deadline
+    from silica.model.llm import run_with_deadline
     try:
         return run_with_deadline(
             fn, seconds,
@@ -521,7 +521,7 @@ def run_distiller(
     Returns:
         parsed dict with {"updates": [...]} or {"error": ...}
     """
-    from silica.agent.providers import get_provider
+    from silica.model.providers import get_provider
     from silica.config import CONFIG
     from silica.kernel import distill_cache
     from silica.kernel.context_builder import build_context
@@ -624,7 +624,7 @@ def run_distiller(
     ceiling = int(os.getenv("DISTILLER_MAX_TOKENS", "0"))
     explicit_ceiling = ceiling > 0
     if not context_window or not ceiling:
-        from silica.agent.providers import model_limits
+        from silica.model.providers import model_limits
         # Same fallback chain as get_provider for the active role.
         if escalate:
             w_provider, w_model = (CONFIG.distill_escalation_provider,
@@ -692,7 +692,7 @@ def run_distiller(
             # under one key.
             cache_ok = False
             logger.warning("Distiller call failed, retrying on %s: %s", fallback_model, e)
-            from silica.agent.llm import call_llm
+            from silica.model.llm import call_llm
             return _call_with_deadline(lambda: call_llm(
                 model=(CONFIG.distill_escalation_model or CONFIG.model) if escalate else CONFIG.model,
                 messages=msgs,

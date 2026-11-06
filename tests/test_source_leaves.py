@@ -118,7 +118,7 @@ def test_leaf_carries_the_citation_fields_the_converter_stamped(tmp_vault):
 
     finalize._write_source_leaf(fsm, "Inbox/src.md")
 
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     data, _, _ = frontmatter.split(_vault_file("sources/src.md").read_text(encoding="utf-8"))
     assert (data["doi"], data["arxiv"], data["authors"], data["source_title"]) == (
         "10.1/x", "2310.08560", "A. Smith", "A Paper")
@@ -318,7 +318,7 @@ def test_embed_index_invisible(tmp_vault, monkeypatch):
         def embed(self, texts, query=False):
             return [[1.0, 0.0] for _ in texts]
 
-    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: _Emb())
+    monkeypatch.setattr("silica.model.providers.get_embedder", lambda cfg: _Emb())
     from silica.tools.composed import silica_embed_refresh
 
     res = silica_embed_refresh(force=True)
@@ -558,7 +558,7 @@ def test_a_footnote_definition_is_a_link_to_the_leaf():
     the footnote plugin that line is a link reference definition whose target
     is the literal `[[sources/X]]`, so the note's edge to its leaf never reached
     the graph: no "Notes from this paper", no paper groups (ADR-0055)."""
-    from silica.kernel.link.ast import extract_links
+    from silica.kernel.base.markdown import extract_links
 
     note = "# A\nA claim.[^p]\n\n## Sources\n\n[^p]: [[sources/@smith2024]]\n"
 

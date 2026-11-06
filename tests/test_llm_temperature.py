@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from silica.agent.llm import call_llm
+from silica.model.llm import call_llm
 
 from tests.llm_mocks import litellm_mock_response as _mock_completion
 

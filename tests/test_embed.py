@@ -507,7 +507,7 @@ def test_silica_semantic_search_returns_results(tmp_path, monkeypatch):
     mock_embedder = MagicMock()
     mock_embedder.embed.return_value = [[1.0, 0.0]]
 
-    with patch("silica.agent.providers.get_embedder", return_value=mock_embedder):
+    with patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         from silica.tools.composed import silica_semantic_search
         result = silica_semantic_search(query="test", k=2)
 
@@ -522,7 +522,7 @@ def test_silica_semantic_search_returns_results(tmp_path, monkeypatch):
 
 def test_openai_embedder_returns_sorted_embeddings():
     """The embedder should return vectors in input order regardless of API ordering."""
-    from silica.agent.providers import OpenAIEmbedder
+    from silica.model.providers import OpenAIEmbedder
 
     # Build a mock openai client
     mock_client = MagicMock()
@@ -544,7 +544,7 @@ def test_openai_embedder_role_prefixes():
     """Asymmetric embedders (jina-embeddings-v5 retrieval) are trained with a
     role prompt: queries and documents must each get their own, and an unset
     prefix must leave the text untouched (the Qwen3 default runs without one)."""
-    from silica.agent.providers import OpenAIEmbedder
+    from silica.model.providers import OpenAIEmbedder
 
     mock_client = MagicMock()
     mock_client.embeddings.create.return_value = MagicMock(data=[MagicMock(index=0, embedding=[1.0])])
@@ -568,7 +568,7 @@ def test_queries_go_to_their_own_server_and_documents_stay_on_the_index_one():
     queries a server of their own."""
     from types import SimpleNamespace
 
-    from silica.agent.providers import OpenAIEmbedder, get_embedder
+    from silica.model.providers import OpenAIEmbedder, get_embedder
 
     def _client():
         c = MagicMock()
@@ -592,7 +592,7 @@ def test_queries_go_to_their_own_server_and_documents_stay_on_the_index_one():
 
 
 def test_openai_embedder_empty_input():
-    from silica.agent.providers import OpenAIEmbedder
+    from silica.model.providers import OpenAIEmbedder
 
     embedder = OpenAIEmbedder.__new__(OpenAIEmbedder)
     assert embedder.embed([]) == []

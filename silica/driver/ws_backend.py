@@ -36,11 +36,11 @@ from silica.driver.base import (
     NoteRef,
     Txn,
 )
-from silica.kernel.link.ast import extract_links_typed
-from silica.kernel.recall.graph_export import is_vault_artifact
+from silica.kernel.base.markdown import extract_links_typed
+from silica.kernel.graph.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import is_source_leaf
 from silica.kernel.write import preserve, session_changes
-from silica.kernel.write import frontmatter as fm
+from silica.kernel.base import frontmatter as fm
 from silica.kernel.write.notetype import stamp_type
 from silica.kernel.write.ops import InverseOp, InverseOpKind
 
@@ -271,7 +271,7 @@ class ObsidianWSBackend(GraphIndexMixin):
         ]
 
     def list_inbox_files(self) -> list[NoteRef]:
-        from silica.kernel.vault_manifest import active_inbox_dir
+        from silica.kernel.base.manifest import active_inbox_dir
         inbox = active_inbox_dir()
         if not inbox:
             return []
@@ -656,7 +656,7 @@ class ObsidianWSBackend(GraphIndexMixin):
 
     def _resolve_link(self, target: str, source_path: str = "") -> NoteRef | None:
         """Resolve a link target against the index — by path, else by name."""
-        from silica.kernel.link.ast import resolve_relative
+        from silica.kernel.base.markdown import resolve_relative
 
         # Mirror of fs_backend: a `./`/`../` target is relative to the source
         # note and invisible to the suffix matcher until normalized.

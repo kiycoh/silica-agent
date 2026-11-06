@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from silica.agent.llm import ToolCall
+from silica.model.llm import ToolCall
 
 FIXTURE = str(Path(__file__).with_name("mcp_fixture_server.py"))
 

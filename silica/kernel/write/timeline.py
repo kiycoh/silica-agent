@@ -29,7 +29,7 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 from silica.kernel.write.contested import note_clock
 from silica.kernel.recall.paths import SOURCES_DIR
 

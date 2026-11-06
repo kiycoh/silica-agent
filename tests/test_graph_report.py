@@ -233,7 +233,7 @@ def test_to_markdown_folds_long_lists_into_callouts():
 
 
 def test_is_vault_artifact_matches_root_only():
-    from silica.kernel.recall.graph_export import is_vault_artifact
+    from silica.kernel.graph.graph_export import is_vault_artifact
     assert is_vault_artifact("GRAPH_REPORT.md")
     assert is_vault_artifact("log")
     assert not is_vault_artifact("Concepts/log.md")   # a real note in a subfolder
@@ -243,7 +243,7 @@ def test_is_vault_artifact_matches_root_only():
 def test_build_graph_data_excludes_vault_artifacts(tmp_vault):
     """GRAPH_REPORT.md/log.md are Silica's own output — they must stay out of the
     graph, or the report's own `[[...]]` would zero the orphan count next run."""
-    from silica.kernel.recall.graph_export import build_graph_data
+    from silica.kernel.graph.graph_export import build_graph_data
 
     tmp_vault.note("Real.md", "# Real\nNo links here.\n")
     tmp_vault.note("GRAPH_REPORT.md", "# Report\n[[Real]]\n")   # report links Real
@@ -605,7 +605,7 @@ def _staging_graph():
 
 
 def test_inbox_and_done_files_are_not_orphans(monkeypatch):
-    import silica.kernel.vault_manifest as vm
+    from silica.kernel.base import manifest as vm
 
     monkeypatch.setattr(vm, "active_inbox_dir", lambda: "silica/Inbox")
     monkeypatch.setattr(vm, "active_write_dir", lambda: "silica")
@@ -631,7 +631,7 @@ def test_edge_graph_is_the_same_graph_whatever_order_the_edges_arrive_in():
     """
     import random
 
-    from silica.kernel.recall.graph_export import edge_graph
+    from silica.kernel.graph.graph_export import edge_graph
 
     nodes = [{"id": f"n{i}.md", "type": "note"} for i in range(20)]
     edges = [{"from": f"n{i}.md", "to": f"n{(i * 7 + 3) % 20}.md", "type": "EXTRACTED"}

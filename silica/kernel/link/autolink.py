@@ -311,7 +311,7 @@ def autolink(
     # skip that title entirely regardless of where in the body it appears.
     # Path-qualified targets ([[topics/Python]]) also register their basename
     # ("python") so we don't add a second, redundant [[Python]] (audit §3).
-    from silica.kernel.link.ast import WIKILINK_TARGET_RE
+    from silica.kernel.base.markdown import WIKILINK_TARGET_RE
     existing_links: set[str] = set()
     for _m in WIKILINK_TARGET_RE.findall(body):
         t = _m.strip().lower()
@@ -406,7 +406,7 @@ def backlink_pass(
     import os as _os
     from silica.driver import DRIVER
     from silica.kernel.recall.paths import is_inbox_path
-    from silica.kernel.vault_manifest import active_write_dir, within
+    from silica.kernel.base.manifest import active_write_dir, within
 
     # This path rewrites pre-existing notes without passing validate_operations,
     # so it enforces the vault write boundary itself: on a vault that reads a

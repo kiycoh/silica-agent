@@ -477,7 +477,7 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_PROVIDER_API_KEY", "")
     )
 
-    # OpenRouter upstream-provider routing (agent/llm.py). Comma-separated
+    # OpenRouter upstream-provider routing (model/llm.py). Comma-separated
     # provider names (e.g. "DeepInfra,Together") pinned as the routing `order`
     # for openrouter/* models; unset → OpenRouter's default auto-routing (as now).
     openrouter_provider: str = field(
@@ -497,7 +497,7 @@ class SilicaConfig:
 
     # Models tried in order when a call's own model fails for a reason the
     # endpoint owns: down, overloaded, rate-limited past its retries, a key it
-    # refuses, a model it does not have (agent/llm.py, ADR-0063).
+    # refuses, a model it does not have (model/llm.py, ADR-0063).
     # Comma-separated litellm ids, e.g. "openrouter/deepseek/deepseek-v4-flash,
     # lmstudio/qwen3.5-9b"; empty keeps every call on its own model, as before.
     fallback_models: str = field(
@@ -513,7 +513,7 @@ class SilicaConfig:
         or os.getenv("OPENROUTER_PROVIDER", "")
     )
 
-    # Typed-decision model (agent/decide.py): TypeSafe Jev through OpenRouter's
+    # Typed-decision model (model/decide.py): TypeSafe Jev through OpenRouter's
     # Decisions endpoint, in front of the form sniff. Empty = off, and the
     # sniff runs its LLM call as before. Pin a dated id (a reply names
     # "typesafe/jev-1.13-20260917"), never "~typesafe/jev-latest": the

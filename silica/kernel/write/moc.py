@@ -48,7 +48,7 @@ def moc_target(name: str, target_dir: str) -> str:
       the block lands on top of what the note already said.
     """
     from silica.kernel.recall.paths import is_inbox_path
-    from silica.kernel.vault_manifest import in_write_dir, seed_mirror_copy
+    from silica.kernel.base.manifest import in_write_dir, seed_mirror_copy
 
     resolved = resolve_note_path(name)
     # A source file shares its title with the notes distilled from it, so name

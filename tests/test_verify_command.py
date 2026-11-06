@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from silica.kernel.write import frontmatter
+from silica.kernel.base import frontmatter
 from silica.kernel.write.notetype import (
     attestation_drift,
     body_sha256,

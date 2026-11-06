@@ -20,7 +20,7 @@ def _chunk(content=None, reasoning=None):
 
 
 def test_call_llm_streams_deltas_and_reassembles():
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
 
     chunks = [
         _chunk(reasoning="hmm"),
@@ -54,7 +54,7 @@ def test_bounded_stream_times_out_on_stalled_chunk():
     import litellm
     import pytest
 
-    from silica.agent.llm import _bounded_stream
+    from silica.model.llm import _bounded_stream
 
     block = threading.Event()
 
@@ -72,7 +72,7 @@ def test_bounded_stream_forwards_chunks_and_propagates_error():
     import litellm
     import pytest
 
-    from silica.agent.llm import _bounded_stream
+    from silica.model.llm import _bounded_stream
 
     assert list(_bounded_stream(lambda: iter([1, 2, 3]), 5.0, "test/model")) == [1, 2, 3]
 
@@ -129,7 +129,7 @@ def test_bounded_stream_closes_the_provider_stream_on_every_exit():
     import litellm
     import pytest
 
-    from silica.agent.llm import _bounded_stream
+    from silica.model.llm import _bounded_stream
 
     for sdk_shape in (False, True):
         done = _Wrapper([1, 2], sdk_shape)
@@ -153,7 +153,7 @@ def test_bounded_stream_closes_the_provider_stream_on_every_exit():
 
 
 def test_call_llm_without_on_delta_does_not_stream():
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
 
     with patch("litellm.completion", return_value=litellm_mock_response("Hi")) as mock_completion:
         res = call_llm(model="test_model", messages=[{"role": "user", "content": "hi"}])
@@ -164,7 +164,7 @@ def test_call_llm_without_on_delta_does_not_stream():
 
 @patch("silica.agent.loop.call_llm")
 def test_run_agent_streams_only_with_callback(mock_call_llm):
-    from silica.agent.llm import LLMResponse
+    from silica.model.llm import LLMResponse
     from silica.agent.loop import run_agent
 
     mock_call_llm.return_value = LLMResponse(
@@ -185,7 +185,7 @@ def _tool_then_answer(preamble="let me look"):
     """A provider that streams `preamble` as text and only then reveals that the
     turn is a tool call; the second turn answers. Returns (fake_call_llm, TOOLS
     patch target name)."""
-    from silica.agent.llm import LLMResponse, ToolCall
+    from silica.model.llm import LLMResponse, ToolCall
 
     responses = [
         LLMResponse(
@@ -229,7 +229,7 @@ def test_tool_call_retracts_the_text_it_already_streamed(mock_call_llm):
     """The loop learns the streamed text was a preamble only after painting it,
     so it retracts it — before the first tool line, since the TUI's live region
     is shared and a later reset would clear a region that has moved on."""
-    from silica.agent.events import LLMStreamEvent, ToolStartEvent
+    from silica.obs.events import LLMStreamEvent, ToolStartEvent
 
     mock_call_llm.side_effect = _tool_then_answer()
     events: list = []
@@ -248,8 +248,8 @@ def test_tool_call_retracts_the_text_it_already_streamed(mock_call_llm):
 
 @patch("silica.agent.loop.call_llm")
 def test_a_plain_answer_is_never_retracted(mock_call_llm):
-    from silica.agent.events import LLMStreamEvent
-    from silica.agent.llm import LLMResponse
+    from silica.obs.events import LLMStreamEvent
+    from silica.model.llm import LLMResponse
 
     def fake_call_llm(model, messages, **kw):
         if kw.get("on_delta") is not None:
@@ -286,7 +286,7 @@ def test_no_reset_when_the_run_never_streamed(mock_call_llm):
     """Constrained runs stay on the non-streaming call (no on_delta), so nobody
     subscribed to a reset — emitting one anyway would clear an unrelated region."""
     from silica.agent.constraints import AgentConstraints
-    from silica.agent.events import LLMStreamEvent
+    from silica.obs.events import LLMStreamEvent
 
     mock_call_llm.side_effect = _tool_then_answer()
     events: list = []
@@ -299,7 +299,7 @@ def test_no_reset_when_the_run_never_streamed(mock_call_llm):
 
 def test_renderer_stream_buffer_accumulates_and_resets():
     from rich.console import Console
-    from silica.agent.events import LLMStreamEvent, ThinkingEndEvent
+    from silica.obs.events import LLMStreamEvent, ThinkingEndEvent
     from silica.ui.renderer import make_progress_callback
 
     orig = (CONFIG.tool_progress, CONFIG.show_thinking, CONFIG.verbose)

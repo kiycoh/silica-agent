@@ -21,7 +21,7 @@ INBOX = "INBOX001"
 
 @pytest.fixture
 def fake(tmp_vault, monkeypatch):
-    from silica.kernel.vault_manifest import set_zotero
+    from silica.kernel.base.manifest import set_zotero
 
     f = FakeZotero()
     f.add_paper()

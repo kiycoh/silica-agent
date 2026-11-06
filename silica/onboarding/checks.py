@@ -18,7 +18,7 @@ from typing import Callable, Literal
 
 import httpx
 
-from silica.agent.providers import (
+from silica.model.providers import (
     PROVIDER_PRESETS,
     has_local_rerank,
     local_rerank_model,
@@ -221,7 +221,7 @@ def check_vault(config: SilicaConfig) -> CheckResult:
         # Doctor may be handed a config that is not the active vault (the wizard
         # does exactly that), so the boundary comes from this path's own
         # manifest rather than from active_inbox_dir().
-        from silica.kernel.vault_manifest import load_manifest, resolve_inbox_dir
+        from silica.kernel.base.manifest import load_manifest, resolve_inbox_dir
 
         write_dir = load_manifest(str(p)).write_dir or ""
         inbox = resolve_inbox_dir(p, write_dir, config.inbox_dir)
@@ -447,8 +447,8 @@ def sample_vault_text(vault: str) -> str:
     the `/vault` info block in cli.py go through `detect_vault_language`
     below, which calls this — no duplicated sampling.
     """
-    from silica.kernel.recall.graph_export import is_vault_artifact
-    from silica.kernel.vault_manifest import load_manifest, resolve_done_dir
+    from silica.kernel.graph.graph_export import is_vault_artifact
+    from silica.kernel.base.manifest import load_manifest, resolve_done_dir
 
     root = Path(vault)
     try:
@@ -541,7 +541,7 @@ def declared_language(vault: str) -> str | None:
     Resolved from the `vault` argument, never the global CONFIG singleton —
     same contract as frozen_store_language above.
     """
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
 
     lang = load_manifest(vault).cooccurrence_lang
     return lang if lang and lang != "auto" else None
@@ -573,7 +573,7 @@ def reply_language_for(vault: str) -> str | None:
     """
     if not vault:
         return None
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
 
     conv = load_manifest(vault).conventions
     return conv.reply_language or conv.language or language_status(vault)[0]
@@ -625,7 +625,7 @@ def check_language(config: SilicaConfig) -> CheckResult:
 
 
 def check_manifest(config: SilicaConfig) -> CheckResult:
-    from silica.kernel.vault_manifest import MANIFEST_REL, load_manifest
+    from silica.kernel.base.manifest import MANIFEST_REL, load_manifest
     from silica.sources.registry import ALL_ADAPTERS
 
     vault = config.vault_path.strip()
@@ -716,7 +716,7 @@ def live_probe(config: SilicaConfig) -> CheckResult:
     if not (getattr(config, "model", "") or "").strip():
         return CheckResult("live probe", "warn", "skipped — no model configured",
                            "run silica init to set one")
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
 
     try:
         # 512 and not the 5 tokens the word needs: a hybrid model bills its
@@ -1025,7 +1025,7 @@ def check_narration_store(config: SilicaConfig) -> CheckResult:
     """Warn at 1GB store / 100MB single session (spec ticket 06). Numbers,
     not conditions: eviction is never automatic, so the doctor is the one
     place growth becomes visible before it becomes a surprise."""
-    from silica.agent.narration import store_stats
+    from silica.obs.narration import store_stats
     st = store_stats()
     gb, mb = st["total_bytes"] / 1e9, st["biggest_bytes"] / 1e6
     if st["biggest_bytes"] > 100e6:
@@ -1042,7 +1042,7 @@ def check_narration_store(config: SilicaConfig) -> CheckResult:
 
 
 def _zotero_link(config: SilicaConfig):
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
 
     vault = (config.vault_path or "").strip()
     return load_manifest(vault).zotero if vault else None

@@ -93,11 +93,11 @@ def test_the_draft_sees_only_the_persons_words(monkeypatch):
             return SimpleNamespace(text=json.dumps(DRAFTED))
         return SimpleNamespace(call_llm=call_llm)
 
-    monkeypatch.setattr("silica.agent.providers.get_provider", provider)
+    monkeypatch.setattr("silica.model.providers.get_provider", provider)
     assert ps.draft(SAME, None) == DRAFTED
     user = seen["messages"][-1]["content"]
     assert all(a in user for a in SAME) and len(seen["messages"]) == 2 and seen["tools"] is None
-    monkeypatch.setattr("silica.agent.providers.get_provider", lambda c, role: _provider("not json"))
+    monkeypatch.setattr("silica.model.providers.get_provider", lambda c, role: _provider("not json"))
     assert ps.draft(SAME, None) is None
 
 

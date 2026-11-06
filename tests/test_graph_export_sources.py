@@ -14,7 +14,7 @@ from silica.kernel.write.provenance import append_record
 
 
 def test_nodes_carry_their_sources(tmp_vault):
-    from silica.kernel.recall.graph_export import build_graph_data
+    from silica.kernel.graph.graph_export import build_graph_data
 
     tmp_vault.note("Concepts/A.md", "---\ntitle: A\n---\n\n[[B]]\n")
     tmp_vault.note("Concepts/B.md", "---\ntitle: B\n---\n\nb\n")

@@ -124,7 +124,7 @@ def _conversion(rec: dict) -> bool:
 
 
 def _publish(rec: dict) -> None:
-    from silica.agent.bus import BUS
+    from silica.obs.bus import BUS
 
     if _conversion(rec):
         BUS.publish(TOPIC, public(rec))
@@ -637,7 +637,7 @@ def _owed(files: list[str]) -> list[str]:
     conversion: no source claims them, and no earlier conversion of the same
     file sits in the inbox or in done/ (the batch resume `_sc_nucleate` does)."""
     from silica.cli import _prior_conversions
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
     from silica.sources.convert import DOC_EXTS, _resolve_input
     from silica.sources.registry import adapter_for
 

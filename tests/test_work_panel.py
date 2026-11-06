@@ -23,7 +23,7 @@ INDEX = WEB / "static" / "index.html"
 
 from tests.webassets import app_css, app_js
 
-# The shape is the real one: silica/agent/narration.py writes these records and
+# The shape is the real one: silica/obs/narration.py writes these records and
 # `read_beats` hands them back verbatim. A thought span WRAPS the llm call that
 # produced it, both close on the same tick, and neither carries the other as a
 # parent — which is exactly why the fold below cannot key on `parent`.

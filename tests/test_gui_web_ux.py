@@ -538,7 +538,7 @@ def test_delete_asks_first_and_names_the_consequence(client, tmp_path):
 
 def test_rename_and_delete_reach_the_narration_store(client, monkeypatch):
     tc, server = client
-    from silica.agent import narration as _narr
+    from silica.obs import narration as _narr
 
     sid = _narr.NARRATOR.ensure_session(driver="gui")
     _narr.NARRATOR.turn({"role": "user", "content": "first question"})

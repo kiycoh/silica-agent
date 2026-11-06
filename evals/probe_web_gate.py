@@ -42,7 +42,7 @@ import re
 from pathlib import Path
 
 from evals.factscore import decompose, judge_facts
-from silica.agent.events import ToolCompleteEvent
+from silica.obs.events import ToolCompleteEvent
 from silica.config import CONFIG
 from silica.kernel.write.templates import slugify
 from silica.sources import web_research as wr

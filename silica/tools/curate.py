@@ -3,7 +3,7 @@
 
 """Curator dispatch — /curate: vault maintenance as a background policy.
 
-The pure composer (silica.kernel.recall.curator) turns an L1 VaultReport into a typed
+The pure composer (silica.kernel.report.curator) turns an L1 VaultReport into a typed
 CurationPlan. This module executes that plan on the *existing* machinery:
 
   * strong autolink candidate → the mechanical, LLM-free silica_autolink path
@@ -28,9 +28,9 @@ from typing import Any
 from pydantic import Field
 
 from silica.agent.subagent import run_subagent_batch
-from silica.kernel.recall.curator import CurationPlan, compose_curation_plan
+from silica.kernel.report.curator import CurationPlan, compose_curation_plan
 from silica.kernel.report.graph_report import compute_report
-from silica.kernel.recall.run_log import append_log_line, format_curate_event
+from silica.kernel.write.run_log import append_log_line, format_curate_event
 from silica.kernel.workqueue import WorkItem
 from silica.tools import tool
 
@@ -96,7 +96,7 @@ def link_candidates(path: str, k: int = 5) -> list[dict]:
         from silica.kernel.recall.paths import is_staging_path
         from silica.kernel.recall.relatedness import related_notes
 
-        from silica.agent.providers import get_reranker
+        from silica.model.providers import get_reranker
         from silica.kernel.recall.rerank import link_query, rerank_related
 
         # cooccur_key (case-PRESERVED, .md-stripped) is the store keyspace; _norm_path

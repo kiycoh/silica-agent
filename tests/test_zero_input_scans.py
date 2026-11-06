@@ -29,7 +29,7 @@ def _cfg(vault_path: str) -> SilicaConfig:
 
 class TestTheIntegrityProbe:
     def test_zero_notes_is_not_measured(self, tmp_path):
-        from silica.kernel.link.health import integrity_probe
+        from silica.kernel.report.health import integrity_probe
 
         res = integrity_probe(tmp_path)
 

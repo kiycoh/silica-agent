@@ -170,7 +170,7 @@ def load_conversation_vault(vault: Path, inst: dict, distill: bool = False,
     if reuse:
         existing = sorted(sess_dir.glob("s*.md")) if sess_dir.is_dir() else []
         if _shared.corpus_reusable(vault, fields, present=len(existing)):
-            from silica.kernel.write import frontmatter
+            from silica.kernel.base import frontmatter
 
             index = {}
             for f in existing:
@@ -217,7 +217,7 @@ def build_timeline_seed(vault: Path) -> str:
     resolves (its filename stem). Undated notes are EXCLUDED: a note with no
     date has no place on a chronology, and 'end of list' would read as
     most-recent — wrong. Returns "" when nothing is dated (seed suppressed)."""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     rows = []
     for f in sorted(vault.rglob("*.md")):
@@ -249,9 +249,9 @@ _INBOX_RE = re.compile(r"^session_(\d+)\.md$")
 def _clear_fsm_state() -> None:
     """Vault-keyed singletons beyond bind_vault's: deferred store cache and
     overlay/manifest caches (the FSM write path touches all of them)."""
-    import silica.kernel.recall.deferred as deferred_mod
+    from silica.kernel.write import deferred as deferred_mod
     from silica.kernel.text.overlay import reset_overlay_cache
-    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.kernel.base.manifest import reset_manifest_cache
 
     deferred_mod._stores.clear()
     reset_overlay_cache()
@@ -536,8 +536,8 @@ def answer_question_agent(model: str, question: str, now: str,
     injected after the product vmap. None = bit-identical to the R baseline."""
     from silica.agent import loop as loop_mod
     from silica.agent.constraints import AgentConstraints
-    from silica.agent.events import ToolCompleteEvent
-    from silica.kernel.recall.vault_map import build_vault_map
+    from silica.obs.events import ToolCompleteEvent
+    from silica.kernel.report.vault_map import build_vault_map
 
     system = (_CONTRACT_OPEN.format(a=speakers[0], b=speakers[1], now=now)
               + _AGENT_DELIVERY + _CONTRACT_CLOSE)

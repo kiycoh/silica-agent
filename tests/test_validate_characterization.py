@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from silica.config import CONFIG
-from silica.kernel.vault_manifest import reset_manifest_cache
+from silica.kernel.base.manifest import reset_manifest_cache
 from silica.kernel.write.ops_io import parse_ops
 from silica.kernel.write.validate import validate_operations
 

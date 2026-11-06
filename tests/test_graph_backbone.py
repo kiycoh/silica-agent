@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 
-from silica.kernel.recall.graph_export import (
+from silica.kernel.graph.graph_export import (
     _is_file_slug,
     area_hubs,
     area_tally,
@@ -111,7 +111,7 @@ def test_an_area_and_its_sub_areas_are_named_by_one_rule():
 
 
 def _export(monkeypatch, tmp_path, nodes, edges, zones):
-    import silica.kernel.recall.graph_export as ge
+    from silica.kernel.graph import graph_export as ge
     import silica.ui.web.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
@@ -139,7 +139,7 @@ def test_the_atlas_draws_the_areas_and_the_semantic_partition_is_not_computed(mo
 
 def test_a_vault_with_no_area_of_three_notes_draws_the_zones(monkeypatch, tmp_path):
     """Open 4: a link-free vault's atlas is its semantic zones, and says so."""
-    from silica.kernel.recall.graph_export import Zone
+    from silica.kernel.graph.graph_export import Zone
 
     nodes = [_note(f"n{i}.md", group=-1) for i in range(4)]
     zone = Zone(id=0, label="topic", color="#888", color_paper="#444", size=4)

@@ -545,7 +545,7 @@ def _note_states(hits: list[dict]) -> None:
     from datetime import date
 
     from silica.kernel.recall.paths import is_source_leaf
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
     from silica.kernel.write.contested import SUPERSEDED_BY_KEY, lifecycle, trust
 
     root = _engine()._root()
@@ -903,7 +903,7 @@ def _with_stale_banner(content: str, path: str = "", vault: str | None = None) -
     vault = vault or CONFIG.vault_path
     try:
         from silica.kernel.code import codedocs
-        from silica.kernel.write import frontmatter
+        from silica.kernel.base import frontmatter
 
         data, _, _ = frontmatter.split(content)
         if data and codedocs.documents_of(data):
@@ -1104,7 +1104,7 @@ def silica_file_links(target: Annotated[str, Field(description='A note (name or 
     it as {file, embedded_in, documented_by}. Complements silica_links, which
     sees only note→note wikilinks. Embeds are vault-relative paths;
     `documents:` entries are repo-relative (code lane)."""
-    from silica.kernel.link.ast import NON_MD_EXTENSIONS
+    from silica.kernel.base.markdown import NON_MD_EXTENSIONS
 
     t = (target or "").strip()
     # Notes win over files, but a file-shaped target (extension allowlist —
@@ -1187,7 +1187,7 @@ def notes_under(folder: str) -> list[str]:
     save four lines.
     """
     from silica.kernel.recall.paths import in_folder
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir
 
     scope = _vault_rel(folder)
     # list_files(folder) pre-filters loosely (startswith); in_folder tightens it
@@ -1219,7 +1219,7 @@ def _unconverted_under(folder: str) -> list[str]:
     inbox-only every one of them read as empty.
     """
     from silica.kernel.recall.paths import in_folder
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir
 
     scope = _vault_rel(folder)
     if not scope:
@@ -1309,7 +1309,7 @@ def _with_prop(files: list[str], key: str, value: str, folder: str) -> list[str]
     copy is not a member, its original is: counting both made 18 contracts of
     17. Unless the listing asks for the staging folder itself.
     """
-    from silica.kernel.vault_manifest import active_write_dir, within
+    from silica.kernel.base.manifest import active_write_dir, within
     from silica.onboarding.adopt import SAFE_WRITE_DIR
 
     skip_copies = (active_write_dir() == SAFE_WRITE_DIR
@@ -1476,14 +1476,14 @@ def silica_deferred_list() -> list:
     Returns summary rows — use silica_deferred_retry(content_hash) to attempt
     writing them, or silica_deferred_flush(content_hash) to discard them.
     """
-    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.deferred import get_deferred_store
     return get_deferred_store().list_all()
 
 
 @tool(cls="atomic", collapse="eager")
 def silica_deferred_flush(content_hash: Annotated[str, Field(description='Content hash of the deferred bundle to permanently discard')]) -> dict:
     """Discard a deferred op bundle — marks those rejected ops as permanently skipped."""
-    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.deferred import get_deferred_store
     removed = get_deferred_store().purge(content_hash)
     if removed:
         return {"removed": True, "content_hash": content_hash}
@@ -1512,7 +1512,7 @@ def silica_graph_path(source: Annotated[str, Field(description='Source note name
     Uses the undirected view of the resolved (EXTRACTED) wikilink graph.
     """
     import networkx as nx
-    from silica.kernel.recall.graph_export import build_graph_data, edge_graph
+    from silica.kernel.graph.graph_export import build_graph_data, edge_graph
 
     try:
         nodes, edges = build_graph_data(folder="")
@@ -1854,7 +1854,7 @@ def silica_record_quiz(results: Annotated[list, Field(description='One entry per
     state feeding silica_review_queue and the report's attention list.
     Concepts are logged raw, exactly as spelled.
     """
-    from silica.kernel.report import quiz
+    from silica.kernel.learn import quiz
 
     entries = []
     for r in results:
@@ -2000,7 +2000,7 @@ def silica_learn_items(n: Annotated[int, Field(description='Session size (defaul
             scope, frontier, revisit, plan_path = scoped["paths"], scoped["frontier"], scoped["revisit"], plan["path"]
         else:
             from silica.config import CONFIG
-            from silica.kernel.report import learner
+            from silica.kernel.learn import learner
 
             prefix = t.replace("\\", "/").casefold()
             notes = learner._notes_meta(Path(CONFIG.vault_path))
@@ -2034,7 +2034,7 @@ def silica_review_queue(limit: Annotated[int, Field(description='How many notes 
     learning once; quizzes are the only proof since.
     """
     from silica.kernel.learn.plans import planned_paths
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
     from silica.kernel.workspaces import active_scope, in_scope
 
     scoped = active_scope() is not None  # a workspace's turn picks among its members only

@@ -3,7 +3,7 @@
 
 """Seven inter-note variables (docs/superpowers/specs/2026-08-22-graph-variables-design.md).
 
-Pure kernel functions first (silica.kernel.recall.signals), then the seams
+Pure kernel functions first (silica.kernel.graph.signals), then the seams
 that consume them: report wiring, relatedness legs, curator, learner, tools.
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import math
 import networkx as nx
 import pytest
 
-from silica.kernel.recall import signals
+from silica.kernel.graph import signals
 
 
 # ---------------------------------------------------------------------------
@@ -320,8 +320,9 @@ def test_prerequisites_map_runs_the_real_pass(graph_nodes_edges, cooccur_store, 
     # untested: when V7 left the tuple it kept unpacking four values, swallowed
     # the ValueError and served {} to Learn and to the explore Path surface,
     # which then said "no reading order yet" over a built index.
-    from silica.kernel.recall import cooccurrence, graph_export, paths
-    from silica.kernel.report import learner
+    from silica.kernel.recall import cooccurrence, paths
+    from silica.kernel.graph import graph_export
+    from silica.kernel.learn import learner
     from silica.kernel.report.graph_report import cooccur_delta as cd
     monkeypatch.setattr(cd, "_REFD_MIN_RELATED", 1)
     monkeypatch.setattr(graph_export, "build_graph_data", lambda: graph_nodes_edges)
@@ -388,7 +389,7 @@ def test_cowrite_transactions_are_scoped_to_the_vault_and_capped(tmp_path, monke
 # Curator
 # ===========================================================================
 
-from silica.kernel.recall.curator import compose_curation_plan
+from silica.kernel.report.curator import compose_curation_plan
 from silica.kernel.report.graph_report import (
     CoupledPair,
     StructuralLink,
@@ -426,7 +427,7 @@ def test_curator_autolinks_only_corroborated_structural_and_coupled_pairs():
 # Learner
 # ===========================================================================
 
-from silica.kernel.report import learner
+from silica.kernel.learn import learner
 
 
 def _notes(*paths, ai=True):
@@ -526,7 +527,7 @@ def test_paragraphs_filter_short_and_cap():
 
 
 def test_semantic_shift_separates_mixed_note_from_atomic(tmp_path, monkeypatch):
-    import silica.agent.providers as providers
+    from silica.model import providers
     from silica.kernel.report import structure
 
     _bind_vault(tmp_path / "v", monkeypatch)
@@ -546,7 +547,7 @@ def test_semantic_shift_separates_mixed_note_from_atomic(tmp_path, monkeypatch):
 
 
 def test_semantic_shift_absent_when_embedder_down(tmp_path, monkeypatch):
-    import silica.agent.providers as providers
+    from silica.model import providers
     from silica.kernel.report import structure
 
     _bind_vault(tmp_path / "v", monkeypatch)
@@ -577,8 +578,9 @@ def test_prerequisites_map_is_kept_while_its_inputs_are(graph_nodes_edges, coocc
     """An edit elsewhere moved the vault epoch and a plan page recomputed an
     unchanged map, 16 s of its first 34 (2026-10-23): keyed on the links and
     the index, it is reused, across processes too, and recomputed when a link moves."""
-    from silica.kernel.recall import cooccurrence, graph_export, paths
-    from silica.kernel.report import learner
+    from silica.kernel.recall import cooccurrence, paths
+    from silica.kernel.graph import graph_export
+    from silica.kernel.learn import learner
     from silica.kernel.report.graph_report import cooccur_delta as cd
 
     monkeypatch.setattr(cd, "_REFD_MIN_RELATED", 1)

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.link.correlate import compute_edges, jaccard, topk_set
+from silica.kernel.recall.correlate import compute_edges, jaccard, topk_set
 
 
 def _nodes(**counts: int) -> dict:

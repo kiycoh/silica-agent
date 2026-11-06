@@ -143,7 +143,7 @@ def _judge(prompt: str, *, max_tokens: int = 64) -> str:
 
 
 def _body(vault: Path, key: str, limit: int = 700) -> str:
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     p = vault / (key + ".md")
     try:
@@ -168,7 +168,7 @@ def _structural_ranking(graph, query_path: str, *, k: int, exclude: set[str]):
     if graph is None:
         return None
     from silica.kernel.recall.cooccurrence import cooccur_key
-    from silica.kernel.recall.signals import adamic_adar_ranking
+    from silica.kernel.graph.signals import adamic_adar_ranking
 
     key_of = {cooccur_key(n): n for n in graph.nodes}
     gid = key_of.get(cooccur_key(query_path))
@@ -195,7 +195,7 @@ def fused_with(key: str, es, store, *, k: int = K, graph=None, mode: str = "leg"
     """
     from silica.kernel.recall import relatedness as R
     from silica.kernel.recall.cooccurrence import cooccur_key
-    from silica.kernel.recall.graph_export import is_vault_artifact
+    from silica.kernel.graph.graph_export import is_vault_artifact
 
     blocked = {cooccur_key(key)}
     pool = max(k * 3, R._POOL_MIN)
@@ -244,9 +244,9 @@ def check_reproduces_facade(keys, es, store, *, k: int = K) -> None:
 def run_structural(vault: Path) -> dict:
     import networkx as nx
 
-    from silica.kernel.link.health import wikilink_graph
+    from silica.kernel.report.health import wikilink_graph
     from silica.kernel.recall.relatedness import related_notes
-    from silica.kernel.recall.signals import adamic_adar_ranking
+    from silica.kernel.graph.signals import adamic_adar_ranking
 
     store, es = _stores(vault)
     adj = wikilink_graph(vault, store)
@@ -315,7 +315,7 @@ def run_structural(vault: Path) -> dict:
     # Regression read on the golden metric: the eligible pairs stay >2 hops
     # apart once masked, so the leg cannot recover them by construction and
     # can only dilute. A drop here would fail the golden gate after wiring.
-    from silica.kernel.link.health import eligible_pairs
+    from silica.kernel.report.health import eligible_pairs
 
     eligible = eligible_pairs(adj)
     ends = sorted({e for pr in eligible for e in pr})
@@ -347,7 +347,7 @@ def run_structural(vault: Path) -> dict:
 # ---------------------------------------------------------------------------
 
 def run_coupling(vault: Path) -> dict:
-    from silica.kernel.link.health import eligible_pairs, wikilink_graph
+    from silica.kernel.report.health import eligible_pairs, wikilink_graph
     from silica.kernel.recall.relatedness import related_notes
     from silica.kernel.report.graph_report import compute_report
 
@@ -389,7 +389,7 @@ def run_coupling(vault: Path) -> dict:
 def run_loadbearing(vault: Path) -> dict:
     import networkx as nx
 
-    from silica.kernel.recall.graph_export import build_graph_data, edge_graph
+    from silica.kernel.graph.graph_export import build_graph_data, edge_graph
     from silica.kernel.report.graph_report import compute_report
 
     _stores(vault)

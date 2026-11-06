@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from silica.agent.providers import _to_wire, SILICA_CLI_OPEN, SILICA_CLI_CLOSE
+from silica.model.providers import _to_wire, SILICA_CLI_OPEN, SILICA_CLI_CLOSE
 
 
 class ToWireTest(unittest.TestCase):

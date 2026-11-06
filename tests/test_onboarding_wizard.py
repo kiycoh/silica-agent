@@ -423,7 +423,7 @@ class TestRunWizard:
 
     def test_forced_language_roundtrips_through_load_manifest(self, monkeypatch, tmp_path):
         import silica.onboarding.wizard as wizard
-        from silica.kernel.vault_manifest import load_manifest
+        from silica.kernel.base.manifest import load_manifest
 
         env_path = tmp_path / ".env"
 
@@ -439,7 +439,7 @@ class TestRunWizard:
 
     def test_enter_leaves_language_none_after_load_manifest(self, monkeypatch, tmp_path):
         import silica.onboarding.wizard as wizard
-        from silica.kernel.vault_manifest import load_manifest
+        from silica.kernel.base.manifest import load_manifest
 
         env_path = tmp_path / ".env"
 
@@ -522,7 +522,7 @@ class TestRunWizard:
             "cooccurrence_lang: italian\nconventions:\n  language: Italian\n"
         )
         # both axes resolve through load_manifest
-        from silica.kernel.vault_manifest import load_manifest
+        from silica.kernel.base.manifest import load_manifest
 
         m = load_manifest(str(vault))
         assert m.cooccurrence_lang == "italian"
@@ -591,7 +591,7 @@ class TestRunWizard:
         degrade to defaults on next load). The answer must be validated before
         it ever reaches the file."""
         import silica.onboarding.wizard as wizard
-        from silica.kernel.vault_manifest import load_manifest
+        from silica.kernel.base.manifest import load_manifest
 
         env_path = tmp_path / ".env"
 

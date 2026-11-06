@@ -20,7 +20,7 @@ DAY = 86400.0
 
 @pytest.fixture
 def vault(tmp_vault, tmp_path, monkeypatch):
-    import silica.kernel.report.quiz as quiz
+    from silica.kernel.learn import quiz
 
     monkeypatch.setattr(quiz, "log_path", lambda: tmp_path / "quiz.jsonl")
     old = time.time() - 400 * DAY

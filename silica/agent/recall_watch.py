@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 
-from silica.agent.events import ToolCompleteEvent
+from silica.obs.events import ToolCompleteEvent
 from silica.agent.loop import _is_tool_failure
 from silica.kernel.write.provenance import number_tokens, unfounded_numbers
 
@@ -350,7 +350,7 @@ def numbers_of_session(sid: str | None) -> set[str]:
     """`numbers_from_beats` over the narration of session *sid*: what
     /session/load and /resume rebuild the session set from. Empty for no
     session, and for a legacy snapshot, which kept no raw results."""
-    from silica.agent import narration
+    from silica.obs import narration
 
     if not sid:
         return set()

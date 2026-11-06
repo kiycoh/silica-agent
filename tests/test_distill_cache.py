@@ -116,11 +116,11 @@ def distill(monkeypatch):
     def _no_network(*a, **k):
         raise RuntimeError("litellm fallback must never reach the network in tests")
 
-    monkeypatch.setattr("silica.agent.llm.call_llm", _no_network)
+    monkeypatch.setattr("silica.model.llm.call_llm", _no_network)
 
     def _run(responses, **kwargs):
         fake = _FakeProvider(responses)
-        monkeypatch.setattr("silica.agent.providers.get_provider",
+        monkeypatch.setattr("silica.model.providers.get_provider",
                             lambda *a, **k: fake)
         result = prep_delegation.run_distiller(
             payload=CLEAN, target="Target", session_date="2026-08-02", **kwargs)
@@ -164,7 +164,7 @@ class TestReplayInsteadOfReRoll:
         other = json.loads(json.dumps(CLEAN))
         other["batches"][0]["concepts"][0]["inbox_excerpt"] = "different source"
         fake = _FakeProvider([REPLY])
-        monkeypatch.setattr("silica.agent.providers.get_provider",
+        monkeypatch.setattr("silica.model.providers.get_provider",
                             lambda *a, **k: fake)
         prep_delegation.run_distiller(payload=other, target="Target",
                                       session_date="2026-08-02")
@@ -219,9 +219,9 @@ class TestOnlyCompleteRepliesEnterTheCache:
         """The cache key names the worker model; a reply served by the litellm
         fallback came from the router model and must not blend the corpora."""
         monkeypatch.setenv("SILICA_DISTILL_CACHE", "1")
-        monkeypatch.setattr("silica.agent.providers.get_provider",
+        monkeypatch.setattr("silica.model.providers.get_provider",
                             mock.Mock(side_effect=RuntimeError("worker down")))
-        monkeypatch.setattr("silica.agent.llm.call_llm",
+        monkeypatch.setattr("silica.model.llm.call_llm",
                             lambda **k: mock.Mock(text=REPLY, tool_calls=[],
                                                   finish_reason="stop"))
         served = prep_delegation.run_distiller(

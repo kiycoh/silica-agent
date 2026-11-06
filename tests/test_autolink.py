@@ -419,7 +419,7 @@ def test_autolink_escapes_the_alias_pipe_inside_a_table_row():
     tables already use it. Asserted through the linter, which is the instrument
     that has to agree.
     """
-    from silica.kernel.link.health import lint
+    from silica.kernel.report.health import lint
 
     body = "| Concept | Note |\n| --- | --- |\n| neural networks | see above |\n"
     before = lint.totals(lint.scan(body, "Stem"))
@@ -502,7 +502,7 @@ def test_build_alias_map_skips_single_char_and_blank_surfaces():
 
 
 def test_aliases_of_reads_the_obsidian_spellings():
-    from silica.kernel.write.frontmatter import aliases_of
+    from silica.kernel.base.frontmatter import aliases_of
 
     assert aliases_of("---\naliases: [AI, ANI]\n---\n\nbody\n") == ["AI", "ANI"]
     assert aliases_of("---\naliases:\n  - AI\n  - ANI\n---\n\nbody\n") == ["AI", "ANI"]

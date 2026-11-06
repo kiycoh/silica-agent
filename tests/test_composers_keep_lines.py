@@ -15,7 +15,8 @@ ensure_hub_link, is in test_ensure_hub_link_frontmatter.py.
 from __future__ import annotations
 
 from silica.kernel.link.sweep import _unlink_body
-from silica.kernel.write import frontmatter, templates
+from silica.kernel.base import frontmatter
+from silica.kernel.write import templates
 
 # `title: [unclosed` is a YAML error: the block is present and unusable.
 _BROKEN = '---\ntitle: [unclosed\nsources:\n  - "Old one.md"\n---\n\nBody.\n'

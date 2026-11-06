@@ -24,7 +24,7 @@ ORIGIN = "placement"
 
 def _ordered(paths: list[str]) -> list[str]:
     """`paths` in prerequisite order, the step's own order breaking ties."""
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     prereqs = {learner.key_of(k): v for k, v in learner.prerequisites_map().items()}
     place = {p: i for i, p in enumerate(paths)}
@@ -38,7 +38,7 @@ def step_paths(plan: dict, notes: dict | None = None) -> list[list[str]]:
     it on every call, 0.08 s a title, which made a 241-note plan's page 27 s
     slower (measured 2026-10-27)."""
     from silica.kernel.learn import plans
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     notes = notes if notes is not None else learner._notes_meta(plans._vault())
     out = []
@@ -64,7 +64,7 @@ def candidates(plan: dict, view: dict | None = None, steps: list[list[str]] | No
     earlier step is not asked twice; a note the learner view does not hold
     (a lecture spine, a note outside the material) is not asked at all."""
     from silica.kernel.learn.items import LEVEL_OF
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     view = learner.view() if view is None else view
     steps = step_paths(plan) if steps is None else steps

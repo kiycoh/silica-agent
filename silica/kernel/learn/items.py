@@ -77,7 +77,7 @@ def read_note(path: str) -> str:
 
 
 def title_of(path: str, text: str | None = None) -> str:
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     text = read_note(path) if text is None else text
     data, _raw, body = frontmatter.split(text)
@@ -211,7 +211,7 @@ def claims_of(path: str, text: str | None = None) -> list[dict]:
     stripped. `line`/`span` locate it in the leaf; 0/"" when it does not
     ground, which the generators skip.
     """
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     text = read_note(path) if text is None else text
     _data, _raw, body = frontmatter.split(text)
@@ -638,7 +638,7 @@ def grounded(item: dict) -> bool:
     if not _footnote_leaves(text):
         # no leaf to cite: the note's own body is the only text the span can
         # be checked against (the legacy-vault case of claims_of)
-        from silica.kernel.write import frontmatter
+        from silica.kernel.base import frontmatter
 
         _d, _r, body = frontmatter.split(text)
         ln, found = span_of(span, body)
@@ -670,7 +670,7 @@ def hints_for(path: str) -> list[str]:
 def hint_rungs(path: str) -> list[tuple[str, str]]:
     """hints_for with each hint's rung, so a ledger line can say which ones
     the reader saw (ADR-0135 point 5)."""
-    from silica.kernel.report import learner
+    from silica.kernel.learn import learner
 
     out: list[tuple[str, str]] = []
     try:
@@ -839,7 +839,7 @@ GENERATE_MAX_TOKENS = 4096
 def _llm(prompt: str, max_tokens: int) -> tuple[str, str | None]:
     """One deterministic call; (text, finish_reason). ("", None) without a
     configured model, so the mechanical kinds carry the session."""
-    from silica.agent.llm import call_llm
+    from silica.model.llm import call_llm
     from silica.config import CONFIG
 
     model = CONFIG.model
@@ -852,7 +852,7 @@ def _llm(prompt: str, max_tokens: int) -> tuple[str, str | None]:
 
 def lede_of(text: str) -> str:
     """The first claim callout or paragraph of the body."""
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     _d, _r, body = frontmatter.split(text)
     para: list[str] = []

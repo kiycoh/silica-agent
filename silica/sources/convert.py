@@ -517,7 +517,7 @@ def is_skippable_chunk(note_rel: str) -> bool:
     unflagged files answer False — never blocks ingestion on a read error.
     """
     from silica.driver import DRIVER
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base import frontmatter
 
     try:
         data, _, _ = frontmatter.split(DRIVER.read_note(note_rel).content)
@@ -774,7 +774,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
         )
     body = _rewrite_image_links(_respace_prose(strip_degenerate_runs(md_text)), renamed)
     from silica.driver import DRIVER
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir
     from silica.kernel.write.preserve import Loss
 
     inbox = _note_dir(src, active_inbox_dir() or "Inbox")
@@ -1037,7 +1037,7 @@ def _read_pages(data: dict, workdir: Path, draw=None) -> None:
     if pending or later:
         from concurrent.futures import ThreadPoolExecutor
 
-        from silica.agent.usage_limits import UsageLimited
+        from silica.model.usage_limits import UsageLimited
         from silica.agent.vision import ask_chat_model
         from silica.kernel.recall import image_readings
 
@@ -2564,7 +2564,7 @@ def _convert_tabular(src: Path) -> list[str]:
     md = _duckdb_profile(src, members)
 
     from silica.driver import DRIVER
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir
 
     inbox = _note_dir(src, active_inbox_dir() or "Inbox")
     stem = _family_stem(members) if len(members) > 1 else src.stem
@@ -3395,8 +3395,8 @@ def _write_leaf(src: Path, body: str, name: str, fields: dict) -> None:
     """
     from silica.driver import DRIVER
     from silica.kernel.recall.paths import SOURCES_DIR
-    from silica.kernel.vault_manifest import in_write_dir
-    from silica.kernel.write import frontmatter
+    from silica.kernel.base.manifest import in_write_dir
+    from silica.kernel.base import frontmatter
 
     from silica.kernel.write.preserve import Loss
 
@@ -3424,7 +3424,7 @@ def _resolve_input(target: str) -> Path:
 
 
 def _images_dest(dest_dir: str) -> Path:
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.base.manifest import active_inbox_dir
 
     base = dest_dir.strip() or active_inbox_dir() or "Inbox"
     return Path(CONFIG.vault_path) / base / "Images"

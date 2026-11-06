@@ -38,12 +38,12 @@ ALLOWED = {
     # live KEYS travel (key_vocabulary), so capture snaps to the established
     # vocabulary instead of coining synonyms (ADR-0021). No fact text, no
     # retrieval leg.
-    "kernel/recall/run_substrate.py": "distiller key vocabulary (keys only, no fact text)",
+    "router/run_substrate.py": "distiller key vocabulary (keys only, no fact text)",
     # G2 orientation (2026-08-25): the vault map's one usage-derived line is
     # "Recurring facts (by days)": fact KEYS and day counts only, no fact
     # text, and the map is not a retrieval leg, so the echo channel this
     # contract closes stays closed.
-    "kernel/recall/vault_map.py":   "orientation salience (keys + day counts, no fact text)",
+    "kernel/report/vault_map.py":   "orientation salience (keys + day counts, no fact text)",
 }
 
 

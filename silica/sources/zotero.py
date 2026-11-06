@@ -136,7 +136,7 @@ class Zotero:
 
 def client() -> Zotero:
     """The client for the active vault's linked library."""
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.base.manifest import get_active_manifest
 
     link = get_active_manifest().zotero
     return Zotero(server_id=link.library if link else "",
@@ -279,7 +279,7 @@ def _leaf_index(vault: str | Path | None = None) -> dict[str, tuple[str, str]]:
     """{zotero_key: (leaf basename, pdf_md5)} for the papers in a vault."""
     from silica.config import CONFIG
     from silica.kernel.recall.paths import SOURCES_DIR
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
 
     vault = Path(vault or CONFIG.vault_path or ".")
     write_dir = load_manifest(vault).write_dir or ""
@@ -319,7 +319,7 @@ def linked_elsewhere(library: str, vault: str | Path) -> Path | None:
     """Another known vault already linked to this library (ADR-0055 decision
     10: one library, one vault; the others reach its papers by peek)."""
     from silica.kernel.recall.vault_registry import known_vaults
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
 
     here = Path(vault).resolve()
     for other in known_vaults():
@@ -367,7 +367,7 @@ def detect(vault: str | Path) -> dict | None:
     import json
     from datetime import datetime, timezone
 
-    from silica.kernel.vault_manifest import load_manifest
+    from silica.kernel.base.manifest import load_manifest
 
     link = load_manifest(vault).zotero
     if link is None:
@@ -423,8 +423,8 @@ class ZoteroAdapter:
 
     def to_stub(self, item: RawItem) -> GroundedStub:
         from silica.kernel.recall.paths import SOURCES_DIR
-        from silica.kernel.vault_manifest import in_write_dir
-        from silica.kernel.write import frontmatter
+        from silica.kernel.base.manifest import in_write_dir
+        from silica.kernel.base import frontmatter
 
         paper: Paper = item.meta["paper"]
         head = f"# {paper.title}\n\n" if paper.title else ""

@@ -49,7 +49,7 @@ def handle_recon(fsm: "InjectorFSM") -> None:
         # Surface any deferred ops from a previous run of this file
         content_hash = fsm._file_content_hashes[fi] if fi < len(fsm._file_content_hashes) else ""
         if content_hash:
-            from silica.kernel.recall.deferred import get_deferred_store
+            from silica.kernel.write.deferred import get_deferred_store
             bundle = get_deferred_store().get(content_hash)
             if bundle:
                 rejected_count = len(bundle.get("rejected_ops", []))
@@ -130,7 +130,7 @@ def build_vault_graph_ctx() -> dict[str, dict]:
     next recompute — fine for routing context.
     """
     try:
-        from silica.kernel.recall.graph_export import (
+        from silica.kernel.graph.graph_export import (
             build_graph_data,
             ctx_from_report,
             load_cluster_ctx,
@@ -277,7 +277,7 @@ def _attach_file_chunks(fsm: "InjectorFSM", fi: int, inbox_file: str,
     try:
         from silica.kernel.text import language as lang_mod
         from silica.kernel.prep_delegation import _payload_sample_text
-        from silica.kernel.vault_manifest import get_active_manifest
+        from silica.kernel.base.manifest import get_active_manifest
         if not get_active_manifest().conventions.language:
             # The whole chunk, not its first 4,000 characters: a formula-heavy
             # lecture holds a handful of function words there and Lezione 7
@@ -479,7 +479,7 @@ def _salience_filter(fsm: "InjectorFSM", chunks: list[dict]) -> int | None:
     or None when no embedder is available (gate skipped, chunks untouched).
     """
     τ_theme = getattr(orch.CONFIG, "sim_threshold_theme", 0.35)
-    from silica.agent.providers import get_embedder_or_none
+    from silica.model.providers import get_embedder_or_none
     from silica.kernel.recall.embed import document_theme_vector, _cosine
     from silica.kernel.text.text import clean_body
     embedder = get_embedder_or_none(orch.CONFIG, "SALIENCE")
