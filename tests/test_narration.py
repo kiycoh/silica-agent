@@ -200,7 +200,6 @@ def test_an_incognito_session_stays_on_disk_and_leaves_the_list(narrator, monkey
     at birth) and typed in the middle (marked by the toggle). Turning it off
     again does not bring it back."""
     from silica.cli import _dc_incognito
-    from silica.kernel import user_memory
 
     monkeypatch.setattr("silica.obs.narration.INCOGNITO", False)
     shown = _open(narrator)
