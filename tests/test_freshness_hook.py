@@ -13,7 +13,7 @@ import snowballstemmer
 
 from silica.kernel.recall.cooccurrence import CooccurStore
 from silica.kernel.write.ops import Op, OpType
-from silica.router.orchestrator import _refresh_cooccurrence_for_ops
+from silica.router.states.write import _refresh_cooccurrence_for_ops
 
 
 def _write_op(path: str) -> Op:
@@ -163,8 +163,7 @@ def test_helper_is_embedder_free():
     """The freshness helper is the stable leg: it must not pull in the embedder
     or provider stack, so it refreshes even when LM Studio is down."""
     import inspect
-    import silica.router.orchestrator as orch
-    src = inspect.getsource(orch._refresh_cooccurrence_for_ops)
+    src = inspect.getsource(_refresh_cooccurrence_for_ops)
     tree = ast.parse(src)
     imported: list[str] = []
     for node in ast.walk(tree):
@@ -193,7 +192,7 @@ def test_embedding_refresh_embeds_written_notes_and_leaves_patches_to_the_run_en
     Hosted t01, 2026-10-23: 49 patches on a 39-section paper, 38 notes
     refreshed up to 3 times, each refresh ~4 s on the host's 2-core embedder."""
     from silica.kernel.recall.embed import EmbedStore
-    from silica.router.orchestrator import _refresh_embeddings_for_ops
+    from silica.router.states.write import _refresh_embeddings_for_ops
 
     store = EmbedStore(path=tmp_path / "e.json")
     emb = _RecEmbedder()
@@ -208,7 +207,7 @@ def test_embedding_refresh_embeds_written_notes_and_leaves_patches_to_the_run_en
 
 def test_embedding_refresh_skips_uncommitted_writes(tmp_path):
     from silica.kernel.recall.embed import EmbedStore
-    from silica.router.orchestrator import _refresh_embeddings_for_ops
+    from silica.router.states.write import _refresh_embeddings_for_ops
 
     store = EmbedStore(path=tmp_path / "e.json")
     emb = _RecEmbedder()
@@ -222,7 +221,7 @@ def test_embedding_refresh_keeps_patches_where_no_sweep_will_run(tmp_path):
     """The ws backend has no mtime_of and SILICA_INDEX_SWEEP can be off: there
     the run-end sweep does nothing, so WRITE embeds the patch as it always did."""
     from silica.kernel.recall.embed import EmbedStore
-    from silica.router.orchestrator import _refresh_embeddings_for_ops
+    from silica.router.states.write import _refresh_embeddings_for_ops
 
     store = EmbedStore(path=tmp_path / "e.json")
     emb = _RecEmbedder()

@@ -3,19 +3,21 @@
 
 """Injector write states: SNAPSHOT, WRITE, HUB_UPDATE (+ MOC helpers).
 
-Handler bodies for InjectorFSM, extracted from orchestrator.py: each function
-takes the FSM instance and mutates its context/state exactly as the former
-method did. Patchable collaborators (DRIVER, CONFIG, tools, load_ops, time)
-are resolved through the orchestrator module namespace (orch.X) so tests that
-patch silica.router.orchestrator.* keep working.
+Handler bodies for InjectorFSM: each function takes the FSM instance and
+mutates its state.
 """
 from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+import time
+from typing import Any, Callable, TYPE_CHECKING
 
-from silica.router import orchestrator as orch
+from silica.config import CONFIG
+from silica.driver import DRIVER
+from silica.kernel.write.gate import build_txn
+from silica.kernel.write.ops_io import load_ops
+from silica.router.phases import phase
 
 if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
@@ -36,13 +38,164 @@ from silica.kernel.write.moc import (
 )
 
 
+def _refresh_cooccurrence_for_ops(
+    ops: list,
+    committed_paths: set,
+    *,
+    read_body: Callable[[str], str],
+    lang: str = "english",
+    store: Any | None = None,
+    save: bool = True,
+) -> int:
+    """Refresh the embedder-free co-occurrence index for committed write/patch ops.
+
+    The freshness twin of the embedding refresh, but the STABLE leg: it imports
+    only the cooccurrence module (never the embedder/provider stack), so the
+    index stays fresh even when LM Studio is down. Uses build_index(force=True)
+    so a note's prior contribution is replaced, never inflated, with a single
+    save — replacement semantics only: it deliberately does NOT pass
+    refreeze=True, so the store's frozen stemming language is never re-detected
+    from a write batch (re-detection is reserved for /cooccur --force).
+    Note edges need no step here: they are derived from the contributions on
+    read (CooccurStore.note_adjacency, ADR-0029). Best-effort: a per-note read
+    failure is skipped and the whole call never raises. Returns the number of
+    notes refreshed.
+    """
+    from silica.kernel.recall.cooccurrence import build_index as _cooccur_build
+
+    notes: list[tuple[str, str, str]] = []
+    concepts_by_path: dict[str, list[str]] = {}
+    seen: set[str] = set()
+    for op in ops:
+        path = op.touched_ref()
+        if op.op not in (OpType.write, OpType.patch) or not path:
+            continue
+        if path not in committed_paths or path in seen:
+            continue
+        seen.add(path)
+        stem = os.path.splitext(os.path.basename(path))[0]
+        idx_path = path.removesuffix(".md")
+        try:
+            body = read_body(path) or ""
+        except Exception:
+            continue
+        notes.append((idx_path, stem, body))
+        # #9: forward LLM-extracted concept phrases to reinforce this note.
+        op_concepts = getattr(op, "concepts", None)
+        if op_concepts:
+            concepts_by_path[idx_path] = op_concepts
+
+    if not notes:
+        return 0
+    try:
+        # save=False defers the single save to the end-of-run flush, which
+        # rewrites the same singleton.
+        built = _cooccur_build(notes, store=store, lang=lang, force=True,
+                               concepts_by_path=concepts_by_path or None, save=False)
+        if save:
+            built.save()
+    except Exception as exc:
+        logger.debug("WRITE: cooccur refresh skipped (%s)", exc)
+        return 0
+    return len(notes)
+
+
+def _refresh_embeddings_for_ops(
+    ops: list,
+    committed_paths: set,
+    *,
+    read_body: Callable[[str], str],
+    embedder: Any,
+    store: Any,
+    patches: bool = False,
+) -> int:
+    """Embed the notes this chunk wrote, once each, so the next chunk's dedup
+    sees them. Patches are left out: the note already has a vector the dedup
+    can read, and the sweep that ends the run (Coordinator.run) embeds its new
+    text once, after the passes that edit notes past WRITE. Hosted t01 on
+    2026-10-23 spent 47% of its embedder time here, 49 of 218 refreshes on
+    patches, at ~4 s each on a 2-core host. `patches` puts them back where no
+    sweep runs (a driver with no mtime_of, the index sweep turned off).
+    Returns the notes embedded.
+    """
+    from silica.kernel.recall.embed import refresh_note
+
+    kinds = (OpType.write, OpType.patch) if patches else (OpType.write,)
+    seen: set[str] = set()
+    for op in ops:
+        path = op.touched_ref()
+        if op.op not in kinds or not path or path not in committed_paths or path in seen:
+            continue
+        seen.add(path)
+        try:
+            body = read_body(path) or ""
+            # Fix A: defer the whole-index write to a single end-of-run flush
+            # (_run_loop); upsert into the shared in-memory store only.
+            refresh_note(embedder, path.removesuffix(".md"), os.path.splitext(os.path.basename(path))[0],
+                         body, store=store, save=False)
+        except Exception as exc:
+            # One note missing from the index is caught by the run-end sweep;
+            # the chunk's other notes still go in.
+            seen.discard(path)
+            logger.debug("WRITE: embed refresh failed for '%s': %s", path, exc)
+    return len(seen)
+
+
+def _commit_docs_for_ops(
+    ops: list,
+    committed_paths: set,
+    *,
+    vault: str,
+    git_commit: str,
+) -> str | None:
+    """Commit touched vault paths for write/patch ops to git.
+
+    Git safety net behind SILICA_GIT_COMMIT=auto: an additive snapshot on top
+    of the undo journal (ADR-0002), never a replacement. Best-effort: no git
+    binary, vault outside a repo, nothing staged, or any subprocess failure all
+    yield None and never raise. Commits ONLY vault paths — the out-of-vault
+    guard lives inside gitstate.commit_docs, so a bug cannot commit source files.
+    """
+    from silica.kernel.base import gitstate
+    from pathlib import Path as _Path
+
+    if git_commit != "auto" or not vault:
+        return None
+
+    seen: set[str] = set()
+    abs_paths: list[_Path] = []
+    for op in ops:
+        path = op.touched_ref()
+        if op.op not in (OpType.write, OpType.patch) or not path:
+            continue
+        if path not in committed_paths or path in seen:
+            continue
+        seen.add(path)
+        abs_paths.append(_Path(vault) / path)
+
+    if not abs_paths:
+        return None
+
+    try:
+        from silica.kernel.base.roots import repo_root_for
+
+        root = repo_root_for(vault)
+        if root is None:
+            return None
+        n = len(abs_paths)
+        return gitstate.commit_docs(root, vault, abs_paths, f"silica: write {n} note(s)")
+    except Exception as _ge:
+        logger.debug("WRITE: git auto-commit skipped (%s)", _ge)
+        return None
+
+
 def handle_snapshot(fsm: "InjectorFSM") -> None:
-    with orch.phase(fsm, fsm._chunk_task_id("snapshot"), "snapshot"):
+    with phase(fsm, fsm._chunk_task_id("snapshot"), "snapshot"):
         from silica.driver.base import NoteRef
 
         try:
-            ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
-            fsm._txn = orch.build_txn(ops)
+            ops = load_ops(fsm._chunk_ctx["ops_path"])
+            fsm._txn = build_txn(ops)
         except Exception as e:
             raise RuntimeError(f"SNAPSHOT failed: {e}")
         fsm._chunk_ctx["txn_id"] = fsm._txn.id
@@ -66,14 +219,14 @@ def handle_snapshot(fsm: "InjectorFSM") -> None:
                     if op.op in (OpType.patch, OpType.overwrite, OpType.delete):
                         # Capture current outgoing targets so we can detect orphaning.
                         try:
-                            for target_ref in orch.DRIVER.links(ref):
+                            for target_ref in DRIVER.links(ref):
                                 snapshot_domain.add(target_ref)
                         except Exception as ex:
                             logger.warning("Failed to fetch pre-write links for %s: %s", path, ex)
 
                     elif op.op == OpType.write:
                         # A write op creates a new note that didn't exist at pre-snapshot
-                        # orch.time.  After the write, graph_snapshot expands its neighborhood
+                        # time.  After the write, graph_snapshot expands its neighborhood
                         # to include every vault note the new note links to.  If those
                         # linked notes carry pre-existing unresolved links, they appear as
                         # new_unres in graph_diff Rule 2 — a false positive.
@@ -88,7 +241,7 @@ def handle_snapshot(fsm: "InjectorFSM") -> None:
                                     target_name = os.path.splitext(os.path.basename(target_stem))[0]
                                     snapshot_domain.add(NoteRef(name=target_name, path=target_stem + ".md"))
                                 else:
-                                    for match in orch.DRIVER.search_names(target_stem):
+                                    for match in DRIVER.search_names(target_stem):
                                         if match.name.lower() == target_key:
                                             snapshot_domain.add(match)
                             except Exception as ex:
@@ -96,7 +249,7 @@ def handle_snapshot(fsm: "InjectorFSM") -> None:
 
             snapshot_domain_list = list(snapshot_domain)
             fsm._chunk_ctx["snapshot_domain"] = [{"name": r.name, "path": r.path} for r in snapshot_domain_list]
-            fsm._pre_graph = orch.DRIVER.graph_snapshot(snapshot_domain_list)
+            fsm._pre_graph = DRIVER.graph_snapshot(snapshot_domain_list)
         except Exception as e:
             logger.error("Failed to take pre-write graph snapshot: %s", e)
             raise RuntimeError(f"Pre-write graph snapshot failed: {e}")
@@ -121,7 +274,7 @@ def _attach_section_images(fsm: "InjectorFSM", ops: list) -> None:
     if not source_file:
         return
     try:
-        source = orch.DRIVER.read_note(source_file).content or ""
+        source = DRIVER.read_note(source_file).content or ""
     except Exception:
         return
     if "![" not in source:  # fast bail: no embeds at all
@@ -177,7 +330,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
     from silica.kernel.write.gate import bulk_write_atomic
     fsm._progress_note(fsm._chunk_task_id("write"), "write", "running")
 
-    ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
+    ops = load_ops(fsm._chunk_ctx["ops_path"])
     try:
         _attach_section_images(fsm, ops)
     except Exception as _ie:
@@ -299,11 +452,11 @@ def handle_write(fsm: "InjectorFSM") -> None:
             from silica.kernel.recall.embed import get_store
             # The run-end sweep that embeds patches skips a driver with no
             # mtime_of (the ws backend) and an index_sweep turned off.
-            swept = (getattr(orch.DRIVER, "mtime_of", None) is not None
-                     and getattr(orch.CONFIG, "index_sweep", True))
-            if orch._refresh_embeddings_for_ops(
-                ops, committed_paths, read_body=lambda p: orch.DRIVER.read_note(p).content or "",
-                embedder=get_embedder(orch.CONFIG), store=get_store(), patches=not swept,
+            swept = (getattr(DRIVER, "mtime_of", None) is not None
+                     and getattr(CONFIG, "index_sweep", True))
+            if _refresh_embeddings_for_ops(
+                ops, committed_paths, read_body=lambda p: DRIVER.read_note(p).content or "",
+                embedder=get_embedder(CONFIG), store=get_store(), patches=not swept,
             ):
                 # Mark the in-memory index dirty so the end-of-run flush knows
                 # to persist (and only then — no flush when nothing changed).
@@ -314,11 +467,11 @@ def handle_write(fsm: "InjectorFSM") -> None:
         # Best-effort incremental co-occurrence refresh — the STABLE leg.
         # Separate from the embed block above so it stays fresh even when the
         # embedder is down (no network, pure local compute). Also deferred (Fix A).
-        _n_cooccur = orch._refresh_cooccurrence_for_ops(
+        _n_cooccur = _refresh_cooccurrence_for_ops(
             ops,
             committed_paths,
-            read_body=lambda p: orch.DRIVER.read_note(p).content or "",
-            lang=orch.CONFIG.cooccurrence_lang,
+            read_body=lambda p: DRIVER.read_note(p).content or "",
+            lang=CONFIG.cooccurrence_lang,
             save=False,
         )
         if _n_cooccur:
@@ -340,7 +493,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
                     idx_path = path.removesuffix(".md")
                     stem = os.path.splitext(os.path.basename(path))[0]
                     try:
-                        body = orch.DRIVER.read_note(path).content or ""
+                        body = DRIVER.read_note(path).content or ""
                         lex.upsert(idx_path, stem, body)
                         # Only mark dirty after a real upsert, so a run that
                         # indexed nothing never triggers a spurious index save
@@ -355,9 +508,9 @@ def handle_write(fsm: "InjectorFSM") -> None:
 
     # Git safety net (SILICA_GIT_COMMIT=auto): snapshot the write batch.
     try:
-        orch._commit_docs_for_ops(
+        _commit_docs_for_ops(
             ops, committed_paths,
-            vault=orch.CONFIG.vault_path, git_commit=orch.CONFIG.git_commit,
+            vault=CONFIG.vault_path, git_commit=CONFIG.git_commit,
         )
     except Exception as _ge:
         logger.debug("WRITE: git auto-commit skipped (%s)", _ge)
@@ -390,7 +543,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
         return
 
     try:
-        ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
+        ops = load_ops(fsm._chunk_ctx["ops_path"])
     except Exception as e:
         raise RuntimeError(f"HUB_UPDATE: failed to read ops: {e}")
 
@@ -434,7 +587,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
     hub_ref = NoteRef(name=hub_name, path=hub_path)
 
     try:
-        hub_note = orch.DRIVER.read_note(hub_ref)
+        hub_note = DRIVER.read_note(hub_ref)
     except Exception as e:
         logger.warning("HUB_UPDATE: hub '%s' not readable: %s — skipping", hub_path, e)
         fsm._progress_note(fsm._chunk_task_id("hub_update"), "hub_update", "done")
@@ -497,16 +650,16 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
     new_hub_content = _merge_moc_section(hub_note.content, moc_heading, note_lines)
 
     try:
-        orch.DRIVER.overwrite(hub_path, new_hub_content)
+        DRIVER.overwrite(hub_path, new_hub_content)
         # Explicitly wait until the section header is readable.
-        _deadline = orch.time.monotonic() + 5.0
-        while orch.time.monotonic() < _deadline:
+        _deadline = time.monotonic() + 5.0
+        while time.monotonic() < _deadline:
             try:
-                if moc_heading in orch.DRIVER.read_note(hub_ref).content:
+                if moc_heading in DRIVER.read_note(hub_ref).content:
                     break
             except Exception:
                 pass
-            orch.time.sleep(0.15)
+            time.sleep(0.15)
         else:
             logger.warning("HUB_UPDATE: MOC block settle timeout for hub '%s' — graph may lag", hub_path)
         logger.info("HUB_UPDATE: updated hub '%s' with %d links", hub_path, len(hub_notes))
@@ -534,7 +687,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
             try:
                 from silica.driver.base import NoteRef as _NR
                 p_ref = _NR(name=parent_name, path=parent_path)
-                p_note = orch.DRIVER.read_note(p_ref)
+                p_note = DRIVER.read_note(p_ref)
                 # Register rollback inverse for parent note
                 if fsm._txn is not None:
                     p_inverse = InverseOp(
@@ -548,7 +701,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
                 p_heading = _moc_heading(source_name, p_note.content)
                 p_note_lines = [_moc_line(p, d) for p, d in p_new_notes]
                 new_p_content = _merge_moc_section(p_note.content, p_heading, p_note_lines)
-                orch.DRIVER.overwrite(parent_path, new_p_content)
+                DRIVER.overwrite(parent_path, new_p_content)
                 existing_paths = {d["path"] for d in fsm._chunk_ctx.get("snapshot_domain", [])}
                 if parent_path not in existing_paths:
                     fsm._chunk_ctx.setdefault("snapshot_domain", []).append(

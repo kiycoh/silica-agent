@@ -115,7 +115,7 @@ def test_distill_inputs_snapshot_shape():
 def test_prefetch_ahead_noop_at_k1():
     from silica.router.states import distill as d
     fsm = _stub_fsm()
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 1, create=True):
+    with patch.object(d.CONFIG, "distill_concurrency", 1, create=True):
         d._prefetch_ahead(fsm, 0)
     assert fsm._prefetcher is None
 
@@ -124,7 +124,7 @@ def test_prefetch_ahead_dispatches_window_and_runs_collision_for_lookahead():
     from silica.router.states import distill as d
     fsm = _stub_fsm(n_chunks=5)
     seen = []
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+    with patch.object(d.CONFIG, "distill_concurrency", 3, create=True), \
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass",
                side_effect=lambda f, j: seen.append(j)):
@@ -144,7 +144,7 @@ def test_prefetch_ahead_crosses_one_attached_file_boundary():
     # crosses into it.
     from silica.router.states import distill as d
     fsm = _stub_fsm(n_chunks=4, file_of={0: 0, 1: 0, 2: 1, 3: 1})
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+    with patch.object(d.CONFIG, "distill_concurrency", 3, create=True), \
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"):
         d._prefetch_ahead(fsm, 0)
@@ -157,7 +157,7 @@ def test_prefetch_ahead_crosses_one_attached_file_boundary():
 def test_prefetch_ahead_never_crosses_two_boundaries():
     from silica.router.states import distill as d
     fsm = _stub_fsm(n_chunks=3, file_of={0: 0, 1: 1, 2: 2})
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+    with patch.object(d.CONFIG, "distill_concurrency", 3, create=True), \
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"):
         d._prefetch_ahead(fsm, 0)
@@ -173,7 +173,7 @@ def test_prefetch_ahead_skips_steer_context_chunks():
     from silica.router.states import distill as d
     fsm = _stub_fsm(n_chunks=3)
     fsm.context["chunk_1_steer_context"] = "## Steer feedback"
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+    with patch.object(d.CONFIG, "distill_concurrency", 3, create=True), \
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"):
         d._prefetch_ahead(fsm, 0)
@@ -194,7 +194,7 @@ def test_prefetch_ahead_warms_next_file_when_unattached():
         f._chunk_flat_to_fi_ci[flat] = (1, 0)
         return True
 
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+    with patch.object(d.CONFIG, "distill_concurrency", 3, create=True), \
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"), \
          patch("silica.router.states.setup.warm_next_file",
@@ -208,7 +208,7 @@ def test_prefetch_ahead_warms_next_file_when_unattached():
 def test_prefetch_ahead_warm_failure_falls_back_to_sequential():
     from silica.router.states import distill as d
     fsm = _stub_fsm(n_chunks=2)
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+    with patch.object(d.CONFIG, "distill_concurrency", 3, create=True), \
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"), \
          patch("silica.router.states.setup.warm_next_file", return_value=False):
@@ -221,7 +221,7 @@ def test_prefetch_ahead_warm_failure_falls_back_to_sequential():
 def test_prefetch_ahead_skips_checkpoint_done_chunks():
     from silica.router.states import distill as d
     fsm = _stub_fsm(n_chunks=3, k_done=(2,))
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+    with patch.object(d.CONFIG, "distill_concurrency", 3, create=True), \
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"):
         d._prefetch_ahead(fsm, 0)
@@ -235,7 +235,7 @@ def test_prefetch_ahead_skips_empty_chunks():
     fsm = _stub_fsm(n_chunks=3)
     fsm._chunks[1] = {"schema_version": 1, "batches": []}
     fsm.context["chunk_1_collision_done"] = True  # collision already emptied it
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+    with patch.object(d.CONFIG, "distill_concurrency", 3, create=True), \
          patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
          patch("silica.router.states.collision.collision_pass"):
         d._prefetch_ahead(fsm, 0)

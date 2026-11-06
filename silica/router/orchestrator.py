@@ -23,15 +23,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-# Unused in this file on purpose: silica/router/states/*.py do
-# `from silica.router import orchestrator as orch` and then reach `orch.time`
-# and the stages below through this module's namespace, which is also the
-# attribute the suite patches. Ruff sees only this file, so it reads the whole
-# block as dead; deleting it takes six call sites and 46 tests with it.
-import time  # noqa: F401
-from contextlib import contextmanager
-from enum import Enum, auto
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
 
@@ -43,17 +35,12 @@ if TYPE_CHECKING:
 
 from silica.driver import DRIVER
 from silica.config import CONFIG
-from silica.kernel.text.payload import payload_chunks  # noqa: F401  (see the `import time` note above)
-from silica.kernel.text.vault_recon import recon_file  # noqa: F401
-from silica.kernel.text.sanitize import sanitize_output  # noqa: F401
-from silica.kernel.write.gate import build_txn, in_run, open_run  # noqa: F401
-from silica.kernel.write.validate import validate_ops  # noqa: F401
+from silica.kernel.write.gate import in_run, open_run
 from silica.kernel.write.ops import OpType
 from silica.kernel.write.ops_io import load_ops
 from silica.kernel.base.layout import to_vault_relative
 from silica.router.base_fsm import BaseFSM
-# Imported for the states modules (and tests), which resolve patchable
-# collaborators through this module's namespace — see silica.router.states.
+from silica.router.phases import InjectorState
 from silica.router import states
 
 logger = logging.getLogger(__name__)
@@ -64,196 +51,6 @@ logger = logging.getLogger(__name__)
 # Mirrored for display by _FILE_PHASES/_CHUNK_PHASES in silica/ui/renderer.py;
 # tests/test_phase_track.py pins both against the recipe.
 _FILE_SCOPE_PHASES = frozenset({"recon", "payload", "salience"})
-
-
-def _refresh_cooccurrence_for_ops(
-    ops: list,
-    committed_paths: set,
-    *,
-    read_body: Callable[[str], str],
-    lang: str = "english",
-    store: Any | None = None,
-    save: bool = True,
-) -> int:
-    """Refresh the embedder-free co-occurrence index for committed write/patch ops.
-
-    The freshness twin of the embedding refresh, but the STABLE leg: it imports
-    only the cooccurrence module (never the embedder/provider stack), so the
-    index stays fresh even when LM Studio is down. Uses build_index(force=True)
-    so a note's prior contribution is replaced, never inflated, with a single
-    save — replacement semantics only: it deliberately does NOT pass
-    refreeze=True, so the store's frozen stemming language is never re-detected
-    from a write batch (re-detection is reserved for /cooccur --force).
-    Note edges need no step here: they are derived from the contributions on
-    read (CooccurStore.note_adjacency, ADR-0029). Best-effort: a per-note read
-    failure is skipped and the whole call never raises. Returns the number of
-    notes refreshed.
-    """
-    from silica.kernel.recall.cooccurrence import build_index as _cooccur_build
-
-    notes: list[tuple[str, str, str]] = []
-    concepts_by_path: dict[str, list[str]] = {}
-    seen: set[str] = set()
-    for op in ops:
-        path = op.touched_ref()
-        if op.op not in (OpType.write, OpType.patch) or not path:
-            continue
-        if path not in committed_paths or path in seen:
-            continue
-        seen.add(path)
-        stem = os.path.splitext(os.path.basename(path))[0]
-        idx_path = path.removesuffix(".md")
-        try:
-            body = read_body(path) or ""
-        except Exception:
-            continue
-        notes.append((idx_path, stem, body))
-        # #9: forward LLM-extracted concept phrases to reinforce this note.
-        op_concepts = getattr(op, "concepts", None)
-        if op_concepts:
-            concepts_by_path[idx_path] = op_concepts
-
-    if not notes:
-        return 0
-    try:
-        # save=False defers the single save to the end-of-run flush, which
-        # rewrites the same singleton.
-        built = _cooccur_build(notes, store=store, lang=lang, force=True,
-                               concepts_by_path=concepts_by_path or None, save=False)
-        if save:
-            built.save()
-    except Exception as exc:
-        logger.debug("WRITE: cooccur refresh skipped (%s)", exc)
-        return 0
-    return len(notes)
-
-
-def _refresh_embeddings_for_ops(
-    ops: list,
-    committed_paths: set,
-    *,
-    read_body: Callable[[str], str],
-    embedder: Any,
-    store: Any,
-    patches: bool = False,
-) -> int:
-    """Embed the notes this chunk wrote, once each, so the next chunk's dedup
-    sees them. Patches are left out: the note already has a vector the dedup
-    can read, and the sweep that ends the run (Coordinator.run) embeds its new
-    text once, after the passes that edit notes past WRITE. Hosted t01 on
-    2026-10-23 spent 47% of its embedder time here, 49 of 218 refreshes on
-    patches, at ~4 s each on a 2-core host. `patches` puts them back where no
-    sweep runs (a driver with no mtime_of, the index sweep turned off).
-    Returns the notes embedded.
-    """
-    from silica.kernel.recall.embed import refresh_note
-
-    kinds = (OpType.write, OpType.patch) if patches else (OpType.write,)
-    seen: set[str] = set()
-    for op in ops:
-        path = op.touched_ref()
-        if op.op not in kinds or not path or path not in committed_paths or path in seen:
-            continue
-        seen.add(path)
-        try:
-            body = read_body(path) or ""
-            # Fix A: defer the whole-index write to a single end-of-run flush
-            # (_run_loop); upsert into the shared in-memory store only.
-            refresh_note(embedder, path.removesuffix(".md"), os.path.splitext(os.path.basename(path))[0],
-                         body, store=store, save=False)
-        except Exception as exc:
-            # One note missing from the index is caught by the run-end sweep;
-            # the chunk's other notes still go in.
-            seen.discard(path)
-            logger.debug("WRITE: embed refresh failed for '%s': %s", path, exc)
-    return len(seen)
-
-
-def _commit_docs_for_ops(
-    ops: list,
-    committed_paths: set,
-    *,
-    vault: str,
-    git_commit: str,
-) -> str | None:
-    """Commit touched vault paths for write/patch ops to git.
-
-    Git safety net behind SILICA_GIT_COMMIT=auto: an additive snapshot on top
-    of the undo journal (ADR-0002), never a replacement. Best-effort: no git
-    binary, vault outside a repo, nothing staged, or any subprocess failure all
-    yield None and never raise. Commits ONLY vault paths — the out-of-vault
-    guard lives inside gitstate.commit_docs, so a bug cannot commit source files.
-    """
-    from silica.kernel.base import gitstate
-    from pathlib import Path as _Path
-
-    if git_commit != "auto" or not vault:
-        return None
-
-    seen: set[str] = set()
-    abs_paths: list[_Path] = []
-    for op in ops:
-        path = op.touched_ref()
-        if op.op not in (OpType.write, OpType.patch) or not path:
-            continue
-        if path not in committed_paths or path in seen:
-            continue
-        seen.add(path)
-        abs_paths.append(_Path(vault) / path)
-
-    if not abs_paths:
-        return None
-
-    try:
-        from silica.kernel.base.roots import repo_root_for
-
-        root = repo_root_for(vault)
-        if root is None:
-            return None
-        n = len(abs_paths)
-        return gitstate.commit_docs(root, vault, abs_paths, f"silica: write {n} note(s)")
-    except Exception as _ge:
-        logger.debug("WRITE: git auto-commit skipped (%s)", _ge)
-        return None
-
-
-class InjectorState(Enum):
-    INIT = auto()
-    RECON = auto()         # Phase 1
-    PAYLOAD = auto()       # Phase 2.0
-    SALIENCE = auto()      # Phase 2.05 — thematic salience gate (drop off-theme concepts)
-    COLLISION = auto()     # Phase 5 — dedup routing: high-sim→patch, borderline→defer, low→write
-    DELEGATE = auto()      # Phase 2.1 — real Distiller LLM
-    SANITIZE = auto()      # Phase 2.2
-    VALIDATE = auto()      # Phase 2.3 (Gate) — C4: overwrites ops_path
-    SNAPSHOT = auto()      # Phase 2.5 — C3: builds InverseOp Txn
-    WRITE = auto()         # Phase 3
-    HUB_UPDATE = auto()    # Phase 3.5 — patch Hub note with MOC links
-    AUTOLINK = auto()      # Phase 4 — inject wikilinks into touched notes
-    BACKLINK = auto()      # Phase 4.5 — reverse: inject links to new notes into pre-existing ones
-    LINT = auto()          # Phase 5 (Gate)
-    CLEANUP = auto()       # Phase 5 — C5: only from DONE
-    ROLLBACK = auto()      # On gate fail — C3: apply inverses
-    DONE = auto()
-    ERROR = auto()
-
-
-@contextmanager
-def phase(fsm, task_id: str, capability_name: str):
-    """Bracket a handler's happy path: 'running' on entry, then 'done' +
-    _transition_success() on clean exit. An exception propagates WITHOUT
-    emitting 'done'/transition (the caller's raise routes to ROLLBACK/error
-    exactly as before). Fits only linear handlers with a single trailing
-    success; handlers with early-exit transitions, a split done/transition,
-    or ROLLBACK routing keep their explicit progress notes.
-
-    A free function (not an FSM method) so it depends only on `_progress_note`
-    and `_transition_success`: handler unit tests keep stubbing those two on a
-    plain fake without needing to know about (or bind) the concrete FSM."""
-    fsm._progress_note(task_id, capability_name, "running")
-    yield
-    fsm._progress_note(task_id, capability_name, "done")
-    fsm._transition_success()
 
 
 class InjectorFSM(BaseFSM[InjectorState]):

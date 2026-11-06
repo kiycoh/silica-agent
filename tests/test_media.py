@@ -217,11 +217,11 @@ def test_attach_section_images_reaches_overwrite_ops(monkeypatch):
     # note lost the figure of the section it was distilled from (2026-09-09).
     from types import SimpleNamespace
     from silica.kernel.write.ops import Op, OpType
-    from silica.router import orchestrator as orch
+    from silica.router.states import write as write_state
     from silica.router.states.write import _attach_section_images
 
     src = "## Fisher\ntesto\n![[fig.jpg]]\n## Altro\n"
-    monkeypatch.setattr(orch, "DRIVER", SimpleNamespace(read_note=lambda p: SimpleNamespace(content=src)))
+    monkeypatch.setattr(write_state, "DRIVER", SimpleNamespace(read_note=lambda p: SimpleNamespace(content=src)))
     fsm = SimpleNamespace(_chunk_flat_to_fi_ci={}, _current_chunk_idx=0, _file_chunks={}, inbox_file="Inbox/lez.md")
     ops = [
         Op(op=OpType.overwrite, heading="Fisher", source_basename="lez.md", path="Corso/Fisher.md", content="corpo nuovo"),

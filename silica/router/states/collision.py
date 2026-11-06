@@ -3,11 +3,8 @@
 
 """Injector COLLISION state: embedding-based dedup routing.
 
-Handler bodies for InjectorFSM, extracted from orchestrator.py: each function
-takes the FSM instance and mutates its context/state exactly as the former
-method did. Patchable collaborators (DRIVER, CONFIG, tools, load_ops, time)
-are resolved through the orchestrator module namespace (orch.X) so tests that
-patch silica.router.orchestrator.* keep working.
+Handler bodies for InjectorFSM: each function takes the FSM instance and
+mutates its state.
 """
 from __future__ import annotations
 
@@ -16,7 +13,8 @@ import os
 import hashlib
 from typing import Any, TYPE_CHECKING
 
-from silica.router import orchestrator as orch
+from silica.config import CONFIG
+from silica.driver import DRIVER
 
 if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
@@ -240,7 +238,7 @@ def _cold_intra_chunk_near_dup(a: tuple, b: tuple) -> bool:
     # Only compare excerpts, and only when both carry enough text to be meaningful.
     if len(ea) < 40 or len(eb) < 40:
         return False
-    thr = getattr(orch.CONFIG, "minhash_dup_threshold", 0.6)
+    thr = getattr(CONFIG, "minhash_dup_threshold", 0.6)
     sa, sb = minhash_signature(ea), minhash_signature(eb)
     return bool(sa and sb) and estimate_jaccard(sa, sb) >= thr
 
@@ -266,7 +264,7 @@ def _run_embedder_free_dedup_leg(fsm: "InjectorFSM", idx: int, chunk: dict) -> N
             _before - sum(len(b.get("concepts", [])) for b in chunk.get("batches", [])),
         )
 
-    threshold = getattr(orch.CONFIG, "minhash_dup_threshold", 0.6)
+    threshold = getattr(CONFIG, "minhash_dup_threshold", 0.6)
     try:
         corpus: dict[str, str] = {}
         # "" matches every note name → full-vault enumeration. Acceptable on this
@@ -274,9 +272,9 @@ def _run_embedder_free_dedup_leg(fsm: "InjectorFSM", idx: int, chunk: dict) -> N
         # chunk on purpose: chunk N must see notes chunk N-1 just wrote, or
         # cross-chunk twins land as duplicates. Only the signatures are memoized
         # (sig_cache below) — the corpus text is cheap I/O, the MinHash is not.
-        for ref in orch.DRIVER.search_names(""):
+        for ref in DRIVER.search_names(""):
             try:
-                corpus[ref.path] = orch.DRIVER.read_note(ref).content or ""
+                corpus[ref.path] = DRIVER.read_note(ref).content or ""
             except Exception:
                 continue
     except Exception as _e:
@@ -370,8 +368,8 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
 
     # No literal fallbacks: the 0.75 that used to sit here outlived the config
     # default (0.70 since ADR-0030) and a divergence nothing exercised.
-    τ_high = orch.CONFIG.sim_threshold_high
-    τ_low = orch.CONFIG.sim_threshold_low
+    τ_high = CONFIG.sim_threshold_high
+    τ_low = CONFIG.sim_threshold_low
 
     from silica.model.providers import get_embedder_or_none
     from silica.kernel.recall.embed import get_store
@@ -391,7 +389,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
         logger.info("COLLISION: embedding index empty — falling back to MinHash dedup leg")
         _minhash_fallback()
         return
-    embedder = get_embedder_or_none(orch.CONFIG, "COLLISION")
+    embedder = get_embedder_or_none(CONFIG, "COLLISION")
     if embedder is None:
         _minhash_fallback()
         return
@@ -522,7 +520,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
 
             if decision == "patch":
                 try:
-                    orch.DRIVER.read_note(existing_path)
+                    DRIVER.read_note(existing_path)
                     # Graph confirms node exists — safe to patch
                     logger.info(
                         "COLLISION: '%s' → patch '%s' (score=%.3f ≥ τ_eff=%.2f%s)",

@@ -3,21 +3,23 @@
 
 """Injector run-setup states: RECON, PAYLOAD, SALIENCE.
 
-Handler bodies for InjectorFSM, extracted from orchestrator.py: each function
-takes the FSM instance and mutates its context/state exactly as the former
-method did. Patchable collaborators (DRIVER, CONFIG, tools, load_ops, time)
-are resolved through the orchestrator module namespace (orch.X) so tests that
-patch silica.router.orchestrator.* keep working.
+Handler bodies for InjectorFSM: each function takes the FSM instance and
+mutates its state.
 """
 from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import TYPE_CHECKING
 
 from silica.kernel.forms import read_source_text
 from silica.kernel.outline import lane_for
-from silica.router import orchestrator as orch
+from silica.config import CONFIG
+from silica.driver import DRIVER
+from silica.kernel.text.payload import payload_chunks
+from silica.kernel.text.vault_recon import recon_file
+from silica.router.phases import phase
 
 if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
@@ -35,7 +37,7 @@ def handle_recon(fsm: "InjectorFSM") -> None:
     """
     fi = fsm._current_file_idx
     inbox_file = fsm.inbox_files[fi]
-    with orch.phase(fsm, "recon", "recon"):
+    with phase(fsm, "recon", "recon"):
         # Warmed early by the distill prefetch window (warm_next_file): reuse
         # the recon it already ran instead of paying the pass twice.
         warm = fsm.context.pop(f"warm_recon_{fi}", None)
@@ -99,7 +101,7 @@ def _recon_for_lane(fsm: "InjectorFSM", fi: int, inbox_file: str) -> dict:
     lane = lane_for(profile)
     fsm.context[f"file_{fi}_lane"] = lane
     if lane != "outline":
-        return orch.recon_file(inbox_file)
+        return recon_file(inbox_file)
     return {"success": True, "outline_lane": True, "file": inbox_file,
             "source_text": read_source_text(inbox_file)}
 
@@ -137,7 +139,7 @@ def build_vault_graph_ctx() -> dict[str, dict]:
             save_cluster_ctx,
         )
         from silica.kernel.report.graph_report import compute_report
-        _t = orch.time.monotonic()
+        _t = time.monotonic()
 
         nodes, edges = build_graph_data(folder="")  # cheap snapshot (no Louvain)
         sig = [
@@ -149,7 +151,7 @@ def build_vault_graph_ctx() -> dict[str, dict]:
             ctx = cached.get("ctx") or {}
             logger.info(
                 "PAYLOAD: vault graph context reused from cache — %d nodes (%.2fs, Louvain skipped)",
-                len(ctx), orch.time.monotonic() - _t,
+                len(ctx), time.monotonic() - _t,
             )
             return ctx
 
@@ -158,7 +160,7 @@ def build_vault_graph_ctx() -> dict[str, dict]:
         save_cluster_ctx(sig, ctx)
         logger.info(
             "PAYLOAD: vault graph context built — %d nodes, %d clusters (%.2fs)",
-            len(ctx), len(report.clusters), orch.time.monotonic() - _t,
+            len(ctx), len(report.clusters), time.monotonic() - _t,
         )
         return ctx
     except Exception as _e:
@@ -217,7 +219,7 @@ def _assemble_file_chunks(fsm: "InjectorFSM", recon_cur: dict) -> tuple[dict, li
     phase_conf = fsm._get_recipe_phase("payload")
     max_concepts = phase_conf.get("partition_if_over", 200)
     max_bytes = int(os.getenv("DISTILLER_CHUNK_MAX_BYTES", str(30 * 1024)))
-    res = orch.payload_chunks([recon_cur], max_concepts=max_concepts, max_bytes=max_bytes)
+    res = payload_chunks([recon_cur], max_concepts=max_concepts, max_bytes=max_bytes)
 
     # Re-partition this file's payload (§3.6); fall back to the legacy
     # flat-chunk path when batch structure is absent (e.g. tests).
@@ -475,11 +477,11 @@ def _salience_filter(fsm: "InjectorFSM", chunks: list[dict]) -> int | None:
     The SALIENCE core, shared with warm_next_file. Returns the dropped count,
     or None when no embedder is available (gate skipped, chunks untouched).
     """
-    τ_theme = getattr(orch.CONFIG, "sim_threshold_theme", 0.35)
+    τ_theme = getattr(CONFIG, "sim_threshold_theme", 0.35)
     from silica.model.providers import get_embedder_or_none
     from silica.kernel.base.vectors import document_theme_vector, cosine
     from silica.kernel.text.text import clean_body
-    embedder = get_embedder_or_none(orch.CONFIG, "SALIENCE")
+    embedder = get_embedder_or_none(CONFIG, "SALIENCE")
     if embedder is None:
         return None
 
@@ -493,7 +495,7 @@ def _salience_filter(fsm: "InjectorFSM", chunks: list[dict]) -> int | None:
                 try:
                     # Same cleaned body as RECON's keyphrase pass → the theme
                     # vector is a cache hit in embed._theme_cache, no re-embed.
-                    body = clean_body(orch.DRIVER.read_note(inbox_file).content, fences=True)
+                    body = clean_body(DRIVER.read_note(inbox_file).content, fences=True)
                 except Exception:
                     body = ""
                 theme_cache[inbox_file] = document_theme_vector(embedder, body)

@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 from silica.kernel.write.ops import Op, OpType
-from silica.router.orchestrator import _commit_docs_for_ops
+from silica.router.states.write import _commit_docs_for_ops
 
 
 # ---------------------------------------------------------------------------

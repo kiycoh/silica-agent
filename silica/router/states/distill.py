@@ -3,11 +3,8 @@
 
 """Injector distillation states: DELEGATE, SANITIZE, VALIDATE.
 
-Handler bodies for InjectorFSM, extracted from orchestrator.py: each function
-takes the FSM instance and mutates its context/state exactly as the former
-method did. Patchable collaborators (DRIVER, CONFIG, tools, load_ops, time)
-are resolved through the orchestrator module namespace (orch.X) so tests that
-patch silica.router.orchestrator.* keep working.
+Handler bodies for InjectorFSM: each function takes the FSM instance and
+mutates its state.
 """
 from __future__ import annotations
 
@@ -22,7 +19,11 @@ from functools import partial
 from typing import Any, TYPE_CHECKING
 
 from silica.kernel.base.frontmatter import FM_RE_TOLERANT
-from silica.router import orchestrator as orch
+from silica.config import CONFIG
+from silica.driver import DRIVER
+from silica.kernel.text.sanitize import sanitize_output
+from silica.kernel.write.validate import validate_ops
+from silica.router.phases import InjectorState, phase
 from silica.kernel.outline import flag_cosine_near_titles, parse_outline, run_outliner, vault_outline
 from silica.kernel.prep_delegation import payload_inbox_text, run_distiller
 
@@ -53,7 +54,7 @@ def _doc_date(fsm: "InjectorFSM", idx: int) -> str:
         fi = fsm._chunk_flat_to_fi_ci.get(idx, (None, None))[0]
         chunk = fsm._file_chunks.get(fi) if fi is not None else None
         src = (chunk or {}).get("source_file") or fsm.inbox_file
-        text = orch.DRIVER.read_note(src).content or ""
+        text = DRIVER.read_note(src).content or ""
         fm = FM_RE_TOLERANT.match(text)
         m = _FM_DATE_RE.search(fm.group(1)) if fm else None
         return m.group(1) if m else ""
@@ -363,7 +364,7 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
     attached yet — same ≤ k-1 staleness class as within-file lookahead, which
     the 2026-07-18 k=1-vs-k=3 A/B bounded), never a second one.
     """
-    k = int(getattr(orch.CONFIG, "distill_concurrency", 1) or 1)
+    k = int(getattr(CONFIG, "distill_concurrency", 1) or 1)
     if k <= 1:
         return
     if fsm._prefetcher is None:
@@ -547,7 +548,7 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
                 chunk_hash[:8],
             )
             fsm._chunk_ctx["ops_path"] = saved_ops_path  # per-chunk ns: every consumer reads _chunk_ctx
-            fsm.state = orch.InjectorState.SNAPSHOT
+            fsm.state = InjectorState.SNAPSHOT
             return
     else:
         # Steer retry is mid-chunk work: never content-addressed-skip, and keep
@@ -644,7 +645,7 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
 
 
 def handle_sanitize(fsm: "InjectorFSM") -> None:
-    with orch.phase(fsm, fsm._chunk_task_id("sanitize"), "sanitize"):
+    with phase(fsm, fsm._chunk_task_id("sanitize"), "sanitize"):
         # The chunk's own inbox text anchors verbatim-body escape repair:
         # doublings the source contains survive, everything else collapses.
         # The full chunk is a superset of any steer-retry payload — a
@@ -656,7 +657,7 @@ def handle_sanitize(fsm: "InjectorFSM") -> None:
         except OSError as e:
             res = {"error": f"Failed to read distiller output: {e}"}
         else:
-            res = orch.sanitize_output(raw, verbatim_source=source or None)
+            res = sanitize_output(raw, verbatim_source=source or None)
         if "error" in res:
             fsm._progress_note(fsm._chunk_task_id("sanitize"), "sanitize", "failed", error=res["error"])
             raise RuntimeError(f"Sanitize failed: {res['error']}")
@@ -705,7 +706,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
 
     from silica.kernel.write.ops_io import parse_ops
 
-    res = orch.validate_ops(
+    res = validate_ops(
         parse_ops(ops_raw),
         payloads,
         target_dir=fsm.target_dir,
@@ -750,7 +751,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
 
     max_rate = fsm._get_recipe_gate("rejection_rate_max", 0.10)
 
-    if orch.CONFIG.verbose:
+    if CONFIG.verbose:
         total_ops = res.get("validated_count", 0) + res.get("rejected_count", 0)
         logger.info(
             "[DEBUG VALIDATE Gate]: Success: %s | Total evaluated ops: %d | Validated (accepted): %d | Rejected: %d | Rejection Rate: %.1f%% (Max Allowed: %.1f%%)",
@@ -777,7 +778,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
         fsm.context["final_status"] = "no_ops"
         fsm._chunk_ctx["ops_path"] = ops_path
         fsm._progress_note(fsm._chunk_task_id("validate"), "validate", "done")
-        fsm.state = orch.InjectorState.CLEANUP
+        fsm.state = InjectorState.CLEANUP
         return
 
     # Run-global: any chunk with actionable ops makes the run not-no_ops, so a
@@ -863,7 +864,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
                 )
             except Exception:
                 pass
-            fsm.state = orch.InjectorState.DELEGATE
+            fsm.state = InjectorState.DELEGATE
             return
         # Exhausted steering budget → defer and short-circuit.
         logger.warning("VALIDATE: steer budget exhausted (%d/%d) — deferring chunk %d.", steer_attempts, _max_steer, idx)
@@ -878,7 +879,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
         fsm.context["has_partial_failure"] = True
         fsm._progress_note(fsm._chunk_task_id("validate"), "validate", "failed",
                            error="all ops rejected — deferred")
-        fsm.state = orch.InjectorState.CLEANUP
+        fsm.state = InjectorState.CLEANUP
         return
 
     # Partial rejection: steer ONLY the rejected concepts back through the
@@ -913,7 +914,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
             )
             fsm._progress_note(fsm._chunk_task_id("validate"), "validate", "running",
                                 error=f"steer {steer_attempts}/{_max_steer} (partial)")
-            fsm.state = orch.InjectorState.DELEGATE
+            fsm.state = InjectorState.DELEGATE
             return
 
     # Knowledge-block consolidation (Phase 2): persist the validated ops to

@@ -521,6 +521,15 @@ def synthetic_vault() -> Path:
 
 
 @pytest.fixture
+def run_driver():
+    """A mock DRIVER for a whole injector run, for tests taking it as an argument."""
+    from tests.fsm_patches import patch_run
+
+    with patch_run("DRIVER") as driver:
+        yield driver
+
+
+@pytest.fixture
 def tmp_vault(tmp_path, monkeypatch):
     """Provide a temporary filesystem-backed vault for unit tests.
 

@@ -774,7 +774,8 @@ def test_render_write_stamps_the_section(tmp_vault):
 from unittest.mock import MagicMock, patch
 
 from silica.router import states
-from silica.router.orchestrator import InjectorFSM, InjectorState
+from silica.router.orchestrator import InjectorFSM
+from silica.router.phases import InjectorState
 
 
 def _outline_chunk(text: str = "## Margine\ncorpo") -> dict:
@@ -878,7 +879,7 @@ def test_delegate_steer_retry_keeps_the_whole_whitelist(mock_run, mock_vo):
 def test_assemble_file_chunks_outline_lane_makes_one_full_text_chunk():
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     recon = {"success": True, "outline_lane": True, "file": "Inbox/test.md", "source_text": "## A\nbody"}
-    with patch("silica.router.orchestrator.payload_chunks") as mock_payload:
+    with patch("silica.router.states.setup.payload_chunks") as mock_payload:
         res, chunks = states.setup._assemble_file_chunks(fsm, recon)
     mock_payload.assert_not_called()
     assert chunks == [_outline_chunk("## A\nbody")]
@@ -892,7 +893,7 @@ def test_recon_skips_the_miner_on_the_outline_lane(monkeypatch):
     monkeypatch.setattr(states.setup, "_pin_file_profile",
                         lambda fsm, fi, f: fsm.context.__setitem__(f"file_{fi}_profile", "default"))
     monkeypatch.setattr(states.setup, "read_source_text", lambda rel: "## A\nbody")
-    with patch("silica.router.orchestrator.recon_file") as mock_recon:
+    with patch("silica.router.states.setup.recon_file") as mock_recon:
         fsm.step()
     mock_recon.assert_not_called()
     rec = fsm.context["recon"][-1]
@@ -908,7 +909,7 @@ def test_recon_keeps_the_miner_for_memory_forms(monkeypatch):
     monkeypatch.setattr(states.setup, "_pin_file_profile",
                         lambda fsm, fi, f: fsm.context.update({f"file_{fi}_profile": "clip",
                                                                 f"file_{fi}_form_origin": "stamp"}))
-    with patch("silica.router.orchestrator.recon_file", return_value={"success": True, "concepts": []}) as mock_recon:
+    with patch("silica.router.states.setup.recon_file", return_value={"success": True, "concepts": []}) as mock_recon:
         fsm.step()
     mock_recon.assert_called_once_with("Inbox/test.md")
     assert fsm.context["file_0_lane"] == "keyphrase"
@@ -1044,7 +1045,7 @@ def test_recon_ignores_a_sniffed_clip_for_the_lane(monkeypatch):
                         lambda fsm, fi, f: fsm.context.update({f"file_{fi}_profile": "clip",
                                                                 f"file_{fi}_form_origin": "sniff"}))
     monkeypatch.setattr(states.setup, "read_source_text", lambda rel: "## A\nbody")
-    with patch("silica.router.orchestrator.recon_file") as mock_recon:
+    with patch("silica.router.states.setup.recon_file") as mock_recon:
         fsm.step()
     mock_recon.assert_not_called()
     assert fsm.context["file_0_lane"] == "outline"

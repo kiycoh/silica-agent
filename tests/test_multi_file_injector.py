@@ -6,11 +6,14 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from tests.fsm_patches import patch_run
+
 import pytest
 
 from silica.kernel.write.ops import Txn
 from silica.router.states import finalize
-from silica.router.orchestrator import InjectorFSM, InjectorState
+from silica.router.orchestrator import InjectorFSM
+from silica.router.phases import InjectorState
 from silica.tools import TOOLS
 
 
@@ -82,8 +85,8 @@ class TestT1MultiFileInit:
         assert "inbox_files" in fsm.progress.inputs
         assert len(fsm.progress.inputs["inbox_files"]) == 2
 
-    @patch("silica.router.orchestrator.recon_file")
-    @patch("silica.router.orchestrator.payload_chunks")
+    @patch("silica.router.states.setup.recon_file")
+    @patch("silica.router.states.setup.payload_chunks")
     @patch("silica.kernel.write.ledger.get_ledger")
     def test_payload_produces_f0_and_f1_tasks(self, mock_ledger, mock_payload, mock_recon):
         """Per-file pipeline: each file's PAYLOAD pass registers its own f{fi}_* tasks."""
@@ -163,8 +166,8 @@ class TestT1MultiFileInit:
 class TestT2ChunkContainment:
     """Chunk failure preserves prior successful chunks and advances to the next."""
 
-    @patch("silica.router.orchestrator.recon_file")
-    @patch("silica.router.orchestrator.payload_chunks")
+    @patch("silica.router.states.setup.recon_file")
+    @patch("silica.router.states.setup.payload_chunks")
     # The USE site, as the other eleven distiller patches in the suite already
     # target: states/distill.py binds run_distiller at import, so patching the
     # module that DEFINES it left the real one running. This test then passed
@@ -172,20 +175,14 @@ class TestT2ChunkContainment:
     # died in CI with "LLM Provider NOT provided" turning `partial` into
     # `failed`.
     @patch("silica.router.states.distill.run_distiller")
-    @patch("silica.router.orchestrator.sanitize_output")
-    @patch("silica.router.orchestrator.validate_ops")
-    @patch("silica.router.orchestrator.DRIVER")
-    @patch("silica.router.orchestrator.build_txn")
+    @patch("silica.router.states.distill.sanitize_output")
+    @patch("silica.router.states.distill.validate_ops")
+    @patch("silica.router.states.write.build_txn")
     @patch("silica.kernel.write.gate.bulk_write_atomic")
     @patch("silica.kernel.write.gate.archive_source")
     @patch("silica.kernel.write.gate.apply_inverses")
     @patch("silica.kernel.write.ledger.get_ledger")
-    def test_write_failure_contained_at_chunk_level(
-        self,
-        mock_ledger, mock_restore, mock_cleanup,
-        mock_bulk_write, mock_snapshot, mock_driver, mock_validate,
-        mock_sanitize, mock_distiller, mock_payload, mock_recon,
-    ):
+    def test_write_failure_contained_at_chunk_level(self, mock_ledger, mock_restore, mock_cleanup, mock_bulk_write, mock_snapshot, mock_validate, mock_sanitize, mock_distiller, mock_payload, mock_recon, run_driver):
         """Write failure on chunk 1 → chunk 0 stays committed, run='partial', no ERROR."""
         from silica.kernel.write.gate import AtomicBulkResult, NoteCommitResult
 
@@ -205,7 +202,7 @@ class TestT2ChunkContainment:
         mock_snapshot.return_value = Txn(id="txn_x", inverses=[])
         mock_restore.return_value = {"success": True}
         mock_cleanup.return_value = {"success": True}
-        mock_driver.graph_snapshot.return_value = MagicMock()
+        run_driver.graph_snapshot.return_value = MagicMock()
 
         # Chunk 0 write succeeds (1 committed); chunk 1 write fails (0 committed, 1 failed)
         write_call_count = [0]
@@ -391,7 +388,7 @@ class TestT4PerFileCleanup:
         mock_op.op.value = "write"
         mock_op.op.__eq__ = lambda self, other: False  # not OpType.skip
 
-        with patch("silica.router.orchestrator.load_ops", return_value=[mock_op]):
+        with patch_run("load_ops", return_value=[mock_op]):
             with patch("silica.kernel.write.ledger.get_ledger") as mock_ledger:
                 fsm.context.setdefault("chunk", {})["ops_path"] = "/tmp/ops.json"
                 fsm.context.setdefault("chunk", {})["txn_id"] = "txn_1"
@@ -405,7 +402,7 @@ class TestT4PerFileCleanup:
     def test_cleanup_defers_archive_for_non_last_chunk(self):
         """Cleanup does NOT archive when ci < last chunk of the file."""
         with patch("silica.kernel.write.gate.archive_source") as mock_cleanup:
-            with patch("silica.router.orchestrator.load_ops", return_value=[]):
+            with patch_run("load_ops", return_value=[]):
                 with patch("silica.kernel.write.ledger.get_ledger"):
                     fsm = InjectorFSM("Inbox/test.md", "Concepts")
                     # Two chunks under one file group
@@ -421,7 +418,7 @@ class TestT4PerFileCleanup:
     def test_cleanup_archives_on_last_chunk_of_file(self):
         """Cleanup DOES archive when ci == last chunk of the file (no failures)."""
         with patch("silica.kernel.write.gate.archive_source", return_value={"success": True}) as mock_cleanup:
-            with patch("silica.router.orchestrator.load_ops", return_value=[]):
+            with patch_run("load_ops", return_value=[]):
                 with patch("silica.kernel.write.ledger.get_ledger"):
                     fsm = InjectorFSM("Inbox/test.md", "Concepts")
                     fsm._file_chunks = {0: {"source_file": "Inbox/test.md", "chunks": [{"a": 1}, {"b": 2}]}}
@@ -439,8 +436,8 @@ class TestT4PerFileCleanup:
 # ---------------------------------------------------------------------------
 
 class TestT5DeadCodeRemoved:
-    @patch("silica.router.orchestrator.recon_file")
-    @patch("silica.router.orchestrator.payload_chunks")
+    @patch("silica.router.states.setup.recon_file")
+    @patch("silica.router.states.setup.payload_chunks")
     @patch("silica.kernel.write.ledger.get_ledger")
     def test_no_task_ledger_load_in_payload(self, mock_ledger, mock_payload, mock_recon, caplog):
         """No FileNotFoundError is swallowed during PAYLOAD phase."""

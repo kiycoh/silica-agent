@@ -3,11 +3,8 @@
 
 """Injector terminal states: LINT (gate), CLEANUP, ROLLBACK.
 
-Handler bodies for InjectorFSM, extracted from orchestrator.py: each function
-takes the FSM instance and mutates its context/state exactly as the former
-method did. Patchable collaborators (DRIVER, CONFIG, tools, load_ops, time)
-are resolved through the orchestrator module namespace (orch.X) so tests that
-patch silica.router.orchestrator.* keep working.
+Handler bodies for InjectorFSM: each function takes the FSM instance and
+mutates its state.
 """
 from __future__ import annotations
 
@@ -16,7 +13,10 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from silica.kernel.write import gate
-from silica.router import orchestrator as orch
+from silica.config import CONFIG
+from silica.driver import DRIVER
+from silica.kernel.write.ops_io import load_ops
+from silica.router.phases import InjectorState, phase
 
 if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
@@ -30,7 +30,7 @@ from silica.kernel.write.ops import OpType
 def handle_lint(fsm: "InjectorFSM") -> None:
     fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "running")
     try:
-        ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
+        ops = load_ops(fsm._chunk_ctx["ops_path"])
     except Exception as e:
         raise RuntimeError(f"LINT: failed to read ops: {e}")
 
@@ -48,7 +48,7 @@ def handle_lint(fsm: "InjectorFSM") -> None:
     baselines = fsm._chunk_ctx.get("lint_baseline", {})
     for path, op_type, hub in touched:
         new_errors = gate.new_lint_errors(path or "", op_type or "", hub or "", set(baselines.get(path, [])))
-        if orch.CONFIG.verbose:
+        if CONFIG.verbose:
             logger.info(
                 "[DEBUG LINT Gate]: File: %s | Type: %s | Hub: %s | New errors: %s",
                 path,
@@ -59,7 +59,7 @@ def handle_lint(fsm: "InjectorFSM") -> None:
         if new_errors:
             fsm._chunk_ctx["abort_reason"] = f"Lint failed for {path}: {new_errors}"
             fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
-            fsm.state = orch.InjectorState.ROLLBACK
+            fsm.state = InjectorState.ROLLBACK
             return
 
     # S3.2: Run graph-diff check
@@ -68,7 +68,7 @@ def handle_lint(fsm: "InjectorFSM") -> None:
         if fsm._pre_graph is None:
             fsm._chunk_ctx["abort_reason"] = "Graph regression gate failed: pre-write snapshot is missing"
             fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
-            fsm.state = orch.InjectorState.ROLLBACK
+            fsm.state = InjectorState.ROLLBACK
             return
         try:
             from silica.driver.base import NoteRef
@@ -84,7 +84,7 @@ def handle_lint(fsm: "InjectorFSM") -> None:
                         name = os.path.splitext(os.path.basename(path))[0]
                         snapshot_domain.append(NoteRef(name=name, path=path))
             
-            post_graph = orch.DRIVER.graph_snapshot(snapshot_domain)
+            post_graph = DRIVER.graph_snapshot(snapshot_domain)
             from silica.kernel.graph_diff import check_graph_regression
             
             created_paths = fsm._txn.created_paths if fsm._txn else []
@@ -130,7 +130,7 @@ def handle_lint(fsm: "InjectorFSM") -> None:
                 patched_paths, removed_paths=frozenset(txn_removed_paths(fsm._txn)),
             )
 
-            if orch.CONFIG.verbose:
+            if CONFIG.verbose:
                 logger.info(
                     "[DEBUG Graph Regression Gate]: Pre-write graph size: %d nodes | Post-write graph size: %d nodes | Rule: %s | Result: %s",
                     len(fsm._pre_graph.link_counts) if fsm._pre_graph and fsm._pre_graph.link_counts else 0,
@@ -178,13 +178,13 @@ def handle_lint(fsm: "InjectorFSM") -> None:
                     logger.warning("[Graph Regression Gate]: Blocking errors (triggering rollback): %s", "; ".join(blocking_errors))
                     fsm._chunk_ctx["abort_reason"] = reason
                     fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=reason)
-                    fsm.state = orch.InjectorState.ROLLBACK
+                    fsm.state = InjectorState.ROLLBACK
                     return
         except Exception as e:
             logger.error("Failed to perform graph-diff check: %s", e)
             fsm._chunk_ctx["abort_reason"] = f"Graph regression gate error during check: {e}"
             fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
-            fsm.state = orch.InjectorState.ROLLBACK
+            fsm.state = InjectorState.ROLLBACK
             return
 
     fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "done")
@@ -484,7 +484,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         # The label stays the segment's, because the patch executor already
         # cited the segment's prose with it.
         try:
-            src_data, _, _ = frontmatter.split(orch.DRIVER.read_note(source_file).content or "")
+            src_data, _, _ = frontmatter.split(DRIVER.read_note(source_file).content or "")
         except Exception:
             src_data = {}
         if not isinstance(src_data, dict):
@@ -496,7 +496,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         leaf_name = str(owner) if owner else source_key(source_file)
         leaf_rel = f"{in_write_dir(SOURCES_DIR)}/{leaf_name}"
         try:
-            orch.DRIVER.read_note(leaf_rel)
+            DRIVER.read_note(leaf_rel)
             leaf_exists = True
         except Exception:
             leaf_exists = False
@@ -505,7 +505,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             # the same original file, the one identity convert stamps on both.
             flat = f"{in_write_dir(SOURCES_DIR)}/{basename}"
             try:
-                old, _, _ = frontmatter.split(orch.DRIVER.read_note(flat).content or "")
+                old, _, _ = frontmatter.split(DRIVER.read_note(flat).content or "")
             except Exception:
                 old = None
             if (isinstance(old, dict) and src_data.get("source_file")
@@ -517,7 +517,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             getattr(fsm, "seen_override", None)
         )
         if wants_leaf and not leaf_exists and not owner:
-            source_text = orch.DRIVER.read_note(source_file).content or ""
+            source_text = DRIVER.read_note(source_file).content or ""
             # Single frontmatter block: keep the source BODY verbatim; the date
             # is the source's event clock, resolved by the same function that
             # stamps it on every claim (kernel/provenance) so leaf and claim
@@ -540,7 +540,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
                     carry += f'{key}: "{quoted}"\n'
             date_line = f"date: {date}\n" if date else ""
             leaf = f"---\n{date_line}source_id: {leaf_name}\n{carry}---\n\n{body.lstrip()}"
-            orch.DRIVER.create(leaf_rel, leaf)
+            DRIVER.create(leaf_rel, leaf)
             fsm._run_inverses.append(
                 (leaf_rel, InverseOp(kind=InverseOpKind.delete_created, path=leaf_rel), None)
             )
@@ -559,12 +559,12 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             for rel in notes:
                 note_path = f"{rel}.md"
                 try:
-                    prior = orch.DRIVER.read_note(note_path).content or ""
+                    prior = DRIVER.read_note(note_path).content or ""
                 except Exception:
                     continue
                 if marker not in prior or f"{marker}:" in prior:
                     continue
-                orch.DRIVER.overwrite(
+                DRIVER.overwrite(
                     note_path, append_before_superseded(prior, f"\n{marker}: {basename}\n"))
                 fsm._run_inverses.append(
                     (note_path,
@@ -581,7 +581,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         # says which line came from which instead of just naming all three.
         leaf_body = ""
         try:
-            _d, _r, leaf_body = frontmatter.split(orch.DRIVER.read_note(leaf_rel).content or "")
+            _d, _r, leaf_body = frontmatter.split(DRIVER.read_note(leaf_rel).content or "")
         except Exception:
             leaf_body = ""
         # Path-qualified, never the bare stem: the outline lane writes a spine
@@ -594,7 +594,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         for rel in notes:
             note_path = f"{rel}.md"  # manifest paths carry no .md
             try:
-                prior = orch.DRIVER.read_note(note_path).content or ""
+                prior = DRIVER.read_note(note_path).content or ""
             except Exception:
                 continue
             # Idempotency is about the BLOCK, not the link anywhere in the file.
@@ -634,7 +634,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
 
             # CITE: verbatim lines gain their [^label] and the patch's own
             # definition gives way to the one that links the leaf.
-            orch.DRIVER.overwrite(note_path, new, loss=Loss.CITE)
+            DRIVER.overwrite(note_path, new, loss=Loss.CITE)
             fsm._run_inverses.append(
                 (note_path,
                  InverseOp(kind=InverseOpKind.restore_version, path=note_path,
@@ -688,7 +688,7 @@ def file_language(fsm: "InjectorFSM", fi: int, source_text: str) -> str | None:
 def handle_cleanup(fsm: "InjectorFSM") -> None:
     fsm._get_chunks_from_context_if_empty()
     fi, ci = fsm._chunk_flat_to_fi_ci.get(fsm._current_chunk_idx, (0, fsm._current_chunk_idx))
-    with orch.phase(fsm, fsm._chunk_task_id("cleanup"), "cleanup"):
+    with phase(fsm, fsm._chunk_task_id("cleanup"), "cleanup"):
         # Always write ledger for this chunk's ops (per chunk)
         fsm._write_ledger_for_file(fi, "committed")
 

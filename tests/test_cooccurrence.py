@@ -633,7 +633,7 @@ def test_refresh_note_auto_lang_sticky_to_frozen_store(tmp_path):
 
 def test_build_index_write_hook_shape_force_true_sticky_to_frozen_store(tmp_path):
     # THE mainline shape (Round 2): the post-write freshness hook
-    # (orchestrator._refresh_cooccurrence_for_ops) calls build_index with
+    # (states.write._refresh_cooccurrence_for_ops) calls build_index with
     # force=True — there force means "replace this note's prior contribution,
     # never inflate" (replacement semantics), NOT "rebuild the store". It must
     # NOT re-detect the frozen language; only an explicit refreeze=True may.

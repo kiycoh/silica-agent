@@ -10,7 +10,9 @@ already builds once per chunk. These tests pin:
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
+from tests.fsm_patches import patch_run
 
 from silica.driver.fs_backend import ObsidianFSBackend
 
@@ -108,8 +110,8 @@ def test_handle_autolink_passes_title_index_to_driver():
     driver = MagicMock()
     driver.list_files.return_value = refs
 
-    with patch("silica.router.orchestrator.load_ops", return_value=[write_op]), \
-         patch("silica.router.orchestrator.DRIVER", driver):
+    with patch_run("load_ops", return_value=[write_op]), \
+         patch_run("DRIVER", driver):
         handle_autolink(fsm)
 
     driver.autolink_note.assert_called_once()

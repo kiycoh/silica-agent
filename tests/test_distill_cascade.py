@@ -135,7 +135,7 @@ def _chunk_one_concept():
 def test_first_attempt_does_not_escalate():
     from silica.router.states import distill as d
     fsm = _delegate_fsm(_chunk_one_concept())
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 1), \
+    with patch.object(d.CONFIG, "distill_concurrency", 1), \
          patch.object(d, "run_distiller", return_value={"updates": []}) as rd, \
          patch("silica.kernel.recall.episodic.capture_from_distill"):
         d.handle_delegate(fsm)
@@ -146,7 +146,7 @@ def test_first_attempt_does_not_escalate():
 def test_steer_retry_escalates_and_counts():
     from silica.router.states import distill as d
     fsm = _delegate_fsm(_chunk_one_concept(), steer="## Steering feedback\nfix op 1")
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 1), \
+    with patch.object(d.CONFIG, "distill_concurrency", 1), \
          patch.object(d, "run_distiller", return_value={"updates": []}) as rd, \
          patch("silica.kernel.recall.episodic.capture_from_distill"):
         d.handle_delegate(fsm)
@@ -158,7 +158,7 @@ def test_steer_retry_escalates_and_counts():
 def test_empty_chunk_skips_distiller_but_completes():
     from silica.router.states import distill as d
     fsm = _delegate_fsm({"schema_version": 1, "batches": []})
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 1), \
+    with patch.object(d.CONFIG, "distill_concurrency", 1), \
          patch.object(d, "run_distiller") as rd, \
          patch("silica.kernel.recall.episodic.capture_from_distill"):
         d.handle_delegate(fsm)
@@ -174,7 +174,7 @@ def test_distill_secs_persisted_to_ledger_inputs():
     from silica.router.states import distill as d
     fsm = _delegate_fsm(_chunk_one_concept())
     fsm.progress.inputs = {}
-    with patch.object(d.orch.CONFIG, "distill_concurrency", 1), \
+    with patch.object(d.CONFIG, "distill_concurrency", 1), \
          patch.object(d, "run_distiller", return_value={"updates": []}), \
          patch("silica.kernel.recall.episodic.capture_from_distill"):
         d.handle_delegate(fsm)

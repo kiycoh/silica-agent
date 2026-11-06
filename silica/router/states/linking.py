@@ -3,11 +3,8 @@
 
 """Injector linking states: AUTOLINK, BACKLINK.
 
-Handler bodies for InjectorFSM, extracted from orchestrator.py: each function
-takes the FSM instance and mutates its context/state exactly as the former
-method did. Patchable collaborators (DRIVER, CONFIG, tools, load_ops, time)
-are resolved through the orchestrator module namespace (orch.X) so tests that
-patch silica.router.orchestrator.* keep working.
+Handler bodies for InjectorFSM: each function takes the FSM instance and
+mutates its state.
 """
 from __future__ import annotations
 
@@ -16,7 +13,8 @@ import os
 import typing
 from typing import TYPE_CHECKING
 
-from silica.router import orchestrator as orch
+from silica.driver import DRIVER
+from silica.kernel.write.ops_io import load_ops
 
 if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
@@ -36,7 +34,7 @@ def _run_title_refs(fsm: "InjectorFSM") -> list[typing.Any]:
     append/remove — the ingest path never renames vault notes mid-run.
     """
     if fsm._run_title_refs is None:
-        fsm._run_title_refs = list(orch.DRIVER.list_files())
+        fsm._run_title_refs = list(DRIVER.list_files())
     return fsm._run_title_refs
 
 
@@ -75,7 +73,7 @@ def _backlink_neighbourhood(new_titles: list[str], touched_abs: set[str],
     if not new_titles:
         return []
     try:
-        hits_by_title = orch.DRIVER.search_context_batch(list(new_titles))
+        hits_by_title = DRIVER.search_context_batch(list(new_titles))
     except Exception as e:
         logger.debug("BACKLINK: neighbourhood sweep failed (phase abstains): %s", e)
         return []
@@ -136,7 +134,7 @@ def handle_autolink(fsm: "InjectorFSM") -> None:
     try:
         from silica.kernel.link.autolink import build_title_index
 
-        ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
+        ops = load_ops(fsm._chunk_ctx["ops_path"])
         touched_paths = [
             ref
             for op in ops
@@ -164,7 +162,7 @@ def handle_autolink(fsm: "InjectorFSM") -> None:
         total_added = 0
         for path in touched_paths:
             try:
-                added = orch.DRIVER.autolink_note(
+                added = DRIVER.autolink_note(
                     path,
                     candidates=_relevant(path),
                     title_index=title_index,
@@ -199,7 +197,7 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
     try:
         from silica.kernel.link.autolink import backlink_pass, build_title_index
 
-        ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
+        ops = load_ops(fsm._chunk_ctx["ops_path"])
 
         hub_name_lower = (fsm.hub or "").strip("[]").lower()
         new_titles: list[str] = []
@@ -236,7 +234,7 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
         prior_contents: dict[str, str] = {}
         for path in neighbourhood:
             try:
-                prior_contents[path] = orch.DRIVER.read_note(path).content or ""
+                prior_contents[path] = DRIVER.read_note(path).content or ""
             except Exception:
                 pass
 

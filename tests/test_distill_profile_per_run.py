@@ -202,7 +202,8 @@ class TestFSMThreading:
     extractive prompt judged by the default floor rejects its own output."""
 
     def _fsm(self):
-        from silica.router.orchestrator import InjectorFSM, InjectorState
+        from silica.router.orchestrator import InjectorFSM
+        from silica.router.phases import InjectorState
 
         fsm = InjectorFSM("Inbox/test.md", "TargetDir",
                           distill_profile="extractive")
@@ -214,7 +215,7 @@ class TestFSMThreading:
         from unittest.mock import patch
 
         monkeypatch.setattr(
-            "silica.router.states.distill.orch.CONFIG.distill_concurrency", 1)
+            "silica.router.states.distill.CONFIG.distill_concurrency", 1)
         fsm, InjectorState = self._fsm()
         fsm.state = InjectorState.DELEGATE
         seen = {}
@@ -242,7 +243,7 @@ class TestFSMThreading:
             return {"validated_count": 0, "rejected_count": 0,
                     "validated_ops": [], "rejected_ops": []}
 
-        with patch("silica.router.states.distill.orch.validate_ops",
+        with patch("silica.router.states.distill.validate_ops",
                    side_effect=_validate), \
              patch.object(fsm, "_make_tmp", return_value="tmp.json"):
             fsm.step()

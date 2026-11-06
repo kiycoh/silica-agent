@@ -8,7 +8,8 @@ rejected concepts while validated ops are carried forward.
 from unittest.mock import patch
 
 from silica.kernel.prep_delegation import render_steer_feedback
-from silica.router.orchestrator import InjectorFSM, InjectorState
+from silica.router.orchestrator import InjectorFSM
+from silica.router.phases import InjectorState
 from silica.router.recipe_parser import load_recipe
 
 # Loaded before any test patches builtins.open (same guard as test_fsm.py).
@@ -119,7 +120,7 @@ def _fsm_at_validate(parsed=None):
     return fsm
 
 
-@patch("silica.router.orchestrator.validate_ops")
+@patch("silica.router.states.distill.validate_ops")
 def test_partial_rejection_steers_only_rejected_concepts(mock_validate):
     mock_validate.return_value = {
         "success": True, "rejection_rate": 0.5, "total": 2,
@@ -149,7 +150,7 @@ def test_partial_rejection_steers_only_rejected_concepts(mock_validate):
     assert "ungrounded claim" in steer
 
 
-@patch("silica.router.orchestrator.validate_ops")
+@patch("silica.router.states.distill.validate_ops")
 def test_partial_rejection_specialized_lanes_do_not_steer(mock_validate):
     # near-title → dedup judge; short snippet → expand worker: no steer arc.
     mock_validate.return_value = {
@@ -169,7 +170,7 @@ def test_partial_rejection_specialized_lanes_do_not_steer(mock_validate):
     assert fsm.context.get("chunk_0_steer_attempts", 0) == 0
 
 
-@patch("silica.router.orchestrator.validate_ops")
+@patch("silica.router.states.distill.validate_ops")
 def test_partial_steer_respects_budget(mock_validate):
     mock_validate.return_value = {
         "success": True, "rejection_rate": 0.5, "total": 2,
@@ -185,7 +186,7 @@ def test_partial_steer_respects_budget(mock_validate):
     assert "chunk_0_retry_payload" not in fsm.context
 
 
-@patch("silica.router.orchestrator.validate_ops")
+@patch("silica.router.states.distill.validate_ops")
 def test_carry_ops_merge_into_next_validate_pass(mock_validate):
     mock_validate.return_value = {
         "success": True, "rejection_rate": 0.0, "total": 2,

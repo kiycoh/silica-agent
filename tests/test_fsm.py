@@ -1,8 +1,11 @@
 import pytest
 from unittest.mock import patch, MagicMock
+
+from tests.fsm_patches import patch_run
 from silica.kernel.write.ops import Txn
 from silica.router import states
-from silica.router.orchestrator import InjectorFSM, InjectorState
+from silica.router.orchestrator import InjectorFSM
+from silica.router.phases import InjectorState
 from silica.router.recipe_parser import load_recipe
 from silica.tools import TOOLS
 
@@ -115,7 +118,7 @@ def test_silica_run_injector_is_registered():
 # Pin k=1: this asserts the inline single-chunk delegate contract, which is the
 # k=1 path. At the default k=3 the prefetcher fires an extra lookahead call and
 # call_args (last call) would no longer be this chunk's.
-@patch("silica.router.states.distill.orch.CONFIG.distill_concurrency", 1)
+@patch("silica.router.states.distill.CONFIG.distill_concurrency", 1)
 @patch("silica.router.states.distill.run_distiller")
 def test_fsm_delegate_single_chunk(mock_run_distiller):
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
@@ -146,7 +149,7 @@ def test_fsm_delegate_single_chunk(mock_run_distiller):
 
 # Pin k=1: asserts the inline delegate's session_date + a single read_note; at
 # the default k=3 the prefetch snapshot reads the doc a second time.
-@patch("silica.router.states.distill.orch.CONFIG.distill_concurrency", 1)
+@patch("silica.router.states.distill.CONFIG.distill_concurrency", 1)
 @patch("silica.router.states.distill.run_distiller")
 def test_fsm_delegate_dated_doc_anchors_session_date(mock_run_distiller):
     """A source doc with frontmatter `date:` anchors the distiller's
@@ -170,27 +173,24 @@ def test_fsm_delegate_dated_doc_anchors_session_date(mock_run_distiller):
         ),
     )
     with patch.object(fsm, "_make_tmp", return_value="tmp.json"), \
-         patch("silica.router.orchestrator.DRIVER.read_note", return_value=doc) as mock_read:
+         patch("silica.router.states.distill.DRIVER") as driver:
+        driver.read_note.return_value = doc
         fsm.step()
 
-    mock_read.assert_called_once_with("Inbox/journal.md")
+    driver.read_note.assert_called_once_with("Inbox/journal.md")
     assert mock_run_distiller.call_args.kwargs["session_date"] == "2024-03-12"
 
 
-@patch("silica.router.orchestrator.recon_file")
-@patch("silica.router.orchestrator.payload_chunks")
+@patch("silica.router.states.setup.recon_file")
+@patch("silica.router.states.setup.payload_chunks")
 @patch("silica.router.states.distill.run_distiller")
-@patch("silica.router.orchestrator.sanitize_output")
-@patch("silica.router.orchestrator.validate_ops")
-@patch("silica.router.orchestrator.DRIVER")
-@patch("silica.router.orchestrator.build_txn")
+@patch("silica.router.states.distill.sanitize_output")
+@patch("silica.router.states.distill.validate_ops")
+@patch("silica.router.states.write.build_txn")
 @patch("silica.kernel.write.gate.lint_note")
 @patch("silica.kernel.write.gate.archive_source")
 @patch("silica.kernel.recall.embed.EmbedStore")
-def test_fsm_multi_chunk_loop(
-    mock_embed_store, mock_cleanup, mock_lint, mock_snapshot, mock_driver,
-    mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon
-):
+def test_fsm_multi_chunk_loop(mock_embed_store, mock_cleanup, mock_lint, mock_snapshot, mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon, run_driver):
     # Setup mock payload with 2 chunks
     mock_embed_store.return_value.__len__ = lambda _: 0  # empty index → COLLISION skips early
     mock_recon.return_value = {"success": True}
@@ -209,7 +209,7 @@ def test_fsm_multi_chunk_loop(
 
     # Setup graph mocks
     post_graph = MagicMock()
-    mock_driver.graph_snapshot.return_value = post_graph
+    run_driver.graph_snapshot.return_value = post_graph
 
     # Initialize FSM
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
@@ -286,7 +286,7 @@ def test_fsm_recipe_configuration():
     assert payload_conf.get("partition_if_over") == 7
 
 
-@patch("silica.router.orchestrator.validate_ops")
+@patch("silica.router.states.distill.validate_ops")
 def test_fsm_gate_all_rejected_steers_then_defers(mock_validate):
     # Phase 6: when ALL ops are rejected, VALIDATE steers back to DELEGATE (max 2
     # attempts). After the budget is exhausted, it goes to CLEANUP with "no_ops".
@@ -336,7 +336,7 @@ def test_fsm_gate_all_rejected_steers_then_defers(mock_validate):
     assert fsm.context.get("has_partial_failure") is True
 
 
-@patch("silica.router.orchestrator.validate_ops")
+@patch("silica.router.states.distill.validate_ops")
 def test_fsm_default_steer_is_one_then_defers(mock_validate):
     # Default max_steer_attempts is now 1: one in-flight steer, then the ops are
     # left for the boundary anneal instead of a second in-flight re-delegation.
@@ -362,7 +362,7 @@ def test_fsm_default_steer_is_one_then_defers(mock_validate):
     assert fsm.context.get("final_status") == "no_ops"
 
 
-@patch("silica.router.orchestrator.validate_ops")
+@patch("silica.router.states.distill.validate_ops")
 def test_fsm_gate_partial_rejection_continues(mock_validate):
     # When some ops pass and some are rejected, VALIDATE must continue the
     # pipeline (SNAPSHOT) and log a warning — it does NOT abort.
@@ -390,18 +390,17 @@ def test_fsm_gate_partial_rejection_continues(mock_validate):
 
 
 @patch("silica.kernel.write.gate.lint_note")
-@patch("silica.router.orchestrator.DRIVER")
 @patch("silica.kernel.write.gate.apply_inverses")
 @patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
 @patch("builtins.open")
-def test_fsm_graph_regression_orphan_is_warning(mock_open, mock_restore, mock_driver, mock_lint):
+def test_fsm_graph_regression_orphan_is_warning(mock_open, mock_restore, mock_lint, run_driver):
     """Orphan-only regression errors must emit a WARNING and not trigger ROLLBACK."""
     mock_open.return_value.__enter__.return_value.read.return_value = '[]'
     mock_lint.return_value = {"success": True}
 
     pre_graph = MagicMock()
     post_graph = MagicMock()
-    mock_driver.graph_snapshot.return_value = post_graph
+    run_driver.graph_snapshot.return_value = post_graph
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.context.setdefault("chunk", {})["ops_path"] = "dummy_ops.json"
@@ -425,18 +424,17 @@ def test_fsm_graph_regression_orphan_is_warning(mock_open, mock_restore, mock_dr
 
 
 @patch("silica.kernel.write.gate.lint_note")
-@patch("silica.router.orchestrator.DRIVER")
 @patch("silica.kernel.write.gate.apply_inverses")
 @patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
 @patch("builtins.open")
-def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver, mock_lint):
+def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_lint, run_driver):
     """Blocking regression errors (broken backlinks, unresolved links) still trigger ROLLBACK."""
     mock_open.return_value.__enter__.return_value.read.return_value = '[]'
     mock_lint.return_value = {"success": True}
 
     pre_graph = MagicMock()
     post_graph = MagicMock()
-    mock_driver.graph_snapshot.return_value = post_graph
+    run_driver.graph_snapshot.return_value = post_graph
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.context.setdefault("chunk", {})["ops_path"] = "dummy_ops.json"
@@ -487,9 +485,8 @@ def _lint_gate_fsm(op_path: str):
 
 
 @patch("silica.kernel.write.gate.lint_note")
-@patch("silica.router.orchestrator.DRIVER")
 @patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
-def test_fsm_lint_gate_tolerates_per_op_baseline(mock_driver, mock_lint):
+def test_fsm_lint_gate_tolerates_per_op_baseline(mock_lint, run_driver):
     """The gate must apply the same diff-aware tolerance as per-op lint
     (commit_note_atomic baseline): a pre-existing violation in a patched user
     note is not this chunk's regression. Run 880b9aa9: f1_c0/f1_c1 aborted —
@@ -497,11 +494,11 @@ def test_fsm_lint_gate_tolerates_per_op_baseline(mock_driver, mock_lint):
     missing" the WRITE phase had correctly waved through."""
     inherited = "frontmatter 'AI' missing or not boolean"
     mock_lint.return_value = {"success": False, "errors": [inherited]}
-    mock_driver.graph_snapshot.return_value = MagicMock()
+    run_driver.graph_snapshot.return_value = MagicMock()
 
     fsm, ops = _lint_gate_fsm("Topics/Legacy.md")
     fsm.context["chunk"]["lint_baseline"] = {"Topics/Legacy.md": [inherited]}
-    with patch("silica.router.orchestrator.load_ops", return_value=ops), \
+    with patch_run("load_ops", return_value=ops), \
          patch("silica.kernel.graph_diff.check_graph_regression", return_value=(True, [])):
         fsm.step()
 
@@ -509,39 +506,34 @@ def test_fsm_lint_gate_tolerates_per_op_baseline(mock_driver, mock_lint):
 
 
 @patch("silica.kernel.write.gate.lint_note")
-@patch("silica.router.orchestrator.DRIVER")
 @patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
-def test_fsm_lint_gate_still_blocks_new_violations(mock_driver, mock_lint):
+def test_fsm_lint_gate_still_blocks_new_violations(mock_lint, run_driver):
     """Control for the baseline tolerance: a violation NOT in the baseline
     (introduced by this chunk, e.g. by autolink/hub mutations after per-op
     lint) must still abort to ROLLBACK."""
     mock_lint.return_value = {"success": False, "errors": ["unknown callout type [!x]"]}
-    mock_driver.graph_snapshot.return_value = MagicMock()
+    run_driver.graph_snapshot.return_value = MagicMock()
 
     fsm, ops = _lint_gate_fsm("Topics/Legacy.md")
     fsm.context["chunk"]["lint_baseline"] = {
         "Topics/Legacy.md": ["frontmatter 'AI' missing or not boolean"]
     }
-    with patch("silica.router.orchestrator.load_ops", return_value=ops):
+    with patch_run("load_ops", return_value=ops):
         fsm.step()
 
     assert fsm.state == InjectorState.ROLLBACK
     assert "unknown callout type" in fsm.context["chunk"]["abort_reason"]
 
 
-@patch("silica.router.orchestrator.recon_file")
-@patch("silica.router.orchestrator.payload_chunks")
+@patch("silica.router.states.setup.recon_file")
+@patch("silica.router.states.setup.payload_chunks")
 @patch("silica.router.states.distill.run_distiller")
-@patch("silica.router.orchestrator.sanitize_output")
-@patch("silica.router.orchestrator.validate_ops")
-@patch("silica.router.orchestrator.DRIVER")
-@patch("silica.router.orchestrator.build_txn")
+@patch("silica.router.states.distill.sanitize_output")
+@patch("silica.router.states.distill.validate_ops")
+@patch("silica.router.states.write.build_txn")
 @patch("silica.kernel.write.gate.lint_note")
 @patch("silica.kernel.write.gate.archive_source")
-def test_fsm_recipe_end_to_end_flow(
-    mock_cleanup, mock_lint, mock_snapshot, mock_driver,
-    mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon
-):
+def test_fsm_recipe_end_to_end_flow(mock_cleanup, mock_lint, mock_snapshot, mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon, run_driver):
     # Setup mocks
     mock_recon.return_value = {"success": True}
     mock_payload.return_value = {"payload": {"chunk_id": 0}}
@@ -554,7 +546,7 @@ def test_fsm_recipe_end_to_end_flow(
 
     # Setup graph mocks
     post_graph = MagicMock()
-    mock_driver.graph_snapshot.return_value = post_graph
+    run_driver.graph_snapshot.return_value = post_graph
 
     # Initialize FSM (loads actual injector.yaml recipe)
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
@@ -643,8 +635,8 @@ def test_collision_high_similarity_routes_to_patch():
     mock_embedder = MagicMock()
     mock_embedder.embed.return_value = [[0.1, 0.2, 0.3]]
 
-    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
-         patch("silica.router.orchestrator.DRIVER") as mock_driver, \
+    with patch_run("CONFIG") as mock_cfg, \
+         patch_run("DRIVER") as mock_driver, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
@@ -677,7 +669,7 @@ def test_collision_dedup_item_carries_the_run_id():
     mock_embedder = MagicMock()
     mock_embedder.embed.return_value = [[0.1, 0.2, 0.3]]
 
-    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
+    with patch_run("CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
@@ -699,7 +691,7 @@ def test_collision_low_similarity_keeps_for_distillation():
     mock_embedder = MagicMock()
     mock_embedder.embed.return_value = [[0.1, 0.2, 0.3]]
 
-    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
+    with patch_run("CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
@@ -748,7 +740,7 @@ def test_collision_embeds_concept_with_excerpt():
     mock_embedder = MagicMock()
     mock_embedder.embed.side_effect = _capture
 
-    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
+    with patch_run("CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
@@ -789,7 +781,7 @@ def test_collision_high_score_name_mismatch_deferred_to_judge():
 
     mock_deferred = MagicMock()
 
-    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
+    with patch_run("CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.model.providers.get_embedder", return_value=mock_embedder), \
          patch("silica.kernel.write.deferred.get_deferred_store", return_value=mock_deferred):
@@ -826,8 +818,8 @@ def test_collision_high_score_acronym_match_still_patches():
     mock_embedder = MagicMock()
     mock_embedder.embed.return_value = [[0.1, 0.2, 0.3]]
 
-    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
-         patch("silica.router.orchestrator.DRIVER") as mock_driver, \
+    with patch_run("CONFIG") as mock_cfg, \
+         patch_run("DRIVER") as mock_driver, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
@@ -854,7 +846,7 @@ def test_collision_borderline_deferred():
 
     mock_deferred = MagicMock()
 
-    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
+    with patch_run("CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.model.providers.get_embedder", return_value=mock_embedder), \
          patch("silica.kernel.write.deferred.get_deferred_store", return_value=mock_deferred):
@@ -900,7 +892,7 @@ def test_collision_borderline_defers_rematerializable_op_and_tags_workitem():
     mock_deferred = MagicMock()
     mock_deferred.get.return_value = None
 
-    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
+    with patch_run("CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.model.providers.get_embedder", return_value=mock_embedder), \
          patch("silica.kernel.write.deferred.get_deferred_store", return_value=mock_deferred):
@@ -936,7 +928,7 @@ def test_collision_does_not_consult_the_fused_facade():
     mock_embedder = MagicMock()
     mock_embedder.embed.return_value = [[0.1, 0.2, 0.3]]
 
-    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
+    with patch_run("CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.model.providers.get_embedder", return_value=mock_embedder), \
          patch("silica.kernel.recall.relatedness.related_notes_for_query") as facade:
@@ -973,8 +965,8 @@ def test_collision_inbox_candidate_is_filtered():
     mock_embedder = MagicMock()
     mock_embedder.embed.return_value = [[0.1, 0.2, 0.3]]
 
-    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
-         patch("silica.router.orchestrator.DRIVER") as mock_driver, \
+    with patch_run("CONFIG") as mock_cfg, \
+         patch_run("DRIVER") as mock_driver, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.model.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
@@ -1055,7 +1047,7 @@ def test_worker_read_only(mock_get_provider, mock_call_llm):
             assert name not in mutation_tools, f"profile '{profile.name}' exposes mutation tool '{name}'"
 
 
-@patch("silica.router.orchestrator.validate_ops")
+@patch("silica.router.states.distill.validate_ops")
 def test_fsm_short_circuit_no_ops(mock_validate):
     # Setup mock validation with 0 validated and 0 rejected (all skip/no-op)
     mock_validate.return_value = {
@@ -1078,19 +1070,15 @@ def test_fsm_short_circuit_no_ops(mock_validate):
     assert fsm.context["final_status"] == "no_ops"
 
 
-@patch("silica.router.orchestrator.recon_file")
-@patch("silica.router.orchestrator.payload_chunks")
+@patch("silica.router.states.setup.recon_file")
+@patch("silica.router.states.setup.payload_chunks")
 @patch("silica.router.states.distill.run_distiller")
-@patch("silica.router.orchestrator.sanitize_output")
-@patch("silica.router.orchestrator.validate_ops")
-@patch("silica.router.orchestrator.DRIVER")
-@patch("silica.router.orchestrator.build_txn")
+@patch("silica.router.states.distill.sanitize_output")
+@patch("silica.router.states.distill.validate_ops")
+@patch("silica.router.states.write.build_txn")
 @patch("silica.kernel.write.gate.apply_inverses")
 @patch("silica.kernel.write.gate.archive_source")
-def test_fsm_create_settle_timeout_rollback(
-    mock_cleanup, mock_restore, mock_snapshot, mock_driver,
-    mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon
-):
+def test_fsm_create_settle_timeout_rollback(mock_cleanup, mock_restore, mock_snapshot, mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon, run_driver):
     mock_recon.return_value = {"success": True}
     mock_payload.return_value = {"payload": {"chunk_id": 0}}
     mock_run_distiller.return_value = {"updates": []}
@@ -1106,7 +1094,7 @@ def test_fsm_create_settle_timeout_rollback(
     mock_restore.return_value = {"success": True}
     
     pre_graph = MagicMock()
-    mock_driver.graph_snapshot.return_value = pre_graph
+    run_driver.graph_snapshot.return_value = pre_graph
     
     fsm = InjectorFSM("Inbox/test_fsm_settle.md", "TargetDir")
     
@@ -1264,8 +1252,8 @@ def test_hub_inverse_appears_in_chunk_ctx_snapshot(tmp_path):
     from silica.kernel.write.ops import Txn
     fsm._txn = Txn(id="txn-001", created_paths=[], inverses=[])
 
-    with patch("silica.router.orchestrator.DRIVER") as mock_driver, \
-         patch("silica.router.orchestrator.time") as mock_time:
+    with patch_run("DRIVER") as mock_driver, \
+         patch("silica.router.states.write.time") as mock_time:
         mock_driver.read_note.return_value = mock_hub_note
         mock_driver.overwrite.return_value = None
         mock_time.monotonic.side_effect = [0.0, 10.0]
@@ -1320,9 +1308,9 @@ def test_hub_update_writes_parent_at_its_real_vault_path(tmp_path):
     # Two names for the one proxy: the FSM reads/overwrites through
     # orchestrator.DRIVER, name resolution lives in kernel/write/moc.py and
     # reaches the driver directly (kernel must not import router).
-    with patch("silica.router.orchestrator.DRIVER") as mock_driver, \
+    with patch_run("DRIVER") as mock_driver, \
          patch("silica.driver.DRIVER", mock_driver), \
-         patch("silica.router.orchestrator.time") as mock_time:
+         patch("silica.router.states.write.time") as mock_time:
         mock_driver.read_note.return_value = note
         mock_driver.overwrite.return_value = None
         # lezione_7 lives in 'Lezioni/', NOT under target_dir 'testing/'.
@@ -1338,7 +1326,7 @@ def test_hub_update_writes_parent_at_its_real_vault_path(tmp_path):
 
 
 
-@patch("silica.router.states.distill.orch.CONFIG.distill_concurrency", 1)
+@patch("silica.router.states.distill.CONFIG.distill_concurrency", 1)
 @patch("silica.router.states.distill.run_distiller")
 def test_fsm_seen_override_reaches_episodic_capture(mock_run_distiller):
     """seen_override (bench knob) replaces the ingest day in capture_from_distill."""
@@ -1362,7 +1350,7 @@ def test_fsm_seen_override_reaches_episodic_capture(mock_run_distiller):
     assert captured["run_id"] == fsm.progress.run_id
 
 
-@patch("silica.router.states.distill.orch.CONFIG.distill_concurrency", 1)
+@patch("silica.router.states.distill.CONFIG.distill_concurrency", 1)
 @patch("silica.router.states.distill.run_distiller")
 def test_fsm_seen_default_is_ingest_day(mock_run_distiller):
     """Without the override the product behavior is unchanged: ingest day."""
@@ -1384,7 +1372,7 @@ def test_fsm_seen_default_is_ingest_day(mock_run_distiller):
     assert captured["seen"] == fsm.progress.started_at[:10]
 
 
-@patch("silica.router.states.distill.orch.CONFIG.distill_concurrency", 1)
+@patch("silica.router.states.distill.CONFIG.distill_concurrency", 1)
 @patch("silica.router.states.distill.run_distiller")
 def test_fsm_can_run_without_feeding_the_episodic_store(mock_run_distiller):
     """/promote distills a RENDER of episodic memory. Capturing that back into
@@ -1461,7 +1449,7 @@ def test_recon_steps_straight_to_payload():
     fsm.state = InjectorState.RECON
     fsm.context["recon"] = [{"file": "Inbox/a.md", "new_concepts": ["PIL"], "collisions": []}]
 
-    with patch("silica.router.orchestrator.states.setup.handle_recon",
+    with patch("silica.router.states.setup.handle_recon",
                side_effect=lambda f: f._transition_success()):
         fsm.step()
 
@@ -1497,7 +1485,7 @@ def test_collision_routes_on_the_cosine_best_note_not_the_fused_winner():
     mock_deferred = MagicMock()
     mock_deferred.get.return_value = None
 
-    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
+    with patch_run("CONFIG") as mock_cfg, \
          patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.model.providers.get_embedder", return_value=mock_embedder), \
          patch("silica.kernel.recall.relatedness.related_notes_for_query", return_value=fused_winner), \

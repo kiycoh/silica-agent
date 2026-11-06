@@ -15,11 +15,14 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from tests.fsm_patches import patch_run
+
 import pytest
 
 from silica.kernel.write.ops import Txn
 from silica.kernel.write.gate import AtomicBulkResult, NoteCommitResult
-from silica.router.orchestrator import InjectorFSM, InjectorState
+from silica.router.orchestrator import InjectorFSM
+from silica.router.phases import InjectorState
 
 INBOX = "Inbox/lezione.md"
 TARGET = "Concepts"
@@ -114,16 +117,16 @@ def op_stream(monkeypatch):
         empty_index.__len__ = lambda _self: 0  # COLLISION -> embedder-free MinHash leg
 
         with (
-            patch("silica.router.orchestrator.recon_file", return_value={"success": True}),
-            patch("silica.router.orchestrator.payload_chunks", return_value={"chunks": [chunk]}),
+            patch("silica.router.states.setup.recon_file", return_value={"success": True}),
+            patch("silica.router.states.setup.payload_chunks", return_value={"chunks": [chunk]}),
             patch("silica.router.states.distill.run_distiller", side_effect=_fake_distiller),
-            patch("silica.router.states.distill.orch.CONFIG.distill_concurrency", 1),
+            patch("silica.router.states.distill.CONFIG.distill_concurrency", 1),
             patch("silica.kernel.recall.embed.get_store", return_value=empty_index),
             patch("silica.kernel.write.gate.bulk_write_atomic", side_effect=_capture),
-            patch("silica.router.orchestrator.DRIVER", driver),
+            patch_run("DRIVER", driver),
             patch("silica.kernel.write.validate.DRIVER", driver),
             patch("silica.kernel.write.gate.lint_note", return_value={"success": True}),
-            patch("silica.router.orchestrator.build_txn", return_value=Txn(id="txn_test", inverses=[])),
+            patch("silica.router.states.write.build_txn", return_value=Txn(id="txn_test", inverses=[])),
             patch("silica.kernel.write.gate.archive_source", return_value={"success": True}),
             patch("silica.kernel.graph_diff.check_graph_regression", return_value=(True, [])),
         ):

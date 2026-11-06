@@ -1,6 +1,8 @@
 """Run-scoped title-index cache: one list_files() per run, append-on-write."""
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
+from tests.fsm_patches import patch_run
 
 from silica.router.states.linking import _run_title_refs
 
@@ -13,7 +15,7 @@ def test_list_files_called_once_and_cached():
     fsm = SimpleNamespace(_run_title_refs=None)  # the FSM declares this; the stub must too
     driver = MagicMock()
     driver.list_files.return_value = [_ref("A", "A.md"), _ref("B", "B.md")]
-    with patch("silica.router.orchestrator.DRIVER", driver):
+    with patch_run("DRIVER", driver):
         refs1 = _run_title_refs(fsm)
         refs2 = _run_title_refs(fsm)
     assert refs1 is refs2
@@ -26,7 +28,7 @@ def test_write_appended_stems_visible_to_later_chunks():
     fsm = SimpleNamespace(_run_title_refs=None)  # the FSM declares this; the stub must too
     driver = MagicMock()
     driver.list_files.return_value = [_ref("A", "A.md")]
-    with patch("silica.router.orchestrator.DRIVER", driver):
+    with patch_run("DRIVER", driver):
         refs = _run_title_refs(fsm)
     # simulate the WRITE-side append for a note created mid-run
     from silica.driver.base import NoteRef
@@ -42,7 +44,7 @@ def test_duplicate_basename_still_disambiguated():
     fsm = SimpleNamespace(_run_title_refs=None)  # the FSM declares this; the stub must too
     driver = MagicMock()
     driver.list_files.return_value = [_ref("Foo", "x/Foo.md")]
-    with patch("silica.router.orchestrator.DRIVER", driver):
+    with patch_run("DRIVER", driver):
         refs = _run_title_refs(fsm)
     from silica.driver.base import NoteRef
     refs.append(NoteRef(name="Foo", path="y/Foo.md"))
