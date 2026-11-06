@@ -357,6 +357,16 @@ def test_every_state_changing_route_refuses_a_foreign_origin():
     assert not open_doors, f"state-changing routes a foreign origin reached: {open_doors}"
 
 
+def test_the_whole_vault_is_a_read_only_this_page_may_ask_for(client):
+    """The rule goes by method and this route is a GET (ADR-0142), so it names
+    the guard itself; 404 here means the guard let it through to the hosted check."""
+    tc, _server = client
+    foreign = tc.get("/vault/export", headers={"Sec-Fetch-Site": "cross-site"})
+    assert foreign.status_code == 403
+    assert foreign.json() == {"detail": "cross-origin request refused"}
+    assert tc.get("/vault/export", headers={"Sec-Fetch-Site": "same-origin"}).status_code == 404
+
+
 # --- graph document title -----------------------------------------------------
 
 

@@ -2998,7 +2998,7 @@ def test_a_hosted_tenant_listens_on_its_socket_and_answers_to_its_public_name(mo
     forwards the public Host unchanged, which the loopback check would refuse."""
     import uvicorn
 
-    from silica.ui.web import server
+    from silica.ui.web import security, server
 
     sock = str(tmp_path / "gui.sock")
     monkeypatch.setenv("SILICA_GUI_SOCKET", sock)
@@ -3011,7 +3011,7 @@ def test_a_hosted_tenant_listens_on_its_socket_and_answers_to_its_public_name(mo
 
     server.serve(port=8799)
     assert server._SERVER.config.uds == sock
-    assert server._public_hosts() == {"silica.example.dev"}
+    assert security._public_hosts() == {"silica.example.dev"}
 
 
 def test_serve_exits_quietly_on_the_signal_uvicorn_re_raises(monkeypatch, tmp_path):

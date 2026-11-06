@@ -16,7 +16,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from silica.config import CONFIG
 
@@ -26,14 +26,7 @@ from silica.config import CONFIG
 CAP = 32 * 1024
 
 
-def _require_same_origin(request: Request) -> None:
-    from silica.ui.web.server import _require_same_origin as check
-
-    check(request)
-
-
 router = APIRouter(prefix="/skills")
-_SAME_ORIGIN = [Depends(_require_same_origin)]
 
 
 def _vault() -> Path:
@@ -162,7 +155,7 @@ def _write(vault: Path, dest: Path, data: bytes) -> None:
         raise
 
 
-@router.post("", dependencies=_SAME_ORIGIN)
+@router.post("")
 async def install(file: UploadFile = File(...), confirm: bool = Form(False)):
     """`confirm` false answers the preview and writes nothing; true writes it."""
     from silica_core.kernel.skills import discover
@@ -198,7 +191,7 @@ async def install(file: UploadFile = File(...), confirm: bool = Form(False)):
     return {"ok": True, "installed": True, "skill": preview}
 
 
-@router.post("/proposed/{name}/install", dependencies=_SAME_ORIGIN)
+@router.post("/proposed/{name}/install")
 def install_proposed(name: str):
     """A proposed skill (ADR-0127 point 5) becomes a vault skill: the person's
     act, the only way one ever runs."""
@@ -211,7 +204,7 @@ def install_proposed(name: str):
     return {"ok": True, "name": name}
 
 
-@router.post("/proposed/{name}/dismiss", dependencies=_SAME_ORIGIN)
+@router.post("/proposed/{name}/dismiss")
 def dismiss_proposed(name: str):
     """Not this one: its text goes, its requests stay so it is not proposed again."""
     from silica.kernel.proposed_skills import dismiss
@@ -221,7 +214,7 @@ def dismiss_proposed(name: str):
     return {"ok": True}
 
 
-@router.delete("/{name}", dependencies=_SAME_ORIGIN)
+@router.delete("/{name}")
 def remove(name: str):
     """A vault skill's SKILL.md, and its folder when nothing else is in it: a
     folder placed by hand can hold files of its author's that are not ours to

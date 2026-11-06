@@ -30,7 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 
 from silica.config import CONFIG, hosted, silica_home
 
@@ -663,14 +663,7 @@ def _owed(files: list[str]) -> list[str]:
 
 # --- routes ----------------------------------------------------------------------------
 
-def _require_same_origin(request: Request) -> None:
-    from silica.ui.web.server import _require_same_origin as check
-
-    check(request)
-
-
 router = APIRouter(prefix="/jobs")
-_SAME_ORIGIN = [Depends(_require_same_origin)]
 
 
 def _refused(exc: Refused) -> HTTPException:
@@ -698,7 +691,7 @@ def running_jobs():
     return {"turn": bool(server._busy), "jobs": rows}
 
 
-@router.post("/{job_id}/retry", dependencies=_SAME_ORIGIN)
+@router.post("/{job_id}/retry")
 def retry_job(job_id: str):
     try:
         return retry(job_id)
@@ -706,7 +699,7 @@ def retry_job(job_id: str):
         raise _refused(exc) from None
 
 
-@router.post("/{job_id}/dismiss", dependencies=_SAME_ORIGIN)
+@router.post("/{job_id}/dismiss")
 def dismiss_job(job_id: str):
     try:
         dismiss(job_id)
@@ -715,7 +708,7 @@ def dismiss_job(job_id: str):
     return {"ok": True}
 
 
-@router.post("/{job_id}/turn", dependencies=_SAME_ORIGIN)
+@router.post("/{job_id}/turn")
 def offered_turn(job_id: str, payload: dict | None = None):
     """The turn a read file offers (ADR-0121 points 1 and 6). The job never
     starts it: the page that holds the chat asks, for the drop's question as

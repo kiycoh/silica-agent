@@ -56,6 +56,7 @@ from silica.metrics import emit
 from silica.kernel.write import session_changes
 from silica.sources.web_research import WebTurn
 from silica.ui.web.callback import event_to_json, tool_calls_to_json
+from silica.ui.web import security
 from silica.ui.web.failures import explain as _failure
 
 logger = logging.getLogger(__name__)
@@ -352,7 +353,6 @@ import html as _html
 import re
 from html.parser import HTMLParser
 from urllib.parse import quote as _quote
-from urllib.parse import urlsplit as _urlsplit
 
 # A whitespace-delimited path-like token: contains "/" or ends in ".md".
 _PATHLIKE = re.compile(r"[^\s\[\]]*(?:/[^\s\[\]]*|\.md)")
@@ -2052,7 +2052,12 @@ async def _lifespan(app: FastAPI):
         await bridge.stop()
 
 
-app = FastAPI(lifespan=_lifespan)
+app = FastAPI(lifespan=_lifespan, dependencies=[Depends(security.same_origin_writes)])
+# Added in this order because the last added runs first: a refused host is
+# answered before anything else looks at the request.
+app.middleware("http")(security.hosted_image_policy)
+app.middleware("http")(security.withheld_views)
+app.middleware("http")(security.require_loopback_host)
 
 # NOT GZipMiddleware. It would also wrap /chat, which is text/event-stream, and
 # Starlette's gzip responder writes each chunk into a zlib compressor that
@@ -2060,98 +2065,6 @@ app = FastAPI(lifespan=_lifespan)
 # stream would be withheld and the transcript would arrive in bursts. /graph
 # compresses itself instead, at the one route where the payload is large enough
 # to matter (see graph()).
-
-_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
-
-
-def _authority(value: str) -> tuple[str, str]:
-    """`host[:port]` split into (host, port), with the loopback spellings folded
-    into one host — the browser repeats whatever the user typed, and the server
-    was reached on the loopback interface either way."""
-    raw = value.strip().lower()
-    host, _, port = raw.rpartition(":")
-    if not host or "]" in port:  # no port at all, or a bare IPv6 literal
-        host, port = raw, ""
-    return ("loopback" if host in _LOOPBACK_HOSTS else host), port
-
-
-def _require_same_origin(request: Request) -> None:
-    """Refuse a state-changing request another origin made on the user's behalf.
-
-    The GUI has no auth (localhost, one user), so it answers with the browser's
-    ambient authority, and a multipart POST is CORS-safelisted: it crosses
-    origins with no preflight. Any page the user happened to visit could
-    therefore fetch() an upload into the vault Inbox and run a whole agent turn
-    with the write tools. A browser always sends Origin on a cross-origin POST,
-    so checking it closes that while a client that sends no Origin at all (curl,
-    the tests) keeps working. Every state-changing route must carry this.
-    """
-    site = (request.headers.get("sec-fetch-site") or "").lower()
-    if site and site not in ("same-origin", "none"):
-        raise HTTPException(403, "cross-origin request refused")
-    origin = request.headers.get("origin")
-    if origin is None:
-        return
-    parsed = _urlsplit(origin)
-    if parsed.scheme not in ("http", "https") or _authority(parsed.netloc) != _authority(
-        request.headers.get("host", "")
-    ):
-        raise HTTPException(403, "cross-origin request refused")
-
-
-_SAME_ORIGIN = [Depends(_require_same_origin)]
-
-# The names this server answers to. It binds 127.0.0.1 only (serve()), so a
-# browser that reached it legitimately typed a loopback name. A page on any
-# other name got here by DNS rebinding (its name re-resolved to 127.0.0.1), and
-# Origin cannot tell: the page sets Origin and Host to its own name alike
-# (audit 2026-10-09, S3). Tests add TestClient's "testserver" in conftest.
-# A hosted tenant also answers to the public names its unit lists in
-# SILICA_GUI_HOSTS: the proxy forwards Host unchanged (ADR-0085 point 4), and
-# the socket it listens on is reachable by the proxy alone (serve()). An
-# environment variable and not a setting, so the GUI can never widen itself.
-def _public_hosts() -> set[str]:
-    return {h.strip().lower() for h in os.environ.get("SILICA_GUI_HOSTS", "").split(",") if h.strip()}
-
-
-_ALLOWED_HOSTS = {"loopback", *_public_hosts()}
-
-
-@app.middleware("http")
-async def _hosted_image_policy(request: Request, call_next):
-    """On the server, the page draws only its own images (ADR-0098 H6): the
-    layer under `_linkify(remote_images=False)`, and the one that also covers
-    notes, the drawer and the editor's preview. The page loads nothing from
-    another origin, so only web images inside notes stop drawing; locally
-    they still draw (the ADR's open item 3). A response with its own policy
-    (`/asset`'s sandbox) keeps it."""
-    from silica.config import hosted
-
-    response = await call_next(request)
-    if hosted() and "content-security-policy" not in response.headers:
-        response.headers["Content-Security-Policy"] = "img-src 'self' data: blob:"
-    return response
-
-
-@app.middleware("http")
-async def _withheld_views(request: Request, call_next):
-    """A view this account does not get answers as a route that does not exist
-    (ADR-0140 point 4), and so does what a demo refuses (ADR-0139 point 6).
-    The page hides the control, but a request does not come from the page."""
-    from silica.config import withheld
-
-    path = request.url.path
-    if any(path == r or path.startswith(r + "/") for r in withheld("routes")):
-        return JSONResponse({"detail": "Not Found"}, status_code=404)
-    return await call_next(request)
-
-
-@app.middleware("http")
-async def _require_loopback_host(request: Request, call_next):
-    if _authority(request.headers.get("host", ""))[0] not in _ALLOWED_HOSTS:
-        return JSONResponse({"detail": "unknown host refused"}, status_code=403)
-    return await call_next(request)
-
 
 # Images a chat turn may carry, and how large each may be: a phone photo is a
 # few MB, and the model sees at most about 1,000 tokens of any of them.
@@ -2239,7 +2152,7 @@ def _demo_refuses(payload: dict) -> str:
     return f"'{word}' is not part of the demo" if word in withheld("commands") else ""
 
 
-@app.post("/chat", dependencies=_SAME_ORIGIN)
+@app.post("/chat")
 async def chat(payload: dict):
     if refused := _demo_refuses(payload):
         raise HTTPException(status_code=404, detail=refused)
@@ -2290,7 +2203,7 @@ async def chat(payload: dict):
                           **({"said": text.removeprefix("/web ")} if story and scope == "web" else {}))
 
 
-@app.post("/phone/turn", dependencies=_SAME_ORIGIN)
+@app.post("/phone/turn")
 async def phone_turn(payload: dict):
     """One turn from the phone, answered once and whole: a Telegram message is
     sent complete, so the caller has no use for a stream (ADR-0089 amendment,
@@ -2314,7 +2227,7 @@ async def phone_turn(payload: dict):
         _end_turn()
 
 
-@app.post("/phone/new", dependencies=_SAME_ORIGIN)
+@app.post("/phone/new")
 async def phone_new():
     """`/new` from the phone: its next turn opens a fresh conversation."""
     if _busy:
@@ -2804,7 +2717,7 @@ def _readable_now(rel: str) -> bool:
     return data is not None and len(data["no_text"]) < data["n_pages"]
 
 
-@app.post("/nucleate", dependencies=_SAME_ORIGIN)
+@app.post("/nucleate")
 async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     """A drop: the files into the chat's own folder, and the turn that acts on them.
 
@@ -2967,7 +2880,7 @@ def _add_to_vault(notes: Sequence[str], sources: Sequence[str] = ()) -> list[str
     return out
 
 
-@app.post("/chat/files/add", dependencies=_SAME_ORIGIN)
+@app.post("/chat/files/add")
 async def chat_file_add(payload: dict):
     """"add to vault" on a file of the open chat (ADR-0121 point 5): the file
     and its notes copied into the Inbox, with no agent turn. The notes are
@@ -3039,7 +2952,7 @@ def _edited(content: str, words: str, note: str = "") -> str:
     return words + rest
 
 
-@app.post("/turn/redo", dependencies=_SAME_ORIGIN)
+@app.post("/turn/redo")
 async def redo_turn(payload: dict | None = None):
     """Ask the last question again (ADR-0121 point 7): regenerate, or with
     `text`, edit it. The last user message and everything after it leave the
@@ -3083,7 +2996,7 @@ async def redo_turn(payload: dict | None = None):
     return _turn_response(content, workspace=msg.get("silica_workspace") or "", withhold=withhold, prebuilt=msg)
 
 
-@app.post("/vault/import", dependencies=_SAME_ORIGIN)
+@app.post("/vault/import")
 async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = Form([]),
                        last: str = Form(""), workspace: str = Form(""), obsidian: str = Form("")):
     """The vault's `+` (ADR-0098 point 5): files, or a folder's files with
@@ -3171,7 +3084,10 @@ def vault_export_summary():
     return ve.summary(_export_vault())
 
 
-@app.get("/vault/export", dependencies=_SAME_ORIGIN)
+# The one read the rule by method does not reach (ADR-0142): a GET, because a
+# link is what streams the archive to the person's disk, and still this page's
+# alone, or any other page could ask for the whole vault.
+@app.get("/vault/export", dependencies=[Depends(security.require_same_origin)])
 def vault_export():
     """The vault whole, every file in its tree (ADR-0142 point 2). A link the
     browser follows, so the archive streams to the person's disk."""
@@ -3183,7 +3099,7 @@ def vault_export():
                              headers={"Content-Disposition": f'attachment; filename="{top}.zip"'})
 
 
-@app.post("/vault/export/added", dependencies=_SAME_ORIGIN)
+@app.post("/vault/export/added")
 def vault_export_added():
     """What Silica added since the last download, written for the root of the
     person's Obsidian vault (ADR-0142 points 3 and 4); 204 when nothing is new.
@@ -3219,7 +3135,7 @@ YOUTUBE_ON_SERVER = ("YouTube does not let the server read videos (it asks it to
                      "download the video's audio and add that file, and it is transcribed")
 
 
-@app.post("/vault/fetch", dependencies=_SAME_ORIGIN)
+@app.post("/vault/fetch")
 async def vault_fetch(payload: dict):
     """The vault's + "a link…" (ADR-0120): one web page, or locally a
     YouTube video's captions, into the Inbox as a note, with no agent turn:
@@ -3299,7 +3215,7 @@ def workspaces_list():
     return {"workspaces": rows, "current": current_workspace}
 
 
-@app.post("/workspaces", dependencies=_SAME_ORIGIN)
+@app.post("/workspaces")
 def workspaces_create(payload: dict):
     """A new workspace note, optionally holding the note or folder its menu
     was opened on."""
@@ -3320,7 +3236,7 @@ def workspaces_create(payload: dict):
     return workspaces.summary(workspaces.read_workspace(path))
 
 
-@app.post("/workspaces/line", dependencies=_SAME_ORIGIN)
+@app.post("/workspaces/line")
 def workspaces_line(payload: dict):
     """Add or remove one line of a workspace: the user's act from the
     drawer's menu. Removing a line never touches the note or folder it names."""
@@ -3529,7 +3445,7 @@ def _embed_imported(folders: set[str]) -> None:
     threading.Thread(target=run, name="vault-import-embed", daemon=True).start()
 
 
-@app.post("/mail/upload", dependencies=_SAME_ORIGIN)
+@app.post("/mail/upload")
 async def mail_upload(request: Request, name: str):
     """The Mail row's export (ADR-0090 point 5), saved into the inbox inside
     the write boundary as `_stage_uploads` saves a drop, and not staged: the
@@ -3962,7 +3878,7 @@ def calendar_event_path(title: str = "", start: str = "", rrule: str = ""):
     return event_note_path(title, start, rrule)
 
 
-@app.post("/calendar/event", dependencies=_SAME_ORIGIN)
+@app.post("/calendar/event")
 def calendar_event_create(payload: dict):
     """The quick card's Save (ADR-0118 point 1): the same writer as the chat's
     `silica_event_create`, so the calendar is a second door and not a second
@@ -3974,7 +3890,7 @@ def calendar_event_create(payload: dict):
     return create_event(f.pop("title"), f.pop("start"), **f, person=True)
 
 
-@app.post("/calendar/event/status", dependencies=_SAME_ORIGIN)
+@app.post("/calendar/event/status")
 def calendar_event_status(payload: dict):
     """The event card's Done and Cancel (ADR-0118 point 6). Open is not a
     status a card can set: `silica_event_update` keeps a field it is passed
@@ -3987,7 +3903,7 @@ def calendar_event_status(payload: dict):
     return silica_event_update(note=str(payload.get("path") or ""), status=status)
 
 
-@app.post("/reminders", dependencies=_SAME_ORIGIN)
+@app.post("/reminders")
 def reminders_poll():
     """The front-end poll IS the reminder tick: compute due, advance the
     high-water marks, return the list. POST, not GET — the poll mutates the
@@ -4336,7 +4252,7 @@ def graph(request: Request):
 _MAP_LAYOUT_MAX = 2000
 
 
-@app.post("/map/layout", dependencies=_SAME_ORIGIN)
+@app.post("/map/layout")
 def map_layout(payload: dict):
     """The graph frame's lit set, arranged as the Map (ADR-0088).
 
@@ -4718,7 +4634,7 @@ def _index_note(key: str) -> None:
             logger.warning("note index: co-occurrence failed: %s", type(exc).__name__)
 
 
-@app.post("/note/let-go", dependencies=_SAME_ORIGIN)
+@app.post("/note/let-go")
 def note_let_go(payload: dict):
     """The editor left this note: its pending refresh runs now, and a note
     with none pending costs nothing, so the page can send this on every leave."""
@@ -4781,7 +4697,7 @@ def raw_file(path: str = "", download: bool = False):
                         content_disposition_type="attachment" if attach else "inline")
 
 
-@app.post("/note/save", dependencies=_SAME_ORIGIN)
+@app.post("/note/save")
 def note_save(payload: dict):
     from silica.driver import DRIVER
 
@@ -4819,7 +4735,7 @@ def note_save(payload: dict):
             "broken": _broken_links(landed, note_resolver())}
 
 
-@app.post("/note/new", dependencies=_SAME_ORIGIN)
+@app.post("/note/new")
 def note_new(payload: dict):
     """A note written by hand (ADR-0155 points 7 to 9), `{folder, name, text}`:
     `folder/name.md` holding exactly `text`, as one run under user:/write whose
@@ -4877,7 +4793,7 @@ def note_new(payload: dict):
             "broken": _broken_links(landed, note_resolver()), **({"same_name": other} if other else {})}
 
 
-@app.post("/note/asset", dependencies=_SAME_ORIGIN)
+@app.post("/note/asset")
 async def note_asset(note: str = Form(""), file: UploadFile = File(...)):
     """An image pasted or dropped into a note (ADR-0155 point 15): the file in
     the note's attachment folder as `Pasted image <stamp>.ext`. Told by its first
@@ -4949,7 +4865,7 @@ def _write_asset(canon: str, data: bytes, suffix: str) -> str:
     return rel
 
 
-@app.post("/tree/delete", dependencies=_SAME_ORIGIN)
+@app.post("/tree/delete")
 def tree_delete(payload: dict):
     """Delete a note, or every note the rail shows under a folder, from the
     tree row's menu (ADR-0123). The user's act, as /delete is (ADR-0092): no
@@ -5036,7 +4952,7 @@ def _tree_name_ok(name: str) -> bool:
 _BAD_NAME_WHY = "a name cannot be empty, start with a dot or hold / \\ : * ? \" < > | # ^ [ ]"
 
 
-@app.post("/tree/move", dependencies=_SAME_ORIGIN)
+@app.post("/tree/move")
 def tree_move(payload: dict):
     """A selection dropped on a folder, `{paths, folder}`, or a note renamed
     in its row, `{path, name}` (ADR-0126 points 3 and 8). Each note keeps its
@@ -5112,7 +5028,7 @@ def tree_move(payload: dict):
             "skipped": skipped, "rewritten": rewritten, "error": res["error"]}
 
 
-@app.post("/tree/undo", dependencies=_SAME_ORIGIN)
+@app.post("/tree/undo")
 def tree_undo(payload: dict):
     """The toast's undo for /tree/delete, /tree/move and /note/new: the run
     back, every note in it. Was /tree/undo-delete until ADR-0126."""
@@ -5166,7 +5082,7 @@ def trash_list():
     return {"items": _trash_items()}
 
 
-@app.post("/trash/restore", dependencies=_SAME_ORIGIN)
+@app.post("/trash/restore")
 def trash_restore(payload: dict):
     """One note back from the trash, not the run it was deleted in."""
     from silica.kernel.write.undo_journal import restore_from_trash
@@ -5187,7 +5103,7 @@ def trash_restore(payload: dict):
     return {"restored": item["path"]}
 
 
-@app.post("/trash/erase", dependencies=_SAME_ORIGIN)
+@app.post("/trash/erase")
 def trash_erase(payload: dict):
     """Delete for good one item, `{run, path}`, or the whole trash, `{all:
     true}`. No turn slot: it touches the journal and no note."""
@@ -5200,7 +5116,7 @@ def trash_erase(payload: dict):
     return {"erased": len(items)}
 
 
-@app.post("/note/render", dependencies=_SAME_ORIGIN)
+@app.post("/note/render")
 def note_render(payload: dict):
     """One block of the editor's live preview (a table, a callout, a formula,
     the properties) drawn by the reader's own renderer, so the two surfaces
@@ -5218,7 +5134,7 @@ class _CheckHeld(Exception):
     """A long pass waits for the person's go (ADR-0110 point 13)."""
 
 
-@app.post("/note/check", dependencies=_SAME_ORIGIN)
+@app.post("/note/check")
 async def note_check(payload: dict, request: Request):
     """The drawer's `check sources` (ADR-0110 step 3), as JSON lines: the rule
     findings at once, one line per block as the model judges it, then the
@@ -5400,7 +5316,7 @@ def changes():
     return _change_rows()
 
 
-@app.post("/note/check/keep", dependencies=_SAME_ORIGIN)
+@app.post("/note/check/keep")
 async def note_check_keep(payload: dict):
     """`keep in Inbox` in a web verdict's box (ADR-0110, amendment of
     2026-11-06, point 13): `{path, url, quote, claim}` as one cited note in the
@@ -5426,7 +5342,7 @@ async def note_check_keep(payload: dict):
         _end_turn()
 
 
-@app.post("/changes/keep", dependencies=_SAME_ORIGIN)
+@app.post("/changes/keep")
 def changes_keep(payload: dict):
     """The person looked at a write under review and keeps it: `review:` comes
     off the frontmatter through the same overwrite path /undo uses, so the
@@ -5556,7 +5472,7 @@ def note_history_diff(path: str = "", id: str = ""):
             "lines": rows[:_MAX_DIFF_LINES], "clipped": max(0, len(rows) - _MAX_DIFF_LINES)}
 
 
-@app.post("/note/history/restore", dependencies=_SAME_ORIGIN)
+@app.post("/note/history/restore")
 def note_history_restore(payload: dict):
     """Write one past version back as the note's body. A restore is a write
     like any other: it is pushed as a version, so /undo takes it back."""
@@ -6688,7 +6604,7 @@ def list_sessions():
     return JSONResponse(rows, headers={"X-Silica-Session": current_session_id or ""})
 
 
-@app.post("/session/load", dependencies=_SAME_ORIGIN)
+@app.post("/session/load")
 def load_session(payload: dict):
     global current_session_id, _collapsed, current_workspace
     if _busy:
@@ -6738,7 +6654,7 @@ def load_session(payload: dict):
     return {"ok": True}
 
 
-@app.post("/session/rename", dependencies=_SAME_ORIGIN)
+@app.post("/session/rename")
 def rename_session(payload: dict):
     """The chat list's rename (audit P18): a title beat, never a rewrite."""
     from silica.obs import narration as _narr
@@ -6756,7 +6672,7 @@ def rename_session(payload: dict):
     return {"ok": True, "title": title}
 
 
-@app.post("/session/delete", dependencies=_SAME_ORIGIN)
+@app.post("/session/delete")
 def delete_session(payload: dict):
     """Delete one chat. The open one is closed first and the tab lands on a
     fresh session, so the record and the conversation go together."""
@@ -6866,7 +6782,7 @@ def _turn_since(sid0: str | None, seq0: int) -> dict | None:
     return {"session": sid, "seq": seqs[0]} if seqs else None
 
 
-@app.post("/flag", dependencies=_SAME_ORIGIN)
+@app.post("/flag")
 def flag_answer(payload: dict):
     """Append one flag to `<home>/flags.jsonl`: time, session, the seq of the
     user beat that opened the turn, and the student's own line."""
@@ -6902,7 +6818,7 @@ def flag_answer(payload: dict):
     return {"ok": True}
 
 
-@app.post("/reset", dependencies=_SAME_ORIGIN)
+@app.post("/reset")
 def reset():
 
     _capture_own_session()
@@ -6910,7 +6826,7 @@ def reset():
     return {"ok": True, "vault": CONFIG.vault_path}
 
 
-@app.post("/stop", dependencies=_SAME_ORIGIN)
+@app.post("/stop")
 def stop():
     if current_cancel is not None:
         current_cancel.set()
@@ -7033,7 +6949,7 @@ async def _stt_via_endpoint(url: str, clip: bytes) -> tuple[str, str]:
     return text, ""
 
 
-@app.post("/stt", dependencies=_SAME_ORIGIN)
+@app.post("/stt")
 async def stt(audio: UploadFile = File(...)):
     """Transcribe one recorded clip: the endpoint when it answers, else in process.
 
@@ -7154,7 +7070,7 @@ def _reject_if_busy_or_locked(key: str) -> None:
         raise HTTPException(status_code=409, detail=f"defined in the environment ({key})")
 
 
-@app.post("/settings", dependencies=_SAME_ORIGIN)
+@app.post("/settings")
 def set_setting(payload: dict):
     """Apply one row: live in CONFIG, persisted in the .env that wins at boot."""
     from silica.ui.web import settings as st
@@ -7169,7 +7085,7 @@ def set_setting(payload: dict):
     return result
 
 
-@app.post("/settings/confirm", dependencies=_SAME_ORIGIN)
+@app.post("/settings/confirm")
 async def confirm_setting(payload: dict):
     """The two rows that need a sequence, not an assignment: switching the vault
     and swapping the embedding model.
@@ -7276,7 +7192,7 @@ def memory_view():
     return view
 
 
-@app.put("/memory/{scope}", dependencies=_SAME_ORIGIN)
+@app.put("/memory/{scope}")
 def memory_write(scope: str, payload: dict):
     from silica.kernel import user_memory
 
@@ -7286,7 +7202,7 @@ def memory_write(scope: str, payload: dict):
     return out
 
 
-@app.post("/memory/undo", dependencies=_SAME_ORIGIN)
+@app.post("/memory/undo")
 def memory_undo(payload: dict):
     from silica.kernel import user_memory
 
@@ -7297,7 +7213,7 @@ def memory_undo(payload: dict):
     return out
 
 
-@app.post("/memory/reset", dependencies=_SAME_ORIGIN)
+@app.post("/memory/reset")
 def memory_reset():
     from silica.kernel import user_memory
 
@@ -7317,7 +7233,7 @@ def instructions_view():
     return {"available": bool(vault), "text": vi.read(vault), "cap": vi.CAP, "path": vi.REL}
 
 
-@app.put("/instructions", dependencies=_SAME_ORIGIN)
+@app.put("/instructions")
 def instructions_write(payload: dict):
     from silica.kernel import vault_instructions as vi
 
@@ -7352,13 +7268,13 @@ def zotero_status():
     return zotero_web.status()
 
 
-@app.post("/zotero/link", dependencies=_SAME_ORIGIN)
+@app.post("/zotero/link")
 def zotero_link(payload: dict):
     from silica.ui.web import zotero_web
     return _zotero_call(zotero_web.link, bool(payload.get("on")))
 
 
-@app.post("/zotero/setting", dependencies=_SAME_ORIGIN)
+@app.post("/zotero/setting")
 def zotero_setting(payload: dict):
     from silica.ui.web import zotero_web
     try:
@@ -7367,7 +7283,7 @@ def zotero_setting(payload: dict):
         raise HTTPException(status_code=400, detail="not a Zotero setting")
 
 
-@app.post("/zotero/grant", dependencies=_SAME_ORIGIN)
+@app.post("/zotero/grant")
 def zotero_grant():
     from silica.ui.web import zotero_web
     return _zotero_call(zotero_web.grant)
@@ -7391,7 +7307,7 @@ def zotero_item(key: str):
     return _zotero_call(zotero_web.item, key)
 
 
-@app.post("/zotero/file", dependencies=_SAME_ORIGIN)
+@app.post("/zotero/file")
 def zotero_file(payload: dict):
     from silica.ui.web import zotero_web
     return _zotero_call(zotero_web.file, list(payload.get("moves") or []))
@@ -7403,7 +7319,7 @@ def zotero_groups():
     return _zotero_call(zotero_web.groups_preview)
 
 
-@app.post("/zotero/groups", dependencies=_SAME_ORIGIN)
+@app.post("/zotero/groups")
 def zotero_groups_write():
     from silica.ui.web import zotero_web
     return _zotero_call(zotero_web.groups_write)
@@ -7421,7 +7337,7 @@ def zotero_covers_status():
     return zotero_web.covers_status()
 
 
-@app.post("/zotero/covers", dependencies=_SAME_ORIGIN)
+@app.post("/zotero/covers")
 def zotero_covers_start():
     from silica.ui.web import zotero_web
     return zotero_web.covers_start()
@@ -7433,7 +7349,7 @@ def zotero_labels():
     return zotero_web.labels()
 
 
-@app.post("/zotero/unlink", dependencies=_SAME_ORIGIN)
+@app.post("/zotero/unlink")
 def zotero_unlink():
     from silica.ui.web import zotero_web
     return _zotero_call(zotero_web.unlink)
@@ -7448,7 +7364,7 @@ def connectors_status():
     return [c.status() for c in connectors()]
 
 
-@app.post("/connectors/{name}/{action}", dependencies=_SAME_ORIGIN)
+@app.post("/connectors/{name}/{action}")
 async def connectors_act(name: str, action: str, request: Request):
     from silica.connectors import find
 
@@ -7471,7 +7387,7 @@ def get_endpoints():
     return st.endpoint_status()
 
 
-@app.post("/endpoints/start", dependencies=_SAME_ORIGIN)
+@app.post("/endpoints/start")
 async def start_endpoint(payload: dict):
     """Start one local endpoint from the command its own .env key names. Loading
     a model takes tens of seconds, so this waits on a worker thread."""
