@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from silica.config import embedder_defaults
 from silica.sources.discover import store
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,6 @@ _NEAR_PER_READ = 60
 # stories where 0.40 passes 3.4% on jina. Hosted tenants run pplx, and 0.40
 # there would pass 4 of the 1,716.
 NEAR_AT = 0.40
-NEAR_AT_BY_MODEL: dict[str, float] = {"pplx-embed-v1-4b": 0.28}
 # shortcut: a flat floor does not know how many notes the vault has. The
 # owner's 2,083-note vault on jina (92 labeled stories, 2026-10-31): 47% of
 # stories pass 0.40, 95% of those in the right subfield and only 18% real
@@ -57,11 +57,8 @@ _SKIP_DIRS = {"sources", "attachments", "assets", "templates", "_inbox", "inbox"
 
 
 def near_at(model: str) -> float:
-    """The floor for the configured embedder id, matched the way its config
-    row is (config.embedder_defaults: the key inside the id); NEAR_AT for a
-    model nobody measured."""
-    m = (model or "").lower()
-    return next((v for k, v in NEAR_AT_BY_MODEL.items() if k in m), NEAR_AT)
+    """The floor on the embedder's row; NEAR_AT for a model nobody measured."""
+    return float(embedder_defaults(model).get("near_at", NEAR_AT))
 
 
 def near_notes(vault: str | None, stories: list[str]) -> None:

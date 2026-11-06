@@ -503,7 +503,10 @@ DEFAULT_EMBEDDING_MODEL = "embeddinggemma-2"
 # Qwen apart from the model the thresholds were set for. HIGH and LOW were then
 # gated on ADR-0030's risk-coverage probe, 60 synthetic duplicates per embedder
 # (docs/evaluation/collision-gate-per-embedder-2026-10-08.md): Gemma 2's held,
-# jina's LOW moved.
+# jina's LOW moved. `dense_floor` and `near_at` are the cosine floors of a check
+# and of Discover, measured where they are read (kernel/check/run.py,
+# sources/discover/rank.py); a row without one has no measured floor, which a
+# check takes as "decide no absence" and Discover as its NEAR_AT.
 EMBEDDER_DEFAULTS: dict[str, dict[str, str]] = {
     "embeddinggemma-2": {
         "dim": "768",
@@ -517,6 +520,7 @@ EMBEDDER_DEFAULTS: dict[str, dict[str, str]] = {
         "SILICA_SIM_THRESHOLD_THEME": "0.708",
         "SILICA_AUTOLINK_MIN_SIM": "0.654",
         "SILICA_EPISODIC_RECALL_FLOOR": "0.724",
+        "dense_floor": "0.645",
     },
     # CC-BY-NC, so a personal setting and never the default (ADR-0078). Its
     # cosines sit BELOW Qwen's (all-pairs median 0.178 vs 0.298), so the Qwen
@@ -535,6 +539,8 @@ EMBEDDER_DEFAULTS: dict[str, dict[str, str]] = {
         "SILICA_SIM_THRESHOLD_THEME": "0.208",
         "SILICA_AUTOLINK_MIN_SIM": "0.180",
         "SILICA_EPISODIC_RECALL_FLOOR": "0.5",
+        "dense_floor": "0.26",
+        "near_at": "0.40",
     },
     # Perplexity's 4B through OpenRouter, the hosted index since 2026-10-23: an
     # API, so the 2-core host spends no CPU on it. No role prompts, the model
@@ -559,6 +565,7 @@ EMBEDDER_DEFAULTS: dict[str, dict[str, str]] = {
         "SILICA_SIM_THRESHOLD_THEME": "0.189",
         "SILICA_AUTOLINK_MIN_SIM": "0.204",
         "SILICA_EPISODIC_RECALL_FLOOR": "0.52",
+        "near_at": "0.28",
     },
 }
 
