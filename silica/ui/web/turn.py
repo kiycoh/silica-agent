@@ -26,7 +26,8 @@ from silica.agent.constraints import (
     PHONE_TOOLS,
     web_turn_constraints,
 )
-from silica.agent.loop import _EMPTY_COMPLETION, _is_tool_failure, run_agent
+from silica.agent.loop import run_agent
+from silica.agent.sentinels import EMPTY_COMPLETION
 from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
 from silica.config import CONFIG, demo
 from silica.kernel import vault_files
@@ -62,7 +63,7 @@ def _join_workspace(ws_path: str, ev) -> None:
     4); the write to the workspace note lands among the chat's changes."""
     from silica.kernel import workspaces
 
-    if _is_tool_failure(ev.result):
+    if tool_failed(ev.result):
         return
     path = ""
     try:
@@ -660,7 +661,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         SESSION.chat.seen_numbers.update(read.numbers)
         answer = await task  # re-raises if run_agent failed
         # Read before attribution and figures append to it.
-        empty = answer == _EMPTY_COMPLETION
+        empty = answer == EMPTY_COMPLETION
         # Stop is an outcome, not an answer (audit P3): the loop hands back its
         # sentinel once the token is set, and the text that had streamed stays
         # in the transcript untouched. The frame says who stopped it and the GUI
@@ -879,7 +880,7 @@ def phone_turn(text: str, cancel: threading.Event) -> dict:
             SESSION.phone.collapsed = _compact_context(SESSION.phone.messages, SESSION.phone.collapsed)
         if cancel.is_set():
             return {"answer": "Stopped."}
-        outcome = "empty" if answer == _EMPTY_COMPLETION else "done"
+        outcome = "empty" if answer == EMPTY_COMPLETION else "done"
         return {"answer": answer}
     except Exception as exc:
         failure = _failure(exc)

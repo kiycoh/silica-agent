@@ -16,8 +16,8 @@ from __future__ import annotations
 import json
 
 from silica.obs.events import ToolCompleteEvent
-from silica.agent.loop import _is_tool_failure
 from silica.kernel.write.provenance import number_tokens, unfounded_numbers
+from silica.tools import TOOLS, Reads, tool_failed
 
 THIN_COVERAGE_HINT = "vault coverage was thin: /web to search the web"
 
@@ -59,37 +59,16 @@ def degraded_lines(degraded: dict, surface: str = "gui") -> list[str]:
         lines.append(f"{prefix}: the {role} {phrase}" + (f" · {fix}" if fix else ""))
     return lines
 
-# Per-tool emptiness. `silica_related` is excluded on purpose: it takes an
-# existing note, so an empty result means "no neighbors", not "no coverage".
-# `silica_search` (title match only) is too weak a signal to escalate on.
+# What an empty retrieval looks like is Tool.found_nothing. `silica_related`
+# declares none on purpose: it takes an existing note, so an empty result means
+# "no neighbors", not "no coverage". `silica_search` (title match only) declares
+# one, but is too weak a signal to send the user to the web on: a title search
+# that matched nothing put nothing in front of the chat model that a web answer
+# would leave out, which is all the loop's reading of it asks.
 #
 # ponytail: hard miss only — every recall call returned zero. "Few or low-scored
 # hits" needs a scored threshold nobody has benched; revisit with an eval.
-_MISS = {
-    "silica_recall": lambda d: not d.get("notes"),
-    "silica_semantic_search": lambda d: not d.get("results"),
-    "silica_search_context": lambda d: not d.get("notes_matched"),
-}
-
-
-def found_nothing(name: str | None, result: object) -> bool:
-    """A vault search that matched nothing: the only call a `final` web answer
-    may stand beside and still end the turn (loop.py).
-
-    Kept beside _MISS because _MISS is the one list of what an empty retrieval
-    looks like. `silica_search` counts here though not there: too weak a signal
-    to send the user to the web on, but a title search that matched nothing put
-    nothing in front of the chat model that the web answer would leave out. An
-    error is not nothing: the chat model may owe the user a word about it.
-    """
-    predicate = (lambda d: not d.get("paths")) if name == "silica_search" else _MISS.get(name or "")
-    if predicate is None:
-        return False
-    try:
-        data = json.loads(result)  # type: ignore[arg-type]
-    except (ValueError, TypeError):
-        return False
-    return isinstance(data, dict) and "error" not in data and bool(predicate(data))
+_TOO_WEAK_TO_ESCALATE = frozenset({"silica_search"})
 
 
 class RecallWatch:
@@ -124,8 +103,8 @@ class RecallWatch:
             self._inner(event)
 
     def _inspect(self, event: ToolCompleteEvent) -> None:
-        predicate = _MISS.get(event.name)
-        if predicate is None:
+        empty_key = getattr(TOOLS.get(event.name), "found_nothing", "")
+        if not empty_key or event.name in _TOO_WEAK_TO_ESCALATE:
             return
         try:
             data = json.loads(event.result)
@@ -143,7 +122,7 @@ class RecallWatch:
             # sending the user to the web here would mask the real problem.
             return
         self.calls += 1
-        if predicate(data):
+        if not data.get(empty_key):
             self.misses += 1
 
     @property
@@ -209,7 +188,7 @@ def result_text(result: str, args: dict | None = None) -> str:
     2026-10-11, "Giordano Bruno 1548 1600"). Exact leaves only, and strings
     only: a count that happens to equal `k` is still a count.
     """
-    if _is_tool_failure(result):
+    if tool_failed(result):
         return ""
     try:
         obj = json.loads(result)
@@ -301,18 +280,18 @@ def numbers_notes(flagged: list[str]) -> list[dict]:
     return [{"kind": "numbers", "text": f"numbers not in what this turn read: {shown}{more}"}]
 
 
-# The tools that hand the model a note's own words, and where each names the
-# note: in its arguments, its result, or both (shapes read off stored sessions,
-# 2026-10-22). A title search is left out: it lists candidates, it reads none.
-_READS_ARGS = {"silica_read_note": ("name",), "silica_outline": ("name",),
-               "silica_read": ("path",), "silica_recall": ("notes",)}
-_READS_RESULT = {"silica_recall": "notes", "silica_read": "path", "silica_search_context": "hits"}
 READS_KEY = "silica_reads"   # the read notes stored on the answer, for a reopened chat
+
+
+def _reads(name: str) -> Reads:
+    return getattr(TOOLS.get(name), "reads", None) or Reads()
 
 
 def read_refs(messages: list[dict], end: int | None = None) -> list[str]:
     """The notes the turn ending at `messages[end - 1]` read, as the calls named
-    them (a title or a path), for linking its answer (ADR-0127).
+    them (a title or a path), for linking its answer (ADR-0127). Which calls
+    count, and where each names the note, is Tool.reads (shapes read off stored
+    sessions, 2026-10-22).
 
     The turn starts after the last user message. A tool result is read only
     while it is whole: compaction stubs old ones, which is why the answer keeps
@@ -330,11 +309,11 @@ def read_refs(messages: list[dict], end: int | None = None) -> list[str]:
                 args = json.loads(fn.get("arguments") or "{}")
             except (ValueError, TypeError):
                 continue   # a malformed call read nothing
-            for key in _READS_ARGS.get(name, ()):
+            for key in _reads(name).args:
                 v = args.get(key) if isinstance(args, dict) else None
                 out += [v] if isinstance(v, str) else [x for x in v or () if isinstance(x, str)]
-        named = _READS_RESULT.get(calls.get(str(m.get("tool_call_id") or ""), ""))
-        if m.get("role") != "tool" or named is None:
+        named = _reads(calls.get(str(m.get("tool_call_id") or ""), "")).result
+        if m.get("role") != "tool" or not named:
             continue
         try:
             v = json.loads(m.get("content") or "").get(named)

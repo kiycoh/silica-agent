@@ -40,7 +40,7 @@ def _vault() -> Path:
     return Path(CONFIG.vault_path)
 
 
-@tool(cls="composed", collapse="eager")
+@tool(cls="composed", collapse="eager", ingress=False)
 def silica_event_create(title: Annotated[str, Field(description='Event title')], start: Annotated[str, Field(description="'YYYY-MM-DD HH:MM', or 'YYYY-MM-DD' = all-day")], end: Annotated[str, Field(description='Optional end; all-day end date is inclusive')] = "", rrule: Annotated[str, Field(description="iCal RRULE, e.g. 'FREQ=WEEKLY;BYDAY=WE'")] = "",
                         reminder: Annotated[str, Field(description='Lead before each occurrence: <N>m|h|d')] = "", body: Annotated[str, Field(description='Optional markdown body')] = "") -> dict[str, Any]:
     """Create a user event (appointment, deadline) as a calendar note.
@@ -146,7 +146,7 @@ def create_event(title: str, start: str, *, end: str = "", rrule: str = "",
     return {"op": "write", "success": True, "path": ref.path or path, **checkpoint}
 
 
-@tool(cls="composed", collapse="eager")
+@tool(cls="composed", collapse="eager", ingress=False, note_args=("note",))
 def silica_event_update(note: Annotated[str, Field(description='Event note stem or path')], start: Annotated[str, Field(description='New start (empty = keep)')] = "", end: Annotated[str, Field(description='New end')] = "", rrule: Annotated[str, Field(description='New RRULE')] = "",
                         reminder: Annotated[str, Field(description='New lead (<N>m|h|d)')] = "", status: Annotated[str, Field(description='done|cancelled closes the series')] = "") -> dict[str, Any]:
     """Update an event note: only the passed fields change; the merged set
@@ -206,7 +206,7 @@ def silica_event_update(note: Annotated[str, Field(description='Event note stem 
             "changed": sorted(changes), "checkpoint_ok": checkpoint_ok}
 
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False)
 def silica_agenda(start: Annotated[str, Field(description="Window start: 'today' or 'YYYY-MM-DD'")] = "today", days: Annotated[int, Field(ge=1, le=90, description='Window length in days')] = 7) -> dict[str, Any]:
     """Per-day agenda: the day's daily note, event occurrences, dated notes,
     tasks (read as the Tasks plugin reads them), study plans on their `by` day,

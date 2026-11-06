@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 from silica.config import SilicaConfig
 from silica.model.providers import Provider
 from silica.model.llm import LLMResponse, ToolCall, call_llm
-from silica.agent.loop import run_agent, _is_tool_failure
+from silica.agent.loop import run_agent
+from silica.tools import tool_failed
 from silica.tools import TOOLS, Tool
 from silica.kernel.prep_delegation import run_distiller
 
@@ -214,20 +215,20 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
 
         self.assertIn("error", res)
 
-    def test_is_tool_failure(self):
+    def testtool_failed(self):
         # Dict representation
-        self.assertTrue(_is_tool_failure({"error": "something"}))
-        self.assertFalse(_is_tool_failure({"success": True}))
+        self.assertTrue(tool_failed({"error": "something"}))
+        self.assertFalse(tool_failed({"success": True}))
 
         # String representation: only a structured {"error": ...} payload is a
         # failure. Plain prose is a successful tool output even when it happens
         # to contain words like "error"/"failed" (e.g. grep hits, "0 errors"
         # reports) — substring-sniffing those is a false positive.
-        self.assertTrue(_is_tool_failure('{"error": "bad stuff"}'))
-        self.assertFalse(_is_tool_failure('An error occurred'))
-        self.assertFalse(_is_tool_failure('Failed to read file'))
-        self.assertFalse(_is_tool_failure('Exception raised'))
-        self.assertFalse(_is_tool_failure('All systems operational'))
+        self.assertTrue(tool_failed('{"error": "bad stuff"}'))
+        self.assertFalse(tool_failed('An error occurred'))
+        self.assertFalse(tool_failed('Failed to read file'))
+        self.assertFalse(tool_failed('Exception raised'))
+        self.assertFalse(tool_failed('All systems operational'))
 
     @patch("silica.agent.loop.call_llm")
     def test_convergence_guard_trigger(self, mock_call_llm):

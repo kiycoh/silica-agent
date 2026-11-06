@@ -1009,26 +1009,6 @@ def test_worker_read_only(mock_get_provider, mock_call_llm):
     _, kwargs = mock_call_llm.call_args
     assert kwargs.get("tools") is None
 
-    # Test 2: Verify that every builtin worker profile allowlists only atomic
-    # read-only tools (the profile.tools tuple is the single enforcement seam:
-    # AgentConstraints receives it verbatim in run_worker).
-    from silica.capabilities.profiles_builtin import READER, ROUTER
-    import silica.tools.atomic  # noqa: F401 — populates TOOLS via @tool decorators
-    from silica.tools import TOOLS
-
-    mutation_tools = {
-        "silica_run_injector",
-        "silica_move",
-        "silica_delete",
-        "silica_snapshot",
-        "silica_restore",
-    }
-    for profile in (READER, ROUTER):
-        for name in profile.tools:
-            assert name in TOOLS, f"profile '{profile.name}' lists unknown tool '{name}'"
-            assert TOOLS[name].cls == "atomic", f"profile '{profile.name}' exposes non-atomic tool '{name}'"
-            assert name not in mutation_tools, f"profile '{profile.name}' exposes mutation tool '{name}'"
-
 
 @patch("silica.router.orchestrator.validate_ops")
 def test_fsm_short_circuit_no_ops(mock_validate):

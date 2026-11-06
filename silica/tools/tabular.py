@@ -222,7 +222,7 @@ def _fit_rows(rows: list[list[Any]]) -> list[list[Any]]:
     return rows
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, note_args=("path",))
 def silica_query_table(
     path: Annotated[str, Field(description='Path to the data file to query (.csv/.tsv/.parquet/.json, or .xlsx/.xls for one sheet at a time)')], sql: Annotated[str, Field(description="A single read-only SELECT. The file is bound to the table name `t` — e.g. SELECT region, avg(score) FROM t GROUP BY 1. When the columns are unknown, call with `SUMMARIZE t` first: one call returns every column's type, min/max, distinct count and null share, without spending rows.")], limit: Annotated[int, Field(description='Max rows returned; the reply flags whether it truncated')] = 200, sheet: Annotated[str, Field(description='Excel files only: which sheet to query. Omit for single-sheet workbooks; a multi-sheet workbook rejects the call and lists its sheet names.')] = ""
 ) -> dict[str, Any]:
@@ -392,7 +392,7 @@ def _describe_table(src: Path) -> dict[str, Any]:
         return {"error": f"{type(first).__name__}: {first}"}
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False)
 def silica_tables(folder: Annotated[str, Field(description='Vault-relative folder to scope the census; empty = the whole vault')] = "", column: Annotated[str, Field(description='Case-insensitive substring filter: only tables with a matching column name return, with the matches named')] = "", limit: Annotated[int, Field(description='Max tables described in the reply')] = 50) -> dict[str, Any]:
     """Census of the vault's tabular files (.csv/.tsv/.parquet/.ndjson, Excel):
     path, size and column schema per file, filterable by column name — the

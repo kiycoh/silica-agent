@@ -43,24 +43,10 @@ from silica.ui.home import print_home
 from silica.ui.prompt import build_session, bottom_toolbar, prompt_text
 from prompt_toolkit.patch_stdout import patch_stdout
 
-# Import tools to trigger registration via @tool decorator
-import silica.tools.atomic  # noqa: F401
-import silica.tools.pipeline  # noqa: F401
-import silica.tools.notes  # noqa: F401
-import silica.tools.events  # noqa: F401
-import silica.tools.graph  # noqa: F401
-import silica.tools.aliases  # noqa: F401
-import silica.tools.curate  # noqa: F401
-import silica.tools.sessions  # noqa: F401
-import silica.tools.rework  # noqa: F401
-import silica.tools.runners  # noqa: F401
-import silica.tools.wrapped  # noqa: F401
-import silica.tools.codedocs_tool  # noqa: F401
-import silica.tools.delegate_tool  # noqa: F401
-import silica.tools.loader  # noqa: F401
-import silica.tools.tabular  # noqa: F401
-import silica.sources.web_research  # noqa: F401  (registers the web_search, web_fetch, remember and plan tools)
+from silica.tools import catalog
 from silica.sources.web_research import WebTurn
+
+catalog.load()
 
 logger = logging.getLogger(__name__)
 

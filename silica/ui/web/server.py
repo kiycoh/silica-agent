@@ -81,8 +81,11 @@ async def _lifespan(app: FastAPI):
     """Host the Obsidian bridge for the GUI session — the plugin dials in and
     the driver hot-swaps to ws (falls back on drop). No-op without the
     [connect] extra or when the vault has no .obsidian/."""
+    from silica.tools import catalog
     from silica.ui.connect import maybe_start_bridge
     from silica.ui.web import jobs
+
+    catalog.load()
 
     # Before the first request (ADR-0099 point 4): a job this process did not
     # queue and that never ended was cut by the restart, and the student is

@@ -16,7 +16,8 @@ from silica.sources import mail
 from silica.sources.registry import stage
 from silica.tools import TOOLS
 from silica.tools import atomic, graph  # noqa: F401  (registers the note-reading tools)
-from silica.tools import user_memory as gate
+from silica.agent import memory_gate as gate
+from silica.tools import user_memory
 from tests.mail_fixtures import ME, ME_FULL, PROF, msg, write_eml
 
 ASK = "ricordati che il relatore vuole il capitolo due entro venerdì"
@@ -26,9 +27,9 @@ ASK = "ricordati che il relatore vuole il capitolo due entro venerdì"
 def vault(tmp_vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "user_memory", True)
     monkeypatch.setattr(um, "_INCOGNITO", False)
-    token = gate._TURN.set(None)
+    token = gate.TURN.set(None)
     yield tmp_vault
-    gate._TURN.reset(token)
+    gate.TURN.reset(token)
 
 
 @pytest.fixture
@@ -55,7 +56,7 @@ def _remember() -> dict:
 
 def _run(tool: str, **args):
     """A tool call as the loop makes it: the tool, then after_tool."""
-    turn = gate._TURN.get()
+    turn = gate.TURN.get()
     out = TOOLS[tool].run(**args)
     gate.after_tool(turn, tool)
     try:

@@ -336,7 +336,7 @@ def apply_curation_plan(
 # tool
 # ---------------------------------------------------------------------------
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False)
 def silica_curate(
     apply: Annotated[bool, Field(description='If True, enqueue/execute the plan; default is a dry-run that only returns the plan.')] = False,
     folder: Annotated[str, Field(description='Vault-relative folder to scope the audit (empty = whole vault)')] = "",

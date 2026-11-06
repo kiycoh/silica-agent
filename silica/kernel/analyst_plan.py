@@ -52,7 +52,6 @@ _IRREVERSIBLE = frozenset({
     "silica_move",
     "silica_delete",
     "silica_run_injector",
-    "silica_bulk_move",
     "silica_run_organizer",
 })
 

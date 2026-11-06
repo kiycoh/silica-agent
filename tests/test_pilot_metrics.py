@@ -186,11 +186,11 @@ def test_a_chat_turn_writes_one_turn_line(client, journal, monkeypatch):
 
 def test_an_empty_answer_and_an_unknown_slash_are_named_as_such(client, journal, monkeypatch):
     from silica.ui.web import turn
-    from silica.agent.loop import _EMPTY_COMPLETION
+    from silica.agent.sentinels import EMPTY_COMPLETION
 
     _, server = client
     monkeypatch.setattr(turn, "run_agent", lambda messages, *a, **k: messages.append(
-        {"role": "assistant", "content": _EMPTY_COMPLETION}) or _EMPTY_COMPLETION)
+        {"role": "assistant", "content": EMPTY_COMPLETION}) or EMPTY_COMPLETION)
 
     async def collect(text):
         from silica.ui.web import turn

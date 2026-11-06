@@ -271,7 +271,7 @@ def empty_recall(monkeypatch):
 
     monkeypatch.setitem(TOOLS, "silica_recall", Tool(
         lambda: json.dumps({"query": "x", "notes": []}), "silica_recall",
-        "test recall", _EmptyArgs, "composed"))
+        "test recall", _EmptyArgs, "composed", found_nothing="notes"))
 
 
 class TestLandingTurn:

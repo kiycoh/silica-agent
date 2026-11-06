@@ -129,7 +129,7 @@ def run_subagent_batch(
 ) -> dict[str, Any]:
     """Run a batch of WorkItems through leashed sub-agents in parallel.
 
-    Used by the ad-hoc /dedup, /enrich commands and silica_delegate
+    Used by the ad-hoc /dedup, /enrich commands
     (out of the inject pipeline).  A pre-closed WorkQueue drained by the shared
     ``consume`` loop — the exact engine the Coordinator runs in-pipeline — so
     both paths get identical cancel/bookkeeping semantics.  BoundedSubAgent is

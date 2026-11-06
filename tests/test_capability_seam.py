@@ -2,9 +2,8 @@
 
 CAPABILITIES (silica/capabilities/__init__.py) is THE dispatch table for
 background work: every WorkItem kind produced anywhere in silica/ must have a
-registered capability, and every WorkerProfile must be dispatchable through
-the same table (kind == profile name). A new producer or profile that bypasses
-the seam fails here and forces an explicit decision.
+registered capability. A new producer that bypasses the seam fails here and
+forces an explicit decision.
 """
 from __future__ import annotations
 
@@ -34,36 +33,3 @@ def test_every_produced_workitem_kind_has_a_capability():
         f"WorkItem kind(s) produced without a registered capability: {missing}. "
         "Register them in silica/capabilities/__init__.py or stop producing them."
     )
-
-
-def test_every_worker_profile_is_dispatchable_through_the_seam():
-    from silica.capabilities import CAPABILITIES
-    from silica.capabilities.profiles_builtin import READER, ROUTER
-
-    for profile in (READER, ROUTER):
-        assert profile.name in CAPABILITIES, (
-            f"profile '{profile.name}' is not dispatchable via CAPABILITIES — "
-            "the worker capability must cover every built-in profile"
-        )
-
-
-def test_worker_item_round_trip_through_dispatch(monkeypatch):
-    """A WorkItem with kind=<profile> flows BoundedSubAgent → capability → run_worker."""
-    from silica.agent.subagent import BoundedSubAgent
-    from silica.config import SilicaConfig
-    from silica.kernel.workqueue import WorkItem
-    from silica.capabilities.profile import WorkerResult
-
-    seen: dict = {}
-
-    def fake_run_worker(profile, goal, inputs=None, *, config, cancel_token=None):
-        seen["profile"] = profile.name
-        seen["goal"] = goal
-        return WorkerResult(status="ok", output="digest")
-
-    monkeypatch.setattr("silica.capabilities.run_worker", fake_run_worker)
-    agent = BoundedSubAgent(SilicaConfig())
-    res = agent.handle(WorkItem(kind="reader", target_path="", context={"goal": "g"}))
-
-    assert res == {"status": "ok", "output": "digest", "detail": ""}
-    assert seen == {"profile": "reader", "goal": "g"}

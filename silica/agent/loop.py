@@ -19,7 +19,7 @@ around this nucleus. Build this first, then ergonomics.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Any
+from typing import Callable, Any
 import concurrent.futures as _cf
 import contextvars
 import threading
@@ -27,10 +27,6 @@ import time
 import logging
 import json
 
-if TYPE_CHECKING:
-    from silica.kernel.progress import ProgressLedger
-
-from silica.obs import bus as _bus_mod
 from silica.obs.events import (
     ToolStartEvent,
     ToolCompleteEvent,
@@ -45,7 +41,6 @@ from silica.model.errors import context_overflow
 from silica.model.llm import call_llm, run_with_deadline
 from silica.obs import narration as _narr_mod
 from silica.agent.compaction import (
-    dedup_recall_excerpts,
     COMPACT_FLOOR_TURNS,
     COMPACT_FRACTION,
     compact_read_history,
@@ -53,53 +48,16 @@ from silica.agent.compaction import (
     fit_window,
 )
 from silica.model.limits import ROUGH_CHARS_PER_TOKEN, TEXT_CHARS_PER_TOKEN
-from silica.agent import read_scope
+from silica.agent import memory_gate, read_scope
 from silica.agent.relevance import compact_by_relevance
-from silica.agent.sentinels import CANCELLED, MAX_ITERATIONS, is_sentinel
-from silica.agent.sentinels import EMPTY_COMPLETION as _EMPTY_COMPLETION
-from silica.tools import user_memory as memory_gate
+from silica.agent.sentinels import CANCELLED, EMPTY_COMPLETION, MAX_ITERATIONS, is_sentinel
 from silica.config import CONFIG
 from silica.model.concurrency import worker_slot
 from silica.agent.constraints import AgentConstraints
-from silica.tools import MODEL_CALL, TOOLS, Tool
+from silica.tools import MODEL_CALL, TOOLS, Tool, found_nothing, tool_failed
 from contextlib import nullcontext
 
 logger = logging.getLogger(__name__)
-
-
-def _topic_for(event: RenderEvent) -> str | None:
-    if isinstance(event, ToolStartEvent):
-        return "agent/tool_start"
-    if isinstance(event, ToolCompleteEvent):
-        return "agent/tool_complete"
-    if isinstance(event, ToolErrorEvent):
-        return "agent/tool_error"
-    if isinstance(event, (ThinkingStartEvent, ThinkingEndEvent)):
-        return "agent/thinking"
-    if isinstance(event, ReasoningEvent):
-        return "agent/reasoning"
-    if isinstance(event, LLMStreamEvent):
-        return "agent/stream"
-    return None
-
-
-def _is_tool_failure(result: Any) -> bool:
-    """Helper to detect if a tool result indicates a failure."""
-    if not result:
-        return False
-    if isinstance(result, str):
-        try:
-            parsed = json.loads(result)
-            if isinstance(parsed, dict) and "error" in parsed:
-                return True
-        except Exception:
-            pass
-        # A non-JSON / non-error-keyed string result is a successful tool
-        # output, not a failure. Substring-sniffing for "error"/"failed" here
-        # misclassifies legitimate content (grep hits, "0 errors" reports).
-    elif isinstance(result, dict) and "error" in result:
-        return True
-    return False
 
 
 ToolProgressCallback = Callable[[RenderEvent], None] | None
@@ -134,26 +92,22 @@ FIT_NARROWS = False
 
 
 def _fit_shrink(name: str, arguments: str, body: str) -> str | None:
-    if not FIT_NARROWS or name != "silica_read_note":
+    shrink = getattr(TOOLS.get(name), "shrink", None)
+    if not FIT_NARROWS or shrink is None:
         return None
     try:
         args = json.loads(arguments or "{}")
     except (json.JSONDecodeError, TypeError):
         return None
-    if not isinstance(args, dict) or args.get("vault") or not args.get("name"):
+    if not isinstance(args, dict):
         return None
     requests = read_scope.REQUESTS.get()
-    query = str(args.get("query") or "").strip() or (requests[-1] if requests else "")
-    if not query:
-        return None
-    from silica.tools.atomic import narrowed_read
-
     try:
-        return narrowed_read(str(args["name"]), query)
+        return shrink(args, requests[-1] if requests else "")
     except Exception as exc:
         # The note moved or the driver failed between the read and this fit:
         # the stub the caller falls back to is what the fit wrote before.
-        logger.warning("fit narrowing failed for %s (%s): stubbed", args["name"], exc)
+        logger.warning("fit narrowing failed for %s (%s): stubbed", name, exc)
         return None
 
 _FINAL_TURN_INSTRUCTION = (
@@ -274,18 +228,9 @@ class _Stopped(Exception):
     """The turn's cancel token was set while the model was still writing."""
 
 
-# ADR-0150: the reads one tool block may run at once. Each reads files or
-# stores that take their own locks (EmbedStore, silica-core's _STORE_RW), the
-# Obsidian bridge correlates concurrent RPCs by id, and none of them takes a
-# progress callback. Anything else, or a block holding a write, runs one call
-# at a time as before.
-PARALLEL_READS = frozenset({
-    "silica_search_context", "silica_read", "silica_read_note", "silica_outline",
-    "silica_files", "silica_exists", "silica_search", "silica_semantic_search",
-    "silica_related", "silica_timeline", "silica_recall", "silica_concepts",
-    "silica_links", "silica_backlinks", "silica_props", "silica_file_links",
-    "silica_unresolved", "silica_orphans", "silica_graph_path", "silica_vaults",
-})
+# ADR-0150: how many reads of one tool block run at once (Tool.parallel_safe).
+# The Obsidian bridge correlates concurrent RPCs by id. A block with anything
+# else in it, a write above all, runs one call at a time as before.
 _READ_WORKERS = 4
 
 
@@ -311,12 +256,13 @@ def _prefetch_reads(tool_calls: list, allowed: dict[str, Tool], cancel_token: An
     takes the calls in order, so events, narration and history read exactly as
     before, only sooner.
 
-    At most one silica_recall per block: its mark_used re-reads and saves the
+    Tool.once_per_block is silica_recall: its mark_used re-reads and saves the
     episodic file, and two in flight would lose one's TTL refresh.
     """
     names = [tc.name for tc in tool_calls]
-    if (len(names) < 2 or names.count("silica_recall") > 1
-            or any(n not in PARALLEL_READS or n not in allowed for n in names)):
+    tools = [allowed.get(n) for n in names]
+    if (len(names) < 2 or any(t is None or not t.parallel_safe for t in tools)
+            or any(t.once_per_block and names.count(n) > 1 for n, t in zip(names, tools))):
         return {}
     pool = _cf.ThreadPoolExecutor(max_workers=min(len(names), _READ_WORKERS),
                                   thread_name_prefix="silica-read")
@@ -333,7 +279,6 @@ def run_agent(
     messages: list[dict],
     model: str,
     tool_progress_callback: ToolProgressCallback = None,
-    progress: "ProgressLedger | None" = None,
     cancel_token: "threading.Event | None" = None,
     constraints: "AgentConstraints | None" = None,
     temperature: float | None = None,
@@ -351,6 +296,10 @@ def run_agent(
     Returns:
         The model's final text response
     """
+    # A chat turn: no constraints at all, or a constrained caller that says so.
+    # Everything a chat turn has and a worker has not reads this one fact.
+    _interactive = constraints is None or constraints.interactive
+
     # Effective tool registry: full global, or the constrained subset.
     if constraints is not None:
         source = TOOLS if constraints.registry is None else constraints.registry
@@ -398,11 +347,11 @@ def run_agent(
     # what puts an earlier read out of scope, and a rewrite here costs one
     # cache break for the turn instead of one per iteration (relevance.py).
     # A batch run has a single user message and nothing to judge.
-    if constraints is None or constraints.interactive:
+    if _interactive:
         compact_by_relevance(messages, TOOLS)
     # What a tool may need to know about the turn it serves (read_scope.py).
     read_scope.set_requests(messages)
-    if constraints is None or constraints.interactive:
+    if _interactive:
         # A chat turn opens here: a create at a path the chat deleted since is
         # judged against the deleted body (ADR-0093). A batch sub-loop opens
         # none, so it cannot shrink the window of the chat turn it runs in.
@@ -412,8 +361,7 @@ def run_agent(
     # Not read_scope's REQUESTS for the user-memory turn (ADR-0076): those
     # strings drop `origin`, and the forget-only check must not read a
     # directive's own words as the user's.
-    memory_turn = memory_gate.begin_turn(
-        messages, chat=constraints is None or constraints.interactive)
+    memory_turn = memory_gate.begin_turn(messages, chat=_interactive)
     # ponytail: a single meter for every tool. Split retrieval from writes if a
     # turn is ever seen spending its whole allowance on reads, or vice versa.
 
@@ -445,15 +393,12 @@ def run_agent(
     sent_tokens, sent_len = 0, 0
 
     def _emit(event: RenderEvent) -> None:
-        """Best-effort event emission to callback and bus."""
+        """Best-effort event emission to the callback and the narration."""
         if tool_progress_callback is not None:
             try:
                 tool_progress_callback(event)
             except Exception as exc:
                 logger.debug("tool_progress_callback error (swallowed): %s", exc)
-        topic = _topic_for(event)
-        if topic is not None:
-            _bus_mod.BUS.publish(topic, event)
         # Durable record: one adapter call, all render-event kinds (spec §4).
         # Best-effort like the callback above — narration must never kill a turn.
         try:
@@ -481,7 +426,6 @@ def run_agent(
     # chat_tools cut says so with constraints.interactive.
     # The kwarg is only passed when active, so call_llm test doubles only need
     # the bare signature plus cancel=None.
-    _interactive = constraints is None or constraints.interactive
     _llm_kwargs: dict = {"tools": None}
     if temperature is not None:
         # None keeps the provider default (product behavior). Eval agent arms
@@ -633,7 +577,7 @@ def run_agent(
             # max-iterations sentinels: the caller always gets text back.
             # strip(): glm-5.3-flash answered " " on 2026-10-13, and a truthy
             # space walked past `or` into an empty bubble.
-            answer = resp.text if (resp.text or "").strip() else _EMPTY_COMPLETION
+            answer = resp.text if (resp.text or "").strip() else EMPTY_COMPLETION
             return _declare_links(answer) if _interactive else answer
 
         # Tool calls, so whatever text this iteration streamed was a preamble and
@@ -744,16 +688,16 @@ def run_agent(
                 # reset. If the turn goes on anyway (the door failed, a
                 # convergence landing), the next model call opens with a reset
                 # that takes the text back (llm.py).
-                if progress_cb is not None and tc.name == "silica_web_answer" and not (
-                        _interactive and (tc.args or {}).get("final")
+                reply_flag = allowed[tc.name].reply_flag
+                if progress_cb is not None and reply_flag and not (
+                        _interactive and (tc.args or {}).get(reply_flag)
                         and tc is resp.tool_calls[-1] and _stands_alone(messages, None)):
                     progress_cb = _without_stream(progress_cb)
                 try:
                     # The frontend callback, deliberately not `_emit`: `_emit`
-                    # also publishes on the bus, and a tool that runs a loop of
-                    # its own has its own `_emit` publishing there already — so
-                    # forwarding that one would put every inner event on
-                    # `agent/tool_*` twice.
+                    # also writes the narration, and a tool that runs a loop of
+                    # its own has its own `_emit` writing there already, so
+                    # forwarding that one would record every inner event twice.
                     ahead = prefetched.get(id(tc))
                     if ahead is not None:
                         # Started with its siblings (ADR-0150): its own run
@@ -784,7 +728,7 @@ def run_agent(
                             iteration=iteration,
                         )
                     )
-                    if _is_tool_failure(result):
+                    if tool_failed(result):
                         failed = True
                 except Exception as e:
                     duration = time.perf_counter() - start_time
@@ -805,26 +749,15 @@ def run_agent(
             # Eager projection: a write/gate tool's fat JSON never enters the
             # history — the TUI already got the full result via the event above.
             # Errors stay verbatim so the model can react to them.
-            if not failed and tc.name in allowed and allowed[tc.name].collapse == "eager":
-                result = eager_stub(allowed[tc.name], result)
-            if not failed and tc.name == "silica_recall":
-                result = dedup_recall_excerpts(result, recalled_excerpts)
-            if not failed and tc.name == "silica_load_tools":
-                for name in (tc.args or {}).get("names") or ():
+            ran = None if failed else allowed.get(tc.name)
+            if ran is not None and ran.collapse == "eager":
+                result = eager_stub(ran, result)
+            if ran is not None and ran.history_view is not None:
+                result = ran.history_view(result, recalled_excerpts)
+            if ran is not None and ran.loads is not None:
+                for name in ran.loads(tc.args or {}, result):
                     if isinstance(name, str):
                         _load(name)
-            if not failed and tc.name == "silica_ledger_next":
-                # The plan names the tools to run. A loadable one left unoffered
-                # is a call llama.cpp's grammar cannot emit: handed
-                # `silica_backlink`, qwen3.5-9b called `silica_backlinks`, a read
-                # (prompt-rules probe, 2026-09-28).
-                try:
-                    tasks = json.loads(result).get("tasks") or []
-                except (json.JSONDecodeError, AttributeError, TypeError):
-                    tasks = []  # an error or a done reply names no task: nothing to load
-                for task in tasks:
-                    if isinstance(task, dict) and isinstance(task.get("capability"), str):
-                        _load(task["capability"])
 
             tool_msg = {
                 "role": "tool",
@@ -837,7 +770,7 @@ def run_agent(
                 tool_msg[memory_gate.TAINT_KEY] = taint
             messages.append(tool_msg)
             _narr_mod.NARRATOR.turn(tool_msg)
-            if (not failed and tc.name == "silica_web_answer" and (tc.args or {}).get("final")
+            if (ran is not None and ran.reply_flag and (tc.args or {}).get(ran.reply_flag)
                     and not is_sentinel(str(result))):
                 final_answer = tool_msg
 
@@ -847,16 +780,6 @@ def run_agent(
                 failures_count = consecutive_failures[tool_key]
                 if failures_count >= 3:
                     logger.error("Convergence guard: tool '%s' with args %s failed %d times consecutively. Aborting agent run.", tc.name, tc.args, failures_count)
-                    if progress is not None and progress.cursor:
-                        try:
-                            progress.set_status(
-                                progress.cursor,
-                                "blocked",
-                                error=f"Convergence guard: '{tc.name}' failed 3× consecutively",
-                            )
-                            progress.save()
-                        except Exception:
-                            pass
                     # Stop the loop, keep the run: a deep research turn that
                     # stubs its toes on one tool (measured live: a re-pasted
                     # non-verbatim `remember` quote, three times) still holds
@@ -977,8 +900,6 @@ def _stands_alone(messages: list[dict], answer_msg: dict | None) -> bool:
     read, a write it made, anything a tool returned is the chat model's to weave
     in, and the turn goes on. The turn is everything after the last user message.
     """
-    from silica.agent.recall_watch import found_nothing  # recall_watch imports this module
-
     start = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=0)
     names = {tc.get("id"): (tc.get("function") or {}).get("name")
              for m in messages[start:] for tc in m.get("tool_calls") or ()}

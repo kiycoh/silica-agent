@@ -120,8 +120,9 @@ def main() -> int:
             print(f"VOID: not ready: {', '.join(down)}", file=sys.stderr)
             return 2
 
-    import silica.cli  # noqa: F401  (registers the tools)
-    from silica.tools import TOOLS
+    from silica.tools import catalog
+
+    TOOLS = catalog.load()
 
     rows = []
     for ts, name, args, driver in calls:

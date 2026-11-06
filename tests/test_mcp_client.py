@@ -66,15 +66,15 @@ def test_a_sub_loop_dispatches_from_its_own_registry_not_the_global_one():
 
 
 def test_a_connector_call_taints_the_conversation_for_user_memory():
-    from silica.tools import user_memory
+    from silica.agent import memory_gate
 
-    turn = user_memory.begin_turn([{"role": "user", "content": "q"}], chat=True)
-    user_memory.after_tool(turn, "mcp__gmail")
+    turn = memory_gate.begin_turn([{"role": "user", "content": "q"}], chat=True)
+    memory_gate.after_tool(turn, "mcp__gmail")
     assert turn.tainted_by == "mcp__gmail"
 
 
 def test_a_connector_call_in_history_taints_the_next_turn():
-    from silica.tools import user_memory
+    from silica.agent import memory_gate
 
     history = [
         {"role": "user", "content": "q"},
@@ -83,7 +83,7 @@ def test_a_connector_call_in_history_taints_the_next_turn():
         {"role": "tool", "tool_call_id": "1", "content": "x"},
         {"role": "user", "content": "remember that"},
     ]
-    assert user_memory.begin_turn(history, chat=True).tainted_by == "mcp__github"
+    assert memory_gate.begin_turn(history, chat=True).tainted_by == "mcp__github"
 
 
 # --- the client: one event-loop thread, sessions held open per server --------

@@ -177,7 +177,7 @@ def _ok(c: dict, answer) -> bool:
     try:
         return not (isinstance(r := json.loads(c["result"]), dict) and "error" in r)
     except (TypeError, ValueError):
-        return True  # plain text is a note, not an error (loop._is_tool_failure)
+        return True  # plain text is a note, not an error (tools.tool_failed)
 
 
 def judge(t: dict) -> dict | None:

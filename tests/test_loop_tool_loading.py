@@ -96,7 +96,8 @@ def test_a_ledger_task_loads_the_tool_it_names(monkeypatch):
     tools to run: the loop offers them."""
     task = {"task_id": "t1", "capability": "silica_orphans", "payload": {}}
     monkeypatch.setitem(TOOLS, "silica_ledger_next", Tool(
-        lambda: json.dumps({"tasks": [task], "remaining": 0}), "silica_ledger_next", "stub", _NoArgs, "atomic"))
+        lambda: json.dumps({"tasks": [task], "remaining": 0}), "silica_ledger_next", "stub", _NoArgs, "atomic",
+        loads=TOOLS["silica_ledger_next"].loads))
     c = AgentConstraints(tools=("silica_recall", "silica_ledger_next"), deferred=("silica_orphans",))
     offered, queue = [], [_call("silica_ledger_next"), _text("done")]
 

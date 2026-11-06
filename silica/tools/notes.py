@@ -95,7 +95,8 @@ def _mermaid_gate(tool: str, path: str, text: str) -> tuple[dict | None, str | N
                       + "\n".join(errors))}, None
 
 
-@tool(cls="composed", collapse="eager")
+@tool(cls="composed", collapse="eager", ingress=False, mutates="written", note_args=("name",),
+      label=("patch note", "name"))
 def silica_patch_note(
     name: Annotated[str, Field(description='Name or vault-relative path of the note to patch')],
     heading: Annotated[str, Field(description='Concept/section heading the snippet is filed under')],
@@ -206,7 +207,8 @@ def silica_patch_note(
             **({"warning": mermaid_warning} if mermaid_warning else {})}
 
 
-@tool(cls="composed", collapse="eager")
+@tool(cls="composed", collapse="eager", ingress=False, mutates="written",
+      note_args=("name", "ref"), label=("flag note", "name"))
 def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relative path of the note to flag')], reason: Annotated[str, Field(description='Why the note is wrong or stale, in a few words')] = "", clear: Annotated[bool, Field(description='Clear a previously set flag instead of setting one')] = False,
                      ref: Annotated[str, Field(description="With clear: resolve only this entry of the note's `contradictions:` list, verbatim; default resolves every open one")] = "") -> dict[str, Any]:
     """Flag an EXISTING note as wrong or stale: marks `contested` in
@@ -270,7 +272,8 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
             **checkpoint_landed(path, prior_content, new_content)}
 
 
-@tool(cls="composed", collapse="eager")
+@tool(cls="composed", collapse="eager", ingress=False, mutates="written", note_args=("name",),
+      label=("require", "name"))
 def silica_require(
     name: Annotated[str, Field(description='Name or vault-relative path of the note that requires another')],
     prerequisite: Annotated[str, Field(description='Name or path of the note to read before it')],
@@ -321,7 +324,8 @@ def silica_require(
     return {"note": name, "path": path, "requires": wanted, **checkpoint_landed(path, nc.content)}
 
 
-@tool(cls="composed", collapse="eager")
+@tool(cls="composed", collapse="eager", ingress=False, mutates="written", note_args=("path",),
+      label=("write note", "path"))
 def silica_write_note(
     path: Annotated[str, Field(description="Vault-relative path for the new note (e.g. 'Computer Science/Computer Vision.md')")],
     body: Annotated[str, Field(description='Markdown body only — NO YAML frontmatter; it is applied mechanically from the vault template. ' + _MERMAID_RULE)],

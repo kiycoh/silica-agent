@@ -976,7 +976,9 @@ def _stub_egress() -> None:
                 "free-threaded CPython support, array API dispatch for more estimators, and "
                 "faster HistGradientBoosting. Source: https://scikit-learn.org/stable/whats_new.html")
 
-    import silica.cli  # noqa: F401  registers silica_web_answer
+    from silica.tools import catalog
+
+    catalog.load()
     TOOLS["silica_run_injector"].fn = injector
     TOOLS["silica_web_answer"].fn = web
 

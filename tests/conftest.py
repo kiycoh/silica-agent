@@ -139,8 +139,17 @@ def _no_page_reading_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _load_tools_registry() -> None:
+    """Fill TOOLS as every entry point does: the facts the loop, the compaction
+    and the taint gate read are in it, and a test file run alone must see them."""
+    from silica.tools import catalog
+
+    catalog.load()
+
+
 @pytest.fixture(autouse=True)
-def _restore_tools_registry() -> None:
+def _restore_tools_registry(_load_tools_registry) -> None:
     """Undo any registration a test leaves in the global TOOLS dict.
 
     TOOLS is module-level and `@tool` writes into it at import time; ten test

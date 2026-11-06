@@ -31,7 +31,7 @@ from typing import Annotated, Any
 from pydantic import Field
 
 from silica.connectors import approval, mcp_client, mcp_config
-from silica.tools import TOOLS, Tool, _model_from_signature
+from silica.tools import TOOLS, Tool, model_from_signature
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +254,8 @@ class _ConnectorTool(Tool):
             return _run(key, request, cancel_token, progress)
 
         super().__init__(connector, mcp_config.tool_name(key), _description(key, names),
-                         _model_from_signature(connector), "composed", collapse="never")
+                         model_from_signature(connector), "composed", collapse="never",
+                         ingress=True)
         self.key = key
 
 

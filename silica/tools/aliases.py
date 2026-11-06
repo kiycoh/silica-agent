@@ -127,7 +127,7 @@ def _propose_groups_single(titles: list[str], config: Any) -> dict:
     return parsed
 
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False)
 def silica_aliases(apply: Annotated[bool, Field(description='If True, write the gated aliases into frontmatter; default is a dry-run that only returns the proposals.')] = False, folder: Annotated[str, Field(description='Vault-relative folder to scope the pass (empty = whole vault)')] = "", cancel_token: Any = None) -> dict[str, Any]:
     """Propose and record frontmatter aliases for existing note titles. One
     LLM call proposes variants; each passes the read-time ambiguity gate (no

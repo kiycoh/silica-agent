@@ -21,6 +21,7 @@ from silica.obs.events import (
     ToolErrorEvent,
     ToolStartEvent,
 )
+from silica.tools import TOOLS, note_keys, tool_failed
 from silica.ui.tool_labels import (  # same verb + target the TUI shows
     CHUNK_PHASES,
     FILE_PHASES,
@@ -29,27 +30,12 @@ from silica.ui.tool_labels import (  # same verb + target the TUI shows
     tool_verb,
 )
 
-# How a tool changes the vault, for the chat footer's grouping. Only the tools
-# that mutate notes are listed; everything else is a read. Deliberately keyed on
-# the note-touching surface (the tools whose args `_note_refs` can resolve), so a
-# batch pipeline that names an ops file rather than a note produces no chip and
-# needs no entry here.
-_TOOL_EFFECT: dict[str, str] = {
-    "silica_write_note": "written",
-    "silica_patch_note": "written",
-    "silica_flag_note": "written",
-    "silica_require": "written",
-    "silica_bulk_write": "written",
-    "silica_restore": "written",
-    "silica_delete": "deleted",
-    "silica_move": "moved",
-}
+def _effect(name: str) -> str:
+    """How a tool changes the vault, for the chat footer's grouping: Tool.mutates,
+    and a read for everything else, a batch pipeline that names an ops file rather
+    than a note among them: it produces no chip."""
+    return getattr(TOOLS.get(name), "mutates", "") or "read"
 
-# Arg keys that name a note across the tool surface (read=name, write=path,
-# related=note, mindmap=note_path, move/delete=ref). A small allowlist, not
-# per-tool logic: missing one only omits a chip from the chat 'sources' footer,
-# it never reports a wrong note.
-_NOTE_KEYS = ("name", "path", "note", "note_path", "ref")
 
 # The search tools whose results name notes (ADR-0121 point 7): an answer that
 # stood on search snippets and read no note showed nothing to click. The first
@@ -127,7 +113,10 @@ def _refusal(name: str, result: Any) -> dict | None:
 
 
 def _note_refs(args: dict) -> list[str]:
-    refs = [args[k].strip() for k in _NOTE_KEYS
+    """The notes a call names (read=name, write=path, related=note,
+    mindmap=note_path, move/delete=ref). Missing one only omits a chip from the
+    chat 'sources' footer, it never reports a wrong note."""
+    refs = [args[k].strip() for k in note_keys()
             if isinstance(args.get(k), str) and args[k].strip()]
     paths = args.get("note_paths")
     if isinstance(paths, list):
@@ -202,7 +191,7 @@ def event_to_json(ev) -> dict | None:
         out: dict[str, Any] = {
                "type": "tool_start", "name": tool_verb(ev.name), "id": ev.call_id,
                "target": tool_target(ev.name, ev.args),
-               "effect": _TOOL_EFFECT.get(ev.name, "read"),
+               "effect": _effect(ev.name),
                "notes": notes}
         # The call's own arguments are the IN half of the expandable card: the
         # one-word target the row prints answers "which note", never "asking
@@ -229,9 +218,7 @@ def event_to_json(ev) -> dict | None:
         # A tool that returns {"error": ...} still completes, and the chat
         # claimed its notes as landed while a reloaded chat, which reads the
         # stored result, drew the same call as failed.
-        from silica.agent.loop import _is_tool_failure
-
-        if _is_tool_failure(ev.result):
+        if tool_failed(ev.result):
             out["failed"] = True
             if (refused := _refusal(ev.name, ev.result)):
                 out["refused"] = refused
@@ -298,7 +285,7 @@ def tool_calls_to_json(
                 "error": bool(failed and tc.get("id") in failed),
                 # The footer of a replayed turn (audit P4) is built from these
                 # two, exactly as the live turn builds it from tool_start.
-                "effect": _TOOL_EFFECT.get(name, "read"), "notes": notes}
+                "effect": _effect(name), "notes": notes}
         if line["error"] and results:
             # Why it failed, in the authored sentence (audit P12): the bare
             # mark said only that something did not land.
