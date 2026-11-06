@@ -408,9 +408,45 @@ def _ask(prompt: str, max_tokens: int) -> str:
     from silica.agent.llm import call_llm
     from silica.config import CONFIG
 
-    resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=max_tokens,
-                    temperature=0.2, reasoning=False)
-    return resp.text or ""
+    # A cut reply parses as a finished card without its question, so it is never
+    # kept: the same ask with room to finish, as the outline's stages do, then the
+    # step stops and says why, with what it wrote waiting in `_remembering`.
+    for budget in (max_tokens, max_tokens * 2):
+        resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=budget,
+                        temperature=0.2, reasoning=False)
+        if resp.finish_reason != "length":
+            return resp.text or ""
+    raise ValueError(f"the model reached its output limit at {budget} tokens")
+
+
+def _remembering(plan_path: str, step: int, ask):
+    """(`ask` with each reply kept on disk, the call that drops them). A step's
+    calls are the same prompts in the same order, so a retry after the usage
+    window, a restart or a provider error pays only for the cards still missing.
+    Nothing is kept past a saved reading: Rewrite is asking for new words."""
+    from silica.kernel.recall.paths import atomic_write_bytes
+
+    name = hashlib.sha256(f"{plan_path}\0{step}".encode("utf-8")).hexdigest()[:16]
+    memo_path = _log().with_name(f"reading-memo-{name}.json")
+    try:
+        memo = json.loads(memo_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        memo = {}  # none kept, or a torn file: the worst case is paying for the calls again
+    lock = threading.Lock()
+
+    def call(prompt: str, max_tokens: int) -> str:
+        key = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        if key in memo:
+            return memo[key]
+        reply = ask(prompt, max_tokens)
+        if reply:
+            with lock:
+                memo[key] = reply
+                memo_path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_bytes(memo_path, json.dumps(memo).encode("utf-8"), mode=0o600)
+        return reply
+
+    return call, lambda: memo_path.unlink(missing_ok=True)
 
 
 def _language(paths: list[str]) -> str:
@@ -662,7 +698,7 @@ def write_reading(plan_path: str, step: int, ask=None, progress=None) -> dict:
     notes = step_notes(plan, step)
     if not notes:
         raise ValueError(f"step {step + 1} has no note in the vault to explain")
-    ask = ask or _ask
+    ask, forget = _remembering(plan["path"], step, ask or _ask)
     language = _language([p for _t, p in notes])
     ordered = order_cards(notes, ask)
     cards = ordered["cards"]
@@ -694,6 +730,7 @@ def write_reading(plan_path: str, step: int, ask=None, progress=None) -> dict:
              "notes_hash": notes_hash([p for _t, p in notes]), "order": ordered["order"],
              "written": str(int(time.time()))}
     _save(path, label, body, props)
+    forget()
     asked = [c for c in written if c["question"]]
     return {"path": path, "cards": len(written), "order": ordered["order"],
             "marked": sum(c["marked"] for c in written), "answered": sum(1 for c in asked if c["answer"]),

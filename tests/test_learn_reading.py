@@ -307,6 +307,56 @@ def test_a_changed_note_makes_the_reading_stale_and_a_rewrite_starts_the_readers
 
 # ------------------------------------------------------------------ the practice
 
+def test_a_card_cut_at_the_output_limit_asks_once_more_with_room_and_is_never_kept_cut(monkeypatch):
+    """A cut reply parsed as a finished card without its question: 10 of 18 on
+    the owner's step (2026-11-02), with nothing on screen to say so."""
+    from types import SimpleNamespace
+
+    from silica.agent import llm
+
+    budgets, finishes = [], ["length", "stop"]
+
+    def replying(*_a, max_tokens, **_k):
+        budgets.append(max_tokens)
+        return SimpleNamespace(text=f"at {max_tokens}", finish_reason=finishes.pop(0))
+
+    monkeypatch.setattr(llm, "call_llm", replying)
+    assert reading._ask("p", 100) == "at 200" and budgets == [100, 200]
+    finishes[:] = ["length", "length"]
+    with pytest.raises(ValueError, match="output limit"):
+        reading._ask("p", 100)
+
+
+def test_a_reading_stopped_halfway_keeps_what_it_paid_for_and_a_finished_one_keeps_nothing(step_vault):
+    """The usage window closing mid-step threw every finished card away, and
+    the retry paid for them again."""
+    paid: list[str] = []
+
+    def stopping(prompt, max_tokens):
+        if len(paid) >= 2:
+            raise RuntimeError("usage limit reached: window, resets 18:00")
+        out = fake_ask(prompt, max_tokens)
+        paid.append(prompt)
+        return out
+
+    with pytest.raises(RuntimeError, match="usage limit"):
+        reading.write_reading("Plans/Esame.md", 0, ask=stopping)
+    assert not reading.state("Plans/Esame.md", 0)["exists"]
+
+    asked: list[str] = []
+
+    def resuming(prompt, max_tokens):
+        asked.append(prompt)
+        return fake_ask(prompt, max_tokens)
+
+    done = reading.write_reading("Plans/Esame.md", 0, ask=resuming)
+    assert done["cards"] == 5 and asked and not set(asked) & set(paid)
+
+    asked.clear()
+    reading.write_reading("Plans/Esame.md", 0, ask=resuming)      # Rewrite asks for new words
+    assert set(paid) <= set(asked)
+
+
 def test_a_steps_questions_take_turns_between_notes():
     items = [{"path": p} for p in "AAAABBC"]
     out = pick.alternate_notes(items)

@@ -984,6 +984,17 @@ def build_assistant_message(
     return msg, parsed
 
 
+# reasoning=False reaches OpenRouter alone, and on anthropic/ a model thinks inside
+# max_tokens: Sonnet 5.5 by default, Opus 5.5 with no way to turn it off. At
+# reading.py's 2,200 Sonnet ended 10 of 18 cards mid-sentence with 820 to 1,650
+# tokens of text (count_tokens on the owner's step of 2026-11-02). A ceiling and
+# not a price: what is not written is not billed.
+# ponytail: room, not the knob. `thinking: between_tools` should stop the spend on
+# Sonnet 5.5, but it has never been sent through litellm 1.106 here and a 400 would
+# take down every caller on anthropic/. Upgrade after one live call on the owner's
+# key; raise this at the first "token limit" error on a reading job.
+ANTHROPIC_THINKING_ROOM = 6000
+
 # An image part's share of the request, in tokens, for the output clamp. Its
 # base64 counted as text read a 120 KB page PNG (160k characters of data URL)
 # as about 80k tokens, left no window, and cut the reply to the clamp's 1024
@@ -1206,6 +1217,9 @@ def _call_llm(
         messages = _one_leading_system(messages)
 
     input_chars = _request_chars(messages) + (len(str(tools)) if tools else 0)
+    # Before the clamp, which is what keeps a request inside the model's window.
+    if reasoning is False and max_tokens is not None and model.startswith("anthropic/"):
+        max_tokens += ANTHROPIC_THINKING_ROOM
     kwargs: dict = {
         "model": model,
         "messages": _with_prompt_cache(model, messages),
