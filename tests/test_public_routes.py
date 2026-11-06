@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-BASE = "https://pages.silica-agent.dev/@marta/memory/"
+BASE = "https://wikis.silica-agent.dev/@marta/memory/"
 PAGE = BASE + "spacing-effect"
 MD = ("---\ntitle: Spacing effect\ntags:\n- memory\nvault: Memoria\n---\n"
       "Reviews spread over days. It follows from the "
@@ -254,13 +254,13 @@ def test_save_writes_a_snapshot_crediting_the_author_and_links_what_it_can(clien
 
 
 @pytest.mark.parametrize("url", [
-    "http://pages.silica-agent.dev/@marta/memory/spacing-effect",     # not https
+    "http://wikis.silica-agent.dev/@marta/memory/spacing-effect",     # not https
     "https://evil.test/@marta/memory/spacing-effect",                 # not a listed host
-    "https://pages.silica-agent.dev/@marta/memory/spacing-effect?x=1",  # a query
-    "https://pages.silica-agent.dev/notes/spacing-effect",            # not a page address
-    "https://pages.silica-agent.dev/@marta/spacing-effect",           # ADR-0143's shape, gone
-    "https://pages.silica-agent.dev@evil.test/@marta/memory/x",       # a userinfo trick
-    "https://pages.silica-agent.dev:8443/@marta/memory/",             # another port
+    "https://wikis.silica-agent.dev/@marta/memory/spacing-effect?x=1",  # a query
+    "https://wikis.silica-agent.dev/notes/spacing-effect",            # not a page address
+    "https://wikis.silica-agent.dev/@marta/spacing-effect",           # ADR-0143's shape, gone
+    "https://wikis.silica-agent.dev@evil.test/@marta/memory/x",       # a userinfo trick
+    "https://wikis.silica-agent.dev:8443/@marta/memory/",             # another port
 ])
 def test_save_refuses_anything_but_a_public_page_address(client, fetched, url):
     tc, _ = client
@@ -300,7 +300,7 @@ def test_a_copy_credits_its_original_only_when_the_original_is_that_authors_page
 
     from silica.sources import web_fetch
 
-    orig = "https://pages.silica-agent.dev/@luca/notes/borrowed"
+    orig = "https://wikis.silica-agent.dev/@luca/notes/borrowed"
     copy = f"---\ntitle: Borrowed\nauthor: '@luca'\nsource: {orig}\nvault: Memoria\n---\nLuca's.\n"
     monkeypatch.setattr(web_fetch, "_fetch", lambda url, headers=None, *, types=(), cap=0:
                         (httpx.Response(200, text=copy), url))
