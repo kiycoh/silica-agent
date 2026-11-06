@@ -29,13 +29,13 @@ def speech_lang(config: Any) -> str:
     browser left to guess picks its UI language, which reads an Italian vault
     with an English voice.
     """
-    fixed = (getattr(config, "stt_lang", "") or "").strip()
+    fixed = (config.stt_lang or "").strip()
     if fixed and fixed != "auto":
         return fixed
     from silica.kernel.text.language import ISO
     from silica.onboarding.checks import reply_language_for
 
-    name = (reply_language_for((getattr(config, "vault_path", "") or "").strip()) or "").strip().lower()
+    name = (reply_language_for((config.vault_path or "").strip()) or "").strip().lower()
     if name in ISO:
         return ISO[name]
     return name if len(name) == 2 and name.isalpha() else ""
