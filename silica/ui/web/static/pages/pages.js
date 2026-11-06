@@ -813,7 +813,8 @@
     document.addEventListener("keydown", (ev) => {
       if (sheet.open) return;
       if (ev.key === "/" && !document.activeElement?.matches("input:not([type=checkbox]), textarea")) { ev.preventDefault(); q.focus(); return; }
-      if (ev.key !== "Escape" || document.activeElement === q) return;
+      // not from the Report box: the note would close on what the reader is typing, and reopening drops it
+      if (ev.key !== "Escape" || document.activeElement === q || document.activeElement?.matches("textarea")) return;
       if (menuOff) menuOff(true);
       else if (S.pick) setPick(false);
       else if (S.link != null) { S.link = null; ltag.hidden = true; paint(); }
