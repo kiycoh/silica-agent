@@ -219,7 +219,7 @@ def render_tree(nodes: list[dict], *, actions: bool = False,
             # shows it where the account gets Public page and the folder is not Silica's
             pub = (f'<button type="button" class="tree-pub" hidden aria-pressed="false" '
                    f'data-pub-folder="{html.escape(folder.rstrip("/"), quote=True)}" '
-                   f'aria-label="put the folder {html.escape(name, quote=True)} on your public page"></button>'
+                   f'aria-label="make the folder {html.escape(name, quote=True)} a wiki"></button>'
                    ) if actions else ""
             # a note's <a> drags by itself; a summary only when told, and the
             # rail drops a folder on a workspace row as its menu adds one
@@ -262,7 +262,7 @@ def render_tree(nodes: list[dict], *, actions: bool = False,
                 f'<path d="M5 17h14l-2-4V4H7v9z"></path></svg></button>'
                 f'<button type="button" class="tree-pub" hidden aria-pressed="false" '
                 f'data-pub="{html.escape(nid, quote=True)}" '
-                f'aria-label="put {html.escape(shown, quote=True)} on your public page"></button>'
+                f'aria-label="put {html.escape(shown, quote=True)} in its wiki"></button>'
                 f'{_more_button(nid, shown, folder=False)}</div>'
             )
         return "".join(out)
