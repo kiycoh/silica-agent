@@ -3704,7 +3704,8 @@ function lrReadPoll(r) {
     const open = lrReadOpen();
     if ((j && j.state === "running") || (open?.pending && !open.failure)) { setTimeout(tick, 1500); return; }
     if (lrRead) lrRead.polling = false;
-    if (j?.state === "error") notify("couldn't write the reading: " + j.error);
+    // an open card already says why, in the reader's clock; the job only holds the raw text
+    if (j?.state === "error" && !open?.failure) notify("couldn't write the reading: " + j.error);
     lrRender();
     if (open?.failure && typeof upgradeAtLimit === "function") upgradeAtLimit(open.failure, limitSentence(open.failure));
   };
