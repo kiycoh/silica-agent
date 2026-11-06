@@ -303,6 +303,7 @@ details > summary::-webkit-details-marker { display: none; }
 .has-note .zoom { right: calc(var(--dw) + 22px); }
 /* wraps beside the drawer, which took Choose under it at 1,200 px and All at 1,000 */
 .has-note .mb { right: calc(var(--dw) + 22px); }
+.has-note .hint { width: auto; right: 0; }
 .zoom button { width: 32px; height: 32px; padding: 0; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: var(--slate); color: var(--ash); cursor: pointer; font-size: 15px; }
 .zoom button:hover { color: var(--accent); border-color: var(--accent); }
 .view .ctip { z-index: 3; }
