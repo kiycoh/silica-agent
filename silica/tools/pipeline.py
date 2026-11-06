@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Pipeline tools — what the model can reach of the deferred-ops path.
+"""Pipeline tools: what the model can reach of the deferred-ops path.
 
 The bodies are silica.router.anneal's, below the tools because the FSM's
 boundary anneal calls them; the injector's own stages are plain functions the
