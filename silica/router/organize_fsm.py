@@ -493,28 +493,20 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
                     kind=InverseOpKind.move_back, path=res["from"], to_path=res["to"]))
 
     def _handle_rollback(self) -> None:
-        """Undo moves by calling DRIVER.move() in reverse."""
+        """Undo the moves that landed, through the gate's one rollback executor."""
         snapshot = self.context.get("snapshot", {})
         inverses = snapshot.get("inverses", [])
 
         if not inverses:
             logger.info("ROLLBACK: no inverses to apply")
         else:
-            successful_dests = {res["to"] for res in self.context.get("move_results", [])}
-            for inv_dict in inverses:
-                from_path = inv_dict.get("path")       # original source
-                to_path = inv_dict.get("to_path")      # where we moved it
-                if not from_path or not to_path:
-                    continue
-                if to_path not in successful_dests:
-                    logger.debug("ROLLBACK: skipping restore for %s → %s (move did not succeed)", to_path, from_path)
-                    continue
-                # Reverse: move back from to_path → from_path
-                try:
-                    DRIVER.move(to_path, from_path)
-                    logger.info("ROLLBACK: restored %s → %s", to_path, from_path)
-                except Exception as exc:
-                    logger.error("ROLLBACK: failed to restore %s → %s: %s", to_path, from_path, exc)
+            landed = {res["to"] for res in self.context.get("move_results", [])}
+            res = gate.apply_inverses(snapshot.get("txn_id", ""),
+                                      [inv for inv in inverses if inv.get("to_path") in landed])
+            for applied in res["applied"]:
+                logger.info("ROLLBACK: %s", applied)
+            for error in res["errors"]:
+                logger.error("ROLLBACK: %s", error)
 
         self.context["final_status"] = (
             f"Rolled Back: {self.context.get('abort_reason', 'unknown reason')}"
