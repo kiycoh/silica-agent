@@ -334,8 +334,8 @@ source_modules = [
   "silica.kernel.report", "silica.kernel.text", "silica.kernel.link",
 ]
 forbidden_modules = ["silica.kernel.organize"]
-# taxonomy + classify serve one user-facing command (/organize) and nothing
-# else. Keeping the arrow one-way is what lets the pair stay a two-file lane
+# taxonomy, classify and its arbiter serve one user-facing command (/organize)
+# and nothing else. Keeping the arrow one-way is what lets them stay one lane
 # instead of dissolving back into text/ and recall/.
 allow_indirect_imports = true
 

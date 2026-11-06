@@ -292,7 +292,7 @@ class TestClassifyNotes:
 
 
 # ---------------------------------------------------------------------------
-# _llm_arbitrate — L2 arbiter: constrained decoding via response_format
+# llm_arbitrate — L2 arbiter: constrained decoding via response_format
 #
 # json_schema requires an object root, so the arbiter asks for a wrapper
 # object ({"assignments": [...]}) instead of a bare JSON array. The tolerant
@@ -321,7 +321,7 @@ class TestLLMArbitrate:
     def test_response_format_passed_to_litellm(self, taxonomy_with_two_folders):
         """Both call-sites must request response_format at the litellm boundary,
         not just call call_llm() with a bare prompt."""
-        from silica.kernel.organize.classify import ArbitrationResult, _llm_arbitrate
+        from silica.kernel.organize.arbitrate import ArbitrationResult, llm_arbitrate
 
         mock_resp = _litellm_mock_response(json.dumps({
             "assignments": [
@@ -330,7 +330,7 @@ class TestLLMArbitrate:
             ]
         }))
         with patch("litellm.completion", return_value=mock_resp) as mock_completion:
-            result = _llm_arbitrate(self._ambiguous(), taxonomy_with_two_folders)
+            result = llm_arbitrate(self._ambiguous(), taxonomy_with_two_folders)
 
         assert mock_completion.called
         call_kwargs = mock_completion.call_args.kwargs
@@ -339,7 +339,7 @@ class TestLLMArbitrate:
 
     def test_wrapper_conformant_response_applies_assignments(self, taxonomy_with_two_folders):
         """A response matching the ArbitrationResult wrapper is applied as before."""
-        from silica.kernel.organize.classify import _llm_arbitrate
+        from silica.kernel.organize.arbitrate import llm_arbitrate
 
         mock_resp = _litellm_mock_response(json.dumps({
             "assignments": [
@@ -348,40 +348,40 @@ class TestLLMArbitrate:
             ]
         }))
         with patch("litellm.completion", return_value=mock_resp):
-            result = _llm_arbitrate(self._ambiguous(), taxonomy_with_two_folders)
+            result = llm_arbitrate(self._ambiguous(), taxonomy_with_two_folders)
 
         assert result == {"note-a.md": "Life/Food", "note-b.md": "Concepts/AI"}
 
     def test_malformed_shaped_response_falls_back_to_uncategorized(self, taxonomy_with_two_folders):
         """Valid JSON that doesn't match the wrapper shape (e.g. a bare list, the
         old pre-fix format) degrades to uncategorized — degradation unchanged."""
-        from silica.kernel.organize.classify import _llm_arbitrate
+        from silica.kernel.organize.arbitrate import llm_arbitrate
 
         mock_resp = _litellm_mock_response(json.dumps([
             {"index": 0, "folder": "Concepts/AI"},
         ]))
         with patch("litellm.completion", return_value=mock_resp):
-            result = _llm_arbitrate(self._ambiguous(), taxonomy_with_two_folders)
+            result = llm_arbitrate(self._ambiguous(), taxonomy_with_two_folders)
 
         assert result == {"note-a.md": "Misc", "note-b.md": "Misc"}
 
     def test_unparseable_response_falls_back_to_uncategorized(self, taxonomy_with_two_folders):
         """Completely non-JSON output (parse_json raises) hits the except branch."""
-        from silica.kernel.organize.classify import _llm_arbitrate
+        from silica.kernel.organize.arbitrate import llm_arbitrate
 
         mock_resp = _litellm_mock_response("not json at all <<<")
         with patch("litellm.completion", return_value=mock_resp):
-            result = _llm_arbitrate(self._ambiguous(), taxonomy_with_two_folders)
+            result = llm_arbitrate(self._ambiguous(), taxonomy_with_two_folders)
 
         assert result == {"note-a.md": "Misc", "note-b.md": "Misc"}
 
     def test_call_llm_exception_falls_back_to_uncategorized(self, taxonomy_with_two_folders):
         """The provider call itself failing (network, timeout, ...) must still
         degrade cleanly, exactly as before."""
-        from silica.kernel.organize.classify import _llm_arbitrate
+        from silica.kernel.organize.arbitrate import llm_arbitrate
 
         with patch("litellm.completion", side_effect=RuntimeError("network down")):
-            result = _llm_arbitrate(self._ambiguous(), taxonomy_with_two_folders)
+            result = llm_arbitrate(self._ambiguous(), taxonomy_with_two_folders)
 
         assert result == {"note-a.md": "Misc", "note-b.md": "Misc"}
 
