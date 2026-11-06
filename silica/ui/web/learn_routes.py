@@ -1905,14 +1905,18 @@ def _step_of(payload_or_args) -> tuple[str, int]:
 
 def _reading_shown(plan: str, step: int) -> dict:
     """The reading as the page reads it: a card that failed carries the sentence
-    the chat would say, so a limit's reset reaches the reader's clock the same way."""
+    the chat would say, so a limit's reset reaches the reader's clock the same way.
+    The raw text goes: a provider's can hold a fragment of the key (ADR-0085 point 5),
+    and the job's reached the reader as a toast of litellm's words."""
     from silica.kernel.learn import reading
     from silica.ui.web import failures
 
     st = reading.state(plan, step)
     for c in st["cards"]:
-        if c.get("error"):
-            c["failure"] = failures.explain(c["error"])
+        if raw := c.pop("error", ""):
+            c["failure"] = failures.explain(raw)
+    if st["job"] and st["job"].get("error"):
+        st["job"]["error"] = failures.explain(st["job"]["error"])["error"]
     return st
 
 

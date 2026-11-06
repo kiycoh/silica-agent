@@ -437,6 +437,46 @@ def client(step_vault, monkeypatch):
     return TestClient(server.app, headers={"Origin": "http://testserver"})
 
 
+def _shown(c):
+    return c.get("/learn/reading", params={"plan": "Plans/Esame.md", "step": 0}).json()
+
+
+def test_a_card_cut_twice_says_why_and_the_raw_text_never_reaches_a_hosted_page(client, monkeypatch):
+    """It read "Something went wrong on this turn. The detail says what." with no
+    detail on the page (2026-11-06, in the browser, on a reply cut at both budgets)."""
+    from silica.ui.web import failures
+
+    reading.begin("Plans/Esame.md", 0, ask=fake_ask)
+
+    def cut(prompt, max_tokens):
+        raise ValueError("the model reached its output limit at 4400 tokens")
+
+    for t in reading.reach("Plans/Esame.md", 0, 1, ask=cut):
+        t.join()
+    card = _shown(client)["cards"][0]
+    assert "ran out of room" in card["failure"]["error"] and "4400" in card["failure"]["detail"]
+    assert "error" not in card, "the page reads the sentence and the disclosed detail, never the raw field"
+    monkeypatch.setattr(failures, "hosted", lambda: True)
+    card = _shown(client)["cards"][0]
+    assert "ran out of room" in card["failure"]["error"] and card["failure"]["detail"] == ""
+
+
+def test_a_job_that_failed_reaches_the_page_as_a_sentence(client):
+    """Its raw text was a toast: "couldn't write the reading: litellm.BadRequestError..."."""
+    def refused(prompt, max_tokens):
+        if "study reading" in prompt:
+            raise RuntimeError("litellm.BadRequestError: OpenAIException - a provider's own words")
+        return fake_ask(prompt, max_tokens)
+
+    reading.start("Plans/Esame.md", 0, ask=refused)
+    for _ in range(100):
+        st = _shown(client)
+        if st["job"] and st["job"]["state"] != "running":
+            break
+        time.sleep(0.05)
+    assert st["job"]["state"] == "error" and "litellm" not in st["job"]["error"]
+
+
 def test_the_routes_write_a_reading_keep_the_readers_words_and_start_its_practice(client):
     c = client
     st = c.get("/learn/reading", params={"plan": "Plans/Esame.md", "step": 0}).json()
