@@ -267,7 +267,7 @@ def _overwrite_op(path="Concepts/Ack.md"):
 
 
 def test_worker_commit_records_an_overwrite(tmp_vault):
-    """`overwrite` is the ONLY op four sub-agent profiles in agent/bounds.py may
+    """`overwrite` is the ONLY op four sub-agent profiles in the gate's bounds may
     emit, and what all three dedup merges emit. The ledger predicate listed only
     write/patch, so the majority of the lane's writes reached the vault with no
     record: /revert walked past them and check_renucleate reported the source as

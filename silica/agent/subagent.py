@@ -159,7 +159,7 @@ def run_subagent_batch(
     # /enrich or /dedup. Pool workers don't inherit contextvars, so
     # each worker enters the same run itself.
     from silica.kernel.write.gate import in_run, open_run
-    undo_run_id = open_run(f"{items[0].kind}-batch", vault=getattr(config, "vault_path", None) or None)
+    undo_run_id = open_run(f"{items[0].kind}-batch")
 
     def _worker():
         with in_run(undo=undo_run_id):
