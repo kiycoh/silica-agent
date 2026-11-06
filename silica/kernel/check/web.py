@@ -22,6 +22,7 @@ from __future__ import annotations
 import calendar
 import datetime
 import logging
+import os
 import re
 from collections import Counter
 from collections.abc import Callable
@@ -33,6 +34,16 @@ from silica.kernel.check import GRADES
 from silica.kernel.check import blocks as blk
 from silica.kernel.check.judge import PASSAGE_CHARS
 from silica.kernel.check.run import PASSAGE_QUOTE, Judge, overlapping
+
+
+def is_open() -> bool:
+    """Whether the web entry is offered. shortcut: off by default, because its
+    gate failed on 2026-11-06 (amendment point 15, ORACLE.md): on B the web backed
+    4 of 8 real values where 6 were asked, with the controls, the false sources, the
+    quotes and the time all passing. SILICA_CHECK_WEB=1 opens it for a rerun. Reopen
+    by a pass on a set that run has not seen, and not by moving the 0.75 on this one."""
+    return os.environ.get("SILICA_CHECK_WEB", "").strip() == "1"
+
 
 logger = logging.getLogger(__name__)
 

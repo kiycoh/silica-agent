@@ -19,6 +19,14 @@ from silica.kernel.text.text import squash
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _web_open(monkeypatch):
+    """The web entry is off by default since its gate failed (web.is_open): what
+    these tests hold is the path a pass on a new set would open."""
+    monkeypatch.setenv("SILICA_CHECK_WEB", "1")
+
+
 PAGE_30 = ("Consumer rights. The time limit for exercising the short-term right to reject is the end of 30 days "
            "beginning with the first day after ownership has passed to the consumer. Other remedies follow.")
 PAGE_OFF = "A page about something else entirely, with no word of the claim in it at all."

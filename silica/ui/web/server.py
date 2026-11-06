@@ -5304,6 +5304,8 @@ async def note_check(payload: dict, request: Request):
             raise HTTPException(400, "lines is [first, last], 1-based")
         card_lines = (span[0], span[1])
     web_on = payload.get("web") is True and not rules_only
+    if web_on and not check_web.is_open():
+        raise HTTPException(404, "the web check is not open")
     claim, where = "", (0, 0)
     aimed: list = []
     if web_on:
@@ -5451,8 +5453,11 @@ async def note_check_keep(payload: dict):
     2026-11-06, point 13): `{path, url, quote, claim}` as one cited note in the
     Inbox. Regime 2 of ADR-0015 and no third: the note waits for /nucleate. The
     turn's slot, as /vault/fetch takes it for the same Inbox."""
+    from silica.kernel.check import web as check_web
     from silica.sources.web_research import keep_check
 
+    if not check_web.is_open():
+        raise HTTPException(404, "the web check is not open")
     canon = await asyncio.to_thread(lambda: note_resolver()(str(payload.get("path", ""))))
     if not canon:
         raise HTTPException(404, "note not found in vault")
@@ -6364,6 +6369,8 @@ def _tree_raws() -> dict[str, list[str]]:
 def vault_info():
     """Sidebar data: vault stats + file tree, from the same builders as the
     graph view so the numbers can't disagree between the two surfaces."""
+    from silica.kernel.check.web import is_open as check_web_open
+    from silica.kernel.publish import never_dirs
     from silica.kernel.recall.graph_export import build_graph_data
     from silica.ui.web.graph_view import render_tree
 
@@ -6381,6 +6388,10 @@ def vault_info():
         # frame renders the same tree without one, because a pin there would
         # point at a rail that document does not have.
         "tree": render_tree(nodes, actions=True, raws=_tree_raws()),
+        # Silica's own folders: no folder in view and no "Write a note" (ADR-0155
+        # points 4, 5). The page asks here because it has the tree from here.
+        "never": list(never_dirs()),
+        "check_web": check_web_open(),
         # The chat landing's ways to start (ADR-0048, amendment 2026-10-22):
         # the notes the vault links most. The counts, the area count and the
         # topic labels the landing stated before the greeting went with it,
