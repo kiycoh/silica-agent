@@ -125,7 +125,3 @@ def system_prompt(reply_language: str | None = None, math: bool = False) -> str:
     lang = _lang_rule(reply_language)
     parts = [_BASE, _MATH_GUI, lang] if math else [_BASE, lang]
     return "\n\n".join(parts)
-
-
-# Back-compat: the None branch is bit-identical to the prior constant.
-SYSTEM_PROMPT = system_prompt()

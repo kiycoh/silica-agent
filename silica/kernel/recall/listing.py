@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Which notes a folder holds, in the order a reader and the injector take them.
+"""Which notes a folder holds, in the order a reader and the injector take them,
+and the files in it still waiting to become notes.
 
-Below the tools, because the outline lane and the lab pass ask it too, and they
-were importing a 2,000-line tool module to list a folder.
+Below the tools, because the outline lane, the lab pass and ingest ask it too, and
+they were importing a 2,000-line tool module to list a folder.
 """
 from __future__ import annotations
 

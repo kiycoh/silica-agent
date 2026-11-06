@@ -266,10 +266,10 @@ def subagent_seconds(sid: str) -> dict[str, float]:
 def measure(sample: list[dict], target_dir: str, profile: str) -> list[dict]:
     from silica.obs.bus import BUS
     from silica.obs.narration import NARRATOR
-    from silica.cli import _nucleate_prepare
+    from silica.sources.ingest import distill, prepare_unit
+    from silica.ui.console import CONSOLE
     from silica.kernel.write.undo_journal import get_undo_journal
     from silica.config import CONFIG
-    from silica.router.coordinator import Coordinator
     from silica.sources.convert import convert
 
     clock = PhaseClock()
@@ -295,17 +295,15 @@ def measure(sample: list[dict], target_dir: str, profile: str) -> list[dict]:
             print(f"    convert failed: {exc}")
             continue
         t_conv = time.perf_counter() - t0
-        mfs = _nucleate_prepare(segs, target_dir, profile or None, undo_run)
+        mfs = prepare_unit(segs, target_dir, profile or None, undo_run, CONSOLE,
+                           CONSOLE.input if sys.stdin.isatty() else None)
         if not mfs:
             # Already distilled, all apparatus, or filed as a draft. Zero
             # seconds for zero work would drag the median toward "instant".
             print("    nothing to distill (already nucleated / apparatus) — excluded")
             continue
         t1 = time.perf_counter()
-        result = Coordinator(
-            inbox_files=mfs, target_dir=target_dir, hub=None,
-            keep_sources=True, distill_profile=profile or None,
-        ).run()
+        result, _ = distill(mfs, target_dir, keep_sources=True, profile=profile)
         t_nuc = time.perf_counter() - t1
         cov = result.get("coverage") or {}
         rows.append({
@@ -489,7 +487,7 @@ def main() -> int:
     from silica.cli import _activate_repo_mode, _ensure_servers
     from silica.config import CONFIG
     from silica.kernel.base.manifest import apply_manifest_to_config
-    from silica.sources.convert import CONVERTIBLE_DOC_EXTS
+    from silica.kernel.base.formats import CONVERTIBLE_DOC_EXTS
 
     _activate_repo_mode()
     apply_manifest_to_config()

@@ -12,7 +12,7 @@ so the difference is attributable to the writer alone:
             Needs live network + LLM, and a scratch --vault: the notes it
             writes are experiment output, not knowledge.
   replay  — per frozen run: arm A = the one-shot body as recorded; arm B =
-            _compose_findings over the frozen bank (live writer calls, frozen
+            compose_findings over the frozen bank (live writer calls, frozen
             retrieval). Both bind against the frozen trace. Metrics per arm:
             factscore (the gate), effective citations; per run: quote
             validity (guardian sanity — 1.0 or the guardian is broken) and
@@ -76,7 +76,7 @@ def acquisition(rec: dict) -> dict:
     }
 
 
-def bank_validity(bank: dict[str, wr._Quote], trace_values: list[str]) -> float | None:
+def bank_validity(bank: dict[str, wr.Quote], trace_values: list[str]) -> float | None:
     """Fraction of banked quotes verbatim in their page. None on an empty bank.
 
     Below 1.0 the remember guardian is broken — that is a test failure to go
@@ -173,9 +173,9 @@ def record_run(concept: str, out_dir: Path, max_searches: int,
     # one-shot arm, run_agent observed so the pre-bind body is kept even
     # though web_research never returns it.
     wr.run_agent = observing_run_agent
-    real_compose = wr._compose_findings
+    real_compose = wr.compose_findings
     real_steering = wr._STEERING
-    wr._compose_findings = lambda concept, bank: None
+    wr.compose_findings = lambda concept, bank: None
     # Arm A is the pre-steering loop, live. The seam switches tool and prompt
     # step together (spec §6: the only variable between arms is acquisition).
     wr._STEERING = arm == "B"
@@ -188,7 +188,7 @@ def record_run(concept: str, out_dir: Path, max_searches: int,
         final_plan = wr._PLAN
     finally:
         wr.run_agent = real_run_agent
-        wr._compose_findings = real_compose
+        wr.compose_findings = real_compose
         wr._STEERING = real_steering
         _loop.call_llm = real_loop_llm
 
@@ -211,9 +211,9 @@ def record_run(concept: str, out_dir: Path, max_searches: int,
     return path
 
 
-def _arm(body: str, trace_values: list[str], bank: dict[str, wr._Quote],
+def _arm(body: str, trace_values: list[str], bank: dict[str, wr.Quote],
          judge_model: str) -> dict:
-    bound, _, audit = wr._bind_citations(
+    bound, _, audit = wr.bind_citations(
         body, wr._collect_sources(trace_values), bank
     )
     pages = [t for t in trace_values if t.startswith("Source: ")]
@@ -232,7 +232,7 @@ def _arm(body: str, trace_values: list[str], bank: dict[str, wr._Quote],
 def replay_run(rec: dict, judge_model: str) -> dict:
     """Both arms from one frozen run. Arm B's writer calls are live; its
     retrieval is the recording's."""
-    bank = {qid: wr._Quote(*v) for qid, v in rec["bank"].items()}
+    bank = {qid: wr.Quote(*v) for qid, v in rec["bank"].items()}
     trace_values = list(rec["trace"].values())
 
     tokens = {"n": 0}
@@ -246,7 +246,7 @@ def replay_run(rec: dict, judge_model: str) -> dict:
 
     wr.call_llm = counting_call_llm
     try:
-        composed = wr._compose_findings(rec["concept"], bank) if bank else None
+        composed = wr.compose_findings(rec["concept"], bank) if bank else None
     finally:
         wr.call_llm = real_call_llm
 
@@ -278,9 +278,9 @@ def steer_run(rec: dict, judge_model: str) -> dict:
     (eBPF-A leaked its tool call as text and still floored 0.943) and it
     drifts between replays (the PQC A/A floors differ by 0.068 where their
     notes differ by 0.006)."""
-    bank = {qid: wr._Quote(*v) for qid, v in rec["bank"].items()}
+    bank = {qid: wr.Quote(*v) for qid, v in rec["bank"].items()}
     trace_values = list(rec["trace"].values())
-    composed = wr._compose_findings(rec["concept"], bank) if bank else None
+    composed = wr.compose_findings(rec["concept"], bank) if bank else None
     return {
         "concept": rec["concept"],
         "acquisition": acquisition(rec),

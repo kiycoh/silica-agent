@@ -8,8 +8,8 @@ Written from its articles only, through the bank-and-compose path of
 /web-search: a quote is banked only if the article contains it (the same
 containment check `remember` makes, run here on a bank of the story's own so
 a story written during a chat turn never touches that turn's bank), the
-sections are written from the bank by `_compose_findings`, and
-`_bind_citations` removes any marker that names no banked quote. One rule is
+sections are written from the bank by `compose_findings`, and
+`bind_citations` removes any marker that names no banked quote. One rule is
 new and is this module's: a sentence left with no marker after binding is
 dropped from the story.
 """
@@ -24,6 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote as urlquote
 
 from silica.kernel.base.syntax import HEADING_RE
+from silica.kernel.text.text import squash
 from silica.sources import web_fetch as wf
 from silica.sources import web_research as wr
 from silica.sources.discover import feeds as F
@@ -76,7 +77,7 @@ def article_text(a: dict) -> str:
     if a.get("video") and _hosted():
         raise StoryError("desktop app only")
     try:
-        page = wf.fetch_page(a["url"], wf._READER_HEADERS)
+        page = wf.fetch_page(a["url"], wf.READER_HEADERS)
         text = page.text.split("\n", 2)[-1].strip()
     except Exception as exc:
         logger.info("discover: article %s not read: %s", a.get("url"), exc)
@@ -108,13 +109,13 @@ def bank_quotes(title: str, arts: list[dict], texts: list[str]) -> tuple[dict, l
                          for i, (a, t) in enumerate(zip(arts, texts), 1))
     # No reasoning: copying sentences out of a text is not a problem to think
     # through, and with thinking on a 4-article story took 239 s on the
-    # default model against G3's 20 (measured 2026-10-28; see _compose_findings).
+    # default model against G3's 20 (measured 2026-10-28; see compose_findings).
     reply = call_llm(CONFIG.model, [
         {"role": "system", "content": _BANK_SYSTEM},
         {"role": "user", "content": f"Headline: {title}\n\n{fenced}"},
     ], reasoning=False).text
     doc = _json_object(reply)
-    bank: dict[str, wr._Quote] = {}
+    bank: dict[str, wr.Quote] = {}
     for q in doc.get("quotes") or []:
         if not isinstance(q, dict):
             continue
@@ -125,13 +126,13 @@ def bank_quotes(title: str, arts: list[dict], texts: list[str]) -> tuple[dict, l
         quote = str(q.get("quote") or "").strip()
         if not (0 <= i < len(arts)) or not quote:
             continue
-        squashed = wr._squash(quote)
-        if not squashed or squashed not in wr._squash(texts[i]):
+        squashed = squash(quote)
+        if not squashed or squashed not in squash(texts[i]):
             continue
         url = arts[i]["url"]
-        if any(b.url == url and wr._squash(b.quote) == squashed for b in bank.values()):
+        if any(b.url == url and squash(b.quote) == squashed for b in bank.values()):
             continue
-        bank[f"Q{len(bank) + 1}"] = wr._Quote(url=url, quote=quote, why=str(q.get("why") or "").strip())
+        bank[f"Q{len(bank) + 1}"] = wr.Quote(url=url, quote=quote, why=str(q.get("why") or "").strip())
     terms = [str(t).strip() for t in doc.get("terms") or [] if str(t).strip()][:_BACKGROUND_MAX]
     # The composer's three suggestions (ADR-0137 point 8), asked in the same
     # call: they cost no call of their own, and a click only fills the field.
@@ -230,7 +231,7 @@ def background(terms: list[str], hosts: list[str]) -> list[dict]:
         for host in hosts:
             url = f"https://{host}/api/rest_v1/page/summary/{urlquote(term.replace(' ', '_'))}"
             try:
-                resp, _ = wf._fetch(url, wf._WP_HEADERS)
+                resp, _ = wf.fetch(url, wf.WP_HEADERS)
                 doc = resp.json()
             except Exception as exc:
                 logger.debug("discover: background %s on %s: %s", term, host, exc)
@@ -271,11 +272,11 @@ def write(vault: str | None, sid: str) -> dict:
     if not bank:
         raise StoryError("the articles gave nothing that could be quoted")
     prog["phase"] = "sections"
-    body = wr._compose_findings(f"What happened: {title}", bank, reasoning=False, workers=6)
+    body = wr.compose_findings(f"What happened: {title}", bank, reasoning=False, workers=6)
     if body is None:
         raise StoryError("the model did not write the sections")
     collected = [(a["url"], a["title"]) for a in arts]
-    bound, sources, audit = wr._bind_citations(body, collected, bank)
+    bound, sources, audit = wr.bind_citations(body, collected, bank)
     bound, dropped = drop_unmarked(bound)
     secs = sections(bound)
     if not secs:
@@ -340,7 +341,7 @@ def _note_body(doc: dict, s: dict) -> tuple[str, list[tuple[str, str]], dict, li
                 quotes.append(f"> {qt} [{src['n']}]")
         body = w["body"] + ("\n\n## Quotes\n\n" + "\n>\n".join(quotes) if quotes else "")
         sources = [(x["url"], x["title"]) for x in w["sources"]]
-        bank = {q["id"]: wr._Quote(q["url"], q["quote"], q["why"]) for q in w["quotes"]}
+        bank = {q["id"]: wr.Quote(q["url"], q["quote"], q["why"]) for q in w["quotes"]}
         return body, sources, bank, list(w.get("texts", {}).values())
     # Saved before it was opened: the articles as their feeds described them,
     # which is the publishers' words and nothing a model wrote.
@@ -368,11 +369,11 @@ def save(vault: str | None, sid: str, answer: str = "", question: str = "") -> s
     if answer:
         title = f"{title}: {question}"[:150] if question else title
         body = answer.strip() + "\n\n## The story\n\n" + body
-    note = wr._build_note(title, body, sources, source="discover", force_sources=True)
-    rel = wr._unique_inbox_path(title, fallback="discover")
+    note = wr.build_note(title, body, sources, source="discover", force_sources=True)
+    rel = wr.unique_inbox_path(title, fallback="discover")
     DRIVER.create(rel, note)
     if texts or bank:
-        wr._write_leaf(rel, texts, bank=bank)
+        wr.write_leaf(rel, texts, bank=bank)
     with store.LOCK:
         doc = store.load(vault)
         if sid in doc["stories"] and not answer:

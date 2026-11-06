@@ -2077,25 +2077,15 @@ def test_stt_forwards_the_clip_and_returns_the_text(client, monkeypatch, local_s
         def json():
             return {"text": "  ciao mondo  "}
 
-    class _Client:
-        def __init__(self, **kw):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-        async def post(self, url, files, data, headers):
-            seen["url"] = url
-            seen["lang"] = data.get("language")
-            seen["bytes"] = files["file"][1]
-            return _Resp()
+    def post(url, files, data, headers, timeout):
+        seen["url"] = url
+        seen["lang"] = data.get("language")
+        seen["bytes"] = files["file"][1]
+        return _Resp()
 
     import httpx
 
-    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(httpx, "post", post)
     resp = app.post("/stt", files={"audio": ("clip.wav", b"RIFFfake", "audio/wav")})
     assert resp.json() == {"text": "ciao mondo", "via": "endpoint"}
     assert local_stt["clips"] == []  # an answering endpoint is always preferred
@@ -2104,6 +2094,32 @@ def test_stt_forwards_the_clip_and_returns_the_text(client, monkeypatch, local_s
     # would come back as a translation of an Italian vault
     assert seen["lang"] == "it"
     assert seen["bytes"] == b"RIFFfake"
+
+
+def test_dictation_takes_a_base_url_without_v1_as_media_does(client, monkeypatch, local_stt):
+    """Users paste both shapes. Only the media client normalised, so a base URL
+    that worked for a lecture answered 404 to the microphone."""
+    from silica.config import CONFIG
+    app, server = client
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://localhost:9", raising=False)
+    posted = []
+
+    class _Resp:
+        status_code, text = 200, ""
+
+        @staticmethod
+        def json():
+            return {"text": "ciao"}
+
+    def post(url, files, data, headers, timeout):
+        posted.append(url)
+        return _Resp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "post", post)
+    assert app.post("/stt", files={"audio": ("clip.wav", b"RIFFfake", "audio/wav")}).json()["via"] == "endpoint"
+    assert posted == ["http://localhost:9/v1/audio/transcriptions"]
 
 
 def test_stt_asks_again_without_auto_when_the_endpoint_rejects_it(client, monkeypatch, local_stt):
@@ -2123,23 +2139,13 @@ def test_stt_asks_again_without_auto_when_the_endpoint_rejects_it(client, monkey
         def json():
             return {"text": "ciao"}
 
-    class _Client:
-        def __init__(self, **kw):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-        async def post(self, url, files, data, headers):
-            langs.append(data.get("language"))
-            return _Resp(400 if "language" in data else 200)
+    def post(url, files, data, headers, timeout):
+        langs.append(data.get("language"))
+        return _Resp(400 if "language" in data else 200)
 
     import httpx
 
-    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(httpx, "post", post)
     resp = app.post("/stt", files={"audio": ("clip.wav", b"RIFFfake", "audio/wav")})
     assert resp.json() == {"text": "ciao", "via": "endpoint"}
     assert langs == ["auto", None]
@@ -2152,22 +2158,11 @@ def test_stt_rejects_an_empty_recording(client, monkeypatch):
     assert app.post("/stt", files={"audio": ("clip.wav", b"", "audio/wav")}).status_code == 400
 
 
-class _RefusingClient:
-    """httpx.AsyncClient against a port nobody listens on."""
+def _refused(url, **kw):
+    """httpx.post against a port nobody listens on."""
+    import httpx
 
-    def __init__(self, **kw):
-        pass
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *a):
-        return False
-
-    async def post(self, url, **kw):
-        import httpx
-
-        raise httpx.ConnectError("connection refused")
+    raise httpx.ConnectError("connection refused")
 
 
 def test_stt_status_offers_the_in_process_transcriber_when_the_endpoint_is_down(
@@ -2215,7 +2210,7 @@ def test_stt_falls_back_in_process_when_the_endpoint_refuses(client, monkeypatch
     monkeypatch.setattr(CONFIG, "stt_local_model", "", raising=False)
     import httpx
 
-    monkeypatch.setattr(httpx, "AsyncClient", _RefusingClient)
+    monkeypatch.setattr(httpx, "post", _refused)
     resp = app.post("/stt", files={"audio": ("clip.wav", b"RIFFclip", "audio/wav")})
     assert resp.status_code == 200, resp.text
     assert resp.json() == {"text": "trascritto qui", "via": "local"}
@@ -2238,7 +2233,7 @@ def test_stt_reports_both_failures_when_both_transcribers_fail(client, monkeypat
 
     from silica.agent import stt
 
-    monkeypatch.setattr(httpx, "AsyncClient", _RefusingClient)
+    monkeypatch.setattr(httpx, "post", _refused)
 
     def broken(wav, *, lang, model):
         raise ValueError("expected 16 kHz mono 16-bit WAV")
@@ -2274,14 +2269,13 @@ def test_dictation_goes_to_its_own_endpoint_not_the_convert_one(client, monkeypa
 
     posted: list[str] = []
 
-    class _Client(_RefusingClient):
-        async def post(self, url, **kw):
-            posted.append(url)
-            return await super().post(url, **kw)
+    def post(url, **kw):
+        posted.append(url)
+        return _refused(url, **kw)
 
     import httpx
 
-    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    monkeypatch.setattr(httpx, "post", post)
     app.post("/stt", files={"audio": ("clip.wav", b"RIFFclip", "audio/wav")})
     assert posted == ["http://localhost:8/v1/audio/transcriptions"]
 
@@ -2300,7 +2294,7 @@ def test_an_empty_dictation_endpoint_turns_off_only_dictation(client, monkeypatc
     import httpx
 
     # reaching the /convert server would be a 502 from the refused connection
-    monkeypatch.setattr(httpx, "AsyncClient", _RefusingClient)
+    monkeypatch.setattr(httpx, "post", _refused)
     resp = app.post("/stt", files={"audio": ("clip.wav", b"RIFFclip", "audio/wav")})
     assert resp.status_code == 503
 

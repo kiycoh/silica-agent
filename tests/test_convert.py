@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from silica.config import CONFIG, SilicaConfig
+from silica.kernel.base import formats
 from silica.sources import convert as conv
 
 
@@ -33,7 +34,7 @@ def test_unknown_extension_raises(target):
         conv.convert(target)
 
 
-@pytest.mark.parametrize("ext", conv.DOC_EXTS)
+@pytest.mark.parametrize("ext", formats.DOC_EXTS)
 def test_every_doc_ext_reaches_the_converter(ext, tmp_vault):
     """Dispatch accepts the extension — it fails later, on the missing file."""
     with pytest.raises(ValueError, match="file not found"):
@@ -224,7 +225,7 @@ def test_fb2_sections_become_headings_and_paragraphs(tmp_vault):
 def test_xps_and_mobi_are_no_longer_convertible(ext, tmp_vault):
     """MuPDF opened them; nothing in the base install does now, and a format
     nobody has asked for is declared unsupported rather than half-read."""
-    assert ext not in conv.DOC_EXTS and ext not in conv.CONVERTIBLE_DOC_EXTS
+    assert ext not in formats.DOC_EXTS and ext not in formats.CONVERTIBLE_DOC_EXTS
     with pytest.raises(ValueError, match="no converter"):
         conv.convert(f"legacy{ext}")
 
@@ -603,7 +604,7 @@ def test_pdf_mineru_provider_success(tmp_vault, monkeypatch):
 # --- images and OOXML: mineru is the only backend ---------------------------
 
 
-@pytest.mark.parametrize("ext", conv.IMG_EXTS + conv.OFFICE_EXTS)
+@pytest.mark.parametrize("ext", formats.IMG_EXTS + formats.OFFICE_EXTS)
 def test_image_and_office_route_to_mineru_whatever_the_provider_says(
     ext, tmp_vault, monkeypatch
 ):
@@ -748,7 +749,7 @@ def _fake_soffice(monkeypatch, *, writes_pdf=True, returncode=0, stderr="", hang
     monkeypatch.setattr(conv.subprocess, "run", run)
 
 
-@pytest.mark.parametrize("ext", conv.LEGACY_OFFICE_EXTS)
+@pytest.mark.parametrize("ext", formats.LEGACY_OFFICE_EXTS)
 def test_legacy_office_goes_through_libreoffice_then_the_pdf_seam(
     ext, tmp_vault, monkeypatch
 ):
@@ -1003,8 +1004,8 @@ def _no_subprocess(monkeypatch):
 def test_only_the_two_binary_formats_still_need_an_office_suite():
     """Regression guard on the routing itself: widening this back to ODF/RTF/xls
     should be a failing test, not a 240 MB dependency quietly coming back."""
-    assert set(conv.LEGACY_OFFICE_EXTS) == {".doc", ".ppt"}
-    assert set(conv._PURE_PY_OFFICE_EXTS) == {".odt", ".odp", ".ods", ".rtf", ".xls"}
+    assert set(formats.LEGACY_OFFICE_EXTS) == {".doc", ".ppt"}
+    assert set(formats.exts_of("office")) == {".odt", ".odp", ".ods", ".rtf", ".xls"}
 
 
 def test_odt_is_read_with_no_office_suite_and_no_subprocess(tmp_vault, monkeypatch):
@@ -1176,7 +1177,7 @@ def _fake_wav(monkeypatch):
     monkeypatch.setattr(conv, "_media_to_audio", to_audio)
 
 
-@pytest.mark.parametrize("ext", conv.MEDIA_EXTS)
+@pytest.mark.parametrize("ext", formats.MEDIA_EXTS)
 def test_every_media_ext_reaches_the_asr_lane(ext, tmp_vault, monkeypatch):
     _fake_wav(monkeypatch)
     _fake_asr(monkeypatch)
@@ -1230,16 +1231,13 @@ def test_media_never_reaches_a_document_provider(tmp_vault, monkeypatch):
     assert conv.convert("clip.mkv")
 
 
-@pytest.mark.parametrize("base,expected", [
-    ("http://h:8080", "http://h:8080/v1"),
-    ("http://h:8080/", "http://h:8080/v1"),
-    ("http://h:8080/v1", "http://h:8080/v1"),
-    ("http://h:8080/v1/", "http://h:8080/v1"),
-])
-def test_asr_base_url_is_normalised(base, expected):
+@pytest.mark.parametrize("base", ["http://h:8080", "http://h:8080/", "http://h:8080/v1", "http://h:8080/v1/"])
+def test_asr_base_url_is_normalised(base):
     """Users paste both shapes; a doubled or missing /v1 is a 404 whose message
     says nothing about the cause."""
-    assert conv._asr_base(base) == expected
+    from silica.agent.stt import transcriptions_url
+
+    assert transcriptions_url(base) == "http://h:8080/v1/audio/transcriptions"
 
 
 def test_endpoint_provider_posts_multipart_and_asks_for_verbose_json(tmp_vault, monkeypatch):
@@ -1704,12 +1702,16 @@ def test_respace_prose_fixes_tight_punctuation_outside_math_and_code():
     assert "a,b = 1,2" in fixed                  # fenced code untouched
 
 
-# --- book segmentation (split_markdown) -------------------------------------
+# --- book segmentation (_split_markdown_flagged) -----------------------------
+
+
+def _split(md: str, max_chars: int = conv._MAX_SEGMENT_CHARS) -> list[str]:
+    return [seg for seg, _ in conv._split_markdown_flagged(md, max_chars)]
 
 def test_split_on_headings_splits_chapters():
     # max_chars small enough that no two sections pack together → cuts land
     # exactly on the heading boundaries.
-    segs = conv.split_markdown("# Book\n\nintro\n\n## One\n\naaa\n\n## Two\n\nbbb", max_chars=20)
+    segs = _split("# Book\n\nintro\n\n## One\n\naaa\n\n## Two\n\nbbb", max_chars=20)
     assert len(segs) == 3
     assert segs[0].startswith("# Book")      # preamble attached to first heading
     assert "## One" in segs[1] and "## Two" in segs[2]
@@ -1717,7 +1719,7 @@ def test_split_on_headings_splits_chapters():
 
 def test_split_ignores_headings_inside_code_fences():
     md = "intro\n\n```\n# not a heading\n```\n\n## Real\n\nbody"
-    segs = conv.split_markdown(md, max_chars=40)
+    segs = _split(md, max_chars=40)
     assert len(segs) == 2                     # the fenced '# ...' is not a boundary
     assert "# not a heading" in segs[0]
 
@@ -1727,7 +1729,7 @@ def test_split_packs_small_sections_together():
     lines (80-page docling probe: 53 raw segments, some 14 chars) — adjacent
     small sections must coalesce instead of becoming micro-notes."""
     md = "".join(f"## S{i}\n\n{'x' * 50}\n\n" for i in range(10))
-    segs = conv.split_markdown(md, max_chars=200)
+    segs = _split(md, max_chars=200)
     assert 1 < len(segs) < 10                  # packed, not one-note-per-heading
     assert all(len(s) <= 200 for s in segs)
     assert segs[0].count("## S") >= 2          # a pack spans multiple headings
@@ -1735,24 +1737,24 @@ def test_split_packs_small_sections_together():
 
 def test_split_small_multiheading_doc_packs_to_one():
     md = "# Paper\n\nintro\n\n## Method\n\naaa\n\n## Results\n\nbbb"
-    assert conv.split_markdown(md) == [md]     # a paper stays one flat note
+    assert _split(md) == [md]     # a paper stays one flat note
 
 
 def test_split_dimensional_fallback_when_no_headings():
     body = "".join(f"Paragraph {i} of heading-less scanned prose.\n\n" for i in range(200))
-    segs = conv.split_markdown(body, max_chars=500)
+    segs = _split(body, max_chars=500)
     assert len(segs) > 1                       # blind body still gets cut into parts
     assert all(len(s) <= 600 for s in segs)    # ≤ max + one paragraph of slack
 
 
 def test_split_size_caps_an_oversized_heading_section():
     big = "## Huge\n\n" + "".join(f"line {i}\n\n" for i in range(300))
-    segs = conv.split_markdown(big, max_chars=400)
+    segs = _split(big, max_chars=400)
     assert len(segs) > 1                        # a giant chapter is split further
 
 
 def test_split_single_small_section_is_one_segment():
-    assert conv.split_markdown("# Paper\n\nshort body") == ["# Paper\n\nshort body"]
+    assert _split("# Paper\n\nshort body") == ["# Paper\n\nshort body"]
 
 
 def test_pdf_book_splits_into_multiple_inbox_notes(tmp_vault, monkeypatch):
@@ -2123,7 +2125,7 @@ def test_references_heading_variants_match():
 
 def test_split_markdown_unchanged_without_references():
     md = "# Paper\n\nintro\n\n## Method\n\naaa\n\n## Results\n\nbbb"
-    assert conv.split_markdown(md) == [md]
+    assert _split(md) == [md]
 
 
 def test_doc_citation_finds_doi_and_arxiv_in_head(tmp_path):
@@ -2307,3 +2309,30 @@ def test_each_segment_of_a_split_source_carries_its_readers_title(tmp_vault, mon
 def test_a_segments_title_drops_its_section_label(heading, title):
     """Headings mineru gave six arXiv papers (2026-10-26)."""
     assert conv._segment_title("P", f"{heading}\n\nbody\n", 2) == title
+
+
+@pytest.mark.parametrize("raised", [ValueError, RuntimeError])
+def test_a_full_gpu_is_named_where_the_tools_words_are_read(tmp_vault, monkeypatch, raised):
+    """A batch stops on the type, not on a sentence it would have to know. Every
+    caller keeps catching what the reader raised."""
+    src = tmp_vault.note("Inbox/scan.pdf", "%PDF")
+
+    def full(*a, **k):
+        raise raised("mineru failed: CUDA out of memory. Tried to allocate 20.00 MiB")
+
+    monkeypatch.setattr(conv, "_doc_to_md", full)
+    with pytest.raises(conv.GpuOutOfMemory, match="CUDA out of memory") as caught:
+        conv.convert(src)
+    assert isinstance(caught.value, ValueError) and isinstance(caught.value, RuntimeError)
+
+
+def test_another_failure_keeps_its_own_type(tmp_vault, monkeypatch):
+    src = tmp_vault.note("Inbox/scan.pdf", "%PDF")
+
+    def broken(*a, **k):
+        raise ValueError("mineru failed: no space left")
+
+    monkeypatch.setattr(conv, "_doc_to_md", broken)
+    with pytest.raises(ValueError) as caught:
+        conv.convert(src)
+    assert type(caught.value) is ValueError

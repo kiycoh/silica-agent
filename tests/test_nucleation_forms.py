@@ -6,6 +6,7 @@ clip by construction. Both stamp `form:` into frontmatter so downstream
 profile resolution never has to guess what the ingress lane already knew.
 """
 
+from silica.sources import ingest
 from pathlib import Path
 from silica.router.run_state import FileState, RunState
 
@@ -449,7 +450,7 @@ class TestDraftFiling:
         assert (Path(CONFIG.vault_path) / "Videos" / "Local still loses on thumbnails.md").is_file()
 
     def test_a_heading_title_loses_what_obsidian_refuses_in_a_name(self):
-        from silica.cli import _draft_title
+        from silica.sources.ingest import _draft_title
 
         assert _draft_title("# Machine Learning: guida allo studio\n", "g") == \
             "Machine Learning - guida allo studio"
@@ -699,7 +700,7 @@ def test_a_txt_draft_is_read_and_filed_too(tmp_vault, monkeypatch):
 
 
 def test_a_txt_draft_files_under_auto_target_too(tmp_vault, monkeypatch):
-    """_pick_target_folder must read a .txt source: with no --target the ep180
+    """pick_target_folder must read a .txt source: with no --target the ep180
     case died there and fell back to distillation."""
     from pathlib import Path
 
@@ -853,7 +854,7 @@ class TestFileDraftsParallelResolve:
             return forms.Form("study", "default", "sniff")
         with _patch.object(forms, "read_source_text", side_effect=lambda f: f), \
              _patch.object(forms, "resolve", side_effect=fake_resolve):
-            kept = cli._file_drafts(list(files), "Target", None)
+            kept = ingest.file_drafts(list(files), "Target", None, cli.CONSOLE)
         assert kept == files
 
     def test_folder_vote_overrides_a_lone_verdict(self, monkeypatch):
@@ -870,7 +871,7 @@ class TestFileDraftsParallelResolve:
         forms._sniff_memo.clear()
         with _patch.object(forms, "read_source_text", side_effect=lambda f: f), \
              _patch.object(forms, "sniff_form", side_effect=lambda text: verdict[text]):
-            kept = cli._file_drafts(list(verdict), "Target", None)
+            kept = ingest.file_drafts(list(verdict), "Target", None, cli.CONSOLE)
         assert kept == list(verdict)  # nothing filed
         # RECON re-resolves the same text later: the pinned memo answers, no LLM call.
         with _patch.object(forms, "call_llm", side_effect=AssertionError("re-sniffed")):
@@ -884,7 +885,7 @@ class TestFileDraftsParallelResolve:
 
         with _patch.object(forms, "read_source_text",
                            side_effect=RuntimeError("boom")):
-            kept = cli._file_drafts(["Inbox/x.md"], "Target", None)
+            kept = ingest.file_drafts(["Inbox/x.md"], "Target", None, cli.CONSOLE)
         assert kept == ["Inbox/x.md"]
 
 
@@ -1011,3 +1012,67 @@ class TestSniffDecision:
         monkeypatch.setattr(forms, "call_llm", _llm)
         assert forms._sniff_llm("body\n", structured=True) == "clip"
         assert seen["response_format"] is forms.SniffVerdict
+
+
+def _a_terminal_nobody_is_at(monkeypatch):
+    """`silica --gui` started from a shell: stdin is a tty, and the person is in
+    the browser, so a prompt there hangs a worker thread holding the turn."""
+    import sys
+
+    import silica.cli as cli
+
+    def read(*a, **k):
+        raise AssertionError("asked the terminal")
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli.CONSOLE, "input", read)
+
+
+def _draft(tmp_vault):
+    tmp_vault.note("Inbox/mine.md", "---\nform: draft\n---\n\n# Mine\n\nHalf a thought.\n")
+
+
+class TestAskIsTheSurfaces:
+    def test_a_browser_nucleate_of_a_draft_never_reads_the_terminal(self, tmp_vault, monkeypatch):
+        from silica.cli import _expand_workflow_shortcut
+
+        _a_terminal_nobody_is_at(monkeypatch)
+        _draft(tmp_vault)
+        assert _expand_workflow_shortcut("/nucleate Inbox/mine.md --target=T") == ""
+        assert (Path(tmp_vault.note("T/.keep", "")).parent / "Mine.md").exists()  # filed, as headless
+
+    def test_a_surface_with_a_person_is_asked_and_no_keeps_it_distilling(self, tmp_vault, monkeypatch):
+        from silica.cli import _expand_workflow_shortcut
+        import silica.router.coordinator as coord_mod
+
+        runs: list[dict] = []
+
+        class _Coordinator:
+            def __init__(self, **kw):
+                runs.append(kw)
+
+            def run(self):
+                return {"final_status": "Success"}
+
+        monkeypatch.setattr(coord_mod, "Coordinator", _Coordinator)
+        _draft(tmp_vault)
+        asked: list[str] = []
+        msg = _expand_workflow_shortcut("/nucleate Inbox/mine.md --target=T",
+                                        ask=lambda q: asked.append(q) or "n")
+        assert msg == "" and "looks like a draft of yours" in asked[0]
+        assert runs[0]["inbox_files"] == ["Inbox/mine.md"]
+
+
+class TestFiledFrontmatter:
+    def test_an_empty_property_stays_empty_and_a_name_stays_readable(self, tmp_vault):
+        """Rendered by hand, an empty `tags:` came back as the tag `None`: 195 of
+        2,418 real notes had a property that would (2026-11-06)."""
+        from silica.cli import _expand_workflow_shortcut
+        from silica.kernel.base import frontmatter
+
+        tmp_vault.note("Inbox/mine.md", "---\nform: draft\ntags:\ntitle: \"caffè: note\"\n---\n\n# Mine\n\nHalf.\n")
+        assert _expand_workflow_shortcut("/nucleate Inbox/mine.md --target=T") == ""
+        filed = (Path(tmp_vault.note("T/.keep", "")).parent / "Mine.md").read_text(encoding="utf-8")
+        data, _, body = frontmatter.split(filed)
+        assert data["tags"] is None and data["title"] == "caffè: note" and data["form"] == "draft"
+        assert "caffè" in filed and body.strip().startswith("# Mine")

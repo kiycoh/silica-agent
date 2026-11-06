@@ -155,7 +155,7 @@ def test_silica_file_links_both_directions(asset_vault, monkeypatch):
 
 
 def test_tabular_targets_are_file_refs_not_note_links():
-    # A profile note names its data file (convert.py TABULAR_EXTS); as note
+    # A profile note names its data file (formats.TABULAR_EXTS); as note
     # targets these were phantom dangling links, invisible to file_backlinks.
     from silica.kernel.base.markdown import extract_file_refs, extract_links
 

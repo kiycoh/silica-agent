@@ -46,7 +46,7 @@ def test_search_ranks_on_topic_first_in_ddg_shape():
     })
     hits = c.search("borrow checker aliasing")
     assert hits[0]["url"] == "https://a.test/rust"
-    assert set(hits[0]) == {"title", "url", "content"}  # _ddg_search parity
+    assert set(hits[0]) == {"title", "url", "content"}  # ddg_search parity
     assert hits[0]["title"] == "Rust borrow checker"
     assert "aliasing" in hits[0]["content"]
     assert len(hits[0]["content"]) <= 180

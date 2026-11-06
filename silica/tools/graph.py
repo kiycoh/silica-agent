@@ -692,7 +692,7 @@ def _covering_stem(path: Path) -> str:
     families exist nowhere else, which bounds a wrong answer here to
     suppressing one hint about one CSV.
     """
-    from silica.sources.convert import TABULAR_EXTS
+    from silica.kernel.base.formats import TABULAR_EXTS
 
     if not path.suffix.lower().endswith(TABULAR_EXTS):
         return ""
@@ -799,8 +799,8 @@ def silica_vault_report(
     try:
         if vault_path:
             from silica.kernel.base.manifest import active_done_dir
+            from silica.kernel.base.formats import CONVERTIBLE_DOC_EXTS
             from silica.kernel.base.layout import files_with
-            from silica.sources.convert import CONVERTIBLE_DOC_EXTS
 
             root = Path(vault_path)
             # rglob, not glob: the archive mirrors the inbox tree since

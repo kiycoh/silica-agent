@@ -443,7 +443,7 @@ def _hides(attrs: list[tuple[str, str | None]]) -> bool:
 
 
 class _VisiblePass(HTMLParser):
-    """Re-emit the HTML a client would show, for `web_fetch._extract_text`.
+    """Re-emit the HTML a client would show, for `web_fetch.extract_text`.
 
     Drops every element that hides itself (`_hides`), every image (its URL is
     never requested, and its `alt` is text a stranger wrote that the reader
@@ -678,17 +678,17 @@ def _unlinked(text: str) -> str:
 
 def _message_text(m: Mail, cut_quotes: bool) -> str:
     from silica.kernel.text.sanitize import strip_degenerate_runs
-    from silica.sources.web_fetch import _extract_text, _truncate
+    from silica.sources.web_fetch import extract_text, truncate
 
     if m.html:
-        text = _cut_signature(_extract_text(_visible_html(m.body, cut_quotes)), "--")
+        text = _cut_signature(extract_text(_visible_html(m.body, cut_quotes)), "--")
     else:
         text = m.body.replace("\r\n", "\n").replace("\r", "\n")
         if cut_quotes:
             text = _cut_plain_quotes(text)
         text = _cut_signature(text, "-- ")
     text = re.sub(r"\n{3,}", "\n\n", strip_degenerate_runs(_inert(text))).strip()
-    return _truncate(text, MESSAGE_CAP)
+    return truncate(text, MESSAGE_CAP)
 
 
 def _size(n: int) -> str:
@@ -708,7 +708,7 @@ def render(thread: Thread) -> str:
     `## <sender>, <date>`. A reply's quoted copy is cut only when the message
     it quotes is in this note, so nothing the note holds once is held twice
     and nothing is lost when the original is not here."""
-    from silica.sources.web_fetch import _truncate
+    from silica.sources.web_fetch import truncate
 
     ids = {m.msg_id for m in thread.mails if m.msg_id}
     parts = [f"# {_unlinked(thread.mails[0].subject) or 'no subject'}"]
@@ -720,7 +720,7 @@ def render(thread: Thread) -> str:
                                for a in m.attachments)
             block += f"\n\nAttachments: {listed}"
         parts.append(block)
-    return _truncate("\n\n".join(parts), NOTE_CAP) + "\n"
+    return truncate("\n\n".join(parts), NOTE_CAP) + "\n"
 
 
 # --- point 1: the adapter --------------------------------------------------------
@@ -760,9 +760,9 @@ def threads_in(path: str | Path) -> list[Thread]:
 
 
 def _resolve(file: str) -> Path:
-    from silica.sources.convert import _resolve_input
+    from silica.sources.convert import resolve_input
 
-    return _resolve_input(file)
+    return resolve_input(file)
 
 
 def _stamp(thread: Thread, origin: str, path: str) -> dict:
@@ -795,7 +795,7 @@ def _defaults_hold(file: str, src: Path) -> None:
     defaults. A keyed target comes from /mail import, which already planned it,
     or from a user who typed the key, which is the same choice --all makes."""
     p = plan(src)
-    if p.guessed and not p.takeout:
+    if unconfirmed(p):
         raise ValueError(f"no address of yours is recorded for this vault; /mail import {file} "
                          "shows the thread and asks for it")
     if p.write:
@@ -851,6 +851,22 @@ MAIL = MailAdapter()
 MAX_THREADS = 200
 STATE_FILE = "mail_import.json"
 LIMIT_ERROR = "--limit takes a whole number of threads, 1 or more"
+
+
+def plan_typed(file: str | Path, me: str, *, label: str = "", all_: bool = False, limit=None) -> Plan:
+    """`plan` on what a person typed: `me` the addresses as written, kept on their
+    word, dry run or not, because typing one is the confirmation the prefill asks
+    for (point 4). `limit` is raw or already parsed."""
+    typed = tuple(a for a in (me or "").split(",") if a.strip())
+    if typed:
+        typed = remember_addresses(typed)
+    return plan(file, me=typed or None, label=label, all_=all_, limit=parse_limit(limit))
+
+
+def unconfirmed(p: Plan) -> bool:
+    """Whose mail this is rests on a guess nobody confirmed, so nothing is written.
+    Takeout's Sent label says it outright."""
+    return p.guessed and not p.takeout
 
 
 def parse_limit(value) -> int:
@@ -1039,7 +1055,7 @@ GATE6_FIRES = 10
 def _nucleated_pdfs() -> set[str]:
     """Basenames of the documents /nucleate converted, from the `source_file`
     every converted segment carries, in the inbox (a run in progress) and in
-    done/ (a finished one): the places cli._prior_conversions reads."""
+    done/ (a finished one): the places ingest.prior_conversions reads."""
     from silica.config import CONFIG
     from silica.driver import DRIVER
     from silica.kernel.base.manifest import active_done_dir, active_inbox_dir

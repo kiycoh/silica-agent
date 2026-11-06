@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from silica.sources import ingest
 from silica.cli import _expand_workflow_shortcut
 # Bound at import, before conftest stubs the module attribute for every test.
-from silica.cli import _pick_batch_folders as _REAL_BATCH
+from silica.sources.ingest import pick_batch_folders as _REAL_BATCH
 from silica.config import CONFIG
 
 
@@ -72,13 +73,13 @@ def test_nucleate_md_with_target_dispatches_fsm_directly(stub_coordinator):
     assert msg == ""  # handled inline — no agent turn
     assert stub_coordinator == [
         {"inbox_files": ["Inbox/a.md"], "target_dir": "Concepts/AI", "hub": None,
-         "keep_sources": True, "seen_override": None, "distill_profile": None}
+         "keep_sources": True, "seen_override": None, "distill_profile": None,
+         "resume_run_id": None, "cancel_token": None, "episodic_capture": True}
     ]
 
 
 def test_nucleate_md_missing_target_uses_folder_pick(stub_coordinator, monkeypatch):
-    import silica.cli as cli_mod
-    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "Concepts/AI")
+    monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "Concepts/AI")
     msg = _expand_workflow_shortcut("/nucleate Inbox/a.md")
     assert msg == ""
     assert stub_coordinator[0]["target_dir"] == "Concepts/AI"
@@ -108,7 +109,6 @@ def test_a_batch_picks_every_units_folder_in_one_call(stub_coordinator, monkeypa
     for the next five, and all six went to `machine-learning` (2026-10-26).
     One call sees every unit (ADR-0133). Segments of one source stay one unit;
     loose notes with no source go together."""
-    import silica.cli as cli_mod
 
     _three_units(tmp_vault)
     calls: list = []
@@ -120,8 +120,8 @@ def test_a_batch_picks_every_units_folder_in_one_call(stub_coordinator, monkeypa
     def _never(files):
         raise AssertionError("a unit the batch placed is not picked again")
 
-    monkeypatch.setattr(cli_mod, "_pick_batch_folders", _batch)
-    monkeypatch.setattr(cli_mod, "_pick_target_folder", _never)
+    monkeypatch.setattr(ingest, "pick_batch_folders", _batch)
+    monkeypatch.setattr(ingest, "pick_target_folder", _never)
 
     assert _expand_workflow_shortcut("/nucleate Inbox/") == ""
     assert calls == [[("memo.md", "# a note of mine"), ("Adam", "# Adam"), ("YOLO", "# YOLO")]]
@@ -134,7 +134,6 @@ def test_a_batch_picks_every_units_folder_in_one_call(stub_coordinator, monkeypa
 
 
 def test_a_unit_the_batch_call_left_out_is_picked_alone(stub_coordinator, monkeypatch, tmp_vault):
-    import silica.cli as cli_mod
 
     _three_units(tmp_vault)
     alone: list = []
@@ -143,8 +142,8 @@ def test_a_unit_the_batch_call_left_out_is_picked_alone(stub_coordinator, monkey
         alone.append(files[0])
         return "Picked/Alone"
 
-    monkeypatch.setattr(cli_mod, "_pick_batch_folders", lambda briefs: {0: "Notes", 2: "ML/Vision"})
-    monkeypatch.setattr(cli_mod, "_pick_target_folder", _single)
+    monkeypatch.setattr(ingest, "pick_batch_folders", lambda briefs: {0: "Notes", 2: "ML/Vision"})
+    monkeypatch.setattr(ingest, "pick_target_folder", _single)
 
     assert _expand_workflow_shortcut("/nucleate Inbox/") == ""
     assert alone == ["Inbox/Adam/Adam-1-adam.md"]
@@ -156,12 +155,11 @@ def test_a_unit_the_batch_call_left_out_is_picked_alone(stub_coordinator, monkey
 def test_a_failed_batch_call_picks_each_paper_alone(stub_coordinator, monkeypatch, tmp_vault):
     """The conftest stub makes the batch call raise: the run goes on with the
     pick per unit it had before ADR-0133, never a lost run."""
-    import silica.cli as cli_mod
 
     _three_units(tmp_vault)
     picks = {"Inbox/Adam/Adam-1-adam.md": "ML/Optimization", "Inbox/YOLO/YOLO-1-yolo.md": "ML/Vision",
              "Inbox/memo.md": "Notes"}
-    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: picks[files[0]])
+    monkeypatch.setattr(ingest, "pick_target_folder", lambda files: picks[files[0]])
 
     assert _expand_workflow_shortcut("/nucleate Inbox/") == ""
     got = {tuple(c["inbox_files"]): c["target_dir"] for c in stub_coordinator}
@@ -170,13 +168,12 @@ def test_a_failed_batch_call_picks_each_paper_alone(stub_coordinator, monkeypatc
 
 
 def test_one_unit_or_a_given_target_makes_no_batch_call(stub_coordinator, monkeypatch, tmp_vault):
-    import silica.cli as cli_mod
 
     def _never(briefs):
         raise AssertionError("no batch call")
 
-    monkeypatch.setattr(cli_mod, "_pick_batch_folders", _never)
-    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "Concepts/AI")
+    monkeypatch.setattr(ingest, "pick_batch_folders", _never)
+    monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "Concepts/AI")
     _three_units(tmp_vault)
     assert _expand_workflow_shortcut("/nucleate Inbox/memo.md") == ""
     assert _expand_workflow_shortcut("/nucleate Inbox/ --target=Papers") == ""
@@ -184,7 +181,6 @@ def test_one_unit_or_a_given_target_makes_no_batch_call(stub_coordinator, monkey
 
 
 def test_a_pdf_not_yet_converted_takes_its_batch_pick(tmp_vault, monkeypatch, stub_coordinator):
-    import silica.cli as cli_mod
 
     _library(tmp_vault, monkeypatch)
     seen: list = []
@@ -193,7 +189,7 @@ def test_a_pdf_not_yet_converted_takes_its_batch_pick(tmp_vault, monkeypatch, st
         seen.extend(briefs)
         return {0: "silica/Freemasonry/Mackey", 1: "silica/Freemasonry/Memphis"}
 
-    monkeypatch.setattr(cli_mod, "_pick_batch_folders", _batch)
+    monkeypatch.setattr(ingest, "pick_batch_folders", _batch)
 
     assert _expand_workflow_shortcut("/nucleate 04-massoneria") == ""
     # The fixture files are not real PDFs: no metadata, the name alone.
@@ -238,7 +234,7 @@ def test_batch_pick_reads_one_line_per_unit(tmp_vault, monkeypatch):
 
 
 def test_unit_brief_skips_a_references_chunk(tmp_vault):
-    from silica.cli import _unit_brief
+    from silica.sources.ingest import _unit_brief
 
     tmp_vault.note("Inbox/P/P-1-refs.md", _seg("P", "[1] A. Author, 1999.", "boilerplate: true\n"))
     tmp_vault.note("Inbox/P/P-2-intro.md", _seg("P", "# Intro\n\nWhat the paper is about."))
@@ -248,7 +244,7 @@ def test_unit_brief_skips_a_references_chunk(tmp_vault):
 
 def test_pending_brief_reads_a_pdfs_own_title(tmp_vault, monkeypatch):
     """An arXiv download is named by its number; its metadata may name it."""
-    from silica.cli import _pending_brief
+    from silica.sources.ingest import _pending_brief
     from silica.sources import pdf_extract
 
     tmp_vault.note("Inbox/1706.03762.pdf", "%PDF-1.4\n")
@@ -269,12 +265,11 @@ def test_a_given_target_still_takes_every_paper(stub_coordinator, tmp_vault):
 
 
 def test_nucleate_folder_pick_failure_falls_back_to_agent(monkeypatch):
-    import silica.cli as cli_mod
 
     def boom(files):
         raise ValueError("no llm")
 
-    monkeypatch.setattr(cli_mod, "_pick_target_folder", boom)
+    monkeypatch.setattr(ingest, "pick_target_folder", boom)
     msg = _expand_workflow_shortcut("/nucleate Inbox/a.md")
     assert msg is not None and "silica_run_injector" in msg
     assert "Inbox/a.md" in msg
@@ -679,7 +674,6 @@ def test_nucleate_no_prior_provenance_no_warning(repo_vault, capsys, stub_coordi
 def test_nucleate_missing_target_still_warns_on_renucleate(repo_vault, capsys, monkeypatch):
     """Auto-target (no --target) is a valid invocation — the provenance
     drift warning must still print on the way to the agent fallback."""
-    import silica.cli as cli_mod
     root, vault = repo_vault
     inbox = vault / "Inbox"
     inbox.mkdir(exist_ok=True)
@@ -688,7 +682,7 @@ def test_nucleate_missing_target_still_warns_on_renucleate(repo_vault, capsys, m
     from silica.kernel.write.provenance import append_record
     append_record("lezione.md", "old-sha-not-matching", "run1", ["Concepts/A", "Concepts/B"])
 
-    monkeypatch.setattr(cli_mod, "_pick_target_folder",
+    monkeypatch.setattr(ingest, "pick_target_folder",
                         lambda files: (_ for _ in ()).throw(ValueError("no llm")))
     msg = _expand_workflow_shortcut("/nucleate Inbox/lezione.md")
 
@@ -758,7 +752,7 @@ def test_auto_target_refuses_a_pick_inside_the_inbox(tmp_vault, monkeypatch):
     """A pick under the inbox is rejected at the source, not 20 LLM calls later
     at VALIDATE, where it costs a whole run and writes nothing."""
     from silica.model import llm
-    from silica.cli import _pick_target_folder
+    from silica.sources.ingest import pick_target_folder
 
     class _R:
         text = "Inbox/Book-of-Enoch"
@@ -768,14 +762,14 @@ def test_auto_target_refuses_a_pick_inside_the_inbox(tmp_vault, monkeypatch):
     tmp_vault.note("Inbox/Book-of-Enoch/01-enoch.md", "body\n")
 
     with pytest.raises(ValueError):
-        _pick_target_folder(["Inbox/Book-of-Enoch/01-enoch.md"])
+        pick_target_folder(["Inbox/Book-of-Enoch/01-enoch.md"])
 
 
 def test_folder_census_offers_folders_that_hold_no_markdown(tmp_vault, monkeypatch):
     """A researcher's library is folders of PDFs. Censusing only .md parents
     hides the whole taxonomy and leaves the model nothing to pick."""
     from silica.model import llm
-    from silica.cli import _pick_target_folder
+    from silica.sources.ingest import pick_target_folder
 
     seen: dict = {}
 
@@ -791,7 +785,7 @@ def test_folder_census_offers_folders_that_hold_no_markdown(tmp_vault, monkeypat
     tmp_vault.note("04-massoneria/Mackey.pdf", "%PDF-1.4\n")
     tmp_vault.note("Inbox/01-enoch.md", "body\n")
 
-    assert _pick_target_folder(["Inbox/01-enoch.md"]) == "02-apocrifi"
+    assert pick_target_folder(["Inbox/01-enoch.md"]) == "02-apocrifi"
     assert "02-apocrifi" in seen["prompt"]
     assert "04-massoneria" in seen["prompt"]
     assert "- Inbox" not in seen["prompt"]
@@ -809,7 +803,6 @@ def test_folder_census_offers_folders_that_hold_no_markdown(tmp_vault, monkeypat
 
 def _library(tmp_vault, monkeypatch):
 
-    import silica.cli as cli_mod
 
     tmp_vault.note("vault.yaml", "write_dir: silica\n")
     tmp_vault.note("04-massoneria/mackey.pdf", "%PDF mackey")
@@ -829,7 +822,7 @@ def _library(tmp_vault, monkeypatch):
         return [rel]
 
     monkeypatch.setattr("silica.sources.convert.convert", _fake_convert)
-    monkeypatch.setattr(cli_mod, "_pick_target_folder",
+    monkeypatch.setattr(ingest, "pick_target_folder",
                         lambda files: "silica/04-massoneria")
     return converted
 
@@ -856,7 +849,6 @@ def test_an_inbox_folder_leaves_the_images_its_notes_embed_alone(
     """2026-10-12: `/nucleate Inbox/machine_learning` on 14 converted lectures
     queued their 129 images/ attachments as sources to convert, one /nucleate
     each. A screenshot no note embeds stays OCR input."""
-    import silica.cli as cli_mod
 
     tmp_vault.note("Inbox/ml/L1.md", "# L1\n\n![](images/a.jpg)\n\n![[b.png]]\n")
     tmp_vault.note("Inbox/ml/images/a.jpg", "img")
@@ -871,7 +863,7 @@ def test_an_inbox_folder_leaves_the_images_its_notes_embed_alone(
         return [rel]
 
     monkeypatch.setattr("silica.sources.convert.convert", _fake_convert)
-    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "T")
+    monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "T")
 
     _expand_workflow_shortcut("/nucleate Inbox/ml")
 
@@ -884,7 +876,6 @@ def test_a_folder_of_pdfs_converted_beside_them_runs_each_document_once(
     earlier /convert made beside them. Each note was listed twice, in the
     folder's loose-note unit and in its PDF's own unit; now each lecture is
     one unit carrying its note, and only the loose notes share one."""
-    import silica.cli as cli_mod
 
     vault = Path(CONFIG.vault_path)
     for n in (1, 2):
@@ -894,7 +885,7 @@ def test_a_folder_of_pdfs_converted_beside_them_runs_each_document_once(
     tmp_vault.note("Inbox/ml/guide.md", "# Guide\n\nmy own guide\n")
     monkeypatch.setattr("silica.sources.convert.convert",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("re-converted")))
-    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "T")
+    monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "T")
 
     _expand_workflow_shortcut("/nucleate Inbox/ml")
 
@@ -909,18 +900,19 @@ def test_a_gpu_out_of_memory_stops_the_conversions_after_the_first(
         tmp_vault, monkeypatch, stub_coordinator):
     """2026-10-12: with a 9B chat server holding the GPU, MinerU failed with
     CUDA out of memory 129 times in a row, about 8 s each, one per file."""
-    import silica.cli as cli_mod
 
     for name in ("a", "b", "c"):
         tmp_vault.note(f"Inbox/lib/{name}.pdf", "%PDF")
     tried: list[str] = []
 
+    from silica.sources.convert import GpuOutOfMemory
+
     def _oom(target, dest_dir=""):
         tried.append(target)
-        raise ValueError("mineru failed: CUDA out of memory. Tried to allocate 20.00 MiB")
+        raise GpuOutOfMemory("mineru failed: CUDA out of memory. Tried to allocate 20.00 MiB")
 
     monkeypatch.setattr("silica.sources.convert.convert", _oom)
-    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "T")
+    monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "T")
 
     _expand_workflow_shortcut("/nucleate Inbox/lib")
 
@@ -1028,7 +1020,6 @@ def test_next_book_converts_while_the_previous_distills(
     conversion of book B must complete DURING book A's distill, not after."""
     import threading
 
-    import silica.cli as cli_mod
     import silica.router.coordinator as coord_mod
 
     tmp_vault.note("vault.yaml", "write_dir: silica\n")
@@ -1064,7 +1055,7 @@ def test_next_book_converts_while_the_previous_distills(
 
     monkeypatch.setattr("silica.sources.convert.convert", _fake_convert)
     monkeypatch.setattr(coord_mod, "Coordinator", _SlowCoordinator)
-    monkeypatch.setattr(cli_mod, "_pick_target_folder",
+    monkeypatch.setattr(ingest, "pick_target_folder",
                         lambda files: "silica/04-massoneria")
 
     _expand_workflow_shortcut("/nucleate 04-massoneria")

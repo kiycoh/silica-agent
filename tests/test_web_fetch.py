@@ -139,14 +139,14 @@ _PAGE = """<html><head><title>Real Title</title>
 
 
 def test_extract_keeps_prose_and_title():
-    out = wf._extract_text(_PAGE)
+    out = wf.extract_text(_PAGE)
     assert "Real Title" in out
     assert "First paragraph." in out
     assert "Second paragraph & more." in out  # entities decoded, runs collapsed
 
 
 def test_extract_drops_boilerplate_tags():
-    out = wf._extract_text(_PAGE)
+    out = wf.extract_text(_PAGE)
     for noise in ("color:red", "Home Login", "Site banner", "Copyright notice",
                   "var tracking"):
         assert noise not in out
@@ -154,32 +154,32 @@ def test_extract_drops_boilerplate_tags():
 
 def test_extract_separates_block_elements():
     # open and close both emit a break, so blocks land one blank line apart
-    assert wf._extract_text("<p>one</p><p>two</p>") == "one\n\ntwo"
+    assert wf.extract_text("<p>one</p><p>two</p>") == "one\n\ntwo"
 
 
 def test_extract_collapses_blank_runs():
-    assert wf._extract_text("<p>a</p><div></div><div></div><div></div><p>b</p>") == "a\n\nb"
+    assert wf.extract_text("<p>a</p><div></div><div></div><div></div><p>b</p>") == "a\n\nb"
 
 
 def test_extract_survives_unbalanced_tags():
     # a stray close tag must not drive the skip counter negative and swallow
     # the rest of the page
-    out = wf._extract_text("</script><p>visible</p>")
+    out = wf.extract_text("</script><p>visible</p>")
     assert "visible" in out
 
 
 def test_extract_of_empty_html_is_empty():
-    assert wf._extract_text("") == ""
+    assert wf.extract_text("") == ""
 
 
 # --- truncation -------------------------------------------------------------
 
 def test_truncate_is_a_noop_under_the_limit():
-    assert wf._truncate("short", limit=100) == "short"
+    assert wf.truncate("short", limit=100) == "short"
 
 
 def test_truncate_marks_the_cut():
-    out = wf._truncate("x" * 500, limit=100)
+    out = wf.truncate("x" * 500, limit=100)
     assert out.startswith("x" * 100)
     assert "truncated at 100 characters" in out
 
@@ -195,7 +195,7 @@ from silica.tools import TOOLS
 class _Resp:
     """Minimal stand-in for a streamed httpx.Response.
 
-    `_fetch` streams, so the stand-in is a context manager whose body arrives
+    `fetch` streams, so the stand-in is a context manager whose body arrives
     through `iter_bytes()`; `text` is what those bytes decode back to.
     """
 
@@ -238,7 +238,7 @@ class _Resp:
 
 
 def _patch_stream(monkeypatch, fake):
-    """`_fetch` opens each hop through `_stream(url, ip, headers)` since the
+    """`fetch` opens each hop through `_stream(url, ip, headers)` since the
     DNS pin (ADR-0137 point 11); the fakes here keep httpx.stream's shape."""
     monkeypatch.setattr(
         wf, "_stream",
@@ -279,7 +279,7 @@ def test_fetch_drops_the_wire_encoding_headers_from_the_rebuilt_response(monkeyp
         text="<html><body><p>Hello world.</p></body></html>",
         extra_headers={"content-encoding": "gzip", "content-length": "31"},
     ))
-    resp, _url = wf._fetch("https://example.com/a")
+    resp, _url = wf.fetch("https://example.com/a")
     assert "content-encoding" not in resp.headers
     # httpx restamps content-length from the body it was handed, so the stale
     # wire length ("31") must not survive either.
@@ -631,7 +631,7 @@ def test_wikipedia_language_comes_from_the_host(monkeypatch):
 
 
 def test_wikipedia_sends_a_descriptive_user_agent_not_a_browser_string(monkeypatch):
-    """Wikimedia's UA policy throttles generic browser strings, and `_HEADERS`
+    """Wikimedia's UA policy throttles generic browser strings, and `HEADERS`
     is one. Only this branch opts out, so pin it."""
     sent: list[dict] = []
 
@@ -839,40 +839,40 @@ def test_pre_block_is_fenced_and_keeps_its_indentation():
     return 1
 </code></pre>
 <p>After.</p></body>"""
-    out = wf._extract_text(html)
+    out = wf.extract_text(html)
     assert "```\ndef f():\n    return 1\n```" in out
     assert "Before." in out and "After." in out
 
 
 def test_fenced_code_keeps_blank_lines_but_prose_still_collapses():
     html = "<pre>a\n\nb</pre><p>c    d</p>"
-    out = wf._extract_text(html)
+    out = wf.extract_text(html)
     assert "```\na\n\nb\n```" in out
     assert "c d" in out
 
 
 def test_pre_inside_skipped_container_emits_no_fence():
     """An unpaired fence would render the whole rest of the page as code."""
-    out = wf._extract_text("<nav><pre>menu</pre></nav><p>real</p>")
+    out = wf.extract_text("<nav><pre>menu</pre></nav><p>real</p>")
     assert "```" not in out
     assert out == "real"
 
 
 def test_unclosed_pre_is_fenced_shut():
-    out = wf._extract_text("<body><pre>truncated code")
+    out = wf.extract_text("<body><pre>truncated code")
     assert out.count("```") == 2
     assert out.endswith("```")
 
 
 def test_truncation_closes_a_fence_it_cut_open():
     text = "intro\n```\n" + "x" * 200
-    out = wf._truncate(text, limit=40)
+    out = wf.truncate(text, limit=40)
     assert out.count("```") == 2
     assert "truncated at 40 characters" in out
 
 
 def test_truncation_leaves_balanced_fences_alone():
-    out = wf._truncate("```\na\n```\n" + "y" * 200, limit=40)
+    out = wf.truncate("```\na\n```\n" + "y" * 200, limit=40)
     assert out.count("```") == 2
 
 
@@ -882,7 +882,7 @@ def test_truncation_leaves_balanced_fences_alone():
 def test_image_alt_text_survives_marked_as_an_image():
     """On a technical page the alt is often the only description of a diagram
     that exists in the markup, and this parser read no attributes at all."""
-    out = wf._extract_text(
+    out = wf.extract_text(
         '<p>See below.</p><img src="a.png" alt="Transformer block diagram">'
         "<p>As shown.</p>"
     )
@@ -891,30 +891,30 @@ def test_image_alt_text_survives_marked_as_an_image():
 
 
 def test_self_closing_image_is_read_too():
-    out = wf._extract_text('<img src="a.png" alt="XHTML self closed" />')
+    out = wf.extract_text('<img src="a.png" alt="XHTML self closed" />')
     assert "[image: XHTML self closed]" in out
 
 
 def test_image_without_alt_adds_nothing():
-    assert wf._extract_text('<p>a</p><img src="x.png"><p>b</p>') == "a\n\nb"
-    assert wf._extract_text('<p>a</p><img src="x.png" alt="  "><p>b</p>') == "a\n\nb"
+    assert wf.extract_text('<p>a</p><img src="x.png"><p>b</p>') == "a\n\nb"
+    assert wf.extract_text('<p>a</p><img src="x.png" alt="  "><p>b</p>') == "a\n\nb"
 
 
 def test_alt_with_no_letters_is_dropped():
     """`alt="***"` and `alt="—"` are spacers, not captions."""
-    assert "image:" not in wf._extract_text('<img alt="***"><img alt="—">')
+    assert "image:" not in wf.extract_text('<img alt="***"><img alt="—">')
 
 
 def test_repeated_alt_is_emitted_once():
     """Icon rows repeat one alt down a page; each is a line of pure noise."""
     html = "".join('<li><img src="i.png" alt="bullet icon">item</li>' for _ in range(5))
-    assert wf._extract_text(html).count("[image: bullet icon]") == 1
+    assert wf.extract_text(html).count("[image: bullet icon]") == 1
 
 
 def test_alt_returns_after_a_different_alt_interrupts():
     """Adjacent-equal dedup, not seen-once: the same diagram legitimately appears
     twice on a long page, separated by other content."""
-    out = wf._extract_text(
+    out = wf.extract_text(
         '<img alt="figure one"><p>prose</p><img alt="figure two">'
         '<p>prose</p><img alt="figure one">'
     )
@@ -923,7 +923,7 @@ def test_alt_returns_after_a_different_alt_interrupts():
 
 def test_alt_inside_skipped_boilerplate_is_dropped():
     """A nav is full of icons; none of them describe the page."""
-    out = wf._extract_text(
+    out = wf.extract_text(
         '<nav><img alt="home icon"><img alt="search icon"></nav>'
         '<article><img alt="real figure">body</article>'
     )

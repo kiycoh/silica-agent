@@ -45,15 +45,15 @@ _PAGE = "Source: https://e.example/p\nThe cat sat on the mat."
 def flags_phantom_marker(body: str, bank: dict) -> bool:
     """Did the citation binder flag a marker naming no banked quote?
 
-    The gate reports `_bind_citations`' audit line verbatim (probe_web_gate._arm
+    The gate reports `bind_citations`' audit line verbatim (probe_web_gate._arm
     -> "phantom_audit"); the control pins the discriminating half of it, so
     rewording the sentence does not fail a run while gutting the check would.
     """
-    return bool(wr._bind_citations(body, [], bank)[2])
+    return bool(wr.bind_citations(body, [], bank)[2])
 
 
-def _quote(url: str, text: str) -> wr._Quote:
-    return wr._Quote(url=url, quote=text, why="control")
+def _quote(url: str, text: str) -> wr.Quote:
+    return wr.Quote(url=url, quote=text, why="control")
 
 
 # metric name -> (fn, [((args...), expected), ...], why these inputs are the test)
@@ -92,7 +92,7 @@ CONTROLS: dict[str, tuple[Callable, list[tuple[tuple, Any]], str]] = {
         acquisition,
         [
             # Fixtures in WIRE shape: the runner feeds acquisition() the raw
-            # JSON-decoded recording, so bank values are lists, not _Quote.
+            # JSON-decoded recording, so bank values are lists, not Quote.
             (({"arm": "A", "bank": {}, "trace": {"1": "no results"}},),
              {"arm": "A", "urls_with_quotes": 0, "quotes": 0, "fetches": 0,
               "yield_per_fetch": None, "steps": 1}),

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from silica.config import CONFIG
+from silica.kernel.base.formats import AUDIO_EXTS
 from silica.sources import convert as conv
 from tests.doc_factory import PNG_1X1, docx_bytes, pptx_bytes
 
@@ -246,7 +247,7 @@ def test_the_recorders_formats_open_through_the_demuxer_whitelist(tmp_path):
     made = []
     for ext, codec in ((".aiff", []), (".au", []), (".3gp", ["-c:a", "aac"]),
                        (".amr", ["-ar", "8000", "-ac", "1", "-c:a", "libopencore_amrnb"])):
-        assert ext in conv.AUDIO_EXTS
+        assert ext in AUDIO_EXTS
         src = tmp_path / f"tone{ext}"
         made_it = subprocess.run(["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-f", "lavfi",
                                   "-i", "sine=duration=1", *codec, str(src)], capture_output=True)

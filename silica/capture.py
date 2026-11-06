@@ -21,6 +21,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from silica.kernel.base.home import inbox_dir_for
+from silica.sources.transcript import (
+    FORMAT_CHATGPT,
+    FORMAT_CLAUDE_AI,
+    FORMAT_CLAUDE_CODE,
+    FORMAT_SILICA,
+    SOURCE_SILICA,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -148,11 +155,11 @@ def _explode_conversations(conversations: list[dict]) -> list[tuple[str, dict]]:
         if not isinstance(conversation, dict):
             continue
         if "mapping" in conversation:
-            source, fmt = "chatgpt", "chatgpt-mapping"
+            source, fmt = "chatgpt", FORMAT_CHATGPT
             cid = str(conversation.get("conversation_id") or conversation.get("id") or "")
             title = str(conversation.get("title") or "")
         elif "chat_messages" in conversation:
-            source, fmt = "claude-ai", "claude-ai-messages"
+            source, fmt = "claude-ai", FORMAT_CLAUDE_AI
             cid = str(conversation.get("uuid") or "")
             title = str(conversation.get("name") or "")
         else:
@@ -194,7 +201,7 @@ def _jsonl_envelopes(target: Path) -> list[tuple[str, dict]]:
     for f in files:
         session_id = f.stem
         envelope = _import_envelope(
-            "claude-code", "claude-code-jsonl", {},
+            "claude-code", FORMAT_CLAUDE_CODE, {},
             session_id=session_id, title="",
         )
         envelope["payload"] = f.read_text(encoding="utf-8", errors="replace")
@@ -298,9 +305,9 @@ def capture_session(messages: list[dict], *, session_id: str, driver: str,
         )
         return write_envelope(vault, name, {
             "version": 1,
-            "source": "silica",
+            "source": SOURCE_SILICA,
             "event": event,
-            "format": "silica-session",
+            "format": FORMAT_SILICA,
             "captured_at": datetime.now(UTC).isoformat(),
             "session_id": session_id,
             "cwd": os.getcwd(),

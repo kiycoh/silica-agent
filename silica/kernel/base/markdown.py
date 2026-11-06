@@ -7,6 +7,7 @@ import re
 import textwrap
 from markdown_it import MarkdownIt
 
+from silica.kernel.base.formats import TABULAR_EXTS, VISUAL_MEDIA_EXTS
 from silica.kernel.base.frontmatter import FM_RE_SCAN
 from silica.kernel.base.syntax import ADR_REF_RE
 
@@ -17,19 +18,13 @@ _FOOTNOTE_DEF_RE = re.compile(r"^([ \t]{0,3})\[\^[^\]\n]+\]:[ \t]?", re.MULTILIN
 # before .ipynb/.mov/.tiff joined 2026-08-27, each such link sat in the
 # backends' unresolved set as a phantom dangling NOTE) and extract_file_refs
 # RETURNS them as the note→file reference bucket. Deliberately a superset of
-# text/media.py's _IMG_EXT_TUPLE: that list is "what to strip from prose"
-# (visual media only — a .zip or .ipynb link must stay in the text), this one
-# is "what is a file". Extension allowlist, not "has a dot": note titles like
-# "Node.js" or "Web 2.0" must stay note targets.
-NON_MD_EXTENSIONS = (
-    '.png', '.jpg', '.jpeg', '.pdf', '.webp', '.svg', '.gif', '.bmp',
-    '.tif', '.tiff', '.avif', '.mp4', '.mov', '.avi', '.mkv',
-    '.zip', '.html', '.css', '.ipynb',
-    # Tabular data (convert.py TABULAR_EXTS): a profile note names its source
-    # file, and as note targets these were the same phantom dangling links the
-    # 2026-08-27 batch fixed for notebooks.
-    '.csv', '.tsv', '.parquet',
-)
+# VISUAL_MEDIA_EXTS: that list is "what to strip from prose" (visual media only —
+# a .zip or .ipynb link must stay in the text), this one is "what is a file".
+# Extension allowlist, not "has a dot": note titles like "Node.js" or "Web 2.0"
+# must stay note targets.
+# Tabular data: a profile note names its source file, and as note targets these
+# were the same phantom dangling links the 2026-08-27 batch fixed for notebooks.
+NON_MD_EXTENSIONS = (*VISUAL_MEDIA_EXTS, '.zip', '.html', '.css', '.ipynb', *TABULAR_EXTS)
 
 # Every marker that can make `_extract_links_ast` return anything. It reads
 # targets from two places only — a text token containing `[[…]]`, and the

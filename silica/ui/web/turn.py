@@ -27,6 +27,7 @@ from silica.agent.constraints import (
     web_turn_constraints,
 )
 from silica.agent.loop import run_agent
+from silica.agent.mentions import image_mark
 from silica.agent.sentinels import EMPTY_COMPLETION
 from silica.tools import tool_failed
 from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
@@ -282,7 +283,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
     from silica.obs.bus import BUS
     BUS.subscribe("work/phase", on_phase)
     # A typed /nucleate runs the injector with no agent call around it, and
-    # says so on "work/tool" (cli._sc_nucleate), so its block draws as the
+    # says so on "work/tool" (ingest.nucleate), so its block draws as the
     # agent's does.
     BUS.subscribe("work/tool", on_phase)
 
@@ -409,7 +410,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                 return handled or expanded == "", expanded, capture.get()
 
             # Pumped as the agent's turn is: a command that runs the injector
-            # streams its block and phases while it works (cli._sc_nucleate),
+            # streams its block and phases while it works (ingest.nucleate),
             # and they reached no one while this awaited the thread whole. Held
             # as the turn's task, so a dropped tab keeps the gate shut until
             # the work ends instead of freeing it under a running import.
@@ -515,7 +516,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # re-sent with every later turn and stored with the session.
         images = [] if text.startswith("/") else list(attachments)
         if images:
-            agent_msg += "".join(f"\n\n[image attached: {p}]" for p in images)
+            agent_msg += "".join(image_mark(p) for p in images)
         msg: dict[str, Any] = {"role": "user", "content": agent_msg}
         if text.startswith("/"):
             msg["origin"] = "cli"

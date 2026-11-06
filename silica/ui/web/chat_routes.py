@@ -16,9 +16,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from silica.agent import turn_notes
+from silica.agent.mentions import IMAGE_MARK, IMAGE_MARK_RE
 from silica.tools import tool_failed
 from silica.agent.recall_watch import numbers_of_session, read_refs, READS_KEY
 from silica.config import CONFIG, demo
+from silica.kernel.base.formats import IMAGE_SUFFIX, ext_alternation
 from silica.kernel.graph.mindmap import note_resolver
 from silica.sources import drop_turn
 from silica.ui.web import drop, flags, render, session, sse, turn
@@ -48,7 +50,6 @@ def _save_attachments(images: list) -> list[Path]:
     import binascii
     import hashlib
 
-    from silica.kernel.recall.image_readings import _MIME
     from silica.kernel.base.durable import atomic_write_bytes
     from silica.kernel.base.home import attachments_dir
 
@@ -58,7 +59,7 @@ def _save_attachments(images: list) -> list[Path]:
     for img in images:
         name = str((img or {}).get("name") or "image")
         m = re.match(r"data:(image/[\w.+-]+);base64,(.+)", str((img or {}).get("data") or ""), re.S)
-        ext = next((e for e, mime in _MIME.items() if m and mime == m.group(1)), None)
+        ext = IMAGE_SUFFIX.get(m.group(1)) if m else None
         if m is None or ext is None:
             raise HTTPException(status_code=400, detail=f"{name}: not an image the chat model reads "
                                                         "(png, jpg, webp, gif, bmp)")
@@ -75,8 +76,7 @@ def _save_attachments(images: list) -> list[Path]:
     return out
 
 
-_ATTACHED_RE = re.compile(r"\n*\[image attached: ([^\]\n]+)\]")
-_ATTACHMENT_NAME_RE = re.compile(r"[0-9a-f]{16}\.(?:png|jpg|webp|gif|bmp)")
+_ATTACHMENT_NAME_RE = re.compile(rf"[0-9a-f]{{16}}\.{ext_alternation(IMAGE_SUFFIX.values())}")
 
 
 def _attached_images(content: str) -> tuple[str, list[dict]]:
@@ -84,8 +84,8 @@ def _attached_images(content: str) -> tuple[str, list[dict]]:
     saved path for the model (silica_look opens it), the person sees the picture
     they sent, as the live bubble showed it."""
     images = [{"src": f"/attachment/{Path(p).name}", "name": Path(p).name}
-              for p in _ATTACHED_RE.findall(content) if _ATTACHMENT_NAME_RE.fullmatch(Path(p).name)]
-    return _ATTACHED_RE.sub("", content).rstrip(), images
+              for p in IMAGE_MARK_RE.findall(content) if _ATTACHMENT_NAME_RE.fullmatch(Path(p).name)]
+    return IMAGE_MARK_RE.sub("", content).rstrip(), images
 
 
 @router.get("/attachment/{name}")
@@ -217,11 +217,11 @@ def _edited(content: str, words: str, note: str = "") -> str:
     from silica.agent.mentions import named_notes, strip
 
     base = strip(content)
-    cuts = [i for i in (base.find(drop_turn.MANIFEST_MARK), base.find("\n\n[image attached: ")) if i >= 0]
+    cuts = [i for i in (base.find(drop_turn.MANIFEST_MARK), base.find(f"\n\n{IMAGE_MARK}")) if i >= 0]
     rest = base[min(cuts):] if cuts else ""
     block = named_notes(words, None, note)
     if block:
-        at = rest.find("\n\n[image attached: ")
+        at = rest.find(f"\n\n{IMAGE_MARK}")
         rest = rest + "\n\n" + block if at < 0 else rest[:at] + "\n\n" + block + rest[at:]
     return words + rest
 
@@ -318,7 +318,7 @@ def get_messages():
             from silica.agent.mentions import strip
 
             content = strip(content)
-        if m["role"] == "user" and isinstance(content, str) and "[image attached: " in content:
+        if m["role"] == "user" and isinstance(content, str) and IMAGE_MARK in content:
             content, images = _attached_images(content)
         files: list[dict] = []
         if m["role"] == "user":

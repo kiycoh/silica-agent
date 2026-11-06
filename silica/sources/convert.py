@@ -5,11 +5,11 @@
 
 A plain function, not a `SourceAdapter`: `/convert` exposes it and `/nucleate`
 calls it as the fallback when no source adapter claims a file. Dispatch is by
-extension over `DOC_EXTS`, three families with three different backends:
+extension over `formats.FORMATS`, families with different backends:
 
   * PDF — the selectable provider seam below.
   * DOCX (mammoth → HTML), EPUB (a ZIP of XHTML), FB2 (XML) and PPTX (a ZIP
-    of slide XML) (`_BASE_TEXT_EXTS`) — read in process through one
+    of slide XML) — read in process through one
     HTML/XML-to-markdown pass, no office suite and no torch; on the server
     mammoth runs in `pdf_extract`'s limited child (ADR-0120). XPS and MOBI,
     which only MuPDF opened, are no longer accepted: declared unsupported
@@ -18,7 +18,7 @@ extension over `DOC_EXTS`, three families with three different backends:
     them into a one-page PDF), and the chat model's reading when it is not, as
     on the server (ADR-0120). OOXML sheets (`OFFICE_EXTS`) — mineru, always,
     because it is the only backend that opens them at all.
-  * ODF, RTF and legacy `.xls` (`_PURE_PY_OFFICE_EXTS`) — read in process, with
+  * ODF, RTF and legacy `.xls` — read in process, with
     no office suite anywhere: an ODF file is a ZIP the standard library opens,
     and striprtf + xlrd together weigh ~200 KB.
   * Legacy binary `.doc`/`.ppt` (`LEGACY_OFFICE_EXTS`) — the only two formats
@@ -71,13 +71,13 @@ import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Callable, Sequence
-from contextvars import ContextVar
 from glob import escape as glob_escape, glob
 from html.parser import HTMLParser
 from pathlib import Path
 
 from silica.config import CONFIG
 from silica.kernel.base import frontmatter
+from silica.kernel.base import formats
 from silica.kernel.base.syntax import FILE_UNSAFE, LINK_UNSAFE, MD_IMAGE_RE
 from silica.kernel.text.sanitize import strip_degenerate_runs
 
@@ -122,8 +122,6 @@ def _reap_with_parent_factory():
 
 
 _REAP_WITH_PARENT = _reap_with_parent_factory()
-
-_IMG_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 
 # Book segmentation — a converted book is one giant markdown, but RECON caps
 # concepts PER FILE (keyphrase.MAX_CONCEPTS=40), so a whole book in one inbox
@@ -178,52 +176,8 @@ _MINERU_ERR_RE = re.compile(r"error|exception|traceback", re.IGNORECASE)
 _MINERU_SIX_RE = re.compile(r"No module named ['\"]six['\"]")
 
 
-# Text documents read in process with no PDF renderer in the path: DOCX through
-# mammoth, EPUB (a ZIP of XHTML), FB2 (XML) and PPTX (a ZIP of slide XML)
-# through the standard library. `.txt`/`.md` are absent on purpose:
-# ProseAdapter already claims them.
-_BASE_TEXT_EXTS = (".docx", ".epub", ".fb2", ".pptx")
-
-# Image formats mineru opens (its own `image_suffixes`). It wraps the image into
-# a one-page PDF internally, so a screenshot or a scan takes the same OCR
-# pipeline a scanned PDF takes. Both `.tif` and `.tiff` land because mineru
-# sniffs content rather than trusting the extension (measured: `.tif` -> "tiff",
-# `.jpg` -> "jpeg"). `.heic` is absent: mineru does not list it, and reading it
-# at all needs pillow-heif. Without mineru only `image_readings._MIME`'s
-# formats are read, by the chat model (`_via_image_model`).
-IMG_EXTS = (".png", ".jpg", ".jpeg", ".jp2", ".webp", ".gif", ".bmp", ".tif", ".tiff")
-
-# OOXML mineru parses NATIVELY, via openpyxl, with no LibreOffice anywhere in
-# the path. Output lands in `<stem>/office/<stem>.md` instead of `auto/`,
-# which the provider's recursive glob already finds.
-#
-# `.docx` is deliberately NOT here: mammoth reads it in the base install, so
-# routing it through mineru would demand an OCR install for a format that
-# already works. Nor is `.pptx` since 2026-10-17 (ADR-0120): mineru 3.2.1's
-# pptx path is python-pptx with no OCR at all (`grep -i ocr` on its
-# model/pptx/ and backend/office/ is empty), so it read nothing the deck's own
-# XML does not, and `_via_pptx` reads that XML with no install. The pre-2007
-# binaries are not here either -- neither mineru nor MuPDF opens them (see
-# `_PURE_PY_OFFICE_EXTS` and `LEGACY_OFFICE_EXTS`).
-OFFICE_EXTS = (".xlsx",)
-
-# Inputs no provider but mineru opens, so the provider seam does not apply.
-_MINERU_ONLY_EXTS = (*IMG_EXTS, *OFFICE_EXTS)
-
-# ODF is a ZIP with a `content.xml` inside, so reading it needs no office suite
-# and no dependency at all — `zipfile` plus `xml.etree`. RTF and legacy `.xls`
-# need one small pure-python parser each (striprtf 15 KB BSD-3, xlrd 192 KB
-# BSD). Together that is ~200 KB against the ~240 MB minimum a headless
-# LibreOffice install costs on Debian (measured: libreoffice-core 155 MB +
-# -common 47 MB + one app), for five of the seven formats that used to demand it.
-#
-# ponytail: text only. The old `soffice → pdf → MuPDF` path carried embedded
-# figures through; these do not. Re-save as PDF when the images are the point.
-ODF_EXTS = (".odt", ".odp", ".ods")
-_PURE_PY_OFFICE_EXTS = (*ODF_EXTS, ".rtf", ".xls")
-
-# What is left after the above: the two pre-2007 binary formats with no pure
-# python reader worth carrying. Apache POI reads both and is Apache-2.0, but it
+# `.doc` and `.ppt`, the two pre-2007 binary formats with no pure python reader
+# worth carrying. Apache POI reads both and is Apache-2.0, but it
 # is Java — trading a 240 MB office suite for a JVM is not a trade. So these two
 # keep the LibreOffice hop, and when it is absent they are refused with a
 # message naming the OOXML escape rather than converted badly.
@@ -245,7 +199,6 @@ _PURE_PY_OFFICE_EXTS = (*ODF_EXTS, ".rtf", ".xls")
 # So: single-dash flags (LibreOffice accepts them too), the wizard suppressed,
 # and AOO refused BEFORE the subprocess rather than after — attempting it puts a
 # dialog on the user's screen, which no timeout can take back.
-LEGACY_OFFICE_EXTS = (".ppt", ".doc")
 # Single dash on purpose (see above). `-invisible`/`-nodefault`/`-norestore`
 # keep it from opening a blank document or restoring a crashed session;
 # `-nolockcheck` stops it consulting a profile lock we deliberately bypass.
@@ -261,45 +214,6 @@ _SOFFICE_PROBE_TIMEOUT_S = 20
 # mistaken for the cause when a conversion really does fail.
 _SOFFICE_NOISE = ("javaldx",)
 
-# Media: transcribed, not parsed. Both families take the same path (ffmpeg
-# demuxes any container to 16 kHz mono wav, which is the one input every ASR
-# accepts), so video costs nothing beyond `-vn`. The list is what ffmpeg reads
-# in a default build, not everything it can be built for. The second row is
-# ADR-0120's, what a phone or a Mac recorder writes: 3GP/3G2 (old Android
-# recorders, the `mov` demuxer), AIFF (macOS), AMR (voice memos) and Sun AU.
-# `.3gp` can hold video, whose audio is the part transcribed, as for `.mp4`.
-# Not NotebookLM's `.ram` (a playlist, the class `_FFMPEG_FORMATS` keeps out),
-# `.cda` (a 44-byte CD track stub with no audio in it) or `.mid` (MIDI, no speech).
-AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma",
-              ".3gp", ".3g2", ".aiff", ".aif", ".aifc", ".amr", ".au", ".snd")
-VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".mpg", ".mpeg")
-MEDIA_EXTS = (*AUDIO_EXTS, *VIDEO_EXTS)
-
-# Data files: never prose-converted row by row. A .csv in the inbox becomes a
-# PROFILE note — schema, per-column stats, a 5-row sample — that makes the file
-# discoverable by recall while the rows stay on disk for `silica_query_table`
-# to aggregate in place. json/ndjson stay out: their shape is unknowable up
-# front (config? API dump? records?), so profiling them would guess.
-TABULAR_EXTS = (".csv", ".tsv", ".parquet")
-
-# `.ipynb` reaches convert() only where the code lane does not claim it
-# (`NotebookAdapter.matches`: no git checkout around the vault).
-DOC_EXTS = (
-    ".pdf", *_BASE_TEXT_EXTS, *IMG_EXTS, *OFFICE_EXTS, *MEDIA_EXTS,
-    *_PURE_PY_OFFICE_EXTS, *LEGACY_OFFICE_EXTS, *TABULAR_EXTS, ".ipynb",
-)
-
-# The subset that is a *document* someone meant to keep, as opposed to an
-# attachment that happens to be convertible. Onboarding offers to convert what
-# it finds sitting in a vault, and by that measure an image or a video is almost
-# always an attachment: every Obsidian vault carries pasted screenshots, and
-# `_copy_images` puts Silica's OWN extracted figures in `<inbox>/Images`. Offering
-# to convert those would mean offering to re-ingest our own output.
-CONVERTIBLE_DOC_EXTS = (
-    ".pdf", *_BASE_TEXT_EXTS, *OFFICE_EXTS, *_PURE_PY_OFFICE_EXTS,
-    *LEGACY_OFFICE_EXTS, *TABULAR_EXTS,
-)
-
 # ffmpeg knobs. `-nostdin` is not cosmetic: ffmpeg reads stdin by default and
 # would swallow the TUI's keystrokes (or block) when run under a prompt.
 _FFMPEG_ARGS = ("-nostdin", "-loglevel", "error", "-y")
@@ -308,7 +222,7 @@ _FFMPEG_ARGS = ("-nostdin", "-loglevel", "error", "-y")
 # uploader's: ffmpeg 8.0.1 read "x.mp3" holding `ffconcat version 1.0` as a
 # concat list of another file beside it (2026-10-14), and the host's 5.1.9
 # predates the 2024 check that keeps an HLS playlist out the same way. Every
-# AUDIO_EXTS and VIDEO_EXTS file opens with one of these; no playlist does.
+# format of the media families opens with one of these; no playlist does.
 _FFMPEG_FORMATS = ("-format_whitelist",
                    "mp3,wav,mov,aac,flac,ogg,asf,matroska,avi,mpeg,mpegts,aiff,amr,au")
 _ASR_SAMPLE_RATE = "16000"
@@ -330,14 +244,21 @@ _ASR_TIMEOUT_S = 7200
 _ASR_PARAGRAPH_GAP_S = 2.0
 
 
-def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = None) -> list[str]:
+class GpuOutOfMemory(ValueError, RuntimeError):
+    """The GPU was full: the next file fails the same way until something else
+    lets go of it. Both bases, because a reader's failure reaches its callers as
+    either, and each of them already catches what it caught before."""
+
+
+def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = None, *,
+            on_page: Callable[[int, int], None] | None = None, beside: bool = False) -> list[str]:
     """Convert a non-`.md` document into one or more `.md` notes in the inbox.
 
     Returns the list of created note paths. A small document is a single note; a
     book-sized one is split into chapter/size-bounded segments (see
-    ``split_markdown``) so RECON — which caps concepts PER FILE — sees book
+    ``_split_markdown_flagged``) so RECON — which caps concepts PER FILE — sees book
     units, not the whole book collapsed into one note. Dispatch by extension
-    over ``DOC_EXTS``; anything else → ``ValueError``. Side artifacts (extracted
+    over ``formats.DOC_EXTS``; anything else → ``ValueError``. Side artifacts (extracted
     figures) go to ``<dest_dir>/Images`` when given, else ``<inbox>/Images``.
 
     ``leaf`` is ``(basename, identity fields)`` for a source that is one node
@@ -345,25 +266,28 @@ def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = Non
     written once as that source leaf, references included, and every segment
     is named after it and carries ``source_leaf:`` so CLEANUP links its notes
     there instead of writing one leaf per segment.
+
+    ``on_page`` is called with (pages read, pages to read) while the chat model
+    reads a PDF's pages, the one slow part of a conversion that knows how far it
+    is (ADR-0121 point 1). ``beside`` is for a file the vault's + brought in: that
+    file sits where the person put it, at the top of the vault and not in the
+    inbox (owner, 2026-11-02), so its note goes beside it. /convert keeps its
+    contract, a note in the inbox.
     """
     # Strip first: a quoted path with a stray trailing space ("…book.pdf ") has
     # suffix ".pdf " — not in DOC_EXTS — and the rejection then prints ".pdf",
     # a message the user cannot tell from a real unsupported type.
     target = target.strip()
-    if Path(target).suffix.lower() not in DOC_EXTS:
+    if Path(target).suffix.lower() not in formats.DOC_EXTS:
         raise ValueError(f"no converter for {Path(target).suffix.lower() or 'this file type'}")
-    return _doc_to_md(target, dest_dir, leaf)
-
-
-# Set by the job worker around one convert() (ADR-0121 point 1): called with
-# (pages read, pages to read) while the chat model reads a PDF's pages, the one
-# slow part of a conversion that knows how far it is.
-PAGE_PROGRESS: ContextVar[Callable[[int, int], None] | None] = ContextVar("page_progress", default=None)
-# Set by the job worker around the convert() of a file the vault's + brought in:
-# that file sits where the person put it, at the top of the vault and not in
-# the inbox (owner, 2026-11-02), so its note goes beside it. /convert keeps its
-# contract, a note in the inbox.
-BESIDE_SOURCE: ContextVar[bool] = ContextVar("beside_source", default=False)
+    try:
+        return _doc_to_md(target, dest_dir, leaf, on_page, beside)
+    except (ValueError, RuntimeError) as exc:
+        # The one place a tool's text is read for what it means. Any reader can
+        # say it: the sentence comes from the OCR tool's own stderr.
+        if "CUDA out of memory" in str(exc):
+            raise GpuOutOfMemory(str(exc)) from exc
+        raise
 
 
 def _in(folder: str, name: str) -> str:
@@ -372,7 +296,7 @@ def _in(folder: str, name: str) -> str:
     return f"{folder}/{name}" if folder else name
 
 
-def _note_dir(src: Path, inbox: str) -> str:
+def _note_dir(src: Path, inbox: str, beside: bool = False) -> str:
     """The folder a converted note goes to: the source's own folder when the
     source sits under the inbox, else the inbox itself.
 
@@ -380,14 +304,14 @@ def _note_dir(src: Path, inbox: str) -> str:
     `CorsoA/Lezione 1.pdf` and `CorsoB/Lezione 1.pdf` the same note, the second
     overwriting the first (reproduced 2026-10-13, ADR-0098 point 6), and a
     folder import is made of exactly such folders.
-    A file the vault's + imported (`BESIDE_SOURCE`) converts beside itself
-    wherever it sits in the vault: the same rule against the vault root.
+    A file the vault's + imported (`beside`) converts beside itself wherever it
+    sits in the vault: the same rule against the vault root.
     ponytail: a source outside the inbox given to /convert still lands at the
     inbox root, so two such sources with one name still collide; the upgrade is
-    `BESIDE_SOURCE` for /convert too, due when a /convert of a library reports it.
+    `beside` for /convert too, due when a /convert of a library reports it.
     """
     vault = Path(CONFIG.vault_path or ".").resolve()
-    if BESIDE_SOURCE.get():
+    if beside:
         try:
             rel = src.resolve().parent.relative_to(vault)
             return "" if rel == Path(".") else rel.as_posix()
@@ -453,7 +377,7 @@ def _split_by_size(text: str, max_chars: int) -> list[str]:
 # A section whose first heading is a bibliography heading. Reference lists are
 # citation metadata, not content to nucleate: one survey's references produced
 # 34 venue notes (NeurIPS.md, ICML.md, …) out of 98 total (2026-08-15 run).
-_REFERENCES_HEADING_RE = re.compile(
+REFERENCES_HEADING_RE = re.compile(
     r"^#{1,6}\s*[\d.\s]*\**\s*(references?|bibliography|works cited|bibliografia|"
     r"riferimenti(?:\s+bibliografici)?)\s*\**\s*$",
     re.IGNORECASE,
@@ -539,7 +463,7 @@ def _section_kind(section: str) -> str:
     for line in section.splitlines():
         if _HEADING_RE.match(line):
             head = line.strip()
-            if _REFERENCES_HEADING_RE.match(head):
+            if REFERENCES_HEADING_RE.match(head):
                 return "references"
             if _CONTENTS_HEADING_RE.match(head) or _CHECKLIST_HEADING_RE.match(head):
                 return "boilerplate"
@@ -561,7 +485,17 @@ def _section_kind(section: str) -> str:
 
 
 def _split_markdown_flagged(md: str, max_chars: int) -> list[tuple[str, str]]:
-    """split_markdown's engine, each segment carrying its `_section_kind`.
+    """Book-sized markdown → RECON-sized segments, each carrying its `_section_kind`.
+
+    Headings (``#``/``##``) are the cut points; any section still over
+    ``max_chars`` is further split on paragraph boundaries — the same
+    dimensional fallback that carries a heading-less scan. Adjacent pieces are
+    then greedily packed up to ``max_chars``: real converters flatten every
+    section to ``##`` and emit lone ``## Chapter N`` lines (verified on an
+    80-page docling probe: 53 raw segments, some 14 chars), so raw sections
+    over-fragment — packing restores chapter-sized units and absorbs the
+    micro-segments. A document smaller than ``max_chars`` packs to a single
+    segment. Always returns ≥1 segment.
 
     The kind is per SECTION (heading-level), inherited by its size-split
     continuation pieces, and packing never merges across a kind change — so a
@@ -588,22 +522,6 @@ def _split_markdown_flagged(md: str, max_chars: int) -> list[tuple[str, str]]:
     if cur.strip():
         out.append((cur, cur_kind))
     return out or [(md, "")]
-
-
-def split_markdown(md: str, max_chars: int = _MAX_SEGMENT_CHARS) -> list[str]:
-    """Book-sized markdown → RECON-sized segments: heading-split, packed to size.
-
-    Headings (``#``/``##``) are the cut points; any section still over
-    ``max_chars`` is further split on paragraph boundaries — the same
-    dimensional fallback that carries a heading-less scan. Adjacent pieces are
-    then greedily packed up to ``max_chars``: real converters flatten every
-    section to ``##`` and emit lone ``## Chapter N`` lines (verified on an
-    80-page docling probe: 53 raw segments, some 14 chars), so raw sections
-    over-fragment — packing restores chapter-sized units and absorbs the
-    micro-segments. A document smaller than ``max_chars`` packs to a single
-    segment. Always returns ≥1 segment.
-    """
-    return [seg for seg, _ in _split_markdown_flagged(md, max_chars)]
 
 
 def _segment_slug(segment: str, fallback: str) -> str:
@@ -676,52 +594,65 @@ def _respace_prose(md: str) -> str:
     return "".join(out)
 
 
-def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None) -> list[str]:
-    src = _resolve_input(target)
+def has_mineru() -> bool:
+    """Whether the mineru CLI is on PATH: what an image's reader turns on here,
+    and what the doctor's rows report."""
+    return shutil.which("mineru") is not None
+
+
+def _pdf_provider():
+    name = resolve_pdf_provider(CONFIG.pdf_provider)
+    if name not in PDF_PROVIDERS:
+        raise ValueError(
+            f"unknown pdf_provider {CONFIG.pdf_provider!r} "
+            f"(known: {', '.join(PDF_PROVIDERS)})"
+        )
+    return PDF_PROVIDERS[name]
+
+
+def _reader_of(fmt: formats.Format):
+    """The function that reads `fmt` now.
+
+    Two rows do not name one for good: a PDF's is a setting, and an image's
+    turns on what is installed. Images and OOXML have exactly one backend, so the
+    provider seam does not apply to them: a text-layer reader opens an image but
+    reads no text out of it (measured on MuPDF: a 1653x2339 render of a text page
+    yields ''), and neither docling nor opendataloader is a path verified here
+    for either family. The seam is PDF-only: docling/opendataloader/mineru take a
+    PDF and nothing else, so DOCX/EPUB/FB2 each have their own in-process reader.
+
+    By name at call time: the table sits below this module, and a reader replaced
+    on the module has to be the one that runs.
+    """
+    if fmt.family == "image" and not has_mineru():
+        return _via_image_model
+    if fmt.reader == formats.PDF_READER:
+        return _pdf_provider()
+    return globals()[fmt.reader]
+
+
+def _read(reader, src: Path, workdir: Path, on_page) -> tuple[str, Path]:
+    """`reader` on `src`, handed `on_page` if it is one that can say how far it is.
+
+    Three of them can. Every other reader, and whatever fills `PDF_PROVIDERS`, is
+    a plain (src, workdir), so one more parameter on all of them would be noise.
+    """
+    if reader in (_via_pdfium, _via_pptx, _via_legacy_office):
+        return reader(src, workdir, on_page)
+    return reader(src, workdir)
+
+
+def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None,
+               on_page=None, beside: bool = False) -> list[str]:
+    src = resolve_input(target)
     suffix = src.suffix.lower()
-    # Images and OOXML have exactly one backend, so the provider seam does not
-    # apply: a text-layer reader opens an image but reads no text out of it
-    # (measured on MuPDF: a 1653x2339 render of a text page yields ''), and
-    # neither docling nor opendataloader is a path verified here for either family.
-    if suffix in TABULAR_EXTS:
-        return _convert_tabular(src)
-    if suffix in IMG_EXTS and shutil.which("mineru") is None:
-        provider = _via_image_model
-    elif suffix in _MINERU_ONLY_EXTS:
-        provider = _pdf_via_mineru
-    elif suffix in MEDIA_EXTS:
-        provider = _via_asr
-    elif suffix in ODF_EXTS:
-        provider = _via_odf
-    elif suffix == ".rtf":
-        provider = _via_rtf
-    elif suffix == ".xls":
-        provider = _via_xls
-    elif suffix in LEGACY_OFFICE_EXTS:
-        provider = _via_legacy_office
-    # The seam is PDF-only — docling/opendataloader/mineru take a PDF and
-    # nothing else, so DOCX/EPUB/FB2 each have their own in-process reader.
-    elif suffix == ".docx":
-        provider = _via_docx
-    elif suffix == ".epub":
-        provider = _via_epub
-    elif suffix == ".fb2":
-        provider = _via_fb2
-    elif suffix == ".pptx":
-        provider = _via_pptx
-    elif suffix == ".ipynb":
-        provider = _via_ipynb
-    else:
-        name = resolve_pdf_provider(CONFIG.pdf_provider)
-        if name not in PDF_PROVIDERS:
-            raise ValueError(
-                f"unknown pdf_provider {CONFIG.pdf_provider!r} "
-                f"(known: {', '.join(PDF_PROVIDERS)})"
-            )
-        provider = PDF_PROVIDERS[name]
+    fmt = formats.FORMATS[suffix]
+    if fmt.family == "tabular":
+        return _convert_tabular(src, beside)
+    provider = _reader_of(fmt)
     with tempfile.TemporaryDirectory() as tmp:
-        md_text, images_src = provider(src, Path(tmp))
-        read_from_image = not md_text.strip() and suffix in IMG_EXTS
+        md_text, images_src = _read(provider, src, Path(tmp), on_page)
+        read_from_image = not md_text.strip() and fmt.family == "image"
         if read_from_image:
             md_text = _image_reading_md(src)
         elif provider is _via_pdfium:
@@ -733,37 +664,16 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
             read_from_image = bool(seen and seen.get("read") and len(seen["no_text"]) == seen["n_pages"])
         if not md_text.strip():
             # Silence here would write an empty inbox note and call it success.
-            if suffix in MEDIA_EXTS:
-                raise ValueError(
-                    f"no speech transcribed from {src.name} — the audio track "
-                    "carries no recognisable speech (music, silence, or a "
-                    "language the model was not given)"
-                )
+            from silica.sources.pdf_extract import PdfUnreadable
+
             if provider is _via_image_model:
                 # No OCR ran, so pointing at one would be advice the server
                 # cannot take; the sentence is the student's (ADR-0120).
-                from silica.sources.pdf_extract import PdfUnreadable
-
                 raise PdfUnreadable(IMAGE_UNREAD, "no_text")
-            if suffix in _MINERU_ONLY_EXTS:
-                # mineru already ran (it is the only backend for these), so
-                # pointing at OCR would be advice the user has already taken.
-                raise ValueError(
-                    f"no readable text in {src.name} — the OCR pass found none "
-                    "(a photo with no writing in it, or an empty document)"
-                )
-            if suffix in (*_PURE_PY_OFFICE_EXTS, *_BASE_TEXT_EXTS):
-                # No OCR anywhere in this path, so advice about OCR would be a
-                # red herring: the file really does carry no text.
-                raise ValueError(
-                    f"no text in {src.name} — the document is empty, or its "
-                    "content is entirely images (which this path does not read; "
-                    "re-save it as PDF to run those through OCR)"
-                )
+            if fmt.empty_text_message:
+                raise ValueError(fmt.empty_text_message.format(name=src.name))
             # The usual cause is a scan with no text layer. pdfium refuses one
             # itself (_via_pdfium); this is another provider coming back empty.
-            from silica.sources.pdf_extract import PdfUnreadable
-
             raise PdfUnreadable(_no_text_sentence(provider is _pdf_via_mineru), "no_text")
         # Copy only images the markdown references: mineru dumps every crop it
         # detects (477 files for a 200-page book, 19 referenced) — the rest
@@ -777,7 +687,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
     from silica.kernel.base.manifest import active_inbox_dir
     from silica.kernel.write.preserve import Loss
 
-    inbox = _note_dir(src, active_inbox_dir() or "Inbox")
+    inbox = _note_dir(src, active_inbox_dir() or "Inbox", beside)
     stem = _note_stem(src)
     if leaf is not None:
         _write_leaf(src, body, *leaf)
@@ -926,7 +836,7 @@ def _first_prose_words(part: str) -> list[str]:
 # hand-faked modules in tests/test_convert.py — a library rename would drift the
 # fakes and pass silently. Add a real-install smoke test to catch API drift.
 
-def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
+def _via_pdfium(src: Path, workdir: Path, on_page=None) -> tuple[str, Path]:
     """Default provider — PDFium's text layer, headings from the outline or a
     line heuristic. No torch, no JVM, one ~3 MB wheel.
 
@@ -955,7 +865,7 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
     from silica.sources import pdf_extract, pdf_tables
 
     data = pdf_extract.read(src)
-    _read_pages(data, workdir, draw=lambda pages: pdf_extract.page_pngs(src, pages))
+    _read_pages(data, workdir, draw=lambda pages: pdf_extract.page_pngs(src, pages), on_page=on_page)
     if len(data["no_text"]) == data["n_pages"] and not data["read"]:
         raise pdf_extract.PdfUnreadable(_no_text_sentence(), "no_text")
     after = dict(data["readings"])
@@ -963,7 +873,7 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
         after[i] = f"> [page {i + 1}: no selectable text, not read]"
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)
-    pages = pdf_tables.stitched(src, data)
+    pages = pdf_tables.stitched(src, data, on_page)
     return _pdf_markdown(pages, data["toc"], after, set(data["math_read"])), images
 
 
@@ -994,7 +904,7 @@ def _no_text_sentence(ocr_provider: bool = False) -> str:
 _PAGE_READERS = 4
 
 
-def _read_pages(data: dict, workdir: Path, draw=None) -> None:
+def _read_pages(data: dict, workdir: Path, draw=None, on_page=None) -> None:
     """Send each rendered page to the chat model, a page without text
     (ADR-0087 amendment) for its words and a formula page (the amendment of
     2026-10-14) for a transcription with its formulas in LaTeX, and keep what
@@ -1095,7 +1005,7 @@ def _read_pages(data: dict, workdir: Path, draw=None) -> None:
                 yield batch
 
         results: list[tuple[int, dict | None]] = []
-        report = PAGE_PROGRESS.get() or (lambda done, total: None)
+        report = on_page or (lambda done, total: None)
         report(0, total)
         with ThreadPoolExecutor(max_workers=_PAGE_READERS, thread_name_prefix="pdf-page") as pool:
             for batch in batches():
@@ -1112,8 +1022,7 @@ def _read_pages(data: dict, workdir: Path, draw=None) -> None:
                         break
                     report(1, total)
                     batch = batch[1:]
-                # In order, so a slow page holds the count back a little;
-                # the calling thread is the one the job's PAGE_PROGRESS is set in.
+                # In order, so a slow page holds the count back a little.
                 for (i, _), reading in zip(batch, pool.map(guarded, batch)):
                     results.append((i, reading))
                     report(len(results), total)
@@ -1531,9 +1440,6 @@ _PPTX_BULLETS = frozenset({"", "body", "obj"})
 # mineru's rule for a picture too small to be content (MIN_PICTURE_AREA_RATIO
 # in its pptx_converter, 3.2.1): a logo or an icon under 1% of the slide.
 _PPTX_MIN_PICTURE = 0.01
-# What the vault shows and `_rewrite_image_links` embeds. EMF and WMF, which
-# decks carry for vector art, nothing here renders.
-_PPTX_MEDIA = (".png", ".jpg", ".jpeg", ".gif", ".webp")
 # A PDF's page cap (pdf_extract.MAX_PAGES), for the same reason.
 _PPTX_MAX_SLIDES = 1000
 
@@ -1646,7 +1552,7 @@ def _pptx_table(frame: ET.Element) -> str:
     return "\n".join([lines[0], "|" + "---|" * width, *lines[1:]])
 
 
-def _via_pptx(src: Path, workdir: Path) -> tuple[str, Path]:
+def _via_pptx(src: Path, workdir: Path, on_page=None) -> tuple[str, Path]:
     """PPTX → markdown from the deck's XML, standard library only (ADR-0120).
 
     Slides in the presentation's order, each a `##` heading (its title, or
@@ -1711,7 +1617,7 @@ def _via_pptx(src: Path, workdir: Path) -> tuple[str, Path]:
         else:
             bare[n] = max(pictures)[1]
         parts[n] = out
-    readings = _read_slides(bare, written, images, parts, workdir)
+    readings = _read_slides(bare, written, images, parts, workdir, on_page)
     for n in bare:
         parts[n].insert(1, readings.get(n) or f"> [slide {n + 1}: no text, not read]")
     if not texty and not readings:
@@ -1751,7 +1657,7 @@ def _pptx_slide(z: zipfile.ZipFile, part: str, slide_area: int
             blip = next((d for d in el.iter() if _local_name(d.tag) == "blip"), None)
             media = srels.get(_ooxml_attr(blip, "embed"), "")
             area = _pptx_area(el)
-            if (media.lower().endswith(_PPTX_MEDIA) and media in z.NameToInfo
+            if (media.lower().endswith(formats.WEB_IMAGE_EXTS) and media in z.NameToInfo
                     and not (slide_area and area < _PPTX_MIN_PICTURE * slide_area)):
                 pictures.append((area, media))
             continue
@@ -1785,7 +1691,7 @@ def _pptx_slide(z: zipfile.ZipFile, part: str, slide_area: int
 
 
 def _read_slides(bare: dict[int, str], written: dict[str, str], images: Path,
-                 parts: dict[int, list[str]], workdir: Path) -> dict[int, str]:
+                 parts: dict[int, list[str]], workdir: Path, on_page=None) -> dict[int, str]:
     """The chat model's reading of each slide with no text of its own, from its
     largest picture, through `_read_pages` like a PDF page without text: the
     same cap (`vision_pages`), the same 16 MiB of pictures a file, and the
@@ -1806,7 +1712,7 @@ def _read_slides(bare: dict[int, str], written: dict[str, str], images: Path,
     sample = " ".join(line for out in parts.values() for line in out[1:] if not line.startswith("!["))[:4000]
     data: dict = {"images": sent, "suffixes": suffixes, "unit": "slide",
                   "pages": [[(sample, 0.0)]], "no_text": sorted(sent)}
-    _read_pages(data, workdir)
+    _read_pages(data, workdir, on_page=on_page)
     return data["readings"]
 
 
@@ -2545,7 +2451,7 @@ def _duckdb_profile_bound(src: Path, members: list[Path] | None,
                        [list(r) for r in sample], label, categorical, members)
 
 
-def _convert_tabular(src: Path) -> list[str]:
+def _convert_tabular(src: Path, beside: bool = False) -> list[str]:
     """Data file → profile note in the inbox. The rows never enter the vault.
 
     ADR-0014 turns every source into prose, and for a data file the honest
@@ -2566,7 +2472,7 @@ def _convert_tabular(src: Path) -> list[str]:
     from silica.driver import DRIVER
     from silica.kernel.base.manifest import active_inbox_dir
 
-    inbox = _note_dir(src, active_inbox_dir() or "Inbox")
+    inbox = _note_dir(src, active_inbox_dir() or "Inbox", beside)
     stem = _family_stem(members) if len(members) > 1 else src.stem
     fm = _provenance_fm(src, md, tabular_members=members)
     note_rel = _in(inbox, f"{stem}.md")
@@ -2687,7 +2593,7 @@ def _legacy_office_to_pdf(src: Path, workdir: Path) -> Path:
 
     The timeout is the point. omniparse runs the same conversion as
     `subprocess.run(cmd, check=True)` with no timeout at all, which on a machine
-    whose LibreOffice hangs (measured, see LEGACY_OFFICE_EXTS) blocks the caller
+    whose LibreOffice hangs (measured, see `_SOFFICE_QUIET`) blocks the caller
     forever with no output and no error.
     """
     # Both remaining formats have a free way out, so the errors below lead with
@@ -2740,7 +2646,7 @@ def _legacy_office_to_pdf(src: Path, workdir: Path) -> Path:
     return pdfs[0]
 
 
-def _via_legacy_office(src: Path, workdir: Path) -> tuple[str, Path]:
+def _via_legacy_office(src: Path, workdir: Path, on_page=None) -> tuple[str, Path]:
     """Legacy/ODF → PDF → whichever PDF provider is configured.
 
     Deliberately routed back through the seam rather than pinned to the default:
@@ -2748,13 +2654,7 @@ def _via_legacy_office(src: Path, workdir: Path) -> tuple[str, Path]:
     it here too.
     """
     pdf = _legacy_office_to_pdf(src, workdir)
-    provider = PDF_PROVIDERS.get(resolve_pdf_provider(CONFIG.pdf_provider))
-    if provider is None:
-        raise ValueError(
-            f"unknown pdf_provider {CONFIG.pdf_provider!r} "
-            f"(known: {', '.join(PDF_PROVIDERS)})"
-        )
-    return provider(pdf, workdir)
+    return _read(_pdf_provider(), pdf, workdir, on_page)
 
 
 # --- media: ffmpeg demux + a speech-to-text provider ------------------------
@@ -2799,16 +2699,6 @@ def _media_to_audio(src: Path, workdir: Path, mp3: bool = False) -> Path:
     if out.stat().st_size <= (0 if mp3 else 44):  # a header and no samples
         raise ValueError(f"{src.name} carries no audio track")
     return out
-
-
-def _asr_base(url: str) -> str:
-    """Normalise a configured base URL to one ending in `/v1`.
-
-    Users paste both shapes, and a doubled or missing `/v1` is a 404 whose
-    message says nothing about the cause.
-    """
-    base = url.rstrip("/")
-    return base if base.endswith("/v1") else f"{base}/v1"
 
 
 def _paragraphs_at_pauses(payload: dict, gap_s: float) -> str:
@@ -2862,46 +2752,27 @@ def _asr_via_endpoint(audio: Path) -> str:
 
     import httpx
 
-    from silica.metrics import outcome_of, transcribed
+    from silica.agent.stt import post_transcription, transcribed, transcriptions_url
+    from silica.metrics import outcome_of
     from silica.sources.web_fetch import vtt_to_text
 
-    url = f"{_asr_base(CONFIG.stt_base_url)}/audio/transcriptions"
     data = {"model": CONFIG.stt_model, "response_format": "verbose_json",
             "timestamp_granularities[]": ["word", "segment"]}
     # Named, not omitted: whisper-server and whisper-cli both fall back to "en"
     # when a request names no language (server.cpp:113, cli.cpp:84, read
     # 2026-10-13), so omitting it turned an Italian lecture into English.
-    lang = CONFIG.stt_lang.strip() or "auto"
-    data["language"] = lang
-    mime = "audio/mpeg" if audio.suffix == ".mp3" else "audio/wav"
-
-    def post() -> httpx.Response:
-        with audio.open("rb") as fh:
-            return httpx.post(
-                url,
-                files={"file": (audio.name, fh, mime)},
-                data=data,
-                headers={"Authorization": f"Bearer {CONFIG.stt_api_key}"},
-                timeout=_ASR_TIMEOUT_S,
-            )
-
+    data["language"] = CONFIG.stt_lang.strip() or "auto"
     started = time.monotonic()
     try:
-        resp = post()
-        # ...but a hosted API takes an ISO-639-1 code or nothing: OpenRouter
-        # answered 400 to "auto" on MAI-Transcribe-2, whisper-large-v3,
-        # qwen3-asr-1.7b and scribe-v2 (2026-10-13), and detects the language
-        # itself when the field is absent. The retry costs one more upload;
-        # telling the two servers apart by their URL is a guess.
-        if resp.status_code == 400 and lang == "auto":
-            del data["language"]
-            resp = post()
+        resp = post_transcription(CONFIG.stt_base_url, audio, name=audio.name, form=data,
+                                  mime="audio/mpeg" if audio.suffix == ".mp3" else "audio/wav",
+                                  api_key=CONFIG.stt_api_key, timeout=_ASR_TIMEOUT_S)
     except httpx.HTTPError as e:
         transcribed("media", started, outcome_of(e))
         raise ValueError(
             # whisper-server serves /inference unless told otherwise, and
             # answers 404 on this path (measured 2026-10-13)
-            f"no transcription server at {url}: {e}. Start one (whisper.cpp: "
+            f"no transcription server at {transcriptions_url(CONFIG.stt_base_url)}: {e}. Start one (whisper.cpp: "
             "`whisper-server -m <model> --inference-path /v1/audio/transcriptions`), "
             "point SILICA_STT_BASE_URL at it, or "
             "set SILICA_STT_PROVIDER=whispercpp"
@@ -3061,11 +2932,9 @@ IMAGE_UNREAD = ("This image could not be read: the model that reads images gave 
 def _via_image_model(src: Path, workdir: Path) -> tuple[str, Path]:
     """An image where no OCR is installed, as on the server: no text of its own,
     so `_doc_to_md`'s image branch has the chat model read it (ADR-0120).
-    Refused up front in a format the model is never sent (`_MIME`): a `.tif`
+    Refused up front in a format the model is never sent (`IMAGE_MIME`): a `.tif`
     or `.jp2` needs mineru, or a re-save."""
-    from silica.kernel.recall.image_readings import _MIME
-
-    if src.suffix.lower() not in _MIME:
+    if src.suffix.lower() not in formats.IMAGE_MIME:
         raise ValueError(
             f"{src.suffix} images are read by mineru, which is not installed here: "
             "re-save it as PNG or JPEG"
@@ -3107,7 +2976,7 @@ def _image_reading_md(src: Path) -> str:
             f"> [figure, read by {reading.get('model') or 'a model'}] {reading.get('kind') or 'image'}: {words}\n")
 
 def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
-    """The OCR provider, and the only backend for `IMG_EXTS` / `OFFICE_EXTS`.
+    """The OCR provider, and the only backend for an image or a sheet.
 
     Input-agnostic on purpose: the CLI sniffs the file's content and picks its
     own pipeline (`auto/` for pdf and images, `office/` for pptx/xlsx), and the
@@ -3153,7 +3022,7 @@ def _via_mineru_kit(src: Path, out: Path) -> tuple[str, Path]:
     figures a lecture links (52 in Lezione 27) would never reach the vault.
     """
     archive = out.with_suffix(".zip")
-    tier = ["--tier", _MINERU4_TIER] if src.suffix.lower() in (".pdf", *IMG_EXTS) else []
+    tier = ["--tier", _MINERU4_TIER] if src.suffix.lower() in (".pdf", *formats.IMG_EXTS) else []
     proc = subprocess.run(
         ["mineru-kit", "parse", str(src), "-o", str(archive), "--format", "zip", *tier],
         capture_output=True, text=True, timeout=_MINERU_TIMEOUT_S,
@@ -3213,7 +3082,7 @@ def _source_date(src: Path) -> str | None:
     import datetime
     try:
         suffix = src.suffix.lower()
-        if suffix in (*OFFICE_EXTS, ".docx", ".pptx"):
+        if suffix in (*formats.OFFICE_EXTS, ".docx", ".pptx"):
             # OOXML core properties: <dcterms:created>2024-04-02T09:00:00Z</…>
             with zipfile.ZipFile(src) as z:
                 xml = _zip_member(z, "docProps/core.xml").decode("utf-8", "replace")
@@ -3346,7 +3215,7 @@ def _provenance_fm(src: Path, md_text: str = "",
     # Form stamp (docs/specs/nucleation-forms.md): a converted media file is a
     # transcript by construction, so the profile ladder never has to sniff it.
     # A document's form is not knowable at ingress; it gets no stamp.
-    if src.suffix.lower() in MEDIA_EXTS:
+    if src.suffix.lower() in formats.MEDIA_EXTS:
         lines.append("form: transcript\n")
     # A lab notebook is filed intact, never distilled as code: the policy
     # forms._looks_like_notebook_export holds for nbconvert exports, stamped
@@ -3360,7 +3229,7 @@ def _provenance_fm(src: Path, md_text: str = "",
     # repo-relative because an absolute path dies on any other machine;
     # code_ref arms /stale for git-tracked files. A file outside the repo gets
     # no edge — the graph's universe is the repo.
-    if src.suffix.lower() in TABULAR_EXTS and CONFIG.vault_path:
+    if src.suffix.lower() in formats.TABULAR_EXTS and CONFIG.vault_path:
         from silica.kernel.base import gitstate
         from silica.kernel.base import roots
 
@@ -3404,7 +3273,7 @@ def _write_leaf(src: Path, body: str, name: str, fields: dict) -> None:
                   loss=Loss.STAGED)
 
 
-def _resolve_input(target: str) -> Path:
+def resolve_input(target: str) -> Path:
     """Absolute as given; relative tried vault-first, then cwd.
 
     ProseAdapter.read resolves vault-only because its inputs are notes, which
@@ -3498,7 +3367,7 @@ def _rewrite_image_links(md: str, renamed: dict[str, str] | None = None) -> str:
     """
     def repl(m: "re.Match[str]") -> str:
         base = os.path.basename(m.group(1))
-        if not base.lower().endswith(_IMG_EXTS):
+        if not base.lower().endswith(formats.WEB_IMAGE_EXTS):
             return m.group(0)
         return f"![[{(renamed or {}).get(base, base)}]]"
 

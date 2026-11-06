@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import re
 
+from silica.kernel.base.formats import ATTACHMENT_EXTS, ext_alternation
 from silica.kernel.base.syntax import MENTION_RE
 
 logger = logging.getLogger(__name__)
@@ -25,9 +26,7 @@ logger = logging.getLogger(__name__)
 # A link to a PDF or an image names an attachment, never a note. Listed, not
 # "anything after a dot": titles carry dots (`Industria 4.0`, `Python 3.11`),
 # and those are notes.
-_NOT_A_NOTE = re.compile(
-    r"\.(?:png|jpe?g|gif|webp|svg|bmp|avif|pdf|mp3|mp4|m4a|wav|ogg|webm|mov|"
-    r"canvas|base|csv|xlsx?|docx?|pptx?|zip|epub)$", re.I)
+_NOT_A_NOTE = re.compile(rf"\.{ext_alternation(ATTACHMENT_EXTS)}$", re.I)
 
 # A pasted passage full of wikilinks would otherwise list every one of them.
 CAP = 10
@@ -40,6 +39,17 @@ OPEN, CLOSE = "<named-notes>", "</named-notes>"
 # every reader of the user's words (the replay, rework's request) drops both,
 # and Discover's story block (ADR-0137 point 8) with them.
 STRIP = re.compile(r"\n*<(named-notes|converted-files|discover-story)>.*?</\1>", re.S)
+
+# An image a turn carries, as its message holds it: the saved path, which the
+# transcript and every later turn keep where the base64 would be re-sent. Here, with
+# the other things that are in a message and are not the person's words, because a
+# tool reads it back too and the web server is no import for a tool.
+IMAGE_MARK = "[image attached: "
+IMAGE_MARK_RE = re.compile(r"\n*\[image attached: ([^\]\n]+)\]")
+
+
+def image_mark(path: object) -> str:
+    return f"\n\n{IMAGE_MARK}{path}]"
 
 
 def refs(text: str) -> list[str]:

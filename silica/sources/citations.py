@@ -19,7 +19,7 @@ import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from silica.sources.convert import _REFERENCES_HEADING_RE
+from silica.sources.convert import REFERENCES_HEADING_RE
 
 # Cited by this many library papers and absent from the library ⇒ a missing
 # paper node. Reopen at 100 such nodes (73 on 2026-10-05, ADR-0055 Reopen).
@@ -62,7 +62,7 @@ def reference_text(body: str) -> str:
     """The text after the last References heading, or the whole body when the
     paper has none: a converter that lost the heading must not lose the ids."""
     lines = (body or "").splitlines()
-    last = max((i for i, line in enumerate(lines) if _REFERENCES_HEADING_RE.match(line.strip())),
+    last = max((i for i, line in enumerate(lines) if REFERENCES_HEADING_RE.match(line.strip())),
                default=None)
     return body if last is None else "\n".join(lines[last + 1:])
 

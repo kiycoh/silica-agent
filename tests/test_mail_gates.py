@@ -2,6 +2,8 @@
 (taint) lives in tests/test_mail_taint.py."""
 from __future__ import annotations
 
+import pytest
+
 from silica.sources import mail
 from tests.mail_fixtures import ME_FULL, PROF, msg
 
@@ -180,3 +182,22 @@ def test_gate2_a_second_import_writes_nothing_and_same_subject_threads_stay_apar
     texts = [(folder / n).read_text(encoding="utf-8") for n in meetings]
     assert "Thread 0 message" in texts[0] + texts[1] and "Thread 1 message" in texts[0] + texts[1]
     assert all(t.count("Thread ") == 4 for t in texts)
+
+
+def test_each_surface_keeps_its_own_order_of_limit_and_address(tmp_vault, monkeypatch):
+    """The command checks the limit before it keeps the address, the Mail row after:
+    `plan_typed` is the one rule, and a parsed limit passes through it unchanged."""
+    kept = []
+    monkeypatch.setattr(mail, "remember_addresses", lambda given, vault=None: kept.append(given) or tuple(given))
+    with pytest.raises(ValueError):
+        mail.plan_typed("nope.mbox", "me@example.org", limit="abc")
+    assert kept == [("me@example.org",)]            # the row's order
+    assert mail.parse_limit(mail.parse_limit("7")) == 7
+
+
+def test_a_guess_nobody_confirmed_writes_nothing_unless_takeout_says_whose(monkeypatch):
+    from types import SimpleNamespace as Plan
+
+    assert mail.unconfirmed(Plan(guessed=True, takeout=False))
+    assert not mail.unconfirmed(Plan(guessed=True, takeout=True))
+    assert not mail.unconfirmed(Plan(guessed=False, takeout=False))

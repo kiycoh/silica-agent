@@ -85,9 +85,9 @@ def _folder_name(title: str) -> str:
 def _fetch_markdown(url: str) -> str:
     """The page's `.md`, through the web reader's guard, which revalidates
     every redirect hop (a public page must not be a door into the server)."""
-    from silica.sources.web_fetch import _fetch
+    from silica.sources.web_fetch import fetch
 
-    resp, final = _fetch(url + ".md", types=("text/",))
+    resp, final = fetch(url + ".md", types=("text/",))
     if (urlsplit(final).hostname or "").lower() not in allowed_hosts():
         raise ValueError("that page moved to a host Silica does not save from")
     return resp.text
@@ -221,9 +221,9 @@ def room(adding_notes: int, adding_bytes: int, vault: Path | None = None) -> dic
 
 
 def _fetch_json(url: str):
-    from silica.sources.web_fetch import _fetch
+    from silica.sources.web_fetch import fetch
 
-    resp, final = _fetch(url, types=("application/json", "text/"), cap=64 * 1024 * 1024)
+    resp, final = fetch(url, types=("application/json", "text/"), cap=64 * 1024 * 1024)
     if (urlsplit(final).hostname or "").lower() not in allowed_hosts():
         raise ValueError("that wiki moved to a host Silica does not save from")
     return resp.json()

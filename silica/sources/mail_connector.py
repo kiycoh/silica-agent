@@ -105,17 +105,13 @@ class MailBlock:
             return {"ok": False, "error": "unknown action"}
         try:
             src = _inside_vault(str(payload.get("path") or ""))
-            me = tuple(a for a in str(payload.get("me") or "").split(",") if a.strip())
-            if me:
-                me = mail.remember_addresses(me)  # typed in the row: the confirmation point 4 asks
-            p = mail.plan(src, me=me or None, label=str(payload.get("label") or ""),
-                          all_=bool(payload.get("all")),
-                          limit=mail.parse_limit(payload.get("limit")))
+            p = mail.plan_typed(src, str(payload.get("me") or ""), label=str(payload.get("label") or ""),
+                                all_=bool(payload.get("all")), limit=payload.get("limit"))
         except (OSError, ValueError) as exc:
             return {"ok": False, "error": str(exc)}
         if action == "plan":
             return {"ok": True, **_rows(p)}
-        if p.guessed and not p.takeout:
+        if mail.unconfirmed(p):
             return {"ok": False, "error": "Confirm your address first: type it in the address field."}
         out = mail.apply(p)
         done = {"ok": True, "written": out["written"], "run_id": out["run_id"]}

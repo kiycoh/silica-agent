@@ -1242,7 +1242,7 @@ class TestUnindexableDocs:
     def test_every_offered_extension_is_one_convert_accepts(self):
         """The narrow list must stay a subset of what the converter dispatches on,
         or onboarding would offer a conversion that immediately errors."""
-        from silica.sources.convert import CONVERTIBLE_DOC_EXTS, DOC_EXTS
+        from silica.kernel.base.formats import CONVERTIBLE_DOC_EXTS, DOC_EXTS
 
         assert set(CONVERTIBLE_DOC_EXTS) <= set(DOC_EXTS)
 

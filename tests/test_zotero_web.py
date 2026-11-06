@@ -30,7 +30,7 @@ def fake(tmp_vault, monkeypatch):
                         api_key=os.getenv("SILICA_ZOTERO_API_KEY", ""), transport=f.transport())
 
     monkeypatch.setattr(z, "client", _client)
-    monkeypatch.setattr(z, "_client_for", lambda vault, link: _client())
+    monkeypatch.setattr(z, "client_for", lambda vault, link: _client())
     monkeypatch.setattr(z, "Zotero", _bind(f, z.Zotero))
     return f
 

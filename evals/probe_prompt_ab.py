@@ -255,7 +255,7 @@ def apply_arm(arm: str) -> None:
         # The chat's language before 2026-10-16: an undeclared vault's detected
         # language, as "Reply in <it> by default".
         import silica.cli as cli
-        from silica.onboarding.checks import reply_language_for
+        from silica.kernel.vault_language import reply_language_for
         cli._reply_language = lambda: reply_language_for(cli.CONFIG.vault_path) or ""
     elif arm.startswith("minus:"):
         rule = arm.split(":", 1)[1]

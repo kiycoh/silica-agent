@@ -230,7 +230,7 @@ def reliability_tier(content: str, *, has_source_leaf: bool | None = None) -> in
 # combined, so "grounded but contested" stays askable.
 TRUST_ORDER = {"kept": 0, "distilled": 1, "grounded": 2, "human": 3}
 _TIER_NAMES = {TIER_HUMAN: "human", TIER_GROUNDED: "grounded", TIER_DISTILLED: "distilled"}
-# `source:` values the web lanes stamp (web_research._build_note). A kept
+# `source:` values the web lanes stamp (web_research.build_note). A kept
 # answer is zero-trust ingress (ADR-0009) with a Sources block, which the tier
 # alone would read as grounded, or as human when the AI stamp is missing.
 _KEPT_SOURCES = frozenset({"web", "web-research"})

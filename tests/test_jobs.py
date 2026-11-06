@@ -696,3 +696,24 @@ def test_the_page_reads_a_reply_that_is_not_a_stream_and_rereads_jobs_on_reconne
     assert 'document.addEventListener("silica:stream-open", jobsFetch)' in js
     # the edge's cap is checked before a byte is sent, on the drop and the import
     assert js.count("withinUploadCap(") >= 3
+
+
+def test_a_job_hands_convert_its_page_count_and_where_the_note_goes(monkeypatch):
+    """Arguments, not context: one reading thread down from convert() the job's
+    ContextVar was already gone, which is why the readers had to care which
+    thread they were on."""
+    from silica.ui.web import jobs
+
+    seen = {}
+
+    def fake(target, dest_dir="", leaf=None, *, on_page=None, beside=False):
+        on_page(1, 2)
+        seen.update(target=target, beside=beside)
+        return ["n.md"]
+
+    monkeypatch.setattr(conv, "convert", fake)
+    updates = []
+    monkeypatch.setattr(jobs, "_update", lambda job_id, **kw: updates.append(kw))
+    assert jobs._converted("j1", Path("a.pdf"), "", beside=True) == ["n.md"]
+    assert seen == {"target": "a.pdf", "beside": True}
+    assert updates[0]["progress"] == {"done": 1, "total": 2}

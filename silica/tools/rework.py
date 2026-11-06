@@ -156,10 +156,6 @@ _QUESTION = {
     },
 }
 
-# The marker server.run_turn appends for an attached image (ui/web/server.py,
-# _ATTACHED_RE). Repeated here: importing the web server from a tool would pull
-# FastAPI into every surface that registers tools.
-_IMAGE_RE = re.compile(r"\n*\[image attached: [^\]\n]+\]")
 _SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
 _HEADING_RE = re.compile(r"^\s*#{1,6} ")
 _LEAD_HEADING_RE = re.compile(r"^\s*#{1,6} [^\n]*\n+")
@@ -267,7 +263,7 @@ def _request() -> str:
     from silica.agent.read_scope import REQUESTS
 
     requests = REQUESTS.get()
-    return _IMAGE_RE.sub("", mentions.strip(requests[-1])).strip() if requests else ""
+    return mentions.IMAGE_MARK_RE.sub("", mentions.strip(requests[-1])).strip() if requests else ""
 
 
 def _ask(request: str) -> tuple[str, str]:

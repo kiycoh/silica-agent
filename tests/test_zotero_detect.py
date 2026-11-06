@@ -23,7 +23,7 @@ def fake(tmp_vault, monkeypatch):
     f.add_paper()
     set_zotero(CONFIG.vault_path, "library", SERVER_ID)
     tmp_vault.note(LEAF, "---\nzotero_key: 8H4AC8GW\npdf_md5: 16e65f7cc5c1d647eb6acffdf085ce62\n---\n")
-    monkeypatch.setattr(z, "_client_for", lambda vault, link: z.Zotero(
+    monkeypatch.setattr(z, "client_for", lambda vault, link: z.Zotero(
         server_id=link.library, transport=f.transport()))
     return f
 

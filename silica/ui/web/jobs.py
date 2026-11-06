@@ -132,7 +132,7 @@ def _sha256(path: Path) -> str:
 
 
 def _is_media(name: str) -> bool:
-    from silica.sources.convert import MEDIA_EXTS
+    from silica.kernel.base.formats import MEDIA_EXTS
 
     return Path(name).suffix.lower() in MEDIA_EXTS
 
@@ -306,17 +306,12 @@ def _converted(job_id: str, src: Path, dest_dir: str, beside: bool = False) -> l
     on the record as `progress` (ADR-0121 point 1): the slow part of a PDF,
     105 s for a 13-page paper with formulas, which the row could only count in
     minutes. One write a page; a page takes about 2 s."""
-    from silica.sources.convert import BESIDE_SOURCE, PAGE_PROGRESS, convert
+    from silica.sources.convert import convert
 
     def report(done: int, total: int) -> None:
         _update(job_id, expect=("running",), progress={"done": done, "total": total})
 
-    token, near = PAGE_PROGRESS.set(report), BESIDE_SOURCE.set(beside)
-    try:
-        return convert(str(src), dest_dir=dest_dir)
-    finally:
-        BESIDE_SOURCE.reset(near)
-        PAGE_PROGRESS.reset(token)
+    return convert(str(src), dest_dir=dest_dir, on_page=report, beside=beside)
 
 
 def _pages(src: Path) -> tuple[dict, str]:
@@ -543,7 +538,7 @@ def from_command(text: str, session: str | None) -> dict | None:
     /nucleate turns into jobs only for the files it names that need a
     conversion it has not had; it does not run now, and the jobs offer it.
     ponytail: a folder, a glob or a Zotero key still converts inside the turn,
-    because only `_sc_nucleate` expands them. Its trigger fired on 2026-10-23
+    because only `ingest.nucleate` expands them. Its trigger fired on 2026-10-23
     (hosted t01, kind nucleate cut at 124,990 ms) and the turn's keepalive
     (sse._KEEPALIVE_S) answered the cut instead; a turn still dies with its
     tab and with a release. The upgrade is the same split after expansion, due
@@ -558,16 +553,18 @@ def from_command(text: str, session: str | None) -> dict | None:
         parts = shlex.split(text.strip())
     except ValueError:
         return None  # the command's own parser names the unbalanced quote
-    from silica.cli import _positional, _rejoin_spaced_paths, _str_flag
-    from silica.sources.convert import DOC_EXTS, _resolve_input
+    from silica.cli import _positional, _str_flag
+    from silica.kernel.base.formats import DOC_EXTS
+    from silica.sources.convert import resolve_input
+    from silica.sources import ingest
 
-    args = _rejoin_spaced_paths(parts[1:])
+    args = ingest.rejoin_spaced_paths(parts[1:])
     files = _positional(args)
     target = _str_flag(args, "--target")
     if not files:
         return None  # usage, or /nucleate's drain of the write-ahead log
     if word == "/nucleate":
-        files = _owed(files)
+        files = ingest.owed(files)
         if not files:
             return None
     jobs: list[dict] = []
@@ -579,7 +576,7 @@ def from_command(text: str, session: str | None) -> dict | None:
                             + (Path(f).suffix or "a file without an extension")})
             continue
         try:
-            src = _resolve_input(f)
+            src = resolve_input(f)
         except ValueError:
             skipped.append({"name": name, "reason": "it was not found"})
             continue
@@ -590,33 +587,3 @@ def from_command(text: str, session: str | None) -> dict | None:
         except ValueError as exc:  # admission's refusal, written for the student
             skipped.append({"name": name, "reason": _sentence(exc)})
     return {"jobs": jobs, "skipped": skipped, "command": word}
-
-
-def _owed(files: list[str]) -> list[str]:
-    """The files of a /nucleate that name one document each and still need a
-    conversion: no source claims them, and no earlier conversion of the same
-    file sits in the inbox or in done/ (the batch resume `_sc_nucleate` does)."""
-    from silica.cli import _prior_conversions
-    from silica.kernel.base.manifest import get_active_manifest
-    from silica.sources.convert import DOC_EXTS, _resolve_input
-    from silica.sources.registry import adapter_for
-
-    enabled = get_active_manifest().sources
-    out: list[str] = []
-    prior: dict | None = None
-    for f in files:
-        if any(ch in f for ch in "*?["):
-            return []  # a glob: the whole command runs as before
-        try:
-            src = _resolve_input(f)
-        except ValueError:
-            continue  # a Zotero key, or a missing file: the command says which
-        if src.is_dir():
-            return []  # a folder: the whole command runs as before
-        if src.suffix.lower() not in DOC_EXTS or adapter_for(f, enabled=enabled) is not None:
-            continue  # a note or code: staged by the command, no conversion
-        prior = _prior_conversions() if prior is None else prior
-        seen = prior.get(str(src))
-        if not (seen and (seen["inbox"] or seen["done"])):
-            out.append(f)
-    return out

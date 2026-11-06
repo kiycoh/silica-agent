@@ -42,7 +42,7 @@ class Corpus:
 
     fetch serves the recorded string whole — Source header, truncation marker
     and all — and search renders the same {title, url, content} triples
-    _ddg_search does. Byte parity is the point: re-extracting or re-truncating
+    ddg_search does. Byte parity is the point: re-extracting or re-truncating
     would make the frozen web observably different from the live one.
     """
 
@@ -66,7 +66,7 @@ class Corpus:
         self._avgdl = total / n if n else 0.0
 
     def search(self, query: str) -> list[dict[str, str]]:
-        """Okapi BM25 over the recorded pages, top 5 as _ddg_search triples.
+        """Okapi BM25 over the recorded pages, top 5 as ddg_search triples.
 
         No overlap -> empty list, exactly what a live lane returns for a query
         the web has nothing for; the model reformulates, it does not crash.

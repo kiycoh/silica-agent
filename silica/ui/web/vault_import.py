@@ -14,35 +14,8 @@ import re
 import unicodedata
 from pathlib import Path, PurePosixPath
 
-from silica.sources.convert import AUDIO_EXTS
+from silica.kernel.base.formats import FORMATS, HOSTED_EXTENSIONS
 
-# ADR-0087 point 5, the owner's answer of 2026-10-12: the hosted pilot reads
-# PDF, markdown and plain text, and nothing else is installed to read more.
-# Audio since the amendment of 2026-10-14: ffmpeg is on the host for the
-# transcriber, and its demuxers are held to convert._FFMPEG_FORMATS. Not
-# video, which the notice does not name and which is mostly bytes the
-# transcriber never hears under the edge's 100 MB.
-# ADR-0120 (2026-10-17) adds what NotebookLM takes and the base install
-# reads with nothing installed on the host: documents read in process under
-# the 16 MB part ceiling (DOCX in pdf_extract's child), images read by the
-# chat model, and a CSV's profile.
-DOCUMENT_EXTENSIONS = (".docx", ".pptx", ".epub", ".fb2", ".odt", ".odp", ".ods", ".rtf")
-# The formats the chat model is sent (image_readings._MIME without .bmp,
-# which no OpenRouter provider lists).
-IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
-HOSTED_EXTENSIONS = (".md", ".pdf", ".txt", *DOCUMENT_EXTENSIONS, *IMAGE_EXTENSIONS, ".csv",
-                     *AUDIO_EXTS)
-# What the first bytes of an upload must be for its extension: a renamed
-# file reached a reader as whatever it really was (ADR-0098 H4).
-_SIGNATURES = {
-    **dict.fromkeys((".docx", ".pptx", ".epub", ".odt", ".odp", ".ods"), (b"PK\x03\x04",)),
-    ".rtf": (b"{\\rtf",),
-    ".fb2": (b"<?xml", b"\xef\xbb\xbf<?xml", b"<FictionBook"),
-    ".png": (b"\x89PNG\r\n\x1a\n",),
-    ".jpg": (b"\xff\xd8\xff",), ".jpeg": (b"\xff\xd8\xff",),
-    ".gif": (b"GIF87a", b"GIF89a"),
-    ".webp": (b"RIFF",),
-}
 # 255 bytes is the name limit on ext4 and XFS; 200 leaves room for " (99)".
 MAX_NAME_BYTES = 200
 MAX_DEPTH = 16
@@ -81,7 +54,7 @@ def importable_extensions(hosted: bool) -> list[str]:
 def check_signature(path: Path, suffix: str) -> None:
     """Refused when `path`'s first bytes are not what `suffix` says; a format
     with no fixed opening (markdown, CSV, audio, which admission probes) passes."""
-    want = _SIGNATURES.get(suffix)
+    want = FORMATS[suffix].magic if suffix in FORMATS else ()
     if not want:
         return
     with open(path, "rb") as fh:
@@ -94,7 +67,7 @@ def image_suffix(head: bytes) -> str | None:
     """A picture's suffix from its first 16 bytes, whatever its name says; None
     for anything else, SVG among them, which has no signature here to match."""
     for suffix in (".png", ".jpg", ".gif", ".webp"):
-        if head.startswith(_SIGNATURES[suffix]) and (suffix != ".webp" or head[8:12] == b"WEBP"):
+        if head.startswith(FORMATS[suffix].magic) and (suffix != ".webp" or head[8:12] == b"WEBP"):
             return suffix
     return None
 

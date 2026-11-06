@@ -16,6 +16,7 @@ from typing import Any
 from fastapi import HTTPException, UploadFile
 
 from silica.config import CONFIG
+from silica.kernel.base.formats import INGEST_LABELS
 from silica.kernel.recall import note_index
 from silica.metrics import emit
 from silica.ui.web.failures import explain as _failure
@@ -108,7 +109,7 @@ async def write_stream(chunks, dest: Path, cap: int, too_big: str) -> None:
 async def stage_uploads(files: list[UploadFile], folder: str | None = None, **job: Any
                          ) -> tuple[list[str], list[str], list[tuple[str, str]], list[dict]]:
     """Write uploads to Inbox and mechanically stage them, mirroring the inline
-    half of `/nucleate` (silica/cli.py): code/notebooks become skeleton stubs,
+    half of `/nucleate` (silica/sources/ingest.py): code/notebooks become skeleton stubs,
     prose stays as-is, and a file that needs convert() becomes a job.
     Returns (ready, stubs, skipped, queued): markdown notes ready for the
     injector/reading, code stub note paths already written to the vault,
@@ -126,12 +127,11 @@ async def stage_uploads(files: list[UploadFile], folder: str | None = None, **jo
     blocked /stop, leaving a visible Stop button that could not be served.
     """
     from silica.config import hosted
+    from silica.kernel.base.formats import HOSTED_EXTENSIONS, IMG_EXTS
     from silica.kernel.base.manifest import active_write_dir, get_active_manifest, resolve_inbox_dir
     from silica.sources import pdf_extract
-    from silica.sources.convert import IMG_EXTS
-    from silica.sources.registry import adapter_for, stage
+    from silica.sources.ingest import triage
     from silica.ui.web import jobs
-    from silica.ui.web.vault_import import HOSTED_EXTENSIONS
 
     if len(files) > UPLOAD_MAX_FILES:
         raise HTTPException(413, f"at most {UPLOAD_MAX_FILES} files per drop")
@@ -176,8 +176,8 @@ async def stage_uploads(files: list[UploadFile], folder: str | None = None, **jo
             await _write_upload(f, dest)
             ingest["bytes"] = dest.stat().st_size
             rel = f"{inbox_rel}/{dest.name}"
-            adapter = adapter_for(rel, enabled=enabled)
-            if adapter is None:  # no source claims it: convert() runs as a job (ADR-0099)
+            result = await asyncio.to_thread(triage, rel, enabled)
+            if result is None:  # no source claims it: convert() runs as a job (ADR-0099)
                 try:
                     queued.append(await asyncio.to_thread(
                         jobs.record, rel, origin="drop", **job, on_end=partial(_ingest_ended, ingest)))
@@ -187,7 +187,6 @@ async def stage_uploads(files: list[UploadFile], folder: str | None = None, **jo
                     skipped.append((dest.name, _skip_reason(exc)))
                     ingest.update(pdf_extract.report(dest)[0], outcome=getattr(exc, "outcome", "error"))
                 continue
-            result = await asyncio.to_thread(stage, adapter, rel)
             if result["status"] == "distill":       # prose → injector re-reads it
                 ready.append(rel)
                 ingest["outcome"] = "ok"
@@ -234,21 +233,9 @@ def _skip_reason(exc: Exception | str) -> str:
     return "it could not be converted"
 
 
-# Extensions the ingest line may name. A suffix is part of the file's name,
-# which is the student's text, so anything outside this list is "other".
-_INGEST_EXTS = frozenset({
-    ".pdf", ".md", ".markdown", ".txt", ".docx", ".pptx", ".xlsx", ".odt", ".ods",
-    ".epub", ".rtf", ".html", ".htm", ".csv", ".json", ".ipynb", ".py",
-    ".png", ".jpg", ".jpeg", ".mp3", ".m4a", ".wav",
-    # ADR-0120's additions to the hosted list, so its uploads count by type
-    ".fb2", ".odp", ".webp", ".gif", ".aac", ".flac", ".ogg", ".opus", ".wma",
-    ".3gp", ".3g2", ".aiff", ".aif", ".aifc", ".amr", ".au", ".snd",
-})
-
-
 def _ingest_ext(name: str) -> str:
     ext = Path(name).suffix.lower()
-    return ext if ext in _INGEST_EXTS else "other"
+    return ext if ext in INGEST_LABELS else "other"
 
 
 def is_mail(name: str) -> bool:
@@ -280,8 +267,8 @@ async def import_files(files: list[UploadFile], paths: list[str]) -> tuple[list[
         get_active_manifest,
     )
     from silica.sources import pdf_extract
+    from silica.sources.ingest import triage
     from silica.sources.media_admission import MediaRefused
-    from silica.sources.registry import adapter_for, stage
     from silica.ui.web import jobs
     from silica.ui.web import vault_import as vi
 
@@ -370,12 +357,11 @@ async def import_files(files: list[UploadFile], paths: list[str]) -> tuple[list[
                 if attached:  # the file its notes lost, brought back: nothing to convert
                     row.update(status="note", notes=attached, attached=True)
                     continue
-            adapter = adapter_for(dest_rel, enabled=enabled)
-            if adapter is None:  # no source claims it: the converter, as a job (ADR-0099)
+            staged = await asyncio.to_thread(triage, dest_rel, enabled)
+            if staged is None:  # no source claims it: the converter, as a job (ADR-0099)
                 # Its notes, and the hidden text it left out, arrive on the job.
                 row.update(status="queued", job=(await asyncio.to_thread(jobs.record, dest_rel, origin="import"))["id"])
                 continue
-            staged = await asyncio.to_thread(stage, adapter, dest_rel)
             if staged["status"] == "distill":  # prose: the file is the note
                 row.update(status="note", notes=[dest_rel])
             elif staged["status"] == "ok":       # code or a notebook: a stub note

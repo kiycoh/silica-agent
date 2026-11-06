@@ -27,10 +27,10 @@ class _Reply:
 
 def _pick_with(monkeypatch, reply: str, source_rel: str = "Inbox/01-src.md"):
     from silica.model import llm
-    from silica.cli import _pick_target_folder
+    from silica.sources.ingest import pick_target_folder
 
     monkeypatch.setattr(llm, "call_llm", lambda *a, **k: _Reply(reply))
-    return _pick_target_folder([source_rel])
+    return pick_target_folder([source_rel])
 
 
 def test_folder_pick_rejects_a_parent_traversal(tmp_vault, monkeypatch):
@@ -328,7 +328,7 @@ def test_folder_pick_prompt_says_when_the_vault_has_no_folders(tmp_vault, monkey
     user says 'Existing folders:' but then nothing follows" before guessing.
     An empty census is an answer, and the prompt has to state it."""
     from silica.model import llm
-    from silica.cli import _pick_target_folder
+    from silica.sources.ingest import pick_target_folder
 
     captured: dict = {}
 
@@ -339,7 +339,7 @@ def test_folder_pick_prompt_says_when_the_vault_has_no_folders(tmp_vault, monkey
     monkeypatch.setattr(llm, "call_llm", fake)
     tmp_vault.note("Inbox/14-digital-libraries/01-src.md", "body\n")
 
-    assert _pick_target_folder(["Inbox/14-digital-libraries/01-src.md"]) == "Digital Libraries"
+    assert pick_target_folder(["Inbox/14-digital-libraries/01-src.md"]) == "Digital Libraries"
     prompt = captured["prompt"]
     assert "Existing folders:\n\n" not in prompt
     assert "no folders yet" in prompt
@@ -350,7 +350,7 @@ def test_folder_pick_turns_thinking_off(tmp_vault, monkeypatch):
     30 s, hit its 2048-token cap with no answer (finish=length, text='') and
     the batch fell back to a full agent turn to choose the folder."""
     from silica.model import llm
-    from silica.cli import _pick_target_folder
+    from silica.sources.ingest import pick_target_folder
 
     captured: dict = {}
 
@@ -362,7 +362,7 @@ def test_folder_pick_turns_thinking_off(tmp_vault, monkeypatch):
     tmp_vault.note("Concepts/existing.md", "census non-empty\n")
     tmp_vault.note("Inbox/01-src.md", "body\n")
 
-    assert _pick_target_folder(["Inbox/01-src.md"]) == "Concepts"
+    assert pick_target_folder(["Inbox/01-src.md"]) == "Concepts"
     assert captured.get("reasoning") is False
 
 
@@ -372,19 +372,19 @@ def test_folder_pick_lands_on_the_existing_folder_it_spells_differently(tmp_vaul
     made a new `machine_learning` beside the vault's `Machine learning`, a 4B
     named the inbox folder itself and the batch fell back to an agent turn."""
     monkeypatch.setattr("silica.model.llm.call_llm", lambda *a, **k: _Reply(reply))
-    from silica.cli import _pick_target_folder
+    from silica.sources.ingest import pick_target_folder
 
     tmp_vault.note("Machine learning/Machine learning.md", "hub\n")
     tmp_vault.note("Inbox/machine_learning/Lezione 1.md", "body\n")
 
-    assert _pick_target_folder(["Inbox/machine_learning/Lezione 1.md"]) == "Machine learning"
+    assert pick_target_folder(["Inbox/machine_learning/Lezione 1.md"]) == "Machine learning"
 
 
 def test_folder_pick_prompt_names_the_file_not_its_inbox_folder(tmp_vault, monkeypatch):
     """The excerpt header carried `Inbox/machine_learning/Lezione 1.md` and the
     model answered with the folder it read there."""
     from silica.model import llm
-    from silica.cli import _pick_target_folder
+    from silica.sources.ingest import pick_target_folder
 
     captured: dict = {}
 
@@ -396,14 +396,14 @@ def test_folder_pick_prompt_names_the_file_not_its_inbox_folder(tmp_vault, monke
     tmp_vault.note("Machine learning/Machine learning.md", "hub\n")
     tmp_vault.note("Inbox/machine_learning/Lezione 1.md", "body\n")
 
-    _pick_target_folder(["Inbox/machine_learning/Lezione 1.md"])
+    pick_target_folder(["Inbox/machine_learning/Lezione 1.md"])
     assert "Lezione 1.md" in captured["prompt"]
     assert "Inbox/machine_learning" not in captured["prompt"]
 
 
 def test_folder_pick_prompt_lists_existing_folders(tmp_vault, monkeypatch):
     from silica.model import llm
-    from silica.cli import _pick_target_folder
+    from silica.sources.ingest import pick_target_folder
 
     captured: dict = {}
 
@@ -415,6 +415,6 @@ def test_folder_pick_prompt_lists_existing_folders(tmp_vault, monkeypatch):
     tmp_vault.note("Concepts/existing.md", "census non-empty\n")
     tmp_vault.note("Inbox/01-src.md", "body\n")
 
-    assert _pick_target_folder(["Inbox/01-src.md"]) == "Concepts"
+    assert pick_target_folder(["Inbox/01-src.md"]) == "Concepts"
     assert "- Concepts" in captured["prompt"]
     assert "no folders yet" not in captured["prompt"]

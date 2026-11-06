@@ -5,7 +5,7 @@ or the notes'."""
 from __future__ import annotations
 
 from silica.kernel.base.manifest import load_manifest
-from silica.prompts import SYSTEM_PROMPT, system_prompt
+from silica.prompts import system_prompt
 
 
 def test_reply_language_parsed_and_stripped(tmp_path):
@@ -59,7 +59,7 @@ def test_prompt_without_preference_follows_the_person():
     """No "by default" for an undeclared vault: "Reply in italian by default"
     answered 2 of 12 Chinese questions in Chinese, this rule 9 (2026-10-16). The
     turn with no language of its own is the follow rule's to place."""
-    assert system_prompt(None) == SYSTEM_PROMPT
+    SYSTEM_PROMPT = system_prompt()
     assert "ALWAYS reply in the language of the person's latest message" in SYSTEM_PROMPT
     assert "by default" not in SYSTEM_PROMPT
     assert "slash command" in SYSTEM_PROMPT and "else its notes'" in SYSTEM_PROMPT

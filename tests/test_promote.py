@@ -9,6 +9,7 @@ gate, then stamps the chain head with the note it became.
 """
 from __future__ import annotations
 
+from silica.sources import ingest
 import pytest
 
 from silica.config import CONFIG
@@ -97,8 +98,7 @@ def vault(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_llm_target_pick(monkeypatch):
-    import silica.cli as cli_mod
-    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "Concepts")
+    monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "Concepts")
 
 
 @pytest.fixture

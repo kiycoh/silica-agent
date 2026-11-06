@@ -33,7 +33,8 @@ ALLOWED = {
     "kernel/recall/perception.py":  "the answer seam: facts reach the model only in the Personal-memory block",
     "kernel/progress.py":           "the digest: nucleation candidates are suggested, never written",
     "router/states/distill.py":     "the capture seam: ephemerals of a note-path run",
-    "cli.py":                       "the drain seam: own-session envelopes become facts",
+    "cli.py":                       "/episodes: the person reads the store, no retrieval leg",
+    "sources/ingest.py":            "the drain seam: own-session envelopes become facts; promotion sends a chain through the note gate",
     # Not in the spec's enumerated list, but deliberate and content-free: only
     # live KEYS travel (key_vocabulary), so capture snaps to the established
     # vocabulary instead of coining synonyms (ADR-0021). No fact text, no

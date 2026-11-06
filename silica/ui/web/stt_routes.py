@@ -33,7 +33,7 @@ def speech_lang(config: Any) -> str:
     if fixed and fixed != "auto":
         return fixed
     from silica.kernel.text.language import ISO
-    from silica.onboarding.checks import reply_language_for
+    from silica.kernel.vault_language import reply_language_for
 
     name = (reply_language_for((config.vault_path or "").strip()) or "").strip().lower()
     if name in ISO:
@@ -84,29 +84,18 @@ async def _stt_via_endpoint(url: str, clip: bytes) -> tuple[str, str]:
     """One clip through the configured /audio/transcriptions endpoint:
     `(text, "")`, or `("", the sentence the user reads)` so the route can try
     the in-process lane before it reports anything."""
-    import httpx
+    from starlette.concurrency import run_in_threadpool
 
-    from silica.metrics import outcome_of, transcribed
+    from silica.agent.stt import post_transcription, transcribed
+    from silica.metrics import outcome_of
 
     form = {"model": CONFIG.stt_model, "response_format": "json"}
     if CONFIG.stt_lang:
         form["language"] = CONFIG.stt_lang
     started = time.monotonic()
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            for _ in range(2):
-                resp = await client.post(
-                    f"{url.rstrip('/')}/audio/transcriptions",
-                    files={"file": ("clip.wav", clip, "audio/wav")},
-                    data=form,
-                    headers={"Authorization": f"Bearer {CONFIG.stt_api_key}"},
-                )
-                # whisper-server needs "auto" named, a hosted API rejects it
-                # with 400 and detects the language itself without the field:
-                # the same retry as convert._asr_via_endpoint.
-                if resp.status_code != 400 or form.get("language") != "auto":
-                    break
-                del form["language"]
+        resp = await run_in_threadpool(post_transcription, url, clip, name="clip.wav", mime="audio/wav",
+                                       form=form, api_key=CONFIG.stt_api_key, timeout=120.0)
     except Exception as exc:
         transcribed("dictation", started, outcome_of(exc))
         return "", f"transcription endpoint unreachable: {exc}"

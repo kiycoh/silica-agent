@@ -15,9 +15,8 @@ start with a slash are read as slash commands by the registry parity test.
 """
 from __future__ import annotations
 
-import sys
 import time
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from silica.connectors.mcp_block import McpBlock
@@ -156,21 +155,23 @@ def _line(prompt: str) -> str:
     return ask(prompt)
 
 
+def terminal_asks() -> dict[str, Any]:
+    """What `run` asks with on a terminal, for the surface that has one."""
+    return {"ask_secret": _hidden, "ask_yes": _yes, "ask_line": _line}
+
+
 def run(line: str, console, *, ask_secret: Callable[[str], str] | None = None,
         ask_yes: Callable[[str], bool] | None = None, ask_line: Callable[[str], str] | None = None,
         poll_s: float = 1.0) -> None:
-    """One /connect line. `ask_secret`/`ask_yes` default to hidden prompts
-    when stdin is a terminal, and to None (never ask) when it is not: the GUI
-    runs direct commands under a captured console with no one to type."""
+    """One /connect line. `ask_secret`/`ask_yes` are the surface's, None (never
+    ask) where nobody can type: the GUI runs direct commands under a captured
+    console, and stdin being a terminal says nothing about that, since `silica
+    --gui` started from a shell has one."""
     from silica.connectors import credentials, mcp_config
 
     if mcp_config.hosted():
         console.print("  connectors are local only")
         return
-    if sys.stdin.isatty():
-        ask_secret = ask_secret or _hidden
-        ask_yes = ask_yes or _yes
-        ask_line = ask_line or _line
     _, _, rest = line.strip().partition(" ")
     verb, _, arg = rest.strip().partition(" ")
     verb, arg = verb.lower() or "list", arg.strip()

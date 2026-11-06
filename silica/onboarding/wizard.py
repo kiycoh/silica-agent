@@ -567,7 +567,7 @@ def unindexable_docs(vault: Path, cap: int = DOC_SCAN_CAP) -> list[Path]:
     screenshots with "500 documents to convert", and would count the figures
     Silica itself extracted into `<inbox>/Images`.
     """
-    from silica.sources.convert import CONVERTIBLE_DOC_EXTS
+    from silica.kernel.base.formats import CONVERTIBLE_DOC_EXTS
 
     return files_with(vault, CONVERTIBLE_DOC_EXTS, cap)
 

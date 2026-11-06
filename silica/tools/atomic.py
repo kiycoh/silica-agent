@@ -950,10 +950,11 @@ def silica_look(
     import base64
 
     from silica.agent import vision
-    from silica.kernel.recall.image_readings import _MIME, image_part
+    from silica.kernel.base.formats import IMAGE_MIME
+    from silica.kernel.recall.image_readings import image_part
 
     path = _image_file(image)
-    if path is None or path.suffix.lower() not in (*_MIME, ".pdf"):
+    if path is None or path.suffix.lower() not in (*IMAGE_MIME, ".pdf"):
         return f"image not found: {image} (a vault image, by name or path, or an attached image's saved path)"
     if path.suffix.lower() != ".pdf":
         return vision.ask_chat_model(

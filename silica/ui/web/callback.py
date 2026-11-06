@@ -136,7 +136,7 @@ _PHASE_TRACKS = {
 
 # final_status as the FSM writes it -> what the user is told. The FSM emits
 # "Success" capitalised and the rest lowercase (states/finalize.py); normalising
-# here rather than renaming at the source keeps cli.py's _DRAIN_SETTLED and the
+# here rather than renaming at the source keeps ingest's _DRAIN_SETTLED and the
 # FSM tests on their existing contract.
 _STATUS_TEXT: dict[str, tuple[str, str]] = {
     "success":           ("ok", ""),

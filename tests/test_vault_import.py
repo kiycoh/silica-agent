@@ -184,7 +184,8 @@ def test_on_the_server_the_pdf_stays_as_the_raw_of_its_note(client, monkeypatch)
     became. ADR-0087 point 5's list with its audio (amendment of 2026-10-14)
     and ADR-0120's documents, images and CSV: a video is not offered or
     taken, and a .docx that is not one is refused by its bytes, and goes."""
-    from silica.ui.web.vault_import import HOSTED_EXTENSIONS
+    from silica.kernel.base.formats import HOSTED_EXTENSIONS
+    from silica.ui.web.vault_import import MAX_FILES_PER_IMPORT
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
     tc, _ = client
@@ -194,6 +195,8 @@ def test_on_the_server_the_pdf_stays_as_the_raw_of_its_note(client, monkeypatch)
                       ("", "doc.docx", b"PK"), ("", "talk.mp4", b"\x00\x00\x00\x18ftypmp42")])
 
     assert types["import"] == types["extensions"] == list(HOSTED_EXTENSIONS)
+    assert types["import_max"] == MAX_FILES_PER_IMPORT  # the page holds no copy of its own
+    assert types["images"] == [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"]
     assert {".docx", ".pptx", ".epub", ".png", ".csv", ".3gp"} <= set(HOSTED_EXTENSIONS)
     rows = _settled(resp)
     assert rows["paper.pdf"]["notes"] == ["paper.md"]
