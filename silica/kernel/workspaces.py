@@ -16,11 +16,9 @@ import threading
 from contextvars import ContextVar
 from pathlib import Path
 
-KIND = "workspace"
+from silica.kernel.base.noteshape import NOT_MEMBERS, WORKSPACE, type_word
+
 LINES = ("notes", "folders", "where")
-# A workspace is the card, never the material, as a plan is (plans.py): the
-# walk records `type`, and neither kind is ever a member of anything.
-NOT_MEMBERS = ("workspace", "plan", "syllabus")
 DEFAULT_FOLDER = "Workspaces"
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]+)?\]\]")
@@ -35,7 +33,7 @@ def _vault() -> Path:
 
 
 def is_workspace(data: dict | None) -> bool:
-    return isinstance(data, dict) and str(data.get("type") or "").strip().lower() == KIND
+    return isinstance(data, dict) and type_word(data) == WORKSPACE
 
 
 def _as_list(value) -> list[str]:
@@ -168,7 +166,7 @@ def members(ws: dict) -> dict[str, list[dict]]:
     fms = _frontmatters(_vault())
     mirrors = _mirror_copies(fms)
     material = {p: d for p, d in fms.items()
-                if p not in mirrors and str(d.get("type") or "").strip().lower() not in NOT_MEMBERS}
+                if p not in mirrors and type_word(d) not in NOT_MEMBERS}
     by_stem: dict[str, str] = {}
     for p in material:
         by_stem.setdefault(Path(p).stem.casefold(), p)
@@ -356,7 +354,7 @@ def create_workspace(name: str, notes=(), folders=()) -> str:
         raise ValueError(f"a workspace named {name!r} already exists")
     path = f"{in_write_dir(DEFAULT_FOLDER)}/{name}.md"
     data = {
-        "type": KIND,
+        "type": WORKSPACE,
         "notes": [f"[[{title_of(t).removesuffix('.md')}]]" for t in notes],
         "folders": [str(f).replace("\\", "/").strip("/") for f in folders],
         "where": [],

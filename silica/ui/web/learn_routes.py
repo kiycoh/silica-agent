@@ -26,6 +26,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from silica.kernel.base import noteshape
 from silica.kernel.learn.schedule import DUE_R
 
 logger = logging.getLogger(__name__)
@@ -293,7 +294,7 @@ def _recent(rows: dict, now: float) -> list[dict]:
     # the view's rows carry no mtime; the note walk does, and says what is material
     meta = learner._notes_meta(Path(CONFIG.vault_path))
     fresh = [(m["mtime"], p) for p, m in meta.items()
-             if learner.is_material(m) and (m.get("mtime") or 0) >= now - RECENT_DAYS * 86400
+             if noteshape.is_material(m) and (m.get("mtime") or 0) >= now - RECENT_DAYS * 86400
              and learner.key_of(p) in rows]
     fresh.sort(reverse=True)
     return [{"path": p, "title": _stem(p)} for _t, p in fresh[:RECENT_N]]
@@ -1629,7 +1630,7 @@ def learn_map():
             logger.debug("learn: map without the scope of %s (%s)", pl["path"], exc)
     folders: dict[str, dict] = {}
     for pth, meta in notes.items():
-        if not learner.is_material(meta):
+        if not noteshape.is_material(meta):
             continue
         k = learner.key_of(pth)
         row, evs = rows.get(k) or {}, evs_by.get(k, [])
@@ -1855,7 +1856,7 @@ def scope_options(q: str = ""):
     out = [{"kind": "folder", "target": f, "label": f, "count": folders[f]} for f in fs[:6]]
     if not needle:
         return out
-    ns = sorted((p for p, m in notes.items() if learner.is_material(m) and needle in Path(p).stem.casefold()),
+    ns = sorted((p for p, m in notes.items() if noteshape.is_material(m) and needle in Path(p).stem.casefold()),
                 key=lambda p: (not Path(p).stem.casefold().startswith(needle), len(p), p))[:6]
     for pth in ns:
         out.append({"kind": "notes", "target": Path(pth).stem, "label": Path(pth).stem, "count": 1, "path": pth})

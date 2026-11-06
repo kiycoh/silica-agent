@@ -32,6 +32,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from silica.kernel.base.layout import is_vault_artifact
+from silica.kernel.base.noteshape import NATIVE_TYPES
 
 
 @dataclass
@@ -185,14 +186,6 @@ def _infer_type(path: str) -> str:
     return "note"
 
 
-# A note a Silica feature runs on (ADR-0070): drawn, as a diamond, but not
-# counted. Unlike log.md it is the user's to open and edit, so it stays in the
-# graph; unlike a note it is not knowledge, and "Prova Learn" showed what
-# counting it costs: its tree of 52 links named an area on the test vault and
-# was the only in-link of 10 notes, which then never rang as orphans.
-NATIVE_TYPES = ("plan", "event", "reading")
-
-
 def stamp_native(nodes: list[dict], vault: Path) -> None:
     """Type a Learn plan `plan`, a step's reading `reading` (ADR-0132) and an
     event note `event`, in place.
@@ -211,6 +204,7 @@ def stamp_native(nodes: list[dict], vault: Path) -> None:
     /graph wait on it.
     """
     from silica.kernel.base import frontmatter
+    from silica.kernel.base.noteshape import EVENT, PLAN, READING, is_event, is_plan, type_word
 
     for n in nodes:
         # A day stays a triangle: the shape Obsidian's own setting gave it.
@@ -225,13 +219,12 @@ def stamp_native(nodes: list[dict], vault: Path) -> None:
         data, _raw, _body = frontmatter.split(text)
         if not isinstance(data, dict):
             continue
-        kind = str(data.get("type") or "").strip().lower()
-        if kind in ("plan", "syllabus"):
-            n["type"] = "plan"
-        elif kind == "reading":
-            n["type"] = "reading"
-        elif data.get("event_start") is not None:
-            n["type"] = "event"
+        if is_plan(data):
+            n["type"] = PLAN
+        elif type_word(data) == READING:
+            n["type"] = READING
+        elif is_event(data):
+            n["type"] = EVENT
 
 
 def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:

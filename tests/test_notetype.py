@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import pytest
 
+from silica.kernel.base.noteshape import verified_entries
 from silica.kernel.write.notetype import (
     derive_type,
     is_human_verified,
     okf_conformance,
     stamp_type,
-    verified_entries,
 )
 
 PLAIN = "---\ntitle: X\n---\n\nBody.\n"

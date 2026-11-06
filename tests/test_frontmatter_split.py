@@ -2,8 +2,8 @@
 
 The bug that motivated these: a note whose frontmatter is a YAML *sequence*
 parses fine, so split() handed the list back as `data`, and the first
-`data.get(...)` downstream raised AttributeError. mark_contested, clear_contested,
-contested_refs, reliability_tier, mark_superseded_by, resolve_contested,
+`data.get(...)` downstream raised AttributeError. mark_contested, contested_refs,
+ reliability_tier, mark_superseded_by, resolve_contested,
 notetype.derive_type, codedocs and graph_report all took that path.
 """
 from __future__ import annotations
@@ -52,7 +52,6 @@ def test_contested_writers_leave_a_non_mapping_note_untouched():
     from silica.kernel.write import contested as c
 
     assert c.mark_contested(SEQ_NOTE, "flagged: x") == SEQ_NOTE
-    assert c.clear_contested(SEQ_NOTE) == SEQ_NOTE
     assert c.mark_superseded_by(SEQ_NOTE, "Winner.md") == SEQ_NOTE
     assert c.resolve_contested(SEQ_NOTE, resolved_by="user", valid_to="2026-08-04") == SEQ_NOTE
     assert c.contested_refs(SEQ_NOTE) == []

@@ -9,17 +9,17 @@ byte-identical output to the pre-stamp behaviour, so every non-FSM path
 from __future__ import annotations
 
 from silica.kernel.write import templates
-from silica.kernel.write.contested import parse_stamp, stamp
+from silica.kernel.base.noteshape import parse_stamps, stamp
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.provenance import source_event_date
 
 
-# --- stamp / parse_stamp (pure) ----------------------------------------------
+# --- stamp / parse_stamps (pure) ---------------------------------------------
 
 def test_stamp_round_trip():
     s = stamp(valid_from="2023-05-08", run="b07f126889f04ee5")
     assert s == "<!-- silica: valid_from=2023-05-08 run=b07f126889f04ee5 -->"
-    assert parse_stamp(s) == {"valid_from": "2023-05-08", "run": "b07f126889f04ee5"}
+    assert parse_stamps(s) == [{"valid_from": "2023-05-08", "run": "b07f126889f04ee5"}]
 
 
 def test_stamp_drops_empty_fields_and_is_empty_when_all_empty():
@@ -32,11 +32,11 @@ def test_stamp_value_cannot_close_the_comment():
     s = stamp(valid_from="2023 --> <script>alert(1)</script>")
     assert s.count("-->") == 1
     assert "<script>" not in s
-    assert parse_stamp(s)["valid_from"]
+    assert parse_stamps(s)[0]["valid_from"]
 
 
 def test_parse_stamp_absent():
-    assert parse_stamp("# Titolo\n\nSolo prosa.") == {}
+    assert parse_stamps("# Titolo\n\nSolo prosa.") == []
 
 
 # --- source_event_date (pure) ------------------------------------------------
@@ -83,7 +83,7 @@ def test_patch_snippet_stamps_right_above_the_prose():
         source_basename="appunti.md", valid_from="2023-05-08",
     )
     assert "<!-- silica: valid_from=2023-05-08 -->\nIl dosaggio raccomandato" in out
-    assert parse_stamp(out) == {"valid_from": "2023-05-08"}
+    assert parse_stamps(out) == [{"valid_from": "2023-05-08"}]
 
 
 # --- write / patch through the executor --------------------------------------
@@ -115,7 +115,7 @@ def test_execute_write_stamps_under_the_h1(tmp_vault):
     ))
 
     content = DRIVER.read_note("Farmacologia/Dosaggio Warfarin.md").content
-    assert parse_stamp(content) == {"valid_from": "2023-05-08"}
+    assert parse_stamps(content) == [{"valid_from": "2023-05-08"}]
     assert content.index("# Dosaggio Warfarin") < content.index("<!-- silica:")
     assert content.index("<!-- silica:") < content.index("Il dosaggio")
 
@@ -144,7 +144,7 @@ def test_execute_patch_stamps_the_block(tmp_vault):
     ))
 
     content = tmp_vault.read(path)
-    assert parse_stamp(content) == {"valid_from": "2023-05-08"}
+    assert parse_stamps(content) == [{"valid_from": "2023-05-08"}]
     assert "## Additional notes" not in content
     assert content.index("<!-- silica:") < content.index("INR target 2.0-3.0.[^appunti]")
     assert "5mg/die" in content  # the pre-existing claim is untouched

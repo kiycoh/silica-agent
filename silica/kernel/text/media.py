@@ -15,6 +15,8 @@ import os
 import re
 from collections.abc import Mapping
 
+from silica.kernel.base.noteshape import BODY_END_RE
+
 # ---------------------------------------------------------------------------
 # Regex patterns
 # ---------------------------------------------------------------------------
@@ -199,7 +201,7 @@ def append_section_images(snippet: str, source: str, concept: str) -> str:
     block = "\n".join(embeds)
     # The figure belongs to the body: appended to the end it landed after the
     # `## Relations` block on 5% of the outline-lane notes (2026-09-06).
-    m = re.search(r"^## (?:Relations|Sources)\b", snippet, re.M)
+    m = BODY_END_RE.search(snippet)
     if m:
         head, tail = snippet[:m.start()].rstrip(), snippet[m.start():]
         return f"{head}\n\n{block}\n\n{tail}" if head else f"{block}\n\n{tail}"

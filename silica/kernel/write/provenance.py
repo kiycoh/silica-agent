@@ -36,6 +36,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from silica.kernel.base.home import resolve_vault_path
+from silica.kernel.base.noteshape import CLAIMS_END_RE
 
 logger = logging.getLogger(__name__)
 
@@ -1058,7 +1059,6 @@ def nonextractive_lines(body: str, source: str) -> list[str]:
 # and a positional reference would silently re-point.
 _FOOTNOTE_LABEL_RE = re.compile(r"[^A-Za-z0-9_-]+")
 _TRAILING_URL_RE = re.compile(r"https?://\S+\s*$")
-_SECTION_STOP_RE = re.compile(r"^#{1,6}\s+(Sources|Superseded)\b", re.IGNORECASE)
 # A line that is only an image embed or a one-line display formula: a picture
 # or a formula is not a claim a reader checks against the leaf, and on the
 # embed the marker rendered as a superscript glued to the image (live
@@ -1100,7 +1100,7 @@ def attribute_lines(note: str, source: str, label: str) -> str:
     fenced = False
     math = False
     for i, raw in enumerate(lines):
-        if _SECTION_STOP_RE.match(raw):
+        if CLAIMS_END_RE.match(raw):
             out.extend(lines[i:])
             break
         if raw.lstrip().startswith("```"):

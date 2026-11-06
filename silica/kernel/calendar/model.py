@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from silica.kernel.base import frontmatter
+from silica.kernel.base.noteshape import is_event
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ def _check_rrule(rule: str, dtstart: dt.datetime) -> str | None:
 def parse_event(data: dict, *, stem: str, path: str) -> Event | None:
     """Tolerant read of one note's frontmatter. None = not an Event note, or
     an unusable one (malformed start) — every degrade logs a warning."""
-    if not data or data.get("event_start") is None:
+    if not is_event(data):
         return None
     when = _parse_when(data["event_start"])
     if when is None:
@@ -232,7 +233,7 @@ def scan_events(vault: Path) -> list[Event]:
         except (OSError, UnicodeDecodeError):
             continue  # one unreadable note must never take the agenda down
         data, _raw, _body = frontmatter.split(text)
-        if not data or data.get("event_start") is None:
+        if not is_event(data):
             continue
         ev = parse_event(data, stem=f.stem, path="/".join(parts))
         if ev:

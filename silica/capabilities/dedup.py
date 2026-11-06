@@ -283,8 +283,8 @@ def _file_dominated_claim(
     import datetime
 
     from silica.agent.bounds import dedup_supersede_bounds
+    from silica.kernel.base.noteshape import SUPERSEDED_MARKER
     from silica.kernel.write.contested import (
-        SUPERSEDED_HEADING,
         superseded_claim,
         suppress_contest,
     )
@@ -299,7 +299,7 @@ def _file_dominated_claim(
         return None
 
     today = datetime.date.today().isoformat()
-    filed = merge_moc_section(prior, SUPERSEDED_HEADING, superseded_claim(
+    filed = merge_moc_section(prior, SUPERSEDED_MARKER, superseded_claim(
         decision.addition, source_basename=source_basename,
         valid_from=incoming_clock, valid_to=today,
     ))
@@ -372,12 +372,12 @@ def _note_key(path: str) -> str:
 
 
 def _is_spine(path: str) -> bool:
-    from silica.kernel.outline import SPINE_SECTION
     from silica.kernel.base import frontmatter
+    from silica.kernel.base.noteshape import is_spine
 
     rel = path if path.endswith(".md") else path + ".md"
     data, _raw, _body = frontmatter.split(read_or_skip(rel)[0] or "")
-    return isinstance(data, dict) and str(data.get("section") or "") == SPINE_SECTION
+    return is_spine(data)
 
 
 def _record_absorbed_alias(ctx: dict, winner_path: str, hub: str | None) -> None:

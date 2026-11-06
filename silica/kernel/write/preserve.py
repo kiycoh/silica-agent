@@ -33,6 +33,7 @@ from contextvars import ContextVar
 from types import FrameType
 
 from silica.kernel.base import frontmatter
+from silica.kernel.base.noteshape import PROVENANCE_HEADER_PREFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +52,6 @@ SYSTEM_KEYS = frozenset({"last modified", "agent", "review", "code_ref"})
 # the whole Learn stack in and this module must stay importable alone.
 PLAN_SECTIONS = frozenset({"objectives", "tree", "steps", "assessment"})
 
-# The patch headers written until 2026-09-04 (templates.PROVENANCE_HEADER_
-# PREFIXES, compared by test_preserve_rule). resolve_contested prunes one left
-# empty by the callout it moved, so RESOLVE relaxes them with the callouts;
-# the suite's census of would-refuse lines found it (test_superseded.py).
-PROVENANCE_HEADERS = ("## Additional notes", "## Note aggiuntive")
 
 
 class Loss(enum.Enum):
@@ -168,7 +164,7 @@ def _lines(text: str, loss: Loss | None, *, context: bool = True) -> list[str]:
         if not line.strip():
             continue
         if loss is Loss.RESOLVE and (line.lstrip().startswith(">")
-                                     or line.startswith(PROVENANCE_HEADERS)):
+                                     or line.startswith(PROVENANCE_HEADER_PREFIXES)):
             continue  # the resolved callouts move, with their emptied header
         out.append(f"{ctx}\x00{line}" if context else line)
     return out

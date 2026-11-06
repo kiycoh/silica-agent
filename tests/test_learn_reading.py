@@ -13,6 +13,7 @@ import time
 import pytest
 
 import silica.tools.notes  # noqa: F401 — the write gate registers on import
+from silica.kernel.base import noteshape
 from silica.kernel.learn import pick, plans, reading
 
 NOTES = {
@@ -280,7 +281,7 @@ def test_a_reading_is_written_beside_the_plan_read_back_and_never_material(step_
     assert cards[2]["spine"] and cards[2]["points"] == ["Neurone artificiale", "Gradiente discendente"]
     assert cards[3]["needed_by"] == ["Gradiente discendente"]
     meta = learner._notes_meta(plans._vault())[out["path"]]
-    assert meta["kind"] == "reading" and not learner.is_material(meta)
+    assert meta["kind"] == "reading" and not noteshape.is_material(meta)
     text = (plans._vault() / out["path"]).read_text(encoding="utf-8")
     assert "type: reading" in text and "AI: true" in text and "notes_hash:" in text
     assert "> [!question] To finish the card" in text and "Do not confuse" not in text

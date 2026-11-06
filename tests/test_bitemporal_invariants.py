@@ -16,15 +16,14 @@ import types
 
 from silica.kernel.progress import RunManifestEntry
 from silica.kernel.base import frontmatter
+from silica.kernel.base.noteshape import STAMP_RE, SUPERSEDED_MARKER
 from silica.kernel.write.contested import (
-    STAMP_RE,
-    SUPERSEDED_HEADING,
     contested_callout,
     mark_contested,
 )
 from silica.router.states import finalize
 
-SUPERSEDED_TAIL = f"{SUPERSEDED_HEADING}\n\n> [!quote] Superseded 2026-07-25\n> claim vecchio.\n"
+SUPERSEDED_TAIL = f"{SUPERSEDED_MARKER}\n\n> [!quote] Superseded 2026-07-25\n> claim vecchio.\n"
 
 
 def _fsm(entries, *, keep_sources=False, seen_override=None):
@@ -61,7 +60,7 @@ def test_sources_block_lands_above_the_superseded_section(tmp_vault):
 
     out = tmp_vault.read(note)
     assert "[[sources/src]]" in out, out
-    assert out.index("## Sources") < out.index(SUPERSEDED_HEADING)
+    assert out.index("## Sources") < out.index(SUPERSEDED_MARKER)
     assert out.rstrip().endswith("claim vecchio.")
 
 
@@ -93,8 +92,8 @@ def _assert_valid_to_is_filed(content: str) -> None:
     dead = [m for m in STAMP_RE.finditer(content) if "valid_to" in m.group(1)]
     if not dead:
         return
-    assert SUPERSEDED_HEADING in content, "valid_to stamped outside a superseded section"
-    grave = content.index(SUPERSEDED_HEADING)
+    assert SUPERSEDED_MARKER in content, "valid_to stamped outside a superseded section"
+    grave = content.index(SUPERSEDED_MARKER)
     assert all(m.start() > grave for m in dead), "a valid_to stamp escaped the section"
 
 
@@ -165,7 +164,7 @@ def test_equal_tier_contradiction_stays_contested(tmp_vault):
 
     out = tmp_vault.read(target)
     assert contested_refs(out), "the contradiction was not recorded"
-    assert SUPERSEDED_HEADING not in out, "equal tier auto-resolved"
+    assert SUPERSEDED_MARKER not in out, "equal tier auto-resolved"
     assert "5mg/die" in out and "50mg/die" in out  # both claims stay live
 
 
@@ -325,7 +324,7 @@ def test_resolving_one_ref_leaves_the_other_open():
                             valid_to="2026-08-11", source_ref="source: appunti.md")
 
     assert contested_refs(out) == ["source: slides.md"]  # flag survives with it
-    grave = out[out.index(SUPERSEDED_HEADING):]
+    grave = out[out.index(SUPERSEDED_MARKER):]
     assert "from appunti.md" in grave
     assert "from slides.md" not in grave       # the open one stays in the live body
     assert "Unresolved." in out                # and still says so
@@ -345,18 +344,19 @@ def test_resolving_the_last_ref_clears_the_flag():
     data, _, _ = frontmatter.split(twice)
     assert "contested" not in data and "contradictions" not in data
     assert "Unresolved." not in twice
-    grave = twice[twice.index(SUPERSEDED_HEADING):]
+    grave = twice[twice.index(SUPERSEDED_MARKER):]
     assert "from appunti.md" in grave and "from slides.md" in grave
 
 
 def test_resolving_every_ref_at_once_keeps_both_records():
     """No `source_ref`: the all-or-nothing resolution the live tool still uses."""
-    from silica.kernel.write.contested import contested_refs, parse_stamps, resolve_contested
+    from silica.kernel.base.noteshape import parse_stamps
+    from silica.kernel.write.contested import contested_refs, resolve_contested
 
     out = resolve_contested(_two_contradictions(), resolved_by="user", valid_to="2026-08-11")
 
     assert contested_refs(out) == []
-    grave = out[out.index(SUPERSEDED_HEADING):]
+    grave = out[out.index(SUPERSEDED_MARKER):]
     assert "from appunti.md" in grave and "from slides.md" in grave
     assert len([s for s in parse_stamps(out) if "valid_to" in s]) == 2
     _assert_valid_to_is_filed(out)

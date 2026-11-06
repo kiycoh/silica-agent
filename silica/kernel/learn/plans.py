@@ -21,6 +21,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from silica.kernel.base.noteshape import is_plan
+
 logger = logging.getLogger(__name__)
 
 SCOPES = ("notes", "folder", "topic", "steps", "workspace")
@@ -37,12 +39,6 @@ def _vault() -> Path:
     from silica.config import CONFIG
 
     return Path(CONFIG.vault_path)
-
-
-def is_plan(data: dict | None) -> bool:
-    if not data:
-        return False
-    return str(data.get("type") or "").strip().lower() in ("plan", "syllabus")
 
 
 def find_plan(name: str) -> dict | None:
@@ -353,7 +349,8 @@ def resolve_scope(kind: str, target, restrict: str = "", refused=(), declared: d
     context; a step that names a concept with no note of its own is a gap
     until new-material targets (extension 1) exist.
     """
-    from silica.kernel.learn.learner import _notes_meta, is_material
+    from silica.kernel.base.noteshape import is_material
+    from silica.kernel.learn.learner import _notes_meta
 
     notes = _notes_meta(_vault())
     # A note's path is a prefix of itself only, so a list of notes and a
@@ -2165,7 +2162,7 @@ def _material_of(plan: dict, notes: dict) -> tuple[list[dict], dict, str, list[d
     reference's body, its rows), the roles as the plan states them or as
     ADR-0131 reads them."""
     from silica.kernel.learn import sources as so
-    from silica.kernel.learn.learner import is_material
+    from silica.kernel.base.noteshape import is_material
     from silica.kernel.base import frontmatter
 
     ref = resolve_title(plan.get("target") or "", notes) if plan.get("scope") == "steps" else None
@@ -2711,7 +2708,8 @@ def guide_candidates(restrict: str = "") -> list[str]:
     """The notes in the bound a plan could take its steps' depth from: a
     table whose header names a depth or a difficulty (ADR-0131 point 11),
     as a study guide writes one. Read once per notes epoch and bound."""
-    from silica.kernel.learn.learner import _notes_meta, is_material, parsed_note
+    from silica.kernel.base.noteshape import is_material
+    from silica.kernel.learn.learner import _notes_meta, parsed_note
 
     vault = _vault()
     notes = _notes_meta(vault)

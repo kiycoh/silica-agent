@@ -20,6 +20,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
 from silica.kernel import publish
+from silica.kernel.base.noteshape import SOURCES_TAIL_RE
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,6 @@ _CREDIT_MAX = 200
 _OUT = "*Image not published*"
 
 _WORD = re.compile(r"\w+", re.U)
-_SOURCES_TAIL = re.compile(r"^## Sources.*", re.S | re.M)
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp")
 _WIKI_EMBED = re.compile(r"!\[\[([^\]]+)\]\]")
 # One level of brackets inside the address: Wikipedia's file names carry them.
@@ -378,7 +378,7 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
     notes: dict[str, dict] = {}
     for p in paths:
         text = _body((vault / p).read_text(encoding="utf-8", errors="ignore")) if (vault / p).is_file() else ""
-        notes[p] = {"title": _title(p, fms.get(p) or {}), "text": _SOURCES_TAIL.sub("", text), "body": text,
+        notes[p] = {"title": _title(p, fms.get(p) or {}), "text": SOURCES_TAIL_RE.sub("", text), "body": text,
                     "files": [], "rewritten": (fms.get(p) or {}).get("rewritten") is True,
                     "edited": None, "share": None, "measured": False}
 

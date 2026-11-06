@@ -370,7 +370,7 @@ def _read_dated_body(path: str, origin: str = "vault") -> tuple[
     # `body` is the frontmatter-stripped text; for a body-only note split()
     # already returns the whole content as body. The old `or content` fallback
     # leaked YAML frontmatter into context whenever the body was empty (A7).
-    from silica.kernel.base.layout import SOURCES_MARKER
+    from silica.kernel.base.noteshape import SOURCES_MARKER
     from silica.kernel.write.contested import lifecycle as note_lifecycle
     from silica.kernel.write.contested import trust as note_trust
 

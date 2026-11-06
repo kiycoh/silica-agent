@@ -19,6 +19,7 @@ from pathlib import Path
 import yaml
 
 from silica.kernel.base import frontmatter
+from silica.kernel.base.noteshape import READING, type_word
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +165,7 @@ def build(checked: str, notes: dict[str, Note], keys: tuple[str, ...], write_dir
 
     wd = (write_dir or "").strip("/")
     candidates = {p for p in notes if p != checked and not is_vault_artifact(p)
-                  and str(notes[p].fm.get("type") or "").strip().lower() != "reading"
+                  and type_word(notes[p].fm) != READING
                   and not (wd and (p == wd or p.startswith(wd + "/")))}
     parties = {p: values_of(notes[p], keys) for p in candidates}
     if not any(parties.values()):

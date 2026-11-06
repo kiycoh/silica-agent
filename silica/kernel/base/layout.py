@@ -104,12 +104,6 @@ def vault_epoch(vault: str | None = None) -> str:
 SOURCES_DIR = "sources"
 
 
-# The H2 under which a note links back to its verbatim leaf. Its presence is
-# also the note-side signal that the source is still retrievable, which is what
-# separates a grounded claim from a purely distilled one (reliability_tier).
-SOURCES_MARKER = "## Sources"
-
-
 # Two rules disagree (probe 2026-09-17): this hides leaves from every index
 # built on list_files, while the silica-core engine behind silica_search_context
 # walks sources/ and ranked a leaf first. Verbatim outranking its distilled note

@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from collections.abc import Set as AbstractSet
 from typing import Callable
 
+from silica.kernel.base.noteshape import SPINE_SECTION, is_spine
 from silica.kernel.text.media import strip_images
 
 logger = logging.getLogger(__name__)
@@ -50,11 +51,10 @@ RELATION_LABEL = {
     "generalizes": "generalizes", "justifies": "justifies",
 }
 
-# Frontmatter `section:` value that marks a lesson spine note. The spine is
-# the one note per source that is about the source's argument, not an idea,
-# so the edge stage must never propose it as a target (measured: 6 of 9 edges
-# went to the lecture-level note when it was visible).
-SPINE_SECTION = "(outline)"
+# noteshape.SPINE_SECTION marks a lesson spine note. The spine is the one note
+# per source that is about the source's argument, not an idea, so the edge stage
+# must never propose it as a target (measured: 6 of 9 edges went to the
+# lecture-level note when it was visible).
 
 BODIES_BATCH = 4            # ideas per bodies call. Was 8: the wall time of a lecture is its longest
                             # stream, and two 8-idea batches streamed 3.7 and 6.5 min on deepseek
@@ -651,7 +651,7 @@ def _hidden_note(rel: str) -> bool:
         # Unreadable candidate: not a merge target, the judge would fail on it anyway.
         return True
     data = data if isinstance(data, dict) else {}
-    return bool(data.get("superseded_by")) or str(data.get("section") or "") == SPINE_SECTION
+    return bool(data.get("superseded_by")) or is_spine(data)
 
 
 def section_text(source: str, heading: str) -> str:
@@ -740,7 +740,7 @@ def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozens
             logger.debug("vault_outline: skipping %s (%s)", rel, e)
             continue
         data = data if isinstance(data, dict) else {}
-        if str(data.get("section") or "") == SPINE_SECTION:
+        if is_spine(data):
             continue
         if data.get("superseded_by"):
             # A merge loser shown as a live note draws the model's same_as

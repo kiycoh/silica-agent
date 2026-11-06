@@ -125,8 +125,8 @@ def compute_report(
     Pass _nodes_edges_override for testing without a live driver.
     """
     import networkx as nx
+    from silica.kernel.base.noteshape import NATIVE_TYPES
     from silica.kernel.graph.graph_export import (
-        NATIVE_TYPES,
         area_bridges,
         area_hubs,
         area_tally,
@@ -216,6 +216,7 @@ def compute_report(
             from silica.kernel.write import contested as contested_kernel
             from silica.kernel.link import ofm
             from silica.kernel.base import frontmatter
+            from silica.kernel.base.noteshape import SUPERSEDED_MARKER, parse_stamps
             from silica.kernel.learn.learner import _created_and_ai
             from silica.driver import DRIVER
 
@@ -244,11 +245,11 @@ def compute_report(
                     if mt is not None or ts_created != 0.0:
                         created_ts[nid] = ts_created
                     tiers[contested_kernel.reliability_tier(nc.content)] += 1
-                    if contested_kernel.SUPERSEDED_HEADING in body:
+                    if SUPERSEDED_MARKER in body:
                         superseded_sections += 1
                     if data and data.get(contested_kernel.SUPERSEDED_BY_KEY):
                         superseded_notes += 1
-                    stamps = contested_kernel.parse_stamps(body)
+                    stamps = parse_stamps(body)
                     if stamps:
                         stamped += 1
                     valid_froms.extend(s["valid_from"] for s in stamps if s.get("valid_from"))

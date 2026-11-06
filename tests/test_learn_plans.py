@@ -521,7 +521,8 @@ def _meta_and_material():
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.learn.learner import _notes_meta, is_material
+    from silica.kernel.base.noteshape import is_material
+    from silica.kernel.learn.learner import _notes_meta
 
     meta = _notes_meta(Path(CONFIG.vault_path))
     return meta, {p for p, m in meta.items() if is_material(m)}

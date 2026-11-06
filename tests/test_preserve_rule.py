@@ -227,8 +227,3 @@ def test_resolve_drops_the_provenance_header_left_empty_by_the_move():
     assert lost(before, after.replace("The dose is 5mg.\n", ""), loss=Loss.RESOLVE)
 
 
-def test_the_header_prefixes_are_the_ones_templates_writes():
-    from silica.kernel.write.preserve import PROVENANCE_HEADERS
-    from silica.kernel.write.templates import PROVENANCE_HEADER_PREFIXES
-
-    assert PROVENANCE_HEADERS == PROVENANCE_HEADER_PREFIXES

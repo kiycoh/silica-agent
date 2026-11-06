@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from silica.kernel.base import noteshape
 from silica.kernel.learn.schedule import DUE_R, WEAK_R, note_state, view  # noqa: F401  re-exported v1 names
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ def _note_meta(text: str, mtime: float) -> tuple[float, bool, str, dict]:
     pickers can keep plan and syllabus notes out of the study material.
     """
     from silica.kernel.base import frontmatter
-    from silica.kernel.write.contested import note_clock
+    from silica.kernel.base.noteshape import is_spine, note_clock, note_kind
 
     data, _raw, _body = frontmatter.split(text)
     date = (data or {}).get("date") or note_clock(text)
@@ -68,13 +69,7 @@ def _note_meta(text: str, mtime: float) -> tuple[float, bool, str, dict]:
             ).timestamp()
         except ValueError:
             pass  # unparseable statement: keep the mtime proxy
-    # An event note states no `type`; its `event_start` is what makes it one
-    # (calendar/model.py), so that key names its kind here. A merge loser is
-    # its winner's material twice: a course plan listed "Reti neurali
-    # ricorrenti" (superseded_by Rete ricorrente) beside its winner (2026-10-23).
     data = data or {}
-    kind = ("event" if data.get("event_start") is not None
-            else "merged" if data.get("superseded_by") else data.get("type"))
     extra: dict = {}
     winner = _WINNER_RE.search(str(data.get("superseded_by") or ""))
     if winner:
@@ -83,26 +78,12 @@ def _note_meta(text: str, mtime: float) -> tuple[float, bool, str, dict]:
     aliases = [aliases] if isinstance(aliases, str) else aliases
     if isinstance(aliases, list) and aliases:
         extra["aliases"] = [str(a).strip() for a in aliases if str(a).strip()]
-    # outline.SPINE_SECTION, spelled here: outline reaches silica.agent, and the
-    # graph report imports this module (import contract P2/DKB).
-    if str(data.get("section") or "") == "(outline)":
+    if is_spine(data):
         extra["spine"] = True
-    return ts, bool(data.get("AI")), str(kind or "").strip().lower(), extra
+    return ts, bool(data.get("AI")), note_kind(data), extra
 
 
 _WINNER_RE = re.compile(r"\[\[([^\]|#]+)")
-
-
-# Notes about learning, never asked about; the calendar's own notes, which
-# Learn's "never practised" listed as study material until 2026-10-15; and
-# merge losers, whose winner is the note to study; a step's reading (ADR-0132),
-# an explanation written from notes that are themselves the material; and
-# the pipeline's staging, converted text that is the source, not a note.
-NOT_MATERIAL = ("plan", "syllabus", "event", "merged", "reading", "staged")
-
-
-def is_material(meta: dict) -> bool:
-    return meta.get("kind") not in NOT_MATERIAL
 
 
 _meta_memo: dict[str, tuple[str, dict[str, dict]]] = {}  # vault -> (epoch, meta)
@@ -158,6 +139,7 @@ def _notes_meta(vault: Path) -> dict[str, dict]:
     re-parse.
     """
     from silica.kernel.base.layout import SOURCES_DIR, ignore_matcher, is_staging_path, vault_epoch
+    from silica.kernel.base.noteshape import STAGED
 
     epoch = vault_epoch(str(vault))
     if epoch:
@@ -188,7 +170,7 @@ def _notes_meta(vault: Path) -> dict[str, dict]:
         # "8 questions waiting from earlier sessions", a references segment
         # among them (2026-10-26).
         if is_staging_path(rel):
-            kind = "staged"
+            kind = STAGED
         # mtime rides along for the picker's freshness rule (learn-suite D13):
         # a note edited after its last rating is asked as new material.
         out[rel] = {"created": created, "ai": ai, "mtime": mtime, "kind": kind, **extra}
@@ -363,9 +345,10 @@ def drop_structural(prereq_map: dict[str, list[str]], notes: dict[str, dict]) ->
     """
     from silica.kernel.recall.cooccurrence import cooccur_key
     from silica.kernel.base.layout import is_source_leaf
+    from silica.kernel.base.noteshape import STAGED
 
     structural = {cooccur_key(p) for p, m in notes.items()
-                  if m.get("spine") or m.get("kind") == "staged"
+                  if m.get("spine") or m.get("kind") == STAGED
                   or Path(p).stem.casefold() == Path(p).parent.name.casefold()}
 
     def arranges(key: str) -> bool:
@@ -504,7 +487,7 @@ def review_queue(
             return "unexplored"
         return "known"
 
-    rows = {k: r for k, r in rows.items() if is_material(notes_meta.get(r["path"], {}))}
+    rows = {k: r for k, r in rows.items() if noteshape.is_material(notes_meta.get(r["path"], {}))}
     if not target:
         rows = off_plan_dropped(rows, planned)
     for r in rows.values():

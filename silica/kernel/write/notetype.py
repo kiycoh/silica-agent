@@ -26,10 +26,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from silica.kernel.base import frontmatter
-
-# The four values derive_type can produce. Free-form per §4.1 — this is
-# Silica's vocabulary, not the spec's.
-SOURCE, CODE, PLAN, NOTE = "Source", "Code", "Plan", "Note"
+from silica.kernel.base.noteshape import OKF_CODE, OKF_NOTE, OKF_PLAN, OKF_SOURCE, verified_entries
 
 # §11.3 binds these names to a bundle-level index/changelog when present. The
 # vault generates neither, so a note carrying the name is a collision to rename
@@ -48,14 +45,14 @@ def derive_type(path: str, content: str) -> str:
     from silica.kernel.base.layout import is_source_leaf
 
     if is_source_leaf(path):
-        return SOURCE
+        return OKF_SOURCE
     data, _raw, _body = frontmatter.split(content)
     data = data or {}
     if data.get("documents") or data.get("code_ref"):
-        return CODE
+        return OKF_CODE
     if str(data.get("status") or "").strip() in VALID_STATUS:
-        return PLAN
-    return NOTE
+        return OKF_PLAN
+    return OKF_NOTE
 
 
 _TYPE_KEY_RE = re.compile(r"^type:\s", re.MULTILINE)
@@ -98,21 +95,6 @@ def agent_id() -> str:
     function guessing one.
     """
     return os.environ.get("SILICA_AGENT_ID", "").strip()
-
-
-def verified_entries(data: dict | None) -> list[dict]:
-    """The `verified` entries of a note's frontmatter, always as a list.
-
-    §5.2 is a MUST on readers: a single `{by, at}` mapping means a one-element
-    list. Hand-edited frontmatter is where this field comes from, and a person
-    writing one verification writes the mapping, not a list of one.
-    """
-    raw = (data or {}).get("verified")
-    if isinstance(raw, dict):
-        return [raw]
-    if isinstance(raw, list):
-        return [e for e in raw if isinstance(e, dict)]
-    return []
 
 
 def is_human_verified(data: dict | None) -> bool:

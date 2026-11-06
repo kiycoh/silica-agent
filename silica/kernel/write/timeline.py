@@ -30,7 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from silica.kernel.base import frontmatter
-from silica.kernel.write.contested import note_clock
+from silica.kernel.base.noteshape import note_clock
 from silica.kernel.base.layout import SOURCES_DIR
 
 

@@ -12,13 +12,13 @@ from pathlib import Path
 import pytest
 
 from silica.kernel.base import frontmatter
+from silica.kernel.base.noteshape import verified_entries
 from silica.kernel.write.notetype import (
     attestation_drift,
     body_sha256,
     clear_verified,
     is_human_verified,
     stamp_verified,
-    verified_entries,
 )
 
 NOTE = "---\ndate: 2026-01-01\n---\n\n# T\n\nbody text\n"

@@ -184,7 +184,8 @@ def test_a_dominated_undated_contradiction_is_filed_not_flagged(tmp_vault):
     """The case §6.1-bis exists for: a hand-written note against an undated,
     unsourced claim. Nothing suggests the incoming side is fresher, so the
     contest is settled in the note's favour instead of being left to a human."""
-    from silica.kernel.write.contested import SUPERSEDED_HEADING, contested_refs
+    from silica.kernel.base.noteshape import SUPERSEDED_MARKER
+    from silica.kernel.write.contested import contested_refs
 
     res, out = _contradiction_run(
         tmp_vault,
@@ -194,10 +195,10 @@ def test_a_dominated_undated_contradiction_is_filed_not_flagged(tmp_vault):
 
     assert res["status"] == "committed", res
     assert contested_refs(out) == []            # not flagged
-    assert SUPERSEDED_HEADING in out            # filed instead
-    grave = out[out.index(SUPERSEDED_HEADING):]
+    assert SUPERSEDED_MARKER in out            # filed instead
+    grave = out[out.index(SUPERSEDED_MARKER):]
     assert "50mg/die" in grave                  # the losing claim is kept, not dropped
-    assert "5mg/die" in out[: out.index(SUPERSEDED_HEADING)]  # the live claim stays
+    assert "5mg/die" in out[: out.index(SUPERSEDED_MARKER)]  # the live claim stays
 
 
 def test_a_fresher_contradiction_still_flags_the_note(tmp_vault):
@@ -206,7 +207,8 @@ def test_a_fresher_contradiction_still_flags_the_note(tmp_vault):
     Same tiers as the case above, opposite outcome, because the one thing that
     changed is evidence that the note may be the stale side.
     """
-    from silica.kernel.write.contested import SUPERSEDED_HEADING, contested_refs
+    from silica.kernel.base.noteshape import SUPERSEDED_MARKER
+    from silica.kernel.write.contested import contested_refs
 
     res, out = _contradiction_run(
         tmp_vault,
@@ -216,7 +218,7 @@ def test_a_fresher_contradiction_still_flags_the_note(tmp_vault):
 
     assert res["status"] == "committed", res
     assert contested_refs(out) == ["source: appunti.md"]
-    assert SUPERSEDED_HEADING not in out
+    assert SUPERSEDED_MARKER not in out
     assert "Unresolved." in out
 
 

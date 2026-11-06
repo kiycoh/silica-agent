@@ -16,6 +16,7 @@ import logging
 import re
 from pathlib import Path
 
+from silica.kernel.base.noteshape import is_material
 from silica.kernel.learn.items import LEVEL_OF
 from silica.kernel.learn.schedule import DUE_R, events_by_key
 
@@ -189,7 +190,7 @@ def session(
     days_left = _days_to(deadline, now)
     cold = frozenset(scope) if days_left is not None and scope is not None else frozenset()
     rows = learner.view(now_ts=now, _notes_override=notes, _entries_override=entries, cold=cold)
-    rows = {k: r for k, r in rows.items() if learner.is_material(notes.get(r["path"], {}))}
+    rows = {k: r for k, r in rows.items() if is_material(notes.get(r["path"], {}))}
     last_event: dict[str, float] = {}
     for k, evs in events_by_key(entries).items():
         last_event[k] = max(ts for ts, _r, _ok in evs)

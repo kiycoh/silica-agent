@@ -10,6 +10,7 @@ gets auto-tiered, no embedder-free score is compared against a cosine tau).
 """
 from __future__ import annotations
 
+from silica.kernel.base import noteshape
 from silica.kernel.write import contested
 from silica.kernel.analyst_plan import build_task_plan
 from silica.kernel.report.graph_report.models import (
@@ -64,11 +65,9 @@ def test_parse_stamps_reads_every_claim_not_just_the_first():
         "<!-- silica: valid_from=2023-05-08 run=aaa -->\nclaim one\n"
         "<!-- silica: valid_from=2021-01-02 run=bbb -->\nclaim two\n"
     )
-    stamps = contested.parse_stamps(body)
+    stamps = noteshape.parse_stamps(body)
     assert [s["valid_from"] for s in stamps] == ["2023-05-08", "2021-01-02"]
-    # parse_stamp stays the single-claim accessor its existing callers expect.
-    assert contested.parse_stamp(body)["run"] == "aaa"
-    assert contested.parse_stamps("no stamps here") == []
+    assert noteshape.parse_stamps("no stamps here") == []
 
 
 def test_temporal_stat_is_populated_from_the_analytics_body_scan(tmp_path, monkeypatch):

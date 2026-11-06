@@ -14,6 +14,15 @@ import yaml
 
 from silica.kernel.base import frontmatter
 from silica.kernel.base.frontmatter import clean_tag  # canonical; do not redefine
+from silica.kernel.base.noteshape import (
+    LEGACY_PROVENANCE_HEADER_PREFIX,
+    PROVENANCE_HEADER_PREFIX,
+    RELATIONS_MARKER,
+    SOURCES_MARKER,
+    SUPERSEDED_MARKER,
+    is_tail,
+    stamp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -404,17 +413,6 @@ AI: true
     return frontmatter + content
 
 
-RELATIONS_MARKER = "## Relations"
-SOURCES_MARKER = "## Sources"      # same literal as recall.paths.SOURCES_MARKER; no import cycle
-SUPERSEDED_MARKER = "## Superseded"
-_TAIL_MARKERS = (RELATIONS_MARKER, SOURCES_MARKER, SUPERSEDED_MARKER)
-# A hub's index blocks (`## From: <source>`, legacy `## Da: `) are a tail too:
-# a facet appended after them filed itself under the index (2026-09-05).
-_MOC_PREFIXES = ("## From: ", "## Da: ")
-
-
-def _is_tail(line: str) -> bool:
-    return line.rstrip() in _TAIL_MARKERS or line.startswith(_MOC_PREFIXES)
 _HEADING_RE = re.compile(r"^(#{1,6})\s")
 # A bullet the outline lane emits for a cross edge: `- [[From]] applies this (Spine): why`.
 _RELATION_BULLET_RE = re.compile(r"^- (\[\[[^\]]+\]\]) .*? this \(([^)]+)\)")
@@ -653,7 +651,6 @@ def patch_snippet(heading: str, snippet: str, source_basename: str, hub: str | N
     # No valid_from -> no stamp line and the text is what every pre-stamp
     # write produced. Only the FSM supplies one today.
     if valid_from:
-        from silica.kernel.write.contested import stamp
         rendered = stamp(valid_from=valid_from)
         if rendered and lead:
             lead = f"{rendered}\n{lead}"
@@ -665,7 +662,7 @@ def patch_snippet(heading: str, snippet: str, source_basename: str, hub: str | N
     if lead:
         content = _insert_before(content, lambda l: _HEADING_RE.match(l) and l.startswith("##"), lead)
     if facets:
-        content = _insert_before(content, _is_tail, facets)
+        content = _insert_before(content, is_tail, facets)
     return _define(content, marker, source_basename) if (lead or facets) else content
 
 
@@ -993,18 +990,6 @@ def ensure_system_floor(content: str, prior: str | None = None) -> str:
     else:
         head += f"\nlast modified: {today}"
     return _stamp_agent(head + tail)
-
-
-# Emitted until 2026-09-04 (English) and 2026-08 (Italian). Recognized
-# forever, never emitted: the header was the idempotency key for a patch block
-# (block_present), so a vault carrying blocks in either spelling must keep
-# matching or every re-ingest appends a second copy of what it already wrote.
-# Today a patch lands headerless (patch_snippet); its keys are snippet_present
-# and missing_relations.
-PROVENANCE_HEADER_PREFIX = "## Additional notes"
-LEGACY_PROVENANCE_HEADER_PREFIX = "## Note aggiuntive"
-
-PROVENANCE_HEADER_PREFIXES = (PROVENANCE_HEADER_PREFIX, LEGACY_PROVENANCE_HEADER_PREFIX)
 
 
 def provenance_header(heading: str, source_basename: str) -> str:
