@@ -498,9 +498,13 @@ def run_agent(
         chunk and stops an orphaned worker retrying. sync litellm can't abort
         the in-flight HTTP request: best we can do is stop waiting and stop
         retrying."""
+        # A named frame and not a lambda: it is the token meter's call-site label
+        # for the loop, and the hosted llm_call lines carry it.
+        def _llm_worker(k=dict(kwargs)):
+            return call_llm(effective_model, messages, **k)
+
         return run_with_deadline(
-            lambda k=dict(kwargs): call_llm(effective_model, messages, **k), None,
-            catch=BaseException, abandon=_abandon,
+            _llm_worker, None, catch=BaseException, abandon=_abandon,
             stop=cancel_token if cancel_token is not None else threading.Event(), on_stop=_Stopped)
 
     def _reask_without_reasoning(reply, kwargs: dict):

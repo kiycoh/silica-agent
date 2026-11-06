@@ -143,7 +143,8 @@ def check_chat_endpoint(config: SilicaConfig) -> CheckResult:
         # fallback. Warning on it every run trains the operator to skim the
         # column where a real degradation appears.
         return CheckResult("chat endpoint", "unknown", "skipped — no model configured")
-    if config.provider in PROVIDERS and config.provider not in HOSTED and config.provider != "custom":
+    row = PROVIDERS.get(config.provider)
+    if row is not None and row.fixed_key:  # a local server, at the row's address
         base_url = provider_base_url(config.provider)
     elif config.provider == "custom":
         base_url = config.provider_base_url
@@ -157,7 +158,7 @@ def check_chat_endpoint(config: SilicaConfig) -> CheckResult:
         return CheckResult(
             "chat endpoint", "unknown", f"{config.provider} (hosted, not probed)"
         )
-    label = PROVIDERS[config.provider].label if config.provider in PROVIDERS else "the endpoint"
+    label = row.label if row is not None else "the endpoint"
     try:
         resp = httpx.get(f"{base_url.rstrip('/')}/models", timeout=_HTTP_TIMEOUT)
     except Exception:
