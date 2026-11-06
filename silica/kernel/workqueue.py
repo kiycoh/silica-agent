@@ -277,7 +277,7 @@ class WorkQueue:
             pass
 
 
-_BATCH_CONCEPT_KEYS = ("concept", "excerpt", "score", "full_score", "title_score", "inbox_file")
+_BATCH_CONCEPT_KEYS = ("concept", "excerpt", "score", "full_score", "title_score", "inbox_file", "loser_path")
 # Fixed cap bounds the batch prompt; raise it the day real families outgrow it.
 _MAX_FAMILY_BATCH = 8
 

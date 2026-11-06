@@ -151,6 +151,30 @@ def test_run_batch_routes_each_verdict(tmp_vault):
     assert "followups" not in res
 
 
+def test_a_family_marks_each_loser_not_the_first_one_twice(tmp_vault):
+    """/curate collapses a family into its canonical note: every member is a
+    real note and each must point at the winner. `loser_path` rode the shared
+    context, so all of them marked the first member and the rest stayed live."""
+    tmp_vault.note("Reti/MQTT.md", "# MQTT\n\nProtocollo pub/sub leggero.\n")
+    first = tmp_vault.note("Reti/MQTT QoS.md", "# MQTT QoS\n\nLivelli di servizio.\n")
+    second = tmp_vault.note("Reti/Broker.md", "# Broker\n\nIl centro del routing.\n")
+
+    [batch] = batch_dedup_items([
+        _item("Reti/MQTT.md", "MQTT QoS", candidate="MQTT", excerpt=LONG,
+              inbox_file="Reti/MQTT QoS.md", loser_path="Reti/MQTT QoS.md"),
+        _item("Reti/MQTT.md", "Broker", candidate="MQTT", excerpt=LONG,
+              inbox_file="Reti/Broker.md", loser_path="Reti/Broker.md"),
+    ])
+    decisions = [DedupDecision(verdict="duplicate", rationale="same", addition=LONG + str(i))
+                 for i in range(2)]
+    with patch("silica.capabilities.dedup._decide_dedup_batch", return_value=decisions):
+        res = run_dedup(batch, SilicaConfig())
+
+    assert [r["status"] for r in res["results"]] == ["committed", "committed"]
+    assert "superseded_by" in tmp_vault.read(first)
+    assert "superseded_by" in tmp_vault.read(second)
+
+
 def test_run_batch_mechanical_spoke_emits_no_followup(tmp_vault):
     tmp_vault.note("Reti/Reti.md", "# Reti\n")
     mqtt_abs = tmp_vault.note("Reti/MQTT.md", "# MQTT\n\nProtocollo pub/sub leggero.\n")
