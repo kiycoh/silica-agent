@@ -50,6 +50,8 @@ _MD_IMAGE = re.compile(r"!\[([^\]]*)\]\(\s*<?((?:[^()\s>]|\([^()\s]*\))+)>?(?:\s
 _HTML_IMAGE = re.compile(r"<img\b[^>]*?\bsrc\s*=\s*[\"']?([^\"'\s>]+)[\"']?[^>]*>", re.I)
 _REMOTE = re.compile(r"(?:https?:)?//", re.I)
 _LINK = re.compile(r"(?<!!)\[\[([^\]|#]+)")
+# The mark's line, with the block around it when it is the note's only property.
+_MARK = re.compile(r"\A---\r?\nrewritten:\s*true[ \t]*\r?\n---\r?\n|^rewritten:\s*true[ \t]*\r?\n", re.M)
 _KEPT_NAME = re.compile(r"[0-9a-f]{24}\.[a-z]+")
 _TYPES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp",
           "image/bmp": ".bmp"}
@@ -302,18 +304,28 @@ def _images_on_disk(vault: Path) -> dict[str, Path]:
     return out
 
 
-def _hand_edits(vault: Path) -> tuple[set[str], set[str]]:
-    """(note keys the journal holds, note keys edited since Silica wrote them). Both empty when it
+def _hand_edits(vault: Path) -> tuple[dict[str, str | None], set[str]]:
+    """({note key: what Silica last wrote, as a hash}, note keys edited since). Both empty when it
     cannot be read: every note then has no record, which the screen says and the review reads."""
     from silica.kernel.write.provenance import note_key
     from silica.kernel.write.undo_journal import edited_since_write, written_notes
 
     try:
-        known = {note_key(p) for p in written_notes(str(vault))}
+        known = {note_key(p): h for p, h in written_notes(str(vault)).items()}
         return known, {note_key(p) for p in edited_since_write(str(vault))}
     except Exception as exc:
         logger.warning("rights: journal not read (%s)", exc)
-        return set(), set()
+        return {}, set()
+
+
+def _only_marked(path: Path, written: str | None) -> bool:
+    """Whether a note differs from what Silica wrote by its `rewritten:` line alone. The journal
+    hashes the whole file, so the mark typed by hand reads as the edit it claims (ADR-0153 point 26).
+    shortcut: a mark set through a tool that reformats the properties reads as an edit; compare
+    bodies if the review ever meets one."""
+    from silica.kernel.write.undo_journal import _content_hash
+
+    return _content_hash(_MARK.sub("", path.read_text(encoding="utf-8"), count=1)) == written
 
 
 def _read_sources(vault: Path, notes: dict, wanted: dict[str, list[str]], names: dict[str, str]) -> dict:
@@ -407,6 +419,8 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
         key = note_key(p)
         if n["files"] and key in known:
             n["edited"] = key in edits
+            if n["edited"] and n["rewritten"] and _only_marked(vault / p, known[key]):
+                n["edited"] = n["rewritten"] = False
         n["personal"] = personal_data(n["body"])
         for target in _LINK.findall(n["body"]):
             hit = titles.get(Path(target.strip()).name.casefold())
@@ -670,6 +684,7 @@ def sheet(wiki: dict, ans: dict) -> dict:
         "from_files": sum(len(row["images"]) for row in wiki["files"].values()),
         "checks": {
             "personal": personal,
+            "personal_notes": sum(1 for p in plan["notes"] if wiki["notes"][p]["personal"]),
             "location": sum(1 for img in wiki["local"].values()
                             if img["location"] and plan["notes"].intersection(img["notes"])),
             "lost": sum(1 for a, b in wiki["links"] if a in plan["notes"] and b not in plan["notes"]),

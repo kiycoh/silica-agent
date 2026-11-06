@@ -13,11 +13,14 @@ moves folders.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
 import unicodedata
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 PUBLIC_KEY = "public"
 
@@ -531,23 +534,32 @@ def _write_publish(path: str, value: bool | None) -> None:
 
 def write_prop(path: str, key: str, value: bool | None) -> None:
     """Set or remove a note's property through the driver, so the change is a
-    session change like any edit: the ledger keeps the old bytes and /undo
-    restores them. Not `overwrite`, which stamps a `type:` the person never
-    asked for. Lowercase YAML booleans, from the dumper."""
+    session change like any edit, and leave /undo a restore point: it reads the
+    checkpoints and not the session's ledger. Not `overwrite`, which stamps a
+    `type:` the person never asked for. Lowercase YAML booleans, from the dumper."""
     from silica.driver import DRIVER
     from silica.kernel.write import frontmatter as fm
+    from silica.kernel.write.checkpoints import push_landed
 
-    data, raw, _body = fm.split(DRIVER.read_note(path).content)
+    prior = DRIVER.read_note(path).content
+    data, raw, _body = fm.split(prior)
     if data is None and raw is not None:
         raise ValueError(f"the properties of {path} do not parse; fix them before publishing it")
     if value is not None:
         DRIVER.set_prop(path, key, value)
-        return
-    unset = getattr(DRIVER, "unset_prop", None)
-    if unset is None:
-        # The Obsidian bridge has no removal; Obsidian itself does.
-        raise ValueError(f"remove `{key}:` from {path} in Obsidian")
-    unset(path, key)
+    else:
+        unset = getattr(DRIVER, "unset_prop", None)
+        if unset is None:
+            # The Obsidian bridge has no removal; Obsidian itself does.
+            raise ValueError(f"remove `{key}:` from {path} in Obsidian")
+        unset(path, key)
+    try:
+        # `hand`: the person's click and no body of Silica's, or a note they edited would read
+        # as untouched to `edited_since_write` and could not be marked as theirs (ADR-0153 point 26).
+        push_landed(path, prior, prior, kind="hand")
+    except Exception as exc:
+        # The property is on disk: only /undo loses this step, as for a patch in tools/notes.py.
+        logger.warning("checkpoint push failed for '%s': %s; /undo has no restore point for it", path, exc)
 
 
 # --- where the files go -------------------------------------------------------
