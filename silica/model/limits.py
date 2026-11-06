@@ -10,13 +10,12 @@ the role resolver above it read the same numbers; the kernel reads them here too
 from __future__ import annotations
 
 import logging
-import os
 import time
 from urllib.parse import urlsplit
 
 # Before anything here reads the environment: config is what loads `.env`, and
 # OLLAMA_HOST set there must reach the read at import below.
-from silica.config import CONFIG
+from silica.config import CONFIG, live_env
 from silica.provider_table import PROVIDERS
 
 logger = logging.getLogger(__name__)
@@ -46,7 +45,7 @@ def _ollama_base_url() -> str:
     every shape ollama does: `host`, `host:port`, `http://host:port`. Port
     defaults to 11434, matching ollama's client.
     """
-    raw = (os.getenv("OLLAMA_HOST") or "").strip()
+    raw = live_env("OLLAMA_HOST")
     if not raw:
         return PROVIDERS["ollama"].base_url
     try:
@@ -75,7 +74,7 @@ def ollama_num_ctx() -> int:
     Costs VRAM — the KV cache scales with it — so OLLAMA_NUM_CTX raises or lowers
     it. model_limits caps the effective value at the model's trained maximum.
     """
-    raw = (os.getenv("OLLAMA_NUM_CTX") or "").strip()
+    raw = live_env("OLLAMA_NUM_CTX")
     if not raw:
         return _OLLAMA_DEFAULT_NUM_CTX
     try:
@@ -215,12 +214,12 @@ def default_max_tokens() -> int:
     in-between once real runs finish at this ceiling (finish_reason=length on
     distill).
     """
-    return int(os.getenv("MAX_TOKENS", "32768"))
+    return live_env("MAX_TOKENS")
 
 
 def distiller_timeout() -> float:
     """The wall-clock seconds one distiller or outline call gets (run_with_deadline)."""
-    return float(os.getenv("DISTILLER_TIMEOUT", "300"))
+    return live_env("DISTILLER_TIMEOUT")
 
 
 def clamp_max_tokens(provider: str, model: str, requested: int | None, input_chars: int = 0) -> int:

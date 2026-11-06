@@ -14,11 +14,10 @@ the reader as the same files, put outside their vault by the host's relay.
 """
 from __future__ import annotations
 
-from silica.config import silica_home
+from silica.config import live_env, silica_home
 
 import datetime
 import json
-import os
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -35,7 +34,7 @@ _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")
 
 def allowed_hosts() -> set[str]:
     # the hosted pages' host (ADR-0143 point 6): the apex is the landing, on GitHub Pages
-    raw = os.environ.get("SILICA_PUBLIC_HOSTS", "").strip() or "wikis.silica-agent.dev"
+    raw = live_env("SILICA_PUBLIC_HOSTS") or "wikis.silica-agent.dev"
     return {h.strip().lower() for h in raw.split(",") if h.strip()}
 
 
@@ -194,7 +193,7 @@ def _limits() -> tuple[int, int]:
     """(notes, MB) a vault may hold, 0 for no limit: the Free limits are
     still open (ADR-0151 Opens 1), so the host sets them or nothing does."""
     def num(key: str) -> int:
-        raw = os.environ.get(key, "").strip()
+        raw = live_env(key)
         return int(raw) if raw.isdigit() else 0
     return num("SILICA_VAULT_MAX_NOTES"), num("SILICA_VAULT_MAX_MB")
 
@@ -373,7 +372,7 @@ _NAME = re.compile(r"^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$")
 
 
 def invitations_dir() -> Path:
-    raw = os.environ.get("SILICA_INVITATIONS_DIR", "").strip()
+    raw = live_env("SILICA_INVITATIONS_DIR")
     return Path(raw) if raw else silica_home() / "invitations"
 
 

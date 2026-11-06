@@ -325,6 +325,16 @@ def env_raw(name: str) -> str | None:
     return os.environ.get(name)
 
 
+def public_base() -> str:
+    """Where the public pages are served, "" when nothing says."""
+    return live_env("SILICA_PUBLIC_BASE").rstrip("/")
+
+
+def public_save_url() -> str:
+    """The app a "Save to Silica" button opens, and where a reader joins."""
+    return live_env("SILICA_PUBLIC_SAVE_URL").rstrip("/") or "https://app.silica-agent.dev"
+
+
 def hosted() -> bool:
     """Hosted mode (ADR-0086 point 2): one variable, set only by the tenant's
     unit. Not a true_word: "true" or "t" in a user's .env must not switch a
@@ -359,13 +369,19 @@ VIEWS: dict[str, dict[str, tuple[str, ...]]] = {
 }
 
 
+def view_words() -> set[str]:
+    """SILICA_VIEWS as the unit wrote it: tab ids, "all", and the words beside
+    them that have no tab (`private`, ADR-0151 point 9)."""
+    return {v.strip() for v in live_env("SILICA_VIEWS").split(",")}
+
+
 def hosted_views() -> frozenset[str]:
     """The views a hosted process serves beyond the chat (ADR-0140 point 3):
     SILICA_VIEWS from the tenant's unit, tab ids or "all". Unset or empty is
     the chat alone, so a unit that lost its line loses views instead of giving
     the paid ones away. Examine is never one (ADR-0111 point 3). The tenant
     cannot write the key: on hosted, POST /settings takes ADR-0104's rows only."""
-    names = {v.strip() for v in os.environ.get("SILICA_VIEWS", "").split(",")}
+    names = view_words()
     views = (set(VIEWS) if "all" in names else names & set(VIEWS)) - {"metrics"}
     # A demo is Explore alone whatever its unit lists (ADR-0139, amendment
     # 2026-10-31): it has no handle to publish under, Learn is off by the
@@ -447,6 +463,12 @@ def ensure_prefix(model: str, provider: str | None) -> str:
             return f"{provider}/{model}"
     return model
 
+def provider_of(model: str) -> str:
+    """The provider a `prefix/model` id names, lmstudio for a bare id."""
+    prefix = model.split("/", 1)[0] if "/" in model else ""
+    return prefix if prefix in PROVIDER_PREFIXES else "lmstudio"
+
+
 # Hosted providers in fallback order: (API key env var, model ids best first),
 # the view of provider_table that the no-model chain and the Settings panel read.
 HOSTED_PROVIDERS: dict[str, tuple[str, tuple[str, ...]]] = {
@@ -489,6 +511,11 @@ def model_from_env() -> tuple[str, str]:
 LOCAL_RERANK_MODEL = "mixedbread-ai/mxbai-rerank-base-v2"
 
 DEFAULT_EMBEDDING_MODEL = "embeddinggemma-2"
+
+# The ports silica picks for itself. compose.yaml spells the GUI's again: a
+# YAML file cannot import this one.
+GUI_PORT = 8765
+RERANK_PORT = 1235
 
 # A cosine threshold belongs to an embedder, not to the vault (ADR-0078). On the
 # founder's 681-note vault (2026-10-07) any two notes sit at a median cosine of
@@ -708,11 +735,7 @@ class SilicaConfig:
     def provider(self) -> str:
         if self._provider is not None:
             return self._provider
-        if self.model and "/" in self.model:
-            prefix = self.model.split("/", 1)[0]
-            if prefix in PROVIDER_PREFIXES:
-                return prefix
-        return "lmstudio"
+        return provider_of(self.model)
 
     @provider.setter
     def provider(self, val: str) -> None:
@@ -726,13 +749,7 @@ class SilicaConfig:
         if self._distill_escalation_provider is not None:
             return self._distill_escalation_provider
         m = self.distill_escalation_model
-        if not m:
-            return None
-        if "/" in m:
-            prefix = m.split("/", 1)[0]
-            if prefix in PROVIDER_PREFIXES:
-                return prefix
-        return "lmstudio"
+        return provider_of(m) if m else None
 
     # --- Sub-agent worker model (leashed sub-agents run on a separate, smaller model) ---
     # The router (agent loop) uses `model`/`provider` above; sub-agents (dedup, refiner)
@@ -895,6 +912,35 @@ class SilicaConfig:
     # Shows the model's reasoning blocks (runtime toggle with /thinking)
     show_thinking: bool = from_env("SILICA_SHOW_THINKING", True, true_word, doc=True, panel=True)
 
+    # Wall-clock backstop we enforce ourselves (> the litellm timeout below, so litellm's
+    # own timeout wins if it ever fires). litellm's `timeout` kwarg does NOT fire on a
+    # provider that accepts the request then never sends a body: observed, OpenRouter
+    # holding an ESTAB socket idle ~58min, zero retries, the whole process wedged on one
+    # call. Kept 10s above the 120s litellm timeout so litellm fires first on a normal
+    # timeout and this only catches the silent-hang case.
+    #
+    # Overridable because the default cannot tell "hung" from "slow" on a non-streaming
+    # call, and a slow reasoning model lives inside the band: measured 2026-08-23 on
+    # openrouter/stealth/ox-alpha, the distiller shape (8.1k prompt -> 4k completion) took
+    # 78s alone and 106-112s with the default k=3 prefetch in flight, i.e. the run kills
+    # its own healthy calls. Raise it for such a model (SILICA_LLM_TIMEOUT=400), or drop
+    # SILICA_DISTILL_CONCURRENCY to 1. The real repair is to stream the distiller call so
+    # the deadline resets per chunk (_bounded_stream already does that for the loop) and
+    # no wall-clock number has to be guessed at all.
+    llm_timeout: float = from_env("SILICA_LLM_TIMEOUT", 130.0, float)
+
+    # The token meter (model/llm.py), a profiling aid; hosted always meters.
+    token_meter: bool = from_env("SILICA_TOKEN_METER", False, strict_one)
+
+    # Seconds a local server may take to load before silica stops waiting
+    # (onboarding/serve.py).
+    serve_timeout: float = from_env("SILICA_SERVE_TIMEOUT", 180.0, float)
+
+    # Candidates the miner proposes (also the rerank pool); operator knob. The
+    # legacy name SILICA_YAKE_POOL stays recognized: a pin in someone's ~/.silica/.env
+    # must not silently revert to the default because the extractor changed.
+    keyphrase_pool: int = from_env("SILICA_KEYPHRASE_POOL", 100, int, aliases=("SILICA_YAKE_POOL",))
+
     # Runtime session state — updated by cli.py after each agent turn
     context_tokens: int = 0
 
@@ -991,7 +1037,7 @@ class SilicaConfig:
     # (agent/rerank_serve.py, ADR-0073), which the wizard points it at. Down,
     # loading or empty, the pass is skipped and the pool's order stands.
     rerank_base_url: str = from_env(
-        "SILICA_RERANK_BASE_URL", "http://localhost:1235/v1", doc=True, panel=True, hosted=True
+        "SILICA_RERANK_BASE_URL", f"http://localhost:{RERANK_PORT}/v1", doc=True, panel=True, hosted=True
     )
     rerank_model: str = from_env(
         "SILICA_RERANK_MODEL", "bge-reranker-v2-m3-Q8_0", doc=True, panel=True, hosted=True
@@ -1095,7 +1141,7 @@ class SilicaConfig:
 
     # Minimum title-only cosine similarity to promote a pair into the dedup
     # borderline window, regardless of the full-note score.
-    # Set higher than sim_threshold_low (0.75) to avoid spurious matches between
+    # Set higher than sim_threshold_low (0.70) to avoid spurious matches between
     # generically related titles (e.g. "Python" / "Python async").
     sim_title_threshold = embedder_env("SILICA_SIM_TITLE_THRESHOLD", 0.80, float, doc=True)
 

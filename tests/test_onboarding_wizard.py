@@ -124,7 +124,7 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
         # os.environ.update inside the wizard must not leak into the test env
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = [
             "",            # setup mode → essential
@@ -161,7 +161,7 @@ class TestRunWizard:
         monkeypatch.chdir(notes)
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = [
             "",            # setup mode → essential
@@ -192,7 +192,7 @@ class TestRunWizard:
         env = dict(os.environ)
         env["SILICA_MODEL"] = "openrouter/foo/bar"
         env["SILICA_PROVIDER"] = "openrouter"
-        monkeypatch.setattr(wizard.os, "environ", env)
+        monkeypatch.setattr(os, "environ", env)
 
         answers = [
             "",          # setup mode → essential
@@ -218,7 +218,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = [
             "",                             # setup mode → essential
@@ -249,7 +249,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         # Don't probe a live Ollama; offer a pick-list deterministically.
         monkeypatch.setattr(wizard, "_ollama_installed_models", lambda: ["llama3.2:3b"])
 
@@ -278,7 +278,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         monkeypatch.setattr(wizard, "_ollama_installed_models", lambda: ["mistral:7b"])
 
         answers = [
@@ -304,7 +304,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         # No network in tests: an unreachable /models falls back to the
         # curated list, which is the path this flow asserts.
         monkeypatch.setattr(wizard, "endpoint_model_ids", lambda base, api_key="": [])
@@ -350,7 +350,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = [
             "",            # setup mode → essential
@@ -376,7 +376,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = [
             "",            # setup mode → essential
@@ -403,7 +403,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = [
             "",            # setup mode → essential
@@ -429,7 +429,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = ["", "", "Italian", "", "test-model", "n", ""]
         wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -445,7 +445,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = ["", "", "", "", "test-model", "n", ""]
         wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -466,7 +466,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = ["", "", "", "", "test-model", "n", ""]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -502,7 +502,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = [
             "",            # setup mode → essential
@@ -540,7 +540,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = [
             "",            # setup mode → essential
@@ -567,7 +567,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = [
             "",            # setup mode → essential
@@ -597,7 +597,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = [
             "",                   # setup mode → essential
@@ -629,7 +629,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         answers = [
             "",            # setup mode → essential
@@ -655,7 +655,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         monkeypatch.setattr(wizard, "endpoint_model_ids", lambda url: ["qwen3-30b"])
 
         answers = [
@@ -681,7 +681,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         # autouse fixture already stubs endpoint_model_ids → []
 
         answers = [
@@ -709,7 +709,7 @@ class TestRunWizard:
         for served in (["qwen3-30b", "qwen/qwen3.5-9b"], []):
             # Fresh environ per run: the first run exports SILICA_MODEL, which
             # would turn the second run's model question into "keep it?".
-            monkeypatch.setattr(wizard.os, "environ", dict(clean))
+            monkeypatch.setattr(os, "environ", dict(clean))
             monkeypatch.setattr(wizard, "endpoint_model_ids", lambda url, served=served: served)
             vault = tmp_path / f"vault{len(served)}"
             vault.mkdir()
@@ -728,7 +728,7 @@ class TestRunWizard:
         env_path = tmp_path / ".env"
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         monkeypatch.setattr(wizard, "gpu_vram_gb", lambda: 6.0)
         answers = ["", str(vault), "", "", "", "n", ""]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -744,7 +744,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         monkeypatch.setattr(
             wizard, "endpoint_model_ids", lambda url: ["qwen3-30b", "nomic-embed-text"]
         )
@@ -779,7 +779,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         # A chat model is listed but nothing with "embed" → no candidate.
         monkeypatch.setattr(wizard, "endpoint_model_ids", lambda url: ["qwen3-30b"])
 
@@ -819,7 +819,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         monkeypatch.setattr(wizard, "_find_env_example", lambda *a: example)
 
         answers = ["", str(vault), "", "", "test-model", "n", ""]
@@ -841,7 +841,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         monkeypatch.setattr(wizard, "_find_env_example", lambda *a: None)
 
         answers = ["", str(vault), "", "", "test-model", "n", ""]
@@ -862,7 +862,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
 
         def _boom(*a):
             raise AssertionError("_find_env_example must not be consulted when .env exists")
@@ -998,7 +998,7 @@ class TestWizardModes:
         monkeypatch.setattr(wizard, "gpu_vram_gb", lambda: None)
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
-        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         self.wizard = wizard
         self.vault = tmp_path / "vault"
         self.vault.mkdir()

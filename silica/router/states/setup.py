@@ -12,9 +12,9 @@ patch silica.router.orchestrator.* keep working.
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING
 
+from silica.config import live_env
 from silica.kernel.forms import read_source_text
 from silica.kernel.outline import lane_for
 from silica.router import orchestrator as orch
@@ -216,7 +216,7 @@ def _assemble_file_chunks(fsm: "InjectorFSM", recon_cur: dict) -> tuple[dict, li
         return {"chunks": [chunk]}, [chunk]
     phase_conf = fsm._get_recipe_phase("payload")
     max_concepts = phase_conf.get("partition_if_over", 200)
-    max_bytes = int(os.getenv("DISTILLER_CHUNK_MAX_BYTES", str(30 * 1024)))
+    max_bytes = live_env("DISTILLER_CHUNK_MAX_BYTES")
     res = orch.payload_chunks([recon_cur], max_concepts=max_concepts, max_bytes=max_bytes)
 
     # Re-partition this file's payload (§3.6); fall back to the legacy

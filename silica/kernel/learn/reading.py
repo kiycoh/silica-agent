@@ -971,7 +971,7 @@ def job_status(plan_path: str, step: int) -> dict | None:
            "error": rec.get("error", ""), "started": rec.get("started")}
     from silica.model import llm
 
-    out["meter"] = dict(rec.get("meter") or llm.new_meter()) if llm._METER_ON else None
+    out["meter"] = dict(rec.get("meter") or llm.new_meter()) if llm.meter_on() else None
     if state == "done":
         out.update(path=rec.get("result_path", ""), marked=rec.get("marked", 0))
     elif state != "running":

@@ -9,6 +9,7 @@ import threading
 
 import pytest
 
+from silica.config import CONFIG
 from silica.model import llm
 
 
@@ -16,7 +17,7 @@ from silica.model import llm
 def metering(monkeypatch):
     import collections
 
-    monkeypatch.setattr(llm, "_METER_ON", True)
+    monkeypatch.setattr(CONFIG, "token_meter", True)
     monkeypatch.setattr(llm, "emit", lambda *a, **k: None)
     # the process-wide table prints at exit: these test calls stay out of it
     monkeypatch.setattr(llm, "_meter", collections.defaultdict(lambda: [0, 0, 0, 0]))
@@ -68,7 +69,7 @@ def test_a_thread_started_inside_does_not_inherit_the_scope(metering):
 
 
 def test_the_meter_is_off_and_counts_nothing_without_the_switch(monkeypatch):
-    monkeypatch.setattr(llm, "_METER_ON", False)
+    monkeypatch.setattr(CONFIG, "token_meter", False)
     m = llm.new_meter()
     with llm.meter_scope(m):
         _call(cost=0.01)

@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from silica.router.prefetch import DistillPrefetcher
 
 from silica.driver import DRIVER
-from silica.config import CONFIG
+from silica.config import CONFIG, live_env
 from silica.kernel.text.payload import payload_chunks  # noqa: F401  (see the `import time` note above)
 from silica.kernel.text.vault_recon import recon_file  # noqa: F401
 from silica.kernel.text.sanitize import sanitize_output  # noqa: F401
@@ -840,8 +840,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         accumulates many unfixable bundles, gate on this-run deferrals instead.
         Kill-switch: SILICA_BOUNDARY_ANNEAL=0.
         """
-        import os
-        if os.getenv("SILICA_BOUNDARY_ANNEAL", "1") == "0":
+        if not live_env("SILICA_BOUNDARY_ANNEAL"):
             return
         try:
             from silica.kernel.write.deferred import get_deferred_store

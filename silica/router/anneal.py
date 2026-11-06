@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from silica.config import live_env
 from silica.agent.sentinels import is_sentinel
 from silica.driver import DRIVER
 from silica.kernel.write.ops import BulkResult, Op, OpType
@@ -306,7 +307,6 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
     turn. Ops leave the bundle only by being written, so written is the op
     count before minus after, and partial progress survives a dead loop.
     """
-    import os
 
     import orjson as _orjson
 
@@ -378,7 +378,7 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
                 # pays one extra tool-less landing call, so 4 caps the spend
                 # at 5 calls per bundle (vs 1 for the old one-shot) — and only
                 # for bundles that already failed the mechanical pass.
-                max_iterations=int(os.getenv("ANNEAL_STEER_ITERATIONS", "4")),
+                max_iterations=live_env("ANNEAL_STEER_ITERATIONS"),
             ),
         )
     except Exception as e:

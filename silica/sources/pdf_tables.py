@@ -17,7 +17,7 @@ are put back together from what was collected.
 """
 from __future__ import annotations
 
-from silica.config import silica_home
+from silica.config import live_env, silica_home
 
 import hashlib
 import logging
@@ -82,7 +82,7 @@ def enabled() -> bool:
     `pdf_extract.every_page()` is. A setting and not onnxruntime being importable:
     [stt] brings onnxruntime through faster-whisper, and a dictation install must
     not start paying a model per table, or fetching 76 MB, on its next PDF."""
-    return os.environ.get("SILICA_PDF_TABLES", "").strip() == "1"
+    return live_env("SILICA_PDF_TABLES")
 
 
 def stitched(src: Path, data: dict) -> list:

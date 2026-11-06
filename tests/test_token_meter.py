@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Token meter attributes usage to the calling frame, not the LLM plumbing."""
+from silica.config import CONFIG
 from silica.model import llm
 
 
@@ -12,7 +13,7 @@ def _collision(usage):
 
 
 def test_meter_sums_per_callsite(monkeypatch):
-    monkeypatch.setattr(llm, "_METER_ON", True)
+    monkeypatch.setattr(CONFIG, "token_meter", True)
     llm._meter.clear()
 
     _distill({"prompt_tokens": 100, "completion_tokens": 10})
@@ -37,7 +38,7 @@ def test_cached_tokens_provider_dialects():
 
 
 def test_meter_off_is_noop(monkeypatch):
-    monkeypatch.setattr(llm, "_METER_ON", False)
+    monkeypatch.setattr(CONFIG, "token_meter", False)
     llm._meter.clear()
     llm.LLMResponse(usage={"prompt_tokens": 999, "completion_tokens": 999})
     assert not llm._meter

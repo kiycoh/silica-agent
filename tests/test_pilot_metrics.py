@@ -10,6 +10,7 @@ import logging
 
 import pytest
 
+from silica.config import CONFIG
 from silica.obs.events import LLMStreamEvent, ToolErrorEvent, ToolStartEvent
 from silica.ui.logging import HostedJsonFormatter
 
@@ -114,7 +115,7 @@ def test_emit_is_silent_off_the_hosted_service_and_after_an_objection(journal, m
 def test_each_model_call_writes_an_llm_call_line(journal, monkeypatch):
     from silica.model import llm
 
-    monkeypatch.setattr(llm, "_METER_ON", True)
+    monkeypatch.setattr(CONFIG, "token_meter", True)
     monkeypatch.setattr(llm, "_meter", collections.defaultdict(lambda: [0, 0, 0, 0]))  # no exit table
     before = llm.meter_totals()
 
@@ -158,7 +159,7 @@ def test_a_chat_turn_writes_one_turn_line(client, journal, monkeypatch):
     from silica.model import llm
 
     _, server = client
-    monkeypatch.setattr(llm, "_METER_ON", True)
+    monkeypatch.setattr(CONFIG, "token_meter", True)
     monkeypatch.setattr(llm, "_meter", collections.defaultdict(lambda: [0, 0, 0, 0]))
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):

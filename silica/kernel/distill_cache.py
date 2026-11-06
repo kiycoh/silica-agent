@@ -21,12 +21,11 @@ which is what a frozen arm needs and not what a live vault wants.
 """
 from __future__ import annotations
 
-from silica.config import silica_home
+from silica.config import live_env, silica_home
 
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -35,7 +34,7 @@ _FP_LEN = 12
 
 
 def enabled() -> bool:
-    return os.getenv("SILICA_DISTILL_CACHE", "0") == "1"
+    return live_env("SILICA_DISTILL_CACHE")
 
 
 def cache_root() -> Path:

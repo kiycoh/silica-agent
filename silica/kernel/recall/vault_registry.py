@@ -35,6 +35,7 @@ import os
 import sys
 from pathlib import Path
 
+from silica.config import env_raw
 from silica.kernel.recall.rerank import _WINDOW_CHARS, best_window
 
 # Stage-one pool per stage (lexical, embed), independent of the titles shown.
@@ -70,7 +71,7 @@ def _obsidian_json() -> Path:
     if sys.platform == "darwin":
         cands = [home / "Library/Application Support/obsidian/obsidian.json"]
     elif os.name == "nt":
-        cands = [Path(os.environ.get("APPDATA") or (home / "AppData/Roaming")) / "obsidian/obsidian.json"]
+        cands = [Path(env_raw("APPDATA") or (home / "AppData/Roaming")) / "obsidian/obsidian.json"]
     else:
         cands = [home / ".config/obsidian/obsidian.json",
                  home / ".var/app/md.obsidian.Obsidian/config/obsidian/obsidian.json",

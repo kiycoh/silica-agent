@@ -19,13 +19,12 @@ switch must not log the user out of everything.
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from silica.config import hosted  # noqa: F401  callers read it as mcp_config.hosted()
+from silica.config import env_raw, hosted
 from silica.connectors import credentials
 from silica.config import silica_home
 
@@ -165,7 +164,7 @@ def _expand(key: str, value: str, in_header: bool, missing: list[str], unset: li
                 return ""
             return got
         var, _, default = ref.partition(":-")
-        got = os.environ.get(var)
+        got = env_raw(var)
         if got is not None:
             return got
         if ":-" in ref:

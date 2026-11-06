@@ -20,6 +20,7 @@ from pathlib import Path
 
 import yaml
 
+from silica.config import env_raw
 from silica.kernel.base import roots
 
 logger = logging.getLogger(__name__)
@@ -757,7 +758,7 @@ def apply_manifest_to_config() -> None:
     from silica.config import CONFIG
 
     m = get_active_manifest()
-    if os.getenv("SILICA_COOCCURRENCE_LANG") is None:
+    if env_raw("SILICA_COOCCURRENCE_LANG") is None:
         # "auto" mirrors the config-level default for this field (per-store
         # detection, frozen at build — see kernel/cooccurrence.py). A vault
         # without a declared cooccurrence_lang must NOT be silently pinned to

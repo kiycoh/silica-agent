@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import threading
 import typing
 from pathlib import Path
 
+from silica.config import live_env
 from silica.kernel.prompts import PROMPT_DIR, load_prompt
 
 logger = logging.getLogger(__name__)
@@ -81,7 +81,7 @@ def active_distill_profile() -> str:
         declared = get_active_manifest().conventions.distill_profile
     except Exception:
         declared = ""
-    return os.getenv("SILICA_DISTILL_PROFILE") or declared or "default"
+    return live_env("SILICA_DISTILL_PROFILE") or declared or "default"
 
 
 def render_prompt(target: str, hub: str | None = None, source_text: str = "",
@@ -502,7 +502,7 @@ def run_distiller(
     # matters most — a selected span must reach the note as selected.
     two_pass = (
         not structure_only
-        and os.getenv("SILICA_DISTILL_TWO_PASS", "1") != "0"
+        and live_env("SILICA_DISTILL_TWO_PASS")
         and needs_body_pass(payload)
     )
 
@@ -586,8 +586,8 @@ def run_distiller(
     # MODEL_CONTEXT_WINDOW / DISTILLER_MAX_TOKENS stay as explicit operator
     # overrides, 262144 as the last-resort default when the provider is
     # unreachable or the model unmapped.
-    context_window = int(os.getenv("MODEL_CONTEXT_WINDOW", "0"))
-    ceiling = int(os.getenv("DISTILLER_MAX_TOKENS", "0"))
+    context_window = live_env("MODEL_CONTEXT_WINDOW")
+    ceiling = live_env("DISTILLER_MAX_TOKENS")
     explicit_ceiling = ceiling > 0
     if not context_window or not ceiling:
         from silica.model.limits import model_limits
@@ -608,7 +608,7 @@ def run_distiller(
         # a genuine length cut still recovers via salvage_distiller_json.
         from silica.model.limits import default_max_tokens
         ceiling = min(ceiling or (1 << 30), default_max_tokens())
-    safety_margin = int(os.getenv("DISTILLER_TOKEN_SAFETY_MARGIN", "2048"))
+    safety_margin = live_env("DISTILLER_TOKEN_SAFETY_MARGIN")
     max_tokens = compute_distiller_max_tokens(
         budget_text,
         context_window=context_window,

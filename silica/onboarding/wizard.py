@@ -4,7 +4,6 @@
 """`silica init` — interactive setup wizard. Writes .env, then runs the doctor checks."""
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys
@@ -12,10 +11,13 @@ from pathlib import Path
 from typing import Callable
 
 from silica.config import (
-    USER_ENV,
-    SilicaConfig,
     claim_env,
+    env_raw,
+    live_env,
     model_from_env,
+    RERANK_PORT,
+    SilicaConfig,
+    USER_ENV,
 )
 from silica.kernel.base import gitstate
 from silica.kernel.base.manifest import MANIFEST_REL
@@ -376,7 +378,7 @@ def _rerank_server_updates() -> dict[str, str]:
     """The keys that point recall at the [rerank] extra's own server (ADR-0073),
     or {} when the user already runs a reranker of their own: a serve command,
     or a base URL with no command (a server started by hand)."""
-    if os.getenv("SILICA_RERANK_SERVE_CMD") or os.getenv("SILICA_RERANK_BASE_URL"):
+    if env_raw("SILICA_RERANK_SERVE_CMD") or env_raw("SILICA_RERANK_BASE_URL"):
         return {}
     import json
 
@@ -385,7 +387,7 @@ def _rerank_server_updates() -> dict[str, str]:
     from silica.config import CONFIG
 
     return {
-        "SILICA_RERANK_BASE_URL": "http://127.0.0.1:1235/v1",
+        "SILICA_RERANK_BASE_URL": f"http://127.0.0.1:{RERANK_PORT}/v1",
         # The server ignores the request's model; this names it for the log line.
         "SILICA_RERANK_MODEL": local_rerank_model(CONFIG),
         # A dotenv double-quoted value: the shell quoting inside it (a venv path
@@ -761,7 +763,7 @@ def _run_wizard_inner(
             # hand-kept suggestions to still exist.
             key = ""
             while not key:
-                key = _ask(input_fn, key_prompt, os.getenv(key_env, ""), secret=True)
+                key = _ask(input_fn, key_prompt, live_env(key_env), secret=True)
             updates[key_env] = key
             model = _pick(
                 input_fn, "Model — pick a number or type an id",
@@ -996,7 +998,7 @@ def _run_wizard_inner(
             ).lower()
         if answer in ("y", "yes"):
             updates["SILICA_RERANK_BASE_URL"] = _ask(
-                input_fn, "Reranker base URL", "http://localhost:1235/v1"
+                input_fn, "Reranker base URL", f"http://localhost:{RERANK_PORT}/v1"
             )
             updates["SILICA_RERANK_MODEL"] = _pick(
                 input_fn, "Reranker model — pick a number or type an id",

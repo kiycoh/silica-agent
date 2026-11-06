@@ -27,12 +27,11 @@ Every refusal is a `MediaRefused` whose text is the sentence the user reads.
 """
 from __future__ import annotations
 
-from silica.config import silica_home
+from silica.config import live_env, silica_home
 
 import json
 import logging
 import math
-import os
 import shutil
 import subprocess
 import time
@@ -55,7 +54,7 @@ class MediaRefused(ValueError):
 
 def _minutes(key: str) -> float:
     """A configured limit in minutes; 0 means none."""
-    raw = os.environ.get(key, "").strip()
+    raw = live_env(key)
     if not raw:
         return 0.0
     try:
