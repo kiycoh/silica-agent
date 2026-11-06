@@ -28,7 +28,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Generic, Literal, TypeVar, overload
 
 from dotenv import dotenv_values
 
@@ -37,6 +37,8 @@ from dotenv import dotenv_values
 # because this is where every caller expects to find it.
 from silica import SHELL_ENV, VAULT_PINNED  # noqa: E402,F401
 from silica.provider_table import HOSTED, PROVIDERS
+
+T = TypeVar("T")
 
 # The one ambient .env. Layered *under* the real environment (override=False),
 # so a key the shell exported stays a deliberate per-invocation pin. It is the
@@ -561,17 +563,51 @@ EMBEDDER_DEFAULTS: dict[str, dict[str, str]] = {
 }
 
 
-def embedder_defaults(model: str | None = None) -> dict[str, str]:
-    """The EMBEDDER_DEFAULTS row for `model` (the configured embedder when None), or {}."""
-    model = (model if model is not None else os.getenv("SILICA_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)).lower()
-    return next((row for key, row in EMBEDDER_DEFAULTS.items() if key in model), {})
+def embedder_defaults(model: str) -> dict[str, str]:
+    """The EMBEDDER_DEFAULTS row for the embedder id `model`, or {}: the one
+    matcher, a row's key inside the id."""
+    m = (model or "").lower()
+    return next((row for key, row in EMBEDDER_DEFAULTS.items() if key in m), {})
 
 
-def embedder_env(key: str, default: str) -> str:
-    """os.getenv, falling back to the configured embedder's own default before
-    the Qwen-era one. An exported empty string is a value (it clears a prefix)."""
-    value = os.getenv(key)
-    return value if value is not None else embedder_defaults().get(key, default)
+class FromEmbedder(Generic[T]):
+    """A value of the embedder's row (ADR-0078), worked out from `embedding_model`
+    on every read, so a swap cannot leave the old embedder's prefix or bar in place.
+    It did: the panel assigned the id alone, the reindex ran under the old document
+    prefix, and the next boot re-embedded every note again.
+
+    What the environment held when the config was built and what is assigned
+    afterwards are pins, and a pin outranks the row across a swap, because an
+    exported value always wins. Read at build and not here, as a field is: a
+    `setenv` after that has never reached a threshold. An exported empty string is
+    a pin too (it clears a prefix). `default` answers for an id with no row."""
+
+    def __init__(self, row: Setting) -> None:
+        self.row = row
+
+    @overload
+    def __get__(self, obj: None, owner: Any = None) -> FromEmbedder[T]: ...
+    @overload
+    def __get__(self, obj: SilicaConfig, owner: Any = None) -> T: ...
+    def __get__(self, obj: SilicaConfig | None, owner: Any = None) -> FromEmbedder[T] | T:
+        if obj is None:
+            return self
+        if self.row.key in obj._pinned:
+            return obj._pinned[self.row.key]
+        value = embedder_defaults(obj.embedding_model).get(self.row.key)
+        return self.row.default if value is None else self.row.type(value)
+
+    def __set__(self, obj: SilicaConfig, value: T) -> None:
+        obj._pinned[self.row.key] = value
+
+    def __delete__(self, obj: SilicaConfig) -> None:
+        # mock.patch.object leaves by deleting what it set.
+        obj._pinned.pop(self.row.key, None)
+
+
+def embedder_env(key: str, default: T, type: Callable[[str], T], **columns: Any) -> FromEmbedder[T]:
+    """A SilicaConfig attribute the embedder's row decides, and its table row."""
+    return FromEmbedder(Setting(key, type=type, default=default, **columns))
 
 
 # The sampling a local chat model was post-trained with, sent on the `custom/`
@@ -793,9 +829,7 @@ class SilicaConfig:
     # different embedder shifts the whole band: under EmbeddingGemma 2 every
     # off-topic query clears 0.5, hence its own row in EMBEDDER_DEFAULTS.
     # 0 = off (pre-floor behavior).
-    episodic_recall_floor: float = from_env(
-        "SILICA_EPISODIC_RECALL_FLOOR", factory=lambda: float(embedder_env("SILICA_EPISODIC_RECALL_FLOOR", "0.5"))
-    )
+    episodic_recall_floor = embedder_env("SILICA_EPISODIC_RECALL_FLOOR", 0.5, float)
 
     # Obsidian WebSocket bridge (backend="ws"): port `silica connect` binds (0 →
     # OS picks a free one) and the shared token (empty → minted on first connect,
@@ -857,6 +891,9 @@ class SilicaConfig:
     # Runtime session state — updated by cli.py after each agent turn
     context_tokens: int = 0
 
+    # What outranks the embedder's row, by key (FromEmbedder).
+    _pinned: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
+
     # Startup banner art (True → wordmark, False → plain one-liner)
     show_banner: bool = from_env("SILICA_SHOW_BANNER", True, true_word, doc=True, panel=True, hosted=True)
 
@@ -914,12 +951,8 @@ class SilicaConfig:
     # (docs/evaluation/qwen3-query-instruction-2026-09-27.md). The document
     # prefix is part of the store identity (embed.embedder_identity), so
     # changing it re-embeds every note like a model swap does.
-    embedding_query_prefix: str = from_env(
-        "SILICA_EMBEDDING_QUERY_PREFIX", factory=lambda: embedder_env("SILICA_EMBEDDING_QUERY_PREFIX", ""), doc=True
-    )
-    embedding_document_prefix: str = from_env(
-        "SILICA_EMBEDDING_DOCUMENT_PREFIX", factory=lambda: embedder_env("SILICA_EMBEDDING_DOCUMENT_PREFIX", ""), doc=True
-    )
+    embedding_query_prefix = embedder_env("SILICA_EMBEDDING_QUERY_PREFIX", "", str, doc=True)
+    embedding_document_prefix = embedder_env("SILICA_EMBEDDING_DOCUMENT_PREFIX", "", str, doc=True)
 
     # Base URL for the embeddings endpoint — a local llama-server or LM Studio
     # instance by default.
@@ -1044,12 +1077,8 @@ class SilicaConfig:
     # Every number in this comment, and the defaults of TITLE, THEME and
     # AUTOLINK below, is Qwen3-Embedding's; EMBEDDER_DEFAULTS replaces them
     # for an embedder whose cosines sit elsewhere (ADR-0078).
-    sim_threshold_high: float = from_env(
-        "SILICA_SIM_THRESHOLD_HIGH", factory=lambda: float(embedder_env("SILICA_SIM_THRESHOLD_HIGH", "0.85")), doc=True
-    )
-    sim_threshold_low: float = from_env(
-        "SILICA_SIM_THRESHOLD_LOW", factory=lambda: float(embedder_env("SILICA_SIM_THRESHOLD_LOW", "0.70")), doc=True
-    )
+    sim_threshold_high = embedder_env("SILICA_SIM_THRESHOLD_HIGH", 0.85, float, doc=True)
+    sim_threshold_low = embedder_env("SILICA_SIM_THRESHOLD_LOW", 0.70, float, doc=True)
 
     # Number of candidates to retrieve per note during dedup scan.
     # Higher values increase recall at negligible BLAS cost (search is a single
@@ -1061,9 +1090,7 @@ class SilicaConfig:
     # borderline window, regardless of the full-note score.
     # Set higher than sim_threshold_low (0.75) to avoid spurious matches between
     # generically related titles (e.g. "Python" / "Python async").
-    sim_title_threshold: float = from_env(
-        "SILICA_SIM_TITLE_THRESHOLD", factory=lambda: float(embedder_env("SILICA_SIM_TITLE_THRESHOLD", "0.80")), doc=True
-    )
+    sim_title_threshold = embedder_env("SILICA_SIM_TITLE_THRESHOLD", 0.80, float, doc=True)
 
     # Language for the co-occurrence graph stemmer + stopwords (kernel/cooccurrence.py).
     # "auto" (default) detects the vault language from its own text at build time
@@ -1091,9 +1118,7 @@ class SilicaConfig:
     index_sweep: bool = from_env("SILICA_INDEX_SWEEP", True, true_word, doc=True)
 
     # Salience gate (Phase 2.05): concept kept only if cosine(concept, doc_centroid) >= threshold
-    sim_threshold_theme: float = from_env(
-        "SILICA_SIM_THRESHOLD_THEME", factory=lambda: float(embedder_env("SILICA_SIM_THRESHOLD_THEME", "0.35")), doc=True
-    )
+    sim_threshold_theme = embedder_env("SILICA_SIM_THRESHOLD_THEME", 0.35, float, doc=True)
 
     # AUTOLINK relevance gate: a title is a linking candidate only if its note
     # vector is within this cosine of the note being linked. 0 disables it (the
@@ -1105,9 +1130,7 @@ class SilicaConfig:
     # Judged on the noise it exists to stop (a psychology note linked from an ML
     # lecture), 0.30 removes 7 of 11 such links for 2 lost real ones; every step
     # above costs ~9 real links per further noise link removed.
-    autolink_min_sim: float = from_env(
-        "SILICA_AUTOLINK_MIN_SIM", factory=lambda: float(embedder_env("SILICA_AUTOLINK_MIN_SIM", "0.30"))
-    )
+    autolink_min_sim = embedder_env("SILICA_AUTOLINK_MIN_SIM", 0.30, float)
 
     # Mindmap (/map): radial map rooted on one note. Node cap is "breathing room"
     # (readable map, not a hairball); latent_k = neighbours asked of the
@@ -1131,6 +1154,7 @@ class SilicaConfig:
         self.debug_logging = v
 
     def __post_init__(self):
+        self._pinned = {row.key: row.read() for row in _embedder_rows().values() if row.key in os.environ}
         self.model = ensure_prefix(self.model, self._provider)
         self.worker_model = ensure_prefix(self.worker_model, self.worker_provider)
         self.judge_model = ensure_prefix(self.judge_model, self.judge_provider)
@@ -1139,12 +1163,18 @@ class SilicaConfig:
             self.distill_escalation_model, self._distill_escalation_provider)
 
 
+def _embedder_rows() -> dict[str, Setting]:
+    """Every FromEmbedder row by its SilicaConfig attribute."""
+    return {name: attr.row for name, attr in vars(SilicaConfig).items() if isinstance(attr, FromEmbedder)}
+
+
 # The whole table, for what is checked against it. `field` is filled in here
 # because a row only learns its attribute's name when the class is built.
 SETTINGS: dict[str, Setting] = {
     **LIVE,
     **{f.metadata["setting"].key: replace(f.metadata["setting"], field=f.name)
        for f in fields(SilicaConfig) if "setting" in f.metadata},
+    **{row.key: replace(row, field=name) for name, row in _embedder_rows().items()},
 }
 
 CONFIG = SilicaConfig()

@@ -11,8 +11,8 @@ from silica.config import LIVE, SETTINGS, SilicaConfig, live_env
 
 ROOT = Path(__file__).resolve().parent.parent
 NAMES = {name for row in SETTINGS.values() for name in (row.key, *row.aliases)}
-# Runtime state of the REPL, not a setting.
-NOT_SETTINGS = {"context_tokens"}
+# Runtime state of the REPL, and what outranks the embedder row: not settings.
+NOT_SETTINGS = {"context_tokens", "_pinned"}
 
 
 def _example_keys() -> set[str]:
