@@ -228,9 +228,9 @@ def iter_notes(vault, *, scope: str = "reader", under: str = "",
     `scope="reader"` is the reader's notes, without the verbatim leaves of both
     roots; `scope="vault"` keeps them. Neither takes the pipeline's staging out:
     a workspace may list an inbox handout, and Learn marks it itself. Silica's
-    root files stay too, because no walk here drops them: the two index builders
-    list assets from the same pass, so they walk `walk_tree` and ask
-    `is_vault_artifact`.
+    root files stay too, because no caller here drops them: the driver's index
+    pass, the one that does, lists assets from the same walk, so it takes
+    `walk_tree` and asks `is_vault_artifact`.
 
     The roots are read off THIS vault and not the active one: doctor is routinely
     pointed at a vault it has not opened. A bare `parts[0] == "sources"` was how
@@ -483,6 +483,10 @@ def is_vault_artifact(note_id: str) -> bool:
     Id form varies by caller (graph node ids carry `.md`; other callers may
     not), so this matches on the `.md`-stripped stem and requires no path
     separator — i.e. vault-root only.
+
+    shortcut: root only, so a `write_dir` vault's `<write_dir>/log.md` enters the
+    embeddings and co-occurrence. Widening it changes what those indexes hold, so
+    it waits for their rebuild stamp; reopen by 2026-12-31.
     """
     stem = note_id.replace("\\", "/").removesuffix(".md")
     return "/" not in stem and stem in _VAULT_ROOT_ARTIFACT_STEMS
