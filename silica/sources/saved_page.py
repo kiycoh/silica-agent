@@ -68,6 +68,14 @@ def is_vault(url: str) -> bool:
     return bool(_VAULT_PATH.match(urlsplit((url or "").strip()).path or ""))
 
 
+def _wikilink(m: re.Match, path: str, words: str) -> str:
+    """A link in place of the match `m`, its bar escaped in a table row, where Obsidian reads a bare one as
+    the cell's edge and splits the row. Silica's renderer escapes it itself, so only Obsidian shows that."""
+    row = m.string[m.string.rfind("\n", 0, m.start()) + 1:].lstrip()
+    bar = "\\|" if row.startswith("|") else "|"
+    return f"[[{path}{bar}{words}]]"
+
+
 def _folder_name(title: str) -> str:
     return _FOLDER_UNSAFE.sub(" ", title or "").strip().strip(".")[:80].strip() or "Saved vault"
 
@@ -139,7 +147,7 @@ def prepare(url: str, vault: Path | None = None) -> dict:
         if target not in seen:
             seen.add(target)
             links.append({"text": words, "to": "copy" if own else "web"})
-        return f"[[{own.removesuffix('.md')}|{words}]]" if own else m.group(0)
+        return _wikilink(m, own.removesuffix(".md"), words) if own else m.group(0)
 
     new_body = _MD_LINK.sub(relink, body)
     tags = props.get("tags") if isinstance(props.get("tags"), list) else []
@@ -299,10 +307,10 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
             words, target = m.group(1), m.group(2)
             tail = target.rsplit("/", 1)[-1].removesuffix(".md")
             if (not base or target.startswith(base)) and tail in names:
-                return f"[[{names[tail]}|{words}]]"
+                return _wikilink(m, names[tail], words)
             own = mine.get(target)
             if own:
-                return f"[[{own.removesuffix('.md')}|{words}]]"
+                return _wikilink(m, own.removesuffix(".md"), words)
             # a Private vault's address is never served: a link to a note not saved is its words
             return words if private else m.group(0)
 
