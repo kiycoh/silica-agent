@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Alessandro Carosia
 
 """The retrieval engine comes from the silica-core package (ADR-0043), and
-the seam in tools/atomic.py is what keeps it a library here.
+the seam in kernel/recall/engine.py is what keeps it a library here.
 
 The engine's five functions carry `@tool` decorators, and they register into
 `silica_core.tools.TOOLS`, a different registry from this tree's, so the four

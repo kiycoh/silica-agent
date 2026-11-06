@@ -272,8 +272,8 @@ def apply_arm(arm: str) -> None:
         import silica.ui.web.app_help as app_help
         app_help.app_message = lambda: ""
     elif arm == "no_relevance":
-        import silica.agent.relevance as relevance
-        relevance.ENABLED = False
+        import silica.agent.loop as loop
+        loop.compact_by_relevance = lambda messages, tools: []
     elif arm == "no_read_query":
         from pydantic import create_model
 

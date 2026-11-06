@@ -87,7 +87,9 @@ WINDOW_FILL = 0.9
 # A note read this turn that will not fit is served as its passages densest in
 # the words of the read's query, or of the request when it gave none, instead
 # of a stub naming a re-read that cannot fit either (compaction.fit_window).
-# The probe's `fitnarrow` arm; off until it is measured against the stub.
+# The probe's `fitnarrow` arm (Tool.shrink); off until it is measured against the
+# stub. Not refuted: the re-read loop it answers did not reproduce (2026-10-15).
+# Delete it by 2026-12-31 unless n>=12 per arm moves the return turns.
 FIT_NARROWS = False
 
 
@@ -260,8 +262,8 @@ def _prefetch_reads(tool_calls: list, allowed: dict[str, Tool], cancel_token: An
     episodic file, and two in flight would lose one's TTL refresh.
     """
     names = [tc.name for tc in tool_calls]
-    tools = [allowed.get(n) for n in names]
-    if (len(names) < 2 or any(t is None or not t.parallel_safe for t in tools)
+    tools = [allowed[n] for n in names if n in allowed]
+    if (len(names) < 2 or len(tools) < len(names) or not all(t.parallel_safe for t in tools)
             or any(t.once_per_block and names.count(n) > 1 for n, t in zip(names, tools))):
         return {}
     pool = _cf.ThreadPoolExecutor(max_workers=min(len(names), _READ_WORKERS),

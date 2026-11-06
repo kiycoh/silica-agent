@@ -521,7 +521,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # Surface the transition to whatever frontend is watching (no-op if none).
         try:
             from silica.obs.events import PhaseEvent
-            from silica.ui.renderer import emit_phase
+            from silica.obs.bus import emit_phase
             from silica.obs import narration as _narr_mod
             pe = PhaseEvent(phase=capability_name, status=status,
                             **self._phase_position(capability_name))

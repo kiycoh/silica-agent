@@ -219,7 +219,6 @@ class TestReplay:
         before = _assistant_notes(tc)
         assert before.count([THIN]) == 3
 
-        monkeypatch.setattr(relevance, "ENABLED", True)
         monkeypatch.setattr(CONFIG, "decision_model", "stub/model")
         monkeypatch.setattr(relevance, "decide",
                             lambda state, q: {"needed": {"noul": 0.0}})

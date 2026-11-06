@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # no read is narrowed. Adopted 2026-10-01 on the probe's `jev_scope` arm, 35
 # runs against 35 whole-note ones: right on 28 of 29 decisions, 0.96x prompt
 # tokens, truthfulness and accuracy level (docs/evaluation/read-query-2026-09-30.md).
-ENABLED = True
+
 # The user's requests of the running turn, oldest first, set by run_agent at
 # entry. Tools run in the loop's thread, so they see it; a tool called outside
 # run_agent (a direct TOOLS call, a test) sees () and no decision is asked.
@@ -64,7 +64,7 @@ def wants_part(name: str, query: str) -> bool | None:
     from silica.config import CONFIG
 
     requests = REQUESTS.get()
-    if not ENABLED or not CONFIG.decision_model or not requests or not query.strip():
+    if not CONFIG.decision_model or not requests or not query.strip():
         return None
     try:
         answers = decide({"current_request": requests[-1],

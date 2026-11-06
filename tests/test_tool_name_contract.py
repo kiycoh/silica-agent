@@ -31,6 +31,7 @@ naming a dead tool costs one wasted model call, not a silently amputated lane.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,20 @@ def test_web_turn_constraints_names_only_real_tools():
 
     missing = set(web_turn_constraints().tools) - _tool_names()
     assert not missing, f"/web lane names tools that do not exist: {sorted(missing)}"
+
+
+def test_every_tool_a_plan_can_name_exists():
+    """The plan writes these into ledger tasks, silica_ledger_next serves them and
+    the loop loads what they name, so a dead one reaches the model as a task it
+    cannot run. `_IRREVERSIBLE` carried `silica_bulk_move` for months, and a tool
+    missing from it is an irreversible step the plan may mark auto."""
+    from silica.kernel import analyst_plan
+
+    src = Path(analyst_plan.__file__).read_text(encoding="utf-8")
+    named = set(re.findall(r'capability_name="(\w+)"', src))
+    assert named, "no capability_name literal found; this test would pass vacuously"
+    missing = (named | analyst_plan._IRREVERSIBLE) - _tool_names()
+    assert not missing, f"the plan names tools that do not exist: {sorted(missing)}"
 
 
 def test_chat_exclusions_all_exist():
