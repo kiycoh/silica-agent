@@ -463,10 +463,11 @@ def ensure_prefix(model: str, provider: str | None) -> str:
             return f"{provider}/{model}"
     return model
 
+
 def provider_of(model: str) -> str:
-    """The provider a `prefix/model` id names, lmstudio for a bare id."""
-    prefix = model.split("/", 1)[0] if "/" in model else ""
-    return prefix if prefix in PROVIDER_PREFIXES else "lmstudio"
+    """The provider a `prefix/model` id names, lmstudio for a bare id or none."""
+    prefix, slash, _ = (model or "").partition("/")
+    return prefix if slash and prefix in PROVIDER_PREFIXES else "lmstudio"
 
 
 # Hosted providers in fallback order: (API key env var, model ids best first),
