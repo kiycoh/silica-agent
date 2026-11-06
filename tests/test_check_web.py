@@ -210,7 +210,7 @@ def test_what_the_judge_says_becomes(kind, web_says):
     out = web.check_claim(CLAIM, search=lanes("https://a.example/1"), fetch=lambda u: page(PAGE_30), judge=verdict(kind))
     assert out["web"] == web_says
     if not web_says:
-        assert out["say"] == "not checked: no page spoke to this"
+        assert out["say"] == "no page spoke to this"
 
 
 @pytest.mark.parametrize("v", [
@@ -455,7 +455,7 @@ def test_no_network_keeps_the_vaults_verdict_and_says_so(desk):
     mp.setattr("silica.cli._check_web_legs", lambda: (down, page, lambda p: "q"))
     out = press(tc)
     assert [x["event"] for x in out][-2:] == ["web_verdict", "done"]
-    assert out[-2]["states"] == [{"state": "not checked", "line": 5, "end": 5, "say": "not checked: the web did not answer"}]
+    assert out[-2]["states"] == [{"state": "not checked", "line": 5, "end": 5, "say": "the web did not answer"}]
 
 
 def test_a_press_stays_out_of_the_chats_lock(desk):
@@ -575,6 +575,14 @@ def test_keep_writes_one_cited_note_in_the_inbox_with_no_web_turn_behind_it(desk
     assert "> the end of 30 days" in text and "[[memo]]" in text and CLAIM in text
     assert "## Sources\n1. www.example.org " in text and "https://www.example.org/rights" in text
     assert "source: web\n" in text and f"fetched: {date.today().isoformat()}" in text
+
+
+def test_a_long_claim_still_fits_a_files_name(desk):
+    tc, _, vault, *_ = desk
+    claim = "è una frase piuttosto lunga " * 21
+    body = keep(tc, claim=claim).json()
+    assert len(body["path"].rsplit("/", 1)[-1].encode()) <= 200 and (vault / body["path"]).is_file()
+    assert claim.strip() in (vault / body["path"]).read_text(encoding="utf-8")
 
 
 def test_keep_goes_nowhere_but_the_inbox_and_a_second_is_a_second_note(desk):

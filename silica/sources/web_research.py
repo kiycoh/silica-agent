@@ -1148,7 +1148,9 @@ def keep_check(claim: str, url: str, quote: str, note: str) -> str:
     body = f"> {' '.join(quote.split())}\n\nRead while checking [[{name}]]: {' '.join(claim.split())}"
     from silica.driver import DRIVER
 
-    note_rel = _unique_inbox_path(claim, fallback="web")
+    # The claim runs to 600 characters and slugify does not shorten: past the
+    # 255 bytes a file's name may hold, the note would not be written at all.
+    note_rel = _unique_inbox_path(claim.encode()[:150].decode(errors="ignore").strip(), fallback="web")
     DRIVER.create(note_rel, _build_note(claim, body, [(url, urlsplit(url).hostname or url)], source="web",
                                         force_sources=True))
     return note_rel

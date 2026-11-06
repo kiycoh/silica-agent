@@ -40,8 +40,9 @@ TOO_LONG = "select one statement"
 # the claim is one selection, and three pages is what one press reads of it.
 PAGES = 3
 NOTHING_TO_CHECK = "a heading, code or a block under 6 words states nothing to check"
-NO_ANSWER = "not checked: the web did not answer"
-NO_PAGE = "not checked: no page spoke to this"
+# Without "not checked:", which the box prints from the state before these.
+NO_ANSWER = "the web did not answer"
+NO_PAGE = "no page spoke to this"
 CANCELLED = "the check was cancelled"
 
 # Point 8's table, keyed (web, vault). The vault's own grade never moves: these
