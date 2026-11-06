@@ -232,7 +232,7 @@ class TestT2ChunkContainment:
         assert res["final_status"] == "partial"
 
         # Progress has partial failure flag
-        assert fsm.run_state.has_partial_failure is True
+        assert res.get("has_partial_failure") is True
 
     def test_context_reset_between_chunks(self):
         """Per-chunk namespace is atomically cleared after contain_chunk_failure."""
