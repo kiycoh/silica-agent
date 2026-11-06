@@ -118,7 +118,7 @@ def render(entries: list[dict], app: str) -> str:
             'name.</p></div>' + tools
             + f'<div class="cat-grid">{cards}</div><p class="cat-empty" data-empty{"" if not entries else " hidden"}>'
             f'{empty}</p>'
-            '<div class="cat-join"><span><b>List your own.</b> In Silica, open Page, set a vault to Public and turn on '
+            '<div class="cat-join"><span><b>List your own.</b> In Silica, open My Wikis, set a vault to Public and turn on '
             'Listed in Pages.</span><span>Something here should not be? Open the vault and press Report.</span></div>'
             '</section></main>\n'
             + site.foot("Every vault here is a copy its author chose to publish, served as static files.", app))

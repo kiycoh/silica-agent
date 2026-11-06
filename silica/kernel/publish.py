@@ -60,7 +60,7 @@ def slugify(text: str) -> str:
 def handle(vault: Path | None = None) -> str:
     """The page's @name. On the server the host writes it and the account
     cannot take another's (ADR-0143 point 7, amended 2026-11-02: the account
-    asks for one from My Page, the host decides), so an account without one
+    asks for one from My Wikis, the host decides), so an account without one
     has no page rather than one named after its vault folder."""
     from silica.config import hosted
 
@@ -84,7 +84,7 @@ RESERVED_HANDLES = frozenset(
 
 
 def handle_problem(h: str) -> str:
-    """"" when `h` can be a handle, else why not, as My Page says it."""
+    """"" when `h` can be a handle, else why not, as My Wikis says it."""
     if not _HANDLE.match(h) or "--" in h:
         return "a handle is 1 to 30 of a-z, 0-9 and single dashes, not at either end"
     if h in RESERVED_HANDLES:
@@ -134,7 +134,7 @@ def _asked() -> str:
 
 
 def handle_state(vault: Path | None = None) -> dict:
-    """What My Page's overlay needs: whether to ask for a handle, the claim
+    """What My Wikis' overlay needs: whether to ask for a handle, the claim
     waiting for the host, and the last one it refused."""
     from silica.config import hosted
 
@@ -172,7 +172,7 @@ def claim(h: str, vault: Path | None = None) -> None:
     if why := handle_problem(h):
         raise ValueError(why)
     if not handle_state(vault).get("ask"):
-        raise ValueError("this Page already has its handle")
+        raise ValueError("this account already has its handle")
     if hosted():
         p = claim_path()
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -498,7 +498,7 @@ def set_note(path: str, on: bool, vault: Path | None = None) -> str:
         raise ValueError(f"{path} is a copy of a Private vault and stays yours alone")
     items = vaults(vault)
     if vault_of(path, items) is None:
-        raise ValueError(f"{path} is in no vault of your Page: make its folder a vault first")
+        raise ValueError(f"{path} is in no vault in My Wikis: make its folder a vault first")
     clip = fm.get("form") == "clip"
     value = (True if clip else None) if on else (None if clip else False)
     _write_publish(path, value)

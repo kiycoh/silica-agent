@@ -25,7 +25,7 @@ def test_every_row_of_the_panel_is_read():
 def test_the_views_are_read_and_hosted_drops_what_it_hides():
     local, hosted = dict(panel(hosted=False)), dict(panel(hosted=True))
     assert [t for t, _ in local["the views"]] == ["a chat", "Discover", "Explore", "Memorize", "Calendar",
-                                                  "My Page", "Examine", "a new note"]
+                                                  "My Wikis", "Examine", "a new note"]
     assert "Examine" not in [t for t, _ in hosted["the views"]]
     assert "Examine" not in _rows(panel(hosted=True))
 

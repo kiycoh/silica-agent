@@ -142,7 +142,7 @@ def public_view():
 
 @router.post("/public/handle", dependencies=_SAME_ORIGIN)
 def public_handle(payload: dict):
-    """The handle My Page asks for on its first visit (ADR-0143 point 7, amended 2026-11-02)."""
+    """The handle My Wikis asks for on its first visit (ADR-0143 point 7, amended 2026-11-02)."""
     from silica.kernel import publish
 
     try:

@@ -1,4 +1,4 @@
-// The Page (ADR-0143, ADR-0151): the view that holds the account's vaults, each a
+// My Wikis (ADR-0143, ADR-0151): the view that holds the account's vaults, each a
 // folder of its vault, Off, Public or Private; the globes on the tree and on the note; the strip
 // over a saved note; the invitations to Private vaults; and the confirm a page's "Save to Silica"
 // lands on, for one note or for the areas of a whole vault.
@@ -100,7 +100,7 @@ function syncTreePublic() {
         b.hidden = false;
         b.classList.add("vault", v.visibility === "public" ? "on" : v.visibility === "private" ? "priv" : "paused");
         b.innerHTML = pubSvg(11, false, v.visibility === "private");
-        b.title = `the vault ${v.title} on your Page, ${v.visibility === "off" ? "Off" : v.visibility === "public" ? "Public" : "Private"}: open it`;
+        b.title = `the vault ${v.title} in My Wikis, ${v.visibility === "off" ? "Off" : v.visibility === "public" ? "Public" : "Private"}: open it`;
         b.setAttribute("aria-pressed", String(v.visibility !== "off"));
         continue;
       }
@@ -110,7 +110,7 @@ function syncTreePublic() {
       if (b.hidden) continue;
       b.innerHTML = pubSvg(11, false, false);
       b.setAttribute("aria-pressed", "false");
-      b.title = `make the folder ${folder} a vault on your Page`;
+      b.title = `make the folder ${folder} a vault in My Wikis`;
       continue;
     }
     const v = pubVaultOfNote(b.dataset.pub);
@@ -127,12 +127,12 @@ async function pubPost(url, body) {
   try {
     r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   } catch {
-    notify("your Page could not be reached");
+    notify("My Wikis could not be reached");
     return null;
   }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
-    notify(data.detail || "your Page did not change");
+    notify(data.detail || "My Wikis did not change");
     return null;
   }
   if (data.vaults) {
@@ -479,8 +479,8 @@ function pubAskPaint(st) {
   if (ask.pending && !input.value) input.value = ask.pending;
   const v = input.value.trim().replace(/^@/, "").toLowerCase();
   $(".pg-ask-p").textContent = st.hosted
-    ? "It is your Page's address and the name readers see on every vault you publish. You choose it once."
-    : "It names your Page and is shown on every vault you publish.";
+    ? "It is your public page's address and the name readers see on every vault you publish. You choose it once."
+    : "It names your public page and is shown on every vault you publish.";
   const base = (st.base || "").replace(/^https?:\/\//, "");
   $("#pg-ask-addr").textContent = base ? `${base}/@${v || "your-name"}/` : "";
   const pending = ask.pending || "";
@@ -489,7 +489,7 @@ function pubAskPaint(st) {
   let ok = false;
   if (pending && !stale) {
     msg.className += " ok";
-    msg.textContent = `Taking @${pending}. Your Page opens in about a minute.`;
+    msg.textContent = `Taking @${pending}. My Wikis opens in about a minute.`;
   } else if (stale) {
     msg.textContent = "The server has not answered yet. You can try again.";
     ok = !pubHandleWhy(v, ask.reserved || []) && !!v;
@@ -533,8 +533,8 @@ function renderPublic(fresh) {
     link.hidden = true;
     count.textContent = "";
     body.replaceChildren(mkEl("p", "pp-dim", !st
-      ? "Your Page could not be read."
-      : "This account has no Page address yet: the person who runs Silica gives each account its own handle."));
+      ? "My Wikis could not be read."
+      : "This account has no public address yet: the person who runs Silica gives each account its own handle."));
     return;
   }
   link.hidden = !st.url;
@@ -563,14 +563,14 @@ function renderPublic(fresh) {
   const add = mkEl("button", "pg-tab add", "+ New vault");
   add.type = "button";
   add.disabled = st.vaults.length >= st.max;
-  if (add.disabled) add.title = `a Page holds ${st.max} vaults at most`;
+  if (add.disabled) add.title = `you can publish ${st.max} vaults at most`;
   add.addEventListener("click", () => { pubAdding = !pubAdding; renderPublic(); });
   tabs.append(add);
   frag.append(tabs);
 
   if (pubAdding || !v) {
     const panel = mkEl("div", "pg-panel");
-    panel.append(mkEl("p", "pg-pt", "Publish a folder of your vault as a vault on your Page"));
+    panel.append(mkEl("p", "pg-pt", "Publish a folder of your vault as a vault in My Wikis"));
     const row = mkEl("div", "pg-row");
     const sel = document.createElement("select");
     sel.className = "pg-sel";
@@ -596,7 +596,7 @@ function renderPublic(fresh) {
     frag.append(panel);
   }
   if (!v) {
-    frag.append(mkEl("p", "pp-status", `Your Page holds up to ${st.max} vaults, each a folder of your vault. Readers find them at your address, and in Pages if you list them.`));
+    frag.append(mkEl("p", "pp-status", `You can publish up to ${st.max} vaults, each a folder of your vault. Readers find them at your address, and in Pages if you list them.`));
     frag.append(invitesBox(true));
     body.replaceChildren(frag);
     return;
@@ -609,7 +609,7 @@ function renderPublic(fresh) {
     status.textContent = v.downgraded
       ? "Off since this account became Free: a Private vault goes Off. Its readers keep the copies they saved."
       : st.hosted || st.url
-        ? "Off: this vault's address says there is nothing there, and your Page does not show it. Its notes keep their globes for when you turn it on."
+        ? "Off: this vault's address says there is nothing there, and your public page does not show it. Its notes keep their globes for when you turn it on."
         : `Off. Publish writes it${st.dir ? ` into ${st.dir}` : ""}, as files any static host can serve; a vault on this computer is not listed in Pages.`;
   }
 
@@ -701,7 +701,7 @@ function renderPublic(fresh) {
     ? "Your readers get the vault as it is when you publish, as an invitation to save it."
     : "Readers see the vault as it is when you publish; a note written later in its folder goes out the next time."));
   if (v.visibility === "off") {
-    const rm = mkEl("button", "st-btn", "Remove from your Page");
+    const rm = mkEl("button", "st-btn", "Remove from My Wikis");
     rm.type = "button";
     rm.title = "the folder and its notes stay as they are";
     rm.addEventListener("click", async () => { const r = await pubPost(`/public/vault/${encodeURIComponent(v.slug)}/remove`); if (r) { pubCur = ""; renderPublic(true); } });
