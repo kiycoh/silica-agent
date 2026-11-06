@@ -113,6 +113,20 @@ def section_end(text: str, level: int, start: int) -> int:
     return m.start() if m else len(text)
 
 
+def section_chain(body: str, offset: int, depth: int = 3) -> str:
+    """Markdown heading chain still open at `offset` ("Training > Gradients").
+    Deepest `depth` levels only — the nearest heading carries the most anchor
+    per token, and a full chain on a deeply nested note is header bloat.
+    '' above the first heading, so headingless notes cost zero tokens."""
+    chain: list[tuple[int, str]] = []
+    for m in HEADING_RE.finditer(body[:offset]):
+        lvl = len(m.group(1))
+        while chain and chain[-1][0] >= lvl:
+            chain.pop()
+        chain.append((lvl, m.group(2)))
+    return " > ".join(t for _lvl, t in chain[-depth:])
+
+
 # --- math -------------------------------------------------------------------
 
 DISPLAY_MATH_RE = re.compile(r"\$\$.*?\$\$", re.DOTALL)

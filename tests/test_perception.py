@@ -402,11 +402,11 @@ def test_section_chain_anchors_window_under_its_headings(tmp_path, monkeypatch):
 
 
 def test_section_chain_pops_siblings_and_caps_depth():
-    from silica.kernel.recall.perception import _section_chain
+    from silica.kernel.base.syntax import section_chain
     body = ("# A\n## B\ntext\n## C\n### D\nhere")
     off = body.index("here")
-    assert _section_chain(body, off) == "A > C > D"          # B popped by C
-    assert _section_chain(body, off, depth=2) == "C > D"     # deepest levels win
+    assert section_chain(body, off) == "A > C > D"          # B popped by C
+    assert section_chain(body, off, depth=2) == "C > D"     # deepest levels win
 
 
 def test_headingless_note_renders_without_sec_segment(tmp_path, monkeypatch):

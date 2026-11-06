@@ -29,7 +29,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from silica.kernel.base.syntax import HEADING_RE, LINK_RE
+from silica.kernel.base.syntax import LINK_RE, section_chain
 
 logger = logging.getLogger(__name__)
 
@@ -519,20 +519,6 @@ def declare_missing_links(text: str) -> str:
     return "".join(out) + _mark_unresolved(text[pos:], exists)[0]
 
 
-def _section_chain(body: str, offset: int, depth: int = 3) -> str:
-    """Markdown heading chain still open at `offset` ("Training > Gradients").
-    Deepest `depth` levels only — the nearest heading carries the most anchor
-    per token, and a full chain on a deeply nested note is header bloat.
-    '' above the first heading, so headingless notes cost zero tokens."""
-    chain: list[tuple[int, str]] = []
-    for m in HEADING_RE.finditer(body[:offset]):
-        lvl = len(m.group(1))
-        while chain and chain[-1][0] >= lvl:
-            chain.pop()
-        chain.append((lvl, m.group(2)))
-    return " > ".join(t for _lvl, t in chain[-depth:])
-
-
 def perceive(query: str, *, now: str, k: int = DEFAULT_K,
              window_chars: int = WINDOW_CHARS, windows: int = DEFAULT_WINDOWS,
              facts_k: int = FACTS_K,
@@ -665,7 +651,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
         seen_bodies[key] = len(blocks)
         blocks.append(NoteBlock(path=path, date=date, evidence=evidence,
                                 body=body, excerpt=excerpt, contested=contested,
-                                section=_section_chain(body, spans[0][0]), title=title, whole=whole,
+                                section=section_chain(body, spans[0][0]), title=title, whole=whole,
                                 origin=origin, documents=documents,
                                 builds_on=", ".join(requires),
                                 grounding=(grounding.get(note_key(path), "")

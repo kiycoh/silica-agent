@@ -756,7 +756,7 @@ def _narrow_to_query(name: str, body: str, path: str, query: str) -> str | None:
     Line ranges and not headings: converted slides repeat titles (nine sections
     of Lezione 32 share one), and `silica_read(section=)` refuses those."""
     from silica.kernel.recall import rerank
-    from silica.kernel.recall.perception import _section_chain
+    from silica.kernel.base.syntax import section_chain
 
     # The note's own name locates the note, not the passage: "Lezione 32" in
     # the query put a window on the first slide dense in "lezione".
@@ -774,7 +774,7 @@ def _narrow_to_query(name: str, body: str, path: str, query: str) -> str | None:
         if a > nxt:
             gaps.append(f"{nxt}-{a - 1}")
         nxt = max(nxt, b + 1)
-        chain = _section_chain(body, off)
+        chain = section_chain(body, off)
         parts.append(f"[lines {a}-{b}{' | ' + chain if chain else ''}]\n{text.rstrip()}")
     if nxt <= total:
         gaps.append(f"{nxt}-{total}")

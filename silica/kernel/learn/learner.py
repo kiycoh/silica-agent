@@ -287,9 +287,8 @@ def off_plan_dropped(rows: dict[str, dict], planned: set[str] | None) -> dict[st
     does not become a goal by being in the vault. A note already practised
     stays, because practising it was the reader's choice. `planned` is
     `plans.planned_paths()`, None when no plan is active, and then every note
-    is material, as before. The caller reads it: this module is under the
-    graph contract (pyproject, "graph data never reaches silica.agent"), and
-    plans reaches the agent through learn.items.
+    is material, as before. The caller reads it: the report reads this module,
+    and plans reaches the agent through learn.items.
     """
     if planned is None:
         return rows
