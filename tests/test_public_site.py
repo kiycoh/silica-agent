@@ -126,6 +126,45 @@ def test_what_a_page_hides_does_not_ride_out_in_its_md_or_notes_json(marta, tmp_
     assert "<!-- kept -->" in md and "%% kept too %%" in md  # code keeps what it shows
 
 
+@pytest.mark.parametrize("body, gone, kept", [
+    # a comment wrapped around a fence: the fence is the comment's, as an author who comments code out means it
+    ("a\n\n%%\nnote\n```\nsecret\n```\nnote\n%%\n\nb\n", ["note", "secret", "%%", "```"], ["a", "b"]),
+    ("a\n\n<!--\nnote\n```\nsecret\n```\nnote\n-->\n\nb\n", ["note", "secret", "-->", "```"], ["a", "b"]),
+    # never closed, with a fence below it: a page hid all of it before, and must still
+    ("a\n\n<!-- open\n\n```\nsecret\n```\n\nsecret too\n", ["open", "secret"], ["a"]),
+    ("a\n\n%% open\n\nsecret\n", ["open", "secret"], ["a"]),
+    # the first opener wins: a lone %% in an HTML comment is the comment's, and pairs with nothing below
+    ("<!-- 5%% off -->\nreal text\n%% remark %%\ntail\n", ["5%%", "remark", "-->"], ["real text", "tail"]),
+    ("%% an <!-- in a remark %%\nreal text\n", ["remark", "<!--"], ["real text"]),
+    # <!--> and <!---> are whole comments to markdown-it: what follows is the note
+    ("a\n\n<!-->\n\nreal text\n", ["<!--"], ["a", "real text"]),
+    ("a\n\n<!--->\n\nreal text\n", ["<!--"], ["a", "real text"]),
+    # two stray backticks are no code span across paragraphs, so what lies between them is prose
+    ("a ` tick\n\n%% secret %%\n\nb ` tick\n", ["secret"], ["a ` tick", "b ` tick"]),
+    # code keeps what it shows, wherever markdown-it finds it
+    ("a\n\n    <!-- code -->\n    %% code too %%\n\nb\n", [], ["<!-- code -->", "%% code too %%"]),
+    ("> ~~~\n> <!-- code -->\n> ~~~\n", [], ["<!-- code -->"]),
+    ("1. step\n\n    ~~~\n    %% code %%\n    ~~~\n", [], ["%% code %%"]),
+    # a list's continuation looks like an indented block and is prose
+    ("- item\n\n    %% secret %%\n\n    b\n", ["secret"], ["b"]),
+])
+def test_a_published_body_keeps_code_and_loses_every_comment(body, gone, kept):
+    from silica.ui.web.server import _strip_ofm_meta
+
+    out = _strip_ofm_meta(body, published=True)
+    assert not [w for w in gone if w in out], out
+    assert all(w in out for w in kept), out
+
+
+def test_the_drawer_keeps_what_only_a_published_body_loses():
+    from silica.ui.web.server import _strip_ofm_meta
+
+    # markdown-it hides an HTML comment there, and a lone %% in a chat answer is not a remark
+    assert _strip_ofm_meta("a <!-- b --> c") == "a <!-- b --> c"
+    assert _strip_ofm_meta("100%% sure\n\nthe rest\n") == "100%% sure\n\nthe rest\n"
+    assert _strip_ofm_meta("<!-- 5%% -->\nreal\n%% gone %%\n") == "<!-- 5%% -->\nreal\n\n"
+
+
 def test_only_images_a_published_note_cites_are_copied(marta):
     from silica.ui.web.public_site import build
 

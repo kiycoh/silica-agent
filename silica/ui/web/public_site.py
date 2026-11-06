@@ -441,7 +441,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
         # body, and only _linkify stripped comments, so a `%% remark %%` the page hid went
         # out in the `.md` and into the room's text search, and hidden text reached the
         # vault of whoever saved the note.
-        body = rights.place_images(_drop_title_heading(_strip_ofm_meta(body, html_comments=True), titles[p]), plan)
+        body = rights.place_images(_drop_title_heading(_strip_ofm_meta(body, published=True), titles[p]), plan)
         page_html = _linkify(body, resolve, remote_images=False)
         targets = set(_ANCHOR.findall(page_html))
         edges.update((p, html.unescape(t)) for t in targets if html.unescape(t) in on)

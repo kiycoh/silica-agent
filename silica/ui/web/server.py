@@ -375,15 +375,16 @@ _ASSET_HEADERS = {
 # --- OFM (Obsidian-flavored markdown) sugar ----------------------------------
 # ==highlight== | #tag (letter-first, so #123 and hex colors stay literal)
 _MARK_OR_TAG = re.compile(r"==([^=\n]+)==|(?<![\w#])#([A-Za-z_][\w/-]*)")
-_COMMENT = re.compile(r"%%.*?%%", re.S)
-# To the end when unterminated: markdown-it's html_block runs there too, so a page
-# hides that text as well, and it must not ride out in a published note's `.md`.
-_HTML_COMMENT = re.compile(r"<!--.*?(?:-->|\Z)", re.S)
+# One alternation, because the first opener wins: run as two subs, the %% inside
+# `<!-- 5%% -->` paired with a %% paragraphs below and took the note between them.
+# `<!-->` and `<!--->` are whole comments to markdown-it. `open` is one never closed:
+# markdown-it's html_block runs to the end, and Obsidian hides a lone %% the same way.
+_HIDDEN = re.compile(r"%%.*?%%|<!--(?:-?>|.*?-->)|(?P<open>%%|<!--).*\Z", re.S)
 _BLOCK_ID = re.compile(r"[ \t]+\^[\w-]+[ \t]*$", re.M)
-_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")
-# Inline code span: a backtick run closed by an equal-length run. Parked
-# before the %%/^ subs so span contents read as code, not markup.
-_CODE_SPAN = re.compile(r"(`+)[\s\S]*?\1")
+# Inline code span: a backtick run closed by an equal-length run, in one paragraph as
+# markdown-it reads it: across a blank line, two stray backticks parked the remark
+# between them. Parked before the %%/^ subs so span contents read as code, not markup.
+_CODE_SPAN = re.compile(r"(`+)(?:(?!\n[ \t]*\n)[\s\S])*?\1")
 _PARKED = re.compile(r"\x00(\d+)\x00")
 _CALLOUT_HEAD = re.compile(r"\[!(\w+)\][+-]?[ \t]*(.*)")  # first line of a callout quote
 _TASK_HEAD = re.compile(r"^\[([ xX])\][ \t]+")  # first inline text of a task list item
@@ -876,18 +877,40 @@ def _highlight(code: str, lang: str, _attrs: str) -> str:
     return highlight(code, lexer, HtmlFormatter(nowrap=True))
 
 
+def _code_lines(text: str) -> set[int]:
+    """The lines markdown-it reads as code: a fence at any depth, in a quote or a list, and
+    an indented block, which no pattern on one line can tell from a list's continuation."""
+    from markdown_it import MarkdownIt
+
+    return {n for tok in MarkdownIt().parse(text) if tok.type in ("fence", "code_block") and tok.map
+            for n in range(*tok.map)}
+
+
 # Inline spans are parked as \x00 sentinels for the length of the sub, the
 # same trick mdLite plays client-side; pathological nested backtick runs can
 # still fool the span regex, which costs a stripped %% inside them, cosmetic.
-def _strip_ofm_meta(text: str, html_comments: bool = False) -> str:
-    """Strip %%comments%% and trailing ^block-ids, sparing fenced code and
-    inline `code spans` where %% and ^ are code (a lone %% in a fence would
-    otherwise pair with a prose %% and swallow everything between).
-    `html_comments` is for text that leaves as Markdown: the renderer's
-    allowlist drops `<!-- -->` from HTML, and nothing drops it from a `.md`."""
+def _strip_ofm_meta(text: str, published: bool = False) -> str:
+    """Strip %%comments%% and trailing ^block-ids, sparing code, where %% and ^
+    are code (a lone %% in a fence would otherwise pair with a prose %% and
+    swallow everything between). A comment already open beats the code below
+    it: an author comments a block out by wrapping it, and a fence decided
+    first let that block out.
+    `published` is for text that leaves as Markdown, where nothing else hides
+    a comment: an HTML one, which the renderer's allowlist drops from a page
+    alone, and a %% never closed, which rights.py reads as hidden. A drawer
+    keeps both, since a chat answer may say "100%% sure"."""
+    if "%%" not in text and "<!--" not in text and not _BLOCK_ID.search(text):
+        return text
+    code = _code_lines(text)
     pieces: list[str] = []
     run: list[str] = []
-    fence: tuple[str, int] | None = None  # (marker char, marker length)
+
+    def _hide(m: "re.Match[str]") -> str:
+        closed_remark = m.group(0).startswith("%%") and not m["open"]
+        return "" if published or closed_remark else m.group(0)
+
+    def _comment_open() -> bool:
+        return any(m["open"] for m in _HIDDEN.finditer(_CODE_SPAN.sub("", "\n".join(run))))
 
     def _flush() -> None:
         if run:
@@ -898,26 +921,17 @@ def _strip_ofm_meta(text: str, html_comments: bool = False) -> str:
                 return f"\x00{len(spans) - 1}\x00"
 
             parked = _CODE_SPAN.sub(_park, "\n".join(run))
-            cleaned = _BLOCK_ID.sub("", _COMMENT.sub("", parked))
-            if html_comments:
-                cleaned = _HTML_COMMENT.sub("", cleaned)
+            cleaned = _BLOCK_ID.sub("", _HIDDEN.sub(_hide, parked))
             pieces.append(
                 _PARKED.sub(lambda m: spans[int(m.group(1))], cleaned))
             run.clear()
 
-    for line in text.split("\n"):
-        m = _FENCE.match(line)
-        if fence is None:
-            if m:
-                _flush()
-                fence = (m.group(1)[0], len(m.group(1)))
-                pieces.append(line)
-            else:
-                run.append(line)
-        else:
+    for i, line in enumerate(text.split("\n")):
+        if i in code and not _comment_open():
+            _flush()
             pieces.append(line)
-            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1]:
-                fence = None
+        else:
+            run.append(line)
     _flush()
     return "\n".join(pieces)
 
