@@ -18,6 +18,8 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from silica.kernel.base.syntax import IMAGE_RE
+
 logger = logging.getLogger(__name__)
 
 HEADING = "## Concepts practised"   # UI copy: English whatever the vault's language
@@ -38,7 +40,6 @@ MAX_CANDIDATES = 900
 LAB_CHARS = 6000
 
 _OUTPUT_RE = re.compile(r"```text\n.*?```\n?", re.S)
-_EMBED_RE = re.compile(r"!\[\[[^\]]*\]\]|!\[[^\]]*\]\([^)]*\)")
 _WORD_RE = re.compile(r"[^\W\d_]{4,}")
 
 _PROMPT = """You link a lab exercise (a notebook of code and prose) to the notes it practises.
@@ -53,7 +54,7 @@ Notes:
 
 
 def _lab_text(body: str) -> str:
-    return _EMBED_RE.sub("", _OUTPUT_RE.sub("", body)).strip()[:LAB_CHARS]
+    return IMAGE_RE.sub("", _OUTPUT_RE.sub("", body)).strip()[:LAB_CHARS]
 
 
 def _ranked(titles: list[str], text: str) -> list[str]:
@@ -140,7 +141,7 @@ def folder_titles(folder: str, exclude: str = "") -> list[str]:
     (2026-10-23)."""
     from silica.kernel.outline import _hidden_note
     from silica.kernel.base.layout import is_source_leaf
-    from silica.tools.atomic import notes_under
+    from silica.kernel.recall.listing import notes_under
 
     return [Path(p).stem for p in notes_under(folder)
             if p != exclude and not is_source_leaf(p) and not _hidden_note(p)]

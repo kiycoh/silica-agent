@@ -11,13 +11,15 @@ contract in relatedness._fuse) when they cannot rank, never with [].
 
 Keyspace: these functions do not know about '.md'. Callers hand in one
 keyspace and get the same one back; the report and the facade bridge at
-their own seams (cooccur_key), as every other signal does.
+their own seams (store_key), as every other signal does.
 """
 from __future__ import annotations
 
 import math
 from collections import Counter
 from collections.abc import Iterable
+
+from silica.kernel.base import notekey
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +147,35 @@ def refd_edges(
 # V3  Coupling: notes that share transactions (sources cited, runs written)
 # ---------------------------------------------------------------------------
 
+# RefD related-set depth: the paper's related concepts are the top neighbours
+# by similarity; 30 is the facade pool size (_POOL_MIN) so a prerequisite
+# reads the same neighbourhood /related shows.
+_REFD_RELATED_K = 30
+_REFD_THETA = 0.1
+# Fewer related notes than this and the note's side abstains; see refd_edges
+# for the measured failure this guards.
+_REFD_MIN_RELATED = 5
+
+
+def refd_prerequisites(G_dir, nodes, store, *, scope: str | None = None) -> list[tuple[str, str, float]]:
+    """RefD over (directed wikilinks, co-occurrence related sets) of `nodes`, in
+    the store keyspace. Here and not in the report that shows it, because Learn
+    orders a session by the same edges and Learn is read by the report."""
+    from silica.kernel.recall.relatedness import _cooccur_ranking
+
+    keys = {notekey.store_key(n) for n in nodes}
+    links: dict[str, set[str]] = {}
+    for u, v in G_dir.edges():
+        links.setdefault(notekey.store_key(u), set()).add(notekey.store_key(v))
+    related: dict[str, list[tuple[str, float]]] = {}
+    for p in store.paths():
+        if p in keys:
+            ranking = _cooccur_ranking(store, p, k=_REFD_RELATED_K, exclude={p}, scope=scope)
+            if ranking:
+                related[p] = [(q, float(w)) for q, w in ranking if q in keys]
+    return refd_edges(links, related, theta=_REFD_THETA, min_related=_REFD_MIN_RELATED)
+
+
 def coupling_adjacency(
     transactions: Iterable[Iterable[str]], *, cap: int = 30, report_dropped: bool = False,
 ):
@@ -173,22 +204,6 @@ def coupling_adjacency(
                 adj.setdefault(b, {})[a] = adj.get(b, {}).get(a, 0.0) + w
     return (adj, dropped) if report_dropped else adj
 
-
-def coupling_ranking(
-    adj: dict[str, dict[str, float]], note: str, *, k: int, exclude: Iterable[str] = (),
-) -> list[tuple[str, float]] | None:
-    row = adj.get(note)
-    if not row:
-        return None
-    blocked = set(exclude) | {note}
-    ranked = sorted(((p, w) for p, w in row.items() if p not in blocked),
-                    key=lambda kv: (-kv[1], kv[0]))
-    return ranked[:k] or None
-
-
-# ---------------------------------------------------------------------------
-# V4  Load-bearing notes: coreness, articulation points, surprise
-# ---------------------------------------------------------------------------
 
 def _pct_rank(values: dict[str, float]) -> dict[str, float]:
     """Fraction of the other nodes strictly below each node (ties share)."""

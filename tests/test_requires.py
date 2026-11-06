@@ -43,14 +43,14 @@ def test_the_written_list_replaces_the_inferred_one_and_drops_the_reverse_edge()
 
 
 def test_prerequisites_map_carries_what_the_person_wrote(tmp_vault, monkeypatch):
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
     from silica.kernel.learn import learner
 
     tmp_vault.note("ML/Backprop.md", '---\nrequires: ["[[Chain rule]]"]\n---\n\n# Backprop\n')
     tmp_vault.note("Math/Chain rule.md", "# Chain rule\n")
     learner._prereq_memo.clear()
     got = learner.prerequisites_map()
-    assert got[cooccur_key("ML/Backprop.md")] == [cooccur_key("Math/Chain rule.md")]
+    assert got[store_key("ML/Backprop.md")] == [store_key("Math/Chain rule.md")]
 
 
 def test_reading_path_prefers_and_names_a_written_prerequisite():

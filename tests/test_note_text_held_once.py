@@ -12,7 +12,7 @@ import pytest
 
 from silica.driver import fs_backend
 from silica.driver.fs_backend import ObsidianFSBackend
-from silica.kernel.learn import learner
+from silica.kernel.base import note_index
 
 
 def test_a_long_note_reads_whole_and_only_a_short_one_is_held(tmp_path, monkeypatch):
@@ -47,27 +47,27 @@ def test_a_long_crlf_note_keeps_its_terminator_when_written(tmp_path, monkeypatc
 def test_the_parsed_memo_keeps_the_frontmatter_and_not_the_body(tmp_path):
     (tmp_path / "N.md").write_text("---\ntype: plan\n---\nThe body.\n")
 
-    first = learner.parsed_note(tmp_path, "N.md")
-    second = learner.parsed_note(tmp_path, "N.md")
+    first = note_index.parsed(tmp_path, "N.md")
+    second = note_index.parsed(tmp_path, "N.md")
 
     assert first == second == ({"type": "plan"}, "The body.\n")
-    assert learner._parsed_memo[str(tmp_path / "N.md")][1:] == ({"type": "plan"},)
+    assert note_index._parsed_memo[str(tmp_path / "N.md")][1:] == ({"type": "plan"},)
 
 
 def test_a_note_with_no_frontmatter_gives_its_whole_text_on_a_memo_hit(tmp_path):
     (tmp_path / "N.md").write_text("Only a body.\n")
 
-    assert learner.parsed_note(tmp_path, "N.md") == (None, "Only a body.\n")
-    assert learner.parsed_note(tmp_path, "N.md") == (None, "Only a body.\n")
+    assert note_index.parsed(tmp_path, "N.md") == (None, "Only a body.\n")
+    assert note_index.parsed(tmp_path, "N.md") == (None, "Only a body.\n")
 
 
 def test_a_frontmatter_read_on_a_memo_hit_opens_no_file(tmp_path, monkeypatch):
     """The plan list asks this of every note, and a 2,166-note vault pays for it."""
     (tmp_path / "N.md").write_text("---\ntype: plan\n---\nThe body.\n")
-    learner.parsed_note(tmp_path, "N.md")
+    note_index.parsed(tmp_path, "N.md")
     monkeypatch.setattr(Path, "read_text", lambda *a, **k: pytest.fail("opened the note"))
 
-    assert learner.parsed_note(tmp_path, "N.md", body=False) == ({"type": "plan"}, "")
+    assert note_index.parsed(tmp_path, "N.md", body=False) == ({"type": "plan"}, "")
 
 
 def test_a_note_edited_after_the_memo_is_parsed_again(tmp_path):
@@ -75,8 +75,8 @@ def test_a_note_edited_after_the_memo_is_parsed_again(tmp_path):
 
     note = tmp_path / "N.md"
     note.write_text("---\ntype: plan\n---\nOld.\n")
-    learner.parsed_note(tmp_path, "N.md")
+    note_index.parsed(tmp_path, "N.md")
     note.write_text("---\ntype: note\n---\nNew.\n")
     os.utime(note, (note.stat().st_atime, note.stat().st_mtime + 5))
 
-    assert learner.parsed_note(tmp_path, "N.md") == ({"type": "note"}, "New.\n")
+    assert note_index.parsed(tmp_path, "N.md") == ({"type": "note"}, "New.\n")

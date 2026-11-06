@@ -152,7 +152,7 @@ def is_spine(path: str) -> bool:
     """A lecture's outline (`section: (outline)`): a card at its lecture
     place, never a prerequisite, written with no call."""
     from silica.kernel.learn import items
-    from silica.kernel.outline import SPINE_SECTION
+    from silica.kernel.base.noteshape import SPINE_SECTION
     from silica.kernel.base import frontmatter
 
     data, _raw, _body = frontmatter.split(items.read_note(path))

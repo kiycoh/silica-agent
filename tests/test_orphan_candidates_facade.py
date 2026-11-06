@@ -31,8 +31,8 @@ def isolated_indexes(tmp_path, monkeypatch):
 
 def test_orphan_candidates_fuses_both_legs(isolated_indexes):
     # Keys are CASE-PRESERVING (real vault paths, .md stripped at index time) and
-    # the query arrives as ref.path WITH .md — the realistic shapes. cooccur_key
-    # reconciles them; a lowercasing key (the old _norm_path bug) would miss every
+    # the query arrives as ref.path WITH .md — the realistic shapes. store_key
+    # reconciles them; a lowercasing key (the old lowercased-key bug) would miss every
     # stored key and silently return [].
     es = EmbedStore()
     es.upsert("Notes/Orphan", "Orphan", [1.0, 0.0])

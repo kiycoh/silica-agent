@@ -21,6 +21,7 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
+from silica.kernel.base.syntax import NAME_UNSAFE_RE
 from silica.tools import tool
 
 logger = logging.getLogger(__name__)
@@ -160,7 +161,6 @@ _QUESTION = {
 # FastAPI into every surface that registers tools.
 _IMAGE_RE = re.compile(r"\n*\[image attached: [^\]\n]+\]")
 _SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
-_UNSAFE_NAME = re.compile(r'[\\/:*?"<>|#^\[\]]+')
 _HEADING_RE = re.compile(r"^\s*#{1,6} ")
 _LEAD_HEADING_RE = re.compile(r"^\s*#{1,6} [^\n]*\n+")
 _OUTLINE_LINE_RE = re.compile(r"\s*\[?(\d+)\]?\s*\|\s*(.+)")
@@ -416,7 +416,7 @@ def silica_rework(
     # line above it ("Rielabora questo testo:").
     head, _, rest = text.partition("\n")
     naming = rest if rest.strip() and _words(head) < 20 else text
-    stem = title or _UNSAFE_NAME.sub("", " ".join(naming.split()[:6])).strip(" ,.;:!?") or "Pasted text"
+    stem = title or NAME_UNSAFE_RE.sub("", " ".join(naming.split()[:6])).strip(" ,.;:!?") or "Pasted text"
     path = _target(folder, stem)
     written = silica_write_note(path=path, body=body, template="none",
                                 props={"source": f"[[{title}]]"} if title else None)

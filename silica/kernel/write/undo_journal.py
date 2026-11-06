@@ -227,7 +227,7 @@ class UndoJournalStore:
                     ) -> tuple[str, str, float] | None:
         """The same over every source in `sources`: by default a chat delete
         or one the user ran with /delete, both of which /undo takes back."""
-        from silica.kernel.write.provenance import note_key
+        from silica.kernel.base.notekey import note_key
 
         marks = ",".join("?" * len(sources))
         query = ("SELECT r.run_id, i.path, r.started_at FROM runs r "
@@ -248,7 +248,7 @@ class UndoJournalStore:
         """The post-write hash of the newest un-reverted inverse for `path`
         in `vault` (any spelling, via provenance.note_key): what the agent last
         landed there. ADR-0093's draft pass compares it with the note now."""
-        from silica.kernel.write.provenance import note_key
+        from silica.kernel.base.notekey import note_key
 
         query = ("SELECT i.path, i.post_hash FROM inverses i JOIN runs r ON r.run_id = i.run_id "
                  "WHERE r.reverted_at IS NULL")
@@ -268,7 +268,7 @@ class UndoJournalStore:
         """(run_id, from, to, started_at) of the newest un-reverted move in
         `vault`, the chat's or the tree's (ADR-0126): /undo takes both back. `ref` matches either end, or the folder the note landed in:
         the GUI's moved card sends the call's raw `to`, which may be a folder."""
-        from silica.kernel.write.provenance import note_key
+        from silica.kernel.base.notekey import note_key
 
         marks = ",".join("?" * len(MOVE_SOURCES))
         query = ("SELECT r.run_id, i.path, i.to_path, r.started_at FROM runs r "
@@ -393,7 +393,7 @@ class UndoJournalStore:
         chars}` with `id` = "j<inverse id>": the part of a note's history that
         /nucleate and the other runs keep, not the checkpoint store (ADR-0144
         point 6). A note a run created has no before-image."""
-        from silica.kernel.write.provenance import note_key
+        from silica.kernel.base.notekey import note_key
 
         query = ("SELECT i.id, i.path, LENGTH(i.prior_content) AS chars, r.started_at, "
                  "r.source, r.reverted_at FROM inverses i JOIN runs r ON r.run_id = i.run_id "
@@ -411,7 +411,7 @@ class UndoJournalStore:
 
     def before_image(self, inverse_id: int, path: str, vault: str | None) -> str | None:
         """The body of one before-image of `path` in `vault`; None when the id is not one."""
-        from silica.kernel.write.provenance import note_key
+        from silica.kernel.base.notekey import note_key
 
         row = self._conn().execute(
             "SELECT i.path, i.prior_content, r.vault FROM inverses i "

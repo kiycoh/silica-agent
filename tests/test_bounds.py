@@ -157,7 +157,7 @@ def test_bare_hub_does_not_block_collateral_note():
     legitimate repair target — it must pass hub protection even though its directory
     also contains notes whose basename could match other bare forbidden entries.
     The fix: basename expansion is only applied to bare forbidden entries so that
-    "notes/Bar.md" is not spuriously blocked because norm_path(basename) != "foo".
+    "notes/Bar.md" is not spuriously blocked because ledger_key(basename) != "foo".
     """
     # dedup_bounds with target=notes/Bar.md, hub bare name "Foo"
     bounds = dedup_bounds("notes/Bar.md", hub="Foo")

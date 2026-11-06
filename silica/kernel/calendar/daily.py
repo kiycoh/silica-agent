@@ -170,13 +170,12 @@ def daily_notes(vault: Path) -> dict[str, dt.date]:
     rule = daily_rule(vault)
     if rule is None:
         return {}
-    base = vault / rule.folder if rule.folder else vault
+    from silica.kernel.base.layout import iter_notes
+
     out: dict[str, dt.date] = {}
-    for f in sorted(base.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts):
-            continue
-        rel = "/".join(parts)
+    # ignore=False: the daily folder is the vault's own setting, named in
+    # Obsidian, and a name in `.silicaignore` must not empty the calendar.
+    for rel, _f in iter_notes(vault, scope="vault", under=rule.folder or "", ignore=False):
         day = daily_date(rel, rule)
         if day is not None:
             out[rel] = day

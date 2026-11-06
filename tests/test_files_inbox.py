@@ -10,9 +10,16 @@ cases pin the `list_inbox_files` fallback that still catches an empty listing.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from contextlib import contextmanager
 from unittest.mock import patch
 
 from silica.tools.atomic import silica_files
+
+
+@contextmanager
+def _driver():
+    with patch("silica.tools.atomic.DRIVER") as drv, patch("silica.kernel.recall.listing.DRIVER", drv):
+        yield drv
 
 
 def _refs(*paths):
@@ -31,7 +38,7 @@ _INBOX = _refs(
 
 
 def test_inbox_folder_lists_its_notes():
-    with patch("silica.tools.atomic.DRIVER") as drv, \
+    with _driver() as drv, \
          patch("silica.kernel.base.manifest.active_inbox_dir", return_value="Inbox"):
         drv.list_files.return_value = []
         drv.list_inbox_files.return_value = _INBOX
@@ -45,7 +52,7 @@ def test_inbox_folder_lists_its_notes():
 
 
 def test_inbox_root_lists_every_nested_note():
-    with patch("silica.tools.atomic.DRIVER") as drv, \
+    with _driver() as drv, \
          patch("silica.kernel.base.manifest.active_inbox_dir", return_value="Inbox"):
         drv.list_files.return_value = []
         drv.list_inbox_files.return_value = _INBOX
@@ -57,7 +64,7 @@ def test_listing_is_natural_sorted():
     """os.walk order is neither stable nor meaningful, and the injector ingests a
     folder in listing order: lesson 10 must not land before lesson 2 defines its
     terms. Plain lexicographic sort would do exactly that."""
-    with patch("silica.tools.atomic.DRIVER") as drv, \
+    with _driver() as drv, \
          patch("silica.kernel.base.manifest.active_inbox_dir", return_value="Inbox"):
         drv.list_files.return_value = []
         drv.list_inbox_files.return_value = _refs(
@@ -78,7 +85,7 @@ def test_folder_of_pdfs_is_not_reported_as_empty():
     "files": []} — the same payload as a folder that is not there, and the agent
     reported it as "the path does not exist". Images/ stays out: it is
     conversion output, not something to convert."""
-    with patch("silica.tools.atomic.DRIVER") as drv, \
+    with _driver() as drv, \
          patch("silica.kernel.base.manifest.active_inbox_dir", return_value="Inbox"):
         drv.list_files.return_value = []
         drv.list_inbox_files.return_value = _refs(
@@ -98,7 +105,7 @@ def test_folder_of_pdfs_is_not_reported_as_empty():
 def test_non_inbox_folder_does_not_consult_the_inbox():
     """An empty vault folder stays empty — the fallback is scoped to the inbox,
     not a second listing every miss falls through to."""
-    with patch("silica.tools.atomic.DRIVER") as drv, \
+    with _driver() as drv, \
          patch("silica.kernel.base.manifest.active_inbox_dir", return_value="Inbox"):
         drv.list_files.return_value = []
         drv.list_inbox_files.return_value = _INBOX

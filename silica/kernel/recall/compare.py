@@ -22,10 +22,6 @@ import math
 from typing import Any, Iterable
 
 
-def _pair(x: str, y: str) -> tuple[str, str]:
-    return (x, y) if x < y else (y, x)
-
-
 def compare_sets(
     a: set[str], b: set[str], *, store: Any, vault_size: int,
     nodes: list[dict], edges: list[dict], sim: list[dict],
@@ -34,10 +30,10 @@ def compare_sets(
     """`a`, `b`: note ids (graph keys). `store`: the co-occurrence store, or
     None for no terms. `vault_size`: notes in the whole vault, the ceiling's
     denominator. `edges`: the wikilink layer; `sim`: the k-NN layer."""
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
 
     def rates(ids: set[str]) -> dict[str, float]:
-        keys = {cooccur_key(p) for p in ids}
+        keys = {store_key(p) for p in ids}
         out: dict[str, float] = {}
         if not store or not keys:
             return out
@@ -54,7 +50,7 @@ def compare_sets(
     # 38% of the test vault). Measured against the rest and not the whole, or a
     # term owned by one big side would be its own ceiling.
     common: set[str] = set()
-    both = {cooccur_key(p) for p in a | b}
+    both = {store_key(p) for p in a | b}
     rest_n = max(vault_size - len(both), 0)
     if store and rest_n:
         for stem, notes in store.stem_postings().items():

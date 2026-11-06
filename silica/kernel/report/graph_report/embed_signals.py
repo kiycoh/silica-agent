@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 
+from silica.kernel.base import notekey
 from silica.kernel.report.graph_report.models import DuplicatePair, VaultReport
 from silica.kernel.base.layout import in_folder
 
@@ -68,7 +69,7 @@ def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
         # Title + body, mirroring the collision leg's "name + excerpt" query: two
         # notes on the same concept usually differ in surface title, and body
         # alone loses that signal.
-        name = nid.rsplit("/", 1)[-1].removesuffix(".md")
+        name = notekey.stem(nid)
         sig = minhash_signature(f"{name}\n{body}")
         if sig:
             sigs[nid] = sig

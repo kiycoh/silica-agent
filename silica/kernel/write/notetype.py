@@ -26,10 +26,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from silica.kernel.base import frontmatter
-
-# The four values derive_type can produce. Free-form per §4.1 — this is
-# Silica's vocabulary, not the spec's.
-SOURCE, CODE, PLAN, NOTE = "Source", "Code", "Plan", "Note"
+from silica.kernel.base.noteshape import OKF_CODE, OKF_NOTE, OKF_PLAN, OKF_SOURCE, verified_entries
 
 # §11.3 binds these names to a bundle-level index/changelog when present. The
 # vault generates neither, so a note carrying the name is a collision to rename
@@ -48,14 +45,14 @@ def derive_type(path: str, content: str) -> str:
     from silica.kernel.base.layout import is_source_leaf
 
     if is_source_leaf(path):
-        return SOURCE
+        return OKF_SOURCE
     data, _raw, _body = frontmatter.split(content)
     data = data or {}
     if data.get("documents") or data.get("code_ref"):
-        return CODE
+        return OKF_CODE
     if str(data.get("status") or "").strip() in VALID_STATUS:
-        return PLAN
-    return NOTE
+        return OKF_PLAN
+    return OKF_NOTE
 
 
 _TYPE_KEY_RE = re.compile(r"^type:\s", re.MULTILINE)
@@ -70,17 +67,19 @@ def stamp_type(path: str, content: str) -> str:
     and the walker censuses it), when the YAML is unparseable (stamping into
     it would corrupt it further), and when `type` is already present.
     """
-    if not content.startswith("---\n"):
-        return content
-    end = content.find("\n---\n", 4)
-    if end == -1:
-        return content  # unterminated frontmatter — the walker flags it
-    if _TYPE_KEY_RE.search(content[4:end]):
+    span = frontmatter.block(content)
+    if span is None:
+        return content  # none, or unterminated: the walker flags it
+    start, end = span
+    if _TYPE_KEY_RE.search(content[start:end]):
         return content
     data, _raw, _body = frontmatter.split(content)
     if data is None:
         return content
-    return content[:end] + f"\ntype: {derive_type(path, content)}" + content[end:]
+    # `create` stamps the text as handed to it, the one way a CRLF note gets here:
+    # every read is on LF and goes back through preserve.encode.
+    eol = "\r" if content[end - 1:end] == "\r" else ""
+    return content[:end] + f"\ntype: {derive_type(path, content)}{eol}" + content[end:]
 
 
 # OKF §5.2 `verified`. The actor prefix is what separates a person vouching for
@@ -98,21 +97,6 @@ def agent_id() -> str:
     function guessing one.
     """
     return os.environ.get("SILICA_AGENT_ID", "").strip()
-
-
-def verified_entries(data: dict | None) -> list[dict]:
-    """The `verified` entries of a note's frontmatter, always as a list.
-
-    §5.2 is a MUST on readers: a single `{by, at}` mapping means a one-element
-    list. Hand-edited frontmatter is where this field comes from, and a person
-    writing one verification writes the mapping, not a list of one.
-    """
-    raw = (data or {}).get("verified")
-    if isinstance(raw, dict):
-        return [raw]
-    if isinstance(raw, list):
-        return [e for e in raw if isinstance(e, dict)]
-    return []
 
 
 def is_human_verified(data: dict | None) -> bool:
@@ -158,16 +142,16 @@ def _replace_verified(content: str, entries: list[dict]) -> str:
     """`content` with its `verified` block replaced by `entries` (dropped when
     empty). Requires a frontmatter block; the callers guarantee one."""
     if content.startswith("---\n---\n"):
-        fm, tail = "", content[4:]
+        fence, fm, tail = "---\n", "", content[4:]
     else:
-        end = content.find("\n---\n", 4)
-        fm, tail = content[4:end + 1], content[end + 1:]
+        start, end = frontmatter.block(content)
+        fence, fm, tail = content[:start], content[start:end + 1], content[end + 1:]
     fm = _VERIFIED_BLOCK_RE.sub("", fm)
     if fm and not fm.endswith("\n"):
         fm += "\n"
     if entries:
         fm += _render_verified(entries)
-    return "---\n" + fm + tail
+    return fence + fm + tail
 
 
 def stamp_verified(content: str, by: str, at: str) -> str:
@@ -179,7 +163,7 @@ def stamp_verified(content: str, by: str, at: str) -> str:
         raise ValueError(f"an attestation must name a person ({HUMAN_ACTOR_PREFIX}…), got {by!r}")
     content = content or ""
     entry = {"by": by.strip(), "at": at, "body_sha256": body_sha256(content)}
-    if not content.startswith("---\n"):
+    if not frontmatter.FM_OPEN_RE.match(content):
         return "---\n" + _render_verified([entry]) + "---\n\n" + content
     data, raw, _body = frontmatter.split(content)
     if data is None:
@@ -240,15 +224,12 @@ def okf_conformance(vault: Path | str) -> Census:
     A path that is not a directory raises instead of reading as an empty,
     conformant bundle: a zero-file scan is an invocation error, never a pass.
     """
-    from silica.kernel.base.layout import ignore_matcher
-
-    from silica.kernel.base.layout import DEFAULT_LOG_FILENAME
+    from silica.kernel.base.layout import DEFAULT_LOG_FILENAME, iter_notes
     from silica.kernel.base.manifest import load_manifest
 
     vault = Path(vault)
     if not vault.is_dir():
         raise NotADirectoryError(f"{vault} is not a vault directory")
-    ignored = ignore_matcher(vault)
     # Silica's own journal is not a note. §11.3's advice for it reads "rename
     # any `index`/`log` note by hand" — which the user cannot do, because the
     # next run writes it again. Read the write_dir off THIS vault, not the
@@ -259,13 +240,7 @@ def okf_conformance(vault: Path | str) -> Census:
         journal = DEFAULT_LOG_FILENAME
     out: list[Violation] = []
     scanned = 0
-    for f in sorted(vault.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts):
-            continue  # .obsidian, .trash, .silica
-        if any(ignored(p) for p in parts[:-1]):
-            continue  # .silicaignore / NOISE_DIRS: node_modules under a repo vault
-        rel = f.relative_to(vault).as_posix()
+    for rel, f in iter_notes(vault, scope="vault"):
         if rel == journal:
             continue
         scanned += 1

@@ -23,6 +23,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
+from silica.kernel.recall.listing import natural_key, notes_under, vault_rel
 from silica.tools import tool
 
 
@@ -466,7 +467,7 @@ def _literal_search(query: str, folder: str, k: int) -> dict:
     import time
 
     from silica.config import CONFIG, in_config_dir
-    from silica.kernel.base.layout import ignore_matcher, in_folder
+    from silica.kernel.base.layout import in_folder, iter_notes
     from silica.kernel.workspaces import in_scope
 
     needle = query.strip()
@@ -474,16 +475,11 @@ def _literal_search(query: str, folder: str, k: int) -> dict:
         return {"error": {"code": "bad_query",
                           "hint": "a literal search takes one exact string of 2 to 200 characters"}}
     vault = Path(CONFIG.vault_path or ".").expanduser().resolve()
-    ignored = ignore_matcher(vault)
     folded = needle.casefold()
     t0 = time.monotonic()
     found: list[tuple[int, str, list[dict]]] = []
     scanned = cut = 0
-    for f in sorted(vault.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts) or any(ignored(p) for p in parts[:-1]):
-            continue
-        rel = "/".join(parts)
+    for rel, f in iter_notes(vault, scope="vault"):
         if not in_folder(rel, folder) or not in_scope(rel):
             continue
         if time.monotonic() - t0 > _LITERAL_BUDGET_S:
@@ -760,7 +756,7 @@ def _narrow_to_query(name: str, body: str, path: str, query: str) -> str | None:
     Line ranges and not headings: converted slides repeat titles (nine sections
     of Lezione 32 share one), and `silica_read(section=)` refuses those."""
     from silica.kernel.recall import rerank
-    from silica.kernel.recall.perception import _section_chain
+    from silica.kernel.base.syntax import section_chain
 
     # The note's own name locates the note, not the passage: "Lezione 32" in
     # the query put a window on the first slide dense in "lezione".
@@ -778,7 +774,7 @@ def _narrow_to_query(name: str, body: str, path: str, query: str) -> str | None:
         if a > nxt:
             gaps.append(f"{nxt}-{a - 1}")
         nxt = max(nxt, b + 1)
-        chain = _section_chain(body, off)
+        chain = section_chain(body, off)
         parts.append(f"[lines {a}-{b}{' | ' + chain if chain else ''}]\n{text.rstrip()}")
     if nxt <= total:
         gaps.append(f"{nxt}-{total}")
@@ -1157,54 +1153,6 @@ def silica_unresolved() -> list:
 # List files
 # ---------------------------------------------------------------------------
 
-def _natural_key(path: str) -> list:
-    """Sort key that reads embedded runs of digits as numbers.
-
-    Plain lexicographic order interleaves "Lezione 10" between 1 and 2, and the
-    injector ingests a folder in listing order: lesson 10's concepts would land
-    before lesson 2 defines them. re.split alternates non-digit/digit, so the
-    element at a given index always has the same type across paths.
-    """
-    import re
-
-    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", path)]
-
-
-def notes_under(folder: str) -> list[str]:
-    """Vault-relative `.md` paths under `folder`, natural-sorted. "" ⇒ the vault.
-
-    The one answer to "which notes does this folder hold?", because neither
-    half of the codebase could give it for an inbox folder: the note index used
-    to skip the inbox entirely, and `sources.registry.expand_folder` answers
-    only for the code lane off a git-backed census — a plain Obsidian vault is
-    no repo, so it returns [] for every folder in it. Between the two a folder
-    argument had no listing at all, and the only caller left to produce one was
-    an LLM guessing filenames.
-
-    The index now walks the inbox, so `list_files` alone answers. The
-    `list_inbox_files` fallback below stays as belt-and-braces: its failure mode
-    was a model inventing filenames, which is not a failure worth re-earning to
-    save four lines.
-    """
-    from silica.kernel.base.layout import in_folder
-    from silica.kernel.base.manifest import active_inbox_dir
-
-    scope = _vault_rel(folder)
-    # list_files(folder) pre-filters loosely (startswith); in_folder tightens it
-    # so a Foo/ argument never leaks into a sibling FooBar/.
-    paths = [r.path for r in DRIVER.list_files(scope) if in_folder(r.path, scope)]
-    if not paths and scope:
-        inbox = active_inbox_dir()
-        if inbox and in_folder(scope, inbox):
-            # .md only: the unconverted files (PDFs) are silica_inbox_ls's job,
-            # and a converted folder's Images/ leaves outnumber its notes 70:1.
-            paths = [
-                r.path for r in DRIVER.list_inbox_files()
-                if r.path.endswith(".md") and in_folder(r.path, scope)
-            ]
-    return sorted(paths, key=_natural_key)
-
-
 def _unconverted_under(folder: str) -> list[str]:
     """Non-markdown files under `folder`, natural-sorted; `Images/` excluded.
 
@@ -1221,7 +1169,7 @@ def _unconverted_under(folder: str) -> list[str]:
     from silica.kernel.base.layout import in_folder
     from silica.kernel.base.manifest import active_inbox_dir
 
-    scope = _vault_rel(folder)
+    scope = vault_rel(folder)
     if not scope:
         return []
     inbox = active_inbox_dir()
@@ -1236,7 +1184,7 @@ def _unconverted_under(folder: str) -> list[str]:
             and in_folder(p, scope)
             and "/Images/" not in p
         ),
-        key=_natural_key,
+        key=natural_key,
     )
 
 
@@ -1255,40 +1203,21 @@ def _raws_of(files: list[str]) -> dict[str, str]:
 
 def _vault_files_under(scope: str) -> list[str]:
     """Vault-relative files under `scope`, dotfiles and dot-dirs skipped."""
-    import os
-
     from silica.config import CONFIG
+    from silica.kernel.base.layout import walk_tree
 
     root = Path(CONFIG.vault_path or "")
     base = root / scope
     if not base.is_dir():
         return []
     out: list[str] = []
-    for dirpath, dirnames, filenames in os.walk(base):
-        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+    # ignore=False: /nucleate of a folder the person named reads that folder.
+    for dirpath, _dirnames, filenames in walk_tree(root, base, ignore=False):
         for name in filenames:
             if name.startswith("."):
                 continue
             out.append((Path(dirpath) / name).relative_to(root).as_posix())
     return out
-
-
-def _vault_rel(path: str) -> str:
-    """`path` as a vault-relative posix path; already-relative input passes through.
-
-    Users do paste absolute vault paths at /nucleate, and every listing below is
-    keyed vault-relative. A path outside the vault is returned as given: it
-    matches nothing, which is the honest answer for it.
-    """
-    from silica.config import CONFIG
-
-    p = Path(path.strip())
-    if p.is_absolute():
-        try:
-            return p.resolve().relative_to(Path(CONFIG.vault_path).resolve()).as_posix()
-        except (ValueError, OSError):
-            pass
-    return path.replace("\\", "/").strip("/")
 
 
 def _prop_selector(prop: str) -> tuple[str, str] | None:
@@ -1313,7 +1242,7 @@ def _with_prop(files: list[str], key: str, value: str, folder: str) -> list[str]
     from silica.kernel.base.manifest import SAFE_WRITE_DIR
 
     skip_copies = (active_write_dir() == SAFE_WRITE_DIR
-                   and not within(_vault_rel(folder), SAFE_WRITE_DIR))
+                   and not within(vault_rel(folder), SAFE_WRITE_DIR))
     out: list[str] = []
     for f in files:
         if skip_copies and within(f, SAFE_WRITE_DIR):
@@ -1390,7 +1319,7 @@ def silica_files(
     raw_of = _raws_of(pending)
     if raw_of:
         pending = [p for p in pending if p not in raw_of]
-        result["raws"] = [{"path": r, "source": raw_of[r]} for r in sorted(raw_of, key=_natural_key)][:_FILES_CAP]
+        result["raws"] = [{"path": r, "source": raw_of[r]} for r in sorted(raw_of, key=natural_key)][:_FILES_CAP]
     if pending:
         result["unconverted"] = pending[:_FILES_CAP]
         result["unconverted_total"] = len(pending)
@@ -2000,10 +1929,10 @@ def silica_learn_items(n: Annotated[int, Field(description='Session size (defaul
             scope, frontier, revisit, plan_path = scoped["paths"], scoped["frontier"], scoped["revisit"], plan["path"]
         else:
             from silica.config import CONFIG
-            from silica.kernel.learn import learner
+            from silica.kernel.base import note_index
 
             prefix = t.replace("\\", "/").casefold()
-            notes = learner._notes_meta(Path(CONFIG.vault_path))
+            notes = note_index.meta(Path(CONFIG.vault_path))
             scope = [p for p in notes if p.casefold().startswith(prefix)]
     from silica.kernel.workspaces import active_scope
 

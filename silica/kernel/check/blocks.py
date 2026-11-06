@@ -14,16 +14,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from silica.kernel.base.frontmatter import FM_RE_TOLERANT
+from silica.kernel.base.syntax import FENCE_LINE_RE, INLINE_CODE_RE, INLINE_MATH_STRICT_RE
+
 MIN_WORDS = 6
 
-_FENCE = re.compile(r"^\s*(```|~~~)")
 _HEADING = re.compile(r"^\s{0,3}#{1,6}\s")
 _ITEM = re.compile(r"^(\s*)(?:[-*+]|\d{1,3}[.)])\s+(?:\[[ xX]\]\s+)?")
 _FOOTDEF = re.compile(r"^\[\^([^\]\s]+)\]:\s?")
 _FOOTREF = re.compile(r"\[\^([^\]\s]+)\](?!:)")
 _TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
-_INLINE_CODE = re.compile(r"`[^`\n]*`")
-_INLINE_MATH = re.compile(r"(?<![\\$])\$(?=\S)[^$\n]*?\S\$(?!\d)")
 _WORD = re.compile(r"[^\W_]+")
 
 
@@ -38,7 +38,7 @@ class Block:
     @property
     def clean(self) -> str:
         """The text with inline code and inline math taken out."""
-        return _INLINE_MATH.sub(" ", _INLINE_CODE.sub(" ", self.text))
+        return INLINE_MATH_STRICT_RE.sub(" ", INLINE_CODE_RE.sub(" ", self.text))
 
     @property
     def words(self) -> int:
@@ -47,12 +47,11 @@ class Block:
 
 def body_start(content: str) -> int:
     """Index of the first body line: past a frontmatter block when there is one."""
-    lines = content.split("\n")
-    if lines and lines[0].strip() == "---":
-        for i in range(1, len(lines)):
-            if lines[i].strip() in ("---", "..."):
-                return i + 1
-    return 0
+    m = FM_RE_TOLERANT.match(content)
+    if not m:
+        return 0
+    n = content.count("\n", 0, m.end())
+    return n if content[m.end() - 1] == "\n" else n + 1
 
 
 def split(content: str) -> tuple[list[Block], dict[str, str]]:
@@ -73,9 +72,9 @@ def split(content: str) -> tuple[list[Block], dict[str, str]]:
         raw = lines[i]
         s = raw.strip()
         if fence:
-            fence = not _FENCE.match(raw)
+            fence = not FENCE_LINE_RE.match(raw)
             continue
-        if _FENCE.match(raw):
+        if FENCE_LINE_RE.match(raw):
             close()
             fence = True
             continue

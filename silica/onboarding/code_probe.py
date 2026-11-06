@@ -8,7 +8,7 @@ import logging
 import os
 from pathlib import Path
 
-from silica.kernel.base.layout import ignore_matcher
+from silica.kernel.base.layout import walk_tree
 
 
 logger = logging.getLogger(__name__)
@@ -45,9 +45,7 @@ def looks_like_code(root, sample_max: int = 400) -> bool:
 
     code_exts = {e for e, lang in EXTENSION_MAP.items() if lang not in BARE_LANGUAGES}
     code = prose = seen = 0
-    skip = ignore_matcher(root)
-    for dirpath, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if not d.startswith(".") and not skip(d)]
+    for _dirpath, _dirs, files in walk_tree(root):
         for name in files:
             ext = os.path.splitext(name)[1].lower()
             if ext in code_exts:

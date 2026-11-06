@@ -15,6 +15,9 @@ from datetime import datetime, timedelta, timezone
 
 from fsrs import Card, Rating, Scheduler, State
 
+from silica.kernel.base import note_index
+from silica.kernel.base.notekey import ledger_key
+
 # No intra-day steps: a note is not a card drilled ten minutes apart. Fuzz off:
 # the view must be deterministic under test and identical on every surface.
 # 365 days because a vault changes under its notes.
@@ -26,7 +29,6 @@ SCHEDULER = Scheduler(
 S0_USER = 90.0   # days of stability granted by writing a note yourself (v1 prior)
 DUE_R = 0.9      # the scheduler's desired retention: below it a note enters the session pool
 WEAK_R = 0.6     # the digest's WEAK RECALL line and the attention list, measured notes only
-DAY = 86400.0
 
 AGAIN, HARD, GOOD, EASY = 1, 2, 3, 4
 
@@ -101,7 +103,6 @@ def note_state(created_ts: float, is_ai: bool, events: list, now_ts: float) -> d
 
 def events_by_key(entries: list[dict]) -> dict[str, list]:
     """{note key: [(ts, rating, correct)]} over the ledger."""
-    from silica.kernel.learn.quiz import key
 
     out: dict[str, list] = {}
     for e in entries:
@@ -113,7 +114,7 @@ def events_by_key(entries: list[dict]) -> dict[str, list]:
             ts = datetime.fromisoformat(str(e.get("ts"))).timestamp()
         except (ValueError, TypeError):
             continue  # an undatable rating cannot move a clock
-        out.setdefault(key(str(e.get("path") or "")), []).append(
+        out.setdefault(ledger_key(str(e.get("path") or "")), []).append(
             (ts, rating_of(e), bool(e.get("correct")))
         )
     return out
@@ -125,7 +126,7 @@ def view(
     _entries_override: list | None = None,
     cold: frozenset[str] = frozenset(),
 ) -> dict[str, dict]:
-    """The whole vault's learner state, keyed by quiz.key(path).
+    """The whole vault's learner state, keyed by ledger_key(path).
 
     `cold` paths start with no authorship prior: inside a plan with a date,
     a note the reader wrote is a card like any other until its first answer,
@@ -141,17 +142,16 @@ def view(
 
     from silica.config import CONFIG
     from silica.kernel.learn import quiz
-    from silica.kernel.learn.learner import _notes_meta
 
     now = now_ts if now_ts is not None else datetime.now(timezone.utc).timestamp()
     notes = _notes_override
     if notes is None:
-        notes = _notes_meta(Path(CONFIG.vault_path))
+        notes = note_index.meta(Path(CONFIG.vault_path))
     entries = _entries_override if _entries_override is not None else quiz.entries()
     events = events_by_key(entries)
     out: dict[str, dict] = {}
     for path, meta in notes.items():
-        k = quiz.key(path)
+        k = ledger_key(path)
         st = note_state(meta["created"], bool(meta.get("ai")) or path in cold, events.get(k, []), now)
         st.update(path=path, ai=bool(meta.get("ai")), attempts=st["misses"] + st["correct"])
         out[k] = st

@@ -31,11 +31,11 @@ import unicodedata
 from collections.abc import Mapping
 
 from silica.kernel.base.markdown import NON_MD_EXTENSIONS
+from silica.kernel.base.syntax import WIKILINK_RE
 
 logger = logging.getLogger(__name__)
 
 # [[Target]], [[Target|alias]], [[Target#anchor]], and the embed form ![[…]].
-_WIKILINK_RE = re.compile(r"(!?)\[\[([^\]|#\n]+)(#[^\]|\n]*)?(?:\|([^\]\n]*))?\]\]")
 
 # A quoted wikilink entry in a `related:` YAML list — either quote style and
 # either indentation (`  - "[[X]]"` and column-0 `- '[[X]]'` both occur).
@@ -134,7 +134,7 @@ def _make_resolver(extra_names: set[str] | None = None):
 def links_in(text: str | None) -> frozenset[str]:
     """Every note-link target a note's text holds, its `related:` entries
     included: what a note said before a run touched it."""
-    return frozenset(m.group(2).strip() for m in _WIKILINK_RE.finditer(text or "") if not m.group(1))
+    return frozenset(m.group(2).strip() for m in WIKILINK_RE.finditer(text or "") if not m.group(1))
 
 
 def _unlink_body(body: str, resolves, keep: frozenset[str] = frozenset()) -> tuple[str, list[str], list[str]]:
@@ -164,7 +164,7 @@ def _unlink_body(body: str, resolves, keep: frozenset[str] = frozenset()) -> tup
         # what the reader sees.
         return alias or t
 
-    return _WIKILINK_RE.sub(_sub, body), stripped, relinked
+    return WIKILINK_RE.sub(_sub, body), stripped, relinked
 
 
 def _prune_related(fm_text: str, resolves, keep: frozenset[str] = frozenset()) -> tuple[str, list[str]]:

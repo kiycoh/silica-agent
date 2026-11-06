@@ -19,7 +19,10 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote, unquote, urlsplit
 
+from silica.kernel.base import notekey
 from silica.kernel import publish
+from silica.kernel.base.noteshape import SOURCES_TAIL_RE
+from silica.kernel.base.syntax import EMBED_RE, LINK_TARGET_RE
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +43,11 @@ _CREDIT_MAX = 200
 _OUT = "*Image not published*"
 
 _WORD = re.compile(r"\w+", re.U)
-_SOURCES_TAIL = re.compile(r"^## Sources.*", re.S | re.M)
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp")
-_WIKI_EMBED = re.compile(r"!\[\[([^\]]+)\]\]")
 # One level of brackets inside the address: Wikipedia's file names carry them.
 _MD_IMAGE = re.compile(r"!\[([^\]]*)\]\(\s*<?((?:[^()\s>]|\([^()\s]*\))+)>?(?:\s+[\"'][^)]*[\"'])?\s*\)")
 _HTML_IMAGE = re.compile(r"<img\b[^>]*?\bsrc\s*=\s*[\"']?([^\"'\s>]+)[\"']?[^>]*>", re.I)
 _REMOTE = re.compile(r"(?:https?:)?//", re.I)
-_LINK = re.compile(r"(?<!!)\[\[([^\]|#]+)")
 # The mark's line, with the block around it when it is the note's only property.
 _MARK = re.compile(r"\A---\r?\nrewritten:\s*true[ \t]*\r?\n---\r?\n|^rewritten:\s*true[ \t]*\r?\n", re.M)
 _KEPT_NAME = re.compile(r"[0-9a-f]{24}\.[a-z]+")
@@ -164,7 +164,7 @@ def _embeds(body: str) -> tuple[list[str], list[str]]:
     """(local names, remote addresses) a note's body shows, in order."""
     local: list[str] = []
     remote: list[str] = []
-    for raw in _WIKI_EMBED.findall(body):
+    for raw in EMBED_RE.findall(body):
         target = raw.split("|", 1)[0].split("#", 1)[0].strip()
         if _is_image(target):
             local.append(target)
@@ -233,7 +233,7 @@ def place_images(body: str, plan: dict) -> str:
         key = _name_key(name)
         return f"![[{name}]]{credit(key)}" if key in plan["local"] else _OUT
 
-    return _HTML_IMAGE.sub(tag, _MD_IMAGE.sub(markdown, _WIKI_EMBED.sub(wiki, body)))
+    return _HTML_IMAGE.sub(tag, _MD_IMAGE.sub(markdown, EMBED_RE.sub(wiki, body)))
 
 
 # --- copies of remote images ---------------------------------------------------
@@ -274,7 +274,7 @@ def _keep(url: str, data: bytes, ctype: str, vault: Path) -> Path:
 
 def _title(path: str, fm: dict) -> str:
     t = fm.get("title")
-    return t.strip() if isinstance(t, str) and t.strip() else path.rsplit("/", 1)[-1].removesuffix(".md")
+    return t.strip() if isinstance(t, str) and t.strip() else notekey.stem(path)
 
 
 def _body(text: str) -> str:
@@ -307,7 +307,7 @@ def _images_on_disk(vault: Path) -> dict[str, Path]:
 def _hand_edits(vault: Path) -> tuple[dict[str, str | None], set[str]]:
     """({note key: what Silica last wrote, as a hash}, note keys edited since). Both empty when it
     cannot be read: every note then has no record, which the screen says and the review reads."""
-    from silica.kernel.write.provenance import note_key
+    from silica.kernel.base.notekey import note_key
     from silica.kernel.write.undo_journal import edited_since_write, written_notes
 
     try:
@@ -368,7 +368,8 @@ def _read_sources(vault: Path, notes: dict, wanted: dict[str, list[str]], names:
 def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict] | None = None) -> dict:
     """The facts of one wiki. `fetch` brings a remote image with no kept copy: the screen passes one,
     the build does not, since a Publish must not wait on a stranger's site."""
-    from silica.kernel.write.provenance import note_key, read_records
+    from silica.kernel.write.provenance import read_records
+    from silica.kernel.base.notekey import note_key
 
     vault = vault or publish._vault()
     conf = publish.find(slug, vault)
@@ -378,7 +379,7 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
     notes: dict[str, dict] = {}
     for p in paths:
         text = _body((vault / p).read_text(encoding="utf-8", errors="ignore")) if (vault / p).is_file() else ""
-        notes[p] = {"title": _title(p, fms.get(p) or {}), "text": _SOURCES_TAIL.sub("", text), "body": text,
+        notes[p] = {"title": _title(p, fms.get(p) or {}), "text": SOURCES_TAIL_RE.sub("", text), "body": text,
                     "files": [], "rewritten": (fms.get(p) or {}).get("rewritten") is True,
                     "edited": None, "share": None, "measured": False}
 
@@ -422,7 +423,7 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
             if n["edited"] and n["rewritten"] and _only_marked(vault / p, known[key]):
                 n["edited"] = n["rewritten"] = False
         n["personal"] = personal_data(n["body"])
-        for target in _LINK.findall(n["body"]):
+        for target in LINK_TARGET_RE.findall(n["body"]):
             hit = titles.get(Path(target.strip()).name.casefold())
             if hit is None:
                 nowhere[p] = nowhere.get(p, 0) + 1

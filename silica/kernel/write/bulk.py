@@ -157,7 +157,7 @@ def _execute_write(op: Op, path: str) -> dict:
     # "(to be expanded)" placeholder. op.snippet stays untouched so the MOC
     # bullet (hub_desc) still reads the first line of real prose.
     if op.valid_from and snippet.strip():
-        from silica.kernel.write.contested import stamp
+        from silica.kernel.base.noteshape import stamp
         rendered = stamp(valid_from=op.valid_from)
         if rendered:
             snippet = f"{rendered}\n\n{snippet.lstrip()}"

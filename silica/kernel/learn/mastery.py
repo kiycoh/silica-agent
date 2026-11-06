@@ -17,6 +17,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from silica.kernel.base.notekey import ledger_key
 from silica.kernel.learn.schedule import DUE_R
 
 DEPTH_LABEL = {1: "Facts", 2: "Parts", 3: "Mechanisms", 4: "New contexts"}
@@ -25,12 +26,6 @@ BANDS = (90, 70, 50, 25)
 BLIND_SPOT_CONF = 70
 FRAGILE_CONF = 25
 _STRUCTURE_KINDS = ("structure", "contrast", "contradiction")
-
-
-def _key(path: str) -> str:
-    from silica.kernel.learn.quiz import key
-
-    return key(path)
 
 
 def _ts(e: dict) -> float:
@@ -53,12 +48,12 @@ def _level(e: dict) -> int | None:
 def by_path(entries: list[dict], paths: list[str] | None = None) -> dict[str, list[dict]]:
     """{path: [entries]} in ledger order, keyed like the view; `paths` fixes
     the display spelling and restricts the scope."""
-    want = {_key(p): p for p in paths} if paths is not None else None
+    want = {ledger_key(p): p for p in paths} if paths is not None else None
     out: dict[str, list[dict]] = {p: [] for p in (paths or [])}
     for e in entries:
         if e.get("retest"):
             continue  # evidence for the reader, not for an objective (ADR-0135 point 4)
-        k = _key(str(e.get("path") or ""))
+        k = ledger_key(str(e.get("path") or ""))
         if want is not None:
             if k not in want:
                 continue
@@ -156,44 +151,27 @@ def depth_by_path(paths: list[str], entries: list[dict] | None = None, since: st
     return {p: depth_of(evs, since) for p, evs in by_path(entries, paths).items()}
 
 
-def next_ask(evs: list[dict], reach: int = 4) -> int:
-    """The level to ask next: one above the last unassisted success, capped
-    at reach; after a failure the failed demand again; level 4 only once 3
-    held. A pacing heuristic, not a law of learning."""
-    ordered = sorted((e for e in evs if _level(e) is not None), key=_ts)
-    held = 0
-    for e in ordered:
-        if unassisted(e) and e.get("grader") != "told":
-            held = max(held, _level(e) or 0)  # `ordered` kept only entries with a level
-    if ordered and not ordered[-1].get("correct"):
-        return max(1, min(reach, _level(ordered[-1]) or 0))
-    nxt = min(reach, held + 1)
-    if nxt >= 4 and held < 3:
-        nxt = 3
-    return max(1, nxt)
-
-
 def integration(paths: list[str], entries: list[dict], relations: list[tuple[str, str]]) -> dict:
     """Relations inside the scope the reader answered on: held when an item
     named both endpoints and met its criterion without help. `total` is the
     scope's relation count; with none, the label says so instead of zero."""
-    scope = {_key(p) for p in paths}
-    stems = {_key(p).rsplit("/", 1)[-1]: _key(p) for p in paths}
-    total = [(a, b) for a, b in relations if _key(a) in scope and _key(b) in scope]
+    scope = {ledger_key(p) for p in paths}
+    stems = {ledger_key(p).rsplit("/", 1)[-1]: ledger_key(p) for p in paths}
+    total = [(a, b) for a, b in relations if ledger_key(a) in scope and ledger_key(b) in scope]
     held: set[tuple[str, str]] = set()
     items = []
     for e in entries:
-        if e.get("retest") or e.get("kind") not in _STRUCTURE_KINDS or _key(str(e.get("path") or "")) not in scope:
+        if e.get("retest") or e.get("kind") not in _STRUCTURE_KINDS or ledger_key(str(e.get("path") or "")) not in scope:
             continue
         ends = e.get("endpoints") or []
-        keys = [k for x in ends if (k := stems.get(_key(str(x)).rsplit("/", 1)[-1]))]
+        keys = [k for x in ends if (k := stems.get(ledger_key(str(x)).rsplit("/", 1)[-1]))]
         if len(keys) < 2:
             continue
         pair = (min(keys[0], keys[1]), max(keys[0], keys[1]))
         items.append({"path": e.get("path"), "q": e.get("q", ""), "held": unassisted(e), "ts": e.get("ts")})
         if unassisted(e):
             held.add(pair)
-    known = {(min(_key(a), _key(b)), max(_key(a), _key(b))) for a, b in total}
+    known = {(min(ledger_key(a), ledger_key(b)), max(ledger_key(a), ledger_key(b))) for a, b in total}
     n_held = len(held & known) if known else len(held)
     return {"held": n_held, "total": len(known), "items": items,
             "label": "No relations available" if not known else f"{n_held} of {len(known)} relations held"}
@@ -296,7 +274,7 @@ def node_readings(leaves: list[str], view: dict[str, dict], entries: list[dict],
     several children counts once here; child sums need not equal the parent
     and the UI says so."""
     distinct = list(dict.fromkeys(leaves))
-    rows: dict[str, Any] = {p: view.get(_key(p)) for p in distinct}
+    rows: dict[str, Any] = {p: view.get(ledger_key(p)) for p in distinct}
     depth = depth_by_path(distinct, entries, since)
     objs = objectives_met(distinct, objectives, entries, since) if objectives else {}
     measured = [p for p in distinct if rows.get(p) and rows[p].get("attempts")]

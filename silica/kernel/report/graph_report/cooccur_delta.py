@@ -52,7 +52,9 @@ def _compute_cooccur_delta(
     `cooccur_store` is injectable for testing; loaded from disk when None.
     Returns empty lists when the index is empty (best-effort, never raises).
     """
-    from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store, tokenize
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.text.text import tokens
+    from silica.kernel.base.notekey import store_key
     from silica.kernel.recall.relatedness import _concept_idf, _cooccur_ranking, related_notes_many
 
     try:
@@ -87,10 +89,10 @@ def _compute_cooccur_delta(
         return [store.node_label(s) for s in ranked[:5]]
 
     # Keyspace bridge: G_und node ids are graph paths WITH '.md'; store keys are
-    # stripped (cooccur_key). Membership and hop checks must cross that boundary
+    # stripped (store_key). Membership and hop checks must cross that boundary
     # here — on a real vault a raw `nid in G_und` matches nothing and the whole
     # AUTOLINK section silently comes out empty.
-    gid_by_key = {cooccur_key(n): n for n in G_und.nodes}
+    gid_by_key = {store_key(n): n for n in G_und.nodes}
 
     # Precompute once for the AUTOLINK loop below: the symmetric note-edge
     # adjacency (else note_edges_for does an O(E) reverse scan per note -> O(N*E))
@@ -184,7 +186,7 @@ def _compute_cooccur_delta(
     # weight-only ordering when there are no god nodes.
     # Same keyspace bridge: god-node ids are graph paths, candidates carry store
     # keys — normalise once so the hub-exclusion and reach comparisons line up.
-    god_ids = [cooccur_key(n.id) for n in report.god_nodes]
+    god_ids = [store_key(n.id) for n in report.god_nodes]
     if god_ids:
         god_set = set(god_ids)
         god_related: dict[str, set[str]] = {}
@@ -255,7 +257,7 @@ def _compute_cooccur_delta(
     adj = store.adjacency(scope)  # the aggregate to_networkx() would wrap, unwrapped
     titled_stems: set[str] = set()
     for label in node_label.values():
-        for sentence in tokenize(label, stem_lang=store.lang, stopword_lang=store.lang):
+        for sentence in tokens(label, lang=store.lang, stopword_lang=store.lang):
             titled_stems.update(stem for stem, _surface in sentence)
 
     hubs: list[MissingHub] = []
@@ -268,16 +270,6 @@ def _compute_cooccur_delta(
     hubs = hubs[:k]
 
     return autolinks, stale, hubs, deficits
-
-
-# RefD related-set depth: the paper's related concepts are the top neighbours
-# by similarity; 30 is the facade pool size (_POOL_MIN) so a prerequisite
-# reads the same neighbourhood /related shows.
-_REFD_RELATED_K = 30
-_REFD_THETA = 0.1
-# Fewer related notes than this and the note's side abstains; see
-# signals.refd_edges for the measured failure this guards.
-_REFD_MIN_RELATED = 5
 
 
 def _compute_cooccur_variables(
@@ -296,9 +288,9 @@ def _compute_cooccur_variables(
     when the index is empty, never raises. `created` is {graph id: creation
     timestamp} from the analytics body scan; None skips the burst.
     """
-    from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
-    from silica.kernel.recall.relatedness import _cooccur_ranking
-    from silica.kernel.graph.signals import burst, refd_edges
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.base.notekey import store_key
+    from silica.kernel.graph.signals import burst, refd_prerequisites
 
     try:
         store = cooccur_store if cooccur_store is not None else get_cooccur_store()
@@ -309,28 +301,20 @@ def _compute_cooccur_variables(
         return [], {}, []
 
     scope = report.scope or None
-    gid_by_key = {cooccur_key(n): n for n in G_und.nodes}
+    gid_by_key = {store_key(n): n for n in G_und.nodes}
     in_graph = [p for p in store.paths() if p in gid_by_key]
 
     def _shared(a_gid: str, b_gid: str) -> list[str]:
-        na, nb = store.note_nodes(cooccur_key(a_gid)), store.note_nodes(cooccur_key(b_gid))
+        na, nb = store.note_nodes(store_key(a_gid)), store.note_nodes(store_key(b_gid))
         return sorted(store.node_label(s) for s in (set(na) & set(nb)))[:5]
 
     for row in list(report.structural_links) + list(report.coupled_pairs):
         row.shared = _shared(row.source, row.target)
 
-    # --- V2 prerequisites: RefD over (directed wikilinks, cooccur related sets)
-    links: dict[str, set[str]] = {}
-    for u, v in G_dir.edges():
-        links.setdefault(cooccur_key(u), set()).add(cooccur_key(v))
-    related: dict[str, list[tuple[str, float]]] = {}
-    for p in in_graph:
-        ranking = _cooccur_ranking(store, p, k=_REFD_RELATED_K, exclude={p}, scope=scope)
-        if ranking:
-            related[p] = [(q, float(w)) for q, w in ranking if q in gid_by_key]
+    # --- V2 prerequisites
     prereqs = [
         PrerequisiteEdge(prereq=a, dependent=b, refd=round(r, 4))
-        for a, b, r in refd_edges(links, related, theta=_REFD_THETA, min_related=_REFD_MIN_RELATED)
+        for a, b, r in refd_prerequisites(G_dir, G_und.nodes, store, scope=scope)
     ]
     prereq_map: dict[str, list[str]] = {}
     for e in prereqs:
@@ -340,7 +324,7 @@ def _compute_cooccur_variables(
     stems = {p: dict(store.note_nodes(p)) for p in in_graph}
     bursting: list[BurstingConcept] = []
     if created:
-        created_keys = {cooccur_key(g): ts for g, ts in created.items() if ts is not None}
+        created_keys = {store_key(g): ts for g, ts in created.items() if ts is not None}
         bursting = [
             BurstingConcept(concept=store.node_label(s), z=z, recent=nr, total=na)
             for s, z, nr, na in burst(created_keys, stems)

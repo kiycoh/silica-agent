@@ -57,10 +57,11 @@ def _prewarm_learn() -> None:
     first open after a restart (2,166 notes, 2026-10-23). A failure costs only
     that wait, which the click then pays."""
     try:
+        from silica.kernel.base import note_index
         from silica.kernel.learn import plans
         from silica.kernel.learn import learner
 
-        learner._notes_meta(plans._vault())
+        note_index.meta(plans._vault())
         plans.list_plans()
         learner.prerequisites_map()
     except Exception:

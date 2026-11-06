@@ -18,59 +18,19 @@ from __future__ import annotations
 import re
 
 from silica.kernel.base import frontmatter
+from silica.kernel.base.noteshape import (
+    PROVENANCE_HEADER_PREFIXES,
+    SOURCES_MARKER,
+    SUPERSEDED_MARKER,
+    SUPERSEDED_RE,
+    note_clock,
+    stamp,
+)
 from silica.kernel.write.notetype import HUMAN_ACTOR_PREFIX, is_human_verified
 
 CONTESTED_KEY = "contested"
 CONTRADICTIONS_KEY = "contradictions"
 _UNRESOLVED_TAIL = "Unresolved."
-
-STAMP_RE = re.compile(r"<!--\s*silica:\s*(.*?)\s*-->")
-# Values are dates and hex run ids. Anything outside this class is dropped so a
-# value can never close the comment early or break the key=value split.
-_STAMP_VALUE_RE = re.compile(r"[^\w.:+-]")
-
-
-def stamp(**fields: str) -> str:
-    """A claim stamp: `<!-- silica: valid_from=2023-05-08 run=b07f1268 -->`.
-
-    Key order is the caller's, so the rendered line is deterministic. Fields
-    with an empty value are dropped; all-empty yields "" so a caller can splice
-    unconditionally.
-    """
-    parts = []
-    for k, v in fields.items():
-        if v is None:  # str(None) is "None", which is truthy — never emit it
-            continue
-        cleaned = _STAMP_VALUE_RE.sub("", str(v).strip())
-        if cleaned:
-            parts.append(f"{k}={cleaned}")
-    return f"<!-- silica: {' '.join(parts)} -->" if parts else ""
-
-
-def _stamp_fields(raw: str) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for tok in raw.split():
-        k, _, v = tok.partition("=")
-        if k and v:
-            out[k] = v
-    return out
-
-
-def parse_stamp(text: str) -> dict[str, str]:
-    """Fields of the first claim stamp in `text`; {} when there is none."""
-    m = STAMP_RE.search(text or "")
-    return _stamp_fields(m.group(1)) if m else {}
-
-
-def parse_stamps(text: str) -> list[dict[str, str]]:
-    """Fields of EVERY claim stamp in `text`, in document order.
-
-    A note accumulates claims from several sources on different dates, so the
-    first stamp is not the note's clock. The temporal report reads all of them;
-    `parse_stamp` stays the single-claim accessor its callers expect.
-    """
-    return [_stamp_fields(m.group(1)) for m in STAMP_RE.finditer(text or "")]
-
 
 def mark_contested(content: str, source_ref: str) -> str:
     """Set `contested: true` and append `source_ref` to `contradictions:`.
@@ -89,20 +49,6 @@ def mark_contested(content: str, source_ref: str) -> str:
         return content
     data[CONTESTED_KEY] = True
     data[CONTRADICTIONS_KEY] = refs + [source_ref]
-    return frontmatter.dump(data, body)
-
-
-def clear_contested(content: str) -> str:
-    """Remove the `contested`/`contradictions` flag from a note's frontmatter.
-
-    No-op when the note is not contested; a note with unparseable YAML is
-    returned unchanged (mirror of `mark_contested`).
-    """
-    data, raw, body = frontmatter.split(content)
-    if data is None or not data.get(CONTESTED_KEY):
-        return content
-    data.pop(CONTESTED_KEY, None)
-    data.pop(CONTRADICTIONS_KEY, None)
     return frontmatter.dump(data, body)
 
 
@@ -135,8 +81,6 @@ def contested_callout(claim: str, source_basename: str) -> str:
 # the codebase routes through it.
 # ---------------------------------------------------------------------------
 
-SUPERSEDED_HEADING = "## Superseded"
-_SUPERSEDED_RE = re.compile(r"^## Superseded\s*$", re.MULTILINE)
 _CONTRADICTION_START_RE = re.compile(
     r"^> \[!warning\] Contradiction\b(?:[^\n]*?\bfrom (?P<src>[^\n]+?))?\s*$"
 )
@@ -149,7 +93,7 @@ def append_before_superseded(content: str, block: str) -> str:
     replaces. With it, the block lands above, so live content never ends up
     filed under the note's graveyard.
     """
-    m = _SUPERSEDED_RE.search(content)
+    m = SUPERSEDED_RE.search(content)
     if not m:
         return content.rstrip() + "\n" + block
     head, tail = content[: m.start()], content[m.start():]
@@ -158,7 +102,7 @@ def append_before_superseded(content: str, block: str) -> str:
 
 def _split_at_superseded(body: str) -> tuple[str, str]:
     """(live body, superseded section incl. heading). Tail is "" when absent."""
-    m = _SUPERSEDED_RE.search(body)
+    m = SUPERSEDED_RE.search(body)
     if not m:
         return body, ""
     return body[: m.start()], body[m.start():]
@@ -190,7 +134,6 @@ def _extract_contradiction_callouts(
     `source` restricts the lift to the callouts attributed to that basename,
     which is how one contradiction is resolved while the others stay open.
     """
-    from silica.kernel.write.templates import PROVENANCE_HEADER_PREFIXES
 
     lines = body.splitlines()
     kept: list[str] = []
@@ -275,7 +218,6 @@ def reliability_tier(content: str, *, has_source_leaf: bool | None = None) -> in
     if not ai or is_human_verified(data):
         return TIER_HUMAN
     if has_source_leaf is None:
-        from silica.kernel.base.layout import SOURCES_MARKER
         has_source_leaf = SOURCES_MARKER in (content or "")
     return TIER_GROUNDED if has_source_leaf else TIER_DISTILLED
 
@@ -370,24 +312,6 @@ def superseded_claim(
         quoted,
         "",
     ]
-
-
-def note_clock(content: str) -> str | None:
-    """The freshest date a note can show for its own claims; None when it shows none.
-
-    Two sources, both already written by this codebase: the newest `valid_from`
-    on a claim stamp (Fase A), and OKF §5.2 `verified.at`, a person recording
-    the day they read the note. A note that carries neither is not thereby
-    fresh — it is silent, which `suppress_contest` treats as the risk it is.
-    """
-    from silica.kernel.write.notetype import verified_entries
-
-    dates = [s["valid_from"] for s in parse_stamps(content) if s.get("valid_from")]
-    data, _raw, _body = frontmatter.split(content or "")
-    dates += [
-        str(e.get("at")) for e in verified_entries(data) if e.get("at")
-    ]
-    return max(dates) if dates else None
 
 
 def suppress_contest(
@@ -497,9 +421,9 @@ def resolve_contested(
     the list returns the note unchanged: resolving twice must not clear a
     contradiction nobody adjudicated.
 
-    This is what `clear_contested` should have been: clearing the flag while
-    leaving a body callout that still reads "Unresolved" makes the note lie
-    about its own state, and drops every record of what was contested.
+    Clearing the flag alone would be wrong: leaving a body callout that still
+    reads "Unresolved" makes the note lie about its own state, and drops every
+    record of what was contested.
     """
     from silica.kernel.write.moc import merge_moc_section
 
@@ -535,7 +459,7 @@ def resolve_contested(
             block.append(stamp(valid_to=valid_to, resolved_by=resolved_by))
             block.append(callout.replace(_UNRESOLVED_TAIL, f"Resolved {valid_to}."))
             block.append("")
-        new_body = merge_moc_section(new_body, SUPERSEDED_HEADING, block)
+        new_body = merge_moc_section(new_body, SUPERSEDED_MARKER, block)
 
     if remaining:
         data[CONTRADICTIONS_KEY] = remaining

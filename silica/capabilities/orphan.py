@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -28,8 +27,10 @@ from pydantic import BaseModel
 
 from silica.kernel.write.gate import commit_ops
 from silica.model.decide import decide
+from silica.kernel.base.frontmatter import FM_RE_TOLERANT
 from silica.kernel.write.gate import orphan_bounds
 from silica.kernel.base.manifest import active_write_dir, within
+from silica.kernel.base.syntax import WIKILINK_SHOWN_RE
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities._base import emit_feedback, load_prompt, read_or_skip
@@ -60,7 +61,6 @@ LINK_QUESTION = {
 # The state the gate measured: the orphan's head, the candidate's opening.
 _ORPHAN_HEAD = 2000
 _CANDIDATE_OPENING = 600
-_WIKILINK = re.compile(r"\[\[([^\]|]+\|)?([^\]]+)\]\]")
 
 
 def _stem(path: str) -> str:
@@ -68,11 +68,8 @@ def _stem(path: str) -> str:
 
 
 def _strip_frontmatter(text: str) -> str:
-    if text.startswith("---"):
-        end = text.find("\n---", 3)
-        if end != -1:
-            return text[end + 4:].lstrip()
-    return text
+    m = FM_RE_TOLERANT.match(text)
+    return text[m.end():].lstrip() if m else text
 
 
 def typed_state(orphan_path: str, orphan_text: str, candidate_path: str,
@@ -85,7 +82,7 @@ def typed_state(orphan_path: str, orphan_text: str, candidate_path: str,
         "orphan_note": {"title": _stem(orphan_path),
                         "body": _strip_frontmatter(orphan_text)[:_ORPHAN_HEAD]},
         "candidate_note": {"title": _stem(candidate_path),
-                           "opening": _WIKILINK.sub(r"\2", _strip_frontmatter(candidate_text))[:_CANDIDATE_OPENING]},
+                           "opening": WIKILINK_SHOWN_RE.sub(r"\2", _strip_frontmatter(candidate_text))[:_CANDIDATE_OPENING]},
     }
 
 
@@ -129,7 +126,7 @@ def run_orphan(item: WorkItem, config: Any) -> dict[str, Any]:
     title = os.path.splitext(os.path.basename(target))[0]
     hub = item.context.get("hub")
     # The candidate paths come from the relatedness facade, whose keyspace is
-    # cooccur_key: '.md'-stripped. The driver reads either spelling, but the op
+    # store_key: '.md'-stripped. The driver reads either spelling, but the op
     # path is what gets written, so it has to be the real note.
     neighbours = list(dict.fromkeys(
         p if p.endswith(".md") else p + ".md" for n in valid if (p := by_name[n])

@@ -40,19 +40,6 @@ def test_depth_is_the_highest_level_met_without_help_and_a_miss_never_erases_it(
     assert d["D.md"]["level"] is None and d["D.md"]["measured"] is False
 
 
-def test_next_ask_repeats_a_failed_demand_and_climbs_after_success_capped_at_reach():
-    assert mastery.next_ask([], reach=4) == 1                                  # nothing held: Facts
-    held3 = [_e("A.md", 10, level=3, kind="explain")]
-    assert mastery.next_ask(held3, reach=4) == 4                              # one above the last success
-    assert mastery.next_ask(held3, reach=3) == 3                              # capped at reach
-    failed = held3 + [_e("A.md", 5, level=4, kind="transfer", correct=False, rating=1)]
-    assert mastery.next_ask(failed, reach=4) == 4                             # repeat the failed demand
-    fresh = [_e("A.md", 10, level=2, kind="recall")]
-    assert mastery.next_ask(fresh, reach=4) == 3
-    jump = [_e("A.md", 10, level=2, kind="recall"), _e("A.md", 9, level=2, kind="recall")]
-    assert mastery.next_ask(jump, reach=4) < 4                                # level 4 never before 3 held
-
-
 def test_transfer_reads_applied_and_transferred_under_the_unassisted_criterion():
     entries = [_e("A.md", 5, level=3, kind="apply"), _e("B.md", 5, level=4, kind="transfer", hints=2)]
     d = mastery.depth_by_path(["A.md", "B.md"], entries)

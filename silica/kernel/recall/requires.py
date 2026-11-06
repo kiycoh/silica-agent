@@ -38,10 +38,9 @@ def resolve(requires: dict[str, list[str]], aliases: dict[str, list[str]],
 
 
 def written_requires(vault: str | Path) -> dict[str, list[str]]:
-    """{note path: [prerequisite paths]} for `vault`, the walk the learner's
-    notes view makes (dot dirs, .silicaignore and the verbatim sources are not
-    notes). Only a frontmatter that names `requires` is parsed as YAML."""
-    from silica.kernel.base.layout import SOURCES_DIR, ignore_matcher, vault_epoch
+    """{note path: [prerequisite paths]} for `vault`, over the reader's notes.
+    Only a frontmatter that names `requires` is parsed as YAML."""
+    from silica.kernel.base.layout import iter_notes, vault_epoch
     from silica.kernel.base import frontmatter
 
     root = Path(vault)
@@ -50,16 +49,10 @@ def written_requires(vault: str | Path) -> dict[str, list[str]]:
     hit = _memo.get(key)
     if epoch and hit is not None and hit[0] == epoch:
         return hit[1]
-    ignored = ignore_matcher(root)
     paths: list[str] = []
     aliases: dict[str, list[str]] = {}
     requires: dict[str, list[str]] = {}
-    for f in sorted(root.rglob("*.md")):
-        parts = f.relative_to(root).parts
-        if (any(p.startswith(".") for p in parts) or any(ignored(p) for p in parts[:-1])
-                or parts[0] == SOURCES_DIR):
-            continue
-        rel = "/".join(parts)
+    for rel, f in iter_notes(root):
         paths.append(rel)
         try:
             text = f.read_text(encoding="utf-8")

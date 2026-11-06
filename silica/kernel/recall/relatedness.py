@@ -38,7 +38,8 @@ from dataclasses import dataclass
 from collections.abc import Mapping
 from typing import Callable
 
-from silica.kernel.recall.cooccurrence import CooccurStore, cooccur_key
+from silica.kernel.recall.cooccurrence import CooccurStore
+from silica.kernel.base.notekey import store_key
 from silica.kernel.recall.embed import EmbedStore
 from silica.kernel.base.layout import is_vault_artifact
 from silica.kernel.base.layout import in_folder
@@ -178,7 +179,7 @@ def _embed_ranking(
     if embed_store is None:
         return None
     return _rank_embeddings_from_vec(
-        embed_store, embed_store.get_vec(cooccur_key(query_path)), k=k, exclude=exclude
+        embed_store, embed_store.get_vec(store_key(query_path)), k=k, exclude=exclude
     )
 
 
@@ -211,10 +212,10 @@ def _profile_from_seeds(
 
 def _seed_from_text(text: str, lang: str) -> dict[str, float]:
     """Seed concepts {stem: count} from raw query text (for fresh queries)."""
-    from silica.kernel.recall.cooccurrence import tokenize
+    from silica.kernel.text.text import tokens
 
     seeds: dict[str, float] = {}
-    for sentence in tokenize(text, stem_lang=lang):
+    for sentence in tokens(text, lang=lang):
         for stem, _surface in sentence:
             seeds[stem] = seeds.get(stem, 0.0) + 1.0
     return seeds
@@ -584,18 +585,18 @@ def neighbours_above(query_path: str, floor: float) -> list[str] | None:
     if floor <= 0:
         return None
     try:
-        from silica.kernel.recall.cooccurrence import cooccur_key
+        from silica.kernel.base.notekey import store_key
         from silica.kernel.recall.embed import get_store
 
         store = get_store()
         if len(store) == 0:
             return None
-        key = cooccur_key(query_path)
+        key = store_key(query_path)
         vec = store.get_vec(key)
         if not vec:
             return None
         # Exclude by the STORE's key, not the raw path: the store drops `.md`
-        # (cooccur_key), so a raw-path exclude never matches and the query note
+        # (store_key), so a raw-path exclude never matches and the query note
         # comes back as its own closest neighbour.
         hits = store.cosine_top_k(vec, k=len(store), exclude={key})
     except Exception as exc:
@@ -637,11 +638,11 @@ def related_notes(
     reproducible without a production seam nobody passes.
     """
     # Normalize to the STORE keyspace before anything is excluded. CooccurStore
-    # normalizes at its own boundary (note_nodes -> cooccur_key); EmbedStore does
+    # normalizes at its own boundary (note_nodes -> store_key); EmbedStore does
     # not, so a caller handing in a graph-style '<path>.md' built an exclude that
     # never matched any store key and the query note came back as its own closest
     # neighbour, burning a slot in the fusion pool. /map did exactly that.
-    blocked = {cooccur_key(x) for x in (exclude or ())} | {cooccur_key(query_path)}
+    blocked = {store_key(x) for x in (exclude or ())} | {store_key(query_path)}
     pool = max(k * 3, _POOL_MIN)
 
     embed_rank = _embed_ranking(embed_store, query_path, k=pool, exclude=blocked)
@@ -649,7 +650,7 @@ def related_notes(
 
     mem_embed_rank = None
     if memory_embed_store is not None and embed_store is not None:
-        vec = embed_store.get_vec(cooccur_key(query_path))
+        vec = embed_store.get_vec(store_key(query_path))
         mem_embed_rank = _rank_embeddings_from_vec(
             memory_embed_store, vec, k=pool, exclude=set()
         )
@@ -694,7 +695,7 @@ def related_notes_many(
     `_embed_ranking` does when `get_vec` returns None. Memory lane not
     offered: a vault-against-itself pass has nothing to ask of another vault.
     """
-    keys = [cooccur_key(p) for p in paths]
+    keys = [store_key(p) for p in paths]
     pool = max(k * 3, _POOL_MIN)
     batch: dict[str, list[dict]] = {}
     if embed_store is not None and len(embed_store) and keys:

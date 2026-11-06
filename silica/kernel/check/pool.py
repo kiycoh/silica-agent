@@ -19,13 +19,15 @@ from pathlib import Path
 import yaml
 
 from silica.kernel.base import frontmatter
+from silica.kernel.base.layout import walk_tree
+from silica.kernel.base.noteshape import READING, type_word
+from silica.kernel.base.syntax import WIKILINK_SPAN_RE
 
 logger = logging.getLogger(__name__)
 
 # English and Italian (the owner's C, 2026-10-24). A default applies only
 # where a note carries it, so a vault with none of them is untouched.
 DEFAULT_PARTY_KEYS = ("client", "matter", "patient", "cliente", "pratica", "paziente")
-_WIKILINK = re.compile(r"!?\[\[([^\]|#^]+)(?:[#^][^\]|]*)?(?:\|[^\]]*)?\]\]")
 
 
 @dataclass
@@ -52,20 +54,24 @@ def walk(vault: str) -> tuple[dict[str, Note], set[str]]:
     root = Path(vault)
     notes: dict[str, Note] = {}
     files: set[str] = set()
-    for p in root.rglob("*"):
-        rel = p.relative_to(root)
-        if any(part.startswith(".") for part in rel.parts) or not p.is_file():
-            continue
-        files.add(p.name.casefold())
-        if p.suffix.lower() != ".md":
-            continue
-        try:
-            text = p.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue  # an unreadable file is no one's source; the check goes on without it
-        data, _raw, _body = frontmatter.split(text)
-        fm = {str(k).casefold(): v for k, v in (data or {}).items()} if isinstance(data, dict) else {}
-        notes[rel.as_posix()] = Note(rel.as_posix(), text, fm)
+    # ignore=False: what a person cites is a source wherever it sits, and a note
+    # the check cannot see reads as a claim with nothing behind it.
+    for d, _dirs, names in walk_tree(root, ignore=False):
+        for name in names:
+            p = Path(d) / name
+            if name.startswith(".") or not p.is_file():
+                continue
+            files.add(name.casefold())
+            if p.suffix.lower() != ".md":
+                continue
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue  # an unreadable file is no one's source; the check goes on without it
+            data, _raw, _body = frontmatter.split(text)
+            fm = {str(k).casefold(): v for k, v in (data or {}).items()} if isinstance(data, dict) else {}
+            rel = p.relative_to(root).as_posix()
+            notes[rel] = Note(rel, text, fm)
     return notes, files
 
 
@@ -135,7 +141,9 @@ class Resolver:
 
     def links(self, text: str) -> list[tuple[str, str | None]]:
         """(target as written, resolved path or ""/None) for each wikilink."""
-        return [(m.group(1).strip(), self.resolve(m.group(1))) for m in _WIKILINK.finditer(text or "")]
+        # The span grammar, for its `^`: `[[Note^block]]` cites Note. An empty target
+        # is an anchor into this note, no source.
+        return [(t.strip(), self.resolve(t)) for m in WIKILINK_SPAN_RE.finditer(text or "") if (t := m.group(2))]
 
     def mentions(self, text: str) -> set[str]:
         folded = f" {fold(text)} "
@@ -164,7 +172,7 @@ def build(checked: str, notes: dict[str, Note], keys: tuple[str, ...], write_dir
 
     wd = (write_dir or "").strip("/")
     candidates = {p for p in notes if p != checked and not is_vault_artifact(p)
-                  and str(notes[p].fm.get("type") or "").strip().lower() != "reading"
+                  and type_word(notes[p].fm) != READING
                   and not (wd and (p == wd or p.startswith(wd + "/")))}
     parties = {p: values_of(notes[p], keys) for p in candidates}
     if not any(parties.values()):

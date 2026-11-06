@@ -45,7 +45,7 @@ VALID_KINDS = frozenset({"autolink", "orphan", "dedup"})
 def _norm_note_path(path: str) -> str:
     """Forward-slash, `.md`-suffixed note path for suffix matching.
 
-    Named apart from gate.norm_path, which drops the `.md` and folds case: this
+    Named apart from notekey.ledger_key, which drops the `.md` and folds case: this
     key is matched as a path suffix.
     """
     p = path.strip().replace("\\", "/")

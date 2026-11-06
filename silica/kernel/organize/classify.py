@@ -106,11 +106,10 @@ def _read_body(note_path: str) -> str | None:
 
 def _stems_from_body(body: str, lang: str) -> dict[str, int]:
     """Tokenize a note body into {stem: count} (same pipeline as the cooccur index)."""
-    from silica.kernel.recall.cooccurrence import tokenize
-    from silica.kernel.text.text import clean_body
+    from silica.kernel.text.text import clean_body, tokens
     return dict(Counter(
         stem
-        for sentence in tokenize(clean_body(body, fences=False), stem_lang=lang)
+        for sentence in tokens(clean_body(body, fences=False), lang=lang)
         for stem, _surface in sentence
     ))
 
@@ -212,7 +211,7 @@ def _score_note_against_rules(
     Returns (best_folder, best_score, evidence, matched_themes).
     evidence is "keyword" if a keyword exact-match fired, else "cooccur".
     """
-    from silica.kernel.recall.cooccurrence import tokenize
+    from silica.kernel.text.text import tokens
 
     title = _note_title(note_path)
     title_lower = title.lower()
@@ -247,7 +246,7 @@ def _score_note_against_rules(
         if rule.themes:
             rule_stems: set[str] = set()
             for theme in rule.themes:
-                for sentence in tokenize(theme, stem_lang=lang, stopword_lang=lang):
+                for sentence in tokens(theme, lang=lang, stopword_lang=lang):
                     rule_stems.update(stem for stem, _s in sentence)
 
             overlap = sum(count for stem, count in concept_stems.items() if stem in rule_stems)

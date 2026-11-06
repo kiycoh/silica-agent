@@ -152,7 +152,7 @@ def resolve_cwd_vault(cwd, home=None):
       but a spawned process can start with cwd ``/`` (a GUI client's stdio
       server did, before ADR-0130), and indexing the whole disk is never what
       that meant.
-    - a system directory itself (`recall.paths.SYSTEM_DIRS`: /tmp, /usr, the
+    - a system directory itself (`layout.SYSTEM_DIRS`: /tmp, /usr, the
       temp dir...) → None, same reason; a folder inside one is still a vault.
 
     Adoption of the returned path (a pre-existing ``docs/silica`` under it still

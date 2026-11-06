@@ -29,6 +29,7 @@ from typing import Callable, NamedTuple
 
 from silica.kernel.base import frontmatter
 from silica.kernel.base.markdown import extract_callouts, parse_headings
+from silica.kernel.base.syntax import INLINE_CODE_RE
 from silica.kernel.write.ofm import CALLOUT_TYPES
 from silica.kernel.text.title import title_key
 
@@ -37,12 +38,11 @@ from silica.kernel.text.title import title_key
 # ---------------------------------------------------------------------------
 
 _FENCE = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL)
-_INLINE_CODE = re.compile(r"`[^`\n]+`")
 
 
 def _strip_code(body: str) -> str:
     """Body with fenced + inline code removed (but $, \\, ** untouched)."""
-    return _INLINE_CODE.sub("", _FENCE.sub("", body))
+    return INLINE_CODE_RE.sub("", _FENCE.sub("", body))
 
 
 class Ctx(NamedTuple):
@@ -121,7 +121,7 @@ def _frontmatter_yaml_error(c: Ctx) -> int:
 
 def _unclosed_frontmatter(c: Ctx) -> int:
     # opens with a `---` line at the very top but FM_RE found no closing delimiter
-    if re.match(r"\A---[ \t]*\r?\n", c.text) and frontmatter.FM_RE.match(c.text) is None:
+    if frontmatter.FM_OPEN_RE.match(c.text) and frontmatter.FM_RE.match(c.text) is None:
         return 1
     return 0
 

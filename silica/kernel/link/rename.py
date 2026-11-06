@@ -35,7 +35,9 @@ from urllib.parse import unquote, quote
 # wikilinks and headings to rewrite them.
 # ---------------------------------------------------------------------------
 
-from silica.kernel.link.autolink import SKIP_PATTERNS_BASE, build_skip_mask, _FRONTMATTER_RE
+from silica.kernel.base.frontmatter import FM_RE_TOLERANT
+from silica.kernel.base.syntax import WIKILINK_SPAN_RE
+from silica.kernel.link.autolink import SKIP_PATTERNS_BASE, build_skip_mask
 
 
 def _build_skip_mask(text: str) -> list[bool]:
@@ -70,22 +72,6 @@ def _path_without_ext(vault_path: str) -> str:
 # Wikilink rewriter
 # ---------------------------------------------------------------------------
 
-# Matches optional embed bang + full wikilink: !?[[target(#^suffix)?(|alias)?]]
-# Group 1: "!" or ""
-# Group 2: the target (everything before # or ^ or |)
-# Group 3: suffix (#... or ^...) — may be empty
-# Group 4: alias part (|...) — may be empty
-_WIKILINK_FULL_RE = re.compile(
-    r"(!?)"                         # optional embed
-    r"\[\["
-    r"([^\]#^|]*)"                  # target (no suffix, no alias delimiters)
-    r"([#^][^\]|]*)?"               # optional heading/block suffix
-    r"(\|[^\]]*)?"                  # optional alias
-    r"\]\]",
-    re.DOTALL,
-)
-
-
 def _rewrite_wikilinks(
     content: str,
     mask: list[bool],
@@ -119,7 +105,7 @@ def _rewrite_wikilinks(
     # Build list of (match, replacement) pairs so we can apply back-to-front
     replacements: list[tuple[re.Match, str]] = []
 
-    for m in _WIKILINK_FULL_RE.finditer(content):
+    for m in WIKILINK_SPAN_RE.finditer(content):
         if not _span_is_clear(mask, m.start(), m.end()):
             continue
 
@@ -192,7 +178,7 @@ def _rewrite_frontmatter_wikilinks(
     rewrites those link-type properties on rename and so must we (A19). Rewrite
     them with an all-clear mask over the frontmatter substring only.
     """
-    m = _FRONTMATTER_RE.match(content)
+    m = FM_RE_TOLERANT.match(content)
     if not m:
         return content, 0
     block = m.group(0)
@@ -390,7 +376,7 @@ def explicit_links(path: str) -> bool:
     resolved = {r.name.lower(): r.path for r in DRIVER.links(path) if r.path}
     out: list[str] = []
     at = 0
-    for m in _WIKILINK_FULL_RE.finditer(content):
+    for m in WIKILINK_SPAN_RE.finditer(content):
         target = m.group(2).strip()
         if not target or "/" in target or not _span_is_clear(mask, m.start(), m.end()):
             continue

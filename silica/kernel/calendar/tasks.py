@@ -16,12 +16,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from silica.kernel.base import notekey
+from silica.kernel.base.syntax import FENCE_LINE_RE
 from silica.kernel.calendar.daily import DailyRule, compile_format, daily_date, daily_rule
 
 # The same shapes Tasks accepts: a list item of any marker, under any depth of
 # blockquote or callout, then a one-character status in brackets.
 _TASK_RE = re.compile(r"^[\s>]*(?:[-*+]|\d+[.)])\s+\[(.)\]\s*(.*)$")
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
 # Tasks' signifiers and their alternative spellings. A date is strictly
 # YYYY-MM-DD, as Tasks requires: "📅 2026-10-5" is text to the plugin, and the
 # calendar shows what the plugin would show.
@@ -77,7 +78,7 @@ def parse_tasks(text: str, *, global_filter: str = "", path: str = "") -> list[T
     out: list[Task] = []
     fenced = False
     for i, line in enumerate(text.splitlines(), start=1):
-        if _FENCE_RE.match(line):
+        if FENCE_LINE_RE.match(line):
             fenced = not fenced
             continue
         m = None if fenced else _TASK_RE.match(line)
@@ -122,7 +123,7 @@ def _filename_date(rel: str, settings: dict) -> dt.date | None:
     folders = [str(f).strip("/") for f in settings.get("filenameAsDateFolders") or []]
     if folders and not any(rel.startswith(f + "/") for f in folders if f):
         return None
-    stem = rel.rsplit("/", 1)[-1].removesuffix(".md")
+    stem = notekey.stem(rel)
     fmt = str(settings.get("filenameAsScheduledDateFormat") or "").strip()
     if fmt:
         compiled = compile_format(fmt)
@@ -136,7 +137,7 @@ _scan_memo: dict[str, tuple[str, list[Task]]] = {}
 
 def scan_tasks(vault: Path) -> list[Task]:
     """Every task of the vault, memoized on its file-state epoch like the timeline."""
-    from silica.kernel.base.layout import SOURCES_DIR, ignore_matcher, vault_epoch
+    from silica.kernel.base.layout import iter_notes, vault_epoch
 
     vault = Path(vault)
     epoch = vault_epoch(str(vault))
@@ -150,20 +151,13 @@ def scan_tasks(vault: Path) -> list[Task]:
         # uses it (2026-10-06); the upgrade is one more pattern per date field.
         return []
     rule = daily_rule(vault)
-    ignored = ignore_matcher(vault)
     by_name = settings["useFilenameAsScheduledDate"]
     out: list[Task] = []
-    for f in sorted(vault.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts) or any(ignored(p) for p in parts[:-1]):
-            continue
-        if parts[0] == SOURCES_DIR:
-            continue   # verbatim leaves: a source's checklist is not the writer's
+    for rel, f in iter_notes(vault):   # a source's checklist is not the writer's
         try:
             text = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue   # one unreadable note costs its tasks, not the agenda
-        rel = "/".join(parts)
         day = daily_date(rel, rule)
         named = _filename_date(rel, settings) if by_name else None
         for t in parse_tasks(text, global_filter=settings["globalFilter"], path=rel):

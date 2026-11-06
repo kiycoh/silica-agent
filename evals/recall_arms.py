@@ -34,7 +34,8 @@ def _driver_neighbors(path: str):
     from evals import recall_assembly as assembly
     from silica.config import CONFIG
     from silica.driver import DRIVER
-    from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.base.notekey import store_key
 
     try:
         raw = (DRIVER.props_of(path) or {}).get("parent note") or ""
@@ -58,7 +59,7 @@ def _driver_neighbors(path: str):
         pass
     try:
         store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-        row = store.note_edges_for(cooccur_key(path))
+        row = store.note_edges_for(store_key(path))
         edges = [
             p for p, _ in sorted(row.items(), key=lambda item: (-item[1], item[0]))
         ]

@@ -16,11 +16,12 @@ from __future__ import annotations
 import logging
 import re
 
+from silica.kernel.base.syntax import MENTION_RE
+
 logger = logging.getLogger(__name__)
 
 # `[[Target#heading|alias]]` names Target. `![[...]]` is an embed, a figure
 # ADR-0082 already handles, so it is not a note the user named.
-_LINK = re.compile(r"(?<!!)\[\[([^\]\[|#\n]+)(?:#[^\]\[|\n]*)?(?:\|[^\]\[\n]*)?\]\]")
 # A link to a PDF or an image names an attachment, never a note. Listed, not
 # "anything after a dot": titles carry dots (`Industria 4.0`, `Python 3.11`),
 # and those are notes.
@@ -44,7 +45,7 @@ STRIP = re.compile(r"\n*<(named-notes|converted-files|discover-story)>.*?</\1>",
 def refs(text: str) -> list[str]:
     """The note targets `text` links to, in order, each once."""
     out: list[str] = []
-    for m in _LINK.finditer(text):
+    for m in MENTION_RE.finditer(text):
         target = m.group(1).strip()
         if target and not _NOT_A_NOTE.search(target) and target not in out:
             out.append(target)

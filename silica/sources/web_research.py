@@ -61,6 +61,7 @@ from silica.model.llm import call_llm
 from silica.agent.loop import run_agent
 from silica.agent.sentinels import is_sentinel
 from silica.config import CONFIG
+from silica.kernel.base.noteshape import SOURCES_TAIL_RE
 from silica.kernel.write.templates import slugify
 from silica.tools import tool
 
@@ -739,7 +740,7 @@ def web_research(
         # banked: _bind_citations owns the numbering, and _build_note would keep
         # a hand-written section over the mechanical one. Cut from the heading
         # down; the block below regenerates what the cut removed.
-        bound = re.split(r"(?m)^## Sources.*$", bound, maxsplit=1)[0].rstrip()
+        bound = SOURCES_TAIL_RE.split(bound, maxsplit=1)[0].rstrip()
     provenance = "\n".join(line for line in (_lane_line(), audit) if line)
     note = _build_note(concept, bound, sources, lanes=provenance)
     note_rel = _unique_inbox_path(concept)

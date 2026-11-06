@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import httpx
 
-from silica.kernel.recall.rerank import (_best_window, best_window, best_windows,
+from silica.kernel.recall.rerank import (best_window, best_windows,
                                           best_window_spans, rerank_related,
                                           window_weights)
 from silica.model.providers import Reranker, get_reranker
@@ -100,17 +100,17 @@ def test_window_surfaces_query_passage_past_head_slice():
     body = ("weather smalltalk " * 80) + "I attend yoga classes for my anxiety " \
            + ("unrelated filler " * 80)
     assert len(body) > 800
-    win = _best_window(body, "how often do I attend yoga for anxiety?", 200)
+    win = best_window(body, "how often do I attend yoga for anxiety?", 200)
     assert "yoga classes for my anxiety" in win
 
 
 def test_window_is_noop_when_body_fits():
-    assert _best_window("short body", "anything", 800) == "short body"
+    assert best_window("short body", "anything", 800) == "short body"
 
 
 def test_window_falls_back_to_head_without_query_terms():
     long = "x" * 2000
-    assert _best_window(long, "a an of", 500) == long[:500]  # no >3-char terms
+    assert best_window(long, "a an of", 500) == long[:500]  # no >3-char terms
 
 
 # --- multi-window selection (multi-window spec 2026-07-15) -----------------
@@ -159,7 +159,7 @@ def test_best_windows_drops_second_window_without_hits():
     assert wins[0].count("zebra") == 4
 
 
-def test_best_windows_n1_equals_best_window():
+def test_best_windows_n1_equalsbest_window():
     from silica.kernel.recall.rerank import best_window, best_windows
 
     body = ("weather smalltalk " * 80) + "I attend yoga classes for my anxiety " \

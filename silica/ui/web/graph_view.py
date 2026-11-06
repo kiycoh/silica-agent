@@ -40,6 +40,7 @@ from pathlib import Path
 
 # The edge colours ride along so each legend swatch and the edges it stands for
 # cannot drift apart: they were two literals of the same hex until one moved.
+from silica.kernel.base.noteshape import NATIVE_TYPES
 from silica.ui.web import file_tree
 from silica.kernel.graph.graph_export import (
     _EDGE_COLOR_AMBIGUOUS,
@@ -48,7 +49,6 @@ from silica.kernel.graph.graph_export import (
     _EDGE_COLOR_EXTRACTED_PAPER,
     _EDGE_COLOR_SIMILAR,
     _EDGE_COLOR_SIMILAR_PAPER,
-    NATIVE_TYPES,
     Community,
     SubArea,
     Zone,
@@ -802,8 +802,6 @@ def _size_by_links(nodes: list[dict], G_und) -> None:
     said nothing and said it twice with the hub ring. `links` rides along: the
     frame's Key names and Clusters read it, and they must agree with the size.
     """
-    from silica.kernel.graph.graph_export import NATIVE_TYPES
-
     native = {n["id"] for n in nodes if n.get("type") in NATIVE_TYPES}
     for n in nodes:
         if n.get("type") == "ghost" or n["id"] in native:

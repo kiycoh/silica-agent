@@ -134,7 +134,7 @@ def study_points(targets: list[str], limit: int = STUDY_POINTS_MAX) -> tuple[lis
     from pathlib import Path
 
     from silica.kernel.learn import items, plans
-    from silica.tools.atomic import notes_under
+    from silica.kernel.recall.listing import notes_under
 
     paths: list[str] = []
     for t in targets:

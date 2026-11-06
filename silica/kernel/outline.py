@@ -30,6 +30,9 @@ from dataclasses import dataclass, field
 from collections.abc import Set as AbstractSet
 from typing import Callable
 
+from silica.kernel.base import frontmatter
+from silica.kernel.base.noteshape import SPINE_SECTION, is_spine
+from silica.kernel.base.syntax import HEADING_RE, section_end
 from silica.kernel.text.media import strip_images
 
 logger = logging.getLogger(__name__)
@@ -50,11 +53,10 @@ RELATION_LABEL = {
     "generalizes": "generalizes", "justifies": "justifies",
 }
 
-# Frontmatter `section:` value that marks a lesson spine note. The spine is
-# the one note per source that is about the source's argument, not an idea,
-# so the edge stage must never propose it as a target (measured: 6 of 9 edges
-# went to the lecture-level note when it was visible).
-SPINE_SECTION = "(outline)"
+# noteshape.SPINE_SECTION marks a lesson spine note. The spine is the one note
+# per source that is about the source's argument, not an idea, so the edge stage
+# must never propose it as a target (measured: 6 of 9 edges went to the
+# lecture-level note when it was visible).
 
 BODIES_BATCH = 4            # ideas per bodies call. Was 8: the wall time of a lecture is its longest
                             # stream, and two 8-idea batches streamed 3.7 and 6.5 min on deepseek
@@ -376,7 +378,6 @@ def parse_outline(obj: dict) -> Outline:
     return Outline(lesson_title=str(obj.get("lesson_title") or "").strip(), spine=spine, ideas=ideas)
 
 
-_HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$", re.M)
 _NOISE_HEADING_RE = re.compile(
     r"@|^\s*(dove|where|note|notes)\s*:?\s*$|\b\d+\s*cfu\b|^\s*lezione\s+\d+\s*$", re.I)
 
@@ -390,7 +391,7 @@ def source_headings(md: str) -> list[str]:
     """
     out: list[str] = []
     seen: set[str] = set()
-    for h in _HEADING_RE.findall(md):
+    for _hashes, h in HEADING_RE.findall(md):
         h = _clean_title(h)
         if not h or _NOISE_HEADING_RE.search(h) or h.casefold() in seen:
             continue
@@ -645,13 +646,12 @@ def _hidden_note(rel: str) -> bool:
     idea it lists."""
     try:
         from silica.driver import DRIVER
-        from silica.kernel.base import frontmatter
         data, _raw, _body = frontmatter.split(DRIVER.read_note(rel).content or "")
     except Exception:  # noqa: BLE001
         # Unreadable candidate: not a merge target, the judge would fail on it anyway.
         return True
     data = data if isinstance(data, dict) else {}
-    return bool(data.get("superseded_by")) or str(data.get("section") or "") == SPINE_SECTION
+    return bool(data.get("superseded_by")) or is_spine(data)
 
 
 def section_text(source: str, heading: str) -> str:
@@ -661,12 +661,10 @@ def section_text(source: str, heading: str) -> str:
     if not key:
         return ""
     parts: list[str] = []
-    for m in _HEADING_RE.finditer(source):
-        if _sec_key(m.group(1)) != key:
+    for m in HEADING_RE.finditer(source):
+        if _sec_key(m.group(2)) != key:
             continue
-        level = len(m.group(0)) - len(m.group(0).lstrip("#"))
-        nxt = re.compile(rf"^#{{1,{level}}}\s", re.M).search(source, m.end())
-        parts.append(source[m.start():nxt.start() if nxt else len(source)].strip())
+        parts.append(source[m.start():section_end(source, len(m.group(1)), m.end())].strip())
     return "\n\n".join(parts)
 
 
@@ -725,8 +723,7 @@ def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozens
     the textbook wrote "LSTM" beside it (2026-10-23).
     """
     from silica.driver import DRIVER
-    from silica.kernel.base import frontmatter
-    from silica.tools.atomic import notes_under
+    from silica.kernel.recall.listing import notes_under
 
     rows: list[dict] = []
     for rel in notes_under(target_dir):
@@ -740,7 +737,7 @@ def vault_outline(target_dir: str, *, exclude_titles: AbstractSet[str] = frozens
             logger.debug("vault_outline: skipping %s (%s)", rel, e)
             continue
         data = data if isinstance(data, dict) else {}
-        if str(data.get("section") or "") == SPINE_SECTION:
+        if is_spine(data):
             continue
         if data.get("superseded_by"):
             # A merge loser shown as a live note draws the model's same_as
@@ -761,7 +758,7 @@ def _nearest_rows(rows: list[dict], query: str) -> list[dict]:
     segment blurs ten sections into none. With nothing to rank by (no embedder,
     an empty store, a query without text) it is the first rows by name, the
     cap as it was before."""
-    heads = list(dict.fromkeys(m.group(1) for m in _HEADING_RE.finditer(query)))[:MAX_ROW_QUERIES]
+    heads = list(dict.fromkeys(m.group(2) for m in HEADING_RE.finditer(query)))[:MAX_ROW_QUERIES]
     texts = heads if len(heads) >= 2 else [t for t in (query[:1500], query[1500:3000]) if t.strip()]
     if not texts:
         return rows[:MAX_OUTLINE_ROWS]
@@ -1266,7 +1263,6 @@ def translates(src: str) -> bool:
 # Stage A names a section that spans two headings as "A / B" or "A; B"
 # (11 of 137 ideas on the 2026-10-14 A/B lectures).
 _SECTION_PARTS = re.compile(r"\s*[/;]\s*")
-_FRONTMATTER_RE = re.compile(r"\A\s*---[ \t]*\n.*?\n---[ \t]*(?:\n|\Z)", re.S)
 _BODY_HEADING = re.compile(r"^(#{1,6})(?=\s)", re.M)
 
 
@@ -1288,8 +1284,8 @@ def partition_bodies(outline: Outline, src: str) -> tuple[str, dict[str, str]]:
     Returns the lead and each idea's text as the source has it, VALIDATE's
     excerpt for the note.
     """
-    marks = list(_HEADING_RE.finditer(src))
-    stems = {_sec_key(m.group(1)): _stems(m.group(1)) for m in marks}
+    marks = list(HEADING_RE.finditer(src))
+    stems = {_sec_key(m.group(2)): _stems(m.group(2)) for m in marks}
     owner_of: dict[str, Idea] = {}
     for idea in outline.ideas:
         for part in _SECTION_PARTS.split(idea.section or ""):
@@ -1302,11 +1298,11 @@ def partition_bodies(outline: Outline, src: str) -> tuple[str, dict[str, str]]:
     # Not the source's own frontmatter: a converted syllabus opens on its
     # `date:`/`source_file:` block and then a table, and that block landed in
     # the spine note's body as a second frontmatter (2026-10-23).
-    head = _FRONTMATTER_RE.sub("", src[:first], count=1).strip()
+    head = frontmatter.body_of(src[:first], frontmatter.FM_RE_SCAN).strip()
     lead: list[str] = [head] if head else []
     owner: Idea | None = None
     for m, nxt in zip(marks, marks[1:] + [None]):
-        k = _sec_key(m.group(1))
+        k = _sec_key(m.group(2))
         if k in owner_of:
             owner = owner_of[k]
         elif k in skipped:
@@ -1317,7 +1313,7 @@ def partition_bodies(outline: Outline, src: str) -> tuple[str, dict[str, str]]:
             # An apparatus heading keeps its text, not its own line: Lezione
             # 18's first 20 lines of content sat under the course banner
             # "Machine Learning (9 CFU)" (2026-10-15).
-            if _NOISE_HEADING_RE.search(m.group(1)):
+            if _NOISE_HEADING_RE.search(m.group(2)):
                 block = src[m.end():end].strip()
             if block:
                 lead.append(block)

@@ -28,6 +28,7 @@ from html import escape as html_escape
 from html.parser import HTMLParser
 from pathlib import Path
 
+from silica.kernel.base.syntax import ADR_REF_RE, FILE_UNSAFE_RE, LINK_UNSAFE, WIKILINK_INNER_RE
 from silica.sources.base import GroundedStub, RawItem
 
 _MSGID_RE = re.compile(r"<[^<>\s]+>")
@@ -49,7 +50,7 @@ def _unlinked_id(value: str) -> str:
     the frontmatter, so `<[[x]]@host>` or `ADR-0001` in a Message-ID or a
     thread id made an edge from the note (2026-10-12). Applied where the id is
     read, so threading and dedupe compare the same strings the stamp holds."""
-    return _ADR_REF_RE.sub(r"ADR \1", re.sub(r"[\[\]]", "", value))
+    return ADR_REF_RE.sub(r"ADR \1", re.sub(r"[\[\]]", "", value))
 
 
 # C0 and C1 controls but tab and newline: NUL, ESC and CSI are terminal and
@@ -318,7 +319,7 @@ MAIL_DIR = "mail"
 # `#`, `^`, `[` and `]` on top of what a filesystem refuses: a filename that
 # holds them cannot be a wikilink target, and a note that links to its mail
 # through `## Sources` names the file in one.
-_UNLINKABLE_RE = re.compile(r"[#^\[\]]")
+_UNLINKABLE_RE = re.compile(rf"[{LINK_UNSAFE}]")
 # A subject is a stranger's text and has no length limit; the path carries the
 # date and the key, so 80 chars of it identify a thread to a reader and keep
 # the name far under the 255-byte filename limit.
@@ -326,9 +327,8 @@ _SUBJECT_CHARS = 80
 
 
 def _subject_for_path(subject: str) -> str:
-    from silica.kernel.text.sanitize import _ILLEGAL_FILENAME_CHARS_RE
 
-    clean = _UNLINKABLE_RE.sub("", _ILLEGAL_FILENAME_CHARS_RE.sub("", _unlinked_id(subject)))
+    clean = _UNLINKABLE_RE.sub("", FILE_UNSAFE_RE.sub("", _unlinked_id(subject)))
     clean = " ".join(clean.split())[:_SUBJECT_CHARS].strip(" .")
     return clean or "no subject"
 
@@ -630,7 +630,6 @@ def _no_images(text: str) -> str:
 # decodes to `[` is a link there too: both are written so they stay as typed.
 _ESCAPE_RE = re.compile(r"\\(?=[!-/:-@\[-`{-~])")
 _ENTITY_RE = re.compile(r"&(?=#\d+;|#[xX][0-9a-fA-F]+;|[A-Za-z][A-Za-z0-9]*;)")
-_WIKILINK_RE = re.compile(r"\[\[([^\[\]\n]*)\]\]")
 # A markdown link to anything but the web: a vault path, and so an edge.
 _LOCAL_LINK_RE = re.compile(
     r"\[([^\[\]\n]*)\]\((?!\s*<?(?:https?://|mailto:))[^()\n]*(?:\([^()\n]*\)[^()\n]*)*\)")
@@ -638,17 +637,16 @@ _LOCAL_LINK_RE = re.compile(
 # name nothing. Footnote definitions are among them; Silica's parser reads one
 # as a link too.
 _REF_DEF_RE = re.compile(r"\[([^\[\]\n]+)\]:")
-_ADR_REF_RE = re.compile(r"\bADR-(\d{4})\b")  # kernel/base/markdown.py's numbered-decision link
 # Obsidian's inline tag: `#` at a word's start, with a letter in what follows,
 # so "#12" and a URL's "page#anchor" stay as written.
 _INLINE_TAG_RE = re.compile(r"(?:^|(?<=[\s(\[{<>\"'*_,;!|]))#(?=[\w/-]*[^\W\d])(?=[\w/-])")
 
 
 def _no_links(text: str) -> str:
-    text = _WIKILINK_RE.sub(r"\1", text)
+    text = WIKILINK_INNER_RE.sub(r"\1", text)
     text = re.sub(r"\]{2,}", "]", re.sub(r"\[{2,}", "[", text))
     text = _REF_DEF_RE.sub(r"\1:", _LOCAL_LINK_RE.sub(r"\1", text))
-    return _INLINE_TAG_RE.sub("", _ADR_REF_RE.sub(r"ADR \1", text))
+    return _INLINE_TAG_RE.sub("", ADR_REF_RE.sub(r"ADR \1", text))
 
 
 def _inert(text: str) -> str:

@@ -91,7 +91,8 @@ def link_candidates(path: str, k: int = 5) -> list[dict]:
     """
     try:
         from silica.config import CONFIG
-        from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
+        from silica.kernel.recall.cooccurrence import get_cooccur_store
+        from silica.kernel.base.notekey import store_key
         from silica.kernel.recall.embed import get_store
         from silica.kernel.base.layout import is_staging_path
         from silica.kernel.recall.relatedness import related_notes
@@ -99,9 +100,9 @@ def link_candidates(path: str, k: int = 5) -> list[dict]:
         from silica.model.providers import get_reranker
         from silica.kernel.recall.rerank import link_query, rerank_related
 
-        # cooccur_key (case-PRESERVED, .md-stripped) is the store keyspace; _norm_path
+        # store_key (case-PRESERVED, .md-stripped) is the store keyspace; ledger_key
         # would lowercase and miss the case-preserving stored keys -> empty results.
-        key = cooccur_key(path)
+        key = store_key(path)
         reranker = get_reranker(CONFIG)
         pool = max(k, 20) if reranker else k
         embed_store = get_store()

@@ -9,13 +9,12 @@ from __future__ import annotations
 
 from silica.kernel.base import frontmatter
 from silica.kernel.write import templates
+from silica.kernel.base.noteshape import SUPERSEDED_MARKER, parse_stamps
 from silica.kernel.write.contested import (
-    SUPERSEDED_HEADING,
     append_before_superseded,
     contested_callout,
     contested_refs,
     mark_contested,
-    parse_stamp,
     resolve_contested,
 )
 
@@ -61,24 +60,24 @@ def test_append_is_byte_identical_without_the_section():
 def test_append_lands_above_the_superseded_section():
     body = (
         "# Titolo\n\nProsa.\n\n"
-        f"{SUPERSEDED_HEADING}\n\n> [!quote] vecchio claim\n"
+        f"{SUPERSEDED_MARKER}\n\n> [!quote] vecchio claim\n"
     )
     out = append_before_superseded(body, "\n\n## Additional notes: X (from y.md)\n\nnuovo\n")
-    assert out.index("nuovo") < out.index(SUPERSEDED_HEADING)
+    assert out.index("nuovo") < out.index(SUPERSEDED_MARKER)
     assert out.rstrip().endswith("> [!quote] vecchio claim")
 
 
 def test_superseded_stays_last_across_repeated_patches():
     """The invariant that matters: N appends, section still last."""
-    content = f"# Titolo\n\nProsa.\n\n{SUPERSEDED_HEADING}\n\n> [!quote] vecchio\n"
+    content = f"# Titolo\n\nProsa.\n\n{SUPERSEDED_MARKER}\n\n> [!quote] vecchio\n"
     for i in range(3):
         content = templates.patch_snippet(
             heading=f"Concetto {i}", snippet=f"corpo {i}",
             source_basename="appunti.md", existing_content=content,
         )
-    assert content.count(SUPERSEDED_HEADING) == 1
+    assert content.count(SUPERSEDED_MARKER) == 1
     for i in range(3):
-        assert content.index(f"corpo {i}") < content.index(SUPERSEDED_HEADING)
+        assert content.index(f"corpo {i}") < content.index(SUPERSEDED_MARKER)
 
 
 # --- resolve_contested -------------------------------------------------------
@@ -89,8 +88,8 @@ def test_resolve_moves_the_callout_and_clears_the_flag():
     assert contested_refs(out) == []
     data, _, body = frontmatter.split(out)
     assert "contested" not in data and "contradictions" not in data
-    assert SUPERSEDED_HEADING in body
-    assert body.index(SUPERSEDED_HEADING) < body.index("[!warning] Contradiction")
+    assert SUPERSEDED_MARKER in body
+    assert body.index(SUPERSEDED_MARKER) < body.index("[!warning] Contradiction")
     assert "5mg/die" in body  # the live claim is untouched
 
 
@@ -103,7 +102,7 @@ def test_resolve_rewrites_the_unresolved_tail():
 
 def test_resolve_stamps_valid_to():
     out = resolve_contested(_contested(), resolved_by="user", valid_to="2026-07-25")
-    assert parse_stamp(out) == {"valid_to": "2026-07-25", "resolved_by": "user"}
+    assert parse_stamps(out)[0] == {"valid_to": "2026-07-25", "resolved_by": "user"}
 
 
 def test_resolve_drops_the_orphaned_provenance_header():
@@ -130,7 +129,7 @@ def test_resolve_moves_every_open_callout():
     )
     out = resolve_contested(note, resolved_by="user", valid_to="2026-07-25")
     _data, _raw, body = frontmatter.split(out)
-    tail = body[body.index(SUPERSEDED_HEADING):]
+    tail = body[body.index(SUPERSEDED_MARKER):]
     assert tail.count("[!warning] Contradiction") == 2
 
 
@@ -176,7 +175,7 @@ def test_flag_note_resolves_one_ref_and_stays_contested(tmp_vault):
 
     content = tmp_vault.read(path)
     assert contested_refs(content) == [REF]
-    assert "500mg/die" in content[content.index(SUPERSEDED_HEADING):]
+    assert "500mg/die" in content[content.index(SUPERSEDED_MARKER):]
     assert "Unresolved." in content  # the surviving one still reads unresolved
     assert "Farmacologia/Dosaggio Warfarin.md" in contested_register.entries()
 
@@ -204,6 +203,6 @@ def test_flag_note_clear_files_the_callout(tmp_vault):
 
     content = tmp_vault.read(path)
     assert contested_refs(content) == []
-    assert SUPERSEDED_HEADING in content
+    assert SUPERSEDED_MARKER in content
     assert "Unresolved." not in content
     assert "50mg/die" in content  # the contested claim survives, filed

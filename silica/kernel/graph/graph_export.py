@@ -31,7 +31,9 @@ import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from silica.kernel.base import notekey
 from silica.kernel.base.layout import is_vault_artifact
+from silica.kernel.base.noteshape import NATIVE_TYPES
 
 
 @dataclass
@@ -185,14 +187,6 @@ def _infer_type(path: str) -> str:
     return "note"
 
 
-# A note a Silica feature runs on (ADR-0070): drawn, as a diamond, but not
-# counted. Unlike log.md it is the user's to open and edit, so it stays in the
-# graph; unlike a note it is not knowledge, and "Prova Learn" showed what
-# counting it costs: its tree of 52 links named an area on the test vault and
-# was the only in-link of 10 notes, which then never rang as orphans.
-NATIVE_TYPES = ("plan", "event", "reading")
-
-
 def stamp_native(nodes: list[dict], vault: Path) -> None:
     """Type a Learn plan `plan`, a step's reading `reading` (ADR-0132) and an
     event note `event`, in place.
@@ -202,15 +196,14 @@ def stamp_native(nodes: list[dict], vault: Path) -> None:
     still one. `AI:` is not the test: it says who wrote a body, and every
     note /nucleate writes carries it.
 
-    Its own read and not learner._notes_meta, which already walks the same
-    files: importing kernel.report from here pulls codegraph into the recall
-    lanes and breaks the import contract. The YAML parse is the cost, so only
-    a note whose text names one of the two keys is parsed: 211 ms to 21 ms on
-    the 730-note test vault (2026-10-07). ponytail: still one read per note per
-    build; memoize on vault_epoch as _notes_meta does if a 5k-note vault makes
-    /graph wait on it.
+    Its own read and not the note index, which parses every note: the YAML is
+    the cost, so only a note whose text names one of the two keys is parsed,
+    211 ms to 21 ms on the 730-note test vault (2026-10-07). ponytail: still one
+    read per note per build; memoize on vault_epoch as note_index.meta does if a
+    5k-note vault makes /graph wait on it.
     """
     from silica.kernel.base import frontmatter
+    from silica.kernel.base.noteshape import EVENT, PLAN, READING, is_event, is_plan, type_word
 
     for n in nodes:
         # A day stays a triangle: the shape Obsidian's own setting gave it.
@@ -225,13 +218,12 @@ def stamp_native(nodes: list[dict], vault: Path) -> None:
         data, _raw, _body = frontmatter.split(text)
         if not isinstance(data, dict):
             continue
-        kind = str(data.get("type") or "").strip().lower()
-        if kind in ("plan", "syllabus"):
-            n["type"] = "plan"
-        elif kind == "reading":
-            n["type"] = "reading"
-        elif data.get("event_start") is not None:
-            n["type"] = "event"
+        if is_plan(data):
+            n["type"] = PLAN
+        elif type_word(data) == READING:
+            n["type"] = READING
+        elif is_event(data):
+            n["type"] = EVENT
 
 
 def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
@@ -259,7 +251,8 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
     # Provenance is a third grouping of the graph, disjoint from both Louvain
     # partitions (ADR-0023 names two; this is neither): read off the ledger,
     # never computed from topology. One inversion for the whole payload.
-    from silica.kernel.write.provenance import note_key, sources_by_note
+    from silica.kernel.write.provenance import sources_by_note
+    from silica.kernel.base.notekey import note_key
 
     by_note = sources_by_note()
 
@@ -345,7 +338,7 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
         src = src_raw.replace("\\", "/")
         if src not in node_ids:
             continue
-        tgt_name = tgt_raw.removesuffix(".md").rsplit("/", 1)[-1]
+        tgt_name = notekey.stem(tgt_raw)
         ghost_id  = f"__unresolved__{tgt_name}"
 
         if ghost_id not in ghost_nodes:
@@ -395,22 +388,22 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
     vault, via EmbedStore.cosine_top_k_batch). Empty list when the embed index is
     absent.
     """
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
     from silica.kernel.recall.embed import get_store
 
     store = get_store()
     if len(store) == 0:
         return []
 
-    # Store keyspace is stripped-.md/posix/case-preserved (cooccur_key); node ids
-    # carry '.md'. Map both through cooccur_key so a store hit resolves to its node.
+    # Store keyspace is stripped-.md/posix/case-preserved (store_key); node ids
+    # carry '.md'. Map both through store_key so a store hit resolves to its node.
     # A daily note is neither a source nor a neighbour here: its whole-note
     # vector is mostly its template, which made every day the nearest note to
     # every other day (ADR-0062). daily_edges relates it by its blocks instead.
     # A plan or an event (ADR-0070) is not offered either: a plan's vector is
     # the centroid of the notes its tree lists, which would take a neighbour
     # slot from each of them.
-    id_by_key = {cooccur_key(n["id"]): n["id"] for n in nodes
+    id_by_key = {store_key(n["id"]): n["id"] for n in nodes
                  if n.get("type") not in ("ghost", "daily", *NATIVE_TYPES)}
 
     # One matmul for the whole vault, not one matvec per note: this is the only
@@ -424,7 +417,7 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
     idx = 0
     for key, nid in id_by_key.items():
         for cand in neighbours.get(key, ()):
-            tid = id_by_key.get(cooccur_key(cand["path"]))
+            tid = id_by_key.get(store_key(cand["path"]))
             if tid is None or tid == nid:
                 continue
             p = (nid, tid) if nid < tid else (tid, nid)
@@ -599,7 +592,7 @@ def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
             }
 
     # Fetch community labels from the co-occurrence index; degrade to {} on any failure.
-    # Member ids carry '.md'; CooccurStore.note_nodes normalises via cooccur_key, so
+    # Member ids carry '.md'; CooccurStore.note_nodes normalises via store_key, so
     # no manual strip is needed here (single source of truth for the key).
     from silica.kernel.recall.cooccurrence import get_cooccur_store
     try:
@@ -863,7 +856,8 @@ def shared_concepts(pairs, *, k: int = 3) -> dict[tuple[str, str], list[str]]:
     the gates refuted (docs/adr/0027), so no index means no proposals rather
     than proposals nobody checked.
     """
-    from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.base.notekey import store_key
 
     try:
         store = get_cooccur_store()
@@ -875,7 +869,7 @@ def shared_concepts(pairs, *, k: int = 3) -> dict[tuple[str, str], list[str]]:
     out: dict[tuple[str, str], list[str]] = {}
     for a, b in pairs:
         try:
-            common = set(store.note_nodes(cooccur_key(a))) & set(store.note_nodes(cooccur_key(b)))
+            common = set(store.note_nodes(store_key(a))) & set(store.note_nodes(store_key(b)))
         except Exception:
             continue
         if common:
@@ -951,7 +945,7 @@ def _is_file_slug(note_id: str) -> bool:
     """A title that is a file name and not a name: no space, three or more
     parts joined by - or _, one of them a number (`Goodfellow-38-15-2-...`,
     a daily `2026-10-28`). "GPT-4" and "Cross-validation" are names."""
-    stem = note_id.rsplit("/", 1)[-1].removesuffix(".md")
+    stem = notekey.stem(note_id)
     parts = re.split(r"[-_]", stem)
     return not re.search(r"\s", stem) and len(parts) >= 3 and any(p.isdigit() for p in parts)
 
@@ -1284,7 +1278,7 @@ def cluster_hub_of(ctx: dict, path: str) -> str | None:
     hub = (gctx or {}).get("hub")
     if not hub:
         return None
-    return hub.rsplit("/", 1)[-1].removesuffix(".md")
+    return notekey.stem(hub)
 
 
 def canvas_metrics(nodes: list[dict], edges: list[dict], k: int = 400) -> tuple[dict[str, float], int]:

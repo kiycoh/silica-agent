@@ -401,10 +401,9 @@ def silica_tables(folder: Annotated[str, Field(description='Vault-relative folde
     list their sheets (a sheet's schema costs one query_table call). Schemas
     come from a head sample; the types query_table replies with (whole-file
     sniff) are the ones to trust."""
-    import os
 
     from silica.config import CONFIG
-    from silica.kernel.base.layout import ignore_matcher
+    from silica.kernel.base.layout import walk_tree
 
     vault = (CONFIG.vault_path or "").strip()
     if not vault:
@@ -418,16 +417,11 @@ def silica_tables(folder: Annotated[str, Field(description='Vault-relative folde
     if not base.is_dir():
         raise ValueError(f"{folder or str(root)!r} is not a folder in the vault")
 
-    ignored = ignore_matcher(root)
     found: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(base):
-        # Same pruning as the note walks: dot-dirs, NOISE_DIRS + .silicaignore.
-        # Images/ too — conversion output, not data.
-        dirnames[:] = sorted(
-            d for d in dirnames
-            if not d.startswith(".") and not ignored(d) and d != "Images"
-        )
-        for name in sorted(filenames):
+    for dirpath, dirnames, filenames in walk_tree(root, base):
+        # Images/ too: conversion output, not data.
+        dirnames[:] = [d for d in dirnames if d != "Images"]
+        for name in filenames:
             if not name.startswith(".") and Path(name).suffix.lower() in _CENSUS_EXTS:
                 found.append(Path(dirpath) / name)
         if len(found) > _CATALOG_FILE_CAP:

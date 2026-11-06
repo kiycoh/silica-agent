@@ -36,6 +36,16 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from silica.kernel.base.home import resolve_vault_path
+from silica.kernel.base.layout import walk_tree
+from silica.kernel.base.notekey import note_key, note_ref
+from silica.kernel.base.noteshape import CLAIMS_END_RE
+from silica.kernel.base.syntax import (
+    EMBED_TOKEN,
+    INLINE_CODE_RE,
+    WIKILINK_FLAT_RE,
+    WIKILINK_TOKEN,
+    WIKILINK_TOKEN_RE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +198,6 @@ def _source_census(vault_path: str | None, memo_key: tuple | None) -> dict[str, 
     back as `done/<folder>/<name>`.
     """
     global _census_memo
-    import os
 
     from silica.kernel.base.manifest import active_done_dir, active_inbox_dir
 
@@ -203,9 +212,10 @@ def _source_census(vault_path: str | None, memo_key: tuple | None) -> dict[str, 
     for base in dict.fromkeys(b for b in (done, inbox) if b):
         top = Path(root) / base
         skip = (Path(root) / done).resolve() if done and base != done else None
-        for dirpath, dirnames, filenames in os.walk(top):
-            dirnames[:] = [d for d in dirnames if not d.startswith(".")
-                           and (skip is None or (Path(dirpath) / d).resolve() != skip)]
+        # ignore=False: a source stays in the ledger's census wherever it was filed.
+        for dirpath, dirnames, filenames in walk_tree(root, top, ignore=False):
+            dirnames[:] = [d for d in dirnames
+                           if skip is None or (Path(dirpath) / d).resolve() != skip]
             for fn in filenames:
                 rel = (Path(dirpath) / fn).relative_to(top).as_posix()
                 out.setdefault(fn, set()).add(rel)
@@ -455,35 +465,6 @@ def drifted_notes(
     return out
 
 
-def _bare_note_ref(p: str) -> str:
-    """A note reference in the ledger's own spelling: vault-relative POSIX, no
-    `.md`. Provenance stores RunManifestEntry.path in exactly this form; a
-    caller may pass an absolute or `.md`-suffixed path, so relativize when
-    possible and degrade to a plain strip otherwise."""
-    ref = p or ""
-    try:
-        from silica.kernel.base.layout import to_vault_relative
-
-        ref = to_vault_relative(ref, ensure_md=False)
-    except Exception:
-        ref = ref.replace("\\", "/").strip("/")
-    return ref.removesuffix(".md")
-
-
-def note_key(p: str) -> str:
-    """The comparable key of a note reference: `_bare_note_ref`, casefolded.
-
-    Public because the undo journal scopes a revert by the ledger's note set
-    and must fold its own (possibly absolute) inverse paths the same way;
-    two spellings of this rule would disagree on exactly the rename cases
-    the ledger exists to survive.
-    """
-    return _bare_note_ref(p).casefold()
-
-
-_norm_note_ref = note_key
-
-
 def already_distilled(source: str, sha256: str, *, vault_path: str | None = None) -> bool:
     """True when the last record for `source` is this exact content, from a
     run that completed and wrote at least one note. A zero-yield record (all
@@ -516,11 +497,11 @@ def note_authored_by(
     patches. Matches any recorded version of the source (an A->B->A edit still
     counts). Absent/unreadable ledger degrades to False.
     """
-    target = _norm_note_ref(note_path)
+    target = note_key(note_path)
     if not target:
         return False
     for r in read_records(source, vault_path=vault_path, by_name=True):
-        if any(_norm_note_ref(n) == target for n in (r.get("notes") or [])):
+        if any(note_key(n) == target for n in (r.get("notes") or [])):
             return True
     return False
 
@@ -592,7 +573,7 @@ def rename_note(old_path: str, new_path: str, *, vault_path: str | None = None) 
     if not path:
         return "absent"
     old_key = note_key(old_path)
-    new_bare = _bare_note_ref(new_path)
+    new_bare = note_ref(new_path)
     if not old_key or not new_bare:
         return "absent"
 
@@ -853,7 +834,6 @@ def _span_verdicts(body: str, source: str) -> list[tuple[str, bool]]:
 _NUMBER_RE = re.compile(r"(?<![0-9A-Za-z])-?\d+(?:[.,]\d+)*")
 _GROUPED_RE = re.compile(r"-?\d{1,3}(?:[.,]\d{3})+")
 _DECIMAL_COMMA_RE = re.compile(r"-?\d+,\d+")
-_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 # Any scheme and any markdown link target, not http(s) alone: a local model
 # linked a note as `](file://C:/.../Ledbury%20Components%202025%20EWCA.md)`
 # and its `%20` escapes were flagged as the numbers 20, 202025 and 201109
@@ -897,11 +877,11 @@ def checked_numbers(text: str) -> list[str]:
     the answer's own layout; and any number of fewer than 2 digits, for the
     reason `_NUMERAL_RE` gives.
     """
-    # _LEADING_MARKER_RE and _ANY_WIKILINK_RE are the extractive check's own,
+    # _LEADING_MARKER_RE and WIKILINK_TOKEN_RE are the extractive check's own,
     # defined below: one notion of "layout" and "a link" across both checks.
     prose = _FENCE_RE.sub(" ", text)
-    prose = _INLINE_CODE_RE.sub(" ", prose)
-    prose = _ANY_WIKILINK_RE.sub(" ", prose)
+    prose = INLINE_CODE_RE.sub(" ", prose)
+    prose = WIKILINK_TOKEN_RE.sub(" ", prose)
     prose = _URL_RE.sub(" ", prose)
     out: list[str] = []
     for line in prose.splitlines():
@@ -975,9 +955,7 @@ _HEADING_LINE_RE = re.compile(r"^\s*#{1,6}\s+")
 # never be a source span; only the payload is claim content. Kept tight (the
 # link must open the line and a separator must follow) because a looser
 # split-on-any-dash would let a fabricated label ride in on a verbatim quote.
-_INDEX_LABEL_RE = re.compile(r"^\[\[[^\]]+\]\]\s*[\u2014\u2013:-]\s+")
-_ANY_WIKILINK_RE = re.compile(r"\[\[[^\]]+\]\]")
-_WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+_INDEX_LABEL_RE = re.compile(rf"^{WIKILINK_TOKEN}\s*[\u2014\u2013:-]\s+")
 _EXTRACTIVE_MIN_CHARS = 12  # normalized; shorter residues match trivially
 
 
@@ -1012,7 +990,7 @@ def nonextractive_lines(body: str, source: str) -> list[str]:
         label (the wikilink that introduces the payload) dropped, remaining
         wikilinks unwrapped to the text they wrap."""
         marked = _INDEX_LABEL_RE.sub("", _LEADING_MARKER_RE.sub("", raw))
-        return _norm_extract(_WIKILINK_RE.sub(r"\1", marked))
+        return _norm_extract(WIKILINK_FLAT_RE.sub(r"\1", marked))
 
     for raw in body.splitlines():
         # Framework structure is not a claim. A heading is a label, and a line
@@ -1028,7 +1006,7 @@ def nonextractive_lines(body: str, source: str) -> list[str]:
         # case and could not see them.
         marked = _LEADING_MARKER_RE.sub("", raw)
         if (_HEADING_LINE_RE.match(raw)
-                or len(_norm_extract(_ANY_WIKILINK_RE.sub("", marked)))
+                or len(_norm_extract(WIKILINK_TOKEN_RE.sub("", marked)))
                 < _EXTRACTIVE_MIN_CHARS):
             exempt.append(_claim(raw))
             continue
@@ -1058,13 +1036,12 @@ def nonextractive_lines(body: str, source: str) -> list[str]:
 # and a positional reference would silently re-point.
 _FOOTNOTE_LABEL_RE = re.compile(r"[^A-Za-z0-9_-]+")
 _TRAILING_URL_RE = re.compile(r"https?://\S+\s*$")
-_SECTION_STOP_RE = re.compile(r"^#{1,6}\s+(Sources|Superseded)\b", re.IGNORECASE)
 # A line that is only an image embed or a one-line display formula: a picture
 # or a formula is not a claim a reader checks against the leaf, and on the
 # embed the marker rendered as a superscript glued to the image (live
 # 2026-09-04, `![[img.jpg]][^Lezione-6]`). Multi-line `$$` blocks are the
 # `math` toggle below; this is the single-line form the toggle cannot see.
-_NOT_A_CLAIM_RE = re.compile(r"^(?:!\[\[[^\]]+\]\]|\$\$.*\$\$)$")
+_NOT_A_CLAIM_RE = re.compile(rf"^(?:{EMBED_TOKEN}|\$\$.*\$\$)$")
 
 
 def footnote_label(source_basename: str) -> str:
@@ -1100,7 +1077,7 @@ def attribute_lines(note: str, source: str, label: str) -> str:
     fenced = False
     math = False
     for i, raw in enumerate(lines):
-        if _SECTION_STOP_RE.match(raw):
+        if CLAIMS_END_RE.match(raw):
             out.extend(lines[i:])
             break
         if raw.lstrip().startswith("```"):
@@ -1117,7 +1094,7 @@ def attribute_lines(note: str, source: str, label: str) -> str:
             math = not math
             out.append(raw)
             continue
-        line = _WIKILINK_RE.sub(r"\1", _LEADING_MARKER_RE.sub("", raw))
+        line = WIKILINK_FLAT_RE.sub(r"\1", _LEADING_MARKER_RE.sub("", raw))
         norm = _norm_extract(line)
         if (fenced or math or raw.lstrip().startswith(("#", "|")) or marker in raw
                 or _TRAILING_URL_RE.search(raw) or _NOT_A_CLAIM_RE.match(raw.strip())

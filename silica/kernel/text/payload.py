@@ -4,6 +4,7 @@
 import re
 from typing import Any
 from silica.driver import DRIVER
+from silica.kernel.base.syntax import section_end
 
 MAX_EXCERPT_CHARS = 2000      # Hard per-excerpt cap.
 MAX_OCCURRENCES = 2           # Max non-overlapping windows per concept per file.
@@ -38,10 +39,7 @@ def find_heading(content: str, concept: str):
     return pattern.search(content)
 
 def extract_section(content: str, heading_match) -> str:
-    level = len(heading_match.group(1))
-    next_pattern = re.compile(rf'^#{{1,{level}}}(?!#)\s+', re.MULTILINE)
-    next_match = next_pattern.search(content, pos=heading_match.end())
-    end = next_match.start() if next_match else len(content)
+    end = section_end(content, len(heading_match.group(1)), heading_match.end())
     return content[heading_match.start():end].strip()
 
 def expand_to_double_newline(content: str, start: int, end: int) -> tuple[int, int]:

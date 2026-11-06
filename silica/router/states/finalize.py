@@ -444,7 +444,7 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
         logger.debug("CLEANUP: provenance append skipped (non-fatal): %s", exc)
 
 
-from silica.kernel.base.layout import SOURCES_MARKER as _SOURCES_MARKER
+from silica.kernel.base.noteshape import SOURCES_MARKER as _SOURCES_MARKER
 
 
 def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:

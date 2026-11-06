@@ -37,10 +37,6 @@ from pathlib import Path
 
 from silica.kernel.recall.rerank import _WINDOW_CHARS, best_window
 
-# How deep the lexical probe counts. `hits` is a count, not a ranking, so the
-# pool only has to be larger than any number worth reporting exactly.
-_PROBE_POOL = 50
-
 # Stage-one pool per stage (lexical, embed), independent of the titles shown.
 # Bench 2026-09-01: nominee recall of the labelled note 0.929 at 3, 0.952 at 6
 # and flat through 25, routing 42/42 at every size, and the reranked top

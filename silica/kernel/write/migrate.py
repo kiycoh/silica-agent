@@ -21,12 +21,14 @@ from pathlib import Path
 # start (ADR-0039), and ops (pydantic) plus provenance (config) cost more than
 # the hook itself, 0.28 s against 0.13 s measured 2026-09-05. The walk and
 # the detect need neither; propose/apply import them when called.
-from silica.kernel.write.templates import (
+from silica.kernel.base.noteshape import (
     LEGACY_PROVENANCE_HEADER_PREFIX,
     PROVENANCE_HEADER_PREFIX,
     RELATIONS_MARKER,
     SOURCES_MARKER,
     SUPERSEDED_MARKER,
+)
+from silica.kernel.write.templates import (
     _FOOTNOTE_DEF_RE,
     _RELATION_BULLET_RE,
     _body_lines,
@@ -289,7 +291,7 @@ def propose(vault: Path | str, folder: str = "", migration: Migration = PROVENAN
     hand-edited note and an unrecognised block are listed with the reason
     and never rewritten. Reads through DRIVER for the edit check, so `vault`
     must be the active one."""
-    from silica.kernel.write.provenance import note_key
+    from silica.kernel.base.notekey import note_key
 
     vault = Path(vault)
     scope = folder.strip().strip("/")

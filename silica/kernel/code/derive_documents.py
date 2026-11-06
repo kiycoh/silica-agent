@@ -19,7 +19,6 @@ on every drift that already happened.
 """
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -29,6 +28,7 @@ from silica.kernel.base.frontmatter import documents_of
 from silica.kernel.code import codeast, codedocs
 from silica.kernel.base import gitstate
 from silica.kernel.base import layout, roots
+from silica.kernel.base.syntax import ADR_REF_RE
 from silica.kernel.base import frontmatter
 from silica.kernel.write import templates
 
@@ -42,10 +42,6 @@ class Proposal:
 
 
 _ADR_NOTE_RE = re.compile(r"^(\d{4})-")
-# Twin of `silica.kernel.base.markdown.ADR_REF_RE`, spelled again here because the
-# code lane may not import the link lane (import-linter: "text and code lanes
-# sit low"). tests/test_derive_documents.py pins the two patterns equal.
-ADR_REF_RE = re.compile(r"\bADR-(\d{4})\b")
 # A path with at least one directory and an extension, not glued to other
 # path characters: `src/m.py` in prose or backticks, not `a.b/c` inside a URL.
 _PATH_RE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z0-9]{1,6})(?![\w/])")
@@ -85,15 +81,6 @@ def _note_date(data: dict, body: str, md: Path) -> str:
     return datetime.fromtimestamp(md.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
-def _iter_notes(vault: Path):
-    skip = layout.ignore_matcher(vault)
-    for dirpath, dirnames, filenames in os.walk(vault):
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not skip(d))
-        for fn in sorted(filenames):
-            if fn.endswith(".md"):
-                yield Path(dirpath) / fn
-
-
 def propose(vault: Path | str, repo_root: Path | str | None = None,
             folder: str = "") -> list[Proposal]:
     """One Proposal per unbound note that names source, under `folder` when
@@ -110,8 +97,7 @@ def propose(vault: Path | str, repo_root: Path | str | None = None,
     cited = _citations(root, files)
     known = set(files)
     out: list[Proposal] = []
-    for md in _iter_notes(vault):
-        rel = md.relative_to(vault).as_posix()
+    for rel, md in layout.iter_notes(vault, scope="vault"):
         if scope and not rel.startswith(scope):
             continue
         try:
@@ -161,7 +147,7 @@ def apply(vault: Path | str, proposals: list[Proposal]) -> int:
             content = DRIVER.read_note(p.note_path).content
         except Exception:  # noqa: BLE001 - gone or unreadable since propose(): nothing to stamp
             continue
-        if content.startswith("---\n"):
+        if frontmatter.FM_OPEN_RE.match(content):
             stamped = templates.stamp_documents(content, p.documents, p.code_ref)
         else:
             stamped = frontmatter.dump({"documents": list(p.documents),

@@ -7,21 +7,20 @@ from silica.kernel.write.templates import (
     prepare_fields,
     render_note,
     stamp_sources,
-    template_spoke,
 )
 
 
 def test_spoke_does_not_double_wrap_bracketed_parent_and_related():
     """Distiller often emits parent/related already as [[X]] (hence write.py's
-    .strip('[]')). template_spoke must not re-wrap them into [[[[X]]]], which
+    .strip('[]')). The template must not re-wrap them into [[[[X]]]], which
     Obsidian reads as an unresolved link and trips the graph regression gate."""
-    out = template_spoke(
-        heading="Modelli Linguistici Generativi (GPT)",
-        snippet="testo",
+    out = render_note(BUILTIN_TEMPLATE, prepare_fields(
+        title="Modelli Linguistici Generativi (GPT)",
+        body="testo",
         hub="[[IA Generativa]]",
         related=["[[Reti Neurali Profonde (Deep Learning)]]", "calcolo parallelo"],
         parent="[[Rinascita dell'IA]]",
-    )
+    ))
     assert "[[[[" not in out and "]]]]" not in out, out
     assert 'parent note: "[[Rinascita dell\'IA]]"' in out
     assert '"[[Reti Neurali Profonde (Deep Learning)]]"' in out
@@ -52,24 +51,25 @@ def test_ensure_ai_flag_is_conservative():
     assert ensure_ai_flag("# no frontmatter\nbody") == "# no frontmatter\nbody"
 
 
-def test_builtin_template_parity_with_template_spoke():
-    """The guarantee that existing vaults do not change behavior: the built-in
-    template through render_note is byte-identical to template_spoke."""
+def test_builtin_template_renders_the_historical_layout():
+    """The guarantee that existing vaults do not change behavior: these bytes are
+    what the pre-template code wrote, for a plain note, a full one and an empty one."""
+    today = datetime.date.today().isoformat()
     cases = [
-        dict(heading="Varianza", snippet="La varianza misura la dispersione.", hub="Statistica"),
-        dict(heading="GPT", snippet="testo", hub="[[IA Generativa]]",
-             parent="[[Rinascita dell'IA]]",
-             related=["[[Reti Neurali]]", "calcolo parallelo"],
-             tags=["Tag One", "tag-one"], title="Custom Title"),
-        dict(heading="Empty", snippet="", hub="AI"),
+        (dict(title="Varianza", body="La varianza misura la dispersione.", hub="Statistica"),
+         '---\nparent note: "[[Statistica]]"\nrelated:\n  - "[[Statistica]]"\ntags:\n  - statistica\n'
+         f'last modified: {today}\nAI: true\n---\n\n# Varianza\n\nLa varianza misura la dispersione.\n'),
+        (dict(title="Custom Title", body="testo", hub="[[IA Generativa]]", parent="[[Rinascita dell'IA]]",
+              related=["[[Reti Neurali]]", "calcolo parallelo"], tags=["Tag One", "tag-one"]),
+         '---\nparent note: "[[Rinascita dell\'IA]]"\nrelated:\n  - "[[Rinascita dell\'IA]]"\n'
+         '  - "[[IA Generativa]]"\n  - "[[Reti Neurali]]"\n  - "[[calcolo parallelo]]"\n'
+         f'tags:\n  - tag-one\nlast modified: {today}\nAI: true\n---\n\n# Custom Title\n\ntesto\n'),
+        (dict(title="Empty", body="", hub="AI"),
+         '---\nparent note: "[[AI]]"\nrelated:\n  - "[[AI]]"\ntags:\n  - ai\n'
+         f'last modified: {today}\nAI: true\n---\n\n# Empty\n\n(to be expanded)\n'),
     ]
-    for c in cases:
-        legacy = template_spoke(**c)
-        fields = prepare_fields(
-            title=c.get("title") or c["heading"], body=c["snippet"], hub=c["hub"],
-            tags=c.get("tags"), related=c.get("related"), parent=c.get("parent"),
-        )
-        assert render_note(BUILTIN_TEMPLATE, fields) == legacy, c
+    for fields, expected in cases:
+        assert render_note(BUILTIN_TEMPLATE, prepare_fields(**fields)) == expected, fields
 
 
 def test_render_drops_empty_lines_and_expands_lists():

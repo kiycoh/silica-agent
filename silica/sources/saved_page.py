@@ -23,11 +23,12 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from silica.kernel.base.syntax import NAME_UNSAFE_RE
+
 SAVED_DIR = "Saved"
 # a note, /@handle/<vault>/<note>, and a vault, /@handle/<vault>/ (ADR-0151 point 4)
 _PAGE_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)/([a-z0-9-]+)$")
 _VAULT_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)/$")
-_FOLDER_UNSAFE = re.compile(r'[\\/:*?"<>|#^\[\]]+')
 _MD_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
 _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")
 
@@ -79,7 +80,7 @@ def _wikilink(m: re.Match, path: str, words: str) -> str:
 
 
 def _folder_name(title: str) -> str:
-    return _FOLDER_UNSAFE.sub(" ", title or "").strip().strip(".")[:80].strip() or "Saved vault"
+    return NAME_UNSAFE_RE.sub(" ", title or "").strip().strip(".")[:80].strip() or "Saved vault"
 
 
 def _fetch_markdown(url: str) -> str:
@@ -291,7 +292,7 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
             continue
         t = props.get("title")
         titles[slug] = t.strip() if isinstance(t, str) and t.strip() else slug.replace("-", " ")
-        name = _FOLDER_UNSAFE.sub(" ", titles[slug]).strip() or slug
+        name = NAME_UNSAFE_RE.sub(" ", titles[slug]).strip() or slug
         n, cand = 2, name
         # the disk too: the folder may hold another note of that title, from an earlier save
         while cand.lower() in taken or _exists(f"{folder}/{cand}.md"):

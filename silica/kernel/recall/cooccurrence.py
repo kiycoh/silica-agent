@@ -26,15 +26,16 @@ import numpy as np
 import orjson
 
 from silica.kernel.text import language
+from silica.kernel.text.text import tokens
 from silica.kernel.base.durable import DiskSynced, quarantine
 from silica.kernel.base.layout import in_folder
+from silica.kernel.base.notekey import store_key
 
 logger = logging.getLogger(__name__)
 
 # --- algorithm constants -------------------------------------
 NARRATIVE_WEIGHT = 3
 GAP = 4               # effective look-back of GAP - 1 = 3 tokens
-MIN_TOKEN_LEN = 3
 EVIDENCE = "cooccur"
 # A note's body contributes its first MAX_BODY_CHARS characters (after cleaning),
 # as embed._MAX_CHARS does for vectors. Uncapped, 97 converted books (median 221 KB,
@@ -90,36 +91,6 @@ def frozen_lang(vault: str) -> str | None:
     except Exception:
         return None
 
-def tokenize(
-    text: str,
-    stem_lang: str = "english",
-    stopword_lang: str | None = None,
-) -> list[list[tuple[str, str]]]:
-    """Sentences of (stem, surface) pairs — thin delegate to the kernel/text
-    seam (C1), kept as public API of this module.
-
-    `stem_lang` is the STORE's frozen stemming language — one stemmer per
-    store, since node keys are stemmed tokens and a per-note stemmer would
-    split cross-language shared terms. `stopword_lang` is per-NOTE: `None`
-    detects it from `text`; pass an explicit language to pin it (e.g.
-    matching a short label against store node keys, where detection on a
-    2-4 word sample is noise).
-    """
-    from silica.kernel.text import text as text_seam
-
-    return text_seam.tokens(text, lang=stem_lang, stopword_lang=stopword_lang)
-
-
-def cooccur_key(path: str) -> str:
-    """Canonical key for the co-occurrence keyspace — single source of truth.
-
-    Producers store the stripped path ('notes/foo'); consumers pass graph node
-    ids that carry '.md' ('notes/foo.md'). Normalising here, at the store's own
-    boundary, means the two can no longer diverge into ghost keys. Idempotent.
-    """
-    return (path or "").replace("\\", "/").removesuffix(".md")
-
-
 def build_contribution(
     name: str,
     body: str,
@@ -159,7 +130,7 @@ def build_contribution(
     node_surface_counts: dict[str, dict[str, int]] = {}
     edge_acc: dict[tuple[str, str], float] = {}
 
-    for sentence in tokenize(text, stem_lang=lang):
+    for sentence in tokens(text, lang=lang):
         stems = [stem for (stem, _s) in sentence]
         for i, (stem, surface) in enumerate(sentence):
             node_surface_counts.setdefault(stem, {})
@@ -468,14 +439,14 @@ class CooccurStore(DiskSynced):
 
     # --- mutation ---
     def upsert_note(self, path: str, contribution: dict[str, Any]) -> None:
-        key = cooccur_key(path)
+        key = store_key(path)
         self._notes[key] = contribution
         self._dirty.add(key)
         self._gone.discard(key)
         self._invalidate()
 
     def delete_note(self, path: str) -> None:
-        key = cooccur_key(path)
+        key = store_key(path)
         self._notes.pop(key, None)
         self._gone.add(key)
         self._dirty.discard(key)
@@ -509,7 +480,7 @@ class CooccurStore(DiskSynced):
         per visited node (mindmap.reading_path) stays O(V+E). Fresh dict per
         call, like note_nodes: callers may mutate their result.
         """
-        return dict(self.note_adjacency().get(cooccur_key(path), {}))
+        return dict(self.note_adjacency().get(store_key(path), {}))
 
     # --- lookup ---
     def paths(self) -> list[str]:
@@ -528,7 +499,7 @@ class CooccurStore(DiskSynced):
         call still returns a fresh copy so callers may mutate their result
         without corrupting the cache.
         """
-        key = cooccur_key(path)
+        key = store_key(path)
         cached = self._note_nodes_cache.get(key)
         if cached is None:
             contrib = self._notes.get(key)

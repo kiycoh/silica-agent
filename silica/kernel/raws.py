@@ -8,8 +8,8 @@ deck); a source is a note it became, which names it in `source_file`. The
 link goes from the note to the file and is not a wikilink, so nothing in the
 graph knows it: the tree, the drawer and `silica_files` ask here.
 
-Its own walk and not Learn's `_notes_meta`, which parses every note's YAML
-again whenever anything in the vault changes: the tree asks after every turn,
+Its own walk and not the note index, which parses every note's YAML again
+whenever anything in the vault changes: the tree asks after every turn,
 and a turn that writes one note would cost a parse of all of them. Here a
 note is read again only when its own mtime or size moved, and parsed only
 when its head names a `source_file`.
@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
+
+from silica.kernel.base.layout import walk_tree
 
 # What the drawer and a re-import read of a note's raw; `document` marks a
 # split document's parent note (ADR-0129 point 5).
@@ -105,8 +107,9 @@ def named(vault: Path) -> Iterator[tuple[str, dict]]:
     """(note, its raw keys) for every note outside the dot-folders that names
     a `source_file`."""
     root = vault.resolve()
-    for d, dirs, files in os.walk(root):
-        dirs[:] = [x for x in dirs if not x.startswith(".")]
+    # ignore=False: a raw sits where the person put it, and a note in an ignored
+    # folder still names the file its drawer opens.
+    for d, _dirs, files in walk_tree(root, ignore=False):
         for name in files:
             if name.endswith(".md"):
                 p = Path(d) / name

@@ -29,6 +29,8 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from silica.kernel.base.syntax import LINK_RE, section_chain
+
 logger = logging.getLogger(__name__)
 
 # Perception-grid winners as plain defaults (config promotion declined
@@ -55,7 +57,6 @@ FACTS_K = 10
 # into its answer, while the note that did exist for the concept sat at rank
 # 15. The brackets stay: the model must learn that the NAME is not a note, not
 # merely lose a link. Embeds (`![[...]]`) are attachments, never marked.
-_WIKILINK = re.compile(r"(?<!!)\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]")
 NO_NOTE = " (no such note)"
 # A fenced block (to its close, or the end of an answer cut mid-fence) or an
 # inline code span: text a reader runs or copies, never a link to mark.
@@ -370,7 +371,7 @@ def _read_dated_body(path: str, origin: str = "vault") -> tuple[
     # `body` is the frontmatter-stripped text; for a body-only note split()
     # already returns the whole content as body. The old `or content` fallback
     # leaked YAML frontmatter into context whenever the body was empty (A7).
-    from silica.kernel.base.layout import SOURCES_MARKER
+    from silica.kernel.base.noteshape import SOURCES_MARKER
     from silica.kernel.write.contested import lifecycle as note_lifecycle
     from silica.kernel.write.contested import trust as note_trust
 
@@ -497,7 +498,7 @@ def _mark_unresolved(text: str, exists) -> tuple[str, int]:
             return m.group(0)
         n += 1
         return m.group(0) + NO_NOTE
-    return _WIKILINK.sub(sub, text), n
+    return LINK_RE.sub(sub, text), n
 
 
 def declare_missing_links(text: str) -> str:
@@ -516,20 +517,6 @@ def declare_missing_links(text: str) -> str:
         out += [_mark_unresolved(text[pos:m.start()], exists)[0], m.group(0)]
         pos = m.end()
     return "".join(out) + _mark_unresolved(text[pos:], exists)[0]
-
-
-def _section_chain(body: str, offset: int, depth: int = 3) -> str:
-    """Markdown heading chain still open at `offset` ("Training > Gradients").
-    Deepest `depth` levels only — the nearest heading carries the most anchor
-    per token, and a full chain on a deeply nested note is header bloat.
-    '' above the first heading, so headingless notes cost zero tokens."""
-    chain: list[tuple[int, str]] = []
-    for m in re.finditer(r"^(#{1,6})\s+(.+?)\s*$", body[:offset], re.MULTILINE):
-        lvl = len(m.group(1))
-        while chain and chain[-1][0] >= lvl:
-            chain.pop()
-        chain.append((lvl, m.group(2)))
-    return " > ".join(t for _lvl, t in chain[-depth:])
 
 
 def perceive(query: str, *, now: str, k: int = DEFAULT_K,
@@ -615,7 +602,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     # {} — no lexical index — keeps the scan bit-identical to the unweighted one.
     wts = window_weights(query) if query else {}
     grounding = _grounding_labels()
-    from silica.kernel.write.provenance import note_key
+    from silica.kernel.base.notekey import note_key
     blocks: list[NoteBlock] = []
     exists = _resolver()
     unresolved = 0
@@ -664,7 +651,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
         seen_bodies[key] = len(blocks)
         blocks.append(NoteBlock(path=path, date=date, evidence=evidence,
                                 body=body, excerpt=excerpt, contested=contested,
-                                section=_section_chain(body, spans[0][0]), title=title, whole=whole,
+                                section=section_chain(body, spans[0][0]), title=title, whole=whole,
                                 origin=origin, documents=documents,
                                 builds_on=", ".join(requires),
                                 grounding=(grounding.get(note_key(path), "")

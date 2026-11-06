@@ -7,6 +7,9 @@ import re
 import textwrap
 from markdown_it import MarkdownIt
 
+from silica.kernel.base.frontmatter import FM_RE_SCAN
+from silica.kernel.base.syntax import ADR_REF_RE
+
 _MD = MarkdownIt()  # stateless parser, shared by every parse below
 _FOOTNOTE_DEF_RE = re.compile(r"^([ \t]{0,3})\[\^[^\]\n]+\]:[ \t]?", re.MULTILINE)
 
@@ -27,12 +30,6 @@ NON_MD_EXTENSIONS = (
     # 2026-08-27 batch fixed for notebooks.
     '.csv', '.tsv', '.parquet',
 )
-
-# Wikilink target extraction: captures the target of [[Target]], [[Target|alias]]
-# and [[Target#anchor]] (everything before the first | or #). The shared regex
-# for quick target scans; extract_links below is the full AST-aware version.
-WIKILINK_TARGET_RE = re.compile(r"\[\[([^\]|#]+)")
-
 
 # Every marker that can make `_extract_links_ast` return anything. It reads
 # targets from two places only — a text token containing `[[…]]`, and the
@@ -68,12 +65,6 @@ WIKILINK_TARGET_RE = re.compile(r"\[\[([^\]|#]+)")
 # parser side of this scan, not this side — and every alternative here is
 # mutation-tested (tests/test_wikilink_fast_path.py), because a scan that is
 # merely nearly right looks exactly like one that is right.
-# A decision record cited by number in prose. The 36 ADRs under docs/adr cite
-# each other this way and had `out_links: []`: the graph was blind to the one
-# reference they all write. Emitted as the literal `ADR-NNNN` token; the
-# backend resolver maps it to the note filed as `NNNN-*` (fs_backend).
-ADR_REF_RE = re.compile(r"\bADR-(\d{4})\b")
-
 _LINK_MARKER_RE = re.compile(
     r"\[\["
     r"|ADR-\d{4}\b"
@@ -270,7 +261,6 @@ def _extract_refs_ast(content: str) -> tuple[list[str], list[str], list[str]]:
     return cleaned, files, mentions
 
 
-_FRONTMATTER_BLOCK_RE = re.compile(r"\A\s*---\r?\n.*?\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 _HEADING_LINE_RE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t].*$", re.MULTILINE)
 
 
@@ -306,7 +296,7 @@ def extract_refs_typed(content: str) -> tuple[dict[str, bool], list[str], list[s
     all_targets, files, mentions = _extract_refs_ast(content)
     if not all_targets:
         return {}, files, mentions
-    m = _FRONTMATTER_BLOCK_RE.match(content)
+    m = FM_RE_SCAN.match(content)
     body = content[m.end():] if m else content
     prose = set(extract_links(_HEADING_LINE_RE.sub("", body)))
     return {t: t not in prose for t in all_targets}, files, mentions
@@ -320,7 +310,7 @@ def parse_headings(body: str) -> list[dict]:
     # underline to CommonMark: every note with properties opened its outline
     # with them as an H2 (silica_outline, found 2026-10-20). Blanked, not cut,
     # so every `pos` below stays an offset into `body`.
-    m = _FRONTMATTER_BLOCK_RE.match(body)
+    m = FM_RE_SCAN.match(body)
     tokens = _MD.parse(re.sub(r"[^\r\n]", " ", m.group(0)) + body[m.end():] if m else body)
 
     lines = body.splitlines(keepends=True)

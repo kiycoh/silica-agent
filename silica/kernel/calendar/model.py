@@ -27,9 +27,10 @@ import datetime as dt
 import logging
 import re
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from silica.kernel.base import frontmatter
+from silica.kernel.base.noteshape import is_event
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +100,7 @@ def _check_rrule(rule: str, dtstart: dt.datetime) -> str | None:
 def parse_event(data: dict, *, stem: str, path: str) -> Event | None:
     """Tolerant read of one note's frontmatter. None = not an Event note, or
     an unusable one (malformed start) — every degrade logs a warning."""
-    if not data or data.get("event_start") is None:
+    if not is_event(data):
         return None
     when = _parse_when(data["event_start"])
     if when is None:
@@ -206,10 +207,9 @@ _scan_memo: dict[str, tuple[str, list[Event]]] = {}  # vault -> (epoch, events)
 
 
 def scan_events(vault: Path) -> list[Event]:
-    """Every Event note of `vault`. Walk parity with `timeline._all_rows`
-    (dot-parts, ignore_matcher, SOURCES_DIR); memoized on the vault's
-    file-state epoch like the timeline walk."""
-    from silica.kernel.base.layout import SOURCES_DIR, ignore_matcher, vault_epoch
+    """Every Event note of `vault`, memoized on its file-state epoch like the
+    timeline walk."""
+    from silica.kernel.base.layout import iter_notes, vault_epoch
 
     epoch = vault_epoch(str(vault))
     if epoch:
@@ -217,24 +217,16 @@ def scan_events(vault: Path) -> list[Event]:
         if hit is not None and hit[0] == epoch:
             return hit[1]
 
-    ignored = ignore_matcher(vault)
     events: list[Event] = []
-    for f in sorted(vault.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts):
-            continue  # .obsidian, .trash, .silica
-        if any(ignored(p) for p in parts[:-1]):
-            continue  # .silicaignore / NOISE_DIRS
-        if parts[0] == SOURCES_DIR:
-            continue  # verbatim leaves
+    for rel, f in iter_notes(vault):
         try:
             text = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue  # one unreadable note must never take the agenda down
         data, _raw, _body = frontmatter.split(text)
-        if not data or data.get("event_start") is None:
+        if not is_event(data):
             continue
-        ev = parse_event(data, stem=f.stem, path="/".join(parts))
+        ev = parse_event(data, stem=f.stem, path=rel)
         if ev:
             events.append(ev)
 
@@ -242,50 +234,3 @@ def scan_events(vault: Path) -> list[Event]:
         _scan_memo.clear()
         _scan_memo[str(vault)] = (epoch, events)
     return events
-
-
-def _fmt_start(e: Event) -> str:
-    return e.start.date().isoformat() if e.all_day else e.start.strftime("%Y-%m-%d %H:%M")
-
-
-def _fmt_end(e: Event) -> str:
-    """User-facing end: inclusive date for all-day, wall-clock for timed."""
-    if e.end is None:
-        return ""
-    if e.all_day:
-        return (e.end - dt.timedelta(days=1)).date().isoformat()
-    return e.end.strftime("%Y-%m-%d %H:%M")
-
-
-def event_rows(vault: Path) -> list[dict]:
-    """BI flattener, one row per Event note. Stable column contract:
-    stem, title, start, end, all_day, rrule, reminder, status, folder."""
-    rows = []
-    for e in scan_events(vault):
-        parent = str(PurePosixPath(e.path).parent)
-        rows.append({
-            "stem": e.stem, "title": e.title,
-            "start": _fmt_start(e), "end": _fmt_end(e),
-            "all_day": e.all_day, "rrule": e.rrule or "",
-            "reminder": e.reminder_raw, "status": e.status,
-            "folder": "" if parent == "." else parent,
-        })
-    return rows
-
-
-def occurrence_rows(vault: Path, win_start: dt.datetime, win_end: dt.datetime) -> list[dict]:
-    """BI flattener, one row per materialized Occurrence in the half-open
-    window [win_start, win_end). Columns: stem, title, start, end, all_day,
-    status."""
-    from silica.kernel.calendar.occurrences import expand
-
-    rows = []
-    for e in scan_events(vault):
-        for occ in expand(e, win_start, win_end):
-            rows.append({
-                "stem": occ.stem, "title": occ.title,
-                "start": occ.start.isoformat(sep=" "),
-                "end": occ.end.isoformat(sep=" ") if occ.end else "",
-                "all_day": occ.all_day, "status": occ.status,
-            })
-    return rows

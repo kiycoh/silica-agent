@@ -43,7 +43,8 @@ from typing import Any, Callable, Iterator
 
 from silica.driver import DRIVER
 from silica.driver.base import NoteRef
-from silica.kernel.base.markdown import WIKILINK_TARGET_RE
+from silica.kernel.base.notekey import ledger_key
+from silica.kernel.base.syntax import WIKILINK_TARGET_RE
 from silica.kernel.write import undo_journal
 from silica.kernel.write.bulk import VerifyMismatchError, execute_one, execute_operations
 from silica.kernel.write.linter import validate_note
@@ -398,7 +399,7 @@ def revert_run(run_id: str, *, store: undo_journal.UndoJournalStore | None = Non
     caller sweeps them (link.sweep.revert_and_sweep), since the write lane
     does not reach up into link.
     """
-    from silica.kernel.write.provenance import note_key
+    from silica.kernel.base.notekey import note_key
 
     store = store or undo_journal.get_undo_journal()
     entries = store.inverses_for(run_id)  # LIFO
@@ -1261,13 +1262,6 @@ def _wikilinks(text: str) -> set[str]:
     return {m.strip().lower() for m in WIKILINK_TARGET_RE.findall(text or "") if m.strip()}
 
 
-def norm_path(path: str | None) -> str:
-    """Canonical comparison key for a vault path: posix, no .md, lowercase."""
-    if not path:
-        return ""
-    return path.replace("\\", "/").removesuffix(".md").lower()
-
-
 def make_backlink_guard(orphan_title: str) -> Callable[[Op, str], str | None]:
     """Build a content_guard requiring a patch to ADD a wikilink to `orphan_title`.
 
@@ -1276,7 +1270,7 @@ def make_backlink_guard(orphan_title: str) -> Callable[[Op, str], str | None]:
     orphan lowers the orphan's in-degree. Any other link is a no-op that would
     still report the orphan as repaired.
     """
-    want = norm_path(orphan_title).rsplit("/", 1)[-1]
+    want = ledger_key(orphan_title).rsplit("/", 1)[-1]
 
     def guard(op: Op, original: str) -> str | None:
         added = op.content if op.content is not None else (op.snippet or "")
@@ -1302,10 +1296,10 @@ class CapabilityBounds:
     content_guard: Callable[[Op, str], str | None] | None = None
 
     def allows_path(self, path: str | None) -> bool:
-        norm = norm_path(path)
+        norm = ledger_key(path)
         if not norm:
             return False
-        forbidden_norms = {norm_path(p) for p in self.forbidden_paths}
+        forbidden_norms = {ledger_key(p) for p in self.forbidden_paths}
         if norm in forbidden_norms:
             return False
         # Bare-name forbidden entries (no "/" or "\") may be matched by the
@@ -1314,11 +1308,11 @@ class CapabilityBounds:
         # where a note named "Foo.md" is blocked by hub="Foo" even when the hub
         # is actually a different full path like "other/Foo".
         bare_forbidden = {
-            norm_path(p)
+            ledger_key(p)
             for p in self.forbidden_paths
             if "/" not in p and "\\" not in p
         }
-        if bare_forbidden and norm_path(os.path.basename(path or "")) in bare_forbidden:
+        if bare_forbidden and ledger_key(os.path.basename(path or "")) in bare_forbidden:
             return False
         return bool(self.target_predicate(path or ""))
 
@@ -1393,11 +1387,11 @@ class CapabilityBounds:
 def _one_note_bounds(path: str, op: OpType, name: str, *, hub: str | None) -> CapabilityBounds:
     """One op of one kind on the framework-derived `path`, hub never touchable.
     `name` sets log attribution: the envelopes below differ in nothing else."""
-    key = norm_path(path)
+    key = ledger_key(path)
     return CapabilityBounds(
         name=name,
         allowed_ops=frozenset({op}),
-        target_predicate=lambda p: norm_path(p) == key,
+        target_predicate=lambda p: ledger_key(p) == key,
         forbidden_paths=frozenset({hub} if hub else set()),
     )
 
@@ -1496,12 +1490,12 @@ def orphan_bounds(
     Permits `patch` against the offered neighbours only, each introducing a
     wikilink to `orphan_title`.  Never overwrites, deletes, or creates.
     """
-    allowed = {norm_path(p) for p in neighbour_paths if p}
+    allowed = {ledger_key(p) for p in neighbour_paths if p}
     forbidden = frozenset({hub} if hub else set())
     return CapabilityBounds(
         name="orphan",
         allowed_ops=frozenset({OpType.patch}),
-        target_predicate=lambda p: norm_path(p) in allowed,
+        target_predicate=lambda p: ledger_key(p) in allowed,
         forbidden_paths=forbidden,
         content_guard=make_backlink_guard(orphan_title),
     )

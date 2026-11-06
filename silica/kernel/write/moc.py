@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import re
 
+from silica.kernel.base.notekey import store_key
+from silica.kernel.base.noteshape import LEGACY_MOC_PREFIX, MOC_PREFIX
+
 
 def resolve_note_path(name: str) -> str | None:
     """Real vault-relative path of an existing note by name, searched vault-wide.
@@ -78,7 +81,7 @@ def moc_line(path: str, desc: str = "") -> str:
     """
     from silica.driver import DRIVER
 
-    stem = (path or "").replace("\\", "/").removesuffix(".md")
+    stem = store_key(path)
     name = stem.rsplit("/", 1)[-1]
     try:
         shared = len(DRIVER.notes_named(name)) > 1
@@ -86,12 +89,6 @@ def moc_line(path: str, desc: str = "") -> str:
         shared = False  # a backend without the name index: the bare link, as before
     link = f"[[{stem}|{name}]]" if shared and "/" in stem else f"[[{name}]]"
     return f"- {link} — {desc}" if desc else f"- {link}"
-
-
-# Emitted until 2026-09. Recognised forever by merge_moc_section: a hub that
-# already carries this spelling must keep merging into it, or every later chunk
-# of the same source opens a second section. Never emitted again.
-LEGACY_MOC_PREFIX = "## Da: "
 
 
 def moc_heading(source_name: str, sample: str = "") -> str:
@@ -113,8 +110,8 @@ def merge_moc_section(content: str, heading: str, note_lines: list[str]) -> str:
     HUB_UPDATE.  Rather than duplicating the heading, new links are appended
     inside the existing section.
     """
-    if heading.startswith("## From: "):
-        legacy = LEGACY_MOC_PREFIX + heading[len("## From: "):]
+    if heading.startswith(MOC_PREFIX):
+        legacy = LEGACY_MOC_PREFIX + heading[len(MOC_PREFIX):]
         if legacy + "\n" in content or legacy + "\r\n" in content:
             heading = legacy  # keep appending into the pre-2026-09 section
     if heading + "\n" in content or heading + "\r\n" in content:

@@ -23,6 +23,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote as urlquote
 
+from silica.kernel.base.syntax import HEADING_RE
 from silica.sources import web_fetch as wf
 from silica.sources import web_research as wr
 from silica.sources.discover import feeds as F
@@ -209,9 +210,9 @@ def sections(body: str) -> list[dict]:
     text before the first heading is the lead, with no title."""
     out: list[dict] = [{"title": "", "paras": []}]
     for block in re.split(r"\n\s*\n", body.strip()):
-        m = re.match(r"^#{1,6}\s+(.+?)\s*$", block.split("\n", 1)[0])
+        m = HEADING_RE.match(block.split("\n", 1)[0])
         if m:
-            out.append({"title": m.group(1).strip(), "paras": []})
+            out.append({"title": m.group(2).strip(), "paras": []})
             block = block.split("\n", 1)[1] if "\n" in block else ""
         if block.strip():
             cites = sorted({int(n) for g in _MARK.findall(block) for n in re.findall(r"\d+", g)})

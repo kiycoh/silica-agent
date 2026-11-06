@@ -71,8 +71,8 @@ class VaultConventions:
     # overrides this for eval A/Bs.
     distill_profile: str = ""
     wiki_dir: str = ""  # landing dir for /wiki notes; "" ⇒ vault root
-    # Frontmatter templates (2026-07-17 spec): None ⇒ built-in template_spoke
-    # layout — a vault with no config behaves bit-identically to before.
+    # Frontmatter templates (2026-07-17 spec): None ⇒ the built-in layout, so a
+    # vault with no config behaves bit-identically to before.
     default_template: str | None = None
     templates_dir: str = "templates"
     # ADR-0021: None ⇒ no episodic key enforcement (bit-identical to today).
@@ -170,7 +170,7 @@ def within(rel_path: str, root: str) -> bool:
     """
     if not root:
         return True
-    prefix = root.strip("/").lower()
+    prefix = root.replace("\\", "/").strip("/").lower()
     p = (rel_path or "").replace("\\", "/").strip("/").lower()
     return p == prefix or p.startswith(prefix + "/")
 
@@ -734,17 +734,17 @@ def source_key(source_file: str) -> str:
     return rel.rsplit("/", 1)[-1]
 
 
-def in_write_dir(rel_path: str) -> str:
+def in_write_dir(rel_path: str, write_dir: str | None = None) -> str:
     """`rel_path` composed into the write boundary; unchanged when already inside.
 
     The composer behind every folder Silica creates for its own bookkeeping
     (`done/`, `sources/`) the way `active_inbox_dir` composes the inbox. Those
     call sites build their path from a bare constant, which knows nothing about
     `write_dir` and so drops a folder at the root of a vault whose writes are
-    confined elsewhere.
+    confined elsewhere. `write_dir` names another vault's boundary.
     """
     rel = (rel_path or "").replace("\\", "/").strip("/")
-    write_dir = active_write_dir()
+    write_dir = active_write_dir() if write_dir is None else write_dir
     if not write_dir or not rel or within(rel, write_dir):
         return rel
     return f"{write_dir}/{rel}"

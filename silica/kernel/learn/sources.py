@@ -19,6 +19,10 @@ import statistics
 from collections import Counter
 from pathlib import Path
 
+from silica.kernel.base import note_index
+from silica.kernel.base.layout import is_source_leaf
+from silica.kernel.base.syntax import WIKILINK_NAME, WIKILINK_RE, WIKILINK_TARGET_RE
+
 MATERIAL, REFERENCE, UNUSED = "material", "reference", "unused"
 ROLES = (MATERIAL, REFERENCE, UNUSED)
 
@@ -34,9 +38,7 @@ ORDER_FLOOR = 0.6
 ORDER_MARGIN = 0.2
 FOCUS_MARGIN = 0.15
 
-_ROW_RE = re.compile(r"^\s*\d+[.)]\s+\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]:?\s*(.*)$")
-_LEAF_RE = re.compile(r"\[\[(sources/[^\]|#]+)")
-_LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]")
+_ROW_RE = re.compile(rf"^\s*\d+[.)]\s+{WIKILINK_NAME}:?\s*(.*)$")
 _PRACTICE_RE = re.compile(r"^##\s+Concepts practised\s*$", re.M)
 # A cell, line or heading that introduces a reference's books: what the
 # reference names there is recommended reading, not what it was taught from.
@@ -50,6 +52,13 @@ def _vault() -> Path:
     from silica.config import CONFIG
 
     return Path(CONFIG.vault_path)
+
+
+def _leaf_links(text: str) -> list[str]:
+    """The verbatim leaves `text` links. By `is_source_leaf` and not by spelling:
+    a leaf link is composed with the write dir (finalize), so `[[silica/sources/`
+    on a confined vault, and a bare `[[sources/` found none there."""
+    return [t for t in WIKILINK_TARGET_RE.findall(text) if is_source_leaf(t)]
 
 
 def _read(path: str) -> str:
@@ -66,7 +75,7 @@ def natural_key(text: str) -> list:
 
 def plain(text: str) -> str:
     """A row or a line with its links read as their words."""
-    return _LINK_RE.sub(lambda m: m.group(2) or m.group(1), text)
+    return WIKILINK_RE.sub(lambda m: m.group(4) or m.group(2), text)
 
 
 def roots(text: str) -> set[str]:
@@ -100,8 +109,6 @@ def collections(notes: dict, allowed: set[str]) -> list[dict]:
     split into segments), else by the leaf's folder (a series). The hub note
     is no key: the course's book hub was merged into another note
     (2026-10-25). Computed once per notes-meta epoch and bound."""
-    from silica.kernel.learn.learner import parsed_note
-
     spines = sorted((p for p in allowed if notes.get(p, {}).get("spine")), key=natural_key)
     memo_key = (str(_vault()), tuple(spines), tuple(notes[p].get("mtime", 0) for p in spines))
     if memo_key in _MEMO:
@@ -109,11 +116,11 @@ def collections(notes: dict, allowed: set[str]) -> list[dict]:
     vault = _vault()
     found: list[tuple[str, str, str]] = []   # (spine, leaf, source_file)
     for sp in spines:
-        m = _LEAF_RE.search(_read(sp))
-        if not m:
+        links = _leaf_links(_read(sp))
+        if not links:
             continue   # an outline the reader wrote: no source behind it
-        leaf = m.group(1).removesuffix(".md")
-        parsed = parsed_note(vault, leaf + ".md", body=False)
+        leaf = links[0].removesuffix(".md")
+        parsed = note_index.parsed(vault, leaf + ".md", body=False)
         data = (parsed[0] if parsed else None) or {}
         found.append((sp, leaf, str(data.get("source_file") or "")))
     shared = Counter(sf for _sp, _l, sf in found if sf)
@@ -173,7 +180,7 @@ def note_collections(paths, colls: list[dict]) -> dict[str, set[str]]:
             if r["note"]:
                 out.setdefault(r["note"], set()).add(c["key"])
     for p in paths:
-        for leaf in _LEAF_RE.findall(_read(p)):
+        for leaf in _leaf_links(_read(p)):
             k = leaf_key.get(leaf.removesuffix(".md"))
             if k:
                 out.setdefault(p, set()).add(k)

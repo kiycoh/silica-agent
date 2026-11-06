@@ -240,7 +240,7 @@ def suggested(canon: str, related: list[dict], linked: set[str], resolve) -> lis
     ]
     for r in related:
         dist = r.get("distance")
-        # The recall stores key on cooccur_key (path minus .md), the wikilink
+        # The recall stores key on store_key (path minus .md), the wikilink
         # graph on the full path — resolve back, or `linked` never matches and
         # the click target is a path the drawer cannot open.
         rpath = resolve(r["path"]) or r["path"]

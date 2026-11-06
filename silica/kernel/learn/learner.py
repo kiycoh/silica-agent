@@ -5,9 +5,8 @@
 
 Per-note retention is the FSRS-6 retrievability of a card replayed from the
 graded-quiz ledger (quiz.jsonl), note creation dates and the `AI: true`
-authorship stamp — see silica/kernel/learn/schedule.py, which this module
-delegates to so the digest, the calendar and the metrics attention list keep
-their import. Never materialized: a second store of the same state diverges
+authorship stamp — see silica/kernel/learn/schedule.py, which folds the ledger
+for this module. Never materialized: a second store of the same state diverges
 from the ledger at the first crash, so the view is recomputed by scan on
 read, exactly like quiz.stats().
 
@@ -20,184 +19,13 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-from silica.kernel.learn.schedule import DUE_R, WEAK_R, note_state, view  # noqa: F401  re-exported v1 names
+from silica.kernel.base import note_index, noteshape
+from silica.kernel.base.notekey import ledger_key
+from silica.kernel.learn.schedule import DUE_R, view
 
 logger = logging.getLogger(__name__)
-
-DAY = 86400.0
-
-
-def key_of(path: str) -> str:
-    """The join keyspace: quiz.key (posix, no .md, casefolded)."""
-    from silica.kernel.learn import quiz
-
-    return quiz.key(path)
-
-
-def _created_and_ai(text: str, mtime: float) -> tuple[float, bool]:
-    """A note's creation timestamp and authorship from its own frontmatter."""
-    ts, ai, _kind, _extra = _note_meta(text, mtime)
-    return ts, ai
-
-
-def _note_meta(text: str, mtime: float) -> tuple[float, bool, str, dict]:
-    """(created ts, AI-authored, frontmatter `type`, extras) from one parse.
-    The extras hold what Learn's title lookups read, only when present: the
-    winner a merge loser points at, the note's aliases, whether it is a
-    lesson spine.
-
-    Same date precedence as the timeline: explicit `date:` outranks the claim
-    clock, and a note that states neither falls back to mtime — the ceiling
-    AttentionCandidate already lives with. The type rides along so the
-    pickers can keep plan and syllabus notes out of the study material.
-    """
-    from silica.kernel.base import frontmatter
-    from silica.kernel.write.contested import note_clock
-
-    data, _raw, _body = frontmatter.split(text)
-    date = (data or {}).get("date") or note_clock(text)
-    ts = mtime
-    if date:
-        try:
-            ts = datetime.strptime(str(date)[:10], "%Y-%m-%d").replace(
-                tzinfo=timezone.utc
-            ).timestamp()
-        except ValueError:
-            pass  # unparseable statement: keep the mtime proxy
-    # An event note states no `type`; its `event_start` is what makes it one
-    # (calendar/model.py), so that key names its kind here. A merge loser is
-    # its winner's material twice: a course plan listed "Reti neurali
-    # ricorrenti" (superseded_by Rete ricorrente) beside its winner (2026-10-23).
-    data = data or {}
-    kind = ("event" if data.get("event_start") is not None
-            else "merged" if data.get("superseded_by") else data.get("type"))
-    extra: dict = {}
-    winner = _WINNER_RE.search(str(data.get("superseded_by") or ""))
-    if winner:
-        extra["winner"] = winner.group(1).strip()
-    aliases = data.get("aliases")
-    aliases = [aliases] if isinstance(aliases, str) else aliases
-    if isinstance(aliases, list) and aliases:
-        extra["aliases"] = [str(a).strip() for a in aliases if str(a).strip()]
-    # outline.SPINE_SECTION, spelled here: outline reaches silica.agent, and the
-    # graph report imports this module (import contract P2/DKB).
-    if str(data.get("section") or "") == "(outline)":
-        extra["spine"] = True
-    return ts, bool(data.get("AI")), str(kind or "").strip().lower(), extra
-
-
-_WINNER_RE = re.compile(r"\[\[([^\]|#]+)")
-
-
-# Notes about learning, never asked about; the calendar's own notes, which
-# Learn's "never practised" listed as study material until 2026-10-15; and
-# merge losers, whose winner is the note to study; a step's reading (ADR-0132),
-# an explanation written from notes that are themselves the material; and
-# the pipeline's staging, converted text that is the source, not a note.
-NOT_MATERIAL = ("plan", "syllabus", "event", "merged", "reading", "staged")
-
-
-def is_material(meta: dict) -> bool:
-    return meta.get("kind") not in NOT_MATERIAL
-
-
-_meta_memo: dict[str, tuple[str, dict[str, dict]]] = {}  # vault -> (epoch, meta)
-_parsed_memo: dict[str, tuple[float, Any]] = {}  # file -> (mtime, frontmatter)
-
-
-def parsed_note(vault: Path, path: str, *, body: bool = True) -> tuple[Any, str] | None:
-    """(frontmatter, body) of a note, its YAML parsed once per mtime; None when
-    it cannot be read. A Learn session read every note's YAML three times
-    (contrast pairs, conflicts, the plan list), about 4 s each on a 2,166-note
-    vault (2026-10-23, profiled). The frontmatter is shared: read it, never
-    change it.
-
-    The memo holds no body: the YAML was the cost, and the bodies were a whole
-    second copy of the vault, 102 MiB of t20's 1 GB before anyone opened Learn
-    (2026-11-06). body=False is for a caller that wants the frontmatter alone:
-    a hit then opens no file, and the body comes back empty."""
-    from silica.kernel.base import frontmatter
-
-    f = vault / path
-    try:
-        mtime = f.stat().st_mtime
-    except OSError:
-        return None
-    hit = _parsed_memo.get(str(f))
-    if hit is not None and hit[0] != mtime:
-        hit = None
-    if hit is not None and not body:
-        return hit[1], ""
-    try:
-        text = f.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
-    if hit is not None:
-        m = frontmatter.FM_RE.match(text)
-        return hit[1], text[m.end():] if m else text
-    data, _raw, rest = frontmatter.split(text)
-    _parsed_memo[str(f)] = (mtime, data)
-    return data, rest if body else ""
-
-
-
-
-def _notes_meta(vault: Path) -> dict[str, dict]:
-    """{relative path: {"created": ts, "ai": bool}} for every readable note.
-
-    Timeline's walk verbatim: dot-dirs, .silicaignore matches and the verbatim
-    sources dir are not the reader's notes. The pipeline's own staging (the
-    inbox, the archive, the run log) is walked, since a workspace may list an
-    inbox handout, but its kind is "staged", which is not study material.
-    Memoized on the vault's file-state epoch like timeline._all_rows: repeated
-    digest reads between vault changes cost one stat walk instead of a full
-    re-parse.
-    """
-    from silica.kernel.base.layout import SOURCES_DIR, ignore_matcher, is_staging_path, vault_epoch
-
-    epoch = vault_epoch(str(vault))
-    if epoch:
-        hit = _meta_memo.get(str(vault))
-        if hit is not None and hit[0] == epoch:
-            return hit[1]
-
-    ignored = ignore_matcher(vault)
-    out: dict[str, dict] = {}
-    for f in sorted(vault.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts):
-            continue
-        if any(ignored(p) for p in parts[:-1]):
-            continue
-        if parts[0] == SOURCES_DIR:
-            continue
-        rel = "/".join(parts)
-        try:
-            text = f.read_text(encoding="utf-8")
-            mtime = f.stat().st_mtime
-        except (OSError, UnicodeDecodeError):
-            continue  # one unreadable note must not blind the view
-        created, ai, kind, extra = _note_meta(text, mtime)
-        # Converted text waiting in the inbox or filed in the archive carries
-        # the paper's own `date:` and no `AI: true`, so it read as notes the
-        # reader wrote years ago: a fresh vault of six papers opened Learn on
-        # "8 questions waiting from earlier sessions", a references segment
-        # among them (2026-10-26).
-        if is_staging_path(rel):
-            kind = "staged"
-        # mtime rides along for the picker's freshness rule (learn-suite D13):
-        # a note edited after its last rating is asked as new material.
-        out[rel] = {"created": created, "ai": ai, "mtime": mtime, "kind": kind, **extra}
-
-    if epoch:
-        _meta_memo.clear()
-        _meta_memo[str(vault)] = (epoch, out)
-    return out
-
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -279,8 +107,7 @@ def prerequisites_map() -> dict[str, list[str]]:
 
         from silica.kernel.recall.cooccurrence import get_cooccur_store
         from silica.kernel.graph.graph_export import build_graph_data, edge_graph
-        from silica.kernel.report.graph_report.compute import _empty_report
-        from silica.kernel.report.graph_report.cooccur_delta import _compute_cooccur_variables
+        from silica.kernel.graph.signals import refd_prerequisites
 
         nodes, edges = build_graph_data()
         store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
@@ -293,13 +120,13 @@ def prerequisites_map() -> dict[str, list[str]]:
         prereq_map = _prereq_disk(sig)
         if prereq_map is None:
             G_dir = edge_graph(nodes, edges, directed=True)
-            _prereqs, prereq_map, _burst = _compute_cooccur_variables(
-                _empty_report(), G_dir.to_undirected(), G_dir, cooccur_store=store, created=None,
-            )
+            prereq_map = {}
+            for prereq, dependent, _refd in refd_prerequisites(G_dir, G_dir.nodes, store):
+                prereq_map.setdefault(dependent, []).append(prereq)
             _prereq_disk(sig, prereq_map)
         # After the disk cache, which keys on the links and the index alone:
         # an edit to `requires:` moves the epoch and lands here, not there.
-        prereq_map = with_written(drop_structural(prereq_map, _notes_meta(Path(vault))),
+        prereq_map = with_written(drop_structural(prereq_map, note_index.meta(Path(vault))),
                                   _written_keys(vault))
         if epoch:
             _prereq_memo.clear()
@@ -317,18 +144,18 @@ def prerequisites_map() -> dict[str, list[str]]:
 
 
 def prerequisites_of(path: str) -> list[str]:
-    """One note's prerequisites. The map keeps a note's case and `key_of` folds it,
-    so a lookup by `key_of` finds nothing on a real map."""
-    key = key_of(path)
-    return next((v for k, v in prerequisites_map().items() if key_of(k) == key), [])
+    """One note's prerequisites. The map keeps a note's case and `ledger_key` folds it,
+    so a lookup by `ledger_key` finds nothing on a real map."""
+    key = ledger_key(path)
+    return next((v for k, v in prerequisites_map().items() if ledger_key(k) == key), [])
 
 
 def _written_keys(vault: str) -> dict[str, list[str]]:
     """The written prerequisites (ADR-0145) in the store keyspace prerequisites_map speaks."""
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
     from silica.kernel.recall.requires import written_requires
 
-    return {cooccur_key(d): [cooccur_key(q) for q in qs]
+    return {store_key(d): [store_key(q) for q in qs]
             for d, qs in written_requires(vault).items()}
 
 
@@ -361,11 +188,12 @@ def drop_structural(prereq_map: dict[str, list[str]], notes: dict[str, dict]) ->
     the YOLO paper's spine two rungs up, before every note; without them, each
     paper's archived segment stood after each of its notes (2026-10-26).
     """
-    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.base.notekey import store_key
     from silica.kernel.base.layout import is_source_leaf
+    from silica.kernel.base.noteshape import STAGED
 
-    structural = {cooccur_key(p) for p, m in notes.items()
-                  if m.get("spine") or m.get("kind") == "staged"
+    structural = {store_key(p) for p, m in notes.items()
+                  if m.get("spine") or m.get("kind") == STAGED
                   or Path(p).stem.casefold() == Path(p).parent.name.casefold()}
 
     def arranges(key: str) -> bool:
@@ -426,12 +254,12 @@ def _topological(rows: list[dict], prereqs: dict[str, list[str]], order_key) -> 
     cycle (RefD is antisymmetric per pair but chains can close) leaves the
     remaining rows in `order_key` order at the end, so the picker never stalls.
     """
-    by_key = {key_of(r["path"]): r for r in rows}
+    by_key = {ledger_key(r["path"]): r for r in rows}
     indeg: dict[str, int] = {k: 0 for k in by_key}
     dependents: dict[str, list[str]] = {k: [] for k in by_key}
     for k in by_key:
         for p in prereqs.get(k, ()):
-            pk = key_of(p)
+            pk = ledger_key(p)
             if pk in by_key and pk != k:
                 indeg[k] += 1
                 dependents[pk].append(k)
@@ -446,8 +274,8 @@ def _topological(rows: list[dict], prereqs: dict[str, list[str]], order_key) -> 
                 ready.append(d)
         ready.sort(key=lambda k: order_key(by_key[k]))
     if len(out) < len(rows):
-        done = {key_of(r["path"]) for r in out}
-        out += sorted((r for r in rows if key_of(r["path"]) not in done), key=order_key)
+        done = {ledger_key(r["path"]) for r in out}
+        out += sorted((r for r in rows if ledger_key(r["path"]) not in done), key=order_key)
     return out
 
 
@@ -459,9 +287,8 @@ def off_plan_dropped(rows: dict[str, dict], planned: set[str] | None) -> dict[st
     does not become a goal by being in the vault. A note already practised
     stays, because practising it was the reader's choice. `planned` is
     `plans.planned_paths()`, None when no plan is active, and then every note
-    is material, as before. The caller reads it: this module is under the
-    graph contract (pyproject, "graph data never reaches silica.agent"), and
-    plans reaches the agent through learn.items.
+    is material, as before. The caller reads it: the report reads this module,
+    and plans reaches the agent through learn.items.
     """
     if planned is None:
         return rows
@@ -494,7 +321,7 @@ def review_queue(
     if notes_meta is None:
         from silica.config import CONFIG
 
-        notes_meta = _notes_meta(Path(CONFIG.vault_path))
+        notes_meta = note_index.meta(Path(CONFIG.vault_path))
     rows = view(now_ts=now_ts, _notes_override=notes_meta, _entries_override=entries)
 
     def why(r: dict) -> str:
@@ -504,7 +331,7 @@ def review_queue(
             return "unexplored"
         return "known"
 
-    rows = {k: r for k, r in rows.items() if is_material(notes_meta.get(r["path"], {}))}
+    rows = {k: r for k, r in rows.items() if noteshape.is_material(notes_meta.get(r["path"], {}))}
     if not target:
         rows = off_plan_dropped(rows, planned)
     for r in rows.values():
@@ -514,8 +341,8 @@ def review_queue(
     # known (R at or above the due line). Unknown prerequisites (not a note in
     # this view) do not block: absence of evidence is not a blocker.
     prereqs = _prereqs_override if _prereqs_override is not None else prerequisites_map()
-    prereq_paths = {key_of(k): list(v) for k, v in prereqs.items()}   # display form
-    prereq_keys = {k: [key_of(p) for p in v] for k, v in prereq_paths.items()}
+    prereq_paths = {ledger_key(k): list(v) for k, v in prereqs.items()}   # display form
+    prereq_keys = {k: [ledger_key(p) for p in v] for k, v in prereq_paths.items()}
     for k, r in rows.items():
         mine = prereq_keys.get(k, [])
         r["prereqs"] = prereq_paths.get(k, [])

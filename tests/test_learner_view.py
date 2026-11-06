@@ -10,7 +10,9 @@ import math
 import time
 from datetime import datetime, timezone
 
-from silica.kernel.learn import learner
+from silica.kernel.base import note_index, noteshape
+from silica.kernel.base.notekey import ledger_key
+from silica.kernel.learn import learner, schedule
 
 DAY = 86400.0
 
@@ -25,22 +27,22 @@ def test_reader_prior_is_due_ninety_days_after_writing():
     """Writing a note seeds a Review card with S=90: R(90d) is the desired
     retention by construction, and one day later the note enters the pool."""
     now = time.time()
-    st = learner.note_state(created_ts=now - 90 * DAY, is_ai=False, events=[], now_ts=now)
+    st = schedule.note_state(created_ts=now - 90 * DAY, is_ai=False, events=[], now_ts=now)
     assert st["S"] == 90.0
     assert math.isclose(st["R"], 0.9, abs_tol=1e-6)
-    assert st["R"] >= learner.DUE_R
-    later = learner.note_state(now - 91 * DAY, False, [], now)
-    assert later["R"] < learner.DUE_R
-    fresh = learner.note_state(now - DAY, False, [], now)
+    assert st["R"] >= schedule.DUE_R
+    later = schedule.note_state(now - 91 * DAY, False, [], now)
+    assert later["R"] < schedule.DUE_R
+    fresh = schedule.note_state(now - DAY, False, [], now)
     assert fresh["R"] > st["R"]
     assert st["last"] == now - 90 * DAY and st["state"] == "review"
 
 
 def test_ai_note_is_unknown_until_first_rating():
     now = time.time()
-    st = learner.note_state(created_ts=now - 400 * DAY, is_ai=True, events=[], now_ts=now)
+    st = schedule.note_state(created_ts=now - 400 * DAY, is_ai=True, events=[], now_ts=now)
     assert st["R"] is None and st["S"] is None and st["state"] == "new"
-    st = learner.note_state(now - 400 * DAY, True, [(now - 30 * DAY, 3, True)], now)
+    st = schedule.note_state(now - 400 * DAY, True, [(now - 30 * DAY, 3, True)], now)
     assert st["S"] is not None and st["S"] > 0
     assert st["last"] == now - 30 * DAY
     assert 0 < st["R"] < 1
@@ -49,12 +51,12 @@ def test_ai_note_is_unknown_until_first_rating():
 def test_ratings_order_stability_and_replay_is_deterministic():
     now = time.time()
     by_rating = {
-        r: learner.note_state(now - 100 * DAY, False, [(now - 10 * DAY, r, r >= 3)], now)
+        r: schedule.note_state(now - 100 * DAY, False, [(now - 10 * DAY, r, r >= 3)], now)
         for r in (2, 3, 4)
     }
     assert by_rating[2]["S"] < by_rating[3]["S"] < by_rating[4]["S"]
-    again = learner.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
-    twice = learner.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
+    again = schedule.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
+    twice = schedule.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
     assert again == twice  # fuzz off: the view is identical on every surface
 
 
@@ -63,29 +65,29 @@ def test_a_miss_never_moves_the_clock():
     last-review clock stays on the last success, so a note missed a second ago
     never reads as fresh."""
     now = time.time()
-    held = learner.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
-    missed = learner.note_state(
+    held = schedule.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
+    missed = schedule.note_state(
         now - 100 * DAY, False, [(now - 10 * DAY, 3, True), (now - 5 * DAY, 1, False)], now
     )
     assert missed["last"] == now - 10 * DAY
     assert missed["S"] < held["S"]
-    assert missed["R"] < held["R"] and missed["R"] < learner.DUE_R
+    assert missed["R"] < held["R"] and missed["R"] < schedule.DUE_R
     assert missed["misses"] == 1 and missed["correct"] == 1
     # an AI note with only misses is measured unknown, not unexplored
-    st = learner.note_state(now - 400 * DAY, True, [(now, 1, False)], now)
+    st = schedule.note_state(now - 400 * DAY, True, [(now, 1, False)], now)
     assert st["R"] == 0.0
     # and a later rating lifts it
-    st = learner.note_state(now - 400 * DAY, True, [(now - DAY, 1, False), (now, 3, True)], now)
+    st = schedule.note_state(now - 400 * DAY, True, [(now - DAY, 1, False), (now, 3, True)], now)
     assert st["R"] > 0.9
 
 
 def test_weak_and_due_thresholds_split():
     """DUE_R (0.9) decides the session pool; WEAK_R (0.6) keeps the digest's
     WEAK RECALL line quiet about a merely aging vault."""
-    assert learner.WEAK_R == 0.6 and learner.DUE_R == 0.9
+    assert schedule.WEAK_R == 0.6 and schedule.DUE_R == 0.9
     now = time.time()
-    st = learner.note_state(now - 730 * DAY, False, [], now)
-    assert learner.WEAK_R < st["R"] < learner.DUE_R
+    st = schedule.note_state(now - 730 * DAY, False, [], now)
+    assert schedule.WEAK_R < st["R"] < schedule.DUE_R
 
 
 # --------------------------------------------------------------- the ledger
@@ -106,7 +108,7 @@ def test_legacy_lines_map_to_again_and_good():
         {"ts": ts, "path": "Rated Miss.md", "correct": False, "rating": 1},
     ]
     v = learner.view(_notes_override=notes, _entries_override=entries, now_ts=now)
-    k = learner.key_of
+    k = ledger_key
     assert v[k("Legacy Ok.md")]["S"] == v[k("Rated Ok.md")]["S"]
     assert v[k("Legacy Miss.md")]["S"] == v[k("Rated Miss.md")]["S"]
     assert v[k("Legacy Ok.md")]["S"] > v[k("Legacy Miss.md")]["S"]
@@ -122,7 +124,7 @@ def test_rating_overrides_correct_for_scheduling():
     entries = [{"ts": ts, "path": "A.md", "correct": True, "rating": 2},
                {"ts": ts, "path": "B.md", "correct": True, "rating": 3}]
     v = learner.view(_notes_override=notes, _entries_override=entries, now_ts=now)
-    a, b = v[learner.key_of("A.md")], v[learner.key_of("B.md")]
+    a, b = v[ledger_key("A.md")], v[ledger_key("B.md")]
     assert a["S"] < b["S"]
     assert a["correct"] == 1 and a["misses"] == 0
 
@@ -132,9 +134,9 @@ def test_view_rows_carry_due_and_state():
     notes = {"A.md": {"created": now - 10 * DAY, "ai": False},
              "Bot.md": {"created": now - 10 * DAY, "ai": True}}
     v = learner.view(_notes_override=notes, _entries_override=[], now_ts=now)
-    a = v[learner.key_of("A.md")]
+    a = v[ledger_key("A.md")]
     assert a["due"] is not None and math.isclose(a["due"], now - 10 * DAY + 90 * DAY, abs_tol=DAY)
-    bot = v[learner.key_of("Bot.md")]
+    bot = v[ledger_key("Bot.md")]
     assert bot["due"] is None and bot["state"] == "new" and bot["attempts"] == 0
 
 
@@ -182,7 +184,7 @@ def test_ledger_joins_no_matter_the_path_spelling():
     notes = {"Concepts/RAG.md": {"created": now - 400 * DAY, "ai": False}}
     entries = [{"ts": _iso(now - DAY), "path": "concepts/rag", "correct": True}]
     v = learner.view(_notes_override=notes, _entries_override=entries, now_ts=now)
-    row = v[learner.key_of("Concepts/RAG.md")]
+    row = v[ledger_key("Concepts/RAG.md")]
     assert row["correct"] == 1 and row["R"] > 0.9
 
 
@@ -215,10 +217,10 @@ def test_view_reads_frontmatter_from_the_vault(tmp_vault, monkeypatch):
     tmp_vault.note("Robot.md", "---\nAI: true\n---\nnucleated\n")
     tmp_vault.note("Undated.md", "no frontmatter at all\n")
     v = learner.view()
-    user = v[learner.key_of("User.md")]
-    assert learner.WEAK_R < user["R"] < learner.DUE_R          # months old: in the pool, not the digest
-    assert v[learner.key_of("Robot.md")]["R"] is None        # AI: true, never quizzed
-    assert v[learner.key_of("Undated.md")]["R"] > 0.9        # mtime fallback: just written
+    user = v[ledger_key("User.md")]
+    assert schedule.WEAK_R < user["R"] < schedule.DUE_R          # months old: in the pool, not the digest
+    assert v[ledger_key("Robot.md")]["R"] is None        # AI: true, never quizzed
+    assert v[ledger_key("Undated.md")]["R"] > 0.9        # mtime fallback: just written
 
 
 def test_review_queue_leaves_a_never_practised_note_outside_every_plan_out():
@@ -246,9 +248,9 @@ def test_an_event_note_is_not_study_material(tmp_vault):
 
     from silica.config import CONFIG
 
-    meta = learner._notes_meta(Path(CONFIG.vault_path))
-    assert not learner.is_material(meta["Cal/Lab session.md"])
-    assert learner.is_material(meta["Bio/cell.md"])
+    meta = note_index.meta(Path(CONFIG.vault_path))
+    assert not noteshape.is_material(meta["Cal/Lab session.md"])
+    assert noteshape.is_material(meta["Bio/cell.md"])
 
 
 def test_the_pipelines_staging_and_its_log_are_not_the_readers_notes(tmp_vault):
@@ -266,8 +268,8 @@ def test_the_pipelines_staging_and_its_log_are_not_the_readers_notes(tmp_vault):
     tmp_vault.note("log.md", "- 2026-10-26 · nucleate `Adam-1-adam.md` → 10 new\n")
     tmp_vault.note("Papers/Adam Update Rule.md", "---\nAI: true\n---\n\n# Adam Update Rule\n")
 
-    meta = learner._notes_meta(Path(CONFIG.vault_path))
-    assert {p for p, m in meta.items() if learner.is_material(m)} == {"Papers/Adam Update Rule.md"}
+    meta = note_index.meta(Path(CONFIG.vault_path))
+    assert {p for p, m in meta.items() if noteshape.is_material(m)} == {"Papers/Adam Update Rule.md"}
     # still walked: a workspace may list an inbox handout
     assert "Inbox/Adam/Adam-2-references.md" in meta
 

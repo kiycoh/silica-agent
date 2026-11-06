@@ -14,7 +14,8 @@ def is_lean(content):
 def wikilink(name):
     return f"[[{name}]]"
 
-from silica.kernel.base.markdown import parse_headings, _balanced, WIKILINK_TARGET_RE
+from silica.kernel.base.markdown import parse_headings, _balanced
+from silica.kernel.base.syntax import WIKILINK_TARGET_RE
 
 
 # ---------------------------------------------------------------------------

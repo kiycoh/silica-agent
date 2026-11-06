@@ -7,8 +7,8 @@ Siblings are write ops whose display names share ≥ 1 discriminating content to
 after filtering vocabulary from the active domain overlay (see silica.kernel.text.overlay)
 and a small language-neutral structural set.
 
-The injected names land in each op's `related` list as bare titles — template_spoke
-wraps them in [[...]] when the note is written.
+The injected names land in each op's `related` list as bare titles, and the
+note template wraps them in [[...]] when the note is written.
 
 Scope: operates on a single chunk's ops list (list of raw dicts). Cross-chunk
 sibling linking is out of scope here; the AUTOLINK+BACKLINK phases handle

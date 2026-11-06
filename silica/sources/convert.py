@@ -77,6 +77,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from silica.config import CONFIG
+from silica.kernel.base import frontmatter
+from silica.kernel.base.syntax import FILE_UNSAFE, LINK_UNSAFE, MD_IMAGE_RE
 from silica.kernel.text.sanitize import strip_degenerate_runs
 
 logger = logging.getLogger(__name__)
@@ -122,7 +124,6 @@ def _reap_with_parent_factory():
 _REAP_WITH_PARENT = _reap_with_parent_factory()
 
 _IMG_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
-_MD_IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
 # Book segmentation — a converted book is one giant markdown, but RECON caps
 # concepts PER FILE (keyphrase.MAX_CONCEPTS=40), so a whole book in one inbox
@@ -517,7 +518,6 @@ def is_skippable_chunk(note_rel: str) -> bool:
     unflagged files answer False — never blocks ingestion on a read error.
     """
     from silica.driver import DRIVER
-    from silica.kernel.base import frontmatter
 
     try:
         data, _, _ = frontmatter.split(DRIVER.read_note(note_rel).content)
@@ -622,7 +622,7 @@ def _segment_slug(segment: str, fallback: str) -> str:
 _SECTION_LABEL_RE = re.compile(r"^(?:\d+(?:\.\d+)*\.?|[A-Z](?:\.\d+)+\.?|[A-Z]\.|[IVX]+\.|[B-HJ-UWYZ]|A(?=\s+[AEIOUaeiou])|[IVX]{2,})\s+")
 # What a file name cannot hold, and quotes, which a cut at 60 characters can
 # leave open ("Appendix for “BERT Pre-training of", seen 2026-10-26).
-_TITLE_UNSAFE_RE = re.compile(r'[\\/:*?"<>|#^\[\]“”„«»]')
+_TITLE_UNSAFE_RE = re.compile(rf'[{FILE_UNSAFE}{LINK_UNSAFE}“”„«»]')
 
 
 def _segment_title(stem: str, segment: str, index: int) -> str:
@@ -768,7 +768,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
         # Copy only images the markdown references: mineru dumps every crop it
         # detects (477 files for a 200-page book, 19 referenced) — the rest
         # would land in the vault as orphans.
-        referenced = {os.path.basename(m.group(1)) for m in _MD_IMG_RE.finditer(md_text)}
+        referenced = {os.path.basename(m.group(1)) for m in MD_IMAGE_RE.finditer(md_text)}
         renamed = _copy_images(                                  # before tmp is cleaned
             images_src, _images_dest(dest_dir), _image_prefix(src), only=referenced
         )
@@ -910,7 +910,7 @@ def _first_prose_words(part: str) -> list[str]:
     """The first words of `part` below its frontmatter that are not a heading,
     an embed or a line Silica wrote ("> [page 3: ...]"), lowercased."""
     words: list[str] = []
-    for line in re.sub(r"\A---\n.*?\n---\n", "", part, flags=re.S).splitlines():
+    for line in frontmatter.body_of(part, frontmatter.FM_RE_TOLERANT).splitlines():
         t = line.strip()
         if not t or t.startswith(("#", "![", "> [page", "```")):
             continue
@@ -3396,7 +3396,6 @@ def _write_leaf(src: Path, body: str, name: str, fields: dict) -> None:
     from silica.driver import DRIVER
     from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.base.manifest import in_write_dir
-    from silica.kernel.base import frontmatter
 
     from silica.kernel.write.preserve import Loss
 
@@ -3503,4 +3502,4 @@ def _rewrite_image_links(md: str, renamed: dict[str, str] | None = None) -> str:
             return m.group(0)
         return f"![[{(renamed or {}).get(base, base)}]]"
 
-    return _MD_IMG_RE.sub(repl, md)
+    return MD_IMAGE_RE.sub(repl, md)

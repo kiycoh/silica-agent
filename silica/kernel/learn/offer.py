@@ -20,6 +20,8 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
+from silica.kernel.base.notekey import ledger_key
+
 # The reader saying it did not follow, in the two languages this was written
 # against. A word list, not a classifier: self-declared beats inferred. The
 # adverb slot is there because "still" is how a second turn says it: "non ho
@@ -88,15 +90,14 @@ def struggles(paths: list[str], entries: list[dict]) -> dict[str, str]:
     wrong 43.6% of the time, after a confident miss 40.9%, after silence
     36.6%, so it counts (the owner's call, 2026-10-23)."""
     from silica.kernel.learn.mastery import BLIND_SPOT_CONF, CALIBRATION_MIN, FRAGILE_CONF, eligible
-    from silica.kernel.learn.quiz import key
 
     calibrated = sum(1 for e in entries if eligible(e)) >= CALIBRATION_MIN
     by_key: dict[str, list[dict]] = {}
     for e in entries:
-        by_key.setdefault(key(str(e.get("path") or "")), []).append(e)
+        by_key.setdefault(ledger_key(str(e.get("path") or "")), []).append(e)
     out: dict[str, str] = {}
     for p in paths:
-        evs = sorted(by_key.get(key(p), []), key=lambda e: str(e.get("ts")))[-RECENT:]
+        evs = sorted(by_key.get(ledger_key(p), []), key=lambda e: str(e.get("ts")))[-RECENT:]
         if not evs:
             continue
         name = p.removesuffix(".md").rsplit("/", 1)[-1]
@@ -591,9 +592,8 @@ def escalation(note: str, chat: str, text: str, history: list[str], entries: lis
     """Why the next answer on `note` should be the aid itself, or "": three
     misses in a row, two more misses after an offer on it was ignored, or a
     reader still lost after an answer in this chat already said so."""
-    from silica.kernel.learn.quiz import key
 
-    evs = sorted((e for e in entries if key(str(e.get("path") or "")) == key(note)), key=lambda e: str(e.get("ts")))
+    evs = sorted((e for e in entries if ledger_key(str(e.get("path") or "")) == ledger_key(note)), key=lambda e: str(e.get("ts")))
     if len(evs) >= ESCALATE_MISSES and not any(e.get("correct") for e in evs[-ESCALATE_MISSES:]):
         return f"{ESCALATE_MISSES} misses in a row"
     records = _records() if records is None else records
@@ -625,7 +625,6 @@ def confident_readout(entries: list[dict], records: list[dict] | None = None) ->
     """The shadow reason's record against the ledger (ADR-0135 point 9): its
     fires, how many the next answer on the same note missed again, and the
     Learn sessions it was seen in. It acts at 20 sessions and half followed."""
-    from silica.kernel.learn.quiz import key
 
     from datetime import datetime
 
@@ -643,7 +642,7 @@ def confident_readout(entries: list[dict], records: list[dict] | None = None) ->
         # a record's time is to the second and the miss that fired it is a
         # fraction of that second earlier: the next answer starts past it
         since = at(r.get("ts")) + 1
-        nxt = next((e for e in ordered if key(str(e.get("path") or "")) == key(str(r.get("note") or ""))
+        nxt = next((e for e in ordered if ledger_key(str(e.get("path") or "")) == ledger_key(str(r.get("note") or ""))
                     and at(e.get("ts")) >= since), None)
         followed += bool(nxt and not nxt.get("correct"))
     sessions = {r.get("session") for r in fires if r.get("session")}
@@ -729,7 +728,7 @@ def weakest_prerequisite(path: str) -> str | None:
         return None  # a store that does not read costs the attachment, never the aid
 
     def held(p: str) -> float:
-        row = rows.get(learner.key_of(p)) or {}
+        row = rows.get(ledger_key(p)) or {}
         return row["R"] if row.get("attempts") and row.get("R") is not None else -1.0
 
     return min(prereqs, key=held) if prereqs else None
@@ -774,11 +773,10 @@ def replay(entries: list[dict], records: list[dict] | None = None) -> dict:
     offer have fired on what came before, and was that answer then wrong? A
     rule worth its line fires before misses more than before hits. Plus how
     often a shown offer was acted on. Counts only; reading them is the point."""
-    from silica.kernel.learn.quiz import key
 
     by_note: dict[str, list[dict]] = {}
     for e in entries:
-        by_note.setdefault(key(str(e.get("path") or "")), []).append(e)
+        by_note.setdefault(ledger_key(str(e.get("path") or "")), []).append(e)
     fired = {"wrong": 0, "right": 0}
     silent = {"wrong": 0, "right": 0}
     for evs in by_note.values():

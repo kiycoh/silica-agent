@@ -3,35 +3,16 @@
 
 import logging
 from silica.driver.base import GraphSnapshot, NoteRef
+from silica.kernel.base.layout import is_gate_staging
+from silica.kernel.base.notekey import gate_key
 
 logger = logging.getLogger(__name__)
 
-def normalize_path(p: str) -> str:
-    # Case-fold before stripping the suffix so a hand-written "[[Foo.MD]]"
-    # folds onto the same key as "Foo.md" (the old normalize_ref did not).
-    return p.replace("\\", "/").strip("/").lower().removesuffix(".md")
-
 def normalize_ref(ref: NoteRef) -> str:
-    return normalize_path(ref.path or ref.name)
+    return gate_key(ref.path or ref.name)
 
 def normalize_link(source_ref: NoteRef, target: str) -> tuple[str, str]:
-    return (normalize_ref(source_ref), normalize_path(target))
-
-def _is_staging(path: str) -> bool:
-    """True for pipeline bookkeeping notes: inbox sources and done/ archives.
-
-    Recon already refuses them as collision targets ("Inbox notes are
-    staging"); the regression gate owes them the same blindness.
-    """
-    p = path.replace("\\", "/").lower()
-    if p.startswith("done/") or "/done/" in p:
-        return True
-    try:
-        from silica.kernel.base.layout import is_inbox_path  # lazy: CONFIG-backed
-        return is_inbox_path(path)
-    except Exception:
-        return p.startswith("inbox/") or "/inbox/" in p
-
+    return (normalize_ref(source_ref), gate_key(target))
 
 def check_graph_regression(
     pre: GraphSnapshot,
@@ -86,7 +67,7 @@ def check_graph_regression(
     # 1. Unplanned orphans check
     norm_pre_orphans = {normalize_ref(ref) for ref in pre.orphans}
     norm_post_orphans = {normalize_ref(ref) for ref in post.orphans}
-    norm_created = {normalize_path(p) for p in created_paths}
+    norm_created = {gate_key(p) for p in created_paths}
 
     # Notes we actually observed in the pre-snapshot neighborhood.
     # The incremental snapshot domain can grow between pre and post: new notes
@@ -95,7 +76,7 @@ def check_graph_regression(
     # orphan pulled in this way would appear as a false "new orphan" because it
     # was never in norm_pre_orphans.  We only flag regressions for notes we
     # have a concrete pre-write baseline for.
-    norm_pre_observed = {normalize_path(k) for k in pre.link_counts}
+    norm_pre_observed = {gate_key(k) for k in pre.link_counts}
 
     new_orphans = norm_post_orphans - norm_pre_orphans
     unplanned_orphans = (new_orphans & norm_pre_observed) - norm_created
@@ -124,10 +105,10 @@ def check_graph_regression(
     # target notes surface as new_unres even though nothing changed in them —
     # a false positive that mirrors the Rule 1 domain-expansion problem already
     # guarded by norm_pre_observed.
-    norm_patched = {normalize_path(p) for p in patched_paths}
+    norm_patched = {gate_key(p) for p in patched_paths}
     # A link names a note by path or by basename; a removed note answers to both.
     removed = None if removed_paths is None else {
-        k for p in removed_paths for k in (normalize_path(p), normalize_path(p).rsplit("/", 1)[-1])}
+        k for p in removed_paths for k in (gate_key(p), gate_key(p).rsplit("/", 1)[-1])}
     new_unres_blocking = {
         (src, tgt) for src, tgt in new_unres
         if src not in norm_created
@@ -170,10 +151,10 @@ def check_graph_regression(
     # Filtering only pre would instead let inbox counts on the post side mask
     # a real loss on a same-stem vault note.
     pre_lower = fold({k: v for k, v in pre.backlink_counts.items()
-                      if not _is_staging(k)})
+                      if not is_gate_staging(k)})
     post_lower = {stem: total for stem, (_, total) in
                   fold({k: v for k, v in post.backlink_counts.items()
-                        if not _is_staging(k)}).items()}
+                        if not is_gate_staging(k)}).items()}
     shared_keys = set(pre_lower.keys()) & set(post_lower.keys())
     
     for norm_name in sorted(shared_keys):
