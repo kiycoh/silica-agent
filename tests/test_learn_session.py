@@ -129,3 +129,18 @@ def test_a_build_outside_a_session_leaves_the_turn_s_own_meter_alone(client, mon
     with llm.meter_scope(mine):
         session.draw(1)
     assert scopes[-1] is mine
+
+
+def test_every_field_of_the_tool_s_schema_reaches_the_ledger(client):
+    """`silica_record_quiz` is the other way a line is written, and its schema
+    is prompt bytes: a field the model is told about must land."""
+    from silica.tools.atomic import QuizResult, silica_record_quiz
+
+    full = {"path": "ML/Iperpiano.md", "correct": False, "concepts": ["c"], "q": "q", "anchor": "#h", "rating": 2, "kind": "explain",
+            "level": 3, "conf": 70, "source": {"leaf": "sources/Lezione 11.md", "line": 2}, "grader": "model", "grader_rating": 3,
+            "hints": 1, "told": True, "paraphrase": True, "misconception": "m", "session": "s", "plan": "Plans/ML.md",
+            "objective": "explain", "point": 1}
+    assert set(full) == set(QuizResult.model_fields)
+    assert silica_record_quiz(results=[full])["recorded"] == 1
+    line = json.loads(quiz.log_path().read_text(encoding="utf-8").splitlines()[-1])
+    assert set(full) <= set(line)

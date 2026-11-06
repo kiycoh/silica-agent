@@ -32,7 +32,7 @@ def _ordered(paths: list[str]) -> list[str]:
     prereqs = {ledger_key(k): v for k, v in learner.prerequisites_map().items()}
     place = {p: i for i, p in enumerate(paths)}
     rows = [{"path": p} for p in paths]
-    return [r["path"] for r in learner._topological(rows, prereqs, lambda r: place[r["path"]])]
+    return [r["path"] for r in learner.topological(rows, prereqs, lambda r: place[r["path"]])]
 
 
 def step_paths(plan: dict, notes: dict | None = None) -> list[list[str]]:

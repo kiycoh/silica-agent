@@ -247,7 +247,7 @@ def _prereq_disk(sig: str, value: dict[str, list[str]] | None = None) -> dict[st
         return None
 
 
-def _topological(rows: list[dict], prereqs: dict[str, list[str]], order_key) -> list[dict]:
+def topological(rows: list[dict], prereqs: dict[str, list[str]], order_key) -> list[dict]:
     """Kahn's order over the prerequisite edges among `rows`, ties by `order_key`.
 
     A note with an unknown or out-of-scope prerequisite is free (no edge). A
@@ -357,7 +357,7 @@ def review_queue(
         state_key = lambda r: (r["R"] is not None, r["R"] if r["R"] is not None else 0.0)
         # Prerequisite order is the syllabus order /learn asks for; within a
         # rank the old unknown-first order stands.
-        return _topological(scoped, prereq_keys, state_key)
+        return topological(scoped, prereq_keys, state_key)
 
     gain = gain_fn(entries, _store)
 

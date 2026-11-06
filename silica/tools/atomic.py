@@ -1771,8 +1771,9 @@ class QuizResult(BaseModel):
     point: int | None = Field(default=None, description="The key point of the note the question covered (the item's `point.i`)")
 
 
-_V2_KEYS = ("rating", "kind", "level", "conf", "source", "grader", "grader_rating", "hints",
-            "told", "paraphrase", "misconception", "session", "plan", "objective", "point")
+# The schema's fields past the legacy line's, read off it so a new one is not
+# dropped here without a word.
+_V2_KEYS = tuple(k for k in QuizResult.model_fields if k not in ("path", "correct", "concepts", "q", "anchor"))
 
 
 @tool(cls="atomic")
