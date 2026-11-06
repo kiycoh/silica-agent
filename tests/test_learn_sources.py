@@ -100,9 +100,9 @@ def course(tmp_vault, tmp_path, monkeypatch):
 
 
 def _notes():
-    from silica.kernel.learn.learner import _notes_meta
+    from silica.kernel.base import note_index
 
-    return _notes_meta(plans._vault())
+    return note_index.meta(plans._vault())
 
 
 def _stems(paths) -> list[str]:

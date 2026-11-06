@@ -196,13 +196,11 @@ def stamp_native(nodes: list[dict], vault: Path) -> None:
     still one. `AI:` is not the test: it says who wrote a body, and every
     note /nucleate writes carries it.
 
-    Its own read and not learner._notes_meta, which already walks the same
-    files: importing kernel.report from here pulls codegraph into the recall
-    lanes and breaks the import contract. The YAML parse is the cost, so only
-    a note whose text names one of the two keys is parsed: 211 ms to 21 ms on
-    the 730-note test vault (2026-10-07). ponytail: still one read per note per
-    build; memoize on vault_epoch as _notes_meta does if a 5k-note vault makes
-    /graph wait on it.
+    Its own read and not the note index, which parses every note: the YAML is
+    the cost, so only a note whose text names one of the two keys is parsed,
+    211 ms to 21 ms on the 730-note test vault (2026-10-07). ponytail: still one
+    read per note per build; memoize on vault_epoch as note_index.meta does if a
+    5k-note vault makes /graph wait on it.
     """
     from silica.kernel.base import frontmatter
     from silica.kernel.base.noteshape import EVENT, PLAN, READING, is_event, is_plan, type_word

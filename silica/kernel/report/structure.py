@@ -526,7 +526,7 @@ def bursting(*, k: int = 12) -> list[dict]:
     Rebuilt here rather than read off the report because the report's
     co-occurrence depth measured 9.39 s cold and the calendar is a tab you
     flip to. This pass needs the store's note -> stems map and one creation
-    timestamp per note, which is the same `_created_and_ai` the report reads,
+    timestamp per note, which is the same `created_and_ai` the report reads,
     falling back to the file's mtime exactly as it does: the two surfaces then
     burst on the same window or neither does.
     """
@@ -554,7 +554,7 @@ def _build_burst(k: int) -> list[dict]:
     from silica.driver.base import NoteRef
     from silica.kernel.recall.cooccurrence import get_cooccur_store
     from silica.kernel.graph.signals import burst
-    from silica.kernel.learn.learner import _created_and_ai
+    from silica.kernel.base.note_index import created_and_ai
 
     store = get_cooccur_store()
     if len(store) == 0:
@@ -577,7 +577,7 @@ def _build_burst(k: int) -> list[dict]:
             mt = mtime_of(gid) if mtime_of else None
         except Exception:
             continue  # a note the index knows and the disk no longer has
-        ts, _ai = _created_and_ai(content, mt if mt is not None else 0.0)
+        ts, _ai = created_and_ai(content, mt if mt is not None else 0.0)
         if mt is not None or ts:
             created[key] = ts
     stems = {p: dict(store.note_nodes(p)) for p in in_graph}

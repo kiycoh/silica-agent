@@ -10,7 +10,7 @@ import math
 import time
 from datetime import datetime, timezone
 
-from silica.kernel.base import noteshape
+from silica.kernel.base import note_index, noteshape
 from silica.kernel.base.notekey import ledger_key
 from silica.kernel.learn import learner
 
@@ -248,7 +248,7 @@ def test_an_event_note_is_not_study_material(tmp_vault):
 
     from silica.config import CONFIG
 
-    meta = learner._notes_meta(Path(CONFIG.vault_path))
+    meta = note_index.meta(Path(CONFIG.vault_path))
     assert not noteshape.is_material(meta["Cal/Lab session.md"])
     assert noteshape.is_material(meta["Bio/cell.md"])
 
@@ -268,7 +268,7 @@ def test_the_pipelines_staging_and_its_log_are_not_the_readers_notes(tmp_vault):
     tmp_vault.note("log.md", "- 2026-10-26 · nucleate `Adam-1-adam.md` → 10 new\n")
     tmp_vault.note("Papers/Adam Update Rule.md", "---\nAI: true\n---\n\n# Adam Update Rule\n")
 
-    meta = learner._notes_meta(Path(CONFIG.vault_path))
+    meta = note_index.meta(Path(CONFIG.vault_path))
     assert {p for p, m in meta.items() if noteshape.is_material(m)} == {"Papers/Adam Update Rule.md"}
     # still walked: a workspace may list an inbox handout
     assert "Inbox/Adam/Adam-2-references.md" in meta

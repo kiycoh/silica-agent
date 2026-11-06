@@ -50,20 +50,20 @@ def make_vault(root: Path, n: int) -> Path:
 
 
 def bench_learner_memo(root: Path) -> None:
-    from silica.kernel.learn import learner
+    from silica.kernel.base import note_index
 
     for n in SIZES:
         vault = make_vault(root / "learner", n) if not (root / "learner" / f"vault_{n}").exists() else root / "learner" / f"vault_{n}"
 
         def off():
-            learner._meta_memo.clear()
-            learner._notes_meta(vault)
+            note_index._meta_memo.clear()
+            note_index.meta(vault)
 
         off()  # warm the fs cache so both arms read hot files
         off_ms = timed(off)
-        learner._meta_memo.clear()
-        learner._notes_meta(vault)          # populate the memo
-        on_ms = timed(lambda: learner._notes_meta(vault))  # epoch hit
+        note_index._meta_memo.clear()
+        note_index.meta(vault)          # populate the memo
+        on_ms = timed(lambda: note_index.meta(vault))  # epoch hit
         RESULTS.append(("learner epoch memo (repeat call)", n, off_ms, on_ms))
 
 

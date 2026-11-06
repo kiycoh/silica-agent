@@ -16,6 +16,7 @@ import logging
 import re
 from pathlib import Path
 
+from silica.kernel.base import note_index
 from silica.kernel.base.noteshape import is_material
 from silica.kernel.learn.items import LEVEL_OF
 from silica.kernel.learn.schedule import DUE_R, events_by_key
@@ -61,7 +62,6 @@ def contrast_pairs(notes: dict[str, dict]) -> list[tuple[str, str]]:
     it. Kill by 2026-12-31 if the ledger shows zero `contrast` events.
     """
     from silica.config import CONFIG
-    from silica.kernel.learn import learner
     from silica.kernel.write.templates import parse_related_traces
 
     vault = Path(CONFIG.vault_path)
@@ -76,7 +76,7 @@ def contrast_pairs(notes: dict[str, dict]) -> list[tuple[str, str]]:
             out.append((a, b))
 
     for path in notes:
-        parsed = learner.parsed_note(vault, path)
+        parsed = note_index.parsed(vault, path)
         if parsed is None:
             continue
         data, body = parsed
@@ -96,14 +96,13 @@ def conflicts(notes: dict[str, dict]) -> list[str]:
     (provenance drift). ponytail: pool D; kill by 2026-12-31 with zero
     `contradiction` events in the ledger."""
     from silica.config import CONFIG
-    from silica.kernel.learn import learner
     from silica.kernel.write.provenance import drifted_notes
     from silica.kernel.base.notekey import note_key
 
     vault = Path(CONFIG.vault_path)
     out: list[str] = []
     for path in notes:
-        parsed = learner.parsed_note(vault, path, body=False)
+        parsed = note_index.parsed(vault, path, body=False)
         if parsed is None:
             continue
         data = parsed[0]
@@ -187,7 +186,7 @@ def session(
     if notes is None:
         from silica.config import CONFIG
 
-        notes = learner._notes_meta(Path(CONFIG.vault_path))
+        notes = note_index.meta(Path(CONFIG.vault_path))
     days_left = _days_to(deadline, now)
     cold = frozenset(scope) if days_left is not None and scope is not None else frozenset()
     rows = learner.view(now_ts=now, _notes_override=notes, _entries_override=entries, cold=cold)

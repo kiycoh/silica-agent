@@ -19,6 +19,7 @@ import statistics
 from collections import Counter
 from pathlib import Path
 
+from silica.kernel.base import note_index
 from silica.kernel.base.layout import is_source_leaf
 from silica.kernel.base.syntax import WIKILINK_TARGET_RE
 
@@ -109,8 +110,6 @@ def collections(notes: dict, allowed: set[str]) -> list[dict]:
     split into segments), else by the leaf's folder (a series). The hub note
     is no key: the course's book hub was merged into another note
     (2026-10-25). Computed once per notes-meta epoch and bound."""
-    from silica.kernel.learn.learner import parsed_note
-
     spines = sorted((p for p in allowed if notes.get(p, {}).get("spine")), key=natural_key)
     memo_key = (str(_vault()), tuple(spines), tuple(notes[p].get("mtime", 0) for p in spines))
     if memo_key in _MEMO:
@@ -122,7 +121,7 @@ def collections(notes: dict, allowed: set[str]) -> list[dict]:
         if not links:
             continue   # an outline the reader wrote: no source behind it
         leaf = links[0].removesuffix(".md")
-        parsed = parsed_note(vault, leaf + ".md", body=False)
+        parsed = note_index.parsed(vault, leaf + ".md", body=False)
         data = (parsed[0] if parsed else None) or {}
         found.append((sp, leaf, str(data.get("source_file") or "")))
     shared = Counter(sf for _sp, _l, sf in found if sf)

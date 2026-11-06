@@ -128,13 +128,13 @@ def test_the_roots_are_read_off_the_vault_walked_and_not_the_active_one(confined
 def test_the_timeline_the_calendar_and_learn_leave_a_composed_leaf_out(confined):
     from silica.config import CONFIG  # noqa: F401
     from silica.kernel.calendar import tasks
-    from silica.kernel.learn.learner import _notes_meta
+    from silica.kernel.base import note_index
     from silica.kernel.recall.requires import written_requires
     from silica.kernel.write import timeline
 
     (confined / "silica/sources/Leaf.md").write_text(
         "---\nevent_start: 2026-02-02\nrequires: ['[[A]]']\n---\n- [ ] t 📅 2026-02-03\n", encoding="utf-8")
-    assert "silica/sources/Leaf.md" not in _notes_meta(confined)
+    assert "silica/sources/Leaf.md" not in note_index.meta(confined)
     assert "silica/sources/Leaf.md" not in {r[3] for r in timeline._scan(confined)[0]}
     assert written_requires(confined) == {}
     assert all(t.path != "silica/sources/Leaf.md" for t in tasks.scan_tasks(confined))

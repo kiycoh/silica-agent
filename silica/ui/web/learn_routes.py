@@ -26,7 +26,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from silica.kernel.base import noteshape
+from silica.kernel.base import note_index, noteshape
 from silica.kernel.base.notekey import ledger_key
 from silica.kernel.learn.schedule import DUE_R
 
@@ -289,10 +289,9 @@ def _recent(rows: dict, now: float) -> list[dict]:
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.learn import learner
 
     # the view's rows carry no mtime; the note walk does, and says what is material
-    meta = learner._notes_meta(Path(CONFIG.vault_path))
+    meta = note_index.meta(Path(CONFIG.vault_path))
     fresh = [(m["mtime"], p) for p, m in meta.items()
              if noteshape.is_material(m) and (m.get("mtime") or 0) >= now - RECENT_DAYS * 86400
              and ledger_key(p) in rows]
@@ -584,12 +583,11 @@ def _last_session(entries: list[dict]) -> dict | None:
 
 def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
     from silica.kernel.learn import mastery, objectives as obj, plans
-    from silica.kernel.learn.learner import _notes_meta
 
     # Read once for every title lookup below: steps_passed without it read the
     # vault's notes per step note, 84 epoch walks and 24 s of a 30 s Learn
     # home on a 2,166-note vault (2026-10-23, profiled).
-    notes = _notes_meta(plans._vault())
+    notes = note_index.meta(plans._vault())
     scoped = plans.scope_of(p, notes=notes)
     node = mastery.node_readings(scoped["paths"], rows, entries, p.get("created"), p["objectives"])
     frontier = scoped["frontier"]
@@ -662,7 +660,7 @@ def note_detail(path: str):
     history = _history(path, entries)
     evs = _events_of(entries).get(ledger_key(path), [])
     lately = next((m for m in _missed_lately({ledger_key(path): evs}, _lately_cutoff(entries, now))), None) if evs else None
-    stale_row = {**row, "mtime": (learner._notes_meta(Path(CONFIG.vault_path)).get(path) or {}).get("mtime")}
+    stale_row = {**row, "mtime": (note_index.meta(Path(CONFIG.vault_path)).get(path) or {}).get("mtime")}
     stale_row["stale"] = bool(evs and stale_row["mtime"] and stale_row["mtime"] > (_ts(evs[-1].get("ts")) or now) + 1.0)
     reason = _reason(stale_row, evs, now, misses=lately["misses"] if lately else None)
     also = _also_in(path, scopes)
@@ -779,10 +777,9 @@ def start_session(payload: dict):
             from pathlib import Path
 
             from silica.config import CONFIG
-            from silica.kernel.learn import learner
 
             prefix = scope.casefold()
-            scope = [p for p in learner._notes_meta(Path(CONFIG.vault_path)) if p.casefold().startswith(prefix)]
+            scope = [p for p in note_index.meta(Path(CONFIG.vault_path)) if p.casefold().startswith(prefix)]
         later: set[str] = set()
         if plan is not None:
             later = _placed_notes(plan)
@@ -1613,7 +1610,7 @@ def learn_map():
 
     entries = quiz.entries()
     now = _now()
-    notes = learner._notes_meta(Path(CONFIG.vault_path))
+    notes = note_index.meta(Path(CONFIG.vault_path))
     rows = learner.view(now_ts=now, _notes_override=notes, _entries_override=entries)
     evs_by = _events_of(entries)
     cutoff = _lately_cutoff(entries, now)
@@ -1843,9 +1840,8 @@ def scope_options(q: str = ""):
 
     from silica.config import CONFIG
     from silica.kernel.learn import items, plans
-    from silica.kernel.learn import learner
 
-    notes = learner._notes_meta(Path(CONFIG.vault_path))
+    notes = note_index.meta(Path(CONFIG.vault_path))
     needle = q.strip().casefold()
     folders = plans.folders_of(notes)
     fs = [f for f in folders if needle in f.casefold()] if needle else list(folders)

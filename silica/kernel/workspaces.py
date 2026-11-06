@@ -16,6 +16,7 @@ import threading
 from contextvars import ContextVar
 from pathlib import Path
 
+from silica.kernel.base import note_index
 from silica.kernel.base.notekey import store_key
 from silica.kernel.base.noteshape import NOT_MEMBERS, WORKSPACE, type_word
 
@@ -24,7 +25,6 @@ DEFAULT_FOLDER = "Workspaces"
 
 _WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]+)?\]\]")
 _H1_RE = re.compile(r"^#\s+(.*?)\s*$")
-_fm_memo: dict[str, tuple[str, dict[str, dict]]] = {}  # vault -> (epoch, path -> frontmatter)
 
 
 def _vault() -> Path:
@@ -55,37 +55,6 @@ def title_of(entry: str) -> str:
     """`[[Bayes theorem|Bayes]]` -> `Bayes theorem`; a bare title stays."""
     m = _WIKILINK_RE.search(entry)
     return (m.group(1) if m else entry).strip()
-
-
-def _frontmatters(vault: Path) -> dict[str, dict]:
-    """{path: frontmatter} for every readable note, memoized on the vault's
-    file-state epoch as `_notes_meta` is, since `where:` and `sources:` need
-    every note's properties and a sidebar refresh asks for them often.
-
-    ponytail: one full read per vault change; ADR-0109 point 2 sets the
-    ceiling for the same pass (100 ms at p90 on a 2,000-note vault), cache it
-    per index generation past that.
-    """
-    from silica.kernel.base.layout import vault_epoch
-    from silica.kernel.learn.learner import _notes_meta
-    from silica.kernel.base import frontmatter
-
-    epoch = vault_epoch(str(vault))
-    hit = _fm_memo.get(str(vault))
-    if epoch and hit is not None and hit[0] == epoch:
-        return hit[1]
-    out: dict[str, dict] = {}
-    for path in _notes_meta(vault):
-        try:
-            text = (vault / path).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue  # one unreadable note must not blind the walk
-        data, _raw, _body = frontmatter.split(text)
-        out[path] = data or {}
-    if epoch:
-        _fm_memo.clear()
-        _fm_memo[str(vault)] = (epoch, out)
-    return out
 
 
 def _mirror_copies(paths) -> set[str]:
@@ -126,7 +95,7 @@ def read_workspace(path: str, text: str | None = None) -> dict:
 def list_workspaces() -> list[dict]:
     vault = _vault()
     out = []
-    for path, data in _frontmatters(vault).items():
+    for path, data in note_index.frontmatters(vault).items():
         if not is_workspace(data):
             continue
         try:
@@ -164,7 +133,7 @@ def members(ws: dict) -> dict[str, list[dict]]:
     folder | where | derived, "via": the line or source that brought it}."""
     from silica.kernel.base.layout import in_folder
 
-    fms = _frontmatters(_vault())
+    fms = note_index.frontmatters(_vault())
     mirrors = _mirror_copies(fms)
     material = {p: d for p, d in fms.items()
                 if p not in mirrors and type_word(d) not in NOT_MEMBERS}
@@ -208,7 +177,7 @@ def dead_lines(ws: dict) -> dict[str, list[str]]:
     no longer on disk (renamed outside Silica, ADR-0112 point 1). Named on
     the workspace's row rather than shown as fewer notes."""
     vault = _vault()
-    fms = _frontmatters(vault)
+    fms = note_index.frontmatters(vault)
     stems = {Path(p).stem.casefold() for p in fms}
     notes = [t for t in ws.get("notes", [])
              if (t if t.endswith(".md") else t + ".md") not in fms and Path(t).stem.casefold() not in stems]
@@ -269,7 +238,7 @@ def _link_name(value: str) -> str:
     stem = Path(target).stem
     if "/" not in target:
         return target
-    clash = sum(1 for p in _frontmatters(_vault()) if Path(p).stem.casefold() == stem.casefold())
+    clash = sum(1 for p in note_index.frontmatters(_vault()) if Path(p).stem.casefold() == stem.casefold())
     return stem if clash <= 1 else target
 
 # One writer at a time: add_line/remove_line read the note and write the

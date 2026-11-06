@@ -217,7 +217,7 @@ def compute_report(
             from silica.kernel.link import ofm
             from silica.kernel.base import frontmatter
             from silica.kernel.base.noteshape import SUPERSEDED_MARKER, parse_stamps
-            from silica.kernel.learn.learner import _created_and_ai
+            from silica.kernel.base.note_index import created_and_ai
             from silica.driver import DRIVER
 
             tiers: Counter = Counter()
@@ -241,7 +241,7 @@ def compute_report(
                         if isinstance(srcs, list):
                             sources_of[nid] = [str(x) for x in srcs if isinstance(x, (str, int))]
                     mt = mtimes.get(nid)
-                    ts_created, _ai = _created_and_ai(nc.content, mt if mt is not None else 0.0)
+                    ts_created, _ai = created_and_ai(nc.content, mt if mt is not None else 0.0)
                     if mt is not None or ts_created != 0.0:
                         created_ts[nid] = ts_created
                     tiers[contested_kernel.reliability_tier(nc.content)] += 1

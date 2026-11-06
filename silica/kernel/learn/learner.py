@@ -20,151 +20,15 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
-from silica.kernel.base import noteshape
+from silica.kernel.base import note_index, noteshape
 from silica.kernel.base.notekey import ledger_key
 from silica.kernel.learn.schedule import DUE_R, WEAK_R, note_state, view  # noqa: F401  re-exported v1 names
 
 logger = logging.getLogger(__name__)
 
 DAY = 86400.0
-
-
-def _created_and_ai(text: str, mtime: float) -> tuple[float, bool]:
-    """A note's creation timestamp and authorship from its own frontmatter."""
-    ts, ai, _kind, _extra = _note_meta(text, mtime)
-    return ts, ai
-
-
-def _note_meta(text: str, mtime: float) -> tuple[float, bool, str, dict]:
-    """(created ts, AI-authored, frontmatter `type`, extras) from one parse.
-    The extras hold what Learn's title lookups read, only when present: the
-    winner a merge loser points at, the note's aliases, whether it is a
-    lesson spine.
-
-    Same date precedence as the timeline: explicit `date:` outranks the claim
-    clock, and a note that states neither falls back to mtime — the ceiling
-    AttentionCandidate already lives with. The type rides along so the
-    pickers can keep plan and syllabus notes out of the study material.
-    """
-    from silica.kernel.base import frontmatter
-    from silica.kernel.base.noteshape import is_spine, note_clock, note_kind
-
-    data, _raw, _body = frontmatter.split(text)
-    date = (data or {}).get("date") or note_clock(text)
-    ts = mtime
-    if date:
-        try:
-            ts = datetime.strptime(str(date)[:10], "%Y-%m-%d").replace(
-                tzinfo=timezone.utc
-            ).timestamp()
-        except ValueError:
-            pass  # unparseable statement: keep the mtime proxy
-    data = data or {}
-    extra: dict = {}
-    winner = _WINNER_RE.search(str(data.get("superseded_by") or ""))
-    if winner:
-        extra["winner"] = winner.group(1).strip()
-    aliases = data.get("aliases")
-    aliases = [aliases] if isinstance(aliases, str) else aliases
-    if isinstance(aliases, list) and aliases:
-        extra["aliases"] = [str(a).strip() for a in aliases if str(a).strip()]
-    if is_spine(data):
-        extra["spine"] = True
-    return ts, bool(data.get("AI")), note_kind(data), extra
-
-
-_WINNER_RE = re.compile(r"\[\[([^\]|#]+)")
-
-
-_meta_memo: dict[str, tuple[str, dict[str, dict]]] = {}  # vault -> (epoch, meta)
-_parsed_memo: dict[str, tuple[float, Any]] = {}  # file -> (mtime, frontmatter)
-
-
-def parsed_note(vault: Path, path: str, *, body: bool = True) -> tuple[Any, str] | None:
-    """(frontmatter, body) of a note, its YAML parsed once per mtime; None when
-    it cannot be read. A Learn session read every note's YAML three times
-    (contrast pairs, conflicts, the plan list), about 4 s each on a 2,166-note
-    vault (2026-10-23, profiled). The frontmatter is shared: read it, never
-    change it.
-
-    The memo holds no body: the YAML was the cost, and the bodies were a whole
-    second copy of the vault, 102 MiB of t20's 1 GB before anyone opened Learn
-    (2026-11-06). body=False is for a caller that wants the frontmatter alone:
-    a hit then opens no file, and the body comes back empty."""
-    from silica.kernel.base import frontmatter
-
-    f = vault / path
-    try:
-        mtime = f.stat().st_mtime
-    except OSError:
-        return None
-    hit = _parsed_memo.get(str(f))
-    if hit is not None and hit[0] != mtime:
-        hit = None
-    if hit is not None and not body:
-        return hit[1], ""
-    try:
-        text = f.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
-    if hit is not None:
-        m = frontmatter.FM_RE.match(text)
-        return hit[1], text[m.end():] if m else text
-    data, _raw, rest = frontmatter.split(text)
-    _parsed_memo[str(f)] = (mtime, data)
-    return data, rest if body else ""
-
-
-
-
-def _notes_meta(vault: Path) -> dict[str, dict]:
-    """{relative path: {"created": ts, "ai": bool}} for every readable note.
-
-    Timeline's walk verbatim: dot-dirs, .silicaignore matches and the verbatim
-    sources dir are not the reader's notes. The pipeline's own staging (the
-    inbox, the archive, the run log) is walked, since a workspace may list an
-    inbox handout, but its kind is "staged", which is not study material.
-    Memoized on the vault's file-state epoch like timeline._all_rows: repeated
-    digest reads between vault changes cost one stat walk instead of a full
-    re-parse.
-    """
-    from silica.kernel.base.layout import is_staging_path, iter_notes, vault_epoch
-    from silica.kernel.base.noteshape import STAGED
-
-    epoch = vault_epoch(str(vault))
-    if epoch:
-        hit = _meta_memo.get(str(vault))
-        if hit is not None and hit[0] == epoch:
-            return hit[1]
-
-    out: dict[str, dict] = {}
-    for rel, f in iter_notes(vault):
-        try:
-            text = f.read_text(encoding="utf-8")
-            mtime = f.stat().st_mtime
-        except (OSError, UnicodeDecodeError):
-            continue  # one unreadable note must not blind the view
-        created, ai, kind, extra = _note_meta(text, mtime)
-        # Converted text waiting in the inbox or filed in the archive carries
-        # the paper's own `date:` and no `AI: true`, so it read as notes the
-        # reader wrote years ago: a fresh vault of six papers opened Learn on
-        # "8 questions waiting from earlier sessions", a references segment
-        # among them (2026-10-26).
-        if is_staging_path(rel):
-            kind = STAGED
-        # mtime rides along for the picker's freshness rule (learn-suite D13):
-        # a note edited after its last rating is asked as new material.
-        out[rel] = {"created": created, "ai": ai, "mtime": mtime, "kind": kind, **extra}
-
-    if epoch:
-        _meta_memo.clear()
-        _meta_memo[str(vault)] = (epoch, out)
-    return out
-
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -266,7 +130,7 @@ def prerequisites_map() -> dict[str, list[str]]:
             _prereq_disk(sig, prereq_map)
         # After the disk cache, which keys on the links and the index alone:
         # an edit to `requires:` moves the epoch and lands here, not there.
-        prereq_map = with_written(drop_structural(prereq_map, _notes_meta(Path(vault))),
+        prereq_map = with_written(drop_structural(prereq_map, note_index.meta(Path(vault))),
                                   _written_keys(vault))
         if epoch:
             _prereq_memo.clear()
@@ -462,7 +326,7 @@ def review_queue(
     if notes_meta is None:
         from silica.config import CONFIG
 
-        notes_meta = _notes_meta(Path(CONFIG.vault_path))
+        notes_meta = note_index.meta(Path(CONFIG.vault_path))
     rows = view(now_ts=now_ts, _notes_override=notes_meta, _entries_override=entries)
 
     def why(r: dict) -> str:

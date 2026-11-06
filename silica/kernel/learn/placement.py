@@ -15,6 +15,7 @@ and never stored, and placed is not passed (`mastery.steps_passed`).
 """
 from __future__ import annotations
 
+from silica.kernel.base import note_index
 from silica.kernel.base.notekey import ledger_key
 
 PER_STEP = 2
@@ -40,9 +41,8 @@ def step_paths(plan: dict, notes: dict | None = None) -> list[list[str]]:
     it on every call, 0.08 s a title, which made a 241-note plan's page 27 s
     slower (measured 2026-10-27)."""
     from silica.kernel.learn import plans
-    from silica.kernel.learn import learner
 
-    notes = notes if notes is not None else learner._notes_meta(plans._vault())
+    notes = notes if notes is not None else note_index.meta(plans._vault())
     out = []
     for step in plan.get("steps") or []:
         seen: list[str] = []

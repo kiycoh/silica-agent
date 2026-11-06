@@ -1994,10 +1994,10 @@ def silica_learn_items(n: Annotated[int, Field(description='Session size (defaul
             scope, frontier, revisit, plan_path = scoped["paths"], scoped["frontier"], scoped["revisit"], plan["path"]
         else:
             from silica.config import CONFIG
-            from silica.kernel.learn import learner
+            from silica.kernel.base import note_index
 
             prefix = t.replace("\\", "/").casefold()
-            notes = learner._notes_meta(Path(CONFIG.vault_path))
+            notes = note_index.meta(Path(CONFIG.vault_path))
             scope = [p for p in notes if p.casefold().startswith(prefix)]
     from silica.kernel.workspaces import active_scope
 

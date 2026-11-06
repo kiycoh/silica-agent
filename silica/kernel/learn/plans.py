@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from silica.kernel.base import note_index
 from silica.kernel.base.notekey import ledger_key
 from silica.kernel.base.noteshape import is_plan
 
@@ -57,12 +58,11 @@ def list_plans() -> list[dict]:
     ponytail: scans every note's frontmatter on request; index it when the
     vault passes 5k notes.
     """
-    from silica.kernel.learn.learner import _notes_meta, parsed_note
 
     vault = _vault()
     out = []
-    for path in _notes_meta(vault):
-        parsed = parsed_note(vault, path, body=False)
+    for path in note_index.meta(vault):
+        parsed = note_index.parsed(vault, path, body=False)
         if parsed is None or not is_plan(parsed[0]):
             continue
         try:
@@ -263,9 +263,8 @@ def resolve_title(name: str, notes: dict | None = None) -> str | None:
     merge loser resolves to the note it points at: a dedup pass made
     "Retropropagazione" a loser of "Backpropagation", and a syllabus that
     names retropropagazione called it not in the vault (2026-10-23)."""
-    from silica.kernel.learn.learner import _notes_meta
 
-    notes = notes if notes is not None else _notes_meta(_vault())
+    notes = notes if notes is not None else note_index.meta(_vault())
     hit = _by_name(name, notes)
     for _hop in range(3):   # a chain of merges, never a loop
         winner = hit and notes[hit].get("winner")
@@ -351,9 +350,8 @@ def resolve_scope(kind: str, target, restrict: str = "", refused=(), declared: d
     until new-material targets (extension 1) exist.
     """
     from silica.kernel.base.noteshape import is_material
-    from silica.kernel.learn.learner import _notes_meta
 
-    notes = _notes_meta(_vault())
+    notes = note_index.meta(_vault())
     # A note's path is a prefix of itself only, so a list of notes and a
     # folder bound a reference by the same test
     bounds = tuple(b.strip().casefold() for b in str(restrict or "").split(RESTRICT_SEP) if b.strip())
@@ -444,9 +442,8 @@ def _topic_scope(term: str, allowed: set[str]) -> dict:
     except Exception as exc:
         logger.debug("learn: topic scope without the store (%s)", exc)
         posting, neighbours = {}, []
-    from silica.kernel.learn.learner import _notes_meta
 
-    notes = _notes_meta(_vault())
+    notes = note_index.meta(_vault())
     # Carriers ranked by how much of the term they carry, the way silica_concepts lists them.
     ranked = [p for p, _c in sorted(posting.items(), key=lambda kv: (-kv[1], kv[0]))]
     paths: list[str] = []
@@ -1692,9 +1689,8 @@ def scope_of(plan: dict, notes: dict | None = None) -> dict:
     The vault's notes are read once and handed to every title lookup: each
     lookup used to read them itself, a vault walk per note, and a plan of 16
     syllabus steps over 60 notes took 56 s to open (2026-10-23, profiled)."""
-    from silica.kernel.learn.learner import _notes_meta
 
-    notes = notes if notes is not None else _notes_meta(_vault())
+    notes = notes if notes is not None else note_index.meta(_vault())
     if plan["scope"] == "steps":
         paths: list[str] = []
         for s in plan["steps"]:
@@ -2188,7 +2184,6 @@ def lecture_gaps(plan: dict, notes: dict | None = None) -> tuple[list[str], int]
     (all of them for one or two), read as roots so a plural meets its
     singular; activity lines and lines still glued are not judged."""
     from silica.kernel.learn import sources as so
-    from silica.kernel.learn.learner import _notes_meta
 
     # 5.6 s on the course's 32 decks, most of it the title vectors: once per
     # plan note as written, since its syllabus and its folder are the input
@@ -2198,7 +2193,7 @@ def lecture_gaps(plan: dict, notes: dict | None = None) -> tuple[list[str], int]
         key = None
     if key and key in _GAPS_CACHE:
         return _GAPS_CACHE[key]
-    notes = notes if notes is not None else _notes_meta(_vault())
+    notes = notes if notes is not None else note_index.meta(_vault())
     material, _role, _body, rows = _material_of(plan, notes)
     decks = [so.leaf_roots(leaf) for c in material for leaf in c["leaves"]]
     decks = [d for d in decks if d]
@@ -2247,7 +2242,7 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
     view = view if view is not None else learner.view(_entries_override=entries)
     from silica.kernel.learn import objectives as obj
 
-    notes = learner._notes_meta(_vault())  # read once: every title lookup below uses it
+    notes = note_index.meta(_vault())  # read once: every title lookup below uses it
     scoped = scope_of(plan, notes)
     paths = scoped["paths"]
     since = plan.get("created")
@@ -2710,17 +2705,16 @@ def guide_candidates(restrict: str = "") -> list[str]:
     table whose header names a depth or a difficulty (ADR-0131 point 11),
     as a study guide writes one. Read once per notes epoch and bound."""
     from silica.kernel.base.noteshape import is_material
-    from silica.kernel.learn.learner import _notes_meta, parsed_note
 
     vault = _vault()
-    notes = _notes_meta(vault)
+    notes = note_index.meta(vault)
     bounds = tuple(b.strip().casefold() for b in str(restrict or "").split(RESTRICT_SEP) if b.strip())
     paths = sorted(p for p, m in notes.items() if is_material(m) and (not bounds or p.casefold().startswith(bounds)))
     key = (str(vault), bounds, len(paths), max((notes[p].get("mtime", 0) for p in paths), default=0))
     if key not in _GUIDES_MEMO:
         found = []
         for p in paths:
-            parsed = parsed_note(vault, p)
+            parsed = note_index.parsed(vault, p)
             body = parsed[1] if parsed else ""
             if "|" in body and _GUIDE_HEAD_RE.search(body) and any(r.get("depth") for r in reference_rows(body)):
                 found.append(p)
@@ -3069,9 +3063,8 @@ _READ_FIELD_RE = re.compile(r"^\s*(KIND|TARGET|ONLY_IN|NAME)\s*:\s*(.*?)\s*$", r
 
 def folders_of(notes: dict | None = None) -> dict[str, int]:
     """{folder path with a trailing slash: notes under it, subfolders included}."""
-    from silica.kernel.learn.learner import _notes_meta
 
-    notes = notes if notes is not None else _notes_meta(_vault())
+    notes = notes if notes is not None else note_index.meta(_vault())
     out: dict[str, int] = {}
     for p, m in notes.items():
         if m.get("kind") in ("plan", "syllabus"):
@@ -3217,7 +3210,6 @@ def read_sentence(sentence: str, today=None) -> dict:
     import time
 
     from silica.kernel.learn.items import _llm
-    from silica.kernel.learn.learner import _notes_meta
 
     sentence = " ".join(str(sentence or "").split())[:1200]
     by, why_date = read_date(sentence, today)
@@ -3227,7 +3219,7 @@ def read_sentence(sentence: str, today=None) -> dict:
         out["said"].append(why_date)
     if not sentence:
         return out
-    notes = _notes_meta(_vault())
+    notes = note_index.meta(_vault())
     folders = folders_of(notes)
     listed = sorted(folders, key=lambda f: (f.count("/") > 2, -folders[f], f))[:80]
     t0 = time.monotonic()

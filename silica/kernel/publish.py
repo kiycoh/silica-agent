@@ -489,10 +489,10 @@ def state(path: str, fm: dict, items: list[dict], dirs: tuple[str, ...]) -> str:
 
 
 def frontmatters(vault: Path | None = None) -> dict[str, dict]:
-    """{path: frontmatter} of every note, the walk Workspaces already memoizes."""
-    from silica.kernel.workspaces import _frontmatters
+    """{path: frontmatter} of every note, from the note index."""
+    from silica.kernel.base import note_index
 
-    return _frontmatters(vault or _vault())
+    return note_index.frontmatters(vault or _vault())
 
 
 def selection(vault: Path | None = None) -> dict:

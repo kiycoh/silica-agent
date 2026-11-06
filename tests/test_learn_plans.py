@@ -190,22 +190,22 @@ def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_wha
     assert deep["gap"] is True and deep["missing"] == ["Dropout", "apprendimento multi-task"]
     # a hyphenated topic meets its joined title
     vault.note("ML/AdaBoost.md", "# AdaBoost\n")
-    from silica.kernel.learn.learner import _notes_meta
+    from silica.kernel.base import note_index
     from pathlib import Path as _P
     from silica.config import CONFIG as _C
-    found, missing = plans._topic_notes(["ada-boost", "random forest"], _notes_meta(_P(_C.vault_path)),
+    found, missing = plans._topic_notes(["ada-boost", "random forest"], note_index.meta(_P(_C.vault_path)),
                                         {"ML/AdaBoost.md"})
     assert found == ["ML/AdaBoost.md"] and missing == ["random forest"]
     # a one-word topic names a whole title, never one that merely holds the word
     vault.note("ML/Ottimizzazione del codice.md", "# x\n")
     vault.note("ML/Pooling.md", "# x\n")
-    meta = _notes_meta(_P(_C.vault_path))
+    meta = note_index.meta(_P(_C.vault_path))
     found, missing = plans._topic_notes(["ottimizzazione", "pooling"], meta,
                                         {"ML/Ottimizzazione del codice.md", "ML/Pooling.md"})
     assert found == ["ML/Pooling.md"] and missing == ["ottimizzazione"]
     # ...unless the rest of the title is what the block lists too
     vault.note("ML/Underfitting e overfitting.md", "# x\n")
-    meta = _notes_meta(_P(_C.vault_path))
+    meta = note_index.meta(_P(_C.vault_path))
     found, missing = plans._topic_notes(["overfitting", "underfitting", "ottimizzazione"], meta,
                                         {"ML/Underfitting e overfitting.md", "ML/Ottimizzazione del codice.md"})
     assert found == ["ML/Underfitting e overfitting.md"] and missing == ["ottimizzazione"]
@@ -522,9 +522,9 @@ def _meta_and_material():
 
     from silica.config import CONFIG
     from silica.kernel.base.noteshape import is_material
-    from silica.kernel.learn.learner import _notes_meta
+    from silica.kernel.base import note_index
 
-    meta = _notes_meta(Path(CONFIG.vault_path))
+    meta = note_index.meta(Path(CONFIG.vault_path))
     return meta, {p for p, m in meta.items() if is_material(m)}
 
 
@@ -561,7 +561,7 @@ def test_a_many_word_topic_meets_its_note_by_meaning(vault, monkeypatch):
     from silica.model import providers
     import silica.kernel.recall.embed as embed
     from silica.config import CONFIG
-    from silica.kernel.learn.learner import _notes_meta
+    from silica.kernel.base import note_index
 
     vault.note("ML/Iniezione di rumore negli input.md", "# x\n")
     vault.note("ML/Diversità architetturale.md", "# x\n")
@@ -588,14 +588,14 @@ def test_a_many_word_topic_meets_its_note_by_meaning(vault, monkeypatch):
     monkeypatch.setattr(providers, "get_embedder_or_none", lambda *a, **kw: Embedder())
     monkeypatch.setattr(CONFIG, "sim_title_threshold", 0.709)
     allowed = {"ML/Iniezione di rumore negli input.md", "ML/Diversità architetturale.md"}
-    found, missing = plans._topic_notes(["noise injection", "architettura"], _notes_meta(Path(CONFIG.vault_path)), allowed)
+    found, missing = plans._topic_notes(["noise injection", "architettura"], note_index.meta(Path(CONFIG.vault_path)), allowed)
     assert found == ["ML/Iniezione di rumore negli input.md"] and missing == ["architettura"]
     monkeypatch.setattr(CONFIG, "sim_title_threshold", 0.8)   # below the band: still not in the vault
-    assert plans._topic_notes(["noise injection"], _notes_meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
+    assert plans._topic_notes(["noise injection"], note_index.meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
     # inside the dedup band but under the plan's floor: a judge may see it, a plan does not link it
     monkeypatch.setattr(CONFIG, "sim_title_threshold", 0.709)
     scores["noise"]["ML/Iniezione di rumore negli input"] = 0.729
-    assert plans._topic_notes(["noise injection"], _notes_meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
+    assert plans._topic_notes(["noise injection"], note_index.meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
     # a link met by meaning is marked in the plan note, the one to check
     scores["noise"]["ML/Iniezione di rumore negli input"] = 0.79
     out = plans.write_plan("Esame", "steps", "Reti profonde: noise injection, architettura", restrict="ML/", cards=[])

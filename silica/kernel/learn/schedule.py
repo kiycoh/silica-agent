@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from fsrs import Card, Rating, Scheduler, State
 
+from silica.kernel.base import note_index
 from silica.kernel.base.notekey import ledger_key
 
 # No intra-day steps: a note is not a card drilled ten minutes apart. Fuzz off:
@@ -142,12 +143,11 @@ def view(
 
     from silica.config import CONFIG
     from silica.kernel.learn import quiz
-    from silica.kernel.learn.learner import _notes_meta
 
     now = now_ts if now_ts is not None else datetime.now(timezone.utc).timestamp()
     notes = _notes_override
     if notes is None:
-        notes = _notes_meta(Path(CONFIG.vault_path))
+        notes = note_index.meta(Path(CONFIG.vault_path))
     entries = _entries_override if _entries_override is not None else quiz.entries()
     events = events_by_key(entries)
     out: dict[str, dict] = {}
