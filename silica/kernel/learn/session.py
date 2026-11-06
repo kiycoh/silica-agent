@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 
 
 class Refused(Exception):
-    """A session action turned away. The text is what the reader is told;
-    `why` is which of WHYS it is, for the surface to say in its own terms."""
+    """A session action turned away. The text is what the reader is told; `why`
+    is BUSY, MISSING, INVALID or NO_MODEL, for a surface to say in its own terms."""
 
     def __init__(self, why: str, text: str):
         super().__init__(text)
