@@ -31,6 +31,8 @@ pkgs=(
   @codemirror/language@6.12.4
   @codemirror/lang-markdown@6.5.2
   @lezer/markdown@1.7.2
+  @codemirror/autocomplete@6.20.4
+  @codemirror/search@6.7.2
   esbuild@0.28.2
 )
 npm init -y >/dev/null
@@ -38,13 +40,15 @@ npm install --silent --no-audit --no-fund "${pkgs[@]}"
 
 cat > entry.js <<'JS'
 export { EditorState, EditorSelection, StateField, StateEffect, RangeSetBuilder, Prec, Transaction } from "@codemirror/state";
-export { EditorView, Decoration, WidgetType, keymap, drawSelection, placeholder } from "@codemirror/view";
+export { EditorView, Decoration, WidgetType, keymap, drawSelection, placeholder, showTooltip, tooltips } from "@codemirror/view";
 export { defaultKeymap, history, historyKeymap, indentMore, indentLess } from "@codemirror/commands";
 export { Language, LanguageSupport, syntaxTree, ensureSyntaxTree } from "@codemirror/language";
 export { markdownLanguage, markdownKeymap } from "@codemirror/lang-markdown";
+export { autocompletion, startCompletion } from "@codemirror/autocomplete";
+export { search, searchKeymap, SearchQuery, setSearchQuery, getSearchQuery, findNext, findPrevious, replaceNext, replaceAll, openSearchPanel, closeSearchPanel } from "@codemirror/search";
 JS
 
-banner="/* CodeMirror 6 + Lezer, MIT (c) Marijn Haverbeke and others. Built by scripts/vendor_codemirror.sh from: ${pkgs[*]:0:6} */"
+banner="/* CodeMirror 6 + Lezer, MIT (c) Marijn Haverbeke and others. Built by scripts/vendor_codemirror.sh from: ${pkgs[*]:0:8} */"
 npx esbuild entry.js --bundle --minify --format=iife --global-name=CM \
   --target=es2020 --legal-comments=none --banner:js="$banner" --outfile="$out"
 echo "wrote $out ($(wc -c < "$out") bytes)"

@@ -988,6 +988,7 @@ function restoreYieldedSidebar() {
 // `changes` chip is the way back from it to the text.
 let drawerMode = "note";
 let detailsOn = false; // the note's second view, held for the session (ADR-0075)
+let detailsLent = false; // open for the note at the centre, so they do not stick to the next note
 // The PDF a source came from is its third view (ADR-0129, amended 2026-11-04),
 // held the same way: once it is asked for, every source opened after it opens
 // on its PDF, at the page the note starts, until the text is asked for again.
@@ -1020,6 +1021,8 @@ function syncDrawerMode() {
   $("#node-scope").hidden = drawerMode !== "node";
   $("#node-state").hidden = drawerMode !== "node";
   $("#note-edit").hidden = drawerMode !== "note" || details || raw;
+  $("#note-foot").hidden = $("#note-edit").hidden;
+  $("#note-centre").hidden = $("#note-edit").hidden;
   $("#note-diff").hidden = drawerMode !== "diff";
   $("#node-pane").hidden = drawerMode !== "node" && !details;
   syncRawView(raw);
@@ -1044,7 +1047,9 @@ function syncDrawerMode() {
 
 // A vault switch leaves nothing of the old vault to reopen.
 function forgetDrawer() {
-  if (notePanel.classList.contains("open")) closeNote();
+  if (fieldHeld(centreNote)) dropField(centreNote); // its path means nothing in the new vault
+  if (activeTab === "note") showTab("chat"); // lets the note at the centre go, into the vault it came from
+  if (notePanel.classList.contains("open")) closeNote(true);
   lastViewedPath = null;
   nodePicked = false;
   syncDrawerMode();
@@ -1096,6 +1101,7 @@ let openSeq = 0; // two fast opens: only the last one may land
 async function openNote(path, line, facts) {
   if (!path) return;
   const seq = ++openSeq;
+  if (detailsLent) { detailsLent = false; detailsOn = false; } // they were the note at the centre's
   // The note already open, on its text or its details: clicking its node again
   // or a row naming it has nothing new to load, and a reload would drop the
   // caret and the scroll for nothing.
@@ -1109,7 +1115,7 @@ async function openNote(path, line, facts) {
   const held = heldElsewhere(path, drawerNote);
   if (held) { if (held.reveal) held.reveal(line); return false; }
   closeNoteMenu();
-  await releaseNote(); // what was typed into the last note reaches the disk first
+  if (!(await releaseNote())) return false; // what was typed into the last note reaches the disk first
   let data, ed;
   try {
     const [r, loaded] = await Promise.all([fetch("/note/raw?path=" + encodeURIComponent(path)), ensureEditor()]);
@@ -1137,6 +1143,7 @@ async function openNote(path, line, facts) {
   const top = data.paper ? paperStripEl(data.paper)
     : data.saved && typeof savedStripEl === "function" ? savedStripEl(data.saved) : rawTop;
   ed.load(data.text, { top, missing: data.broken || [] });
+  paintFoot(drawerNote);
   focusGraphNode(data.path);
   showDrawer(data.title || data.path);
   ed.view.requestMeasure(); // it was measured while hidden
@@ -1187,6 +1194,8 @@ function setDetails(on) {
   if (on) { rawOn = false; rawFor = null; } // details are asked for over the PDF too: Alt+Enter
   syncDrawerMode();
   if (on && ctxPath !== lastNotePath) loadContext(lastNotePath);
+  // Details of the note at the centre (centreDetails) have no text here to go back to.
+  if (!on && drawerNote.path !== lastNotePath) { closeNote(); return true; }
   if (!on && drawerNote.editor) drawerNote.editor.view.requestMeasure(); // it was measured while hidden
   // The control that was pressed is hidden now: focus goes to the one that
   // took its place, rather than to the page.
@@ -1388,7 +1397,7 @@ window.showNode = showNode;
 async function openDiff(path) {
   if (!path) return;
   closeNoteMenu();
-  await releaseNote(); // the diff has to include what was just typed
+  if (!(await releaseNote())) return; // the diff has to include what was just typed
   lastNotePath = path;
   lastViewedPath = path;
   drawerMode = "diff";
@@ -1437,7 +1446,13 @@ async function openDiff(path) {
   showDrawer(d.name || path);
 }
 
-function closeNote() {
+function closeNote(force = false) {
+  // Text only the field holds keeps the panel open: shutting it would drop the text.
+  if (fieldHeld(drawerNote)) {
+    if (!force) { sayHeld(drawerNote); return; }
+    dropField(drawerNote); // the note itself is gone, or its vault is
+  }
+  if (detailsLent) { detailsLent = false; detailsOn = false; }
   closeNoteMenu();
   releaseNote(); // the save rides on after the panel is shut
   notePanel.classList.remove("open");
@@ -1573,9 +1588,9 @@ window.openLadder = (note) => {
 // Backslashes too: shlex reads `\"` inside quotes as a quote, so a passage
 // ending in `\` would otherwise swallow its own closing quote.
 const shellQuote = (s) => '"' + String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
-function drawerReader(makeCmd, peekTitle) {
-  if (!lastNotePath || streaming) return; // streaming: send() would no-op — no peek either
-  const cmd = makeCmd(lastNotePath, $("#note-title-text").textContent.trim());
+function drawerReader(makeCmd, peekTitle, path = lastNotePath) {
+  if (!path || streaming) return; // streaming: send() would no-op — no peek either
+  const cmd = makeCmd(path, $("#note-title-text").textContent.trim());
   if (activeTab !== "chat") openPeek(peekTitle || cmd); // on chat the stream is already visible
   send(cmd);
 }
@@ -1583,6 +1598,7 @@ function drawerReader(makeCmd, peekTitle) {
 // Explore and Learn. Calendar and Metrics show none, so there it goes to Chat.
 // Nothing is sent: the reader finishes the question.
 function draftInComposer(draft) {
+  if (activeTab === "note") $("#dock").hidden = false; // the view's writing room, lent for this one question
   const box = activeTab === "chat" ? $("#input") : !$("#dock").hidden ? $("#dock-input") : null;
   if (!box) { prefillChat(draft); return; }
   box.value = draft + box.value;
@@ -1612,6 +1628,7 @@ $("#note-chat").addEventListener("click", () => {
 let noteChipSkip = "";   // the path the next message leaves out
 
 function chatNote() {
+  if (activeTab === "note" && centreNote.path) return centreNote.path;
   const open = notePanel.classList.contains("open") && drawerMode !== "node";
   return open && lastNotePath && lastNotePath !== noteChipSkip ? lastNotePath : "";
 }
@@ -1676,6 +1693,7 @@ function userNote(body, path) {
 }
 // Test me and Explain it (ADR-0119): Learn's home no longer lists every
 // note, so a test on this one starts here. Learn's own functions run them.
+$("#note-find").addEventListener("click", () => { closeNoteMenu(); findInNote(drawerNote); });
 $("#note-test").addEventListener("click", () => { closeNoteMenu(); if (lastNotePath && typeof learnTestNote === "function") learnTestNote(lastNotePath); });
 $("#note-teach").addEventListener("click", () => { closeNoteMenu(); if (lastNotePath && typeof learnExplain === "function") learnExplain(lastNotePath); });
 $("#note-diff-open").addEventListener("click", () => openDiff(lastNotePath));
@@ -1766,11 +1784,29 @@ function noteSession() {
     saving: null,   // the in-flight save; a second one waits for it
     again: false,   // a save asked for while one was in flight
     onRelease: null, // what the place does when its note is let go
+    // ADR-0155 point 10: what the foot line says, from the server's answers.
+    phase: "",      // "" | "saving" | "saved" | "retry" | "conflict"
+    at: null,       // when the server last said saved
+    disk: null,     // a 409's own bytes, for Take the disk's and Compare
+    retry: 0,       // the 5 s timer of a save that failed
+    touched: false, // a save landed since the note was held: the index is owed a refresh
+    broken: [],     // the links that resolve nowhere, as the server last said
+    // a note not yet on disk (ADR-0155 point 7): `folder` is where it will be born
+    fresh: false,
+    folder: "",
+    // the surface: its foot line, its strip, its bar, the box they sit in
+    foot: null,
+    strip: null,
+    bar: null,
+    host: null,
+    // the source check on this session's note (ADR-0110)
+    ck: { path: "", run: null, view: null },
   };
 }
 const noteSessions = [];
 const drawerNote = noteSession();
 noteSessions.push(drawerNote);
+Object.assign(drawerNote, { foot: $("#note-foot"), strip: $("#note-check"), bar: $("#note-selbar"), host: notePanel });
 
 // The session other than `s` that holds this note, if any.
 const heldElsewhere = (path, s) => noteSessions.find((x) => x !== s && x.path && x.path === path) || null;
@@ -1781,6 +1817,8 @@ function holdNote(s, data) {
   if (heldElsewhere(data.path, s)) return false;
   s.path = data.path; s.etag = data.etag; s.clean = data.text;
   s.conflict = false;
+  s.phase = ""; s.at = null; s.disk = null; s.touched = false; s.broken = data.broken || [];
+  clearTimeout(s.retry);
   return true;
 }
 
@@ -1811,9 +1849,11 @@ function sessionHooks(s, extra = {}) {
       body: JSON.stringify({ text }),
     }).then((r) => (r.ok ? r.json() : Promise.reject(r.status))).then((d) => d.html || ""),
     openNote: openLinkedNote,
-    change: () => { s.conflict = false; scheduleSave(s); },
+    change: () => typed(s),
     blur: () => { saveEdit(s); },
     save: () => { saveEdit(s); },
+    keep: (x) => keepWebSource(s, x),
+    extra: () => noteExtensions(s),
     decorate: decorateRendered,
     openAt: (path, line) => openNote(path, line || undefined),
     links: (paths) => paths.map((p) => `[[${mentionLink(p)}]]`), // a tree row dropped on the note
@@ -1829,11 +1869,11 @@ function sessionEditor(s, parent, extra) {
 function ensureEditor() {
   return sessionEditor(drawerNote, noteEdit, {
     blur: () => { saveEdit(drawerNote); recheck(); },
-    select: (view) => { syncSelBar(view); recheck(); },
+    select: (view) => { syncSelBar(view, drawerNote); recheck(); },
   });
 }
 drawerNote.onRelease = () => {
-  if (checkRun) checkRun.abort(); // the verdicts paid for are cached, and come back on reopening
+  if (drawerNote.ck.run) drawerNote.ck.run.abort(); // the verdicts paid for are cached, and come back on reopening
   hideSelBar();
 };
 
@@ -1862,13 +1902,53 @@ function openLinkedNote(target) {
 
 // The field lets go of its note: whatever was typed is on disk first,
 // including a save that was asked for while another was in flight.
-async function releaseNote(s = drawerNote) {
-  if (!s.path) return;
+// `unless`, read once the saves are done: the person came back, so it stays held.
+async function releaseNote(s = drawerNote, unless = null) {
+  if (!s.path) return true;
   if (s.onRelease) s.onRelease();
   await saveEdit(s);
   while (s.saving) await s.saving;
+  if (unless && unless()) return false;
+  // A conflict or a failed save leaves the person's text in the field and
+  // nowhere else, so the field keeps its note: a false here stops the caller
+  // from loading anything over it. Text is never dropped to make room.
+  if (fieldHeld(s)) { sayHeld(s); return false; }
+  // The vectors and the co-occurrence follow the person (ADR-0155 point 18):
+  // once per let-go, here, and not per save. The server's own 60 s timer is what
+  // a page that never lets go falls back on, so a lost call costs a minute.
+  if (s.touched) {
+    fetch("/note/let-go", {
+      method: "POST", headers: { "Content-Type": "application/json" }, keepalive: true,
+      body: JSON.stringify({ path: s.path }),
+    }).catch(() => { /* the 60 s timer still runs */ });
+  }
   s.path = ""; s.etag = ""; s.clean = ""; s.conflict = false;
+  s.phase = ""; s.at = null; s.disk = null; s.touched = false; s.broken = [];
   clearTimeout(s.timer);
+  clearTimeout(s.retry);
+  return true;
+}
+
+// The field holds text the disk does not, and saving cannot put it there now.
+const fieldHeld = (s) => !!s.editor && (s.fresh
+  ? (s.phase === "retry" || s.phase === "refused") && !!s.editor.getText().trim()
+  : !!s.path && (s.conflict || s.phase === "retry" || s.phase === "gone"));
+
+function sayHeld(s) {
+  const away = s === centreNote && activeTab !== "note";
+  notify(s.conflict ? "This note changed on disk: pick Keep mine or Take the disk's first"
+    : s.phase === "gone" ? "This note's file is gone: pick Write it back or Let it go first"
+    : "Not saved yet: your text stays in the note until the save lands", "error",
+         away ? { label: "back to it", run: () => { showTab("note"); syncUrl(true); } } : null);
+}
+
+// For a note that is gone with its file or its vault: no save can land.
+function dropField(s) {
+  s.conflict = false;
+  s.phase = "";
+  s.disk = null;
+  if (s.editor) s.clean = s.editor.getText();
+  clearTimeout(s.retry);
 }
 
 // An agent's write or an /undo can land on a note an editor holds. While
@@ -1882,14 +1962,16 @@ function refreshOpenNote() {
 
 async function refreshSession(s) {
   const path = s.path, ed = s.editor;
-  if (!path || !ed || s.saving || ed.getText() !== s.clean) return;
+  if (!path || !ed || s.saving || s.conflict || ed.getText() !== s.clean) return;
   const r = await fetch("/note/raw?path=" + encodeURIComponent(path)).catch(() => null);
   const d = r && r.ok ? await r.json().catch(() => null) : null;
   if (!d || s.path !== path || s.saving || ed.getText() !== s.clean || d.etag === s.etag) return;
   s.etag = d.etag;
   s.clean = d.text;
+  s.broken = d.broken || [];
   ed.adopt(d.text);
-  ed.setMissing(d.broken || []);
+  ed.setMissing(s.broken);
+  paintFoot(s);
 }
 
 function scheduleSave(s = drawerNote) {
@@ -1905,7 +1987,7 @@ function scheduleSave(s = drawerNote) {
 function followNote(to, rewritten) {
   for (const s of noteSessions) {
     if (s === drawerNote || !s.path) continue;
-    if (to.has(s.path)) s.path = to.get(s.path);
+    if (to.has(s.path)) { s.path = to.get(s.path); if (s.onMoved) s.onMoved(); }
     else if (rewritten.includes(s.path)) refreshSession(s);
   }
   if (!drawerNote.path) return;
@@ -1921,10 +2003,15 @@ function followNote(to, rewritten) {
 
 async function saveEdit(s = drawerNote) {
   clearTimeout(s.timer);
-  if (!s.path || s.conflict || !s.editor) return;
+  if (s.fresh) return createFresh(s);
+  if (!s.path || s.conflict || s.phase === "gone" || !s.editor) return;
   if (s.saving) { s.again = true; return s.saving; }
   const path = s.path, ed = s.editor, text = ed.getText();
-  if (text === s.clean) return;
+  if (text === s.clean) {
+    // typed and taken back before the save fired: the field is the disk's again
+    if (s.phase === "saving") setPhase(s, s.at ? "saved" : "");
+    return;
+  }
   s.saving = (async () => {
     try {
       const r = await fetch("/note/save", {
@@ -1934,12 +2021,17 @@ async function saveEdit(s = drawerNote) {
       const data = await r.json().catch(() => ({}));
       if (s.path !== path) return; // the field moved on; this save is history
       if (r.status === 409) {
+        // A choice and not a race (ADR-0155 point 11): the typed text stays in
+        // the field, no further keystroke writes, and the foot line asks.
         s.etag = data.etag || s.etag;
         s.conflict = true;
-        notify("this note changed on disk while you were editing; keep typing to overwrite it");
+        s.disk = data.text;
+        setPhase(s, "conflict");
         return;
       }
-      if (!r.ok) { notify("couldn't save the note"); return; }
+      // The file left behind the app: no retry can land, so the person is asked.
+      if (r.status === 404) { setPhase(s, "gone"); return; }
+      if (!r.ok) throw new Error(String(r.status));
       s.etag = data.etag;
       // What landed may differ from what was sent (overwrite stamps a `type:`
       // into frontmatter that lacks it). If nothing was typed meanwhile the
@@ -1948,12 +2040,22 @@ async function saveEdit(s = drawerNote) {
       // clean text is the disk's, the one the new etag names.
       if (data.text !== text && ed.getText() === text) ed.adopt(data.text);
       s.clean = data.text;
-      if (data.broken) ed.setMissing(data.broken);
+      s.touched = true;
+      s.at = new Date();
+      if (data.broken) { s.broken = data.broken; ed.setMissing(data.broken); }
+      setPhase(s, ed.getText() === data.text ? "saved" : "saving");
+      if (s.onSaved) s.onSaved();
       loadChanges(); // the menu's diff and the write cards see the edit
       // a workspace note's row reads its name, lines and instructions (ADR-0112)
       if (typeof workspaces !== "undefined" && workspaces.some((w) => w.path === path)) loadWorkspaces();
     } catch {
-      notify("couldn't save the note");
+      // The text stays in the field and the foot line says so: a toast leaves,
+      // and a person writing for an hour may not be looking at it.
+      if (s.path === path) {
+        setPhase(s, "retry");
+        clearTimeout(s.retry);
+        s.retry = setTimeout(() => saveEdit(s), 5000);
+      }
     } finally {
       s.saving = null;
       if (s.again) { s.again = false; saveEdit(s); }
@@ -1962,14 +2064,217 @@ async function saveEdit(s = drawerNote) {
   return s.saving;
 }
 
+// Typing: the foot line says Saving… at once, and only the server's answer says
+// Saved. A note in conflict waits for the person's choice, and typing is not one.
+function typed(s) {
+  if (s.conflict || s.phase === "gone") { paintFoot(s); return; }
+  // A field with no note under it must not swallow words: at the centre they
+  // become a new note, and the drawer shuts on a note it no longer holds, so
+  // reaching this there is a defect that a toast at least says out loud.
+  if (!s.path && !s.fresh) {
+    if (s === centreNote) s.fresh = true;
+    else { notify("This field holds no note, so what you type here is not saved"); return; }
+  }
+  setPhase(s, "saving");
+  scheduleSave(s);
+  if (s.onChange) s.onChange();
+}
+
+function setPhase(s, phase) {
+  s.phase = phase;
+  paintFoot(s);
+}
+
+const fmEnd = (text) => { const m = /^---[ \t]*\n[\s\S]*?\n---[ \t]*(?:\n|$)/.exec(text); return m ? m[0].length : 0; };
+
+// The save state now; the counts a beat later, since they read the whole text.
+function paintFoot(s) {
+  const foot = s.foot;
+  if (!foot || !s.editor) return;
+  const st = foot.querySelector(".nv-st"), text = s.editor.getText();
+  st.className = "nv-st";
+  st.textContent = "";
+  if (s.fresh && !text.trim()) st.textContent = "Nothing written yet";
+  else if (s.phase === "saving") st.textContent = "Saving…";
+  else if (s.phase === "refused") {
+    st.classList.add("warn");
+    st.append(mkEl("span", "dot"), document.createTextNode("Not saved: the reason is under the title"));
+  } else if (s.phase === "gone") {
+    st.classList.add("warn");
+    st.append(mkEl("span", "dot"), document.createTextNode("Its file is gone"));
+    const act = (label, fn) => { const b = mkEl("button", "act", label); b.type = "button"; b.addEventListener("click", fn); st.append(b); };
+    act("Write it back", () => writeBack(s));
+    act("Let it go", () => letItGo(s));
+  } else if (s.phase === "retry") {
+    st.classList.add("warn");
+    st.append(mkEl("span", "dot"), document.createTextNode("Not saved: retrying. Your text stays here"));
+  } else if (s.phase === "conflict") {
+    st.classList.add("warn");
+    st.append(mkEl("span", "dot"), document.createTextNode("Changed on disk"));
+    const act = (label, fn) => { const b = mkEl("button", "act", label); b.type = "button"; b.addEventListener("click", fn); st.append(b); };
+    act("Keep mine", () => keepMine(s));
+    act("Take the disk's", () => takeDisk(s));
+    act("Compare", () => openCompare(s));
+  } else if (s.at) st.textContent = `Saved ${s.at.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`;
+  clearTimeout(s.countTimer);
+  s.countTimer = setTimeout(() => paintCounts(s), 250);
+}
+
+function paintCounts(s) {
+  const ct = s.foot.querySelector(".nv-ct"), text = s.editor.getText(), body = text.slice(fmEnd(text));
+  const words = (body.replace(/[#>*_`=|[\]-]/g, " ").match(/\S+/g) || []).length;
+  const links = [...body.matchAll(/(?<!!)\[\[[^[\]\n]+?\]\]/g)].length;
+  ct.textContent = "";
+  ct.append(mkEl("span", "", `${words} ${words === 1 ? "word" : "words"}`));
+  if (s !== drawerNote || links) ct.append(mkEl("span", "opt", `${links} ${links === 1 ? "link" : "links"}`));
+  if (s.broken.length) ct.append(mkEl("span", "opt", `${s.broken.length} unresolved`));
+  if (s.path) {
+    const h = mkEl("button", "nv-link", "History");
+    h.type = "button";
+    h.addEventListener("click", () => noteHistory(s));
+    ct.append(h);
+  }
+}
+
+// The drawer's details are the one home of a note's history, whichever
+// surface holds its text.
+function noteHistory(s) {
+  if (s !== drawerNote) { centreDetails("history"); return; }
+  setDetails(true);
+  if (window.showNoteHistory) window.showNoteHistory();
+}
+
+function keepMine(s) {
+  s.conflict = false;
+  s.clean = s.disk; // what the fresh etag names, so the field reads as changed
+  s.disk = null;
+  closeCompare(s);
+  setPhase(s, "saving");
+  saveEdit(s);
+}
+
+// The file went behind the app: the field's text is the only copy, so it goes back
+// where it was, as a new note. The vault may refuse (the name taken since, a folder
+// of Silica's), and then the field stays as it is and the toast says why.
+async function writeBack(s) {
+  const path = s.path, at = path.lastIndexOf("/");
+  let r = null, d = {};
+  try {
+    r = await fetch("/note/new", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder: at < 0 ? "" : path.slice(0, at), name: path.slice(at + 1).replace(/\.md$/i, ""), text: s.editor.getText() }),
+    });
+    d = await r.json().catch(() => ({}));
+  } catch { /* reported below */ }
+  if (!r || !r.ok) { notify(d.detail || "couldn't write the note back"); return; }
+  s.etag = d.etag;
+  s.clean = d.text;
+  s.broken = d.broken || [];
+  s.editor.setMissing(s.broken);
+  s.at = new Date();
+  s.touched = true;
+  setPhase(s, "saved");
+  loadVaultInfo();
+}
+
+function letItGo(s) {
+  dropField(s);
+  if (s === drawerNote) { closeNote(); return; }
+  releaseNote(s).then(() => { if (activeTab === "note") showTab("chat"); });
+}
+
+// Read again on the press: the bytes of the 409 may be old by now, and only the
+// disk's own bytes can honestly read as Saved.
+async function takeDisk(s) {
+  const r = await fetch("/note/raw?path=" + encodeURIComponent(s.path)).catch(() => null);
+  const now = r && r.ok ? await r.json().catch(() => null) : null;
+  if (now) { s.disk = now.text; s.etag = now.etag; }
+  const disk = s.disk;
+  s.conflict = false;
+  s.disk = null;
+  s.clean = disk;
+  s.at = new Date();
+  closeCompare(s);
+  s.editor.take(disk);
+  setPhase(s, "saved");
+}
+
+// Line by line, what the field holds against what the disk holds. The two share
+// their head and tail in the usual case, so the table is for the middle; past
+// 2,000 by 2,000 lines it shows the two middles whole rather than stall the page.
+function lineDiff(mine, disk) {
+  const a = mine.split("\n"), b = disk.split("\n");
+  let i = 0, z = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  while (z < a.length - i && z < b.length - i && a[a.length - 1 - z] === b[b.length - 1 - z]) z++;
+  const x = a.slice(i, a.length - z), y = b.slice(i, b.length - z), out = [];
+  if (x.length * y.length > 4e6) {
+    for (const l of x) out.push(["del", l]);
+    for (const l of y) out.push(["add", l]);
+    return out;
+  }
+  const t = Array.from({ length: x.length + 1 }, () => new Uint32Array(y.length + 1));
+  for (let p = x.length - 1; p >= 0; p--) for (let q = y.length - 1; q >= 0; q--) {
+    t[p][q] = x[p] === y[q] ? t[p + 1][q + 1] + 1 : Math.max(t[p + 1][q], t[p][q + 1]);
+  }
+  let p = 0, q = 0;
+  while (p < x.length || q < y.length) {
+    if (p < x.length && q < y.length && x[p] === y[q]) { out.push(["same", x[p]]); p++; q++; }
+    else if (q >= y.length || (p < x.length && t[p + 1][q] >= t[p][q + 1])) out.push(["del", x[p++]]);
+    else out.push(["add", y[q++]]);
+  }
+  return out;
+}
+
+function closeCompare(s) {
+  if (s.compare) { s.compare.remove(); s.compare = null; }
+}
+
+// Rows are DOM nodes, never innerHTML: every line is a line of the vault.
+function openCompare(s) {
+  closeCompare(s);
+  const box = mkEl("div", "nv-compare");
+  box.setAttribute("role", "region");
+  box.setAttribute("aria-label", "your text against the disk's");
+  const head = mkEl("div", "nv-compare-head");
+  head.append(mkEl("span", "", "Red is what you typed, green is what the disk holds"));
+  const x = mkEl("button", "nc-close", "\u00D7");
+  x.type = "button";
+  x.setAttribute("aria-label", "close the comparison");
+  x.addEventListener("click", () => closeCompare(s));
+  head.append(x);
+  const rows = mkEl("div", "nv-compare-rows");
+  for (const [kind, line] of lineDiff(s.editor.getText(), s.disk ?? "")) {
+    if (kind === "same") continue;
+    rows.append(mkEl("div", kind === "add" ? "dl-add" : "dl-del", line || " "));
+  }
+  if (!rows.childElementCount) rows.append(mkEl("div", "", "The two are the same."));
+  box.append(head, rows);
+  s.host.append(box);
+  s.compare = box;
+  x.focus();
+}
+
 // A reload or a closed tab with an unsaved edit: the beacon outlives the page.
 addEventListener("pagehide", () => {
   for (const s of noteSessions) {
+    if (s.fresh && s.editor && s.editor.getText().trim()) {
+      navigator.sendBeacon("/note/new", new Blob(
+        [JSON.stringify({ folder: s.folder, name: freshName() === s.nameRefused ? "" : freshName(), text: s.editor.getText() })],
+        { type: "application/json" }));
+      continue;
+    }
     if (!s.path || s.conflict || !s.editor || s.editor.getText() === s.clean) continue;
     navigator.sendBeacon("/note/save", new Blob(
       [JSON.stringify({ path: s.path, text: s.editor.getText(), etag: s.etag })],
       { type: "application/json" }));
   }
+});
+
+// The beacon cannot carry a conflict or a save that is failing, so the browser's
+// own question is the last thing standing between that text and a closed tab.
+addEventListener("beforeunload", (e) => {
+  if (noteSessions.some(fieldHeld)) e.preventDefault();
 });
 
 // --- checking the note's sources (ADR-0110 step 3) ----------------------------
@@ -1979,12 +2284,8 @@ addEventListener("pagehide", () => {
 // the chat stays free; cancel drops it. A note checked in this page comes
 // back with its marks when it is reopened, from the server's cache and with
 // no model call, so following a box's passage and coming back loses nothing.
-const checkStrip = $("#note-check");
 const CHECK_SHOW_KEY = "check-show";
 const CHECK_GRADES = ["error", "warning", "nit"];
-let checkPath = "";       // the note the marks belong to; "" when none
-let checkRun = null;      // the AbortController of the check in flight
-let checkView = null;     // what the strip shows: {counts, pool, done, of, calls, held, notChecked}
 let recheckBusy = false;
 const checkedPaths = new Set();
 
@@ -2024,20 +2325,21 @@ function countFindings(findings) {
   return c;
 }
 
-async function checkSources(confirm = false) {
-  if (!drawerNote.path || !drawerNote.editor) return;
-  if (checkRun) checkRun.abort();
-  if (!(await flushForCheck())) { notify("this note changed on disk; reopen it before checking"); return; }
-  const path = drawerNote.path, ctl = new AbortController();
-  checkRun = ctl;
-  checkPath = path;
+async function checkSources(confirm = false, s = drawerNote) {
+  if (!s.path || !s.editor) return;
+  const c = s.ck;
+  if (c.run) c.run.abort();
+  if (!(await flushForCheck(s))) { notify("this note changed on disk; reopen it before checking"); return; }
+  const path = s.path, ctl = new AbortController();
+  c.run = ctl;
+  c.path = path;
   checkedPaths.add(path);
   const seen = [];
-  checkView = { counts: countFindings(seen), pool: null, done: 0, of: 0, notChecked: 0 };
-  drawerNote.editor.startCheck();
-  drawerNote.editor.showCheck(checkShown());
-  drawCheckStrip();
-  const live = () => checkRun === ctl && drawerNote.path === path;
+  c.view = { counts: countFindings(seen), pool: null, done: 0, of: 0, notChecked: 0 };
+  s.editor.startCheck();
+  s.editor.showCheck(checkShown());
+  drawCheckStrip(s);
+  const live = () => c.run === ctl && s.path === path;
   try {
     const r = await fetch("/note/check", {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -2047,56 +2349,156 @@ async function checkSources(confirm = false) {
     await readLines(r, (ev) => {
       if (!live()) return;
       if (ev.event === "rules" || ev.event === "confirm" || ev.event === "block") {
-        drawerNote.editor.addCheck(ev.findings, ev.states);
+        s.editor.addCheck(ev.findings, ev.states);
         seen.push(...ev.findings);
-        checkView.counts = countFindings(seen);
+        c.view.counts = countFindings(seen);
       }
-      if (ev.event === "rules") Object.assign(checkView, { pool: ev.pool, of: ev.waiting });
-      else if (ev.event === "confirm") Object.assign(checkView, { pool: ev.pool, held: ev.calls });
-      else if (ev.event === "block") Object.assign(checkView, { done: ev.done, of: ev.of });
+      if (ev.event === "rules") Object.assign(c.view, { pool: ev.pool, of: ev.waiting });
+      else if (ev.event === "confirm") Object.assign(c.view, { pool: ev.pool, held: ev.calls });
+      else if (ev.event === "block") Object.assign(c.view, { done: ev.done, of: ev.of });
       else if (ev.event === "done") {
         // The report's counts are the cache file's (point 14, step 3).
-        Object.assign(checkView, { counts: ev.counts, pool: ev.pool, notChecked: ev.states.filter((s) => s.state === "not checked").length });
+        Object.assign(c.view, { counts: ev.counts, pool: ev.pool, notChecked: ev.states.filter((x) => x.state === "not checked").length });
       } else if (ev.event === "error") notify(ev.say);
-      drawCheckStrip();
+      drawCheckStrip(s);
     });
   } catch (e) {
-    if (e.name === "AbortError" && drawerNote.path === path && checkView) {
+    if (e.name === "AbortError" && s.path === path && c.view) {
       // The blocks it never reached; the one in flight lands in the cache.
-      Object.assign(checkView, { cancelled: true, notChecked: checkView.notChecked + Math.max(0, checkView.of - checkView.done) });
+      Object.assign(c.view, { cancelled: true, notChecked: c.view.notChecked + Math.max(0, c.view.of - c.view.done) });
     } else if (live()) notify("couldn't check this note");
   } finally {
-    if (checkRun === ctl) checkRun = null;
-    if (drawerNote.path === path) drawCheckStrip();
+    if (c.run === ctl) c.run = null;
+    if (s.path === path) drawCheckStrip(s);
   }
+}
+
+// What a selection asked, for the strip's second line: a supported block carries
+// no mark, and a person who asked about one sentence is owed an answer.
+function vaultVerdict(findings, states) {
+  const f = findings.find((x) => x.grade !== "nit") || findings[0];
+  if (f) return f.kind === "not found" ? "not found in the vault" : f.kind;
+  const ok = states.find((x) => x.state === "supported");
+  if (ok) return ok.at ? `supported · ${ok.at}` : "supported";
+  const no = states.find((x) => x.state === "not checked");
+  return no ? `not checked · ${no.say}` : "nothing here to check";
+}
+
+// A selection, against the vault or against the web (ADR-0110, amendment of
+// 2026-11-06). The range's marks replace its own and no others: a check of one
+// sentence must not wipe what a check of the note found elsewhere.
+async function checkSelection(s, web) {
+  const ed = s.editor, c = s.ck;
+  if (!ed || ed.view.state.selection.main.empty) return;
+  if (c.run) c.run.abort();
+  hideSelBar();
+  if (!(await flushForCheck(s))) { notify("this note changed on disk; reopen it before checking"); return; }
+  const v = ed.view, sel = v.state.selection.main, doc = v.state.doc;
+  const claim = v.state.sliceDoc(sel.from, sel.to).trim();
+  const first = doc.lineAt(sel.from).number, last = doc.lineAt(sel.to).number;
+  const path = s.path, ctl = new AbortController();
+  c.run = ctl;
+  c.path = path;
+  if (ed.hasCheck()) ed.rebaseCheck(); else ed.startCheck();
+  ed.dropCheck(first, last);
+  ed.showCheck(checkShown());
+  checkedPaths.add(path);
+  c.view = { counts: countFindings(ed.checkFindings()), sub: "reading the vault" };
+  drawCheckStrip(s);
+  const live = () => c.run === ctl && s.path === path;
+  const vault = { findings: [], states: [] };
+  let line = 0, blocks = -1, webSaid = "";
+  try {
+    const r = await fetch("/note/check", {
+      method: "POST", headers: { "Content-Type": "application/json" }, signal: ctl.signal,
+      body: JSON.stringify({ path, lines: [first, last], confirm: true, ...(web ? { claim, web: true } : {}) }),
+    });
+    if (r.status === 400) {
+      notify((await r.json().catch(() => ({}))).detail || "couldn't check that");
+      c.view = null;
+      drawCheckStrip(s);
+      return;
+    }
+    if (!r.ok) throw new Error(String(r.status));
+    await readLines(r, (ev) => {
+      if (!live()) return;
+      if (ev.event === "rules" || ev.event === "block") {
+        vault.findings.push(...ev.findings);
+        vault.states.push(...ev.states);
+        // the box prints the vault's verdict first, so a supported block says who said so
+        ed.addCheck(ev.findings, ev.states.flatMap((x) => (x.state === "supported" && x.at
+          ? [x, { ...x, state: "vault", say: `supported by ${x.at}` }] : [x])));
+        line ||= (ev.findings[0] || {}).line || 0;
+      } else if (ev.event === "web") {
+        c.view.sub = ev.step === "reading" ? `reading ${ev.pages} ${ev.pages === 1 ? "page" : "pages"}` : "asking the web";
+      } else if (ev.event === "web_verdict") {
+        ed.addCheck(ev.findings, ev.states);
+        const said = ev.findings[0] || ev.states[0];
+        webSaid = said ? said.say : "";
+        line = (ev.findings[0] || ev.states.find((x) => x.host) || {}).line || line;
+      } else if (ev.event === "done") {
+        blocks = ev.blocks ?? -1;
+        vault.states.push(...(ev.states || []).filter((x) => !vault.states.some((y) => y.line === x.line && y.state === x.state)));
+      } else if (ev.event === "error") notify(ev.say);
+      c.view.counts = countFindings(ed.checkFindings());
+      drawCheckStrip(s);
+    });
+    if (!live()) return;
+    if (blocks === 0) notify("Nothing here to check", "info");
+    c.view.sub = webSaid || vaultVerdict(vault.findings, vault.states);
+    if (line) ed.openCheck(line);
+  } catch (e) {
+    if (e.name === "AbortError" && s.path === path && c.view) c.view.sub = "cancelled";
+    else if (live()) notify("couldn't check that");
+  } finally {
+    if (c.run === ctl) c.run = null;
+    if (s.path === path) drawCheckStrip(s);
+  }
+}
+
+// A page the web check read, staged in the Inbox with its citation: /nucleate
+// stays the only way on (ADR-0015).
+async function keepWebSource(s, x) {
+  let r = null, d = {};
+  try {
+    r = await fetch("/note/check/keep", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: s.path, url: x.url, quote: x.passage || "", claim: x.mark || "" }),
+    });
+    d = await r.json().catch(() => ({}));
+  } catch { /* reported below */ }
+  if (!r || !r.ok) { notify(d.detail || "couldn't keep that page"); return; }
+  notify(`Kept in Inbox, cited to ${x.host}`, "info", { label: "open", run: () => openNote(d.path) });
+  loadVaultInfo();
 }
 
 // The rules again on a block typed into, once the caret has left it (Open 4),
 // and the marks of a note checked earlier in this page when it is reopened:
 // served from the cache, so no model call. The model's verdicts on an edited
 // block stay hollow until the next check.
-async function recheck(reopened = false) {
-  if (!drawerNote.editor || recheckBusy || checkRun || !drawerNote.path) return;
-  if (!reopened && (checkPath !== drawerNote.path || !drawerNote.editor.checkEdited())) return;
+async function recheck(reopened = false, s = drawerNote) {
+  const c = s.ck;
+  if (!s.editor || recheckBusy || c.run || !s.path) return;
+  if (!reopened && (c.path !== s.path || !s.editor.checkEdited())) return;
   recheckBusy = true;
-  const path = drawerNote.path;
+  const path = s.path;
   try {
-    if (!(await flushForCheck()) || drawerNote.path !== path) return;
-    if (reopened) { drawerNote.editor.startCheck(); drawerNote.editor.showCheck(checkShown()); }
-    const carried = drawerNote.editor.rebaseCheck();
+    if (!(await flushForCheck(s)) || s.path !== path) return;
+    if (reopened) { s.editor.startCheck(); s.editor.showCheck(checkShown()); }
+    const carried = s.editor.rebaseCheck();
     const r = await fetch("/note/check", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, rules: true }),
     });
     if (!r.ok) return;
     let report = null;
     await readLines(r, (ev) => { if (ev.event === "done") report = ev; });
-    if (!report || drawerNote.path !== path || checkRun) return;
-    if (report.unchecked) { checkedPaths.delete(path); drawerNote.editor.endCheck(); return; }
-    drawerNote.editor.replaceCheck(report, carried);
-    checkPath = path;
-    checkView = { counts: report.counts, pool: report.pool, done: 0, of: 0,
-                  notChecked: report.states.filter((s) => s.state === "not checked").length };
-    drawCheckStrip();
+    if (!report || s.path !== path || c.run) return;
+    if (report.unchecked) { checkedPaths.delete(path); s.editor.endCheck(); return; }
+    s.editor.replaceCheck(report, carried);
+    c.path = path;
+    c.view = { counts: report.counts, pool: report.pool, done: 0, of: 0,
+               notChecked: report.states.filter((x) => x.state === "not checked").length };
+    drawCheckStrip(s);
   } catch {
     /* a rerun that failed leaves the marks hollow, which is what they are */
   } finally {
@@ -2104,23 +2506,25 @@ async function recheck(reopened = false) {
   }
 }
 
-function endCheck() {
-  if (checkRun) checkRun.abort();
-  checkRun = null;
-  if (checkPath) checkedPaths.delete(checkPath);
-  checkPath = "";
-  checkView = null;
-  if (drawerNote.editor) drawerNote.editor.endCheck();
-  drawCheckStrip();
+function endCheck(s = drawerNote) {
+  const c = s.ck;
+  if (c.run) c.run.abort();
+  c.run = null;
+  if (c.path) checkedPaths.delete(c.path);
+  c.path = "";
+  c.view = null;
+  if (s.editor) s.editor.endCheck();
+  drawCheckStrip(s);
 }
 
 // The strip: the counts by grade, each a toggle for its marks, and under them
 // the run's progress or what was searched. At most two lines (point 14).
-function drawCheckStrip() {
-  const on = !!checkView && checkPath === drawerNote.path && drawerMode === "note" && !detailsOn && !rawShowing();
-  checkStrip.hidden = !on;
+function drawCheckStrip(s = drawerNote) {
+  const c = s.ck, strip = s.strip;
+  const on = !!c.view && c.path === s.path && (s !== drawerNote || (drawerMode === "note" && !detailsOn && !rawShowing()));
+  strip.hidden = !on;
   if (!on) return;
-  const v = checkView, shown = checkShown();
+  const v = c.view, shown = checkShown();
   const toggle = (key, label, n) => {
     const b = document.createElement("button");
     b.type = "button";
@@ -2131,8 +2535,8 @@ function drawCheckStrip() {
       const next = checkShown();
       next.has(key) ? next.delete(key) : next.add(key);
       try { localStorage.setItem(CHECK_SHOW_KEY, JSON.stringify([...next])); } catch { /* private window: this page only */ }
-      drawerNote.editor.showCheck(next);
-      drawCheckStrip();
+      s.editor.showCheck(next);
+      drawCheckStrip(s);
     });
     if (n !== undefined) b.dataset.n = String(n);
     return b;
@@ -2150,7 +2554,7 @@ function drawCheckStrip() {
   close.className = "nc-close";
   close.setAttribute("aria-label", "clear the check");
   close.textContent = "×";
-  close.addEventListener("click", endCheck);
+  close.addEventListener("click", () => endCheck(s));
   row.append(close);
   const sub = document.createElement("div");
   sub.className = "nc-sub";
@@ -2162,12 +2566,15 @@ function drawCheckStrip() {
     b.addEventListener("click", fn);
     return b;
   };
-  if (v.held && !checkRun) {
+  if (v.held && !c.run) {
     // Cancel keeps the rule marks: only the model's pass waited for a go.
-    sub.append(`${v.held} blocks for the model · `, act("go", () => checkSources(true)), " · ",
-      act("cancel", () => { v.held = 0; drawCheckStrip(); }));
-  } else if (checkRun) {
-    sub.append(v.of ? `judging ${v.done} of ${v.of} · ` : "reading the vault · ", act("cancel", () => checkRun && checkRun.abort()));
+    sub.append(`${v.held} blocks for the model · `, act("go", () => checkSources(true, s)), " · ",
+      act("cancel", () => { v.held = 0; drawCheckStrip(s); }));
+  } else if (c.run) {
+    sub.append(v.sub || (v.of ? `judging ${v.done} of ${v.of}` : "reading the vault"), " · ", act("cancel", () => c.run && c.run.abort()));
+  } else if (v.sub) {
+    sub.textContent = v.sub;
+    sub.title = v.sub;
   } else if (v.pool) {
     const p = v.pool;
     const where = p.scope === "whole" ? "searched the whole vault"
@@ -2176,7 +2583,7 @@ function drawCheckStrip() {
     sub.textContent = where + (v.cancelled ? " · cancelled" : "") + (v.notChecked ? ` · ${v.notChecked} not checked` : "");
     sub.title = sub.textContent;
   }
-  checkStrip.replaceChildren(row, sub);
+  strip.replaceChildren(row, sub);
 }
 
 $("#note-check-open").addEventListener("click", () => checkSources());
@@ -2188,53 +2595,70 @@ $("#note-check-open").addEventListener("click", () => checkSources());
 // under a drag. It does not close on blur, or a press on its own buttons
 // (and a Tab into them) would take it away first; an empty selection, a
 // press anywhere else, Escape and leaving the note close it.
-const selBar = $("#note-selbar");
 let selDragging = false;
 
 function hideSelBar() {
-  if (selBar.hidden) return false;
-  selBar.hidden = true;
-  return true;
+  let was = false;
+  for (const s of noteSessions) if (s.bar && !s.bar.hidden) { s.bar.hidden = true; was = true; }
+  return was;
 }
 
-function syncSelBar(view) {
+function syncSelBar(view, s = drawerNote) {
+  if (treeMenu && treeMenu.dataset.sel) return; // an open list owns the selection until it closes
   const sel = view.state.selection.main;
-  if (sel.empty || drawerMode !== "note" || !drawerNote.path) { hideSelBar(); return; }
+  if (sel.empty || (s === drawerNote && (drawerMode !== "note" || !drawerNote.path))) { if (s.bar) s.bar.hidden = true; return; }
   if (selDragging || !view.hasFocus) return; // shown on release, kept on blur
-  placeSelBar(view);
+  placeSelBar(view, s);
 }
 
-// Over the selection's first line, inside the drawer; under its last when the
+// Over the selection's first line, inside the surface; under its last when the
 // top of the text has no room above it. Off screen, it hides.
-function placeSelBar(view) {
-  const sel = view.state.selection.main;
+function placeSelBar(view, s = drawerNote) {
+  const sel = view.state.selection.main, bar = s.bar;
   const a = view.coordsAtPos(sel.from), b = view.coordsAtPos(sel.to);
   const box = view.scrollDOM.getBoundingClientRect();
-  if (!a || !b || b.bottom < box.top || a.top > box.bottom) { hideSelBar(); return; }
-  selBar.hidden = false;
-  const p = notePanel.getBoundingClientRect(), w = selBar.offsetWidth, h = selBar.offsetHeight;
+  if (!a || !b || b.bottom < box.top || a.top > box.bottom) { bar.hidden = true; return; }
+  if (s === drawerNote) syncQuoteButton();
+  bar.hidden = false;
+  const p = s.host.getBoundingClientRect(), w = bar.offsetWidth, h = bar.offsetHeight;
   const above = a.top - h - 6;
   const top = above >= box.top ? above : b.bottom + 6;
   const left = Math.min(Math.max(a.left - p.left, 8), p.width - w - 8);
-  selBar.style.top = Math.round(top - p.top) + "px";
-  selBar.style.left = Math.round(left) + "px";
+  bar.style.top = Math.round(top - p.top) + "px";
+  bar.style.left = Math.round(left) + "px";
 }
 
-noteEdit.addEventListener("pointerdown", () => { selDragging = true; hideSelBar(); });
+// One press, one drag, whichever editor it starts in. The second button is the
+// right click's, which raises no bar: its list opens instead.
+function watchSelection(s, field) {
+  field.addEventListener("pointerdown", (e) => {
+    if (e.button === 0) selDragging = true;
+    hideSelBar();
+  });
+  field.addEventListener("scroll", () => {
+    if (s.bar && !s.bar.hidden && s.editor) placeSelBar(s.editor.view, s);
+  }, true);
+  field.addEventListener("contextmenu", (e) => {
+    const v = s.editor && s.editor.view, sel = v && v.state.selection.main;
+    if (!sel || sel.empty) return; // nothing selected: the browser's own menu
+    const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
+    if (pos == null || pos < sel.from || pos > sel.to) return;
+    e.preventDefault();
+    selMenu(s, e.clientX, e.clientY);
+  });
+}
+watchSelection(drawerNote, noteEdit);
 document.addEventListener("pointerup", () => {
   if (!selDragging) return;
   selDragging = false;
-  if (drawerNote.editor) syncSelBar(drawerNote.editor.view);
+  for (const s of noteSessions) if (s.editor && s.editor.view.hasFocus) syncSelBar(s.editor.view, s);
 });
 document.addEventListener("pointerdown", (e) => {
-  if (!e.target.closest("#note-selbar, #note-edit")) hideSelBar();
+  if (!e.target.closest("#note-selbar, #nv-selbar, #note-edit, #nv-edit, #tree-menu")) hideSelBar();
 });
-noteEdit.addEventListener("scroll", () => {
-  if (!selBar.hidden && drawerNote.editor) placeSelBar(drawerNote.editor.view);
-}, true);
 
-const passage = () => {
-  const v = drawerNote.editor && drawerNote.editor.view, sel = v && v.state.selection.main;
+const passage = (s = drawerNote) => {
+  const v = s.editor && s.editor.view, sel = v && v.state.selection.main;
   return sel && !sel.empty ? v.state.sliceDoc(sel.from, sel.to).trim() : "";
 };
 const quoted = (text) => text.split("\n").map((l) => "> " + l).join("\n");
@@ -2244,30 +2668,96 @@ const passageTitle = (verb, text) => verb + ": “" + (text.length > 48 ? text.s
 
 // Not /explain, which takes a concept (its skill, ADR-0063): a passage is explained
 // in the note it sits in, so the turn names the note.
-$("#sel-explain").addEventListener("click", () => {
-  const text = passage();
+function explainPassage(s) {
+  const text = passage(s);
   if (!text) return;
   hideSelBar();
   drawerReader((p) => "Explain this passage from the note " + shellQuote(p)
-    + ", in the context of that note:\n\n" + quoted(text), passageTitle("explain this", text));
-});
+    + ", in the context of that note:\n\n" + quoted(text), passageTitle("explain this", text), s.path);
+}
 // /quiz on the note with the passage as its focus, so the round is still a
 // round on the note and records through silica_record_quiz.
-$("#sel-quiz").addEventListener("click", () => {
-  const text = passage();
+function quizPassage(s) {
+  const text = passage(s);
   if (!text) return;
   hideSelBar();
-  drawerReader((p) => "/quiz " + shellQuote(p) + " --focus=" + shellQuote(text), passageTitle("quiz me on this", text));
-});
+  drawerReader((p) => "/quiz " + shellQuote(p) + " --focus=" + shellQuote(text), passageTitle("quiz me on this", text), s.path);
+}
 // The passage, quoted, in the composer that is showing, for a question in
 // the reader's own words: the chat's on Chat, the dock on Explore and Learn.
 // Calendar and Metrics show none, so there it goes to Chat.
-$("#sel-ask").addEventListener("click", () => {
-  const text = passage();
-  if (!text || !lastNotePath) return;
+function askPassage(s) {
+  const text = passage(s);
+  if (!text || !s.path) return;
   hideSelBar();
-  draftInComposer("From " + shellQuote(lastNotePath) + ":\n" + quoted(text) + "\n\n");
-});
+  draftInComposer("From " + shellQuote(s.path) + ":\n" + quoted(text) + "\n\n");
+}
+const PASSAGE_VERBS = { explain: explainPassage, quiz: quizPassage, ask: askPassage };
+$("#sel-explain").addEventListener("click", () => explainPassage(drawerNote));
+$("#sel-quiz").addEventListener("click", () => quizPassage(drawerNote));
+$("#sel-ask").addEventListener("click", () => askPassage(drawerNote));
+
+// One statement per web check (ADR-0110, amendment of 2026-11-06, point 5): one
+// verdict over several claims would hide which of them failed.
+const WEB_CLAIM_MAX = 600;
+// The server says whether the web entry is open: its gate failed on 2026-11-06, so
+// by default it is not, and the bar's button is then the one check (web.py).
+let checkWebOpen = false;
+function setCheckWeb(on) {
+  checkWebOpen = !!on;
+  for (const b of document.querySelectorAll("#sel-check, #nv-selbar [data-check]")) {
+    b.textContent = checkWebOpen ? "check…" : "check this";
+    if (checkWebOpen) b.setAttribute("aria-haspopup", "menu"); else b.removeAttribute("aria-haspopup");
+  }
+}
+
+// The right click's list, and the bar's `check…`, which shows only its checks.
+// It wears the tree's menu (ADR-0123): same element, same keys, same placing.
+function selMenu(s, x, y, checksOnly = false) {
+  closeTreeMenu();
+  if (!checksOnly) hideSelBar();
+  const m = mkEl("div");
+  m.id = "tree-menu";
+  m.dataset.sel = "1";
+  m.setAttribute("role", "menu");
+  m.setAttribute("aria-label", "this passage");
+  treeMenu = m;
+  const item = (label, fn, off) => {
+    const b = mkEl("button", "s-item", label);
+    b.type = "button";
+    b.setAttribute("role", "menuitem");
+    if (off) { b.disabled = true; b.title = off; }
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); closeTreeMenu(); s.editor.focus(); fn(); });
+    m.append(b);
+  };
+  const sep = () => { const d = mkEl("div", "vam-sep"); d.setAttribute("role", "separator"); m.append(d); };
+  if (!checksOnly) {
+    item("copy", () => { navigator.clipboard?.writeText(passage(s)); });
+    sep();
+    item("explain this", () => explainPassage(s));
+    if (viewServed("learn")) item("quiz me on this", () => quizPassage(s));
+    item("ask…", () => askPassage(s));
+    if (!DEMO) sep();
+  }
+  if (!DEMO) {
+    item("check against the vault", () => checkSelection(s, false));
+    if (checkWebOpen) item("check against the web", () => checkSelection(s, true), passage(s).length > WEB_CLAIM_MAX ? "select one statement" : "");
+  }
+  document.body.append(m);
+  const w = m.offsetWidth;
+  // Stands in for the tree's row: placeTreeMenu re-reads it on a resize or a
+  // scroll, and Escape gives the caret back to the text it came from.
+  treeMenuFor = { isConnected: true, setAttribute() {}, focus: () => s.editor.focus(),
+                  getBoundingClientRect: () => ({ right: x + w, bottom: y - 4 }) };
+  placeTreeMenu(x + w, y);
+  m.querySelector("button:not([disabled])").focus();
+}
+function checkFromBar(b, s) {
+  if (!checkWebOpen) { checkSelection(s, false); return; } // one check: nothing to choose between
+  const r = b.getBoundingClientRect();
+  selMenu(s, r.left, r.bottom + 4, true);
+}
+$("#sel-check").addEventListener("mousedown", (e) => { e.preventDefault(); checkFromBar(e.currentTarget, drawerNote); });
 
 // --- dock card (rendered answer for a dock- or drawer-launched turn) ---------
 // Not a re-implementation of the chat flow: no tools, no thinking text. Title =
@@ -2278,6 +2768,7 @@ $("#sel-ask").addEventListener("click", () => {
 const peekEl = $("#peek");
 let peek = null; // { body, caret, raw } while a turn is being mirrored
 function openPeek(title) {
+  if (activeTab === "note") $("#dock").hidden = false; // as for the composer: only while it answers
   const body = $("#peek-body");
   body.className = "";
   body.textContent = "thinking";
@@ -2292,6 +2783,7 @@ function openPeek(title) {
 function closePeek() {
   peekEl.hidden = true;
   peek = null;
+  if (activeTab === "note" && !$("#dock-input").value.trim()) $("#dock").hidden = true;
 }
 // Freeze: stop mirroring, drop the caret, leave the card up until dismissed.
 function freezePeek() {
@@ -2491,9 +2983,11 @@ document.addEventListener("click", (e) => {
       // Explore's column too (find, Key, scope, compare): it picks what the
       // graph shows, and closing the note unfolded the column under the
       // pointer that had just reached for it.
-      !e.target.closest("#dock, #composer, #graph-side")) closeNote();
+      // And the note at the centre: the drawer is the source beside it (ADR-0155
+      // point 3), and a click in the text must not take the source away.
+      !e.target.closest("#dock, #composer, #graph-side, #view-note")) closeNote();
 });
-$("#note-close").addEventListener("click", closeNote);
+$("#note-close").addEventListener("click", () => closeNote()); // not as the handler: the click would pass as `force`
 // (Escape is handled once, at the bottom of this file, in priority order.)
 // Graph node clicks (in the iframe) post a message up when embedded.
 window.addEventListener("message", (e) => {

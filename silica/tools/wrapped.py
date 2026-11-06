@@ -217,6 +217,28 @@ def move_notes_with_restore_point(moves: list[tuple[str, str]], source: str) -> 
     return {"run": run_id, "moved": moved, "error": error}
 
 
+def create_note_with_restore_point(path: str, text: str, source: str) -> str:
+    """A note a person wrote, as ONE journal run under `source`, whose id this
+    returns (ADR-0155 point 8). `text` is what lands: no heading, no frontmatter.
+    The restore point first, as a delete's: a write the toast cannot take back
+    is not one this makes. Raises what the driver raises, FileExistsError on a
+    taken path, with the run closed, since no note means nothing to take back."""
+    from silica.config import CONFIG
+    from silica.kernel.write.preserve import Loss
+    from silica.kernel.write.undo_journal import get_undo_journal
+
+    journal = get_undo_journal()
+    run_id = journal.start_run(source=source, vault=(CONFIG.vault_path or "").strip() or None)
+    journal.record(run_id, InverseOp(kind=InverseOpKind.trash_created, path=path), post_hash=None)
+    try:
+        DRIVER.create(path, text, loss=Loss.PERSON)
+    except Exception:
+        journal.drop_inverse(run_id, path)
+        journal.mark_reverted(run_id)
+        raise
+    return run_id
+
+
 # ---------------------------------------------------------------------------
 # silica_delete
 # ---------------------------------------------------------------------------
@@ -577,6 +599,17 @@ def silica_restore(txn_id: Annotated[str, Field(description='Transaction ID to r
                 else:
                     DRIVER.move(inv.to_path, path)
                     applied.append(f"moved_back:{inv.to_path}->{path}")
+
+            elif inv.kind == InverseOpKind.trash_created:
+                # The trash lists delete runs, so the note leaves as a person's
+                # delete of what it holds now, and comes back from there (ADR-0128).
+                from silica.kernel.write.undo_journal import USER_DELETE_SOURCE
+
+                res = delete_notes_with_restore_point([(path, DRIVER.read_note(path).content)], USER_DELETE_SOURCE)
+                if res["deleted"]:
+                    applied.append(f"trashed_created:{path}")
+                else:
+                    errors.append(f"trash_created: {res['error']}")
 
         except Exception as e:
             errors.append(f"Inverse op {inv.kind} on {path} failed: {e}")

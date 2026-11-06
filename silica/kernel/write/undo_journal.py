@@ -38,6 +38,10 @@ MOVE_SOURCES = (CHAT_MOVE_SOURCE, USER_MOVE_SOURCE)
 # can leave the user's out by name.
 USER_DELETE_SOURCE = "user:/delete"
 DELETE_SOURCES = (CHAT_DELETE_SOURCE, USER_DELETE_SOURCE)
+# A note the user wrote by hand (ADR-0155 point 8): one run, one trash_created.
+# Its post_hash is None and not the first save's: the note is typed into for an
+# hour after the create, and the version guard would then refuse every undo.
+USER_WRITE_SOURCE = "user:/write"
 
 
 class UndoJournalStore:
@@ -546,7 +550,7 @@ def revert_run(run_id: str, *, store: UndoJournalStore | None = None,
         # empty overwrite as an error or an absent delete as a revert.
         # (recreate_deleted is exempt: an absent note is its expected precondition.)
         if cur_hash is None and inv.kind in (
-            InverseOpKind.restore_version, InverseOpKind.delete_created
+            InverseOpKind.restore_version, InverseOpKind.delete_created, InverseOpKind.trash_created
         ):
             stale.append({"path": inv.path, "reason": "note absent (vault changed)"})
             continue

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import glob
+import itertools
 import json
 import logging
 import os
@@ -4703,6 +4704,81 @@ def _etag(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
 
+# --- the index follows the person (ADR-0155 point 18) --------------------------
+# A save comes every 800 ms of pause, and a re-embed is a paid call on hosted, so
+# one refresh goes 60 s after a note's LAST save or when it is let go, never per
+# save. It never runs on /note/save's thread and it asks no chat model.
+_INDEX_AFTER_S = 60.0
+_INDEX_LOCK = threading.Lock()
+_INDEX_PENDING: dict[str, threading.Timer] = {}
+
+
+def _index_later(canon: str) -> None:
+    """(Re)start the note's refresh. The vault rides along: a timer that fires
+    after a switch must not read the same path in another vault."""
+    key = canon.removesuffix(".md")
+    timer = threading.Timer(_INDEX_AFTER_S, _index_due, (key, CONFIG.vault_path))
+    timer.daemon = True
+    with _INDEX_LOCK:
+        if (old := _INDEX_PENDING.get(key)) is not None:
+            old.cancel()
+        _INDEX_PENDING[key] = timer
+    timer.start()
+
+
+def _index_due(key: str, vault: str) -> None:
+    with _INDEX_LOCK:
+        _INDEX_PENDING.pop(key, None)
+    if vault == CONFIG.vault_path:
+        _index_note(key)
+
+
+def _index_note(key: str) -> None:
+    """The note's vectors and co-occurrence, as the write path keeps an agent's
+    note. `_EMBED_LOCK` because /embed and an import write the same store. Each
+    leg fails alone and is left to /embed: the text is safe on disk, and a stale
+    vector costs a search, never a keystroke."""
+    from silica.agent.providers import get_embedder_or_none
+    from silica.driver import DRIVER
+    from silica.kernel.recall.cooccurrence import build_index
+    from silica.kernel.recall.embed import refresh_note
+
+    embedder = get_embedder_or_none(CONFIG, "note index", level="debug")
+    if embedder is None:
+        return
+    name = key.rsplit("/", 1)[-1]
+    try:
+        body = DRIVER.read_note(f"{key}.md").content or ""
+    except Exception as exc:
+        # Moved or deleted since it was saved: the next /embed sees the vault as it is.
+        logger.debug("note index: %s not read: %s", key, type(exc).__name__)
+        return
+    with _EMBED_LOCK:
+        try:
+            refresh_note(embedder, key, name, body)
+        except Exception as exc:
+            logger.warning("note index: embedding failed: %s", type(exc).__name__)
+        try:
+            # force without refreeze: this note's old share out, and the store's
+            # frozen language left alone (orchestrator._refresh_cooccurrence_for_ops).
+            build_index([(key, name, body)], lang=CONFIG.cooccurrence_lang, force=True)
+        except Exception as exc:
+            logger.warning("note index: co-occurrence failed: %s", type(exc).__name__)
+
+
+@app.post("/note/let-go", dependencies=_SAME_ORIGIN)
+def note_let_go(payload: dict):
+    """The editor left this note: its pending refresh runs now, and a note
+    with none pending costs nothing, so the page can send this on every leave."""
+    key = str(payload.get("path") or "").removesuffix(".md")
+    with _INDEX_LOCK:
+        timer = _INDEX_PENDING.pop(key, None)
+    if timer is not None:
+        timer.cancel()
+        _index_note(key)
+    return {"ok": True}
+
+
 @app.get("/note/raw")
 def note_raw(path: str = ""):
     """The note's bytes for the editor, which is how the drawer shows a note
@@ -4778,6 +4854,7 @@ def note_save(payload: dict):
             from silica.kernel.write.preserve import Loss
 
             DRIVER.overwrite(canon, text, loss=Loss.PERSON)  # the person typed it
+            _index_later(canon)
     # overwrite() may stamp a derived `type:` into the frontmatter, so what
     # landed is read back rather than assumed: the editor's next etag has to be
     # the disk's, or its next save refuses itself.
@@ -4788,6 +4865,135 @@ def note_save(payload: dict):
     # within one save of being typed rather than at the next open.
     return {"ok": True, "path": canon, "text": landed, "etag": _etag(landed),
             "broken": _broken_links(landed, note_resolver())}
+
+
+@app.post("/note/new", dependencies=_SAME_ORIGIN)
+def note_new(payload: dict):
+    """A note written by hand (ADR-0155 points 7 to 9), `{folder, name, text}`:
+    `folder/name.md` holding exactly `text`, as one run under user:/write whose
+    undo sends it to the trash. `""` is the vault's root; an empty name with text
+    picks `Untitled`, `Untitled 2`. A folder that does not exist is made. Refused
+    with the sentence shown under the title: a taken path (409), a bad name or
+    Silica's own folder (400), a full vault (`_has_room`).
+
+    No turn slot: /note/save takes none, and a new path is one no turn is
+    reading (ADR-0155 point 17: writing does not wait for the model). A name
+    another folder holds is allowed (ADR-0114), and `same_name` says which."""
+    from silica.driver import DRIVER
+    from silica.kernel import publish
+    from silica.kernel.workspaces import _EDIT_LOCK
+    from silica.kernel.write.undo_journal import USER_WRITE_SOURCE
+    from silica.tools.wrapped import _vault_file, create_note_with_restore_point
+    from silica.ui.web.vault_import import MAX_NAME_BYTES
+
+    folder = str(payload.get("folder") or "").strip().strip("/")
+    name = " ".join(str(payload.get("name") or "").split())
+    text = str(payload.get("text") or "")
+    if folder and not all(_tree_name_ok(seg) for seg in folder.split("/")):
+        raise HTTPException(400, _BAD_NAME_WHY)
+    if name and not _tree_name_ok(name) or not name and not text:
+        raise HTTPException(400, _BAD_NAME_WHY)
+    if len(name.encode("utf-8")) > MAX_NAME_BYTES:
+        raise HTTPException(400, f"a name is at most {MAX_NAME_BYTES} bytes")
+    if folder and publish.never(f"{folder}/x.md"):
+        raise HTTPException(400, f"{folder} is Silica's own folder: write in another")
+    _has_room(1, len(text.encode("utf-8")))
+
+    def at(stem: str) -> str:
+        return f"{folder}/{stem}.md" if folder else f"{stem}.md"
+
+    # The workspace line edits' lock, as /note/save: one person, one writer here.
+    with _EDIT_LOCK:
+        try:
+            if not name:
+                stems = (f"Untitled {n}" if n > 1 else "Untitled" for n in itertools.count(1))
+                name = next(s for s in stems if not _vault_file(at(s)).exists())
+            path = at(name)
+            if _vault_file(path).exists():
+                raise FileExistsError(path)
+            run = create_note_with_restore_point(path, text, USER_WRITE_SOURCE)
+        except (FileExistsError, NotADirectoryError):
+            raise HTTPException(409, f"{at(name)} is already taken") from None
+        except ValueError:
+            # contain_in_vault: a folder that is a link out of the vault
+            raise HTTPException(400, _BAD_NAME_WHY) from None
+    _index_later(path)
+    landed = session_changes.current_text(path)
+    landed = text if landed is None else landed
+    other = next((p for p in DRIVER.notes_named(name) if p != path), None)
+    return {"ok": True, "path": path, "name": name, "text": landed, "etag": _etag(landed), "run": run,
+            "broken": _broken_links(landed, note_resolver()), **({"same_name": other} if other else {})}
+
+
+@app.post("/note/asset", dependencies=_SAME_ORIGIN)
+async def note_asset(note: str = Form(""), file: UploadFile = File(...)):
+    """An image pasted or dropped into a note (ADR-0155 point 15): the file in
+    the note's attachment folder as `Pasted image <stamp>.ext`. Told by its first
+    bytes, so an SVG named `.png` is refused: /asset's sandbox guards a navigated
+    document, and a picture needs none of what an SVG can carry."""
+    from silica.ui.web import vault_import as vi
+
+    canon = await asyncio.to_thread(lambda: note_resolver()(note))
+    if not canon:
+        raise HTTPException(404, "note not found in vault")
+    data = bytearray()
+    while chunk := await file.read(_UPLOAD_CHUNK):
+        data.extend(chunk)
+        if len(data) > _MAX_IMAGE_BYTES:
+            raise HTTPException(400, f"larger than {_MAX_IMAGE_BYTES // 2**20} MB")
+    suffix = vi.image_suffix(bytes(data[:16]))
+    if suffix is None:
+        raise HTTPException(400, "not a PNG, JPEG, GIF or WebP image")
+    await asyncio.to_thread(_has_room, 0, len(data))
+    path = await asyncio.to_thread(_write_asset, canon, bytes(data), suffix)
+    return {"ok": True, "path": path, "embed": f"![[{path.rsplit('/', 1)[-1]}]]"}
+
+
+def _attachment_folder(canon: str) -> str:
+    """Where a pasted image of this note goes, vault-relative: what Obsidian's
+    `attachmentFolderPath` says, read as Obsidian does (`./x` under the note's
+    folder, `/` or empty the vault's root, else a folder of the vault), and with
+    no such setting `attachments/` beside the note. A vault here is often the
+    person's Obsidian vault, and an image Silica files elsewhere is lost to them."""
+    beside = canon.rpartition("/")[0]
+    try:
+        app_json = (Path(CONFIG.vault_path) / ".obsidian" / "app.json").read_text(encoding="utf-8")
+        setting = json.loads(app_json).get("attachmentFolderPath")
+    except (OSError, ValueError, AttributeError):
+        setting = None  # no Obsidian here, or a file it would not read either
+    if not isinstance(setting, str):
+        return f"{beside}/attachments".lstrip("/")
+    if setting.startswith("./"):
+        return f"{beside}/{setting[2:]}".strip("/")
+    return setting.strip("/")
+
+
+def _write_asset(canon: str, data: bytes, suffix: str) -> str:
+    """The bytes under a free `Pasted image` name; its vault-relative path.
+    Under `_EDIT_LOCK` because the name is chosen by looking: two pastes in one
+    second take ` 2`, and atomic_write_bytes would replace the first."""
+    from datetime import datetime
+
+    from silica.kernel.recall.paths import atomic_write_bytes, contain_in_vault
+    from silica.kernel.workspaces import _EDIT_LOCK
+
+    root = Path(CONFIG.vault_path)
+    stem = f"Pasted image {datetime.now():%Y%m%d%H%M%S}"
+    try:
+        folder = contain_in_vault(f"{_attachment_folder(canon)}/{stem}{suffix}".lstrip("/"), root).rpartition("/")[0]
+    except ValueError:
+        # `../x` in app.json, or a link out of the vault: a setting does not
+        # get to place a file outside it.
+        folder = f"{canon.rpartition('/')[0]}/attachments".lstrip("/")
+
+    def named(n: int) -> str:
+        return f"{folder}/{stem}{f' {n}' if n > 1 else ''}{suffix}".lstrip("/")
+
+    with _EDIT_LOCK:
+        rel = next(r for r in map(named, itertools.count(1)) if not (root / r).exists())
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(root / rel, data)
+    return rel
 
 
 @app.post("/tree/delete", dependencies=_SAME_ORIGIN)
@@ -4854,6 +5060,16 @@ def _tree_paths(refs: list) -> list[str]:
             raise HTTPException(404, "note not found in vault")
         out.append(canon)
     return out
+
+
+def _has_room(notes: int, size: int) -> None:
+    """A 400 past the vault's limits, the status `saved_page.save` reaches
+    through /vault/save. A laptop sets none, so this passes there."""
+    from silica.sources import saved_page
+
+    short = saved_page.room(notes, size)["short"]
+    if short:
+        raise HTTPException(400, f"this vault has no room for that: {short}")
 
 
 def _tree_name_ok(name: str) -> bool:
@@ -4945,16 +5161,16 @@ def tree_move(payload: dict):
 
 @app.post("/tree/undo", dependencies=_SAME_ORIGIN)
 def tree_undo(payload: dict):
-    """The toast's undo for /tree/delete and /tree/move: the run back, every
-    note in it. Was /tree/undo-delete until ADR-0126."""
-    from silica.kernel.write.undo_journal import (USER_DELETE_SOURCE, USER_MOVE_SOURCE,
+    """The toast's undo for /tree/delete, /tree/move and /note/new: the run
+    back, every note in it. Was /tree/undo-delete until ADR-0126."""
+    from silica.kernel.write.undo_journal import (USER_DELETE_SOURCE, USER_MOVE_SOURCE, USER_WRITE_SOURCE,
                                                   get_undo_journal, revert_run)
 
     run = str(payload.get("run") or "")
     info = get_undo_journal().run_info(run) if run else None
-    # The id comes from the page: only a delete or a move the person made is
-    # this button's to take back; any other run is /revert's, with its own report.
-    if not info or info["source"] not in (USER_DELETE_SOURCE, USER_MOVE_SOURCE):
+    # The id comes from the page: only what the person did here is this
+    # button's to take back; any other run is /revert's, with its own report.
+    if not info or info["source"] not in (USER_DELETE_SOURCE, USER_MOVE_SOURCE, USER_WRITE_SOURCE):
         raise HTTPException(404, "nothing to undo")
     if info["reverted_at"]:
         raise HTTPException(409, "already undone")
@@ -5061,10 +5277,14 @@ async def note_check(payload: dict, request: Request):
     stops before its next call and keeps the verdicts paid for. `rules: true`
     asks the model nothing (the rerun after an edit, served from the cache);
     `confirm: true` lets a pass of more than CONFIRM_OVER calls go;
-    `lines: [first, last]` checks only the blocks inside those lines (a card
-    of a reading the reader writes, ADR-0134 point 4)."""
-    from silica.cli import _check_judge, _check_legs
+    `lines: [first, last]` checks only the blocks those lines touch (a card of
+    a reading the reader writes, ADR-0134 point 4, or a selection, ADR-0110's
+    amendment of 2026-11-06). `web: true` with `claim`, on `lines`, then asks
+    the web about that claim: the vault leg's events as ever, `web` for each
+    step, `web_verdict`, and `done` last."""
+    from silica.cli import _check_judge, _check_legs, _check_web_legs
     from silica.kernel.check import run as check
+    from silica.kernel.check import web as check_web
     from silica.kernel.vault_manifest import active_write_dir
     from silica.metrics import ms_since, outcome_of
 
@@ -5083,6 +5303,22 @@ async def note_check(payload: dict, request: Request):
                 and span[0] <= span[1]):
             raise HTTPException(400, "lines is [first, last], 1-based")
         card_lines = (span[0], span[1])
+    web_on = payload.get("web") is True and not rules_only
+    if web_on and not check_web.is_open():
+        raise HTTPException(404, "the web check is not open")
+    claim, where = "", (0, 0)
+    aimed: list = []
+    if web_on:
+        if card_lines is None:
+            raise HTTPException(400, "a web check takes the selection's lines")
+        text = await asyncio.to_thread(session_changes.current_text, canon)
+        if text is None:
+            raise HTTPException(404, "note unreadable")
+        try:
+            claim, aimed = check_web.aim(text, card_lines, str(payload.get("claim") or ""))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        where = (aimed[0].line, aimed[-1].end) if aimed else card_lines
     if rules_only and not await asyncio.to_thread(check.read_cache, CONFIG.vault_path, path):
         # Never checked (or its file torn): a rerun has no marks to bring back.
         return JSONResponse({"event": "done", "unchecked": True}, media_type="application/x-ndjson")
@@ -5100,26 +5336,47 @@ async def note_check(payload: dict, request: Request):
             raise _CheckHeld
         put(ev)
 
+    def press(report: dict, judge) -> None:
+        """The web leg of a selection, after the vault's (point 8: two
+        verdicts, never one). A range that touches nothing checkable asks no
+        model. Only a verdict is kept: "the web did not answer" says nothing
+        about the block, and a verdict paid for earlier stands."""
+        result = {"web": "", "say": check_web.NOTHING_TO_CHECK}
+        if aimed:
+            lanes, fetch = _check_web_legs()
+            result = check_web.check_claim(claim, search=lanes, fetch=fetch, judge=judge,
+                                           step=lambda ev: put({"event": "web", **ev}), cancelled=stop.is_set)
+        findings, states = check_web.rows(result, claim, check_web.vault_says(report), *where)
+        if result["web"]:
+            row = (findings or states)[0]
+            check.keep_web(CONFIG.vault_path, path, aimed[0],
+                           {k: v for k, v in row.items() if k not in ("line", "end")})
+        put({"event": "web_verdict", "findings": findings, "states": states})
+
     def work() -> None:
         started = time.monotonic()
+        said = {"web": True} if web_on else {}  # that a web was asked, never what (ADR-0100)
         try:
             search, dense, floor = _check_legs()
+            judge = None if rules_only else _check_judge(cite=card_lines is not None)
             report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(), search=search,
-                                      dense=dense, dense_floor=floor, judge=None if rules_only else _check_judge(),
+                                      dense=dense, dense_floor=floor, judge=judge,
                                       cache_only=rules_only, progress=progress, cancelled=stop.is_set,
                                       lines=card_lines)
+            if web_on:
+                press(report, judge)
             put({**report, "event": "done"})
             if not rules_only:  # a rerun after an edit is not a check the person asked for
                 c = report["counts"]
                 emit("check", outcome="ok", ms=ms_since(started), blocks=report["blocks"], cached=report["cached"],
-                     error=c["error"], warning=c["warning"], nit=c["nit"])
+                     error=c["error"], warning=c["warning"], nit=c["nit"], **said)
         except _CheckHeld:
             pass
         except Exception as e:
             logger.warning("/note/check failed on %s: %s", path, e)
             put({"event": "error", "say": f"the check failed: {e}"})
             if not rules_only:
-                emit("check", outcome=outcome_of(e), ms=ms_since(started))
+                emit("check", outcome=outcome_of(e), ms=ms_since(started), **said)
         finally:
             put(None)
 
@@ -5188,6 +5445,32 @@ def changes():
     """Every note this session has changed, oldest first, each with the
     judge's `review` sentence when the gate was unsure (audit P4)."""
     return _change_rows()
+
+
+@app.post("/note/check/keep", dependencies=_SAME_ORIGIN)
+async def note_check_keep(payload: dict):
+    """`keep in Inbox` in a web verdict's box (ADR-0110, amendment of
+    2026-11-06, point 13): `{path, url, quote, claim}` as one cited note in the
+    Inbox. Regime 2 of ADR-0015 and no third: the note waits for /nucleate. The
+    turn's slot, as /vault/fetch takes it for the same Inbox."""
+    from silica.kernel.check import web as check_web
+    from silica.sources.web_research import keep_check
+
+    if not check_web.is_open():
+        raise HTTPException(404, "the web check is not open")
+    canon = await asyncio.to_thread(lambda: note_resolver()(str(payload.get("path", ""))))
+    if not canon:
+        raise HTTPException(404, "note not found in vault")
+    url, quote, claim = (str(payload.get(k) or "").strip() for k in ("url", "quote", "claim"))
+    if not url.startswith(("https://", "http://")) or not quote or not claim:
+        raise HTTPException(400, "name the page, its words and the claim")
+    await asyncio.to_thread(_has_room, 1, len(quote) + len(claim))
+    if not _begin_turn():
+        raise HTTPException(409, "a turn is running: keep it when it ends")
+    try:
+        return {"ok": True, "path": await asyncio.to_thread(keep_check, claim, url, quote, canon)}
+    finally:
+        _end_turn()
 
 
 @app.post("/changes/keep", dependencies=_SAME_ORIGIN)
@@ -6086,6 +6369,8 @@ def _tree_raws() -> dict[str, list[str]]:
 def vault_info():
     """Sidebar data: vault stats + file tree, from the same builders as the
     graph view so the numbers can't disagree between the two surfaces."""
+    from silica.kernel.check.web import is_open as check_web_open
+    from silica.kernel.publish import never_dirs
     from silica.kernel.recall.graph_export import build_graph_data
     from silica.ui.web.graph_view import render_tree
 
@@ -6103,6 +6388,10 @@ def vault_info():
         # frame renders the same tree without one, because a pin there would
         # point at a rail that document does not have.
         "tree": render_tree(nodes, actions=True, raws=_tree_raws()),
+        # Silica's own folders: no folder in view and no "Write a note" (ADR-0155
+        # points 4, 5). The page asks here because it has the tree from here.
+        "never": list(never_dirs()),
+        "check_web": check_web_open(),
         # The chat landing's ways to start (ADR-0048, amendment 2026-10-22):
         # the notes the vault links most. The counts, the area count and the
         # topic labels the landing stated before the greeting went with it,

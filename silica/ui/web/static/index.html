@@ -49,6 +49,7 @@
   <link rel="stylesheet" href="/static/app-limits.css" />
   <link rel="stylesheet" href="/static/app-workspaces.css" />
   <link rel="stylesheet" href="/static/app-public.css" />
+  <link rel="stylesheet" href="/static/app-write.css" />
   <link rel="stylesheet" href="/static/app-motion.css" />
 </head>
 <body>
@@ -68,6 +69,7 @@
       <button type="button" class="rm side-toggle" aria-label="show the sidebar"><svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><line x1="9" y1="4" x2="9" y2="20"></line></svg></button>
       <button type="button" class="rm" id="rail-vault" aria-label="vault" aria-haspopup="dialog" aria-expanded="false"><span class="vdot" aria-hidden="true"></span></button>
       <button type="button" class="rm" id="rail-new" aria-label="new chat"><svg aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
+      <button aria-label="write a note" class="rm" id="rail-write" title="Write a note · Alt+N" type="button"><svg aria-hidden="true" fill="none" focusable="false" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24" width="15"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.4 2.6a1 1 0 0 1 3 3l-9 9a2 2 0 0 1-.85.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.85z"></path></svg></button>
       <button type="button" class="rm tab" data-tab="discover" aria-label="discover" data-tip="Discover: your feeds read into stories; ask about one, save it to the Inbox"><svg aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M15.5 8.5l-2 5-5 2 2-5z"></path></svg></button>
       <button type="button" class="rm tab" data-tab="graph" aria-label="explore" data-tip="Explore: a map of your notes; similar notes sit close, links draw lines"><svg aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="7" r="2.2"></circle><circle cx="18" cy="6" r="2.2"></circle><circle cx="12" cy="18" r="2.2"></circle><line x1="8.1" y1="7.6" x2="15.8" y2="6.4"></line><line x1="7.2" y1="9" x2="11" y2="16"></line><line x1="17" y1="8" x2="13" y2="16"></line></svg></button>
       <button type="button" class="rm tab" data-tab="learn" aria-label="memorize" data-tip="Memorize: questions on your notes; what you miss comes back, and study plans are made and kept here"><svg aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5h6a4 4 0 0 1 4 4v11a3 3 0 0 0-3-3H2z"></path><path d="M22 5h-6a4 4 0 0 0-4 4v11a3 3 0 0 1 3-3h7z"></path></svg></button>
@@ -114,7 +116,10 @@
            for, as "New" heads Claude's drawer. Chat has no row of its own
            (ADR-0084 point 3): a chat is a row of Chats, marked while it is
            open. aria-current is set by showTab. -->
-      <button type="button" id="new-chat" class="side-new"><svg aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg><span>New chat</span></button>
+      <div class="side-new-row">
+        <button type="button" id="new-chat" class="side-new"><svg aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg><span>New chat</span></button>
+        <button class="side-new" id="write-note" title="Write a note · Alt+N" type="button"><svg aria-hidden="true" fill="none" focusable="false" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24" width="15"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.4 2.6a1 1 0 0 1 3 3l-9 9a2 2 0 0 1-.85.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.85z"></path></svg><span>Write a note</span></button>
+      </div>
       <nav id="views" class="tabs" aria-label="views">
         <!-- First of the views (ADR-0137 decision 1): right under New chat. -->
         <button type="button" class="tab" data-tab="discover" data-tip="Discover: your feeds read into stories; ask about one, save it to the Inbox"><svg aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M15.5 8.5l-2 5-5 2 2-5z"></path></svg><span>Discover</span></button>
@@ -192,6 +197,8 @@
            the + menu is, because the drawer scrolls and clips. -->
       <div id="ws-menu" role="menu" aria-label="workspaces" hidden></div>
       <div id="vault-add-menu" role="menu" aria-label="add to the vault" hidden>
+        <button type="button" role="menuitem" id="vam-write">Write a note</button>
+        <div class="vam-sep" role="separator"></div>
         <button type="button" role="menuitem" id="vam-files" title="pick files; each becomes a note at the top of the vault">files…</button>
         <button type="button" role="menuitem" id="vam-folder" title="pick a folder; it lands at the top of the vault with its tree, and moving it into the Inbox has it nucleated">a folder…</button>
         <button type="button" role="menuitem" id="vam-link" title="type a web address; the page's text becomes a note in the Inbox">a link…</button>
@@ -208,6 +215,70 @@
         </div>
       </section>
     </aside>
+
+    <!-- A note at the centre (ADR-0155): the drawer's editor in a second session,
+         a view with no row in #views, as a chat has none. app-write.js. -->
+    <section aria-label="the note" class="view" id="view-note">
+<div id="nv-bar">
+<nav aria-label="where this note is" id="nv-path">
+<button id="nv-crumb" title="move to…" type="button"></button><span aria-hidden="true" class="sep">/</span>
+<button aria-haspopup="menu" id="nv-handle" type="button"><span></span><svg aria-hidden="true" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" viewbox="0 0 24 24" width="12"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+</nav>
+<div aria-label="format" id="nv-format" role="toolbar">
+<div class="nv-group">
+<button aria-haspopup="menu" class="nv-b txt" data-pop="nv-pop-text" type="button"><span id="nv-kind">Text</span><svg aria-hidden="true" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" viewbox="0 0 24 24" width="12"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+<button aria-label="bold · Ctrl+B" aria-pressed="false" class="nv-b" data-fmt="bold" title="bold · Ctrl+B" type="button"><svg aria-hidden="true" fill="none" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" viewbox="0 0 24 24" width="15"><path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"></path></svg></button><button aria-label="italic · Ctrl+I" aria-pressed="false" class="nv-b" data-fmt="italic" title="italic · Ctrl+I" type="button"><svg aria-hidden="true" fill="none" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" viewbox="0 0 24 24" width="15"><line x1="19" x2="10" y1="4" y2="4"></line><line x1="14" x2="5" y1="20" y2="20"></line><line x1="15" x2="9" y1="4" y2="20"></line></svg></button><button aria-label="highlight" aria-pressed="false" class="nv-b" data-fmt="mark" title="highlight" type="button"><svg aria-hidden="true" fill="none" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" viewbox="0 0 24 24" width="15"><path d="m9 11-6 6v3h9l3-3"></path><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"></path></svg></button>
+</div>
+<div class="nv-group"><button aria-label="bullets" aria-pressed="false" class="nv-b" data-fmt="bullets" title="bullets" type="button"><svg aria-hidden="true" fill="none" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" viewbox="0 0 24 24" width="15"><line x1="8" x2="21" y1="6" y2="6"></line><line x1="8" x2="21" y1="12" y2="12"></line><line x1="8" x2="21" y1="18" y2="18"></line><line x1="3" x2="3.01" y1="6" y2="6"></line><line x1="3" x2="3.01" y1="12" y2="12"></line><line x1="3" x2="3.01" y1="18" y2="18"></line></svg></button><button aria-label="numbers" aria-pressed="false" class="nv-b" data-fmt="numbers" title="numbers" type="button"><svg aria-hidden="true" fill="none" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" viewbox="0 0 24 24" width="15"><line x1="10" x2="21" y1="6" y2="6"></line><line x1="10" x2="21" y1="12" y2="12"></line><line x1="10" x2="21" y1="18" y2="18"></line><path d="M4 6h1v4"></path><path d="M4 10h2"></path><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"></path></svg></button><button aria-label="tasks" aria-pressed="false" class="nv-b" data-fmt="tasks" title="tasks" type="button"><svg aria-hidden="true" fill="none" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" viewbox="0 0 24 24" width="15"><path d="m3 17 2 2 4-4"></path><path d="m3 7 2 2 4-4"></path><path d="M13 6h8"></path><path d="M13 12h8"></path><path d="M13 18h8"></path></svg></button></div>
+<div class="nv-group">
+<button aria-label="link · Ctrl+K" aria-pressed="false" class="nv-b" data-fmt="link" title="link · Ctrl+K" type="button"><svg aria-hidden="true" fill="none" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" viewbox="0 0 24 24" width="15"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg></button>
+<button aria-haspopup="menu" class="nv-b txt" data-pop="nv-pop-insert" type="button">Insert<svg aria-hidden="true" fill="none" height="12" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" viewbox="0 0 24 24" width="12"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+</div>
+<div class="nv-pop" hidden="" id="nv-pop-text" role="menu">
+<button data-fmt="para" role="menuitem" type="button">Text</button>
+<button data-fmt="h1" role="menuitem" type="button">Heading 1</button>
+<button data-fmt="h2" role="menuitem" type="button">Heading 2</button>
+<button data-fmt="h3" role="menuitem" type="button">Heading 3</button>
+<button data-fmt="quote" role="menuitem" type="button">Quote</button>
+<button data-fmt="code" role="menuitem" type="button">Code block</button>
+</div>
+<div class="nv-pop" hidden="" id="nv-pop-insert" role="menu">
+<button data-fmt="table" role="menuitem" type="button">Table</button>
+<button data-fmt="callout" role="menuitem" type="button">Callout</button>
+<button data-fmt="math" role="menuitem" type="button">Formula</button>
+<button data-fmt="diagram" role="menuitem" type="button">Diagram</button>
+<button data-fmt="footnote" role="menuitem" type="button">Footnote</button>
+<button data-fmt="image" role="menuitem" type="button">Image…</button>
+<button data-fmt="divider" role="menuitem" type="button">Divider</button>
+</div>
+</div>
+<div id="nv-acts">
+<button aria-label="details: links, place and history" class="nv-b" id="nv-info" title="details" type="button"><svg aria-hidden="true" fill="none" focusable="false" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" width="15"><circle cx="12" cy="12" r="9.5"></circle><line x1="12" x2="12" y1="16.5" y2="11"></line><line x1="12" x2="12.01" y1="7.6" y2="7.6"></line></svg></button>
+<button aria-label="keep this note in the rail" class="nv-b" title="keep this note in the rail" type="button"><svg aria-hidden="true" fill="none" focusable="false" height="14" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" width="14"><line x1="12" x2="12" y1="17" y2="22"></line><path d="M5 17h14l-2-4V4H7v9z"></path></svg></button>
+<button aria-label="workspaces of this note" class="nv-b" title="workspaces of this note" type="button"><svg aria-hidden="true" fill="none" focusable="false" height="13" stroke="currentColor" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24" width="13"><path d="M12 3l9 9-9 9-9-9z"></path></svg></button>
+<button aria-label="back to the drawer" class="nv-b" id="nv-todrawer" title="back to the drawer" type="button"><svg aria-hidden="true" fill="none" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" viewbox="0 0 24 24" width="15"><rect height="18" rx="2" width="18" x="3" y="3"></rect><path d="M15 3v18"></path><path d="m8 9 3 3-3 3"></path></svg></button>
+<button aria-label="close this note" class="nv-b" id="nv-close" title="close" type="button">✕</button>
+</div>
+<div aria-label="this note" hidden="" id="nv-menu" role="menu">
+<button data-act="ask" role="menuitem" type="button">ask about it</button>
+<button data-act="check" role="menuitem" type="button">check sources</button>
+<button data-act="test" role="menuitem" type="button">test me on this…</button>
+<button data-act="teach" role="menuitem" type="button">explain it in my words</button>
+<button data-act="find" role="menuitem" type="button">find in the note</button>
+<button data-act="map" role="menuitem" type="button">the map<span aria-hidden="true" class="arw">→</span></button>
+</div>
+</div>
+<div hidden="" id="nv-check" role="status"></div>
+<div id="nv-edit"></div>
+<div class="nv-foot" id="nv-foot"><div class="nv-st"></div><div class="nv-ct"></div></div>
+<div aria-label="this passage" hidden="" id="nv-selbar" role="toolbar">
+<button class="na" data-verb="explain" type="button">explain this</button>
+<button class="na" data-verb="quiz" data-view="learn" type="button">quiz me on this</button>
+<button class="na" data-verb="ask" type="button">ask…</button>
+<button aria-haspopup="menu" class="na" data-check="" type="button">check…</button>
+</div>
+<input accept="image/png,image/jpeg,image/gif,image/webp" hidden="" id="nv-file" type="file"/>
+</section>
 
     <section id="view-chat" class="view active">
       <!-- Inside the chat view, not over the page: the drop lands in this
@@ -539,6 +610,8 @@
       <div class="hp-row"><kbd>&#8629;</kbd><span>send the message</span></div>
       <div class="hp-row"><kbd>&#8679; &#8629;</kbd><span>new line instead of sending</span></div>
       <div class="hp-row"><kbd>/</kbd><span>open the command palette, then <kbd>&#8593;</kbd><kbd>&#8595;</kbd> to pick</span></div>
+      <div class="hp-row"><kbd>alt n</kbd><span>write a note</span></div>
+      <div class="hp-row"><kbd>ctrl f</kbd><span>find in the note you are writing</span></div>
       <div class="hp-row"><kbd>esc</kbd><span>close the note drawer or an open panel</span></div>
       <div class="hp-row" data-route="/settings"><kbd>ctrl ,</kbd><span>settings</span></div>
       <div class="hp-row"><kbd>?</kbd><span>this panel, from anywhere you are not typing</span></div>
@@ -594,6 +667,7 @@
       <!-- Out with its vault or left out (ADR-0143, ADR-0151), a state like the pin, so it shows at rest. -->
       <span id="note-pub-wrap"><button type="button" id="note-pub" aria-pressed="false" hidden aria-label="this note in My Wikis" data-tip="this note in My Wikis"><svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><ellipse cx="12" cy="12" rx="4" ry="9"></ellipse><line x1="3" y1="12" x2="21" y2="12"></line></svg></button><div id="note-pub-pop" hidden role="dialog" aria-label="publish with credit"><p class="np-text"></p><div class="np-actions"><button type="button" class="st-btn" data-np="no">cancel</button><button type="button" class="st-btn primary" data-np="yes">publish with credit</button></div></div></span>
       <button type="button" id="note-ws" aria-haspopup="menu" aria-expanded="false" aria-label="workspaces of this note" data-tip="workspaces of this note"><svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 9-9 9-9-9z"></path></svg></button>
+      <button aria-label="open at the centre" id="note-centre" title="open at the centre" type="button"><svg aria-hidden="true" fill="none" height="15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" viewbox="0 0 24 24" width="15"><rect height="18" rx="2" width="18" x="3" y="3"></rect><path d="M15 3v18"></path><path d="m10 15-3-3 3-3"></path></svg></button>
       <!-- While the diff shows: what it is, and the way back to the text. -->
       <button type="button" id="note-changes" class="wk-scope" hidden aria-label="changes this session; back to the text">changes <span aria-hidden="true">&#215;</span></button>
       <!-- The node pane's own two marks. The scope chip says `report` on the
@@ -619,6 +693,7 @@
         <button type="button" role="menuitem" id="note-check-open">check sources</button>
         <button type="button" role="menuitem" id="note-test">test me on this…</button>
         <button type="button" role="menuitem" id="note-teach">explain it in my words</button>
+        <button type="button" role="menuitem" id="note-find">find in the note</button>
         <button type="button" role="menuitem" id="note-map">the map<span class="arw" aria-hidden="true">&#8594;</span></button>
         <div id="nm-read" hidden>
           <div role="separator"></div>
@@ -637,6 +712,8 @@
          text it marks; drawn by app-notes.js, shown only on a checked note. -->
     <div id="note-check" role="status" hidden></div>
     <div id="note-edit" hidden></div>
+    <!-- The foot line (ADR-0155 point 10): the save state, the counts, History. -->
+    <div id="note-foot" class="nv-foot" hidden><div class="nv-st"></div><div class="nv-ct"></div></div>
     <!-- The source's PDF, in the browser's own viewer (ADR-0129, amended
          2026-11-04): /raw serves it under /asset's sandboxed headers, so the
          frame runs nothing on the GUI's origin. Under the strip that names
@@ -650,6 +727,8 @@
       <button type="button" class="na" id="sel-explain">explain this</button>
       <button type="button" class="na" id="sel-quiz" data-view="learn">quiz me on this</button>
       <button type="button" class="na" id="sel-ask">ask&#8230;</button>
+      <button type="button" class="na" id="sel-check" aria-haspopup="menu">check&#8230;</button>
+      <button type="button" class="na" id="sel-quote" hidden>quote in the note</button>
     </div>
     <!-- A note's details (Content, Links, Place) behind the info button, and
          node mode: what has no text to read - an unresolved link, a bridge, a
@@ -813,6 +892,7 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
   <script src="/static/app-metrics.js"></script>
   <script src="/static/app-learn.js"></script>
   <script src="/static/app-notes.js"></script>
+  <script src="/static/app-write.js"></script>
   <script src="/static/app-discover.js"></script>
   <script src="/static/app-workspaces.js"></script>
   <script src="/static/app-jobs.js"></script>

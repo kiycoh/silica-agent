@@ -123,6 +123,9 @@ class InverseOpKind(str, Enum):
     restore_version = "restore_version"     # undo a patch: history:restore to prior version
     recreate_deleted = "recreate_deleted"   # undo a delete: recreate with prior content
     move_back = "move_back"                 # undo a move: DRIVER.move(to_path, from_path)
+    # undo a note a person wrote: to the trash with what it holds by then, since
+    # delete_created would erase what they typed after the create (ADR-0155 point 8)
+    trash_created = "trash_created"
 
 
 class InverseOp(BaseModel):

@@ -214,7 +214,7 @@ def served_views() -> frozenset[str]:
 DEMO_OFF: dict[str, tuple[str, ...]] = {
     "routes": (
         # an upload is personal data, and an import reaches the internet
-        "/chat/files/add", "/vault/import", "/vault/fetch", "/vault/save", "/mail/upload",
+        "/chat/files/add", "/vault/import", "/vault/fetch", "/vault/save", "/mail/upload", "/note/asset",
         # Settings and what only Settings reaches. The Caddy block that refuses
         # /settings/*, /endpoints, /zotero and /bug_report on a tenant's route
         # never sees the demo's hostname (ADR-0139 point 4).
@@ -223,7 +223,7 @@ DEMO_OFF: dict[str, tuple[str, ...]] = {
         "/stt", "/flag",
         # model calls the door never counts: a turn outside POST /chat, the
         # injector, check sources' judge, the worker's sentence on the vault
-        "/turn/redo", "/phone", "/nucleate", "/note/check", "/vault_brief",
+        "/turn/redo", "/phone", "/nucleate", "/note/check", "/note/check/keep", "/vault_brief",
         # a job's turn (POST /jobs/{id}/turn) is a whole agent loop the door
         # never counts, whatever queued the job; with no upload there is none
         # to list, and the tray leaves itself as it was on a 404 (jobsFetch)

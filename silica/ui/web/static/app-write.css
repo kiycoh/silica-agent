@@ -1,0 +1,348 @@
+/* A note at the centre (ADR-0155) and a selection's check (ADR-0110, amendment
+   of 2026-11-06). Only what those records add: the editor's own look is the
+   drawer's, shared through :is(#note-edit,#nv-edit) in app-panels.css. */
+
+/* --- the rail: two births on one row ----------------------------------------- */
+.side-new-row {
+  display: flex;
+  flex-shrink: 0;
+  margin: 0 0.45rem 0.35rem;
+  /* one filled row still: New chat is the row the rail fills, and writing shares
+     it instead of adding a second slab */
+  background: var(--slate-2);
+  border-radius: var(--r-sm);
+}
+.side-new-row .side-new {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  margin: 0;
+  gap: 0.45rem;
+  padding: 0 0.55rem;
+  background: transparent;
+  white-space: nowrap;
+}
+.side-new-row .side-new:hover { background: var(--sel-hover); }
+.side-new-row .side-new + .side-new { border-radius: 0 var(--r-sm) var(--r-sm) 0; box-shadow: inset 1px 0 0 var(--line-2); }
+.side-new-row .side-new:first-child { border-radius: var(--r-sm) 0 0 var(--r-sm); }
+.side-new-row .side-new:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+#vault-add-menu .vam-sep { height: 1px; margin: 0.2rem 0.3rem; background: var(--line-2); }
+#vault-add-menu #vam-write { color: var(--frost); }
+#tree-menu .s-item.write { color: var(--frost); }
+
+/* --- the note view ------------------------------------------------------------ */
+#view-note {
+  position: relative;
+  container: note / inline-size;
+}
+#nv-bar {
+  position: relative;
+  z-index: 3;
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.6rem;
+  min-height: 46px;
+  padding: 0.35rem 0.55rem 0.35rem 1rem;
+  background: var(--slate);
+}
+#nv-path { order: 1; display: flex; align-items: center; gap: 0.3rem; min-width: 0; flex: 1 1 0; font-size: 13px; }
+#nv-crumb {
+  flex: 0 1 auto;
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 0.2rem 0.15rem;
+  border-radius: var(--r-xs);
+  color: var(--ash);
+  font: 400 13px/1.3 var(--sans);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#nv-crumb:hover { color: var(--frost); }
+#nv-path .sep { color: var(--ash-dim); flex: none; }
+#nv-handle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  border: 0;
+  background: none;
+  padding: 0.25rem 0.35rem;
+  border-radius: var(--r-sm);
+  color: var(--frost);
+  font: 500 13px/1.3 var(--sans);
+  cursor: pointer;
+}
+#nv-handle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#nv-handle:hover { background: var(--sel-hover); }
+#nv-handle svg { flex: none; color: var(--ash); }
+#nv-format { order: 2; display: flex; align-items: center; gap: 0.7rem; flex: none; }
+#nv-acts { order: 3; display: flex; align-items: center; gap: 0.1rem; flex: 1 1 0; justify-content: flex-end; }
+@container note (max-width: 860px) {
+  /* beside an open drawer: the path and the note's glyphs on one row, the marks under them */
+  #nv-format { order: 4; flex-basis: 100%; }
+  #nv-bar { padding-bottom: 0.3rem; }
+}
+.nv-group { display: flex; align-items: center; gap: 1px; }
+.nv-b {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--ash);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+.nv-b.txt { display: inline-flex; gap: 0.3rem; align-items: center; width: auto; padding: 0 0.45rem; font: 500 13px/1 var(--sans); white-space: nowrap; }
+.nv-b:hover { color: var(--frost); background: var(--sel-hover); }
+.nv-b[aria-pressed="true"] { color: var(--frost); background: var(--sel); }
+.nv-b:focus-visible, #nv-crumb:focus-visible, #nv-handle:focus-visible, #nv-title:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+#nv-title:focus-visible { outline: none; }
+#nv-acts .nv-b { width: 28px; height: 28px; border-radius: var(--r-sm); }
+#nv-close { border: 1px solid var(--line-2); background: var(--slate); margin-left: 0.25rem; }
+.nv-pop {
+  position: absolute;
+  z-index: 20;
+  min-width: 11rem;
+  padding: 0.25rem;
+  background: var(--bubble);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+}
+.nv-pop[hidden] { display: none; }
+.nv-pop button {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  width: 100%;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--text);
+  padding: 0.4rem 0.55rem;
+  font: 400 13px/1.3 var(--sans);
+  text-align: left;
+  cursor: pointer;
+}
+.nv-pop button:hover { color: var(--frost); background: var(--sel-hover); }
+.nv-pop kbd { color: var(--ash-dim); font: 400 12px/1.3 var(--sans); background: none; border: 0; padding: 0; }
+
+#nv-edit { flex: 1; min-height: 0; font-size: 16px; line-height: 1.72; }
+#nv-edit .cm-scroller { justify-content: center; }
+#nv-edit .cm-content { flex: 0 1 calc(43rem + 4rem); min-width: 0; max-width: calc(43rem + 4rem); padding: 0 2rem 5rem; }
+.nv-top { padding: 1.9rem 0 0.9rem; font-family: var(--sans); line-height: 1.4; cursor: default; }
+#nv-title {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: var(--frost);
+  caret-color: var(--accent);
+  font: 700 2rem/1.18 var(--sans);
+  letter-spacing: -0.02em;
+}
+#nv-title::placeholder { color: var(--ash-dim); opacity: 1; }
+#nv-msg { margin-top: 0.4rem; color: var(--ash); font-size: 13px; }
+#nv-msg[hidden] { display: none; }
+#nv-msg.bad { color: var(--warn); }
+#nv-msg button { border: 0; background: none; padding: 0; color: var(--frost); font: inherit; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; cursor: pointer; }
+#nv-props { margin-top: 0.75rem; font-size: 13px; }
+#nv-edit.form-on .cm-rendered-block:has(> details.fm) { display: none; }
+.nv-prow { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); align-items: center; gap: 0.5rem; min-height: 30px; }
+.nv-prow .k { color: var(--ash-dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nv-prow input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.22rem 0.4rem;
+  margin-left: -0.4rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--text);
+  font: 400 13px/1.4 var(--sans);
+  text-overflow: ellipsis;
+}
+.nv-prow input:hover { background: var(--sel-hover); }
+.nv-prow input:focus { outline: none; background: var(--slate-2); border-color: var(--accent); color: var(--frost); }
+.nv-prow .fixed { color: var(--ash); padding-left: 1px; }
+.nv-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-left: -0.1rem; }
+.nv-chip { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.12rem 0.3rem 0.12rem 0.55rem; border: 1px solid var(--line-2); border-radius: 999px; background: var(--slate-2); color: var(--frost); font-size: 12px; line-height: 1.35; }
+.nv-chip button { border: 0; background: none; color: var(--ash); padding: 0 0.15rem; font: inherit; cursor: pointer; }
+.nv-chip button:hover { color: var(--frost); }
+.nv-chips input { width: 6rem; margin-left: 0; }
+.nv-pacts { display: flex; gap: 1rem; margin-top: 0.3rem; min-height: 22px; align-items: center; }
+.nv-link { border: 0; background: none; padding: 0; color: var(--ash-dim); font: 400 12px/1.4 var(--sans); cursor: pointer; }
+.nv-link:hover { color: var(--frost); }
+.nv-link:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+/* the foot line, on both surfaces */
+.nv-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 30px;
+  padding: 0.2rem 1rem 0.3rem;
+  color: var(--ash-dim);
+  font-size: 12px;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+#note-foot { padding-inline: 1.25rem; }
+.nv-foot .nv-st { display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
+.nv-foot .nv-ct { display: flex; align-items: center; gap: 0.75rem; flex: none; white-space: nowrap; }
+.nv-foot .nv-st.warn { color: var(--frost); }
+.nv-foot .dot { flex: none; width: 6px; height: 6px; border-radius: 999px; background: var(--warn); }
+.nv-foot .act {
+  flex: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ash);
+  padding: 0.14rem 0.5rem;
+  font: 400 12px/1.35 var(--sans);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.nv-foot .act:hover { color: var(--accent); border-color: var(--accent); }
+.nv-foot .act:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+@container note (max-width: 620px) { #nv-foot .nv-ct .opt { display: none; } }
+
+/* [[ completion: the composer's list, on the palette's surface */
+body .cm-tooltip.cm-tooltip-autocomplete,
+body .cm-tooltip.nv-ghost {
+  padding: 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--lift), var(--glass-edge);
+  font-family: var(--sans);
+}
+body .cm-tooltip.cm-tooltip-autocomplete > ul { max-height: 19rem; min-width: 20rem; max-width: 26rem; font-family: var(--sans); }
+body .cm-tooltip.cm-tooltip-autocomplete > ul > li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  color: var(--ash);
+  font-size: 13px;
+  line-height: 1.35;
+}
+body .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected] { background: var(--slate-2); color: var(--frost); }
+.cm-tooltip-autocomplete .cm-completionLabel { color: var(--frost); flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cm-tooltip-autocomplete .cm-completionMatchedText { text-decoration: none; font-weight: 600; }
+.cm-tooltip-autocomplete .cm-completionDetail { margin-left: 0; color: var(--ash-dim); font-size: 12px; font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+body .cm-tooltip.nv-ghost { padding: 4px; }
+.nv-ghost button {
+  white-space: nowrap;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  padding: 6px 10px;
+  color: var(--frost);
+  font: 400 13px/1.35 var(--sans);
+  cursor: pointer;
+}
+.nv-ghost button:hover { background: var(--slate-2); }
+.nv-ghost button span { color: var(--ash-dim); font-size: 12px; }
+
+/* find, in the note */
+.cm-editor .cm-panels { background: var(--slate); color: var(--text); border: 0; }
+.cm-editor .cm-panels.cm-panels-top { border-bottom: 0; }
+.nv-find { display: grid; gap: 4px; padding: 0.4rem 0.7rem; font-family: var(--sans); }
+.nv-find .row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+.nv-find input {
+  flex: 1 1 9rem;
+  min-width: 0;
+  max-width: 22rem;
+  height: 28px;
+  padding: 0 0.5rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--slate-2);
+  color: var(--frost);
+  font: 400 13px/1 var(--sans);
+}
+.nv-find input:focus { outline: none; border-color: var(--accent); }
+.nv-find input::placeholder { color: var(--ash-dim); opacity: 1; }
+.nv-find .n { min-width: 4.2rem; padding: 0 0.3rem; color: var(--ash-dim); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.nv-find .sp { flex: 1; }
+
+/* a match wears the highlight's tint, and the current one is outlined */
+.cm-editor .cm-searchMatch { background: color-mix(in srgb, var(--warn) 24%, transparent); outline: 0; border-radius: 2px; }
+.cm-editor .cm-searchMatch.cm-searchMatch-selected { background: color-mix(in srgb, var(--warn) 42%, transparent); }
+#nv-edit .cm-placeholder { color: var(--ash-dim); }
+
+/* the two bars and menus the record adds to the app's */
+#nv-selbar[hidden], #nv-menu[hidden] { display: none; }
+#nv-menu { top: calc(100% + 2px); left: 0.8rem; }
+
+
+/* the list on a selection wears the tree's menu */
+#tree-menu .vam-sep { height: 1px; margin: 0.2rem 0.3rem; background: var(--line-2); }
+#tree-menu .s-item:disabled { color: var(--ash-dim); cursor: not-allowed; background: none; }
+#view-note { display: none; flex-direction: column; }
+#view-note.active { display: flex; }
+#nv-check { flex: none; }
+#nv-check[hidden], #note-foot[hidden] { display: none; }
+:is(#note-edit,#nv-edit) .cm-chk-vault { margin: 0 0 0.45rem; color: var(--ash); }
+:is(#note-edit,#nv-edit) .cm-chk-web {
+  display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap;
+  gap: 0.1rem 0.75rem; margin-top: 0.3rem; font-size: 12.5px; color: var(--ash);
+}
+:is(#note-edit,#nv-edit) .cm-chk-web a { color: inherit; text-underline-offset: 2px; }
+:is(#note-edit,#nv-edit) .cm-chk-web a:hover { color: var(--frost); }
+:is(#note-edit,#nv-edit) .cm-chk-keep {
+  padding: 0; border: 0; background: none; font: inherit; color: var(--accent); cursor: pointer;
+}
+:is(#note-edit,#nv-edit) .cm-chk-keep:hover { text-decoration: underline; }
+:is(#note-edit,#nv-edit) .cm-chk-keep:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+/* Measured at 328 px: three verbs 230, with check... 290, with quote in 458. The
+   narrowest drawer holds 304, so the bar wraps instead of leaving the panel. */
+:is(#note-selbar,#nv-selbar) { flex-wrap: wrap; max-width: calc(100% - 16px); width: max-content; }
+#sel-quote { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+#nv-selbar[hidden] { display: none; }
+
+/* what the field holds against what the disk holds */
+.nv-compare {
+  position: absolute;
+  z-index: 30;
+  inset: 3.2rem 0.75rem 2.4rem;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--bubble);
+  box-shadow: var(--lift);
+  font-size: 13px;
+}
+.nv-compare-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.45rem 0.75rem; color: var(--ash); border-bottom: 1px solid var(--line); }
+.nv-compare-head button { border: 0; background: none; color: var(--ash); font-size: 15px; cursor: pointer; }
+.nv-compare-rows { flex: 1; min-height: 0; overflow: auto; padding: 0.4rem 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* the composer lent to the note view stands over the foot line, not on it */
+body:has(#view-note.active) #dock { margin-bottom: 30px; }
+
+/* the note view holds its own close and its own way back to the drawer */
+body:has(#view-note.active) #drawer-toggle { display: none; }
