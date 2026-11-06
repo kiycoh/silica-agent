@@ -174,6 +174,17 @@ def test_a_link_in_a_table_stays_a_link_in_the_md(marta, tmp_vault):
     assert "[the effect](" in md and "spacing-effect" in md
 
 
+def test_a_link_finds_the_note_that_goes_out_when_a_private_one_shares_its_name(marta, tmp_vault):
+    from silica.ui.web.public_site import build
+
+    # sorted first, so the plain resolver names it, and a note saved from someone else is the usual way here
+    tmp_vault.note("Archive/Forgetting curve.md", "not in any wiki\n")
+    tmp_vault.note("Memory/Links.md", "See [[Forgetting curve]].\n")
+    build("memory")
+    md = (_live(marta) / "memory" / "links.md").read_text(encoding="utf-8")
+    assert "[Forgetting curve](" in md and "forgetting-curve" in md
+
+
 def test_only_images_a_published_note_cites_are_copied(marta):
     from silica.ui.web.public_site import build
 

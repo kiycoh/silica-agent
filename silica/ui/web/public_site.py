@@ -354,7 +354,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     relay when Private (ADR-0151 points 3, 9). Returns what went out, for
     the view's line after Publish."""
     from silica.driver import DRIVER
-    from silica.kernel.recall.mindmap import note_resolver
+    from silica.kernel.recall.mindmap import answer_resolver, note_resolver
     from silica.kernel.write import frontmatter as fm
     from silica.ui.web.server import _find_asset, _linkify, _strip_ofm_meta
 
@@ -383,11 +383,16 @@ def build(slug: str, vault: Path | None = None) -> dict:
     lang = _LANGS.get(_language().strip().lower(), "")
 
     base_resolve = note_resolver()
+    # A name two notes share is the one going out, as an answer's is the one it read (ADR-0114):
+    # the first by path went out as words, so saving a note named like your own unlinked yours.
+    shared_resolve, _read = answer_resolver(public)
 
     def resolve(ref: str) -> str:
         # "" and not None: the renderer then writes the words with no
         # "broken" mark, which would say that a note stands behind them.
         hit = base_resolve(ref)
+        if hit not in on:
+            hit = shared_resolve(ref)
         return hit if hit in on else ""
 
     root = publish.site_root(h)
