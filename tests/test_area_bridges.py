@@ -128,12 +128,12 @@ def test_a_link_carried_by_a_bullet_or_a_quote_still_has_its_passage(client, tmp
     """31 of 55 prose bridges on the test vault had no passage because the
     snippet rule refuses list items and quotes. Here they ARE the prose:
     `- **Hazard**: [[Funzione matematica]] chiave per...` is the sentence."""
-    from silica.ui.web.server import _bridge_passage
+    from silica.kernel.report.note_context import bridge_passage
 
     _two_triangles(tmp_vault, "[[A]] [[B]]\n\n- **Lemma**: rests on [[D]] for the bound.\n")
-    assert _bridge_passage("C.md", "D.md") == "Lemma: rests on D for the bound."
+    assert bridge_passage("C.md", "D.md") == "Lemma: rests on D for the bound."
     tmp_vault.write(tmp_vault.note("C.md"), "[[A]] [[B]]\n\n> To do it, [[D|derive]] the log-likelihood.\n")
-    assert _bridge_passage("C.md", "D.md") == "To do it, derive the log-likelihood."
+    assert bridge_passage("C.md", "D.md") == "To do it, derive the log-likelihood."
 
 
 def test_shape_ships_the_areas_reading_and_the_colours_bridges_paints_with(client, tmp_vault):

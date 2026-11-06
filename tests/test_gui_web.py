@@ -880,6 +880,7 @@ def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkey
     """No words with the drop: the turn describes and asks (t03 2026-10-14 ran
     a 22-file nucleate off a bare drop), from the file's text when it fits
     (ADR-0121 point 2) and from an outline when it does not."""
+    from silica.sources import drop_turn
     from silica.ui.web.session import SESSION
     tc, server = client
     ran: dict = {}
@@ -897,10 +898,10 @@ def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkey
     user = next(m for m in ran["msgs"] if m["role"] == "user")["content"]
     from silica.kernel.base.layout import chat_folder
 
-    assert user.startswith(server.DROP_ASK)
+    assert user.startswith(drop_turn.DROP_ASK)
     assert f'<file path="{chat_folder(SESSION.chat.sid)}/bio.md">' in user and "## Inibizione" in user
-    monkeypatch.setattr(server, "_INLINE_CHARS", 10)
-    assert "sections: Enzimi; Cinetica; Inibizione" in server._compose_nucleate_turn(
+    monkeypatch.setattr(drop_turn, "_INLINE_CHARS", 10)
+    assert "sections: Enzimi; Cinetica; Inibizione" in drop_turn.compose_nucleate_turn(
         "", [f"{chat_folder(SESSION.chat.sid)}/bio.md"], [])
 
 
@@ -925,15 +926,15 @@ def test_a_dropped_file_lands_in_its_chat_inside_the_write_boundary(client, monk
 
 
 def test_compose_nucleate_turn_defaults_empty_text_and_lists_files():
-    from silica.ui.web.server import DROP_ASK, _compose_nucleate_turn
+    from silica.sources.drop_turn import DROP_ASK, compose_nucleate_turn
 
     # empty instruction → describe and ask, never nucleate; markdown vs code stubs both listed
-    msg = _compose_nucleate_turn("", ["Inbox/a.md"], ["Code/b.md"])
+    msg = compose_nucleate_turn("", ["Inbox/a.md"], ["Code/b.md"])
     assert msg.startswith(DROP_ASK) and "Do not nucleate" in msg
     assert "Inbox/a.md" in msg and "Code/b.md" in msg
 
     # a real instruction is kept verbatim as the turn's lead
-    msg2 = _compose_nucleate_turn("summarize these", ["Inbox/a.md"], [])
+    msg2 = compose_nucleate_turn("summarize these", ["Inbox/a.md"], [])
     assert msg2.startswith("summarize these")
     assert "Inbox/a.md" in msg2
 
@@ -1736,7 +1737,7 @@ def test_graph_route_builds_unified_export(client, monkeypatch):
 def test_top_hubs_ranks_by_resolved_degree():
     """The map landing picker ranks notes by resolved-link degree, skips ghost
     and unlinked nodes, and caps the list."""
-    from silica.ui.web.server import _top_hubs
+    from silica.kernel.report.brief import top_hubs
 
     nodes = [
         {"id": "a", "path": "a.md", "label": "A", "type": "note"},
@@ -1749,10 +1750,10 @@ def test_top_hubs_ranks_by_resolved_degree():
         {"from": "a", "to": "g", "type": "EXTRACTED"},   # a has degree 2
         {"from": "a", "to": "b", "type": "AMBIGUOUS"},   # unresolved: ignored
     ]
-    hubs = _top_hubs(nodes, edges, top_n=10)
+    hubs = top_hubs(nodes, edges, top_n=10)
     assert [h["path"] for h in hubs] == ["a.md", "b.md"]  # a(2) > b(1); c(0) dropped
     assert hubs[0]["degree"] == 2 and hubs[0]["name"] == "A"
-    assert _top_hubs(nodes, edges, top_n=1) == hubs[:1]   # cap honored
+    assert top_hubs(nodes, edges, top_n=1) == hubs[:1]   # cap honored
 
 
 def test_config_is_the_headers_cheap_read_and_no_longer_writes(client, monkeypatch):
@@ -1875,10 +1876,10 @@ def test_metrics_gaps_carry_the_sizes_that_rank_them(client, tmp_vault):
 
 
 def test_degree_histogram_bins_are_heavy_tail_shaped_and_trim_empty_tail():
-    from silica.ui.web.server import _degree_histogram
+    from silica.kernel.report.vault_shape import degree_histogram
 
     # 3 isolated, 2 leaves, 1 note at degree 7 (the 5-8 bucket).
-    bins = _degree_histogram({"a": 0, "b": 0, "c": 0, "d": 1, "e": 1, "f": 7})
+    bins = degree_histogram({"a": 0, "b": 0, "c": 0, "d": 1, "e": 1, "f": 7})
     assert [(b["label"], b["count"]) for b in bins] == [
         ("0", 3), ("1", 2), ("2", 0), ("3-4", 0), ("5-8", 1),
     ]
@@ -1887,11 +1888,11 @@ def test_degree_histogram_bins_are_heavy_tail_shaped_and_trim_empty_tail():
     assert not any(b["label"].endswith("+") for b in bins)
 
     # A hub past the last named bucket lands in the open-ended one.
-    top = _degree_histogram({"h": 400})[-1]
+    top = degree_histogram({"h": 400})[-1]
     assert top["label"] == "65+" and top["count"] == 1
 
     # Never returns an empty axis, even for an empty vault.
-    assert len(_degree_histogram({})) == 1
+    assert len(degree_histogram({})) == 1
 
 
 def test_metrics_reports_a_degree_distribution_over_every_note(client, tmp_vault):
@@ -2558,9 +2559,10 @@ def test_vault_brief_is_off_when_the_setting_is_off(client, monkeypatch):
     renders beside it is what keeps the landing from going blank."""
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.kernel.report import brief
 
     monkeypatch.setattr(CONFIG, "vault_brief", False)
-    monkeypatch.setattr(server, "_write_brief",
+    monkeypatch.setattr(brief, "write_brief",
                         lambda *a: pytest.fail("a disabled brief called the model"))
     assert server.vault_brief() == {"enabled": False, "text": ""}
 
@@ -2578,9 +2580,10 @@ def test_vault_brief_replays_its_cache_until_the_corpus_shape_changes(
     from silica.config import CONFIG
     from silica.kernel.graph import graph_export
     from silica.ui.web import server
+    from silica.kernel.report import brief
 
     monkeypatch.setattr(CONFIG, "vault_brief", True)
-    monkeypatch.setattr(server, "_brief_path", lambda: tmp_path / "brief.json")
+    monkeypatch.setattr(brief, "brief_path", lambda: tmp_path / "brief.json")
 
     nodes = [{"id": "a", "path": "a.md", "label": "a"},
              {"id": "b", "path": "b.md", "label": "b"}]
@@ -2588,7 +2591,7 @@ def test_vault_brief_replays_its_cache_until_the_corpus_shape_changes(
     monkeypatch.setattr(graph_export, "detect_communities", lambda *_a: [])
 
     calls = []
-    monkeypatch.setattr(server, "_write_brief",
+    monkeypatch.setattr(brief, "write_brief",
                         lambda n, t, h: calls.append(n) or f"about {n} notes")
 
     assert server.vault_brief()["text"] == "about 2 notes"
@@ -2607,9 +2610,10 @@ def test_vault_brief_survives_a_provider_that_is_not_there(
     landing with one fewer line on it."""
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.kernel.report import brief
 
     monkeypatch.setattr(CONFIG, "vault_brief", True)
-    monkeypatch.setattr(server, "_brief_path", lambda: tmp_path / "brief.json")
+    monkeypatch.setattr(brief, "brief_path", lambda: tmp_path / "brief.json")
 
     def _boom(*_a, **_k):
         raise ConnectionError("no worker here")

@@ -9,11 +9,11 @@ catches it.
   - `inter_cluster` is the coupling grid's whole content. Counted off a
     directed graph it would double every mutual pair, and the grid would
     disagree with the cohesion on its own diagonal.
-  - `_signal_areas` colours the treemap. Computed from the twelve rows
+  - `signal_areas` colours the treemap. Computed from the twelve rows
     `/metrics` ships it would paint the top-12's areas hot and every other area
     clean, which is a confident statement about the wrong population -- the
     same trap `dangling_hist` exists to avoid for the unresolved tail.
-  - `_area_matrix` and `/shape` are drawn by ONE client renderer. Let the two
+  - `area_matrix` and `/shape` are drawn by ONE client renderer. Let the two
     payload shapes drift and the second surface to be opened renders wrong.
   - `waterfall` draws E's terms. A zero term painted at the bar's 2px floor
     reads as "a little", and a carry off the level it hands down reconnects
@@ -33,7 +33,7 @@ import pytest
 pytest.importorskip("fastapi")
 
 from silica.kernel.report.graph_report import compute_report  # noqa: E402
-from silica.ui.web.server import _area_matrix, _area_of, _signal_areas# noqa: E402
+from silica.kernel.report.vault_shape import area_matrix, area_of, signal_areas  # noqa: E402
 
 from tests.webassets import app_js
 
@@ -131,7 +131,7 @@ def test_coupling_is_absent_not_empty_without_analytics():
 
 def test_area_matrix_matches_the_shape_payload(two_triangles):
     """One client renderer draws this grid and `/shape`'s. Same keys or it breaks."""
-    m = _area_matrix(two_triangles)
+    m = area_matrix(two_triangles)
     assert m is not None
     assert set(m) == {"areas", "matrix"}
     assert set(m["areas"][0]) == {"id", "label", "path", "size", "cohesion", "intra",
@@ -152,7 +152,7 @@ def test_area_matrix_is_none_below_two_areas():
     r = compute_report(
         analytics=True, _nodes_edges_override=(nodes, edges), _mtimes_override={},
     )
-    assert _area_matrix(r) is None
+    assert area_matrix(r) is None
 
 
 def test_area_index_answers_in_both_keyspaces(two_triangles):
@@ -160,7 +160,7 @@ def test_area_index_answers_in_both_keyspaces(two_triangles):
 
     A lookup that missed would not raise. It would report the area as clean.
     """
-    idx = _area_of(two_triangles)
+    idx = area_of(two_triangles)
     member = two_triangles.clusters[0].members[0]
     bare = member[:-3] if member.endswith(".md") else member
     assert idx[bare] == idx[bare + ".md"]
@@ -188,7 +188,7 @@ def test_signal_areas_counts_the_whole_list_not_the_shipped_slice():
         contested=[],
         source_drift=[],
     )
-    tallies = _signal_areas(report)
+    tallies = signal_areas(report)
     assert tallies["lean"] == {"0": 20}
     assert tallies["lean"]["0"] > _METRICS_ROWS, "the slice would read 12"
     # A note in no multi-note area has no column, rather than a made-up one.
@@ -207,7 +207,7 @@ def test_signals_with_no_place_are_absent_by_construction():
         lean_notes=["a.md"], orphans=[], attention_candidates=[],
         integration_deficits=[], contested=[], source_drift=[],
     )
-    tallies = _signal_areas(report)
+    tallies = signal_areas(report)
     assert "dangling" not in tallies
     assert "gaps" not in tallies
 
@@ -237,7 +237,7 @@ def test_the_coupling_matrix_gets_every_field_it_reads(two_triangles):
     body = _fn_body(app_js(), "couplingMatrix")
     reads = _fields_read(body, "a", "b")
     assert reads, "couplingMatrix stopped reading its rows by name"
-    supplied = set(_area_matrix(two_triangles)["areas"][0])
+    supplied = set(area_matrix(two_triangles)["areas"][0])
     missing = sorted(reads - supplied)
     assert not missing, f"couplingMatrix reads fields /metrics does not ship: {missing}"
 
@@ -288,9 +288,9 @@ def test_the_lens_only_offers_signals_the_server_tallies():
     named = set(re.findall(r"^\s*(\w+):", unplaceable.group(1), re.M))
 
     # Everything the server can place, from the one place that decides it.
-    server = (Path(__file__).resolve().parents[1] / "silica" / "ui" / "web" / "server.py").read_text()
-    lists = re.search(r"    lists = \{(.*?)\n    \}", server, re.S)
-    assert lists, "_signal_areas' list table moved"
+    report = (Path(__file__).resolve().parents[1] / "silica" / "kernel" / "report" / "vault_shape.py").read_text()
+    lists = re.search(r"    lists = \{(.*?)\n    \}", report, re.S)
+    assert lists, "signal_areas' list table moved"
     tallied = set(re.findall(r'"(\w+)":', lists.group(1)))
 
     unexplained = sorted(rows - tallied - named)
@@ -310,7 +310,7 @@ def test_shape_and_metrics_ship_the_same_area(two_triangles):
     lit = re.search(r"    areas = \[\n        \{(.*?)\}\n        for g in ids", server, re.S)
     assert lit, "the /shape areas literal moved"
     shape_keys = set(re.findall(r'"(\w+)":', lit.group(1)))
-    metrics_keys = set(_area_matrix(two_triangles)["areas"][0])
+    metrics_keys = set(area_matrix(two_triangles)["areas"][0])
     assert shape_keys == metrics_keys, (
         f"/shape ships {sorted(shape_keys)}, /metrics ships {sorted(metrics_keys)}"
     )

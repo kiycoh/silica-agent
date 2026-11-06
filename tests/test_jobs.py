@@ -438,6 +438,7 @@ def test_a_transition_reaches_the_narration_stream_as_a_job_event(client, monkey
 # --- point 6: a finished job offers the turn -----------------------------------------------
 
 def test_a_finished_job_offers_the_turn_and_never_starts_one(client):
+    from silica.sources import drop_turn
     tc, server, ran = client
     r = tc.post("/nucleate", files=[("files", ("talk.mp3", b"\0" * 64, "audio/mpeg"))])
     job = r.json()["jobs"][0]
@@ -447,7 +448,7 @@ def test_a_finished_job_offers_the_turn_and_never_starts_one(client):
     assert r.status_code == 200
     # The button is the student's choice, so it nucleates; a wordless drop no
     # longer does. Nucleating adds the file to the vault first (ADR-0121 point 5).
-    assert ran["text"].startswith(server.NUCLEATE_ASK) and "Inbox/talk.md" in ran["text"]
+    assert ran["text"].startswith(drop_turn.NUCLEATE_ASK) and "Inbox/talk.md" in ran["text"]
     assert (_inbox() / "talk.md").exists() and (_inbox() / "talk.mp3").exists()
     assert _record(job["id"])["dismissed"] is True
     # A drop's turn is asked once (ADR-0121 point 1): two tabs, one answer.

@@ -103,11 +103,11 @@ def test_the_words_of_a_waiting_drop_ride_the_message_that_took_its_file(chat):
 # --- point 2: what fits rides whole, what does not is named --------------------------------
 
 def test_a_file_too_long_to_include_is_named_with_its_outline_and_read_first(tmp_vault, monkeypatch):
-    from silica.ui.web import server
+    from silica.sources import drop_turn
 
     tmp_vault.note("Inbox/long.md", "# Uno\n\n" + "parola " * 5000 + "\n\n## Due\n\nfine\n")
     tmp_vault.note("Inbox/short.md", "# Breve\n\nun verbale corto\n")
-    msg = server._compose_nucleate_turn("what does it say?", ["Inbox/short.md", "Inbox/long.md"], [])
+    msg = drop_turn.compose_nucleate_turn("what does it say?", ["Inbox/short.md", "Inbox/long.md"], [])
     assert '<file path="Inbox/short.md">' in msg and "un verbale corto" in msg
     assert "- Inbox/long.md (~" in msg and "sections: Uno; Due" in msg
     assert 'read it with silica_read(path="Inbox/long.md") before answering' in msg
@@ -118,9 +118,10 @@ def test_a_file_too_long_to_include_is_named_with_its_outline_and_read_first(tmp
 # --- point 6: the turns a read file offers ------------------------------------------------
 
 def test_summarize_and_quiz_compose_their_request_and_withhold_the_injector(chat):
+    from silica.sources import drop_turn
     from silica.ui.web.session import SESSION
     tc, server, turns = chat
-    for kind, lead in (("summarize", server.SUMMARIZE_ASK), ("quiz", server.QUIZ_ASK)):
+    for kind, lead in (("summarize", drop_turn.SUMMARIZE_ASK), ("quiz", drop_turn.QUIZ_ASK)):
         SESSION.reset()
         r = tc.post("/nucleate", files=[("files", (f"{kind}.mp3", kind.encode() * 9, "audio/mpeg"))])
         _drain()

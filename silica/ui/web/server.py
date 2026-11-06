@@ -62,6 +62,12 @@ from silica.kernel.text import note_parts
 from silica.ui.web import render
 from silica.ui.web.session import SESSION
 from silica.ui.web import session
+from silica.kernel import vault_files
+from silica.sources import drop_turn
+from silica.kernel.recall import note_index
+from silica.kernel.report import vault_shape
+from silica.kernel.report import note_context
+from silica.kernel.report import brief
 
 logger = logging.getLogger(__name__)
 
@@ -1059,6 +1065,18 @@ app.middleware("http")(security.hosted_image_policy)
 app.middleware("http")(security.withheld_views)
 app.middleware("http")(security.require_loopback_host)
 
+
+def _refused(status: int):
+    async def answer(_request: Request, exc: Exception) -> JSONResponse:
+        return JSONResponse({"detail": exc.args[0]}, status_code=status)
+
+    return answer
+
+
+# Sentences written for the person by code below this layer, which names no status.
+app.add_exception_handler(vault_files.NotAChatFile, _refused(400))
+app.add_exception_handler(vault_files.InboxClash, _refused(409))
+
 # NOT GZipMiddleware. It would also wrap /chat, which is text/event-stream, and
 # Starlette's gzip responder writes each chunk into a zlib compressor that
 # buffers until it has enough to emit — so the SSE frames that make a turn
@@ -1195,9 +1213,9 @@ async def chat(payload: dict):
         joined = await asyncio.to_thread(jobs.join_next, SESSION.chat.sid)
         if joined:
             notes, files, earlier = joined
-            composed = await asyncio.to_thread(_compose_nucleate_turn, text, notes, [], earlier=earlier)
+            composed = await asyncio.to_thread(drop_turn.compose_nucleate_turn, text, notes, [], earlier=earlier)
             return _turn_response(composed, attachments, workspace,
-                                  withhold=WITHHELD_WITH_FILES, files=files, said=text, note=note,
+                                  withhold=drop_turn.WITHHELD_WITH_FILES, files=files, said=text, note=note,
                                   story=story, scope=scope)
     return _turn_response(text, attachments, workspace, note=note, story=story, scope=scope,
                           **({"said": text.removeprefix("/web ")} if story and scope == "web" else {}))
@@ -1513,209 +1531,6 @@ def _is_mail(name: str) -> bool:
     return Path(name).suffix.lower() in SUFFIXES
 
 
-NUCLEATE_ASK = ("Nucleate the attached file(s) into an appropriate folder; "
-                "ask me if the target is unclear.")
-
-# A drop with no words used to default to NUCLEATE_ASK. On t03 (2026-10-14) a
-# dropped 317-page PDF started a 22-file run nobody asked for, the most
-# expensive thing the agent can do. Without a request the turn now describes
-# what came in and asks; "Nucleate it" on a finished job still says
-# NUCLEATE_ASK, because there the student chose it.
-DROP_ASK = ("I attached the file(s) below without saying what I want. Do not nucleate, convert, "
-            "move or write anything yet. Say in one or two sentences what each file is, from its "
-            "outline below; read the file only when the outline is not enough. Then ask what I "
-            "want to do with it, offering three or four concrete options that fit this material "
-            "(for example: nucleate it into notes under a folder you name, summarize it, quiz me "
-            "on it, a guided /memorize path).")
-_DROP_OUTLINE_HEADINGS = 8
-
-# The two turns a read file offers besides its question (ADR-0121 point 6),
-# composed like "Nucleate it" and drawn as the label the bubble shows.
-SUMMARIZE_ASK = ("Summarize the attached file(s): the main points and findings, "
-                 "in a few short sections, from the file's own text.")
-QUIZ_ASK = ("Quiz me on the attached file(s): one question at a time, wait for my answer, "
-            "then say whether it is right and why, from the file's text.")
-
-# A turn that brings attached files in is not offered the injector (ADR-0121
-# point 3): the 9B called it for a question about an 80-word file, against the
-# DROP_ASK sentence a drop with no words already carries. "Nucleate it" keeps it.
-WITHHELD_WITH_FILES = ("silica_run_injector",)
-
-# How much of the attached files' text rides the turn (ADR-0121 point 2):
-# about 6,000 tokens, a fifth of the hosted 32k window, which a verbale or a
-# short paper fits and a 317-page textbook (t03) does not.
-_INLINE_CHARS = 24_000
-
-# Where the words the student typed end in a composed turn: what follows is
-# the manifest the model reads and the bubble never shows (ADR-0121 point 4).
-MANIFEST_MARK = "\n\n---\nAttached files"
-
-
-def _attached_text(rel: str) -> str | None:
-    from silica.config import CONFIG
-
-    try:
-        return (Path(CONFIG.vault_path) / rel).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        # The manifest still names the file; without its text or outline the
-        # model reads it, which is the cost this saves and not a wrong answer.
-        return None
-
-
-def _drop_outline(rel: str, md: str | None = None) -> str:
-    """"~N words; sections: a; b; ..." for a staged note, so DROP_ASK is
-    answered from the manifest and not by reading a whole textbook into the
-    context (the t03 PDF was 317 pages)."""
-    from silica.kernel.outline import source_headings
-
-    md = _attached_text(rel) if md is None else md
-    if md is None:
-        return ""
-    heads = source_headings(md)
-    more = f" (+{len(heads) - _DROP_OUTLINE_HEADINGS} more)" if len(heads) > _DROP_OUTLINE_HEADINGS else ""
-    shown = "; ".join(heads[:_DROP_OUTLINE_HEADINGS])
-    return f"~{len(md.split())} words" + (f"; sections: {shown}{more}" if shown else "")
-
-
-def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
-                           mail: Sequence[str] = (),
-                           skipped: Sequence[tuple[str, str]] = (),
-                           converting: Sequence[str] = (),
-                           earlier: str = "", inline: bool = True) -> str:
-    """The agent turn for a batch of attached files: the user's instruction plus
-    a factual manifest of what got staged. Empty instruction: DROP_ASK.
-
-    Each ready file's text goes in whole while the total fits _INLINE_CHARS
-    (ADR-0121 point 2), so a question about a short file needs no tool call;
-    one that does not fit is named with its outline and read first. `earlier`
-    is the question a drop asked when its file joins a later message (point
-    4); `inline` is off for "Nucleate it", whose injector reads the files."""
-    asked = text.strip()
-    lines: list[str] = []
-    if asked and asked not in (NUCLEATE_ASK, SUMMARIZE_ASK, QUIZ_ASK):
-        # The prompt's rule is the language of the person's latest message,
-        # and this message is mostly attached text: an Italian question on an
-        # English paper was answered in English (ADR-0121, the app run).
-        lines.append("Everything below this line is attached material, not the user's words: "
-                     "reply in the language of their words above it, whatever the files' language.")
-    if earlier.strip():
-        lines.append(f'With these files the user asked earlier: "{earlier.strip()}"')
-    if ready:
-        # Not "ready to nucleate": with those words a 9B nucleated a file it
-        # was asked a question about (ADR-0121 Context).
-        lines.append("Attached to this message by the user. The message is about these files: answer "
-                     "from them, and search the rest of the vault only when the message asks for that:"
-                     if inline else "Copied into the Inbox, to nucleate:")
-        budget = _INLINE_CHARS if inline else 0
-        for p in ready:
-            md = _attached_text(p)
-            if md is not None and len(md) <= budget:
-                budget -= len(md)
-                lines.append(f"- {p} (~{len(md.split())} words), its text:\n<file path=\"{p}\">\n"
-                             f"{md.strip()}\n</file>")
-                continue
-            outline = _drop_outline(p, md) if md is not None else ""
-            # The whole path in the call: a chat's file is in no index, so a
-            # read by its name alone finds nothing (the app run, ADR-0121).
-            lines.append(f"- {p}" + (f" ({outline})" if outline else "")
-                         + (f': too long to include here, read it with silica_read(path="{p}") before answering'
-                            if inline else ""))
-    if converting:
-        # Named so the answer does not read as if the files were lost: each is
-        # still being read and joins the conversation when it is ready
-        # (ADR-0121 points 1 and 4). Each by its path, with what can be read of
-        # it now (ADR-0099 amendment 2026-10-20). The button is not named: told
-        # "offered with Nucleate it", the model told the student that button converts.
-        lines.append("Still being read. Tell the user each one joins this chat once it is ready, "
-                     "and can then be summarized or asked about:")
-        lines += [_converting_line(p) for p in converting]
-    if ready and inline:
-        # Said again last, where a small model weighs it: with the sentence
-        # only at the head, the 9B still ran ten vault searches for a question
-        # its attached text answered (ADR-0121, the app run).
-        lines.append("Answer from the attached text above. Do not search the vault unless the "
-                     "user's words ask about their own notes.")
-    if stubs:
-        lines.append("Code skeleton stubs already staged in the vault:")
-        lines += [f"- {p}" for p in stubs]
-    if mail:
-        lines.append("Not staged, mail files: mail is imported through Settings › Connectors › Mail "
-                     "or /mail import <file>, which show a dry run first and keep the threads the "
-                     "user took part in. Tell the user so:")
-        lines += [f"- {n}" for n in mail]
-    if skipped:
-        # Named in the turn and not only in the log: a refused or failed file
-        # otherwise vanished, and the user saw an answer about the others.
-        lines.append("Not staged, or staged in part, each with the reason. Tell the user which files and why:")
-        lines += [f"- {n}: {why}" for n, why in skipped]
-    manifest = "\n".join(lines) if lines else "(no files could be staged)"
-    return f"{asked or DROP_ASK}{MANIFEST_MARK}:\n{manifest}"
-
-
-def _converting_line(rel: str) -> str:
-    """One file of a drop still converting, by its vault path, which a read
-    can take; the name alone left the model nothing to open.
-
-    A PDF's text layer is readable now (ADR-0099 amendment 2026-10-20):
-    silica_read opens it through pdf_extract, in the limited child on the
-    server and without its hidden text (ADR-0098 amendment 2026-10-20), in
-    0.24-0.42 s for 36 pages, while the conversion waits on the chat model
-    reading page images (ADR-0087: 23.6 s for one scanned page). "Not
-    readable in this turn" was true of the note and false of the file.
-
-    This read is the one silica_read makes (`vision=0`, one cache key), so it
-    moves that cost before the turn rather than adding one; it names the
-    pages the layer lacks, so an answer that needs them says so."""
-    from silica.sources import pdf_extract
-
-    later = f"- {rel}: not readable until it is converted; tell the user so"
-    data = _text_layer(rel)
-    if data is None:
-        return later
-    n, no_text, math = data["n_pages"], data["no_text"], data["math"]
-    look = f'silica_look(image="{rel}", question=...), which finds the pages by its words, or with page=N'
-    if len(no_text) == n:
-        return (f"- {rel} ({n} pages): it has no selectable text, so it is not readable as text "
-                f"until it is converted; an answer from one page can look at it, {look}")
-    # No `section="p. N"` here: once the note exists the engine serves it for
-    # this path, and a page section is then not_found; the path alone reads
-    # the layer now and the note later.
-    line = f'- {rel} ({n} pages): its text layer is readable now, in this message: silica_read(path="{rel}")'
-    gaps = ([f"may garble the formulas on {pdf_extract.named_pages([i + 1 for i in math])}"] if math else []) \
-        + ([f"has nothing on {pdf_extract.named_pages([i + 1 for i in no_text])}"] if no_text else [])
-    if gaps:
-        # The page and not "say so" (ADR-0099 amendment 2026-10-21): on 40
-        # questions about the owner's lectures the text layer answered 0.56
-        # and the layer with the formula pages seen 0.91 to 0.93.
-        line += f". That layer {' and '.join(gaps)}: when the answer depends on one of them, look at it, {look}"
-    return line
-
-
-def _text_layer(rel: str) -> dict | None:
-    """A dropped PDF's text layer, read as silica_read reads it; None for any
-    other file and for a PDF the reader refuses."""
-    from silica.config import CONFIG
-    from silica.sources import pdf_extract
-
-    if not rel.lower().endswith(".pdf"):
-        return None
-    try:
-        return pdf_extract.read(Path(CONFIG.vault_path or ".") / rel, vision=0)
-    except Exception:
-        # Tolerated: a PDF the reader refuses (a password, a malformed file, a
-        # child that died) is the conversion's to report, and how it ended
-        # reaches the next turn (jobs.settled). Until then it is a file still
-        # converting, which is all the drop's line said before.
-        logger.warning("drop: the text layer of %s was not read", rel, exc_info=True)
-        return None
-
-
-def _readable_now(rel: str) -> bool:
-    """A PDF with text on some page: its question need not wait for it."""
-    data = _text_layer(rel)
-    return data is not None and len(data["no_text"]) < data["n_pages"]
-
-
 @app.post("/nucleate")
 async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     """A drop: the files into the chat's own folder, and the turn that acts on them.
@@ -1757,7 +1572,7 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     # with a text layer, which this turn reads while it converts (ADR-0099
     # amendment 2026-10-20). A drop waits whole when one file must: its
     # question is asked once, with all of them (the amendment's recommendation).
-    now = ([j for j in queued if await asyncio.to_thread(_readable_now, j["source"]["path"])]
+    now = ([j for j in queued if await asyncio.to_thread(drop_turn.readable_now, j["source"]["path"])]
            if text.strip() else [])
     waits = bool(text.strip()) and len(now) < len(queued)
     if queued and (waits or not (ready or stubs or now)):
@@ -1772,13 +1587,13 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
         # Answered: the page would ask the drop's question again once the note
         # is written. Not told: the next turn hears of the note (jobs.settled).
         await asyncio.to_thread(jobs.annotate, [j["id"] for j in now], answered=True)
-    files_said = [_file_entry(p) for p in ready] + [_file_entry(j["source"]["path"], job=j["id"]) for j in queued]
+    files_said = [drop_turn.file_entry(p) for p in ready] + [drop_turn.file_entry(j["source"]["path"], job=j["id"]) for j in queued]
     # A thread: the manifest reads each staged note, and a textbook read on
     # the loop thread blocks /stop.
     resp = _turn_response(await asyncio.to_thread(
-        _compose_nucleate_turn, text, ready, stubs, mail, skipped,
+        drop_turn.compose_nucleate_turn, text, ready, stubs, mail, skipped,
         converting=[j["source"]["path"] for j in queued]),
-        withhold=WITHHELD_WITH_FILES, files=files_said, said=text.strip())
+        withhold=drop_turn.WITHHELD_WITH_FILES, files=files_said, said=text.strip())
     if queued:
         resp.headers["X-Silica-Jobs"] = ",".join(j["id"] for j in queued)
     return resp
@@ -1793,92 +1608,6 @@ def _name_session(sid: str, title: str) -> None:
     _narr.rename_session(sid, title[:57] + "…" if len(title) > 58 else title, CONFIG.vault_path or "")
 
 
-def _file_entry(source: str, notes: Sequence[str] | None = None, job: str = "") -> dict:
-    """One file as a user message carries it (`silica_files`, ADR-0121 point
-    4): its name, the file the student gave, the notes the model reads, and
-    the job converting it when the notes are not written yet."""
-    out: dict[str, Any] = {"name": Path(source).name, "source": source,
-                           "notes": list(notes) if notes is not None else ([] if job else [source])}
-    if job:
-        out["job"] = job
-    return out
-
-
-_EMBED_RE = re.compile(r"!\[\[([^\]|#]+)|!\[[^\]]*\]\(([^)\s]+)\)")
-
-
-def _chat_rel(rel: str, sid: str | None = None) -> tuple[str, str]:
-    """(the chat folder, the rest of the path) for a file of a chat's folder;
-    with `sid`, only of that chat. Anything else is refused: these routes copy
-    what the browser names, and it names only its own chat's files."""
-    from silica.kernel.base.layout import CHAT_DIR
-
-    parts = Path(rel).parts
-    at = parts.index(CHAT_DIR) if CHAT_DIR in parts else -1
-    if (at < 0 or len(parts) < at + 3 or ".." in parts or Path(rel).is_absolute()
-            or (sid is not None and parts[at + 1] != sid)):
-        raise HTTPException(400, "that is not a file of this chat")
-    return "/".join(parts[:at + 2]), "/".join(parts[at + 2:])
-
-
-def _inbox_rel() -> str:
-    from silica.kernel.base.manifest import active_write_dir, resolve_inbox_dir
-
-    return resolve_inbox_dir(CONFIG.vault_path or ".", active_write_dir(), CONFIG.inbox_dir or "Inbox")
-
-
-def _add_to_vault(notes: Sequence[str], sources: Sequence[str] = ()) -> list[str]:
-    """Copy a chat's files into the Inbox (ADR-0121 point 5), where they are
-    what a drop wrote before files belonged to their chat: the file at
-    `<inbox>/<name>`, its notes beside it, the pictures they embed under
-    `<inbox>/Images`. Returns the notes' Inbox paths, in order.
-
-    A copy, not a move: the chat's history names the chat's paths, and a turn
-    asked again reads them there. A file the Inbox already has with other
-    bytes is refused rather than overwritten, since it may be another file
-    of the same name the student put there."""
-    import filecmp
-    import shutil
-
-    from silica.driver import DRIVER
-    from silica.kernel.write.preserve import Loss
-
-    vault = Path(CONFIG.vault_path or ".")
-    inbox = _inbox_rel()
-    moved: dict[str, str] = {}
-    for rel in dict.fromkeys(sources):
-        if rel in notes:
-            continue
-        _, rest = _chat_rel(rel)
-        src, dst = vault / rel, vault / inbox / rest
-        if dst.exists() and not filecmp.cmp(src, dst, shallow=False):
-            raise HTTPException(409, f"the Inbox already has a different file named {dst.name}")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        if not dst.exists():
-            shutil.copy2(src, dst)
-        moved[str(src)] = str(dst)
-    out: list[str] = []
-    for rel in notes:
-        chat, rest = _chat_rel(rel)
-        dst_rel = f"{inbox}/{rest}"
-        if not rel.endswith(".md"):
-            (vault / dst_rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(vault / rel, vault / dst_rel)
-            out.append(dst_rel)
-            continue
-        text = (vault / rel).read_text(encoding="utf-8", errors="replace")
-        for old, new in moved.items():   # source_file names the file it came from
-            text = text.replace(old, new)
-        DRIVER.upsert(dst_rel, text, loss=Loss.STAGED)
-        out.append(dst_rel)
-        for m in _EMBED_RE.finditer(text):
-            pic = vault / chat / "Images" / Path(m[1] or m[2]).name
-            if pic.is_file():
-                (vault / inbox / "Images").mkdir(parents=True, exist_ok=True)
-                shutil.copy2(pic, vault / inbox / "Images" / pic.name)
-    return out
-
-
 @app.post("/chat/files/add")
 async def chat_file_add(payload: dict):
     """"add to vault" on a file of the open chat (ADR-0121 point 5): the file
@@ -1887,7 +1616,7 @@ async def chat_file_add(payload: dict):
     from silica.ui.web import jobs
 
     source = str(payload.get("source") or "")
-    _chat_rel(source, SESSION.chat.sid or "")
+    vault_files.chat_rel(source, SESSION.chat.sid or "")
     notes = [source]
     vault = CONFIG.vault_path or ""
     done = [r for r in jobs._all() if r.get("vault") == vault and r["source"].get("path") == source
@@ -1899,7 +1628,7 @@ async def chat_file_add(payload: dict):
     if not SESSION.claim():   # the one serialisation of vault writes (see /vault/import)
         raise HTTPException(409, "a turn is running: add it when it ends")
     try:
-        added = await asyncio.to_thread(_add_to_vault, notes, [source])
+        added = await asyncio.to_thread(vault_files.add_to_vault, notes, [source])
     finally:
         SESSION.release()
     return {"notes": added}
@@ -1915,7 +1644,7 @@ def _files_shown(files: Any) -> list[dict]:
     if not isinstance(files, list):
         return out
     vault = Path(CONFIG.vault_path or ".")
-    inbox = _inbox_rel()
+    inbox = vault_files.inbox_rel()
     for f in files:
         if not isinstance(f, dict) or not f.get("source"):
             continue
@@ -1924,12 +1653,12 @@ def _files_shown(files: Any) -> list[dict]:
             rec = jobs.read(f["job"]) if jobs._ID.fullmatch(str(f["job"])) else None
             f["notes"] = (rec or {}).get("notes") or []
         try:
-            _, rest = _chat_rel(f["source"])
+            _, rest = vault_files.chat_rel(f["source"])
             # By size too: another file of the same name in the Inbox is not
             # this one, and "add to vault" refuses to overwrite it.
             mine, there = vault / f["source"], vault / inbox / rest
             f["in_vault"] = there.is_file() and mine.is_file() and there.stat().st_size == mine.stat().st_size
-        except (HTTPException, OSError):
+        except (vault_files.NotAChatFile, OSError):
             f["in_vault"] = False
         out.append(f)
     return out
@@ -1942,7 +1671,7 @@ def _edited(content: str, words: str, note: str = "") -> str:
     from silica.agent.mentions import named_notes, strip
 
     base = strip(content)
-    cuts = [i for i in (base.find(MANIFEST_MARK), base.find("\n\n[image attached: ")) if i >= 0]
+    cuts = [i for i in (base.find(drop_turn.MANIFEST_MARK), base.find("\n\n[image attached: ")) if i >= 0]
     rest = base[min(cuts):] if cuts else ""
     block = named_notes(words, None, note)
     if block:
@@ -1990,7 +1719,7 @@ async def redo_turn(payload: dict | None = None):
     except BaseException:
         SESSION.release()
         raise
-    withhold = WITHHELD_WITH_FILES if msg.get("silica_files") and not content.startswith(NUCLEATE_ASK) else ()
+    withhold = drop_turn.WITHHELD_WITH_FILES if msg.get("silica_files") and not content.startswith(drop_turn.NUCLEATE_ASK) else ()
     return _turn_response(content, workspace=msg.get("silica_workspace") or "", withhold=withhold, prebuilt=msg)
 
 
@@ -2409,9 +2138,6 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
     return results, folders
 
 
-_EMBED_LOCK = threading.Lock()
-
-
 # How long the embedding of an import waits for the conversion queue to
 # drain. It bounds a waiting thread, not the work: an import is up to 500
 # files (ADR-0098 H2) and the queue runs one at a time, so a large one can
@@ -2431,7 +2157,7 @@ def _embed_imported(folders: set[str]) -> None:
         from silica.ui.web import jobs
 
         jobs.drain(_EMBED_WAIT_S)
-        with _EMBED_LOCK:
+        with note_index.EMBED_LOCK:
             for folder in sorted(folders):
                 try:
                     TOOLS["silica_embed_refresh"].run(folder=folder)
@@ -2478,26 +2204,6 @@ async def mail_upload(request: Request, name: str):
 # vault). A card samples; GRAPH_REPORT.md is where the full list lives.
 _METRICS_ROWS = 12
 
-# Degree-distribution buckets. Doubling widths, not equal ones: a wikilink graph
-# is heavy-tailed, so linear bins put ~everything in the first two and stretch a
-# hundred empty bins under the hubs. The first three degrees stay their own bin
-# because 0 (isolated), 1 (a leaf) and 2 mean different things about a note.
-_DEGREE_BINS = ((0, 0), (1, 1), (2, 2), (3, 4), (5, 8), (9, 16), (17, 32), (33, 64), (65, None))
-
-
-def _degree_histogram(degree_map: dict[str, int]) -> list[dict]:
-    """Bucket every note's resolved-link degree. Trailing empty buckets are
-    dropped so the axis ends where the vault does; interior empties stay, since
-    a hole in the middle of the distribution is itself the reading."""
-    out = []
-    for lo, hi in _DEGREE_BINS:
-        n = sum(1 for d in degree_map.values() if d >= lo and (hi is None or d <= hi))
-        label = str(lo) if hi == lo else (f"{lo}+" if hi is None else f"{lo}-{hi}")
-        out.append({"label": label, "count": n, "lo": lo})
-    while len(out) > 1 and out[-1]["count"] == 0:
-        out.pop()
-    return out
-
 
 # How many stored readings the trend band draws. The series gains a line only
 # when a count actually moves, so 60 is years of daily use on a vault that keeps
@@ -2523,62 +2229,6 @@ def _metrics_history(vault: str | None) -> list[dict]:
         return []
 
 
-def _area_of(report) -> dict[str, int]:
-    """Note id -> area id, indexed under both keyspaces the callers arrive in.
-
-    `clusters[].members` are graph ids, which carry `.md`; the store keyspace
-    drops it, and store-derived rows arrive in that spelling. Indexing both
-    spellings once is cheaper than making every caller remember which one it
-    holds, and a lookup that silently missed would not raise, it would report
-    an area as clean.
-    """
-    out: dict[str, int] = {}
-    for c in report.clusters:
-        if c.size <= 1:
-            continue  # a singleton is its own area; see inter_cluster's cut
-        for m in c.members:
-            out[m] = c.cluster_id
-            if m.endswith(".md"):
-                out[m[:-3]] = c.cluster_id
-            else:
-                out[m + ".md"] = c.cluster_id
-    return out
-
-
-def _signal_areas(report) -> dict[str, dict[str, int]]:
-    """How many notes each worklist signal puts in each area.
-
-    Counted over the report's FULL lists, never the twelve rows `/metrics` ships:
-    a lens coloured from the slice would paint the top-12's areas hot and every
-    other area clean, which is a confident statement about the wrong population.
-    That is the same trap `dangling_hist` exists to avoid for the tail reading.
-
-    `dangling` and `gaps` are absent by construction and not by omission: a
-    dangling target has no note to place, and a gap is already a fact about a
-    PAIR of areas, so tallying either into one area would invent a location.
-    """
-    area = _area_of(report)
-    lists = {
-        "lean": report.lean_notes,
-        "orphans": report.orphans,
-        "attention": [a.path for a in report.attention_candidates],
-        "deficits": [d.path for d in report.integration_deficits],
-        "contested": [c.path for c in report.contested],
-        "drift": [d.note for d in report.source_drift],
-    }
-    out: dict[str, dict[str, int]] = {}
-    for key, paths in lists.items():
-        tally: dict[str, int] = {}
-        for p in paths:
-            cid = area.get(p)
-            if cid is None:
-                continue  # a note outside every multi-note area has no column
-            tally[str(cid)] = tally.get(str(cid), 0) + 1
-        if tally:
-            out[key] = tally
-    return out
-
-
 def _lean_limit() -> int:
     """The character count under which a note is called lean.
 
@@ -2592,86 +2242,6 @@ def _lean_limit() -> int:
     except Exception as exc:
         logger.debug("metrics: lean limit unreadable (%s)", exc)
         return 0  # the pane drops the comparison rather than inventing a bound
-
-
-def _area_matrix(report) -> dict | None:
-    """The area x area coupling grid, in the shape `/shape` already ships.
-
-    Same payload shape on purpose: one client renderer draws both, so the two
-    surfaces cannot drift into disagreeing about what a coupling is. The
-    diagonal carries intra-area linked pairs, which is cohesion's numerator, and
-    the renderer prints cohesion there instead.
-
-    None rather than an empty grid below two areas: a 1x1 matrix is a cell
-    saying nothing, and None is what lets the card say so in words.
-    """
-    if not report.inter_cluster:
-        return None  # analytics did not run; see VaultReport.inter_cluster
-    areas = [c for c in report.clusters if c.size > 1]
-    if len(areas) < 2:
-        return None
-    areas.sort(key=lambda c: (-c.size, c.cluster_id))
-    ids = [c.cluster_id for c in areas]
-    short = lambda nid: note_parts.clean_name(nid or "")  # noqa: E731  one name with /shape: no folder, no .md
-    cell = report.inter_cluster
-    at = lambda a, b: cell.get(f"{min(a, b)}|{max(a, b)}", 0)  # noqa: E731
-    # The colours too, though the gaps card paints none: the row is /shape's
-    # row, and an area's colour is a function of its id in both producers
-    # (detect_communities), so shipping it keeps the two payloads one shape.
-    from silica.kernel.graph.graph_export import _community_color
-
-    return {
-        "areas": [
-            {"id": c.cluster_id, "label": short(c.hub) or f"#{c.cluster_id}",
-             "path": c.hub or "", "size": c.size, "cohesion": c.cohesion,
-             "intra": at(c.cluster_id, c.cluster_id),
-             "color": _community_color(c.cluster_id),
-             "color_paper": _community_color(c.cluster_id, on_paper=True)}
-            for c in areas
-        ],
-        "matrix": [[at(a, b) for b in ids] for a in ids],
-    }
-
-
-def _shape_reading(adj: dict, deg: dict, areas: list[dict], label_of: dict, stops: int = 24) -> dict[str, Any]:
-    """A reading order over the vault, derived rather than authored.
-
-    Areas biggest first, and inside one the hub then its best-connected
-    neighbours, breadth-first. Not a ranking of what matters: it is the order
-    that keeps each next note adjacent to something already read, which is the
-    only property a reading path can actually promise from link structure.
-
-    Capped, because a path with 795 stops is the file tree with extra words.
-    """
-    out: list[dict] = []
-    seen: set[str] = set()
-    # Every area's hub, reserved. Hubs link to each other, so without this the
-    # second area's hub gets picked up as a neighbour of the first, and then its
-    # own section is skipped as already-seen — silently dropping the area, and
-    # the biggest ones first, since those are exactly the well-connected hubs.
-    hubs = {a["path"] for a in areas if a["path"]}
-    covered = 0
-    for a in areas:
-        hub = a["path"]
-        if not hub:
-            continue
-        if len(out) + 1 > stops:
-            break
-        covered += 1
-        seen.add(hub)
-        out.append({"path": hub, "label": label_of.get(hub, hub), "area": a["label"],
-                    "why": f"hub of {a['label']} — {a['size']} notes, the densest point of the area"})
-        # Two neighbours per area: enough to show what the hub opens onto,
-        # few enough that the biggest area cannot eat the whole path.
-        near = sorted((n for n in adj.get(hub, ()) if n not in seen and n not in hubs),
-                      key=lambda n: -deg.get(n, 0))[:2]
-        for n in near:
-            if len(out) >= stops:
-                break
-            seen.add(n)
-            out.append({"path": n, "label": label_of.get(n, n), "area": a["label"],
-                        "why": f"linked from the hub, {deg.get(n, 0)} links of its own"})
-    return {"stops": out, "areas_covered": covered, "areas_total": len(areas)}
 
 
 @app.get("/vault_version")
@@ -2753,92 +2323,9 @@ def shape():
         # colour/font/title the canvas uses would triple the payload for nothing.
         "notes": [{"path": n["id"], "size": n.get("size") or 1, "area": group_of.get(n["id"], -1)}
                   for n in real],
-        "reading": _shape_reading(adj, deg, areas, label_of),
+        "reading": vault_shape.shape_reading(adj, deg, areas, label_of),
         "totals": {"notes": len(real), "areas": len(ids),
                    "singletons": sum(1 for s in sizes.values() if s <= 1)},
-    }
-
-
-def _write_sessions(report) -> dict | None:
-    """The days claims were written, crossed against the areas that received them.
-
-    Not a chronology of the vault: the vault's clock is per-claim (`valid_from`
-    stamps), and only a nucleated note carries one. So this measures what WROTE
-    the vault, not when the vault's subjects happened.
-
-    A session x area matrix, not a time axis. Measured on a real vault the dates
-    collapse onto 9 days inside a 2-month window with one straggler two years
-    back; on a linear date axis that straggler takes 90% of the width and the
-    nine days that hold 99% of the work land in a smear. The matrix drops the
-    duration and keeps what varies -- which areas recur across sessions.
-
-    Areas are the multi-note communities only. A singleton is its own community,
-    so counting them would make every session look perfectly focused by
-    construction. Areas never written into are counted rather than listed: the
-    reading here is coverage, and 19 empty columns bury the 7 carrying the work.
-
-    A stem that resolves to more than one note (the vault has forked pairs
-    sharing a subpath under `write_dir`) is attributed to no area and counted as
-    ambiguous, because guessing one of the two would silently move a mark into
-    the wrong column.
-    """
-    from silica.kernel.write.timeline import timeline
-
-    vault = Path(CONFIG.vault_path or "").expanduser()
-    if not vault.is_dir():
-        return None
-    rows = timeline(vault, limit=10**6)["rows"]
-    if not rows:
-        return None
-
-    areas = [c for c in report.clusters if c.size > 1]
-    # Stem -> the areas claiming it. A set, so a genuine fork shows up as >1
-    # rather than as whichever member the iteration happened to reach last.
-    by_stem: dict[str, set[int]] = {}
-    for c in areas:
-        for m in c.members:
-            by_stem.setdefault(m.rsplit("/", 1)[-1].removesuffix(".md"), set()).add(c.cluster_id)
-    hub_path = {c.cluster_id: (c.hub or "") for c in areas}
-
-    days: dict[str, dict[str, int]] = {}
-    touched: dict[int, int] = {}
-    ambiguous = unplaced = 0
-    for date, _label, stem in rows:
-        hit = by_stem.get(stem)
-        if not hit:
-            unplaced += 1
-            continue
-        if len(hit) > 1:
-            ambiguous += 1
-            continue
-        cid = next(iter(hit))
-        cells = days.setdefault(date, {})
-        cells[str(cid)] = cells.get(str(cid), 0) + 1
-        touched[cid] = touched.get(cid, 0) + 1
-
-    if not days:
-        return None
-    # Busiest area first: the columns are read left to right, and the areas the
-    # writing actually lands in are the ones worth seeing without scrolling.
-    ordered = sorted(touched.items(), key=lambda kv: (-kv[1], kv[0]))
-    return {
-        "areas": [
-            {"id": str(cid), "label": (hub_path.get(cid, "") or f"#{cid}").rsplit("/", 1)[-1]
-             .removesuffix(".md"), "path": hub_path.get(cid, ""), "total": n}
-            for cid, n in ordered
-        ],
-        "days": [
-            {"date": d, "notes": sum(cells.values()), "cells": cells}
-            for d, cells in sorted(days.items())
-        ],
-        "areas_total": len(areas),
-        "untouched": len(areas) - len(touched),
-        # The notes with no claim clock at all. Named, never dropped: on a vault
-        # written mostly by hand this is the overwhelming majority, and a matrix
-        # that omits it reads as "the whole vault, over 9 days".
-        "undated": max((report.totals or {}).get("notes", 0) - len(rows), 0),
-        "ambiguous": ambiguous,
-        "unplaced": unplaced,
     }
 
 
@@ -3047,7 +2534,7 @@ def metrics(proposals: bool = False):
                 {"name": "contested", "value": round(e.contested, 2)},
             ],
         },
-        "degree_histogram": _degree_histogram(report.degree_map),
+        "degree_histogram": vault_shape.degree_histogram(report.degree_map),
         "clusters": [
             {"id": c.cluster_id, "size": c.size, "hub": short(c.hub), "path": c.hub,
              "cohesion": c.cohesion}
@@ -3170,13 +2657,13 @@ def metrics(proposals: bool = False):
             if report.temporal and report.temporal.notes_scanned
             else None
         ),
-        "sessions": _write_sessions(report),
+        "sessions": vault_shape.write_sessions(report),
         # The three readings the charts need that no single report can hold.
         # history is the only one that outlives a run: it is what turns four
         # tiles from a state into a direction.
         "history": _metrics_history(CONFIG.vault_path),
-        "area_matrix": _area_matrix(report),
-        "signal_areas": _signal_areas(report),
+        "area_matrix": vault_shape.area_matrix(report),
+        "signal_areas": vault_shape.signal_areas(report),
         "code_coverage": (
             {
                 "documented": report.code_coverage.documented,
@@ -3287,7 +2774,7 @@ def link_written(request: Request):
     if not a or not b:
         return {"path": "", "line": 0, "text": ""}
     for src, target in ((a, b), (b, a)):
-        line, text = _link_line(src, target)
+        line, text = note_context.link_line(src, target)
         if line:
             return {"path": src, "line": line, "text": text}
     return {"path": "", "line": 0, "text": ""}
@@ -3362,21 +2849,21 @@ def prereq_path(note: str = ""):
         return {"error": f"'{note}' not found in vault."}
     if not l["nodes"]:
         return {
-            "root": _row(canon), "levels": [], "edges": [], "cycles": 0, "truncated": False,
+            "root": note_context.row(canon), "levels": [], "edges": [], "cycles": 0, "truncated": False,
             "hint": "nothing reads before or after this note: RefD found no direction "
                     "between it and its neighbours.",
         }
     by_depth: dict[int, list[dict]] = {}
     for n in l["nodes"]:
         by_depth.setdefault(n["depth"], []).append(
-            {**_row(n["path"]), "cyclic": n["cyclic"], "root": n["path"] == canon}
+            {**note_context.row(n["path"]), "cyclic": n["cyclic"], "root": n["path"] == canon}
         )
     levels = [
         {"depth": d, "notes": sorted(by_depth[d], key=lambda r: r["name"])}
         for d in sorted(by_depth)
     ]
     return {
-        "root": _row(canon), "levels": levels, "edges": l["edges"],
+        "root": note_context.row(canon), "levels": levels, "edges": l["edges"],
         "cycles": l["cycles"], "truncated": l["truncated"], "hint": "",
     }
 
@@ -3596,40 +3083,7 @@ def _index_due(key: str, vault: str) -> None:
     with _INDEX_LOCK:
         _INDEX_PENDING.pop(key, None)
     if vault == CONFIG.vault_path:
-        _index_note(key)
-
-
-def _index_note(key: str) -> None:
-    """The note's vectors and co-occurrence, as the write path keeps an agent's
-    note. `_EMBED_LOCK` because /embed and an import write the same store. Each
-    leg fails alone and is left to /embed: the text is safe on disk, and a stale
-    vector costs a search, never a keystroke."""
-    from silica.model.providers import get_embedder_or_none
-    from silica.driver import DRIVER
-    from silica.kernel.recall.cooccurrence import build_index
-    from silica.kernel.recall.embed import refresh_note
-
-    embedder = get_embedder_or_none(CONFIG, "note index", level="debug")
-    if embedder is None:
-        return
-    name = key.rsplit("/", 1)[-1]
-    try:
-        body = DRIVER.read_note(f"{key}.md").content or ""
-    except Exception as exc:
-        # Moved or deleted since it was saved: the next /embed sees the vault as it is.
-        logger.debug("note index: %s not read: %s", key, type(exc).__name__)
-        return
-    with _EMBED_LOCK:
-        try:
-            refresh_note(embedder, key, name, body)
-        except Exception as exc:
-            logger.warning("note index: embedding failed: %s", type(exc).__name__)
-        try:
-            # force without refreeze: this note's old share out, and the store's
-            # frozen language left alone (orchestrator._refresh_cooccurrence_for_ops).
-            build_index([(key, name, body)], lang=CONFIG.cooccurrence_lang, force=True)
-        except Exception as exc:
-            logger.warning("note index: co-occurrence failed: %s", type(exc).__name__)
+        note_index.index_note(key)
 
 
 @app.post("/note/let-go")
@@ -3641,7 +3095,7 @@ def note_let_go(payload: dict):
         timer = _INDEX_PENDING.pop(key, None)
     if timer is not None:
         timer.cancel()
-        _index_note(key)
+        note_index.index_note(key)
     return {"ok": True}
 
 
@@ -3815,25 +3269,6 @@ async def note_asset(note: str = Form(""), file: UploadFile = File(...)):
     return {"ok": True, "path": path, "embed": f"![[{path.rsplit('/', 1)[-1]}]]"}
 
 
-def _attachment_folder(canon: str) -> str:
-    """Where a pasted image of this note goes, vault-relative: what Obsidian's
-    `attachmentFolderPath` says, read as Obsidian does (`./x` under the note's
-    folder, `/` or empty the vault's root, else a folder of the vault), and with
-    no such setting `attachments/` beside the note. A vault here is often the
-    person's Obsidian vault, and an image Silica files elsewhere is lost to them."""
-    beside = canon.rpartition("/")[0]
-    try:
-        app_json = (Path(CONFIG.vault_path) / ".obsidian" / "app.json").read_text(encoding="utf-8")
-        setting = json.loads(app_json).get("attachmentFolderPath")
-    except (OSError, ValueError, AttributeError):
-        setting = None  # no Obsidian here, or a file it would not read either
-    if not isinstance(setting, str):
-        return f"{beside}/attachments".lstrip("/")
-    if setting.startswith("./"):
-        return f"{beside}/{setting[2:]}".strip("/")
-    return setting.strip("/")
-
-
 def _write_asset(canon: str, data: bytes, suffix: str) -> str:
     """The bytes under a free `Pasted image` name; its vault-relative path.
     Under `_EDIT_LOCK` because the name is chosen by looking: two pastes in one
@@ -3847,7 +3282,7 @@ def _write_asset(canon: str, data: bytes, suffix: str) -> str:
     root = Path(CONFIG.vault_path)
     stem = f"Pasted image {datetime.now():%Y%m%d%H%M%S}"
     try:
-        folder = contain_in_vault(f"{_attachment_folder(canon)}/{stem}{suffix}".lstrip("/"), root).rpartition("/")[0]
+        folder = contain_in_vault(f"{vault_files.attachment_folder(canon)}/{stem}{suffix}".lstrip("/"), root).rpartition("/")[0]
     except ValueError:
         # `../x` in app.json, or a link out of the vault: a setting does not
         # get to place a file outside it.
@@ -4492,209 +3927,6 @@ def note_history_restore(payload: dict):
     return {"restored": note, "id": payload.get("id")}
 
 
-# --- context explorer (GET /context) -----------------------------------------
-# One blocking call, all of it deterministic and LLM-free. Measured on a
-# 718-note vault, warm: related 0.01s, concepts(note=) 0.06s, outline/links/
-# unresolved 0.00s. The first call in a fresh process pays ~0.9s to load the
-# co-occurrence store — once, in a long-lived server. So: no progressive fill,
-# no client-side hybrid, one endpoint that returns the whole drawer.
-
-# Below this a note reads faster whole than as an extract, so the snippets
-# section is dropped rather than duplicating the reader.
-_SNIPPET_MIN_BODY = 700
-_SNIPPET_CUT = 140
-_H2 = re.compile(r"^##\s+(.+?)\s*$", re.M)
-# Lines that say nothing as a one-line extract: headings, lists, quotes,
-# callouts, tables, fences, images.
-_NOT_PROSE = re.compile(r"^\s*(?:[-*+>#|]|\d+[.)]\s|```|~~~|!\[|\[!)")
-_SENTENCE_END = re.compile(r"(?<=[.!?])(?:\s|$)")
-# List and quote markers, nested (`> - text`), for the readers that treat the
-# item or the quote as the sentence rather than as block structure. What is
-# left is then checked against _NOT_PASSAGE and not _NOT_PROSE: a stripped
-# `- **term**: ...` starts with `*`, which _NOT_PROSE reads as a list marker.
-_LIST_OR_QUOTE = re.compile(r"^\s*(?:(?:[-*+]|\d+[.)])\s+|>\s?)+")
-_NOT_PASSAGE = re.compile(r"^\s*(?:#|\||```|~~~|!\[|\[!)")
-# A related note this far away (or unreachable) is a link that does not exist
-# yet; distance 1 means it is already linked and belongs under Related instead.
-_SUGGEST_MIN_DIST = 3
-
-
-# A wikilink SPLIT INTO ITS PARTS, which is what the two readers below need and
-# what `_WIKILINK` (line 173, the linkifier's) deliberately does not do: that one
-# keeps `Target|alias` whole because it re-emits the link, while these two have
-# to resolve the target and display the alias separately. Naming them apart is
-# not style — the first version of this reused `_WIKILINK` and shadowed the
-# linkifier, and every note in the app rendered without its links.
-# `[[Target#anchor|alias]]`, and either half can be absent.
-_WIKI_REF = re.compile(r"!?\[\[([^\]|#]*)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]")
-_MD_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
-# Only the PAIRED marks, and only the unambiguous ones. A lone `*` or `_` is
-# left alone on purpose: stripping those turns snake_case into snakecase and a
-# multiplication sign into nothing, which is a worse read than the emphasis
-# marker it would have removed.
-_MD_PAIR = re.compile(r"(\*\*|__|==|~~|`)(.+?)\1", re.S)
-
-
-def _plain(text: str) -> str:
-    """Inline markup out, the words it wrapped left in.
-
-    The extract is prose, not source. This ran nowhere while the snippets lived
-    in the note drawer, one scroll under the reader that showed the same
-    sentence properly rendered; they are the first thing the work panel says
-    about a note now, and `==Un **Database** o Base di dati` at the top of a
-    panel reads as a broken row rather than as emphasis. Block-level markup
-    needs no handling here: _NOT_PROSE already refuses those lines.
-    """
-    out = _WIKI_REF.sub(lambda m: (m.group(2) or m.group(1) or "").strip(), text)
-    out = _MD_LINK.sub(lambda m: m.group(1).strip(), out)
-    # Pairs NEST (`==A **b** c==`) and sub() does not rescan what it inserted,
-    # so one pass leaves the inner marks standing. Three passes, because three
-    # is one more than the deepest nesting anyone writes by hand: highlight
-    # around bold around code.
-    for _ in range(3):
-        stripped = _MD_PAIR.sub(lambda m: m.group(2), out)
-        if stripped == out:
-            break
-        out = stripped
-    return out
-
-
-def _fm_ref(value: str) -> tuple[str, str]:
-    """A frontmatter `related:` entry as (what to resolve, what to show)."""
-    v = str(value).strip()
-    m = _WIKI_REF.fullmatch(v)
-    if not m:
-        return v, note_parts.clean_name(v)
-    target = (m.group(1) or "").strip()
-    return target, (m.group(2) or "").strip() or note_parts.clean_name(target)
-
-
-def _lead_prose(chunk: str) -> str:
-    """The first run of plain prose in a chunk, as one line."""
-    run: list[str] = []
-    for line in chunk.splitlines():
-        if not line.strip() or _NOT_PROSE.match(line):
-            if run:
-                break
-            continue
-        run.append(line.strip())
-    return " ".join(run)
-
-
-def _first_sentence(text: str, limit: int = _SNIPPET_CUT) -> str:
-    """First sentence, trimmed to `limit` on a word boundary.
-    ponytail: regex sentence split, so `e.g.` cuts early — a snippet, not a quote."""
-    text = " ".join(text.split())
-    if not text:
-        return ""
-    m = _SENTENCE_END.search(text)
-    out = text[: m.start()] if m else text
-    if len(out) > limit:
-        out = out[:limit].rsplit(" ", 1)[0] + "…"
-    return out
-
-
-def _key_snippets(body: str) -> list[dict]:
-    """First sentence of the body plus the first sentence of each `##` section,
-    at most three — a probe into the note, not a second reader."""
-    if len(body) < _SNIPPET_MIN_BODY:
-        return []
-    parts: list[tuple[str, str]] = []
-    head, last = "", 0
-    for m in _H2.finditer(body):
-        parts.append((head, body[last:m.start()]))
-        head, last = m.group(1), m.end()
-    parts.append((head, body[last:]))
-
-    out: list[dict] = []
-    for heading, chunk in parts:
-        # _plain BEFORE _first_sentence, not after: the cut lands mid-sentence
-        # by design, so a `==highlight==` whose closing mark falls past the
-        # limit would otherwise keep its opening one and nothing to close it.
-        text = _first_sentence(_plain(_lead_prose(chunk)))
-        if text:
-            out.append({"heading": _plain(heading), "text": text})
-        if len(out) == 3:
-            break
-    return out
-
-
-def _row(path: str) -> dict:
-    return {"name": note_parts.clean_name(path), "path": path}
-
-
-def _bridge_passage(src: str, target: str, limit: int = 240) -> str:
-    """The sentence in `src` that carries its wikilink to `target`, as prose.
-
-    A list item or a quote counts as prose here, marker stripped: on the test
-    vault 31 of 55 prose bridges lived in a `- **term**: [[link]] ...` bullet
-    or a `> ...` line, which IS the sentence. Headings, tables, fences,
-    images and callouts stay out. Empty when nothing carries it. The cut is
-    twice a snippet's: a bridge sentence is the evidence the row exists for,
-    so it may run a clause longer.
-    """
-    from silica.driver import get_driver
-    from silica.driver.base import NoteRef
-
-    try:
-        content = get_driver().read_note(NoteRef(name=note_parts.clean_name(src), path=src)).content
-    except Exception:
-        logger.debug("shape: bridge source unreadable %s", src, exc_info=True)
-        return ""
-    want = note_parts.clean_name(target).lower()
-    _props, body = note_parts.split_frontmatter(content)
-    for raw in body.splitlines():
-        line = _LIST_OR_QUOTE.sub("", raw)
-        if not line.strip() or _NOT_PASSAGE.match(line):
-            continue
-        for m in _WIKI_REF.finditer(line):
-            if note_parts.clean_name((m.group(1) or "").strip()).lower() != want:
-                continue
-            for sentence in _SENTENCE_END.split(line):
-                if m.group(0) in sentence:
-                    out = " ".join(_plain(sentence).split())
-                    if len(out) > limit:
-                        out = out[:limit].rsplit(" ", 1)[0] + "…"
-                    return out
-    return ""
-
-
-def _link_line(src: str, target: str, limit: int = 240) -> tuple[int, str]:
-    """The line of `src` a wikilink to `target` is written on, and its words.
-
-    Counted in the whole file, frontmatter included, because the drawer opens
-    at that number. Not _bridge_passage's filter: a link in a table or under a
-    heading is still written somewhere, and on Cultura (2026-11-05) any line
-    holding the link found 1,248 of 1,263. (0, "") when no line names it: a
-    link through an alias of the note resolves and spells another name.
-    """
-    from silica.driver import get_driver
-    from silica.driver.base import NoteRef
-
-    try:
-        content = get_driver().read_note(NoteRef(name=note_parts.clean_name(src), path=src)).content
-    except Exception:
-        logger.debug("link: source unreadable %s", src, exc_info=True)
-        return 0, ""
-    want = note_parts.clean_name(target).lower()
-    lines = content.splitlines()
-    # The body before the frontmatter: a sentence says why the link is there,
-    # and a `related:` entry only that it is.
-    head = len(lines) - len(note_parts.split_frontmatter(content)[1].splitlines())
-    for number in [*range(head, len(lines)), *range(head)]:
-        raw = lines[number]
-        for m in _WIKI_REF.finditer(raw):
-            if note_parts.clean_name((m.group(1) or "").strip()).lower() != want:
-                continue
-            line = _LIST_OR_QUOTE.sub("", raw)
-            said = next((s for s in _SENTENCE_END.split(line) if m.group(0) in s), line)
-            out = " ".join(_plain(said).split()).strip("'\"")
-            if len(out) > limit:
-                out = out[:limit].rsplit(" ", 1)[0] + "…"
-            return number + 1, out
-    return 0, ""
-
-
 def _note_concepts(target: str, k: int = 18) -> list[dict]:
     from silica.tools.graph import silica_concepts
 
@@ -4702,16 +3934,6 @@ def _note_concepts(target: str, k: int = 18) -> list[dict]:
         return silica_concepts(note=target, k=k).get("concepts") or []
     except Exception:
         logger.debug("context: concepts failed for %s", target, exc_info=True)
-        return []
-
-
-def _unresolved_links() -> list:
-    from silica.driver import get_driver
-
-    try:
-        return get_driver().unresolved()
-    except Exception:
-        logger.debug("context: unresolved() failed", exc_info=True)
         return []
 
 
@@ -4728,7 +3950,7 @@ def _ghost_context(name: str) -> dict:
 
     stem = note_parts.clean_name(name).lower()
     invokers = sorted({
-        link.source.path for link in _unresolved_links()
+        link.source.path for link in note_context.unresolved_links()
         if note_parts.clean_name(link.target).lower() == stem and link.source.path
     })
     merged: Counter = Counter()
@@ -4741,160 +3963,10 @@ def _ghost_context(name: str) -> dict:
         "ghost": True,
         "snippets": [],
         "concepts": [{"concept": c, "weight": w} for c, w in merged.most_common(18)],
-        "related": {"frontmatter": [], "outgoing": [], "backlinks": [_row(p) for p in invokers]},
+        "related": {"frontmatter": [], "outgoing": [], "backlinks": [note_context.row(p) for p in invokers]},
         "suggested": [],
         "hint": "",
     }
-
-
-def _suggested(canon: str, related: list[dict], linked: set[str], resolve) -> list[dict]:
-    """How this note SHOULD be connected, in two flavours.
-
-    - ghost: a wikilink leaving this note whose target does not exist. The note
-      already claims the connection; only the file is missing.
-    - note: a computed relative that scores high and sits far away (or
-      unreachable) in the wikilink graph — "a missing link worth creating", per
-      silica_related's own docstring. distance 1 is already linked, so it is
-      Related's business, not this section's.
-
-    Structural GAPs stay out on purpose: they are hub-to-hub by construction, so
-    the section would be empty on every note that is not a hub.
-    """
-    out: list[dict] = [
-        {"name": note_parts.clean_name(link.target), "path": "", "kind": "ghost",
-         "why": "linked from here, never written"}
-        for link in _unresolved_links()
-        if link.source.path == canon
-    ]
-    for r in related:
-        dist = r.get("distance")
-        # The recall stores key on cooccur_key (path minus .md), the wikilink
-        # graph on the full path — resolve back, or `linked` never matches and
-        # the click target is a path the drawer cannot open.
-        rpath = resolve(r["path"]) or r["path"]
-        if rpath in linked or rpath == canon or (dist is not None and dist < _SUGGEST_MIN_DIST):
-            continue
-        out.append({
-            "name": r.get("name") or note_parts.clean_name(rpath), "path": rpath, "kind": "note",
-            "why": ("unreachable" if dist is None else f"{dist} hops away")
-                   + f" · score {r.get('score', 0):.2f}",
-            # The same score the sentence above states in words. The explore
-            # panel draws it as a meter, and parsing it back out of `why` is how
-            # a display string becomes an accidental API: reword the sentence
-            # and the bar goes blank.
-            "score": float(r.get("score", 0) or 0),
-        })
-        if len(out) >= 8:
-            break
-    return out
-
-
-def _note_structure(canon: str) -> dict:
-    """The seven variables for one note, named for a reader rather than a paper.
-
-    Rows, not scalars: the panel prints what each number MEANS, so the naming
-    happens here where the thresholds can be justified, not in JS where they
-    would be three magic numbers in a template. A note the graph has never seen
-    (written this second, index not rebuilt) returns {} and the panel omits the
-    section rather than printing six zeroes.
-    """
-    from silica.kernel.report.structure import note_structure
-
-    try:
-        st = note_structure(canon)
-    except Exception:
-        logger.debug("context: structure failed for %s", canon, exc_info=True)
-        return {}
-    if not st or not st.get("in_graph"):
-        return {}
-    out = {
-        "coreness": st["coreness"],
-        # The scales the labels carry (ADR-0075): depth k OF the vault's
-        # deepest, and how many of the vault's notes are that deep.
-        "core_max": st.get("core_max", 0),
-        "core_reach": st.get("core_reach", 0),
-        "core_hist": st.get("core_hist", []),
-        "notes": st.get("notes", 0),
-        "articulation": st["articulation"],
-        "strands": st["strands"],
-        # Rounded to whole percent HERE: the raw pct-rank difference carries
-        # four decimals of sampling noise from a betweenness taken at 400
-        # pivots, and printing them would claim a precision the estimate has not
-        # got.
-        "surprise": round(st["surprise"] * 100),
-        # The two ranks the difference is taken of, which is what the drawer
-        # shows: "+25" asks the reader to know what was subtracted from what.
-        "degree_pct": round(st.get("degree_rank", 0.0) * 100),
-        "betweenness_pct": round(st.get("betweenness_rank", 0.0) * 100),
-        # prerequisites/unlocks are NOT here: they are the +-1 rungs of the
-        # ladder below, and the panel draws that instead. Two spellings of one
-        # relation in one payload is the drift this file's tests exist to stop.
-    }
-    stranded = st.get("stranded") or []
-    if st["articulation"] and stranded:
-        out["component"] = st.get("component", 0)
-        # Every stranded note, piece by piece, best-linked first: the drawer
-        # names them, draws the pieces, and tags a neighbour that is one of
-        # them `behind`. A piece is named by its head, so it ships with it.
-        out["behind"] = [q for p in stranded for q in p]
-        out["pieces"] = [{"size": len(p), "head": _row(p[0])} for p in stranded]
-        if st.get("layout"):
-            out["cut"] = _cut_figure(st["layout"])
-    return out
-
-
-def _cut_figure(layout: dict) -> dict:
-    """The cut's neighbourhood dressed for the drawer: names, and each area's
-    hue in both themes, the frame's own (ADR-0075, Place)."""
-    from silica.kernel.graph.graph_export import area_color
-
-    nodes = [{**{k: v for k, v in n.items() if k != "id"}, **_row(n["id"])} for n in layout["nodes"]]
-    areas = sorted({n["area"] for n in nodes if n["area"] >= 0})
-    return {"nodes": nodes, "edges": layout["edges"],
-            "colors": {a: [area_color(a), area_color(a, on_paper=True)] for a in areas}}
-
-
-def _note_ladder(canon: str, *, near: int = 2, per_rung: int = 3) -> dict:
-    """Where this note sits in a reading order, not just who touches it.
-
-    The two flat lists this replaced could not say the one thing the DAG knows:
-    that a prerequisite has a prerequisite. `ladder` walks three hops each way,
-    and the drawer draws the near rungs at `near`; everything past that is a
-    count and a hand-off to Flow, which is the one place in the app
-    that draws a whole ladder. Same reason `per_rung` exists: a 310px column
-    that prints all 21 dependents of a hub buries every section under it.
-
-    Empty dict, never a rung of one: a note with no direction around it has no
-    reading order, and a section holding only the note you are already on is a
-    heading with nothing under it.
-    """
-    from silica.kernel.report.structure import ladder as build_ladder
-
-    try:
-        lad = build_ladder(canon)
-    except Exception:
-        logger.debug("context: ladder failed for %s", canon, exc_info=True)
-        return {}
-    if not lad["nodes"]:
-        return {}
-    by_depth: dict[int, list[str]] = {}
-    for n in lad["nodes"]:
-        by_depth.setdefault(n["depth"], []).append(n["path"])
-    rungs, further = [], 0
-    for d in sorted(by_depth):
-        paths = sorted(by_depth[d], key=note_parts.clean_name)
-        # Past the near rungs the drawer says how many rather than which: the
-        # names are Flow's job and it has the width for them.
-        if abs(d) > near:
-            further += len(paths)
-            continue
-        rungs.append({
-            "depth": d,
-            "notes": [_row(q) for q in paths[:per_rung]],
-            "hidden": max(0, len(paths) - per_rung),
-        })
-    return {"rungs": rungs, "further": further, "root": lad["root"],
-            "cycles": lad["cycles"], "truncated": lad["truncated"]}
 
 
 @app.get("/context")
@@ -4931,7 +4003,7 @@ def context(path: str = "", name: str = "", ghost: bool = False):
         # and listing those here would put a dead row under "how it IS
         # connected" — they belong under suggested, as links worth writing.
         try:
-            return [_row(p) for r in fn(canon) if (p := resolve(r.path or ""))]
+            return [note_context.row(p) for r in fn(canon) if (p := resolve(r.path or ""))]
         except Exception:
             logger.debug("context: %s failed for %s", fn.__name__, canon, exc_info=True)
             return []
@@ -4952,7 +4024,7 @@ def context(path: str = "", name: str = "", ghost: bool = False):
     for v in fm_raw:
         if not v:
             continue
-        target, display = _fm_ref(str(v))
+        target, display = note_context.fm_ref(str(v))
         frontmatter.append({"name": display, "path": resolve(target) or ""})
 
     try:
@@ -4986,12 +4058,12 @@ def context(path: str = "", name: str = "", ghost: bool = False):
         "path": canon,
         "ghost": False,
         # A paper's text before its first section is the byline, not a claim.
-        "snippets": [s for s in _key_snippets(body) if s["heading"] or not paper],
+        "snippets": [s for s in note_context.key_snippets(body) if s["heading"] or not paper],
         "concepts": _note_concepts(canon),
         "related": {"frontmatter": frontmatter, "outgoing": outgoing, "backlinks": backlinks},
-        "suggested": _suggested(canon, rel, linked, resolve),
-        "structure": _note_structure(canon),
-        "ladder": _note_ladder(canon),
+        "suggested": note_context.suggested(canon, rel, linked, resolve),
+        "structure": note_context.note_structure(canon),
+        "ladder": note_context.note_ladder(canon),
         # Without embeddings `related` ranks on co-occurrence alone, and the
         # section looks thin for a reason the reader cannot see from here.
         # silica_related's own hint wins when it has one — it knows more about
@@ -5069,7 +4141,7 @@ def concepts(terms: str = ""):
         for q, hs in hits.items():
             for h in hs:
                 path = resolve(h.ref.path) or h.ref.path
-                text = _plain(_LIST_OR_QUOTE.sub("", h.snippet))[:240]
+                text = note_context.plain(note_context.LIST_OR_QUOTE.sub("", h.snippet))[:240]
                 # A one-token line is a tag or a frontmatter entry, not a sentence
                 # ("- classificazione-statistica" carried half the hits on a
                 # statistics note): the note still counts, the line is not quoted.
@@ -5175,7 +4247,7 @@ def compare(a: str = "", b: str = ""):
     return {
         "a": {"selector": a, "label": A[1], "size": out["a"]["size"], "terms": out["a"]["terms"], "paths": sorted(A[0])},
         "b": {"selector": b, "label": B[1], "size": out["b"]["size"], "terms": out["b"]["terms"], "paths": sorted(B[0])},
-        "links": [{"a": end(x), "b": end(y), "passage": "" if scaffold(x, y) else _bridge_passage(x, y) or _bridge_passage(y, x)}
+        "links": [{"a": end(x), "b": end(y), "passage": "" if scaffold(x, y) else note_context.bridge_passage(x, y) or note_context.bridge_passage(y, x)}
                   for x, y in out["links"]],
         "knn": [{"a": end(x), "b": end(y)} for x, y in out["knn"]],
     }
@@ -5243,45 +4315,8 @@ def vault_info():
         # the notes the vault links most. The counts, the area count and the
         # topic labels the landing stated before the greeting went with it,
         # and with them the community pass this endpoint ran after every turn.
-        "hubs": _top_hubs(nodes, edges),
+        "hubs": brief.top_hubs(nodes, edges),
     }
-
-
-def _top_hubs(nodes: list[dict], edges: list[dict], top_n: int = 24) -> list[dict]:
-    """Best-connected notes by resolved-link degree — the map view's landing
-    picker (a radial map must be rooted on one note, so 'most central' is the
-    sensible entry point). Ghost/unlinked nodes are skipped."""
-    from collections import Counter
-
-    deg: Counter = Counter()
-    for e in edges:
-        if e.get("type") == "EXTRACTED":
-            deg[e.get("from")] += 1
-            deg[e.get("to")] += 1
-    hubs = [
-        {"name": n.get("label") or (n.get("path") or "").rsplit("/", 1)[-1],
-         "path": n["path"], "degree": deg[n["id"]]}
-        for n in nodes
-        if n.get("type") != "ghost" and n.get("path") and deg[n["id"]] > 0
-    ]
-    hubs.sort(key=lambda h: (-h["degree"], h["name"].lower()))
-    return hubs[:top_n]
-
-
-# --- the vault brief ---------------------------------------------------------
-# A sentence a model writes about what the folder holds, which silica_vaults
-# hands the agent when it picks among vaults (vault_registry._brief). It was
-# the chat landing's second line until the greeting took the landing (ADR-0048,
-# amendment 2026-10-22); the page still asks for it at load, because nothing
-# else writes it. A convenience and not a fact, so a toggle switches it off.
-#
-# It caches into the vault's index dir rather than the vault: Silica's own
-# bookkeeping never lands in a folder the user reads.
-
-def _brief_path() -> Path:
-    from silica.kernel.base import home
-
-    return home.index_dir() / "vault_brief.json"
 
 
 @app.get("/limits")
@@ -5321,7 +4356,7 @@ def vault_brief(refresh: int = 0):
     topics = [c.label for c in communities if c.size > 1][:8]
     stamp = f"{notes}|" + "|".join(topics)
 
-    cache = _brief_path()
+    cache = brief.brief_path()
     if not refresh:
         try:
             got = json.loads(cache.read_text(encoding="utf-8"))
@@ -5330,8 +4365,8 @@ def vault_brief(refresh: int = 0):
         except Exception:
             pass  # no cache, unreadable cache, or a stamp from an older shape
 
-    hubs = [h["name"] for h in _top_hubs(nodes, edges, top_n=12)]
-    text = _write_brief(notes, topics, hubs)
+    hubs = [h["name"] for h in brief.top_hubs(nodes, edges, top_n=12)]
+    text = brief.write_brief(notes, topics, hubs)
     if not text:
         return {"enabled": True, "text": ""}
     try:
@@ -5340,45 +4375,6 @@ def vault_brief(refresh: int = 0):
     except Exception:
         pass  # an uncacheable brief is still a usable brief
     return {"enabled": True, "text": text}
-
-
-def _write_brief(notes: int, topics: list[str], hubs: list[str]) -> str:
-    """Ask the worker model for one sentence over evidence it cannot embellish.
-
-    It is handed labels and note names, never note bodies: the sentence has to
-    say what the collection is about, and a corpus of 1,200 notes has no
-    summary that fits in one line anyway. Trimmed hard on the way out: a
-    model asked for one sentence returns three often enough that no reader of
-    it can be built on trusting it.
-    """
-    if not topics and not hubs:
-        return ""
-    from silica.model.providers import get_provider
-
-    prompt = (
-        "Below are the topic labels of the largest link clusters in a personal "
-        "markdown vault, and the names of its best-connected notes.\n\n"
-        f"Clusters: {', '.join(topics) or 'none'}\n"
-        f"Best-connected notes: {', '.join(hubs) or 'none'}\n"
-        f"Total notes: {notes}\n\n"
-        "Write ONE sentence, at most 24 words, naming what this collection is "
-        "about. Describe only what the labels above support. No preamble, no "
-        "quotes, no note counts, no adjectives of praise. Reply with the "
-        "sentence and nothing else."
-    )
-    try:
-        provider = get_provider(CONFIG, role="worker")
-        reply = provider.call_llm(
-            messages=[{"role": "user", "content": prompt}],
-            tools=None,
-            response_schema=None,
-            max_tokens=200,
-        )
-        out = (reply.text or "").strip().strip('"').split("\n")[0].strip()
-    except Exception as exc:
-        logger.info("vault brief unavailable: %s", exc)
-        return ""
-    return out[:240]
 
 
 @app.get("/messages")
@@ -5443,9 +4439,9 @@ def get_messages():
             # (ADR-0121 point 4); a chat saved before that cuts at the same mark.
             if isinstance(m.get("silica_said"), str):
                 content = m["silica_said"]
-            elif isinstance(content, str) and MANIFEST_MARK in content:
-                content = content.split(MANIFEST_MARK, 1)[0]
-                content = "" if content == DROP_ASK else content
+            elif isinstance(content, str) and drop_turn.MANIFEST_MARK in content:
+                content = content.split(drop_turn.MANIFEST_MARK, 1)[0]
+                content = "" if content == drop_turn.DROP_ASK else content
             files = _files_shown(m.get("silica_files"))
         data.append({"role": m["role"], "content": content, "tools": tools, "files": files,
                      "note": m.get("silica_note") or "",

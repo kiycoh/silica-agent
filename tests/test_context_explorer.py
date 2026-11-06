@@ -24,7 +24,7 @@ def client(tmp_vault, tmp_path, monkeypatch):
 # --- snippet extraction (pure) ----------------------------------------------
 
 def test_snippets_take_the_lead_sentence_of_body_and_each_section():
-    from silica.ui.web.server import _key_snippets
+    from silica.kernel.report.note_context import key_snippets
 
     body = (
         "The vault is a graph of notes. A second sentence nobody asked for.\n\n"
@@ -33,7 +33,7 @@ def test_snippets_take_the_lead_sentence_of_body_and_each_section():
         "## How\n\nBy writing wikilinks as you go. Trailing prose.\n\n"
         "## Ignored\n\nThe fourth section never shows.\n" + "x " * 400
     )
-    out = _key_snippets(body)
+    out = key_snippets(body)
     assert [s["heading"] for s in out] == ["", "Why", "How"]        # at most three
     assert out[0]["text"] == "The vault is a graph of notes."       # first sentence only
     assert out[1]["text"] == "Because structure beats folders."     # bullets skipped
@@ -46,7 +46,7 @@ def test_a_snippet_is_prose_not_markup():
     work panel says about a note now, and raw marks there read as a broken row
     rather than as emphasis. The strip runs BEFORE the cut, so a highlight whose
     closing == falls past the 140th character cannot leave its opening behind."""
-    from silica.ui.web.server import _key_snippets
+    from silica.kernel.report.note_context import key_snippets
 
     body = (
         "==A **database** is a [[Sistema azienda]], that is a set of resources "
@@ -55,7 +55,7 @@ def test_a_snippet_is_prose_not_markup():
         "## **Why** it matters\n\nBecause `structure` beats [[folders|plain folders]].\n"
     )
     assert len(body) >= 700   # else snippets are withheld and this proves nothing
-    out = _key_snippets(body)
+    out = key_snippets(body)
     for mark in ("==", "**", "[[", "]]", "`"):
         assert all(mark not in s["text"] and mark not in s["heading"] for s in out), mark
     assert out[0]["text"].startswith("A database is a Sistema azienda")
@@ -65,15 +65,15 @@ def test_a_snippet_is_prose_not_markup():
 
 def test_snippets_are_hidden_for_a_short_note():
     """Reading a short note whole costs less than reading an extract of it."""
-    from silica.ui.web.server import _key_snippets
+    from silica.kernel.report.note_context import key_snippets
 
-    assert _key_snippets("A tiny note.\n\n## Section\n\nOne line.") == []
+    assert key_snippets("A tiny note.\n\n## Section\n\nOne line.") == []
 
 
 def test_long_sentence_is_cut_on_a_word_boundary():
-    from silica.ui.web.server import _first_sentence
+    from silica.kernel.report.note_context import first_sentence
 
-    out = _first_sentence("word " * 60)
+    out = first_sentence("word " * 60)
     assert len(out) <= 141 and out.endswith("…") and not out.endswith(" …")
 
 

@@ -33,6 +33,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from silica.config import CONFIG, hosted, silica_home
+from silica.kernel import vault_files
+from silica.sources import drop_turn
 
 logger = logging.getLogger(__name__)
 
@@ -491,17 +493,15 @@ def _answer(recs: list[dict]) -> tuple[list[str], list[dict], str]:
     carries: the notes the model reads (the converted ones, then the drop's
     files that were ready at once), one `silica_files` entry per file, and
     the words typed with the drop."""
-    from silica.ui.web.server import _file_entry
-
     notes: list[str] = []
     files: list[dict] = []
     for r in recs:
         # Told: the turn carries the notes, so `settled` would repeat them.
         _update(r["id"], answered=True, dismissed=True, told=True)
         notes += r.get("notes") or []
-        files.append(_file_entry(r["source"]["path"], r.get("notes") or []))
+        files.append(drop_turn.file_entry(r["source"]["path"], r.get("notes") or []))
     beside = list(dict.fromkeys(p for r in recs for p in r.get("beside") or []))
-    files += [_file_entry(p) for p in beside]
+    files += [drop_turn.file_entry(p) for p in beside]
     return notes + beside, files, (recs[0].get("text") or "") if recs else ""
 
 
@@ -750,15 +750,15 @@ def offered_turn(job_id: str, payload: dict | None = None):
             # Copied into the Inbox first (ADR-0121 point 5): the injector reads
             # inbox files, and nucleating is the student adding them to the vault.
             # The one composed turn still offered the injector.
-            inbox = server._add_to_vault(notes, [f["source"] for f in files])
+            inbox = vault_files.add_to_vault(notes, [f["source"] for f in files])
             return server._turn_response(
-                server._compose_nucleate_turn(server.NUCLEATE_ASK, inbox, [], inline=False),
+                drop_turn.compose_nucleate_turn(drop_turn.NUCLEATE_ASK, inbox, [], inline=False),
                 files=files, said=f"Nucleate {names}")
         words, said = {"ask": (words, words.strip()),
-                       "summarize": (server.SUMMARIZE_ASK, f"Summarize {names}"),
-                       "quiz": (server.QUIZ_ASK, f"Quiz me on {names}")}[kind]
-        return server._turn_response(server._compose_nucleate_turn(words, notes, []),
-                                     withhold=server.WITHHELD_WITH_FILES, files=files, said=said)
+                       "summarize": (drop_turn.SUMMARIZE_ASK, f"Summarize {names}"),
+                       "quiz": (drop_turn.QUIZ_ASK, f"Quiz me on {names}")}[kind]
+        return server._turn_response(drop_turn.compose_nucleate_turn(words, notes, []),
+                                     withhold=drop_turn.WITHHELD_WITH_FILES, files=files, said=said)
     except BaseException:
         SESSION.release()
         raise

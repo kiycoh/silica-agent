@@ -106,8 +106,8 @@ def test_the_two_offers_are_two_sections(tmp_path):
 def test_the_score_the_meter_draws_is_a_field_and_not_a_parsed_sentence():
     """`why` says "score 0.81" in words. Reading the number back out of a display
     string is how a sentence becomes an API: reword it and the bar goes blank."""
-    src = (ROOT / "silica" / "ui" / "web" / "server.py").read_text()
-    suggested = _block(src, "def _suggested(", "@app.get")
+    src = (ROOT / "silica" / "kernel" / "report" / "note_context.py").read_text()
+    suggested = _block(src, "def suggested(", "def note_structure(")
     assert '"score": float(' in suggested
     # and the panel never reads a number back out of the sentence. It draws no
     # meter any more (ADR-0075): on the note the change was measured on, eight
