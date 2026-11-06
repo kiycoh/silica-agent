@@ -4703,6 +4703,81 @@ def _etag(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
 
+# --- the index follows the person (ADR-0155 point 18) --------------------------
+# A save comes every 800 ms of pause, and a re-embed is a paid call on hosted, so
+# one refresh goes 60 s after a note's LAST save or when it is let go, never per
+# save. It never runs on /note/save's thread and it asks no chat model.
+_INDEX_AFTER_S = 60.0
+_INDEX_LOCK = threading.Lock()
+_INDEX_PENDING: dict[str, threading.Timer] = {}
+
+
+def _index_later(canon: str) -> None:
+    """(Re)start the note's refresh. The vault rides along: a timer that fires
+    after a switch must not read the same path in another vault."""
+    key = canon.removesuffix(".md")
+    timer = threading.Timer(_INDEX_AFTER_S, _index_due, (key, CONFIG.vault_path))
+    timer.daemon = True
+    with _INDEX_LOCK:
+        if (old := _INDEX_PENDING.get(key)) is not None:
+            old.cancel()
+        _INDEX_PENDING[key] = timer
+    timer.start()
+
+
+def _index_due(key: str, vault: str) -> None:
+    with _INDEX_LOCK:
+        _INDEX_PENDING.pop(key, None)
+    if vault == CONFIG.vault_path:
+        _index_note(key)
+
+
+def _index_note(key: str) -> None:
+    """The note's vectors and co-occurrence, as the write path keeps an agent's
+    note. `_EMBED_LOCK` because /embed and an import write the same store. Each
+    leg fails alone and is left to /embed: the text is safe on disk, and a stale
+    vector costs a search, never a keystroke."""
+    from silica.agent.providers import get_embedder_or_none
+    from silica.driver import DRIVER
+    from silica.kernel.recall.cooccurrence import build_index
+    from silica.kernel.recall.embed import refresh_note
+
+    embedder = get_embedder_or_none(CONFIG, "note index", level="debug")
+    if embedder is None:
+        return
+    name = key.rsplit("/", 1)[-1]
+    try:
+        body = DRIVER.read_note(f"{key}.md").content or ""
+    except Exception as exc:
+        # Moved or deleted since it was saved: the next /embed sees the vault as it is.
+        logger.debug("note index: %s not read: %s", key, type(exc).__name__)
+        return
+    with _EMBED_LOCK:
+        try:
+            refresh_note(embedder, key, name, body)
+        except Exception as exc:
+            logger.warning("note index: embedding failed: %s", type(exc).__name__)
+        try:
+            # force without refreeze: this note's old share out, and the store's
+            # frozen language left alone (orchestrator._refresh_cooccurrence_for_ops).
+            build_index([(key, name, body)], lang=CONFIG.cooccurrence_lang, force=True)
+        except Exception as exc:
+            logger.warning("note index: co-occurrence failed: %s", type(exc).__name__)
+
+
+@app.post("/note/let-go", dependencies=_SAME_ORIGIN)
+def note_let_go(payload: dict):
+    """The editor left this note: its pending refresh runs now, and a note
+    with none pending costs nothing, so the page can send this on every leave."""
+    key = str(payload.get("path") or "").removesuffix(".md")
+    with _INDEX_LOCK:
+        timer = _INDEX_PENDING.pop(key, None)
+    if timer is not None:
+        timer.cancel()
+        _index_note(key)
+    return {"ok": True}
+
+
 @app.get("/note/raw")
 def note_raw(path: str = ""):
     """The note's bytes for the editor, which is how the drawer shows a note
@@ -4778,6 +4853,7 @@ def note_save(payload: dict):
             from silica.kernel.write.preserve import Loss
 
             DRIVER.overwrite(canon, text, loss=Loss.PERSON)  # the person typed it
+            _index_later(canon)
     # overwrite() may stamp a derived `type:` into the frontmatter, so what
     # landed is read back rather than assumed: the editor's next etag has to be
     # the disk's, or its next save refuses itself.
