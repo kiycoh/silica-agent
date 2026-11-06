@@ -134,7 +134,7 @@ def test_each_model_call_writes_an_llm_call_line(journal, monkeypatch):
 
 
 def test_turn_kind_names_only_built_in_commands():
-    from silica.ui.web.server import _turn_kind
+    from silica.ui.web.turn import _turn_kind
 
     assert _turn_kind("what do my notes say?") == "chat"
     assert _turn_kind("/find bayes --k=3") == "find"
@@ -154,6 +154,7 @@ def client(tmp_vault, tmp_path, monkeypatch):
 
 
 def test_a_chat_turn_writes_one_turn_line(client, journal, monkeypatch):
+    from silica.ui.web import turn
     from silica.model import llm
 
     _, server = client
@@ -169,10 +170,10 @@ def test_a_chat_turn_writes_one_turn_line(client, journal, monkeypatch):
         messages.append({"role": "assistant", "content": "Hi"})
         return "Hi"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
     async def collect():
-        return [item async for item in server.run_turn(f"tell me about {MARKER}")]
+        return [item async for item in turn.run_turn(f"tell me about {MARKER}")]
 
     asyncio.run(collect())
     (turn,) = journal.events("turn")
@@ -184,14 +185,16 @@ def test_a_chat_turn_writes_one_turn_line(client, journal, monkeypatch):
 
 
 def test_an_empty_answer_and_an_unknown_slash_are_named_as_such(client, journal, monkeypatch):
+    from silica.ui.web import turn
     from silica.agent.loop import _EMPTY_COMPLETION
 
     _, server = client
-    monkeypatch.setattr(server, "run_agent", lambda messages, *a, **k: messages.append(
+    monkeypatch.setattr(turn, "run_agent", lambda messages, *a, **k: messages.append(
         {"role": "assistant", "content": _EMPTY_COMPLETION}) or _EMPTY_COMPLETION)
 
     async def collect(text):
-        return [item async for item in server.run_turn(text)]
+        from silica.ui.web import turn
+        return [item async for item in turn.run_turn(text)]
 
     asyncio.run(collect("hello"))
     asyncio.run(collect("/definitely-not-a-command"))
@@ -201,8 +204,9 @@ def test_an_empty_answer_and_an_unknown_slash_are_named_as_such(client, journal,
 
 
 def test_an_upload_writes_an_ingest_line_without_its_name(client, journal, monkeypatch):
+    from silica.ui.web import turn
     tc, server = client
-    monkeypatch.setattr(server, "run_agent", lambda messages, *a, **kw: "ok")
+    monkeypatch.setattr(turn, "run_agent", lambda messages, *a, **kw: "ok")
     body = b"# Hi\n\nsome body text to stage"
     resp = tc.post("/nucleate", files=[("files", (f"{MARKER}.md", body, "text/markdown")),
                                        ("files", (f"x.{MARKER}", b"?", "application/octet-stream"))])

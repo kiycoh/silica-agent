@@ -17,6 +17,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from silica.ui.web import session
 from silica.ui.web.settings import _tilde
 
 logger = logging.getLogger(__name__)
@@ -404,19 +405,15 @@ async def save_preview(request: Request, url: str = ""):
 
 async def _write_turn(fn, *args, **kwargs):
     from silica.ui.web.server import _embed_imported
-    from silica.ui.web.session import SESSION
 
-    if not SESSION.claim():
-        raise HTTPException(409, "a turn is running: save when it ends")
-    try:
-        out = await asyncio.to_thread(fn, *args, **kwargs)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    except Exception as exc:
-        logger.warning("save failed: %s: %s", type(exc).__name__, exc)
-        raise HTTPException(502, "that page could not be read right now")
-    finally:
-        SESSION.release()
+    with session.turn_slot("a turn is running: save when it ends"):
+        try:
+            out = await asyncio.to_thread(fn, *args, **kwargs)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        except Exception as exc:
+            logger.warning("save failed: %s: %s", type(exc).__name__, exc)
+            raise HTTPException(502, "that page could not be read right now")
     folder = out["folder"] if isinstance(out, dict) else str(Path(out).parent)
     _embed_imported({folder})
     return out

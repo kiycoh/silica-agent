@@ -47,6 +47,7 @@ def sandbox(tmp_vault, _fresh_narrator, monkeypatch):
     line SILICA_VIEWS=graph; the chat answers without a model and keeps the
     constraints of every turn it ran."""
     from silica.ui.web import server
+    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
@@ -60,7 +61,7 @@ def sandbox(tmp_vault, _fresh_narrator, monkeypatch):
         messages.append({"role": "assistant", "content": "forty-two"})
         return "forty-two"
 
-    monkeypatch.setattr(server, "run_agent", answers)
+    monkeypatch.setattr(turn, "run_agent", answers)
     return TestClient(server.app), server, ran
 
 
@@ -264,6 +265,7 @@ def test_no_answer_is_flaggable_in_a_demo(sandbox):
 
 
 def test_a_thin_answer_does_not_offer_the_web_the_demo_refuses(sandbox, monkeypatch):
+    from silica.ui.web import turn
     tc, server, _ = sandbox
 
     def thin(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -274,7 +276,7 @@ def test_a_thin_answer_does_not_offer_the_web_the_demo_refuses(sandbox, monkeypa
         messages.append({"role": "assistant", "content": "I have nothing on that."})
         return "I have nothing on that."
 
-    monkeypatch.setattr(server, "run_agent", thin)
+    monkeypatch.setattr(turn, "run_agent", thin)
     done = _frames(tc.post("/chat", json={"text": "what is graph rewiring?"}))[-1]
     assert THIN_COVERAGE_HINT not in [n["text"] for n in done.get("notes") or []]
     monkeypatch.delenv("SILICA_DEMO")

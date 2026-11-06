@@ -58,6 +58,7 @@ def lane(tmp_vault, monkeypatch):
 @pytest.fixture
 def client(lane, monkeypatch):
     from silica.ui.web import server
+    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     SESSION.reset()
@@ -68,7 +69,7 @@ def client(lane, monkeypatch):
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     monkeypatch.setattr(server, "_embed_imported", lambda folders: None)
     return TestClient(server.app), server, ran
 
@@ -405,6 +406,7 @@ def test_an_id_that_is_not_one_reaches_no_file(client):
 # --- point 5: transitions on the stream the browser holds --------------------------------
 
 def test_a_transition_reaches_the_narration_stream_as_a_job_event(client, monkeypatch):
+    from silica.ui.web import sse
     from silica.ui.web.session import SESSION
     from types import SimpleNamespace
 
@@ -414,7 +416,7 @@ def test_a_transition_reaches_the_narration_stream_as_a_job_event(client, monkey
     tc, server, _ = client
     stop = SimpleNamespace(should_exit=False)
     monkeypatch.setattr(SESSION, "server", stop)
-    monkeypatch.setattr(server, "_SSE_POLL_S", 0.01)
+    monkeypatch.setattr(sse, "POLL_S", 0.01)
     body: list[str] = []
     t = threading.Thread(target=lambda: body.append(tc.get("/narration/sse").text), daemon=True)
     t.start()

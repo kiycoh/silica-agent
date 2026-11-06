@@ -160,9 +160,10 @@ def test_tui_incognito_also_stops_capture_and_clears_with_a_new_process(on, monk
 # --- the GUI ------------------------------------------------------------------
 
 def test_gui_remember_saves_and_undo_takes_it_back(client, monkeypatch):
+    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
-    monkeypatch.setattr(server, "run_agent", MagicMock(side_effect=AssertionError("no model")))
+    monkeypatch.setattr(turn, "run_agent", MagicMock(side_effect=AssertionError("no model")))
     done = _sse(tc.post("/chat", json={"text": "/remember test entry"}))[-1]
     assert done["type"] == "done" and done["answer"] == "Saved to memory: test entry"
     mem = done["memory"]
@@ -217,6 +218,7 @@ def test_a_reopened_gui_chat_starts_from_the_seed(client, monkeypatch):
     """The narration stores turns only, so a loaded chat used to run with no
     system prompt and no memory; it now gets a fresh seed in front, as the
     TUI's /resume does."""
+    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
 
@@ -224,7 +226,7 @@ def test_a_reopened_gui_chat_starts_from_the_seed(client, monkeypatch):
         messages.append({"role": "assistant", "content": "Reply"})
         return "Reply"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     tc.post("/chat", json={"text": "first question"})
     sid = tc.get("/sessions").json()[0]["id"]
     um.save("user", "Name is Giulia")

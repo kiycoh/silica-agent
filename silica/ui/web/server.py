@@ -19,8 +19,7 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterator, Sequence
-from contextlib import asynccontextmanager, contextmanager, suppress
+from contextlib import asynccontextmanager, suppress
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -28,34 +27,19 @@ from typing import Any
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.background import BackgroundTask
 
-from silica.agent.constraints import (
-    DEMO_MAX_ITERATIONS,
-    PHONE_TOOLS,
-    AgentConstraints,
-    chat_deferred,
-    chat_tools,
-    web_turn_constraints,
-)
-from silica.obs.events import LLMStreamEvent, ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
-from silica.model.llm import meter_totals
-from silica.agent.loop import _EMPTY_COMPLETION, _is_tool_failure, run_agent
+from silica.agent.loop import _is_tool_failure
 from silica.agent import turn_notes
 from silica.agent.recall_watch import (
     READS_KEY,
-    RecallWatch,
-    numbers_notes,
     numbers_of_session,
     read_refs,
-    unfounded_in_turn,
 )
 from silica.config import CONFIG, demo
 from silica.kernel.graph.mindmap import note_resolver
 from silica.metrics import emit
 from silica.kernel.write import session_changes
-from silica.sources.web_research import WebTurn
-from silica.ui.web.callback import event_to_json, tool_calls_to_json
+from silica.ui.web.callback import tool_calls_to_json
 from silica.ui.web import security
 from silica.ui.web.failures import explain as _failure
 from silica.kernel.text import note_parts
@@ -68,6 +52,9 @@ from silica.kernel.recall import note_index
 from silica.kernel.report import vault_shape
 from silica.kernel.report import note_context
 from silica.kernel.report import brief
+from silica.ui.web import flags
+from silica.ui.web import turn
+from silica.ui.web import sse
 
 logger = logging.getLogger(__name__)
 
@@ -88,934 +75,6 @@ def _prewarm_learn() -> None:
         learner.prerequisites_map()
     except Exception:
         logger.exception("learn prewarm failed")
-
-
-def _scoped_run(ws: dict | None, fn, *args, **kwargs):
-    """Run the agent with retrieval narrowed to `ws` (ADR-0112 point 4). Set
-    and reset on the worker thread itself: `to_thread` copies the context, and
-    a token must be reset in the context that set it."""
-    from silica.kernel import workspaces
-
-    token = workspaces.open_scope(ws) if ws else None
-    try:
-        return fn(*args, **kwargs)
-    finally:
-        if token is not None:
-            workspaces.close_scope(token)
-
-
-def _join_workspace(ws_path: str, ev) -> None:
-    """A note this chat wrote joins its workspace's `notes:` (ADR-0112 point
-    4); the write to the workspace note lands among the chat's changes."""
-    from silica.kernel import workspaces
-
-    if _is_tool_failure(ev.result):
-        return
-    path = ""
-    try:
-        out = json.loads(ev.result)
-        path = str(out.get("path") or "") if isinstance(out, dict) else ""
-    except (TypeError, ValueError):
-        pass  # a non-JSON result names no path; the call's own argument does
-    path = path or str((ev.args or {}).get("path") or "")
-    if not path:
-        return
-    try:
-        ws = workspaces.read_workspace(ws_path)
-        if path.removesuffix(".md") not in {k.removesuffix(".md") for k in workspaces.members(ws)}:
-            workspaces.add_line(ws_path, "notes", path)
-    except Exception:
-        # The note is written either way; a workspace note deleted or broken
-        # mid-turn only loses the listing, which the drawer then shows absent.
-        logger.warning("could not add %s to the workspace %s", path, ws_path, exc_info=True)
-
-
-def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dict | None]:
-    """(turn note, offer) for the turn that just ended (ADR-0127 points 5, 6):
-    a proposal written from a request the person made in enough chats, or
-    else the installed skill that answers it, offered as the next turn. An
-    incognito chat proposes nothing: it asked to leave no trace."""
-    from silica.obs import narration as _narr
-    from silica.kernel import proposed_skills as ps
-    from silica.kernel import user_memory
-
-    from silica.kernel.learn.offer import says_lost
-
-    vault = CONFIG.vault_path or ""
-    # "non ho capito la Lezione 14" said in three chats is a reader stuck, not
-    # a request to make reusable: it became the skill /non-ho-capito
-    # (2026-10-23). The study offer answers that message. A demo neither
-    # drafts one (a worker call no question counts) nor offers one it may
-    # refuse, /explain among them (ADR-0139 point 6).
-    if not vault or demo() or user_memory.incognito() or says_lost(text):
-        return None, None
-    try:
-        evidence = ps.detect(text, messages, vault, _narr.NARRATOR.sid)
-        if evidence is not None:
-            drafted = ps.draft(evidence["asks"], CONFIG)
-            name = ps.stage(vault, drafted, evidence, CONFIG.worker_model or CONFIG.model or "") if drafted else None
-            if name:
-                return {"kind": "skill", "text": f"/{name} written from a request you made in "
-                                                 f"{len(evidence['sessions'])} chats · review it in "
-                                                 "Settings › Skills"}, None
-        return None, ps.offer(text, vault)
-    except Exception:
-        # A proposal is an extra: a chat file that does not parse or a worker
-        # that is down costs the person the proposal, never the answer.
-        logger.warning("skill proposal skipped", exc_info=True)
-        return None, None
-
-
-def _study_offer(text: str, messages: list[dict], plan_draft: dict | None = None) -> dict | None:
-    """The study offer for the turn that just ended, from the notes it read
-    (learn.offer). An incognito chat gets none, as it gets no proposal, and
-    a demo none: its commands are Learn's and the demo's refused ones.
-    `plan_draft` is the plan this turn computed (_plan_context), offered for
-    saving."""
-    from silica.config import withheld
-    from silica.kernel import user_memory
-    from silica.kernel.learn.offer import study_offer
-
-    if demo() or user_memory.incognito():
-        return None
-    try:
-        from silica.kernel.learn.offer import asks_plan, plan_offer
-
-        if (plan_draft or asks_plan(text)) and "/learn" not in withheld("routes"):
-            # A plan asked of the chat: the one it computed, or the one Learn tracks.
-            from silica.kernel.learn.plans import list_plans
-
-            return plan_offer(text, list_plans(), plan_draft)
-        # The turn names its reads as the calls did, a title or a path; the
-        # ledger keys notes by path, so the titles are resolved first.
-        from silica.kernel.learn.offer import says_lost
-        from silica.kernel.graph.mindmap import _driver_graph, answer_resolver
-
-        graph = _driver_graph()
-        _resolve, read = answer_resolver(read_refs(messages), graph=graph)
-        if says_lost(text):
-            # The note the reader named is the one the offer is about: a turn
-            # that read nothing (the local 9B answered "punti di supporto" from
-            # memory), or one whose first read was a neighbour ("Limite
-            # d'errore con slack" for "variabili slack di margine", 2026-10-23).
-            low = text.casefold()
-            named = [(t, p) for p, t in graph[1].items()
-                     if len(t) >= 6 and t.casefold() in low and "/sources/" not in f"/{p}"]
-            read = [p for _t, p in sorted(named, key=lambda tp: -len(tp[0]))[:1]] + list(read)
-        from silica.kernel.learn.offer import allowed, log_offer, mode
-
-        if mode() == "off":
-            return None
-        offer = study_offer(text, [p if p.endswith(".md") else p + ".md" for p in read])
-        if offer is None:
-            return None
-        # Two offers a chat, none on a note whose offer went unused in the last
-        # week, and in shadow mode only the record (learn.offer, research rule).
-        chat = SESSION.chat.sid or ""
-        show = mode() == "on" and allowed(chat, offer["note"])
-        log_offer(chat, offer, shown=show)
-        return offer if show else None
-    except Exception:
-        # An offer is an extra: a ledger that does not parse costs the offer,
-        # never the answer.
-        logger.warning("study offer skipped", exc_info=True)
-        return None
-
-
-def _escalation(text: str, messages: list[dict]) -> str:
-    """The escalation block for this turn, or "": the note the reader names,
-    stuck on it by the ledger, by an unused offer or by saying so twice. Logs
-    an offer acted on first. Nothing in an incognito chat."""
-    from silica.kernel import user_memory
-    from silica.kernel.learn import offer as learn_offer
-
-    if user_memory.incognito() or learn_offer.mode() == "off":
-        return ""
-    try:
-        chat = SESSION.chat.sid or ""
-        learn_offer.log_acted(chat, text)
-        from silica.kernel.graph.mindmap import _driver_graph
-        from silica.kernel.learn.quiz import entries
-
-        low = (text or "").casefold()
-        named = sorted(((t, p) for p, t in _driver_graph()[1].items()
-                        if len(t) >= 6 and t.casefold() in low and "/sources/" not in f"/{p}"),
-                       key=lambda tp: -len(tp[0]))
-        if not named:
-            return ""
-        name, path = named[0]
-        note = path if path.endswith(".md") else path + ".md"
-        history = [str(m.get("content") or "") for m in messages if m.get("role") == "user"][-3:]
-        why = learn_offer.escalation(note, chat, text, history, entries())
-        if not why:
-            return ""
-        # in shadow mode the record only: what would have fired, nothing shown;
-        # a shadowed reason the same in any mode (ADR-0135 point 9)
-        shown = learn_offer.mode() == "on" and not learn_offer.shadowed(why)
-        learn_offer._append({"chat": chat, "note": note, "escalated": True, "why": why, "displayed": shown})
-        if not shown:
-            return ""
-        from silica.kernel.learn.items import read_note
-
-        return learn_offer.escalation_block(name, why, read_note(note))
-    except Exception:
-        # An escalation is an extra: a ledger that does not parse costs it,
-        # never the turn.
-        logger.warning("study escalation skipped", exc_info=True)
-        return ""
-
-
-def _plan_context(text: str, messages: list[dict]) -> tuple[str, str, dict | None]:
-    """Learn's plan for this message (learn.offer.plan_context), or ("", "",
-    None): the block for the model, the plan or calendar appended under its
-    answer, and the plan to save when this turn computed one. `messages` is
-    the chat before this turn, whose last exchange may be the question for
-    the material that this message answers. An incognito chat gets none, as
-    it gets no offer, and an account Memorize is not served to none: the
-    plan it would offer to save lands on a route that answers 404."""
-    from silica.config import withheld
-    from silica.kernel import user_memory
-
-    if "/learn" in withheld("routes") or user_memory.incognito() or not text or text.startswith("/"):
-        return "", "", None
-    try:
-        from silica.kernel.learn.offer import plan_context
-        from silica.kernel.learn.plans import list_plans
-
-        prev_user, prev_answer = "", ""
-        for m in reversed(messages):
-            if m.get("role") == "assistant" and not prev_answer and not prev_user:
-                prev_answer = str(m.get("content") or "")
-            elif m.get("role") == "user":
-                # the person's words: the blocks this server appended to the
-                # turn start at a blank line and a bracket, and the question
-                # for the material said "study plan" itself
-                prev_user = str(m.get("silica_said") or m.get("content") or "").split("\n\n[", 1)[0]
-                break
-        return plan_context(text, list_plans(), prev_user, prev_answer)
-    except Exception:
-        # The plan's numbers are an extra: a plan note that does not parse,
-        # or a reading model that is down, costs the block, never the turn.
-        logger.warning("plan context skipped", exc_info=True)
-        return "", "", None
-
-
-def _sse(data: dict) -> str:
-    return f"data: {json.dumps(data)}\n\n"
-
-
-def _turn_kind(text: str) -> str:
-    """The turn line's kind: "chat", a built-in command's name, or "slash".
-
-    Only names from COMMANDS pass: a skill installed into the vault
-    (ADR-0097) is a slash command its user named, and an unknown one is
-    whatever the user typed, so both stay "slash" and no free text reaches
-    the journal."""
-    if not text.startswith("/"):
-        return "chat"
-    from silica.ui.commands import COMMANDS
-
-    word = text.split(None, 1)[0].lower()
-    return word[1:] if any(c.name == word for c in COMMANDS) else "slash"
-
-
-async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str = "",
-                   withhold: "Sequence[str]" = (), files: "Sequence[dict]" = (), said: str = "",
-                   prebuilt: dict | None = None, note: str = "", story: str = "",
-                   scope: str = "story") -> AsyncIterator[dict]:
-    """One agent turn as a stream of transport-neutral wire dicts.
-
-    Yields `event_to_json(...)` dicts as the agent streams, then exactly one
-    terminal dict: `{"type": "done", ...}` or `{"type": "error", ...}`. Owns the
-    whole turn lifecycle (session append, sync→async queue bridge, cancel token,
-    context compaction, save). Both `--gui` (SSE) and `connect` (WS) consume this
-    — the framing is the transport's job, not this core's.
-
-    Gate lifecycle: the slot is freed on normal end/error at once; on abandonment
-    (the consumer stops iterating — a dropped SSE/WS client) the worker keeps
-    running, so we signal cancel and defer the release to the worker's exit, so
-    no second turn overlaps a zombie still mutating `messages`.
-
-    ADR-0121: `withhold` names tools this turn is not offered (a turn that
-    brings attached files in is not offered the injector, point 3); `files` and
-    `said` ride the user message for the bubble a reload draws (point 4);
-    `prebuilt` is a stored user message asked again as it was (POST /turn/redo).
-    `note` is the vault path of the note open beside the chat (the composer's
-    chip): it joins the named notes and rides the user message as `silica_note`.
-    `story` is a Discover story the composer's story chip names (ADR-0137 point
-    8): its articles ride the turn as a fenced block, `scope` says what the
-    answer may draw on, and the chip rides the message as `silica_story`.
-    """
-    from silica.cli import _compact_context, _expand_web_turn, _update_context_tokens
-
-    messages = SESSION.chat.messages
-    if not SESSION.busy:  # direct callers (tests, future WS) that didn't pre-claim
-        SESSION.busy = True
-    q: asyncio.Queue = asyncio.Queue()
-    loop = asyncio.get_running_loop()
-    SESSION.cancel = threading.Event()  # module-level so /stop can see it
-    task: asyncio.Task | None = None
-    # The turn's usage line (ADR-0100 point 3), written in the finally.
-    # Abandonment ends the stream without a verdict, so "cancelled" until a
-    # terminal frame says otherwise.
-    started, tokens_before = time.monotonic(), meter_totals()
-    first_token: list[float] = []
-    tools: dict[str, int] = {}
-    tool_errors: dict[str, int] = {}
-    outcome = "cancelled"
-    limit: str | None = None  # the layer a `limited` turn met (ADR-0102 point 10)
-    ws: dict | None = None    # the workspace this turn runs in (ADR-0112 point 4)
-
-    def cb(ev):  # runs in the agent/LLM worker thread
-        if isinstance(ev, ToolCompleteEvent) and ws is not None and ev.name == "silica_write_note":
-            _join_workspace(ws["path"], ev)
-        if isinstance(ev, ToolStartEvent):
-            tools[ev.name] = tools.get(ev.name, 0) + 1
-        elif isinstance(ev, ToolErrorEvent):
-            tool_errors[ev.name] = tool_errors.get(ev.name, 0) + 1
-        elif not first_token and isinstance(ev, LLMStreamEvent) and ev.chunk_type == "text" and ev.content:
-            first_token.append(time.monotonic())
-        data = event_to_json(ev)
-        if data is not None:
-            loop.call_soon_threadsafe(q.put_nowait, data)
-
-    # InjectorFSM phase transitions arrive on BUS, not through the agent
-    # callback: they are emitted from inside the tool, several layers below the
-    # loop that owns `cb`. Subscribed per turn and dropped in the finally, so a
-    # turn never receives another turn's phases and nothing accumulates across
-    # turns. Publishing happens on the FSM's thread, hence the same
-    # call_soon_threadsafe hop `cb` uses.
-    def on_phase(ev):
-        try:
-            cb(ev)
-        except RuntimeError:
-            pass  # loop already closed: the turn is gone, the event is moot
-
-    from silica.obs.bus import BUS
-    BUS.subscribe("work/phase", on_phase)
-    # A typed /nucleate runs the injector with no agent call around it, and
-    # says so on "work/tool" (cli._sc_nucleate), so its block draws as the
-    # agent's does.
-    BUS.subscribe("work/tool", on_phase)
-
-    try:
-        # A slash command follows the REPL's dispatch order (silica/cli.py): the
-        # direct handler first — synchronous, no LLM round-trip — then the
-        # workflow expansion. Asking the same handler the REPL asks is the point:
-        # the hand-kept list of "web commands" that used to gate this drifted, and
-        # /lexical /wiki /graph /map /find /vault fell through it into an error.
-        #
-        # A persona (ADR-0127 point 3) comes before all of them: it is worn, not
-        # run. Its command edits this conversation's system line and asks no
-        # model; with words after the name, those words are this turn, already
-        # under the persona.
-        from silica.kernel import personas
-
-        worn = (await asyncio.to_thread(personas.command, text, messages, CONFIG.vault_path or None,
-                                        not SESSION.chat.collapsed) if text.startswith("/") else None)
-        if worn is not None and not worn[1]:
-            from silica.obs import narration as _narr
-
-            messages.append({"role": "user", "content": text, "origin": "cli"})
-            session.narrate_user_turn(messages[-1])
-            messages.append({"role": "assistant", "content": worn[0]})
-            _narr.NARRATOR.turn(messages[-1])
-            _update_context_tokens(messages)
-            outcome = "done"
-            yield {"type": "done", "answer": worn[0], "html": render.linkify(worn[0], remote_images=False),
-                   **session.ctx_meter()}
-            return
-        if worn is not None:
-            text = worn[1]
-        from silica.config import withheld
-
-        # A view's command goes with the view (ADR-0140 point 4), and a demo's
-        # refused ones with it (ADR-0139 point 6); the picker does not offer
-        # them, but a typed one does not come from it. Asked after the persona,
-        # whose words are this turn, and before /web and /flashcards, which run
-        # ahead of the dispatchers: "/<persona> /web" passed the 404 in
-        # _demo_refuses and reached the internet (review 2026-10-31). The first
-        # word as split() finds it, lowered as both dispatchers lower it.
-        head = (text.split(None, 1) or [""])[0]
-        if head.startswith("/") and head.lower() in withheld("commands"):
-            outcome = "error"
-            yield {"type": "error", "error": f"'{head}' is not part of this account"}
-            return
-        agent_msg = text
-        escalated = False   # the turn's answer is the aid itself (learn.offer.escalation)
-        plan_appendix = ""  # Learn's calendar, appended under the answer (learn.offer.plan_context)
-        plan_draft = None   # the plan this turn computed, offered for saving under the answer
-        # /web comes first: it is neither direct nor a workflow expansion but an
-        # agent turn with web-only tools. A usage error raises ValueError, which
-        # the except below turns into the single error event.
-        web = _expand_web_turn(text, messages) if text.startswith("/") else None
-        if web is not None:
-            agent_msg = web[1]
-        elif text.lower().split(None, 1)[:1] == ["/remember"] and len(text.split(None, 1)) > 1:
-            # /remember <text> (ADR-0076 §6) is written here and not by the
-            # direct handler below, whose console text would come back wrapped
-            # in a code block: the chat draws this as a Saved line with Undo,
-            # from the `memory` the done frame carries. Bare /remember goes on
-            # to the expansion below, which asks the model.
-            from silica.obs import narration as _narr
-            from silica.cli import remember_text
-            from silica.kernel import user_memory
-
-            out = user_memory.save("vault", remember_text(text), session=_narr.NARRATOR.sid or "")
-            answer = user_memory.describe(out)
-            messages.append({"role": "user", "content": text, "origin": "cli"})
-            session.narrate_user_turn(messages[-1])
-            messages.append({"role": "assistant", "content": answer})
-            _narr.NARRATOR.turn(messages[-1])
-            done = {"type": "done", "answer": answer, "html": render.linkify(answer, remote_images=False), **session.ctx_meter()}
-            if (saved := user_memory.undo_payload(out)) is not None:
-                done["memory"] = saved
-            outcome = "done"
-            yield done
-            return
-        elif text.lower().split(None, 1)[:1] == ["/flashcards"]:
-            # Cards are made as data and checked before they are shown
-            # (learn.artifacts.flashcards), and the answer is their Markdown:
-            # the direct path below would wrap what the command prints in a
-            # code block, and the formulas on the cards would not render.
-            import shlex
-
-            from silica.obs import narration as _narr
-            from silica.cli import _int_flag, _positional, _str_flag
-            from silica.kernel.learn.artifacts import flashcards
-
-            try:
-                args = shlex.split(text)[1:]
-            except ValueError:
-                raise ValueError("unbalanced quotes in command. Wrap paths with spaces in \"...\".") from None
-            targets = _positional(args)
-            if not targets:
-                raise ValueError("/flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]")
-            answer = await asyncio.to_thread(flashcards, targets, _int_flag(args, "--n=", 12),
-                                             _str_flag(args, "--save").strip())
-            messages.append({"role": "user", "content": text, "origin": "cli"})
-            session.narrate_user_turn(messages[-1])
-            messages.append({"role": "assistant", "content": answer})
-            _narr.NARRATOR.turn(messages[-1])
-            _update_context_tokens(messages)
-            outcome = "done"
-            yield {"type": "done", "answer": answer, "html": await asyncio.to_thread(render.answer_html, answer, []),
-                   **session.ctx_meter()}
-            return
-        elif text.startswith("/"):
-            from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
-            from silica.ui.console import CONSOLE
-
-            def _run_slash():
-                # Both dispatchers print their result to CONSOLE and both can do
-                # real work, so both run under the capture and off the loop
-                # thread. The expansion is not a pure string builder: /fetch,
-                # /web-search and /convert do the whole job inside it and return
-                # "" to say the REPL has nothing left for the agent. Reading
-                # that "" as "not available" was reporting failure for work that
-                # had already written notes to disk, with the success line going
-                # to the server's stdout where no browser user can see it.
-                with CONSOLE.capture() as capture:
-                    handled = _handle_direct_shortcut(text, messages)
-                    expanded = None if handled else _expand_workflow_shortcut(text)
-                return handled or expanded == "", expanded, capture.get()
-
-            # Pumped as the agent's turn is: a command that runs the injector
-            # streams its block and phases while it works (cli._sc_nucleate),
-            # and they reached no one while this awaited the thread whole. Held
-            # as the turn's task, so a dropped tab keeps the gate shut until
-            # the work ends instead of freeing it under a running import.
-            done_slash = object()
-            typed = {"role": "user", "content": text, "origin": "cli"}
-            told: list[bool] = []
-
-            def _turn_before_its_work(ev) -> None:
-                # The run projection starts at a user turn, so the injector's
-                # beats must follow this one. A command that ran a unit is past
-                # the agent fallback (its target is resolved), so the turn
-                # narrated here is never narrated again as an expansion.
-                if not told:
-                    told.append(True)
-                    session.narrate_user_turn(typed)
-
-            BUS.subscribe("work/tool", _turn_before_its_work)
-            try:
-                SESSION.task = task = asyncio.ensure_future(asyncio.to_thread(_run_slash))
-                task.add_done_callback(lambda t: q.put_nowait(done_slash))
-                while (item := await q.get()) is not done_slash:
-                    yield item
-                handled, expanded, captured_out = await task
-            finally:
-                BUS.unsubscribe("work/tool", _turn_before_its_work)
-
-            if handled:
-                # Appended only once the verdict is in: a False falls through to
-                # the agent below, which appends the expanded turn itself.
-                messages.append(typed)
-                if not told:
-                    session.narrate_user_turn(typed)
-                # A GUI started from a terminal renders CONSOLE in colour and the
-                # capture keeps the escape codes, which the chat showed verbatim
-                # around /fetch's note path. The browser gets the text alone.
-                from rich.text import Text
-                shown = Text.from_ansi(captured_out).plain.strip()
-                answer = f"```text\n{shown}\n```" if shown else "```text\n(done)\n```"
-                messages.append({"role": "assistant", "content": answer})
-                from silica.obs import narration as _narr
-                _narr.NARRATOR.turn(messages[-1])
-
-                # Yield a fake agent turn with the direct result
-                outcome = "done"
-                yield {
-                    "type": "done",
-                    "answer": answer,
-                    "html": render.linkify(answer, note_resolver(), remote_images=False),
-                    **session.ctx_meter(),
-                }
-                return
-
-            if expanded is None:
-                outcome = "error"
-                yield {"type": "error", "error": f"'{text}' not available in this session"}
-                return
-            agent_msg = expanded
-
-        # The notes the user named, as paths (ADR-0097 point 2). From `text`,
-        # so a skill's expansion keeps its links and the block adds their
-        # paths. Not on a /web turn: its tools cannot read a note. Off the
-        # loop, because it reads the driver's graph.
-        opened = ""
-        if web is None:
-            from silica.agent.mentions import named_notes
-            from silica.kernel.learn.offer import says_lost
-            from silica.ui.web import jobs
-
-            if block := await asyncio.to_thread(named_notes, text, None, note):
-                agent_msg += "\n\n" + block
-                # Only a note the block kept: one renamed under the open drawer
-                # was left out, and the bubble must not claim it was read.
-                opened = note if note and ": " + note in block else ""
-            # A reader still stuck on a note gets the aid as the answer itself
-            # (learn.offer.escalation), and an offer's command sent is recorded.
-            if block := await asyncio.to_thread(_escalation, text, messages):
-                agent_msg += "\n\n" + block
-                escalated = True
-            block, plan_appendix, plan_draft = await asyncio.to_thread(_plan_context, text, messages)
-            if block:
-                agent_msg += "\n\n" + block
-            elif await asyncio.to_thread(says_lost, text):   # Jev over HTTP behind the word list: off the loop
-                # A reader saying it is unclear asked to understand, not to
-                # write: the local 9B answered "non ho capito il Boosting"
-                # with a new note of its own (2026-10-23).
-                agent_msg += ("\n\n[The reader says this was not clear. Answer here in the chat; READ-ONLY: "
-                              "do not create, edit, patch, or move any note.]")
-            # This chat's conversions that ended since the agent last heard of
-            # them: the history still says "still converting" (jobs.settled).
-            if block := await asyncio.to_thread(jobs.settled, SESSION.chat.sid):
-                agent_msg += "\n\n" + block
-
-        story_chip = None
-        if story:
-            from silica.sources.discover.story import chat_block
-
-            block, story_chip = await asyncio.to_thread(chat_block, None, story, scope)
-            if block:
-                agent_msg += "\n\n" + block
-        # An attached image rides this turn only (ADR-0077 point 3): the
-        # transcript, the narration and every later turn carry its saved path,
-        # which silica_look opens again, because the base64 would otherwise be
-        # re-sent with every later turn and stored with the session.
-        images = [] if text.startswith("/") else list(attachments)
-        if images:
-            agent_msg += "".join(f"\n\n[image attached: {p}]" for p in images)
-        msg: dict[str, Any] = {"role": "user", "content": agent_msg}
-        if text.startswith("/"):
-            msg["origin"] = "cli"
-        if persona := personas.active(messages):
-            msg[personas.TURN_KEY] = persona
-        if files:
-            msg["silica_files"] = list(files)
-        if said:
-            msg["silica_said"] = said
-        elif text.startswith("/") and agent_msg != text:
-            # A command's expansion is the model's instructions, not the
-            # person's words: a reloaded chat drew /quiz's directive as what
-            # they had typed (tour run, 2026-10-29).
-            msg["silica_said"] = text
-        if opened:
-            msg["silica_note"] = opened
-        if story_chip:
-            msg["silica_story"] = story_chip
-        if prebuilt is not None:
-            msg = prebuilt
-        ws = await asyncio.to_thread(session.resolve_workspace, workspace)
-        await asyncio.to_thread(session.apply_workspace, ws)
-        if ws is not None:
-            msg["silica_workspace"] = ws["path"]   # the scope this turn ran in
-        messages.append(msg)
-        session.narrate_user_turn(msg)
-        if msg.get("silica_files"):
-            # The bubble's file chips, with what "add to vault" needs (ADR-0121
-            # point 4): the page only knew the names it uploaded.
-            yield {"type": "files", "files": await asyncio.to_thread(_files_shown, msg["silica_files"])}
-        if images:
-            from silica.agent import vision
-            if vision.separate():
-                # A chat model that takes text only gets the pixels as words
-                # (ADR-0077 amendment 2026-10-21). They ride this turn only, as
-                # the pixels did: the done-callback below restores agent_msg.
-                msg["content"] = agent_msg + await asyncio.to_thread(vision.read_attached, images, text)
-            else:
-                from silica.kernel.recall.image_readings import image_part
-                msg["content"] = [{"type": "text", "text": agent_msg}, *map(image_part, images)]
-
-        # Both wrappers forward every event to `cb` untouched: WebTurn records the
-        # trace the citations are built from, RecallWatch counts recall misses for
-        # the thin-coverage hint.
-        # A /web turn is not checked for numbers, but its pages were read: the
-        # RecallWatch under its WebTurn collects them for the session set.
-        read = RecallWatch(cb)
-        watch = WebTurn(web[0], read) if web else read
-
-        sentinel = object()
-        task = asyncio.create_task(
-            asyncio.to_thread(
-                _scoped_run, ws, run_agent, messages, CONFIG.model, watch,
-                cancel_token=SESSION.cancel,
-                # Same chat_tools cut as the CLI REPL (the tool block is the
-                # biggest per-iteration cost); interactive keeps the GUI's live
-                # stream and keeps the turn off the worker-slot cap. Slash
-                # directives carry origin="cli", so excluded tools a command
-                # names are summoned back exactly as in the terminal.
-                constraints=(
-                    web_turn_constraints() if web
-                    else AgentConstraints(tools=tuple(n for n in chat_tools(messages) if n not in withhold),
-                                          deferred=chat_deferred(messages), interactive=True,
-                                          max_iterations=DEMO_MAX_ITERATIONS if demo() else None)
-                ),
-            )
-        )
-        SESSION.task = task
-        task.add_done_callback(lambda t: q.put_nowait(sentinel))
-        if images:
-            # After the sentinel's callback and before the stream reader resumes,
-            # so the context meter and compaction already see the text form.
-            task.add_done_callback(lambda t: msg.__setitem__("content", agent_msg))
-
-        while True:
-            item = await q.get()
-            if item is sentinel:
-                break
-            yield item
-
-        # Before the await, which re-raises: a turn that failed still read what
-        # its results showed, and the narration a reload rebuilds from has them.
-        SESSION.chat.seen_numbers.update(read.numbers)
-        answer = await task  # re-raises if run_agent failed
-        # Read before attribution and figures append to it.
-        empty = answer == _EMPTY_COMPLETION
-        # Stop is an outcome, not an answer (audit P3): the loop hands back its
-        # sentinel once the token is set, and the text that had streamed stays
-        # in the transcript untouched. The frame says who stopped it and the GUI
-        # draws that as a row under what arrived, never as the reply. `answer`
-        # keeps the sentinel: the WS bridge (silica connect) reads it as the
-        # turn's text and has no row to draw.
-        stopped = SESSION.cancel.is_set()
-        # ADR-0095: the answer as the model wrote it, before attribution and
-        # figures add text it did not; not a stopped turn's, not a /web turn's,
-        # whose answer is bound to banked verbatim quotes.
-        unread = ([] if stopped or web else
-                  unfounded_in_turn(answer, read.numbers, messages, SESSION.chat.seen_numbers))
-        # isinstance, not `if web:` — the two are the same condition (watch is
-        # built from it one screen up) but only this one says which half of the
-        # union carries `attribute`.
-        if stopped:
-            pass
-        elif isinstance(watch, WebTurn):
-            # Before _linkify and before the compaction sweep: the Sources block
-            # belongs to what the user sees AND to what the history carries.
-            answer = watch.attribute(answer, messages)
-        elif watch.web_answer:
-            from silica.sources.web_research import relay_sources
-
-            answer = relay_sources(answer, messages)
-        if not stopped:
-            # The figures the turn read go beside the paragraph they illustrate
-            # (ADR-0082). Here and not in the loop: only this surface draws an
-            # embed, and the stored message must carry them for a reopened chat.
-            from silica.agent.figures import place_figures
-
-            answer = place_figures(answer, messages, exists=lambda f: render.find_asset(f) is not None)
-            if plan_appendix and answer:
-                # Learn's calendar under the answer, written by code so every
-                # date is the plan's (learn.offer.plan_context)
-                answer = answer.rstrip() + "\n\n" + plan_appendix
-                if messages and messages[-1].get("role") == "assistant":
-                    messages[-1]["content"] = answer
-        # A request made in enough chats becomes a proposed skill, or one already
-        # installed is offered as the next turn (ADR-0127 points 5 and 6).
-        skill_note, offer = ((None, None) if stopped or web or not answer
-                             else await asyncio.to_thread(_skill_after_turn, text, messages))
-        if offer is None and not (stopped or web or not answer or escalated):
-            # A note the reader keeps missing, or a message saying it was not
-            # clear: a way to work on it, launched by the reader (learn.offer).
-            # Not under an answer that is already the aid.
-            offer = await asyncio.to_thread(_study_offer, text, messages, plan_draft)
-        # The lines under the answer (ADR-0094 point 8), stored on it before the
-        # beat below so a reopened chat draws them too. A stopped turn has no
-        # answer to carry them: they are drawn live only.
-        notes = watch.notes() if isinstance(watch, RecallWatch) else []
-        notes += numbers_notes(unread)
-        if not (stopped or web):
-            # A card or a slide point its cited note does not hold (learn.artifacts).
-            from silica.kernel.learn.artifacts import grounding_notes
-
-            notes += grounding_notes(text, answer)
-        notes += [skill_note] if skill_note else []
-        notes = turn_notes.ordered(notes) if stopped else turn_notes.attach(messages, notes)
-        # The notes this turn read, before the beat stores the answer and before
-        # compaction stubs the results that name them (ADR-0127).
-        refs = read_refs(messages)
-        if refs and not stopped and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
-            messages[-1][READS_KEY] = refs
-        # Final-assistant turn beat, post-attribution (see loop.py).
-        if messages and messages[-1].get("role") == "assistant":
-            from silica.obs import narration as _narr
-            _narr.NARRATOR.turn(messages[-1])
-        _update_context_tokens(messages)
-        SESSION.chat.collapsed = _compact_context(messages, SESSION.chat.collapsed)
-        # answer_resolver reads the DRIVER graph — with the ws backend installed
-        # (silica connect) a driver call on the loop thread deadlocks (`_rpc`
-        # blocks the very loop that must send the frame), so render off-loop.
-        html = await asyncio.to_thread(render.answer_html, answer, refs)
-        done = {
-            "type": "done",
-            "answer": answer,
-            "html": html,
-            **session.ctx_meter(),
-        }
-        if stopped:
-            done["stopped"] = True
-        if notes:
-            done["notes"] = notes
-        if offer:
-            done["offer"] = offer
-        outcome = "cancelled" if stopped else "empty" if empty else "done"
-        yield done
-    except Exception as exc:  # never leave the UI stuck on the spinner
-        # Off the loop: hosted, a 403 reads the key to name the spent layer.
-        failure = await asyncio.to_thread(_failure, exc)
-        # A limit reached is the tenant's allowance at work, not a fault of
-        # the server: counted as `limited` (ADR-0102 point 10), and kept out
-        # of the error log the nightly rollup counts.
-        limit = failure.get("limit")
-        if limit is None:
-            logger.exception("web turn failed")
-        outcome = "limited" if limit else "error"
-        yield {"type": "error", **failure}
-    finally:
-        BUS.unsubscribe("work/phase", on_phase)
-        BUS.unsubscribe("work/tool", on_phase)
-        # ponytail: the tokens are the difference of the process totals, so a
-        # background job running during the turn is charged to it (its own
-        # llm_call lines still name it by call-site), and an abandoned turn's
-        # worker spends past this line uncounted. A context variable per turn
-        # is the upgrade, due when ADR-0099's jobs are built.
-        tokens_after = meter_totals()
-        emit("turn", kind=_turn_kind(text), channel="web", outcome=outcome,
-             ms=round((time.monotonic() - started) * 1000),
-             first_token_ms=round((first_token[0] - started) * 1000) if first_token else None,
-             calls=tokens_after[0] - tokens_before[0], prompt=tokens_after[1] - tokens_before[1],
-             cached=tokens_after[3] - tokens_before[3],
-             completion=tokens_after[2] - tokens_before[2],
-             tools=dict(tools), tool_errors=dict(tool_errors), limit=limit,
-             scope="workspace" if ws is not None else "vault")
-        session.prewarm_seed()  # the turn may have written notes — refresh the new-chat seed
-        if task is not None and not task.done():
-            SESSION.cancel.set()  # abandonment: stop the zombie...
-            task.add_done_callback(lambda t: SESSION.release())  # ...free the gate when it exits
-        else:
-            SESSION.release()  # normal / error / early-return: free now
-
-
-# Cloudflare cuts a request whose origin sends no byte for 125 s (ADR-0099
-# Context), and a slash command or a long tool call streams nothing while it
-# works: hosted t01's /nucleate got a 524 at 124,990 ms on 2026-10-23, while web
-# turns that kept streaming events ran to 333 s and ended done. ADR-0099 left
-# streamed bytes untried for the jobs; a turn that stays a request needs them.
-_KEEPALIVE_S = 30.0
-
-
-async def _with_keepalive(chunks: AsyncGenerator[str, None], every: float) -> AsyncIterator[str]:
-    """`chunks`, with an SSE comment line whenever `every` seconds pass without
-    one. The pending step is waited on, never timed out, so a keepalive does not
-    cancel the turn; a dropped client cancels it, as it did with no wrapper."""
-    step = asyncio.ensure_future(chunks.__anext__())
-    try:
-        while True:
-            done, _ = await asyncio.wait({step}, timeout=every)
-            if not done:
-                yield ": keepalive\n\n"
-                continue
-            try:
-                chunk = step.result()
-            except StopAsyncIteration:
-                return
-            yield chunk
-            step = asyncio.ensure_future(chunks.__anext__())
-    finally:
-        if step.done():
-            await chunks.aclose()
-        else:
-            step.cancel()
-            # What the cancelled turn raises on its way out has no reader left:
-            # its own finally already wrote the verdict and holds the gate.
-            with suppress(asyncio.CancelledError, Exception):
-                await step
-
-
-def _turn_response(text: str, attachments: "Sequence[Path]" = (), workspace: str = "",
-                   **extra: Any) -> StreamingResponse:
-    """One agent turn as an SSE stream. Caller must claim the slot via
-    `_begin_turn()` first; `_sweep_if_orphaned` frees it if the body never runs."""
-
-    async def gen():
-        from silica.config import hosted
-
-        # The done frame names the turn a flag would point at (ADR-0100 point
-        # 6), hosted only: the one place a flag exists. Not a demo's, whose
-        # flags would die unread with its HOME (ADR-0139 point 6). Read where
-        # the session stood first, since the _busy gate lets only this turn
-        # narrate in it.
-        flaggable = hosted() and not demo()
-        sid0 = SESSION.chat.sid
-        seq0 = await asyncio.to_thread(_session_head, sid0) if flaggable else 0
-        async for item in run_turn(text, attachments, workspace, **extra):
-            if flaggable and item.get("type") == "done":
-                turn = await asyncio.to_thread(_turn_since, sid0, seq0)
-                if turn:
-                    item["turn"] = turn
-            yield _sse(item)
-
-    return StreamingResponse(
-        _with_keepalive(gen(), _KEEPALIVE_S), media_type="text/event-stream",
-        background=BackgroundTask(SESSION.sweep_if_orphaned)
-    )
-
-
-# The system prompt teaches the write workflows and a phone turn has none of
-# their tools, so without this line "save this" reads to the model as a request
-# it can meet. It goes before the seed's closing language line, which must stay
-# last (cli.seed_messages).
-_PHONE_LINE = (
-    "This conversation is on Telegram, where you can search and read the vault "
-    "but not change it: nothing is written, moved or remembered from here. If "
-    "asked to, say it has to be done in Silica itself. Telegram shows plain "
-    "text, so write without Markdown, tables or LaTeX."
-)
-
-
-@contextmanager
-def _narrating_phone():
-    """Point the narrator at the phone's session for one turn, then at the
-    browser's chat as it stands when the turn ends: New chat may have replaced
-    it meanwhile (_reset_session), and reopening the one held at the start
-    would append the next chat's turns to the file the student left. No
-    browser turn narrates in between, because the gate is the phone's."""
-    from silica.obs import narration as _narr
-
-    _narr.NARRATOR.close()
-    try:
-        fresh = SESSION.phone.sid is None
-        # Named before the session beat is written, so narration_sse already
-        # knows the phone's beats by their sid and keeps them off the tab.
-        SESSION.phone.sid = SESSION.phone.sid or uuid.uuid4().hex[:12]
-        _narr.NARRATOR.ensure_session(driver="gui", sid=SESSION.phone.sid)
-        if fresh:
-            # A title beat before the first turn names the chat in the list,
-            # as a rename does (narration._narration_row).
-            _narr.NARRATOR.narrate("title", "done", "Telegram", {"title": "Telegram"}, parent=None)
-        yield
-    finally:
-        _narr.NARRATOR.close()
-        if SESSION.chat.sid:
-            try:
-                _narr.NARRATOR.ensure_session(driver="gui", sid=SESSION.chat.sid)
-            except _narr.SessionBusy:
-                # Another process took the browser's file while the phone held
-                # the narrator. Nothing is lost by going on: the browser's next
-                # turn meets the same SessionBusy in _narrate_user_turn, which
-                # is where it is reported.
-                logger.warning("narration not restored after a phone turn")
-
-
-def _phone_turn(text: str, cancel: threading.Event) -> dict:
-    """One phone turn, whole: `{"answer": ...}`, or `{"error": ...}` with the
-    sentence the browser would show, a usage limit's reset included."""
-    from silica.obs import narration as _narr
-    from silica.cli import _compact_context, _update_context_tokens, seed_messages
-
-    # The browser reopened the phone's session from the chat list and now
-    # writes it, so the phone goes on in a new one rather than beside it. A
-    # chat deleted from the list starts over too: its history must not reach
-    # the model again, nor its file come back without a title.
-    if SESSION.phone.sid is not None and (
-            SESSION.phone.sid == SESSION.chat.sid
-            or not (_narr.narration_dir() / f"{SESSION.phone.sid}.jsonl").exists()):
-        SESSION.reset_phone()
-    started, tokens_before = time.monotonic(), meter_totals()
-    first_token: list[float] = []
-    tools: dict[str, int] = {}
-    tool_errors: dict[str, int] = {}
-    outcome, limit = "cancelled", None
-    # CONFIG.context_tokens is the browser's ring. The phone's compaction
-    # borrows the meter and hands it back as it found it.
-    browser_tokens = CONFIG.context_tokens
-
-    def cb(ev):  # the counts the turn line carries, as run_turn's cb keeps them
-        if isinstance(ev, ToolStartEvent):
-            tools[ev.name] = tools.get(ev.name, 0) + 1
-        elif isinstance(ev, ToolErrorEvent):
-            tool_errors[ev.name] = tool_errors.get(ev.name, 0) + 1
-        elif not first_token and isinstance(ev, LLMStreamEvent) and ev.chunk_type == "text" and ev.content:
-            first_token.append(time.monotonic())
-
-    try:
-        if not SESSION.phone.messages:
-            seed = seed_messages()
-            seed.insert(len(seed) - 1, {"role": "system", "content": _PHONE_LINE})
-            SESSION.phone.messages[:] = seed
-        with _narrating_phone():
-            msg = {"role": "user", "content": text, "origin": "telegram"}
-            SESSION.phone.messages.append(msg)
-            _narr.NARRATOR.turn(msg)
-            answer = run_agent(SESSION.phone.messages, CONFIG.model, cb, cancel_token=cancel,
-                               constraints=AgentConstraints(tools=PHONE_TOOLS, interactive=True))
-            if SESSION.phone.messages[-1].get("role") == "assistant":
-                _narr.NARRATOR.turn(SESSION.phone.messages[-1])
-            _update_context_tokens(SESSION.phone.messages)
-            SESSION.phone.collapsed = _compact_context(SESSION.phone.messages, SESSION.phone.collapsed)
-        if cancel.is_set():
-            return {"answer": "Stopped."}
-        outcome = "empty" if answer == _EMPTY_COMPLETION else "done"
-        return {"answer": answer}
-    except Exception as exc:
-        failure = _failure(exc)
-        limit = failure.get("limit")
-        if limit is None:
-            logger.exception("phone turn failed")
-        outcome = "limited" if limit else "error"
-        return {"error": failure["error"]}
-    finally:
-        CONFIG.context_tokens = browser_tokens
-        tokens_after = meter_totals()
-        emit("turn", kind="chat", channel="telegram", outcome=outcome,
-             ms=round((time.monotonic() - started) * 1000),
-             first_token_ms=round((first_token[0] - started) * 1000) if first_token else None,
-             calls=tokens_after[0] - tokens_before[0], prompt=tokens_after[1] - tokens_before[1],
-             cached=tokens_after[3] - tokens_before[3],
-             completion=tokens_after[2] - tokens_before[2],
-             tools=dict(tools), tool_errors=dict(tool_errors), limit=limit)
 
 
 def _zotero_detect() -> None:
@@ -1190,35 +249,29 @@ async def chat(payload: dict):
     # comes from. Web makes it a /web turn, the one whose tools read pages.
     story = str(payload.get("story") or "")
     scope = str(payload.get("scope") or "story")
-    if not SESSION.claim():
-        raise HTTPException(status_code=409, detail="a turn is already in progress")
-    text = payload.get("text", "")
-    if story and scope == "web" and text.strip() and not text.startswith("/"):
-        text = "/web " + text
-    # /convert and /nucleate <file> typed here convert as jobs and answer at
-    # once (ADR-0099 point 1), with the 202 a drop of files alone gets.
-    from silica.ui.web import jobs
+    with session.turn_slot() as slot:
+        text = payload.get("text", "")
+        if story and scope == "web" and text.strip() and not text.startswith("/"):
+            text = "/web " + text
+        # /convert and /nucleate <file> typed here convert as jobs and answer at
+        # once (ADR-0099 point 1), with the 202 a drop of files alone gets.
+        from silica.ui.web import jobs
 
-    try:
         queued = await asyncio.to_thread(jobs.from_command, text, SESSION.chat.sid)
-    except BaseException:
-        SESSION.release()
-        raise
-    if queued is not None:
-        SESSION.release()
-        return JSONResponse(queued, status_code=202)
-    if SESSION.chat.sid and text.strip() and not text.startswith("/"):
-        # A file read after its drop got no turn joins this message (ADR-0121
-        # point 4): otherwise "this paper" names nothing the chat was given.
-        joined = await asyncio.to_thread(jobs.join_next, SESSION.chat.sid)
-        if joined:
-            notes, files, earlier = joined
-            composed = await asyncio.to_thread(drop_turn.compose_nucleate_turn, text, notes, [], earlier=earlier)
-            return _turn_response(composed, attachments, workspace,
-                                  withhold=drop_turn.WITHHELD_WITH_FILES, files=files, said=text, note=note,
-                                  story=story, scope=scope)
-    return _turn_response(text, attachments, workspace, note=note, story=story, scope=scope,
-                          **({"said": text.removeprefix("/web ")} if story and scope == "web" else {}))
+        if queued is not None:
+            return JSONResponse(queued, status_code=202)
+        if SESSION.chat.sid and text.strip() and not text.startswith("/"):
+            # A file read after its drop got no turn joins this message (ADR-0121
+            # point 4): otherwise "this paper" names nothing the chat was given.
+            joined = await asyncio.to_thread(jobs.join_next, SESSION.chat.sid)
+            if joined:
+                notes, files, earlier = joined
+                composed = await asyncio.to_thread(drop_turn.compose_nucleate_turn, text, notes, [], earlier=earlier)
+                return sse.turn_response(slot, composed, attachments, workspace,
+                                         withhold=drop_turn.WITHHELD_WITH_FILES, files=files, said=text, note=note,
+                                         story=story, scope=scope)
+        return sse.turn_response(slot, text, attachments, workspace, note=note, story=story, scope=scope,
+                                 **({"said": text.removeprefix("/web ")} if story and scope == "web" else {}))
 
 
 @app.post("/phone/turn")
@@ -1229,19 +282,17 @@ async def phone_turn(payload: dict):
     text = str(payload.get("text") or "").strip()
     if not text:
         raise HTTPException(status_code=422, detail="text is empty")
-    if not SESSION.claim():
-        raise HTTPException(status_code=409, detail="a turn is already in progress")
-    SESSION.phone_running = True
-    # The browser's Stop sets this token, so it ends a phone turn too.
-    SESSION.cancel = cancel = threading.Event()
-    # Named as the gate's task, so a /chat stream closing in the same instant
-    # (_sweep_if_orphaned) does not take this turn for an orphan and free it.
-    SESSION.task = task = asyncio.ensure_future(asyncio.to_thread(_phone_turn, text, cancel))
-    try:
-        return await task
-    finally:
-        SESSION.phone_running = False
-        SESSION.release()
+    with session.turn_slot():
+        SESSION.phone_running = True
+        # The browser's Stop sets this token, so it ends a phone turn too.
+        SESSION.cancel = cancel = threading.Event()
+        # Named as the gate's task, so a /chat stream closing in the same instant
+        # (sweep_if_orphaned) does not take this turn for an orphan and free it.
+        SESSION.task = task = asyncio.ensure_future(asyncio.to_thread(turn.phone_turn, text, cancel))
+        try:
+            return await task
+        finally:
+            SESSION.phone_running = False
 
 
 @app.post("/phone/new")
@@ -1547,12 +598,10 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     this chat asks the question once the drop's last job is done. A drop of
     only such files and no words answers 202 too; each one, read, offers its
     turns. Otherwise the turn starts with the files that were ready."""
-    if not SESSION.claim():
-        raise HTTPException(status_code=409, detail="a turn is already in progress")
     from silica.kernel.base.layout import chat_folder
     from silica.ui.web import jobs
 
-    try:
+    with session.turn_slot() as slot:
         fresh = not any(m.get("role") == "user" for m in SESSION.chat.messages)
         sid = await asyncio.to_thread(session.open_session) or uuid.uuid4().hex[:12]
         names = [Path(f.filename or "").name for f in files]
@@ -1564,39 +613,35 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
         folder = chat_folder(sid)
         ready, stubs, skipped, queued = await _stage_uploads(
             files, folder=folder, text=text, session=sid, drop=uuid.uuid4().hex[:12], dest_dir=folder)
-    except Exception:
-        SESSION.release()  # release the slot the staging never got to use
-        raise
-    mail = [n for n in names if _is_mail(n)]
-    # The question waits for its files (ADR-0121 point 1) but not for a PDF
-    # with a text layer, which this turn reads while it converts (ADR-0099
-    # amendment 2026-10-20). A drop waits whole when one file must: its
-    # question is asked once, with all of them (the amendment's recommendation).
-    now = ([j for j in queued if await asyncio.to_thread(drop_turn.readable_now, j["source"]["path"])]
-           if text.strip() else [])
-    waits = bool(text.strip()) and len(now) < len(queued)
-    if queued and (waits or not (ready or stubs or now)):
-        # The ready files of the same drop ride its question when it is asked.
-        await asyncio.to_thread(jobs.annotate, [j["id"] for j in queued], beside=ready)
-        SESSION.release()
-        return JSONResponse({"jobs": queued, "waits": waits, "mail": mail, "session": sid,
-                             "skipped": [{"name": n, "reason": why} for n, why in skipped]},
-                            status_code=202)
-    if now:
-        # Before the turn: a short PDF can be converted before it ends.
-        # Answered: the page would ask the drop's question again once the note
-        # is written. Not told: the next turn hears of the note (jobs.settled).
-        await asyncio.to_thread(jobs.annotate, [j["id"] for j in now], answered=True)
-    files_said = [drop_turn.file_entry(p) for p in ready] + [drop_turn.file_entry(j["source"]["path"], job=j["id"]) for j in queued]
-    # A thread: the manifest reads each staged note, and a textbook read on
-    # the loop thread blocks /stop.
-    resp = _turn_response(await asyncio.to_thread(
-        drop_turn.compose_nucleate_turn, text, ready, stubs, mail, skipped,
-        converting=[j["source"]["path"] for j in queued]),
-        withhold=drop_turn.WITHHELD_WITH_FILES, files=files_said, said=text.strip())
-    if queued:
-        resp.headers["X-Silica-Jobs"] = ",".join(j["id"] for j in queued)
-    return resp
+        mail = [n for n in names if _is_mail(n)]
+        # The question waits for its files (ADR-0121 point 1) but not for a PDF
+        # with a text layer, which this turn reads while it converts (ADR-0099
+        # amendment 2026-10-20). A drop waits whole when one file must: its
+        # question is asked once, with all of them (the amendment's recommendation).
+        now = ([j for j in queued if await asyncio.to_thread(drop_turn.readable_now, j["source"]["path"])]
+               if text.strip() else [])
+        waits = bool(text.strip()) and len(now) < len(queued)
+        if queued and (waits or not (ready or stubs or now)):
+            # The ready files of the same drop ride its question when it is asked.
+            await asyncio.to_thread(jobs.annotate, [j["id"] for j in queued], beside=ready)
+            return JSONResponse({"jobs": queued, "waits": waits, "mail": mail, "session": sid,
+                                 "skipped": [{"name": n, "reason": why} for n, why in skipped]},
+                                status_code=202)
+        if now:
+            # Before the turn: a short PDF can be converted before it ends.
+            # Answered: the page would ask the drop's question again once the note
+            # is written. Not told: the next turn hears of the note (jobs.settled).
+            await asyncio.to_thread(jobs.annotate, [j["id"] for j in now], answered=True)
+        files_said = [drop_turn.file_entry(p) for p in ready] + [drop_turn.file_entry(j["source"]["path"], job=j["id"]) for j in queued]
+        # A thread: the manifest reads each staged note, and a textbook read on
+        # the loop thread blocks /stop.
+        resp = sse.turn_response(slot, await asyncio.to_thread(
+            drop_turn.compose_nucleate_turn, text, ready, stubs, mail, skipped,
+            converting=[j["source"]["path"] for j in queued]),
+            withhold=drop_turn.WITHHELD_WITH_FILES, files=files_said, said=text.strip())
+        if queued:
+            resp.headers["X-Silica-Jobs"] = ",".join(j["id"] for j in queued)
+        return resp
 
 
 def _name_session(sid: str, title: str) -> None:
@@ -1625,43 +670,9 @@ async def chat_file_add(payload: dict):
         notes = done[-1]["notes"]
     elif not source.endswith((".md", ".txt", ".markdown")):
         raise HTTPException(409, "that file is still being read")
-    if not SESSION.claim():   # the one serialisation of vault writes (see /vault/import)
-        raise HTTPException(409, "a turn is running: add it when it ends")
-    try:
+    with session.turn_slot("a turn is running: add it when it ends"):
         added = await asyncio.to_thread(vault_files.add_to_vault, notes, [source])
-    finally:
-        SESSION.release()
     return {"notes": added}
-
-
-def _files_shown(files: Any) -> list[dict]:
-    """A user message's files as the bubble draws them (ADR-0121 point 4):
-    each with whether the Inbox has it, and a converted file's notes filled
-    in from its job when the message went out before they were written."""
-    from silica.ui.web import jobs
-
-    out: list[dict] = []
-    if not isinstance(files, list):
-        return out
-    vault = Path(CONFIG.vault_path or ".")
-    inbox = vault_files.inbox_rel()
-    for f in files:
-        if not isinstance(f, dict) or not f.get("source"):
-            continue
-        f = dict(f)
-        if not f.get("notes") and f.get("job"):
-            rec = jobs.read(f["job"]) if jobs._ID.fullmatch(str(f["job"])) else None
-            f["notes"] = (rec or {}).get("notes") or []
-        try:
-            _, rest = vault_files.chat_rel(f["source"])
-            # By size too: another file of the same name in the Inbox is not
-            # this one, and "add to vault" refuses to overwrite it.
-            mine, there = vault / f["source"], vault / inbox / rest
-            f["in_vault"] = there.is_file() and mine.is_file() and there.stat().st_size == mine.stat().st_size
-        except (vault_files.NotAChatFile, OSError):
-            f["in_vault"] = False
-        out.append(f)
-    return out
 
 
 def _edited(content: str, words: str, note: str = "") -> str:
@@ -1692,9 +703,7 @@ async def redo_turn(payload: dict | None = None):
     from silica.obs import narration as _narr
 
     words = (payload or {}).get("text")
-    if not SESSION.claim():
-        raise HTTPException(status_code=409, detail="a turn is already in progress")
-    try:
+    with session.turn_slot() as slot:
         at = max((k for k, m in enumerate(SESSION.chat.messages) if m.get("role") == "user"), default=-1)
         if at < 0:
             raise HTTPException(409, "there is no question to ask again")
@@ -1716,11 +725,8 @@ async def redo_turn(payload: dict | None = None):
         del SESSION.chat.messages[at:]
         SESSION.chat.collapsed = {c for c in SESSION.chat.collapsed if c < at}
         _narr.NARRATOR.narrate(_narr.REWIND, "done", "asked again", {}, parent=None)
-    except BaseException:
-        SESSION.release()
-        raise
-    withhold = drop_turn.WITHHELD_WITH_FILES if msg.get("silica_files") and not content.startswith(drop_turn.NUCLEATE_ASK) else ()
-    return _turn_response(content, workspace=msg.get("silica_workspace") or "", withhold=withhold, prebuilt=msg)
+        withhold = drop_turn.WITHHELD_WITH_FILES if msg.get("silica_files") and not content.startswith(drop_turn.NUCLEATE_ASK) else ()
+        return sse.turn_response(slot, content, workspace=msg.get("silica_workspace") or "", withhold=withhold, prebuilt=msg)
 
 
 @app.post("/vault/import")
@@ -1738,7 +744,7 @@ async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = F
     resolves when the job writes the note. `obsidian` names the picked folder
     when it held `.obsidian/` (ADR-0142 point 5).
 
-    The turn slot is held while the batch writes: `_begin_turn` is the one
+    The turn slot is held while the batch writes: `turn_slot` is the one
     serialisation of vault writes the server has, and an import racing a
     turn's writes is a case nothing tests.
     ponytail: one writer at a time, so an import waits for a turn; a lock per
@@ -1748,12 +754,8 @@ async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = F
         raise HTTPException(413, f"at most {_UPLOAD_MAX_FILES} files per request")
     if paths and len(paths) != len(files):
         raise HTTPException(400, "paths must name every file, in order")
-    if not SESSION.claim():
-        raise HTTPException(409, "a turn is running: import when it ends")
-    try:
+    with session.turn_slot("a turn is running: import when it ends"):
         results, folders = await _import_files(files, paths or [""] * len(files))
-    finally:
-        SESSION.release()
     if obsidian:
         _mark_obsidian_root(obsidian, paths)
     if last and folders:
@@ -1885,27 +887,24 @@ async def vault_fetch(payload: dict):
     if (hosted() and youtube_cookies() is None
             and host_matches(url if "://" in url else f"https://{url}", *_YT_DOMAINS)):
         return {"files": [{**row, "status": "refused", "reason": YOUTUBE_ON_SERVER}]}
-    if not SESSION.claim():
-        raise HTTPException(409, "a turn is running: add the link when it ends")
-    try:
-        note = await asyncio.to_thread(fetch_to_inbox, url)
-        row.update(status="note", notes=[note], path=note)
-    except YoutubeBlocked:
-        # web_fetch logged the renewal line; the student gets the way around it.
-        row.update(status="refused", reason=YOUTUBE_ON_SERVER if hosted() else
-                   "YouTube asked to sign in: set SILICA_YOUTUBE_COOKIES to an account's cookies "
-                   "file, or download the audio and add that")
-    except Exception as exc:
-        # Not only ValueError: httpx raises its own on a refused connection or
-        # a timeout, and either is this link refused, not a 500. The reason
-        # is detail, as an import's converter text is, which explain() leaves
-        # empty on the server (ADR-0085 point 5); the log keeps it there.
-        logger.warning("vault fetch failed: %s: %s", type(exc).__name__, exc)
-        row.update(status="refused", detail=_failure(exc)["detail"],
-                   reason="that page could not be read: it may need a login, refuse automated "
-                          "readers, or not be a web page")
-    finally:
-        SESSION.release()
+    with session.turn_slot("a turn is running: add the link when it ends"):
+        try:
+            note = await asyncio.to_thread(fetch_to_inbox, url)
+            row.update(status="note", notes=[note], path=note)
+        except YoutubeBlocked:
+            # web_fetch logged the renewal line; the student gets the way around it.
+            row.update(status="refused", reason=YOUTUBE_ON_SERVER if hosted() else
+                       "YouTube asked to sign in: set SILICA_YOUTUBE_COOKIES to an account's cookies "
+                       "file, or download the audio and add that")
+        except Exception as exc:
+            # Not only ValueError: httpx raises its own on a refused connection or
+            # a timeout, and either is this link refused, not a 500. The reason
+            # is detail, as an import's converter text is, which explain() leaves
+            # empty on the server (ADR-0085 point 5); the log keeps it there.
+            logger.warning("vault fetch failed: %s: %s", type(exc).__name__, exc)
+            row.update(status="refused", detail=_failure(exc)["detail"],
+                       reason="that page could not be read: it may need a login, refuse automated "
+                              "readers, or not be a web page")
     if row["status"] == "note":
         _embed_imported({str(Path(row["path"]).parent)})
         if workspace:
@@ -3331,13 +2330,9 @@ def tree_delete(payload: dict):
         raise HTTPException(400, "name a note or a folder")
     # The turn's slot, as an import takes it: a turn reading or patching a
     # note this deletes would fail mid-answer on a file the person removed.
-    if not SESSION.claim():
-        raise HTTPException(409, "a turn is running: delete when it ends")
-    try:
+    with session.turn_slot("a turn is running: delete when it ends"):
         res = delete_notes_with_restore_point(
             [(p, DRIVER.read_note(p).content) for p in paths], USER_DELETE_SOURCE)
-    finally:
-        SESSION.release()
     if not res["deleted"]:
         # The driver's text can carry the vault's absolute path, which the
         # hosted pilot does not show its tenants (ADR-0085): logged, not sent.
@@ -3448,12 +2443,8 @@ def tree_move(payload: dict):
     # reloads the one it holds open, or the editor would save the old link back.
     own = {src for src, _ in moves}
     rewritten = sorted(set().union(*(linked_from(src) for src in own)) - own)
-    if not SESSION.claim():
-        raise HTTPException(409, "a turn is running: move when it ends")
-    try:
+    with session.turn_slot("a turn is running: move when it ends"):
         res = move_notes_with_restore_point(moves, USER_MOVE_SOURCE)
-    finally:
-        SESSION.release()
     if res["error"]:
         logger.warning("tree move stopped after %d of %d: %s", len(res["moved"]), len(moves), res["error"])
         res["error"] = f"{len(moves) - len(res['moved'])} of {len(moves)} could not be moved"
@@ -3476,12 +2467,8 @@ def tree_undo(payload: dict):
         raise HTTPException(404, "nothing to undo")
     if info["reverted_at"]:
         raise HTTPException(409, "already undone")
-    if not SESSION.claim():
-        raise HTTPException(409, "a turn is running: undo when it ends")
-    try:
+    with session.turn_slot("a turn is running: undo when it ends"):
         res = revert_run(run)
-    finally:
-        SESSION.release()
     return {"restored": res["reverted"],
             "skipped": [s["path"] for s in res["skipped"] + res["errors"]]}
 
@@ -3523,12 +2510,8 @@ def trash_restore(payload: dict):
     item = _trash_item(payload)
     if item["taken"]:
         raise HTTPException(409, "a note is at that path now")
-    if not SESSION.claim():
-        raise HTTPException(409, "a turn is running: restore when it ends")
-    try:
+    with session.turn_slot("a turn is running: restore when it ends"):
         why = restore_from_trash(item)
-    finally:
-        SESSION.release()
     if why:
         # the driver's text can carry the vault's absolute path (ADR-0085)
         logger.warning("trash restore of %s refused: %s", item["path"], why)
@@ -3688,7 +2671,7 @@ async def note_check(payload: dict, request: Request):
         try:
             while True:
                 try:
-                    ev = await asyncio.wait_for(q.get(), _SSE_POLL_S)
+                    ev = await asyncio.wait_for(q.get(), sse.POLL_S)
                 except asyncio.TimeoutError:
                     if session.stopping() or await request.is_disconnected():
                         return
@@ -3767,12 +2750,8 @@ async def note_check_keep(payload: dict):
     if not url.startswith(("https://", "http://")) or not quote or not claim:
         raise HTTPException(400, "name the page, its words and the claim")
     await asyncio.to_thread(_has_room, 1, len(quote) + len(claim))
-    if not SESSION.claim():
-        raise HTTPException(409, "a turn is running: keep it when it ends")
-    try:
+    with session.turn_slot("a turn is running: keep it when it ends"):
         return {"ok": True, "path": await asyncio.to_thread(keep_check, claim, url, quote, canon)}
-    finally:
-        SESSION.release()
 
 
 @app.post("/changes/keep")
@@ -3916,14 +2895,10 @@ def note_history_restore(payload: dict):
     note = _history_note(str(payload.get("path", "")))
     version = str(payload.get("id", ""))
     body = _history_body(note, version)
-    if not SESSION.claim():
-        raise HTTPException(409, "a turn is running: restore when it ends")
-    try:
+    with session.turn_slot("a turn is running: restore when it ends"):
         prior = DRIVER.read_note(note).content
         DRIVER.overwrite(note, body, loss=Loss.RESTORE)
         push_landed(note, prior, body, kind="restore", of=version)
-    finally:
-        SESSION.release()
     return {"restored": note, "id": payload.get("id")}
 
 
@@ -4403,12 +3378,12 @@ def get_messages():
     from silica.config import hosted
 
     turn_of: dict[int, dict] = {}
-    sid = _plain_sid(SESSION.chat.sid) if hosted() and not demo() else ""
+    sid = flags.plain_sid(SESSION.chat.sid) if hosted() and not demo() else ""
     if sid:
-        seqs = _user_turn_seqs(_session_beats(sid))
+        seqs = flags.user_turn_seqs(flags.session_beats(sid))
         users = [m for m in messages if m.get("role") == "user"]
         if len(users) == len(seqs):
-            done = _flagged(sid)
+            done = flags.flagged(sid)
             turn_of = {id(m): {"session": sid, "seq": s, "flagged": s in done}
                        for m, s in zip(users, seqs)}
     from silica.kernel.graph.mindmap import _driver_graph
@@ -4442,7 +3417,7 @@ def get_messages():
             elif isinstance(content, str) and drop_turn.MANIFEST_MARK in content:
                 content = content.split(drop_turn.MANIFEST_MARK, 1)[0]
                 content = "" if content == drop_turn.DROP_ASK else content
-            files = _files_shown(m.get("silica_files"))
+            files = turn.files_shown(m.get("silica_files"))
         data.append({"role": m["role"], "content": content, "tools": tools, "files": files,
                      "note": m.get("silica_note") or "",
                      "story": m.get("silica_story") or None,
@@ -4479,12 +3454,6 @@ def narration_replay(from_seq: int = 0, sid: str = ""):
     path = _narr.narration_dir() / f"{target}.jsonl"
     return JSONResponse({"sid": target,
                          "beats": list(_narr.read_beats(path, from_seq=from_seq))})
-
-
-# The GUI's own uvicorn server, so an endless response can ask whether the
-# process is leaving. None under TestClient and in the suite, where nothing is
-# shutting down and every stream is read to its end by its caller.
-_SSE_POLL_S = 0.25   # four wakeups a second per open tab, against a 1s deadline
 
 
 def _beat_for_tab(rec: dict) -> bool:
@@ -4544,7 +3513,7 @@ async def narration_sse(request: Request, from_seq: int = 0):
                 # is what keeps the exit free of the 40-line ASGI traceback that
                 # a cancelled connection task prints.
                 try:
-                    rec = await asyncio.wait_for(q.get(), _SSE_POLL_S)
+                    rec = await asyncio.wait_for(q.get(), sse.POLL_S)
                 except asyncio.TimeoutError:
                     if session.stopping():
                         return
@@ -4686,71 +3655,6 @@ def delete_session(payload: dict):
 _FLAG_NOTE_MAX = 300
 
 
-def _session_beats(sid: str) -> list[dict]:
-    from silica.obs import narration as _narr
-
-    return list(_narr.read_beats(_narr.narration_dir() / f"{sid}.jsonl"))
-
-
-def _user_turn_seqs(beats: list[dict]) -> list[int]:
-    """The seqs of the user `turn` beats, in file order."""
-    from silica.obs.narration import REWIND
-
-    out = []
-    for b in beats:
-        p = b.get("payload")
-        m = p.get("message") if isinstance(p, dict) else None
-        if b.get("kind") == "turn" and isinstance(m, dict) and m.get("role") == "user" and b.get("seq"):
-            out.append(b["seq"])
-        elif b.get("kind") == REWIND and out:
-            out.pop()   # the question asked again left the conversation (ADR-0121 point 7)
-    return out
-
-
-def _flagged(sid: str) -> set[int]:
-    """The answers of `sid` already flagged, so a reopened chat says so and a
-    second click is not a second flag."""
-    from silica.config import silica_home
-
-    try:
-        lines = (silica_home() / "flags.jsonl").read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return set()
-    out = set()
-    for raw in lines:
-        try:
-            rec = json.loads(raw)
-        except ValueError:
-            continue  # a torn last line from a full disk: the other flags still count
-        if isinstance(rec, dict) and rec.get("session") == sid and isinstance(rec.get("answer"), int):
-            out.add(rec["answer"])
-    return out
-
-
-def _plain_sid(sid: object) -> str:
-    """A session id as a file stem, or "" when it could name anything else."""
-    s = str(sid or "")
-    return s if s.isascii() and s.isalnum() else ""
-
-
-def _session_head(sid: str | None) -> int:
-    """The last seq written to `sid`, 0 for a session not yet opened."""
-    sid = _plain_sid(sid)
-    return max((b.get("seq") or 0 for b in _session_beats(sid)), default=0) if sid else 0
-
-
-def _turn_since(sid0: str | None, seq0: int) -> dict | None:
-    """The turn a flag would point at: the first user beat narrated past where
-    the session stood before the turn. None when this turn narrated none (the
-    session was busy in another process), so no flag can point at a neighbour."""
-    sid = _plain_sid(SESSION.chat.sid)
-    if not sid:
-        return None
-    after = seq0 if sid == sid0 else 0
-    seqs = [s for s in _user_turn_seqs(_session_beats(sid)) if s > after]
-    return {"session": sid, "seq": seqs[0]} if seqs else None
-
-
 @app.post("/flag")
 def flag_answer(payload: dict):
     """Append one flag to `<home>/flags.jsonl`: time, session, the seq of the
@@ -4760,7 +3664,7 @@ def flag_answer(payload: dict):
 
     if not hosted():
         raise HTTPException(status_code=404, detail="Not Found")
-    sid = _plain_sid(payload.get("session"))
+    sid = flags.plain_sid(payload.get("session"))
     if not sid:
         raise HTTPException(status_code=400, detail="that is not a chat id")
     seq = payload.get("seq")
@@ -4769,9 +3673,9 @@ def flag_answer(payload: dict):
     note = str(payload.get("note") or "").strip()
     if len(note) > _FLAG_NOTE_MAX:
         raise HTTPException(status_code=400, detail=f"keep the note under {_FLAG_NOTE_MAX} characters")
-    if seq not in _user_turn_seqs(_session_beats(sid)):
+    if seq not in flags.user_turn_seqs(flags.session_beats(sid)):
         raise HTTPException(status_code=404, detail="that answer is not in this chat")
-    if seq in _flagged(sid):
+    if seq in flags.flagged(sid):
         return {"ok": True, "already": True}  # one flag per answer; a second click is not news
     path = silica_home() / "flags.jsonl"
     rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "session": sid,
@@ -5447,7 +4351,7 @@ from silica.ui.web.skills_routes import router as _skills_router  # noqa: E402
 
 app.include_router(_skills_router)
 
-from silica.ui.web.jobs import router as _jobs_router  # noqa: E402
+from silica.ui.web.jobs_routes import router as _jobs_router  # noqa: E402
 
 app.include_router(_jobs_router)
 

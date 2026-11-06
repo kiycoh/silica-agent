@@ -65,9 +65,10 @@ READ_242 = _event("silica_read_note", {"path": "Mail.md", "body": "the sensor ta
 
 class TestGui:
     def test_an_unread_number_gets_its_note_live_and_on_the_answer(self, client, monkeypatch):
+        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         tc, server = client
-        monkeypatch.setattr(server, "run_agent", _turn("It has 243+ variables, as 242 columns.", READ_242))
+        monkeypatch.setattr(turn, "run_agent", _turn("It has 243+ variables, as 242 columns.", READ_242))
         done = _read_sse(tc.post("/chat", json={"text": "how many variables?"}))[-1]
         assert done["notes"] == [_note("243")]
         assert SESSION.chat.messages[-1][turn_notes.KEY] == [_note("243")]
@@ -75,60 +76,66 @@ class TestGui:
             [_note("243")]]
 
     def test_numbers_come_after_retrieval_in_the_channel(self, client, monkeypatch):
+        from silica.ui.web import turn
         tc, server = client
         miss = _event("silica_recall", {"query": "x", "notes": []})
-        monkeypatch.setattr(server, "run_agent", _turn("Roughly 55 to 60% of it.", miss))
+        monkeypatch.setattr(turn, "run_agent", _turn("Roughly 55 to 60% of it.", miss))
         done = _read_sse(tc.post("/chat", json={"text": "how much?"}))[-1]
         assert done["notes"] == [THIN, _note("55", "60")]
 
     def test_nothing_unread_means_no_note(self, client, monkeypatch):
+        from silica.ui.web import turn
         tc, server = client
-        monkeypatch.setattr(server, "run_agent", _turn("It has 242 columns.", READ_242))
+        monkeypatch.setattr(turn, "run_agent", _turn("It has 242 columns.", READ_242))
         done = _read_sse(tc.post("/chat", json={"text": "how many columns?"}))[-1]
         assert "notes" not in done
 
     def test_the_answer_is_checked_before_attribution_adds_to_it(self, client, monkeypatch):
         """relay_sources and place_figures add text the model did not write."""
+        from silica.ui.web import turn
         tc, server = client
         import silica.sources.web_research as wr
 
         web = _event("silica_web_answer", {"answer": "x"})
         monkeypatch.setattr(wr, "relay_sources",
                             lambda answer, messages: answer + "\n\n## Sources\n1. page 4471")
-        monkeypatch.setattr(server, "run_agent", _turn("It has 242 columns.", READ_242, web))
+        monkeypatch.setattr(turn, "run_agent", _turn("It has 242 columns.", READ_242, web))
         done = _read_sse(tc.post("/chat", json={"text": "how many columns?"}))[-1]
         assert "4471" in done["answer"]
         assert "notes" not in done
 
     def test_a_stopped_turn_is_not_checked(self, client, monkeypatch):
+        from silica.ui.web import turn
         tc, server = client
 
         def stopped(messages, model=None, tool_progress_callback=None, cancel_token=None, **kw):
             cancel_token.set()
             return "(silica: cancelled) 9999"
 
-        monkeypatch.setattr(server, "run_agent", stopped)
+        monkeypatch.setattr(turn, "run_agent", stopped)
         done = _read_sse(tc.post("/chat", json={"text": "q"}))[-1]
         assert done["stopped"] is True
         assert "notes" not in done
 
     def test_the_session_set_is_kept_across_turns_and_emptied_by_a_new_chat(self, client, monkeypatch):
+        from silica.ui.web import turn
         tc, server = client
-        monkeypatch.setattr(server, "run_agent", _turn("Read it.", READ_242))
+        monkeypatch.setattr(turn, "run_agent", _turn("Read it.", READ_242))
         tc.post("/chat", json={"text": "read the mail"})
         # turn two reads nothing: 242 was read by turn one
-        monkeypatch.setattr(server, "run_agent", _turn("It has 242 columns."))
+        monkeypatch.setattr(turn, "run_agent", _turn("It has 242 columns."))
         assert "notes" not in _read_sse(tc.post("/chat", json={"text": "how many?"}))[-1]
         tc.post("/reset")
         done = _read_sse(tc.post("/chat", json={"text": "how many?"}))[-1]
         assert done["notes"] == [_note("242")]
 
     def test_session_load_rebuilds_the_set_the_live_chat_had(self, client, monkeypatch):
+        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         tc, server = client
         events = (READ_242, _event("silica_search", {"hits": ["a"], "total": 1067}, "c2"),
                   _event("silica_read_note", {"error": "no note 404"}, "c3"))
-        monkeypatch.setattr(server, "run_agent", _turn("Read it.", *events))
+        monkeypatch.setattr(turn, "run_agent", _turn("Read it.", *events))
         tc.post("/chat", json={"text": "read the mail"})
         live = set(SESSION.chat.seen_numbers)
         assert {"242", "1067"} <= live and "404" not in live
@@ -137,15 +144,16 @@ class TestGui:
         assert SESSION.chat.seen_numbers == set()
         assert tc.post("/session/load", json={"id": sid}).status_code == 200
         assert SESSION.chat.seen_numbers == live
-        monkeypatch.setattr(server, "run_agent", _turn("242 columns, 1,067 hits, 404 errors."))
+        monkeypatch.setattr(turn, "run_agent", _turn("242 columns, 1,067 hits, 404 errors."))
         done = _read_sse(tc.post("/chat", json={"text": "and so?"}))[-1]
         assert done["notes"] == [_note("404")]
 
     def test_a_reopened_chat_draws_the_note_in_channel_order(self, client, monkeypatch):
+        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         tc, server = client
         miss = _event("silica_recall", {"query": "x", "notes": []})
-        monkeypatch.setattr(server, "run_agent", _turn("About 70 more passages.", miss))
+        monkeypatch.setattr(turn, "run_agent", _turn("About 70 more passages.", miss))
         tc.post("/chat", json={"text": "how many?"})
         sid = SESSION.chat.sid
         tc.post("/reset")
@@ -154,21 +162,23 @@ class TestGui:
         assert replayed == [[THIN, _note("70")]]
 
     def test_the_seed_grounds_this_year_and_the_user_grounds_their_numbers(self, client, monkeypatch):
+        from silica.ui.web import turn
         import datetime
 
         tc, server = client
         year = str(datetime.date.today().year)
-        monkeypatch.setattr(server, "run_agent", _turn(f"In {year}, 45 minutes a day, 3010 left."))
+        monkeypatch.setattr(turn, "run_agent", _turn(f"In {year}, 45 minutes a day, 3010 left."))
         done = _read_sse(tc.post("/chat", json={"text": "plan 45 minutes a day"}))[-1]
         assert done["notes"] == [_note("3010")]
 
     def test_a_web_turns_results_ground_later_turns(self, client, monkeypatch):
         """/web turns are not checked, but the session read their pages: the
         rebuilt set holds them, so the live one must too."""
+        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         tc, server = client
         page = _event("web_fetch", {"url": "https://x.test", "text": "population 8,336,817"})
-        monkeypatch.setattr(server, "run_agent", _turn("New York has 9,999,999 people.", page))
+        monkeypatch.setattr(turn, "run_agent", _turn("New York has 9,999,999 people.", page))
         done = _read_sse(tc.post("/chat", json={"text": "/web population of New York"}))[-1]
         assert not any(n["kind"] == "numbers" for n in done.get("notes", []))
         assert "8336817" in SESSION.chat.seen_numbers

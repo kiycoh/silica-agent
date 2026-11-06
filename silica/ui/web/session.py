@@ -14,6 +14,8 @@ import asyncio
 import logging
 import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -112,6 +114,39 @@ class Session:
 
 
 SESSION = Session()
+
+
+class TurnSlot:
+    """The slot `turn_slot` holds. `hand_off` is for the one case the block does
+    not end the holding: a turn's stream, whose own `finally` frees it."""
+
+    handed_off = False
+
+    def hand_off(self) -> None:
+        self.handed_off = True
+
+
+@contextmanager
+def turn_slot(busy: str = "a turn is already in progress") -> Iterator[TurnSlot]:
+    """Hold the one slot for the block, or refuse with a 409 saying `busy`.
+
+    It is also the vault's write lock: the one serialisation of vault writes
+    the server has, which is why an import or a tree move takes it too. The
+    block's end frees it however the block ends, a cancelled request included.
+    A block that returns a turn's stream hands it off (`sse.turn_response`
+    does), and the release is then the turn's: `run_turn`'s finally, its
+    worker's done-callback, or `sweep_if_orphaned` when the body never ran."""
+    if not SESSION.claim():
+        # Here and not at the top: the bridge reads this module without the [gui] extra.
+        from fastapi import HTTPException
+
+        raise HTTPException(409, busy)
+    slot = TurnSlot()
+    try:
+        yield slot
+    finally:
+        if not slot.handed_off:
+            SESSION.release()
 
 
 def build_seed() -> tuple[list[dict], int]:

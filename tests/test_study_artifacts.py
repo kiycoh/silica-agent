@@ -30,7 +30,7 @@ def test_the_chat_shows_the_cards_as_markdown(tmp_vault, tmp_path, monkeypatch):
     import asyncio
 
     from silica.kernel.learn import artifacts
-    from silica.ui.web import server
+    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     SESSION.reset()
@@ -38,10 +38,10 @@ def test_the_chat_shows_the_cards_as_markdown(tmp_vault, tmp_path, monkeypatch):
     _points(monkeypatch, {"ML/Dropout.md": ["Il dropout approssima il bagging di sottoreti."]})
     monkeypatch.setattr(artifacts, "_card_reply",
                         lambda prompt, retry=False: "Cosa approssima il dropout? :: il bagging di sottoreti [[Dropout]]")
-    monkeypatch.setattr(server, "run_agent", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no agent turn")))
+    monkeypatch.setattr(turn, "run_agent", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no agent turn")))
 
     async def collect():
-        return [x async for x in server.run_turn('/flashcards "Dropout" --n=3')]
+        return [x async for x in turn.run_turn('/flashcards "Dropout" --n=3')]
 
     done = asyncio.run(collect())[-1]
     assert done["type"] == "done" and ":: il bagging di sottoreti" in done["answer"]

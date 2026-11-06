@@ -211,7 +211,7 @@ class BridgeServer:
             logger.debug("bridge: metadata event: %s", frame)  # non-fatal, LINT audits later
 
     async def _chat_turn(self, ws: Any, tid: str, text: str) -> None:
-        from silica.ui.web.server import run_turn
+        from silica.ui.web.turn import run_turn
 
         try:
             async for item in run_turn(text):

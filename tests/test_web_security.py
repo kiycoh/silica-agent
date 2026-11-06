@@ -407,11 +407,12 @@ def test_the_upload_caps_are_the_documented_ones():
 def _no_llm(monkeypatch, server):
     """Stub the turn so a cap that stopped holding fails the assertion below
     instead of hanging the suite on a real agent run."""
+    from silica.ui.web import turn
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
 
 
 def test_an_oversized_upload_is_refused_and_leaves_no_partial_file(client, monkeypatch):

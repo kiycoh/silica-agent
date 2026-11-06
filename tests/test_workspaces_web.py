@@ -70,6 +70,7 @@ def test_create_add_remove_and_membership(client):
 
 
 def test_a_chat_opened_in_a_workspace_is_scoped_instructed_and_lists_what_it_writes(client, monkeypatch, tmp_vault):
+    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
     from silica.kernel import workspaces
@@ -86,7 +87,7 @@ def test_a_chat_opened_in_a_workspace_is_scoped_instructed_and_lists_what_it_wri
         return "Fatto."
 
     tmp_vault.note("Notes/Summary.md", "# Summary\n")
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     resp = tc.post("/chat", json={"text": "riassumi", "workspace": "Workspaces/Thesis.md"})
     assert resp.status_code == 200
     assert seen["allow"] == frozenset({"Courses/Econometrics/Panel data", "Inbox/Dataset README"})
@@ -100,6 +101,7 @@ def test_a_chat_opened_in_a_workspace_is_scoped_instructed_and_lists_what_it_wri
 
 
 def test_closing_the_scope_widens_the_next_turn_and_edits_the_line_in_place(client, monkeypatch):
+    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
     from silica.kernel import workspaces
@@ -111,7 +113,7 @@ def test_closing_the_scope_widens_the_next_turn_and_edits_the_line_in_place(clie
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     tc.post("/chat", json={"text": "one", "workspace": "Thesis"})
     n = len([m for m in SESSION.chat.messages if m.get("origin") == "workspace"])
     tc.post("/chat", json={"text": "two"})
@@ -123,6 +125,7 @@ def test_closing_the_scope_widens_the_next_turn_and_edits_the_line_in_place(clie
 
 
 def test_a_reopened_chat_keeps_the_scope_of_its_last_turn(client, monkeypatch):
+    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
 
@@ -130,7 +133,7 @@ def test_a_reopened_chat_keeps_the_scope_of_its_last_turn(client, monkeypatch):
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     tc.post("/chat", json={"text": "one", "workspace": "Thesis"})
     sid = SESSION.chat.sid
     tc.post("/reset")
@@ -149,6 +152,7 @@ def test_the_internal_key_never_reaches_the_provider():
 def test_the_joined_note_and_the_workspace_edit_are_among_this_chats_changes(client, monkeypatch):
     """Point 4 as decided: a note the chat writes joins notes:, and that edit
     shows among what this chat did to the vault (ADR-0072's list, /changes)."""
+    from silica.ui.web import turn
     tc, server = client
     from silica.driver import DRIVER
 
@@ -160,7 +164,7 @@ def test_the_joined_note_and_the_workspace_edit_are_among_this_chats_changes(cli
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     tc.post("/chat", json={"text": "scrivi i metodi", "workspace": "Thesis"})
     changed = {row["path"] for row in tc.get("/changes").json()}
     assert {"Notes/Methods.md", "Workspaces/Thesis.md"} <= changed
@@ -174,9 +178,10 @@ def test_the_joined_note_and_the_workspace_edit_are_among_this_chats_changes(cli
 # --- the endpoints' answers (review of 2026-10-15) --------------------------------
 
 def test_a_turn_naming_a_workspace_that_is_gone_is_refused_not_run_unscoped(client, monkeypatch, tmp_vault):
+    from silica.ui.web import turn
     tc, server = client
     ran = []
-    monkeypatch.setattr(server, "run_agent", lambda *a, **k: ran.append(1) or "ok")
+    monkeypatch.setattr(turn, "run_agent", lambda *a, **k: ran.append(1) or "ok")
     from silica.config import CONFIG
     from pathlib import Path
 

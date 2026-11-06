@@ -384,7 +384,7 @@ def journal(monkeypatch):
 def test_a_refused_turn_is_counted_limited_and_says_when(fake, journal, tmp_vault, monkeypatch):
     pytest.importorskip("fastapi")
     from silica.model import llm
-    from silica.ui.web import server
+    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     SESSION.reset()
@@ -394,12 +394,12 @@ def test_a_refused_turn_is_counted_limited_and_says_when(fake, journal, tmp_vaul
     def run_agent(messages, model, *a, **k):  # the loop's first call, through the real gate
         return llm.call_llm("openrouter/qwen/qwen3.7-flash", messages).text
 
-    monkeypatch.setattr(server, "run_agent", run_agent)
+    monkeypatch.setattr(turn, "run_agent", run_agent)
     usage_limits.check()  # opens the window
     fake.body = key_record(usage=10.2)
 
     async def collect():
-        return [item async for item in server.run_turn("what is entropy?")]
+        return [item async for item in turn.run_turn("what is entropy?")]
 
     frames = asyncio.run(collect())
     error = frames[-1]

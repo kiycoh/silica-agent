@@ -38,6 +38,18 @@ SUMMARIZE_ASK = ("Summarize the attached file(s): the main points and findings, 
 QUIZ_ASK = ("Quiz me on the attached file(s): one question at a time, wait for my answer, "
             "then say whether it is right and why, from the file's text.")
 
+OFFERED_TURNS = ("ask", "summarize", "quiz", "nucleate")
+
+
+def offered_ask(kind: str, words: str, names: str) -> tuple[str, str]:
+    """What one of OFFERED_TURNS asks of the agent, and the words its bubble
+    shows; `words` is what the drop said, `names` its files."""
+    return {"ask": (words, words.strip()),
+            "summarize": (SUMMARIZE_ASK, f"Summarize {names}"),
+            "quiz": (QUIZ_ASK, f"Quiz me on {names}"),
+            "nucleate": (NUCLEATE_ASK, f"Nucleate {names}")}[kind]
+
+
 # A turn that brings attached files in is not offered the injector (ADR-0121
 # point 3): the 9B called it for a question about an 80-word file, against the
 # DROP_ASK sentence a drop with no words already carries. "Nucleate it" keeps it.

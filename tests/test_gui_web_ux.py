@@ -139,16 +139,18 @@ def test_a_reload_restores_the_draft_under_what_was_typed_since():
 # --- P3. Stop is an outcome; failure rides the message -------------------------
 
 def test_a_stopped_turn_keeps_the_partial_answer_and_adds_an_outcome_row(client, monkeypatch):
+    from silica.ui.web import turn
     tc, server = client
 
     def stops(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         cancel_token.set()
         return "(silica: cancelled)"
 
-    monkeypatch.setattr(server, "run_agent", stops)
+    monkeypatch.setattr(turn, "run_agent", stops)
 
     async def collect():
-        return [item async for item in server.run_turn("hi")]
+        from silica.ui.web import turn
+        return [item async for item in turn.run_turn("hi")]
 
     items = asyncio.run(collect())
     done = items[-1]

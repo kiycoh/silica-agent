@@ -148,6 +148,7 @@ def client(monkeypatch):
 
     from silica.config import CONFIG
     from silica.ui.web import server
+    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(CONFIG, "capture_sessions", False)
@@ -157,7 +158,7 @@ def client(monkeypatch):
         messages.append({"role": "assistant", "content": "Fatto"})
         return "Fatto"
 
-    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
     return TestClient(server.app), server
 
 
