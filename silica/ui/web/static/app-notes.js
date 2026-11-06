@@ -212,7 +212,7 @@ function addToVaultButton(source, chip) {
   return b;
 }
 
-// The formats the chat model's projector takes (image_readings._MIME).
+// The formats the chat model's projector takes (formats.IMAGE_MIME).
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
 function stagedAreImages() {
   return staged.length > 0 && staged.every((f) => IMAGE_TYPES.includes(f.type));

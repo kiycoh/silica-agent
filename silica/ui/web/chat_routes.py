@@ -20,6 +20,7 @@ from silica.agent.loop import _is_tool_failure
 from silica.agent.mentions import IMAGE_MARK, IMAGE_MARK_RE
 from silica.agent.recall_watch import numbers_of_session, read_refs, READS_KEY
 from silica.config import CONFIG, demo
+from silica.kernel.base.formats import IMAGE_SUFFIX, ext_alternation
 from silica.kernel.graph.mindmap import note_resolver
 from silica.sources import drop_turn
 from silica.ui.web import drop, flags, render, session, sse, turn
@@ -50,7 +51,6 @@ def _save_attachments(images: list) -> list[Path]:
     import hashlib
 
     from silica.kernel.base.durable import atomic_write_bytes
-    from silica.kernel.base.formats import IMAGE_SUFFIX
     from silica.kernel.base.home import attachments_dir
 
     if len(images) > _MAX_ATTACHED:
@@ -76,7 +76,7 @@ def _save_attachments(images: list) -> list[Path]:
     return out
 
 
-_ATTACHMENT_NAME_RE = re.compile(r"[0-9a-f]{16}\.(?:png|jpg|webp|gif|bmp)")
+_ATTACHMENT_NAME_RE = re.compile(rf"[0-9a-f]{{16}}\.{ext_alternation(IMAGE_SUFFIX.values())}")
 
 
 def _attached_images(content: str) -> tuple[str, list[dict]]:
