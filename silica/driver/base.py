@@ -76,37 +76,6 @@ class GraphSnapshot:
     backlink_counts: dict[str, int] = field(default_factory=dict)  # note -> incoming count
 
 
-@dataclass
-class Txn:
-    """Transaction handle for snapshot/rollback.
-
-    Rollback strategies (C3 / ADR-0009):
-      - inverses:       authoritative list of InverseOp — consumed by silica_restore and
-                        the ROLLBACK state. Single source of truth.
-      - created_paths:  derived from inverses (delete_created entries); same reason.
-    """
-    id: str
-    refs: list[NoteRef] = field(default_factory=list)
-    created_paths: list[str] = field(default_factory=list)   # paths created by write ops
-    inverses: list = field(default_factory=list)              # list[InverseOp] — real field, not dynamic attr
-
-    @property
-    def inverses_serialized(self) -> list[dict]:
-        """Return a JSON-serializable list of dicts representing the inverse operations."""
-        serialized = []
-        for inv in self.inverses:
-            if hasattr(inv, "model_dump"):
-                serialized.append(inv.model_dump())
-            elif isinstance(inv, dict):
-                serialized.append(inv)
-            else:
-                try:
-                    serialized.append(dict(inv))
-                except Exception:
-                    pass
-        return serialized
-
-
 def namesake_order(path: str) -> tuple[int, str]:
     """Which of several notes sharing a name a bare name means: the shallowest
     path, then alphabetical, the rank the fs link resolver always used.
@@ -322,10 +291,6 @@ class ObsidianDriver(Protocol):
         """
         ...
 
-    def append(self, ref: NoteRef | str, content: str) -> None:
-        """Append content to an existing note."""
-        ...
-
     def set_prop(self, ref: NoteRef | str, name: str, value: Any, type_: str = "text") -> None:
         """Set a frontmatter property on a note."""
         ...
@@ -383,24 +348,5 @@ class ObsidianDriver(Protocol):
 
         Ensures the graph index is populated first. Used by graph_export to
         avoid O(N) CLI calls while keeping the contract explicit.
-        """
-        ...
-
-    # -- transactionality --------------------------------------------------
-
-    def snapshot_versions(self, refs: list[NoteRef]) -> Txn:
-        """Snapshot current versions for later rollback."""
-        ...
-
-    def restore(self, txn: Txn) -> None:
-        """Rollback a transaction.
-
-        CAPABILITY GAP: rollback completeness is backend-dependent.
-          - created_paths (undo write ops): honored by both backends.
-          - versions (undo patch ops via history): CLI-backend only; the FS
-            backend has no version history and no-ops these (logged).
-        Prefer content-based rollback (InverseOp.restore_version with
-        prior_content, applied via silica_restore) for backend-agnostic undo;
-        this version-based path is a fallback only.
         """
         ...

@@ -24,14 +24,15 @@ from __future__ import annotations
 from typing import Annotated
 
 import logging
+import uuid
 from pathlib import Path
 from typing import Any
 
 from pydantic import Field
 
 from silica.driver import DRIVER
-from silica.driver.base import NoteRef, Txn
-from silica.kernel.write.ops import InverseOp, InverseOpKind, OpType, Op
+from silica.driver.base import NoteRef
+from silica.kernel.write.ops import InverseOp, InverseOpKind, OpType, Op, Txn
 from silica.kernel.write.ops_io import parse_ops, load_ops
 from silica.tools import tool
 
@@ -467,9 +468,6 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
                 prior_content=prior_content
             ))
 
-    # Txn id comes from the driver; rollback is content-based (prior_content).
-    base_txn = DRIVER.snapshot_versions(patch_refs)
-
     for ref in patch_refs:
         key = ref.path or ref.name
         if key in seeded_here:
@@ -490,7 +488,7 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
         if inv.kind == InverseOpKind.delete_created
     ]
     txn = Txn(
-        id=base_txn.id,
+        id=f"txn_{uuid.uuid4().hex}",
         refs=patch_refs,
         created_paths=created_paths,
         inverses=inverses,

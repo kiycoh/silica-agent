@@ -153,21 +153,6 @@ class _EdgeStrippingDriver:
         )
 
 
-class _CorruptingDriverWithVersions(_CorruptingDriver):
-    """_CorruptingDriver + snapshot_versions.
-
-    commit_note_atomic calls build_txn() directly (not through the mocked
-    silica_snapshot tool used by the commit_ops test above), and build_txn
-    unconditionally calls DRIVER.snapshot_versions(patch_refs) — so any fake
-    driver used with commit_note_atomic needs this method, even when
-    patch_refs is empty (write ops).
-    """
-
-    def snapshot_versions(self, refs):
-        from silica.driver.base import Txn
-        return Txn(id="test-txn")
-
-
 class _DeadChannelDriver:
     """read_note raises a RuntimeError shaped like a dead channel (CLI
     timeout / Obsidian down), NOT like a genuine "note not found" — used to
@@ -406,7 +391,7 @@ def test_commit_note_atomic_reverts_new_note_on_verify_mismatch(monkeypatch):
     import silica.kernel.write.bulk as bulk_mod
     import silica.tools.wrapped as wrapped_mod
 
-    driver = _CorruptingDriverWithVersions()
+    driver = _CorruptingDriver()
     monkeypatch.setattr(bulk_mod, "DRIVER", driver)
     monkeypatch.setattr(wrapped_mod, "DRIVER", driver)
 
@@ -434,7 +419,7 @@ def test_commit_note_atomic_restores_prior_content_on_verify_mismatch(monkeypatc
     import silica.tools.wrapped as wrapped_mod
 
     original = "# Existing\n\nOriginal body.\n"
-    driver = _CorruptingDriverWithVersions(seed={"Concepts/Existing.md": original})
+    driver = _CorruptingDriver(seed={"Concepts/Existing.md": original})
     monkeypatch.setattr(bulk_mod, "DRIVER", driver)
     monkeypatch.setattr(wrapped_mod, "DRIVER", driver)
 

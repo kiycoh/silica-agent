@@ -46,8 +46,8 @@ def handle_snapshot(fsm: "InjectorFSM") -> None:
         fsm._chunk_ctx["snapshot"] = res
         fsm._chunk_ctx["txn_id"] = res["txn_id"]
         try:
-            from silica.driver.base import NoteRef, Txn
-            from silica.kernel.write.ops import InverseOp
+            from silica.driver.base import NoteRef
+            from silica.kernel.write.ops import InverseOp, Txn
             inv = [InverseOp(**d) for d in res["inverses"]]
 
             # Reconstruct refs for Txn from inverses

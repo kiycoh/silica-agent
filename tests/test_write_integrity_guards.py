@@ -16,7 +16,7 @@ import time
 import pytest
 
 from silica.driver import get_driver
-from silica.driver.base import Txn
+from silica.kernel.write.ops import Txn
 from silica.kernel.write.atomic_write import commit_note_atomic
 from silica.kernel.write.bulk import execute_one
 from silica.kernel.write.ledger import Ledger

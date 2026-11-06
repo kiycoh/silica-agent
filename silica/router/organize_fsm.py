@@ -352,8 +352,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             self._transition_success()
             return
 
-        from silica.driver.base import Txn
-        from silica.kernel.write.ops import InverseOp, InverseOpKind
+        from silica.kernel.write.ops import InverseOp, InverseOpKind, Txn
         import uuid
 
         # Open an undo-journal run so `/revert` can move these notes back later.

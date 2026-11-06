@@ -26,7 +26,6 @@ from silica.driver.base import (  # noqa: F401 — re-export domain types
     NoteContent,
     NoteRef,
     ObsidianDriver,
-    Txn,
 )
 
 logger = logging.getLogger(__name__)

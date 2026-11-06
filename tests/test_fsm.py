@@ -443,7 +443,7 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver
 
     # self._txn is the single source of truth for rollback inverses (C3).
     inverses = [{"op": "delete", "path": "notes/NoteA.md"}]
-    from silica.driver.base import Txn
+    from silica.kernel.write.ops import Txn
     fsm._txn = Txn(id="txn_123", created_paths=["notes/NoteA.md"], inverses=inverses)
     fsm.context.setdefault("chunk", {})["snapshot"] = {
         "txn_id": "txn_123",
@@ -1244,7 +1244,7 @@ def test_hub_inverse_appears_in_chunk_ctx_snapshot(tmp_path):
     mock_hub_note = MagicMock()
     mock_hub_note.content = "# Hub\n\nExisting content\n"
 
-    from silica.driver.base import Txn
+    from silica.kernel.write.ops import Txn
     fsm._txn = Txn(id="txn-001", created_paths=[], inverses=[])
 
     with patch("silica.router.orchestrator.DRIVER") as mock_driver, \
@@ -1274,7 +1274,8 @@ def test_hub_update_writes_parent_at_its_real_vault_path(tmp_path):
     import json
     from unittest.mock import patch, MagicMock
     from silica.router.orchestrator import InjectorFSM
-    from silica.driver.base import NoteRef, Txn
+    from silica.driver.base import NoteRef
+    from silica.kernel.write.ops import Txn
 
     ops_path = str(tmp_path / "ops.json")
     with open(ops_path, "w") as f:

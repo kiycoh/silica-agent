@@ -35,7 +35,8 @@ from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
 
-    from silica.driver.base import Txn, GraphSnapshot
+    from silica.driver.base import GraphSnapshot
+    from silica.kernel.write.ops import Txn
     from silica.driver.base import NoteRef
     from silica.kernel.write.undo_journal import InverseOp
     from silica.router.prefetch import DistillPrefetcher

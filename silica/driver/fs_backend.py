@@ -39,7 +39,6 @@ from silica.driver.base import (
     Link,
     NoteContent,
     NoteRef,
-    Txn,
 )
 from silica.kernel.base import frontmatter as fm
 from silica.kernel.write import preserve, session_changes
@@ -1190,9 +1189,9 @@ class ObsidianFSBackend(GraphIndexMixin):
         # saved is the before-state (ADR-0093 decision 4).
         preserve.check_recreate(rel_path, content, loss=loss, free=free)
         session_changes.touched(rel_path, None)  # no baseline: the note is new
-        # Notes are irreplaceable and this backend keeps no version history
-        # (snapshot_versions returns an empty Txn), so a truncating write_text
-        # has nothing to roll back to when it dies mid-write.
+        # Notes are irreplaceable and this backend keeps no version history,
+        # so a truncating write_text has nothing to roll back to when it dies
+        # mid-write.
         atomic_write_bytes(full_path, content.encode("utf-8"))
         self._invalidate_body(rel_path)
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
@@ -1268,29 +1267,6 @@ class ObsidianFSBackend(GraphIndexMixin):
         if added:
             self.overwrite(path, new_body)
         return added
-
-    def append(self, ref: NoteRef | str, content: str) -> None:
-        """Append content to an existing note."""
-        path = self._resolve_path(ref)
-        if not path.exists():
-            raise RuntimeError(f"File not found: {path}")
-
-        # Same boundary as create/overwrite: `ref` is caller-supplied and
-        # `_resolve_path` happily joins it onto the vault, so a note that is a
-        # symlink out of the vault reads as vault-relative while the append
-        # lands on the target. relative_to() alone only catches the absolute
-        # case — it compares strings and never resolves the link.
-        rel_path_str = contain_in_vault(str(path), self.vault_path)
-        session_changes.touched(rel_path_str, self._read_cached(path))
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(content)
-
-        self._invalidate_body(rel_path_str)
-        if self._needs_reindex:
-            self._rebuild_index()
-        else:
-            full_content = self._read_cached(path)
-            self._patch_index(rel_path_str, full_content)
 
     def set_prop(self, ref: NoteRef | str, name: str, value: Any, type_: str = "text") -> None:
         """Set a frontmatter property on a note."""
@@ -1600,36 +1576,3 @@ class ObsidianFSBackend(GraphIndexMixin):
                 name = file.removesuffix(".md")
                 results.append(NoteRef(name=name, path=rel_p))
         return results
-
-    # ------------------------------------------------------------------
-    # Transactionality
-    # ------------------------------------------------------------------
-
-    def snapshot_versions(self, refs: list[NoteRef]) -> Txn:
-        """Snapshot current versions for later rollback.
-
-        The FS backend does not track version history, so `versions` is always
-        empty. Rollback of patch ops is a no-op in FS mode. Rollback of write
-        ops works via `created_paths` (delete the created notes).
-        """
-        txn_id = f"txn_fs_{int(time.time())}"
-        return Txn(id=txn_id, refs=refs)
-
-    def restore(self, txn: Txn) -> None:
-        """Rollback a transaction.
-
-        - created_paths: deletes newly-created notes to undo write ops.
-        """
-        for path in txn.created_paths:
-            try:
-                full_path = self.vault_path / path
-                if full_path.exists():
-                    full_path.unlink()
-                    self._invalidate_body(path)
-                    logger.info("Rolled back created note: %s", path)
-                    if self._needs_reindex:
-                        pass  # full rebuild will happen on next _ensure_index
-                    else:
-                        self._patch_index(path, None)
-            except Exception as e:
-                logger.error("Failed to delete created note %s during rollback: %s", path, e)

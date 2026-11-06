@@ -136,9 +136,6 @@ class StubPluginServer:
 
             fs._overwrite_raw(params["path"], params["content"], loss=Loss.RESTORE)
             return {"ok": True}
-        if method == "append":
-            fs.append(self._ref(params["path"]), params["content"])
-            return {"ok": True}
         if method == "set_prop":
             fs.set_prop(self._ref(params["path"]), params["name"], params["value"],
                         params.get("type", "text"))
@@ -355,16 +352,6 @@ def test_overwrite_of_missing_note_raises(wbe):
         wbe.overwrite("Nope/Missing.md", "x")
 
 
-def test_append_adds_fragment_and_patches_graph(wbe):
-    empty = NoteRef(name="Empty", path="Lean/Empty.md")
-    perceptron = NoteRef(name="Perceptron", path="Concepts/Perceptron.md")
-    before_backlinks = {r.path for r in wbe.backlinks(perceptron)}  # primes the graph
-    before = wbe.read_note(empty).content
-    wbe.append(empty, "\nSee [[Perceptron]].\n")
-    assert wbe.read_note(empty).content == before + "\nSee [[Perceptron]].\n"
-    assert {r.path for r in wbe.backlinks(perceptron)} == before_backlinks | {"Lean/Empty.md"}
-
-
 def test_set_prop_visible_via_props_of(wbe):
     ref = NoteRef(name="Gradient", path="Concepts/Gradient.md")
     wbe.set_prop(ref, "status", "reviewed")
@@ -427,15 +414,22 @@ def test_rpc_timeout_drops_pending_entry(wbe):
     assert wbe._pending == {}
 
 
-def test_snapshot_restore_round_trips_prior_content(wbe):
+def test_rollback_round_trips_prior_content(wbe, monkeypatch):
+    from silica.kernel.write.notetype import stamp_type
+    from silica.kernel.write.ops import InverseOp, InverseOpKind
+    from silica.tools import wrapped
+
+    monkeypatch.setattr(wrapped, "DRIVER", wbe)
     ref = NoteRef(name="Gradient", path="Concepts/Gradient.md")
     original = wbe.read_note(ref).content
-    txn = wbe.snapshot_versions([ref])
-    assert txn.id
     wbe.overwrite("Concepts/Gradient.md", "clobbered\n")
     created = wbe.create("Tmp/Scratch.md", "scratch\n")
-    txn.created_paths.append(created.path)  # the caller (build_txn) records creations
-    wbe.restore(txn)
-    assert wbe.read_note(ref).content == original
+    res = wrapped.silica_restore(txn_id="t", inverses=[
+        InverseOp(kind=InverseOpKind.restore_version, path=ref.path, prior_content=original).model_dump(),
+        InverseOp(kind=InverseOpKind.delete_created, path=created.path).model_dump(),
+    ])
+    assert res["success"], res
+    # The undo goes through the public seam, which stamps the derived `type`.
+    assert wbe.read_note(ref).content == stamp_type(ref.path, original)
     with pytest.raises(RuntimeError):
         wbe.read_note(created)
