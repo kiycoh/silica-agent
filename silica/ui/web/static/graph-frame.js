@@ -831,6 +831,14 @@ function flowColumns(levels, unit) {
   return { layout, heads };
 }
 
+// What is left of an arrangement's side room on a frame too narrow for it: never
+// more than half the free width, or the picture has none. At 390px 2 * 165 is
+// more than the frame's 302, and the fit came out negative.
+function layoutRoom(free, left, right) {
+  const s = Math.min(1, free / (2 * (left + right)));
+  return [left * s, right * s];
+}
+
 // frame-pure:end
 
 function applyFocus(ids) { computeFocus(ids); refreshPaint(); arrangeFocus(); }
@@ -1062,8 +1070,18 @@ function fitGraph() {
   fitFree(400);
 }
 
+// The lib clamps every zoom at 0.01, a number of graph units and not a share of
+// the picture: alex_second_brain fits at 0.008 on a 1440 frame, and at 390 the fit
+// asked 0.0085 and got 0.01. Half the fit leaves a wheel room to go on out.
+function lowerZoomFloor(k) {
+  Graph.minZoom(Math.min(0.01, k / 2));
+}
+
 // The lib's zoomToFit frames the canvas, and the key stands over its right edge
 // (freeWidth): with a note counted in pixels (KREF) the outer ones went under it.
+// The foot stands over the bottom edge the same way, 44px up against a pad of 40,
+// and took Petrarch and Divine Comedy on silica_wiki at 1440.
+const FOOT_GAP = 12;
 function fitFree(ms, pad = 40, only = n => !n._hidden) {
   wake(ms + 200);
   if (!is2D()) { Graph.zoomToFit(ms, pad, only); return; }
@@ -1075,9 +1093,11 @@ function fitFree(ms, pad = 40, only = n => !n._hidden) {
   }
   if (x0 > x1) return;
   const W = Graph.width(), H = Graph.height(), free = freeWidth();
-  const k = Math.min((free - 2 * pad) / Math.max(1, x1 - x0), (H - 2 * pad) / Math.max(1, y1 - y0));
+  const foot = Math.max(pad, H - document.getElementById("gstat").getBoundingClientRect().top + FOOT_GAP);
+  const k = Math.min((free - 2 * pad) / Math.max(1, x1 - x0), (H - pad - foot) / Math.max(1, y1 - y0));
   if (!(k > 0)) return;
-  Graph.centerAt((x0 + x1) / 2 + (W - free) / 2 / k, (y0 + y1) / 2, ms);
+  lowerZoomFloor(k);
+  Graph.centerAt((x0 + x1) / 2 + (W - free) / 2 / k, (y0 + y1) / 2 + (foot - pad) / 2 / k, ms);
   Graph.zoom(k, ms);
 }
 
@@ -1248,11 +1268,12 @@ function frameLayout() {
   };
   for (const id in layout) take(c.x + layout[id][0], c.y + layout[id][1]);
   for (const h of heads) kind === "clusters" ? take(c.x + h.cx, c.y + h.cy, h.R) : take(c.x + h.x, c.y + h.y);
-  const W = Graph.width(), H = Graph.height(), free = freeWidth(), [px, py] = LAYOUT_ROOM[kind];
-  const right = kind === "flow" ? FLOW_NAME : px;
-  const k = Math.max(0.01, Math.min((free - px - right) / Math.max(1, x1 - x0),
-    (H - 2 * py) / Math.max(1, y1 - y0), kind === "flow" ? 4 * KREF : Infinity));
+  const W = Graph.width(), H = Graph.height(), free = freeWidth(), [side, py] = LAYOUT_ROOM[kind];
+  const [px, right] = layoutRoom(free, side, kind === "flow" ? FLOW_NAME : side);
+  const k = Math.min((free - px - right) / Math.max(1, x1 - x0),
+    Math.max(1, H - 2 * py) / Math.max(1, y1 - y0), kind === "flow" ? 4 * KREF : Infinity);
   ARR.k = k;
+  lowerZoomFloor(k);
   // the picture's middle at the middle of what is free of the key and the names
   const dx = ((W - free) / 2 + (right - px) / 2) / k;
   Graph.centerAt((x0 + x1) / 2 + dx, (y0 + y1) / 2, 800);
