@@ -21,6 +21,7 @@ from unittest.mock import patch
 import pytest
 
 from silica.config import silica_home
+from silica.kernel.progress import run_dir_for
 from silica.router.orchestrator import InjectorFSM
 from silica.router.phases import InjectorState
 
@@ -58,12 +59,15 @@ def old_run(tmp_vault, monkeypatch):
     monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "100")
     vault = Path(CONFIG.vault_path)
     shutil.copytree(FIXTURE / "vault", vault, dirs_exist_ok=True)
-    run_dir = silica_home() / "runs" / RUN_ID
+    # Asked of the code that reads it, not derived from the home: a run's
+    # checkpoint path is absolute, and the run has to find it where it looks.
+    run_dir = run_dir_for(RUN_ID)
     for src in (FIXTURE / "run").rglob("*"):
         if src.is_file():
             dst = run_dir / src.relative_to(FIXTURE / "run")
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(src.read_text(encoding="utf-8").replace("<VAULT>", str(vault))
+                           .replace("<HOME>/runs", str(run_dir.parent))
                            .replace("<HOME>", str(silica_home())), encoding="utf-8")
     yield run_dir
     shutil.rmtree(run_dir, ignore_errors=True)

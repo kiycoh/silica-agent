@@ -86,7 +86,7 @@ def merge_verdicts(pairs: list[dict], *, verbose: bool = False) -> dict:
     examples: list[tuple[str, str]] = []
     for item in _pairs_to_items(pairs):
         winner_path = item.target_path
-        loser_path = item.context.get("loser_path")
+        loser_path = item.context.loser_path
         if not loser_path:
             continue
         try:

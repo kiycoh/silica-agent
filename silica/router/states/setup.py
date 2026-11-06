@@ -172,7 +172,7 @@ def _pin_file_profile(fsm: "InjectorFSM", fi: int, inbox_file: str) -> None:
     profile (--profile, /promote) short-circuits the whole resolution, so no
     sniff call is ever paid under it. A `draft` verdict reaching the FSM means
     a direct tool call bypassed the dispatch filing path: it distills under
-    the vault fallback, with the verdict kept visible in context and the log.
+    the vault fallback, with the verdict kept visible in its pins and the log.
     """
     pins = fsm.run_state.file(fi)
     if fsm.distill_profile or pins.form is not None:
