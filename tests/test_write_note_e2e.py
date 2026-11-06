@@ -338,3 +338,24 @@ def test_the_web_entry_is_out_until_its_gate_passes(app):
     r = p.js("fetch('/note/check', {method: 'POST', headers: {'Content-Type': 'application/json'}, "
              "body: JSON.stringify({path: 'Topic/Source.md', lines: [1, 1], web: true, claim: 'x'})}).then((r) => r.status)")
     assert r == 404
+
+
+def test_a_note_whose_file_left_is_a_choice_and_not_a_wedge(app):
+    p, vault = app
+    p.js("openCentre('Topic/Source.md')")
+    p.wait("centreNote.path === 'Topic/Source.md'", 8, "the note at the centre")
+    p.js("centreNote.editor.view.focus(); centreNote.editor.view.dispatch({selection: {anchor: 0}})")
+    note = vault / "Topic" / "Source.md"
+    note.unlink()
+    p.type("Still mine. ")
+    p.wait("centreNote.phase === 'gone'", 5, "the 404")
+    foot = "document.querySelector('#nv-foot .nv-st').innerText"
+    assert "Write it back" in p.js(foot) and "Let it go" in p.js(foot)
+    p.js("[...document.querySelectorAll('#nv-foot .act')].find((b) => b.textContent === 'Write it back').click()")
+    p.wait("centreNote.phase === 'saved'", 5, "the write")
+    assert note.read_text(encoding="utf-8").startswith("Still mine. ")
+    note.unlink()
+    p.type("Again. ")
+    p.wait("centreNote.phase === 'gone'", 5, "the 404")
+    p.js("[...document.querySelectorAll('#nv-foot .act')].find((b) => b.textContent === 'Let it go').click()")
+    p.wait("centreNote.path === '' && activeTab !== 'note'", 5, "the way out")

@@ -5358,7 +5358,7 @@ async def note_check(payload: dict, request: Request):
         said = {"web": True} if web_on else {}  # that a web was asked, never what (ADR-0100)
         try:
             search, dense, floor = _check_legs()
-            judge = None if rules_only else _check_judge()
+            judge = None if rules_only else _check_judge(cite=card_lines is not None)
             report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(), search=search,
                                       dense=dense, dense_floor=floor, judge=judge,
                                       cache_only=rules_only, progress=progress, cancelled=stop.is_set,

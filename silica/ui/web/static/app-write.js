@@ -195,21 +195,25 @@ async function putImage(s, file) {
   v.dispatch({ changes: { from: at, insert: text }, selection: { anchor: at + text.length } });
   v.focus();
 }
+// In turn: each goes in at the caret the last one left.
+async function putImages(s, files) {
+  for (const f of files) await putImage(s, f);
+}
 const imageDrop = (s) => window.CM.EditorView.domEventHandlers({
   paste(e) {
-    const f = [...(e.clipboardData?.files || [])].find((x) => IMAGE.test(x.type));
-    if (!f) return false;
+    const files = [...(e.clipboardData?.files || [])].filter((x) => IMAGE.test(x.type));
+    if (!files.length) return false;
     e.preventDefault();
-    putImage(s, f);
+    putImages(s, files);
     return true;
   },
   drop(e, view) {
-    const f = [...(e.dataTransfer?.files || [])].find((x) => IMAGE.test(x.type));
-    if (!f) return false;
+    const files = [...(e.dataTransfer?.files || [])].filter((x) => IMAGE.test(x.type));
+    if (!files.length) return false;
     e.preventDefault();
     const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
     if (pos != null) view.dispatch({ selection: { anchor: pos } });
-    putImage(s, f);
+    putImages(s, files);
     return true;
   },
 });
@@ -358,6 +362,8 @@ async function undoWrite(d) {
     data = await r.json().catch(() => ({}));
   } catch { /* reported below */ }
   if (!r || !r.ok) { notify(data.detail || "couldn't take that back"); return; }
+  // Renamed since it was born, the note is not where the run left it, and stays.
+  if (!(data.restored || []).length) { notify("This note has moved since: delete it from the tree", "info"); return; }
   notify("In the trash, with what it held", "info");
   if (centreNote.path === d.path) {
     centreNote.path = ""; // its bytes are in the trash: nothing is left to save
@@ -771,7 +777,7 @@ function addPropertyRow() {
     renderProps();
   };
   for (const f of [k, val]) f.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); row.remove(); }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done = true; row.remove(); }
     if (e.key === "Enter") { e.preventDefault(); if (f === k) val.focus(); else commit(); }
   });
   row.addEventListener("focusout", (e) => {
@@ -850,7 +856,7 @@ function renderProps(force = false) {
     y.type = "button";
     y.addEventListener("click", () => {
       formOn = false;
-      renderProps();
+      renderProps(true);
       s.editor.view.dispatch({ selection: { anchor: 4 } });
       s.editor.focus();
     });

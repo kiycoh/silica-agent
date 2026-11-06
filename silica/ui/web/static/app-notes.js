@@ -1930,11 +1930,12 @@ async function releaseNote(s = drawerNote, unless = null) {
 }
 
 // The field holds text the disk does not, and saving cannot put it there now.
-const fieldHeld = (s) => !!s.path && !!s.editor && (s.conflict || s.phase === "retry");
+const fieldHeld = (s) => !!s.path && !!s.editor && (s.conflict || s.phase === "retry" || s.phase === "gone");
 
 function sayHeld(s) {
   const away = s === centreNote && activeTab !== "note";
   notify(s.conflict ? "This note changed on disk: pick Keep mine or Take the disk's first"
+    : s.phase === "gone" ? "This note's file is gone: pick Write it back or Let it go first"
     : "Not saved yet: your text stays in the note until the save lands", "error",
          away ? { label: "back to it", run: () => { showTab("note"); syncUrl(true); } } : null);
 }
@@ -2001,7 +2002,7 @@ function followNote(to, rewritten) {
 async function saveEdit(s = drawerNote) {
   clearTimeout(s.timer);
   if (s.fresh) return createFresh(s);
-  if (!s.path || s.conflict || !s.editor) return;
+  if (!s.path || s.conflict || s.phase === "gone" || !s.editor) return;
   if (s.saving) { s.again = true; return s.saving; }
   const path = s.path, ed = s.editor, text = ed.getText();
   if (text === s.clean) {
@@ -2026,6 +2027,8 @@ async function saveEdit(s = drawerNote) {
         setPhase(s, "conflict");
         return;
       }
+      // The file left behind the app: no retry can land, so the person is asked.
+      if (r.status === 404) { setPhase(s, "gone"); return; }
       if (!r.ok) throw new Error(String(r.status));
       s.etag = data.etag;
       // What landed may differ from what was sent (overwrite stamps a `type:`
@@ -2062,7 +2065,7 @@ async function saveEdit(s = drawerNote) {
 // Typing: the foot line says Saving… at once, and only the server's answer says
 // Saved. A note in conflict waits for the person's choice, and typing is not one.
 function typed(s) {
-  if (s.conflict) { paintFoot(s); return; }
+  if (s.conflict || s.phase === "gone") { paintFoot(s); return; }
   // A field with no note under it must not swallow words: they become a new note.
   if (s === centreNote && !s.path && !s.fresh) s.fresh = true;
   setPhase(s, "saving");
@@ -2089,6 +2092,12 @@ function paintFoot(s) {
   else if (s.phase === "refused") {
     st.classList.add("warn");
     st.append(mkEl("span", "dot"), document.createTextNode("Not saved: give it another name"));
+  } else if (s.phase === "gone") {
+    st.classList.add("warn");
+    st.append(mkEl("span", "dot"), document.createTextNode("Its file is gone"));
+    const act = (label, fn) => { const b = mkEl("button", "act", label); b.type = "button"; b.addEventListener("click", fn); st.append(b); };
+    act("Write it back", () => writeBack(s));
+    act("Let it go", () => letItGo(s));
   } else if (s.phase === "retry") {
     st.classList.add("warn");
     st.append(mkEl("span", "dot"), document.createTextNode("Not saved: retrying. Your text stays here"));
@@ -2137,7 +2146,42 @@ function keepMine(s) {
   saveEdit(s);
 }
 
-function takeDisk(s) {
+// The file went behind the app: the field's text is the only copy, so it goes back
+// where it was, as a new note. The vault may refuse (the name taken since, a folder
+// of Silica's), and then the field stays as it is and the toast says why.
+async function writeBack(s) {
+  const path = s.path, at = path.lastIndexOf("/");
+  let r = null, d = {};
+  try {
+    r = await fetch("/note/new", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder: at < 0 ? "" : path.slice(0, at), name: path.slice(at + 1).replace(/\.md$/i, ""), text: s.editor.getText() }),
+    });
+    d = await r.json().catch(() => ({}));
+  } catch { /* reported below */ }
+  if (!r || !r.ok) { notify(d.detail || "couldn't write the note back"); return; }
+  s.etag = d.etag;
+  s.clean = d.text;
+  s.broken = d.broken || [];
+  s.editor.setMissing(s.broken);
+  s.at = new Date();
+  s.touched = true;
+  setPhase(s, "saved");
+  loadVaultInfo();
+}
+
+function letItGo(s) {
+  dropField(s);
+  if (s === drawerNote) { closeNote(); return; }
+  releaseNote(s).then(() => { if (activeTab === "note") showTab("chat"); });
+}
+
+// Read again on the press: the bytes of the 409 may be old by now, and only the
+// disk's own bytes can honestly read as Saved.
+async function takeDisk(s) {
+  const r = await fetch("/note/raw?path=" + encodeURIComponent(s.path)).catch(() => null);
+  const now = r && r.ok ? await r.json().catch(() => null) : null;
+  if (now) { s.disk = now.text; s.etag = now.etag; }
   const disk = s.disk;
   s.conflict = false;
   s.disk = null;

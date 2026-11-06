@@ -38,7 +38,7 @@ def test_a_conflict_is_a_choice_and_typing_is_not_one():
     assert "keep typing to overwrite" not in NOTES
     for act in ("Keep mine", "Take the disk's", "Compare"):
         assert f'act("{act}"' in NOTES, act
-    assert "if (s.conflict) { paintFoot(s); return; }" in NOTES
+    assert 'if (s.conflict || s.phase === "gone") { paintFoot(s); return; }' in NOTES
 
 
 def test_the_foot_says_saved_only_on_the_servers_answer():

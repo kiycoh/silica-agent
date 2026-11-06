@@ -1176,7 +1176,7 @@ def _dc_check(args: list[str], **_) -> bool:
     search, dense, floor = _check_legs()
     try:
         report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(),
-                                  search=search, dense=dense, dense_floor=floor, judge=_check_judge())
+                                  search=search, dense=dense, dense_floor=floor, judge=_check_judge(cite=False))
     except Exception as e:
         metrics.emit("check", outcome=metrics.outcome_of(e), ms=metrics.ms_since(started))
         CONSOLE.print(f"  [yellow]The check failed: {e}[/]")
@@ -1188,7 +1188,7 @@ def _dc_check(args: list[str], **_) -> bool:
     return True
 
 
-def _check_judge():
+def _check_judge(cite: bool = True):
     """Jev decides a block's verdict; the chat model answers only when Jev
     answers nothing (ADR-0110 point 7, the owner's decision of 2026-10-24)."""
     from silica.agent.decide import decide
@@ -1203,7 +1203,7 @@ def _check_judge():
                                              max_tokens=300, temperature=0.0, reasoning=False)
         return resp.text or ""
 
-    return lambda text, passages: jd.judge(text, passages, decide=decide, chat=chat)
+    return lambda text, passages: jd.judge(text, passages, decide=decide, chat=chat, cite=cite)
 
 
 def _check_web_legs():
