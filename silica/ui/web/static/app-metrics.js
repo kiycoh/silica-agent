@@ -892,6 +892,17 @@ function evAct(label, prompt, primary) {
   return b;
 }
 
+// A target's two offers (ADR-0155 point 9): `write it` makes the note, no model,
+// and `open in chat` asks the model to draft it, as this row always did.
+function evWrite(r) {
+  const box = mkEl("span", "ev-acts");
+  const b = mkEl("button", "mini", "write it");
+  b.type = "button";
+  b.addEventListener("click", (e) => { e.stopPropagation(); window.writeGhost(r.target, r.from); });
+  box.append(b, evAct("open in chat", writePrompt(r), false));
+  return box;
+}
+
 function evEmpty(box, text) {
   box.appendChild(mkEl("p", "mempty", text));
   return box;
@@ -924,7 +935,7 @@ function evDangling(d, T) {
     [{ key: "target", label: "Target" }, { key: "refs", label: "Refs", num: true },
      { key: "src", label: "Referenced from" },
      // a row's action is the outline button; the card's one teal is "write the top N" below it
-     { label: "", el: (r) => evAct("write it", writePrompt(r._row), false) }],
+     { label: "", el: (r) => evWrite(r._row) }],
     d.dangling.map((r) => ({ target: r.target, refs: r.refs, _row: r, src: srcLabel(r) })),
   ));
   const more = mMore(d.dangling.length, targets, "targets");

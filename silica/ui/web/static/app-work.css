@@ -441,7 +441,7 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
   display: none;
 }
 
-/* The pane itself, on the same footing as #note-edit and #note-diff: one of the
+/* The pane itself, on the same footing as :is(#note-edit,#nv-edit) and #note-diff: one of the
    drawer's three children, shown for the mode it draws. No display of its own,
    so the [hidden] JS sets is the whole switch. */
 #node-pane {

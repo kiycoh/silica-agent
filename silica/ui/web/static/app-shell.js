@@ -41,7 +41,7 @@ const HOSTED = document.documentElement.hasAttribute("data-hosted");
 const DEMO = document.documentElement.hasAttribute("data-demo");
 // The server marks a hosted account's views on their tabs (ADR-0140); read
 // from there so the page and the CSS cannot disagree about one.
-const viewServed = (tab) => tab === "chat" || !HOSTED || !!document.querySelector(`#views .tab[data-tab="${tab}"][data-served]`);
+const viewServed = (tab) => tab === "chat" || tab === "note" || !HOSTED || !!document.querySelector(`#views .tab[data-tab="${tab}"][data-served]`);
 
 function toggleRail(sec) {
   const open = railSection !== sec;
@@ -123,6 +123,11 @@ function ticket(name) {
   return () => my === loadSeq[name] && epoch === vaultEpoch;
 }
 
+// Silica's own folders, from the server's one list (publish.never_dirs): they
+// are no folder in view and offer no "Write a note" (ADR-0155 points 4, 5).
+let vaultNever = [];
+const ownFolder = (f) => vaultNever.some((d) => f === d || f.startsWith(d + "/"));
+
 // Vault stats + file tree, from /vault_info. Best-effort: on error the placeholders stay.
 async function loadVaultInfo() {
   // A rename or a new folder being typed in the tree would die with the
@@ -136,6 +141,8 @@ async function loadVaultInfo() {
     if (!still()) return;
     if (data.error) return;
     if (data.path) setVaultPath(data.path); // follows a /vault switch
+    vaultNever = data.never || [];
+    setCheckWeb(data.check_web);
     $("#tree").innerHTML = data.tree || "";
     applyTreeOpen();         // the folders the person opened or closed (ADR-0126 point 9)
     if (!$("#tree .tree-note")) {
@@ -145,8 +152,10 @@ async function loadVaultInfo() {
       // which is also why `#tree:empty` never matched.
       const p = document.createElement("p");
       p.className = "vault-empty";
-      p.innerHTML = 'Nothing here yet: <button type="button" class="linklike">add files, a folder or a link</button>, or drop them anywhere.';
-      p.querySelector("button").addEventListener("click", (e) => { e.stopPropagation(); $("#vault-add").click(); });
+      p.innerHTML = 'Nothing here yet: <button type="button" class="linklike">write a note</button>, <button type="button" class="linklike">add files, a folder or a link</button>, or drop them anywhere.';
+      const [write, add] = p.querySelectorAll("button");
+      write.addEventListener("click", (e) => { e.stopPropagation(); writeNote(); });
+      add.addEventListener("click", (e) => { e.stopPropagation(); $("#vault-add").click(); });
       $("#tree").append(p);
     }
     loadWorkspaces();                 // the members follow the files (ADR-0112)
@@ -807,6 +816,9 @@ function openTreeMenu(btn, x, y) {
   // No "workspaces…" for a selection: ADR-0112's menu states one note's
   // membership per workspace, which three notes have no honest state for,
   // and the drag onto a workspace row adds them all.
+  // ADR-0155 point 4: first on a folder, and not on Silica's own (Inbox and the
+  // like), whose notes come through the operations that own them.
+  if (!note && !sel && !ownFolder(folder)) item("Write a note", () => { closeTreeMenu(); writeNote({ folder }); }, "write");
   if (!sel) item("workspaces…", () => { closeTreeMenu(); openWsMenu(btn, note || folder, !note); });
   if (note) item("move to…", () => treeMoveMenu(sel || [note]));
   if (note && !sel) item("rename", () => renameNoteInline(btn.closest(".tree-row")));
@@ -886,7 +898,9 @@ async function deleteFromTree(note, folder, paths) {
   // A pin on a deleted note opens nothing; the undo puts it back with the note.
   const unpinned = pinnedPaths.filter((p) => gone.has(p));
   if (unpinned.length) { pinnedPaths = pinnedPaths.filter((p) => !gone.has(p)); savePins(); }
-  if (lastNotePath && gone.has(lastNotePath)) closeNote();
+  if (lastNotePath && gone.has(lastNotePath)) closeNote(true);
+  // The file is in the trash with what it held, so the field has nothing left to save.
+  if (gone.has(centreNote.path)) { dropField(centreNote); centreNote.path = ""; centreNote.clean = ""; clearTimeout(centreNote.timer); showTab("chat"); }
   if (lastViewedPath && gone.has(lastViewedPath)) lastViewedPath = null; // the corner toggle would reopen it
   loadVaultInfo();
   clearTreeSel();
@@ -977,10 +991,11 @@ function plainClick(e) {
 // active tab and the current chat carry: cyan says "you are here".
 function markOpenNote() {
   const open = notePanel.classList.contains("open") ? (lastNotePath || "") : "";
+  const centre = activeTab === "note" ? centreNote.path : "";
   // On its PDF, the drawer is on the raw's row and not the note's (ADR-0129).
   const raw = open && rawShowing() ? drawerRaw.path : "";
   for (const el of $("#tree").querySelectorAll(".tree-note"))
-    el.classList.toggle("open", !!open && !raw && el.dataset.id === open);
+    el.classList.toggle("open", (!!open && !raw && el.dataset.id === open) || (!!centre && el.dataset.id === centre));
   for (const el of $("#tree").querySelectorAll(".tree-file"))
     el.classList.toggle("open", !!raw && el.dataset.raw === raw);
 }
@@ -1448,7 +1463,7 @@ async function openSession(id, fromUrl = false) {
 // bookmark made before a rename lands where it did. Calendar was Plan from
 // 2026-10-13 to 2026-10-15 and is Calendar again (ADR-0111 point 2): plans are
 // made in Learn, and two pilot users looked for them under Plan the same day.
-const VIEW_SLUG = { graph: "explore", metrics: "examine", learn: "memorize" };
+const VIEW_SLUG = { graph: "explore", metrics: "examine", learn: "memorize", note: "write" };
 const OLD_SLUG = { plan: "calendar" };
 // A view the account does not get (Examine on hosted, ADR-0111 point 3; a paid
 // one on Free, ADR-0140) has no address, so a bookmark lands on the chat like
@@ -1477,6 +1492,8 @@ function parseHash() {
 // 2026-10-25 that rewrite dropped the note: a reload, or a pasted link, opened
 // the view without the note it named. syncUrl keeps it while it waits.
 let pendingHashNote = parseHash().note;
+// The note at the centre a #write/<path> named, held the same way (ADR-0155 point 2).
+let pendingHashWrite = parseHash().slug === "write" ? parseHash().arg : "";
 
 function syncUrl(push) {
   if (activeTab === "learn" && /^#(memorize|learn)/.test(location.hash)) return; // its own sub-states, and #learn from before ADR-0141
@@ -1486,6 +1503,7 @@ function syncUrl(push) {
   if (activeTab === "graph" && typeof graphMode === "string") h += "/" + graphMode;
   // #examine/<reading> (ADR-0072); Structure is the tab's own address.
   if (activeTab === "metrics" && typeof metricsTab === "string" && metricsTab !== "structure") h += "/" + metricsTab;
+  if (activeTab === "note" && (centreNote.path || pendingHashWrite)) h += "/" + encodeURIComponent(centreNote.path || pendingHashWrite);
   const note = notePanel.classList.contains("open") && lastNotePath ? lastNotePath : pendingHashNote;
   if (note) h += "?note=" + encodeURIComponent(note);
   if (location.hash === h) return;
@@ -1500,6 +1518,7 @@ function applyHashSession() {
   if (slug === "chat" && arg && arg !== currentSessionId && !streaming) openSession(arg, true);
 }
 function applyHashNote() {
+  if (pendingHashWrite) { const p = pendingHashWrite; pendingHashWrite = ""; openCentre(p, undefined, { fromUrl: true }); }
   const note = parseHash().note || pendingHashNote;
   pendingHashNote = "";
   if (!note || note === lastNotePath) return;
@@ -1572,8 +1591,15 @@ function showTab(tab) {
   // cannot disagree with its own motion.
   const order = ["chat", ...[...document.querySelectorAll("#views .tab")].map((b) => b.dataset.tab)];
   const step = order.indexOf(tab) - order.indexOf(activeTab);
-  $("main").style.setProperty("--tab-from", String(Math.sign(step)));
+  $("main").style.setProperty("--tab-from", String(tab === "note" ? 0 : Math.sign(step)));
+  // Pressing another view saves the note and lets it go, and Back brings it
+  // back (ADR-0155 point 2): the one move between views that takes a history entry.
+  const leaving = activeTab === "note" && tab !== "note";
+  if (leaving) leaveCentre();
   activeTab = tab;
+  // Now, before a view's own loader rewrites the address: a replace would take
+  // the note's entry and Back would have nothing to come back to.
+  if (leaving) syncUrl(true);
   if (tab === "chat") closePeek(); // stream visible → card redundant
   // ask-from-here lives on the graph, and on learn, where the peek
   // card mirrors a session the drawer sent to chat (learn-suite §5.3).
@@ -1585,6 +1611,7 @@ function showTab(tab) {
     if (b.dataset.tab === tab) b.setAttribute("aria-current", "page");
     else b.removeAttribute("aria-current");
   }
+  $("#view-note").classList.toggle("active", tab === "note");
   $("#view-chat").classList.toggle("active", tab === "chat");
   $("#view-discover").classList.toggle("active", tab === "discover");
   $("#view-graph").classList.toggle("active", tab === "graph");
@@ -1603,6 +1630,7 @@ function showTab(tab) {
   // (#learn/plan/…, #learn/session/…) so Back and Forward restore them
   // (learn-suite §5.4); syncUrl never flattens one of those to "#learn".
   syncUrl(false);
+  markOpenNote();
   // The node pane reads this: a selection on one view is not a subject on
   // another. It is a separate file and has no other way to know which view is up.
   document.dispatchEvent(new CustomEvent("silica:view", { detail: tab }));
@@ -1621,7 +1649,10 @@ let pendingGraphMode = "";
 function tabFromHash() {
   const { slug, arg, note } = parseHash();
   const tab = viewOfSlug(slug);
-  if (["chat", "discover", "graph", "learn", "calendar", "metrics", "public"].includes(tab) && tab !== activeTab) showTab(tab);
+  if (["chat", "note", "discover", "graph", "learn", "calendar", "metrics", "public"].includes(tab) && tab !== activeTab) showTab(tab);
+  if (tab === "note" && arg && arg !== centreNote.path) openCentre(arg, undefined, { fromUrl: true });
+  // Back to a bare #write: the note it stood for left no trace, so it is a new one.
+  else if (tab === "note" && !arg && !centreNote.path && !centreNote.fresh && !pendingHashWrite) writeNote();
   // Back and Forward walk the chats and the surfaces, not only the tabs.
   if (tab === "chat" && arg && arg !== currentSessionId && !streaming) openSession(arg, true);
   if (tab === "graph" && arg && arg !== graphMode) {

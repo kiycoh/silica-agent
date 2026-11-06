@@ -99,10 +99,10 @@ def test_every_free_key_set_is_pinned():
 def test_the_counts_the_record_states():
     from silica.kernel.write.preserve import _RELAX_ALL, Loss
 
-    assert sum(LOSS_PINS.values()) == 27  # ADR-0155 point 8: a note a person writes
+    assert sum(LOSS_PINS.values()) == 27  # ADR-0155 point 8: a note written by hand
     off = sum(n for (_f, _fn, v), n in LOSS_PINS.items()
               if Loss[v.rsplit(".", 1)[-1].split()[0]] in _RELAX_ALL)
-    assert off == 21  # PERSON relaxes all: ADR-0155 point 8 adds one
+    assert off == 21  # STAGED relaxes all, PERSON too: ADR-0129 point 5 and ADR-0155 point 8 add one each
     assert sum(FREE_PINS.values()) == 8  # ADR-0143: unset_prop beside set_prop
 
 

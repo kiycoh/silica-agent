@@ -205,7 +205,7 @@ def test_shell_switches_loads_and_deep_links_the_learn_view():
     js = app_js()
     assert '$("#view-learn").classList.toggle("active", tab === "learn")' in js
     assert 'if (tab === "learn") loadLearn()' in js
-    assert '["chat", "discover", "graph", "learn", "calendar", "metrics", "public"].includes(tab)' in js
+    assert '["chat", "note", "discover", "graph", "learn", "calendar", "metrics", "public"].includes(tab)' in js
     assert '["graph", "learn"].includes(tab)' in js
     assert "async function loadLearn(" in js
     assert '#note-learn' not in js and "learnStartSession({ note: n.path" in js
