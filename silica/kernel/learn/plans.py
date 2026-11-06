@@ -1790,7 +1790,7 @@ def cycles_among(paths: list[str]) -> list[list[str]]:
     from silica.kernel.learn import learner
 
     try:
-        # the map is keyed by path in the note's own case and key_of folds it:
+        # the map is keyed by path in the note's own case and ledger_key folds it:
         # read raw, no key of it matched and no cycle was ever found
         prereqs = {ledger_key(k): v for k, v in learner.prerequisites_map().items()}
     except Exception:

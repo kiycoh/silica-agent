@@ -91,9 +91,9 @@ def test_the_prerequisite_attached_is_the_one_held_least(monkeypatch):
 
 
 def test_the_prerequisites_are_found_in_the_map_as_it_really_is_keyed(monkeypatch):
-    """The map keeps a note's case and the join key folds it, so `.get(key_of(path))`
+    """The map keeps a note's case and the join key folds it, so `.get(ledger_key(path))`
     missed every note of the owner's step (18 of 18, 2026-11-06) while the test above,
-    whose fake map is keyed by key_of, passed."""
+    whose fake map is keyed by ledger_key, passed."""
     from silica.kernel.learn import learner
 
     monkeypatch.setattr(learner, "prerequisites_map", lambda: {"ML/Note": ["ML/A.md"]})

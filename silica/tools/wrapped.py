@@ -139,7 +139,8 @@ def explicit_links(path: str) -> bool:
     unique name stays bare, as the person wrote it. Body links only: the
     frontmatter's are the move's own rewrite (rename.py). Returns whether
     it wrote. Under Loss.RENAME, the one reason a link target may change."""
-    from silica.kernel.link.rename import _WIKILINK_FULL_RE, _build_skip_mask, _span_is_clear
+    from silica.kernel.base.syntax import WIKILINK_SPAN_RE
+    from silica.kernel.link.rename import _build_skip_mask, _span_is_clear
     from silica.kernel.write.preserve import Loss
 
     content = DRIVER.read_note(path).content
@@ -147,7 +148,7 @@ def explicit_links(path: str) -> bool:
     resolved = {r.name.lower(): r.path for r in DRIVER.links(path) if r.path}
     out: list[str] = []
     at = 0
-    for m in _WIKILINK_FULL_RE.finditer(content):
+    for m in WIKILINK_SPAN_RE.finditer(content):
         target = m.group(2).strip()
         if not target or "/" in target or not _span_is_clear(mask, m.start(), m.end()):
             continue

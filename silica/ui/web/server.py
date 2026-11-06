@@ -5029,9 +5029,9 @@ def _has_room(notes: int, size: int) -> None:
 def _tree_name_ok(name: str) -> bool:
     """A note's or a folder's name the tree may write: a workspace's rule
     (ADR-0112), and no leading dot, which the index reads as hidden."""
-    from silica.kernel.workspaces import _BAD_NAME
+    from silica.kernel.base.syntax import NAME_UNSAFE_RE
 
-    return bool(name) and not _BAD_NAME.search(name) and not name.startswith(".")
+    return bool(name) and not NAME_UNSAFE_RE.search(name) and not name.startswith(".")
 
 
 _BAD_NAME_WHY = "a name cannot be empty, start with a dot or hold / \\ : * ? \" < > | # ^ [ ]"

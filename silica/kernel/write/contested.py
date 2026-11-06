@@ -421,9 +421,9 @@ def resolve_contested(
     the list returns the note unchanged: resolving twice must not clear a
     contradiction nobody adjudicated.
 
-    This is what `clear_contested` should have been: clearing the flag while
-    leaving a body callout that still reads "Unresolved" makes the note lie
-    about its own state, and drops every record of what was contested.
+    Clearing the flag alone would be wrong: leaving a body callout that still
+    reads "Unresolved" makes the note lie about its own state, and drops every
+    record of what was contested.
     """
     from silica.kernel.write.moc import merge_moc_section
 

@@ -1097,7 +1097,7 @@ class ObsidianFSBackend(GraphIndexMixin):
                 resolved_count = self._graph.out_degree(path) if path in self._graph else 0
                 unresolved_count = len(by_source.get(path, ()))
                 # Key by canonical path (no .md) — unique even with duplicate basenames.
-                # graph_diff.normalize_path() strips .md and lowercases, so path-keyed
+                # notekey.gate_key() strips .md and lowercases, so path-keyed
                 # snapshots compare identically to name-keyed ones in the diff.
                 key = path.removesuffix(".md")
                 link_counts[key] = resolved_count + unresolved_count
