@@ -137,5 +137,5 @@ class RunState:
         outcome only, so nothing downstream can mistake a planned concept for a
         created note. What did not happen is absent, as every reader expects."""
         keys = ("final_status", "error", "committed_chunks", "failed_chunks", "files_summary",
-                "yield_notes", "yield_links", "renucleated")
+                "yield_notes", "yield_links", "renucleated", "has_partial_failure")
         return {k: v for k in keys if (v := getattr(self, k))}
