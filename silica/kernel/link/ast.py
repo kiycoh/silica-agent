@@ -117,6 +117,9 @@ def join_code_aliases(children: list) -> list:
     for itself, drew the link. On tokens and not on the source, so a fence or a
     whole code span showing the same characters stays code.
     """
+    # shortcut: one code span per alias, the only form in those 6 notes, so
+    # `[[A|`x` and `y`]]` still splits; walk on to the closing ]] the day a vault
+    # is found holding one.
     out: list = []
     i = 0
     while i < len(children):
