@@ -227,3 +227,26 @@ def test_add_takes_the_good_entries_and_names_each_refused_one():
     assert "added ok" in out
     assert "not added: entry 'old'" in out and "sse" in out
     assert set(mcp_config.load()) == {"ok"}
+
+
+def test_a_browser_connect_never_reads_the_terminal(monkeypatch, tmp_path):
+    """`silica --gui` from a shell has a tty on stdin; the prompt would hang a
+    worker thread holding the turn, inside the capture nobody can see."""
+    import sys
+
+    from silica.cli import _handle_direct_shortcut
+    from silica.connectors import connect_cli
+
+    def read(*a, **k):
+        raise AssertionError("asked the terminal")
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(connect_cli, "_hidden", read)
+    monkeypatch.setattr(connect_cli, "_yes", read)
+    monkeypatch.setattr(connect_cli, "_line", read)
+    seen = {}
+    monkeypatch.setattr(connect_cli, "_block", lambda: type("B", (), {"act": lambda s, *a: {"ok": True}})())
+    monkeypatch.setattr(connect_cli, "_secure", lambda arg, console, ask_secret, ask_yes: seen.update(
+        secret=ask_secret, yes=ask_yes))
+    assert _handle_direct_shortcut("/connect secure gmail", []) is True
+    assert seen == {"secret": None, "yes": None}

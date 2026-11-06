@@ -2089,13 +2089,14 @@ def _dc_mail(args: list[str], *, raw_input: str = "", **_) -> bool:
     return True
 
 
-def _dc_connect(args: list[str], *, raw_input: str = "", **_) -> bool:
+def _dc_connect(args: list[str], *, raw_input: str = "", ask=None, **_) -> bool:
     """/connect [list|add <json>|secure|login|logout|remove <key>|reload]: MCP servers (ADR-0091)."""
     from silica.connectors import connect_cli
 
     # The raw line: `add` takes a JSON object whose spaces whitespace
     # splitting would scatter.
-    connect_cli.run(raw_input or " ".join(["/connect", *args]), CONSOLE)
+    asks = connect_cli.terminal_asks() if ask else {}
+    connect_cli.run(raw_input or " ".join(["/connect", *args]), CONSOLE, **asks)
     return True
 
 
@@ -2389,7 +2390,7 @@ _DIRECT: dict[str, Callable[..., bool]] = {
 }
 
 
-def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
+def _handle_direct_shortcut(raw_input: str, messages: list[dict], ask=None) -> bool:
     """Execute read-only commands directly without an LLM round-trip.
 
     Operates on the raw (case-preserved) input so that query strings and file
@@ -2424,7 +2425,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         return False
     # `messages` for /incognito, which hides the memory message of the
     # conversation in progress; every other handler ignores it.
-    return handler(parts[1:], raw_input=raw_input, messages=messages)
+    return handler(parts[1:], raw_input=raw_input, messages=messages, ask=ask)
 
 
 def _chunk_by_json_size(items: list, max_bytes: int = 4000) -> list[list]:
@@ -2530,7 +2531,7 @@ def _expand_web_turn(user_input: str, messages: list[dict]) -> tuple[str, str] |
 # a handler's signature names exactly what it reads.
 
 
-def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
+def _sc_nucleate(args: list[str], *, user_input: str = "", ask=None, **_) -> str | None:
     """/nucleate <file|folder|glob...> [--target=DIR] [--hub=H] [--profile=P]
     [--seen=YYYY-MM-DD] [--no-keep-sources] — ingest sources into vault notes.
 
@@ -2568,6 +2569,7 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
         keep_sources="--no-keep-sources" not in args,
         user_input=user_input,
         console=CONSOLE,
+        ask=ask,
     )
 
 
@@ -3196,7 +3198,7 @@ def _expand_skill(user_input: str) -> str | None:
     return body
 
 
-def _expand_workflow_shortcut(user_input: str, progress=None) -> str | None:
+def _expand_workflow_shortcut(user_input: str, progress=None, ask=None) -> str | None:
     """Expand workflow shortcuts (e.g. /report, /nucleate) into agent-directed messages.
 
     Returns the expanded message string, or None if the input is not a
@@ -3207,6 +3209,10 @@ def _expand_workflow_shortcut(user_input: str, progress=None) -> str | None:
     inline. A `_ProgressRenderer` claims the module-global batch hook and
     subscribes to the BUS for its whole life, so a second one built here would
     orphan the REPL's — reuse it when the caller has one.
+
+    `ask` is the surface's way to put a question to the person at it, None when
+    there is nobody to ask. The surface says so, because the process cannot:
+    `silica --gui` from a shell has a tty on stdin and the person in a browser.
     """
     if not user_input.strip().startswith("/"):
         return None  # not a shortcut — skip shlex entirely, plain prose can have stray quotes/apostrophes
@@ -3218,7 +3224,7 @@ def _expand_workflow_shortcut(user_input: str, progress=None) -> str | None:
         parts = shlex.split(user_input.strip())  # honours quoted paths with spaces
     except ValueError:
         return "Error: unbalanced quotes in command. Wrap paths with spaces in \"...\"."
-    return handler(parts[1:], user_input=user_input, progress=progress)
+    return handler(parts[1:], user_input=user_input, progress=progress, ask=ask)
 
 
 def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
@@ -3750,6 +3756,9 @@ def main():
 
     from silica.ui.renderer import make_progress_callback
     callback = make_progress_callback()
+    # This surface owns the terminal, so here and only here its tty answers
+    # whether a person can be asked: piped input has nobody to type a reply.
+    ask = CONSOLE.input if sys.stdin.isatty() else None
 
     while True:
         if oneshot:
@@ -3788,13 +3797,13 @@ def main():
                 user_input = typed = worn[1]
 
         # Direct shortcuts bypass the LLM entirely (case-sensitive args preserved)
-        if user_input.startswith("/") and _handle_direct_shortcut(user_input, messages):
+        if user_input.startswith("/") and _handle_direct_shortcut(user_input, messages, ask=ask):
             continue
 
         # Expand workflow shortcuts (/report, /nucleate etc.) into agent-directed messages
         is_directive = False
         try:
-            expanded = _expand_workflow_shortcut(user_input, progress=callback)
+            expanded = _expand_workflow_shortcut(user_input, progress=callback, ask=ask)
         except KeyboardInterrupt:
             # /nucleate drives the whole FSM inline on this thread. Without this
             # the Ctrl+C escapes main() and kills the REPL with a raw traceback —

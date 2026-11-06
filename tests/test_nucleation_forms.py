@@ -1011,3 +1011,52 @@ class TestSniffDecision:
         monkeypatch.setattr(forms, "call_llm", _llm)
         assert forms._sniff_llm("body\n", structured=True) == "clip"
         assert seen["response_format"] is forms.SniffVerdict
+
+
+def _a_terminal_nobody_is_at(monkeypatch):
+    """`silica --gui` started from a shell: stdin is a tty, and the person is in
+    the browser, so a prompt there hangs a worker thread holding the turn."""
+    import sys
+
+    import silica.cli as cli
+
+    def read(*a, **k):
+        raise AssertionError("asked the terminal")
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli.CONSOLE, "input", read)
+
+
+def _draft(tmp_vault):
+    tmp_vault.note("Inbox/mine.md", "---\nform: draft\n---\n\n# Mine\n\nHalf a thought.\n")
+
+
+class TestAskIsTheSurfaces:
+    def test_a_browser_nucleate_of_a_draft_never_reads_the_terminal(self, tmp_vault, monkeypatch):
+        from silica.cli import _expand_workflow_shortcut
+
+        _a_terminal_nobody_is_at(monkeypatch)
+        _draft(tmp_vault)
+        assert _expand_workflow_shortcut("/nucleate Inbox/mine.md --target=T") == ""
+        assert (Path(tmp_vault.note("T/.keep", "")).parent / "Mine.md").exists()  # filed, as headless
+
+    def test_a_surface_with_a_person_is_asked_and_no_keeps_it_distilling(self, tmp_vault, monkeypatch):
+        from silica.cli import _expand_workflow_shortcut
+        import silica.router.coordinator as coord_mod
+
+        runs: list[dict] = []
+
+        class _Coordinator:
+            def __init__(self, **kw):
+                runs.append(kw)
+
+            def run(self):
+                return {"final_status": "Success"}
+
+        monkeypatch.setattr(coord_mod, "Coordinator", _Coordinator)
+        _draft(tmp_vault)
+        asked: list[str] = []
+        msg = _expand_workflow_shortcut("/nucleate Inbox/mine.md --target=T",
+                                        ask=lambda q: asked.append(q) or "n")
+        assert msg == "" and "looks like a draft of yours" in asked[0]
+        assert runs[0]["inbox_files"] == ["Inbox/mine.md"]

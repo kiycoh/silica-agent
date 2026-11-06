@@ -16,7 +16,6 @@ import json
 import logging
 import os
 import re
-import sys
 import uuid
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -57,7 +56,7 @@ def _draft_title(body: str, stem: str) -> str:
 
 
 def file_drafts(
-    md_files: list[str], target_dir: str, undo_run: str | None, console
+    md_files: list[str], target_dir: str, undo_run: str | None, console, ask=None
 ) -> list[str]:
     """File draft-form sources instead of distilling them; return the rest.
 
@@ -65,8 +64,9 @@ def file_drafts(
     artifact — both distillation outcomes observed on drafts were defects
     (silent drop, verbatim paste under a fragment title). Filing = one note at
     the resolved target, body intact, `form: draft` frontmatter, /revert
-    coverage, source archived. Interactive runs confirm; headless runs file
-    and report. A "n" answer sends the file down normal nucleation under the
+    coverage, source archived. A surface with a person at it hands in `ask`,
+    which takes the question and returns the answer; without one the run files
+    and reports. A "n" answer sends the file down normal nucleation under the
     vault fallback profile.
     """
     import silica.kernel.forms as forms
@@ -129,8 +129,8 @@ def file_drafts(
             )
             kept.append(f)
             continue
-        if sys.stdin.isatty():
-            ans = console.input(
+        if ask is not None:
+            ans = ask(
                 f"  {f} looks like a draft of yours ({res.origin}) — file it "
                 f"as-is instead of distilling? [Y/n] "
             ).strip().lower()
@@ -1341,7 +1341,7 @@ def _units_by_source(md_files: list[str]) -> list[tuple[str, list[str]]]:
 
 
 def prepare_unit(
-    mfs: list[str], target_dir: str | None, profile: str | None, undo_run, console
+    mfs: list[str], target_dir: str | None, profile: str | None, undo_run, console, ask=None
 ) -> list[str]:
     """refs filter → draft filing → provenance drop, for one unit."""
     # A folder arg can list both a PDF and its already-converted chunks;
@@ -1366,7 +1366,7 @@ def prepare_unit(
     # so a run that was ONLY drafts never pays the folder-pick call. An
     # explicit --profile tops the ladder: no resolution, no filing.
     if not profile:
-        mfs = file_drafts(mfs, target_dir or "", undo_run, console)
+        mfs = file_drafts(mfs, target_dir or "", undo_run, console, ask)
         if not mfs:
             return []  # everything was filed; reported above
 
@@ -1485,7 +1485,7 @@ def _nucleate_result_line(result: dict) -> str:
 
 def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str = "",
              profile: str = "", keep_sources: bool = True, user_input: str = "",
-             console) -> str | None:
+             console, ask=None) -> str | None:
     """Ingest sources into vault notes: triage them, then one Coordinator run per unit.
 
     Returns "" when it dispatched, or an agent-directed message when the target
@@ -1566,7 +1566,7 @@ def nucleate(files: list[str], *, target_dir: str = "", hub: str = "", seen: str
         """Prepare and run one unit; a returned string is the agent
         fallback (unresolvable target) and ends the whole batch."""
         nonlocal dispatched
-        mfs = prepare_unit(mfs, target_dir, profile, undo_run, console)
+        mfs = prepare_unit(mfs, target_dir, profile, undo_run, console, ask)
         if not mfs:
             return None
 
