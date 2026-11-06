@@ -28,6 +28,7 @@ from silica.kernel.base.frontmatter import documents_of
 from silica.kernel.code import codeast, codedocs
 from silica.kernel.base import gitstate
 from silica.kernel.base import layout, roots
+from silica.kernel.base.syntax import ADR_REF_RE
 from silica.kernel.base import frontmatter
 from silica.kernel.write import templates
 
@@ -41,10 +42,6 @@ class Proposal:
 
 
 _ADR_NOTE_RE = re.compile(r"^(\d{4})-")
-# Twin of `silica.kernel.base.markdown.ADR_REF_RE`, spelled again here because the
-# code lane may not import the link lane (import-linter: "text and code lanes
-# sit low"). tests/test_derive_documents.py pins the two patterns equal.
-ADR_REF_RE = re.compile(r"\bADR-(\d{4})\b")
 # A path with at least one directory and an extension, not glued to other
 # path characters: `src/m.py` in prose or backticks, not `a.b/c` inside a URL.
 _PATH_RE = re.compile(r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z0-9]{1,6})(?![\w/])")

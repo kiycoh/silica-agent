@@ -21,13 +21,13 @@ import yaml
 from silica.kernel.base import frontmatter
 from silica.kernel.base.layout import walk_tree
 from silica.kernel.base.noteshape import READING, type_word
+from silica.kernel.base.syntax import WIKILINK_SPAN_RE
 
 logger = logging.getLogger(__name__)
 
 # English and Italian (the owner's C, 2026-10-24). A default applies only
 # where a note carries it, so a vault with none of them is untouched.
 DEFAULT_PARTY_KEYS = ("client", "matter", "patient", "cliente", "pratica", "paziente")
-_WIKILINK = re.compile(r"!?\[\[([^\]|#^]+)(?:[#^][^\]|]*)?(?:\|[^\]]*)?\]\]")
 
 
 @dataclass
@@ -141,7 +141,9 @@ class Resolver:
 
     def links(self, text: str) -> list[tuple[str, str | None]]:
         """(target as written, resolved path or ""/None) for each wikilink."""
-        return [(m.group(1).strip(), self.resolve(m.group(1))) for m in _WIKILINK.finditer(text or "")]
+        # The span grammar, for its `^`: `[[Note^block]]` cites Note. An empty target
+        # is an anchor into this note, no source.
+        return [(t.strip(), self.resolve(t)) for m in WIKILINK_SPAN_RE.finditer(text or "") if (t := m.group(2))]
 
     def mentions(self, text: str) -> set[str]:
         folded = f" {fold(text)} "

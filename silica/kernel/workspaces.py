@@ -19,11 +19,11 @@ from pathlib import Path
 from silica.kernel.base import note_index
 from silica.kernel.base.notekey import store_key
 from silica.kernel.base.noteshape import NOT_MEMBERS, WORKSPACE, type_word
+from silica.kernel.base.syntax import NAME_UNSAFE_RE, WIKILINK_NAME_RE
 
 LINES = ("notes", "folders", "where")
 DEFAULT_FOLDER = "Workspaces"
 
-_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]+)?\]\]")
 _H1_RE = re.compile(r"^#\s+(.*?)\s*$")
 
 
@@ -53,7 +53,7 @@ def _as_list(value) -> list[str]:
 
 def title_of(entry: str) -> str:
     """`[[Bayes theorem|Bayes]]` -> `Bayes theorem`; a bare title stays."""
-    m = _WIKILINK_RE.search(entry)
+    m = WIKILINK_NAME_RE.search(entry)
     return (m.group(1) if m else entry).strip()
 
 
@@ -85,7 +85,7 @@ def read_workspace(path: str, text: str | None = None) -> dict:
         "path": path,
         "name": name,
         # every link of a line: a text property `"[[A]], [[B]]"` lost B on the next edit
-        "notes": [t.strip() for x in _as_list(data.get("notes")) for t in (_WIKILINK_RE.findall(x) or [x])],
+        "notes": [t.strip() for x in _as_list(data.get("notes")) for t in (WIKILINK_NAME_RE.findall(x) or [x])],
         "folders": [f.replace("\\", "/").strip("/") for f in _as_list(data.get("folders"))],
         "where": _as_list(data.get("where")),
         "instructions": "\n".join(lines).strip(),
@@ -306,7 +306,6 @@ def _remove_line(ws_path: str, key: str, value: str) -> bool:
     return True
 
 
-_BAD_NAME = re.compile(r'[\\/:*?"<>|#^\[\]]')
 
 
 def create_workspace(name: str, notes=(), folders=()) -> str:
@@ -318,7 +317,7 @@ def create_workspace(name: str, notes=(), folders=()) -> str:
 
     name = " ".join(str(name).split())
     # a leading dot is a hidden file the walk never lists: a workspace no one sees
-    if not name or _BAD_NAME.search(name) or name.startswith("."):
+    if not name or NAME_UNSAFE_RE.search(name) or name.startswith("."):
         raise ValueError("a workspace name cannot be empty, start with a dot or hold / \\ : * ? \" < > | # ^ [ ]")
     if find_workspace(name):
         raise ValueError(f"a workspace named {name!r} already exists")

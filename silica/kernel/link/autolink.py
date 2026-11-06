@@ -36,19 +36,16 @@ import re
 from typing import Sequence
 
 from silica.kernel.base.frontmatter import FM_RE_TOLERANT
+from silica.kernel.base.syntax import (
+    DISPLAY_MATH_RE,
+    INLINE_CODE_RE,
+    INLINE_MATH_RE,
+    WIKILINK_TOKEN_RE,
+)
 
 # ---------------------------------------------------------------------------
 # Skip-region detection
 # ---------------------------------------------------------------------------
-
-# Inline code (`...`)
-_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
-
-# Display math ($$...$$) — must come before single-$ match
-_DISPLAY_MATH_RE = re.compile(r"\$\$.*?\$\$", re.DOTALL)
-
-# Inline math ($...$) — single-line only
-_INLINE_MATH_RE = re.compile(r"\$[^$\n]+\$")
 
 # Bare URLs — never link a word inside https://example.com/Neural-Networks
 _URL_RE = re.compile(r"https?://[^\s<>()\[\]]+")
@@ -56,9 +53,6 @@ _URL_RE = re.compile(r"https?://[^\s<>()\[\]]+")
 # Inline Obsidian tags (#tag, #nested/tag) — preceded by start/whitespace so
 # C# and heading markers ("# Title") don't match. Linking would kill the tag.
 _INLINE_TAG_RE = re.compile(r"(?<!\S)#[A-Za-z_][\w/-]*")
-
-# Existing wikilinks [[...]]
-_WIKILINK_RE = re.compile(r"\[\[[^\]]+\]\]")
 
 # Markdown links and images: [text](href) / ![alt](href). Protects both the
 # link/alt text and the href. Autolink-only — rename REWRITES these hrefs, so
@@ -136,14 +130,14 @@ SKIP_PATTERNS_BASE = (
     # Tolerant, so Windows (CRLF) user notes touched by backlink_pass are
     # protected too: a block this misses becomes linkable.
     FM_RE_TOLERANT,
-    _INLINE_CODE_RE,
-    _DISPLAY_MATH_RE,
-    _INLINE_MATH_RE,
+    INLINE_CODE_RE,
+    DISPLAY_MATH_RE,  # before inline math: a `$$` block holds single `$`
+    INLINE_MATH_RE,
     _URL_RE,
     _INLINE_TAG_RE,
 )
 SKIP_PATTERNS_FULL = SKIP_PATTERNS_BASE + (
-    _WIKILINK_RE,
+    WIKILINK_TOKEN_RE,
     _MD_LINK_RE,
     _HTML_TAG_RE,
     _HTML_COMMENT_RE,

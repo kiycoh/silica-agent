@@ -34,6 +34,7 @@ from types import FrameType
 
 from silica.kernel.base import frontmatter
 from silica.kernel.base.noteshape import PROVENANCE_HEADER_PREFIXES
+from silica.kernel.base.syntax import WIKILINK_CELL_RE
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,6 @@ class PreservationError(RuntimeError):
 # [[T]], [[T|A]], [[T\|A]] (autolink's escaped pipe inside a table row),
 # [[T#H]], and the embed form. The target is lazy so `T\|A` splits at the
 # escaped pipe instead of swallowing the backslash.
-_WIKILINK = re.compile(r"(!?)\[\[([^\]|#\n]*?)(#[^\]|\n]*)?(?:\\?\|([^\]\n]*))?\]\]")
 _MDLINK = re.compile(r"(!?)\[([^\]\n]*)\]\(([^)\n]*)\)")
 _FN_REF = re.compile(r"\[\^[^\]\s]+\](?!:)")
 _FN_DEF = re.compile(r"^\[\^[^\]\s]+\]:")
@@ -126,7 +126,7 @@ def _reduce(line: str, loss: Loss | None) -> str:
             return m.group(1) + m.group(4)
         return m.group(1) + (_TARGET if loss is Loss.RENAME else m.group(2).strip())
 
-    line = _WIKILINK.sub(_wl, line)
+    line = WIKILINK_CELL_RE.sub(_wl, line)
     if loss is Loss.RENAME:
         line = _MDLINK.sub(lambda m: m.group(1) + m.group(2), line)
     if loss is Loss.CITE:

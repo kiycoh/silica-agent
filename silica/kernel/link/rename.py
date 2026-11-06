@@ -36,6 +36,7 @@ from urllib.parse import unquote, quote
 # ---------------------------------------------------------------------------
 
 from silica.kernel.base.frontmatter import FM_RE_TOLERANT
+from silica.kernel.base.syntax import WIKILINK_SPAN_RE
 from silica.kernel.link.autolink import SKIP_PATTERNS_BASE, build_skip_mask
 
 
@@ -71,22 +72,6 @@ def _path_without_ext(vault_path: str) -> str:
 # Wikilink rewriter
 # ---------------------------------------------------------------------------
 
-# Matches optional embed bang + full wikilink: !?[[target(#^suffix)?(|alias)?]]
-# Group 1: "!" or ""
-# Group 2: the target (everything before # or ^ or |)
-# Group 3: suffix (#... or ^...) — may be empty
-# Group 4: alias part (|...) — may be empty
-_WIKILINK_FULL_RE = re.compile(
-    r"(!?)"                         # optional embed
-    r"\[\["
-    r"([^\]#^|]*)"                  # target (no suffix, no alias delimiters)
-    r"([#^][^\]|]*)?"               # optional heading/block suffix
-    r"(\|[^\]]*)?"                  # optional alias
-    r"\]\]",
-    re.DOTALL,
-)
-
-
 def _rewrite_wikilinks(
     content: str,
     mask: list[bool],
@@ -120,7 +105,7 @@ def _rewrite_wikilinks(
     # Build list of (match, replacement) pairs so we can apply back-to-front
     replacements: list[tuple[re.Match, str]] = []
 
-    for m in _WIKILINK_FULL_RE.finditer(content):
+    for m in WIKILINK_SPAN_RE.finditer(content):
         if not _span_is_clear(mask, m.start(), m.end()):
             continue
 

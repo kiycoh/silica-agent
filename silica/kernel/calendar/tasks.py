@@ -17,12 +17,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from silica.kernel.base import notekey
+from silica.kernel.base.syntax import FENCE_LINE_RE
 from silica.kernel.calendar.daily import DailyRule, compile_format, daily_date, daily_rule
 
 # The same shapes Tasks accepts: a list item of any marker, under any depth of
 # blockquote or callout, then a one-character status in brackets.
 _TASK_RE = re.compile(r"^[\s>]*(?:[-*+]|\d+[.)])\s+\[(.)\]\s*(.*)$")
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
 # Tasks' signifiers and their alternative spellings. A date is strictly
 # YYYY-MM-DD, as Tasks requires: "📅 2026-10-5" is text to the plugin, and the
 # calendar shows what the plugin would show.
@@ -78,7 +78,7 @@ def parse_tasks(text: str, *, global_filter: str = "", path: str = "") -> list[T
     out: list[Task] = []
     fenced = False
     for i, line in enumerate(text.splitlines(), start=1):
-        if _FENCE_RE.match(line):
+        if FENCE_LINE_RE.match(line):
             fenced = not fenced
             continue
         m = None if fenced else _TASK_RE.match(line)

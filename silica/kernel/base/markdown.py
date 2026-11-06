@@ -8,6 +8,7 @@ import textwrap
 from markdown_it import MarkdownIt
 
 from silica.kernel.base.frontmatter import FM_RE_SCAN
+from silica.kernel.base.syntax import ADR_REF_RE
 
 _MD = MarkdownIt()  # stateless parser, shared by every parse below
 _FOOTNOTE_DEF_RE = re.compile(r"^([ \t]{0,3})\[\^[^\]\n]+\]:[ \t]?", re.MULTILINE)
@@ -64,12 +65,6 @@ NON_MD_EXTENSIONS = (
 # parser side of this scan, not this side — and every alternative here is
 # mutation-tested (tests/test_wikilink_fast_path.py), because a scan that is
 # merely nearly right looks exactly like one that is right.
-# A decision record cited by number in prose. The 36 ADRs under docs/adr cite
-# each other this way and had `out_links: []`: the graph was blind to the one
-# reference they all write. Emitted as the literal `ADR-NNNN` token; the
-# backend resolver maps it to the note filed as `NNNN-*` (fs_backend).
-ADR_REF_RE = re.compile(r"\bADR-(\d{4})\b")
-
 _LINK_MARKER_RE = re.compile(
     r"\[\["
     r"|ADR-\d{4}\b"

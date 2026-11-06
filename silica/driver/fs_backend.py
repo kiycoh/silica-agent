@@ -24,11 +24,11 @@ from collections.abc import Sequence
 from typing import Any
 import networkx as nx
 from silica.kernel.base.markdown import (
-    ADR_REF_RE,
     NON_MD_EXTENSIONS,
     extract_refs_typed,
     resolve_relative,
 )
+from silica.kernel.base.syntax import ADR_REF_RE
 
 from silica.driver.base import (
     namesake_order,

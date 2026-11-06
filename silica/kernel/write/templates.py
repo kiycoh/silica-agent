@@ -14,6 +14,7 @@ import yaml
 
 from silica.kernel.base import frontmatter
 from silica.kernel.base.frontmatter import clean_tag  # canonical; do not redefine
+from silica.kernel.base.syntax import EMBED_TOKEN, FILE_UNSAFE_RE, WIKILINK_TOKEN
 from silica.kernel.base.noteshape import (
     LEGACY_PROVENANCE_HEADER_PREFIX,
     PROVENANCE_HEADER_PREFIX,
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 def slugify(s: str) -> str:
-    s = re.sub(r'[\\/:*?"<>|]', '', s)
+    s = FILE_UNSAFE_RE.sub('', s)
     s = re.sub(r'\s+', ' ', s)  # normalise newlines, tabs, and multiple spaces to a single space
     return s.strip()
 
@@ -352,7 +353,7 @@ AI: true
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s")
 # A bullet the outline lane emits for a cross edge: `- [[From]] applies this (Spine): why`.
-_RELATION_BULLET_RE = re.compile(r"^- (\[\[[^\]]+\]\]) .*? this \(([^)]+)\)")
+_RELATION_BULLET_RE = re.compile(rf"^- ({WIKILINK_TOKEN}) .*? this \(([^)]+)\)")
 
 
 def _body_lines(content: str):
@@ -493,7 +494,7 @@ def snippet_present(content: str, snippet: str) -> bool:
     return bool(key) and key in norm(content)
 
 
-_EMBED_RE = re.compile(r"^!\[\[[^\]]+\]\]$")
+_EMBED_RE = re.compile(rf"^{EMBED_TOKEN}$")
 
 
 def _cite(block: str, label: str) -> str:

@@ -22,10 +22,11 @@ import base64
 import hashlib
 import logging
 import os
-import re
 from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
+
+from silica.kernel.base.syntax import IMAGE_RE
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,6 @@ logger = logging.getLogger(__name__)
 _MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
          ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp"}
 
-_EMBED_RE = re.compile(r"!\[\[([^\]|]+?)(?:\|[^\]]*)?\]\]|!\[[^\]]*\]\(([^)\s]+)[^)]*\)")
 
 # English on purpose: the prompt is the model's, and the reading's language is
 # named in it. "Never 'This image'": 50 of 50 free-form 9B captions opened by
@@ -143,7 +143,7 @@ def texts_by_name() -> dict[str, str]:
 def _embedded(body: str) -> list[str]:
     """Basenames of the raster images `body` embeds, in order, once each."""
     out: list[str] = []
-    for m in _EMBED_RE.finditer(body):
+    for m in IMAGE_RE.finditer(body):
         raw = (m.group(1) or m.group(2) or "").strip()
         if raw.startswith(("http://", "https://")):
             continue

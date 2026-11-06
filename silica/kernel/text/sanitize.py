@@ -5,6 +5,8 @@ import json
 import logging
 import re
 
+from silica.kernel.base.syntax import FILE_UNSAFE_RE
+
 logger = logging.getLogger(__name__)
 
 # Inline ($...$) must not cross newlines; block ($$...$$) may.
@@ -32,9 +34,6 @@ _MD_EXT_WIKILINK_RE = re.compile(
     r'\[\[([^\]#|]+?)\.md((?:#[^\]#|]*)?)(\|[^\]]*)?\]\]',
     re.IGNORECASE,
 )
-
-# Characters illegal in filesystem filenames
-_ILLEGAL_FILENAME_CHARS_RE = re.compile(r'[/\\:*?"<>|]')
 
 # Degenerate run: 5+ consecutive identical characters (LLM output garbage).
 # Excludes markdown-structural chars (# = - * _ ` ~): they legitimately repeat
@@ -203,7 +202,7 @@ def normalize_ops(ops: list, *, verbatim_source: str | None = None) -> list:
             ]
 
         if isinstance(op.get("title"), str):
-            op["title"] = _ILLEGAL_FILENAME_CHARS_RE.sub("", op["title"]).strip()
+            op["title"] = FILE_UNSAFE_RE.sub("", op["title"]).strip()
             if not op["title"]:
                 op["title"] = None
 

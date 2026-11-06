@@ -40,12 +40,12 @@ exactly 1.0; a single introduced violation fails. Transforms under test:
 """
 from __future__ import annotations
 
-import re
 import tempfile
 from pathlib import Path
 
 from silica.kernel.base import layout
 from silica.kernel.base import frontmatter
+from silica.kernel.base.syntax import WIKILINK_RE
 from silica.kernel.link.autolink import autolink, build_title_index
 from silica.kernel.report.health import lint
 from silica.kernel.text.sanitize import normalize_ops
@@ -53,9 +53,6 @@ from silica.kernel.text.sanitize import normalize_ops
 # Facade depth measured; matches the k of every production related_notes surface.
 # The metric name pins it — change both together or not at all.
 K = 10
-
-# (!?) embed marker, target, optional #anchor, optional |alias — targets only.
-_WIKILINK = re.compile(r"(!?)\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
 
 _EMPTY_FUSION = {
     "pairs_evaluated": 0,
@@ -98,7 +95,7 @@ def wikilink_graph(vault: Path, store) -> dict[str, set[str]]:
         if src not in keys:
             continue
         _data, _raw, body = frontmatter.split(p.read_text(encoding="utf-8"))
-        for m in _WIKILINK.finditer(body):
+        for m in WIKILINK_RE.finditer(body):
             if m.group(1):  # embed — skip
                 continue
             target = m.group(2).strip().replace("\\", "/").split("/")[-1]

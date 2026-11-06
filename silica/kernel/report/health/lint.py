@@ -29,6 +29,7 @@ from typing import Callable, NamedTuple
 
 from silica.kernel.base import frontmatter
 from silica.kernel.base.markdown import extract_callouts, parse_headings
+from silica.kernel.base.syntax import INLINE_CODE_RE
 from silica.kernel.link.ofm import CALLOUT_TYPES
 from silica.kernel.text.title import title_key
 
@@ -37,12 +38,11 @@ from silica.kernel.text.title import title_key
 # ---------------------------------------------------------------------------
 
 _FENCE = re.compile(r"```.*?```|~~~.*?~~~", re.DOTALL)
-_INLINE_CODE = re.compile(r"`[^`\n]+`")
 
 
 def _strip_code(body: str) -> str:
     """Body with fenced + inline code removed (but $, \\, ** untouched)."""
-    return _INLINE_CODE.sub("", _FENCE.sub("", body))
+    return INLINE_CODE_RE.sub("", _FENCE.sub("", body))
 
 
 class Ctx(NamedTuple):

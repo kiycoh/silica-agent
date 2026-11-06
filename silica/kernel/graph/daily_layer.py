@@ -22,13 +22,13 @@ import re
 from pathlib import Path
 from typing import Any
 
+from silica.kernel.base.syntax import FENCE_LINE_RE
 from silica.kernel.calendar.daily import daily_date, daily_notes, daily_rule
 from silica.kernel.calendar.tasks import FIELD_START
 from silica.kernel.graph.graph_export import _NODE_DEFAULT_COLOR, similar_edge
 
 logger = logging.getLogger(__name__)
 
-_FENCE_RE = re.compile(r"^\s*(```|~~~)")
 _HEADING_RE = re.compile(r"^\s*#{1,6}\s")
 _ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?:\[.\]\s*)?")
 # One request's worth of blocks. A block is a line or a paragraph, so 64 of
@@ -57,7 +57,7 @@ def blocks(text: str) -> list[str]:
 
     fenced = False
     for line in body.splitlines():
-        if _FENCE_RE.match(line):
+        if FENCE_LINE_RE.match(line):
             flush()
             fenced = not fenced
             continue

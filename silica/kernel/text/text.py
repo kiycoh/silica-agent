@@ -21,6 +21,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from silica.kernel.base import frontmatter
+from silica.kernel.base.syntax import INLINE_CODE_RE, WIKILINK_INNER_RE
 
 from silica.kernel.text import language
 from silica.kernel.text.media import strip_images
@@ -41,7 +42,6 @@ _FENCE_RE = re.compile(r"^(```|~~~).*?^\1[^\S\n]*$\n?", re.DOTALL | re.MULTILINE
 # `git clone` remotes) — stripped unconditionally, like images. `[^\s)>\]]+`
 # stops at the closing paren/bracket of a markdown link so `[text](url)` keeps
 # its text.
-_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 _URL_RE = re.compile(r"(?:https?://|www\.)[^\s)>\]]+", re.I)
 # Obsidian/Excalidraw block-reference ids (^9eUffsl8) — drawing/anchor
 # metadata, never prose. Length ≥4 avoids clipping any legit `^` use (math
@@ -58,7 +58,6 @@ _BLOCK_ID_RE = re.compile(r"\^[A-Za-z0-9]{4,}")
 # The replacement is space-PADDED: adjacent links (`[[a|x]][[b|y]]`, real in the
 # vault) used to be separated by the `]][[` that the tokenizer discarded, so an
 # unpadded unwrap glued `x` and `y` into one token.
-_WIKILINK_RE = re.compile(r"!?\[\[([^\[\]]*?)\]\]")
 _WIKILINK_SEP_RE = re.compile(r"[|#]")
 # Same disease, other syntax: `_URL_RE` deletes the target of `[text](url)` and
 # leaves the scaffolding, so keyphrase emitted `maltego]( )`. Unwrapped to text
@@ -136,7 +135,7 @@ def clean_body(text: str, *, fences: bool) -> str:
     identifiers never become nodes; a code vault keeps them — identifiers ARE
     the graph signal of code notes. URLs (incl. schemeless www.) and
     Obsidian/Excalidraw block-ref ids are always stripped. Wikilink syntax is
-    unwrapped to its words (see _WIKILINK_RE), never dropped.
+    unwrapped to its words (see WIKILINK_INNER_RE), never dropped.
     """
     if not text:
         return ""
@@ -147,13 +146,13 @@ def clean_body(text: str, *, fences: bool) -> str:
         import html as _html
         text = _html.unescape(text)
     _data, _fm, body = frontmatter.split(text)
-    body = _WIKILINK_RE.sub(
+    body = WIKILINK_INNER_RE.sub(
         lambda m: f" {_WIKILINK_SEP_RE.sub(' ', m.group(1))} ", strip_images(body)
     )
     body = _MD_LINK_RE.sub(r" \1 \2 ", body)
     body = _BLOCK_ID_RE.sub(" ", _URL_RE.sub(" ", strip_math(body)))
     if fences:
-        body = _INLINE_CODE_RE.sub(" ", _FENCE_RE.sub(" ", body))
+        body = INLINE_CODE_RE.sub(" ", _FENCE_RE.sub(" ", body))
     return body
 
 

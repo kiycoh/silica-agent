@@ -39,6 +39,13 @@ from silica.kernel.base.home import resolve_vault_path
 from silica.kernel.base.layout import walk_tree
 from silica.kernel.base.notekey import note_key, note_ref
 from silica.kernel.base.noteshape import CLAIMS_END_RE
+from silica.kernel.base.syntax import (
+    EMBED_TOKEN,
+    INLINE_CODE_RE,
+    WIKILINK_FLAT_RE,
+    WIKILINK_TOKEN,
+    WIKILINK_TOKEN_RE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -827,7 +834,6 @@ def _span_verdicts(body: str, source: str) -> list[tuple[str, bool]]:
 _NUMBER_RE = re.compile(r"(?<![0-9A-Za-z])-?\d+(?:[.,]\d+)*")
 _GROUPED_RE = re.compile(r"-?\d{1,3}(?:[.,]\d{3})+")
 _DECIMAL_COMMA_RE = re.compile(r"-?\d+,\d+")
-_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 # Any scheme and any markdown link target, not http(s) alone: a local model
 # linked a note as `](file://C:/.../Ledbury%20Components%202025%20EWCA.md)`
 # and its `%20` escapes were flagged as the numbers 20, 202025 and 201109
@@ -871,11 +877,11 @@ def checked_numbers(text: str) -> list[str]:
     the answer's own layout; and any number of fewer than 2 digits, for the
     reason `_NUMERAL_RE` gives.
     """
-    # _LEADING_MARKER_RE and _ANY_WIKILINK_RE are the extractive check's own,
+    # _LEADING_MARKER_RE and WIKILINK_TOKEN_RE are the extractive check's own,
     # defined below: one notion of "layout" and "a link" across both checks.
     prose = _FENCE_RE.sub(" ", text)
-    prose = _INLINE_CODE_RE.sub(" ", prose)
-    prose = _ANY_WIKILINK_RE.sub(" ", prose)
+    prose = INLINE_CODE_RE.sub(" ", prose)
+    prose = WIKILINK_TOKEN_RE.sub(" ", prose)
     prose = _URL_RE.sub(" ", prose)
     out: list[str] = []
     for line in prose.splitlines():
@@ -949,9 +955,7 @@ _HEADING_LINE_RE = re.compile(r"^\s*#{1,6}\s+")
 # never be a source span; only the payload is claim content. Kept tight (the
 # link must open the line and a separator must follow) because a looser
 # split-on-any-dash would let a fabricated label ride in on a verbatim quote.
-_INDEX_LABEL_RE = re.compile(r"^\[\[[^\]]+\]\]\s*[\u2014\u2013:-]\s+")
-_ANY_WIKILINK_RE = re.compile(r"\[\[[^\]]+\]\]")
-_WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+_INDEX_LABEL_RE = re.compile(rf"^{WIKILINK_TOKEN}\s*[\u2014\u2013:-]\s+")
 _EXTRACTIVE_MIN_CHARS = 12  # normalized; shorter residues match trivially
 
 
@@ -986,7 +990,7 @@ def nonextractive_lines(body: str, source: str) -> list[str]:
         label (the wikilink that introduces the payload) dropped, remaining
         wikilinks unwrapped to the text they wrap."""
         marked = _INDEX_LABEL_RE.sub("", _LEADING_MARKER_RE.sub("", raw))
-        return _norm_extract(_WIKILINK_RE.sub(r"\1", marked))
+        return _norm_extract(WIKILINK_FLAT_RE.sub(r"\1", marked))
 
     for raw in body.splitlines():
         # Framework structure is not a claim. A heading is a label, and a line
@@ -1002,7 +1006,7 @@ def nonextractive_lines(body: str, source: str) -> list[str]:
         # case and could not see them.
         marked = _LEADING_MARKER_RE.sub("", raw)
         if (_HEADING_LINE_RE.match(raw)
-                or len(_norm_extract(_ANY_WIKILINK_RE.sub("", marked)))
+                or len(_norm_extract(WIKILINK_TOKEN_RE.sub("", marked)))
                 < _EXTRACTIVE_MIN_CHARS):
             exempt.append(_claim(raw))
             continue
@@ -1037,7 +1041,7 @@ _TRAILING_URL_RE = re.compile(r"https?://\S+\s*$")
 # embed the marker rendered as a superscript glued to the image (live
 # 2026-09-04, `![[img.jpg]][^Lezione-6]`). Multi-line `$$` blocks are the
 # `math` toggle below; this is the single-line form the toggle cannot see.
-_NOT_A_CLAIM_RE = re.compile(r"^(?:!\[\[[^\]]+\]\]|\$\$.*\$\$)$")
+_NOT_A_CLAIM_RE = re.compile(rf"^(?:{EMBED_TOKEN}|\$\$.*\$\$)$")
 
 
 def footnote_label(source_basename: str) -> str:
@@ -1090,7 +1094,7 @@ def attribute_lines(note: str, source: str, label: str) -> str:
             math = not math
             out.append(raw)
             continue
-        line = _WIKILINK_RE.sub(r"\1", _LEADING_MARKER_RE.sub("", raw))
+        line = WIKILINK_FLAT_RE.sub(r"\1", _LEADING_MARKER_RE.sub("", raw))
         norm = _norm_extract(line)
         if (fenced or math or raw.lstrip().startswith(("#", "|")) or marker in raw
                 or _TRAILING_URL_RE.search(raw) or _NOT_A_CLAIM_RE.match(raw.strip())

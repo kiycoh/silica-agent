@@ -21,7 +21,7 @@ from pathlib import Path
 
 from silica.kernel.base import note_index
 from silica.kernel.base.layout import is_source_leaf
-from silica.kernel.base.syntax import WIKILINK_TARGET_RE
+from silica.kernel.base.syntax import WIKILINK_NAME, WIKILINK_RE, WIKILINK_TARGET_RE
 
 MATERIAL, REFERENCE, UNUSED = "material", "reference", "unused"
 ROLES = (MATERIAL, REFERENCE, UNUSED)
@@ -38,8 +38,7 @@ ORDER_FLOOR = 0.6
 ORDER_MARGIN = 0.2
 FOCUS_MARGIN = 0.15
 
-_ROW_RE = re.compile(r"^\s*\d+[.)]\s+\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]:?\s*(.*)$")
-_LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]")
+_ROW_RE = re.compile(rf"^\s*\d+[.)]\s+{WIKILINK_NAME}:?\s*(.*)$")
 _PRACTICE_RE = re.compile(r"^##\s+Concepts practised\s*$", re.M)
 # A cell, line or heading that introduces a reference's books: what the
 # reference names there is recommended reading, not what it was taught from.
@@ -76,7 +75,7 @@ def natural_key(text: str) -> list:
 
 def plain(text: str) -> str:
     """A row or a line with its links read as their words."""
-    return _LINK_RE.sub(lambda m: m.group(2) or m.group(1), text)
+    return WIKILINK_RE.sub(lambda m: m.group(4) or m.group(2), text)
 
 
 def roots(text: str) -> set[str]:

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -31,6 +30,7 @@ from silica.model.decide import decide
 from silica.agent.bounds import orphan_bounds
 from silica.kernel.base.frontmatter import FM_RE_TOLERANT
 from silica.kernel.base.manifest import active_write_dir, within
+from silica.kernel.base.syntax import WIKILINK_SHOWN_RE
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities._base import emit_feedback, load_prompt, read_or_skip
@@ -61,7 +61,6 @@ LINK_QUESTION = {
 # The state the gate measured: the orphan's head, the candidate's opening.
 _ORPHAN_HEAD = 2000
 _CANDIDATE_OPENING = 600
-_WIKILINK = re.compile(r"\[\[([^\]|]+\|)?([^\]]+)\]\]")
 
 
 def _stem(path: str) -> str:
@@ -83,7 +82,7 @@ def typed_state(orphan_path: str, orphan_text: str, candidate_path: str,
         "orphan_note": {"title": _stem(orphan_path),
                         "body": _strip_frontmatter(orphan_text)[:_ORPHAN_HEAD]},
         "candidate_note": {"title": _stem(candidate_path),
-                           "opening": _WIKILINK.sub(r"\2", _strip_frontmatter(candidate_text))[:_CANDIDATE_OPENING]},
+                           "opening": WIKILINK_SHOWN_RE.sub(r"\2", _strip_frontmatter(candidate_text))[:_CANDIDATE_OPENING]},
     }
 
 

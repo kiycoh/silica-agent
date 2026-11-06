@@ -29,6 +29,8 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from silica.kernel.base.syntax import HEADING_RE, LINK_RE
+
 logger = logging.getLogger(__name__)
 
 # Perception-grid winners as plain defaults (config promotion declined
@@ -55,7 +57,6 @@ FACTS_K = 10
 # into its answer, while the note that did exist for the concept sat at rank
 # 15. The brackets stay: the model must learn that the NAME is not a note, not
 # merely lose a link. Embeds (`![[...]]`) are attachments, never marked.
-_WIKILINK = re.compile(r"(?<!!)\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]")
 NO_NOTE = " (no such note)"
 # A fenced block (to its close, or the end of an answer cut mid-fence) or an
 # inline code span: text a reader runs or copies, never a link to mark.
@@ -497,7 +498,7 @@ def _mark_unresolved(text: str, exists) -> tuple[str, int]:
             return m.group(0)
         n += 1
         return m.group(0) + NO_NOTE
-    return _WIKILINK.sub(sub, text), n
+    return LINK_RE.sub(sub, text), n
 
 
 def declare_missing_links(text: str) -> str:
@@ -524,7 +525,7 @@ def _section_chain(body: str, offset: int, depth: int = 3) -> str:
     per token, and a full chain on a deeply nested note is header bloat.
     '' above the first heading, so headingless notes cost zero tokens."""
     chain: list[tuple[int, str]] = []
-    for m in re.finditer(r"^(#{1,6})\s+(.+?)\s*$", body[:offset], re.MULTILINE):
+    for m in HEADING_RE.finditer(body[:offset]):
         lvl = len(m.group(1))
         while chain and chain[-1][0] >= lvl:
             chain.pop()

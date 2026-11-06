@@ -44,11 +44,6 @@ def _by_note(props):
     return {p.note_path: p for p in props}
 
 
-def test_adr_regex_is_the_link_lane_twin():
-    from silica.kernel.base.markdown import ADR_REF_RE
-    assert dd.ADR_REF_RE.pattern == ADR_REF_RE.pattern
-
-
 def test_cited_lane_binds_an_adr_to_the_files_citing_it_at_its_own_date(tmp_path):
     vault, ref_jan, _ = _fixture(tmp_path)
     p = _by_note(dd.propose(vault, repo_root=tmp_path))["adr/0907-a-thing.md"]
