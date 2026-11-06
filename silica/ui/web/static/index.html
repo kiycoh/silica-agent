@@ -881,11 +881,17 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
        syncNarrow()), so this list is the load order and it is the only copy of
        it -- server.py reads its cache-bust list back out of these lines, and so
        do the tests. Add a file by cutting at a `// ---` banner and appending
-       here in position; never reorder to make a file read more thematically. -->
+       here in position; never reorder to make a file read more thematically.
+       A helper more than one script needs goes in app-core.js, which comes
+       first and reads nothing from the others. -->
+  <script src="/static/app-core.js"></script>
   <!-- The prototype behind ADR-0048, kept as the record of the choice: inert
        unless the URL carries ?presence=A|B|C, and then it draws its orb over
-       the landing. Before work.js like every app-*.js, which the tests pin. -->
-  <script src="/static/app-prototype-presence.js"></script>
+       the landing. Before work.js like every app-*.js, which the tests pin.
+       document.write and not an appended element: the parser stops for it as it
+       does for a tag, so it holds this place in the order, and 43 KB nobody
+       asked for stays off every other page view. -->
+  <script>if (new URLSearchParams(location.search).get("presence")) document.write('<script src="/static/app-prototype-presence.js"><\/script>');</script>
   <script src="/static/app-chat.js"></script>
   <script src="/static/app-shell.js"></script>
   <script src="/static/app-explore.js"></script>

@@ -27,9 +27,9 @@ async function renderConnectors(host) {
   host.querySelectorAll(".st-connector, .st-note-line").forEach((e) => e.remove());
   let blocks = [];
   try { blocks = await (await fetch("/connectors")).json(); }
-  catch { host.appendChild(stEl("div", "st-note-line", "could not read the connectors")); return; }
+  catch { host.appendChild(mkEl("div", "st-note-line", "could not read the connectors")); return; }
   for (const status of blocks) {
-    const el = stEl("div", "st-connector");
+    const el = mkEl("div", "st-connector");
     el.dataset.connector = status.name;
     host.appendChild(el);
     connDraw(el, status);
@@ -40,7 +40,7 @@ async function renderConnectors(host) {
 // half-typed paste in another block's field.
 function connDraw(el, status) {
   el.innerHTML = "";
-  el.appendChild(stEl("div", "st-conn-title", status.title || status.name));
+  el.appendChild(mkEl("div", "st-conn-title", status.title || status.name));
   const rerender = async () => {
     let blocks = [];
     try { blocks = await (await fetch("/connectors")).json(); } catch { return; }
@@ -58,11 +58,11 @@ function connDraw(el, status) {
 // ponytail: shown on every hosted build; a host without silica-telegram.service
 // answers this link 502, so gate it on a /settings flag with a second host.
 function renderTelegramLink(host) {
-  const el = stEl("div", "st-connector");
-  el.appendChild(stEl("div", "st-conn-title", "Telegram"));
+  const el = mkEl("div", "st-connector");
+  el.appendChild(mkEl("div", "st-conn-title", "Telegram"));
   const { ctl } = connRow(el, "ask from your phone",
     "search and read your notes from Telegram, never change them", "telegram bot link unlink");
-  const a = stEl("a", "st-btn primary st-safe", "link or unlink ↗");
+  const a = mkEl("a", "st-btn primary st-safe", "link or unlink ↗");
   a.href = "/telegram/link";
   a.target = "_blank";
   a.rel = "noopener";
@@ -71,22 +71,22 @@ function renderTelegramLink(host) {
 }
 
 function connRow(host, name, help, search) {
-  const row = stEl("div", "st-row");
+  const row = mkEl("div", "st-row");
   row.dataset.search = `connector ${search || ""} ${name} ${help || ""}`.toLowerCase();
-  const label = stEl("div", "st-label");
-  label.appendChild(stEl("span", "st-name", name));
-  if (help) label.appendChild(stEl("div", "st-help", help));
+  const label = mkEl("div", "st-label");
+  label.appendChild(mkEl("span", "st-name", name));
+  if (help) label.appendChild(mkEl("div", "st-help", help));
   row.appendChild(label);
-  const ctl = stEl("div", "st-ctl");
+  const ctl = mkEl("div", "st-ctl");
   row.appendChild(ctl);
-  const note = stEl("div", "st-note");
+  const note = mkEl("div", "st-note");
   row.appendChild(note);
   host.appendChild(row);
   return { row, ctl, note };
 }
 
 function connBtn(text, cls) {
-  const b = stEl("button", "st-btn" + (cls ? " " + cls : ""), text);
+  const b = mkEl("button", "st-btn" + (cls ? " " + cls : ""), text);
   b.type = "button";
   return b;
 }
@@ -142,13 +142,13 @@ window.ST_CONNECTOR_RENDERERS.mcp = function renderMcp(el, status, rerender) {
 function mcpServerRow(el, r, rerender) {
   const { row, ctl, note } = connRow(el, r.key, r.kind, "mcp server " + r.state);
   row.classList.add("st-mcp-server");
-  const state = stEl("div", "st-ctl-text " + mcpStateClass(r.state), r.state);
+  const state = mkEl("div", "st-ctl-text " + mcpStateClass(r.state), r.state);
   ctl.appendChild(state);
 
   for (const name of r.needs || []) {
     // One password field per missing secret: it goes to the keyring (or the
     // opted-in file) and never into the .env.
-    const field = stEl("input");
+    const field = mkEl("input");
     field.type = "password";
     field.autocomplete = "off";
     field.placeholder = name;
@@ -158,7 +158,7 @@ function mcpServerRow(el, r, rerender) {
       if (!field.value) return;
       connRun(save, note, "mcp", "secret", { key: r.key, name, value: field.value }, rerender);
     });
-    const line = stEl("div", "st-mcp-secret");
+    const line = mkEl("div", "st-mcp-secret");
     line.append(field, save);
     row.insertBefore(line, note);
   }
@@ -178,7 +178,7 @@ function mcpServerRow(el, r, rerender) {
   if (r.client_id_field) {
     // Neither CIMD nor dynamic registration worked: the spec's last step is a
     // client ID the user registered with the service by hand.
-    const field = stEl("input");
+    const field = mkEl("input");
     field.type = "text";
     field.autocomplete = "off";
     field.spellcheck = false;
@@ -189,7 +189,7 @@ function mcpServerRow(el, r, rerender) {
       if (!field.value.trim()) return;
       connRun(save, note, "mcp", "client_id", { key: r.key, client_id: field.value.trim() }, rerender);
     });
-    const line = stEl("div", "st-mcp-secret");
+    const line = mkEl("div", "st-mcp-secret");
     line.append(field, save);
     row.insertBefore(line, note);
   }
@@ -213,11 +213,11 @@ function mcpServerRow(el, r, rerender) {
   ctl.appendChild(remove);
 
   if ((r.tools || []).length) {
-    const list = stEl("details", "st-mcp-tools");
-    list.appendChild(stEl("summary", "", `${r.tools.length} tools`));
+    const list = mkEl("details", "st-mcp-tools");
+    list.appendChild(mkEl("summary", "", `${r.tools.length} tools`));
     for (const t of r.tools) {
-      const item = stEl("div", "st-mcp-tool" + (t.note ? " off" : ""), t.name);
-      if (t.note) item.appendChild(stEl("span", "st-mcp-tool-note", " · " + t.note));
+      const item = mkEl("div", "st-mcp-tool" + (t.note ? " off" : ""), t.name);
+      if (t.note) item.appendChild(mkEl("span", "st-mcp-tool-note", " · " + t.note));
       list.appendChild(item);
     }
     row.insertBefore(list, note);
@@ -238,7 +238,7 @@ async function mcpLogin(btn, note, key, rerender) {
   note.textContent = "";
   if (out.url) {
     note.append("waiting for the browser · ");
-    const a = stEl("a", "", "open the login page");
+    const a = mkEl("a", "", "open the login page");
     a.href = out.url;
     a.target = "_blank";
     a.rel = "noopener";
@@ -262,7 +262,7 @@ function mcpAddRow(el, rerender) {
     "paste {\"mcpServers\": {...}} from Claude Code or Claude Desktop, or one {\"name\": {...}}; " +
     "a secret in it moves to the keyring", "mcp add paste json");
   row.classList.add("st-mcp-add");
-  const text = stEl("textarea", "st-mcp-paste");
+  const text = mkEl("textarea", "st-mcp-paste");
   text.rows = 4;
   text.spellcheck = false;
   text.placeholder = '{"mcpServers": {"github": {"type": "http", "url": "https://…"}}}';
@@ -281,7 +281,7 @@ function mcpAddRow(el, rerender) {
       const fresh = el.querySelector(".st-mcp-add .st-note");
       if (fresh && (out.refused || []).length) {
         fresh.className = "st-note bad";
-        for (const why of out.refused) fresh.appendChild(stEl("div", "", "not added: " + why));
+        for (const why of out.refused) fresh.appendChild(mkEl("div", "", "not added: " + why));
       }
     } catch (e) {
       note.className = "st-note bad";

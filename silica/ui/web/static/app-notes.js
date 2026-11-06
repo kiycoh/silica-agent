@@ -1036,7 +1036,7 @@ function syncDrawerMode() {
   // what it reopens, because an icon alone cannot say which note.
   const toggle = $("#drawer-toggle");
   toggle.hidden = open || !(lastViewedPath || nodePicked);
-  const what = drawerMode !== "node" && lastViewedPath ? noExt(lastViewedPath.split("/").pop()) : "";
+  const what = drawerMode !== "node" && lastViewedPath ? noteStem(lastViewedPath) : "";
   const label = what ? "show " + what : "show the note sidebar";
   toggle.setAttribute("aria-label", label);
   toggle.dataset.tip = label;
@@ -1137,11 +1137,8 @@ async function openNote(path, line, facts) {
   holdNote(drawerNote, data);
   drawerRaw = data.raw || null;
   if (rawFor !== data.path) rawFor = null;
-  // a saved note names its author over the text as a paper does (ADR-0143
-  // point 11), and a source the file it came from (ADR-0129)
-  rawTop = data.raw && !data.paper && !data.saved ? fillRawStrip(mkEl("div", ""), data.raw, data.path, false) : null;
-  const top = data.paper ? paperStripEl(data.paper)
-    : data.saved && typeof savedStripEl === "function" ? savedStripEl(data.saved) : rawTop;
+  const top = noteTopEl(data);
+  rawTop = data.raw && !data.paper && !data.saved ? top : null;
   ed.load(data.text, { top, missing: data.broken || [] });
   paintFoot(drawerNote);
   focusGraphNode(data.path);
@@ -1312,6 +1309,15 @@ document.addEventListener("keydown", (e) => {
   setDetails(!detailsOn);
 }, true);
 
+// What stands over a note's text, the same in the drawer and at the centre: a
+// paper's byline, a saved note's author (ADR-0143 point 11), or the file a
+// source came from (ADR-0129).
+function noteTopEl(data) {
+  return data.paper ? paperStripEl(data.paper)
+    : data.saved && typeof savedStripEl === "function" ? savedStripEl(data.saved)
+    : data.raw ? fillRawStrip(mkEl("div", ""), data.raw, data.path, false) : null;
+}
+
 // A paper's byline and its doors to Zotero, the PDF and the DOI, over the
 // text (ADR-0055); the body below is the verbatim paper.
 function paperStripEl(paper) {
@@ -1406,7 +1412,7 @@ async function openDiff(path) {
   const box = $("#note-diff");
   box.className = "dl-wait";
   box.textContent = "reading the diff…";
-  showDrawer(path.split("/").pop().replace(/\.md$/, ""));
+  showDrawer(noteStem(path));
   let d;
   try {
     d = await (await fetch("/changes/diff?path=" + encodeURIComponent(path))).json();
@@ -1647,7 +1653,7 @@ function renderNoteChip() {
   // The x was for this note and the next message: another note, or the same
   // one closed and reopened, starts with its chip.
   if (!open || noteChipSkip !== lastNotePath) noteChipSkip = "";
-  const title = open ? ($("#note-title-text").textContent.trim() || noExt(lastNotePath.split("/").pop())) : "";
+  const title = open ? ($("#note-title-text").textContent.trim() || noteStem(lastNotePath)) : "";
   for (const row of document.querySelectorAll(".note-chip-row")) {
     const field = row.closest("form").querySelector("textarea");
     row.innerHTML = "";
@@ -1683,7 +1689,7 @@ function userNote(body, path) {
   const row = mkEl("div", "msg-note");
   const chip = mkEl("span", "mf");
   chip.appendChild(mkEl("span", "mf-in", "with"));
-  const name = mkEl("button", "mf-name", noExt(path.split("/").pop()));
+  const name = mkEl("button", "mf-name", noteStem(path));
   name.type = "button";
   name.title = "open " + path;
   name.addEventListener("click", () => openNote(path));
@@ -1694,8 +1700,8 @@ function userNote(body, path) {
 // Test me and Explain it (ADR-0119): Learn's home no longer lists every
 // note, so a test on this one starts here. Learn's own functions run them.
 $("#note-find").addEventListener("click", () => { closeNoteMenu(); findInNote(drawerNote); });
-$("#note-test").addEventListener("click", () => { closeNoteMenu(); if (lastNotePath && typeof learnTestNote === "function") learnTestNote(lastNotePath); });
-$("#note-teach").addEventListener("click", () => { closeNoteMenu(); if (lastNotePath && typeof learnExplain === "function") learnExplain(lastNotePath); });
+$("#note-test").addEventListener("click", () => { closeNoteMenu(); if (lastNotePath) learnTestNote(lastNotePath); });
+$("#note-teach").addEventListener("click", () => { closeNoteMenu(); if (lastNotePath) learnExplain(lastNotePath); });
 $("#note-diff-open").addEventListener("click", () => openDiff(lastNotePath));
 $("#note-changes").addEventListener("click", () => openNote(lastNotePath));
 
@@ -2162,7 +2168,7 @@ async function writeBack(s) {
   try {
     r = await fetch("/note/new", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folder: at < 0 ? "" : path.slice(0, at), name: path.slice(at + 1).replace(/\.md$/i, ""), text: s.editor.getText() }),
+      body: JSON.stringify({ folder: at < 0 ? "" : path.slice(0, at), name: noteStem(path), text: s.editor.getText() }),
     });
     d = await r.json().catch(() => ({}));
   } catch { /* reported below */ }

@@ -21,7 +21,7 @@ WEB = Path(__file__).resolve().parents[1] / "silica" / "ui" / "web"
 WORK_JS = WEB / "static" / "work.js"
 INDEX = WEB / "static" / "index.html"
 
-from tests.webassets import app_css, app_js
+from tests.webassets import app_css, app_js, core_js
 
 # The shape is the real one: silica/obs/narration.py writes these records and
 # `read_beats` hands them back verbatim. A thought span WRAPS the llm call that
@@ -71,7 +71,7 @@ def _pure_block() -> str:
     block = m.group(0)
     for banned in ("document.", "window.", "fetch(", "EventSource"):
         assert banned not in block, f"the projection block reaches for {banned}"
-    return block
+    return core_js() + block
 
 
 def _project(tmp_path, beats: list[dict]) -> dict:

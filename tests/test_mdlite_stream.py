@@ -15,7 +15,7 @@ import pytest
 
 from tests.link_cases import URL_CASES
 
-from tests.webassets import app_js
+from tests.webassets import app_js, core_js
 
 STREAMED = (
     "### Panoramica\n\n"
@@ -34,7 +34,7 @@ STREAMED = (
 def _md_lite_source() -> str:
     m = re.search(r"^function mdLite\(src\) \{.*?^\}", app_js(), re.S | re.M)
     assert m, "mdLite() not found in app.js"
-    return m.group(0)
+    return core_js() + m.group(0)
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run app.js")

@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.webassets import core_js
+
 JS = Path(__file__).resolve().parents[1] / "silica" / "ui" / "web" / "static" / "app-zotero.js"
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
 
@@ -23,7 +25,7 @@ def _call(tmp_path, fn: str, *args):
     src = JS.read_text(encoding="utf-8")
     pure = src[src.index("// zotero-pure:start"):src.index("// zotero-pure:end")]
     script = tmp_path / "z.js"
-    script.write_text(pure + f"\nconsole.log(JSON.stringify({fn}(...JSON.parse(process.argv[2]))));\n")
+    script.write_text(core_js() + pure + f"\nconsole.log(JSON.stringify({fn}(...JSON.parse(process.argv[2]))));\n")
     out = subprocess.run(["node", str(script), json.dumps(list(args))],
                          capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr

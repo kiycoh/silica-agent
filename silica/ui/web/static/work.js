@@ -17,8 +17,8 @@
 
 // --- projection:begin --------------------------------------------------------
 // Everything between this marker and projection:end is pure: no DOM, no fetch,
-// no globals. tests/test_work_panel.py lifts the block out and runs it under
-// node, which is how the fold below is checked at all.
+// no globals but app-core.js's formats. tests/test_work_panel.py lifts the block
+// out and runs it under node, which is how the fold below is checked at all.
 // The narration payload carries the RAW tool name and the raw args, and the
 // browser has no renderer, so the verb table has to live here too. A copy that
 // nothing checks is a copy that goes stale on the next tool, so
@@ -81,8 +81,6 @@ const WRITE_OPS = {
 // only drops a row from Sources; it never names the wrong note.
 const NOTE_KEYS = ["name", "path", "note", "note_path", "ref"];
 
-const fmtSecs = (s) => (s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s / 60)}m${String(Math.floor(s % 60)).padStart(2, "0")}s`);
-const fmtTok = (n) => Number(n).toLocaleString("en-US");
 
 function toolVerb(name) {
   const e = TOOL_VERBS[name];
@@ -136,7 +134,7 @@ function projectRun(beats) {
       } else if (spans[id]) {
         const row = spans[id].row;
         row.text = String(p.text || b.summary || "").trim();
-        row.dur = fmtSecs(p.duration_s != null ? p.duration_s : b.ts - spans[id].ts);
+        row.dur = fmtDur(p.duration_s != null ? p.duration_s : b.ts - spans[id].ts);
         row.running = false;
         openThoughts = openThoughts.filter((r) => r !== row);
       }
@@ -149,14 +147,14 @@ function projectRun(beats) {
       // A retry re-narrates the span as running; the start stays the first one.
       if (!terminal) { if (!spans[id]) spans[id] = { ts: b.ts }; if (p.model) model = p.model; continue; }
       const bits = [];
-      if (p.prompt_tokens != null) bits.push(`${fmtTok(p.prompt_tokens)} → ${fmtTok(p.completion_tokens || 0)} tok`);
-      if (p.cached_tokens) bits.push(`${fmtTok(p.cached_tokens)} cached`);
+      if (p.prompt_tokens != null) bits.push(`${fmtNum(p.prompt_tokens)} → ${fmtNum(p.completion_tokens || 0)} tok`);
+      if (p.cached_tokens) bits.push(`${fmtNum(p.cached_tokens)} cached`);
       const sub = bits.join(" · ");
       const host = openThoughts[openThoughts.length - 1];
       if (host) { host.sub = sub; }
       else {
         rows.push({ kind: "call", verb: "call", target: p.model || model, sub: sub,
-                    dur: spans[id] ? fmtSecs(b.ts - spans[id].ts) : "", running: false, seq: b.seq });
+                    dur: spans[id] ? fmtDur(b.ts - spans[id].ts) : "", running: false, seq: b.seq });
       }
       continue;
     }
@@ -173,7 +171,7 @@ function projectRun(beats) {
       const row = sp.row;
       row.running = false;
       row.failed = st === "failed";
-      row.dur = fmtSecs(b.ts - sp.ts);
+      row.dur = fmtDur(b.ts - sp.ts);
       const op = WRITE_OPS[row.name];
       if (op) {
         writes.push({ op: op, target: row.target, failed: row.failed, seq: b.seq });
@@ -197,7 +195,7 @@ function projectRun(beats) {
       const last = rows[rows.length - 1];
       if (last && last.kind === "phase" && last.target === label && last.running) {
         last.running = !terminal; last.sub = pos.join(" · ");
-        if (terminal && spans[id]) last.dur = fmtSecs(b.ts - spans[id].ts);
+        if (terminal && spans[id]) last.dur = fmtDur(b.ts - spans[id].ts);
         continue;
       }
       rows.push({ kind: "phase", verb: "phase", target: label, sub: pos.join(" · "),
@@ -218,7 +216,7 @@ function projectRun(beats) {
   // a stall: a formatted elapsed freezes at the last beat, which is exactly
   // the moment a stalled run stops being distinguishable from a finished one.
   return { title, model, running, rows, writes, sources, shape, t0, tLast,
-           elapsed: t0 != null && tLast != null ? fmtSecs(tLast - t0) : "" };
+           elapsed: t0 != null && tLast != null ? fmtDur(tLast - t0) : "" };
 }
 
 // --- the node projection -----------------------------------------------------
@@ -250,11 +248,10 @@ function projectNode(node, ctx) {
   // rather than from a second threshold invented here.
   if (n.state && n.state !== "note") meta.push(n.state);
   if (n.area) meta.push(n.area);
-  const name = (p) => String(p || "").split("/").pop().replace(/\.md$/, "");
   const linked = new Set(
     [...(rel.outgoing || []), ...(rel.backlinks || [])].map((r) => r.path).filter(Boolean));
   const d = {
-    title: c.title || n.name || name(n.path),
+    title: c.title || n.name || noteStem(n.path),
     path: n.path || c.path || "",
     ghost: !!(n.ghost || c.ghost),
     count: n.links == null ? "" : n.links + (n.links === 1 ? " link" : " links"),
@@ -389,7 +386,6 @@ function placeReadings(st) {
 // frontmatter; similar, not linked; linked and never written. Inside a group
 // a note behind the bridge comes first, because that is the warning's list.
 const TAG_ORDER = ["both", "in", "out", "-1", "+1", "declared", "similar", "unwritten", "behind"];
-const noteName = (p) => String(p || "").split("/").pop().replace(/\.md$/, "");
 
 function neighbourRows(d) {
   const rows = new Map();
@@ -397,7 +393,7 @@ function neighbourRows(d) {
     const key = r.path || "ghost:" + (r.name || "");
     let row = rows.get(key);
     if (!row) {
-      row = { name: r.name || noteName(r.path), path: r.path || "", tags: [], group: group,
+      row = { name: r.name || noteStem(r.path), path: r.path || "", tags: [], group: group,
               unreachable: false, why: "" };
       rows.set(key, row);
     }
@@ -463,17 +459,10 @@ function neighbourRows(d) {
   let concepts = null;              // on explore: the concepts lit together, a /concepts payload
   let compare = null;               // on explore: two parts side by side, a /compare payload
 
-  const el = (tag, cls, text) => {
-    const n = document.createElement(tag);
-    if (cls) n.className = cls;
-    if (text != null) n.textContent = text;
-    return n;
-  };
-
   function sectionHead(label, count) {
-    const h = el("div", "wk-sec");
-    h.appendChild(el("span", "wk-sec-t", label));
-    if (count != null) h.appendChild(el("span", "wk-sec-n", String(count)));
+    const h = mkEl("div", "wk-sec");
+    h.appendChild(mkEl("span", "wk-sec-t", label));
+    if (count != null) h.appendChild(mkEl("span", "wk-sec-n", String(count)));
     return h;
   }
 
@@ -510,7 +499,7 @@ function neighbourRows(d) {
     if (run.sources.length) pos.push(`${run.sources.length} note${run.sources.length === 1 ? "" : "s"} read so far`);
     const stalledFor = live && run.tLast != null ? now - run.tLast : 0;
     const stalled = stalledFor >= STALL_S;
-    const elapsed = run.t0 != null ? fmtSecs(Math.max(0, (live ? now : (run.tLast || now)) - run.t0)) : "";
+    const elapsed = run.t0 != null ? fmtDur(Math.max(0, (live ? now : (run.tLast || now)) - run.t0)) : "";
     for (const line of runLines) {
       const set = (cls, txt) => { const e = line.querySelector(cls); if (e) e.textContent = txt; };
       set(".rl-verb", verb);
@@ -561,13 +550,13 @@ function neighbourRows(d) {
 
   function nodeRow(r, opt) {
     const o = opt || {};
-    const row = el("div", "wk-src" + (o.action ? " has-act" : "") + (o.dir ? " dir" : ""));
-    row.appendChild(o.dir ? dirArrow(o.dir) : el("span", "wk-src-sw" + (o.warn ? " warn" : "")));
-    const t = el("button", "wk-srct");
+    const row = mkEl("div", "wk-src" + (o.action ? " has-act" : "") + (o.dir ? " dir" : ""));
+    row.appendChild(o.dir ? dirArrow(o.dir) : mkEl("span", "wk-src-sw" + (o.warn ? " warn" : "")));
+    const t = mkEl("button", "wk-srct");
     t.type = "button";
-    t.appendChild(el("div", "wk-src-n", r.name || r.path || ""));
-    const v = el("div", "wk-src-v");
-    if (o.why) v.appendChild(el("span", null, o.why));
+    t.appendChild(mkEl("div", "wk-src-n", r.name || r.path || ""));
+    const v = mkEl("div", "wk-src-v");
+    if (o.why) v.appendChild(mkEl("span", null, o.why));
     if (v.childElementCount) t.appendChild(v);
     // A row here NAMES a note, so it opens it, on whichever view the drawer is
     // in (ADR-0075): walking the neighbours with details on stays in details.
@@ -582,7 +571,7 @@ function neighbourRows(d) {
     }
     row.appendChild(t);
     if (o.action) {
-      const b = el("button", "wk-mini" + (o.go ? " go" : ""), o.action);
+      const b = mkEl("button", "wk-mini" + (o.go ? " go" : ""), o.action);
       b.type = "button";
       b.addEventListener("click", () => { if (window.prefillChat) window.prefillChat(o.prompt); });
       row.appendChild(b);
@@ -605,8 +594,8 @@ function neighbourRows(d) {
     for (const r of rows.slice(0, NODE_VISIBLE)) into.appendChild(mk(r));
     const rest = rows.slice(NODE_VISIBLE);
     if (!rest.length) return;
-    const more = el("details", "wk-more");
-    more.appendChild(el("summary", null, rest.length + " more"));
+    const more = mkEl("details", "wk-more");
+    more.appendChild(mkEl("summary", null, rest.length + " more"));
     for (const r of rest) more.appendChild(mk(r));
     into.appendChild(more);
   }
@@ -631,18 +620,18 @@ function neighbourRows(d) {
     for (const rung of lad.rungs) {
       for (const n of rung.notes) {
         const here = n.path === lad.root;
-        const row = el("div", "wk-src rung" + (here ? " here" : ""));
-        row.appendChild(el("span", "wk-lad-d", rungLabel(rung.depth)));
-        const t = el("button", "wk-srct");
+        const row = mkEl("div", "wk-src rung" + (here ? " here" : ""));
+        row.appendChild(mkEl("span", "wk-lad-d", rungLabel(rung.depth)));
+        const t = mkEl("button", "wk-srct");
         t.type = "button";
-        t.appendChild(el("div", "wk-src-n", n.name || n.path));
-        const v = el("div", "wk-src-v");
+        t.appendChild(mkEl("div", "wk-src-n", n.name || n.path));
+        const v = mkEl("div", "wk-src-v");
         // "here" earns the only word on this row that is not a folder: without
         // it a spine of five titles gives no clue which one you are standing on.
         // The folder only where it is news: 9 of 13 rows on one note printed
         // the note's own folder, 73 characters of mono that said nothing.
         const fold = folderOf(n.path);
-        v.appendChild(el("span", null, here ? "here" : fold !== folderOf(d.path) ? fold : ""));
+        v.appendChild(mkEl("span", null, here ? "here" : fold !== folderOf(d.path) ? fold : ""));
         t.appendChild(v);
         // The note you are already reading is not a place to go.
         if (here) { t.disabled = true; t.style.cursor = "default"; }
@@ -650,11 +639,11 @@ function neighbourRows(d) {
         row.appendChild(t);
         into.appendChild(row);
       }
-      if (rung.hidden) into.appendChild(el("div", "wk-lad-x", rung.hidden + " more on this rung"));
+      if (rung.hidden) into.appendChild(mkEl("div", "wk-lad-x", rung.hidden + " more on this rung"));
     }
     // One line, and it is a hand-off, not a summary: everything the drawer
     // decided not to name is named in full one click away.
-    const foot = el("button", "wk-lad-f");
+    const foot = mkEl("button", "wk-lad-f");
     foot.type = "button";
     foot.textContent = (lad.further ? lad.further + " further out · " : "") + "open full ladder";
     foot.addEventListener("click", () => {
@@ -669,8 +658,8 @@ function neighbourRows(d) {
   // tells a systematic association from a topical one by, so it is on the row.
   function outsideSection(o) {
     const textRow = (text) => {
-      const row = el("div", "wk-snip");
-      row.appendChild(el("div", "wk-snip-t", text));
+      const row = mkEl("div", "wk-snip");
+      row.appendChild(mkEl("div", "wk-snip-t", text));
       return row;
     };
     if (o.covered == null) {
@@ -698,10 +687,10 @@ function neighbourRows(d) {
   // reader, and the DOI (ADR-0055). Silica embeds no PDF viewer.
   function stripEl(fm) {
     const s = paperStrip(fm);
-    const strip = el("div", "wk-paper");
-    if (s.byline) strip.appendChild(el("span", "wk-num", s.byline));
+    const strip = mkEl("div", "wk-paper");
+    if (s.byline) strip.appendChild(mkEl("span", "wk-num", s.byline));
     for (const [label, href] of s.links) {
-      const a = el("a", "wk-paper-a", label);
+      const a = mkEl("a", "wk-paper-a", label);
       a.href = href;
       if (href.startsWith("http")) { a.target = "_blank"; a.rel = "noopener"; }
       strip.appendChild(a);
@@ -710,8 +699,8 @@ function neighbourRows(d) {
   }
 
   const emptyLine = (into, text) => {
-    const e = el("div", "wk-empty");
-    e.appendChild(el("div", "wk-empty-d", text));
+    const e = mkEl("div", "wk-empty");
+    e.appendChild(mkEl("div", "wk-empty-d", text));
     into.appendChild(e);
   };
 
@@ -719,9 +708,9 @@ function neighbourRows(d) {
     if (!d.says.length) return;
     into.appendChild(sectionHead("Says", d.says.length));
     for (const sn of d.says) {
-      const row = el("div", "wk-snip");
-      if (sn.heading) row.appendChild(el("div", "wk-snip-h", sn.heading));
-      row.appendChild(el("div", "wk-snip-t", sn.text || ""));
+      const row = mkEl("div", "wk-snip");
+      if (sn.heading) row.appendChild(mkEl("div", "wk-snip-h", sn.heading));
+      row.appendChild(mkEl("div", "wk-snip-t", sn.text || ""));
       into.appendChild(row);
     }
   }
@@ -729,9 +718,9 @@ function neighbourRows(d) {
   function conceptPills(d, into) {
     if (!d.concepts.length) return;
     into.appendChild(sectionHead("Concepts", d.concepts.length));
-    const pills = el("div", "wk-pills");
+    const pills = mkEl("div", "wk-pills");
     for (const c of d.concepts) {
-      const b = el("button", "wk-pill", c.concept);
+      const b = mkEl("button", "wk-pill", c.concept);
       b.type = "button";
       b.title = "weight " + (c.weight || 1) + ": light its notes in the graph";
       if (window.isConceptLit && window.isConceptLit(c.concept)) b.classList.add("lit");
@@ -759,8 +748,8 @@ function neighbourRows(d) {
     body.textContent = "";
     if (isNoteSubject(d)) { renderDetails(d); return; }
 
-    const rh = el("div", "wk-run");
-    rh.appendChild(el("div", "wk-run-t", d.title || "node"));
+    const rh = mkEl("div", "wk-run");
+    rh.appendChild(mkEl("div", "wk-run-t", d.title || "node"));
     // A rim paper's record comes from Zotero, not from a leaf: the same strip,
     // built from the item (its one door out is Zotero itself).
     if (d.outside && d.outside.item && window.paperStrip) {
@@ -768,13 +757,13 @@ function neighbourRows(d) {
         year: d.outside.item.year, venue: d.outside.item.venue }));
     }
     if (d.count || d.meta.length) {
-      const m = el("div", "wk-run-m");
-      if (d.count) m.appendChild(el("span", "wk-num strong", d.count));
-      for (const bit of d.meta) m.appendChild(el("span", "wk-num", bit));
+      const m = mkEl("div", "wk-run-m");
+      if (d.count) m.appendChild(mkEl("span", "wk-num strong", d.count));
+      for (const bit of d.meta) m.appendChild(mkEl("span", "wk-num", bit));
       rh.appendChild(m);
     }
-    const acts = el("div", "wk-acts");
-    const ask = el("button", "wk-mini", "open in chat");
+    const acts = mkEl("div", "wk-acts");
+    const ask = mkEl("button", "wk-mini", "open in chat");
     ask.type = "button";
     ask.addEventListener("click", () => {
       if (!window.prefillChat) return;
@@ -785,7 +774,7 @@ function neighbourRows(d) {
     if (d.ghost && window.writeGhost) {
       // ADR-0155 point 9: the name is known, so the note is one press away and
       // no model stands between the person and their own page.
-      const write = el("button", "wk-mini", "write it");
+      const write = mkEl("button", "wk-mini", "write it");
       write.type = "button";
       write.addEventListener("click", () => window.writeGhost(d.title, d.from));
       acts.appendChild(write);
@@ -799,14 +788,14 @@ function neighbourRows(d) {
     if (d.outside) { outsideSection(d.outside); return; }
     if (d.cited) {
       body.appendChild(sectionHead("Cited by your papers, not in your library", null));
-      if (d.cited.quote) body.appendChild(el("div", "wk-snip-t", d.cited.quote));
-      const row = el("div", "wk-ext");
-      const a = el("a", "wk-paper-a", d.cited.href.replace(/^https:\/\//, ""));
+      if (d.cited.quote) body.appendChild(mkEl("div", "wk-snip-t", d.cited.quote));
+      const row = mkEl("div", "wk-ext");
+      const a = mkEl("a", "wk-paper-a", d.cited.href.replace(/^https:\/\//, ""));
       a.href = d.cited.href;
       a.target = "_blank";
       a.rel = "noopener";
       row.appendChild(a);
-      row.appendChild(el("span", "wk-num", "add it in Zotero: Add Item by Identifier"));
+      row.appendChild(mkEl("span", "wk-num", "add it in Zotero: Add Item by Identifier"));
       body.appendChild(row);
       return;
     }
@@ -839,12 +828,12 @@ function neighbourRows(d) {
     if (d.loading) { emptyLine(body, "reading the vault…"); return; }
     const warn = !!(d.place && d.place.warn);
     const tab = detailsTab || (warn ? "place" : "content");
-    const bar = el("div", "dt-tabs");
+    const bar = mkEl("div", "dt-tabs");
     bar.setAttribute("role", "tablist");
     bar.setAttribute("aria-label", "details");
     for (const [key, label] of TABS) {
       const on = key === tab;
-      const b = el("button", "dt-tab");
+      const b = mkEl("button", "dt-tab");
       b.type = "button";
       b.id = "dt-tab-" + key;
       b.setAttribute("role", "tab");
@@ -852,14 +841,14 @@ function neighbourRows(d) {
       b.setAttribute("aria-controls", "dt-panel");
       b.tabIndex = on ? 0 : -1;
       if (key === "place" && warn) {
-        b.appendChild(el("span", "dt-dot"));
-        b.appendChild(el("span", "sr-only", "needs attention: "));
+        b.appendChild(mkEl("span", "dt-dot"));
+        b.appendChild(mkEl("span", "sr-only", "needs attention: "));
       }
       b.appendChild(document.createTextNode(label));
-      if (key === "links" && d.neighbours.length) b.appendChild(el("span", "dt-n", String(d.neighbours.length)));
+      if (key === "links" && d.neighbours.length) b.appendChild(mkEl("span", "dt-n", String(d.neighbours.length)));
       // History is read when picked, not when the drawer opens: its count shows once it has been.
       if (key === "history" && hist && hist.path === d.path && hist.versions && hist.versions.length)
-        b.appendChild(el("span", "dt-n", String(hist.versions.length)));
+        b.appendChild(mkEl("span", "dt-n", String(hist.versions.length)));
       b.addEventListener("click", () => pickTab(key));
       bar.appendChild(b);
     }
@@ -872,7 +861,7 @@ function neighbourRows(d) {
       pickTab(TABS[(go + TABS.length) % TABS.length][0]);
     });
     body.appendChild(bar);
-    const panel = el("div", "dt-panel");
+    const panel = mkEl("div", "dt-panel");
     panel.id = "dt-panel";
     panel.setAttribute("role", "tabpanel");
     panel.setAttribute("aria-labelledby", "dt-tab-" + tab);
@@ -893,9 +882,7 @@ function neighbourRows(d) {
   const clock = (at) => { const t = new Date(at * 1000); return two(t.getHours()) + ":" + two(t.getMinutes()); };
 
   function dayOf(at) {
-    const t = new Date(at * 1000), now = new Date();
-    const midnight = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-    const ago = Math.round((midnight(now) - midnight(t)) / 86400000);
+    const t = new Date(at * 1000), now = new Date(), ago = daysAgo(at);
     if (ago === 0) return "Today";
     if (ago === 1) return "Yesterday";
     return t.toLocaleDateString("en-GB", t.getFullYear() === now.getFullYear()
@@ -945,32 +932,32 @@ function neighbourRows(d) {
       return;
     }
     const byId = new Map(hist.versions.map((v) => [String(v.id), v]));
-    const tl = el("div", "tl");
+    const tl = mkEl("div", "tl");
     let day = "";
     for (const v of hist.versions) {
       const label = dayOf(v.at);
-      if (label !== day) { day = label; tl.appendChild(el("div", "tl-day", label)); }
+      if (label !== day) { day = label; tl.appendChild(mkEl("div", "tl-day", label)); }
       const id = String(v.id), open = hist.open === id;
-      const row = el("button", "tl-row" + (v.undone || v.reverted ? " undone" : "") + (v.now ? " now" : "") + (open ? " sel" : ""));
+      const row = mkEl("button", "tl-row" + (v.undone || v.reverted ? " undone" : "") + (v.now ? " now" : "") + (open ? " sel" : ""));
       row.type = "button";
       row.dataset.version = id;
       row.setAttribute("aria-expanded", String(open));
-      row.appendChild(el("span", "tl-time", clock(v.at)));
-      const mark = el("span", "tl-mark");
+      row.appendChild(mkEl("span", "tl-time", clock(v.at)));
+      const mark = mkEl("span", "tl-mark");
       mark.setAttribute("aria-hidden", "true");
-      mark.appendChild(el("i"));
+      mark.appendChild(mkEl("i"));
       row.appendChild(mark);
-      const what = el("span", "tl-what", KIND[v.kind] || v.kind);
+      const what = mkEl("span", "tl-what", KIND[v.kind] || v.kind);
       const tail = versionTail(v, byId);
-      if (tail) what.appendChild(el("span", "", tail));
+      if (tail) what.appendChild(mkEl("span", "", tail));
       row.appendChild(what);
-      row.appendChild(el("span", "tl-sz", Number(v.chars || 0).toLocaleString("en-US")));
+      row.appendChild(mkEl("span", "tl-sz", fmtNum(v.chars || 0)));
       row.addEventListener("click", () => openVersion(v, d));
       tl.appendChild(row);
       if (open) tl.appendChild(versionDiff(v, d));
     }
     into.appendChild(tl);
-    into.appendChild(el("div", "nb-leg", "Sizes in characters. A hollow mark is undone."));
+    into.appendChild(mkEl("div", "nb-leg", "Sizes in characters. A hollow mark is undone."));
   }
 
   async function openVersion(v, d) {
@@ -991,36 +978,36 @@ function neighbourRows(d) {
   const DIFF_CLS = { "+": "dl-add", "-": "dl-del", "@": "dl-gap", " ": "dl-ctx" };
 
   function versionDiff(v, d) {
-    const box = el("div", "tl-diff");
-    const dl = el("div", "dl");
+    const box = mkEl("div", "tl-diff");
+    const dl = mkEl("div", "dl");
     box.appendChild(dl);
     const st = hist.diff;
     if (!st || st.id !== String(v.id) || (!st.lines && !st.error)) {
-      dl.appendChild(el("div", "dl-empty", "reading that version…"));
+      dl.appendChild(mkEl("div", "dl-empty", "reading that version…"));
       return box;
     }
-    if (st.error) { dl.appendChild(el("div", "dl-empty", st.error)); return box; }
-    const head = el("div", "dl-head");
-    head.appendChild(el("span", "dl-kind", st.lines.length ? "if restored" : "the same as now"));
-    if (st.added) head.appendChild(el("span", "chg-add", "+" + st.added));
-    if (st.removed) head.appendChild(el("span", "chg-del", "−" + st.removed));
+    if (st.error) { dl.appendChild(mkEl("div", "dl-empty", st.error)); return box; }
+    const head = mkEl("div", "dl-head");
+    head.appendChild(mkEl("span", "dl-kind", st.lines.length ? "if restored" : "the same as now"));
+    if (st.added) head.appendChild(mkEl("span", "chg-add", "+" + st.added));
+    if (st.removed) head.appendChild(mkEl("span", "chg-del", "−" + st.removed));
     // Never on the version the note is now, nor on a floor that stands for a
     // note that did not exist yet: the route has nothing to write back.
     if (!v.now && !v.absent && st.lines.length) {
-      const b = el("button", "wc-act", "Restore");
+      const b = mkEl("button", "wc-act", "Restore");
       b.type = "button";
       b.addEventListener("click", () => restoreVersion(v, d, b));
       head.appendChild(b);
     }
     dl.appendChild(head);
     if (st.lines.length) {
-      const track = el("div", "dl-track");
+      const track = mkEl("div", "dl-track");
       for (const r of st.lines)
-        track.appendChild(el("div", "dl-line " + (DIFF_CLS[r.op] || "dl-ctx"), r.op === "@" ? "⋯" : r.op + r.text));
-      if (st.clipped) track.appendChild(el("div", "dl-line dl-gap", st.clipped + " more lines"));
+        track.appendChild(mkEl("div", "dl-line " + (DIFF_CLS[r.op] || "dl-ctx"), r.op === "@" ? "⋯" : r.op + r.text));
+      if (st.clipped) track.appendChild(mkEl("div", "dl-line dl-gap", st.clipped + " more lines"));
       dl.appendChild(track);
     }
-    dl.appendChild(el("div", "dl-note", st.note || "Restoring writes this version as a new one. /undo takes it back."));
+    dl.appendChild(mkEl("div", "dl-note", st.note || "Restoring writes this version as a new one. /undo takes it back."));
     return box;
   }
 
@@ -1035,7 +1022,7 @@ function neighbourRows(d) {
     btn.disabled = true;
     // What was typed into the open note reaches the disk first, so the restore
     // keeps it as a version instead of the editor losing it to the new text.
-    if (typeof drawerNote !== "undefined" && drawerNote.path === d.path && typeof saveEdit === "function")
+    if (drawerNote.path === d.path)
       await saveEdit(drawerNote);
     let r;
     try {
@@ -1052,7 +1039,7 @@ function neighbourRows(d) {
     }
     // loadChanges refreshes an editor holding the note, as after an /undo,
     // and the Changes record and the write cards with it.
-    if (typeof loadChanges === "function") loadChanges();
+    loadChanges();
     await loadHistory(d.path);
   }
 
@@ -1065,8 +1052,8 @@ function neighbourRows(d) {
     conceptPills(d, into);
     if (d.paper && d.paper.collections.length) {
       into.appendChild(sectionHead("Collections", d.paper.collections.length));
-      const pills = el("div", "wk-pills");
-      for (const c of d.paper.collections) pills.appendChild(el("span", "wk-pill", c));
+      const pills = mkEl("div", "wk-pills");
+      for (const c of d.paper.collections) pills.appendChild(mkEl("span", "wk-pill", c));
       into.appendChild(pills);
     }
     if (!d.says.length && !d.concepts.length) emptyLine(into, "nothing indexed for this note yet. Run /report or /embed to build the index");
@@ -1089,31 +1076,31 @@ function neighbourRows(d) {
   ];
 
   function neighbourRow(r, d) {
-    const row = el("div", "nb-row" + (r.behind ? " behind" : ""));
+    const row = mkEl("div", "nb-row" + (r.behind ? " behind" : ""));
     const go = r.path ? () => window.openNote && window.openNote(r.path)
       : r.tags.includes("unwritten") ? () => window.showNode && window.showNode({ ghost: true, name: r.name })
       : null;
-    const n = el(go ? "button" : "div", "nb-n");
+    const n = mkEl(go ? "button" : "div", "nb-n");
     if (go) { n.type = "button"; n.addEventListener("click", go); }
-    n.appendChild(el("span", "nb-t", r.name));
+    n.appendChild(mkEl("span", "nb-t", r.name));
     // The folder only where it is news, and "not connected" for a relative the
     // graph cannot reach at all: two notes called Cell stay two notes.
     const fold = folderOf(r.path);
     const meta = [fold && fold !== folderOf(d.path) ? fold : "", r.unreachable ? "not connected" : ""]
       .filter(Boolean).join(" · ");
-    if (meta) n.appendChild(el("span", "nb-m", meta));
+    if (meta) n.appendChild(mkEl("span", "nb-m", meta));
     row.appendChild(n);
-    const tags = el("div", "nb-tags");
-    tags.appendChild(el("span", "sr-only", r.tags.map((t) => TAG_SAY[t]).join(", ")));
+    const tags = mkEl("div", "nb-tags");
+    tags.appendChild(mkEl("span", "sr-only", r.tags.map((t) => TAG_SAY[t]).join(", ")));
     for (const t of r.tags) {
-      const tg = el("span", "nb-tag" + (t === "behind" ? " w" : ""), TAG_TEXT[t]);
+      const tg = mkEl("span", "nb-tag" + (t === "behind" ? " w" : ""), TAG_TEXT[t]);
       tg.setAttribute("aria-hidden", "true");
       tags.appendChild(tg);
     }
     // The two offers the old sections carried stay on their rows: they draft a
     // turn and send nothing, so the write still goes through the agent's gate.
     if (r.tags.includes("unwritten") && window.writeGhost) {
-      const w = el("button", "wk-mini", "write it");
+      const w = mkEl("button", "wk-mini", "write it");
       w.type = "button";
       w.addEventListener("click", () => window.writeGhost(r.name, d.title));
       tags.appendChild(w);
@@ -1122,7 +1109,7 @@ function neighbourRows(d) {
       : r.tags.includes("similar") ? ["link", window.linkNotesPrompt && window.linkNotesPrompt(d.title, r.name)]
       : null;
     if (offer && offer[1]) {
-      const b = el("button", "wk-mini", offer[0]);
+      const b = mkEl("button", "wk-mini", offer[0]);
       b.type = "button";
       b.addEventListener("click", () => { if (window.prefillChat) window.prefillChat(offer[1]); });
       tags.appendChild(b);
@@ -1140,13 +1127,13 @@ function neighbourRows(d) {
       if (p.missing.count) {
         into.appendChild(sectionHead("Cited, not in library", p.missing.count));
         for (const m of p.missing.top) {
-          const row = el("div", "wk-ext");
-          const a = el("a", "wk-paper-a", m.label);
+          const row = mkEl("div", "wk-ext");
+          const a = mkEl("a", "wk-paper-a", m.label);
           a.href = m.href;
           a.target = "_blank";
           a.rel = "noopener";
           row.appendChild(a);
-          row.appendChild(el("span", "wk-num",
+          row.appendChild(mkEl("span", "wk-num",
             m.cited_by + (m.cited_by === 1 ? " paper here cites it" : " papers here cite it")));
           into.appendChild(row);
         }
@@ -1157,22 +1144,22 @@ function neighbourRows(d) {
     const rows = d.neighbours;
     if (!rows.length && !d.paper) emptyLine(into, "No links in or out, and nothing similar enough to propose.");
     if (rows.length) {
-      const list = el("div", "nb");
+      const list = mkEl("div", "nb");
       for (const r of rows.slice(0, NB_VISIBLE)) list.appendChild(neighbourRow(r, d));
       const rest = rows.slice(NB_VISIBLE);
       if (rest.length) {
-        const more = el("details", "wk-more");
-        more.appendChild(el("summary", null, rest.length + " more"));
+        const more = mkEl("details", "wk-more");
+        more.appendChild(mkEl("summary", null, rest.length + " more"));
         for (const r of rest) more.appendChild(neighbourRow(r, d));
         list.appendChild(more);
       }
       into.appendChild(list);
       const used = new Set(rows.flatMap((r) => r.tags));
       const leg = LEGEND.filter(([tags]) => tags.some((t) => used.has(t))).map(([, text]) => text);
-      into.appendChild(el("div", "nb-leg", leg.join(" · ")));
+      into.appendChild(mkEl("div", "nb-leg", leg.join(" · ")));
     }
     // Under the rows it explains: it is the reason the similar ones are few.
-    if (d.hint) into.appendChild(el("div", "wk-hint", d.hint));
+    if (d.hint) into.appendChild(mkEl("div", "wk-hint", d.hint));
   }
 
   // --- Place: the cut drawn, two measures, the reading order ----------------
@@ -1334,7 +1321,7 @@ function neighbourRows(d) {
   }
 
   function cutFigure(b, title) {
-    const host = el("div", "pl-cutfig");
+    const host = mkEl("div", "pl-cutfig");
     host.setAttribute("role", "img");
     host.setAttribute("aria-label", title + " is the only way between "
       + (b.rest != null ? "the other " + countOf(b.rest, "note", "notes") : "its part of the vault")
@@ -1344,36 +1331,36 @@ function neighbourRows(d) {
   }
 
   function noteButton(p) {
-    const b = el("button", "pl-nm", noteName(p));
+    const b = mkEl("button", "pl-nm", noteStem(p));
     b.type = "button";
     b.addEventListener("click", () => { if (window.openNote) window.openNote(p); });
     return b;
   }
 
   function bridgeBlock(b, d) {
-    const fig = el("figure", "pl-fig");
+    const fig = mkEl("figure", "pl-fig");
     // No layout (an older index, or the layout failed): the sentence and the
     // names still say it, and a picture of nothing would not.
     if (b.cut && b.cut.nodes && b.cut.nodes.length > 1) fig.appendChild(cutFigure(b, d.title));
-    const cap = el("figcaption", "pl-cap");
-    cap.appendChild(el("b", null, b.title + "."));
+    const cap = mkEl("figcaption", "pl-cap");
+    cap.appendChild(mkEl("b", null, b.title + "."));
     cap.appendChild(document.createTextNode(" " + b.why));
     fig.appendChild(cap);
     // Named, because "13" is not something a reader can act on and the names
     // are: the notes that lose every path to the rest without this one.
     if (b.behind.length) {
-      const names = el("div", "pl-names");
-      names.appendChild(el("span", "pl-k", "Behind it"));
+      const names = mkEl("div", "pl-names");
+      names.appendChild(mkEl("span", "pl-k", "Behind it"));
       for (const p of b.behind.slice(0, 3)) names.appendChild(noteButton(p));
       if (b.behind.length > 3) {
-        const more = el("details", "pl-more");
-        more.appendChild(el("summary", null, (b.behind.length - 3) + " more"));
+        const more = mkEl("details", "pl-more");
+        more.appendChild(mkEl("summary", null, (b.behind.length - 3) + " more"));
         for (const p of b.behind.slice(3)) more.appendChild(noteButton(p));
         names.appendChild(more);
       }
       fig.appendChild(names);
     }
-    fig.appendChild(el("div", "pl-term", "graph term: " + b.term));
+    fig.appendChild(mkEl("div", "pl-term", "graph term: " + b.term));
     return fig;
   }
 
@@ -1383,7 +1370,7 @@ function neighbourRows(d) {
   // How many notes sit at each depth, this note's column lit. It replaced
   // nested rings, which drew the scale and none of the vault on it.
   function depthChart(dp) {
-    const host = el("div", "pl-chart");
+    const host = mkEl("div", "pl-chart");
     host.setAttribute("role", "img");
     host.setAttribute("aria-label", "Notes by mesh depth: " + dp.hist.map((v, k) => v + " at " + k).join(", ")
       + ". This note is at " + dp.k + ".");
@@ -1406,7 +1393,7 @@ function neighbourRows(d) {
   // crossed like. The gap between them is the reading; the rank the reading
   // is about carries the signal, the other is a hollow mark.
   function routeChart(rt) {
-    const host = el("div", "pl-chart");
+    const host = mkEl("div", "pl-chart");
     host.setAttribute("role", "img");
     host.setAttribute("aria-label", "Links: more than " + rt.links + "% of notes. Paths through it: more than "
       + rt.paths + "%.");
@@ -1432,11 +1419,11 @@ function neighbourRows(d) {
   }
 
   function measure(title, chart, why, term) {
-    const t = el("div", "pl-m");
-    t.appendChild(el("div", "pl-k", title));
+    const t = mkEl("div", "pl-m");
+    t.appendChild(mkEl("div", "pl-k", title));
     t.appendChild(chart);
-    t.appendChild(el("div", "pl-v", why));
-    t.appendChild(el("div", "pl-term", "graph term: " + term));
+    t.appendChild(mkEl("div", "pl-v", why));
+    t.appendChild(mkEl("div", "pl-term", "graph term: " + term));
     return t;
   }
 
@@ -1448,17 +1435,17 @@ function neighbourRows(d) {
       if (pl.bridge) into.appendChild(bridgeBlock(pl.bridge, d));
       const dp = pl.depth, rt = pl.routing;
       const ms = [
-        dp && measure(dp.title, dp.hist.length ? depthChart(dp) : el("span"), dp.why + (dp.scale ? " " + dp.scale : ""), dp.term),
+        dp && measure(dp.title, dp.hist.length ? depthChart(dp) : mkEl("span"), dp.why + (dp.scale ? " " + dp.scale : ""), dp.term),
         rt && measure(rt.title, routeChart(rt), rt.why, rt.term),
       ].filter(Boolean);
       if (ms.length) {
         // Side by side under a rule, no tiles: a figure sits on the sheet.
-        const g = el("div", "pl-two" + (ms.length === 1 ? " one" : ""));
+        const g = mkEl("div", "pl-two" + (ms.length === 1 ? " one" : ""));
         for (const m of ms) g.appendChild(m);
         into.appendChild(g);
       }
       if (!pl.bridge && !ms.length) {
-        into.appendChild(el("p", "pl-plain", "Nothing stands out about its place: it bridges nothing, "
+        into.appendChild(mkEl("p", "pl-plain", "Nothing stands out about its place: it bridges nothing, "
           + "its group is loose, and paths cross it about as often as its links predict."));
       }
     }
@@ -1478,9 +1465,9 @@ function neighbourRows(d) {
     scope.textContent = "";
     head.textContent = "";
     body.textContent = "";
-    const e = el("div", "wk-empty");
-    e.appendChild(el("div", "wk-empty-t", "Nothing selected"));
-    e.appendChild(el("div", "wk-empty-d",
+    const e = mkEl("div", "wk-empty");
+    e.appendChild(mkEl("div", "wk-empty-t", "Nothing selected"));
+    e.appendChild(mkEl("div", "wk-empty-d",
       "Open a note and its info button shows its links and its place in the vault. "
       + "A set of concepts or a comparison picked on Explore lands here."));
     body.appendChild(e);
@@ -1495,33 +1482,33 @@ function neighbourRows(d) {
     head.textContent = "";
     head.className = "wk-num";
     body.textContent = "";
-    const chips = el("div", "wk-pills");
+    const chips = mkEl("div", "wk-pills");
     for (const t of d.terms) {
-      const b = el("button", "wk-pill lit", t.concept + " · " + t.notes);
+      const b = mkEl("button", "wk-pill lit", t.concept + " · " + t.notes);
       b.type = "button";
       b.title = t.notes + " notes carry it: click to drop it from the selection";
       b.addEventListener("click", () => { if (window.lightConcept) window.lightConcept(t.term, null); });
       chips.appendChild(b);
     }
     body.appendChild(chips);
-    const sum = el("div", "wk-run-m");
-    sum.appendChild(el("span", "wk-num strong", d.notes.length
+    const sum = mkEl("div", "wk-run-m");
+    sum.appendChild(mkEl("span", "wk-num strong", d.notes.length
       ? (d.terms.length > 1 ? d.notes.length + " notes carry all " + d.terms.length : d.notes.length + " notes carry it")
       : "no note carries all " + d.terms.length + " together"));
     body.appendChild(sum);
     for (const n of d.notes) {
-      const rh = el("div", "wk-run");
-      const t = el("button", "wk-mini", n.name);
+      const rh = mkEl("div", "wk-run");
+      const t = mkEl("button", "wk-mini", n.name);
       t.title = "open this note";
       t.addEventListener("click", () => { if (window.showNode) window.showNode({ path: n.path }); });
       rh.appendChild(t);
       for (const q of n.passages) {
-        const line = el("p", "brg-quote");
-        line.appendChild(el("b", "", q.terms.join(" + ") + " · "));
+        const line = mkEl("p", "brg-quote");
+        line.appendChild(mkEl("b", "", q.terms.join(" + ") + " · "));
         line.appendChild(document.createTextNode(q.text));
         rh.appendChild(line);
       }
-      if (!n.passages.length) rh.appendChild(el("p", "brg-quote none", "carried in the index, no line quotes it"));
+      if (!n.passages.length) rh.appendChild(mkEl("p", "brg-quote none", "carried in the index, no line quotes it"));
       body.appendChild(rh);
     }
   }
@@ -1534,44 +1521,44 @@ function neighbourRows(d) {
     head.textContent = "";
     head.className = "wk-num";
     body.textContent = "";
-    const rh = el("div", "wk-run");
-    rh.appendChild(el("div", "wk-run-t", d.a.label + " ↔ " + d.b.label));
-    const m = el("div", "wk-run-m");
-    m.appendChild(el("span", "wk-num", d.a.size + " notes ↔ " + d.b.size + " notes"));
+    const rh = mkEl("div", "wk-run");
+    rh.appendChild(mkEl("div", "wk-run-t", d.a.label + " ↔ " + d.b.label));
+    const m = mkEl("div", "wk-run-m");
+    m.appendChild(mkEl("span", "wk-num", d.a.size + " notes ↔ " + d.b.size + " notes"));
     rh.appendChild(m);
     body.appendChild(rh);
     for (const side of [d.a, d.b]) {
       body.appendChild(sectionHead(side.label + " says", side.terms.length));
-      const pills = el("div", "wk-pills");
+      const pills = mkEl("div", "wk-pills");
       for (const t of side.terms) {
-        const b = el("button", "wk-pill", t);
+        const b = mkEl("button", "wk-pill", t);
         b.type = "button";
         b.title = "light the notes that carry it";
         b.addEventListener("click", () => { if (window.lightConcept) window.lightConcept(t, b); });
         pills.appendChild(b);
       }
-      if (!side.terms.length) pills.appendChild(el("span", "wk-num", "no term stands out"));
+      if (!side.terms.length) pills.appendChild(mkEl("span", "wk-num", "no term stands out"));
       body.appendChild(pills);
     }
     body.appendChild(sectionHead("In touch", d.links.length + d.knn.length));
-    const why = el("div", "wk-run-m");
-    why.appendChild(el("span", "wk-num strong", d.links.length + " wikilinks cross · " + d.knn.length + " nearest-neighbour pairs"));
+    const why = mkEl("div", "wk-run-m");
+    why.appendChild(mkEl("span", "wk-num strong", d.links.length + " wikilinks cross · " + d.knn.length + " nearest-neighbour pairs"));
     body.appendChild(why);
     for (const l of d.links) {
-      const r = el("div", "wk-run");
-      const acts = el("div", "wk-acts");
+      const r = mkEl("div", "wk-run");
+      const acts = mkEl("div", "wk-acts");
       for (const end of [l.a, l.b]) {
-        const b = el("button", "wk-mini", end.name);
+        const b = mkEl("button", "wk-mini", end.name);
         b.addEventListener("click", () => { if (window.showNode) window.showNode({ path: end.path }); });
         acts.appendChild(b);
       }
       r.appendChild(acts);
-      r.appendChild(el("p", "brg-quote" + (l.passage ? "" : " none"), l.passage || "No sentence quotes this link."));
+      r.appendChild(mkEl("p", "brg-quote" + (l.passage ? "" : " none"), l.passage || "No sentence quotes this link."));
       body.appendChild(r);
     }
     for (const k of d.knn.slice(0, 12)) {
-      const r = el("div", "wk-run-m");
-      r.appendChild(el("span", "wk-num", k.a.name + " ~ " + k.b.name));
+      const r = mkEl("div", "wk-run-m");
+      r.appendChild(mkEl("span", "wk-num", k.a.name + " ~ " + k.b.name));
       body.appendChild(r);
     }
   }

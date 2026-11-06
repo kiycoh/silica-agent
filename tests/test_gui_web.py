@@ -2854,7 +2854,7 @@ def test_a_write_card_meets_the_changes_payload_on_the_resolved_path():
     js = app_js()
     block = js[js.index("function stampWriteTallies"):]
     block = block[:block.index("\n}\n")]
-    assert 'replace(/\\.md$/, "")' in block, "no stem key: a bare name never matches"
+    assert "noExt(" in block, "no stem key: a bare name never matches"
     assert 'querySelector(".wc-open")' in block, "the card is never re-pointed at the resolved path"
 
 

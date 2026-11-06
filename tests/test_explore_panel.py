@@ -24,7 +24,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "silica" / "ui" / "web" / "static"
 INDEX = WEB / "index.html"
-from tests.webassets import app_css, app_js
+from tests.webassets import app_css, app_js, core_js
 WORK_JS = WEB / "work.js"
 FRAME_HTML = WEB / "graph-frame.html"
 FRAME_CSS = WEB / "graph-frame.css"
@@ -43,7 +43,7 @@ def _pure_block() -> str:
     src = WORK_JS.read_text()
     m = re.search(r"// --- projection:begin.*?// --- projection:end", src, re.S)
     assert m, "projection markers not found in work.js"
-    return m.group(0)
+    return core_js() + m.group(0)
 
 
 def _project_node(tmp_path, node: dict, ctx) -> dict:
@@ -231,7 +231,7 @@ def test_a_hub_does_not_unroll_its_whole_neighbourhood():
     work = WORK_JS.read_text()
     assert "const NODE_VISIBLE = 5;" in work
     sec = _block(work, "function nodeSection(", "function renderNode(")
-    assert "NODE_VISIBLE" in sec and 'el("details"' in sec
+    assert "NODE_VISIBLE" in sec and 'mkEl("details"' in sec
 
 
 def test_a_suggested_row_says_which_folder_it_lives_in():

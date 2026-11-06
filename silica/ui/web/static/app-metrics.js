@@ -95,13 +95,6 @@ $("#metrics-body").addEventListener("click", (e) => {
   else announceNode(null, null);
 });
 
-const mkEl = (tag, cls, text) => {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (text !== undefined) n.textContent = text; // labels are vault data — never innerHTML
-  return n;
-};
-
 // A card: hairline compartment, micro-label title, optional one-line note.
 // A div, not a <header>: the global `header>* {display:flex}` rule would flatten
 // the title and its subtitle onto one line.
@@ -976,7 +969,6 @@ function srcLabel(r) {
   return shown.join(", ") + (more ? ` +${more}` : "");
 }
 
-const noExt = (n) => String(n).replace(/\.md$/, "");
 
 // The same sentence the ghost drawer and the explore panel send, so a target
 // written from here and one written from either of those arrive as the same

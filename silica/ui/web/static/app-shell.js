@@ -264,6 +264,9 @@ const LAYOUT_MODES = [
   ["read", "Read", "a reading order derived from hubs and their links", 1],
 ];
 
+// A mode's tab, for the scripts that point at it (the tour, Library's badge).
+const surfaceTab = (mode) => `#surface-tabs [data-gmode="${mode}"]`;
+
 function buildSurfaceTabs() {
   const box = $("#surface-tabs");
   box.innerHTML = "";
@@ -354,7 +357,7 @@ function renderPins() {
     row.title = path;
     row.draggable = true; // onto a workspace, a folder or the composer (ADR-0126 point 10)
     row.appendChild(mkEl("span", "sw"));
-    row.appendChild(mkEl("span", "t", path.replace(/\.md$/, "").split("/").pop()));
+    row.appendChild(mkEl("span", "t", noteStem(path)));
     const x = mkEl("button", "pin-x", "✕");
     x.type = "button";
     x.setAttribute("aria-label", "unpin " + path);
@@ -905,7 +908,7 @@ async function deleteFromTree(note, folder, paths) {
   if (lastViewedPath && gone.has(lastViewedPath)) lastViewedPath = null; // the corner toggle would reopen it
   loadVaultInfo();
   clearTreeSel();
-  const what = note ? note.replace(/\.md$/, "").split("/").pop()
+  const what = note ? noteStem(note)
     : `${gone.size} ${gone.size === 1 ? "note" : "notes"}` + (folder ? ` in ${folder.split("/").pop()}` : "");
   const d = data.dangling.length;
   const msg = `Moved ${what} to the trash.`
@@ -943,7 +946,7 @@ async function loadTrash() {
   list.innerHTML = "";
   for (const t of items) {
     const row = mkEl("div", "trash-row");
-    const name = mkEl("span", "trash-name", t.path.replace(/\.md$/, "").split("/").pop());
+    const name = mkEl("span", "trash-name", noteStem(t.path));
     const who = t.source === "user:/delete" ? "you" : "the chat";
     name.title = `${t.path}\ndeleted ${new Date(t.deleted_at * 1000).toLocaleString()} by ${who}`;
     const back = mkEl("button", "linklike", "restore");
@@ -1064,7 +1067,7 @@ function stampWriteTallies(rows) {
   // to open was never the thing that opened.
   const by = new Map(), byBase = new Map();
   for (const r of rows) {
-    const stem = r.path.replace(/\.md$/, "");
+    const stem = noExt(r.path);
     by.set(r.path, r);
     by.set(stem, r);
     const base = stem.split("/").pop();
@@ -1206,9 +1209,7 @@ $("#sessions-more").addEventListener("click", () => {
 // today / yesterday / earlier, by the calendar day of the machine the vault is
 // on, which is also the machine the person is on.
 function dayBucket(ts) {
-  const d = new Date(ts * 1000), now = new Date();
-  const day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diff = Math.round((day(now) - day(d)) / 86400000);
+  const diff = daysAgo(ts);
   return diff <= 0 ? "Today" : diff === 1 ? "Yesterday" : "Earlier";
 }
 // Relative while it is short, a date once it is not; the absolute time rides
@@ -1218,7 +1219,7 @@ function relTime(ts) {
   if (s < 60) return "now";
   if (s < 3600) return Math.floor(s / 60) + "m";
   if (s < 86400) return Math.floor(s / 3600) + "h";
-  return new Date(ts * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return fmtDay(new Date(ts * 1000));
 }
 
 // The document title follows the open chat, so a tab strip of three silica

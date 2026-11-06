@@ -40,7 +40,7 @@ async function loadWorkspaces({ adopt = false } = {}) {
   // A workspace note open in the reader was rewritten under it (a ◇ edit, a
   // note the chat wrote): the field takes the new bytes unless it holds
   // unsaved typing, and the next keystroke no longer meets a 409.
-  if (typeof refreshOpenNote === "function" && workspaces.some((w) => w.path === drawerNote.path)) refreshOpenNote();
+  if (workspaces.some((w) => w.path === drawerNote.path)) refreshOpenNote();
 }
 
 const wsByPath = (p) => workspaces.find((w) => w.path === p);
@@ -119,7 +119,7 @@ function renderWsMembers(w) {
       const a = mkEl("a", "ws-note");
       a.href = "#chat?note=" + encodeURIComponent(m.path);
       a.dataset.id = m.path;
-      a.appendChild(mkEl("span", "t", m.path.split("/").pop().replace(/\.md$/, "")));
+      a.appendChild(mkEl("span", "t", noteStem(m.path)));
       const bs = mkEl("span", "ws-badges");
       for (const r of m.reasons) {
         const b = mkEl("span", "ws-b " + r.kind, WS_REASON[r.kind] || r.kind);
@@ -220,7 +220,7 @@ $("#ws-new-name").addEventListener("keydown", (e) => {
 const WS_DRAG = "application/x-silica-ws";
 const NOTE_DRAG = "application/x-silica-notes";
 const wsGroup = $("#ws-group");
-const wsShown = (it) => it.value.split("/").pop().replace(/\.md$/, "") + (it.key === "folders" ? "/" : "");
+const wsShown = (it) => noteStem(it.value) + (it.key === "folders" ? "/" : "");
 const wsItems = (it) => [...it.notes.map((v) => ({ key: "notes", value: v })),
                          ...it.folders.map((v) => ({ key: "folders", value: v }))];
 const wsItemsShown = (it) => {
@@ -235,7 +235,7 @@ document.addEventListener("dragstart", (e) => {
   if (!note && !folder) return;
   const path = note && (note.dataset.id || note.dataset.path);
   // a row inside the tree's selection drags the whole selection; one outside it drags alone
-  const inSel = path && note.matches("#tree .tree-note") && typeof treeSel !== "undefined" && treeSel.has(path);
+  const inSel = path && note.matches("#tree .tree-note") && treeSel.has(path);
   const notes = path ? (inSel ? [...treeSel] : [path]) : [];
   e.dataTransfer.setData(WS_DRAG, JSON.stringify({ notes, folders: folder ? [folder] : [] }));
   if (notes.length) e.dataTransfer.setData(NOTE_DRAG, String(notes.length));

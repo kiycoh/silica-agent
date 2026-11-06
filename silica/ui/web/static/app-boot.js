@@ -61,7 +61,7 @@ async function loadVault() {
         addTurnImages(body, m.images || []);
         userFiles(body, m.files || []);
         userNote(body, m.note || "");
-        if (m.story && typeof userStory === "function") userStory(body, m.story);
+        if (m.story) userStory(body, m.story);
         attached = (m.files || []).flatMap((f) => f.notes || []);
         flagTurn = m.turn || null;
         continue;

@@ -12,15 +12,11 @@ const centreNote = noteSession();
 noteSessions.push(centreNote);
 Object.assign(centreNote, { foot: $("#nv-foot"), strip: $("#nv-check"), bar: $("#nv-selbar"), host: $("#view-note") });
 
-const stemOf = (p) => p.replace(/\.md$/i, "").split("/").pop();
 const noteFolder = (p) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
-const postJson = (url, body) => fetch(url, {
-  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-});
 
 // --- `[[` completes, over the composer's own index (ADR-0155 point 13) --------
 function linkSource(cx) {
-  const m = cx.matchBefore(/\[\[[^\][\n|#]{0,64}$/);
+  const m = cx.matchBefore(LINK_OPENING);
   if (!m) return null;
   const q = m.text.slice(2).trim().toLowerCase();
   const hits = (q ? noteIdx.map((n) => [scoreNote(n, q), n]).filter((p) => p[0] > 0)
@@ -274,7 +270,7 @@ async function commitTitle() {
   const s = centreNote, name = freshName();
   if (!name) return true;
   if (s.fresh) { await createFresh(s); return !s.fresh; }
-  if (!s.path || name === stemOf(s.path)) return true;
+  if (!s.path || name === noteStem(s.path)) return true;
   // Enter moves the caret, which blurs the title: one press, one rename.
   s.renaming ||= renameCentre(s, name).finally(() => { s.renaming = null; });
   return s.renaming;
@@ -389,7 +385,7 @@ async function undoWrite(d) {
 function paintCentre() {
   const s = centreNote, folder = s.path ? noteFolder(s.path) : s.folder;
   $("#nv-crumb").textContent = folder || "Vault";
-  $("#nv-handle span").textContent = s.path ? stemOf(s.path) : (nvTitle.value.trim() || "New note");
+  $("#nv-handle span").textContent = s.path ? noteStem(s.path) : (nvTitle.value.trim() || "New note");
   markOpenNote();
 }
 
@@ -413,7 +409,7 @@ centreNote.onRelease = () => {
 };
 // A move from the tree: the name, the crumb and the address follow the note.
 centreNote.onMoved = () => {
-  nvTitle.value = stemOf(centreNote.path);
+  nvTitle.value = noteStem(centreNote.path);
   growTitle();
   paintCentre();
   syncUrl(false);
@@ -458,12 +454,10 @@ async function openCentre(path, pos, { fromUrl = false } = {}) {
   holdNote(s, data);
   s.folder = noteFolder(data.path);
   nvStrip.replaceChildren();
-  const strip = data.paper ? paperStripEl(data.paper)
-    : data.saved && typeof savedStripEl === "function" ? savedStripEl(data.saved)
-    : data.raw ? fillRawStrip(mkEl("div", ""), data.raw, data.path, false) : null;
+  const strip = noteTopEl(data);
   if (strip) nvStrip.append(strip);
   ed.load(data.text, { top: nvTop, missing: data.broken || [] });
-  nvTitle.value = stemOf(data.path);
+  nvTitle.value = noteStem(data.path);
   titleSay("");
   formOn = true;
   renderProps();
@@ -518,7 +512,7 @@ async function centreDetails(tab) {
   drawerMode = "note";
   detailsOn = true;
   detailsLent = true;
-  showDrawer(stemOf(path));
+  showDrawer(noteStem(path));
   syncDrawerMode();
   await loadContext(path);
   if (tab === "history" && window.showNoteHistory) window.showNoteHistory();
@@ -894,7 +888,7 @@ function syncQuoteButton() {
   const on = activeTab === "note" && !!(centreNote.path || centreNote.fresh) && !!centreNote.editor;
   const b = $("#sel-quote");
   b.hidden = !on;
-  if (on) b.textContent = `quote in ${centreNote.path ? stemOf(centreNote.path) : "the note"}`;
+  if (on) b.textContent = `quote in ${centreNote.path ? noteStem(centreNote.path) : "the note"}`;
 }
 $("#sel-quote").addEventListener("mousedown", (e) => {
   e.preventDefault();
@@ -923,8 +917,8 @@ $("#nv-menu").addEventListener("click", (e) => {
   if (!path) { notify("write a line first: this note is not on disk yet", "info"); return; }
   if (act === "ask") { $("#dock").hidden = false; $("#dock-input").focus(); }
   else if (act === "check") checkSources(false, centreNote);
-  else if (act === "test" && typeof learnTestNote === "function") learnTestNote(path);
-  else if (act === "teach" && typeof learnExplain === "function") learnExplain(path);
+  else if (act === "test") learnTestNote(path);
+  else if (act === "teach") learnExplain(path);
   else if (act === "map") { graphMode = "graph"; document.querySelector('.tab[data-tab="graph"]').click(); focusGraphNode(path); }
 });
 // The note's menu and the bar's two lists take the keys a menu takes.

@@ -1,6 +1,5 @@
 // Vanilla client: POST /chat returns text/event-stream, read incrementally via
 // the body's ReadableStream (not EventSource — that only does GET).
-const $ = (s) => document.querySelector(s);
 const log = $("#log");
 const input = $("#input");
 // The run line (P1): the dock's strip, and in the chat the live ledger line at
@@ -70,67 +69,6 @@ jumpBtn.addEventListener("click", () => {
   newBelow = 0;
   followBottom();
 });
-
-// --- notifications + screen-reader status ------------------------------------
-// A hairline toast strip fills the silent catch(){} gaps: a failed background
-// fetch now says so instead of leaving a stale "—". Two levels only (info =
-// accent, error = gold/caution) — the palette reserves no third UI signal.
-// Every notify() also lands in the polite SR region, so the streaming
-// transcript itself needn't be a chatty live region.
-const srStatus = $("#sr-status");
-const toasts = $("#toasts");
-function announce(msg) { if (srStatus) srStatus.textContent = msg; }
-// Cap the visible stack. Two diagnostics fire on every load and an error turn
-// stacked five, ~300px of grey boxes sitting on top of #send — so whatever you
-// had just done, the screen closed on a debug message covering the primary
-// control. Older ones roll up behind a "+N" the user can expand.
-const TOAST_MAX = 2;
-
-function rollUpToasts() {
-  const all = [...toasts.querySelectorAll(".toast")];
-  const overflow = Math.max(0, all.length - TOAST_MAX);
-  all.forEach((t, i) => { t.hidden = i < overflow; });
-  let more = toasts.querySelector(".toast-more");
-  if (!overflow) { if (more) more.remove(); return; }
-  if (!more) {
-    more = document.createElement("button");
-    more.type = "button";
-    more.className = "toast-more";
-    // recompute on click: the stack keeps changing under this handler
-    more.addEventListener("click", () => {
-      toasts.querySelectorAll(".toast").forEach((t) => { t.hidden = false; });
-      more.remove();
-    });
-  }
-  toasts.prepend(more);
-  more.textContent = `+${overflow} more`;
-}
-
-// `action` ({label, run}) puts one button on the toast, the way back from what
-// it reports (a tree delete's undo, ADR-0123). Such a toast is never deduped,
-// since its button belongs to one event, and it stays longer: the reader has
-// to find the button, not only read the line.
-function notify(msg, level = "error", action = null) {
-  announce(msg);
-  if (!action && [...toasts.querySelectorAll(".toast")].some((t) => t.textContent === msg)) return; // dedupe visible
-  const t = document.createElement("div");
-  t.className = "toast " + level;
-  t.textContent = msg;
-  t.title = msg; // CSS clamps the box to 3 lines; the full text stays reachable
-  const kill = () => { t.remove(); rollUpToasts(); };
-  if (action) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "toast-act";
-    b.textContent = action.label;
-    b.addEventListener("click", (e) => { e.stopPropagation(); kill(); action.run(); });
-    t.appendChild(b);
-  }
-  t.addEventListener("click", kill);
-  toasts.appendChild(t);
-  setTimeout(kill, action ? 10000 : level === "error" ? 6000 : 3000);
-  rollUpToasts();
-}
 
 // --- system notifications (ADR-0147) -----------------------------------------
 // os-notify:start
@@ -250,9 +188,6 @@ function memorySuggestLine(cmd) {
 
 const PHASE_MARK = { done: "✓", running: "◉", failed: "✗", pending: "·" };
 const SUMMARY_MARK = { ok: "✓", partial: "◐", empty: "⊘", failed: "✗" };
-
-const fmtDur = (s) =>
-  s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s / 60)}m${String(Math.floor(s % 60)).padStart(2, "0")}s`;
 
 // One line of counts for a finished run. Shared by the live tool_done event and
 // by transcript replay, so reopening a chat restates what it said while running.
@@ -677,12 +612,6 @@ function armThenRun(btn, label, armed, run) {
 // it as `detail`. The regex table that used to live here guessed at the raw
 // text after the fact, and guessed differently from the TUI.
 
-function escapeHtml(s) {
-  const d = document.createElement("div");
-  d.textContent = s;
-  return d.innerHTML;
-}
-
 // A failure belongs to the thing that failed (P3). It attaches under the
 // person's own bubble as one authored sentence, a "try again" that re-runs
 // exactly that turn, and the raw text behind a disclosure for whoever is
@@ -1027,7 +956,6 @@ function quoteLabels(src) {
 // the canonical answer (wikilinks, callouts, mermaid) on `done` for uninterrupted
 // turns; swap in a vendored parser if full CommonMark is ever needed here.
 function mdLite(src) {
-  const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
   // `[[note|alias]]` -> the same .note-link the server render emits. The target
   // is passed through raw: /note resolves titles and paths itself, so the live
   // segment needs no vault index (and an unresolvable one just says so on click).
@@ -1045,7 +973,7 @@ function mdLite(src) {
         return hold(`<img src="/asset?path=${encodeURIComponent(file)}" alt="${alt}"${width}>`);
       }
       const path = target.split("#")[0].trim();
-      const shown = (alias || path.split("/").pop().replace(/\.md$/, "")).trim();
+      const shown = (alias || noteStem(path)).trim();
       return bang + hold(`<a class="note-link" data-path="${path.replace(/"/g, "&quot;")}">${shown}</a>`);
     });
   // Only these schemes become a live href. mdLite builds its anchors by hand and
@@ -1088,7 +1016,7 @@ function mdLite(src) {
     const hold = (html) => `\u0000${held.push(html) - 1}\u0000`;
     // a code span can hold a parked wiki tag, so a restored one is restored again
     const restore = (s) => s.replace(/\u0000(\d+)\u0000/g, (_m, i) => restore(held[i]));
-    return restore(wiki(esc(t), hold)
+    return restore(wiki(escapeHtml(t), hold)
       .replace(/`([^`]+)`/g, (_m, c) => hold(`<code>${c}</code>`))
       .replace(/\*\*([^*]+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*([^*\n]+?)\*/g, "<em>$1</em>")
@@ -1147,7 +1075,7 @@ function mdLite(src) {
       // drawDiagrams() runs it once the turn ends, and half a diagram is not one.
       const diagram = i < lines.length && line.slice(3).trim() === "mermaid";
       i++; // closing fence (or EOF while still streaming)
-      out.push(diagram ? `<pre class="mermaid">${esc(buf.join("\n"))}</pre>` : `<pre><code>${esc(buf.join("\n"))}</code></pre>`);
+      out.push(diagram ? `<pre class="mermaid">${escapeHtml(buf.join("\n"))}</pre>` : `<pre><code>${escapeHtml(buf.join("\n"))}</code></pre>`);
       continue;
     }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
@@ -1972,11 +1900,11 @@ function resolveRef(ref) {
   const idx = typeof noteIdx !== "undefined" ? noteIdx : [];
   if (!r || !idx.length) return r;
   const lr = r.toLowerCase();
-  const stem = lr.replace(/\.md$/, "");
-  const hit = idx.find((n) => n.lp === lr || n.lp.replace(/\.md$/, "") === stem);
+  const stem = noExt(lr);
+  const hit = idx.find((n) => n.lp === lr || noExt(n.lp) === stem);
   if (hit) return hit.path;
   const base = stem.split("/").pop();
-  const same = idx.filter((n) => n.lp.replace(/\.md$/, "").split("/").pop() === base);
+  const same = idx.filter((n) => noteStem(n.lp) === base);
   return same.length === 1 ? same[0].path : r; // ambiguous: keep the argument as written
 }
 
@@ -1991,7 +1919,7 @@ function uniqueReads(refs) {
 }
 
 const noteLabel = (path) =>
-  window.chipLabel ? window.chipLabel(path) : path.split("/").pop().replace(/\.md$/, "");
+  window.chipLabel ? window.chipLabel(path) : noteStem(path);
 
 // --- the ledger line (ADR-0117 point 3) --------------------------------------
 // Everything that describes how a turn ran, folded into one line at its head.
@@ -2037,7 +1965,7 @@ function finishLedger(msg, led, { steps, secs, reads, cited, found = [] }) {
   const fromSearch = reads.length ? [] : [...new Set(found)].filter((p) => !cited.has(p)).slice(0, 6);
   // A read named by a title two notes share stays as written (resolveRef), and
   // the answer cites the one it means (ADR-0127): a citation of either is it.
-  const base = (p) => p.toLowerCase().replace(/\.md$/, "").split("/").pop();
+  const base = (p) => noteStem(p.toLowerCase());
   const idx = typeof noteIdx !== "undefined" ? noteIdx : [];
   const isCited = (p) => cited.has(p) || (!idx.some((n) => n.path === p) && [...cited].some((c) => base(c) === base(p)));
   const uncited = fromSearch.length ? fromSearch : reads.filter((p) => !isCited(p));
@@ -2516,7 +2444,7 @@ let mention = null;
 function mentionAtCaret() {
   if (input.selectionStart !== input.selectionEnd) return null;
   const upto = input.value.slice(0, input.selectionStart);
-  const m = /(?:^|[\s(\[])(@)([^@\[\]\n]{0,64})$/.exec(upto) || /(\[\[)([^\]\[\n|#]{0,64})$/.exec(upto);
+  const m = /(?:^|[\s(\[])(@)([^@\[\]\n]{0,64})$/.exec(upto) || LINK_OPENING.exec(upto);
   if (!m || /^\s/.test(m[2])) return null;
   return { start: upto.length - m[1].length - m[2].length, end: upto.length, query: m[2], brackets: m[1] === "[[" };
 }
@@ -2555,9 +2483,9 @@ function renderMentions() {
 // path when possible", and what the server resolves the same way. One rule
 // for the picker, a drop on the composer and a drop on the editor.
 function mentionLink(path) {
-  const stem = (p) => p.replace(/\.md$/i, "").split("/").pop().toLowerCase();
+  const stem = (p) => noteStem(p).toLowerCase();
   const unique = noteIdx.filter((o) => stem(o.path) === stem(path)).length === 1;
-  return unique ? path.replace(/\.md$/i, "").split("/").pop() : path.replace(/\.md$/i, "");
+  return unique ? noteStem(path) : noExt(path);
 }
 
 function pickMention(n) {
