@@ -4179,6 +4179,10 @@ function buildGraph() {
   // engine stops on its first frame without a tick, its cooldown already spent.
   const seeded = loadLayout();
   if (!seeded) KREF = DISC_PX;
+  // A cold 3D build starts from the lib's own seed. With z left at the 0 a 2D
+  // cache hit writes, it started flat on the 2D layout, stayed flat (median z 4
+  // against a radius of 2,325) and was then kept for good. No z reseeds all three.
+  if (!seeded && !is2D()) RAW_NODES.forEach(n => { delete n.z; });
   const warm = seeded ? 0 : WARMUP_TICKS();
   warmupRun = warm; simTicks = 0;
   paintStat(seeded ? "settled" : "settling");

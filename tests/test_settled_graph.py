@@ -123,6 +123,12 @@ def test_a_lit_set_lights_itself_and_no_neighbours():
     assert got == [[False, False, True], False, True]
 
 
+def test_a_cold_3d_layout_does_not_start_flat_on_the_2d_one():
+    """A 2D cache hit writes z = 0, and d3 reseeds a note only when a coordinate
+    is missing: the 3D layout stayed flat, and a layout that holds kept it so."""
+    assert "if (!seeded && !is2D()) RAW_NODES.forEach(n => { delete n.z; });" in FRAME
+
+
 def test_the_key_is_what_the_size_says():
     assert "const isKey = n => (n.links || 0) >= KEY_MIN;" in FRAME
     assert "_links[Math.floor(_links.length * 0.9)]" in FRAME
