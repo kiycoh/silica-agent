@@ -420,3 +420,18 @@ def test_a_new_note_that_cannot_be_written_is_held_on_a_reload(app):
     p.type("Worth keeping.")
     time.sleep(1)
     assert p.js("fieldHeld(centreNote)") is True
+
+
+def test_a_refused_title_does_not_pull_the_keys_back_into_it(app):
+    p, vault = app
+    p.js("writeNote({ folder: 'Topic' })")
+    p.wait("document.activeElement.id === 'nv-title'", 5, "the title's caret")
+    p.type("Other")
+    _press_enter(p)
+    for ch in "Body typed at once":
+        p.send("Input.dispatchKeyEvent", {"type": "keyDown", "text": ch, "key": ch})
+        p.send("Input.dispatchKeyEvent", {"type": "keyUp", "key": ch})
+        time.sleep(0.02)
+    p.wait("!document.querySelector('#nv-msg').hidden", 5, "the reason")
+    assert p.js("centreNote.editor.getText()") == "Body typed at once"
+    assert p.js("document.querySelector('#nv-title').value") == "Other"

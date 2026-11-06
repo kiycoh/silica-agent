@@ -262,7 +262,9 @@ nvTitle.addEventListener("keydown", (e) => {
   // The caret moves now and the write runs behind it: at typing speed the next
   // keys are the text's, and waiting for the answer sent them into the file's name.
   centreNote.editor.focus();
-  commitTitle().then((ok) => { if (!ok) nvTitle.focus(); });
+  // A refusal brings the caret back only to a text not yet begun: mid-sentence, the
+  // keys would go on into the title and name the note after them.
+  commitTitle().then((ok) => { if (!ok && !centreNote.editor.getText().trim()) nvTitle.focus(); });
 });
 nvTitle.addEventListener("blur", () => { if (nvTitle.value.trim()) commitTitle(); });
 
