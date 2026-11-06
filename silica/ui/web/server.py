@@ -7294,15 +7294,20 @@ def index(request: Request):
         gone = withheld("routes")
         html = re.sub(r'data-route="([^"]*)"', lambda m: m[0] if m[1] in gone else f"{m[0]} data-served", html)
         # The account the window is signed in as, for the menu under SILICA
-        # (ADR-0122, amendment 2026-10-22). Cloudflare Access sets the header,
-        # and the host's Caddy passes only Access's hostname to a tenant
-        # (silica-hosted deploy/Caddyfile). It is shown back to whoever sent it
-        # and decides nothing, so a forged one forges only its own page.
-        email = request.headers.get("cf-access-authenticated-user-email", "")
+        # (ADR-0122, amendment 2026-10-22). The gateway sets X-Silica-Email
+        # (ADR-0154), Cloudflare Access its own header until the switch, and the
+        # host's Caddy passes a tenant only what one of them set (silica-hosted
+        # deploy/Caddyfile). It is shown back to whoever sent it and decides
+        # nothing, so a forged one forges only its own page. Sign out is offered
+        # behind the gateway alone: under Access /sign-out would reach this
+        # process and answer 404.
+        gateway = request.headers.get("x-silica-email", "")
+        email = gateway or request.headers.get("cf-access-authenticated-user-email", "")
         if email:
+            signout = " data-signout" if gateway else ""
             html = html.replace(
                 '<html lang="en" data-hosted',
-                f'<html lang="en" data-hosted data-user="{_html.escape(email, quote=True)}"', 1)
+                f'<html lang="en" data-hosted data-user="{_html.escape(email, quote=True)}"{signout}', 1)
     return HTMLResponse(html)
 
 

@@ -1,3 +1,17 @@
+// A session can end with the page open (ADR-0154 point 6). The gateway answers the app's
+// fetches 401 with this header, and only it does: a connector's own 401 is that
+// service's and must not sign anyone out. The page load then finds the sign-in page.
+if (document.documentElement.dataset.signout !== undefined) {
+  const fetchNow = window.fetch.bind(window);
+  window.fetch = async (...args) => {
+    const r = await fetchNow(...args);
+    if (r.status === 401 && r.headers.has("X-Silica-Signed-Out")) {
+      location.assign("/sign-in?next=" + encodeURIComponent(location.pathname + location.search));
+    }
+    return r;
+  };
+}
+
 // --- session bootstrap (re-render server-side history; never resets on load) -
 async function loadVault() {
   const epoch = logEpoch;
