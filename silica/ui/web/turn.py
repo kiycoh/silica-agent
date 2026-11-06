@@ -31,7 +31,7 @@ from silica.agent.sentinels import EMPTY_COMPLETION
 from silica.tools import tool_failed
 from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
 from silica.config import CONFIG, demo
-from silica.kernel import vault_files
+from silica.kernel import job_records, vault_files
 from silica.kernel.graph.mindmap import note_resolver
 from silica.metrics import emit
 from silica.model.llm import meter_totals
@@ -123,53 +123,17 @@ def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dic
 
 def _study_offer(text: str, messages: list[dict], plan_draft: dict | None = None) -> dict | None:
     """The study offer for the turn that just ended, from the notes it read
-    (learn.offer). An incognito chat gets none, as it gets no proposal, and
-    a demo none: its commands are Learn's and the demo's refused ones.
+    (learn.offer.decide). An incognito chat gets none, as it gets no proposal,
+    and a demo none: its commands are Learn's and the demo's refused ones.
     `plan_draft` is the plan this turn computed (_plan_context), offered for
     saving."""
-    from silica.config import withheld
     from silica.kernel import user_memory
-    from silica.kernel.learn.offer import study_offer
+    from silica.kernel.learn.offer import decide
 
     if demo() or user_memory.incognito():
         return None
     try:
-        from silica.kernel.learn.offer import asks_plan, plan_offer
-
-        if (plan_draft or asks_plan(text)) and "/learn" not in withheld("routes"):
-            # A plan asked of the chat: the one it computed, or the one Learn tracks.
-            from silica.kernel.learn.plans import list_plans
-
-            return plan_offer(text, list_plans(), plan_draft)
-        # The turn names its reads as the calls did, a title or a path; the
-        # ledger keys notes by path, so the titles are resolved first.
-        from silica.kernel.learn.offer import says_lost
-        from silica.kernel.graph.mindmap import _driver_graph, answer_resolver
-
-        graph = _driver_graph()
-        _resolve, read = answer_resolver(read_refs(messages), graph=graph)
-        if says_lost(text):
-            # The note the reader named is the one the offer is about: a turn
-            # that read nothing (the local 9B answered "punti di supporto" from
-            # memory), or one whose first read was a neighbour ("Limite
-            # d'errore con slack" for "variabili slack di margine", 2026-10-23).
-            low = text.casefold()
-            named = [(t, p) for p, t in graph[1].items()
-                     if len(t) >= 6 and t.casefold() in low and "/sources/" not in f"/{p}"]
-            read = [p for _t, p in sorted(named, key=lambda tp: -len(tp[0]))[:1]] + list(read)
-        from silica.kernel.learn.offer import allowed, log_offer, mode
-
-        if mode() == "off":
-            return None
-        offer = study_offer(text, [p if p.endswith(".md") else p + ".md" for p in read])
-        if offer is None:
-            return None
-        # Two offers a chat, none on a note whose offer went unused in the last
-        # week, and in shadow mode only the record (learn.offer, research rule).
-        chat = SESSION.chat.sid or ""
-        show = mode() == "on" and allowed(chat, offer["note"])
-        log_offer(chat, offer, shown=show)
-        return offer if show else None
+        return decide(text, read_refs(messages), SESSION.chat.sid or "", plan_draft)
     except Exception:
         # An offer is an extra: a ledger that does not parse costs the offer,
         # never the answer.
@@ -178,41 +142,16 @@ def _study_offer(text: str, messages: list[dict], plan_draft: dict | None = None
 
 
 def _escalation(text: str, messages: list[dict]) -> str:
-    """The escalation block for this turn, or "": the note the reader names,
-    stuck on it by the ledger, by an unused offer or by saying so twice. Logs
-    an offer acted on first. Nothing in an incognito chat."""
+    """The escalation block for this turn, or "" (learn.offer.decide_escalation).
+    Nothing in an incognito chat."""
     from silica.kernel import user_memory
-    from silica.kernel.learn import offer as learn_offer
+    from silica.kernel.learn.offer import decide_escalation
 
-    if user_memory.incognito() or learn_offer.mode() == "off":
+    if user_memory.incognito():
         return ""
     try:
-        chat = SESSION.chat.sid or ""
-        learn_offer.log_acted(chat, text)
-        from silica.kernel.graph.mindmap import _driver_graph
-        from silica.kernel.learn.quiz import entries
-
-        low = (text or "").casefold()
-        named = sorted(((t, p) for p, t in _driver_graph()[1].items()
-                        if len(t) >= 6 and t.casefold() in low and "/sources/" not in f"/{p}"),
-                       key=lambda tp: -len(tp[0]))
-        if not named:
-            return ""
-        name, path = named[0]
-        note = path if path.endswith(".md") else path + ".md"
         history = [str(m.get("content") or "") for m in messages if m.get("role") == "user"][-3:]
-        why = learn_offer.escalation(note, chat, text, history, entries())
-        if not why:
-            return ""
-        # in shadow mode the record only: what would have fired, nothing shown;
-        # a shadowed reason the same in any mode (ADR-0135 point 9)
-        shown = learn_offer.mode() == "on" and not learn_offer.shadowed(why)
-        learn_offer._append({"chat": chat, "note": note, "escalated": True, "why": why, "displayed": shown})
-        if not shown:
-            return ""
-        from silica.kernel.learn.items import read_note
-
-        return learn_offer.escalation_block(name, why, read_note(note))
+        return decide_escalation(text, history, SESSION.chat.sid or "")
     except Exception:
         # An escalation is an extra: a ledger that does not parse costs it,
         # never the turn.
@@ -918,7 +857,7 @@ def files_shown(files: Any) -> list[dict]:
             continue
         f = dict(f)
         if not f.get("notes") and f.get("job"):
-            rec = jobs.read(f["job"]) if jobs._ID.fullmatch(str(f["job"])) else None
+            rec = jobs.read(f["job"]) if job_records.is_id(str(f["job"])) else None
             f["notes"] = (rec or {}).get("notes") or []
         try:
             _, rest = vault_files.chat_rel(f["source"])

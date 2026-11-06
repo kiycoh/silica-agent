@@ -76,9 +76,9 @@ def client(lane, monkeypatch):
 
 
 def _jobs_dir() -> Path:
-    from silica.ui.web import jobs
+    from silica.kernel import job_records
 
-    return jobs.jobs_dir()
+    return job_records.directory()
 
 
 def _record(job_id: str) -> dict:

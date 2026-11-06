@@ -21,6 +21,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 from silica.kernel.base.notekey import ledger_key
+from silica.kernel.base.syntax import HEADING_RE
+from silica.kernel.learn import store
 
 # The reader saying it did not follow, in the two languages this was written
 # against. A word list, not a classifier: self-declared beats inferred. The
@@ -112,11 +114,6 @@ def struggles(paths: list[str], entries: list[dict]) -> dict[str, str]:
     return out
 
 
-def struggling(paths: list[str], entries: list[dict]) -> list[str]:
-    """The notes among `paths` the reader struggles with (`struggles`)."""
-    return list(struggles(paths, entries))
-
-
 def study_offer(text: str, reads: list[str], entries: list[dict] | None = None) -> dict | None:
     """The offer under an answer, or None: silent unless the ledger or the
     reader's words say so. The commands are ones the reader already has
@@ -148,10 +145,11 @@ AIDS_SHOWN = 5   # practice plus four forms: one short line under the answer
 _LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\S", re.M)
 _TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$", re.M)
 _STEP_RE = re.compile(r"^\s*\d+[.)]\s+\S", re.M)
-_HEADING_RE = re.compile(r"^#{1,6}\s+\S", re.M)
-_LINK_RE = re.compile(r"\[\[")
 
 
+# Where a note's content ends for its shape. Not noteshape.BODY_END_RE, which is
+# `##` only and takes "## Sources of error" for the tail: here a heading of any
+# level, and only the whole word.
 _SERVICE_RE = re.compile(r"^#{1,6}\s+(?:Relations|Sources)\s*$", re.M)
 
 
@@ -181,9 +179,9 @@ def shape_forms(text: str) -> list[str]:
         (spine, "slides"),
         (has_items, "table"),
         (len(_STEP_RE.findall(main)) >= 3 or formulas, "diagram"),
-        (len(_LINK_RE.findall(linked)) >= 5, "map"),
+        (linked.count("[[") >= 5, "map"),
         (len(_LIST_ITEM_RE.findall(main)) >= 3 or body.count("[^") >= 3, "cards"),
-        (len(_HEADING_RE.findall(main)) >= 3, "slides"),
+        (len(HEADING_RE.findall(main)) >= 3, "slides"),
     ]
     return list(dict.fromkeys(form for ok, form in fits if ok))
 
@@ -268,9 +266,9 @@ def plan_offer(text: str, plans: list[dict], draft: dict | None = None) -> dict 
 
 # What Learn's plan computes and the chat model would otherwise make up, put
 # in the turn before the model answers: asked for a study plan, the calendar
-# from the plan's steps and date (plans.day_by_day); asked what the syllabus
+# from the plan's steps and date (pace.day_by_day); asked what the syllabus
 # holds that the lectures do not, the topics no lecture deck mentions
-# (plans.lecture_gaps). The local 9B dated a plan "about 17 weeks" and listed
+# (sources.lecture_gaps). The local 9B dated a plan "about 17 weeks" and listed
 # half the programme as missing from the slides (2026-10-23).
 _SYLLABUS_RE = re.compile(r"\b(programma|scheda|syllabus|curriculum)\b", re.I)
 _LECTURES_RE = re.compile(r"\b(slides?|lezion[ei]|lectures?|lessons?)\b", re.I)
@@ -307,7 +305,7 @@ def plan_context(text: str, plans: list[dict], prev_user: str = "",
     message names, else the first open one. The calendar is appended by
     code, not copied by the model: told to reproduce it, the 9B merged three
     days and dropped 1 November (2026-10-23)."""
-    from silica.kernel.learn import plans as pl
+    from silica.kernel.learn import pace, plans as pl, sentence as reader, sources
 
     open_plans = [p for p in plans if p.get("status") != "completed"]
     low = text.casefold()
@@ -317,7 +315,7 @@ def plan_context(text: str, plans: list[dict], prev_user: str = "",
                None)
     sentence = "" if row else plan_request(text, prev_user, prev_answer)
     if sentence:
-        read = pl.read_sentence(sentence)
+        read = reader.read_sentence(sentence)
         if read.get("scope") and read.get("target"):
             kept = pl.target_text(read["scope"], read["target"])
             row = next((p for p in open_plans if p.get("scope") == read["scope"] and p.get("target") == kept), None)
@@ -334,12 +332,12 @@ def plan_context(text: str, plans: list[dict], prev_user: str = "",
 
         # the calendar of what is left: a step the ledger says passed is done
         passed = mastery.steps_passed(plan) if plan.get("steps") else []
-        rows = pl.day_by_day(plan, passed=passed)
+        rows = pace.day_by_day(plan, passed=passed)
         if not rows:
             return "", "", None
-        table = pl.day_by_day_table(rows, plan, passed)
+        table = pace.day_by_day_table(rows, plan, passed)
         facts = _heavy_steps(plan)
-        gaps = pl.lecture_gaps(plan) if plan.get("scope") == "steps" else None
+        gaps = sources.lecture_gaps(plan) if plan.get("scope") == "steps" else None
         if gaps and gaps[0]:
             facts += f" Topics of the syllabus no lecture deck mentions, to study from the book or the guide: {', '.join(gaps[0])}."
         return (f"[Memorize tracks the plan {plan['name']}, by {plan['by']}. Silica appends its day-by-day calendar, "
@@ -348,7 +346,7 @@ def plan_context(text: str, plans: list[dict], prev_user: str = "",
                 f"this plan built on these facts and the steps below, naming the steps and topics; no study tip "
                 f"that would fit any plan:\n{table}]",
                 f"Calendar {COMPUTED} from the plan {plan['name']} (by {plan['by']}):\n\n{table}", None)
-    found = pl.lecture_gaps(plan) if plan.get("scope") == "steps" else None
+    found = sources.lecture_gaps(plan) if plan.get("scope") == "steps" else None
     if not found:
         return "", "", None
     missing, decks = found
@@ -362,24 +360,26 @@ def _heavy_steps(plan: dict) -> str:
     """The advice stands on the plan's facts, not on study tips any plan
     would get: its heaviest steps, by the reference's hours when it gives
     them (ADR-0131), else by their notes."""
-    from silica.kernel.learn import plans as pl
+    from silica.kernel.learn.reference import step_label
 
     heavy = sorted((s for s in plan.get("steps") or [] if s.get("notes")),
                    key=lambda s: (-(s.get("hours") or 0), -len(s["notes"])))[:3]
     if not heavy:
         return ""
     return "The heaviest steps: " + "; ".join(
-        f"{pl._step_label(s)} ({s['hours']:g} {s.get('unit') or 'weight'})" if s.get("hours")
-        else f"{pl._step_label(s)} ({len(s['notes'])} notes)" for s in heavy) + "."
+        f"{step_label(s)} ({s['hours']:g} {s.get('unit') or 'weight'})" if s.get("hours")
+        else f"{step_label(s)} ({len(s['notes'])} notes)" for s in heavy) + "."
 
 
 def plan_draft(read: dict) -> dict:
-    """The plan a request reads as (plans.read_sentence), composed and read
+    """The plan a request reads as (sentence.read_sentence), composed and read
     back, not written: {body, plan, resolved}. `body` is what the line under
     the answer posts to /learn/plan, the Memorize form's own save, so the
     click writes the plan this turn showed. The name moves to "<name> 2" when
-    Plans/<name>.md exists, because the write gate refuses a path that does."""
+    its path exists, because the write gate refuses a path that does."""
+    from silica.kernel.base.manifest import in_write_dir
     from silica.kernel.learn import plans as pl
+    from silica.kernel.learn.sentence import name_of
     from silica.kernel.publish import PLANS_DIR
     from silica.kernel.base import frontmatter
 
@@ -388,16 +388,16 @@ def plan_draft(read: dict) -> dict:
         # read_sentence named it after the request ("Piano di studio", live
         # run 2026-11-03), a name the reader cannot edit here and plan_context
         # passes over: the material names it instead, as in read_sentence
-        base = pl.name_of(read["scope"], read["target"]) or "Plan"
+        base = name_of(read["scope"], read["target"]) or "Plan"
     name, n = base, 2
-    while (pl._vault() / PLANS_DIR / f"{name}.md").exists():
+    while (store.vault() / in_write_dir(PLANS_DIR) / f"{name}.md").exists():
         name, n = f"{base} {n}", n + 1
     body = {"name": name, "scope": read["scope"], "target": read["target"],
             "restrict": read.get("restrict") or "", "by": read.get("by") or None, "templates": True}
     if read.get("objectives"):
         body["objectives"] = read["objectives"]
-    d = pl.compose_plan(name, body["scope"], body["target"], by=body["by"], restrict=body["restrict"],
-                        objectives=body.get("objectives"), folder=PLANS_DIR, templates=True)
+    d = pl.compose_plan(pl.PlanSpec(name, body["scope"], body["target"], by=body["by"], restrict=body["restrict"],
+                                    objectives=body.get("objectives"), folder=PLANS_DIR, templates=True))
     plan = pl.read_plan(d["path"], frontmatter.dump(d["props"], d["body"]))
     return {"body": body, "plan": plan, "resolved": d["resolved"]}
 
@@ -406,7 +406,7 @@ def draft_context(draft: dict) -> tuple[str, str]:
     """(the block for the model, the plan appended under its answer) for a
     plan computed and not saved: its steps in the reference's order, or its
     parts when it has none, and the day-by-day calendar when it has a date."""
-    from silica.kernel.learn import plans as pl
+    from silica.kernel.learn import pace
 
     plan, res = draft["plan"], draft["resolved"]
     material = plan["target"] + (f" under {plan['restrict']}" if plan.get("restrict") else "")
@@ -420,10 +420,10 @@ def draft_context(draft: dict) -> tuple[str, str]:
                  + (f" and {len(n['leaves']) - 3} more" if len(n["leaves"]) > 3 else "")
                  for n in res["tree"] if not n.get("gap") and n.get("leaves")]
         listing = "\n".join(parts[:TREE_SHOWN] + ([f"- and {len(parts) - TREE_SHOWN} more"] if len(parts) > TREE_SHOWN else []))
-    rows = pl.day_by_day(plan) if steps else None
-    table = pl.day_by_day_table(rows, plan) if rows else ""
+    rows = pace.day_by_day(plan) if steps else None
+    table = pace.day_by_day_table(rows, plan) if rows else ""
     facts = f"{len(res['paths'])} notes" + (f" in {len(steps)} steps." if steps else ".")
-    b = pl.budget(plan) if rows else None
+    b = pace.budget(plan) if rows else None
     if b:
         # the count the model otherwise makes up: "6 passi in 6 giornate" for 37 days (2026-11-03)
         facts += f" {b['days']} days to the date, {b['study_days']} of them for the steps, then review."
@@ -456,12 +456,12 @@ def ask_block() -> str:
     """The turn that asks for a study plan and names no material the vault
     holds: the model asks for it, naming the vault's largest folders so the
     question can be answered by picking one, and writes no plan of its own."""
-    from silica.kernel.learn import plans as pl
+    from silica.kernel.learn import sentence as reader
     from silica.kernel.publish import never
 
     try:
         # a folder of Silica's own (Plans, sources, the inbox) is never material
-        folders = sorted(((c, f) for f, c in pl.folders_of().items() if f.count("/") <= 2 and not never(f + "_")),
+        folders = sorted(((c, f) for f, c in reader.folders_of().items() if f.count("/") <= 2 and not never(f + "_")),
                          reverse=True)[:FOLDERS_NAMED]
     except Exception:
         # the examples are an extra: a vault that does not scan still gets the question
@@ -517,31 +517,18 @@ def _log_path():
 
 
 def _records() -> list[dict]:
-    import json
-
     try:
-        lines = _log_path().read_text(encoding="utf-8").splitlines()
+        return store.parse_rows(_log_path().read_text(encoding="utf-8"))
     except OSError:
         return []
-    out = []
-    for line in lines:
-        try:
-            out.append(json.loads(line))
-        except ValueError:
-            continue  # a torn last line from a crash is one lost record, not a lost log
-    return out
 
 
 def _append(record: dict) -> None:
-    import json
     from datetime import datetime, timezone
 
     record = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), **record}
     try:
-        path = _log_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        store.append_rows(_log_path(), [record])
     except OSError:
         pass  # a log that cannot be written costs its record, never the turn
 
@@ -619,6 +606,88 @@ def escalation(note: str, chat: str, text: str, history: list[str], entries: lis
 def shadowed(why: str) -> bool:
     """A reason that is logged and never shown, whatever the mode."""
     return why == CONFIDENT_REASON and CONFIDENT_SHADOW
+
+
+def named_notes(text: str, titles: dict[str, str]) -> list[tuple[str, str]]:
+    """(title, path) of the notes a message names, the longest title first:
+    `titles` is {path: title}, the driver graph's. Six letters at least, so a
+    short title is not a word of the sentence, and never a source leaf."""
+    low = (text or "").casefold()
+    return sorted(((t, p) for p, t in titles.items()
+                   if len(t) >= 6 and t.casefold() in low and "/sources/" not in f"/{p}"), key=lambda tp: -len(tp[0]))
+
+
+def decide(text: str, refs: list[str], chat: str, plan_draft: dict | None = None) -> dict | None:
+    """The offer under the answer that just ended, or None: a plan the turn
+    computed or asked for, else a way to work on what the turn read (`refs`,
+    titles or paths as its calls named them). Owns the rule's whole sequence:
+    the mode, two offers a chat, none on a note whose offer went unused in the
+    last week, and in shadow mode only the record."""
+    from silica.config import withheld
+    from silica.kernel.graph import mindmap
+
+    if (plan_draft or asks_plan(text)) and "/learn" not in withheld("routes"):
+        # A plan asked of the chat: the one it computed, or the one Learn tracks.
+        from silica.kernel.learn.plans import list_plans
+
+        return plan_offer(text, list_plans(), plan_draft)
+    # The turn names its reads as the calls did, a title or a path; the
+    # ledger keys notes by path, so the titles are resolved first.
+    graph = mindmap._driver_graph()
+    _resolve, read = mindmap.answer_resolver(refs, graph=graph)
+    if says_lost(text):
+        # The note the reader named is the one the offer is about: a turn
+        # that read nothing (the local 9B answered "punti di supporto" from
+        # memory), or one whose first read was a neighbour ("Limite
+        # d'errore con slack" for "variabili slack di margine", 2026-10-23).
+        read = [p for _t, p in named_notes(text, graph[1])[:1]] + list(read)
+    if mode() == "off":
+        return None
+    offer = study_offer(text, [p if p.endswith(".md") else p + ".md" for p in read])
+    if offer is None:
+        return None
+    show = mode() == "on" and allowed(chat, offer["note"])
+    log_offer(chat, offer, shown=show)
+    return offer if show else None
+
+
+def decide_escalation(text: str, history: list[str], chat: str) -> str:
+    """The block that makes this turn's answer the aid, or "": the note the
+    reader names, stuck on it by the ledger, by an unused offer or by saying so
+    twice. Records an offer acted on first. In shadow mode the record only:
+    what would have fired, nothing shown; a shadowed reason the same in any
+    mode (ADR-0135 point 9)."""
+    from silica.kernel.graph import mindmap
+    from silica.kernel.learn.items import read_note
+    from silica.kernel.learn.quiz import entries
+
+    if mode() == "off":
+        return ""
+    log_acted(chat, text)
+    named = named_notes(text, mindmap._driver_graph()[1])
+    if not named:
+        return ""
+    name, path = named[0]
+    note = path if path.endswith(".md") else path + ".md"
+    why = escalation(note, chat, text, history, entries())
+    if not why:
+        return ""
+    shown = mode() == "on" and not shadowed(why)
+    _append({"chat": chat, "note": note, "escalated": True, "why": why, "displayed": shown})
+    return escalation_block(name, why, read_note(note)) if shown else ""
+
+
+def decide_aid(note: str, session: str) -> tuple[str, bool]:
+    """(why, shown) for a Learn miss on `note`, logged: "" when nothing
+    escalates. The session keeps which notes spent their one aid."""
+    from silica.kernel.learn import quiz
+
+    why = escalation(note, "", "", [], quiz.entries())
+    if not why:
+        return "", False
+    shown = mode() == "on" and not shadowed(why)
+    log_aid(note, session, why, shown)
+    return why, shown
 
 
 def confident_readout(entries: list[dict], records: list[dict] | None = None) -> dict:

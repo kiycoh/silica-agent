@@ -115,7 +115,7 @@ def test_membership_of_marks_listed_and_other_reasons(vault):
 def test_a_plan_scoped_to_a_workspace_follows_its_members_live(vault):
     from silica.kernel.learn import plans
 
-    out = plans.write_plan("Exam prep", "workspace", "Statistics exam", objectives=["explain"])
+    out = plans.write_plan(plans.PlanSpec("Exam prep", "workspace", "Statistics exam", objectives=["explain"]))
     plan = plans.read_plan(out["path"])
     assert plan["scope"] == "workspace" and plan["target"] == "[[Workspaces/Statistics exam]]"
     before = set(plans.scope_of(plan)["paths"])

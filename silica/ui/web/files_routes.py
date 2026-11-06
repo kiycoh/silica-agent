@@ -126,13 +126,13 @@ async def chat_file_add(payload: dict):
     """"add to vault" on a file of the open chat (ADR-0121 point 5): the file
     and its notes copied into the Inbox, with no agent turn. The notes are
     the job's when the file was converted, else the file itself."""
-    from silica.ui.web import jobs
+    from silica.kernel import job_records
 
     source = str(payload.get("source") or "")
     vault_files.chat_rel(source, SESSION.chat.sid or "")
     notes = [source]
     vault = CONFIG.vault_path or ""
-    done = [r for r in jobs._all() if r.get("vault") == vault and r["source"].get("path") == source
+    done = [r for r in job_records.all_records() if r.get("vault") == vault and r["source"].get("path") == source
             and r.get("state") == "done" and r.get("notes")]
     if done:
         notes = done[-1]["notes"]

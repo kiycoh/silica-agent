@@ -97,7 +97,7 @@ def reply_language(q: str, production: str) -> str:
     answer is too short to detect on."""
     from silica.kernel.text import language
 
-    return language.display_name(language.detect(f"{q} {production}"))
+    return language.named(f"{q} {production}")
 
 
 def rating_for(outcome: str, *, hints: int, told: bool, conf: int | None, precise: bool = False) -> int:
@@ -113,7 +113,7 @@ def rating_for(outcome: str, *, hints: int, told: bool, conf: int | None, precis
     return rating
 
 
-def _base(item: dict, grader: str) -> dict:
+def base(item: dict, grader: str) -> dict:
     return {
         "grader": grader, "claim": item.get("claim", ""), "span": item.get("span", ""),
         "source": dict(item.get("source") or {}), "answer": item.get("answer", ""),
@@ -124,7 +124,7 @@ def _base(item: dict, grader: str) -> dict:
 def told_grade(item: dict, *, hints: int) -> dict:
     """"Just tell me", priced honestly: correct false, Hard at best, no call."""
     del hints  # told already caps at Hard; a hint before it changes nothing
-    out = _base(item, "told")
+    out = base(item, "told")
     out.update(grade="lapsed", correct=False, rating=HARD, feedback_line=TOLD_LINE,
                rubric_notes="", told=True, skip=False)
     return out
@@ -134,7 +134,7 @@ def self_grade(item: dict, *, rating: int, hints: int, told: bool) -> dict:
     """The reader's own judgment (D11): correct is rating >= Good, the caps
     still apply, and nothing here supplies independent validation."""
     rating = max(AGAIN, min(EASY, int(rating)))
-    out = _base(item, "self")
+    out = base(item, "self")
     outcome = "recalled" if rating >= GOOD else ("partial" if rating == HARD else "lapsed")
     out.update(grade=outcome, correct=rating >= GOOD,
                rating=min(rating, HARD) if (hints or told) else rating,
@@ -197,7 +197,7 @@ def grade(item: dict, *, production: str, conf: int | None, hints: int, told: bo
     if told:
         return told_grade(item, hints=hints)
     if not production.strip():
-        out = _base(item, "model")
+        out = base(item, "model")
         out.update(grade="lapsed", correct=False, rating=rating_for("lapsed", hints=hints, told=False, conf=conf),
                    feedback_line="No answer was given.", rubric_notes="", skip=False)
         return out
@@ -214,11 +214,11 @@ def grade(item: dict, *, production: str, conf: int | None, hints: int, told: bo
     except Exception as exc:
         logger.warning("learn: grader call failed (%s)", exc)
     if parsed is None:
-        out = _base(item, "self")
+        out = base(item, "self")
         out.update(grade=None, correct=None, rating=None, feedback_line="", rubric_notes="",
                    needs_self_grade=True, skip=False)
         return out
-    out = _base(item, "model")
+    out = base(item, "model")
     out.update(parsed)
     out["correct"] = parsed["grade"] == "recalled"
     if parsed["note_defect"] and _no_source_to_disagree(item):
@@ -300,7 +300,7 @@ def teach_summary(item: dict, transcript: list[dict], claims: list[str]) -> dict
         parsed = parse_reply(reply) if reply else None
     except Exception as exc:
         logger.warning("learn: teach summary call failed (%s)", exc)
-    out = _base(item, "self" if parsed is None else "model")
+    out = base(item, "self" if parsed is None else "model")
     if parsed is None:
         out.update(grade=None, correct=None, rating=None, feedback_line="", rubric_notes="",
                    needs_self_grade=True, skip=False, summary="")

@@ -37,7 +37,7 @@ def test_the_reason_fires_on_the_last_answer_only_and_the_old_reasons_win(monkey
 
 
 def test_a_confident_miss_in_a_session_is_logged_not_shown_and_keeps_the_notes_aid(client):
-    from silica.ui.web import learn_routes
+    from silica.kernel.learn import session as learn_session
 
     c, _ = client
     s = _start(c, plan="Plans/ML.md")
@@ -47,7 +47,7 @@ def test_a_confident_miss_in_a_session_is_logged_not_shown_and_keeps_the_notes_a
     assert r["escalate"] is None
     recs = [x for x in offer._records() if x.get("why") == offer.CONFIDENT_REASON]
     assert len(recs) == 1 and recs[0]["displayed"] is False and recs[0]["session"] == s["id"]
-    assert it["path"] not in (learn_routes._LIVE.get("escalated") or set())
+    assert it["path"] not in (learn_session._LIVE.get("escalated") or set())
     from silica.kernel.learn import quiz
 
     out = offer.confident_readout(quiz.entries())

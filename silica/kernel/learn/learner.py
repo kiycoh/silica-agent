@@ -69,7 +69,7 @@ def gain_fn(entries: list[dict], store=None):
             measured = _measured_stems(entries, getattr(store, "lang", "en"))
             adj_mass = {s: sum(nb.values()) for s, nb in store.adjacency().items()}
         except Exception:
-            store = None
+            store = None   # a store that does not read ranks as no store: by authorship alone
 
     def gain(r: dict) -> float:
         if store is None:
@@ -77,7 +77,7 @@ def gain_fn(entries: list[dict], store=None):
         try:
             nodes = store.note_nodes(r["path"])
         except Exception:
-            return 0.0
+            return 0.0   # a note the store does not hold has no gain to rank by
         return sum(adj_mass.get(s, 0.0) for s in nodes if s not in measured)
 
     return gain
@@ -247,7 +247,7 @@ def _prereq_disk(sig: str, value: dict[str, list[str]] | None = None) -> dict[st
         return None
 
 
-def _topological(rows: list[dict], prereqs: dict[str, list[str]], order_key) -> list[dict]:
+def topological(rows: list[dict], prereqs: dict[str, list[str]], order_key) -> list[dict]:
     """Kahn's order over the prerequisite edges among `rows`, ties by `order_key`.
 
     A note with an unknown or out-of-scope prerequisite is free (no edge). A
@@ -357,7 +357,7 @@ def review_queue(
         state_key = lambda r: (r["R"] is not None, r["R"] if r["R"] is not None else 0.0)
         # Prerequisite order is the syllabus order /learn asks for; within a
         # rank the old unknown-first order stands.
-        return _topological(scoped, prereq_keys, state_key)
+        return topological(scoped, prereq_keys, state_key)
 
     gain = gain_fn(entries, _store)
 

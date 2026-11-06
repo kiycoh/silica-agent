@@ -20,7 +20,7 @@ from silica.kernel.base.notekey import ledger_key
 
 PER_STEP = 2
 # Ten steps of two, twenty questions: under the session's cap of 24
-# (learn_routes.start_session). A longer plan places its first ten steps.
+# (session.start). A longer plan places its first ten steps.
 MAX_STEPS = 10
 ORIGIN = "placement"
 
@@ -32,7 +32,7 @@ def _ordered(paths: list[str]) -> list[str]:
     prereqs = {ledger_key(k): v for k, v in learner.prerequisites_map().items()}
     place = {p: i for i, p in enumerate(paths)}
     rows = [{"path": p} for p in paths]
-    return [r["path"] for r in learner._topological(rows, prereqs, lambda r: place[r["path"]])]
+    return [r["path"] for r in learner.topological(rows, prereqs, lambda r: place[r["path"]])]
 
 
 def step_paths(plan: dict, notes: dict | None = None) -> list[list[str]]:
@@ -40,14 +40,14 @@ def step_paths(plan: dict, notes: dict | None = None) -> list[list[str]]:
     gives them, with the vault's metadata read once: resolve_title alone reads
     it on every call, 0.08 s a title, which made a 241-note plan's page 27 s
     slower (measured 2026-10-27)."""
-    from silica.kernel.learn import plans
+    from silica.kernel.learn import sources, store
 
-    notes = notes if notes is not None else note_index.meta(plans._vault())
+    notes = notes if notes is not None else note_index.meta(store.vault())
     out = []
     for step in plan.get("steps") or []:
         seen: list[str] = []
         for title in step.get("notes") or []:
-            path = plans.resolve_title(title, notes)
+            path = sources.resolve_title(title, notes)
             if path and path not in seen:
                 seen.append(path)
         out.append(seen)

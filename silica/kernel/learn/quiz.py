@@ -14,12 +14,12 @@ shows up in a profile, not before.
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 from silica.kernel.base.notekey import ledger_key
+from silica.kernel.learn import store
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,7 @@ def record(results: list[dict]) -> int:
     existing "#^id" citation into the note). Absent fields are omitted, so a
     legacy-shaped call writes a legacy-shaped line.
 
-    Returns the number of entries written. Appends rather than rewriting, so
-    a crash mid-write costs the tail of one round and never the history.
+    Returns the number of entries written.
     """
     now = datetime.now(timezone.utc).isoformat()
     lines = []
@@ -57,13 +56,10 @@ def record(results: list[dict]) -> int:
             if v:
                 rec[k] = v
         _v2_fields(r, rec)
-        lines.append(json.dumps(rec, ensure_ascii=False))
+        lines.append(rec)
     if not lines:
         return 0
-    p = log_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    store.append_rows(log_path(), lines)
     return len(lines)
 
 
@@ -147,16 +143,12 @@ def entries(path: Path | None = None) -> list[dict]:
         logger.warning("quiz: unreadable log %s (%s)", p, exc)
         return []
     out: list[dict] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    for rec in store.parse_rows(text):
         try:
-            rec = json.loads(line)
             rec["path"] = str(rec["path"])
             rec["correct"] = bool(rec["correct"])
-        except (ValueError, KeyError, TypeError):
-            continue  # one torn or hand-edited line must not blind the rest
+        except (KeyError, TypeError):
+            continue  # a line with no path or verdict carries no event
         out.append(rec)
     out.sort(key=lambda e: str(e.get("ts") or ""))
     return out
@@ -173,15 +165,11 @@ def stats() -> dict[str, dict]:
     except OSError as exc:
         logger.warning("quiz: unreadable log %s (%s)", p, exc)
         return {}
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    for rec in store.parse_rows(text):
         try:
-            rec = json.loads(line)
             path = str(rec["path"])
-        except (ValueError, KeyError, TypeError):
-            continue  # one torn or hand-edited line must not blind the rest
+        except (KeyError, TypeError):
+            continue  # a line with no path carries no event
         s = out.setdefault(ledger_key(path), {"path": path, "misses": 0, "correct": 0, "last": ""})
         s["correct" if rec.get("correct") else "misses"] += 1
         ts = str(rec.get("ts") or "")
