@@ -110,7 +110,7 @@ def test_a_raw_outside_the_vault_or_in_a_chat_is_offered_nowhere_and_the_route_r
 
 
 def test_the_rail_lists_a_raw_in_its_folder_and_the_frame_does_not(client, monkeypatch):
-    from silica.ui.web.graph_view import render_tree
+    from silica.ui.web.file_tree import frame_tree, rail_tree
 
     _split_survey(monkeypatch)
     tree = client.get("/vault_info").json()["tree"]
@@ -118,9 +118,9 @@ def test_the_rail_lists_a_raw_in_its_folder_and_the_frame_does_not(client, monke
 
     assert 'class="tree-file" href="/raw?path=Inbox%2Fsurvey.md"' in tree
     assert 'data-raw="Inbox/survey.pdf"' in tree and '<span class="tree-ext">.pdf</span>' in tree
-    assert "tree-file" not in render_tree([{"path": "Inbox/survey.md", "id": "Inbox/survey.md"}], raws=raws)
+    assert "tree-file" not in frame_tree([{"path": "Inbox/survey.md", "id": "Inbox/survey.md"}])
     # the folder counts notes, which its menu's delete removes, and not the raw beside them
-    rail = render_tree([{"path": "Inbox/survey.md", "id": "Inbox/survey.md"}], actions=True, raws=raws)
+    rail = rail_tree([{"path": "Inbox/survey.md", "id": "Inbox/survey.md"}], raws)
     assert '<summary draggable="true">Inbox<span class="tree-n">1</span>' in rail
 
 

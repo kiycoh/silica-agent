@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from silica.config import CONFIG  # noqa: E402
 from silica.onboarding.wizard import merge_env, resolve_env_path  # noqa: E402
+from silica.onboarding import settings_ops
 from silica.ui.web import settings as st  # noqa: E402
 
 
@@ -49,10 +50,12 @@ def test_the_env_holds_keys_so_only_its_owner_reads_it(env_file):
     both end 0600: the file holds every API key the user has."""
     import os
 
-    st.write_env({"SILICA_MODEL": "a"})
+    from silica.onboarding.wizard import write_env
+
+    write_env({"SILICA_MODEL": "a"})
     assert os.stat(env_file).st_mode & 0o777 == 0o600
     os.chmod(env_file, 0o664)
-    st.write_env({"SILICA_MODEL": "b"})
+    write_env({"SILICA_MODEL": "b"})
     assert os.stat(env_file).st_mode & 0o777 == 0o600
 
 
@@ -133,9 +136,11 @@ def test_loopback_names_are_served(client, host):
 def test_changing_the_provider_writes_its_whole_group_at_once(env_file, monkeypatch):
     """No intermediate state where the provider is new and the model is old:
     both move in one merge_env, so there is no instant to observe them apart."""
+    from silica.onboarding import wizard
+
     writes = []
-    real_write = st.write_env
-    monkeypatch.setattr(st, "write_env", lambda u: (writes.append(dict(u)), real_write(u))[1])
+    real_write = wizard.write_env
+    monkeypatch.setattr(wizard, "write_env", lambda u: (writes.append(dict(u)), real_write(u))[1])
     monkeypatch.setattr(CONFIG, "model", "qwen3-32b")
     monkeypatch.setattr(CONFIG, "_provider", "lmstudio")
     # apply() makes the keys live by writing os.environ; declare them here so
@@ -199,14 +204,14 @@ def test_safe_mode_round_trips_through_vault_yaml_not_the_env(tmp_vault, env_fil
     (root / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")
     reset_manifest_cache()
     row = next(r for rows in st.sections().values() for r in rows
-               if r.key == st.SAFE_MODE_KEY)
+               if r.key == settings_ops.SAFE_MODE_KEY)
     assert st._value(row) == "true"
 
-    assert st.apply(st.SAFE_MODE_KEY, "false")["ok"] is True
+    assert st.apply(settings_ops.SAFE_MODE_KEY, "false")["ok"] is True
     assert st._value(row) == "false"
     assert 'write_dir: ""' in (root / "vault.yaml").read_text(encoding="utf-8")
 
-    result = st.apply(st.SAFE_MODE_KEY, "true")
+    result = st.apply(settings_ops.SAFE_MODE_KEY, "true")
     assert result["values"] == {"safe_mode": "true", "write_dir": "silica"}
     assert st._value(row) == "true"
     assert not env_file.exists()  # never an env var
@@ -220,7 +225,7 @@ def test_the_bug_payload_carries_no_api_key(tmp_vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "provider_api_key", secret)
     monkeypatch.setattr(CONFIG, "tavily_api_key", secret)
 
-    payload = st.bug_report()["payload"]
+    payload = settings_ops.bug_report(st.reportable())["payload"]
 
     assert secret not in payload
     assert "silica" in payload  # it still says something useful

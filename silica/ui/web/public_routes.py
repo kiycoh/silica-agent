@@ -17,8 +17,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 
+from silica.onboarding import settings_ops
 from silica.ui.web import drop, session
-from silica.ui.web.settings import _tilde
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ def _view() -> dict:
         # where the files are, on a laptop: the person serves them; a hosted
         # path names the server's disk and says nothing to the account. The home
         # folder reads as ~, as the bug report prints it: the line is read, not typed.
-        "dir": _tilde(str(publish.site_root(h) / "live")) if h and not hosted() else "",
+        "dir": settings_ops.tilde(str(publish.site_root(h) / "live")) if h and not hosted() else "",
         "private": publish.private_allowed(),
         "max": publish.max_vaults(),
         "plan": publish.paid_plan(),

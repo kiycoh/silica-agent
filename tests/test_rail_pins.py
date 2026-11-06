@@ -25,15 +25,15 @@ NODES = [
 
 
 def test_the_tree_carries_a_pin_only_where_there_is_a_rail_to_pin_into():
-    """The same render_tree draws the rail's tree and the graph frame's own
+    """One tree draws in the rail and in the graph frame's own
     sidebar. A pin in the frame would point at a rail that document does not
     have, so the action is asked for rather than assumed."""
-    from silica.ui.web.graph_view import render_tree
+    from silica.ui.web.file_tree import frame_tree, rail_tree
 
-    plain = render_tree(NODES)
+    plain = frame_tree(NODES)
     assert "tree-pin" not in plain and "tree-row" not in plain
 
-    with_pins = render_tree(NODES, actions=True)
+    with_pins = rail_tree(NODES)
     assert with_pins.count('class="tree-pin"') == 2      # two notes, no ghost
     assert with_pins.count('class="tree-row"') == 2
     # the pin names the note it pins, for the click and for the screen reader
@@ -49,9 +49,9 @@ def test_the_tree_carries_a_pin_only_where_there_is_a_rail_to_pin_into():
 
 def test_the_rail_asks_for_the_pins_and_the_frame_does_not():
     routes = (ROOT / "silica" / "ui" / "web" / "explore_routes.py").read_text()
-    assert "render_tree(nodes, actions=True, raws=_tree_raws())" in routes
+    assert "file_tree.rail_tree(nodes, _tree_raws())" in routes
     frame = (ROOT / "silica" / "ui" / "web" / "graph_view.py").read_text()
-    assert "tree_html = render_tree(nodes)" in frame
+    assert "tree_html = file_tree.frame_tree(nodes)" in frame
 
 
 def test_the_pin_click_does_not_also_open_the_note():

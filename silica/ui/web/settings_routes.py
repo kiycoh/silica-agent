@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 
 from silica.config import CONFIG
+from silica.onboarding import settings_ops
 from silica.kernel.write import session_changes
 from silica.ui.web import session
 from silica.ui.web.session import SESSION
@@ -86,7 +87,7 @@ def get_settings():
 
     on_server = hosted()
     return {
-        "env_path": st.short_path(resolve_env_path()),
+        "env_path": settings_ops.short_path(resolve_env_path()),
         "busy": SESSION.busy,
         # No hosted row has a pick-list fed by /models (ADR-0104 point 3), so
         # the four probes would run on every opening of the panel for nothing.
@@ -209,7 +210,7 @@ def get_bug_report():
     is exactly the wrong place for one."""
     from silica.ui.web import settings as st
 
-    return st.bug_report()
+    return settings_ops.bug_report(st.reportable())
 
 
 # --- User memory (ADR-0076) ----------------------------------------------------
@@ -228,11 +229,10 @@ def _memory_scope(scope: str) -> str:
 @router.get("/memory")
 def memory_view():
     from silica.kernel import user_memory
-    from silica.ui.web import settings as st
 
     view = user_memory.view()
     for s in view["scopes"].values():
-        s["path"] = st.short_path(Path(s["path"])) if s["path"] else ""
+        s["path"] = settings_ops.short_path(Path(s["path"])) if s["path"] else ""
     return view
 
 
@@ -315,15 +315,13 @@ async def connectors_act(name: str, action: str, request: Request):
 
 @router.get("/endpoints")
 def get_endpoints():
-    from silica.ui.web import settings as st
 
-    return st.endpoint_status()
+    return settings_ops.endpoint_status()
 
 
 @router.post("/endpoints/start")
 async def start_endpoint(payload: dict):
     """Start one local endpoint from the command its own .env key names. Loading
     a model takes tens of seconds, so this waits on a worker thread."""
-    from silica.ui.web import settings as st
 
-    return await asyncio.to_thread(st.start_endpoint, str(payload.get("label", "")))
+    return await asyncio.to_thread(settings_ops.start_endpoint, str(payload.get("label", "")))

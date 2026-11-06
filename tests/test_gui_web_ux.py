@@ -567,10 +567,10 @@ def test_rename_and_delete_reach_the_narration_store(client, monkeypatch):
 
 
 def test_tree_rows_drop_the_extension_and_folders_carry_counts():
-    from silica.ui.web.graph_view import render_tree
+    from silica.ui.web.file_tree import rail_tree
 
-    html = render_tree([{"id": "a/b.md", "path": "a/b.md", "type": "note"},
-                        {"id": "a/c.md", "path": "a/c.md", "type": "note"}], actions=True)
+    html = rail_tree([{"id": "a/b.md", "path": "a/b.md", "type": "note"},
+                      {"id": "a/c.md", "path": "a/c.md", "type": "note"}])
     assert '<span class="tree-n">2</span>' in html
     assert ">b</a>" in html and "b.md</a>" not in html
 

@@ -13,7 +13,7 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from silica.ui.web.graph_view import render_tree  # noqa: E402
+from silica.ui.web.file_tree import frame_tree, rail_tree  # noqa: E402
 
 STATIC = Path(__file__).resolve().parents[1] / "silica" / "ui" / "web" / "static"
 
@@ -39,7 +39,7 @@ def client(tmp_vault):
 # -- the tree -----------------------------------------------------------------
 
 def test_the_rail_row_carries_the_menu_and_no_diamond():
-    html = render_tree([{"id": "a/b/c.md", "path": "a/b/c.md", "type": "note"}], actions=True)
+    html = rail_tree([{"id": "a/b/c.md", "path": "a/b/c.md", "type": "note"}])
     assert 'class="tree-more" data-note="a/b/c.md"' in html
     # the folder's own path, as the ◇ carried it: the drag onto a workspace reads it
     assert 'class="tree-more" data-folder="a"' in html and 'data-folder="a/b"' in html
@@ -47,7 +47,7 @@ def test_the_rail_row_carries_the_menu_and_no_diamond():
 
 
 def test_the_frame_tree_has_no_menu():
-    assert "tree-more" not in render_tree([{"id": "a/c.md", "path": "a/c.md", "type": "note"}])
+    assert "tree-more" not in frame_tree([{"id": "a/c.md", "path": "a/c.md", "type": "note"}])
 
 
 def test_no_script_or_style_still_looks_for_the_diamond():

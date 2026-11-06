@@ -17,7 +17,7 @@ from silica.config import CONFIG
 from silica.kernel.graph.mindmap import note_resolver
 from silica.kernel.report import brief, note_context
 from silica.kernel.text import note_parts
-from silica.ui.web import render
+from silica.ui.web import file_tree, render
 from silica.ui.web.failures import explain as _failure
 
 logger = logging.getLogger(__name__)
@@ -590,7 +590,6 @@ def vault_info():
     from silica.kernel.check.web import is_open as check_web_open
     from silica.kernel.publish import never_dirs
     from silica.kernel.graph.graph_export import build_graph_data
-    from silica.ui.web.graph_view import render_tree
 
     try:
         nodes, edges = build_graph_data(folder="")
@@ -605,7 +604,7 @@ def vault_info():
         # actions=True: the rail's tree carries a pin per note. The graph
         # frame renders the same tree without one, because a pin there would
         # point at a rail that document does not have.
-        "tree": render_tree(nodes, actions=True, raws=_tree_raws()),
+        "tree": file_tree.rail_tree(nodes, _tree_raws()),
         # Silica's own folders: no folder in view and no "Write a note" (ADR-0155
         # points 4, 5). The page asks here because it has the tree from here.
         "never": list(never_dirs()),

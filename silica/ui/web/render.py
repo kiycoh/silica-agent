@@ -545,8 +545,8 @@ def _foreign_img_link(src: str) -> str:
     parts = urlsplit("".join(ch for ch in src if ord(ch) > 0x20).replace("\\", "/"))
     host = _html.escape(parts.hostname or "another site")
     if parts.scheme.lower() not in ("http", "https", ""):
-        return f'<span class="remote-img">image from {host}</span>'
-    return (f'<a class="remote-img" href="{_html.escape(src, quote=True)}" rel="noopener noreferrer" '
+        return f'<span>image from {host}</span>'
+    return (f'<a href="{_html.escape(src, quote=True)}" rel="noopener noreferrer" '
             f'target="_blank">image from {host}</a>')
 
 
