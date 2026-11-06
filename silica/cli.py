@@ -1206,6 +1206,24 @@ def _check_judge():
     return lambda text, passages: jd.judge(text, passages, decide=decide, chat=chat)
 
 
+def _check_web_legs():
+    """What a selection's web check reads with (ADR-0110, amendment of
+    2026-11-06): the lanes, fetch_page and one tool-less call for the question.
+    Neither the lanes nor the fetch touch a chat turn's web state."""
+    from silica.agent.providers import get_provider
+    from silica.config import CONFIG
+    from silica.sources.web_fetch import fetch_page
+    from silica.sources.web_research import search_lanes
+
+    def ask(prompt: str) -> str:
+        # reasoning off, as _check_judge's chat: 80 tokens hold a question and
+        # no thinking pass.
+        return get_provider(CONFIG).call_llm(messages=[{"role": "user", "content": prompt}],
+                                             max_tokens=80, temperature=0.0, reasoning=False).text or ""
+
+    return search_lanes, fetch_page, ask
+
+
 def _check_legs():
     """The passage search and the dense leg a /check reads with. The dense leg
     is the vault's own embed index; a vault without one, an embedder that is

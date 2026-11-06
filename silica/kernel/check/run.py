@@ -284,9 +284,32 @@ def overlapping(blocks: list, lines: tuple[int, int]) -> list:
     return [b for b in blocks if b.line <= lines[1] and (b.end or b.line) >= lines[0]]
 
 
+def _web_key(block: Any) -> str:
+    """A web verdict's place in the cache: the block's words alone, not the
+    passages a model verdict is keyed by, since no search reruns to find them.
+    An edit orphans it, which is what turns it hollow."""
+    return hashlib.sha1(block.clean.encode()).hexdigest()[:16]
+
+
+def keep_web(vault: str, path: str, block: Any, row: dict) -> None:
+    """A web verdict with its block: URL, quote and day stay in `.silica/checks/`,
+    and none of it in the note (ADR-0110 point 9, amendment point 13). `row` is
+    its finding or state; `line` and `end` are taken from the block when it is
+    read back, since text above it may move it.
+    shortcut: a selection across two blocks is kept with the first alone, so an
+    edit of the second leaves it solid; reopen if a statement that crosses a
+    block boundary is ever pressed in a gate."""
+    data = read_cache(vault, path) or {"verdicts": {}}
+    data.setdefault("web", {})[_web_key(block)] = row
+    cache_file = _cache_path(vault, path)
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+
 def read_cache(vault: str, path: str) -> dict:
-    """{"verdicts": {key: verdict}, "report": the last check's report}; empty
-    when the note was never checked or its file is torn."""
+    """{"verdicts": {key: verdict}, "report": the last check's report, "web":
+    {block key: a web verdict's row}}; empty when the note was never checked or
+    its file is torn."""
     try:
         data = json.loads(_cache_path(vault, path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -316,9 +339,8 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
     if path not in notes:
         raise FileNotFoundError(path)
     me = notes[path]
-    blocks, defs = blk.split(me.text)
-    if lines is not None:
-        blocks = overlapping(blocks, lines)
+    every, defs = blk.split(me.text)
+    blocks = every if lines is None else overlapping(every, lines)
     res = pl.Resolver(notes, files)
     body = me.text[sum(len(x) + 1 for x in me.text.split("\n")[:blk.body_start(me.text)]):]
     named_all = {p for _t, p in res.links(body) if p} | res.mentions(body)
@@ -331,6 +353,16 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
     reading = judge is not None or cache_only
     old = read_cache(vault, path) if reading else {}
     cache = old.get("verdicts", {})
+    # A web verdict was paid for by a press, and a whole-note check or a rerun
+    # after an edit asks no web (ADR-0110 amendment, point 13), so it is carried
+    # as long as its block's words stand. Not on a range: that is a press or a
+    # card, whose own verdict arrives on its own, and this would draw it twice.
+    web = old.get("web", {})
+    if lines is None:
+        for b in blocks:
+            row = web.get(_web_key(b))
+            if row:
+                (states if "state" in row else findings).append({**row, "line": b.line, "end": b.end})
     fresh: dict[str, dict] = {}
     pending: list[tuple[Any, list[dict], str, list[str]]] = []  # (block, passages, key, cited)
     seen_source_dates: set[tuple[str, str]] = set()
@@ -508,8 +540,10 @@ def check_note(path: str, vault: str, *, write_dir: str = "", search: Search | N
         merge = stopped or lines is not None
         cache_file = _cache_path(vault, path)
         cache_file.parent.mkdir(parents=True, exist_ok=True)
+        alive = {_web_key(b) for b in every}
         cache_file.write_text(json.dumps({"verdicts": {**cache, **fresh} if merge else fresh,
-                                          "report": old.get("report", report) if lines is not None else report},
+                                          "report": old.get("report", report) if lines is not None else report,
+                                          "web": {k: v for k, v in web.items() if k in alive}},
                                          ensure_ascii=False), encoding="utf-8")
     return report
 

@@ -5061,10 +5061,14 @@ async def note_check(payload: dict, request: Request):
     stops before its next call and keeps the verdicts paid for. `rules: true`
     asks the model nothing (the rerun after an edit, served from the cache);
     `confirm: true` lets a pass of more than CONFIRM_OVER calls go;
-    `lines: [first, last]` checks only the blocks inside those lines (a card
-    of a reading the reader writes, ADR-0134 point 4)."""
-    from silica.cli import _check_judge, _check_legs
+    `lines: [first, last]` checks only the blocks those lines touch (a card of
+    a reading the reader writes, ADR-0134 point 4, or a selection, ADR-0110's
+    amendment of 2026-11-06). `web: true` with `claim`, on `lines`, then asks
+    the web about that claim: the vault leg's events as ever, `web` for each
+    step, `web_verdict`, and `done` last."""
+    from silica.cli import _check_judge, _check_legs, _check_web_legs
     from silica.kernel.check import run as check
+    from silica.kernel.check import web as check_web
     from silica.kernel.vault_manifest import active_write_dir
     from silica.metrics import ms_since, outcome_of
 
@@ -5083,6 +5087,20 @@ async def note_check(payload: dict, request: Request):
                 and span[0] <= span[1]):
             raise HTTPException(400, "lines is [first, last], 1-based")
         card_lines = (span[0], span[1])
+    web_on = payload.get("web") is True and not rules_only
+    claim, where = "", (0, 0)
+    aimed: list = []
+    if web_on:
+        if card_lines is None:
+            raise HTTPException(400, "a web check takes the selection's lines")
+        text = await asyncio.to_thread(session_changes.current_text, canon)
+        if text is None:
+            raise HTTPException(404, "note unreadable")
+        try:
+            claim, aimed = check_web.aim(text, card_lines, str(payload.get("claim") or ""))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        where = (aimed[0].line, aimed[-1].end) if aimed else card_lines
     if rules_only and not await asyncio.to_thread(check.read_cache, CONFIG.vault_path, path):
         # Never checked (or its file torn): a rerun has no marks to bring back.
         return JSONResponse({"event": "done", "unchecked": True}, media_type="application/x-ndjson")
@@ -5100,26 +5118,47 @@ async def note_check(payload: dict, request: Request):
             raise _CheckHeld
         put(ev)
 
+    def press(report: dict, judge) -> None:
+        """The web leg of a selection, after the vault's (point 8: two
+        verdicts, never one). A range that touches nothing checkable asks no
+        model. Only a verdict is kept: "the web did not answer" says nothing
+        about the block, and a verdict paid for earlier stands."""
+        result = {"web": "", "say": check_web.NOTHING_TO_CHECK}
+        if aimed:
+            lanes, fetch, ask = _check_web_legs()
+            result = check_web.check_claim(claim, search=lanes, fetch=fetch, judge=judge, ask=ask,
+                                           step=lambda ev: put({"event": "web", **ev}), cancelled=stop.is_set)
+        findings, states = check_web.rows(result, claim, check_web.vault_says(report), *where)
+        if result["web"]:
+            row = (findings or states)[0]
+            check.keep_web(CONFIG.vault_path, path, aimed[0],
+                           {k: v for k, v in row.items() if k not in ("line", "end")})
+        put({"event": "web_verdict", "findings": findings, "states": states})
+
     def work() -> None:
         started = time.monotonic()
+        said = {"web": True} if web_on else {}  # that a web was asked, never what (ADR-0100)
         try:
             search, dense, floor = _check_legs()
+            judge = None if rules_only else _check_judge()
             report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(), search=search,
-                                      dense=dense, dense_floor=floor, judge=None if rules_only else _check_judge(),
+                                      dense=dense, dense_floor=floor, judge=judge,
                                       cache_only=rules_only, progress=progress, cancelled=stop.is_set,
                                       lines=card_lines)
+            if web_on:
+                press(report, judge)
             put({**report, "event": "done"})
             if not rules_only:  # a rerun after an edit is not a check the person asked for
                 c = report["counts"]
                 emit("check", outcome="ok", ms=ms_since(started), blocks=report["blocks"], cached=report["cached"],
-                     error=c["error"], warning=c["warning"], nit=c["nit"])
+                     error=c["error"], warning=c["warning"], nit=c["nit"], **said)
         except _CheckHeld:
             pass
         except Exception as e:
             logger.warning("/note/check failed on %s: %s", path, e)
             put({"event": "error", "say": f"the check failed: {e}"})
             if not rules_only:
-                emit("check", outcome=outcome_of(e), ms=ms_since(started))
+                emit("check", outcome=outcome_of(e), ms=ms_since(started), **said)
         finally:
             put(None)
 
