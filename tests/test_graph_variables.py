@@ -134,12 +134,6 @@ def test_coupling_drops_transactions_over_the_cap_and_reports_them():
     assert "n1" not in adj and adj["x"]["y"] > 0
 
 
-def test_coupling_ranking_abstains_without_row():
-    adj = signals.coupling_adjacency([{"a", "b"}])
-    assert signals.coupling_ranking(adj, "zzz", k=5) is None
-    assert signals.coupling_ranking(adj, "a", k=5) == [("b", pytest.approx(1 / math.log(3)))]
-
-
 # ---------------------------------------------------------------------------
 # V4 load-bearing
 # ---------------------------------------------------------------------------
@@ -283,8 +277,7 @@ def test_coupling_from_transactions_override(graph_nodes_edges):
 
 
 def test_cooccur_variables_annotate_shared_and_emit_prerequisites(graph_nodes_edges, cooccur_store, monkeypatch):
-    from silica.kernel.report.graph_report import cooccur_delta as cd
-    monkeypatch.setattr(cd, "_REFD_MIN_RELATED", 1)
+    monkeypatch.setattr(signals, "_REFD_MIN_RELATED", 1)
     r = compute_report(
         _nodes_edges_override=graph_nodes_edges, analytics=True,
         with_cooccurrence=True, _cooccur_store_override=cooccur_store,
@@ -305,8 +298,7 @@ def test_prerequisite_direction_on_synthetic_citations(graph_nodes_edges, cooccu
     # RefD(C -> A) = 1, so C is a prerequisite of A. Nothing may be a
     # prerequisite of itself. The related-set floor is lowered: six notes
     # cannot have five related each.
-    from silica.kernel.report.graph_report import cooccur_delta as cd
-    monkeypatch.setattr(cd, "_REFD_MIN_RELATED", 1)
+    monkeypatch.setattr(signals, "_REFD_MIN_RELATED", 1)
     r = compute_report(
         _nodes_edges_override=graph_nodes_edges, analytics=True,
         with_cooccurrence=True, _cooccur_store_override=cooccur_store,
@@ -324,8 +316,7 @@ def test_prerequisites_map_runs_the_real_pass(graph_nodes_edges, cooccur_store, 
     from silica.kernel.base import layout
     from silica.kernel.graph import graph_export
     from silica.kernel.learn import learner
-    from silica.kernel.report.graph_report import cooccur_delta as cd
-    monkeypatch.setattr(cd, "_REFD_MIN_RELATED", 1)
+    monkeypatch.setattr(signals, "_REFD_MIN_RELATED", 1)
     monkeypatch.setattr(graph_export, "build_graph_data", lambda: graph_nodes_edges)
     monkeypatch.setattr(cooccurrence, "get_cooccur_store", lambda **_: cooccur_store)
     monkeypatch.setattr(layout, "vault_epoch", lambda *_: "")
@@ -334,8 +325,7 @@ def test_prerequisites_map_runs_the_real_pass(graph_nodes_edges, cooccur_store, 
 
 
 def test_render_shows_the_new_sections(graph_nodes_edges, cooccur_store, monkeypatch):
-    from silica.kernel.report.graph_report import cooccur_delta as cd
-    monkeypatch.setattr(cd, "_REFD_MIN_RELATED", 1)
+    monkeypatch.setattr(signals, "_REFD_MIN_RELATED", 1)
     r = compute_report(
         _nodes_edges_override=graph_nodes_edges, analytics=True,
         with_cooccurrence=True, _cooccur_store_override=cooccur_store,
@@ -500,68 +490,6 @@ def test_review_queue_tool_rows_carry_prerequisites(monkeypatch):
     assert out[0]["prereqs"] == ["a/y"] and out[0]["ready"] is False
 
 
-# --- G5 semantic shift (structure.semantic_shift, replaces V7 flatness) ---
-
-def _bind_vault(vault, monkeypatch):
-    import silica.driver
-    from silica.config import CONFIG
-
-    vault.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(CONFIG, "vault_path", str(vault))
-    monkeypatch.setattr(silica.driver, "_driver", None)
-
-
-class _MarkerEmbedder:
-    """text -> axis vector by topic marker: TOPIC_A/TOPIC_B orthogonal, so a
-    note mixing both has MPD ~1 and a single-topic note has MPD ~0."""
-
-    def embed(self, texts, query=False):
-        return [[1.0, 0.0] if "TOPIC_A" in t else [0.0, 1.0] for t in texts]
-
-
-def test_paragraphs_filter_short_and_cap():
-    from silica.kernel.report.structure import _paragraphs
-    body = "\n\n".join(["x" * 250] * 12 + ["short"] * 5)
-    got = _paragraphs(body)
-    assert len(got) == 8            # cap
-    assert all(len(p) >= 200 for p in got)
-
-
-def test_semantic_shift_separates_mixed_note_from_atomic(tmp_path, monkeypatch):
-    from silica.model import providers
-    from silica.kernel.report import structure
-
-    _bind_vault(tmp_path / "v", monkeypatch)
-    para_a = ("TOPIC_A " + "alpha " * 60).strip()
-    para_b = ("TOPIC_B " + "beta " * 60).strip()
-    (tmp_path / "v" / "mixed.md").write_text(
-        "\n\n".join([para_a, para_b, para_a, para_b]), encoding="utf-8")
-    (tmp_path / "v" / "atomic.md").write_text(
-        "\n\n".join([para_a, para_a, para_a, para_a]), encoding="utf-8")
-    monkeypatch.setattr(providers, "get_embedder", lambda cfg: _MarkerEmbedder())
-
-    rows = structure._build_shift(k=5)
-    by = {r["path"]: r for r in rows}
-    assert by["mixed"]["mpd"] > by["atomic"]["mpd"]
-    assert rows[0]["path"] == "mixed"          # worklist ranks the diluted note first
-    assert by["atomic"]["mpd"] == 0.0          # identical vectors: no dilution
-
-
-def test_semantic_shift_absent_when_embedder_down(tmp_path, monkeypatch):
-    from silica.model import providers
-    from silica.kernel.report import structure
-
-    _bind_vault(tmp_path / "v", monkeypatch)
-    (tmp_path / "v" / "a.md").write_text("\n\n".join(["x" * 250] * 4), encoding="utf-8")
-
-    def _boom(cfg):
-        raise RuntimeError("embedder down")
-
-    monkeypatch.setattr(providers, "get_embedder", _boom)
-    structure._shift_memo.clear()
-    assert structure.semantic_shift() == []    # absent, never a fake zero row
-
-
 def test_graph_explain_never_calls_a_singleton_both_orphan_and_hub(monkeypatch, graph_nodes_edges):
     # Measured 2026-09-03: an ADR with degree 0 came back is_orphan AND
     # is_hub, because a one-note cluster's hub is itself.
@@ -583,9 +511,8 @@ def test_prerequisites_map_is_kept_while_its_inputs_are(graph_nodes_edges, coocc
     from silica.kernel.base import layout
     from silica.kernel.graph import graph_export
     from silica.kernel.learn import learner
-    from silica.kernel.report.graph_report import cooccur_delta as cd
 
-    monkeypatch.setattr(cd, "_REFD_MIN_RELATED", 1)
+    monkeypatch.setattr(signals, "_REFD_MIN_RELATED", 1)
     monkeypatch.setattr(graph_export, "build_graph_data", lambda: graph_nodes_edges)
     monkeypatch.setattr(cooccurrence, "get_cooccur_store", lambda **_: cooccur_store)
     # every read moves the epoch; the map also reads the notes' own (spines, hubs)
@@ -593,8 +520,8 @@ def test_prerequisites_map_is_kept_while_its_inputs_are(graph_nodes_edges, coocc
     monkeypatch.setattr(layout, "vault_epoch", lambda *_: next(epochs))
     monkeypatch.setattr(learner, "_prereq_memo", {})
     calls = []
-    real = cd._compute_cooccur_variables
-    monkeypatch.setattr(cd, "_compute_cooccur_variables", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    real = signals.refd_prerequisites
+    monkeypatch.setattr(signals, "refd_prerequisites", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
 
     first = learner.prerequisites_map()
     learner._prereq_memo.clear()                  # another process, another edit

@@ -151,23 +151,6 @@ def depth_by_path(paths: list[str], entries: list[dict] | None = None, since: st
     return {p: depth_of(evs, since) for p, evs in by_path(entries, paths).items()}
 
 
-def next_ask(evs: list[dict], reach: int = 4) -> int:
-    """The level to ask next: one above the last unassisted success, capped
-    at reach; after a failure the failed demand again; level 4 only once 3
-    held. A pacing heuristic, not a law of learning."""
-    ordered = sorted((e for e in evs if _level(e) is not None), key=_ts)
-    held = 0
-    for e in ordered:
-        if unassisted(e) and e.get("grader") != "told":
-            held = max(held, _level(e) or 0)  # `ordered` kept only entries with a level
-    if ordered and not ordered[-1].get("correct"):
-        return max(1, min(reach, _level(ordered[-1]) or 0))
-    nxt = min(reach, held + 1)
-    if nxt >= 4 and held < 3:
-        nxt = 3
-    return max(1, nxt)
-
-
 def integration(paths: list[str], entries: list[dict], relations: list[tuple[str, str]]) -> dict:
     """Relations inside the scope the reader answered on: held when an item
     named both endpoints and met its criterion without help. `total` is the

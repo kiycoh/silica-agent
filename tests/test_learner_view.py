@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from silica.kernel.base import note_index, noteshape
 from silica.kernel.base.notekey import ledger_key
-from silica.kernel.learn import learner
+from silica.kernel.learn import learner, schedule
 
 DAY = 86400.0
 
@@ -27,22 +27,22 @@ def test_reader_prior_is_due_ninety_days_after_writing():
     """Writing a note seeds a Review card with S=90: R(90d) is the desired
     retention by construction, and one day later the note enters the pool."""
     now = time.time()
-    st = learner.note_state(created_ts=now - 90 * DAY, is_ai=False, events=[], now_ts=now)
+    st = schedule.note_state(created_ts=now - 90 * DAY, is_ai=False, events=[], now_ts=now)
     assert st["S"] == 90.0
     assert math.isclose(st["R"], 0.9, abs_tol=1e-6)
-    assert st["R"] >= learner.DUE_R
-    later = learner.note_state(now - 91 * DAY, False, [], now)
-    assert later["R"] < learner.DUE_R
-    fresh = learner.note_state(now - DAY, False, [], now)
+    assert st["R"] >= schedule.DUE_R
+    later = schedule.note_state(now - 91 * DAY, False, [], now)
+    assert later["R"] < schedule.DUE_R
+    fresh = schedule.note_state(now - DAY, False, [], now)
     assert fresh["R"] > st["R"]
     assert st["last"] == now - 90 * DAY and st["state"] == "review"
 
 
 def test_ai_note_is_unknown_until_first_rating():
     now = time.time()
-    st = learner.note_state(created_ts=now - 400 * DAY, is_ai=True, events=[], now_ts=now)
+    st = schedule.note_state(created_ts=now - 400 * DAY, is_ai=True, events=[], now_ts=now)
     assert st["R"] is None and st["S"] is None and st["state"] == "new"
-    st = learner.note_state(now - 400 * DAY, True, [(now - 30 * DAY, 3, True)], now)
+    st = schedule.note_state(now - 400 * DAY, True, [(now - 30 * DAY, 3, True)], now)
     assert st["S"] is not None and st["S"] > 0
     assert st["last"] == now - 30 * DAY
     assert 0 < st["R"] < 1
@@ -51,12 +51,12 @@ def test_ai_note_is_unknown_until_first_rating():
 def test_ratings_order_stability_and_replay_is_deterministic():
     now = time.time()
     by_rating = {
-        r: learner.note_state(now - 100 * DAY, False, [(now - 10 * DAY, r, r >= 3)], now)
+        r: schedule.note_state(now - 100 * DAY, False, [(now - 10 * DAY, r, r >= 3)], now)
         for r in (2, 3, 4)
     }
     assert by_rating[2]["S"] < by_rating[3]["S"] < by_rating[4]["S"]
-    again = learner.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
-    twice = learner.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
+    again = schedule.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
+    twice = schedule.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
     assert again == twice  # fuzz off: the view is identical on every surface
 
 
@@ -65,29 +65,29 @@ def test_a_miss_never_moves_the_clock():
     last-review clock stays on the last success, so a note missed a second ago
     never reads as fresh."""
     now = time.time()
-    held = learner.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
-    missed = learner.note_state(
+    held = schedule.note_state(now - 100 * DAY, False, [(now - 10 * DAY, 3, True)], now)
+    missed = schedule.note_state(
         now - 100 * DAY, False, [(now - 10 * DAY, 3, True), (now - 5 * DAY, 1, False)], now
     )
     assert missed["last"] == now - 10 * DAY
     assert missed["S"] < held["S"]
-    assert missed["R"] < held["R"] and missed["R"] < learner.DUE_R
+    assert missed["R"] < held["R"] and missed["R"] < schedule.DUE_R
     assert missed["misses"] == 1 and missed["correct"] == 1
     # an AI note with only misses is measured unknown, not unexplored
-    st = learner.note_state(now - 400 * DAY, True, [(now, 1, False)], now)
+    st = schedule.note_state(now - 400 * DAY, True, [(now, 1, False)], now)
     assert st["R"] == 0.0
     # and a later rating lifts it
-    st = learner.note_state(now - 400 * DAY, True, [(now - DAY, 1, False), (now, 3, True)], now)
+    st = schedule.note_state(now - 400 * DAY, True, [(now - DAY, 1, False), (now, 3, True)], now)
     assert st["R"] > 0.9
 
 
 def test_weak_and_due_thresholds_split():
     """DUE_R (0.9) decides the session pool; WEAK_R (0.6) keeps the digest's
     WEAK RECALL line quiet about a merely aging vault."""
-    assert learner.WEAK_R == 0.6 and learner.DUE_R == 0.9
+    assert schedule.WEAK_R == 0.6 and schedule.DUE_R == 0.9
     now = time.time()
-    st = learner.note_state(now - 730 * DAY, False, [], now)
-    assert learner.WEAK_R < st["R"] < learner.DUE_R
+    st = schedule.note_state(now - 730 * DAY, False, [], now)
+    assert schedule.WEAK_R < st["R"] < schedule.DUE_R
 
 
 # --------------------------------------------------------------- the ledger
@@ -218,7 +218,7 @@ def test_view_reads_frontmatter_from_the_vault(tmp_vault, monkeypatch):
     tmp_vault.note("Undated.md", "no frontmatter at all\n")
     v = learner.view()
     user = v[ledger_key("User.md")]
-    assert learner.WEAK_R < user["R"] < learner.DUE_R          # months old: in the pool, not the digest
+    assert schedule.WEAK_R < user["R"] < schedule.DUE_R          # months old: in the pool, not the digest
     assert v[ledger_key("Robot.md")]["R"] is None        # AI: true, never quizzed
     assert v[ledger_key("Undated.md")]["R"] > 0.9        # mtime fallback: just written
 

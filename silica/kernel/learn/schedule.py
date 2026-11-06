@@ -29,7 +29,6 @@ SCHEDULER = Scheduler(
 S0_USER = 90.0   # days of stability granted by writing a note yourself (v1 prior)
 DUE_R = 0.9      # the scheduler's desired retention: below it a note enters the session pool
 WEAK_R = 0.6     # the digest's WEAK RECALL line and the attention list, measured notes only
-DAY = 86400.0
 
 AGAIN, HARD, GOOD, EASY = 1, 2, 3, 4
 

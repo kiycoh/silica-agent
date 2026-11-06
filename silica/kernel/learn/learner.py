@@ -5,9 +5,8 @@
 
 Per-note retention is the FSRS-6 retrievability of a card replayed from the
 graded-quiz ledger (quiz.jsonl), note creation dates and the `AI: true`
-authorship stamp — see silica/kernel/learn/schedule.py, which this module
-delegates to so the digest, the calendar and the metrics attention list keep
-their import. Never materialized: a second store of the same state diverges
+authorship stamp — see silica/kernel/learn/schedule.py, which folds the ledger
+for this module. Never materialized: a second store of the same state diverges
 from the ledger at the first crash, so the view is recomputed by scan on
 read, exactly like quiz.stats().
 
@@ -24,11 +23,9 @@ from pathlib import Path
 
 from silica.kernel.base import note_index, noteshape
 from silica.kernel.base.notekey import ledger_key
-from silica.kernel.learn.schedule import DUE_R, WEAK_R, note_state, view  # noqa: F401  re-exported v1 names
+from silica.kernel.learn.schedule import DUE_R, view
 
 logger = logging.getLogger(__name__)
-
-DAY = 86400.0
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -110,8 +107,7 @@ def prerequisites_map() -> dict[str, list[str]]:
 
         from silica.kernel.recall.cooccurrence import get_cooccur_store
         from silica.kernel.graph.graph_export import build_graph_data, edge_graph
-        from silica.kernel.report.graph_report.compute import _empty_report
-        from silica.kernel.report.graph_report.cooccur_delta import _compute_cooccur_variables
+        from silica.kernel.graph.signals import refd_prerequisites
 
         nodes, edges = build_graph_data()
         store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
@@ -124,9 +120,9 @@ def prerequisites_map() -> dict[str, list[str]]:
         prereq_map = _prereq_disk(sig)
         if prereq_map is None:
             G_dir = edge_graph(nodes, edges, directed=True)
-            _prereqs, prereq_map, _burst = _compute_cooccur_variables(
-                _empty_report(), G_dir.to_undirected(), G_dir, cooccur_store=store, created=None,
-            )
+            prereq_map = {}
+            for prereq, dependent, _refd in refd_prerequisites(G_dir, G_dir.nodes, store):
+                prereq_map.setdefault(dependent, []).append(prereq)
             _prereq_disk(sig, prereq_map)
         # After the disk cache, which keys on the links and the index alone:
         # an edit to `requires:` moves the epoch and lands here, not there.

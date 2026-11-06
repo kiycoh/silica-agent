@@ -71,8 +71,8 @@ class VaultConventions:
     # overrides this for eval A/Bs.
     distill_profile: str = ""
     wiki_dir: str = ""  # landing dir for /wiki notes; "" ⇒ vault root
-    # Frontmatter templates (2026-07-17 spec): None ⇒ built-in template_spoke
-    # layout — a vault with no config behaves bit-identically to before.
+    # Frontmatter templates (2026-07-17 spec): None ⇒ the built-in layout, so a
+    # vault with no config behaves bit-identically to before.
     default_template: str | None = None
     templates_dir: str = "templates"
     # ADR-0021: None ⇒ no episodic key enforcement (bit-identical to today).

@@ -142,9 +142,6 @@ def best_window(text: str, query: str, width: int,
     return best_windows(text, query, width, 1, weights)[0]
 
 
-_best_window = best_window  # transitional alias; drop once callers migrate
-
-
 def _read_body(path: str, *, origin: str = "vault") -> tuple[str, str]:
     """(note name, full body text) for one note; ('', '') when unreadable —
     a length of 0 fails open toward reranking, and '' scores as irrelevant.

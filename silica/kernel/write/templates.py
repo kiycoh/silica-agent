@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Note templates — template_spoke and patch_snippet.
+"""Note templates: the built-in layout, its fields and patch_snippet.
 
 Migrated AS-IS from hermes_common/templates.py, with the bootstrap path
 hack removed (no longer needed — this is a proper Python package now).
@@ -94,66 +94,8 @@ def _drop_echoed_title(body: str, h1: str) -> str:
     return m.group(1).lstrip() + body[m.end():]
 
 
-def template_spoke(heading: str, snippet: str, hub: str, title: str | None = None, tags: list[str] | None = None, related: list[str] | None = None, parent: str | None = None) -> str:
-    today = datetime.date.today().isoformat()
-    body = snippet.strip() or "(to be expanded)"
-    h1 = title or heading  # title wins: filename and H1 stay in sync
-
-    hub_link = _link_name(hub)
-    # parent note link — specific parent overrides hub when provided
-    if parent:
-        parent_link = _link_name(parent)
-        parent_note = f'"[[{parent_link}]]"'
-        related_items = [f'"[[{parent_link}]]"', f'"[[{hub_link}]]"']
-    else:
-        parent_note = f'"[[{hub_link}]]"'
-        related_items = [f'"[[{hub_link}]]"']
-
-    # related list
-    if related:
-        for r in related:
-            r_link = f'"[[{_link_name(r)}]]"'
-            if r_link not in related_items:
-                related_items.append(r_link)
-
-    # tags list
-    tag_list = []
-    if tags:
-        for t in tags:
-            ct = clean_tag(t)
-            if ct and ct not in tag_list:
-                tag_list.append(ct)
-    else:
-        # default tag derived from hub
-        ch = clean_tag(hub)
-        if ch:
-            tag_list.append(ch)
-
-    # Format YAML components
-    related_yaml = "\n".join(f"  - {item}" for item in related_items)
-    tags_yaml = "\n".join(f"  - {tag}" for tag in tag_list)
-
-    frontmatter = f"""---
-parent note: {parent_note}
-related:
-{related_yaml}
-tags:
-{tags_yaml}
-last modified: {today}
-AI: true
----"""
-
-    return f"""{frontmatter}
-
-# {h1}
-
-{body}
-"""
-
-
-# The historical template_spoke layout as a template string. A vault with no
-# templates/ dir and no config renders bit-identically to the old code
-# (guarded by the golden parity test).
+# The layout of a vault with no templates/ dir and no config, pinned byte for
+# byte by test_builtin_template_renders_the_historical_layout.
 BUILTIN_TEMPLATE = """---
 parent note: {{parent}}
 related: {{related}}
@@ -172,7 +114,7 @@ def prepare_fields(*, title: str, body: str, hub: str | None = None,
                    tags: list[str] | None = None,
                    related: list[str] | None = None,
                    parent: str | None = None) -> dict:
-    """Encode template_spoke's conditional fallbacks once, for every template.
+    """Encode the layout's conditional fallbacks once, for every template.
 
     Substitution in render_note is pure, so ALL conditional behavior lives
     here: parent falls back to the hub, the hub is merged into related
@@ -691,7 +633,7 @@ def ensure_ai_flag(content: str, value: str = "true") -> str:
     String-level (no YAML round-trip) so the rest of the user's frontmatter is
     left byte-for-byte intact.
 
-    No-ops when there is no frontmatter (fresh writes carry it via template_spoke)
+    No-ops when there is no frontmatter (fresh writes carry it via the template)
     or the `AI` key already exists (never overwrites the user's own value, and
     never upgrades an earlier `partial` to `true`).
     """

@@ -5,12 +5,12 @@ from pathlib import Path
 
 
 
-from silica.kernel.recall.cooccurrence import tokenize
+from silica.kernel.text.text import tokens
 
 
 def test_tokenize_breaks_sentences_on_terminators():
     text = "Prima frase. Seconda frase! Terza?\nQuarta frase"
-    sents = tokenize(text, stem_lang="italian", stopword_lang="italian")
+    sents = tokens(text, lang="italian", stopword_lang="italian")
     assert len(sents) == 4
     assert [s for (_t, s) in sents[0]] == ["prima", "frase"]
 
@@ -20,7 +20,7 @@ def test_tokenize_lowercases_and_drops_short_and_stopwords_english():
     # stopword_lang pinned explicitly: the assertion depends on the English
     # stopword set specifically, not on whatever language.detect() picks for
     # this tiny sample.
-    sents = tokenize("The cat is on a mat", stem_lang="english", stopword_lang="english")
+    sents = tokens("The cat is on a mat", lang="english", stopword_lang="english")
     # one sentence, stopwords/short removed, remaining stemmed (cat, mat)
     stems = [stem for sent in sents for (stem, _surface) in sent]
     assert "cat" in stems
@@ -34,7 +34,7 @@ def snow_stem_it(word: str) -> str:
 
 
 def test_tokenize_collapses_italian_inflections():
-    sents = tokenize("La rete e le reti neurali", stem_lang="italian", stopword_lang="italian")
+    sents = tokens("La rete e le reti neurali", lang="italian", stopword_lang="italian")
     stems = [stem for sent in sents for (stem, _surface) in sent]
     # rete and reti must collapse to the same stem
     assert stems.count(snow_stem_it("rete")) >= 1
@@ -43,7 +43,7 @@ def test_tokenize_collapses_italian_inflections():
 
 
 def test_tokenize_keeps_surface_form():
-    sents = tokenize("Neural networks", stem_lang="english", stopword_lang="english")
+    sents = tokens("Neural networks", lang="english", stopword_lang="english")
     surfaces = [surface for sent in sents for (_stem, surface) in sent]
     assert "neural" in surfaces  # surface is lowercased original token
 
@@ -51,7 +51,7 @@ def test_tokenize_keeps_surface_form():
 def test_tokenize_stopword_lang_explicit_overrides_detection():
     # "della" is an Italian stopword; pinning stopword_lang="italian" filters
     # it even though stem_lang is "english" (store's frozen stemmer).
-    sents = tokenize("della rete", stem_lang="english", stopword_lang="italian")
+    sents = tokens("della rete", lang="english", stopword_lang="italian")
     stems = [stem for sent in sents for (stem, _surface) in sent]
     assert "della" not in stems
 
@@ -59,9 +59,9 @@ def test_tokenize_stopword_lang_explicit_overrides_detection():
 def test_tokenize_stopword_lang_none_detects_from_text():
     # stopword_lang=None (default) -> language.detect(text); Italian function
     # words get dropped even when stem_lang is frozen to "english".
-    sents = tokenize(
+    sents = tokens(
         "La rete della azienda migliora molto il lavoro del team.",
-        stem_lang="english",
+        lang="english",
     )
     stems = [stem for sent in sents for (stem, _surface) in sent]
     assert "della" not in stems

@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from silica.kernel.recall.cooccurrence import tokenize
+from silica.kernel.text.text import tokens
 from silica.kernel.text.keyphrase import extract_keyphrases
 
 GOLDEN_PATH = Path(__file__).parent / "keyphrase_cases.json"
@@ -36,7 +36,7 @@ _BUNDLED_OVERLAYS = Path(__file__).resolve().parent.parent.parent / "silica" / "
 def _stems(phrase: str, lang: str) -> frozenset[str]:
     """Content stems of *phrase* (stopwords / short tokens dropped by tokenize)."""
     return frozenset(
-        stem for sent in tokenize(phrase, stem_lang=lang, stopword_lang=lang) for stem, _surface in sent
+        stem for sent in tokens(phrase, lang=lang, stopword_lang=lang) for stem, _surface in sent
     )
 
 

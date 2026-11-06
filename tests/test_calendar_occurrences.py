@@ -148,15 +148,3 @@ def test_instant_covers_its_own_day():
 
 
 # --- BI occurrence flattener --------------------------------------------------
-
-def test_occurrence_rows_window_contract(tmp_path):
-    from silica.kernel.calendar.model import occurrence_rows
-    vault = tmp_path / "vault"
-    vault.mkdir()
-    (vault / "gym.md").write_text(
-        "---\nevent_start: 2026-08-03 18:00\nevent_rrule: FREQ=DAILY;COUNT=10\n---\n",
-        encoding="utf-8")
-    rows = occurrence_rows(vault, D(2026, 8, 5), D(2026, 8, 8))
-    assert [r["start"] for r in rows] == [
-        "2026-08-05 18:00:00", "2026-08-06 18:00:00", "2026-08-07 18:00:00"]
-    assert set(rows[0]) == {"stem", "title", "start", "end", "all_day", "status"}

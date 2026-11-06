@@ -27,7 +27,7 @@ import datetime as dt
 import logging
 import re
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 from silica.kernel.base import frontmatter
 from silica.kernel.base.noteshape import is_event
@@ -234,50 +234,3 @@ def scan_events(vault: Path) -> list[Event]:
         _scan_memo.clear()
         _scan_memo[str(vault)] = (epoch, events)
     return events
-
-
-def _fmt_start(e: Event) -> str:
-    return e.start.date().isoformat() if e.all_day else e.start.strftime("%Y-%m-%d %H:%M")
-
-
-def _fmt_end(e: Event) -> str:
-    """User-facing end: inclusive date for all-day, wall-clock for timed."""
-    if e.end is None:
-        return ""
-    if e.all_day:
-        return (e.end - dt.timedelta(days=1)).date().isoformat()
-    return e.end.strftime("%Y-%m-%d %H:%M")
-
-
-def event_rows(vault: Path) -> list[dict]:
-    """BI flattener, one row per Event note. Stable column contract:
-    stem, title, start, end, all_day, rrule, reminder, status, folder."""
-    rows = []
-    for e in scan_events(vault):
-        parent = str(PurePosixPath(e.path).parent)
-        rows.append({
-            "stem": e.stem, "title": e.title,
-            "start": _fmt_start(e), "end": _fmt_end(e),
-            "all_day": e.all_day, "rrule": e.rrule or "",
-            "reminder": e.reminder_raw, "status": e.status,
-            "folder": "" if parent == "." else parent,
-        })
-    return rows
-
-
-def occurrence_rows(vault: Path, win_start: dt.datetime, win_end: dt.datetime) -> list[dict]:
-    """BI flattener, one row per materialized Occurrence in the half-open
-    window [win_start, win_end). Columns: stem, title, start, end, all_day,
-    status."""
-    from silica.kernel.calendar.occurrences import expand
-
-    rows = []
-    for e in scan_events(vault):
-        for occ in expand(e, win_start, win_end):
-            rows.append({
-                "stem": occ.stem, "title": occ.title,
-                "start": occ.start.isoformat(sep=" "),
-                "end": occ.end.isoformat(sep=" ") if occ.end else "",
-                "all_day": occ.all_day, "status": occ.status,
-            })
-    return rows

@@ -22,10 +22,6 @@ import math
 from typing import Any, Iterable
 
 
-def _pair(x: str, y: str) -> tuple[str, str]:
-    return (x, y) if x < y else (y, x)
-
-
 def compare_sets(
     a: set[str], b: set[str], *, store: Any, vault_size: int,
     nodes: list[dict], edges: list[dict], sim: list[dict],

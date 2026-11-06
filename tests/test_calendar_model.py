@@ -14,7 +14,6 @@ from silica.kernel.calendar.model import (
     parse_event,
     validate_event,
     scan_events,
-    event_rows,
 )
 
 
@@ -209,23 +208,3 @@ def test_scan_memoized_on_vault_epoch(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.kernel.base.layout.vault_epoch", lambda v=None: "epoch-2")
     assert {e.stem for e in scan_events(vault)} == {"ok", "later"}
 
-
-# --- BI flattener contract ----------------------------------------------------
-
-def test_event_rows_columns_and_display_semantics(tmp_path):
-    vault = tmp_path / "vault"
-    vault.mkdir()
-    _write(vault, "calendar/trip.md",
-           "---\ntitle: Trip\nevent_start: 2026-08-20\nevent_end: 2026-08-22\n---\n")
-    _write(vault, "calendar/dentist.md",
-           "---\nevent_start: 2026-08-20 15:00\nevent_end: 2026-08-20 16:00\n"
-           "event_reminder: 30m\nevent_status: done\n---\n")
-    rows = {r["stem"]: r for r in event_rows(vault)}
-    trip, dentist = rows["trip"], rows["dentist"]
-    assert set(trip) == {"stem", "title", "start", "end", "all_day", "rrule",
-                         "reminder", "status", "folder"}
-    # all-day rows echo the user-facing INCLUSIVE dates, not the internal bound
-    assert trip["start"] == "2026-08-20" and trip["end"] == "2026-08-22"
-    assert trip["all_day"] is True and trip["folder"] == "calendar"
-    assert dentist["start"] == "2026-08-20 15:00" and dentist["end"] == "2026-08-20 16:00"
-    assert dentist["reminder"] == "30m" and dentist["status"] == "done"

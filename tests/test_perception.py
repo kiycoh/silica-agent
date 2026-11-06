@@ -47,13 +47,6 @@ LONG_BODY = ("filler chatter " * 400) + "the yoga class is on Tuesday evening " 
             + ("more filler " * 400)
 
 
-def test_best_window_is_public():
-    # The harness used to import the private name; the seam is public now.
-    from silica.kernel.recall.rerank import _best_window, best_window
-
-    assert best_window is _best_window
-
-
 def test_perceive_windows_bodies_under_rank_evidence_date_headers(tmp_path, monkeypatch):
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", LONG_BODY)

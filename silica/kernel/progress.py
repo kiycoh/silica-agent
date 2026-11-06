@@ -528,12 +528,12 @@ class ProgressLedger:
         # tested would be a guess, and the digest must stay silent until
         # something was measured (quiz.py's own contract).
         try:
-            from silica.kernel.learn import learner
+            from silica.kernel.learn import schedule
 
             weak = sorted(
                 (
-                    r for r in learner.view().values()
-                    if r["attempts"] and r["R"] is not None and r["R"] < learner.WEAK_R
+                    r for r in schedule.view().values()
+                    if r["attempts"] and r["R"] is not None and r["R"] < schedule.WEAK_R
                 ),
                 key=lambda r: r["R"],
             )[:3]

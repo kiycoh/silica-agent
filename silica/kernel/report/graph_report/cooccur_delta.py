@@ -52,7 +52,8 @@ def _compute_cooccur_delta(
     `cooccur_store` is injectable for testing; loaded from disk when None.
     Returns empty lists when the index is empty (best-effort, never raises).
     """
-    from silica.kernel.recall.cooccurrence import get_cooccur_store, tokenize
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.text.text import tokens
     from silica.kernel.base.notekey import store_key
     from silica.kernel.recall.relatedness import _concept_idf, _cooccur_ranking, related_notes_many
 
@@ -256,7 +257,7 @@ def _compute_cooccur_delta(
     adj = store.adjacency(scope)  # the aggregate to_networkx() would wrap, unwrapped
     titled_stems: set[str] = set()
     for label in node_label.values():
-        for sentence in tokenize(label, stem_lang=store.lang, stopword_lang=store.lang):
+        for sentence in tokens(label, lang=store.lang, stopword_lang=store.lang):
             titled_stems.update(stem for stem, _surface in sentence)
 
     hubs: list[MissingHub] = []
@@ -269,16 +270,6 @@ def _compute_cooccur_delta(
     hubs = hubs[:k]
 
     return autolinks, stale, hubs, deficits
-
-
-# RefD related-set depth: the paper's related concepts are the top neighbours
-# by similarity; 30 is the facade pool size (_POOL_MIN) so a prerequisite
-# reads the same neighbourhood /related shows.
-_REFD_RELATED_K = 30
-_REFD_THETA = 0.1
-# Fewer related notes than this and the note's side abstains; see
-# signals.refd_edges for the measured failure this guards.
-_REFD_MIN_RELATED = 5
 
 
 def _compute_cooccur_variables(
@@ -299,8 +290,7 @@ def _compute_cooccur_variables(
     """
     from silica.kernel.recall.cooccurrence import get_cooccur_store
     from silica.kernel.base.notekey import store_key
-    from silica.kernel.recall.relatedness import _cooccur_ranking
-    from silica.kernel.graph.signals import burst, refd_edges
+    from silica.kernel.graph.signals import burst, refd_prerequisites
 
     try:
         store = cooccur_store if cooccur_store is not None else get_cooccur_store()
@@ -321,18 +311,10 @@ def _compute_cooccur_variables(
     for row in list(report.structural_links) + list(report.coupled_pairs):
         row.shared = _shared(row.source, row.target)
 
-    # --- V2 prerequisites: RefD over (directed wikilinks, cooccur related sets)
-    links: dict[str, set[str]] = {}
-    for u, v in G_dir.edges():
-        links.setdefault(store_key(u), set()).add(store_key(v))
-    related: dict[str, list[tuple[str, float]]] = {}
-    for p in in_graph:
-        ranking = _cooccur_ranking(store, p, k=_REFD_RELATED_K, exclude={p}, scope=scope)
-        if ranking:
-            related[p] = [(q, float(w)) for q, w in ranking if q in gid_by_key]
+    # --- V2 prerequisites
     prereqs = [
         PrerequisiteEdge(prereq=a, dependent=b, refd=round(r, 4))
-        for a, b, r in refd_edges(links, related, theta=_REFD_THETA, min_related=_REFD_MIN_RELATED)
+        for a, b, r in refd_prerequisites(G_dir, G_und.nodes, store, scope=scope)
     ]
     prereq_map: dict[str, list[str]] = {}
     for e in prereqs:

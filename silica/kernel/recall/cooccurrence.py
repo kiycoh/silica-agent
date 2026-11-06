@@ -26,6 +26,7 @@ import numpy as np
 import orjson
 
 from silica.kernel.text import language
+from silica.kernel.text.text import tokens
 from silica.kernel.base.durable import DiskSynced, quarantine
 from silica.kernel.base.layout import in_folder
 from silica.kernel.base.notekey import store_key
@@ -35,7 +36,6 @@ logger = logging.getLogger(__name__)
 # --- algorithm constants -------------------------------------
 NARRATIVE_WEIGHT = 3
 GAP = 4               # effective look-back of GAP - 1 = 3 tokens
-MIN_TOKEN_LEN = 3
 EVIDENCE = "cooccur"
 # A note's body contributes its first MAX_BODY_CHARS characters (after cleaning),
 # as embed._MAX_CHARS does for vectors. Uncapped, 97 converted books (median 221 KB,
@@ -91,26 +91,6 @@ def frozen_lang(vault: str) -> str | None:
     except Exception:
         return None
 
-def tokenize(
-    text: str,
-    stem_lang: str = "english",
-    stopword_lang: str | None = None,
-) -> list[list[tuple[str, str]]]:
-    """Sentences of (stem, surface) pairs — thin delegate to the kernel/text
-    seam (C1), kept as public API of this module.
-
-    `stem_lang` is the STORE's frozen stemming language — one stemmer per
-    store, since node keys are stemmed tokens and a per-note stemmer would
-    split cross-language shared terms. `stopword_lang` is per-NOTE: `None`
-    detects it from `text`; pass an explicit language to pin it (e.g.
-    matching a short label against store node keys, where detection on a
-    2-4 word sample is noise).
-    """
-    from silica.kernel.text import text as text_seam
-
-    return text_seam.tokens(text, lang=stem_lang, stopword_lang=stopword_lang)
-
-
 def build_contribution(
     name: str,
     body: str,
@@ -150,7 +130,7 @@ def build_contribution(
     node_surface_counts: dict[str, dict[str, int]] = {}
     edge_acc: dict[tuple[str, str], float] = {}
 
-    for sentence in tokenize(text, stem_lang=lang):
+    for sentence in tokens(text, lang=lang):
         stems = [stem for (stem, _s) in sentence]
         for i, (stem, surface) in enumerate(sentence):
             node_surface_counts.setdefault(stem, {})

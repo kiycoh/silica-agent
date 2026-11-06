@@ -18,8 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from silica.kernel.base import frontmatter
-from silica.kernel.base.layout import is_staging_path, iter_notes, vault_epoch
+from silica.kernel.base import frontmatter, layout
 from silica.kernel.base.noteshape import STAGED, is_spine, note_clock, note_kind
 from silica.kernel.base.syntax import WIKILINK_TARGET_RE
 
@@ -106,14 +105,14 @@ def meta(vault: Path) -> dict[str, dict]:
     since a workspace may list an inbox handout, but its kind is "staged", which
     is not study material.
     """
-    epoch = vault_epoch(str(vault))
+    epoch = layout.vault_epoch(str(vault))
     if epoch:
         hit = _meta_memo.get(str(vault))
         if hit is not None and hit[0] == epoch:
             return hit[1]
 
     out: dict[str, dict] = {}
-    for rel, f in iter_notes(vault):
+    for rel, f in layout.iter_notes(vault):
         try:
             text = f.read_text(encoding="utf-8")
             mtime = f.stat().st_mtime
@@ -125,7 +124,7 @@ def meta(vault: Path) -> dict[str, dict]:
         # reader wrote years ago: a fresh vault of six papers opened Learn on
         # "8 questions waiting from earlier sessions", a references segment
         # among them (2026-10-26).
-        if is_staging_path(rel):
+        if layout.is_staging_path(rel):
             kind = STAGED
         # mtime rides along for the picker's freshness rule (learn-suite D13):
         # a note edited after its last rating is asked as new material.
@@ -145,7 +144,7 @@ def frontmatters(vault: Path) -> dict[str, dict]:
     the same pass (100 ms at p90 on a 2,000-note vault), cache it per index
     generation past that.
     """
-    epoch = vault_epoch(str(vault))
+    epoch = layout.vault_epoch(str(vault))
     hit = _fm_memo.get(str(vault))
     if epoch and hit is not None and hit[0] == epoch:
         return hit[1]
