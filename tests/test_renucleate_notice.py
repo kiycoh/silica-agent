@@ -55,7 +55,7 @@ class TestTheRunReportCarriesIt:
             run_state=RunState(renucleated={"lec.md": 2}), files_logged=set(),
         )
 
-        finalize._log_nucleate_completion(fsm, 0, "Inbox/lec.md")
+        finalize.log_nucleate_completion(fsm, 0, "Inbox/lec.md")
 
         (summary,) = fsm.run_state.files_summary
         assert summary["renucleated_prior_notes"] == 2
@@ -73,7 +73,7 @@ class TestTheRunReportCarriesIt:
             run_state=RunState(), files_logged=set(),
         )
 
-        finalize._log_nucleate_completion(fsm, 0, "Inbox/lec.md")
+        finalize.log_nucleate_completion(fsm, 0, "Inbox/lec.md")
 
         assert "renucleated_prior_notes" not in fsm.run_state.files_summary[0]
 

@@ -1,7 +1,7 @@
 """CLEANUP-phase wiring of the provenance ledger (spec-hermes-coherence §3).
 
 `_record_provenance` is the seam: a sibling projection to
-`_log_nucleate_completion` at the same CLEANUP point, appending one
+`log_nucleate_completion` at the same CLEANUP point, appending one
 .silica/provenance.json record per (source, run) using data the FSM already
 has — the sha256 computed once at RUN start (`file_content_hashes`) and the
 write/patch note paths already recorded in the manifest. Exercised directly
@@ -110,14 +110,14 @@ def test_no_sha_available_skips_silently(tmp_vault):
 
 
 def test_wired_into_handle_cleanup_on_archive(monkeypatch, tmp_vault):
-    """handle_cleanup calls _record_provenance alongside _log_nucleate_completion
+    """handle_cleanup calls _record_provenance alongside log_nucleate_completion
     when a file's last chunk archives successfully."""
     calls = []
     monkeypatch.setattr(
         finalize, "_record_provenance",
         lambda fsm, fi, source_file: calls.append((fi, source_file)),
     )
-    monkeypatch.setattr(finalize, "_log_nucleate_completion", lambda *a, **k: None)
+    monkeypatch.setattr(finalize, "log_nucleate_completion", lambda *a, **k: None)
     monkeypatch.setattr("silica.kernel.write.gate.archive_source", lambda *a, **k: {"success": True})
 
     fsm = types.SimpleNamespace(
@@ -151,7 +151,7 @@ def test_partial_file_still_records_provenance(monkeypatch, tmp_vault):
         finalize, "_record_provenance",
         lambda fsm, fi, source_file: calls.append((fi, source_file)),
     )
-    monkeypatch.setattr(finalize, "_log_nucleate_completion", lambda *a, **k: None)
+    monkeypatch.setattr(finalize, "log_nucleate_completion", lambda *a, **k: None)
     archived = []
     monkeypatch.setattr(
         "silica.kernel.write.gate.archive_source",

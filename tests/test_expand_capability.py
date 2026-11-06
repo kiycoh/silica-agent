@@ -157,7 +157,7 @@ class _FSM:
 
 
 def test_short_snippet_rejection_enqueues_expand_workitem():
-    from silica.router.states.distill import _enqueue_short_snippet_expands
+    from silica.router.states.distill import enqueue_short_snippet_expands
 
     fsm = _FSM()
     rejected = [
@@ -165,7 +165,7 @@ def test_short_snippet_rejection_enqueues_expand_workitem():
         {"op": {"op": "write", "heading": "X", "path": "Corso/X.md"},
          "reason": "Heading 'X' not present in payload concepts"},
     ]
-    _enqueue_short_snippet_expands(fsm, rejected)
+    enqueue_short_snippet_expands(fsm, rejected)
 
     items = fsm.work_queue.items()
     assert len(items) == 1, "only short-snippet rejections become expand work"
@@ -180,11 +180,11 @@ def test_short_snippet_rejection_enqueues_expand_workitem():
 
 
 def test_enqueue_expand_noop_without_queue():
-    from silica.router.states.distill import _enqueue_short_snippet_expands
+    from silica.router.states.distill import enqueue_short_snippet_expands
 
     fsm = _FSM()
     fsm.work_queue = None
-    _enqueue_short_snippet_expands(fsm, [_rejected_short()])  # must not raise
+    enqueue_short_snippet_expands(fsm, [_rejected_short()])  # must not raise
 
 
 def test_author_body_turns_thinking_off():

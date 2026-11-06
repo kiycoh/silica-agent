@@ -132,7 +132,7 @@ def _fsm(queue, ledger):
 
 
 def test_settle_flagged_records_ledger_and_asks_judge_with_loser_path():
-    from silica.router.states.write import _settle_flagged
+    from silica.router.states.write import settle_flagged
 
     q, ledger = _FakeQueue(), _FakeLedger()
     ops = [
@@ -145,7 +145,7 @@ def test_settle_flagged_records_ledger_and_asks_judge_with_loser_path():
         Op(op=OpType.write, heading="Clean", source_basename="lez.md",
            path="Corso/Clean.md", snippet=LONG, hub="Hub"),
     ]
-    _settle_flagged(_fsm(q, ledger), ops, committed={"Corso/Description.md", "Corso/Percettrone.md", "Corso/Clean.md"})
+    settle_flagged(_fsm(q, ledger), ops, committed={"Corso/Description.md", "Corso/Percettrone.md", "Corso/Clean.md"})
 
     assert sorted(r[:2] for r in ledger.rows) == [
         ("Corso/Description.md", "soft_gate"), ("Corso/Percettrone.md", "soft_gate")]
@@ -158,13 +158,13 @@ def test_settle_flagged_records_ledger_and_asks_judge_with_loser_path():
 
 
 def test_settle_flagged_ignores_ops_that_did_not_land():
-    from silica.router.states.write import _settle_flagged
+    from silica.router.states.write import settle_flagged
 
     q, ledger = _FakeQueue(), _FakeLedger()
     op = Op(op=OpType.write, heading="Description", source_basename="lez.md",
             path="Corso/Description.md", snippet=LONG, hub="Hub",
             review="near_title candidate='Descriptor' path='Corso/Descriptor.md' ratio=0.90")
-    _settle_flagged(_fsm(q, ledger), [op], committed=set())
+    settle_flagged(_fsm(q, ledger), [op], committed=set())
     assert ledger.rows == [] and q.items == []
 
 

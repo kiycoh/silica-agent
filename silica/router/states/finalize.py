@@ -203,7 +203,7 @@ def _entries_of(fsm: "InjectorFSM", source_file: str) -> list:
                 else e.source_basename == basename)]
 
 
-def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
+def log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
     """Append one line to the vault's human journal (log.md).
 
     Pure projection of state WRITE/VALIDATE already recorded — the manifest
@@ -396,7 +396,7 @@ def _reverify_prior(fsm, key: str, source_file: str, sha256: str,
 def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
     """Append one `<vault>/provenance.json` record (spec-hermes-coherence §3).
 
-    Sibling projection to _log_nucleate_completion, at the same CLEANUP point:
+    Sibling projection to log_nucleate_completion, at the same CLEANUP point:
     reuses fsm.file_content_hashes[fi] — the sha256 already computed once
     per file at RUN start (silica.router.orchestrator.InjectorFSM.run), the
     same value the /nucleate pre-check will later compare against. Recomputing
@@ -695,7 +695,7 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
             # committed notes in earlier chunks still deserves its log.md line
             # and files_summary entry. Only ARCHIVING is gated on no-failure
             # (a partial source stays in the inbox for retry).
-            _log_nucleate_completion(fsm, fi, inbox_file_for_fi)
+            log_nucleate_completion(fsm, fi, inbox_file_for_fi)
             if not file_has_failure:
                 # Leaf before archive: the source text must still be readable
                 # at its inbox path. On failure the source stays in the inbox

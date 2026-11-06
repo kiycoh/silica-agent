@@ -592,7 +592,7 @@ def test_dedup_items_carry_the_chunk_s_own_file_not_file_zero():
     from types import SimpleNamespace
 
     from silica.agent.subagent import _item_provenance
-    from silica.router.states.distill import _enqueue_near_title_dedups
+    from silica.router.states.distill import enqueue_near_title_dedups
 
     class _Q:
         def __init__(self): self.items = []
@@ -608,7 +608,7 @@ def test_dedup_items_carry_the_chunk_s_own_file_not_file_zero():
         hub="Hub", target_dir="Target",
         progress=SimpleNamespace(run_id="run-9"),
     )
-    _enqueue_near_title_dedups(fsm, [{
+    enqueue_near_title_dedups(fsm, [{
         "op": {"heading": "Beta", "snippet": "beta body"},
         "reason": "near_title candidate='Betas' path='Target/Betas.md' "
                   "ratio=0.90 — deferred for dedup review",
@@ -622,7 +622,7 @@ def test_expand_items_carry_the_same_triple():
     from types import SimpleNamespace
 
     from silica.agent.subagent import _item_provenance
-    from silica.router.states.distill import _enqueue_short_snippet_expands
+    from silica.router.states.distill import enqueue_short_snippet_expands
 
     class _Q:
         def __init__(self): self.items = []
@@ -636,7 +636,7 @@ def test_expand_items_carry_the_same_triple():
         chunks=[{"batches": [{"concepts": [{"name": "Beta", "inbox_excerpt": "…"}]}]}],
         chunk_idx=0,
     )
-    _enqueue_short_snippet_expands(fsm, [
+    enqueue_short_snippet_expands(fsm, [
         {"op": {"heading": "Beta", "path": "Target/Beta.md"},
          "reason": "snippet too short (12 < 100)"},
     ])

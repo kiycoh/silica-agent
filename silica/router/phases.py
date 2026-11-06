@@ -21,7 +21,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal
+from typing import Literal, Self
 
 
 @dataclass(frozen=True)
@@ -60,7 +60,7 @@ class PipelineState(Enum):
         return [s.value for s in cls if s.value.handler]
 
     @classmethod
-    def steps(cls) -> list["PipelineState"]:
+    def steps(cls) -> list[Self]:
         """The run's sequence: every phase but the exception branch, which is
         reached by failing and never by finishing the phase before it."""
         return [s for s in cls if s.value.handler and s.value.scope != "exception"]

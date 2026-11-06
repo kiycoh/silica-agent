@@ -5,7 +5,7 @@
 
 Append-only record of which notes derive from which version (sha256) of an
 nucleated source file, keyed by source basename. Written at CLEANUP alongside
-archiving (silica.router.states.finalize, sibling to _log_nucleate_completion)
+archiving (silica.router.states.finalize, sibling to log_nucleate_completion)
 and read by graph_report (source drift section) and /nucleate (re-nucleate of a
 modified source warning).
 

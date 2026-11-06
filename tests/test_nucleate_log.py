@@ -1,6 +1,6 @@
 """CLEANUP-phase wiring of the log.md journal (silica.router.states.finalize).
 
-`_log_nucleate_completion` is the seam: a pure projection of already-recorded
+`log_nucleate_completion` is the seam: a pure projection of already-recorded
 manifest entries + deferred-store state onto one log.md line, exercised
 directly against a minimal fake FSM rather than the full injector pipeline
 (that machinery is covered elsewhere; this file's job is the seam only).
@@ -45,7 +45,7 @@ def test_writes_projected_new_and_patch_counts(tmp_vault):
     ]
     fsm = _fake_fsm(entries, run_id="deadbeef1234", content_hashes=["hash0"])
 
-    finalize._log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
+    finalize.log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
 
     content = (Path(CONFIG.vault_path) / DEFAULT_LOG_FILENAME).read_text(encoding="utf-8")
     assert "nucleate `lezione-03.md` → 2 new, 1 patch, 0 deferred" in content
@@ -67,7 +67,7 @@ def test_includes_deferred_count_from_deferred_store(tmp_vault, monkeypatch, tmp
 
     fsm = _fake_fsm([], run_id="cafef00dabcd", content_hashes=["hash0"])
 
-    finalize._log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
+    finalize.log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
 
     content = (Path(CONFIG.vault_path) / DEFAULT_LOG_FILENAME).read_text(encoding="utf-8")
     assert "→ 0 new, 0 patch, 2 deferred" in content
@@ -77,10 +77,10 @@ def test_two_nucleates_two_lines_in_order(tmp_vault):
     from silica.config import CONFIG
 
     fsm1 = _fake_fsm([_entry("one.md", "write", "A")], run_id="runidone1234", content_hashes=["h1"])
-    finalize._log_nucleate_completion(fsm1, 0, "Inbox/one.md")
+    finalize.log_nucleate_completion(fsm1, 0, "Inbox/one.md")
 
     fsm2 = _fake_fsm([_entry("two.md", "write", "B")], run_id="runidtwo5678", content_hashes=["h2"])
-    finalize._log_nucleate_completion(fsm2, 0, "Inbox/two.md")
+    finalize.log_nucleate_completion(fsm2, 0, "Inbox/two.md")
 
     lines = (Path(CONFIG.vault_path) / DEFAULT_LOG_FILENAME).read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
@@ -101,8 +101,8 @@ def test_multi_file_same_run_id_logs_one_line_per_file(tmp_vault):
     ]
     fsm = _fake_fsm(entries, run_id="sharedrunid1", content_hashes=["h1", "h2"])
 
-    finalize._log_nucleate_completion(fsm, 0, "Inbox/one.md")
-    finalize._log_nucleate_completion(fsm, 1, "Inbox/two.md")
+    finalize.log_nucleate_completion(fsm, 0, "Inbox/one.md")
+    finalize.log_nucleate_completion(fsm, 1, "Inbox/two.md")
 
     log_file = Path(CONFIG.vault_path) / DEFAULT_LOG_FILENAME
     lines = [l for l in log_file.read_text(encoding="utf-8").splitlines() if l.strip()]
@@ -111,8 +111,8 @@ def test_multi_file_same_run_id_logs_one_line_per_file(tmp_vault):
     assert "nucleate `two.md` → 1 new, 1 patch, 0 deferred" in lines[1]
 
     # Resume of the same run: both files re-enter CLEANUP → still two lines.
-    finalize._log_nucleate_completion(fsm, 0, "Inbox/one.md")
-    finalize._log_nucleate_completion(fsm, 1, "Inbox/two.md")
+    finalize.log_nucleate_completion(fsm, 0, "Inbox/one.md")
+    finalize.log_nucleate_completion(fsm, 1, "Inbox/two.md")
     lines = [l for l in log_file.read_text(encoding="utf-8").splitlines() if l.strip()]
     assert len(lines) == 2
 
@@ -120,7 +120,7 @@ def test_multi_file_same_run_id_logs_one_line_per_file(tmp_vault):
 def test_never_raises_on_broken_fsm(tmp_vault):
     """Best-effort: a fsm missing the expected attributes must not blow up CLEANUP."""
     broken_fsm = types.SimpleNamespace()
-    finalize._log_nucleate_completion(broken_fsm, 0, "Inbox/x.md")  # must not raise
+    finalize.log_nucleate_completion(broken_fsm, 0, "Inbox/x.md")  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +151,7 @@ def test_files_summary_counts_extractive_rejections(tmp_vault):
     fsm = _fake_fsm([], run_id="cafecafe0000", content_hashes=["hash0"])
     fsm.run_state = RunState()
 
-    finalize._log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
+    finalize.log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
 
     [entry] = fsm.run_state.files_summary
     assert entry["deferred"] == 2
@@ -172,7 +172,7 @@ def test_files_summary_omits_extractive_key_when_none(tmp_vault):
     fsm = _fake_fsm([], run_id="cafecafe0001", content_hashes=["hash0"])
     fsm.run_state = RunState()
 
-    finalize._log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
+    finalize.log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
 
     [entry] = fsm.run_state.files_summary
     assert entry["deferred"] == 1

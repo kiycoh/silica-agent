@@ -325,7 +325,7 @@ def _mark_merge_loser(job: DedupJob, winner_path: str) -> None:
 
     Only fires when the loser is a real vault note: `loser_path` is set by the
     note-vs-note seams (/dedup pairs, /curate families) and by the soft gate
-    once a flagged note has landed (write.py _settle_flagged); an incoming
+    once a flagged note has landed (write.py settle_flagged); an incoming
     concept that was never written has none. Best-effort — a committed merge
     must not be reported failed over a bookkeeping key.
     """

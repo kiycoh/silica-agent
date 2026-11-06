@@ -59,7 +59,7 @@ class BaseFSM(Generic[StateT]):
         if self.state in steps:
             idx = steps.index(self.state)
             if idx + 1 < len(steps):
-                self.state = steps[idx + 1]  # type: ignore[assignment]
+                self.state = steps[idx + 1]
             else:
                 self._on_pipeline_end()
 

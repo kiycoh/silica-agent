@@ -178,7 +178,7 @@ def test_near_title_rejection_enqueues_dedup_workitem():
     """The fuzzy band reuses C2: the deferred op ALSO becomes a live dedup
     WorkItem (content_hash + target_dir aboard) so the judge routes it —
     retry stays the exception, not the drain."""
-    from silica.router.states.distill import _enqueue_near_title_dedups
+    from silica.router.states.distill import enqueue_near_title_dedups
     from silica.kernel.workqueue import WorkQueue
 
     class _FSM:
@@ -199,7 +199,7 @@ def test_near_title_rejection_enqueues_dedup_workitem():
          "reason": "Heading 'X' not present in payload concepts"},
     ]
     fsm = _FSM()
-    _enqueue_near_title_dedups(fsm, rejected)
+    enqueue_near_title_dedups(fsm, rejected)
 
     items = fsm.work_queue.items()
     assert len(items) == 1, "only near_title rejections become dedup work"

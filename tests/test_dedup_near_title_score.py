@@ -5,7 +5,7 @@ of the degenerate score=0.0 (which force-routes every near-title pair distinct).
 from types import SimpleNamespace
 
 from silica.capabilities.dedup import passes_dedup_gate
-from silica.router.states.distill import _enqueue_near_title_dedups
+from silica.router.states.distill import enqueue_near_title_dedups
 
 
 class _FakeQueue:
@@ -31,7 +31,7 @@ def test_ratio_becomes_title_score_and_clears_gate():
         "reason": "near_title candidate='Betas' path='TargetDir/Betas.md' "
                   "ratio=0.90 — deferred for dedup review",
     }]
-    _enqueue_near_title_dedups(_fsm(q), rejected)
+    enqueue_near_title_dedups(_fsm(q), rejected)
     assert len(q.items) == 1
     job = q.items[0].context
     assert job.title_score == 0.90              # real ratio, not 0.0
@@ -47,7 +47,7 @@ def test_missing_ratio_stays_zero():
         "op": {"heading": "Beta", "snippet": "x"},
         "reason": "near_title candidate='Betas' path='TargetDir/Betas.md'",
     }]
-    _enqueue_near_title_dedups(_fsm(q), rejected)
+    enqueue_near_title_dedups(_fsm(q), rejected)
     assert q.items[0].context.title_score == 0.0  # graceful when absent
 
 
@@ -64,7 +64,7 @@ def test_rejections_against_one_candidate_become_one_judge_call():
         {"op": {"heading": "Gamma", "snippet": "g"},
          "reason": "near_title candidate='Gammas' path='TargetDir/Gammas.md' ratio=0.91"},
     ]
-    _enqueue_near_title_dedups(_fsm(q), rejected)
+    enqueue_near_title_dedups(_fsm(q), rejected)
     by_path = {it.target_path: it for it in q.items}
     assert len(q.items) == 2
     family = by_path["TargetDir/Betas.md"]

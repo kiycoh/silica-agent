@@ -237,7 +237,7 @@ def test_wired_before_archive(monkeypatch, tmp_vault):
     monkeypatch.setattr(finalize, "_write_source_leaf",
                         lambda fsm, src: order.append(("leaf", src)))
     monkeypatch.setattr(finalize, "_record_provenance", lambda *a: None)
-    monkeypatch.setattr(finalize, "_log_nucleate_completion", lambda *a: None)
+    monkeypatch.setattr(finalize, "log_nucleate_completion", lambda *a: None)
     monkeypatch.setattr("silica.kernel.write.gate.archive_source",
                         lambda *a, **k: order.append(("archive", a[0])) or {"success": True})
 

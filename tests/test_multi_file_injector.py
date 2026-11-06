@@ -304,9 +304,9 @@ class TestT2ChunkContainment:
         """The success (CLEANUP) and failure (containment) entry points must not
         both record the same file — the files_logged guard keeps it to one."""
         fsm = InjectorFSM("Inbox/lezione-07.md", "Concepts")
-        from silica.router.states.finalize import _log_nucleate_completion
-        _log_nucleate_completion(fsm, 0, "Inbox/lezione-07.md")
-        _log_nucleate_completion(fsm, 0, "Inbox/lezione-07.md")
+        from silica.router.states.finalize import log_nucleate_completion
+        log_nucleate_completion(fsm, 0, "Inbox/lezione-07.md")
+        log_nucleate_completion(fsm, 0, "Inbox/lezione-07.md")
         assert len(fsm.run_state.files_summary) == 1
 
     def test_on_error_per_chunk_routes_to_rollback(self):

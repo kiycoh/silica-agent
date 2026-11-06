@@ -998,7 +998,7 @@ def _validate_write(op: Op, batch: _Batch) -> Rejection | _Skip | None:
 
     # C3 gate, band 2: fuzzy-near an existing title (Descriptor vs
     # Description). SOFT: the note lands with `review:` set and the
-    # dedup judge is asked once it exists (write.py _settle_flagged).
+    # dedup judge is asked once it exists (write.py settle_flagged).
     # It used to reject-and-defer "so the judge decides", but the judge
     # only ever ran inside the FSM: the anneal retry re-validated with
     # no judge, the same band fired again, and 13 of the 23 ops parked

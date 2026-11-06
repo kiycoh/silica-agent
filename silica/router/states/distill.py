@@ -63,10 +63,10 @@ def _doc_date(fsm: "InjectorFSM", idx: int) -> str:
         return ""
 
 
-def _enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed: bool = False) -> None:
+def enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed: bool = False) -> None:
     """Fuzzy-band title flags become live dedup WorkItems (C3 reuses C2).
 
-    `landed`: the op is a note on disk (soft gate, write.py _settle_flagged),
+    `landed`: the op is a note on disk (soft gate, write.py settle_flagged),
     so the judge gets `loser_path` and a duplicate verdict has something to
     mark superseded. Without it the pair is judged as an incoming concept
     (legacy rejected shape). Best-effort: no queue (ad-hoc validate) → no-op.
@@ -123,7 +123,7 @@ def _enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list, *, landed
             logger.debug("VALIDATE: failed to enqueue near_title dedup item: %s", _qe)
 
 
-def _enqueue_short_snippet_expands(fsm: "InjectorFSM", rejected_raw: list) -> None:
+def enqueue_short_snippet_expands(fsm: "InjectorFSM", rejected_raw: list) -> None:
     """«snippet too short» rejections become live expand WorkItems.
 
     The op is already parked in the deferred bundle by defer_ops; the expand

@@ -299,7 +299,7 @@ def _attach_section_images(fsm: "InjectorFSM", ops: list) -> None:
             op.snippet = append_section_images(op.snippet or "", source, concept)
 
 
-def _settle_flagged(fsm: "InjectorFSM", ops: list, committed: set[str]) -> None:
+def settle_flagged(fsm: "InjectorFSM", ops: list, committed: set[str]) -> None:
     """Soft-gate verdicts, once the note exists: ledger row + the follow-up.
 
     After the commit and not at VALIDATE, because the workers run concurrently
@@ -309,7 +309,7 @@ def _settle_flagged(fsm: "InjectorFSM", ops: list, committed: set[str]) -> None:
     the write reverted is already in the deferred store.
     """
     from silica.router.states.distill import (
-        _enqueue_near_title_dedups, _enqueue_short_snippet_expands,
+        enqueue_near_title_dedups, enqueue_short_snippet_expands,
     )
     flagged = [
         {"op": op.model_dump(), "reason": op.review}
@@ -321,8 +321,8 @@ def _settle_flagged(fsm: "InjectorFSM", ops: list, committed: set[str]) -> None:
     if fsm.warning_ledger is not None:
         for f in flagged:
             fsm.warning_ledger.add(f["op"].get("path", ""), "soft_gate", f["reason"])
-    _enqueue_near_title_dedups(fsm, flagged, landed=True)
-    _enqueue_short_snippet_expands(fsm, flagged)
+    enqueue_near_title_dedups(fsm, flagged, landed=True)
+    enqueue_short_snippet_expands(fsm, flagged)
 
 
 def handle_write(fsm: "InjectorFSM") -> None:
@@ -347,7 +347,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
         logger.debug("WRITE: claim stamp skipped (%s)", _ve)
 
     result = bulk_write_atomic(ops, hub=fsm.hub, lint=True)
-    _settle_flagged(fsm, ops, committed={r.path for r in result.committed})
+    settle_flagged(fsm, ops, committed={r.path for r in result.committed})
 
     # Per-op lint tolerated these pre-existing violations (patch baseline);
     # hand them to the chunk LINT gate so it applies the same tolerance.

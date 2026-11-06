@@ -422,7 +422,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         modified, prior = check_renucleate(key, content_hash)
         if not modified:
             return
-        # Keyed by basename: _log_nucleate_completion and files_summary read it
+        # Keyed by basename: log_nucleate_completion and files_summary read it
         # back by the file's name, the label they print.
         self.run_state.renucleated[basename] = prior
         logger.warning(
@@ -599,9 +599,9 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 # still open, workers alive), so they get the same settle as
                 # a chunk write: ledger row, judge with loser_path, expand.
                 from silica.kernel.write.ops import Op
-                from silica.router.states.write import _settle_flagged
+                from silica.router.states.write import settle_flagged
                 ops = [Op.model_validate(o) for o in res["flagged_ops"]]
-                _settle_flagged(self, ops, committed={r for o in ops if (r := o.touched_ref())})
+                settle_flagged(self, ops, committed={r for o in ops if (r := o.touched_ref())})
         except Exception as e:
             logger.debug("boundary anneal skipped (%s)", e)
 
@@ -771,14 +771,14 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # Per-file accounting is CLEANUP-anchored, but a failed last chunk never
         # reaches CLEANUP — so this file (whose earlier chunks may have committed
         # real notes) would otherwise get no log.md line / files_summary entry.
-        # Emit it here on the file boundary; _log_nucleate_completion is guarded
+        # Emit it here on the file boundary; log_nucleate_completion is guarded
         # against double-recording the success path.
         file_group = self.file_chunks.get(fi, {})
         n_chunks_in_file = len(file_group.get("chunks", []))
         if ci + 1 >= n_chunks_in_file:
             try:
-                from silica.router.states.finalize import _log_nucleate_completion
-                _log_nucleate_completion(
+                from silica.router.states.finalize import log_nucleate_completion
+                log_nucleate_completion(
                     self, fi, file_group.get("source_file", self.inbox_file)
                 )
             except Exception as _le:
