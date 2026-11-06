@@ -3672,7 +3672,7 @@ def _lean_limit() -> int:
     every row, and a copy would keep saying 600 for a year after the limit moved.
     """
     try:
-        from silica.kernel.link.ofm import LIMITS
+        from silica.kernel.write.ofm import LIMITS
 
         return int(LIMITS["lean_chars"])
     except Exception as exc:

@@ -422,7 +422,7 @@ def silica_bulk_write(ops_json_path: Annotated[str, Field(description='Path to t
 @tool(cls="composed", internal=True)
 def silica_lint(note_name: Annotated[str, Field(description='Name of the note to lint')], op_type: Annotated[str, Field(description='Operation type (write/patch/overwrite) for conditional checks')] = "", hub: Annotated[str, Field(description='Hub note name for wikilink validation')] = "") -> dict[str, Any]:
     """Post-write gate: executes the OFM linter to find structural regressions."""
-    from silica.kernel.link.linter import validate_note
+    from silica.kernel.write.linter import validate_note
 
     errors, warnings = validate_note(note_name, hub=hub or None, op_type=op_type or None)
 

@@ -118,7 +118,7 @@ class TestTheOkfCensus:
 class TestTheLinterCli:
     def test_refuses_an_empty_target(self, tmp_path):
         proc = subprocess.run(
-            [sys.executable, "-m", "silica.kernel.link.linter", "--target", str(tmp_path)],
+            [sys.executable, "-m", "silica.kernel.write.linter", "--target", str(tmp_path)],
             capture_output=True, text=True, timeout=120,
         )
 

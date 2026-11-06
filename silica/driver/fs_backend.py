@@ -42,7 +42,7 @@ from silica.driver.base import (
 )
 from silica.kernel.base import frontmatter as fm
 from silica.kernel.write import preserve, session_changes
-from silica.kernel.link import ofm
+from silica.kernel.write import ofm
 from silica.kernel.base.layout import is_vault_artifact
 from silica.kernel.base.durable import atomic_write_bytes
 from silica.kernel.base.layout import contain_in_vault, ignore_matcher, is_source_leaf

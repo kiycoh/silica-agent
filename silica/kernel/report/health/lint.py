@@ -29,7 +29,7 @@ from typing import Callable, NamedTuple
 
 from silica.kernel.base import frontmatter
 from silica.kernel.base.markdown import extract_callouts, parse_headings
-from silica.kernel.link.ofm import CALLOUT_TYPES
+from silica.kernel.write.ofm import CALLOUT_TYPES
 from silica.kernel.text.title import title_key
 
 # ---------------------------------------------------------------------------
