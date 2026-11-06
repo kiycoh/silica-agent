@@ -88,13 +88,13 @@ def feed_state(feed: dict) -> dict:
 # --- one feed --------------------------------------------------------------------
 
 def _get(url: str, state: dict | None = None, *, types=wf.FEED_TYPES, cap=_FEED_CAP):
-    headers = dict(wf._READER_HEADERS)
+    headers = dict(wf.READER_HEADERS)
     if state:
         if state.get("etag"):
             headers["If-None-Match"] = state["etag"]
         if state.get("modified"):
             headers["If-Modified-Since"] = state["modified"]
-    return wf._fetch(url, headers, types=types, cap=cap)
+    return wf.fetch(url, headers, types=types, cap=cap)
 
 
 def _yt_feed_url(url: str) -> str:
@@ -153,16 +153,11 @@ def _site_search(host: str) -> list[dict]:
 
     key = (CONFIG.tavily_api_key or "").strip()
     if key:
-        import httpx
-
-        resp = httpx.post(wr._TAVILY_URL, timeout=wr._HTTP_TIMEOUT, json={
-            "api_key": key, "query": f"latest from {host}", "max_results": 10, "topic": "news",
-            "include_domains": [host], "include_domains_mode": "filter", "include_answer": False})
-        resp.raise_for_status()
-        hits = resp.json().get("results", [])
+        hits = wr.tavily_post(key, f"latest from {host}", max_results=10, topic="news",
+                              include_domains=[host], include_domains_mode="filter", include_answer=False)
     else:
         hits = []
-        for lane in (wr._ddg_search, wr._mojeek_search):
+        for lane in (wr.ddg_search, wr.mojeek_search):
             try:
                 hits = lane(f"site:{host}")
                 break
@@ -455,7 +450,7 @@ def site_icon(domain: str, vault: str | None = None) -> tuple[str, str] | None:
 
 def _page_image(url: str) -> str:
     try:
-        resp, final = _get(url, None, types=wf._TEXT_TYPES, cap=wf._MAX_BODY_BYTES)
+        resp, final = _get(url, None, types=wf.TEXT_TYPES, cap=wf.MAX_BODY_BYTES)
     except Exception as exc:
         logger.debug("discover: og:image lookup %s failed: %s", url, exc)
         return ""

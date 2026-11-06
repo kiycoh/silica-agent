@@ -160,7 +160,7 @@ def silica_query_table(
 
     src = Path(path).expanduser()
     vault = (CONFIG.vault_path or "").strip()
-    # Vault first, cwd second — mirrors convert._resolve_input. The profile
+    # Vault first, cwd second — mirrors convert.resolve_input. The profile
     # note prints its query example repo-relative (machine-portable), so the
     # example must resolve from wherever the server happens to be running.
     if not src.is_absolute() and vault and (Path(vault) / src).exists():

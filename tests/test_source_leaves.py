@@ -4,7 +4,7 @@
 """Verbatim source leaves (spec-harness-promotion 2026-07-24 §2).
 
 Write side: `finalize._write_source_leaf` at CLEANUP (fake-FSM style, like
-test_finalize_provenance) and `web_research._write_leaf`. Read side: leaves
+test_finalize_provenance) and `web_research.write_leaf`. Read side: leaves
 are retrieval-invisible — one test per index (search, embed, cooccurrence,
 autolink title index) — while staying reachable via silica_read_note.
 """
@@ -265,7 +265,7 @@ def test_wired_before_archive(monkeypatch, tmp_vault):
 # ---------------------------------------------------------------------------
 
 def test_web_research_leaf_from_tool_trace(tmp_vault):
-    from silica.sources.web_research import _write_leaf
+    from silica.sources.web_research import write_leaf
 
     # The trace is the tool results themselves, recorded at emission — not the
     # message history, which run_agent's compaction sweep rewrites in place.
@@ -273,7 +273,7 @@ def test_web_research_leaf_from_tool_trace(tmp_vault):
         '[{"title": "T", "url": "u", "content": "excerpt one"}]',
         '[{"title": "U", "url": "v", "content": "excerpt two"}]',
     ]
-    _write_leaf("Inbox/topic.md", results)
+    write_leaf("Inbox/topic.md", results)
 
     leaf = _vault_file("sources/topic.md").read_text(encoding="utf-8")
     assert "excerpt one" in leaf and "excerpt two" in leaf
@@ -281,9 +281,9 @@ def test_web_research_leaf_from_tool_trace(tmp_vault):
 
 
 def test_web_research_no_trace_no_leaf(tmp_vault):
-    from silica.sources.web_research import _write_leaf
+    from silica.sources.web_research import write_leaf
 
-    _write_leaf("Inbox/topic.md", [])
+    write_leaf("Inbox/topic.md", [])
     assert not _vault_file("sources/topic.md").exists()
 
 

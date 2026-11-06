@@ -133,7 +133,7 @@ def test_zotero_grant_says_whether_the_key_was_kept(fake, tmp_path, monkeypatch,
 
 
 def test_zotero_status_shows_what_changed_since_the_last_session(fake, monkeypatch, capsys):
-    monkeypatch.setattr(z, "_client_for", lambda vault, link: z.client())
+    monkeypatch.setattr(z, "client_for", lambda vault, link: z.client())
     z.detect(CONFIG.vault_path)
     item = fake.clone(fake.items["8H4AC8GW"], "NEWPAPER", title="Memory in the Age of AI Agents",
                       citationKey="hu2026", dateAdded="2099-01-01T00:00:00Z")

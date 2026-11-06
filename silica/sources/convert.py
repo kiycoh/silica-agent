@@ -364,7 +364,7 @@ def _split_by_size(text: str, max_chars: int) -> list[str]:
 # A section whose first heading is a bibliography heading. Reference lists are
 # citation metadata, not content to nucleate: one survey's references produced
 # 34 venue notes (NeurIPS.md, ICML.md, …) out of 98 total (2026-08-15 run).
-_REFERENCES_HEADING_RE = re.compile(
+REFERENCES_HEADING_RE = re.compile(
     r"^#{1,6}\s*[\d.\s]*\**\s*(references?|bibliography|works cited|bibliografia|"
     r"riferimenti(?:\s+bibliografici)?)\s*\**\s*$",
     re.IGNORECASE,
@@ -450,7 +450,7 @@ def _section_kind(section: str) -> str:
     for line in section.splitlines():
         if _HEADING_RE.match(line):
             head = line.strip()
-            if _REFERENCES_HEADING_RE.match(head):
+            if REFERENCES_HEADING_RE.match(head):
                 return "references"
             if _CONTENTS_HEADING_RE.match(head) or _CHECKLIST_HEADING_RE.match(head):
                 return "boilerplate"
@@ -637,7 +637,7 @@ def _read(reader, src: Path, workdir: Path, on_page) -> tuple[str, Path]:
 
 def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None,
                on_page=None, beside: bool = False) -> list[str]:
-    src = _resolve_input(target)
+    src = resolve_input(target)
     suffix = src.suffix.lower()
     fmt = formats.FORMATS[suffix]
     if fmt.family == "tabular":
@@ -3266,7 +3266,7 @@ def _write_leaf(src: Path, body: str, name: str, fields: dict) -> None:
                   loss=Loss.STAGED)
 
 
-def _resolve_input(target: str) -> Path:
+def resolve_input(target: str) -> Path:
     """Absolute as given; relative tried vault-first, then cwd.
 
     ProseAdapter.read resolves vault-only because its inputs are notes, which

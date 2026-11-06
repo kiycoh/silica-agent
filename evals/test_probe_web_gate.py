@@ -37,9 +37,9 @@ def test_effective_citations_counts_distinct_sources():
 
 def test_bank_validity_checks_quotes_against_their_pages():
     bank = {
-        "Q1": wr._Quote("https://s.test/a", "Graphs beat lists", "w"),
-        "Q2": wr._Quote("https://s.test/a", "never on the page", "w"),
-        "Q3": wr._Quote("https://gone.test", "page never fetched", "w"),
+        "Q1": wr.Quote("https://s.test/a", "Graphs beat lists", "w"),
+        "Q2": wr.Quote("https://s.test/a", "never on the page", "w"),
+        "Q3": wr.Quote("https://gone.test", "page never fetched", "w"),
     }
 
     assert pwg.bank_validity(bank, [_PAGE]) == pytest.approx(1 / 3)

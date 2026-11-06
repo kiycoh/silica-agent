@@ -282,7 +282,7 @@ async def vault_fetch(payload: dict):
     server the unit's IPAddressDeny holds the private ranges and link-local
     under it."""
     from silica.config import hosted
-    from silica.sources.web_fetch import _YT_DOMAINS, YoutubeBlocked, host_matches, youtube_cookies
+    from silica.sources.web_fetch import YT_DOMAINS, YoutubeBlocked, host_matches, youtube_cookies
     from silica.sources.web_research import fetch_to_inbox
 
     url = str(payload.get("url") or "").strip()
@@ -291,7 +291,7 @@ async def vault_fetch(payload: dict):
         raise HTTPException(400, "a link is one web address, at most 2,048 characters")
     row: dict = {"name": url}
     if (hosted() and youtube_cookies() is None
-            and host_matches(url if "://" in url else f"https://{url}", *_YT_DOMAINS)):
+            and host_matches(url if "://" in url else f"https://{url}", *YT_DOMAINS)):
         return {"files": [{**row, "status": "refused", "reason": drop.YOUTUBE_ON_SERVER}]}
     with session.turn_slot("a turn is running: add the link when it ends"):
         try:

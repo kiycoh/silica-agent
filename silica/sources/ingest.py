@@ -216,7 +216,7 @@ def prior_conversions() -> dict[str, dict]:
     The two places a source's converted segments can already live: still in the
     inbox (a run that never finished) and archived in done/ (a run that did).
     Read once per /nucleate invocation off the `source_file` frontmatter that
-    convert() stamps on every segment — the identity `_resolve_input` produced
+    convert() stamps on every segment — the identity `resolve_input` produced
     at conversion time, so the same resolver matches it on re-run.
     """
     from silica.driver import DRIVER
@@ -238,7 +238,7 @@ def prior_conversions() -> dict[str, dict]:
                 continue
             if "/" in src and not Path(src).is_absolute():
                 # The server's vault path (ADR-0129 point 1), keyed as
-                # `_resolve_input` spells the same file; a bare name is an
+                # `resolve_input` spells the same file; a bare name is an
                 # older server note whose file is gone, and matches nothing.
                 src = str(vault / src)
             entry = out.setdefault(src, {"inbox": [], "done": 0})
@@ -487,9 +487,9 @@ def _pending_brief(src: str) -> tuple[str, str]:
         return name, ""
     try:
         from silica.sources import pdf_extract
-        from silica.sources.convert import _resolve_input
+        from silica.sources.convert import resolve_input
 
-        meta = pdf_extract.metadata(_resolve_input(src))
+        meta = pdf_extract.metadata(resolve_input(src))
     except Exception:
         # A PDF that will not open is convert's to report, a few lines later;
         # here it only goes without its title.
@@ -1114,13 +1114,13 @@ def _converted_notes_of(sources: list[str]) -> set[str]:
     """The inbox notes an earlier convert() made from these source files."""
     if not sources:
         return set()
-    from silica.sources.convert import _resolve_input
+    from silica.sources.convert import resolve_input
 
     prior = prior_conversions()
     out: set[str] = set()
     for s in sources:
         try:
-            out.update(prior.get(str(_resolve_input(s)), {}).get("inbox") or [])
+            out.update(prior.get(str(resolve_input(s)), {}).get("inbox") or [])
         except ValueError:
             continue  # gone since the census: convert() reports it later
     return out
@@ -1218,7 +1218,7 @@ def owed(files: list[str]) -> list[str]:
     [] when one of them is a glob or a folder: the whole command runs as before."""
     from silica.kernel.base.formats import DOC_EXTS
     from silica.kernel.base.manifest import get_active_manifest
-    from silica.sources.convert import _resolve_input
+    from silica.sources.convert import resolve_input
     from silica.sources.registry import adapter_for
 
     enabled = get_active_manifest().sources
@@ -1228,7 +1228,7 @@ def owed(files: list[str]) -> list[str]:
         if any(ch in f for ch in "*?["):
             return []
         try:
-            src = _resolve_input(f)
+            src = resolve_input(f)
         except ValueError:
             continue  # a Zotero key, or a missing file: the command says which
         if src.is_dir():
@@ -1270,9 +1270,9 @@ def plan_units(
             # Both identities are already on disk — segments in the inbox
             # (interrupted run) and the done/ archive (finished book) both
             # carry `source_file` frontmatter.
-            from silica.sources.convert import _resolve_input
+            from silica.sources.convert import resolve_input
             try:
-                src_key = str(_resolve_input(f))
+                src_key = str(resolve_input(f))
             except ValueError:
                 src_key = ""  # convert() stays the authority on missing files
             if converted is None:

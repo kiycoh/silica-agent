@@ -121,7 +121,7 @@ class _Challenged(_FakeDDGResp):
 
 # Mojeek's results list, plus a chrome list carrying an <h2> anchor of its own:
 # the parser is anchored on ul.results-standard, so the chrome must not become a
-# hit. Selectors per searxng's mojeek engine (see _mojeek_search).
+# hit. Selectors per searxng's mojeek engine (see mojeek_search).
 _MOJEEK_HTML = """
 <ul class="nav-standard">
   <li><h2><a href="https://www.mojeek.com/about/">About Mojeek</a></h2></li>
@@ -155,7 +155,7 @@ class _MojeekCaptcha:
 
 
 def _serve_lanes(monkeypatch, *, mojeek=None, wikipedia=None) -> list[tuple]:
-    """Stub the two lanes that go through `_web_fetch._fetch`.
+    """Stub the two lanes that go through `_web_fetch.fetch`.
 
     Mojeek runs through it as well as Wikipedia — it is the fetcher that
     revalidates every redirect hop, and a raw `follow_redirects=True` get is
@@ -175,7 +175,7 @@ def _serve_lanes(monkeypatch, *, mojeek=None, wikipedia=None) -> list[tuple]:
             raise resp
         return resp, url
 
-    monkeypatch.setattr(wr._web_fetch, "_fetch", fake_fetch)
+    monkeypatch.setattr(wr._web_fetch, "fetch", fake_fetch)
     return seen
 
 
@@ -233,7 +233,7 @@ def test_mojeek_parse_does_not_depend_on_anchor_order(monkeypatch):
 
     _serve_lanes(monkeypatch, mojeek=_Swapped())
 
-    assert wr._mojeek_search("graph theory")[0] == {
+    assert wr.mojeek_search("graph theory")[0] == {
         "title": "Mojeek One",
         "url": "https://m1.test/page",
         "content": "Snippet one & a bit.",
@@ -246,14 +246,14 @@ def test_mojeek_captcha_and_empty_page_both_raise(monkeypatch):
     answering and never reach the ones that still do."""
     _serve_lanes(monkeypatch, mojeek=_MojeekCaptcha())
     with pytest.raises(ValueError, match="challenged"):
-        wr._mojeek_search("graph theory")
+        wr.mojeek_search("graph theory")
 
     class _Renamed(_FakeMojeekResp):
         text = _MOJEEK_HTML.replace("results-standard", "results-v2")
 
     _serve_lanes(monkeypatch, mojeek=_Renamed())
     with pytest.raises(ValueError, match="no parseable results"):
-        wr._mojeek_search("graph theory")
+        wr.mojeek_search("graph theory")
 
 
 class _FakeWPResp:
@@ -305,7 +305,7 @@ def test_web_search_double_failure_names_the_tavily_escape_hatch(monkeypatch):
     def boom(*a, **k):
         raise ValueError("cannot resolve 'en.wikipedia.org'")
 
-    monkeypatch.setattr(wr._web_fetch, "_fetch", boom)
+    monkeypatch.setattr(wr._web_fetch, "fetch", boom)
     with pytest.raises(ValueError, match="TAVILY"):
         wr.web_search("anything")
 
@@ -319,7 +319,7 @@ def _all_lanes_down(monkeypatch) -> list[int]:
     monkeypatch.setattr(CONFIG, "tavily_api_key", "")
     monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: (dialled.append(1), _Challenged())[1])
     monkeypatch.setattr(wr.httpx, "get", lambda *a, **k: _MojeekCaptcha())
-    monkeypatch.setattr(wr._web_fetch, "_fetch", boom)
+    monkeypatch.setattr(wr._web_fetch, "fetch", boom)
     return dialled
 
 
@@ -408,7 +408,7 @@ def test_web_search_posts_to_tavily_when_ddg_challenges(monkeypatch):
         return _FakeTavilyResp()
 
     monkeypatch.setattr(wr.httpx, "post", fake_post)
-    monkeypatch.setattr(wr._web_fetch, "_fetch", _wikipedia_must_not_run)
+    monkeypatch.setattr(wr._web_fetch, "fetch", _wikipedia_must_not_run)
 
     items = json.loads(wr.web_search("graph theory"))
 
@@ -434,7 +434,7 @@ def test_web_search_falls_through_tavily_to_wikipedia(monkeypatch):
         raise httpx.HTTPError("tavily 401")
 
     monkeypatch.setattr(wr.httpx, "post", fake_post)
-    monkeypatch.setattr(wr._web_fetch, "_fetch", lambda url, headers=None: (_FakeWPResp(), url))
+    monkeypatch.setattr(wr._web_fetch, "fetch", lambda url, headers=None: (_FakeWPResp(), url))
 
     items = json.loads(wr.web_search("graph theory"))
 
@@ -1161,14 +1161,14 @@ def test_bank_and_pages_are_per_turn():
 
 def test_bind_citations_renumbers_by_first_appearance_and_reorders_sources():
     bank = {
-        "Q1": wr._Quote("https://b.test", "quote b", "w"),
-        "Q2": wr._Quote("https://a.test", "quote a", "w"),
+        "Q1": wr.Quote("https://b.test", "quote b", "w"),
+        "Q2": wr.Quote("https://a.test", "quote a", "w"),
     }
     collected = [
         ("https://c.test", "C"), ("https://b.test", "B"), ("https://a.test", "A"),
     ]
 
-    body, sources, audit = wr._bind_citations("x [Q2] y [Q1] z [Q2].", collected, bank)
+    body, sources, audit = wr.bind_citations("x [Q2] y [Q1] z [Q2].", collected, bank)
 
     assert body == "x [1] y [2] z [1]."
     # Cited pages first, in first-citation order; the uncited page stays listed
@@ -1183,11 +1183,11 @@ def test_quotes_from_one_page_share_one_source_number():
     """Citations name sources, not bank rows: [Q1] and [Q2] off the same page
     are the same [1], singly or in a combined marker."""
     bank = {
-        "Q1": wr._Quote("https://a.test", "one", "w"),
-        "Q2": wr._Quote("https://a.test", "two", "w"),
+        "Q1": wr.Quote("https://a.test", "one", "w"),
+        "Q2": wr.Quote("https://a.test", "two", "w"),
     }
 
-    body, sources, _ = wr._bind_citations(
+    body, sources, _ = wr.bind_citations(
         "x [Q1] y [Q2] z [Q1, Q2].", [("https://a.test", "A")], bank
     )
 
@@ -1196,7 +1196,7 @@ def test_quotes_from_one_page_share_one_source_number():
 
 
 def test_a_phantom_marker_is_removed_and_audited():
-    body, sources, audit = wr._bind_citations("A claim [Q9]. More.", [], {})
+    body, sources, audit = wr.bind_citations("A claim [Q9]. More.", [], {})
 
     assert body == "A claim. More."
     assert "1 marker(s) named no banked quote" in audit
@@ -1267,8 +1267,8 @@ def test_parse_outline_ignores_headings_without_ids():
 
 
 _TWO_PAGE_BANK = {
-    "Q1": wr._Quote("https://a.test", "alpha quote", "why a"),
-    "Q2": wr._Quote("https://b.test", "beta quote", "why b"),
+    "Q1": wr.Quote("https://a.test", "alpha quote", "why a"),
+    "Q2": wr.Quote("https://b.test", "beta quote", "why b"),
 }
 
 
@@ -1301,7 +1301,7 @@ def test_compose_findings_writes_each_section_from_its_own_quotes(monkeypatch):
         "Beta prose [Q2].",
     ])
 
-    body = wr._compose_findings("the question", _TWO_PAGE_BANK)
+    body = wr.compose_findings("the question", _TWO_PAGE_BANK)
 
     assert body == (
         "## Alpha side\n\nAlpha prose [Q1].\n\n## Beta side\n\nBeta prose [Q2]."
@@ -1318,7 +1318,7 @@ def test_compose_findings_writes_each_section_from_its_own_quotes(monkeypatch):
 def test_compose_findings_returns_none_when_outline_unparsable(monkeypatch):
     _sequential_llm(monkeypatch, ["I could not decide on sections, sorry."])
 
-    assert wr._compose_findings("q", _TWO_PAGE_BANK) is None
+    assert wr.compose_findings("q", _TWO_PAGE_BANK) is None
 
 
 def test_compose_findings_returns_none_when_a_section_call_fails(monkeypatch):
@@ -1328,7 +1328,7 @@ def test_compose_findings_returns_none_when_a_section_call_fails(monkeypatch):
         RuntimeError("provider down"),
     ])
 
-    assert wr._compose_findings("q", _TWO_PAGE_BANK) is None
+    assert wr.compose_findings("q", _TWO_PAGE_BANK) is None
 
 
 def test_compose_findings_strips_a_writer_echoed_heading(monkeypatch):
@@ -1340,7 +1340,7 @@ def test_compose_findings_strips_a_writer_echoed_heading(monkeypatch):
         "## Alpha side\n\nAlpha prose [Q1].\n\n### A sub-point\n\nMore.",
     ])
 
-    body = wr._compose_findings("q", _TWO_PAGE_BANK)
+    body = wr.compose_findings("q", _TWO_PAGE_BANK)
 
     assert body == (
         "## Alpha side\n\nAlpha prose [Q1].\n\n### A sub-point\n\nMore."
@@ -1350,9 +1350,9 @@ def test_compose_findings_strips_a_writer_echoed_heading(monkeypatch):
 
 def test_bind_citations_collapses_adjacent_duplicate_markers():
     """[Q3][Q3] (measured live) and [Q3] [Q3] are one citation, not two."""
-    bank = {"Q3": wr._Quote("https://a.test", "one", "w")}
+    bank = {"Q3": wr.Quote("https://a.test", "one", "w")}
 
-    body, _, _ = wr._bind_citations(
+    body, _, _ = wr.bind_citations(
         "bypassed [Q3][Q3]. also [Q3] [Q3]. kept [Q3], [Q3].",
         [("https://a.test", "A")], bank,
     )
@@ -1365,7 +1365,7 @@ def test_compose_findings_drops_sections_citing_only_phantoms(monkeypatch):
     whose every section is phantom is unparsable in effect."""
     _sequential_llm(monkeypatch, ["## Ghosts [Q9]\n## More ghosts [Q8]"])
 
-    assert wr._compose_findings("q", _TWO_PAGE_BANK) is None
+    assert wr.compose_findings("q", _TWO_PAGE_BANK) is None
 
 
 def _run_agent_banking_one_quote(monkeypatch, body="One-shot body [Q1]."):
@@ -1444,7 +1444,7 @@ def test_web_turn_never_composes(monkeypatch):
         ),
     )
     turn = wr.WebTurn("q")
-    wr._BANK["Q1"] = wr._Quote("https://a.test", "alpha", "w")
+    wr._BANK["Q1"] = wr.Quote("https://a.test", "alpha", "w")
 
     out = turn.attribute("Answer [Q1].", [])
 
@@ -1465,7 +1465,7 @@ def test_plan_rejects_text_without_section_headings():
 
 
 def test_plan_rejects_unknown_ids_listing_the_known_ones():
-    wr._BANK["Q1"] = wr._Quote(url="https://s.test/a", quote="q", why="w")
+    wr._BANK["Q1"] = wr.Quote(url="https://s.test/a", quote="q", why="w")
     with pytest.raises(ValueError, match=r"unknown quote ID\(s\): Q7"):
         wr.plan("## Training [Q7]")
     assert wr._PLAN == ""
@@ -1477,13 +1477,13 @@ def test_plan_rejection_names_an_empty_bank():
 
 
 def test_plan_accepts_gap_headings_and_names_them():
-    wr._BANK["Q1"] = wr._Quote(url="https://s.test/a", quote="q", why="w")
+    wr._BANK["Q1"] = wr.Quote(url="https://s.test/a", quote="q", why="w")
     out = wr.plan("## Training [Q1]\n## Failure modes\n## Cost")
     assert out == "saved: 3 sections, 1 with evidence; gaps: Failure modes; Cost"
 
 
 def test_plan_confirms_full_coverage():
-    wr._BANK["Q1"] = wr._Quote(url="https://s.test/a", quote="q", why="w")
+    wr._BANK["Q1"] = wr.Quote(url="https://s.test/a", quote="q", why="w")
     assert wr.plan("## Training [Q1]") == "saved: 1 section, all with evidence"
 
 
@@ -1520,7 +1520,7 @@ def test_live_plan_leaves_composition_untouched(tmp_vault, monkeypatch):
         calls.append((concept, dict(bank)))
         return "## Data structures\n\nProse [Q1]."
 
-    monkeypatch.setattr(wr, "_compose_findings", recording_compose)
+    monkeypatch.setattr(wr, "compose_findings", recording_compose)
     wr.web_research("the question")
     assert calls == [("the question", {"Q1": wr._BANK["Q1"]})]
 

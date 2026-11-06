@@ -591,7 +591,7 @@ def from_command(text: str, session: str | None) -> dict | None:
         return None  # the command's own parser names the unbalanced quote
     from silica.cli import _positional, _str_flag
     from silica.kernel.base.formats import DOC_EXTS
-    from silica.sources.convert import _resolve_input
+    from silica.sources.convert import resolve_input
     from silica.sources import ingest
 
     args = ingest.rejoin_spaced_paths(parts[1:])
@@ -612,7 +612,7 @@ def from_command(text: str, session: str | None) -> dict | None:
                             + (Path(f).suffix or "a file without an extension")})
             continue
         try:
-            src = _resolve_input(f)
+            src = resolve_input(f)
         except ValueError:
             skipped.append({"name": name, "reason": "it was not found"})
             continue

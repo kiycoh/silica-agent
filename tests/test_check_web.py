@@ -251,7 +251,7 @@ def test_a_cancelled_press_stops_before_the_next_paid_call():
 def test_a_check_leaves_a_chat_turns_web_state_alone(monkeypatch):
     from silica.sources import web_research as wr
 
-    monkeypatch.setattr(wr, "_ddg_search", lambda q: [{"url": "https://a.example/1"}])
+    monkeypatch.setattr(wr, "ddg_search", lambda q: [{"url": "https://a.example/1"}])
     wr._reset_turn()
     wr._LANES.append("mojeek")
     wr._DEAD = 2
@@ -267,8 +267,8 @@ def test_the_lanes_fall_back_and_web_search_alone_counts_them(monkeypatch):
     def challenged(q):
         raise ValueError("DuckDuckGo answered HTTP 202")
 
-    monkeypatch.setattr(wr, "_ddg_search", challenged)
-    monkeypatch.setattr(wr, "_mojeek_search", lambda q: [{"url": "https://m.example/1"}])
+    monkeypatch.setattr(wr, "ddg_search", challenged)
+    monkeypatch.setattr(wr, "mojeek_search", lambda q: [{"url": "https://m.example/1"}])
     wr._reset_turn()
     assert wr.search_lanes("q")[1] == "mojeek" and wr._LANES == []
     wr.web_search("q")
@@ -277,7 +277,7 @@ def test_the_lanes_fall_back_and_web_search_alone_counts_them(monkeypatch):
     def down(q):
         raise ValueError("lane down")
 
-    monkeypatch.setattr(wr, "_mojeek_search", down)
+    monkeypatch.setattr(wr, "mojeek_search", down)
     monkeypatch.setattr(wr, "_wikipedia_search", down)
     with pytest.raises(ValueError, match="DuckDuckGo"):
         wr.search_lanes("q")

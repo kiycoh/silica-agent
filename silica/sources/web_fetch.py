@@ -49,14 +49,14 @@ _HTTP_TIMEOUT = 30
 # _MAX_CHARS bounds what reaches the model; this bounds what reaches memory,
 # which nothing did before: a buffered GET materialises the whole body (and then
 # a whole str) before any ceiling of ours runs, so one hostile or merely enormous
-# URL OOMs the process while `_truncate` waits its turn. ~270x the char ceiling,
+# URL OOMs the process while `truncate` waits its turn. ~270x the char ceiling,
 # so no real page meets it.
-_MAX_BODY_BYTES = 8 * 1024 * 1024
+MAX_BODY_BYTES = 8 * 1024 * 1024
 # `timeout` is per socket operation, not a deadline: an endless stream dripping
 # one byte before each timeout window never trips it and never ends, so the body
 # gets its own wall clock.
 _BODY_DEADLINE = 120
-_YT_DOMAINS: tuple[str, ...] = ("youtube.com", "youtu.be")
+YT_DOMAINS: tuple[str, ...] = ("youtube.com", "youtu.be")
 # Languages only: `--sub-lang` does not choose between auto-generated and
 # uploaded subs (that is `--write-auto-sub` / `--write-sub`, and we ask for
 # both). Not `en.*`, which it was until 2026-10-17: YouTube names its machine
@@ -101,35 +101,35 @@ def youtube_cookies() -> Path | None:
     return path if path is not None and os.access(path, os.R_OK) else None
 _WP_DOMAINS: tuple[str, ...] = ("wikipedia.org",)
 _WP_PREFIX = "/wiki/"
-_WP_API_PATH = "/w/api.php"
+WP_API_PATH = "/w/api.php"
 _WP_MATH_MAXLEN = 3
 # Wikimedia's user-agent policy asks for a descriptive agent with a contact URL
 # and throttles generic browser strings, so the API branch does not send
-# _HEADERS. Their own docs call the browser-string case "discouraged".
-_WP_HEADERS = {
+# HEADERS. Their own docs call the browser-string case "discouraged".
+WP_HEADERS = {
     "User-Agent": "silica-agent (https://github.com/kiycoh/silica-agent)",
     "Accept": "application/json",
 }
 # A bare httpx user agent collects more 403s than a browser string does, and
 # the 401/403/429 branch below is how we surface the ones that remain.
-_HEADERS = {
+HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/126.0.0.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
 }
-_TEXT_TYPES = ("text/", "application/xhtml", "application/xml", "application/json")
+TEXT_TYPES = ("text/", "application/xhtml", "application/xml", "application/json")
 # What Discover reads with (ADR-0137 point 11): a reader that runs because a
 # view opened announces itself, as the Wikipedia branch does, instead of
 # passing for a person at a browser. Measured 2026-10-28: a descriptive agent
 # got 200 from all ten tested feeds and the three article pages behind them.
-_READER_HEADERS = {
-    "User-Agent": _WP_HEADERS["User-Agent"],
+READER_HEADERS = {
+    "User-Agent": WP_HEADERS["User-Agent"],
     "Accept": ("application/rss+xml, application/atom+xml, application/feed+json, "
                "application/xml;q=0.9, text/html;q=0.8, */*;q=0.5"),
 }
-FEED_TYPES = (*_TEXT_TYPES, "application/rss+xml", "application/atom+xml",
+FEED_TYPES = (*TEXT_TYPES, "application/rss+xml", "application/atom+xml",
               "application/feed+json", "application/rdf+xml")
 
 _SCHEMES = ("http", "https")
@@ -326,7 +326,7 @@ class _TextExtractor(HTMLParser):
             self.parts.append(data)
 
 
-def _extract_text(html: str) -> str:
+def extract_text(html: str) -> str:
     """HTML to readable plain text: drop boilerplate, collapse whitespace.
 
     Whitespace collapsing stops inside a fence. A `<pre>` block that keeps its
@@ -372,7 +372,7 @@ def _extract_text(html: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _truncate(text: str, limit: int = _MAX_CHARS) -> str:
+def truncate(text: str, limit: int = _MAX_CHARS) -> str:
     """Hard ceiling with a visible marker, so the model knows it saw a prefix."""
     if len(text) <= limit:
         return text
@@ -537,7 +537,7 @@ def content_type(resp: httpx.Response) -> str:
     return resp.headers.get("content-type", "").split(";")[0].strip().lower()
 
 
-def _refuse_binary(resp: httpx.Response, url: str, types: tuple[str, ...] = _TEXT_TYPES) -> None:
+def _refuse_binary(resp: httpx.Response, url: str, types: tuple[str, ...] = TEXT_TYPES) -> None:
     """Decided on the headers, before a byte of the body is spent: a PDF or a
     video is refused either way, and refusing it after buffering it is the
     expensive way to reach the same answer. `types` is what the caller reads:
@@ -568,7 +568,7 @@ def _decoded_headers(headers: httpx.Headers) -> httpx.Headers:
     return out
 
 
-def _read_capped(resp: httpx.Response, url: str, cap: int = _MAX_BODY_BYTES) -> bytes:
+def _read_capped(resp: httpx.Response, url: str, cap: int = MAX_BODY_BYTES) -> bytes:
     """Accumulate the body against a size ceiling and a wall clock, aborting on
     either. Content-Length is not consulted: it is the server's claim, and a
     chunked response makes none."""
@@ -589,8 +589,8 @@ def _read_capped(resp: httpx.Response, url: str, cap: int = _MAX_BODY_BYTES) -> 
     return b"".join(chunks)
 
 
-def _fetch(url: str, headers: dict[str, str] = _HEADERS, *, types: tuple[str, ...] = _TEXT_TYPES,
-           cap: int = _MAX_BODY_BYTES) -> tuple[httpx.Response, str]:
+def fetch(url: str, headers: dict[str, str] = HEADERS, *, types: tuple[str, ...] = TEXT_TYPES,
+           cap: int = MAX_BODY_BYTES) -> tuple[httpx.Response, str]:
     """GET with redirects followed by hand, revalidating every hop, and a body
     read under a ceiling instead of buffered whole.
 
@@ -663,7 +663,7 @@ def _wikipedia_extract(url: str) -> tuple[str, str] | None:
     """Article plaintext and canonical title, from the MediaWiki API instead of
     the rendered page.
 
-    Wikipedia is the one site where _extract_text is measurably poor. On
+    Wikipedia is the one site where extract_text is measurably poor. On
     /wiki/PageRank the HTML path returns 30k chars that stop 14 sections in and
     spend their tail on the footer navbox, while `prop=extracts` returns the
     whole 60k-char article and nothing else: no nav, no image captions, no
@@ -699,8 +699,8 @@ def _wikipedia_extract(url: str) -> tuple[str, str] | None:
             "titles": title,
         }
     )
-    api = f"{parts.scheme}://{parts.hostname}{_WP_API_PATH}?{query}"
-    resp, _ = _fetch(api, headers=_WP_HEADERS)
+    api = f"{parts.scheme}://{parts.hostname}{WP_API_PATH}?{query}"
+    resp, _ = fetch(api, headers=WP_HEADERS)
     pages = resp.json().get("query", {}).get("pages") or [{}]
     extract = _strip_mathml(pages[0].get("extract", "")).strip()
     if not extract:
@@ -721,14 +721,14 @@ class Page(NamedTuple):
     title: str
 
 
-def fetch_page(url: str, headers: dict[str, str] = _HEADERS) -> Page:
+def fetch_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
     """`web_fetch` plus the title, for callers that name a note after the page.
 
     The tool wrapper below drops the title; nothing else about the text differs,
     so both paths stay one code path. `headers` is for Discover, which reads an
-    article as itself (`_READER_HEADERS`) and not as a browser.
+    article as itself (`READER_HEADERS`) and not as a browser.
     """
-    if host_matches(url, *_YT_DOMAINS):
+    if host_matches(url, *YT_DOMAINS):
         return _youtube_transcript(url)
     if host_matches(url, *_WP_DOMAINS):
         # Cites the requested URL, not the redirect target: it is what resolves
@@ -736,17 +736,17 @@ def fetch_page(url: str, headers: dict[str, str] = _HEADERS) -> Page:
         article = _wikipedia_extract(url)
         if article:
             extract, title = article
-            return Page(_render(url, _truncate(extract)), title)
-    resp, final_url = _fetch(url, headers)
-    # the type gate already ran in _fetch, on the headers, before the body
+            return Page(_render(url, truncate(extract)), title)
+    resp, final_url = fetch(url, headers)
+    # the type gate already ran in fetch, on the headers, before the body
     ctype = content_type(resp)
     # no charset sniffing, httpx already decoded from the header.
     body = resp.text
     is_html = "html" in ctype or not ctype
-    text = _extract_text(body) if is_html else body
+    text = extract_text(body) if is_html else body
     # plain text and JSON carry no title element; "" says so rather than
     # promoting their first line to one
-    return Page(_render(final_url, _truncate(text)), page_title(body) if is_html else "")
+    return Page(_render(final_url, truncate(text)), page_title(body) if is_html else "")
 
 
 @tool(cls="atomic", sensitive=True)
@@ -875,7 +875,7 @@ def _youtube_transcript(url: str) -> Page:
             )
         text = vtt_to_text(files[0].read_text(encoding="utf-8", errors="replace"))
         title = _yt_info_title(Path(tmp))
-    return Page(_render(url, _truncate(text)), title)
+    return Page(_render(url, truncate(text)), title)
 
 
 def _yt_info_title(tmp: Path) -> str:

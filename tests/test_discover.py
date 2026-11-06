@@ -54,7 +54,7 @@ def test_each_hop_connects_to_the_address_its_check_approved(monkeypatch):
 
     _dns(monkeypatch, "93.184.216.34")
     monkeypatch.setattr(wf, "_stream", fake)
-    resp, final = wf._fetch("https://example.com/start")
+    resp, final = wf.fetch("https://example.com/start")
     # The relative Location resolves against the URL as named, never the IP.
     assert seen == [("https://example.com/start", "93.184.216.34"), ("https://example.com/next", "93.184.216.34")]
     assert final == "https://example.com/next"
@@ -91,7 +91,7 @@ def test_the_stream_sends_the_name_as_host_and_sni(monkeypatch):
 def test_a_304_comes_back_to_the_caller_that_asked_for_it(monkeypatch):
     _dns(monkeypatch)
     monkeypatch.setattr(wf, "_stream", lambda url, ip, headers: _Resp(304, ctype=""))
-    resp, _ = wf._fetch("https://example.com/feed", {"If-None-Match": "x"}, types=wf.FEED_TYPES)
+    resp, _ = wf.fetch("https://example.com/feed", {"If-None-Match": "x"}, types=wf.FEED_TYPES)
     assert resp.status_code == 304 and resp.content == b""
 
 
@@ -99,10 +99,10 @@ def test_a_cover_is_taken_only_on_its_word(monkeypatch):
     _dns(monkeypatch)
     monkeypatch.setattr(wf, "_stream", lambda url, ip, headers: _Resp(body=b"x", ctype=""))
     with pytest.raises(ValueError, match="untyped"):
-        wf._fetch("https://example.com/i", types=("image/",))
+        wf.fetch("https://example.com/i", types=("image/",))
     monkeypatch.setattr(wf, "_stream", lambda url, ip, headers: _Resp(body=b"x" * 50, ctype="image/jpeg"))
     with pytest.raises(ValueError, match="passed 10 bytes"):
-        wf._fetch("https://example.com/i", types=("image/",), cap=10)
+        wf.fetch("https://example.com/i", types=("image/",), cap=10)
 
 
 def test_og_image_is_read_with_a_parser_not_a_pattern():

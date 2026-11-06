@@ -334,7 +334,7 @@ def linked_elsewhere(library: str, vault: str | Path) -> Path | None:
 
 # --- detection at session open (ADR-0055 decision 9, ADR-0038) ------------------
 
-def _client_for(vault: str | Path, link) -> Zotero:
+def client_for(vault: str | Path, link) -> Zotero:
     return Zotero(server_id=link.library, api_key=os.getenv("SILICA_ZOTERO_API_KEY", ""))
 
 
@@ -372,7 +372,7 @@ def detect(vault: str | Path) -> dict | None:
     link = load_manifest(vault).zotero
     if link is None:
         return None
-    zot = _client_for(vault, link)
+    zot = client_for(vault, link)
     try:
         r = zot.get("/items/top", limit=1, format="versions")
         version = int(r.headers.get("Last-Modified-Version") or 0)

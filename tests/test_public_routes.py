@@ -260,7 +260,7 @@ def fetched(monkeypatch):
         seen.append(url)
         return httpx.Response(200, text=MD, headers={"content-type": "text/markdown"}), url
 
-    monkeypatch.setattr(web_fetch, "_fetch", fake)
+    monkeypatch.setattr(web_fetch, "fetch", fake)
     return seen
 
 
@@ -313,7 +313,7 @@ def test_a_page_that_moved_to_another_host_is_not_saved(client, monkeypatch):
 
     from silica.sources import web_fetch
 
-    monkeypatch.setattr(web_fetch, "_fetch", lambda url, headers=None, *, types=(), cap=0:
+    monkeypatch.setattr(web_fetch, "fetch", lambda url, headers=None, *, types=(), cap=0:
                         (httpx.Response(200, text=MD), "https://evil.test/x.md"))
     tc, tmp = client
     assert tc.post("/vault/save", json={"url": PAGE}).status_code == 400
@@ -326,7 +326,7 @@ def test_a_hostile_page_cannot_pick_the_folder_or_the_credit(client, monkeypatch
     from silica.sources import web_fetch
 
     hostile = ("---\ntitle: Spacing effect\nauthor: \"../../x\"\nsource: https://evil.test/@marta/y\n---\nBody.\n")
-    monkeypatch.setattr(web_fetch, "_fetch", lambda url, headers=None, *, types=(), cap=0:
+    monkeypatch.setattr(web_fetch, "fetch", lambda url, headers=None, *, types=(), cap=0:
                         (httpx.Response(200, text=hostile), url))
     tc, tmp = client
     path = tc.post("/vault/save", json={"url": PAGE}).json()["path"]
@@ -342,7 +342,7 @@ def test_a_copy_credits_its_original_only_when_the_original_is_that_authors_page
 
     orig = "https://wikis.silica-agent.dev/@luca/notes/borrowed"
     copy = f"---\ntitle: Borrowed\nauthor: '@luca'\nsource: {orig}\nvault: Memoria\n---\nLuca's.\n"
-    monkeypatch.setattr(web_fetch, "_fetch", lambda url, headers=None, *, types=(), cap=0:
+    monkeypatch.setattr(web_fetch, "fetch", lambda url, headers=None, *, types=(), cap=0:
                         (httpx.Response(200, text=copy), url))
     tc, tmp = client
     path = tc.post("/vault/save", json={"url": BASE + "borrowed"}).json()["path"]
@@ -389,7 +389,7 @@ def vault_fetched(monkeypatch):
         body = m if url.endswith("vault.json") else n
         return httpx.Response(200, text=body, headers={"content-type": "application/json"}), url
 
-    monkeypatch.setattr(web_fetch, "_fetch", fake)
+    monkeypatch.setattr(web_fetch, "fetch", fake)
     return seen
 
 

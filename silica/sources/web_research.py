@@ -12,7 +12,7 @@ in the Inbox, with sources cited. The note enters the vault only via /nucleate.
 Citations are guaranteed mechanically at two grains (spec-web-research-memory-bank):
 the *sources* come from the fetch trace, so a URL the model never opened cannot
 be cited; the *quotes* go through remember's verbatim guardian, so a sentence
-the page does not contain cannot be banked, and `_bind_citations` removes any
+the page does not contain cannot be banked, and `bind_citations` removes any
 inline marker that names no banked quote. Fabrication is structurally
 impossible at both levels, not merely discouraged by the prompt.
 
@@ -49,7 +49,7 @@ from dataclasses import replace
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Annotated, NamedTuple
+from typing import Annotated, Any, NamedTuple
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
@@ -170,7 +170,7 @@ _DEAD = 0
 _DEAD_LANES_LIMIT = 3
 
 
-class _Quote(NamedTuple):
+class Quote(NamedTuple):
     """One banked quote: the evidence unit behind an inline [Qn] citation."""
 
     url: str
@@ -178,10 +178,10 @@ class _Quote(NamedTuple):
     why: str
 
 
-# The turn's evidence bank: "Q1", "Q2", ... -> _Quote, in remember order.
+# The turn's evidence bank: "Q1", "Q2", ... -> Quote, in remember order.
 # Same per-process, per-turn life as _LANES. The note builders snapshot it
 # (dict(_BANK)) before the next turn's _reset_turn can clear it.
-_BANK: dict[str, _Quote] = {}
+_BANK: dict[str, Quote] = {}
 
 # url -> fetched page text, fed by _harvest_page from the turn's tool events.
 # remember's guardian checks quotes against these bodies: a page the loop never
@@ -238,7 +238,7 @@ def search_lanes(query: str) -> tuple[list[dict[str, str]], str]:
     it, so a selection's check (ADR-0110 amendment, point 7), which runs beside
     a chat turn, leaves both alone."""
     try:
-        return _ddg_search(query), "duckduckgo"
+        return ddg_search(query), "duckduckgo"
     except ValueError as ddg_err:
         # DDG is the primary lane and runs first even when a key is set: it is
         # the whole web, and no vendor sees the query. The backstops only run
@@ -250,7 +250,7 @@ def search_lanes(query: str) -> tuple[list[dict[str, str]], str]:
         # from the literal: the tavily entry is a closure with its own parameter
         # name, and a callable's parameter NAMES are part of its type.
         backstops: list[tuple[Callable[[str], list[dict[str, str]]], str]] = [
-            (_mojeek_search, "mojeek"), (_wikipedia_search, "wikipedia")]
+            (mojeek_search, "mojeek"), (_wikipedia_search, "wikipedia")]
         if key:
             backstops.insert(1, (lambda q: _tavily_search(q, key), "tavily"))
         for backstop, lane in backstops:
@@ -339,7 +339,7 @@ def remember(url: str, quote: str, why: str) -> str:
         if banked.url == url and _squash(banked.quote) == squashed:
             return f"already banked as [{qid}]"
     qid = f"Q{len(_BANK) + 1}"
-    _BANK[qid] = _Quote(url=url, quote=quote.strip(), why=why.strip())
+    _BANK[qid] = Quote(url=url, quote=quote.strip(), why=why.strip())
     return f"banked [{qid}] — cite it inline as [{qid}]"
 
 
@@ -436,21 +436,18 @@ def plan(outline: str) -> str:
     return head + "all with evidence"
 
 
-def _tavily_search(query: str, key: str) -> list[dict[str, str]]:
-    # Direct REST, no tavily-python SDK; an API change is its own alarm.
-    resp = httpx.post(
-        _TAVILY_URL,
-        json={
-            "api_key": key,
-            "query": query,
-            "search_depth": "advanced",
-            "max_results": _MAX_RESULTS,
-            "include_answer": False,
-        },
-        timeout=_HTTP_TIMEOUT,
-    )
+def tavily_post(key: str, query: str, **body: Any) -> list[dict]:
+    """Tavily's hits for `query`, as it sent them; `body` is the search's own.
+
+    Direct REST, no tavily-python SDK; an API change is its own alarm."""
+    resp = httpx.post(_TAVILY_URL, json={"api_key": key, "query": query, **body}, timeout=_HTTP_TIMEOUT)
     resp.raise_for_status()
-    results = resp.json().get("results", [])
+    return resp.json().get("results", [])
+
+
+def _tavily_search(query: str, key: str) -> list[dict[str, str]]:
+    results = tavily_post(key, query, search_depth="advanced", max_results=_MAX_RESULTS,
+                          include_answer=False)
     return [
         {"title": r.get("title", ""), "url": r.get("url", ""), "content": r.get("content", "")}
         for r in results
@@ -503,14 +500,14 @@ class _DDGParser(HTMLParser):
             self.results[-1][self._field] += data
 
 
-def _ddg_search(query: str) -> list[dict[str, str]]:
+def ddg_search(query: str) -> list[dict[str, str]]:
     """Primary lane: scrape DuckDuckGo's HTML endpoint, stdlib parser only.
     Same local-first trade as web_fetch — no third party sees the query, and in
     exchange rate limits are ours to surface, not a vendor's to hide."""
     resp = httpx.post(
         _DDG_URL,
         data={"q": query},
-        headers=_web_fetch._HEADERS,  # browser UA; a bare httpx UA gets challenged
+        headers=_web_fetch.HEADERS,  # browser UA; a bare httpx UA gets challenged
         timeout=_HTTP_TIMEOUT,
     )
     if resp.status_code != 200:  # DDG answers challenges with 202, not an error
@@ -534,7 +531,7 @@ class _MojeekParser(HTMLParser):
     same target and a `<p class="s">` snippet.
 
     Anchored on the results list, so a renamed class yields zero results rather
-    than harvesting the chrome — `_mojeek_search` turns that emptiness into a
+    than harvesting the chrome — `mojeek_search` turns that emptiness into a
     raise, and the next lane answers.
     """
 
@@ -586,7 +583,7 @@ class _MojeekParser(HTMLParser):
             self.results[-1][self._field] += data
 
 
-def _mojeek_search(query: str) -> list[dict[str, str]]:
+def mojeek_search(query: str) -> list[dict[str, str]]:
     """Second keyless lane: Mojeek's own crawl, scraped like DDG.
 
     Keeps a challenged keyless default on the open web instead of dropping
@@ -605,11 +602,11 @@ def _mojeek_search(query: str) -> list[dict[str, str]]:
     cookie jar regardless, so they are not verified against a live answer here.
     Re-check them the first time this lane returns nothing on a working IP.
     """
-    # Through _fetch, not a raw httpx.get with follow_redirects=True: that flag
-    # is the exact hole _fetch exists to close, since a redirect hop is a URL
+    # Through fetch, not a raw httpx.get with follow_redirects=True: that flag
+    # is the exact hole fetch exists to close, since a redirect hop is a URL
     # nobody validated and 169.254.169.254 is one 302 away.
-    resp, _ = _web_fetch._fetch(
-        f"{_MOJEEK_URL}?{urlencode({'q': query})}", headers=_web_fetch._HEADERS
+    resp, _ = _web_fetch.fetch(
+        f"{_MOJEEK_URL}?{urlencode({'q': query})}", headers=_web_fetch.HEADERS
     )
     if resp.status_code != 200 or "<title>Captcha" in resp.text:
         raise ValueError(f"Mojeek answered HTTP {resp.status_code} (challenged).")
@@ -653,8 +650,8 @@ def _wikipedia_search(query: str) -> list[dict[str, str]]:
             "srlimit": _MAX_RESULTS,
         }
     )
-    resp, _ = _web_fetch._fetch(
-        f"{_WP_SITE}{_web_fetch._WP_API_PATH}?{q}", headers=_web_fetch._WP_HEADERS
+    resp, _ = _web_fetch.fetch(
+        f"{_WP_SITE}{_web_fetch.WP_API_PATH}?{q}", headers=_web_fetch.WP_HEADERS
     )
     return [
         {
@@ -731,23 +728,23 @@ def web_research(
         # sectioned rewrite (spec §3.3-3.4) recomposes the note from the banked
         # quotes instead; the one-shot body stays as the §3.6 fallback. Only
         # here — /web answers in direct prose (§5).
-        body = _compose_findings(concept, dict(_BANK)) or body
+        body = compose_findings(concept, dict(_BANK)) or body
 
     results = list(trace.values())
-    bound, sources, audit = _bind_citations(body, _collect_sources(results), _BANK)
+    bound, sources, audit = bind_citations(body, _collect_sources(results), _BANK)
     if _BANK and "## Sources" in bound:
         # The prompt forbids a model-written Sources section when quotes were
-        # banked: _bind_citations owns the numbering, and _build_note would keep
+        # banked: bind_citations owns the numbering, and build_note would keep
         # a hand-written section over the mechanical one. Cut from the heading
         # down; the block below regenerates what the cut removed.
         bound = SOURCES_TAIL_RE.split(bound, maxsplit=1)[0].rstrip()
     provenance = "\n".join(line for line in (_lane_line(), audit) if line)
-    note = _build_note(concept, bound, sources, lanes=provenance)
-    note_rel = _unique_inbox_path(concept)
+    note = build_note(concept, bound, sources, lanes=provenance)
+    note_rel = unique_inbox_path(concept)
     from silica.driver import DRIVER
 
     DRIVER.create(note_rel, note)
-    _write_leaf(note_rel, results, bank=dict(_BANK))
+    write_leaf(note_rel, results, bank=dict(_BANK))
     return note_rel
 
 
@@ -757,7 +754,7 @@ def web_research(
 # unkept answers is a second inbox. Lanes and bank are stashed with the rest
 # because _LANES and _BANK have moved on by the time /keep runs.
 _LAST_WEB_TURN: (
-    tuple[str, str, list[tuple[str, str]], list[str], str, dict[str, _Quote]] | None
+    tuple[str, str, list[tuple[str, str]], list[str], str, dict[str, Quote]] | None
 ) = None
 
 
@@ -802,9 +799,9 @@ class WebTurn:
         be neither forgotten (it does not depend on the model remembering) nor
         fabricated (a URL absent from the trace cannot appear). A `## Sources`
         the model wrote itself is left in place above ours, same posture as
-        `force_sources` in _build_note.
+        `force_sources` in build_note.
 
-        [Qk] markers go through the same _bind_citations pass as the batch
+        [Qk] markers go through the same bind_citations pass as the batch
         path, against this block's own ordering — so the numbers the user reads
         point at the lines below them, and a marker with no banked quote is
         removed here too.
@@ -814,7 +811,7 @@ class WebTurn:
         if not answer or is_sentinel(answer):
             return answer  # cancelled or capped: nothing to cite, nothing to keep
         raw = list(self._trace.values())
-        answer, sources, audit = _bind_citations(answer, _collect_sources(raw), _BANK)
+        answer, sources, audit = bind_citations(answer, _collect_sources(raw), _BANK)
         lanes = "\n".join(line for line in (_lane_line(), audit) if line)
         _LAST_WEB_TURN = (self.question, answer, sources, raw, lanes, dict(_BANK))
         out = f"{answer.rstrip()}\n\n{_sources_block(sources, lanes)}"
@@ -1112,7 +1109,7 @@ def keep_last() -> str:
     """`/keep` — materialize the last `/web` turn as one Inbox note.
 
     Returns the note's vault-relative path. Raises ValueError when no web turn
-    is waiting. `_build_note(force_sources=True)` regenerates the Sources block
+    is waiting. `build_note(force_sources=True)` regenerates the Sources block
     from the stored pairs, which is why the slot holds the model's prose without
     the block appended by WebTurn.attribute — otherwise the note would carry two.
 
@@ -1123,14 +1120,14 @@ def keep_last() -> str:
     if _LAST_WEB_TURN is None:
         raise ValueError("nothing to keep: run /web first")
     question, body, sources, raw, lanes, bank = _LAST_WEB_TURN
-    note = _build_note(
+    note = build_note(
         question, body, sources, source="web", force_sources=True, lanes=lanes
     )
-    note_rel = _unique_inbox_path(question, fallback="web")
+    note_rel = unique_inbox_path(question, fallback="web")
     from silica.driver import DRIVER
 
     DRIVER.create(note_rel, note)
-    _write_leaf(note_rel, raw, bank=bank)
+    write_leaf(note_rel, raw, bank=bank)
     _LAST_WEB_TURN = None
     return note_rel
 
@@ -1152,14 +1149,14 @@ def keep_check(claim: str, url: str, quote: str, note: str) -> str:
 
     # The claim runs to 600 characters and slugify does not shorten: past the
     # 255 bytes a file's name may hold, the note would not be written at all.
-    note_rel = _unique_inbox_path(claim.encode()[:150].decode(errors="ignore").strip(), fallback="web")
-    DRIVER.create(note_rel, _build_note(claim, body, [(url, urlsplit(url).hostname or url)], source="web",
+    note_rel = unique_inbox_path(claim.encode()[:150].decode(errors="ignore").strip(), fallback="web")
+    DRIVER.create(note_rel, build_note(claim, body, [(url, urlsplit(url).hostname or url)], source="web",
                                         force_sources=True))
     return note_rel
 
 
-def _write_leaf(
-    note_rel: str, results: list[str], bank: dict[str, _Quote] | None = None
+def write_leaf(
+    note_rel: str, results: list[str], bank: dict[str, Quote] | None = None
 ) -> None:
     """Verbatim source leaf beside the findings note (spec-harness-promotion §2).
 
@@ -1240,7 +1237,7 @@ not given, do not write a Sources section, and do not repeat what the outline \
 assigns to other sections."""
 
 
-def _compose_findings(concept: str, bank: dict[str, _Quote], *, reasoning: bool | None = None,
+def compose_findings(concept: str, bank: dict[str, Quote], *, reasoning: bool | None = None,
                       workers: int = 1) -> str | None:
     """Outline + per-section writer (spec §3.3-3.4). None means: fall back.
 
@@ -1342,10 +1339,10 @@ def _compose_findings(concept: str, bank: dict[str, _Quote], *, reasoning: bool 
 _QREF_RE = re.compile(r"(\s*)\[(Q\d+(?:\s*,\s*Q\d+)*)\]")
 
 
-def _bind_citations(
+def bind_citations(
     body: str,
     collected: list[tuple[str, str]],
-    bank: dict[str, _Quote],
+    bank: dict[str, Quote],
 ) -> tuple[str, list[tuple[str, str]], str]:
     """Resolve the body's [Qk] markers against the bank (spec §3.5).
 
@@ -1433,7 +1430,7 @@ def _collect_sources(results: list[str]) -> list[tuple[str, str]]:
     return list({url: hits.get(url, url) for url in pages}.items())
 
 
-def _build_note(
+def build_note(
     concept: str,
     body: str,
     sources: list[tuple[str, str]],
@@ -1480,13 +1477,13 @@ def _build_note(
     return f"{front}\n{out}\n"
 
 
-def _unique_inbox_path(concept: str, fallback: str = "web-research") -> str:
+def unique_inbox_path(concept: str, fallback: str = "web-research") -> str:
     """`<inbox>/<slug>.md`, with a numeric suffix on collision in the Inbox OR
-    in sources/. _write_leaf names the leaf after this same basename, so a
+    in sources/. write_leaf names the leaf after this same basename, so a
     basename that is merely free in the Inbox is not enough: a leaf can
     outlive its note past /nucleate, and reusing that basename would silently
     attach a stale, unrelated leaf to the new note (DRIVER.create raises
-    FileExistsError there, which _write_leaf swallows as best-effort). Check
+    FileExistsError there, which write_leaf swallows as best-effort). Check
     both up front so the note and its future leaf are always in lockstep.
 
     `fallback` names the note when the title slugifies to nothing (CJK, emoji,
@@ -1548,13 +1545,13 @@ def fetch_to_inbox(url: str) -> str:
     # filename slug, so a lead sentence in that slot costs twice.
     title = page.title or first_line
 
-    note = _build_note(
+    note = build_note(
         title, text, [(url, title)], source="web-fetch", force_sources=True,
         form="clip",
     )
-    note_rel = _unique_inbox_path(title, fallback="web-fetch")
+    note_rel = unique_inbox_path(title, fallback="web-fetch")
     from silica.driver import DRIVER
 
     DRIVER.create(note_rel, note)
-    _write_leaf(note_rel, [text])
+    write_leaf(note_rel, [text])
     return note_rel

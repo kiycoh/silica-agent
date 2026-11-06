@@ -1057,7 +1057,7 @@ def check_zotero(config: SilicaConfig) -> CheckResult:
     from silica.sources import zotero
 
     link = _zotero_link(config)
-    zot = zotero._client_for(config.vault_path, link)
+    zot = zotero.client_for(config.vault_path, link)
     allow = ("Zotero › Settings › Advanced › Allow other applications on this computer "
              "to communicate with Zotero")
     try:
