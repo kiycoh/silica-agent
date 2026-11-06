@@ -144,12 +144,8 @@ def test_the_quote_is_the_pages_own_words_and_says_when_it_is_cut():
 
 # -- a press (points 6, 7 and 14) ----------------------------------------------
 
-def test_the_steps_run_in_order_and_the_lanes_get_the_neutral_question():
+def test_the_steps_run_in_order_and_the_lanes_get_the_selection():
     seen = {}
-
-    def ask(prompt):
-        seen["prompt"] = prompt
-        return "How long does the short-term right to reject last?\n"
 
     def search(q):
         seen["query"] = q
@@ -160,29 +156,13 @@ def test_the_steps_run_in_order_and_the_lanes_get_the_neutral_question():
         return {"kind": "contradicted", "p": 0.9, "by": "jev", "at": "https://b.example/2:0"}
 
     steps = []
-    out = web.check_claim(CLAIM, search=search, fetch=lambda u: page(PAGE_30), judge=judge, ask=ask, step=steps.append)
-    assert CLAIM in seen["prompt"]
-    assert seen["query"] == "How long does the short-term right to reject last?"
+    out = web.check_claim(CLAIM, search=search, fetch=lambda u: page(PAGE_30), judge=judge, step=steps.append)
+    assert seen["query"] == CLAIM
     assert steps == [{"step": "asking"}, {"step": "reading", "pages": 2}]
     assert [(p["path"], p["line"]) for p in seen["passages"]] == [("https://a.example/1", 0), ("https://b.example/2", 0)]
     assert "Source:" not in seen["passages"][0]["text"]
     assert out["web"] == "disagrees" and out["url"] == "https://b.example/2" and out["lane"] == "mojeek"
     assert "30 days" in out["passage"]
-
-
-def test_with_no_question_the_selection_is_the_query():
-    seen = []
-    web.check_claim(CLAIM, search=lambda q: (seen.append(q), ([], "mojeek"))[1], fetch=page, judge=verdict("supported"))
-    assert seen == [CLAIM]
-
-
-def test_a_question_that_was_not_written_costs_the_check_nothing():
-    def ask(prompt):
-        raise ConnectionError("no chat model")
-
-    seen = []
-    web.check_claim(CLAIM, search=lambda q: (seen.append(q), ([], "mojeek"))[1], fetch=page, judge=verdict("supported"), ask=ask)
-    assert seen == [CLAIM]
 
 
 def test_three_pages_are_read_past_one_that_refuses():
@@ -256,7 +236,7 @@ def test_a_cancelled_press_stops_before_the_next_paid_call():
     def search(q):
         raise AssertionError("cancelled: no search")
 
-    out = web.check_claim(CLAIM, search=search, fetch=fetch, judge=judge, ask=lambda p: "q", cancelled=lambda: True)
+    out = web.check_claim(CLAIM, search=search, fetch=fetch, judge=judge, cancelled=lambda: True)
     assert out == {"web": "", "say": web.CANCELLED}
 
 
@@ -359,22 +339,18 @@ def desk(tmp_vault, monkeypatch):
     from silica.ui.web import server
 
     tmp_vault.note("Drafts/memo.md", DRAFT)
-    calls: dict = {"judged": [], "asked": [], "searched": []}
+    calls: dict = {"judged": [], "searched": []}
 
     def vault_judge(text, passages):
         calls["judged"].append(text)
         return {"kind": "supported", "p": 0.9, "by": "jev", "at": passages[0]["path"] + ":1"} if passages else None
 
     def legs():
-        def ask(prompt):
-            calls["asked"].append(prompt)
-            return "How long is the short-term right to reject?"
-
         def search(q):
             calls["searched"].append(q)
             return [{"url": "https://www.example.org/rights"}], "mojeek"
 
-        return search, lambda u: page(PAGE_30), ask
+        return search, lambda u: page(PAGE_30)
 
     monkeypatch.setattr("silica.cli._check_judge", lambda: vault_judge)
     monkeypatch.setattr("silica.cli._check_legs", lambda: (None, None, None))
@@ -413,7 +389,7 @@ def test_a_press_streams_the_vault_then_the_web_then_done(desk):
     assert (f["line"], f["end"]) == (5, 5) and f["mark"] == CLAIM
     assert f["host"] == "example.org" and f["url"] == "https://www.example.org/rights"
     assert f["read"] and "30 days" in f["passage"]
-    assert calls["searched"] == ["How long is the short-term right to reject?"]
+    assert calls["searched"] == [CLAIM]
 
 
 def test_the_web_never_touches_the_vaults_report(desk):
@@ -428,14 +404,14 @@ def test_a_press_refuses_what_is_not_one_statement_before_it_streams(desk):
     r = tc.post("/note/check", json={"path": "Drafts/memo", "lines": [5, 5], "web": True, "claim": "x " * 301})
     assert r.status_code == 400 and r.json()["detail"] == "select one statement"
     assert tc.post("/note/check", json={"path": "Drafts/memo", "web": True, "claim": CLAIM}).status_code == 400
-    assert not calls["asked"] and not calls["searched"] and not calls["judged"]
+    assert not calls["searched"] and not calls["judged"]
 
 
 def test_a_selection_under_six_words_goes_out_as_its_block(desk):
     tc, _, _, calls, mp = desk
     judged_web(mp)
     press(tc, claim="14 days")
-    assert "The short-term right to reject lasts 14 days from delivery." in calls["asked"][0]
+    assert calls["searched"] == ["The short-term right to reject lasts 14 days from delivery."]
 
 
 def test_a_range_with_nothing_to_check_asks_no_model(desk):
@@ -443,7 +419,7 @@ def test_a_range_with_nothing_to_check_asks_no_model(desk):
     out = press(tc, lines=[1, 3], claim="matter: x")
     assert [x["event"] for x in out] == ["rules", "web_verdict", "done"]
     assert out[1]["states"] == [{"state": "not checked", "line": 1, "end": 3, "say": web.NOTHING_TO_CHECK}]
-    assert not calls["asked"] and not calls["searched"]
+    assert not calls["searched"]
 
 
 def test_no_network_keeps_the_vaults_verdict_and_says_so(desk):
@@ -452,7 +428,7 @@ def test_no_network_keeps_the_vaults_verdict_and_says_so(desk):
     def down(q):
         raise ConnectionError("no route")
 
-    mp.setattr("silica.cli._check_web_legs", lambda: (down, page, lambda p: "q"))
+    mp.setattr("silica.cli._check_web_legs", lambda: (down, page))
     out = press(tc)
     assert [x["event"] for x in out][-2:] == ["web_verdict", "done"]
     assert out[-2]["states"] == [{"state": "not checked", "line": 5, "end": 5, "say": "the web did not answer"}]
@@ -543,7 +519,7 @@ def test_a_second_press_replaces_and_a_failed_one_leaves_the_verdict_paid_for(de
     def down(q):
         raise ConnectionError("no route")
 
-    mp.setattr("silica.cli._check_web_legs", lambda: (down, page, lambda p: "q"))
+    mp.setattr("silica.cli._check_web_legs", lambda: (down, page))
     press(tc)
     assert len(cached(vault)["web"]) == 1
 

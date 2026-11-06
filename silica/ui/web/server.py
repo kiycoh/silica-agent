@@ -5341,8 +5341,8 @@ async def note_check(payload: dict, request: Request):
         about the block, and a verdict paid for earlier stands."""
         result = {"web": "", "say": check_web.NOTHING_TO_CHECK}
         if aimed:
-            lanes, fetch, ask = _check_web_legs()
-            result = check_web.check_claim(claim, search=lanes, fetch=fetch, judge=judge, ask=ask,
+            lanes, fetch = _check_web_legs()
+            result = check_web.check_claim(claim, search=lanes, fetch=fetch, judge=judge,
                                            step=lambda ev: put({"event": "web", **ev}), cancelled=stop.is_set)
         findings, states = check_web.rows(result, claim, check_web.vault_says(report), *where)
         if result["web"]:

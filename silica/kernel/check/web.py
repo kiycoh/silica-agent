@@ -8,10 +8,14 @@ window holding most of the claim's words, then `judge()` as it stands. A page is
 hostile (ADR-0009), and the judge holds no tools and chooses from a closed list,
 so the worst a page can do is a wrong verdict, which point 9 caps at a warning.
 
+The selection is the query. Point 6's step 2, one chat call writing a neutral
+question first, lost its own gate on 2026-11-06 (point 15, ORACLE.md): it flagged
+10 of 16 F against the selection's 12, at 4.29 s a press against 3.15. A press now
+asks no chat model unless Jev answers nothing.
+
 The legs come in as arguments, as `check_note`'s do: `search(query)` is
-web_research.search_lanes, `fetch(url)` is web_fetch.fetch_page, `ask(prompt)` a
-tool-less chat call. So this module holds no turn state, reaches no network of
-its own, and a test hands in lists.
+web_research.search_lanes and `fetch(url)` web_fetch.fetch_page. So this module
+holds no turn state, reaches no network of its own, and a test hands in lists.
 """
 from __future__ import annotations
 
@@ -54,17 +58,8 @@ _SAY = {
 }
 _PLAIN = {"disagrees": "the web does not back this", "supported": "the web backs this"}
 
-_QUESTION = """A person wrote the STATEMENT below and wants to look its point up on the web.
-Write the one search question the statement answers, in the statement's language, worded so a page can answer it either way.
-Keep the names that say what is asked. Leave out the statement's own answer: the number, date, amount, name or yes-or-no it asserts.
-Reply with the question only.
-
-STATEMENT:
-{claim}"""
-
 Search = Callable[[str], "tuple[list[dict], str]"]
 Fetch = Callable[[str], Any]
-Ask = Callable[[str], str]
 
 _WORD = re.compile(r"[^\W_]+")
 
@@ -137,10 +132,12 @@ def _page_text(page: Any) -> str:
 
 def _read(hits: list[dict], fetch: Fetch, claim: str) -> list[dict]:
     """The first PAGES of `hits` that open, each as one passage. All of them are
-    fetched at once: a page refused or slow costs no time, and a 403 at rank 2
-    does not leave the judge with two pages while a fourth was there. A failed
-    fetch is one page fewer, never a failed check: most of what the lanes return
-    is a site the server has no right to read."""
+    fetched at once, so a 403 at rank 2 does not leave the judge with two pages
+    while a fourth was there: 89 of the 480 pages the gate's presses asked for
+    refused (2026-11-06). A failed fetch is one page fewer, never a failed check.
+    shortcut: a press waits for its slowest page, at most fetch_page's 30 s, or
+    120 s for a YouTube hit on a laptop; none of the gate's 391 fetches passed 8 s,
+    so add a deadline when a press's p90 passes 20 s."""
     def one(url: str) -> dict | None:
         try:
             text = _page_text(fetch(url))
@@ -156,7 +153,7 @@ def _read(hits: list[dict], fetch: Fetch, claim: str) -> list[dict]:
         return [p for p in pool.map(one, urls) if p][:PAGES]
 
 
-def check_claim(claim: str, *, search: Search, fetch: Fetch, judge: Judge, ask: Ask | None = None,
+def check_claim(claim: str, *, search: Search, fetch: Fetch, judge: Judge,
                 step: Callable[[dict], None] | None = None,
                 cancelled: Callable[[], bool] | None = None) -> dict:
     """One press. {"web": "supported" | "disagrees", "url", "passage", "lane", ...},
@@ -168,18 +165,10 @@ def check_claim(claim: str, *, search: Search, fetch: Fetch, judge: Judge, ask: 
 
     tell = step or (lambda ev: None)
     tell({"step": "asking"})
-    query = claim
-    if ask is not None:
-        try:
-            query = " ".join((ask(_QUESTION.format(claim=claim)) or "").split()) or claim
-        except Exception as exc:
-            # No question is no reason to lose the check: the lanes take the
-            # selection itself, and the judge after them is what the person pays for.
-            logger.warning("check: the question was not written: %s", type(exc).__name__)
     if stop():
         return {"web": "", "say": CANCELLED}
     try:
-        hits, lane = search(query)
+        hits, lane = search(claim)
     except Exception as exc:
         # Every lane down, whatever it raised (httpx's own on no network, a
         # ValueError on a challenge): the vault's verdict stands.
