@@ -1274,6 +1274,10 @@ class ObsidianFSBackend(GraphIndexMixin):
         content, crlf = _read_lf(path)
         data, delim, body = fm.split(content)
 
+        # `data` None with a block means YAML refused it, not that there is no
+        # block: reading it as empty replaced every key a person typed.
+        if data is None and delim is not None:
+            raise ValueError(f"the properties of {rel_path_str} do not parse; fix them first")
         if data is None:
             data = {}
 

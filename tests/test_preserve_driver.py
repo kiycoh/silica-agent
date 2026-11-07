@@ -111,6 +111,25 @@ def test_set_prop_is_checked_with_its_own_key_free(vault, caplog):
     assert "status: done" in (vault / "Notes" / "N.md").read_text(encoding="utf-8")
 
 
+def test_set_prop_leaves_a_block_it_cannot_parse(vault):
+    """A block YAML refuses has keys a person typed and nothing here can
+    round-trip them: read as empty, the write dropped every one of them."""
+    broken = "---\ntitle: [unclosed\nowner: me\n---\n\n# N\n"
+    note = vault / "Notes" / "B.md"
+    note.write_text(broken, encoding="utf-8")
+    with pytest.raises(ValueError, match="do not parse"):
+        _driver().set_prop("Notes/B.md", "status", "done")
+    assert note.read_text(encoding="utf-8") == broken
+    assert "Notes/B.md" not in session_changes.snapshot()
+
+
+def test_set_prop_on_a_note_with_no_block_still_adds_one(vault):
+    note = vault / "Notes" / "P.md"
+    note.write_text("# P\n", encoding="utf-8")
+    _driver().set_prop("Notes/P.md", "status", "done")
+    assert note.read_text(encoding="utf-8") == "---\nstatus: done\n---\n\n# P\n"
+
+
 def test_a_move_rewrites_referrers_under_rename(vault, caplog):
     caplog.set_level(logging.WARNING, logger="silica.kernel.write.preserve")
     (vault / "Notes" / "R.md").write_text("# R\n\nSee [[N]] and [[N|the note]].\n", encoding="utf-8")
