@@ -215,11 +215,11 @@ def _n(nid, sgroup=-1, ntype="note"):
 
 
 def test_load_bearing_is_stamped_on_the_nodes_with_what_a_cut_costs():
-    from silica.ui.web.graph_view import _stamp_load_bearing
+    from silica.kernel.graph.overlays import stamp_load_bearing
 
     nodes = [_n("a"), _n("cut"), _n("b"), _n("c"), _n("G", ntype="ghost")]
     G = nx.Graph([("a", "cut"), ("cut", "b"), ("b", "c")])
-    _stamp_load_bearing(nodes, G, {n: 0.0 for n in G})
+    stamp_load_bearing(nodes, G, {n: 0.0 for n in G})
     by_id = {n["id"]: n for n in nodes}
     assert by_id["cut"]["cut"] is True and by_id["cut"]["strands"] == 1
     assert "cut" not in by_id["a"]           # not a cut vertex: no flag at all
@@ -231,13 +231,13 @@ def test_proposed_layer_keeps_only_pairs_a_shared_concept_corroborates(monkeypat
     """Uncorroborated, V1 lost every golden pair it was tested on (ADR-0027).
     The layer is allowed to exist because the corroboration is the filter, so
     a pair the index cannot vouch for is not drawn."""
-    import silica.ui.web.graph_view as gv
+    from silica.kernel.graph import overlays
 
     monkeypatch.setattr(
         "silica.kernel.graph.graph_export.shared_concepts",
         lambda pairs, k=3: {("A", "D"): ["gradient"]},
     )
-    out = gv._corroborate(
+    out = overlays._corroborate(
         [("A", "D", 2.0), ("B", "E", 9.0)], [_n("A"), _n("B"), _n("D"), _n("E")], 10,
         kind="PROPOSED", color="#000", paper="#fff",
     )
@@ -246,18 +246,18 @@ def test_proposed_layer_keeps_only_pairs_a_shared_concept_corroborates(monkeypat
 
 
 def test_proposed_layer_is_empty_without_an_index(monkeypatch):
-    import silica.ui.web.graph_view as gv
+    from silica.kernel.graph import overlays
 
     monkeypatch.setattr(
         "silica.kernel.graph.graph_export.shared_concepts", lambda pairs, k=3: {})
-    assert gv._corroborate([("A", "D", 2.0)], [_n("A"), _n("D")], 10,
+    assert overlays._corroborate([("A", "D", 2.0)], [_n("A"), _n("D")], 10,
                            kind="COUPLED", color="#000", paper="#fff") == []
 
 
 def test_the_frame_hides_a_layer_that_has_nothing_in_it():
     """A checkbox for an empty layer promises something behind it. Each of the
     four rows is rendered only where its own count is non-zero."""
-    from silica.ui.web.graph_view import _frame_context
+    from silica.tools.graph_view import _frame_context
 
     ctx = _frame_context([_n("A"), _n("B")],
                          [{"id": "e0", "from": "A", "to": "B", "type": "EXTRACTED"}],
@@ -267,7 +267,7 @@ def test_the_frame_hides_a_layer_that_has_nothing_in_it():
 
 
 def test_the_frame_renders_each_layer_when_it_has_something(tmp_path):
-    from silica.ui.web.graph_view import _frame_context
+    from silica.tools.graph_view import _frame_context
 
     nodes = [_n("A", 0), _n("B", 1)]
     nodes[0]["cut"] = True
@@ -289,7 +289,7 @@ def test_the_frame_renders_each_layer_when_it_has_something(tmp_path):
 def test_the_three_inferred_layers_are_off_until_asked_for():
     """The frame opens on what you WROTE. Every layer that is a claim about
     what you did not write starts unticked."""
-    from silica.ui.web.graph_view import _frame_context
+    from silica.tools.graph_view import _frame_context
 
     js = FRAME_JS.read_text()
     for flag in ("showProposed", "showCoupled"):
@@ -341,7 +341,7 @@ def test_every_edge_layer_has_a_colour_of_its_own():
     same hex - so ticking it changed nothing anyone could see. Every edge
     colour the frame can draw at once has to differ from every other."""
     from silica.kernel.graph import graph_export as ge
-    from silica.ui.web import graph_view as gv
+    from silica.tools import graph_view as gv
 
     # By NAME first: graph_view re-imports three of graph_export's constants, and
     # a constant seen twice under its own name is one colour, not two.

@@ -113,7 +113,7 @@ def _island(html: str) -> dict:
 def test_the_web_graph_carries_papers_citations_and_missing_papers(tmp_vault, monkeypatch, tmp_path):
     """The layer reaches the frame, and a missing paper is never counted or
     coloured as a note: it is appended after the partitions are computed."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
     for i in range(5):

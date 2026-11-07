@@ -57,7 +57,7 @@ def test_3d_cuts_the_triangle_from_its_circumsphere():
 
 
 def test_the_key_names_the_triangle_only_where_a_day_is():
-    from silica.ui.web.graph_view import render_html
+    from silica.tools.graph_view import render_html
 
     day = {"id": "daily/2026-09-18.md", "label": "2026-09-18", "type": "daily",
            "path": "daily/2026-09-18.md", "size": 16, "color": {"background": "#545d67"}}

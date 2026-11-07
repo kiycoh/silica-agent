@@ -14,10 +14,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
 from silica.config import CONFIG
+from silica.kernel.graph import file_tree
 from silica.kernel.graph.mindmap import note_resolver
 from silica.kernel.report import brief, note_context
 from silica.kernel.text import note_parts
-from silica.ui.web import file_tree, render
+from silica.ui.web import render
 from silica.ui.web.failures import explain as _failure
 
 logger = logging.getLogger(__name__)
@@ -546,7 +547,7 @@ def compare(a: str = "", b: str = ""):
         logger.debug("compare: semantic layer unavailable", exc_info=True)
     if a.startswith("collection") or b.startswith("collection"):
         from silica.sources.citations import paper_layer
-        from silica.ui.web.graph_view import _stamp_collections
+        from silica.tools.graph_view import _stamp_collections
 
         paper_layer(nodes)
         _stamp_collections(nodes)

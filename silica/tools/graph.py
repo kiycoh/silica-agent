@@ -60,7 +60,7 @@ def graph_export(output_path: str, folder: str = "", title: str = "Vault Graph",
                  knn_k: int = 6) -> dict[str, Any]:
     """The export behind silica_graph_export, for a path the USER chose (the
     /graph command, the GUI's temp file), which may lie outside the vault."""
-    from silica.ui.web.graph_view import export_graph
+    from silica.tools.graph_view import export_graph
 
     # Best-effort: refresh the co-occurrence index so clusters get named labels
     # (incremental — skips already-indexed notes). Naming degrades to "Cluster N"

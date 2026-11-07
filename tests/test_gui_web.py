@@ -1747,7 +1747,7 @@ def test_chat_done_html_linkifies_a_cited_note(client, tmp_vault, monkeypatch):
 
 def test_graph_route_builds_unified_export(client, monkeypatch):
     """GET /graph builds the one unified graph via export_graph (no mode param)."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     tc, _server = client
     seen = {}
@@ -2362,7 +2362,7 @@ def test_the_graph_document_carries_both_palettes(tmp_path, monkeypatch):
     at the iframe boundary.
     """
     from silica.kernel.graph import graph_export as ge
-    from silica.ui.web import graph_view as gv
+    from silica.tools import graph_view as gv
 
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (
         [{"id": "a.md", "label": "a", "type": "note"}], []))
@@ -2928,7 +2928,7 @@ def test_the_2d_resolution_governor_cannot_be_held_soft_by_the_idle_tick():
     the 250ms restore window — so re-arming the restore on EVERY paint meant it
     could never elapse and one pan left the settled graph permanently at half
     backing-store resolution, inverting the block's own premise."""
-    from silica.ui.web import graph_view
+    from silica.tools import graph_view
 
     text = graph_view._asset("graph-frame.js")
     body = text[text.index("function drsOnPaint()"):]

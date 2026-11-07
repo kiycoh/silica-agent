@@ -374,7 +374,7 @@ def test_the_whole_vault_is_a_read_only_this_page_may_ask_for(client):
 def test_render_html_escapes_a_model_chosen_title():
     """The title is a tool argument, and it lands in <title> and in an <h1>:
     a `</title>` closes the first slot and lets whatever follows become markup."""
-    from silica.ui.web.graph_view import render_html
+    from silica.tools.graph_view import render_html
 
     payload = "</title><script>alert(1)</script>"
     out = render_html([{"id": "a", "name": "a"}], [], title=payload)
@@ -384,7 +384,7 @@ def test_render_html_escapes_a_model_chosen_title():
 
 
 def test_render_html_escapes_the_discourse_badge_too():
-    from silica.ui.web.graph_view import render_html
+    from silica.tools.graph_view import render_html
 
     out = render_html([{"id": "a", "name": "a"}], [], discourse="<img src=x onerror=alert(1)>")
     assert "<img src=x onerror=alert(1)>" not in out

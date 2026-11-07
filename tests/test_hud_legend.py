@@ -26,7 +26,7 @@ def _hud(html: str) -> str:
 
 
 def _render() -> str:
-    from silica.ui.web.graph_view import render_html
+    from silica.tools.graph_view import render_html
     nodes = [
         {"id": "a.md", "label": "A", "type": "note", "group": 0, "size": 3,
          "betweenness": 0.4, "path": "a.md"},
@@ -49,7 +49,7 @@ def test_the_panel_asks_three_questions_in_reading_order():
 
 
 def _areas_render() -> str:
-    from silica.ui.web.graph_view import Community, render_html
+    from silica.tools.graph_view import Community, render_html
     nodes = [{"id": f"{g}{i}.md", "label": f"{g.upper()}{i}", "type": "note", "group": n, "path": f"{g}{i}.md"}
              for n, (g, k) in enumerate([("a", 3), ("b", 2), ("s", 1)]) for i in range(k)]
     edges = [{"from": "a0.md", "to": "a1.md", "type": "EXTRACTED"},
@@ -133,7 +133,7 @@ def test_one_atlas_row_replaces_the_blobs_and_the_zones_and_names_its_partition(
     the zones on a vault with no area of 3 notes, and says so (ADR-0023: a
     surface names the partition it shows). With neither it has no row."""
     from silica.kernel.graph.graph_export import Community
-    from silica.ui.web.graph_view import Zone, render_html
+    from silica.tools.graph_view import Zone, render_html
     nodes = [{"id": f"{i}.md", "label": str(i), "type": "note", "group": 0, "sgroup": 0,
               "size": 3, "path": f"{i}.md"} for i in range(3)]
     areas = [Community(id=0, label="a", color="#888", color_paper="#444", size=3)]

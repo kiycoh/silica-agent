@@ -202,7 +202,7 @@ def test_a_pass_reads_the_library_searches_once_per_paper_and_keeps_its_versions
 # --- decisions 2, 3, 5: what the frame is handed ----------------------------------
 
 def _library_for_the_frame(vault, monkeypatch):
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
     monkeypatch.setattr("silica.kernel.recall.sync.vault_version", lambda: "v1")
@@ -222,7 +222,7 @@ def _library_for_the_frame(vault, monkeypatch):
 
 def test_a_paper_with_no_leaf_here_is_an_outside_paper_joined_after_the_counts(
         tmp_vault, monkeypatch, tmp_path):
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     f = _library_for_the_frame(tmp_vault, monkeypatch)
     zc._cache_path(CONFIG.vault_path).parent.mkdir(parents=True, exist_ok=True)
@@ -251,7 +251,7 @@ def test_a_paper_with_no_leaf_here_is_an_outside_paper_joined_after_the_counts(
 
 
 def test_before_any_pass_the_rim_has_no_verdict(tmp_vault, monkeypatch, tmp_path):
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     _library_for_the_frame(tmp_vault, monkeypatch)
     gv.export_graph(output_path=str(tmp_path / "g.html"))
@@ -264,7 +264,7 @@ def test_before_any_pass_the_rim_has_no_verdict(tmp_vault, monkeypatch, tmp_path
 
 def test_a_closed_zotero_draws_no_rim(tmp_vault, monkeypatch, tmp_path):
     """conftest points the client at a closed port."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
     tmp_vault.note("Concepts/Memory.md", "# Memory\n")

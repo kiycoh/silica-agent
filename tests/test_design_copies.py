@@ -103,15 +103,12 @@ def test_the_system_and_the_switch_print_one_graphite_on_pages():
 
 def test_python_writes_the_sheets_colours():
     """The graph's edge colours are painted by the exporter, so they are hex in
-    Python, and only a comment tied them to a token. _EDGE_COLOR_GAP_PAPER is a
-    known drift, stated here so it can be seen: it says `--warn, on paper` and is
-    #7A5305 where the token is #7A4F03. When it is fixed its line turns to ==."""
-    from silica.kernel.graph import graph_export as ge
-    from silica.ui.web import graph_view as gv
+    Python, and only a comment tied them to a token."""
+    from silica.kernel.graph import graph_export as ge, overlays
 
     app = _sheets()["app-base.css"]
-    assert gv._EDGE_COLOR_GAP.lower() == app["graphite"]["--warn"]
-    assert gv._EDGE_COLOR_GAP_PAPER.lower() != app["paper"]["--warn"]
+    assert overlays._EDGE_COLOR_GAP.lower() == app["graphite"]["--warn"]
+    assert overlays._EDGE_COLOR_GAP_PAPER.lower() == app["paper"]["--warn"]
     assert ge._EDGE_COLOR_SIMILAR.lower() == app["graphite"]["--accent"]
     assert ge._EDGE_COLOR_SIMILAR_PAPER.lower() == app["paper"]["--accent"]
     assert ge._EDGE_COLOR_REQUIRES.lower() == app["graphite"]["--frost"]

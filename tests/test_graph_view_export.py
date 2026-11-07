@@ -1,4 +1,4 @@
-"""Tests for export_graph() in silica/ui/web/graph_view.py.
+"""Tests for export_graph() in silica/tools/graph_view.py.
 
 The viewer moved out of the kernel and now vendors its JS bundle instead of
 fetching it from a CDN. These lock the new behavior:
@@ -22,7 +22,7 @@ def test_export_graph_unifies_wikilinks_and_similar(monkeypatch, tmp_path):
     """One build carries BOTH the wikilink edges and the embedding k-NN overlay;
     communities are Louvain on the WIKILINKS, and the SIMILAR filter row renders."""
     from silica.kernel.graph import graph_export as ge
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (
@@ -58,7 +58,7 @@ def test_export_graph_unifies_wikilinks_and_similar(monkeypatch, tmp_path):
 
 def test_export_graph_inlines_vendored_bundle_no_cdn(monkeypatch, tmp_path):
     from silica.kernel.graph import graph_export as ge
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     sentinel = "/*VENDORED_SENTINEL_12345*/"
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: sentinel)
@@ -85,7 +85,7 @@ def test_export_graph_has_density_forces_panel(monkeypatch, tmp_path):
     (FORCE_SCALE from avg degree) and the live Forces sliders that multiply it.
     Same template serves both views, so one export covers links and semantic."""
     from silica.kernel.graph import graph_export as ge
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (
@@ -107,7 +107,7 @@ def test_export_graph_has_density_forces_panel(monkeypatch, tmp_path):
 
 def test_export_graph_raises_when_vendored_asset_missing(monkeypatch, tmp_path):
     """A missing vendored asset is loud — never a silent CDN fallback."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     def boom() -> str:
         raise RuntimeError("graph_export: vendored 3d-force-graph.min.js is missing")
@@ -123,7 +123,7 @@ def test_both_renderer_bundles_are_vendored():
     The 2D half is not `numDimensions(2)` on the 3D bundle — it is a second
     library, so it is a second packaging risk. This is the presence test.
     """
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     js = gv._vendored_lib_js()
     assert "ForceGraph3D" in js          # WebGL UMD export
@@ -132,7 +132,7 @@ def test_both_renderer_bundles_are_vendored():
 
 def test_vendored_bundles_missing_is_loud(monkeypatch, tmp_path):
     """Either asset missing is a RuntimeError naming it, never a CDN fallback."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_VENDORED_BUNDLES", ("force-graph.min.js", "nope.min.js"))
     with pytest.raises(RuntimeError, match="nope.min.js"):
@@ -147,7 +147,7 @@ def test_export_graph_ships_the_2d_3d_switch(monkeypatch, tmp_path):
     reload the iframe.
     """
     from silica.kernel.graph import graph_export as ge
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (
@@ -184,7 +184,7 @@ def test_graph_view_import_is_gui_free():
     imported fastapi in the shared pytest process.
     """
     code = (
-        "import silica.ui.web.graph_view, sys; "
+        "import silica.tools.graph_view, sys; "
         "assert 'fastapi' not in sys.modules, 'graph_view pulled in fastapi'; "
         "print('ok')"
     )

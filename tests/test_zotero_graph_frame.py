@@ -66,7 +66,7 @@ def _cites(a: str, b: str) -> dict:
 def test_a_paper_vault_shows_citations_on_and_missing_papers_off():
     """Citations are in the source, so they are on; a missing paper is not in
     the vault at all, so its layer has to be asked for."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     edges = [_cites("sources/@p0.md", "sources/@p1.md"), _cites("sources/@p0.md", MISSING["id"])]
     html = gv.render_html([_paper(0), _paper(1), MISSING, NOTE], edges, lib_js="// x")
@@ -78,7 +78,7 @@ def test_a_paper_vault_shows_citations_on_and_missing_papers_off():
 
 
 def test_a_vault_without_papers_has_neither_row():
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     html = gv.render_html([NOTE], [], lib_js="// x")
 
@@ -86,7 +86,7 @@ def test_a_vault_without_papers_has_neither_row():
 
 
 def test_a_missing_paper_is_not_counted_as_a_note():
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     html = gv.render_html([_paper(0), _paper(1), MISSING, NOTE], [], lib_js="// x")
 
@@ -105,7 +105,7 @@ def _leaves(vault) -> None:
 
 
 def test_collections_are_read_live_from_zotero_at_build(tmp_vault, monkeypatch, tmp_path):
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
     fake = FakeZotero()
@@ -128,7 +128,7 @@ def test_collections_are_read_live_from_zotero_at_build(tmp_vault, monkeypatch, 
 def test_a_closed_zotero_leaves_the_collections_out(tmp_vault, monkeypatch, tmp_path):
     """conftest points the client at a closed port: the build still succeeds
     and no paper carries a membership it could not read."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
     _leaves(tmp_vault)
@@ -142,7 +142,7 @@ def test_a_closed_zotero_leaves_the_collections_out(tmp_vault, monkeypatch, tmp_
 
 def test_citations_stay_out_of_the_partitions_and_betweenness(tmp_vault, monkeypatch, tmp_path):
     from silica.kernel.graph import graph_export as ge
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
     seen: dict[str, set] = {}

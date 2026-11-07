@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from silica.ui.web.graph_view import render_html
+from silica.tools.graph_view import render_html
 
 
 # ---------------------------------------------------------------------------
@@ -545,7 +545,7 @@ class TestLayoutWorker:
         assert 'new Blob([lib.textContent, "\\n", simWorkerSource()]' in html
 
     def test_a_bundle_that_could_end_its_element_is_refused(self, monkeypatch):
-        import silica.ui.web.graph_view as gv
+        import silica.tools.graph_view as gv
         monkeypatch.setattr(gv, "_asset", lambda name: "x</SCRIPT>y")
         with pytest.raises(RuntimeError, match="cannot be inlined"):
             gv._sim_js()

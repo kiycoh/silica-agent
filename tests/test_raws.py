@@ -110,7 +110,7 @@ def test_a_raw_outside_the_vault_or_in_a_chat_is_offered_nowhere_and_the_route_r
 
 
 def test_the_rail_lists_a_raw_in_its_folder_and_the_frame_does_not(client, monkeypatch):
-    from silica.ui.web.file_tree import frame_tree, rail_tree
+    from silica.kernel.graph.file_tree import frame_tree, rail_tree
 
     _split_survey(monkeypatch)
     tree = client.get("/vault_info").json()["tree"]

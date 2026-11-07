@@ -16,7 +16,7 @@ FRAME_HTML = WEB / "graph-frame.html"
 
 
 def _ctx(edges, communities=()):
-    from silica.ui.web.graph_view import _frame_context
+    from silica.tools.graph_view import _frame_context
 
     nodes = [{"id": "A", "label": "A", "type": "note", "group": 0},
              {"id": "A2", "label": "A2", "type": "note", "group": 0},
@@ -80,7 +80,7 @@ def test_the_frame_names_an_area_by_its_hub_like_the_shape_surfaces_do():
     are named; a one-note area named after its hub is the note's name again."""
     import json
 
-    from silica.ui.web.graph_view import Community
+    from silica.tools.graph_view import Community
 
     comms = [Community(id=0, label="a · topics", color="#111", size=2),
              Community(id=1, label="b · topics", color="#222", size=2)]

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 
 from silica.kernel.graph.graph_export import Community, _community_color, detect_communities
-from silica.ui.web.graph_view import render_html
+from silica.tools.graph_view import render_html
 
 
 # ---------------------------------------------------------------------------

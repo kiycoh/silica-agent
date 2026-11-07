@@ -66,7 +66,7 @@ def _plan_star():
 
 
 def test_the_export_draws_the_plan_and_counts_none_of_its_links(monkeypatch, tmp_path):
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     nodes, edges = _plan_star()
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
@@ -183,7 +183,7 @@ def test_3d_cuts_the_diamond_from_the_squares_sphere():
 
 
 def test_the_key_names_the_diamond_only_where_a_native_note_is():
-    from silica.ui.web.graph_view import render_html
+    from silica.tools.graph_view import render_html
 
     plan = {"id": "Plans/P.md", "label": "P", "type": "plan", "path": "Plans/P.md",
             "size": 16, "color": {"background": "#545d67"}}
