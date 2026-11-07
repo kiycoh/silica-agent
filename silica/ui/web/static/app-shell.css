@@ -1381,7 +1381,7 @@ body.sidebar-collapsed #sidebar {
 
 /* selection reads from the fill, not from a coloured rule down the left edge:
    a 2px accent bar on every hovered row was the loudest thing in the column.
-   The row is a <button> (see render_tree): reachable, announced as a button,
+   The row is a <button> (see file_tree.frame_tree): reachable, announced as a button,
    and reset here back to the shape of a row. */
 /* --- a note in the tree, with the one action the rail can take on it --------
    The pin appears on hover (and on keyboard focus, which is the half a hover

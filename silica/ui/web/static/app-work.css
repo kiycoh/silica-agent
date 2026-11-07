@@ -418,7 +418,7 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
 
 /* --- the narration's panes ----------------------------------------------------
    What the agent is doing has a surface since work.js projected the stream
-   silica/agent/narration.py writes. The run's steps are the transcript's ledger
+   silica/obs/narration.py writes. The run's steps are the transcript's ledger
    line (ADR-0117 point 3) and its marks are on the left drawer's Chats segment
    (ADR-0122); the run's own pane, "This chat", left with ADR-0122. What stays
    here is the right drawer's node pane and its chip. */
