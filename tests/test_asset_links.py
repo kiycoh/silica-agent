@@ -13,8 +13,14 @@ from silica.driver.fs_backend import ObsidianFSBackend
 # ast level: the one generator gains a file bucket, note contract untouched
 # ---------------------------------------------------------------------------
 
-def test_extract_file_refs_all_syntaxes():
-    from silica.kernel.base.markdown import extract_file_refs, extract_links
+def _file_refs(content: str) -> list[str]:
+    from silica.kernel.base.markdown import extract_refs_typed
+
+    return extract_refs_typed(content)[1]
+
+
+def test_file_refs_all_syntaxes():
+    from silica.kernel.base.markdown import extract_links
 
     content = (
         "# N\n\n"
@@ -22,7 +28,7 @@ def test_extract_file_refs_all_syntaxes():
         "[the notebook](analysis.ipynb) and [[B]] and ![[clip.mov]]\n"
         "![remote](https://x.com/pic.png)\n"
     )
-    refs = extract_file_refs(content)
+    refs = _file_refs(content)
     assert set(refs) == {"foto.jpg", "report.pdf", "img/chart.png",
                          "analysis.ipynb", "clip.mov"}
     # note-link contract is bit-identical: files never leak into extract_links
@@ -32,19 +38,17 @@ def test_extract_file_refs_all_syntaxes():
 def test_file_targets_no_longer_phantom_note_links():
     # Before the extension list grew, [[analysis.ipynb]] / [[clip.mov]] read as
     # dangling NOTE links; they are file refs.
-    from silica.kernel.base.markdown import extract_file_refs, extract_links
+    from silica.kernel.base.markdown import extract_links
 
     assert extract_links("[[analysis.ipynb]] [[clip.mov]]") == []
-    assert extract_file_refs("[[analysis.ipynb]] [[clip.mov]]") == [
+    assert _file_refs("[[analysis.ipynb]] [[clip.mov]]") == [
         "analysis.ipynb", "clip.mov"]
 
 
-def test_extract_file_refs_fast_path_and_normalization():
-    from silica.kernel.base.markdown import extract_file_refs
-
-    assert extract_file_refs("plain prose, no refs at all") == []
-    assert extract_file_refs("![[img.png|300]]") == ["img.png"]      # size hint
-    assert extract_file_refs("[[doc.pdf#page=3]]") == ["doc.pdf"]    # anchor
+def test_file_refs_fast_path_and_normalization():
+    assert _file_refs("plain prose, no refs at all") == []
+    assert _file_refs("![[img.png|300]]") == ["img.png"]      # size hint
+    assert _file_refs("[[doc.pdf#page=3]]") == ["doc.pdf"]    # anchor
 
 
 def test_extract_refs_typed_matches_links_typed():
@@ -157,11 +161,11 @@ def test_silica_file_links_both_directions(asset_vault, monkeypatch):
 def test_tabular_targets_are_file_refs_not_note_links():
     # A profile note names its data file (formats.TABULAR_EXTS); as note
     # targets these were phantom dangling links, invisible to file_backlinks.
-    from silica.kernel.base.markdown import extract_file_refs, extract_links
+    from silica.kernel.base.markdown import extract_links
 
     body = "[[vendite.csv]] [[data/log.tsv]] ![[frame.parquet]]"
     assert extract_links(body) == []
-    assert extract_file_refs(body) == ["vendite.csv", "data/log.tsv", "frame.parquet"]
+    assert _file_refs(body) == ["vendite.csv", "data/log.tsv", "frame.parquet"]
 
 
 # ---------------------------------------------------------------------------
