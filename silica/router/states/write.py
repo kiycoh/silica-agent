@@ -450,9 +450,8 @@ def handle_write(fsm: "InjectorFSM") -> None:
             from silica.model.providers import get_embedder
             from silica.kernel.recall.embed import get_store
             # The run-end sweep that embeds patches skips a driver with no
-            # mtime_of (the ws backend) and an index_sweep turned off.
-            swept = (getattr(DRIVER, "mtime_of", None) is not None
-                     and CONFIG.index_sweep)
+            # mtimes (the ws backend) and an index_sweep turned off.
+            swept = DRIVER.knows_mtimes and CONFIG.index_sweep
             if _refresh_embeddings_for_ops(
                 ops, committed_paths, read_body=lambda p: DRIVER.read_note(p).content or "",
                 embedder=get_embedder(CONFIG), store=get_store(), patches=not swept,

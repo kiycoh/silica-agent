@@ -218,7 +218,7 @@ def test_embedding_refresh_skips_uncommitted_writes(tmp_path):
 
 
 def test_embedding_refresh_keeps_patches_where_no_sweep_will_run(tmp_path):
-    """The ws backend has no mtime_of and SILICA_INDEX_SWEEP can be off: there
+    """The ws backend has no mtimes and SILICA_INDEX_SWEEP can be off: there
     the run-end sweep does nothing, so WRITE embeds the patch as it always did."""
     from silica.kernel.recall.embed import EmbedStore
     from silica.router.states.write import _refresh_embeddings_for_ops

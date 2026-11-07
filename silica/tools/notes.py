@@ -314,11 +314,10 @@ def silica_require(
     if wanted == names:
         return {"note": name, "path": path, "requires": names, "changed": False}
     try:
-        unset = getattr(DRIVER, "unset_prop", None)  # the Obsidian bridge has none
-        if wanted or unset is None:
+        if wanted or not DRIVER.composes_props:  # the Obsidian bridge has no removal
             DRIVER.set_prop(path, "requires", [f"[[{n}]]" for n in wanted])
         else:
-            unset(path, "requires")
+            DRIVER.unset_prop(path, "requires")
     except Exception as e:
         return {"error": f"Failed to write '{name}': {e}"}
 

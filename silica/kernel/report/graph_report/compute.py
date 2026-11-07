@@ -84,13 +84,13 @@ def _note_mtimes(real_ids: set[str], override: dict[str, float] | None) -> dict[
     mtimes: dict[str, float] = {}
     from silica.driver import DRIVER
 
-    mtime_of = getattr(DRIVER, "mtime_of", None)
-    if mtime_of is None:
-        return mtimes
     for nid in real_ids:
         try:
-            ts = mtime_of(nid)
-        except Exception:
+            ts = DRIVER.mtime_of(nid)
+        except Exception as exc:
+            # A date is the recency signal of one note: without it the note
+            # ranks as undated, which beats losing the report.
+            logger.debug("graph_report: no mtime for '%s' (%s)", nid, exc)
             ts = None
         if ts is not None:
             mtimes[nid] = ts
