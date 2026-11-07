@@ -29,7 +29,6 @@ def find(c: Call) -> Result:
     k = int_flag(args, "--k=", 5)
     min_trust = str_flag(args, "--min-trust").strip().lower()
     life = str_flag(args, "--lifecycle").strip().lower()
-    # original case preserved — raw_input, not the lowered cmd
     query = " ".join(positional(args))
     if not query:
         out.print("  Usage: /find <query> [--k=N] [--min-trust=human|grounded|distilled|kept] "

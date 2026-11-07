@@ -42,7 +42,7 @@ def nucleate(c: Call) -> Result:
         # On by default: the leaf lives in `sources/`, which every index built on
         # the vault listing leaves out (is_source_leaf: embeddings, the graph, the
         # driver's search), while the passage search behind silica_search_context
-        # walks it and returns it (kernel/recall/paths.py:235, probed 2026-11-04).
+        # walks it and returns it (silica_core's recall/paths.py, probed 2026-11-04).
         # It is what makes a note's verbatim source reachable at all
         # (reliability_tier reads exactly that). --no-keep-sources opts out.
         keep_sources="--no-keep-sources" not in args,

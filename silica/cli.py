@@ -189,7 +189,7 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
     cmd = cmd.strip().lower()
 
     if cmd in ("/exit", "/quit", "/q"):
-        return False  # Signal to exit
+        return False
 
     if cmd.startswith("/sessions"):
         from silica.obs import narration as _narr
@@ -308,7 +308,7 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
 
         return True
 
-    return None  # unrecognized: the caller lets the agent infer the intent
+    return None
 
 
 _NO_MODEL_HINT = (
@@ -715,7 +715,6 @@ def main():
                 continue
             user_input = typed = worn[1]
 
-        # A command either does the whole job or hands the model a directive
         is_directive = False
         if user_input.startswith("/"):
             try:
@@ -750,7 +749,6 @@ def main():
             user_input = web[1]
             is_directive = True
 
-        # Handle slash commands
         if user_input.startswith("/"):
             cmd = user_input.strip().lower()
             if cmd in ("/clear", "/new"):
@@ -790,7 +788,6 @@ def main():
                 "it out; if it's genuinely unclear, ask one brief clarifying question."
             )
             is_directive = True
-            # fall through to the agentic loop below
 
         # Fail-fast guard: a chat turn without a model would only surface a
         # provider stack trace — point at `silica init` instead.

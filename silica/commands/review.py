@@ -271,7 +271,7 @@ def report(c: Call) -> Result:
         elif arg in ("--cooccurrence", "--with-cooccurrence"):
             with_cooccurrence = True
         elif not arg.startswith("-"):
-            folder = arg  # positional: /report Concepts/ML
+            folder = arg
 
     scope_desc = f"scoped to `{folder}`" if folder else "on the whole vault"
     embed_note = " Also propose missing links via the embedding index." if with_embeddings else ""
@@ -320,7 +320,6 @@ def organize(c: Call) -> Result:
     run_extra = ", move_uncategorized=true" if move_uncat else ""
 
     if taxonomy_file:
-        # Skip taxonomy generation — use existing file
         dry = "false" if apply_now else "true"
         scope_str = f", scope={json.dumps(scope)}" if scope else ""
         msg = (

@@ -11,7 +11,6 @@ from silica.config import CONFIG
 from silica.session.words import positional
 
 
-# The three index refreshes differ only in tool and result label.
 _REFRESH = {
     "/embed": ("silica_embed_refresh", ""),
     "/cooccur": ("silica_cooccurrence_refresh", " (co-occurrence)"),

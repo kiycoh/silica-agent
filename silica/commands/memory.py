@@ -93,9 +93,6 @@ def episodes(c: Call) -> Result:
     out.print(escape(body))
     # Re-split the raw line with shlex so `--save="a b/x.md"` honours the
     # quoted path; a malformed quote falls back to the whitespace split.
-    # (shlex is imported at module scope — a local `import shlex` here
-    # rebinds the name for the WHOLE function, and /path's use of it above
-    # then dies with UnboundLocalError before this branch ever runs.)
     try:
         save_args = shlex.split(raw_input.strip())[1:]
     except ValueError:
