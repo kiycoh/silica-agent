@@ -1,11 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""My Wikis when the answers hold notes back, end to end in headless Chrome.
+"""My Wikis' cover on the press the app shares with Pages, end to end in headless Chrome.
 
-Opt-in like tests/test_calendar_e2e.py, whose DevTools driver this borrows. The view counts what
-a Publish writes, so a wiki whose every note waits on an answer counts none: the press that opens
-the check is the one way to those answers, and it has to stay open at every width.
+Opt-in like tests/test_calendar_e2e.py, whose DevTools driver this borrows. cover.js comes in from
+a script and not from index.html, so nothing but a browser can say it arrived and printed.
 """
 from __future__ import annotations
 
@@ -97,15 +96,11 @@ def _open(page: Page, width: int) -> None:
 
 
 @pytest.mark.parametrize("width", [1440, 390])
-def test_a_wiki_held_by_its_answers_still_opens_the_check_and_the_view_follows_them(app, width):
+def test_the_cover_prints_on_the_shared_press_and_publish_opens_the_check(app, width):
     _open(app, width)
-    assert app.js(f"{GO}.textContent") == "Check before publishing"
-    assert app.js(f"{GO}.disabled") is False
-    assert "2 notes waiting for an answer" in app.js("document.querySelector('#public-body').textContent")
+    assert app.js(f"{GO}.textContent") == "Turn on and publish 2 notes"
+    app.wait(INKED, 15, "the cover to print on the shared press")
     app.js(f"{GO}.click()")
     app.wait("!!document.querySelector('.pre-top')", 15, "the check before Publish")
-    assert app.js("fetch('/public/check/answer', {method: 'POST', headers: {'Content-Type': 'application/json'},"
-                  " body: JSON.stringify({vault: 'stats', key: 'Book.pdf', answer: 'mine'})}).then(r => r.status)") == 200
     app.js("[...document.querySelectorAll('.pre-top button, .pre-top a')].find(e => e.textContent === 'Back').click()")
-    app.wait(f"{GO} && {GO}.textContent.startsWith('Turn on and publish 2 notes')", 15, "the view to follow the answer")
-    app.wait(INKED, 15, "the cover to print on the shared press")
+    app.wait(f"{GO} && {GO}.textContent === 'Turn on and publish 2 notes'", 15, "the view again")

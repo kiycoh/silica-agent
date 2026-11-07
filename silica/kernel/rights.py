@@ -578,10 +578,10 @@ def decide(wiki: dict, ans: dict) -> dict:
 
 
 def goes_out(slug: str, vault: Path | None = None, sel: dict | None = None) -> set[str]:
-    """The notes a Publish of this wiki writes, which is what the view counts, lists and draws:
-    `decide`'s answer without `read_wiki`'s reads, seconds on 1,748 notes (measured 2026-11-07)
-    and the view asks on every click. A note the answers settle opens nothing; only one that
-    hangs on its mark has its text read, as the build reads it."""
+    """The notes a Publish of this wiki writes: `decide`'s answer without `read_wiki`'s reads,
+    seconds on 1,748 notes (measured 2026-11-07), for a screen that asks on every click. A note
+    the answers settle opens nothing; only one that hangs on its mark has its text read, as the
+    build reads it."""
     vault = vault or publish.vault_root()
     sel = sel or publish.selection(vault)
     fms = sel["frontmatter"]
@@ -599,6 +599,18 @@ def goes_out(slug: str, vault: Path | None = None, sel: dict | None = None) -> s
         _mark_edits(marked, vault)
         notes.update(marked)
     return {p for p, n in notes.items() if _goes(n, free)}
+
+
+# KNOWN DRIFT, the owner's to settle, as KNOWN_DRIFT in tests/test_design_copies.py is for the
+# palette. My Wikis counts, lists and draws what a vault takes; the build writes what the answers
+# leave of it. On a real vault with no answers (Cultura, 2026-11-07) the view says 1,748 and the
+# build writes 699. The true number needs new UI first: `goes_out` alone counts 0 on a wiki whose
+# every note waits on an answer, and 0 disables Publish, the only way to the check that frees them.
+# Once that is decided this is one line, `return sorted(goes_out(slug, vault, sel))`, and
+# `test_my_wikis_counts_what_the_vault_takes_until_the_owner_decides` turns with it.
+def counted(slug: str, vault: Path, sel: dict) -> list[str]:
+    """What My Wikis counts, lists and draws as going out, sorted."""
+    return publish.taken_by(slug, sel)
 
 
 def blocks(wiki: dict, ans: dict, plan: dict) -> list[str]:

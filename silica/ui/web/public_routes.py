@@ -80,7 +80,7 @@ def _view() -> dict:
     notes, fms, of = sel["notes"], sel["frontmatter"], sel["vault_of"]
     last = (last_published(h) if h else {}).get("vaults", {})
     page_url = publish.page_url(vault)
-    going = {v["slug"]: rights.goes_out(v["slug"], vault, sel) for v in sel["vaults"]}
+    going = {v["slug"]: rights.counted(v["slug"], vault, sel) for v in sel["vaults"]}
     deg = _degrees(set().union(*going.values()))
     reviews = publish.host_reviews()
     vaults = []
@@ -93,8 +93,6 @@ def _view() -> dict:
                                  "readers", "published", "downgraded")},
             "url": publish.wiki_url(page_url, v["slug"]),
             "out": len(mine),
-            # what waits on an answer: Publish still opens the check for these
-            "held": len(publish.taken_by(v["slug"], sel)) - len(mine),
             "top": [note_parts.title_of(p, fms.get(p) or {}) for p in top],
             "struck": sum(1 for p, s in notes.items() if s == "struck" and of.get(p) == v["slug"]),
             "new": sum(1 for p in mine if before and p not in before),
@@ -165,7 +163,7 @@ def public_cover(vault: str = ""):
 
     root = publish.vault_root()
     sel = publish.selection(root)
-    on = sorted(rights.goes_out(vault, root, sel))
+    on = rights.counted(vault, root, sel)
     if not on:
         return {"n": [], "e": []}
     out = set(on)

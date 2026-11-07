@@ -119,10 +119,9 @@ def test_a_blocked_wiki_says_why_and_a_request_does_not_reach_its_manifest(clien
     assert tc.get("/public").json()["vaults"][0]["blocked"] == []
 
 
-def test_the_view_and_the_cover_show_what_the_answers_let_out_and_publish_stays_open(client):
-    """The count, the titles and the cover were the notes on in the vault, while the build
-    wrote those the answers let through: 1,748 against 699 on a real vault, 2026-11-07. A note
-    held by an unanswered file is counted apart, so the button that opens the check stays."""
+def test_the_view_and_the_cover_stay_on_what_the_vault_takes_whatever_the_answers_hold_back(client):
+    """The drift named at `rights.counted`, as a person meets it: the screen says two, the
+    build writes one, and an answer moves only the build."""
     from silica.kernel.write.provenance import append_record
 
     tc, tmp = client
@@ -132,16 +131,12 @@ def test_the_view_and_the_cover_show_what_the_answers_let_out_and_publish_stays_
     append_record("Book.md", "Book.md", "run-1", ["Memory/Spacing effect"], vault_path=str(root))
     tc.post("/public/vault", json={"folder": "Memory"})
     m = tc.get("/public").json()["vaults"][0]
-    assert (m["out"], m["held"], m["top"]) == (1, 1, ["Forgetting curve"])
+    assert m["out"] == 2 and "held" not in m and len(m["top"]) == 2
     c = tc.get("/public/cover", params={"vault": "memory"}).json()
-    assert c["n"] == [] and c["unlinked"] == 1
+    assert sorted(n[4] for n in c["n"]) == ["Forgetting curve", "Spacing effect"]
     assert tc.post("/public/publish", json={"vault": "memory"}).json()["result"]["notes"] == 1
     tc.post("/public/check/answer", json={"vault": "memory", "key": "Book.pdf", "answer": "mine"})
-    m = tc.get("/public").json()["vaults"][0]
-    assert (m["out"], m["held"], m["new"]) == (2, 0, 1)
-    assert m["top"][0] in ("Forgetting curve", "Spacing effect") and len(m["top"]) == 2
-    assert sorted(n[4] for n in tc.get("/public/cover", params={"vault": "memory"}).json()["n"]) == [
-        "Forgetting curve", "Spacing effect"]
+    assert tc.get("/public").json()["vaults"][0]["out"] == 2
 
 
 def test_the_cover_is_the_graph_of_what_goes_out_and_nothing_private(client):

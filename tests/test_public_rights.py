@@ -91,7 +91,7 @@ def _written(root: Path, *paths: str) -> None:
 
 
 def _agreed() -> set[str]:
-    """What goes out, once the view's read and the build's have said the same."""
+    """What goes out, once `goes_out`'s read and the build's have said the same."""
     from silica.kernel import rights
 
     out = rights.goes_out("stats")
@@ -104,7 +104,7 @@ HAND = {"Stats/Hand note.md", "Stats/Descriptive/Box plot.md"}
 
 # --- what goes out, said once ---------------------------------------------------
 
-def test_the_views_read_says_what_the_build_decides_as_the_answers_move(stats):
+def test_goes_out_says_what_the_build_decides_as_the_answers_move(stats):
     assert _agreed() == HAND
     _say("Slides.pdf", "mine")
     assert _agreed() == HAND | {"Stats/Regression.md"}
@@ -114,7 +114,7 @@ def test_the_views_read_says_what_the_build_decides_as_the_answers_move(stats):
     assert _agreed() == HAND | {"Stats/Bayes.md"}
 
 
-def test_a_mark_counts_in_the_views_read_only_where_it_stands_in_the_build(stats, tmp_vault):
+def test_a_mark_counts_in_goes_out_only_where_it_stands_in_the_build(stats, tmp_vault):
     tmp_vault.note("Stats/Bayes.md", "---\nrewritten: true\n---\nMy own words about it.\n")
     assert _agreed() == HAND | {"Stats/Bayes.md"}
     tmp_vault.note("Stats/Bayes.md", f"---\nrewritten: true\n---\n{BOOK}\n")
@@ -136,11 +136,22 @@ def test_a_struck_note_and_a_wiki_that_is_not_there_go_nowhere(stats, tmp_vault)
     assert rights.goes_out("no-such-wiki") == set()
 
 
-def test_the_build_writes_what_the_views_read_counted(stats):
+def test_the_build_writes_what_goes_out_says(stats):
     from silica.kernel import rights
 
-    counted = rights.goes_out("stats")
-    assert _build()["notes"] == len(counted) == 2
+    going = rights.goes_out("stats")
+    assert _build()["notes"] == len(going) == 2
+
+
+def test_my_wikis_counts_what_the_vault_takes_until_the_owner_decides(stats):
+    """The drift named at `rights.counted`: 1,748 against 699 on a real vault, 2026-11-07. The
+    true number needs new UI, which is the owner's. When it lands this asserts `== going`."""
+    from silica.kernel import publish, rights
+
+    sel = publish.selection(stats)
+    going = rights.goes_out("stats", stats, sel)
+    assert rights.counted("stats", stats, sel) == publish.taken_by("stats", sel)
+    assert len(rights.counted("stats", stats, sel)) == 5 and len(going) == 2
 
 
 # --- files ---------------------------------------------------------------------
