@@ -1,4 +1,4 @@
-"""Tests for the command registry (silica/ui/commands.py) and dependent surfaces."""
+"""Tests for the command registry (silica/command_table.py) and dependent surfaces."""
 from __future__ import annotations
 
 import io
@@ -24,35 +24,26 @@ def _make_console() -> tuple[Console, io.StringIO]:
 # 1. Registry ↔ handler parity
 # ---------------------------------------------------------------------------
 
-def _dispatched_from_source() -> set[str]:
-    """Extract slash command strings from cli.py dispatch functions, from the
-    persona dispatcher both surfaces ask first (ADR-0127), and from /web, which is
-    a turn and not a command (session.turn)."""
+def _repl_own_from_source() -> set[str]:
+    """The slash commands the REPL answers itself, its literals in cli.py, with the
+    persona dispatcher both surfaces ask first (ADR-0127) and /web, which is a turn
+    and not a command (session.turn)."""
     root = Path(__file__).parent.parent / "silica"
     src = "".join((root / rel).read_text() for rel in ("cli.py", "kernel/personas.py", "session/turn.py"))
     found = set(re.findall(r'"(/[\w-]+)"', src))
-    # Remove aliases that are intentionally not in COMMANDS
-    found.discard("/quit")
+    found.discard("/quit")   # /exit's other names: its row says so
     found.discard("/q")
-    found.discard("/learn")   # /memorize's name before ADR-0141, kept so a typed /learn still runs
     return found
 
 
 def test_registry_handler_parity():
     # The Python commands only: a skill dispatches through the skill fallback,
-    # never by a literal in cli.py (tests/test_skill_commands.py, ADR-0063).
+    # never by a row (tests/test_skill_commands.py, ADR-0063).
     registry_names = {c.name for c in COMMANDS}
-    dispatched = _dispatched_from_source()
-
-    missing_from_registry = dispatched - registry_names
-    assert not missing_from_registry, (
-        f"Commands dispatched in cli.py but absent from COMMANDS: {missing_from_registry}"
-    )
-
-    missing_from_dispatch = registry_names - dispatched
-    assert not missing_from_dispatch, (
-        f"Commands in COMMANDS but not dispatched in cli.py: {missing_from_dispatch}"
-    )
+    own = _repl_own_from_source()
+    assert own <= registry_names, f"answered in cli.py but absent from COMMANDS: {own - registry_names}"
+    unanswered = {c.name for c in COMMANDS if not c.handler} - own
+    assert not unanswered, f"rows with no handler that nothing answers: {unanswered}"
 
 
 # ---------------------------------------------------------------------------

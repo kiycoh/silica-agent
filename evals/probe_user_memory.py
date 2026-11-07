@@ -88,8 +88,8 @@ def _restore_vault(vault: Path, pristine: Path, before: dict[str, float]) -> lis
 
 def _expand(turn: str) -> dict:
     if turn == "/remember":
-        from silica.cli import _expand_workflow_shortcut
-        return {"role": "user", "content": _expand_workflow_shortcut(turn), "origin": "cli"}
+        from silica.commands import dispatch
+        return {"role": "user", "content": dispatch(turn, []).directive, "origin": "cli"}
     return {"role": "user", "content": turn}
 
 

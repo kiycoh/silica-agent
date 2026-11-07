@@ -21,9 +21,9 @@ from __future__ import annotations
 import importlib
 import shlex
 from collections.abc import Callable
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager
 
-from silica.command_table import ROWS, Ask, Call, Command, Result
+from silica.command_table import ROWS, Ask, Call, Command, Result, unseen
 from silica.config import CONFIG
 from silica.session.words import command_word, direct_args
 
@@ -40,7 +40,7 @@ def _run(row: Command, call: Call) -> Result:
 
 
 def dispatch(text: str, messages: list[dict], *, ask: Ask | None = None,
-             progress: Callable[[Result], AbstractContextManager] = lambda out: nullcontext(None),
+             progress: Callable[[Result], AbstractContextManager] = unseen,
              live: Callable[..., None] | None = None) -> Result | None:
     """Run the command `text` names. None: no command by that name, nothing ran.
 

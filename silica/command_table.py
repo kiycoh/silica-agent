@@ -120,6 +120,11 @@ class Ask:
     yes: Callable[[str], bool]
 
 
+def unseen(out: Result) -> AbstractContextManager:
+    """No renderer: an agent loop a command runs itself goes undrawn."""
+    return nullcontext(None)
+
+
 @dataclass(frozen=True)
 class Call:
     """One line, on its way to a handler."""
@@ -130,8 +135,8 @@ class Call:
     out: Result
     ask: Ask | None = None
     # Opens the surface's renderer of an agent loop a command runs itself, given
-    # the result to draw into. None leaves that loop unseen.
-    progress: Callable[[Result], AbstractContextManager] = lambda out: nullcontext(None)
+    # the result to draw into.
+    progress: Callable[[Result], AbstractContextManager] = unseen
 
 
 # A turn answers these two before the table: a persona is worn, not run

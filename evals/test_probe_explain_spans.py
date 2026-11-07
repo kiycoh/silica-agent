@@ -202,9 +202,9 @@ def test_the_probe_contract_tracks_the_shipped_explain_prompt():
     """The probe holds a paraphrase of `/explain`'s contract, so it can drift out
     of date and measure a prompt nobody ships. This fails the moment the product
     clause changes and the copy does not follow."""
-    from silica.cli import _expand_workflow_shortcut
+    from silica.commands import dispatch
 
-    live = _expand_workflow_shortcut('/explain "anything"')
+    live = dispatch('/explain "anything"', []).directive
     assert ATTRIBUTION_CLAUSE in live, "the shipped prompt lost the clause"
     assert ATTRIBUTION_CLAUSE in EXPOSE_SYSTEM, "the probe copy did not follow"
 

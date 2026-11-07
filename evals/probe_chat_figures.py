@@ -119,7 +119,7 @@ def run_one(kind: str, arm: str, out_file: Path) -> None:
     from silica.obs import narration as _narr
     from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
     from silica.agent.loop import run_agent
-    from silica.cli import _expand_workflow_shortcut
+    from silica.commands import dispatch
     from silica.session.seed import seed_messages
     from silica.config import CONFIG
 
