@@ -46,7 +46,7 @@ def sample_vault_text(vault: str) -> str:
     pure-diagnostic contract.
 
     Single seam for this sampling logic: both `check_language` (doctor) and
-    the `/vault` info block in cli.py go through `detect_vault_language`
+    the `/vault` info block in commands/vault.py go through `detect_vault_language`
     below, which calls this — no duplicated sampling.
     """
     from silica.kernel.base.layout import is_vault_artifact
