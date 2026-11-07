@@ -30,7 +30,7 @@ from silica.session import check as check_wiring
 from silica.session import commands, meter, seed
 from silica.session import turn as session_turn
 from silica.session.conversation import Conversation
-from silica.session.words import direct_args, int_flag, positional, remember_text, str_flag, unquoted
+from silica.session.words import command_word, direct_args, int_flag, positional, remember_text, str_flag, unquoted
 from silica.sources import ingest
 from silica.ui.console import CONSOLE
 from silica.ui.home import print_home
@@ -2675,7 +2675,7 @@ def _expand_workflow_shortcut(user_input: str, progress=None, ask=None) -> str |
     """
     if not user_input.strip().startswith("/"):
         return None  # not a shortcut — skip shlex entirely, plain prose can have stray quotes/apostrophes
-    cmd = user_input.split(None, 1)[0].lower()
+    cmd = command_word(user_input)
     handler = _SHORTCUTS.get(cmd)
     if handler is None:
         return _expand_skill(user_input)
@@ -3073,21 +3073,11 @@ def _start_reminder_daemon() -> None:
                     continue
                 vault = _Path(raw)
                 from silica.kernel.calendar.model import scan_events
-                from silica.kernel.calendar.reminders import (
-                    advance_marks, delivery_lock, due_reminders, load_marks,
-                    save_marks,
-                )
+                from silica.kernel.calendar.reminders import deliver_due
                 events = scan_events(vault)
                 if not events:
                     continue
-                with delivery_lock(vault):
-                    marks = load_marks(vault)
-                    due = due_reminders(events, marks, _dt.datetime.now())
-                    if due:
-                        save_marks(vault, advance_marks(marks, due))
-                if not due:
-                    continue
-                for r in due:
+                for r in deliver_due(vault, events, _dt.datetime.now()):
                     tag = "[yellow]late reminder[/]" if r["late"] else "[bold cyan]reminder[/]"
                     when = r["start"].strftime("%Y-%m-%d %H:%M")
                     CONSOLE.print(f"  {tag} · {escape(r['title'])} · {when}")

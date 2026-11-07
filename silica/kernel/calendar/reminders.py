@@ -113,6 +113,17 @@ def delivery_lock(vault: Path):
             fcntl.flock(fh, fcntl.LOCK_UN)
 
 
+def deliver_due(vault: Path, events: list[Event], now: dt.datetime) -> list[dict]:
+    """The reminders due at `now`, taken: their marks advance under the lock, so
+    whichever surface asks first delivers them and the other gets none."""
+    with delivery_lock(vault):
+        marks = load_marks(vault)
+        due = due_reminders(events, marks, now)
+        if due:
+            save_marks(vault, advance_marks(marks, due))
+    return due
+
+
 def load_marks(vault: Path) -> dict[str, str]:
     p = marks_path(vault)
     try:
