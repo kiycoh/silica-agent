@@ -301,3 +301,22 @@ def test_hosted_writes_a_table_row_to_the_tenant_env(hosted_client, env_file, mo
     monkeypatch.setattr(CONFIG, "stt_lang", CONFIG.stt_lang)
     assert c.post("/settings", json={"key": "SILICA_STT_LANG", "value": "it"}).status_code == 200
     assert "SILICA_STT_LANG=it" in env_file.read_text()
+
+
+def test_a_model_changed_in_settings_brings_its_window(client, env_file, monkeypatch):
+    """The window was sized at boot alone, so the ring and the compaction budget
+    went on reading the last model's until a restart. Under a pin, from the pin:
+    the last model may have cut the field below it."""
+    from silica.config import CONFIG
+
+    tc, _ = client
+    monkeypatch.setattr(CONFIG, "max_context_tokens", 60000)
+    monkeypatch.setattr("silica.model.limits.model_limits", lambda provider, model: (131072, 0))
+    monkeypatch.delenv("SILICA_MAX_CONTEXT", raising=False)
+    assert tc.post("/settings", json={"key": "SILICA_MODEL", "value": "openrouter/x/wide"}).status_code == 200
+    assert CONFIG.max_context_tokens == 131072
+
+    monkeypatch.setenv("SILICA_MAX_CONTEXT", "65536")
+    monkeypatch.setattr(CONFIG, "max_context_tokens", 8192)   # what a narrow model left
+    assert tc.post("/settings", json={"key": "SILICA_MODEL", "value": "openrouter/x/other"}).status_code == 200
+    assert CONFIG.max_context_tokens == 65536

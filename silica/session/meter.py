@@ -177,7 +177,8 @@ def recount(conv, shown: bool = True) -> None:
 
 
 def resolve_context_budget() -> None:
-    """Size the REPL context meter to the live model's window.
+    """Size the context meter to the live model's window, at boot and whenever
+    Settings changes the model.
 
     SILICA_MAX_CONTEXT, when set, is the window on every provider. Locally it
     stands in for a served window silica can't reliably introspect (LM Studio,
@@ -189,12 +190,14 @@ def resolve_context_budget() -> None:
     """
     if not CONFIG.model.strip():
         return
-    pinned = bool(env_raw("SILICA_MAX_CONTEXT"))
-    if pinned and CONFIG.provider != "openrouter":
+    pin = env_raw("SILICA_MAX_CONTEXT")
+    if pin and CONFIG.provider != "openrouter":
+        CONFIG.max_context_tokens = int(pin)
         return
     from silica.model.limits import model_limits
     window, _ = model_limits(CONFIG.provider, CONFIG.model)
     if window:
         # OpenRouter's window is the one it serves, so a pin left from a larger
         # model is cut to it instead of sending prompts the provider refuses.
-        CONFIG.max_context_tokens = min(window, CONFIG.max_context_tokens) if pinned else window
+        # From the pin and not the field: the last model may have cut the field.
+        CONFIG.max_context_tokens = min(window, int(pin)) if pin else window
