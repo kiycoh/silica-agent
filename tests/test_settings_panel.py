@@ -310,8 +310,11 @@ def test_a_model_changed_in_settings_brings_its_window(client, env_file, monkeyp
     from silica.config import CONFIG
 
     tc, _ = client
+    monkeypatch.setattr(CONFIG, "model", "openrouter/x/narrow")
+    monkeypatch.setattr(CONFIG, "_provider", "openrouter")
     monkeypatch.setattr(CONFIG, "max_context_tokens", 60000)
     monkeypatch.setattr("silica.model.limits.model_limits", lambda provider, model: (131072, 0))
+    monkeypatch.setenv("SILICA_MODEL", "")   # apply() writes os.environ: monkeypatch restores what it declared
     monkeypatch.delenv("SILICA_MAX_CONTEXT", raising=False)
     assert tc.post("/settings", json={"key": "SILICA_MODEL", "value": "openrouter/x/wide"}).status_code == 200
     assert CONFIG.max_context_tokens == 131072
