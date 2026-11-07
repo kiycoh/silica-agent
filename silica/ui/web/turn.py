@@ -13,13 +13,14 @@ import json
 import logging
 import threading
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from silica.agent.constraints import AgentConstraints, DEMO_MAX_ITERATIONS, PHONE_TOOLS
+from silica.command_table import Result
 from silica.commands import dispatch
 from silica.config import CONFIG, demo
 from silica.kernel import job_records, system_lines, vault_files
@@ -198,6 +199,23 @@ def _drawn_in_the_answer(out):
     return closing(make_progress_callback(out))
 
 
+def _drawn(result: Result) -> tuple[str, Callable[[], str], dict]:
+    """A finished command as this surface draws it: the answer, the HTML of it for
+    off the loop, and what rides the frame. What it said goes in a code block; an
+    `answer` is the reply itself, whose formulas a code block would not render; a
+    save is a Saved line the chat draws with its Undo (ADR-0076 §6)."""
+    if result.saved is not None:
+        from silica.kernel import user_memory
+
+        saved = user_memory.describe(result.saved)
+        return saved, lambda: render.linkify(saved, remote_images=False), {"memory": user_memory.undo_payload(result.saved)}
+    if (answer := result.answer) is not None:
+        return answer, lambda: render.answer_html(answer, []), {}
+    shown = plain(result.lines)
+    block = f"```text\n{shown}\n```" if shown else "```text\n(done)\n```"
+    return block, lambda: render.linkify(block, note_resolver(), remote_images=False), {}
+
+
 def _answered(messages: list[dict], typed: dict, answer: str, *, narrated: bool = False) -> None:
     """A command's whole exchange, which no model answered."""
     from silica.obs import narration as _narr
@@ -266,7 +284,7 @@ async def run_turn(ask: Ask) -> AsyncIterator[dict]:
         return await asyncio.shield(task)
 
     try:
-        # A slash command follows the order `session.commands` names. A persona
+        # A slash command follows the order `silica.commands` names. A persona
         # comes before all of it: it is worn, not run.
         worn = await off_loop(session_turn.wear, t.text, t.conv)
         if worn is not None and not worn[1]:
@@ -287,46 +305,6 @@ async def run_turn(ask: Ask) -> AsyncIterator[dict]:
         t.web = session_turn.expand_web_turn(t.text, messages) if t.text.startswith("/") else None
         if t.web is not None:
             t.content = t.web[1]
-        elif command_word(t.text) == "/remember" and len(t.text.split(None, 1)) > 1:
-            # /remember <text> (ADR-0076 §6) is written here and not by the
-            # direct handler below, whose console text would come back wrapped
-            # in a code block: the chat draws this as a Saved line with Undo,
-            # from the `memory` the done frame carries. Bare /remember goes on
-            # to the expansion below, which asks the model.
-            from silica.obs import narration as _narr
-            from silica.kernel import user_memory
-            from silica.session.words import remember_text
-
-            out = user_memory.save("vault", remember_text(t.text), session=_narr.NARRATOR.sid or "")
-            answer = user_memory.describe(out)
-            _answered(messages, {"role": "user", "content": t.text, "origin": "cli"}, answer)
-            line.outcome = "done"
-            yield callback.done_frame(answer, render.linkify(answer, remote_images=False), session.ctx_meter(),
-                                      memory=user_memory.undo_payload(out))
-            return
-        elif command_word(t.text) == "/flashcards":
-            # Cards are made as data and checked before they are shown
-            # (learn.artifacts.flashcards), and the answer is their Markdown:
-            # the direct path below would wrap what the command prints in a
-            # code block, and the formulas on the cards would not render.
-            import shlex
-
-            from silica.kernel.learn.artifacts import flashcards
-            from silica.session.words import int_flag, positional, str_flag
-
-            try:
-                args = shlex.split(t.text)[1:]
-            except ValueError:
-                raise ValueError("unbalanced quotes in command. Wrap paths with spaces in \"...\".") from None
-            targets = positional(args)
-            if not targets:
-                raise ValueError("/flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]")
-            answer = await off_loop(flashcards, targets, int_flag(args, "--n=", 12), str_flag(args, "--save").strip())
-            _answered(messages, {"role": "user", "content": t.text, "origin": "cli"}, answer)
-            meter.update_context_tokens(messages)
-            line.outcome = "done"
-            yield callback.done_frame(answer, await off_loop(render.answer_html, answer, []), session.ctx_meter())
-            return
         elif t.text.startswith("/"):
             # Pumped as the agent's turn is: a command that runs the injector
             # streams its block and phases while it works (ingest.nucleate),
@@ -369,12 +347,12 @@ async def run_turn(ask: Ask) -> AsyncIterator[dict]:
             if result.directive is None:
                 # Appended only once the verdict is in: a directive falls through
                 # to the agent below, which appends the expanded turn itself.
-                shown = plain(result.lines)
-                answer = f"```text\n{shown}\n```" if shown else "```text\n(done)\n```"
+                answer, html, extra = _drawn(result)
                 _answered(messages, typed, answer, narrated=bool(told))
+                if result.answer is not None:
+                    meter.update_context_tokens(messages)
                 line.outcome = "done"
-                yield callback.done_frame(answer, render.linkify(answer, note_resolver(), remote_images=False),
-                                          session.ctx_meter())
+                yield callback.done_frame(answer, await off_loop(html), session.ctx_meter(), **extra)
                 return
             t.content = result.directive
 

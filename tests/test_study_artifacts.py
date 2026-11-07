@@ -25,8 +25,8 @@ def test_flashcards_ground_every_card_in_a_checked_point(tmp_vault, monkeypatch)
 
 
 def test_the_chat_shows_the_cards_as_markdown(tmp_vault, tmp_path, monkeypatch):
-    """The web turn answers /flashcards itself: the direct path would wrap the
-    printed cards in a code block, where the formulas do not render."""
+    """The cards are the answer: a code block would keep their formulas from
+    rendering."""
     import asyncio
 
     from silica.kernel.learn import artifacts

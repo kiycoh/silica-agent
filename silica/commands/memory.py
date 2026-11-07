@@ -35,7 +35,7 @@ def remember(c: Call) -> Result:
         )
     from silica.obs import narration
 
-    saved = user_memory.save("vault", text, session=narration.NARRATOR.sid or "")
+    saved = out.saved = user_memory.save("vault", text, session=narration.NARRATOR.sid or "")
     if not saved["ok"]:
         out.print(f"  [yellow]{escape(saved['error'])}[/]")
         for entry in saved.get("entries") or ():
