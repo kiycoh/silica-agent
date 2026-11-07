@@ -45,7 +45,7 @@ def run_rerank_ab(vault, store, *, embed_store=None, reranker=None,
     invariant by construction and the A/B measures ORDERING: mrr and per-pair
     rank wins/losses).
 
-    Arm B mirrors the production call sites (coordinator/_orphan_candidates,
+    Arm B mirrors the production call sites (coordinator/link_candidates,
     curate): query text = link_query(key) — bare title when informative, body
     head window otherwise (query-shape A/B, bench/local_rerank_excerpt_sweep
     + local_rerank_title_blind). Pre-gate baselines used note_document(key).

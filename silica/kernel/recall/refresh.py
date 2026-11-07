@@ -183,3 +183,33 @@ def lexical(folder: str = "", force: bool = False) -> dict[str, Any]:
         "read_errors": errors,
         "index_path": str(store._path),
     }
+
+
+def flush(*, embed: bool, cooccur: bool, lexical: bool) -> None:
+    """Persist a run's deferred upserts, once (Fix A).
+
+    The write path upserts into the shared in-memory singletons with save=False
+    and marks the index dirty; this single flush rewrites each dirty index file
+    once instead of per note (1.17s/note at 10k). Gated on the dirty flags so a
+    run that wrote nothing (or had the embedder down) never rewrites the index.
+    Runs in the _run_loop finally so it fires on success, error, and Ctrl+C; a
+    hard kill is repaired by the index sweep.
+    """
+    if embed:
+        try:
+            from silica.kernel.recall.embed import get_store
+            get_store().save()
+        except Exception as e:
+            logger.debug("flush: embed index save skipped (%s)", e)
+    if cooccur:
+        try:
+            from silica.kernel.recall.cooccurrence import get_cooccur_store
+            get_cooccur_store().save()
+        except Exception as e:
+            logger.debug("flush: cooccur index save skipped (%s)", e)
+    if lexical:
+        try:
+            from silica.kernel.recall.lexical import get_lexical_store
+            get_lexical_store().save()
+        except Exception as e:
+            logger.debug("flush: lexical index save skipped (%s)", e)

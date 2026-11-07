@@ -1,5 +1,6 @@
-"""Migration test: Coordinator._orphan_candidates routes through the relatedness
-facade, fusing embeddings + co-occurrence instead of embeddings alone.
+"""Migration test: an orphan's link candidates (link_candidates, what the
+Coordinator repairs from) route through the relatedness facade, fusing embeddings
++ co-occurrence instead of embeddings alone.
 
 This is a pure candidate-generation site (no cosine thresholding), so swapping
 cosine_top_k for the RRF facade is a clean, zero-regression upgrade: it gains
@@ -9,14 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from silica.router.coordinator import Coordinator
 from silica.kernel.recall.embed import EmbedStore
 from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
-
-
-def _bare_coordinator() -> Coordinator:
-    # bypass the heavy __init__ (FSM construction); _orphan_candidates uses no self state
-    return object.__new__(Coordinator)
+from silica.kernel.report.related import link_candidates
 
 
 @pytest.fixture
@@ -45,7 +41,7 @@ def test_orphan_candidates_fuses_both_legs(isolated_indexes):
     cs.upsert_note("Notes/Near", build_contribution("Near", "neural network training"))
     cs.save()
 
-    out = _bare_coordinator()._orphan_candidates("Notes/Orphan.md", k=3)
+    out = link_candidates("Notes/Orphan.md", k=3)
     paths = [c["path"] for c in out]
     assert "Notes/Near" in paths
     assert "Notes/Orphan" not in paths          # never the query itself (self-exclusion)
@@ -60,7 +56,7 @@ def test_orphan_candidates_routes_on_cooccurrence_when_embed_empty(isolated_inde
     cs.upsert_note("far", build_contribution("Far", "sailing boat harbour"))
     cs.save()
 
-    out = _bare_coordinator()._orphan_candidates("orphan", k=3)
+    out = link_candidates("orphan", k=3)
     paths = [c["path"] for c in out]
     assert "near" in paths                      # shared concepts -> related
     assert "far" not in paths                   # disjoint concepts
@@ -68,5 +64,5 @@ def test_orphan_candidates_routes_on_cooccurrence_when_embed_empty(isolated_inde
 
 def test_orphan_candidates_empty_when_no_signal(isolated_indexes):
     # Nothing indexed anywhere -> both legs abstain -> [] (best-effort, no raise)
-    out = _bare_coordinator()._orphan_candidates("orphan", k=3)
+    out = link_candidates("orphan", k=3)
     assert out == []

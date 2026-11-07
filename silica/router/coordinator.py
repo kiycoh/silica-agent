@@ -196,14 +196,9 @@ class Coordinator:
             logger.debug("orphan recompute failed (non-fatal): %s", e)
             return set()
 
-    def _orphan_candidates(self, path: str, k: int = 3) -> list[dict]:
-        """Link targets for an orphan, via the relatedness facade."""
-        from silica.kernel.report.related import link_candidates
-
-        return link_candidates(path, k=k)
-
     def _enqueue_orphan_repairs(self, wq: Any, result: dict) -> None:
         from silica.kernel.base.notekey import ledger_key
+        from silica.kernel.report.related import link_candidates
         from silica.kernel.workqueue import OrphanJob, WorkItem
 
         ledger = getattr(self.fsm, "warning_ledger", None)
@@ -224,7 +219,7 @@ class Coordinator:
 
         enqueued = 0
         for path in residual[:MAX_ORPHAN_REPAIRS_PER_RUN]:
-            candidates = self._orphan_candidates(path)
+            candidates = link_candidates(path, k=3)
             if not candidates:
                 continue
             wq.enqueue(WorkItem(
