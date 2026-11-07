@@ -6,24 +6,28 @@ a note was made from, each folder of images and each site. What nobody answered 
 
 `read_wiki` reads the facts of one wiki, `decide` turns them and the answers into what goes out,
 `sheet` into what the check before Publish shows. The build calls `decide` itself, so an answer
-binds whether or not anyone opened the screen.
+binds whether or not anyone opened the screen. `goes_out` is `decide`'s answer for whoever only
+wants the notes.
 
-The fetch of a remote image is passed in: the kernel does not reach the network.
+The fetch of a remote image and the address of a thumbnail are passed in: the kernel neither
+reaches the network nor names a route.
 """
 from __future__ import annotations
 
+import functools
 import hashlib
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import unquote, urlsplit
 
-from silica.kernel.base import notekey
 from silica.kernel.base.formats import IMAGE_SUFFIX, SHOWN_IMAGE_EXTS
 from silica.kernel import publish
 from silica.kernel.base.noteshape import SOURCES_TAIL_RE
 from silica.kernel.base.syntax import EMBED_RE, LINK_TARGET_RE
+from silica.kernel.text import note_parts
+from silica.kernel.vault_files import images_by_name
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +35,10 @@ ANSWERS = ("mine", "open", "else")
 PUBLIC_DOMAIN = "Public domain or CC0"
 NO_DERIVATIVES = "CC BY-ND"
 SHARE_ALIKE = "CC BY-SA"
+# What a source was published under, by family. Not `publish.LICENSES`, the terms a wiki grants:
+# a source can be the public domain or no-derivatives, which no wiki here offers, and a
+# share-alike one asks its wiki for `publish.SHARE_ALIKE_LICENSE`.
 LICENSES = (PUBLIC_DOMAIN, "CC BY", SHARE_ALIKE, "CC BY-NC", NO_DERIVATIVES)
-# The wiki's own license a share-alike source asks for, from `publish.LICENSES`.
-_SHARE_ALIKE_WIKI = "CC BY-SA 4.0"
 _KEY = "sources"
 # ADR-0153 Open 3: the share of a note copied word for word that cannot count as the author's. My
 # number; only the runs behind it are measured (point 10).
@@ -63,7 +68,7 @@ _IBAN = re.compile(r"\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){3,7}(?: ?[A-Z0-9]{1,3})?\b
 def answers(vault: Path | None = None) -> dict:
     """{key: answer} from `public: sources:`. A key is a file's name, `folder:<path>` or
     `site:<host>`; a file holds for every wiki, so the answers live beside `vaults:`."""
-    raw = publish._block(vault or publish._vault()).get(_KEY)
+    raw = publish.block(vault or publish.vault_root()).get(_KEY)
     return raw if isinstance(raw, dict) else {}
 
 
@@ -76,7 +81,7 @@ def save_answer(key: str, answer: str, *, license: str = "", credit: str = "",
         raise ValueError(f"not an answer: {answer}")
     if license and license not in LICENSES:
         raise ValueError(f"not a license: {license}")
-    vault = vault or publish._vault()
+    vault = vault or publish.vault_root()
     items = answers(vault)
     if answer:
         row = {"answer": answer, "license": license, "credit": credit.strip()[:_CREDIT_MAX],
@@ -252,7 +257,7 @@ def kept_image(name: str, vault: Path | None = None) -> Path | None:
     """A kept copy by file name, for the screen's thumbnail; None for anything but such a name."""
     if not _KEPT_NAME.fullmatch(name):
         return None
-    path = _kept_dir(vault or publish._vault()) / name
+    path = _kept_dir(vault or publish.vault_root()) / name
     return path if path.is_file() else None
 
 
@@ -270,11 +275,6 @@ def _keep(url: str, data: bytes, ctype: str, vault: Path) -> Path:
 
 # --- the facts of a wiki -------------------------------------------------------
 
-def _title(path: str, fm: dict) -> str:
-    t = fm.get("title")
-    return t.strip() if isinstance(t, str) and t.strip() else notekey.stem(path)
-
-
 def _body(text: str) -> str:
     """A note as it goes out, so a remark the build strips is no finding, and text it keeps is read."""
     from silica.kernel.base.markdown import strip_ofm_meta
@@ -286,20 +286,6 @@ def _body(text: str) -> str:
 def _folder_of(path: str, root: str) -> str:
     rest = path[len(root) + 1:].split("/", 1)
     return f"{root}/{rest[0]}" if len(rest) > 1 else root
-
-
-def _images_on_disk(vault: Path) -> dict[str, Path]:
-    """{name: file}, one walk, the way `_find_asset` takes a bare name.
-    shortcut: an image is told apart by its name, as `![[x.png]]` names it, so two files of one
-    name share one answer and one thumbnail. No name repeats among the 885 image files measured on
-    2026-11-06, where pasted names carry a date; key on the path if a vault of `image.png` exports
-    shows up."""
-    out: dict[str, Path] = {}
-    for p in sorted(vault.rglob("*")):
-        if p.suffix.lower() in SHOWN_IMAGE_EXTS and p.is_file() \
-                and not any(s.startswith(".") for s in p.relative_to(vault).parts):
-            out.setdefault(p.name.casefold(), p)
-    return out
 
 
 def _hand_edits(vault: Path) -> tuple[dict[str, str | None], set[str]]:
@@ -326,10 +312,12 @@ def _only_marked(path: Path, written: str | None) -> bool:
     return content_hash(_MARK.sub("", path.read_text(encoding="utf-8"), count=1)) == written
 
 
-def _read_sources(vault: Path, notes: dict, wanted: dict[str, list[str]], names: dict[str, str]) -> dict:
-    """One pass over the leaves in `sources/`, one held at a time: what each names as its file, the
-    images it embeds, and the share of each wanted note. `wanted` is {leaf stem: [note paths]}.
-    Returns {image key: file} and fills `names`, {leaf stem: file}, and each note's share."""
+def _read_sources(vault: Path, notes: dict, wanted: dict[str, list[str]], names: dict[str, str],
+                  only: set[str] | None = None) -> dict:
+    """One pass over the leaves in `sources/`, one held at a time: the images each embeds, and the
+    share of each wanted note. `wanted` is {leaf stem: [note paths]}, `names` {leaf stem: file},
+    and `only` the leaf stems to open, all of them by default. Returns {image key: file} and
+    each file's credit, and fills each note's share."""
     from silica.kernel.base.layout import SOURCES_DIR
     from silica.kernel.text.language import detect
     from silica.kernel.base.manifest import in_write_dir
@@ -339,12 +327,12 @@ def _read_sources(vault: Path, notes: dict, wanted: dict[str, list[str]], names:
     credits: dict[str, str] = {}
     root = vault / in_write_dir(SOURCES_DIR)
     for leaf in sorted(root.rglob("*.md")) if root.is_dir() else ():
+        stem = leaf.stem.casefold()
+        if only is not None and stem not in only:
+            continue
         data, _raw, body = frontmatter.split(leaf.read_text(encoding="utf-8", errors="ignore"))
         data = data or {}
-        stem = leaf.stem.casefold()
-        raw = str(data.get("source_file") or "")
-        file = Path(raw.replace("\\", "/")).name or leaf.name
-        names[stem] = file
+        file = names.get(stem) or leaf.name
         said = ", ".join(str(data[k]) for k in ("authors", "source_title") if data.get(k))
         if said:
             credits[file] = said
@@ -363,25 +351,44 @@ def _read_sources(vault: Path, notes: dict, wanted: dict[str, list[str]], names:
     return {"traced": traced, "credits": credits}
 
 
-def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict] | None = None) -> dict:
-    """The facts of one wiki. `fetch` brings a remote image with no kept copy: the screen passes one,
-    the build does not, since a Publish must not wait on a stranger's site."""
-    from silica.kernel.write.provenance import read_records
+def _leaf_names(vault: Path) -> dict[str, str]:
+    """{leaf stem: the file it names}. The frontmatter comes from the note index, so the view's
+    every click opens no leaf; one the index cannot read is read here, as the pass above reads it."""
+    from silica.kernel.base import frontmatter, note_index
+    from silica.kernel.base.layout import SOURCES_DIR
+    from silica.kernel.base.manifest import in_write_dir
+
+    names: dict[str, str] = {}
+    root = vault / in_write_dir(SOURCES_DIR)
+    for leaf in sorted(root.rglob("*.md")) if root.is_dir() else ():
+        note = note_index.parsed(vault, leaf.relative_to(vault).as_posix(), body=False)
+        try:
+            data = note[0] if note else frontmatter.split(leaf.read_text(encoding="utf-8", errors="ignore"))[0]
+        except OSError as exc:
+            # Gone since the walk, with an ingest running: its notes fall back on the name the
+            # records give, and the view, which asks on every click, still draws.
+            logger.debug("rights: %s not read (%s)", leaf, exc)
+            continue
+        raw = str((data or {}).get("source_file") or "")
+        names[leaf.stem.casefold()] = Path(raw.replace("\\", "/")).name or leaf.name
+    return names
+
+
+@functools.lru_cache(maxsize=16384)
+def _key(vault: str, path: str) -> str:
+    """`note_key`, kept: it walks the vault's path rules, 0.1 ms a spelling, and the view asks for
+    every note of every wiki on every click (0.5 s on 1,748 notes, measured 2026-11-07). A
+    spelling's key cannot change while its vault stands. `vault` is only what tells two apart."""
     from silica.kernel.base.notekey import note_key
 
-    vault = vault or publish._vault()
-    conf = publish.find(slug, vault)
-    sel = publish.selection(vault)
-    fms = sel["frontmatter"]
-    paths = sorted(p for p, s in sel["notes"].items() if s == "on" and sel["vault_of"].get(p) == slug)
-    notes: dict[str, dict] = {}
-    for p in paths:
-        text = _body((vault / p).read_text(encoding="utf-8", errors="ignore")) if (vault / p).is_file() else ""
-        notes[p] = {"title": _title(p, fms.get(p) or {}), "text": SOURCES_TAIL_RE.sub("", text), "body": text,
-                    "files": [], "rewritten": (fms.get(p) or {}).get("rewritten") is True,
-                    "edited": None, "share": None, "measured": False}
+    return note_key(path)
 
-    by_key = {note_key(p): p for p in paths}
+
+def _traced(paths: Iterable[str], vault: Path) -> tuple[dict[str, list[str]], dict[str, str]]:
+    """({leaf stem: the notes made from it}, {leaf stem: its source as the records name it})."""
+    from silica.kernel.write.provenance import read_records
+
+    by_key = {_key(str(vault), p): p for p in paths}
     wanted: dict[str, list[str]] = {}
     fallback: dict[str, str] = {}
     for r in read_records(vault_path=str(vault)):
@@ -391,35 +398,71 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
         stem = Path(source).stem.casefold()
         fallback.setdefault(stem, source)
         for n in r.get("notes") or []:
-            p = by_key.get(note_key(n))
+            p = by_key.get(_key(str(vault), n))
             if p and p not in wanted.setdefault(stem, []):
                 wanted[stem].append(p)
-    names: dict[str, str] = {}
-    leaves = _read_sources(vault, notes, wanted, names)
+    return wanted, fallback
 
-    files: dict[str, dict] = {}
+
+def _tie_files(notes: dict, wanted: dict[str, list[str]], names: dict[str, str],
+               fallback: dict[str, str]) -> dict[str, list[str]]:
+    """Fill each note's `files` and return {file: its notes}."""
+    tied: dict[str, list[str]] = {}
     for stem, mine in wanted.items():
         file = names.get(stem) or fallback[stem]
         for p in mine:
             if file not in notes[p]["files"]:
                 notes[p]["files"].append(file)
-            row = files.setdefault(file, {"notes": [], "images": [], "credit": leaves["credits"].get(file, "")})
-            if p not in row["notes"]:
-                row["notes"].append(p)
+            row = tied.setdefault(file, [])
+            if p not in row:
+                row.append(p)
+    return tied
+
+
+def _facts(p: str, vault: Path, fm: dict) -> dict:
+    """A note as `read_wiki` first knows it, with the text its measures read."""
+    text = _body((vault / p).read_text(encoding="utf-8", errors="ignore")) if (vault / p).is_file() else ""
+    return {"title": note_parts.title_of(p, fm), "text": SOURCES_TAIL_RE.sub("", text), "body": text,
+            "files": [], "rewritten": fm.get("rewritten") is True, "edited": None, "share": None, "measured": False}
+
+
+def _mark_edits(notes: dict, vault: Path) -> None:
+    """Whether each note made from a file was edited since Silica wrote it, and a mark that is
+    the note's only change taken back."""
+    from silica.kernel.base.notekey import note_key
 
     known, edits = _hand_edits(vault)
-    on_disk = _images_on_disk(vault)
-    local: dict[str, dict] = {}
-    remote: dict[str, dict] = {}
-    titles = {Path(p).stem.casefold(): p for p in paths}
-    links: list[tuple[str, str]] = []
-    nowhere: dict[str, int] = {}
     for p, n in notes.items():
         key = note_key(p)
         if n["files"] and key in known:
             n["edited"] = key in edits
             if n["edited"] and n["rewritten"] and _only_marked(vault / p, known[key]):
                 n["edited"] = n["rewritten"] = False
+
+
+def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict] | None = None) -> dict:
+    """The facts of one wiki. `fetch` brings a remote image with no kept copy: the screen passes one,
+    the build does not, since a Publish must not wait on a stranger's site."""
+    vault = vault or publish.vault_root()
+    conf = publish.find(slug, vault)
+    sel = publish.selection(vault)
+    fms = sel["frontmatter"]
+    paths = publish.taken_by(slug, sel)
+    notes = {p: _facts(p, vault, fms.get(p) or {}) for p in paths}
+    wanted, fallback = _traced(paths, vault)
+    names = _leaf_names(vault)
+    leaves = _read_sources(vault, notes, wanted, names)
+    files = {f: {"notes": mine, "images": [], "credit": leaves["credits"].get(f, "")}
+             for f, mine in _tie_files(notes, wanted, names, fallback).items()}
+    _mark_edits(notes, vault)
+
+    on_disk = images_by_name(vault)
+    local: dict[str, dict] = {}
+    remote: dict[str, dict] = {}
+    titles = {Path(p).stem.casefold(): p for p in paths}
+    links: list[tuple[str, str]] = []
+    nowhere: dict[str, int] = {}
+    for p, n in notes.items():
         n["personal"] = personal_data(n["body"])
         for target in LINK_TARGET_RE.findall(n["body"]):
             hit = titles.get(Path(target.strip()).name.casefold())
@@ -490,16 +533,17 @@ def _can_mark(n: dict) -> bool:
     return n["rewritten"] or n["edited"] is not False
 
 
+def _goes(n: dict, free: dict[str, bool]) -> bool:
+    """The one rule for a note: every file it was made from answered for, or marked as its
+    author's with the mark standing."""
+    return all(free[f] for f in n["files"]) or (n["rewritten"] and (n["share"] is None or n["share"] < COPIED))
+
+
 def decide(wiki: dict, ans: dict) -> dict:
     """What goes out: `notes`, `local` image keys, `remote` {address: copy's name}, `files` {copy's
     name: path}, `credits` {image key or address: words}, `note_credits` {note: words}."""
     free = {f: is_free(ans.get(f, {})) for f in wiki["files"]}
-    notes = set()
-    for p, n in wiki["notes"].items():
-        if all(free[f] for f in n["files"]):
-            notes.add(p)
-        elif n["rewritten"] and (n["share"] is None or n["share"] < COPIED):
-            notes.add(p)
+    notes = {p for p, n in wiki["notes"].items() if _goes(n, free)}
 
     local: set[str] = set()
     credits: dict[str, str] = {}
@@ -533,6 +577,42 @@ def decide(wiki: dict, ans: dict) -> dict:
             "note_credits": note_credits}
 
 
+def goes_out(slug: str, vault: Path | None = None, sel: dict | None = None) -> set[str]:
+    """The notes a Publish of this wiki writes: `decide`'s answer without `read_wiki`'s reads,
+    seconds on 1,748 notes (measured 2026-11-07), for a screen that asks on every click. A note
+    the answers settle opens nothing; only one that hangs on its mark has its text read, as the
+    build reads it."""
+    vault = vault or publish.vault_root()
+    sel = sel or publish.selection(vault)
+    fms = sel["frontmatter"]
+    ans = answers(vault)
+    notes: dict[str, dict] = {p: {"files": [], "rewritten": (fms.get(p) or {}).get("rewritten") is True, "share": None}
+                              for p in publish.taken_by(slug, sel)}
+    wanted, fallback = _traced(notes, vault)
+    names = _leaf_names(vault)
+    free = {f: is_free(ans.get(f, {})) for f in _tie_files(notes, wanted, names, fallback)}
+    marked = {p: {**_facts(p, vault, fms.get(p) or {}), "files": n["files"]} for p, n in notes.items()
+              if n["rewritten"] and not all(free[f] for f in n["files"])}
+    if marked:
+        mine = {s: [p for p in ps if p in marked] for s, ps in wanted.items() if marked.keys() & set(ps)}
+        _read_sources(vault, marked, mine, names, only=set(mine))
+        _mark_edits(marked, vault)
+        notes.update(marked)
+    return {p for p, n in notes.items() if _goes(n, free)}
+
+
+# KNOWN DRIFT, the owner's to settle, as KNOWN_DRIFT in tests/test_design_copies.py is for the
+# palette. My Wikis counts, lists and draws what a vault takes; the build writes what the answers
+# leave of it. On a real vault with no answers (Cultura, 2026-11-07) the view says 1,748 and the
+# build writes 699. The true number needs new UI first: `goes_out` alone counts 0 on a wiki whose
+# every note waits on an answer, and 0 disables Publish, the only way to the check that frees them.
+# Once that is decided this is one line, `return sorted(goes_out(slug, vault, sel))`, and
+# `test_my_wikis_counts_what_the_vault_takes_until_the_owner_decides` turns with it.
+def counted(slug: str, vault: Path, sel: dict) -> list[str]:
+    """What My Wikis counts, lists and draws as going out, sorted."""
+    return publish.taken_by(slug, sel)
+
+
 def blocks(wiki: dict, ans: dict, plan: dict) -> list[str]:
     """Why this wiki cannot ask to enter Wikis (ADR-0153 points 9 and 16), in the screen's words."""
     if wiki["visibility"] == "private":
@@ -546,8 +626,8 @@ def blocks(wiki: dict, ans: dict, plan: dict) -> list[str]:
         out.append(f"It can ask to enter Wikis once {what} fixed.")
     share_alike = any(ans.get(f, {}).get("license") == SHARE_ALIKE and is_free(ans.get(f, {}))
                       for f in wiki["files"])
-    if share_alike and wiki["license"] != _SHARE_ALIKE_WIKI:
-        out.append(f"It can ask to enter Wikis once its license is {_SHARE_ALIKE_WIKI}.")
+    if share_alike and wiki["license"] != publish.SHARE_ALIKE_LICENSE:
+        out.append(f"It can ask to enter Wikis once its license is {publish.SHARE_ALIKE_LICENSE}.")
     return out
 
 
@@ -581,7 +661,9 @@ def check_mark(wiki: dict, path: str, on: bool = True) -> None:
 
 
 def set_rewritten(path: str, on: bool) -> None:
-    publish.write_prop(path, "rewritten", True if on else None)
+    from silica.kernel.write.notes import write_prop
+
+    write_prop(path, "rewritten", True if on else None)
 
 
 # --- what the screen shows -----------------------------------------------------
@@ -602,7 +684,7 @@ def _answer_fields(a: dict, default_credit: str = "") -> dict:
             "credit": a.get("credit") or default_credit}
 
 
-def _file_row(wiki: dict, ans: dict, plan: dict, name: str) -> dict:
+def _file_row(wiki: dict, ans: dict, plan: dict, name: str, src: Callable[[dict], str]) -> dict:
     a = ans.get(name, {})
     row = wiki["files"][name]
     notes = []
@@ -612,15 +694,15 @@ def _file_row(wiki: dict, ans: dict, plan: dict, name: str) -> dict:
         notes.append({"path": p, "title": n["title"], "status": _status(n), "can": _can_mark(n),
                       "mine": n["rewritten"], "goes": p in plan["notes"], "held": held})
     return {"key": name, "name": name, "old": name in wiki["asked"], "free": is_free(a), "notes": notes,
-            "images": [_thumb(wiki["local"][k]) for k in sorted(row["images"])],
+            "images": [_thumb(wiki["local"][k], src) for k in sorted(row["images"])],
             **_answer_fields(a, row["credit"])}
 
 
-def _thumb(img: dict) -> dict:
-    return {"name": img["name"], "src": "/asset?path=" + quote(img["src"])}
+def _thumb(img: dict, src: Callable[[dict], str]) -> dict:
+    return {"name": img["name"], "src": src(img)}
 
 
-def _group_rows(wiki: dict, ans: dict, plan: dict) -> list[dict]:
+def _group_rows(wiki: dict, ans: dict, plan: dict, src: Callable[[dict], str]) -> list[dict]:
     rows: dict[str, dict] = {}
 
     def row(key: str, kind: str, name: str, default: str = "") -> dict:
@@ -633,7 +715,7 @@ def _group_rows(wiki: dict, ans: dict, plan: dict) -> list[dict]:
         if img["file"] or not plan["notes"].intersection(img["notes"]):
             continue
         r = row(img["group"], "folder", img["group"].removeprefix("folder:") + "/")
-        r["images"].append({**_thumb(img), "note": _first_title(wiki, img), "on": img["name"] not in r["off"]})
+        r["images"].append({**_thumb(img, src), "note": _first_title(wiki, img), "on": img["name"] not in r["off"]})
     for img in sorted(wiki["remote"].values(), key=lambda i: i["url"]):
         if not plan["notes"].intersection(img["notes"]):
             continue
@@ -641,8 +723,8 @@ def _group_rows(wiki: dict, ans: dict, plan: dict) -> list[dict]:
         if img["why"]:
             r["bad"].append({"name": img["name"], "why": img["why"]})
         else:
-            r["images"].append({"name": img["name"], "src": "/public/check/image?name=" + img["kept"].name,
-                                "note": _first_title(wiki, img), "on": img["name"] not in r["off"]})
+            r["images"].append({**_thumb(img, src), "note": _first_title(wiki, img),
+                                "on": img["name"] not in r["off"]})
     return sorted(rows.values(), key=lambda r: (r["kind"] != "folder", r["name"].casefold()))
 
 
@@ -655,11 +737,13 @@ def _first_title(wiki: dict, img: dict) -> str:
     return wiki["notes"][img["notes"][0]]["title"]
 
 
-def sheet(wiki: dict, ans: dict) -> dict:
-    """The check before Publish as the screen draws it."""
+def sheet(wiki: dict, ans: dict, src: Callable[[dict], str]) -> dict:
+    """The check before Publish as the screen draws it. `src` answers where the screen reads one
+    of `read_wiki`'s image rows: a local one has its vault path in `src`, a remote one its copy
+    in `kept`."""
     plan = decide(wiki, ans)
-    files = [_file_row(wiki, ans, plan, f) for f in sorted(wiki["files"], key=_natural)]
-    groups = _group_rows(wiki, ans, plan)
+    files = [_file_row(wiki, ans, plan, f, src) for f in sorted(wiki["files"], key=_natural)]
+    groups = _group_rows(wiki, ans, plan, src)
     personal = [[wiki["notes"][p]["title"], what] for p in sorted(plan["notes"])
                 for what in wiki["notes"][p]["personal"]]
     going_local = len(plan["local"])

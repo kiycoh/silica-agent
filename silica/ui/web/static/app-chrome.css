@@ -211,7 +211,6 @@ body.note-open #toasts {
   display: none;
 }
 
-/* honor reduced-motion for the animated bits added/kept here */
 @media (prefers-reduced-motion: reduce) {
 
   .caret,

@@ -137,10 +137,6 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
         return dict(self.context)
 
-    # ------------------------------------------------------------------
-    # State Handlers
-    # ------------------------------------------------------------------
-
     def _handle_scan(self) -> None:
         """List all vault notes in the taxonomy scope."""
         try:
@@ -154,7 +150,6 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             if (ref.path or ref.name).endswith(".md")
         ]
 
-        # If taxonomy has its own scope, additionally filter by it
         if self.taxonomy.scope:
             scope_prefix = self.taxonomy.scope.replace("\\", "/").rstrip("/") + "/"
             note_paths = [
@@ -234,7 +229,6 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
         logger.info("ARBITRATE: sending %d ambiguous notes to LLM", len(ambiguous))
 
-        # Re-fetch snippets for the LLM context
         enriched_ambiguous = []
         for note_path, _s, _r in ambiguous:
             snippet = ""
@@ -255,7 +249,6 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             self.transition_success()
             return
 
-        # Patch the classifications in-place
         path_to_idx = {c.note_path: i for i, c in enumerate(classifications)}
         for note_path, _s, _r in enriched_ambiguous:
             chosen = llm_choices.get(note_path, self.taxonomy.uncategorized)
@@ -297,7 +290,6 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
                 basename,
             ).replace("\\", "/")
 
-            # Skip if the computed destination is identical to the source
             if c.note_path.replace("\\", "/") == to_path:
                 continue
 
@@ -335,7 +327,6 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             ],
         }
 
-        # In dry_run mode, stop here — do not execute moves
         if self.dry_run:
             logger.info("PLAN: dry_run=True — returning plan without executing moves")
             self.context["final_status"] = "DryRun"
@@ -348,7 +339,6 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         """Snapshot pre-move state for rollback (C3 strategy)."""
         move_ops = self.context["move_ops"]
         if not move_ops:
-            # Nothing to snapshot
             self.context["snapshot"] = {}
             self.transition_success()
             return
@@ -364,7 +354,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         # We also pre-capture the pre-move graph snapshot for the lint gate.
         inverses = [
             InverseOp(
-                kind=InverseOpKind.move_back,   # new kind added below
+                kind=InverseOpKind.move_back,
                 path=op.from_path,
                 to_path=op.to_path,
             )
@@ -383,7 +373,6 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         }
         self.context["txn_id"] = txn_id
 
-        # Pre-move graph snapshot for lint gate
         try:
             self._pre_graph = DRIVER.graph_snapshot(refs)
         except Exception as exc:
@@ -512,10 +501,6 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             f"Rolled Back: {self.context.get('abort_reason', 'unknown reason')}"
         )
         self.transition_success()
-
-    # ------------------------------------------------------------------
-    # Ledger helpers
-    # ------------------------------------------------------------------
 
     def _write_ledger(self, status: str) -> None:
         try:

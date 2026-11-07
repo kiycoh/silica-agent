@@ -1,12 +1,11 @@
 """Design values that must live in several files, held to one another.
 
 None of these copies can link the others. site/ publishes with no build step, the
-graph frame stays self-contained for file:// (ADR-0026), and pages.css ships alone
-to the public host's /_s/ (public_site._STATIC), so one shared sheet is not on
-offer and a compare is the cheapest honest thing. KNOWN_DRIFT below is the only
-disagreement allowed, and it is the owner's to settle: DESIGN.md at the repo root
-(gitignored) names one value, a published page prints another, and a refactor does
-not restyle a live page.
+graph frame stays self-contained for file:// (ADR-0026), and the app and Pages each
+paint their own tokens, so one shared token sheet is not on offer and a compare is
+the cheapest honest thing. KNOWN_DRIFT below is the only disagreement allowed, and
+it is the owner's to settle: DESIGN.md at the repo root (gitignored) names one value,
+a published page prints another, and a refactor does not restyle a live page.
 """
 from __future__ import annotations
 
@@ -104,19 +103,46 @@ def test_the_system_and_the_switch_print_one_graphite_on_pages():
 
 def test_python_writes_the_sheets_colours():
     """The graph's edge colours are painted by the exporter, so they are hex in
-    Python, and only a comment tied them to a token. _EDGE_COLOR_GAP_PAPER is a
-    known drift, stated here so it can be seen: it says `--warn, on paper` and is
-    #7A5305 where the token is #7A4F03. When it is fixed its line turns to ==."""
-    from silica.kernel.graph import graph_export as ge
-    from silica.ui.web import graph_view as gv
+    Python, and only a comment tied them to a token."""
+    from silica.kernel.graph import graph_export as ge, overlays
 
     app = _sheets()["app-base.css"]
-    assert gv._EDGE_COLOR_GAP.lower() == app["graphite"]["--warn"]
-    assert gv._EDGE_COLOR_GAP_PAPER.lower() != app["paper"]["--warn"]
+    assert overlays._EDGE_COLOR_GAP.lower() == app["graphite"]["--warn"]
+    assert overlays._EDGE_COLOR_GAP_PAPER.lower() == app["paper"]["--warn"]
     assert ge._EDGE_COLOR_SIMILAR.lower() == app["graphite"]["--accent"]
     assert ge._EDGE_COLOR_SIMILAR_PAPER.lower() == app["paper"]["--accent"]
     assert ge._EDGE_COLOR_REQUIRES.lower() == app["graphite"]["--frost"]
     assert ge._EDGE_COLOR_REQUIRES_PAPER.lower() == app["paper"]["--frost"]
+
+
+def test_the_terminal_keeps_two_hues_the_app_dropped():
+    """Stated so it can be seen, as KNOWN_DRIFT is: ui/console.py's cyan, indigo and amber are
+    from before the one-hue identity, and recolouring a terminal is the owner's to settle.
+    When it is, these turn to ==, and BRAND_CYAN goes with them."""
+    from silica.term import console
+
+    graphite = _sheets()["app-base.css"]["graphite"]
+    assert console.CYAN != graphite["--accent"] and console.AMBER != graphite["--warn"]
+    assert "#%02x%02x%02x" % console.BRAND_CYAN == console.CYAN
+    assert "#%02x%02x%02x" % console.BRAND_INDIGO == console.INDIGO
+
+
+def test_the_graphs_inlined_face_is_the_sheets_file_with_the_sheets_axes():
+    """The exported graph opens from file:// and inlines Archivo (ADR-0026). The bytes cannot
+    drift, they are read from the app's file at render; its axes are typed a third time."""
+    import base64
+
+    from silica.tools import graph_view as gv
+
+    face = gv._vendored_font_face()
+    data = re.search(r"base64,([^\"]+)", face).group(1)
+    assert base64.b64decode(data) == (STATIC / "archivo-latin.woff2").read_bytes()
+    for sheet in ("app-base.css", "pages/pages.css"):
+        text = (STATIC / sheet).read_text(encoding="utf-8")
+        block = text[text.index('font-family: "Archivo"'):]
+        block = block[:block.index("}")]
+        assert re.search(r"font-weight:\s*100 900", block) and re.search(r"font-stretch:\s*62% 125%", block), sheet
+    assert "font-weight:100 900;font-stretch:62% 125%" in face
 
 
 def test_every_surface_sets_the_same_three_faces():
@@ -147,7 +173,7 @@ def test_the_favicons_are_what_build_banners_writes():
 def test_every_inline_mark_is_the_computed_one():
     """The pages around these copies are hand-written, so build_banners cannot
     regenerate them; any path that starts on the mark's corner is held to it."""
-    from silica.ui.web import public_site
+    from silica.kernel import public_site
 
     shells, seed = _banners().mark_paths()
     pieces = {seed, shells, *re.findall(r"M[^Z]+Z", shells)}
@@ -160,21 +186,17 @@ def test_every_inline_mark_is_the_computed_one():
         assert set(paths) <= pieces, name
 
 
-def _press(path: Path) -> str:
-    text = path.read_text(encoding="utf-8")
-    block = text[text.index("cover-ink:start"):text.index("// cover-ink:end")]
-    lines = [line.strip() for line in block.splitlines()]
-    return "\n".join(line for line in lines[1:] if not line.startswith("//"))
-
-
 def test_the_app_and_pages_print_a_cover_on_one_press():
-    """pages.js cannot load a file of the app's, so the printer is two texts that
-    must stay one; the app's only adds the build-up and the hover around it."""
-    app, pages = STATIC / "app-public.js", STATIC / "pages" / "pages.js"
-    assert _press(app) == _press(pages)
-    assert "const disc" in _press(app)
-    for script in (app, pages):
+    """One file, loaded by each when it first prints. What each keeps is what differs:
+    the app's build-up and hover, Pages' plain print."""
+    from silica.kernel import public_site
+
+    assert "cover.js" in public_site.static_files()
+    press = (STATIC / "pages" / "cover.js").read_text(encoding="utf-8")
+    assert "N[i][3] >= 12" in press
+    for script in (STATIC / "app-public.js", STATIC / "pages" / "pages.js"):
         text = script.read_text(encoding="utf-8")
+        assert "coverPress(cv, N, w, h, pad)" in text and "N[i][3] >= 12" not in text
         assert '("--void"' in text and '("--frost"' in text
         assert "((255 << 24) | (c[2] << 16) | (c[1] << 8) | c[0]) >>> 0" in text
 
@@ -183,10 +205,9 @@ def test_a_key_note_is_the_same_note_on_every_cover():
     """The landing prints one bit on a canvas of its own and public_site an SVG
     for a reader without the script, so neither can share the press; what they
     do share is which note is drawn large."""
-    from silica.ui.web import public_site
+    from silica.kernel import public_site
 
-    for name, text in (("app-public.js", (STATIC / "app-public.js").read_text(encoding="utf-8")),
-                       ("pages.js", (STATIC / "pages" / "pages.js").read_text(encoding="utf-8")),
+    for name, text in (("cover.js", (STATIC / "pages" / "cover.js").read_text(encoding="utf-8")),
                        ("site/index.html", SITE.read_text(encoding="utf-8")),
                        ("public_site._svg", inspect.getsource(public_site._svg))):
         assert set(re.findall(r"\[3\] >= (\d+)", text)) == {"12"}, name

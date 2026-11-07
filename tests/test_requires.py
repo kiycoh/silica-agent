@@ -141,7 +141,7 @@ def test_an_entry_already_there_is_no_write_wherever_it_sits(vault):
 
 def test_the_graph_flags_a_written_requires_on_its_wikilink_and_keys_it_apart(tmp_vault):
     from silica.kernel.graph.graph_export import build_graph_data
-    from silica.ui.web.graph_view import render_html
+    from silica.tools.graph_view import render_html
 
     tmp_vault.note("ML/Backprop.md", '---\nrequires: ["[[Chain rule]]"]\n---\n\n# Backprop\n\nsee [[Adam]]\n')
     tmp_vault.note("Math/Chain rule.md", "# Chain rule\n")

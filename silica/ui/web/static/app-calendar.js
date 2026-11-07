@@ -272,8 +272,6 @@ function calDailyBtn(daily) {
   return tri;
 }
 
-// --- the views ----------------------------------------------------------------
-
 function renderCalendar() {
   calCloseCard();
   document.querySelectorAll("#cal-mode button").forEach((b) => setActive(b, b.dataset.calmode === calMode));
@@ -386,8 +384,6 @@ function calRenderLayers() {
     box.appendChild(b);
   }
 }
-
-// --- week and day: the hours ----------------------------------------------------
 
 function calTimeGrid(dates, withHead) {
   const today = calFmt(new Date());
@@ -892,8 +888,6 @@ function calBuildWeek(dates) {
   return week;
 }
 
-// --- agenda -------------------------------------------------------------------------
-
 function calAgendaDay(row) {
   const sec = document.createElement("div");
   sec.className = "cal-ag-day";
@@ -1047,8 +1041,6 @@ function renderCalAgenda() {
     panel.appendChild(calAgendaDay(row));
   }
 }
-
-// --- the cards ----------------------------------------------------------------------
 
 function calCloseCard() {
   if (!calCard) return;
@@ -1332,8 +1324,6 @@ function calNewEvent(anchor) {
   const start = base === now ? Math.min(23 * 60, (now.getHours() + 1) * 60) : 9 * 60;
   calQuickCard({ date: calFmt(base), start, end: start + 60 }, anchor);
 }
-
-// --- controls -----------------------------------------------------------------------
 
 $("#cal-prev").addEventListener("click", () => calStep(-1));
 $("#cal-next").addEventListener("click", () => calStep(1));

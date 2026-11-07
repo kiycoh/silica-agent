@@ -294,10 +294,6 @@ def history(since: float | None = None, limit: int = 200) -> list[dict]:
     return out
 
 
-# ---------------------------------------------------------------------------
-# Rows
-# ---------------------------------------------------------------------------
-
 def tally(before: str, after: str) -> tuple[int, int]:
     """Lines added and removed — the same opcodes a unified diff walks."""
     import difflib

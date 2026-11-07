@@ -1,7 +1,7 @@
 """Unit tests for the vault file tree emitters."""
 from __future__ import annotations
 
-from silica.ui.web.file_tree import frame_tree, rail_tree
+from silica.kernel.graph.file_tree import frame_tree, rail_tree
 
 
 def _node(nid: str, node_type: str = "note") -> dict:

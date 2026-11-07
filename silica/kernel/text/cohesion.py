@@ -38,7 +38,6 @@ from silica.kernel.text.overlay import DomainOverlay, overlay_for_lang
 # Language-specific stopwords (function words, structural academic terms) are
 # supplied by the active DomainOverlay — see silica.kernel.text.overlay.
 _STRUCTURAL_TOKENS: frozenset[str] = frozenset({
-    # Roman numerals used as chapter/section prefixes
     "ii", "iii", "iv", "vi", "vii", "viii", "ix",
 })
 
@@ -112,13 +111,11 @@ def cohesion_pass(ops_raw: list[dict[str, Any]], overlay: DomainOverlay | None =
 
     tokens: dict[int, frozenset[str]]
     if overlay is not None:
-        # Explicit overlay: resolve once, thread it down — unchanged behavior.
         tokens = {
             i: _content_tokens(_display_name(ops_raw[i]), overlay=overlay)
             for i in write_indices
         }
     else:
-        # overlay=None: resolve per-op from each write op's body language.
         tokens = {}
         for i in write_indices:
             op = ops_raw[i]
@@ -127,7 +124,6 @@ def cohesion_pass(ops_raw: list[dict[str, Any]], overlay: DomainOverlay | None =
             per_op_overlay = overlay_for_lang(language.detect(body_text))
             tokens[i] = _content_tokens(name, overlay=per_op_overlay)
 
-    # Pairwise: find which indices have a sibling
     siblings: dict[int, set[int]] = {i: set() for i in write_indices}
     wi = write_indices
     for pos_a, a in enumerate(wi):
@@ -136,7 +132,6 @@ def cohesion_pass(ops_raw: list[dict[str, Any]], overlay: DomainOverlay | None =
                 siblings[a].add(b)
                 siblings[b].add(a)
 
-    # Nothing to do if no siblings found
     if not any(siblings.values()):
         return ops_raw
 

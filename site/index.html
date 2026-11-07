@@ -132,7 +132,6 @@ html { scrollbar-color: var(--line-2) transparent; }
 .plate-cap { grid-column: 1 / -1; padding-top: .75rem; font-size: var(--t-5); line-height: 1.55; color: var(--ash); max-width: 62ch; }
 .plate-cap b, .figcap b { font-weight: 600; }
 
-/* ---- sections ------------------------------------------------------------ */
 .sec { padding-block: clamp(4rem, 8vw, 7rem) 0; }
 .sheet > .sec:last-child, .sheet > .sec-last { padding-bottom: clamp(4rem, 8vw, 7rem); }
 .sec-head { align-items: end; }
@@ -257,7 +256,6 @@ td.n { font: 400 var(--t-6)/1.35 var(--mono); color: var(--ash-dim); }
 tr.flat td { color: var(--ash); }
 tr.flat td.v { color: var(--ash); }
 
-/* where it runs */
 .runs { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 clamp(1rem, 2.2vw, 2.25rem); }
 .run { border-top: 1px solid var(--line-2); padding: 1.25rem 0 2.5rem; display: grid; gap: .75rem; align-content: start; min-width: 0; }
 .run h3 { font-size: var(--t-3); font-weight: 600; display: flex; gap: .75rem; align-items: baseline; }
@@ -279,7 +277,6 @@ tr.flat td.v { color: var(--ash); }
 .facts dd { margin-top: .5rem; max-width: 30ch; }
 .legal { grid-column: 1 / -1; margin-top: 2.5rem; display: flex; gap: 1.5rem; font-size: var(--t-5); color: var(--ash); }
 
-/* close */
 .close { padding-block: clamp(4rem, 8vw, 7rem); align-items: end; }
 .close-t { grid-column: 1 / span 6; display: grid; gap: 1.5rem; justify-items: start; }
 .close-t h2 { font-size: var(--t-1); line-height: .96; letter-spacing: -.04em; font-weight: 700; }
@@ -1249,7 +1246,6 @@ try { if (localStorage.getItem("silica-landing-theme") === "dark") document.docu
   if (reduce) fig5(false);
   else { fig5HT.build(); fig5HT.hold(); inView(fig5Box, .35, () => fig5(true)); }
 
-  // ---- copy ------------------------------------------------------------------
   document.querySelectorAll(".copy").forEach((b) => b.addEventListener("click", async () => {
     const c = document.getElementById(b.dataset.copy).cloneNode(true);
     c.querySelectorAll(".pr").forEach((s) => s.remove());

@@ -24,7 +24,6 @@
 #cal-main { display: flex; gap: 16px; flex: 1; min-height: 0; }
 #cal-grid { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
-/* the side column */
 #cal-side { flex: 0 0 216px; display: flex; flex-direction: column; gap: 18px; min-height: 0; overflow-x: hidden; overflow-y: auto; }
 .cal-new { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; height: 44px; padding: 0 18px 0 14px; border: 0; border-radius: var(--r); background: var(--frost); color: var(--on-vivid); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .cal-new::before { content: "+"; font-size: 22px; font-weight: 400; line-height: 1; }
@@ -419,7 +418,7 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
 
 /* --- the narration's panes ----------------------------------------------------
    What the agent is doing has a surface since work.js projected the stream
-   silica/agent/narration.py writes. The run's steps are the transcript's ledger
+   silica/obs/narration.py writes. The run's steps are the transcript's ledger
    line (ADR-0117 point 3) and its marks are on the left drawer's Chats segment
    (ADR-0122); the run's own pane, "This chat", left with ADR-0122. What stays
    here is the right drawer's node pane and its chip. */

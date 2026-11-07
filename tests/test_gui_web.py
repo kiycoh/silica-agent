@@ -1295,7 +1295,7 @@ def test_raw_html_allowlist_drops_handlers_and_script_schemes():
     """The allowlist is the only thing between a nucleated document and the DOM:
     app.js writes this render with innerHTML, so anything executable that gets
     through runs on the GUI's own origin."""
-    from silica.ui.web.render import _sanitize_html
+    from silica.kernel.text.render import _sanitize_html
 
     # Case is HTMLParser's problem, whitespace inside the name is the browser's,
     # and neither may reach the output.
@@ -1713,7 +1713,7 @@ def test_chat_done_html_linkifies_a_cited_note(client, tmp_vault, monkeypatch):
 
 def test_graph_route_builds_unified_export(client, monkeypatch):
     """GET /graph builds the one unified graph via export_graph (no mode param)."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     tc, _server = client
     seen = {}
@@ -2328,7 +2328,7 @@ def test_the_graph_document_carries_both_palettes(tmp_path, monkeypatch):
     at the iframe boundary.
     """
     from silica.kernel.graph import graph_export as ge
-    from silica.ui.web import graph_view as gv
+    from silica.tools import graph_view as gv
 
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (
         [{"id": "a.md", "label": "a", "type": "note"}], []))
@@ -2877,7 +2877,7 @@ def test_the_2d_resolution_governor_cannot_be_held_soft_by_the_idle_tick():
     the 250ms restore window — so re-arming the restore on EVERY paint meant it
     could never elapse and one pan left the settled graph permanently at half
     backing-store resolution, inverting the block's own premise."""
-    from silica.ui.web import graph_view
+    from silica.tools import graph_view
 
     text = graph_view._asset("graph-frame.js")
     body = text[text.index("function drsOnPaint()"):]
@@ -3153,13 +3153,14 @@ def test_every_view_row_says_what_the_view_is_for():
 def test_an_aliased_link_in_a_table_cell_keeps_the_row_whole():
     """The model writes `[[Note|alias]]` in a table where Obsidian asks for
     `\\|`; its pipe ended the cell and split the row (an aid's table, 2026-10-23)."""
+    from silica.kernel.text import render as ofm
     from silica.ui.web import render
 
     table = "| Aspetto | Reti |\n|---|---|\n| Movimenti | a meno di [[Attenzione|attenzione]] |\n"
     html = render.linkify(table, resolve=lambda r: "ML/Attenzione.md" if r.startswith("Attenzione") else None)
     row = html[html.index("<tbody"):]
     assert row.count("<td") == 2 and '<a class="note-link" data-path="ML/Attenzione.md">attenzione</a>' in row
-    assert render._escape_table_aliases("prose [[A|b]]\n") == "prose [[A|b]]\n"
+    assert ofm._escape_table_aliases("prose [[A|b]]\n") == "prose [[A|b]]\n"
 
 
 def test_a_reader_saying_it_is_unclear_gets_a_read_only_turn(client, monkeypatch):
@@ -3192,6 +3193,7 @@ def test_a_reader_saying_it_is_unclear_gets_a_read_only_turn(client, monkeypatch
 def test_an_absolute_value_in_a_table_cell_keeps_the_row_whole():
     """`$|x|$` in a table row split the row at its bars (2026-10-23); they
     become \\vert, and a norm's \\| becomes \\Vert, which draw the same."""
+    from silica.kernel.text import render as ofm
     from silica.ui.web import render
 
     table = "| Posizione | Condizione |\n|---|---|\n| Esterno | $|y_i f(x)| > \\gamma$ |\n| Norma | $\\|\\xi\\|_2$ |\n"
@@ -3199,7 +3201,7 @@ def test_an_absolute_value_in_a_table_cell_keeps_the_row_whole():
     body = body[body.index("<tbody"):]
     assert [row.count("<td") for row in body.split("</tr>")[:2]] == [2, 2]
     assert "&#x0007C;" in body and "&#x02016;" in body
-    assert render._escape_table_aliases("prose $|x|$\n") == "prose $|x|$\n"
+    assert ofm._escape_table_aliases("prose $|x|$\n") == "prose $|x|$\n"
 
 
 def test_a_plan_request_ends_on_the_calendar_learn_computed(client, monkeypatch):

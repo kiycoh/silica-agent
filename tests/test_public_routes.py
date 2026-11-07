@@ -119,6 +119,26 @@ def test_a_blocked_wiki_says_why_and_a_request_does_not_reach_its_manifest(clien
     assert tc.get("/public").json()["vaults"][0]["blocked"] == []
 
 
+def test_the_view_and_the_cover_stay_on_what_the_vault_takes_whatever_the_answers_hold_back(client):
+    """The drift named at `rights.counted`, as a person meets it: the screen says two, the
+    build writes one, and an answer moves only the build."""
+    from silica.kernel.write.provenance import append_record
+
+    tc, tmp = client
+    root = tmp / "vault"
+    (root / "sources").mkdir()
+    (root / "sources" / "Book.md").write_text('---\nsource_file: "/x/Book.pdf"\n---\nThe book.\n', encoding="utf-8")
+    append_record("Book.md", "Book.md", "run-1", ["Memory/Spacing effect"], vault_path=str(root))
+    tc.post("/public/vault", json={"folder": "Memory"})
+    m = tc.get("/public").json()["vaults"][0]
+    assert m["out"] == 2 and "held" not in m and len(m["top"]) == 2
+    c = tc.get("/public/cover", params={"vault": "memory"}).json()
+    assert sorted(n[4] for n in c["n"]) == ["Forgetting curve", "Spacing effect"]
+    assert tc.post("/public/publish", json={"vault": "memory"}).json()["result"]["notes"] == 1
+    tc.post("/public/check/answer", json={"vault": "memory", "key": "Book.pdf", "answer": "mine"})
+    assert tc.get("/public").json()["vaults"][0]["out"] == 2
+
+
 def test_the_cover_is_the_graph_of_what_goes_out_and_nothing_private(client):
     """The view's cover (ADR-0146 point 4): the notes that go out, the links between them, laid
     out once; a private note it links to is neither a mark nor a line."""
@@ -215,7 +235,7 @@ def test_a_laptop_takes_its_handle_into_the_vault_unless_it_already_published(cl
     assert ask["ask"] is True and ask["suggest"] == publish.slugify((tmp / "vault").resolve().name)
     v = tc.post("/public/handle", json={"handle": "marta-v"}).json()
     assert v["handle"] == "marta-v" and v["ask_handle"] == {"ask": False}
-    assert publish._block((tmp / "vault"))["handle"] == "marta-v"
+    assert publish.block((tmp / "vault"))["handle"] == "marta-v"
     # a laptop that already has a page under its folder's name is not asked
     from silica.kernel.base.manifest import unset_block_key
 

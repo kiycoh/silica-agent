@@ -237,7 +237,6 @@ class Tool:
                     if value is not None and param in sig.parameters:
                         call_kwargs[param] = value
             result = self.fn(**call_kwargs)
-            # Ensure result is always a string
             if isinstance(result, str):
                 return result
             return json.dumps(result, ensure_ascii=False, default=str)

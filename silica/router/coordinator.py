@@ -134,7 +134,6 @@ class Coordinator:
                 {"run_id": _run_id})
             _narr_mod.reset_run(_run_tok)
 
-        # Re-verify: recompute orphans after the repairs committed.
         self._reverify_orphans(result)
 
         # Zero dangling links on run exit: forward-refs that never materialized
@@ -179,8 +178,6 @@ class Coordinator:
         # their pre-patch vectors until someone ran /embed (2026-10-23).
         sync.sweep(force=True, uncapped=True)
         return result
-
-    # --- end-of-run orphan resolution -------------------------------------
 
     def _current_orphans(self) -> set[str]:
         """Normalized set of notes currently orphaned, from the driver graph.

@@ -145,8 +145,6 @@ def _is_media(name: str) -> bool:
     return Path(name).suffix.lower() in MEDIA_EXTS
 
 
-# --- recording a job -------------------------------------------------------------------
-
 def record(path: str, *, origin: str, text: str = "", session: str | None = None,
            dest_dir: str = "", drop: str = "", on_end: Callable[[dict], None] | None = None) -> dict:
     """Record one conversion of `path` and queue it; return its record.
@@ -207,8 +205,6 @@ def annotate(ids: list[str], **fields: Any) -> None:
     for job_id in ids:
         _update(job_id, **fields)
 
-
-# --- the worker ------------------------------------------------------------------------
 
 def _enqueue(job_id: str) -> None:
     global _PENDING, _WORKER
@@ -361,8 +357,6 @@ def _remove_source(rec: dict) -> None:
     if src.is_file() and not src.is_symlink():
         src.unlink()
 
-
-# --- startup, retry, dismiss -----------------------------------------------------------
 
 def recover() -> int:
     """At startup, before serving: a job still queued or running belonged to a
@@ -533,8 +527,6 @@ def settled(session: str | None) -> str:
                       "earlier message says one is still converting or not readable, this is its "
                       "state now:", *lines, "</converted-files>"])
 
-
-# --- commands typed in the chat ------------------------------------------------------
 
 def from_command(text: str, session: str | None) -> dict | None:
     """`/convert` and `/nucleate <file>` typed in the chat, as jobs: the turn

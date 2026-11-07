@@ -566,7 +566,7 @@ def test_rename_and_delete_reach_the_narration_store(client, monkeypatch):
 
 
 def test_tree_rows_drop_the_extension_and_folders_carry_counts():
-    from silica.ui.web.file_tree import rail_tree
+    from silica.kernel.graph.file_tree import rail_tree
 
     html = rail_tree([{"id": "a/b.md", "path": "a/b.md", "type": "note"},
                       {"id": "a/c.md", "path": "a/c.md", "type": "note"}])
@@ -836,7 +836,8 @@ def test_the_note_is_a_reading_sheet_with_one_inset():
     na = css[css.index(".na {"):]
     na = na[:na.index("}")]
     assert "border: none;" in na
-    callout = css[css.index(":is(.msg, #peek-body, #note-edit, #nv-edit) .callout {"):]
+    body = (WEB / "pages" / "body.css").read_text(encoding="utf-8")
+    callout = body[body.index(":is(.msg, #peek-body, #note-edit, #nv-edit, .body) .callout {"):]
     callout = callout[:callout.index("}")]
     assert "border-left" not in callout
     js = (WEB / "app-notes.js").read_text(encoding="utf-8")

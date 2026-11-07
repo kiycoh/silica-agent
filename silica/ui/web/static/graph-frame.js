@@ -1252,7 +1252,6 @@ function sayLayout(text) {
   el.hidden = !text;
 }
 
-// Puts the notes where `arr` says and plays them there from `from`.
 function placeLayout(arr, from) {
   restoreArranged(ALL_NODES, ARR_SAVED, true);
   ARR = arr;
@@ -1825,7 +1824,7 @@ function saveLayout() {
 
 // --- 2D labels: node radius + zoom LOD --------------------------------------
 // Base size is whatever the smallest real note got (16 with no links, plus 3.5
-// a link: graph_view._size_by_links); anything above it is a node that stands
+// a link: overlays.size_by_links); anything above it is a node that stands
 // out, and those are the ones worth a label before you have zoomed in.
 const BASE_SIZE = RAW_NODES.reduce(
   (m, n) => n.type === "ghost" ? m : Math.min(m, n.size || 16), Infinity);
@@ -5313,7 +5312,6 @@ function reframe() {
   if (ARR) requestAnimationFrame(ARR.kind === "map" ? frameArrangement : frameLayout);
 }
 
-// --- Communities legend: sort by size, toggling ascending <-> descending ----
 let communitySortAsc = true;
 function toggleCommunitySort() {
   const box = document.getElementById("legend-box");

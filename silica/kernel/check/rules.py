@@ -77,8 +77,6 @@ def at(path: str, line: int) -> str:
     return f"{path}:{line}"
 
 
-# ---------------------------------------------------------------- dates
-
 def _stems(text: str) -> list[str]:
     return [w[:6] for w in fold(text).split() if len(w) >= 4]
 
@@ -160,8 +158,6 @@ def date_rules(d: str, periods: list[dict], ix: Index, pool: set[str]) -> tuple[
                     return findings, states
     return findings, states
 
-
-# ---------------------------------------------------------------- quotations
 
 def quotations(text: str, whole: bool) -> list[str]:
     """The quotations of a block: text between quotation marks, or the whole

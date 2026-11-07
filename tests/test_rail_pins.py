@@ -28,7 +28,7 @@ def test_the_tree_carries_a_pin_only_where_there_is_a_rail_to_pin_into():
     """One tree draws in the rail and in the graph frame's own
     sidebar. A pin in the frame would point at a rail that document does not
     have, so the action is asked for rather than assumed."""
-    from silica.ui.web.file_tree import frame_tree, rail_tree
+    from silica.kernel.graph.file_tree import frame_tree, rail_tree
 
     plain = frame_tree(NODES)
     assert "tree-pin" not in plain and "tree-row" not in plain
@@ -50,7 +50,7 @@ def test_the_tree_carries_a_pin_only_where_there_is_a_rail_to_pin_into():
 def test_the_rail_asks_for_the_pins_and_the_frame_does_not():
     routes = (ROOT / "silica" / "ui" / "web" / "explore_routes.py").read_text()
     assert "file_tree.rail_tree(nodes, _tree_raws())" in routes
-    frame = (ROOT / "silica" / "ui" / "web" / "graph_view.py").read_text()
+    frame = (ROOT / "silica" / "tools" / "graph_view.py").read_text()
     assert "tree_html = file_tree.frame_tree(nodes)" in frame
 
 

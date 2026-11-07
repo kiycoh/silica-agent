@@ -34,7 +34,7 @@ _FOOTNOTE_DEF_RE = re.compile(r"^([ \t]{0,3})\[\^[^\]\n]+\]:[ \t]?", re.MULTILIN
 
 # One list, two jobs: extract_links DROPS these targets (a file is not a note;
 # before .ipynb/.mov/.tiff joined 2026-08-27, each such link sat in the
-# backends' unresolved set as a phantom dangling NOTE) and extract_file_refs
+# backends' unresolved set as a phantom dangling NOTE) and extract_refs_typed
 # RETURNS them as the note→file reference bucket. Deliberately a superset of
 # VISUAL_MEDIA_EXTS: that list is "what to strip from prose" (visual media only —
 # a .zip or .ipynb link must stay in the text), this one is "what is a file".
@@ -158,23 +158,6 @@ def extract_links(content: str) -> list[str]:
     return _extract_links_ast(content)
 
 
-def extract_file_refs(content: str) -> list[str]:
-    """Non-md file targets a note references: ![[img.jpg]] embeds, [[doc.pdf]]
-    wikilinks, ![alt](x.png) images and [label](x.ipynb) links, in order,
-    deduped. Remote (http/https/mailto) sources never appear — the walk in
-    `_extract_refs_ast` filters them before the buckets exist.
-
-    Same marker-scan fast path as extract_links, and provably so: every file
-    ref carries one of its markers (`![[` contains `[[`; `![](x.png)` and
-    `[l](x.pdf)` contain a non-web `](`), so a scan-negative note has no file
-    refs either.
-    """
-    content = textwrap.dedent(content)
-    if not _LINK_MARKER_RE.search(content):
-        return []
-    return _extract_refs_ast(content)[1]
-
-
 def _extract_links_ast(content: str) -> list[str]:
     """`extract_links` without the marker scan, on already-dedented content.
 
@@ -240,7 +223,6 @@ def _extract_refs_ast(content: str) -> tuple[list[str], list[str], list[str]]:
     cleaned: list[str] = []
     files: list[str] = []
     for text in text_pieces:
-        # Match [[target]] links (allowing characters like # and ^)
         raw_targets = re.findall(r'\[\[([^\]|]+)(?:\|[^\]]*)?\]\]', text)
         for t in raw_targets:
             t = t.strip().replace("''", "'")
@@ -297,11 +279,18 @@ def extract_links_typed(content: str) -> dict[str, bool]:
 def extract_refs_typed(content: str) -> tuple[dict[str, bool], list[str], list[str]]:
     """`extract_links_typed` plus the file and mention buckets, one parse.
 
-    The per-note call for the backends' index pass: separate calls
-    (typed + extract_file_refs) would parse every link-bearing note twice
-    for nothing — the parse is the hot loop's measured cost. The mention scan
-    widens the fast path only for notes carrying a path-shaped inline cite,
-    so link-free prose still skips the parser.
+    The per-note call for the backends' index pass: a call per bucket would
+    parse every link-bearing note twice for nothing — the parse is the hot
+    loop's measured cost. The mention scan widens the fast path only for notes
+    carrying a path-shaped inline cite, so link-free prose still skips the
+    parser.
+
+    The file bucket is the non-md targets a note references: ![[img.jpg]]
+    embeds, [[doc.pdf]] wikilinks, ![alt](x.png) images and [label](x.ipynb)
+    links, in order, deduped. Remote (http/https/mailto) sources never appear:
+    the walk in `_extract_refs_ast` filters them before the buckets exist. The
+    fast path holds for it too: every file ref carries one of the link markers
+    (`![[` contains `[[`; `![](x.png)` and `[l](x.pdf)` contain a non-web `](`).
     """
     content = textwrap.dedent(content)
     if not (_LINK_MARKER_RE.search(content) or _CODE_MENTION_RE.search(content)):
@@ -337,7 +326,6 @@ def parse_headings(body: str) -> list[dict]:
     for idx, t in enumerate(tokens):
         if t.type == "heading_open":
             level = int(t.tag[1])
-            # Find next inline token to get heading text
             next_t = tokens[idx + 1]
             text = next_t.content
             
@@ -352,7 +340,6 @@ def _balanced(body: str) -> list[str]:
     """Check for unbalanced OFM structural delimiters (fence-aware) using AST."""
     body = textwrap.dedent(body)
     issues = []
-    # If there's an odd number of ``` in the raw body, code fence is unclosed
     if body.count("```") % 2:
         issues.append("unclosed code fence")
 
@@ -395,7 +382,6 @@ def extract_callouts(body: str) -> list[str]:
     callout_types = []
     for idx, t in enumerate(tokens):
         if t.type == "blockquote_open":
-            # Search for the first inline token inside the blockquote
             for k in range(idx + 1, len(tokens)):
                 if tokens[k].type == "blockquote_close":
                     break

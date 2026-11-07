@@ -219,8 +219,6 @@ def membership_of(path: str, is_folder: bool = False) -> list[dict]:
     return out
 
 
-# --- writes -------------------------------------------------------------------
-
 def _note_key(title: str) -> str:
     return title_of(title).removesuffix(".md").casefold()
 

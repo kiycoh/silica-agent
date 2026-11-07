@@ -38,10 +38,6 @@ def _vault_relative_folder(value: str) -> str:
     return norm
 
 
-# ---------------------------------------------------------------------------
-# Pydantic models
-# ---------------------------------------------------------------------------
-
 class MetadataFilter(BaseModel):
     """Filter to match note frontmatter or properties."""
 
@@ -110,19 +106,15 @@ class Taxonomy(BaseModel):
         if self.scope:
             prefix = self.scope.replace("\\", "/").rstrip("/")
             
-            # Ensure uncategorized starts with scope
             uncat_path = self.uncategorized.replace("\\", "/")
             if not (uncat_path == prefix or uncat_path.startswith(prefix + "/")):
                 self.uncategorized = f"{prefix}/{self.uncategorized.lstrip('/')}"
             
-            # Ensure each rule folder starts with scope
             for rule in self.rules:
                 r_folder = rule.folder.replace("\\", "/")
                 if not (r_folder == prefix or r_folder.startswith(prefix + "/")):
                     rule.folder = f"{prefix}/{rule.folder.lstrip('/')}"
         return self
-
-    # --- I/O ---
 
     @classmethod
     def from_yaml(cls, path: Path) -> "Taxonomy":
@@ -148,10 +140,6 @@ class Taxonomy(BaseModel):
                         default_flow_style=False)
         atomic_write_bytes(path, doc.encode("utf-8"))
 
-
-# ---------------------------------------------------------------------------
-# Default taxonomy path helper
-# ---------------------------------------------------------------------------
 
 _DEFAULT_TAXONOMY_REL = "taxonomy.yaml"
 _LEGACY_TAXONOMY_REL = "_silica/taxonomy.yaml"
@@ -194,10 +182,6 @@ def load_taxonomy(path: str | Path | None = None) -> Taxonomy:
         logger.error("taxonomy: failed to parse %s: %s — using empty taxonomy", p, exc)
         return Taxonomy()
 
-
-# ---------------------------------------------------------------------------
-# LLM-generation prompt helper
-# ---------------------------------------------------------------------------
 
 TAXONOMY_GENERATION_PROMPT = """\
 You are an expert knowledge manager. The user wants to reorganize their Obsidian vault.

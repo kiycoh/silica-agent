@@ -118,7 +118,7 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
         orphan_lower = orphan_path.lower()
         for kid in known_ids:
             if kid == orphan_lower:
-                continue  # skip the orphan itself
+                continue
             kid_stem = kid.rsplit("/", 1)[-1].removesuffix(".md").lower()
             if stem in kid_stem or kid_stem in stem:
                 return True
@@ -371,7 +371,6 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
     # §3.2-bis safety check: strip any irreversible capability that leaked into auto
     auto = [c for c in auto if c.capability_name not in _IRREVERSIBLE]
 
-    # Sort by priority within each tier
     auto.sort(key=lambda c: (c.priority, c.reason))
     propose.sort(key=lambda c: (c.priority, c.reason))
     escalate.sort(key=lambda c: (c.priority, c.reason))

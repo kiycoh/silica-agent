@@ -112,7 +112,7 @@ def test_an_area_and_its_sub_areas_are_named_by_one_rule():
 
 def _export(monkeypatch, tmp_path, nodes, edges, zones):
     from silica.kernel.graph import graph_export as ge
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (nodes, edges))

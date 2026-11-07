@@ -11,7 +11,7 @@ unmeasured.
 
 Kept out of `build_graph_data` on purpose: the report, the mindmap and the
 learner read that payload too, and a missing paper is not a note to count. The
-web graph adds this layer on top (`graph_view`).
+web graph adds this layer on top (`silica.tools.graph_view`).
 """
 from __future__ import annotations
 

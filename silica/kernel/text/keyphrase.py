@@ -135,10 +135,6 @@ def _structural_concepts(body: str, overlay: DomainOverlay) -> dict[str, str]:
     return out
 
 
-# ---------------------------------------------------------------------------
-# Embedder + MMR ranker
-# ---------------------------------------------------------------------------
-
 def _mmr(vecs, theme, k, lam: float = MMR_LAMBDA, rel=None) -> list[int]:
     """Maximal Marginal Relevance selection. Returns selected indices, best-first.
 

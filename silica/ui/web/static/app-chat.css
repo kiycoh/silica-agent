@@ -1,3 +1,8 @@
+/* The rules a note's render needs on every surface, from the sheet Pages shares. The address
+   carries the file's hash by hand: index() versions what index.html names and cannot see an
+   import, and tests/test_public_copies.py fails a change that forgets it. */
+@import url("/static/pages/body.css?v=4d5d85b7");
+
 /* --- chat log: dense terminal transcript, not floating bubbles -------------- */
 #log {
   flex: 1;
@@ -687,31 +692,6 @@
   border-radius: var(--r-sm);
 }
 
-/* pygments fences — restrained syntax scheme mapped onto the site palette:
-   keywords azure, literals gold, comments dim, names frost. */
-:is(.msg, #peek-body, #note-edit, #nv-edit) pre :is(.k, .kc, .kd, .kn, .kp, .kr, .kt, .ow, .nd, .nt) {
-  color: var(--accent);
-}
-
-:is(.msg, #peek-body, #note-edit, #nv-edit) pre :is(.s, .s1, .s2, .sa, .sb, .sc, .sd, .se, .sh, .si, .sr, .ss, .sx,
-  .m, .mb, .mf, .mh, .mi, .mo, .il) {
-  color: var(--accent);
-}
-
-:is(.msg, #peek-body, #note-edit, #nv-edit) pre :is(.c, .c1, .ch, .cm, .cp, .cpf, .cs) {
-  color: var(--ash-dim);
-  font-style: italic;
-}
-
-:is(.msg, #peek-body, #note-edit, #nv-edit) pre :is(.nf, .nc, .fm) {
-  color: var(--frost);
-  font-weight: 500;
-}
-
-:is(.msg, #peek-body, #note-edit, #nv-edit) pre :is(.nb, .bp, .o, .p) {
-  color: var(--ash);
-}
-
 /* --- OFM sugar (highlight, tags, callouts, tasks, mermaid) ------------------ */
 :is(.msg, #peek-body, #note-edit, #nv-edit) mark {
   background: color-mix(in srgb, var(--accent) 26%, transparent);
@@ -721,33 +701,6 @@
 
 :is(.msg, #peek-body, #note-edit, #nv-edit) .tag {
   color: var(--accent);
-}
-
-/* A callout is a box, not a stripe: neutral fill, a title you can read, the
-   text. Warnings and errors keep their identity in the title's colour, which
-   is a label, where a coloured edge was a decoration that said the same. */
-:is(.msg, #peek-body, #note-edit, #nv-edit) .callout {
-  border-radius: var(--r-sm);
-  background: var(--slate-2);
-  padding: 0.6rem 0.8rem;
-  color: var(--frost);
-  font-style: normal;
-}
-
-:is(.msg, #peek-body, #note-edit, #nv-edit) .callout-title {
-  color: var(--frost);
-  font-weight: 600;
-  font-size: var(--fs-ctl);
-  margin: 0 0 0.3rem;
-}
-
-:is(.msg, #peek-body, #note-edit, #nv-edit) .callout p:empty {
-  display: none;
-}
-
-/* title-only callouts */
-:is(.msg, #peek-body, #note-edit, #nv-edit) :is(.callout-warning, .callout-caution, .callout-danger, .callout-error, .callout-bug) .callout-title {
-  color: var(--warn);
 }
 
 :is(.msg, #peek-body, #note-edit, #nv-edit) li.task {
@@ -798,29 +751,6 @@
      the whole note sideways under the drawer's edge */
   contain: inline-size;
 }
-
-/* LaTeX → native MathML; display math gets its own centered strip */
-:is(.msg, #peek-body, #note-edit, #nv-edit) .math {
-  text-align: center;
-  overflow-x: auto;
-  /* overflow-x: auto computes overflow-y to auto too, and an integral's limits
-     reach 3px past the line box (measured 2026-09-29: scrollHeight 34 over 31),
-     so every display formula with one wore a vertical scrollbar. The padding
-     gives the glyphs that room; hidden stops the bar should one reach further. */
-  overflow-y: hidden;
-  padding: 0.2em 0;
-  margin: 0.75em 0;
-}
-
-:is(.msg, #peek-body, #note-edit, #nv-edit) math {
-  font-size: 1.08em;
-}
-
-:is(.msg, #peek-body, #note-edit, #nv-edit) .math-err {
-  color: var(--warn);
-}
-
-/* unconvertible source, flagged */
 
 /* collapsible thinking block — native <details>, no JS toggle needed */
 .thinking {

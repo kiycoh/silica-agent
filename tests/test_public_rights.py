@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from silica.sources.web_fetch import TooLarge, WrongType
+from silica.ui.web.public_routes import _thumbnail
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 BOOK = ("the probability of an event is a number between zero and one that measures how likely "
@@ -62,7 +63,7 @@ def _names(root: Path) -> set[str]:
 def _sheet(**kw) -> dict:
     from silica.kernel import rights
 
-    return rights.sheet(rights.read_wiki("stats", **kw), rights.answers())
+    return rights.sheet(rights.read_wiki("stats", **kw), rights.answers(), _thumbnail)
 
 
 def _say(key: str, answer: str, **kw) -> None:
@@ -72,7 +73,7 @@ def _say(key: str, answer: str, **kw) -> None:
 
 
 def _build() -> dict:
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     return build("stats")
 
@@ -87,6 +88,70 @@ def _written(root: Path, *paths: str) -> None:
     for p in paths:
         store.record(run, InverseOp(kind=InverseOpKind.delete_created, path=p),
                      content_hash((root / p).read_text(encoding="utf-8")))
+
+
+def _agreed() -> set[str]:
+    """What goes out, once `goes_out`'s read and the build's have said the same."""
+    from silica.kernel import rights
+
+    out = rights.goes_out("stats")
+    assert out == rights.decide(rights.read_wiki("stats"), rights.answers())["notes"]
+    return out
+
+
+HAND = {"Stats/Hand note.md", "Stats/Descriptive/Box plot.md"}
+
+
+# --- what goes out, said once ---------------------------------------------------
+
+def test_goes_out_says_what_the_build_decides_as_the_answers_move(stats):
+    assert _agreed() == HAND
+    _say("Slides.pdf", "mine")
+    assert _agreed() == HAND | {"Stats/Regression.md"}
+    _say(ROSS, "open", license="CC BY", credit="Ross")
+    assert _agreed() == HAND | {"Stats/Regression.md", "Stats/Bayes.md", "Stats/Variance.md"}
+    _say("Slides.pdf", "else")
+    assert _agreed() == HAND | {"Stats/Bayes.md"}
+
+
+def test_a_mark_counts_in_goes_out_only_where_it_stands_in_the_build(stats, tmp_vault):
+    tmp_vault.note("Stats/Bayes.md", "---\nrewritten: true\n---\nMy own words about it.\n")
+    assert _agreed() == HAND | {"Stats/Bayes.md"}
+    tmp_vault.note("Stats/Bayes.md", f"---\nrewritten: true\n---\n{BOOK}\n")
+    assert _agreed() == HAND
+
+
+def test_a_mark_on_a_note_nobody_touched_holds_nothing_back_or_out_in_either_read(stats):
+    note = stats / "Stats/Bayes.md"
+    _written(stats, "Stats/Bayes.md")
+    note.write_text("---\nrewritten: true\n---\n" + note.read_text(encoding="utf-8"), encoding="utf-8")
+    assert _agreed() == HAND
+
+
+def test_a_struck_note_and_a_wiki_that_is_not_there_go_nowhere(stats, tmp_vault):
+    from silica.kernel import rights
+
+    tmp_vault.note("Stats/Hand note.md", "---\npublish: false\n---\nMine.\n")
+    assert _agreed() == {"Stats/Descriptive/Box plot.md"}
+    assert rights.goes_out("no-such-wiki") == set()
+
+
+def test_the_build_writes_what_goes_out_says(stats):
+    from silica.kernel import rights
+
+    going = rights.goes_out("stats")
+    assert _build()["notes"] == len(going) == 2
+
+
+def test_my_wikis_counts_what_the_vault_takes_until_the_owner_decides(stats):
+    """The drift named at `rights.counted`: 1,748 against 699 on a real vault, 2026-11-07. The
+    true number needs new UI, which is the owner's. When it lands this asserts `== going`."""
+    from silica.kernel import publish, rights
+
+    sel = publish.selection(stats)
+    going = rights.goes_out("stats", stats, sel)
+    assert rights.counted("stats", stats, sel) == publish.taken_by("stats", sel)
+    assert len(rights.counted("stats", stats, sel)) == 5 and len(going) == 2
 
 
 # --- files ---------------------------------------------------------------------
@@ -166,7 +231,7 @@ def test_a_wiki_of_hand_notes_goes_straight_to_publish(tmp_vault, stats):
 
     tmp_vault.note("Plain/One.md", "Written by hand.\n")
     add_vault("Plain")
-    sheet = rights.sheet(rights.read_wiki("plain"), rights.answers())
+    sheet = rights.sheet(rights.read_wiki("plain"), rights.answers(), _thumbnail)
     assert sheet["ask"] is False and sheet["plain"] == 1 and not sheet["files"] and not sheet["groups"]
 
 
@@ -539,7 +604,7 @@ def test_a_published_photo_loses_its_location_and_the_sheet_counts_it(stats):
 
 
 def test_listing_a_blocked_wiki_after_publish_does_not_reach_the_catalog(stats):
-    from silica.ui.web.public_site import set_listed
+    from silica.kernel.public_site import set_listed
 
     _build()
     set_listed("stats", True)

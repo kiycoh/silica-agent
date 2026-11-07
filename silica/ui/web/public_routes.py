@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from silica.config import public_base
 from silica.kernel.text import note_parts
 from silica.onboarding import settings_ops
-from silica.ui.web import drop, session
+from silica.ui.web import drop, render, session
 from silica.ui.web.failures import Refused
 
 logger = logging.getLogger(__name__)
@@ -71,28 +71,28 @@ def _folders(vault: Path, taken: list[str]) -> list[str]:
 def _view() -> dict:
     """Everything the view and the globes draw, from one walk of the vault."""
     from silica.config import hosted
-    from silica.kernel import publish
-    from silica.ui.web.public_site import last_published
+    from silica.kernel import publish, rights
+    from silica.kernel.public_site import last_published
 
-    vault = publish._vault()
+    vault = publish.vault_root()
     turned = publish.enforce_tier(vault)
     h = publish.handle(vault)
     sel = publish.selection(vault)
     notes, fms, of = sel["notes"], sel["frontmatter"], sel["vault_of"]
     last = (last_published(h) if h else {}).get("vaults", {})
     page_url = publish.page_url(vault)
-    out_paths = {p for p, s in notes.items() if s == "on"}
-    deg = _degrees(out_paths)
+    going = {v["slug"]: rights.counted(v["slug"], vault, sel) for v in sel["vaults"]}
+    deg = _degrees(set().union(*going.values()))
     reviews = publish.host_reviews()
     vaults = []
     for v in sel["vaults"]:
-        mine = [p for p in out_paths if of.get(p) == v["slug"]]
+        mine = going[v["slug"]]
         before = set(last.get(v["slug"], {}).get("notes", []))
         top = sorted(mine, key=lambda p: (-deg.get(p, 0), note_parts.title_of(p, fms.get(p) or {}).lower()))[:_GOES_OUT]
         vaults.append({
             **{k: v[k] for k in ("slug", "folder", "title", "line", "license", "visibility", "listed",
                                  "readers", "published", "downgraded")},
-            "url": f"{page_url}/{v['slug']}/" if page_url else "",
+            "url": publish.wiki_url(page_url, v["slug"]),
             "out": len(mine),
             "top": [note_parts.title_of(p, fms.get(p) or {}) for p in top],
             "struck": sum(1 for p, s in notes.items() if s == "struck" and of.get(p) == v["slug"]),
@@ -159,11 +159,12 @@ def public_cover(vault: str = ""):
     layout, seed 7). The links are the vault graph's between two outgoing notes, so a private
     note is never a mark."""
     from silica.driver import get_driver
-    from silica.kernel import publish
-    from silica.ui.web.public_site import cover
+    from silica.kernel import publish, rights
+    from silica.kernel.public_site import cover
 
-    sel = publish.selection(publish._vault())
-    on = sorted(p for p, s in sel["notes"].items() if s == "on" and sel["vault_of"].get(p) == vault)
+    root = publish.vault_root()
+    sel = publish.selection(root)
+    on = rights.counted(vault, root, sel)
     if not on:
         return {"n": [], "e": []}
     out = set(on)
@@ -202,7 +203,7 @@ def _canon(path: str) -> str:
 
 def _refresh_page() -> None:
     """The Page lists the Public vaults, so it follows a visibility change at once."""
-    from silica.ui.web.public_site import write_page
+    from silica.kernel.public_site import write_page
 
     try:
         write_page()
@@ -225,7 +226,7 @@ def public_add_vault(payload: dict):
 @router.post("/public/vault/{slug}")
 def public_update_vault(slug: str, payload: dict):
     from silica.kernel import publish
-    from silica.ui.web.public_site import set_listed
+    from silica.kernel.public_site import set_listed
 
     changes = {k: payload[k] for k in ("title", "line", "license", "listed", "readers") if k in payload}
     try:
@@ -267,7 +268,7 @@ async def public_publish(payload: dict | None = None):
     """Write one vault and put it out; the button reads "Turn on and
     publish" while the vault is Off, so it turns the vault Public first."""
     from silica.kernel import publish
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     slug = str((payload or {}).get("vault") or "")
     if not publish.available():
@@ -288,6 +289,12 @@ async def public_publish(payload: dict | None = None):
 _WIKI: dict[str, dict] = {}
 
 
+def _thumbnail(img: dict) -> str:
+    """Where the screen reads an image: a kept copy from the route below, the vault's through
+    /asset. The two routes are this module's and the app's to name."""
+    return f"/public/check/image?name={img['kept'].name}" if img.get("kept") else render.asset_url(img["src"])
+
+
 def _sheet(slug: str, *, fresh: bool = False) -> dict:
     from silica.kernel import rights
     from silica.sources.discover.read import fetch_figure
@@ -295,7 +302,7 @@ def _sheet(slug: str, *, fresh: bool = False) -> dict:
     if fresh or slug not in _WIKI:
         _WIKI.clear()
         _WIKI[slug] = rights.read_wiki(slug, fetch=fetch_figure)
-    return rights.sheet(_WIKI[slug], rights.answers())
+    return rights.sheet(_WIKI[slug], rights.answers(), _thumbnail)
 
 
 @router.get("/public/check")

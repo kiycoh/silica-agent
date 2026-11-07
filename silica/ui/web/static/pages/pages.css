@@ -4,6 +4,8 @@
    two inks on the well, at 46:21, and walked in the room (ADR-0151, amendment of 2026-11-06).
    One sheet for every account's pages, served by the host from /_s/, so no account can restyle
    the catalog or another account's page. */
+/* what a note's render needs, shared with the app */
+@import url("body.css");
 @font-face { font-family: "Archivo"; src: url("archivo-latin.woff2") format("woff2"); font-weight: 100 900; font-stretch: 62% 125%; font-display: swap; }
 @font-face { font-family: "Martian Mono"; src: url("martian-mono-latin.woff2") format("woff2"); font-weight: 300 800; font-display: swap; }
 /* the wordmark's face and nothing else's (host-grotesk-OFL.txt beside it) */
@@ -14,7 +16,7 @@
   --void: #EFEAE0; --slate: #F5F1E9; --sheet: #FFFDF9; --slate-2: #E9E2D4;
   --line: #D9D1C0; --line-2: #C6BCA8;
   --frost: #1A1815; --text: #3A362F; --ash: #5B554B; --ash-dim: #655D4F;
-  --accent: #0A6070; --on-vivid: #FFFFFF;
+  --accent: #0A6070; --on-vivid: #FFFFFF; --warn: #7A4F03;
   --sel: rgb(40 90 100 / .10); --sel-hover: rgb(26 24 21 / .05);
   --wash: rgba(58, 44, 20, .05);
   --spot: #C1BAAE; --spot-dim: #E5DFD2; --node-dim: #CBC6BD;
@@ -30,7 +32,7 @@
     --void: #0D0E0F; --slate: #141518; --sheet: #23272B; --slate-2: #24272B;
     --line: #2F343A; --line-2: #3F454D;
     --frost: #F4F5F7; --text: #C5CAD2; --ash: #AEB4BE; --ash-dim: #969CA6;
-    --accent: #22B4CC; --on-vivid: #0D0E0F;
+    --accent: #22B4CC; --on-vivid: #0D0E0F; --warn: #E0A93B;
     --sel: rgb(150 205 215 / .14); --sel-hover: rgb(244 245 247 / .06);
     --wash: rgba(63, 69, 77, .30);
     --spot: #3D4147; --spot-dim: #131517; --node-dim: #454B54;
@@ -41,7 +43,7 @@
   --void: #0D0E0F; --slate: #141518; --sheet: #23272B; --slate-2: #24272B;
   --line: #2F343A; --line-2: #3F454D;
   --frost: #F4F5F7; --text: #C5CAD2; --ash: #AEB4BE; --ash-dim: #969CA6;
-  --accent: #22B4CC; --on-vivid: #0D0E0F;
+  --accent: #22B4CC; --on-vivid: #0D0E0F; --warn: #E0A93B;
   --sel: rgb(150 205 215 / .14); --sel-hover: rgb(244 245 247 / .06);
   --wash: rgba(63, 69, 77, .30);
   --spot: #3D4147; --spot-dim: #131517; --node-dim: #454B54;

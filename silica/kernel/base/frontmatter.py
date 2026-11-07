@@ -45,9 +45,12 @@ FM_RE_SCAN = re.compile(
     r"\A\s*---[ \t]*\r?\n(.*?)(?<=\n)(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 
 # What the app shows as properties (split_shown): the tolerant close, and a bare
-# opening fence. `--- ` is the one difference from FM_RE_TOLERANT, and folding it
-# in would show as properties, and hide from the body, what the drawer shows as
-# text today.
+# opening fence. TOLERANT but for two shapes: a `--- ` opening fence reads as body,
+# and `---\n---\n` as no block, closing at the next fence down instead. Equal on all
+# 2,642 notes of the vaults measured 2026-11-07; folding it in would show as
+# properties, and hide from the body, what the drawer shows as text today. Skills are
+# the one reader outside this table: `skills_routes` imports silica_core's `split`
+# so that its refusal and the skill loader's cannot disagree.
 FM_RE_SHOWN = re.compile(r"\A---\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 
 # A note that opens a block, closed or not: the lint's unclosed fence, and the
@@ -245,7 +248,6 @@ def _ensure_tag_list(raw):
     if not raw:
         return []
     if isinstance(raw, str):
-        # Detect inline-CSV scalar: "a, b, c" → ["a", "b", "c"]
         if "," in raw:
             return [s.strip() for s in raw.split(",") if s.strip()]
         return [raw]

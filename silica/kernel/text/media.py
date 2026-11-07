@@ -18,10 +18,6 @@ from collections.abc import Mapping
 from silica.kernel.base.formats import VISUAL_MEDIA_EXTS, ext_alternation
 from silica.kernel.base.noteshape import BODY_END_RE
 
-# ---------------------------------------------------------------------------
-# Regex patterns
-# ---------------------------------------------------------------------------
-
 # Obsidian-flavored image embed: ![[path/to/file.ext]] or ![[file.ext|300]]
 # Matches any file extension that looks like a raster/vector image or media.
 _IMAGE_EXTENSIONS = ext_alternation(VISUAL_MEDIA_EXTS)
@@ -57,10 +53,6 @@ _IMAGE_CAPTION_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 def strip_images(text: str) -> str:
     """Remove all image embeds from *text*, returning clean prose.

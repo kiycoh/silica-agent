@@ -5,7 +5,7 @@
 // "This chat", until ADR-0122: the transcript's ledger line (ADR-0117 point 3)
 // says the same steps and reads where the answer is.
 //
-// `silica/agent/narration.py` has written an append-only account of every run
+// `silica/obs/narration.py` has written an append-only account of every run
 // since it shipped, and `/narration/sse` has served it live for just as long.
 // Nothing rendered it. So this file is a PROJECTION of a stream that already
 // exists, not new plumbing: every duration, token delta, phase and write below

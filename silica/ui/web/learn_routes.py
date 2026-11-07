@@ -25,6 +25,7 @@ from silica.kernel.base.notekey import ledger_key
 from silica.kernel.learn import items, pace, reasons, reference, session, store
 from silica.kernel.learn.reference import RESTRICT_SEP
 from silica.kernel.learn.schedule import DUE_R
+from silica.kernel.text.render import mathml
 from silica.ui.web import render
 from silica.ui.web.failures import Refused
 
@@ -435,11 +436,11 @@ MATH_CHARS = 2000     # one formula's LaTeX; a note's longest display block is a
 @router.post("/math")
 def math(payload: dict):
     """The formulas in Learn's text as MathML, converted as the chat's are
-    (render.mathml: the browser draws them, and a formula that does not
+    (mathml: the browser draws them, and a formula that does not
     convert comes back as written)."""
     tex = [str(t)[:MATH_CHARS] for t in (payload.get("tex") or [])][:MATH_MAX]
     display = list(payload.get("display") or [])
-    return {"mathml": [render.mathml(t, bool(display[i]) if i < len(display) else False) for i, t in enumerate(tex)]}
+    return {"mathml": [mathml(t, bool(display[i]) if i < len(display) else False) for i, t in enumerate(tex)]}
 
 
 @router.post("/teach")

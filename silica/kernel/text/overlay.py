@@ -21,10 +21,6 @@ import yaml
 from silica.kernel.text import language
 
 
-# ---------------------------------------------------------------------------
-# Data type
-# ---------------------------------------------------------------------------
-
 @dataclass(frozen=True)
 class DomainOverlay:
     """Immutable vocabulary overlay applied at concept-extraction time."""
@@ -32,10 +28,6 @@ class DomainOverlay:
     stopwords: frozenset[str]
     noise_patterns: tuple[re.Pattern, ...]
 
-
-# ---------------------------------------------------------------------------
-# Default (English-generic) overlay
-# ---------------------------------------------------------------------------
 
 _ENGLISH_FUNCTION_WORDS: frozenset[str] = language.stopwords_for("english")
 
@@ -114,10 +106,6 @@ DEFAULT_OVERLAY: DomainOverlay = DomainOverlay(
 )
 
 
-# ---------------------------------------------------------------------------
-# load_overlay
-# ---------------------------------------------------------------------------
-
 def load_overlay(path: Path) -> DomainOverlay:
     """Parse a YAML overlay file and return a DomainOverlay.
 
@@ -179,10 +167,6 @@ def load_overlay(path: Path) -> DomainOverlay:
 
     return DomainOverlay(stopwords=merged_stopwords, noise_patterns=merged_patterns)
 
-
-# ---------------------------------------------------------------------------
-# get_active_overlay — vault-scoped, cached
-# ---------------------------------------------------------------------------
 
 _OVERLAY_REL = "overlay.yaml"
 _LEGACY_OVERLAY_REL = "_silica/overlay.yaml"

@@ -1604,7 +1604,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     pending.remove(); // something arrived — the placeholder has done its job
     if (ev.type === "delta" && ev.kind === "reset") {
       // The server retracts what it just streamed: a transient retry replays the
-      // whole attempt (agent/llm.py), and a turn that resolved into tool calls
+      // whole attempt (model/llm.py), and a turn that resolved into tool calls
       // streamed a preamble, never an answer (agent/loop.py). Without this branch
       // the event fell through and the replay was spliced under the truncated
       // first take, so the GUI showed a duplicated answer the TUI did not.
@@ -2061,7 +2061,7 @@ async function openCite(el) {
 // answer in one language over notes in another shares mostly names, symbols
 // and numbers, so most of those citations open the note with no line marked.
 // The upgrade is the passage the turn's own read returned: the server keeps
-// every tool result with the session (server.py, the replay's `results`), but
+// every tool result with the session (chat_routes.py, the replay's `results`), but
 // the page gets 1200 characters of a live one and nothing of a stored one, so
 // the join belongs on the server. Review at the pilot report on 2027-03-01.
 const CITE_STOP = new Set(("that this with from have your what when which their there these those they them then than "
@@ -2492,7 +2492,7 @@ function pickMention(n) {
 // --- a drop on the composer writes the wikilinks @ writes (ADR-0126 point 5) --
 // At the caret, then the pipeline a keystroke runs (grow, picker, mirror,
 // draft), so the box reads as typed. Ten at most: the turn's own cap on the
-// notes it reads for a message (silica/agent/mentions.py, CAP), stated here
+// notes it reads for a message (silica/kernel/text/mentions.py, CAP), stated here
 // for the first time rather than discovered as "4 more links not resolved".
 const DROP_CAP = 10;
 function insertLinks(paths) {

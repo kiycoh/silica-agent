@@ -211,7 +211,6 @@ class _ProgressRenderer:
         self._phase_start_times: dict[str, float] = {}
         # Run position, restated by every PhaseEvent (file/chunk counters + label).
         self._inject_pos: dict = {}
-        # Inject progress bar (tracks files processed / total)
         self._inject_inbox_label: str = ""
         self._inject_file_count: int = 0
         self._inject_progress: Progress | None = None
@@ -600,7 +599,7 @@ class _ProgressRenderer:
 
         if isinstance(event, ToolStartEvent):
             if self._batch is not None:
-                return  # All tool spinners suppressed during batch run
+                return
             if self._out.is_terminal:
                 self._active_tools[event.call_id] = {"name": event.name, "args": event.args}
                 if event.name == "silica_run_injector":
@@ -626,7 +625,6 @@ class _ProgressRenderer:
                         # self._live, which drives the rendering.
                 self._update_live()
             else:
-                # Non-interactive fallback: print immediately
                 desc = _synthetic_tool_desc(event.name, event.args)
                 if mode == "new":
                     if event.name == self._last_tool_name:
@@ -667,7 +665,6 @@ class _ProgressRenderer:
                     self._batch["micro_phase"] = ""
                     self._update_batch_live()
                 return
-            # Suppress all other tool completions during batch
             if self._batch is not None:
                 return
 
@@ -756,7 +753,6 @@ class _ProgressRenderer:
                 self._active_tools.pop(event.call_id, None)
                 self._update_live()
             else:
-                # Non-interactive fallback
                 desc = _synthetic_tool_desc(event.name, event.args)
                 dur = _fmt_dur(event.duration_s)
                 dur_str = f" [dim]{dur}[/]" if dur else ""

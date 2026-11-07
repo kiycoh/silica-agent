@@ -45,7 +45,6 @@ def llm_arbitrate(
     from silica.model.reply import parse_reply
     from silica.config import CONFIG
 
-    # Build a concise prompt listing all ambiguous notes and their candidate folders
     folder_list = "\n".join(
         f"  - folder: \"{r.folder}\" — {r.description or ', '.join(r.themes[:3])}"
         for r in taxonomy.rules
@@ -104,13 +103,7 @@ def llm_arbitrate(
         note_path = ambiguous[raw_idx][0]
         result[note_path] = folder if folder in valid_folders else taxonomy.uncategorized
 
-    # Fill any missing entries
     for note_path, _s, _r in ambiguous:
         result.setdefault(note_path, taxonomy.uncategorized)
 
     return result
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------

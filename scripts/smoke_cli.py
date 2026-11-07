@@ -57,10 +57,6 @@ def md_digest(vault: Path) -> str:
     return h.hexdigest()
 
 
-# --------------------------------------------------------------------------
-# Phase A — shell subcommands
-# --------------------------------------------------------------------------
-
 def phase_a(vault: Path) -> None:
     print("\nPhase A — shell subcommands")
 
@@ -72,10 +68,6 @@ def phase_a(vault: Path) -> None:
     check("Traceback" not in r.stderr, "doctor runs to a report", r.stderr[-300:])
     print(f"        (doctor exit {r.returncode} — non-zero is a real finding, read the table)")
 
-
-# --------------------------------------------------------------------------
-# Phase B — REPL command batches
-# --------------------------------------------------------------------------
 
 # (name, commands, writes_notes, needs_endpoint)
 GROUPS: list[tuple[str, list[str], bool, bool]] = [
@@ -128,8 +120,6 @@ def phase_b(vault: Path, offline: bool) -> None:
     if not offline:
         check((vault / "graph.html").exists(), "graph export produced a file")
 
-
-# --------------------------------------------------------------------------
 
 def main() -> int:
     offline = "--offline" in sys.argv

@@ -42,7 +42,7 @@ def index_note(key: str) -> None:
             logger.warning("note index: embedding failed: %s", type(exc).__name__)
         try:
             # force without refreeze: this note's old share out, and the store's
-            # frozen language left alone (orchestrator._refresh_cooccurrence_for_ops).
+            # frozen language left alone (states.write._refresh_cooccurrence_for_ops).
             build_index([(key, name, body)], lang=CONFIG.cooccurrence_lang, force=True)
         except Exception as exc:
             logger.warning("note index: co-occurrence failed: %s", type(exc).__name__)

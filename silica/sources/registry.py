@@ -149,9 +149,9 @@ def stage(
         except Exception:
             prior = None  # absent; an unreadable stub fails the upsert below, which reports it
     # This write lands in the vault but NOT in the indexes. The distill lane
-    # crosses `_refresh_cooccurrence_for_ops` (router/states/write.py:302); the
+    # crosses `_refresh_cooccurrence_for_ops` (router/states/write.py); the
     # terminal lane calls the driver bare, and `sync.sweep()` only reconciles
-    # stores that already exist ("cold indexes stay cold", recall/sync.py:28).
+    # stores that already exist ("cold indexes stay cold", recall/sync.py).
     # ponytail: no hook here because nothing had ever nucleated code — measured
     # 2026-08-25, silica/kernel/recall held 21 code files and 0 notes, so the
     # missing hop cost nothing yet. It starts costing on the first batch:

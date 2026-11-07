@@ -65,10 +65,6 @@ def _save_json(obj: Any, filename: str) -> Path:
     return path
 
 
-# ---------------------------------------------------------------------------
-# PlanStep — one entry in the immutable plan
-# ---------------------------------------------------------------------------
-
 @dataclass
 class PlanStep:
     """A single planned step of the run. Written once; never mutated."""
@@ -76,10 +72,6 @@ class PlanStep:
     kind: str          # PlanStepKind — str for forward-compat with new kinds
     objective: str     # tool / worker name or free-form description
 
-
-# ---------------------------------------------------------------------------
-# TaskLedger — immutable plan for the full run
-# ---------------------------------------------------------------------------
 
 @dataclass
 class TaskLedger:
@@ -89,10 +81,6 @@ class TaskLedger:
     checkpoints: list[PlanStep] = field(default_factory=list)
     facts: dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
-
-    # ------------------------------------------------------------------
-    # Factory
-    # ------------------------------------------------------------------
 
     @classmethod
     def new(
@@ -110,15 +98,11 @@ class TaskLedger:
             created_at=_now(),
         )
 
-    # ------------------------------------------------------------------
-    # Persistence — write-once
-    # ------------------------------------------------------------------
-
     def save(self) -> Path:
         """Write to disk only if the file does not yet exist (immutable semantics)."""
         path = run_dir_for(self.run_id) / "task_ledger.json"
         if path.exists():
-            return path  # already written — do not overwrite
+            return path
         return _save_json(self, "task_ledger.json")
 
     @classmethod
@@ -126,10 +110,6 @@ class TaskLedger:
         path = run_dir_for(run_id) / "task_ledger.json"
         return TypeAdapter(cls).validate_python(orjson.loads(path.read_bytes()))
 
-
-# ---------------------------------------------------------------------------
-# RunManifest — short-term memory of what was injected in this run
-# ---------------------------------------------------------------------------
 
 @dataclass
 class RunManifestEntry:
@@ -185,10 +165,6 @@ class RunManifest:
         return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# IssueCard — human-in-the-loop escalation
-# ---------------------------------------------------------------------------
-
 @dataclass
 class IssueCard:
     """A question the planner cannot resolve without human input."""
@@ -198,10 +174,6 @@ class IssueCard:
     default_option: str | None = None
     free_form_allowed: bool = False
 
-
-# ---------------------------------------------------------------------------
-# Task — one unit of work inside a ProgressLedger
-# ---------------------------------------------------------------------------
 
 @dataclass
 class Task:
@@ -216,10 +188,6 @@ class Task:
     content_hash: str | None = None # for idempotent checkpoint resumption (Phase 2)
     error: str | None = None
 
-
-# ---------------------------------------------------------------------------
-# ProgressLedger — mutable execution state
-# ---------------------------------------------------------------------------
 
 @dataclass
 class ProgressLedger:
@@ -239,10 +207,6 @@ class ProgressLedger:
     # upgrade beats showing another vault's work as if it were yours.
     vault: str = ""
 
-    # ------------------------------------------------------------------
-    # Factory
-    # ------------------------------------------------------------------
-
     @classmethod
     def new(cls, mode: str, inputs: dict[str, Any] | None = None) -> ProgressLedger:
         now = _now()
@@ -254,10 +218,6 @@ class ProgressLedger:
             inputs=inputs or {},
             vault=_active_vault(),
         )
-
-    # ------------------------------------------------------------------
-    # Mutation helpers
-    # ------------------------------------------------------------------
 
     def add_task(
         self,
@@ -342,10 +302,6 @@ class ProgressLedger:
         ready = self.ready_pending(limit=1)
         return ready[0] if ready else None
 
-    # ------------------------------------------------------------------
-    # Idempotency helpers (Phase 2)
-    # ------------------------------------------------------------------
-
     @property
     def run_dir(self) -> Path:
         """Directory that owns all artefacts for this run."""
@@ -363,10 +319,6 @@ class ProgressLedger:
                 return t.output_ref
         return None
 
-    # ------------------------------------------------------------------
-    # Digest — compact summary for LLM context injection
-    # ------------------------------------------------------------------
-
     def digest(self, manifest: "RunManifest | None" = None) -> str:
         """Return a compact human-readable run summary, targeting < 500 tokens.
 
@@ -375,7 +327,6 @@ class ProgressLedger:
         distiller knows what was created in earlier chunks.
         Safe to call at any point during or after a run.
         """
-        # Try to load the immutable plan
         plan_lines: list[str] = []
         request_line = ""
         try:
@@ -391,7 +342,6 @@ class ProgressLedger:
         except Exception:
             pass
 
-        # Build per-task status lines, grouping f{fi}_c{ci}_{cap} tasks by file
         _sym = {
             "done":     "✓",
             "running":  "→",
@@ -428,7 +378,6 @@ class ProgressLedger:
                 line += f"  [{t.error[:60]}]"
             task_lines.append(line)
 
-        # Emit per-file groups with summary header
         sources = (self.inputs or {}).get("sources", [])
         for fi in sorted(file_groups.keys()):
             file_tasks = file_groups[fi]
@@ -568,10 +517,6 @@ class ProgressLedger:
 
         return "\n".join(parts)
 
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
     def save(self) -> Path:
         return _save_json(self, "ledger.json")
 
@@ -579,10 +524,6 @@ class ProgressLedger:
     def load(cls, run_id: str) -> ProgressLedger:
         path = run_dir_for(run_id) / "ledger.json"
         return TypeAdapter(cls).validate_python(orjson.loads(path.read_bytes()))
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _get(self, task_id: str) -> Task:
         for t in self.tasks:
@@ -593,10 +534,6 @@ class ProgressLedger:
     def _touch(self) -> None:
         self.last_updated = _now()
 
-
-# ---------------------------------------------------------------------------
-# Run — deep facade over the per-run trio
-# ---------------------------------------------------------------------------
 
 @dataclass
 class Run:
@@ -613,10 +550,6 @@ class Run:
     manifest: RunManifest
     resumed: bool = False
 
-    # ------------------------------------------------------------------
-    # Identity / layout
-    # ------------------------------------------------------------------
-
     @property
     def run_id(self) -> str:
         return self.progress.run_id
@@ -631,10 +564,6 @@ class Run:
         d = self.run_dir / "payloads"
         d.mkdir(parents=True, exist_ok=True)
         return d
-
-    # ------------------------------------------------------------------
-    # Factories
-    # ------------------------------------------------------------------
 
     @classmethod
     def new(
@@ -718,10 +647,6 @@ class Run:
             resumed=True,
         )
 
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
     def save(self) -> None:
         """Persist mutable state (ProgressLedger). TaskLedger is write-once
         at creation; RunManifest is saved by whoever records entries."""
@@ -762,10 +687,6 @@ def latest_run_id() -> str | None:
         return None
     return max(candidates, key=lambda d: d.stat().st_mtime).name
 
-
-# ---------------------------------------------------------------------------
-# Serialisation helpers
-# ---------------------------------------------------------------------------
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()

@@ -31,7 +31,7 @@ _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 def slugify(s: str) -> str:
     s = FILE_UNSAFE_RE.sub('', s)
-    s = re.sub(r'\s+', ' ', s)  # normalise newlines, tabs, and multiple spaces to a single space
+    s = re.sub(r'\s+', ' ', s)
     return s.strip()
 
 

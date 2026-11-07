@@ -527,7 +527,7 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
         # processed in a prior run with identical input, skip DELEGATE→SANITIZE→VALIDATE
         # and reuse the persisted knowledge-block ops file.
         #
-        # Use the pre-COLLISION hash stored by _handle_collision so the key is
+        # Use the pre-COLLISION hash stored by collision_pass so the key is
         # based on the original source input, not the vault-state-dependent
         # post-COLLISION chunk (which changes when resumed after a partial run).
         chunk_hash = fsm.run_state.chunk(idx).input_hash or hashlib.sha256(
@@ -691,7 +691,6 @@ def handle_validate(fsm: "InjectorFSM") -> None:
     if fsm.chunks and fsm.chunk_idx < len(fsm.chunks):
         payloads.append(fsm.chunks[fsm.chunk_idx])
     else:
-        # Fallback to general payload if chunks is not populated
         payload_data = fsm.run_state.payload or {}
         if "chunks" in payload_data:
             payloads.extend(payload_data["chunks"])
@@ -858,7 +857,6 @@ def handle_validate(fsm: "InjectorFSM") -> None:
                 logger.debug("VALIDATE: steer note skipped (%s)", _ke)
             fsm.state = InjectorState.DELEGATE
             return
-        # Exhausted steering budget → defer and short-circuit.
         logger.warning("VALIDATE: steer budget exhausted (%d/%d) — deferring chunk %d.", steer_attempts, _max_steer, idx)
         fsm.chunk.abort_reason = "All ops rejected — nothing to write"
         # Provisional; CLEANUP overrides to Success if the run had ops elsewhere (A24).

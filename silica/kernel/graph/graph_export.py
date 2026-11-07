@@ -19,7 +19,7 @@ Community detection via networkx.algorithms.community.louvain_communities
 Degrades gracefully to no-community mode if unavailable.
 
 The HTML viewer that renders this data (render_html / export_graph) lives in
-silica.ui.web.graph_view — kept out of the kernel so this layer stays offline.
+silica.tools.graph_view — kept out of the kernel so this layer stays offline.
 """
 from __future__ import annotations
 

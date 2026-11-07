@@ -271,7 +271,7 @@ def _ledger_key(vault_path: str | None) -> tuple | None:
 # Named once because the three call sites (CLEANUP's manifest, the sub-agent
 # worker lane, the anneal recovery) each spelled it inline and disagreed: the
 # worker lane listed only write/patch, and `overwrite` is the ONLY op four
-# sub-agent profiles in agent/bounds.py are allowed to emit — so the majority of
+# sub-agent profiles in write/gate.py are allowed to emit — so the majority of
 # that lane's notes reached the vault with no record at all.
 DERIVING_OPS = frozenset({"write", "patch", "overwrite"})
 

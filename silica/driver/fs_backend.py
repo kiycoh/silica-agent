@@ -123,7 +123,6 @@ class ObsidianFSBackend(GraphIndexMixin):
         self.vault_path = Path(vault_path).resolve()
         self._index_lock = threading.RLock()
 
-        # In-memory index
         self._notes: dict[str, NoteRef] = {}          # path -> NoteRef
         self._notes_by_name: dict[str, list[NoteRef]] = {}  # lower_name -> list of NoteRefs
         self._graph = nx.DiGraph()
@@ -170,10 +169,6 @@ class ObsidianFSBackend(GraphIndexMixin):
         # actually stored at Matematica/Statistica/Statistica.md.
         resolved = self._resolve_target(ref)
         return resolved.path if resolved else None
-
-    # ------------------------------------------------------------------
-    # Indexing (in-memory graph)
-    # ------------------------------------------------------------------
 
     @_locked
     def _ensure_index(self):
@@ -282,13 +277,11 @@ class ObsidianFSBackend(GraphIndexMixin):
             p1 = target_no_ext + ".md"
             p1_norm = os.path.normcase(p1.replace("\\", "/").strip("/")).lower()
             
-            # Try exact match first
             for path, ref in self._notes.items():
                 path_norm = os.path.normcase(path.replace("\\", "/").strip("/")).lower()
                 if path_norm == p1_norm:
                     return ref
                     
-            # Try matching end of path (suffix matching with /)
             suffix = "/" + p1_norm
             candidates = []
             for path, ref in self._notes.items():
@@ -296,7 +289,6 @@ class ObsidianFSBackend(GraphIndexMixin):
                 if path_norm.endswith(suffix):
                     candidates.append(ref)
             if candidates:
-                # Prioritize same directory as source_path if available
                 if source_path and "/" in source_path:
                     source_dir = source_path.rsplit("/", 1)[0]
                     same_dir_candidates = [c for c in candidates if c.path.startswith(source_dir + "/")]
@@ -322,7 +314,6 @@ class ObsidianFSBackend(GraphIndexMixin):
             if len(refs) == 1:
                 return refs[0]
                 
-            # Prioritize the one in the same directory as source_path
             if source_path and "/" in source_path:
                 source_dir = source_path.rsplit("/", 1)[0]
                 same_dir_refs = [r for r in refs if r.path.startswith(source_dir + "/")]
@@ -330,7 +321,6 @@ class ObsidianFSBackend(GraphIndexMixin):
                     sorted_same = sorted(same_dir_refs, key=lambda r: (r.path.count("/"), r.path.lower()))
                     return sorted_same[0]
                     
-            # Prioritize the one with the shortest vault-relative path
             sorted_refs = sorted(refs, key=lambda r: (r.path.count("/"), r.path.lower()))
             return sorted_refs[0]
 
@@ -532,22 +522,18 @@ class ObsidianFSBackend(GraphIndexMixin):
         # exits below: the deletion path returns early.
         self._restamp_dirs(rel_path)
 
-        # --- remove stale data for this path ---
         self._forget_links_from(rel_path)
         self._alias_pairs.pop(rel_path, None)
 
         if content is None:
-            # deletion path
             self._leave_note(rel_path)
             self._dirty_paths.discard(rel_path)
             self._drop_file_refs(rel_path)
             return
 
-        # --- upsert node ---
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
         self._enter_note(rel_path, NoteRef(name=name, path=rel_path))
 
-        # --- rebuild edges for this path ---
         typed, file_targets, mentions = extract_refs_typed(content)
         self._link_from(rel_path, typed)
         self._drop_file_refs(rel_path)   # replace, never accumulate, on re-upsert
@@ -642,7 +628,6 @@ class ObsidianFSBackend(GraphIndexMixin):
 
         name = ref if isinstance(ref, str) else ref.name
         
-        # Strip .md if passed in string
         if name.endswith(".md"):
             name = name[:-3]
         
@@ -698,10 +683,6 @@ class ObsidianFSBackend(GraphIndexMixin):
     def _invalidate_body(self, rel_path: str) -> None:
         """Drop the cached body for a vault-relative path (write just landed)."""
         self._body_cache.pop(str(self.vault_path / rel_path), None)
-
-    # ------------------------------------------------------------------
-    # Discovery / Read
-    # ------------------------------------------------------------------
 
     @_locked
     def notes_named(self, name: str) -> list[str]:
@@ -898,10 +879,6 @@ class ObsidianFSBackend(GraphIndexMixin):
         except Exception:
             return []  # gone or undecodable: a note with no headings to offer
 
-    # ------------------------------------------------------------------
-    # Graph
-    # ------------------------------------------------------------------
-
     @_locked
     def graph_data(self) -> tuple[dict, set, Any]:
         """Locked override of the mixin's accessor, returning copies.
@@ -925,12 +902,10 @@ class ObsidianFSBackend(GraphIndexMixin):
         if not path:
             return []
         
-        # Resolved outgoing links from graph
         results = []
         if path in self._graph:
             results.extend([self._node_ref(t) for t in self._graph.successors(path)])
         
-        # Unresolved outgoing links
         for s, t in self._unresolved_links:
             if s == path:
                 t_name = t.rsplit("/", 1)[-1].removesuffix(".md")
@@ -1039,16 +1014,13 @@ class ObsidianFSBackend(GraphIndexMixin):
                 backlink_counts=backlink_counts
             )
 
-        # Incremental snapshot
         neighborhood = set()
         for r in refs:
             if r.path:
                 neighborhood.add(r.path)
-                # Add outgoing
                 if r.path in self._graph:
                     for t in self._graph.successors(r.path):
                         neighborhood.add(t)
-                # Add incoming
                 if r.path in self._graph:
                     for s in self._graph.predecessors(r.path):
                         neighborhood.add(s)
@@ -1064,7 +1036,6 @@ class ObsidianFSBackend(GraphIndexMixin):
                 link_counts[key] = resolved_count + unresolved_count
                 backlink_counts[key] = self._graph.in_degree(path) if path in self._graph else 0
 
-        # Filter orphans & unresolved to neighborhood incrementally
         orphans = [
             self._notes[path] for path in neighborhood
             if path in self._notes and (path not in self._graph or self._graph.in_degree(path) == 0)
@@ -1332,10 +1303,6 @@ class ObsidianFSBackend(GraphIndexMixin):
             self._rebuild_index()
         else:
             self._patch_delete(note.rel)
-
-    # ------------------------------------------------------------------
-    # Advanced
-    # ------------------------------------------------------------------
 
     @_locked
     def list_files(self, folder: str = "") -> list[NoteRef]:

@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from silica.config import CONFIG
 from silica.kernel.base.frontmatter import split_shown
 from silica.kernel import vault_files
+from silica.kernel.base.syntax import WIKILINK_WHOLE_RE
 from silica.kernel.graph.mindmap import note_resolver
 from silica.kernel.recall import note_index
 from silica.kernel.text import note_parts
@@ -163,7 +164,7 @@ def _broken_links(text: str, resolve) -> list[str]:
     every save. Embeds are left out: /note/render draws those, and marks its
     own. So is `[[#Heading]]`, a link into the same note."""
     out = set()
-    for m in render.WIKILINK.finditer(text or ""):
+    for m in WIKILINK_WHOLE_RE.finditer(text or ""):
         if m.group(1):
             continue
         target = m.group(2).partition("|")[0].split("#", 1)[0].strip()

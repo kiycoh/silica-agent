@@ -31,7 +31,6 @@ const DV_ICON = {
   compass: '<svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M15.5 8.5l-2 5-5 2 2-5z"></path></svg>',
 };
 
-// --- small builders ------------------------------------------------------------
 function dvBtn(label, cls, onClick, icon) {
   const b = mkEl("button", "dv-btn " + (cls || ""));
   b.type = "button";
@@ -79,7 +78,6 @@ function dvMarks(domains) {
 
 function dvBody() { return $("#dv-body"); }
 
-// --- routing ------------------------------------------------------------------------
 function dvRoute() {
   const parts = (location.hash || "").replace(/^#/, "").split("?")[0].split("/");
   if (parts[0] !== "discover") return { screen: "feed" };
@@ -111,7 +109,6 @@ function loadDiscover() {
   return dvLoadFront();
 }
 
-// --- the front page -----------------------------------------------------------------
 async function dvLoadFront(quiet) {
   if (!quiet && !dv.data) $("#dv-loading").hidden = false;
   try {
@@ -526,7 +523,6 @@ function dvDuration(s) {
   return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 }
 
-// --- saving -----------------------------------------------------------------------
 async function dvSave(card, btn) {
   if (card.saved) { openNote(card.saved); return; }
   if (btn) btn.disabled = true;
@@ -570,7 +566,6 @@ function dvNucleate(path) {
   send(`/nucleate "${path}"`);
 }
 
-// --- the story ------------------------------------------------------------------------
 async function dvOpenStory(id) {
   if (!dv.story || dv.story.id !== id) {
     dv.story = null;
@@ -1109,7 +1104,6 @@ document.addEventListener("silica:session", () => {
 });
 for (const id of ["#new-chat", "#rail-new"]) $(id).addEventListener("click", () => { dvChip = null; renderStoryChip(); });
 
-// --- the Feeds screen ---------------------------------------------------------------------
 async function dvLoadFeeds() {
   $("#dv-loading").hidden = !dv.feeds;
   try { dv.feeds = await api("/discover/feeds"); }
@@ -1317,7 +1311,6 @@ function dvWhenPanel(f) {
   return sec;
 }
 
-// --- the first run ------------------------------------------------------------------------
 async function dvFirstRun() {
   let s;
   try { s = await api("/discover/setup"); }

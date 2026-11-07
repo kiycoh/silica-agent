@@ -401,7 +401,7 @@ name = "graph data stays offline — the kernel viewer split leaves no network d
 type = "forbidden"
 source_modules = ["silica.kernel.graph.graph_export"]
 forbidden_modules = ["httpx"]
-# The viewer (render_html/export_graph) moved to silica.ui.web.graph_view and
+# The viewer (render_html/export_graph) moved to silica.tools.graph_view and
 # now inlines a *vendored* JS bundle; the CDN fetch (httpx) is gone. This freezes
 # that: the deterministic data module must never re-acquire a network dependency.
 

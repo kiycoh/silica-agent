@@ -6,10 +6,10 @@ Public vaults, and for each vault its own page, one page and one markdown
 file per note, its images, and two files the script and a reader's Silica
 read (`vault.json`, `notes.json`).
 
-Rendered by the note drawer's own renderer (`render.linkify`), so a page
-reads as the note reads in the app, with one difference that is the point:
-the resolver only knows the vault's published notes, so a link to anything
-else comes out as its words (ADR-0143 point 4). A vault is built in a
+Rendered by the note drawer's own renderer (`silica.kernel.text.render`), so
+a page reads as the note reads in the app, with one difference that is the
+point: the resolver only knows the vault's published notes, so a link to
+anything else comes out as its words (ADR-0143 point 4). A vault is built in a
 temporary folder and swapped in whole (`publish.swap_in`).
 """
 from __future__ import annotations
@@ -29,23 +29,24 @@ from silica.config import GUI_PORT, live_env, public_save_url
 from silica.kernel import publish, rights
 from silica.kernel.base.formats import SHOWN_IMAGE_EXTS
 from silica.kernel.base.markdown import strip_ofm_meta
+from silica.kernel.base.syntax import WIKILINK_PREVIEW_RE, WIKILINK_WHOLE_RE
 from silica.kernel.image_meta import strip_location
 from silica.kernel.text import note_parts
-from silica.ui.web import render
+from silica.kernel.text.render import render
+from silica.kernel.vault_files import find_image
 
 logger = logging.getLogger(__name__)
 
 # What a page shows of a note's properties (ADR-0143 point 4); everything
 # else in a frontmatter (sources, paths, a paper's ids) stays in the vault.
 _SHOWN_PROPS = ("title", "tags", "date")
-_ANCHOR = re.compile(r'<a class="note-link" data-path="([^"]*)">')
-_ASSET_SRC = re.compile(r'/asset\?path=([^"\'\s>]+)')
 # The sheet, the script and their fonts: the host serves them from /_s/ (ADR-0151 point 7); a page
 # built on a laptop carries its own copy in _s/ so its folder opens from disk. mermaid.min.js is
 # the app's own copy, which pages.js loads only on a note that holds a diagram (owner, 2026-11-02):
 # the policy runs scripts from /_s/ alone, so it is a file there and never a script in a page.
-_STATIC = ("pages/pages.css", "pages/pages.js", "archivo-latin.woff2", "martian-mono-latin.woff2",
-           "host-grotesk-latin.woff2", "host-grotesk-OFL.txt", "mermaid.min.js")
+# body.css and cover.js are the app's as much as a page's, so each is one file both load.
+_STATIC = ("pages/pages.css", "pages/body.css", "pages/pages.js", "pages/cover.js", "archivo-latin.woff2",
+           "martian-mono-latin.woff2", "host-grotesk-latin.woff2", "host-grotesk-OFL.txt", "mermaid.min.js")
 _LANGS = {"italian": "it", "english": "en", "spanish": "es", "french": "fr",
           "german": "de", "portuguese": "pt"}
 # shortcut: past this many linked notes the cover keeps the best linked ones, so the layout stays
@@ -253,7 +254,7 @@ def foot(left: str, app: str) -> str:
 
 def _desc(body: str) -> str:
     """The first words of a note for a link preview, markup and links stripped."""
-    text = re.sub(r"!?\[\[([^\]|]*\|)?([^\]]*)\]\]", r"\2", body)
+    text = WIKILINK_PREVIEW_RE.sub(r"\2", body)
     text = re.sub(r"[#>*_`~\[\]()|-]+", " ", text)
     return " ".join(text.split())[:160]
 
@@ -276,7 +277,7 @@ def _md_for_reader(body: str, resolve, href_of) -> str:
         hit = resolve(target)
         return f"[{display}]({href_of(('note', hit))})" if hit else display
 
-    return render.WIKILINK.sub(sub, body)
+    return WIKILINK_WHOLE_RE.sub(sub, body)
 
 
 def cover(nodes: list[str], pairs: set[tuple[str, str]], titles: dict[str, str]) -> dict:
@@ -355,7 +356,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     from silica.kernel.graph.mindmap import answer_resolver, note_resolver
     from silica.kernel.base import frontmatter as fm
 
-    vault = vault or publish._vault()
+    vault = vault or publish.vault_root()
     h = publish.handle(vault)
     if not publish.available(vault):
         raise ValueError("this account has no public address yet")
@@ -376,7 +377,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     titles = {p: note_parts.title_of(p, fms.get(p) or {}) for p in public}
     slugs = _slugs(public, titles)
     site = _Site(h, publish.page_url(vault))
-    vurl = site.absolute(site.vault(slug, 0))
+    vurl = publish.wiki_url(site.base, slug)
     lang = _LANGS.get(_language().strip().lower(), "")
 
     base_resolve = note_resolver()
@@ -405,7 +406,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
         """The vault's name for an image a published note cites, copied once."""
         if target in copied:
             return copied[target]
-        found = plan["files"].get(target) or render.find_asset(target)
+        found = plan["files"].get(target) or find_image(str(vault), target)
         if found is None:
             copied[target] = ""
             return ""
@@ -413,6 +414,10 @@ def build(slug: str, vault: Path | None = None) -> dict:
         (build_dir / "assets" / name).write_bytes(strip_location(found.read_bytes()))
         copied[target] = name
         return name
+
+    def asset_src(target: str) -> str:
+        name = copy_asset(target)
+        return site.asset(slug, name, 1) if name else ""
 
     def note_url(p: str) -> str:
         # A Private vault is never served, but its notes keep the address they would have, so a
@@ -430,6 +435,14 @@ def build(slug: str, vault: Path | None = None) -> dict:
 
     rendered: dict[str, dict] = {}
     edges: set[tuple[str, str]] = set()
+
+    def link_from(p: str):
+        def link(target: str, display: str) -> str:
+            edges.add((p, target))
+            return f'<a class="note-link" href="{_esc(site.note(slug, slugs[target], 1))}">{_esc(display)}</a>'
+
+        return link
+
     for p in public:
         try:
             text = DRIVER.read_note(p).content
@@ -441,19 +454,11 @@ def build(slug: str, vault: Path | None = None) -> dict:
         props, _raw, body = fm.split(text)
         props = props or {}
         # Once, here: the page, the `.md`, notes.json and the description all read this
-        # body, and only render.linkify stripped comments, so a `%% remark %%` the page hid went
+        # body, and only the renderer stripped comments, so a `%% remark %%` the page hid went
         # out in the `.md` and into the room's text search, and hidden text reached the
         # vault of whoever saved the note.
         body = rights.place_images(_drop_title_heading(strip_ofm_meta(body, published=True), titles[p]), plan)
-        page_html = render.linkify(body, resolve, remote_images=False)
-        targets = set(_ANCHOR.findall(page_html))
-        edges.update((p, html.unescape(t)) for t in targets if html.unescape(t) in on)
-        page_html = _ANCHOR.sub(
-            lambda m: f'<a class="note-link" href="{_esc(site.note(slug, slugs[html.unescape(m.group(1))], 1))}">'
-            if html.unescape(m.group(1)) in slugs else "<a>", page_html)
-        page_html = _ASSET_SRC.sub(
-            lambda m: site.asset(slug, copy_asset(_unquote(m.group(1))), 1) if copy_asset(_unquote(m.group(1))) else "",
-            page_html)
+        page_html = render(body, link=link_from(p), asset=asset_src, resolve=resolve, remote_images=False)
         rendered[p] = {"html": page_html, "props": props, "body": body, "credit": plan["note_credits"].get(p, "")}
 
     shown = [p for p in public if p in rendered]
@@ -511,7 +516,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     publish.swap_in(build_dir, dest)
     if not private:
         shutil.rmtree(root / "paused" / slug, ignore_errors=True)
-    _mark_published(slug, today, vault)
+    publish.mark_published(slug, today, vault)
     state = last_published(h) or {"vaults": {}}
     # The reasons stay here, for the author: the manifest is public, and one of them says a note
     # holds someone's personal data.
@@ -521,14 +526,6 @@ def build(slug: str, vault: Path | None = None) -> dict:
     return {"vault": slug, "notes": len(shown), "links": len(pairs),
             "images": sum(1 for v in copied.values() if v), "url": vurl, "published_at": stamp,
             "private": private}
-
-
-def _mark_published(slug: str, day: str, vault: Path) -> None:
-    items = publish.vaults(vault)
-    for v in items:
-        if v["slug"] == slug:
-            v["published"] = day
-    publish._save_vaults(items, vault)
 
 
 def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, backlinks: list[str],
@@ -670,7 +667,7 @@ def write_page(vault: Path | None = None) -> None:
     sends the script there (amendment of 2026-11-06, item 3). With no Public
     vault the Page goes, so its address answers that there is no page; a
     laptop's copy of the sheet goes with it."""
-    vault = vault or publish._vault()
+    vault = vault or publish.vault_root()
     h = publish.handle(vault)
     if not h:
         return
@@ -721,7 +718,7 @@ def write_page(vault: Path | None = None) -> None:
 def set_listed(slug: str, listed: bool, vault: Path | None = None) -> None:
     """Ask to list reaches the published manifest at once, since the host reads
     the request there; the rest of the vault waits for Publish."""
-    vault = vault or publish._vault()
+    vault = vault or publish.vault_root()
     h = publish.handle(vault)
     path = publish.site_root(h) / "live" / slug / "vault.json" if h else None
     if path is None or not path.is_file():
@@ -776,16 +773,12 @@ def _drop_title_heading(body: str, title: str) -> str:
     return body[m.end():] if m and m.group(1).strip().lower() == title.strip().lower() else body
 
 
-def _unquote(s: str) -> str:
-    from urllib.parse import unquote
-
-    return unquote(html.unescape(s))
-
-
 def static_files() -> dict[str, bytes]:
     """{name: bytes} of the sheet, the script and the fonts, as /_s/ serves
     them; the host copies them from the release (ADR-0151 point 7)."""
-    static = importlib.resources.files("silica.ui.web") / "static"
+    # by the top package: the files sit with the app's, whose fonts and mermaid they share, and
+    # naming `silica.ui.web` would import the layer above this one to read a folder
+    static = importlib.resources.files("silica") / "ui" / "web" / "static"
     out = {}
     for name in _STATIC:
         res = static.joinpath(*name.split("/"))

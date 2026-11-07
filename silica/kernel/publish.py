@@ -7,9 +7,11 @@ their notes go out, and where Silica keeps the static files it writes.
 A vault on the Page is a folder of the account's one vault, at most ten,
 each Off, Public or Private, kept in `vault.yaml` under `public: vaults:`.
 A note's own `publish:` in its frontmatter beats its vault, as in Obsidian
-Publish. The files themselves are written by `silica.ui.web.public_site`,
+Publish. The files themselves are written by `silica.kernel.public_site`,
 which renders with the drawer's renderer; this module only decides and
-moves folders.
+moves folders. What leaves a vault is decided in two steps: this module says
+which notes a vault takes (`taken_by`), and `rights.goes_out` which of those
+the answers let through.
 """
 from __future__ import annotations
 
@@ -32,13 +34,13 @@ PUBLIC_KEY = "public"
 PLANS_DIR = "Plans"
 
 
-def _vault() -> Path:
+def vault_root() -> Path:
     from silica.config import CONFIG
 
     return Path(CONFIG.vault_path or ".")
 
 
-def _block(vault: Path) -> dict:
+def block(vault: Path) -> dict:
     """The raw `public:` block of vault.yaml; {} when absent or malformed."""
     import yaml
 
@@ -74,9 +76,9 @@ def handle(vault: Path | None = None) -> str:
         # The host's answer before the unit's env: a claim granted after the
         # process started is in the file, and the env catches up at the next start.
         named = _host_answer().get("handle")
-        return slugify(named if isinstance(named, str) and _HANDLE.match(named) else env)
-    vault = vault or _vault()
-    named = _block(vault).get("handle")
+        return slugify(named if isinstance(named, str) and HANDLE_RE.match(named) else env)
+    vault = vault or vault_root()
+    named = block(vault).get("handle")
     return slugify(named if isinstance(named, str) and named.strip() else vault.resolve().name)
 
 
@@ -90,11 +92,28 @@ RESERVED_HANDLES = frozenset(
 
 def handle_problem(h: str) -> str:
     """"" when `h` can be a handle, else why not, as My Wikis says it."""
-    if not _HANDLE.match(h) or "--" in h:
+    if not HANDLE_RE.match(h) or "--" in h:
         return "a handle is 1 to 30 of a-z, 0-9 and single dashes, not at either end"
     if h in RESERVED_HANDLES:
         return f"@{h} is reserved"
     return ""
+
+
+# --- the files this process and silica-hosted pass each other ------------------
+# The other end is another repository (its bin/pages), so nothing here can import it and this
+# is where the protocol is written down. A rename on either side fails no test of the other.
+#   <SILICA_HOST_DIR>/handle.json  root's. {"handle": h} once the account has one,
+#                                  {"asked": h, "refused": "taken" | "invalid"} after a refusal.
+#   <SILICA_HOST_DIR>/wikis.json   root's. {slug: {"state": "wait" | "in" | "out" | "no",
+#                                  "since": date, ...}}, a refusal adding its notice.
+#   <silica home>/handle-request.json  the account's. {"handle": h}, read as root and never
+#                                  through a link, removed once answered.
+#   <SILICA_PUBLIC_DIR>/<handle>/live/<slug>/vault.json  the account's. Read as data, nothing
+#                                  trusted beyond its shape (`pages_catalog`, with the host's
+#                                  handles.tsv and wikis.tsv beside it).
+HANDLE_FILE = "handle.json"
+WIKIS_FILE = "wikis.json"
+CLAIM_FILE = "handle-request.json"
 
 
 def _host_dir() -> Path | None:
@@ -122,19 +141,19 @@ def _host_file(name: str) -> dict:
 def _host_answer() -> dict:
     """The host's handle.json: {"handle": h} once the account has one,
     {"asked": h, "refused": "taken" | "invalid"} after a claim it refused."""
-    return _host_file("handle.json")
+    return _host_file(HANDLE_FILE)
 
 
 def host_reviews() -> dict:
     """The host's wikis.json (ADR-0153 point 7), by slug: "state" is wait, in,
     out or no, "since" its date, and a refusal adds the notice of point 13."""
-    return _host_file("wikis.json")
+    return _host_file(WIKIS_FILE)
 
 
 def claim_path() -> Path:
     """Where the account asks for a handle; silica-hosted bin/pages claims reads
     it as root, never through a link, and removes it once answered."""
-    return silica_home() / "handle-request.json"
+    return silica_home() / CLAIM_FILE
 
 
 def _asked() -> str:
@@ -165,8 +184,8 @@ def handle_state(vault: Path | None = None) -> dict:
         if not out["pending"] and isinstance(ans.get("refused"), str):
             out["refused"] = {"handle": str(ans.get("asked") or ""), "why": ans["refused"]}
         return out
-    vault = vault or _vault()
-    named = _block(vault).get("handle")
+    vault = vault or vault_root()
+    named = block(vault).get("handle")
     # A laptop that already published under its folder's name keeps it: a new
     # handle would leave those files in a folder nothing points at.
     if (isinstance(named, str) and named.strip()) or site_root(handle(vault)).exists():
@@ -195,7 +214,7 @@ def claim(h: str, vault: Path | None = None) -> None:
         tmp.write_text(json.dumps({"handle": h}), encoding="utf-8")
         os.replace(tmp, p)
         return
-    set_block_key(vault or _vault(), PUBLIC_KEY, "handle", h)
+    set_block_key(vault or vault_root(), PUBLIC_KEY, "handle", h)
 
 
 def page_url(vault: Path | None = None) -> str:
@@ -203,6 +222,11 @@ def page_url(vault: Path | None = None) -> str:
     base = public_base()
     h = handle(vault)
     return f"{base}/@{h}" if base and h else ""
+
+
+def wiki_url(page: str, slug: str) -> str:
+    """A wiki's address under its page's, "" when the page has none."""
+    return f"{page}/{slug}/" if page else ""
 
 
 def available(vault: Path | None = None) -> bool:
@@ -221,11 +245,17 @@ def available(vault: Path | None = None) -> bool:
 MAX_VAULTS = 20
 FREE_VAULTS = 3
 VISIBILITY = ("off", "public", "private")
-# The license select's choices; "not stated" is the default (ADR-0151 answer 15a).
-LICENSES = ("not stated", "CC BY 4.0", "CC BY-SA 4.0", "CC BY-NC 4.0", "CC0 1.0", "all rights reserved")
+# What a wiki built on a share-alike source must itself say (`rights.blocks`).
+SHARE_ALIKE_LICENSE = "CC BY-SA 4.0"
+# The license select's choices; "not stated" is the default (ADR-0151 answer 15a). The terms a
+# wiki grants its readers, each with its version. `rights.LICENSES` is the other list and stays
+# another: what a source was published under, by family, with terms no wiki here offers.
+LICENSES = ("not stated", "CC BY 4.0", SHARE_ALIKE_LICENSE, "CC BY-NC 4.0", "CC0 1.0", "all rights reserved")
 # A vault's slug is a folder of the page beside these, so none may take their names.
 _RESERVED_SLUGS = {"index", "assets", "_s", "private", "paused", "vault"}
-_HANDLE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,28}[a-z0-9])?$")
+# A handle, the host's rule too: the catalog reads its map with it, and app-public.js checks a
+# field against a copy (`tests/test_public_copies.py`) so a refusal needs no round trip.
+HANDLE_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,28}[a-z0-9])?$")
 
 
 def _clean_vault(raw) -> dict | None:
@@ -249,7 +279,7 @@ def _clean_vault(raw) -> dict | None:
         "visibility": vis if vis in VISIBILITY else "off",
         "listed": raw.get("listed") is True,
         "readers": sorted({r.strip().lstrip("@").lower() for r in readers
-                           if isinstance(r, str) and _HANDLE.match(r.strip().lstrip("@").lower())}),
+                           if isinstance(r, str) and HANDLE_RE.match(r.strip().lstrip("@").lower())}),
         "published": text("published", 40),
         "downgraded": raw.get("downgraded") is True,
     }
@@ -260,11 +290,11 @@ def vaults(vault: Path | None = None) -> list[dict]:
     `folders:` list and `page:` switch are read as vaults until the first
     write replaces them (ADR-0151 point 2): each folder becomes a vault,
     Public when the page was on."""
-    block = _block(vault or _vault())
-    raw = block.get("vaults")
+    public = block(vault or vault_root())
+    raw = public.get("vaults")
     if not isinstance(raw, list):
-        old = f if isinstance(f := block.get("folders"), list) else []
-        on = "public" if block.get("page") is True else "off"
+        old = f if isinstance(f := public.get("folders"), list) else []
+        on = "public" if public.get("page") is True else "off"
         raw = [{"folder": f, "visibility": on} for f in old if isinstance(f, str)]
     out: list[dict] = []
     slugs: set[str] = set()
@@ -292,6 +322,14 @@ def _save_vaults(items: list[dict], vault: Path) -> None:
     set_block_key(vault, PUBLIC_KEY, "vaults", rows)
     for old in ("folders", "page"):
         unset_block_key(vault, PUBLIC_KEY, old)
+
+
+def mark_published(slug: str, day: str, vault: Path) -> None:
+    items = vaults(vault)
+    for v in items:
+        if v["slug"] == slug:
+            v["published"] = day
+    _save_vaults(items, vault)
 
 
 def vault_of(path: str, items: list[dict]) -> dict | None:
@@ -341,7 +379,7 @@ def enforce_tier(vault: Path | None = None) -> list[str]:
     """A Private vault of an account that lost Private turns Off (ADR-0151
     point 10); returns the slugs it turned. Readers keep what they saved,
     and the relay has already stopped delivering on the tier."""
-    vault = vault or _vault()
+    vault = vault or vault_root()
     # only a hosted account loses Private; a laptop never had a relay, and a vault.yaml brought
     # down from the server keeps its choice there rather than reading as a downgrade
     if private_allowed() != "paid":
@@ -360,7 +398,7 @@ def enforce_tier(vault: Path | None = None) -> list[str]:
 
 def add_vault(folder: str, vault: Path | None = None) -> dict:
     """Make a folder a vault on the Page; it starts Off (ADR-0151 point 1)."""
-    vault = vault or _vault()
+    vault = vault or vault_root()
     folder = folder.strip().strip("/")
     items = vaults(vault)
     if not folder or never(folder + "/x", never_dirs()):
@@ -387,7 +425,7 @@ def add_vault(folder: str, vault: Path | None = None) -> dict:
 def update_vault(slug: str, changes: dict, vault: Path | None = None) -> dict:
     """Title, line, license, listing or readers of one vault. Visibility has
     its own call, which moves files."""
-    vault = vault or _vault()
+    vault = vault or vault_root()
     items = vaults(vault)
     v = next((x for x in items if x["slug"] == slug), None)
     if v is None:
@@ -405,7 +443,7 @@ def update_vault(slug: str, changes: dict, vault: Path | None = None) -> dict:
     if "readers" in changes:
         me = handle(vault)
         names = [str(r).strip().lstrip("@").lower() for r in changes["readers"] or []]
-        bad = [n for n in names if not _HANDLE.match(n)]
+        bad = [n for n in names if not HANDLE_RE.match(n)]
         if bad:
             raise ValueError(f"@{bad[0]} is not a handle")
         v["readers"] = sorted({n for n in names if n != me})
@@ -416,7 +454,7 @@ def update_vault(slug: str, changes: dict, vault: Path | None = None) -> dict:
 def remove_vault(slug: str, vault: Path | None = None) -> None:
     """Take an Off vault off the Page, its last publication with it; the
     folder and its notes stay as they are."""
-    vault = vault or _vault()
+    vault = vault or vault_root()
     items = vaults(vault)
     v = next((x for x in items if x["slug"] == slug), None)
     if v is None:
@@ -491,12 +529,12 @@ def frontmatters(vault: Path | None = None) -> dict[str, dict]:
     """{path: frontmatter} of every note, from the note index."""
     from silica.kernel.base import note_index
 
-    return note_index.frontmatters(vault or _vault())
+    return note_index.frontmatters(vault or vault_root())
 
 
 def selection(vault: Path | None = None) -> dict:
     """Every note's state, its vault, and the vaults it was computed from."""
-    vault = vault or _vault()
+    vault = vault or vault_root()
     items = vaults(vault)
     dirs = never_dirs()
     fms = frontmatters(vault)
@@ -505,12 +543,20 @@ def selection(vault: Path | None = None) -> dict:
     return {"vaults": items, "never": list(dirs), "notes": notes, "vault_of": of, "frontmatter": fms}
 
 
+def taken_by(slug: str, sel: dict) -> list[str]:
+    """The notes a vault takes, sorted: on, and in it. What the answers then leave of them is
+    `rights.goes_out`, and nothing but it says what a Publish writes."""
+    return sorted(p for p, s in sel["notes"].items() if s == "on" and sel["vault_of"].get(p) == slug)
+
+
 def set_note(path: str, on: bool, vault: Path | None = None) -> str:
     """Put a note's globe on or off inside its vault, writing the least that
     says it: no `publish:` when its vault already takes it, `false` to leave
     it out, `true` for a clip, which only its own globe takes. Returns the
     note's new state."""
-    vault = vault or _vault()
+    from silica.kernel.write.notes import write_prop
+
+    vault = vault or vault_root()
     dirs = never_dirs()
     if never(path, dirs):
         raise ValueError(f"{path} cannot be published")
@@ -524,38 +570,9 @@ def set_note(path: str, on: bool, vault: Path | None = None) -> str:
         raise ValueError(f"{path} is in no wiki: make its folder a wiki first")
     clip = fm.get("form") == "clip"
     value = (True if clip else None) if on else (None if clip else False)
-    _write_publish(path, value)
+    write_prop(path, "publish", value)
     return state(path, {**fm, "publish": value} if value is not None
                  else {k: v for k, v in fm.items() if k != "publish"}, items, dirs)
-
-
-def _write_publish(path: str, value: bool | None) -> None:
-    write_prop(path, "publish", value)
-
-
-def write_prop(path: str, key: str, value: bool | None) -> None:
-    """Set or remove a note's property through the driver, so the change is a
-    session change like any edit, and leave /undo a restore point: it reads the
-    checkpoints and not the session's ledger. Not `overwrite`, which stamps a
-    `type:` the person never asked for. Lowercase YAML booleans, from the dumper."""
-    from silica.driver import DRIVER
-    from silica.kernel.base import frontmatter as fm
-    from silica.kernel.write.checkpoints import checkpoint_landed
-
-    prior = DRIVER.read_note(path).content
-    data, raw, _body = fm.split(prior)
-    if data is None and raw is not None:
-        raise ValueError(f"the properties of {path} do not parse; fix them before publishing it")
-    if value is not None:
-        DRIVER.set_prop(path, key, value)
-    else:
-        if not DRIVER.composes_props:
-            # The Obsidian bridge has no removal; Obsidian itself does.
-            raise ValueError(f"remove `{key}:` from {path} in Obsidian")
-        DRIVER.unset_prop(path, key)
-    # `hand`: the person's click and no body of Silica's, or a note they edited would read
-    # as untouched to `edited_since_write` and could not be marked as theirs (ADR-0153 point 26).
-    checkpoint_landed(path, prior, prior, kind="hand")
 
 
 # --- where the files go -------------------------------------------------------
@@ -575,7 +592,7 @@ def set_visibility(slug: str, vis: str, vault: Path | None = None) -> dict:
     last publication aside, so its address answers that there is nothing
     there; Public puts it back; Private takes it off the public host, and
     Publish builds it where only the relay reads (point 9)."""
-    vault = vault or _vault()
+    vault = vault or vault_root()
     if vis not in VISIBILITY:
         raise ValueError("a wiki is off, public or private")
     if vis == "private" and private_allowed() != "ok":

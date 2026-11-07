@@ -32,10 +32,6 @@ from silica.tools import tool
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# silica_move
-# ---------------------------------------------------------------------------
-
 @tool(cls="wrapped", collapse="eager", ingress=False, mutates="moved", note_args=("ref",))
 def silica_move(ref: Annotated[str, Field(description='Name or path of the note to move')], to: Annotated[str, Field(description='Destination path')]) -> dict[str, Any]:
     """Move/rename a note safely. Obsidian updates all wikilinks (graph-safe).
@@ -83,10 +79,6 @@ def silica_move(ref: Annotated[str, Field(description='Name or path of the note 
         return {"error": str(e)}
 
 
-# ---------------------------------------------------------------------------
-# silica_delete
-# ---------------------------------------------------------------------------
-
 @tool(cls="wrapped", collapse="eager", ingress=False, mutates="deleted", note_args=("ref",),
       label=("delete", "ref"))
 def silica_delete(ref: Annotated[str, Field(description='Name or path of the note to delete')]) -> dict[str, Any]:
@@ -124,10 +116,6 @@ def silica_delete(ref: Annotated[str, Field(description='Name or path of the not
     return res
 
 
-# ---------------------------------------------------------------------------
-# silica_snapshot
-# ---------------------------------------------------------------------------
-
 @tool(cls="wrapped", collapse="eager", internal=True, ingress=False, label=("snapshot", "ops_json_path"))
 def silica_snapshot(ops_json_path: Annotated[str, Field(description='Path to validated operations JSON to snapshot before writing')]) -> dict[str, Any]:
     """Snapshot the current state of notes before they are modified.
@@ -157,10 +145,6 @@ def silica_snapshot(ops_json_path: Annotated[str, Field(description='Path to val
         "inverses": txn.inverses_serialized,
     }
 
-
-# ---------------------------------------------------------------------------
-# silica_restore
-# ---------------------------------------------------------------------------
 
 @tool(cls="wrapped", collapse="eager", internal=True, ingress=False, mutates="written",
       label=("restore", "txn_id"))

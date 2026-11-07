@@ -305,7 +305,7 @@ class TestGraphExportAutoCooccur:
 
     def test_refreshes_cooccurrence_before_export(self, monkeypatch):
         import silica.tools.graph as gmod
-        import silica.ui.web.graph_view as gx
+        import silica.tools.graph_view as gx
 
         calls = []
         monkeypatch.setattr(gmod, "silica_cooccurrence_refresh",
@@ -320,7 +320,7 @@ class TestGraphExportAutoCooccur:
 
     def test_refresh_failure_is_best_effort(self, monkeypatch):
         import silica.tools.graph as gmod
-        import silica.ui.web.graph_view as gx
+        import silica.tools.graph_view as gx
 
         def boom(folder=""):
             raise RuntimeError("index locked")
@@ -336,7 +336,7 @@ class TestGraphExportStaysInTheVault:
 
     def _capture(self, monkeypatch):
         import silica.tools.graph as gmod
-        import silica.ui.web.graph_view as gx
+        import silica.tools.graph_view as gx
 
         seen = {}
         monkeypatch.setattr(gmod, "silica_cooccurrence_refresh", lambda folder="": {})

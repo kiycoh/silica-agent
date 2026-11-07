@@ -33,7 +33,7 @@ from silica.sources.base import GroundedStub, RawItem
 
 _MSGID_RE = re.compile(r"<[^<>\s]+>")
 # The two files Part A reads (point 9). Also what the Mail row's picker offers
-# and what a chat drop refuses to stage (server.py), from this one tuple.
+# and what a chat drop refuses to stage (drop.py), from this one tuple.
 SUFFIXES = (".eml", ".mbox")
 # What one message may hold in memory before it is reduced. A newsletter's HTML
 # runs to ~100k chars; past this a message is a payload, not correspondence,

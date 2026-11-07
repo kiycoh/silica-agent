@@ -119,10 +119,6 @@ def _first_line(full: str) -> str:
     return full.splitlines()[0].strip() if full else ""
 
 
-# ---------------------------------------------------------------------------
-# symbols
-# ---------------------------------------------------------------------------
-
 def _add(symbols: dict, sym: Symbol) -> None:
     key = (sym.kind, sym.name, sym.parent)
     old = symbols.get(key)

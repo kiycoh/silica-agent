@@ -14,7 +14,7 @@ the reader as the same files, put outside their vault by the host's relay.
 """
 from __future__ import annotations
 
-from silica.config import live_env, silica_home
+from silica.config import PUBLIC_PAGES_HOST, live_env, silica_home
 
 import datetime
 import json
@@ -34,7 +34,7 @@ _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")
 
 def allowed_hosts() -> set[str]:
     # the hosted pages' host (ADR-0143 point 6): the apex is the landing, on GitHub Pages
-    raw = live_env("SILICA_PUBLIC_HOSTS") or "wikis.silica-agent.dev"
+    raw = live_env("SILICA_PUBLIC_HOSTS") or PUBLIC_PAGES_HOST
     return {h.strip().lower() for h in raw.split(",") if h.strip()}
 
 

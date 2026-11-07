@@ -27,7 +27,7 @@ def test_every_slot_is_filled_and_every_value_is_read():
     """substitute() already raises on a slot with no value; this is the other
     direction, a value the skeleton stopped asking for, which nothing else
     would ever report."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     slots = set(Template(gv._asset("graph-frame.html")).get_identifiers())
     ctx = gv._frame_context([], [], [], "t", "", "", [])
@@ -44,7 +44,7 @@ def test_the_frame_code_is_a_file_node_can_parse():
 
 
 def test_the_frame_reads_its_data_from_the_island_and_nowhere_else():
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     html = gv.render_html([{"id": "a.md", "label": "a", "type": "note", "group": 0, "path": "a.md"}],
                           [], lib_js="// x")
@@ -63,7 +63,7 @@ def test_the_island_cannot_be_ended_by_what_it_carries():
     """`</script>` is the obvious one. `<!--<script>` is the other: it moves the
     HTML parser into the double-escaped state, where the real closing tag no
     longer closes, which is why every `<` goes and not only `</`."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     label = "x</script><!--<script>alert(1)//"
     html = gv.render_html([{"id": "n", "label": label, "type": "note", "group": 0, "path": label + ".md"}],
@@ -77,7 +77,7 @@ def test_the_island_cannot_be_ended_by_what_it_carries():
 def test_a_non_finite_score_fails_on_the_server_with_a_name():
     """NaN was a working JS literal and would be a JSON.parse syntax error and a
     blank frame; the ValueError here is what /graph shows instead."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     edges = [{"id": "e", "from": "a", "to": "b", "type": "SIMILAR", "score": float("nan")}]
     with pytest.raises(ValueError, match="JSON compliant"):
@@ -85,7 +85,7 @@ def test_a_non_finite_score_fails_on_the_server_with_a_name():
 
 
 def test_a_missing_frame_file_is_a_packaging_error_with_a_name():
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     with pytest.raises(RuntimeError, match="nope.css"):
         gv._asset("nope.css")
@@ -97,7 +97,7 @@ def test_the_document_references_nothing_by_url():
     """Opened from file:// there is no server: everything the page needs is in
     the page. The bundles and the face were already inlined; the frame's own
     three files must not be the exception."""
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     html = gv.render_html([], [], lib_js="// x")
     assert "<link" not in html and "<script src=" not in html
@@ -120,7 +120,7 @@ def _edge_colors(paper: bool) -> dict[str, str]:
     so their luminance is chosen to hide, not to separate.
     """
     from silica.kernel.graph import graph_export as ge
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     out = {}
     for mod in (ge, gv):
@@ -155,7 +155,7 @@ def test_a_broken_line_is_a_link_that_is_not_there():
     holds rather than one that is missing, and at 2901 of 4246 visible edges it
     is the ground the other layers are read against.
     """
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     js = gv._asset("graph-frame.js")
     line = next(ln for ln in js.splitlines() if ln.startswith("const ABSENT"))
@@ -193,7 +193,7 @@ def test_both_renderers_break_the_inferred_line():
     2D prints a screen instead (ADR-0146, the tests below); the canvas keeps
     the dash only for the frame with no WebGL2, which has no screen to print.
     """
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     js = gv._asset("graph-frame.js")
     assert ".linkLineDash(" in js, "the canvas fallback draws the absent layers solid"
@@ -233,7 +233,7 @@ def _edge(kind: str) -> dict:
     """An edge as the server sends it: colour pair and opacity from the
     exporters' own constants (CITES carries none and takes the fallback)."""
     from silica.kernel.graph import graph_export as ge
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     pair = {"EXTRACTED": (ge._EDGE_COLOR_EXTRACTED, ge._EDGE_COLOR_EXTRACTED_PAPER, 0.72),
             "AMBIGUOUS": (ge._EDGE_COLOR_AMBIGUOUS, ge._EDGE_COLOR_AMBIGUOUS_PAPER, 0.55),
@@ -601,7 +601,7 @@ def test_the_3d_mark_carries_the_rings_2d_draws():
     per COLOUR and a geometry per size, so the value has to arrive on the object
     itself, immediately before its draw.
     """
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     js = gv._asset("graph-frame.js")
     assert "onBeforeRender = nodeRingStep" in js, (

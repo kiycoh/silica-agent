@@ -5,18 +5,9 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 from pathlib import Path
 
 from silica.config import CONFIG, silica_home
-
-logger = logging.getLogger(__name__)
-
-
-    # ponytail: no directory fsync — post-power-loss rename durability is
-    # filesystem-dependent, and every caller's file is rebuildable or
-    # re-produceable; upgrade if a real loss is ever traced here.
-
 
 def resolve_vault_path(vault_path: str | None = None) -> str | None:
     """An explicit vault path, else the live CONFIG's, else None.
@@ -34,12 +25,6 @@ def resolve_vault_path(vault_path: str | None = None) -> str | None:
         return CONFIG.vault_path or None
     except Exception:
         return None
-
-
-# ---------------------------------------------------------------------------
-# Silica runtime directory helpers
-# ---------------------------------------------------------------------------
-
 
 
 def silica_tmp_dir() -> Path:

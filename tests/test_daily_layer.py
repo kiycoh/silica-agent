@@ -192,7 +192,7 @@ def test_a_lone_day_is_drawn_neutral(vault):
 
 
 def test_the_export_draws_a_lone_day_neutral(monkeypatch, tmp_path):
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
     monkeypatch.setattr(graph_export, "build_graph_data", lambda folder="": (
@@ -218,7 +218,7 @@ def test_the_export_draws_a_lone_day_neutral(monkeypatch, tmp_path):
 
 def test_the_graph_export_tool_refreshes_the_blocks_first(monkeypatch, vault):
     import silica.tools.graph as tg
-    import silica.ui.web.graph_view as gv
+    import silica.tools.graph_view as gv
 
     calls = []
     monkeypatch.setattr(tg, "silica_cooccurrence_refresh", lambda folder="": {})

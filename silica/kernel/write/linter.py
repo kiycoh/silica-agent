@@ -215,7 +215,7 @@ if __name__ == "__main__":
                 print(f"  ⚠ {fname}:")
                 for w in warns:
                     print(f"    · {w}")
-            print()  # blank line separator
+            print()
 
         # Errors (violations) — block pipeline
         if not error_results:

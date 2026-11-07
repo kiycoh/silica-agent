@@ -123,7 +123,7 @@ def test_every_message_between_the_page_and_the_frame_has_both_ends():
 def test_every_call_python_writes_into_the_frames_html_is_a_function_of_the_frame():
     """H-INLINEJS: a JS-only search reports these as dead, and a rename breaks a
     checkbox without a word."""
-    called = set(re.findall(r'on(?:change|click)="(\w+)\(', _py("ui/web/graph_view.py")))
+    called = set(re.findall(r'on(?:change|click)="(\w+)\(', _py("tools/graph_view.py")))
     frame = _js("graph-frame.js")
     assert called and not {f for f in called if not re.search(rf"\bfunction {f}\(|\b{f} = ", frame)}
 
@@ -133,11 +133,11 @@ def test_the_rails_classes_are_ones_the_page_styles_or_reads():
     from tests.webassets import app_css
 
     page = app_css() + "".join(_page_scripts().values())
-    written = set(re.findall(r'class="((?:tree|find|fm)-[\w-]+)', _py("ui/web/file_tree.py", "ui/web/explore_routes.py", "ui/web/render.py")))
+    written = set(re.findall(r'class="((?:tree|find|fm)-[\w-]+)', _py("kernel/graph/file_tree.py", "ui/web/explore_routes.py", "ui/web/render.py")))
     assert {"tree-row", "tree-pin", "find-result", "fm-row"} <= written
     assert not {c for c in written if c not in page}
     # a tree row's address is the hash router's grammar
-    assert 'href="#chat?note=' in _py("ui/web/file_tree.py") and 'params.get("note")' in page
+    assert 'href="#chat?note=' in _py("kernel/graph/file_tree.py") and 'params.get("note")' in page
 
 
 def test_an_embed_in_a_streaming_answer_draws_what_the_page_can_draw():

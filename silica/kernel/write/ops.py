@@ -151,7 +151,7 @@ class Txn:
     """
     id: str
     refs: list[NoteRef] = field(default_factory=list)
-    created_paths: list[str] = field(default_factory=list)   # paths created by write ops
+    created_paths: list[str] = field(default_factory=list)
     inverses: list = field(default_factory=list)              # list[InverseOp] — real field, not dynamic attr
 
     @property

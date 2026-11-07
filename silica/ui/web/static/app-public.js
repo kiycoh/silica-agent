@@ -167,8 +167,6 @@ async function togglePublicRow(b) {
   return pubPost("/public/note", { path, on });
 }
 
-// --- the note's globe --------------------------------------------------------
-
 function syncNotePub() {
   const b = $("#note-pub");
   if (!b) return;
@@ -218,8 +216,6 @@ $("#note-pub-pop").addEventListener("click", (e) => {
   if (pick.dataset.np === "yes") pubPost("/public/note", { path: pop.dataset.path, on: true });
 });
 
-// --- the view ----------------------------------------------------------------
-
 async function loadPublicView() {
   if (!pubState) $("#public-body").replaceChildren(mkEl("p", "pp-dim", "Reading the vault…"));
   await Promise.all([loadPublicState(), loadInvitations()]);
@@ -251,10 +247,19 @@ function pubCoverFigure() {
   return pubCoverEl;
 }
 
+// Its address carries its hash by hand, as app-chat.css's import does: index() versions what
+// index.html names, and tests/test_public_copies.py fails a change that forgets it.
+const PUB_PRESS = "/static/pages/cover.js?v=73b99244";
+let pubPressLoad = null;
+const pubPress = () => pubPressLoad ||= new Promise((ok) => {
+  // a press that does not load leaves the boxes of the view, which say the same in words
+  document.head.append(Object.assign(document.createElement("script"), { src: PUB_PRESS, onload: ok, onerror: ok }));
+});
+
 async function loadPubCover(slug, build) {
   let c = null;
   try {
-    const r = await fetch("/public/cover?vault=" + encodeURIComponent(slug));
+    const [r] = await Promise.all([fetch("/public/cover?vault=" + encodeURIComponent(slug)), pubPress()]);
     c = r.ok ? await r.json() : null;
   } catch {
     // A vault without its picture still says what goes out: the boxes do not need it.
@@ -295,7 +300,7 @@ function drawPubCover() {
   if (!pubCover || !pubCoverEl || activeTab !== "public") return;
   const box = pubCoverEl.querySelector(".pp-cover-box"), cv = box.querySelector("canvas");
   const r = box.getBoundingClientRect(), w = Math.floor(r.width), h = Math.floor(r.height);
-  if (w < 40 || h < 40) return;
+  if (w < 40 || h < 40 || !window.coverPress) return;
   const N = pubCover.n, E = pubCover.e, pad = 14;
   if (!pubCoverRank) {
     // the order the vault builds in: from the middle of the layout outward
@@ -305,18 +310,7 @@ function drawPubCover() {
     [...d.keys()].sort((a, b) => d[a] - d[b]).forEach((i, k) => { pubCoverRank[i] = k / N.length; });
   }
   if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-  // cover-ink:start The press this cover shares with pages.js, which ships alone to the public
-  // host and cannot load a file of the app's: tests/test_design_copies.py holds the two to one text.
-  const X = (i) => Math.round(pad + N[i][0] * (w - 2 * pad)), Y = (i) => Math.round(pad + N[i][1] * (h - 2 * pad));
-  const rad = (i) => (N[i][3] >= 12 ? 2 : 1);
-  const x = cv.getContext("2d"), img = x.createImageData(w, h), px = new Uint32Array(img.data.buffer);
-  const put = (a, b, c) => { if (a >= 0 && b >= 0 && a < w && b < h) px[b * w + a] = c; };
-  const seg = (x0, y0, x1, y1, c) => {
-    const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
-    for (let k = 0; k <= n; k++) put(Math.round(x0 + (x1 - x0) * k / n), Math.round(y0 + (y1 - y0) * k / n), c);
-  };
-  const disc = (cx, cy, rr, c) => { for (let a = -rr; a <= rr; a++) for (let b = -rr; b <= rr; b++) if (a * a + b * b <= rr * rr + rr) put(cx + a, cy + b, c); };
-  // cover-ink:end
+  const { X, Y, rad, seg, disc, px, done } = coverPress(cv, N, w, h, pad);
   const ground = pubU32(pubRgb(pubCss("--void"))), ink = pubU32(pubRgb(pubCss("--frost")));
   px.fill(ground);
   // a note lands at at(i) and its links grow from the note that landed first
@@ -338,7 +332,7 @@ function drawPubCover() {
     disc(X(i), Y(i), r0 + 4, ground); disc(X(i), Y(i), r0 + 3, ink);
     disc(X(i), Y(i), r0 + 1, ground); disc(X(i), Y(i), r0, ink);
   }
-  x.putImageData(img, 0, 0);
+  done();
 }
 
 function pubCoverPoint(ev) {
@@ -427,7 +421,7 @@ function upgradeAtLimit(ev, said) {
 
 function upsellText(why) {
   if (why === "hosted") return [document.createTextNode("A Private wiki is read only by the accounts you name, which needs Silica hosted: on this computer there is no one to deliver it to.")];
-  const a = Object.assign(document.createElement("a"), { href: "https://silica-agent.dev/#plans", target: "_blank", rel: "noopener", textContent: "What a paid account includes" });
+  const a = Object.assign(document.createElement("a"), { href: $("#upgrade-go").href, target: "_blank", rel: "noopener", textContent: "What a paid account includes" });
   return [document.createTextNode("A Private wiki is read only by the accounts you name. It comes with a paid account: "), a, document.createTextNode(".")];
 }
 

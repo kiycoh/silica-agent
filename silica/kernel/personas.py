@@ -24,7 +24,7 @@ from silica.kernel import system_lines
 ORIGIN = "persona"
 COMMAND = "/persona"   # answered by `command` below, ahead of both REPL tables
 # On the persona's system line and on every user turn it ran under, so a
-# reopened chat puts it back (server.load_session) and a reader of the
+# reopened chat puts it back (chat_routes.load_session) and a reader of the
 # narration can tell which answers it shaped.
 TURN_KEY = "silica_persona"
 # Every call of every turn pays the line, so it is capped: 2,000 characters is
