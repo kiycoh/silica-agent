@@ -26,6 +26,7 @@ from silica.kernel.base import note_index
 from silica.kernel.base.notekey import ledger_key
 from silica.kernel.base.noteshape import is_plan
 from silica.kernel.learn import store
+from silica.kernel.learn.mastery import DEPTH_LABEL
 from silica.kernel.learn.pace import budget, pace_of, today_line
 from silica.kernel.learn.reference import (HEADING_LINE_RE, RESTRICT_SEP, STEP_LINK_RE, assessment_text, note_title,
                                            parse_assessment, parse_steps, reference_rows, section_lines, section_links,
@@ -37,7 +38,6 @@ logger = logging.getLogger(__name__)
 
 SCOPES = ("notes", "folder", "topic", "steps", "workspace")
 REACH = {"unistructural": 1, "multistructural": 2, "relational": 3, "extended": 4}
-REACH_LABEL = {1: "Facts", 2: "Parts", 3: "Mechanisms", 4: "New contexts"}
 
 
 def find_plan(name: str) -> dict | None:
@@ -648,7 +648,7 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
         nxt = {"path": first, "title": Path(first).stem, "objective": o, "label": obj.LABEL[o]}
     return {
         "path": plan["path"], "name": plan["name"], "scope": plan["scope"], "target": plan["target"],
-        "reach": plan["reach"], "reach_level": plan["reach_level"], "reach_label": REACH_LABEL[plan["reach_level"]],
+        "reach": plan["reach"], "reach_level": plan["reach_level"], "reach_label": DEPTH_LABEL[plan["reach_level"]],
         "objectives": objectives, "objectives_chosen": plan["objectives_chosen"],
         "objective_labels": [obj.LABEL[o] for o in objectives],
         "cards": obj.attach_paths(plan["cards"], tree_src), "next": nxt,

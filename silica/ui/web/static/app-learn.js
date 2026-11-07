@@ -41,22 +41,15 @@ let lrPrevOpen = false;       // the previous question's feedback is unfolded
 const lrDiscOpen = new Set(); // disclosures the reader opened, kept across re-renders
 const LR_LAST_PLAN = "silica.learn.lastPlan";
 
-const LR_CONF = [["certain", 90], ["pretty sure", 70], ["half unsure", 50], ["guessing", 25]];
-const LR_RATING = { 1: "again", 2: "hard", 3: "good", 4: "easy" };
-const LR_LEVEL = { 1: "Facts", 2: "Parts", 3: "Mechanisms", 4: "New contexts" };
-const LR_OBJ = { recall: "Recall information", explain: "Explain how and why", apply: "Apply to a case", compare: "Compare and distinguish", evaluate: "Evaluate and justify" };
-const LR_OBJ_DESC = {
-  recall: "Restate definitions, facts or steps without looking them up.",
-  explain: "Make relations, mechanisms and conditions of validity explicit.",
-  apply: "Use a principle or a procedure, showing the steps it requires.",
-  compare: "Find similarities, differences and the conditions that make them matter.",
-  evaluate: "Support a choice or a judgement with criteria and evidence.",
-};
+const LR_CONF = VOCAB.learn.confidence;
+const LR_RATING = VOCAB.learn.ratings;
+const LR_LEVEL = VOCAB.learn.levels;
+const LR_OBJ = VOCAB.learn.objectives;
+const LR_OBJ_DESC = VOCAB.learn.objective_help;
 const LR_SCOPE = { notes: "some notes", folder: "a folder", topic: "a topic", steps: "a syllabus", workspace: "a workspace" };
 const LR_GRADE_WAIT_MS = 20000;   // §5.1: after 20 s without a verdict, self-grade with the evidence
-// An explanation said aloud runs longer than a chat message (ADR-0049); the
-// server's upload cap (_STT_MAX_BYTES) is sized for this ceiling.
-const LR_MIC_MAX_MS = 180000;
+// An explanation said aloud runs longer than a chat message (ADR-0049).
+const LR_MIC_MAX_MS = VOCAB.mic.explain_max_ms;
 const LR_READ_KEY = "silica.learn.readAloud";
 let lrReadAloud = (() => { try { return localStorage.getItem(LR_READ_KEY) === "1"; } catch { return false; } })();
 let lrSpoken = new Set();     // what was already read aloud, so a re-render never repeats it
@@ -97,7 +90,7 @@ function lrGone(e) {
 // with help, not counted), full (met without help); warn is the one amber
 // mark, for caution. `say` labels it for a screen reader; "" when the words
 // beside it already say it.
-const LR_MARK_SAY = { open: "still to verify", half: "met with help, not counted", full: "met without help", warn: "caution", never: "not tested yet" };
+const LR_MARK_SAY = VOCAB.learn.marks;
 function lrMark(kind, say) {
   const m = mkEl("span", "lr-mk " + kind);
   const label = say === undefined ? LR_MARK_SAY[kind] : say;
@@ -655,7 +648,7 @@ function lrMissedHome(missed) {
   h.appendChild(mkEl("span", "cnt num", ` ${missed.length}`));
   t.append(h, mkEl("span", "lr-help", "lately, and not met since"));
   const q = missed.reduce((a, m) => a + (m.questions || 1), 0);
-  const go = lrBtn("ghost box", "Ask these again", () => learnStartSession({ scope: missed.map((m) => m.path), n: Math.min(24, q), from: "missed" }));
+  const go = lrBtn("ghost box", "Ask these again", () => learnStartSession({ scope: missed.map((m) => m.path), n: Math.min(VOCAB.learn.session_max, q), from: "missed" }));
   go.disabled = !!lrSession;
   head.append(t, go);
   sec.appendChild(head);
@@ -758,7 +751,7 @@ function lrPlanRow(p, on, completed = false) {
     b.appendChild(mkEl("div", "n", `in progress · ${lrSession.items[lrSession.cur]?.title || ""}, question ${lrSession.cur + 1} of ${lrSession.items.length}`));
   } else {
     const why = (lrData.next?.plans || []).find((x) => x.path === p.path)?.why;
-    b.appendChild(mkEl("div", "n", why || (p.gaps ? `not started · ${lrPlural(p.gaps, "step has no note in the vault", "steps have no note in the vault")}` : "nothing pending")));
+    b.appendChild(mkEl("div", "n", why));
   }
   // the plan page's measure (ADR-0141): notes met, and the percent once one is met
   const meter = mkEl("div", "lr-meter");
@@ -909,7 +902,7 @@ function lrRenderPlanDetail(right, p) {
   const live = lrSession && lrSession.plan === p.path;
   const closed = p.status === "completed";
   if (live) right.appendChild(lrResumeBox());
-  const n = p.pace?.session || 8;
+  const n = p.pace?.session || LR_SESSION_Q;
   const open = lrBtn("ghost box", "Open plan note", () => openNote(p.path));
   const edit = lrBtn("ghost box", "Edit plan", () => lrGo({ view: "edit", plan: p.path }));
   const go = !live && !closed ? lrBtn(p.complete ? "ghost box" : "lr-send", "Continue plan", () => learnStartSession({ plan: p.path, n })) : null;
@@ -919,7 +912,7 @@ function lrRenderPlanDetail(right, p) {
   const done = p.complete && !closed ? lrBtn(live ? "ghost box" : "lr-send", "Mark completed", async () => { await apiPost("/learn/plan/close", { path: p.path }); lrData = null; lrPlan = null; loadLearn(true); }) : null;
   const reopen = closed ? lrBtn("ghost box", "Reopen", async () => { await apiPost("/learn/plan/close", { path: p.path, reopen: true }); lrData = null; lrPlan = null; loadLearn(true); }) : null;
   const head = lrHead(closed ? `Plan · completed ${lrDate(p.completed)}` : "Plan", p.name,
-    live ? "a new session waits for this one to end" : !closed ? `${lrPlural(n, "question")} · about ${Math.max(1, Math.round(n * 1.3))} min` : "",
+    live ? "a new session waits for this one to end" : !closed ? `${lrPlural(n, "question")} · about ${_lrMinutes(n)} min` : "",
     [open, edit, reopen]);
   head.appendChild(lrCompletion(p));
   // under the bar that says why: Mark completed leads once it is the plan's
@@ -932,7 +925,7 @@ function lrRenderPlanDetail(right, p) {
   }
   if (check) {
     const q = p.placement.questions;
-    head.appendChild(mkEl("p", "lr-help", `Up to 2 questions a step, ${q} in all, about ${Math.max(1, Math.round(q * 1.3))} min. `
+    head.appendChild(mkEl("p", "lr-help", `Up to 2 questions a step, ${q} in all, about ${_lrMinutes(q)} min. `
       + "A step you know comes after the others; nothing is passed for you." + (p.placement.last ? ` Last checked ${lrDate(p.placement.last)}.` : "")));
   }
   const goal = mkEl("p", "goal");
@@ -1028,7 +1021,7 @@ function lrRenderPlanDetail(right, p) {
       const tr = mkEl("tr");
       tr.appendChild(mkEl("th", null, lrDate(s.date)));
       tr.appendChild(mkEl("td", "num", String(s.items)));
-      tr.appendChild(mkEl("td", null, s.met ? s.met.replace(/,/g, " ·") : s.line.replace(/ · session: [0-9a-f]+$/, "").split(" · ").slice(2).join(" · ")));
+      tr.appendChild(mkEl("td", null, s.met ? s.met.replace(/,/g, " ·") : s.rest));
       const td = mkEl("td");
       if (s.session) td.appendChild(lrBtn("lr-link", "receipt", () => lrOpenReceipt(s.session)));
       tr.appendChild(td);
@@ -1530,13 +1523,13 @@ function lrFormReset(extra = {}) {
 }
 lrFormReset();
 const LR_KIND_WORD = { folder: "folder", notes: "notes", topic: "topic", steps: "syllabus", workspace: "workspace" };
-const LR_SESSION_Q = 8;
+const LR_SESSION_Q = VOCAB.learn.session;
 
 // The Study as the items it holds (ADR-0119, amendment 2026-10-17): notes and folders gather, a
 // topic, a workspace or a syllabus stands alone. Notes alone stay a notes
 // scope, by title; any folder among them makes one folder scope whose parts
 // are joined by " | ", as `restrict` joins its bounds (plans.folder_parts).
-const LR_SEP = " | ";
+const LR_SEP = VOCAB.learn.separator;
 const lrJoins = (o) => o.kind === "folder" || o.kind === "notes";
 function lrStudyItems(f) {
   if (!f.scope || !String(f.target).trim()) return [];
@@ -1639,7 +1632,7 @@ function lrFormFromPlan(p) {
 function lrSourcesFromPlan(p) {
   const roles = {};
   for (const [key, role] of [["materials", "material"], ["references", "reference"], ["unused", "unused"]]) {
-    for (const label of String(p[key] || "").split(" | ").map((x) => x.trim()).filter(Boolean)) roles[label] = role;
+    for (const label of String(p[key] || "").split(LR_SEP).map((x) => x.trim()).filter(Boolean)) roles[label] = role;
   }
   return {
     // kept, not touched: they go back as the plan's, said "as the plan says"
@@ -2277,8 +2270,8 @@ function lrShowPreview(sec, p) {
 // role in this plan and the rule that gave it (ADR-0131 points 2 and 13);
 // the assessment the reference states, as parts that can be removed; a
 // guide for the steps' depth when the bound holds one.
-const LR_ROLE = { material: "Material", reference: "Reference", unused: "Not used" };
-const LR_PART = { project: "Project", oral: "Oral exam", written: "Written exam", presentation: "Presentation", exercises: "Exercises" };
+const LR_ROLE = VOCAB.learn.roles;
+const LR_PART = VOCAB.learn.parts;
 function lrSourcesSection() {
   const f = lrForm;
   const p = f.preview;
@@ -2468,7 +2461,7 @@ function lrProjection() {
   if (sessions === 1) return { text: `${pass}; ${lrPlural(days, "day")} leave room for a second pass on what you miss.` };
   return { text: `${pass}. ${when} that is ` + (perWeek <= 1 ? "one a week; two leave room to ask again what you miss." : `${Math.ceil(perWeek)} a week.`) };
 }
-const _lrMinutes = (q) => Math.max(1, Math.round(q * 1.3));
+const _lrMinutes = (q) => Math.max(1, Math.round(q * VOCAB.learn.minutes_per_question));
 
 // -- Objectives: a closed row, written in the background, never the gate (§16)
 function lrObjectivesSection() {
@@ -2770,7 +2763,7 @@ function lrInputParts(sheet, s, it) {
 // title asks four times (grade.TEACH_TURNS); the summary then reads your
 // words against the note, and the reveal and its rating follow as for any
 // question. Answering by voice is the session's own mic.
-const LR_TEACH_TURNS = 4;
+const LR_TEACH_TURNS = VOCAB.learn.teach_turns;
 // the note's name, not items.title_of: that reads the first heading, which in
 // this vault is often a section ("Modellamento cognitivo" for L'apprendimento)
 const lrTeachAsk = (it) => `Explain ${noteStem(it.path)} in your own words.`;
@@ -3464,7 +3457,7 @@ function lrRenderReceipt(body) {
     const t = mkEl("div", "t");
     t.appendChild(mkEl("b", null, `${lrPlural(missed.paths.length, "note")} to ask again`));
     t.appendChild(mkEl("span", "lr-help", "or they come back in Missed"));
-    fu.append(t, lrBtn("lr-send", "Ask these again", () => learnStartSession({ scope: missed.paths, n: Math.min(24, missed.n), from: "missed" })));
+    fu.append(t, lrBtn("lr-send", "Ask these again", () => learnStartSession({ scope: missed.paths, n: Math.min(VOCAB.learn.session_max, missed.n), from: "missed" })));
     wrap.appendChild(fu);
   }
   if (r.revisit?.length) {

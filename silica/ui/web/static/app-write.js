@@ -174,7 +174,6 @@ function findInNote(s) {
 }
 
 // --- an image pasted or dropped lands in the vault (ADR-0155 point 15) ---------
-const IMAGE = /^image\/(png|jpeg|gif|webp)$/;
 async function putImage(s, file) {
   if (s.fresh) await saveEdit(s); // the file lands beside its note, so the note comes first
   if (!s.path) { notify("write a line first: an image lands beside its note"); return; }
@@ -197,14 +196,14 @@ async function putImages(s, files) {
 }
 const imageDrop = (s) => window.CM.EditorView.domEventHandlers({
   paste(e) {
-    const files = [...(e.clipboardData?.files || [])].filter((x) => IMAGE.test(x.type));
+    const files = [...(e.clipboardData?.files || [])].filter((x) => VOCAB.formats.note_images.includes(x.type));
     if (!files.length) return false;
     e.preventDefault();
     putImages(s, files);
     return true;
   },
   drop(e, view) {
-    const files = [...(e.dataTransfer?.files || [])].filter((x) => IMAGE.test(x.type));
+    const files = [...(e.dataTransfer?.files || [])].filter((x) => VOCAB.formats.note_images.includes(x.type));
     if (!files.length) return false;
     e.preventDefault();
     const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });

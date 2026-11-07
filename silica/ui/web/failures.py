@@ -55,13 +55,13 @@ _AUTHORED = re.compile(r"\bUsage:|not available in this session|has nothing to s
 
 # A usage limit reached (ADR-0102 point 6): one sentence per layer, each naming
 # when it resets. `{when}` is filled here in UTC, and the frame also carries the
-# instant and the exact words filled in, so the browser can put the student's
-# own clock in their place: the server's zone is the host's, never the reader's.
-_LIMIT_SENTENCES = {
-    "window": "You have used this 5-hour window.",
-    "week": "You have used this week's allowance.",
-    "month": "You have used this month's allowance.",
-}
+# instant and these words, so the browser can write the sentence again with the
+# student's own clock: the server's zone is the host's, never the reader's.
+LIMIT_PHRASE = {"window": "this 5-hour window", "week": "this week's allowance", "month": "this month's allowance"}
+LIMIT_SENTENCE = {layer: f"You have used {phrase}." for layer, phrase in LIMIT_PHRASE.items()}
+# The reset's sentence after it, `{when}` filled here in UTC and on the page in
+# the reader's own clock.
+LIMIT_RESETS = "It resets {when}."
 # UsageLimited's own text (silica.model.usage_limits), which is all a tool's
 # failure carries by the time a sub-agent's refusal reaches the transcript.
 _LIMIT_TEXT = re.compile(r"usage limit reached: (window|week|month), resets (\S+)")
@@ -96,8 +96,8 @@ def _when(layer: str, resets_at: str | None) -> str:
 def limit_sentence(layer: str, resets_at: str | None) -> tuple[str, str]:
     """(sentence, the reset's words inside it) for a limit reached."""
     when = _when(layer, resets_at) if resets_at else ""
-    head = _LIMIT_SENTENCES.get(layer, _LIMIT_SENTENCES["month"])
-    return (f"{head} It resets {when}." if when else head), when
+    head = LIMIT_SENTENCE.get(layer, LIMIT_SENTENCE["month"])
+    return (f"{head} {LIMIT_RESETS.format(when=when)}" if when else head), when
 
 
 def sentence(raw: str) -> str:
@@ -116,7 +116,7 @@ def _limit_of(exc: BaseException | str, raw: str) -> tuple[str, str | None] | No
     """(layer, resets_at) when `exc` is a usage limit: refused before the call,
     or, hosted, a 403 OpenRouter returned while `budgets` shows a layer spent."""
     layer = getattr(exc, "layer", None)
-    if isinstance(layer, str) and layer in _LIMIT_SENTENCES:
+    if isinstance(layer, str) and layer in LIMIT_SENTENCE:
         return layer, getattr(exc, "resets_at", None)
     if m := _LIMIT_TEXT.search(raw):
         return m[1], (m[2] if m[2] != "never" else None)

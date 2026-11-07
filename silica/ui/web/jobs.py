@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # The topic the narration stream forwards to the browser as `event: job`.
 TOPIC = "jobs/update"
 INTERRUPTED = "the server restarted during this conversion"
+UNCONVERTED = "it could not be converted"
 # Open 2, accepted 2026-10-13: a finished job's record goes after 30 days; a
 # failed or interrupted one stays until the student dismisses it.
 DONE_KEEP_S = 30 * 86400
@@ -257,9 +258,9 @@ def _sentence(exc: Exception) -> str:
     from silica.sources.pdf_extract import PdfUnreadable
 
     if isinstance(exc, MediaRefused | PdfUnreadable | Refused):
-        return str(exc.args[0]) if exc.args else "it could not be converted"
+        return str(exc.args[0]) if exc.args else UNCONVERTED
     if isinstance(exc, ValueError):
-        return "it could not be converted" if hosted() else str(exc)
+        return UNCONVERTED if hosted() else str(exc)
     return "it could not be read"
 
 

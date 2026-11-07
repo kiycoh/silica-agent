@@ -212,8 +212,8 @@ function addToVaultButton(source, chip) {
   return b;
 }
 
-// The formats the chat model's projector takes (formats.IMAGE_MIME).
-const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
+// The formats the chat model's projector takes.
+const IMAGE_TYPES = VOCAB.formats.chat_images;
 function stagedAreImages() {
   return staged.length > 0 && staged.every((f) => IMAGE_TYPES.includes(f.type));
 }
@@ -2281,7 +2281,7 @@ addEventListener("beforeunload", (e) => {
 // back with its marks when it is reopened, from the server's cache and with
 // no model call, so following a box's passage and coming back loses nothing.
 const CHECK_SHOW_KEY = "check-show";
-const CHECK_GRADES = ["error", "warning", "nit"];
+const CHECK_GRADES = VOCAB.check.grades;
 let recheckBusy = false;
 const checkedPaths = new Set();
 

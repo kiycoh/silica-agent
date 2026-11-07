@@ -5,7 +5,7 @@
 // #discover/story/<id>, the way Learn owns its own (syncUrl leaves them be).
 // Everything a publisher wrote is set as text, never as markup (ADR-0009).
 
-const DV_TABS = [["foryou", "For you"], ["news", "News"], ["research", "Research"], ["video", "Video"]];
+const DV_TABS = Object.entries(VOCAB.discover.tabs);
 const DV_SCOPES = [["story", "This story"], ["web", "Web"], ["vault", "Vault"]];
 const DV_POLL_MS = 900;
 const dv = {
@@ -1335,7 +1335,7 @@ async function dvFirstRun() {
     news: ["News", "Tech, science and world desks: TechCrunch, The Verge, Ars Technica, BBC, The Guardian, Hacker News and more.", `${s.counts.news} feeds`],
     research: ["Research", "The latest arXiv listing in the categories you pick.", "cs.CC, cs.LG to start"],
     reference: ["Reference", "Wikipedia, looked up for the people and ideas a story names.", "never a feed of its own"],
-    video: ["Video", "YouTube channels you follow, read through their transcripts.", s.hosted ? "desktop app only" : `${s.counts.video} channels to start`],
+    video: ["Video", "YouTube channels you follow, read through their transcripts.", s.hosted ? VOCAB.discover.desktop_only : `${s.counts.video} channels to start`],
   };
   for (const k of ["news", "research", "reference", "video"]) {
     const [label, d, note] = desc[k];

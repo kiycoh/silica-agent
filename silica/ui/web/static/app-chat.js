@@ -113,7 +113,7 @@ const toolLabel = (t) => (t.target ? `${t.name} "${t.target}"` : t.name);
 // the tool row's card is collapsed by default, and a memory the user never saw
 // being written is one they cannot take back. Shared by the model's
 // silica_remember (tool_done) and by /remember (the done frame).
-const MEMORY_VERB = { save: "Saved to memory", replace: "Updated memory", forget: "Forgot" };
+const MEMORY_VERB = VOCAB.memory.verbs;
 function memoryLine(m) {
   const row = document.createElement("div");
   row.className = "turn-outcome memory-line";

@@ -288,7 +288,7 @@ $("#ctx-ring").addEventListener("click", (e) => {
 const sttPanel = $("#stt-panel");
 // A recording nobody stopped is otherwise a twenty-minute upload and a wait to
 // match, so the take ends itself.
-const MIC_MAX_MS = 60000;
+const MIC_MAX_MS = VOCAB.mic.max_ms;
 
 // Set by every probe: a hosted tenant cannot install or start a transcriber, so
 // the panel keeps only the lane it can still choose, the browser's.

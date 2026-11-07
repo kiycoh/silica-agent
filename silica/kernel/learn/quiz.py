@@ -20,6 +20,7 @@ from pathlib import Path
 
 from silica.kernel.base.notekey import ledger_key
 from silica.kernel.learn import store
+from silica.kernel.learn.mastery import BANDS
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +64,6 @@ def record(results: list[dict]) -> int:
     return len(lines)
 
 
-CONF_BANDS = (90, 70, 50, 25)   # learn-suite D14: fixed labels, for data stability
-
-
 def _v2_fields(r: dict, rec: dict) -> None:
     """The learn-suite D11 fields, each written only when valid and present.
 
@@ -86,7 +84,7 @@ def _v2_fields(r: dict, rec: dict) -> None:
         rec["level"] = level
     if "conf" in r:
         conf = r.get("conf")
-        if conf is None or conf in CONF_BANDS:
+        if conf is None or conf in BANDS:
             rec["conf"] = conf
     src = r.get("source")
     if isinstance(src, dict) and str(src.get("leaf") or "").strip():

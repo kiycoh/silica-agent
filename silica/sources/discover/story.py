@@ -61,6 +61,10 @@ may need explained, written as an encyclopedia would title them.
 in the articles' language, each under twelve words."""
 
 
+# A video's transcript is read from the person's own machine, never the server's.
+DESKTOP_ONLY = "desktop app only"
+
+
 class StoryError(ValueError):
     """The story cannot be written; the message is the page's to show."""
 
@@ -75,7 +79,7 @@ def article_text(a: dict) -> str:
     """The article as the model will read it: the page, else what the feed
     said about it, which is still the publisher's own words."""
     if a.get("video") and _hosted():
-        raise StoryError("desktop app only")
+        raise StoryError(DESKTOP_ONLY)
     try:
         page = wf.fetch_page(a["url"], wf.READER_HEADERS)
         text = page.text.split("\n", 2)[-1].strip()

@@ -290,7 +290,7 @@ def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
                "step": next((i + 1 for i, s in enumerate(p["steps"]) if Path(first).stem in s["notes"]), None)}
     return {
         "path": p["path"], "name": p["name"], "scope": p["scope"], "target": p["target"], "reach": p["reach"],
-        "reach_label": plans.REACH_LABEL[p["reach_level"]], "by": p.get("by"), "status": p["status"],
+        "reach_label": mastery.DEPTH_LABEL[p["reach_level"]], "by": p.get("by"), "status": p["status"],
         "objectives": p["objectives"], "objective_labels": [obj.LABEL[o] for o in p["objectives"]],
         "objectives_chosen": p["objectives_chosen"],
         "completed": p.get("completed"), "sessions": len(p["sessions"]), "last": p["sessions"][-1]["date"] if p["sessions"] else None,

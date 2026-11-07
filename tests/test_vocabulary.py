@@ -44,7 +44,9 @@ def test_every_word_a_script_reads_is_in_the_table():
         for path in set(re.findall(r"\bVOCAB((?:\.\w+)+)", src)):
             node = tree
             for key in path.split(".")[1:]:
-                if not isinstance(node, dict) or key not in node:
+                if not isinstance(node, dict):
+                    break  # a method of the word itself: `.includes`, `.replace`
+                if key not in node:
                     missing.append(f"{name}: VOCAB{path}")
                     break
                 node = node[key]

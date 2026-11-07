@@ -50,7 +50,7 @@ function jobWhat(j, ahead) {
     return waits + verb + len + since;
   }
   if (j.state === "done") return "ready";
-  return j.error || (j.state === "interrupted" ? "the server restarted during this conversion" : "it could not be converted");
+  return j.error || (j.state === "interrupted" ? VOCAB.jobs.interrupted : VOCAB.jobs.unconverted);
 }
 
 function jobButton(label, cls, title, onClick) {

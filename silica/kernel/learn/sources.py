@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 MATERIAL, REFERENCE, UNUSED = "material", "reference", "unused"
 ROLES = (MATERIAL, REFERENCE, UNUSED)
+ROLE_LABEL = {MATERIAL: "Material", REFERENCE: "Reference", UNUSED: "Not used"}
 
 # What decides a role when the reader did not, read once on the Machine
 # Learning course (2026-10-25, lexical, read-only): the decks followed the
