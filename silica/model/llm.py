@@ -1331,7 +1331,6 @@ def _call_llm(
     message = choice.message
     finish_reason = getattr(choice, "finish_reason", None)
 
-    # Extract the model's reasoning trace
     trace = getattr(message, "reasoning_content", None)
     if not isinstance(trace, str):
         trace = getattr(message, "reasoning", None)
@@ -1346,7 +1345,6 @@ def _call_llm(
     if not trace and streamed_reasoning:
         trace = "".join(streamed_reasoning)
 
-    # Build the assistant message dict for conversation history
     raw = ([(tc.id, tc.function.name, tc.function.arguments) for tc in message.tool_calls]
            if message.tool_calls else None)
     assistant_msg, parsed_calls = build_assistant_message(message.content, raw, trace)
