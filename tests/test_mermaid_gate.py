@@ -95,6 +95,16 @@ def test_code_and_other_tools_writing_a_note_are_never_refused(vault):
 
 
 @needs_node
+def test_what_learn_writes_is_never_refused_for_a_diagram(vault):
+    """Learn writes through kernel write_note, below the tool: the refusal speaks
+    to a model that can answer it, and a reading has none. The diagram lands."""
+    from silica.kernel.learn import reading
+
+    reading._save("R.md", "R", BROKEN, {"type": "reading"})
+    assert "```mermaid" in (vault / "R.md").read_text(encoding="utf-8")
+
+
+@needs_node
 def test_a_patch_is_checked_on_its_snippet_not_the_note(vault):
     (vault / "N.md").write_text("# N\n\n" + BROKEN, encoding="utf-8")   # the person's own diagram
     out = _as_model("silica_patch_note", name="N.md", heading="N", snippet="More text.", source_basename="chat")

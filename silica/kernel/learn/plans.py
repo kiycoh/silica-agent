@@ -850,16 +850,16 @@ def close_plan(plan_path: str, reopen: bool = False) -> dict:
 
 
 def write_plan(spec: PlanSpec) -> dict:
-    """The note compose_plan composes, through the write gate
-    (silica_write_note), which refuses a path that exists."""
-    from silica.tools import TOOLS
+    """The note compose_plan composes, through write_note, which refuses a path
+    that exists."""
+    from silica.kernel.write.notes import write_note
 
     d = compose_plan(spec)
-    out = TOOLS["silica_write_note"].fn(path=d["path"], body=d["body"], title=spec.name, props=d["props"])
-    if isinstance(out, dict) and out.get("error"):
+    out = write_note(d["path"], d["body"], title=spec.name, props=d["props"])
+    if out.get("error"):
         raise RuntimeError(out["error"])
     resolved = d["resolved"]
-    return {"path": (out.get("path") if isinstance(out, dict) else None) or d["path"],
+    return {"path": out.get("path") or d["path"],
             "gaps": resolved["gaps"], "tree": resolved["tree"], "paths": resolved["paths"], "cards": d["cards"]}
 
 

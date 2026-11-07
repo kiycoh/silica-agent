@@ -788,15 +788,15 @@ def reach(plan_path: str, step: int, n: int, ask=None) -> list[threading.Thread]
 
 
 def _save(path: str, title: str, body: str, props: dict) -> None:
-    """A new reading through the write gate; an existing one as one revertible
+    """A new reading through write_note; an existing one as one revertible
     overwrite (the plan note's own path, ADR-0039), frontmatter rewritten."""
     from silica.kernel.base import frontmatter
-    from silica.tools import TOOLS
+    from silica.kernel.write.notes import write_note
 
     full = f"# {title}\n\n{body}"
     if not (store.vault() / path).is_file():
-        out = TOOLS["silica_write_note"].fn(path=path, body=full, title=title, props=props, template="none")
-        if isinstance(out, dict) and out.get("error"):
+        out = write_note(path, full, title=title, props=props, template="none")
+        if out.get("error"):
             raise RuntimeError(out["error"])
         return
 
