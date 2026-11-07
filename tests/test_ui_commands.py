@@ -24,10 +24,11 @@ def _make_console() -> tuple[Console, io.StringIO]:
 # ---------------------------------------------------------------------------
 
 def _dispatched_from_source() -> set[str]:
-    """Extract slash command strings from cli.py dispatch functions, and from
-    the persona dispatcher both surfaces ask first (ADR-0127)."""
+    """Extract slash command strings from cli.py dispatch functions, from the
+    persona dispatcher both surfaces ask first (ADR-0127), and from /web, which is
+    a turn and not a command (session.turn)."""
     root = Path(__file__).parent.parent / "silica"
-    src = (root / "cli.py").read_text() + (root / "kernel" / "personas.py").read_text()
+    src = "".join((root / rel).read_text() for rel in ("cli.py", "kernel/personas.py", "session/turn.py"))
     found = set(re.findall(r'"(/[\w-]+)"', src))
     # Remove aliases that are intentionally not in COMMANDS
     found.discard("/quit")

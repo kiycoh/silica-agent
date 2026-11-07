@@ -136,7 +136,7 @@ def test_tui_incognito_also_stops_capture_and_clears_with_a_new_process(on, monk
     session = MagicMock()
     session.prompt.side_effect = ["/incognito", "what is entropy?", "/exit"]
 
-    def _answer(messages, **kw):
+    def _answer(messages, *a, **kw):
         seen.append([dict(m) for m in messages])
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"

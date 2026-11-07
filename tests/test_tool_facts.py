@@ -86,7 +86,7 @@ def test_a_call_to_a_tool_no_longer_registered_still_names_its_note():
     from silica.ui.web.callback import _note_refs
 
     assert "silica_gone" not in TOOLS
-    assert _note_refs({"path": "a/b.md"}) == ["a/b.md"]
+    assert _note_refs("silica_gone", {"path": "a/b.md"}) == ["a/b.md"]
 
 
 def test_a_write_never_runs_beside_another_call():

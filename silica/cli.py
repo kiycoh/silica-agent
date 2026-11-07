@@ -2099,8 +2099,8 @@ def _sc_web_search(args: list[str], *, progress=None, **_) -> str | None:
     """/web-search "<concept>" [--max-searches=N] — research the web into an inbox note."""
     from rich.markup import escape
 
-    from silica.sources.web_research import web_research, _DEFAULT_MAX_SEARCHES
-    max_searches = int_flag(args, "--max-searches=", _DEFAULT_MAX_SEARCHES)
+    from silica.sources.web_research import web_research, DEFAULT_MAX_SEARCHES
+    max_searches = int_flag(args, "--max-searches=", DEFAULT_MAX_SEARCHES)
     concept = " ".join(positional(args)).strip()
     if not concept:
         return 'Error: /web-search requires a concept. Usage: /web-search "<concept>" [--max-searches=N]'

@@ -98,7 +98,7 @@ _HTTP_TIMEOUT = 30
 # challenges from the third consecutive query and the backstops are one crawler
 # and one encyclopedia, so a run that actually spends 48 steps says so in its
 # lane line. Raise it when a lane can carry it.
-_DEFAULT_MAX_SEARCHES = 48
+DEFAULT_MAX_SEARCHES = 48
 
 _RESEARCH_SYSTEM_PROMPT = """You are a focused web-research agent. Given a \
 concept, research it on the web and write a findings note.
@@ -667,7 +667,7 @@ def _wikipedia_search(query: str) -> list[dict[str, str]]:
 
 def web_research(
     concept: str,
-    max_searches: int = _DEFAULT_MAX_SEARCHES,
+    max_searches: int = DEFAULT_MAX_SEARCHES,
     tool_progress_callback=None,
 ) -> str:
     """Run the constrained web-research loop and write one findings note to the

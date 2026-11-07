@@ -26,7 +26,7 @@ def _run(inputs):
     session = MagicMock()
     session.prompt.side_effect = inputs
 
-    def _answer(messages, **kw):
+    def _answer(messages, *a, **kw):
         messages.append({"role": "assistant", "content": ANSWER})
         return ANSWER
 

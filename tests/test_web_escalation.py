@@ -56,7 +56,7 @@ def test_web_turn_exposes_exactly_the_three_web_tools():
 def test_web_turn_iteration_cap_matches_web_research():
     from silica.agent.constraints import web_turn_constraints
 
-    assert web_turn_constraints().max_iterations == wr._DEFAULT_MAX_SEARCHES
+    assert web_turn_constraints().max_iterations == wr.DEFAULT_MAX_SEARCHES
 
 
 # --- 2. dispatch ------------------------------------------------------------
