@@ -2567,11 +2567,7 @@ function drawCheckStrip(s = drawerNote) {
     sub.textContent = v.sub;
     sub.title = v.sub;
   } else if (v.pool) {
-    const p = v.pool;
-    const where = p.scope === "whole" ? "searched the whole vault"
-      : p.scope === "party" ? `${p.size} of ${p.of} notes · ${p.values.join(", ")}`
-      : `${p.size} of ${p.of} notes · no party value here, so other parties' notes are out`;
-    sub.textContent = where + (v.cancelled ? " · cancelled" : "") + (v.notChecked ? ` · ${v.notChecked} not checked` : "");
+    sub.textContent = v.pool.line + (v.cancelled ? " · cancelled" : "") + (v.notChecked ? ` · ${v.notChecked} not checked` : "");
     sub.title = sub.textContent;
   }
   strip.replaceChildren(row, sub);

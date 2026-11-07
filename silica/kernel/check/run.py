@@ -264,12 +264,21 @@ def _quote(text: str) -> str:
     return flat if len(flat) <= PASSAGE_QUOTE else flat[:PASSAGE_QUOTE - 1].rstrip() + "…"
 
 
+def _pool_line(pool: pl.Pool) -> str:
+    """What the note's strip says of the pool. render() below says it for a
+    terminal, where a line can run on; the two wordings differ by surface."""
+    return {"whole": "searched the whole vault",
+            "party": f"{len(pool.paths)} of {pool.of} notes · {', '.join(sorted(pool.values))}",
+            "shared": f"{len(pool.paths)} of {pool.of} notes · no party value here, so other parties' notes are out"}[pool.scope]
+
+
 def _summary(path: str, blocks: list, pool: pl.Pool, findings: list[dict], states: list[dict],
              waiting: int, cached: int) -> dict[str, Any]:
     findings = sorted(findings, key=lambda f: (ORDER.index(f["grade"]), f["line"]))
     return {
         "note": path, "blocks": len(blocks), "waiting": waiting, "cached": cached,
-        "pool": {"size": len(pool.paths), "of": pool.of, "scope": pool.scope, "values": sorted(pool.values)},
+        "pool": {"size": len(pool.paths), "of": pool.of, "scope": pool.scope, "values": sorted(pool.values),
+                 "line": _pool_line(pool)},
         "findings": findings, "states": states,
         "counts": {g: sum(f["grade"] == g for f in findings) for g in ORDER},
     }

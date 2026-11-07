@@ -156,3 +156,11 @@ def test_every_command_the_composer_menu_offers_is_one_the_chat_runs(tmp_vault):
     offered = set(re.findall(r'data-action="(/[\w-]+)"', html))
     names = {c["name"] for c in TestClient(server.app).get("/commands").json()}
     assert offered and offered <= names
+
+
+def test_the_upload_cap_holds_the_longest_take_the_page_allows():
+    """H-MIC: 16 kHz mono 16-bit PCM, what toWav16k sends."""
+    from silica.ui.web import stt_routes
+
+    assert stt_routes.MIC_EXPLAIN_MAX_MS / 1000 * 16000 * 2 <= stt_routes._STT_MAX_BYTES
+    assert stt_routes.MIC_MAX_MS <= stt_routes.MIC_EXPLAIN_MAX_MS
