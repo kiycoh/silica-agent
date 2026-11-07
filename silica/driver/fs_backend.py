@@ -493,12 +493,7 @@ class ObsidianFSBackend(GraphIndexMixin):
             try:
                 content = path.read_text(encoding="utf-8")
                 typed, file_targets, mentions = extract_refs_typed(content)
-                for target, scaffold in typed.items():
-                    ref = self._resolve_target(target, source_path=rel_path_file)
-                    if ref:
-                        self._add_link_edge(rel_path_file, ref.path, scaffold=scaffold)
-                    else:
-                        self._unresolved_links.add((rel_path_file, target))
+                self._link_from(rel_path_file, typed)
                 self._index_file_refs(rel_path_file, content, file_targets, mentions)
 
                 # Frontmatter aliases — harvested here because this pass already
@@ -538,45 +533,23 @@ class ObsidianFSBackend(GraphIndexMixin):
         self._restamp_dirs(rel_path)
 
         # --- remove stale data for this path ---
-        if rel_path in self._graph:
-            self._graph.remove_edges_from(list(self._graph.out_edges(rel_path)))
-        self._unresolved_links = {(s, t) for s, t in self._unresolved_links if s != rel_path}
+        self._forget_links_from(rel_path)
         self._alias_pairs.pop(rel_path, None)
 
         if content is None:
             # deletion path
-            if rel_path in self._graph:
-                self._graph.remove_node(rel_path)
-            old_ref = self._notes.pop(rel_path, None)
-            if old_ref:
-                name_lower = old_ref.name.lower()
-                if name_lower in self._notes_by_name:
-                    self._notes_by_name[name_lower] = [
-                        r for r in self._notes_by_name[name_lower] if r.path != rel_path
-                    ]
+            self._leave_note(rel_path)
             self._dirty_paths.discard(rel_path)
             self._drop_file_refs(rel_path)
             return
 
         # --- upsert node ---
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
-        ref = NoteRef(name=name, path=rel_path)
-        self._notes[rel_path] = ref
-        self._graph.add_node(rel_path, ref=ref)
-        name_lower = name.lower()
-        if name_lower not in self._notes_by_name:
-            self._notes_by_name[name_lower] = []
-        if ref not in self._notes_by_name[name_lower]:
-            self._notes_by_name[name_lower].append(ref)
+        self._enter_note(rel_path, NoteRef(name=name, path=rel_path))
 
         # --- rebuild edges for this path ---
         typed, file_targets, mentions = extract_refs_typed(content)
-        for target, scaffold in typed.items():
-            target_ref = self._resolve_target(target, source_path=rel_path)
-            if target_ref:
-                self._add_link_edge(rel_path, target_ref.path, scaffold=scaffold)
-            else:
-                self._unresolved_links.add((rel_path, target))
+        self._link_from(rel_path, typed)
         self._drop_file_refs(rel_path)   # replace, never accumulate, on re-upsert
         self._index_file_refs(rel_path, content, file_targets, mentions)
 
@@ -598,47 +571,22 @@ class ObsidianFSBackend(GraphIndexMixin):
         namesake the resolver now picks. About 1 ms a referrer, 24.6 ms for
         the 23 of the test vault's most linked note.
         """
-        referrers = ([p for p in self._graph.predecessors(rel_path) if p != rel_path]
-                     if rel_path in self._graph else [])
+        referrers = self._referrers_of(rel_path)
         self._patch_index(rel_path, None)
         self._repatch_from_disk(referrers)
 
     @_locked
     def _patch_create(self, rel_path: str, content: str) -> None:
-        """`_patch_index` for a new note, then the notes its name now reaches.
-
-        (a) Every source of an unresolved pair that now resolves to it: the
-        move's step 7, filtered by name before resolving, so a create pays for
-        the pairs that could match and not for all 546 of the test vault.
-        (b) Every referrer of a namesake, because the resolver prefers the
-        referrer's folder and then the shortest path, so a new note can take
-        a name link that resolved elsewhere. A `NNNN-` note also answers
-        `ADR-NNNN`, so for it the namesakes are the notes sharing that number.
-        """
+        """`_patch_index` for a new note, then the notes its name now reaches:
+        the move's step 7 plus the referrers of a namesake, because this
+        resolver prefers the referrer's folder and then the shortest path."""
         self._patch_index(rel_path, content)
         ref = self._notes.get(rel_path)
         if ref is None:
             return  # a vault artifact: never indexed, so no link can reach it
         name = ref.name.lower()
         adr = name[:4] if name[:4].isdigit() and name[4:5] == "-" else ""
-        sources: set[str] = set()
-        for source, target in list(self._unresolved_links):
-            base = target.rsplit("/", 1)[-1].removesuffix(".md")
-            if base.lower() != name and not (
-                    adr and (m := ADR_REF_RE.fullmatch(base)) and m.group(1) == adr):
-                continue
-            hit = self._resolve_target(target, source_path=source)
-            if hit is not None and hit.path == rel_path:
-                sources.add(source)
-        namesakes = [r.path for r in self._notes_by_name.get(name, ())]
-        if adr:
-            namesakes += [r.path for n, rs in self._notes_by_name.items()
-                          if n.startswith(adr + "-") for r in rs]
-        for other in namesakes:
-            if other != rel_path and other in self._graph:
-                sources.update(self._graph.predecessors(other))
-        sources.discard(rel_path)
-        self._repatch_from_disk(sorted(sources))
+        self._repatch_from_disk(self._sources_reached_by(rel_path, name, adr))
 
     def _repatch_from_disk(self, paths: list[str]) -> None:
         """Re-index notes whose bytes did not change but whose links may now

@@ -25,10 +25,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Protocol, runtime_checkable
 
-# websockets' 1 MiB default max_size would sever the connection on a read reply
-# carrying a large note body. One value for both ends of the bridge, here
-# because the bridge server (ui/connect.py) sits above this package and the
-# client side must not pull `websockets` in just to read it.
+from silica.kernel.base.syntax import ADR_REF_RE
+
+# Both ends of the bridge read these, here because the server (ui/connect.py)
+# sits above this package and may not be imported from it.
+PROTOCOL_VERSION = 1
+
+# websockets' 1 MiB default max_size would sever the connection on any note
+# body over ~1 MB (rpc read replies, bulk-nucleate creates). 32 MiB matches the
+# no-ceiling behavior of the fs backend.
 MAX_FRAME = 2**25
 
 
@@ -126,20 +131,35 @@ class GraphIndexMixin:
     """Graph-index helpers shared by the fs and ws backends.
 
     Subclasses build the in-memory index in ``_ensure_graph()`` and expose
-    the ``_notes``/``_unresolved_links``/``_graph``
+    the ``_notes``/``_notes_by_name``/``_unresolved_links``/``_graph``
     attributes it populates, plus the read ``exists`` is answered from.
 
     Both halves of that contract are declared below rather than left implicit:
     a mixin that reads names it does not define is only safe while every
     subclass happens to define them, and nothing was checking that.
+
+    ``_resolve_target`` is the one half that stays two. On fs it IS the index:
+    every edge comes from it, so it carries Obsidian's rules (`#` and `^` to
+    the note itself, `ADR-NNNN` to its record, the referrer's folder before
+    the shallowest path). On ws the plugin's own `resolved_links` is the index
+    and this only keeps a write's patch honest until the next rebuild, so it
+    is by path, else by `namesake_order`. Merging them moves which note a
+    patched ws edge points at, and which notes the graph gate sees.
     """
 
     # Built by the subclass's _ensure_graph(); read by every helper here.
     _notes: dict[str, NoteRef]
+    _notes_by_name: dict[str, list[NoteRef]]
     _unresolved_links: set
     _graph: Any
 
     def _ensure_graph(self) -> None:
+        raise NotImplementedError
+
+    def _resolve_target(self, target: str, source_path: str = "") -> NoteRef | None:
+        raise NotImplementedError
+
+    def _repatch_from_disk(self, paths: list[str]) -> None:
         raise NotImplementedError
 
     def _add_link_edge(self, source: str, target: str, *, scaffold: bool) -> None:
@@ -154,6 +174,69 @@ class GraphIndexMixin:
                 self._graph[source][target]["scaffold"] = False
             return
         self._graph.add_edge(source, target, scaffold=scaffold)
+
+    def _link_from(self, path: str, typed: dict[str, bool]) -> None:
+        """A note's links into the index: an edge, or an unresolved pair."""
+        for target, scaffold in typed.items():
+            resolved = self._resolve_target(target, source_path=path)
+            if resolved is not None:
+                self._add_link_edge(path, resolved.path, scaffold=scaffold)
+            else:
+                self._unresolved_links.add((path, target))
+
+    def _forget_links_from(self, path: str) -> None:
+        """What a note linked, before it is indexed again or leaves."""
+        if path in self._graph:
+            self._graph.remove_edges_from(list(self._graph.out_edges(path)))
+        self._unresolved_links = {(s, t) for s, t in self._unresolved_links if s != path}
+
+    def _enter_note(self, path: str, ref: NoteRef) -> None:
+        self._notes[path] = ref
+        self._graph.add_node(path, ref=ref)
+        by_name = self._notes_by_name.setdefault(ref.name.lower(), [])
+        if ref not in by_name:
+            by_name.append(ref)
+
+    def _leave_note(self, path: str) -> None:
+        if path in self._graph:
+            self._graph.remove_node(path)
+        old_ref = self._notes.pop(path, None)
+        if old_ref and old_ref.name.lower() in self._notes_by_name:
+            name = old_ref.name.lower()
+            self._notes_by_name[name] = [r for r in self._notes_by_name[name] if r.path != path]
+
+    def _referrers_of(self, path: str) -> list[str]:
+        return [p for p in self._graph.predecessors(path) if p != path] if path in self._graph else []
+
+    def _sources_reached_by(self, path: str, name: str, adr: str = "") -> list[str]:
+        """The notes to re-index after a new note took `name`.
+
+        (a) Every source of an unresolved pair that now resolves to it, filtered
+        by name before resolving, so a create pays for the pairs that could
+        match and not for all 546 of the test vault. (b) Every referrer of a
+        namesake, because a new note can take a name link that resolved
+        elsewhere. A `NNNN-` note also answers `ADR-NNNN` where the resolver
+        knows that (`adr`), so for it the namesakes are the notes sharing the
+        number.
+        """
+        sources: set[str] = set()
+        for source, target in list(self._unresolved_links):
+            base = target.rsplit("/", 1)[-1].removesuffix(".md")
+            if base.lower() != name and not (
+                    adr and (m := ADR_REF_RE.fullmatch(base)) and m.group(1) == adr):
+                continue
+            hit = self._resolve_target(target, source_path=source)
+            if hit is not None and hit.path == path:
+                sources.add(source)
+        namesakes = [r.path for r in self._notes_by_name.get(name, ())]
+        if adr:
+            namesakes += [r.path for n, rs in self._notes_by_name.items()
+                          if n.startswith(adr + "-") for r in rs]
+        for other in namesakes:
+            if other != path and other in self._graph:
+                sources.update(self._graph.predecessors(other))
+        sources.discard(path)
+        return sorted(sources)
 
     def read_note(self, ref: NoteRef | str) -> Any:
         raise NotImplementedError

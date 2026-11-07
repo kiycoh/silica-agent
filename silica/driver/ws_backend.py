@@ -26,6 +26,7 @@ from websockets.asyncio.client import connect
 
 from silica.driver.base import (
     MAX_FRAME,
+    PROTOCOL_VERSION,
     namesake_order,
     GraphIndexMixin,
     GraphSnapshot,
@@ -42,8 +43,6 @@ from silica.kernel.base.layout import is_vault_artifact
 from silica.kernel.base.layout import is_source_leaf
 
 logger = logging.getLogger(__name__)
-
-PROTOCOL_VERSION = 1
 
 
 def _disk_prior(path: str) -> tuple[str | None, bool]:
@@ -515,7 +514,7 @@ class ObsidianWSBackend(GraphIndexMixin):
         return []
 
     # ------------------------------------------------------------------
-    # In-memory index patching after writes (mirrors fs_backend)
+    # In-memory index patching after writes (shared half: GraphIndexMixin)
     # ------------------------------------------------------------------
 
     def _patch_graph_add(self, path: str, ref: NoteRef, content: str) -> None:
@@ -525,32 +524,12 @@ class ObsidianWSBackend(GraphIndexMixin):
         """
         if not self._is_graph_built:
             return
-        if path in self._graph:
-            self._graph.remove_edges_from(list(self._graph.out_edges(path)))
-        self._unresolved_links = {(s, t) for s, t in self._unresolved_links if s != path}
-        self._notes[path] = ref
-        self._graph.add_node(path, ref=ref)
-        by_name = self._notes_by_name.setdefault(ref.name.lower(), [])
-        if ref not in by_name:
-            by_name.append(ref)
-        self._add_link_edges(path, content)
-
-    def _patch_graph_remove(self, path: str) -> None:
-        """Patch the index after a delete."""
-        if not self._is_graph_built:
-            return
-        if path in self._graph:
-            self._graph.remove_node(path)
-        self._notes.pop(path, None)
-        name_lower = path.rsplit("/", 1)[-1].removesuffix(".md").lower()
-        if name_lower in self._notes_by_name:
-            self._notes_by_name[name_lower] = [
-                r for r in self._notes_by_name[name_lower] if r.path != path
-            ]
-        self._unresolved_links = {(s, t) for s, t in self._unresolved_links if s != path}
+        self._forget_links_from(path)
+        self._enter_note(path, ref)
+        self._link_from(path, extract_links_typed(content))
 
     def _patch_delete(self, path: str) -> None:
-        """`_patch_graph_remove`, then every note that linked it.
+        """Drop the note, then re-index every note that linked it.
 
         The fs backend's repair (ADR-0092), with each referrer's body read
         from disk: the plugin's delete replies as soon as `trashFile` returns,
@@ -561,33 +540,19 @@ class ObsidianWSBackend(GraphIndexMixin):
         """
         if not self._is_graph_built:
             return
-        referrers = ([p for p in self._graph.predecessors(path) if p != path]
-                     if path in self._graph else [])
-        self._patch_graph_remove(path)
+        referrers = self._referrers_of(path)
+        self._forget_links_from(path)
+        self._leave_note(path)
         self._repatch_from_disk(referrers)
 
     def _patch_create(self, path: str, ref: NoteRef, content: str) -> None:
-        """`_patch_graph_add`, then the sources of unresolved pairs that now
-        resolve to the new note, filtered by name first, and the referrers of
-        a namesake: a bare name ranks its notes by `namesake_order` (ADR-0114),
-        so a shallower new note can take a link that resolved elsewhere, as
-        in the fs backend (ADR-0092 point 1)."""
+        """`_patch_graph_add`, then the notes its name now reaches: a bare name
+        ranks its notes by `namesake_order` (ADR-0114), so a shallower new note
+        can take a link that resolved elsewhere (ADR-0092 point 1)."""
         self._patch_graph_add(path, ref, content)
         if not self._is_graph_built:
             return
-        name = ref.name.lower()
-        sources: set[str] = set()
-        for source, target in list(self._unresolved_links):
-            if target.rsplit("/", 1)[-1].removesuffix(".md").lower() != name:
-                continue
-            hit = self._resolve_link(target, source_path=source)
-            if hit is not None and hit.path == path:
-                sources.add(source)
-        for other in self._notes_by_name.get(name, ()):
-            if other.path != path and other.path in self._graph:
-                sources.update(self._graph.predecessors(other.path))
-        sources.discard(path)
-        self._repatch_from_disk(sorted(sources))
+        self._repatch_from_disk(self._sources_reached_by(path, ref.name.lower()))
 
     def _repatch_from_disk(self, paths: list[str]) -> None:
         from silica.config import CONFIG
@@ -607,20 +572,13 @@ class ObsidianWSBackend(GraphIndexMixin):
                 return
             self._patch_graph_add(path, self._node_ref(path), content)
 
-    def _add_link_edges(self, path: str, content: str) -> None:
-        for target, scaffold in extract_links_typed(content).items():
-            resolved = self._resolve_link(target, source_path=path)
-            if resolved is not None:
-                self._add_link_edge(path, resolved.path, scaffold=scaffold)
-            else:
-                self._unresolved_links.add((path, target))
-
-    def _resolve_link(self, target: str, source_path: str = "") -> NoteRef | None:
-        """Resolve a link target against the index — by path, else by name."""
+    def _resolve_target(self, target: str, source_path: str = "") -> NoteRef | None:
+        """Resolve a link target against the index — by path, else by name.
+        Why this is not the fs rule: GraphIndexMixin."""
         from silica.kernel.base.markdown import resolve_relative
 
-        # Mirror of fs_backend: a `./`/`../` target is relative to the source
-        # note and invisible to the suffix matcher until normalized.
+        # A `./`/`../` target is relative to the source note and invisible to
+        # the suffix matcher until normalized, as on fs.
         normalized = resolve_relative(target, source_path)
         if normalized is None:
             return None  # escapes the vault root
