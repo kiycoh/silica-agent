@@ -607,30 +607,30 @@ def render(
     own = (_DATA_IMAGE, *own)
     # What `asset` answered is this surface's own address, whatever it looks like.
     made: set[str] = set()
-    md = (
+    parser = (
         MarkdownIt(options_update={"highlight": _highlight})
         .enable("table")
         .enable("strikethrough")
         .enable("linkify")
     )
-    md.options["linkify"] = True
+    parser.options["linkify"] = True
     # fuzzy_link off or `nota.md` in prose resolves to the Moldovan ccTLD and
     # renders as a link to http://nota.md; fuzzy_email off keeps the scope at
     # "a URL is clickable", not "prose opens a mail client".
-    if md.linkify is not None:  # only present with the [linkify] extra
-        md.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
+    if parser.linkify is not None:  # only present with the [linkify] extra
+        parser.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
     # allow_space=False keeps prose prices ("$5 and $10") out of math.
     # double_inline: a `$$...$$` line inside a paragraph is display math, as in
     # Obsidian and Pandoc. The block rule cannot interrupt a paragraph, so
     # without it the inline rule ate one `$` of each pair and left two on screen
     # around the formula (chat 4b3dfdab7b64, 2026-11-01).
-    md.use(dollarmath_plugin, allow_space=False, allow_digits=False, double_inline=True)
+    parser.use(dollarmath_plugin, allow_space=False, allow_digits=False, double_inline=True)
     # Without it a `## Sources` definition `[^L]: [[sources/X]]` parsed as a
     # link reference whose target was the literal `[[sources/X]]`, and clicking
     # the marker navigated away from the app (ADR-0055 prerequisite). Its
     # `#fn1` anchors are scrolled in place by the client, never routed.
-    md.use(footnote_plugin)
-    tokens = md.parse(text)
+    parser.use(footnote_plugin)
+    tokens = parser.parse(text)
     mentions = _mentions(reads) if resolve is not None else None
     _sanitize_raw_tokens(tokens)  # the note's raw HTML; must precede the injected kind
     _ofm_blocks(tokens)
@@ -670,9 +670,9 @@ def render(
                     made.add(src)
                     child.attrSet("src", src)
                 if not remote_images and src and src not in made and not _is_own_image(src, own):
-                    link = Token("html_inline", "", 0)
-                    link.content = _foreign_img_link(src)
-                    new.append(link)
+                    foreign = Token("html_inline", "", 0)
+                    foreign.content = _foreign_img_link(src)
+                    new.append(foreign)
                     continue
                 new.append(child)
                 continue
@@ -689,4 +689,4 @@ def render(
             raw.content = frag
             new.append(raw)
         tok.children = new
-    return md.renderer.render(tokens, md.options, {})
+    return parser.renderer.render(tokens, parser.options, {})

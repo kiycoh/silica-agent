@@ -580,8 +580,8 @@ def goes_out(slug: str, vault: Path | None = None, sel: dict | None = None) -> s
     sel = sel or publish.selection(vault)
     fms = sel["frontmatter"]
     ans = answers(vault)
-    notes = {p: {"files": [], "rewritten": (fms.get(p) or {}).get("rewritten") is True, "share": None}
-             for p in publish.taken_by(slug, sel)}
+    notes: dict[str, dict] = {p: {"files": [], "rewritten": (fms.get(p) or {}).get("rewritten") is True, "share": None}
+                              for p in publish.taken_by(slug, sel)}
     wanted, fallback = _traced(notes, vault)
     names = _leaf_names(vault)
     free = {f: is_free(ans.get(f, {})) for f in _tie_files(notes, wanted, names, fallback)}

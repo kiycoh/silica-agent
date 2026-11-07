@@ -71,7 +71,7 @@ def _render(tmp_path, sources: list[str]) -> list[str]:
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run app.js")
 def test_url_contract_matches_the_server_render(tmp_path):
-    """The same corpus test_gui_web.py runs against `_linkify`. A tool-split turn
+    """The same corpus test_gui_web.py runs against `linkify`. A tool-split turn
     keeps its live segments until reload, so what mdLite does to a URL is what the
     user sees — the two renders answer to one contract."""
     htmls = _render(tmp_path, [md for md, _p, _a in URL_CASES])

@@ -439,6 +439,16 @@ def test_an_address_a_surface_gave_is_its_own_where_a_stranger_image_becomes_a_l
     assert html.count("image from evil.test") == 2
 
 
+def test_a_stranger_image_leaves_the_notes_after_it_to_the_surface():
+    """The first cut of this renderer named the link it wrote for a foreign image `link`, the
+    surface's callback, and the next note ref in the paragraph called a Token."""
+    from silica.kernel.text.render import render
+
+    html = render("![t](https://evil.test/p.png) then [[Note]]", link=lambda p, d: f"<u>{d}</u>",
+                  asset=lambda t: t, resolve=lambda ref: ref, remote_images=False)
+    assert "image from evil.test" in html and "<u>Note</u>" in html
+
+
 def test_an_image_nothing_was_found_for_keeps_its_place_with_no_address():
     from silica.kernel.text.render import render
 

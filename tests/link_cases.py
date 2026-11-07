@@ -3,7 +3,7 @@
 
 """Link cases both web renders must agree on.
 
-An answer is rendered twice: `_linkify` (markdown-it, server, canonical) and
+An answer is rendered twice: `linkify` (markdown-it, server, canonical) and
 `mdLite` (hand-rolled JS, the live streaming segment). Two languages, one
 contract — so the corpus lives here and both halves assert the same list. A
 drift where one side gains a behavior the other lacks already has its case
