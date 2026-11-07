@@ -41,10 +41,6 @@ DEFAULT_TAU_HIGH = 0.55   # above → clear L1 winner
 DEFAULT_TAU_LOW  = 0.15   # below → uncategorized (no signal)
 
 
-# ---------------------------------------------------------------------------
-# Output dataclass
-# ---------------------------------------------------------------------------
-
 @dataclass
 class Classification:
     """Result of classifying a single note against the taxonomy."""
@@ -58,10 +54,6 @@ class Classification:
     title: str = ""                   # note title (stem)
     rule_themes: list[str] = field(default_factory=list)   # matched rule's themes
 
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 def _current_folder(note_path: str) -> str:
     """Return the parent folder of a vault-relative note path."""
@@ -161,7 +153,6 @@ def _evaluate_metadata_filter(note_path: str, props: dict, filt: Any) -> bool:
     normalized_props = {k.lower(): v for k, v in props.items()}
     val = normalized_props.get(key)
     
-    # Fallback to filesystem if key is date/created-related and not in frontmatter props
     if val is None and key in ("date", "created", "created_at", "creation_date"):
         val = _get_file_fs_year(note_path)
         
@@ -222,7 +213,6 @@ def _score_note_against_rules(
     best_themes: list[str] = []
 
     for rule in taxonomy.rules:
-        # Check metadata filters first (gate)
         if hasattr(rule, "metadata_filters") and rule.metadata_filters:
             passed_all = True
             for filt in rule.metadata_filters:
@@ -235,14 +225,12 @@ def _score_note_against_rules(
         score = 0.0
         evidence = "cooccur"
 
-        # --- Keyword hit in title (whole-word match) ---
         kw_hits = sum(1 for k in rule.keyword_set() if _keyword_hit(k, title_lower))
         kw_score = min(kw_hits * 0.4, 0.8)
         if kw_hits:
             evidence = "keyword"
         score += kw_score
 
-        # --- Theme overlap via co-occurrence stems ---
         if rule.themes:
             rule_stems: set[str] = set()
             for theme in rule.themes:
@@ -252,7 +240,7 @@ def _score_note_against_rules(
             overlap = sum(count for stem, count in concept_stems.items() if stem in rule_stems)
             total_rule_stems = len(rule_stems) if rule_stems else 1
             # Normalised: proportion of rule stems that the note covers, weighted by frequency
-            theme_score = min(overlap / (total_rule_stems * 3), 0.6)  # cap at 0.6
+            theme_score = min(overlap / (total_rule_stems * 3), 0.6)
             score += theme_score
 
         if score > best_score:
@@ -296,7 +284,6 @@ def classify_notes(
         One Classification per note_path (same order).
     """
     if not taxonomy.rules:
-        # No rules → everything is uncategorized
         return [
             Classification(
                 note_path=p,
@@ -310,7 +297,6 @@ def classify_notes(
             for p in note_paths
         ]
 
-    # Load co-occurrence store
     if cooccur_store is None:
         try:
             from silica.kernel.recall.cooccurrence import get_cooccur_store
@@ -331,7 +317,6 @@ def classify_notes(
         title = _note_title(note_path)
         idx_path = note_path.removesuffix(".md")
 
-        # Extract concept profile from co-occurrence index
         concept_stems: dict[str, int] = {}
         if cooccur_store is not None:
             concept_stems = cooccur_store.note_nodes(idx_path)
@@ -347,7 +332,6 @@ def classify_notes(
             if cached_body:
                 concept_stems = _stems_from_body(cached_body, effective_lang)
 
-        # Retrieve note properties
         props = {}
         if props_map and note_path in props_map:
             props = props_map[note_path]
@@ -363,7 +347,6 @@ def classify_notes(
         )
 
         if best_score >= tau_high:
-            # Clear L1 winner
             results.append(Classification(
                 note_path=note_path,
                 current_folder=current_folder,
@@ -375,7 +358,6 @@ def classify_notes(
                 rule_themes=best_themes,
             ))
         elif best_score < tau_low:
-            # No signal — uncategorized
             results.append(Classification(
                 note_path=note_path,
                 current_folder=current_folder,
@@ -399,7 +381,6 @@ def classify_notes(
             )
             ambiguous_indices.append(len(results))
             results.append(placeholder)
-            # Collect snippet for LLM context: first 300 chars of note body
             if cached_body is None:
                 cached_body = _read_body(note_path)
             snippet = (cached_body or "")[:300]
