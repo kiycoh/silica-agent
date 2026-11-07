@@ -204,16 +204,14 @@ class Vault:
         # The old key's vector now points at a gone path; drop it or a rename makes
         # the note appear twice in candidates (stale old key + fresh new key). The
         # new path re-embeds lazily on the next build_index (A13).
-        if self.transport.kind == "fs":
-            _drop_embed_vector(old)
+        _drop_embed_vector(old)
 
     def delete(self, ref: NoteRef | str) -> None:
         """Delete a note from the vault."""
         note = self.transport.prior_for_delete(ref)
         _baseline(note.rel, note.text)
         self.transport.remove(note)
-        if self.transport.kind == "fs":
-            _drop_embed_vector(note.rel)
+        _drop_embed_vector(note.rel)
 
     def autolink_note(
         self,
