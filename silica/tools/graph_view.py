@@ -66,10 +66,11 @@ from silica.kernel.graph.graph_export import (
 
 logger = logging.getLogger(__name__)
 
-# Both renderers, in load order: WebGL first (the default mode), canvas second.
 # By the top package: the frame's files sit with the app's static tree, and naming
 # `silica.ui.web` would import the layer above this one to read a folder.
 _STATIC = importlib.resources.files("silica") / "ui" / "web" / "static"
+
+# Both renderers, in load order: WebGL first (the default mode), canvas second.
 _VENDORED_BUNDLES = ("3d-force-graph.min.js", "force-graph.min.js")
 
 
