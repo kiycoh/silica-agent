@@ -305,7 +305,7 @@ def get_messages():
             continue
         tools = tool_calls_to_json(m, failed, results) if m["role"] == "assistant" else []
         content = m.get("content") or ""
-        # The thinking that produced this step, kept out of the wire by _to_wire.
+        # The thinking that produced this step, kept out of the wire by to_wire.
         # Plain text, not rendered: it is a trace, and the live block shows it raw.
         thinking = m.get("silica_reasoning") or "" if m["role"] == "assistant" else ""
         if not content and not tools and not thinking:

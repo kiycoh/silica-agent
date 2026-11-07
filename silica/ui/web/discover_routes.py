@@ -31,7 +31,6 @@ _COVER_NAME = re.compile(r"^[0-9a-f]{24}\.(?:jpg|png|webp|gif|avif)$")
 # A host name and nothing else: it becomes both a fetched address and a file name.
 _DOMAIN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
 _IMAGE_HEADERS = {"Cache-Control": "private, max-age=86400", "Content-Security-Policy": "default-src 'none'; sandbox"}
-# The view's tabs and what the page calls them.
 TABS = {"foryou": "For you", "news": "News", "research": "Research", "video": "Video"}
 _FEEDBACK = (-1, 0, 1)
 _CATALOG_SHOWN = 40
@@ -328,8 +327,6 @@ async def unsave(payload: dict):
     return {"ok": True}
 
 
-# --- the Feeds screen ---------------------------------------------------------------
-
 @router.get("/feeds")
 def feeds_list():
     with store.LOCK:
@@ -466,8 +463,6 @@ async def opml(file: UploadFile = File(...)):
         store.save(doc)
     return {"added": added, "listed": len(listed)}
 
-
-# --- the catalog ----------------------------------------------------------------------
 
 _CATALOG: dict | None = None
 
