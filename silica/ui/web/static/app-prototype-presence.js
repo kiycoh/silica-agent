@@ -779,7 +779,6 @@ void main() {
     }
   }
 
-  // ---- GL -------------------------------------------------------------------------
   const UNIFORMS = ["uRes", "uSizePt", "uTime", "uYaw", "uFront", "uInk", "uTone", "uTone2", "uHueShift",
     "uDepth", "uGlow", "uChar", "uStateIndex", "uStateTau", "uThink", "uResp", "uErr", "uVariant",
     "uSeedA", "uSeedB", "uSeedC", "uJit", "uDruse"];
@@ -867,7 +866,6 @@ void main() {
     colors.ink = ground(heroCanvas);
   }
 
-  // ---- DOM ------------------------------------------------------------------------
   const hero = document.getElementById("vault-hero");
   if (!hero) return;
   const heroCanvas = document.createElement("canvas");
@@ -913,7 +911,6 @@ void main() {
   const mini = presence($("#pp-mini"), 24);
   if (!big) return;
 
-  // ---- the clock ------------------------------------------------------------------
   let cur = "idle", prev = "idle", changedAt = performance.now() / 1000;
   let phase = 0, yaw = 0, front = 0, act = 0, last = changedAt;
   let demo = false, demoAt = 0, frameNo = 0, dirty = true;

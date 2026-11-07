@@ -167,8 +167,6 @@ async function togglePublicRow(b) {
   return pubPost("/public/note", { path, on });
 }
 
-// --- the note's globe --------------------------------------------------------
-
 function syncNotePub() {
   const b = $("#note-pub");
   if (!b) return;
@@ -217,8 +215,6 @@ $("#note-pub-pop").addEventListener("click", (e) => {
   pop.hidden = true;
   if (pick.dataset.np === "yes") pubPost("/public/note", { path: pop.dataset.path, on: true });
 });
-
-// --- the view ----------------------------------------------------------------
 
 async function loadPublicView() {
   if (!pubState) $("#public-body").replaceChildren(mkEl("p", "pp-dim", "Reading the vault…"));

@@ -348,7 +348,6 @@
       tipAt(S.hover); paint();
     }
 
-    // ---- pointing ---------------------------------------------------------------------------
     function pick(mx, my) {
       let best = null, bd = 144;
       for (const n of drawn) { const dx = X(n) - mx, dy = Y(n) - my, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = n.i; } }
@@ -825,7 +824,6 @@
       if (menuOff && !ev.target.closest(".rhead")) menuOff();
     });
 
-    // ---- size and start ------------------------------------------------------------------------
     function resize() {
       const r = view.getBoundingClientRect(), w = Math.max(40, Math.floor(r.width)), h = Math.max(40, Math.floor(r.height));
       if (w === W && h === H && img) { paint(); return; }

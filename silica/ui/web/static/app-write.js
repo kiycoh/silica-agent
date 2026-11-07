@@ -380,7 +380,6 @@ async function undoWrite(d) {
   loadVaultInfo();
 }
 
-// --- the surface ---------------------------------------------------------------
 function paintCentre() {
   const s = centreNote, folder = s.path ? noteFolder(s.path) : s.folder;
   $("#nv-crumb").textContent = folder || "Vault";
@@ -796,7 +795,6 @@ function addPropertyRow() {
   nvProps.querySelector(".nv-pacts").before(row);
   k.focus();
 }
-// How many characters the closing fence takes at the end of the block.
 const fenceLength = (v, cur) => {
   const closing = v.state.sliceDoc(0, cur.end).match(/---[ \t]*\n?$/);
   return closing ? closing[0].length : 0;
@@ -871,7 +869,6 @@ function renderProps(force = false) {
   nvProps.append(acts);
 }
 
-// --- the bars and menus of the note view ------------------------------------------
 $("#nv-selbar").addEventListener("mousedown", (e) => {
   const b = e.target.closest("button");
   if (!b) return;

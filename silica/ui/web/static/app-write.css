@@ -30,7 +30,6 @@
 #vault-add-menu #vam-write { color: var(--frost); }
 #tree-menu .s-item.write { color: var(--frost); }
 
-/* --- the note view ------------------------------------------------------------ */
 #view-note {
   position: relative;
   container: note / inline-size;
