@@ -83,13 +83,13 @@ def test_undo_takes_a_quoted_path_without_its_quotes(monkeypatch):
 
 
 def test_direct_args_group_a_double_quoted_name_and_leave_apostrophes_and_tags_alone():
-    from silica.cli import _direct_args
+    from silica.session.words import direct_args
 
-    assert _direct_args('/check "Drafts/Opinion on limitation"') == ["/check", "Drafts/Opinion on limitation"]
-    assert _direct_args('/verify "Stoicism" --as "J. Smith"') == ["/verify", "Stoicism", "--as", "J. Smith"]
-    assert _direct_args("/find l'entropia #tag") == ["/find", "l'entropia", "#tag"]
-    assert _direct_args(r"/map C:\notes\a.md") == ["/map", r"C:\notes\a.md"]
-    assert _direct_args('/find "unbalanced') == ["/find", '"unbalanced']  # as typed, as before
+    assert direct_args('/check "Drafts/Opinion on limitation"') == ["/check", "Drafts/Opinion on limitation"]
+    assert direct_args('/verify "Stoicism" --as "J. Smith"') == ["/verify", "Stoicism", "--as", "J. Smith"]
+    assert direct_args("/find l'entropia #tag") == ["/find", "l'entropia", "#tag"]
+    assert direct_args(r"/map C:\notes\a.md") == ["/map", r"C:\notes\a.md"]
+    assert direct_args('/find "unbalanced') == ["/find", '"unbalanced']  # as typed, as before
 
 
 def test_map_resolves_a_quoted_title_with_spaces(monkeypatch):

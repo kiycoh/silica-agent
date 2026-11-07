@@ -108,14 +108,13 @@ class TestNeverSentToTheModel:
     def test_the_next_request_carries_no_key(self, client, monkeypatch):
         """Turn one stores a note; turn two goes through the real loop and the
         real call_llm, and litellm receives the history without it."""
-        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         from silica.agent.constraints import AgentConstraints
         from silica.agent.loop import run_agent
         from tests.llm_mocks import litellm_mock_response
 
         tc, server = client
-        monkeypatch.setattr(turn, "run_agent", _thin_turn)
+        monkeypatch.setattr("silica.session.turn.run_agent", _thin_turn)
         tc.post("/chat", json={"text": "what is graph rewiring?"})
         assert SESSION.chat.messages[-1][turn_notes.KEY] == [THIN]
 
@@ -123,7 +122,7 @@ class TestNeverSentToTheModel:
             return run_agent(messages, "test_model", cb, cancel_token=cancel_token,
                              constraints=AgentConstraints(tools=(), max_iterations=1))
 
-        monkeypatch.setattr(turn, "run_agent", real_turn)
+        monkeypatch.setattr("silica.session.turn.run_agent", real_turn)
         with patch("litellm.completion",
                    return_value=litellm_mock_response("second answer")) as completion:
             tc.post("/chat", json={"text": "and now?"})
@@ -134,17 +133,15 @@ class TestNeverSentToTheModel:
 
 class TestLive:
     def test_the_done_frame_carries_the_notes_in_place_of_hint(self, client, monkeypatch):
-        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         tc, server = client
-        monkeypatch.setattr(turn, "run_agent", _thin_turn)
+        monkeypatch.setattr("silica.session.turn.run_agent", _thin_turn)
         done = _read_sse(tc.post("/chat", json={"text": "what is graph rewiring?"}))[-1]
         assert done["notes"] == [THIN]
         assert "hint" not in done
         assert SESSION.chat.messages[-1][turn_notes.KEY] == [THIN]
 
     def test_a_turn_with_nothing_to_say_has_no_notes(self, client, monkeypatch):
-        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         tc, server = client
 
@@ -156,14 +153,13 @@ class TestLive:
             messages.append({"role": "assistant", "content": "You wrote about it."})
             return "You wrote about it."
 
-        monkeypatch.setattr(turn, "run_agent", found)
+        monkeypatch.setattr("silica.session.turn.run_agent", found)
         done = _read_sse(tc.post("/chat", json={"text": "what about RAG?"}))[-1]
         assert "notes" not in done
         assert turn_notes.KEY not in SESSION.chat.messages[-1]
 
     def test_a_stopped_turn_draws_its_notes_live_only(self, client, monkeypatch):
         """No final answer to carry them: the frame has them, the history not."""
-        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         tc, server = client
 
@@ -172,7 +168,7 @@ class TestLive:
             cancel_token.set()
             return "(silica: cancelled)"
 
-        monkeypatch.setattr(turn, "run_agent", stopped)
+        monkeypatch.setattr("silica.session.turn.run_agent", stopped)
         done = _read_sse(tc.post("/chat", json={"text": "q"}))[-1]
         assert done["stopped"] is True
         assert done["notes"] == [THIN]
@@ -181,9 +177,8 @@ class TestLive:
 
 class TestReplay:
     def test_messages_gives_the_assistant_entry_its_notes(self, client, monkeypatch):
-        from silica.ui.web import turn
         tc, server = client
-        monkeypatch.setattr(turn, "run_agent", _thin_turn)
+        monkeypatch.setattr("silica.session.turn.run_agent", _thin_turn)
         tc.post("/chat", json={"text": "what is graph rewiring?"})
         entries = tc.get("/messages").json()
         assert [m["notes"] for m in entries if m["role"] == "assistant"][-1] == [THIN]
@@ -193,7 +188,6 @@ class TestReplay:
         """Relevance and budget compaction rewrite tool results, never the
         assistant answer: forced over a history whose tool results all qualify."""
         from silica.config import CONFIG
-        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         from silica.agent import relevance
         from silica.agent.compaction import compact_read_history
@@ -213,7 +207,7 @@ class TestReplay:
             messages.append({"role": "tool", "tool_call_id": f"r{n}", "content": big})
             return _thin_turn(messages, model, tool_progress_callback)
 
-        monkeypatch.setattr(turn, "run_agent", reads_then_misses)
+        monkeypatch.setattr("silica.session.turn.run_agent", reads_then_misses)
         for q in ("first", "second", "third"):
             tc.post("/chat", json={"text": q})
         before = _assistant_notes(tc)
@@ -229,10 +223,9 @@ class TestReplay:
         assert _assistant_notes(tc) == before
 
     def test_session_load_gives_them_back(self, client, monkeypatch):
-        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         tc, server = client
-        monkeypatch.setattr(turn, "run_agent", _thin_turn)
+        monkeypatch.setattr("silica.session.turn.run_agent", _thin_turn)
         tc.post("/chat", json={"text": "what is graph rewiring?"})
         sid = SESSION.chat.sid
         tc.post("/reset")
@@ -287,7 +280,6 @@ class TestLandingTurn:
 
     def test_a_landing_turn_keeps_its_notes_live_and_on_both_replays(
             self, client, monkeypatch, empty_recall):
-        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         from silica.obs import narration as narr
         from silica.agent.loop import run_agent
@@ -298,7 +290,7 @@ class TestLandingTurn:
             return run_agent(messages, model, cb, cancel_token=cancel_token,
                              constraints=dataclasses.replace(constraints, max_iterations=1))
 
-        monkeypatch.setattr(turn, "run_agent", capped)
+        monkeypatch.setattr("silica.session.turn.run_agent", capped)
         with patch("silica.agent.loop.call_llm", _landing_llm):
             done = _read_sse(tc.post("/chat", json={"text": "what is graph rewiring?"}))[-1]
         assert done["answer"] == "Closing answer from what I found."
@@ -318,7 +310,7 @@ class TestLandingTurn:
 class TestRepl:
     def test_the_repl_prints_them_in_channel_order(self):
         from silica.cli import _print_turn_notes
-        from silica.ui.console import CONSOLE
+        from silica.term.console import CONSOLE
 
         msgs = [{"role": "assistant", "content": "a"}]
         notes = turn_notes.attach(msgs, [{"kind": "graph", "text": "graph line"},

@@ -20,7 +20,7 @@ import pytest
 
 from silica.obs.events import ToolCompleteEvent
 from silica.agent.recall_watch import RecallWatch
-from silica.cli import _expand_web_turn
+from silica.session.turn import expand_web_turn
 from silica.config import CONFIG
 from silica.sources import web_research as wr
 
@@ -56,13 +56,13 @@ def test_web_turn_exposes_exactly_the_three_web_tools():
 def test_web_turn_iteration_cap_matches_web_research():
     from silica.agent.constraints import web_turn_constraints
 
-    assert web_turn_constraints().max_iterations == wr._DEFAULT_MAX_SEARCHES
+    assert web_turn_constraints().max_iterations == wr.DEFAULT_MAX_SEARCHES
 
 
 # --- 2. dispatch ------------------------------------------------------------
 
 def test_keywords_land_in_the_instruction():
-    question, instruction = _expand_web_turn("/web graph rewiring", [])
+    question, instruction = expand_web_turn("/web graph rewiring", [])
     assert question == "graph rewiring"
     assert "graph rewiring" in instruction
     assert "web_search" in instruction and "web_fetch" in instruction
@@ -74,7 +74,7 @@ def test_bare_web_escalates_the_previous_user_question():
         {"role": "user", "content": "what is graph rewiring?"},
         {"role": "assistant", "content": "I have nothing on that."},
     ]
-    question, instruction = _expand_web_turn("/web", messages)
+    question, instruction = expand_web_turn("/web", messages)
     assert question == "what is graph rewiring?"
     assert "what is graph rewiring?" in instruction
 
@@ -86,18 +86,18 @@ def test_bare_web_ignores_a_cli_expanded_directive():
         {"role": "user", "content": "what is graph rewiring?"},
         {"role": "user", "content": "Read Concepts/RAG.md and...", "origin": "cli"},
     ]
-    question, _ = _expand_web_turn("/web", messages)
+    question, _ = expand_web_turn("/web", messages)
     assert question == "what is graph rewiring?"
 
 
 def test_bare_web_on_a_fresh_session_is_a_usage_error():
     with pytest.raises(ValueError, match="Usage: /web"):
-        _expand_web_turn("/web", [{"role": "system", "content": "sys"}])
+        expand_web_turn("/web", [{"role": "system", "content": "sys"}])
 
 
 def test_web_search_is_not_matched_as_a_web_turn():
-    assert _expand_web_turn("/web-search 'x'", []) is None
-    assert _expand_web_turn("what about /web", []) is None
+    assert expand_web_turn("/web-search 'x'", []) is None
+    assert expand_web_turn("what about /web", []) is None
 
 
 # --- 3./4. attribution: built from the trace, appended to answer AND history --

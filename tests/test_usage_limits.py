@@ -394,12 +394,12 @@ def test_a_refused_turn_is_counted_limited_and_says_when(fake, journal, tmp_vaul
     def run_agent(messages, model, *a, **k):  # the loop's first call, through the real gate
         return llm.call_llm("openrouter/qwen/qwen3.7-flash", messages).text
 
-    monkeypatch.setattr(turn, "run_agent", run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", run_agent)
     usage_limits.check()  # opens the window
     fake.body = key_record(usage=10.2)
 
     async def collect():
-        return [item async for item in turn.run_turn("what is entropy?")]
+        return [item async for item in turn.run_turn(turn.Ask("what is entropy?"))]
 
     frames = asyncio.run(collect())
     error = frames[-1]
@@ -407,8 +407,8 @@ def test_a_refused_turn_is_counted_limited_and_says_when(fake, journal, tmp_vaul
     assert error["error"].startswith("You have used this 5-hour window. It resets at ")
     assert error["when"] in error["error"] and error["resets_at"]
     assert made == []
-    (turn,) = journal.turns()
-    assert (turn["outcome"], turn["limit"]) == ("limited", "window")
+    (row,) = journal.turns()
+    assert (row["outcome"], row["limit"]) == ("limited", "window")
 
 
 def test_what_needs_no_model_stays_at_the_limit(fake, tmp_vault, monkeypatch):

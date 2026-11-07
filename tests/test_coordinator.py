@@ -130,7 +130,7 @@ def test_coordinator_enqueues_only_residual_orphans_and_reverifies():
 
     with patch("silica.agent.subagent.BoundedSubAgent", _FakeAgent), \
          patch.object(type(coord), "_current_orphans", side_effect=fake_current), \
-         patch.object(type(coord), "_orphan_candidates", return_value=[{"name": "X", "path": "Concepts/X"}]):
+         patch("silica.kernel.report.related.link_candidates", return_value=[{"name": "X", "path": "Concepts/X"}]):
         result = coord.run()
 
     ow = result["orphan_warnings"]
@@ -155,7 +155,7 @@ def test_orphan_repairs_are_capped_per_run():
     coord = _coordinator_with(_ManyWarnings(), SilicaConfig())
     with patch("silica.agent.subagent.BoundedSubAgent", _FakeAgent), \
          patch.object(type(coord), "_current_orphans", return_value=set()), \
-         patch.object(type(coord), "_orphan_candidates", return_value=[{"name": "X", "path": "Concepts/X"}]):
+         patch("silica.kernel.report.related.link_candidates", return_value=[{"name": "X", "path": "Concepts/X"}]):
         result = coord.run()
 
     ow = result["orphan_warnings"]

@@ -101,11 +101,7 @@ def write_note(
     # stays: it returns a friendly "use silica_patch_note" error instead of a
     # backend exception, and cross-process it still guards other agents.
     with path_lease(path):
-        try:
-            DRIVER.read_note(path)
-        except Exception:
-            pass  # missing note — the happy path
-        else:
+        if DRIVER.exists(path):
             return {"error": f"Note '{path}' already exists: use silica_patch_note to modify it."}
 
         try:
@@ -121,10 +117,9 @@ def write_note(
 def unset_prop(path: str, key: str) -> bool:
     """Remove a note's property; False on a backend that cannot, which is the Obsidian bridge:
     Obsidian itself can, so what to do then is the caller's."""
-    unset = getattr(DRIVER, "unset_prop", None)
-    if unset is None:
+    if not DRIVER.composes_props:
         return False
-    unset(path, key)
+    DRIVER.unset_prop(path, key)
     return True
 
 

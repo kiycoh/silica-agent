@@ -21,7 +21,6 @@ from fastapi.testclient import TestClient  # noqa: E402
 @pytest.fixture
 def client(tmp_vault, _fresh_narrator, monkeypatch):
     from silica.ui.web import server
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     SESSION.reset()
@@ -30,7 +29,7 @@ def client(tmp_vault, _fresh_narrator, monkeypatch):
         messages.append({"role": "assistant", "content": "forty-two"})
         return "forty-two"
 
-    monkeypatch.setattr(turn, "run_agent", answers)
+    monkeypatch.setattr("silica.session.turn.run_agent", answers)
     return TestClient(server.app), server
 
 

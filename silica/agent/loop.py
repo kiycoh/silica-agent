@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from typing import Callable, Any
 import concurrent.futures as _cf
-import contextvars
 import threading
 import time
 import logging
@@ -50,6 +49,7 @@ from silica.agent.compaction import (
 from silica.model.limits import ROUGH_CHARS_PER_TOKEN, TEXT_CHARS_PER_TOKEN
 from silica.agent import memory_gate, read_scope
 from silica.agent.relevance import compact_by_relevance
+from silica.agent.run_context import RunContext
 from silica.agent.sentinels import CANCELLED, EMPTY_COMPLETION, MAX_ITERATIONS, is_sentinel
 from silica.config import CONFIG
 from silica.model.concurrency import worker_slot
@@ -268,11 +268,8 @@ def _prefetch_reads(tool_calls: list, allowed: dict[str, Tool], cancel_token: An
         return {}
     pool = _cf.ThreadPoolExecutor(max_workers=min(len(names), _READ_WORKERS),
                                   thread_name_prefix="silica-read")
-    # One context copy per call: the workspace scope, read_scope's requests and
-    # the user-memory turn are context variables a pool thread would not see.
-    futures = {id(tc): pool.submit(contextvars.copy_context().run, _run_read,
-                                   allowed[tc.name], tc, cancel_token)
-               for tc in tool_calls}
+    read = RunContext.here(narrated=True).spawn(_run_read)
+    futures = {id(tc): pool.submit(read, allowed[tc.name], tc, cancel_token) for tc in tool_calls}
     pool.shutdown(wait=False)  # the threads end with their call; nothing waits on the pool
     return futures
 
@@ -445,12 +442,13 @@ def run_agent(
         the in-flight HTTP request: best we can do is stop waiting and stop
         retrying."""
         # A named frame and not a lambda: it is the token meter's call-site label
-        # for the loop, and the hosted llm_call lines carry it.
+        # for the loop, and the hosted llm_call lines carry it. Narrated, or a
+        # loop run by a tool leaves its `call` beats outside the tool's span.
         def _llm_worker(k=dict(kwargs)):
             return call_llm(effective_model, messages, **k)
 
         return run_with_deadline(
-            _llm_worker, None, catch=BaseException, abandon=_abandon,
+            RunContext.here(narrated=True).spawn(_llm_worker), None, catch=BaseException, abandon=_abandon,
             stop=cancel_token if cancel_token is not None else threading.Event(), on_stop=_Stopped)
 
     def _reask_without_reasoning(reply, kwargs: dict):

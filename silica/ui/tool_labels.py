@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 from silica.router.phases import InjectorState
 from silica.tools import TOOLS
-from silica.ui.style import GLYPHS
+from silica.term.style import GLYPHS
 
 
 # Value transforms for targets that are unreadable raw. Applied by both readers

@@ -20,7 +20,6 @@ WRITES = {"silica_write_note", "silica_patch_note", "silica_move", "silica_flag_
 @pytest.fixture
 def phone(tmp_vault, monkeypatch):
     from silica.ui.web import server
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     SESSION.reset()
@@ -34,7 +33,7 @@ def phone(tmp_vault, monkeypatch):
         messages.append({"role": "assistant", "content": "From your notes: 42."})
         return "From your notes: 42."
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     yield TestClient(server.app), server, seen
     SESSION.reset_phone()
 
@@ -131,7 +130,6 @@ def test_new_starts_the_phone_over(phone):
 
 def test_the_turn_line_names_the_channel_and_a_failure_answers_its_sentence(phone, journal,  # noqa: F811
                                                                              monkeypatch):
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server, _ = phone
     tc.post("/phone/turn", json={"text": "student-wrote-this"})
@@ -139,7 +137,7 @@ def test_the_turn_line_names_the_channel_and_a_failure_answers_its_sentence(phon
     def boom(*a, **k):
         raise RuntimeError("provider exploded")
 
-    monkeypatch.setattr(turn, "run_agent", boom)
+    monkeypatch.setattr("silica.session.turn.run_agent", boom)
     r = tc.post("/phone/turn", json={"text": "again"})
 
     assert r.status_code == 200 and set(r.json()) == {"error"}
@@ -160,7 +158,6 @@ def test_new_chat_during_a_phone_turn_keeps_the_gate_and_the_old_chat_clean(phon
     """The browser cannot see a phone turn, so its New chat can land in the
     middle of one: the gate stays the phone's, and the narrator ends on the
     new chat, not on the file the student left."""
-    from silica.ui.web import turn
     from silica.ui.web import session
     from silica.ui.web.session import SESSION
     from silica.obs import narration
@@ -177,7 +174,7 @@ def test_new_chat_during_a_phone_turn_keeps_the_gate_and_the_old_chat_clean(phon
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(turn, "run_agent", agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", agent)
     assert tc.post("/phone/turn", json={"text": "hi"}).json() == {"answer": "ok"}
 
     assert seen["busy"] is True and not SESSION.busy

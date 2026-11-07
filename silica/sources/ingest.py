@@ -165,7 +165,7 @@ def file_drafts(
         try:
             prior = DRIVER.read_note(note_rel).content
         except Exception:
-            prior = None
+            prior = None  # absent; an unreadable note fails the upsert below, which reports it
         if prior is not None:
             note_rel = f"{dest_dir}/{title} ({Path(f).stem}).md"
             prior = None

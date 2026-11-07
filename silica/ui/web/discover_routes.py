@@ -23,6 +23,7 @@ from silica.sources.discover import feeds as F
 from silica.sources.discover import rank, read, store
 from silica.sources.discover import story as S
 from silica.ui.web import drop
+from silica.ui.web.failures import Refused
 
 
 router = APIRouter(prefix="/discover")
@@ -30,7 +31,8 @@ _COVER_NAME = re.compile(r"^[0-9a-f]{24}\.(?:jpg|png|webp|gif|avif)$")
 # A host name and nothing else: it becomes both a fetched address and a file name.
 _DOMAIN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
 _IMAGE_HEADERS = {"Cache-Control": "private, max-age=86400", "Content-Security-Policy": "default-src 'none'; sandbox"}
-_TABS = ("foryou", "news", "research", "video")
+# The view's tabs and what the page calls them.
+TABS = {"foryou": "For you", "news": "News", "research": "Research", "video": "Video"}
 _FEEDBACK = (-1, 0, 1)
 _CATALOG_SHOWN = 40
 
@@ -88,7 +90,7 @@ def _feed_row(f: dict) -> dict:
     if f.get("kind") == "wikipedia":
         status, bad = "on demand", ""
     elif f.get("kind") == "youtube" and hosted():
-        status, bad = "desktop app only", "warn"
+        status, bad = S.DESKTOP_ONLY, "warn"
     elif st.get("status") == "error":
         status = st.get("error", "failed") + (f" since {_age(st.get('since'))}" if st.get("since") else "")
         bad = "err"
@@ -115,7 +117,7 @@ def discover():
         doc = store.load()
     reading = read.start() if doc.get("setup") else False
     stories = list(doc["stories"].values())
-    by_tab: dict[str, list[dict]] = {t: [] for t in _TABS}
+    by_tab: dict[str, list[dict]] = {t: [] for t in TABS}
     for s in stories:
         if not doc["buckets"].get(s["bucket"], True):
             continue
@@ -311,7 +313,7 @@ async def save(payload: dict):
     try:
         path = await asyncio.to_thread(S.save, None, sid, answer, question)
     except S.StoryError as exc:
-        raise HTTPException(404, str(exc)) from None
+        raise Refused(404, exc) from None
     return {"path": path}
 
 
@@ -445,7 +447,7 @@ async def opml(file: UploadFile = File(...)):
     try:
         listed = F.parse_opml(data)
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from None
+        raise Refused(422, exc) from None
     added = 0
     with store.LOCK:
         doc = store.load()

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+from silica.kernel.vault import Vault
 
 pytest.importorskip("websockets")
 
@@ -33,7 +34,7 @@ def ws(tmp_path, monkeypatch):
     monkeypatch.setattr(uj, "_store", uj.UndoJournalStore(tmp_path / "uj.db"))
     monkeypatch.setattr(preserve, "_TURN_STARTED", preserve.ContextVar("t", default=None))
     srv = StubPluginServer(v)
-    be = ObsidianWSBackend(url=srv.url, token=srv.token)
+    be = Vault(ObsidianWSBackend(url=srv.url, token=srv.token))
     yield be, v
     be.close()
     srv.stop()

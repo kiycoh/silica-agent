@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""RenderEvent -> JSON. The single source of truth for the wire event map.
+"""RenderEvent -> JSON. The single source of truth for the wire event map, a turn's
+terminal frames and the bridge's framing of them included.
 
 Mirrors the table in docs/specs/gui-web.md. Reasoning/thinking events are
 dropped in v1 (return None -> the callback skips them).
@@ -112,10 +113,15 @@ def _refusal(name: str, result: Any) -> dict | None:
             "path": path}
 
 
-def _note_refs(args: dict) -> list[str]:
+def _note_refs(name: str, args: dict) -> list[str]:
     """The notes a call names (read=name, write=path, related=note,
     mindmap=note_path, move/delete=ref). Missing one only omits a chip from the
-    chat 'sources' footer, it never reports a wrong note."""
+    chat 'sources' footer, it never reports a wrong note. The live event and a
+    reloaded transcript both read this, so the two draw the same chips."""
+    # A move leaves the note at `to`, so that is the ref worth offering as a
+    # chip; `ref` is a path that no longer resolves once the move lands.
+    if name == "silica_move" and isinstance(args.get("to"), str):
+        return [args["to"].strip()]
     refs = [args[k].strip() for k in note_keys()
             if isinstance(args.get(k), str) and args[k].strip()]
     paths = args.get("note_paths")
@@ -183,16 +189,11 @@ def event_to_json(ev) -> dict | None:
     if isinstance(ev, LLMStreamEvent):
         return {"type": "delta", "kind": ev.chunk_type, "text": ev.content}
     if isinstance(ev, ToolStartEvent):
-        # A move leaves the note at `to`, so that is the ref worth offering as a
-        # chip; `ref` is a path that no longer resolves once the move lands.
-        notes = _note_refs(ev.args)
-        if ev.name == "silica_move" and isinstance(ev.args.get("to"), str):
-            notes = [ev.args["to"].strip()]
         out: dict[str, Any] = {
                "type": "tool_start", "name": tool_verb(ev.name), "id": ev.call_id,
                "target": tool_target(ev.name, ev.args),
                "effect": _effect(ev.name),
-               "notes": notes}
+               "notes": _note_refs(ev.name, ev.args)}
         # The call's own arguments are the IN half of the expandable card: the
         # one-word target the row prints answers "which note", never "asking
         # what of it", and a recall whose query the reader cannot see is a step
@@ -253,6 +254,34 @@ def event_to_json(ev) -> dict | None:
     return None  # ReasoningEvent / Thinking* — ignored in v1
 
 
+def done_frame(answer: str, html: str, meter: dict, **extra: Any) -> dict:
+    """A turn's end. `meter` is `session.ctx_meter()`; `extra` carries what the
+    turn left under its answer (`stopped`, `notes`, `offer`, `memory`), each only
+    when set, because the page tells a turn with a note from one without by the key."""
+    return {"type": "done", "answer": answer, "html": html, **meter, **{k: v for k, v in extra.items() if v}}
+
+
+def error_frame(failure: dict) -> dict:
+    """A turn's end in failure: `failures.explain`'s sentence, or a refusal's."""
+    return {"type": "error", **failure}
+
+
+def files_frame(files: list[dict]) -> dict:
+    """The bubble's file chips (ADR-0121 point 4)."""
+    return {"type": "files", "files": files}
+
+
+def bridge_frame(item: dict, turn_id: str) -> dict:
+    """A turn's frame as the Obsidian bridge sends it (obsidian-silica PROTOCOL.md)."""
+    kind = item.get("type")
+    if kind == "done":
+        return {"type": "chat_done", "turnId": turn_id, "answer": item.get("answer", ""),
+                "html": item.get("html", "")}
+    if kind == "error":
+        return {"type": "chat_error", "turnId": turn_id, "error": item.get("error", "")}
+    return {"type": "chat_event", "turnId": turn_id, "event": item}
+
+
 def tool_calls_to_json(
     msg: dict,
     failed: set[str] | None = None,
@@ -278,14 +307,11 @@ def tool_calls_to_json(
             args = {}
         if not isinstance(args, dict):
             args = {}
-        notes = _note_refs(args)
-        if name == "silica_move" and isinstance(args.get("to"), str):
-            notes = [args["to"].strip()]
         line = {"name": tool_verb(name), "target": tool_target(name, args),
                 "error": bool(failed and tc.get("id") in failed),
                 # The footer of a replayed turn (audit P4) is built from these
                 # two, exactly as the live turn builds it from tool_start.
-                "effect": _effect(name), "notes": notes}
+                "effect": _effect(name), "notes": _note_refs(name, args)}
         if line["error"] and results:
             # Why it failed, in the authored sentence (audit P12): the bare
             # mark said only that something did not land.

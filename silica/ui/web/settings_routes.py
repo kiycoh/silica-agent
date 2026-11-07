@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from silica.config import CONFIG
 from silica.onboarding import settings_ops
+from silica.session import meter
 from silica.kernel.write import session_changes
 from silica.ui.web import session
 from silica.ui.web.session import SESSION
@@ -127,6 +128,8 @@ def set_setting(payload: dict):
     result = st.apply(key, payload.get("value", ""))
     if not result["ok"]:
         raise HTTPException(status_code=400, detail=result["error"])
+    if key in ("SILICA_MODEL", "SILICA_PROVIDER"):
+        meter.resolve_context_budget()  # the window the ring and the compaction budget read is the model's
     return result
 
 
@@ -159,7 +162,7 @@ async def confirm_setting(payload: dict):
 
 
 def _apply_vault_switch(path: str) -> dict:
-    from silica.cli import switch_vault
+    from silica.onboarding.adopt import switch_vault
     from silica.ui.web import settings as st
 
     switched = switch_vault(path)

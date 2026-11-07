@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from rich.console import Console
 
-from silica.ui.style import FlatMarkdown
+from silica.term.style import FlatMarkdown
 
 OSC8 = "\x1b]8;"  # the hyperlink escape rich emits around a link token
 

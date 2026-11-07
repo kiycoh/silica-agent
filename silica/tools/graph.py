@@ -27,10 +27,6 @@ from silica.tools import Reads, tool
 logger = logging.getLogger(__name__)
 
 
-# shortcut: only tools/runners.py still reads this name, and it is being split by
-# two other lanes. Drop it with the first of their merges, by 2026-11-20.
-from silica.kernel.base.layout import in_folder as _in_folder  # noqa: F401
-
 
 @tool(cls="composed", ingress=False)
 def silica_graph_export(output_path: Annotated[str, Field(description="Vault-relative path for the output HTML file (e.g. 'graph.html')")] = "graph.html", folder: Annotated[str, Field(description='Vault-relative folder to restrict scope (empty = entire vault)')] = "",
@@ -606,7 +602,7 @@ def silica_concepts(term: Annotated[str, Field(description="A single word/concep
         try:
             path = DRIVER.read_note(note).ref.path or note
         except Exception:
-            path = note
+            path = note  # unresolved: the index may still know the reader's spelling
         nodes = store.note_nodes(path)
         top = sorted(nodes.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
         out: dict[str, Any] = {

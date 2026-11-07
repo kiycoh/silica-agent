@@ -8,11 +8,15 @@ from __future__ import annotations
 import logging
 import re
 
+from silica.kernel.base.frontmatter import split_shown
 from silica.kernel.base.syntax import MD_LINK_RE, WIKILINK_WORDS_RE
 from silica.kernel.text import note_parts
 
 logger = logging.getLogger(__name__)
 
+
+# A link from here to a note nobody wrote, in the row's reason and on its tag.
+UNWRITTEN = "linked from here, never written"
 
 # Below this a note reads faster whole than as an extract, so the snippets
 # section is dropped rather than duplicating the reader.
@@ -148,7 +152,7 @@ def bridge_passage(src: str, target: str, limit: int = 240) -> str:
         logger.debug("shape: bridge source unreadable %s", src, exc_info=True)
         return ""
     want = note_parts.clean_name(target).lower()
-    _props, body = note_parts.split_frontmatter(content)
+    _props, body = split_shown(content)
     for raw in body.splitlines():
         line = LIST_OR_QUOTE.sub("", raw)
         if not line.strip() or _NOT_PASSAGE.match(line):
@@ -186,7 +190,7 @@ def link_line(src: str, target: str, limit: int = 240) -> tuple[int, str]:
     lines = content.splitlines()
     # The body before the frontmatter: a sentence says why the link is there,
     # and a `related:` entry only that it is.
-    head = len(lines) - len(note_parts.split_frontmatter(content)[1].splitlines())
+    head = len(lines) - len(split_shown(content)[1].splitlines())
     for number in [*range(head, len(lines)), *range(head)]:
         raw = lines[number]
         for m in WIKILINK_WORDS_RE.finditer(raw):
@@ -226,7 +230,7 @@ def suggested(canon: str, related: list[dict], linked: set[str], resolve) -> lis
     """
     out: list[dict] = [
         {"name": note_parts.clean_name(link.target), "path": "", "kind": "ghost",
-         "why": "linked from here, never written"}
+         "why": UNWRITTEN}
         for link in unresolved_links()
         if link.source.path == canon
     ]

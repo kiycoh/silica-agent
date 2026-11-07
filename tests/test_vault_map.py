@@ -29,13 +29,13 @@ def test_populated_store_yields_map(tmp_path):
 
 
 def test_inject_appends_system_message(monkeypatch):
-    import silica.cli as cli
     from silica.kernel.report import vault_map as vm
+    from silica.session import seed
 
     monkeypatch.setattr(vm, "build_vault_map", lambda **k: "## Vault map\n- Note: 3")
     messages = [{"role": "system", "content": "SYSTEM_PROMPT"}]
 
-    cli._inject_vault_map(messages)
+    seed.inject_vault_map(messages)
 
     assert len(messages) == 2
     assert messages[1]["role"] == "system"
@@ -43,20 +43,20 @@ def test_inject_appends_system_message(monkeypatch):
 
 
 def test_inject_noop_when_map_is_none(monkeypatch):
-    import silica.cli as cli
     from silica.kernel.report import vault_map as vm
+    from silica.session import seed
 
     monkeypatch.setattr(vm, "build_vault_map", lambda **k: None)
     messages = [{"role": "system", "content": "SYSTEM_PROMPT"}]
 
-    cli._inject_vault_map(messages)
+    seed.inject_vault_map(messages)
 
     assert len(messages) == 1
 
 
 def test_inject_swallows_errors(monkeypatch):
-    import silica.cli as cli
     from silica.kernel.report import vault_map as vm
+    from silica.session import seed
 
     def _boom(**k):
         raise RuntimeError("index corrotto")
@@ -64,7 +64,7 @@ def test_inject_swallows_errors(monkeypatch):
     monkeypatch.setattr(vm, "build_vault_map", _boom)
     messages = [{"role": "system", "content": "SYSTEM_PROMPT"}]
 
-    cli._inject_vault_map(messages)  # non deve sollevare
+    seed.inject_vault_map(messages)  # non deve sollevare
 
     assert len(messages) == 1
 

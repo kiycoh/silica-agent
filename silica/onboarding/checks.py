@@ -1021,7 +1021,7 @@ def render_report(results: list[CheckResult]) -> None:
     from rich.markup import escape
     from rich.table import Table
 
-    from silica.ui.console import CONSOLE
+    from silica.term.console import CONSOLE
 
     table = Table(show_header=False, box=None, padding=(0, 1))
     for r in results:

@@ -171,7 +171,7 @@ def reply_language_for(vault: str) -> str | None:
     Explicit conventions win (`reply_language`, else `language`); the fallback
     is the vault's own authority (declared `cooccurrence_lang`, else detected
     from the human notes). The chat used it too until 2026-10-16 and now reads
-    the conventions alone (cli._reply_language): it has the person's messages.
+    the conventions alone (session.seed.reply_language): it has the person's messages.
     """
     if not vault:
         return None

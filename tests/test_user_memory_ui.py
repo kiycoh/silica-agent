@@ -43,7 +43,7 @@ def _memory_msgs(messages):
 # --- the seed -----------------------------------------------------------------
 
 def test_the_seed_carries_memory_before_the_language_line(on):
-    from silica.cli import seed_messages
+    from silica.session.seed import seed_messages
 
     assert _memory_msgs(seed_messages()) == []   # empty files: no message at all
     um.save("user", "Name is Giulia")
@@ -55,7 +55,7 @@ def test_the_seed_carries_memory_before_the_language_line(on):
 
 
 def test_the_seed_has_no_memory_when_paused_or_incognito(on, monkeypatch):
-    from silica.cli import seed_messages
+    from silica.session.seed import seed_messages
 
     um.save("user", "Name is Giulia")
     monkeypatch.setattr(CONFIG, "user_memory", False)
@@ -78,7 +78,7 @@ def test_the_memory_origin_never_reaches_the_wire(on):
 def test_remember_writes_the_text_verbatim_with_no_model(on):
     from silica.cli import _handle_direct_shortcut
 
-    with patch("silica.cli.run_agent", side_effect=AssertionError("no model")):
+    with patch("silica.session.turn.run_agent", side_effect=AssertionError("no model")):
         assert _handle_direct_shortcut("/remember  Thesis draft due 2026-11-30 (ask Vitale)", [])
     assert um.read("vault") == "- Thesis draft due 2026-11-30 (ask Vitale)\n"
 
@@ -115,7 +115,8 @@ def test_memory_prints_both_files_with_paths_and_usage(on):
 
 
 def test_incognito_hides_the_memory_of_the_conversation_in_progress(on):
-    from silica.cli import _handle_direct_shortcut, seed_messages
+    from silica.cli import _handle_direct_shortcut
+    from silica.session.seed import seed_messages
 
     um.save("user", "Name is Giulia")
     messages = seed_messages() + [{"role": "user", "content": "hi"}]
@@ -135,7 +136,7 @@ def test_tui_incognito_also_stops_capture_and_clears_with_a_new_process(on, monk
     session = MagicMock()
     session.prompt.side_effect = ["/incognito", "what is entropy?", "/exit"]
 
-    def _answer(messages, **kw):
+    def _answer(messages, *a, **kw):
         seen.append([dict(m) for m in messages])
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
@@ -143,10 +144,10 @@ def test_tui_incognito_also_stops_capture_and_clears_with_a_new_process(on, monk
     um.save("user", "Name is Giulia")
     captured = MagicMock()
     with patch("silica.cli.build_session", MagicMock(return_value=session)), \
-         patch("silica.cli.run_agent", _answer), \
+         patch("silica.session.turn.run_agent", _answer), \
          patch("silica.cli._model_configured", lambda: True), \
          patch("silica.cli.CONSOLE"), patch("silica.cli.print_home"), \
-         patch("silica.cli._setup_logging"), patch("silica.cli._update_context_tokens"), \
+         patch("silica.cli._setup_logging"), patch("silica.session.meter.update_context_tokens"), \
          patch("silica.cli._ensure_servers"), patch("silica.cli._announce_code_lane"), \
          patch("silica.cli._activate_repo_mode"), patch("silica.capture.capture_session", captured), \
          patch("sys.argv", ["silica"]):
@@ -160,10 +161,9 @@ def test_tui_incognito_also_stops_capture_and_clears_with_a_new_process(on, monk
 # --- the GUI ------------------------------------------------------------------
 
 def test_gui_remember_saves_and_undo_takes_it_back(client, monkeypatch):
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
-    monkeypatch.setattr(turn, "run_agent", MagicMock(side_effect=AssertionError("no model")))
+    monkeypatch.setattr("silica.session.turn.run_agent", MagicMock(side_effect=AssertionError("no model")))
     done = _sse(tc.post("/chat", json={"text": "/remember test entry"}))[-1]
     assert done["type"] == "done" and done["answer"] == "Saved to memory: test entry"
     mem = done["memory"]
@@ -218,7 +218,6 @@ def test_a_reopened_gui_chat_starts_from_the_seed(client, monkeypatch):
     """The narration stores turns only, so a loaded chat used to run with no
     system prompt and no memory; it now gets a fresh seed in front, as the
     TUI's /resume does."""
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
 
@@ -226,7 +225,7 @@ def test_a_reopened_gui_chat_starts_from_the_seed(client, monkeypatch):
         messages.append({"role": "assistant", "content": "Reply"})
         return "Reply"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     tc.post("/chat", json={"text": "first question"})
     sid = tc.get("/sessions").json()[0]["id"]
     um.save("user", "Name is Giulia")

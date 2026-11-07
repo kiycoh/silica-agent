@@ -272,7 +272,6 @@ def gui(rig, monkeypatch):
     """The GUI's run_turn over the real run_agent, each RecallWatch kept."""
     from silica.agent.loop import run_agent
     from silica.ui.web import server
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     watches: list = []
@@ -297,8 +296,8 @@ def gui(rig, monkeypatch):
             **({"max_iterations": max_iter["n"]} if max_iter["n"] else {}))
         return run_agent(messages, model, cb, cancel_token=cancel_token, constraints=constraints)
 
-    monkeypatch.setattr(turn, "RecallWatch", Spy)
-    monkeypatch.setattr(turn, "run_agent", chat_turn)
+    monkeypatch.setattr("silica.session.turn.RecallWatch", Spy)
+    monkeypatch.setattr("silica.session.turn.run_agent", chat_turn)
     SESSION.reset()
     sent: list = []
     yield SimpleNamespace(tc=TestClient(server.app), server=server, watches=watches,

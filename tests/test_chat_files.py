@@ -31,7 +31,6 @@ def chat(tmp_vault, monkeypatch):
     """The GUI with the transcriber stood in for and the agent recorded: each
     turn keeps its user message and the tools it was offered."""
     from silica.ui.web import server
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     for key in (adm.MAX_MINUTES_ENV, adm.MONTHLY_MINUTES_ENV, "SILICA_HOSTED"):
@@ -48,7 +47,7 @@ def chat(tmp_vault, monkeypatch):
         messages.append({"role": "assistant", "content": f"answer {len(turns)}"})
         return f"answer {len(turns)}"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     return TestClient(server.app), server, turns
 
 

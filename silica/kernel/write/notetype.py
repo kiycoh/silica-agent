@@ -77,7 +77,7 @@ def stamp_type(path: str, content: str) -> str:
     if data is None:
         return content
     # `create` stamps the text as handed to it, the one way a CRLF note gets here:
-    # every read is on LF and goes back through preserve.encode.
+    # every read is on LF and goes back through markdown.encode.
     eol = "\r" if content[end - 1:end] == "\r" else ""
     return content[:end] + f"\ntype: {derive_type(path, content)}{eol}" + content[end:]
 

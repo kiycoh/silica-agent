@@ -4,8 +4,8 @@
 `/narration/sse` has been written and served since the narration shipped, and
 until now nothing in the GUI read it: the panel is a projection of a file that
 already exists. These tests pin the two things that can silently rot — the
-fold that attaches an llm call to the thought that ran it, and the verb table
-that has to stay in step with `silica/ui/renderer.py`.
+fold that attaches an llm call to the thought that ran it, and the target rule
+that has to stay in step with `silica/ui/tool_labels.py`.
 """
 from __future__ import annotations
 
@@ -151,42 +151,25 @@ def test_the_user_turn_titles_the_run(tmp_path):
     assert run["title"] == "cerca utilitarismo"
 
 
-def test_the_verb_table_cannot_drift_from_the_renderer():
-    """work.js carries its own copy of the verb table, because the narration
-    payload holds the RAW tool name and the browser has no renderer. A copy that
-    nothing checks is a copy that goes stale the next time a tool is added."""
-    from silica.tools import TOOLS
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run work.js")
+def test_the_run_line_names_a_call_as_the_chat_row_does(tmp_path):
+    """Both surfaces read `Tool.label`; what is left in the browser is toolTarget,
+    which re-states the Python's two special forms. The narration holds the RAW
+    tool name, so this is the only place the two meet."""
+    from silica.tools import TOOLS, catalog
+    from silica.ui.tool_labels import tool_target, tool_verb
 
-    labels = {name: t.label for name, t in TOOLS.items() if t.label}
-    src = WORK_JS.read_text()
-    m = re.search(r"^const TOOL_VERBS = \{(.*?)^\};", src, re.S | re.M)
-    assert m, "TOOL_VERBS not found in work.js"
-    js_full = {name: (verb, key or None) for name, verb, key in
-               re.findall(r'"(\w+)":\s*\["([^"]*)",\s*(?:"([^"]*)"|null)\]', m.group(1))}
-    js = js_full
-    assert js, "no entries parsed out of TOOL_VERBS"
-    missing = sorted(set(labels) - set(js))
-    assert not missing, f"work.js TOOL_VERBS is missing {missing}"
-    extra = sorted(set(js) - set(labels))
-    assert not extra, f"work.js TOOL_VERBS invents {extra}"
-    for name, (verb, key) in labels.items():
-        assert js_full[name] == (verb, key), f"{name}: {js_full[name]} != {(verb, key)}"
-
-
-def test_the_write_table_cannot_drift_from_what_the_tools_declare():
-    """H-EFFECT: `WRITE_OPS` and `NOTE_KEYS` are work.js's copies of two tool
-    facts, and the comments saying "same keys" were all that compared them."""
-    from silica.tools import TOOLS
-
-    src = WORK_JS.read_text()
-    block = re.search(r"^const WRITE_OPS = \{(.*?)^\};", src, re.S | re.M)
-    assert block, "WRITE_OPS not found in work.js"
-    assert set(re.findall(r'"(\w+)":', block.group(1))) == {
-        name for name, t in TOOLS.items() if t.mutates}
-    keys = re.search(r"^const NOTE_KEYS = \[(.*?)\];", src, re.M)
-    assert keys, "NOTE_KEYS not found in work.js"
-    assert set(re.findall(r'"(\w+)"', keys.group(1))) == {
-        k for t in TOOLS.values() for k in t.note_args}
+    catalog.load()
+    calls = [(name, {t.label[1]: "Morale"} if t.label[1] else {}) for name, t in TOOLS.items() if t.label]
+    calls += [("silica_move", {"ref": "A", "to": "B"}), ("silica_recall", {}),
+              ("web_fetch", {"url": "https://example.com/a/b"}), ("web_fetch", {"url": "not a url"})]
+    script = tmp_path / "labels.js"
+    script.write_text(_pure_block() + "\nconsole.log(JSON.stringify(JSON.parse(process.argv[2]).map("
+                      "([n, a]) => [toolVerb(n), toolTarget(n, a)])));\n")
+    out = subprocess.run(["node", str(script), json.dumps(calls)], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    want = [[tool_verb(name), tool_target(name, args)] for name, args in calls]
+    assert json.loads(out.stdout) == want
 
 
 def test_the_panel_is_wired_into_the_page():

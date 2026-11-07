@@ -111,14 +111,7 @@ def _make_resolver(extra_names: set[str] | None = None):
         try:
             if "/" in stem:
 
-                def _path_exists(p: str) -> bool:
-                    try:
-                        DRIVER.read_note(p)
-                        return True
-                    except RuntimeError:
-                        return False
-
-                result = stem if (_path_exists(stem + ".md") or _path_exists(stem)) else ""
+                result = stem if (DRIVER.exists(stem + ".md") or DRIVER.exists(stem)) else ""
             elif any(r.name.lower() == key for r in DRIVER.search_names(stem)):
                 result = stem
             else:
@@ -207,7 +200,7 @@ def sweep_note(rel_path: str, resolves, keep: frozenset[str] = frozenset()) -> d
     try:
         nc = DRIVER.read_note(rel_path)
     except Exception:
-        return None
+        return None  # a note this pass cannot read keeps its related: as it is
     content = nc.content
     if m := FM_RE.match(content):
         fm_new, dropped = _prune_related(m.group(0), resolves, keep)

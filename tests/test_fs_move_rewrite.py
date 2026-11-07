@@ -16,6 +16,7 @@ from pathlib import Path
 
 from silica.driver import fs_backend
 from silica.driver.fs_backend import ObsidianFSBackend
+from silica.kernel.vault import Vault
 
 
 # ---------------------------------------------------------------------------
@@ -24,7 +25,7 @@ from silica.driver.fs_backend import ObsidianFSBackend
 
 def _make_backend(vault: Path) -> ObsidianFSBackend:
     """Return a fresh FS backend for *vault*, forcing a clean initial index."""
-    b = ObsidianFSBackend(str(vault))
+    b = Vault(ObsidianFSBackend(str(vault)))
     b._ensure_index()
     return b
 

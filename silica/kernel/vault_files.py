@@ -7,12 +7,12 @@ from __future__ import annotations
 
 import glob
 import json
-import re
 from collections.abc import Sequence
 from pathlib import Path
 
 from silica.config import CONFIG
 from silica.kernel.base.formats import SHOWN_IMAGE_EXTS
+from silica.kernel.base.syntax import CHAT_IMAGE_RE
 
 
 class NotAChatFile(ValueError):
@@ -21,9 +21,6 @@ class NotAChatFile(ValueError):
 
 class InboxClash(ValueError):
     """The Inbox holds another file of that name; the app answers it with a 409."""
-
-
-_EMBED_RE = re.compile(r"!\[\[([^\]|#]+)|!\[[^\]]*\]\(([^)\s]+)\)")
 
 
 def find_image(vault: str | None, path: str) -> Path | None:
@@ -127,7 +124,7 @@ def add_to_vault(notes: Sequence[str], sources: Sequence[str] = ()) -> list[str]
             text = text.replace(old, new)
         DRIVER.upsert(dst_rel, text, loss=Loss.STAGED)
         out.append(dst_rel)
-        for m in _EMBED_RE.finditer(text):
+        for m in CHAT_IMAGE_RE.finditer(text):
             pic = vault / chat / "Images" / Path(m[1] or m[2]).name
             if pic.is_file():
                 (vault / inbox / "Images").mkdir(parents=True, exist_ok=True)

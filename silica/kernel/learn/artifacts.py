@@ -261,11 +261,10 @@ def flashcards(targets: list[str], n: int = 12, save: str = "") -> str:
     if made["dropped"]:
         out += ["", f"_{made['dropped']} of {made['written']} cards dropped: the note each cites does not hold its answer._"]
     if save:
-        from silica.tools.notes import silica_write_note
+        from silica.kernel.write.notes import write_note
 
         path = save if save.endswith(".md") else save + ".md"
         body = "#flashcards\n\n" + "\n\n".join(f"{q} :: {a} [[{note}]]" for q, a, note in made["cards"]) + "\n"
-        res = silica_write_note(path=path, body=body, title=Path(path).stem)
-        err = res.get("error") if isinstance(res, dict) else None
+        err = write_note(path, body, title=Path(path).stem).get("error")
         out += ["", f"Not saved: {err}" if err else f"Saved as [[{Path(path).stem}]], the format the Spaced Repetition plugin reads."]
     return "\n".join([*out, "", PRACTICE_LINE])

@@ -371,6 +371,10 @@ def current_parent() -> str | None:
     return _parent_var.get()
 
 
+def current_run() -> str | None:
+    return _run_var.get()
+
+
 def set_run(run_id: str | None):
     """Bind the ambient run id for this context; returns the reset token."""
     return _run_var.set(run_id)

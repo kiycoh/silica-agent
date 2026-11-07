@@ -25,6 +25,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from silica.agent.run_context import RunContext
 from silica.kernel.write.gate import commit_ops
 from silica.model.decide import decide
 from silica.kernel.base.frontmatter import FM_RE_TOLERANT
@@ -197,7 +198,7 @@ def _decide_typed(target: str, body: str, candidates: list[dict]) -> OrphanLinkD
         return answers["link"]["noul"] if answers else None
 
     with ThreadPoolExecutor(max_workers=max(1, len(candidates))) as ex:
-        ps = list(ex.map(ask, candidates))
+        ps = list(ex.map(RunContext.here().spawn(ask), candidates))
     verdicts = " ".join(f"{c.get('name', '?')}={'-' if p is None else f'{p:.2f}'}"
                         for c, p in zip(candidates, ps))
     if any(p is None for p in ps):

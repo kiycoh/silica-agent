@@ -178,6 +178,12 @@ SYSTEM_DIRS: frozenset[str] = frozenset({
 })
 
 
+def vault_root() -> Path:
+    """The active vault as a Path, for code that has one by now. `publish` and the
+    skills route keep their own: no vault is `.` to one and a 409 to the other."""
+    return Path(CONFIG.vault_path)
+
+
 def is_system_dir(path) -> bool:
     return str(Path(path).resolve()) in SYSTEM_DIRS
 
@@ -217,7 +223,10 @@ def ignore_matcher(vault) -> Callable[[str], bool]:
 
     Matches by name at any depth, like NOISE_DIRS itself — not by path, so
     `docs/private` does not work but `private` and `*.egg-info` do.
-    ponytail: name-only matching, add path anchoring when someone needs it.
+    shortcut: name-only, so a `docs/private` line matches nothing here while the
+    engine's walk honours it (BUG 1 of the 2026-11-06 audit); core has had the
+    anchoring since 0.12.0 at the latest, and taking it changes which notes the
+    fusion indexes hold, so it comes with the first rebuild stamp this tree gets.
 
     Reads the file once: build the matcher before a walk, never inside it.
     """

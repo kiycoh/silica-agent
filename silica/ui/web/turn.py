@@ -2,62 +2,39 @@
 # Copyright (C) 2026 Alessandro Carosia
 
 """One agent turn, transport-neutral: the browser's as a stream of wire dicts, the phone's
-answered whole. Framing a turn for HTTP is `sse`'s job, so this module loads no web
-framework and the bridge (`silica connect`) can run a turn without one."""
+answered whole. The turn itself is `silica.session.turn`; this module is the browser's and
+the phone's lists of its steps, and the queue that carries the events out. Framing a turn
+for HTTP is `sse`'s job, so this module loads no web framework and the bridge (`silica
+connect`) can run a turn without one."""
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
 import threading
-import time
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from silica.agent import turn_notes
-from silica.agent.constraints import (
-    AgentConstraints,
-    chat_deferred,
-    chat_tools,
-    DEMO_MAX_ITERATIONS,
-    PHONE_TOOLS,
-    web_turn_constraints,
-)
-from silica.agent.loop import run_agent
-from silica.agent.mentions import image_mark
-from silica.agent.sentinels import EMPTY_COMPLETION
-from silica.tools import tool_failed
-from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
+from silica.agent.constraints import AgentConstraints, DEMO_MAX_ITERATIONS, PHONE_TOOLS
 from silica.config import CONFIG, demo
-from silica.kernel import job_records, vault_files
+from silica.kernel import job_records, system_lines, vault_files
 from silica.kernel.graph.mindmap import note_resolver
-from silica.metrics import emit
-from silica.model.llm import meter_totals
-from silica.obs.events import LLMStreamEvent, ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
-from silica.sources.web_research import WebTurn
-from silica.ui.web import render, session
-from silica.ui.web.callback import event_to_json
+from silica.kernel.text.mentions import image_mark
+from silica.obs.events import ToolCompleteEvent
+from silica.session import commands, meter, seed
+from silica.session import turn as session_turn
+from silica.session.turn import Turn, UsageLine
+from silica.session.words import command_word
+from silica.tools import tool_failed
+from silica.ui.web import callback, render, session
 from silica.ui.web.failures import explain as _failure
 from silica.ui.web.session import SESSION
 
 logger = logging.getLogger(__name__)
-
-
-def _scoped_run(ws: dict | None, fn, *args, **kwargs):
-    """Run the agent with retrieval narrowed to `ws` (ADR-0112 point 4). Set
-    and reset on the worker thread itself: `to_thread` copies the context, and
-    a token must be reset in the context that set it."""
-    from silica.kernel import workspaces
-
-    token = workspaces.open_scope(ws) if ws else None
-    try:
-        return fn(*args, **kwargs)
-    finally:
-        if token is not None:
-            workspaces.close_scope(token)
 
 
 def _join_workspace(ws_path: str, ev) -> None:
@@ -86,115 +63,6 @@ def _join_workspace(ws_path: str, ev) -> None:
         logger.warning("could not add %s to the workspace %s", path, ws_path, exc_info=True)
 
 
-def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dict | None]:
-    """(turn note, offer) for the turn that just ended (ADR-0127 points 5, 6):
-    a proposal written from a request the person made in enough chats, or
-    else the installed skill that answers it, offered as the next turn. An
-    incognito chat proposes nothing: it asked to leave no trace."""
-    from silica.obs import narration as _narr
-    from silica.kernel import proposed_skills as ps
-    from silica.kernel import user_memory
-
-    from silica.kernel.learn.offer import says_lost
-
-    vault = CONFIG.vault_path or ""
-    # "non ho capito la Lezione 14" said in three chats is a reader stuck, not
-    # a request to make reusable: it became the skill /non-ho-capito
-    # (2026-10-23). The study offer answers that message. A demo neither
-    # drafts one (a worker call no question counts) nor offers one it may
-    # refuse, /explain among them (ADR-0139 point 6).
-    if not vault or demo() or user_memory.incognito() or says_lost(text):
-        return None, None
-    try:
-        evidence = ps.detect(text, messages, vault, _narr.NARRATOR.sid)
-        if evidence is not None:
-            drafted = ps.draft(evidence["asks"], CONFIG)
-            name = ps.stage(vault, drafted, evidence, CONFIG.worker_model or CONFIG.model or "") if drafted else None
-            if name:
-                return {"kind": "skill", "text": f"/{name} written from a request you made in "
-                                                 f"{len(evidence['sessions'])} chats · review it in "
-                                                 "Settings › Skills"}, None
-        return None, ps.offer(text, vault)
-    except Exception:
-        # A proposal is an extra: a chat file that does not parse or a worker
-        # that is down costs the person the proposal, never the answer.
-        logger.warning("skill proposal skipped", exc_info=True)
-        return None, None
-
-
-def _study_offer(text: str, messages: list[dict], plan_draft: dict | None = None) -> dict | None:
-    """The study offer for the turn that just ended, from the notes it read
-    (learn.offer.decide). An incognito chat gets none, as it gets no proposal,
-    and a demo none: its commands are Learn's and the demo's refused ones.
-    `plan_draft` is the plan this turn computed (_plan_context), offered for
-    saving."""
-    from silica.kernel import user_memory
-    from silica.kernel.learn.offer import decide
-
-    if demo() or user_memory.incognito():
-        return None
-    try:
-        return decide(text, read_refs(messages), SESSION.chat.sid or "", plan_draft)
-    except Exception:
-        # An offer is an extra: a ledger that does not parse costs the offer,
-        # never the answer.
-        logger.warning("study offer skipped", exc_info=True)
-        return None
-
-
-def _escalation(text: str, messages: list[dict]) -> str:
-    """The escalation block for this turn, or "" (learn.offer.decide_escalation).
-    Nothing in an incognito chat."""
-    from silica.kernel import user_memory
-    from silica.kernel.learn.offer import decide_escalation
-
-    if user_memory.incognito():
-        return ""
-    try:
-        history = [str(m.get("content") or "") for m in messages if m.get("role") == "user"][-3:]
-        return decide_escalation(text, history, SESSION.chat.sid or "")
-    except Exception:
-        # An escalation is an extra: a ledger that does not parse costs it,
-        # never the turn.
-        logger.warning("study escalation skipped", exc_info=True)
-        return ""
-
-
-def _plan_context(text: str, messages: list[dict]) -> tuple[str, str, dict | None]:
-    """Learn's plan for this message (learn.offer.plan_context), or ("", "",
-    None): the block for the model, the plan or calendar appended under its
-    answer, and the plan to save when this turn computed one. `messages` is
-    the chat before this turn, whose last exchange may be the question for
-    the material that this message answers. An incognito chat gets none, as
-    it gets no offer, and an account Memorize is not served to none: the
-    plan it would offer to save lands on a route that answers 404."""
-    from silica.config import withheld
-    from silica.kernel import user_memory
-
-    if "/learn" in withheld("routes") or user_memory.incognito() or not text or text.startswith("/"):
-        return "", "", None
-    try:
-        from silica.kernel.learn.offer import plan_context
-        from silica.kernel.learn.plans import list_plans
-
-        prev_user, prev_answer = "", ""
-        for m in reversed(messages):
-            if m.get("role") == "assistant" and not prev_answer and not prev_user:
-                prev_answer = str(m.get("content") or "")
-            elif m.get("role") == "user":
-                # the person's words: the blocks this server appended to the
-                # turn start at a blank line and a bracket, and the question
-                # for the material said "study plan" itself
-                prev_user = str(m.get("silica_said") or m.get("content") or "").split("\n\n[", 1)[0]
-                break
-        return plan_context(text, list_plans(), prev_user, prev_answer)
-    except Exception:
-        # The plan's numbers are an extra: a plan note that does not parse,
-        # or a reading model that is down, costs the block, never the turn.
-        logger.warning("plan context skipped", exc_info=True)
-        return "", "", None
-
-
 def _turn_kind(text: str) -> str:
     """The turn line's kind: "chat", a built-in command's name, or "slash".
 
@@ -206,65 +74,157 @@ def _turn_kind(text: str) -> str:
         return "chat"
     from silica.ui.commands import COMMANDS
 
-    word = text.split(None, 1)[0].lower()
+    word = command_word(text)
     return word[1:] if any(c.name == word for c in COMMANDS) else "slash"
 
 
-async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str = "",
-                   withhold: "Sequence[str]" = (), files: "Sequence[dict]" = (), said: str = "",
-                   prebuilt: dict | None = None, note: str = "", story: str = "",
-                   scope: str = "story") -> AsyncIterator[dict]:
+@dataclass(frozen=True)
+class Ask:
+    """What one web turn is asked: the words, and what rides them.
+
+    ADR-0121: `withhold` names tools this turn is not offered (a turn that brings
+    attached files in is not offered the injector, point 3); `files` and `said`
+    ride the user message for the bubble a reload draws (point 4); `prebuilt` is
+    a stored user message asked again as it was (POST /turn/redo). `note` is the
+    vault path of the note open beside the chat (the composer's chip): it joins
+    the named notes and rides the user message as `silica_note`. `story` is a
+    Discover story the composer's story chip names (ADR-0137 point 8): its
+    articles ride the turn as a fenced block, `scope` says what the answer may
+    draw on, and the chip rides the message as `silica_story`.
+    """
+
+    text: str
+    attachments: "Sequence[Path]" = ()
+    workspace: str = ""
+    withhold: "Sequence[str]" = ()
+    files: "Sequence[dict]" = ()
+    said: str = ""
+    prebuilt: dict | None = None
+    note: str = ""
+    story: str = ""
+    scope: str = "story"
+
+
+@dataclass
+class _ChatTurn(Turn):
+    """What only the browser's turn carries."""
+
+    ask: Ask = field(default_factory=lambda: Ask(""))
+    chip: dict | None = None  # the story chip the message stores
+    images: list[Path] = field(default_factory=list)
+
+
+def _settled(t: _ChatTurn) -> None:
+    """This chat's conversions that ended since the agent last heard of them: the
+    history still says "still converting" (jobs.settled)."""
+    from silica.ui.web import jobs
+
+    if t.web is None:
+        if block := jobs.settled(t.conv.sid):
+            t.add(block)
+
+
+def _story(t: _ChatTurn) -> None:
+    if t.ask.story:
+        from silica.sources.discover.story import chat_block
+
+        block, t.chip = chat_block(None, t.ask.story, t.ask.scope)
+        t.add(block)
+
+
+def _image_marks(t: _ChatTurn) -> None:
+    """An attached image rides this turn only (ADR-0077 point 3): the transcript,
+    the narration and every later turn carry its saved path, which silica_look
+    opens again, because the base64 would otherwise be re-sent with every later
+    turn and stored with the session."""
+    t.images = [] if t.text.startswith("/") else list(t.ask.attachments)
+    t.content += "".join(image_mark(p) for p in t.images)
+
+
+# Off the loop, each of them: they read the driver's graph, and with the ws
+# backend installed (silica connect) a driver call on the loop thread deadlocks
+# (`_rpc` blocks the very loop that must send the frame).
+_BEFORE = (session_turn.name_notes, session_turn.escalate, session_turn.plan, _settled, _story, _image_marks)
+
+
+def _message(t: _ChatTurn) -> dict:
+    ask = t.ask
+    msg = session_turn.user_message(t)
+    if ask.files:
+        msg["silica_files"] = list(ask.files)
+    if ask.said:
+        msg["silica_said"] = ask.said
+    elif t.text.startswith("/") and t.content != t.text:
+        # A command's expansion is the model's instructions, not the person's
+        # words: a reloaded chat drew /quiz's directive as what they had typed
+        # (tour run, 2026-10-29).
+        msg["silica_said"] = t.text
+    if t.opened:
+        msg["silica_note"] = t.opened
+    if t.chip:
+        msg["silica_story"] = t.chip
+    return msg if ask.prebuilt is None else ask.prebuilt
+
+
+def _figures(t: _ChatTurn) -> None:
+    """The figures the turn read go beside the paragraph they illustrate
+    (ADR-0082). Here and not in the loop: only this surface draws an embed, and
+    the stored message must carry them for a reopened chat."""
+    from silica.agent.figures import place_figures
+
+    if not t.stopped:
+        t.answer = place_figures(t.answer, t.conv.messages, exists=lambda f: render.find_asset(f) is not None)
+
+
+def _offer_next(t: _ChatTurn) -> None:
+    from silica.ui.commands import COMMANDS
+
+    session_turn.offer_next(t, [c.name.lstrip("/") for c in COMMANDS])
+
+
+_AFTER = (session_turn.check_numbers, session_turn.attribute, _figures, session_turn.plan_under_answer,
+          _offer_next, session_turn.note, session_turn.stamp_reads, session_turn.beat,
+          session_turn.recount)
+
+
+def _answered(messages: list[dict], typed: dict, answer: str, *, narrated: bool = False) -> None:
+    """A command's whole exchange, which no model answered."""
+    from silica.obs import narration as _narr
+
+    messages.append(typed)
+    if not narrated:
+        session.narrate_user_turn(typed)
+    messages.append({"role": "assistant", "content": answer})
+    _narr.NARRATOR.turn(messages[-1])
+
+
+async def run_turn(ask: Ask) -> AsyncIterator[dict]:
     """One agent turn as a stream of transport-neutral wire dicts.
 
-    Yields `event_to_json(...)` dicts as the agent streams, then exactly one
-    terminal dict: `{"type": "done", ...}` or `{"type": "error", ...}`. Owns the
-    whole turn lifecycle (session append, sync→async queue bridge, cancel token,
-    context compaction, save). Both `--gui` (SSE) and `connect` (WS) consume this
-    — the framing is the transport's job, not this core's.
+    Yields the agent's events as they stream, then exactly one terminal dict
+    (`callback.done_frame` or `error_frame`). Owns the whole turn lifecycle
+    (session append, sync→async queue bridge, cancel token, context compaction,
+    save). Both `--gui` (SSE) and `connect` (WS) consume this — the framing is the
+    transport's job, not this core's.
 
     Gate lifecycle: the slot is freed on normal end/error at once; on abandonment
     (the consumer stops iterating — a dropped SSE/WS client) the worker keeps
     running, so we signal cancel and defer the release to the worker's exit, so
     no second turn overlaps a zombie still mutating `messages`.
-
-    ADR-0121: `withhold` names tools this turn is not offered (a turn that
-    brings attached files in is not offered the injector, point 3); `files` and
-    `said` ride the user message for the bubble a reload draws (point 4);
-    `prebuilt` is a stored user message asked again as it was (POST /turn/redo).
-    `note` is the vault path of the note open beside the chat (the composer's
-    chip): it joins the named notes and rides the user message as `silica_note`.
-    `story` is a Discover story the composer's story chip names (ADR-0137 point
-    8): its articles ride the turn as a fenced block, `scope` says what the
-    answer may draw on, and the chip rides the message as `silica_story`.
     """
-    from silica.cli import _compact_context, _expand_web_turn, _update_context_tokens
-
     messages = SESSION.chat.messages
     q: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
-    SESSION.cancel = threading.Event()  # module-level so /stop can see it
-    task: asyncio.Task | None = None
-    # The turn's usage line (ADR-0100 point 3), written in the finally.
-    # Abandonment ends the stream without a verdict, so "cancelled" until a
-    # terminal frame says otherwise.
-    started, tokens_before = time.monotonic(), meter_totals()
-    first_token: list[float] = []
-    tools: dict[str, int] = {}
-    tool_errors: dict[str, int] = {}
-    outcome = "cancelled"
-    limit: str | None = None  # the layer a `limited` turn met (ADR-0102 point 10)
-    ws: dict | None = None    # the workspace this turn runs in (ADR-0112 point 4)
+    SESSION.cancel = cancel = threading.Event()  # module-level so /stop can see it
+    task: asyncio.Future | None = None
+    line = UsageLine()
+    t = _ChatTurn(SESSION.chat, ask.text, note=ask.note, ask=ask)
 
     def cb(ev):  # runs in the agent/LLM worker thread
-        if isinstance(ev, ToolCompleteEvent) and ws is not None and ev.name == "silica_write_note":
-            _join_workspace(ws["path"], ev)
-        if isinstance(ev, ToolStartEvent):
-            tools[ev.name] = tools.get(ev.name, 0) + 1
-        elif isinstance(ev, ToolErrorEvent):
-            tool_errors[ev.name] = tool_errors.get(ev.name, 0) + 1
-        elif not first_token and isinstance(ev, LLMStreamEvent) and ev.chunk_type == "text" and ev.content:
-            first_token.append(time.monotonic())
-        data = event_to_json(ev)
+        if isinstance(ev, ToolCompleteEvent) and t.scope is not None and ev.name == "silica_write_note":
+            _join_workspace(t.scope["path"], ev)
+        line(ev)
+        data = callback.event_to_json(ev)
         if data is not None:
             loop.call_soon_threadsafe(q.put_nowait, data)
 
@@ -287,127 +247,90 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
     # agent's does.
     BUS.subscribe("work/tool", on_phase)
 
+    async def off_loop(fn, *args):
+        """`fn` on a thread, held as the turn's task: a dropped tab keeps the gate
+        shut until it ends, and only a task the drop did not cancel can say so."""
+        nonlocal task
+        SESSION.task = task = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+        return await asyncio.shield(task)
+
     try:
-        # A slash command follows the REPL's dispatch order (silica/cli.py): the
-        # direct handler first — synchronous, no LLM round-trip — then the
-        # workflow expansion. Asking the same handler the REPL asks is the point:
-        # the hand-kept list of "web commands" that used to gate this drifted, and
-        # /lexical /wiki /graph /map /find /vault fell through it into an error.
-        #
-        # A persona (ADR-0127 point 3) comes before all of them: it is worn, not
-        # run. Its command edits this conversation's system line and asks no
-        # model; with words after the name, those words are this turn, already
-        # under the persona.
-        from silica.kernel import personas
-
-        worn = (await asyncio.to_thread(personas.command, text, messages, CONFIG.vault_path or None,
-                                        not SESSION.chat.collapsed) if text.startswith("/") else None)
+        # A slash command follows the order `session.commands` names. A persona
+        # comes before all of it: it is worn, not run.
+        worn = await off_loop(session_turn.wear, t.text, t.conv)
         if worn is not None and not worn[1]:
-            from silica.obs import narration as _narr
-
-            messages.append({"role": "user", "content": text, "origin": "cli"})
-            session.narrate_user_turn(messages[-1])
-            messages.append({"role": "assistant", "content": worn[0]})
-            _narr.NARRATOR.turn(messages[-1])
-            _update_context_tokens(messages)
-            outcome = "done"
-            yield {"type": "done", "answer": worn[0], "html": render.linkify(worn[0], remote_images=False),
-                   **session.ctx_meter()}
+            _answered(messages, {"role": "user", "content": t.text, "origin": "cli"}, worn[0])
+            meter.update_context_tokens(messages)
+            line.outcome = "done"
+            yield callback.done_frame(worn[0], render.linkify(worn[0], remote_images=False), session.ctx_meter())
             return
         if worn is not None:
-            text = worn[1]
-        from silica.config import withheld
-
-        # A view's command goes with the view (ADR-0140 point 4), and a demo's
-        # refused ones with it (ADR-0139 point 6); the picker does not offer
-        # them, but a typed one does not come from it. Asked after the persona,
-        # whose words are this turn, and before /web and /flashcards, which run
-        # ahead of the dispatchers: "/<persona> /web" passed the 404 in
-        # _demo_refuses and reached the internet (review 2026-10-31). The first
-        # word as split() finds it, lowered as both dispatchers lower it.
-        head = (text.split(None, 1) or [""])[0]
-        if head.startswith("/") and head.lower() in withheld("commands"):
-            outcome = "error"
-            yield {"type": "error", "error": f"'{head}' is not part of this account"}
+            t.text = t.content = worn[1]
+        if refusal := session_turn.refused(t.text):
+            line.outcome = "error"
+            yield callback.error_frame({"error": refusal})
             return
-        agent_msg = text
-        escalated = False   # the turn's answer is the aid itself (learn.offer.escalation)
-        plan_appendix = ""  # Learn's calendar, appended under the answer (learn.offer.plan_context)
-        plan_draft = None   # the plan this turn computed, offered for saving under the answer
         # /web comes first: it is neither direct nor a workflow expansion but an
         # agent turn with web-only tools. A usage error raises ValueError, which
         # the except below turns into the single error event.
-        web = _expand_web_turn(text, messages) if text.startswith("/") else None
-        if web is not None:
-            agent_msg = web[1]
-        elif text.lower().split(None, 1)[:1] == ["/remember"] and len(text.split(None, 1)) > 1:
+        t.web = session_turn.expand_web_turn(t.text, messages) if t.text.startswith("/") else None
+        if t.web is not None:
+            t.content = t.web[1]
+        elif command_word(t.text) == "/remember" and len(t.text.split(None, 1)) > 1:
             # /remember <text> (ADR-0076 §6) is written here and not by the
             # direct handler below, whose console text would come back wrapped
             # in a code block: the chat draws this as a Saved line with Undo,
             # from the `memory` the done frame carries. Bare /remember goes on
             # to the expansion below, which asks the model.
             from silica.obs import narration as _narr
-            from silica.cli import remember_text
             from silica.kernel import user_memory
+            from silica.session.words import remember_text
 
-            out = user_memory.save("vault", remember_text(text), session=_narr.NARRATOR.sid or "")
+            out = user_memory.save("vault", remember_text(t.text), session=_narr.NARRATOR.sid or "")
             answer = user_memory.describe(out)
-            messages.append({"role": "user", "content": text, "origin": "cli"})
-            session.narrate_user_turn(messages[-1])
-            messages.append({"role": "assistant", "content": answer})
-            _narr.NARRATOR.turn(messages[-1])
-            done = {"type": "done", "answer": answer, "html": render.linkify(answer, remote_images=False), **session.ctx_meter()}
-            if (saved := user_memory.undo_payload(out)) is not None:
-                done["memory"] = saved
-            outcome = "done"
-            yield done
+            _answered(messages, {"role": "user", "content": t.text, "origin": "cli"}, answer)
+            line.outcome = "done"
+            yield callback.done_frame(answer, render.linkify(answer, remote_images=False), session.ctx_meter(),
+                                      memory=user_memory.undo_payload(out))
             return
-        elif text.lower().split(None, 1)[:1] == ["/flashcards"]:
+        elif command_word(t.text) == "/flashcards":
             # Cards are made as data and checked before they are shown
             # (learn.artifacts.flashcards), and the answer is their Markdown:
             # the direct path below would wrap what the command prints in a
             # code block, and the formulas on the cards would not render.
             import shlex
 
-            from silica.obs import narration as _narr
-            from silica.cli import _int_flag, _positional, _str_flag
             from silica.kernel.learn.artifacts import flashcards
+            from silica.session.words import int_flag, positional, str_flag
 
             try:
-                args = shlex.split(text)[1:]
+                args = shlex.split(t.text)[1:]
             except ValueError:
                 raise ValueError("unbalanced quotes in command. Wrap paths with spaces in \"...\".") from None
-            targets = _positional(args)
+            targets = positional(args)
             if not targets:
                 raise ValueError("/flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]")
-            answer = await asyncio.to_thread(flashcards, targets, _int_flag(args, "--n=", 12),
-                                             _str_flag(args, "--save").strip())
-            messages.append({"role": "user", "content": text, "origin": "cli"})
-            session.narrate_user_turn(messages[-1])
-            messages.append({"role": "assistant", "content": answer})
-            _narr.NARRATOR.turn(messages[-1])
-            _update_context_tokens(messages)
-            outcome = "done"
-            yield {"type": "done", "answer": answer, "html": await asyncio.to_thread(render.answer_html, answer, []),
-                   **session.ctx_meter()}
+            answer = await off_loop(flashcards, targets, int_flag(args, "--n=", 12), str_flag(args, "--save").strip())
+            _answered(messages, {"role": "user", "content": t.text, "origin": "cli"}, answer)
+            meter.update_context_tokens(messages)
+            line.outcome = "done"
+            yield callback.done_frame(answer, await off_loop(render.answer_html, answer, []), session.ctx_meter())
             return
-        elif text.startswith("/"):
-            from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
-            from silica.ui.console import CONSOLE
+        elif t.text.startswith("/"):
+            from silica.term.console import CONSOLE
 
             def _run_slash():
-                # Both dispatchers print their result to CONSOLE and both can do
-                # real work, so both run under the capture and off the loop
-                # thread. The expansion is not a pure string builder: /fetch,
-                # /web-search and /convert do the whole job inside it and return
-                # "" to say the REPL has nothing left for the agent. Reading
-                # that "" as "not available" was reporting failure for work that
-                # had already written notes to disk, with the success line going
-                # to the server's stdout where no browser user can see it.
+                # The dispatch prints its result to CONSOLE and can do real work,
+                # so it runs under the capture and off the loop thread. The
+                # expansion is not a pure string builder: /fetch, /web-search and
+                # /convert do the whole job inside it and return "" to say there
+                # is nothing left for the agent. Reading that "" as "not
+                # available" was reporting failure for work that had already
+                # written notes to disk, with the success line going to the
+                # server's stdout where no browser user can see it.
                 with CONSOLE.capture() as capture:
-                    handled = _handle_direct_shortcut(text, messages)
-                    expanded = None if handled else _expand_workflow_shortcut(text)
-                return handled or expanded == "", expanded, capture.get()
+                    expanded = commands.dispatch(t.text, messages)
+                return expanded, capture.get()
 
             # Pumped as the agent's turn is: a command that runs the injector
             # streams its block and phases while it works (ingest.nucleate),
@@ -415,7 +338,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             # as the turn's task, so a dropped tab keeps the gate shut until
             # the work ends instead of freeing it under a running import.
             done_slash = object()
-            typed = {"role": "user", "content": text, "origin": "cli"}
+            typed = {"role": "user", "content": t.text, "origin": "cli"}
             told: list[bool] = []
 
             def _turn_before_its_work(ev) -> None:
@@ -430,166 +353,74 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             BUS.subscribe("work/tool", _turn_before_its_work)
             try:
                 SESSION.task = task = asyncio.ensure_future(asyncio.to_thread(_run_slash))
-                task.add_done_callback(lambda t: q.put_nowait(done_slash))
+                task.add_done_callback(lambda _: q.put_nowait(done_slash))
                 while (item := await q.get()) is not done_slash:
                     yield item
-                handled, expanded, captured_out = await task
+                expanded, captured_out = await task
             finally:
                 BUS.unsubscribe("work/tool", _turn_before_its_work)
 
-            if handled:
-                # Appended only once the verdict is in: a False falls through to
-                # the agent below, which appends the expanded turn itself.
-                messages.append(typed)
-                if not told:
-                    session.narrate_user_turn(typed)
+            if expanded == "":
+                # Appended only once the verdict is in: a directive falls through
+                # to the agent below, which appends the expanded turn itself.
                 # A GUI started from a terminal renders CONSOLE in colour and the
                 # capture keeps the escape codes, which the chat showed verbatim
                 # around /fetch's note path. The browser gets the text alone.
                 from rich.text import Text
                 shown = Text.from_ansi(captured_out).plain.strip()
                 answer = f"```text\n{shown}\n```" if shown else "```text\n(done)\n```"
-                messages.append({"role": "assistant", "content": answer})
-                from silica.obs import narration as _narr
-                _narr.NARRATOR.turn(messages[-1])
-
-                # Yield a fake agent turn with the direct result
-                outcome = "done"
-                yield {
-                    "type": "done",
-                    "answer": answer,
-                    "html": render.linkify(answer, note_resolver(), remote_images=False),
-                    **session.ctx_meter(),
-                }
+                _answered(messages, typed, answer, narrated=bool(told))
+                line.outcome = "done"
+                yield callback.done_frame(answer, render.linkify(answer, note_resolver(), remote_images=False),
+                                          session.ctx_meter())
                 return
 
             if expanded is None:
-                outcome = "error"
-                yield {"type": "error", "error": f"'{text}' not available in this session"}
+                line.outcome = "error"
+                yield callback.error_frame({"error": f"'{t.text}' not available in this session"})
                 return
-            agent_msg = expanded
+            t.content = expanded
 
-        # The notes the user named, as paths (ADR-0097 point 2). From `text`,
-        # so a skill's expansion keeps its links and the block adds their
-        # paths. Not on a /web turn: its tools cannot read a note. Off the
-        # loop, because it reads the driver's graph.
-        opened = ""
-        if web is None:
-            from silica.agent.mentions import named_notes
-            from silica.kernel.learn.offer import says_lost
-            from silica.ui.web import jobs
-
-            if block := await asyncio.to_thread(named_notes, text, None, note):
-                agent_msg += "\n\n" + block
-                # Only a note the block kept: one renamed under the open drawer
-                # was left out, and the bubble must not claim it was read.
-                opened = note if note and ": " + note in block else ""
-            # A reader still stuck on a note gets the aid as the answer itself
-            # (learn.offer.escalation), and an offer's command sent is recorded.
-            if block := await asyncio.to_thread(_escalation, text, messages):
-                agent_msg += "\n\n" + block
-                escalated = True
-            block, plan_appendix, plan_draft = await asyncio.to_thread(_plan_context, text, messages)
-            if block:
-                agent_msg += "\n\n" + block
-            elif await asyncio.to_thread(says_lost, text):   # Jev over HTTP behind the word list: off the loop
-                # A reader saying it is unclear asked to understand, not to
-                # write: the local 9B answered "non ho capito il Boosting"
-                # with a new note of its own (2026-10-23).
-                agent_msg += ("\n\n[The reader says this was not clear. Answer here in the chat; READ-ONLY: "
-                              "do not create, edit, patch, or move any note.]")
-            # This chat's conversions that ended since the agent last heard of
-            # them: the history still says "still converting" (jobs.settled).
-            if block := await asyncio.to_thread(jobs.settled, SESSION.chat.sid):
-                agent_msg += "\n\n" + block
-
-        story_chip = None
-        if story:
-            from silica.sources.discover.story import chat_block
-
-            block, story_chip = await asyncio.to_thread(chat_block, None, story, scope)
-            if block:
-                agent_msg += "\n\n" + block
-        # An attached image rides this turn only (ADR-0077 point 3): the
-        # transcript, the narration and every later turn carry its saved path,
-        # which silica_look opens again, because the base64 would otherwise be
-        # re-sent with every later turn and stored with the session.
-        images = [] if text.startswith("/") else list(attachments)
-        if images:
-            agent_msg += "".join(image_mark(p) for p in images)
-        msg: dict[str, Any] = {"role": "user", "content": agent_msg}
-        if text.startswith("/"):
-            msg["origin"] = "cli"
-        if persona := personas.active(messages):
-            msg[personas.TURN_KEY] = persona
-        if files:
-            msg["silica_files"] = list(files)
-        if said:
-            msg["silica_said"] = said
-        elif text.startswith("/") and agent_msg != text:
-            # A command's expansion is the model's instructions, not the
-            # person's words: a reloaded chat drew /quiz's directive as what
-            # they had typed (tour run, 2026-10-29).
-            msg["silica_said"] = text
-        if opened:
-            msg["silica_note"] = opened
-        if story_chip:
-            msg["silica_story"] = story_chip
-        if prebuilt is not None:
-            msg = prebuilt
-        ws = await asyncio.to_thread(session.resolve_workspace, workspace)
-        await asyncio.to_thread(session.apply_workspace, ws)
-        if ws is not None:
-            msg["silica_workspace"] = ws["path"]   # the scope this turn ran in
+        for step in _BEFORE:
+            await off_loop(step, t)
+        t.origin = "cli" if t.text.startswith("/") else None
+        msg = _message(t)
+        t.scope = await off_loop(session.resolve_workspace, ask.workspace)
+        await off_loop(session.apply_workspace, t.scope)
+        if t.scope is not None:
+            msg["silica_workspace"] = t.scope["path"]   # the scope this turn ran in
         messages.append(msg)
         session.narrate_user_turn(msg)
         if msg.get("silica_files"):
             # The bubble's file chips, with what "add to vault" needs (ADR-0121
             # point 4): the page only knew the names it uploaded.
-            yield {"type": "files", "files": await asyncio.to_thread(files_shown, msg["silica_files"])}
-        if images:
+            yield callback.files_frame(await off_loop(files_shown, msg["silica_files"]))
+        if t.images:
             from silica.agent import vision
             if vision.separate():
                 # A chat model that takes text only gets the pixels as words
                 # (ADR-0077 amendment 2026-10-21). They ride this turn only, as
-                # the pixels did: the done-callback below restores agent_msg.
-                msg["content"] = agent_msg + await asyncio.to_thread(vision.read_attached, images, text)
+                # the pixels did: the model's part below restores the text.
+                msg["content"] = t.content + await off_loop(vision.read_attached, t.images, t.text)
             else:
                 from silica.kernel.recall.image_readings import image_part
-                msg["content"] = [{"type": "text", "text": agent_msg}, *map(image_part, images)]
+                msg["content"] = [{"type": "text", "text": t.content}, *map(image_part, t.images)]
 
-        # Both wrappers forward every event to `cb` untouched: WebTurn records the
-        # trace the citations are built from, RecallWatch counts recall misses for
-        # the thin-coverage hint.
-        # A /web turn is not checked for numbers, but its pages were read: the
-        # RecallWatch under its WebTurn collects them for the session set.
-        read = RecallWatch(cb)
-        watch = WebTurn(web[0], read) if web else read
+        session_turn.watched(t, cb)
+        cut = session_turn.constraints(t, ask.withhold, DEMO_MAX_ITERATIONS if demo() else None)
+
+        def model_part():
+            try:
+                session_turn.ask_model(t, cancel, cut)
+            finally:
+                if t.images:
+                    # Before the steps below, so the context meter and compaction
+                    # already see the text form.
+                    msg["content"] = t.content
 
         sentinel = object()
-        task = asyncio.create_task(
-            asyncio.to_thread(
-                _scoped_run, ws, run_agent, messages, CONFIG.model, watch,
-                cancel_token=SESSION.cancel,
-                # Same chat_tools cut as the CLI REPL (the tool block is the
-                # biggest per-iteration cost); interactive keeps the GUI's live
-                # stream and keeps the turn off the worker-slot cap. Slash
-                # directives carry origin="cli", so excluded tools a command
-                # names are summoned back exactly as in the terminal.
-                constraints=(
-                    web_turn_constraints() if web
-                    else AgentConstraints(tools=tuple(n for n in chat_tools(messages) if n not in withhold),
-                                          deferred=chat_deferred(messages), interactive=True,
-                                          max_iterations=DEMO_MAX_ITERATIONS if demo() else None)
-                ),
-            )
-        )
-        SESSION.task = task
-        task.add_done_callback(lambda t: q.put_nowait(sentinel))
-        if images:
-            # After the sentinel's callback and before the stream reader resumes,
-            # so the context meter and compaction already see the text form.
-            task.add_done_callback(lambda t: msg.__setitem__("content", agent_msg))
+        SESSION.task = task = asyncio.ensure_future(asyncio.to_thread(model_part))
+        task.add_done_callback(lambda _: q.put_nowait(sentinel))
 
         while True:
             item = await q.get()
@@ -597,132 +428,44 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                 break
             yield item
 
+        assert t.read is not None  # `watched` above
         # Before the await, which re-raises: a turn that failed still read what
         # its results showed, and the narration a reload rebuilds from has them.
-        SESSION.chat.seen_numbers.update(read.numbers)
-        answer = await task  # re-raises if run_agent failed
-        # Read before attribution and figures append to it.
-        empty = answer == EMPTY_COMPLETION
+        SESSION.chat.seen_numbers.update(t.read.numbers)
+        await task  # re-raises if run_agent failed
         # Stop is an outcome, not an answer (audit P3): the loop hands back its
         # sentinel once the token is set, and the text that had streamed stays
         # in the transcript untouched. The frame says who stopped it and the GUI
         # draws that as a row under what arrived, never as the reply. `answer`
         # keeps the sentinel: the WS bridge (silica connect) reads it as the
         # turn's text and has no row to draw.
-        stopped = SESSION.cancel.is_set()
-        # ADR-0095: the answer as the model wrote it, before attribution and
-        # figures add text it did not; not a stopped turn's, not a /web turn's,
-        # whose answer is bound to banked verbatim quotes.
-        unread = ([] if stopped or web else
-                  unfounded_in_turn(answer, read.numbers, messages, SESSION.chat.seen_numbers))
-        # isinstance, not `if web:` — the two are the same condition (watch is
-        # built from it one screen up) but only this one says which half of the
-        # union carries `attribute`.
-        if stopped:
-            pass
-        elif isinstance(watch, WebTurn):
-            # Before linkify and before the compaction sweep: the Sources block
-            # belongs to what the user sees AND to what the history carries.
-            answer = watch.attribute(answer, messages)
-        elif watch.web_answer:
-            from silica.sources.web_research import relay_sources
-
-            answer = relay_sources(answer, messages)
-        if not stopped:
-            # The figures the turn read go beside the paragraph they illustrate
-            # (ADR-0082). Here and not in the loop: only this surface draws an
-            # embed, and the stored message must carry them for a reopened chat.
-            from silica.agent.figures import place_figures
-
-            answer = place_figures(answer, messages, exists=lambda f: render.find_asset(f) is not None)
-            if plan_appendix and answer:
-                # Learn's calendar under the answer, written by code so every
-                # date is the plan's (learn.offer.plan_context)
-                answer = answer.rstrip() + "\n\n" + plan_appendix
-                if messages and messages[-1].get("role") == "assistant":
-                    messages[-1]["content"] = answer
-        # A request made in enough chats becomes a proposed skill, or one already
-        # installed is offered as the next turn (ADR-0127 points 5 and 6).
-        skill_note, offer = ((None, None) if stopped or web or not answer
-                             else await asyncio.to_thread(_skill_after_turn, text, messages))
-        if offer is None and not (stopped or web or not answer or escalated):
-            # A note the reader keeps missing, or a message saying it was not
-            # clear: a way to work on it, launched by the reader (learn.offer).
-            # Not under an answer that is already the aid.
-            offer = await asyncio.to_thread(_study_offer, text, messages, plan_draft)
-        # The lines under the answer (ADR-0094 point 8), stored on it before the
-        # beat below so a reopened chat draws them too. A stopped turn has no
-        # answer to carry them: they are drawn live only.
-        notes = watch.notes() if isinstance(watch, RecallWatch) else []
-        notes += numbers_notes(unread)
-        if not (stopped or web):
-            # A card or a slide point its cited note does not hold (learn.artifacts).
-            from silica.kernel.learn.artifacts import grounding_notes
-
-            notes += grounding_notes(text, answer)
-        notes += [skill_note] if skill_note else []
-        notes = turn_notes.ordered(notes) if stopped else turn_notes.attach(messages, notes)
-        # The notes this turn read, before the beat stores the answer and before
-        # compaction stubs the results that name them (ADR-0127).
-        refs = read_refs(messages)
-        if refs and not stopped and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
-            messages[-1][READS_KEY] = refs
-        # Final-assistant turn beat, post-attribution (see loop.py).
-        if messages and messages[-1].get("role") == "assistant":
-            from silica.obs import narration as _narr
-            _narr.NARRATOR.turn(messages[-1])
-        _update_context_tokens(messages)
-        SESSION.chat.collapsed = _compact_context(messages, SESSION.chat.collapsed)
+        t.stopped = SESSION.cancel.is_set()
+        # New chat may have replaced the conversation while the turn ran, keeping
+        # its message list: what the turn leaves goes to the chat now current.
+        t.conv = SESSION.chat
+        for step in _AFTER:
+            await off_loop(step, t)
         # answer_resolver reads the DRIVER graph — with the ws backend installed
         # (silica connect) a driver call on the loop thread deadlocks (`_rpc`
         # blocks the very loop that must send the frame), so render off-loop.
-        html = await asyncio.to_thread(render.answer_html, answer, refs)
-        done = {
-            "type": "done",
-            "answer": answer,
-            "html": html,
-            **session.ctx_meter(),
-        }
-        if stopped:
-            done["stopped"] = True
-        if notes:
-            done["notes"] = notes
-        if offer:
-            done["offer"] = offer
-        outcome = "cancelled" if stopped else "empty" if empty else "done"
-        yield done
+        html = await off_loop(render.answer_html, t.answer, t.refs)
+        line.outcome = "cancelled" if t.stopped else "empty" if t.empty else "done"
+        yield callback.done_frame(t.answer, html, session.ctx_meter(), stopped=t.stopped, notes=t.notes, offer=t.offer)
     except Exception as exc:  # never leave the UI stuck on the spinner
         # Off the loop: hosted, a 403 reads the key to name the spent layer.
         failure = await asyncio.to_thread(_failure, exc)
-        # A limit reached is the tenant's allowance at work, not a fault of
-        # the server: counted as `limited` (ADR-0102 point 10), and kept out
-        # of the error log the nightly rollup counts.
-        limit = failure.get("limit")
-        if limit is None:
+        line.failed(failure)
+        if line.limit is None:
             logger.exception("web turn failed")
-        outcome = "limited" if limit else "error"
-        yield {"type": "error", **failure}
+        yield callback.error_frame(failure)
     finally:
         BUS.unsubscribe("work/phase", on_phase)
         BUS.unsubscribe("work/tool", on_phase)
-        # ponytail: the tokens are the difference of the process totals, so a
-        # background job running during the turn is charged to it (its own
-        # llm_call lines still name it by call-site), and an abandoned turn's
-        # worker spends past this line uncounted. A context variable per turn
-        # is the upgrade, due when ADR-0099's jobs are built.
-        tokens_after = meter_totals()
-        emit("turn", kind=_turn_kind(text), channel="web", outcome=outcome,
-             ms=round((time.monotonic() - started) * 1000),
-             first_token_ms=round((first_token[0] - started) * 1000) if first_token else None,
-             calls=tokens_after[0] - tokens_before[0], prompt=tokens_after[1] - tokens_before[1],
-             cached=tokens_after[3] - tokens_before[3],
-             completion=tokens_after[2] - tokens_before[2],
-             tools=dict(tools), tool_errors=dict(tool_errors), limit=limit,
-             scope="workspace" if ws is not None else "vault")
+        line.write(_turn_kind(t.text), "web", scope="workspace" if t.scope is not None else "vault")
         session.prewarm_seed()  # the turn may have written notes — refresh the new-chat seed
         if task is not None and not task.done():
             SESSION.cancel.set()  # abandonment: stop the zombie...
-            task.add_done_callback(lambda t: SESSION.release())  # ...free the gate when it exits
+            task.add_done_callback(lambda _: SESSION.release())  # ...free the gate when it exits
         else:
             SESSION.release()  # normal / error / early-return: free now
 
@@ -730,7 +473,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
 # The system prompt teaches the write workflows and a phone turn has none of
 # their tools, so without this line "save this" reads to the model as a request
 # it can meet. It goes before the seed's closing language line, which must stay
-# last (cli.seed_messages).
+# last (session.seed).
 _PHONE_LINE = (
     "This conversation is on Telegram, where you can search and read the vault "
     "but not change it: nothing is written, moved or remembered from here. If "
@@ -773,11 +516,14 @@ def _narrating_phone():
                 logger.warning("narration not restored after a phone turn")
 
 
+# ADR-0089's reduced turn: no blocks before the model, nothing under the answer.
+_PHONE_AFTER = (session_turn.beat, session_turn.recount)
+
+
 def phone_turn(text: str, cancel: threading.Event) -> dict:
     """One phone turn, whole: `{"answer": ...}`, or `{"error": ...}` with the
     sentence the browser would show, a usage limit's reset included."""
     from silica.obs import narration as _narr
-    from silica.cli import _compact_context, _update_context_tokens, seed_messages
 
     # The browser reopened the phone's session from the chat list and now
     # writes it, so the phone goes on in a new one rather than beside it. A
@@ -787,59 +533,32 @@ def phone_turn(text: str, cancel: threading.Event) -> dict:
             SESSION.phone.sid == SESSION.chat.sid
             or not (_narr.narration_dir() / f"{SESSION.phone.sid}.jsonl").exists()):
         SESSION.reset_phone()
-    started, tokens_before = time.monotonic(), meter_totals()
-    first_token: list[float] = []
-    tools: dict[str, int] = {}
-    tool_errors: dict[str, int] = {}
-    outcome, limit = "cancelled", None
-    # CONFIG.context_tokens is the browser's ring. The phone's compaction
-    # borrows the meter and hands it back as it found it.
-    browser_tokens = CONFIG.context_tokens
-
-    def cb(ev):  # the counts the turn line carries, as run_turn's cb keeps them
-        if isinstance(ev, ToolStartEvent):
-            tools[ev.name] = tools.get(ev.name, 0) + 1
-        elif isinstance(ev, ToolErrorEvent):
-            tool_errors[ev.name] = tool_errors.get(ev.name, 0) + 1
-        elif not first_token and isinstance(ev, LLMStreamEvent) and ev.chunk_type == "text" and ev.content:
-            first_token.append(time.monotonic())
-
+    line = UsageLine()
     try:
         if not SESSION.phone.messages:
-            seed = seed_messages()
-            seed.insert(len(seed) - 1, {"role": "system", "content": _PHONE_LINE})
-            SESSION.phone.messages[:] = seed
+            head = seed.seed_messages()
+            system_lines.insert(head, {"role": "system", "content": _PHONE_LINE})
+            SESSION.phone.messages[:] = head
+        t = Turn(SESSION.phone, text, origin="telegram", shown=False, watch=line)
         with _narrating_phone():
-            msg = {"role": "user", "content": text, "origin": "telegram"}
+            msg = session_turn.user_message(t)
             SESSION.phone.messages.append(msg)
             _narr.NARRATOR.turn(msg)
-            answer = run_agent(SESSION.phone.messages, CONFIG.model, cb, cancel_token=cancel,
-                               constraints=AgentConstraints(tools=PHONE_TOOLS, interactive=True))
-            if SESSION.phone.messages[-1].get("role") == "assistant":
-                _narr.NARRATOR.turn(SESSION.phone.messages[-1])
-            _update_context_tokens(SESSION.phone.messages)
-            SESSION.phone.collapsed = _compact_context(SESSION.phone.messages, SESSION.phone.collapsed)
+            session_turn.ask_model(t, cancel, AgentConstraints(tools=PHONE_TOOLS, interactive=True))
+            for step in _PHONE_AFTER:
+                step(t)
         if cancel.is_set():
             return {"answer": "Stopped."}
-        outcome = "empty" if answer == EMPTY_COMPLETION else "done"
-        return {"answer": answer}
+        line.outcome = "empty" if t.empty else "done"
+        return {"answer": t.answer}
     except Exception as exc:
         failure = _failure(exc)
-        limit = failure.get("limit")
-        if limit is None:
+        line.failed(failure)
+        if line.limit is None:
             logger.exception("phone turn failed")
-        outcome = "limited" if limit else "error"
         return {"error": failure["error"]}
     finally:
-        CONFIG.context_tokens = browser_tokens
-        tokens_after = meter_totals()
-        emit("turn", kind="chat", channel="telegram", outcome=outcome,
-             ms=round((time.monotonic() - started) * 1000),
-             first_token_ms=round((first_token[0] - started) * 1000) if first_token else None,
-             calls=tokens_after[0] - tokens_before[0], prompt=tokens_after[1] - tokens_before[1],
-             cached=tokens_after[3] - tokens_before[3],
-             completion=tokens_after[2] - tokens_before[2],
-             tools=dict(tools), tool_errors=dict(tool_errors), limit=limit)
+        line.write("chat", "telegram")
 
 
 def files_shown(files: Any) -> list[dict]:

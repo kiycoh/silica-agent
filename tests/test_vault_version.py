@@ -108,7 +108,7 @@ def test_a_broken_driver_answers_empty(vault, monkeypatch):
 
 
 def test_a_driver_without_mtimes_still_answers(vault, monkeypatch):
-    """The ws backend (the Obsidian plugin bridge) has no `mtime_of`. It gets a
+    """The ws backend (the Obsidian plugin bridge) has no mtimes. It gets a
     roster-only digest rather than nothing, the same abstention the sweep makes."""
     from types import SimpleNamespace
 
@@ -116,6 +116,7 @@ def test_a_driver_without_mtimes_still_answers(vault, monkeypatch):
 
     monkeypatch.setattr("silica.driver.DRIVER", SimpleNamespace(
         list_files=lambda folder="": [NoteRef("A", "A.md")],
+        knows_mtimes=False,
     ))
     first = sync.vault_version()
     assert first

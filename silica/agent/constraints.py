@@ -88,7 +88,7 @@ def web_turn_constraints() -> AgentConstraints:
     greps one; both touch only per-turn module state in
     silica/sources/web_research.py, never the vault.)
 
-    48 is the twin of `_DEFAULT_MAX_SEARCHES` in silica/sources/web_research.py,
+    48 is the twin of `DEFAULT_MAX_SEARCHES` in silica/sources/web_research.py,
     which carries the reasoning for the number. Duplicated rather than imported:
     the import direction is sources -> agent, so this module must not read that
     one; test_web_turn_iteration_cap_matches_web_research holds them equal.

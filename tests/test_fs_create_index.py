@@ -1,10 +1,11 @@
 """FS backend create() patches the in-memory index atomically."""
 from silica.driver.fs_backend import ObsidianFSBackend
+from silica.kernel.vault import Vault
 
 
 def test_fs_create_patches_index(tmp_path):
     """FS create() atomically patches the index — no settle wait needed."""
-    backend = ObsidianFSBackend(vault_path=str(tmp_path))
+    backend = Vault(ObsidianFSBackend(vault_path=str(tmp_path)))
     # A pre-existing note + rebuild puts the index in the "built" state so
     # create() takes the _patch_index fast path (not a full reindex). The
     # created note must be a NEW path — create raises on existing ones.
@@ -28,7 +29,7 @@ def test_fs_create_into_inbox_is_indexed(tmp_path, monkeypatch):
     from silica.config import CONFIG
     from silica.kernel.base.layout import is_inbox_path
     monkeypatch.setattr(CONFIG, "inbox_dir", "Inbox")
-    backend = ObsidianFSBackend(vault_path=str(tmp_path))
+    backend = Vault(ObsidianFSBackend(vault_path=str(tmp_path)))
     backend._rebuild_index()
 
     backend.create("Inbox/clip.md", "raw clipped content")
@@ -47,7 +48,7 @@ def test_resolve_path_never_escapes_vault_via_cwd(tmp_path, monkeypatch):
     (cwd / "memory").mkdir(parents=True)
     monkeypatch.chdir(cwd)
 
-    backend = ObsidianFSBackend(vault_path=str(vault))
+    backend = Vault(ObsidianFSBackend(vault_path=str(vault)))
     backend._rebuild_index()
 
     resolved = backend._resolve_path("memory")

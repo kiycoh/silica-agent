@@ -203,7 +203,7 @@ async function stCommit(row, input, rowEl) {
     data = await resp.json();
   } catch { /* falls through to the failure branch */ }
   if (!resp || !resp.ok || (data && data.ok === false)) {
-    const why = (data && (data.detail || data.error)) || "could not save";
+    const why = failureSaid(data, "could not save");
     stNote(rowEl, "bad", "✕ " + why);
     stRevert(row, input);
     if (resp && resp.status === 409) stSetBusy(true);
@@ -495,7 +495,7 @@ async function renderMemory(host) {
       if (!resp || !resp.ok) {
         // The text stays as typed: a refusal over budget is the cue to shorten
         // it, and wiping the edit would make that cost a retype.
-        stNote(row, "bad", "✕ " + ((out && (out.detail || out.error)) || "could not save"));
+        stNote(row, "bad", "✕ " + failureSaid(out, "could not save"));
         paint();
         return;
       }
@@ -590,8 +590,7 @@ async function renderEndpoints(host) {
         if (out && out.ok) renderEndpoints(host);
         else {
           note.className = "st-note bad";
-          note.textContent = (out && out.error)
-            || `${e.label} did not come up · see ${out ? out.log : "~/.silica/logs"}`;
+          note.textContent = failureSaid(out, `${e.label} did not come up · see ${out ? out.log : "~/.silica/logs"}`);
           start.disabled = false;
         }
       });
@@ -997,7 +996,7 @@ $("#vx-added").addEventListener("click", async () => {
     return;
   }
   if (!r.ok) {
-    vxSay((await r.json().catch(() => ({}))).detail || `the server answered ${r.status}`);
+    vxSay(failureSaid(await r.json().catch(() => ({})), `the server answered ${r.status}`));
     btn.disabled = false;
     return;
   }

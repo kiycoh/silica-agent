@@ -152,14 +152,26 @@ def classify_import(
 
 
 # ---------------------------------------------------------------------------
-# store — derived index at paths.index_dir()/codegraph.json
+# store — derived index at home.index_dir()/codegraph_agent.json
 # ---------------------------------------------------------------------------
 
 STORE_VERSION = 5   # v5: Java calls link on a unique first-party definition (ADR-0114)
 
 
 def store_path() -> Path:
-    return home.index_dir() / "codegraph.json"
+    """Not `codegraph.json`: silica-core writes that name in the same index dir,
+    also as version 5, with another schema (symbols and edges carry a line, Java
+    calls do not link on a unique definition). Neither side could tell, so on a
+    folder both index whoever wrote first won: all 17 version-5 files on one
+    machine were core's (2026-11-07), and a 175-file Java repo served 163 call
+    edges here where this tree builds 731. Its own file, as ADR-0043 point 2
+    gave the engine `retrieval.json`; the version stamp cannot do it, since both
+    sides would rebuild each time the other ran.
+
+    shortcut: one repo holds two graphs on disk, the largest 20 MB on 2026-11-07;
+    goes with this module once core links Java calls and gives the graph a
+    public name (core-ask 2026-11-07, item 3)."""
+    return home.index_dir() / "codegraph_agent.json"
 
 
 @dataclass
@@ -512,10 +524,26 @@ def _serialize(graph: CodeGraph) -> bytes:
     )
 
 
+def _structureless(files: dict[str, dict]) -> bool:
+    """A parse error somewhere and not one symbol anywhere: tree-sitter failed
+    in the process that built this (a grammar missing, a venv pulled out from
+    under a running server), not the repo. Measured 2026-09-08: one such build
+    left 107 of 111 entries at parse_error, and `_still_valid` served it to
+    every later process until the next commit. Core's fix, and it reached this
+    tree only by the shared file until this store got its own.
+
+    shortcut: a repo with no symbol-bearing file and one broken one rebuilds on
+    every load; that repo is tiny, so the rebuild is too, reopen past 100 files."""
+    return any(e.get("parse_error") for e in files.values()) and not any(e.get("symbols") for e in files.values())
+
+
 def _still_valid(data: dict, root: Path, current: list[str], sp: Path) -> bool:
     """Validity key (spec §1): head_ref unchanged AND file set identical AND
     no supported file newer than the store (mtime alone misses adds/deletes;
-    the set comparison catches them — same walk, same stat pass)."""
+    the set comparison catches them — same walk, same stat pass) AND the
+    store holds structure (see `_structureless`)."""
+    if _structureless(data.get("files", {})):
+        return False
     if data.get("head_ref", "") != (gitstate.head_ref(root) or ""):
         return False
     if set(data.get("files", {}).keys()) != set(current):
@@ -544,7 +572,8 @@ def load_codegraph(vault: Path | str) -> CodeGraph | None:
         except Exception:
             durable.quarantine(sp)  # corrupt derived store: aside for doctor, then rebuild
     graph = build_codegraph(root)
-    durable.atomic_write_bytes(sp, _serialize(graph))
+    if not _structureless(graph.files):
+        durable.atomic_write_bytes(sp, _serialize(graph))
     return graph
 
 

@@ -15,6 +15,7 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
+from silica.view_table import VIEWS  # noqa: E402
 from tests.test_learn_items import LEAF, NOTE  # noqa: E402
 from tests.webassets import WEB, app_css, app_js  # noqa: E402
 
@@ -217,7 +218,7 @@ def test_shell_switches_loads_and_deep_links_the_learn_view():
     # the one writer of the hash (syncUrl, audit P7) keeps learn's own
     assert 'activeTab === "learn" && /^#(memorize|learn)/.test(location.hash)' in js
     # the view is Memorize since ADR-0141: its address too, and #learn still lands
-    assert 'learn: "memorize"' in js and 'parts[0] !== "memorize" && parts[0] !== "learn"' in js
+    assert VIEWS["learn"].slug == "memorize" and 'parts[0] !== "memorize" && parts[0] !== "learn"' in js
     assert '["discover", "graph", "learn", "calendar", "metrics", "public"].includes(bootTab)' in js
     for h in ('"#memorize/plan/"', '"#memorize/note/"', '"#memorize/plans"', '"#memorize/map"', '"#memorize/new"', '"#memorize/edit/"',
               '"#memorize/session/"', '"#memorize/receipt/"'):

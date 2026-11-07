@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from silica.kernel.vault import Vault
 
 pytest.importorskip("websockets")
 
@@ -52,7 +53,7 @@ def stub(vault):
 def ws(stub):
     from silica.driver.ws_backend import ObsidianWSBackend
 
-    be = ObsidianWSBackend(url=stub.url, token=stub.token)
+    be = Vault(ObsidianWSBackend(url=stub.url, token=stub.token))
     be._ensure_graph()
     yield be
     be.close()
@@ -66,7 +67,7 @@ def rebuilt(stub):
 
     def _build() -> tuple:
         stub._fs._rebuild_index()
-        be = ObsidianWSBackend(url=stub.url, token=stub.token)
+        be = Vault(ObsidianWSBackend(url=stub.url, token=stub.token))
         opened.append(be)
         return _state(be)
 

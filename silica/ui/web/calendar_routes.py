@@ -85,17 +85,10 @@ def reminders_poll():
     from pathlib import Path as _Path
 
     from silica.kernel.calendar.model import scan_events
-    from silica.kernel.calendar.reminders import (
-        advance_marks, delivery_lock, due_reminders, load_marks, save_marks,
-    )
+    from silica.kernel.calendar.reminders import deliver_due
 
     vault = _Path(CONFIG.vault_path)
-    events = scan_events(vault)
-    with delivery_lock(vault):
-        marks = load_marks(vault)
-        due = due_reminders(events, marks, _dt.datetime.now())
-        if due:
-            save_marks(vault, advance_marks(marks, due))
+    due = deliver_due(vault, scan_events(vault), _dt.datetime.now())
     return {"due": [{"stem": r["stem"], "title": r["title"],
                      "start": r["start"].isoformat(sep=" "), "late": r["late"]}
                     for r in due]}

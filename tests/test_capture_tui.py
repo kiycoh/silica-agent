@@ -26,17 +26,17 @@ def _run(inputs):
     session = MagicMock()
     session.prompt.side_effect = inputs
 
-    def _answer(messages, **kw):
+    def _answer(messages, *a, **kw):
         messages.append({"role": "assistant", "content": ANSWER})
         return ANSWER
 
     with patch("silica.cli.build_session", MagicMock(return_value=session)), \
-         patch("silica.cli.run_agent", _answer), \
+         patch("silica.session.turn.run_agent", _answer), \
          patch("silica.cli._model_configured", lambda: True), \
          patch("silica.cli.CONSOLE"), \
          patch("silica.cli.print_home"), \
          patch("silica.cli._setup_logging"), \
-         patch("silica.cli._update_context_tokens"), \
+         patch("silica.session.meter.update_context_tokens"), \
          patch("silica.cli._ensure_servers"), \
          patch("silica.cli._announce_code_lane"), \
          patch("silica.cli._activate_repo_mode"), \

@@ -227,6 +227,30 @@ forbidden_modules = ["silica"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
+name = "the driver is a transport: it imports nothing above kernel.base"
+type = "forbidden"
+source_modules = ["silica.driver"]
+forbidden_modules = [
+  "silica.kernel",
+  "silica.agent",
+  "silica.capabilities",
+  "silica.connectors",
+  "silica.onboarding",
+  "silica.router",
+  "silica.sources",
+  "silica.tools",
+  "silica.ui",
+  "silica.cli",
+]
+ignore_imports = [
+  "silica.driver -> silica.kernel.base.**",
+  "silica.driver.** -> silica.kernel.base.**",
+]
+# Write policy reaches a transport from above, through kernel.base.vault_seam
+# (silica.kernel fills it). Was 34 sites, the largest back-edge in the graph,
+# behind a lazy import; lazy imports count here, so none of them can come back.
+
+[[tool.importlinter.contracts]]
 name = "capabilities (procedural memory) does not import the decision cycle"
 type = "forbidden"
 source_modules = ["silica.capabilities"]
@@ -261,11 +285,14 @@ allow_indirect_imports = true
 name = "kernel is the lowest layer under the seam — never imports the decision cycle"
 type = "forbidden"
 source_modules = ["silica.kernel"]
-forbidden_modules = ["silica.router", "silica.capabilities"]
+forbidden_modules = [
+  "silica.router", "silica.capabilities", "silica.agent", "silica.tools",
+  "silica.sources", "silica.connectors", "silica.onboarding", "silica.ui",
+]
 # This is the invariant that keeps workqueue/progress legal homes in kernel
-# (capabilities -> kernel.workqueue must never become a cycle). Note: kernel
-# is NOT pure — lazy imports into agent/ and tools/ exist (see ADR-0016 and
-# the AUDIT-COALA WATCH list); this contract codifies only what is true today.
+# (capabilities -> kernel.workqueue must never become a cycle). Function-local
+# imports count: the last ones up (Learn's writes through silica_write_note and
+# the rest, ADR-0016's WATCH list) went on 2026-11-07.
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]

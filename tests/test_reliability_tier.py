@@ -246,24 +246,24 @@ def test_mark_superseded_by_leaves_broken_yaml_alone():
 
 def test_pairs_to_items_targets_the_human_note(tmp_vault):
     """End to end at the seam: the merge goes INTO the human note."""
-    from silica.tools.runners import _pairs_to_items
+    from silica.kernel.recall.duplicates import pairs_to_items
 
     tmp_vault.note("A.md", HUMAN)
     tmp_vault.note("B.md", AGENT.replace("Distillata.", "Distillata. " + "prosa " * 500))
 
-    items = _pairs_to_items([{"source": "B.md", "target": "A.md", "score": 0.9}])
+    items = pairs_to_items([{"source": "B.md", "target": "A.md", "score": 0.9}])
     assert len(items) == 1
     assert items[0].target_path == "A.md"          # human note is the target
     assert items[0].context.loser_path == "B.md"
 
 
 def test_pairs_to_items_falls_back_to_length_within_a_tier(tmp_vault):
-    from silica.tools.runners import _pairs_to_items
+    from silica.kernel.recall.duplicates import pairs_to_items
 
     tmp_vault.note("A.md", AGENT)
     tmp_vault.note("B.md", AGENT.replace("Distillata.", "Distillata. " + "prosa " * 500))
 
-    items = _pairs_to_items([{"source": "A.md", "target": "B.md", "score": 0.9}])
+    items = pairs_to_items([{"source": "A.md", "target": "B.md", "score": 0.9}])
     assert items[0].target_path == "B.md"          # the longer one, tier being equal
     assert items[0].context.loser_path == "A.md"
 

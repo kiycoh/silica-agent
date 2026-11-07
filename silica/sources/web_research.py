@@ -98,7 +98,7 @@ _HTTP_TIMEOUT = 30
 # challenges from the third consecutive query and the backstops are one crawler
 # and one encyclopedia, so a run that actually spends 48 steps says so in its
 # lane line. Raise it when a lane can carry it.
-_DEFAULT_MAX_SEARCHES = 48
+DEFAULT_MAX_SEARCHES = 48
 
 _RESEARCH_SYSTEM_PROMPT = """You are a focused web-research agent. Given a \
 concept, research it on the web and write a findings note.
@@ -267,7 +267,8 @@ def search_lanes(query: str) -> tuple[list[dict[str, str]], str]:
         raise ddg_err from None
 
 
-@tool(cls="atomic", sensitive=True)
+# ingress: /web, result titles and snippets.
+@tool(cls="atomic", sensitive=True, ingress=True, label=("web search", "query"))
 def web_search(query: str) -> str:
     """Search the web for a single query. Returns a JSON list of
     {title, url, content} results. Use iteratively to research a concept."""
@@ -307,7 +308,8 @@ def _lane_line() -> str:
     return f"Search lanes: {named}. DuckDuckGo was challenged; these answered instead."
 
 
-@tool(cls="atomic", sensitive=True)
+# ingress: /web, a verbatim quote banked from a page (not silica_remember).
+@tool(cls="atomic", sensitive=True, ingress=True)
 def remember(url: str, quote: str, why: str) -> str:
     """Bank one verbatim quote from a page already read with web_fetch, to cite
     in the findings. Copy the quote exactly as the fetched text shows it; `why`
@@ -343,7 +345,8 @@ def remember(url: str, quote: str, why: str) -> str:
     return f"banked [{qid}] — cite it inline as [{qid}]"
 
 
-@tool(cls="atomic", sensitive=True)
+# ingress: /web, lines grepped out of a fetched page.
+@tool(cls="atomic", sensitive=True, ingress=True)
 def find_in_page(url: str, pattern: str) -> str:
     """Find every line containing a word or phrase in a page already read with
     web_fetch, shown with a line of context. Mine the pages you have before
@@ -384,7 +387,7 @@ def find_in_page(url: str, pattern: str) -> str:
     return "\n…\n".join(windows)[:4000] + tail
 
 
-@tool(cls="atomic", sensitive=True)
+@tool(cls="atomic", sensitive=True, ingress=False)
 def plan(outline: str) -> str:
     """Save or replace your working plan for the findings note: markdown
     `## ` section headings, each optionally ending with the banked quote IDs
@@ -667,7 +670,7 @@ def _wikipedia_search(query: str) -> list[dict[str, str]]:
 
 def web_research(
     concept: str,
-    max_searches: int = _DEFAULT_MAX_SEARCHES,
+    max_searches: int = DEFAULT_MAX_SEARCHES,
     tool_progress_callback=None,
 ) -> str:
     """Run the constrained web-research loop and write one findings note to the
@@ -821,7 +824,7 @@ class WebTurn:
 
 
 def web_turn_instruction(question: str) -> str:
-    """The `/web` turn's user-side instruction (silica/cli.py expands to it).
+    """The `/web` turn's user-side instruction (session.turn.expand_web_turn expands to it).
 
     The chat's own door, `silica_web_answer`, shared this text until 2026-10-21
     and now has web_answer_instruction below: see there for what it drops.
@@ -1011,7 +1014,11 @@ def _live_progress(progress):
     return _forward
 
 
-@tool(cls="composed")
+# An answer composed from fetched web pages. The question is the label's target:
+# the chat model rewords the user's own, and this row is the only place that
+# rewording is ever visible. Without it a wrong answer reads as "web search is
+# bad" rather than "it asked something else".
+@tool(cls="composed", ingress=True, label=("web answer", "question"), reply_flag="final")
 def silica_web_answer(
     question: Annotated[str, Field(description="The question, in the language the user wrote in")],
     final: Annotated[bool, Field(description=(

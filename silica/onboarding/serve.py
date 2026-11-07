@@ -92,7 +92,7 @@ _DEGRADES_TO = {
 
 def _fail(label: str, headline: str, log_path: Path) -> bool:
     """Report a server that never came up: what broke, why, what it costs."""
-    from silica.ui.console import CONSOLE
+    from silica.term.console import CONSOLE
 
     # info, not warning: the WARNING handler writes to stderr too, and the red
     # block below is the loud channel — a warning here just prints it twice.
@@ -126,7 +126,7 @@ def ensure(label: str, base_url: str, command: str) -> bool:
         return True
     if ready(base_url):
         return True
-    from silica.ui.console import CONSOLE
+    from silica.term.console import CONSOLE
 
     log_dir = silica_home() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)

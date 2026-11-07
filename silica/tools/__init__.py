@@ -319,10 +319,16 @@ def tool(
     collapse: str = "lazy",
     sensitive: bool = False,
     internal: bool = False,
+    *,
+    ingress: bool,
     **facts: Any,
 ):
     """Decorator that registers a function as a Silica tool. `facts` are Tool's
-    keyword-only arguments: what the tool is, said where it is.
+    other keyword-only arguments: what the tool is, said where it is.
+
+    `ingress` has no default so that a tool bringing outside text in cannot be
+    registered by saying nothing: the taint gate reads it (ADR-0090), and a
+    forgotten one is a TypeError at import and not a page past the gate.
 
     Usage:
         @tool(cls="atomic", ingress=False, note_args=("name",))
@@ -341,7 +347,7 @@ def tool(
         TOOLS[tool_name] = Tool(
             fn, tool_name, tool_desc, model, cls,
             collapse=collapse, sensitive=sensitive,
-            internal=internal, **facts,
+            internal=internal, ingress=ingress, **facts,
         )
         logger.debug("Registered tool: %s (class=%s, collapse=%s)", tool_name, cls, collapse)
         return fn

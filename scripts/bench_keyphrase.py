@@ -33,13 +33,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from silica.kernel.base import frontmatter  # noqa: E402
 from silica.kernel.text import language  # noqa: E402
 from silica.kernel.text.keyphrase import extract_keyphrases  # noqa: E402
 from silica.kernel.text.overlay import overlay_for_lang  # noqa: E402
 from tests.golden.test_eval_keyphrase import concept_recalled  # noqa: E402
 
 _LINK = re.compile(r"\[\[([^\[\]|#]+)(?:[#|][^\]]*)?\]\]")
-_FRONTMATTER = re.compile(r"^---\n.*?\n---\n", re.S)
 MIN_LINKS, MIN_WORDS = 3, 120
 
 
@@ -62,7 +62,7 @@ def main() -> int:
     for path in sorted(args.vault.rglob("*.md")):
         if any(part.startswith(".") for part in path.parts):
             continue
-        body = _FRONTMATTER.sub("", path.read_text(encoding="utf-8", errors="replace"), count=1)
+        body = frontmatter.body_of(path.read_text(encoding="utf-8", errors="replace"))
         gold = sorted({m.group(1).strip() for m in _LINK.finditer(body)
                        if 2 <= len(m.group(1).strip()) <= 60})
         if len(gold) < MIN_LINKS or len(body.split()) < MIN_WORDS:

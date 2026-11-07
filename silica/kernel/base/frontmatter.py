@@ -7,7 +7,7 @@ import yaml
 
 from silica.kernel.base.syntax import WIKILINK_TARGET_RE
 
-# Where a frontmatter block ends, read four ways, each by what its reader needs.
+# Where a frontmatter block ends, read five ways, each by what its reader needs.
 # Which notes parse is decided by the first; a reader that took a wider grammar
 # would show or skip what the write gate treats as body, so the others are named
 # here instead of being widened or typed again.
@@ -17,7 +17,7 @@ from silica.kernel.base.syntax import WIKILINK_TARGET_RE
 #   FM_RE_TEMPLATE   no    no         no           no             yes
 #   FM_RE_TOLERANT   yes   yes        yes          no             yes
 #   FM_RE_SCAN       yes   yes        yes          yes            yes
-#   FM_RE_DRAWER     yes   yes        yes          no             no
+#   FM_RE_SHOWN      yes   yes        yes          no             no
 #
 # The write gate's block, and with it every property read and write. Its
 # trailing \s* takes the blank lines after the closing fence with it. Widening
@@ -44,13 +44,14 @@ FM_RE_TOLERANT = re.compile(
 FM_RE_SCAN = re.compile(
     r"\A\s*---[ \t]*\r?\n(.*?)(?<=\n)(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 
-# What the app draws as a note's Properties (`note_parts.split_frontmatter`). TOLERANT
-# but for two shapes: a `--- ` opening fence reads as body, and `---\n---\n` as no block,
-# closing at the next fence down instead. Equal on all 2,642 notes of the vaults measured
-# 2026-11-07; folding it would move what a person sees for a note in either shape, so it
-# stays. Skills are the one reader outside this table: `skills_routes` imports silica_core's
-# `split` so that its refusal and the skill loader's cannot disagree.
-FM_RE_DRAWER = re.compile(r"\A---\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL)
+# What the app shows as properties (split_shown): the tolerant close, and a bare
+# opening fence. TOLERANT but for two shapes: a `--- ` opening fence reads as body,
+# and `---\n---\n` as no block, closing at the next fence down instead. Equal on all
+# 2,642 notes of the vaults measured 2026-11-07; folding it in would show as
+# properties, and hide from the body, what the drawer shows as text today. Skills are
+# the one reader outside this table: `skills_routes` imports silica_core's `split`
+# so that its refusal and the skill loader's cannot disagree.
+FM_RE_SHOWN = re.compile(r"\A---\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 
 # A note that opens a block, closed or not: the lint's unclosed fence, and the
 # writers that leave an unterminated block alone instead of adding a second one.
@@ -105,6 +106,23 @@ def split(content):
     if data is None:
         return {}, raw, body
     return (data if isinstance(data, dict) else None), raw, body
+
+
+def split_shown(text: str) -> tuple[dict | None, str]:
+    """(props, body) as the app shows a note. props is None unless the block
+    parses to a mapping, and the body is then the whole text, the block included:
+    a block that is not properties is something the reader wrote."""
+    m = FM_RE_SHOWN.match(text or "")
+    if not m:
+        return None, text
+    try:
+        props = yaml.safe_load(m.group(1))
+    except yaml.YAMLError:
+        return None, text
+    if not isinstance(props, dict):
+        return None, text
+    return props, text[m.end():]
+
 
 def aliases_of(content):
     """The frontmatter alias surfaces of a note, as a list of strings.

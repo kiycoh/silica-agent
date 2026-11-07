@@ -42,20 +42,6 @@ def test_head_ref_returns_sha_after_commit(tmp_path):
     assert isinstance(ref, str) and len(ref) == 40
 
 
-def test_is_ignored_batch(tmp_path):
-    _init_repo(tmp_path)
-    (tmp_path / ".gitignore").write_text("*.log\n", encoding="utf-8")
-    (tmp_path / "keep.md").write_text("a", encoding="utf-8")
-    (tmp_path / "drop.log").write_text("b", encoding="utf-8")
-    ignored = gitstate.is_ignored(tmp_path, [Path("keep.md"), Path("drop.log")])
-    assert ignored == {Path("drop.log")}
-
-
-def test_is_ignored_empty_without_git(tmp_path):
-    # not a repo → nothing reported ignored, no raise
-    assert gitstate.is_ignored(tmp_path, [Path("x.md")]) == set()
-
-
 def test_latest_shas_one_walk_many_paths(tmp_path):
     _init_repo(tmp_path)
     _commit(tmp_path, "src/m.py", "v1\n", "add m")

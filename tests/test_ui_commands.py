@@ -24,10 +24,11 @@ def _make_console() -> tuple[Console, io.StringIO]:
 # ---------------------------------------------------------------------------
 
 def _dispatched_from_source() -> set[str]:
-    """Extract slash command strings from cli.py dispatch functions, and from
-    the persona dispatcher both surfaces ask first (ADR-0127)."""
+    """Extract slash command strings from cli.py dispatch functions, from the
+    persona dispatcher both surfaces ask first (ADR-0127), and from /web, which is
+    a turn and not a command (session.turn)."""
     root = Path(__file__).parent.parent / "silica"
-    src = (root / "cli.py").read_text() + (root / "kernel" / "personas.py").read_text()
+    src = "".join((root / rel).read_text() for rel in ("cli.py", "kernel/personas.py", "session/turn.py"))
     found = set(re.findall(r'"(/[\w-]+)"', src))
     # Remove aliases that are intentionally not in COMMANDS
     found.discard("/quit")
@@ -113,7 +114,7 @@ def test_completer_no_completions_for_plain_text():
 
 def test_render_help_contains_all_group_headers_and_commands():
     con, buf = _make_console()
-    with patch("silica.ui.console.CONSOLE", con):
+    with patch("silica.term.console.CONSOLE", con):
         render_help()
     output = buf.getvalue()
 
@@ -132,7 +133,7 @@ def test_print_home_shows_model_vault_line_without_command_table():
     con, buf = _make_console()
     with patch("silica.ui.home.print_banner"), \
          patch("silica.ui.home.CONSOLE", con), \
-         patch("silica.ui.console.CONSOLE", con):
+         patch("silica.term.console.CONSOLE", con):
         print_home()
     output = buf.getvalue()
 

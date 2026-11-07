@@ -20,6 +20,7 @@ from silica.kernel.write.provenance import (
     drifted_notes,
     read_records,
 )
+from silica.kernel.vault import Vault
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +245,7 @@ def test_content_sha256_matches_manual_hash(tmp_path, monkeypatch):
     note.write_text("hello world", encoding="utf-8")
 
     monkeypatch.setattr(config_mod.CONFIG, "vault_path", str(vault))
-    monkeypatch.setattr(driver_mod, "DRIVER", fs_backend.ObsidianFSBackend(str(vault)))
+    monkeypatch.setattr(driver_mod, "DRIVER", Vault(fs_backend.ObsidianFSBackend(str(vault))))
 
     expected = hashlib.sha256("hello world".encode("utf-8")).hexdigest()
     assert content_sha256("Inbox/a.md") == expected
@@ -258,7 +259,7 @@ def test_content_sha256_missing_file_returns_empty(tmp_path, monkeypatch):
     vault = tmp_path / "vault"
     vault.mkdir()
     monkeypatch.setattr(config_mod.CONFIG, "vault_path", str(vault))
-    monkeypatch.setattr(driver_mod, "DRIVER", fs_backend.ObsidianFSBackend(str(vault)))
+    monkeypatch.setattr(driver_mod, "DRIVER", Vault(fs_backend.ObsidianFSBackend(str(vault))))
 
     assert content_sha256("Inbox/does-not-exist.md") == ""
 

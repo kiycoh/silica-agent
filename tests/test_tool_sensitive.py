@@ -33,7 +33,7 @@ def test_tool_defaults_to_not_sensitive():
 
 
 def test_decorator_propagates_sensitive():
-    @tool(_EmptyArgs, sensitive=True)
+    @tool(_EmptyArgs, sensitive=True, ingress=False)
     def _probe_sensitive_tool():
         """probe"""
         return "x"

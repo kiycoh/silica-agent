@@ -234,7 +234,7 @@ def test_the_command_prints_the_report_and_writes_nothing(tmp_vault, capsys, mon
     from silica.cli import _handle_direct_shortcut
     from silica.config import CONFIG
 
-    monkeypatch.setattr("silica.cli._check_judge", lambda **_: None)   # rules only: no model call from a test
+    monkeypatch.setattr("silica.session.check.judge", lambda **_: None)   # rules only: no model call from a test
 
     tmp_vault.note("Drafts/memo.md", "---\nmatter: x\n---\n\nThe hearing listed for 17 February 2026 was adjourned by the court.\n")
     before = (Path(CONFIG.vault_path) / "Drafts/memo.md").read_bytes()
@@ -397,8 +397,8 @@ def test_the_drawers_route_streams_rules_then_the_report_and_reruns_only_a_check
 
     from silica.ui.web.server import app
 
-    monkeypatch.setattr("silica.cli._check_judge", lambda **_: None)   # rules only: no model call from a test
-    monkeypatch.setattr("silica.cli._check_legs", lambda: (None, None, None))
+    monkeypatch.setattr("silica.session.check.judge", lambda **_: None)   # rules only: no model call from a test
+    monkeypatch.setattr("silica.session.check.legs", lambda: (None, None, None))
     tmp_vault.note("Drafts/memo.md", "---\nmatter: x\n---\n\nThe hearing listed for 17 February 2026 was adjourned by the court.\n")
     tc = TestClient(app, headers={"Origin": "http://testserver"})
     lines = [_json.loads(x) for x in tc.post("/note/check", json={"path": "Drafts/memo"}).text.splitlines()]
@@ -418,8 +418,8 @@ def test_a_long_pass_waits_for_the_persons_go_and_asks_nothing_before_it(tmp_vau
 
     asked = []
     hits = lambda q, k: [{"path": "Sources/rule.md", "line": 5, "coverage": 0.9, "window": "The hearing was adjourned."}]
-    monkeypatch.setattr("silica.cli._check_legs", lambda: (hits, None, None))
-    monkeypatch.setattr("silica.cli._check_judge", lambda **_: lambda t, ps: (asked.append(t), {"kind": "supported", "by": "jev", "p": 0.9})[1])
+    monkeypatch.setattr("silica.session.check.legs", lambda: (hits, None, None))
+    monkeypatch.setattr("silica.session.check.judge", lambda **_: lambda t, ps: (asked.append(t), {"kind": "supported", "by": "jev", "p": 0.9})[1])
     monkeypatch.setattr(run, "CONFIRM_OVER", 0)
     tmp_vault.note("Sources/rule.md", "# Rule\n\nThe hearing listed for February was adjourned by the court.\n")
     tmp_vault.note("Drafts/memo.md", "The hearing listed for February was adjourned by the court of appeal.\n")
@@ -496,8 +496,8 @@ def test_the_route_takes_a_line_range_and_refuses_a_bad_one(tmp_vault, monkeypat
 
     from silica.ui.web.server import app
 
-    monkeypatch.setattr("silica.cli._check_judge", lambda **_: None)
-    monkeypatch.setattr("silica.cli._check_legs", lambda: (None, None, None))
+    monkeypatch.setattr("silica.session.check.judge", lambda **_: None)
+    monkeypatch.setattr("silica.session.check.legs", lambda: (None, None, None))
     tmp_vault.note("Drafts/memo.md", "---\nmatter: x\n---\n\nThe hearing listed for 17 February 2026 was adjourned by the court.\n\n"
                                      "A second paragraph naming 18 March 2026 for the next hearing of the court.\n")
     tc = TestClient(app, headers={"Origin": "http://testserver"})

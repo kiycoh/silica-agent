@@ -17,6 +17,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 from silica.kernel.base import note_index
+from silica.kernel.base.layout import vault_root
 from silica.kernel.base.notekey import store_key
 from silica.kernel.base.noteshape import NOT_MEMBERS, WORKSPACE, type_word
 from silica.kernel.base.syntax import NAME_UNSAFE_RE, WIKILINK_NAME_RE
@@ -25,12 +26,6 @@ LINES = ("notes", "folders", "where")
 DEFAULT_FOLDER = "Workspaces"
 
 _H1_RE = re.compile(r"^#\s+(.*?)\s*$")
-
-
-def _vault() -> Path:
-    from silica.config import CONFIG
-
-    return Path(CONFIG.vault_path)
 
 
 def is_workspace(data: dict | None) -> bool:
@@ -72,7 +67,7 @@ def read_workspace(path: str, text: str | None = None) -> dict:
     from silica.kernel.base import frontmatter
 
     if text is None:
-        text = (_vault() / path).read_text(encoding="utf-8")
+        text = (vault_root() / path).read_text(encoding="utf-8")
     data, _raw, body = frontmatter.split(text)
     data = data or {}
     lines = body.lstrip("\n").split("\n")
@@ -93,7 +88,7 @@ def read_workspace(path: str, text: str | None = None) -> dict:
 
 
 def list_workspaces() -> list[dict]:
-    vault = _vault()
+    vault = vault_root()
     out = []
     for path, data in note_index.frontmatters(vault).items():
         if not is_workspace(data):
@@ -133,7 +128,7 @@ def members(ws: dict) -> dict[str, list[dict]]:
     folder | where | derived, "via": the line or source that brought it}."""
     from silica.kernel.base.layout import in_folder
 
-    fms = note_index.frontmatters(_vault())
+    fms = note_index.frontmatters(vault_root())
     mirrors = _mirror_copies(fms)
     material = {p: d for p, d in fms.items()
                 if p not in mirrors and type_word(d) not in NOT_MEMBERS}
@@ -176,7 +171,7 @@ def dead_lines(ws: dict) -> dict[str, list[str]]:
     """Lines that point at nothing: a listed title no note carries, a folder
     no longer on disk (renamed outside Silica, ADR-0112 point 1). Named on
     the workspace's row rather than shown as fewer notes."""
-    vault = _vault()
+    vault = vault_root()
     fms = note_index.frontmatters(vault)
     stems = {Path(p).stem.casefold() for p in fms}
     notes = [t for t in ws.get("notes", [])
@@ -238,7 +233,7 @@ def _link_name(value: str) -> str:
     stem = Path(target).stem
     if "/" not in target:
         return target
-    clash = sum(1 for p in note_index.frontmatters(_vault()) if Path(p).stem.casefold() == stem.casefold())
+    clash = sum(1 for p in note_index.frontmatters(vault_root()) if Path(p).stem.casefold() == stem.casefold())
     return stem if clash <= 1 else target
 
 # One writer at a time: add_line/remove_line read the note and write the

@@ -414,6 +414,8 @@ def _path_exists_memo():
                 DRIVER.read_note(p)
                 _existence_cache[norm] = True
             except RuntimeError:
+                # Absent, or a bridge that answers no one: the op validates as if
+                # the note were not there and fails where it writes, which reports it.
                 _existence_cache[norm] = False
         return _existence_cache[norm]
     return path_exists
@@ -552,7 +554,7 @@ class Grounding:
                     text = DRIVER.read_note(cand).content
                     break
                 except Exception:
-                    continue
+                    continue  # the next spelling of the source's name may read
             self._source_text_cache[basename] = text
         return self._source_text_cache[basename]
 

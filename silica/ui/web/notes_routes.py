@@ -17,6 +17,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from silica.config import CONFIG
+from silica.kernel.base.frontmatter import split_shown
 from silica.kernel import vault_files
 from silica.kernel.base.syntax import WIKILINK_WHOLE_RE
 from silica.kernel.graph.mindmap import note_resolver
@@ -25,6 +26,7 @@ from silica.kernel.text import note_parts
 from silica.kernel.write import session_changes
 from silica.metrics import emit
 from silica.ui.web import drop, note_ops, render, session, sse
+from silica.ui.web.failures import Refused, refusal
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +51,7 @@ def note(path: str = ""):
         content = get_driver().read_note(NoteRef(name=note_parts.clean_name(canon), path=canon)).content
     except Exception:
         return {"title": note_parts.clean_name(canon), "html": "<p>note unreadable.</p>"}
-    props, body = note_parts.split_frontmatter(content)
+    props, body = split_shown(content)
     html = render.linkify(body, resolve)
     if props:
         html = html + render.render_frontmatter(props)
@@ -248,7 +250,7 @@ def note_raw(path: str = ""):
         text = get_driver().read_note(NoteRef(name=note_parts.clean_name(canon), path=canon)).content
     except Exception:
         raise HTTPException(404, "note unreadable")
-    props, _body = note_parts.split_frontmatter(text)
+    props, _body = split_shown(text)
     return {"path": canon, **_note_identity(canon, props), "text": text, "etag": _etag(text),
             "broken": _broken_links(text, resolve)}
 
@@ -272,7 +274,7 @@ def raw_file(path: str = "", download: bool = False):
         text = get_driver().read_note(NoteRef(name=note_parts.clean_name(canon), path=canon)).content
     except Exception:
         raise HTTPException(404)
-    _value, found = _raw_found(canon, note_parts.split_frontmatter(text)[0])
+    _value, found = _raw_found(canon, split_shown(text)[0])
     if found is None:
         raise HTTPException(404)
     attach = download or found.suffix.lower() not in _RAW_OPENS
@@ -298,7 +300,7 @@ def note_save(payload: dict):
         if current is None:
             raise HTTPException(404, "note unreadable")
         if payload.get("etag") and payload["etag"] != _etag(current):
-            return JSONResponse({"detail": "note changed on disk", "text": current,
+            return JSONResponse({**refusal("note changed on disk"), "text": current,
                                  "etag": _etag(current)}, status_code=409)
         text = str(payload.get("text", ""))
         if text != current:
@@ -436,7 +438,7 @@ def note_render(payload: dict):
     cannot typeset the same markdown two ways. POST because a table does not
     fit in a query string; guarded like a write because it runs the resolver
     over the vault on another page's say-so."""
-    props, body = note_parts.split_frontmatter(str(payload.get("text", "")))
+    props, body = split_shown(str(payload.get("text", "")))
     html = render.linkify(body, note_resolver()) if body.strip() else ""
     if props:
         html = render.render_frontmatter(props) + html
@@ -464,7 +466,7 @@ async def note_check(payload: dict, request: Request):
     amendment of 2026-11-06). `web: true` with `claim`, on `lines`, then asks
     the web about that claim: the vault leg's events as ever, `web` for each
     step, `web_verdict`, and `done` last."""
-    from silica.cli import _check_judge, _check_legs, _check_web_legs
+    from silica.session import check as check_wiring
     from silica.kernel.check import run as check
     from silica.kernel.check import web as check_web
     from silica.kernel.base.manifest import active_write_dir
@@ -499,7 +501,7 @@ async def note_check(payload: dict, request: Request):
         try:
             claim, aimed = check_web.aim(text, card_lines, str(payload.get("claim") or ""))
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise Refused(400, e)
         where = (aimed[0].line, aimed[-1].end) if aimed else card_lines
     if rules_only and not await asyncio.to_thread(check.read_cache, CONFIG.vault_path, path):
         # Never checked (or its file torn): a rerun has no marks to bring back.
@@ -525,7 +527,7 @@ async def note_check(payload: dict, request: Request):
         about the block, and a verdict paid for earlier stands."""
         result = {"web": "", "say": check_web.NOTHING_TO_CHECK}
         if aimed:
-            lanes, fetch = _check_web_legs()
+            lanes, fetch = check_wiring.web_legs()
             result = check_web.check_claim(claim, search=lanes, fetch=fetch, judge=judge,
                                            step=lambda ev: put({"event": "web", **ev}), cancelled=stop.is_set)
         findings, states = check_web.rows(result, claim, check_web.vault_says(report), *where)
@@ -539,8 +541,8 @@ async def note_check(payload: dict, request: Request):
         started = time.monotonic()
         said = {"web": True} if web_on else {}  # that a web was asked, never what (ADR-0100)
         try:
-            search, dense, floor = _check_legs()
-            judge = None if rules_only else _check_judge(cite=card_lines is not None)
+            search, dense, floor = check_wiring.legs()
+            judge = None if rules_only else check_wiring.judge(cite=card_lines is not None)
             report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(), search=search,
                                       dense=dense, dense_floor=floor, judge=judge,
                                       cache_only=rules_only, progress=progress, cancelled=stop.is_set,
@@ -621,15 +623,13 @@ def _history_note(path: str) -> str:
 
 
 def _history_body(path: str, version: str) -> str:
-    from silica.config import CONFIG
     from silica.kernel.write.checkpoints import get_checkpoint_store
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
 
     body = None
     v = str(version)
     if v.startswith("j") and v[1:].isdigit():
-        body = get_undo_journal().before_image(int(v[1:]), path,
-                                               (CONFIG.vault_path or "").strip() or None)
+        body = get_undo_journal().before_image(int(v[1:]), path, active_vault())
     elif v.isdigit():
         body = get_checkpoint_store().version(path, int(v))
     if body is None:
@@ -641,15 +641,14 @@ def _history_body(path: str, version: str) -> str:
 def note_history(path: str = ""):
     """Every version of one note, newest first: what Silica wrote, what it
     found edited by hand, what a run found before writing over it."""
-    from silica.config import CONFIG
     from silica.kernel.write.checkpoints import get_checkpoint_store
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
 
     from silica.driver import DRIVER
 
     note = _history_note(path)
     versions = get_checkpoint_store().history(note, current=DRIVER.read_note(note).content) + get_undo_journal().before_images(
-        note, (CONFIG.vault_path or "").strip() or None)
+        note, active_vault())
     versions.sort(key=lambda v: v["at"], reverse=True)
     return {"path": note, "name": note_parts.clean_name(note), "versions": versions}
 

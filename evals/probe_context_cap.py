@@ -4,7 +4,7 @@
 """Context cap for the hosted chat: what a student's long conversation costs,
 and how well it still answers, at each `max_context_tokens`.
 
-Why this exists: on OpenRouter `cli._resolve_context_budget` sizes the window
+Why this exists: on OpenRouter `meter.resolve_context_budget` sizes the window
 to the provider's `context_length`, 1M for Qwen 3.7 Flash, so neither the
 post-call compaction (60% of the window) nor the pre-call fit (90%) ever fires
 on the pilot, and every call resends the whole chat. The endpoint the pilot
@@ -214,7 +214,7 @@ def run_one(arm: str, case: str, model: str, max_usd: float, out_json: Path) -> 
     from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
     from silica.model.llm import _cached_tokens
     from silica.agent.loop import run_agent
-    from silica.cli import seed_messages
+    from silica.session.seed import seed_messages
     from silica.config import CONFIG
 
     base = arm.split("@")[0]

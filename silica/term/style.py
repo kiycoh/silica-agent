@@ -10,7 +10,7 @@ from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
-from silica.ui.console import CYAN
+from silica.term.console import CYAN
 
 # Single glyph vocabulary for the whole TUI — everything single-width, no emoji
 # (double-width glyphs tear column alignment).

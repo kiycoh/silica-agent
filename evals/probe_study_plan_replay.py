@@ -374,9 +374,10 @@ def main(argv=None) -> int:
         print(json.dumps(check_answer(text, ctx), ensure_ascii=False, indent=1))
         return 0
 
-    from silica.cli import seed_messages, _chat_tool_schemas
+    from silica.session.seed import seed_messages
+    from silica.session.meter import chat_tool_schemas
     seed = seed_messages(math=True)
-    tools = _chat_tool_schemas(seed) if args.with_tools else None
+    tools = chat_tool_schemas(seed) if args.with_tools else None
     model = args.model or CONFIG.model
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)

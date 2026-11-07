@@ -30,15 +30,9 @@ from pathlib import Path
 from typing import Any
 
 from silica.config import CONFIG
+from silica.driver.base import MAX_FRAME, PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
-
-PROTOCOL_VERSION = 1
-
-# websockets' 1 MiB default max_size would sever the connection on any note
-# body over ~1 MB (rpc read replies, bulk-nucleate creates). 32 MiB matches the
-# no-ceiling behavior of the fs backend. Mirrored in ws_backend.py.
-MAX_FRAME = 2**25
 
 
 def _origin_ok(origin: str) -> bool:
@@ -211,20 +205,12 @@ class BridgeServer:
             logger.debug("bridge: metadata event: %s", frame)  # non-fatal, LINT audits later
 
     async def _chat_turn(self, ws: Any, tid: str, text: str) -> None:
-        from silica.ui.web.turn import run_turn
+        from silica.ui.web.callback import bridge_frame
+        from silica.ui.web.turn import Ask, run_turn
 
         try:
-            async for item in run_turn(text):
-                kind = item.get("type")
-                if kind == "done":
-                    await _send(ws, {"type": "chat_done", "turnId": tid,
-                                     "answer": item.get("answer", ""),
-                                     "html": item.get("html", "")})
-                elif kind == "error":
-                    await _send(ws, {"type": "chat_error", "turnId": tid,
-                                     "error": item.get("error", "")})
-                else:
-                    await _send(ws, {"type": "chat_event", "turnId": tid, "event": item})
+            async for item in run_turn(Ask(text)):
+                await _send(ws, bridge_frame(item, tid))
         except Exception as exc:  # socket died mid-turn; run_turn's finally cleans up
             logger.warning("bridge: chat turn aborted: %s", exc)
 

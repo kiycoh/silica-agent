@@ -172,35 +172,35 @@ class TestFallbacks:
 
 
 class TestCliContextBudget:
-    """_resolve_context_budget() sizes the REPL meter to the real window."""
+    """resolve_context_budget() sizes the REPL meter to the real window."""
 
     @patch("silica.model.limits.model_limits", return_value=(131072, 0))
     def test_sets_budget_from_provider(self, _limits, monkeypatch):
-        from silica.cli import _resolve_context_budget
+        from silica.session.meter import resolve_context_budget
         from silica.config import CONFIG
 
         monkeypatch.delenv("SILICA_MAX_CONTEXT", raising=False)
         monkeypatch.setattr(CONFIG, "model", "qwen/qwen3-8b")
         monkeypatch.setattr(CONFIG, "max_context_tokens", 60000)
-        _resolve_context_budget()
+        resolve_context_budget()
         assert CONFIG.max_context_tokens == 131072
 
     @patch("silica.model.limits.model_limits", return_value=(131072, 0))
     def test_env_pin_wins_for_local_provider(self, _limits, monkeypatch):
-        from silica.cli import _resolve_context_budget
+        from silica.session.meter import resolve_context_budget
         from silica.config import CONFIG
 
         monkeypatch.setenv("SILICA_MAX_CONTEXT", "42000")
         monkeypatch.setattr(CONFIG, "model", "lmstudio/qwen3-8b")
         monkeypatch.setattr(CONFIG, "_provider", "lmstudio")
         monkeypatch.setattr(CONFIG, "max_context_tokens", 42000)
-        _resolve_context_budget()
+        resolve_context_budget()
         assert CONFIG.max_context_tokens == 42000
 
     @patch("silica.model.limits.model_limits", return_value=(1048576, 0))
     def test_env_pin_wins_on_openrouter_off_hosted(self, _limits, monkeypatch):
         # Regression 2026-10-27: a laptop's 65536 ran DeepSeek V4 Flash at 1M.
-        from silica.cli import _resolve_context_budget
+        from silica.session.meter import resolve_context_budget
         from silica.config import CONFIG
 
         monkeypatch.delenv("SILICA_HOSTED", raising=False)
@@ -208,19 +208,19 @@ class TestCliContextBudget:
         monkeypatch.setattr(CONFIG, "model", "openrouter/deepseek/deepseek-v4-flash-0731")
         monkeypatch.setattr(CONFIG, "_provider", "openrouter")
         monkeypatch.setattr(CONFIG, "max_context_tokens", 65536)
-        _resolve_context_budget()
+        resolve_context_budget()
         assert CONFIG.max_context_tokens == 65536
 
     @patch("silica.model.limits.model_limits", return_value=(131072, 0))
     def test_env_pin_above_the_openrouter_window_is_cut_to_it(self, _limits, monkeypatch):
-        from silica.cli import _resolve_context_budget
+        from silica.session.meter import resolve_context_budget
         from silica.config import CONFIG
 
         monkeypatch.setenv("SILICA_MAX_CONTEXT", "250000")
         monkeypatch.setattr(CONFIG, "model", "openrouter/x/y")
         monkeypatch.setattr(CONFIG, "_provider", "openrouter")
         monkeypatch.setattr(CONFIG, "max_context_tokens", 250000)
-        _resolve_context_budget()
+        resolve_context_budget()
         assert CONFIG.max_context_tokens == 131072
 
     @patch("silica.model.limits.model_limits", return_value=(1000000, 0))
@@ -228,7 +228,7 @@ class TestCliContextBudget:
         # The host's cap is a price decision, not a guess at the window: past
         # 32k prompt tokens the pilot's endpoint bills 3.3x
         # (docs/evaluation/context-cap-2026-10-13.md).
-        from silica.cli import _resolve_context_budget
+        from silica.session.meter import resolve_context_budget
         from silica.config import CONFIG
 
         monkeypatch.setenv("SILICA_HOSTED", "1")
@@ -236,18 +236,18 @@ class TestCliContextBudget:
         monkeypatch.setattr(CONFIG, "model", "openrouter/qwen/qwen3.7-flash-20260727")
         monkeypatch.setattr(CONFIG, "_provider", "openrouter")
         monkeypatch.setattr(CONFIG, "max_context_tokens", 32000)
-        _resolve_context_budget()
+        resolve_context_budget()
         assert CONFIG.max_context_tokens == 32000
 
     @patch("silica.model.limits.model_limits", return_value=(0, 0))
     def test_unknown_window_keeps_default(self, _limits, monkeypatch):
-        from silica.cli import _resolve_context_budget
+        from silica.session.meter import resolve_context_budget
         from silica.config import CONFIG
 
         monkeypatch.delenv("SILICA_MAX_CONTEXT", raising=False)
         monkeypatch.setattr(CONFIG, "model", "qwen/qwen3-8b")
         monkeypatch.setattr(CONFIG, "max_context_tokens", 60000)
-        _resolve_context_budget()
+        resolve_context_budget()
         assert CONFIG.max_context_tokens == 60000
 
 

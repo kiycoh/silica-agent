@@ -16,6 +16,10 @@ from typing import Any
 from silica.kernel.base.notekey import ledger_key
 
 RATING_NAME = {1: "Again", 2: "Hard", 3: "Good", 4: "Easy"}
+# What a learning state's mark says (ADR-0061): open, half and full, the amber
+# warn, and never for a note no answer has touched.
+MARK_SAY = {"open": "still to verify", "half": "met with help, not counted", "full": "met without help",
+            "warn": "caution", "never": "not tested yet"}
 # LATELY_DAYS and LATELY_SESSIONS bound Missed lately, whichever reaches
 # further, so it never becomes a log.
 LATELY_DAYS = 14
@@ -121,7 +125,7 @@ def reason(row: dict, evs: list[dict], now: float, pool: str = "", misses: list[
     # a note the reader wrote holds a card from its writing (D10), so the
     # picker can hold it due before any answer: the due date is its reason
     if row.get("attempts", 0) == 0 and not evs and not (pool == "due" and due):
-        return "not tested yet · " + ("AI-written, a prediction first" if row.get("ai") else "written by you")
+        return f"{MARK_SAY['never']} · " + ("AI-written, a prediction first" if row.get("ai") else "written by you")
     if due:
         return f"waiting since {day(due)}" if due <= now else f"falls due {day(due)}"
     return "practise this note"
@@ -172,7 +176,7 @@ def reason_sentence(reason: str, history: list[dict], in_plan: str) -> str:
         parts.append(f"It {reason}; practising it early costs nothing.")
     elif reason.startswith("edited"):
         parts.append(f"It was {reason.split(',')[0]}, after the last answer: the questions are on the new text.")
-    elif reason.startswith("not tested yet"):
+    elif reason.startswith(MARK_SAY["never"]):
         parts.append("Not tested yet. " + ("Written by the AI, so you predict first, then read." if "AI" in reason
                                             else "Written by you, so a first question checks what writing it left."))
     elif reason.startswith("met with a hint"):

@@ -535,7 +535,7 @@ def meter_on() -> bool:
 
 _meter: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0, 0, 0])  # site -> [calls, prompt, completion, cached]
 # The same four counts over every call-site, so a chat turn's usage is the
-# difference between two readings (meter_totals, ui/web/server.py run_turn).
+# difference between two readings (meter_totals, session.turn.UsageLine).
 _meter_totals = [0, 0, 0, 0]
 
 
@@ -647,7 +647,7 @@ def _keep_openrouter_cache_markers(litellm) -> None:
 # The routes with `jinja_template` in provider_table render the conversation
 # with the model's own chat template. Qwen3.5's template raises "System message must be at the beginning" on any system message past
 # index 0 (measured 2026-09-27 on llama-server), and the interactive loop sends a
-# leading block of four (cli._fresh_messages) plus mid-run notes (agent/loop.py).
+# leading block of four (session.seed.fresh_messages) plus mid-run notes (agent/loop.py).
 # The same template also expects the reasoning of the turn in flight back:
 # without it the step after a tool result came back empty 3/3 (one end-of-turn
 # token, or the whole answer left inside an unclosed <think>), with it 3/3

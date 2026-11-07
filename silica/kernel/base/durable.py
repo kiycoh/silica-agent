@@ -93,6 +93,9 @@ def atomic_write_bytes(path: Path, data: bytes, mode: int | None = None) -> None
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
+    # ponytail: no directory fsync — post-power-loss rename durability is
+    # filesystem-dependent, and every caller's file is rebuildable or
+    # re-produceable; upgrade if a real loss is ever traced here.
 
 
 def quarantine(path: Path) -> Path | None:

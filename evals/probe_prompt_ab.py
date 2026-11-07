@@ -254,9 +254,9 @@ def apply_arm(arm: str) -> None:
     elif arm == "detected_default":
         # The chat's language before 2026-10-16: an undeclared vault's detected
         # language, as "Reply in <it> by default".
-        import silica.cli as cli
+        import silica.session.seed as seed_mod
         from silica.kernel.vault_language import reply_language_for
-        cli._reply_language = lambda: reply_language_for(cli.CONFIG.vault_path) or ""
+        seed_mod.reply_language = lambda: reply_language_for(seed_mod.CONFIG.vault_path) or ""
     elif arm.startswith("minus:"):
         rule = arm.split(":", 1)[1]
         if rule == "lang":
@@ -879,13 +879,14 @@ def run_one(arm: str, case: str, model: str, max_prompt_tokens: int, out_json: P
     except ImportError:
         chat_deferred = None
     from silica.agent.loop import run_agent
-    from silica.cli import seed_messages
+    from silica.session.seed import seed_messages
+    from silica.ui.web import app_help
     from evals.probe_study_plan_replay import Ctx, score_v2
 
     vault = Path(os.environ["SILICA_VAULT"])
     # An ablated suffix leaves an empty system message; a Jinja route folds it
     # into the head harmlessly, a hosted one may 400 on empty content.
-    messages = [m for m in seed_messages(math=True, app=True) if m.get("content")]
+    messages = [m for m in seed_messages(math=True, app=app_help.app_message()) if m.get("content")]
     sid = _narr.NARRATOR.ensure_session(driver="probe", seed={"arm": arm, "case": case})
     cancel = threading.Event()
     spent = {"prompt": 0, "completion": 0, "calls": 0}

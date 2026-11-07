@@ -25,7 +25,7 @@ import pytest
 from silica.kernel.report import structure
 
 WEB = Path(__file__).resolve().parent.parent / "silica" / "ui" / "web"
-from tests.webassets import app_css, app_js
+from tests.webassets import app_css, app_js, core_js
 WORK_JS = WEB / "static" / "work.js"
 FRAME_JS = WEB / "static" / "graph-frame.js"
 FRAME_HTML = WEB / "static" / "graph-frame.html"
@@ -368,7 +368,7 @@ def _run_projection(tmp_path, call: str, arg):
     assert m, "projection markers not found in work.js"
     script = tmp_path / "run.js"
     script.write_text(
-        m.group(0)
+        core_js() + m.group(0)
         + f"\nconsole.log(JSON.stringify({call}(JSON.parse(process.argv[2]))));\n"
     )
     out = subprocess.run(["node", str(script), json.dumps(arg)],

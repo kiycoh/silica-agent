@@ -119,7 +119,7 @@ def test_the_terminal_keeps_two_hues_the_app_dropped():
     """Stated so it can be seen, as KNOWN_DRIFT is: ui/console.py's cyan, indigo and amber are
     from before the one-hue identity, and recolouring a terminal is the owner's to settle.
     When it is, these turn to ==, and BRAND_CYAN goes with them."""
-    from silica.ui import console
+    from silica.term import console
 
     graphite = _sheets()["app-base.css"]["graphite"]
     assert console.CYAN != graphite["--accent"] and console.AMBER != graphite["--warn"]

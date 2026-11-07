@@ -36,6 +36,7 @@ from dotenv import dotenv_values
 # load_dotenv can blur an exported pin into a .env value. Re-exported here
 # because this is where every caller expects to find it.
 from silica import SHELL_ENV, VAULT_PINNED  # noqa: E402,F401
+from silica import view_table
 from silica.provider_table import HOSTED, PROVIDERS
 
 T = TypeVar("T")
@@ -354,26 +355,6 @@ def demo() -> bool:
     return live_env("SILICA_DEMO")
 
 
-# What each view beyond the chat is made of, by the tab id the page gives it
-# (ADR-0140 point 4): a view a process does not serve loses its routes, its
-# chat tools and its commands with its tab. A route is its path or anything
-# under it. Explore has no tools of its own: the chat reads the notes it draws.
-VIEWS: dict[str, dict[str, tuple[str, ...]]] = {
-    "discover": {"routes": ("/discover",)},
-    "graph": {"routes": ("/graph", "/map/layout", "/compare", "/shape")},
-    "learn": {"routes": ("/learn",),
-              "tools": ("silica_learn_items", "silica_review_queue", "silica_record_quiz"),
-              # /learn is the name before ADR-0141 and cli.py still runs it
-              "commands": ("/quiz", "/memorize", "/learn")},
-    "calendar": {"routes": ("/calendar", "/reminders"),
-                 "tools": ("silica_agenda", "silica_event_create", "silica_event_update"),
-                 "commands": ("/agenda",)},
-    "metrics": {"routes": ("/metrics",)},
-    # ADR-0143: the choice and Publish; saving a page (/vault/save) is every account's
-    "public": {"routes": ("/public",)},
-}
-
-
 def view_words() -> set[str]:
     """SILICA_VIEWS as the unit wrote it: tab ids, "all", and the words beside
     them that have no tab (`private`, ADR-0151 point 9)."""
@@ -387,7 +368,8 @@ def hosted_views() -> frozenset[str]:
     the paid ones away. Examine is never one (ADR-0111 point 3). The tenant
     cannot write the key: on hosted, POST /settings takes ADR-0104's rows only."""
     names = view_words()
-    views = (set(VIEWS) if "all" in names else names & set(VIEWS)) - {"metrics"}
+    every = set(view_table.VIEWS)
+    views = (every if "all" in names else names & every) - {"metrics"}
     # A demo is Explore alone whatever its unit lists (ADR-0139, amendment
     # 2026-10-31): it has no handle to publish under, Learn is off by the
     # owner's answer, and Discover reaches the internet.
@@ -397,53 +379,15 @@ def hosted_views() -> frozenset[str]:
 def served_views() -> frozenset[str]:
     """Every view off hosted: the variable is the host's, never read on a laptop.
     A demo keeps its clamp even on a unit that lost SILICA_HOSTED."""
-    return hosted_views() if hosted() or demo() else frozenset(VIEWS)
-
-
-# What a demo refuses beyond its views (ADR-0139 point 6), at the doors a view
-# already has: a route answers 404 as one that does not exist, a command is
-# neither offered nor run. The chat's tools are constraints.DEMO_WITHHELD.
-DEMO_OFF: dict[str, tuple[str, ...]] = {
-    "routes": (
-        # an upload is personal data, and an import reaches the internet
-        "/chat/files/add", "/vault/import", "/vault/fetch", "/vault/save", "/mail/upload", "/note/asset",
-        # Settings and what only Settings reaches. The Caddy block that refuses
-        # /settings/*, /endpoints, /zotero and /bug_report on a tenant's route
-        # never sees the demo's hostname (ADR-0139 point 4).
-        "/settings", "/connectors", "/skills", "/instructions", "/endpoints", "/zotero", "/bug_report",
-        # dictation sends the voice outside the count; a flag would die unread
-        "/stt", "/flag",
-        # model calls the door never counts: a turn outside POST /chat, the
-        # injector, check sources' judge, the worker's sentence on the vault
-        "/turn/redo", "/phone", "/nucleate", "/note/check", "/note/check/keep", "/vault_brief",
-        # a job's turn (POST /jobs/{id}/turn) is a whole agent loop the door
-        # never counts, whatever queued the job; with no upload there is none
-        # to list, and the tray leaves itself as it was on a 404 (jobsFetch)
-        "/jobs",
-        # ADR-0142's two downloads: the owner has not decided (2026-10-31)
-        "/vault/export",
-    ),
-    "commands": (
-        # the web door reaches the internet, and the connectors are Settings'
-        "/web", "/web-search", "/fetch", "/keep", "/connect", "/zotero",
-        # files in, through the injector or a converter
-        "/nucleate", "/convert", "/mail", "/promote",
-        # the model or the embedder spent outside the chat's 8 calls
-        "/enrich", "/dedup", "/curate", "/anneal", "/aliases", "/flashcards", "/wiki", "/embed", "/check",
-        # off by the owner's answer (Open 6); /organize's two tools are not the demo's
-        "/explain", "/organize",
-        # one vault, and no settings
-        "/vault", "/settings",
-    ),
-}
+    return hosted_views() if hosted() or demo() else frozenset(view_table.VIEWS)
 
 
 def withheld(part: str) -> frozenset[str]:
     """The routes, tools or commands of every view this process does not serve,
     and in a demo what DEMO_OFF names."""
     served = served_views()
-    gone = {x for v, p in VIEWS.items() if v not in served for x in p.get(part, ())}
-    return frozenset(gone | set(DEMO_OFF.get(part, ()) if demo() else ()))
+    gone = {x for tab, view in view_table.VIEWS.items() if tab not in served for x in getattr(view, part)}
+    return frozenset(gone | set(view_table.DEMO_OFF.get(part, ()) if demo() else ()))
 
 
 # Provider prefixes that map a `prefix/model` string to an endpoint and get

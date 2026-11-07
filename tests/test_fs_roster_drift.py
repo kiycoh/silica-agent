@@ -19,6 +19,7 @@ import pytest
 
 from silica.driver import fs_backend
 from silica.driver.fs_backend import ObsidianFSBackend
+from silica.kernel.vault import Vault
 
 
 @pytest.fixture
@@ -33,7 +34,7 @@ def vault_dir(tmp_path):
 def backend(vault_dir, monkeypatch):
     """Backend with the roster re-check debounce off (its own test covers it)."""
     monkeypatch.setattr(fs_backend, "_ROSTER_RECHECK_INTERVAL", 0.0)
-    b = ObsidianFSBackend(vault_path=str(vault_dir))
+    b = Vault(ObsidianFSBackend(vault_path=str(vault_dir)))
     b._ensure_index()  # first build, so later drift is drift and not cold start
     return b
 
@@ -41,13 +42,13 @@ def backend(vault_dir, monkeypatch):
 def _rebuild_counter(backend, monkeypatch):
     """Count full rebuilds without suppressing them."""
     calls: list[int] = []
-    original = backend._rebuild_index
+    original = backend.transport._rebuild_index
 
     def counting():
         calls.append(1)
         return original()
 
-    monkeypatch.setattr(backend, "_rebuild_index", counting)
+    monkeypatch.setattr(backend.transport, "_rebuild_index", counting)
     return calls
 
 
@@ -103,7 +104,7 @@ def test_churn_in_an_ignored_tree_does_not_rebuild(vault_dir, monkeypatch):
     monkeypatch.setattr(fs_backend, "_ROSTER_RECHECK_INTERVAL", 0.0)
     (vault_dir / ".git").mkdir()
     (vault_dir / "node_modules").mkdir()
-    b = ObsidianFSBackend(vault_path=str(vault_dir))
+    b = Vault(ObsidianFSBackend(vault_path=str(vault_dir)))
     b._ensure_index()
     calls = _rebuild_counter(b, monkeypatch)
 
@@ -130,7 +131,7 @@ def test_recheck_is_debounced(vault_dir, monkeypatch):
     """Several reads land in one agent turn; a roster that just rescanned has
     nothing new to see, and the scan is a whole-tree walk."""
     monkeypatch.setattr(fs_backend, "_ROSTER_RECHECK_INTERVAL", 3600.0)
-    b = ObsidianFSBackend(vault_path=str(vault_dir))
+    b = Vault(ObsidianFSBackend(vault_path=str(vault_dir)))
     b._ensure_index()
 
     (vault_dir / "B.md").write_text("beta body\n")
@@ -163,7 +164,7 @@ def test_out_of_band_create_reaches_the_embed_index(vault_dir, monkeypatch):
     monkeypatch.setattr("silica.config.CONFIG.index_sweep", True)
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr(providers, "get_embedder", lambda cfg: _Emb())
-    driver_mod.set_driver(ObsidianFSBackend(vault_path=str(vault_dir)))
+    driver_mod.set_driver(Vault(ObsidianFSBackend(vault_path=str(vault_dir))))
 
     store = get_store()
     build_index(

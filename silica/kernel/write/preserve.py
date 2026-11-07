@@ -10,7 +10,7 @@ in, and every frontmatter value; otherwise the first thing lost, named.
 Inserting is always free. It keeps lines and values, not meaning: an inserted
 line that contradicts the note passes (ADR-0093, Consequences).
 
-`check_write` is the same rule at the driver's write site. Until 2026-12-15 it
+`check_write` is the same rule at the vault's write site. Until 2026-12-15 it
 only logs (`REFUSE = False`); on that date the owner reads the WARNING lines
 and either sets `REFUSE = True` (at least 1 true catch, at most 3 false alarms)
 or removes the check (ADR-0093 decision 5). A caller that must remove names
@@ -32,7 +32,7 @@ from collections import Counter
 from contextvars import ContextVar
 from types import FrameType
 
-from silica.kernel.base import frontmatter
+from silica.kernel.base import frontmatter, markdown
 from silica.kernel.base.noteshape import PROVENANCE_HEADER_PREFIXES
 from silica.kernel.base.syntax import WIKILINK_CELL_RE
 
@@ -110,12 +110,6 @@ _H2 = re.compile(r"^##\s+(.*?)\s*#*\s*$")
 # What a link target reduces to under RENAME: one placeholder, so a retarget
 # passes and a dropped link still does not.
 _TARGET = "\x01"
-
-
-def lf(text: str) -> str:
-    """`text` on LF, as Python's universal newlines read it: the one input
-    every composer is written for (decision 8)."""
-    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def _reduce(line: str, loss: Loss | None) -> str:
@@ -284,7 +278,7 @@ def lost(before: str, after: str, *, loss: Loss | None = None, free=()) -> str |
     never compared."""
     if loss in _RELAX_ALL:
         return None
-    before, after = lf(before), lf(after)
+    before, after = markdown.lf(before), markdown.lf(after)
     if before == after:
         return None
     b_data, b_raw, b_body = frontmatter.split(before)
@@ -339,21 +333,15 @@ def _staged_path(path: str) -> bool:
 
 
 def _caller() -> tuple[str, str]:
-    """The first frame outside the driver and this module: the site that
-    asked for the write, which is what the review needs to name."""
+    """The first frame outside the driver, the vault wrapper and this module:
+    the site that asked for the write, which is what the review needs to name."""
     f: FrameType | None = sys._getframe(2)
     while f is not None:
         mod = f.f_globals.get("__name__", "")
-        if not (mod.startswith("silica.driver") or mod == __name__):
+        if not (mod.startswith("silica.driver") or mod in ("silica.kernel.vault", __name__)):
             return mod, f.f_code.co_name
         f = f.f_back
     return "?", "?"
-
-
-def _vault() -> str | None:
-    from silica.config import CONFIG
-
-    return (CONFIG.vault_path or "").strip() or None
 
 
 def _untouched_draft(path: str, prior: str) -> bool:
@@ -364,10 +352,10 @@ def _untouched_draft(path: str, prior: str) -> bool:
     data, _raw, _body = frontmatter.split(prior)
     if not isinstance(data, dict) or "review" not in data:
         return False
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
 
     try:
-        post = get_undo_journal().newest_post_hash(path, _vault())
+        post = get_undo_journal().newest_post_hash(path, active_vault())
     except Exception as exc:
         # No journal, no grant: the write is judged like any other.
         logger.debug("preservation: journal unreadable for %s: %s", path, exc)
@@ -392,7 +380,7 @@ def check_write(path: str, before: str | None, after: str, *,
             logger.debug("preservation: %s under %s: %s", path, loss.name, why)
             return
         why = relaxed
-    if _untouched_draft(path, lf(before)):
+    if _untouched_draft(path, markdown.lf(before)):
         logger.debug("preservation: %s re-authored as an untouched draft", path)
         return
     mod, fn = _caller()
@@ -410,11 +398,11 @@ def check_recreate(path: str, after: str, *, loss: Loss | None = None, free=()) 
     started = _TURN_STARTED.get()
     if started is None:
         return
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
 
     try:
         journal = get_undo_journal()
-        hit = journal.last_chat_delete(_vault(), path)
+        hit = journal.last_chat_delete(active_vault(), path)
         if hit is None or hit[2] < started:
             return
         saved = next((inv.prior_content for inv, _h in journal.inverses_for(hit[0])
@@ -425,17 +413,3 @@ def check_recreate(path: str, after: str, *, loss: Loss | None = None, free=()) 
         logger.debug("preservation: re-create lookup failed for %s: %s", path, exc)
         return
     check_write(path, saved, after, loss=loss, free=free)
-
-
-# ---------------------------------------------------------------- line endings
-
-def crlf_dominant(raw: bytes) -> bool:
-    """CRLF when the bytes hold more `\\r\\n` than lone `\\n` (decision 8)."""
-    crlf = raw.count(b"\r\n")
-    return crlf > raw.count(b"\n") - crlf
-
-
-def encode(content: str, crlf: bool) -> str:
-    """`content` (composed on LF) with the prior's terminator put back."""
-    content = lf(content)
-    return content.replace("\n", "\r\n") if crlf else content

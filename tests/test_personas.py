@@ -108,7 +108,6 @@ def test_a_gui_chat_wears_a_persona_with_no_model_and_a_reopened_chat_wears_it_a
 
     from silica.config import CONFIG
     from silica.ui.web import server
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     monkeypatch.setattr(CONFIG, "capture_sessions", False)
@@ -122,7 +121,7 @@ def test_a_gui_chat_wears_a_persona_with_no_model_and_a_reopened_chat_wears_it_a
         messages.append({"role": "assistant", "content": "Risposta"})
         return "Risposta"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     done = _sse(tc.post("/chat", json={"text": "/parafrasi"}))[-1]
     assert done["type"] == "done" and "parafrasi on" in done["answer"] and not seen
     tc.post("/chat", json={"text": "Parafrasa l'art. 1321"})

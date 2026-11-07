@@ -60,7 +60,7 @@ def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
         try:
             content = DRIVER.read_note(nid).content
         except Exception:
-            continue
+            continue  # a note it cannot read cannot be a duplicate of anything in this pass
         if not content:
             continue
         _data, _raw, body = frontmatter.split(content)

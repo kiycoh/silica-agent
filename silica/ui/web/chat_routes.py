@@ -16,15 +16,18 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from silica.agent import turn_notes
-from silica.agent.mentions import IMAGE_MARK, IMAGE_MARK_RE
+from silica.kernel.text.mentions import IMAGE_MARK, IMAGE_MARK_RE
 from silica.tools import tool_failed
 from silica.agent.recall_watch import numbers_of_session, read_refs, READS_KEY
 from silica.config import CONFIG, demo
 from silica.kernel.base.formats import IMAGE_SUFFIX, ext_alternation
 from silica.kernel.graph.mindmap import note_resolver
+from silica.session import meter
+from silica.session import turn as session_turn
 from silica.sources import drop_turn
 from silica.ui.web import drop, flags, render, session, sse, turn
 from silica.ui.web.callback import tool_calls_to_json
+from silica.ui.web.failures import Refused
 from silica.ui.web.session import SESSION
 
 router = APIRouter()
@@ -103,20 +106,14 @@ def _demo_refuses(payload: dict) -> str:
     """Why a demo refuses this message, or "" (ADR-0139 points 5 and 6). Asked
     before the turn starts: a 404 is a refusal the door counts no question for,
     where the stream's own error frame for a withheld command arrives in a 200."""
-    from silica.config import withheld
-
     if not demo():
         return ""
     if payload.get("images"):
         return "images are not part of the demo"
     if payload.get("story"):
         return "Discover is not part of the demo"
-    # The first word as split() finds it, as jobs.from_command and run_turn's
-    # /flashcards branch find it: " /convert x" got past a startswith("/")
-    # here and queued a conversion (review 2026-10-31).
-    text = str(payload.get("text") or "")
-    word = (text.split(None, 1) or [""])[0].lower()
-    return f"'{word}' is not part of the demo" if word in withheld("commands") else ""
+    word = session_turn.withheld_command(str(payload.get("text") or "")).lower()
+    return f"'{word}' is not part of the demo" if word else ""
 
 
 @router.post("/chat")
@@ -157,11 +154,11 @@ async def chat(payload: dict):
             if joined:
                 notes, files, earlier = joined
                 composed = await asyncio.to_thread(drop_turn.compose_nucleate_turn, text, notes, [], earlier=earlier)
-                return sse.turn_response(slot, composed, attachments, workspace,
-                                         withhold=drop_turn.WITHHELD_WITH_FILES, files=files, said=text, note=note,
-                                         story=story, scope=scope)
-        return sse.turn_response(slot, text, attachments, workspace, note=note, story=story, scope=scope,
-                                 **({"said": text.removeprefix("/web ")} if story and scope == "web" else {}))
+                return sse.turn_response(slot, turn.Ask(composed, attachments, workspace,
+                                                        withhold=drop_turn.WITHHELD_WITH_FILES, files=files, said=text,
+                                                        note=note, story=story, scope=scope))
+        return sse.turn_response(slot, turn.Ask(text, attachments, workspace, note=note, story=story, scope=scope,
+                                                said=text.removeprefix("/web ") if story and scope == "web" else ""))
 
 
 @router.post("/phone/turn")
@@ -214,7 +211,7 @@ def _edited(content: str, words: str, note: str = "") -> str:
     """A stored user message with its typed words replaced (POST /turn/redo):
     the manifest and the images stay, the named notes follow the new words,
     and the note that was open beside the chat stays the one the turn reads."""
-    from silica.agent.mentions import named_notes, strip
+    from silica.kernel.text.mentions import named_notes, strip
 
     base = strip(content)
     cuts = [i for i in (base.find(drop_turn.MANIFEST_MARK), base.find(f"\n\n{IMAGE_MARK}")) if i >= 0]
@@ -261,7 +258,8 @@ async def redo_turn(payload: dict | None = None):
         SESSION.chat.collapsed = {c for c in SESSION.chat.collapsed if c < at}
         _narr.NARRATOR.narrate(_narr.REWIND, "done", "asked again", {}, parent=None)
         withhold = drop_turn.WITHHELD_WITH_FILES if msg.get("silica_files") and not content.startswith(drop_turn.NUCLEATE_ASK) else ()
-        return sse.turn_response(slot, content, workspace=msg.get("silica_workspace") or "", withhold=withhold, prebuilt=msg)
+        return sse.turn_response(slot, turn.Ask(content, workspace=msg.get("silica_workspace") or "", withhold=withhold,
+                                                prebuilt=msg))
 
 
 @router.get("/messages")
@@ -315,7 +313,7 @@ def get_messages():
         images: list[dict] = []
         if m["role"] == "user" and isinstance(content, str) and (
                 "<named-notes>" in content or "<converted-files>" in content or "<discover-story>" in content):
-            from silica.agent.mentions import strip
+            from silica.kernel.text.mentions import strip
 
             content = strip(content)
         if m["role"] == "user" and isinstance(content, str) and IMAGE_MARK in content:
@@ -459,7 +457,6 @@ def list_sessions():
 def load_session(payload: dict):
     if SESSION.busy:
         raise HTTPException(status_code=409, detail="a turn is already in progress")
-    from silica.cli import _update_context_tokens
     from silica.obs import narration as _narr
 
     sid = str(payload.get("id", ""))
@@ -472,7 +469,7 @@ def load_session(payload: dict):
         try:
             _narr.NARRATOR.resume(sid)   # continue appending to the same account
         except _narr.SessionBusy as e:
-            raise HTTPException(status_code=409, detail=str(e)) from None
+            raise Refused(409, e) from None
         SESSION.chat.sid = sid
     else:
         # Legacy snapshot: continue as a NEW narration session seeded with its
@@ -500,7 +497,7 @@ def load_session(payload: dict):
         personas.apply(SESSION.chat.messages, worn)
     SESSION.chat.seen_numbers.clear()
     SESSION.chat.seen_numbers.update(numbers_of_session(SESSION.chat.sid))
-    _update_context_tokens(SESSION.chat.messages)
+    meter.update_context_tokens(SESSION.chat.messages)
     return {"ok": True}
 
 
@@ -516,7 +513,7 @@ def rename_session(payload: dict):
     try:
         ok = _narr.rename_session(sid, title, CONFIG.vault_path or "")
     except _narr.SessionBusy as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
+        raise Refused(409, e) from None
     if not ok:
         raise HTTPException(status_code=404, detail="no such session")
     return {"ok": True, "title": title}
@@ -538,7 +535,7 @@ def delete_session(payload: dict):
     try:
         ok = _narr.delete_session(sid, CONFIG.vault_path or "")
     except _narr.SessionBusy as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
+        raise Refused(409, e) from None
     if not ok:
         raise HTTPException(status_code=404, detail="no such session")
     # The chat's attached files go with it (ADR-0121 point 5); a copy the

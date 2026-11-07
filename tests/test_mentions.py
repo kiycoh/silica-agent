@@ -1,7 +1,7 @@
 """ADR-0097 point 2: the notes a message names reach the model as resolved paths."""
 from __future__ import annotations
 
-from silica.agent.mentions import CAP, named_notes, refs, resolve, strip
+from silica.kernel.text.mentions import CAP, named_notes, refs, resolve, strip
 
 VAULT = {
     "Concepts/ML/Machine learning.md": "Machine learning",
@@ -37,7 +37,7 @@ def test_the_block_names_found_missing_and_ambiguous():
 
 
 def test_no_link_no_block_and_no_vault_read(monkeypatch):
-    import silica.agent.mentions as m
+    import silica.kernel.text.mentions as m
 
     def boom():
         raise AssertionError("a message with no link must not read the vault")
@@ -54,7 +54,7 @@ def test_the_cap_says_how_many_it_left():
 
 
 def test_an_unreadable_vault_sends_the_turn_without_a_block(monkeypatch):
-    import silica.agent.mentions as m
+    import silica.kernel.text.mentions as m
 
     def broken():
         raise RuntimeError("no vault")
@@ -75,7 +75,6 @@ def test_a_gui_turn_carries_the_paths_and_a_reopened_chat_shows_the_words(tmp_va
     from fastapi.testclient import TestClient
 
     from silica.ui.web import server
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     tmp_vault.note("Concepts/ML/Machine learning.md", "# Machine learning\n")
@@ -88,7 +87,7 @@ def test_a_gui_turn_carries_the_paths_and_a_reopened_chat_shows_the_words(tmp_va
         messages.append({"role": "assistant", "content": "Ok."})
         return "Ok."
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     r = tc.post("/chat", json={"text": "Spiega [[Machine learning]]"})
     events = [json.loads(line[6:]) for line in r.text.splitlines() if line.startswith("data: ")]
     assert events[-1]["type"] == "done"
@@ -119,7 +118,6 @@ def test_the_chip_note_reaches_the_model_and_a_reopened_chat_draws_it(tmp_vault,
 
     from silica.model.wire import to_wire
     from silica.ui.web import server
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     tmp_vault.note("Codice civile/Art. 1453.md", "# Art. 1453\n\nRisoluzione per inadempimento.\n")
@@ -132,7 +130,7 @@ def test_the_chip_note_reaches_the_model_and_a_reopened_chat_draws_it(tmp_vault,
         messages.append({"role": "assistant", "content": "Ok."})
         return "Ok."
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     tc.post("/chat", json={"text": "cosa dice questo articolo?", "note": "Codice civile/Art. 1453.md"})
     tc.post("/chat", json={"text": "e questo?", "note": "Gone.md"})
     assert "The note open beside the chat" in seen[0]["content"]

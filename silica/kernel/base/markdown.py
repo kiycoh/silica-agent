@@ -11,12 +11,30 @@ from silica.kernel.base.formats import TABULAR_EXTS, VISUAL_MEDIA_EXTS
 from silica.kernel.base.frontmatter import FM_RE_SCAN
 from silica.kernel.base.syntax import ADR_REF_RE
 
+def lf(text: str) -> str:
+    """`text` on LF, as Python's universal newlines read it: the one input
+    every composer is written for (ADR-0093 decision 8)."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def crlf_dominant(raw: bytes) -> bool:
+    """CRLF when the bytes hold more `\\r\\n` than lone `\\n` (decision 8)."""
+    crlf = raw.count(b"\r\n")
+    return crlf > raw.count(b"\n") - crlf
+
+
+def encode(content: str, crlf: bool) -> str:
+    """`content` (composed on LF) with the prior's terminator put back."""
+    content = lf(content)
+    return content.replace("\n", "\r\n") if crlf else content
+
+
 _MD = MarkdownIt()  # stateless parser, shared by every parse below
 _FOOTNOTE_DEF_RE = re.compile(r"^([ \t]{0,3})\[\^[^\]\n]+\]:[ \t]?", re.MULTILINE)
 
 # One list, two jobs: extract_links DROPS these targets (a file is not a note;
 # before .ipynb/.mov/.tiff joined 2026-08-27, each such link sat in the
-# backends' unresolved set as a phantom dangling NOTE) and extract_file_refs
+# backends' unresolved set as a phantom dangling NOTE) and extract_refs_typed
 # RETURNS them as the note→file reference bucket. Deliberately a superset of
 # VISUAL_MEDIA_EXTS: that list is "what to strip from prose" (visual media only —
 # a .zip or .ipynb link must stay in the text), this one is "what is a file".
@@ -138,23 +156,6 @@ def extract_links(content: str) -> list[str]:
     if not _LINK_MARKER_RE.search(content):
         return []
     return _extract_links_ast(content)
-
-
-def extract_file_refs(content: str) -> list[str]:
-    """Non-md file targets a note references: ![[img.jpg]] embeds, [[doc.pdf]]
-    wikilinks, ![alt](x.png) images and [label](x.ipynb) links, in order,
-    deduped. Remote (http/https/mailto) sources never appear — the walk in
-    `_extract_refs_ast` filters them before the buckets exist.
-
-    Same marker-scan fast path as extract_links, and provably so: every file
-    ref carries one of its markers (`![[` contains `[[`; `![](x.png)` and
-    `[l](x.pdf)` contain a non-web `](`), so a scan-negative note has no file
-    refs either.
-    """
-    content = textwrap.dedent(content)
-    if not _LINK_MARKER_RE.search(content):
-        return []
-    return _extract_refs_ast(content)[1]
 
 
 def _extract_links_ast(content: str) -> list[str]:
@@ -279,11 +280,18 @@ def extract_links_typed(content: str) -> dict[str, bool]:
 def extract_refs_typed(content: str) -> tuple[dict[str, bool], list[str], list[str]]:
     """`extract_links_typed` plus the file and mention buckets, one parse.
 
-    The per-note call for the backends' index pass: separate calls
-    (typed + extract_file_refs) would parse every link-bearing note twice
-    for nothing — the parse is the hot loop's measured cost. The mention scan
-    widens the fast path only for notes carrying a path-shaped inline cite,
-    so link-free prose still skips the parser.
+    The per-note call for the backends' index pass: a call per bucket would
+    parse every link-bearing note twice for nothing — the parse is the hot
+    loop's measured cost. The mention scan widens the fast path only for notes
+    carrying a path-shaped inline cite, so link-free prose still skips the
+    parser.
+
+    The file bucket is the non-md targets a note references: ![[img.jpg]]
+    embeds, [[doc.pdf]] wikilinks, ![alt](x.png) images and [label](x.ipynb)
+    links, in order, deduped. Remote (http/https/mailto) sources never appear:
+    the walk in `_extract_refs_ast` filters them before the buckets exist. The
+    fast path holds for it too: every file ref carries one of the link markers
+    (`![[` contains `[[`; `![](x.png)` and `[l](x.pdf)` contain a non-web `](`).
     """
     content = textwrap.dedent(content)
     if not (_LINK_MARKER_RE.search(content) or _CODE_MENTION_RE.search(content)):

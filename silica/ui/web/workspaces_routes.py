@@ -7,7 +7,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
-from silica.ui.web.failures import explain as _failure
+from silica.ui.web.failures import Refused, explain as _failure
 from silica.ui.web.session import SESSION
 
 router = APIRouter()
@@ -41,7 +41,7 @@ def workspaces_create(payload: dict):
         path = workspaces.create_workspace(str(payload.get("name") or ""), notes=notes, folders=folders)
     except ValueError as exc:
         # create_workspace's own sentences (name refused or taken), never a path
-        raise HTTPException(status_code=400, detail=exc.args[0]) from None
+        raise Refused(400, exc.args[0]) from None
     except FileExistsError:
         raise HTTPException(status_code=409, detail="a note with that name is already there") from None
     except OSError:

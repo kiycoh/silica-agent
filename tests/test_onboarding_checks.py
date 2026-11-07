@@ -720,7 +720,7 @@ class TestAggregation:
         from rich.console import Console
 
         import silica.onboarding.checks as checks
-        from silica.ui import console as console_mod
+        from silica.term import console as console_mod
 
         buf = io.StringIO()
         monkeypatch.setattr(console_mod, "CONSOLE", Console(file=buf, highlight=False, width=120))
@@ -908,7 +908,7 @@ class TestCredentialsNeverReachTheOutput:
 
     def test_rendered_report_is_scrubbed(self, capsys, monkeypatch):
         from silica.onboarding.checks import render_report
-        from silica.ui.console import CONSOLE
+        from silica.term.console import CONSOLE
 
         # Wide enough that the table cannot wrap the redaction marker apart and
         # turn the positive half of this assertion into a false green.

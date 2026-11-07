@@ -7,6 +7,7 @@ import pytest
 
 from silica.sources import ingest
 from silica.config import CONFIG
+from silica.kernel.vault import Vault
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +29,7 @@ def vault(tmp_path, monkeypatch):
     v.mkdir()
     monkeypatch.setattr(CONFIG, "vault_path", str(v))
     monkeypatch.setattr(CONFIG, "inbox_dir", "Inbox")
-    backend = fs_backend.ObsidianFSBackend(str(v))
+    backend = Vault(fs_backend.ObsidianFSBackend(str(v)))
     monkeypatch.setattr(driver_mod, "DRIVER", backend)
     driver_mod.set_driver(backend)
     return v

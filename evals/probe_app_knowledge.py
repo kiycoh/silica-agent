@@ -121,7 +121,8 @@ def run_one(arm: str, out_json: Path, cap: int) -> None:
     """Inside the subprocess: SILICA_VAULT, HOME and SILICA_HOSTED are set."""
     import threading
 
-    import silica.cli as cli
+    import silica.cli  # noqa: F401  registers the tools
+    from silica.session.seed import seed_messages
     from silica.agent import loop as _loop
     from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
     from silica.agent.loop import run_agent
@@ -129,7 +130,7 @@ def run_one(arm: str, out_json: Path, cap: int) -> None:
 
     # No live web: an answer that reaches for it is graded on what it says.
     TOOLS["silica_web_answer"].fn = lambda **kw: "The web is not reachable from this session."
-    seed = [m for m in cli.seed_messages(math=True) if m.get("content")]
+    seed = [m for m in seed_messages(math=True) if m.get("content")]
     if arm in ("app", "app_v1"):
         import silica.ui.web.app_help as app_help
         if arm == "app_v1":

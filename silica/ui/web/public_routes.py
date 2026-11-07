@@ -20,6 +20,7 @@ from silica.config import public_base
 from silica.kernel.text import note_parts
 from silica.onboarding import settings_ops
 from silica.ui.web import drop, render, session
+from silica.ui.web.failures import Refused
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +143,7 @@ def public_handle(payload: dict):
     try:
         publish.claim(str(payload.get("handle") or ""))
     except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+        raise Refused(400, exc) from exc
     return _view()
 
 
@@ -218,7 +219,7 @@ def public_add_vault(payload: dict):
     try:
         v = publish.add_vault(str(payload.get("folder") or ""))
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
     return {**_view(), "added": v["slug"]}
 
 
@@ -234,7 +235,7 @@ def public_update_vault(slug: str, payload: dict):
             _refresh_page()
         v = publish.update_vault(slug, changes)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
     if "listed" in changes:
         set_listed(slug, v["listed"] and v["visibility"] == "public")
     return _view()
@@ -247,7 +248,7 @@ def public_remove_vault(slug: str):
     try:
         publish.remove_vault(slug)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
     return _view()
 
 
@@ -258,7 +259,7 @@ def public_note(payload: dict):
     try:
         publish.set_note(_canon(str(payload.get("path") or "")), bool(payload.get("on")))
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
     return _view()
 
 
@@ -277,7 +278,7 @@ async def public_publish(payload: dict | None = None):
             publish.set_visibility(slug, "public")
         out = await asyncio.to_thread(build, slug)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
     return {**_view(), "result": out}
 
 
@@ -309,7 +310,7 @@ async def public_check(vault: str = ""):
     try:
         return await asyncio.to_thread(_sheet, vault, fresh=True)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
 
 
 @router.post("/public/check/answer")
@@ -328,7 +329,7 @@ def public_check_answer(payload: dict):
                            off=[str(x) for x in off] if isinstance(off, list) else None)
         return _sheet(slug)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
 
 
 @router.post("/public/check/note")
@@ -346,7 +347,7 @@ def public_check_note(payload: dict):
         wiki["notes"][path]["rewritten"] = on
         return _sheet(slug)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
 
 
 @router.get("/public/check/image")
@@ -396,7 +397,7 @@ async def save_preview(request: Request, url: str = ""):
             return {**p, "kind": "vault", "chosen": areas}
         p = await asyncio.to_thread(saved_page.prepare, url)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
     except Exception as exc:
         # httpx raises its own on a refused connection or a timeout: that page
         # could not be read, which is the reader's to know, not a 500.
@@ -411,7 +412,7 @@ async def _write_turn(fn, *args, **kwargs):
         try:
             out = await asyncio.to_thread(fn, *args, **kwargs)
         except ValueError as exc:
-            raise HTTPException(400, str(exc))
+            raise Refused(400, exc)
         except Exception as exc:
             logger.warning("save failed: %s: %s", type(exc).__name__, exc)
             raise HTTPException(502, "that page could not be read right now")
@@ -447,7 +448,7 @@ def invitation_preview(request: Request, author: str = "", vault: str = ""):
         return saved_page.prepare_invitation(
             author, vault, _areas([a for v in request.query_params.getlist("areas") for a in v.split(",")]))
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
 
 
 @router.post("/vault/invitations/save")
@@ -466,5 +467,5 @@ def invitation_decline(payload: dict):
     try:
         saved_page.decline_invitation(str(payload.get("author") or ""), str(payload.get("vault") or ""))
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
     return {"invitations": saved_page.invitations()}

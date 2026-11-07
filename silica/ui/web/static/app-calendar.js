@@ -1103,6 +1103,10 @@ function calQuickCard(at, anchor) {
   const today = calFmt(new Date());
   const plans = calPlans.filter((p) => p.by >= today);
   const el = mkEl("form", "cal-card cq");
+  // submit() is this card's validation and says what is wrong. The browser's
+  // says nothing: the 23:59 clamp below is off the inputs' 15-minute step, so
+  // from 22:00 on it stopped Save without a word (More options never asked it).
+  el.noValidate = true;
   el.setAttribute("aria-label", "new event");
   const x = mkEl("button", "x", "×");
   x.type = "button";

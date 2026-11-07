@@ -164,7 +164,7 @@ def test_switch_vault_rebuilds_the_driver_on_the_new_path(tmp_vault, tmp_path):
     """The nine steps as one call: a live process holds a driver, an overlay, a
     manifest and vault-scoped caches, and they all still answer for the old
     folder until they are reset."""
-    from silica.cli import switch_vault
+    from silica.onboarding.adopt import switch_vault
     from silica.driver import get_driver
 
     other = tmp_path / "other-vault"
@@ -180,7 +180,7 @@ def test_switch_vault_rebuilds_the_driver_on_the_new_path(tmp_vault, tmp_path):
 
 
 def test_switch_vault_refuses_a_path_that_is_not_a_directory(tmp_vault, tmp_path):
-    from silica.cli import switch_vault
+    from silica.onboarding.adopt import switch_vault
 
     file_path = tmp_path / "notes.md"
     file_path.write_text("x")
@@ -301,3 +301,25 @@ def test_hosted_writes_a_table_row_to_the_tenant_env(hosted_client, env_file, mo
     monkeypatch.setattr(CONFIG, "stt_lang", CONFIG.stt_lang)
     assert c.post("/settings", json={"key": "SILICA_STT_LANG", "value": "it"}).status_code == 200
     assert "SILICA_STT_LANG=it" in env_file.read_text()
+
+
+def test_a_model_changed_in_settings_brings_its_window(client, env_file, monkeypatch):
+    """The window was sized at boot alone, so the ring and the compaction budget
+    went on reading the last model's until a restart. Under a pin, from the pin:
+    the last model may have cut the field below it."""
+    from silica.config import CONFIG
+
+    tc, _ = client
+    monkeypatch.setattr(CONFIG, "model", "openrouter/x/narrow")
+    monkeypatch.setattr(CONFIG, "_provider", "openrouter")
+    monkeypatch.setattr(CONFIG, "max_context_tokens", 60000)
+    monkeypatch.setattr("silica.model.limits.model_limits", lambda provider, model: (131072, 0))
+    monkeypatch.setenv("SILICA_MODEL", "")   # apply() writes os.environ: monkeypatch restores what it declared
+    monkeypatch.delenv("SILICA_MAX_CONTEXT", raising=False)
+    assert tc.post("/settings", json={"key": "SILICA_MODEL", "value": "openrouter/x/wide"}).status_code == 200
+    assert CONFIG.max_context_tokens == 131072
+
+    monkeypatch.setenv("SILICA_MAX_CONTEXT", "65536")
+    monkeypatch.setattr(CONFIG, "max_context_tokens", 8192)   # what a narrow model left
+    assert tc.post("/settings", json={"key": "SILICA_MODEL", "value": "openrouter/x/other"}).status_code == 200
+    assert CONFIG.max_context_tokens == 65536

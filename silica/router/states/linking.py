@@ -236,7 +236,7 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
             try:
                 prior_contents[path] = DRIVER.read_note(path).content or ""
             except Exception:
-                pass
+                pass  # backlink_pass skips a note it cannot read too, so no inverse is owed
 
         all_refs = _run_title_refs(fsm)
         title_index = build_title_index(all_refs)

@@ -47,6 +47,7 @@ def test_call_llm_failure_closes_the_span_failed(narrator, monkeypatch):
 
 
 def test_consume_wraps_items_in_attributed_subagent_spans(narrator):
+    from silica.agent.run_context import RunContext
     from silica.agent.subagent import consume
     from silica.kernel.workqueue import WorkItem, WorkQueue
 
@@ -59,7 +60,7 @@ def test_consume_wraps_items_in_attributed_subagent_spans(narrator):
     item = WorkItem(kind="dedup", target_path="Concepts/X.md", id="it1")
     wq.enqueue(item)
     wq.close()
-    consume(wq, FakeAgent(), parent_span="run-r9", run_id="r9")
+    RunContext.of_run(run="r9", parent="run-r9").spawn(consume)(wq, FakeAgent())
     beats = _beats(narrator)
     sub = [b for b in beats if b["kind"] == "subagent"]
     assert [b["status"] for b in sub] == ["running", "done"]
@@ -132,7 +133,6 @@ def test_gui_turn_roundtrip_replay_and_endpoints(narrator, monkeypatch, tmp_path
     and a reloaded session equals what the user saw."""
     from fastapi.testclient import TestClient
     from silica.ui.web import server
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     narrator.close()   # the server owns its own session
@@ -143,7 +143,7 @@ def test_gui_turn_roundtrip_replay_and_endpoints(narrator, monkeypatch, tmp_path
         messages.append({"role": "assistant", "content": "Reply"})
         return "Reply"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     tc = TestClient(server.app)
     tc.post("/chat", json={"text": "hello narration"})
 
@@ -192,8 +192,8 @@ def test_repl_sessions_resume_handlers(narrator, monkeypatch, capsys):
     sid = narrator.sid
     narrator.close()
 
-    monkeypatch.setattr("silica.cli._fresh_messages", lambda: [{"role": "system", "content": "seed"}])
-    monkeypatch.setattr("silica.cli._update_context_tokens", lambda m: None)
+    monkeypatch.setattr("silica.session.seed.fresh_messages", lambda: [{"role": "system", "content": "seed"}])
+    monkeypatch.setattr("silica.session.meter.update_context_tokens", lambda m: None)
 
     assert _handle_slash_command("/sessions", []) is True
     messages: list[dict] = []

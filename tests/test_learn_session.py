@@ -86,7 +86,8 @@ def test_the_sessions_line_is_composed_and_read_by_one_definition(client):
 
 def test_a_line_from_before_the_id_reads_with_none(client):
     assert session.parse_lines(["- 2026-01-02 · 1 item · ratings"]) == [
-        {"date": "2026-01-02", "items": 1, "line": "2026-01-02 · 1 item · ratings", "session": "", "met": ""}]
+        {"date": "2026-01-02", "items": 1, "line": "2026-01-02 · 1 item · ratings", "session": "", "met": "",
+         "rest": "ratings"}]
 
 
 def test_the_agent_draws_without_the_plan_s_date_or_its_placement(client, monkeypatch):

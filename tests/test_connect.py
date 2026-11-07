@@ -165,14 +165,13 @@ async def _recv_chat(ws):
         return frame
 
 def test_chat_streams_events_then_done(bridge_env, monkeypatch):
-    from silica.ui.web import turn
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         tool_progress_callback(LLMStreamEvent("content", "Hello", 0))
         messages.append({"role": "assistant", "content": "Hello"})
         return "Hello"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     async def scenario(srv):
         ws, _ = await _dial(srv)
@@ -195,7 +194,6 @@ def test_chat_streams_events_then_done(bridge_env, monkeypatch):
 
 
 def test_second_chat_while_busy_is_refused(bridge_env, monkeypatch):
-    from silica.ui.web import turn
     release = threading.Event()
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -204,7 +202,7 @@ def test_second_chat_while_busy_is_refused(bridge_env, monkeypatch):
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     async def scenario(srv):
         ws, _ = await _dial(srv)
@@ -224,7 +222,6 @@ def test_second_chat_while_busy_is_refused(bridge_env, monkeypatch):
 
 
 def test_chat_cancel_sets_the_cancel_token(bridge_env, monkeypatch):
-    from silica.ui.web import turn
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         tool_progress_callback(LLMStreamEvent("content", "…", 0))
@@ -233,7 +230,7 @@ def test_chat_cancel_sets_the_cancel_token(bridge_env, monkeypatch):
         messages.append({"role": "assistant", "content": answer})
         return answer
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     async def scenario(srv):
         ws, _ = await _dial(srv)
@@ -260,7 +257,7 @@ def test_rpc_frames_serve_the_installed_driver(bridge_env):
     async def scenario(srv):
         ws, _ = await _dial(srv)
         be = get_driver()
-        assert isinstance(be, ObsidianWSBackend)
+        assert isinstance(be.transport, ObsidianWSBackend)
 
         async def plugin():
             frame = json.loads(await ws.recv())
@@ -287,13 +284,13 @@ def test_plugin_drop_falls_back_to_local_backend(bridge_env):
 
     async def scenario(srv):
         ws, _ = await _dial(srv)
-        assert isinstance(get_driver(), ObsidianWSBackend)
+        assert isinstance(get_driver().transport, ObsidianWSBackend)
         await ws.close()
         for _ in range(200):  # the handler notices the drop asynchronously
-            if not isinstance(get_driver(), ObsidianWSBackend):
+            if not isinstance(get_driver().transport, ObsidianWSBackend):
                 break
             await asyncio.sleep(0.02)
-        assert not isinstance(get_driver(), ObsidianWSBackend)  # fs fallback (tmp_vault)
+        assert not isinstance(get_driver().transport, ObsidianWSBackend)  # fs fallback (tmp_vault)
 
     _run(scenario)
 
@@ -305,11 +302,12 @@ def test_plugin_drop_falls_back_to_local_backend(bridge_env):
 def test_cli_dispatches_silica_connect(monkeypatch):
     import silica.cli as cli
     import silica.ui.connect as connect_mod
+    from silica.session import meter
 
     calls = []
     monkeypatch.setattr(connect_mod, "run_connect", lambda: calls.append(1) or 0)
     monkeypatch.setattr(cli, "_activate_repo_mode", lambda: None)
-    monkeypatch.setattr(cli, "_resolve_context_budget", lambda: None)
+    monkeypatch.setattr(meter, "resolve_context_budget", lambda: None)
     assert cli._dispatch_subcommand(["connect"]) == 0
     assert calls == [1]
 
@@ -417,7 +415,7 @@ def test_start_bridge_thread_hosts_rpc_only(bridge_env):
         async def scenario():
             ws, welcome = await _dial(srv)
             assert welcome["type"] == "welcome"
-            assert isinstance(get_driver(), ObsidianWSBackend)  # driver hot-swapped
+            assert isinstance(get_driver().transport, ObsidianWSBackend)  # driver hot-swapped
             await ws.send(json.dumps({"type": "chat", "turnId": "t3", "text": "hi"}))
             reply = json.loads(await ws.recv())
             assert reply["type"] == "chat_error"  # rpc-only host

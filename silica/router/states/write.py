@@ -276,7 +276,7 @@ def _attach_section_images(fsm: "InjectorFSM", ops: list) -> None:
     try:
         source = DRIVER.read_note(source_file).content or ""
     except Exception:
-        return
+        return  # the note lands without the section's images, which it can
     if "![" not in source:  # fast bail: no embeds at all
         return
     from silica.kernel.text.media import append_section_images
@@ -450,9 +450,8 @@ def handle_write(fsm: "InjectorFSM") -> None:
             from silica.model.providers import get_embedder
             from silica.kernel.recall.embed import get_store
             # The run-end sweep that embeds patches skips a driver with no
-            # mtime_of (the ws backend) and an index_sweep turned off.
-            swept = (getattr(DRIVER, "mtime_of", None) is not None
-                     and CONFIG.index_sweep)
+            # mtimes (the ws backend) and an index_sweep turned off.
+            swept = DRIVER.knows_mtimes and CONFIG.index_sweep
             if _refresh_embeddings_for_ops(
                 ops, committed_paths, read_body=lambda p: DRIVER.read_note(p).content or "",
                 embedder=get_embedder(CONFIG), store=get_store(), patches=not swept,
@@ -657,7 +656,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
                 if moc_heading in DRIVER.read_note(hub_ref).content:
                     break
             except Exception:
-                pass
+                pass  # not settled yet: the deadline is what ends this wait
             time.sleep(0.15)
         else:
             logger.warning("HUB_UPDATE: MOC block settle timeout for hub '%s' — graph may lag", hub_path)
