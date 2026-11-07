@@ -7,13 +7,14 @@ The WS backend already raises (Obsidian vault.create throws on existing).
 """
 import pytest
 from silica.driver.fs_backend import ObsidianFSBackend
+from silica.kernel.vault import Vault
 
 
 @pytest.fixture
 def backend(tmp_path):
     vault = tmp_path / "vault"
     vault.mkdir()
-    return ObsidianFSBackend(str(vault))
+    return Vault(ObsidianFSBackend(str(vault)))
 
 
 def test_create_raises_on_existing_path(backend):

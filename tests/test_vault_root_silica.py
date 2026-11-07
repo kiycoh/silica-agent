@@ -6,6 +6,7 @@ like everything else Silica creates. `CONFIG.inbox_dir` knows nothing about
 the root of the user's source tree; `active_inbox_dir()` is what composes the two.
 """
 from silica.driver.fs_backend import ObsidianFSBackend
+from silica.kernel.vault import Vault
 
 
 def test_the_inbox_stays_inside_the_write_boundary(tmp_path, monkeypatch):
@@ -20,7 +21,7 @@ def test_the_inbox_stays_inside_the_write_boundary(tmp_path, monkeypatch):
 
     assert active_inbox_dir() == f"docs/silica/{CONFIG.inbox_dir}"
 
-    backend = ObsidianFSBackend(str(tmp_path))
+    backend = Vault(ObsidianFSBackend(str(tmp_path)))
     backend.upsert(f"{active_inbox_dir()}/materiale.md", "# grezzo")
 
     assert [str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*.md")] == [

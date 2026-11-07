@@ -3,11 +3,14 @@
 
 """Obsidian Driver package — exposes the global DRIVER instance.
 
-Two backends, one of which is never built from config:
+Two transports, one of which is never built from config:
   - ObsidianFSBackend — direct filesystem access, headless, no Obsidian
     required. Built here, always.
   - ObsidianWSBackend — installed live by `silica connect` via set_driver()
     when the Obsidian plugin dials in.
+
+Whichever is live, DRIVER is the kernel's `Vault` over it: every transport goes
+in through `vault_seam.wrap`, so no write reaches one without its policy.
 
 Usage:
     from silica.driver import DRIVER
@@ -24,9 +27,12 @@ from silica.driver.base import (  # noqa: F401 — re-export domain types
     Hit,
     Link,
     NoteContent,
+    NoteNotFound,
+    NoteReader,
     NoteRef,
     ObsidianDriver,
 )
+from silica.kernel.base import vault_seam
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +42,7 @@ def _create_driver() -> ObsidianDriver:
     from silica.config import CONFIG
     from silica.driver.fs_backend import ObsidianFSBackend
 
-    return ObsidianFSBackend(vault_path=CONFIG.vault_path)
+    return vault_seam.wrap(ObsidianFSBackend(vault_path=CONFIG.vault_path))
 
 
 # Lazy initialization — created on first access, protected by lock for thread safety
@@ -61,7 +67,7 @@ def driver_kind() -> str:
     Reads the cached instance rather than CONFIG so it reports what is actually
     serving reads, and never forces driver construction just to answer.
     """
-    return "ws" if type(_driver).__name__ == "ObsidianWSBackend" else "fs"
+    return getattr(_driver, "kind", "fs")
 
 
 def reset_driver() -> None:
@@ -77,12 +83,12 @@ def reset_driver() -> None:
 
 # Read-only backends on vaults other than the active one, keyed by resolved
 # path (the peek: silica_read_note vault=, ADR-0035). Never installed as the
-# driver and never handed a write: the tool surface routes every write through
-# DRIVER, so a foreign reader cannot become a write path by accident.
-_readers: dict[str, ObsidianDriver] = {}
+# driver and never handed a write: bare transports, which have no write verb a
+# tool could reach, so a foreign reader cannot become a write path by accident.
+_readers: dict[str, NoteReader] = {}
 
 
-def reader_for(vault: str) -> ObsidianDriver:
+def reader_for(vault: str) -> NoteReader:
     """A handle to read notes of `vault`: the live driver when it IS the active
     vault (one index, and the one this process's writes land in), else a
     filesystem backend on that folder, built once per process. The foreign
@@ -106,12 +112,12 @@ def reader_for(vault: str) -> ObsidianDriver:
         return reader
 
 
-def set_driver(driver: ObsidianDriver | None) -> None:
-    """Install a live driver instance — `silica connect`'s attached ws backend.
-    None falls back to building the fs backend on next access."""
+def set_driver(driver: NoteReader | None) -> None:
+    """Install a live transport — `silica connect`'s attached ws backend. None
+    falls back to building the fs backend on next access."""
     global _driver
     with _driver_lock:
-        _driver = driver
+        _driver = None if driver is None else vault_seam.wrap(driver)
 
 
 # For convenience: DRIVER can be imported directly

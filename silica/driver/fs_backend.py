@@ -25,7 +25,11 @@ from typing import Any
 import networkx as nx
 from silica.kernel.base.markdown import (
     NON_MD_EXTENSIONS,
+    crlf_dominant,
+    encode,
     extract_refs_typed,
+    lf,
+    parse_headings,
     resolve_relative,
 )
 from silica.kernel.base.syntax import ADR_REF_RE
@@ -37,16 +41,15 @@ from silica.driver.base import (
     Heading,
     Hit,
     Link,
+    NoteBytes,
     NoteContent,
+    NoteNotFound,
     NoteRef,
 )
 from silica.kernel.base import frontmatter as fm
-from silica.kernel.write import preserve, session_changes
-from silica.kernel.write import ofm
 from silica.kernel.base.layout import is_vault_artifact
 from silica.kernel.base.durable import atomic_write_bytes
 from silica.kernel.base.layout import contain_in_vault, is_source_leaf, walk_tree
-from silica.kernel.write.notetype import stamp_type
 logger = logging.getLogger(__name__)
 
 # Per-note Hit ceiling for content search. The tool layer renders at most 3
@@ -80,46 +83,12 @@ _BODY_CACHE_MAX_CHARS = 65_536
 # scan ever passes ~200 ms (roughly 20k folders).
 _ROSTER_RECHECK_INTERVAL = 2.0
 
-# Buffered embed-vector deletes per npz save. A move/delete sweep on a big
-# vault was paying one whole-index serialization per note; buffering trades
-# that for a bounded staleness window: another process sees the phantom
-# vector until the threshold or exit flush lands. In-process reads stay
-# exact (the store's memory is updated per op).
-_EMBED_FLUSH_EVERY = 32
-
-
-# Deferred embed-delete flush state (see _drop_embed_vector).
-_embed_deletes_pending = 0
-_embed_flush_registered = False
-
-
 def _read_lf(full: Path) -> tuple[str, bool]:
     """A note as every composer reads it, on LF (what read_text's universal
     newlines gave before 2026-10-11), and whether its bytes were CRLF, so the
     write can put the user's terminator back (ADR-0093 decision 8)."""
     raw = full.read_bytes()
-    return preserve.lf(raw.decode("utf-8")), preserve.crlf_dominant(raw)
-
-
-def _flush_pending_embed_deletes() -> None:
-    """Persist buffered embed deletes; safe to call with nothing pending."""
-    global _embed_deletes_pending
-    if _embed_deletes_pending <= 0:
-        return
-    try:
-        from silica.kernel.recall.embed import get_store
-        get_store().save()
-        _embed_deletes_pending = 0
-    except Exception as exc:
-        logger.debug("deferred embed flush failed (non-fatal): %s", exc)
-
-
-def _register_embed_flush() -> None:
-    global _embed_flush_registered
-    if not _embed_flush_registered:
-        import atexit
-        atexit.register(_flush_pending_embed_deletes)
-        _embed_flush_registered = True
+    return lf(raw.decode("utf-8")), crlf_dominant(raw)
 
 
 def _locked(method):
@@ -141,7 +110,12 @@ def _locked(method):
 
 
 class ObsidianFSBackend(GraphIndexMixin):
-    """ObsidianDriver implementation using direct filesystem access."""
+    """Transport using direct filesystem access."""
+
+    kind = "fs"
+    knows_mtimes = True
+    composes_props = True
+    links_natively = False
 
     def __init__(self, vault_path: str):
         if not vault_path:
@@ -772,14 +746,6 @@ class ObsidianFSBackend(GraphIndexMixin):
         hit = self._body_cache.get(str(full))
         return bool(hit and hit[2])
 
-    def _guard_write(self, rel_path: str, prior: str | None, content: str, crlf: bool, *,
-                     loss: preserve.Loss | None = None, free=()) -> bytes:
-        """ADR-0093 at the write site: the rule on the composed text (it
-        raises only once preserve.REFUSE is on), then the bytes in the prior's
-        own line terminator, since every composer reads and writes LF."""
-        preserve.check_write(rel_path, prior, content, loss=loss, free=free)
-        return preserve.encode(content, crlf).encode("utf-8")
-
     def _invalidate_body(self, rel_path: str) -> None:
         """Drop the cached body for a vault-relative path (write just landed)."""
         self._body_cache.pop(str(self.vault_path / rel_path), None)
@@ -912,7 +878,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         """Read a note's full content by name or ref."""
         path = self._resolve_path(ref)
         if not path.exists():
-            raise RuntimeError(f"File not found: {path}")
+            raise NoteNotFound(f"File not found: {path}")
 
         content = self._read_cached(path)
         name = ref if isinstance(ref, str) else ref.name
@@ -922,6 +888,15 @@ class ObsidianFSBackend(GraphIndexMixin):
             ref=NoteRef(name=name, path=rel_path),
             content=content,
         )
+
+    def exists(self, ref: NoteRef | str) -> bool:
+        """Whether `read_note(ref)` would find a note, from one stat. is_file:
+        a folder of that name is no note, and reading one raises. A path
+        outside the vault is a note this vault does not have."""
+        try:
+            return self._resolve_path(ref).is_file()
+        except RuntimeError:
+            return False
 
     def mtime_of(self, ref: NoteRef | str) -> float | None:
         """Last-modified epoch seconds of a note, or None if it can't be stat'd.
@@ -961,7 +936,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         """Get the heading tree of a note."""
         try:
             nc = self.read_note(ref)
-            raw_headings = ofm.parse_headings(nc.content)
+            raw_headings = parse_headings(nc.content)
             return [
                 Heading(
                     level=h["level"],
@@ -1158,12 +1133,10 @@ class ObsidianFSBackend(GraphIndexMixin):
         )
 
     # ------------------------------------------------------------------
-    # Write (graph-safe)
+    # Write primitives: bytes and index, in the order kernel.vault.Vault calls
     # ------------------------------------------------------------------
 
-    def create(self, path: str, content: str, *, loss: preserve.Loss | None = None,
-               free=()) -> NoteRef:
-        """Create a new note at the given vault-relative path."""
+    def claim(self, path: str) -> str:
         rel_path = contain_in_vault(path, self.vault_path)
 
         full_path = self.vault_path / rel_path
@@ -1176,164 +1149,88 @@ class ObsidianFSBackend(GraphIndexMixin):
         if full_path.exists():
             raise FileExistsError(f"Note already exists: {rel_path}")
         full_path.parent.mkdir(parents=True, exist_ok=True)
+        return rel_path
 
-        content = stamp_type(rel_path, content)   # OKF §4.1 `type`, if absent
-        # A path the chat deleted earlier in this turn: the body that delete
-        # saved is the before-state (ADR-0093 decision 4).
-        preserve.check_recreate(rel_path, content, loss=loss, free=free)
-        session_changes.touched(rel_path, None)  # no baseline: the note is new
+    def write_new(self, rel: str, content: str, landing) -> NoteRef:
+        full_path = self.vault_path / rel
+        landing(rel)
         # Notes are irreplaceable and this backend keeps no version history,
         # so a truncating write_text has nothing to roll back to when it dies
         # mid-write.
         atomic_write_bytes(full_path, content.encode("utf-8"))
-        self._invalidate_body(rel_path)
-        name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
+        self._invalidate_body(rel)
+        name = rel.rsplit("/", 1)[-1].removesuffix(".md")
         if self._needs_reindex:
             self._rebuild_index()
         else:
-            self._patch_create(rel_path, content)
-        return NoteRef(name=name, path=rel_path)
+            self._patch_create(rel, content)
+        return NoteRef(name=name, path=rel)
 
-    def overwrite(self, path: str, content: str, *, loss: preserve.Loss | None = None,
-                  free=()) -> NoteRef:
-        """Overwrite an existing note in-place.
-
-        The FS backend does this as a direct write — history is not tracked
-        in FS mode, so overwrite and patch rollback via versions is a no-op
-        (see restore()). For write-op rollback, created_paths is used instead.
-        """
-        return self._overwrite_raw(path, content, stamp=True, loss=loss, free=free)
-
-    def _overwrite_raw(self, path: str, content: str, stamp: bool = False, *,
-                       loss: preserve.Loss | None = None, free=()) -> NoteRef:
-        """The write itself. `stamp=False` writes the bytes as given — for
-        callers replaying content that already exists (a rollback, or the WS
-        stub emulating the Obsidian plugin, which is a verbatim pipe and does
-        no stamping of its own).
-        """
+    def prior_for_overwrite(self, path: str) -> NoteBytes:
         rel_path = contain_in_vault(path, self.vault_path)
 
         full_path = self.vault_path / rel_path
         if not full_path.exists():
-            raise RuntimeError(f"Cannot overwrite non-existent file: {path}")
-
-        if stamp:
-            content = stamp_type(rel_path, content)   # OKF §4.1 `type`, if absent
+            raise NoteNotFound(f"Cannot overwrite non-existent file: {path}")
         prior = self._read_cached(full_path)
-        data = self._guard_write(rel_path, prior, content, self._crlf(full_path),
-                                 loss=loss, free=free)
-        session_changes.touched(rel_path, prior)
-        atomic_write_bytes(full_path, data)
-        self._invalidate_body(rel_path)
-        name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
+        return NoteBytes(rel_path, prior, self._crlf(full_path), full_path)
+
+    def write_over(self, note: NoteBytes, content: str) -> NoteRef:
+        """A direct write: history is not tracked in FS mode, so overwrite and
+        patch rollback via versions is a no-op (see restore()). For write-op
+        rollback, created_paths is used instead."""
+        assert note.at is not None
+        atomic_write_bytes(note.at, encode(content, note.crlf).encode("utf-8"))
+        self._invalidate_body(note.rel)
+        name = note.rel.rsplit("/", 1)[-1].removesuffix(".md")
         if self._needs_reindex:
             self._rebuild_index()
         else:
-            self._patch_index(rel_path, content)
-        return NoteRef(name=name, path=rel_path)
+            self._patch_index(note.rel, content)
+        return NoteRef(name=name, path=note.rel)
 
-    def autolink_note(
-        self,
-        path: str,
-        candidates: list[str] | None = None,
-        title_index: list[str] | None = None,
-    ) -> list[str]:
-        """FS backend: pure-Python kernel autolink + direct overwrite.
-
-        `title_index`, when given, is used as-is (caller-built, e.g. LINKING's
-        one-per-chunk index) instead of rebuilding via build_title_index(
-        self.list_files()) on every call.
-        """
-        import os
-        from silica.kernel.link.autolink import autolink, build_alias_map, build_title_index
-        nc = self.read_note(path)
-        body = nc.content or ""
-        if not body.strip():
-            return []
-        if title_index is None:
-            title_index = build_title_index(self.list_files())
-        self_title = os.path.splitext(os.path.basename(path))[0]
-        aliases = build_alias_map(self.alias_index(), title_index)
-        new_body, added = autolink(
-            body, title_index, candidates=candidates, self_title=self_title, aliases=aliases
-        )
-        if added:
-            self.overwrite(path, new_body)
-        return added
-
-    def set_prop(self, ref: NoteRef | str, name: str, value: Any, type_: str = "text") -> None:
-        """Set a frontmatter property on a note."""
+    def prior_for_props(self, ref: NoteRef | str) -> NoteBytes:
         path = self._resolve_path(ref)
         if not path.exists():
-            raise RuntimeError(f"File not found: {path}")
+            raise NoteNotFound(f"File not found: {path}")
 
         # Contained before the read, for the reason append() gives: the write
         # below resolves symlinks (atomic_write_bytes writes THROUGH them), so
         # an unresolved boundary check here would rewrite a file outside.
         rel_path_str = contain_in_vault(str(path), self.vault_path)
         content, crlf = _read_lf(path)
-        data, delim, body = fm.split(content)
+        return NoteBytes(rel_path_str, content, crlf, path)
 
-        # `data` None with a block means YAML refused it, not that there is no
-        # block: reading it as empty replaced every key a person typed.
-        if data is None and delim is not None:
-            raise ValueError(f"the properties of {rel_path_str} do not parse; fix them first")
-        if data is None:
-            data = {}
-
-        data[name] = value
-
-        new_content = fm.dump(data, body)
-        raw = self._guard_write(rel_path_str, content, new_content, crlf, free=(name,))
-        session_changes.touched(rel_path_str, content)
-        atomic_write_bytes(path, raw)
-        self._body_cache.pop(str(path), None)
-
-    def unset_prop(self, ref: NoteRef | str, name: str) -> None:
-        """Remove a frontmatter property, and the block with it when it was the
-        last: a property set and then unset leaves the note as it was, which
-        set_prop(name, None) would not (it writes `name: null`). No type stamp,
-        for the same reason set_prop has none: the person changed one key."""
-        path = self._resolve_path(ref)
-        if not path.exists():
-            raise RuntimeError(f"File not found: {path}")
-        rel_path_str = contain_in_vault(str(path), self.vault_path)
-        content, crlf = _read_lf(path)
-        data, delim, body = fm.split(content)
-        if not data or name not in data:
-            return
-        data.pop(name)
-        new_content = fm.dump(data, body) if data else body.lstrip("\n")
-        raw = self._guard_write(rel_path_str, content, new_content, crlf, free=(name,))
-        session_changes.touched(rel_path_str, content)
-        atomic_write_bytes(path, raw)
-        self._body_cache.pop(str(path), None)
+    def write_prop(self, note: NoteBytes, name: str, value: Any, type_: str,
+                   composed: str | None) -> None:
+        assert note.at is not None and composed is not None
+        atomic_write_bytes(note.at, encode(composed, note.crlf).encode("utf-8"))
+        self._body_cache.pop(str(note.at), None)
 
     @_locked
-    def move(self, ref: NoteRef | str, to: str) -> None:
+    def move_note(self, ref: NoteRef | str, to: str, *, moving, moved, retarget) -> None:
         """Move/rename a note, rewriting incoming wikilinks in all referrers.
 
         Mirrors Obsidian's "automatically update internal links" behaviour:
 
         - Resolved referrers (predecessors in the graph) have their link text
-          rewritten via the pure kernel ``rewrite_links`` function.
+          rewritten by ``retarget``, the kernel's ``rewrite_links`` under the
+          write policy.
         - Ambiguity guard: if the old basename is shared by multiple notes and
           the referrer's name-based resolution points elsewhere, only path-based
-          links in that referrer are rewritten (``rewrite_name_links=False``).
+          links in that referrer are rewritten (``name_links=False``).
         - After the physical rename, the in-memory index is updated
           incrementally for the moved note and every rewritten referrer.
         - Unresolved-promotion sweep: raw targets that were previously
           unresolvable but now resolve to the new path are promoted to resolved
           graph edges via ``_patch_index``.
         """
-        from silica.kernel.link.rename import rewrite_links
-
         # Step 1: guarantee a fresh index before reading graph state
         self._ensure_index()
 
         src = self._resolve_path(ref)
         if not src.exists():
-            raise RuntimeError(f"File not found: {src}")
+            raise NoteNotFound(f"File not found: {src}")
 
         # Step 2: vault-relative paths. Both ends go through the containment
         # choke point: `ref` may be a NoteRef carrying an absolute path, and
@@ -1353,24 +1250,11 @@ class ObsidianFSBackend(GraphIndexMixin):
         # Step 4: physical filesystem move
         dst = self.vault_path / new_rel
         dst.parent.mkdir(parents=True, exist_ok=True)
-        # The row follows the file: baseline first (in case this is the note's
-        # first touch this session), then move it onto the new key.
-        session_changes.touched(old_rel, self._read_cached(src))
-        session_changes.renamed(old_rel, new_rel)
+        moving(old_rel, new_rel, self._read_cached(src))
         src.rename(dst)
-        # The ledger follows the file the way the session row does: it keys
-        # notes by path, and a moved note the ledger still knows under its old
-        # name is re-appended into on the next nucleate of its source.
-        # Never raises; a failure is logged with what it costs.
-        from silica.kernel.write.provenance import rename_note
-
-        rename_note(old_rel, new_rel, vault_path=str(self.vault_path))
+        moved(old_rel, new_rel)
         self._invalidate_body(old_rel)
         self._invalidate_body(new_rel)
-        # The old key's vector now points at a gone path; drop it or a rename makes
-        # the note appear twice in candidates (stale old key + fresh new key). The
-        # new path re-embeds lazily on the next build_index (A13).
-        self._drop_embed_vector(old_rel)
 
         # move() is the only multi-file write in this backend.  Everything after
         # the physical rename (referrer disk-writes, index patches, unresolved
@@ -1419,9 +1303,9 @@ class ObsidianFSBackend(GraphIndexMixin):
                     resolved = self._resolve_target(old_basename, source_path=referrer_rel)
                     allow_name = resolved is not None and resolved.path == old_rel
 
-                new_content, n = rewrite_links(
-                    referrer_content, old_rel, new_rel,
-                    rewrite_name_links=allow_name,
+                new_content = retarget(
+                    referrer_rel, referrer_content, old_rel, new_rel,
+                    name_links=allow_name,
                     # A shared name that resolved to the moved note did so by
                     # the same-folder rule; once the note leaves with its name,
                     # the bare name means another folder's namesake, so this
@@ -1430,12 +1314,10 @@ class ObsidianFSBackend(GraphIndexMixin):
                     # new name resolves on its own.
                     path_form=allow_name and not basename_is_unique and not basename_changed,
                 )
-                if n > 0:
+                if new_content is not None:
                     # Write directly — avoids re-entrant overwrite() logic
-                    raw = self._guard_write(referrer_rel, referrer_content, new_content,
-                                            referrer_crlf, loss=preserve.Loss.RENAME)
-                    session_changes.touched(referrer_rel, referrer_content)
-                    atomic_write_bytes(referrer_path, raw)
+                    atomic_write_bytes(referrer_path,
+                                       encode(new_content, referrer_crlf).encode("utf-8"))
                     self._invalidate_body(referrer_rel)
                     referrer_updates.append((referrer_rel, new_content))
                 else:
@@ -1483,47 +1365,22 @@ class ObsidianFSBackend(GraphIndexMixin):
             self._body_cache.clear()
             raise
 
-    def _drop_embed_vector(self, rel_path: str) -> None:
-        """Remove a note's embedding vector when it is deleted/renamed, so
-        cosine_top_k stops returning it as a phantom candidate before the next
-        full /embed rebuild (audit A13). Best-effort: retrieval quality, never fatal.
-
-        The in-memory store updates per op (this process never sees the
-        phantom); the npz save is buffered every _EMBED_FLUSH_EVERY deletes
-        plus once at exit, because each save serializes the whole index and a
-        bulk /organize was paying that per note.
-        """
-        global _embed_deletes_pending
-        try:
-            from silica.kernel.recall.embed import get_store
-            store = get_store()
-            key = rel_path.removesuffix(".md")
-            if store.get_vec(key) is not None:  # skip non-embedding vaults / unindexed notes
-                store.delete(key)
-                _embed_deletes_pending += 1
-                if _EMBED_FLUSH_EVERY is None or _embed_deletes_pending >= _EMBED_FLUSH_EVERY:
-                    store.save()
-                    _embed_deletes_pending = 0
-                else:
-                    _register_embed_flush()
-        except Exception as exc:
-            logger.debug("embed vector cleanup failed for %s (non-fatal): %s", rel_path, exc)
-
-    def delete(self, ref: NoteRef | str) -> None:
-        """Delete a note from the vault."""
+    def prior_for_delete(self, ref: NoteRef | str) -> NoteBytes:
         path = self._resolve_path(ref)
         if not path.exists():
-            raise RuntimeError(f"File not found: {path}")
+            raise NoteNotFound(f"File not found: {path}")
 
         rel_path_str = path.relative_to(self.vault_path).as_posix()
-        session_changes.touched(rel_path_str, self._read_cached(path))
-        path.unlink()
-        self._invalidate_body(rel_path_str)
+        return NoteBytes(rel_path_str, self._read_cached(path), False, path)
+
+    def remove(self, note: NoteBytes) -> None:
+        assert note.at is not None
+        note.at.unlink()
+        self._invalidate_body(note.rel)
         if self._needs_reindex:
             self._rebuild_index()
         else:
-            self._patch_delete(rel_path_str)
-        self._drop_embed_vector(rel_path_str)
+            self._patch_delete(note.rel)
 
     # ------------------------------------------------------------------
     # Advanced

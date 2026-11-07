@@ -22,6 +22,7 @@ from websockets.asyncio.server import serve  # noqa: E402
 
 from silica.driver.base import NoteRef  # noqa: E402
 from silica.driver.fs_backend import ObsidianFSBackend  # noqa: E402
+from silica.kernel.vault import Vault  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +39,7 @@ class StubPluginServer:
 
     def __init__(self, vault_path, token: str = "test-token"):
         self.token = token
-        self._fs = ObsidianFSBackend(vault_path=str(vault_path))
+        self._fs = Vault(ObsidianFSBackend(vault_path=str(vault_path)))
         self._fs._ensure_index()
         self.port: int | None = None
         self._ready = threading.Event()
@@ -132,9 +133,8 @@ class StubPluginServer:
             # and does no stamping of its own (the WS backend already did it).
             # Unchecked too, as the plugin is: the ws side judged the write
             # (ADR-0093), and a second judgement here would log it twice.
-            from silica.kernel.write.preserve import Loss
-
-            fs._overwrite_raw(params["path"], params["content"], loss=Loss.RESTORE)
+            bare = fs.transport
+            bare.write_over(bare.prior_for_overwrite(params["path"]), params["content"])
             return {"ok": True}
         if method == "set_prop":
             fs.set_prop(self._ref(params["path"]), params["name"], params["value"],
@@ -306,7 +306,7 @@ def write_stub(synthetic_vault, tmp_path):
 def wbe(write_stub):
     from silica.driver.ws_backend import ObsidianWSBackend
 
-    be = ObsidianWSBackend(url=write_stub.url, token=write_stub.token)
+    be = Vault(ObsidianWSBackend(url=write_stub.url, token=write_stub.token))
     yield be
     be.close()
 
@@ -408,7 +408,7 @@ def test_autolink_note_wraps_unlinked_mentions(wbe):
 def test_rpc_timeout_drops_pending_entry(wbe):
     """A timed-out RPC must not strand its future in _pending (leak on timeout)."""
     wbe._ensure_connected()
-    wbe._timeout = 0.2
+    wbe.transport._timeout = 0.2
     with pytest.raises(Exception):
         wbe._rpc("__noreply__")
     assert wbe._pending == {}

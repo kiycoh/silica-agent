@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from silica.config import CONFIG
+from silica.kernel.vault import Vault
 
 PY_SRC = '''\
 import os
@@ -43,7 +44,7 @@ def repo_vault(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "inbox_dir", "Inbox")
     from silica.driver import fs_backend
     import silica.driver as driver_mod
-    monkeypatch.setattr(driver_mod, "DRIVER", fs_backend.ObsidianFSBackend(str(vault)))
+    monkeypatch.setattr(driver_mod, "DRIVER", Vault(fs_backend.ObsidianFSBackend(str(vault))))
     return tmp_path, vault
 
 

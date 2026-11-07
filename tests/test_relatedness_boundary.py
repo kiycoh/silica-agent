@@ -55,7 +55,7 @@ ALLOWED = {
     "router/states/write.py":       "incremental embed index refresh after writes",
     "kernel/check/dense.py":        "the source check's absence floor (ADR-0110 point 6): one block's best cosine against its pool, not a ranking",
     "router/states/finalize.py":    "embed index cleanup on rollback",
-    "driver/fs_backend.py":         "embed vector cleanup on note delete/rename (index maintenance), not relatedness ranking",
+    "kernel/vault.py":              "embed vector cleanup on note delete/rename (index maintenance), not relatedness ranking",
     "tools/graph.py":               "silica_concepts and the vault report read the stores by design",
     "kernel/recall/refresh.py":     "the three index refresh loops: build_index, not relatedness ranking",
     "kernel/report/related.py":     "constructs stores to inject into the facade (silica_related, orphan candidates)",
