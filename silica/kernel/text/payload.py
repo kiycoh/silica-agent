@@ -6,7 +6,7 @@ from typing import Any
 from silica.driver import DRIVER
 from silica.kernel.base.syntax import section_end
 
-MAX_EXCERPT_CHARS = 2000      # Hard per-excerpt cap.
+MAX_EXCERPT_CHARS = 2000
 MAX_OCCURRENCES = 2           # Max non-overlapping windows per concept per file.
 FULL_INCLUDE_THRESHOLD = 6000 # Include whole note below this.
 
@@ -162,7 +162,6 @@ def payload_chunks(recon_reports: list, max_concepts: int = 7, max_bytes: int = 
     """Assembles payloads for the Distiller by pre-extracting snippets from the vault."""
     from silica.kernel.partition import partition_by_concepts
 
-    # We use a default window of 450 chars
     payload = build_payload(recon_reports, window=450)
 
     # C4/S3.1: Always run partition_by_concepts if we have constraints

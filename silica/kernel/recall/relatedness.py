@@ -118,10 +118,6 @@ class RelatedNote:
     origin: str = "vault"
 
 
-# ---------------------------------------------------------------------------
-# RRF fusion (pure)
-# ---------------------------------------------------------------------------
-
 def _rrf_fuse(rankings: list[list[tuple[str, float]]]) -> dict[str, float]:
     """Reciprocal Rank Fusion over several ranked lists of (key, _score).
 
@@ -135,10 +131,6 @@ def _rrf_fuse(rankings: list[list[tuple[str, float]]]) -> dict[str, float]:
             fused[key] = fused.get(key, 0.0) + 1.0 / (RRF_K + rank + 1)
     return fused
 
-
-# ---------------------------------------------------------------------------
-# Embedding leg
-# ---------------------------------------------------------------------------
 
 def _rank_embeddings_from_vec(
     embed_store: EmbedStore | None,
@@ -389,10 +381,6 @@ def _cooccur_ranking(
         cooccur_store, profile, k=k, blocked=set(exclude) | {query_path}, scope=scope
     )
 
-
-# ---------------------------------------------------------------------------
-# Facade entry point
-# ---------------------------------------------------------------------------
 
 def _basename(path: str) -> str:
     return path.rsplit("/", 1)[-1]

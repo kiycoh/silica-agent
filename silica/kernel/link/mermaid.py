@@ -49,7 +49,7 @@ def parse_errors(text: str) -> list[str]:
     by its place among the fences. [] when every fence parses, and also when
     Node cannot answer: a note is never refused because the host has no Node
     (the Dockerfile installs it; a local install may not have it)."""
-    # The fences the renderer draws (server._ofm_blocks), a blockquoted one
+    # The fences the renderer draws (render._ofm_blocks), a blockquoted one
     # included, where a regex would hand mermaid the `> ` of every line.
     blocks = [t.content for t in MarkdownIt().parse(text)
               if t.type == "fence" and t.info.strip() == "mermaid"]

@@ -356,7 +356,7 @@ def _file_entry(root: Path, rel: str, files: AbstractSet[str]) -> tuple[dict, li
     elif language is None:
         # build_codegraph only walks files language_for() claims (or notebooks),
         # so this is unreachable through it — but the invariant lives at that
-        # call site, 130 lines away, and there is no skeleton without a language.
+        # call site, and there is no skeleton without a language.
         return {"language": None, "imports": [], "external": [],
                 "unresolved": [], "symbols": [], "parse_error": True, **_EMPTY_V2}, []
     else:

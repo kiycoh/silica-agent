@@ -90,7 +90,6 @@ def recon_file(inbox_file: str) -> dict:
             new_concepts.append(c)
             continue
             
-        # Group hits by ref
         from silica.kernel.base.layout import is_inbox_path
         grouped = {}
         for h in hits:

@@ -121,10 +121,6 @@ def node_color(community: int) -> str:
     return _community_color(community)
 
 
-# ---------------------------------------------------------------------------
-# Neighbourhood selection + cap
-# ---------------------------------------------------------------------------
-
 def _with_md(path: str) -> str:
     return path if path.endswith(".md") else path + ".md"
 
@@ -385,10 +381,6 @@ def _layout(nodes: list[MapNode], *, costs: dict[str, float], sim: SimFn | None 
         placed.append(n)
 
 
-# ---------------------------------------------------------------------------
-# Builder
-# ---------------------------------------------------------------------------
-
 def build_mapview(
     root: str,
     materials: MapMaterials,
@@ -507,10 +499,6 @@ def arrangement_payload(mv: MapView) -> dict:
         "r_in": round(_WEDGE_IN, 1),
     }
 
-
-# ---------------------------------------------------------------------------
-# Serializers
-# ---------------------------------------------------------------------------
 
 def _xy(n: MapNode) -> tuple[int, int]:
     """Rounded integer coordinates — shared by both serializers so they agree."""

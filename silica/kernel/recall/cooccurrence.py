@@ -33,12 +33,11 @@ from silica.kernel.base.notekey import store_key
 
 logger = logging.getLogger(__name__)
 
-# --- algorithm constants -------------------------------------
 NARRATIVE_WEIGHT = 3
 GAP = 4               # effective look-back of GAP - 1 = 3 tokens
 EVIDENCE = "cooccur"
 # A note's body contributes its first MAX_BODY_CHARS characters (after cleaning),
-# as embed._MAX_CHARS does for vectors. Uncapped, 97 converted books (median 221 KB,
+# as vectors.MAX_CHARS does for vectors. Uncapped, 97 converted books (median 221 KB,
 # max 6.7 MB, hosted t20 2026-10-30) made the startup vault map's
 # _aggregate need >1.6 GB before the socket bound, against a tenant's 1 GB; cut
 # at 20k the same notes start at 329 MB peak and /cooccur --force drops from
@@ -135,7 +134,6 @@ def build_contribution(
         for i, (stem, surface) in enumerate(sentence):
             node_surface_counts.setdefault(stem, {})
             node_surface_counts[stem][surface] = node_surface_counts[stem].get(surface, 0) + 1
-            # link back up to GAP - 1 tokens with decaying weight (3, 2, 1)
             for dist in range(1, GAP):
                 j = i - dist
                 if j < 0:
@@ -374,7 +372,6 @@ class CooccurStore(DiskSynced):
                 # that succeeds writes the columns; a read must not fail on it.
                 logger.warning("co-occurrence store kept as version 1 at %s: %s", self._path, e)
 
-    # --- caches ---
     def _invalidate(self) -> None:
         self._adj = None
         self._labels = None
@@ -385,7 +382,6 @@ class CooccurStore(DiskSynced):
         self._doc_lengths = None
         self._note_adj = None
 
-    # --- I/O ---
     def _read_disk(self) -> dict[str, Any]:
         src = self._path
         # No legacy soft-migration: inheriting the global index copied old-schema
@@ -437,7 +433,6 @@ class CooccurStore(DiskSynced):
     def _dirty_sets(self) -> tuple[set, ...]:
         return (self._dirty, self._gone)
 
-    # --- mutation ---
     def upsert_note(self, path: str, contribution: dict[str, Any]) -> None:
         key = store_key(path)
         self._notes[key] = contribution
@@ -482,7 +477,6 @@ class CooccurStore(DiskSynced):
         """
         return dict(self.note_adjacency().get(store_key(path), {}))
 
-    # --- lookup ---
     def paths(self) -> list[str]:
         return list(self._notes.keys())
 

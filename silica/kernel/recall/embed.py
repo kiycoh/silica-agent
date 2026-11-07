@@ -41,10 +41,6 @@ def _index_path() -> Path:
     return home.index_file("embeddings")
 
 # ---------------------------------------------------------------------------
-# Pure maths
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # Binary persistence (Fix 2A)
 # ---------------------------------------------------------------------------
 #
@@ -139,10 +135,6 @@ def _deserialize_notes(raw: bytes) -> dict[str, dict[str, Any]]:
     return notes
 
 
-# ---------------------------------------------------------------------------
-# EmbedStore
-# ---------------------------------------------------------------------------
-
 class EmbedStore(DiskSynced):
     """orjson-backed flat index mapping note paths to embedding vectors.
 
@@ -202,10 +194,6 @@ class EmbedStore(DiskSynced):
             self._tmat = None
             self._tmat_paths = []
             self._tmat_dim = None
-
-    # ------------------------------------------------------------------
-    # I/O
-    # ------------------------------------------------------------------
 
     def _read_disk(self) -> dict[str, dict[str, Any]]:
         src = self._path
@@ -271,10 +259,6 @@ class EmbedStore(DiskSynced):
     def _dirty_sets(self) -> tuple[set[str], set[str]]:
         return (self._dirty, self._gone)
 
-    # ------------------------------------------------------------------
-    # Mutation
-    # ------------------------------------------------------------------
-
     def upsert(self, path: str, name: str, vec: list[float],
                 *, title_vec: list[float] | None = None,
                 content_hash: str | None = None) -> None:
@@ -298,7 +282,6 @@ class EmbedStore(DiskSynced):
                 "vec": np.asarray(vec, dtype=np.float32).ravel(),
                 "name": name, "ts": time.time(),
             }
-            # Preserve existing title_vec if not explicitly provided
             resolved_tv = title_vec if title_vec is not None else existing.get("title_vec")
             if resolved_tv is not None:
                 entry["title_vec"] = np.asarray(resolved_tv, dtype=np.float32).ravel()
@@ -316,10 +299,6 @@ class EmbedStore(DiskSynced):
             self._gone.add(path)
             self._dirty.discard(path)
             self._invalidate_matrix()
-
-    # ------------------------------------------------------------------
-    # Lookup
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _as_list(v: Any) -> list[float] | None:
@@ -380,10 +359,6 @@ class EmbedStore(DiskSynced):
         """
         self._ensure_matrix()
         return self._mat_dim
-
-    # ------------------------------------------------------------------
-    # Search
-    # ------------------------------------------------------------------
 
     def _build_matrix(self, vec_key: str) -> tuple[np.ndarray, list[str], int | None]:
         """Unit-normalized search matrix, path list, and dim for a vector field.
@@ -622,10 +597,6 @@ def clear() -> None:
     _STORE_CACHE.clear()
 
 
-# ---------------------------------------------------------------------------
-# Index management
-# ---------------------------------------------------------------------------
-
 def _note_text(title: str, body: str, *, folder: str = "") -> str:
     """Combine title and body prefix for embedding.
 
@@ -765,8 +736,8 @@ def build_index(
                 f"Embedder returned {len(vecs)} vectors for {2 * len(batch)} interleaved "
                 f"inputs (batch {i//batch_size}); refusing to de-interleave a mispaired reply"
             )
-        full_vecs  = vecs[0::2]  # even positions
-        title_vecs = vecs[1::2]  # odd positions
+        full_vecs  = vecs[0::2]
+        title_vecs = vecs[1::2]
         for (path, name, body), fv, tv, f in zip(batch, full_vecs, title_vecs, folders):
             store.upsert(path, name, fv, title_vec=tv,
                          content_hash=_embed_signature(name, body, folder=f, model=_model))
