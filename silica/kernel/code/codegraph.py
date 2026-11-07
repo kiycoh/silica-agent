@@ -152,14 +152,26 @@ def classify_import(
 
 
 # ---------------------------------------------------------------------------
-# store — derived index at paths.index_dir()/codegraph.json
+# store — derived index at home.index_dir()/codegraph_agent.json
 # ---------------------------------------------------------------------------
 
 STORE_VERSION = 5   # v5: Java calls link on a unique first-party definition (ADR-0114)
 
 
 def store_path() -> Path:
-    return home.index_dir() / "codegraph.json"
+    """Not `codegraph.json`: silica-core writes that name in the same index dir,
+    also as version 5, with another schema (symbols and edges carry a line, Java
+    calls do not link on a unique definition). Neither side could tell, so on a
+    folder both index whoever wrote first won: all 17 version-5 files on one
+    machine were core's (2026-11-07), and a 175-file Java repo served 163 call
+    edges here where this tree builds 731. Its own file, as ADR-0043 point 2
+    gave the engine `retrieval.json`; the version stamp cannot do it, since both
+    sides would rebuild each time the other ran.
+
+    shortcut: one repo holds two graphs on disk, the largest 20 MB on 2026-11-07;
+    goes with this module once core links Java calls and gives the graph a
+    public name (core-ask 2026-11-07, item 3)."""
+    return home.index_dir() / "codegraph_agent.json"
 
 
 @dataclass

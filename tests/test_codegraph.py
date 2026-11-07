@@ -72,6 +72,8 @@ def test_moved_helpers_still_work(tmp_path):
 
 import subprocess
 
+import orjson
+
 
 from silica.kernel.code import codegraph
 
@@ -133,6 +135,47 @@ def test_load_rebuilds_on_head_move_and_mtime(tmp_path, monkeypatch):
     (tmp_path / "new.py").write_text("x = 1\n", encoding="utf-8")  # untracked, supported
     g2 = codegraph.load_codegraph(tmp_path)
     assert "new.py" in g2.files  # file-set mismatch forced a full rebuild
+
+
+def _java_repo_with_a_link_only_this_tree_makes(path: Path) -> None:
+    # Same package, no import: the import matcher has nothing to go on, and the
+    # unique-definition rule of ADR-0114 is what links it.
+    _init_repo(path)
+    (path / "Lib.java").write_text("public class Lib { public int twice(int x) { return x * 2; } }\n", encoding="utf-8")
+    (path / "App.java").write_text("public class App { int go(Lib l) { return l.twice(2); } }\n", encoding="utf-8")
+
+
+def test_a_graph_silica_core_left_in_the_index_dir_is_not_served_here(tmp_path):
+    """Both distributions stamp STORE_VERSION = 5 for two schemas, so a file at
+    core's name passed every check here and its Java links were simply missing
+    (BUG 4): 163 call edges where this tree builds 731, on a 175-file repo."""
+    from silica.kernel.base import home
+
+    _java_repo_with_a_link_only_this_tree_makes(tmp_path)
+    built = codegraph.build_codegraph(tmp_path)
+    core_shape = {rel: {**entry, "calls": [],
+                        "symbols": [{**s, "line": 1, "end_line": 1} for s in entry.get("symbols", [])]}
+                  for rel, entry in built.files.items()}
+    theirs = home.index_dir() / "codegraph.json"
+    theirs.parent.mkdir(parents=True, exist_ok=True)
+    left = orjson.dumps({"version": codegraph.STORE_VERSION, "head_ref": built.head_ref, "files": core_shape})
+    theirs.write_bytes(left)
+
+    graph = codegraph.load_codegraph(tmp_path)
+
+    assert [c["callee"] for c in graph.files["App.java"]["calls"] if c["target"] == "Lib.java"]
+    assert theirs.read_bytes() == left  # core's file stays core's: it keeps its lines
+
+
+def test_the_graph_built_here_never_lands_at_silica_cores_name(tmp_path):
+    """The other half of BUG 4: at that name core read our file as its own and
+    its `path#L<line>` selector found no symbol."""
+    from silica.kernel.base import home
+
+    _java_repo_with_a_link_only_this_tree_makes(tmp_path)
+    codegraph.load_codegraph(tmp_path)
+    assert codegraph.store_path().is_file()
+    assert not (home.index_dir() / "codegraph.json").exists()
 
 
 def test_parse_error_file_present_never_aborts(tmp_path, monkeypatch):
