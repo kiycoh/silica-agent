@@ -864,18 +864,14 @@ function lrResumeBox() {
 
 async function lrFetchPlan(path) {
   try {
-    const p = await (await fetch("/learn/plan?path=" + encodeURIComponent(path))).json();
-    if (failureSaid(p)) throw new Error(failureSaid(p));
-    lrPlan = p;
+    lrPlan = await api("/learn/plan?path=" + encodeURIComponent(path));
   } catch (e) { notify("couldn't read that plan"); lrPlan = null; return; }
   if ((lrRoute.view === "plan" || lrRoute.view === "edit") && lrRoute.plan === path) lrRender();
 }
 
 async function lrFetchNote(path) {
   try {
-    const n = await (await fetch("/learn/note?path=" + encodeURIComponent(path))).json();
-    if (failureSaid(n)) throw new Error(failureSaid(n));
-    lrNote = n;
+    lrNote = await api("/learn/note?path=" + encodeURIComponent(path));
   } catch (e) {
     // renamed or deleted since it was listed: the pane says so and stops waiting
     lrNote = { path, gone: true };
