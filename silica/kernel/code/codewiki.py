@@ -496,10 +496,6 @@ def edges_ref(edges: list[tuple[str, str, int, int]]) -> str:
     return hashlib.sha256(orjson.dumps(pairs)).hexdigest()[:16]
 
 
-# ---------------------------------------------------------------------------
-# Flow sketches + deterministic Mermaid
-# ---------------------------------------------------------------------------
-
 _FLOW_DEPTH = 6
 _FLOWS_PER_ENTRY = 3
 _FLOW_BRANCHING = 2
