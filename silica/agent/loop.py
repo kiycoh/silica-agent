@@ -442,12 +442,13 @@ def run_agent(
         the in-flight HTTP request: best we can do is stop waiting and stop
         retrying."""
         # A named frame and not a lambda: it is the token meter's call-site label
-        # for the loop, and the hosted llm_call lines carry it.
+        # for the loop, and the hosted llm_call lines carry it. Narrated, or a
+        # loop run by a tool leaves its `call` beats outside the tool's span.
         def _llm_worker(k=dict(kwargs)):
             return call_llm(effective_model, messages, **k)
 
         return run_with_deadline(
-            RunContext.here().spawn(_llm_worker), None, catch=BaseException, abandon=_abandon,
+            RunContext.here(narrated=True).spawn(_llm_worker), None, catch=BaseException, abandon=_abandon,
             stop=cancel_token if cancel_token is not None else threading.Event(), on_stop=_Stopped)
 
     def _reask_without_reasoning(reply, kwargs: dict):

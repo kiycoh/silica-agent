@@ -61,3 +61,23 @@ def test_one_spawned_function_runs_on_every_thread_of_a_pool_at_once():
     work = RunContext.here().spawn(lambda n: (barrier.wait(), n)[1])
     with ThreadPoolExecutor(3) as pool:
         assert sorted(pool.map(work, range(3))) == [0, 1, 2]
+
+
+def test_a_model_call_in_a_loop_under_a_tool_is_the_tools_child(_fresh_narrator, monkeypatch):
+    """`parent` is the innermost open span (narration spec §3). The loop runs each
+    model call on a thread of its own, so a tool that runs a loop of its own, as
+    silica_web_answer does, left its `call` beats at the root beside the `thought`
+    beats that carried the tool."""
+    from silica.agent.constraints import AgentConstraints
+    from silica.agent.loop import run_agent
+    from silica.model.llm import LLMResponse
+
+    monkeypatch.setattr("silica.model.llm._call_llm", lambda *a, **k: LLMResponse(
+        text="done", assistant_message={"role": "assistant", "content": "done"}, finish_reason="stop"))
+    monkeypatch.setattr("silica.model.llm.fallback_chain", lambda model: [model])
+    sid = _fresh_narrator.ensure_session(driver="test")
+    _fresh_narrator.span_open("tool", "outer", "silica_web_answer", {}, attach=True)
+    run_agent([{"role": "user", "content": "q"}], "local/m", constraints=AgentConstraints(tools=(), interactive=True))
+    _fresh_narrator.span_close("tool", "outer", "done", "done")
+    calls = [b for b in narr.read_beats(narr.narration_dir() / f"{sid}.jsonl") if b["kind"] == "call"]
+    assert calls and {b["parent"] for b in calls} == {"outer"}
