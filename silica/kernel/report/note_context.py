@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import re
 
+from silica.kernel.base.syntax import MD_LINK_RE, WIKILINK_WORDS_RE
 from silica.kernel.text import note_parts
 
 logger = logging.getLogger(__name__)
@@ -33,15 +34,6 @@ _NOT_PASSAGE = re.compile(r"^\s*(?:#|\||```|~~~|!\[|\[!)")
 _SUGGEST_MIN_DIST = 3
 
 
-# A wikilink SPLIT INTO ITS PARTS, which is what the two readers below need and
-# what `render.WIKILINK` (the linkifier's) deliberately does not do: that one
-# keeps `Target|alias` whole because it re-emits the link, while these two have
-# to resolve the target and display the alias separately. Naming them apart is
-# not style — the first version of this reused `WIKILINK` and shadowed the
-# linkifier, and every note in the app rendered without its links.
-# `[[Target#anchor|alias]]`, and either half can be absent.
-_WIKI_REF = re.compile(r"!?\[\[([^\]|#]*)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]")
-_MD_LINK = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
 # Only the PAIRED marks, and only the unambiguous ones. A lone `*` or `_` is
 # left alone on purpose: stripping those turns snake_case into snakecase and a
 # multiplication sign into nothing, which is a worse read than the emphasis
@@ -59,8 +51,8 @@ def plain(text: str) -> str:
     panel reads as a broken row rather than as emphasis. Block-level markup
     needs no handling here: _NOT_PROSE already refuses those lines.
     """
-    out = _WIKI_REF.sub(lambda m: (m.group(2) or m.group(1) or "").strip(), text)
-    out = _MD_LINK.sub(lambda m: m.group(1).strip(), out)
+    out = WIKILINK_WORDS_RE.sub(lambda m: (m.group(2) or m.group(1) or "").strip(), text)
+    out = MD_LINK_RE.sub(lambda m: m.group(1).strip(), out)
     # Pairs NEST (`==A **b** c==`) and sub() does not rescan what it inserted,
     # so one pass leaves the inner marks standing. Three passes, because three
     # is one more than the deepest nesting anyone writes by hand: highlight
@@ -76,7 +68,7 @@ def plain(text: str) -> str:
 def fm_ref(value: str) -> tuple[str, str]:
     """A frontmatter `related:` entry as (what to resolve, what to show)."""
     v = str(value).strip()
-    m = _WIKI_REF.fullmatch(v)
+    m = WIKILINK_WORDS_RE.fullmatch(v)
     if not m:
         return v, note_parts.clean_name(v)
     target = (m.group(1) or "").strip()
@@ -161,7 +153,7 @@ def bridge_passage(src: str, target: str, limit: int = 240) -> str:
         line = LIST_OR_QUOTE.sub("", raw)
         if not line.strip() or _NOT_PASSAGE.match(line):
             continue
-        for m in _WIKI_REF.finditer(line):
+        for m in WIKILINK_WORDS_RE.finditer(line):
             if note_parts.clean_name((m.group(1) or "").strip()).lower() != want:
                 continue
             for sentence in _SENTENCE_END.split(line):
@@ -197,7 +189,7 @@ def link_line(src: str, target: str, limit: int = 240) -> tuple[int, str]:
     head = len(lines) - len(note_parts.split_frontmatter(content)[1].splitlines())
     for number in [*range(head, len(lines)), *range(head)]:
         raw = lines[number]
-        for m in _WIKI_REF.finditer(raw):
+        for m in WIKILINK_WORDS_RE.finditer(raw):
             if note_parts.clean_name((m.group(1) or "").strip()).lower() != want:
                 continue
             line = LIST_OR_QUOTE.sub("", raw)

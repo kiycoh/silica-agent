@@ -84,6 +84,20 @@ WIKILINK_INNER_RE = re.compile(r"!?\[\[([^\[\]]*?)\]\]")
 # backend resolver maps it to the note filed as `NNNN-*` (fs_backend).
 ADR_REF_RE = re.compile(r"\bADR-(\d{4})\b")
 
+# The renderer's link, embed `!` then everything between the brackets: it keeps
+# `Target|alias` whole because it re-emits the link. WIKILINK_RE would answer a
+# `[[word_map['k']]]` the renderer has always left as text.
+WIKILINK_WHOLE_RE = re.compile(r"(!?)\[\[([^\]\[]+)\]\]")
+# A wikilink SPLIT INTO ITS PARTS, the target then the alias, which is what a reader
+# of prose needs and what WIKILINK_WHOLE_RE deliberately does not do: that one keeps
+# `Target|alias` whole because it re-emits the link, while these resolve the target
+# and display the alias separately. Naming them apart is not style: the first
+# version of this reused the linkifier's and shadowed it, and every note in the app
+# rendered without its links. `[[Target#anchor|alias]]`, and either half can be
+# absent, which is why WIKILINK_RE will not do, and no line end stops it, which is
+# why WIKILINK_CELL_RE will not.
+WIKILINK_WORDS_RE = re.compile(r"!?\[\[([^\]|#]*)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]")
+
 # --- embeds -----------------------------------------------------------------
 
 EMBED_TOKEN = r"!\[\[[^\]]+\]\]"
@@ -104,6 +118,20 @@ MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 # `mail._IMAGE_REF_RE` every shape a stranger's mail can use to fetch a pixel.
 EMBEDDED_ADDRESS_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)>\s]+)")
 EMBEDDED_NAME_RE = re.compile(r"!\[\[([^\]|#]+)")
+
+# A Markdown link or image, the words as the one group, for a reader who keeps them.
+MD_LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+
+# --- OFM sugar ----------------------------------------------------------------
+
+# ==highlight== | #tag (letter-first, so #123 and hex colors stay literal)
+MARK_OR_TAG_RE = re.compile(r"==([^=\n]+)==|(?<![\w#])#([A-Za-z_][\w/-]*)")
+# The first line of a callout quote: its kind, then its title.
+CALLOUT_HEAD_RE = re.compile(r"\[!(\w+)\][+-]?[ \t]*(.*)")
+# The first inline text of a task list item.
+TASK_HEAD_RE = re.compile(r"^\[([ xX])\][ \t]+")
+# A whitespace-delimited path-like token: holds "/" or ends in ".md".
+PATH_TOKEN_RE = re.compile(r"[^\s\[\]]*(?:/[^\s\[\]]*|\.md)")
 
 # --- code -------------------------------------------------------------------
 

@@ -5,12 +5,14 @@
 where a pasted image goes."""
 from __future__ import annotations
 
+import glob
 import json
 import re
 from collections.abc import Sequence
 from pathlib import Path
 
 from silica.config import CONFIG
+from silica.kernel.base.formats import SHOWN_IMAGE_EXTS
 
 
 class NotAChatFile(ValueError):
@@ -22,6 +24,43 @@ class InboxClash(ValueError):
 
 
 _EMBED_RE = re.compile(r"!\[\[([^\]|#]+)|!\[[^\]]*\]\(([^)\s]+)\)")
+
+
+def find_image(vault: str | None, path: str) -> Path | None:
+    """The image a note's `path` names in `vault`, by its path or else by its bare name,
+    None when there is none. One at a time, for a browser asking for one file: it matches
+    the name as written and looks in dot-folders. `images_by_name` is the walk for a whole
+    wiki, and differs on both, because what it answers decides what may leave the vault."""
+    if not path or not vault:
+        return None
+    if Path(path).suffix.lower() not in SHOWN_IMAGE_EXTS:
+        return None
+    root = Path(vault).resolve()
+    target = (root / path).resolve()
+    found: Path | None = target
+    if not (target.is_relative_to(root) and target.is_file()):
+        # escaped: rglob reads the name as a pattern, so `fig[1].png` matched
+        # fig1.png and a name holding `**` raised ValueError mid-answer
+        found = next((p for p in root.rglob(glob.escape(Path(path).name)) if p.is_file()), None)
+    if found is None or not found.is_relative_to(root) or found.suffix.lower() not in SHOWN_IMAGE_EXTS:
+        return None
+    return found
+
+
+def images_by_name(vault: Path) -> dict[str, Path]:
+    """{name: file}, one walk, the way `find_image` takes a bare name, for the check before
+    Publish: casefolded, as `![[x.png]]` matches `X.PNG` in Obsidian, and out of dot-folders,
+    which never publish.
+    shortcut: an image is told apart by its name, as `![[x.png]]` names it, so two files of one
+    name share one answer and one thumbnail. No name repeats among the 885 image files measured on
+    2026-11-06, where pasted names carry a date; key on the path if a vault of `image.png` exports
+    shows up."""
+    out: dict[str, Path] = {}
+    for p in sorted(vault.rglob("*")):
+        if p.suffix.lower() in SHOWN_IMAGE_EXTS and p.is_file() \
+                and not any(s.startswith(".") for s in p.relative_to(vault).parts):
+            out.setdefault(p.name.casefold(), p)
+    return out
 
 
 def chat_rel(rel: str, sid: str | None = None) -> tuple[str, str]:

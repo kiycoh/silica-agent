@@ -24,6 +24,7 @@ from silica.kernel.base.formats import IMAGE_SUFFIX, SHOWN_IMAGE_EXTS
 from silica.kernel import publish
 from silica.kernel.base.noteshape import SOURCES_TAIL_RE
 from silica.kernel.base.syntax import EMBED_RE, LINK_TARGET_RE
+from silica.kernel.vault_files import images_by_name
 
 logger = logging.getLogger(__name__)
 
@@ -288,20 +289,6 @@ def _folder_of(path: str, root: str) -> str:
     return f"{root}/{rest[0]}" if len(rest) > 1 else root
 
 
-def _images_on_disk(vault: Path) -> dict[str, Path]:
-    """{name: file}, one walk, the way `_find_asset` takes a bare name.
-    shortcut: an image is told apart by its name, as `![[x.png]]` names it, so two files of one
-    name share one answer and one thumbnail. No name repeats among the 885 image files measured on
-    2026-11-06, where pasted names carry a date; key on the path if a vault of `image.png` exports
-    shows up."""
-    out: dict[str, Path] = {}
-    for p in sorted(vault.rglob("*")):
-        if p.suffix.lower() in SHOWN_IMAGE_EXTS and p.is_file() \
-                and not any(s.startswith(".") for s in p.relative_to(vault).parts):
-            out.setdefault(p.name.casefold(), p)
-    return out
-
-
 def _hand_edits(vault: Path) -> tuple[dict[str, str | None], set[str]]:
     """({note key: what Silica last wrote, as a hash}, note keys edited since). Both empty when it
     cannot be read: every note then has no record, which the screen says and the review reads."""
@@ -408,7 +395,7 @@ def read_wiki(slug: str, vault: Path | None = None, fetch: Callable[[str], dict]
                 row["notes"].append(p)
 
     known, edits = _hand_edits(vault)
-    on_disk = _images_on_disk(vault)
+    on_disk = images_by_name(vault)
     local: dict[str, dict] = {}
     remote: dict[str, dict] = {}
     titles = {Path(p).stem.casefold(): p for p in paths}
