@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Create one note: the fast path for a single new note, the chat's and the code's.
+"""Create one note, the fast path for a single new note, the chat's and the code's, and set
+one property on a note that exists.
 
 Below the tools, so a Memorize plan or a reading card writes a note without
 reaching up into the registry for a tool's function.
@@ -115,3 +116,34 @@ def write_note(
         checkpoint = checkpoint_landed(path, None)  # None: created, /undo removes it
 
     return {"op": "write", "success": True, "path": ref.path or path, **checkpoint}
+
+
+def unset_prop(path: str, key: str) -> bool:
+    """Remove a note's property; False on a backend that cannot, which is the Obsidian bridge:
+    Obsidian itself can, so what to do then is the caller's."""
+    unset = getattr(DRIVER, "unset_prop", None)
+    if unset is None:
+        return False
+    unset(path, key)
+    return True
+
+
+def write_prop(path: str, key: str, value: bool | None) -> None:
+    """Set or remove a note's property through the driver, so the change is a
+    session change like any edit, and leave /undo a restore point: it reads the
+    checkpoints and not the session's ledger. Not `overwrite`, which stamps a
+    `type:` the person never asked for. Lowercase YAML booleans, from the dumper."""
+    from silica.kernel.base import frontmatter as fm
+    from silica.kernel.write.checkpoints import checkpoint_landed
+
+    prior = DRIVER.read_note(path).content
+    data, raw, _body = fm.split(prior)
+    if data is None and raw is not None:
+        raise ValueError(f"the properties of {path} do not parse; fix them before publishing it")
+    if value is not None:
+        DRIVER.set_prop(path, key, value)
+    elif not unset_prop(path, key):
+        raise ValueError(f"remove `{key}:` from {path} in Obsidian")
+    # `hand`: the person's click and no body of Silica's, or a note they edited would read
+    # as untouched to `edited_since_write` and could not be marked as theirs (ADR-0153 point 26).
+    checkpoint_landed(path, prior, prior, kind="hand")

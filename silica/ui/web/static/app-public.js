@@ -704,10 +704,11 @@ function renderPublic(fresh) {
   const goes = ppBox(v.visibility === "off" ? "Would go out" : "Goes out", `${pubCount(v.out)} · ${v.folder}/`, { wide: true });
   const chips = mkEl("ul", "pg-chips");
   for (const t of v.top) chips.append(mkEl("li", "", t));
-  if (!v.out) chips.append(mkEl("li", "more", "Nothing yet: this folder has no note that can go out."));
+  if (!v.out) chips.append(mkEl("li", "more", v.held ? "Nothing yet: its notes wait for the check before Publish." : "Nothing yet: this folder has no note that can go out."));
   else if (v.out > v.top.length) chips.append(mkEl("li", "more", `and ${fmtNum(v.out - v.top.length)} more`));
   goes.append(chips);
   const notes = [];
+  if (v.held) notes.push(`${pubCount(v.held)} waiting for an answer`);
   if (v.struck) notes.push(`${pubCount(v.struck)} left out by ${v.struck === 1 ? "its" : "their"} own globe`);
   if (v.new) notes.push(`${pubCount(v.new)} new since the last publish`);
   if (st.outside) notes.push(`${pubCount(st.outside)} with publish: true outside every wiki ${st.outside === 1 ? "stays" : "stay"} in your vault`);
@@ -719,9 +720,11 @@ function renderPublic(fresh) {
   frag.append(grid);
 
   const row = mkEl("div", "pp-actions");
-  const go = mkEl("button", "pp-go", v.visibility === "off" ? `Turn on and publish ${pubCount(v.out)}` : `Publish ${pubCount(v.out)}`);
+  const go = mkEl("button", "pp-go", !v.out && v.held ? "Check before publishing"
+    : v.visibility === "off" ? `Turn on and publish ${pubCount(v.out)}` : `Publish ${pubCount(v.out)}`);
   go.type = "button";
-  go.disabled = !v.out;
+  // the check is the only way to the answers that free a held note, so it stays one press away
+  go.disabled = !v.out && !v.held;
   go.addEventListener("click", () => startPublish(v, go));
   row.append(go, mkEl("span", "pp-dim", inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
     ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
@@ -1034,7 +1037,8 @@ function checkSheet(v) {
   const c = pubCheck.data;
   const frag = document.createDocumentFragment();
   const top = mkEl("div", "pre-top");
-  top.append(preLink("Back", "back", () => { pubCheck = null; renderPublic(); }), mkEl("h2", "pre-h", "Before you publish"),
+  // the view's counts follow the answers, so Back reads them again
+  top.append(preLink("Back", "back", () => { pubCheck = null; loadPublicView(); }), mkEl("h2", "pre-h", "Before you publish"),
     mkEl("p", "pre-lead", "Say once whose each thing is. What nobody answers for stays out."));
   frag.append(top);
 

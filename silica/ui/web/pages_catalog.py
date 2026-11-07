@@ -25,10 +25,10 @@ import sys
 from pathlib import Path
 
 from silica.config import public_save_url
-from silica.ui.web import public_site as site
+from silica.kernel import public_site as site
+from silica.kernel.publish import HANDLE_RE
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,59}$")
-_HANDLE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,28}[a-z0-9])?$")
 _ID = re.compile(r"^[a-z0-9-]{1,32}$")
 # shortcut: a manifest past this size is skipped, not read; Cultura's is 60 KB at 654 notes, so
 # reopen near 10,000 notes a vault
@@ -66,7 +66,7 @@ def handles(path: Path) -> list[tuple[str, str]]:
     out = []
     for line in path.read_text(encoding="utf-8").splitlines():
         parts = line.split("\t")
-        if len(parts) == 2 and _HANDLE.match(parts[0]) and _ID.match(parts[1]):
+        if len(parts) == 2 and HANDLE_RE.match(parts[0]) and _ID.match(parts[1]):
             out.append((parts[0], parts[1]))
     return out
 

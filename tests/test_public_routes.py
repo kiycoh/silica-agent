@@ -119,6 +119,31 @@ def test_a_blocked_wiki_says_why_and_a_request_does_not_reach_its_manifest(clien
     assert tc.get("/public").json()["vaults"][0]["blocked"] == []
 
 
+def test_the_view_and_the_cover_show_what_the_answers_let_out_and_publish_stays_open(client):
+    """The count, the titles and the cover were the notes on in the vault, while the build
+    wrote those the answers let through: 1,748 against 699 on a real vault, 2026-11-07. A note
+    held by an unanswered file is counted apart, so the button that opens the check stays."""
+    from silica.kernel.write.provenance import append_record
+
+    tc, tmp = client
+    root = tmp / "vault"
+    (root / "sources").mkdir()
+    (root / "sources" / "Book.md").write_text('---\nsource_file: "/x/Book.pdf"\n---\nThe book.\n', encoding="utf-8")
+    append_record("Book.md", "Book.md", "run-1", ["Memory/Spacing effect"], vault_path=str(root))
+    tc.post("/public/vault", json={"folder": "Memory"})
+    m = tc.get("/public").json()["vaults"][0]
+    assert (m["out"], m["held"], m["top"]) == (1, 1, ["Forgetting curve"])
+    c = tc.get("/public/cover", params={"vault": "memory"}).json()
+    assert c["n"] == [] and c["unlinked"] == 1
+    assert tc.post("/public/publish", json={"vault": "memory"}).json()["result"]["notes"] == 1
+    tc.post("/public/check/answer", json={"vault": "memory", "key": "Book.pdf", "answer": "mine"})
+    m = tc.get("/public").json()["vaults"][0]
+    assert (m["out"], m["held"], m["new"]) == (2, 0, 1)
+    assert m["top"][0] in ("Forgetting curve", "Spacing effect") and len(m["top"]) == 2
+    assert sorted(n[4] for n in tc.get("/public/cover", params={"vault": "memory"}).json()["n"]) == [
+        "Forgetting curve", "Spacing effect"]
+
+
 def test_the_cover_is_the_graph_of_what_goes_out_and_nothing_private(client):
     """The view's cover (ADR-0146 point 4): the notes that go out, the links between them, laid
     out once; a private note it links to is neither a mark nor a line."""
@@ -215,7 +240,7 @@ def test_a_laptop_takes_its_handle_into_the_vault_unless_it_already_published(cl
     assert ask["ask"] is True and ask["suggest"] == publish.slugify((tmp / "vault").resolve().name)
     v = tc.post("/public/handle", json={"handle": "marta-v"}).json()
     assert v["handle"] == "marta-v" and v["ask_handle"] == {"ask": False}
-    assert publish._block((tmp / "vault"))["handle"] == "marta-v"
+    assert publish.block((tmp / "vault"))["handle"] == "marta-v"
     # a laptop that already has a page under its folder's name is not asked
     from silica.kernel.base.manifest import unset_block_key
 

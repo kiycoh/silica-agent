@@ -355,7 +355,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     from silica.kernel.graph.mindmap import answer_resolver, note_resolver
     from silica.kernel.base import frontmatter as fm
 
-    vault = vault or publish._vault()
+    vault = vault or publish.vault_root()
     h = publish.handle(vault)
     if not publish.available(vault):
         raise ValueError("this account has no public address yet")
@@ -376,7 +376,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     titles = {p: note_parts.title_of(p, fms.get(p) or {}) for p in public}
     slugs = _slugs(public, titles)
     site = _Site(h, publish.page_url(vault))
-    vurl = site.absolute(site.vault(slug, 0))
+    vurl = publish.wiki_url(site.base, slug)
     lang = _LANGS.get(_language().strip().lower(), "")
 
     base_resolve = note_resolver()
@@ -515,7 +515,7 @@ def build(slug: str, vault: Path | None = None) -> dict:
     publish.swap_in(build_dir, dest)
     if not private:
         shutil.rmtree(root / "paused" / slug, ignore_errors=True)
-    _mark_published(slug, today, vault)
+    publish.mark_published(slug, today, vault)
     state = last_published(h) or {"vaults": {}}
     # The reasons stay here, for the author: the manifest is public, and one of them says a note
     # holds someone's personal data.
@@ -525,14 +525,6 @@ def build(slug: str, vault: Path | None = None) -> dict:
     return {"vault": slug, "notes": len(shown), "links": len(pairs),
             "images": sum(1 for v in copied.values() if v), "url": vurl, "published_at": stamp,
             "private": private}
-
-
-def _mark_published(slug: str, day: str, vault: Path) -> None:
-    items = publish.vaults(vault)
-    for v in items:
-        if v["slug"] == slug:
-            v["published"] = day
-    publish._save_vaults(items, vault)
 
 
 def _write_note(build_dir: Path, p: str, r: dict, titles: dict, slugs: dict, backlinks: list[str],
@@ -674,7 +666,7 @@ def write_page(vault: Path | None = None) -> None:
     sends the script there (amendment of 2026-11-06, item 3). With no Public
     vault the Page goes, so its address answers that there is no page; a
     laptop's copy of the sheet goes with it."""
-    vault = vault or publish._vault()
+    vault = vault or publish.vault_root()
     h = publish.handle(vault)
     if not h:
         return
@@ -725,7 +717,7 @@ def write_page(vault: Path | None = None) -> None:
 def set_listed(slug: str, listed: bool, vault: Path | None = None) -> None:
     """Ask to list reaches the published manifest at once, since the host reads
     the request there; the rest of the vault waits for Publish."""
-    vault = vault or publish._vault()
+    vault = vault or publish.vault_root()
     h = publish.handle(vault)
     path = publish.site_root(h) / "live" / slug / "vault.json" if h else None
     if path is None or not path.is_file():
@@ -783,7 +775,9 @@ def _drop_title_heading(body: str, title: str) -> str:
 def static_files() -> dict[str, bytes]:
     """{name: bytes} of the sheet, the script and the fonts, as /_s/ serves
     them; the host copies them from the release (ADR-0151 point 7)."""
-    static = importlib.resources.files("silica.ui.web") / "static"
+    # by the top package: the files sit with the app's, whose fonts and mermaid they share, and
+    # naming `silica.ui.web` would import the layer above this one to read a folder
+    static = importlib.resources.files("silica") / "ui" / "web" / "static"
     out = {}
     for name in _STATIC:
         res = static.joinpath(*name.split("/"))

@@ -16,7 +16,7 @@ from pydantic import Field
 
 from silica.driver import DRIVER
 from silica.tools import tool
-from silica.kernel.write.notes import write_note
+from silica.kernel.write.notes import unset_prop, write_note
 from silica.kernel.write.ops import Op, OpType
 
 # One description, two tools: write_note and patch_note bind `documents:` the
@@ -314,11 +314,8 @@ def silica_require(
     if wanted == names:
         return {"note": name, "path": path, "requires": names, "changed": False}
     try:
-        unset = getattr(DRIVER, "unset_prop", None)  # the Obsidian bridge has none
-        if wanted or unset is None:
+        if wanted or not unset_prop(path, "requires"):
             DRIVER.set_prop(path, "requires", [f"[[{n}]]" for n in wanted])
-        else:
-            unset(path, "requires")
     except Exception as e:
         return {"error": f"Failed to write '{name}': {e}"}
 

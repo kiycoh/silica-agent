@@ -72,7 +72,7 @@ def _say(key: str, answer: str, **kw) -> None:
 
 
 def _build() -> dict:
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     return build("stats")
 
@@ -87,6 +87,59 @@ def _written(root: Path, *paths: str) -> None:
     for p in paths:
         store.record(run, InverseOp(kind=InverseOpKind.delete_created, path=p),
                      content_hash((root / p).read_text(encoding="utf-8")))
+
+
+def _agreed() -> set[str]:
+    """What goes out, once the view's read and the build's have said the same."""
+    from silica.kernel import rights
+
+    out = rights.goes_out("stats")
+    assert out == rights.decide(rights.read_wiki("stats"), rights.answers())["notes"]
+    return out
+
+
+HAND = {"Stats/Hand note.md", "Stats/Descriptive/Box plot.md"}
+
+
+# --- what goes out, said once ---------------------------------------------------
+
+def test_the_views_read_says_what_the_build_decides_as_the_answers_move(stats):
+    assert _agreed() == HAND
+    _say("Slides.pdf", "mine")
+    assert _agreed() == HAND | {"Stats/Regression.md"}
+    _say(ROSS, "open", license="CC BY", credit="Ross")
+    assert _agreed() == HAND | {"Stats/Regression.md", "Stats/Bayes.md", "Stats/Variance.md"}
+    _say("Slides.pdf", "else")
+    assert _agreed() == HAND | {"Stats/Bayes.md"}
+
+
+def test_a_mark_counts_in_the_views_read_only_where_it_stands_in_the_build(stats, tmp_vault):
+    tmp_vault.note("Stats/Bayes.md", "---\nrewritten: true\n---\nMy own words about it.\n")
+    assert _agreed() == HAND | {"Stats/Bayes.md"}
+    tmp_vault.note("Stats/Bayes.md", f"---\nrewritten: true\n---\n{BOOK}\n")
+    assert _agreed() == HAND
+
+
+def test_a_mark_on_a_note_nobody_touched_holds_nothing_back_or_out_in_either_read(stats):
+    note = stats / "Stats/Bayes.md"
+    _written(stats, "Stats/Bayes.md")
+    note.write_text("---\nrewritten: true\n---\n" + note.read_text(encoding="utf-8"), encoding="utf-8")
+    assert _agreed() == HAND
+
+
+def test_a_struck_note_and_a_wiki_that_is_not_there_go_nowhere(stats, tmp_vault):
+    from silica.kernel import rights
+
+    tmp_vault.note("Stats/Hand note.md", "---\npublish: false\n---\nMine.\n")
+    assert _agreed() == {"Stats/Descriptive/Box plot.md"}
+    assert rights.goes_out("no-such-wiki") == set()
+
+
+def test_the_build_writes_what_the_views_read_counted(stats):
+    from silica.kernel import rights
+
+    counted = rights.goes_out("stats")
+    assert _build()["notes"] == len(counted) == 2
 
 
 # --- files ---------------------------------------------------------------------
@@ -539,7 +592,7 @@ def test_a_published_photo_loses_its_location_and_the_sheet_counts_it(stats):
 
 
 def test_listing_a_blocked_wiki_after_publish_does_not_reach_the_catalog(stats):
-    from silica.ui.web.public_site import set_listed
+    from silica.kernel.public_site import set_listed
 
     _build()
     set_listed("stats", True)

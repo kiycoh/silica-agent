@@ -56,7 +56,7 @@ def _live(marta: Path) -> Path:
 
 
 def test_the_vault_carries_its_notes_and_nothing_private(marta):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     out = build("memory")
     live = _live(marta)
@@ -77,7 +77,7 @@ def test_the_vault_carries_its_notes_and_nothing_private(marta):
 def test_the_manifest_carries_the_cover_and_the_areas_of_the_published_notes(marta):
     import json
 
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     build("memory")
     m = json.loads((_live(marta) / "memory" / "vault.json").read_text(encoding="utf-8"))
@@ -95,7 +95,7 @@ def test_the_manifest_carries_the_cover_and_the_areas_of_the_published_notes(mar
 
 
 def test_a_link_to_a_private_note_is_its_words_and_a_vault_note_a_link(marta):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     build("memory")
     page = (_live(marta) / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
@@ -112,7 +112,7 @@ def test_a_link_to_a_private_note_is_its_words_and_a_vault_note_a_link(marta):
 
 
 def test_what_a_page_hides_does_not_ride_out_in_its_md_or_notes_json(marta, tmp_vault):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     tmp_vault.note("Memory/Aside.md", "%% call Marco on 333 1234567 %%\nSeen in class.\n\n"
                                       "<!-- fetch evil.example -->\n\nA `%% code %%` span.\n\n"
@@ -166,7 +166,7 @@ def test_the_drawer_keeps_what_only_a_published_body_loses():
 
 
 def test_a_link_in_a_table_stays_a_link_in_the_md(marta, tmp_vault):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     tmp_vault.note("Memory/Table.md", "| Note | What |\n|---|---|\n| [[Spacing effect\\|the effect]] | x |\n")
     build("memory")
@@ -175,7 +175,7 @@ def test_a_link_in_a_table_stays_a_link_in_the_md(marta, tmp_vault):
 
 
 def test_a_link_finds_the_note_that_goes_out_when_a_private_one_shares_its_name(marta, tmp_vault):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     # sorted first, so the plain resolver names it, and a note saved from someone else is the usual way here
     tmp_vault.note("Archive/Forgetting curve.md", "not in any wiki\n")
@@ -186,7 +186,7 @@ def test_a_link_finds_the_note_that_goes_out_when_a_private_one_shares_its_name(
 
 
 def test_only_images_a_published_note_cites_are_copied(marta):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     out = build("memory")
     assets = sorted(p.name for p in (_live(marta) / "memory" / "assets").iterdir())
@@ -197,7 +197,7 @@ def test_only_images_a_published_note_cites_are_copied(marta):
 
 
 def test_a_republished_copy_credits_its_author_and_points_at_the_original(marta, monkeypatch):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://silica-agent.dev")
     build("memory")
@@ -208,7 +208,7 @@ def test_a_republished_copy_credits_its_author_and_points_at_the_original(marta,
 
 
 def test_with_an_address_links_are_absolute_and_every_page_can_be_saved_and_reported(marta, monkeypatch):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
     build("memory")
@@ -230,7 +230,7 @@ def test_with_an_address_links_are_absolute_and_every_page_can_be_saved_and_repo
 
 
 def test_a_vault_and_a_note_name_the_room_and_keep_their_page_for_a_reader_without_the_script(marta, monkeypatch):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
     build("memory")
@@ -247,7 +247,7 @@ def test_a_vault_and_a_note_name_the_room_and_keep_their_page_for_a_reader_witho
 
 
 def test_a_page_built_without_a_host_tells_the_room_its_files_end_in_html(marta):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     build("memory")
     index = (_live(marta) / "memory" / "index.html").read_text(encoding="utf-8")
@@ -256,7 +256,7 @@ def test_a_page_built_without_a_host_tells_the_room_its_files_end_in_html(marta)
 
 def test_a_page_of_one_public_vault_sends_the_script_to_that_map(marta, monkeypatch):
     from silica.kernel.publish import add_vault, set_visibility
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test/")
     build("memory")
@@ -269,7 +269,7 @@ def test_a_page_of_one_public_vault_sends_the_script_to_that_map(marta, monkeypa
 
 
 def test_without_an_address_there_is_no_save_and_the_folder_opens_from_disk(marta):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     build("memory")
     live = _live(marta)
@@ -282,7 +282,7 @@ def test_without_an_address_there_is_no_save_and_the_folder_opens_from_disk(mart
 
 def test_off_takes_the_vault_and_the_page_down_and_a_republish_replaces_the_paused_copy(marta):
     from silica.kernel.publish import set_note, set_visibility
-    from silica.ui.web.public_site import build, write_page
+    from silica.kernel.public_site import build, write_page
 
     build("memory")
     live = _live(marta)
@@ -301,7 +301,7 @@ def test_a_private_vault_is_built_beside_the_served_folder_with_its_readers(mart
     import json
 
     from silica.kernel.publish import set_visibility, update_vault
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
     monkeypatch.setenv("SILICA_VIEWS", "all")
@@ -324,7 +324,7 @@ def test_two_vaults_share_the_page_and_each_lists_the_other(marta, tmp_path):
     import json
 
     from silica.kernel.publish import add_vault, set_visibility
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     (Path(tmp_path) / "vault" / "Courses").mkdir(exist_ok=True)
     add_vault("Courses")
@@ -342,7 +342,7 @@ def test_the_page_is_readable_by_the_web_server_whatever_the_umask(marta):
     import os
     import stat
 
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     old = os.umask(0o077)  # the hosted unit's
     try:
@@ -359,7 +359,7 @@ def test_the_catalog_lists_only_what_the_host_approved_under_the_handle_it_gave(
     import json
 
     from silica.ui.web import pages_catalog
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     monkeypatch.setenv("SILICA_PUBLIC_BASE", "https://pages.test")
     build("memory")
@@ -397,7 +397,7 @@ def test_the_catalog_lists_only_what_the_host_approved_under_the_handle_it_gave(
 
 
 def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(marta, tmp_vault):
-    from silica.ui.web.public_site import build
+    from silica.kernel.public_site import build
 
     tmp_vault.note("Memory/Forgetting curve.md",
                "Ebbinghaus measured it. Back to [[Spacing effect]].\n\n"

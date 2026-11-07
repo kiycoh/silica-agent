@@ -147,7 +147,7 @@ def test_the_favicons_are_what_build_banners_writes():
 def test_every_inline_mark_is_the_computed_one():
     """The pages around these copies are hand-written, so build_banners cannot
     regenerate them; any path that starts on the mark's corner is held to it."""
-    from silica.ui.web import public_site
+    from silica.kernel import public_site
 
     shells, seed = _banners().mark_paths()
     pieces = {seed, shells, *re.findall(r"M[^Z]+Z", shells)}
@@ -183,7 +183,7 @@ def test_a_key_note_is_the_same_note_on_every_cover():
     """The landing prints one bit on a canvas of its own and public_site an SVG
     for a reader without the script, so neither can share the press; what they
     do share is which note is drawn large."""
-    from silica.ui.web import public_site
+    from silica.kernel import public_site
 
     for name, text in (("app-public.js", (STATIC / "app-public.js").read_text(encoding="utf-8")),
                        ("pages.js", (STATIC / "pages" / "pages.js").read_text(encoding="utf-8")),
