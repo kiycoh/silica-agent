@@ -146,7 +146,7 @@ class DeferredStore:
                 op = {**op, "rejection_phase": phase}
             return op
 
-        # Dedup payloads by content: _defer_ops merges existing + current across
+        # Dedup payloads by content: defer_ops merges existing + current across
         # chunks and re-runs of the same source, which would re-append verbatim.
         seen_p: set[bytes] = set()
         payloads_dedup: list[dict] = []

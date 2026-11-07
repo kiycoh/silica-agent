@@ -137,7 +137,7 @@ def _malformed_wikilink(c: Ctx) -> int:
         + len(_BROKEN_ALIAS.findall(c.body))
         + len(_ZW_IN_LINK.findall(c.body))
     )
-    # bracket-balance on noncode (mirrors ast._balanced)
+    # bracket-balance on noncode (mirrors markdown._balanced)
     if c.noncode.count("[[") != c.noncode.count("]]"):
         n += 1
     return n
@@ -241,12 +241,7 @@ def _unclosed_emphasis(c: Ctx) -> int:
     return sum(1 for para in c.body.split("\n\n") if para.count("**") % 2)
 
 
-# ---------------------------------------------------------------------------
-# Catalog
-# ---------------------------------------------------------------------------
-
 CHECKS: list[tuple[str, str, Callable[[Ctx], int]]] = [
-    # --- structural (16) ---
     ("unclosed-code-fence", "structural", _unclosed_code_fence),
     ("unbalanced-display-math", "structural", _unbalanced_display_math),
     ("unbalanced-inline-math", "structural", _unbalanced_inline_math),
@@ -263,7 +258,6 @@ CHECKS: list[tuple[str, str, Callable[[Ctx], int]]] = [
     ("placeholder-text", "structural", _placeholder_text),
     ("mermaid-bad", "structural", _mermaid_bad),
     ("table-column-mismatch", "structural", _table_column_mismatch),
-    # --- style (6) ---
     ("heading-emphasis", "style", _heading_emphasis),
     ("heading-level-jump", "style", _heading_level_jump),
     ("duplicate-h1", "style", _duplicate_h1),
@@ -274,10 +268,6 @@ CHECKS: list[tuple[str, str, Callable[[Ctx], int]]] = [
 
 SEVERITY: dict[str, str] = {name: sev for name, sev, _fn in CHECKS}
 
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 def scan(text: str, stem: str | None = None) -> Counter:
     """Return a Counter of {check_name: count} for one note (zero counts dropped)."""

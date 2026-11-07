@@ -223,7 +223,6 @@ def _extract_refs_ast(content: str) -> tuple[list[str], list[str], list[str]]:
     cleaned: list[str] = []
     files: list[str] = []
     for text in text_pieces:
-        # Match [[target]] links (allowing characters like # and ^)
         raw_targets = re.findall(r'\[\[([^\]|]+)(?:\|[^\]]*)?\]\]', text)
         for t in raw_targets:
             t = t.strip().replace("''", "'")
@@ -327,7 +326,6 @@ def parse_headings(body: str) -> list[dict]:
     for idx, t in enumerate(tokens):
         if t.type == "heading_open":
             level = int(t.tag[1])
-            # Find next inline token to get heading text
             next_t = tokens[idx + 1]
             text = next_t.content
             
@@ -342,7 +340,6 @@ def _balanced(body: str) -> list[str]:
     """Check for unbalanced OFM structural delimiters (fence-aware) using AST."""
     body = textwrap.dedent(body)
     issues = []
-    # If there's an odd number of ``` in the raw body, code fence is unclosed
     if body.count("```") % 2:
         issues.append("unclosed code fence")
 
@@ -385,7 +382,6 @@ def extract_callouts(body: str) -> list[str]:
     callout_types = []
     for idx, t in enumerate(tokens):
         if t.type == "blockquote_open":
-            # Search for the first inline token inside the blockquote
             for k in range(idx + 1, len(tokens)):
                 if tokens[k].type == "blockquote_close":
                     break

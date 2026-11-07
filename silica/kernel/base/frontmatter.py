@@ -248,7 +248,6 @@ def _ensure_tag_list(raw):
     if not raw:
         return []
     if isinstance(raw, str):
-        # Detect inline-CSV scalar: "a, b, c" → ["a", "b", "c"]
         if "," in raw:
             return [s.strip() for s in raw.split(",") if s.strip()]
         return [raw]

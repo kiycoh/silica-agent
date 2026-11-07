@@ -113,10 +113,6 @@ def path_lease(path: str) -> Iterator[None]:
         lock.release()
 
 
-# ---------------------------------------------------------------------------
-# WorkItem
-# ---------------------------------------------------------------------------
-
 class _Job:
     def to_dict(self) -> dict[str, Any]:
         """The context a persisted item carries in workqueue.json."""
@@ -246,10 +242,6 @@ class WorkItem(Generic[JobT]):
         }
 
 
-# ---------------------------------------------------------------------------
-# WorkQueue
-# ---------------------------------------------------------------------------
-
 _SENTINEL = object()  # poison pill — injected by close() to unblock consumers
 
 
@@ -327,8 +319,6 @@ class WorkQueue:
             item.result = result
             self._pending -= 1
         self._persist()
-
-    # --- draining ---------------------------------------------------------
 
     def drained(self) -> bool:
         """True when producers are done and every queued item is consumed."""

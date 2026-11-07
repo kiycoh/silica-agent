@@ -261,7 +261,6 @@ class Outline:
         return [i.title for i in self.ideas]
 
 
-# ------------------------------------------------------------------ routing --
 def lane_for(profile: str | None) -> str:
     """'outline' for document-shaped sources, 'keyphrase' for the memory forms.
 
@@ -417,7 +416,6 @@ def coverage_gaps(outline: Outline, headings: list[str]) -> list[str]:
     return gaps
 
 
-# -------------------------------------------------------------------- edges --
 def select_edges(raw: list, *, ideas: set[str], existing: dict[str, str],
                  spine_titles: AbstractSet[str] = frozenset()) -> list[dict]:
     """Stage B edges the vault will act on, in proposal order."""

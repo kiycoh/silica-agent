@@ -32,11 +32,9 @@ def partition_by_file(
         if not concepts:
             continue
 
-        # Build a single-file sub-payload and partition it
         sub_payload = {"schema_version": schema_version, "batches": [{"inbox_file": inbox_file, "concepts": concepts}]}
         chunks = partition_by_concepts(sub_payload, max_concepts, max_bytes)
 
-        # Tag each chunk with its source_file
         tagged_chunks = [dict(chunk, source_file=inbox_file) for chunk in chunks]
         result.append({"source_file": inbox_file, "chunks": tagged_chunks})
 

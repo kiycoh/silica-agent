@@ -186,7 +186,6 @@ def compute_report(
     G_dir = edge_graph(nodes, edges, directed=True)
     G_und = G_dir.to_undirected()
 
-    # Degree maps
     out_deg: dict[str, int] = dict(G_dir.out_degree())
     in_deg: dict[str, int] = dict(G_dir.in_degree())
     deg: dict[str, int] = {n: out_deg.get(n, 0) + in_deg.get(n, 0) for n in real_ids}
@@ -505,9 +504,6 @@ def compute_report(
         except Exception as exc:
             logger.warning("graph_report: coupling failed — %s", exc)
 
-    # ------------------------------------------------------------------
-    # Clusters
-    # ------------------------------------------------------------------
     cluster_members: dict[int, list[str]] = {}
     for nid in real_ids:
         cid = cluster_map.get(nid, -1)
@@ -617,9 +613,6 @@ def compute_report(
         key=lambda d: (-d["refs"], d["target"]),
     )
 
-    # ------------------------------------------------------------------
-    # Totals
-    # ------------------------------------------------------------------
     n_links = sum(1 for e in edges if e.get("type") == "EXTRACTED")
     # The share of the wikilink graph written by structure, not prose
     # (frontmatter properties, heading lines). A reading, not a filter: every
@@ -631,7 +624,7 @@ def compute_report(
     report = VaultReport(
         generated_at=_now(),
         scope=folder,
-        totals={}, # Placeholder
+        totals={},
         god_nodes=god_nodes,
         bridges=bridges,
         orphans=orphans,

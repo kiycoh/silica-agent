@@ -1024,8 +1024,6 @@ def parse_lines(lines: list[str]) -> list[dict]:
     return out
 
 
-# ---------------------------------------------------------------- closing
-
 def close(sid: str) -> dict:
     global _LIVE, _LAST
     from silica.kernel.learn import plans

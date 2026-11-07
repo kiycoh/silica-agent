@@ -131,7 +131,7 @@ NOT_A_TOPIC = frozenset({"sources", "attachments", "assets", "templates", "_inbo
 # built on list_files, while the silica-core engine behind silica_search_context
 # walks sources/ and ranked a leaf first. Verbatim outranking its distilled note
 # is the measured good outcome for answering (verbatim 0.840 vs distill 0.693,
-# docs/evaluation/v1-substrate/V1-substrate-pin.md:87-89) and a defect only for
+# docs/evaluation/v1-substrate/V1-substrate-pin.md) and a defect only for
 # structure indexes. S3 of docs/audits/2026-09-17-paper-backed-simplifications.md.
 def is_source_leaf(path: str) -> bool:
     """True when `path` (vault-relative, any separator) lives under sources/.
