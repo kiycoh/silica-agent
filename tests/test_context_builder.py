@@ -91,9 +91,9 @@ def test_whitespace_substrate_omitted():
 # ProgressLedger.is_checkpoint_done
 # ---------------------------------------------------------------------------
 
-def test_is_checkpoint_done_returns_output_ref(tmp_path):
+def test_is_checkpoint_done_returns_output_ref(tmp_path, monkeypatch):
     import silica.kernel.progress as _mod
-    _mod.runs_dir = lambda: tmp_path
+    monkeypatch.setattr(_mod, "runs_dir", lambda: tmp_path)
     from silica.kernel.progress import ProgressLedger
 
     p = ProgressLedger.new(mode="inject", inputs={})
@@ -104,9 +104,9 @@ def test_is_checkpoint_done_returns_output_ref(tmp_path):
     assert result == "/tmp/ops.json"
 
 
-def test_is_checkpoint_done_wrong_hash(tmp_path):
+def test_is_checkpoint_done_wrong_hash(tmp_path, monkeypatch):
     import silica.kernel.progress as _mod
-    _mod.runs_dir = lambda: tmp_path
+    monkeypatch.setattr(_mod, "runs_dir", lambda: tmp_path)
     from silica.kernel.progress import ProgressLedger
 
     p = ProgressLedger.new(mode="inject", inputs={})
@@ -116,9 +116,9 @@ def test_is_checkpoint_done_wrong_hash(tmp_path):
     assert p.is_checkpoint_done("chunk_0_validate", "different_hash") is None
 
 
-def test_is_checkpoint_done_pending_task(tmp_path):
+def test_is_checkpoint_done_pending_task(tmp_path, monkeypatch):
     import silica.kernel.progress as _mod
-    _mod.runs_dir = lambda: tmp_path
+    monkeypatch.setattr(_mod, "runs_dir", lambda: tmp_path)
     from silica.kernel.progress import ProgressLedger
 
     p = ProgressLedger.new(mode="inject", inputs={})
@@ -127,9 +127,9 @@ def test_is_checkpoint_done_pending_task(tmp_path):
     assert p.is_checkpoint_done("chunk_0_validate", "abc123") is None
 
 
-def test_is_checkpoint_done_unknown_task(tmp_path):
+def test_is_checkpoint_done_unknown_task(tmp_path, monkeypatch):
     import silica.kernel.progress as _mod
-    _mod.runs_dir = lambda: tmp_path
+    monkeypatch.setattr(_mod, "runs_dir", lambda: tmp_path)
     from silica.kernel.progress import ProgressLedger
 
     p = ProgressLedger.new(mode="inject", inputs={})
@@ -144,9 +144,9 @@ def test_is_checkpoint_done_unknown_task(tmp_path):
 # mark_done with content_hash round-trip
 # ---------------------------------------------------------------------------
 
-def test_mark_done_content_hash_survives_roundtrip(tmp_path):
+def test_mark_done_content_hash_survives_roundtrip(tmp_path, monkeypatch):
     import silica.kernel.progress as _mod
-    _mod.runs_dir = lambda: tmp_path
+    monkeypatch.setattr(_mod, "runs_dir", lambda: tmp_path)
     from silica.kernel.progress import ProgressLedger
 
     p = ProgressLedger.new(mode="inject", inputs={})
