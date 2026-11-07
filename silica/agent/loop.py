@@ -299,7 +299,6 @@ def run_agent(
     # Everything a chat turn has and a worker has not reads this one fact.
     _interactive = constraints is None or constraints.interactive
 
-    # Effective tool registry: full global, or the constrained subset.
     if constraints is not None:
         source = TOOLS if constraints.registry is None else constraints.registry
         allowed: dict[str, "Tool"] = {
@@ -324,7 +323,6 @@ def run_agent(
     # a load never changes a schema the last request already sent.
     reach = frozenset(allowed) | frozenset(deferred)
 
-    # Collect tool schemas for the LLM
     schemas = [t.json_schema(reach) for t in allowed.values()] if allowed else None
 
     def _load(name: str) -> None:
@@ -371,9 +369,6 @@ def run_agent(
         else DEFAULT_MAX_ITERATIONS
     )
 
-    # Track consecutive failures for the same (tool_name, args) pair
-    # Key: (tool_name, args_json_string)
-    # Value: consecutive failure count
     consecutive_failures: dict[tuple[str, str], int] = {}
     # Excerpts recall already delivered this turn (compaction.dedup_recall_excerpts).
     recalled_excerpts: set[str] = set()
@@ -415,7 +410,7 @@ def run_agent(
     def _stream_delta(chunk_type: str, content: str) -> None:
         # Called from the LLM worker thread; `iteration` reads the current loop pass.
         if _abandon.is_set():
-            return  # interrupted/abandoned — stop feeding the renderer
+            return
         _emit(LLMStreamEvent(chunk_type=chunk_type, content=content, iteration=iteration))
 
     # Streaming is a TUI ergonomic: only interactive turns get it, and a sub-loop
@@ -628,7 +623,6 @@ def run_agent(
                               {"indices": _newly, "prompt_tokens": prompt_tokens},
                               parent=None)
 
-        # Dispatch each tool call
         final_answer: dict | None = None  # a `final` web answer's tool message
         pending_notices: list[dict] = []  # A34: convergence warnings, flushed AFTER
         for tc in resp.tool_calls:
@@ -642,11 +636,10 @@ def run_agent(
                 break
             logger.info("Tool call: %s(%s)", tc.name, tc.args)
 
-            # Key representing the specific tool call + args
             args_str = json.dumps(tc.args, sort_keys=True)
             tool_key = (tc.name, args_str)
 
-            # Reuse probe. The current call is already in `messages` (:270), so
+            # Reuse probe. The current call is already in `messages`, so
             # >1 means this exact result was produced earlier in the chat and is
             # being recomputed — either a plain re-ask or compaction's read_stub
             # telling the model to re-call. Grep "reuse-probe" over a session log
@@ -774,7 +767,6 @@ def run_agent(
                     and not is_sentinel(str(result))):
                 final_answer = tool_msg
 
-            # Update convergence guard
             if failed:
                 consecutive_failures[tool_key] = consecutive_failures.get(tool_key, 0) + 1
                 failures_count = consecutive_failures[tool_key]
@@ -832,8 +824,6 @@ def run_agent(
         if notice is not None:
             messages.append(notice)
             _narr_mod.NARRATOR.turn(notice)
-
-        # Loop continues: re-call LLM with tool results
 
     if convergence_landing:
         logger.warning("Agent loop stopped by the convergence guard; landing")
