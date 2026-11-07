@@ -107,7 +107,6 @@ def test_lazy_tool_result_stays_verbatim_in_history():
 
 
 def test_compact_context_collapses_old_read_and_recounts(monkeypatch):
-    from silica import cli
     from silica.config import CONFIG
 
     big = "x" * 300
@@ -198,7 +197,6 @@ def test_write_gate_tools_are_classified_eager():
 
 
 def test_compact_context_noop_under_budget(monkeypatch):
-    from silica import cli
     from silica.config import CONFIG
 
     messages = [{"role": "user", "content": "q"}]
