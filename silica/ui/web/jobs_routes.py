@@ -36,7 +36,7 @@ def running_jobs():
     endpoints for their models. No file names: the operator sees counts."""
     vault = CONFIG.vault_path or ""
     rows = [{"id": r["id"], "state": r["state"], "kind": job_records.kind_of(r)}
-            for r in job_records.all_records() if r.get("state") in ("queued", "running") and r.get("vault") == vault]
+            for r in job_records.all_records() if r.get("state") in jobs.IN_FLIGHT and r.get("vault") == vault]
     return {"turn": bool(SESSION.busy), "jobs": rows}
 
 
