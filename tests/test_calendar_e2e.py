@@ -256,7 +256,7 @@ def _evening(cal) -> None:
     east = (22 - utc + 12) % 24 - 12  # Etc/ zones are signed the other way round
     cal.send("Emulation.setTimezoneOverride", {"timezoneId": f"Etc/GMT{-east:+d}"})
     cal.open(cal.base + "/#calendar")
-    assert cal.js("new Date().getHours()") == 22
+    assert cal.js("new Date().getHours()") in (22, 23)  # 23 when the hour turned on the way here: same card
 
 
 def test_a_card_opened_late_in_the_evening_saves_with_the_end_it_shows(cal):
