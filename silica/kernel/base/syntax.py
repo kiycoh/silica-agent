@@ -77,6 +77,19 @@ WIKILINK_CELL_RE = re.compile(r"(!?)\[\[([^\]|#\n]*?)(#[^\]|\n]*)?(?:\\?\|([^\]\
 WIKILINK_FLAT_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 WIKILINK_SHOWN_RE = re.compile(r"\[\[([^\]|]+\|)?([^\]]+)\]\]")
 WIKILINK_INNER_RE = re.compile(r"!?\[\[([^\[\]]*?)\]\]")
+# SHOWN for a link preview, which takes an embed and an empty part as well: its
+# output is a published page's description, whose bytes this must not move.
+WIKILINK_PREVIEW_RE = re.compile(r"!?\[\[([^\]|]*\|)?([^\]]*)\]\]")
+#
+# Markup flattened to prose has no one rule, and these above are its parts. Five
+# readers put them together differently because each compares its result to
+# something else, so a shared flattener would move what each one matches:
+# `note_context.plain` keeps a lone `*` and snake_case, for a sentence a person
+# reads; `learn.items.plain` drops an embed and folds spaces, and quiz spans are
+# matched against it; `learn.reading._plain` casefolds and takes list marks off,
+# for a card's copy check; `learn.sources.plain` reads a table row; `public_site._desc`
+# strips every mark, for a link preview. In the browser, app-chat.js's line reader
+# is a sixth, for a sentence it offers to quote.
 
 # A decision record cited by number in prose. The 36 ADRs under docs/adr cite
 # each other this way and had `out_links: []`: the graph was blind to the one

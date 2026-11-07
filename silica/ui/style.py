@@ -10,6 +10,8 @@ from rich.markup import escape
 from rich.table import Table
 from rich.text import Text
 
+from silica.ui.console import CYAN
+
 # Single glyph vocabulary for the whole TUI — everything single-width, no emoji
 # (double-width glyphs tear column alignment).
 GLYPHS: dict[str, str] = {
@@ -109,7 +111,7 @@ class FlatMarkdown(Markdown):
         self.parsed = parser.parse(markup)
 
 GROUP_STYLE: dict[str, str] = {
-    "workflow": "#22d3ee",  # BRAND_CYAN — works in both markup and Table column style
+    "workflow": CYAN,  # works in both markup and Table column style
     "direct": "cyan",
     "system": "dim",
 }
@@ -118,7 +120,7 @@ GROUP_STYLE: dict[str, str] = {
 def command_table(
     commands: list,
     *,
-    name_style: str = "bold #22d3ee",
+    name_style: str = f"bold {CYAN}",
     usage_style: str = "dim",
     show_summary: bool = True,
     compact: bool = False,

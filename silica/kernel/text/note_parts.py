@@ -5,10 +5,6 @@
 what the app shows and what the reports quote start from the same two calls."""
 from __future__ import annotations
 
-import re
-
-
-_FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.S)
 
 
 def clean_name(ref: str) -> str:
@@ -27,7 +23,9 @@ def split_frontmatter(text: str) -> tuple[dict | None, str]:
     None unless the block parses to a mapping."""
     import yaml
 
-    m = _FRONTMATTER.match(text or "")
+    from silica.kernel.base.frontmatter import FM_RE_DRAWER
+
+    m = FM_RE_DRAWER.match(text or "")
     if not m:
         return None, text
     try:

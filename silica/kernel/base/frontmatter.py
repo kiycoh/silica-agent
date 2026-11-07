@@ -17,6 +17,7 @@ from silica.kernel.base.syntax import WIKILINK_TARGET_RE
 #   FM_RE_TEMPLATE   no    no         no           no             yes
 #   FM_RE_TOLERANT   yes   yes        yes          no             yes
 #   FM_RE_SCAN       yes   yes        yes          yes            yes
+#   FM_RE_DRAWER     yes   yes        yes          no             no
 #
 # The write gate's block, and with it every property read and write. Its
 # trailing \s* takes the blank lines after the closing fence with it. Widening
@@ -42,6 +43,14 @@ FM_RE_TOLERANT = re.compile(
 # reads a fence below a blank line as a rule, and the text after it is prose.
 FM_RE_SCAN = re.compile(
     r"\A\s*---[ \t]*\r?\n(.*?)(?<=\n)(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL)
+
+# What the app draws as a note's Properties (`note_parts.split_frontmatter`). TOLERANT
+# but for two shapes: a `--- ` opening fence reads as body, and `---\n---\n` as no block,
+# closing at the next fence down instead. Equal on all 2,642 notes of the vaults measured
+# 2026-11-07; folding it would move what a person sees for a note in either shape, so it
+# stays. Skills are the one reader outside this table: `skills_routes` imports silica_core's
+# `split` so that its refusal and the skill loader's cannot disagree.
+FM_RE_DRAWER = re.compile(r"\A---\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.DOTALL)
 
 # A note that opens a block, closed or not: the lint's unclosed fence, and the
 # writers that leave an unterminated block alone instead of adding a second one.

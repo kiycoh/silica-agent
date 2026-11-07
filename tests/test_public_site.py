@@ -409,3 +409,65 @@ def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(mart
     assert '<pre class="mermaid">' in page and "&lt;b&gt;learn&lt;/b&gt;" in page
     assert "<script>" not in page and page.count("<script") == 1  # pages.js alone
     assert (live / "_s" / "mermaid.min.js").is_file()
+
+
+# --- the renderer's contract ----------------------------------------------------
+
+def test_a_surface_writes_its_own_links_and_images_and_the_grammar_names_no_route():
+    from silica.kernel.text.render import render
+
+    seen: list[str] = []
+
+    def link(path: str, display: str) -> str:
+        seen.append(path)
+        return f"<i data-to='{path}'>{display}</i>"
+
+    html = render("[[Note|words]] and ![[a.png]] and ![b](c.png) and <img src=\"d.png\">",
+                  link=link, asset=lambda t: f"/files/{t}", resolve=lambda ref: ref + ".md", remote_images=False)
+    assert seen == ["Note.md"] and "<i data-to='Note.md'>words</i>" in html
+    assert 'src="/files/a.png"' in html and 'src="/files/c.png"' in html and 'src="/files/d.png"' in html
+    assert "note-link" not in html and "/asset" not in html
+
+
+def test_an_address_a_surface_gave_is_its_own_where_a_stranger_image_becomes_a_link():
+    from silica.kernel.text.render import render
+
+    html = render('![x](y.png)\n\n<img src="z.png">\n\n![t](https://evil.test/p.png)\n\n<img src="https://evil.test/q.png">\n',
+                  link=lambda p, d: d, asset=lambda t: f"https://wikis.test/assets/{t}", remote_images=False)
+    assert 'src="https://wikis.test/assets/y.png"' in html and 'src="https://wikis.test/assets/z.png"' in html
+    assert "<img" in html and "evil.test/p.png\"" not in html.split("<img")[1]
+    assert html.count("image from evil.test") == 2
+
+
+def test_an_image_nothing_was_found_for_keeps_its_place_with_no_address():
+    from silica.kernel.text.render import render
+
+    assert 'src=""' in render("![[gone.png]]", link=lambda p, d: d, asset=lambda t: "", resolve=lambda r: r)
+    assert 'src=""' in render("![x](gone.png)", link=lambda p, d: d, asset=lambda t: "", remote_images=False)
+    assert 'src=""' in render('<img src="gone.png">', link=lambda p, d: d, asset=lambda t: "", remote_images=False)
+
+
+def test_a_notes_links_reach_the_page_however_the_app_writes_its_anchor(marta, monkeypatch):
+    """Reordering two attributes in the app's anchor used to publish wikis whose links were dead,
+    because the build read them back out of the HTML."""
+    from silica.kernel.public_site import build
+    from silica.ui.web import render as app
+
+    monkeypatch.setattr(app, "anchor", lambda path, display: f'<a data-path="{path}" class="note-link">{display}</a>')
+    build("memory")
+    page = (_live(marta) / "memory" / "spacing-effect.html").read_text(encoding="utf-8")
+    assert '<a class="note-link" href="forgetting-curve.html">Forgetting curve</a>' in page
+
+
+def test_words_that_spell_the_apps_image_route_are_words_and_copy_nothing(marta, tmp_vault):
+    """The build read `/asset?path=` out of the whole page, so a note that wrote it in a link or
+    in prose lost it, and the file it named was published with no answer for it (2026-11-07)."""
+    from silica.kernel.public_site import build
+
+    tmp_vault.note("Memory/Forgetting curve.md",
+                   "Ebbinghaus. [scan](/asset?path=private-scan.png) and /asset?path=private-scan.png in prose.\n")
+    build("memory")
+    live = _live(marta) / "memory"
+    assert not [p for p in (live / "assets").iterdir() if "scan" in p.name]
+    assert "in prose" in (live / "forgetting-curve.html").read_text(encoding="utf-8")
+    assert "/asset?path=private-scan.png in prose" in (live / "forgetting-curve.html").read_text(encoding="utf-8")

@@ -29,7 +29,7 @@ from silica.config import GUI_PORT, live_env, public_save_url
 from silica.kernel import publish, rights
 from silica.kernel.base.formats import SHOWN_IMAGE_EXTS
 from silica.kernel.base.markdown import strip_ofm_meta
-from silica.kernel.base.syntax import WIKILINK_WHOLE_RE
+from silica.kernel.base.syntax import WIKILINK_PREVIEW_RE, WIKILINK_WHOLE_RE
 from silica.kernel.image_meta import strip_location
 from silica.kernel.text import note_parts
 from silica.kernel.text.render import render
@@ -254,7 +254,7 @@ def foot(left: str, app: str) -> str:
 
 def _desc(body: str) -> str:
     """The first words of a note for a link preview, markup and links stripped."""
-    text = re.sub(r"!?\[\[([^\]|]*\|)?([^\]]*)\]\]", r"\2", body)
+    text = WIKILINK_PREVIEW_RE.sub(r"\2", body)
     text = re.sub(r"[#>*_`~\[\]()|-]+", " ", text)
     return " ".join(text.split())[:160]
 

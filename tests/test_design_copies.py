@@ -115,6 +115,36 @@ def test_python_writes_the_sheets_colours():
     assert ge._EDGE_COLOR_REQUIRES_PAPER.lower() == app["paper"]["--frost"]
 
 
+def test_the_terminal_keeps_two_hues_the_app_dropped():
+    """Stated so it can be seen, as KNOWN_DRIFT is: ui/console.py's cyan, indigo and amber are
+    from before the one-hue identity, and recolouring a terminal is the owner's to settle.
+    When it is, these turn to ==, and BRAND_CYAN goes with them."""
+    from silica.ui import console
+
+    graphite = _sheets()["app-base.css"]["graphite"]
+    assert console.CYAN != graphite["--accent"] and console.AMBER != graphite["--warn"]
+    assert "#%02x%02x%02x" % console.BRAND_CYAN == console.CYAN
+    assert "#%02x%02x%02x" % console.BRAND_INDIGO == console.INDIGO
+
+
+def test_the_graphs_inlined_face_is_the_sheets_file_with_the_sheets_axes():
+    """The exported graph opens from file:// and inlines Archivo (ADR-0026). The bytes cannot
+    drift, they are read from the app's file at render; its axes are typed a third time."""
+    import base64
+
+    from silica.tools import graph_view as gv
+
+    face = gv._vendored_font_face()
+    data = re.search(r"base64,([^\"]+)", face).group(1)
+    assert base64.b64decode(data) == (STATIC / "archivo-latin.woff2").read_bytes()
+    for sheet in ("app-base.css", "pages/pages.css"):
+        text = (STATIC / sheet).read_text(encoding="utf-8")
+        block = text[text.index('font-family: "Archivo"'):]
+        block = block[:block.index("}")]
+        assert re.search(r"font-weight:\s*100 900", block) and re.search(r"font-stretch:\s*62% 125%", block), sheet
+    assert "font-weight:100 900;font-stretch:62% 125%" in face
+
+
 def test_every_surface_sets_the_same_three_faces():
     """site/ loads from Google Fonts what the app and Pages serve themselves, so
     a face that changes in one place has no other way to be noticed."""
