@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.run_command import expansion as expand
+from tests.run_command import expansion as expand, refusal
 
 
 @pytest.fixture(autouse=True)
@@ -19,9 +19,7 @@ def _hosted_model(monkeypatch):
 
 
 def test_diagram_requires_a_target():
-    out = expand("/diagram")
-    assert "Error" in out
-    assert "Usage: /diagram <note|folder|topic> [--save=<path>]" in out
+    assert "Usage: /diagram <note|folder|topic> [--save=<path>]" in refusal("/diagram")
 
 
 def test_diagram_names_target_and_is_read_only():

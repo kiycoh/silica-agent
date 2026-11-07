@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from silica.sources import ingest
-from tests.run_command import expansion
+from tests.run_command import expansion, refusal
 # Bound at import, before conftest stubs the module attribute for every test.
 from silica.sources.ingest import pick_batch_folders as _REAL_BATCH
 from silica.config import CONFIG
@@ -312,8 +312,8 @@ def test_plain_prose_with_apostrophe_is_not_hijacked():
 
 
 def test_slash_command_unbalanced_quotes_still_errors():
-    msg = expansion('/nucleate "Inbox/no closing quote.pdf')
-    assert msg == 'Error: unbalanced quotes in command. Wrap paths with spaces in "...".'
+    msg = refusal('/nucleate "Inbox/no closing quote.pdf')
+    assert msg == 'unbalanced quotes in command. Wrap paths with spaces in "...".'
 
 
 def test_run_injector_converts_a_pdf_itself(repo_vault, monkeypatch):
@@ -614,8 +614,8 @@ def test_convert_command_returns_sentinel_and_reports(repo_vault, monkeypatch, c
 
 
 def test_convert_command_no_files_errors():
-    msg = expansion("/convert --target=X")
-    assert msg is not None and msg.startswith("Error:")
+    msg = refusal("/convert --target=X")
+    assert msg is not None and msg.startswith("/convert requires at least one file path")
 
 
 # ---------------------------------------------------------------------------
@@ -705,7 +705,7 @@ def test_settings_sets_and_shows_vault_yaml(repo_vault, capsys):
     assert msg == ""
     assert "italian" in capsys.readouterr().out
 
-    assert expansion("/settings bogus.key x").startswith("Error:")
+    assert refusal("/settings bogus.key x").startswith("usage /settings")
     reset_manifest_cache()
 
 

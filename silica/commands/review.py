@@ -226,7 +226,7 @@ def enrich(c: Call) -> Result:
     # it so /enrich Foo never leaks into a sibling FooBar/ folder.
     paths = [r.path for r in DRIVER.list_files(folder=folder) if in_folder(r.path, folder)]
     if not paths:
-        return out.to_model(f"Error: no files found in '{folder}'.")
+        return out.refused(f"no files found in '{folder}'.")
 
     payloads = [{"note_paths": chunk} for chunk in _chunk_by_json_size(paths)]
     return _seed_batch_ledger(out, "silica_enrich_batch", payloads, kind="enrich", label=folder or "vault")
@@ -313,7 +313,7 @@ def organize(c: Call) -> Result:
         try:
             scope = to_vault_relative(scope, ensure_md=False)
         except ValueError as exc:
-            return out.to_model(f"Error: /organize --scope is not usable: {exc}")
+            return out.refused(f"/organize --scope is not usable: {exc}")
 
     # Re-join intent (handles both quoted and unquoted multi-word)
     intent = " ".join(intent_parts).strip('"\'')

@@ -32,7 +32,7 @@ from silica.session.turn import Turn, UsageLine
 from silica.session.words import command_word
 from silica.term.console import plain
 from silica.tools import tool_failed
-from silica.ui.web import callback, render, session
+from silica.ui.web import callback, failures, render, session
 from silica.ui.web.failures import explain as _failure
 from silica.ui.web.session import SESSION
 
@@ -361,6 +361,10 @@ async def run_turn(ask: Ask) -> AsyncIterator[dict]:
             if result is None:
                 line.outcome = "error"
                 yield callback.error_frame({"error": f"'{t.text}' not available in this session"})
+                return
+            if result.error is not None:
+                line.outcome = "error"
+                yield callback.error_frame(failures.said(result.error))
                 return
             if result.directive is None:
                 # Appended only once the verdict is in: a directive falls through

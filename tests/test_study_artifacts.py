@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """/flashcards and /slides (silica/commands/learn.py): the deck and the cards NotebookLM's
 Studio makes, drawn from Learn's checked key points where the notes carry them."""
-from tests.run_command import expansion
+from tests.run_command import expansion, refusal
 
 
 def _points(monkeypatch, points):
@@ -21,7 +21,7 @@ def test_flashcards_ground_every_card_in_a_checked_point(tmp_vault, monkeypatch)
     assert expansion("/flashcards Dropout --n=5") == ""   # made and printed here, nothing for the agent
     assert prompts[0].startswith("Write 5 flashcards from the notes [[Dropout]].")
     assert "- [[Dropout]]: Il dropout approssima il bagging di sottoreti." in prompts[0]
-    assert expansion("/flashcards").startswith("Error: /flashcards needs a note or a folder")
+    assert refusal("/flashcards").startswith("/flashcards needs a note or a folder")
 
 
 def test_the_chat_shows_the_cards_as_markdown(tmp_vault, tmp_path, monkeypatch):

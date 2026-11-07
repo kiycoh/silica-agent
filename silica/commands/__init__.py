@@ -60,7 +60,7 @@ def dispatch(text: str, messages: list[dict], *, ask: Ask | None = None,
     try:
         args = shlex.split(text.strip())[1:]  # honours quoted paths with spaces
     except ValueError:
-        return out.to_model("Error: unbalanced quotes in command. Wrap paths with spaces in \"...\".")
+        return out.refused("unbalanced quotes in command. Wrap paths with spaces in \"...\".")
     return _run(row, Call(args, text, messages, out, ask, progress))
 
 
@@ -82,7 +82,7 @@ def expand_skill(text: str, out: Result) -> Result | None:
     try:
         body = skills.expand(skill, args)
     except ValueError as e:  # the usage line: shown, and the model is never asked
-        return out.to_model(f"Error: {e}")
+        return out.refused(f"{e}")
     if skill.name == "diagram" and skill.source == "builtin" and (CONFIG.model or "").startswith("custom/"):
         # ADR-0082 gate 2: Qwen3.5-9B's /diagram parsed 46 of 48 once quoted,
         # but 5 of 10 audited carried arrows its note does not hold (a list

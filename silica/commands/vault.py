@@ -164,7 +164,7 @@ def settings(c: Call) -> Result:
         out.print(f"  Keys: {', '.join(sorted(_KEYS))} — /settings <key> <value|none>")
         return out
     if len(args) != 2 or args[0] not in _KEYS:
-        return out.to_model(f"Error: usage /settings <key> <value|none>. Keys: {', '.join(sorted(_KEYS))}")
+        return out.refused(f"usage /settings <key> <value|none>. Keys: {', '.join(sorted(_KEYS))}")
     key, raw = args
     val = None if raw.lower() in ("none", "null") else (int(raw) if raw.isdigit() else raw)
     node = data

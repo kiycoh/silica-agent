@@ -594,8 +594,10 @@ class TestOrganizeScope:
         import silica.config
 
         monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(tmp_path / "vault"))
-        msg = self._expand('/organize --scope=/elsewhere/docs "by domain"')
-        assert msg.startswith("Error:")
+        from tests.run_command import refusal
+
+        msg = refusal('/organize --scope=/elsewhere/docs "by domain"')
+        assert msg.startswith("/organize --scope is not usable")
         assert "outside the configured vault" in msg
 
     def test_relative_scope_passes_through(self, monkeypatch, tmp_path):

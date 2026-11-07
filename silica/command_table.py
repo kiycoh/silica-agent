@@ -64,7 +64,8 @@ class Result:
     printed at once only there.
 
     The rest says how the command ended. With none of them set it did the whole
-    job. `directive`: the model is asked this. `answer`: Markdown that is the reply
+    job. `directive`: the model is asked this. `error`: why the line cannot run,
+    shown as an error and asked of nobody. `answer`: Markdown that is the reply
     itself, which a code block would not render (the formulas on a card). `saved`:
     a write to memory, `user_memory.save`'s record, which the browser draws with its
     Undo. `batch`: the event a REPL's panel opens on.
@@ -73,6 +74,7 @@ class Result:
     live: Callable[..., None] | None = None
     lines: list[tuple[tuple, dict]] = field(default_factory=list)
     directive: str | None = None
+    error: str | None = None
     answer: str | None = None
     saved: dict | None = None
     batch: Any = None
@@ -99,6 +101,10 @@ class Result:
         """What the model is asked, "" for nothing: a service like `ingest.nucleate`
         answers with one or the other."""
         self.directive = directive or None
+        return self
+
+    def refused(self, why: str) -> Result:
+        self.error = why
         return self
 
 

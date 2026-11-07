@@ -20,6 +20,8 @@ import uuid
 from collections.abc import Callable
 from contextlib import nullcontext, redirect_stdout
 
+from rich.markup import escape
+
 from silica.term.style import FlatMarkdown
 
 from silica.agent.recall_watch import numbers_of_session
@@ -366,6 +368,8 @@ def _command(text: str, messages: list[dict], *, ask: Ask | None = None, rendere
     result = dispatch(text, messages, ask=ask, progress=lambda out: nullcontext(renderer), live=CONSOLE.print)
     if result is None:
         return None
+    if result.error is not None:
+        CONSOLE.print(f"  [yellow]{escape(result.error)}[/]")
     if result.answer is not None:
         CONSOLE.print(FlatMarkdown(result.answer))
     if result.batch is not None:

@@ -19,7 +19,7 @@ def flashcards(c: Call) -> Result:
 
     targets = positional(args)
     if not targets:
-        return out.to_model("Error: /flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]")
+        return out.refused("/flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]")
     out.answer = flashcards(targets, int_flag(args, "--n=", 12), str_flag(args, "--save").strip())
     return out
 
@@ -33,7 +33,7 @@ def slides(c: Call) -> Result:
     save = str_flag(args, "--save").strip()
     targets = positional(args)
     if not targets:
-        return out.to_model("Error: /slides needs a note or a folder. Usage: /slides <note|folder> [--save=<path>]")
+        return out.refused("/slides needs a note or a folder. Usage: /slides <note|folder> [--save=<path>]")
     titles, points = study_points(targets)
     ground = ("Build the slides from these points, each already checked against its source, in this order "
               "unless the topic's logic asks another:\n" + "\n".join(points) if points else
@@ -247,18 +247,18 @@ def memorize(c: Call) -> Result:
     teach = _kv_flag(args, "--teach")
     if teach is not None:
         if not teach:
-            return out.to_model("Error: /memorize --teach requires a note. Usage: /memorize --teach <note>")
+            return out.refused("/memorize --teach requires a note. Usage: /memorize --teach <note>")
         return out.to_model(_learn_teach_prompt(teach))
     plan = _kv_flag(args, "--plan")
     scope = str_flag(args, "--scope")
     steps = str_flag(args, "--steps")
     if plan is not None:
         if not plan:
-            return out.to_model("Error: /memorize --plan requires a name. Usage: /memorize --plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]")
+            return out.refused("/memorize --plan requires a name. Usage: /memorize --plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]")
         if steps:
             return out.to_model(_learn_plan_prompt(plan, "steps", steps, restrict=scope))
         if not scope:
-            return out.to_model("Error: /memorize --plan needs --scope=<folder|note,note|topic:term> or --steps=<note>")
+            return out.refused("/memorize --plan needs --scope=<folder|note,note|topic:term> or --steps=<note>")
         if scope.startswith("topic:"):
             return out.to_model(_learn_plan_prompt(plan, "topic", scope[len("topic:"):]))
         if "," in scope or (not scope.endswith("/") and scope.endswith(".md")):

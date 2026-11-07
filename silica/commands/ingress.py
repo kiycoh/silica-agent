@@ -64,7 +64,7 @@ def convert(c: Call) -> Result:
     files = positional(args)
     target_dir = str_flag(args, "--target")
     if not files:
-        return out.to_model("Error: /convert requires at least one file path. Usage: /convert <file...> [--target=DIR]")
+        return out.refused("/convert requires at least one file path. Usage: /convert <file...> [--target=DIR]")
     from silica.sources.convert import convert
     for f in files:
         try:
@@ -86,7 +86,7 @@ def web_search(c: Call) -> Result:
     max_searches = int_flag(args, "--max-searches=", DEFAULT_MAX_SEARCHES)
     concept = " ".join(positional(args)).strip()
     if not concept:
-        return out.to_model('Error: /web-search requires a concept. Usage: /web-search "<concept>" [--max-searches=N]')
+        return out.refused('/web-search requires a concept. Usage: /web-search "<concept>" [--max-searches=N]')
 
     with c.progress(out) as renderer:
         try:
@@ -116,7 +116,7 @@ def fetch(c: Call) -> Result:
     from silica.sources.web_research import fetch_to_inbox
     url = " ".join(args).strip()
     if not url:
-        return out.to_model("Error: /fetch requires a URL. Usage: /fetch <url>")
+        return out.refused("/fetch requires a URL. Usage: /fetch <url>")
 
     try:
         note_rel = fetch_to_inbox(url)

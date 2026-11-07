@@ -159,6 +159,13 @@ def refusal(said: str, code: str = "") -> dict[str, str]:
     return {"error": said, "detail": said, **({"code": code} if code else {})}
 
 
+def said(words: str) -> dict[str, str]:
+    """`explain()`'s shape for a command's own "no": its words were written for the
+    person, so no table rewrites them, and hosted its `detail` stays empty as every
+    stream frame's does."""
+    return {"error": words, "detail": "" if hosted() else words}
+
+
 def explain(exc: BaseException | str) -> dict[str, str]:
     """`{"error": <sentence>, "detail": <raw>}` for a response body or a
     stream frame. `error` is what the person reads; `detail` is what the

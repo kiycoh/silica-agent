@@ -24,3 +24,9 @@ def expansion(line: str, progress=None, ask=None) -> str | None:
     """What the model is asked, "" for nothing, None when no command has that name."""
     result = cli._command(line, [], ask=_ask(ask), renderer=progress)
     return None if result is None else result.directive or ""
+
+
+def refusal(line: str) -> str | None:
+    """Why the table will not run `line`, None when it will."""
+    result = cli._command(line, [])
+    return None if result is None else result.error

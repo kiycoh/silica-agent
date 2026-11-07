@@ -9,7 +9,7 @@ from silica.config import silica_home
 
 from pathlib import Path
 
-from tests.run_command import expansion as expand
+from tests.run_command import expansion as expand, refusal
 
 
 def _skill(root: Path, name: str, body: str, hint: str = "") -> None:
@@ -29,7 +29,7 @@ def test_a_vault_skill_is_listed_and_expanded():
     assert (row.group, row.usage) == ("workflow", "<folder>")
     assert row.summary == "weekly review of the inbox (vault skill)"
     assert expand("/weekly Inbox/") == "Review Inbox/."
-    assert expand("/weekly").startswith("Error: /weekly needs 1 argument")
+    assert refusal("/weekly").startswith("/weekly needs 1 argument")
 
 
 def test_a_skill_never_shadows_a_python_command():

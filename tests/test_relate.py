@@ -5,11 +5,11 @@
 (silica_core/builtin_skills/relate, ADR-0063)."""
 from __future__ import annotations
 
-from tests.run_command import expansion as expand
+from tests.run_command import expansion as expand, refusal
 
 
 def test_relate_requires_a_note():
-    assert "Error" in expand("/relate")
+    assert refusal("/relate")
 
 
 def test_relate_names_note_and_is_read_only():
