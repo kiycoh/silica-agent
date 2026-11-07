@@ -98,10 +98,6 @@ class ObsidianWSBackend(GraphIndexMixin):
         self._notes_by_name: dict[str, list[NoteRef]] = {}
         self._is_graph_built = False
 
-    # ------------------------------------------------------------------
-    # Connection + RPC transport
-    # ------------------------------------------------------------------
-
     @classmethod
     def attached(cls, ws: Any, loop: asyncio.AbstractEventLoop) -> ObsidianWSBackend:
         """Wrap an already-accepted connection (production: `silica connect`
@@ -220,10 +216,6 @@ class ObsidianWSBackend(GraphIndexMixin):
         if self._thread is not None:
             self._thread.join(timeout=self._timeout)
         loop.close()
-
-    # ------------------------------------------------------------------
-    # Discovery / Read
-    # ------------------------------------------------------------------
 
     def _path_arg(self, ref: NoteRef | str) -> str:
         """Vault-relative path for a `path` RPC param.

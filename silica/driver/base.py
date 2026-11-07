@@ -37,10 +37,6 @@ PROTOCOL_VERSION = 1
 MAX_FRAME = 2**25
 
 
-# ---------------------------------------------------------------------------
-# Domain types & Exceptions
-# ---------------------------------------------------------------------------
-
 class NoteNotFound(RuntimeError):
     """The note is not there, and nothing else went wrong.
 
@@ -122,10 +118,6 @@ def namesake_order(path: str) -> tuple[int, str]:
     """
     return (path.count("/"), path.lower())
 
-
-# ---------------------------------------------------------------------------
-# GraphIndexMixin — helpers shared verbatim by both backends
-# ---------------------------------------------------------------------------
 
 class GraphIndexMixin:
     """Graph-index helpers shared by the fs and ws backends.
@@ -292,8 +284,6 @@ class NoteReader(Protocol):
     # a name and a value, parses for itself, and has no removal.
     composes_props: bool
 
-    # -- discovery / read --------------------------------------------------
-
     def search_names(self, query: str) -> list[NoteRef]:
         """Search vault note names matching query."""
         ...
@@ -341,8 +331,6 @@ class NoteReader(Protocol):
         """Get the heading tree of a note."""
         ...
 
-    # -- graph -------------------------------------------------------------
-
     def links(self, ref: NoteRef | str) -> list[NoteRef]:
         """Outgoing links from a note."""
         ...
@@ -386,8 +374,6 @@ class NoteReader(Protocol):
         an empty list: Obsidian resolves aliases on its own.
         """
         ...
-
-    # -- advanced ----------------------------------------------------------
 
     def list_files(self, folder: str = "") -> list[NoteRef]:
         """List all markdown files, optionally filtered by folder."""
