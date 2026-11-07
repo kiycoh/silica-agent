@@ -178,6 +178,27 @@ def test_the_graph_built_here_never_lands_at_silica_cores_name(tmp_path):
     assert not (home.index_dir() / "codegraph.json").exists()
 
 
+def test_a_build_with_no_structure_is_neither_kept_nor_served(tmp_path, monkeypatch):
+    """Tree-sitter failing in one process is that process, not the repo. Core's
+    `codegraph.json` carried this guard, and this tree's own file no longer
+    meets it, so the graph has to carry its own."""
+    _init_repo(tmp_path)
+    _seed_mini_repo(tmp_path)
+    store = tmp_path / "cg.json"
+    monkeypatch.setattr(codegraph, "store_path", lambda: store)
+    real = codegraph.codeast.extract_skeleton
+    monkeypatch.setattr(codegraph.codeast, "extract_skeleton", lambda source, language, path="":
+                        codegraph.codeast.ModuleSkeleton(path=path, language=language, parse_error=True))
+    broken = codegraph.load_codegraph(tmp_path)
+    assert broken is not None and not any(e.get("symbols") for e in broken.files.values())
+    assert not store.exists()  # never written, so no later process inherits it
+
+    store.write_bytes(codegraph._serialize(broken))  # one left by an older build
+    monkeypatch.setattr(codegraph.codeast, "extract_skeleton", real)
+    healed = codegraph.load_codegraph(tmp_path)
+    assert any(e.get("symbols") for e in healed.files.values())
+
+
 def test_parse_error_file_present_never_aborts(tmp_path, monkeypatch):
     _init_repo(tmp_path)
     (tmp_path / "bad.py").write_text("def x(: pass", encoding="utf-8")
