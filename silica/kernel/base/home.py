@@ -27,12 +27,6 @@ def resolve_vault_path(vault_path: str | None = None) -> str | None:
         return None
 
 
-# ---------------------------------------------------------------------------
-# Silica runtime directory helpers
-# ---------------------------------------------------------------------------
-
-
-
 def silica_tmp_dir() -> Path:
     """Return the pipeline staging directory (~/.silica/tmp/), creating it if needed.
 

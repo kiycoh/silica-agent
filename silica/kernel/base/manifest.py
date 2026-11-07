@@ -760,7 +760,7 @@ def apply_manifest_to_config() -> None:
     m = get_active_manifest()
     if env_raw("SILICA_COOCCURRENCE_LANG") is None:
         # "auto" mirrors the config-level default for this field (per-store
-        # detection, frozen at build — see kernel/cooccurrence.py). A vault
+        # detection, frozen at build — see kernel/recall/cooccurrence.py). A vault
         # without a declared cooccurrence_lang must NOT be silently pinned to
         # english.
         CONFIG.cooccurrence_lang = m.cooccurrence_lang or "auto"
