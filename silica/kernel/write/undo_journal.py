@@ -504,7 +504,7 @@ def edited_since_write(vault: str, *, store: UndoJournalStore | None = None,
         try:
             current = content_hash(DRIVER.read_note(path).content)
         except Exception:
-            continue
+            continue  # gone or unreadable: not an edit this can name
         if current == post_hash or current in cp.hashes_for(path):
             continue
         edited.append(path)

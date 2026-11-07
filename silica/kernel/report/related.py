@@ -37,7 +37,7 @@ def related(note: str, k: int = 5, memory: bool = True) -> dict[str, Any]:
         query_path = DRIVER.read_note(note).ref.path
         resolved = bool(query_path)  # a backend returning '' must not pass as resolved
     except Exception:
-        resolved = False
+        resolved = False  # any failure to open it answers as unresolved below, never as a crash
     if not resolved:
         query_path = note  # unresolved: treat the input itself as a path
     note_path = query_path if resolved else ""  # pre-store_key form, for file_refs_of

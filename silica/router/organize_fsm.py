@@ -247,7 +247,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
                 _data, _fm, body = frontmatter.split(nc.content)
                 snippet = body[:300]
             except Exception:
-                pass
+                pass  # the arbiter judges the path alone, which it can
             enriched_ambiguous.append((note_path, snippet, self.taxonomy.rules))
 
         try:

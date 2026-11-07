@@ -203,7 +203,7 @@ def _pairs_to_items(pairs: list[dict]) -> list["WorkItem"]:
             body_src = DRIVER.read_note(source).content or ""
             body_tgt = DRIVER.read_note(target).content or ""
         except Exception:
-            continue
+            continue  # a pair with an unreadable side cannot be judged: left for the next run
 
         # The more reliable note is the merge target; the other is the source of
         # new info. Reliability first, length only to break a tie within a tier.

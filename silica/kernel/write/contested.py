@@ -386,7 +386,7 @@ def follow_superseded(path: str, *, max_hops: int = 5) -> str:
         try:
             data, _raw, _body = frontmatter.split(DRIVER.read_note(path).content or "")
         except Exception:
-            return path
+            return path  # the chain ends at the last note that could be read
         link = str((data or {}).get(SUPERSEDED_BY_KEY) or "").strip()
         if not link.startswith("[["):
             return path
@@ -398,7 +398,7 @@ def follow_superseded(path: str, *, max_hops: int = 5) -> str:
             if nxt in seen or not DRIVER.read_note(nxt).content:
                 return path
         except Exception:
-            return path
+            return path  # a link to nothing readable is no successor
         seen.add(nxt)
         path = nxt
     return path

@@ -765,7 +765,7 @@ class ObsidianFSBackend(GraphIndexMixin):
                         if note_hits >= _MAX_HITS_PER_NOTE:
                             break
             except Exception:
-                continue
+                continue  # gone or undecodable since the index saw it: no hits, not a failed search
 
         return results
 
@@ -818,7 +818,7 @@ class ObsidianFSBackend(GraphIndexMixin):
                             if note_hits >= _MAX_HITS_PER_NOTE:
                                 break
             except Exception:
-                continue
+                continue  # as in search_context: parity by construction
 
         return results
 
@@ -878,6 +878,8 @@ class ObsidianFSBackend(GraphIndexMixin):
             data, _, _ = fm.split(nc.content)
             return data or {}
         except RuntimeError:
+            # Absent or outside the vault: nothing to tell about, and props are
+            # asked for in sweeps that must outlive a note gone since listing.
             return {}
 
     def outline(self, ref: NoteRef | str) -> list[Heading]:
@@ -893,7 +895,7 @@ class ObsidianFSBackend(GraphIndexMixin):
                 ) for h in raw_headings
             ]
         except Exception:
-            return []
+            return []  # gone or undecodable: a note with no headings to offer
 
     # ------------------------------------------------------------------
     # Graph

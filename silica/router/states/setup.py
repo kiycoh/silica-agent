@@ -494,7 +494,7 @@ def _salience_filter(fsm: "InjectorFSM", chunks: list[dict]) -> int | None:
                     # vector is a cache hit in embed._theme_cache, no re-embed.
                     body = clean_body(DRIVER.read_note(inbox_file).content, fences=True)
                 except Exception:
-                    body = ""
+                    body = ""  # no theme vector for this file: its concepts pass unfiltered
                 theme_cache[inbox_file] = document_theme_vector(embedder, body)
             theme = theme_cache[inbox_file]
             if not theme:

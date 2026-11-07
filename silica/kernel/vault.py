@@ -143,7 +143,7 @@ class Vault:
 
     def upsert(self, path: str, content: str, *, loss: preserve.Loss | None = None,
                free=()) -> NoteRef:
-        if self.transport.exists(path):
+        if self.exists(path):
             return self.overwrite(path, content, loss=loss, free=free)
         return self.create(path, content, loss=loss, free=free)
 
@@ -236,14 +236,14 @@ class Vault:
 
         from silica.kernel.link.autolink import autolink, build_alias_map, build_title_index
 
-        nc = self.transport.read_note(path)
+        nc = self.read_note(path)
         body = nc.content or ""
         if not body.strip():
             return []
         if title_index is None:
-            title_index = build_title_index(self.transport.list_files())
+            title_index = build_title_index(self.list_files())
         self_title = os.path.splitext(os.path.basename(path))[0]
-        aliases = build_alias_map(self.transport.alias_index(), title_index)
+        aliases = build_alias_map(self.alias_index(), title_index)
         new_body, added = autolink(
             body, title_index, candidates=candidates, self_title=self_title, aliases=aliases
         )

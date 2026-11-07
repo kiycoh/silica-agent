@@ -276,7 +276,7 @@ def _attach_section_images(fsm: "InjectorFSM", ops: list) -> None:
     try:
         source = DRIVER.read_note(source_file).content or ""
     except Exception:
-        return
+        return  # the note lands without the section's images, which it can
     if "![" not in source:  # fast bail: no embeds at all
         return
     from silica.kernel.text.media import append_section_images
@@ -656,7 +656,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
                 if moc_heading in DRIVER.read_note(hub_ref).content:
                     break
             except Exception:
-                pass
+                pass  # not settled yet: the deadline is what ends this wait
             time.sleep(0.15)
         else:
             logger.warning("HUB_UPDATE: MOC block settle timeout for hub '%s' — graph may lag", hub_path)

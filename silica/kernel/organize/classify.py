@@ -101,7 +101,7 @@ def _read_body(note_path: str) -> str | None:
         _data, _fm, body = frontmatter.split(nc.content)
         return body
     except Exception:
-        return None
+        return None  # gone, undecodable or the bridge down: unclassified, never a failed /organize
 
 
 def _stems_from_body(body: str, lang: str) -> dict[str, int]:
@@ -356,7 +356,7 @@ def classify_notes(
                 from silica.driver import DRIVER
                 props = DRIVER.props_of(note_path) or {}
             except Exception:
-                pass
+                pass  # scored on its body alone, as a note with no properties is
 
         best_folder, best_score, evidence, best_themes = _score_note_against_rules(
             note_path, concept_stems, taxonomy, props, lang=effective_lang

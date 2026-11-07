@@ -34,13 +34,10 @@ def _event_stem(title: str, start: str, rrule: str) -> tuple[str, str]:
 def _free_path(folder: str, stem: str) -> str:
     path = f"{folder}/{stem}.md"
     n = 2
-    while True:
-        try:
-            DRIVER.read_note(path)
-        except Exception:
-            return path  # free slot — the happy path
+    while DRIVER.exists(path):
         path = f"{folder}/{stem} {n}.md"
         n += 1
+    return path
 
 
 def event_note_path(title: str, start: str, rrule: str = "") -> dict[str, Any]:

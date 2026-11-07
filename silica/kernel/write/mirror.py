@@ -40,7 +40,7 @@ def seed_mirror_copy(path: str) -> None:
         DRIVER.read_note(path)
         return  # the copy is already there
     except Exception:
-        pass
+        pass  # not exists(): a dead bridge must end at the read below, quietly, and not raise here
     try:
         original = DRIVER.read_note(rel).content
     except Exception:
