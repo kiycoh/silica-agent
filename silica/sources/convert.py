@@ -940,7 +940,7 @@ def _read_pages(data: dict, workdir: Path, draw=None, on_page=None) -> None:
     size = pdf_extract.vision_pages()
     if draw is not None and size and pdf_extract.every_page():
         # A local set and not data["math"]: that one stays the pages that draw
-        # a math font, which the chat's attachment line names (server.py).
+        # a math font, which the chat's attachment line names (drop_turn.py).
         math |= set(range(data["n_pages"])) - set(data["no_text"])
         later = [i for i in range(data["n_pages"]) if i not in images]
     pending = sorted(i for i, png in images.items() if png)
