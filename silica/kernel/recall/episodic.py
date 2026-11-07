@@ -403,10 +403,6 @@ class EpisodicStore:
         self.lived_days: list[str] = []
         self._load()
 
-    # ------------------------------------------------------------------
-    # Persistence
-    # ------------------------------------------------------------------
-
     def _load(self) -> None:
         if not self.path.is_file():
             return
@@ -454,10 +450,6 @@ class EpisodicStore:
             return 0  # unparseable date: never expire on bad input
         return max(0, bisect.bisect_right(self.lived_days, until)
                    - bisect.bisect_right(self.lived_days, since))
-
-    # ------------------------------------------------------------------
-    # Capture
-    # ------------------------------------------------------------------
 
     def capture(self, facts: list[dict], *, run_id: str, seen: str,
                 embedder=None, schema=None,
@@ -552,10 +544,6 @@ class EpisodicStore:
         self.lang = language.detect(sample) if sample.strip() else "english"
         return self.lang
 
-    # ------------------------------------------------------------------
-    # TTL sweep
-    # ------------------------------------------------------------------
-
     def sweep(self, now: str, *, ttl_days: int | None = None) -> int:
         """Delete chains whose HEAD is more than ttl_days lived days old at `now`.
 
@@ -615,10 +603,6 @@ class EpisodicStore:
         self._live(on)
         self.save()
 
-    # ------------------------------------------------------------------
-    # Recall
-    # ------------------------------------------------------------------
-
     def recall(self, query_text: str, query_vec: list[float] | None = None, *,
                k: int = 10, now: str, ttl_days: int | None = None,
                floor: float | None = None,
@@ -673,10 +657,6 @@ class EpisodicStore:
         hits.sort(key=lambda h: h.score, reverse=True)
         return hits[:k]
 
-    # ------------------------------------------------------------------
-    # Nucleation
-    # ------------------------------------------------------------------
-
     def nucleation_candidates(self, *, min_days: int | None = None) -> list["NucleationCandidate"]:
         """Keys whose chain was captured on >= min_days distinct days.
 
@@ -700,10 +680,6 @@ class EpisodicStore:
                                                since=min(f.first_seen for f in links),
                                                text=head.text))
         return out
-
-    # ------------------------------------------------------------------
-    # Views
-    # ------------------------------------------------------------------
 
     def live_facts(self) -> list[Fact]:
         return [f for f in self.facts if f.status == "live"]
