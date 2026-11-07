@@ -252,7 +252,6 @@ LIVE: dict[str, Setting] = {row.key: row for row in (
     Setting("SILICA_VAULT_MAX_MB", type=str.strip, hosted=True),
     Setting("SILICA_AGENT_ID", type=str.strip),
     Setting("SILICA_WIZARD_DONE", type=strict_one, default=False),
-    # Public pages.
     Setting("SILICA_PUBLIC_DIR", type=str.strip, doc=True, hosted=True),
     Setting("SILICA_PUBLIC_HANDLE", type=str.strip, doc=True, hosted=True),
     Setting("SILICA_PUBLIC_BASE", type=str.strip, doc=True, hosted=True),
@@ -891,7 +890,7 @@ class SilicaConfig:
     # must not silently revert to the default because the extractor changed.
     keyphrase_pool: int = from_env("SILICA_KEYPHRASE_POOL", 100, int, aliases=("SILICA_YAKE_POOL",))
 
-    # Runtime session state — updated by cli.py after each agent turn
+    # Runtime session state — updated by session/meter.py after each agent turn
     context_tokens: int = 0
 
     # What outranks the embedder's row, by key (FromEmbedder).
@@ -998,7 +997,7 @@ class SilicaConfig:
     # sheds a request still queued at half this (rerank_serve._Served.wait).
     rerank_timeout: float = from_env("SILICA_RERANK_TIMEOUT", 5.0, float, blank_unset=True, doc=True)
     # The weights the [rerank] server loads: a HuggingFace repo id or a local
-    # directory. Empty = rerank_serve.LOCAL_RERANK_MODEL, the one the product
+    # directory. Empty = LOCAL_RERANK_MODEL, the one the product
     # ships. Exists for personal stacks whose best reranker cannot be the default
     # (jina-reranker v3.5 is CC-BY-NC, see rerank_serve._LISTWISE_RERANKERS).
     local_rerank_model: str = from_env("SILICA_LOCAL_RERANK_MODEL", doc=True)
@@ -1095,7 +1094,7 @@ class SilicaConfig:
     # generically related titles (e.g. "Python" / "Python async").
     sim_title_threshold = embedder_env("SILICA_SIM_TITLE_THRESHOLD", 0.80, float, doc=True)
 
-    # Language for the co-occurrence graph stemmer + stopwords (kernel/cooccurrence.py).
+    # Language for the co-occurrence graph stemmer + stopwords (kernel/recall/cooccurrence.py).
     # "auto" (default) detects the vault language from its own text at build time
     # and freezes it into the index; set an explicit Snowball language to override.
     cooccurrence_lang: str = from_env("SILICA_COOCCURRENCE_LANG", "auto", doc=True, panel=True)

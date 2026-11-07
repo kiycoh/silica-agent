@@ -318,7 +318,6 @@ def compact_read_history(
     self-hysteresing, no per-message estimation. Eager/never/unknown tools and
     bodies <= MIN_COLLAPSE_CHARS are left alone by both passes.
     """
-    # Map tool_call_id -> (name, arguments) from assistant messages; collect turn markers.
     id_to_call: dict[str, tuple[str, str]] = {}
     assistant_indices: list[int] = []
     for i, m in enumerate(messages):

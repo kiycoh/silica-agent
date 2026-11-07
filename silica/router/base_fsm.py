@@ -39,10 +39,6 @@ class BaseFSM(Generic[StateT]):
     state: StateT
     _tmp_files: list[str]
 
-    # ------------------------------------------------------------------
-    # Shared execution mechanics
-    # ------------------------------------------------------------------
-
     def step(self) -> None:
         logger.info("%s phase: %s", self._phase_label, self.state.name)
         handler = self._HANDLERS.get(self.state)
@@ -94,10 +90,6 @@ class BaseFSM(Generic[StateT]):
         """Called on a handler's failure. Return True after setting
         ``self.state`` yourself to keep the loop going; False ends the run."""
         return False
-
-    # ------------------------------------------------------------------
-    # Shared tmp-file helpers
-    # ------------------------------------------------------------------
 
     def make_tmp(self, content: Any, suffix: str = ".json") -> str:
         """Write content as JSON to ~/.silica/tmp/ and track for cleanup."""

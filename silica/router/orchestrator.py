@@ -82,7 +82,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
         target_dir = in_write_dir(resolve_target_dir(target_dir))
         self.target_dir = target_dir
 
-        # Hub sanity check: if not specified, inherit the folder name of target_dir
         if not hub and target_dir:
             import os
             hub = os.path.basename(target_dir.rstrip("/\\"))
@@ -138,7 +137,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self.file_valid_from: list[str | None] = []  # source event clock; None → no stamp
         self.committed_file_indices: set[int] = set()  # indices of already-committed files
 
-        # Iterative chunk processing state fields
         self.chunks: list[dict] = []
         # Monotonic union of every chunk's concept stems, for the LINT graph-diff
         # gate. Folded incrementally (only chunks appended since the last LINT) to
@@ -434,7 +432,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
         from silica.kernel.write.ledger import get_ledger
         ledger = get_ledger()
 
-        # Compute per-file canonicals and content hashes; track committed status
         from silica.kernel.write.provenance import source_event_date
         self.file_canonicals = []
         self.file_content_hashes = []
@@ -714,7 +711,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
         if abort_reason is None:
             abort_reason = "chunk failure"
 
-        # Mark all f{fi}_c{ci}_* tasks that are not already done as failed
         prefix = f"f{fi}_c{ci}_"
         for task in self.progress.tasks:
             if task.id.startswith(prefix) and task.status not in ("done",):
@@ -758,7 +754,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
             except Exception as _le:
                 logger.debug("containment: per-file log skipped (non-fatal): %s", _le)
 
-        # Advance to next uncommitted chunk, or conclude the run as partial
         self.chunks_from_payload()
         next_idx = self._next_uncommitted_chunk_idx(self.chunk_idx + 1)
         # Same warm-attach guard as _on_pipeline_end: a next chunk belonging
@@ -829,7 +824,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
             ledger = get_ledger()
             txn_id = self.chunk.txn_id or "unknown"
 
-            # Use per-file canonical/hash when available; fall back to the run's
             if fi < len(self.file_canonicals):
                 source_canonical = self.file_canonicals[fi]
                 content_hash = self.file_content_hashes[fi] if fi < len(self.file_content_hashes) else None

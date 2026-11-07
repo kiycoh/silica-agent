@@ -108,8 +108,6 @@ class Narrator:
         self._thought: str | None = None         # open thought span id, if any
         self._thought_t0 = 0.0
 
-    # --- session lifecycle -------------------------------------------------
-
     @property
     def sid(self) -> str | None:
         return self._sid
@@ -391,8 +389,6 @@ def set_parent(span_id: str | None):
 def reset_parent(token) -> None:
     _parent_var.reset(token)
 
-
-# --- reader ----------------------------------------------------------------
 
 def read_beats(path: Path, *, from_seq: int = 0) -> Iterator[dict]:
     """Yield parsed beats with seq > from_seq, in file order.

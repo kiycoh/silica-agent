@@ -45,10 +45,8 @@ def handle_recon(fsm: "InjectorFSM") -> None:
         if "error" in res:
             fsm.progress_note("recon", "recon", "failed", error=res["error"])
             raise RuntimeError(f"Recon failed for {inbox_file}: {res['error']}")
-        # Accumulated across files
         fsm.run_state.recon.append(res)
 
-        # Surface any deferred ops from a previous run of this file
         content_hash = fsm.file_content_hashes[fi] if fi < len(fsm.file_content_hashes) else ""
         if content_hash:
             from silica.kernel.write.deferred import get_deferred_store
@@ -491,7 +489,7 @@ def _salience_filter(fsm: "InjectorFSM", chunks: list[dict]) -> int | None:
             if inbox_file not in theme_cache:
                 try:
                     # Same cleaned body as RECON's keyphrase pass → the theme
-                    # vector is a cache hit in embed._theme_cache, no re-embed.
+                    # vector is a cache hit in vectors._theme_cache, no re-embed.
                     body = clean_body(DRIVER.read_note(inbox_file).content, fences=True)
                 except Exception:
                     body = ""  # no theme vector for this file: its concepts pass unfiltered

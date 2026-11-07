@@ -75,7 +75,6 @@ def handle_lint(fsm: "InjectorFSM") -> None:
         if snapshot_domain_dicts:
             snapshot_domain = [NoteRef(**d) for d in snapshot_domain_dicts]
         else:
-            # Fallback to touched refs if snapshot_domain is missing
             snapshot_domain = []
             for op in ops:
                 path = op.touched_ref()
@@ -502,7 +501,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             source_text = DRIVER.read_note(source_file).content or ""
             # Single frontmatter block: keep the source BODY verbatim; the date
             # is the source's event clock, resolved by the same function that
-            # stamps it on every claim (kernel/provenance) so leaf and claim
+            # stamps it on every claim (kernel/write/provenance) so leaf and claim
             # can never disagree. An undated source leaves the leaf undated:
             # `date: <today>` here would be read back by _incoming_side as the
             # incoming clock of every future contest this leaf feeds.
@@ -671,10 +670,8 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
     fsm.chunks_from_payload()
     fi, ci = fsm.chunk_flat_to_fi_ci.get(fsm.chunk_idx, (0, fsm.chunk_idx))
     with phase(fsm, fsm.chunk_task_id("cleanup"), "cleanup"):
-        # Always write ledger for this chunk's ops (per chunk)
         fsm.write_ledger_for_file(fi, "committed")
 
-        # Archive the physical file only on the last chunk of its file group
         file_group = fsm.file_chunks.get(fi, {})
         n_chunks_in_file = len(file_group.get("chunks", []))
         is_last_chunk_of_file = (ci + 1 >= n_chunks_in_file)

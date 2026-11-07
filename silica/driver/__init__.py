@@ -45,7 +45,6 @@ def _create_driver() -> ObsidianDriver:
     return vault_seam.wrap(ObsidianFSBackend(vault_path=CONFIG.vault_path))
 
 
-# Lazy initialization — created on first access, protected by lock for thread safety
 _driver: ObsidianDriver | None = None
 _driver_lock = threading.Lock()
 

@@ -32,10 +32,6 @@ from silica.tools import Reads, tool
 engine.pdf_reader = pdf_extract
 
 
-# ---------------------------------------------------------------------------
-# Read / Discovery
-# ---------------------------------------------------------------------------
-
 # One cap for every listing that grows with the vault. ponytail: flat cap
 # defends the context window (a 1000-note vault ≈ 20k tokens uncapped); no
 # paging — narrowing by folder, or acting on a sample, covers the real uses.
@@ -856,10 +852,6 @@ def silica_outline(name: Annotated[str, Field(description='Name of the note to d
     return [{"level": h.level, "text": h.text} for h in headings]
 
 
-# ---------------------------------------------------------------------------
-# Graph
-# ---------------------------------------------------------------------------
-
 @tool(cls="atomic", ingress=False, parallel_safe=True, note_args=("name",), label=("links", "name"))
 def silica_links(name: Annotated[str, Field(description='Name of the note to list outgoing links from')]) -> list:
     """Lists outgoing links from a note (connected notes)."""
@@ -1051,10 +1043,6 @@ def silica_unresolved() -> list:
     return [{"target": l.target} for l in links]
 
 
-# ---------------------------------------------------------------------------
-# List files
-# ---------------------------------------------------------------------------
-
 def _raws_of(files: list[str]) -> dict[str, str]:
     """{file: the note naming it as its raw} for those of `files` a note names."""
     if not files:
@@ -1242,10 +1230,6 @@ def silica_exists(path: Annotated[str, Field(description='Relative path of the n
     return target.is_file()
 
 
-# ---------------------------------------------------------------------------
-# Deferred Op Store
-# ---------------------------------------------------------------------------
-
 @tool(cls="atomic", ingress=False, label=("deferred list", None))
 def silica_deferred_list() -> list:
     """List all pending deferred op bundles (concepts rejected by the validator in previous runs).
@@ -1276,10 +1260,6 @@ def silica_inbox_ls() -> list:
     refs = DRIVER.list_inbox_files()
     return [r.path for r in refs]
 
-
-# ---------------------------------------------------------------------------
-# Graph path / explain
-# ---------------------------------------------------------------------------
 
 @tool(cls="atomic", ingress=False, parallel_safe=True)
 def silica_graph_path(source: Annotated[str, Field(description='Source note name or vault-relative path')], target: Annotated[str, Field(description='Target note name or vault-relative path')], max_paths: Annotated[int, Field(description='Maximum number of shortest paths to return')] = 1) -> dict:
@@ -1359,7 +1339,6 @@ def silica_graph_explain(note: Annotated[str, Field(description='Note name or va
     except Exception as exc:
         return {"error": f"Failed to compute graph report: {exc}"}
 
-    # Find the node in god_nodes or clusters
     q_lower = note.lower().removesuffix(".md")
     node_stat = None
     for n in report.god_nodes:
@@ -1367,7 +1346,6 @@ def silica_graph_explain(note: Annotated[str, Field(description='Note name or va
             node_stat = n
             break
 
-    # Resolve via cluster members if not in god_nodes
     resolved_id: str | None = None
     if node_stat:
         resolved_id = node_stat.id
@@ -1381,7 +1359,6 @@ def silica_graph_explain(note: Annotated[str, Field(description='Note name or va
                 break
 
     if resolved_id is None:
-        # last attempt: check orphans
         for o in report.orphans:
             if o.lower() == q_lower or o.rsplit("/", 1)[-1].removesuffix(".md").lower() == q_lower:
                 resolved_id = o
@@ -1390,7 +1367,6 @@ def silica_graph_explain(note: Annotated[str, Field(description='Note name or va
     if resolved_id is None:
         return {"error": f"Note '{note}' not found in the graph"}
 
-    # Degree rank (rank among all nodes by degree)
     try:
         out_links = [r.path or r.name for r in DRIVER.links(resolved_id)]
         backlinks = [r.path or r.name for r in DRIVER.backlinks(resolved_id)]
@@ -1411,7 +1387,6 @@ def silica_graph_explain(note: Annotated[str, Field(description='Note name or va
             cluster_id = c.cluster_id
             break
 
-    # Degree rank
     all_degrees = sorted(
         [(n.id, n.degree) for n in report.god_nodes],
         key=lambda x: -x[1],
@@ -1482,10 +1457,6 @@ def silica_graph_explain(note: Annotated[str, Field(description='Note name or va
     }
 
 
-# ---------------------------------------------------------------------------
-# Ledger steering — silica_ledger_next / silica_ledger_update
-# ---------------------------------------------------------------------------
-
 # Fixed byte budget per drain — payloads carry ~4KB path chunks, and a 40-task
 # run would otherwise land ~40k tokens in one tool result. Tool-arg promotion
 # declined 2026-08-19: no caller wants a different slice.
@@ -1543,7 +1514,6 @@ def silica_ledger_next(run_id: Annotated[str, Field(description='Run ID returned
     tasks: list[dict] = []
     budget = LEDGER_DRAIN_BYTES
     for t in ready:
-        # Load payload from disk if available
         payload: dict = {}
         if t.input_ref:
             try:
@@ -1601,10 +1571,6 @@ def silica_ledger_update(run_id: Annotated[str, Field(description='Run ID')], ta
     return {"ok": True, "digest": progress.digest()}
 
 
-
-# ---------------------------------------------------------------------------
-# Study loop
-# ---------------------------------------------------------------------------
 
 class QuizResult(BaseModel):
     path: str = Field(description="Note the question was drawn from (wikilink name or vault-relative path)")

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 from silica.kernel.write.ops import OpType
 
-# Extracted to kernel/moc.py so the deferred-retry path (tools/pipeline.py) can
+# Extracted to kernel/write/moc.py so the deferred-retry path (router/anneal.py) can
 # reuse them; aliased here to keep the FSM code and existing tests unchanged.
 from silica.kernel.write.moc import (
     hub_desc as _hub_desc,
@@ -419,7 +419,6 @@ def handle_write(fsm: "InjectorFSM") -> None:
     )
     fsm.chunk.deferred_stems = list(_deferred_stems)
 
-    # Register committed notes in the RunManifest and refresh embedding index.
     try:
         from silica.kernel.progress import RunManifestEntry
         vault_ctx = fsm.run_state.vault_graph_ctx or {}
@@ -640,7 +639,6 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
     _lang_sample = hub_note.content + " ".join(d for _, d in hub_notes[:3])
     moc_heading = _moc_heading(source_name, _lang_sample)
 
-    # Build note link lines.
     note_lines = [_moc_line(p, d) for p, d in hub_notes]
 
     # Merge: append to existing section if present (same file, multiple chunks),
@@ -686,7 +684,6 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
                 from silica.driver.base import NoteRef as _NR
                 p_ref = _NR(name=parent_name, path=parent_path)
                 p_note = DRIVER.read_note(p_ref)
-                # Register rollback inverse for parent note
                 if fsm.chunk.txn is not None:
                     p_inverse = InverseOp(
                         kind=InverseOpKind.restore_version,

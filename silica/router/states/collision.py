@@ -570,7 +570,6 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
         if kept:
             modified_batches.append({"inbox_file": inbox_file, "concepts": kept})
 
-    # Persist borderline concepts in the deferred store
     if deferred_concepts:
         deferred_op_dicts = [
             _deferred_op_dict(fsm, d, "collision_deferred") for d in deferred_concepts
