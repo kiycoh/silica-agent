@@ -620,15 +620,13 @@ def _history_note(path: str) -> str:
 
 
 def _history_body(path: str, version: str) -> str:
-    from silica.config import CONFIG
     from silica.kernel.write.checkpoints import get_checkpoint_store
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
 
     body = None
     v = str(version)
     if v.startswith("j") and v[1:].isdigit():
-        body = get_undo_journal().before_image(int(v[1:]), path,
-                                               (CONFIG.vault_path or "").strip() or None)
+        body = get_undo_journal().before_image(int(v[1:]), path, active_vault())
     elif v.isdigit():
         body = get_checkpoint_store().version(path, int(v))
     if body is None:
@@ -640,15 +638,14 @@ def _history_body(path: str, version: str) -> str:
 def note_history(path: str = ""):
     """Every version of one note, newest first: what Silica wrote, what it
     found edited by hand, what a run found before writing over it."""
-    from silica.config import CONFIG
     from silica.kernel.write.checkpoints import get_checkpoint_store
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
 
     from silica.driver import DRIVER
 
     note = _history_note(path)
     versions = get_checkpoint_store().history(note, current=DRIVER.read_note(note).content) + get_undo_journal().before_images(
-        note, (CONFIG.vault_path or "").strip() or None)
+        note, active_vault())
     versions.sort(key=lambda v: v["at"], reverse=True)
     return {"path": note, "name": note_parts.clean_name(note), "versions": versions}
 

@@ -607,8 +607,9 @@ class ObsidianFSBackend(GraphIndexMixin):
     def _resolve_path(self, ref: NoteRef | str) -> Path:
         """Resolve a NoteRef or name to a full filesystem path inside the vault.
 
-        ``RuntimeError`` for anything that lands outside it, the driver's "cannot
-        read this" (13 callers treat it as not found). The ref reaches here
+        A plain ``RuntimeError`` for anything that lands outside it: a refusal,
+        not `NoteNotFound`, though the callers tolerating any failed read take
+        it as one. The ref reaches here
         from a chat tool as often as from the user, and a document in the inbox
         can steer the model into naming `/proc/self/environ` (audit 2026-10-09,
         S2): before this check `read_note` returned any file the process could

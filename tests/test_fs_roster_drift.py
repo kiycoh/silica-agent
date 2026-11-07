@@ -42,13 +42,13 @@ def backend(vault_dir, monkeypatch):
 def _rebuild_counter(backend, monkeypatch):
     """Count full rebuilds without suppressing them."""
     calls: list[int] = []
-    original = backend._rebuild_index
+    original = backend.transport._rebuild_index
 
     def counting():
         calls.append(1)
         return original()
 
-    monkeypatch.setattr(backend, "_rebuild_index", counting)
+    monkeypatch.setattr(backend.transport, "_rebuild_index", counting)
     return calls
 
 
