@@ -573,7 +573,7 @@ class ObsidianWSBackend(GraphIndexMixin):
             self._patch_graph_add(path, self._node_ref(path), content)
 
     def _resolve_target(self, target: str, source_path: str = "") -> NoteRef | None:
-        """Resolve a link target against the index — by path, else by name.
+        """Resolve a link target against the index: by path, else by name.
         Why this is not the fs rule: GraphIndexMixin."""
         from silica.kernel.base.markdown import resolve_relative
 

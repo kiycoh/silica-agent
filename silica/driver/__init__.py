@@ -113,7 +113,7 @@ def reader_for(vault: str) -> NoteReader:
 
 
 def set_driver(driver: NoteReader | None) -> None:
-    """Install a live transport — `silica connect`'s attached ws backend. None
+    """Install a live transport: `silica connect`'s attached ws backend. None
     falls back to building the fs backend on next access."""
     global _driver
     with _driver_lock:

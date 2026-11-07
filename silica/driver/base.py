@@ -263,7 +263,7 @@ class GraphIndexMixin:
 
 
 # ---------------------------------------------------------------------------
-# Protocols — the domain interface (SILICA.md §3 L0)
+# Protocols: the domain interface (SILICA.md §3 L0)
 # ---------------------------------------------------------------------------
 
 @runtime_checkable

@@ -227,7 +227,7 @@ forbidden_modules = ["silica"]
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]
-name = "the driver is a transport — it imports nothing above kernel.base"
+name = "the driver is a transport: it imports nothing above kernel.base"
 type = "forbidden"
 source_modules = ["silica.driver"]
 forbidden_modules = [

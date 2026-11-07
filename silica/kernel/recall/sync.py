@@ -220,7 +220,7 @@ def _sweep(stats: SweepStats, uncapped: bool = False) -> SweepStats:
     from silica.driver import DRIVER
     from silica.kernel.recall.embed import get_store
 
-    # A driver without mtimes (ws backend) has no cheap change signal — the
+    # A driver without mtimes (ws backend) has no cheap change signal: the
     # bridge's own write path keeps the indexes fresh while it is connected.
     if not DRIVER.knows_mtimes:
         stats.skipped = True
