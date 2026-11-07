@@ -332,7 +332,7 @@ def _read_sources(vault: Path, notes: dict, wanted: dict[str, list[str]], names:
             continue
         data, _raw, body = frontmatter.split(leaf.read_text(encoding="utf-8", errors="ignore"))
         data = data or {}
-        file = names[stem]
+        file = names.get(stem) or leaf.name
         said = ", ".join(str(data[k]) for k in ("authors", "source_title") if data.get(k))
         if said:
             credits[file] = said
@@ -362,7 +362,13 @@ def _leaf_names(vault: Path) -> dict[str, str]:
     root = vault / in_write_dir(SOURCES_DIR)
     for leaf in sorted(root.rglob("*.md")) if root.is_dir() else ():
         note = note_index.parsed(vault, leaf.relative_to(vault).as_posix(), body=False)
-        data = note[0] if note else frontmatter.split(leaf.read_text(encoding="utf-8", errors="ignore"))[0]
+        try:
+            data = note[0] if note else frontmatter.split(leaf.read_text(encoding="utf-8", errors="ignore"))[0]
+        except OSError as exc:
+            # Gone since the walk, with an ingest running: its notes fall back on the name the
+            # records give, and the view, which asks on every click, still draws.
+            logger.debug("rights: %s not read (%s)", leaf, exc)
+            continue
         raw = str((data or {}).get("source_file") or "")
         names[leaf.stem.casefold()] = Path(raw.replace("\\", "/")).name or leaf.name
     return names
