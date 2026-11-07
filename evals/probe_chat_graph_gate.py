@@ -240,14 +240,10 @@ def _slash(line: str) -> str:
     """Run a direct command; return what it printed."""
     from rich.console import Console
 
-    import silica.cli as cli
+    from silica.commands import dispatch
 
     console = Console(record=True, width=400)
-    real, cli.CONSOLE = cli.CONSOLE, console
-    try:
-        cli._handle_direct_shortcut(line, [])
-    finally:
-        cli.CONSOLE = real
+    dispatch(line, [], live=console.print)
     return console.export_text()
 
 

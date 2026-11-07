@@ -665,7 +665,7 @@ def main():
         # MCP servers open in the background (ADR-0091); never waited on here.
         from silica.connectors.mcp_tools import start as _start_connectors
         _start_connectors()
-    # /incognito is the user memory module's flag (_dc_incognito), read below
+    # /incognito is the user memory module's flag (commands.memory), read below
     # for capture too, so one toggle covers both. A session starts on the record.
     from silica.kernel import user_memory
     user_memory.set_incognito(False)

@@ -143,8 +143,7 @@ def _no_page_reading_network(monkeypatch: pytest.MonkeyPatch) -> None:
 def _load_tools_registry() -> None:
     """Fill TOOLS as every entry point does: the facts the loop, the compaction
     and the taint gate read are in it, and a test file run alone must see them.
-    The CLI too, as every process that runs a turn starts in it: its command
-    table is what a slash turn reaches through `session.commands`."""
+    The CLI too, as every process that runs a turn starts in it."""
     import silica.cli  # noqa: F401
     from silica.tools import catalog
 
