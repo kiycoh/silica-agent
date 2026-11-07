@@ -23,6 +23,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from silica.agent.compaction import read_stub, relevance_candidates
+from silica.agent.run_context import RunContext
 from silica.model.decide import decide
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,7 @@ def compact_by_relevance(messages: list[dict], tools: dict) -> list[int]:
         return answers["needed"]["noul"] if answers else None
 
     with ThreadPoolExecutor(max_workers=min(_WORKERS, len(candidates))) as ex:
-        ps = list(ex.map(ask, candidates))
+        ps = list(ex.map(RunContext.here().spawn(ask), candidates))
     dropped: list[int] = []
     for (i, name, arguments), p in zip(candidates, ps):
         if p is not None and p < DROP_BELOW:

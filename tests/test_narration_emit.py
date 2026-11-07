@@ -47,6 +47,7 @@ def test_call_llm_failure_closes_the_span_failed(narrator, monkeypatch):
 
 
 def test_consume_wraps_items_in_attributed_subagent_spans(narrator):
+    from silica.agent.run_context import RunContext
     from silica.agent.subagent import consume
     from silica.kernel.workqueue import WorkItem, WorkQueue
 
@@ -59,7 +60,7 @@ def test_consume_wraps_items_in_attributed_subagent_spans(narrator):
     item = WorkItem(kind="dedup", target_path="Concepts/X.md", id="it1")
     wq.enqueue(item)
     wq.close()
-    consume(wq, FakeAgent(), parent_span="run-r9", run_id="r9")
+    RunContext.of_run(run="r9", parent="run-r9").spawn(consume)(wq, FakeAgent())
     beats = _beats(narrator)
     sub = [b for b in beats if b["kind"] == "subagent"]
     assert [b["status"] for b in sub] == ["running", "done"]

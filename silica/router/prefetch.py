@@ -15,6 +15,8 @@ import logging
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Callable
 
+from silica.agent.run_context import RunContext
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +33,7 @@ class DistillPrefetcher:
         if idx in self._started:
             return
         self._started.add(idx)
-        self._futures[idx] = self._executor.submit(fn)
+        self._futures[idx] = self._executor.submit(RunContext.here().spawn(fn))
 
     def pop(self, idx: int) -> Future | None:
         """Take ownership of idx's future (or None if never/already popped)."""

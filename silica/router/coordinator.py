@@ -21,6 +21,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from silica.agent.run_context import RunContext
 from silica.config import CONFIG
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,8 @@ class Coordinator:
 
         max_workers = max(1, int(self.config.subagent_max_concurrent))
         pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="subagent")
-        futures = [pool.submit(self._consume, wq) for _ in range(max_workers)]
+        worker = RunContext.of_run(run=_run_id, parent=f"run-{_run_id or 'adhoc'}").spawn(self._consume)
+        futures = [pool.submit(worker, wq) for _ in range(max_workers)]
 
         try:
             result = self.fsm.run()  # producer; runs to completion on this thread
@@ -418,13 +420,10 @@ class Coordinator:
         silica/agent/subagent.py (the same engine ad-hoc batches run on)."""
         from silica.agent.subagent import BoundedSubAgent, consume
 
-        # Pool threads start with a fresh context, so the run id has to be set
-        # inside the worker — and RESOLVED PER ITEM, not snapshotted here: this
-        # pool is submitted before `fsm.run()` opens the journal run, so at
-        # thread entry the id is still None. Without it commit_ops' `if
-        # undo_run_id:` guard silently skips the journal and /revert walks past
-        # every note the expand/dedup workers created.
+        # The undo run is RESOLVED PER ITEM, not carried into the thread with the
+        # rest of the run: this pool is submitted before `fsm.run()` opens the
+        # journal run, so at thread entry the id is still None. Without it
+        # commit_ops' `if undo_run_id:` guard silently skips the journal and
+        # /revert walks past every note the expand/dedup workers created.
         consume(wq, BoundedSubAgent(self.config), self._stop,
-                parent_span=f"run-{getattr(self.fsm.progress, 'run_id', None) or 'adhoc'}",
-                run_id=getattr(self.fsm.progress, "run_id", None),
                 undo_run=lambda: getattr(self.fsm, "undo_run_id", None))

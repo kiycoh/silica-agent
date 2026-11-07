@@ -21,6 +21,7 @@ from typing import Annotated, Any
 
 from pydantic import Field
 
+from silica.agent.run_context import RunContext
 from silica.kernel.base.syntax import NAME_UNSAFE_RE
 from silica.tools import tool
 
@@ -396,7 +397,8 @@ def silica_rework(
     # message behind it.
     ask = re.split(r"\n\s*\n", request, maxsplit=1)[0][:300] if request else (instruction or "Rework this text")
     with ThreadPoolExecutor(min(WORKERS, len(parts))) as pool:
-        futures = [pool.submit(_rework, p, ask, language, cancel_token, kind, register) for p in parts]
+        block = RunContext.here().spawn(_rework)
+        futures = [pool.submit(block, p, ask, language, cancel_token, kind, register) for p in parts]
         outs: list[str] = []
         for k, fut in enumerate(futures):
             try:

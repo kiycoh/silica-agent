@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from silica.agent.run_context import RunContext
 from silica.config import CONFIG
 from silica.capabilities import CAPABILITIES, Capability
 from silica.kernel.workqueue import DedupFamily, DedupJob, ExpandJob, WorkItem
@@ -53,9 +54,7 @@ def _item_provenance(item: Any) -> tuple[str, str, str] | None:
     return (source_key(src), job.content_hash, job.run_id) if src and job.content_hash else None
 
 
-def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None,
-            undo_run: Any = None, parent_span: str | None = None,
-            run_id: str | None = None) -> None:
+def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None, undo_run: Any = None) -> None:
     """One consumer thread: claim → handle → complete until the queue closes.
 
     THE consumer loop — shared by the Coordinator's in-run pool and the ad-hoc
@@ -70,13 +69,6 @@ def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None,
     from silica.kernel.write.gate import in_run
     from silica.obs.events import WorkCancelledEvent
     from silica.obs import narration as _narr_mod
-
-    # Thread contexts are born empty: rebind the run/parent anchors the
-    # submitting thread held, so children attribute to the run span.
-    if run_id is not None:
-        _narr_mod.set_run(run_id)
-    if parent_span is not None:
-        _narr_mod.set_parent(parent_span)
 
     while True:
         item = wq.claim()               # blocks; no timeout, no polling
@@ -156,17 +148,12 @@ def run_subagent_batch(
     wq.close()
 
     # One undo-journal run for the whole batch so /revert can undo the entire
-    # /enrich or /dedup. Pool workers don't inherit contextvars, so
-    # each worker enters the same run itself.
-    from silica.kernel.write.gate import in_run, open_run
-    undo_run_id = open_run(f"{items[0].kind}-batch")
-
-    def _worker():
-        with in_run(undo=undo_run_id):
-            return consume(wq, agent, cancel_token)
+    # /enrich or /dedup.
+    from silica.kernel.write.gate import open_run
+    worker = RunContext.of_run(undo=open_run(f"{items[0].kind}-batch")).spawn(consume)
 
     with ThreadPoolExecutor(max_workers=mw, thread_name_prefix="subagent") as ex:
-        futures = [ex.submit(_worker) for _ in range(mw)]
+        futures = [ex.submit(worker, wq, agent, cancel_token) for _ in range(mw)]
     for f in futures:
         exc = f.exception()
         if exc:
