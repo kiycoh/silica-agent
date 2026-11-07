@@ -2745,11 +2745,11 @@ def _sc_enrich(args: list[str], **_) -> str | None:
 
 def _sc_dedup(args: list[str], **_) -> str | None:
     """/dedup [folder] — seed a batch ledger over the near-duplicate pairs found."""
-    from silica.tools.runners import _scan_dedup_pairs
+    from silica.kernel.recall import duplicates
 
     folder = " ".join(_positional(args))
 
-    pairs, err = _scan_dedup_pairs(folder)
+    pairs, err = duplicates.scan_pairs(folder)
     if err:
         CONSOLE.print(f"  [yellow]{err}[/]")
         return ""  # handled inline — nothing for the agent

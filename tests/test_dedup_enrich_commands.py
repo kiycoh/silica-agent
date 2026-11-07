@@ -133,7 +133,7 @@ def test_cli_dedup_seeds_ledger():
     from silica import cli
 
     pairs = [{"source": "Concepts/A", "target": "Concepts/B", "score": 0.8}]
-    with patch("silica.tools.runners._scan_dedup_pairs", return_value=(pairs, None)) as scan, \
+    with patch("silica.kernel.recall.duplicates.scan_pairs", return_value=(pairs, None)) as scan, \
          patch("silica.cli._seed_batch_ledger", return_value="ledger msg") as seed:
         msg = cli._expand_workflow_shortcut("/dedup Concepts/ML")
 
@@ -148,7 +148,7 @@ def test_cli_dedup_seeds_ledger():
 def test_cli_dedup_no_pairs_handled_inline():
     """An empty scan is fully handled inline — the agent gets nothing to do."""
     from silica import cli
-    with patch("silica.tools.runners._scan_dedup_pairs", return_value=([], None)):
+    with patch("silica.kernel.recall.duplicates.scan_pairs", return_value=([], None)):
         msg = cli._expand_workflow_shortcut("/dedup")
     assert msg == ""
 

@@ -59,7 +59,7 @@ ALLOWED = {
     "tools/graph.py":               "silica_concepts and the vault report read the stores by design",
     "kernel/recall/refresh.py":     "the three index refresh loops: build_index, not relatedness ranking",
     "kernel/report/related.py":     "constructs stores to inject into the facade (silica_related, orphan candidates)",
-    "tools/runners.py":             "pairwise cosine dedup windows (silica_dedup)",
+    "kernel/recall/duplicates.py":  "pairwise cosine dedup windows (silica_dedup, /dedup)",
     "kernel/vault_language.py":     "metadata-only read via the public frozen_lang accessor (the vault's language), no store construction, not relatedness ranking",
     "onboarding/checks.py":         "the doctor's index rows: how many vectors and notes the stores hold, not relatedness ranking",
     "kernel/report/graph_report/compute.py": "store-file stat only (_index_path, for the report memo's freshness key), no store construction, not relatedness ranking",
