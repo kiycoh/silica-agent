@@ -217,8 +217,8 @@ def serve(port: int = GUI_PORT) -> None:
     opened: the person opens the address the banner prints."""
     import uvicorn
 
-    from silica.ui.banner import print_banner
-    from silica.ui.console import CONSOLE
+    from silica.term.banner import print_banner
+    from silica.term.console import CONSOLE
 
     SESSION.reset()
 

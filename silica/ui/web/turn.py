@@ -395,7 +395,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             return
         elif text.startswith("/"):
             from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
-            from silica.ui.console import CONSOLE
+            from silica.term.console import CONSOLE
 
             def _run_slash():
                 # Both dispatchers print their result to CONSOLE and both can do

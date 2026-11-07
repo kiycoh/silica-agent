@@ -529,8 +529,8 @@ def unrecorded(line: str) -> bool:
 def render_help() -> None:
     from rich.padding import Padding
 
-    from silica.ui.console import CONSOLE
-    from silica.ui.style import GROUP_STYLE, command_table
+    from silica.term.console import CONSOLE
+    from silica.term.style import GROUP_STYLE, command_table
 
     CONSOLE.print()
     CONSOLE.print("  [bold]silica commands[/]")

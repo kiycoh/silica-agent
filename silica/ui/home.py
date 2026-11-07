@@ -8,12 +8,12 @@ from pathlib import Path
 from rich.text import Text
 
 from silica.config import CONFIG
-from silica.ui.banner import print_banner
-from silica.ui.console import CONSOLE
+from silica.term.banner import print_banner
+from silica.term.console import CONSOLE
 
 
 def _model_vault_line(model_slug: str, worker_slug: str, vault: str) -> Text:
-    from silica.ui.style import GLYPHS
+    from silica.term.style import GLYPHS
     t = Text("  ")
     t.append(GLYPHS["model"], style="dim")
     t.append(f" {model_slug}", style="bold")

@@ -318,7 +318,7 @@ class TestLandingTurn:
 class TestRepl:
     def test_the_repl_prints_them_in_channel_order(self):
         from silica.cli import _print_turn_notes
-        from silica.ui.console import CONSOLE
+        from silica.term.console import CONSOLE
 
         msgs = [{"role": "assistant", "content": "a"}]
         notes = turn_notes.attach(msgs, [{"kind": "graph", "text": "graph line"},

@@ -28,8 +28,8 @@ from silica.obs.events import (
     BatchRunStartEvent,
 )
 from silica.config import CONFIG
-from silica.ui.console import CONSOLE
-from silica.ui.style import GLYPHS
+from silica.term.console import CONSOLE
+from silica.term.style import GLYPHS
 from silica.ui import tool_labels
 
 logger = logging.getLogger(__name__)

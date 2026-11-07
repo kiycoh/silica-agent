@@ -215,7 +215,7 @@ def test_web_search_closes_a_renderer_it_owns(tmp_vault, monkeypatch):
 def test_injector_failure_names_the_failed_phase(monkeypatch):
     from silica.obs.events import ToolCompleteEvent
     from silica.config import CONFIG
-    from silica.ui.console import CONSOLE
+    from silica.term.console import CONSOLE
     from silica.ui.renderer import make_progress_callback
 
     monkeypatch.setattr(CONSOLE, "_force_terminal", True)

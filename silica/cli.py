@@ -23,7 +23,7 @@ from collections.abc import Callable
 from contextlib import nullcontext, redirect_stdout
 from typing import NamedTuple
 
-from silica.ui.style import FlatMarkdown
+from silica.term.style import FlatMarkdown
 
 from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools, web_turn_constraints
 from silica.agent.loop import run_agent
@@ -38,7 +38,7 @@ from silica.config import claim_env, CONFIG, env_raw, GUI_PORT, live_env
 from silica.onboarding.adopt import resolve_cwd_vault
 from silica.prompts import _lang_rule, system_prompt
 from silica.sources import ingest
-from silica.ui.console import CONSOLE
+from silica.term.console import CONSOLE
 from silica.ui.home import print_home
 from silica.ui.prompt import build_session, bottom_toolbar, prompt_text
 from prompt_toolkit.patch_stdout import patch_stdout

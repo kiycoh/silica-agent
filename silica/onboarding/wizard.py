@@ -24,9 +24,9 @@ from silica.kernel.base.layout import DOC_SCAN_CAP, files_with
 from silica.kernel.base.manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
 from silica.provider_table import HOSTED, PROVIDERS
-from silica.ui.banner import print_banner
-from silica.ui.console import CONSOLE
-from silica.ui.style import GLYPHS
+from silica.term.banner import print_banner
+from silica.term.console import CONSOLE
+from silica.term.style import GLYPHS
 
 # Optional leading `#` so merge_env can uncomment-and-fill a `# KEY=default`
 # line seeded from .env.example, not just rewrite an already-active key.

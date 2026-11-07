@@ -207,7 +207,7 @@ def test_bg_handler_does_not_take_console_lock():
     lock of its own — the regression this pins is the hang, not a torn line.
     """
     import threading
-    from silica.ui.console import CONSOLE
+    from silica.term.console import CONSOLE
 
     handler = LiveAwareStreamHandler()
     handler.setFormatter(logging.Formatter("%(message)s"))
