@@ -8,7 +8,8 @@ import re
 import pytest
 from fastapi.testclient import TestClient
 
-from silica.config import VIEWS, served_views, withheld
+from silica.config import served_views, withheld
+from silica.view_table import VIEWS
 from tests.webassets import WEB as STATIC_SRC
 
 # Page (ADR-0143, ADR-0151) is a view added after ADR-0140, so paid by default
@@ -88,7 +89,7 @@ def test_a_free_chat_neither_offers_nor_permits_a_paid_views_tool(monkeypatch):
     import silica.cli  # noqa: F401  registers every tool
     from silica.agent.constraints import _eligible, chat_deferred, chat_tools
 
-    paid = {t for v in PAID for t in VIEWS[v].get("tools", ())}
+    paid = {t for v in PAID for t in VIEWS[v].tools}
     monkeypatch.delenv("SILICA_HOSTED", raising=False)
     assert paid <= set(_eligible())
     monkeypatch.setenv("SILICA_HOSTED", "1")
@@ -122,7 +123,7 @@ def test_the_chat_hears_of_no_view_the_account_does_not_get(monkeypatch):
 
 # Point 5: a route, tool or command added later is placed on purpose, so a new
 # view's cannot ship open to Free by omission. These are the chat's, shared by
-# every account; a new one goes here or into its view's row in config.VIEWS.
+# every account; a new one goes here or into its view's row in view_table.VIEWS.
 SHARED_ROUTES = {
     "/link",
     "/", "/asset", "/attachment/{name}", "/bug_report", "/changes", "/changes/diff", "/changes/keep",
@@ -186,7 +187,7 @@ def _paths(routes):
 
 
 def _owned(part: str) -> set[str]:
-    return {x for v in VIEWS.values() for x in v.get(part, ())}
+    return {x for v in VIEWS.values() for x in getattr(v, part)}
 
 
 def test_every_route_tool_command_and_tab_is_a_views_or_named_shared():
@@ -213,3 +214,38 @@ def test_every_route_tool_command_and_tab_is_a_views_or_named_shared():
     assert not commands - _owned("commands") - SHARED_COMMANDS, sorted(commands - _owned("commands") - SHARED_COMMANDS)
     tabs = set(re.findall(r'data-tab="([a-z]+)"', (STATIC_SRC / "index.html").read_text(encoding="utf-8")))
     assert tabs == set(VIEWS)
+
+
+def test_every_view_marker_in_the_page_is_a_row_of_the_table():
+    """A `data-view` the table does not hold is hidden from every hosted account
+    by the CSS, with nothing to say why (index() marks only served views)."""
+    html = (STATIC_SRC / "index.html").read_text(encoding="utf-8")
+    assert set(re.findall(r'data-view="([a-z]+)"', html)) <= set(VIEWS)
+
+
+def test_every_route_a_help_row_names_is_a_route_of_the_app():
+    from silica.ui.web import server
+
+    html = (STATIC_SRC / "index.html").read_text(encoding="utf-8")
+    named = set(re.findall(r'data-route="([^"]+)"', html))
+    assert named and named <= set(_paths(server.app.routes))
+
+
+def test_each_address_the_chat_is_told_is_a_view_the_help_panel_names():
+    from silica.ui.web.app_help import ADDRESS, panel
+
+    assert set(ADDRESS) <= {term for term, _ in dict(panel(hosted=False))["the views"]}
+
+
+def test_the_page_is_told_what_this_process_withholds(free, monkeypatch):
+    """The landing's ideas read this and not their own rule: /quiz goes with Learn,
+    and /explain with a demo (DEMO_OFF)."""
+    from silica.ui.web.vocabulary import table
+
+    assert "/quiz" in table()["views"]["withheld_commands"]
+    assert "/explain" not in table()["views"]["withheld_commands"]
+    monkeypatch.setenv("SILICA_DEMO", "1")
+    assert "/explain" in table()["views"]["withheld_commands"]
+    monkeypatch.delenv("SILICA_HOSTED")
+    monkeypatch.delenv("SILICA_DEMO")
+    assert table()["views"]["withheld_commands"] == []

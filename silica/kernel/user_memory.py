@@ -35,6 +35,8 @@ from silica.obs import narration
 USER_BUDGET = 1000
 VAULT_BUDGET = 1500
 SCOPES = ("user", "vault")
+# The line a write leaves, the chat's under Undo and the transcript's.
+VERBS = {"save": "Saved to memory", "replace": "Updated memory", "forget": "Forgot"}
 _BUDGETS = {"user": USER_BUDGET, "vault": VAULT_BUDGET}
 
 # The seed message carries this in `origin`, which the wire boundary strips
@@ -492,7 +494,6 @@ def describe(result: dict) -> str:
     """One line for the user about a write: what the chat shows under Undo."""
     if not result.get("ok"):
         return result.get("error", "Memory was not changed.")
-    verb = {"save": "Saved to memory", "replace": "Updated memory",
-            "forget": "Forgot"}.get(result.get("action", ""), "Memory updated")
+    verb = VERBS.get(result.get("action", ""), "Memory updated")
     text = result.get("text", "").removeprefix("- ")
     return f"{verb}: {text}"

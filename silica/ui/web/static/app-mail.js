@@ -54,7 +54,7 @@ async function mailAct(action, payload) {
   const r = await postJson(`/connectors/mail/${action}`, payload);
   let d = {};
   try { d = await r.json(); } catch { /* an empty answer is still an answer */ }
-  if (!r.ok || d.ok === false) throw new Error(d.error || d.detail || `HTTP ${r.status}`);
+  if (!r.ok || d.ok === false) throw new Error(failureSaid(d, `HTTP ${r.status}`));
   return d;
 }
 
@@ -268,7 +268,7 @@ window.ST_CONNECTOR_RENDERERS.mail = function renderMail(blockEl, status, rerend
         method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: f });
       let d = {};
       try { d = await r.json(); } catch { /* an empty answer: the status says it */ }
-      if (!r.ok) throw new Error(d.detail || `HTTP ${r.status}`);
+      if (!r.ok) throw new Error(failureSaid(d, `HTTP ${r.status}`));
       form = mailForm = { path: d.path, me: "", label: "", all: false };
       controls = null;
       fields.replaceChildren();

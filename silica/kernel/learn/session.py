@@ -30,7 +30,7 @@ from typing import Any
 
 from silica.kernel.base import note_index
 from silica.kernel.base.notekey import ledger_key
-from silica.kernel.learn.reasons import RATING_NAME, outcome, ts
+from silica.kernel.learn.reasons import MARK_SAY, RATING_NAME, outcome, ts
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 class Refused(Exception):
     """A session action turned away. The text is what the reader is told; `why`
     is BUSY, MISSING, INVALID or NO_MODEL, for a surface to say in its own terms."""
+
+    code = ""
 
     def __init__(self, why: str, text: str):
         super().__init__(text)
@@ -47,6 +49,18 @@ class Refused(Exception):
 # Who is turned away and for what: another session holds the slot, the thing
 # named is not there, the request cannot be done, the model gave nothing.
 BUSY, MISSING, INVALID, NO_MODEL = "busy", "missing", "invalid", "no_model"
+
+
+class Gone(Refused):
+    """The session lived in this process's memory and the process restarted under
+    an open page. `code` is what a surface acts on: every later call would fail
+    the same way, and a sentence is not an error code."""
+
+    code = "session_gone"
+
+    def __init__(self) -> None:
+        super().__init__(MISSING, "no live session with that id")
+
 
 # The reason a suggestion is on the list, in the reader's words (refinement §19).
 REASON = {"due": "Suggested for review", "unexplored": "Not practised yet", "stale": "Changed since last practice",
@@ -401,7 +415,7 @@ def reload(sid: str) -> dict:
 
 def _live(sid: str) -> dict:
     if _LIVE is None or _LIVE["id"] != sid:
-        raise Refused(MISSING, "no live session with that id")
+        raise Gone()
     return _LIVE
 
 
@@ -880,12 +894,12 @@ def _receipt(s: dict) -> dict:
 
 def _state_words(st: dict) -> str:
     if st["met"]:
-        return f"met without help on {iso_day(ts(st['met']))}"
+        return f"{MARK_SAY['full']} on {iso_day(ts(st['met']))}"
     if st["assisted"]:
-        return "met with help, not counted"
+        return MARK_SAY["half"]
     if st["missed"]:
         return "missed"
-    return "still to verify"
+    return MARK_SAY["open"]
 
 
 def _points_covered(s: dict, rows: list[dict]) -> list[dict]:
@@ -969,7 +983,7 @@ def _next_line(rows: list[dict]) -> str:
 # ---------------------------------------------------------------- the `## Sessions` line
 # A closed session's line on its plan note, composed and read here and nowhere
 # else: position 0 is the date, 1 the items, and the id, the tag's value, is
-# what makes a retry append nothing. `static/app-learn.js` reads the same text.
+# what makes a retry append nothing.
 
 _SESSION_ID_RE = re.compile(r"session:\s*([0-9a-f]{8,32})")
 
@@ -993,7 +1007,9 @@ def has_line(text: str, sid: str) -> bool:
 
 
 def parse_lines(lines: list[str]) -> list[dict]:
-    """The `## Sessions` section's lines as {date, items, line, session, met}."""
+    """The `## Sessions` section's lines as {date, items, line, session, met,
+    rest}. `rest` is what follows the items without the id, the column a line
+    with no `met:` shows, so the page holds no copy of this format."""
     out = []
     for line in lines:
         line = line.strip()
@@ -1002,8 +1018,9 @@ def parse_lines(lines: list[str]) -> list[dict]:
         parts = [p.strip() for p in line[2:].split(" · ")]
         m = re.match(r"(\d+) item", parts[1] if len(parts) > 1 else "")
         met = next((x[len("met: "):] for x in parts if x.startswith("met: ")), "")
+        rest = " · ".join(re.sub(r" · session: [0-9a-f]+$", "", line[2:]).split(" · ")[2:])
         out.append({"date": parts[0][:10], "items": int(m.group(1)) if m else 0,
-                    "line": line[2:], "session": line_id(line), "met": met})
+                    "line": line[2:], "session": line_id(line), "met": met, "rest": rest})
     return out
 
 
@@ -1016,7 +1033,7 @@ def close(sid: str) -> dict:
     if _LIVE is None or _LIVE["id"] != sid:
         if _LAST and _LAST["id"] == sid:
             return _LAST
-        raise Refused(MISSING, "no live session with that id")
+        raise Gone()
     s = _LIVE
     rc = _receipt(s)
     if s["plan"] and rc["recorded"]:

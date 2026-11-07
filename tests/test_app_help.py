@@ -50,3 +50,16 @@ def test_settings_are_named_never_valued(monkeypatch):
     monkeypatch.setenv("SILICA_HOSTED", "1")
     msg = app_message()
     assert "dictation language" in msg and "api key" not in msg
+
+
+def test_the_tabs_row_names_the_tabs_explore_has():
+    # The row told the chat of Path and Areas for a day after ADR-0152 removed
+    # them, and of neither Flow nor Clusters, and the LIMIT forbids naming
+    # anything the rows do not.
+    shell = (INDEX.parent / "app-shell.js").read_text(encoding="utf-8")
+    block = shell[shell.index("const LAYOUT_MODES = ["):]
+    labels = re.findall(r'^\s*\["\w+", "(\w+)",', block[:block.index("];")], re.M)
+    assert len(labels) == 5
+    row = dict(dict(panel(hosted=False))["explore"])["the tabs"]
+    said = set(re.findall(r"\b[A-Z][a-z]+\b", row)) - {"The"}
+    assert said == set(labels), row

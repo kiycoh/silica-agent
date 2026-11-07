@@ -433,13 +433,13 @@ function greet(again = false) {
 // way the + menu does. Dated notes are left out: a daily note is a hub because
 // every day links to it, and "quiz me on 2026-10-21" asks about nothing.
 // /quiz is a shortcut, split with shlex, so a title with spaces is quoted; the
-// two skills read their line as written. /quiz is Learn's, so an account
-// without Learn is not offered it (ADR-0140), and a demo refuses /explain.
+// two skills read their line as written. What this process withholds is not
+// offered: /quiz without Learn (ADR-0140), /explain in a demo.
 const LANDING_IDEAS = [
   ["Explain ", "/explain", (link) => `/explain [[${link}]]`],
   ["Quiz me on ", "/quiz", (link) => `/quiz ${/\s/.test(link) ? `"${link}"` : link}`],
   ["Summarize ", "/summarize", (link) => `/summarize [[${link}]]`],
-].filter(([, cmd]) => (cmd !== "/quiz" || viewServed("learn")) && (cmd !== "/explain" || !DEMO));
+].filter(([, cmd]) => !VOCAB.views.withheld_commands.includes(cmd));
 
 function renderLandingIdeas(data) {
   const box = $("#vh-ideas");
@@ -651,7 +651,7 @@ async function moveFromTree(paths, folder, name) {
     r = await postJson("/tree/move", name !== undefined ? { path: paths[0], name } : { paths, folder });
     data = await r.json();
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify((data && data.detail) || "couldn't move that"); return; }
+  if (!r || !r.ok) { notify(failureSaid(data, "couldn't move that")); return; }
   followMoves(data.moved, data.rewritten);
   if (name === undefined && folder) openTreeFolder(folder);
   clearTreeSel();
@@ -694,7 +694,7 @@ async function undoTreeRun(run) {
     r = await postJson("/tree/undo", { run });
     data = await r.json();
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify((data && data.detail) || "couldn't undo that"); return null; }
+  if (!r || !r.ok) { notify(failureSaid(data, "couldn't undo that")); return null; }
   return data;
 }
 
@@ -889,7 +889,7 @@ async function deleteFromTree(note, folder, paths) {
     r = await postJson("/tree/delete", paths ? { paths } : note ? { path: note } : { folder });
     data = await r.json();
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify((data && data.detail) || "couldn't delete that"); return false; }
+  if (!r || !r.ok) { notify(failureSaid(data, "couldn't delete that")); return false; }
   const gone = new Set(data.deleted);
   // A pin on a deleted note opens nothing; the undo puts it back with the note.
   const unpinned = pinnedPaths.filter((p) => gone.has(p));
@@ -969,7 +969,7 @@ async function trashAct(url, item, done) {
     r = await postJson(url, item.all ? { all: true } : { run: item.run, path: item.path });
     data = await r.json();
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify((data && data.detail) || "couldn't do that", "error"); loadTrash(); return; }
+  if (!r || !r.ok) { notify(failureSaid(data, "couldn't do that"), "error"); loadTrash(); return; }
   notify(done);
   loadVaultInfo(); // a restored note joins the tree, and the trash redraws with it
 }
@@ -1450,7 +1450,7 @@ async function openSession(id, fromUrl = false) {
 // bookmark made before a rename lands where it did. Calendar was Plan from
 // 2026-10-13 to 2026-10-15 and is Calendar again (ADR-0111 point 2): plans are
 // made in Learn, and two pilot users looked for them under Plan the same day.
-const VIEW_SLUG = { graph: "explore", metrics: "examine", learn: "memorize", note: "write" };
+const VIEW_SLUG = { ...VOCAB.views.slugs, note: "write" };
 const OLD_SLUG = { plan: "calendar" };
 // A view the account does not get (Examine on hosted, ADR-0111 point 3; a paid
 // one on Free, ADR-0140) has no address, so a bookmark lands on the chat like

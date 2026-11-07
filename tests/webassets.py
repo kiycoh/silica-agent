@@ -41,8 +41,11 @@ def app_js() -> str:
 
 def core_js() -> str:
     """app-core.js, for a block lifted out of a script and run under node: such a
-    block reads core's names as globals, and core touches no DOM while it loads."""
-    return (WEB / "app-core.js").read_text(encoding="utf-8")
+    block reads core's names as globals, and core touches no DOM while it loads.
+    `VOCAB` is the real table, as index() stamps it, and not a copy for the tests."""
+    from silica.ui.web.vocabulary import island
+
+    return f"const VOCAB = {island()};\n" + (WEB / "app-core.js").read_text(encoding="utf-8")
 
 
 def app_css() -> str:

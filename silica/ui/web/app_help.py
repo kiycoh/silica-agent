@@ -13,10 +13,12 @@ from __future__ import annotations
 from html.parser import HTMLParser
 from pathlib import Path
 
+from silica.view_table import VIEWS
+
 INDEX = Path(__file__).parent / "static" / "index.html"
 
 # A view's address, which the hash router opens (app-shell.js tabFromHash).
-ADDRESS = {"Discover": "#discover", "Explore": "#explore", "Memorize": "#memorize", "Calendar": "#calendar", "Examine": "#examine"}
+ADDRESS = {v.label: f"#{v.slug}" for v in VIEWS.values() if v.linked}
 
 # Not "point to the help panel" for what it does not name: it holds these same
 # rows, so the pointer led nowhere, and the first wording's answers went on to
@@ -44,7 +46,7 @@ class _Panel(HTMLParser):
     row whose last direct child is the text and the children before it the term."""
 
     def __init__(self, hosted: bool):
-        from silica.config import VIEWS, hosted_views, withheld
+        from silica.config import hosted_views, withheld
 
         super().__init__()
         self.served = {"chat", *(hosted_views() if hosted else VIEWS)}

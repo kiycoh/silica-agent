@@ -14,6 +14,9 @@ from silica.kernel.text import note_parts
 logger = logging.getLogger(__name__)
 
 
+# A link from here to a note nobody wrote, in the row's reason and on its tag.
+UNWRITTEN = "linked from here, never written"
+
 # Below this a note reads faster whole than as an extract, so the snippets
 # section is dropped rather than duplicating the reader.
 _SNIPPET_MIN_BODY = 700
@@ -235,7 +238,7 @@ def suggested(canon: str, related: list[dict], linked: set[str], resolve) -> lis
     """
     out: list[dict] = [
         {"name": note_parts.clean_name(link.target), "path": "", "kind": "ghost",
-         "why": "linked from here, never written"}
+         "why": UNWRITTEN}
         for link in unresolved_links()
         if link.source.path == canon
     ]

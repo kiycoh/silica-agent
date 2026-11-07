@@ -249,7 +249,34 @@ def test_a_drag_writes_the_session_note_and_draws_it_at_once(cal):
     assert "event_plan: '[[Plans/Exam]]'" in text and "AI: true" not in text
 
 
-def test_the_card_refuses_an_empty_start_and_writes_nothing(cal):
+def _evening(cal) -> None:
+    """Reload the page with its clock past 22:00, wherever this runs: the card
+    opens at the next hour, and its end meets the day's last minute."""
+    utc = dt.datetime.now(dt.timezone.utc).hour
+    east = (22 - utc + 12) % 24 - 12  # Etc/ zones are signed the other way round
+    cal.send("Emulation.setTimezoneOverride", {"timezoneId": f"Etc/GMT{-east:+d}"})
+    cal.open(cal.base + "/#calendar")
+    assert cal.js("new Date().getHours()") in (22, 23)  # 23 when the hour turned on the way here: same card
+
+
+def test_a_card_opened_late_in_the_evening_saves_with_the_end_it_shows(cal):
+    """From 22:00 the end was 23:59, off the inputs' 15-minute step, and the
+    browser's own validation stopped Save without a word (2026-11-06)."""
+    _evening(cal)
+    cal.click("document.querySelector('#cal-new')")
+    cal.wait("!!document.querySelector('.cq-title')", what="the quick card")
+    assert cal.js("[...document.querySelectorAll('.cal-card input[type=time]')].map(i => i.value)") == ["23:00", "23:59"]
+    cal.type("Tardi")
+    cal.click("document.querySelector('.cq-save')")
+    cal.wait("!document.querySelector('.cal-card')", 5, "the card to close on Save")
+    note = next((cal.vault / "calendar").glob("* Tardi.md"))
+    assert " 23:59" in next(ln for ln in note.read_text(encoding="utf-8").splitlines() if ln.startswith("event_end:"))
+
+
+@pytest.mark.parametrize("late", [False, True], ids=["now", "evening"])
+def test_the_card_refuses_an_empty_start_and_writes_nothing(cal, late):
+    if late:
+        _evening(cal)
     cal.click("document.querySelector('#cal-new')")
     cal.wait("!!document.querySelector('.cq-title')", what="the quick card")
     cal.type("Vuoto")

@@ -54,15 +54,22 @@ function daysAgo(ts) {
 }
 
 // --- talking to the server ---------------------------------------------------
-// postJson is the request and nothing else, for a caller that reads the status
-// itself; answerOf is the one rule for what a refusal is: it throws the server's
-// words, with the status and the body for whoever must branch on them.
+// failureSaid is the one reading of a failure's body, whatever the status it came
+// with: `error` is what the person reads (failures.py), and `detail` alone is a
+// body from outside that shape, a guard's. FastAPI's 422 holds a list there, which
+// is no sentence. postJson is the request and nothing else, for a caller that reads
+// the status itself; answerOf is the one rule for what a refusal is: it throws the
+// server's words, with the status and the body for whoever must branch on them.
+const failureSaid = (data, fallback = "") => {
+  const said = data && (data.error || data.detail);
+  return typeof said === "string" && said ? said : fallback;
+};
 const postJson = (url, body) => fetch(url, {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}),
 });
 async function answerOf(r) {
   const data = await r.json().catch(() => ({})); // an empty or HTML body: the status still says what happened
-  if (!r.ok) throw Object.assign(new Error((data && data.detail) || `HTTP ${r.status}`), { status: r.status, data });
+  if (!r.ok) throw Object.assign(new Error(failureSaid(data, `HTTP ${r.status}`)), { status: r.status, data });
   return data;
 }
 const api = async (url, init) => answerOf(await fetch(url, init));

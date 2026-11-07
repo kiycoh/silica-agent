@@ -230,7 +230,9 @@ def _skip_reason(exc: Exception | str) -> str:
     # and naming no tool or path, so it goes as it is on the server too.
     if isinstance(exc, (MediaRefused, PdfUnreadable)) or not hosted():
         return str(exc)
-    return "it could not be converted"
+    from silica.ui.web import jobs
+
+    return jobs.UNCONVERTED
 
 
 def _ingest_ext(name: str) -> str:
@@ -377,7 +379,7 @@ async def import_files(files: list[UploadFile], paths: list[str]) -> tuple[list[
         except ValueError as exc:
             # A converter's own reason can carry a path or a tool's output, so
             # it is detail, which explain() leaves empty on the server (ADR-0085).
-            row.update(status="refused", reason="it could not be converted", detail=_failure(exc)["detail"])
+            row.update(status="refused", reason=jobs.UNCONVERTED, detail=_failure(exc)["detail"])
         except Exception as exc:
             # Tolerated, not swallowed: one file a lane chokes on must not cost
             # the student the rest of the folder (H4), so it is named in its

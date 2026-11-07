@@ -25,6 +25,7 @@ from silica.kernel.text import note_parts
 from silica.kernel.write import session_changes
 from silica.metrics import emit
 from silica.ui.web import drop, note_ops, render, session, sse
+from silica.ui.web.failures import Refused, refusal
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +299,7 @@ def note_save(payload: dict):
         if current is None:
             raise HTTPException(404, "note unreadable")
         if payload.get("etag") and payload["etag"] != _etag(current):
-            return JSONResponse({"detail": "note changed on disk", "text": current,
+            return JSONResponse({**refusal("note changed on disk"), "text": current,
                                  "etag": _etag(current)}, status_code=409)
         text = str(payload.get("text", ""))
         if text != current:
@@ -499,7 +500,7 @@ async def note_check(payload: dict, request: Request):
         try:
             claim, aimed = check_web.aim(text, card_lines, str(payload.get("claim") or ""))
         except ValueError as e:
-            raise HTTPException(400, str(e))
+            raise Refused(400, e)
         where = (aimed[0].line, aimed[-1].end) if aimed else card_lines
     if rules_only and not await asyncio.to_thread(check.read_cache, CONFIG.vault_path, path):
         # Never checked (or its file torn): a rerun has no marks to bring back.

@@ -36,7 +36,14 @@ logger = logging.getLogger(__name__)
 
 # The topic the narration stream forwards to the browser as `event: job`.
 TOPIC = "jobs/update"
+# A record's `state`, and the two ways of asking about it: still in flight, and
+# ended without its notes, which is what a retry takes. app-jobs.js and the tour
+# compare these as literals, as wire keys are; test_vocabulary holds them to this.
+STATES = ("queued", "running", "done", "failed", "interrupted")
+IN_FLIGHT = ("queued", "running")
+STOPPED = ("failed", "interrupted")
 INTERRUPTED = "the server restarted during this conversion"
+UNCONVERTED = "it could not be converted"
 # Open 2, accepted 2026-10-13: a finished job's record goes after 30 days; a
 # failed or interrupted one stays until the student dismisses it.
 DONE_KEEP_S = 30 * 86400
@@ -114,7 +121,7 @@ def public(rec: dict) -> dict:
     if Path(src.get("path") or "").is_absolute():
         src["path"] = src.get("name") or ""
     out["source"] = src
-    out["retry"] = rec.get("state") in ("failed", "interrupted") and _absolute(rec).is_file()
+    out["retry"] = rec.get("state") in STOPPED and _absolute(rec).is_file()
     return out
 
 
@@ -172,7 +179,7 @@ def record(path: str, *, origin: str, text: str = "", session: str | None = None
         # transcribe and charge them twice (a drop sent again, /convert typed
         # while the drop's job runs).
         for rec in job_records.all_records():
-            if (rec.get("state") in ("queued", "running") and rec.get("vault") == vault
+            if (rec.get("state") in IN_FLIGHT and rec.get("vault") == vault
                     and rec["source"].get("path") == rel and rec["source"].get("sha256") == digest):
                 return public(rec)
         now = time.time()
@@ -257,9 +264,9 @@ def _sentence(exc: Exception) -> str:
     from silica.sources.pdf_extract import PdfUnreadable
 
     if isinstance(exc, MediaRefused | PdfUnreadable | Refused):
-        return str(exc.args[0]) if exc.args else "it could not be converted"
+        return str(exc.args[0]) if exc.args else UNCONVERTED
     if isinstance(exc, ValueError):
-        return "it could not be converted" if hosted() else str(exc)
+        return UNCONVERTED if hosted() else str(exc)
     return "it could not be read"
 
 
@@ -369,8 +376,8 @@ def recover() -> int:
     for rec in job_records.all_records():
         if rec["id"] in _LIVE:
             continue
-        if rec.get("state") in ("queued", "running"):
-            if _update(rec["id"], expect=("queued", "running"), state="interrupted",
+        if rec.get("state") in IN_FLIGHT:
+            if _update(rec["id"], expect=IN_FLIGHT, state="interrupted",
                        error=INTERRUPTED, finished=time.time()):
                 n += 1
         elif rec.get("state") == "done" and (rec.get("finished") or 0) < stale:
@@ -387,7 +394,7 @@ def retry(job_id: str) -> dict:
     rec = read(job_id)
     if rec is None or not _conversion(rec):
         raise Refused("there is no such conversion")
-    if rec.get("state") not in ("failed", "interrupted"):
+    if rec.get("state") not in STOPPED:
         raise Refused(f"{rec['source']['name']} is not stopped, so there is nothing to retry")
     if rec.get("vault") != (CONFIG.vault_path or ""):
         raise Refused(f"{rec['source']['name']} was added to another vault: open that one to retry it")
@@ -407,7 +414,7 @@ def retry(job_id: str) -> dict:
             raise Refused(str(exc.args[0])) from None
     with job_records.LOCK:
         cur = read(job_id)
-        if cur is None or cur.get("state") not in ("failed", "interrupted"):
+        if cur is None or cur.get("state") not in STOPPED:
             raise Refused(f"{name} is not stopped, so there is nothing to retry")
         # `told` too: the agent heard of the failure, and the rerun's end is news.
         cur.update(state="queued", error="", notes=[], hidden=[], finished=None,
@@ -425,7 +432,7 @@ def dismiss(job_id: str) -> None:
         rec = read(job_id)
         if rec is None or not _conversion(rec):
             return
-        if rec.get("state") in ("queued", "running"):
+        if rec.get("state") in IN_FLIGHT:
             raise Refused(f"{rec['source']['name']} is still converting")
         rec.update(dismissed=True, updated=time.time())
         if rec.get("state") == "done":
@@ -506,7 +513,7 @@ def settled(session: str | None) -> str:
     with job_records.LOCK:
         for rec in job_records.all_records():
             if (rec.get("session") != session or rec.get("told") or rec.get("vault") != vault
-                    or rec.get("state") not in ("done", "failed", "interrupted")):
+                    or rec.get("state") not in ("done", *STOPPED)):
                 continue
             name, notes = rec["source"]["name"], rec.get("notes") or []
             if rec["state"] != "done":

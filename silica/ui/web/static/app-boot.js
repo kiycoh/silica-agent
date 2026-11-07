@@ -288,7 +288,7 @@ $("#ctx-ring").addEventListener("click", (e) => {
 const sttPanel = $("#stt-panel");
 // A recording nobody stopped is otherwise a twenty-minute upload and a wait to
 // match, so the take ends itself.
-const MIC_MAX_MS = 60000;
+const MIC_MAX_MS = VOCAB.mic.max_ms;
 
 // Set by every probe: a hosted tenant cannot install or start a transcriber, so
 // the panel keeps only the lane it can still choose, the browser's.
@@ -451,7 +451,7 @@ async function recordTake(take, avail, opts, put) {
       form.append("audio", wav, "clip.wav");
       const resp = await fetch("/stt", { method: "POST", body: form });
       const body = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(body.detail || resp.statusText);
+      if (!resp.ok) throw new Error(failureSaid(body, resp.statusText));
       if (body.via === "local" && sttProbe) sttProbe.cold = false;
       put((body.text || "").trim());
     } catch (err) {
