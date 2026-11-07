@@ -166,7 +166,6 @@ def retry_bundle(content_hash: str) -> dict[str, Any]:
     if not result.ok:
         return {"error": f"Deferred retry write failed: {[f.model_dump() for f in result.failed]}"}
 
-    # Update or clear the deferred store
     if still_rejected:
         store.put(
             content_hash=content_hash,

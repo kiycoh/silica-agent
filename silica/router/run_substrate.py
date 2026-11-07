@@ -74,7 +74,6 @@ def build_substrate(
         except Exception as _emb_e:
             logger.debug("build_substrate: embedder unavailable (%s) — co-occurrence only", _emb_e)
 
-        # Collect concept texts (name + excerpt) from the chunk
         texts: list[str] = []
         for batch in chunk.get("batches", []):
             for c in batch.get("concepts", []):
@@ -99,7 +98,6 @@ def build_substrate(
             except Exception as _ee:
                 logger.debug("build_substrate: query embed failed (%s)", _ee)
 
-        # Build exclusion set: manifest titles + caller-supplied excludes
         exclude_lower: set[str] = {t.lower() for t in manifest_titles}
         if exclude:
             exclude_lower.update(s.lower() for s in exclude)
