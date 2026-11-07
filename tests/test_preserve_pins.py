@@ -43,7 +43,7 @@ LOSS_PINS = {
 }
 
 FREE_PINS = {
-    ("silica/tools/events.py", "silica_event_update", "tuple(_FIELD_TO_KEY.values())"): 1,
+    ("silica/kernel/calendar/write.py", "update_event", "tuple(EVENT_KEYS.values())"): 1,
     ("silica/kernel/learn/plans.py", "set_revisit", "('revisit',)"): 1,
     ("silica/kernel/learn/plans.py", "clear_revisit", "('revisit',)"): 1,
     ("silica/kernel/learn/plans.py", "close_plan", "('status', 'completed')"): 2,
