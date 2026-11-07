@@ -679,7 +679,7 @@ function scatter(points, {
 // `/shape` owns the containment and coupling views; the metrics tab reaches the
 // same grid from its structural-gaps row. Two renderers over one payload is two
 // places to fix a contrast bug in, and the payloads are already identical by
-// construction (`_area_matrix` mirrors `/shape`'s shape for exactly this).
+// construction (`area_matrix` mirrors `/shape`'s shape for exactly this).
 //
 // Two scales in one grid, so they get two treatments: off-diagonal cells ramp on
 // the accent by inter-area link count, the diagonal is neutral and carries the
@@ -1197,7 +1197,7 @@ function evAttention(d, T, rows, measured) {
     // The accent on the worklist's own first row, and names on the next two
     // dots in its order. That order is not the score: a note failed more often
     // than recalled outranks any note that is only idle
-    // (graph_report/compute.py:375), so on the test vault the first row scores
+    // (graph_report/compute.py), so on the test vault the first row scores
     // 6.67 while eighteen below it score 160.
     name: (marks) => {
       const [focal, ...rest] = new Set(rows.map((r) => marks.find((m) => m.items.includes(r))));
@@ -1692,7 +1692,6 @@ function renderMetrics(d) {
 
   grid = activity;
 
-  // --- reliability tiers -----------------------------------------------------
   if (d.temporal) {
     const tp = d.temporal, bt = tp.by_tier || {};
     const tiers = [
@@ -1752,7 +1751,6 @@ function renderMetrics(d) {
     grid.appendChild(sc);
   }
 
-  // --- code coverage ---------------------------------------------------------
   if (d.code_coverage) {
     const cc = d.code_coverage;
     const card = mCard("Code coverage", "source files with at least one note");

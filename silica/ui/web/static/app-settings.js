@@ -81,7 +81,7 @@ function stRevert(row, input) {
 }
 
 // One control per kind. Every list row is an <input list> with a <datalist>
-// rather than a dropdown: _endpoint_model_ids returns [] on any error, so the
+// rather than a dropdown: endpoint_model_ids returns [] on any error, so the
 // list is empty exactly when the endpoint is down — which is the moment you
 // opened this panel to fix it. A datalist degrades to a text field on its own.
 function stBuildControl(row, rowEl, labelEl) {
@@ -687,7 +687,6 @@ async function openBugReport(fallbackUrl) {
   what.focus();
 }
 
-// --- render, filter, open, close ---------------------------------------------
 function stRender(data) {
   stState.data = data;
   stState.controls = [];

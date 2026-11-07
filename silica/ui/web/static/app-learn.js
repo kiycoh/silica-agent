@@ -892,7 +892,6 @@ function lrHead(eyebrow, title, meta, buttons) {
   return head;
 }
 
-// --- the plan detail -----------------------------------------------------------
 function lrRenderPlanDetail(right, p) {
   const r = p.readings;
   const live = lrSession && lrSession.plan === p.path;
@@ -2094,7 +2093,7 @@ function lrStudyBody() {
   const body = { scope: f.scope, target, restrict: f.restrict, refused: f.refused, objectives: f.objectives };
   // the server turns Study and Reference into a syllabus bounded by the Study (ADR-0119)
   // pasted text always carries a line break: one line equal to a title would
-  // otherwise be read as that note (plans._steps_scope)
+  // otherwise be read as that note (sources.steps_scope)
   if (f.ref?.target?.trim?.()) body.reference = f.ref.kind === "text" && !f.ref.target.includes("\n") ? f.ref.target + "\n" : f.ref.target;
   if (f.ref || f.scope === "steps") Object.assign(body, lrSourcesBody());
   return body;
@@ -2339,7 +2338,7 @@ function lrSourcesSection() {
   return sec;
 }
 
-// The hours under the calendar (plans.budget), asked of the server on a
+// The hours under the calendar (pace.budget), asked of the server on a
 // change of date, hours a day or assessment: the reference's own hours and
 // what the days before the date hold, with the project's days kept.
 async function lrBudget() {
@@ -3207,7 +3206,7 @@ async function lrConfirm() {
   const s = lrSession, it = lrItem();
   if (s.results[it.i]) return lrNext();
   // Enter again while the rating is in flight would post it twice (the server
-  // holds a lock for that too, learn_routes._RATE_LOCK)
+  // holds a lock for that too, session._RATE_LOCK)
   if (s.confirming) return;
   const v = s.verdicts[it.i];
   const self = !!v.needs_self_grade || v.grader === "self";
@@ -3447,7 +3446,7 @@ function lrRenderReceipt(body) {
     wrap.appendChild(fu);
   } else if (missed.paths.length && !r.from_ledger) {
     // a session over several notes: the notes missed, asked again now; a
-    // miss schedules nothing by itself (_reason_sentence), so "tomorrow" as
+    // miss schedules nothing by itself (reason_sentence), so "tomorrow" as
     // drawn would have been a promise the schedule does not keep
     const fu = mkEl("div", "lr-followup");
     const t = mkEl("div", "t");

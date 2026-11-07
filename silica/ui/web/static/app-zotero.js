@@ -196,7 +196,6 @@ function zTwoClick(btn, label, armedLabel, run) {
   });
 }
 
-// --- Settings › Zotero ---------------------------------------------------------
 function zSettingRow(host, label, help) {
   const row = mkEl("div", "st-row");
   row.dataset.search = `zotero ${label} ${help || ""}`.toLowerCase();
@@ -313,7 +312,6 @@ async function renderZotero(host) {
   un.ctl.appendChild(unBtn);
 }
 
-// --- Explore › Library ------------------------------------------------------------
 const zLib = { linked: false, lib: null, col: "", data: null, sel: new Set(), alt: {}, side: null,
   show: new Set() };
 
