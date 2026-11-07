@@ -3,8 +3,8 @@
 
 """The one door from a surface to the slash commands.
 
-`dispatch` walks the rows of `silica.command_table` and the skills this vault
-reaches, and hands back a `Result` for the surface to render. Asking the table
+`dispatch` walks the rows of `silica.command_table` and hands back a `Result` for the
+surface to render. A `/word` with no row is tried as a skill (ADR-0063). Asking the table
 the REPL asks is the point: the hand-kept list of "web commands" that used to gate
 the browser drifted, and /lexical /wiki /graph /map /find /vault fell through it
 into an error.

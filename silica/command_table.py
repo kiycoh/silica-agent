@@ -49,7 +49,9 @@ class Command:
     # internet, brings files in, spends the model or the embedder outside the
     # chat's 8 calls, or needs a second vault or a settings page.
     demo_off: bool = False
-    # Old names the dispatcher still runs: withheld with the row, offered nowhere.
+    # Old names the dispatcher still runs, withheld with the row and offered nowhere:
+    # /learn was the command's name until ADR-0141 named the view Memorize, and
+    # typed from habit it still runs.
     aliases: tuple[str, ...] = ()
 
 

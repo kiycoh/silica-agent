@@ -1,7 +1,13 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Learn's commands: /quiz, /flashcards, /slides, /memorize, and the prompts they ask the model with."""
+"""Learn's commands: /quiz, /flashcards, /slides, /memorize, and the prompts they ask the model with.
+
+/summarize /explain /compare /relate /schematize /diagram are skills
+(silica_core/builtin_skills, ADR-0063). These stay Python because the Python
+decides: /quiz picks one of three instruction sets and computes its count from
+--focus, /memorize reads the ledger and the plan notes.
+"""
 from __future__ import annotations
 
 import json
@@ -9,6 +15,13 @@ from pathlib import Path
 
 from silica.command_table import Call, Result
 from silica.session.words import int_flag, positional, str_flag
+
+
+# A study artifact from the notes, beside /quiz: the deck and the cards
+# NotebookLM's Studio makes (owner's comparison, 2026-10-23), both drawn from
+# Learn's checked key points (learn.artifacts.study_points). The cards are made
+# as data and checked before they are shown (learn.artifacts.flashcards); the
+# deck is written by the agent and its points are checked after it.
 
 
 def flashcards(c: Call) -> Result:

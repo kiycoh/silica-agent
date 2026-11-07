@@ -144,13 +144,6 @@ def _agent_turn(t: session_turn.Turn, callback) -> None:
     t.conv.seen_numbers |= t.read.numbers
 
 
-# A study artifact from the notes, beside /quiz: the deck and the cards
-# NotebookLM's Studio makes (owner's comparison, 2026-10-23), both drawn from
-# Learn's checked key points (learn.artifacts.study_points). The cards are made
-# as data and checked before they are shown (learn.artifacts.flashcards); the
-# deck is written by the agent and its points are checked after it.
-
-
 def _hidden(prompt: str) -> str:
     from prompt_toolkit import prompt as ask
 
