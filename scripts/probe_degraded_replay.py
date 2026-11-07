@@ -113,7 +113,8 @@ def main() -> int:
     config._SILICA_HOME = sandbox
     core_paths_mod._SILICA_HOME = sandbox
     embed_mod._legacy_index_path = lambda: sandbox / "index" / "embeddings.json"
-    adopt_vault(a.vault, writes=False)
+    if not adopt_vault(a.vault, writes=False).vault:
+        sys.exit(f"no vault at {a.vault}")
 
     if a.arm == "running":
         down = [u for u in (CONFIG.embedding_base_url, CONFIG.rerank_base_url) if not ready(u)]

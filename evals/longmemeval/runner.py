@@ -243,9 +243,9 @@ def bind_vault(vault: Path) -> None:
     """Point CONFIG/DRIVER at ``vault`` and drop every store singleton, so no
     prior question's sessions or indexes can leak into this one."""
     from silica.config import CONFIG
-    from silica.onboarding.adopt import adopt_vault
 
-    adopt_vault(vault, writes=False)
+    vault.mkdir(parents=True, exist_ok=True)
+    _shared.adopt_bench_vault(vault)
     # Episodic isolation: episodic_home() resolves to the question's own vault,
     # while memory_lane keeps abstaining bit-identically (coincident-vault rule)
     # so the "personal-memory lane is never passed" guarantee holds.

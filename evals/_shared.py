@@ -17,6 +17,17 @@ import sys
 from pathlib import Path
 
 
+def adopt_bench_vault(vault: str | Path) -> None:
+    """Point the process at `vault`, or stop. `writes=False` leaves a folder that is not
+    there unadopted and says so only in its return value, so a run that ignored it would
+    carry on writing into whatever vault was already active."""
+    from silica.onboarding.adopt import adopt_vault
+
+    switched = adopt_vault(vault, writes=False)
+    if not switched.vault:
+        raise RuntimeError(f"no vault at {vault}: {switched.error or 'the folder is not there'}")
+
+
 def _sha256_file(path: Path) -> str | None:
     if not path.is_file():
         return None

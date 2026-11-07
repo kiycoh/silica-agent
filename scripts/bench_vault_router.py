@@ -85,7 +85,8 @@ def main() -> int:
     alias_of = {str(Path(p).resolve()): a for a, p in spec["vaults"].items()}
 
     if args.vault:
-        adopt_vault(args.vault, writes=False)
+        if not adopt_vault(args.vault, writes=False).vault:
+            sys.exit(f"no vault at {args.vault}")
 
     from silica.model.providers import Reranker, get_embedder
     if not (CONFIG.rerank_base_url and CONFIG.rerank_model):

@@ -84,9 +84,8 @@ def _note_content(idx: int, item: dict) -> str:
 def bind_vault(vault: Path) -> None:
     """Point CONFIG/DRIVER at the bench vault and drop store singletons, so a
     prior in-process vault can never leak its indexes into the run."""
-    from silica.onboarding.adopt import adopt_vault
-
-    adopt_vault(vault, writes=False)
+    vault.mkdir(parents=True, exist_ok=True)
+    _shared.adopt_bench_vault(vault)
 
 
 def load_corpus(corpus: list[dict], *, verbose: bool = False) -> dict:
