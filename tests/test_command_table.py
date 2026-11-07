@@ -81,6 +81,14 @@ def test_the_turn_captures_no_console():
     assert not [n for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr == "capture"]
 
 
+def test_the_browser_has_nobody_to_ask():
+    """`silica --gui` from a shell has a tty on stdin: a prompt would hang the worker
+    holding the turn where nobody can see it, so the turn hands the table no `ask`."""
+    tree = ast.parse((ROOT / "silica/ui/web/turn.py").read_text(encoding="utf-8"))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "dispatch"]
+    assert calls and not [k for c in calls for k in c.keywords if k.arg == "ask"]
+
+
 def test_no_handler_imports_the_console():
     for path in (ROOT / "silica/commands").glob("*.py"):
         assert "CONSOLE" not in path.read_text(encoding="utf-8"), path

@@ -165,8 +165,8 @@ def test_home_vault_when_nothing_else_applies(tmp_path, monkeypatch, vault_env):
 
 
 def test_the_home_vault_is_kept_as_spelled(tmp_path, monkeypatch, vault_env):
-    """Its index is keyed on the spelling, and a $HOME reached through a symlink
-    would move it under a new digest."""
+    """The undo journal filters runs by the spelling (`active_vault`): resolved under
+    a $HOME reached through a symlink, every earlier run would drop out of /revert."""
     real = tmp_path / "real"
     real.mkdir()
     (tmp_path / "link").symlink_to(real)

@@ -251,7 +251,8 @@ def adopt_vault(path: str | Path, *, writes: bool = True, own: bool = False) -> 
     over a vault it does not own: nothing lands on disk, a folder that is not there
     stays unadopted (`created` says so), and vault.yaml's settings are left out of
     CONFIG. `own` is Silica's own fallback vault, which nobody pointed at: kept as
-    spelled, since its index is keyed on the spelling, and nothing declared in it.
+    spelled, since the undo journal filters its runs by that spelling (`active_vault`),
+    and nothing declared in it.
 
     Prints nothing, so a start, /vault and the settings panel can share it: the
     caller renders the returned record. Never raises for a bad path, that is
