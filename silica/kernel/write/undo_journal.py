@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-# silica/kernel/write/undo_journal.py
 from __future__ import annotations
 
 import logging
@@ -68,7 +67,7 @@ class UndoJournalStore:
             if conn is not None:
                 conn.close()
                 self._local.conn = None
-            # paths.quarantine: timestamped, never clobbered — the flat
+            # durable.quarantine: timestamped, never clobbered — the flat
             # ".corrupt" rename here overwrote the previous preserved copy on
             # the second corruption, and doctor's *.corrupt.* glob never saw it.
             from silica.kernel.base.durable import quarantine

@@ -40,9 +40,6 @@ CALLOUT_TYPES = frozenset({
 DATE_PREFIX_RE = re.compile(r'^\s*\d{4}[-,]\s*\d{1,2}[-,]\s*\d{1,2}')
 
 
-# _balanced is imported from ast.py
-
-
 def _effective_limits() -> dict:
     """LIMITS overridden by the active vault's `conventions:` block.
 
@@ -88,7 +85,6 @@ def ofm_lint(content, stem=None):
 
     # --- frontmatter schema (calibrated on golden notes) ---
 
-    # Tags: detect inline-CSV scalar vs empty vs per-item issues
     raw_tags = data.get("tags")
     if isinstance(raw_tags, str) and "," in raw_tags:
         F.append(
@@ -121,7 +117,6 @@ def ofm_lint(content, stem=None):
     if not (data.get("parent note") or data.get("related") or body_links):
         F.append("orphan note: no parent note / related / wikilinks")
 
-    # --- OFM structural integrity ---
     V += _balanced(body)
 
     # Detect literal '\n' character sequence in non-code body. Math spans are

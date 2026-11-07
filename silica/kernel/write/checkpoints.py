@@ -110,8 +110,6 @@ class CheckpointStore:
                 self._conn.execute(f"ALTER TABLE checkpoints ADD COLUMN {name} {ddl}")
         self._conn.commit()
 
-    # -- internals ---------------------------------------------------------
-
     def _insert(self, path: str, content: str, absent: bool = False, *,
                 kind: str = "silica", undone: bool = False, of: str | None = None) -> None:
         self._conn.execute(
@@ -127,8 +125,6 @@ class CheckpointStore:
             f"SELECT id, content, absent FROM checkpoints WHERE {_LIVE} ORDER BY id DESC LIMIT ?",
             (path, _current_vault(), limit),
         ).fetchall()
-
-    # -- write -------------------------------------------------------------
 
     def push(self, path: str, prior_content: str | None, new_content: str,
              kind: str = "silica", of: str | None = None) -> int:
@@ -154,8 +150,6 @@ class CheckpointStore:
             self._insert(path, prior_content, kind=_outside_kind(path, prior_content))
         self._insert(path, new_content, kind=kind, of=of)
         return self.depth(path)
-
-    # -- read --------------------------------------------------------------
 
     def depth(self, path: str) -> int:
         """Number of live restore points stored for a note (floor included)."""
@@ -265,8 +259,6 @@ class CheckpointStore:
             (version_id, path, _current_vault()),
         ).fetchone()
         return None if row is None or row["absent"] else row["content"]
-
-    # -- undo --------------------------------------------------------------
 
     def undo(self, path: str, current: str | None = None) -> str | None:
         """Mark the top restore point undone and return the content to restore to.

@@ -34,10 +34,6 @@ class Ledger:
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._ensure_schema()
 
-    # ------------------------------------------------------------------
-    # Schema management & migration
-    # ------------------------------------------------------------------
-
     def _ensure_schema(self) -> None:
         # Run column migration BEFORE creating table (handles renamed columns in existing DBs)
         self._migrate()
@@ -92,7 +88,6 @@ class Ledger:
             self._conn.execute("ALTER TABLE ops ADD COLUMN content_hash TEXT")
             self._conn.commit()
 
-        # Add unique index if not yet present (idempotent)
         existing_idx = {
             row[1]
             for row in self._conn.execute("SELECT * FROM sqlite_master WHERE type='index'")
@@ -126,10 +121,6 @@ class Ledger:
                 self._conn.commit()
             except Exception:
                 pass  # may fail on duplicate data from old schema
-
-    # ------------------------------------------------------------------
-    # Write
-    # ------------------------------------------------------------------
 
     def record(
         self,
@@ -198,13 +189,10 @@ class Ledger:
             return False
 
         for status, stored_hash, path in rows:
-            # All must be committed
             if status != "committed":
                 return False
-            # Hash must match (NULL → stale)
             if stored_hash is None or stored_hash != content_hash:
                 return False
-            # Output must still exist on disk
             if path and not Path(path).exists():
                 return False
 
@@ -213,10 +201,6 @@ class Ledger:
     def close(self) -> None:
         self._conn.close()
 
-
-# ---------------------------------------------------------------------------
-# Module-level singleton — lazily initialised
-# ---------------------------------------------------------------------------
 
 _ledger: Ledger | None = None
 

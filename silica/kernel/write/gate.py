@@ -560,10 +560,6 @@ def revert_source(source: str, *, vault: str | None,
     return {"source": source, "runs": runs, "unrevertable": unrevertable}
 
 
-# ---------------------------------------------------------------------------
-# Lint
-# ---------------------------------------------------------------------------
-
 def lint_note(note_name: str, op_type: str = "", hub: str = "") -> dict[str, Any]:
     """Post-write gate: executes the OFM linter to find structural regressions."""
     errors, warnings = validate_note(note_name, hub=hub or None, op_type=op_type or None)
@@ -1337,7 +1333,6 @@ class CapabilityBounds:
         guarded_ops = {OpType.overwrite, OpType.patch}
 
         for op in ops:
-            # Explicit no-ops always pass through untouched.
             if op.op == OpType.skip:
                 kept.append(op)
                 continue
