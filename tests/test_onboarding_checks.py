@@ -650,7 +650,7 @@ class TestAggregation:
         assert [r.name for r in results] == [
             "chat model", "chat endpoint", "vault", "memory lane", "vault manifest",
             "language", "embeddings", "recall indexes", "rerank", "dictation", "quarantine", "converters", "OKF §11",
-            "session capture", "own sessions", "narration store",
+            "own sessions", "narration store",
         ]
 
     def test_check_quarantine_surfaces_corrupt_files(self, tmp_path):
@@ -772,64 +772,29 @@ class TestOllamaContextCheck:
         ]
 
 
-class TestCaptureHook:
-    """`silica doctor` tells you when session capture is not wired up."""
+class TestRetiredCaptureHook:
+    """ADR-0130 retired the `silica capture` hook to a word that does nothing, so
+    its absence is no finding: the row read "no hook" on every install, a warn
+    made the verdict "hold", and `silica doctor` exited 2 for it."""
 
-    def _config(self, vault):
-        from silica.config import SilicaConfig
-        return SilicaConfig(vault_path=str(vault))
-
-    def test_missing_hook_is_a_warning_carrying_the_snippet(self, tmp_path, monkeypatch):
-        from silica.onboarding.checks import check_capture_hook
+    def test_doctor_has_no_row_for_a_hook_that_does_nothing(self, tmp_path, monkeypatch):
+        from silica.onboarding import checks
 
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        names = [r.name for r in checks.run_checks(_cfg(vault_path=str(tmp_path)))]
+        assert "session capture" not in names
 
-        monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
-        vault = tmp_path / "vault"
-        vault.mkdir()
-        result = check_capture_hook(self._config(vault))
-
-        assert result.status == "warn"
-        assert "silica capture" in result.hint
-        assert "SessionEnd" in result.hint
-
-    def test_registered_hook_passes(self, tmp_path, monkeypatch):
-        import json
-
-        from silica.onboarding.checks import check_capture_hook
+    def test_a_clean_install_is_not_held_by_the_hook(self, tmp_path, monkeypatch):
+        """The exit code a script reads: every other row ok, nothing holds it."""
+        from silica.onboarding import checks
 
         monkeypatch.setenv("HOME", str(tmp_path))
-
-        monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
-        vault = tmp_path / "vault"
-        (vault / ".claude").mkdir(parents=True)
-        (vault / ".claude" / "settings.json").write_text(json.dumps({
-            "hooks": {"SessionEnd": [
-                {"hooks": [{"type": "command", "command": "silica capture"}]}]}
-        }), encoding="utf-8")
-
-        assert check_capture_hook(self._config(vault)).status == "ok"
-
-    def test_hook_in_the_project_cwd_counts(self, tmp_path, monkeypatch):
-        """An adopted source tree is the Claude Code project; the vault is not."""
-        import json
-
-        from silica.onboarding.checks import check_capture_hook
-
-        monkeypatch.setenv("HOME", str(tmp_path))
-
-        monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
-        vault = tmp_path / "vault"
-        vault.mkdir()
-        project = tmp_path / "repo"
-        (project / ".claude").mkdir(parents=True)
-        (project / ".claude" / "settings.json").write_text(json.dumps({
-            "hooks": {"SessionEnd": [
-                {"hooks": [{"type": "command", "command": "silica capture"}]}]}
-        }), encoding="utf-8")
-        monkeypatch.chdir(project)
-
-        assert check_capture_hook(self._config(vault)).status == "ok"
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(checks, "_guarded", lambda name, check, config: (
+            check(config) if name == "session capture" else checks.CheckResult(name, "ok", "")))
+        results = checks.run_checks(_cfg(vault_path=str(tmp_path)))
+        assert checks.verdict(results) == "ok" and checks.exit_code(results) == 0
 
 
 class TestOwnSessionCapture:

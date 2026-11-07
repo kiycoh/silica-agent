@@ -796,41 +796,6 @@ def check_okf(config: SilicaConfig) -> CheckResult:
     )
 
 
-HOOK_SNIPPET = """\
-"hooks": {
-  "SessionEnd": [{"hooks": [{"type": "command", "command": "silica capture"}]}],
-  "PreCompact": [{"hooks": [{"type": "command", "command": "silica capture"}]}]
-}"""
-
-
-def check_capture_hook(config: SilicaConfig) -> CheckResult:
-    """Session capture is opt-in and hand-registered: say so when it is absent.
-
-    Silica never edits `.claude/settings.json` itself — a tool that rewrites
-    another tool's config is a support burden, and the hook is three lines.
-    """
-    # Claude Code resolves project settings from the session's cwd, not from
-    # the vault: for an adopted source tree the two differ, and looking only
-    # under the vault warned about a hook that was registered and firing.
-    roots = [Path.home(), Path.cwd()]
-    vault = config.vault_path.strip()
-    if vault:
-        roots.append(Path(vault))
-    candidates = [root / ".claude" / name for root in roots
-                  for name in ("settings.json", "settings.local.json")]
-    for path in candidates:
-        try:
-            if "silica capture" in path.read_text(encoding="utf-8"):
-                return CheckResult("session capture", "ok", f"hook registered in {path}")
-        except OSError:
-            continue
-    return CheckResult(
-        "session capture", "warn",
-        "no `silica capture` hook — sessions are not captured",
-        f"add to .claude/settings.json:\n{HOOK_SNIPPET}",
-    )
-
-
 def check_session_capture(config: SilicaConfig) -> CheckResult:
     """Silica's own conversations: opt-in, and never notes.
 
@@ -953,7 +918,6 @@ def run_checks(config: SilicaConfig) -> list[CheckResult]:
         ("quarantine", check_quarantine),
         ("converters", check_converters),
         ("OKF §11", check_okf),
-        ("session capture", check_capture_hook),
         ("own sessions", check_session_capture),
         ("narration store", check_narration_store),
     ]

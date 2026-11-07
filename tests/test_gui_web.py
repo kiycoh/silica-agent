@@ -2376,23 +2376,6 @@ def test_community_colour_has_a_paper_band():
     assert _community_color(3, on_paper=True) != _zone_color(3, on_paper=True)
 
 
-def test_health_hides_the_cli_hook_check_from_the_sidebar(client, monkeypatch):
-    """"session capture" tells a GUI user to edit .claude/settings.json — a
-    Claude-Code-integration concern the browser can do nothing about. It
-    stays out of the sidebar notices and stays IN the ?all=1 diagnostics."""
-    tc, _ = client
-    import silica.onboarding.checks as checks
-
-    monkeypatch.setattr(checks, "run_checks", lambda cfg: [
-        checks.CheckResult("session capture", "warn", "no hook", "edit settings.json"),
-        checks.CheckResult("embeddings", "warn", "down", "start it"),
-    ])
-    assert [r["name"] for r in tc.get("/health").json()] == ["embeddings"]
-    assert [r["name"] for r in tc.get("/health?all=1").json()] == [
-        "session capture", "embeddings",
-    ]
-
-
 def test_health_hides_the_hosts_converters_from_a_tenant(client, monkeypatch):
     """Hosted, the converters row reports binaries host.env chose and a tenant
     cannot install; locally the owner can, so it stays."""
