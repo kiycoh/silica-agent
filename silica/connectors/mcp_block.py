@@ -105,7 +105,6 @@ class McpBlock:
         except KeyError as exc:
             return {"ok": False, "error": f"missing field: {exc.args[0]}"}
 
-    # -- actions --
     def _add(self, p: dict[str, Any]) -> dict[str, Any]:
         from silica.connectors import mcp_tools
 

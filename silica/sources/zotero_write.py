@@ -36,8 +36,6 @@ TAG = "silica"
 GROUPS_NAME = "Silica groups"
 
 
-# --- ledger -------------------------------------------------------------------
-
 def ledger_path() -> Path:
     from silica.config import CONFIG
     from silica.kernel.base.manifest import in_write_dir
@@ -92,8 +90,6 @@ def _last_version(key: str) -> int | None:
     return versions[-1] if versions else None
 
 
-# --- writes -------------------------------------------------------------------
-
 def _write(zot: Zotero, method: str, path: str, *, body=None, version: int | None = None
            ) -> httpx.Response:
     if not zot.api_key:
@@ -125,8 +121,6 @@ def _set_collections(zot: Zotero, item: dict, cols: list[str]) -> int:
                version=item["version"])
     return _version_after(r, item["version"] + 1)
 
-
-# --- back-link notes ------------------------------------------------------------
 
 def _web_url(leaf_rel: str) -> str:
     """The web UI's link, only while it is up: a dead link in Zotero is worse
@@ -196,8 +190,6 @@ def backlink(zot: Zotero, item_key: str, leaf_rel: str, *, run_id: str) -> str:
             prior=note["data"].get("note", ""))
     return "updated"
 
-
-# --- filing -----------------------------------------------------------------------
 
 def file_items(zot: Zotero, moves: list[tuple[str, str]], inbox: str, *, run_id: str) -> int:
     """Move each (item, collection) out of the inbox collection. An item that
@@ -284,8 +276,6 @@ def suggest_filing(zot: Zotero, inbox: str, *, embed=None, k: int = 3) -> list[d
                     "first": first, "votes": int(votes), "second": second})
     return out
 
-
-# --- groups -------------------------------------------------------------------------
 
 def group_plan(nodes: list[dict], edges: list[dict], zones: dict[int, str]) -> dict[str, list[str]]:
     """{zone label: [zotero keys]}: a paper joins the zone most of its concept
@@ -377,8 +367,6 @@ def write_groups(zot: Zotero, plan: dict[str, list[str]], *, run_id: str) -> int
         changed += 1
     return changed
 
-
-# --- revert, unlink, authorize -----------------------------------------------------
 
 def revert(zot: Zotero, run_id: str) -> dict:
     """Undo a run's Zotero writes, newest first, by state."""

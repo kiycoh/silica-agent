@@ -94,7 +94,7 @@ def render_skeleton(
     # never drift from the real import edges.
     first_party: list[str] = []
     external: list[str] = []
-    for mod in dict.fromkeys(sk.imports):  # de-dupe, keep order
+    for mod in dict.fromkeys(sk.imports):
         if not mod:
             continue
         kind, target = classify_import(mod, importer, files, language, root)

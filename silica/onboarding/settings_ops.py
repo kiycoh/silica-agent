@@ -95,8 +95,6 @@ def bug_report(rows: list[tuple[str, str]]) -> dict:
     }
 
 
-# --- endpoints ---------------------------------------------------------------
-
 def endpoint_status() -> list[dict]:
     """The four endpoints, probed concurrently: url, reachability, how many
     models each advertises, and whether silica has a command to start it.

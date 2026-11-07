@@ -239,8 +239,6 @@ def _applicable() -> dict[str, Row]:
     return out
 
 
-# --- values, origins, options ------------------------------------------------
-
 def _file_keys() -> set[str]:
     """Keys carried by the .env on disk — the user-level file, the only one
     config.py layers and so the only one a row can have come from."""
@@ -383,8 +381,6 @@ def read_sections(probe: bool = True) -> list[dict]:
         ]})
     return out
 
-
-# --- writing -----------------------------------------------------------------
 
 def _env_text(row: Row, value: str) -> str:
     """How the value is spelled in the .env, which is what config.py parses back."""

@@ -98,10 +98,6 @@ class BridgeServer:
         path.chmod(0o600)  # a stale file from a dead session may carry another mode
         return path
 
-    # ------------------------------------------------------------------
-    # Connection lifecycle
-    # ------------------------------------------------------------------
-
     async def _handler(self, ws: Any) -> None:
         if not await self._handshake(ws):
             return
@@ -163,10 +159,6 @@ class BridgeServer:
         backend.detach("plugin disconnected")
         set_driver(None)
         logger.info("bridge: plugin disconnected — driver falls back to the fs backend")
-
-    # ------------------------------------------------------------------
-    # Frame routing
-    # ------------------------------------------------------------------
 
     async def _route(self, ws: Any, frame: dict, backend: Any) -> None:
         # ponytail: reaches across a module seam into backend._on_frame (the ws

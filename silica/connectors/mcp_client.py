@@ -72,8 +72,6 @@ def _scrub(text: object) -> str:
     return scrub_credentials(text)
 
 
-# --- the tool listing cache --------------------------------------------------
-
 def _cache_path() -> Path:
 
     return silica_home() / "connectors" / "mcp-tools.json"
@@ -115,8 +113,6 @@ def forget_cache(key: str) -> None:
 
         atomic_write_bytes(_cache_path(), json.dumps(data, indent=1).encode("utf-8"))
 
-
-# --- transports --------------------------------------------------------------
 
 def _errlog(key: str):
     """Where a stdio server's stderr goes: its own log, never the terminal the
@@ -212,8 +208,6 @@ def _transport(key: str, spec: dict[str, Any], auth: Any):
 
     return http()
 
-
-# --- sessions ----------------------------------------------------------------
 
 class _Session:
     def __init__(self, key: str) -> None:
