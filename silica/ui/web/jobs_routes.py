@@ -10,7 +10,7 @@ from silica.config import CONFIG
 from silica.kernel import vault_files
 from silica.sources import drop_turn
 from silica.kernel import job_records
-from silica.ui.web import jobs, session, sse
+from silica.ui.web import jobs, session, sse, turn
 from silica.ui.web.session import SESSION
 
 router = APIRouter(prefix="/jobs")
@@ -94,7 +94,7 @@ def offered_turn(job_id: str, payload: dict | None = None):
             # inbox files, and nucleating is the student adding them to the vault.
             # The one composed turn still offered the injector.
             inbox = vault_files.add_to_vault(notes, [f["source"] for f in files])
-            return sse.turn_response(slot, drop_turn.compose_nucleate_turn(words, inbox, [], inline=False),
-                                     files=files, said=said)
-        return sse.turn_response(slot, drop_turn.compose_nucleate_turn(words, notes, []),
-                                 withhold=drop_turn.WITHHELD_WITH_FILES, files=files, said=said)
+            return sse.turn_response(slot, turn.Ask(drop_turn.compose_nucleate_turn(words, inbox, [], inline=False),
+                                                    files=files, said=said))
+        return sse.turn_response(slot, turn.Ask(drop_turn.compose_nucleate_turn(words, notes, []),
+                                                withhold=drop_turn.WITHHELD_WITH_FILES, files=files, said=said))

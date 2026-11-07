@@ -119,7 +119,6 @@ def test_html_hidden_by_a_parser_trick_never_reaches_the_note(element):
 # --- 3. MAJOR: a chat drop of mail -------------------------------------------------------
 
 def _capture_turn(server, monkeypatch) -> dict:
-    from silica.ui.web import turn
     ran: dict = {}
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -127,7 +126,7 @@ def _capture_turn(server, monkeypatch) -> dict:
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     return ran
 
 
@@ -175,10 +174,9 @@ def test_a_dropped_mbox_says_why_instead_of_no_files_could_be_staged(web, tmp_pa
 # --- 4. Security: an upload through a planted symlink ------------------------------------
 
 def test_an_upload_never_writes_through_a_planted_symlink(web, tmp_path, monkeypatch):
-    from silica.ui.web import turn
     from silica.ui.web import session
     tc, server = web
-    monkeypatch.setattr(turn, "run_agent", lambda messages, *a, **kw: "ok")
+    monkeypatch.setattr("silica.session.turn.run_agent", lambda messages, *a, **kw: "ok")
     outside = tmp_path / "outside"
     outside.mkdir()
     victim = outside / "victim.txt"

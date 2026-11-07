@@ -69,7 +69,6 @@ def test_a_local_install_reaches_the_same_routes(tmp_vault, monkeypatch):
 
 
 def test_a_free_account_has_no_paid_command_in_the_picker_and_a_typed_one_is_refused(free, monkeypatch):
-    from silica.ui.web import turn
     tc, server = free
     names = {c["name"] for c in tc.get("/commands").json()}
     assert not names & {"/quiz", "/learn", "/agenda"}
@@ -78,7 +77,7 @@ def test_a_free_account_has_no_paid_command_in_the_picker_and_a_typed_one_is_ref
     def boom(*a, **kw):
         raise AssertionError("a withheld command must not reach the agent")
 
-    monkeypatch.setattr(turn, "run_agent", boom)
+    monkeypatch.setattr("silica.session.turn.run_agent", boom)
     resp = tc.post("/chat", json={"text": "/quiz Concepts --n=3"})
     events = [json.loads(line[6:]) for line in resp.text.splitlines() if line.startswith("data: ")]
     assert events[-1] == {"type": "error", "error": "'/quiz' is not part of this account"}

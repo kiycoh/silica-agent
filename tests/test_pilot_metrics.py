@@ -171,18 +171,18 @@ def test_a_chat_turn_writes_one_turn_line(client, journal, monkeypatch):
         messages.append({"role": "assistant", "content": "Hi"})
         return "Hi"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     async def collect():
-        return [item async for item in turn.run_turn(f"tell me about {MARKER}")]
+        return [item async for item in turn.run_turn(turn.Ask(f"tell me about {MARKER}"))]
 
     asyncio.run(collect())
-    (turn,) = journal.events("turn")
-    assert MARKER not in json.dumps(turn)
-    assert turn["kind"] == "chat" and turn["outcome"] == "done" and turn["channel"] == "web"
-    assert turn["tools"] == {"search_context": 2} and turn["tool_errors"] == {"read_note": 1}
-    assert (turn["calls"], turn["prompt"], turn["completion"], turn["cached"]) == (1, 30, 5, 0)
-    assert isinstance(turn["ms"], int) and isinstance(turn["first_token_ms"], int)
+    (row,) = journal.events("turn")
+    assert MARKER not in json.dumps(row)
+    assert row["kind"] == "chat" and row["outcome"] == "done" and row["channel"] == "web"
+    assert row["tools"] == {"search_context": 2} and row["tool_errors"] == {"read_note": 1}
+    assert (row["calls"], row["prompt"], row["completion"], row["cached"]) == (1, 30, 5, 0)
+    assert isinstance(row["ms"], int) and isinstance(row["first_token_ms"], int)
 
 
 def test_an_empty_answer_and_an_unknown_slash_are_named_as_such(client, journal, monkeypatch):
@@ -190,12 +190,11 @@ def test_an_empty_answer_and_an_unknown_slash_are_named_as_such(client, journal,
     from silica.agent.sentinels import EMPTY_COMPLETION
 
     _, server = client
-    monkeypatch.setattr(turn, "run_agent", lambda messages, *a, **k: messages.append(
+    monkeypatch.setattr("silica.session.turn.run_agent", lambda messages, *a, **k: messages.append(
         {"role": "assistant", "content": EMPTY_COMPLETION}) or EMPTY_COMPLETION)
 
     async def collect(text):
-        from silica.ui.web import turn
-        return [item async for item in turn.run_turn(text)]
+        return [item async for item in turn.run_turn(turn.Ask(text))]
 
     asyncio.run(collect("hello"))
     asyncio.run(collect("/definitely-not-a-command"))
@@ -205,9 +204,8 @@ def test_an_empty_answer_and_an_unknown_slash_are_named_as_such(client, journal,
 
 
 def test_an_upload_writes_an_ingest_line_without_its_name(client, journal, monkeypatch):
-    from silica.ui.web import turn
     tc, server = client
-    monkeypatch.setattr(turn, "run_agent", lambda messages, *a, **kw: "ok")
+    monkeypatch.setattr("silica.session.turn.run_agent", lambda messages, *a, **kw: "ok")
     body = b"# Hi\n\nsome body text to stage"
     resp = tc.post("/nucleate", files=[("files", (f"{MARKER}.md", body, "text/markdown")),
                                        ("files", (f"x.{MARKER}", b"?", "application/octet-stream"))])

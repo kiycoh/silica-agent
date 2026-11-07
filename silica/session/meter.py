@@ -136,14 +136,11 @@ def context_breakdown(messages: list[dict]) -> dict[str, int]:
     return counts
 
 
-def compact_context(messages: list[dict], collapsed: set[int]) -> set[int]:
-    """Collapse old read-tool results once the context meter crosses the budget.
+def compact_context(messages: list[dict], collapsed: set[int], tokens: int) -> set[int]:
+    """Collapse old read-tool results once the window's `tokens` cross the budget.
 
     The between-turns sweep; the agent loop runs the same pass per iteration
-    (see run_agent). Runs after update_context_tokens (which feeds
-    prompt_tokens); when anything collapsed, recounts so the toolbar meter
-    reflects the slimmer history. Loss is recoverable: each stub names the call
-    to re-issue.
+    (see run_agent). Loss is recoverable: each stub names the call to re-issue.
     """
     from silica.agent.compaction import (
         COMPACT_FLOOR_TURNS,
@@ -152,17 +149,31 @@ def compact_context(messages: list[dict], collapsed: set[int]) -> set[int]:
     )
     from silica.tools import TOOLS
 
-    updated = compact_read_history(
+    return compact_read_history(
         messages,
         collapsed,
-        prompt_tokens=CONFIG.context_tokens,
+        prompt_tokens=tokens,
         budget=int(COMPACT_FRACTION * CONFIG.max_context_tokens),
         floor_turns=COMPACT_FLOOR_TURNS,
         tools=TOOLS,
     )
-    if updated != collapsed:
-        update_context_tokens(messages)
-    return updated
+
+
+def recount(conv, shown: bool = True) -> None:
+    """A turn's end: count the window, sweep it if that crossed the budget, and
+    count again when anything collapsed so the meter reflects the slimmer history.
+
+    `shown` says this is the conversation the meter draws: the phone's window
+    (ADR-0089 amendment) counts for its own compaction and must not move the
+    browser's ring.
+    """
+    tokens = count_context_tokens(conv.messages, chat_tool_schemas(conv.messages))
+    updated = compact_context(conv.messages, conv.collapsed, tokens)
+    if updated != conv.collapsed:
+        tokens = count_context_tokens(conv.messages, chat_tool_schemas(conv.messages))
+    conv.collapsed = updated
+    if shown:
+        CONFIG.context_tokens = tokens
 
 
 def resolve_context_budget() -> None:

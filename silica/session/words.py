@@ -8,6 +8,18 @@ from __future__ import annotations
 import shlex
 
 
+def first_word(text: str) -> str:
+    """The first word as `split()` finds it, "" when there is none: " /convert x"
+    got past a startswith("/") at the demo's door and queued a conversion
+    (review 2026-10-31), so every gate on a command reads the word this way."""
+    return (text.split(None, 1) or [""])[0]
+
+
+def command_word(text: str) -> str:
+    """`first_word` as both dispatchers compare it."""
+    return first_word(text).lower()
+
+
 def direct_args(raw: str) -> list[str]:
     """A direct command's words, a double-quoted run being one word, so
     `/check "Drafts/Opinion on limitation"` names the note and not a note

@@ -23,6 +23,7 @@ from silica.config import CONFIG, demo
 from silica.kernel.base.formats import IMAGE_SUFFIX, ext_alternation
 from silica.kernel.graph.mindmap import note_resolver
 from silica.session import meter
+from silica.session.words import command_word
 from silica.sources import drop_turn
 from silica.ui.web import drop, flags, render, session, sse, turn
 from silica.ui.web.callback import tool_calls_to_json
@@ -112,11 +113,7 @@ def _demo_refuses(payload: dict) -> str:
         return "images are not part of the demo"
     if payload.get("story"):
         return "Discover is not part of the demo"
-    # The first word as split() finds it, as jobs.from_command and run_turn's
-    # /flashcards branch find it: " /convert x" got past a startswith("/")
-    # here and queued a conversion (review 2026-10-31).
-    text = str(payload.get("text") or "")
-    word = (text.split(None, 1) or [""])[0].lower()
+    word = command_word(str(payload.get("text") or ""))
     return f"'{word}' is not part of the demo" if word in withheld("commands") else ""
 
 
@@ -158,11 +155,11 @@ async def chat(payload: dict):
             if joined:
                 notes, files, earlier = joined
                 composed = await asyncio.to_thread(drop_turn.compose_nucleate_turn, text, notes, [], earlier=earlier)
-                return sse.turn_response(slot, composed, attachments, workspace,
-                                         withhold=drop_turn.WITHHELD_WITH_FILES, files=files, said=text, note=note,
-                                         story=story, scope=scope)
-        return sse.turn_response(slot, text, attachments, workspace, note=note, story=story, scope=scope,
-                                 **({"said": text.removeprefix("/web ")} if story and scope == "web" else {}))
+                return sse.turn_response(slot, turn.Ask(composed, attachments, workspace,
+                                                        withhold=drop_turn.WITHHELD_WITH_FILES, files=files, said=text,
+                                                        note=note, story=story, scope=scope))
+        return sse.turn_response(slot, turn.Ask(text, attachments, workspace, note=note, story=story, scope=scope,
+                                                said=text.removeprefix("/web ") if story and scope == "web" else ""))
 
 
 @router.post("/phone/turn")
@@ -262,7 +259,8 @@ async def redo_turn(payload: dict | None = None):
         SESSION.chat.collapsed = {c for c in SESSION.chat.collapsed if c < at}
         _narr.NARRATOR.narrate(_narr.REWIND, "done", "asked again", {}, parent=None)
         withhold = drop_turn.WITHHELD_WITH_FILES if msg.get("silica_files") and not content.startswith(drop_turn.NUCLEATE_ASK) else ()
-        return sse.turn_response(slot, content, workspace=msg.get("silica_workspace") or "", withhold=withhold, prebuilt=msg)
+        return sse.turn_response(slot, turn.Ask(content, workspace=msg.get("silica_workspace") or "", withhold=withhold,
+                                                prebuilt=msg))
 
 
 @router.get("/messages")

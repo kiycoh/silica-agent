@@ -8,7 +8,7 @@ A persona is a skill so that everything a skill already has serves it: the
 three roots and their shadowing, the install preview in Settings › Skills, the
 `/` picker. What differs is the turn: `/<name>` on a persona writes its body
 into the conversation's own system line, the way a workspace's instructions
-are written (server._apply_workspace), and every later answer reads it.
+are written (ui.web.session.apply_workspace), and every later answer reads it.
 `/persona` lists them and names the one on, `/persona off` takes it off.
 
 The flag sits under `metadata`, the map Agent Skills leaves to each harness:
@@ -18,6 +18,8 @@ silica-core's loader drops `metadata`, so the flag is read here.
 from __future__ import annotations
 
 from pathlib import Path
+
+from silica.kernel import system_lines
 
 ORIGIN = "persona"
 COMMAND = "/persona"   # answered by `command` below, ahead of both REPL tables
@@ -75,10 +77,8 @@ def apply(messages: list[dict], skill, can_insert: bool = True) -> bool:
     """Put `skill` on the conversation (None takes the persona off). Written
     once and edited in place, never removed, as the workspace line is: an
     insert shifts every later message, so a caller whose compaction recorded
-    indices passes `can_insert=False` and gets False when there is no line yet.
-    Before the seed's last system message, the language rule, which must stay
-    last."""
-    i = next((n for n, m in enumerate(messages) if m.get("origin") == ORIGIN), None)
+    indices passes `can_insert=False` and gets False when there is no line yet."""
+    i = system_lines.index_of(messages, ORIGIN)
     if skill is None:
         if i is not None:
             messages[i]["content"] = OFF_LINE
@@ -90,9 +90,8 @@ def apply(messages: list[dict], skill, can_insert: bool = True) -> bool:
         return True
     if not can_insert:
         return False
-    head = next((n for n, m in enumerate(messages) if m.get("role") != "system"), len(messages))
-    messages.insert(max(head - 1, 0), {"role": "system", "content": line(skill),
-                                       "origin": ORIGIN, TURN_KEY: skill.name})
+    system_lines.insert(messages, {"role": "system", "content": line(skill),
+                                   "origin": ORIGIN, TURN_KEY: skill.name})
     return True
 
 

@@ -283,7 +283,8 @@ def _repl_dispatched_commands() -> set[str]:
     import inspect
     import re
 
-    from silica.cli import _DIRECT, _SHORTCUTS, _expand_web_turn
+    from silica.cli import _DIRECT, _SHORTCUTS
+    from silica.session.turn import expand_web_turn
     from silica.config import CONFIG
     from silica.kernel.personas import COMMAND as PERSONA
     from silica_core.kernel.skills import discover
@@ -293,7 +294,7 @@ def _repl_dispatched_commands() -> set[str]:
     return set(_DIRECT) | set(_SHORTCUTS) | skills | {PERSONA} | set(
         # The web-escalation expander matches on parts[0], not on a table, and
         # names only the commands it owns: take every literal.
-        re.findall(r'"(/[a-z-]+)"', inspect.getsource(_expand_web_turn))
+        re.findall(r'"(/[a-z-]+)"', inspect.getsource(expand_web_turn))
     )
 
 
@@ -335,14 +336,13 @@ def test_health_reports_only_what_needs_fixing(client, monkeypatch):
 
 def test_direct_command_runs_without_an_llm_round_trip(client, monkeypatch):
     """/plans is REPL-direct: the GUI must run it inline, not hand it to the agent."""
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
 
     def boom(*a, **kw):
         raise AssertionError("a direct command must not reach the agent")
 
-    monkeypatch.setattr(turn, "run_agent", boom)
+    monkeypatch.setattr("silica.session.turn.run_agent", boom)
 
     events = _read_sse(tc.post("/chat", json={"text": "/plans"}))
     assert events[-1]["type"] == "done"
@@ -352,7 +352,6 @@ def test_direct_command_runs_without_an_llm_round_trip(client, monkeypatch):
 def test_declined_direct_command_leaves_no_duplicate_user_turn(client, monkeypatch):
     """Every slash command is offered to the direct handler first; one it declines
     must fall through with exactly ONE user turn in history — the expanded one."""
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
 
@@ -360,7 +359,7 @@ def test_declined_direct_command_leaves_no_duplicate_user_turn(client, monkeypat
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     tc.post("/chat", json={"text": "/summarize Concepts/RAG.md"})
     users = [m["content"] for m in SESSION.chat.messages if m["role"] == "user"]
@@ -372,7 +371,6 @@ def test_declined_direct_command_leaves_no_duplicate_user_turn(client, monkeypat
 
 
 def test_chat_streams_events_and_appends_the_user_message(client, monkeypatch):
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
 
@@ -383,7 +381,7 @@ def test_chat_streams_events_and_appends_the_user_message(client, monkeypatch):
         messages.append({"role": "assistant", "content": "Hello"})
         return "Hello"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     resp = tc.post("/chat", json={"text": "hi there"})
     assert resp.status_code == 200
@@ -455,7 +453,6 @@ def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypa
     answer arrives as markdown (not a fenced text block) and carries the Sources
     block built from the trace. A direct handler here would append the captured
     answer a second time."""
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
 
@@ -472,7 +469,7 @@ def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypa
         messages.append({"role": "assistant", "content": "From the web: it swaps edges."})
         return "From the web: it swaps edges."
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     done = _read_sse(tc.post("/chat", json={"text": "/web graph rewiring"}))[-1]
     assert done["type"] == "done"
@@ -493,7 +490,6 @@ def test_bare_web_without_a_question_yields_one_usage_error(client):
 def test_done_carries_the_hint_when_every_recall_missed(client, monkeypatch):
     """The thin-coverage hint is a `retrieval` turn note on the done event
     (ADR-0094 point 8; it was the `hint` field before)."""
-    from silica.ui.web import turn
     tc, server = client
     from silica.agent.recall_watch import THIN_COVERAGE_HINT
 
@@ -505,14 +501,13 @@ def test_done_carries_the_hint_when_every_recall_missed(client, monkeypatch):
         messages.append({"role": "assistant", "content": "I have nothing on that."})
         return "I have nothing on that."
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     done = _read_sse(tc.post("/chat", json={"text": "what is graph rewiring?"}))[-1]
     assert done["notes"] == [{"kind": "retrieval", "text": THIN_COVERAGE_HINT}]
 
 
 def test_a_turn_that_found_notes_carries_no_hint(client, monkeypatch):
-    from silica.ui.web import turn
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -523,7 +518,7 @@ def test_a_turn_that_found_notes_carries_no_hint(client, monkeypatch):
         messages.append({"role": "assistant", "content": "You wrote about it."})
         return "You wrote about it."
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     done = _read_sse(tc.post("/chat", json={"text": "what about RAG?"}))[-1]
     assert "notes" not in done
@@ -549,11 +544,10 @@ def test_run_turn_yields_raw_dicts_not_sse_frames(client, monkeypatch):
         messages.append({"role": "assistant", "content": "Hi"})
         return "Hi"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     async def collect():
-        from silica.ui.web import turn
-        return [item async for item in turn.run_turn("hello")]
+        return [item async for item in turn.run_turn(turn.Ask("hello"))]
 
     items = asyncio.run(collect())
     assert all(isinstance(i, dict) for i in items)  # dicts, not SSE strings
@@ -569,7 +563,6 @@ def test_a_chat_image_rides_its_turn_and_history_keeps_only_its_path(client, mon
     """ADR-0077 point 3: the pixels go to the model once, as an image_url part;
     the transcript, the narration and every later turn carry the saved path,
     which silica_look opens again, never the base64."""
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     import base64
     tc, server = client
@@ -580,7 +573,7 @@ def test_a_chat_image_rides_its_turn_and_history_keeps_only_its_path(client, mon
         messages.append({"role": "assistant", "content": "Un diagramma."})
         return "Un diagramma."
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     png = "data:image/png;base64," + base64.b64encode(b"\x89PNG fake").decode()
     events = _read_sse(tc.post("/chat", json={"text": "Cosa mostra?",
                                                "images": [{"name": "lavagna.png", "data": png}]}))
@@ -596,7 +589,6 @@ def test_a_chat_image_rides_its_turn_and_history_keeps_only_its_path(client, mon
 def test_a_text_only_chat_model_gets_the_attached_image_as_words(client, monkeypatch):
     """ADR-0077 amendment 2026-10-21: with a vision model of its own, the chat
     model never receives pixels; the reading rides the turn, the path stays."""
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     import base64
     from silica import config as cfg_mod
@@ -609,7 +601,7 @@ def test_a_text_only_chat_model_gets_the_attached_image_as_words(client, monkeyp
         messages.append({"role": "assistant", "content": "Una lavagna."})
         return "Una lavagna."
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     monkeypatch.setattr(cfg_mod.CONFIG, "vision_model", "openrouter/qwen/qwen3.7-flash-20260727")
     monkeypatch.setattr(vision, "ask_chat_model", lambda messages, max_tokens=700:
                         '{"kind": "photo", "description": "Una lavagna con due formule.", "text": ""}')
@@ -625,10 +617,9 @@ def test_a_text_only_chat_model_gets_the_attached_image_as_words(client, monkeyp
 
 
 def test_a_reloaded_chat_shows_the_image_again_and_not_its_path(client, monkeypatch):
-    from silica.ui.web import turn
     import base64
     tc, server = client
-    monkeypatch.setattr(turn, "run_agent", lambda messages, *a, **k: messages.append(
+    monkeypatch.setattr("silica.session.turn.run_agent", lambda messages, *a, **k: messages.append(
         {"role": "assistant", "content": "Ok."}) or "Ok.")
     png = "data:image/png;base64," + base64.b64encode(b"\x89PNG fake").decode()
     _read_sse(tc.post("/chat", json={"text": "Guarda", "images": [{"name": "a.png", "data": png}]}))
@@ -654,11 +645,10 @@ def test_run_turn_error_path_yields_one_error_and_frees_the_gate(client, monkeyp
     def boom(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         raise RuntimeError("kaboom")
 
-    monkeypatch.setattr(turn, "run_agent", boom)
+    monkeypatch.setattr("silica.session.turn.run_agent", boom)
 
     async def collect():
-        from silica.ui.web import turn
-        return [item async for item in turn.run_turn("hi")]
+        return [item async for item in turn.run_turn(turn.Ask("hi"))]
 
     items = asyncio.run(collect())
     assert sum(1 for i in items if i["type"] == "error") == 1
@@ -689,13 +679,12 @@ def test_run_turn_abandonment_holds_gate_until_worker_exits(client, monkeypatch)
         messages.append({"role": "assistant", "content": "partial"})
         return "partial"
 
-    monkeypatch.setattr(turn, "run_agent", slow)
+    monkeypatch.setattr("silica.session.turn.run_agent", slow)
 
     async def scenario():
-        from silica.ui.web import turn
         from silica.ui.web.session import SESSION
         assert SESSION.claim()  # run_turn runs in a slot its caller took
-        gen = turn.run_turn("hi")
+        gen = turn.run_turn(turn.Ask("hi"))
         first = await gen.__anext__()  # one delta, then abandon
         assert first["type"] == "delta"
         await asyncio.to_thread(started.wait, 1.0)
@@ -722,7 +711,6 @@ def test_a_turn_silent_past_the_keepalive_still_sends_a_byte(client, monkeypatch
     kept streaming ran past 300 s and ended done. A silent stretch sends a
     comment line, which the page's parser skips (no `data:` line)."""
     from silica.ui.web import sse
-    from silica.ui.web import turn
     import time
 
     tc, server = client
@@ -733,7 +721,7 @@ def test_a_turn_silent_past_the_keepalive_still_sends_a_byte(client, monkeypatch
         messages.append({"role": "assistant", "content": "late"})
         return "late"
 
-    monkeypatch.setattr(turn, "run_agent", quiet)
+    monkeypatch.setattr("silica.session.turn.run_agent", quiet)
 
     resp = tc.post("/chat", json={"text": "hi"})
     assert ": keepalive\n\n" in resp.text
@@ -828,13 +816,13 @@ def test_a_stream_dropped_during_a_keepalive_still_holds_the_gate_for_the_worker
         messages.append({"role": "assistant", "content": "partial"})
         return "partial"
 
-    monkeypatch.setattr(turn, "run_agent", slow)
+    monkeypatch.setattr("silica.session.turn.run_agent", slow)
 
     async def scenario():
         from silica.ui.web import sse
         from silica.ui.web.session import SESSION
         assert SESSION.claim() is True
-        stream = sse.turn_response(TurnSlot(), "hi").body_iterator
+        stream = sse.turn_response(TurnSlot(), turn.Ask("hi")).body_iterator
         assert await stream.__anext__() == ": keepalive\n\n"
         await asyncio.to_thread(started.wait, 1.0)
         await stream.aclose()
@@ -864,7 +852,6 @@ def test_sweep_frees_the_gate_when_no_worker_ever_started(client):
 
 
 def test_nucleate_stages_uploads_and_hands_files_to_the_agent(client, monkeypatch):
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
 
@@ -875,7 +862,7 @@ def test_nucleate_stages_uploads_and_hands_files_to_the_agent(client, monkeypatc
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     resp = tc.post(
         "/nucleate",
@@ -903,7 +890,6 @@ def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkey
     """No words with the drop: the turn describes and asks (t03 2026-10-14 ran
     a 22-file nucleate off a bare drop), from the file's text when it fits
     (ADR-0121 point 2) and from an outline when it does not."""
-    from silica.ui.web import turn
     from silica.sources import drop_turn
     from silica.ui.web.session import SESSION
     tc, server = client
@@ -914,7 +900,7 @@ def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkey
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     body = b"# Enzimi\n\nuno due tre\n\n## Cinetica\n\nquattro\n\n## Inibizione\n\ncinque\n"
     resp = tc.post("/nucleate", files=[("files", ("bio.md", body, "text/markdown"))])
 
@@ -932,13 +918,12 @@ def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkey
 def test_a_dropped_file_lands_in_its_chat_inside_the_write_boundary(client, monkeypatch):
     """A vault that writes only under docs/silica keeps a chat's files there,
     not in a folder at the root of what may be a repository (ADR-0121 point 5)."""
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     from silica.config import CONFIG
     from silica.kernel.base.manifest import reset_manifest_cache
 
     tc, server = client
-    monkeypatch.setattr(turn, "run_agent", lambda messages, *a, **kw: "ok")
+    monkeypatch.setattr("silica.session.turn.run_agent", lambda messages, *a, **kw: "ok")
     root = Path(CONFIG.vault_path)
     (root / "vault.yaml").write_text("write_dir: docs/silica\n", encoding="utf-8")
     reset_manifest_cache()
@@ -965,7 +950,6 @@ def test_compose_nucleate_turn_defaults_empty_text_and_lists_files():
 
 
 def test_reset_restores_a_fresh_session(client, monkeypatch):
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
 
@@ -973,7 +957,7 @@ def test_reset_restores_a_fresh_session(client, monkeypatch):
         messages.append({"role": "assistant", "content": "a"})
         return "a"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     tc.post("/chat", json={"text": "hi"})
     assert any(m["role"] == "user" for m in SESSION.chat.messages)
@@ -995,14 +979,13 @@ def test_stop_signals_the_in_flight_cancel_token(client):
 
 
 def test_messages_endpoint_returns_user_and_assistant_turns(client, monkeypatch):
-    from silica.ui.web import turn
     tc, server = client
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
         messages.append({"role": "assistant", "content": "Reply"})
         return "Reply"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     tc.post("/chat", json={"text": "question"})
     data = tc.get("/messages").json()
@@ -1039,7 +1022,6 @@ def test_messages_endpoint_replays_the_tool_calls_of_a_turn(client):
 
 
 def test_sessions_persist_across_reset_and_reload(client, monkeypatch):
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
     tc, server = client
 
@@ -1047,7 +1029,7 @@ def test_sessions_persist_across_reset_and_reload(client, monkeypatch):
         messages.append({"role": "assistant", "content": "Reply one"})
         return "Reply one"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     tc.post("/chat", json={"text": "first question"})
     listed = tc.get("/sessions")
@@ -1729,7 +1711,6 @@ def test_messages_endpoint_reports_context_token_headers(client, monkeypatch):
 
 
 def test_chat_done_html_linkifies_a_cited_note(client, tmp_vault, monkeypatch):
-    from silica.ui.web import turn
     tc, server = client
     tmp_vault.note("Foo.md", "# Foo")
 
@@ -1737,7 +1718,7 @@ def test_chat_done_html_linkifies_a_cited_note(client, tmp_vault, monkeypatch):
         messages.append({"role": "assistant", "content": "look at [[Foo]]"})
         return "look at [[Foo]]"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     events = _read_sse(tc.post("/chat", json={"text": "where?"}))
     done = events[-1]
     assert done["type"] == "done"
@@ -3116,7 +3097,6 @@ def test_serve_exits_quietly_on_the_signal_uvicorn_re_raises(monkeypatch, tmp_pa
 def test_a_chat_turn_is_offered_the_core_and_can_load_the_rest(client, monkeypatch):
     """ADR-0050: the GUI builds the same constraints as the REPL, the core
     offered and every other chat tool loadable."""
-    from silica.ui.web import turn
     from silica.agent.constraints import CHAT_CORE, loadable
 
     tc, server = client
@@ -3128,7 +3108,7 @@ def test_a_chat_turn_is_offered_the_core_and_can_load_the_rest(client, monkeypat
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     _read_sse(tc.post("/chat", json={"text": "quali note sono orfane?"}))
     c = seen["c"]
     assert c.interactive and set(c.tools) <= set(CHAT_CORE)
@@ -3226,18 +3206,16 @@ def test_a_reader_saying_it_is_unclear_gets_a_read_only_turn(client, monkeypatch
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
 
     async def collect():
-        from silica.ui.web import turn
-        return [item async for item in turn.run_turn("non ho capito il Boosting")]
+        return [item async for item in turn.run_turn(turn.Ask("non ho capito il Boosting"))]
 
     asyncio.run(collect())
     assert "READ-ONLY" in seen["content"]
 
     async def plain():
-        from silica.ui.web import turn
-        return [item async for item in turn.run_turn("cos'è il boosting?")]
+        return [item async for item in turn.run_turn(turn.Ask("cos'è il boosting?"))]
 
     asyncio.run(plain())
     assert "READ-ONLY" not in seen["content"]
@@ -3268,12 +3246,11 @@ def test_a_plan_request_ends_on_the_calendar_learn_computed(client, monkeypatch)
         messages.append({"role": "assistant", "content": "Ecco come studiare."})
         return "Ecco come studiare."
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
-    monkeypatch.setattr(turn, "_plan_context", lambda text, messages: ("[block]", "| Day | Step | Notes |\n|---|---|---|\n| 2026-10-23 | Basi |  |", None))
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.offers.plan_context", lambda text, messages: ("[block]", "| Day | Step | Notes |\n|---|---|---|\n| 2026-10-23 | Basi |  |", None))
 
     async def collect():
-        from silica.ui.web import turn
-        return [item async for item in turn.run_turn("piano di studio fino all'esame")]
+        return [item async for item in turn.run_turn(turn.Ask("piano di studio fino all'esame"))]
 
     done = asyncio.run(collect())[-1]
     assert done["answer"].startswith("Ecco come studiare.") and done["answer"].endswith("| 2026-10-23 | Basi |  |")
@@ -3292,12 +3269,11 @@ def test_a_plan_computed_in_the_chat_is_offered_for_saving_with_one_click(client
         messages.append({"role": "assistant", "content": "Il piano copre ML/."})
         return "Il piano copre ML/."
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
-    monkeypatch.setattr(turn, "_plan_context", lambda text, messages: ("[block]", "Plan computed by Memorize", draft))
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.offers.plan_context", lambda text, messages: ("[block]", "Plan computed by Memorize", draft))
 
     async def collect():
-        from silica.ui.web import turn
-        return [item async for item in turn.run_turn("ML/, esame il 10 dicembre")]
+        return [item async for item in turn.run_turn(turn.Ask("ML/, esame il 10 dicembre"))]
 
     done = asyncio.run(collect())[-1]
     assert done["offer"]["commands"] == [{"label": "save it in Memorize", "save": draft}]

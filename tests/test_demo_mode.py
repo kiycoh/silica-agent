@@ -47,7 +47,6 @@ def sandbox(tmp_vault, _fresh_narrator, monkeypatch):
     line SILICA_VIEWS=graph; the chat answers without a model and keeps the
     constraints of every turn it ran."""
     from silica.ui.web import server
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
@@ -61,7 +60,7 @@ def sandbox(tmp_vault, _fresh_narrator, monkeypatch):
         messages.append({"role": "assistant", "content": "forty-two"})
         return "forty-two"
 
-    monkeypatch.setattr(turn, "run_agent", answers)
+    monkeypatch.setattr("silica.session.turn.run_agent", answers)
     return TestClient(server.app), server, ran
 
 
@@ -204,14 +203,13 @@ def test_a_refused_command_behind_a_persona_runs_nothing(sandbox, monkeypatch, c
     dispatchers: the refusal has to read the text the persona hands on."""
     from pathlib import Path
 
-    import silica.cli
     from silica.config import CONFIG
 
     d = Path(CONFIG.vault_path) / ".silica" / "skills" / "tutor"
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text("---\nname: tutor\ndescription: a tutor\nmetadata:\n  persona: true\n---\n"
                                 "Ask before you answer.\n", encoding="utf-8")
-    monkeypatch.setattr(silica.cli, "_expand_web_turn", lambda *a: pytest.fail("the dispatch reached _expand_web_turn"))
+    monkeypatch.setattr("silica.session.turn.expand_web_turn", lambda *a: pytest.fail("the dispatch reached /web"))
     tc, server, ran = sandbox
     last = _frames(tc.post("/chat", json={"text": f"/tutor {command}"}))[-1]
     assert last == {"type": "error", "error": f"'{command.split()[0]}' is not part of this account"}
@@ -265,7 +263,6 @@ def test_no_answer_is_flaggable_in_a_demo(sandbox):
 
 
 def test_a_thin_answer_does_not_offer_the_web_the_demo_refuses(sandbox, monkeypatch):
-    from silica.ui.web import turn
     tc, server, _ = sandbox
 
     def thin(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
@@ -276,7 +273,7 @@ def test_a_thin_answer_does_not_offer_the_web_the_demo_refuses(sandbox, monkeypa
         messages.append({"role": "assistant", "content": "I have nothing on that."})
         return "I have nothing on that."
 
-    monkeypatch.setattr(turn, "run_agent", thin)
+    monkeypatch.setattr("silica.session.turn.run_agent", thin)
     done = _frames(tc.post("/chat", json={"text": "what is graph rewiring?"}))[-1]
     assert THIN_COVERAGE_HINT not in [n["text"] for n in done.get("notes") or []]
     monkeypatch.delenv("SILICA_DEMO")

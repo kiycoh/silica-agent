@@ -4,7 +4,8 @@
 """Ctrl+C in the TUI (ADR-0004): during a tool the first press sets the turn's
 cancel token and lets the tool drain; elsewhere, and on the second press, it
 raises as it always did."""
-import inspect
+import signal
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -67,8 +68,22 @@ def test_a_nested_tool_keeps_the_outer_one_running():
     assert turn.token.is_set()
 
 
-def test_the_repl_hands_its_token_to_run_agent():
-    src = inspect.getsource(cli)
-    call = src[src.index("answer = run_agent(\n                messages,"):]
-    call = call[:call.index("\n            )\n")]
-    assert "cancel_token=interrupt.token" in call
+def test_the_repl_hands_its_token_to_run_agent(monkeypatch):
+    """The token a Ctrl+C sets is the one the model run polls, while the turn
+    runs: the handler is in place around the call and gone after it."""
+    from silica.session import turn as session_turn
+    from silica.session.conversation import Conversation
+
+    before = signal.getsignal(signal.SIGINT)
+    seen = {}
+
+    def run_agent(messages, model, tool_progress_callback=None, cancel_token=None, constraints=None):
+        seen["token"], seen["handler"] = cancel_token, signal.getsignal(signal.SIGINT)
+        messages.append({"role": "assistant", "content": "ok"})
+        return "ok"
+
+    monkeypatch.setattr("silica.session.turn.run_agent", run_agent)
+    cli._agent_turn(session_turn.Turn(Conversation(messages=[{"role": "user", "content": "hi"}]), "hi"),
+                    MagicMock())
+    assert seen["handler"].__self__.token is seen["token"]
+    assert signal.getsignal(signal.SIGINT) is before

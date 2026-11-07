@@ -30,6 +30,7 @@ from typing import Any
 
 from silica.config import CONFIG, hosted
 from silica.kernel import job_records
+from silica.session.words import command_word
 from silica.sources import drop_turn
 
 logger = logging.getLogger(__name__)
@@ -546,7 +547,7 @@ def from_command(text: str, session: str | None) -> dict | None:
     """
     if not text.strip().startswith("/"):
         return None
-    word = text.split(None, 1)[0].lower()
+    word = command_word(text)
     if word not in ("/convert", "/nucleate"):
         return None
     try:

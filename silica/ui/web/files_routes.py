@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from silica.config import CONFIG
 from silica.kernel import vault_files
 from silica.sources import drop_turn
-from silica.ui.web import drop, security, session, sse
+from silica.ui.web import drop, security, session, sse, turn
 from silica.ui.web.failures import explain as _failure
 from silica.ui.web.session import SESSION
 
@@ -108,10 +108,10 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
         files_said = [drop_turn.file_entry(p) for p in ready] + [drop_turn.file_entry(j["source"]["path"], job=j["id"]) for j in queued]
         # A thread: the manifest reads each staged note, and a textbook read on
         # the loop thread blocks /stop.
-        resp = sse.turn_response(slot, await asyncio.to_thread(
+        resp = sse.turn_response(slot, turn.Ask(await asyncio.to_thread(
             drop_turn.compose_nucleate_turn, text, ready, stubs, mail, skipped,
             converting=[j["source"]["path"] for j in queued]),
-            withhold=drop_turn.WITHHELD_WITH_FILES, files=files_said, said=text.strip())
+            withhold=drop_turn.WITHHELD_WITH_FILES, files=files_said, said=text.strip()))
         if queued:
             resp.headers["X-Silica-Jobs"] = ",".join(j["id"] for j in queued)
         return resp

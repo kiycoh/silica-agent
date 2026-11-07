@@ -31,7 +31,7 @@ def _run(inputs):
         return ANSWER
 
     with patch("silica.cli.build_session", MagicMock(return_value=session)), \
-         patch("silica.cli.run_agent", _answer), \
+         patch("silica.session.turn.run_agent", _answer), \
          patch("silica.cli._model_configured", lambda: True), \
          patch("silica.cli.CONSOLE"), \
          patch("silica.cli.print_home"), \

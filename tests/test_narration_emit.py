@@ -132,7 +132,6 @@ def test_gui_turn_roundtrip_replay_and_endpoints(narrator, monkeypatch, tmp_path
     and a reloaded session equals what the user saw."""
     from fastapi.testclient import TestClient
     from silica.ui.web import server
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     narrator.close()   # the server owns its own session
@@ -143,7 +142,7 @@ def test_gui_turn_roundtrip_replay_and_endpoints(narrator, monkeypatch, tmp_path
         messages.append({"role": "assistant", "content": "Reply"})
         return "Reply"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     tc = TestClient(server.app)
     tc.post("/chat", json={"text": "hello narration"})
 

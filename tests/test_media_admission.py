@@ -187,7 +187,6 @@ def drop(media, monkeypatch):
     from fastapi.testclient import TestClient
 
     from silica.ui.web import server
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     SESSION.reset()
@@ -198,7 +197,7 @@ def drop(media, monkeypatch):
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     tc = TestClient(server.app)
     lengths = {}
     monkeypatch.setattr(conv, "_media_to_audio", lambda src, wd, mp3=False: _write_wav(Path(wd) / "a.wav", lengths[src.name]))

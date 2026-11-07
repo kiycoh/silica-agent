@@ -146,11 +146,10 @@ def test_a_stopped_turn_keeps_the_partial_answer_and_adds_an_outcome_row(client,
         cancel_token.set()
         return "(silica: cancelled)"
 
-    monkeypatch.setattr(turn, "run_agent", stops)
+    monkeypatch.setattr("silica.session.turn.run_agent", stops)
 
     async def collect():
-        from silica.ui.web import turn
-        return [item async for item in turn.run_turn("hi")]
+        return [item async for item in turn.run_turn(turn.Ask("hi"))]
 
     items = asyncio.run(collect())
     done = items[-1]

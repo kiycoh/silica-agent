@@ -57,9 +57,9 @@ def test_the_turn_names_its_reads_by_title_and_the_offer_resolves_them(monkeypat
     the rule needs the path the ledger keys it by (seen in the app: no offer
     under an answer that had read "Teorema di Novikoff")."""
     from silica.kernel.graph import mindmap as mm
-    from silica.ui.web import turn
+    from silica.session import offers
 
-    monkeypatch.setattr(turn, "read_refs", lambda messages: ["Teorema di Novikoff"])
+    monkeypatch.setattr("silica.session.offers.read_refs", lambda messages: ["Teorema di Novikoff"])
     monkeypatch.setattr(mm, "answer_resolver",
                         lambda refs, graph=None: (None, ["ML/Teorema di Novikoff.md"] if refs == ["Teorema di Novikoff"] else []))
     monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto"}, None))
@@ -67,20 +67,20 @@ def test_the_turn_names_its_reads_by_title_and_the_offer_resolves_them(monkeypat
     monkeypatch.setattr("silica.kernel.learn.quiz.entries", lambda: [])
     # the offer log's caps and declines are tested on their own
     monkeypatch.setattr(offer, "log_offer", lambda *a, **kw: None)
-    o = turn._study_offer("non ho capito il teorema", [])
+    o = offers.study_offer("non ho capito il teorema", [], "")
     assert o and o["note"] == "ML/Teorema di Novikoff.md"
     # ...but the note the message names comes before a neighbour the turn read first
     monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto",
                                                           "ML/Teorema di Novikoff.md": "Teorema di Novikoff"}, None))
-    o = turn._study_offer("non ho capito i punti di supporto", [])
+    o = offers.study_offer("non ho capito i punti di supporto", [], "")
     assert o and o["note"] == "ML/Punti di supporto.md"
     monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto"}, None))
 
     # a turn that read nothing still has the note the reader named
-    monkeypatch.setattr(turn, "read_refs", lambda messages: [])
-    o = turn._study_offer("Non ho capito cosa sono i punti di supporto in una SVM", [])
+    monkeypatch.setattr("silica.session.offers.read_refs", lambda messages: [])
+    o = offers.study_offer("Non ho capito cosa sono i punti di supporto in una SVM", [], "")
     assert o and o["note"] == "ML/Punti di supporto.md"
-    assert turn._study_offer("cosa sono i punti di supporto?", []) is None   # no word saying it was unclear
+    assert offers.study_offer("cosa sono i punti di supporto?", [], "") is None   # no word saying it was unclear
 
 
 def test_a_study_plan_asked_of_the_chat_points_at_learn():
@@ -238,7 +238,7 @@ def test_the_chat_escalation_in_shadow_logs_and_adds_nothing(monkeypatch, tmp_pa
     import json
 
     from silica.kernel.graph import mindmap as mm
-    from silica.ui.web import turn
+    from silica.session import offers
     from silica.kernel.learn import items
 
     monkeypatch.setattr(offer, "_log_path", lambda: tmp_path / "offers.jsonl")
@@ -248,11 +248,11 @@ def test_the_chat_escalation_in_shadow_logs_and_adds_nothing(monkeypatch, tmp_pa
     monkeypatch.setattr(items, "read_note", lambda path: SPINE)
     lost = [{"role": "user", "content": "non ho capito la Lezione 14"}]
     monkeypatch.setenv("SILICA_STUDY_OFFER", "shadow")
-    assert turn._escalation("non ho ancora capito la Lezione 14", lost) == ""
+    assert offers.escalation("non ho ancora capito la Lezione 14", lost, "") == ""
     rec = json.loads((tmp_path / "offers.jsonl").read_text().splitlines()[-1])
     assert rec["escalated"] and rec["displayed"] is False and rec["why"] == "still unclear after an answer"
     monkeypatch.setenv("SILICA_STUDY_OFFER", "on")
-    block = turn._escalation("non ho ancora capito la Lezione 14", lost)
+    block = offers.escalation("non ho ancora capito la Lezione 14", lost, "")
     assert "4 to 6 slides" in block and "READ-ONLY" in block and "give no answer" in block
 
 
@@ -273,13 +273,13 @@ def test_said_unclear_the_offer_is_about_the_note_named_not_one_missed_elsewhere
 
 def test_saying_it_was_unclear_never_becomes_a_skill(monkeypatch, tmp_path):
     from silica.config import CONFIG
-    from silica.ui.web import turn
+    from silica.session import offers
     from silica.kernel import proposed_skills as ps
 
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
     monkeypatch.setattr(ps, "detect", lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked")))
-    assert turn._skill_after_turn("non ho capito la Lezione 14", []) == (None, None)
+    assert offers.skill_after_turn("non ho capito la Lezione 14", []) == (None, None)
 
 
 def test_the_shape_is_read_on_the_body_not_the_frontmatter_or_the_links():

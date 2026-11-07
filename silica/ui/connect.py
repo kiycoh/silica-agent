@@ -211,20 +211,12 @@ class BridgeServer:
             logger.debug("bridge: metadata event: %s", frame)  # non-fatal, LINT audits later
 
     async def _chat_turn(self, ws: Any, tid: str, text: str) -> None:
-        from silica.ui.web.turn import run_turn
+        from silica.ui.web.callback import bridge_frame
+        from silica.ui.web.turn import Ask, run_turn
 
         try:
-            async for item in run_turn(text):
-                kind = item.get("type")
-                if kind == "done":
-                    await _send(ws, {"type": "chat_done", "turnId": tid,
-                                     "answer": item.get("answer", ""),
-                                     "html": item.get("html", "")})
-                elif kind == "error":
-                    await _send(ws, {"type": "chat_error", "turnId": tid,
-                                     "error": item.get("error", "")})
-                else:
-                    await _send(ws, {"type": "chat_event", "turnId": tid, "event": item})
+            async for item in run_turn(Ask(text)):
+                await _send(ws, bridge_frame(item, tid))
         except Exception as exc:  # socket died mid-turn; run_turn's finally cleans up
             logger.warning("bridge: chat turn aborted: %s", exc)
 

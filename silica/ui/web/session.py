@@ -20,25 +20,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from silica.config import CONFIG
+from silica.kernel import system_lines
 from silica.session import meter
+from silica.session.conversation import Conversation
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class Conversation:
-    """What one chat remembers. A field added here starts clean with each new
-    chat by being here: `Session.reset` builds a new one and names none of them."""
-
-    messages: list[dict] = field(default_factory=list)
-    collapsed: set[int] = field(default_factory=set)  # message indices elided by compaction, across turns
-    # Number tokens of every result this session read, raw (ADR-0095): compaction
-    # and a relevance verdict stub the tool messages, and must not decide what grounds.
-    seen_numbers: set[str] = field(default_factory=set)
-    # The narration sid. The store moved to ~/.silica/narration (docs/specs/narration/spec.md §5);
-    # legacy web_sessions/*.json are read forever through silica.obs.narration.
-    sid: str | None = None
-    workspace: str | None = None  # vault path of the workspace this chat is opened in (ADR-0112)
 
 
 @dataclass
@@ -214,7 +200,7 @@ def apply_workspace(ws: dict | None) -> None:
     from silica.kernel import workspaces
 
     messages = SESSION.chat.messages
-    i = next((n for n, m in enumerate(messages) if m.get("origin") == WS_ORIGIN), None)
+    i = system_lines.index_of(messages, WS_ORIGIN)
     if ws is None:
         if i is not None:
             messages[i]["content"] = ("This conversation is no longer limited to a workspace: searches "
@@ -231,9 +217,7 @@ def apply_workspace(ws: dict | None) -> None:
         # that ever shows up in the pilot's logs.
         logger.info("workspace line skipped: the chat is already compacted")
         return
-    # Before the seed's last system message, the language rule, which must stay last.
-    head = next((n for n, m in enumerate(messages) if m.get("role") != "system"), len(messages))
-    messages.insert(max(head - 1, 0), {"role": "system", "content": text, "origin": WS_ORIGIN})
+    system_lines.insert(messages, {"role": "system", "content": text, "origin": WS_ORIGIN})
 
 
 def resolve_workspace(ref: str) -> dict | None:

@@ -2,7 +2,7 @@
 
 - eager projection: run_agent stores the one-line summary in history,
   while the TUI event still carries the full result.
-- lazy compaction: meter.compact_context collapses old reads when the
+- lazy compaction: meter.recount collapses old reads when the
   meter is over budget and refreshes the token count.
 """
 from __future__ import annotations
@@ -106,8 +106,12 @@ def test_lazy_tool_result_stays_verbatim_in_history():
     assert tool_msgs[0]["content"] == fat
 
 
-def test_compact_context_collapses_old_read_and_recounts(monkeypatch):
+@pytest.mark.parametrize("shown", [True, False])
+def test_recount_collapses_an_old_read_and_counts_again(monkeypatch, shown):
+    """`shown=False` is the phone's window: it sweeps its own conversation and
+    the browser's ring stays where it was."""
     from silica.config import CONFIG
+    from silica.session.conversation import Conversation
 
     big = "x" * 300
     messages = [
@@ -119,8 +123,8 @@ def test_compact_context_collapses_old_read_and_recounts(monkeypatch):
         {"role": "assistant", "content": "t2"},
         {"role": "assistant", "content": "t3"},
     ]
-    monkeypatch.setattr(CONFIG, "max_context_tokens", 100)   # budget = 60
-    monkeypatch.setattr(CONFIG, "context_tokens", 1_000)     # over budget → trigger
+    monkeypatch.setattr(CONFIG, "max_context_tokens", 10)    # budget = 6: this window is over it
+    monkeypatch.setattr(CONFIG, "context_tokens", 1_000)
 
     # A whole registry entry, not just `collapse`: the meter now prices the tool
     # block the turn ships (chat_tool_schemas), so it reads the same fields the
@@ -128,12 +132,13 @@ def test_compact_context_collapses_old_read_and_recounts(monkeypatch):
     fake = SimpleNamespace(collapse="lazy", sensitive=False, internal=False,
                            json_schema=lambda reach=None: {"type": "function", "function": {
                                "name": "fake_read", "description": "d", "parameters": {}}})
+    conv = Conversation(messages=messages)
     with patch.dict("silica.tools.TOOLS", {"fake_read": fake}, clear=True):
-        collapsed = meter.compact_context(messages, set())
+        meter.recount(conv, shown=shown)
 
-    assert collapsed == {2}
+    assert conv.collapsed == {2}
     assert "re-call fake_read" in messages[2]["content"]
-    assert CONFIG.context_tokens < 1_000  # meter refreshed after the collapse
+    assert (CONFIG.context_tokens < 1_000) is shown  # the meter reads the slimmer history
 
 
 def test_loop_compacts_between_its_own_iterations(monkeypatch):
@@ -201,10 +206,8 @@ def test_compact_context_noop_under_budget(monkeypatch):
 
     messages = [{"role": "user", "content": "q"}]
     monkeypatch.setattr(CONFIG, "max_context_tokens", 100_000)
-    monkeypatch.setattr(CONFIG, "context_tokens", 10)
 
-    assert meter.compact_context(messages, set()) == set()
-    assert CONFIG.context_tokens == 10  # no recount on the no-op path
+    assert meter.compact_context(messages, set(), 10) == set()
 
 
 def test_context_breakdown_parts_sum_to_the_single_count():

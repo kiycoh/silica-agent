@@ -24,6 +24,7 @@ import re
 from pathlib import Path
 
 from silica.config import CONFIG, silica_home
+from silica.kernel import system_lines
 from silica.obs import narration
 
 # 2,500 characters across both files is about 830 tokens at chars/3 and 1,250
@@ -456,10 +457,7 @@ def refresh_snapshot(messages: list[dict], vault: str | None = None) -> bool:
         return False
     messages[:] = [m for m in messages if m.get("origin") != MESSAGE_ORIGIN]
     if new is not None:
-        head = 0
-        while head < len(messages) and messages[head].get("role") == "system":
-            head += 1
-        messages.insert(max(head - 1, 0), new)
+        system_lines.insert(messages, new)
     return True
 
 

@@ -6,10 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator, AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import suppress
-from pathlib import Path
-from typing import Any
 
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
@@ -59,8 +57,7 @@ async def _with_keepalive(chunks: AsyncGenerator[str, None], every: float) -> As
                 await step
 
 
-def turn_response(slot: TurnSlot, text: str, attachments: "Sequence[Path]" = (), workspace: str = "",
-                  **extra: Any) -> StreamingResponse:
+def turn_response(slot: TurnSlot, ask: turn.Ask) -> StreamingResponse:
     """One agent turn as an SSE stream, which takes the holding over from `slot`:
     `run_turn` frees the gate, and `sweep_if_orphaned` when the body never runs."""
     slot.hand_off()
@@ -76,7 +73,7 @@ def turn_response(slot: TurnSlot, text: str, attachments: "Sequence[Path]" = (),
         flaggable = hosted() and not demo()
         sid0 = SESSION.chat.sid
         seq0 = await asyncio.to_thread(flags.session_head, sid0) if flaggable else 0
-        async for item in turn.run_turn(text, attachments, workspace, **extra):
+        async for item in turn.run_turn(ask):
             if flaggable and item.get("type") == "done":
                 flag = await asyncio.to_thread(flags.turn_since, sid0, seq0)
                 if flag:

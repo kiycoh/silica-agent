@@ -59,7 +59,6 @@ def lane(tmp_vault, monkeypatch):
 def client(lane, monkeypatch):
     from silica.ui.web import server
     from silica.ui.web import drop
-    from silica.ui.web import turn
     from silica.ui.web.session import SESSION
 
     SESSION.reset()
@@ -70,7 +69,7 @@ def client(lane, monkeypatch):
         messages.append({"role": "assistant", "content": "ok"})
         return "ok"
 
-    monkeypatch.setattr(turn, "run_agent", fake_run_agent)
+    monkeypatch.setattr("silica.session.turn.run_agent", fake_run_agent)
     monkeypatch.setattr(drop, "embed_imported", lambda folders: None)
     return TestClient(server.app), server, ran
 

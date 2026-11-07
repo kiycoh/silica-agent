@@ -23,19 +23,13 @@ from contextlib import nullcontext, redirect_stdout
 
 from silica.ui.style import FlatMarkdown
 
-from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools, web_turn_constraints
-from silica.agent.loop import run_agent
-from silica.agent import turn_notes
-from silica.agent.recall_watch import (
-    RecallWatch,
-    numbers_notes,
-    numbers_of_session,
-    unfounded_in_turn,
-)
+from silica.agent.recall_watch import numbers_of_session
 from silica.config import claim_env, CONFIG, GUI_PORT, live_env
 from silica.onboarding.adopt import resolve_cwd_vault, resolve_vault_switch, switch_vault
 from silica.session import check as check_wiring
-from silica.session import meter, seed
+from silica.session import commands, meter, seed
+from silica.session import turn as session_turn
+from silica.session.conversation import Conversation
 from silica.session.words import direct_args, int_flag, positional, remember_text, str_flag, unquoted
 from silica.sources import ingest
 from silica.ui.console import CONSOLE
@@ -44,7 +38,6 @@ from silica.ui.prompt import build_session, bottom_toolbar, prompt_text
 from prompt_toolkit.patch_stdout import patch_stdout
 
 from silica.tools import catalog
-from silica.sources.web_research import WebTurn
 
 catalog.load()
 
@@ -100,6 +93,51 @@ def _print_turn_notes(notes: list[dict]) -> None:
     for note in notes:
         CONSOLE.print(f"  [dim]{escape(note['text'])}[/]")
     CONSOLE.print()
+
+
+def _print_answer(t: session_turn.Turn) -> None:
+    if t.answer:
+        CONSOLE.print()
+        CONSOLE.print("[role.assistant]⏺ silica[/]")
+        CONSOLE.print(FlatMarkdown(t.answer))
+        CONSOLE.print()
+    _print_turn_notes(t.notes)
+
+
+_BEFORE = (session_turn.name_notes,)
+_AFTER = (session_turn.check_numbers, session_turn.attribute, session_turn.note, session_turn.beat,
+          _print_answer, session_turn.recount)
+
+
+def _agent_turn(t: session_turn.Turn, callback) -> None:
+    """The model's part of a REPL turn and everything after it, on this thread."""
+    interrupt = _TurnInterrupt(callback)
+    session_turn.watched(t, interrupt, surface="repl")
+    # Only around the turn: at the prompt, prompt_toolkit owns Ctrl+C.
+    previous_sigint = signal.signal(signal.SIGINT, interrupt.on_sigint)
+    try:
+        session_turn.ask_model(t, interrupt.token, session_turn.constraints(t))
+        if interrupt.token.is_set():
+            # A drained tool hands back the loop's "(silica: cancelled)",
+            # which is no answer: the turn ends the way a raise ends it.
+            raise KeyboardInterrupt
+        for step in _AFTER:
+            step(t)
+    except KeyboardInterrupt:
+        callback.close()
+        from silica.obs import narration as _narr
+        _narr.NARRATOR.cancel(driver="tui", target=None, scope="turn")
+        CONSOLE.print("\n  [dim](interrupted)[/]")
+    except Exception as e:
+        callback.close()
+        logger.exception("Agent error")
+        CONSOLE.print(f"\n  [bold red]Error:[/] {e}\n")
+    finally:
+        signal.signal(signal.SIGINT, previous_sigint)
+    # After the except arms too: an interrupted or failed turn still read
+    # what its results showed, and the narration /resume rebuilds from has them.
+    assert t.read is not None  # `watched` above
+    t.conv.seen_numbers |= t.read.numbers
 
 
 def _setup_logging(debug: bool = False) -> None:
@@ -1944,46 +1982,6 @@ def _seed_batch_ledger(cap: str, payloads: list[dict], *, kind: str, label: str)
     )
 
 
-_WEB_USAGE = (
-    "/web has nothing to search for. Usage: /web <keywords>, or a bare /web "
-    "right after a question to answer that question from the web."
-)
-
-
-def _expand_web_turn(user_input: str, messages: list[dict]) -> tuple[str, str] | None:
-    """`/web [keywords]` — the consent turn. Returns (question, instruction).
-
-    None when the input is not `/web`. Raises ValueError (usage) when there are
-    neither keywords nor a prior question to escalate.
-
-    Deliberately NOT a direct handler: run_agent appends the assistant and tool
-    turns to the shared `messages` itself, so a handler running its own loop and
-    then reporting the answer would append that answer a second time — the GUI's
-    generic direct-command wrapper renders it as a fenced text block, which is
-    how a web answer would arrive both as markdown and as a code block.
-    """
-    parts = user_input.strip().split()
-    if not parts or parts[0].lower() != "/web":
-        return None  # "/web-search" is its own command and must not match here
-    question = " ".join(parts[1:]).strip()
-    if not question:
-        # Bare /web: the question is already in the history, no pending state
-        # needed. `origin` marks CLI-expanded directives — re-asking one of those
-        # on the web would escalate a harness instruction, not a human question.
-        question = next(
-            (
-                m["content"] for m in reversed(messages)
-                if m.get("role") == "user" and not m.get("origin") and m.get("content")
-            ),
-            "",
-        )
-        if not question:
-            raise ValueError(_WEB_USAGE)
-    from silica.sources.web_research import web_turn_instruction
-
-    return question, web_turn_instruction(question)
-
-
 # --- shortcut handlers -------------------------------------------------------
 # One per command, module-level and independently readable: the dispatcher below
 # is a table, not a 20-branch chain, and `git log -L` on one command no longer
@@ -2688,6 +2686,16 @@ def _expand_workflow_shortcut(user_input: str, progress=None, ask=None) -> str |
     return handler(parts[1:], user_input=user_input, progress=progress, ask=ask)
 
 
+def _dispatch_command(text: str, messages: list[dict], *, ask=None, progress=None) -> str | None:
+    """What `session.commands` runs for a surface that cannot read this module."""
+    if _handle_direct_shortcut(text, messages, ask=ask):
+        return ""
+    return _expand_workflow_shortcut(text, progress=progress, ask=ask)
+
+
+commands.install(_dispatch_command)
+
+
 def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
     """Handle a meta slash command. True = handled, False = exit the REPL,
     None = not a recognized command (the caller hands it to the agent)."""
@@ -3178,18 +3186,14 @@ def main():
     # for capture too, so one toggle covers both. A session starts on the record.
     from silica.kernel import user_memory
     user_memory.set_incognito(False)
-    messages = seed.fresh_messages()
-    collapsed: set[int] = set()  # message indices already elided by compaction
-    # Number tokens of every result this session read, raw (ADR-0095): compaction
-    # and a relevance verdict stub the tool messages, and must not decide what grounds.
-    seen_numbers: set[str] = set()
     # This session's own identity, for the capture lane. Random, not a clock:
     # two silica processes started in the same second share the same vault WAL,
     # and a deterministic name would have one overwrite the other's envelope.
     # capture_session is opt-in and fail-open in itself, so both call sites
     # below are the bare call — no wrapper, nothing to guard.
     from silica.capture import capture_session
-    session_id = uuid.uuid4().hex[:12]
+    conv = Conversation(messages=seed.fresh_messages(), sid=uuid.uuid4().hex[:12])
+    messages = conv.messages
 
     from silica.ui.renderer import make_progress_callback
     callback = make_progress_callback()
@@ -3221,17 +3225,12 @@ def main():
             continue
         typed = user_input   # the expansions below rewrite user_input; the named notes are read from this
 
-        # A persona is worn, not run (ADR-0127 point 3): it edits this
-        # conversation's system line; words after its name are this turn.
-        if user_input.startswith("/"):
-            from silica.kernel import personas
-
-            worn = personas.command(user_input, messages, CONFIG.vault_path or None, not collapsed)
-            if worn is not None:
-                CONSOLE.print(f"  {worn[0]}")
-                if not worn[1]:
-                    continue
-                user_input = typed = worn[1]
+        worn = session_turn.wear(user_input, conv)
+        if worn is not None:
+            CONSOLE.print(f"  {worn[0]}")
+            if not worn[1]:
+                continue
+            user_input = typed = worn[1]
 
         # Direct shortcuts bypass the LLM entirely (case-sensitive args preserved)
         if user_input.startswith("/") and _handle_direct_shortcut(user_input, messages, ask=ask):
@@ -3262,7 +3261,7 @@ def main():
         # since it rewrites the input into an ordinary agent instruction.
         web: tuple[str, str] | None = None
         try:
-            web = _expand_web_turn(user_input, messages)
+            web = session_turn.expand_web_turn(user_input, messages)
         except ValueError as e:
             CONSOLE.print(f"  [yellow]{e}[/]")
             continue
@@ -3277,16 +3276,16 @@ def main():
                 # Before the wipe: /clear destroys this conversation, so the
                 # session's own end envelope will not contain it.
                 if not user_memory.incognito():
-                    capture_session(messages, session_id=session_id, driver="tui",
+                    capture_session(messages, session_id=conv.sid, driver="tui",
                                     event="session_clear")
                 CONSOLE.clear()
                 print_home()
                 messages[:] = seed.fresh_messages()
-                collapsed = set()  # indices reset with the history
-                seen_numbers = set()
+                conv.collapsed = set()  # indices reset with the history
+                conv.seen_numbers = set()
                 from silica.obs import narration as _narr
                 _narr.NARRATOR.close()          # next user turn opens a fresh sid
-                session_id = uuid.uuid4().hex[:12]
+                conv.sid = uuid.uuid4().hex[:12]
                 continue
 
             result = _handle_slash_command(user_input, messages)
@@ -3296,7 +3295,7 @@ def main():
                 # what the live set does.
                 from silica.obs import narration as _narr
 
-                seen_numbers = numbers_of_session(_narr.NARRATOR.sid)
+                conv.seen_numbers = numbers_of_session(_narr.NARRATOR.sid)
             if result is False:
                 print("  (_  _)。˚")
                 break
@@ -3318,112 +3317,27 @@ def main():
             CONSOLE.print(_NO_MODEL_HINT)
             continue
 
-        # The notes the user named, as paths (ADR-0097 point 2), the same block
-        # the GUI's run_turn adds. Not on a /web turn: its tools cannot read a note.
-        if web is None:
-            from silica.agent.mentions import named_notes
-
-            if block := named_notes(typed):
-                user_input += "\n\n" + block
-
-        # Normal user message → agentic loop. CLI-expanded shortcuts carry an
-        # `origin` so the wire boundary (and our own bookkeeping) can tell a
+        t = session_turn.Turn(conv, typed, content=user_input, web=web, origin="cli" if is_directive else None)
+        for step in _BEFORE:
+            step(t)
+        # A normal message goes to the agentic loop. CLI-expanded shortcuts carry
+        # an `origin` so the wire boundary (and our own bookkeeping) can tell a
         # harness directive apart from a human turn.
-        msg: dict = {"role": "user", "content": user_input}
-        if is_directive:
-            msg["origin"] = "cli"
-        from silica.kernel import personas
-
-        if persona := personas.active(messages):
-            msg[personas.TURN_KEY] = persona
+        msg = session_turn.user_message(t)
         messages.append(msg)
 
         # Born at the first user turn (spec §5); idempotent afterwards. The
         # sid is capture's session_id so the two records share one id space.
         from silica.obs import narration as _narr
-        _narr.NARRATOR.ensure_session(driver="tui", sid=session_id)
-        session_id = _narr.NARRATOR.sid or session_id   # /resume may have switched it
+        _narr.NARRATOR.ensure_session(driver="tui", sid=conv.sid)
+        conv.sid = _narr.NARRATOR.sid or conv.sid   # /resume may have switched it
         _narr.NARRATOR.turn(msg)
 
-        # Both wrappers forward every event to the renderer untouched: WebTurn
-        # records the trace the citations are built from, RecallWatch counts
-        # recall misses for the thin-coverage hint.
-        # A /web turn is not checked for numbers, but its pages were read: the
-        # RecallWatch under its WebTurn collects them for the session set.
-        interrupt = _TurnInterrupt(callback)
-        read = RecallWatch(interrupt, surface="repl")
-        watch = WebTurn(web[0], read) if web else read
-
-        # Only around the turn: at the prompt, prompt_toolkit owns Ctrl+C.
-        previous_sigint = signal.signal(signal.SIGINT, interrupt.on_sigint)
-        try:
-            answer = run_agent(
-                messages,
-                model=CONFIG.model,
-                tool_progress_callback=watch,
-                cancel_token=interrupt.token,
-                constraints=(
-                    # interactive=True: the chat_tools cut must not also demote
-                    # the REPL to a worker (no streaming, worker-slot capped) —
-                    # which is what it silently did when the toolset constraint
-                    # was first wired in.
-                    web_turn_constraints() if web
-                    else AgentConstraints(tools=chat_tools(messages),
-                                          deferred=chat_deferred(messages), interactive=True)
-                ),
-            )
-            if interrupt.token.is_set():
-                # A drained tool hands back the loop's "(silica: cancelled)",
-                # which is no answer: the turn ends the way a raise ends it.
-                raise KeyboardInterrupt
-            # ADR-0095: the answer as the model wrote it, before attribution adds
-            # text it did not; not a /web turn's, whose answer is bound to banked
-            # verbatim quotes.
-            unread = [] if web else unfounded_in_turn(answer, read.numbers, messages, seen_numbers)
-            if web:
-                answer = watch.attribute(answer, messages)
-            elif watch.web_answer:
-                from silica.sources.web_research import relay_sources
-
-                answer = relay_sources(answer, messages)
-            # The lines under the answer, stored on it before the beat below
-            # so the session keeps them (ADR-0094 point 8).
-            from silica.kernel.learn.artifacts import grounding_notes
-
-            notes = turn_notes.attach(messages, ([] if web else watch.notes()) + numbers_notes(unread)
-                                      + ([] if web else grounding_notes(typed, answer)))
-            # Final-assistant turn beat, post-attribution (see loop.py): the
-            # replay must carry what the user actually read, sources included.
-            if messages and messages[-1].get("role") == "assistant":
-                _narr.NARRATOR.turn(messages[-1])
-            if answer:
-                CONSOLE.print()
-                CONSOLE.print("[role.assistant]⏺ silica[/]")
-                CONSOLE.print(FlatMarkdown(answer))
-                CONSOLE.print()
-            _print_turn_notes(notes)
-            # run_agent already appended the final assistant message to the
-            # history — re-appending `answer` here would store it twice.
-            meter.update_context_tokens(messages)
-            collapsed = meter.compact_context(messages, collapsed)
-        except KeyboardInterrupt:
-            callback.close()
-            from silica.obs import narration as _narr
-            _narr.NARRATOR.cancel(driver="tui", target=None, scope="turn")
-            CONSOLE.print("\n  [dim](interrupted)[/]")
-        except Exception as e:
-            callback.close()
-            logger.exception("Agent error")
-            CONSOLE.print(f"\n  [bold red]Error:[/] {e}\n")
-        finally:
-            signal.signal(signal.SIGINT, previous_sigint)
-        # After the except arms too: an interrupted or failed turn still read
-        # what its results showed, and the narration /resume rebuilds from has them.
-        seen_numbers |= read.numbers
+        _agent_turn(t, callback)
 
     # Every exit from the REPL passes here: /exit, Ctrl+D, Ctrl+C at the prompt.
     if not user_memory.incognito():
-        capture_session(messages, session_id=session_id, driver="tui")
+        capture_session(messages, session_id=conv.sid, driver="tui")
     from silica.obs import narration as _narr
     _narr.NARRATOR.close()
 
