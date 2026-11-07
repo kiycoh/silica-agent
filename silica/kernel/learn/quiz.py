@@ -20,7 +20,6 @@ from pathlib import Path
 
 from silica.kernel.base.notekey import ledger_key
 from silica.kernel.learn import store
-from silica.kernel.learn.mastery import BANDS
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +61,11 @@ def record(results: list[dict]) -> int:
         return 0
     store.append_rows(log_path(), lines)
     return len(lines)
+
+
+# learn-suite D14: fixed labels, for data stability
+CONFIDENCE = (("certain", 90), ("pretty sure", 70), ("half unsure", 50), ("guessing", 25))
+BANDS = tuple(band for _, band in CONFIDENCE)
 
 
 def _v2_fields(r: dict, rec: dict) -> None:

@@ -19,7 +19,7 @@ from typing import Any
 from silica.kernel import user_memory
 from silica.kernel.base.formats import IMAGE_MIME, WEB_IMAGE_EXTS
 from silica.kernel.check import ORDER
-from silica.kernel.learn import grade, items, mastery, objectives, pick, reasons, reference, session, sources
+from silica.kernel.learn import grade, items, mastery, objectives, pick, quiz, reasons, reference, session, sources
 from silica.kernel.report import note_context
 from silica.sources.discover import story
 from silica.tools import TOOLS, note_keys
@@ -43,7 +43,7 @@ def table() -> dict[str, Any]:
                   "withheld_commands": sorted(withheld("commands"))},
         "jobs": {"interrupted": jobs.INTERRUPTED, "unconverted": jobs.UNCONVERTED},
         "learn": {
-            "confidence": mastery.CONFIDENCE,
+            "confidence": quiz.CONFIDENCE,
             "ratings": {n: name.lower() for n, name in reasons.RATING_NAME.items()},
             "levels": mastery.DEPTH_LABEL,
             "objectives": objectives.LABEL,
