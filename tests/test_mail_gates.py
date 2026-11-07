@@ -43,10 +43,10 @@ def test_gate6_counts_the_first_50_threads_whose_pdf_was_then_nucleated(tmp_vaul
 
 
 def test_gate6_is_shown_by_the_status_command(tmp_vault, capsys):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
 
     _imported(tmp_vault, 0)
-    _handle_direct_shortcut("/mail", [])
+    direct("/mail", [])
     assert "Gate 6: 0 of the first 1" in capsys.readouterr().out
 
 
@@ -103,7 +103,7 @@ def _import(tmp_path, messages, name: str, monkeypatch) -> tuple[list[str], int]
     connect failing: (note texts written, connect attempts)."""
     import socket
 
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from tests.mail_fixtures import ME, write_mbox
 
     attempts = []
@@ -117,7 +117,7 @@ def _import(tmp_path, messages, name: str, monkeypatch) -> tuple[list[str], int]
     box = tmp_path / name
     if not box.exists():  # a second import reads the very same file, not a copy appended to it
         write_mbox(box, messages)
-    assert _handle_direct_shortcut(f"/mail import {box} --me={ME} --apply", []) is True
+    assert direct(f"/mail import {box} --me={ME} --apply", []) is True
     notes = sorted((tmp_path / "vault" / "sources" / "mail").glob("*.md"))
     return [p.read_text(encoding="utf-8") for p in notes], len(attempts)
 

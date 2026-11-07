@@ -13,7 +13,7 @@ import json
 import pytest
 from rich.console import Console
 
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 from silica.config import CONFIG
 
 
@@ -114,7 +114,7 @@ def test_an_unlinked_note_is_deleted_and_the_result_names_what_it_orphaned(vault
 def test_slash_delete_deletes_a_linked_note_and_says_what_it_left(vault, out):
     from silica.kernel.write.undo_journal import USER_DELETE_SOURCE, get_undo_journal
 
-    assert _handle_direct_shortcut("/delete Corso/Autoencoders.md", []) is True
+    assert direct("/delete Corso/Autoencoders.md", []) is True
     assert not (vault / "Corso" / "Autoencoders.md").exists()
     text = out()
     assert "Corso/Linker.md" in text and "Corso/Linker2.md" in text  # now point nowhere
@@ -128,28 +128,28 @@ def test_slash_delete_deletes_a_linked_note_and_says_what_it_left(vault, out):
 
 
 def test_slash_delete_takes_a_bare_name(vault, out):
-    assert _handle_direct_shortcut("/delete Autoencoders", []) is True
+    assert direct("/delete Autoencoders", []) is True
     assert not (vault / "Corso" / "Autoencoders.md").exists()
 
 
 def test_slash_delete_of_a_missing_note_deletes_nothing(vault, out):
     from silica.kernel.write.undo_journal import get_undo_journal
 
-    assert _handle_direct_shortcut("/delete Corso/Nothing here.md", []) is True
+    assert direct("/delete Corso/Nothing here.md", []) is True
     assert "not deleted" in out().lower()
     assert get_undo_journal().last_delete(CONFIG.vault_path) is None
 
 
 def test_bare_slash_delete_asks_for_a_path(vault, out):
-    assert _handle_direct_shortcut("/delete", []) is True
+    assert direct("/delete", []) is True
     assert "/delete <path>" in out()
 
 
 def test_undo_brings_back_a_slash_delete_with_its_edges(vault, out):
     before = (vault / "Corso" / "Autoencoders.md").read_text(encoding="utf-8")
-    _handle_direct_shortcut("/delete Corso/Autoencoders.md", [])
+    direct("/delete Corso/Autoencoders.md", [])
 
-    assert _handle_direct_shortcut("/undo Corso/Autoencoders.md", []) is True
+    assert direct("/undo Corso/Autoencoders.md", []) is True
     assert (vault / "Corso" / "Autoencoders.md").read_text(encoding="utf-8") == before
     assert "you deleted it" in out()
     live, rebuilt = _index_state()
@@ -161,8 +161,8 @@ def test_bare_undo_takes_back_a_slash_delete_when_it_is_the_newest_action(vault,
     from silica.tools.notes import silica_patch_note
 
     silica_patch_note("Leaf2", "Extra", "more text", "chat")   # an older write
-    _handle_direct_shortcut("/delete Corso/Autoencoders.md", [])
+    direct("/delete Corso/Autoencoders.md", [])
 
-    assert _handle_direct_shortcut("/undo", []) is True
+    assert direct("/undo", []) is True
     assert (vault / "Corso" / "Autoencoders.md").exists()
     assert "more text" in (vault / "Corso" / "Leaf2.md").read_text(encoding="utf-8")

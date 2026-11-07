@@ -2,7 +2,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 from silica.config import CONFIG
 
 
@@ -35,7 +35,7 @@ def test_stale_command_handled_and_reports(tmp_path, monkeypatch, capsys):
     _commit(tmp_path, "src/m.py", "def f(x):\n    return 1\n", "c2")  # structural: shown by default
 
     monkeypatch.setattr(CONFIG, "vault_path", str(vault))
-    handled = _handle_direct_shortcut("/stale", [])
+    handled = direct("/stale", [])
     assert handled is True
     out = capsys.readouterr().out
     assert "m.md" in out
@@ -61,7 +61,7 @@ def test_stale_command_refreshes_the_snapshot(tmp_path, monkeypatch, capsys):
     cache.write_text('{"head": "poison", "docs": []}', encoding="utf-8")
 
     monkeypatch.setattr(CONFIG, "vault_path", str(vault))
-    assert _handle_direct_shortcut("/stale", []) is True
+    assert direct("/stale", []) is True
     assert "m.md" in capsys.readouterr().out          # reported despite the poison
     raw = json.loads(cache.read_text(encoding="utf-8"))
     assert raw["head"] != "poison" and raw["docs"]    # cache rewritten fresh

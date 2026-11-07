@@ -139,14 +139,8 @@ def library() -> dict:
     holder = _holder(zot)
     return {"total": len(items), "in_vault": sum(i["key"] in leaves for i in items),
             "new": len(det["new"]), "collections": cols,
-            "inbox": _inbox_key(zot, link.inbox) if link and link.inbox else "",
+            "inbox": zotero.collection_key(zot, link.inbox) if link and link.inbox else "",
             "read_only": link is None, "holder": str(holder or "")}
-
-
-def _inbox_key(zot, value: str) -> str:
-    from silica.sources.zotero_cli import _collection_key
-
-    return _collection_key(zot, value)
 
 
 def _row(item: dict, leaves: dict, det: dict, counts, there: dict | None = None) -> dict:
@@ -191,7 +185,7 @@ def collection(key: str) -> dict:
     there = {k: name for k, (name, _) in zotero._leaf_index(holder).items()} if holder else {}
     rows = [_row(i, leaves, det, counts, there) for i in items]
     link = _link()
-    is_inbox = bool(link and link.inbox) and _inbox_key(zot, link.inbox) == key
+    is_inbox = bool(link and link.inbox) and zotero.collection_key(zot, link.inbox) == key
     if is_inbox:
         sugg = {s["key"]: s for s in zotero_write.suggest_filing(zot, key)}
         for r in rows:
@@ -248,7 +242,7 @@ def file(moves: list[list[str]]) -> dict:
     if not link or not link.inbox:
         raise zotero.ZoteroError("no inbox collection set: Settings › Zotero › Inbox collection")
     zot = zotero.client()
-    moved, run = zotero_write.file_in_a_run(zot, [(k, t) for k, t in moves], _inbox_key(zot, link.inbox))
+    moved, run = zotero_write.file_in_a_run(zot, [(k, t) for k, t in moves], zotero.collection_key(zot, link.inbox))
     return {"moved": moved, "run": run}
 
 

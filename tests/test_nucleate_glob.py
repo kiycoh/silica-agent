@@ -24,9 +24,9 @@ def test_glob_expands_to_the_inbox_files_and_reaches_the_fsm(tmp_vault, monkeypa
     calls = _capture_coordinator(monkeypatch)
     tmp_vault.note("Inbox/a.md", "alpha body\n")
     tmp_vault.note("Inbox/b.md", "beta body\n")
-    from silica.cli import _expand_workflow_shortcut
+    from tests.run_command import expansion
 
-    out = _expand_workflow_shortcut("/nucleate Inbox/* --target=Concepts")
+    out = expansion("/nucleate Inbox/* --target=Concepts")
 
     assert out == ""  # handled inline, no agent turn
     assert sorted(calls.get("inbox_files", [])) == ["Inbox/a.md", "Inbox/b.md"]
@@ -35,9 +35,9 @@ def test_glob_expands_to_the_inbox_files_and_reaches_the_fsm(tmp_vault, monkeypa
 
 def test_glob_with_no_match_reports_and_stays_deterministic(tmp_vault, monkeypatch):
     calls = _capture_coordinator(monkeypatch)
-    from silica.cli import _expand_workflow_shortcut
+    from tests.run_command import expansion
 
-    out = _expand_workflow_shortcut("/nucleate Inbox/*.pdf --target=Concepts")
+    out = expansion("/nucleate Inbox/*.pdf --target=Concepts")
 
     assert out == ""  # a miss is an answer, not a question for the agent
     assert calls == {}  # nothing to nucleate, nothing dispatched
@@ -47,9 +47,9 @@ def test_glob_matching_a_directory_expands_its_notes(tmp_vault, monkeypatch):
     """`Inbox/*` may match a subfolder; it takes the existing folder branch."""
     calls = _capture_coordinator(monkeypatch)
     tmp_vault.note("Inbox/sub/c.md", "gamma body\n")
-    from silica.cli import _expand_workflow_shortcut
+    from tests.run_command import expansion
 
-    out = _expand_workflow_shortcut("/nucleate Inbox/* --target=Concepts")
+    out = expansion("/nucleate Inbox/* --target=Concepts")
 
     assert out == ""
     assert calls.get("inbox_files") == ["Inbox/sub/c.md"]

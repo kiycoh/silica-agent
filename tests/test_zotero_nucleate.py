@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from silica import cli
+from tests import run_command
 from silica.config import CONFIG
 from silica.sources import registry
 from silica.sources import zotero as z
@@ -91,7 +92,7 @@ def test_the_pipeline_hands_the_leaf_to_the_converter(tmp_vault, fake, monkeypat
 
     monkeypatch.setattr("silica.sources.convert.convert", _convert)
 
-    cli._sc_nucleate(["@packerMemGPTLLMsOperating2024"])
+    run_command.expansion("/nucleate @packerMemGPTLLMsOperating2024")
 
     assert seen == [(_PDF, "@packerMemGPTLLMsOperating2024.md")]
 
@@ -123,7 +124,7 @@ def test_an_imported_paper_gets_its_backlink_note_in_zotero(tmp_vault, fake, mon
     monkeypatch.setattr(coord_mod, "Coordinator", _Run)
     monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "Papers")
 
-    cli._sc_nucleate(["@packerMemGPTLLMsOperating2024", "--target=Papers"])
+    run_command.expansion("/nucleate @packerMemGPTLLMsOperating2024 --target=Papers")
 
     notes = [i for i in fake.items.values() if i["data"]["itemType"] == "note"]
     assert [n["data"]["parentItem"] for n in notes] == ["8H4AC8GW"]

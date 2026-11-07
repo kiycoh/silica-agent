@@ -1,3 +1,4 @@
+from tests import run_command
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Nucleation forms (docs/specs/nucleation-forms.md): ingress stamps first.
 
@@ -348,9 +349,9 @@ class TestDraftFiling:
 
         monkeypatch.setattr(rc, "Coordinator", _FakeCoordinator)
         monkeypatch.setattr("sys.stdin", __import__("io").StringIO(""))  # not a tty
-        from silica.cli import _expand_workflow_shortcut
+        from tests.run_command import expansion
 
-        return _expand_workflow_shortcut(line), calls
+        return expansion(line), calls
 
     def test_a_stamped_draft_is_filed_headless_and_skips_the_fsm(self, tmp_vault, monkeypatch):
         from pathlib import Path
@@ -561,7 +562,7 @@ class TestVisibility:
         monkeypatch.setattr("sys.stdin", __import__("io").StringIO(""))
         tmp_vault.note("Inbox/art.md", "clipped body\n")
 
-        cli._expand_workflow_shortcut("/nucleate Inbox/art.md --target=Research")
+        run_command.expansion("/nucleate Inbox/art.md --target=Research")
 
         assert any("clip" in p and "sniff" in p for p in printed)
 
@@ -584,9 +585,9 @@ class TestProfileFlag:
 
         monkeypatch.setattr(rc, "Coordinator", _Fake)
         monkeypatch.setattr("sys.stdin", __import__("io").StringIO(""))
-        from silica.cli import _expand_workflow_shortcut
+        from tests.run_command import expansion
 
-        _expand_workflow_shortcut(line)
+        expansion(line)
         return calls
 
     def test_the_flag_reaches_the_coordinator(self, tmp_vault, monkeypatch):
@@ -691,9 +692,9 @@ def test_a_txt_draft_is_read_and_filed_too(tmp_vault, monkeypatch):
     monkeypatch.setattr(forms, "sniff_form", lambda text: "draft")
     tmp_vault.note("Inbox/vo-pass.txt", "rough VO pass for ep 180\n")
 
-    from silica.cli import _expand_workflow_shortcut
+    from tests.run_command import expansion
 
-    _expand_workflow_shortcut("/nucleate Inbox/vo-pass.txt --target=Videos")
+    expansion("/nucleate Inbox/vo-pass.txt --target=Videos")
 
     assert calls == {}  # filed, not distilled
     assert (Path(CONFIG.vault_path) / "Videos" / "vo-pass.md").is_file()
@@ -728,9 +729,9 @@ def test_a_txt_draft_files_under_auto_target_too(tmp_vault, monkeypatch):
     tmp_vault.note("Concepts/existing.md", "so the folder census is non-empty\n")
     tmp_vault.note("Inbox/vo-pass.txt", "rough VO pass for ep 180\n")
 
-    from silica.cli import _expand_workflow_shortcut
+    from tests.run_command import expansion
 
-    _expand_workflow_shortcut("/nucleate Inbox/vo-pass.txt")
+    expansion("/nucleate Inbox/vo-pass.txt")
 
     assert calls == {}  # filed, not distilled
     assert (Path(CONFIG.vault_path) / "Videos" / "vo-pass.md").is_file()
@@ -833,9 +834,9 @@ def test_a_filed_draft_lands_inside_the_write_dir(tmp_vault, monkeypatch):
     monkeypatch.setattr("sys.stdin", __import__("io").StringIO(""))
     monkeypatch.setattr(forms, "sniff_form", lambda text: "draft")
 
-    from silica.cli import _expand_workflow_shortcut
+    from tests.run_command import expansion
 
-    _expand_workflow_shortcut("/nucleate Inbox/vo-pass.md --target=Videos")
+    expansion("/nucleate Inbox/vo-pass.md --target=Videos")
 
     assert (Path(CONFIG.vault_path) / "silica" / "Videos" / "vo-pass.md").is_file()
     assert not (Path(CONFIG.vault_path) / "Videos").exists()
@@ -1034,15 +1035,15 @@ def _draft(tmp_vault):
 
 class TestAskIsTheSurfaces:
     def test_a_browser_nucleate_of_a_draft_never_reads_the_terminal(self, tmp_vault, monkeypatch):
-        from silica.cli import _expand_workflow_shortcut
+        from tests.run_command import expansion
 
         _a_terminal_nobody_is_at(monkeypatch)
         _draft(tmp_vault)
-        assert _expand_workflow_shortcut("/nucleate Inbox/mine.md --target=T") == ""
+        assert expansion("/nucleate Inbox/mine.md --target=T") == ""
         assert (Path(tmp_vault.note("T/.keep", "")).parent / "Mine.md").exists()  # filed, as headless
 
     def test_a_surface_with_a_person_is_asked_and_no_keeps_it_distilling(self, tmp_vault, monkeypatch):
-        from silica.cli import _expand_workflow_shortcut
+        from tests.run_command import expansion
         import silica.router.coordinator as coord_mod
 
         runs: list[dict] = []
@@ -1057,7 +1058,7 @@ class TestAskIsTheSurfaces:
         monkeypatch.setattr(coord_mod, "Coordinator", _Coordinator)
         _draft(tmp_vault)
         asked: list[str] = []
-        msg = _expand_workflow_shortcut("/nucleate Inbox/mine.md --target=T",
+        msg = expansion("/nucleate Inbox/mine.md --target=T",
                                         ask=lambda q: asked.append(q) or "n")
         assert msg == "" and "looks like a draft of yours" in asked[0]
         assert runs[0]["inbox_files"] == ["Inbox/mine.md"]
@@ -1067,11 +1068,11 @@ class TestFiledFrontmatter:
     def test_an_empty_property_stays_empty_and_a_name_stays_readable(self, tmp_vault):
         """Rendered by hand, an empty `tags:` came back as the tag `None`: 195 of
         2,418 real notes had a property that would (2026-11-06)."""
-        from silica.cli import _expand_workflow_shortcut
+        from tests.run_command import expansion
         from silica.kernel.base import frontmatter
 
         tmp_vault.note("Inbox/mine.md", "---\nform: draft\ntags:\ntitle: \"caffè: note\"\n---\n\n# Mine\n\nHalf.\n")
-        assert _expand_workflow_shortcut("/nucleate Inbox/mine.md --target=T") == ""
+        assert expansion("/nucleate Inbox/mine.md --target=T") == ""
         filed = (Path(tmp_vault.note("T/.keep", "")).parent / "Mine.md").read_text(encoding="utf-8")
         data, _, body = frontmatter.split(filed)
         assert data["tags"] is None and data["title"] == "caffè: note" and data["form"] == "draft"

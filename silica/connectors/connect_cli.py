@@ -1,39 +1,26 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""/connect: the MCP client's Settings block, from the REPL (ADR-0091).
+"""/connect: the MCP client's Settings block, as a command (ADR-0091).
 
 Every verb is one of the block's actions, so a row reads the same here and in
 Settings › Connectors. A pasted `add` line can hold an inline key, so `add`
 and `secure` lines are never recorded in the prompt history (the
-`secret_verbs` of the /connect row, silica/ui/commands.py). A missing secret
+`secret_verbs` of the /connect row, silica/command_table.py). A missing secret
 is never asked on the line: it is asked in a separate hidden prompt with no
-history (ADR-0089 point 7), and without a terminal it is not asked at all.
-
-Out of cli.py for the reason zotero_cli.py is: cli.py's string literals that
-start with a slash are read as slash commands by the registry parity test.
+history (ADR-0089 point 7), and without a person to ask it is not asked at all.
 """
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Callable
+
+from silica.command_table import Call, Result
 
 if TYPE_CHECKING:
     from silica.connectors.mcp_block import McpBlock
 
 USAGE = "usage: /connect [list|add <json>|secure <key>|login <key>|logout <key>|remove <key>|reload]"
-
-
-def _hidden(prompt: str) -> str:
-    from prompt_toolkit import prompt as ask
-
-    return ask(prompt, is_password=True)
-
-
-def _yes(prompt: str) -> bool:
-    from prompt_toolkit import prompt as ask
-
-    return ask(prompt).strip().lower() in ("y", "yes")
 
 
 def _block() -> McpBlock:
@@ -149,24 +136,23 @@ def _login(key: str, console, poll_s: float, ask_line: Callable[[str], str] | No
         console.print(f"  [yellow]{exc}[/]")
 
 
-def _line(prompt: str) -> str:
-    from prompt_toolkit import prompt as ask
-
-    return ask(prompt)
-
-
-def terminal_asks() -> dict[str, Any]:
-    """What `run` asks with on a terminal, for the surface that has one."""
-    return {"ask_secret": _hidden, "ask_yes": _yes, "ask_line": _line}
+def command(c: Call) -> Result:
+    """/connect [list|add <json>|secure|login|logout|remove <key>|reload]: MCP servers
+    (ADR-0091). The raw line: `add` takes a JSON object whose spaces whitespace
+    splitting would scatter."""
+    if c.ask is None:
+        run(c.raw, c.out)
+    else:
+        run(c.raw, c.out, ask_secret=c.ask.secret, ask_yes=c.ask.yes, ask_line=c.ask.line)
+    return c.out
 
 
 def run(line: str, console, *, ask_secret: Callable[[str], str] | None = None,
         ask_yes: Callable[[str], bool] | None = None, ask_line: Callable[[str], str] | None = None,
         poll_s: float = 1.0) -> None:
     """One /connect line. `ask_secret`/`ask_yes` are the surface's, None (never
-    ask) where nobody can type: the GUI runs direct commands under a captured
-    console, and stdin being a terminal says nothing about that, since `silica
-    --gui` started from a shell has one."""
+    ask) where nobody can type: stdin being a terminal says nothing about that,
+    since `silica --gui` started from a shell has one."""
     from silica.connectors import credentials, mcp_config
 
     if mcp_config.hosted():

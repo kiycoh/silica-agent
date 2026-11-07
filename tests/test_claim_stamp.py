@@ -182,9 +182,9 @@ def _dispatch_nucleate(monkeypatch, tmp_vault, line):
 
     monkeypatch.setattr(rc, "Coordinator", _FakeCoordinator)
     tmp_vault.note("Inbox/x.md", "parole\n")
-    from silica.cli import _expand_workflow_shortcut
+    from tests.run_command import expansion
 
-    _expand_workflow_shortcut(line)
+    expansion(line)
     return calls
 
 

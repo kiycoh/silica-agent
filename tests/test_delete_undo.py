@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from silica.config import CONFIG
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def test_undo_with_the_path_recreates_a_deleted_note(vault):
     assert res.get("success"), res
     assert not (vault / "Corso" / "Autoencoders.md").exists()
 
-    assert _handle_direct_shortcut("/undo Corso/Autoencoders.md", []) is True
+    assert direct("/undo Corso/Autoencoders.md", []) is True
     assert (vault / "Corso" / "Autoencoders.md").read_text(encoding="utf-8") == before
 
 
@@ -56,7 +56,7 @@ def test_undo_by_the_note_name_takes_back_a_patch_keyed_by_its_path(vault):
     silica_patch_note("Other", "Key takeaways", "- one\n- two", "chat")
     assert "Key takeaways" in (vault / "Corso" / "Other.md").read_text(encoding="utf-8")
 
-    assert _handle_direct_shortcut("/undo Other", []) is True
+    assert direct("/undo Other", []) is True
     assert (vault / "Corso" / "Other.md").read_text(encoding="utf-8") == before
 
 
@@ -66,14 +66,14 @@ def test_bare_undo_takes_back_the_newest_action_even_when_it_is_a_delete(vault):
     silica_patch_note("Other", "Extra", "more text", "chat")  # an older write
     _delete("Autoencoders")                                   # the newest action
 
-    assert _handle_direct_shortcut("/undo", []) is True
+    assert direct("/undo", []) is True
     assert (vault / "Corso" / "Autoencoders.md").exists()
     assert "more text" in (vault / "Corso" / "Other.md").read_text(encoding="utf-8")
 
 
 def test_revert_also_recreates_it(vault):
     _delete("Autoencoders")
-    assert _handle_direct_shortcut("/revert", []) is True
+    assert direct("/revert", []) is True
     assert (vault / "Corso" / "Autoencoders.md").exists()
 
 

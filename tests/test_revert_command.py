@@ -1,6 +1,6 @@
 # tests/test_revert_command.py
 from silica.ui.commands import command_names
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 
 
 def test_revert_is_registered():
@@ -20,7 +20,7 @@ def test_revert_invokes_revert_run(monkeypatch):
         return {"run_id": run_id, "reverted": ["a.md"], "skipped": [], "errors": []}
     monkeypatch.setattr("silica.kernel.link.sweep.revert_and_sweep", fake_revert)
 
-    handled = _handle_direct_shortcut("/revert", [])
+    handled = direct("/revert", [])
     assert handled is True
     assert calls["run_id"] == "RUN1abc"
 
@@ -32,5 +32,5 @@ def test_revert_no_active_run(monkeypatch, capsys):
 
     monkeypatch.setattr("silica.kernel.write.undo_journal.get_undo_journal",
                         lambda: _EmptyStore())
-    handled = _handle_direct_shortcut("/revert", [])
+    handled = direct("/revert", [])
     assert handled is True

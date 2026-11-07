@@ -130,7 +130,7 @@ def test_cli_lexical_command_routes_to_tool():
     """'/lexical --force' reaches silica_lexical_refresh with force=True."""
     from unittest.mock import patch
     import silica.cli  # noqa: F401  registers every tool
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from silica.tools import TOOLS
 
     received: dict = {}
@@ -145,7 +145,7 @@ def test_cli_lexical_command_routes_to_tool():
     tool.fn = capture
     try:
         with patch("silica.cli.CONSOLE"):
-            result = _handle_direct_shortcut("/lexical --force", [])
+            result = direct("/lexical --force", [])
     finally:
         tool.fn = orig
 

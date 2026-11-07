@@ -102,7 +102,7 @@ def test_cli_cooccur_command_routes_to_tool():
     """'/cooccur --force' reaches silica_cooccurrence_refresh with force=True."""
     from unittest.mock import patch
     import silica.cli  # noqa: F401  registers every tool
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from silica.tools import TOOLS
 
     received: dict = {}
@@ -117,7 +117,7 @@ def test_cli_cooccur_command_routes_to_tool():
     tool.fn = capture
     try:
         with patch("silica.cli.CONSOLE"):
-            result = _handle_direct_shortcut("/cooccur --force", [])
+            result = direct("/cooccur --force", [])
     finally:
         tool.fn = orig
 

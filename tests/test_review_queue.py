@@ -92,12 +92,10 @@ def test_anneal_command_is_dispatchable():
     """/review only looks; /anneal is the one that acts. Advertised without a
     dispatch row it would answer "not available" in the GUI and fall through to
     the agent in the REPL."""
-    from silica.cli import _DIRECT
     from silica.command_table import COMMANDS
 
     cmd = next(c for c in COMMANDS if c.name == "/anneal")
-    assert cmd.group == "direct" and not cmd.repl_only
-    assert "/anneal" in _DIRECT
+    assert cmd.group == "direct" and not cmd.repl_only and cmd.handler
 
 
 # ---------------------------------------------------------------------------

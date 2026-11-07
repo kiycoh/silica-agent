@@ -12,6 +12,8 @@ not trusted config.
 
 from __future__ import annotations
 
+from tests import run_command
+
 import subprocess
 import sys
 
@@ -188,12 +190,11 @@ def test_web_search_reuses_the_repl_renderer(tmp_vault, monkeypatch):
     give it back, so /refine and /dedup lost their panel for the session."""
     import silica.sources.web_research as wr
     import silica.ui.renderer as renderer_mod
-    from silica import cli
 
     monkeypatch.setattr(wr, "web_research", lambda *a, **k: "Sources/found.md")
     repl = renderer_mod.make_progress_callback()
     try:
-        assert cli._expand_workflow_shortcut("/web-search agents", progress=repl) == ""
+        assert run_command.expansion("/web-search agents", progress=repl) == ""
         assert renderer_mod._batch_run_hook == repl.__call__
     finally:
         repl.close()
@@ -202,11 +203,10 @@ def test_web_search_reuses_the_repl_renderer(tmp_vault, monkeypatch):
 def test_web_search_closes_a_renderer_it_owns(tmp_vault, monkeypatch):
     import silica.sources.web_research as wr
     import silica.ui.renderer as renderer_mod
-    from silica import cli
 
     monkeypatch.setattr(wr, "web_research", lambda *a, **k: "Sources/found.md")
     renderer_mod._batch_run_hook = None
-    assert cli._expand_workflow_shortcut("/web-search agents") == ""
+    assert run_command.expansion("/web-search agents") == ""
     assert renderer_mod._batch_run_hook is None
 
 

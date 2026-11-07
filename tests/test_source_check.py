@@ -231,14 +231,14 @@ def test_a_dense_floor_belongs_to_an_embedder_silica_ships_a_row_for():
 
 
 def test_the_command_prints_the_report_and_writes_nothing(tmp_vault, capsys, monkeypatch):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from silica.config import CONFIG
 
     monkeypatch.setattr("silica.session.check.judge", lambda **_: None)   # rules only: no model call from a test
 
     tmp_vault.note("Drafts/memo.md", "---\nmatter: x\n---\n\nThe hearing listed for 17 February 2026 was adjourned by the court.\n")
     before = (Path(CONFIG.vault_path) / "Drafts/memo.md").read_bytes()
-    assert _handle_direct_shortcut("/check Drafts/memo", []) is True
+    assert direct("/check Drafts/memo", []) is True
     out = capsys.readouterr().out
     assert "date not found" in out and "17 February 2026" in out
     assert (Path(CONFIG.vault_path) / "Drafts/memo.md").read_bytes() == before

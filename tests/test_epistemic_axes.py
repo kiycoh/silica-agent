@@ -160,7 +160,7 @@ def test_recall_tool_rejects_unknown_trust(monkeypatch):
 
 def test_find_filter_drops_below_floor_and_counts(tmp_path, monkeypatch):
     _seed(monkeypatch, tmp_path)
-    from silica.cli import _epistemic_filter
+    from silica.commands.reading import _epistemic_filter
 
     rows = [{"path": "c/human", "score": 0.9}, {"path": "c/review", "score": 0.8},
             {"path": "c/old", "score": 0.7}, {"path": "c/missing", "score": 0.6}]

@@ -1,6 +1,6 @@
 # tests/test_vault_command.py
 import silica.driver as driver_pkg
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 from silica.config import CONFIG
 from silica.ui.commands import command_names
 
@@ -14,7 +14,7 @@ def test_vault_no_args_shows_status_without_mutating(tmp_path, monkeypatch, caps
     (tmp_path / "a.md").write_text("# a")
     (tmp_path / "b.md").write_text("# b")
 
-    handled = _handle_direct_shortcut("/vault", [])
+    handled = direct("/vault", [])
 
     assert handled is True
     assert CONFIG.vault_path == str(tmp_path)  # unchanged
@@ -32,7 +32,7 @@ def test_vault_no_args_shows_detected_language(tmp_path, monkeypatch, capsys):
         encoding="utf-8",
     )
 
-    handled = _handle_direct_shortcut("/vault", [])
+    handled = direct("/vault", [])
 
     assert handled is True
     out = capsys.readouterr().out
@@ -54,7 +54,7 @@ def test_vault_no_args_warns_on_frozen_store_mismatch(tmp_path, monkeypatch, cap
     store = CooccurStore(path=index_path, lang="english")
     store.save()
 
-    handled = _handle_direct_shortcut("/vault", [])
+    handled = direct("/vault", [])
 
     assert handled is True
     out = capsys.readouterr().out
@@ -70,7 +70,7 @@ def test_vault_switch_updates_config_and_resets_driver(tmp_path, monkeypatch):
     # Prime the driver singleton with a sentinel so we can observe the reset.
     monkeypatch.setattr(driver_pkg, "_driver", object())
 
-    handled = _handle_direct_shortcut(f"/vault {target}", [])
+    handled = direct(f"/vault {target}", [])
 
     assert handled is True
     assert CONFIG.vault_path == str(target.resolve())
@@ -84,7 +84,7 @@ def test_vault_switch_nonexistent_path_is_created(tmp_path, monkeypatch):
     monkeypatch.setattr(driver_pkg, "_driver", object())
     target = tmp_path / "does_not_exist"
 
-    handled = _handle_direct_shortcut(f"/vault {target}", [])
+    handled = direct(f"/vault {target}", [])
 
     assert handled is True
     assert CONFIG.vault_path == str(target.resolve())

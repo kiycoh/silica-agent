@@ -176,8 +176,8 @@ def test_filing_from_the_library_moves_and_can_be_reverted(library, web, monkeyp
     out = web.post("/zotero/file", json={"moves": [["INBOX001", library["mem"]]]}).json()
 
     assert out["moved"] == 1 and out["run"]
-    from silica.cli import _handle_direct_shortcut
-    _handle_direct_shortcut(f"/revert {out['run']}", [])
+    from tests.run_command import direct
+    direct(f"/revert {out['run']}", [])
 
 
 def test_groups_preview_then_write(library, web, monkeypatch):

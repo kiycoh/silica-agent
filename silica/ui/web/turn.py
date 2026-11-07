@@ -14,21 +14,23 @@ import logging
 import threading
 import uuid
 from collections.abc import AsyncIterator, Sequence
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from silica.agent.constraints import AgentConstraints, DEMO_MAX_ITERATIONS, PHONE_TOOLS
+from silica.commands import dispatch
 from silica.config import CONFIG, demo
 from silica.kernel import job_records, system_lines, vault_files
 from silica.kernel.graph.mindmap import note_resolver
 from silica.kernel.text.mentions import image_mark
 from silica.obs.events import ToolCompleteEvent
-from silica.session import commands, meter, seed
+from silica.session import meter, seed
 from silica.session import turn as session_turn
 from silica.session.turn import Turn, UsageLine
 from silica.session.words import command_word
+from silica.term.console import plain
 from silica.tools import tool_failed
 from silica.ui.web import callback, render, session
 from silica.ui.web.failures import explain as _failure
@@ -187,6 +189,15 @@ _AFTER = (session_turn.check_numbers, session_turn.attribute, _figures, session_
           session_turn.recount)
 
 
+def _drawn_in_the_answer(out):
+    """A command's own agent loop, as lines of its answer: this surface streams no
+    tool events for it. A renderer of its own, and closed, because a turn leaves
+    no module-global batch hook behind."""
+    from silica.ui.renderer import make_progress_callback
+
+    return closing(make_progress_callback(out))
+
+
 def _answered(messages: list[dict], typed: dict, answer: str, *, narrated: bool = False) -> None:
     """A command's whole exchange, which no model answered."""
     from silica.obs import narration as _narr
@@ -317,21 +328,6 @@ async def run_turn(ask: Ask) -> AsyncIterator[dict]:
             yield callback.done_frame(answer, await off_loop(render.answer_html, answer, []), session.ctx_meter())
             return
         elif t.text.startswith("/"):
-            from silica.term.console import CONSOLE
-
-            def _run_slash():
-                # The dispatch prints its result to CONSOLE and can do real work,
-                # so it runs under the capture and off the loop thread. The
-                # expansion is not a pure string builder: /fetch, /web-search and
-                # /convert do the whole job inside it and return "" to say there
-                # is nothing left for the agent. Reading that "" as "not
-                # available" was reporting failure for work that had already
-                # written notes to disk, with the success line going to the
-                # server's stdout where no browser user can see it.
-                with CONSOLE.capture() as capture:
-                    expanded = commands.dispatch(t.text, messages)
-                return expanded, capture.get()
-
             # Pumped as the agent's turn is: a command that runs the injector
             # streams its block and phases while it works (ingest.nucleate),
             # and they reached no one while this awaited the thread whole. Held
@@ -352,34 +348,31 @@ async def run_turn(ask: Ask) -> AsyncIterator[dict]:
 
             BUS.subscribe("work/tool", _turn_before_its_work)
             try:
-                SESSION.task = task = asyncio.ensure_future(asyncio.to_thread(_run_slash))
+                # Off the loop thread: a command can do real work.
+                SESSION.task = task = asyncio.ensure_future(asyncio.to_thread(
+                    lambda: dispatch(t.text, messages, progress=_drawn_in_the_answer)))
                 task.add_done_callback(lambda _: q.put_nowait(done_slash))
                 while (item := await q.get()) is not done_slash:
                     yield item
-                expanded, captured_out = await task
+                result = await task
             finally:
                 BUS.unsubscribe("work/tool", _turn_before_its_work)
 
-            if expanded == "":
+            if result is None:
+                line.outcome = "error"
+                yield callback.error_frame({"error": f"'{t.text}' not available in this session"})
+                return
+            if result.directive is None:
                 # Appended only once the verdict is in: a directive falls through
                 # to the agent below, which appends the expanded turn itself.
-                # A GUI started from a terminal renders CONSOLE in colour and the
-                # capture keeps the escape codes, which the chat showed verbatim
-                # around /fetch's note path. The browser gets the text alone.
-                from rich.text import Text
-                shown = Text.from_ansi(captured_out).plain.strip()
+                shown = plain(result.lines)
                 answer = f"```text\n{shown}\n```" if shown else "```text\n(done)\n```"
                 _answered(messages, typed, answer, narrated=bool(told))
                 line.outcome = "done"
                 yield callback.done_frame(answer, render.linkify(answer, note_resolver(), remote_images=False),
                                           session.ctx_meter())
                 return
-
-            if expanded is None:
-                line.outcome = "error"
-                yield callback.error_frame({"error": f"'{t.text}' not available in this session"})
-                return
-            t.content = expanded
+            t.content = result.directive
 
         for step in _BEFORE:
             await off_loop(step, t)

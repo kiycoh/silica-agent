@@ -6,7 +6,7 @@ up "silica/Verdetto" and report nothing to undo. Note names with spaces are the
 common case in a vault, and the web GUI's per-note revert button sends exactly
 this string.
 """
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 
 
 class _Store:
@@ -57,7 +57,7 @@ def _run(monkeypatch, line):
             written["path"] = path
 
     monkeypatch.setattr("silica.driver.DRIVER", _Driver())
-    assert _handle_direct_shortcut(line, []) is True
+    assert direct(line, []) is True
     return store, written
 
 
@@ -101,5 +101,5 @@ def test_map_resolves_a_quoted_title_with_spaces(monkeypatch):
             return '{"skipped": true, "path": "maps/x.canvas"}'
 
     monkeypatch.setattr("silica.tools.TOOLS", {"silica_mindmap": _Tool()})
-    assert _handle_direct_shortcut('/map "Galileo Galilei"', []) is True
+    assert direct('/map "Galileo Galilei"', []) is True
     assert seen["note"] == "Galileo Galilei"

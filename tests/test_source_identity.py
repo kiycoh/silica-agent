@@ -12,6 +12,8 @@ sources whose revert reached another source's notes, all 0 when keyed by path.
 """
 from __future__ import annotations
 
+from tests import run_command
+
 import hashlib
 import json
 import os
@@ -201,12 +203,10 @@ def test_revert_by_key_or_by_path_reverts_only_that_source(tmp_vault, tmp_path):
 
 
 def test_revert_source_takes_the_rest_of_the_line(monkeypatch):
-    from silica import cli
-
     seen = []
-    monkeypatch.setattr(cli, "_revert_by_source", lambda source, vault: seen.append(source) or True)
-    cli._dc_revert([], raw_input="/revert --source CorsoA/Lezione 1.md")
-    cli._dc_revert([], raw_input='/revert --source="Lezione 1.md"')
+    monkeypatch.setattr("silica.commands.notes._revert_by_source", lambda source, vault, out: seen.append(source) or out)
+    run_command.direct("/revert --source CorsoA/Lezione 1.md")
+    run_command.direct('/revert --source="Lezione 1.md"')
     assert seen == ["CorsoA/Lezione 1.md", "Lezione 1.md"]
 
 

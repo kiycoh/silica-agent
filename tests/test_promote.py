@@ -36,8 +36,8 @@ def store(tmp_path, monkeypatch):
 
 
 def _promote(line: str = "/promote"):
-    from silica.cli import _expand_workflow_shortcut
-    return _expand_workflow_shortcut(line)
+    from tests.run_command import expansion
+    return expansion(line)
 
 
 def _seed(path, key="user.dog.name", texts=("Rex", "Rex", "Tom")):

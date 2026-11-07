@@ -42,7 +42,7 @@ def _mail_note_among(paths: list[str]) -> str:
 
 memory_gate.mail_check = _mail_note_among
 
-# The bare `/remember` expands to this (cli._SHORTCUTS).
+# The bare `/remember` expands to this (commands.memory.remember).
 REMEMBER_DIRECTIVE = "/remember: the user asks you to keep something from this conversation."
 
 # "Nothing was saved" first and in those words: refused, qwen3.5-9b once told

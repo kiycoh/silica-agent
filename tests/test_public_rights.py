@@ -338,13 +338,13 @@ def test_a_note_the_author_edited_can_be_marked_again_after_the_mark_is_taken_ba
 
 
 def test_undo_takes_a_mark_back(stats, tmp_vault, capsys):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from silica.kernel import rights
 
     tmp_vault.note("Stats/Bayes.md", "In my own words, after the exam.\n")
     rights.set_rewritten("Stats/Bayes.md", True)
     assert "rewritten" in (stats / "Stats/Bayes.md").read_text(encoding="utf-8")
-    assert _handle_direct_shortcut("/undo Stats/Bayes.md", []) is True
+    assert direct("/undo Stats/Bayes.md", []) is True
     assert "rewritten" not in (stats / "Stats/Bayes.md").read_text(encoding="utf-8")
 
 

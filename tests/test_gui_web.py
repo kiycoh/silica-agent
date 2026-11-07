@@ -272,30 +272,15 @@ def test_plus_menu_names_real_commands():
 
 
 def _repl_dispatched_commands() -> set[str]:
-    """Command names the REPL's dispatchers recognise.
-
-    Both dispatchers are tables now, so this reads them: `_DIRECT` is the
-    inline read-only lane, `_SHORTCUTS` the agent-directed one, and the skills
-    the vault reaches are the agent-directed lane's fallback (ADR-0063). No
-    inference and no source scraping: a command exists here exactly when it
-    has a row there or a SKILL.md.
-    """
-    import inspect
-    import re
-
-    from silica.cli import _DIRECT, _SHORTCUTS
-    from silica.session.turn import expand_web_turn
+    """Command names the table runs: every row with a handler, the two a turn
+    answers ahead of it, and the skills the vault reaches (ADR-0063). A command
+    exists here exactly when it has a row or a SKILL.md."""
+    from silica.command_table import ROWS, TURN_COMMANDS
     from silica.config import CONFIG
-    from silica.kernel.personas import COMMAND as PERSONA
     from silica_core.kernel.skills import discover
 
     skills = {"/" + name for name in discover(CONFIG.vault_path)}
-    # /persona is answered ahead of both tables, in both surfaces (ADR-0127).
-    return set(_DIRECT) | set(_SHORTCUTS) | skills | {PERSONA} | set(
-        # The web-escalation expander matches on parts[0], not on a table, and
-        # names only the commands it owns: take every literal.
-        re.findall(r'"(/[a-z-]+)"', inspect.getsource(expand_web_turn))
-    )
+    return {name for name, row in ROWS.items() if row.handler} | skills | set(TURN_COMMANDS)
 
 
 def test_every_advertised_command_is_dispatchable_by_the_gui():

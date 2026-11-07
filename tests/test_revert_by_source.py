@@ -137,7 +137,7 @@ class TestRevertSource:
 
 class TestTheReplCommand:
     def test_revert_source_flag_dispatches_by_source(self, monkeypatch, capsys):
-        from silica.cli import _handle_direct_shortcut
+        from tests.run_command import direct
 
         calls = {}
 
@@ -149,7 +149,7 @@ class TestTheReplCommand:
 
         monkeypatch.setattr("silica.kernel.write.gate.revert_source", fake)
 
-        assert _handle_direct_shortcut("/revert --source lec.md", []) is True
+        assert direct("/revert --source lec.md", []) is True
         assert calls["source"] == "lec.md"
         out = capsys.readouterr().out
         assert "1 run(s)" in out and "3 note(s)" in out

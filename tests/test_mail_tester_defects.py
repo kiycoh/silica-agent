@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from silica.cli import _handle_direct_shortcut
+from tests import run_command
+from tests.run_command import direct
 from silica.sources import mail
 from tests.mail_fixtures import (
     ME, ME_FULL, PROF, STRANGER, TRACK, field_photos, msg, poster_session_html, write_eml,
@@ -55,7 +56,7 @@ def test_opening_an_imported_note_in_the_drawer_requests_no_image(web, tmp_path)
     requested from it, and an escaped `&lt;img&gt;` came out a live tag."""
     tc, _ = web
     box = write_mbox(tmp_path / "plain.mbox", field_photos())
-    _handle_direct_shortcut(f"/mail import {box} --me={ME} --apply", [])
+    direct(f"/mail import {box} --me={ME} --apply", [])
     [note] = _notes(tmp_path)
     text = note.read_text(encoding="utf-8")
     assert "FIELD-VISIBLE" in text and "Photos attached." in text
@@ -153,7 +154,7 @@ def test_a_mail_file_dropped_into_the_chat_writes_nothing_and_the_turn_says_wher
     assert "Settings › Connectors › Mail" in ran["text"] and "/mail import" in ran["text"]
     assert "drop.eml" in ran["text"] and "/note.md (~" in ran["text"]   # in its chat's folder (ADR-0121)
     assert "Code skeleton stubs" not in ran["text"]
-    _handle_direct_shortcut("/revert", [])
+    direct("/revert", [])
     assert _notes(tmp_path) == []                          # /revert took back the import, all of it
 
 
@@ -213,7 +214,7 @@ def box(tmp_vault, tmp_path):
 
 @pytest.mark.parametrize("limit", ["-1", "0", "abc"])
 def test_a_limit_that_is_not_one_or_more_is_refused_by_the_command(box, tmp_path, capsys, limit):
-    _handle_direct_shortcut(f"/mail import {box} --me={ME} --limit={limit} --apply", [])
+    direct(f"/mail import {box} --me={ME} --limit={limit} --apply", [])
     out = capsys.readouterr().out
     assert "--limit takes a whole number of threads, 1 or more" in out
     assert _notes(tmp_path) == []
@@ -239,7 +240,7 @@ def _takeout(tmp_path) -> Path:
 
 def test_a_quoted_label_with_a_space_is_one_flag_value(tmp_vault, tmp_path, capsys):
     box = _takeout(tmp_path)
-    _handle_direct_shortcut(f'/mail import {box} --label="Category Promotions"', [])
+    direct(f'/mail import {box} --label="Category Promotions"', [])
     out = capsys.readouterr().out
     assert "1 threads in the file" in out and "Promo reply" in out and "Chapter two" not in out
 
@@ -257,7 +258,7 @@ def test_a_label_matches_whatever_its_case(tmp_vault, tmp_path):
 ], ids=["txt", "mbox-without-from-line", "binary-eml", "empty-eml"])
 def test_a_file_that_is_not_mail_is_named_as_such(tmp_vault, tmp_path, capsys, name, data):
     path = write_raw(tmp_path / name, data)
-    _handle_direct_shortcut(f"/mail import {path}", [])
+    direct(f"/mail import {path}", [])
     out = capsys.readouterr().out
     assert f"{name} is not a mail file" in out and "0 threads" not in out
 
@@ -268,11 +269,11 @@ def test_status_and_gate6_stop_counting_threads_a_revert_took_back(tmp_vault, tm
     box = write_mbox(tmp_path / "box.mbox", [msg(
         frm=ME_FULL, to=PROF, mid="<p1@x.example>", plain="Paper attached.",
         attachments=(("paper.pdf", "application/pdf", b"%PDF-1.4"),))])
-    _handle_direct_shortcut(f"/mail import {box} --me={ME} --apply", [])
+    direct(f"/mail import {box} --me={ME} --apply", [])
     assert MAIL_BLOCK.status()["imported"] == 1 and mail.gate6()["threads"] == 1
-    _handle_direct_shortcut("/revert", [])
+    direct("/revert", [])
     capsys.readouterr()
-    _handle_direct_shortcut("/mail", [])
+    direct("/mail", [])
     assert "0 threads imported" in capsys.readouterr().out
     assert MAIL_BLOCK.status()["imported"] == 0
     assert mail.gate6() == {"threads": 0, "with_pdf": 0, "nucleated": 0, "fires": False}
@@ -285,7 +286,7 @@ def test_a_subject_with_a_wikilink_or_a_tag_makes_no_link_and_no_tag(tmp_vault, 
     box = write_mbox(tmp_path / "box.mbox", [msg(
         frm=ME_FULL, to=PROF, mid="<p2@x.example>", subject="Notes [[Secret]] #tag ^block | pipe",
         plain="Wikilink-ish subject.")])
-    _handle_direct_shortcut(f"/mail import {box} --me={ME} --apply", [])
+    direct(f"/mail import {box} --me={ME} --apply", [])
     [note] = _notes(tmp_path)
     h1 = next(ln for ln in note.read_text(encoding="utf-8").splitlines() if ln.startswith("# "))
     assert h1 == "# Notes Secret tag block | pipe"
@@ -394,12 +395,10 @@ def test_an_attribution_stays_when_its_quote_stays():
 
 
 def test_nucleate_of_an_eml_names_no_empty_code_ref(tmp_vault, tmp_path, capsys):
-    from silica import cli
-
     mail.remember_addresses([ME])
     eml = write_eml(tmp_path / "thread.eml", msg(frm=ME_FULL, to=PROF, mid="<e@x.example>",
                                                  plain="Can we meet?"))
-    cli._sc_nucleate([str(eml)])
+    run_command.expansion(f"/nucleate {eml}")
     out = capsys.readouterr().out
     assert "Wrote" in out and "code_ref" not in out
 
@@ -428,7 +427,7 @@ def test_links_and_tags_in_a_body_make_no_node_no_edge_and_no_tag(web, tmp_vault
         frm=ME_FULL, to=PROF, mid="<l1@x.example>", subject="Plans",
         plain=("See [[Secret]] and [[Existing|the note]], ![[Existing]], #urgent and (#later).\n"
                "Issue #12 and https://site.example/page#anchor stay as written."))])
-    _handle_direct_shortcut(f"/mail import {box} --me={ME} --apply", [])
+    direct(f"/mail import {box} --me={ME} --apply", [])
     [note] = _notes(tmp_path)
     rel = note.relative_to(tmp_path / "vault").as_posix()
     body = note.read_text(encoding="utf-8").split("---", 2)[2]

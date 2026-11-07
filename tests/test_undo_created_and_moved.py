@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 from silica.config import CONFIG
 
 
@@ -44,7 +44,7 @@ def test_undo_of_a_note_the_chat_created_removes_it(vault):
     assert res.get("success"), res
     assert (vault / "Corso" / "Fresh.md").exists()
 
-    assert _handle_direct_shortcut("/undo Corso/Fresh.md", []) is True
+    assert direct("/undo Corso/Fresh.md", []) is True
     assert not (vault / "Corso" / "Fresh.md").exists()
 
 
@@ -56,9 +56,9 @@ def test_a_second_undo_brings_back_the_created_note_the_first_removed(vault, sec
     created = (vault / "Corso" / "Fresh.md").read_text(encoding="utf-8")
     (vault / "Corso" / "Fresh.md").write_text(created + "edited by hand\n", encoding="utf-8")
 
-    _handle_direct_shortcut("/undo Corso/Fresh.md", [])
+    direct("/undo Corso/Fresh.md", [])
     assert not (vault / "Corso" / "Fresh.md").exists()
-    _handle_direct_shortcut(second, [])
+    direct(second, [])
     # the note as it was when removed, the hand edit included
     assert (vault / "Corso" / "Fresh.md").read_text(encoding="utf-8") == created + "edited by hand\n"
 
@@ -70,9 +70,9 @@ def test_undo_walks_back_a_patch_then_removes_the_created_note(vault):
     created = (vault / "Corso" / "Fresh.md").read_text(encoding="utf-8")
     silica_patch_note("Corso/Fresh", "Extra", "more", "chat")
 
-    _handle_direct_shortcut("/undo Corso/Fresh.md", [])
+    direct("/undo Corso/Fresh.md", [])
     assert (vault / "Corso" / "Fresh.md").read_text(encoding="utf-8") == created
-    _handle_direct_shortcut("/undo Corso/Fresh.md", [])
+    direct("/undo Corso/Fresh.md", [])
     assert not (vault / "Corso" / "Fresh.md").exists()
 
 
@@ -116,7 +116,7 @@ def test_undo_with_the_cards_ref_moves_the_note_back(vault):
     assert res.get("success"), res
     assert (vault / "Archive" / "Autoencoders.md").exists()
 
-    assert _handle_direct_shortcut("/undo Archive", []) is True
+    assert direct("/undo Archive", []) is True
     assert (vault / "Corso" / "Autoencoders.md").exists()
     assert not (vault / "Archive" / "Autoencoders.md").exists()
 
@@ -125,7 +125,7 @@ def test_undo_with_the_landed_path_moves_the_note_back(vault):
     from silica.tools.wrapped import silica_move
 
     silica_move("Autoencoders", "Archive/Autoencoders.md")
-    _handle_direct_shortcut("/undo Archive/Autoencoders.md", [])
+    direct("/undo Archive/Autoencoders.md", [])
     assert (vault / "Corso" / "Autoencoders.md").exists()
 
 
@@ -136,7 +136,7 @@ def test_bare_undo_takes_back_a_move_when_it_is_the_newest_action(vault):
     silica_patch_note("Linker", "Extra", "more text", "chat")  # an older write
     silica_move("Autoencoders", "Archive")                     # the newest action
 
-    assert _handle_direct_shortcut("/undo", []) is True
+    assert direct("/undo", []) is True
     assert (vault / "Corso" / "Autoencoders.md").exists()
     assert "more text" in (vault / "Corso" / "Linker.md").read_text(encoding="utf-8")
 
@@ -148,7 +148,7 @@ def test_a_patch_after_the_move_is_undone_before_the_move(vault):
     silica_move("Autoencoders", "Archive")
     silica_patch_note("Archive/Autoencoders", "Extra", "later text", "chat")
 
-    _handle_direct_shortcut("/undo Archive/Autoencoders.md", [])
+    direct("/undo Archive/Autoencoders.md", [])
     moved = vault / "Archive" / "Autoencoders.md"
     assert moved.exists() and "later text" not in moved.read_text(encoding="utf-8")
 

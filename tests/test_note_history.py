@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 from silica.config import CONFIG
 from silica.kernel.write.checkpoints import CheckpointStore
 
@@ -104,7 +104,7 @@ def test_slash_undo_says_it_takes_back_a_hand_edit_and_keeps_it(vault, out):
     store.push("A.md", note.read_text(), "# A\n\nfirst\n\nsilica\n")
     note.write_text("# A\n\nfirst\n\nsilica\n\nmine\n", encoding="utf-8")  # an edit in Obsidian
 
-    _handle_direct_shortcut("/undo A.md", [])
+    direct("/undo A.md", [])
     assert note.read_text() == "# A\n\nfirst\n"
     assert "taken back too and kept in the note's history" in out()
     hand = store.history("A.md")[0]
@@ -117,7 +117,7 @@ def test_slash_undo_without_a_hand_edit_says_nothing_more(vault, out):
     note = vault / "A.md"
     get_checkpoint_store().push("A.md", note.read_text(), "# A\n\nsilica\n")
     note.write_text("# A\n\nsilica\n", encoding="utf-8")
-    _handle_direct_shortcut("/undo A.md", [])
+    direct("/undo A.md", [])
     assert note.read_text() == "# A\n\nfirst\n"
     assert "taken back too" not in out()
 
@@ -157,7 +157,7 @@ def test_the_gui_lists_diffs_and_restores_a_version_and_undo_takes_the_restore_b
     assert note.read_text() == "# A\n\nfirst\n"
     assert tc.get("/note/history", params={"path": "Corso/A.md"}).json()["versions"][0]["kind"] == "restore"
 
-    _handle_direct_shortcut("/undo Corso/A.md", [])
+    direct("/undo Corso/A.md", [])
     assert note.read_text() == "# A\n\nsecond\n"
 
 
@@ -196,9 +196,9 @@ def test_a_write_the_driver_stamps_is_not_a_hand_edit(vault, out):
     from silica.kernel.write.checkpoints import get_checkpoint_store
 
     note = vault / "A.md"
-    _handle_direct_shortcut("/verify A.md", [])
+    direct("/verify A.md", [])
     assert "type:" in note.read_text()
-    _handle_direct_shortcut("/undo A.md", [])
+    direct("/undo A.md", [])
     assert note.read_text() == "# A\n\nfirst\n"
     assert "taken back too" not in out()
     assert [v["kind"] for v in get_checkpoint_store().history("A.md")] == ["silica", "original"]
@@ -223,7 +223,7 @@ def test_a_run_write_between_two_chat_writes_is_labelled_run_not_hand(vault, out
                                   prior_content="# A\n\nchat\n"),
                    hashlib.sha256(note.read_text().encode()).hexdigest())
 
-    _handle_direct_shortcut("/undo A.md", [])
+    direct("/undo A.md", [])
     assert "a later run's changes to it are taken back too" in out()
     assert store.history("A.md")[0]["kind"] == "run"
 

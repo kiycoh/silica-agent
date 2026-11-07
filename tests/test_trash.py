@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 from silica.config import CONFIG
 
 
@@ -115,27 +115,27 @@ def test_delete_for_good_leaves_no_byte_of_the_body_in_the_journal(vault, tmp_pa
 
 def test_slash_trash_lists_restores_erases_and_empties(vault, out):
     _delete("A", "B", "C")
-    assert _handle_direct_shortcut("/trash", []) is True
+    assert direct("/trash", []) is True
     text = out()
     assert "Trash: 3 notes" in text and "Corso/A.md" in text and "you" in text
 
-    _handle_direct_shortcut("/trash restore Corso/A.md", [])
+    direct("/trash restore Corso/A.md", [])
     assert "Restored: Corso/A.md" in out() and (vault / "Corso/A.md").exists()
-    _handle_direct_shortcut("/trash erase Corso/B.md", [])
+    direct("/trash erase Corso/B.md", [])
     assert "Deleted for good: Corso/B.md" in out()
     assert [t["path"] for t in _trash()] == ["Corso/C.md"]
-    _handle_direct_shortcut("/trash restore Corso/B.md", [])
+    direct("/trash restore Corso/B.md", [])
     assert "Not in the trash" in out()
-    _handle_direct_shortcut("/trash empty", [])
+    direct("/trash empty", [])
     assert _trash() == [] and not (vault / "Corso/C.md").exists()
-    _handle_direct_shortcut("/trash", [])
+    direct("/trash", [])
     assert out().rstrip().endswith("The trash is empty.")
-    _handle_direct_shortcut("/trash empty", [])
+    direct("/trash empty", [])
     assert out().rstrip().endswith("The trash is empty.") and "0 notes" not in out()
 
 
 def test_slash_delete_says_the_note_is_in_the_trash(vault, out):
-    _handle_direct_shortcut("/delete Corso/A.md", [])
+    direct("/delete Corso/A.md", [])
     assert "In the trash: /undo Corso/A.md brings it back." in out()
 
 

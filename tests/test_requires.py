@@ -101,7 +101,7 @@ def _requires(rel: str) -> list[str]:
 
 
 def test_silica_require_writes_one_entry_once_and_undo_takes_it_back(vault):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from silica.tools.notes import silica_require
 
     res = silica_require("ML/Backprop", "Chain rule")
@@ -111,7 +111,7 @@ def test_silica_require_writes_one_entry_once_and_undo_takes_it_back(vault):
     # a name two notes share is written as the path
     assert silica_require("ML/Backprop", "A/Intro")["requires"] == ["Chain rule", "A/Intro"]
 
-    _handle_direct_shortcut("/undo ML/Backprop.md", [])
+    direct("/undo ML/Backprop.md", [])
     assert _requires("ML/Backprop.md") == ["Chain rule"]
 
 
@@ -171,11 +171,11 @@ def test_the_chevrons_are_stroked_in_screen_pixels_and_draw_no_head():
 def test_slash_path_names_the_requires_leg(tmp_vault, monkeypatch):
     from rich.console import Console
 
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
 
     console = Console(record=True, width=200)
     monkeypatch.setattr("silica.cli.CONSOLE", console)
     tmp_vault.note("ML/Backprop.md", '---\nrequires: ["[[Chain rule]]"]\n---\n\n# Backprop\n')
     tmp_vault.note("Math/Chain rule.md", "# Chain rule\n")
-    _handle_direct_shortcut('/path "Chain rule" "Backprop"', [])
+    direct('/path "Chain rule" "Backprop"', [])
     assert "required by" in console.export_text()

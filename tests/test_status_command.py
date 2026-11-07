@@ -4,7 +4,7 @@ Regression: it used to go through FlatMarkdown, which reflowed every line of
 the digest into a single wrapped paragraph.
 """
 
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 
 
 def test_status_keeps_line_structure(tmp_path, monkeypatch, capsys):
@@ -27,7 +27,7 @@ def test_status_keeps_line_structure(tmp_path, monkeypatch, capsys):
         ],
     ).save()
 
-    assert _handle_direct_shortcut(f"/status {progress.run_id}", [])
+    assert direct(f"/status {progress.run_id}", [])
     lines = capsys.readouterr().out.splitlines()
 
     # Each section owns its line instead of being glued into one paragraph,

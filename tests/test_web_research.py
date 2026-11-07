@@ -8,6 +8,8 @@ findings note.
 """
 from __future__ import annotations
 
+from tests import run_command
+
 import datetime
 import json
 from pathlib import Path
@@ -1036,11 +1038,10 @@ def test_fetch_to_inbox_does_not_attach_a_stale_leaf_after_nucleate(tmp_vault, m
 
 def _run_cli(cmd: str) -> str:
     """Dispatch one REPL command, returning what the user would see."""
-    from silica import cli
     from silica.term.console import CONSOLE
 
     with CONSOLE.capture() as capture:
-        assert cli._expand_workflow_shortcut(cmd) == ""  # handled inline
+        assert run_command.expansion(cmd) == ""  # handled inline
     return capture.get()
 
 

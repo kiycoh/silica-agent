@@ -7,8 +7,8 @@ the FSM running on it.
 Triage (which lane a file takes), batch resume, draft filing, the folder picks,
 the drain of the capture WAL and the promotion out of episodic memory. No surface
 lives here: the caller hands in a `console` to print to, the way `mail_cli.run`
-and `connect_cli.run` take one, so the same run reads the same on a terminal and
-inside the web turn's capture.
+and `connect_cli.run` take one, a command's `Result`, so the same run reads the
+same on a terminal and in the browser's answer.
 """
 from __future__ import annotations
 

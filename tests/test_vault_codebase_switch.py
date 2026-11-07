@@ -7,7 +7,7 @@ source tree, in place for prose). Pre-`write_dir` layouts still resolve to
 import subprocess
 
 import silica.driver as driver_pkg
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 from silica.onboarding.adopt import resolve_vault_switch
 from silica.config import CONFIG
 
@@ -108,7 +108,7 @@ def test_handler_on_code_repo_adopts_root_and_confines_writes(tmp_path, monkeypa
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "old"))
     monkeypatch.setattr(driver_pkg, "_driver", object())  # sentinel to observe reset
 
-    handled = _handle_direct_shortcut(f"/vault {tmp_path}", [])
+    handled = direct(f"/vault {tmp_path}", [])
 
     assert handled is True
     assert CONFIG.vault_path == str(tmp_path.resolve())  # the repo IS the vault
@@ -124,7 +124,7 @@ def test_handler_on_file_refuses_without_switching(tmp_path, monkeypatch):
     sentinel = object()
     monkeypatch.setattr(driver_pkg, "_driver", sentinel)
 
-    handled = _handle_direct_shortcut(f"/vault {note}", [])
+    handled = direct(f"/vault {note}", [])
 
     assert handled is True
     assert CONFIG.vault_path == str(tmp_path / "old")  # unchanged
@@ -136,7 +136,7 @@ def test_handler_on_obsidian_vault_is_verbatim(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "old"))
     monkeypatch.setattr(driver_pkg, "_driver", object())
 
-    handled = _handle_direct_shortcut(f"/vault {tmp_path}", [])
+    handled = direct(f"/vault {tmp_path}", [])
 
     assert handled is True
     assert CONFIG.vault_path == str(tmp_path.resolve())  # root, no docs/silica

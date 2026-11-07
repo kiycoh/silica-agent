@@ -5,7 +5,7 @@
 (learn-suite D20, §4), pinned by substring."""
 from __future__ import annotations
 
-from silica.cli import _expand_workflow_shortcut as expand
+from tests.run_command import expansion as expand
 
 CONF_LABELS = ("90", "70", "50", "25")
 
@@ -115,7 +115,7 @@ def test_learn_status_relays_the_readings_line(monkeypatch):
 
 
 def test_review_docstring_names_the_deferred_store():
-    from silica.cli import _dc_review
+    from silica.commands.review import review
 
-    assert "deferred" in _dc_review.__doc__.lower()
-    assert "learner" not in _dc_review.__doc__.lower()
+    assert "deferred" in review.__doc__.lower()
+    assert "learner" not in review.__doc__.lower()

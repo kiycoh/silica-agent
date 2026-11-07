@@ -466,11 +466,11 @@ class TestT6DirectShortcuts:
         import silica.tools.wrapped  # noqa: F401
 
     def test_status_handled_directly(self):
-        from silica.cli import _handle_direct_shortcut
+        from tests.run_command import direct
         # Tool.run catches its own errors (missing run dir) and returns JSON error string
-        # _handle_direct_shortcut still returns True (command was recognized)
+        # direct still returns True (command was recognized)
         with patch("silica.cli.CONSOLE"):
-            result = _handle_direct_shortcut("/status", [])
+            result = direct("/status", [])
         assert result is True
 
     def _swap_tool_fn(self, tool_name: str, new_fn):
@@ -492,7 +492,7 @@ class TestT6DirectShortcuts:
     def test_find_preserves_case(self):
         """'/find Neural Networks' reaches the search with original casing."""
         received_query = []
-        from silica.cli import _handle_direct_shortcut
+        from tests.run_command import direct
 
         # /find reads the scored core, not the tool, whose payload drops
         # `score` for the model (survey card C2); the stub mirrors its signature.
@@ -502,7 +502,7 @@ class TestT6DirectShortcuts:
 
         with patch("silica.kernel.recall.search.facade_search", capture_search):
             with patch("silica.cli.CONSOLE"):
-                result = _handle_direct_shortcut("/find Neural Networks", [])
+                result = direct("/find Neural Networks", [])
 
         assert result is True
         assert received_query == ["Neural Networks"], f"Case destroyed: got {received_query}"
@@ -510,7 +510,7 @@ class TestT6DirectShortcuts:
     def test_embed_with_force_flag(self):
         """'/embed --force' passes force=True to the tool."""
         received = {}
-        from silica.cli import _handle_direct_shortcut
+        from tests.run_command import direct
 
         def capture_embed(folder: str = "", force: bool = False):
             received["folder"] = folder
@@ -519,14 +519,14 @@ class TestT6DirectShortcuts:
 
         with self._swap_tool_fn("silica_embed_refresh", capture_embed):
             with patch("silica.cli.CONSOLE"):
-                _handle_direct_shortcut("/embed --force", [])
+                direct("/embed --force", [])
 
         assert received.get("force") is True
 
     def test_graph_positional_args(self):
         """/graph Out.html Concepts passes correct output_path and folder."""
         received = {}
-        from silica.cli import _handle_direct_shortcut
+        from tests.run_command import direct
 
         def capture_graph(output_path: str = "graph.html", folder: str = "",
                           title: str = "", mode: str = "links", knn_k: int = 6):
@@ -538,20 +538,20 @@ class TestT6DirectShortcuts:
         # tool, which takes any path, not the vault-held tool (S1).
         with patch("silica.tools.graph.graph_export", capture_graph):
             with patch("silica.cli.CONSOLE"):
-                _handle_direct_shortcut("/graph Out.html Concepts", [])
+                direct("/graph Out.html Concepts", [])
 
         assert received.get("output_path") == "Out.html"
         assert received.get("folder") == "Concepts"
 
     def test_unknown_slash_command_returns_false(self):
-        from silica.cli import _handle_direct_shortcut
-        result = _handle_direct_shortcut("/unknown_command", [])
+        from tests.run_command import direct
+        result = direct("/unknown_command", [])
         assert result is False
 
     def test_find_returns_false_for_non_find_cmd(self):
-        from silica.cli import _handle_direct_shortcut
-        # /report should NOT be handled by _handle_direct_shortcut
-        result = _handle_direct_shortcut("/report", [])
+        from tests.run_command import direct
+        # /report should NOT be handled by direct
+        result = direct("/report", [])
         assert result is False
 
 
@@ -573,8 +573,8 @@ class TestT7NucleateShortcut:
                 return {"final_status": "Success"}
 
         monkeypatch.setattr(coord_mod, "Coordinator", _Fake)
-        from silica.cli import _expand_workflow_shortcut
-        return _expand_workflow_shortcut(cmd), calls
+        from tests.run_command import expansion
+        return expansion(cmd), calls
 
     def test_nucleate_single_file(self, monkeypatch):
         msg, calls = self._expand("/nucleate Inbox/a.md --target=Concepts/AI", monkeypatch)

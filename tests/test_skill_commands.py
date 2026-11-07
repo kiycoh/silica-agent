@@ -9,7 +9,7 @@ from silica.config import silica_home
 
 from pathlib import Path
 
-from silica.cli import _expand_workflow_shortcut as expand
+from tests.run_command import expansion as expand
 
 
 def _skill(root: Path, name: str, body: str, hint: str = "") -> None:
@@ -33,7 +33,7 @@ def test_a_vault_skill_is_listed_and_expanded():
 
 
 def test_a_skill_never_shadows_a_python_command():
-    """Dispatch asks _SHORTCUTS first, so a skill named /quiz would be listed
+    """Dispatch asks the table first, so a skill named /quiz would be listed
     and never run: it is left out of the list instead."""
     from silica.ui.commands import commands
 

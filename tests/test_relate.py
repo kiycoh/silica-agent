@@ -5,7 +5,7 @@
 (silica_core/builtin_skills/relate, ADR-0063)."""
 from __future__ import annotations
 
-from silica.cli import _expand_workflow_shortcut as expand
+from tests.run_command import expansion as expand
 
 
 def test_relate_requires_a_note():

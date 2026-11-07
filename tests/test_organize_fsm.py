@@ -578,9 +578,9 @@ class TestOrganizeScope:
     the run reports success on an empty plan — the failure this normalizes."""
 
     def _expand(self, line):
-        from silica.cli import _expand_workflow_shortcut
+        from tests.run_command import expansion
 
-        return _expand_workflow_shortcut(line)
+        return expansion(line)
 
     def test_absolute_scope_inside_the_vault_is_relativized(self, monkeypatch, tmp_path):
         import silica.config

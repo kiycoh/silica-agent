@@ -3,10 +3,8 @@
 
 """/mail: mail threads from a file the user exported (ADR-0090 "GUI and TUI").
 
-Out of cli.py for the reason zotero_cli.py is: its usage strings start with a
-slash, and cli.py's slash literals are read as commands by the registry parity
-test. A dry run until `--apply`, the `/zotero file` pattern: the user's hand
-on the file and on the flag is the confirmation (ADR-0090 point 5).
+A dry run until `--apply`, the `/zotero file` pattern: the user's hand on the file
+and on the flag is the confirmation (ADR-0090 point 5).
 """
 from __future__ import annotations
 
@@ -14,6 +12,8 @@ import os
 import re
 
 from rich.markup import escape
+
+from silica.command_table import Call, Result
 
 USAGE = ("  Usage: /mail · /mail import <file.mbox|file.eml> [--label=X] [--me=ADDR] [--all] "
          "[--limit=N] [--apply]")
@@ -43,6 +43,14 @@ def _parse(raw: str) -> tuple[str, str, dict[str, str]]:
     verb = words[0] if words else ""
     file = " ".join(words[1:]).strip("'\"")
     return verb, os.path.expanduser(file), flags
+
+
+def command(c: Call) -> Result:
+    """/mail [import <file> ...]: mail threads from a file the user exported
+    (ADR-0090). The raw line, not the words: a Takeout file is "All mail Including
+    Spam and Trash.mbox", and whitespace splitting would cut it in five."""
+    run(c.raw, c.out)
+    return c.out
 
 
 def run(raw: str, console) -> None:

@@ -123,18 +123,18 @@ def test_edited_since_write_ignores_other_vaults_and_reverted_runs(tmp_vault):
 # --- the command and the report ----------------------------------------------
 
 def test_verify_command_writes_human_entry_and_a_checkpoint(tmp_vault, monkeypatch, capsys):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from silica.kernel.write.checkpoints import get_checkpoint_store
 
     monkeypatch.setattr("getpass.getuser", lambda: "kiycoh")
     tmp_vault.note("c/n.md", NOTE)
-    assert _handle_direct_shortcut("/verify c/n", []) is True
+    assert direct("/verify c/n", []) is True
     from silica.config import CONFIG
     content = (Path(CONFIG.vault_path) / "c/n.md").read_text(encoding="utf-8")
     assert [e["by"] for e in verified_entries(_data(content))] == ["human:kiycoh"]
     assert get_checkpoint_store().depth("c/n.md") >= 1
     assert "verified" in capsys.readouterr().out
-    assert _handle_direct_shortcut("/verify c/n --clear", []) is True
+    assert direct("/verify c/n --clear", []) is True
     content = (Path(CONFIG.vault_path) / "c/n.md").read_text(encoding="utf-8")
     assert not is_human_verified(_data(content))
 
@@ -142,15 +142,15 @@ def test_verify_command_writes_human_entry_and_a_checkpoint(tmp_vault, monkeypat
 def test_verify_signs_with_the_name_given_and_as_owner_on_the_server(tmp_vault, monkeypatch):
     """ADR-0110 point 1: the server's login is the tenant's service user, which
     names no one, so a stamp made there says `owner` unless the person signs."""
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from silica.config import CONFIG
 
     monkeypatch.setattr("getpass.getuser", lambda: "silica-t05")
     tmp_vault.note("c/a.md", NOTE)
     tmp_vault.note("c/b.md", NOTE)
-    assert _handle_direct_shortcut('/verify c/a --as "Ada Lovelace"', []) is True
+    assert direct('/verify c/a --as "Ada Lovelace"', []) is True
     monkeypatch.setattr("silica.config.hosted", lambda: True)
-    assert _handle_direct_shortcut("/verify c/b", []) is True
+    assert direct("/verify c/b", []) is True
     read = lambda p: verified_entries(_data((Path(CONFIG.vault_path) / p).read_text(encoding="utf-8")))
     assert [e["by"] for e in read("c/a.md")] == ["human:Ada Lovelace"]
     assert [e["by"] for e in read("c/b.md")] == ["human:owner"]
@@ -171,7 +171,7 @@ def _init_repo(path: Path) -> None:
 
 
 def test_stale_reports_the_two_epistemic_lanes(tmp_path, monkeypatch, capsys):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from silica.config import CONFIG
     from silica.kernel.write.ops import InverseOp, InverseOpKind
     from silica.kernel.write.undo_journal import get_undo_journal
@@ -194,7 +194,7 @@ def test_stale_reports_the_two_epistemic_lanes(tmp_path, monkeypatch, capsys):
     run = journal.start_run("lez.md", vault=str(vault))
     journal.record(run, InverseOp(kind=InverseOpKind.delete_created, path="hand.md"), _sha(written))
 
-    assert _handle_direct_shortcut("/stale", []) is True
+    assert direct("/stale", []) is True
     out = capsys.readouterr().out
     assert "attested.md" in out and "2026-09-04" in out
     assert "hand.md" in out and "edited" in out.lower()
@@ -204,7 +204,7 @@ def test_stale_never_says_all_clear_above_a_stale_lane(tmp_path, monkeypatch, ca
     """Manual pass 2026-09-04: the code lane printed "No stale docs" and the
     epistemic lane listed a changed attestation right under it. One all-clear,
     printed only when every lane is empty."""
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from silica.config import CONFIG
 
     import silica.driver
@@ -220,12 +220,12 @@ def test_stale_never_says_all_clear_above_a_stale_lane(tmp_path, monkeypatch, ca
     attested = stamp_verified(NOTE, "human:me", "2026-09-04").replace("body text", "changed")
     (vault / "attested.md").write_text(attested, encoding="utf-8")
 
-    assert _handle_direct_shortcut("/stale", []) is True
+    assert direct("/stale", []) is True
     out = capsys.readouterr().out
     assert "attested.md" in out
     assert "No stale" not in out and "Nothing stale" not in out
 
     (vault / "attested.md").write_text(NOTE, encoding="utf-8")
-    _handle_direct_shortcut("/stale", [])
+    direct("/stale", [])
     out = capsys.readouterr().out
     assert "Nothing stale" in out and "attested.md" not in out

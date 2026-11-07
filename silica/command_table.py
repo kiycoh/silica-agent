@@ -11,7 +11,10 @@ path and `silica.commands.dispatch` imports it when a line asks for it.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
+from dataclasses import dataclass, field
+from typing import Any, ClassVar
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,81 @@ class Command:
     demo_off: bool = False
     # Old names the dispatcher still runs: withheld with the row, offered nowhere.
     aliases: tuple[str, ...] = ()
+
+
+@dataclass
+class Result:
+    """What a command gave back, for a surface to render.
+
+    `lines` are what it said, each the arguments of a `Console.print`, so the words
+    keep their marks and each surface draws them its own way. A surface that shows
+    work as it happens hands in `live`: `/nucleate` runs for hours, and a question
+    has to follow what it asks about. The line is kept either way, and it is
+    printed at once only there.
+
+    The rest says how the command ended. With none of them set it did the whole
+    job. `directive`: the model is asked this. `answer`: Markdown that is the reply
+    itself, which a code block would not render (the formulas on a card). `saved`:
+    a write to memory, `user_memory.save`'s record, which the browser draws with its
+    Undo. `batch`: the event a REPL's panel opens on.
+    """
+
+    live: Callable[..., None] | None = None
+    lines: list[tuple[tuple, dict]] = field(default_factory=list)
+    directive: str | None = None
+    answer: str | None = None
+    saved: dict | None = None
+    batch: Any = None
+
+    # `ingest`, `mail_cli` and the rest print to whatever console they are given,
+    # and a renderer asks this before it opens a live region.
+    is_terminal: ClassVar[bool] = False
+
+    def print(self, *objects: Any, **style: Any) -> None:
+        if self.live is not None:
+            self.live(*objects, **style)
+        elif style.get("markup", True):
+            # A `[/x]` raises where it was said, as a console's print does: /find's
+            # own except answers that with the raw result, and the work after the
+            # line must not run.
+            from rich.markup import render
+
+            for o in objects:
+                if isinstance(o, str):
+                    render(o)
+        self.lines.append((objects, style))
+
+    def to_model(self, directive: str | None) -> Result:
+        """What the model is asked, "" for nothing: a service like `ingest.nucleate`
+        answers with one or the other."""
+        self.directive = directive or None
+        return self
+
+
+@dataclass(frozen=True)
+class Ask:
+    """How a surface puts a question to the person at it. A surface says so, and a
+    process cannot: `silica --gui` from a shell has a tty on stdin and its person
+    in a browser. Where nobody can answer a surface hands in None, not this."""
+
+    text: Callable[[str], str]    # a line; the prompt's marks are drawn
+    line: Callable[[str], str]    # a line; the prompt as written, "[y/N]" and all
+    secret: Callable[[str], str]  # typed hidden, in no history (ADR-0089 point 7)
+    yes: Callable[[str], bool]
+
+
+@dataclass(frozen=True)
+class Call:
+    """One line, on its way to a handler."""
+
+    args: list[str]           # the words after the command, read the way its row says
+    raw: str                  # the line as typed: a query or a path keeps its case
+    messages: list[dict]      # the conversation, for what acts on it
+    out: Result
+    ask: Ask | None = None
+    # Opens the surface's renderer of an agent loop a command runs itself, given
+    # the result to draw into. None leaves that loop unseen.
+    progress: Callable[[Result], AbstractContextManager] = lambda out: nullcontext(None)
 
 
 # A turn answers these two before the table: a persona is worn, not run
@@ -347,7 +425,7 @@ COMMANDS: tuple[Command, ...] = (
         usage="[file|group|unlink|grant] [--apply|--yes]",
         summary="the linked Zotero library: status, file the inbox, write groups, unlink",
         examples=("/zotero", "/zotero file", "/zotero file --apply", "/zotero group --apply"),
-        handler="silica.sources.zotero_cli:run", demo_off=True,
+        handler="silica.sources.zotero_cli:command", demo_off=True,
     ),
     Command(
         name="/mail",
@@ -357,7 +435,7 @@ COMMANDS: tuple[Command, ...] = (
                 "bare, your addresses and imports so far",
         examples=("/mail", "/mail import ~/Downloads/inbox.mbox",
                   "/mail import takeout.mbox --label=Thesis --apply"),
-        handler="silica.sources.mail_cli:run", demo_off=True,
+        handler="silica.sources.mail_cli:command", demo_off=True,
     ),
     Command(
         name="/connect",
@@ -366,7 +444,7 @@ COMMANDS: tuple[Command, ...] = (
         summary="MCP connectors: list, add, move inline secrets to the keyring, log in",
         examples=("/connect", "/connect secure github", "/connect login gmail"),
         secret_verbs=("add", "secure"),
-        handler="silica.connectors.connect_cli:run", demo_off=True,
+        handler="silica.connectors.connect_cli:command", demo_off=True,
     ),
     Command(
         name="/dedup",

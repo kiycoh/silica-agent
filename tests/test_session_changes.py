@@ -167,14 +167,14 @@ def test_the_ws_backend_records_what_the_plugin_writes(tmp_vault):
 
 def test_the_repl_lists_what_the_session_wrote(tmp_vault, capsys):
     """/changes is the TUI's half of the GUI drawer: same ledger, one line each."""
-    from silica.cli import _dc_changes
+    from tests.run_command import direct
     from silica.driver import DRIVER
 
     tmp_vault.note("Notes/Ada.md", "one\ntwo\n")
     DRIVER.overwrite("Notes/Ada.md", "one\ntwo\nthree\n")
     DRIVER.create("Notes/New.md", "fresh\n")
 
-    assert _dc_changes([]) is True
+    assert direct("/changes") is True
     # Rich honours FORCE_COLOR (set by some harnesses): read the text, not the codes.
     out = re.sub(r"\x1b\[[0-9;]*m", "", capsys.readouterr().out)
     assert "M Notes/Ada.md" in out and "+1" in out
@@ -183,7 +183,7 @@ def test_the_repl_lists_what_the_session_wrote(tmp_vault, capsys):
 
 
 def test_the_repl_says_nothing_happened_rather_than_printing_an_empty_list(tmp_vault, capsys):
-    from silica.cli import _dc_changes
+    from tests.run_command import direct
 
-    assert _dc_changes([]) is True
+    assert direct("/changes") is True
     assert "Nothing changed this session." in capsys.readouterr().out

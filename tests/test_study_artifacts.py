@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""/flashcards and /slides (silica/cli.py): the deck and the cards NotebookLM's
+"""/flashcards and /slides (silica/commands/learn.py): the deck and the cards NotebookLM's
 Studio makes, drawn from Learn's checked key points where the notes carry them."""
-from silica import cli
+from tests.run_command import expansion
 
 
 def _points(monkeypatch, points):
@@ -18,10 +18,10 @@ def test_flashcards_ground_every_card_in_a_checked_point(tmp_vault, monkeypatch)
     prompts = []
     monkeypatch.setattr(artifacts, "_card_reply", lambda prompt, retry=False: (
         prompts.append(prompt), "Cosa approssima il dropout? :: il bagging di sottoreti [[Dropout]]")[1])
-    assert cli._sc_flashcards(["Dropout", "--n=5"]) == ""   # made and printed here, nothing for the agent
+    assert expansion("/flashcards Dropout --n=5") == ""   # made and printed here, nothing for the agent
     assert prompts[0].startswith("Write 5 flashcards from the notes [[Dropout]].")
     assert "- [[Dropout]]: Il dropout approssima il bagging di sottoreti." in prompts[0]
-    assert cli._sc_flashcards([]).startswith("Error: /flashcards needs a note or a folder")
+    assert expansion("/flashcards").startswith("Error: /flashcards needs a note or a folder")
 
 
 def test_the_chat_shows_the_cards_as_markdown(tmp_vault, tmp_path, monkeypatch):
@@ -53,14 +53,15 @@ def test_slides_follow_the_points_or_read_the_notes(tmp_vault, monkeypatch):
     tmp_vault.note("ML/Lezione 13.md", "# Lezione 13\n")
     tmp_vault.note("ML/SVM.md", "# SVM\n")
     _points(monkeypatch, {})
-    prompt = cli._sc_slides(["ML/"])
+    prompt = expansion("/slides ML/")
     assert "[[Lezione 13]]" in prompt and "[[SVM]]" in prompt
     assert "Read the note(s) first" in prompt and "`---`" in prompt and "READ-ONLY" in prompt
-    assert "Slides plugin presents it" in cli._sc_slides(["SVM", "--save=ML/SVM deck.md"])
+    assert "Slides plugin presents it" in expansion('/slides SVM "--save=ML/SVM deck.md"')
 
 
 def test_both_are_listed_commands():
-    from silica.command_table import COMMANDS
+    from silica.command_table import COMMANDS, ROWS
 
     names = {c.name for c in COMMANDS}
-    assert {"/flashcards", "/slides"} <= names and "/flashcards" in cli._SHORTCUTS and "/slides" in cli._SHORTCUTS
+    assert {"/flashcards", "/slides"} <= names
+    assert ROWS["/flashcards"].handler and ROWS["/slides"].handler

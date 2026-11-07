@@ -1,24 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""/zotero: the linked Zotero library from the REPL (ADR-0055 "Chat and commands").
-
-Out of cli.py because it speaks API paths, and cli.py's string literals that
-start with a slash are read as slash commands by the registry parity test.
-"""
+"""/zotero: the linked Zotero library as a command (ADR-0055 "Chat and commands")."""
 from __future__ import annotations
 
+from silica.command_table import Call, Result
 
-def _collection_key(zot, value: str) -> str:
-    """`zotero.inbox` holds a collection's name or its key; names are what a
-    person writes in vault.yaml, keys are what the API takes."""
-    try:
-        cols = zot.paged("/collections")
-    except Exception:
-        return value  # an unreadable list leaves the value as the key it may be
-    if any(c.get("key") == value for c in cols):
-        return value
-    return next((c["key"] for c in cols if c.get("data", {}).get("name") == value), value)
+
+def command(c: Call) -> Result:
+    """/zotero [file|group|unlink|grant] [--apply|--yes]: the linked library (ADR-0055)."""
+    run(list(c.args) or c.raw.strip().split()[1:], c.out)
+    return c.out
 
 
 def run(tokens: list[str], console) -> None:
@@ -44,7 +36,7 @@ def run(tokens: list[str], console) -> None:
             if not link.inbox:
                 console.print("  No inbox collection set: Settings › Zotero › Inbox collection.")
                 return
-            inbox = _collection_key(zot, link.inbox)
+            inbox = zotero.collection_key(zot, link.inbox)
             names = {c["key"]: c["data"]["name"] for c in zot.paged("/collections")}
             rows = zotero_write.suggest_filing(zot, inbox)
             sure = [r for r in rows if r["votes"] == 3]

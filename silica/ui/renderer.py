@@ -198,7 +198,10 @@ class _StageTrack:
 
 
 class _ProgressRenderer:
-    def __init__(self) -> None:
+    def __init__(self, console=None) -> None:
+        # A surface with no terminal hands in what it draws from, whose
+        # `is_terminal` keeps every live region shut.
+        self._console = console
         self._live: Live | None = None
         self._last_tool_name: str = ""
         self._active_tools: dict[str, dict] = {}
@@ -228,6 +231,10 @@ class _ProgressRenderer:
         BUS.subscribe("work/feedback", self._on_work_feedback)
         BUS.subscribe("work/phase", self._on_pipeline_phase)
 
+    @property
+    def _out(self):
+        return self._console or CONSOLE
+
     def _flush_ok_run(self) -> None:
         """Print (and clear) the buffered ✓ line, aggregated when count > 1."""
         run, self._ok_run = self._ok_run, None
@@ -236,12 +243,12 @@ class _ProgressRenderer:
         dur = _fmt_dur(run["dur"])
         dur_str = f" [dim]{dur}[/]" if dur else ""
         if run["count"] > 1:
-            CONSOLE.print(
+            self._out.print(
                 f"  [tool.ok]{GLYPHS['ok']}[/] {tool_labels.tool_verb(run['name'])}"
                 f" [dim]×{run['count']}[/]{dur_str}"
             )
         else:
-            CONSOLE.print(f"  [tool.ok]{GLYPHS['ok']}[/] {run['desc']}{dur_str}")
+            self._out.print(f"  [tool.ok]{GLYPHS['ok']}[/] {run['desc']}{dur_str}")
 
     def _memory_line(self, result: str) -> None:
         """The saved entry as /remember prints it, or a refused save's text
@@ -252,17 +259,17 @@ class _ProgressRenderer:
         if parse_result(result) is not None:
             out = json.loads(result)
             self._flush_ok_run()
-            CONSOLE.print(f"  {escape(describe(out))}  "
+            self._out.print(f"  {escape(describe(out))}  "
                           f"[dim]({out['chars']}/{out['budget']} characters · /memory shows it all)[/]")
         elif cmd := suggestion(result):
             self._flush_ok_run()
-            CONSOLE.print(f"  Not saved: {escape(cmd.removeprefix('/remember '))}  "
+            self._out.print(f"  Not saved: {escape(cmd.removeprefix('/remember '))}  "
                           f"[dim]({escape(cmd)} saves it)[/]")
 
     def _start_spinner(self) -> None:
         if self._live is not None:
             return
-        if not CONSOLE.is_terminal:
+        if not self._out.is_terminal:
             return
         spinner = Spinner("dots", text="  thinking…", style="dim cyan")
         self._live = Live(
@@ -373,7 +380,7 @@ class _ProgressRenderer:
         if self._batch is not None:
             return  # Batch block managed by _update_batch_live
         mode = CONFIG.tool_progress
-        if mode == "off" or not CONSOLE.is_terminal:
+        if mode == "off" or not self._out.is_terminal:
             return
 
         if not self._active_tools:
@@ -415,7 +422,7 @@ class _ProgressRenderer:
             self._live.start()
 
     def _update_batch_live(self) -> None:
-        if self._batch is None or not CONSOLE.is_terminal:
+        if self._batch is None or not self._out.is_terminal:
             return
         batch = self._batch
         batch["progress_obj"].update(batch["task_id"], completed=batch["done"])
@@ -462,12 +469,12 @@ class _ProgressRenderer:
         failed = batch["failed"]
         elapsed = f"{time.monotonic() - batch['start_time']:.1f}s"
         if failed > 0:
-            CONSOLE.print(
+            self._out.print(
                 f"  [tool.err]✗[/] [bold]{kind}[/] [dim]·[/] {label}"
                 f"   {done}/{total} batches [dim]·[/] {failed} failed [dim]·[/] {elapsed}"
             )
         else:
-            CONSOLE.print(
+            self._out.print(
                 f"  [tool.ok]✓[/] [bold]{kind}[/] [dim]·[/] {label}"
                 f"   {done}/{total} batches [dim]·[/] {elapsed}"
             )
@@ -478,15 +485,15 @@ class _ProgressRenderer:
         answer is in before the waiting starts. The Live is stopped first or
         it would redraw over the question."""
         self._stop_spinner()
-        CONSOLE.print(f"  [bold]{escape(event.server)} › {escape(event.tool)}[/] wants to run")
-        CONSOLE.print(Padding(Text(json.dumps(event.args, indent=2, ensure_ascii=False)), (0, 0, 0, 4)))
+        self._out.print(f"  [bold]{escape(event.server)} › {escape(event.tool)}[/] wants to run")
+        self._out.print(Padding(Text(json.dumps(event.args, indent=2, ensure_ascii=False)), (0, 0, 0, 4)))
         typed = _ask_yes_no("  run? [y]es / [N]o ", event.timeout_s)
         event.approved = None if typed is None else typed.strip().lower() in ("y", "yes")
         event.decided.set()
         if event.approved is None:
-            CONSOLE.print("  [dim]not run: no answer[/]")
+            self._out.print("  [dim]not run: no answer[/]")
         elif not event.approved:
-            CONSOLE.print("  [dim]not run: declined[/]")
+            self._out.print("  [dim]not run: declined[/]")
 
     def __call__(self, event: RenderEvent) -> None:
         try:
@@ -520,7 +527,7 @@ class _ProgressRenderer:
             return
 
         if isinstance(event, LLMStreamEvent):
-            if not CONSOLE.is_terminal:
+            if not self._out.is_terminal:
                 return
             if event.chunk_type == "reset":
                 self._stream_buf = ""
@@ -537,17 +544,17 @@ class _ProgressRenderer:
             if CONFIG.show_thinking or mode == "verbose" or CONFIG.verbose:
                 body = _head_cap(event.text).strip()
                 indented = "\n".join(f"  [reasoning.gutter]│[/] [dim]{line}[/]" for line in body.splitlines())
-                CONSOLE.print(f"  [reasoning]{GLYPHS['think']} thinking[/]\n{indented}\n")
+                self._out.print(f"  [reasoning]{GLYPHS['think']} thinking[/]\n{indented}\n")
             return
 
         if isinstance(event, ToolErrorEvent):
             if self._batch is not None:
                 if event.name == "silica_enrich_batch":
                     self._batch["failed"] += 1
-                CONSOLE.print(f"  [tool.err]✗[/] {escape(event.name)}  {escape(event.error[:80])}")
+                self._out.print(f"  [tool.err]✗[/] {escape(event.name)}  {escape(event.error[:80])}")
                 return
             self._stop_spinner()
-            CONSOLE.print(f"  [tool.err]✗[/] [bold]{escape(event.name)}[/]: [tool.err]{escape(event.error)}[/]")
+            self._out.print(f"  [tool.err]✗[/] [bold]{escape(event.name)}[/]: [tool.err]{escape(event.error)}[/]")
             self._active_tools.pop(event.call_id, None)
             self._update_live()
             return
@@ -563,7 +570,7 @@ class _ProgressRenderer:
             return
 
         if isinstance(event, BatchRunStartEvent):
-            if not CONSOLE.is_terminal:
+            if not self._out.is_terminal:
                 return
             self._stop_spinner()
             progress_obj = Progress(
@@ -594,7 +601,7 @@ class _ProgressRenderer:
         if isinstance(event, ToolStartEvent):
             if self._batch is not None:
                 return  # All tool spinners suppressed during batch run
-            if CONSOLE.is_terminal:
+            if self._out.is_terminal:
                 self._active_tools[event.call_id] = {"name": event.name, "args": event.args}
                 if event.name == "silica_run_injector":
                     self._injector_call_id = event.call_id
@@ -625,11 +632,11 @@ class _ProgressRenderer:
                     if event.name == self._last_tool_name:
                         return
                     self._last_tool_name = event.name
-                    CONSOLE.print(f"  [dim]{GLYPHS['gear']}[/] {desc}")
+                    self._out.print(f"  [dim]{GLYPHS['gear']}[/] {desc}")
                 elif mode == "all":
-                    CONSOLE.print(f"  [cyan]→[/] {desc}")
+                    self._out.print(f"  [cyan]→[/] {desc}")
                 elif mode == "verbose":
-                    CONSOLE.print(f"  [cyan]→[/] {desc}")
+                    self._out.print(f"  [cyan]→[/] {desc}")
 
         elif isinstance(event, ToolCompleteEvent):
             # Batch: ledger_next sets the label, ledger_update advances the bar.
@@ -664,7 +671,7 @@ class _ProgressRenderer:
             if self._batch is not None:
                 return
 
-            if CONSOLE.is_terminal:
+            if self._out.is_terminal:
                 self._stop_spinner()
                 desc = _synthetic_tool_desc(event.name, event.args)
 
@@ -701,12 +708,12 @@ class _ProgressRenderer:
                         # rollback), which sends the user to a phase that
                         # succeeded.
                         last_phase = failed_phases[-1].get("phase") or "?"
-                        CONSOLE.print(
+                        self._out.print(
                             f"  [tool.err]✗[/] [bold]injector[/] [dim]·[/] {lbl}"
                             f"   {yield_str} [dim]·[/] failed at {last_phase} [dim]·[/] {inject_dur}"
                         )
                     else:
-                        CONSOLE.print(
+                        self._out.print(
                             f"  [tool.ok]✓[/] [bold]injector[/] [dim]·[/] {lbl}"
                             f"   {yield_str} [dim]·[/] {inject_dur}"
                         )
@@ -718,14 +725,14 @@ class _ProgressRenderer:
                     self._flush_ok_run()
                     dur = _fmt_dur(event.duration_s)
                     dur_str = f" [dim]{dur}[/]" if dur else ""
-                    CONSOLE.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str}")
+                    self._out.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str}")
                     redacted = _redact(event.result)
                     if redacted is not None:
                         head = _head_result(redacted.strip())
                         if head:
-                            CONSOLE.print(f"    [dim]{escape(head)}[/]")
+                            self._out.print(f"    [dim]{escape(head)}[/]")
                     else:
-                        CONSOLE.print("    [dim][result redacted][/]")
+                        self._out.print("    [dim][result redacted][/]")
                 else:
                     # Buffer the ✓ line: consecutive completions of the same tool
                     # collapse into one aggregated line at flush time.
@@ -754,16 +761,16 @@ class _ProgressRenderer:
                 dur = _fmt_dur(event.duration_s)
                 dur_str = f" [dim]{dur}[/]" if dur else ""
                 if mode in ("new", "all"):
-                    CONSOLE.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str}")
+                    self._out.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str}")
                 elif mode == "verbose":
                     redacted = _redact(event.result)
                     if redacted is not None:
                         head = _head_result(redacted.strip())
-                        CONSOLE.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str}")
+                        self._out.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str}")
                         if head:
-                            CONSOLE.print(f"  [dim]{escape(head)}[/]")
+                            self._out.print(f"  [dim]{escape(head)}[/]")
                     else:
-                        CONSOLE.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str} [dim][result redacted][/]")
+                        self._out.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str} [dim][result redacted][/]")
 
 
     def close(self) -> None:
@@ -788,7 +795,7 @@ class _ProgressRenderer:
             if self._live is not None:
                 self._live.stop()
                 self._live = None
-            CONSOLE.print(
+            self._out.print(
                 f"  [bold yellow]⚠[/]  {escape(batch['kind'])} [dim]·[/] {escape(batch['label'])}"
                 f"   interrupted at {batch['done']}/{batch['total']}"
             )
@@ -819,5 +826,6 @@ def _ask_yes_no(message: str, timeout: float) -> str | None:
         return None
 
 
-def make_progress_callback() -> _ProgressRenderer:
-    return _ProgressRenderer()
+def make_progress_callback(console=None) -> _ProgressRenderer:
+    """A renderer, drawing on `console` or the terminal's."""
+    return _ProgressRenderer(console)

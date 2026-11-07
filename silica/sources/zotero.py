@@ -134,6 +134,18 @@ class Zotero:
             return ""
 
 
+def collection_key(zot: Zotero, value: str) -> str:
+    """`zotero.inbox` holds a collection's name or its key; names are what a
+    person writes in vault.yaml, keys are what the API takes."""
+    try:
+        cols = zot.paged("/collections")
+    except Exception:
+        return value  # an unreadable list leaves the value as the key it may be
+    if any(c.get("key") == value for c in cols):
+        return value
+    return next((c["key"] for c in cols if c.get("data", {}).get("name") == value), value)
+
+
 def client() -> Zotero:
     """The client for the active vault's linked library."""
     from silica.kernel.base.manifest import get_active_manifest

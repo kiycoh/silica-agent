@@ -38,9 +38,9 @@ def store(tmp_path, monkeypatch):
 
 
 def _episodes(line: str = "/episodes") -> bool:
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
 
-    return _handle_direct_shortcut(line, [])
+    return direct(line, [])
 
 
 def _seed(path, key="user.dog.name", texts=("Rex", "Tom")):

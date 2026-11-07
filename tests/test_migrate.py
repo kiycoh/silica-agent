@@ -267,17 +267,17 @@ def test_importing_migrate_stays_inside_the_hooks_budget():
 # ---------------------------------------------------------------------------
 
 def test_migrate_lists_without_writing_and_writes_on_request(tmp_path, monkeypatch, capsys):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
 
     v = _vault(tmp_path, monkeypatch)
     before = (v / "ml" / "Margine.md").read_text(encoding="utf-8")
 
-    assert _handle_direct_shortcut("/migrate", []) is True
+    assert direct("/migrate", []) is True
     out = capsys.readouterr().out
     assert "ml/Margine.md" in out and "other/Prose.md" in out and "--write" in out
     assert (v / "ml" / "Margine.md").read_text(encoding="utf-8") == before
 
-    assert _handle_direct_shortcut("/migrate ml --write", []) is True
+    assert direct("/migrate ml --write", []) is True
     out = capsys.readouterr().out
     assert "1 note" in out and "/revert" in out
     assert "Additional notes" not in (v / "ml" / "Margine.md").read_text(encoding="utf-8")

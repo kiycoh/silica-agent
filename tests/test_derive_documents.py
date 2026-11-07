@@ -109,7 +109,7 @@ def test_apply_stamps_frontmatter_and_a_second_pass_proposes_nothing(tmp_path, m
 
 # --- /stale --stamp ----------------------------------------------------------
 
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 from silica.config import CONFIG
 
 
@@ -122,12 +122,12 @@ def test_stale_stamp_lists_without_writing_and_writes_on_request(tmp_path, monke
     adr = vault / "adr" / "0907-a-thing.md"
     before = adr.read_text(encoding="utf-8")
 
-    assert _handle_direct_shortcut("/stale --stamp", []) is True
+    assert direct("/stale --stamp", []) is True
     out = capsys.readouterr().out
     assert "adr/0907-a-thing.md" in out and "src/a.py" in out and ref_jan[:8] in out
     assert adr.read_text(encoding="utf-8") == before      # a list, not a write
 
-    assert _handle_direct_shortcut("/stale --stamp --write", []) is True
+    assert direct("/stale --stamp --write", []) is True
     assert "1 note" in capsys.readouterr().out
     assert "documents:" in adr.read_text(encoding="utf-8")
 
@@ -146,6 +146,6 @@ def test_stale_stamp_takes_a_folder(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(silica.driver, "_driver", None)  # the stamp writes through it
     (vault / "spec.md").write_text("---\ncreated: 2026-02-05\n---\n\nsee src/b.py\n", encoding="utf-8")
     monkeypatch.setattr(CONFIG, "vault_path", str(vault))
-    assert _handle_direct_shortcut("/stale --stamp adr --write", []) is True
+    assert direct("/stale --stamp adr --write", []) is True
     assert "1 note" in capsys.readouterr().out
     assert "documents:" not in (vault / "spec.md").read_text(encoding="utf-8")

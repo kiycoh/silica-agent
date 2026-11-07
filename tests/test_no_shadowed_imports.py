@@ -4,7 +4,7 @@ so every use before that line raises at runtime — even when `x` is imported at
 module scope and the code reads as correct.
 
 It bit `/path`: a lazy `import shlex` added to one branch of the 600-line
-`_handle_direct_shortcut` crashed the CLI on a branch 100 lines above it, with
+`direct` crashed the CLI on a branch 100 lines above it, with
 `shlex` sitting at the top of the file the whole time. Import alone cannot see
 it, so a scan stands in for the test nobody writes per function.
 """

@@ -199,23 +199,23 @@ def test_an_incognito_session_stays_on_disk_and_leaves_the_list(narrator, monkey
     """Both ways a chat goes incognito: typed before its first turn (marked
     at birth) and typed in the middle (marked by the toggle). Turning it off
     again does not bring it back."""
-    from silica.cli import _dc_incognito
+    from tests.run_command import direct
 
     monkeypatch.setattr("silica.obs.narration.INCOGNITO", False)
     shown = _open(narrator)
     narrator.turn({"role": "user", "content": "a normal chat"})
     narrator.close()
 
-    _dc_incognito([])                       # before the first turn
+    direct("/incognito")                       # before the first turn
     born = _open(narrator)
     narrator.turn({"role": "user", "content": "born incognito"})
     narrator.close()
-    _dc_incognito([])                       # off again
+    direct("/incognito")                       # off again
 
     middle = _open(narrator)
     narrator.turn({"role": "user", "content": "went incognito later"})
-    _dc_incognito([])                       # on, mid-session
-    _dc_incognito([])                       # and off
+    direct("/incognito")                       # on, mid-session
+    direct("/incognito")                       # and off
     narrator.close()
 
     assert [r["id"] for r in list_sessions("/v/demo")] == [shown]

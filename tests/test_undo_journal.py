@@ -1,3 +1,4 @@
+from tests import run_command
 # tests/test_undo_journal.py
 import hashlib
 from silica.kernel.write.ops import InverseOp, InverseOpKind
@@ -344,7 +345,6 @@ def test_match_runs_takes_a_journal_or_ledger_id_whole_or_by_prefix(tmp_path):
 
 
 def test_revert_by_the_id_status_prints_takes_back_every_journal_run_under_it(tmp_path, monkeypatch):
-    from silica import cli
     from silica.config import CONFIG
     from silica.kernel.link import sweep
     from silica.kernel.write import undo_journal
@@ -359,14 +359,14 @@ def test_revert_by_the_id_status_prints_takes_back_every_journal_run_under_it(tm
     monkeypatch.setattr(undo_journal, "get_undo_journal", lambda: store)
     monkeypatch.setattr(sweep, "revert_and_sweep",
                         lambda run_id: reverted.append(run_id) or {"reverted": [], "skipped": [], "errors": []})
-    monkeypatch.setattr(cli, "_revert_zotero", lambda run_id: None)
+    monkeypatch.setattr("silica.commands.notes._revert_zotero", lambda run_id, out: None)
 
-    assert cli._handle_direct_shortcut("/revert 3fa9c1d2", []) is True
+    assert run_command.direct("/revert 3fa9c1d2", []) is True
     assert reverted == [b, a]
 
     reverted.clear()  # a prefix that names runs of two ledger runs reverts nothing
-    assert cli._handle_direct_shortcut("/revert 3fa9", []) is True
+    assert run_command.direct("/revert 3fa9", []) is True
     assert reverted == []
 
-    assert cli._handle_direct_shortcut(f"/revert {c[:10]}", []) is True
+    assert run_command.direct(f"/revert {c[:10]}", []) is True
     assert reverted == [c]

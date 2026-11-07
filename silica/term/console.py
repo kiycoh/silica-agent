@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
+import io
+
 from rich.console import Console
+from rich.text import Text
 from rich.theme import Theme
 
 BRAND_CYAN = (0x22, 0xD3, 0xEE)
@@ -28,3 +31,14 @@ SILICA_THEME = Theme(
 )
 
 CONSOLE = Console(highlight=False, theme=SILICA_THEME)
+
+
+def plain(lines: list[tuple[tuple, dict]]) -> str:
+    """A command's lines as the text a terminal of CONSOLE's width would show,
+    without its colour: what a surface with no terminal draws in a code block.
+    Wrapped by Rich, because a long path reads the same in both that way."""
+    text = io.StringIO()
+    console = Console(file=text, width=CONSOLE.width, highlight=False, theme=SILICA_THEME, color_system=None)
+    for objects, style in lines:
+        console.print(*objects, **style)
+    return Text.from_ansi(text.getvalue()).plain.strip()

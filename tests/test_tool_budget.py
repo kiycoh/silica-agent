@@ -101,9 +101,9 @@ def test_a_slash_command_reaches_the_excluded_tools_it_names():
     Checked through the real expansion, not a hand-written string, so the day the
     directive is reworded the check follows it.
     """
-    from silica.cli import _expand_workflow_shortcut
+    from tests.run_command import expansion
 
-    directive = _expand_workflow_shortcut('/organize "group by domain"')
+    directive = expansion('/organize "group by domain"')
     assert directive and "silica_generate_taxonomy" in directive
     history = [{"role": "user", "content": directive, "origin": "cli"}]
     chat = set(chat_tools(history))
@@ -114,12 +114,12 @@ def test_a_slash_command_reaches_the_excluded_tools_it_names():
 def test_quiz_and_learn_reach_the_record_tool_they_name():
     """silica_record_quiz left the chat set: /quiz and /learn are its only
     entries, and both directives name it — the summon path must hand it back."""
-    from silica.cli import _expand_workflow_shortcut
+    from tests.run_command import expansion
 
     # `/learn <name>` with no plan of that name writes a plan (learn-suite
     # D20) and grades nothing; the bare `/learn` is the session that records.
     for cmd in ('/quiz "Topic"', "/learn", "/learn --teach Topic"):
-        directive = _expand_workflow_shortcut(cmd)
+        directive = expansion(cmd)
         assert directive and "silica_record_quiz" in directive, cmd
         history = [{"role": "user", "content": directive, "origin": "cli"}]
         assert "silica_record_quiz" in set(chat_tools(history)), cmd
@@ -129,10 +129,10 @@ def test_quiz_and_learn_reach_the_record_tool_they_name():
 def test_the_summoned_tools_survive_the_follow_up_turn():
     # /organize is generate -> confirm -> dry run -> apply. The confirming turn
     # names no tool at all; scoping to the current message would strand it.
-    from silica.cli import _expand_workflow_shortcut
+    from tests.run_command import expansion
 
     history = [
-        {"role": "user", "content": _expand_workflow_shortcut('/organize "by domain"'), "origin": "cli"},
+        {"role": "user", "content": expansion('/organize "by domain"'), "origin": "cli"},
         {"role": "assistant", "content": "Here is the taxonomy. Look right?"},
         {"role": "user", "content": "yes, go ahead"},
     ]

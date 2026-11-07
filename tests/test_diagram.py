@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.cli import _expand_workflow_shortcut as expand
+from tests.run_command import expansion as expand
 
 
 @pytest.fixture(autouse=True)

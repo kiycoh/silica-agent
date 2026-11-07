@@ -90,14 +90,14 @@ def test_digest_omits_plans_line_when_no_plans(tmp_path, monkeypatch):
 
 def test_plans_command_handled_and_reports(tmp_path, monkeypatch, capsys):
     from silica.config import CONFIG
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
 
     p = tmp_path / "plans"
     p.mkdir(parents=True)
     (p / "alpha.md").write_text("---\nstatus: todo\n---\n# alpha\n", encoding="utf-8")
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
 
-    handled = _handle_direct_shortcut("/plans", [])
+    handled = direct("/plans", [])
     assert handled is True
     out = capsys.readouterr().out
     assert "alpha" in out
@@ -109,19 +109,19 @@ def test_plans_command_handled_and_reports(tmp_path, monkeypatch, capsys):
 
 def test_plans_command_no_vault(monkeypatch, capsys):
     from silica.config import CONFIG
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
 
     monkeypatch.setattr(CONFIG, "vault_path", "")
-    handled = _handle_direct_shortcut("/plans", [])
+    handled = direct("/plans", [])
     assert handled is True
     assert "No vault configured" in capsys.readouterr().out
 
 
 def test_plans_command_no_plans(tmp_path, monkeypatch, capsys):
     from silica.config import CONFIG
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
 
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))  # no plans/ dir
-    handled = _handle_direct_shortcut("/plans", [])
+    handled = direct("/plans", [])
     assert handled is True
     assert "No plans found" in capsys.readouterr().out

@@ -194,9 +194,9 @@ def test_nucleate_gating_sources_prose_only(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(driver_mod, "DRIVER", Vault(fs_backend.ObsidianFSBackend(str(vault))))
     reset_manifest_cache()
 
-    from silica.cli import _expand_workflow_shortcut
+    from tests.run_command import expansion
 
-    msg = _expand_workflow_shortcut("/nucleate m.py")
+    msg = expansion("/nucleate m.py")
     assert msg == ""  # handled: skipped, nothing for the agent
     assert not (vault / "Inbox" / "m.md").exists()  # code source disabled
     assert "Skipped" in capsys.readouterr().out

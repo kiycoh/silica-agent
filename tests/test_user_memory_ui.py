@@ -76,56 +76,56 @@ def test_the_memory_origin_never_reaches_the_wire(on):
 # --- the TUI's direct commands ------------------------------------------------
 
 def test_remember_writes_the_text_verbatim_with_no_model(on):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
 
     with patch("silica.session.turn.run_agent", side_effect=AssertionError("no model")):
-        assert _handle_direct_shortcut("/remember  Thesis draft due 2026-11-30 (ask Vitale)", [])
+        assert direct("/remember  Thesis draft due 2026-11-30 (ask Vitale)", [])
     assert um.read("vault") == "- Thesis draft due 2026-11-30 (ask Vitale)\n"
 
 
 def test_remember_needs_no_ask_and_ignores_taint_but_not_the_switch(on, monkeypatch):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
 
     tainted = [{"role": "assistant", "tool_calls": [
         {"id": "c", "type": "function", "function": {"name": "silica_web_answer", "arguments": "{}"}}]}]
-    assert _handle_direct_shortcut("/remember Exam on Friday", tainted)
+    assert direct("/remember Exam on Friday", tainted)
     assert "Exam on Friday" in um.read("vault")
     monkeypatch.setattr(CONFIG, "user_memory", False)
-    _handle_direct_shortcut("/remember Lab on Monday", tainted)
+    direct("/remember Lab on Monday", tainted)
     assert "Lab on Monday" not in um.read("vault")
 
 
 def test_bare_remember_falls_through_to_the_model_directive(on):
-    from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
+    from tests.run_command import direct, expansion
     from silica.tools.user_memory import REMEMBER_DIRECTIVE
 
-    assert _handle_direct_shortcut("/remember", []) is False
-    assert _expand_workflow_shortcut("/remember").startswith(REMEMBER_DIRECTIVE)
+    assert direct("/remember", []) is False
+    assert expansion("/remember").startswith(REMEMBER_DIRECTIVE)
 
 
 def test_memory_prints_both_files_with_paths_and_usage(on):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
 
     um.save("user", "Name is Giulia")
     with patch("silica.cli.CONSOLE") as console:
-        assert _handle_direct_shortcut("/memory", [])
+        assert direct("/memory", [])
     out = "\n".join(str(c.args[0]) for c in console.print.call_args_list)
     assert "Name is Giulia" in out and "user.md" in out
     assert f"/{um.USER_BUDGET}" in out and f"/{um.VAULT_BUDGET}" in out
 
 
 def test_incognito_hides_the_memory_of_the_conversation_in_progress(on):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from silica.session.seed import seed_messages
 
     um.save("user", "Name is Giulia")
     messages = seed_messages() + [{"role": "user", "content": "hi"}]
     size = len(messages)
-    _handle_direct_shortcut("/incognito", messages)
+    direct("/incognito", messages)
     assert um.incognito() and len(messages) == size   # in place: indices stay put
     assert "Giulia" not in _memory_msgs(messages)[0]["content"]
     assert "incognito" in um.save("user", "Likes tea")["error"]
-    _handle_direct_shortcut("/incognito", messages)
+    direct("/incognito", messages)
     assert not um.incognito() and "Giulia" in _memory_msgs(messages)[0]["content"]
 
 

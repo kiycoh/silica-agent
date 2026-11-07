@@ -89,8 +89,8 @@ def _silica_envelope(session_id="s1", payload=SESSION, notes_touched=()):
 
 
 def _drain():
-    from silica.cli import _expand_workflow_shortcut
-    return _expand_workflow_shortcut("/nucleate")
+    from tests.run_command import expansion
+    return expansion("/nucleate")
 
 
 class TestDrain:

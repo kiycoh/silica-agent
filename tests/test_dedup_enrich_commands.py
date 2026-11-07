@@ -1,3 +1,4 @@
+from tests import run_command
 """Tests for the ad-hoc /dedup and /enrich commands and run_subagent_batch."""
 from unittest.mock import patch, MagicMock
 
@@ -130,15 +131,14 @@ def test_silica_enrich_batch_enqueues_items():
 def test_cli_dedup_seeds_ledger():
     """/dedup scans for pairs then seeds a resumable, agent-driven ledger
     (like /enrich), instead of blocking on a synchronous silica_dedup call."""
-    from silica import cli
-
     pairs = [{"source": "Concepts/A", "target": "Concepts/B", "score": 0.8}]
     with patch("silica.kernel.recall.duplicates.scan_pairs", return_value=(pairs, None)) as scan, \
-         patch("silica.cli._seed_batch_ledger", return_value="ledger msg") as seed:
-        msg = cli._expand_workflow_shortcut("/dedup Concepts/ML")
+         patch("silica.commands.review._seed_batch_ledger",
+               side_effect=lambda out, *a, **k: out.to_model("ledger msg")) as seed:
+        msg = run_command.expansion("/dedup Concepts/ML")
 
     scan.assert_called_once_with("Concepts/ML")
-    cap, payloads = seed.call_args.args
+    _out, cap, payloads = seed.call_args.args
     assert cap == "silica_dedup_pairs"
     assert payloads == [{"pairs": pairs}]
     assert seed.call_args.kwargs["kind"] == "dedup"
@@ -147,28 +147,26 @@ def test_cli_dedup_seeds_ledger():
 
 def test_cli_dedup_no_pairs_handled_inline():
     """An empty scan is fully handled inline — the agent gets nothing to do."""
-    from silica import cli
     with patch("silica.kernel.recall.duplicates.scan_pairs", return_value=([], None)):
-        msg = cli._expand_workflow_shortcut("/dedup")
+        msg = run_command.expansion("/dedup")
     assert msg == ""
 
 
 def test_cli_enrich_scopes_with_in_folder():
     """/enrich Foo must not leak into a sibling FooBar/ folder (prefix bug)."""
-    from silica import cli
     from silica.driver.base import NoteRef
 
     refs = [NoteRef(name="a", path="Foo/a.md"), NoteRef(name="b", path="FooBar/b.md")]
     captured = {}
 
-    def fake_seed(cap, payloads, *, kind, label):
+    def fake_seed(out, cap, payloads, *, kind, label):
         captured["cap"] = cap
         captured["paths"] = [p for pl in payloads for p in pl["note_paths"]]
-        return "ok"
+        return out.to_model("ok")
 
     with patch("silica.driver.DRIVER.list_files", return_value=refs), \
-         patch("silica.cli._seed_batch_ledger", side_effect=fake_seed):
-        cli._expand_workflow_shortcut("/enrich Foo")
+         patch("silica.commands.review._seed_batch_ledger", side_effect=fake_seed):
+        run_command.expansion("/enrich Foo")
 
     assert captured["cap"] == "silica_enrich_batch"
     assert captured["paths"] == ["Foo/a.md"]  # FooBar/b.md excluded by _in_folder

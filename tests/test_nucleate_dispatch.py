@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from silica.sources import ingest
-from silica.cli import _expand_workflow_shortcut
+from tests.run_command import expansion
 # Bound at import, before conftest stubs the module attribute for every test.
 from silica.sources.ingest import pick_batch_folders as _REAL_BATCH
 from silica.config import CONFIG
@@ -70,7 +70,7 @@ def test_code_adapter_matches_new_languages_not_bare():
 
 
 def test_nucleate_md_with_target_dispatches_fsm_directly(stub_coordinator):
-    msg = _expand_workflow_shortcut("/nucleate Inbox/a.md --target=Concepts/AI")
+    msg = expansion("/nucleate Inbox/a.md --target=Concepts/AI")
     assert msg == ""  # handled inline — no agent turn
     assert stub_coordinator == [
         {"inbox_files": ["Inbox/a.md"], "target_dir": "Concepts/AI", "hub": None,
@@ -81,7 +81,7 @@ def test_nucleate_md_with_target_dispatches_fsm_directly(stub_coordinator):
 
 def test_nucleate_md_missing_target_uses_folder_pick(stub_coordinator, monkeypatch):
     monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "Concepts/AI")
-    msg = _expand_workflow_shortcut("/nucleate Inbox/a.md")
+    msg = expansion("/nucleate Inbox/a.md")
     assert msg == ""
     assert stub_coordinator[0]["target_dir"] == "Concepts/AI"
     assert stub_coordinator[0]["inbox_files"] == ["Inbox/a.md"]
@@ -124,7 +124,7 @@ def test_a_batch_picks_every_units_folder_in_one_call(stub_coordinator, monkeypa
     monkeypatch.setattr(ingest, "pick_batch_folders", _batch)
     monkeypatch.setattr(ingest, "pick_target_folder", _never)
 
-    assert _expand_workflow_shortcut("/nucleate Inbox/") == ""
+    assert expansion("/nucleate Inbox/") == ""
     assert calls == [[("memo.md", "# a note of mine"), ("Adam", "# Adam"), ("YOLO", "# YOLO")]]
     got = {tuple(c["inbox_files"]): c["target_dir"] for c in stub_coordinator}
     assert got == {_UNITS["memo"]: "Notes", _UNITS["Adam"]: "ML/Optimization",
@@ -146,7 +146,7 @@ def test_a_unit_the_batch_call_left_out_is_picked_alone(stub_coordinator, monkey
     monkeypatch.setattr(ingest, "pick_batch_folders", lambda briefs: {0: "Notes", 2: "ML/Vision"})
     monkeypatch.setattr(ingest, "pick_target_folder", _single)
 
-    assert _expand_workflow_shortcut("/nucleate Inbox/") == ""
+    assert expansion("/nucleate Inbox/") == ""
     assert alone == ["Inbox/Adam/Adam-1-adam.md"]
     got = {tuple(c["inbox_files"]): c["target_dir"] for c in stub_coordinator}
     assert got[_UNITS["Adam"]] == "Picked/Alone"
@@ -162,7 +162,7 @@ def test_a_failed_batch_call_picks_each_paper_alone(stub_coordinator, monkeypatc
              "Inbox/memo.md": "Notes"}
     monkeypatch.setattr(ingest, "pick_target_folder", lambda files: picks[files[0]])
 
-    assert _expand_workflow_shortcut("/nucleate Inbox/") == ""
+    assert expansion("/nucleate Inbox/") == ""
     got = {tuple(c["inbox_files"]): c["target_dir"] for c in stub_coordinator}
     assert got == {_UNITS["memo"]: "Notes", _UNITS["Adam"]: "ML/Optimization",
                    _UNITS["YOLO"]: "ML/Vision"}
@@ -176,8 +176,8 @@ def test_one_unit_or_a_given_target_makes_no_batch_call(stub_coordinator, monkey
     monkeypatch.setattr(ingest, "pick_batch_folders", _never)
     monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "Concepts/AI")
     _three_units(tmp_vault)
-    assert _expand_workflow_shortcut("/nucleate Inbox/memo.md") == ""
-    assert _expand_workflow_shortcut("/nucleate Inbox/ --target=Papers") == ""
+    assert expansion("/nucleate Inbox/memo.md") == ""
+    assert expansion("/nucleate Inbox/ --target=Papers") == ""
     assert [c["target_dir"] for c in stub_coordinator] == ["Concepts/AI"] + ["Papers"] * 3
 
 
@@ -192,7 +192,7 @@ def test_a_pdf_not_yet_converted_takes_its_batch_pick(tmp_vault, monkeypatch, st
 
     monkeypatch.setattr(ingest, "pick_batch_folders", _batch)
 
-    assert _expand_workflow_shortcut("/nucleate 04-massoneria") == ""
+    assert expansion("/nucleate 04-massoneria") == ""
     # The fixture files are not real PDFs: no metadata, the name alone.
     assert seen == [("mackey.pdf", ""), ("memphis.pdf", "")]
     assert [c["target_dir"] for c in stub_coordinator] == [
@@ -261,7 +261,7 @@ def test_pending_brief_reads_a_pdfs_own_title(tmp_vault, monkeypatch):
 def test_a_given_target_still_takes_every_paper(stub_coordinator, tmp_vault):
     tmp_vault.note("Inbox/Adam/Adam-1-adam.md", '---\nsource_file: "/p/Adam.pdf"\n---\n\n# Adam\n')
     tmp_vault.note("Inbox/YOLO/YOLO-1-yolo.md", '---\nsource_file: "/p/YOLO.pdf"\n---\n\n# YOLO\n')
-    assert _expand_workflow_shortcut("/nucleate Inbox/ --target=Papers") == ""
+    assert expansion("/nucleate Inbox/ --target=Papers") == ""
     assert {c["target_dir"] for c in stub_coordinator} == {"Papers"}
 
 
@@ -271,7 +271,7 @@ def test_nucleate_folder_pick_failure_falls_back_to_agent(monkeypatch):
         raise ValueError("no llm")
 
     monkeypatch.setattr(ingest, "pick_target_folder", boom)
-    msg = _expand_workflow_shortcut("/nucleate Inbox/a.md")
+    msg = expansion("/nucleate Inbox/a.md")
     assert msg is not None and "silica_run_injector" in msg
     assert "Inbox/a.md" in msg
     # the agent must pick the folder, not receive a preset one
@@ -283,7 +283,7 @@ def test_nucleate_no_resolvable_files_falls_back_to_agent():
     # A dropped --folder= (starts with '-', so the flag parser skips it) used to
     # hard-error "requires at least one file". Now the raw line goes to the agent
     # to infer intent instead of rejecting it.
-    msg = _expand_workflow_shortcut("/nucleate --folder=Inbox/x --target=Concepts")
+    msg = expansion("/nucleate --folder=Inbox/x --target=Concepts")
     assert msg is not None
     assert not msg.startswith("Error:")
     assert "silica_run_injector" in msg
@@ -300,19 +300,19 @@ def test_unknown_slash_command_falls_through_to_agent():
 
 
 def test_inject_shortcut_is_retired():
-    assert _expand_workflow_shortcut("/inject Inbox/a.md --target=C") is None
+    assert expansion("/inject Inbox/a.md --target=C") is None
 
 
 def test_plain_prose_with_apostrophe_is_not_hijacked():
     # An Italian contraction ("L'hub") is a single unmatched shlex quote char.
     # Non-slash input must skip shlex entirely, not get replaced by the
     # "unbalanced quotes" error message.
-    msg = _expand_workflow_shortcut("L'hub machine learning quali 5 argomenti fondamentali riporta?")
+    msg = expansion("L'hub machine learning quali 5 argomenti fondamentali riporta?")
     assert msg is None
 
 
 def test_slash_command_unbalanced_quotes_still_errors():
-    msg = _expand_workflow_shortcut('/nucleate "Inbox/no closing quote.pdf')
+    msg = expansion('/nucleate "Inbox/no closing quote.pdf')
     assert msg == 'Error: unbalanced quotes in command. Wrap paths with spaces in "...".'
 
 
@@ -406,7 +406,7 @@ def repo_vault(tmp_path, monkeypatch):
 
 def test_nucleate_code_stages_stub_and_returns_sentinel(repo_vault):
     root, vault = repo_vault
-    msg = _expand_workflow_shortcut("/nucleate m.py")
+    msg = expansion("/nucleate m.py")
     assert msg == ""  # fully handled inline, nothing for the agent
     stub = vault / root.name / "m.md"
     assert stub.is_file()
@@ -416,7 +416,7 @@ def test_nucleate_code_stages_stub_and_returns_sentinel(repo_vault):
 
 def test_nucleate_mixed_batch_stages_code_and_dispatches_md(repo_vault, stub_coordinator):
     root, vault = repo_vault
-    msg = _expand_workflow_shortcut("/nucleate m.py Inbox/note.md --target=Concepts")
+    msg = expansion("/nucleate m.py Inbox/note.md --target=Concepts")
     assert msg == ""
     assert stub_coordinator[0]["inbox_files"] == ["Inbox/note.md"]  # md → FSM
     # code file NOT forwarded (staged inline)
@@ -435,7 +435,7 @@ def test_nucleate_folder_of_code_stages_a_stub_per_file(repo_vault):
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "java"], cwd=root, check=True)
 
-    msg = _expand_workflow_shortcut("/nucleate controller")
+    msg = expansion("/nucleate controller")
     assert msg == ""  # handled inline, nothing punted to the agent
     # destination folder is named after the nucleated source folder, not Inbox
     assert (vault / "controller" / "Api.md").is_file()
@@ -457,7 +457,7 @@ def test_nucleate_folder_of_notes_resolves_without_the_agent(repo_vault, stub_co
         (folder / f"Lezione {n}.md").write_text(f"lezione {n}\n", encoding="utf-8")
     (folder / "slides.pdf").write_bytes(b"%PDF-1.4\n")  # unconverted: not a note
 
-    msg = _expand_workflow_shortcut(
+    msg = expansion(
         "/nucleate Inbox/machine_learning --target=Concepts/AI"
     )
     assert msg == ""  # handled inline — nothing punted to the agent
@@ -475,7 +475,7 @@ def test_nucleate_absolute_folder_path_resolves_too(repo_vault, stub_coordinator
     folder.mkdir(parents=True)
     (folder / "a.md").write_text("a\n", encoding="utf-8")
 
-    msg = _expand_workflow_shortcut(f'/nucleate "{folder}" --target=Concepts/AI')
+    msg = expansion(f'/nucleate "{folder}" --target=Concepts/AI')
     assert msg == ""
     assert stub_coordinator[0]["inbox_files"] == ["Inbox/ml/a.md"]
 
@@ -486,7 +486,7 @@ def test_nucleate_empty_folder_still_falls_back_to_the_agent(repo_vault):
     _, vault = repo_vault
     (vault / "Inbox" / "vuota").mkdir(parents=True)
 
-    msg = _expand_workflow_shortcut("/nucleate Inbox/vuota --target=Concepts/AI")
+    msg = expansion("/nucleate Inbox/vuota --target=Concepts/AI")
     assert msg is not None and "silica_run_injector" in msg
 
 
@@ -497,7 +497,7 @@ def test_nucleate_run_is_revertable(repo_vault):
     from silica.kernel.write.gate import revert_run
 
     root, vault = repo_vault
-    assert _expand_workflow_shortcut("/nucleate m.py") == ""
+    assert expansion("/nucleate m.py") == ""
     note = vault / root.name / "m.md"
     assert note.is_file()
 
@@ -514,13 +514,13 @@ def test_nucleate_revert_restores_a_refreshed_note(repo_vault):
     from silica.kernel.write.gate import revert_run
 
     root, vault = repo_vault
-    _expand_workflow_shortcut("/nucleate m.py")
+    expansion("/nucleate m.py")
     note = vault / root.name / "m.md"
     first = note.read_text(encoding="utf-8")
 
     (root / "m.py").write_text("def hi():\n    return 2\n\ndef bye():\n    pass\n", encoding="utf-8")
     subprocess.run(["git", "commit", "-qam", "second"], cwd=root, check=True)
-    _expand_workflow_shortcut("/nucleate m.py")
+    expansion("/nucleate m.py")
     assert "def bye()" in note.read_text(encoding="utf-8")
 
     revert_run(get_undo_journal().last_active_run(vault=str(vault)))
@@ -562,7 +562,7 @@ def test_silica_files_lists_code_under_a_folder(repo_vault):
 
 def test_nucleate_unsupported_extension_is_skipped(repo_vault, capsys):
     root, vault = repo_vault
-    msg = _expand_workflow_shortcut("/nucleate data.csv")
+    msg = expansion("/nucleate data.csv")
     assert msg == ""  # handled, nothing for the agent
     assert not (vault / "Inbox" / "data.md").exists()
     out = capsys.readouterr().out
@@ -575,7 +575,7 @@ def test_nucleate_folder_and_connective_words_falls_back_to_agent(repo_vault):
     # the intent is clear, so the raw line goes to the agent instead of silently
     # doing nothing.
     root, vault = repo_vault
-    msg = _expand_workflow_shortcut("/nucleate Inbox/lacascia in lacascia/")
+    msg = expansion("/nucleate Inbox/lacascia in lacascia/")
     assert msg is not None and msg != ""   # not the silent "handled" sentinel
     assert not msg.startswith("Error:")
     assert "silica_run_injector" in msg
@@ -587,7 +587,7 @@ def test_nucleate_pdf_converts_and_forwards_converted_md(repo_vault, monkeypatch
     import silica.sources.convert as conv_mod
 
     monkeypatch.setattr(conv_mod, "convert", lambda f, dest_dir="": ["Inbox/paper.md"])
-    msg = _expand_workflow_shortcut("/nucleate paper.pdf --target=Concepts/AI")
+    msg = expansion("/nucleate paper.pdf --target=Concepts/AI")
     assert msg == ""
     assert stub_coordinator[0]["inbox_files"] == ["Inbox/paper.md"]  # converted .md, not the .pdf
 
@@ -599,7 +599,7 @@ def test_nucleate_pdf_converter_error_is_caught(repo_vault, monkeypatch, capsys)
         raise ValueError("mineru not installed")
 
     monkeypatch.setattr(conv_mod, "convert", boom)
-    msg = _expand_workflow_shortcut("/nucleate paper.pdf --target=Concepts/AI")
+    msg = expansion("/nucleate paper.pdf --target=Concepts/AI")
     assert msg == ""  # nothing to run; batch did not crash
     assert "mineru not installed" in capsys.readouterr().out
 
@@ -608,13 +608,13 @@ def test_convert_command_returns_sentinel_and_reports(repo_vault, monkeypatch, c
     import silica.sources.convert as conv_mod
 
     monkeypatch.setattr(conv_mod, "convert", lambda f, dest_dir="": ["Inbox/paper.md"])
-    msg = _expand_workflow_shortcut("/convert paper.pdf")
+    msg = expansion("/convert paper.pdf")
     assert msg == ""  # fully handled inline
     assert "Converted" in capsys.readouterr().out
 
 
 def test_convert_command_no_files_errors():
-    msg = _expand_workflow_shortcut("/convert --target=X")
+    msg = expansion("/convert --target=X")
     assert msg is not None and msg.startswith("Error:")
 
 
@@ -634,7 +634,7 @@ def test_nucleate_renucleate_of_modified_source_warns(repo_vault, capsys, stub_c
     from silica.kernel.write.provenance import append_record
     append_record("lezione.md", "old-sha-not-matching", "run1", ["Concepts/A", "Concepts/B"])
 
-    msg = _expand_workflow_shortcut("/nucleate Inbox/lezione.md --target=Concepts/AI")
+    msg = expansion("/nucleate Inbox/lezione.md --target=Concepts/AI")
     assert msg == ""
 
     out = capsys.readouterr().out
@@ -652,7 +652,7 @@ def test_nucleate_same_sha_no_warning(repo_vault, capsys, stub_coordinator):
     sha = content_sha256("Inbox/lezione.md")
     append_record("lezione.md", sha, "run1", ["Concepts/A"])
 
-    msg = _expand_workflow_shortcut("/nucleate Inbox/lezione.md --target=Concepts/AI")
+    msg = expansion("/nucleate Inbox/lezione.md --target=Concepts/AI")
     assert msg is not None
 
     out = capsys.readouterr().out
@@ -665,7 +665,7 @@ def test_nucleate_no_prior_provenance_no_warning(repo_vault, capsys, stub_coordi
     inbox.mkdir(exist_ok=True)
     (inbox / "fresh.md").write_text("brand new", encoding="utf-8")
 
-    msg = _expand_workflow_shortcut("/nucleate Inbox/fresh.md --target=Concepts/AI")
+    msg = expansion("/nucleate Inbox/fresh.md --target=Concepts/AI")
     assert msg is not None
 
     out = capsys.readouterr().out
@@ -685,7 +685,7 @@ def test_nucleate_missing_target_still_warns_on_renucleate(repo_vault, capsys, m
 
     monkeypatch.setattr(ingest, "pick_target_folder",
                         lambda files: (_ for _ in ()).throw(ValueError("no llm")))
-    msg = _expand_workflow_shortcut("/nucleate Inbox/lezione.md")
+    msg = expansion("/nucleate Inbox/lezione.md")
 
     assert msg is not None and "silica_run_injector" in msg
     out = capsys.readouterr().out
@@ -696,16 +696,16 @@ def test_settings_sets_and_shows_vault_yaml(repo_vault, capsys):
     from silica.config import CONFIG
     from silica.kernel.base.manifest import get_active_manifest, reset_manifest_cache
 
-    msg = _expand_workflow_shortcut("/settings conventions.language italian")
+    msg = expansion("/settings conventions.language italian")
     assert msg == ""
     assert "language" in (Path(CONFIG.vault_path) / "vault.yaml").read_text()
     assert get_active_manifest().conventions.language == "italian"  # cache reset
 
-    msg = _expand_workflow_shortcut("/settings")
+    msg = expansion("/settings")
     assert msg == ""
     assert "italian" in capsys.readouterr().out
 
-    assert _expand_workflow_shortcut("/settings bogus.key x").startswith("Error:")
+    assert expansion("/settings bogus.key x").startswith("Error:")
     reset_manifest_cache()
 
 
@@ -832,7 +832,7 @@ def test_folder_batch_converts_documents_and_leaves_page_photos_alone(
         tmp_vault, monkeypatch, stub_coordinator):
     converted = _library(tmp_vault, monkeypatch)
 
-    msg = _expand_workflow_shortcut("/nucleate 04-massoneria")
+    msg = expansion("/nucleate 04-massoneria")
 
     assert msg == ""
     assert sorted(converted) == ["04-massoneria/mackey.pdf",
@@ -866,7 +866,7 @@ def test_an_inbox_folder_leaves_the_images_its_notes_embed_alone(
     monkeypatch.setattr("silica.sources.convert.convert", _fake_convert)
     monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "T")
 
-    _expand_workflow_shortcut("/nucleate Inbox/ml")
+    expansion("/nucleate Inbox/ml")
 
     assert converted == ["Inbox/ml/shot.png"]
 
@@ -888,7 +888,7 @@ def test_a_folder_of_pdfs_converted_beside_them_runs_each_document_once(
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("re-converted")))
     monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "T")
 
-    _expand_workflow_shortcut("/nucleate Inbox/ml")
+    expansion("/nucleate Inbox/ml")
 
     assert [c["inbox_files"] for c in stub_coordinator] == [
         ["Inbox/ml/guide.md"],
@@ -915,7 +915,7 @@ def test_a_gpu_out_of_memory_stops_the_conversions_after_the_first(
     monkeypatch.setattr("silica.sources.convert.convert", _oom)
     monkeypatch.setattr(ingest, "pick_target_folder", lambda files: "T")
 
-    _expand_workflow_shortcut("/nucleate Inbox/lib")
+    expansion("/nucleate Inbox/lib")
 
     assert tried == ["Inbox/lib/a.pdf"]
 
@@ -930,7 +930,7 @@ def test_an_already_ingested_book_is_not_reconverted(
     tmp_vault.note("silica/done/01-mackey.md",
                    f'---\nsource_file: "{abs_pdf}"\n---\n\nbody\n')
 
-    _expand_workflow_shortcut("/nucleate 04-massoneria")
+    expansion("/nucleate 04-massoneria")
 
     assert converted == ["04-massoneria/memphis.pdf"]
     assert stub_coordinator[0]["inbox_files"] == [
@@ -949,7 +949,7 @@ def test_interrupted_conversion_segments_are_reused_not_reocred(
     tmp_vault.note("silica/Inbox/mackey/02-mackey.md",
                    f'---\nsource_file: "{abs_pdf}"\n---\n\nseg two\n')
 
-    _expand_workflow_shortcut("/nucleate 04-massoneria")
+    expansion("/nucleate 04-massoneria")
 
     assert converted == ["04-massoneria/memphis.pdf"]
     # Reused segments are a ready unit and dispatch first (their distill is
@@ -972,7 +972,7 @@ def test_an_unchanged_already_distilled_segment_is_dropped(
     append_record("01-x.md", content_sha256("silica/Inbox/b/01-x.md"),
                   "prior-run", ["silica/T/X"])
 
-    _expand_workflow_shortcut(
+    expansion(
         "/nucleate silica/Inbox/b/01-x.md silica/Inbox/b/02-y.md --target=T")
 
     assert stub_coordinator[0]["inbox_files"] == ["silica/Inbox/b/02-y.md"]
@@ -991,7 +991,7 @@ def test_a_zero_yield_record_does_not_freeze_the_failure(
     append_record("01-x.md", content_sha256("silica/Inbox/b/01-x.md"),
                   "prior-run", [])
 
-    _expand_workflow_shortcut("/nucleate silica/Inbox/b/01-x.md --target=T")
+    expansion("/nucleate silica/Inbox/b/01-x.md --target=T")
 
     assert stub_coordinator[0]["inbox_files"] == ["silica/Inbox/b/01-x.md"]
 
@@ -1007,7 +1007,7 @@ def test_a_fully_ingested_batch_ends_without_a_run(
         tmp_vault.note(f"silica/done/01-{stem}.md",
                        f'---\nsource_file: "{abs_pdf}"\n---\n\nbody\n')
 
-    msg = _expand_workflow_shortcut("/nucleate 04-massoneria")
+    msg = expansion("/nucleate 04-massoneria")
 
     assert msg == ""            # nothing left is an answer, not an agent turn
     assert converted == []
@@ -1059,7 +1059,7 @@ def test_next_book_converts_while_the_previous_distills(
     monkeypatch.setattr(ingest, "pick_target_folder",
                         lambda files: "silica/04-massoneria")
 
-    _expand_workflow_shortcut("/nucleate 04-massoneria")
+    expansion("/nucleate 04-massoneria")
 
     assert overlap_seen.is_set(), f"no overlap — timeline: {timeline}"
     assert timeline == ["convert:alpha", "dispatch:01-alpha",
@@ -1070,12 +1070,12 @@ def test_keep_sources_is_on_by_default_and_can_be_turned_off(stub_coordinator):
     """The verbatim leaf in sources/ is what makes a note's source reachable at
     all (reliability_tier reads it), and sources/ is retrieval-invisible, so
     keeping it costs nothing but disk. --no-keep-sources is the way back."""
-    _expand_workflow_shortcut("/nucleate Inbox/a.md --target=Concepts/AI")
+    expansion("/nucleate Inbox/a.md --target=Concepts/AI")
     assert stub_coordinator[-1]["keep_sources"] is True
 
-    _expand_workflow_shortcut("/nucleate Inbox/a.md --target=Concepts/AI --no-keep-sources")
+    expansion("/nucleate Inbox/a.md --target=Concepts/AI --no-keep-sources")
     assert stub_coordinator[-1]["keep_sources"] is False
 
     # the old explicit flag still parses, for anything that scripts it
-    _expand_workflow_shortcut("/nucleate Inbox/a.md --target=Concepts/AI --keep-sources")
+    expansion("/nucleate Inbox/a.md --target=Concepts/AI --keep-sources")
     assert stub_coordinator[-1]["keep_sources"] is True

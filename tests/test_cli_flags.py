@@ -1,7 +1,7 @@
 """The one check behind `int_flag`, the parser the five `--flag=N` sites share."""
 from __future__ import annotations
 
-from silica.cli import _REFRESH
+from silica.commands.index import _REFRESH
 from silica.session.words import int_flag
 
 

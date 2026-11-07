@@ -38,13 +38,13 @@ def test_the_editor_save_is_the_persons(client, tmp_vault, caplog):
 
 
 def test_undo_restores_without_a_warning(tmp_vault, caplog):
-    from silica.cli import _handle_direct_shortcut
+    from tests.run_command import direct
     from silica.tools.notes import silica_patch_note
 
     caplog.set_level(logging.WARNING, logger="silica.kernel.write.preserve")
     tmp_vault.note("Other.md", "# Other\n\nbody\n")
     silica_patch_note("Other", "Extra", "more text", "chat")
-    assert _handle_direct_shortcut("/undo", []) is True
+    assert direct("/undo", []) is True
     assert not _warnings(caplog)
 
 

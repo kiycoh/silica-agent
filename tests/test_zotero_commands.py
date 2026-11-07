@@ -9,7 +9,7 @@ import os
 
 import pytest
 
-from silica.cli import _handle_direct_shortcut
+from tests.run_command import direct
 from silica.config import CONFIG
 from silica.sources import zotero as z
 from silica.sources import zotero_write as zw
@@ -66,7 +66,7 @@ def test_zotero_is_a_command():
 
 
 def test_zotero_file_lists_two_choices_and_the_vote(library, capsys):
-    assert _handle_direct_shortcut("/zotero file", []) is True
+    assert direct("/zotero file", []) is True
 
     out = capsys.readouterr().out
     assert "memory new" in out and "MEMORY01" in out and "3/3" in out
@@ -74,16 +74,16 @@ def test_zotero_file_lists_two_choices_and_the_vote(library, capsys):
 
 
 def test_zotero_file_apply_files_only_what_all_three_neighbours_agree_on(library):
-    _handle_direct_shortcut("/zotero file --apply", [])
+    direct("/zotero file --apply", [])
 
     assert library.items["SURE0001"]["data"]["collections"] == ["MEMORY01"]
     assert library.items["SPLIT001"]["data"]["collections"] == [INBOX]
 
 
 def test_bare_revert_undoes_the_newest_zotero_run(library):
-    _handle_direct_shortcut("/zotero file --apply", [])
+    direct("/zotero file --apply", [])
 
-    _handle_direct_shortcut("/revert", [])
+    direct("/revert", [])
 
     assert library.items["SURE0001"]["data"]["collections"] == [INBOX]
 
@@ -94,7 +94,7 @@ def test_revert_of_a_run_undoes_its_backlink_note(fake, tmp_vault):
     run = get_undo_journal().start_run(source="nucleate", vault=CONFIG.vault_path)
     zw.backlink(z.client(), "8H4AC8GW", "sources/@packerMemGPTLLMsOperating2024.md", run_id=run)
 
-    _handle_direct_shortcut(f"/revert {run}", [])
+    direct(f"/revert {run}", [])
 
     assert [i for i in fake.items.values() if i["data"]["itemType"] == "note"] == []
 
@@ -102,11 +102,11 @@ def test_revert_of_a_run_undoes_its_backlink_note(fake, tmp_vault):
 def test_zotero_group_previews_and_apply_writes(fake, monkeypatch, capsys):
     monkeypatch.setattr(zw, "compute_group_plan", lambda: {"memory · agents": ["8H4AC8GW"]})
 
-    _handle_direct_shortcut("/zotero group", [])
+    direct("/zotero group", [])
     assert "memory · agents" in capsys.readouterr().out
     assert fake.collections == {}
 
-    _handle_direct_shortcut("/zotero group --apply", [])
+    direct("/zotero group --apply", [])
     names = {c["data"]["name"] for c in fake.collections.values()}
     assert names == {"Silica groups", "memory · agents"}
 
@@ -115,11 +115,11 @@ def test_zotero_unlink_asks_before_it_deletes(fake, tmp_vault, capsys):
     tmp_vault.note("sources/@packerMemGPTLLMsOperating2024.md", "---\nzotero_key: 8H4AC8GW\n---\n")
     zw.backlink(z.client(), "8H4AC8GW", "sources/@packerMemGPTLLMsOperating2024.md", run_id="r")
 
-    _handle_direct_shortcut("/zotero unlink", [])
+    direct("/zotero unlink", [])
     assert "--yes" in capsys.readouterr().out
     assert any(i["data"]["itemType"] == "note" for i in fake.items.values())
 
-    _handle_direct_shortcut("/zotero unlink --yes", [])
+    direct("/zotero unlink --yes", [])
     assert not any(i["data"]["itemType"] == "note" for i in fake.items.values())
 
 
@@ -127,7 +127,7 @@ def test_zotero_grant_says_whether_the_key_was_kept(fake, tmp_path, monkeypatch,
     monkeypatch.setattr("silica.onboarding.wizard.resolve_env_path", lambda: tmp_path / ".env")
     fake.authorize_answer = {"key": "s" * 32, "remember": False}
 
-    _handle_direct_shortcut("/zotero grant", [])
+    direct("/zotero grant", [])
 
     assert "not kept" in capsys.readouterr().out
 
@@ -142,7 +142,7 @@ def test_a_kept_key_outlives_the_first_model_call(fake, tmp_path, monkeypatch):
     monkeypatch.setattr("silica.onboarding.wizard.resolve_env_path", lambda: tmp_path / ".env")
     fake.authorize_answer = {"key": "s" * 32, "remember": True}
 
-    _handle_direct_shortcut("/zotero grant", [])
+    direct("/zotero grant", [])
     drop_foreign_env()
 
     assert os.environ["SILICA_ZOTERO_API_KEY"] == "s" * 32
@@ -155,7 +155,7 @@ def test_zotero_status_shows_what_changed_since_the_last_session(fake, monkeypat
                       citationKey="hu2026", dateAdded="2099-01-01T00:00:00Z")
     fake._bump(item)
 
-    _handle_direct_shortcut("/zotero", [])
+    direct("/zotero", [])
 
     out = capsys.readouterr().out
     assert "1 new since the last session" in out
