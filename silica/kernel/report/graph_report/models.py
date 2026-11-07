@@ -12,10 +12,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-# ---------------------------------------------------------------------------
-# Dataclasses
-# ---------------------------------------------------------------------------
-
 @dataclass
 class NodeStat:
     id: str           # vault-relative path (no .md)

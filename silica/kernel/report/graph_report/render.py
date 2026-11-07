@@ -18,10 +18,6 @@ from silica.kernel.report.graph_report.models import VaultReport
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Output functions
-# ---------------------------------------------------------------------------
-
 _MEMBERS_CAP = 25  # max members shown per cluster in markdown
 _LIST_CAP = 30     # max bullet/row items for long lists (orphans, dangling, …)
 _MIN_CLUSTER = 2   # size-1 clusters are noise — summarised, never listed
@@ -158,7 +154,6 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
         add("> Nothing changes until you approve — review below, then ask Silica to apply.")
         add("")
 
-    # Totals
     add("## Totals")
     add("| Metric | Count |")
     add("|---|---|")
@@ -217,7 +212,6 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
         add("_No connected notes found._")
     add("")
 
-    # Surprising bridges
     add("## Surprising Cross-Cluster Connections")
     add("_Links joining two areas that share few others — fewest links between the two areas first, then the larger pair._")
     if r.bridges:
@@ -262,7 +256,6 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
         add(f"_Plus {singletons} standalone notes with no internal links (full list in GRAPH_REPORT.json)._")
         add("")
 
-    # Orphans
     add("## Orphans (No Incoming Links)")
     if r.orphans:
         _fold(add, "warning", f"{len(r.orphans)} orphans", r.orphans,

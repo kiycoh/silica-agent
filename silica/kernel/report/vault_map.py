@@ -74,7 +74,6 @@ def build_vault_map(
             skipped.append("list_files")
             logger.debug("build_vault_map: list_files failed: %s", e)
 
-        # Note count + top folders
         try:
             if refs:
                 folder_counts: Counter[str] = Counter(
@@ -157,7 +156,6 @@ def build_vault_map(
             skipped.append("cluster")
             logger.debug("build_vault_map: cluster block skipped: %s", e)
 
-        # Core vocabulary
         try:
             stems = store.top_stems(max_vocab)
             if stems:
