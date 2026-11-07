@@ -24,10 +24,12 @@ from silica.kernel.report import note_context
 from silica.sources.discover import story
 from silica.tools import TOOLS, note_keys
 from silica.ui.web import discover_routes, failures, jobs, stt_routes
+from silica.view_table import VIEWS
 
 
 def table() -> dict[str, Any]:
     """Asked per page: what a process withholds is its unit's, and read per call."""
+    from silica.config import withheld
     from silica.tools import catalog
 
     catalog.load()  # a page served before the app's startup ran still names every tool
@@ -37,6 +39,8 @@ def table() -> dict[str, Any]:
             "writes": {name: tool.mutates for name, tool in TOOLS.items() if tool.mutates},
             "note_args": note_keys(),
         },
+        "views": {"slugs": {tab: view.slug for tab, view in VIEWS.items()},
+                  "withheld_commands": sorted(withheld("commands"))},
         "jobs": {"interrupted": jobs.INTERRUPTED, "unconverted": jobs.UNCONVERTED},
         "learn": {
             "confidence": mastery.CONFIDENCE,
