@@ -10,7 +10,7 @@ def test_tool_defaults_to_lazy_collapse():
         x: int = 0
 
     try:
-        @tool(_A, cls="atomic")
+        @tool(_A, cls="atomic", ingress=False)
         def silica_dummy_lazy(x: int = 0):
             "doc"
             return {"x": x}
@@ -26,7 +26,7 @@ def test_tool_accepts_eager_collapse():
         x: int = 0
 
     try:
-        @tool(_B, cls="composed", collapse="eager")
+        @tool(_B, cls="composed", collapse="eager", ingress=False)
         def silica_dummy_eager(x: int = 0):
             "doc"
             return {"x": x}

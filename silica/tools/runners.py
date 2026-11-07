@@ -15,7 +15,8 @@ from pydantic import Field
 from silica.tools import tool
 
 
-@tool(cls="composed", collapse="eager")
+# ingress: an ingested file's text, distilled into the turn.
+@tool(cls="composed", collapse="eager", ingress=True, label=("injector", "inbox_file"))
 def silica_run_injector(
     inbox_file: Annotated[str, Field(description='Path to a single inbox file (legacy; use inbox_files for multiple files)')] = "",
     inbox_files: Annotated[list[str] | None, Field(description='Paths to one or more inbox files to nucleate in a single run')] = None,
@@ -61,7 +62,7 @@ def silica_run_injector(
                         keep_sources=keep_sources, cancel_token=cancel_token)
 
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False)
 def silica_ledger_digest(run_id: Annotated[str, Field(description='Run ID to inspect (latest saved run if empty)')] = "") -> dict[str, Any]:
     """Compact summary of a run's plan and progress (< 500 tokens).
 
@@ -84,7 +85,7 @@ def silica_ledger_digest(run_id: Annotated[str, Field(description='Run ID to ins
     return {"run_id": resolved_id, "digest": ledger.digest()}
 
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False)
 def silica_dedup_pairs(pairs: Annotated[list[dict], Field(description="List of duplicate pairs to merge. Each dict must have 'source' and 'target' keys.")]) -> dict[str, Any]:
     """Merge an ALREADY-KNOWN list of duplicate note pairs (e.g. from a ledger task).
 
@@ -106,7 +107,7 @@ def silica_dedup_pairs(pairs: Annotated[list[dict], Field(description="List of d
     return res
 
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False)
 def silica_dedup(folder: Annotated[str, Field(description='Vault folder to scan for near-duplicate notes (empty = whole vault)')] = "", cancel_token: Any = None) -> dict[str, Any]:
     """SCAN a folder (or the vault) for near-duplicate pairs and merge each
     smaller note into its larger twin: only genuinely-new info is appended
@@ -129,7 +130,7 @@ def silica_dedup(folder: Annotated[str, Field(description='Vault folder to scan 
     return res
 
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False)
 def silica_enrich_batch(note_paths: Annotated[list[str], Field(description='List of vault-relative paths to semantically enrich.')], cancel_token: Any = None) -> dict[str, Any]:
     """Add what a batch of lean or empty notes is missing, each as an appended
     section: nothing the note already says is rewritten or removed."""
@@ -145,7 +146,7 @@ def silica_enrich_batch(note_paths: Annotated[list[str], Field(description='List
     return res
 
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False)
 def silica_generate_taxonomy(
     user_intent: Annotated[str, Field(description='Natural-language description of how the user wants to organize their vault')], scope: Annotated[str, Field(description='Vault-relative subfolder to restrict taxonomy generation and scanning to')] = "", save_path: Annotated[str, Field(description="Vault-relative path where the taxonomy YAML should be written. Defaults to 'taxonomy.yaml' inside the configured vault.")] = "", merge: Annotated[bool, Field(description='If True, feed the existing taxonomy to the LLM as standing rules and update it incrementally instead of regenerating it from scratch.')] = False
 ) -> dict[str, Any]:
@@ -268,7 +269,7 @@ def silica_generate_taxonomy(
     }
 
 
-@tool(cls="composed")
+@tool(cls="composed", ingress=False)
 def silica_run_organizer(
     taxonomy_path: Annotated[str, Field(description="Path to the taxonomy YAML file. Defaults to 'taxonomy.yaml' in the vault.")] = "",
     scope: Annotated[str, Field(description='Vault-relative subfolder to restrict organization to (empty = vault-wide)')] = "",

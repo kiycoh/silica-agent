@@ -1635,7 +1635,7 @@ class QuizResult(BaseModel):
 _V2_KEYS = tuple(k for k in QuizResult.model_fields if k not in ("path", "correct", "concepts", "q", "anchor"))
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, label=("record quiz", None))
 def silica_record_quiz(results: Annotated[list, Field(description='One entry per graded question')]) -> dict:
     """Record graded quiz answers so the notes the reader failed resurface.
 
@@ -1765,7 +1765,7 @@ def silica_changes(scope: Annotated[str, Field(description="'session' = this pro
     return {"scope": "session", "total": len(rows), "changes": rows}
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False)
 def silica_learn_items(n: Annotated[int, Field(description='Session size (default 8, about five minutes)')] = 8, target: Annotated[str, Field(description="Optional scope: a vault path prefix (folder or note), or the name of a `type: plan` note to continue at its frontier")] = "") -> dict:
     """Pick one study session (learn-suite D13/D19): items with their cue,
     hints and the span's location under sources/, NEVER the answer key.
@@ -1796,7 +1796,7 @@ def silica_learn_items(n: Annotated[int, Field(description='Session size (defaul
     }
 
 
-@tool(cls="atomic")
+@tool(cls="atomic", ingress=False, label=("review queue", None))
 def silica_review_queue(limit: Annotated[int, Field(description='How many notes to return (global picker mode)')] = 10, target: Annotated[str, Field(description='Optional vault path prefix: report EVERY note under it with its retention state instead of picking — the calibration read a study plan starts from')] = "") -> list:
     """What the reader should review next — the learner model's picker.
 

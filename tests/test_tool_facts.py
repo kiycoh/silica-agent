@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from silica.agent import memory_gate
-from silica.tools import TOOLS, Reads, catalog, note_keys
+from silica.tools import TOOLS, Reads, catalog, note_keys, tool
 
 SILICA_ROOT = Path(__file__).resolve().parent.parent / "silica"
 
@@ -46,9 +46,17 @@ def _params(tool) -> set[str]:
 
 def test_every_tool_says_whether_it_brings_outside_text_in():
     """The ADR-0090 hole, closed by construction: `ingress` has no False default
-    a forgotten tool could fall through."""
+    a forgotten tool could fall through. `Tool` itself keeps None for a stub."""
     undeclared = sorted(n for n, t in TOOLS.items() if t.ingress is None)
     assert not undeclared, f"declare ingress=True or False on {undeclared}"
+
+
+def test_a_tool_that_says_nothing_of_ingress_does_not_register():
+    with pytest.raises(TypeError, match="ingress"):
+        @tool(cls="atomic")
+        def silica_silent() -> str:
+            return ""
+    assert "silica_silent" not in TOOLS
 
 
 def test_the_derived_sets_are_the_ones_they_replaced():
@@ -152,17 +160,6 @@ def test_load_is_idempotent_and_leaves_the_order_alone():
     before = list(TOOLS)
     assert catalog.load() is TOOLS
     assert list(TOOLS) == before
-
-
-def test_the_rows_waiting_for_their_decorators_are_only_those():
-    """catalog._DECLARED_HERE is a shortcut with a date. Shrinking it is the
-    point; a row added for a file this lane could edit is the old name list
-    coming back."""
-    assert len(catalog._DECLARED_HERE) <= 16
-    for name in catalog._DECLARED_HERE:
-        module = TOOLS[name].fn.__module__
-        assert module in {"silica.tools.runners", "silica.tools.atomic",
-                          "silica.sources.web_fetch", "silica.sources.web_research"}
 
 
 # --- the lanes the tool bodies moved to --------------------------------------

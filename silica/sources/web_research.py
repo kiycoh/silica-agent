@@ -267,7 +267,8 @@ def search_lanes(query: str) -> tuple[list[dict[str, str]], str]:
         raise ddg_err from None
 
 
-@tool(cls="atomic", sensitive=True)
+# ingress: /web, result titles and snippets.
+@tool(cls="atomic", sensitive=True, ingress=True, label=("web search", "query"))
 def web_search(query: str) -> str:
     """Search the web for a single query. Returns a JSON list of
     {title, url, content} results. Use iteratively to research a concept."""
@@ -307,7 +308,8 @@ def _lane_line() -> str:
     return f"Search lanes: {named}. DuckDuckGo was challenged; these answered instead."
 
 
-@tool(cls="atomic", sensitive=True)
+# ingress: /web, a verbatim quote banked from a page (not silica_remember).
+@tool(cls="atomic", sensitive=True, ingress=True)
 def remember(url: str, quote: str, why: str) -> str:
     """Bank one verbatim quote from a page already read with web_fetch, to cite
     in the findings. Copy the quote exactly as the fetched text shows it; `why`
@@ -343,7 +345,8 @@ def remember(url: str, quote: str, why: str) -> str:
     return f"banked [{qid}] — cite it inline as [{qid}]"
 
 
-@tool(cls="atomic", sensitive=True)
+# ingress: /web, lines grepped out of a fetched page.
+@tool(cls="atomic", sensitive=True, ingress=True)
 def find_in_page(url: str, pattern: str) -> str:
     """Find every line containing a word or phrase in a page already read with
     web_fetch, shown with a line of context. Mine the pages you have before
@@ -384,7 +387,7 @@ def find_in_page(url: str, pattern: str) -> str:
     return "\n…\n".join(windows)[:4000] + tail
 
 
-@tool(cls="atomic", sensitive=True)
+@tool(cls="atomic", sensitive=True, ingress=False)
 def plan(outline: str) -> str:
     """Save or replace your working plan for the findings note: markdown
     `## ` section headings, each optionally ending with the banked quote IDs
@@ -1011,7 +1014,11 @@ def _live_progress(progress):
     return _forward
 
 
-@tool(cls="composed")
+# An answer composed from fetched web pages. The question is the label's target:
+# the chat model rewords the user's own, and this row is the only place that
+# rewording is ever visible. Without it a wrong answer reads as "web search is
+# bad" rather than "it asked something else".
+@tool(cls="composed", ingress=True, label=("web answer", "question"), reply_flag="final")
 def silica_web_answer(
     question: Annotated[str, Field(description="The question, in the language the user wrote in")],
     final: Annotated[bool, Field(description=(
