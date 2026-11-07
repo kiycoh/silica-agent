@@ -1,5 +1,6 @@
 import pytest
 from silica.driver.fs_backend import ObsidianFSBackend
+from silica.kernel.vault import Vault
 
 @pytest.fixture
 def temp_vault(tmp_path):
@@ -19,7 +20,7 @@ def temp_vault(tmp_path):
     return vault
 
 def test_fs_backend_graph_basic(temp_vault):
-    backend = ObsidianFSBackend(str(temp_vault))
+    backend = Vault(ObsidianFSBackend(str(temp_vault)))
     
     # Assert orphans
     # D has no incoming links. A has no incoming links either!
@@ -71,7 +72,7 @@ def test_fs_backend_graph_basic(temp_vault):
     assert snap.backlink_counts["D"] == 0
 
 def test_fs_backend_graph_snapshot_incremental(temp_vault):
-    backend = ObsidianFSBackend(str(temp_vault))
+    backend = Vault(ObsidianFSBackend(str(temp_vault)))
     backend._ensure_index()
     
     # Incremental snapshot for B.md
@@ -111,7 +112,7 @@ def test_fs_backend_duplicate_basename_snapshot(tmp_path):
     # Hub is linked by folder_a/Note.md but NOT by folder_b/Note.md
     (vault / "Hub.md").write_text("# Hub\n\nNo links here.", encoding="utf-8")
 
-    backend = ObsidianFSBackend(str(vault))
+    backend = Vault(ObsidianFSBackend(str(vault)))
     snap = backend.graph_snapshot()
 
     # With path-keyed snapshot there must be two distinct "Note" entries
@@ -146,7 +147,7 @@ def test_vault_root_artifacts_excluded_from_index(tmp_path):
     (vault / "notes").mkdir()
     (vault / "notes" / "log.md").write_text("# genuine log note\n\napples", encoding="utf-8")
 
-    backend = ObsidianFSBackend(str(vault))
+    backend = Vault(ObsidianFSBackend(str(vault)))
     paths = {r.path for r in backend.list_files()}
     assert "GRAPH_REPORT.md" not in paths
     assert "log.md" not in paths
@@ -168,7 +169,7 @@ def test_links_resolve_every_ref_shape(tmp_path):
     (vault / "folder" / "sub" / "Note.md").write_text("[[Target]]", encoding="utf-8")
     (vault / "Target.md").write_text("# Target", encoding="utf-8")
 
-    backend = ObsidianFSBackend(str(vault))
+    backend = Vault(ObsidianFSBackend(str(vault)))
     for ref in ("Note", "Note.md", "folder/sub/Note", "folder/sub/Note.md"):
         assert [r.name for r in backend.links(ref)] == ["Target"], ref
     for ref in ("Target", "Target.md"):
@@ -184,7 +185,7 @@ def test_reads_that_iterate_serialize_against_index_mutation(temp_vault):
     while a mutator holds it, an iterating read must wait, not interleave."""
     import threading
 
-    backend = ObsidianFSBackend(str(temp_vault))
+    backend = Vault(ObsidianFSBackend(str(temp_vault)))
     backend._ensure_index()
 
     done = threading.Event()
@@ -210,7 +211,7 @@ def test_search_context_caps_per_note_and_batch_agrees(temp_vault):
     lines = "\n".join(f"needle line {i}" for i in range(_MAX_HITS_PER_NOTE + 15))
     (temp_vault / "Dense.md").write_text(f"# Dense\n\n{lines}\n", encoding="utf-8")
 
-    backend = ObsidianFSBackend(str(temp_vault))
+    backend = Vault(ObsidianFSBackend(str(temp_vault)))
     hits = backend.search_context("needle")
     assert len(hits) == _MAX_HITS_PER_NOTE
 
@@ -229,7 +230,7 @@ def test_graph_edges_carry_the_scaffold_class(tmp_path):
     (vault / "Hub.md").write_text("# Hub\n\n## [[Spoke A]]\n\nProse about [[Spoke B]].\n", encoding="utf-8")
     (vault / "Spoke A.md").write_text("---\nparent note: \"[[Hub]]\"\n---\n\n# Spoke A\n\nSee [[hub]] in prose.\n", encoding="utf-8")
     (vault / "Spoke B.md").write_text("---\nparent note: \"[[Hub]]\"\n---\n\n# Spoke B\n\nNo prose link.\n", encoding="utf-8")
-    backend = ObsidianFSBackend(str(vault))
+    backend = Vault(ObsidianFSBackend(str(vault)))
     _notes, _unresolved, G = backend.graph_data()
     assert G["Hub.md"]["Spoke A.md"]["scaffold"] is True      # heading line
     assert G["Hub.md"]["Spoke B.md"]["scaffold"] is False     # prose

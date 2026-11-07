@@ -8,7 +8,6 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from silica.config import CONFIG
 from silica.kernel.base.frontmatter import split_shown
 from silica.kernel.graph.mindmap import note_resolver
 from silica.kernel.text import note_parts
@@ -180,10 +179,10 @@ def tree_undo(payload: dict):
 def _trash_items() -> list[dict]:
     """This vault's trash (ADR-0128), the vault spelled as a delete stamps it.
     `taken`: a note is at the item's path again, so its restore is refused."""
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
     from silica.kernel.write.gate import vault_file
 
-    items = get_undo_journal().trashed((CONFIG.vault_path or "").strip() or None)
+    items = get_undo_journal().trashed(active_vault())
     for t in items:
         t["taken"] = vault_file(t["path"]).exists()
     return items

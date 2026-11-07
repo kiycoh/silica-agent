@@ -12,6 +12,7 @@ import pytest
 from silica.driver.base import NoteRef
 from silica.driver.fs_backend import ObsidianFSBackend
 from silica.kernel.base.layout import contain_in_vault
+from silica.kernel.vault import Vault
 
 
 @pytest.fixture
@@ -30,7 +31,7 @@ def outside(tmp_path):
 
 @pytest.fixture
 def backend(vault):
-    return ObsidianFSBackend(str(vault))
+    return Vault(ObsidianFSBackend(str(vault)))
 
 
 # ---------------------------------------------------------------------------

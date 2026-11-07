@@ -53,7 +53,7 @@ def _read_body(path: str) -> str:
 
         content = DRIVER.read_note(path).content or ""
     except Exception:
-        return ""
+        return ""  # no banner: the annotation is advice, the tool's own read reports the failure
     try:
         from silica.config import CONFIG
         from silica.kernel.code import codedocs

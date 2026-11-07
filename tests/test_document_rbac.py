@@ -3,6 +3,7 @@ from pathlib import Path
 
 
 from silica.config import CONFIG
+from silica.kernel.vault import Vault
 
 
 def _init_repo(path: Path) -> None:
@@ -24,7 +25,7 @@ def test_document_writes_only_under_inbox(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "inbox_dir", "Inbox")
     from silica.driver import fs_backend
     import silica.driver as driver_mod
-    monkeypatch.setattr(driver_mod, "DRIVER", fs_backend.ObsidianFSBackend(str(vault)))
+    monkeypatch.setattr(driver_mod, "DRIVER", Vault(fs_backend.ObsidianFSBackend(str(vault))))
 
     from silica.tools.codedocs_tool import silica_document
     before = {p.relative_to(vault).as_posix() for p in vault.rglob("*.md")}

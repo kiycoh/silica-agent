@@ -16,6 +16,7 @@ from tests.fsm_patches import patch_run
 
 from silica.driver.fs_backend import ObsidianFSBackend
 from silica.router.run_state import ChunkState, RunState
+from silica.kernel.vault import Vault
 
 
 def _ref(name):
@@ -31,7 +32,7 @@ def test_autolink_note_uses_passed_title_index_not_rebuilt(tmp_path):
     handed in via title_index — proving the passed index drives linking,
     not a rebuild from list_files()."""
     (tmp_path / "Note.md").write_text("Talks about Phantom things.", encoding="utf-8")
-    backend = ObsidianFSBackend(str(tmp_path))
+    backend = Vault(ObsidianFSBackend(str(tmp_path)))
 
     added = backend.autolink_note("Note.md", title_index=["Phantom"])
 
@@ -45,7 +46,7 @@ def test_autolink_note_fallback_rebuilds_from_vault_when_no_index_passed(tmp_pat
     real vault (list_files()) and only link titles that actually exist."""
     (tmp_path / "Phantom.md").write_text("# Phantom\n", encoding="utf-8")
     (tmp_path / "Note.md").write_text("Talks about Phantom things.", encoding="utf-8")
-    backend = ObsidianFSBackend(str(tmp_path))
+    backend = Vault(ObsidianFSBackend(str(tmp_path)))
 
     added = backend.autolink_note("Note.md")
 
@@ -58,7 +59,7 @@ def test_autolink_note_fallback_does_not_link_nonexistent_title(tmp_path):
     """Without a passed index, a title with no matching note must NOT be
     linked — the rebuild-from-vault fallback is the authoritative set."""
     (tmp_path / "Note.md").write_text("Talks about Phantom things.", encoding="utf-8")
-    backend = ObsidianFSBackend(str(tmp_path))
+    backend = Vault(ObsidianFSBackend(str(tmp_path)))
 
     added = backend.autolink_note("Note.md")
 
@@ -128,7 +129,7 @@ def test_autolink_note_links_a_mention_of_a_frontmatter_alias(tmp_path):
         "---\naliases: [AI]\n---\n\n# Artificial Intelligence\n", encoding="utf-8"
     )
     (tmp_path / "Note.md").write_text("The AI winter ended.", encoding="utf-8")
-    backend = ObsidianFSBackend(str(tmp_path))
+    backend = Vault(ObsidianFSBackend(str(tmp_path)))
 
     added = backend.autolink_note("Note.md")
 
@@ -142,7 +143,7 @@ def test_alias_index_tracks_a_note_edited_after_the_first_scan(tmp_path):
     an alias added after the index was warm has to become linkable, and one
     removed has to stop being linkable."""
     (tmp_path / "Artificial Intelligence.md").write_text("# AI\n", encoding="utf-8")
-    backend = ObsidianFSBackend(str(tmp_path))
+    backend = Vault(ObsidianFSBackend(str(tmp_path)))
     assert backend.alias_index() == []
 
     backend.overwrite(

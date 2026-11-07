@@ -143,7 +143,7 @@ def gate_clean(pre, post) -> tuple[bool, list[str]]:
 def same_note(original: str, now: str | None, path: str) -> bool:
     """The bytes back, or the bytes plus the `type` a create stamps into a
     frontmatter that lacked it: /undo of a delete recreates through upsert,
-    which stamps (the accepted divergence named at ws_backend._overwrite_raw)."""
+    which stamps."""
     if now is None:
         return False
     from silica.kernel.write.notetype import stamp_type
@@ -169,7 +169,7 @@ class Live:
             from silica.driver.ws_backend import ObsidianWSBackend
 
             set_driver(ObsidianWSBackend(url=stub.url, token=stub.token))
-        self.drv = get_driver()
+        self.drv = get_driver().transport
         build = self.drv._rebuild_index if kind == "fs" else self.drv._ensure_graph
 
         def counted(*a, **kw):
@@ -485,7 +485,7 @@ def g2_child(session: Path) -> dict:
     from silica.driver import get_driver
 
     vault = Path(os.environ["SILICA_VAULT"])
-    drv = get_driver()
+    drv = get_driver().transport
     drv._ensure_index()
     rebuilds = {"n": 0}
     inner = drv._rebuild_index

@@ -447,7 +447,7 @@ def is_skippable_chunk(note_rel: str) -> bool:
     try:
         data, _, _ = frontmatter.split(DRIVER.read_note(note_rel).content)
     except Exception:
-        return False
+        return False  # skipping is the claim that needs evidence
     if not isinstance(data, dict):
         return False
     return bool(data.get("boilerplate") or data.get("references") or data.get("document")

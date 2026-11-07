@@ -128,8 +128,9 @@ def test_the_ws_backend_records_what_the_plugin_writes(tmp_vault):
 
     from silica.config import CONFIG
     from silica.driver.ws_backend import ObsidianWSBackend
+    from silica.kernel.vault import Vault
 
-    backend = ObsidianWSBackend("ws://127.0.0.1:0")
+    transport = ObsidianWSBackend("ws://127.0.0.1:0")
 
     def fake_rpc(method, **params):
         """The plugin's half: writes to the same folder CONFIG points at."""
@@ -147,7 +148,8 @@ def test_the_ws_backend_records_what_the_plugin_writes(tmp_vault):
             return None
         raise AssertionError(f"unexpected rpc: {method}")
 
-    backend._rpc = fake_rpc
+    transport._rpc = fake_rpc
+    backend = Vault(transport)
 
     tmp_vault.note("Notes/Live.md", "one\ntwo\n")
     backend.overwrite("Notes/Live.md", "one\ntwo\nthree\n")

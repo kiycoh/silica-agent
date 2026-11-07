@@ -555,7 +555,7 @@ class ProgressLedger:
                 try:
                     refs = contested_refs(DRIVER.read_note(path).content or "")
                 except Exception:
-                    refs = []
+                    refs = []  # gone or unreadable: the register is rebuildable, so it self-heals below
                 if refs:
                     parts.append(
                         f"contested note: {path} | {refs[0]} -> "

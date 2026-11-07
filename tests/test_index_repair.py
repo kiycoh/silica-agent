@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from silica.driver.fs_backend import ObsidianFSBackend
+from silica.kernel.vault import Vault
 
 
 def _write(root: Path, rel: str, body: str) -> None:
@@ -28,7 +29,7 @@ def _state(be) -> tuple:
 
 
 def _rebuilt(root: Path) -> tuple:
-    fresh = ObsidianFSBackend(vault_path=str(root))
+    fresh = Vault(ObsidianFSBackend(vault_path=str(root)))
     fresh._ensure_index()
     return _state(fresh)
 
@@ -45,7 +46,7 @@ def vault(tmp_path):
 
 @pytest.fixture
 def be(vault):
-    b = ObsidianFSBackend(vault_path=str(vault))
+    b = Vault(ObsidianFSBackend(vault_path=str(vault)))
     b._ensure_index()
     return b
 
@@ -61,7 +62,7 @@ def test_a_delete_lets_a_namesake_take_the_links(tmp_path):
     _write(root, "Sub/C.md", "see [[B]]\n")
     _write(root, "Sub/B.md", "# B here\n")
     _write(root, "Far/Deep/B.md", "# B there\n")
-    be = ObsidianFSBackend(vault_path=str(root))
+    be = Vault(ObsidianFSBackend(vault_path=str(root)))
     be._ensure_index()
     assert be._graph.has_edge("Sub/C.md", "Sub/B.md")
 
@@ -80,7 +81,7 @@ def test_a_create_resolves_the_links_waiting_for_its_name(be, vault):
 def test_a_create_resolves_a_waiting_path_link(tmp_path):
     root = tmp_path / "v"
     _write(root, "A.md", "see [[Topic/New]]\n")
-    be = ObsidianFSBackend(vault_path=str(root))
+    be = Vault(ObsidianFSBackend(vault_path=str(root)))
     be._ensure_index()
     be.create("Area/Topic/New.md", "# New\n")
     assert be._graph.has_edge("A.md", "Area/Topic/New.md")
@@ -90,7 +91,7 @@ def test_a_create_resolves_a_waiting_path_link(tmp_path):
 def test_a_create_resolves_a_waiting_adr_reference(tmp_path):
     root = tmp_path / "v"
     _write(root, "A.md", "As ADR-0003 says.\n")
-    be = ObsidianFSBackend(vault_path=str(root))
+    be = Vault(ObsidianFSBackend(vault_path=str(root)))
     be._ensure_index()
     be.create("adr/0003-the-choice.md", "# the choice\n")
     assert be._graph.has_edge("A.md", "adr/0003-the-choice.md")
@@ -101,7 +102,7 @@ def test_a_new_namesake_takes_the_links_it_wins(tmp_path):
     root = tmp_path / "v"
     _write(root, "Sub/C.md", "see [[B]]\n")
     _write(root, "Far/Deep/B.md", "# B there\n")
-    be = ObsidianFSBackend(vault_path=str(root))
+    be = Vault(ObsidianFSBackend(vault_path=str(root)))
     be._ensure_index()
     assert be._graph.has_edge("Sub/C.md", "Far/Deep/B.md")
 

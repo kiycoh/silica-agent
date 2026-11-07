@@ -11,6 +11,24 @@ from silica.kernel.base.formats import TABULAR_EXTS, VISUAL_MEDIA_EXTS
 from silica.kernel.base.frontmatter import FM_RE_SCAN
 from silica.kernel.base.syntax import ADR_REF_RE
 
+def lf(text: str) -> str:
+    """`text` on LF, as Python's universal newlines read it: the one input
+    every composer is written for (ADR-0093 decision 8)."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def crlf_dominant(raw: bytes) -> bool:
+    """CRLF when the bytes hold more `\\r\\n` than lone `\\n` (decision 8)."""
+    crlf = raw.count(b"\r\n")
+    return crlf > raw.count(b"\n") - crlf
+
+
+def encode(content: str, crlf: bool) -> str:
+    """`content` (composed on LF) with the prior's terminator put back."""
+    content = lf(content)
+    return content.replace("\n", "\r\n") if crlf else content
+
+
 _MD = MarkdownIt()  # stateless parser, shared by every parse below
 _FOOTNOTE_DEF_RE = re.compile(r"^([ \t]{0,3})\[\^[^\]\n]+\]:[ \t]?", re.MULTILINE)
 

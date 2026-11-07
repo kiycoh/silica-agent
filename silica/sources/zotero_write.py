@@ -449,10 +449,9 @@ def unlink(zot: Zotero) -> dict:
 
 
 def _journal_run() -> str:
-    from silica.config import CONFIG
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
 
-    return get_undo_journal().start_run(source="zotero", vault=CONFIG.vault_path.strip() or None)
+    return get_undo_journal().start_run(source="zotero", vault=active_vault())
 
 
 def file_in_a_run(zot: Zotero, moves: list[tuple[str, str]], inbox: str) -> tuple[int, str]:

@@ -53,6 +53,7 @@ def _driver(files: dict[str, str], mtimes: dict[str, float] | None = None):
         read_note=lambda ref: SimpleNamespace(
             content=files[str(ref).removesuffix(".md")]
         ),
+        knows_mtimes=True,
         mtime_of=lambda ref: mt.get(
             (ref.path if hasattr(ref, "path") else str(ref)).removesuffix(".md"), 1.0
         ),
@@ -103,17 +104,17 @@ def test_sweep_skips_cold_indexes(tmp_path, monkeypatch, enabled):
         raise AssertionError("sweep must not enumerate on cold indexes")
 
     monkeypatch.setattr("silica.driver.DRIVER",
-                        SimpleNamespace(list_files=_boom, mtime_of=lambda r: 1.0))
+                        SimpleNamespace(list_files=_boom, knows_mtimes=True, mtime_of=lambda r: 1.0))
     assert sync.sweep(force=True).skipped
 
 
 def test_sweep_abstains_without_mtime(tmp_path, monkeypatch, enabled):
-    """A driver without mtime_of (ws backend) has no change signal — abstain."""
+    """A driver without mtimes (ws backend) has no change signal — abstain."""
     import silica.kernel.recall.embed as embed
     monkeypatch.setattr(embed, "_index_path", lambda: tmp_path / "embeddings.json")
     _seed_embed(embed, None, {"a": "body a"})
     monkeypatch.setattr("silica.driver.DRIVER",
-                        SimpleNamespace(list_files=lambda folder="": []))
+                        SimpleNamespace(list_files=lambda folder="": [], knows_mtimes=False))
     assert sync.sweep(force=True).skipped
 
 

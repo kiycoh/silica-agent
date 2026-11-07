@@ -25,30 +25,24 @@ import networkx as nx
 from websockets.asyncio.client import connect
 
 from silica.driver.base import (
+    MAX_FRAME,
+    PROTOCOL_VERSION,
     namesake_order,
     GraphIndexMixin,
     GraphSnapshot,
     Heading,
     Hit,
     Link,
+    NoteBytes,
     NoteContent,
+    NoteNotFound,
     NoteRef,
 )
-from silica.kernel.base.markdown import extract_links_typed
+from silica.kernel.base.markdown import crlf_dominant, encode, extract_links_typed, lf
 from silica.kernel.base.layout import is_vault_artifact
 from silica.kernel.base.layout import is_source_leaf
-from silica.kernel.write import preserve, session_changes
-from silica.kernel.base import frontmatter as fm
-from silica.kernel.write.notetype import stamp_type
 
 logger = logging.getLogger(__name__)
-
-PROTOCOL_VERSION = 1
-
-# websockets' 1 MiB default max_size would sever the connection on a read
-# reply carrying a large note body. Mirrors ui/connect.py (driver must not
-# import from ui).
-MAX_FRAME = 2**25
 
 
 def _disk_prior(path: str) -> tuple[str | None, bool]:
@@ -67,14 +61,20 @@ def _disk_prior(path: str) -> tuple[str | None, bool]:
     except OSError:
         return None, False
     try:
-        return preserve.lf(raw.decode("utf-8")), preserve.crlf_dominant(raw)
+        return lf(raw.decode("utf-8")), crlf_dominant(raw)
     except UnicodeDecodeError:
         # Not text the composers could have read either: nothing to compare.
         return None, False
 
 
 class ObsidianWSBackend(GraphIndexMixin):
-    """ObsidianDriver over the WebSocket bridge (read path)."""
+    """Transport over the WebSocket bridge."""
+
+    kind = "ws"
+    knows_mtimes = False
+    composes_props = False
+    links_natively = True
+    vault_path = None   # the plugin has the folder CONFIG points at open
 
     def __init__(self, url: str, token: str = "", timeout: float = 10.0):
         self._url = url
@@ -168,7 +168,10 @@ class ObsidianWSBackend(GraphIndexMixin):
         if kind == "rpc_result":
             fut.set_result(frame.get("result"))
         else:
-            fut.set_exception(RuntimeError(frame.get("error", "rpc_error")))
+            # `file not found: <path>` is the one reply the plugin's handlers
+            # give for a missing note (handlers.ts, every path-taking method).
+            error = frame.get("error", "rpc_error")
+            fut.set_exception((NoteNotFound if "file not found" in error.lower() else RuntimeError)(error))
 
     def _fail_pending(self, exc: Exception) -> None:
         for fut in self._pending.values():
@@ -251,8 +254,13 @@ class ObsidianWSBackend(GraphIndexMixin):
         # (ADR-0093 decision 8). The plugin hands the bytes over as they are.
         return NoteContent(
             ref=NoteRef(name=name, path=data.get("path", path)),
-            content=preserve.lf(data.get("content", "")),
+            content=lf(data.get("content", "")),
         )
+
+    def mtime_of(self, ref: NoteRef | str) -> float | None:
+        """Abstains: the protocol has no stat and a read of the folder CONFIG
+        names would turn the sweep on under a live bridge (`knows_mtimes`)."""
+        return None
 
     def list_files(self, folder: str = "") -> list[NoteRef]:
         rows = self._rpc("list_files", folder=folder)
@@ -442,83 +450,58 @@ class ObsidianWSBackend(GraphIndexMixin):
         )
 
     # ------------------------------------------------------------------
-    # Write (graph-safe) — one RPC each; the reply IS the settle (§2.4)
+    # Write primitives: one RPC each; the reply IS the settle (§2.4)
     # ------------------------------------------------------------------
 
-    def create(self, path: str, content: str, *, loss: preserve.Loss | None = None,
-               free=()) -> NoteRef:
-        content = stamp_type(path, content)   # OKF §4.1 `type`, if absent
-        # ADR-0093: a path the chat deleted this turn is judged against the
-        # body the delete saved. If the plugin folds the path into a key
-        # note_key does not, the lookup misses and the create is unchecked.
-        preserve.check_recreate(path, content, loss=loss, free=free)
-        data = self._rpc("create", path=path, content=content)
+    def claim(self, path: str) -> str:
+        return path   # the plugin refuses a taken path, on the create itself
+
+    def write_new(self, rel: str, content: str, landing) -> NoteRef:
+        data = self._rpc("create", path=rel, content=content)
         ref = NoteRef(name=data["name"], path=data["path"])
         # The plugin's path is the authoritative one, and it is only known once
-        # the reply is in — so this one records after the write, with no baseline
-        # read: a create had nothing to be a baseline.
-        session_changes.touched(ref.path, None)
+        # the reply is in, so this one lands after the write.
+        landing(ref.path)
         self._patch_create(ref.path, ref, content)
         return ref
 
-    def overwrite(self, path: str, content: str, *, loss: preserve.Loss | None = None,
-                  free=()) -> NoteRef:
-        content = stamp_type(path, content)  # OKF §4.1 `type`
-        prior, crlf = _disk_prior(path)
-        preserve.check_write(path, prior, content, loss=loss, free=free)
-        session_changes.touched_from_disk(path)
-        self._rpc("overwrite", path=path, content=preserve.encode(content, crlf))
-        name = path.rsplit("/", 1)[-1].removesuffix(".md")
-        ref = NoteRef(name=name, path=path)
-        self._patch_graph_add(path, ref, content)
+    def prior_for_overwrite(self, path: str) -> NoteBytes:
+        return NoteBytes(path, *_disk_prior(path))
+
+    def write_over(self, note: NoteBytes, content: str) -> NoteRef:
+        self._rpc("overwrite", path=note.rel, content=encode(content, note.crlf))
+        name = note.rel.rsplit("/", 1)[-1].removesuffix(".md")
+        ref = NoteRef(name=name, path=note.rel)
+        self._patch_graph_add(note.rel, ref, content)
         return ref
 
-    def set_prop(self, ref: NoteRef | str, name: str, value: Any, type_: str = "text") -> None:
-        path = self._path_arg(ref)
-        prior, _crlf = _disk_prior(path)
-        if prior is not None:
-            # The plugin's own result is not visible before it writes, so the
-            # rule judges what the fs backend's set_prop would write. No
-            # caller today (2026-10-11); it stays checked for the first one.
-            data, _raw, body = fm.split(prior)
-            after = fm.dump({**(data or {}), name: value}, body)
-            preserve.check_write(path, prior, after, free=(name,))
-        session_changes.touched_from_disk(path)
-        self._rpc("set_prop", path=path, name=name, value=value, type=type_)
+    def prior_for_props(self, ref: NoteRef | str) -> NoteBytes:
+        return self.prior_for_overwrite(self._path_arg(ref))
 
-    def move(self, ref: NoteRef | str, to: str) -> None:
+    def write_prop(self, note: NoteBytes, name: str, value: Any, type_: str,
+                   composed: str | None) -> None:
+        self._rpc("set_prop", path=note.rel, name=name, value=value, type=type_)
+
+    def move_note(self, ref: NoteRef | str, to: str, *, moving, moved, retarget) -> None:
         path = self._path_arg(ref)
-        # The row follows the file, same as the fs backend. The referrers Obsidian
-        # rewrites on its own side stay out of the list: the plugin never says
-        # which notes it touched, and guessing them would be a lie in a diff.
-        session_changes.touched_from_disk(path)
-        session_changes.renamed(path, to)
+        # `retarget` unused: the referrers Obsidian rewrites on its own side stay
+        # out of the Changes list, because the plugin never says which notes it
+        # touched and guessing them would be a lie in a diff.
+        moving(path, to, _disk_prior(path)[0])
         self._rpc("move", path=path, to=to)
-        # The ledger lives on disk whichever backend moved the file; see the
-        # fs backend's move() for why it has to follow.
-        from silica.kernel.write.provenance import rename_note
-
-        rename_note(path, to)
+        moved(path, to)
         # Obsidian rewrites incoming wikilinks on move; patching every referrer
         # over the wire isn't worth it — reinvalidate, rebuild lazily on next read.
         self._is_graph_built = False
 
-    def delete(self, ref: NoteRef | str) -> None:
-        path = self._path_arg(ref)
-        session_changes.touched_from_disk(path)
-        self._rpc("delete", path=path)
-        self._patch_delete(path)
+    def prior_for_delete(self, ref: NoteRef | str) -> NoteBytes:
+        return self.prior_for_overwrite(self._path_arg(ref))
 
-    def autolink_note(
-        self,
-        path: str,
-        candidates: list[str] | None = None,
-        title_index: list[str] | None = None,
-    ) -> list[str]:
-        # title_index is accepted for protocol parity but ignored: the WS/CLI
-        # backend delegates title resolution to Obsidian's live graph, so a
-        # caller-built index does not apply.
-        session_changes.touched_from_disk(path)  # the plugin rewrites the body
+    def remove(self, note: NoteBytes) -> None:
+        self._rpc("delete", path=note.rel)
+        self._patch_delete(note.rel)
+
+    def autolink(self, path: str, candidates: list[str] | None) -> list[str]:
         added = self._rpc("autolink_note", path=path, candidates=candidates) or []
         if added:
             self._is_graph_built = False  # body rewritten plugin-side; cheapest correct patch
@@ -531,7 +514,7 @@ class ObsidianWSBackend(GraphIndexMixin):
         return []
 
     # ------------------------------------------------------------------
-    # In-memory index patching after writes (mirrors fs_backend)
+    # In-memory index patching after writes (shared half: GraphIndexMixin)
     # ------------------------------------------------------------------
 
     def _patch_graph_add(self, path: str, ref: NoteRef, content: str) -> None:
@@ -541,32 +524,12 @@ class ObsidianWSBackend(GraphIndexMixin):
         """
         if not self._is_graph_built:
             return
-        if path in self._graph:
-            self._graph.remove_edges_from(list(self._graph.out_edges(path)))
-        self._unresolved_links = {(s, t) for s, t in self._unresolved_links if s != path}
-        self._notes[path] = ref
-        self._graph.add_node(path, ref=ref)
-        by_name = self._notes_by_name.setdefault(ref.name.lower(), [])
-        if ref not in by_name:
-            by_name.append(ref)
-        self._add_link_edges(path, content)
-
-    def _patch_graph_remove(self, path: str) -> None:
-        """Patch the index after a delete."""
-        if not self._is_graph_built:
-            return
-        if path in self._graph:
-            self._graph.remove_node(path)
-        self._notes.pop(path, None)
-        name_lower = path.rsplit("/", 1)[-1].removesuffix(".md").lower()
-        if name_lower in self._notes_by_name:
-            self._notes_by_name[name_lower] = [
-                r for r in self._notes_by_name[name_lower] if r.path != path
-            ]
-        self._unresolved_links = {(s, t) for s, t in self._unresolved_links if s != path}
+        self._forget_links_from(path)
+        self._enter_note(path, ref)
+        self._link_from(path, extract_links_typed(content))
 
     def _patch_delete(self, path: str) -> None:
-        """`_patch_graph_remove`, then every note that linked it.
+        """Drop the note, then re-index every note that linked it.
 
         The fs backend's repair (ADR-0092), with each referrer's body read
         from disk: the plugin's delete replies as soon as `trashFile` returns,
@@ -577,33 +540,19 @@ class ObsidianWSBackend(GraphIndexMixin):
         """
         if not self._is_graph_built:
             return
-        referrers = ([p for p in self._graph.predecessors(path) if p != path]
-                     if path in self._graph else [])
-        self._patch_graph_remove(path)
+        referrers = self._referrers_of(path)
+        self._forget_links_from(path)
+        self._leave_note(path)
         self._repatch_from_disk(referrers)
 
     def _patch_create(self, path: str, ref: NoteRef, content: str) -> None:
-        """`_patch_graph_add`, then the sources of unresolved pairs that now
-        resolve to the new note, filtered by name first, and the referrers of
-        a namesake: a bare name ranks its notes by `namesake_order` (ADR-0114),
-        so a shallower new note can take a link that resolved elsewhere, as
-        in the fs backend (ADR-0092 point 1)."""
+        """`_patch_graph_add`, then the notes its name now reaches: a bare name
+        ranks its notes by `namesake_order` (ADR-0114), so a shallower new note
+        can take a link that resolved elsewhere (ADR-0092 point 1)."""
         self._patch_graph_add(path, ref, content)
         if not self._is_graph_built:
             return
-        name = ref.name.lower()
-        sources: set[str] = set()
-        for source, target in list(self._unresolved_links):
-            if target.rsplit("/", 1)[-1].removesuffix(".md").lower() != name:
-                continue
-            hit = self._resolve_link(target, source_path=source)
-            if hit is not None and hit.path == path:
-                sources.add(source)
-        for other in self._notes_by_name.get(name, ()):
-            if other.path != path and other.path in self._graph:
-                sources.update(self._graph.predecessors(other.path))
-        sources.discard(path)
-        self._repatch_from_disk(sorted(sources))
+        self._repatch_from_disk(self._sources_reached_by(path, ref.name.lower()))
 
     def _repatch_from_disk(self, paths: list[str]) -> None:
         from silica.config import CONFIG
@@ -623,20 +572,13 @@ class ObsidianWSBackend(GraphIndexMixin):
                 return
             self._patch_graph_add(path, self._node_ref(path), content)
 
-    def _add_link_edges(self, path: str, content: str) -> None:
-        for target, scaffold in extract_links_typed(content).items():
-            resolved = self._resolve_link(target, source_path=path)
-            if resolved is not None:
-                self._add_link_edge(path, resolved.path, scaffold=scaffold)
-            else:
-                self._unresolved_links.add((path, target))
-
-    def _resolve_link(self, target: str, source_path: str = "") -> NoteRef | None:
-        """Resolve a link target against the index — by path, else by name."""
+    def _resolve_target(self, target: str, source_path: str = "") -> NoteRef | None:
+        """Resolve a link target against the index: by path, else by name.
+        Why this is not the fs rule: GraphIndexMixin."""
         from silica.kernel.base.markdown import resolve_relative
 
-        # Mirror of fs_backend: a `./`/`../` target is relative to the source
-        # note and invisible to the suffix matcher until normalized.
+        # A `./`/`../` target is relative to the source note and invisible to
+        # the suffix matcher until normalized, as on fs.
         normalized = resolve_relative(target, source_path)
         if normalized is None:
             return None  # escapes the vault root

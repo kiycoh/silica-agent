@@ -291,6 +291,7 @@ def test_sweep_save_does_not_clobber_the_other_process(index_path, monkeypatch):
     monkeypatch.setattr("silica.driver.DRIVER", SimpleNamespace(
         list_files=lambda folder="": [NoteRef(p, p + ".md") for p in live],
         read_note=lambda ref: SimpleNamespace(content="body"),
+        knows_mtimes=True,
         mtime_of=lambda ref: 1.0,
     ))
     monkeypatch.setattr("silica.model.providers.get_embedder",

@@ -10,8 +10,8 @@ Public API
     rewrite_links(content, old_path, new_path, *, rewrite_name_links=True)
         → (new_content, n_rewritten)
 
-All logic is pure (no I/O, no driver imports).  Wire-up to the FS backend
-is Task 2 and lives in silica/driver/fs_backend.py.
+All logic is pure (no I/O, no driver imports).  A move reaches it through
+`silica.kernel.vault`, which hands it to the fs transport as `retarget`.
 
 Skip regions (never modified):
     - YAML frontmatter  (--- block at the very top of the note)

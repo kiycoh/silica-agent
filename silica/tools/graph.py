@@ -602,7 +602,7 @@ def silica_concepts(term: Annotated[str, Field(description="A single word/concep
         try:
             path = DRIVER.read_note(note).ref.path or note
         except Exception:
-            path = note
+            path = note  # unresolved: the index may still know the reader's spelling
         nodes = store.note_nodes(path)
         top = sorted(nodes.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
         out: dict[str, Any] = {

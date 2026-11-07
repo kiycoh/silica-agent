@@ -319,7 +319,7 @@ def context(path: str = "", name: str = "", ghost: bool = False):
     try:
         content = driver.read_note(NoteRef(name=note_parts.clean_name(canon), path=canon)).content
     except Exception:
-        content = ""
+        content = ""  # the drawer opens on what the graph knows, without the body
     props, body = split_shown(content)
 
     def _refs(fn) -> list[dict]:

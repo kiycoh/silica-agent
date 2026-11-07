@@ -1225,10 +1225,10 @@ def silica_exists(path: Annotated[str, Field(description='Relative path of the n
     not the same answer as "it is not there".
     """
     try:
-        DRIVER.read_note(path)
-        return True
+        if DRIVER.exists(path):
+            return True
     except Exception:
-        pass
+        pass  # a dead bridge does not make the file absent: the disk still answers
     from silica.config import CONFIG
 
     root = Path(CONFIG.vault_path or "")

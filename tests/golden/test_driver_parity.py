@@ -10,9 +10,10 @@ import inspect
 
 import pytest
 
-from silica.driver.base import ObsidianDriver
+from silica.driver.base import NoteReader, ObsidianDriver, Transport
 from silica.driver.fs_backend import ObsidianFSBackend
 from silica.driver.ws_backend import ObsidianWSBackend
+from silica.kernel.vault import Vault
 from tests.fixtures.vault_factory import SPEC
 
 
@@ -20,20 +21,17 @@ from tests.fixtures.vault_factory import SPEC
 # Structural parity tests — always run, no env gating, no I/O
 # ---------------------------------------------------------------------------
 
-def _protocol_method_names() -> set[str]:
-    """Return the set of public method names declared in ObsidianDriver.
+def _protocol_method_names(protocols=(NoteReader, Transport)) -> set[str]:
+    """The public method names a transport must carry: the read half and the
+    write primitives, each declared on its own Protocol.
 
-    Uses the class __dict__ directly (not inspect.getmembers) to limit scope
+    Uses each class __dict__ directly (not inspect.getmembers) to limit scope
     to methods actually declared on the protocol, not inherited helpers.
-    On Python >= 3.12, __protocol_attrs__ would be authoritative; on 3.11 we
-    derive the same set: callables not starting with '_'.
     """
-    if hasattr(ObsidianDriver, "__protocol_attrs__"):
-        # Future-proof: use the canonical attribute when available.
-        return set(ObsidianDriver.__protocol_attrs__)
     return {
         name
-        for name, val in ObsidianDriver.__dict__.items()
+        for proto in protocols
+        for name, val in proto.__dict__.items()
         if callable(val) and not name.startswith("_")
     }
 
@@ -63,18 +61,18 @@ class TestDriverStructuralParity:
     # ------------------------------------------------------------------
 
     def test_fs_backend_satisfies_protocol(self, tmp_path):
-        """ObsidianFSBackend instantiates cheaply and satisfies ObsidianDriver."""
+        """ObsidianFSBackend instantiates cheaply and satisfies Transport."""
         backend = ObsidianFSBackend(vault_path=str(tmp_path))
-        assert isinstance(backend, ObsidianDriver), (
-            "ObsidianFSBackend does not satisfy the ObsidianDriver protocol. "
+        assert isinstance(backend, Transport), (
+            "ObsidianFSBackend does not satisfy the Transport protocol. "
             "A method may be missing or have the wrong signature."
         )
 
     def test_ws_backend_satisfies_protocol(self):
-        """ObsidianWSBackend instantiates cheaply (no dial) and satisfies ObsidianDriver."""
+        """ObsidianWSBackend instantiates cheaply (no dial) and satisfies Transport."""
         backend = ObsidianWSBackend(url="ws://127.0.0.1:1", token="")
-        assert isinstance(backend, ObsidianDriver), (
-            "ObsidianWSBackend does not satisfy the ObsidianDriver protocol. "
+        assert isinstance(backend, Transport), (
+            "ObsidianWSBackend does not satisfy the Transport protocol. "
             "A method may be missing or have the wrong signature."
         )
 
@@ -129,9 +127,27 @@ class TestDriverStructuralParity:
         undeclared = shared - proto_methods
         assert not undeclared, (
             f"These public methods exist on BOTH backends but are NOT declared "
-            f"in ObsidianDriver: {sorted(undeclared)}. "
+            f"in Transport: {sorted(undeclared)}. "
             f"Either add them to the protocol or make them private (prefix with '_')."
         )
+
+    def test_the_vault_carries_every_write_verb(self):
+        """Declared on the class: reads reach it through __getattr__, which a
+        runtime Protocol check does not see, so the verbs are checked by name."""
+        verbs = _protocol_method_names((ObsidianDriver,))
+        assert not verbs - set(vars(Vault))
+        for verb in verbs:
+            assert (list(inspect.signature(getattr(ObsidianDriver, verb)).parameters)
+                    == list(inspect.signature(getattr(Vault, verb)).parameters)), verb
+
+    def test_a_bare_transport_has_no_write_verb(self):
+        """The verbs are the Vault's: on a transport a write would land with no
+        stamp, no check and no Changes row, so it must not resolve at all."""
+        verbs = _protocol_method_names((ObsidianDriver,))
+        assert verbs >= {"create", "overwrite", "upsert", "set_prop", "unset_prop",
+                         "move", "delete", "autolink_note"}
+        for cls in (ObsidianFSBackend, ObsidianWSBackend):
+            assert not {v for v in verbs if hasattr(cls, v)}, cls
 
     # ------------------------------------------------------------------
     # Test 4: signature drift — parameter names must match the protocol
@@ -143,7 +159,7 @@ class TestDriverStructuralParity:
         mismatches = []
         for method_name in sorted(proto_methods):
             proto_params = list(
-                inspect.signature(getattr(ObsidianDriver, method_name)).parameters.keys()
+                inspect.signature(getattr(Transport, method_name)).parameters.keys()
             )
             fs_params = list(
                 inspect.signature(getattr(ObsidianFSBackend, method_name)).parameters.keys()
@@ -163,7 +179,7 @@ class TestDriverStructuralParity:
         mismatches = []
         for method_name in sorted(proto_methods):
             proto_params = list(
-                inspect.signature(getattr(ObsidianDriver, method_name)).parameters.keys()
+                inspect.signature(getattr(Transport, method_name)).parameters.keys()
             )
             ws_params = list(
                 inspect.signature(getattr(ObsidianWSBackend, method_name)).parameters.keys()

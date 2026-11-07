@@ -20,7 +20,7 @@ Two layers over the same event, a note's FIRST touch by this process:
   last looked (``history``). Per-vault state follows the vault (ADR-0014): no
   vault column, and no central file every process would contend on.
 
-The driver is the only writer here. That is the whole reason this is one file and
+The vault wrapper is the only writer here. That is the whole reason this is one file and
 not a reporting duty spread across the tool surface: interactive patch, bulk
 nucleation, a move's link rewrites and delete all reach disk through the same
 four methods, so they all land in the list without any of them knowing it exists.

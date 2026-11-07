@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from silica.driver import DRIVER
+from silica.driver import DRIVER, NoteNotFound
 from silica.driver.base import NoteRef
 from silica.kernel.base.notekey import ledger_key
 from silica.kernel.base.syntax import WIKILINK_TARGET_RE
@@ -199,6 +199,9 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
             try:
                 prior = DRIVER.read_note(path).content
             except Exception:
+                # Absent is the contract. Anything else fails the create itself
+                # (a note it cannot read is still a note there), so this inverse
+                # never runs against a body it did not capture.
                 prior = None
             if prior:
                 inverses.append(InverseOp(
@@ -298,12 +301,8 @@ def apply_inverses(txn_id: str, inverses: list[InverseOp] | list[dict]) -> dict[
                 try:
                     DRIVER.delete(path)
                     applied.append(f"deleted_created:{path}")
-                except Exception as e:
-                    err_str = str(e).lower()
-                    if "not found" in err_str or "no such file" in err_str:
-                        applied.append(f"deleted_created:{path} (already_absent)")
-                    else:
-                        raise
+                except (NoteNotFound, FileNotFoundError):
+                    applied.append(f"deleted_created:{path} (already_absent)")
 
             elif inv.kind == InverseOpKind.restore_version:
                 if inv.prior_content is not None:
@@ -420,7 +419,9 @@ def revert_run(run_id: str, *, store: undo_journal.UndoJournalStore | None = Non
             current = DRIVER.read_note(inv.path).content
             cur_hash: str | None = undo_journal.content_hash(current)
         except Exception:
-            cur_hash = None  # note absent
+            # Absent, or a body that cannot be compared: both skip as stale, so a
+            # revert never overwrites what its guard could not read.
+            cur_hash = None
 
         # Stale (B): the target note no longer exists in this vault, so there is
         # nothing to restore or delete — the journal describes a vault that was
@@ -934,6 +935,8 @@ def commit_derived(rel: str, content: str) -> dict[str, Any]:
         try:
             prior: str | None = DRIVER.read_note(rel).content
         except Exception:
+            # Absent is the case. An unreadable note takes the create below,
+            # which refuses it, and the refusal is what this returns.
             prior = None
         content = ensure_system_floor(content, prior=prior)
         try:

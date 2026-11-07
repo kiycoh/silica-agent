@@ -11,6 +11,7 @@ already written; the drift report kept naming a path that no longer existed.
 from __future__ import annotations
 
 from silica.kernel.write.provenance import append_record, note_authored_by
+from silica.kernel.vault import Vault
 
 
 def test_fs_move_rewrites_the_ledger(tmp_vault):
@@ -19,7 +20,7 @@ def test_fs_move_rewrites_the_ledger(tmp_vault):
 
     tmp_vault.note("Concepts/A.md", "---\ntitle: A\n---\n\nbody\n")
     append_record("lec.md", "sha1", "r1", ["Concepts/A"])
-    backend = ObsidianFSBackend(CONFIG.vault_path)
+    backend = Vault(ObsidianFSBackend(CONFIG.vault_path))
     backend._ensure_index()
 
     backend.move("Concepts/A.md", "Archive/A.md")
@@ -31,14 +32,15 @@ def test_fs_move_rewrites_the_ledger(tmp_vault):
 def test_ws_move_rewrites_the_ledger(tmp_vault, monkeypatch):
     """The plugin backend moves over RPC; the ledger lives on disk either way."""
     from silica.driver import ws_backend
+    from silica.kernel.write import session_changes
 
     append_record("lec.md", "sha1", "r1", ["Concepts/A"])
     backend = ws_backend.ObsidianWSBackend.__new__(ws_backend.ObsidianWSBackend)
     monkeypatch.setattr(backend, "_path_arg", lambda ref: str(ref), raising=False)
     monkeypatch.setattr(backend, "_rpc", lambda *a, **k: None, raising=False)
-    monkeypatch.setattr(ws_backend.session_changes, "touched_from_disk", lambda p: None)
-    monkeypatch.setattr(ws_backend.session_changes, "renamed", lambda a, b: None)
+    monkeypatch.setattr(session_changes, "touched_from_disk", lambda p: None)
+    monkeypatch.setattr(session_changes, "renamed", lambda a, b: None)
 
-    backend.move("Concepts/A.md", "Archive/A.md")
+    Vault(backend).move("Concepts/A.md", "Archive/A.md")
 
     assert note_authored_by("Archive/A.md", "lec.md")

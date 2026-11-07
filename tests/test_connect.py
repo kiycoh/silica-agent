@@ -260,7 +260,7 @@ def test_rpc_frames_serve_the_installed_driver(bridge_env):
     async def scenario(srv):
         ws, _ = await _dial(srv)
         be = get_driver()
-        assert isinstance(be, ObsidianWSBackend)
+        assert isinstance(be.transport, ObsidianWSBackend)
 
         async def plugin():
             frame = json.loads(await ws.recv())
@@ -287,13 +287,13 @@ def test_plugin_drop_falls_back_to_local_backend(bridge_env):
 
     async def scenario(srv):
         ws, _ = await _dial(srv)
-        assert isinstance(get_driver(), ObsidianWSBackend)
+        assert isinstance(get_driver().transport, ObsidianWSBackend)
         await ws.close()
         for _ in range(200):  # the handler notices the drop asynchronously
-            if not isinstance(get_driver(), ObsidianWSBackend):
+            if not isinstance(get_driver().transport, ObsidianWSBackend):
                 break
             await asyncio.sleep(0.02)
-        assert not isinstance(get_driver(), ObsidianWSBackend)  # fs fallback (tmp_vault)
+        assert not isinstance(get_driver().transport, ObsidianWSBackend)  # fs fallback (tmp_vault)
 
     _run(scenario)
 
@@ -417,7 +417,7 @@ def test_start_bridge_thread_hosts_rpc_only(bridge_env):
         async def scenario():
             ws, welcome = await _dial(srv)
             assert welcome["type"] == "welcome"
-            assert isinstance(get_driver(), ObsidianWSBackend)  # driver hot-swapped
+            assert isinstance(get_driver().transport, ObsidianWSBackend)  # driver hot-swapped
             await ws.send(json.dumps({"type": "chat", "turnId": "t3", "text": "hi"}))
             reply = json.loads(await ws.recv())
             assert reply["type"] == "chat_error"  # rpc-only host

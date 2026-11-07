@@ -183,6 +183,7 @@ def test_inbox_indexing_and_external_reads(tmp_path):
 
 def test_silica_restore_idempotent():
     """Verify that silica_restore ignores file-not-found errors during delete_created rollback operations."""
+    from silica.driver import NoteNotFound
     from silica.tools.wrapped import silica_restore
     from unittest.mock import patch
 
@@ -190,7 +191,7 @@ def test_silica_restore_idempotent():
         {"kind": "delete_created", "path": "Deep Learning/Backpropagation.md"}
     ]
 
-    with patch("silica.tools.wrapped.DRIVER.delete", side_effect=RuntimeError("Error: File \"Deep Learning/Backpropagation.md\" not found.")):
+    with patch("silica.tools.wrapped.DRIVER.delete", side_effect=NoteNotFound("Error: File \"Deep Learning/Backpropagation.md\" not found.")):
         res = silica_restore(txn_id="txn_123", inverses=inverses)
 
     assert res["success"] is True

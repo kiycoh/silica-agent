@@ -38,7 +38,7 @@ LOSS_PINS = {
     ("silica/tools/notes.py", "silica_flag_note", "Loss.RESOLVE if clear else None"): 1,
     ("silica/router/states/finalize.py", "_write_source_leaf", "Loss.CITE"): 1,
     ("silica/kernel/link/sweep.py", "sweep_note", "Loss.UNLINK"): 1,
-    ("silica/driver/fs_backend.py", "move", "preserve.Loss.RENAME"): 1,
+    ("silica/kernel/vault.py", "_retarget", "preserve.Loss.RENAME"): 1,
     ("silica/kernel/link/rename.py", "explicit_links", "Loss.RENAME"): 1,   # ADR-0126 point 3
 }
 
@@ -47,9 +47,8 @@ FREE_PINS = {
     ("silica/kernel/learn/plans.py", "set_revisit", "('revisit',)"): 1,
     ("silica/kernel/learn/plans.py", "clear_revisit", "('revisit',)"): 1,
     ("silica/kernel/learn/plans.py", "close_plan", "('status', 'completed')"): 2,
-    ("silica/driver/fs_backend.py", "set_prop", "(name,)"): 1,
-    ("silica/driver/fs_backend.py", "unset_prop", "(name,)"): 1,   # ADR-0143: a globe clears publish:
-    ("silica/driver/ws_backend.py", "set_prop", "(name,)"): 1,
+    ("silica/kernel/vault.py", "set_prop", "(name,)"): 1,   # one site now: both transports write under the Vault
+    ("silica/kernel/vault.py", "unset_prop", "(name,)"): 1,   # ADR-0143: a globe clears publish:
 }
 
 _FORWARDS = {"loss", "free", "None", "()"}
@@ -104,7 +103,7 @@ def test_the_counts_the_record_states():
     off = sum(n for (_f, _fn, v), n in LOSS_PINS.items()
               if Loss[v.rsplit(".", 1)[-1].split()[0]] in _RELAX_ALL)
     assert off == 19  # STAGED relaxes all, PERSON too: ADR-0129 point 5 and ADR-0155 point 8 add one each
-    assert sum(FREE_PINS.values()) == 8  # ADR-0143: unset_prop beside set_prop
+    assert sum(FREE_PINS.values()) == 7  # ADR-0143: unset_prop beside set_prop
 
 
 def test_a_reason_never_rides_on_an_op():
