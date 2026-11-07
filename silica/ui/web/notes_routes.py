@@ -463,7 +463,7 @@ async def note_check(payload: dict, request: Request):
     amendment of 2026-11-06). `web: true` with `claim`, on `lines`, then asks
     the web about that claim: the vault leg's events as ever, `web` for each
     step, `web_verdict`, and `done` last."""
-    from silica.cli import _check_judge, _check_legs, _check_web_legs
+    from silica.session import check as check_wiring
     from silica.kernel.check import run as check
     from silica.kernel.check import web as check_web
     from silica.kernel.base.manifest import active_write_dir
@@ -524,7 +524,7 @@ async def note_check(payload: dict, request: Request):
         about the block, and a verdict paid for earlier stands."""
         result = {"web": "", "say": check_web.NOTHING_TO_CHECK}
         if aimed:
-            lanes, fetch = _check_web_legs()
+            lanes, fetch = check_wiring.web_legs()
             result = check_web.check_claim(claim, search=lanes, fetch=fetch, judge=judge,
                                            step=lambda ev: put({"event": "web", **ev}), cancelled=stop.is_set)
         findings, states = check_web.rows(result, claim, check_web.vault_says(report), *where)
@@ -538,8 +538,8 @@ async def note_check(payload: dict, request: Request):
         started = time.monotonic()
         said = {"web": True} if web_on else {}  # that a web was asked, never what (ADR-0100)
         try:
-            search, dense, floor = _check_legs()
-            judge = None if rules_only else _check_judge(cite=card_lines is not None)
+            search, dense, floor = check_wiring.legs()
+            judge = None if rules_only else check_wiring.judge(cite=card_lines is not None)
             report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(), search=search,
                                       dense=dense, dense_floor=floor, judge=judge,
                                       cache_only=rules_only, progress=progress, cancelled=stop.is_set,

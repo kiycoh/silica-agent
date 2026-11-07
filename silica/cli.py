@@ -9,7 +9,6 @@ From SILICA.md §8.4:
 """
 from __future__ import annotations
 
-import functools
 import json
 import logging
 import os
@@ -21,7 +20,6 @@ import threading
 import uuid
 from collections.abc import Callable
 from contextlib import nullcontext, redirect_stdout
-from typing import NamedTuple
 
 from silica.ui.style import FlatMarkdown
 
@@ -34,9 +32,11 @@ from silica.agent.recall_watch import (
     numbers_of_session,
     unfounded_in_turn,
 )
-from silica.config import claim_env, CONFIG, env_raw, GUI_PORT, live_env
-from silica.onboarding.adopt import resolve_cwd_vault
-from silica.prompts import _lang_rule, system_prompt
+from silica.config import claim_env, CONFIG, GUI_PORT, live_env
+from silica.onboarding.adopt import resolve_cwd_vault, resolve_vault_switch, switch_vault
+from silica.session import check as check_wiring
+from silica.session import meter, seed
+from silica.session.words import direct_args, int_flag, positional, remember_text, str_flag, unquoted
 from silica.sources import ingest
 from silica.ui.console import CONSOLE
 from silica.ui.home import print_home
@@ -49,126 +49,6 @@ from silica.sources.web_research import WebTurn
 catalog.load()
 
 logger = logging.getLogger(__name__)
-
-
-@functools.cache
-def _cl100k():
-    """tiktoken's cl100k_base, read from the copy litellm ships, never fetched.
-
-    litellm points TIKTOKEN_CACHE_DIR at that copy when it is imported, and the
-    meter now runs before it is (ADR-0073). Without the variable tiktoken
-    downloads the file: offline that is a ProxyError, online a copy in /tmp that
-    a reboot deletes. find_spec locates the package without importing it.
-    """
-    import importlib.util
-
-    spec = importlib.util.find_spec("litellm")
-    if spec and spec.submodule_search_locations:
-        bundled = Path(spec.submodule_search_locations[0]) / "litellm_core_utils" / "tokenizers"
-        if bundled.is_dir():
-            os.environ.setdefault("TIKTOKEN_CACHE_DIR", str(bundled))
-    import tiktoken
-
-    return tiktoken.get_encoding("cl100k_base")
-
-
-# What the chat template wraps around each message (`<|im_start|>role\n` ...
-# `<|im_end|>\n` on Qwen); OpenAI's own envelope is 3.
-_TOKENS_PER_MESSAGE = 4
-
-
-def _count_context_tokens(messages: list[dict], tools: list[dict] | None = None) -> int:
-    """Pure counter — lets callers (e.g. the web seed prewarm) count a candidate
-    message list without clobbering the live session's CONFIG.context_tokens.
-
-    cl100k over each message's text and tool calls, plus the tool block as JSON,
-    which is how the Jinja chat templates of the local routes render it. Not
-    litellm.token_counter: against llama-server's own prompt_tokens on Qwen3.5-9B
-    (2026-10-07) it was 23% short on the seed and 9 to 12% short on the largest
-    sessions, against 2% and 4 to 8% here (ADR-0073), and importing litellm to
-    count cost the GUI 161 MB at startup. A sum, so parts add up to the total.
-    """
-    # Counted on the WIRE form: the kept thinking trace would otherwise show up
-    # in the meter as context the provider is charged for, when `to_wire` drops
-    # it before the request.
-    from silica.model.limits import ROUGH_CHARS_PER_TOKEN
-    from silica.model.wire import text_of, to_wire
-
-    messages = [to_wire(m) for m in messages]
-    try:
-        enc = _cl100k()
-
-        def n(text: str) -> int:
-            # disallowed_special=(): a note that quotes "<|endoftext|>" is text to
-            # count, and tiktoken's default raises on it, which sent the whole
-            # window to the fallback below.
-            return len(enc.encode(text, disallowed_special=()))
-
-        total = sum(
-            n(text_of(m.get("content"))
-              + (json.dumps(m["tool_calls"]) if m.get("tool_calls") else ""))
-            + _TOKENS_PER_MESSAGE
-            for m in messages
-        )
-        return total + (n(json.dumps(tools)) if tools else 0)
-    except Exception:
-        # No encoding (a broken tiktoken install): a rough meter beats none.
-        return sum(len(text_of(m.get("content"))) for m in messages) // ROUGH_CHARS_PER_TOKEN
-
-
-def _chat_tool_schemas(messages: list[dict]) -> list[dict]:
-    """The tool block every interactive turn ships alongside the history.
-
-    Counted because it is *sent*: 51 schemas measured 7.2k tokens on 2026-09-02
-    against 2.1k of seed messages, so a meter that totalled the messages alone
-    read 2.1k while the provider billed 12.7k for the same turn — the ring was
-    reporting a sixth of the window it was there to guard. `chat_tools` is the
-    same selector the REPL and the GUI hand to AgentConstraints; a batch run
-    (nucleate, injector) ships a different set, but the meter is a chat surface
-    and never shows one.
-    """
-    from silica.agent.constraints import chat_deferred, chat_tools
-    from silica.tools import TOOLS
-
-    names = chat_tools(messages)
-    # the reach the loop cuts a schema's pointers by, or the meter counts text never sent
-    reach = {*names, *chat_deferred(messages)}
-    return [TOOLS[n].json_schema(reach) for n in names if n in TOOLS]
-
-
-def _update_context_tokens(messages: list[dict]) -> None:
-    CONFIG.context_tokens = _count_context_tokens(messages, _chat_tool_schemas(messages))
-
-
-# What put a message in the window. `tool_io` takes the assistant turns that
-# carry tool_calls as well as the results: the arguments are what the model paid
-# to emit, and an assistant message holding a call carries no prose worth billing
-# to the conversation.
-def _context_group(m: dict) -> str:
-    role = m.get("role")
-    if role == "system":
-        return "system"
-    if role == "tool" or (role == "assistant" and m.get("tool_calls")):
-        return "tool_io"
-    return "messages"
-
-
-def _context_breakdown(messages: list[dict]) -> dict[str, int]:
-    """The same window `_count_context_tokens` totals, split by what filled it.
-
-    The counter is a sum over messages plus the tool block, so the parts add up
-    to the total beside them by construction. The tool block is its own part
-    rather than folded into the system prompt: it is the single biggest resident
-    of an idle window (7.2k against 2.1k of instructions), and a part that large
-    hidden inside another is the reading the panel exists to prevent.
-    """
-    groups: dict[str, list[dict]] = {"system": [], "tool_io": [], "messages": []}
-    for m in messages:
-        groups[_context_group(m)].append(m)
-    counts = {k: (_count_context_tokens(v) if v else 0) for k, v in groups.items()}
-    schemas = _chat_tool_schemas(messages)
-    counts["tool_specs"] = _count_context_tokens([], schemas) if schemas else 0
-    return counts
 
 
 class _TurnInterrupt:
@@ -220,180 +100,6 @@ def _print_turn_notes(notes: list[dict]) -> None:
     for note in notes:
         CONSOLE.print(f"  [dim]{escape(note['text'])}[/]")
     CONSOLE.print()
-
-
-def _compact_context(messages: list[dict], collapsed: set[int]) -> set[int]:
-    """Collapse old read-tool results once the context meter crosses the budget.
-
-    The between-turns sweep; the agent loop runs the same pass per iteration
-    (see run_agent). Runs after _update_context_tokens (which feeds
-    prompt_tokens); when anything collapsed, recounts so the toolbar meter
-    reflects the slimmer history. Loss is recoverable: each stub names the call
-    to re-issue.
-    """
-    from silica.agent.compaction import (
-        COMPACT_FLOOR_TURNS,
-        COMPACT_FRACTION,
-        compact_read_history,
-    )
-    from silica.tools import TOOLS
-
-    updated = compact_read_history(
-        messages,
-        collapsed,
-        prompt_tokens=CONFIG.context_tokens,
-        budget=int(COMPACT_FRACTION * CONFIG.max_context_tokens),
-        floor_turns=COMPACT_FLOOR_TURNS,
-        tools=TOOLS,
-    )
-    if updated != collapsed:
-        _update_context_tokens(messages)
-    return updated
-
-
-def _inject_vault_map(messages: list[dict]) -> None:
-    """Appends the vault map as a system message (best-effort).
-
-    CoALA recall: loads the corpus self-model into working memory at session
-    start so the agent doesn't rediscover the vault via tools. The map is a
-    startup snapshot; this session's writes already live in working memory.
-    # recomputed once per session; no storage/refresh.
-    """
-    try:
-        from silica.kernel.report.vault_map import build_vault_map
-
-        vault_map = build_vault_map()
-        if vault_map:
-            messages.append({"role": "system", "content": vault_map})
-    except Exception as exc:
-        logger.debug("vault map injection skipped: %s", exc)
-
-
-def _today_line() -> str:
-    """Today's date, which the model cannot get from anywhere else in the seed.
-
-    `silica_event_create` takes an absolute 'YYYY-MM-DD HH:MM' and `silica_agenda`
-    only 'today' or an ISO date, so resolving "next Wednesday" is the model's job
-    — and without this it resolves it against its training cutoff. The one other
-    date in the context is incidental: the run-log tail inside the vault map,
-    which is the *last run's* day and is a best-effort block that can be absent.
-
-    Session-scoped, like the rest of the seed: a session that spans midnight
-    keeps the day it started on. Per-turn re-stamping was declined 2026-08-19.
-    """
-    import datetime as _dt
-
-    today = _dt.date.today()
-    return (
-        f"Today is {today:%A, %d %B %Y} ({today.isoformat()}). Resolve relative "
-        f'dates ("tomorrow", "next Wednesday") against it, never against anything '
-        f"you remember."
-    )
-
-
-def _vault_scope() -> str:
-    """One line naming the two paths the agent must not confuse.
-
-    Reads span the whole vault; new notes are confined to `write_dir`. Without
-    this the model reads "vault" as the folder it writes in and reports an empty
-    vault while sitting on a repo full of Markdown.
-    """
-    from silica.kernel.base.manifest import active_write_dir
-    from silica.kernel.base.manifest import SAFE_WRITE_DIR
-
-    vault = CONFIG.vault_path
-    write_dir = active_write_dir()
-    if not write_dir:
-        return f"Vault: {vault} — you read and write notes anywhere under it."
-    scope = (
-        f"Vault: {vault} — you read everything under it, including files that "
-        f"are not yours (a repo's own README, docs, specs). New notes go under "
-        f"{write_dir}/, the only place you may write; that folder being empty "
-        f"does not mean the vault is empty."
-    )
-    if write_dir != SAFE_WRITE_DIR:
-        return scope
-    # The mirror only earns its merge-by-paste if the model replicates the tree
-    # it can already see in the vault map, so the instruction ships with it.
-    return scope + (
-        f" {write_dir}/ is a staging mirror of the vault's own tree: a note that "
-        f"belongs in Projects/ goes to {write_dir}/Projects/, so the user merges "
-        f"by pasting the folder's contents over the vault. Reuse the folders the "
-        f"vault already has. A folder it does not have yet is rejected unless the "
-        f"op carries a \"reason\" stating why no existing folder fits."
-    )
-
-
-def seed_messages(math: bool = False, app: bool = False) -> list[dict]:
-    """The system context a fresh conversation starts from: prompt, date, vault
-    scope, vault map, and the restated language rule (`_reply_language`).
-
-    Shared by the TUI and the GUI (`ui/web/server._build_seed`, which passes
-    math=True for the MathML renderer and app=True for the help panel the chat
-    answers from, ADR-0115). It used to be TUI-only, and the GUI's
-    own seed had drifted to prompt + map: no `_vault_scope`, so the model was
-    blind to `write_dir`, and no closing language line, which is the fix commit
-    93b6d2d shipped here and never carried across. One builder, no drift.
-    """
-    reply = _reply_language()
-    messages: list[dict] = [{"role": "system", "content": system_prompt(reply, math=math)}]
-    messages.append({"role": "system", "content": _today_line()})
-    messages.append({"role": "system", "content": _vault_scope()})
-    if app:
-        # Before the map, which is the seed's bulk. On 2026-10-16 the seed with
-        # it answered 13 to 15 of 14 to 15 how-to questions a run, against 4 to 5
-        # without (docs evaluation/app-knowledge-2026-10-16).
-        from silica.ui.web.app_help import app_message
-        messages.append({"role": "system", "content": app_message()})
-    _inject_vault_map(messages)
-    # User memory (ADR-0076), frozen for the session: a save lands on disk and
-    # in its tool result and shows here from the next session, so the model's
-    # picture of the user does not move under it mid-conversation. After the
-    # map and before the language line, which must stay last.
-    from silica.kernel import user_memory
-
-    if (memory := user_memory.snapshot_message()) is not None:
-        messages.append(memory)
-    # The vault's author's standing instructions (ADR-0127 point 4), frozen
-    # for the session as memory is, in the same place for the same reason.
-    from silica.kernel import vault_instructions
-
-    if (told := vault_instructions.message(CONFIG.vault_path or None)) is not None:
-        messages.append(told)
-    # The vault map is the vault's own language. On a vault whose notes are not
-    # in `reply`, that bulk drowns the language rule sitting in message 0, and
-    # the model answers in the notes' language. Restate it last, closest to the
-    # user turn.
-    messages.append({"role": "system", "content": _lang_rule(reply)})
-    return messages
-
-
-def _reply_language() -> str:
-    """The chat language the vault declares, "" when it declares none.
-
-    Not the language its notes are detected in, which this also returned until
-    2026-10-16: that set "Reply in italian by default" on every undeclared
-    Italian vault, and 10 of 12 Chinese questions got an Italian answer. A slash
-    command, which has no language of its own, is the follow rule's to place.
-    """
-    if not CONFIG.vault_path:
-        return ""
-    from silica.kernel.base.manifest import load_manifest
-
-    conv = load_manifest(CONFIG.vault_path).conventions
-    return conv.reply_language or conv.language or ""
-
-
-def _fresh_messages() -> list[dict]:
-    """`seed_messages` plus the live context meter — session start and /clear.
-
-    The meter update is what the GUI must NOT do off the request path (it would
-    clobber the meter of the conversation in progress), so it lives here rather
-    than in the shared builder.
-    """
-    messages = seed_messages()
-    _update_context_tokens(messages)
-    return messages
 
 
 def _setup_logging(debug: bool = False) -> None:
@@ -529,118 +235,6 @@ def _attach_file_log() -> None:
     root.setLevel(logging.DEBUG)
 
 
-class VaultTarget(NamedTuple):
-    """Outcome of resolving a runtime ``/vault <arg>`` switch.
-
-    ``vault`` is the absolute path to adopt, ``created`` True when the directory
-    does not exist yet and the caller must mkdir it. ``error`` is set (and the
-    other fields meaningless) only when the path cannot be a vault at all.
-    """
-    vault: str
-    created: bool
-    error: str | None = None
-
-
-def resolve_vault_switch(arg: str) -> VaultTarget:
-    """Resolve a ``/vault <arg>`` (or explicit ``SILICA_VAULT``) target.
-
-    The path is adopted **as-is**, always: the vault is the folder the user
-    named, never a subfolder Silica invents or remembers. Whether notes may be
-    written into that root or into a subtree is a separate axis, declared
-    per-vault as `write_dir` in ``vault.yaml`` (see `onboarding.adopt`).
-
-    So a vault created before that split reads its whole repo again on the next
-    launch, while its notes stay in the ``docs/silica`` its manifest now names.
-    Read-only I/O.
-    """
-    from pathlib import Path
-
-    target = Path(arg).expanduser().resolve()
-    if target.exists() and not target.is_dir():
-        return VaultTarget("", False, f"not a directory: {target}")
-    return VaultTarget(str(target), not target.is_dir())
-
-
-class VaultSwitch(NamedTuple):
-    """What a completed ``switch_vault`` did, for whoever has to report it.
-
-    ``error`` set means nothing happened at all. Everything else is a thing the
-    caller may want to say out loud: ``created`` the directory did not exist,
-    ``write_dir`` this call declared one in vault.yaml, ``invalid_write_dir``
-    the manifest declares one Silica cannot resolve (every write will be
-    rejected), ``repo_warning`` the vault⊂repo invariant is violated,
-    ``language_drift`` the co-occurrence store is frozen in another language.
-    """
-    vault: str
-    error: str | None = None
-    created: bool = False
-    write_dir: str | None = None
-    seeded_ignore: bool = False
-    invalid_write_dir: bool = False
-    repo_warning: str = ""
-    language: str = ""
-    store_language: str = ""
-    language_drift: bool = False
-
-
-def switch_vault(arg: str) -> VaultSwitch:
-    """Point the running process at another vault — the whole sequence.
-
-    Not an assignment: a live process holds a driver, an overlay cache, a
-    manifest and vault-scoped index caches, and every one of them still answers
-    for the old folder until it is reset. Skipping any single step leaves reads
-    and writes disagreeing about which vault they are in.
-
-    Prints nothing, so the REPL and the web settings panel can share it: the
-    caller renders the returned record. Never raises for a bad path — that is
-    ``error``.
-    """
-    from pathlib import Path
-
-    from silica.driver import reset_driver
-    from silica.kernel.base.roots import repo_root_warning
-    from silica.kernel.recall.relatedness import reset_vault_caches
-    from silica.kernel.text.overlay import reset_overlay_cache
-    from silica.kernel.base.manifest import (
-        apply_manifest_to_config,
-        get_active_manifest,
-        reset_manifest_cache,
-    )
-    from silica.onboarding.adopt import declare_write_dir, seed_silicaignore
-    from silica.kernel.vault_language import language_status
-
-    target = resolve_vault_switch(arg)
-    if target.error:
-        return VaultSwitch("", error=target.error)
-    resolved = target.vault
-    if target.created:
-        Path(resolved).mkdir(parents=True, exist_ok=True)
-    declared = declare_write_dir(resolved)
-    seeded = seed_silicaignore(resolved)
-    CONFIG.vault_path = resolved
-    reset_driver()
-    reset_overlay_cache()  # overlay is vault-scoped; don't serve the old vault's
-    reset_manifest_cache()  # manifest is vault-scoped too
-    apply_manifest_to_config()
-    # Vault-scoped store caches are path-keyed (harmless on lookup) but retain
-    # the old vault's index/vectors for the process lifetime.
-    reset_vault_caches()
-    lang, store_lang, drift = language_status(resolved)
-    return VaultSwitch(
-        vault=resolved,
-        created=target.created,
-        write_dir=declared,
-        seeded_ignore=bool(seeded),
-        # Declared but unresolvable (absolute/traversal). Refusing here is the
-        # whole point of not degrading it to "" in the parser.
-        invalid_write_dir=get_active_manifest().write_dir is None,
-        repo_warning=repo_root_warning(resolved) or "",
-        language=lang or "",
-        store_language=store_lang or "",
-        language_drift=bool(drift),
-    )
-
-
 def default_user_vault(home=None):
     """Stable per-user vault used when no explicit SILICA_VAULT and no repo
     mode applies. Sits alongside ~/.silica/{ledger,undo_journal,checkpoints}.db.
@@ -698,58 +292,6 @@ def _announce_code_lane() -> None:
     warn = repo_root_warning(CONFIG.vault_path)
     if warn:
         CONSOLE.print(f"  [yellow]⚠ {warn}[/]")
-
-
-def _direct_args(raw: str) -> list[str]:
-    """A direct command's words, a double-quoted run being one word, so
-    `/check "Drafts/Opinion on limitation"` names the note and not a note
-    called `"Drafts/Opinion`. Not shlex's default: an apostrophe is a letter in
-    prose (`/find l'entropia`), `#` starts a tag and not a comment, and a
-    backslash is a Windows path's. An unbalanced quote leaves the words as
-    typed, as every direct command read them before quotes were honoured."""
-    lex = shlex.shlex(raw, posix=True)
-    lex.whitespace_split, lex.quotes, lex.escape, lex.commenters = True, '"', "", ""
-    try:
-        return list(lex)
-    except ValueError:
-        return raw.split()
-
-
-def _unquoted(text: str) -> str:
-    """The path a command takes whole (`/undo`, `/delete`, `/trash restore`)
-    without one pair of quotes around it: those read the raw line, since a
-    note's name has spaces, and a quoted name was looked up with its quotes."""
-    text = text.strip()
-    return text[1:-1].strip() if len(text) > 1 and text[0] == text[-1] and text[0] in "\"'" else text
-
-
-def _positional(args: list[str]) -> list[str]:
-    """The tokens that are not flags — anything not starting with `-`.
-
-    Slash commands take their subject positionally and their options as
-    `--key=value`, so this and `_str_flag` are the whole parser. argparse would
-    own sys.argv and exit the REPL on a typo; these two never do.
-    """
-    return [a for a in args if not a.startswith("-")]
-
-
-def _str_flag(args: list[str], flag: str, default: str = "") -> str:
-    """`--flag=value` out of args, or `default` when it is absent.
-
-    `flag` is given without the `=` ("--target"); an empty `--target=` yields ""
-    and is therefore indistinguishable from absent, which every caller wants.
-    """
-    prefix = flag + "="
-    return next((a[len(prefix):] for a in args if a.startswith(prefix)), default)
-
-
-def _int_flag(args: list[str], flag: str, default: int) -> int:
-    """`--flag=N` out of args; keeps the default when absent or not a number."""
-    raw = next((a[len(flag):] for a in args if a.startswith(flag)), None)
-    try:
-        return int(raw)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
 
 
 # The three index refreshes differ only in tool and result label.
@@ -933,7 +475,7 @@ def _dc_refresh(args: list[str], cmd: str) -> bool:
 def _dc_wiki(args: list[str], **_) -> bool:
     """/wiki [folder] — prose pass over the staged code notes."""
     args = args
-    folder = next(iter(_positional(args)), "") or None
+    folder = next(iter(positional(args)), "") or None
     overview_only = "--overview-only" in args
     force = "--force" in args
     from silica.capabilities.codewiki import run_wiki
@@ -963,11 +505,11 @@ def _dc_graph(args: list[str], **_) -> bool:
 
     output_path = "graph.html"
     folder = ""
-    positional = _positional(args)
-    if positional:
-        output_path = positional[0]
-    if len(positional) > 1:
-        folder = positional[1]
+    named = positional(args)
+    if named:
+        output_path = named[0]
+    if len(named) > 1:
+        folder = named[1]
     # The user's own command keeps any path; the model's tool is the one held
     # to the vault.
     result = graph_export(output_path=output_path, folder=folder)
@@ -980,8 +522,7 @@ def _dc_map(args: list[str], **_) -> bool:
     from silica.tools import TOOLS
 
     force = "--force" in args
-    positional = _positional(args)
-    note = " ".join(positional).strip()
+    note = " ".join(positional(args)).strip()
     if not note:
         CONSOLE.print("  Usage: /map <note> [--force]")
         return True
@@ -1009,11 +550,11 @@ def _dc_find(args: list[str], *, raw_input: str = "", **_) -> bool:
     """/find <query> [--k=N] [--min-trust=T] [--lifecycle=L] — semantic search,
     printed in the terminal. The two epistemic flags (spec M2) filter AFTER the
     search, so the printed count says what they cost."""
-    k = _int_flag(args, "--k=", 5)
-    min_trust = _str_flag(args, "--min-trust").strip().lower()
-    life = _str_flag(args, "--lifecycle").strip().lower()
+    k = int_flag(args, "--k=", 5)
+    min_trust = str_flag(args, "--min-trust").strip().lower()
+    life = str_flag(args, "--lifecycle").strip().lower()
     # original case preserved — raw_input, not the lowered cmd
-    query = " ".join(_positional(args))
+    query = " ".join(positional(args))
     if not query:
         CONSOLE.print("  Usage: /find <query> [--k=N] [--min-trust=human|grounded|distilled|kept] "
                       "[--lifecycle=active|review|contested|superseded]")
@@ -1076,7 +617,7 @@ def _epistemic_filter(results: list[dict], min_trust: str, life: str) -> tuple[l
 
 def _quoted_flag(args: list[str], flag: str) -> tuple[str | None, list[str]]:
     """(`--flag value` or `--flag "two words"`, the args without it). A
-    double-quoted name arrives whole (`_direct_args`); a single-quoted one
+    double-quoted name arrives whole (`direct_args`); a single-quoted one
     still arrives in pieces and is joined back here; None when the flag is
     absent, "" when it has no value."""
     for i, a in enumerate(args):
@@ -1110,7 +651,7 @@ def _dc_verify(args: list[str], **_) -> bool:
     # --as "<name>" signs with that name. A stamp never reads or writes a
     # /check's state, nor a check the stamp (ADR-0110 point 1).
     signer, rest = _quoted_flag(args, "--as")
-    name = " ".join(_positional(rest))
+    name = " ".join(positional(rest))
     if not name or signer == "":
         CONSOLE.print('  Usage: /verify <note> [--clear] [--as "<name>"]')
         return True
@@ -1156,7 +697,7 @@ def _dc_check(args: list[str], **_) -> bool:
     from silica.kernel.check import run as check
     from silica.kernel.base.manifest import active_write_dir
 
-    name = " ".join(_positional(args))
+    name = " ".join(positional(args))
     if not name:
         CONSOLE.print("  Usage: /check <note>")
         return True
@@ -1167,10 +708,10 @@ def _dc_check(args: list[str], **_) -> bool:
         return True
     path = path if path.endswith(".md") else path + ".md"
     started = time.monotonic()
-    search, dense, floor = _check_legs()
+    search, dense, floor = check_wiring.legs()
     try:
         report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(),
-                                  search=search, dense=dense, dense_floor=floor, judge=_check_judge(cite=False))
+                                  search=search, dense=dense, dense_floor=floor, judge=check_wiring.judge(cite=False))
     except Exception as e:
         metrics.emit("check", outcome=metrics.outcome_of(e), ms=metrics.ms_since(started))
         CONSOLE.print(f"  [yellow]The check failed: {e}[/]")
@@ -1180,63 +721,6 @@ def _dc_check(args: list[str], **_) -> bool:
                  error=c["error"], warning=c["warning"], nit=c["nit"])
     CONSOLE.print(check.render(report), markup=False, highlight=False)
     return True
-
-
-def _check_judge(cite: bool = True):
-    """Jev decides a block's verdict; the chat model answers only when Jev
-    answers nothing (ADR-0110 point 7, the owner's decision of 2026-10-24)."""
-    from silica.model.decide import decide
-    from silica.model.providers import get_provider
-    from silica.config import CONFIG
-    from silica.kernel.check import judge as jd
-
-    def chat(prompt: str) -> str:
-        # reasoning off: a thinking pass spends the budget before the JSON
-        # (llm.py, the 9B's empty answers of 2026-10-15).
-        resp = get_provider(CONFIG).call_llm(messages=[{"role": "user", "content": prompt}],
-                                             max_tokens=300, temperature=0.0, reasoning=False)
-        return resp.text or ""
-
-    return lambda text, passages: jd.judge(text, passages, decide=decide, chat=chat, cite=cite)
-
-
-def _check_web_legs():
-    """What a selection's web check reads with (ADR-0110, amendment of
-    2026-11-06): the lanes and fetch_page, neither of which touches a chat
-    turn's web state."""
-    from silica.sources.web_fetch import fetch_page
-    from silica.sources.web_research import search_lanes
-
-    return search_lanes, fetch_page
-
-
-def _check_legs():
-    """The passage search and the dense leg a /check reads with. The dense leg
-    is the vault's own embed index; a vault without one, an embedder that is
-    down, or an embedder with no measured floor gives None, and absence then
-    waits for the model rather than be decided on words alone (ADR-0110
-    point 6: an Italian block over English sources)."""
-    from silica.config import CONFIG
-    from silica.kernel.check import run as check
-    from silica.kernel.recall.engine import engine
-
-    def search(query: str, k: int) -> list[dict]:
-        r = engine().search(query, folder="", k=k)
-        return r.get("hits") or []
-
-    floor = check.dense_floor(str(CONFIG.embedding_model or ""))
-    if floor is None:
-        return search, None, None
-    try:
-        from silica.model.providers import get_embedder
-        from silica.kernel.check.dense import leg
-
-        dense = leg(get_embedder(CONFIG))
-    except Exception:
-        return search, None, None  # no embedder configured: the dense leg is simply absent
-    if dense is None:
-        return search, None, None
-    return search, dense, floor
 
 
 def _epistemic_lanes(vault: str) -> tuple[list[tuple[str, str]], list[str]]:
@@ -1460,7 +944,7 @@ def _dc_path(args: list[str], *, raw_input: str = "", **_) -> bool:
     except ValueError:
         CONSOLE.print('  Unbalanced quotes. Usage: /path "<note A>" "<note B>"')
         return True
-    endpoints = _positional(toks)
+    endpoints = positional(toks)
     if len(endpoints) != 2:
         CONSOLE.print("  Usage: /path <noteA> <noteB>")
         return True
@@ -1579,7 +1063,7 @@ def _dc_episodes(args: list[str], *, raw_input: str = "", **_) -> bool:
         save_args = shlex.split(raw_input.strip())[1:]
     except ValueError:
         save_args = args
-    save = _str_flag(save_args, "--save")
+    save = str_flag(save_args, "--save")
     if save:
         from pathlib import Path
 
@@ -1676,7 +1160,7 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
     deleted = moved = None
     note_path: str | None
     if len(rest) > 1:
-        note_path = _unquoted(rest[1])
+        note_path = unquoted(rest[1])
         if store.depth(note_path) == 0:
             # The write card sends the tool's own argument, often a bare name,
             # while the store keys a patch on the path it resolved to: unresolved,
@@ -1802,7 +1286,7 @@ def _dc_delete(args: list[str], *, raw_input: str = "", **_) -> bool:
     # Everything after the command is the path, as for /undo: note names
     # with spaces are the common case.
     rest = raw_input.strip().split(maxsplit=1)
-    ref = _unquoted(rest[1]) if len(rest) > 1 else ""
+    ref = unquoted(rest[1]) if len(rest) > 1 else ""
     if not ref:
         CONSOLE.print("  Usage: /delete <path>  [dim](the note to delete; /undo brings it back)[/]")
         return True
@@ -1873,10 +1357,10 @@ def _dc_trash(args: list[str], *, raw_input: str = "", **_) -> bool:
         return True
     # Everything after the verb is the path, as for /undo. A path deleted
     # twice is two items; the newest delete is the one meant.
-    want = note_key(_unquoted(rest[2]))
+    want = note_key(unquoted(rest[2]))
     item = next((t for t in items if note_key(t["path"]) == want), None)
     if item is None:
-        CONSOLE.print(f"  [yellow]Not in the trash:[/] {escape(_unquoted(rest[2]))}", soft_wrap=True)
+        CONSOLE.print(f"  [yellow]Not in the trash:[/] {escape(unquoted(rest[2]))}", soft_wrap=True)
         return True
     if verb == "erase":
         journal.leave_trash(item["run"], item["path"])
@@ -1952,7 +1436,7 @@ def _dc_revert(args: list[str], *, raw_input: str = "", **_) -> bool:
     if source:
         return _revert_by_source(source, vault)
     parts_split = raw_input.strip().split(maxsplit=1)
-    given = _unquoted(parts_split[1]) if len(parts_split) > 1 else ""
+    given = unquoted(parts_split[1]) if len(parts_split) > 1 else ""
     if not given:
         run_id = _latest_revertable(vault)
         if not run_id:
@@ -2091,7 +1575,7 @@ def _dc_review(args: list[str], **_) -> bool:
     by a gate, listed or flushed. Not the study queue: that is /learn."""
     from silica.kernel.write.deferred import get_deferred_store
     store = get_deferred_store()
-    flush_hash = _str_flag(args, "--flush")
+    flush_hash = str_flag(args, "--flush")
     if flush_hash:
         removed = store.remove(flush_hash)
         if removed:
@@ -2126,7 +1610,7 @@ def _dc_anneal(args: list[str], **_) -> bool:
     from silica.tools import TOOLS
 
     steer = any(p == "--steer" for p in args)
-    limit = _int_flag(args, "--limit=", 0)
+    limit = int_flag(args, "--limit=", 0)
     scope = f"{limit} bundle(s)" if limit else "every bundle"
     CONSOLE.print(f"  Annealing {scope}{' with escalation' if steer else ''}…")
     res = json.loads(TOOLS["silica_anneal"].run(steer=steer, limit=limit))
@@ -2161,8 +1645,7 @@ def _dc_curate(args: list[str], **_) -> bool:
     from silica.tools import TOOLS
 
     apply = any(p == "--apply" for p in args)
-    positional = _positional(args)
-    folder = " ".join(positional)
+    folder = " ".join(positional(args))
     scope = folder or "(vault)"
     if apply:
         CONSOLE.print(f"  Curate on [bold]{scope}[/] — applying via the worker seam…")
@@ -2204,8 +1687,7 @@ def _dc_aliases(args: list[str], **_) -> bool:
     from silica.tools import TOOLS
 
     apply = any(p == "--apply" for p in args)
-    positional = _positional(args)
-    folder = " ".join(positional)
+    folder = " ".join(positional(args))
     scope = folder or "(vault)"
     mode = "applying" if apply else "dry-run (nothing is written)"
     CONSOLE.print(f"  Alias consolidation on [bold]{scope}[/] — {mode}…")
@@ -2248,13 +1730,6 @@ def _dc_keep(args: list[str], **_) -> bool:
     except Exception as e:  # empty slot, name collision, write refused
         CONSOLE.print(f"  [yellow]keep failed: {escape(str(e))}[/]")
     return True
-
-
-def remember_text(raw_input: str) -> str:
-    """What follows `/remember`, exactly as typed: the entry is the user's own
-    words, so neither case nor inner spacing is touched."""
-    parts = raw_input.strip().split(None, 1)
-    return parts[1].strip() if len(parts) > 1 else ""
 
 
 def _dc_remember(args: list[str], *, raw_input: str = "", **_) -> bool:
@@ -2401,7 +1876,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict], ask=None) -> b
         /trash [restore <path> | erase <path> | empty]
     """
 
-    parts = _direct_args(raw_input.strip())
+    parts = direct_args(raw_input.strip())
     if not parts:
         return False
     cmd = parts[0].lower()
@@ -2528,7 +2003,7 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", ask=None, **_) -> str
     args = ingest.rejoin_spaced_paths(args)
     if not args:
         return ingest.drain_wal(CONSOLE)
-    seen = _str_flag(args, "--seen")  # capture clock: the day the events happened
+    seen = str_flag(args, "--seen")  # capture clock: the day the events happened
     if seen:
         # Trust boundary: this string becomes the valid_from on every claim
         # of the run — a typo'd date would poison note_clock vault-wide.
@@ -2539,13 +2014,13 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", ask=None, **_) -> str
             CONSOLE.print(f"  [yellow]--seen ignored: {seen!r} is not YYYY-MM-DD[/]")
             seen = ""
     return ingest.nucleate(
-        _positional(args),  # preserve original case
-        target_dir=_str_flag(args, "--target"),
-        hub=_str_flag(args, "--hub"),
+        positional(args),  # preserve original case
+        target_dir=str_flag(args, "--target"),
+        hub=str_flag(args, "--hub"),
         seen=seen,
         # Explicit lens override: tops the whole form ladder
         # (docs/specs/nucleation-forms.md), filing included.
-        profile=_str_flag(args, "--profile"),
+        profile=str_flag(args, "--profile"),
         # On by default: the leaf lives in `sources/`, which every index built on
         # the vault listing leaves out (is_source_leaf: embeddings, the graph, the
         # driver's search), while the passage search behind silica_search_context
@@ -2606,8 +2081,8 @@ def _sc_settings(args: list[str], **_) -> str | None:
 def _sc_convert(args: list[str], **_) -> str | None:
     """/convert <file...> [--target=DIR] — document to inbox notes, no distillation."""
     args = ingest.rejoin_spaced_paths(args)
-    files = _positional(args)
-    target_dir = _str_flag(args, "--target")
+    files = positional(args)
+    target_dir = str_flag(args, "--target")
     if not files:
         return "Error: /convert requires at least one file path. Usage: /convert <file...> [--target=DIR]"
     from silica.sources.convert import convert
@@ -2627,8 +2102,8 @@ def _sc_web_search(args: list[str], *, progress=None, **_) -> str | None:
     from rich.markup import escape
 
     from silica.sources.web_research import web_research, _DEFAULT_MAX_SEARCHES
-    max_searches = _int_flag(args, "--max-searches=", _DEFAULT_MAX_SEARCHES)
-    concept = " ".join(_positional(args)).strip()
+    max_searches = int_flag(args, "--max-searches=", _DEFAULT_MAX_SEARCHES)
+    concept = " ".join(positional(args)).strip()
     if not concept:
         return 'Error: /web-search requires a concept. Usage: /web-search "<concept>" [--max-searches=N]'
 
@@ -2686,7 +2161,7 @@ def _sc_fetch(args: list[str], **_) -> str | None:
 def _sc_report(args: list[str], **_) -> str | None:
     """/report [folder] [--top-k=N] [--embeddings] [--cooccurrence] — structural audit."""
     folder = ""
-    top_k = _int_flag(args, "--top-k=", 10)
+    top_k = int_flag(args, "--top-k=", 10)
     with_embeddings = False
     # Off by default like --embeddings: the co-occurrence delta runs a
     # per-note expanded ranking, the report's other expensive pass. Without
@@ -2731,7 +2206,7 @@ def _sc_enrich(args: list[str], **_) -> str | None:
     from silica.driver import DRIVER
     from silica.kernel.base.layout import in_folder
 
-    folder = next(iter(_positional(args)), "")
+    folder = next(iter(positional(args)), "")
 
     # list_files(folder) pre-filters loosely (startswith); in_folder tightens
     # it so /enrich Foo never leaks into a sibling FooBar/ folder.
@@ -2747,7 +2222,7 @@ def _sc_dedup(args: list[str], **_) -> str | None:
     """/dedup [folder] — seed a batch ledger over the near-duplicate pairs found."""
     from silica.tools.runners import _scan_dedup_pairs
 
-    folder = " ".join(_positional(args))
+    folder = " ".join(positional(args))
 
     pairs, err = _scan_dedup_pairs(folder)
     if err:
@@ -2764,9 +2239,9 @@ def _sc_dedup(args: list[str], **_) -> str | None:
 def _sc_organize(args: list[str], **_) -> str | None:
     """/organize [intent] [--scope=DIR] [--file=TAXONOMY] [--apply] [--merge]
     [--move-uncategorized] — agent-directed taxonomy build and move plan."""
-    intent_parts = _positional(args)
-    scope = _str_flag(args, "--scope")
-    taxonomy_file = _str_flag(args, "--file")
+    intent_parts = positional(args)
+    scope = str_flag(args, "--scope")
+    taxonomy_file = str_flag(args, "--file")
     apply_now = "--apply" in args
     merge = "--merge" in args
     move_uncat = "--move-uncategorized" in args
@@ -2843,10 +2318,10 @@ def _sc_flashcards(args: list[str], **_) -> str | None:
     cards for review outside a session, one checked point each."""
     from silica.kernel.learn.artifacts import flashcards
 
-    targets = _positional(args)
+    targets = positional(args)
     if not targets:
         return "Error: /flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]"
-    CONSOLE.print(FlatMarkdown(flashcards(targets, _int_flag(args, "--n=", 12), _str_flag(args, "--save").strip())))
+    CONSOLE.print(FlatMarkdown(flashcards(targets, int_flag(args, "--n=", 12), str_flag(args, "--save").strip())))
     return ""  # fully handled inline: nothing for the agent
 
 
@@ -2855,8 +2330,8 @@ def _sc_slides(args: list[str], **_) -> str | None:
     say, in the Markdown Obsidian's Slides plugin presents."""
     from silica.kernel.learn.artifacts import study_points
 
-    save = _str_flag(args, "--save").strip()
-    targets = _positional(args)
+    save = str_flag(args, "--save").strip()
+    targets = positional(args)
     if not targets:
         return "Error: /slides needs a note or a folder. Usage: /slides <note|folder> [--save=<path>]"
     titles, points = study_points(targets)
@@ -2884,11 +2359,11 @@ def _sc_slides(args: list[str], **_) -> str | None:
 def _sc_quiz(args: list[str], **_) -> str | None:
     """/quiz [note|folder] [--n=10] [--focus="passage"]: an agent-directed
     active-recall round; --focus narrows it to one passage of the note."""
-    focus = _str_flag(args, "--focus").strip()
+    focus = str_flag(args, "--focus").strip()
     # A passage holds a few testable claims, not ten: ten questions on one
     # paragraph would be asked by rewording the same sentence.
-    n = _int_flag(args, "--n=", 3 if focus else 10)
-    targets = _positional(args)
+    n = int_flag(args, "--n=", 3 if focus else 10)
+    targets = positional(args)
     if targets and focus:
         # The drawer's selection bar (ADR-0059): the round stays a round on the
         # NOTE, so the ledger lines still carry its path, only the questions
@@ -3064,7 +2539,7 @@ def _learn_teach_prompt(note: str) -> str:
 def _sc_learn(args: list[str], **_) -> str | None:
     """/learn v2 (learn-suite D20): a session, a plan to continue, a plan to
     write, a teach-back, or the readings. One door, no new command name."""
-    n = _int_flag(args, "--n=", 8)
+    n = int_flag(args, "--n=", 8)
     status = _kv_flag(args, "--status")
     if status is not None:
         from silica.kernel.learn import mastery
@@ -3077,8 +2552,8 @@ def _sc_learn(args: list[str], **_) -> str | None:
             return "Error: /memorize --teach requires a note. Usage: /memorize --teach <note>"
         return _learn_teach_prompt(teach)
     plan = _kv_flag(args, "--plan")
-    scope = _str_flag(args, "--scope")
-    steps = _str_flag(args, "--steps")
+    scope = str_flag(args, "--scope")
+    steps = str_flag(args, "--steps")
     if plan is not None:
         if not plan:
             return "Error: /memorize --plan requires a name. Usage: /memorize --plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]"
@@ -3091,7 +2566,7 @@ def _sc_learn(args: list[str], **_) -> str | None:
         if "," in scope or (not scope.endswith("/") and scope.endswith(".md")):
             return _learn_plan_prompt(plan, "notes", scope)
         return _learn_plan_prompt(plan, "folder", scope)
-    targets = [a for a in _positional(args) if not a.startswith("--")]
+    targets = [a for a in positional(args) if not a.startswith("--")]
     if not targets:
         return _learn_session_prompt(n)
     target = " ".join(targets)
@@ -3131,7 +2606,7 @@ def _sc_remember(args: list[str], **_) -> str | None:
 # `/word` with no row here is tried as a skill (ADR-0063), and failing that it
 # goes to the agent as prose.
 _SHORTCUTS: dict[str, Callable[..., str | None]] = {
-    "/promote": lambda args, **_: ingest.promote(_positional(args), CONSOLE),
+    "/promote": lambda args, **_: ingest.promote(positional(args), CONSOLE),
     "/nucleate": _sc_nucleate,
     "/settings": _sc_settings,
     "/convert": _sc_convert,
@@ -3273,7 +2748,7 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
             _narr.NARRATOR.ensure_session(driver="tui")
             for m in replayed:
                 _narr.NARRATOR.turn(m)
-        messages[:] = _fresh_messages() + replayed
+        messages[:] = seed.fresh_messages() + replayed
         # The persona its last turn wore (ADR-0127 point 3), as the GUI's
         # /session/load puts it back.
         from silica.kernel import personas
@@ -3281,7 +2756,7 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
         last: dict = next((m for m in reversed(replayed) if m.get("role") == "user"), {})
         if (worn := personas.available(CONFIG.vault_path or None).get(str(last.get(personas.TURN_KEY) or ""))):
             personas.apply(messages, worn)
-        _update_context_tokens(messages)
+        meter.update_context_tokens(messages)
         CONSOLE.print(f"  resumed [bold]{(row or {}).get('title', sid)}[/] "
                       f"({len(replayed)} message(s))")
         return True
@@ -3391,30 +2866,6 @@ def _autolaunch_wizard_if_unconfigured() -> None:
     os.execve(sys.executable, [sys.executable, *sys.argv], os.environ)
 
 
-def _resolve_context_budget() -> None:
-    """Size the REPL context meter to the live model's window.
-
-    SILICA_MAX_CONTEXT, when set, is the window on every provider. Locally it
-    stands in for a served window silica can't reliably introspect (LM Studio,
-    Ollama). On OpenRouter it is a price decision, a laptop's as much as the
-    host's: a 32k cap cost 62% less a chat than the 1M window at equal answers
-    (docs/evaluation/context-cap-2026-10-13.md). Until 2026-10-27 a laptop's
-    pin was ignored on OpenRouter, so a 65536 in ~/.silica/.env ran DeepSeek
-    at 1M. Falls back to the static default when the provider is unreachable.
-    """
-    if not _model_configured():
-        return
-    pinned = bool(env_raw("SILICA_MAX_CONTEXT"))
-    if pinned and CONFIG.provider != "openrouter":
-        return
-    from silica.model.limits import model_limits
-    window, _ = model_limits(CONFIG.provider, CONFIG.model)
-    if window:
-        # OpenRouter's window is the one it serves, so a pin left from a larger
-        # model is cut to it instead of sending prompts the provider refuses.
-        CONFIG.max_context_tokens = min(window, CONFIG.max_context_tokens) if pinned else window
-
-
 def _ensure_servers() -> None:
     """Start the local model servers named in the env. No-op when none are."""
     from silica.onboarding.serve import ensure_local_servers
@@ -3517,7 +2968,7 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         # drains them.
         _activate_repo_mode()
         import silica.capture as capture_mod
-        target = next(iter(_positional(args[1:])), "")
+        target = next(iter(positional(args[1:])), "")
         vault = CONFIG.vault_path.strip()
         if not target or not vault:
             CONSOLE.print(
@@ -3578,7 +3029,7 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         _announce_code_lane()
         from silica.kernel.base.manifest import apply_manifest_to_config
         apply_manifest_to_config()
-        _resolve_context_budget()
+        meter.resolve_context_budget()
         _setup_logging(debug="--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging)
         _ensure_servers()
         import silica.ui.connect as connect_mod
@@ -3662,7 +3113,7 @@ def main():
     _announce_code_lane()
     from silica.kernel.base.manifest import apply_manifest_to_config
     apply_manifest_to_config()
-    _resolve_context_budget()
+    meter.resolve_context_budget()
     debug_mode = "--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging
     _setup_logging(debug=debug_mode)
     _ensure_servers()
@@ -3727,7 +3178,7 @@ def main():
     # for capture too, so one toggle covers both. A session starts on the record.
     from silica.kernel import user_memory
     user_memory.set_incognito(False)
-    messages = _fresh_messages()
+    messages = seed.fresh_messages()
     collapsed: set[int] = set()  # message indices already elided by compaction
     # Number tokens of every result this session read, raw (ADR-0095): compaction
     # and a relevance verdict stub the tool messages, and must not decide what grounds.
@@ -3830,7 +3281,7 @@ def main():
                                     event="session_clear")
                 CONSOLE.clear()
                 print_home()
-                messages[:] = _fresh_messages()
+                messages[:] = seed.fresh_messages()
                 collapsed = set()  # indices reset with the history
                 seen_numbers = set()
                 from silica.obs import narration as _narr
@@ -3953,8 +3404,8 @@ def main():
             _print_turn_notes(notes)
             # run_agent already appended the final assistant message to the
             # history — re-appending `answer` here would store it twice.
-            _update_context_tokens(messages)
-            collapsed = _compact_context(messages, collapsed)
+            meter.update_context_tokens(messages)
+            collapsed = meter.compact_context(messages, collapsed)
         except KeyboardInterrupt:
             callback.close()
             from silica.obs import narration as _narr

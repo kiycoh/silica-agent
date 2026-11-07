@@ -30,7 +30,7 @@ def _warn_once(kind: str, msg: str, *args) -> None:
     """Report a degraded map once per kind, then at DEBUG.
 
     Every block below fails open by design, and the whole builder returns None
-    on failure — which `_inject_vault_map` cannot distinguish from an empty
+    on failure — which `inject_vault_map` cannot distinguish from an empty
     vault, so it injects nothing and the session silently starts without its
     self-model. This is the one line that says so. Once per kind and not per
     call because the GUI rebuilds the map every turn.

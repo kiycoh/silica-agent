@@ -159,7 +159,7 @@ async def confirm_setting(payload: dict):
 
 
 def _apply_vault_switch(path: str) -> dict:
-    from silica.cli import switch_vault
+    from silica.onboarding.adopt import switch_vault
     from silica.ui.web import settings as st
 
     switched = switch_vault(path)

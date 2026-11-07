@@ -118,7 +118,7 @@ def one(opts: argparse.Namespace) -> None:
     from silica.agent import loop
     from silica.obs import narration as narr
     from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
-    from silica.cli import seed_messages
+    from silica.session.seed import seed_messages
     from silica.config import CONFIG
 
     if opts.fit_narrows:

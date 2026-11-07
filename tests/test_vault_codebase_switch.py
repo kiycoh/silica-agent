@@ -7,7 +7,8 @@ source tree, in place for prose). Pre-`write_dir` layouts still resolve to
 import subprocess
 
 import silica.driver as driver_pkg
-from silica.cli import resolve_vault_switch, _handle_direct_shortcut
+from silica.cli import _handle_direct_shortcut
+from silica.onboarding.adopt import resolve_vault_switch
 from silica.config import CONFIG
 
 

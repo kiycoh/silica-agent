@@ -204,7 +204,7 @@ def _repl(inputs, turns, monkeypatch):
          patch("silica.cli.CONSOLE"), \
          patch("silica.cli.print_home"), \
          patch("silica.cli._setup_logging"), \
-         patch("silica.cli._update_context_tokens"), \
+         patch("silica.session.meter.update_context_tokens"), \
          patch("silica.cli._ensure_servers"), \
          patch("silica.cli._announce_code_lane"), \
          patch("silica.cli._activate_repo_mode"), \

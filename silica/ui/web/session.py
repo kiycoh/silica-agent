@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from silica.config import CONFIG
+from silica.session import meter
 
 logger = logging.getLogger(__name__)
 
@@ -155,17 +156,18 @@ def build_seed() -> tuple[list[dict], int]:
     """Compute the fresh-session seed. Never touches the live session state:
     uses the pure token counter so a background rebuild can't clobber the
     context meter of the conversation in progress."""
-    from silica.cli import _chat_tool_schemas, _count_context_tokens, seed_messages
+    from silica.session import seed
+    from silica.ui.web.app_help import app_message
 
     vault = CONFIG.vault_path  # before the build: a switch during it must not label the old map as the new vault's
 
     # The same builder the TUI seeds from, math=True for the MathML renderer,
     # app=True for the help panel the chat answers from (ADR-0115).
-    msgs = seed_messages(math=True, app=True)
-    # Tools included for the same reason `_update_context_tokens` includes them:
+    msgs = seed.seed_messages(math=True, app=app_message())
+    # Tools included for the same reason `update_context_tokens` includes them:
     # counted without the block, a fresh window read 2.1k and jumped to 9.3k on
     # the first turn, so the meter's opening number disagreed with its next one.
-    SESSION.seed = (msgs, _count_context_tokens(msgs, _chat_tool_schemas(msgs)))
+    SESSION.seed = (msgs, meter.count_context_tokens(msgs, meter.chat_tool_schemas(msgs)))
     # After the seed: a reader between the two sees a vault that does not match and builds again.
     SESSION.seed_vault = vault
     return SESSION.seed
@@ -196,9 +198,7 @@ def seeded() -> tuple[list[dict], int]:
     seed_msgs, seed_tokens = cached if cached is not None and built_for == CONFIG.vault_path else build_seed()
     msgs = [dict(m) for m in seed_msgs]  # per-message copy; the seed's own dicts stay untouched
     if user_memory.refresh_snapshot(msgs):
-        from silica.cli import _chat_tool_schemas, _count_context_tokens
-
-        seed_tokens = _count_context_tokens(msgs, _chat_tool_schemas(msgs))
+        seed_tokens = meter.count_context_tokens(msgs, meter.chat_tool_schemas(msgs))
     return msgs, seed_tokens
 
 
@@ -248,7 +248,7 @@ def resolve_workspace(ref: str) -> dict | None:
 def ctx_meter() -> dict:
     """What the composer's context ring reads, in one shape.
 
-    The parts are counted, not apportioned: `_context_breakdown` charges the
+    The parts are counted, not apportioned: `context_breakdown` charges the
     chat envelope once so they sum to the total beside them, and a meter that
     invites you to add up its own segments has to survive that. Three sites emit
     this (the two `done` yields and the transcript headers) and they must not
@@ -256,11 +256,10 @@ def ctx_meter() -> dict:
     left before the history starts being collapsed.
     """
     from silica.agent.compaction import COMPACT_FRACTION
-    from silica.cli import _context_breakdown
 
     return {"context_tokens": CONFIG.context_tokens,
             "max_context_tokens": CONFIG.max_context_tokens,
-            "context_parts": _context_breakdown(SESSION.chat.messages),
+            "context_parts": meter.context_breakdown(SESSION.chat.messages),
             # The one fill level that means anything: past it the loop starts
             # collapsing old read results. Sent rather than mirrored in the
             # client, so the ring cannot go on reassuring at 0.6 after someone

@@ -361,9 +361,9 @@ def desk(tmp_vault, monkeypatch):
 
         return search, lambda u: page(PAGE_30)
 
-    monkeypatch.setattr("silica.cli._check_judge", lambda **_: vault_judge)
-    monkeypatch.setattr("silica.cli._check_legs", lambda: (None, None, None))
-    monkeypatch.setattr("silica.cli._check_web_legs", legs)
+    monkeypatch.setattr("silica.session.check.judge", lambda **_: vault_judge)
+    monkeypatch.setattr("silica.session.check.legs", lambda: (None, None, None))
+    monkeypatch.setattr("silica.session.check.web_legs", legs)
     SESSION.reset()
     yield TestClient(server.app, headers={"Origin": "http://testserver"}), server, Path(CONFIG.vault_path), calls, monkeypatch
     SESSION.release()
@@ -381,7 +381,7 @@ def judged_web(monkeypatch, kind="contradicted", **kw):
             return {"kind": kind, "p": 0.9, "by": "jev", "at": passages[0]["path"] + ":0"}
         return None
 
-    monkeypatch.setattr("silica.cli._check_judge", lambda **_: judge)
+    monkeypatch.setattr("silica.session.check.judge", lambda **_: judge)
 
 
 def test_a_press_streams_the_vault_then_the_web_then_done(desk):
@@ -437,7 +437,7 @@ def test_no_network_keeps_the_vaults_verdict_and_says_so(desk):
     def down(q):
         raise ConnectionError("no route")
 
-    mp.setattr("silica.cli._check_web_legs", lambda: (down, page))
+    mp.setattr("silica.session.check.web_legs", lambda: (down, page))
     out = press(tc)
     assert [x["event"] for x in out][-2:] == ["web_verdict", "done"]
     assert out[-2]["states"] == [{"state": "not checked", "line": 5, "end": 5, "say": "the web did not answer"}]
@@ -530,7 +530,7 @@ def test_a_second_press_replaces_and_a_failed_one_leaves_the_verdict_paid_for(de
     def down(q):
         raise ConnectionError("no route")
 
-    mp.setattr("silica.cli._check_web_legs", lambda: (down, page))
+    mp.setattr("silica.session.check.web_legs", lambda: (down, page))
     press(tc)
     assert len(cached(vault)["web"]) == 1
 

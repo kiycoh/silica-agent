@@ -192,8 +192,8 @@ def test_repl_sessions_resume_handlers(narrator, monkeypatch, capsys):
     sid = narrator.sid
     narrator.close()
 
-    monkeypatch.setattr("silica.cli._fresh_messages", lambda: [{"role": "system", "content": "seed"}])
-    monkeypatch.setattr("silica.cli._update_context_tokens", lambda m: None)
+    monkeypatch.setattr("silica.session.seed.fresh_messages", lambda: [{"role": "system", "content": "seed"}])
+    monkeypatch.setattr("silica.session.meter.update_context_tokens", lambda m: None)
 
     assert _handle_slash_command("/sessions", []) is True
     messages: list[dict] = []

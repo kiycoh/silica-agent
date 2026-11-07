@@ -305,11 +305,12 @@ def test_plugin_drop_falls_back_to_local_backend(bridge_env):
 def test_cli_dispatches_silica_connect(monkeypatch):
     import silica.cli as cli
     import silica.ui.connect as connect_mod
+    from silica.session import meter
 
     calls = []
     monkeypatch.setattr(connect_mod, "run_connect", lambda: calls.append(1) or 0)
     monkeypatch.setattr(cli, "_activate_repo_mode", lambda: None)
-    monkeypatch.setattr(cli, "_resolve_context_budget", lambda: None)
+    monkeypatch.setattr(meter, "resolve_context_budget", lambda: None)
     assert cli._dispatch_subcommand(["connect"]) == 0
     assert calls == [1]
 

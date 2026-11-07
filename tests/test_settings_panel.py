@@ -164,7 +164,7 @@ def test_switch_vault_rebuilds_the_driver_on_the_new_path(tmp_vault, tmp_path):
     """The nine steps as one call: a live process holds a driver, an overlay, a
     manifest and vault-scoped caches, and they all still answer for the old
     folder until they are reset."""
-    from silica.cli import switch_vault
+    from silica.onboarding.adopt import switch_vault
     from silica.driver import get_driver
 
     other = tmp_path / "other-vault"
@@ -180,7 +180,7 @@ def test_switch_vault_rebuilds_the_driver_on_the_new_path(tmp_vault, tmp_path):
 
 
 def test_switch_vault_refuses_a_path_that_is_not_a_directory(tmp_vault, tmp_path):
-    from silica.cli import switch_vault
+    from silica.onboarding.adopt import switch_vault
 
     file_path = tmp_path / "notes.md"
     file_path.write_text("x")

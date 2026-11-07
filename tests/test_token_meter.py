@@ -48,9 +48,9 @@ def test_meter_off_is_noop(monkeypatch):
 # The fixed prefix resent on every LLM call of an interactive turn. Measured
 # 2026-07-28 against a real metered turn: ~9.6k tokens, of which the two
 # deterministic parts pinned here are ~9.2k (tool schemas 8.2k, system prompt
-# 0.95k). The rest (_vault_scope, build_vault_map) is vault-dependent, so it
+# 0.95k). The rest (seed.vault_scope, build_vault_map) is vault-dependent, so it
 # can't be pinned. Tokens are approximated as chars/4 — the same proxy
-# cli._count_context_tokens falls back to, and it reproduced the metered split
+# meter.count_context_tokens falls back to, and it reproduced the metered split
 # exactly. Without this a +30% prompt lands silently on every call.
 #
 # Re-measured 2026-08-14 at 10_298 (schemas 9.2k, system prompt 1.0k). Of the

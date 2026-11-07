@@ -44,11 +44,11 @@ class ToWireTest(unittest.TestCase):
         self.assertIn("silica_reasoning", msg)  # the history keeps its copy
 
     def test_context_meter_counts_the_wire_form(self):
-        from silica.cli import _count_context_tokens
+        from silica.session.meter import count_context_tokens
 
         plain = [{"role": "assistant", "content": "done"}]
         kept = [{"role": "assistant", "content": "done", "silica_reasoning": "word " * 500}]
-        self.assertEqual(_count_context_tokens(plain), _count_context_tokens(kept))
+        self.assertEqual(count_context_tokens(plain), count_context_tokens(kept))
 
 
 if __name__ == "__main__":

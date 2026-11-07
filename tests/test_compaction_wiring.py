@@ -2,7 +2,7 @@
 
 - eager projection: run_agent stores the one-line summary in history,
   while the TUI event still carries the full result.
-- lazy compaction: cli._compact_context collapses old reads when the
+- lazy compaction: meter.compact_context collapses old reads when the
   meter is over budget and refreshes the token count.
 """
 from __future__ import annotations
@@ -15,6 +15,7 @@ import pytest
 
 from silica.agent.compaction import dedup_recall_excerpts
 from silica.agent.loop import run_agent
+from silica.session import meter
 
 
 class _FakeTool:
@@ -123,13 +124,13 @@ def test_compact_context_collapses_old_read_and_recounts(monkeypatch):
     monkeypatch.setattr(CONFIG, "context_tokens", 1_000)     # over budget → trigger
 
     # A whole registry entry, not just `collapse`: the meter now prices the tool
-    # block the turn ships (_chat_tool_schemas), so it reads the same fields the
+    # block the turn ships (chat_tool_schemas), so it reads the same fields the
     # agent loop reads when it builds the schemas for the call.
     fake = SimpleNamespace(collapse="lazy", sensitive=False, internal=False,
                            json_schema=lambda reach=None: {"type": "function", "function": {
                                "name": "fake_read", "description": "d", "parameters": {}}})
     with patch.dict("silica.tools.TOOLS", {"fake_read": fake}, clear=True):
-        collapsed = cli._compact_context(messages, set())
+        collapsed = meter.compact_context(messages, set())
 
     assert collapsed == {2}
     assert "re-call fake_read" in messages[2]["content"]
@@ -204,7 +205,7 @@ def test_compact_context_noop_under_budget(monkeypatch):
     monkeypatch.setattr(CONFIG, "max_context_tokens", 100_000)
     monkeypatch.setattr(CONFIG, "context_tokens", 10)
 
-    assert cli._compact_context(messages, set()) == set()
+    assert meter.compact_context(messages, set()) == set()
     assert CONFIG.context_tokens == 10  # no recount on the no-op path
 
 
@@ -213,11 +214,7 @@ def test_context_breakdown_parts_sum_to_the_single_count():
     reader can add them up: parts that do not reach the total beside them read
     as a meter that cannot count.
     """
-    from silica.cli import (
-        _chat_tool_schemas,
-        _context_breakdown,
-        _count_context_tokens,
-    )
+    from silica.session.meter import chat_tool_schemas, context_breakdown, count_context_tokens
 
     msgs = [
         {"role": "system", "content": "You are silica. " * 40},
@@ -229,9 +226,9 @@ def test_context_breakdown_parts_sum_to_the_single_count():
         {"role": "assistant", "content": "You have several notes." * 10},
     ]
     def total(m):
-        return _count_context_tokens(m, _chat_tool_schemas(m))
+        return count_context_tokens(m, chat_tool_schemas(m))
 
-    parts = _context_breakdown(msgs)
+    parts = context_breakdown(msgs)
     assert sum(parts.values()) == total(msgs)
     # An assistant turn that carries a call is billed to tool_io, not to the
     # conversation: its arguments are what filled the window, and its content is
@@ -245,11 +242,11 @@ def test_context_breakdown_parts_sum_to_the_single_count():
     # A window missing a whole group still adds up: the envelope is charged to
     # whichever group happens to be first, not to `system` by name.
     only_user = [msgs[1]]
-    assert sum(_context_breakdown(only_user).values()) == total(only_user)
+    assert sum(context_breakdown(only_user).values()) == total(only_user)
     # An empty window is not an empty prompt: the tool block still ships, so the
     # meter opens on it rather than on zero. Priced as a difference, it moves a
     # few tokens with the messages beside it, which is why this is a band.
-    empty = _context_breakdown([])
+    empty = context_breakdown([])
     assert sum(empty.values()) == total([])
     assert empty["system"] == empty["tool_io"] == empty["messages"] == 0
     assert abs(empty["tool_specs"] - parts["tool_specs"]) < 50

@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import NamedTuple
 
+from silica.config import CONFIG
 from silica.kernel.base.layout import NOISE_DIRS, SILICAIGNORE_REL
 from silica.onboarding.code_probe import looks_like_code
 from silica.kernel.base.manifest import MANIFEST_REL
@@ -172,3 +174,110 @@ def resolve_cwd_vault(cwd, home=None):
     if root is None:
         return str(cwd)
     return str(Path(root).resolve())
+
+
+class VaultTarget(NamedTuple):
+    """Outcome of resolving a runtime ``/vault <arg>`` switch.
+
+    ``vault`` is the absolute path to adopt, ``created`` True when the directory
+    does not exist yet and the caller must mkdir it. ``error`` is set (and the
+    other fields meaningless) only when the path cannot be a vault at all.
+    """
+    vault: str
+    created: bool
+    error: str | None = None
+
+
+def resolve_vault_switch(arg: str) -> VaultTarget:
+    """Resolve a ``/vault <arg>`` (or explicit ``SILICA_VAULT``) target.
+
+    The path is adopted **as-is**, always: the vault is the folder the user
+    named, never a subfolder Silica invents or remembers. Whether notes may be
+    written into that root or into a subtree is a separate axis, declared
+    per-vault as `write_dir` in ``vault.yaml`` (see `onboarding.adopt`).
+
+    So a vault created before that split reads its whole repo again on the next
+    launch, while its notes stay in the ``docs/silica`` its manifest now names.
+    Read-only I/O.
+    """
+    target = Path(arg).expanduser().resolve()
+    if target.exists() and not target.is_dir():
+        return VaultTarget("", False, f"not a directory: {target}")
+    return VaultTarget(str(target), not target.is_dir())
+
+
+class VaultSwitch(NamedTuple):
+    """What a completed ``switch_vault`` did, for whoever has to report it.
+
+    ``error`` set means nothing happened at all. Everything else is a thing the
+    caller may want to say out loud: ``created`` the directory did not exist,
+    ``write_dir`` this call declared one in vault.yaml, ``invalid_write_dir``
+    the manifest declares one Silica cannot resolve (every write will be
+    rejected), ``repo_warning`` the vault⊂repo invariant is violated,
+    ``language_drift`` the co-occurrence store is frozen in another language.
+    """
+    vault: str
+    error: str | None = None
+    created: bool = False
+    write_dir: str | None = None
+    seeded_ignore: bool = False
+    invalid_write_dir: bool = False
+    repo_warning: str = ""
+    language: str = ""
+    store_language: str = ""
+    language_drift: bool = False
+
+
+def switch_vault(arg: str) -> VaultSwitch:
+    """Point the running process at another vault — the whole sequence.
+
+    Not an assignment: a live process holds a driver, an overlay cache, a
+    manifest and vault-scoped index caches, and every one of them still answers
+    for the old folder until it is reset. Skipping any single step leaves reads
+    and writes disagreeing about which vault they are in.
+
+    Prints nothing, so the REPL and the web settings panel can share it: the
+    caller renders the returned record. Never raises for a bad path — that is
+    ``error``.
+    """
+    from silica.driver import reset_driver
+    from silica.kernel.base.roots import repo_root_warning
+    from silica.kernel.recall.relatedness import reset_vault_caches
+    from silica.kernel.text.overlay import reset_overlay_cache
+    from silica.kernel.base.manifest import (
+        apply_manifest_to_config,
+        get_active_manifest,
+        reset_manifest_cache,
+    )
+    from silica.kernel.vault_language import language_status
+
+    target = resolve_vault_switch(arg)
+    if target.error:
+        return VaultSwitch("", error=target.error)
+    resolved = target.vault
+    if target.created:
+        Path(resolved).mkdir(parents=True, exist_ok=True)
+    declared = declare_write_dir(resolved)
+    seeded = seed_silicaignore(resolved)
+    CONFIG.vault_path = resolved
+    reset_driver()
+    reset_overlay_cache()  # overlay is vault-scoped; don't serve the old vault's
+    reset_manifest_cache()  # manifest is vault-scoped too
+    apply_manifest_to_config()
+    # Vault-scoped store caches are path-keyed (harmless on lookup) but retain
+    # the old vault's index/vectors for the process lifetime.
+    reset_vault_caches()
+    lang, store_lang, drift = language_status(resolved)
+    return VaultSwitch(
+        vault=resolved,
+        created=target.created,
+        write_dir=declared,
+        seeded_ignore=bool(seeded),
+        # Declared but unresolvable (absolute/traversal). Refusing here is the
+        # whole point of not degrading it to "" in the parser.
+        invalid_write_dir=get_active_manifest().write_dir is None,
+        repo_warning=repo_root_warning(resolved) or "",
+        language=lang or "",
+        store_language=store_lang or "",
+        language_drift=bool(drift),
+    )

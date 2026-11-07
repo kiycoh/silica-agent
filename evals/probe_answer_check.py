@@ -108,7 +108,7 @@ class Answer:
 
 
 def date_line(ts: float | None) -> str:
-    """The seed's date line (cli._today_line) for the day a session started."""
+    """The seed's date line (seed.today_line) for the day a session started."""
     if not ts:
         return ""
     d = datetime.date.fromtimestamp(ts)
@@ -459,7 +459,7 @@ def replay(narration: Path, out: Path, model: str, *, call=None,
                          f"{R_REPLAY_FROM.isoformat()}, while real answers may still arrive")
     if call is None:
         from silica.model.llm import call_llm
-        from silica.cli import seed_messages
+        from silica.session.seed import seed_messages
 
         seed = seed_messages(math=True)
 

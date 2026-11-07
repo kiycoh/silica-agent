@@ -43,7 +43,7 @@ def _memory_msgs(messages):
 # --- the seed -----------------------------------------------------------------
 
 def test_the_seed_carries_memory_before_the_language_line(on):
-    from silica.cli import seed_messages
+    from silica.session.seed import seed_messages
 
     assert _memory_msgs(seed_messages()) == []   # empty files: no message at all
     um.save("user", "Name is Giulia")
@@ -55,7 +55,7 @@ def test_the_seed_carries_memory_before_the_language_line(on):
 
 
 def test_the_seed_has_no_memory_when_paused_or_incognito(on, monkeypatch):
-    from silica.cli import seed_messages
+    from silica.session.seed import seed_messages
 
     um.save("user", "Name is Giulia")
     monkeypatch.setattr(CONFIG, "user_memory", False)
@@ -115,7 +115,8 @@ def test_memory_prints_both_files_with_paths_and_usage(on):
 
 
 def test_incognito_hides_the_memory_of_the_conversation_in_progress(on):
-    from silica.cli import _handle_direct_shortcut, seed_messages
+    from silica.cli import _handle_direct_shortcut
+    from silica.session.seed import seed_messages
 
     um.save("user", "Name is Giulia")
     messages = seed_messages() + [{"role": "user", "content": "hi"}]
@@ -146,7 +147,7 @@ def test_tui_incognito_also_stops_capture_and_clears_with_a_new_process(on, monk
          patch("silica.cli.run_agent", _answer), \
          patch("silica.cli._model_configured", lambda: True), \
          patch("silica.cli.CONSOLE"), patch("silica.cli.print_home"), \
-         patch("silica.cli._setup_logging"), patch("silica.cli._update_context_tokens"), \
+         patch("silica.cli._setup_logging"), patch("silica.session.meter.update_context_tokens"), \
          patch("silica.cli._ensure_servers"), patch("silica.cli._announce_code_lane"), \
          patch("silica.cli._activate_repo_mode"), patch("silica.capture.capture_session", captured), \
          patch("sys.argv", ["silica"]):

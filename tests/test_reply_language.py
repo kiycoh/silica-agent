@@ -68,7 +68,7 @@ def test_prompt_without_preference_follows_the_person():
 def test_the_seed_of_an_undeclared_vault_follows_the_person(tmp_vault):
     """Italian notes, nothing declared: the language they are detected in no
     longer sets the chat's, at the head of the seed or in its last line."""
-    from silica.cli import seed_messages
+    from silica.session.seed import seed_messages
     from silica.prompts import _LANG_FOLLOW
 
     it = "Il gatto è sul tavolo e la casa è bella, ma non è facile trovare la strada giusta."

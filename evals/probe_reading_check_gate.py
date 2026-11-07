@@ -54,7 +54,7 @@ def _chat(model: str):
     def chat(prompt: str) -> str:
         with _lock:
             COUNT[f"chat:{model}"] += 1
-        # reasoning off and 300 tokens, as cli._check_judge asks
+        # reasoning off and 300 tokens, as session.check.judge asks
         resp = call_llm(
             model,
             [{"role": "user", "content": prompt}],
@@ -109,9 +109,9 @@ def _judge(arm: str, gate: Path, fresh: bool = False):
 
 
 def _legs():
-    from silica.cli import _check_legs
+    from silica.session.check import legs
 
-    search, dense, floor = _check_legs()
+    search, dense, floor = legs()
 
     def only_notes(q: str, k: int) -> list[dict]:
         # a card under test is never its own or another card's passage

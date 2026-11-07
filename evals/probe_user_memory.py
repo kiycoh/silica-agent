@@ -98,7 +98,7 @@ def run_case(name: str, model: str, pristine: Path) -> dict:
     from silica.obs import narration as _narr
     from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools
     from silica.agent.loop import run_agent
-    from silica.cli import seed_messages
+    from silica.session.seed import seed_messages
     from silica.kernel import user_memory as um
 
     case = CASES[name]

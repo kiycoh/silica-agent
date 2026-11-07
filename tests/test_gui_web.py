@@ -2566,12 +2566,12 @@ def test_reminders_poll_is_post_and_delivers_at_most_once(client, tmp_vault):
 
 def test_gui_seed_is_the_tui_seed(tmp_vault, monkeypatch):
     """The GUI used to build its own seed (prompt + vault map) and had drifted:
-    no `_vault_scope`, so the model was blind to `write_dir`, and no closing
+    no `vault_scope`, so the model was blind to `write_dir`, and no closing
     language line — the fix 93b6d2d shipped for the TUI and never carried over.
-    Both now come from `cli.seed_messages`, so the drift cannot come back."""
+    Both now come from `session.seed.seed_messages`, so the drift cannot come back."""
     import datetime as dt
 
-    from silica.cli import seed_messages
+    from silica.session.seed import seed_messages
     from silica.ui.web.session import SESSION
     from silica.ui.web import session
 

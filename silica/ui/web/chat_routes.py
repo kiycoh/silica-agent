@@ -22,6 +22,7 @@ from silica.agent.recall_watch import numbers_of_session, read_refs, READS_KEY
 from silica.config import CONFIG, demo
 from silica.kernel.base.formats import IMAGE_SUFFIX, ext_alternation
 from silica.kernel.graph.mindmap import note_resolver
+from silica.session import meter
 from silica.sources import drop_turn
 from silica.ui.web import drop, flags, render, session, sse, turn
 from silica.ui.web.callback import tool_calls_to_json
@@ -459,7 +460,6 @@ def list_sessions():
 def load_session(payload: dict):
     if SESSION.busy:
         raise HTTPException(status_code=409, detail="a turn is already in progress")
-    from silica.cli import _update_context_tokens
     from silica.obs import narration as _narr
 
     sid = str(payload.get("id", ""))
@@ -500,7 +500,7 @@ def load_session(payload: dict):
         personas.apply(SESSION.chat.messages, worn)
     SESSION.chat.seen_numbers.clear()
     SESSION.chat.seen_numbers.update(numbers_of_session(SESSION.chat.sid))
-    _update_context_tokens(SESSION.chat.messages)
+    meter.update_context_tokens(SESSION.chat.messages)
     return {"ok": True}
 
 

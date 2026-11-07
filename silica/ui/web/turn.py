@@ -37,6 +37,8 @@ from silica.kernel.graph.mindmap import note_resolver
 from silica.metrics import emit
 from silica.model.llm import meter_totals
 from silica.obs.events import LLMStreamEvent, ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
+from silica.session import meter
+from silica.session import seed as seed_mod
 from silica.sources.web_research import WebTurn
 from silica.ui.web import render, session
 from silica.ui.web.callback import event_to_json
@@ -237,7 +239,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
     8): its articles ride the turn as a fenced block, `scope` says what the
     answer may draw on, and the chip rides the message as `silica_story`.
     """
-    from silica.cli import _compact_context, _expand_web_turn, _update_context_tokens
+    from silica.cli import _expand_web_turn
 
     messages = SESSION.chat.messages
     q: asyncio.Queue = asyncio.Queue()
@@ -309,7 +311,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             session.narrate_user_turn(messages[-1])
             messages.append({"role": "assistant", "content": worn[0]})
             _narr.NARRATOR.turn(messages[-1])
-            _update_context_tokens(messages)
+            meter.update_context_tokens(messages)
             outcome = "done"
             yield {"type": "done", "answer": worn[0], "html": render.linkify(worn[0], remote_images=False),
                    **session.ctx_meter()}
@@ -347,8 +349,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             # from the `memory` the done frame carries. Bare /remember goes on
             # to the expansion below, which asks the model.
             from silica.obs import narration as _narr
-            from silica.cli import remember_text
             from silica.kernel import user_memory
+            from silica.session.words import remember_text
 
             out = user_memory.save("vault", remember_text(text), session=_narr.NARRATOR.sid or "")
             answer = user_memory.describe(out)
@@ -370,23 +372,23 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             import shlex
 
             from silica.obs import narration as _narr
-            from silica.cli import _int_flag, _positional, _str_flag
             from silica.kernel.learn.artifacts import flashcards
+            from silica.session.words import int_flag, positional, str_flag
 
             try:
                 args = shlex.split(text)[1:]
             except ValueError:
                 raise ValueError("unbalanced quotes in command. Wrap paths with spaces in \"...\".") from None
-            targets = _positional(args)
+            targets = positional(args)
             if not targets:
                 raise ValueError("/flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]")
-            answer = await asyncio.to_thread(flashcards, targets, _int_flag(args, "--n=", 12),
-                                             _str_flag(args, "--save").strip())
+            answer = await asyncio.to_thread(flashcards, targets, int_flag(args, "--n=", 12),
+                                             str_flag(args, "--save").strip())
             messages.append({"role": "user", "content": text, "origin": "cli"})
             session.narrate_user_turn(messages[-1])
             messages.append({"role": "assistant", "content": answer})
             _narr.NARRATOR.turn(messages[-1])
-            _update_context_tokens(messages)
+            meter.update_context_tokens(messages)
             outcome = "done"
             yield {"type": "done", "answer": answer, "html": await asyncio.to_thread(render.answer_html, answer, []),
                    **session.ctx_meter()}
@@ -671,8 +673,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         if messages and messages[-1].get("role") == "assistant":
             from silica.obs import narration as _narr
             _narr.NARRATOR.turn(messages[-1])
-        _update_context_tokens(messages)
-        SESSION.chat.collapsed = _compact_context(messages, SESSION.chat.collapsed)
+        meter.update_context_tokens(messages)
+        SESSION.chat.collapsed = meter.compact_context(messages, SESSION.chat.collapsed)
         # answer_resolver reads the DRIVER graph — with the ws backend installed
         # (silica connect) a driver call on the loop thread deadlocks (`_rpc`
         # blocks the very loop that must send the frame), so render off-loop.
@@ -730,7 +732,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
 # The system prompt teaches the write workflows and a phone turn has none of
 # their tools, so without this line "save this" reads to the model as a request
 # it can meet. It goes before the seed's closing language line, which must stay
-# last (cli.seed_messages).
+# last (session.seed).
 _PHONE_LINE = (
     "This conversation is on Telegram, where you can search and read the vault "
     "but not change it: nothing is written, moved or remembered from here. If "
@@ -777,8 +779,6 @@ def phone_turn(text: str, cancel: threading.Event) -> dict:
     """One phone turn, whole: `{"answer": ...}`, or `{"error": ...}` with the
     sentence the browser would show, a usage limit's reset included."""
     from silica.obs import narration as _narr
-    from silica.cli import _compact_context, _update_context_tokens, seed_messages
-
     # The browser reopened the phone's session from the chat list and now
     # writes it, so the phone goes on in a new one rather than beside it. A
     # chat deleted from the list starts over too: its history must not reach
@@ -806,7 +806,7 @@ def phone_turn(text: str, cancel: threading.Event) -> dict:
 
     try:
         if not SESSION.phone.messages:
-            seed = seed_messages()
+            seed = seed_mod.seed_messages()
             seed.insert(len(seed) - 1, {"role": "system", "content": _PHONE_LINE})
             SESSION.phone.messages[:] = seed
         with _narrating_phone():
@@ -817,8 +817,8 @@ def phone_turn(text: str, cancel: threading.Event) -> dict:
                                constraints=AgentConstraints(tools=PHONE_TOOLS, interactive=True))
             if SESSION.phone.messages[-1].get("role") == "assistant":
                 _narr.NARRATOR.turn(SESSION.phone.messages[-1])
-            _update_context_tokens(SESSION.phone.messages)
-            SESSION.phone.collapsed = _compact_context(SESSION.phone.messages, SESSION.phone.collapsed)
+            meter.update_context_tokens(SESSION.phone.messages)
+            SESSION.phone.collapsed = meter.compact_context(SESSION.phone.messages, SESSION.phone.collapsed)
         if cancel.is_set():
             return {"answer": "Stopped."}
         outcome = "empty" if answer == EMPTY_COMPLETION else "done"

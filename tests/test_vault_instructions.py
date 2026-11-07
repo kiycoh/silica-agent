@@ -13,7 +13,7 @@ from silica.kernel import vault_instructions as vi
 
 
 def test_the_seed_carries_them_after_memory_and_before_the_language_line():
-    from silica.cli import seed_messages
+    from silica.session.seed import seed_messages
     from silica.config import CONFIG
 
     assert not any(m.get("origin") == vi.ORIGIN for m in seed_messages())
