@@ -99,6 +99,23 @@ def handle_problem(h: str) -> str:
     return ""
 
 
+# --- the files this process and silica-hosted pass each other ------------------
+# The other end is another repository (its bin/pages), so nothing here can import it and this
+# is where the protocol is written down. A rename on either side fails no test of the other.
+#   <SILICA_HOST_DIR>/handle.json  root's. {"handle": h} once the account has one,
+#                                  {"asked": h, "refused": "taken" | "invalid"} after a refusal.
+#   <SILICA_HOST_DIR>/wikis.json   root's. {slug: {"state": "wait" | "in" | "out" | "no",
+#                                  "since": date, ...}}, a refusal adding its notice.
+#   <silica home>/handle-request.json  the account's. {"handle": h}, read as root and never
+#                                  through a link, removed once answered.
+#   <SILICA_PUBLIC_DIR>/<handle>/live/<slug>/vault.json  the account's. Read as data, nothing
+#                                  trusted beyond its shape (`pages_catalog`, with the host's
+#                                  handles.tsv and wikis.tsv beside it).
+HANDLE_FILE = "handle.json"
+WIKIS_FILE = "wikis.json"
+CLAIM_FILE = "handle-request.json"
+
+
 def _host_dir() -> Path | None:
     """The folder the host writes for this account alone (root's, readable by
     the account's group), None on a host that does not take claims."""
@@ -124,19 +141,19 @@ def _host_file(name: str) -> dict:
 def _host_answer() -> dict:
     """The host's handle.json: {"handle": h} once the account has one,
     {"asked": h, "refused": "taken" | "invalid"} after a claim it refused."""
-    return _host_file("handle.json")
+    return _host_file(HANDLE_FILE)
 
 
 def host_reviews() -> dict:
     """The host's wikis.json (ADR-0153 point 7), by slug: "state" is wait, in,
     out or no, "since" its date, and a refusal adds the notice of point 13."""
-    return _host_file("wikis.json")
+    return _host_file(WIKIS_FILE)
 
 
 def claim_path() -> Path:
     """Where the account asks for a handle; silica-hosted bin/pages claims reads
     it as root, never through a link, and removes it once answered."""
-    return silica_home() / "handle-request.json"
+    return silica_home() / CLAIM_FILE
 
 
 def _asked() -> str:

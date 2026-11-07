@@ -107,11 +107,11 @@ def panel(hosted: bool) -> list[tuple[str, list[tuple[str, str]]]]:
 
 
 def app_message() -> str:
-    from silica.config import hosted as _hosted, withheld
+    from silica.config import PUBLIC_APP_HOST, hosted as _hosted, withheld
     from silica.ui.web.settings import sections
 
     hosted = _hosted()
-    where = ("hosted at app.silica-agent.dev" if hosted
+    where = (f"hosted at {PUBLIC_APP_HOST}" if hosted
              else "running on this person's own machine")
     lines = ["## The app you are in",
              f"You are the chat of the Silica web app, {where}. What follows is its "

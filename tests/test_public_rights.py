@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from silica.sources.web_fetch import TooLarge, WrongType
+from silica.ui.web.public_routes import _thumbnail
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
 BOOK = ("the probability of an event is a number between zero and one that measures how likely "
@@ -62,7 +63,7 @@ def _names(root: Path) -> set[str]:
 def _sheet(**kw) -> dict:
     from silica.kernel import rights
 
-    return rights.sheet(rights.read_wiki("stats", **kw), rights.answers())
+    return rights.sheet(rights.read_wiki("stats", **kw), rights.answers(), _thumbnail)
 
 
 def _say(key: str, answer: str, **kw) -> None:
@@ -219,7 +220,7 @@ def test_a_wiki_of_hand_notes_goes_straight_to_publish(tmp_vault, stats):
 
     tmp_vault.note("Plain/One.md", "Written by hand.\n")
     add_vault("Plain")
-    sheet = rights.sheet(rights.read_wiki("plain"), rights.answers())
+    sheet = rights.sheet(rights.read_wiki("plain"), rights.answers(), _thumbnail)
     assert sheet["ask"] is False and sheet["plain"] == 1 and not sheet["files"] and not sheet["groups"]
 
 

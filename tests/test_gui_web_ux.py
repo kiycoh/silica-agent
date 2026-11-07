@@ -837,7 +837,8 @@ def test_the_note_is_a_reading_sheet_with_one_inset():
     na = css[css.index(".na {"):]
     na = na[:na.index("}")]
     assert "border: none;" in na
-    callout = css[css.index(":is(.msg, #peek-body, #note-edit, #nv-edit) .callout {"):]
+    body = (WEB / "pages" / "body.css").read_text(encoding="utf-8")
+    callout = body[body.index(":is(.msg, #peek-body, #note-edit, #nv-edit, .body) .callout {"):]
     callout = callout[:callout.index("}")]
     assert "border-left" not in callout
     js = (WEB / "app-notes.js").read_text(encoding="utf-8")

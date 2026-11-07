@@ -325,6 +325,11 @@ def env_raw(name: str) -> str | None:
     return os.environ.get(name)
 
 
+# The public names, as a default and in a sentence: the hosted app, and the host of the wikis.
+PUBLIC_APP_HOST = "app.silica-agent.dev"
+PUBLIC_PAGES_HOST = "wikis.silica-agent.dev"
+
+
 def public_base() -> str:
     """Where the public pages are served, "" when nothing says."""
     return live_env("SILICA_PUBLIC_BASE").rstrip("/")
@@ -332,7 +337,7 @@ def public_base() -> str:
 
 def public_save_url() -> str:
     """The app a "Save to Silica" button opens, and where a reader joins."""
-    return live_env("SILICA_PUBLIC_SAVE_URL").rstrip("/") or "https://app.silica-agent.dev"
+    return live_env("SILICA_PUBLIC_SAVE_URL").rstrip("/") or f"https://{PUBLIC_APP_HOST}"
 
 
 def hosted() -> bool:

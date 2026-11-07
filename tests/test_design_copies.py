@@ -1,12 +1,11 @@
 """Design values that must live in several files, held to one another.
 
 None of these copies can link the others. site/ publishes with no build step, the
-graph frame stays self-contained for file:// (ADR-0026), and pages.css ships alone
-to the public host's /_s/ (public_site._STATIC), so one shared sheet is not on
-offer and a compare is the cheapest honest thing. KNOWN_DRIFT below is the only
-disagreement allowed, and it is the owner's to settle: DESIGN.md at the repo root
-(gitignored) names one value, a published page prints another, and a refactor does
-not restyle a live page.
+graph frame stays self-contained for file:// (ADR-0026), and the app and Pages each
+paint their own tokens, so one shared token sheet is not on offer and a compare is
+the cheapest honest thing. KNOWN_DRIFT below is the only disagreement allowed, and
+it is the owner's to settle: DESIGN.md at the repo root (gitignored) names one value,
+a published page prints another, and a refactor does not restyle a live page.
 """
 from __future__ import annotations
 
@@ -160,21 +159,17 @@ def test_every_inline_mark_is_the_computed_one():
         assert set(paths) <= pieces, name
 
 
-def _press(path: Path) -> str:
-    text = path.read_text(encoding="utf-8")
-    block = text[text.index("cover-ink:start"):text.index("// cover-ink:end")]
-    lines = [line.strip() for line in block.splitlines()]
-    return "\n".join(line for line in lines[1:] if not line.startswith("//"))
-
-
 def test_the_app_and_pages_print_a_cover_on_one_press():
-    """pages.js cannot load a file of the app's, so the printer is two texts that
-    must stay one; the app's only adds the build-up and the hover around it."""
-    app, pages = STATIC / "app-public.js", STATIC / "pages" / "pages.js"
-    assert _press(app) == _press(pages)
-    assert "const disc" in _press(app)
-    for script in (app, pages):
+    """One file, loaded by each when it first prints. What each keeps is what differs:
+    the app's build-up and hover, Pages' plain print."""
+    from silica.kernel import public_site
+
+    assert "cover.js" in public_site.static_files()
+    press = (STATIC / "pages" / "cover.js").read_text(encoding="utf-8")
+    assert "N[i][3] >= 12" in press
+    for script in (STATIC / "app-public.js", STATIC / "pages" / "pages.js"):
         text = script.read_text(encoding="utf-8")
+        assert "coverPress(cv, N, w, h, pad)" in text and "N[i][3] >= 12" not in text
         assert '("--void"' in text and '("--frost"' in text
         assert "((255 << 24) | (c[2] << 16) | (c[1] << 8) | c[0]) >>> 0" in text
 
@@ -185,8 +180,7 @@ def test_a_key_note_is_the_same_note_on_every_cover():
     do share is which note is drawn large."""
     from silica.kernel import public_site
 
-    for name, text in (("app-public.js", (STATIC / "app-public.js").read_text(encoding="utf-8")),
-                       ("pages.js", (STATIC / "pages" / "pages.js").read_text(encoding="utf-8")),
+    for name, text in (("cover.js", (STATIC / "pages" / "cover.js").read_text(encoding="utf-8")),
                        ("site/index.html", SITE.read_text(encoding="utf-8")),
                        ("public_site._svg", inspect.getsource(public_site._svg))):
         assert set(re.findall(r"\[3\] >= (\d+)", text)) == {"12"}, name

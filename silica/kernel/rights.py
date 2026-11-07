@@ -6,9 +6,11 @@ a note was made from, each folder of images and each site. What nobody answered 
 
 `read_wiki` reads the facts of one wiki, `decide` turns them and the answers into what goes out,
 `sheet` into what the check before Publish shows. The build calls `decide` itself, so an answer
-binds whether or not anyone opened the screen.
+binds whether or not anyone opened the screen. `goes_out` is `decide`'s answer for whoever only
+wants the notes.
 
-The fetch of a remote image is passed in: the kernel does not reach the network.
+The fetch of a remote image and the address of a thumbnail are passed in: the kernel neither
+reaches the network nor names a route.
 """
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ import logging
 import re
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import unquote, urlsplit
 
 from silica.kernel.base.formats import IMAGE_SUFFIX, SHOWN_IMAGE_EXTS
 from silica.kernel import publish
@@ -664,7 +666,7 @@ def _answer_fields(a: dict, default_credit: str = "") -> dict:
             "credit": a.get("credit") or default_credit}
 
 
-def _file_row(wiki: dict, ans: dict, plan: dict, name: str) -> dict:
+def _file_row(wiki: dict, ans: dict, plan: dict, name: str, src: Callable[[dict], str]) -> dict:
     a = ans.get(name, {})
     row = wiki["files"][name]
     notes = []
@@ -674,15 +676,15 @@ def _file_row(wiki: dict, ans: dict, plan: dict, name: str) -> dict:
         notes.append({"path": p, "title": n["title"], "status": _status(n), "can": _can_mark(n),
                       "mine": n["rewritten"], "goes": p in plan["notes"], "held": held})
     return {"key": name, "name": name, "old": name in wiki["asked"], "free": is_free(a), "notes": notes,
-            "images": [_thumb(wiki["local"][k]) for k in sorted(row["images"])],
+            "images": [_thumb(wiki["local"][k], src) for k in sorted(row["images"])],
             **_answer_fields(a, row["credit"])}
 
 
-def _thumb(img: dict) -> dict:
-    return {"name": img["name"], "src": "/asset?path=" + quote(img["src"])}
+def _thumb(img: dict, src: Callable[[dict], str]) -> dict:
+    return {"name": img["name"], "src": src(img)}
 
 
-def _group_rows(wiki: dict, ans: dict, plan: dict) -> list[dict]:
+def _group_rows(wiki: dict, ans: dict, plan: dict, src: Callable[[dict], str]) -> list[dict]:
     rows: dict[str, dict] = {}
 
     def row(key: str, kind: str, name: str, default: str = "") -> dict:
@@ -695,7 +697,7 @@ def _group_rows(wiki: dict, ans: dict, plan: dict) -> list[dict]:
         if img["file"] or not plan["notes"].intersection(img["notes"]):
             continue
         r = row(img["group"], "folder", img["group"].removeprefix("folder:") + "/")
-        r["images"].append({**_thumb(img), "note": _first_title(wiki, img), "on": img["name"] not in r["off"]})
+        r["images"].append({**_thumb(img, src), "note": _first_title(wiki, img), "on": img["name"] not in r["off"]})
     for img in sorted(wiki["remote"].values(), key=lambda i: i["url"]):
         if not plan["notes"].intersection(img["notes"]):
             continue
@@ -703,8 +705,8 @@ def _group_rows(wiki: dict, ans: dict, plan: dict) -> list[dict]:
         if img["why"]:
             r["bad"].append({"name": img["name"], "why": img["why"]})
         else:
-            r["images"].append({"name": img["name"], "src": "/public/check/image?name=" + img["kept"].name,
-                                "note": _first_title(wiki, img), "on": img["name"] not in r["off"]})
+            r["images"].append({**_thumb(img, src), "note": _first_title(wiki, img),
+                                "on": img["name"] not in r["off"]})
     return sorted(rows.values(), key=lambda r: (r["kind"] != "folder", r["name"].casefold()))
 
 
@@ -717,11 +719,13 @@ def _first_title(wiki: dict, img: dict) -> str:
     return wiki["notes"][img["notes"][0]]["title"]
 
 
-def sheet(wiki: dict, ans: dict) -> dict:
-    """The check before Publish as the screen draws it."""
+def sheet(wiki: dict, ans: dict, src: Callable[[dict], str]) -> dict:
+    """The check before Publish as the screen draws it. `src` answers where the screen reads one
+    of `read_wiki`'s image rows: a local one has its vault path in `src`, a remote one its copy
+    in `kept`."""
     plan = decide(wiki, ans)
-    files = [_file_row(wiki, ans, plan, f) for f in sorted(wiki["files"], key=_natural)]
-    groups = _group_rows(wiki, ans, plan)
+    files = [_file_row(wiki, ans, plan, f, src) for f in sorted(wiki["files"], key=_natural)]
+    groups = _group_rows(wiki, ans, plan, src)
     personal = [[wiki["notes"][p]["title"], what] for p in sorted(plan["notes"])
                 for what in wiki["notes"][p]["personal"]]
     going_local = len(plan["local"])

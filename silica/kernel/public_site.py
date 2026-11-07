@@ -44,8 +44,9 @@ _SHOWN_PROPS = ("title", "tags", "date")
 # built on a laptop carries its own copy in _s/ so its folder opens from disk. mermaid.min.js is
 # the app's own copy, which pages.js loads only on a note that holds a diagram (owner, 2026-11-02):
 # the policy runs scripts from /_s/ alone, so it is a file there and never a script in a page.
-_STATIC = ("pages/pages.css", "pages/pages.js", "archivo-latin.woff2", "martian-mono-latin.woff2",
-           "host-grotesk-latin.woff2", "host-grotesk-OFL.txt", "mermaid.min.js")
+# body.css and cover.js are the app's as much as a page's, so each is one file both load.
+_STATIC = ("pages/pages.css", "pages/body.css", "pages/pages.js", "pages/cover.js", "archivo-latin.woff2",
+           "martian-mono-latin.woff2", "host-grotesk-latin.woff2", "host-grotesk-OFL.txt", "mermaid.min.js")
 _LANGS = {"italian": "it", "english": "en", "spanish": "es", "french": "fr",
           "german": "de", "portuguese": "pt"}
 # shortcut: past this many linked notes the cover keeps the best linked ones, so the layout stays

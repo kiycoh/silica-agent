@@ -36,14 +36,14 @@ def anchor(path: str, display: str) -> str:
     )
 
 
-def _asset_url(target: str) -> str:
+def asset_url(target: str) -> str:
     return "/asset?path=" + _quote(target)
 
 
 def linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> str:
     """A note or an answer as the app draws it. A note link carries its path for the click
     to open and an image comes through /asset, so `/asset?` is this origin's own."""
-    return ofm.render(text, link=anchor, asset=_asset_url, resolve=resolve, own=("/asset?",),
+    return ofm.render(text, link=anchor, asset=asset_url, resolve=resolve, own=("/asset?",),
                       remote_images=remote_images, reads=reads)
 
 

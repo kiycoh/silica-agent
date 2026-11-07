@@ -1,0 +1,79 @@
+/* What a note's render needs on every surface that draws one: callouts, formulas and code colours.
+   One sheet, because a rule kept per surface is how Pages lost these three (the render wrote the
+   classes and pages.css styled none). app-chat.css imports it for the app, pages.css for a page,
+   and public_site ships it to /_s/. The list names the surfaces; `.body` is a page on the public
+   host, and in the app only ever sits inside a `.msg`. Tokens: what both sheets define. */
+
+/* pygments fences — restrained syntax scheme mapped onto the site palette:
+   keywords azure, literals gold, comments dim, names frost. */
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) pre :is(.k, .kc, .kd, .kn, .kp, .kr, .kt, .ow, .nd, .nt) {
+  color: var(--accent);
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) pre :is(.s, .s1, .s2, .sa, .sb, .sc, .sd, .se, .sh, .si, .sr, .ss, .sx,
+  .m, .mb, .mf, .mh, .mi, .mo, .il) {
+  color: var(--accent);
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) pre :is(.c, .c1, .ch, .cm, .cp, .cpf, .cs) {
+  color: var(--ash-dim);
+  font-style: italic;
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) pre :is(.nf, .nc, .fm) {
+  color: var(--frost);
+  font-weight: 500;
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) pre :is(.nb, .bp, .o, .p) {
+  color: var(--ash);
+}
+
+/* A callout is a box, not a stripe: neutral fill, a title you can read, the
+   text. Warnings and errors keep their identity in the title's colour, which
+   is a label, where a coloured edge was a decoration that said the same. */
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) .callout {
+  border-radius: var(--r-sm);
+  background: var(--slate-2);
+  padding: 0.6rem 0.8rem;
+  color: var(--frost);
+  font-style: normal;
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) .callout-title {
+  color: var(--frost);
+  font-weight: 600;
+  font-size: var(--fs-ctl, 13px);
+  margin: 0 0 0.3rem;
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) .callout p:empty {
+  display: none;
+}
+
+/* title-only callouts */
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) :is(.callout-warning, .callout-caution, .callout-danger, .callout-error, .callout-bug) .callout-title {
+  color: var(--warn);
+}
+
+/* LaTeX → native MathML; display math gets its own centered strip */
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) .math {
+  text-align: center;
+  overflow-x: auto;
+  /* overflow-x: auto computes overflow-y to auto too, and an integral's limits
+     reach 3px past the line box (measured 2026-09-29: scrollHeight 34 over 31),
+     so every display formula with one wore a vertical scrollbar. The padding
+     gives the glyphs that room; hidden stops the bar should one reach further. */
+  overflow-y: hidden;
+  padding: 0.2em 0;
+  margin: 0.75em 0;
+}
+
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) math {
+  font-size: 1.08em;
+}
+
+/* unconvertible source, flagged */
+:is(.msg, #peek-body, #note-edit, #nv-edit, .body) .math-err {
+  color: var(--warn);
+}

@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from silica.config import public_base
 from silica.kernel.text import note_parts
 from silica.onboarding import settings_ops
-from silica.ui.web import drop, session
+from silica.ui.web import drop, render, session
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +290,12 @@ async def public_publish(payload: dict | None = None):
 _WIKI: dict[str, dict] = {}
 
 
+def _thumbnail(img: dict) -> str:
+    """Where the screen reads an image: a kept copy from the route below, the vault's through
+    /asset. The two routes are this module's and the app's to name."""
+    return f"/public/check/image?name={img['kept'].name}" if img.get("kept") else render.asset_url(img["src"])
+
+
 def _sheet(slug: str, *, fresh: bool = False) -> dict:
     from silica.kernel import rights
     from silica.sources.discover.read import fetch_figure
@@ -297,7 +303,7 @@ def _sheet(slug: str, *, fresh: bool = False) -> dict:
     if fresh or slug not in _WIKI:
         _WIKI.clear()
         _WIKI[slug] = rights.read_wiki(slug, fetch=fetch_figure)
-    return rights.sheet(_WIKI[slug], rights.answers())
+    return rights.sheet(_WIKI[slug], rights.answers(), _thumbnail)
 
 
 @router.get("/public/check")
