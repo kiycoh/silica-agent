@@ -17,61 +17,22 @@
 
 // --- projection:begin --------------------------------------------------------
 // Everything between this marker and projection:end is pure: no DOM, no fetch,
-// no globals but app-core.js's formats. tests/test_work_panel.py lifts the block
-// out and runs it under node, which is how the fold below is checked at all.
+// no globals but VOCAB and app-core.js's formats. tests/test_work_panel.py lifts
+// the block out and runs it under node, which is how the fold below is checked at
+// all.
 // The narration payload carries the RAW tool name and the raw args, and the
-// browser has no renderer, so the verb table has to live here too. A copy that
-// nothing checks is a copy that goes stale on the next tool, so
-// tests/test_work_panel.py pins it entry-for-entry to each tool's declared
-// label (silica/tools/__init__.py) and fails when the two disagree.
-const TOOL_VERBS = {
-  "silica_search": ["search titles", "query"],
-  "silica_search_context": ["search inside", "query"],
-  "silica_read_note": ["read", "name"],
-  "silica_write_note": ["write note", "path"],
-  "silica_patch_note": ["patch note", "name"],
-  "silica_flag_note": ["flag note", "name"],
-  "silica_require": ["require", "name"],
-  "silica_record_quiz": ["record quiz", null],
-  "silica_review_queue": ["review queue", null],
-  "silica_props": ["props", "name"],
-  "silica_outline": ["outline", "name"],
-  "silica_links": ["links", "name"],
-  "silica_backlinks": ["backlinks", "name"],
-  "silica_orphans": ["orphans", null],
-  "silica_unresolved": ["unresolved links", null],
-  "silica_files": ["list files", "folder"],
-  "silica_exists": ["exists", "path"],
-  "silica_deferred_list": ["deferred list", null],
-  "silica_deferred_flush": ["deferred flush", null],
-  "silica_deferred_retry": ["deferred retry", null],
-  "silica_anneal": ["anneal", null],
-  "silica_inbox_ls": ["inbox", null],
-  "silica_run_injector": ["injector", "inbox_file"],
-  "silica_delete": ["delete", "ref"],
-  "silica_snapshot": ["snapshot", "ops_json_path"],
-  "silica_restore": ["restore", "txn_id"],
-  "web_search": ["web search", "query"],
-  "web_fetch": ["web fetch", "url"],
-  "silica_web_answer": ["web answer", "question"],
-};
+// browser has no renderer, so it reads each tool's declared facts off VOCAB:
+// `label`, `mutates` and `note_args` (silica/tools/__init__.py).
+const TOOL_VERBS = VOCAB.tools.labels;
 
-// How a tool changes the vault. Same keys as the tools declaring `mutates`, and
-// the reason a patch target is a WRITE here and never also a source: the
-// panel's two lists are derived from one table, so a note cannot appear in both.
-const WRITE_OPS = {
-  "silica_write_note": "write",
-  "silica_patch_note": "patch",
-  "silica_flag_note": "flag",
-  "silica_require": "require",
-  "silica_restore": "restore",
-  "silica_delete": "delete",
-  "silica_move": "move",
-};
+// How a tool changes the vault, and the reason a patch target is a WRITE here
+// and never also a source: the panel's two lists are derived from one table, so
+// a note cannot appear in both.
+const WRITE_OPS = VOCAB.tools.writes;
 
-// Arg keys that name a note: every tool's declared `note_args`. Missing one only
-// drops a row from Sources; it never names the wrong note.
-const NOTE_KEYS = ["name", "path", "note", "note_path", "ref"];
+// Arg keys that name a note. Missing one only drops a row from Sources; it never
+// names the wrong note.
+const NOTE_KEYS = VOCAB.tools.note_args;
 
 
 function toolVerb(name) {
@@ -79,6 +40,10 @@ function toolVerb(name) {
   return e ? e[0] : String(name || "").replace(/^silica_/, "").replace(/_/g, " ");
 }
 
+// tool_labels.tool_target for the forms a label cannot state, pinned to it by
+// tests/test_work_panel.py. Not for the injector's `inbox_files`, the plural every
+// real call sends: the run line says a bare "injector" where the chat row names
+// the file, and that difference is older than this table.
 function toolTarget(name, args) {
   const a = args || {};
   if (name === "silica_move") return `${a.ref || ""} → ${a.to || ""}`.trim();

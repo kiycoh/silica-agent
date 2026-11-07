@@ -884,6 +884,12 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
        here in position; never reorder to make a file read more thematically.
        A helper more than one script needs goes in app-core.js, which comes
        first and reads nothing from the others. -->
+  <!-- The words the server and this page share (silica/ui/web/vocabulary.py):
+       index() fills the island, so every script below can read VOCAB as it
+       loads. Parsed here and not in app-core.js, which touches no DOM while it
+       loads, so that a block of a script can run under node. -->
+  <script type="application/json" id="vocab"></script>
+  <script>const VOCAB = JSON.parse(document.getElementById("vocab").textContent);</script>
   <script src="/static/app-core.js"></script>
   <!-- The prototype behind ADR-0048, kept as the record of the choice: inert
        unless the URL carries ?presence=A|B|C, and then it draws its orb over
