@@ -96,35 +96,6 @@ def _parse_log(stdout: str) -> list[CommitInfo]:
     return out
 
 
-def is_ignored(root: Path | str, paths: list[Path]) -> set[Path]:
-    """Return the subset of `paths` ignored by git. Empty set on any failure.
-
-    Paths are interpreted relative to `root`. Works for any vault (an Obsidian
-    vault under git benefits too), not just codebase mode. `check-ignore` needs
-    stdin, which the shared `_run` helper does not provide, so this calls
-    subprocess directly.
-    """
-    if not paths:
-        return set()
-    stdin = "\n".join(str(p) for p in paths)
-    try:
-        proc = subprocess.run(
-            ["git", "check-ignore", "--stdin"],
-            cwd=str(root),
-            input=stdin,
-            capture_output=True,
-            text=True,
-            timeout=_TIMEOUT_S,
-            check=False,
-        )
-    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
-        return set()
-    # exit 0 = some ignored, 1 = none ignored, >1 = error (treat as none).
-    if proc.returncode not in (0, 1):
-        return set()
-    return {Path(line) for line in proc.stdout.splitlines() if line.strip()}
-
-
 def latest_shas(root: Path | str, paths: list[str]) -> dict[str, str]:
     """Newest commit sha per path, in ONE history walk (`git log --name-only`
     limited to `paths`) instead of one subprocess per path — wiki notes list
