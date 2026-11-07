@@ -60,5 +60,5 @@ def print_banner() -> None:
         return
     wordmark = _painted(_ART)
     wordmark.append("\n")
-    wordmark.append(_CAPTION, style="dim")  # caption rides under the wordmark
+    wordmark.append(_CAPTION, style="dim")
     CONSOLE.print(Padding(wordmark, (0, 0, 0, 2)))
