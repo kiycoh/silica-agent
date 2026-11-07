@@ -131,7 +131,7 @@ def run_one(kind: str, arm: str, out_file: Path) -> None:
         if row["id"] in done:
             continue
         messages = [m for m in seed_messages(math=True) if m.get("content")]
-        expanded = _expand_workflow_shortcut(row["prompt"]) if row["prompt"].startswith("/") else None
+        expanded = dispatch(row["prompt"], []).directive if row["prompt"].startswith("/") else None
         messages.append({"role": "user", "content": expanded or row["prompt"],
                          **({"origin": "cli"} if expanded else {})})
         sid = _narr.NARRATOR.ensure_session(driver="probe", seed={"kind": kind, "arm": arm})
