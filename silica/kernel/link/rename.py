@@ -49,10 +49,6 @@ def _span_is_clear(mask: list[bool], start: int, end: int) -> bool:
     return not any(mask[i] for i in range(start, end))
 
 
-# ---------------------------------------------------------------------------
-# Path helpers
-# ---------------------------------------------------------------------------
-
 def _stem(vault_path: str) -> str:
     """Basename without extension (e.g. 'Folder/Note.md' → 'Note')."""
     return os.path.splitext(os.path.basename(vault_path))[0]
@@ -67,10 +63,6 @@ def _path_without_ext(vault_path: str) -> str:
     """Vault-relative path with extension stripped ('Folder/Note.md' → 'Folder/Note')."""
     return os.path.splitext(vault_path)[0]
 
-
-# ---------------------------------------------------------------------------
-# Wikilink rewriter
-# ---------------------------------------------------------------------------
 
 def _rewrite_wikilinks(
     content: str,
@@ -116,9 +108,6 @@ def _rewrite_wikilinks(
 
         target_stripped = target.strip()
 
-        # ---------------------------------------------------------------
-        # Path-based link: target contains a "/" → match by full path
-        # ---------------------------------------------------------------
         if "/" in target_stripped:
             # Decode the stored target to a vault-relative path
             # Obsidian stores paths without extension sometimes, so check both
@@ -139,9 +128,6 @@ def _rewrite_wikilinks(
 
             continue  # path-based — no fallthrough to name-based
 
-        # ---------------------------------------------------------------
-        # Name-based link: no "/" in target — match by basename
-        # ---------------------------------------------------------------
         if not rewrite_name_links:
             continue
         if not basename_changed and not path_form:
@@ -192,10 +178,6 @@ def _rewrite_frontmatter_wikilinks(
     return content, n
 
 
-# ---------------------------------------------------------------------------
-# Markdown link rewriter
-# ---------------------------------------------------------------------------
-
 # Matches Markdown links: [text](href)  or  [text](<href>)
 # Group 1: link text
 # Group 2: "<" if angle-bracket form, else ""
@@ -237,14 +219,13 @@ def _rewrite_markdown_links(
         raw_href = m.group(3)
         close_angle = m.group(4)  # ">" or ""
 
-        # Skip non-relative hrefs
         if raw_href.startswith(("http://", "https://", "mailto:", "#")):
             continue
 
         # Split off any URL fragment (#...) — preserved verbatim on rewrite
         if "#" in raw_href:
             hash_pos = raw_href.index("#")
-            href_path = raw_href[:hash_pos]    # portion before the first #
+            href_path = raw_href[:hash_pos]
             fragment = raw_href[hash_pos:]     # "#Section" or "#^blockid" etc.
         else:
             href_path = raw_href
@@ -256,8 +237,6 @@ def _rewrite_markdown_links(
         if decoded_href.lower() != old_path_lower:
             continue
 
-        # Decide how to re-encode the new path
-        # If original href used %20 encoding, re-encode spaces the same way
         original_had_percent = "%20" in href_path
         if original_had_percent:
             new_href = quote(new_path, safe="/")
@@ -273,10 +252,6 @@ def _rewrite_markdown_links(
 
     return result, len(replacements)
 
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 def rewrite_links(
     content: str,

@@ -43,10 +43,6 @@ from silica.kernel.base.syntax import (
     WIKILINK_TOKEN_RE,
 )
 
-# ---------------------------------------------------------------------------
-# Skip-region detection
-# ---------------------------------------------------------------------------
-
 # Bare URLs — never link a word inside https://example.com/Neural-Networks
 _URL_RE = re.compile(r"https?://[^\s<>()\[\]]+")
 
@@ -62,10 +58,8 @@ _MD_LINK_RE = re.compile(r"!?\[[^\]\n]*\]\([^)\n]*\)")
 # HTML tags with their attributes (<img alt="Neural Networks" ...>)
 _HTML_TAG_RE = re.compile(r"</?[A-Za-z][^>]*>")
 
-# HTML comments
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
-# Heading lines (# ... at line start)
 _HEADING_RE = re.compile(r"^#{1,6} .+$", re.MULTILINE)
 
 
@@ -98,13 +92,13 @@ def _block_skip_spans(text: str) -> list[tuple[int, int]]:
         is_fence = bare.startswith(("```", "~~~"))
         is_blank = line.strip() == ""
 
-        if fence_open_at is not None:          # inside a fence
-            if is_fence:                       # closing delimiter
+        if fence_open_at is not None:
+            if is_fence:
                 spans.append((fence_open_at, end))
                 fence_open_at = None
             prev_blank, in_indented, pos = False, False, end
             continue
-        if is_fence:                           # opening delimiter
+        if is_fence:
             fence_open_at = pos
             prev_blank, in_indented, pos = False, False, end
             continue
@@ -122,7 +116,7 @@ def _block_skip_spans(text: str) -> list[tuple[int, int]]:
     return spans
 
 
-# Shared skip-region idiom (kernel/rename.py reuses it via build_skip_mask).
+# Shared skip-region idiom (kernel/link/rename.py reuses it via build_skip_mask).
 # BASE = regions both callers protect; FULL adds regions only autolink skips.
 # rename REWRITES wikilinks, headings and markdown-link hrefs, so those live in
 # FULL, never BASE. Fenced/indented code is always masked (see build_skip_mask).
@@ -165,10 +159,6 @@ def build_skip_mask(text: str, patterns=SKIP_PATTERNS_FULL) -> list[bool]:
 def _build_skip_mask(text: str) -> list[bool]:
     return build_skip_mask(text, SKIP_PATTERNS_FULL)
 
-
-# ---------------------------------------------------------------------------
-# Main autolink function
-# ---------------------------------------------------------------------------
 
 _WORD_RE = re.compile(r"\w+")
 
@@ -248,7 +238,6 @@ def autolink(
     if not body or not title_index:
         return body, []
 
-    # Determine which titles to consider
     if candidates is not None:
         title_set = {t.lower(): t for t in title_index}
         work_titles = [t for t in candidates if t.lower() in title_set]
@@ -335,7 +324,7 @@ def autolink(
             continue  # single-character titles are too noisy
 
         if title.lower() in existing_links:
-            continue  # already linked elsewhere in the note — skip
+            continue
 
         # Build case-insensitive whole-word pattern.
         # `(?!\.\w)`: a title followed by a dot-and-letter is the stem of a
@@ -349,7 +338,6 @@ def autolink(
             re.IGNORECASE,
         )
 
-        # Find the first match that is NOT inside a skip region
         match = None
         for m in pattern.finditer(current):
             if not any(mask[i] for i in range(m.start(), m.end())):
@@ -377,10 +365,6 @@ def autolink(
 
     return current, added
 
-
-# ---------------------------------------------------------------------------
-# Reverse-link pass — inject links to newly created notes into pre-existing ones
-# ---------------------------------------------------------------------------
 
 def backlink_pass(
     new_titles: list[str],
@@ -435,10 +419,6 @@ def backlink_pass(
             _l.getLogger(__name__).debug("BACKLINK: skipped '%s' (non-fatal): %s", path, _e)
     return result
 
-
-# ---------------------------------------------------------------------------
-# Title index helpers
-# ---------------------------------------------------------------------------
 
 def build_title_index(refs: list) -> list[str]:
     """Build a disambiguated title list from driver NoteRef objects.
