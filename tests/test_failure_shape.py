@@ -7,6 +7,7 @@ branches on."""
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -17,7 +18,7 @@ from fastapi.testclient import TestClient
 
 from silica.ui.web import failures, server
 from silica.ui.web.session import SESSION
-from tests.webassets import core_js
+from tests.webassets import WEB, core_js
 
 ROUTES = Path(server.__file__).parent
 
@@ -94,3 +95,22 @@ def test_the_one_reader_takes_each_body_the_wire_can_carry(tmp_path):
     out = subprocess.run(["node", str(script), json.dumps(cases)], capture_output=True, text=True, timeout=60)
     assert out.returncode == 0, out.stderr
     assert json.loads(out.stdout) == [c[2] for c in cases]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run app-limits.js")
+def test_a_limit_reads_as_the_server_wrote_it_with_the_readers_clock(tmp_path):
+    """The page used to swap `when` into the sentence by exact substring. It writes
+    the sentence from the table now, and must land on the same words."""
+    src = (WEB / "app-limits.js").read_text(encoding="utf-8")
+    block = src[src.index("function limWhen("):src.index("// The Usage section of Settings")]
+    at = "2026-11-02T14:20:00+00:00"
+    frames = [{**failures.explain(f"usage limit reached: {layer}, resets {at}"), "layer": layer}
+              for layer in failures.LIMIT_SENTENCE]
+    script = tmp_path / "limit.js"
+    script.write_text(core_js() + block + "\nconsole.log(JSON.stringify(JSON.parse(process.argv[2]).map("
+                      "(ev) => [limitSentence(ev), limWhen(ev.limit, ev.resets_at)])));\n")
+    out = subprocess.run(["node", str(script), json.dumps(frames)], capture_output=True, text=True, timeout=60,
+                         env={**os.environ, "TZ": "Asia/Tokyo"})
+    assert out.returncode == 0, out.stderr
+    for frame, (said, local) in zip(frames, json.loads(out.stdout), strict=True):
+        assert said == frame["error"].replace(frame["when"], local) and local and "UTC" not in said
