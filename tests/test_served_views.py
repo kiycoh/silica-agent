@@ -235,3 +235,17 @@ def test_each_address_the_chat_is_told_is_a_view_the_help_panel_names():
     from silica.ui.web.app_help import ADDRESS, panel
 
     assert set(ADDRESS) <= {term for term, _ in dict(panel(hosted=False))["the views"]}
+
+
+def test_the_page_is_told_what_this_process_withholds(free, monkeypatch):
+    """The landing's ideas read this and not their own rule: /quiz goes with Learn,
+    and /explain with a demo (DEMO_OFF)."""
+    from silica.ui.web.vocabulary import table
+
+    assert "/quiz" in table()["views"]["withheld_commands"]
+    assert "/explain" not in table()["views"]["withheld_commands"]
+    monkeypatch.setenv("SILICA_DEMO", "1")
+    assert "/explain" in table()["views"]["withheld_commands"]
+    monkeypatch.delenv("SILICA_HOSTED")
+    monkeypatch.delenv("SILICA_DEMO")
+    assert table()["views"]["withheld_commands"] == []
