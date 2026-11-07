@@ -34,11 +34,14 @@ def _recon_embedder():
 
 
 def _same_note(ref_a, ref_b) -> bool:
-    """Path-safe comparison between two NoteRefs — handles slashes, casing, and .md suffix."""
+    """One note, whichever way the two refs spell it: store keys, under the
+    filesystem's own idea of case (normcase folds on Windows, nowhere else)."""
     import os
+
+    from silica.kernel.base.notekey import store_key
+
     def norm(r):
-        p = r.path or r.name
-        return os.path.normcase(p.replace("\\", "/").removesuffix(".md").strip("/"))
+        return os.path.normcase(store_key(r.path or r.name))
     return norm(ref_a) == norm(ref_b)
 
 

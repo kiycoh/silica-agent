@@ -98,12 +98,19 @@ MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 # figure as a source: an address may open with spaces and sit in `<...>`, and an
 # embed's name ends at its `#heading` and needs no closing bracket.
 #
-# Three more image patterns live with their readers and stay there, each a subset
+# Four more image patterns live with their readers and stay there, each a subset
 # chosen for what it guards: `saved_page._MD_IMAGE` remote addresses only,
-# `rights._MD_IMAGE` the alt text and one level of brackets in the address, and
-# `mail._IMAGE_REF_RE` every shape a stranger's mail can use to fetch a pixel.
+# `rights._MD_IMAGE` the alt text and one level of brackets in the address,
+# `mail._IMAGE_REF_RE` every shape a stranger's mail can use to fetch a pixel, and
+# `figures.EMBED` an embed that names a picture, off the format table this module
+# may not import.
 EMBEDDED_ADDRESS_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)>\s]+)")
 EMBEDDED_NAME_RE = re.compile(r"!\[\[([^\]|#]+)")
+# The pictures a chat's file brings along when it moves to the Inbox
+# (`vault_files`): EMBEDDED_NAME_RE, or an address that ends at its bracket. An
+# image with a title stays behind, as it always has; widening it to
+# EMBEDDED_ADDRESS_RE changes what lands in Inbox/Images.
+CHAT_IMAGE_RE = re.compile(r"!\[\[([^\]|#]+)|!\[[^\]]*\]\(([^)\s]+)\)")
 
 # --- code -------------------------------------------------------------------
 

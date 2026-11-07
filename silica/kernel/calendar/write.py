@@ -12,6 +12,16 @@ import yaml
 
 from silica.driver import DRIVER
 
+# What a caller names and the frontmatter key that holds it. `event_start` is
+# also what makes a note an event (noteshape.is_event).
+EVENT_KEYS = {
+    "start": "event_start",
+    "end": "event_end",
+    "rrule": "event_rrule",
+    "reminder": "event_reminder",
+    "status": "event_status",
+}
+
 
 def _event_stem(title: str, start: str, rrule: str) -> tuple[str, str]:
     """(stem, "") or ("", error) for the note an event is written to."""
@@ -73,13 +83,8 @@ def create_event(title: str, start: str, *, end: str = "", rrule: str = "",
     title = title.strip()
     if not title:
         return {"error": "title is required"}
-    fm: dict[str, Any] = {"event_start": start}
-    if end:
-        fm["event_end"] = end
-    if rrule:
-        fm["event_rrule"] = rrule
-    if reminder:
-        fm["event_reminder"] = reminder
+    fm: dict[str, Any] = {EVENT_KEYS["start"]: start}
+    fm.update({EVENT_KEYS[k]: v for k, v in (("end", end), ("rrule", rrule), ("reminder", reminder)) if v})
     errors = validate_event(fm)
     if errors:
         return {"error": "; ".join(errors)}
@@ -109,3 +114,63 @@ def create_event(title: str, start: str, *, end: str = "", rrule: str = "",
         checkpoint = checkpoint_landed(path, None)  # None: created, /undo removes it
 
     return {"op": "write", "success": True, "path": ref.path or path, **checkpoint}
+
+
+def update_event(note: str, *, start: str = "", end: str = "", rrule: str = "",
+                 reminder: str = "", status: str = "") -> dict[str, Any]:
+    """Update an event note: only the passed fields change, and the merged set
+    is re-validated first. `note` is its stem or path."""
+    from silica.kernel.base import frontmatter
+    from silica.kernel.base.layout import vault_root
+    from silica.kernel.calendar import reminders as rem
+    from silica.kernel.calendar.model import scan_events, validate_event
+    from silica.kernel.workqueue import path_lease
+    from silica.kernel.write.checkpoints import checkpoint_landed
+    from silica.kernel.write.templates import upsert_props
+
+    changes = {k: v.strip() for k, v in
+               dict(start=start, end=end, rrule=rrule, reminder=reminder,
+                    status=status).items() if v.strip()}
+    if not changes:
+        return {"error": "nothing to update: pass at least one field"}
+
+    vault = vault_root()
+    target = None
+    for e in scan_events(vault):
+        if e.stem == note or e.path == note or e.path == f"{note}.md":
+            target = e
+            break
+    if target is None:
+        return {"error": f"No event note found for '{note}'"}
+
+    with path_lease(target.path):
+        try:
+            prior = DRIVER.read_note(target.path).content
+        except Exception as e:
+            return {"error": f"Failed to read '{target.path}': {e}"}
+        data, _, _ = frontmatter.split(prior)
+        merged = dict(data or {})
+        merged.update({EVENT_KEYS[k]: v for k, v in changes.items()})
+        errors = validate_event(merged)
+        if errors:
+            return {"error": "; ".join(errors)}
+
+        new_content = upsert_props(prior, {EVENT_KEYS[k]: v for k, v in changes.items()})
+        try:
+            # The event keys are what an update is for (ADR-0093 `free`).
+            DRIVER.overwrite(target.path, new_content, free=tuple(EVENT_KEYS.values()))
+        except Exception as e:
+            return {"error": f"Failed to update '{target.path}': {e}"}
+
+        checkpoint_ok = checkpoint_landed(target.path, prior, new_content)["checkpoint_ok"]
+
+    if "start" in changes or "rrule" in changes:
+        # An event moved earlier than its mark would otherwise never remind.
+        with rem.delivery_lock(vault):
+            marks = rem.load_marks(vault)
+            if target.stem in marks:
+                del marks[target.stem]
+                rem.save_marks(vault, marks)
+
+    return {"op": "update", "success": True, "path": target.path,
+            "changed": sorted(changes), "checkpoint_ok": checkpoint_ok}

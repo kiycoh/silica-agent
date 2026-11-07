@@ -9,6 +9,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from silica.config import CONFIG
+from silica.kernel.base.frontmatter import split_shown
 from silica.kernel.graph.mindmap import note_resolver
 from silica.kernel.text import note_parts
 from silica.kernel.write import session_changes
@@ -247,7 +248,7 @@ def _review_of(path: str) -> str:
     text = session_changes.current_text(path)
     if not text:
         return ""
-    props, _ = note_parts.split_frontmatter(text)
+    props, _ = split_shown(text)
     return str((props or {}).get("review") or "").strip()
 
 

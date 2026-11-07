@@ -350,12 +350,6 @@ def _caller() -> tuple[str, str]:
     return "?", "?"
 
 
-def _vault() -> str | None:
-    from silica.config import CONFIG
-
-    return (CONFIG.vault_path or "").strip() or None
-
-
 def _untouched_draft(path: str, prior: str) -> bool:
     """Decision 9: the prior is byte-identical to what the agent last landed
     (the newest journal inverse for the path carries its hash) and still
@@ -364,10 +358,10 @@ def _untouched_draft(path: str, prior: str) -> bool:
     data, _raw, _body = frontmatter.split(prior)
     if not isinstance(data, dict) or "review" not in data:
         return False
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
 
     try:
-        post = get_undo_journal().newest_post_hash(path, _vault())
+        post = get_undo_journal().newest_post_hash(path, active_vault())
     except Exception as exc:
         # No journal, no grant: the write is judged like any other.
         logger.debug("preservation: journal unreadable for %s: %s", path, exc)
@@ -410,11 +404,11 @@ def check_recreate(path: str, after: str, *, loss: Loss | None = None, free=()) 
     started = _TURN_STARTED.get()
     if started is None:
         return
-    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
 
     try:
         journal = get_undo_journal()
-        hit = journal.last_chat_delete(_vault(), path)
+        hit = journal.last_chat_delete(active_vault(), path)
         if hit is None or hit[2] < started:
             return
         saved = next((inv.prior_content for inv, _h in journal.inverses_for(hit[0])

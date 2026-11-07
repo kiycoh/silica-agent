@@ -178,6 +178,12 @@ SYSTEM_DIRS: frozenset[str] = frozenset({
 })
 
 
+def vault_root() -> Path:
+    """The active vault as a Path, for code that has a vault by now. An unset
+    one raises here: `publish` and the skills route each answer it their own way."""
+    return Path(CONFIG.vault_path)
+
+
 def is_system_dir(path) -> bool:
     return str(Path(path).resolve()) in SYSTEM_DIRS
 

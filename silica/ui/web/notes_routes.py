@@ -17,6 +17,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from silica.config import CONFIG
+from silica.kernel.base.frontmatter import split_shown
 from silica.kernel import vault_files
 from silica.kernel.graph.mindmap import note_resolver
 from silica.kernel.recall import note_index
@@ -48,7 +49,7 @@ def note(path: str = ""):
         content = get_driver().read_note(NoteRef(name=note_parts.clean_name(canon), path=canon)).content
     except Exception:
         return {"title": note_parts.clean_name(canon), "html": "<p>note unreadable.</p>"}
-    props, body = note_parts.split_frontmatter(content)
+    props, body = split_shown(content)
     html = render.linkify(body, resolve)
     if props:
         html = html + render.render_frontmatter(props)
@@ -247,7 +248,7 @@ def note_raw(path: str = ""):
         text = get_driver().read_note(NoteRef(name=note_parts.clean_name(canon), path=canon)).content
     except Exception:
         raise HTTPException(404, "note unreadable")
-    props, _body = note_parts.split_frontmatter(text)
+    props, _body = split_shown(text)
     return {"path": canon, **_note_identity(canon, props), "text": text, "etag": _etag(text),
             "broken": _broken_links(text, resolve)}
 
@@ -271,7 +272,7 @@ def raw_file(path: str = "", download: bool = False):
         text = get_driver().read_note(NoteRef(name=note_parts.clean_name(canon), path=canon)).content
     except Exception:
         raise HTTPException(404)
-    _value, found = _raw_found(canon, note_parts.split_frontmatter(text)[0])
+    _value, found = _raw_found(canon, split_shown(text)[0])
     if found is None:
         raise HTTPException(404)
     attach = download or found.suffix.lower() not in _RAW_OPENS
@@ -435,7 +436,7 @@ def note_render(payload: dict):
     cannot typeset the same markdown two ways. POST because a table does not
     fit in a query string; guarded like a write because it runs the resolver
     over the vault on another page's say-so."""
-    props, body = note_parts.split_frontmatter(str(payload.get("text", "")))
+    props, body = split_shown(str(payload.get("text", "")))
     html = render.linkify(body, note_resolver()) if body.strip() else ""
     if props:
         html = render.render_frontmatter(props) + html

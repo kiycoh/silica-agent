@@ -1459,19 +1459,19 @@ def test_latex_prose_dollars_and_code_stay_literal():
     assert "<math" not in html and "$x^2$" in html
 
 
-def test_split_frontmatter_returns_props_and_body():
-    from silica.kernel.text.note_parts import split_frontmatter
+def test_split_shown_returns_props_and_body():
+    from silica.kernel.base.frontmatter import split_shown
 
-    props, body = split_frontmatter("---\ntags: [a, b]\nstatus: seed\n---\n# Title\n")
+    props, body = split_shown("---\ntags: [a, b]\nstatus: seed\n---\n# Title\n")
     assert props == {"tags": ["a", "b"], "status": "seed"}
     assert body == "# Title\n"
 
 
-def test_split_frontmatter_absent_or_non_mapping_is_none():
-    from silica.kernel.text.note_parts import split_frontmatter
+def test_split_shown_absent_or_non_mapping_is_none():
+    from silica.kernel.base.frontmatter import split_shown
 
-    assert split_frontmatter("# no fm")[0] is None
-    assert split_frontmatter("---\n- just\n- a list\n---\nbody")[0] is None
+    assert split_shown("# no fm")[0] is None
+    assert split_shown("---\n- just\n- a list\n---\nbody")[0] is None
 
 
 def test_note_endpoint_renders_frontmatter_properties_box(client, tmp_vault):

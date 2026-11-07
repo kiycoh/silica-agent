@@ -40,6 +40,7 @@ from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 
+from silica.kernel.base import frontmatter
 from silica.kernel.text.mentions import CLOSE, OPEN, resolve
 
 READ = "silica_read_note"
@@ -58,9 +59,6 @@ _NAMED = re.compile(r"^Notes the user named[^:]*: (.+)$", re.M)
 # Eight words in a row shared with the note: long enough that two notes do not
 # share it by chance, short enough to survive inside a 300-char search snippet.
 SHINGLE = 8
-# Frontmatter is left out of the note's words: recall and search serve the body
-# without it, and in a short note it made the only n-gram one no result holds.
-_FRONTMATTER = re.compile(r"\A---\n.*?\n---\n", re.S)
 
 
 def _text(msg: dict) -> str:
@@ -134,7 +132,9 @@ def _shingles(vault: str, path: str) -> tuple[int, frozenset] | None:
     """The note body's word n-grams, n = SHINGLE or the whole body when
     shorter; None when the note is not on this disk."""
     try:
-        w = _words(_FRONTMATTER.sub("", (Path(vault) / path).read_text(encoding="utf-8")))
+        # Frontmatter is left out of the note's words: recall and search serve the
+        # body without it, and in a short note it made the only n-gram one no result holds.
+        w = _words(frontmatter.body_of((Path(vault) / path).read_text(encoding="utf-8")))
     except OSError:
         return None
     n = min(SHINGLE, len(w))
