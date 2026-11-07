@@ -651,7 +651,7 @@ async function moveFromTree(paths, folder, name) {
     r = await postJson("/tree/move", name !== undefined ? { path: paths[0], name } : { paths, folder });
     data = await r.json();
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify((data && data.detail) || "couldn't move that"); return; }
+  if (!r || !r.ok) { notify(failureSaid(data, "couldn't move that")); return; }
   followMoves(data.moved, data.rewritten);
   if (name === undefined && folder) openTreeFolder(folder);
   clearTreeSel();
@@ -694,7 +694,7 @@ async function undoTreeRun(run) {
     r = await postJson("/tree/undo", { run });
     data = await r.json();
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify((data && data.detail) || "couldn't undo that"); return null; }
+  if (!r || !r.ok) { notify(failureSaid(data, "couldn't undo that")); return null; }
   return data;
 }
 
@@ -889,7 +889,7 @@ async function deleteFromTree(note, folder, paths) {
     r = await postJson("/tree/delete", paths ? { paths } : note ? { path: note } : { folder });
     data = await r.json();
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify((data && data.detail) || "couldn't delete that"); return false; }
+  if (!r || !r.ok) { notify(failureSaid(data, "couldn't delete that")); return false; }
   const gone = new Set(data.deleted);
   // A pin on a deleted note opens nothing; the undo puts it back with the note.
   const unpinned = pinnedPaths.filter((p) => gone.has(p));
@@ -969,7 +969,7 @@ async function trashAct(url, item, done) {
     r = await postJson(url, item.all ? { all: true } : { run: item.run, path: item.path });
     data = await r.json();
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify((data && data.detail) || "couldn't do that", "error"); loadTrash(); return; }
+  if (!r || !r.ok) { notify(failureSaid(data, "couldn't do that"), "error"); loadTrash(); return; }
   notify(done);
   loadVaultInfo(); // a restored note joins the tree, and the trash redraws with it
 }

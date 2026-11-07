@@ -11,13 +11,14 @@ from silica.kernel import vault_files
 from silica.sources import drop_turn
 from silica.kernel import job_records
 from silica.ui.web import jobs, session, sse
+from silica.ui.web.failures import Refused
 from silica.ui.web.session import SESSION
 
 router = APIRouter(prefix="/jobs")
 
 
-def _refused(exc: jobs.Refused) -> HTTPException:
-    return HTTPException(409, str(exc.args[0]))
+def _refused(exc: jobs.Refused) -> Refused:
+    return Refused(409, exc.args[0])
 
 
 @router.get("")

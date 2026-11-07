@@ -67,8 +67,7 @@ async function jobPost(j, action, body) {
   try {
     return await apiPost(`/jobs/${j.id}/${action}`, body);
   } catch (e) {
-    notify(!e.status ? "the server could not be reached"
-      : typeof e.data?.detail === "string" ? e.data.detail : `the server answered ${e.status}`);
+    notify(!e.status ? "the server could not be reached" : failureSaid(e.data, `the server answered ${e.status}`));
     return null;
   }
 }
@@ -125,7 +124,7 @@ async function jobAddToVault(j) {
   try {
     const r = await postJson("/chat/files/add", { source: j.source.path });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) { notify(typeof d.detail === "string" ? d.detail : `the server answered ${r.status}`); return; }
+    if (!r.ok) { notify(failureSaid(d, `the server answered ${r.status}`)); return; }
     announce(`${j.source.name} added to the Inbox`);
     loadVaultInfo();
     markVaultChanged();

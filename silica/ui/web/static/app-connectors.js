@@ -13,7 +13,7 @@ async function connAct(name, action, payload) {
   let d = {};
   try { d = await r.json(); } catch { /* an empty answer is still an answer */ }
   if (!r.ok || d.ok === false) {
-    const err = new Error(d.error || d.detail || `HTTP ${r.status}`);
+    const err = new Error(failureSaid(d, `HTTP ${r.status}`));
     err.data = d; // a refusal can carry what the row offers next (no_store)
     throw err;
   }

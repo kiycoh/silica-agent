@@ -39,6 +39,8 @@ class Refused(Exception):
     """A session action turned away. The text is what the reader is told; `why`
     is BUSY, MISSING, INVALID or NO_MODEL, for a surface to say in its own terms."""
 
+    code = ""
+
     def __init__(self, why: str, text: str):
         super().__init__(text)
         self.why = why
@@ -47,6 +49,18 @@ class Refused(Exception):
 # Who is turned away and for what: another session holds the slot, the thing
 # named is not there, the request cannot be done, the model gave nothing.
 BUSY, MISSING, INVALID, NO_MODEL = "busy", "missing", "invalid", "no_model"
+
+
+class Gone(Refused):
+    """The session lived in this process's memory and the process restarted under
+    an open page. `code` is what a surface acts on: every later call would fail
+    the same way, and a sentence is not an error code."""
+
+    code = "session_gone"
+
+    def __init__(self) -> None:
+        super().__init__(MISSING, "no live session with that id")
+
 
 # The reason a suggestion is on the list, in the reader's words (refinement §19).
 REASON = {"due": "Suggested for review", "unexplored": "Not practised yet", "stale": "Changed since last practice",
@@ -401,7 +415,7 @@ def reload(sid: str) -> dict:
 
 def _live(sid: str) -> dict:
     if _LIVE is None or _LIVE["id"] != sid:
-        raise Refused(MISSING, "no live session with that id")
+        raise Gone()
     return _LIVE
 
 
@@ -1019,7 +1033,7 @@ def close(sid: str) -> dict:
     if _LIVE is None or _LIVE["id"] != sid:
         if _LAST and _LAST["id"] == sid:
             return _LAST
-        raise Refused(MISSING, "no live session with that id")
+        raise Gone()
     s = _LIVE
     rc = _receipt(s)
     if s["plan"] and rc["recorded"]:

@@ -81,7 +81,7 @@ async function createLinked(name, from, fallback) {
     r = await postJson("/note/new", { folder, name: base, text: "" });
     d = await r.json().catch(() => ({}));
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify(d.detail || `couldn't write ${base}`); return null; }
+  if (!r || !r.ok) { notify(failureSaid(d, `couldn't write ${base}`)); return null; }
   notify(`Wrote ${d.name} in ${folder || "the vault root"}`, "info", { label: "undo", run: () => undoWrite(d) });
   await loadVaultInfo();
   return d;
@@ -185,7 +185,7 @@ async function putImage(s, file) {
     r = await fetch("/note/asset", { method: "POST", body: form });
     d = await r.json().catch(() => ({}));
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify(d.detail || "couldn't add that image"); return; }
+  if (!r || !r.ok) { notify(failureSaid(d, "couldn't add that image")); return; }
   const v = s.editor.view, at = v.state.selection.main.head, text = d.embed + "\n";
   v.dispatch({ changes: { from: at, insert: text }, selection: { anchor: at + text.length } });
   v.focus();
@@ -282,7 +282,7 @@ async function renameCentre(s, name) {
     r = await postJson("/tree/move", { path: s.path, name });
     d = await r.json().catch(() => ({}));
   } catch { /* reported below */ }
-  if (!r || !r.ok) { titleSay(d.detail || "couldn't rename this note", true); return false; }
+  if (!r || !r.ok) { titleSay(failureSaid(d, "couldn't rename this note"), true); return false; }
   followMoves(d.moved, d.rewritten);
   paintCentre();
   loadVaultInfo();
@@ -318,7 +318,7 @@ function createFresh(s = centreNote, leaving = false) {
       return;
     }
     if (!r.ok) {
-      titleSay(d.detail || "couldn't write this note", true);
+      titleSay(failureSaid(d, "couldn't write this note"), true);
       s.nameRefused = name;
       setPhase(s, "refused");
       return;
@@ -367,7 +367,7 @@ async function undoWrite(d) {
     r = await postJson("/tree/undo", { run: d.run });
     data = await r.json().catch(() => ({}));
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify(data.detail || "couldn't take that back"); return; }
+  if (!r || !r.ok) { notify(failureSaid(data, "couldn't take that back")); return; }
   // Renamed since it was born, the note is not where the run left it, and stays.
   if (!(data.restored || []).length) { notify("This note has moved since: delete it from the tree", "info"); return; }
   notify("In the trash, with what it held", "info");

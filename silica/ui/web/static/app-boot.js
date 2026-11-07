@@ -451,7 +451,7 @@ async function recordTake(take, avail, opts, put) {
       form.append("audio", wav, "clip.wav");
       const resp = await fetch("/stt", { method: "POST", body: form });
       const body = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(body.detail || resp.statusText);
+      if (!resp.ok) throw new Error(failureSaid(body, resp.statusText));
       if (body.via === "local" && sttProbe) sttProbe.cold = false;
       put((body.text || "").trim());
     } catch (err) {

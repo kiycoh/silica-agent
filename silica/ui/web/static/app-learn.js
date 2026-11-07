@@ -78,7 +78,7 @@ const lrOriginRoute = (o) => (o?.kind === "plan" ? { view: "plan", plan: o.path 
 // and is gone, and every call on it would fail the same way (2026-10-06:
 // Resume, then "couldn't grade: no live session with that id" on each submit).
 function lrGone(e) {
-  if (!(e?.status === 404 && /no live session/.test(e.message || ""))) return false;
+  if (!(e?.status === 404 && e.data?.code === VOCAB.learn.session_gone)) return false;
   lrSession = null;
   notify("this session ended when Silica restarted; start it again", "warn");
   lrGo({ view: "home" });
@@ -286,7 +286,7 @@ async function loadLearn(force = false) {
 async function lrAttach(id) {
   try {
     const s = await (await fetch("/learn/session?id=" + encodeURIComponent(id))).json();
-    if (s.detail || !s.items) return;
+    if (failureSaid(s) || !s.items) return;
     const done = new Set([...(s.done || []), ...(s.skipped || [])]);
     const cur = Math.max(0, s.items.findIndex((it) => !done.has(it.i)));
     const verdicts = {};
@@ -865,7 +865,7 @@ function lrResumeBox() {
 async function lrFetchPlan(path) {
   try {
     const p = await (await fetch("/learn/plan?path=" + encodeURIComponent(path))).json();
-    if (p.detail) throw new Error(p.detail);
+    if (failureSaid(p)) throw new Error(failureSaid(p));
     lrPlan = p;
   } catch (e) { notify("couldn't read that plan"); lrPlan = null; return; }
   if ((lrRoute.view === "plan" || lrRoute.view === "edit") && lrRoute.plan === path) lrRender();
@@ -874,7 +874,7 @@ async function lrFetchPlan(path) {
 async function lrFetchNote(path) {
   try {
     const n = await (await fetch("/learn/note?path=" + encodeURIComponent(path))).json();
-    if (n.detail) throw new Error(n.detail);
+    if (failureSaid(n)) throw new Error(failureSaid(n));
     lrNote = n;
   } catch (e) {
     // renamed or deleted since it was listed: the pane says so and stops waiting
@@ -3315,7 +3315,7 @@ async function lrOpenReceipt(id, { replace = false } = {}) {
   try { rc = await (await fetch("/learn/receipt?id=" + encodeURIComponent(id))).json(); } catch { notify("no receipt for that session"); return; }
   if (lrHash(lrRoute) !== from) return;
   lrReceipt = rc;
-  if (lrReceipt.detail) { notify(lrReceipt.detail); lrGo({ view: "home" }, { replace: true }); return; }
+  if (failureSaid(lrReceipt)) { notify(failureSaid(lrReceipt)); lrGo({ view: "home" }, { replace: true }); return; }
   lrGo({ view: "receipt", id }, { replace });
 }
 
@@ -3680,7 +3680,7 @@ async function lrFetchRead(r) {
     if (prev?.data) return;
   }
   if (!d) lrRead = { key, error: "The server did not answer. Reload to try again." };
-  else if (d.detail) lrRead = { key, error: "That step is not in the plan any more." };
+  else if (failureSaid(d)) lrRead = { key, error: "That step is not in the plan any more." };
   else lrRead = { key, data: d, view: prev && prev.data?.exists ? prev.view : undefined, drafts: prev?.drafts || {},
                   polling: !!prev?.polling, listOpen: !!prev?.listOpen, reached: prev?.reached };
   if (lrRoute.view === "read" && lrReadKey(lrRoute) === key) lrRender();

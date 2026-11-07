@@ -23,6 +23,7 @@ from silica.sources.discover import feeds as F
 from silica.sources.discover import rank, read, store
 from silica.sources.discover import story as S
 from silica.ui.web import drop
+from silica.ui.web.failures import Refused
 
 
 router = APIRouter(prefix="/discover")
@@ -312,7 +313,7 @@ async def save(payload: dict):
     try:
         path = await asyncio.to_thread(S.save, None, sid, answer, question)
     except S.StoryError as exc:
-        raise HTTPException(404, str(exc)) from None
+        raise Refused(404, exc) from None
     return {"path": path}
 
 
@@ -446,7 +447,7 @@ async def opml(file: UploadFile = File(...)):
     try:
         listed = F.parse_opml(data)
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from None
+        raise Refused(422, exc) from None
     added = 0
     with store.LOCK:
         doc = store.load()

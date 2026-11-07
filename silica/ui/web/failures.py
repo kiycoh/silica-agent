@@ -1,4 +1,4 @@
-"""Every failure the web UI states is authored here, once.
+"""Every failure the web UI states has its one shape here.
 
 A raw exception used to reach the person three ways: as the agent's own words
 in the transcript, as a `TypeError` line, or as an amber toast, depending on
@@ -10,6 +10,13 @@ the client draws the first and discloses the second.
 
 One class per sentence. A new failure class gets a sentence here, never a
 branch in a client.
+
+A route's own "no" is the other half. Its words were written for the person, so
+`explain()`'s table must not rewrite them: `refusal()` gives them the same shape
+with `error` the words as they are, and `failureSaid` in app-core.js is the one
+reading of either. Two bodies stay out of it, and the reader takes them too: a
+guard's 403, pinned word for word since it is read by no page, and a status with
+nothing to say of its own, which is how a withheld route passes for a missing one.
 """
 from __future__ import annotations
 
@@ -132,6 +139,24 @@ def _limit_of(exc: BaseException | str, raw: str) -> tuple[str, str | None] | No
 
     hit = spent_layer()
     return (hit.layer, hit.resets_at) if hit is not None else None
+
+
+class Refused(Exception):
+    """A route's "no" in words written for the person: the text of what it caught,
+    named as such by raising this, where `HTTPException(400, str(exc))` would
+    serialise whatever an exception happens to say. `code` is for a page that must
+    act on which "no" this is: it branches on that, never on the sentence."""
+
+    def __init__(self, status: int, said: BaseException | str, code: str = ""):
+        super().__init__(str(said))
+        self.status, self.code = status, code
+
+
+def refusal(said: str, code: str = "") -> dict[str, str]:
+    """The body of a refusal, `explain()`'s shape. `detail` repeats the words
+    because it held them before `error` did, and it is what a reader outside this
+    repo was given to read."""
+    return {"error": said, "detail": said, **({"code": code} if code else {})}
 
 
 def explain(exc: BaseException | str) -> dict[str, str]:

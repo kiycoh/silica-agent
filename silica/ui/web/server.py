@@ -14,11 +14,14 @@ import html as _html
 import logging
 import re
 from contextlib import asynccontextmanager
+from http import HTTPStatus
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException
 
 from silica.config import CONFIG, demo, GUI_PORT, live_env
 from silica.kernel import vault_files
@@ -28,6 +31,7 @@ from silica.ui.web import (
     chat_routes,
     discover_routes,
     explore_routes,
+    failures,
     files_routes,
     jobs_routes,
     learn_routes,
@@ -121,15 +125,31 @@ app.middleware("http")(security.require_loopback_host)
 
 def _refused(status: int):
     async def answer(_request: Request, exc: Exception) -> JSONResponse:
-        return JSONResponse({"detail": exc.args[0]}, status_code=status)
+        return JSONResponse(failures.refusal(exc.args[0]), status_code=status)
 
     return answer
+
+
+async def _route_refused(_request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, failures.Refused)
+    return JSONResponse(failures.refusal(exc.args[0], exc.code), status_code=exc.status)
+
+
+async def _http_refused(request: Request, exc: Exception) -> Response:
+    """A route's own sentence in the one shape. FastAPI's answer stands for the two
+    that failures.py keeps out of it: a guard's 403 and a bare status."""
+    assert isinstance(exc, HTTPException)
+    if exc.status_code == 403 or not isinstance(exc.detail, str) or exc.detail == HTTPStatus(exc.status_code).phrase:
+        return await http_exception_handler(request, exc)
+    return JSONResponse(failures.refusal(exc.detail), status_code=exc.status_code, headers=exc.headers)
 
 
 # Sentences written for the person by code below this layer, which names no status.
 app.add_exception_handler(vault_files.NotAChatFile, _refused(400))
 app.add_exception_handler(vault_files.InboxClash, _refused(409))
 app.add_exception_handler(ZoteroError, zotero_web.refused)
+app.add_exception_handler(failures.Refused, _route_refused)
+app.add_exception_handler(HTTPException, _http_refused)
 
 for _routes in (chat_routes, files_routes, workspaces_routes, metrics_routes, calendar_routes, explore_routes,
                 notes_routes, tree_routes, stt_routes, settings_routes, zotero_web, learn_routes, skills_routes,
