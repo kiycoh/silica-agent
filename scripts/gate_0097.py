@@ -40,7 +40,7 @@ from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 
-from silica.agent.mentions import CLOSE, OPEN, resolve
+from silica.kernel.text.mentions import CLOSE, OPEN, resolve
 
 READ = "silica_read_note"
 # The tools that change a note, and the arguments that name it. The commit

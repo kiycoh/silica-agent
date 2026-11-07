@@ -261,11 +261,14 @@ allow_indirect_imports = true
 name = "kernel is the lowest layer under the seam — never imports the decision cycle"
 type = "forbidden"
 source_modules = ["silica.kernel"]
-forbidden_modules = ["silica.router", "silica.capabilities"]
+forbidden_modules = [
+  "silica.router", "silica.capabilities", "silica.agent", "silica.tools",
+  "silica.sources", "silica.connectors", "silica.onboarding", "silica.ui",
+]
 # This is the invariant that keeps workqueue/progress legal homes in kernel
-# (capabilities -> kernel.workqueue must never become a cycle). Note: kernel
-# is NOT pure — lazy imports into agent/ and tools/ exist (see ADR-0016 and
-# the AUDIT-COALA WATCH list); this contract codifies only what is true today.
+# (capabilities -> kernel.workqueue must never become a cycle). Function-local
+# imports count: the last ones up (Learn's writes through silica_write_note and
+# the rest, ADR-0016's WATCH list) went on 2026-11-07.
 allow_indirect_imports = true
 
 [[tool.importlinter.contracts]]

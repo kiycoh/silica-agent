@@ -259,7 +259,7 @@ def outline(text: str, language: str, cancel_token: Any = None) -> str:
 def _request() -> str:
     """The user's current message as they wrote it: without the named-notes
     block and the image markers the server appends to it."""
-    from silica.agent import mentions
+    from silica.kernel.text import mentions
     from silica.agent.read_scope import REQUESTS
 
     requests = REQUESTS.get()

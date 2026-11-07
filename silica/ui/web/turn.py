@@ -27,7 +27,7 @@ from silica.agent.constraints import (
     web_turn_constraints,
 )
 from silica.agent.loop import run_agent
-from silica.agent.mentions import image_mark
+from silica.kernel.text.mentions import image_mark
 from silica.agent.sentinels import EMPTY_COMPLETION
 from silica.tools import tool_failed
 from silica.agent.recall_watch import numbers_notes, read_refs, READS_KEY, RecallWatch, unfounded_in_turn
@@ -94,6 +94,7 @@ def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dic
     from silica.obs import narration as _narr
     from silica.kernel import proposed_skills as ps
     from silica.kernel import user_memory
+    from silica.ui.commands import COMMANDS
 
     from silica.kernel.learn.offer import says_lost
 
@@ -109,7 +110,8 @@ def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dic
         evidence = ps.detect(text, messages, vault, _narr.NARRATOR.sid)
         if evidence is not None:
             drafted = ps.draft(evidence["asks"], CONFIG)
-            name = ps.stage(vault, drafted, evidence, CONFIG.worker_model or CONFIG.model or "") if drafted else None
+            name = ps.stage(vault, drafted, evidence, CONFIG.worker_model or CONFIG.model or "",
+                            reserved=[c.name.lstrip("/") for c in COMMANDS]) if drafted else None
             if name:
                 return {"kind": "skill", "text": f"/{name} written from a request you made in "
                                                  f"{len(evidence['sessions'])} chats · review it in "
@@ -475,7 +477,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # loop, because it reads the driver's graph.
         opened = ""
         if web is None:
-            from silica.agent.mentions import named_notes
+            from silica.kernel.text.mentions import named_notes
             from silica.kernel.learn.offer import says_lost
             from silica.ui.web import jobs
 

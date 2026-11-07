@@ -526,9 +526,8 @@ def _mirror_prefix() -> str:
     """`"silica/"` when the ACTIVE vault stages writes in the mirror, else "".
 
     Keyed on the one write_dir name whose contents mirror the vault tree
-    (onboarding.adopt.SAFE_WRITE_DIR — same function-level import as
-    vault_manifest.seed_mirror_copy); `docs/silica` is Silica's own folder in
-    a repo, not a mirror of it, so no dedupe applies there.
+    (SAFE_WRITE_DIR, as mirror.seed_mirror_copy reads it); `docs/silica` is
+    Silica's own folder in a repo, not a mirror of it, so no dedupe applies there.
     """
     try:
         from silica.kernel.base.manifest import active_write_dir

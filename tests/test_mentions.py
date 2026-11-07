@@ -1,7 +1,7 @@
 """ADR-0097 point 2: the notes a message names reach the model as resolved paths."""
 from __future__ import annotations
 
-from silica.agent.mentions import CAP, named_notes, refs, resolve, strip
+from silica.kernel.text.mentions import CAP, named_notes, refs, resolve, strip
 
 VAULT = {
     "Concepts/ML/Machine learning.md": "Machine learning",
@@ -37,7 +37,7 @@ def test_the_block_names_found_missing_and_ambiguous():
 
 
 def test_no_link_no_block_and_no_vault_read(monkeypatch):
-    import silica.agent.mentions as m
+    import silica.kernel.text.mentions as m
 
     def boom():
         raise AssertionError("a message with no link must not read the vault")
@@ -54,7 +54,7 @@ def test_the_cap_says_how_many_it_left():
 
 
 def test_an_unreadable_vault_sends_the_turn_without_a_block(monkeypatch):
-    import silica.agent.mentions as m
+    import silica.kernel.text.mentions as m
 
     def broken():
         raise RuntimeError("no vault")

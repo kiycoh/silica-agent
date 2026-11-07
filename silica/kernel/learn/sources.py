@@ -164,9 +164,9 @@ def collections(notes: dict, allowed: set[str]) -> list[dict]:
 
 
 def _file_label(source_file: str) -> str:
-    from silica.sources.convert import _note_stem
+    from silica.kernel.base.notekey import source_stem
 
-    return _note_stem(Path(source_file))
+    return source_stem(Path(source_file))
 
 
 def note_collections(paths, colls: list[dict]) -> dict[str, set[str]]:

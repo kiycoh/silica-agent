@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from silica.agent import turn_notes
-from silica.agent.mentions import IMAGE_MARK, IMAGE_MARK_RE
+from silica.kernel.text.mentions import IMAGE_MARK, IMAGE_MARK_RE
 from silica.tools import tool_failed
 from silica.agent.recall_watch import numbers_of_session, read_refs, READS_KEY
 from silica.config import CONFIG, demo
@@ -214,7 +214,7 @@ def _edited(content: str, words: str, note: str = "") -> str:
     """A stored user message with its typed words replaced (POST /turn/redo):
     the manifest and the images stay, the named notes follow the new words,
     and the note that was open beside the chat stays the one the turn reads."""
-    from silica.agent.mentions import named_notes, strip
+    from silica.kernel.text.mentions import named_notes, strip
 
     base = strip(content)
     cuts = [i for i in (base.find(drop_turn.MANIFEST_MARK), base.find(f"\n\n{IMAGE_MARK}")) if i >= 0]
@@ -315,7 +315,7 @@ def get_messages():
         images: list[dict] = []
         if m["role"] == "user" and isinstance(content, str) and (
                 "<named-notes>" in content or "<converted-files>" in content or "<discover-story>" in content):
-            from silica.agent.mentions import strip
+            from silica.kernel.text.mentions import strip
 
             content = strip(content)
         if m["role"] == "user" and isinstance(content, str) and IMAGE_MARK in content:

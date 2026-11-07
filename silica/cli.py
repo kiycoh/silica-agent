@@ -3870,7 +3870,7 @@ def main():
         # The notes the user named, as paths (ADR-0097 point 2), the same block
         # the GUI's run_turn adds. Not on a /web turn: its tools cannot read a note.
         if web is None:
-            from silica.agent.mentions import named_notes
+            from silica.kernel.text.mentions import named_notes
 
             if block := named_notes(typed):
                 user_input += "\n\n" + block

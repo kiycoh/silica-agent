@@ -29,7 +29,7 @@ def seed_mirror_copy(path: str) -> None:
     Best-effort: a copy that cannot be made leaves the read to report it.
     """
     from silica.driver import DRIVER
-    from silica.onboarding.adopt import SAFE_WRITE_DIR
+    from silica.kernel.base.manifest import SAFE_WRITE_DIR
 
     if active_write_dir() != SAFE_WRITE_DIR or not within(path, SAFE_WRITE_DIR):
         return
