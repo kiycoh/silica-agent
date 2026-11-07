@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from silica.config import CONFIG  # noqa: E402
 from silica.kernel.recall import vault_registry as reg  # noqa: E402
+from silica.onboarding.adopt import adopt_vault  # noqa: E402
 
 SIGNALS = ("cosine", "spread", "hits")
 
@@ -84,7 +85,7 @@ def main() -> int:
     alias_of = {str(Path(p).resolve()): a for a, p in spec["vaults"].items()}
 
     if args.vault:
-        CONFIG.vault_path = str(Path(args.vault).resolve())
+        adopt_vault(args.vault, writes=False)
 
     from silica.model.providers import Reranker, get_embedder
     if not (CONFIG.rerank_base_url and CONFIG.rerank_model):

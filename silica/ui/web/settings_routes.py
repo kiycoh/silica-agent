@@ -160,10 +160,11 @@ async def confirm_setting(payload: dict):
 
 
 def _apply_vault_switch(path: str) -> dict:
-    from silica.onboarding.adopt import switch_vault
+    from silica.kernel.vault_language import language_status
+    from silica.onboarding.adopt import adopt_vault
     from silica.ui.web import settings as st
 
-    switched = switch_vault(path)
+    switched = adopt_vault(path)
     if switched.error:
         return {"ok": False, "error": switched.error}
     # The Changes list describes paths in the vault we just left.
@@ -181,11 +182,9 @@ def _apply_vault_switch(path: str) -> dict:
         notes.append("vault.yaml declares an invalid write_dir — every write will be rejected")
     if switched.repo_warning:
         notes.append(switched.repo_warning)
-    if switched.language_drift:
-        notes.append(
-            f"language {switched.language}, co-occurrence store frozen "
-            f"{switched.store_language} — rebuild it with /cooccur --force"
-        )
+    lang, store_lang, drift = language_status(switched.vault)
+    if drift:
+        notes.append(f"language {lang}, co-occurrence store frozen {store_lang} — rebuild it with /cooccur --force")
     return {**result, "vault": switched.vault, "notes": notes}
 
 

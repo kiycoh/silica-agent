@@ -138,14 +138,12 @@ def _open_stores(vault: Path):
     exists() check bypasses EmbedStore's legacy-path fallback so a vault
     without an index can never silently measure a foreign one.
     """
-    import silica.driver
-    from silica.config import CONFIG
+    from silica.onboarding.adopt import adopt_vault
     from silica.kernel.recall.cooccurrence import CooccurStore, _index_path_for
     from silica.kernel.recall.embed import EmbedStore
     from silica.kernel.base.home import index_dir_for
 
-    CONFIG.vault_path = str(vault)
-    silica.driver._driver = None
+    adopt_vault(vault, writes=False)
     store = CooccurStore(path=_index_path_for(str(vault)))
     embed_path = index_dir_for(str(vault)) / "embeddings.json"
     embed_store = EmbedStore(path=embed_path) if embed_path.exists() else None

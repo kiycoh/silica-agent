@@ -53,8 +53,9 @@ def probe(vault: str, note: str, objectives: list[str], out: Path, model: str | 
     """Generate one note session's items into *out*; returns the run record."""
     from silica.config import CONFIG
     from silica.kernel.learn import items
+    from silica.onboarding.adopt import adopt_vault
 
-    CONFIG.vault_path = str(Path(vault).expanduser())
+    adopt_vault(vault, writes=False)
     if model:
         CONFIG.model = model
     out.mkdir(parents=True, exist_ok=True)
@@ -123,11 +124,11 @@ def _read_set(path: Path) -> list[tuple[str, str, str]]:
 
 
 def _grade(item_dir: Path, cases_file: Path) -> int:
-    from silica.config import CONFIG
     from silica.kernel.learn import grade
+    from silica.onboarding.adopt import adopt_vault
 
     run = json.loads((item_dir / "run.json").read_text(encoding="utf-8"))
-    CONFIG.vault_path = run["vault"]
+    adopt_vault(run["vault"], writes=False)
     made = {it["point"]: it for it in json.loads((item_dir / "made.json").read_text(encoding="utf-8"))}
     for case in json.loads(cases_file.read_text(encoding="utf-8")):
         it = made.get(case["point"])

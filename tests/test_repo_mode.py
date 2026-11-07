@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from silica.cli import _activate_repo_mode, default_user_vault, resolve_cwd_vault
+from silica.config import default_vault, silica_home
+from silica.onboarding.adopt import resolve_cwd_vault
+from silica.ui.bootstrap import open_vault
 from silica.config import CONFIG
 
 
@@ -30,7 +32,7 @@ def test_cwd_beats_a_configured_vault(tmp_path, monkeypatch, vault_env):
     # when a .env still carries a SILICA_VAULT pointing somewhere else.
     monkeypatch.chdir(tmp_path)
     CONFIG.vault_path = str(tmp_path / "elsewhere")
-    _activate_repo_mode()
+    open_vault()
     assert Path(CONFIG.vault_path).resolve() == tmp_path.resolve()
 
 
@@ -42,7 +44,7 @@ def test_exported_vault_pin_beats_cwd(tmp_path, monkeypatch, vault_env):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("silica.config.VAULT_PINNED", True)
     CONFIG.vault_path = str(pinned)
-    _activate_repo_mode()
+    open_vault()
     assert Path(CONFIG.vault_path).resolve() == pinned.resolve()
 
 
@@ -53,7 +55,7 @@ def test_cwd_code_repo_adopts_root_and_declares_write_dir(tmp_path, monkeypatch,
     (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
     monkeypatch.chdir(tmp_path)
     CONFIG.vault_path = ""
-    _activate_repo_mode()
+    open_vault()
     assert Path(CONFIG.vault_path).resolve() == tmp_path.resolve()
     assert (tmp_path / "vault.yaml").read_text(encoding="utf-8") == "write_dir: docs/silica\n"
 
@@ -64,7 +66,7 @@ def test_cwd_prose_folder_is_adopted_whole_and_written_in_place(tmp_path, monkey
     (tmp_path / "nota.md").write_text("# nota")
     monkeypatch.chdir(tmp_path)
     CONFIG.vault_path = ""
-    _activate_repo_mode()
+    open_vault()
     assert Path(CONFIG.vault_path).resolve() == tmp_path.resolve()
     assert not (tmp_path / "vault.yaml").exists()
     assert not (tmp_path / "silica").exists()
@@ -80,7 +82,7 @@ def test_configured_vault_file_is_refused(tmp_path, monkeypatch, vault_env):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     monkeypatch.chdir(tmp_path)
     CONFIG.vault_path = str(target)
-    _activate_repo_mode()
+    open_vault()
     assert CONFIG.vault_path == str(target)  # left alone, not mangled
 
 
@@ -90,7 +92,7 @@ def test_cwd_obsidian_vault_verbatim(tmp_path, monkeypatch, vault_env):
     _obsidian(tmp_path)
     monkeypatch.chdir(tmp_path)
     CONFIG.vault_path = ""
-    _activate_repo_mode()
+    open_vault()
     assert Path(CONFIG.vault_path).resolve() == tmp_path.resolve()
     assert not (tmp_path / "docs" / "silica").exists()
 
@@ -126,7 +128,7 @@ def test_a_pre_write_dir_layout_migrates_on_launch(tmp_path, monkeypatch, vault_
     (tmp_path / "docs" / "silica" / "nota.md").write_text("# nota", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     CONFIG.vault_path = ""
-    _activate_repo_mode()
+    open_vault()
     assert Path(CONFIG.vault_path).resolve() == tmp_path.resolve()
     assert (tmp_path / "vault.yaml").read_text(encoding="utf-8") == "write_dir: docs/silica\n"
 
@@ -137,7 +139,7 @@ def test_declared_manifest_root_wins_over_its_write_dir(tmp_path, monkeypatch, v
     (tmp_path / "docs" / "silica").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
     CONFIG.vault_path = ""
-    _activate_repo_mode()
+    open_vault()
     assert Path(CONFIG.vault_path).resolve() == tmp_path.resolve()
 
 
@@ -149,20 +151,35 @@ def test_adoption_never_prompts(tmp_path, monkeypatch, vault_env):
     monkeypatch.setattr("sys.stdin", io.StringIO())
     monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("prompted for adoption"))
     CONFIG.vault_path = ""
-    _activate_repo_mode()
+    open_vault()
     assert Path(CONFIG.vault_path).resolve() == tmp_path.resolve()
 
 
 def test_home_vault_when_nothing_else_applies(tmp_path, monkeypatch, vault_env):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / ".silica")
     monkeypatch.chdir(tmp_path)
     CONFIG.vault_path = ""
-    _activate_repo_mode()
+    open_vault()
     assert Path(CONFIG.vault_path).resolve() == (tmp_path / ".silica" / "vault").resolve()
 
 
-def test_default_user_vault_under_home(tmp_path):
-    assert default_user_vault(home=tmp_path) == tmp_path / ".silica" / "vault"
+def test_the_home_vault_is_kept_as_spelled(tmp_path, monkeypatch, vault_env):
+    """Its index is keyed on the spelling, and a $HOME reached through a symlink
+    would move it under a new digest."""
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "link").symlink_to(real)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "link"))
+    monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path / "link" / ".silica")
+    monkeypatch.chdir(tmp_path / "link")
+    CONFIG.vault_path = ""
+    open_vault()
+    assert CONFIG.vault_path == str(tmp_path / "link" / ".silica" / "vault")
+
+
+def test_the_default_vault_is_named_once():
+    assert default_vault() == silica_home() / "vault"
 
 
 def test_system_directories_are_never_the_vault(tmp_path):

@@ -8,17 +8,18 @@ import json
 
 from silica.command_table import Call, Result
 from silica.config import CONFIG
-from silica.onboarding.adopt import switch_vault
+from silica.onboarding.adopt import adopt_vault
 
 
 def vault(c: Call) -> Result:
     """/vault [<path>] — show the active vault, or adopt another one."""
     args, out = c.args, c.out
     from silica.driver import driver_kind
+    from silica.kernel.vault_language import language_status
 
     arg = " ".join(args).strip()
     if arg:
-        r = switch_vault(arg)
+        r = adopt_vault(arg)
         if r.error:
             out.print(f"  [red]Cannot adopt as a vault — {r.error}[/]")
             return out
@@ -42,10 +43,11 @@ def vault(c: Call) -> Result:
         # Surface the frozen-language drift here, not only in `/vault` info:
         # a switch is exactly when a wrong-frozen store (english on an IT
         # vault) would otherwise stay silent. Reuses the doctor's check.
-        if r.language_drift:
+        lang, store_lang, drift = language_status(r.vault)
+        if drift:
             out.print(
-                f"  [yellow]⚠ Language: {r.language}, co-occurrence store "
-                f"frozen {r.store_language} — run /cooccur --force to rebuild.[/]"
+                f"  [yellow]⚠ Language: {lang}, co-occurrence store "
+                f"frozen {store_lang} — run /cooccur --force to rebuild.[/]"
             )
         out.print(
             "  [dim]Index namespace follows the vault — run /embed and /cooccur "
@@ -60,8 +62,6 @@ def vault(c: Call) -> Result:
 
         count = len(list(Path(CONFIG.vault_path).rglob("*.md")))
         out.print(f"  Notes:   {count}")
-        from silica.kernel.vault_language import language_status
-
         lang, store_lang, drift = language_status(CONFIG.vault_path)
         if lang and drift:
             out.print(

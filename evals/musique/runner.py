@@ -84,15 +84,9 @@ def _note_content(idx: int, item: dict) -> str:
 def bind_vault(vault: Path) -> None:
     """Point CONFIG/DRIVER at the bench vault and drop store singletons, so a
     prior in-process vault can never leak its indexes into the run."""
-    import silica.driver
-    import silica.kernel.recall.cooccurrence as cooc_mod
-    import silica.kernel.recall.embed as embed_mod
-    from silica.config import CONFIG
+    from silica.onboarding.adopt import adopt_vault
 
-    CONFIG.vault_path = str(vault)
-    silica.driver._driver = None
-    embed_mod.clear()
-    cooc_mod.clear()
+    adopt_vault(vault, writes=False)
 
 
 def load_corpus(corpus: list[dict], *, verbose: bool = False) -> dict:

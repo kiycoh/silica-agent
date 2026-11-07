@@ -50,14 +50,14 @@ def test_verbose_config_and_logging():
     """Setting CONFIG.debug_logging to True enables debug logging levels and updates setup."""
     import logging
     from silica.config import CONFIG
-    from silica.cli import _setup_logging
+    from silica.ui.logging import setup_logging
     
     # Save original state
     orig_debug = CONFIG.debug_logging
     
     try:
         # Enable debug logging
-        _setup_logging(debug=True)
+        setup_logging(debug=True)
         assert CONFIG.debug_logging is True
         
         # httpx/litellm/openai are always suppressed to avoid raw HTTP spam
@@ -69,7 +69,7 @@ def test_verbose_config_and_logging():
         assert logging.getLogger("asyncio").level == logging.WARNING
 
         # Reset logging
-        _setup_logging(debug=False)
+        setup_logging(debug=False)
         assert CONFIG.debug_logging is False
         assert logging.getLogger("httpx").level == logging.WARNING
         assert logging.getLogger("litellm").level == logging.WARNING
@@ -78,7 +78,7 @@ def test_verbose_config_and_logging():
     finally:
         # Restore original state
         CONFIG.debug_logging = orig_debug
-        _setup_logging(debug=orig_debug)
+        setup_logging(debug=orig_debug)
 
 
 

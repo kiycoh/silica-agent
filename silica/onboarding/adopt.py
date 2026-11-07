@@ -207,14 +207,13 @@ def resolve_vault_switch(arg: str) -> VaultTarget:
 
 
 class VaultSwitch(NamedTuple):
-    """What a completed ``switch_vault`` did, for whoever has to report it.
+    """What a completed ``adopt_vault`` did, for whoever has to report it.
 
     ``error`` set means nothing happened at all. Everything else is a thing the
     caller may want to say out loud: ``created`` the directory did not exist,
     ``write_dir`` this call declared one in vault.yaml, ``invalid_write_dir``
     the manifest declares one Silica cannot resolve (every write will be
-    rejected), ``repo_warning`` the vault⊂repo invariant is violated,
-    ``language_drift`` the co-occurrence store is frozen in another language.
+    rejected), ``repo_warning`` the vault⊂repo invariant is violated.
     """
     vault: str
     error: str | None = None
@@ -223,21 +222,39 @@ class VaultSwitch(NamedTuple):
     seeded_ignore: bool = False
     invalid_write_dir: bool = False
     repo_warning: str = ""
-    language: str = ""
-    store_language: str = ""
-    language_drift: bool = False
 
 
-def switch_vault(arg: str) -> VaultSwitch:
-    """Point the running process at another vault — the whole sequence.
+def chosen_vault() -> str:
+    """The vault a process started here curates, "" when nothing names one.
+
+    The working directory wins. An *exported* SILICA_VAULT outranks it
+    (`config.VAULT_PINNED`, the pin for headless runs like cron, which start
+    wherever the scheduler put them); one in a .env file is ignored by
+    config.load_user_env. Where cwd is not a vault ($HOME), the export is the
+    fallback. Cross-project personal memory is the separate SILICA_MEMORY_VAULT
+    axis (`kernel/recall/memory_lane.py`), which self-disables inside its own vault.
+    """
+    from silica.config import VAULT_PINNED
+
+    return (None if VAULT_PINNED else resolve_cwd_vault(Path.cwd())) or CONFIG.vault_path.strip()
+
+
+def adopt_vault(path: str | Path, *, writes: bool = True, own: bool = False) -> VaultSwitch:
+    """Point the running process at a vault — the whole sequence, and the only way.
 
     Not an assignment: a live process holds a driver, an overlay cache, a
     manifest and vault-scoped index caches, and every one of them still answers
     for the old folder until it is reset. Skipping any single step leaves reads
     and writes disagreeing about which vault they are in.
 
-    Prints nothing, so the REPL and the web settings panel can share it: the
-    caller renders the returned record. Never raises for a bad path — that is
+    `writes=False` is a look and not an adoption, for the doctor and for a probe
+    over a vault it does not own: nothing lands on disk, a folder that is not there
+    stays unadopted (`created` says so), and vault.yaml's settings are left out of
+    CONFIG. `own` is Silica's own fallback vault, which nobody pointed at: kept as
+    spelled, since its index is keyed on the spelling, and nothing declared in it.
+
+    Prints nothing, so a start, /vault and the settings panel can share it: the
+    caller renders the returned record. Never raises for a bad path, that is
     ``error``.
     """
     from silica.driver import reset_driver
@@ -249,25 +266,26 @@ def switch_vault(arg: str) -> VaultSwitch:
         get_active_manifest,
         reset_manifest_cache,
     )
-    from silica.kernel.vault_language import language_status
 
-    target = resolve_vault_switch(arg)
+    target = VaultTarget(str(path), not Path(path).is_dir()) if own else resolve_vault_switch(str(path))
     if target.error:
         return VaultSwitch("", error=target.error)
     resolved = target.vault
+    if target.created and not writes:
+        return VaultSwitch("", created=True)
     if target.created:
         Path(resolved).mkdir(parents=True, exist_ok=True)
-    declared = declare_write_dir(resolved)
-    seeded = seed_silicaignore(resolved)
+    declared = declare_write_dir(resolved) if writes and not own else None
+    seeded = seed_silicaignore(resolved) if writes and not own else None
     CONFIG.vault_path = resolved
     reset_driver()
     reset_overlay_cache()  # overlay is vault-scoped; don't serve the old vault's
     reset_manifest_cache()  # manifest is vault-scoped too
-    apply_manifest_to_config()
+    if writes:
+        apply_manifest_to_config()
     # Vault-scoped store caches are path-keyed (harmless on lookup) but retain
     # the old vault's index/vectors for the process lifetime.
     reset_vault_caches()
-    lang, store_lang, drift = language_status(resolved)
     return VaultSwitch(
         vault=resolved,
         created=target.created,
@@ -277,7 +295,4 @@ def switch_vault(arg: str) -> VaultSwitch:
         # whole point of not degrading it to "" in the parser.
         invalid_write_dir=get_active_manifest().write_dir is None,
         repo_warning=repo_root_warning(resolved) or "",
-        language=lang or "",
-        store_language=store_lang or "",
-        language_drift=bool(drift),
     )

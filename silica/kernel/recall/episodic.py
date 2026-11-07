@@ -18,7 +18,7 @@ LongMemEval adapter passes the simulated session date.
 """
 from __future__ import annotations
 
-from silica.config import silica_home
+from silica.config import default_vault
 
 import bisect
 import json
@@ -803,7 +803,7 @@ def episodic_home() -> Path:
     from silica.config import CONFIG
 
     raw = (CONFIG.memory_vault or "").strip()
-    return (Path(raw).expanduser() if raw else silica_home() / "vault").resolve()
+    return (Path(raw).expanduser() if raw else default_vault()).resolve()
 
 
 def store_path() -> Path:

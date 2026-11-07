@@ -484,13 +484,12 @@ def main() -> int:
         os.environ["SILICA_VAULT"] = str(Path(args.vault).expanduser().resolve())
     os.environ.setdefault("SILICA_TOKEN_METER", "1")
 
-    from silica.cli import _activate_repo_mode, _ensure_servers
     from silica.config import CONFIG
-    from silica.kernel.base.manifest import apply_manifest_to_config
     from silica.kernel.base.formats import CONVERTIBLE_DOC_EXTS
+    from silica.onboarding.serve import ensure_local_servers
+    from silica.ui.bootstrap import bootstrap
 
-    _activate_repo_mode()
-    apply_manifest_to_config()
+    bootstrap("vault")
 
     folder = Path(args.folder).expanduser().resolve()
     files = census(folder, tuple(CONVERTIBLE_DOC_EXTS))
@@ -509,7 +508,7 @@ def main() -> int:
 
     if not args.target:
         ap.error("--target is required to run the sample (the notes go somewhere real)")
-    _ensure_servers()
+    ensure_local_servers()
     print(f"vault: {CONFIG.vault_path}  target: {args.target}  model: {CONFIG.model}")
 
     pool = [f for f in files if not args.max_pages or f["pages"] <= args.max_pages]

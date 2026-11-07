@@ -100,6 +100,7 @@ def main() -> int:
     import silica_core.kernel.recall.paths as core_paths_mod
     from silica.config import CONFIG
     from silica.kernel.base.home import vault_digest
+    from silica.onboarding.adopt import adopt_vault
     from silica.onboarding.serve import ready
 
     sandbox = Path(tempfile.mkdtemp(prefix="silica-0094-replay-"))
@@ -112,7 +113,7 @@ def main() -> int:
     config._SILICA_HOME = sandbox
     core_paths_mod._SILICA_HOME = sandbox
     embed_mod._legacy_index_path = lambda: sandbox / "index" / "embeddings.json"
-    CONFIG.vault_path = a.vault
+    adopt_vault(a.vault, writes=False)
 
     if a.arm == "running":
         down = [u for u in (CONFIG.embedding_base_url, CONFIG.rerank_base_url) if not ready(u)]

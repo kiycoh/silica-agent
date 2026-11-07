@@ -45,6 +45,7 @@ from evals.factscore import decompose, judge_facts
 from silica.obs.events import ToolCompleteEvent
 from silica.config import CONFIG
 from silica.kernel.write.templates import slugify
+from silica.onboarding.adopt import adopt_vault
 from silica.sources import web_research as wr
 
 # Distinct sources actually cited inline: the FACT-style metric. Bound bodies
@@ -342,7 +343,7 @@ def main(argv=None) -> int:
     if args.cmd == "record":
         vault = Path(args.vault)
         (vault / "Inbox").mkdir(parents=True, exist_ok=True)
-        CONFIG.vault_path = str(vault)  # before the DRIVER singleton binds
+        adopt_vault(vault, writes=False)
         concepts = [
             line.strip()
             for line in Path(args.concepts).read_text(encoding="utf-8").splitlines()

@@ -28,12 +28,13 @@ from silica.agent.recall_watch import numbers_of_session
 from silica.command_table import Ask, Result
 from silica.commands import dispatch
 from silica.config import claim_env, CONFIG, GUI_PORT, live_env
-from silica.onboarding.adopt import resolve_cwd_vault, resolve_vault_switch
 from silica.session import meter, seed
 from silica.session import turn as session_turn
 from silica.session.conversation import Conversation
 from silica.session.words import positional
 from silica.term.console import CONSOLE
+from silica.ui import logging as ui_logging
+from silica.ui.bootstrap import bootstrap
 from silica.ui.home import print_home
 from silica.ui.prompt import build_session, bottom_toolbar, prompt_text
 from prompt_toolkit.patch_stdout import patch_stdout
@@ -139,198 +140,6 @@ def _agent_turn(t: session_turn.Turn, callback) -> None:
     # what its results showed, and the narration /resume rebuilds from has them.
     assert t.read is not None  # `watched` above
     t.conv.seen_numbers |= t.read.numbers
-
-
-def _setup_logging(debug: bool = False) -> None:
-    """Configure logging for the CLI session."""
-    import threading
-    CONFIG.debug_logging = debug
-    level = logging.DEBUG if debug else logging.WARNING
-
-    root = logging.getLogger()
-    for h in root.handlers[:]:
-        root.removeHandler(h)
-        if isinstance(h, logging.FileHandler):
-            h.close()   # a re-setup (tests, /verbose) must not leak the previous fd
-
-    handler: logging.Handler
-    from silica.config import hosted
-    if hosted():
-        from silica.ui.logging import HostedJsonFormatter, LiveAwareStreamHandler
-        # A hosted tenant's stderr is its journal, which the privacy notice
-        # declares (ADR-0100 point 2): templates, never arguments, whatever
-        # --verbose or SILICA_DEBUG ask for, since DEBUG records carry the
-        # model's reasoning and tool arguments. The handler opens at INFO only
-        # for silica.metrics, whose logger is raised to INFO here because root
-        # stays at WARNING now that the hosted file log is gone.
-        handler = LiveAwareStreamHandler()
-        handler.setFormatter(HostedJsonFormatter())
-        handler.setLevel(logging.INFO)
-        handler.addFilter(lambda r: r.levelno >= logging.WARNING or r.name == "silica.metrics")
-        logging.getLogger("silica.metrics").setLevel(logging.INFO)
-        level = logging.WARNING
-    elif debug:
-        from rich.logging import RichHandler
-        from silica.ui.logging import (
-            AnsiHumanFriendlyFormatter,
-            HumanFriendlyFormatter,
-            LiveAwareStreamHandler,
-        )
-        handler = RichHandler(
-            console=CONSOLE,
-            markup=True,
-            show_path=False,
-            show_level=False,
-            show_time=False,
-        )
-        handler.setFormatter(HumanFriendlyFormatter())
-        # Rich's Live display is driven from the main thread; worker threads logging
-        # through RichHandler concurrently corrupt the terminal render state.
-        # Restrict RichHandler to the main thread only.
-        main_thread = threading.main_thread()
-        handler.addFilter(lambda r: threading.current_thread() is main_thread)
-
-        # Worker-thread records fall back to a live-aware stderr handler: resolving
-        # sys.stderr at emit time follows rich.Live's redirect, so they print above
-        # an active live region instead of tearing it (stale-frame duplication).
-        bg_handler = LiveAwareStreamHandler()
-        # Same human-friendly seam as the main thread — rendered to ANSI in the
-        # formatter (throwaway Console) so worker logs (dedup, refine, enrich,
-        # expand, orphan…) read like the main-thread ones instead of raw dumps.
-        bg_handler.setFormatter(AnsiHumanFriendlyFormatter())
-        bg_handler.addFilter(lambda r: threading.current_thread() is not main_thread)
-        root.addHandler(bg_handler)
-    else:
-        from silica.ui.logging import AnsiHumanFriendlyFormatter, LiveAwareStreamHandler
-        # Live-aware: follows rich.Live's stderr redirect so warnings during the
-        # injector/batch live region print above it instead of tearing the panel.
-        # Same human-friendly ANSI seam as debug mode's worker handler, so
-        # warnings/errors (incl. worker threads like dedup) render coloured instead
-        # of raw dumps. Level stays WARNING here — only warn/error surface.
-        handler = LiveAwareStreamHandler()
-        handler.setFormatter(AnsiHumanFriendlyFormatter())
-    root.addHandler(handler)
-    root.setLevel(level)
-    _attach_file_log()
-
-    # LiteLLM/httpx/openai/httpcore are always silenced — their DEBUG is raw HTTP/request dumps
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("litellm").setLevel(logging.WARNING)
-    logging.getLogger("LiteLLM").setLevel(logging.ERROR)
-    logging.getLogger("openai").setLevel(logging.WARNING)
-    logging.getLogger("markdown_it").setLevel(logging.WARNING)
-    # websockets DEBUG is the raw bridge handshake + per-frame dump; connect.py
-    # already logs the meaningful lifecycle (connect/disconnect/refusals) itself.
-    logging.getLogger("websockets").setLevel(logging.WARNING)
-    # asyncio DEBUG is one "Using selector" line per event loop — litellm's sync
-    # streaming path creates a fresh loop PER CHUNK, so --verbose drowns in them.
-    logging.getLogger("asyncio").setLevel(logging.WARNING)
-
-
-def _attach_file_log() -> None:
-    """Every silica record at DEBUG into ~/.silica/logs/silica.log, whatever
-    the terminal shows. Before this the agent had no log file at all: `-v`
-    went to stderr under a Rich Live region, and a run under setsid lost it
-    entirely (audit 2026-09-06). Third-party loggers stay at WARNING in the
-    file: root at DEBUG would otherwise let PIL/urllib3 flood it.
-
-    ponytail: one file shared by every silica process (REPL, GUI) in
-    append mode; a rotation by one process leaves the others writing to the
-    renamed file until they rotate themselves. Per-pid files if that ever
-    loses a line that mattered.
-    """
-    from logging.handlers import RotatingFileHandler
-    from silica.config import hosted
-    from silica.config import silica_home
-
-    # A hosted tenant keeps no file of its own (ADR-0100 point 1): the privacy
-    # notice promises the system journal and 14 days, and this file held the
-    # model's reasoning and every tool call's arguments with no age limit. Its
-    # WARNING lines still reach the journal through the stderr handler.
-    if hosted():
-        return
-    root = logging.getLogger()
-    if any(isinstance(h, RotatingFileHandler) for h in root.handlers):
-        return
-    # Handlers without a level of their own showed what root allowed: pin that
-    # before root opens up, or the terminal starts printing DEBUG.
-    shown = root.level or logging.WARNING
-    for h in root.handlers:
-        if h.level == logging.NOTSET:
-            h.setLevel(shown)
-    path = silica_home() / "logs" / "silica.log"
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fh = RotatingFileHandler(path, maxBytes=10_000_000, backupCount=3, encoding="utf-8")
-    except OSError as e:
-        logging.getLogger(__name__).warning("file log unavailable at %s: %s", path, e)
-        return
-    fh.setLevel(logging.DEBUG)
-    fh.addFilter(lambda r: r.name.startswith("silica") or r.levelno >= logging.WARNING)
-    fh.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname).1s %(name)s [%(threadName)s] %(message)s"))
-    root.addHandler(fh)
-    root.setLevel(logging.DEBUG)
-
-
-def default_user_vault(home=None):
-    """Stable per-user vault used when no explicit SILICA_VAULT and no repo
-    mode applies. Sits alongside ~/.silica/{ledger,undo_journal,checkpoints}.db.
-    """
-    from pathlib import Path
-
-    return (home or Path.home()) / ".silica" / "vault"
-
-
-def _activate_repo_mode() -> None:
-    """Side-effecting startup vault selection: the working directory wins.
-
-    An *exported* SILICA_VAULT outranks it (`config.VAULT_PINNED` — the pin for
-    headless runs like cron, which start wherever the scheduler put them); one
-    in a .env file is ignored by config.load_user_env. Where cwd is not a vault
-    ($HOME), the export is the fallback, then a stable ~/.silica/vault.
-
-    Cross-project personal memory is the separate SILICA_MEMORY_VAULT axis
-    (`kernel/recall/memory_lane.py`), which self-disables inside its own vault.
-    """
-    from pathlib import Path
-    from silica.config import VAULT_PINNED
-    from silica.onboarding.adopt import declare_write_dir, seed_silicaignore
-
-    target = None if VAULT_PINNED else resolve_cwd_vault(Path.cwd())
-    target = target or CONFIG.vault_path.strip()
-    if target:
-        t = resolve_vault_switch(target)
-        if t.error:
-            CONSOLE.print(f"  [red]{target} cannot be a vault — {t.error}[/]")
-            return
-        if t.created:
-            Path(t.vault).mkdir(parents=True, exist_ok=True)
-        CONFIG.vault_path = t.vault
-        declared = declare_write_dir(t.vault)
-        seeded = seed_silicaignore(t.vault)
-        CONSOLE.print(f"  Vault: [bold]{t.vault}[/]")
-        if declared:
-            CONSOLE.print(f"  Writes confined to [bold]{declared}/[/] (`write_dir` in vault.yaml).")
-        if seeded:
-            CONSOLE.print("  Created [bold].silicaignore[/] — add folders to keep out of the index.")
-        return
-    # $HOME with nothing configured → stable home vault.
-    home_vault = default_user_vault()
-    home_vault.mkdir(parents=True, exist_ok=True)
-    CONFIG.vault_path = str(home_vault)
-    CONSOLE.print(f"  Vault: [bold]{home_vault}[/]")
-
-
-def _announce_code_lane() -> None:
-    """Eager repo-root resolution (ADR-0019): validate the vault⊂repo invariant
-    once at startup / vault switch and surface a violation loudly."""
-    from silica.kernel.base.roots import repo_root_warning
-
-    warn = repo_root_warning(CONFIG.vault_path)
-    if warn:
-        CONSOLE.print(f"  [yellow]⚠ {warn}[/]")
 
 
 # A study artifact from the notes, beside /quiz: the deck and the cards
@@ -496,10 +305,10 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
         CONSOLE.print(f"  Tool progress: [bold]{next_mode}[/]")
 
         if next_mode == "verbose":
-            _setup_logging(debug=True)
+            ui_logging.setup_logging(debug=True)
             CONSOLE.print("  System log level: [bold]DEBUG[/]")
         else:
-            _setup_logging(debug=False)
+            ui_logging.setup_logging(debug=False)
             CONSOLE.print("  System log level: [bold]WARNING[/]")
 
         return True
@@ -555,12 +364,6 @@ def _autolaunch_wizard_if_unconfigured() -> None:
     # env var stops an infinite relaunch if config still doesn't resolve.
     claim_env({"SILICA_WIZARD_DONE": "1"})
     os.execve(sys.executable, [sys.executable, *sys.argv], os.environ)
-
-
-def _ensure_servers() -> None:
-    """Start the local model servers named in the env. No-op when none are."""
-    from silica.onboarding.serve import ensure_local_servers
-    ensure_local_servers()
 
 
 _CLI_HELP = f"""\
@@ -652,12 +455,11 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         from silica.kernel.recall.vault_registry import orphan_indexes
         return _prune_indexes(orphan_indexes(), apply="--apply" in args[1:])
     if args[:1] == ["import"]:
-        # Dispatch runs before main()'s setup (like connect below) — the
-        # vault has to be selected here or CONFIG.vault_path is whatever the
+        # The vault has to be selected or CONFIG.vault_path is whatever the
         # config file last held, and the envelopes land in another vault's
         # inbox (inbox_dir_for keys by vault digest) where /nucleate never
         # drains them.
-        _activate_repo_mode()
+        bootstrap("vault")
         import silica.capture as capture_mod
         target = next(iter(positional(args[1:])), "")
         vault = CONFIG.vault_path.strip()
@@ -683,19 +485,8 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         # stops parsing. CONSOLE resolves sys.stdout per write, so the redirect
         # reaches it.
         quiet = redirect_stdout(sys.stderr) if as_json else nullcontext()
-        # The vault startup would open here, chosen the way _activate_repo_mode
-        # chooses it minus its writes (vault.yaml, .silicaignore): a check is
-        # not an adoption. Left unset, every vault-scoped row read an empty
-        # store: a vault with 22 notes embedded said "no retrieval index yet"
-        # (2026-10-02).
-        from silica.config import VAULT_PINNED
-        target = (None if VAULT_PINNED else resolve_cwd_vault(Path.cwd())) or CONFIG.vault_path.strip()
-        if target:
-            picked = resolve_vault_switch(target)
-            if not picked.error and not picked.created:
-                CONFIG.vault_path = picked.vault
         with quiet:
-            _ensure_servers()  # report the state after the autostart, not before it
+            bootstrap("doctor")  # report the state after the autostart, not before it
             results = checks.run_checks(CONFIG)
             # --live: opt-in real completion (costs a token on hosted providers).
             # A row in BOTH outcomes, appended before rendering: the table has
@@ -715,14 +506,7 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         import silica.onboarding.wizard as wizard_mod
         return wizard_mod.run_wizard(advanced="--advanced" in args[1:])
     if args[:1] == ["connect"]:
-        # Dispatch runs before main()'s setup (unlike --gui) — do it here.
-        _activate_repo_mode()
-        _announce_code_lane()
-        from silica.kernel.base.manifest import apply_manifest_to_config
-        apply_manifest_to_config()
-        meter.resolve_context_budget()
-        _setup_logging(debug="--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging)
-        _ensure_servers()
+        bootstrap("session", debug=_debug())
         import silica.ui.connect as connect_mod
         return connect_mod.run_connect()
     return None
@@ -770,6 +554,10 @@ def _start_reminder_daemon() -> None:
     threading.Thread(target=_tick_loop, daemon=True, name="silica-reminders").start()
 
 
+def _debug() -> bool:
+    return "--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging
+
+
 def _gui_port() -> int:
     """Parse `--port N` / `--port=N` from argv (default GUI_PORT)."""
     for i, a in enumerate(sys.argv):
@@ -790,14 +578,7 @@ def main():
     code = _dispatch_subcommand(_args)
     if code is not None:
         sys.exit(code)
-    _activate_repo_mode()
-    _announce_code_lane()
-    from silica.kernel.base.manifest import apply_manifest_to_config
-    apply_manifest_to_config()
-    meter.resolve_context_budget()
-    debug_mode = "--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging
-    _setup_logging(debug=debug_mode)
-    _ensure_servers()
+    bootstrap("session", debug=_debug())
 
     # --gui: serve the localhost web GUI instead of the REPL (config/model/logging
     # already applied above). Blocks on uvicorn until Ctrl-C. Needs the [gui] extra.

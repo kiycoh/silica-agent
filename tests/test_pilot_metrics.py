@@ -76,7 +76,7 @@ def test_no_argument_or_exception_text_reaches_the_hosted_journal():
 
 def test_hosted_setup_writes_json_and_lets_only_metrics_through_below_warning(monkeypatch, capsys):
     import sys
-    from silica.cli import _setup_logging
+    from silica.ui.logging import setup_logging
     from silica.config import CONFIG
     from silica.metrics import emit
 
@@ -84,7 +84,7 @@ def test_hosted_setup_writes_json_and_lets_only_metrics_through_below_warning(mo
     monkeypatch.delenv("SILICA_METRICS_OPTOUT", raising=False)
     orig = CONFIG.debug_logging
     try:
-        _setup_logging(debug=True)  # hosted wins over --verbose
+        setup_logging(debug=True)  # hosted wins over --verbose
         logging.getLogger("silica.probe").info("info-%s", MARKER)
         logging.getLogger("silica.probe").warning("warn %s", MARKER)
         emit("turn", kind="chat", outcome="done", ms=12)
@@ -92,7 +92,7 @@ def test_hosted_setup_writes_json_and_lets_only_metrics_through_below_warning(mo
         err = capsys.readouterr().err
     finally:
         monkeypatch.delenv("SILICA_HOSTED")
-        _setup_logging(debug=orig)
+        setup_logging(debug=orig)
     rows = [json.loads(line) for line in err.splitlines() if line.startswith("{")]
     assert MARKER not in err
     assert {"logger": "silica.probe", "level": "WARNING", "msg": "warn %s"}.items() <= rows[0].items()

@@ -167,7 +167,7 @@ def test_import_activates_the_vault_before_reading_it(tmp_path, monkeypatch):
         order.append("activate")
         CONFIG.vault_path = str(vault)
 
-    monkeypatch.setattr(cli, "_activate_repo_mode", _activate)
+    monkeypatch.setattr("silica.ui.bootstrap.open_vault", _activate)
 
     seen: dict = {}
 

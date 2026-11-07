@@ -71,6 +71,13 @@ def silica_home() -> Path:
     return _SILICA_HOME
 
 
+def default_vault() -> Path:
+    """The vault of last resort, and where session memory lives unless
+    SILICA_MEMORY_VAULT says otherwise. Named once: the REPL's fallback, the
+    memory lane and the episodic store each spelled it."""
+    return silica_home() / "vault"
+
+
 def in_config_dir(path: str | Path) -> bool:
     """True when `path` resolves inside ~/.silica, Silica's own state: the .env
     with every API key, the narration of every chat, the runs. A vault opened

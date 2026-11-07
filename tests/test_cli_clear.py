@@ -14,7 +14,7 @@ def test_cli_clear_command():
     with patch("silica.cli.build_session", mock_build_session), \
          patch("silica.cli.CONSOLE") as mock_console, \
          patch("silica.cli.print_home") as mock_home, \
-         patch("silica.cli._setup_logging"), \
+         patch("silica.ui.logging.setup_logging"), \
          patch("silica.session.meter.update_context_tokens") as mock_update, \
          patch("sys.argv", ["silica"]):
 

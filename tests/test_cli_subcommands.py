@@ -30,7 +30,7 @@ class TestDispatchSubcommand:
         seen = []
         monkeypatch.setattr(checks, "run_checks", lambda cfg: seen.append(cfg.vault_path) or [])
         monkeypatch.setattr(checks, "render_report", lambda results: None)
-        monkeypatch.setattr(cli, "_ensure_servers", lambda: None)
+        monkeypatch.setattr("silica.ui.bootstrap.ensure_local_servers", lambda: None)
         monkeypatch.setattr(config, "VAULT_PINNED", False)
         monkeypatch.setattr(cli.CONFIG, "vault_path", "")
         monkeypatch.setattr(checks.gitstate, "find_repo_root", lambda p: None)
@@ -63,7 +63,6 @@ class TestDispatchSubcommand:
         """stdout is the payload: nothing else may print on it."""
         import json
 
-        import silica.cli as cli
         import silica.onboarding.checks as checks
         from silica.cli import _dispatch_subcommand
 
@@ -71,7 +70,7 @@ class TestDispatchSubcommand:
         monkeypatch.setattr(checks, "run_checks", lambda cfg: [bad])
         # The autostart prints to the console; under --json that has to be
         # redirected away from stdout, which is what this asserts.
-        monkeypatch.setattr(cli, "_ensure_servers", lambda: print("starting llama-server…"))
+        monkeypatch.setattr("silica.ui.bootstrap.ensure_local_servers", lambda: print("starting llama-server…"))
 
         code = _dispatch_subcommand(["doctor", "--json"])
 

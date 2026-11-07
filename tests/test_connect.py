@@ -306,7 +306,7 @@ def test_cli_dispatches_silica_connect(monkeypatch):
 
     calls = []
     monkeypatch.setattr(connect_mod, "run_connect", lambda: calls.append(1) or 0)
-    monkeypatch.setattr(cli, "_activate_repo_mode", lambda: None)
+    monkeypatch.setattr("silica.ui.bootstrap.open_vault", lambda: None)
     monkeypatch.setattr(meter, "resolve_context_budget", lambda: None)
     assert cli._dispatch_subcommand(["connect"]) == 0
     assert calls == [1]

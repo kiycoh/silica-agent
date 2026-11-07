@@ -233,14 +233,14 @@ def test_no_root_handler_caches_real_stderr(monkeypatch):
     """
     import io
     import sys
-    from silica.cli import _setup_logging
+    from silica.ui.logging import setup_logging
     from silica.config import CONFIG
     from silica.ui.logging import LiveAwareStreamHandler
 
     orig_debug = CONFIG.debug_logging
     try:
         for debug in (True, False):
-            _setup_logging(debug=debug)
+            setup_logging(debug=debug)
             root = logging.getLogger()
             # No plain StreamHandler holding a cached stream on root
             assert not [h for h in root.handlers if type(h) is logging.StreamHandler]
@@ -252,7 +252,7 @@ def test_no_root_handler_caches_real_stderr(monkeypatch):
             assert all(h.stream is proxy for h in live_aware)
             monkeypatch.undo()
     finally:
-        _setup_logging(debug=orig_debug)
+        setup_logging(debug=orig_debug)
 
 
 def test_gui_leaves_uvicorn_logging_to_root():
@@ -292,13 +292,13 @@ def test_debug_records_land_in_the_file_log_while_the_terminal_stays_quiet(tmp_p
     the file is noise within a session."""
     import io
     import sys
-    from silica.cli import _setup_logging
+    from silica.ui.logging import setup_logging
     from silica.config import CONFIG
 
     monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path)
     orig = CONFIG.debug_logging
     try:
-        _setup_logging(debug=False)
+        setup_logging(debug=False)
         err = io.StringIO()
         monkeypatch.setattr(sys, "stderr", err)
         logging.getLogger("silica.probe").debug("needle-debug")
@@ -311,7 +311,7 @@ def test_debug_records_land_in_the_file_log_while_the_terminal_stays_quiet(tmp_p
         assert "needle-debug" not in err.getvalue()
         assert "needle-warn" in err.getvalue()
     finally:
-        _setup_logging(debug=orig)
+        setup_logging(debug=orig)
 
 
 def test_attach_file_log_freezes_the_terminal_level_before_opening_root(tmp_path, monkeypatch):
@@ -319,7 +319,7 @@ def test_attach_file_log_freezes_the_terminal_level_before_opening_root(tmp_path
     own, so lowering root to DEBUG for the file must first pin the terminal
     handler at what root used to show."""
     import io
-    from silica.cli import _attach_file_log
+    from silica.ui.logging import attach_file_log
 
     root = logging.getLogger()
     saved, level = root.handlers[:], root.level
@@ -328,7 +328,7 @@ def test_attach_file_log_freezes_the_terminal_level_before_opening_root(tmp_path
             root.removeHandler(h)
         monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path)
         logging.basicConfig(stream=io.StringIO(), level=logging.WARNING)
-        _attach_file_log()
+        attach_file_log()
         assert root.level == logging.DEBUG
         stream = [h for h in root.handlers if type(h) is logging.StreamHandler]
         assert stream and stream[0].level == logging.WARNING
@@ -347,7 +347,7 @@ def test_a_hosted_tenant_opens_no_file_log(tmp_path, monkeypatch):
     SILICA_HOSTED=1 no silica.log is opened and root keeps the terminal's level
     instead of dropping to DEBUG for a file that does not exist."""
     import io
-    from silica.cli import _attach_file_log
+    from silica.ui.logging import attach_file_log
 
     root = logging.getLogger()
     saved, level = root.handlers[:], root.level
@@ -357,7 +357,7 @@ def test_a_hosted_tenant_opens_no_file_log(tmp_path, monkeypatch):
         monkeypatch.setattr("silica.config._SILICA_HOME", tmp_path)
         monkeypatch.setenv("SILICA_HOSTED", "1")
         logging.basicConfig(stream=io.StringIO(), level=logging.WARNING)
-        _attach_file_log()
+        attach_file_log()
         assert root.level == logging.WARNING
         assert not any(isinstance(h, logging.FileHandler) for h in root.handlers)
         assert not (tmp_path / "logs").exists()

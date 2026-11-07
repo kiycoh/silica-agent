@@ -147,9 +147,9 @@ def test_tui_incognito_also_stops_capture_and_clears_with_a_new_process(on, monk
          patch("silica.session.turn.run_agent", _answer), \
          patch("silica.cli._model_configured", lambda: True), \
          patch("silica.cli.CONSOLE"), patch("silica.cli.print_home"), \
-         patch("silica.cli._setup_logging"), patch("silica.session.meter.update_context_tokens"), \
-         patch("silica.cli._ensure_servers"), patch("silica.cli._announce_code_lane"), \
-         patch("silica.cli._activate_repo_mode"), patch("silica.capture.capture_session", captured), \
+         patch("silica.ui.logging.setup_logging"), patch("silica.session.meter.update_context_tokens"), \
+         patch("silica.ui.bootstrap.ensure_local_servers"), patch("silica.ui.bootstrap.announce_code_lane"), \
+         patch("silica.ui.bootstrap.open_vault"), patch("silica.capture.capture_session", captured), \
          patch("sys.argv", ["silica"]):
         from silica.cli import main
         main()

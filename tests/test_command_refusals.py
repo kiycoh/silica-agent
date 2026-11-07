@@ -36,7 +36,7 @@ def test_the_repl_shows_it_and_asks_no_model(tmp_vault, capsys, line, says):
     session = MagicMock()
     session.prompt.side_effect = [line, EOFError()]
     with patch("silica.cli.build_session", return_value=session), \
-         patch("silica.cli._setup_logging"), patch("silica.cli.print_home"), \
+         patch("silica.ui.logging.setup_logging"), patch("silica.cli.print_home"), \
          patch("silica.session.turn.run_agent", _no_model), patch("sys.argv", ["silica"]):
         main()
     assert says in capsys.readouterr().out.replace("\n", "")

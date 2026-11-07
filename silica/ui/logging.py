@@ -9,9 +9,11 @@ from datetime import datetime, timezone
 from typing import Any, cast
 import logging
 import sys
+import threading
 
 from rich.console import Console
 
+from silica.config import CONFIG, hosted, silica_home
 from silica.term.console import CONSOLE
 from silica.term.style import GLYPHS
 from silica.term.console import SILICA_THEME
@@ -90,7 +92,7 @@ class AnsiHumanFriendlyFormatter(HumanFriendlyFormatter):
 
     The main-thread RichHandler renders markup through the shared CONSOLE; a
     worker thread can't — concurrent rich rendering onto an active Live tears the
-    terminal (see ``_setup_logging``). So we render this one record to its own
+    terminal (see ``setup_logging``). So we render this one record to its own
     throwaway Console/buffer (nothing shared → thread-safe) and hand plain ANSI
     text to the StreamHandler, which the live-aware stderr proxy prints above the
     Live region intact. The buffer Console mirrors CONSOLE's terminal/colour, so
@@ -158,3 +160,125 @@ class HostedJsonFormatter(logging.Formatter):
                            for f in traceback.extract_tb(tb)],
             }
         return json.dumps(out, ensure_ascii=False, separators=(",", ":"))
+
+
+def setup_logging(debug: bool = False) -> None:
+    """Configure logging for the CLI session."""
+    CONFIG.debug_logging = debug
+    level = logging.DEBUG if debug else logging.WARNING
+
+    root = logging.getLogger()
+    for h in root.handlers[:]:
+        root.removeHandler(h)
+        if isinstance(h, logging.FileHandler):
+            h.close()   # a re-setup (tests, /verbose) must not leak the previous fd
+
+    handler: logging.Handler
+    if hosted():
+        # A hosted tenant's stderr is its journal, which the privacy notice
+        # declares (ADR-0100 point 2): templates, never arguments, whatever
+        # --verbose or SILICA_DEBUG ask for, since DEBUG records carry the
+        # model's reasoning and tool arguments. The handler opens at INFO only
+        # for silica.metrics, whose logger is raised to INFO here because root
+        # stays at WARNING now that the hosted file log is gone.
+        handler = LiveAwareStreamHandler()
+        handler.setFormatter(HostedJsonFormatter())
+        handler.setLevel(logging.INFO)
+        handler.addFilter(lambda r: r.levelno >= logging.WARNING or r.name == "silica.metrics")
+        logging.getLogger("silica.metrics").setLevel(logging.INFO)
+        level = logging.WARNING
+    elif debug:
+        from rich.logging import RichHandler
+        handler = RichHandler(
+            console=CONSOLE,
+            markup=True,
+            show_path=False,
+            show_level=False,
+            show_time=False,
+        )
+        handler.setFormatter(HumanFriendlyFormatter())
+        # Rich's Live display is driven from the main thread; worker threads logging
+        # through RichHandler concurrently corrupt the terminal render state.
+        # Restrict RichHandler to the main thread only.
+        main_thread = threading.main_thread()
+        handler.addFilter(lambda r: threading.current_thread() is main_thread)
+
+        # Worker-thread records fall back to a live-aware stderr handler: resolving
+        # sys.stderr at emit time follows rich.Live's redirect, so they print above
+        # an active live region instead of tearing it (stale-frame duplication).
+        bg_handler = LiveAwareStreamHandler()
+        # Same human-friendly seam as the main thread — rendered to ANSI in the
+        # formatter (throwaway Console) so worker logs (dedup, refine, enrich,
+        # expand, orphan…) read like the main-thread ones instead of raw dumps.
+        bg_handler.setFormatter(AnsiHumanFriendlyFormatter())
+        bg_handler.addFilter(lambda r: threading.current_thread() is not main_thread)
+        root.addHandler(bg_handler)
+    else:
+        # Live-aware: follows rich.Live's stderr redirect so warnings during the
+        # injector/batch live region print above it instead of tearing the panel.
+        # Same human-friendly ANSI seam as debug mode's worker handler, so
+        # warnings/errors (incl. worker threads like dedup) render coloured instead
+        # of raw dumps. Level stays WARNING here — only warn/error surface.
+        handler = LiveAwareStreamHandler()
+        handler.setFormatter(AnsiHumanFriendlyFormatter())
+    root.addHandler(handler)
+    root.setLevel(level)
+    attach_file_log()
+
+    # LiteLLM/httpx/openai/httpcore are always silenced — their DEBUG is raw HTTP/request dumps
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("litellm").setLevel(logging.WARNING)
+    logging.getLogger("LiteLLM").setLevel(logging.ERROR)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("markdown_it").setLevel(logging.WARNING)
+    # websockets DEBUG is the raw bridge handshake + per-frame dump; connect.py
+    # already logs the meaningful lifecycle (connect/disconnect/refusals) itself.
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+    # asyncio DEBUG is one "Using selector" line per event loop — litellm's sync
+    # streaming path creates a fresh loop PER CHUNK, so --verbose drowns in them.
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+
+
+def attach_file_log() -> None:
+    """Every silica record at DEBUG into ~/.silica/logs/silica.log, whatever
+    the terminal shows. Before this the agent had no log file at all: `-v`
+    went to stderr under a Rich Live region, and a run under setsid lost it
+    entirely (audit 2026-09-06). Third-party loggers stay at WARNING in the
+    file: root at DEBUG would otherwise let PIL/urllib3 flood it.
+
+    ponytail: one file shared by every silica process (REPL, GUI) in
+    append mode; a rotation by one process leaves the others writing to the
+    renamed file until they rotate themselves. Per-pid files if that ever
+    loses a line that mattered.
+    """
+    from logging.handlers import RotatingFileHandler
+
+    # A hosted tenant keeps no file of its own (ADR-0100 point 1): the privacy
+    # notice promises the system journal and 14 days, and this file held the
+    # model's reasoning and every tool call's arguments with no age limit. Its
+    # WARNING lines still reach the journal through the stderr handler.
+    if hosted():
+        return
+    root = logging.getLogger()
+    if any(isinstance(h, RotatingFileHandler) for h in root.handlers):
+        return
+    # Handlers without a level of their own showed what root allowed: pin that
+    # before root opens up, or the terminal starts printing DEBUG.
+    shown = root.level or logging.WARNING
+    for h in root.handlers:
+        if h.level == logging.NOTSET:
+            h.setLevel(shown)
+    path = silica_home() / "logs" / "silica.log"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fh = RotatingFileHandler(path, maxBytes=10_000_000, backupCount=3, encoding="utf-8")
+    except OSError as e:
+        logging.getLogger(__name__).warning("file log unavailable at %s: %s", path, e)
+        return
+    fh.setLevel(logging.DEBUG)
+    fh.addFilter(lambda r: r.name.startswith("silica") or r.levelno >= logging.WARNING)
+    fh.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname).1s %(name)s [%(threadName)s] %(message)s"))
+    root.addHandler(fh)
+    root.setLevel(logging.DEBUG)

@@ -270,7 +270,7 @@ def serve(port: int = GUI_PORT) -> None:
     # that does not poll - an in-flight /chat turn, which carries its own cancel
     # path and would otherwise hold Ctrl+C for the length of the turn.
     # log_config=None: uvicorn installs no logging of its own, so its records
-    # reach the handler `_setup_logging` already put on root and obey its level
+    # reach the handler `setup_logging` already put on root and obey its level
     # (quiet by default, the full access log under --verbose). Two reasons, and
     # the second is a defect. The banner it prints duplicates the line above.
     # And its colourized formatter re-renders each record from the

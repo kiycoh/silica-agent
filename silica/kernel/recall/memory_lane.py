@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 from collections import OrderedDict
 from pathlib import Path
 
-from silica.config import CONFIG, silica_home
+from silica.config import CONFIG, default_vault
 
 
 def memory_vault() -> Path | None:
@@ -40,8 +40,7 @@ def memory_vault() -> Path | None:
     exist on disk yet.
     """
     raw = (CONFIG.memory_vault or "").strip()
-    # Default mirrors cli.default_user_vault (kernel must not import cli).
-    mem = (Path(raw).expanduser() if raw else silica_home() / "vault").resolve()
+    mem = (Path(raw).expanduser() if raw else default_vault()).resolve()
     active = (CONFIG.vault_path or "").strip()
     if active and Path(active).resolve() == mem:
         return None
