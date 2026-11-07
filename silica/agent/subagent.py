@@ -58,16 +58,13 @@ def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None, undo_run: Any =
     """One consumer thread: claim → handle → complete until the queue closes.
 
     THE consumer loop — shared by the Coordinator's in-run pool and the ad-hoc
-    ``run_subagent_batch`` path, so cancel semantics, bookkeeping, and bus
-    events live in exactly one place.  Blocks at OS level on ``wq.claim()`` —
-    no polling; the sentinel injected by ``wq.close()`` cascades through all
+    ``run_subagent_batch`` path, so cancel semantics and bookkeeping live in
+    exactly one place.  Blocks at OS level on ``wq.claim()`` — no polling; the sentinel injected by ``wq.close()`` cascades through all
     consumers so they all wake and exit cleanly.  ``stop`` (optional Event) is
     checked before each item so a producer crash or user cancel causes pending
     items to be marked cancelled rather than dispatched.
     """
-    from silica.obs.bus import BUS
     from silica.kernel.write.gate import in_run
-    from silica.obs.events import WorkCancelledEvent
     from silica.obs import narration as _narr_mod
 
     while True:
@@ -76,10 +73,6 @@ def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None, undo_run: Any =
             return                      # sentinel received — queue fully drained
         if (stop is not None and stop.is_set()) or item.cancel_token.is_set():
             wq.complete(item, "cancelled", {"status": "cancelled", "reason": "cancel_token"})
-            BUS.publish(
-                "work/cancelled",
-                WorkCancelledEvent(item.id, item.kind, "pre_handle"),
-            )
             _narr_mod.NARRATOR.narrate(
                 "subagent", "cancelled", f"{item.kind} cancelled at pre_handle",
                 {"kind": item.kind, "phase": "pre_handle"}, id=item.id)

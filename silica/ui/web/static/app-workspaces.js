@@ -315,7 +315,7 @@ async function createWorkspace(name, notes, folders) {
   try {
     const r = await postJson("/workspaces", { name, notes, folders });
     const d = await r.json();
-    if (!r.ok) { notify(d.detail || "couldn't create that workspace"); return null; }
+    if (!r.ok) { notify(failureSaid(d, "couldn't create that workspace")); return null; }
     wsOpen.add(d.path);
     await loadWorkspaces();
     return d;

@@ -372,6 +372,8 @@ def run_wiki(config, folder: str | None = None,
         try:
             return DRIVER.read_note(rel).content or ""
         except Exception:
+            # Absent or unreadable both mean regenerate: the commit that follows
+            # refuses a note it cannot write over, and says so in `failed`.
             return ""
 
     def _commit(rel: str, content: str) -> bool:

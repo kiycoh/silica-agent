@@ -147,7 +147,7 @@ def stage(
         try:  # read before the write: refreshing a stub must restore, not delete
             prior = DRIVER.read_note(stub.note_path).content
         except Exception:
-            prior = None
+            prior = None  # absent; an unreadable stub fails the upsert below, which reports it
     # This write lands in the vault but NOT in the indexes. The distill lane
     # crosses `_refresh_cooccurrence_for_ops` (router/states/write.py:302); the
     # terminal lane calls the driver bare, and `sync.sweep()` only reconciles

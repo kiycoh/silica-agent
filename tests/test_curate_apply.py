@@ -321,7 +321,7 @@ def test_cli_curate_apply_prints_real_outcomes_not_planned_counts(monkeypatch):
     'Applied 1 item(s): 1 dedup' — that's the plan, not what happened."""
     from unittest.mock import MagicMock, patch
     from silica import cli
-    from silica.ui.console import CONSOLE
+    from silica.term.console import CONSOLE
 
     fake_tool = MagicMock()
     fake_tool.run.return_value = json.dumps({

@@ -210,6 +210,7 @@ def _t4_sanitize(body, stem) -> dict:
 def integrity_probe(vault: Path, *, verbose: bool = False) -> dict:
     from silica.driver.fs_backend import ObsidianFSBackend  # lazy: kernel stays driver-free at import
     from silica.kernel.report.health.preservation import preservation
+    from silica.kernel.vault import Vault
 
     all_md = iter_notes(vault)
     title_index = build_title_index([p.stem for p in all_md])
@@ -222,7 +223,7 @@ def integrity_probe(vault: Path, *, verbose: bool = False) -> dict:
     notes_with_structural = 0
 
     with tempfile.TemporaryDirectory() as scratch:
-        backend = ObsidianFSBackend(vault_path=scratch)
+        backend = Vault(ObsidianFSBackend(vault_path=scratch))
         for p in all_md:
             text = p.read_text(encoding="utf-8")
             stem = p.stem

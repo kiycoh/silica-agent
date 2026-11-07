@@ -28,7 +28,8 @@ from silica.agent.constraints import (  # noqa: E402
 )
 from silica.obs.events import ToolCompleteEvent  # noqa: E402
 from silica.agent.recall_watch import THIN_COVERAGE_HINT  # noqa: E402
-from silica.config import DEMO_OFF, demo, served_views, withheld  # noqa: E402
+from silica.config import demo, served_views, withheld  # noqa: E402
+from silica.view_table import DEMO_OFF  # noqa: E402
 from tests.webassets import WEB  # noqa: E402
 
 # The chat's tools in a demo, named here so a tool joining the core later is

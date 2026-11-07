@@ -113,7 +113,7 @@ const toolLabel = (t) => (t.target ? `${t.name} "${t.target}"` : t.name);
 // the tool row's card is collapsed by default, and a memory the user never saw
 // being written is one they cannot take back. Shared by the model's
 // silica_remember (tool_done) and by /remember (the done frame).
-const MEMORY_VERB = { save: "Saved to memory", replace: "Updated memory", forget: "Forgot" };
+const MEMORY_VERB = VOCAB.memory.verbs;
 function memoryLine(m) {
   const row = document.createElement("div");
   row.className = "turn-outcome memory-line";
@@ -143,7 +143,7 @@ function memoryLine(m) {
     }
     // A refusal means memory changed since this write: a retry cannot succeed,
     // so the button stays off and says why.
-    const why = (data && data.detail) || "could not undo";
+    const why = failureSaid(data, "could not undo");
     undo.title = why;
     notify(why);
   });
@@ -1507,7 +1507,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       let said = "";
       try {
         const d = await resp.json();
-        said = d.error || (typeof d.detail === "string" ? d.detail : "");
+        said = failureSaid(d);
       } catch {
         // A proxy's HTML page carries no sentence; the status in the detail does.
       }
@@ -1815,7 +1815,7 @@ async function savePlanOffer(body, line, btn) {
   try {
     const r = await postJson("/learn/plan", body);
     const out = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(out.detail || r.statusText);
+    if (!r.ok) throw new Error(failureSaid(out, r.statusText));
     // Memorize reads its plans again when it next opens (lrWritePlan does the same)
     lrData = null; lrPlan = null; lrMap = null;
     const open = document.createElement("a");

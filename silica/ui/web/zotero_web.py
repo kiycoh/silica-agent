@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 
 from silica.config import CONFIG, live_env
 from silica.sources import zotero, zotero_write
+from silica.ui.web import failures
 
 
 def _link():
@@ -326,7 +327,7 @@ async def refused(_request: Request, exc: Exception) -> JSONResponse:
     # A ZoteroError is a sentence written for the person (what failed and
     # where to fix it), never a raw transport error: zotero.Zotero.send
     # turns httpx's URL-bearing text into one before it gets here.
-    return JSONResponse({"detail": exc.args[0] if exc.args else "Zotero failed"}, status_code=409)
+    return JSONResponse(failures.refusal(exc.args[0] if exc.args else "Zotero failed"), status_code=409)
 
 
 # Sync defs: every route talks to Zotero over HTTP, so they run in the

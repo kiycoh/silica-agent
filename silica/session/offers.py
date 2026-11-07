@@ -16,11 +16,12 @@ from silica.config import CONFIG, demo
 logger = logging.getLogger(__name__)
 
 
-def skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dict | None]:
+def skill_after_turn(text: str, messages: list[dict], reserved) -> tuple[dict | None, dict | None]:
     """(turn note, offer) for the turn that just ended (ADR-0127 points 5, 6):
     a proposal written from a request the person made in enough chats, or
     else the installed skill that answers it, offered as the next turn. An
-    incognito chat proposes nothing: it asked to leave no trace."""
+    incognito chat proposes nothing: it asked to leave no trace. `reserved`
+    names the commands a proposal may not shadow."""
     from silica.obs import narration as _narr
     from silica.kernel import proposed_skills as ps
     from silica.kernel import user_memory
@@ -39,7 +40,8 @@ def skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dict
         evidence = ps.detect(text, messages, vault, _narr.NARRATOR.sid)
         if evidence is not None:
             drafted = ps.draft(evidence["asks"], CONFIG)
-            name = ps.stage(vault, drafted, evidence, CONFIG.worker_model or CONFIG.model or "") if drafted else None
+            name = ps.stage(vault, drafted, evidence, CONFIG.worker_model or CONFIG.model or "",
+                            reserved=reserved) if drafted else None
             if name:
                 return {"kind": "skill", "text": f"/{name} written from a request you made in "
                                                  f"{len(evidence['sessions'])} chats · review it in "

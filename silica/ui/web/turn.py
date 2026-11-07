@@ -20,10 +20,10 @@ from pathlib import Path
 from typing import Any
 
 from silica.agent.constraints import AgentConstraints, DEMO_MAX_ITERATIONS, PHONE_TOOLS
-from silica.agent.mentions import image_mark
 from silica.config import CONFIG, demo
 from silica.kernel import job_records, system_lines, vault_files
 from silica.kernel.graph.mindmap import note_resolver
+from silica.kernel.text.mentions import image_mark
 from silica.obs.events import ToolCompleteEvent
 from silica.session import commands, meter, seed
 from silica.session import turn as session_turn
@@ -176,8 +176,14 @@ def _figures(t: _ChatTurn) -> None:
         t.answer = place_figures(t.answer, t.conv.messages, exists=lambda f: render.find_asset(f) is not None)
 
 
+def _offer_next(t: _ChatTurn) -> None:
+    from silica.ui.commands import COMMANDS
+
+    session_turn.offer_next(t, [c.name.lstrip("/") for c in COMMANDS])
+
+
 _AFTER = (session_turn.check_numbers, session_turn.attribute, _figures, session_turn.plan_under_answer,
-          session_turn.offer_next, session_turn.note, session_turn.stamp_reads, session_turn.beat,
+          _offer_next, session_turn.note, session_turn.stamp_reads, session_turn.beat,
           session_turn.recount)
 
 
@@ -311,7 +317,7 @@ async def run_turn(ask: Ask) -> AsyncIterator[dict]:
             yield callback.done_frame(answer, await off_loop(render.answer_html, answer, []), session.ctx_meter())
             return
         elif t.text.startswith("/"):
-            from silica.ui.console import CONSOLE
+            from silica.term.console import CONSOLE
 
             def _run_slash():
                 # The dispatch prints its result to CONSOLE and can do real work,

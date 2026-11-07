@@ -566,7 +566,6 @@ def _build_burst(k: int) -> list[dict]:
 
     # DRIVER.mtime_of, not the note object: the same accessor compute_report's
     # _note_mtimes uses, so the fallback clock is identical on both surfaces.
-    mtime_of = getattr(DRIVER, "mtime_of", None)
     created: dict[str, float] = {}
     for key in in_graph:
         gid = key + ".md" if key + ".md" in m.degree else key
@@ -574,7 +573,7 @@ def _build_burst(k: int) -> list[dict]:
             content = DRIVER.read_note(
                 NoteRef(name=notekey.stem(gid), path=gid)
             ).content
-            mt = mtime_of(gid) if mtime_of else None
+            mt = DRIVER.mtime_of(gid)
         except Exception:
             continue  # a note the index knows and the disk no longer has
         ts, _ai = created_and_ai(content, mt if mt is not None else 0.0)

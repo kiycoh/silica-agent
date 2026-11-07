@@ -10,6 +10,7 @@ from silica.kernel.base.manifest import (
     load_manifest,
     reset_manifest_cache,
 )
+from silica.kernel.vault import Vault
 
 
 @pytest.fixture(autouse=True)
@@ -190,7 +191,7 @@ def test_nucleate_gating_sources_prose_only(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(CONFIG, "vault_path", str(vault))
     from silica.driver import fs_backend
     import silica.driver as driver_mod
-    monkeypatch.setattr(driver_mod, "DRIVER", fs_backend.ObsidianFSBackend(str(vault)))
+    monkeypatch.setattr(driver_mod, "DRIVER", Vault(fs_backend.ObsidianFSBackend(str(vault))))
     reset_manifest_cache()
 
     from silica.cli import _expand_workflow_shortcut

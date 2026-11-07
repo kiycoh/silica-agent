@@ -390,6 +390,22 @@ class TestLLMArbitrate:
 # OrganizerFSM smoke test (dry_run=True — no driver writes)
 # ---------------------------------------------------------------------------
 
+def test_the_reply_carries_no_store(simple_taxonomy: Taxonomy):
+    """The tool's reply is this dict as it stands, and json.dumps(default=str) made a
+    store into its object address: bytes that reach the model and change every run."""
+    from silica.router.organize_fsm import OrganizerFSM
+
+    store = MagicMock()
+    store.__len__.return_value = 1
+    driver = MagicMock()
+    driver.list_files.return_value = [MagicMock(path="Concepts/GPT-4 review.md")]
+    with patch("silica.router.organize_fsm.DRIVER", driver), \
+         patch("silica.kernel.recall.cooccurrence.get_cooccur_store", return_value=store), \
+         patch("silica.kernel.organize.classify.classify_notes", return_value=[]):
+        out = OrganizerFSM(taxonomy=simple_taxonomy, dry_run=True, llm_arbiter=False).run()
+    assert "_cooccur_store" not in out and " object at 0x" not in json.dumps(out, default=str)
+
+
 class TestOrganizerFSMDryRun:
     """Smoke test: dry_run=True should return plan without any DRIVER.move() calls."""
 

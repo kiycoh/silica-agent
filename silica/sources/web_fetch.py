@@ -750,7 +750,8 @@ def fetch_page(url: str, headers: dict[str, str] = HEADERS) -> Page:
     return Page(_render(final_url, truncate(text)), page_title(body) if is_html else "")
 
 
-@tool(cls="atomic", sensitive=True)
+# ingress: /web, a page's text.
+@tool(cls="atomic", sensitive=True, ingress=True, label=("web fetch", "url"))
 def web_fetch(url: str) -> str:
     """Read one web page and return its text, boilerplate stripped and
     truncated. Call this on a promising search result instead of guessing from

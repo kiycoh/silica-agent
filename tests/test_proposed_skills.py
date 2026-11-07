@@ -106,13 +106,13 @@ def test_a_staged_proposal_runs_nowhere_until_installed_and_a_dismissed_one_is_n
 
     vault = _vault()
     ev = {"asks": SAME, "sessions": ["now", "s1", "s2"]}
-    name = ps.stage(vault, DRAFTED, ev, "m")
+    name = ps.stage(vault, DRAFTED, ev, "m", reserved=())
     assert name == "integra-appunti" and "integra-appunti" not in discover(vault)
     row = ps.pending(vault)[0]
     assert row["name"] == name and row["asks"] == SAME and ": " in row["description"]
-    assert ps.stage(vault, DRAFTED, ev) == "integra-appunti-2"
+    assert ps.stage(vault, DRAFTED, ev, reserved=()) == "integra-appunti-2"
     assert ps.install(vault, name) is None and "integra-appunti" in discover(vault)
-    third = ps.stage(vault, DRAFTED, ev)
+    third = ps.stage(vault, DRAFTED, ev, reserved=())
     assert third == "integra-appunti-3"   # the installed name and the staged -2 are taken
     (Path(vault) / ".silica" / "skills" / third).mkdir(parents=True)   # made by hand meanwhile
     assert "exists" in ps.install(vault, third)
@@ -120,6 +120,10 @@ def test_a_staged_proposal_runs_nowhere_until_installed_and_a_dismissed_one_is_n
     assert [p["name"] for p in ps.pending(vault)] == ["integra-appunti-3"]
     _history(monkeypatch, [("s1", [SAME[0]], False), ("s2", [SAME[1]], False)])
     assert ps.detect(SAME[2], [], vault, "now") is None   # answered by the installed one, or asked once
+
+
+def test_a_proposal_steps_around_a_name_the_surface_reserves():
+    assert ps.stage(_vault(), DRAFTED, {"asks": SAME, "sessions": []}, reserved=["integra-appunti"]) == "integra-appunti-2"
 
 
 def _skill(name: str, desc: str, persona: bool = False) -> None:

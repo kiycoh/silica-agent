@@ -455,7 +455,7 @@ async function zLoadCollection() {
   try {
     const r = await fetch("/zotero/collection?key=" + encodeURIComponent(zLib.col));
     const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || "HTTP " + r.status);
+    if (!r.ok) throw new Error(failureSaid(d, "HTTP " + r.status));
     zLib.data = d;
   } catch (err) {
     main.innerHTML = "";
@@ -601,7 +601,7 @@ async function zOpen(r) {
   try {
     const res = await fetch("/zotero/item?key=" + encodeURIComponent(r.key));
     p = await res.json();
-    if (!res.ok) throw new Error(p.detail || "HTTP " + res.status);
+    if (!res.ok) throw new Error(failureSaid(p, "HTTP " + res.status));
   } catch (err) { side.innerHTML = ""; side.appendChild(mkEl("p", "zl-empty", err.message)); return; }
   side.innerHTML = "";
   const readOnly = zLib.lib && zLib.lib.read_only;
@@ -637,7 +637,7 @@ async function zPeek(r) {
   try {
     const res = await fetch("/zotero/peek?key=" + encodeURIComponent(r.key));
     d = await res.json();
-    if (!res.ok) throw new Error(d.detail || "HTTP " + res.status);
+    if (!res.ok) throw new Error(failureSaid(d, "HTTP " + res.status));
   } catch (err) { side.innerHTML = ""; side.appendChild(mkEl("p", "zl-empty", err.message)); return; }
   side.innerHTML = "";
   side.appendChild(mkEl("div", "zl-kicker", "In " + d.vault.split("/").pop() + " · read by peek"));
@@ -656,7 +656,7 @@ async function zShowGroups() {
   try {
     const r = await fetch("/zotero/groups");
     d = await r.json();
-    if (!r.ok) throw new Error(d.detail || "HTTP " + r.status);
+    if (!r.ok) throw new Error(failureSaid(d, "HTTP " + r.status));
   } catch (err) { side.lastChild.textContent = err.message; return; }
   side.lastChild.remove();
   side.appendChild(mkEl("p", "", "The semantic zones of the papers in this vault, as subcollections of Silica groups. "

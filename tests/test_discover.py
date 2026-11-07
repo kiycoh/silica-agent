@@ -301,7 +301,7 @@ def test_the_chat_block_fences_the_articles_and_names_the_scope(tmp_vault):
     assert block.startswith("<discover-story>") and block.endswith("</discover-story>")
     assert "<article-data>" in block and S.SCOPES["vault"] in block and "[1] Headline - https://n.test/1" in block
     assert chip == {"id": "s1", "title": "Headline", "articles": 1}
-    from silica.agent.mentions import strip
+    from silica.kernel.text.mentions import strip
 
     assert strip("my question\n\n" + block) == "my question"
 

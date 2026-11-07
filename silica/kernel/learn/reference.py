@@ -221,6 +221,10 @@ def reference_rows(body: str) -> list[dict]:
     return out
 
 
+# An assessment's parts as the plan's form names them.
+PART_LABEL = {"project": "Project", "oral": "Oral exam", "written": "Written exam", "presentation": "Presentation",
+              "exercises": "Exercises"}
+
 _ASSESS_RE = re.compile(r"\b(valutazion\w*|esam[ei]|modalit\w* d.esame|verifica|assessment|exam\w*|grading|evaluation)\b",
                         re.I)
 

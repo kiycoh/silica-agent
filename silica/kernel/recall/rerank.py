@@ -165,7 +165,7 @@ def _read_body(path: str, *, origin: str = "vault") -> tuple[str, str]:
 
             content = DRIVER.read_note(path).content or ""
         except Exception:
-            return "", ""
+            return "", ""  # unreadable: scored on nothing, so it falls to the bottom and the rest still rank
     from silica.kernel.base import frontmatter
 
     _data, _raw, body = frontmatter.split(content)

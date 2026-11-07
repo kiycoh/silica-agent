@@ -49,13 +49,13 @@ def test_a_reply_with_no_card_is_asked_again_once(tmp_vault, monkeypatch):
     assert artifacts.flashcards(["Nessuna nota"]).startswith("No note or folder found")
 
 
-def test_saved_cards_go_through_the_write_tool(tmp_vault, monkeypatch):
-    import silica.tools.notes as notes
+def test_saved_cards_go_through_write_note(tmp_vault, monkeypatch):
+    import silica.kernel.write.notes as notes
 
     tmp_vault.note("ML/Variabili slack di margine.md", SLACK)
     _reply(monkeypatch, "Cosa misurano? :: La sovrapposizione tra le classi [[Variabili slack di margine]]")
     wrote = {}
-    monkeypatch.setattr(notes, "silica_write_note", lambda **kw: (wrote.update(kw), {"path": kw["path"]})[1])
+    monkeypatch.setattr(notes, "write_note", lambda path, body, **kw: (wrote.update(path=path, body=body), {"path": path})[1])
     md = artifacts.flashcards(["Variabili slack di margine"], save="ML/Slack cards")
     assert wrote["path"] == "ML/Slack cards.md" and wrote["body"].startswith("#flashcards\n\n")
     assert "Cosa misurano? :: La sovrapposizione tra le classi [[Variabili slack di margine]]" in wrote["body"]

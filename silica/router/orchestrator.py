@@ -627,34 +627,10 @@ class InjectorFSM(BaseFSM[InjectorState]):
         )
 
     def _flush_indexes(self) -> None:
-        """Persist the deferred embed + co-occurrence upserts once per run (Fix A).
+        from silica.kernel.recall import refresh
 
-        The write path upserts into the shared in-memory singletons with
-        save=False and marks the index dirty; this single flush rewrites each
-        dirty index file once instead of per note (1.17s/note at 10k). Gated on
-        the dirty flags so a run that wrote nothing (or had the embedder down)
-        never rewrites the index. Runs in the _run_loop finally so it fires on
-        success, error, and Ctrl+C; a hard kill is repaired by the index sweep.
-        """
         rs = self.run_state
-        if rs.embed_dirty:
-            try:
-                from silica.kernel.recall.embed import get_store
-                get_store().save()
-            except Exception as e:
-                logger.debug("flush: embed index save skipped (%s)", e)
-        if rs.cooccur_dirty:
-            try:
-                from silica.kernel.recall.cooccurrence import get_cooccur_store
-                get_cooccur_store().save()
-            except Exception as e:
-                logger.debug("flush: cooccur index save skipped (%s)", e)
-        if rs.lexical_dirty:
-            try:
-                from silica.kernel.recall.lexical import get_lexical_store
-                get_lexical_store().save()
-            except Exception as e:
-                logger.debug("flush: lexical index save skipped (%s)", e)
+        refresh.flush(embed=rs.embed_dirty, cooccur=rs.cooccur_dirty, lexical=rs.lexical_dirty)
 
     def next_uncommitted_file_idx(self, start: int) -> int:
         """Return the first file index >= start not already committed in the ledger."""

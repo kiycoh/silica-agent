@@ -26,6 +26,7 @@ from silica.kernel.learn import items, pace, reasons, reference, session, store
 from silica.kernel.learn.reference import RESTRICT_SEP
 from silica.kernel.learn.schedule import DUE_R
 from silica.ui.web import render
+from silica.ui.web.failures import Refused
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def _engine() -> Iterator[None]:
     try:
         yield
     except session.Refused as exc:
-        raise HTTPException(_STATUS[exc.why], str(exc))
+        raise Refused(_STATUS[exc.why], exc, exc.code)
 
 
 # ---------------------------------------------------------------- readings
@@ -290,7 +291,7 @@ def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
                "step": next((i + 1 for i, s in enumerate(p["steps"]) if Path(first).stem in s["notes"]), None)}
     return {
         "path": p["path"], "name": p["name"], "scope": p["scope"], "target": p["target"], "reach": p["reach"],
-        "reach_label": plans.REACH_LABEL[p["reach_level"]], "by": p.get("by"), "status": p["status"],
+        "reach_label": mastery.DEPTH_LABEL[p["reach_level"]], "by": p.get("by"), "status": p["status"],
         "objectives": p["objectives"], "objective_labels": [obj.LABEL[o] for o in p["objectives"]],
         "objectives_chosen": p["objectives_chosen"],
         "completed": p.get("completed"), "sessions": len(p["sessions"]), "last": p["sessions"][-1]["date"] if p["sessions"] else None,
@@ -583,7 +584,7 @@ def write_plan(payload: dict):
         try:
             scope, target, restrict = _with_reference(scope, target, restrict, lines)
         except Exception as exc:
-            raise HTTPException(400, str(exc))
+            raise Refused(400, exc)
     if scope not in plans.SCOPES:
         raise HTTPException(400, f"scope must be one of {plans.SCOPES}")
     # ADR-0131: a key left out keeps what the plan says, or what Silica reads
@@ -602,7 +603,7 @@ def write_plan(payload: dict):
         try:
             res = plans.resolve(spec)
         except Exception as exc:
-            raise HTTPException(400, str(exc))
+            raise Refused(400, exc)
         if payload.get("cards_only"):
             proposed = obj.propose(res["tree"], chosen)
             for c in proposed:
@@ -621,7 +622,7 @@ def write_plan(payload: dict):
             # read without `matched`, as this path always has, so Save words the cards it worded
             cards = obj.propose(plans.resolve(replace(spec, matched=None))["tree"], chosen, model=False)
         except Exception as exc:
-            raise HTTPException(400, str(exc))
+            raise Refused(400, exc)
     spec = replace(spec, cards=cards)
     if payload.get("path"):
         plan = plans.find_plan(str(payload["path"]))
@@ -630,13 +631,13 @@ def write_plan(payload: dict):
         try:
             return plans.edit_plan(plan["path"], replace(spec, name=name or plan["name"]))
         except Exception as exc:
-            raise HTTPException(400, str(exc))
+            raise Refused(400, exc)
     if not name:
         raise HTTPException(400, "a plan needs a name")
     try:
         return plans.write_plan(replace(spec, objectives=chosen if "objectives" in payload else None))
     except Exception as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
 
 
 def _declared(payload: dict) -> dict[str, str] | None:
@@ -821,7 +822,7 @@ def reading_view(plan: str, step: int):
     try:
         return _reading_shown(plan, int(step))
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        raise Refused(404, exc)
 
 
 @router.post("/reading/write")
@@ -836,7 +837,7 @@ def reading_write(payload: dict):
     try:
         reading.step_notes(plan, step)
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        raise Refused(400, exc)
     return reading.start(plan["path"], step)
 
 
@@ -854,7 +855,7 @@ def reading_card(payload: dict):
         reading.reach(plan_path, step, int(str(n)))
         return _reading_shown(plan_path, step)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        raise Refused(404, exc)
 
 
 @router.post("/reading/answer")

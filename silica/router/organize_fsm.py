@@ -68,8 +68,6 @@ class OrganizeResult(TypedDict, total=False):
     abort_reason: str
     error: str
     final_status: str
-    # Unread past CLASSIFY; kept because the reply has always carried it.
-    _cooccur_store: Any
 
 
 class OrganizerFSM(BaseFSM[OrganizerState]):
@@ -205,7 +203,6 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             sum(1 for c in classifications if c.needs_move),
         )
         self.context["classifications"] = classifications
-        self.context["_cooccur_store"] = cooccur_store   # pass through for ARBITRATE
         self.transition_success()
 
     def _handle_arbitrate(self) -> None:
@@ -247,7 +244,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
                 _data, _fm, body = frontmatter.split(nc.content)
                 snippet = body[:300]
             except Exception:
-                pass
+                pass  # the arbiter judges the path alone, which it can
             enriched_ambiguous.append((note_path, snippet, self.taxonomy.rules))
 
         try:

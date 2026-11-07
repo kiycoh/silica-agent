@@ -140,7 +140,7 @@ def name_notes(t: Turn) -> None:
     """The notes the person named, as paths (ADR-0097 point 2). From their words,
     so a skill's expansion keeps its links and the block adds their paths. Not on
     a /web turn: its tools cannot read a note."""
-    from silica.agent.mentions import named_notes
+    from silica.kernel.text.mentions import named_notes
 
     if t.web is None and (block := named_notes(t.text, None, t.note)):
         t.add(block)
@@ -265,15 +265,16 @@ def plan_under_answer(t: Turn) -> None:
         messages[-1]["content"] = t.answer
 
 
-def offer_next(t: Turn) -> None:
+def offer_next(t: Turn, reserved) -> None:
     """A request made in enough chats becomes a proposed skill, or one already
     installed is offered as the next turn (ADR-0127 points 5 and 6). Failing that,
     a note the reader keeps missing, or a message saying it was not clear: a way
     to work on it, launched by the reader (learn.offer). Not under an answer that
-    is already the aid."""
+    is already the aid. `reserved` is the surface's own commands, which a proposal
+    may not shadow; required, as `proposed_skills.stage` requires it."""
     if t.stopped or t.web or not t.answer:
         return
-    t.skill_note, t.offer = offers.skill_after_turn(t.text, t.conv.messages)
+    t.skill_note, t.offer = offers.skill_after_turn(t.text, t.conv.messages, reserved)
     if t.offer is None and not t.escalated:
         t.offer = offers.study_offer(t.text, t.conv.messages, t.conv.sid or "", t.plan_draft)
 

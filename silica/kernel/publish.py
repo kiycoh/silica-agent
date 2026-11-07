@@ -549,11 +549,10 @@ def write_prop(path: str, key: str, value: bool | None) -> None:
     if value is not None:
         DRIVER.set_prop(path, key, value)
     else:
-        unset = getattr(DRIVER, "unset_prop", None)
-        if unset is None:
+        if not DRIVER.composes_props:
             # The Obsidian bridge has no removal; Obsidian itself does.
             raise ValueError(f"remove `{key}:` from {path} in Obsidian")
-        unset(path, key)
+        DRIVER.unset_prop(path, key)
     # `hand`: the person's click and no body of Silica's, or a note they edited would read
     # as untouched to `edited_since_write` and could not be marked as theirs (ADR-0153 point 26).
     checkpoint_landed(path, prior, prior, kind="hand")

@@ -21,6 +21,18 @@ history join that crosses a vault's ß.
 """
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
+# The tag a shadow library appends to every file it serves. A textbook keeps it
+# in each of its ~60 segment names, their spine notes and the hub's headings
+# ("Deep Learning (Ian Goodfellow, Yoshua Bengio, Aaron Courville) (Z-Library)").
+_DOWNLOAD_TAG_RE = re.compile(
+    r"\s*[\(\[]\s*(?:z-?library|z-?lib(?:\.\w+)?|libgen(?:\.\w+)?|library genesis"
+    r"|anna'?s[\s_-]archive|pdfdrive(?:\.com)?)\s*[\)\]]",
+    re.IGNORECASE,
+)
+
 
 def store_key(path: str | None) -> str:
     """Graph ids carry `.md` and the stores do not: normalising at the store's
@@ -68,3 +80,9 @@ def stem(path: str) -> str:
     """A note's name: `Folder/Node.js.md` is `Node.js`. Not `Path.stem`, which
     takes `.js` off a store key that has already lost its `.md`."""
     return path.replace("\\", "/").rsplit("/", 1)[-1].removesuffix(".md")
+
+
+def source_stem(src: Path) -> str:
+    """The source's name as its notes carry it: the file stem without a download
+    site's tag. The same for a re-convert, as the image prefix needs."""
+    return _DOWNLOAD_TAG_RE.sub("", src.stem).strip() or src.stem

@@ -9,7 +9,7 @@
 // the key has no limit, or off hosted, /limits is empty and nothing here draws.
 
 const LIM_NAMES = { window: "5-hour window", week: "This week", month: "This month" };
-const LIM_PHRASE = { window: "this 5-hour window", week: "this week's allowance", month: "this month's allowance" };
+const LIM_PHRASE = VOCAB.limits.phrases;
 const LIM_WARN = 0.8;
 // setTimeout fires at once past 2^31 ms (24.8 days), and a month's reset can
 // be 31 days out: the refresh waits for the soonest reset, never past 6 hours.
@@ -34,13 +34,14 @@ function limWhen(layer, iso) {
   return `on ${at.toLocaleDateString("en-GB", { day: "numeric", month: "long" })} at ${clock}`;
 }
 
-// A failure frame's sentence with its reset in the reader's clock. The server
-// wrote it in UTC and says which words did (`when`); any other failure, or a
-// frame from a server that sends no instant, keeps its sentence as written.
+// A failure frame's sentence with its reset in the reader's clock, where the
+// server wrote it in UTC; any other failure, or a frame from a server that sends
+// no instant, keeps its sentence as written.
 function limitSentence(ev) {
-  if (!ev || !ev.limit || !ev.when || !ev.resets_at) return ev ? ev.error : "";
+  if (!ev || !ev.limit || !ev.resets_at) return ev ? ev.error : "";
   const local = limWhen(ev.limit, ev.resets_at);
-  return local ? ev.error.replace(ev.when, local) : ev.error;
+  if (!local) return ev.error;
+  return `${VOCAB.limits.sentences[ev.limit]} ${VOCAB.limits.resets.replace("{when}", local)}`;
 }
 
 // The Usage section of Settings, drawn from the last read: one row per layer,

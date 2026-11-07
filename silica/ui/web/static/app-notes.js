@@ -202,7 +202,7 @@ function addToVaultButton(source, chip) {
     try {
       const r = await postJson("/chat/files/add", { source });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { notify(typeof d.detail === "string" ? d.detail : `the server answered ${r.status}`); b.disabled = false; return; }
+      if (!r.ok) { notify(failureSaid(d, `the server answered ${r.status}`)); b.disabled = false; return; }
       b.replaceWith(mkEl("span", "mf-in", "in the vault"));
       announce(`${source.split("/").pop()} added to the Inbox`);
       loadVaultInfo();
@@ -212,8 +212,8 @@ function addToVaultButton(source, chip) {
   return b;
 }
 
-// The formats the chat model's projector takes (formats.IMAGE_MIME).
-const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"];
+// The formats the chat model's projector takes.
+const IMAGE_TYPES = VOCAB.formats.chat_images;
 function stagedAreImages() {
   return staged.length > 0 && staged.every((f) => IMAGE_TYPES.includes(f.type));
 }
@@ -432,7 +432,7 @@ function askVaultLink() {
     try {
       const r = await postJson("/vault/fetch", { url, workspace: intoWorkspace });
       if (r.ok) rows = (await r.json()).files;
-      else failed = (await r.json().catch(() => ({}))).detail || `the server answered ${r.status}`;
+      else failed = failureSaid(await r.json().catch(() => ({})), `the server answered ${r.status}`);
     } catch {
       failed = "the server could not be reached";
     }
@@ -520,7 +520,7 @@ async function importToVault(files, fromFolder) {
     }
     if (!r.ok) {
       // 502 and 524 are the edge's cut at 125 s, with a page of its own and no detail.
-      failed = (await r.json().catch(() => ({}))).detail || (r.status === 502 || r.status === 524
+      failed = failureSaid(await r.json().catch(() => ({})), r.status === 502 || r.status === 524
         ? `${batch.map((f) => f.name).join(", ")} did not finish uploading in the 125 s the server waits: try it again on a faster connection`
         : `the server answered ${r.status}`);
       break;
@@ -2162,7 +2162,7 @@ async function writeBack(s) {
     r = await postJson("/note/new", { folder: at < 0 ? "" : path.slice(0, at), name: noteStem(path), text: s.editor.getText() });
     d = await r.json().catch(() => ({}));
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify(d.detail || "couldn't write the note back"); return; }
+  if (!r || !r.ok) { notify(failureSaid(d, "couldn't write the note back")); return; }
   s.etag = d.etag;
   s.clean = d.text;
   s.broken = d.broken || [];
@@ -2281,7 +2281,7 @@ addEventListener("beforeunload", (e) => {
 // back with its marks when it is reopened, from the server's cache and with
 // no model call, so following a box's passage and coming back loses nothing.
 const CHECK_SHOW_KEY = "check-show";
-const CHECK_GRADES = ["error", "warning", "nit"];
+const CHECK_GRADES = VOCAB.check.grades;
 let recheckBusy = false;
 const checkedPaths = new Set();
 
@@ -2410,7 +2410,7 @@ async function checkSelection(s, web) {
       body: JSON.stringify({ path, lines: [first, last], confirm: true, ...(web ? { claim, web: true } : {}) }),
     });
     if (r.status === 400) {
-      notify((await r.json().catch(() => ({}))).detail || "couldn't check that");
+      notify(failureSaid(await r.json().catch(() => ({})), "couldn't check that"));
       c.view = null;
       drawCheckStrip(s);
       return;
@@ -2460,7 +2460,7 @@ async function keepWebSource(s, x) {
     r = await postJson("/note/check/keep", { path: s.path, url: x.url, quote: x.passage || "", claim: x.mark || "" });
     d = await r.json().catch(() => ({}));
   } catch { /* reported below */ }
-  if (!r || !r.ok) { notify(d.detail || "couldn't keep that page"); return; }
+  if (!r || !r.ok) { notify(failureSaid(d, "couldn't keep that page")); return; }
   notify(`Kept in Inbox, cited to ${x.host}`, "info", { label: "open", run: () => openNote(d.path) });
   loadVaultInfo();
 }
@@ -2567,11 +2567,7 @@ function drawCheckStrip(s = drawerNote) {
     sub.textContent = v.sub;
     sub.title = v.sub;
   } else if (v.pool) {
-    const p = v.pool;
-    const where = p.scope === "whole" ? "searched the whole vault"
-      : p.scope === "party" ? `${p.size} of ${p.of} notes · ${p.values.join(", ")}`
-      : `${p.size} of ${p.of} notes · no party value here, so other parties' notes are out`;
-    sub.textContent = where + (v.cancelled ? " · cancelled" : "") + (v.notChecked ? ` · ${v.notChecked} not checked` : "");
+    sub.textContent = v.pool.line + (v.cancelled ? " · cancelled" : "") + (v.notChecked ? ` · ${v.notChecked} not checked` : "");
     sub.title = sub.textContent;
   }
   strip.replaceChildren(row, sub);

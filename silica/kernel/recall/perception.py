@@ -356,6 +356,8 @@ def _read_dated_body(path: str, origin: str = "vault") -> tuple[
             content = DRIVER.read_note(
                 path if path.endswith(".md") else path + ".md").content or ""
         except Exception:
+            # Gone since indexing, undecodable or the bridge down: one block with
+            # no body drops out of the bundle, the recall answers from the rest.
             return "", None, None, [], "", "active", False, []
     from silica.kernel.base import frontmatter
 
@@ -484,7 +486,7 @@ def _declared_title(path: str) -> str:
 
         props = DRIVER.props_of(path if path.endswith(".md") else path + ".md") or {}
     except Exception:
-        return ""
+        return ""  # the block keeps its filename as a title
     return str(props.get("title") or "").strip()
 
 

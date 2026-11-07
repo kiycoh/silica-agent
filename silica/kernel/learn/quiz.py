@@ -63,7 +63,9 @@ def record(results: list[dict]) -> int:
     return len(lines)
 
 
-CONF_BANDS = (90, 70, 50, 25)   # learn-suite D14: fixed labels, for data stability
+# learn-suite D14: fixed labels, for data stability
+CONFIDENCE = (("certain", 90), ("pretty sure", 70), ("half unsure", 50), ("guessing", 25))
+BANDS = tuple(band for _, band in CONFIDENCE)
 
 
 def _v2_fields(r: dict, rec: dict) -> None:
@@ -86,7 +88,7 @@ def _v2_fields(r: dict, rec: dict) -> None:
         rec["level"] = level
     if "conf" in r:
         conf = r.get("conf")
-        if conf is None or conf in CONF_BANDS:
+        if conf is None or conf in BANDS:
             rec["conf"] = conf
     src = r.get("source")
     if isinstance(src, dict) and str(src.get("leaf") or "").strip():

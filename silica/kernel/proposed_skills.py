@@ -29,6 +29,7 @@ import re
 import shutil
 import tempfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ _NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 
 def ask(text: str) -> str:
     """The instruction a request opens with."""
-    from silica.agent import mentions
+    from silica.kernel.text import mentions
 
     text = mentions.strip(str(text or "")).strip()
     first = re.split(r"\n\s*\n", text, maxsplit=1)[0]
@@ -307,14 +308,14 @@ def _slug(name: str) -> str:
     return s if _NAME.fullmatch(s or "-") else "skill"
 
 
-def stage(vault: str, proposal: dict, evidence: dict, model: str = "") -> str | None:
+def stage(vault: str, proposal: dict, evidence: dict, model: str = "", *, reserved: Iterable[str]) -> str | None:
     """Write the proposal where only Settings reads it; its name, or None when
-    the text does not load as a skill."""
-    from silica.ui.commands import COMMANDS
+    the text does not load as a skill. `reserved` is the surface's own slash
+    commands, required so a caller cannot propose a skill a command shadows."""
     from silica_core.kernel.skills import discover, load
 
     root = Path(vault)
-    taken = {c.name.lstrip("/") for c in COMMANDS} | set(discover(vault)) | {p.parent.name for p in _staged(root)}
+    taken = set(reserved) | set(discover(vault)) | {p.parent.name for p in _staged(root)}
     base = name = _slug(proposal["name"])
     n = 2
     while name in taken:

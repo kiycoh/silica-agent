@@ -8,8 +8,8 @@ from rich.text import Text
 
 from silica import __version__ as _VERSION
 from silica.config import CONFIG
-from silica.ui.console import CONSOLE
-from silica.ui.console import BRAND_CYAN, BRAND_INDIGO
+from silica.term.console import CONSOLE
+from silica.term.console import BRAND_CYAN, BRAND_INDIGO
 
 _CAPTION = f"v{_VERSION.split('+')[0]} · Your personal note curator agent"
 

@@ -4,6 +4,7 @@ import pytest
 from silica.config import CONFIG
 from silica.sources.base import GroundedStub, RawItem, SourceAdapter
 from silica.sources.prose import PROSE
+from silica.kernel.vault import Vault
 
 
 class _Dummy:
@@ -219,7 +220,7 @@ def test_stage_writes_terminal_stub(code_repo, monkeypatch):
     from silica.sources.registry import stage
 
     root, vault = code_repo
-    monkeypatch.setattr(driver_mod, "DRIVER", fs_backend.ObsidianFSBackend(str(vault)))
+    monkeypatch.setattr(driver_mod, "DRIVER", Vault(fs_backend.ObsidianFSBackend(str(vault))))
     result = stage(CODE, "m.py")
     assert result["status"] == "ok"
     assert result["note_path"] == f"{root.name}/m.md"

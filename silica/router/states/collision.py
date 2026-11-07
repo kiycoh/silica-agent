@@ -277,7 +277,7 @@ def _run_embedder_free_dedup_leg(fsm: "InjectorFSM", idx: int, chunk: dict) -> N
             try:
                 corpus[ref.path] = DRIVER.read_note(ref).content or ""
             except Exception:
-                continue
+                continue  # an unreadable note matches nothing, and this leg is best-effort already
     except Exception as _e:
         logger.debug("COLLISION minhash leg: corpus build failed (%s) — skipping", _e)
         return

@@ -11,11 +11,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+from silica.kernel.base.layout import vault_root
+
 
 def vault() -> Path:
-    from silica.config import CONFIG
-
-    return Path(CONFIG.vault_path)
+    return vault_root()
 
 
 def append_rows(path: Path, rows: list[dict]) -> None:

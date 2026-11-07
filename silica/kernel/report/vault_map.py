@@ -106,7 +106,7 @@ def build_vault_map(
                 try:
                     props = DRIVER.props_of(ref)
                 except Exception:
-                    continue
+                    continue  # one note fewer in a count that only hints
                 if props and props.get("date"):
                     dated_count += 1
                 if props and props.get("contested"):

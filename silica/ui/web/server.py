@@ -14,11 +14,14 @@ import html as _html
 import logging
 import re
 from contextlib import asynccontextmanager
+from http import HTTPStatus
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException
 
 from silica.config import CONFIG, demo, GUI_PORT, live_env
 from silica.kernel import vault_files
@@ -28,6 +31,7 @@ from silica.ui.web import (
     chat_routes,
     discover_routes,
     explore_routes,
+    failures,
     files_routes,
     jobs_routes,
     learn_routes,
@@ -40,6 +44,7 @@ from silica.ui.web import (
     skills_routes,
     stt_routes,
     tree_routes,
+    vocabulary,
     workspaces_routes,
     zotero_web,
 )
@@ -120,20 +125,44 @@ app.middleware("http")(security.require_loopback_host)
 
 def _refused(status: int):
     async def answer(_request: Request, exc: Exception) -> JSONResponse:
-        return JSONResponse({"detail": exc.args[0]}, status_code=status)
+        return JSONResponse(failures.refusal(exc.args[0]), status_code=status)
 
     return answer
+
+
+async def _route_refused(_request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, failures.Refused)
+    return JSONResponse(failures.refusal(exc.args[0], exc.code), status_code=exc.status)
+
+
+async def _http_refused(request: Request, exc: Exception) -> Response:
+    """A route's own sentence in the one shape. FastAPI's answer stands for the two
+    that failures.py keeps out of it: a guard's 403 and a bare status."""
+    assert isinstance(exc, HTTPException)
+    if exc.status_code == 403 or not isinstance(exc.detail, str) or exc.detail == HTTPStatus(exc.status_code).phrase:
+        return await http_exception_handler(request, exc)
+    return JSONResponse(failures.refusal(exc.detail), status_code=exc.status_code, headers=exc.headers)
 
 
 # Sentences written for the person by code below this layer, which names no status.
 app.add_exception_handler(vault_files.NotAChatFile, _refused(400))
 app.add_exception_handler(vault_files.InboxClash, _refused(409))
 app.add_exception_handler(ZoteroError, zotero_web.refused)
+app.add_exception_handler(failures.Refused, _route_refused)
+app.add_exception_handler(HTTPException, _http_refused)
 
 for _routes in (chat_routes, files_routes, workspaces_routes, metrics_routes, calendar_routes, explore_routes,
                 notes_routes, tree_routes, stt_routes, settings_routes, zotero_web, learn_routes, skills_routes,
                 jobs_routes, discover_routes, public_routes):
     app.include_router(_routes.router)
+
+
+# What index() writes over in index.html. A target that left the page would make
+# its stamp a silent no-op, so tests/test_vocabulary.py asks for each one.
+ROOT_TAG = '<html lang="en"'
+THEME_PREF = 'data-theme-pref="auto"'
+ASK_PLACEHOLDER = 'placeholder="Ask about your notes"'
+VOCAB_ISLAND = '<script type="application/json" id="vocab">'
 
 
 @app.get("/")
@@ -164,24 +193,14 @@ def index(request: Request):
     # can answer, and the inline script in <head> answers it before first paint.
     # Stamping it server-side is what keeps a light session from flashing dark.
     pref = CONFIG.theme if CONFIG.theme in ("auto", "dark", "light") else "auto"
-    html = html.replace('data-theme-pref="auto"', f'data-theme-pref="{pref}"')
-    # The new chat's greeting says it (ADR-0048, amendment 2026-10-22), and
-    # stamping it is what lets the first word written be the name.
-    if CONFIG.user_name:
-        html = html.replace('<html lang="en"', '<html lang="en" data-name="'
-                            f'{_html.escape(CONFIG.user_name, quote=True)}"', 1)
-    # A demo's controls for what it refuses (ADR-0139 point 6) go before the
-    # first paint too, by the same kind of stamp, and the field names whose
-    # notes these are. Ahead of the hosted stamp, which the account's line reads.
-    if demo():
-        html = html.replace('<html lang="en"', '<html lang="en" data-demo', 1)
-        html = html.replace('placeholder="Ask about your notes"', 'placeholder="Ask about the sample vault"', 1)
+    html = html.replace(THEME_PREF, f'data-theme-pref="{pref}"')
+    root: list[str] = []
     # Stamped, not probed, for the same reason: the views a hosted account
     # does not get (ADR-0111 point 3) must be gone before the first paint. A
     # demo is stamped as served_views() clamps it, even on a unit that lost
     # SILICA_HOSTED, or the page offers tabs the server answers 404 for.
     if hosted() or demo():
-        html = html.replace('<html lang="en"', '<html lang="en" data-hosted', 1)
+        root.append("data-hosted")
         # The views this account gets (ADR-0140 point 4): every element of one
         # is marked, and the CSS hides each unmarked one, so a view added later
         # stays hidden until the tenant's list serves it.
@@ -202,11 +221,23 @@ def index(request: Request):
         gateway = request.headers.get("x-silica-email", "")
         email = gateway or request.headers.get("cf-access-authenticated-user-email", "")
         if email:
-            signout = " data-signout" if gateway else ""
-            html = html.replace(
-                '<html lang="en" data-hosted',
-                f'<html lang="en" data-hosted data-user="{_html.escape(email, quote=True)}"{signout}', 1)
-    return HTMLResponse(html)
+            root.append(f'data-user="{_html.escape(email, quote=True)}"')
+            if gateway:
+                root.append("data-signout")
+    # A demo's controls for what it refuses (ADR-0139 point 6) go before the
+    # first paint too, by the same kind of stamp, and the field names whose
+    # notes these are.
+    if demo():
+        root.append("data-demo")
+        html = html.replace(ASK_PLACEHOLDER, 'placeholder="Ask about the sample vault"', 1)
+    # The new chat's greeting says it (ADR-0048, amendment 2026-10-22), and
+    # stamping it is what lets the first word written be the name.
+    if CONFIG.user_name:
+        root.append(f'data-name="{_html.escape(CONFIG.user_name, quote=True)}"')
+    html = html.replace(ROOT_TAG, " ".join([ROOT_TAG, *root]), 1)
+    # Last: the markers above are found by pattern over the whole page, and a word
+    # in the table must never read as one.
+    return HTMLResponse(html.replace(VOCAB_ISLAND, VOCAB_ISLAND + vocabulary.island(), 1))
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -217,8 +248,8 @@ def serve(port: int = GUI_PORT) -> None:
     opened: the person opens the address the banner prints."""
     import uvicorn
 
-    from silica.ui.banner import print_banner
-    from silica.ui.console import CONSOLE
+    from silica.term.banner import print_banner
+    from silica.term.console import CONSOLE
 
     SESSION.reset()
 

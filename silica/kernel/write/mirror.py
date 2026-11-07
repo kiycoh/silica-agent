@@ -29,7 +29,7 @@ def seed_mirror_copy(path: str) -> None:
     Best-effort: a copy that cannot be made leaves the read to report it.
     """
     from silica.driver import DRIVER
-    from silica.onboarding.adopt import SAFE_WRITE_DIR
+    from silica.kernel.base.manifest import SAFE_WRITE_DIR
 
     if active_write_dir() != SAFE_WRITE_DIR or not within(path, SAFE_WRITE_DIR):
         return
@@ -40,7 +40,7 @@ def seed_mirror_copy(path: str) -> None:
         DRIVER.read_note(path)
         return  # the copy is already there
     except Exception:
-        pass
+        pass  # not exists(): a dead bridge must end at the read below, quietly, and not raise here
     try:
         original = DRIVER.read_note(rel).content
     except Exception:

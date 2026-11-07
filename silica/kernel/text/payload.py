@@ -100,7 +100,7 @@ def vault_content_or_excerpt(note_name: str, concept: str, window: int, is_title
             return nc.content.strip()
         return extract_excerpt_from_content(nc.content, concept, window)
     except RuntimeError:
-        return ""
+        return ""  # absent, or the bridge down: the payload goes out with no excerpt from this note
 
 def build_concept_entry(
     name: str,
@@ -136,7 +136,7 @@ def build_payload(recon_reports: list, window: int) -> dict:
         try:
             inbox_content = DRIVER.read_note(inbox_name).content
         except RuntimeError:
-            inbox_content = ""
+            inbox_content = ""  # as above: this file adds no excerpts, the others still do
         concepts = []
         for collision in report.get("collisions", []):
             concepts.append(build_concept_entry(

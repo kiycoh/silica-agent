@@ -18,11 +18,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from silica.kernel.base.notekey import ledger_key
+from silica.kernel.learn.quiz import BANDS
 from silica.kernel.learn.schedule import DUE_R
 
 DEPTH_LABEL = {1: "Facts", 2: "Parts", 3: "Mechanisms", 4: "New contexts"}
 CALIBRATION_MIN = 10          # eligible events before any figure shows (G4)
-BANDS = (90, 70, 50, 25)
 BLIND_SPOT_CONF = 70
 FRAGILE_CONF = 25
 _STRUCTURE_KINDS = ("structure", "contrast", "contradiction")

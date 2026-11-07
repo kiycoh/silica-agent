@@ -267,7 +267,7 @@ def measure(sample: list[dict], target_dir: str, profile: str) -> list[dict]:
     from silica.obs.bus import BUS
     from silica.obs.narration import NARRATOR
     from silica.sources.ingest import distill, prepare_unit
-    from silica.ui.console import CONSOLE
+    from silica.term.console import CONSOLE
     from silica.kernel.write.undo_journal import get_undo_journal
     from silica.config import CONFIG
     from silica.sources.convert import convert

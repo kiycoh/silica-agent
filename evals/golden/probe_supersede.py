@@ -8,7 +8,7 @@ Two arms over the vault's own notes, zero-API and deterministic.
 Wrong arm (gated on RISE):
     A resolution is WRONG when the claim that survives ranks BELOW the claim it
     absorbed. Both the pairs and the verdict come from the production functions
-    (``runners._scan_dedup_pairs`` then ``_pairs_to_items``), so the probe
+    (``duplicates.scan_pairs`` then ``pairs_to_items``), so the probe
     measures the seam and cannot drift from the rule it guards.
 
     Measured on the golden vault (796 notes, 1064 pairs, 54 of them tier-split):
@@ -72,7 +72,7 @@ def is_inversion(*, winner: str, loser: str) -> bool:
 def merge_verdicts(pairs: list[dict], *, verbose: bool = False) -> dict:
     """Route `pairs` through the real merge seam and rank what it chose.
 
-    `_pairs_to_items` is the production decision (all three note-vs-note seams
+    `pairs_to_items` is the production decision (all three note-vs-note seams
     share it), so this cannot drift from the rule it guards. Pairs whose sides
     rank equal are counted in the denominator but can never move the numerator:
     `wrong_tier_split_pairs` is what says whether the gate is armed on this
@@ -80,11 +80,11 @@ def merge_verdicts(pairs: list[dict], *, verbose: bool = False) -> dict:
     """
     from silica.driver import DRIVER
     from silica.kernel.write.contested import reliability_tier
-    from silica.tools.runners import _pairs_to_items
+    from silica.kernel.recall.duplicates import pairs_to_items
 
     evaluated = wrong = split = 0
     examples: list[tuple[str, str]] = []
-    for item in _pairs_to_items(pairs):
+    for item in pairs_to_items(pairs):
         winner_path = item.target_path
         loser_path = item.context.loser_path
         if not loser_path:
@@ -123,7 +123,7 @@ def merge_verdicts(pairs: list[dict], *, verbose: bool = False) -> dict:
 def _candidate_pairs() -> list[dict]:
     """The pairs /dedup would actually propose, from its own scanner.
 
-    `_scan_dedup_pairs` is the production pair builder for both note-vs-note
+    `scan_pairs` is the production pair builder for both note-vs-note
     seams: vectors only, no API, whole vault. The first version of this probe
     borrowed probe_dedup's candidate loop instead — top same-domain candidate
     per note — and that models COLLISION, a different seam with a domain scope
@@ -133,9 +133,9 @@ def _candidate_pairs() -> list[dict]:
     to watch. `get_store()` is keyed on the resolved index path, so this reads
     the vault the runner pointed CONFIG at.
     """
-    from silica.tools.runners import _scan_dedup_pairs
+    from silica.kernel.recall.duplicates import scan_pairs
 
-    pairs, err = _scan_dedup_pairs("")
+    pairs, err = scan_pairs("")
     return [] if err else pairs
 
 

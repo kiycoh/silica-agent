@@ -13,6 +13,7 @@ from silica.cli import _expand_workflow_shortcut
 # Bound at import, before conftest stubs the module attribute for every test.
 from silica.sources.ingest import pick_batch_folders as _REAL_BATCH
 from silica.config import CONFIG
+from silica.kernel.vault import Vault
 
 
 @pytest.fixture(autouse=True)
@@ -394,7 +395,7 @@ def repo_vault(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "inbox_dir", "Inbox")
     from silica.driver import fs_backend
     import silica.driver as driver_mod
-    backend = fs_backend.ObsidianFSBackend(str(vault))
+    backend = Vault(fs_backend.ObsidianFSBackend(str(vault)))
     monkeypatch.setattr(driver_mod, "DRIVER", backend)
     # Also install it behind the proxy: modules that bind `DRIVER` at import time
     # (kernel.undo_journal) never see the name-level patch above.

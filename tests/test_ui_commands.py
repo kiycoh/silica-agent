@@ -114,7 +114,7 @@ def test_completer_no_completions_for_plain_text():
 
 def test_render_help_contains_all_group_headers_and_commands():
     con, buf = _make_console()
-    with patch("silica.ui.console.CONSOLE", con):
+    with patch("silica.term.console.CONSOLE", con):
         render_help()
     output = buf.getvalue()
 
@@ -133,7 +133,7 @@ def test_print_home_shows_model_vault_line_without_command_table():
     con, buf = _make_console()
     with patch("silica.ui.home.print_banner"), \
          patch("silica.ui.home.CONSOLE", con), \
-         patch("silica.ui.console.CONSOLE", con):
+         patch("silica.term.console.CONSOLE", con):
         print_home()
     output = buf.getvalue()
 

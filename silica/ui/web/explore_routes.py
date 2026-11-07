@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 
 from silica.config import CONFIG
+from silica.kernel.base.frontmatter import split_shown
 from silica.kernel.graph.mindmap import note_resolver
 from silica.kernel.report import brief, note_context
 from silica.kernel.text import note_parts
@@ -318,8 +319,8 @@ def context(path: str = "", name: str = "", ghost: bool = False):
     try:
         content = driver.read_note(NoteRef(name=note_parts.clean_name(canon), path=canon)).content
     except Exception:
-        content = ""
-    props, body = note_parts.split_frontmatter(content)
+        content = ""  # the drawer opens on what the graph knows, without the body
+    props, body = split_shown(content)
 
     def _refs(fn) -> list[dict]:
         # Resolved only. DRIVER.links() also returns a synthesised ref for every

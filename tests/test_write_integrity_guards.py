@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from silica.driver import get_driver
+from silica.driver import NoteNotFound, get_driver
 from silica.kernel.write.ops import Txn
 from silica.kernel.write.gate import commit_note_atomic
 from silica.kernel.write.bulk import execute_one
@@ -135,7 +135,7 @@ def test_not_found_read_is_still_treated_as_absent(tmp_vault, monkeypatch):
     def flaky(ref):
         calls["n"] += 1
         if calls["n"] == 1:  # the prior-content read; the post-write verify reads for real
-            raise RuntimeError(f"File not found: {ref}")
+            raise NoteNotFound(f"File not found: {ref}")
         return real_read(ref)
     monkeypatch.setattr(driver, "read_note", flaky)
 

@@ -9,11 +9,12 @@ never stripped.
 import pytest
 
 from silica.driver.fs_backend import ObsidianFSBackend
+from silica.kernel.vault import Vault
 
 
 @pytest.fixture
 def vault(tmp_path, monkeypatch):
-    backend = ObsidianFSBackend(str(tmp_path))
+    backend = Vault(ObsidianFSBackend(str(tmp_path)))
     monkeypatch.setattr("silica.driver.DRIVER", backend)
     return tmp_path
 

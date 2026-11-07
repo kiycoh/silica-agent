@@ -16,8 +16,12 @@ from silica.ui.web.failures import explain as _failure
 router = APIRouter()
 
 
-# 180 s of 16 kHz mono 16-bit PCM is 5.76 MB, Learn's take ceiling (app-learn.js);
-# the cap is generous enough for that and still refuses a body that was never a clip.
+# How long a take runs before it ends itself: the composer's, and Learn's, where
+# an explanation said aloud runs longer than a chat message (ADR-0049).
+MIC_MAX_MS = 60_000
+MIC_EXPLAIN_MAX_MS = 180_000
+# 180 s of 16 kHz mono 16-bit PCM is 5.76 MB, Learn's take ceiling; the cap is
+# generous enough for that and still refuses a body that was never a clip.
 _STT_MAX_BYTES = 8 * 1024 * 1024
 
 

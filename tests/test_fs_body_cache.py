@@ -9,6 +9,7 @@ import os
 import pytest
 
 from silica.driver.fs_backend import ObsidianFSBackend
+from silica.kernel.vault import Vault
 
 
 def _make_backend(tmp_path, files: dict[str, str]) -> ObsidianFSBackend:
@@ -16,7 +17,7 @@ def _make_backend(tmp_path, files: dict[str, str]) -> ObsidianFSBackend:
         p = tmp_path / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
-    backend = ObsidianFSBackend(str(tmp_path))
+    backend = Vault(ObsidianFSBackend(str(tmp_path)))
     backend._rebuild_index()
     return backend
 

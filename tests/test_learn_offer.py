@@ -279,7 +279,7 @@ def test_saying_it_was_unclear_never_becomes_a_skill(monkeypatch, tmp_path):
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
     monkeypatch.setattr(ps, "detect", lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked")))
-    assert offers.skill_after_turn("non ho capito la Lezione 14", []) == (None, None)
+    assert offers.skill_after_turn("non ho capito la Lezione 14", [], []) == (None, None)
 
 
 def test_the_shape_is_read_on_the_body_not_the_frontmatter_or_the_links():

@@ -474,7 +474,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         try:
             src_data, _, _ = frontmatter.split(DRIVER.read_note(source_file).content or "")
         except Exception:
-            src_data = {}
+            src_data = {}  # the leaf loses the source's stamps, not its existence
         if not isinstance(src_data, dict):
             src_data = {}
         owner = src_data.get("source_leaf")
@@ -483,11 +483,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         # text and its date, and linked every note of B to it.
         leaf_name = str(owner) if owner else source_key(source_file)
         leaf_rel = f"{in_write_dir(SOURCES_DIR)}/{leaf_name}"
-        try:
-            DRIVER.read_note(leaf_rel)
-            leaf_exists = True
-        except Exception:
-            leaf_exists = False
+        leaf_exists = DRIVER.exists(leaf_rel)
         if not leaf_exists and not owner and "/" in leaf_name:
             # A leaf written flat before ADR-0114 is reused only when it names
             # the same original file, the one identity convert stamps on both.
@@ -495,7 +491,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             try:
                 old, _, _ = frontmatter.split(DRIVER.read_note(flat).content or "")
             except Exception:
-                old = None
+                old = None  # no flat leaf to adopt, the common case
             if (isinstance(old, dict) and src_data.get("source_file")
                     and old.get("source_file") == src_data.get("source_file")):
                 leaf_name, leaf_rel, leaf_exists = basename, flat, True
@@ -547,7 +543,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
                 try:
                     prior = DRIVER.read_note(note_path).content or ""
                 except Exception:
-                    continue
+                    continue  # a note it cannot read keeps its marker as it is
                 if marker not in prior or f"{marker}:" in prior:
                     continue
                 DRIVER.overwrite(
@@ -569,7 +565,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         try:
             _d, _r, leaf_body = frontmatter.split(DRIVER.read_note(leaf_rel).content or "")
         except Exception:
-            leaf_body = ""
+            leaf_body = ""  # no leaf: nothing to attribute lines to
         # Path-qualified, never the bare stem: the outline lane writes a spine
         # note carrying the source's own stem beside the concept notes, and a
         # bare `[[Lezione 3]]` resolved to that sibling (same folder wins), so
@@ -582,7 +578,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             try:
                 prior = DRIVER.read_note(note_path).content or ""
             except Exception:
-                continue
+                continue  # no block for a note it cannot read: the rest of the run stands
             # Idempotency is about the BLOCK, not the link anywhere in the file.
             # The distiller names the source basename as a `related:` /
             # `parent note:` wikilink long before the leaf exists, so a

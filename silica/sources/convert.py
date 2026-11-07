@@ -78,6 +78,7 @@ from pathlib import Path
 from silica.config import CONFIG
 from silica.kernel.base import frontmatter
 from silica.kernel.base import formats
+from silica.kernel.base.notekey import source_stem
 from silica.kernel.base.syntax import FILE_UNSAFE, LINK_UNSAFE, MD_IMAGE_RE
 from silica.kernel.text.sanitize import strip_degenerate_runs
 
@@ -446,7 +447,7 @@ def is_skippable_chunk(note_rel: str) -> bool:
     try:
         data, _, _ = frontmatter.split(DRIVER.read_note(note_rel).content)
     except Exception:
-        return False
+        return False  # skipping is the claim that needs evidence
     if not isinstance(data, dict):
         return False
     return bool(data.get("boilerplate") or data.get("references") or data.get("document")
@@ -688,7 +689,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None,
     from silica.kernel.write.preserve import Loss
 
     inbox = _note_dir(src, active_inbox_dir() or "Inbox", beside)
-    stem = _note_stem(src)
+    stem = source_stem(src)
     if leaf is not None:
         _write_leaf(src, body, *leaf)
         stem = Path(leaf[0]).stem
@@ -3307,24 +3308,8 @@ def _image_prefix(src: Path) -> str:
     (`{inbox}/{src.stem}.md`), so two sources that collide here already collide
     there.
     """
-    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", _note_stem(src)).strip("-_")[:40]
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", source_stem(src)).strip("-_")[:40]
     return slug or "doc"
-
-
-# The tag a shadow library appends to every file it serves. A textbook keeps it
-# in each of its ~60 segment names, their spine notes and the hub's headings
-# ("Deep Learning (Ian Goodfellow, Yoshua Bengio, Aaron Courville) (Z-Library)").
-_DOWNLOAD_TAG_RE = re.compile(
-    r"\s*[\(\[]\s*(?:z-?library|z-?lib(?:\.\w+)?|libgen(?:\.\w+)?|library genesis"
-    r"|anna'?s[\s_-]archive|pdfdrive(?:\.com)?)\s*[\)\]]",
-    re.IGNORECASE,
-)
-
-
-def _note_stem(src: Path) -> str:
-    """The source's name as its notes carry it: the file stem without a
-    download site's tag. The same for a re-convert, as `_image_prefix` needs."""
-    return _DOWNLOAD_TAG_RE.sub("", src.stem).strip() or src.stem
 
 
 def _copy_images(

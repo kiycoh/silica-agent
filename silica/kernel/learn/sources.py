@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 MATERIAL, REFERENCE, UNUSED = "material", "reference", "unused"
 ROLES = (MATERIAL, REFERENCE, UNUSED)
+ROLE_LABEL = {MATERIAL: "Material", REFERENCE: "Reference", UNUSED: "Not used"}
 
 # What decides a role when the reader did not, read once on the Machine
 # Learning course (2026-10-25, lexical, read-only): the decks followed the
@@ -164,9 +165,9 @@ def collections(notes: dict, allowed: set[str]) -> list[dict]:
 
 
 def _file_label(source_file: str) -> str:
-    from silica.sources.convert import _note_stem
+    from silica.kernel.base.notekey import source_stem
 
-    return _note_stem(Path(source_file))
+    return source_stem(Path(source_file))
 
 
 def note_collections(paths, colls: list[dict]) -> dict[str, set[str]]:

@@ -419,7 +419,7 @@ def test_inline_slash_command_reaches_the_browser_without_terminal_codes(client,
     import silica.sources.web_research as wr
     from rich.color import ColorSystem
 
-    from silica.ui.console import CONSOLE
+    from silica.term.console import CONSOLE
 
     monkeypatch.setattr(CONSOLE, "_force_terminal", True)
     monkeypatch.setattr(CONSOLE, "_color_system", ColorSystem.TRUECOLOR)
@@ -1441,19 +1441,19 @@ def test_latex_prose_dollars_and_code_stay_literal():
     assert "<math" not in html and "$x^2$" in html
 
 
-def test_split_frontmatter_returns_props_and_body():
-    from silica.kernel.text.note_parts import split_frontmatter
+def test_split_shown_returns_props_and_body():
+    from silica.kernel.base.frontmatter import split_shown
 
-    props, body = split_frontmatter("---\ntags: [a, b]\nstatus: seed\n---\n# Title\n")
+    props, body = split_shown("---\ntags: [a, b]\nstatus: seed\n---\n# Title\n")
     assert props == {"tags": ["a", "b"], "status": "seed"}
     assert body == "# Title\n"
 
 
-def test_split_frontmatter_absent_or_non_mapping_is_none():
-    from silica.kernel.text.note_parts import split_frontmatter
+def test_split_shown_absent_or_non_mapping_is_none():
+    from silica.kernel.base.frontmatter import split_shown
 
-    assert split_frontmatter("# no fm")[0] is None
-    assert split_frontmatter("---\n- just\n- a list\n---\nbody")[0] is None
+    assert split_shown("# no fm")[0] is None
+    assert split_shown("---\n- just\n- a list\n---\nbody")[0] is None
 
 
 def test_note_endpoint_renders_frontmatter_properties_box(client, tmp_vault):
@@ -1978,7 +1978,7 @@ class TestOwnSessionCapture:
         ran: list[bool] = []
         monkeypatch.setattr(uvicorn.Server, "run",
                             lambda self, sockets=None: ran.append(True))
-        monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
+        monkeypatch.setattr("silica.term.banner.print_banner", lambda *a, **k: None)
 
         server.serve(port=0)
 
@@ -3035,7 +3035,7 @@ def test_serve_keeps_a_handle_on_the_server_it_runs(monkeypatch):
                         lambda self, sockets=None: ran.append(True))
     monkeypatch.setattr(SESSION, "reset", lambda: None)
     monkeypatch.setattr(session, "capture_own_session", lambda: None)
-    monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
+    monkeypatch.setattr("silica.term.banner.print_banner", lambda *a, **k: None)
 
     server.serve(port=8799)
     assert ran == [True], "the fake never ran: this test would bind a real port"
@@ -3059,7 +3059,7 @@ def test_a_hosted_tenant_listens_on_its_socket_and_answers_to_its_public_name(mo
     monkeypatch.setattr(uvicorn.Server, "run", lambda self, sockets=None: None)
     monkeypatch.setattr(SESSION, "reset", lambda: None)
     monkeypatch.setattr(session, "capture_own_session", lambda: None)
-    monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
+    monkeypatch.setattr("silica.term.banner.print_banner", lambda *a, **k: None)
 
     server.serve(port=8799)
     assert SESSION.server.config.uds == sock
@@ -3088,7 +3088,7 @@ def test_serve_exits_quietly_on_the_signal_uvicorn_re_raises(monkeypatch, tmp_pa
     monkeypatch.setattr(uvicorn.Server, "run", interrupted)
     monkeypatch.setattr(SESSION, "reset", lambda: None)
     monkeypatch.setattr(session, "capture_own_session", lambda: flushed.append(True))
-    monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
+    monkeypatch.setattr("silica.term.banner.print_banner", lambda *a, **k: None)
 
     server.serve(port=8799)   # must not raise
     assert flushed == [True], "the interrupt skipped the conversation flush"

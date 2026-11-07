@@ -113,11 +113,3 @@ class PhaseEvent:
     chunk_total: int
     source_file: str = ""
     elapsed: float | None = None   # set on done/failed only
-
-
-@dataclass(slots=True)
-class WorkCancelledEvent:
-    item_id: str
-    kind: str
-    phase: str      # where cancellation was detected
-

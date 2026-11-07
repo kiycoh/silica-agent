@@ -13,6 +13,7 @@ import pytest
 from silica.driver import fs_backend
 from silica.driver.fs_backend import ObsidianFSBackend
 from silica.kernel.base import note_index
+from silica.kernel.vault import Vault
 
 
 def test_a_long_note_reads_whole_and_only_a_short_one_is_held(tmp_path, monkeypatch):
@@ -20,7 +21,7 @@ def test_a_long_note_reads_whole_and_only_a_short_one_is_held(tmp_path, monkeypa
     book, short = tmp_path / "Book.md", tmp_path / "Short.md"
     book.write_text("x" * 50)
     short.write_text("short")
-    b = ObsidianFSBackend(vault_path=str(tmp_path))
+    b = Vault(ObsidianFSBackend(vault_path=str(tmp_path)))
 
     assert b._read_cached(book) == "x" * 50
     assert b._read_cached(book) == "x" * 50
@@ -35,7 +36,7 @@ def test_a_long_crlf_note_keeps_its_terminator_when_written(tmp_path, monkeypatc
     monkeypatch.setattr(fs_backend, "_BODY_CACHE_MAX_CHARS", 10)
     book = tmp_path / "Book.md"
     book.write_bytes(b"line one\r\nline two\r\nline three\r\n")
-    b = ObsidianFSBackend(vault_path=str(tmp_path))
+    b = Vault(ObsidianFSBackend(vault_path=str(tmp_path)))
 
     b.overwrite("Book.md", "line one\nline two\nline three\nline four\n")
 

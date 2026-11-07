@@ -100,11 +100,7 @@ def write_note(
     # stays: it returns a friendly "use silica_patch_note" error instead of a
     # backend exception, and cross-process it still guards other agents.
     with path_lease(path):
-        try:
-            DRIVER.read_note(path)
-        except Exception:
-            pass  # missing note — the happy path
-        else:
+        if DRIVER.exists(path):
             return {"error": f"Note '{path}' already exists: use silica_patch_note to modify it."}
 
         try:

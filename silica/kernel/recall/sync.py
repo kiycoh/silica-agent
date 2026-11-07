@@ -110,14 +110,13 @@ def vault_version() -> str:
 
     h = hashlib.blake2b(digest_size=8)
     try:
-        mtime_of = getattr(DRIVER, "mtime_of", None)
         # Sorted: list_files walks the filesystem, whose order is not stable
         # across rebuilds, and an order-sensitive digest would report a change
         # on every poll.
         for ref in sorted(DRIVER.list_files(""), key=lambda r: r.path or r.name):
             h.update((ref.path or ref.name).encode("utf-8"))
-            if mtime_of is not None:  # ws backend has none: roster-only digest
-                h.update(str(mtime_of(ref)).encode("ascii"))
+            if DRIVER.knows_mtimes:  # ws abstains: roster-only digest
+                h.update(str(DRIVER.mtime_of(ref)).encode("ascii"))
         # Each store's own `_index_path`, not a list of names spelled again
         # here: a renamed index file would otherwise stop being watched and
         # nothing would say so.
@@ -221,10 +220,9 @@ def _sweep(stats: SweepStats, uncapped: bool = False) -> SweepStats:
     from silica.driver import DRIVER
     from silica.kernel.recall.embed import get_store
 
-    # A driver without mtime_of (ws backend) has no cheap change signal — the
+    # A driver without mtimes (ws backend) has no cheap change signal: the
     # bridge's own write path keeps the indexes fresh while it is connected.
-    mtime_of = getattr(DRIVER, "mtime_of", None)
-    if mtime_of is None:
+    if not DRIVER.knows_mtimes:
         stats.skipped = True
         return stats
 
@@ -257,7 +255,7 @@ def _sweep(stats: SweepStats, uncapped: bool = False) -> SweepStats:
         idx_path = (ref.path or ref.name).removesuffix(".md")
         if not idx_path:
             continue
-        mt = mtime_of(ref)
+        mt = DRIVER.mtime_of(ref)
         if mt is None:
             continue
         live[idx_path] = (ref.name or Path(idx_path).name, mt)

@@ -2,7 +2,7 @@ from unittest.mock import patch, MagicMock, PropertyMock
 from silica.config import CONFIG
 from silica.cli import _handle_slash_command
 from silica.ui.renderer import make_progress_callback, _redact
-from silica.ui.console import CONSOLE
+from silica.term.console import CONSOLE
 from silica.obs.events import ToolStartEvent, ToolCompleteEvent, ToolErrorEvent
 from silica.agent.loop import run_agent
 from silica.model.llm import LLMResponse, ToolCall

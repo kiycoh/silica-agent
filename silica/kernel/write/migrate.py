@@ -11,7 +11,6 @@ revertible journal run.
 """
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -261,14 +260,12 @@ MIGRATIONS = (PROVENANCE_HEADER, SOURCES_FOOTNOTE)
 # ---------------------------------------------------------------------------
 
 def _iter_notes(vault: Path):
-    # The same walk derive_documents uses; not imported from there because the
-    # code lane sits below the write lane (import-linter contract).
-    from silica.kernel.base.layout import ignore_matcher
+    # walk_tree and not iter_notes: a dot-named note carries the old block too,
+    # and /migrate lists plans in walk order, which iter_notes does not keep.
+    from silica.kernel.base.layout import walk_tree
 
-    skip = ignore_matcher(vault)
-    for dirpath, dirnames, filenames in os.walk(vault):
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".") and not skip(d))
-        for fn in sorted(filenames):
+    for dirpath, _dirnames, filenames in walk_tree(vault):
+        for fn in filenames:
             if fn.endswith(".md"):
                 yield Path(dirpath) / fn
 

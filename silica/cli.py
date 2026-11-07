@@ -21,7 +21,7 @@ import uuid
 from collections.abc import Callable
 from contextlib import nullcontext, redirect_stdout
 
-from silica.ui.style import FlatMarkdown
+from silica.term.style import FlatMarkdown
 
 from silica.agent.recall_watch import numbers_of_session
 from silica.config import claim_env, CONFIG, GUI_PORT, live_env
@@ -32,7 +32,7 @@ from silica.session import turn as session_turn
 from silica.session.conversation import Conversation
 from silica.session.words import command_word, direct_args, int_flag, positional, remember_text, str_flag, unquoted
 from silica.sources import ingest
-from silica.ui.console import CONSOLE
+from silica.term.console import CONSOLE
 from silica.ui.home import print_home
 from silica.ui.prompt import build_session, bottom_toolbar, prompt_text
 from prompt_toolkit.patch_stdout import patch_stdout
@@ -2218,11 +2218,11 @@ def _sc_enrich(args: list[str], **_) -> str | None:
 
 def _sc_dedup(args: list[str], **_) -> str | None:
     """/dedup [folder] — seed a batch ledger over the near-duplicate pairs found."""
-    from silica.tools.runners import _scan_dedup_pairs
+    from silica.kernel.recall import duplicates
 
     folder = " ".join(positional(args))
 
-    pairs, err = _scan_dedup_pairs(folder)
+    pairs, err = duplicates.scan_pairs(folder)
     if err:
         CONSOLE.print(f"  [yellow]{err}[/]")
         return ""  # handled inline — nothing for the agent
