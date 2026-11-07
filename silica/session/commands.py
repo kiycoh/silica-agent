@@ -7,6 +7,10 @@ The commands' handlers sit in `silica/cli.py`, above every surface, so a surface
 cannot import them; the CLI hands its dispatcher in here when it loads, and every
 process that runs a turn starts in it (`silica`, `silica --gui`, `silica connect`).
 
+Asking the handler the REPL asks is the point: the hand-kept list of "web commands"
+that used to gate the browser drifted, and /lexical /wiki /graph /map /find /vault
+fell through it into an error.
+
 The two surfaces walk the same tables in a different order, and that is what
 each of them does today, kept and named here rather than left to read as the
 same one. The REPL asks the direct handler, then the expansion, then `/web`, then

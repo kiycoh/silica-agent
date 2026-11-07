@@ -821,7 +821,7 @@ class WebTurn:
 
 
 def web_turn_instruction(question: str) -> str:
-    """The `/web` turn's user-side instruction (silica/cli.py expands to it).
+    """The `/web` turn's user-side instruction (session.turn.expand_web_turn expands to it).
 
     The chat's own door, `silica_web_answer`, shared this text until 2026-10-21
     and now has web_answer_instruction below: see there for what it drops.

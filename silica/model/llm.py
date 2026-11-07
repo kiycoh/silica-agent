@@ -535,7 +535,7 @@ def meter_on() -> bool:
 
 _meter: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0, 0, 0])  # site -> [calls, prompt, completion, cached]
 # The same four counts over every call-site, so a chat turn's usage is the
-# difference between two readings (meter_totals, ui/web/server.py run_turn).
+# difference between two readings (meter_totals, session.turn.UsageLine).
 _meter_totals = [0, 0, 0, 0]
 
 
