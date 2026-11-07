@@ -23,10 +23,11 @@ from silica.config import CONFIG, demo
 from silica.kernel.base.formats import IMAGE_SUFFIX, ext_alternation
 from silica.kernel.graph.mindmap import note_resolver
 from silica.session import meter
-from silica.session.words import command_word
+from silica.session import turn as session_turn
 from silica.sources import drop_turn
 from silica.ui.web import drop, flags, render, session, sse, turn
 from silica.ui.web.callback import tool_calls_to_json
+from silica.ui.web.failures import Refused
 from silica.ui.web.session import SESSION
 
 router = APIRouter()
@@ -105,16 +106,14 @@ def _demo_refuses(payload: dict) -> str:
     """Why a demo refuses this message, or "" (ADR-0139 points 5 and 6). Asked
     before the turn starts: a 404 is a refusal the door counts no question for,
     where the stream's own error frame for a withheld command arrives in a 200."""
-    from silica.config import withheld
-
     if not demo():
         return ""
     if payload.get("images"):
         return "images are not part of the demo"
     if payload.get("story"):
         return "Discover is not part of the demo"
-    word = command_word(str(payload.get("text") or ""))
-    return f"'{word}' is not part of the demo" if word in withheld("commands") else ""
+    word = session_turn.withheld_command(str(payload.get("text") or "")).lower()
+    return f"'{word}' is not part of the demo" if word else ""
 
 
 @router.post("/chat")
@@ -470,7 +469,7 @@ def load_session(payload: dict):
         try:
             _narr.NARRATOR.resume(sid)   # continue appending to the same account
         except _narr.SessionBusy as e:
-            raise HTTPException(status_code=409, detail=str(e)) from None
+            raise Refused(409, e) from None
         SESSION.chat.sid = sid
     else:
         # Legacy snapshot: continue as a NEW narration session seeded with its
@@ -514,7 +513,7 @@ def rename_session(payload: dict):
     try:
         ok = _narr.rename_session(sid, title, CONFIG.vault_path or "")
     except _narr.SessionBusy as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
+        raise Refused(409, e) from None
     if not ok:
         raise HTTPException(status_code=404, detail="no such session")
     return {"ok": True, "title": title}
@@ -536,7 +535,7 @@ def delete_session(payload: dict):
     try:
         ok = _narr.delete_session(sid, CONFIG.vault_path or "")
     except _narr.SessionBusy as e:
-        raise HTTPException(status_code=409, detail=str(e)) from None
+        raise Refused(409, e) from None
     if not ok:
         raise HTTPException(status_code=404, detail="no such session")
     # The chat's attached files go with it (ADR-0121 point 5); a copy the

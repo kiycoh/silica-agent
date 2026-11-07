@@ -49,6 +49,18 @@ def test_a_routes_own_sentence_takes_the_shape_with_its_status(tc):
     assert r.json() == {"error": "there is no such conversion", "detail": "there is no such conversion"}
 
 
+def test_a_chat_another_process_holds_takes_the_shape(tc, monkeypatch):
+    from silica.obs import narration
+
+    def held(sid, title, vault):
+        raise narration.SessionBusy(sid, {"driver": "tui", "pid": 7})
+
+    monkeypatch.setattr(narration, "rename_session", held)
+    r = tc.post("/session/rename", json={"id": "abc123", "title": "x"})
+    assert r.status_code == 409
+    assert r.json() == {"error": "session abc123 in use by tui, pid 7", "detail": "session abc123 in use by tui, pid 7"}
+
+
 def test_refused_keeps_a_routes_words_where_explain_would_rewrite_them():
     """`explain()`'s table is for raw text. These words match its classes, and a
     route that wrote them for the person must not have them replaced."""
@@ -71,10 +83,8 @@ def test_fastapis_own_refusal_of_a_body_is_left_alone(tc):
 def test_no_route_serialises_an_exception_by_hand():
     """`raise Refused(400, exc)` says the route read those words; `str(exc)` in an
     HTTPException says nothing of the kind."""
-    # shortcut: chat_routes is the turn lane's in the 2026-11 refactor, and its
-    # three go through the same handler; fold them in once it merges, by 2026-11-20.
     written = {p.name: re.findall(r"HTTPException\([^\n]*str\(\w+\)", p.read_text(encoding="utf-8"))
-               for p in ROUTES.glob("*_routes.py") if p.name != "chat_routes.py"}
+               for p in ROUTES.glob("*_routes.py")}
     assert not {name: hits for name, hits in written.items() if hits}
 
 

@@ -81,19 +81,29 @@ def wear(text: str, conv: Conversation) -> tuple[str, str] | None:
     return personas.command(text, conv.messages, CONFIG.vault_path or None, not conv.collapsed)
 
 
-def refused(text: str) -> str:
-    """Why this account does not run the command `text` names, "" when it does.
+def withheld_command(text: str) -> str:
+    """The command `text` opens with, as typed, when this process withholds it,
+    else "". A view's command goes with the view (ADR-0140 point 4), and a demo's
+    refused ones with it (ADR-0139 point 6); the picker does not offer them, but a
+    typed one does not come from it.
 
-    A view's command goes with the view (ADR-0140 point 4), and a demo's refused
-    ones with it (ADR-0139 point 6); the picker does not offer them, but a typed
-    one does not come from it. Asked after the persona, whose words are this
-    turn, and before /web and /flashcards, which run ahead of the dispatchers:
-    "/<persona> /web" passed the 404 in _demo_refuses and reached the internet
-    (review 2026-10-31)."""
+    Two doors ask this and they answer differently on purpose. The demo's, before
+    the turn (`chat_routes._demo_refuses`), is a 404 the door counts no question
+    for. The turn's (`refused`) is an error frame in a 200, because the words after
+    a persona's name only exist once the turn has read it."""
     from silica.config import withheld
 
     head = first_word(text)
-    return f"'{head}' is not part of this account" if head.startswith("/") and head.lower() in withheld("commands") else ""
+    return head if head.startswith("/") and head.lower() in withheld("commands") else ""
+
+
+def refused(text: str) -> str:
+    """Why this account does not run what `text` names, "" when it does. Asked
+    after the persona, whose words are this turn, and before /web and /flashcards,
+    which run ahead of the dispatchers: "/<persona> /web" passed the 404 at the
+    demo's door and reached the internet (review 2026-10-31)."""
+    head = withheld_command(text)
+    return f"'{head}' is not part of this account" if head else ""
 
 
 _WEB_USAGE = (
