@@ -452,11 +452,10 @@ def test_a_press_stays_out_of_the_chats_lock(desk):
 
 
 def test_the_usage_line_says_web_and_no_content(desk):
-    from silica.ui.web import notes_routes
     tc, server, _, _, mp = desk
     judged_web(mp)
     lines = []
-    mp.setattr(notes_routes, "emit", lambda ev, **kw: lines.append((ev, kw)))
+    mp.setattr("silica.metrics.emit", lambda ev, **kw: lines.append((ev, kw)))
     press(tc)
     tc.post("/note/check", json={"path": "Drafts/memo"})
     (ev, kw), (_, plain) = lines

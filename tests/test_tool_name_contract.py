@@ -24,9 +24,10 @@ the product must exist. Two passes, both precise rather than heuristic:
 the named declaration sites, and an AST scan of every `tools=` literal.
 
 ponytail: prose that names tools (prompt text, tool descriptions telling the
-model to call another tool) is out of scope here. Descriptions are already
-covered by test_chat_tools_keeps_every_recovery_path_it_advertises; a prompt
-naming a dead tool costs one wasted model call, not a silently amputated lane.
+model to call another tool) is out of scope here, the commands' prompts apart.
+Descriptions are already covered by
+test_chat_tools_keeps_every_recovery_path_it_advertises; a prompt naming a dead tool
+costs one wasted model call, not a silently amputated lane.
 """
 from __future__ import annotations
 
@@ -69,6 +70,18 @@ def test_every_tool_a_plan_can_name_exists():
     assert named, "no capability_name literal found; this test would pass vacuously"
     missing = (named | analyst_plan._IRREVERSIBLE) - _tool_names()
     assert not missing, f"the plan names tools that do not exist: {sorted(missing)}"
+
+
+def test_every_tool_a_command_prompt_names_exists():
+    """A command's directive tells the model which tool to call, so a rename leaves
+    a turn asking for one that is gone. Memorize alone names eight."""
+    named = set()
+    for path in (SILICA_ROOT / "commands").glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                named |= set(re.findall(r"\bsilica_[a-z_]+\b", node.value))
+    assert len(named) > 10, "the scan found nothing to check"
+    assert not named - _tool_names() - {"silica_core"}, sorted(named - _tool_names())
 
 
 def test_chat_exclusions_all_exist():

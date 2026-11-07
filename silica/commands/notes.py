@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from silica.command_table import Call, Result
-from silica.config import CONFIG
+from silica.commands import UNREADABLE
 from silica.session import check as check_wiring
 from silica.session.words import positional, unquoted
 
@@ -55,7 +55,7 @@ def verify(c: Call) -> Result:
         return out
     try:
         nc = DRIVER.read_note(name)
-    except Exception as e:
+    except UNREADABLE as e:
         out.print(f"  [yellow]Cannot read '{name}': {e}[/]")
         return out
     path, prior = nc.ref.path or name, nc.content or ""
@@ -88,13 +88,8 @@ def check(c: Call) -> Result:
     then Jev's verdict on each block they did not settle. It never edits the
     note."""
     args, out = c.args, c.out
-    import time
-
-    from silica import metrics
-    from silica.config import CONFIG
     from silica.driver import DRIVER
     from silica.kernel.check import run as check
-    from silica.kernel.base.manifest import active_write_dir
 
     name = " ".join(positional(args))
     if not name:
@@ -102,22 +97,17 @@ def check(c: Call) -> Result:
         return out
     try:
         path = DRIVER.read_note(name).ref.path or name
-    except Exception as e:
+    except UNREADABLE as e:
         out.print(f"  [yellow]Cannot read '{name}': {e}[/]")
         return out
     path = path if path.endswith(".md") else path + ".md"
-    started = time.monotonic()
-    search, dense, floor = check_wiring.legs()
     try:
-        report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(),
-                                  search=search, dense=dense, dense_floor=floor, judge=check_wiring.judge(cite=False))
+        report = check_wiring.run(path)
     except Exception as e:
-        metrics.emit("check", outcome=metrics.outcome_of(e), ms=metrics.ms_since(started))
+        # A model or an index that fails mid-pass: the reason is the answer, and
+        # the REPL has nothing to fall back on but the line that says so.
         out.print(f"  [yellow]The check failed: {e}[/]")
         return out
-    counts = report["counts"]
-    metrics.emit("check", outcome="ok", ms=metrics.ms_since(started), blocks=report["blocks"], cached=report["cached"],
-                 error=counts["error"], warning=counts["warning"], nit=counts["nit"])
     out.print(check.render(report), markup=False, highlight=False)
     return out
 
@@ -169,11 +159,11 @@ def undo(c: Call) -> Result:
     from silica.driver import DRIVER
     from silica.kernel.write.checkpoints import get_checkpoint_store
     from silica.kernel.link.sweep import revert_and_sweep
-    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE, get_undo_journal
+    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE, active_vault, get_undo_journal
 
     store = get_checkpoint_store()
     journal = get_undo_journal()
-    vault = (CONFIG.vault_path or "").strip() or None
+    vault = active_vault()
 
     def _on_disk(p: str) -> bool:
         root = Path(vault) if vault else None
@@ -198,7 +188,7 @@ def undo(c: Call) -> Result:
             # landed (2026-10-26).
             try:
                 resolved = DRIVER.read_note(note_path).ref.path
-            except Exception:
+            except UNREADABLE:
                 # No note answers to the name: a deleted note is looked up by
                 # the name as given, just below.
                 resolved = ""
@@ -251,7 +241,7 @@ def undo(c: Call) -> Result:
 
     try:
         on_disk = DRIVER.read_note(note_path).content
-    except Exception:
+    except UNREADABLE:
         on_disk = None  # nothing on disk to keep: the undo writes the note back
     since = store.changed_since(note_path, on_disk)
     # Read before the undo: written over blind, an edit made in Obsidian after
@@ -276,6 +266,7 @@ def undo(c: Call) -> Result:
             res = delete_with_restore_point(
                 note_path, DRIVER.read_note(note_path).content, USER_DELETE_SOURCE)
         except Exception as exc:
+            # Whatever the gate refused with is what the person reads.
             res = {"error": str(exc)}
         if "error" in res:
             out.print(f"  [red]Undo failed:[/] {res['error']}")
@@ -290,12 +281,14 @@ def undo(c: Call) -> Result:
         DRIVER.overwrite(note_path, content, loss=Loss.RESTORE)
         try:
             store.settle(note_path, DRIVER.read_note(note_path).content)  # what landed, stamp included
-        except Exception:
+        except UNREADABLE:
             pass  # the undo landed; an unsettled top only labels the next write as an outside edit
         depth = store.depth(note_path)
         remaining = max(0, depth - 1)
         out.print(f"  Undone: [bold]{note_path}[/]{kept}  [dim]({remaining} undo step(s) remaining)[/]")
     except Exception as exc:
+        # The note stays as it was and the undo store keeps its step: the reason
+        # is all there is to say.
         out.print(f"  [red]Undo failed:[/] {exc}")
     return out
 
@@ -326,6 +319,7 @@ def delete(c: Call) -> Result:
         path = nc.ref.path or ref
         res = delete_with_restore_point(path, nc.content, USER_DELETE_SOURCE)
     except Exception as exc:
+        # A note that cannot be read or that the gate refuses: said, and nothing deleted.
         res = {"error": str(exc)}
     if "error" in res:
         err = res["error"].removeprefix("not deleted: ")
@@ -360,11 +354,10 @@ def trash(c: Call) -> Result:
     from rich.markup import escape
 
     from silica.kernel.base.notekey import note_key
-    from silica.kernel.write.gate import restore_from_trash
-    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE, get_undo_journal
+    from silica.kernel.write.gate import erase_from_trash, restore_from_trash, trash_items
+    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE
 
-    journal = get_undo_journal()
-    items = journal.trashed((CONFIG.vault_path or "").strip() or None)
+    items = trash_items()
     rest = raw_input.strip().split(maxsplit=2)
     verb = rest[1].lower() if len(rest) > 1 else ""
     if verb in ("", "empty") and not items:
@@ -380,8 +373,7 @@ def trash(c: Call) -> Result:
                   "or /trash empty deletes for good.[/]")
         return out
     if verb == "empty":
-        for t in items:
-            journal.leave_trash(t["run"], t["path"])
+        erase_from_trash(items)
         out.print(f"  Deleted for good: {len(items)} note{'s' if len(items) != 1 else ''}.")
         return out
     if verb not in ("restore", "erase") or len(rest) < 3:
@@ -395,10 +387,10 @@ def trash(c: Call) -> Result:
         out.print(f"  [yellow]Not in the trash:[/] {escape(unquoted(rest[2]))}", soft_wrap=True)
         return out
     if verb == "erase":
-        journal.leave_trash(item["run"], item["path"])
+        erase_from_trash([item])
         out.print(f"  Deleted for good: [bold]{escape(item['path'])}[/]", soft_wrap=True)
         return out
-    why = restore_from_trash(item, store=journal)
+    why = restore_from_trash(item)
     if why:
         out.print(f"  [yellow]Not restored:[/] {escape(item['path'])} ({escape(why)})",
                   soft_wrap=True)
@@ -413,8 +405,8 @@ def revert(c: Call) -> Result:
     args, raw_input, out = c.args, c.raw, c.out
     from rich.markup import escape
 
-    from silica.kernel.write.undo_journal import get_undo_journal
-    vault = CONFIG.vault_path.strip() or None
+    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
+    vault = active_vault()
     tokens = list(args) or raw_input.strip().split()[1:]
     # The source is the rest of the line: lecture files carry spaces
     # ("CorsoA/Lezione 1.md"), and one token cut every such name at its first.
@@ -513,7 +505,7 @@ def _revert_one(run_id: str, out: Result) -> Result:
     try:
         info = get_undo_journal().run_info(run_id)
     except Exception:
-        pass
+        pass  # a locked journal costs the label alone: the revert below says what it can
     source = (info or {}).get("source") or ""
     when = ""
     if info and info.get("started_at"):

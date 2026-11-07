@@ -27,6 +27,11 @@ from silica.command_table import ROWS, Ask, Call, Command, Result
 from silica.config import CONFIG
 from silica.session.words import command_word, direct_args
 
+# How a read of a note fails: `NoteNotFound` and a refusal of a path outside the
+# vault are RuntimeErrors, a dropped bridge an OSError, a file that is no text a
+# UnicodeDecodeError. A handler says these and goes on; anything else is a fault.
+UNREADABLE = (RuntimeError, OSError, ValueError)
+
 
 def _run(row: Command, call: Call) -> Result:
     """The row's handler, imported now: a process pays for what a line asks for."""

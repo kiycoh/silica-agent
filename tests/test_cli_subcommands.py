@@ -196,3 +196,32 @@ class TestAutolaunchWizard:
 
         _autolaunch_wizard_if_unconfigured()
         assert execve_calls == []  # aborted wizard → no re-exec
+
+
+def test_the_gui_extra_is_named_by_what_it_imports():
+    """A package added to [gui] and not to `_GUI_IMPORTS` reads as "failed to import"
+    where the person needs "install the extra"."""
+    import tomllib
+    from pathlib import Path
+
+    from silica import cli
+
+    project = tomllib.loads((Path(__file__).resolve().parent.parent / "pyproject.toml").read_text(encoding="utf-8"))
+    dists = {d.split(">")[0].split("[")[0] for d in project["project"]["optional-dependencies"]["gui"]}
+    assert {d.removeprefix("python-").replace("-", "_") for d in dists} == cli._GUI_IMPORTS
+
+
+def test_every_word_the_help_names_is_a_word_that_runs():
+    from silica import cli
+
+    listed = {w.usage.split()[0] for w in cli._WORDS if w.usage}
+    assert listed - {"--gui"} <= {x for w in cli._WORDS if w.run for x in w.words}
+    assert all(("silica " + w.usage).rstrip() in cli._cli_help() for w in cli._WORDS if w.summary)
+
+
+def test_version_is_the_package_version_the_banner_shows(capsys):
+    import silica
+    from silica.cli import _dispatch_subcommand
+
+    assert _dispatch_subcommand(["--version"]) == 0
+    assert capsys.readouterr().out == f"silica {silica.__version__}\n"

@@ -12,6 +12,7 @@ from silica.kernel.base.frontmatter import split_shown
 from silica.kernel.graph.mindmap import note_resolver
 from silica.kernel.text import note_parts
 from silica.kernel.write import session_changes
+from silica.kernel.write.gate import erase_from_trash, restore_from_trash, trash_items
 from silica.ui.web import note_ops, session
 
 logger = logging.getLogger(__name__)
@@ -176,23 +177,11 @@ def tree_undo(payload: dict):
             "skipped": [s["path"] for s in res["skipped"] + res["errors"]]}
 
 
-def _trash_items() -> list[dict]:
-    """This vault's trash (ADR-0128), the vault spelled as a delete stamps it.
-    `taken`: a note is at the item's path again, so its restore is refused."""
-    from silica.kernel.write.undo_journal import active_vault, get_undo_journal
-    from silica.kernel.write.gate import vault_file
-
-    items = get_undo_journal().trashed(active_vault())
-    for t in items:
-        t["taken"] = vault_file(t["path"]).exists()
-    return items
-
-
 def _trash_item(payload: dict) -> dict:
     """The item a request names by run and path, or 404: both come from the
     page, and only what this vault's trash lists is the request's to touch."""
     run, path = str(payload.get("run") or ""), str(payload.get("path") or "")
-    item = next((t for t in _trash_items() if t["run"] == run and t["path"] == path), None)
+    item = next((t for t in trash_items() if t["run"] == run and t["path"] == path), None)
     if item is None:
         raise HTTPException(404, "not in the trash")
     return item
@@ -201,14 +190,12 @@ def _trash_item(payload: dict) -> dict:
 @router.get("/trash")
 def trash_list():
     """The notes deleted from this vault that nothing has brought back."""
-    return {"items": _trash_items()}
+    return {"items": trash_items()}
 
 
 @router.post("/trash/restore")
 def trash_restore(payload: dict):
     """One note back from the trash, not the run it was deleted in."""
-    from silica.kernel.write.gate import restore_from_trash
-
     item = _trash_item(payload)
     if item["taken"]:
         raise HTTPException(409, "a note is at that path now")
@@ -225,12 +212,8 @@ def trash_restore(payload: dict):
 def trash_erase(payload: dict):
     """Delete for good one item, `{run, path}`, or the whole trash, `{all:
     true}`. No turn slot: it touches the journal and no note."""
-    from silica.kernel.write.undo_journal import get_undo_journal
-
-    items = _trash_items() if payload.get("all") is True else [_trash_item(payload)]
-    journal = get_undo_journal()
-    for t in items:
-        journal.leave_trash(t["run"], t["path"])
+    items = trash_items() if payload.get("all") is True else [_trash_item(payload)]
+    erase_from_trash(items)
     return {"erased": len(items)}
 
 

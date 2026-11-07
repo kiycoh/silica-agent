@@ -1108,7 +1108,7 @@ function fmtTokens(n) {
 // --- the context ring -------------------------------------------------------
 // One number, three readings: the ring is how full the window is, the panel is
 // what filled it, and the caution level is the one fill that means something.
-// The parts are counted server-side by _context_breakdown, which charges
+// The parts are counted server-side by context_breakdown, which charges
 // litellm's per-call chat envelope exactly once so they sum to the total printed
 // beside them — a meter that invites you to add up its own segments has to
 // survive that.

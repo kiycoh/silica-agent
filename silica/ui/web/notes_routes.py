@@ -9,7 +9,6 @@ import itertools
 import json
 import logging
 import threading
-import time
 from contextlib import suppress
 from pathlib import Path
 
@@ -23,7 +22,6 @@ from silica.kernel.graph.mindmap import note_resolver
 from silica.kernel.recall import note_index
 from silica.kernel.text import note_parts
 from silica.kernel.write import session_changes
-from silica.metrics import emit
 from silica.ui.web import drop, note_ops, render, session, sse
 from silica.ui.web.failures import Refused, refusal
 
@@ -444,10 +442,6 @@ def note_render(payload: dict):
     return {"html": html}
 
 
-class _CheckHeld(Exception):
-    """A long pass waits for the person's go (ADR-0110 point 13)."""
-
-
 @router.post("/note/check")
 async def note_check(payload: dict, request: Request):
     """The drawer's `check sources` (ADR-0110 step 3), as JSON lines: the rule
@@ -468,8 +462,6 @@ async def note_check(payload: dict, request: Request):
     from silica.session import check as check_wiring
     from silica.kernel.check import run as check
     from silica.kernel.check import web as check_web
-    from silica.kernel.base.manifest import active_write_dir
-    from silica.metrics import ms_since, outcome_of
 
     # Off the event loop: the resolver reads the driver's graph, and every
     # open stream (the narration SSE among them) waits while the loop does.
@@ -516,7 +508,7 @@ async def note_check(payload: dict, request: Request):
     def progress(ev: dict) -> None:
         if ev["event"] == "rules" and ev["calls"] > check.CONFIRM_OVER and not confirmed:
             put({**ev, "event": "confirm"})
-            raise _CheckHeld
+            raise check_wiring.Held
         put(ev)
 
     def press(report: dict, judge) -> None:
@@ -537,29 +529,17 @@ async def note_check(payload: dict, request: Request):
         put({"event": "web_verdict", "findings": findings, "states": states})
 
     def work() -> None:
-        started = time.monotonic()
         said = {"web": True} if web_on else {}  # that a web was asked, never what (ADR-0100)
         try:
-            search, dense, floor = check_wiring.legs()
-            judge = None if rules_only else check_wiring.judge(cite=card_lines is not None)
-            report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(), search=search,
-                                      dense=dense, dense_floor=floor, judge=judge,
-                                      cache_only=rules_only, progress=progress, cancelled=stop.is_set,
-                                      lines=card_lines)
-            if web_on:
-                press(report, judge)
+            report = check_wiring.run(path, cite=card_lines is not None, rules_only=rules_only,
+                                      then=press if web_on else None, said=said, progress=progress,
+                                      cancelled=stop.is_set, lines=card_lines)
             put({**report, "event": "done"})
-            if not rules_only:  # a rerun after an edit is not a check the person asked for
-                c = report["counts"]
-                emit("check", outcome="ok", ms=ms_since(started), blocks=report["blocks"], cached=report["cached"],
-                     error=c["error"], warning=c["warning"], nit=c["nit"], **said)
-        except _CheckHeld:
+        except check_wiring.Held:
             pass
         except Exception as e:
             logger.warning("/note/check failed on %s: %s", path, e)
             put({"event": "error", "say": f"the check failed: {e}"})
-            if not rules_only:
-                emit("check", outcome=outcome_of(e), ms=ms_since(started), **said)
         finally:
             put(None)
 

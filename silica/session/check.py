@@ -1,12 +1,55 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""What a source check reads with: the search, the dense leg, the web legs and the judge.
+"""One source check: what it reads with (the search, the dense leg, the web legs and the
+judge) and the line that counts it.
 
 The wiring between `kernel/check`, which takes them as arguments, and the model and
-index behind them. Both `/check` and the drawer's `check sources` ask here.
+index behind them. Both `/check` and the drawer's `check sources` run through `run`.
 """
 from __future__ import annotations
+
+import time
+from collections.abc import Callable
+from typing import Any
+
+
+class Held(Exception):
+    """A long pass waits for the person's go (ADR-0110 point 13): no check was
+    made, so none is counted."""
+
+
+def run(path: str, *, cite: bool = False, rules_only: bool = False, then: Callable | None = None,
+        said: dict | None = None, **options: Any) -> dict:
+    """Check the note at `path` and count it. `rules_only` asks the model nothing
+    and is no check the person asked for, so no line says it ran. `then(report,
+    judge)` runs inside the count, a selection's web leg; `said` rides the line, and
+    `options` go to `check_note`. A failure is counted and raised."""
+    from silica import metrics
+    from silica.config import CONFIG
+    from silica.kernel.base.manifest import active_write_dir
+    from silica.kernel.check import run as check
+
+    started = time.monotonic()
+    extra = said or {}
+    try:
+        search, dense, floor = legs()
+        decide = None if rules_only else judge(cite=cite)
+        report = check.check_note(path, CONFIG.vault_path, write_dir=active_write_dir(), search=search, dense=dense,
+                                  dense_floor=floor, judge=decide, cache_only=rules_only, **options)
+        if then is not None:
+            then(report, decide)
+    except Held:
+        raise
+    except Exception as e:
+        if not rules_only:
+            metrics.emit("check", outcome=metrics.outcome_of(e), ms=metrics.ms_since(started), **extra)
+        raise
+    if not rules_only:
+        counts = report["counts"]
+        metrics.emit("check", outcome="ok", ms=metrics.ms_since(started), blocks=report["blocks"],
+                     cached=report["cached"], error=counts["error"], warning=counts["warning"], nit=counts["nit"], **extra)
+    return report
 
 
 def judge(cite: bool = True):

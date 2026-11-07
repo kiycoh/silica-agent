@@ -48,8 +48,7 @@ def _importers(folder: str, package: str) -> list[str]:
 
 def test_no_surface_reads_the_repl():
     """The web took 16 private names from it, and a feature of a turn landed twice.
-    What a surface shares is `silica/session`; the commands reach it through
-    `session.commands`, which the CLI fills."""
+    What a surface shares is `silica/session`, and the commands, `silica/commands`."""
     assert not _importers("silica/ui", "silica.cli")
 
 

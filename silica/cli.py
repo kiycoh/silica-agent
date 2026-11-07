@@ -19,12 +19,14 @@ import threading
 import uuid
 from collections.abc import Callable
 from contextlib import nullcontext, redirect_stdout
+from typing import NamedTuple
 
 from rich.markup import escape
 
 from silica.term.style import FlatMarkdown
 
 from silica.agent.recall_watch import numbers_of_session
+from silica import __version__
 from silica.command_table import Ask, Result
 from silica.commands import dispatch
 from silica.config import claim_env, CONFIG, GUI_PORT, live_env
@@ -366,31 +368,6 @@ def _autolaunch_wizard_if_unconfigured() -> None:
     os.execve(sys.executable, [sys.executable, *sys.argv], os.environ)
 
 
-_CLI_HELP = f"""\
-silica — your personal note curator agent
-
-Usage:
-  silica                     open the REPL in the current folder's vault
-  silica --gui [--port N]    serve the web GUI (default http://localhost:{GUI_PORT})
-  silica doctor [--live]     check the environment (--json for machine output)
-  silica init [--advanced]   first-run wizard
-  silica connect             bridge to the Obsidian desktop app
-  silica import <path>       import external material into the vault
-  silica update [--check]    self-update
-  silica prune [--apply]     list the indexes of folders that are gone
-                             (--apply removes them)
-  silica --version           print the version and exit
-
-Options:
-  -c "<command>"             run one REPL command and exit (repeatable),
-                             e.g. silica -c "/report"
-  -v, --verbose              debug logging
-  -h, --help                 this help
-
-The vault is the folder you launch in; SILICA_VAULT overrides it. Type /help
-inside the REPL for the slash-command reference."""
-
-
 def _prune_indexes(found: tuple[list[tuple[Path, Path]], list[tuple[Path, Path]]], *, apply: bool) -> int:
     """`silica prune`: list the index dirs whose folder is gone, remove them
     with `apply`. Not only indexes: a dir also keeps that vault's quiz log,
@@ -428,88 +405,144 @@ def _prune_indexes(found: tuple[list[tuple[Path, Path]], list[tuple[Path, Path]]
     return 1 if failed else 0
 
 
-def _dispatch_subcommand(args: list[str]) -> int | None:
-    """Handle `silica doctor` / `init` / `connect` / `import` / `update` / `prune`.
+def _help(args: list[str]) -> int:
+    print(_cli_help())
+    return 0
 
-    Returns an exit code, or None when no subcommand matched (→ REPL).
-    Lazy imports keep REPL startup unchanged. Module attributes (not `from`
-    imports) so tests can monkeypatch run_checks / run_wizard / run_connect.
-    """
-    # --help/--version answer and exit BEFORE any vault/server bootstrap: a
-    # first contact typing `silica --help` used to get the full REPL instead,
-    # embeddings autostart included.
-    if args[:1] in (["--help"], ["-h"], ["help"]):
-        print(_CLI_HELP)
-        return 0
-    if args[:1] in (["--version"], ["-V"], ["version"]):
-        try:
-            from silica._version import version as _v
-        except Exception:
-            _v = "unknown"
-        print(f"silica {_v}")
-        return 0
-    if args[:1] == ["update"]:
-        import silica.update as update_mod
-        return update_mod.update(check_only="--check" in args[1:])
-    if args[:1] == ["prune"]:
-        from silica.kernel.recall.vault_registry import orphan_indexes
-        return _prune_indexes(orphan_indexes(), apply="--apply" in args[1:])
-    if args[:1] == ["import"]:
-        # The vault has to be selected or CONFIG.vault_path is whatever the
-        # config file last held, and the envelopes land in another vault's
-        # inbox (inbox_dir_for keys by vault digest) where /nucleate never
-        # drains them.
-        bootstrap("vault")
-        import silica.capture as capture_mod
-        target = next(iter(positional(args[1:])), "")
-        vault = CONFIG.vault_path.strip()
-        if not target or not vault:
-            CONSOLE.print(
-                "  usage: [bold]silica import <export.zip|conversations.json|"
-                "~/.claude/projects>[/] (needs a configured vault)")
-            return 1
-        try:
-            created, skipped = capture_mod.run_import(target, vault)
-        except (OSError, ValueError) as exc:
-            CONSOLE.print(f"  [yellow]import failed: {exc}[/]")
-            return 1
+
+def _version(args: list[str]) -> int:
+    print(f"silica {__version__}")
+    return 0
+
+
+def _update(args: list[str]) -> int:
+    import silica.update as update_mod
+
+    return update_mod.update(check_only="--check" in args)
+
+
+def _prune(args: list[str]) -> int:
+    from silica.kernel.recall.vault_registry import orphan_indexes
+
+    return _prune_indexes(orphan_indexes(), apply="--apply" in args)
+
+
+def _import(args: list[str]) -> int:
+    # The vault has to be selected or CONFIG.vault_path is whatever the
+    # config file last held, and the envelopes land in another vault's
+    # inbox (inbox_dir_for keys by vault digest) where /nucleate never
+    # drains them.
+    bootstrap("vault")
+    import silica.capture as capture_mod
+    target = next(iter(positional(args)), "")
+    vault = CONFIG.vault_path.strip()
+    if not target or not vault:
         CONSOLE.print(
-            f"  imported [bold]{created}[/] conversation(s), skipped {skipped} "
-            f"— run [bold]/nucleate[/] to distill them (10 per run)")
-        return 0
-    if args[:1] == ["doctor"]:
-        import silica.onboarding.checks as checks
-        as_json = "--json" in args[1:]
-        # Under --json stdout IS the payload, so the autostart's and the live
-        # probe's console chatter has to land somewhere else or the output
-        # stops parsing. CONSOLE resolves sys.stdout per write, so the redirect
-        # reaches it.
-        quiet = redirect_stdout(sys.stderr) if as_json else nullcontext()
-        with quiet:
-            bootstrap("doctor")  # report the state after the autostart, not before it
-            results = checks.run_checks(CONFIG)
-            # --live: opt-in real completion (costs a token on hosted providers).
-            # A row in BOTH outcomes, appended before rendering: the table has
-            # to show what the exit code is about, and a --json consumer has to
-            # be able to tell "--live passed" from "--live never ran".
-            if "--live" in args[1:]:
-                live_ok = _doctor_live_probe()
-                results.append(checks.CheckResult(
-                    "live probe", "ok" if live_ok else "fail",
-                    "the model replied" if live_ok else "the model did not reply"))
-            if not as_json:
-                checks.render_report(results)
-        if as_json:
-            print(json.dumps(checks.report_payload(results), ensure_ascii=False, indent=2))
-        return checks.exit_code(results)
-    if args[:1] == ["init"]:
-        import silica.onboarding.wizard as wizard_mod
-        return wizard_mod.run_wizard(advanced="--advanced" in args[1:])
-    if args[:1] == ["connect"]:
-        bootstrap("session", debug=_debug())
-        import silica.ui.connect as connect_mod
-        return connect_mod.run_connect()
-    return None
+            "  usage: [bold]silica import <export.zip|conversations.json|"
+            "~/.claude/projects>[/] (needs a configured vault)")
+        return 1
+    try:
+        created, skipped = capture_mod.run_import(target, vault)
+    except (OSError, ValueError) as exc:
+        CONSOLE.print(f"  [yellow]import failed: {exc}[/]")
+        return 1
+    CONSOLE.print(
+        f"  imported [bold]{created}[/] conversation(s), skipped {skipped} "
+        f"— run [bold]/nucleate[/] to distill them (10 per run)")
+    return 0
+
+
+def _doctor(args: list[str]) -> int:
+    import silica.onboarding.checks as checks
+    as_json = "--json" in args
+    # Under --json stdout IS the payload, so the autostart's and the live
+    # probe's console chatter has to land somewhere else or the output
+    # stops parsing. CONSOLE resolves sys.stdout per write, so the redirect
+    # reaches it.
+    quiet = redirect_stdout(sys.stderr) if as_json else nullcontext()
+    with quiet:
+        bootstrap("doctor")  # report the state after the autostart, not before it
+        results = checks.run_checks(CONFIG)
+        # --live: opt-in real completion (costs a token on hosted providers).
+        # A row in BOTH outcomes, appended before rendering: the table has
+        # to show what the exit code is about, and a --json consumer has to
+        # be able to tell "--live passed" from "--live never ran".
+        if "--live" in args:
+            live_ok = _doctor_live_probe()
+            results.append(checks.CheckResult(
+                "live probe", "ok" if live_ok else "fail",
+                "the model replied" if live_ok else "the model did not reply"))
+        if not as_json:
+            checks.render_report(results)
+    if as_json:
+        print(json.dumps(checks.report_payload(results), ensure_ascii=False, indent=2))
+    return checks.exit_code(results)
+
+
+def _init(args: list[str]) -> int:
+    import silica.onboarding.wizard as wizard_mod
+
+    return wizard_mod.run_wizard(advanced="--advanced" in args)
+
+
+def _connect(args: list[str]) -> int:
+    bootstrap("session", debug=_debug())
+    import silica.ui.connect as connect_mod
+
+    return connect_mod.run_connect()
+
+
+class _Word(NamedTuple):
+    """One way to start: what `--help` says, and what runs. No `run`: `main` does."""
+    words: tuple[str, ...]
+    usage: str
+    summary: str
+    run: Callable[[list[str]], int] | None = None
+
+
+# Lazy imports keep REPL startup unchanged. Module attributes (not `from` imports)
+# in the functions above so tests can monkeypatch run_checks / run_wizard /
+# run_connect. --help and --version answer and exit BEFORE any vault/server
+# bootstrap: a first contact typing `silica --help` used to get the full REPL
+# instead, embeddings autostart included.
+_WORDS = (
+    _Word((), "", "open the REPL in the current folder's vault"),
+    _Word((), "--gui [--port N]", f"serve the web GUI (default http://localhost:{GUI_PORT})"),
+    _Word(("doctor",), "doctor [--live]", "check the environment (--json for machine output)", _doctor),
+    _Word(("init",), "init [--advanced]", "first-run wizard", _init),
+    _Word(("connect",), "connect", "bridge to the Obsidian desktop app", _connect),
+    _Word(("import",), "import <path>", "import external material into the vault", _import),
+    _Word(("update",), "update [--check]", "self-update", _update),
+    _Word(("prune",), "prune [--apply]", "list the indexes of folders that are gone\n(--apply removes them)", _prune),
+    _Word(("--version", "-V", "version"), "--version", "print the version and exit", _version),
+    _Word(("--help", "-h", "help"), "", "", _help),
+)
+
+
+def _cli_help() -> str:
+    pad = " " * 29
+    usage = "\n".join(f"  {('silica ' + w.usage).rstrip():<26} " + w.summary.replace("\n", "\n" + pad)
+                      for w in _WORDS if w.summary)
+    return f"""\
+silica — your personal note curator agent
+
+Usage:
+{usage}
+
+Options:
+  -c "<command>"             run one REPL command and exit (repeatable),
+                             e.g. silica -c "/report"
+  -v, --verbose              debug logging
+  -h, --help                 this help
+
+The vault is the folder you launch in; SILICA_VAULT overrides it. Type /help
+inside the REPL for the slash-command reference."""
+
+
+def _dispatch_subcommand(args: list[str]) -> int | None:
+    """Run the word `args` opens with: its exit code, None when none matched (→ REPL)."""
+    word = next((w for w in _WORDS if args[:1] and args[0] in w.words), None)
+    return None if word is None or word.run is None else word.run(args[1:])
 
 
 def _start_reminder_daemon() -> None:
@@ -558,6 +591,10 @@ def _debug() -> bool:
     return "--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging
 
 
+# The [gui] extra of pyproject.toml, by the names they import as.
+_GUI_IMPORTS = {"fastapi", "uvicorn", "multipart", "mdit_py_plugins", "latex2mathml"}
+
+
 def _gui_port() -> int:
     """Parse `--port N` / `--port=N` from argv (default GUI_PORT)."""
     for i, a in enumerate(sys.argv):
@@ -592,8 +629,7 @@ def main():
             # sent an editable tool env, stale on a NEW BASE dependency, chasing
             # an extra it already had -- 2026-09-07, fsrs.
             missing = getattr(exc, "name", None) or "?"
-            gui_deps = {"fastapi", "uvicorn", "multipart", "mdit_py_plugins", "latex2mathml"}
-            if missing.split(".")[0] in gui_deps:
+            if missing.split(".")[0] in _GUI_IMPORTS:
                 CONSOLE.print("  [red]The GUI needs an extra:[/] pip install 'silica\\[gui]'")
             else:
                 CONSOLE.print(f"  [red]The GUI failed to import[/] {missing}: {exc}")

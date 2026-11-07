@@ -134,7 +134,7 @@ def declare_write_dir(vault: str | Path) -> str | None:
         return None
     return declared
 
-# Lives here and not in cli.py, which startup reads it from: doctor
+# Lives here and not in ui/bootstrap, which startup reads it from: doctor
 # (onboarding.checks) must apply the same rule, and checks is imported by
 # tools.atomic, so reaching it through cli pulled every capability worker
 # under tools and broke the P9 contract (lint-imports, 2026-10-02).

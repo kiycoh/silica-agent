@@ -99,9 +99,9 @@ def withheld_command(text: str) -> str:
 
 def refused(text: str) -> str:
     """Why this account does not run what `text` names, "" when it does. Asked
-    after the persona, whose words are this turn, and before /web and /flashcards,
-    which run ahead of the dispatchers: "/<persona> /web" passed the 404 at the
-    demo's door and reached the internet (review 2026-10-31)."""
+    after the persona, whose words are this turn, and before /web, which runs ahead
+    of the table: "/<persona> /web" passed the 404 at the demo's door and reached
+    the internet (review 2026-10-31)."""
     head = withheld_command(text)
     return f"'{head}' is not part of this account" if head else ""
 

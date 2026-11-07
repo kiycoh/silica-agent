@@ -464,6 +464,22 @@ def revert_run(run_id: str, *, store: undo_journal.UndoJournalStore | None = Non
             "stale": stale, "errors": errors}
 
 
+def trash_items() -> list[dict]:
+    """This vault's trash (ADR-0128), the vault spelled as a delete stamps it.
+    `taken`: a note is at the item's path again, so its restore is refused."""
+    items = undo_journal.get_undo_journal().trashed(undo_journal.active_vault())
+    for t in items:
+        t["taken"] = vault_file(t["path"]).exists()
+    return items
+
+
+def erase_from_trash(items: list[dict]) -> None:
+    """Delete these items of the trash for good. It touches the journal and no note."""
+    journal = undo_journal.get_undo_journal()
+    for t in items:
+        journal.leave_trash(t["run"], t["path"])
+
+
 def restore_from_trash(item: dict, *, store: undo_journal.UndoJournalStore | None = None) -> str | None:
     """Bring back one note of the trash, an item of `trashed()`, and take it
     out of the trash; None when it is back, else why not (ADR-0128).

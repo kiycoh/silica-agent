@@ -9,7 +9,7 @@ from silica.command_table import COMMANDS, Command
 def skill_commands() -> tuple[Command, ...]:
     """The skills this vault reaches (ADR-0063), as workflow commands.
 
-    A name a command above already answers is left out: dispatch tries those
+    A name a row of the table already answers is left out: dispatch tries those
     first, so the skill would be listed and never run. A skill from the vault
     or the home dir says so in its summary, since it can shadow a built-in and
     a vault is not always its reader's own.

@@ -278,6 +278,8 @@ def memorize(c: Call) -> Result:
 
         found = plans.find_plan(target)
     except Exception:
+        # A frontmatter scan that fails only loses the continuation: the turn
+        # goes on as a new plan, which the person can still decline.
         found = None
     if found is not None:
         return out.to_model(_learn_session_prompt(n, target=found["path"]))

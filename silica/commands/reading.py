@@ -9,6 +9,7 @@ import logging
 import shlex
 
 from silica.command_table import Call, Result
+from silica.commands import UNREADABLE
 from silica.config import CONFIG
 from silica.session.words import int_flag, positional, str_flag
 
@@ -61,6 +62,7 @@ def find(c: Call) -> Result:
         else:
             out.print(f"  No results for '{query}'.")
     except Exception:
+        # `result` is what the search answered, or "" when it raised: as it came.
         out.print(result)
     return out
 
@@ -79,7 +81,7 @@ def _epistemic_filter(results: list[dict], min_trust: str, life: str) -> tuple[l
         ref = r.get("path") or r.get("name") or ""
         try:
             content = DRIVER.read_note(ref if ref.endswith(".md") else ref + ".md").content or ""
-        except Exception:
+        except UNREADABLE:
             continue
         data, _raw, _body = frontmatter.split(content)
         if TRUST_ORDER.get(trust(content), 0) < floor:
@@ -154,7 +156,7 @@ def contested(c: Call) -> Result:
         for ref in DRIVER.list_files(""):
             try:
                 props = DRIVER.props_of(ref.path)
-            except Exception:
+            except UNREADABLE:
                 continue  # attachments / unreadable frontmatter — not contested
             if props and props.get(CONTESTED_KEY):
                 contras = [str(x) for x in (props.get(CONTRADICTIONS_KEY) or [])]

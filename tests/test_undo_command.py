@@ -6,6 +6,7 @@ up "silica/Verdetto" and report nothing to undo. Note names with spaces are the
 common case in a vault, and the web GUI's per-note revert button sends exactly
 this string.
 """
+from silica.driver import NoteNotFound
 from tests.run_command import direct
 
 
@@ -53,6 +54,9 @@ def _run(monkeypatch, line):
     monkeypatch.setattr("silica.kernel.write.undo_journal.get_undo_journal", lambda: _Journal())
 
     class _Driver:
+        def read_note(self, ref):
+            raise NoteNotFound(ref)
+
         def overwrite(self, path, content, *, loss=None, free=()):
             written["path"] = path
 

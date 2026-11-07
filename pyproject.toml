@@ -251,6 +251,29 @@ ignore_imports = [
 # behind a lazy import; lazy imports count here, so none of them can come back.
 
 [[tool.importlinter.contracts]]
+name = "commands sit under the surfaces: a handler gives back a Result and imports no surface"
+type = "forbidden"
+source_modules = ["silica.commands"]
+forbidden_modules = ["silica.ui", "silica.cli"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "nothing under the commands reaches them: only a surface runs a line"
+type = "forbidden"
+source_modules = [
+  "silica.kernel",
+  "silica.agent",
+  "silica.router",
+  "silica.tools",
+  "silica.sources",
+  "silica.connectors",
+  "silica.session",
+  "silica.onboarding",
+]
+forbidden_modules = ["silica.commands"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
 name = "capabilities (procedural memory) does not import the decision cycle"
 type = "forbidden"
 source_modules = ["silica.capabilities"]
