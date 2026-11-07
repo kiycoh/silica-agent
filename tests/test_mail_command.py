@@ -7,7 +7,8 @@ import pytest
 
 from silica.cli import _handle_direct_shortcut
 from silica.sources import mail
-from silica.ui.commands import COMMANDS, command_names
+from silica.command_table import COMMANDS
+from silica.ui.commands import command_names
 from tests.mail_fixtures import ME, ME_FULL, PROF, msg, write_mbox
 
 

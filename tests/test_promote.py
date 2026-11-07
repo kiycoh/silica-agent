@@ -19,7 +19,7 @@ from silica.kernel.vault import Vault
 def test_promote_is_advertised_where_nucleate_is():
     """`/promote <key>` runs the whole injector: it does not belong under
     "Direct, immediate, no LLM" just because bare `/promote` only lists."""
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
 
     cmd = next((c for c in COMMANDS if c.name == "/promote"), None)
     assert cmd is not None and not cmd.repl_only

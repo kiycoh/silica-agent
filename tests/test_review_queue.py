@@ -77,13 +77,13 @@ def test_digest_omits_queue_line_when_empty(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_review_command_in_commands_list():
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
     names = {c.name for c in COMMANDS}
     assert "/review" in names
 
 
 def test_review_command_is_direct_group():
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
     cmd = next(c for c in COMMANDS if c.name == "/review")
     assert cmd.group == "direct"
 
@@ -93,7 +93,7 @@ def test_anneal_command_is_dispatchable():
     dispatch row it would answer "not available" in the GUI and fall through to
     the agent in the REPL."""
     from silica.cli import _DIRECT
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
 
     cmd = next(c for c in COMMANDS if c.name == "/anneal")
     assert cmd.group == "direct" and not cmd.repl_only

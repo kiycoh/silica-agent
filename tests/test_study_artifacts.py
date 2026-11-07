@@ -60,7 +60,7 @@ def test_slides_follow_the_points_or_read_the_notes(tmp_vault, monkeypatch):
 
 
 def test_both_are_listed_commands():
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
 
     names = {c.name for c in COMMANDS}
     assert {"/flashcards", "/slides"} <= names and "/flashcards" in cli._SHORTCUTS and "/slides" in cli._SHORTCUTS

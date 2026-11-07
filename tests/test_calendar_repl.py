@@ -8,7 +8,7 @@ from __future__ import annotations
 
 
 def test_agenda_command_registered_direct_and_repl_only():
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
 
     [cmd] = [c for c in COMMANDS if c.name == "/agenda"]
     assert cmd.group == "direct"

@@ -326,7 +326,7 @@ def test_the_switch_is_a_settings_row_that_persists(client, tmp_path, monkeypatc
 
 
 def test_the_commands_are_declared_for_both_surfaces():
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
 
     by_name = {c.name: c for c in COMMANDS}
     for name in ("/remember", "/memory", "/incognito"):

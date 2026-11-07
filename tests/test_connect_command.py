@@ -30,7 +30,7 @@ def _run(line, **kw) -> str:
 
 
 def test_the_command_is_registered_as_the_adr_writes_it():
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
 
     cmd = next(c for c in COMMANDS if c.name == "/connect")
     assert cmd.group == "direct"

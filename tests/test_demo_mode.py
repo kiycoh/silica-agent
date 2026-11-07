@@ -29,6 +29,7 @@ from silica.agent.constraints import (  # noqa: E402
 from silica.obs.events import ToolCompleteEvent  # noqa: E402
 from silica.agent.recall_watch import THIN_COVERAGE_HINT  # noqa: E402
 from silica.config import demo, served_views, withheld  # noqa: E402
+from silica.command_table import DEMO_OFF_SKILLS, demo_refused  # noqa: E402
 from silica.view_table import DEMO_OFF  # noqa: E402
 from tests.webassets import WEB  # noqa: E402
 
@@ -112,22 +113,21 @@ def test_a_tenant_and_a_laptop_refuse_none_of_it(monkeypatch):
     monkeypatch.delenv("SILICA_DEMO", raising=False)
     monkeypatch.setenv("SILICA_HOSTED", "1")
     monkeypatch.setenv("SILICA_VIEWS", "all")
-    for part in ("routes", "commands"):
-        assert not withheld(part) & set(DEMO_OFF[part])
+    assert not withheld("routes") & set(DEMO_OFF["routes"])
+    assert not withheld("commands") & demo_refused()
     monkeypatch.delenv("SILICA_HOSTED")
     assert not withheld("routes") and not withheld("commands")
 
 
 def test_every_name_the_demo_refuses_exists():
     """A misspelt route or command would be a refusal that refuses nothing."""
-    import silica.cli
     from silica.ui.commands import commands
     from silica.ui.web import server
 
     paths = set(_paths(server.app.routes))
     for r in DEMO_OFF["routes"]:
         assert any(p == r or p.startswith(r + "/") for p in paths), r
-    assert set(DEMO_OFF["commands"]) <= {c.name for c in commands()} | set(silica.cli._SHORTCUTS)
+    assert set(DEMO_OFF_SKILLS) <= {c.name for c in commands()}
 
 
 # --- the routes ---------------------------------------------------------------
@@ -235,7 +235,7 @@ def test_an_image_or_a_story_is_refused_before_anything_is_saved(sandbox):
 def test_the_picker_offers_no_command_the_demo_refuses(sandbox):
     tc, _, _ = sandbox
     names = {c["name"] for c in tc.get("/commands").json()}
-    assert not names & set(DEMO_OFF["commands"])
+    assert not names & demo_refused()
     assert {"/summarize", "/find", "/undo"} <= names
 
 

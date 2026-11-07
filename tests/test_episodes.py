@@ -21,7 +21,7 @@ _PLAIN = re.compile(r"\x1b\[[0-9;]*m")
 def test_episodes_is_advertised_as_a_direct_command():
     """Read-only render of a local store: no LLM, so it belongs with /contested
     and /keep, not with the verbs that spend a turn."""
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
 
     cmd = next((c for c in COMMANDS if c.name == "/episodes"), None)
     assert cmd is not None and not cmd.repl_only

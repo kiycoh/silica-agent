@@ -56,7 +56,7 @@ def test_learn_free_session_calls_the_engine_and_asks_one_item_at_a_time():
 def test_memorize_is_the_command_and_learn_still_runs_it():
     """ADR-0141 named the view Memorize: the help lists /memorize, and /learn,
     typed from habit, expands to the same directive."""
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
 
     names = {c.name for c in COMMANDS}
     assert "/memorize" in names and "/learn" not in names

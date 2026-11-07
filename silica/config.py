@@ -36,7 +36,7 @@ from dotenv import dotenv_values
 # load_dotenv can blur an exported pin into a .env value. Re-exported here
 # because this is where every caller expects to find it.
 from silica import SHELL_ENV, VAULT_PINNED  # noqa: E402,F401
-from silica import view_table
+from silica import command_table, view_table
 from silica.provider_table import HOSTED, PROVIDERS
 
 T = TypeVar("T")
@@ -379,8 +379,10 @@ def served_views() -> frozenset[str]:
 
 def withheld(part: str) -> frozenset[str]:
     """The routes, tools or commands of every view this process does not serve,
-    and in a demo what DEMO_OFF names."""
+    and in a demo what DEMO_OFF names (a command's row says both for itself)."""
     served = served_views()
+    if part == "commands":
+        return command_table.withheld(served, demo())
     gone = {x for tab, view in view_table.VIEWS.items() if tab not in served for x in getattr(view, part)}
     return frozenset(gone | set(view_table.DEMO_OFF.get(part, ()) if demo() else ()))
 

@@ -631,7 +631,7 @@ class TestT8Help:
         assert "/nucleate" in command_names()
 
     def test_help_lists_direct_commands(self):
-        from silica.ui.commands import COMMANDS
+        from silica.command_table import COMMANDS
         names = {c.name for c in COMMANDS}
         assert "/status" in names
         assert "/embed" in names

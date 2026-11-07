@@ -72,7 +72,7 @@ def _turn_kind(text: str) -> str:
     the journal."""
     if not text.startswith("/"):
         return "chat"
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
 
     word = command_word(text)
     return word[1:] if any(c.name == word for c in COMMANDS) else "slash"
@@ -177,7 +177,7 @@ def _figures(t: _ChatTurn) -> None:
 
 
 def _offer_next(t: _ChatTurn) -> None:
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
 
     session_turn.offer_next(t, [c.name.lstrip("/") for c in COMMANDS])
 

@@ -9,7 +9,8 @@ from unittest.mock import patch
 from prompt_toolkit.document import Document
 from rich.console import Console
 
-from silica.ui.commands import COMMANDS, render_help
+from silica.command_table import COMMANDS
+from silica.ui.commands import render_help
 from silica.ui.home import print_home
 from silica.ui.prompt import SlashCommandCompleter
 

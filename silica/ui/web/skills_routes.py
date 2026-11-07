@@ -50,7 +50,7 @@ def _inside(vault: Path, path: Path) -> Path:
 
 def _commands() -> set[str]:
     """The names a Python command answers: dispatch tries those before any skill."""
-    from silica.ui.commands import COMMANDS
+    from silica.command_table import COMMANDS
 
     return {c.name.lstrip("/") for c in COMMANDS}
 
