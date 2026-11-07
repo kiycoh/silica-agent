@@ -349,7 +349,7 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
     if isinstance(peek, dict):  # a refusal, already shaped as the reply
         return {"query": query, **peek}
     if (since or until) and (notes or peek):
-        # A peek's legs take no allow set (perception.py:308): the window would
+        # A peek's legs take no allow set (perception.facade_retrieve): the window would
         # be dropped there without a word (ADR-0148 point 5).
         return {"query": query, "error": "since/until narrow a search of this vault: named notes "
                 "are read whatever their date, and a peek takes no window",
@@ -857,7 +857,6 @@ def silica_vault_report(
     # Seed tasks from auto + propose (propose carries needs_confirmation flag)
     for candidate in plan.auto + plan.propose:
         task = run.progress.add_task(candidate.capability_name)
-        # Write payload to disk
         payload = dict(candidate.payload)
         payload["_reason"] = candidate.reason
         if candidate.tier == "propose":
@@ -866,7 +865,6 @@ def silica_vault_report(
         Path(payload_path).write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
         task.input_ref = payload_path
 
-    # Escalate items → IssueCards
     for i, candidate in enumerate(plan.escalate):
         card = IssueCard(
             task_id=f"issue_{i}",

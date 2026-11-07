@@ -75,10 +75,6 @@ def _run_autolink(sources: list[str]) -> dict[str, Any]:
 
 
 
-# ---------------------------------------------------------------------------
-# plan → WorkItems
-# ---------------------------------------------------------------------------
-
 def _orphan_workitems(plan: CurationPlan) -> list[WorkItem]:
     items: list[WorkItem] = []
     for it in plan.by_kind("orphan"):
@@ -200,10 +196,6 @@ def _execution_outcome_counts(
     return counts
 
 
-# ---------------------------------------------------------------------------
-# apply
-# ---------------------------------------------------------------------------
-
 def apply_curation_plan(
     plan: CurationPlan,
     *,
@@ -265,10 +257,6 @@ def apply_curation_plan(
         "batch": batch,
     }
 
-
-# ---------------------------------------------------------------------------
-# tool
-# ---------------------------------------------------------------------------
 
 @tool(cls="composed", ingress=False)
 def silica_curate(
