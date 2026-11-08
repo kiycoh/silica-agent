@@ -32,6 +32,8 @@ _MD_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
 # A wiki file has no address, so its notes link each other by slug alone, `<slug>.html` (a Private
 # build with no host writes `<slug>.md`): nothing before the slug, and `in names` checks the slug itself.
 _REL_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\(([^)\s/:]+)\.(?:html|md)\)")
+# Any other link with no scheme. Not `#...`, which points within the note and still works there.
+_ANY_REL_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\((?![A-Za-z][A-Za-z0-9+.-]*:|#)[^)\s]+\)")
 _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")
 # ADR-0157 Open 4: a wiki file may not pass 100 MB unpacked. Decimal megabytes, as Caddy reads the
 # edge's `max_size 100MB`, so the limit the file is built under is the one its upload meets.
@@ -256,9 +258,10 @@ def _vault_files(url: str) -> tuple[dict, dict]:
 
 
 def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None, files=None,
-                  private: bool = False, assets: Path | None = None) -> dict:
+                  private: bool = False, assets: Path | None = None, file: bool = False) -> dict:
     """What the save sheet shows for a vault, and every note it would write.
-    `files` is (manifest, notes) already read, as an invitation's are. A note
+    `files` is (manifest, notes) already read, as an invitation's are; `file`
+    says they came from a wiki file (ADR-0157 point 7). A note
     already saved from this vault stays as it is and is counted, not written:
     a reader saves a vault in pieces, and the notes of one vault share one
     folder (ADR-0151, amendment of 2026-11-06, point 10)."""
@@ -330,6 +333,10 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
             return words if private else m.group(0)
 
         new_body = _REL_LINK.sub(relink, _MD_LINK.sub(relink, body))
+        if file:
+            # ADR-0157 point 8: a file's other relative links keep their words, since nothing at
+            # their address is in the reader's vault. A relay's or a web save's stay as written.
+            new_body = _ANY_REL_LINK.sub(lambda m: m.group(1), new_body)
         tags = props.get("tags") if isinstance(props.get("tags"), list) else []
         # a note the author saved from someone else credits that someone (ADR-0143 point 10)
         author, src = _credit(props, handle, base + slug if base else "")
@@ -347,7 +354,7 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
 
 
 def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, files=None,
-               private: bool = False, assets: Path | None = None) -> dict:
+               private: bool = False, assets: Path | None = None, file: bool = False) -> dict:
     """Write the chosen notes as one run of the undo journal, so `/revert`
     takes the whole save back (ADR-0151 point 8). Refused past the room
     left, naming the shortfall, before anything is written."""
@@ -359,7 +366,7 @@ def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, f
     from silica.kernel.write.ops import InverseOp, InverseOpKind
     from silica.kernel.write.undo_journal import get_undo_journal
 
-    p = prepare_vault(url, areas, vault, named=named, files=files, private=private, assets=assets)
+    p = prepare_vault(url, areas, vault, named=named, files=files, private=private, assets=assets, file=file)
     if not p["files"]:
         raise ValueError("those notes are saved already" if p["already"] else "no note of that wiki was chosen")
     if p["room"]["short"]:
@@ -544,7 +551,8 @@ def _files(d: Path) -> tuple[dict, dict]:
 def prepare_invitation(author: str, slug: str, areas=None, vault: Path | None = None) -> dict:
     d = _invitation(author, slug)
     m, n = _files(d)
-    p = prepare_vault(m["url"], areas, vault, files=(m, n), private=True, assets=d / "assets")
+    p = prepare_vault(m["url"], areas, vault, files=(m, n), private=True, assets=d / "assets",
+                      file=_from_file(d))
     p.pop("files")
     return p
 
@@ -552,7 +560,8 @@ def prepare_invitation(author: str, slug: str, areas=None, vault: Path | None = 
 def save_invitation(author: str, slug: str, areas=None, vault: Path | None = None) -> dict:
     d = _invitation(author, slug)
     m, n = _files(d)
-    out = save_vault(m["url"], areas, vault, files=(m, n), private=True, assets=d / "assets")
+    out = save_vault(m["url"], areas, vault, files=(m, n), private=True, assets=d / "assets",
+                     file=_from_file(d))
     _done_with(d)
     return out
 

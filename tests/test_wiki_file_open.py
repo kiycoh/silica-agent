@@ -136,10 +136,38 @@ def test_only_a_files_own_relative_links_become_wikilinks(wiki_zip, homes):
     assert sorted(p.name for p in folder.glob("*.md")) == ["Forgetting curve.md", "Spacing effect.md"]
     spacing = (folder / "Spacing effect.md").read_text(encoding="utf-8")
     # A Private save writes a link it cannot serve as its words, as it did before; a relative path
-    # with a folder in it is no note of the file and is left as written.
-    assert ("Elsewhere: x, y, [z](sub/forgetting-curve.html), "
-            "[[Saved/@marta/Memoria/Forgetting curve|m]], b.") in spacing
+    # with a folder in it is no note of the file, and nothing at it is in the reader's vault.
+    assert "Elsewhere: x, y, z, [[Saved/@marta/Memoria/Forgetting curve|m]], b." in spacing
     assert not (homes / "home" / ".silica" / "invitations-done").exists()
+
+
+def test_a_files_other_relative_links_land_as_their_words(wiki_zip, homes):
+    """ADR-0157 point 8: any other relative link of a file keeps its words, since nothing at its
+    address is in the reader's vault. An image and a link within the note are not addresses."""
+    from silica.sources import saved_page
+
+    with zipfile.ZipFile(io.BytesIO(wiki_zip)) as z:
+        notes = json.loads(z.read("memory/notes.json"))
+    notes["forgetting-curve"] += ("\nRead [the paper](paper.pdf), [a page](sub/x.html) and [up](../x); "
+                                  "[below](#method), [mail](mailto:m@x.test), ![chart](assets/1-hypnogram.png).\n")
+    saved_page.open_file(_rezip(wiki_zip, change={"memory/notes.json": json.dumps(notes).encode()}))
+    r = saved_page.save_invitation("marta", "memory")
+    text = (homes / "vault" / r["folder"] / "Forgetting curve.md").read_text(encoding="utf-8")
+    assert ("Read the paper, a page and up; [below](#method), [mail](mailto:m@x.test), "
+            "![chart](assets/1-hypnogram.png).") in text
+
+
+def test_a_relay_save_keeps_its_relative_links_as_written(homes):
+    """Only a file's other relative links become words: a relay save and a web save are as they were."""
+    from silica.sources import saved_page
+
+    d = _relay(homes)
+    (d / "vault.json").write_text(json.dumps({"title": "Memoria", "unlinked": [["Relay", "spacing-effect"]]}))
+    (d / "notes.json").write_text(json.dumps(
+        {"spacing-effect": "---\ntitle: Relay\n---\nRead [the paper](paper.pdf) and [a page](sub/x.html).\n"}))
+    r = saved_page.save_invitation("marta", "memory")
+    text = (homes / "vault" / r["folder"] / "Relay.md").read_text(encoding="utf-8")
+    assert "Read [the paper](paper.pdf) and [a page](sub/x.html)." in text
 
 
 def test_pages_scripts_and_what_is_not_an_image_are_never_written(wiki_zip, homes):
