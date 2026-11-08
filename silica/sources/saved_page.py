@@ -609,11 +609,15 @@ def _part_too_big(name: str, cap: int) -> ValueError:
     return ValueError(f"that wiki file's {name} is past the {cap / 1e6:g} MB a wiki's may hold")
 
 
+_DAMAGED = "that wiki file could not be read: the zip is damaged"
+
+
 def _zip_read(said: str, fn, *args):
-    """fn(*args) on the zip, which is anyone's. zipfile, zlib, bz2, lzma and struct each raise
-    their own on a crafted archive (an OSError from bz2, an LZMAError), and the list grows with
-    Python: every one of them is a file that cannot be read, a 400 with `said` and not a 500. A
-    refusal of ours, a ValueError, passes as it was."""
+    """fn(*args), a read of the zip and nothing else: the zip is anyone's. zipfile, zlib, bz2,
+    lzma and struct each raise their own on a crafted archive (a bare OSError from bz2, an
+    LZMAError), and the list grows with Python: every one of them is a file that cannot be read,
+    a 400 with `said` and not a 500. A refusal of ours, a ValueError, passes as it was. Never
+    around a write: a full or unwritable disk is the reader's, and would read as a broken file."""
     try:
         return fn(*args)
     except ValueError:
@@ -623,11 +627,14 @@ def _zip_read(said: str, fn, *args):
 
 
 def _unpacked(z, keep: dict, into: Path) -> None:
-    """Each kept entry into `into`, counting what comes out: a zip's sizes are its own claim."""
+    """Each kept entry into `into`, counting what comes out: a zip's sizes are its own claim. The
+    reads go through _zip_read and the writes do not, so an OSError of the disk reaches the
+    route as the disk's."""
     held = 0
     for name, info in keep.items():
-        with z.open(info) as src, open(into / name, "wb") as out:
-            while chunk := src.read(1 << 20):
+        src = _zip_read(_DAMAGED, z.open, info)
+        with src, open(into / name, "wb") as out:
+            while chunk := _zip_read(_DAMAGED, src.read, 1 << 20):
                 held += len(chunk)
                 if held > WIKI_FILE_MAX:
                     raise _file_too_big()
@@ -717,7 +724,7 @@ def open_file(data: bytes) -> dict:
             raise _part_too_big("vault.json", _MANIFEST_MAX)
         if keep["notes.json"].file_size > _NOTES_JSON_MAX:
             raise _part_too_big("notes.json", _NOTES_JSON_MAX)
-        raw = _zip_read("that wiki file could not be read: the zip is damaged", z.read, keep["vault.json"])
+        raw = _zip_read(_DAMAGED, z.read, keep["vault.json"])
         if len(raw) > _MANIFEST_MAX:
             raise _part_too_big("vault.json", _MANIFEST_MAX)
         try:
@@ -758,7 +765,7 @@ def open_file(data: bytes) -> dict:
             # the manifest written is the one read, each field of its type, so every later list
             # reads a small file that cannot raise
             parts = {k: v for k, v in keep.items() if k != "vault.json"}
-            _zip_read("that wiki file could not be read: the zip is damaged", _unpacked, z, parts, tmp)
+            _unpacked(z, parts, tmp)
             if (tmp / "notes.json").stat().st_size > _NOTES_JSON_MAX:
                 raise _part_too_big("notes.json", _NOTES_JSON_MAX)
             try:

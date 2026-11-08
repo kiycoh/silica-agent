@@ -577,3 +577,26 @@ def test_a_folder_that_will_not_take_the_file_answers_400(tc, wiki_zip, homes):
     (homes / "file-invitations").write_text("a file where the folder should be")
     r = tc.post("/vault/invitations/file", content=wiki_zip)
     assert r.status_code == 400 and "could not be unpacked here" in r.json()["detail"]
+
+
+def test_a_full_disk_while_unpacking_is_said_as_the_disk_and_leaves_nothing(tc, wiki_zip, homes, monkeypatch):
+    """The reader's disk, not the sender's file: ENOSPC carries an errno, a corrupt bzip2 stream
+    raises a bare OSError, and only the zip's reads are taken for a damaged file."""
+    import builtins
+    import errno
+
+    from silica.sources import saved_page
+
+    root = homes / "file-invitations"
+
+    def full(path, mode="r", *a, **k):
+        if "w" in str(mode) and str(path).startswith(str(root)):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return builtins.open(path, mode, *a, **k)
+
+    monkeypatch.setattr(saved_page, "open", full, raising=False)
+    r = tc.post("/vault/invitations/file", content=wiki_zip)
+    assert r.status_code == 400
+    assert r.json()["detail"] == "the file could not be unpacked here (No space left on device)"
+    assert "damaged" not in r.json()["detail"]
+    assert list(root.iterdir()) == []  # no .open-* folder, no invitation
