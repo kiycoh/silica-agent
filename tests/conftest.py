@@ -524,16 +524,6 @@ def synthetic_vault() -> Path:
 
 
 @pytest.fixture
-def linked():
-    """This computer linked to a hosted account (ADR-0157 point 9), so it may turn a wiki Public or
-    build it: the file the gateway's answer writes, by the code that writes it, under the test's
-    own ~/.silica (_isolate_silica_home), for a host no request ever reaches."""
-    from silica.kernel import account_link
-
-    account_link._keep("t" * 43, "marta", "https://link.test")
-
-
-@pytest.fixture
 def tmp_vault(tmp_path, monkeypatch):
     """Provide a temporary filesystem-backed vault for unit tests.
 
