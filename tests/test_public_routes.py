@@ -717,7 +717,9 @@ def test_reveal_refuses_a_path_outside_downloads(client, monkeypatch):
     opened = []
     monkeypatch.setattr(public_routes, "_downloads", lambda: dl)
     monkeypatch.setattr(public_routes, "_open_folder", opened.append)
-    for path in (tmp / "elsewhere.zip", dl / ".." / "elsewhere.zip", dl / "out" / "elsewhere.zip", dl, "a.zip", ""):
+    # a path under a file names that file as its folder, and the opener would launch it
+    for path in (tmp / "elsewhere.zip", dl / ".." / "elsewhere.zip", dl / "out" / "elsewhere.zip", dl, "a.zip", "",
+                 dl / "a.zip" / "x", dl / "gone.zip"):
         assert tc.post("/public/reveal", json={"path": str(path)}).status_code == 400, path
     assert opened == []
     assert tc.post("/public/reveal", json={"path": str(dl / "a.zip")}, headers={"Origin": "https://evil.test"}).status_code == 403

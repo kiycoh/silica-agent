@@ -399,7 +399,9 @@ def public_reveal(payload: dict):
     raw = str(payload.get("path") or "")
     # both sides resolved, so neither `..` nor a link planted in Downloads leads out of it
     p = Path(raw).resolve() if raw and Path(raw).is_absolute() else None
-    if p is None or _downloads().resolve() not in p.parents:
+    # A file that exists, so its parent is a folder: `<Downloads>/x.desktop/y` resolves without
+    # complaint, and its parent is a file the opener would launch.
+    if p is None or not p.is_file() or _downloads().resolve() not in p.parents:
         raise HTTPException(400, "only a file in Downloads can be shown in its folder")
     try:
         _open_folder(p.parent)
