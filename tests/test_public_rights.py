@@ -19,7 +19,7 @@ ROSS = "Ross (Z-Library).pdf"
 
 
 @pytest.fixture
-def stats(tmp_vault, tmp_path, monkeypatch):
+def stats(tmp_vault, tmp_path, monkeypatch, linked):
     """A wiki of a book in two segments, lecture slides, hand notes and pasted images."""
     from silica.kernel.publish import add_vault, set_visibility
     from silica.kernel.vault_manifest import reset_manifest_cache

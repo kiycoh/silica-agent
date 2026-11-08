@@ -474,7 +474,7 @@ body.drawer-recall #public-bar {
   background: transparent;
 }
 
-#view-public[data-wtab="wikis"] :is(#public-body, #public-url, #public-count, .pg-ask),
+#view-public[data-wtab="wikis"] :is(#public-body, #public-url, #public-count, #link-line, .pg-ask),
 #view-public[data-wtab="mine"] :is(#wikis-body, #wikis-from) {
   display: none;
 }
@@ -737,6 +737,12 @@ body.drawer-recall #public-bar {
 
 .lst-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: var(--fs-ctl); color: var(--text); }
 .lst-row p { flex: 1 1 22rem; margin: 0; }
+/* ADR-0157 point 9: the code the person checks against the gateway's page, read across a room */
+.lk-code { font: 500 2rem var(--mono); letter-spacing: 0.14em; color: var(--frost); white-space: nowrap; }
+#link-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+#link-line b { color: var(--frost); font-weight: 500; }
+#link-line .pre-link { color: var(--accent); text-decoration-color: var(--accent); }
+.pp-res a { color: var(--frost); text-decoration-color: var(--accent); text-underline-offset: 3px; }
 .lst-say { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: var(--fs-ctl); line-height: 1.5; }
 .lst-say dt { color: var(--ash-dim); }
 .lst-say dd { margin: 0; color: var(--frost); }

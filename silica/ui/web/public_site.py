@@ -368,6 +368,11 @@ def build(slug: str, vault: Path | None = None) -> dict:
     relay when Private (ADR-0151 points 3, 9). Returns what went out, for
     the view's line after Publish."""
     vault = vault or publish._vault()
+    if not publish.can_publish():
+        # a computer alone saves files; linked, it sends notes and its account builds (ADR-0157 point 4)
+        from silica.kernel.account_link import NOT_LINKED
+
+        raise ValueError(NOT_LINKED)
     h = publish.handle(vault)
     if not publish.available(vault):
         raise ValueError("this account has no public address yet")

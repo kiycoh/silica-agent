@@ -25,8 +25,6 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from silica.ui.web.settings import _tilde
-
 logger = logging.getLogger(__name__)
 
 
@@ -88,11 +86,15 @@ def _folders(vault: Path, taken: list[str]) -> list[str]:
 def _view() -> dict:
     """Everything the view and the globes draw, from one walk of the vault."""
     from silica.config import hosted
-    from silica.kernel import publish
+    from silica.kernel import account_link, publish
+    from silica.sources.saved_page import catalog_host
     from silica.ui.web.public_site import last_published
 
     vault = publish._vault()
     turned = publish.enforce_tier(vault)
+    # Read once: an unlinked computer reads a Public or Private row as Off (ADR-0157, Consequences),
+    # here and never in vaults(), whose rows a title edit writes back as they were read.
+    can = publish.can_publish()
     h = publish.handle(vault)
     sel = publish.selection(vault)
     notes, fms, of = sel["notes"], sel["frontmatter"], sel["vault_of"]
@@ -103,12 +105,14 @@ def _view() -> dict:
     reviews = publish.host_reviews()
     vaults = []
     for v in sel["vaults"]:
+        vis = v["visibility"] if can else "off"
         mine = [p for p in out_paths if of.get(p) == v["slug"]]
         before = set(last.get(v["slug"], {}).get("notes", []))
         top = sorted(mine, key=lambda p: (-deg.get(p, 0), _title(p, fms.get(p) or {}).lower()))[:_GOES_OUT]
         vaults.append({
-            **{k: v[k] for k in ("slug", "folder", "title", "line", "license", "visibility", "listed",
-                                 "readers", "published", "downgraded")},
+            **{k: v[k] for k in ("slug", "folder", "title", "line", "license", "listed", "readers",
+                                 "published", "downgraded")},
+            "visibility": vis,
             "url": f"{page_url}/{v['slug']}/" if page_url else "",
             "out": len(mine),
             "top": [_title(p, fms.get(p) or {}) for p in top],
@@ -116,7 +120,7 @@ def _view() -> dict:
             "new": sum(1 for p in mine if before and p not in before),
             "published_at": last.get(v["slug"], {}).get("published_at", ""),
             "review": reviews.get(v["slug"], {}),
-            "blocked": last.get(v["slug"], {}).get("blocked", []) if v["visibility"] == "public" else [],
+            "blocked": last.get(v["slug"], {}).get("blocked", []) if vis == "public" else [],
             # "kept by your computer": the link id itself is the gateway's business, not the page's
             "computer": bool(v["from_link"]),
         })
@@ -127,10 +131,11 @@ def _view() -> dict:
         "base": os.environ.get("SILICA_PUBLIC_BASE", "").strip().rstrip("/"),
         "url": page_url,
         "hosted": hosted(),
-        # where the files are, on a laptop: the person serves them; a hosted
-        # path names the server's disk and says nothing to the account. The home
-        # folder reads as ~, as the bug report prints it: the line is read, not typed.
-        "dir": _tilde(str(publish.site_root(h) / "live")) if h and not hosted() else "",
+        # ADR-0157 point 4: a computer publishes through the account it is linked to, or not at
+        # all; the hosted service is the account, and has no link of its own
+        "can_publish": can,
+        "link": None if hosted() else account_link.state(),
+        "wikis_host": catalog_host(),
         "private": publish.private_allowed(),
         "max": publish.max_vaults(),
         "plan": publish.paid_plan(),
@@ -284,8 +289,11 @@ def public_note(payload: dict):
 @router.post("/public/publish", dependencies=_SAME_ORIGIN)
 async def public_publish(payload: dict | None = None):
     """Write one vault and put it out; the button reads "Turn on and
-    publish" while the vault is Off, so it turns the vault Public first."""
-    from silica.kernel import publish
+    publish" while the vault is Off, so it turns the vault Public first.
+    A computer sends the notes to the account it is linked to, which builds
+    the pages: no page a computer writes is ever served (ADR-0157 point 10)."""
+    from silica.config import hosted
+    from silica.kernel import account_link, publish
     from silica.ui.web.public_site import build
 
     slug = str((payload or {}).get("vault") or "")
@@ -294,10 +302,79 @@ async def public_publish(payload: dict | None = None):
     try:
         if publish.find(slug)["visibility"] == "off":
             publish.set_visibility(slug, "public")
-        out = await asyncio.to_thread(build, slug)
+        out = await asyncio.to_thread(build if hosted() else account_link.send, slug)
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {**_view(), "result": out}
+
+
+# --- this computer's link to a hosted account (ADR-0157 point 9) ------------------
+# The app's own routes, which its page calls; the gateway refuses a fetch from a page on
+# localhost, so this server calls it. Bare GET /link is the graph's (server.py).
+
+# The poll id of the code on the screen. Kept here and never given to the page: whoever holds it
+# collects the token once a code is confirmed, so a poll id of someone else's choosing, sent to
+# this server, would link this computer to their account and publish the person's wikis there.
+_POLL: dict[str, str] = {}
+
+
+def _computer() -> None:
+    from silica.config import hosted
+
+    if hosted():
+        # the hosted service is the account itself, and the gateway answers its /link/* paths
+        raise HTTPException(404)
+
+
+@router.get("/link/state")
+def link_state():
+    from silica.kernel import account_link
+
+    _computer()
+    return account_link.state()
+
+
+@router.post("/link/start", dependencies=_SAME_ORIGIN)
+async def link_start():
+    from silica.kernel import account_link
+
+    _computer()
+    try:
+        out = await asyncio.to_thread(account_link.start)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    _POLL["poll"] = out.pop("poll")
+    return out
+
+
+@router.post("/link/poll", dependencies=_SAME_ORIGIN)
+async def link_poll():
+    from silica.kernel import account_link
+
+    _computer()
+    poll = _POLL.get("poll")
+    if not poll:
+        return {"state": "gone"}
+    try:
+        out = await asyncio.to_thread(account_link.poll, poll)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except OSError as exc:
+        # the gateway handed the token out once and it could not be kept: only a new code helps
+        _POLL.pop("poll", None)
+        raise HTTPException(400, f"This computer could not keep the link ({exc.strerror or 'disk'}). Link again.")
+    if out["state"] != "pending":
+        _POLL.pop("poll", None)
+    return out
+
+
+@router.post("/link/unlink", dependencies=_SAME_ORIGIN)
+def link_unlink():
+    from silica.kernel import account_link
+
+    _computer()
+    account_link.unlink()
+    return account_link.state()
 
 
 # --- a linked computer's Publish (ADR-0157 points 10 and 11) ----------------------

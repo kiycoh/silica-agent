@@ -734,6 +734,7 @@ function renderPublic(fresh) {
   const count = $("#public-count");
   const st = pubState;
   pubAsk(st);
+  paintLinkLine(st);
   if (st && st.ask_handle && st.ask_handle.ask && !st.available) {
     link.hidden = true;
     count.textContent = "";
@@ -759,6 +760,8 @@ function renderPublic(fresh) {
   if (v) pubCur = v.slug;
   // while the handle is asked, Shared with you is drawn over the question and not twice
   const asked = !!(st.ask_handle && st.ask_handle.ask);
+  // a computer with no account linked: it saves files and publishes nothing (ADR-0157 point 4)
+  const alone = !!st.link && !st.can_publish;
   if (pubCheck && (!v || pubCheck.slug !== v.slug)) pubCheck = null;
   if (pubCheck) {
     paintCheck();
@@ -832,9 +835,12 @@ function renderPublic(fresh) {
   if (v.visibility === "off") {
     status.textContent = v.downgraded
       ? "Off since this account became Free: a Private wiki goes Off. Its readers keep the copies they saved."
-      : st.hosted || st.url
-        ? "Off: this wiki's address says there is nothing there, and your public page does not show it. Its notes keep their globes for when you turn it on."
-        : `Off. Publish writes it${st.dir ? ` into ${st.dir}` : ""}, as files any static host can serve; a wiki on this computer is not listed in Wikis.`;
+      : alone
+        ? "Off. Link an account to publish, or save it as a file."
+        : st.hosted || st.url
+          ? "Off: this wiki's address says there is nothing there, and your public page does not show it. Its notes keep their globes for when you turn it on."
+          // Off here sends nothing, and no route takes a wiki down from a computer: the account does
+          : "Off. Publish sends its notes to your account. A copy published before stays there until you turn it Off in your account.";
   }
 
   // the head of the vault in hand: its title and line, edited in place
@@ -854,7 +860,7 @@ function renderPublic(fresh) {
   const ctl = mkEl("div", "pg-ctl");
   const lock = st.private === "ok" ? null : mkEl("span", "pg-lock");
   if (lock) lock.innerHTML = pubSvg(12, false, true);
-  ctl.append(pgSeg("Who can read this wiki", [["off", "Off"], ["public", "Public"], ["private", "Private", lock]], v.visibility, (x) => {
+  if (!alone) ctl.append(pgSeg("Who can read this wiki", [["off", "Off"], ["public", "Public"], ["private", "Private", lock]], v.visibility, (x) => {
     if (x === v.visibility) return;
     if (x === "private" && upgradeOn()) { upgradeOpen("Private wikis come with a paid account", "A Private wiki is read only by the accounts you name."); return; }
     if (x === "private" && st.private !== "ok") { status.hidden = false; status.replaceChildren(...upsellText(st.private)); return; }
@@ -868,7 +874,7 @@ function renderPublic(fresh) {
   line.addEventListener("change", () => save("line", line));
   line.addEventListener("keydown", (e) => { if (e.key === "Enter") line.blur(); });
   const meta = mkEl("p", "pg-meta");
-  meta.append(mkEl("span", "", "@" + st.handle), mkEl("span", "pg-path", v.folder + "/"), mkEl("span", "", pubCount(v.out)));
+  meta.append(mkEl("span", "", "@" + pubHandle()), mkEl("span", "pg-path", v.folder + "/"), mkEl("span", "", pubCount(v.out)));
   // ADR-0157 point 10: the computer's next Publish replaces this folder, an edit made here with it
   if (v.computer) meta.append(Object.assign(mkEl("span", "", "kept by your computer"), { title: "Publish on your computer replaces this folder, edits made here included." }));
   const areaN = pubCover && pubCoverOf === v.slug && pubCover.areas ? pubCover.areas.length : null;
@@ -888,7 +894,7 @@ function renderPublic(fresh) {
   frag.append(cover, status);
 
   const grid = mkEl("div", "pp-grid");
-  const goes = ppBox(v.visibility === "off" ? "Would go out" : "Goes out", `${pubCount(v.out)} · ${v.folder}/`, { wide: true });
+  const goes = ppBox(alone ? "In the file" : v.visibility === "off" ? "Would go out" : "Goes out", `${pubCount(v.out)} · ${v.folder}/`, { wide: true });
   const chips = mkEl("ul", "pg-chips");
   for (const t of v.top) chips.append(mkEl("li", "", t));
   if (!v.out) chips.append(mkEl("li", "more", "Nothing yet: this folder has no note that can go out."));
@@ -902,21 +908,28 @@ function renderPublic(fresh) {
   grid.append(goes);
   if (v.visibility === "public" && st.url) grid.append(listingBox(v));
   if (v.visibility === "private") grid.append(readersBox(v));
-  if (!asked) grid.append(invitesBox());
+  if (alone) grid.append(linkBox());
+  // alone, the draft puts Shared with you under the one action this computer has
+  if (!asked && !alone) grid.append(invitesBox());
   frag.append(grid);
 
   const row = mkEl("div", "pp-actions");
-  const go = mkEl("button", "pp-go", v.visibility === "off" ? `Turn on and publish ${pubCount(v.out)}` : `Publish ${pubCount(v.out)}`);
-  go.type = "button";
-  go.disabled = !v.out;
-  go.addEventListener("click", () => startPublish(v, go));
-  const file = mkEl("button", "st-btn", "Save as a file");
+  const file = mkEl("button", alone ? "pp-go" : "st-btn", "Save as a file");
   file.type = "button";
   file.disabled = !v.out;
   file.addEventListener("click", () => startPublish(v, file, true));
-  row.append(go, file, mkEl("span", "pp-dim", inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
-    ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
-    : "Readers see the wiki as it is when you publish; a note written later in its folder goes out the next time."));
+  if (alone) row.append(file, mkEl("span", "pp-dim", FILE_LINE));
+  else {
+    const go = mkEl("button", "pp-go", v.visibility === "off" ? `Turn on and publish ${pubCount(v.out)}` : `Publish ${pubCount(v.out)}`);
+    go.type = "button";
+    go.disabled = !v.out;
+    go.addEventListener("click", () => startPublish(v, go));
+    row.append(go, file, mkEl("span", "pp-dim", inWikis(v) ? LEAVES_WIKIS : v.visibility === "private"
+      ? "Your readers get the wiki as it is when you publish, as an invitation to save it."
+      : st.link
+        ? `Publish sends the notes to your account, which builds the pages and publishes them at ${st.wikis_host}/@${pubHandle()}/${v.slug}/. Nothing else leaves this computer.`
+        : "Readers see the wiki as it is when you publish; a note written later in its folder goes out the next time."));
+  }
   if (v.visibility === "off") {
     const rm = mkEl("button", "st-btn", "Remove from My wikis");
     rm.type = "button";
@@ -924,11 +937,23 @@ function renderPublic(fresh) {
     rm.addEventListener("click", async () => { const r = await pubPost(`/public/vault/${encodeURIComponent(v.slug)}/remove`); if (r) { pubCur = ""; renderPublic(true); } });
     row.append(rm);
   }
-  frag.append(row, mkEl("p", "pp-dim", FILE_LINE));
+  frag.append(row);
+  if (!alone) frag.append(mkEl("p", "pp-dim", FILE_LINE));
   if (pubFile && pubFile.vault === v.slug) frag.append(fileSavedLine(pubFile));
   if (pubResult && pubResult.vault === v.slug) {
     const r = pubResult;
-    frag.append(mkEl("p", "pp-dim", `Last publish: ${pubCount(r.notes)}, ${r.links} ${r.links === 1 ? "link" : "links"}, ${r.images} ${r.images === 1 ? "image" : "images"}.`));
+    if (r.sent) {
+      // a computer's Publish: its account built the pages, and only the account knows the address
+      const p = mkEl("p", "pp-dim pp-res", `Last publish: ${pubCount(r.notes)}, sent to your account`);
+      if (r.url) p.append(", at ", Object.assign(document.createElement("a"), { href: r.url, target: "_blank", rel: "noopener", textContent: r.url.replace(/^https:\/\//, "") }));
+      p.append(".");
+      frag.append(p);
+    } else frag.append(mkEl("p", "pp-dim", `Last publish: ${pubCount(r.notes)}, ${r.links} ${r.links === 1 ? "link" : "links"}, ${r.images} ${r.images === 1 ? "image" : "images"}.`));
+  }
+  if (alone && !asked) {
+    const below = mkEl("div", "pp-grid");
+    below.append(invitesBox());
+    frag.append(below);
   }
   body.replaceChildren(frag);
   if (keep && keep.slug === v.slug) {
@@ -937,6 +962,108 @@ function renderPublic(fresh) {
   }
   if (fresh || pubCoverOf !== v.slug || (pubCover && pubCover.n.length + (pubCover.unlinked || 0) !== v.out)) loadPubCover(v.slug, !!fresh);
   else drawPubCover();
+}
+
+// --- this computer's link to an account (ADR-0157 point 9) ------------------------------
+// Unlinked, a computer saves wikis as files; linked, Publish sends the notes to the account. The
+// app's server talks to the gateway and keeps the poll and the token: the page sees the code.
+let pubLinking = null;  // { code, url, until }: a code waiting for the person on the host
+let pubLinkTimer = 0;
+const LINK_POLL_MS = 2000;
+const linkHost = (h) => (h || "").replace(/^https?:\/\//, "");
+// the account's handle once linked: the wiki is published under it, whatever this vault calls itself
+const pubHandle = () => (pubState.link && pubState.link.handle) || pubState.handle;
+
+function paintLinkLine(st) {
+  const el = $("#link-line");
+  const lk = st && st.link;
+  el.hidden = !lk;
+  if (!lk) return;
+  if (lk.linked) {
+    const since = new Date(lk.since).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    el.replaceChildren("Linked to your account on ", mkEl("b", "", linkHost(lk.host)), ` since ${since} · `, preLink("Unlink", "unlink", linkUnlink));
+  } else el.replaceChildren("This computer is not linked to an account · ", preLink("Link an account", "link", linkStart));
+}
+
+function linkBox() {
+  if (pubLinking) {
+    const box = ppBox("Link an account", "waiting for you", { wide: true });
+    const row = mkEl("div", "lst-row");
+    const open = Object.assign(document.createElement("a"), { className: "st-btn", href: pubLinking.url, target: "_blank", rel: "noopener", textContent: "Open the page ↗" });
+    const no = mkEl("button", "st-btn", "Cancel");
+    no.type = "button";
+    no.addEventListener("click", () => linkStop());
+    row.append(mkEl("span", "lk-code", pubLinking.code),
+      mkEl("p", "", `The page that opened in your browser, ${linkHost(pubState.link.host)}/link/confirm, shows this code. Sign in there if it asks, check that the code is the same, and press Link. The code lasts ten minutes.`),
+      open, no);
+    box.append(row);
+    return box;
+  }
+  const box = ppBox("Publish to Wikis", "needs a Silica account", { wide: true });
+  const go = mkEl("button", "st-btn", "Link an account");
+  go.type = "button";
+  go.addEventListener("click", linkStart);
+  const row = mkEl("div", "lst-row");
+  row.append(mkEl("p", "", `Publishing goes through your account on Silica hosted: this Silica sends the wiki's notes, your account builds the pages and publishes them at ${pubState.wikis_host}/@handle/. Until then, save the wiki as a file.`), go);
+  box.append(row);
+  return box;
+}
+
+async function linkStart() {
+  if (pubLinking) return;
+  let r, d;
+  try {
+    r = await fetch("/link/start", { method: "POST" });
+    d = await r.json().catch(() => ({}));
+  } catch {
+    notify("My wikis could not be reached");
+    return;
+  }
+  if (!r.ok) {
+    notify(d.detail || "The link could not start");
+    return;
+  }
+  pubLinking = { code: d.code, url: d.url, until: Date.now() + d.expires_in * 1000 };
+  // still inside the click's few seconds, so the browser lets the tab open; the box offers it too
+  window.open(d.url, "_blank", "noopener");
+  if (activeTab === "public") renderPublic();
+  linkWait();
+}
+
+function linkStop(said) {
+  clearTimeout(pubLinkTimer);
+  pubLinking = null;
+  if (said) notify(said);
+  if (activeTab === "public") renderPublic();
+}
+
+// Every 2 s until the person confirms, the code is gone, or its ten minutes end. A poll that fails
+// is asked again: the gateway keeps the code, and the token waits for the poll that collects it.
+function linkWait() {
+  clearTimeout(pubLinkTimer);
+  if (!pubLinking) return;
+  if (Date.now() > pubLinking.until) return linkStop("The code ran out. Link an account again for a new one.");
+  pubLinkTimer = setTimeout(async () => {
+    let d = null;
+    try {
+      const r = await fetch("/link/poll", { method: "POST" });
+      d = r.ok ? await r.json() : null;
+    } catch {
+      d = null;
+    }
+    if (!pubLinking) return;  // cancelled while it was asked
+    if (d && d.state === "linked") {
+      clearTimeout(pubLinkTimer);
+      pubLinking = null;
+      notify(`Linked to your account on ${linkHost(d.host)}`, "info");
+      await loadPublicState();
+    } else if (d && d.state === "gone") linkStop("The code is gone. Link an account again for a new one.");
+    else linkWait();
+  }, LINK_POLL_MS);
+}
+
+async function linkUnlink() {
+  if (await pubPost("/link/unlink")) await loadPublicState();
 }
 
 // --- Save as a file (ADR-0157 point 5) ---------------------------------------------
@@ -1040,6 +1167,8 @@ const preOpen = (o) => !o.answer || (o.answer === "open" && !o.free && o.license
 async function publishNow(v) {
   const r = await pubPost("/public/publish", { vault: v.slug });
   if (r) pubCheck = null;
+  // an account that no longer knows this computer unlinks it: the view says so at once
+  else if (pubState && pubState.link) await loadPublicState();
   if (r && r.result) {
     pubResult = r.result;
     notify(`Published ${pubCount(r.result.notes)}${r.result.private ? ` for ${v.readers.length} ${v.readers.length === 1 ? "reader" : "readers"}` : ""}`, "info");

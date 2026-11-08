@@ -325,7 +325,9 @@ def private_allowed() -> str:
     from silica.config import hosted
 
     if not hosted():
-        return "hosted"
+        # A linked computer's account decides, and its receive refuses a Private that its tier
+        # does not list: the gateway never tells a computer the tier (ADR-0157 point 9)
+        return "ok" if can_publish() else "hosted"
     names = {v.strip() for v in os.environ.get("SILICA_VIEWS", "").split(",")}
     return "ok" if names & {"all", "private"} else "paid"
 
@@ -436,7 +438,9 @@ def remove_vault(slug: str, vault: Path | None = None) -> None:
     v = next((x for x in items if x["slug"] == slug), None)
     if v is None:
         raise ValueError(f"no wiki {slug!r} on this page")
-    if v["visibility"] != "off":
+    # an unlinked computer reads a Public row as Off and offers no way to turn it Off (ADR-0157
+    # point 4); its served folder is left where it is, as below
+    if v["visibility"] != "off" and can_publish():
         raise ValueError("turn the wiki Off before removing it")
     root = site_root(handle(vault))
     shutil.rmtree(root / "paused" / slug, ignore_errors=True)
@@ -578,6 +582,15 @@ def write_prop(path: str, key: str, value: bool | None) -> None:
         logger.warning("checkpoint push failed for '%s': %s; /undo has no restore point for it", path, exc)
 
 
+def can_publish() -> bool:
+    """Whether this Silica can put a wiki out (ADR-0157 point 4): the hosted service always, a
+    computer only through the hosted account it is linked to. Alone, it saves wikis as files."""
+    from silica.config import hosted
+    from silica.kernel import account_link
+
+    return hosted() or account_link.state()["linked"]
+
+
 # --- where the files go -------------------------------------------------------
 
 def site_root(h: str | None = None) -> Path:
@@ -598,6 +611,11 @@ def set_visibility(slug: str, vis: str, vault: Path | None = None) -> dict:
     vault = vault or _vault()
     if vis not in VISIBILITY:
         raise ValueError("a wiki is off, public or private")
+    # before Private's own refusal, which would send an unlinked computer to the hosted service
+    if vis != "off" and not can_publish():
+        from silica.kernel.account_link import NOT_LINKED
+
+        raise ValueError(NOT_LINKED)
     if vis == "private" and private_allowed() != "ok":
         raise ValueError("Private needs a paid account on Silica hosted"
                          if private_allowed() == "paid" else "Private works between accounts on Silica hosted")

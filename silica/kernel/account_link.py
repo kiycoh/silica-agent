@@ -1,0 +1,396 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Alessandro Carosia
+
+"""A Silica on a computer linked to a hosted account (ADR-0157 points 4, 9, 10 and 11): the code
+the person confirms on the gateway, the token that comes back, and the one thing it does, send a
+wiki's notes to the account, which builds the pages and publishes them. Unlinked, a computer only
+saves wikis as files.
+
+Named account_link and not link: silica.kernel.link is the wikilink package.
+
+The token publishes in the person's name for 90 days, so it lives in one file, 0600, and goes to
+the host that issued it alone: it is in no log line, no exception, no answer to the page and not
+in `state()`. Every call to the gateway is the app server's, never the browser's: the gateway
+refuses a fetch from a page on localhost (silica-hosted bin/gateway, `same_origin`)."""
+from __future__ import annotations
+
+import datetime
+import json
+import logging
+import os
+import re
+import tempfile
+import zipfile
+from pathlib import Path
+from urllib.parse import quote, unquote, urlsplit
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_HOST = "https://app.silica-agent.dev"
+# the link's life, the owner's (ADR-0157 Open 1), as the gateway's LINK_LIFE
+LIFE = datetime.timedelta(days=90)
+NOT_LINKED = "Link a Silica account to publish."
+# The gateway hands out token_urlsafe(32), 43 characters. The bound keeps a hand-written file from
+# putting into a header what no proxy carries; the alphabet keeps a newline out of it.
+_TOKEN = re.compile(r"[A-Za-z0-9_-]{20,200}")
+_CODE = re.compile(r"[A-Z0-9]{3}-[A-Z0-9]{3}")
+# The images the receiver takes (saved_page._ASSET): no svg, which can carry a script, no bmp.
+_SENT_IMAGES = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+
+def _origin(raw: str) -> str:
+    """`raw` as scheme://host[:port], "" for an address a token must not travel to: https alone,
+    since the token rides in a header, but for this machine's own, where a test's gateway listens."""
+    try:
+        u = urlsplit(raw.strip().rstrip("/"))
+        _ = u.port  # raises on a port out of range
+    except ValueError:
+        return ""
+    here = u.scheme == "http" and u.hostname in ("127.0.0.1", "localhost")
+    if not (u.scheme == "https" or here) or not u.hostname or u.username is not None \
+            or u.path or u.query or u.fragment:
+        return ""
+    return f"{u.scheme}://{u.netloc.lower()}"
+
+
+def host() -> str:
+    """The gateway a new link goes to; "" when SILICA_LINK_HOST names one it must not."""
+    return _origin(os.environ.get("SILICA_LINK_HOST", "").strip() or DEFAULT_HOST)
+
+
+def _path() -> Path:
+    # read per call: a tenant's and the tests' _SILICA_HOME move, and a path bound at import would not
+    from silica.kernel.recall import paths
+
+    return paths._SILICA_HOME / "link.json"
+
+
+def _now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+
+
+def _keep(token: str, handle: str, at: str) -> None:
+    """Write the link as the gateway gave it. Through a 0600 temporary file and a rename, so the
+    token is never readable by another account, nor half written."""
+    from silica.kernel.recall.paths import atomic_write_bytes
+
+    now = _now()
+    row = {"token": token, "handle": handle, "host": at, "linked_at": now.isoformat(),
+           "expires": (now + LIFE).isoformat()}
+    atomic_write_bytes(_path(), json.dumps(row).encode("utf-8"), mode=0o600)
+
+
+def _read() -> dict | None:
+    """The link the file holds, None when there is none to use: no file, one that does not parse
+    or has another shape, one for a host a token must not go to, or one past its 90 days."""
+    from silica.kernel.publish import _HANDLE
+
+    try:
+        raw = json.loads(_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        # no file is no link, and a file that does not parse is one no Publish can trust
+        return None
+    if not isinstance(raw, dict):
+        return None
+    token, at, handle = raw.get("token"), raw.get("host"), raw.get("handle")
+    if not (isinstance(token, str) and _TOKEN.fullmatch(token) and isinstance(at, str) and at
+            and _origin(at) == at):
+        return None
+    try:
+        since = datetime.datetime.fromisoformat(raw["linked_at"])
+        expires = datetime.datetime.fromisoformat(raw["expires"])
+        if expires <= _now():
+            return None
+    except (KeyError, TypeError, ValueError):
+        # a date missing, not one, or without its zone, which cannot be compared with now
+        return None
+    return {"token": token, "host": at, "handle": handle if isinstance(handle, str) and _HANDLE.fullmatch(handle)
+            else "", "since": since.isoformat(), "expires": expires.isoformat()}
+
+
+def state() -> dict:
+    """{"linked", "host", "handle", "since", "expires"}, what the view shows; never the token."""
+    got = _read()
+    if got is None:
+        return {"linked": False, "host": host(), "handle": "", "since": "", "expires": ""}
+    return {"linked": True, **{k: got[k] for k in ("host", "handle", "since", "expires")}}
+
+
+def unlink() -> None:
+    """Forget the link on this computer. The account's Settings remove it on the host's side."""
+    _path().unlink(missing_ok=True)
+
+
+def _named(at: str) -> str:
+    return urlsplit(at).netloc or "Silica hosted"
+
+
+def _post(url: str, at: str, **kw):
+    import httpx
+
+    try:
+        # no redirect: one would take the Authorization header somewhere this code never chose
+        return httpx.post(url, follow_redirects=False, **kw)
+    except httpx.HTTPError as exc:
+        # Its words name the address at most, and still never reach the page or the log: the class
+        # is enough to tell a refused connection from a timeout. `from None`, so no traceback a
+        # route prints carries the request the exception holds.
+        logger.warning("account link: %s not reached (%s)", url.split("?", 1)[0], type(exc).__name__)
+        raise ValueError(f"{_named(at)} could not be reached. Check the connection and try again.") from None
+
+
+def _body(r) -> dict:
+    try:
+        out = r.json()
+    except ValueError:
+        return {}
+    return out if isinstance(out, dict) else {}
+
+
+def _gateway() -> str:
+    at = host()
+    if not at:
+        raise ValueError("SILICA_LINK_HOST is not an https address, so this Silica cannot link to it.")
+    return at
+
+
+def start() -> dict:
+    """A code for the person to confirm: {"code", "poll", "expires_in", "url"}, `url` being the
+    page of the gateway that shows it (ADR-0157 point 9, at /link/confirm since Task 9's review).
+    Whoever holds `poll` collects the token once the code is confirmed: the caller keeps it."""
+    at = _gateway()
+    r = _post(f"{at}/link/start", at, json={}, timeout=15)
+    if r.status_code == 429:
+        wait = r.headers.get("retry-after", "")
+        when = f"in {max(1, -(-int(wait) // 60))} minutes" if wait.isdigit() else "later"
+        raise ValueError(f"Too many link codes from this network. Try again {when}.")
+    got = _body(r)
+    code, poll, ttl = got.get("code"), got.get("poll"), got.get("expires_in")
+    if r.status_code != 200 or not (isinstance(code, str) and _CODE.fullmatch(code) and isinstance(poll, str)
+                                    and poll and type(ttl) is int and ttl > 0):
+        raise ValueError(f"{_named(at)} gave no link code (it answered {r.status_code}). Try again in a minute.")
+    return {"code": code, "poll": poll, "expires_in": ttl, "url": f"{at}/link/confirm?code={quote(code)}"}
+
+
+def poll(poll: str) -> dict:
+    """{"state": "pending"} or {"state": "gone"}; once the code is confirmed, the link kept and
+    {"state": "linked", **state()}. The gateway hands the token out once, here, and it goes
+    straight to the file: what this returns never holds it."""
+    from silica.kernel.publish import _HANDLE
+
+    at = _gateway()
+    r = _post(f"{at}/link/poll", at, json={"poll": poll}, timeout=15)
+    got = _body(r)
+    said = got.get("state")
+    if r.status_code != 200 or said not in ("pending", "linked", "gone"):
+        raise ValueError(f"{_named(at)} did not say whether the code was confirmed "
+                         f"(it answered {r.status_code}). Try again in a minute.")
+    if said != "linked":
+        return {"state": said}
+    token, handle = got.get("token"), got.get("handle")
+    if not (isinstance(token, str) and _TOKEN.fullmatch(token)):
+        raise ValueError(f"{_named(at)} answered with a link this Silica cannot keep. Link again.")
+    handle = handle if isinstance(handle, str) and _HANDLE.fullmatch(handle) else ""
+    _keep(token, handle, at)
+    logger.info("account link: this computer is linked to @%s on %s", handle or "?", at)
+    return {"state": "linked", **state()}
+
+
+# --- a Publish from the computer (ADR-0157 points 10 and 11) -------------------------------------
+
+def _answer(files: list[str], said: dict) -> dict:
+    """The author's answer for a note's sources, as the receiver keys it, {} for a note made from
+    none. An open answer first, whose license and credit the page must print.
+    shortcut: a note made from two files sends one answer, since the receiver keeps one a note
+    (Task 10); a list per note there first, before a second license can travel."""
+    from silica.kernel import rights
+
+    rows = [said.get(f) if isinstance(said.get(f), dict) else {} for f in sorted(files)]
+    a = next((r for r in rows if r.get("answer") == "open"), None) \
+        or next((r for r in rows if r.get("answer") in rights.ANSWERS), None)
+    if a is None:
+        return {}
+    lic = a.get("license") if a.get("license") in rights.LICENSES else ""
+    credit = a.get("credit").strip()[:rights._CREDIT_MAX] if isinstance(a.get("credit"), str) else ""
+    return {k: v for k, v in (("answer", a["answer"]), ("license", lic), ("credit", credit)) if v}
+
+
+def _pointed(text: str, names: dict[str, str], credits: dict[str, str], folder: str) -> str:
+    """The note with each image the check let out pointing at its copy under `<folder>/assets/`,
+    as the account's vault will hold it, with the credit its answer asks for; every other embed as
+    written. The three shapes rights.place_images reads, in its order; its shortcut on code fences
+    holds here too."""
+    from silica.kernel import rights
+
+    def to(target: str, alt: str) -> str | None:
+        key = rights._name_key(target)
+        if key not in names:
+            return None
+        said = credits.get(key, "")
+        return f"![[{folder}/assets/{names[key]}{'|' + alt if alt else ''}]]" + (f"\n\n*{said}*" if said else "")
+
+    def wiki(m: re.Match) -> str:
+        target, bar, alt = m.group(1).partition("|")
+        target = target.split("#", 1)[0].strip()
+        return (to(target, alt if bar else "") if rights._is_image(target) else None) or m.group(0)
+
+    def markdown(m: re.Match) -> str:
+        alt, target = m.group(1), m.group(2)
+        if rights._REMOTE.match(target) or target.startswith("data:"):
+            return m.group(0)
+        return to(unquote(target), alt) or m.group(0)
+
+    def tag(m: re.Match) -> str:
+        target = m.group(1)
+        if rights._REMOTE.match(target) or target.startswith("data:"):
+            return m.group(0)
+        return to(unquote(target), "") or m.group(0)
+
+    return rights._HTML_IMAGE.sub(tag, rights._MD_IMAGE.sub(markdown, rights._WIKI_EMBED.sub(wiki, text)))
+
+
+def _too_big() -> ValueError:
+    from silica.sources import saved_page
+
+    return ValueError(f"This wiki is past the {saved_page.WIKI_FILE_MAX / 1e6:g} MB a Publish may send.")
+
+
+def _pack(conf: dict, vault: Path, out) -> None:
+    """The zip a Publish sends, written into `out` (the receiver is publish.receive): `wiki.json`,
+    then the notes the check before Publish lets out as written in the vault, under
+    `notes/<path in the folder>`, then `assets/<name>` for each image of theirs it lets out. Never
+    a page: the account builds those (ADR-0157 point 10). A remote image is sent nothing; the
+    account shows it as a link (Task 10's ruling). Stops past the 100 MB cap before the image or
+    note that passes it is read."""
+    from silica.kernel import publish, rights
+    from silica.kernel.image_meta import strip_location
+    from silica.sources import saved_page
+
+    cap = saved_page.WIKI_FILE_MAX
+    folder = conf["folder"]
+    # The receiver takes a name at the top of the account's vault, never a path.
+    # shortcut: two wikis in A/Notes and B/Notes both send "Notes", and the second replaces the
+    # first on the host; send a folder name of the person's choosing if one ever does
+    name = folder.rsplit("/", 1)[-1]
+    # what the check before Publish decides, read as the build reads it (public_site._write_wiki)
+    wiki = rights.read_wiki(conf["slug"], vault)
+    said = rights.answers(vault)
+    plan = rights.decide(wiki, said)
+    held = 0
+    names: dict[str, str] = {}
+    answers: dict[str, dict] = {}
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for key in sorted(plan["local"]):
+            src = vault / wiki["local"][key]["src"]
+            if src.suffix.lower() not in _SENT_IMAGES:
+                continue  # its embed goes as written, and the account's page leaves it out
+            try:
+                size = src.stat().st_size
+                if held + size > cap:
+                    raise _too_big()
+                data = strip_location(src.read_bytes())
+            except OSError as exc:
+                # gone or unreadable since the check read it: its embed goes as written, and the
+                # account's page says the image is not published, as a build does
+                logger.warning("account link: %s not sent (%s)", src.name, type(exc).__name__)
+                continue
+            held += size
+            # numbered and slugged as the build names a copy: a pasted name has spaces, which the
+            # receiver refuses, and two folders can hold one name
+            names[key] = f"{len(names) + 1}-{publish.slugify(src.stem)[:100] or 'image'}{src.suffix.lower()}"
+            z.writestr("assets/" + names[key], data)
+        for p in sorted(plan["notes"]):
+            try:
+                text = (vault / p).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                # one note that cannot be read stays out, as in a build; the receiver would refuse
+                # the whole wiki for a note that is not text
+                logger.warning("account link: %s not sent (%s)", p, type(exc).__name__)
+                continue
+            if "\x00" in text:
+                logger.warning("account link: %s not sent (it holds a NUL)", p)
+                continue
+            held += len(text.encode("utf-8"))
+            if held > cap:
+                raise _too_big()
+            rel = p[len(folder) + 1:]
+            z.writestr("notes/" + rel, _pointed(text, names, plan["credits"], name))
+            if a := _answer(wiki["notes"][p]["files"], said):
+                answers[rel] = a
+        head = {"link": "", "folder": name, "slug": conf["slug"], "title": conf["title"], "line": conf["line"],
+                "license": conf["license"], "visibility": conf["visibility"], "answers": answers}
+        # `link` is the format's and stays empty: the account learns which link sent a wiki from
+        # the gateway, never from the package (Task 10), and this computer is never told its id
+        z.writestr("wiki.json", json.dumps(head, ensure_ascii=False))
+
+
+def _refusal(status: int, detail: str, at: str) -> str:
+    """The sentence the view shows for an answer of the account other than 200 and 401."""
+    detail = " ".join(detail.split())[:300].rstrip(".")
+    if status == 409:
+        # The account's own words name the folder; a folder of the person's own is never replaced
+        # (ADR-0157 point 10), so one of the two is renamed
+        return f"{detail}." if detail else ("Your account already has a folder of its own with this wiki's "
+                                            "name: rename one of them to publish this wiki.")
+    if status == 503:
+        return "Your account is busy. Try again in a minute."
+    if status == 413:
+        return str(_too_big())
+    if status == 400 and detail:
+        return f"Your account refused this wiki: {detail}."
+    if status == 500 and detail:
+        return f"{detail[0].upper()}{detail[1:]}."
+    return f"{_named(at)} answered {status}. Try again in a minute."
+
+
+def send(slug: str, vault: Path | None = None) -> dict:
+    """Publish one wiki through the linked account: the notes that go out, as written, their images
+    and the author's answers (ADR-0157 points 10 and 11); the account publishes them with its
+    own renderer, in the visibility the wiki has here. Returns {"vault", "notes", "url",
+    "published_at", "sent"}, the account's count and address. ValueError with a sentence for
+    anything the person must read, the account's refusals included."""
+    import httpx
+
+    from silica.kernel import publish
+    from silica.kernel.recall.paths import silica_tmp_dir
+    from silica.sources import saved_page
+
+    got = _read()
+    if got is None:
+        raise ValueError(NOT_LINKED)
+    vault = vault or publish._vault()
+    conf = publish.find(slug, vault)
+    if conf["visibility"] == "off":
+        raise ValueError("turn the wiki Public or Private before publishing it")
+    at = got["host"]
+    # On disk under ~/.silica, unnamed, so it goes when closed even after a crash, and 100 MB is
+    # never held in memory
+    with tempfile.TemporaryFile(dir=silica_tmp_dir()) as f:
+        _pack(conf, vault, f)
+        # the notes and images were counted unpacked; the zip adds its headers
+        if f.tell() > saved_page.WIKI_FILE_MAX:
+            raise _too_big()
+        f.seek(0)
+        # A wiki of 100 MB, then the account builds its pages before it answers
+        r = _post(f"{at}/link/publish", at, content=f, timeout=httpx.Timeout(600, connect=15),
+                  headers={"Authorization": f"Bearer {got['token']}", "Content-Type": "application/zip"})
+    out = _body(r)
+    if r.status_code == 401:
+        # The account no longer knows this token: removed in its Settings, or signed out
+        # everywhere. Kept, it would read as linked while every Publish fails.
+        unlink()
+        logger.info("account link: %s refused the token; this computer is unlinked", at)
+        raise ValueError("Your account no longer knows this computer. Link it again to publish.")
+    if r.status_code != 200:
+        logger.info("account link: %s answered %s to a Publish of %s", at, r.status_code, slug)
+        raise ValueError(_refusal(r.status_code, out.get("detail") if isinstance(out.get("detail"), str) else "", at))
+    url = out.get("url") if isinstance(out.get("url"), str) and out["url"].startswith("https://") else ""
+    notes = out.get("notes") if type(out.get("notes")) is int else 0
+    items = publish.vaults(vault)
+    for v in items:
+        if v["slug"] == slug:
+            v["published"] = datetime.date.today().isoformat()
+    publish._save_vaults(items, vault)
+    return {"vault": slug, "notes": notes, "url": url,
+            "published_at": out.get("published_at") if isinstance(out.get("published_at"), str) else "",
+            "sent": True}
