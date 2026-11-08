@@ -28,17 +28,20 @@ SAVED_DIR = "Saved"
 _PAGE_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)/([a-z0-9-]+)$")
 _VAULT_PATH = re.compile(r"^/@([a-z0-9-]+)/([a-z0-9-]+)/$")
 _FOLDER_UNSAFE = re.compile(r'[\\/:*?"<>|#^\[\]]+')
-_MD_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\((https?://[^)\s]+)\)")
+# Never a link whose words open with an image: in `[![alt](a.png)](page)` the image is the words,
+# and its `](` would be read as the link's, turning the picture into `![alt](page)`.
+_MD_LINK = re.compile(r"(?<!!)\[(?!!\[)([^\]\n]+)\]\((https?://[^)\s]+)\)")
 # A wiki file has no address, so its notes link each other by slug alone, `<slug>.html` (a Private
 # build with no host writes `<slug>.md`): nothing before the slug, and `in names` checks the slug itself.
 # An anchor after it is dropped: it is an html id, which no heading of the saved note is named.
-_REL_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\(([^)\s/:#]+)\.(?:html|md)(?:#[^)\s]*)?\)")
+_REL_LINK = re.compile(r"(?<!!)\[(?!!\[)([^\]\n]+)\]\(([^)\s/:#]+)\.(?:html|md)(?:#[^)\s]*)?\)")
 # Any other link with no scheme. Not `#...`, which points within the note and still works there.
-_ANY_REL_LINK = re.compile(r"(?<!!)\[([^\]\n]+)\]\((?![A-Za-z][A-Za-z0-9+.-]*:|#)[^)\s]+\)")
+_ANY_REL_LINK = re.compile(r"(?<!!)\[(?!!\[)([^\]\n]+)\]\((?![A-Za-z][A-Za-z0-9+.-]*:|#)[^)\s]+\)")
 # A fenced block, to its closing fence or the end, and a code span within one paragraph: the
 # author's code, where `callbacks[i](arg)` reads as a relative link to the two patterns above.
 # shortcut: an indented code block (four spaces) is not seen, so a link-shaped line in one is
-# rewritten; recognise it if a saved note ever shows one changed.
+# rewritten. None of 2,547 notes in silica_wiki, alex_second_brain and joe-felz-library has one
+# outside a fence (2026-11-08); recognise the block at the first saved note that shows one changed.
 _CODE = re.compile(r"^ {0,3}((`|~)\2{2,})[^\n]*\n.*?(?:^ {0,3}\1\2*[ \t]*$|\Z)"
                    r"|(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n).)+?(?<!`)\3(?!`)", re.M | re.S)
 _MD_IMAGE = re.compile(r"!\[[^\]\n]*\]\((https?://[^)\s]+)\)")

@@ -148,13 +148,18 @@ def test_a_files_other_relative_links_land_as_their_words(wiki_zip, homes):
 
     with zipfile.ZipFile(io.BytesIO(wiki_zip)) as z:
         notes = json.loads(z.read("memory/notes.json"))
+    linked = ("[![cover](assets/1-hypnogram.png)](paper.pdf) [![fig](assets/1-hypnogram.png)](spacing-effect.html) "
+              "[![web](https://img.test/x.png)](https://site.test/page)")
     notes["forgetting-curve"] += ("\nRead [the paper](paper.pdf), [a page](sub/x.html) and [up](../x); "
-                                  "[below](#method), [mail](mailto:m@x.test), ![chart](assets/1-hypnogram.png).\n")
+                                  "[below](#method), [mail](mailto:m@x.test), ![chart](assets/1-hypnogram.png).\n"
+                                  f"\n{linked}\n")
     saved_page.open_file(_rezip(wiki_zip, change={"memory/notes.json": json.dumps(notes).encode()}))
     r = saved_page.save_invitation("marta", "memory")
     text = (homes / "vault" / r["folder"] / "Forgetting curve.md").read_text(encoding="utf-8")
     assert ("Read the paper, a page and up; [below](#method), [mail](mailto:m@x.test), "
             "![chart](assets/1-hypnogram.png).") in text
+    # an image that is a link's words stays a picture: no rewrite reads the image's ]( as the link's
+    assert linked in text
 
 
 def test_a_relay_save_keeps_its_relative_links_as_written(homes):
