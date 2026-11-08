@@ -387,6 +387,12 @@ def test_the_catalog_lists_only_what_the_host_approved_under_the_handle_it_gave(
     index = (out / "index.html").read_text(encoding="utf-8")
     assert 'href="/@marta/memory/"' in index and "Memoria" in index and "Fake" not in index
     assert (out / "_s" / "pages.js").is_file() and (out / "_s" / "archivo-latin.woff2").is_file()
+    # index.json is what index.html shows, as data for the app (ADR-0157 point 2): same wikis,
+    # each with its license and address, and the unlisted or unapproved ones absent from both
+    data = json.loads((out / "index.json").read_text(encoding="utf-8"))
+    assert [(e["handle"], e["slug"]) for e in data] == [("marta", "memory")]
+    assert data[0]["url"] == "/@marta/memory/" and data[0]["license"] and data[0]["title"] == "Memoria"
+    assert "Fake" not in json.dumps(data)
     # a hostile title is text, never markup
     m.write_text(m.read_text(encoding="utf-8").replace('"Memoria"', '"<script>x</script>"'), encoding="utf-8")
     pages_catalog.write(host, tsv, wikis, out, "https://app.test")
@@ -394,6 +400,7 @@ def test_the_catalog_lists_only_what_the_host_approved_under_the_handle_it_gave(
     # an approved wiki its author took back asks for nothing, so the host's row alone lists nothing
     m.write_text(m.read_text(encoding="utf-8").replace('"listed":true', '"listed":false'), encoding="utf-8")
     assert pages_catalog.write(host, tsv, wikis, out, "https://app.test") == 0
+    assert json.loads((out / "index.json").read_text(encoding="utf-8")) == []
 
 
 def test_a_diagram_is_printed_as_its_source_and_drawn_by_the_shared_mermaid(marta, tmp_vault):

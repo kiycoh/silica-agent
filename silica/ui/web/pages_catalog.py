@@ -54,6 +54,8 @@ def entry(raw: dict, handle: str, slug: str) -> dict | None:
         "handle": handle, "slug": slug,
         "title": _text(raw.get("title"), 80) or slug,
         "line": _text(raw.get("line"), 160),
+        "license": _text(raw.get("license"), 80),
+        "url": f"/@{handle}/{slug}/",
         "published": published[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", published) else "",
         "count": {"notes": _int(count.get("notes")), "areas": len(areas)},
         "areas": areas,
@@ -103,7 +105,7 @@ def collect(public: Path, pairs: list[tuple[str, str]], ok: set[tuple[str, str]]
 
 
 def render(entries: list[dict], app: str) -> str:
-    cards = "".join(site.card(e, f"/@{e['handle']}/{e['slug']}/", f"/@{e['handle']}/{e['slug']}/vault.json")
+    cards = "".join(site.card(e, e["url"], f"{e['url']}vault.json")
                     for e in entries)
     notes = sum(e["count"]["notes"] for e in entries)
     head = ('<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
@@ -152,6 +154,8 @@ def write(public: Path, handles_tsv: Path, wikis_tsv: Path, out: Path, app: str)
     for name, data in site.static_files().items():
         _write(out / "_s" / name, data)
     _write(out / "index.html", render(entries, app).encode("utf-8"))
+    # the same list, not a second collect(), so the app can never show a wiki the page does not
+    _write(out / "index.json", json.dumps(entries, ensure_ascii=False).encode("utf-8"))
     return len(entries)
 
 
