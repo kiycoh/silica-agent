@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 import os
 import re
 import shutil
@@ -252,7 +253,7 @@ def _vault_files(url: str) -> tuple[dict, dict]:
 
 
 def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None, files=None,
-                  private: bool = False) -> dict:
+                  private: bool = False, assets: Path | None = None) -> dict:
     """What the save sheet shows for a vault, and every note it would write.
     `files` is (manifest, notes) already read, as an invitation's are. A note
     already saved from this vault stays as it is and is counted, not written:
@@ -327,7 +328,8 @@ def prepare_vault(url: str, areas=None, vault: Path | None = None, *, named=None
             note["source"] = src
         note.update({"saved": today, "form": "clip", **({"shared": "private"} if private else {})})
         out[names[slug] + ".md"] = fm.dump(note, new_body)
-    adding = sum(len(t.encode("utf-8")) for t in out.values())
+    # the images save_vault copies count against the room too, or a wiki of photos passes it
+    adding = sum(len(t.encode("utf-8")) for t in out.values()) + _image_bytes(assets)
     return {"url": url, "title": title, "author": f"@{handle}", "folder": folder,
             "notes": len(out), "already": len(already), "of": len(_chosen(manifest, None)),
             "areas": manifest.get("areas", []), "room": room(len(out), adding, vault),
@@ -347,7 +349,7 @@ def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, f
     from silica.kernel.write.ops import InverseOp, InverseOpKind
     from silica.kernel.write.undo_journal import get_undo_journal
 
-    p = prepare_vault(url, areas, vault, named=named, files=files, private=private)
+    p = prepare_vault(url, areas, vault, named=named, files=files, private=private, assets=assets)
     if not p["files"]:
         raise ValueError("those notes are saved already" if p["already"] else "no note of that wiki was chosen")
     if p["room"]["short"]:
@@ -363,11 +365,20 @@ def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, f
         # a Private vault's images travel with it, beside the notes that cite them as assets/<name>
         dest = Path(vault or CONFIG.vault_path or ".") / p["folder"] / "assets"
         dest.mkdir(parents=True, exist_ok=True)
-        for f in assets.iterdir():
-            if f.is_file() and not f.is_symlink():
-                shutil.copyfile(f, dest / f.name)
+        for f in _images(assets):
+            shutil.copyfile(f, dest / f.name)
     return {"folder": p["folder"], "notes": len(p["files"]), "run": run_id,
             "first": next(iter(p["files"]))}
+
+
+def _images(assets: Path | None) -> list[Path]:
+    if assets is None or not assets.is_dir():
+        return []
+    return [f for f in assets.iterdir() if f.is_file() and not f.is_symlink()]
+
+
+def _image_bytes(assets: Path | None) -> int:
+    return sum(f.stat().st_size for f in _images(assets))
 
 
 # --- Private vaults shared with this account (ADR-0151 point 9) ----------------
@@ -375,7 +386,9 @@ def save_vault(url: str, areas=None, vault: Path | None = None, *, named=None, f
 # owned by root and readable by this account alone, outside the vault and its quota. A saved or
 # declined one is marked in the account's own `done` folder with the hash the relay wrote, so the
 # relay stops offering it until the author publishes it again.
-_NAME = re.compile(r"^[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?$")
+# Always fullmatch: `$` also matches before a final newline, so "eve\n" passed .match and was
+# listed, and "marta\n" got past the relay's folder while it showed as @marta.
+_NAME = re.compile(r"[a-z0-9]([a-z0-9-]{0,58}[a-z0-9])?")
 
 
 def invitations_dir() -> Path:
@@ -412,8 +425,8 @@ def _folders(root: Path):
     if not root.is_dir():
         return
     for a in sorted(root.iterdir()):
-        if a.is_dir() and _NAME.match(a.name):
-            yield from (d for d in sorted(a.iterdir()) if d.is_dir() and _NAME.match(d.name))
+        if a.is_dir() and _NAME.fullmatch(a.name):
+            yield from (d for d in sorted(a.iterdir()) if d.is_dir() and _NAME.fullmatch(d.name))
 
 
 def invitations() -> list[dict]:
@@ -431,25 +444,63 @@ def invitations() -> list[dict]:
     return out
 
 
-def _listed(d: Path, *, file: bool) -> list[dict]:
-    try:
-        m = json.loads((d / "vault.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        # half written, or not a manifest: nothing to offer, and the folder is not this list's to fix
-        return []
-    if not isinstance(m, dict):
-        return []
+def _text(v, n: int) -> str:
+    return v[:n] if isinstance(v, str) else ""
+
+
+def _int(v) -> int:
+    return v if type(v) is int else 0  # a bool is an int to isinstance
+
+
+def _num(v) -> float:
+    return v if type(v) in (int, float) and math.isfinite(v) else 0
+
+
+def _manifest(m) -> dict:
+    """The fields of a wiki's vault.json that a reader's Silica reads, each of its own type or
+    left out. A manifest is the author's, a file's anyone's: one field of the wrong type raised in
+    the list every later GET drew, so a single file took Shared with you down for good."""
+    m = m if isinstance(m, dict) else {}
     count = m.get("count") if isinstance(m.get("count"), dict) else {}
-    return [{"author": d.parent.name, "vault": d.name,
-             "title": str(m.get("title") or d.name)[:80], "line": str(m.get("line") or "")[:160],
-             "notes": int(count.get("notes") or 0), "areas": m.get("areas") or [],
-             "unlinked": len(m.get("unlinked") or []),
-             "published": str(m.get("published") or "")[:10], "license": str(m.get("license") or ""),
-             "file": file}]
+
+    def rows(key: str) -> list:
+        v = m.get(key)
+        return v if isinstance(v, list) else []
+
+    return {
+        "handle": _text(m.get("handle"), 60), "slug": _text(m.get("slug"), 60),
+        "title": _text(m.get("title"), 80), "line": _text(m.get("line"), 160),
+        "license": _text(m.get("license"), 80), "published": _text(m.get("published"), 10),
+        "url": _text(m.get("url"), 300), "count": {"notes": _int(count.get("notes"))},
+        # an area keeps its place even when its row is not one: a note names its area by index
+        "areas": [[_text(a[0], 120), _int(a[1])] if isinstance(a, list) and len(a) >= 2 else ["", 0]
+                  for a in rows("areas")],
+        "n": [[_num(r[0]), _num(r[1]), r[2], _num(r[3]), _text(r[4], 200), r[5]] for r in rows("n")
+              if isinstance(r, list) and len(r) >= 6 and type(r[2]) is int and isinstance(r[5], str)],
+        "unlinked": [[_text(r[0], 200), r[1]] for r in rows("unlinked")
+                     if isinstance(r, list) and len(r) >= 2 and isinstance(r[1], str)],
+    }
+
+
+def _read_manifest(d: Path) -> dict | None:
+    try:
+        return _manifest(json.loads((d / "vault.json").read_text(encoding="utf-8")))
+    except (OSError, ValueError, RecursionError):
+        # half written, too deep or not JSON: nothing to offer, and the folder is not this list's to fix
+        return None
+
+
+def _listed(d: Path, *, file: bool) -> list[dict]:
+    m = _read_manifest(d)
+    if m is None:
+        return []
+    return [{"author": d.parent.name, "vault": d.name, "title": m["title"] or d.name, "line": m["line"],
+             "notes": m["count"]["notes"], "areas": m["areas"], "unlinked": len(m["unlinked"]),
+             "published": m["published"], "license": m["license"], "file": file}]
 
 
 def _invitation(author: str, slug: str) -> Path:
-    if not (_NAME.match(author or "") and _NAME.match(slug or "")):
+    if not (_NAME.fullmatch(author or "") and _NAME.fullmatch(slug or "")):
         raise ValueError("no such invitation")
     # the relay's first, as invitations() lists them
     for root in (invitations_dir(), file_invitations_dir()):
@@ -464,8 +515,13 @@ def _from_file(d: Path) -> bool:
 
 
 def _files(d: Path) -> tuple[dict, dict]:
-    m = json.loads((d / "vault.json").read_text(encoding="utf-8"))
-    n = json.loads((d / "notes.json").read_text(encoding="utf-8"))
+    m = _read_manifest(d)
+    try:
+        n = json.loads((d / "notes.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, RecursionError):
+        n = None
+    if m is None or not isinstance(n, dict):
+        raise ValueError("that invitation could not be read")
     # the author is the folder the host wrote, never the manifest's claim
     m["handle"], m["slug"] = d.parent.name, d.name
     return m, n
@@ -474,7 +530,7 @@ def _files(d: Path) -> tuple[dict, dict]:
 def prepare_invitation(author: str, slug: str, areas=None, vault: Path | None = None) -> dict:
     d = _invitation(author, slug)
     m, n = _files(d)
-    p = prepare_vault(str(m.get("url") or ""), areas, vault, files=(m, n), private=True)
+    p = prepare_vault(m["url"], areas, vault, files=(m, n), private=True, assets=d / "assets")
     p.pop("files")
     return p
 
@@ -482,14 +538,8 @@ def prepare_invitation(author: str, slug: str, areas=None, vault: Path | None = 
 def save_invitation(author: str, slug: str, areas=None, vault: Path | None = None) -> dict:
     d = _invitation(author, slug)
     m, n = _files(d)
-    out = save_vault(str(m.get("url") or ""), areas, vault, files=(m, n), private=True, assets=d / "assets")
-    if _from_file(d):
-        # Gone rather than marked done: the mark is keyed author.slug with the file's hash, so the
-        # same file opened again would be hidden from the person who chose to open it. A folder that
-        # will not go stays offered; the notes are saved all the same, so the save is not undone.
-        shutil.rmtree(d, ignore_errors=True)
-    else:
-        _mark_done(author, slug, _stamp(d))
+    out = save_vault(m["url"], areas, vault, files=(m, n), private=True, assets=d / "assets")
+    _done_with(d)
     return out
 
 
@@ -501,7 +551,23 @@ def decline_invitation(author: str, slug: str) -> None:
         except OSError as exc:
             raise ValueError(f"that file could not be removed ({exc.strerror or exc})") from None
     else:
-        _mark_done(author, slug, _stamp(d))
+        _done_with(d)
+
+
+def _done_with(d: Path) -> None:
+    """A saved invitation, or a declined relay one. A file's folder goes rather than being marked
+    done: the mark is keyed author.slug with the file's hash, so the same file opened again would
+    be hidden from the person who chose to open it. A relay one is marked, and a file of the same
+    author and wiki goes with it: hidden behind the relay's folder for good, it would only hold
+    one of the ten places. A folder that will not go stays where it was, and the save or the
+    decline it follows stands."""
+    if _from_file(d):
+        shutil.rmtree(d, ignore_errors=True)
+        return
+    _mark_done(d.parent.name, d.name, _stamp(d))
+    copy = file_invitations_dir() / d.parent.name / d.name
+    if _from_file(copy):
+        shutil.rmtree(copy, ignore_errors=True)
 
 
 def _mark_done(author: str, slug: str, stamp: str) -> None:
@@ -516,16 +582,27 @@ def _mark_done(author: str, slug: str, stamp: str) -> None:
 # notes.json and the images under assets/, by names this code makes, so no entry's name decides
 # where a byte lands; the refusals below are for a zip no Silica built, which is not opened at all.
 # No svg: it can carry a script, and the reader's vault would serve it back.
-_ASSET = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(png|jpe?g|gif|webp)$", re.IGNORECASE)
+_ASSET = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(png|jpe?g|gif|webp)", re.IGNORECASE)
 _DRIVE = re.compile(r"^[A-Za-z]:")
 # A wiki file holds two entries a note (its page and its .md) and one an image: 100,000 is some
 # 45,000 notes, far past the largest vault seen (1,780 notes, 2026-10-29), and about 42 MB of
 # headers held while zipfile reads them.
 _ENTRIES_MAX = 100_000
+# Read whole before they are parsed, and JSON grows as it parses: 9 MB of `[]` held 192 MiB. A
+# wiki's vault.json runs about 100 bytes a note and its notes.json 3.5 KB (Culture, 26 notes,
+# 2026-11-08), so 4 MB is some 40,000 notes and 32 MB some 9,000 notes of that length.
+_MANIFEST_MAX = 4_000_000
+_NOTES_JSON_MAX = 32_000_000
+# What waits in Shared with you from files at once; past it a file is refused until one goes.
+_FILES_WAITING_MAX = 10
 
 
 def _file_too_big() -> ValueError:
     return ValueError(f"that file is past the {WIKI_FILE_MAX / 1e6:g} MB a wiki file may hold")
+
+
+def _part_too_big(name: str, cap: int) -> ValueError:
+    return ValueError(f"that wiki file's {name} is past the {cap / 1e6:g} MB a wiki's may hold")
 
 
 def _unpacked(z, keep: dict, into: Path) -> None:
@@ -538,6 +615,42 @@ def _unpacked(z, keep: dict, into: Path) -> None:
                 if held > WIKI_FILE_MAX:
                     raise _file_too_big()
                 out.write(chunk)
+
+
+def _flat_notes(text: str) -> dict[str, str]:
+    """notes.json as a Silica writes it, an object of strings, read without building anything
+    else: json.loads builds every list and object a hostile file nests in it before a check can
+    refuse them. ValueError for anything that is not that object, or that holds more notes than
+    a wiki file can carry."""
+    from json.decoder import scanstring
+
+    ws = re.compile(r"[ \t\n\r]*")
+    out: dict[str, str] = {}
+    i = ws.match(text).end()
+    if text[i:i + 1] != "{":
+        raise ValueError("not an object")
+    i = ws.match(text, i + 1).end()
+    while text[i:i + 1] != "}":
+        if out and text[i:i + 1] != ",":
+            raise ValueError("not an object of strings")
+        if out:
+            i = ws.match(text, i + 1).end()
+        if text[i:i + 1] != '"':
+            raise ValueError("not an object of strings")
+        key, i = scanstring(text, i + 1)
+        i = ws.match(text, i).end()
+        if text[i:i + 1] != ":":
+            raise ValueError("not an object of strings")
+        i = ws.match(text, i + 1).end()
+        if text[i:i + 1] != '"':
+            raise ValueError("not an object of strings")
+        out[key], i = scanstring(text, i + 1)
+        i = ws.match(text, i).end()
+        if len(out) > _ENTRIES_MAX // 2:
+            raise ValueError("more notes than a wiki file carries")
+    if ws.match(text, i + 1).end() != len(text):
+        raise ValueError("more after the object")
+    return out
 
 
 def open_file(data: bytes) -> dict:
@@ -582,26 +695,40 @@ def open_file(data: bytes) -> dict:
         for i in entries:
             rest = i.filename.removeprefix(top) if i.filename.startswith(top) else ""
             if rest in ("vault.json", "notes.json") or (
-                    rest.startswith("assets/") and _ASSET.match(rest.removeprefix("assets/"))):
+                    rest.startswith("assets/") and _ASSET.fullmatch(rest.removeprefix("assets/"))):
                 keep[rest] = i
         if "notes.json" not in keep:
             raise ValueError("that zip is not a wiki file: it holds no notes.json beside its vault.json")
         if sum(i.file_size for i in keep.values()) > WIKI_FILE_MAX:
             raise _file_too_big()
+        if keep["vault.json"].file_size > _MANIFEST_MAX:
+            raise _part_too_big("vault.json", _MANIFEST_MAX)
+        if keep["notes.json"].file_size > _NOTES_JSON_MAX:
+            raise _part_too_big("notes.json", _NOTES_JSON_MAX)
         try:
-            m = json.loads(z.read(keep["vault.json"]))
-        except (ValueError, *unreadable):
+            raw = z.read(keep["vault.json"])
+            if len(raw) > _MANIFEST_MAX:
+                raise _part_too_big("vault.json", _MANIFEST_MAX)
+            m = json.loads(raw)
+        except (*unreadable, RecursionError, UnicodeDecodeError, json.JSONDecodeError):
             raise ValueError("that wiki file could not be read: its vault.json is not a wiki's") from None
         if not isinstance(m, dict):
             raise ValueError("that wiki file could not be read: its vault.json is not a wiki's")
         handle, slug = m.get("handle"), m.get("slug")
-        if not (isinstance(handle, str) and isinstance(slug, str) and _NAME.match(handle) and _NAME.match(slug)):
+        if not (isinstance(handle, str) and isinstance(slug, str)
+                and _NAME.fullmatch(handle) and _NAME.fullmatch(slug)):
             raise ValueError("that file does not name its author and its wiki as Silica names them")
-        title = str(m.get("title") or slug)[:80]
+        manifest = _manifest(m)
+        del raw, m  # the parse of a 4 MB manifest can hold some 90 MB, and nothing below needs it
+        title = manifest["title"] or slug
         if (invitations_dir() / handle / slug / "vault.json").is_file():
             raise ValueError(f"@{handle}'s {title} already came to you as an invitation, "
                              "and a file does not replace it")
         root = file_invitations_dir()
+        waiting = [d for d in _folders(root) if (d / "vault.json").is_file()]
+        if len(waiting) >= _FILES_WAITING_MAX and root / handle / slug not in waiting:
+            raise ValueError(f"{_FILES_WAITING_MAX} wiki files are waiting in Shared with you. "
+                             "Decline one to open another.")
         root.mkdir(parents=True, exist_ok=True)
         # An Open killed mid-write never reaches its cleanup. An hour is far past any unpacking of
         # 100 MB, so no live one is taken.
@@ -616,16 +743,22 @@ def open_file(data: bytes) -> dict:
         tmp = Path(tempfile.mkdtemp(prefix=".open-", dir=root))
         try:
             (tmp / "assets").mkdir()
+            # the manifest written is the one read, each field of its type, so every later list
+            # reads a small file that cannot raise
+            parts = {k: v for k, v in keep.items() if k != "vault.json"}
             try:
-                _unpacked(z, keep, tmp)
+                _unpacked(z, parts, tmp)
             except unreadable:
                 raise ValueError("that wiki file could not be read: the zip is damaged") from None
+            if (tmp / "notes.json").stat().st_size > _NOTES_JSON_MAX:
+                raise _part_too_big("notes.json", _NOTES_JSON_MAX)
             try:
-                notes = json.loads((tmp / "notes.json").read_text(encoding="utf-8"))
+                notes = _flat_notes((tmp / "notes.json").read_text(encoding="utf-8"))
             except ValueError:
-                notes = None
-            if not isinstance(notes, dict):
-                raise ValueError("that wiki file could not be read: its notes.json is not a wiki's")
+                raise ValueError("that wiki file could not be read: its notes.json is not a wiki's") from None
+            manifest["handle"], manifest["slug"] = handle, slug
+            manifest["count"] = {"notes": len(notes)}
+            (tmp / "vault.json").write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
             (tmp / ".hash").write_text(hashlib.sha256((tmp / "notes.json").read_bytes()).hexdigest(),
                                        encoding="utf-8")
             (tmp / ".from-file").write_bytes(b"")

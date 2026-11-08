@@ -214,9 +214,25 @@ def test_a_relay_invitation_that_arrives_after_the_file_is_the_one_offered(wiki_
     assert [(i["title"], i["file"]) for i in saved_page.invitations()] == [("Memoria by the relay", False)]
     assert saved_page.prepare_invitation("marta", "memory")["of"] == 0  # the relay's manifest, not the file's
     saved_page.decline_invitation("marta", "memory")
-    # declining the relay's marks it done and leaves the file's folder, which still never shows
-    assert (homes / "file-invitations" / "marta" / "memory" / "vault.json").is_file()
+    # declining the relay's marks it done and takes the file's folder with it: hidden behind the
+    # relay's for good, it would only hold one of the ten places
+    assert not (homes / "file-invitations" / "marta" / "memory").exists()
     assert saved_page.invitations() == []
+
+
+def test_saving_a_relay_invitation_takes_the_file_of_the_same_wiki_with_it(wiki_zip, homes):
+    from silica.sources import saved_page
+
+    saved_page.open_file(wiki_zip)
+    relay = _relay(homes)
+    (relay / "vault.json").write_text(json.dumps({"title": "Memoria", "unlinked": [["Relay", "spacing-effect"]]}))
+    saved_page.save_invitation("marta", "memory")
+    assert not (homes / "file-invitations" / "marta" / "memory").exists()
+    # a file of another wiki stays where it was
+    saved_page.open_file(_manifest(wiki_zip, slug="other"))
+    _relay(homes, slug="third")
+    saved_page.decline_invitation("marta", "third")
+    assert (homes / "file-invitations" / "marta" / "other" / "vault.json").is_file()
 
 
 def test_opening_the_same_file_twice_replaces_the_first_and_a_refused_one_leaves_it(wiki_zip, homes, monkeypatch):
@@ -321,3 +337,162 @@ def test_the_screen_opens_a_file_from_shared_with_you_and_from_a_drop_on_my_wiki
     assert "from a file: the file says it is by ${p.author}, and Silica cannot check that" in js
     assert '$("#view-public").addEventListener("drop"' in js
     assert '"/vault/invitations/file"' in js
+
+
+# --- fix round 1: the zip as hostile ---------------------------------------------
+
+_BAD_FIELDS = {"count": {"notes": "x"}, "unlinked": 5, "n": 5, "areas": 5, "title": [1], "line": {"a": 1},
+               "license": 3, "published": None, "url": ["x"]}
+
+
+def test_a_manifest_of_the_wrong_types_opens_as_one_of_the_right_types(wiki_zip, homes):
+    from silica.sources import saved_page
+
+    for bad in ({"count": {"notes": "x"}}, {"count": {"notes": [1]}}, {"unlinked": 5}, _BAD_FIELDS,
+                {"n": [[0, 0, [1], 0, "t", "spacing-effect"], [0, 0, 0, 0, "t", {"a": 1}], 7],
+                 "areas": [["Spacing effect", "2"], 5, ["x"]], "unlinked": [["Borrowed", 1], "x"]}):
+        saved_page.open_file(_manifest(wiki_zip, **bad))
+        inv = saved_page.invitations()
+        assert [(i["author"], i["vault"], i["file"]) for i in inv] == [("marta", "memory", True)]
+        # what is written is the manifest read, each field of its type: notes is the file's own count
+        written = json.loads((homes / "file-invitations" / "marta" / "memory" / "vault.json").read_text())
+        assert set(written) == {"handle", "slug", "title", "line", "license", "published", "url", "count",
+                                "areas", "n", "unlinked"}
+        assert written["count"] == {"notes": 3} and inv[0]["notes"] == 3
+        p = saved_page.prepare_invitation("marta", "memory")
+        assert p["folder"].startswith("Saved/@marta/")
+    # an area of the wrong shape keeps its place, so the notes that name it by index still find it
+    assert written["areas"] == [["Spacing effect", 0], ["", 0], ["", 0]]
+
+
+@pytest.mark.parametrize("bad", [{"count": {"notes": "x"}}, {"count": {"notes": [1]}}, {"unlinked": 5},
+                                 {"n": 5}, {"areas": 5}, _BAD_FIELDS])
+def test_a_bad_folder_already_on_disk_never_takes_the_list_down(wiki_zip, homes, bad):
+    """A folder written before this fix, or by a relay passing on an author's manifest, is read
+    field by field: the list and the sheet stand, the relay's invitations with them."""
+    from silica.sources import saved_page
+
+    saved_page.open_file(wiki_zip)
+    d = homes / "file-invitations" / "marta" / "memory"
+    m = json.loads((d / "vault.json").read_text())
+    (d / "vault.json").write_text(json.dumps({**m, **bad}))
+    relay = _relay(homes, author="sara", slug="tesi")
+    (relay / "vault.json").write_text(json.dumps({"title": "Tesi", **bad}))
+    deep = _relay(homes, author="luca", slug="deep")
+    (deep / "vault.json").write_text("[" * 100_000 + "]" * 100_000)
+    inv = saved_page.invitations()
+    assert sorted((i["author"], i["vault"]) for i in inv) == [("marta", "memory"), ("sara", "tesi")]
+    for author, slug in (("marta", "memory"), ("sara", "tesi")):
+        saved_page.prepare_invitation(author, slug)  # no TypeError from _chosen
+    with pytest.raises(ValueError):
+        saved_page.prepare_invitation("luca", "deep")
+    saved_page.decline_invitation("marta", "memory")
+    assert not d.exists()
+
+
+@pytest.mark.parametrize("over", [{"handle": "eve\n"}, {"slug": "memory\n"}, {"handle": "marta\n"}])
+def test_a_name_with_a_trailing_newline_is_refused(wiki_zip, homes, over):
+    from silica.sources import saved_page
+
+    _relay(homes, author="sara", slug="tesi")
+    with pytest.raises(ValueError, match="author"):
+        saved_page.open_file(_manifest(wiki_zip, **over))
+    assert _files(homes / "file-invitations") == []
+
+
+def test_a_trailing_newline_does_not_make_an_image_or_a_folder_name(wiki_zip, homes):
+    from silica.sources import saved_page
+
+    saved_page.open_file(_rezip(wiki_zip, extra={"memory/assets/x.png\n": b"png"}))
+    assert not any("x.png" in f for f in _files(homes / "file-invitations"))
+    # a relay folder named with a newline is no invitation, and no name with one reaches a folder
+    (homes / "invitations" / "marta\n" / "memory").mkdir(parents=True)
+    (homes / "invitations" / "marta\n" / "memory" / "vault.json").write_text("{}")
+    assert [i["author"] for i in saved_page.invitations()] == ["marta"]
+    with pytest.raises(ValueError, match="no such invitation"):
+        saved_page.prepare_invitation("marta\n", "memory")
+
+
+def test_a_manifest_or_notes_past_their_size_is_refused_before_it_is_parsed(wiki_zip, homes, monkeypatch):
+    from silica.sources import saved_page
+
+    monkeypatch.setattr(json, "loads", lambda *a, **k: pytest.fail("parsed before the size was checked"))
+    monkeypatch.setattr(saved_page, "_MANIFEST_MAX", 100)
+    with pytest.raises(ValueError, match="vault.json is past the 0.0001 MB"):
+        saved_page.open_file(wiki_zip)
+    monkeypatch.undo()
+    monkeypatch.setenv("HOME", str(homes / "home"))
+    monkeypatch.setenv("SILICA_INVITATIONS_DIR", str(homes / "invitations"))
+    monkeypatch.setenv("SILICA_FILE_INVITATIONS_DIR", str(homes / "file-invitations"))
+    monkeypatch.setattr(saved_page, "_NOTES_JSON_MAX", 100)
+    with pytest.raises(ValueError, match="notes.json is past"):
+        saved_page.open_file(wiki_zip)
+    assert _files(homes / "file-invitations") == []
+
+
+@pytest.mark.parametrize("name, blob", [
+    ("memory/vault.json", b"[" * 200_000 + b"]" * 200_000),   # RecursionError in json.loads
+    ("memory/notes.json", b'{"a": ' + b"[" * 200_000 + b"]" * 200_000 + b"}"),
+    ("memory/notes.json", b'{"a": [' + b"[]," * 300_000 + b"[]]}"),  # 900 KB of [] held some 20 MB parsed
+    ("memory/notes.json", b'{"a": "x", "b": 1}'),
+    ("memory/notes.json", b'{"a": "x"} trailing'),
+    ("memory/notes.json", b'{"a": "x",}'),
+    ("memory/notes.json", b'["a"]'),
+    ("memory/vault.json", b'{"handle": "marta", "slug": "memory"' + b"\xff" + b"}"),
+])
+def test_hostile_json_is_refused_and_writes_nothing(wiki_zip, homes, name, blob):
+    from silica.sources import saved_page
+
+    with pytest.raises(ValueError, match="could not be read"):
+        saved_page.open_file(_rezip(wiki_zip, change={name: blob}))
+    assert _files(homes / "file-invitations") == []
+
+
+def test_notes_json_is_read_as_flat_strings_and_counted():
+    from silica.sources.saved_page import _flat_notes
+
+    assert _flat_notes(' { "a" : "x\\n\\u00e9" , "b":"" } \n') == {"a": "x\né", "b": ""}
+    assert _flat_notes("{}") == {}
+    for bad in ('{"a": []}', '{"a": {}}', '{"a": 1}', '{"a": "x" "b": "y"}', '{,}', '{"a"}', ''):
+        with pytest.raises(ValueError):
+            _flat_notes(bad)
+
+
+def test_the_route_answers_400_to_hostile_json(tc, wiki_zip, homes):
+    r = tc.post("/vault/invitations/file", content=_rezip(wiki_zip, change={"memory/vault.json": b"[" * 200_000}))
+    assert r.status_code == 400
+    r = tc.post("/vault/invitations/file", content=_manifest(wiki_zip, count={"notes": "x"}, n=5))
+    assert r.status_code == 200
+    assert tc.get("/vault/invitations").status_code == 200
+    assert tc.get("/vault/invitations/preview", params={"author": "marta", "vault": "memory"}).status_code == 200
+
+
+def test_the_images_a_save_copies_count_against_the_room(wiki_zip, homes, monkeypatch):
+    from silica.sources import saved_page
+
+    big = _rezip(wiki_zip, extra={"memory/assets/2-photo.png": b"\x00" * 1_500_000})
+    saved_page.open_file(big)
+    monkeypatch.setenv("SILICA_VAULT_MAX_MB", "1")
+    p = saved_page.prepare_invitation("marta", "memory")
+    assert "MB over the 1 MB" in p["room"]["short"]
+    with pytest.raises(ValueError, match="no room"):
+        saved_page.save_invitation("marta", "memory")
+    assert not (homes / "vault" / "Saved").exists()
+    # the same notes without the photo fit
+    saved_page.open_file(wiki_zip)
+    assert saved_page.prepare_invitation("marta", "memory")["room"]["short"] == ""
+
+
+def test_ten_files_wait_at_most_and_the_eleventh_is_refused(wiki_zip, homes):
+    from silica.sources import saved_page
+
+    for k in range(10):
+        saved_page.open_file(_manifest(wiki_zip, slug=f"wiki-{k}"))
+    with pytest.raises(ValueError, match="Decline one to open another."):
+        saved_page.open_file(_manifest(wiki_zip, slug="wiki-10"))
+    assert not (homes / "file-invitations" / "marta" / "wiki-10").exists()
+    # the same wiki opened again replaces its own place, and a declined one frees one
+    saved_page.open_file(_manifest(wiki_zip, slug="wiki-3"))
+    saved_page.decline_invitation("marta", "wiki-3")
+    saved_page.open_file(_manifest(wiki_zip, slug="wiki-10"))
+    assert len(saved_page.invitations()) == 10
